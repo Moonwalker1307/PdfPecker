@@ -56,6 +56,42 @@ foreach (var (name, html, baseDir) in cases)
     Console.WriteLine($"Parallel: {total} x '{cases[1].Name}' in {sw.Elapsed.TotalMilliseconds:F0} ms = {total / sw.Elapsed.TotalSeconds:F0} documents/s");
 }
 
+// Markdown: parsing alone (Markdown to HTML) and the full Markdown to PDF path.
+{
+    var guide = File.ReadAllText(Path.Combine(htmlDir, "guide.md"));
+    var big = string.Concat(Enumerable.Repeat(guide, 50));
+    Console.WriteLine();
+    Console.WriteLine($"{"Markdown case",-34} {"Input",9} {"Mean",9} {"Median",9} {"MB/s",8}");
+    foreach (var (name, md, toPdf) in new[]
+    {
+        ("guide.md to HTML", guide, false),
+        ("guide.md x50 to HTML", big, false),
+        ("guide.md to PDF (2 pages)", guide, true),
+    })
+    {
+        var pdfOptions = new PdfOptions { BaseDirectory = htmlDir };
+        var warm = Stopwatch.StartNew();
+        while (warm.Elapsed.TotalSeconds < 1) Run();
+        int runs = iterations;
+        var times = new double[runs];
+        for (int i = 0; i < runs; i++)
+        {
+            long t0 = Stopwatch.GetTimestamp();
+            Run();
+            times[i] = Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
+        }
+        Array.Sort(times);
+        double mean = times.Average();
+        Console.WriteLine($"{name,-34} {md.Length / 1024.0,7:F1}KB {mean,7:F3}ms {times[runs / 2],7:F3}ms {md.Length / 1024.0 / 1024.0 / (mean / 1000),8:F1}");
+
+        void Run()
+        {
+            if (toPdf) MarkdownToPdf.Convert(md, pdfOptions);
+            else MarkdownToHtml.Convert(md);
+        }
+    }
+}
+
 static int CountPages(byte[] pdf)
 {
     var text = Encoding.Latin1.GetString(pdf);

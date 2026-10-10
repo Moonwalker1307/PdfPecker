@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PdfPecker – HTML to PDF</title>
+<title>PdfPecker – HTML and Markdown to PDF</title>
 <style>
   :root {
     --bg: #f4f6fa; --panel: #ffffff; --text: #1a202c; --muted: #5a6577; --border: #d9dee7;
@@ -53,7 +53,7 @@
 <body>
 <header>
   <h1>PdfPecker</h1>
-  <span class="tag">HTML to PDF in milliseconds. Nothing is stored.</span>
+  <span class="tag">HTML and Markdown to PDF in milliseconds. Nothing is stored.</span>
 </header>
 
 <div class="toolbar">
@@ -61,7 +61,20 @@
     <select id="example">
       <option value="invoice">Invoice</option>
       <option value="article">Article</option>
+      <option value="readme">Markdown README</option>
       <option value="blank">Blank</option>
+    </select>
+  </label>
+  <label>Input
+    <select id="inputFormat">
+      <option value="html">HTML</option>
+      <option value="markdown">Markdown</option>
+    </select>
+  </label>
+  <label>Output
+    <select id="output">
+      <option value="pdf">PDF</option>
+      <option value="html" disabled>HTML</option>
     </select>
   </label>
   <label>Page
@@ -73,24 +86,24 @@
   <label>Margin (mm) <input type="number" id="margin" value="12.7" min="0" max="50" step="0.1"></label>
   <label><input type="checkbox" id="pageNumbers" checked> Page numbers</label>
   <span class="spacer"></span>
-  <label class="button" for="file">Open .html file</label>
-  <input type="file" id="file" accept=".html,.htm,text/html" hidden>
-  <button class="primary" id="convert" title="Ctrl+Enter">Convert to PDF</button>
+  <label class="button" for="file">Open file</label>
+  <input type="file" id="file" accept=".html,.htm,.md,.markdown,text/html,text/markdown" hidden>
+  <button class="primary" id="convert" title="Ctrl+Enter">Convert</button>
 </div>
 
 <main>
   <section class="pane">
-    <div class="pane-head">HTML <span class="spacer"></span><span>Drop an .html file here, or press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to convert</span></div>
-    <textarea id="html" spellcheck="false" aria-label="HTML to convert"></textarea>
+    <div class="pane-head"><span id="inputLabel">HTML</span> <span class="spacer"></span><span>Drop an .html or .md file here, or press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to convert</span></div>
+    <textarea id="html" spellcheck="false" aria-label="Document to convert"></textarea>
   </section>
   <section class="pane">
     <div class="pane-head">
-      PDF <span class="status" id="status"></span>
+      <span id="outputLabel">PDF</span> <span class="status" id="status"></span>
       <span class="spacer"></span>
       <a class="button" id="download" hidden>Download</a>
     </div>
     <div class="empty" id="empty">Your PDF will appear here.</div>
-    <iframe id="preview" title="PDF preview" hidden></iframe>
+    <iframe id="preview" title="Preview" hidden></iframe>
   </section>
 </main>
 
@@ -152,6 +165,35 @@ const examples = {
   <p>This heading uses <code>page-break-before: always</code>.</p>
 </body>
 </html>`,
+  readme: `# Project Falcon
+
+Falcon turns **Markdown** into tidy PDFs: write plain text, get a document you can send.
+
+## Features
+
+- Headings, *emphasis*, **bold**, ~~strikethrough~~ and \`inline code\`
+- [Links](https://example.com) and bare URLs like https://example.com
+- Tables, task lists, block quotes and code blocks
+
+> Write the document once, render it anywhere.
+
+## Status
+
+| Milestone      | Owner | Done |
+|:---------------|:-----:|-----:|
+| Parser         | Ana   |  yes |
+| PDF output     | Ben   |  yes |
+| Footnotes      | Cleo  |   no |
+
+### Next steps
+
+- [x] Ship the first version
+- [ ] Collect feedback
+
+\`\`\`csharp
+var pdf = MarkdownToPdf.Convert(File.ReadAllText("README.md"));
+\`\`\`
+`,
   blank: `<!DOCTYPE html>
 <html>
 <body>
@@ -164,6 +206,23 @@ const examples = {
 const $ = id => document.getElementById(id);
 const html = $("html"), statusEl = $("status"), convertBtn = $("convert");
 let currentUrl = null, fileName = "document";
+const isMarkdown = () => $("inputFormat").value === "markdown";
+
+function setInputFormat(format) {
+  $("inputFormat").value = format;
+  const md = format === "markdown";
+  $("inputLabel").textContent = md ? "Markdown" : "HTML";
+  // HTML output only makes sense for Markdown input.
+  $("output").querySelector("option[value=html]").disabled = !md;
+  if (!md) $("output").value = "pdf";
+  updateOutputLabel();
+}
+
+function updateOutputLabel() {
+  const pdf = $("output").value === "pdf";
+  $("outputLabel").textContent = pdf ? "PDF" : "HTML";
+  $("empty").textContent = pdf ? "Your PDF will appear here." : "Your HTML will appear here.";
+}
 
 function setStatus(text, isError) {
   statusEl.textContent = text;
@@ -173,6 +232,7 @@ function setStatus(text, isError) {
 function loadExample(name) {
   html.value = examples[name];
   fileName = name === "blank" ? "document" : name;
+  setInputFormat(name === "readme" ? "markdown" : "html");
 }
 
 async function convert() {
@@ -180,11 +240,13 @@ async function convert() {
   setStatus("Converting…");
   const started = performance.now();
   try {
+    const output = $("output").value;
     const res = await fetch("api/convert", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        html: html.value,
+        [isMarkdown() ? "markdown" : "html"]: html.value,
+        output,
         pageSize: $("pageSize").value,
         landscape: $("landscape").checked,
         marginMm: parseFloat($("margin").value) || 0,
@@ -201,12 +263,17 @@ async function convert() {
     const serverMs = parseFloat(res.headers.get("X-Conversion-Ms"));
     if (currentUrl) URL.revokeObjectURL(currentUrl);
     currentUrl = URL.createObjectURL(blob);
-    $("preview").src = currentUrl;
-    $("preview").hidden = false;
+    const preview = $("preview");
+    // HTML previews are sandboxed: any script in the document stays inert.
+    if (output === "html") preview.setAttribute("sandbox", "");
+    else preview.removeAttribute("sandbox");
+    preview.style.background = output === "html" ? "#fff" : "";
+    preview.src = currentUrl;
+    preview.hidden = false;
     $("empty").hidden = true;
     const dl = $("download");
     dl.href = currentUrl;
-    dl.download = fileName + ".pdf";
+    dl.download = fileName + "." + output;
     dl.hidden = false;
     const kb = (blob.size / 1024).toFixed(1);
     setStatus(isNaN(serverMs)
@@ -232,11 +299,12 @@ html.addEventListener("keydown", e => {
 async function openFile(f) {
   if (!f) return;
   html.value = await f.text();
+  setInputFormat(/\.(md|markdown|mdown|mkdn?)$/i.test(f.name) ? "markdown" : "html");
   fileName = f.name.replace(/\.[^.]+$/, "") || "document";
   convert();
 }
 $("file").addEventListener("change", async e => { await openFile(e.target.files[0]); e.target.value = ""; });
-// Drop an .html file anywhere on the page.
+// Drop an .html or .md file anywhere on the page.
 document.addEventListener("dragover", e => { e.preventDefault(); document.body.classList.add("dragging"); });
 document.addEventListener("dragleave", e => { if (!e.relatedTarget) document.body.classList.remove("dragging"); });
 document.addEventListener("drop", e => {
@@ -245,6 +313,8 @@ document.addEventListener("drop", e => {
   openFile(e.dataTransfer.files[0]);
 });
 for (const id of ["pageSize", "landscape", "pageNumbers"]) $(id).addEventListener("change", convert);
+$("inputFormat").addEventListener("change", e => { setInputFormat(e.target.value); convert(); });
+$("output").addEventListener("change", () => { updateOutputLabel(); convert(); });
 $("margin").addEventListener("change", convert);
 
 loadExample("invoice");

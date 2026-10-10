@@ -1,9 +1,9 @@
 # PdfPecker
 
-Fast HTML to PDF conversion for .NET, with no dependencies.
+Fast HTML and Markdown to PDF conversion for .NET, with no dependencies.
 
-PdfPecker has its own HTML parser, CSS engine, layout engine and PDF writer. It does not start a browser, ship native
-binaries or pull in third-party packages; the NuGet package depends only on the .NET base class library.
+PdfPecker has its own HTML parser, Markdown parser, CSS engine, layout engine and PDF writer. It does not start a
+browser, ship native binaries or pull in third-party packages; the NuGet package depends only on the .NET base class library.
 
 ```csharp
 using PdfPecker;
@@ -49,6 +49,26 @@ byte[] pdf = await HtmlToPdf.ConvertAsync(html);
 
 All methods are static and thread-safe, so you can convert many documents in parallel.
 
+### Markdown
+
+```csharp
+// Markdown to PDF, styled like a GitHub README
+byte[] pdf = MarkdownToPdf.Convert(File.ReadAllText("README.md"));
+
+// File to file; relative image paths resolve against the Markdown file's folder
+MarkdownToPdf.ConvertFile("README.md", "README.pdf", new PdfOptions { FooterText = "Page {page} of {pages}" });
+
+// Markdown to HTML: a body fragment, or a complete page with the stylesheet
+string fragment = MarkdownToHtml.Convert("# Hello\n\n*World*");     // <h1 id="hello">Hello</h1>\n<p><em>World</em></p>
+string page = MarkdownToHtml.ConvertDocument(markdown);
+MarkdownToHtml.ConvertFile("README.md", "README.html");
+```
+
+`MarkdownOptions` switches the GitHub extensions off for strict CommonMark (`GitHubExtensions = false`), drops heading
+ids (`HeadingIds = false`), shows raw HTML as text (`AllowRawHtml = false`), replaces the stylesheet (`StyleSheet`,
+see `MarkdownToHtml.DefaultStyleSheet`) or sets the title (default: the first heading). `MarkdownToPdf` takes
+`PdfOptions` and `MarkdownOptions` side by side.
+
 ### Options
 
 ```csharp
@@ -73,8 +93,9 @@ loaded through `ResourceResolver`.
 
 ## Website
 
-`web/PdfPecker.Web` is a small ASP.NET Core site for converting HTML to PDF in the browser: paste or open an HTML
-file (or drag one onto the page), pick page size, orientation, margins and page numbers, and preview or download the PDF.
+`web/PdfPecker.Web` is a small ASP.NET Core site for converting HTML and Markdown in the browser: paste or open an
+`.html` or `.md` file (or drag one onto the page), pick page size, orientation, margins and page numbers, and preview or
+download the PDF. Markdown can also be converted to HTML.
 
 ```
 dotnet run --project web/PdfPecker.Web -c Release        # then open the URL it prints
@@ -95,6 +116,17 @@ curl -X POST http://localhost:8080/api/convert -F "file=@invoice.html" -F pageSi
 ```
 
 `POST /api/convert` also accepts JSON: `{ "html": "...", "pageSize": "A4", "landscape": false, "marginMm": 12.7, "pageNumbers": true }`.
+
+Markdown works the same way. The input is read as Markdown when it is uploaded as a `.md`/`.markdown` file, sent as
+`"markdown"` in JSON or as a `markdown` form field, posted with `Content-Type: text/markdown`, or marked with
+`format=markdown`. Add `output=html` to get the HTML page instead of a PDF:
+
+```
+curl -X POST http://localhost:8080/api/convert -F "file=@README.md" -o README.pdf
+curl -X POST http://localhost:8080/api/convert -F "file=@README.md" -F output=html -o README.html
+curl -X POST http://localhost:8080/api/convert -H "Content-Type: application/json" -d '{"markdown":"# Hi","output":"html"}'
+```
+
 The site never reads files from the server (`AllowFileAccess = false`), limits requests to 5 MB, 15 seconds and
 120 conversions per minute per IP, and stores nothing.
 
@@ -106,6 +138,13 @@ and `#id` links inside the document), `b`/`strong`, `i`/`em`, `u`, `s`, `sub`, `
 `tbody`, `tfoot`, `caption`, `colspan`, `rowspan`, `col width`), `img`, and legacy attributes such as `align`,
 `valign`, `bgcolor`, `width`, `height`, `border`, `cellpadding`, `cellspacing` and `<font>`. The parser is forgiving
 about unclosed and misnested tags, the way browsers are.
+
+**Markdown**: [CommonMark 0.31](https://spec.commonmark.org/0.31.2/) (651 of the 652 spec examples pass; the one
+miss is an exotic HTML5 entity name) plus the GitHub Flavored Markdown extensions: tables with column alignment,
+`~~strikethrough~~`, task list items (`- [x]`) and bare `www.`/`https://`/e-mail autolinks. Headings get GitHub-style
+ids, so `[see below](#heading-text)` links work in the PDF too. The parser runs in linear time on hostile input
+(deep nesting, unclosed brackets, long delimiter runs). Not supported: footnotes, definition lists, math and
+front matter.
 
 **CSS**: `<style>` blocks, `<link rel="stylesheet">`, inline `style` attributes, `@media print`, and `@page`.
 Selectors: type, `.class`, `#id`, `*`, attribute selectors (`[a]`, `=`, `~=`, `|=`, `^=`, `$=`, `*=`), descendant,
@@ -153,6 +192,9 @@ Measured with `bench/PdfPecker.Benchmarks` on a 4-core cloud VM (.NET 10, Releas
 | Invoice with a PNG logo and a styled table | 1 | 0.55 ms | about 1,800 docs/s on one core |
 | Feature tour (text, lists, tables, JPEG and PNG) | 5 | 2.5 ms | about 1,700 docs/s on 4 cores |
 | Dense report with 1,000 table rows | 30 | 19.5 ms | about 1,500 pages/s on one core |
+| Markdown guide (`guide.md`, headings, lists, code, a table) to PDF | 2 | 0.9 ms | about 1,000 docs/s on one core |
+
+Parsing Markdown to HTML runs at roughly 20 to 45 MB/s, so it is a small part of a Markdown to PDF conversion.
 
 The first conversion in a process also pays for JIT compilation (about 150 ms); later ones run at the speeds above.
 
@@ -161,12 +203,16 @@ The first conversion in a process also pays for JIT compilation (about 150 ms); 
 ```
 dotnet build
 dotnet test
-dotnet run --project samples/PdfPecker.Sample -c Release      # converts samples/PdfPecker.Sample/html/*.html into ./output
+dotnet run --project samples/PdfPecker.Sample -c Release      # converts samples/PdfPecker.Sample/html/*.html and *.md into ./output
 dotnet run --project bench/PdfPecker.Benchmarks -c Release
 dotnet pack src/PdfPecker -c Release -o ./nupkg
 ```
 
 ## How it works
+
+Markdown is first turned into HTML: `Markdown/BlockParser` finds the block structure line by line, following the
+CommonMark reference algorithm, `Markdown/InlineParser` handles emphasis (delimiter stack) and links (bracket stack),
+and `Markdown/HtmlRenderer` writes the HTML, which then takes the same path as any other document:
 
 1. `Html/HtmlParser` builds a DOM in a single pass, applying the browser rules for implied end tags.
 2. `Css/StyleResolver` cascades a user-agent stylesheet, presentational attributes, document stylesheets and inline
