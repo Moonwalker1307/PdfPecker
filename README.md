@@ -74,7 +74,7 @@ loaded through `ResourceResolver`.
 ## Website
 
 `web/PdfPecker.Web` is a small ASP.NET Core site for converting HTML to PDF in the browser: paste or open an HTML
-file, pick page size, orientation, margins and page numbers, and preview or download the PDF.
+file (or drag one onto the page), pick page size, orientation, margins and page numbers, and preview or download the PDF.
 
 ```
 dotnet run --project web/PdfPecker.Web -c Release        # then open the URL it prints
@@ -86,6 +86,12 @@ It also exposes the converter as an HTTP API:
 ```
 curl -X POST "http://localhost:8080/api/convert?pageSize=Letter&pageNumbers=true" \
      -H "Content-Type: text/html" --data-binary @invoice.html -o invoice.pdf
+```
+
+Or upload a file as a form:
+
+```
+curl -X POST http://localhost:8080/api/convert -F "file=@invoice.html" -F pageSize=A4 -F pageNumbers=true -o invoice.pdf
 ```
 
 `POST /api/convert` also accepts JSON: `{ "html": "...", "pageSize": "A4", "landscape": false, "marginMm": 12.7, "pageNumbers": true }`.

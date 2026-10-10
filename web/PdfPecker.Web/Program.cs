@@ -26,8 +26,9 @@ app.UseRateLimiter();
 app.MapGet("/health", () => Results.Text("ok"));
 
 // POST /api/convert
-//   application/json: { "html": "...", "pageSize": "A4", "landscape": false, "marginMm": 12.7, "pageNumbers": true }
-//   anything else:    the raw HTML as the body, options in the query string (?pageSize=Letter&landscape=true&marginMm=10&pageNumbers=true)
+//   multipart/form-data: an uploaded HTML file in the "file" field; options as form fields or query string
+//   application/json:    { "html": "...", "pageSize": "A4", "landscape": false, "marginMm": 12.7, "pageNumbers": true }
+//   anything else:       the raw HTML as the body, options in the query string (?pageSize=Letter&landscape=true&marginMm=10&pageNumbers=true)
 // Returns application/pdf.
 app.MapPost("/api/convert", async (HttpRequest request, CancellationToken ct) =>
 {
@@ -35,6 +36,28 @@ app.MapPost("/api/convert", async (HttpRequest request, CancellationToken ct) =>
     if (request.HasJsonContentType())
     {
         req = await request.ReadFromJsonAsync(AppJsonContext.Default.ConvertRequest, ct);
+    }
+    else if (request.HasFormContentType)
+    {
+        var form = await request.ReadFormAsync(ct);
+        var file = form.Files["file"] ?? form.Files.FirstOrDefault();
+        string html;
+        if (file != null)
+        {
+            using var fileReader = new StreamReader(file.OpenReadStream());
+            html = await fileReader.ReadToEndAsync(ct);
+        }
+        else html = form["html"].ToString();
+        string? Field(string name) => form.TryGetValue(name, out var v) ? v.ToString() : request.Query[name].ToString();
+        req = new ConvertRequest
+        {
+            Html = html,
+            FileName = file?.FileName,
+            PageSize = Field("pageSize"),
+            Landscape = bool.TryParse(Field("landscape"), out var fl) && fl,
+            MarginMm = float.TryParse(Field("marginMm"), System.Globalization.CultureInfo.InvariantCulture, out var fm) ? fm : null,
+            PageNumbers = bool.TryParse(Field("pageNumbers"), out var fp) && fp,
+        };
     }
     else
     {

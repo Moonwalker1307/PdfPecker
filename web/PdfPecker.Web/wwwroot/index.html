@@ -41,6 +41,7 @@
   .empty { flex: 1; display: grid; place-items: center; color: var(--muted); padding: 24px; text-align: center; }
   .status { font-size: 13px; color: var(--muted); }
   .status.error { color: var(--error); }
+  body.dragging textarea { outline: 3px dashed var(--accent); outline-offset: -8px; }
   kbd { font: 12px ui-monospace, monospace; border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
   @media (max-width: 800px) {
     main { grid-template-columns: 1fr; grid-template-rows: 50vh 70vh; }
@@ -79,7 +80,7 @@
 
 <main>
   <section class="pane">
-    <div class="pane-head">HTML <span class="spacer"></span><span>Press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to convert</span></div>
+    <div class="pane-head">HTML <span class="spacer"></span><span>Drop an .html file here, or press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to convert</span></div>
     <textarea id="html" spellcheck="false" aria-label="HTML to convert"></textarea>
   </section>
   <section class="pane">
@@ -228,13 +229,20 @@ html.addEventListener("keydown", e => {
     html.setRangeText("  ", s, html.selectionEnd, "end");
   }
 });
-$("file").addEventListener("change", async e => {
-  const f = e.target.files[0];
+async function openFile(f) {
   if (!f) return;
   html.value = await f.text();
   fileName = f.name.replace(/\.[^.]+$/, "") || "document";
-  e.target.value = "";
   convert();
+}
+$("file").addEventListener("change", async e => { await openFile(e.target.files[0]); e.target.value = ""; });
+// Drop an .html file anywhere on the page.
+document.addEventListener("dragover", e => { e.preventDefault(); document.body.classList.add("dragging"); });
+document.addEventListener("dragleave", e => { if (!e.relatedTarget) document.body.classList.remove("dragging"); });
+document.addEventListener("drop", e => {
+  e.preventDefault();
+  document.body.classList.remove("dragging");
+  openFile(e.dataTransfer.files[0]);
 });
 for (const id of ["pageSize", "landscape", "pageNumbers"]) $(id).addEventListener("change", convert);
 $("margin").addEventListener("change", convert);
