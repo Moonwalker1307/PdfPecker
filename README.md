@@ -26,7 +26,7 @@ dotnet nuget add source "$(pwd)/nupkg" --name pdfpecker-local
 dotnet add <your project> package PdfPecker
 ```
 
-The package targets `net8.0` and works on .NET 8 and later.
+The package targets `net10.0` and works on .NET 10 and later.
 
 ## Usage
 
@@ -118,13 +118,13 @@ These are deliberate scope choices for speed and size; they are the first candid
 
 ## Performance
 
-Measured with `bench/PdfPecker.Benchmarks` on a 4-core cloud VM (.NET 8, Release, after JIT warm-up):
+Measured with `bench/PdfPecker.Benchmarks` on a 4-core cloud VM (.NET 10, Release, after JIT warm-up):
 
 | Document | Pages | Median | Throughput |
 | --- | --- | --- | --- |
-| Invoice with a PNG logo and a styled table | 1 | 0.6 ms | about 1,500 docs/s on one core |
-| Feature tour (text, lists, tables, JPEG and PNG) | 5 | 1.9 ms | about 1,200 docs/s on 4 cores |
-| Dense report with 1,000 table rows | 30 | 18.5 ms | about 1,600 pages/s on one core |
+| Invoice with a PNG logo and a styled table | 1 | 0.55 ms | about 1,800 docs/s on one core |
+| Feature tour (text, lists, tables, JPEG and PNG) | 5 | 2.5 ms | about 1,700 docs/s on 4 cores |
+| Dense report with 1,000 table rows | 30 | 19.5 ms | about 1,500 pages/s on one core |
 
 The first conversion in a process also pays for JIT compilation (about 150 ms); later ones run at the speeds above.
 
