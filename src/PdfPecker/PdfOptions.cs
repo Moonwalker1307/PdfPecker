@@ -77,6 +77,13 @@ public sealed class PdfOptions
     /// </summary>
     public Func<string, byte[]?>? ResourceResolver { get; set; }
 
+    /// <summary>
+    /// Allow images and stylesheets to be read from the local file system. Default: true. Set it to false when converting
+    /// untrusted HTML (for example in a web service), so a document cannot pull files from the server into its output.
+    /// <c>data:</c> URIs and <see cref="ResourceResolver"/> keep working.
+    /// </summary>
+    public bool AllowFileAccess { get; set; } = true;
+
     /// <summary>Extra CSS applied after the document's own styles.</summary>
     public string? UserStyleSheet { get; set; }
 

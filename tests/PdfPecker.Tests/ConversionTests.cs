@@ -281,6 +281,18 @@ public class ConversionTests
     }
 
     [Fact]
+    public void File_access_can_be_disabled()
+    {
+        var fixtures = Path.Combine(AppContext.BaseDirectory, "Fixtures");
+        var absolute = Path.Combine(fixtures, "rgb.jpg");
+        var html = $"<img src='rgb.jpg'><img src='{absolute}'><img src='file://{absolute}'>";
+        var allowed = ConvertUncompressed(html, new PdfOptions { BaseDirectory = fixtures });
+        var blocked = ConvertUncompressed(html, new PdfOptions { BaseDirectory = fixtures, AllowFileAccess = false });
+        Assert.Contains("/Subtype /Image", Latin1(allowed));
+        Assert.DoesNotContain("/Subtype /Image", Latin1(blocked));
+    }
+
+    [Fact]
     public void Writes_to_stream()
     {
         using var ms = new MemoryStream();

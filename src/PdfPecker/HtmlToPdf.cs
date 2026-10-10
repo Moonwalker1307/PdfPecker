@@ -48,7 +48,7 @@ public static class HtmlToPdf
 
         // Stylesheets in document order: <style> blocks and <link rel="stylesheet">.
         var sheet = new Stylesheet();
-        CollectStyles(doc, sheet, baseDirectory, resolver);
+        CollectStyles(doc, sheet, options.AllowFileAccess ? baseDirectory : null, resolver, options.AllowFileAccess);
         if (!string.IsNullOrEmpty(options.UserStyleSheet)) CssParser.ParseStylesheet(options.UserStyleSheet!, sheet);
 
         var page = new PageSetup
@@ -67,7 +67,7 @@ public static class HtmlToPdf
         var root = new ComputedStyle { Display = Display.Block };
         new StyleResolver(sheet).ResolveTree(doc, root);
 
-        var engine = new LayoutEngine(page.ContentHeight, new ImageLoader(baseDirectory, resolver));
+        var engine = new LayoutEngine(page.ContentHeight, new ImageLoader(baseDirectory, resolver, options.AllowFileAccess));
         float height = engine.Layout(doc, page.ContentWidth);
 
         uint background = 0;
@@ -88,7 +88,7 @@ public static class HtmlToPdf
             options.FooterText, options.HeaderText);
     }
 
-    private static void CollectStyles(Element parent, Stylesheet sheet, string? baseDirectory, Func<string, byte[]?>? resolver)
+    private static void CollectStyles(Element parent, Stylesheet sheet, string? baseDirectory, Func<string, byte[]?>? resolver, bool allowFiles)
     {
         foreach (var child in parent.Children)
         {
@@ -102,11 +102,11 @@ public static class HtmlToPdf
             if (e.Name == "link" && (e.GetAttribute("rel") ?? "").IndexOf("stylesheet", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 var media = e.GetAttribute("media");
-                var css = media == null || MediaMatches(media) ? LoadText(e.GetAttribute("href"), baseDirectory, resolver) : null;
+                var css = media == null || MediaMatches(media) ? LoadText(e.GetAttribute("href"), baseDirectory, resolver, allowFiles) : null;
                 if (css != null) CssParser.ParseStylesheet(css, sheet);
                 continue;
             }
-            CollectStyles(e, sheet, baseDirectory, resolver);
+            CollectStyles(e, sheet, baseDirectory, resolver, allowFiles);
         }
     }
 
@@ -116,7 +116,7 @@ public static class HtmlToPdf
         return m.Length == 0 || m.Contains("print") || m.Contains("all");
     }
 
-    private static string? LoadText(string? href, string? baseDirectory, Func<string, byte[]?>? resolver)
+    private static string? LoadText(string? href, string? baseDirectory, Func<string, byte[]?>? resolver, bool allowFiles)
     {
         if (string.IsNullOrWhiteSpace(href)) return null;
         try
@@ -124,6 +124,7 @@ public static class HtmlToPdf
             var bytes = resolver?.Invoke(href!);
             if (bytes != null) return System.Text.Encoding.UTF8.GetString(bytes);
             if (href!.StartsWith("http:", StringComparison.OrdinalIgnoreCase) || href.StartsWith("https:", StringComparison.OrdinalIgnoreCase)) return null;
+            if (!allowFiles) return null;
             var path = href;
             if (!Path.IsPathRooted(path))
             {

@@ -62,6 +62,7 @@ var options = new PdfOptions
     FooterText = "Page {page} of {pages}",            // also HeaderText
     Title = "Invoice 42", Author = "Accounts",        // document properties (Title defaults to <title>)
     Compress = true,                                  // Flate-compress page content (default)
+    AllowFileAccess = false,                          // block local file reads when converting untrusted HTML
 };
 byte[] pdf = HtmlToPdf.Convert(html, options);
 ```
@@ -69,6 +70,27 @@ byte[] pdf = HtmlToPdf.Convert(html, options);
 A CSS `@page { size: A4 landscape; margin: 15mm }` rule overrides the page size and margins unless
 `IgnoreCssPageRules` is set. PdfPecker never makes network requests on its own: `http(s)` images and stylesheets are only
 loaded through `ResourceResolver`.
+
+## Website
+
+`web/PdfPecker.Web` is a small ASP.NET Core site for converting HTML to PDF in the browser: paste or open an HTML
+file, pick page size, orientation, margins and page numbers, and preview or download the PDF.
+
+```
+dotnet run --project web/PdfPecker.Web -c Release        # then open the URL it prints
+docker build -f web/PdfPecker.Web/Dockerfile -t pdfpecker-web . && docker run -p 8080:8080 pdfpecker-web
+```
+
+It also exposes the converter as an HTTP API:
+
+```
+curl -X POST "http://localhost:8080/api/convert?pageSize=Letter&pageNumbers=true" \
+     -H "Content-Type: text/html" --data-binary @invoice.html -o invoice.pdf
+```
+
+`POST /api/convert` also accepts JSON: `{ "html": "...", "pageSize": "A4", "landscape": false, "marginMm": 12.7, "pageNumbers": true }`.
+The site never reads files from the server (`AllowFileAccess = false`), limits requests to 5 MB, 15 seconds and
+120 conversions per minute per IP, and stores nothing.
 
 ## What is supported
 

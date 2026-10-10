@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PdfPecker – HTML to PDF</title>
+<style>
+  :root {
+    --bg: #f4f6fa; --panel: #ffffff; --text: #1a202c; --muted: #5a6577; --border: #d9dee7;
+    --accent: #2b6cb0; --accent-hover: #245a93; --accent-text: #ffffff; --code-bg: #fbfcfe; --error: #c53030;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --panel: #1b2029; --text: #e6e9ef; --muted: #98a2b3; --border: #2c3340;
+      --accent: #5a9be0; --accent-hover: #74aceb; --accent-text: #0d1117; --code-bg: #161a22; --error: #fc8181;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--panel); flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; }
+  header .tag { color: var(--muted); font-size: 13px; }
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 10px 20px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  .toolbar label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+  select, input[type=number] { font: inherit; font-size: 13px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--code-bg); color: var(--text); }
+  input[type=number] { width: 64px; }
+  button, .button { font: inherit; font-size: 14px; padding: 7px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--text); cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+  button:hover, .button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  button.primary:hover { background: var(--accent-hover); }
+  button:disabled { opacity: .6; cursor: progress; }
+  .spacer { flex: 1; }
+  main { flex: 1; display: grid; grid-template-columns: 1fr 1fr; min-height: 0; }
+  .pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+  .pane + .pane { border-left: 1px solid var(--border); }
+  .pane-head { display: flex; align-items: center; gap: 10px; padding: 8px 20px; font-size: 13px; color: var(--muted); border-bottom: 1px solid var(--border); }
+  textarea { flex: 1; width: 100%; resize: none; border: 0; padding: 14px 20px; background: var(--code-bg); color: var(--text); font: 13px/1.5 ui-monospace, "Cascadia Code", Consolas, Menlo, monospace; outline: none; tab-size: 2; }
+  iframe { flex: 1; width: 100%; border: 0; background: #525659; }
+  .empty { flex: 1; display: grid; place-items: center; color: var(--muted); padding: 24px; text-align: center; }
+  .status { font-size: 13px; color: var(--muted); }
+  .status.error { color: var(--error); }
+  kbd { font: 12px ui-monospace, monospace; border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+  @media (max-width: 800px) {
+    main { grid-template-columns: 1fr; grid-template-rows: 50vh 70vh; }
+    .pane + .pane { border-left: 0; border-top: 1px solid var(--border); }
+    header, .toolbar, .pane-head, textarea { padding-left: 16px; padding-right: 16px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>PdfPecker</h1>
+  <span class="tag">HTML to PDF in milliseconds. Nothing is stored.</span>
+</header>
+
+<div class="toolbar">
+  <label>Example
+    <select id="example">
+      <option value="invoice">Invoice</option>
+      <option value="article">Article</option>
+      <option value="blank">Blank</option>
+    </select>
+  </label>
+  <label>Page
+    <select id="pageSize">
+      <option>A4</option><option>Letter</option><option>Legal</option><option>A3</option><option>A5</option>
+    </select>
+  </label>
+  <label><input type="checkbox" id="landscape"> Landscape</label>
+  <label>Margin (mm) <input type="number" id="margin" value="12.7" min="0" max="50" step="0.1"></label>
+  <label><input type="checkbox" id="pageNumbers" checked> Page numbers</label>
+  <span class="spacer"></span>
+  <label class="button" for="file">Open .html file</label>
+  <input type="file" id="file" accept=".html,.htm,text/html" hidden>
+  <button class="primary" id="convert" title="Ctrl+Enter">Convert to PDF</button>
+</div>
+
+<main>
+  <section class="pane">
+    <div class="pane-head">HTML <span class="spacer"></span><span>Press <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to convert</span></div>
+    <textarea id="html" spellcheck="false" aria-label="HTML to convert"></textarea>
+  </section>
+  <section class="pane">
+    <div class="pane-head">
+      PDF <span class="status" id="status"></span>
+      <span class="spacer"></span>
+      <a class="button" id="download" hidden>Download</a>
+    </div>
+    <div class="empty" id="empty">Your PDF will appear here.</div>
+    <iframe id="preview" title="PDF preview" hidden></iframe>
+  </section>
+</main>
+
+<script>
+const examples = {
+  invoice: `<!DOCTYPE html>
+<html>
+<head>
+<title>Invoice 2026-0042</title>
+<style>
+  body { font-family: Helvetica, Arial, sans-serif; font-size: 10pt; color: #222; margin: 0; }
+  .brand { font-size: 20pt; font-weight: bold; color: #2b6cb0; }
+  .header { border-bottom: 3px solid #2b6cb0; padding-bottom: 8px; margin-bottom: 16px; }
+  .muted { color: #718096; }
+  table.items { width: 100%; border-collapse: collapse; margin-top: 16px; }
+  table.items th { background: #2b6cb0; color: white; text-align: left; padding: 6px 8px; }
+  table.items td { padding: 6px 8px; border-bottom: 1px solid #e2e8f0; }
+  table.items tr:nth-child(even) td { background-color: #f7fafc; }
+  .num { text-align: right; }
+  .total td { font-weight: bold; border-top: 2px solid #2b6cb0; }
+  .note { margin-top: 24px; padding: 10px 12px; background: #fffbea; border-left: 4px solid #d69e2e; }
+</style>
+</head>
+<body>
+  <div class="header"><span class="brand">Acme Supplies</span></div>
+  <h1 style="font-size:16pt;margin:0">Invoice #2026-0042</h1>
+  <div class="muted">Issued 10 October 2026 &middot; Due 24 October 2026</div>
+  <table class="items">
+    <thead><tr><th>Description</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Amount</th></tr></thead>
+    <tbody>
+      <tr><td>Widgets, large</td><td class="num">4</td><td class="num">&euro;25.00</td><td class="num">&euro;100.00</td></tr>
+      <tr><td>Widgets, small</td><td class="num">10</td><td class="num">&euro;7.50</td><td class="num">&euro;75.00</td></tr>
+      <tr><td>Installation</td><td class="num">1</td><td class="num">&euro;120.00</td><td class="num">&euro;120.00</td></tr>
+      <tr class="total"><td colspan="3">Total</td><td class="num">&euro;295.00</td></tr>
+    </tbody>
+  </table>
+  <div class="note"><strong>Thank you!</strong> Please pay within 14 days.</div>
+</body>
+</html>`,
+  article: `<!DOCTYPE html>
+<html>
+<head>
+<title>A short article</title>
+<style>
+  body { font-family: Georgia, serif; font-size: 11pt; line-height: 1.5; }
+  h1 { font-family: Helvetica, sans-serif; color: #2c5282; }
+  blockquote { border-left: 4px solid #a0aec0; margin-left: 0; padding-left: 12px; color: #4a5568; font-style: italic; }
+  p { text-align: justify; }
+</style>
+</head>
+<body>
+  <h1>Why plain HTML makes great PDFs</h1>
+  <p>HTML and CSS are a comfortable way to describe documents: headings, paragraphs, <b>bold</b>, <i>italic</i>,
+  <a href="https://example.com">links</a>, lists and tables all come for free.</p>
+  <blockquote>Write the document once, render it anywhere.</blockquote>
+  <ul><li>Invoices and receipts</li><li>Reports and statements</li><li>Tickets and labels</li></ul>
+  <ol><li>Write HTML</li><li>Convert</li><li>Done</li></ol>
+  <h2 style="page-break-before: always">Second page</h2>
+  <p>This heading uses <code>page-break-before: always</code>.</p>
+</body>
+</html>`,
+  blank: `<!DOCTYPE html>
+<html>
+<body>
+  <h1>Hello</h1>
+  <p>Start typing HTML here.</p>
+</body>
+</html>`,
+};
+
+const $ = id => document.getElementById(id);
+const html = $("html"), statusEl = $("status"), convertBtn = $("convert");
+let currentUrl = null, fileName = "document";
+
+function setStatus(text, isError) {
+  statusEl.textContent = text;
+  statusEl.classList.toggle("error", !!isError);
+}
+
+function loadExample(name) {
+  html.value = examples[name];
+  fileName = name === "blank" ? "document" : name;
+}
+
+async function convert() {
+  convertBtn.disabled = true;
+  setStatus("Converting…");
+  const started = performance.now();
+  try {
+    const res = await fetch("api/convert", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        html: html.value,
+        pageSize: $("pageSize").value,
+        landscape: $("landscape").checked,
+        marginMm: parseFloat($("margin").value) || 0,
+        pageNumbers: $("pageNumbers").checked,
+        fileName,
+      }),
+    });
+    if (!res.ok) {
+      let message = res.status === 429 ? "Too many requests, wait a moment." : "Conversion failed (" + res.status + ").";
+      try { const p = await res.json(); if (p.detail) message = p.detail; } catch {}
+      throw new Error(message);
+    }
+    const blob = await res.blob();
+    const serverMs = parseFloat(res.headers.get("X-Conversion-Ms"));
+    if (currentUrl) URL.revokeObjectURL(currentUrl);
+    currentUrl = URL.createObjectURL(blob);
+    $("preview").src = currentUrl;
+    $("preview").hidden = false;
+    $("empty").hidden = true;
+    const dl = $("download");
+    dl.href = currentUrl;
+    dl.download = fileName + ".pdf";
+    dl.hidden = false;
+    const kb = (blob.size / 1024).toFixed(1);
+    setStatus(isNaN(serverMs)
+      ? `${kb} KB`
+      : `${kb} KB · converted in ${serverMs.toFixed(1)} ms (round trip ${Math.round(performance.now() - started)} ms)`);
+  } catch (e) {
+    setStatus(e.message, true);
+  } finally {
+    convertBtn.disabled = false;
+  }
+}
+
+$("example").addEventListener("change", e => { loadExample(e.target.value); convert(); });
+convertBtn.addEventListener("click", convert);
+html.addEventListener("keydown", e => {
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); convert(); }
+  if (e.key === "Tab") {
+    e.preventDefault();
+    const s = html.selectionStart;
+    html.setRangeText("  ", s, html.selectionEnd, "end");
+  }
+});
+$("file").addEventListener("change", async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  html.value = await f.text();
+  fileName = f.name.replace(/\.[^.]+$/, "") || "document";
+  e.target.value = "";
+  convert();
+});
+for (const id of ["pageSize", "landscape", "pageNumbers"]) $(id).addEventListener("change", convert);
+$("margin").addEventListener("change", convert);
+
+loadExample("invoice");
+convert();
+</script>
+</body>
+</html>

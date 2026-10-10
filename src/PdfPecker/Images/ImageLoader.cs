@@ -5,10 +5,12 @@ internal sealed class ImageLoader
 {
     private readonly string? _baseDirectory;
     private readonly Func<string, byte[]?>? _resolver;
+    private readonly bool _allowFiles;
     private readonly Dictionary<string, PdfImage?> _cache = new(StringComparer.Ordinal);
 
-    public ImageLoader(string? baseDirectory, Func<string, byte[]?>? resolver)
+    public ImageLoader(string? baseDirectory, Func<string, byte[]?>? resolver, bool allowFiles = true)
     {
+        _allowFiles = allowFiles;
         _baseDirectory = baseDirectory;
         _resolver = resolver;
     }
@@ -54,6 +56,7 @@ internal sealed class ImageLoader
 
         if (src.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || src.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
             return null; // no network access unless the caller provides a resolver
+        if (!_allowFiles) return null;
 
         string path = src;
         if (src.StartsWith("file:", StringComparison.OrdinalIgnoreCase) && Uri.TryCreate(src, UriKind.Absolute, out var uri))
