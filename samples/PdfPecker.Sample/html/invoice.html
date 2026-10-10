@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Invoice #2026-0042</title>
+  <style>
+    @page { size: A4; margin: 15mm; }
+    body { font-family: Helvetica, Arial, sans-serif; font-size: 10pt; color: #222; margin: 0; }
+    .header { border-bottom: 3px solid #2b6cb0; padding-bottom: 8px; margin-bottom: 16px; }
+    .header img { vertical-align: middle; width: 40px; }
+    .brand { font-size: 20pt; font-weight: bold; color: #2b6cb0; vertical-align: middle; }
+    .muted { color: #718096; }
+    .columns { width: 100%; }
+    .columns td { vertical-align: top; width: 50%; }
+    h1 { font-size: 16pt; margin: 0 0 4px 0; }
+    table.items { width: 100%; border-collapse: collapse; margin-top: 16px; }
+    table.items th { background: #2b6cb0; color: white; text-align: left; padding: 6px 8px; }
+    table.items td { padding: 6px 8px; border-bottom: 1px solid #e2e8f0; }
+    table.items tr:nth-child(even) td { background-color: #f7fafc; }
+    .num { text-align: right; }
+    .total td { font-weight: bold; border-top: 2px solid #2b6cb0; border-bottom: none; }
+    .note { margin-top: 24px; padding: 10px 12px; background: #fffbea; border-left: 4px solid #d69e2e; }
+    .badge { display: inline-block; padding: 2px 8px; background: #c6f6d5; color: #22543d; font-size: 8pt; font-weight: bold; }
+    a { color: #2b6cb0; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <img src="logo.png" alt="logo"> <span class="brand">PdfPecker Ltd.</span>
+    <span class="badge">PAID</span>
+  </div>
+
+  <table class="columns">
+    <tr>
+      <td>
+        <h1>Invoice #2026-0042</h1>
+        <div class="muted">Issued 10 October 2026 &middot; Due 24 October 2026</div>
+      </td>
+      <td style="text-align:right">
+        <strong>Billed to</strong><br>
+        Acme Corporation<br>
+        1 Infinite Loop<br>
+        Springfield, 12345
+      </td>
+    </tr>
+  </table>
+
+  <table class="items">
+    <thead>
+      <tr><th>Description</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Amount</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>HTML to PDF conversion engine &mdash; annual licence</td><td class="num">1</td><td class="num">&euro;1,200.00</td><td class="num">&euro;1,200.00</td></tr>
+      <tr><td>Priority support (hours)</td><td class="num">12</td><td class="num">&euro;95.00</td><td class="num">&euro;1,140.00</td></tr>
+      <tr><td>Custom CSS feature work: <em>tables</em>, <em>lists</em> and <code>page-break-*</code></td><td class="num">3</td><td class="num">&euro;450.00</td><td class="num">&euro;1,350.00</td></tr>
+      <tr><td>Onboarding workshop</td><td class="num">1</td><td class="num">&euro;600.00</td><td class="num">&euro;600.00</td></tr>
+      <tr class="total"><td colspan="3">Total (excl. VAT)</td><td class="num">&euro;4,290.00</td></tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <strong>Payment note:</strong> please transfer the amount to IBAN DE00 1234 5678 9012 3456 78 and quote the
+    invoice number. Questions? Visit <a href="https://github.com/Moonwalker1307/PdfPecker">our repository</a>.
+  </div>
+</body>
+</html>

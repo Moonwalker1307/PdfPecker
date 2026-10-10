@@ -1,0 +1,422 @@
+using System.Text;
+
+namespace PdfPecker.Css;
+
+internal sealed class Declaration
+{
+    public readonly string Property;
+    public readonly string Value;
+    public readonly bool Important;
+
+    public Declaration(string property, string value, bool important)
+    {
+        Property = property;
+        Value = value;
+        Important = important;
+    }
+
+    public override string ToString() => Property + ": " + Value + (Important ? " !important" : "");
+}
+
+internal sealed class StyleRule
+{
+    public readonly Selector Selector;
+    public readonly Declaration[] Declarations;
+    public readonly int Order;
+
+    public StyleRule(Selector selector, Declaration[] declarations, int order)
+    {
+        Selector = selector;
+        Declarations = declarations;
+        Order = order;
+    }
+}
+
+internal sealed class Stylesheet
+{
+    public readonly List<StyleRule> Rules = new();
+    public readonly List<Declaration> PageDeclarations = new(); // from @page
+    public int NextOrder;
+}
+
+/// <summary>Parses CSS stylesheets and declaration blocks. Shorthands are expanded into longhands while parsing.</summary>
+internal static class CssParser
+{
+    public static void ParseStylesheet(string css, Stylesheet sheet)
+    {
+        string s = StripComments(css);
+        int i = 0;
+        ParseRules(s, ref i, sheet, s.Length);
+    }
+
+    private static void ParseRules(string s, ref int i, Stylesheet sheet, int end)
+    {
+        while (i < end)
+        {
+            while (i < end && (char.IsWhiteSpace(s[i]) || s[i] == ';')) i++;
+            if (i >= end) break;
+            if (s[i] == '}') { i++; continue; }
+            if (s.Length - i >= 4 && string.CompareOrdinal(s, i, "<!--", 0, 4) == 0) { i += 4; continue; }
+            if (s.Length - i >= 3 && string.CompareOrdinal(s, i, "-->", 0, 3) == 0) { i += 3; continue; }
+
+            if (s[i] == '@')
+            {
+                int nameStart = ++i;
+                while (i < end && (char.IsLetterOrDigit(s[i]) || s[i] == '-')) i++;
+                string atName = s.Substring(nameStart, i - nameStart).ToLowerInvariant();
+                int brace = IndexOfOutsideQuotes(s, '{', i, end);
+                int semi = IndexOfOutsideQuotes(s, ';', i, end);
+                if (semi >= 0 && (brace < 0 || semi < brace))
+                {
+                    i = semi + 1; // @import, @charset, @namespace: ignored
+                    continue;
+                }
+                if (brace < 0) { i = end; break; }
+                string prelude = s.Substring(i, brace - i).Trim();
+                int blockEnd = MatchingBrace(s, brace, end);
+                if (atName == "media" && MediaApplies(prelude))
+                {
+                    int inner = brace + 1;
+                    ParseRules(s, ref inner, sheet, blockEnd);
+                }
+                else if (atName == "page" && !prelude.Contains(':'))
+                {
+                    // @page { size; margin } - pseudo pages (:first, :left) are ignored.
+                    ParseDeclarations(s.Substring(brace + 1, blockEnd - brace - 1), sheet.PageDeclarations);
+                }
+                i = Math.Min(blockEnd + 1, end);
+                continue;
+            }
+
+            int open = IndexOfOutsideQuotes(s, '{', i, end);
+            if (open < 0) { i = end; break; }
+            int close = MatchingBrace(s, open, end);
+            string selectorText = s.Substring(i, open - i);
+            string body = s.Substring(open + 1, close - open - 1);
+            i = Math.Min(close + 1, end);
+
+            var decls = new List<Declaration>();
+            ParseDeclarations(body, decls);
+            if (decls.Count == 0) continue;
+            var declArray = decls.ToArray();
+            foreach (var selText in SplitTopLevel(selectorText, ','))
+            {
+                var sel = Selector.Parse(selText);
+                if (sel != null) sheet.Rules.Add(new StyleRule(sel, declArray, sheet.NextOrder++));
+            }
+        }
+    }
+
+    private static bool MediaApplies(string prelude)
+    {
+        // Print output: honour "print" and "all" (and queries with no media type), skip screen/speech-only blocks.
+        var p = prelude.ToLowerInvariant();
+        foreach (var query in p.Split(','))
+        {
+            var q = query.Trim();
+            if (q.StartsWith("not ", StringComparison.Ordinal)) continue;
+            if (q.StartsWith("only ", StringComparison.Ordinal)) q = q.Substring(5);
+            if (q.StartsWith("print", StringComparison.Ordinal) || q.StartsWith("all", StringComparison.Ordinal) || q.StartsWith("(", StringComparison.Ordinal))
+            {
+                // Width-based queries are evaluated loosely: assume a page is a "wide" medium.
+                if (q.Contains("max-width")) continue;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static int MatchingBrace(string s, int open, int end)
+    {
+        int depth = 0;
+        for (int i = open; i < end; i++)
+        {
+            char c = s[i];
+            if (c == '"' || c == '\'')
+            {
+                int q = s.IndexOf(c, i + 1);
+                if (q < 0 || q >= end) return end;
+                i = q;
+            }
+            else if (c == '{') depth++;
+            else if (c == '}' && --depth == 0) return i;
+        }
+        return end;
+    }
+
+    private static int IndexOfOutsideQuotes(string s, char target, int start, int end)
+    {
+        for (int i = start; i < end; i++)
+        {
+            char c = s[i];
+            if (c == target) return i;
+            if (c == '"' || c == '\'')
+            {
+                int q = s.IndexOf(c, i + 1);
+                if (q < 0 || q >= end) return -1;
+                i = q;
+            }
+        }
+        return -1;
+    }
+
+    public static string StripComments(string css)
+    {
+        int c = css.IndexOf("/*", StringComparison.Ordinal);
+        if (c < 0) return css;
+        var sb = new StringBuilder(css.Length);
+        int i = 0;
+        while (c >= 0)
+        {
+            sb.Append(css, i, c - i);
+            int e = css.IndexOf("*/", c + 2, StringComparison.Ordinal);
+            if (e < 0) { i = css.Length; break; }
+            i = e + 2;
+            c = css.IndexOf("/*", i, StringComparison.Ordinal);
+        }
+        if (i < css.Length) sb.Append(css, i, css.Length - i);
+        return sb.ToString();
+    }
+
+    /// <summary>Parses "a: b; c: d !important" and appends the expanded longhand declarations.</summary>
+    public static void ParseDeclarations(string body, List<Declaration> output)
+    {
+        if (body.IndexOf("/*", StringComparison.Ordinal) >= 0) body = StripComments(body);
+        foreach (var part in SplitTopLevel(body, ';'))
+        {
+            int colon = part.IndexOf(':');
+            if (colon <= 0) continue;
+            string name = part.Substring(0, colon).Trim().ToLowerInvariant();
+            string value = part.Substring(colon + 1).Trim();
+            bool important = false;
+            int bang = value.LastIndexOf('!');
+            if (bang >= 0 && value.Substring(bang + 1).Trim().Equals("important", StringComparison.OrdinalIgnoreCase))
+            {
+                important = true;
+                value = value.Substring(0, bang).TrimEnd();
+            }
+            if (name.Length == 0 || value.Length == 0) continue;
+            Expand(name, value, important, output);
+        }
+    }
+
+    /// <summary>Splits on a separator that is not inside parentheses, brackets or quotes.</summary>
+    public static List<string> SplitTopLevel(string s, char sep)
+    {
+        var result = new List<string>();
+        int depth = 0, start = 0;
+        char quote = '\0';
+        for (int i = 0; i < s.Length; i++)
+        {
+            char c = s[i];
+            if (quote != '\0')
+            {
+                if (c == quote) quote = '\0';
+                else if (c == '\\') i++;
+                continue;
+            }
+            if (c == '"' || c == '\'') quote = c;
+            else if (c == '(' || c == '[') depth++;
+            else if (c == ')' || c == ']') depth--;
+            else if (c == sep && depth == 0)
+            {
+                if (i > start) result.Add(s.Substring(start, i - start));
+                start = i + 1;
+            }
+        }
+        if (start < s.Length) result.Add(s.Substring(start));
+        return result;
+    }
+
+    /// <summary>Splits a value into whitespace-separated tokens, keeping functions and quoted strings intact.</summary>
+    public static List<string> Tokens(string s)
+    {
+        var result = new List<string>(4);
+        int depth = 0, start = -1;
+        char quote = '\0';
+        for (int i = 0; i < s.Length; i++)
+        {
+            char c = s[i];
+            if (quote != '\0')
+            {
+                if (c == quote) quote = '\0';
+                continue;
+            }
+            bool ws = c == ' ' || c == '\t' || c == '\n' || c == '\r';
+            if (ws && depth == 0)
+            {
+                if (start >= 0) { result.Add(s.Substring(start, i - start)); start = -1; }
+                continue;
+            }
+            if (start < 0) start = i;
+            if (c == '"' || c == '\'') quote = c;
+            else if (c == '(') depth++;
+            else if (c == ')') depth--;
+        }
+        if (start >= 0) result.Add(s.Substring(start));
+        return result;
+    }
+
+    private static readonly string[] Sides = { "top", "right", "bottom", "left" };
+
+    private static void Expand(string name, string value, bool important, List<Declaration> output)
+    {
+        void Add(string n, string v) => output.Add(new Declaration(n, v, important));
+
+        switch (name)
+        {
+            case "margin":
+            case "padding":
+            {
+                var t = Tokens(value);
+                if (t.Count == 0 || t.Count > 4) return;
+                var four = FourSides(t);
+                for (int k = 0; k < 4; k++) Add(name + "-" + Sides[k], four[k]);
+                return;
+            }
+            case "border-width":
+            case "border-style":
+            case "border-color":
+            {
+                var t = Tokens(value);
+                if (t.Count == 0 || t.Count > 4) return;
+                var four = FourSides(t);
+                string suffix = name.Substring(6); // "width" / "style" / "color"
+                for (int k = 0; k < 4; k++) Add("border-" + Sides[k] + "-" + suffix, four[k]);
+                return;
+            }
+            case "border":
+            case "border-top":
+            case "border-right":
+            case "border-bottom":
+            case "border-left":
+            {
+                string width = "medium", style = "none", color = "currentcolor";
+                foreach (var tok in Tokens(value))
+                {
+                    var lower = tok.ToLowerInvariant();
+                    if (IsBorderStyle(lower)) style = lower;
+                    else if (lower is "thin" or "medium" or "thick" || char.IsDigit(lower[0]) || lower[0] == '.') width = lower;
+                    else color = tok;
+                }
+                if (name == "border")
+                {
+                    foreach (var side in Sides)
+                    {
+                        Add("border-" + side + "-width", width);
+                        Add("border-" + side + "-style", style);
+                        Add("border-" + side + "-color", color);
+                    }
+                }
+                else
+                {
+                    Add(name + "-width", width);
+                    Add(name + "-style", style);
+                    Add(name + "-color", color);
+                }
+                return;
+            }
+            case "background":
+            {
+                string color = "transparent";
+                foreach (var tok in Tokens(value))
+                {
+                    var lower = tok.ToLowerInvariant();
+                    if (lower.StartsWith("url(", StringComparison.Ordinal) || lower.Contains("gradient(")) continue;
+                    if (CssColor.TryParse(tok, CssColor.Black, out _)) color = tok;
+                }
+                Add("background-color", color);
+                return;
+            }
+            case "font":
+                ExpandFont(value, output, important);
+                return;
+            case "list-style":
+                foreach (var tok in Tokens(value))
+                {
+                    var lower = tok.ToLowerInvariant();
+                    if (lower is "inside" or "outside") Add("list-style-position", lower);
+                    else if (!lower.StartsWith("url(", StringComparison.Ordinal)) Add("list-style-type", lower);
+                }
+                return;
+            case "page-break-before":
+            case "page-break-after":
+            case "page-break-inside":
+                Add(name.Substring(5), value.ToLowerInvariant());
+                return;
+            case "text-decoration":
+                Add("text-decoration-line", value);
+                return;
+            case "border-spacing":
+            {
+                var t = Tokens(value);
+                if (t.Count == 0) return;
+                Add("border-spacing-h", t[0]);
+                Add("border-spacing-v", t.Count > 1 ? t[1] : t[0]);
+                return;
+            }
+            case "overflow-wrap":
+            case "word-wrap":
+            case "word-break":
+                return;
+            default:
+                output.Add(new Declaration(name, value, important));
+                return;
+        }
+    }
+
+    private static string[] FourSides(List<string> t)
+        => t.Count switch
+        {
+            1 => new[] { t[0], t[0], t[0], t[0] },
+            2 => new[] { t[0], t[1], t[0], t[1] },
+            3 => new[] { t[0], t[1], t[2], t[1] },
+            _ => new[] { t[0], t[1], t[2], t[3] },
+        };
+
+    internal static bool IsBorderStyle(string s)
+        => s is "none" or "hidden" or "solid" or "dashed" or "dotted" or "double" or "groove" or "ridge" or "inset" or "outset";
+
+    private static void ExpandFont(string value, List<Declaration> output, bool important)
+    {
+        void Add(string n, string v) => output.Add(new Declaration(n, v, important));
+        var lower = value.Trim().ToLowerInvariant();
+        if (lower is "caption" or "icon" or "menu" or "message-box" or "small-caption" or "status-bar") return;
+
+        var tokens = Tokens(value);
+        string style = "normal", weight = "normal", size = "medium", lineHeight = "normal";
+        int i = 0;
+        for (; i < tokens.Count; i++)
+        {
+            var t = tokens[i].ToLowerInvariant();
+            if (t is "italic" or "oblique") style = t;
+            else if (t is "bold" or "bolder" or "lighter" || t.Length == 3 && char.IsDigit(t[0]) && t.EndsWith("00", StringComparison.Ordinal)) weight = t;
+            else if (t is "normal" or "small-caps") { }
+            else break;
+        }
+        if (i >= tokens.Count) return;
+        var sizeTok = tokens[i++];
+        int slash = sizeTok.IndexOf('/');
+        if (slash >= 0)
+        {
+            size = sizeTok.Substring(0, slash);
+            lineHeight = sizeTok.Substring(slash + 1);
+            if (lineHeight.Length == 0 && i < tokens.Count) lineHeight = tokens[i++];
+        }
+        else
+        {
+            size = sizeTok;
+            if (i < tokens.Count && tokens[i].StartsWith("/", StringComparison.Ordinal))
+            {
+                lineHeight = tokens[i].Length > 1 ? tokens[i].Substring(1) : (i + 1 < tokens.Count ? tokens[++i] : "normal");
+                i++;
+            }
+        }
+        string family = string.Join(" ", tokens.Skip(i));
+        Add("font-style", style);
+        Add("font-weight", weight);
+        Add("font-size", size);
+        Add("line-height", lineHeight);
+        if (family.Length > 0) Add("font-family", family);
+    }
+}
