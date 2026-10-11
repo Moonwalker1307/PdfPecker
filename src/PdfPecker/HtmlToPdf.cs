@@ -142,8 +142,11 @@ public static class HtmlToPdf
             Security = options.Security,
             Conformance = options.Conformance,
         };
-        return writer.Write(engine.Ops, height, engine.Anchors, background, title, options.Author, options.Subject,
+        var pdf = writer.Write(engine.Ops, height, engine.Anchors, background, title, options.Author, options.Subject,
             options.FooterText, options.HeaderText, pageBands, engine.Headings);
+        if (options.Signature != null)
+            pdf = PdfSigner.Sign(pdf, options.Signature, options.Security?.OwnerPassword ?? options.Security?.UserPassword);
+        return pdf;
     }
 
     private static Func<string, byte[]?> FetchFont(ImageLoader images) => url =>

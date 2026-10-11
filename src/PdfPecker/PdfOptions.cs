@@ -143,4 +143,10 @@ public sealed class PdfOptions
 
     /// <summary>Produce an archival PDF/A file. Default: <see cref="PdfConformance.None"/>. Cannot be combined with <see cref="Security"/>.</summary>
     public PdfConformance Conformance { get; set; }
+
+    /// <summary>
+    /// Digitally sign the PDF with a certificate. Default: null, unsigned. Works together with <see cref="Security"/>
+    /// and <see cref="Conformance"/>.
+    /// </summary>
+    public PdfSignatureOptions? Signature { get; set; }
 }
