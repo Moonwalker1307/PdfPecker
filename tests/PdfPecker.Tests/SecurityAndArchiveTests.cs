@@ -56,12 +56,14 @@ public class SecurityAndArchiveTests
     public void Watermark_text_fits_the_page_diagonal_by_default()
     {
         var pdf = PdfTestHelpers.ConvertUncompressed("<p>x</p>", new PdfOptions { Watermark = new PdfWatermark { Text = "DRAFT" } });
-        var m = Regex.Match(PdfTestHelpers.Latin1(pdf), @"BT /Fw ([\d.]+) Tf\n([-\d.]+) ([-\d.]+) ");
+        var text = PdfTestHelpers.Latin1(pdf);
+        var m = Regex.Match(text, @"q /Gw gs\n([-\d.]+) ([-\d.]+) [-\d.]+ [-\d.]+ [-\d.]+ [-\d.]+ cm\nBT\n");
         Assert.True(m.Success);
-        float size = float.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        var sizeMatch = Regex.Match(text, @"/F2 ([\d.]+) Tf");
+        float size = float.Parse(sizeMatch.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
         Assert.InRange(size, 100, 250);
-        double angle = Math.Atan2(double.Parse(m.Groups[3].Value, System.Globalization.CultureInfo.InvariantCulture),
-            double.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture)) * 180 / Math.PI;
+        double angle = Math.Atan2(double.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture),
+            double.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture)) * 180 / Math.PI;
         Assert.InRange(angle, 54, 55); // A4 diagonal
     }
 
@@ -236,6 +238,34 @@ public class SecurityAndArchiveTests
         var pdf = HtmlToPdf.Convert(html, new PdfOptions { Conformance = PdfConformance.PdfA2b });
         Assert.DoesNotContain("/DeviceCMYK", PdfTestHelpers.Latin1(pdf));
         Assert.Equal(1, PdfRenderer.Open(pdf).PageCount);
+    }
+
+    [Fact]
+    public void PdfA_watermark_and_footer_use_the_documents_embedded_font()
+    {
+        var options = new PdfOptions
+        {
+            Conformance = PdfConformance.PdfA2b,
+            FooterText = "Page {page} of {pages}",
+            Watermark = new PdfWatermark { Text = "DRAFT" },
+        };
+        options.Fonts.Add(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "WorkSans-Regular.ttf")));
+        options.Fonts.Add(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "WorkSans-Bold.ttf")));
+        options.Compress = false;
+        var pdf = HtmlToPdf.Convert("<body style=\"font-family:'Work Sans'\"><p>Payslip</p></body>", options);
+        PdfTestHelpers.AssertStructurallyValid(pdf);
+        var text = PdfTestHelpers.Latin1(pdf);
+        Assert.DoesNotContain("/Subtype /Type1", text); // no standard (non-embedded) fonts
+        Assert.Matches(@"/Subtype /Form .*/Font << /E1", text);
+        Assert.Equal(1, PdfRenderer.Open(pdf).PageCount);
+    }
+
+    [Fact]
+    public void Watermark_font_family_picks_a_standard_font()
+    {
+        var pdf = PdfTestHelpers.ConvertUncompressed("<p>x</p>",
+            new PdfOptions { Watermark = new PdfWatermark { Text = "DRAFT", FontFamily = "'Times New Roman', serif" } });
+        Assert.Contains("/BaseFont /Times-Bold", PdfTestHelpers.Latin1(pdf));
     }
 
     [Fact]

@@ -18,6 +18,12 @@ public sealed class PdfWatermark
     /// <summary>Font size in points. Default 0: as large as fits across the page at the chosen angle.</summary>
     public float FontSize { get; set; }
 
+    /// <summary>
+    /// CSS font-family list for the text, e.g. "'Open Sans', sans-serif". Registered and @font-face fonts are embedded.
+    /// Default: the document body's font family when it names an embedded font, otherwise Helvetica.
+    /// </summary>
+    public string? FontFamily { get; set; }
+
     /// <summary>Use the bold font. Default: true.</summary>
     public bool Bold { get; set; } = true;
 

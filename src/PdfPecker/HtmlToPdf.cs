@@ -136,11 +136,25 @@ public static class HtmlToPdf
             if (t != null) title = System.Text.RegularExpressions.Regex.Replace(t.InnerText(), @"\s+", " ").Trim();
         }
 
+        // The watermark and the header/footer text use the body's font family when it names an embedded font, else Helvetica.
+        TextFont? marginFont = null, watermarkFont = null;
+        if (fonts != null)
+        {
+            var bodyFamily = (body?.Style ?? root).FontFamilyName;
+            if (options.FooterText != null || options.HeaderText != null)
+                marginFont = fonts.Resolve(bodyFamily, FontFamily.Helvetica, 400, false);
+            if (options.Watermark is { Text.Length: > 0 } w)
+                watermarkFont = fonts.Resolve(w.FontFamily ?? bodyFamily, FontFamily.Helvetica, w.Bold ? 700 : 400, false);
+        }
+        else if (options.Watermark is { FontFamily: { } family } w && FontResolver.FirstStandardFamily(family) is FontFamily sf)
+            watermarkFont = StandardFont.Get(sf, w.Bold, false);
         var writer = new PdfDocumentWriter(page, options.Compress, options.CompressionLevel)
         {
             Watermark = options.Watermark,
             Security = options.Security,
             Conformance = options.Conformance,
+            WatermarkFont = watermarkFont,
+            MarginFont = marginFont,
         };
         return writer.Write(engine.Ops, height, engine.Anchors, background, title, options.Author, options.Subject,
             options.FooterText, options.HeaderText, pageBands, engine.Headings);
