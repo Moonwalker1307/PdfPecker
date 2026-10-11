@@ -109,6 +109,29 @@ public sealed class PdfOptions
     /// <example><code>options.Fonts.AddFile("fonts/OpenSans-Regular.ttf").AddFile("fonts/OpenSans-Bold.ttf");</code></example>
     public FontCollection Fonts { get; set; } = new();
 
+    /// <summary>
+    /// Look up font families that neither <see cref="Fonts"/> nor the document's <c>@font-face</c> rules provide in the
+    /// fonts installed on this machine (C:\Windows\Fonts, /Library/Fonts, /usr/share/fonts and the user's own font
+    /// folders), and embed them like registered fonts. CSS <c>local()</c> sources can then name installed fonts too.
+    /// Default: false, so output does not depend on the machine.
+    /// </summary>
+    /// <remarks>
+    /// The folders are scanned once per process, the first time a document asks for a family that is not registered,
+    /// which can take a moment on a machine with many fonts. Names that mean a standard PDF font (Arial, Helvetica,
+    /// Times New Roman, Courier New and the generic families) keep using it, and installed fonts are not searched for
+    /// characters the listed fonts lack. Documents can only choose installed fonts by name; no other files are read.
+    /// </remarks>
+    public bool UseSystemFonts { get; set; }
+
+    /// <summary>
+    /// Called with each font family that a document asks for in <c>font-family</c> but that no font provides, so its
+    /// text is drawn in a later family of the list or a standard font instead. Each family is reported once per
+    /// conversion; families listed after one that was found, and generic families such as <c>sans-serif</c>, are not
+    /// reported. Use it to log the substitution, or throw from it to fail the conversion. Default: null.
+    /// </summary>
+    /// <example><code>options.MissingFont = family => logger.LogWarning("Font {Family} is not registered", family);</code></example>
+    public Action<string>? MissingFont { get; set; }
+
     /// <summary>Extra CSS applied after the document's own styles.</summary>
     public string? UserStyleSheet { get; set; }
 
@@ -134,8 +157,10 @@ public sealed class PdfOptions
     /// <summary>Document title. Defaults to the HTML &lt;title&gt;.</summary>
     public string? Title { get; set; }
 
+    /// <summary>The document's author, shown in the PDF viewer's document properties. Default: none.</summary>
     public string? Author { get; set; }
 
+    /// <summary>The document's subject or description, shown in the PDF viewer's document properties. Default: none.</summary>
     public string? Subject { get; set; }
 
     /// <summary>Text centred in the bottom margin of every page. <c>{page}</c> and <c>{pages}</c> are replaced, e.g. "Page {page} of {pages}".</summary>

@@ -135,6 +135,16 @@ embed the bundled Liberation fonts in their place instead: they have the same wi
 the text looks the same in every viewer, and any character they cover (Latin, Greek, Cyrillic, ...) works. PDF/A
 always does this. It adds a subset of each font used to the file (typically 10-25 KB per font).
 
+A family that no font provides falls back silently, like in a browser. To notice, set `MissingFont`: it is called
+once per conversion for each family that had to be substituted, and throwing from it fails the conversion. To use the
+fonts installed on the machine for families you have not registered, set `UseSystemFonts = true` (off by default, so
+the output does not depend on the machine):
+
+```csharp
+options.MissingFont = family => logger.LogWarning("Font {Family} is not available", family);
+options.UseSystemFonts = true;   // looks in C:\Windows\Fonts, /Library/Fonts, /usr/share/fonts, ...
+```
+
 ### Watermarks, passwords and PDF/A
 
 ```csharp

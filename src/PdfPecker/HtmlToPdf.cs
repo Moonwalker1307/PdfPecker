@@ -90,9 +90,11 @@ public static class HtmlToPdf
         float viewportH = Math.Max(10, page.ContentHeight - declaredTop - declaredBottom);
 
         var images = new ImageLoader(baseDirectory, resolver, options.AllowFileAccess);
+        var missingFonts = options.MissingFont is { } onMissing ? new MissingFontReport(onMissing) : null;
         var fonts = FontResolver.Create(sheet.FontFaces, options.Fonts, FetchFont(images),
-            embedStandard: options.EmbedStandardFonts || options.Conformance != PdfConformance.None);
-        var root = new ComputedStyle { Display = Display.Block, Fonts = fonts };
+            embedStandard: options.EmbedStandardFonts || options.Conformance != PdfConformance.None,
+            systemFonts: options.UseSystemFonts, report: missingFonts);
+        var root = new ComputedStyle { Display = Display.Block, Fonts = fonts, MissingFonts = missingFonts };
         var styles = new StyleResolver(sheet, page.ContentWidth, viewportH) { Cancellation = cancellationToken };
         styles.ResolveTree(doc, root);
 
@@ -115,7 +117,7 @@ public static class HtmlToPdf
         // vh units refer to the space left for the flowing content.
         if (styles.UsedViewportHeight && Math.Abs(page.FlowHeight - viewportH) > 0.01f)
         {
-            root = new ComputedStyle { Display = Display.Block, Fonts = fonts };
+            root = new ComputedStyle { Display = Display.Block, Fonts = fonts, MissingFonts = missingFonts };
             new StyleResolver(sheet, page.ContentWidth, page.FlowHeight) { Cancellation = cancellationToken }.ResolveTree(doc, root);
         }
 
@@ -158,8 +160,11 @@ public static class HtmlToPdf
             if (options.Watermark is { Text.Length: > 0 } w)
                 watermarkFont = fonts.Resolve(w.FontFamily ?? bodyFamily, FontFamily.Helvetica, w.Bold ? 700 : 400, false);
         }
-        else if (options.Watermark is { FontFamily: { } family } w && FontResolver.FirstStandardFamily(family) is FontFamily sf)
-            watermarkFont = StandardFont.Get(sf, w.Bold, false);
+        else if (options.Watermark is { FontFamily: { } family } w)
+        {
+            missingFonts?.CheckStandardOnly(family);
+            if (FontResolver.FirstStandardFamily(family) is FontFamily sf) watermarkFont = StandardFont.Get(sf, w.Bold, false);
+        }
         var writer = new PdfDocumentWriter(page, options.Compress, options.CompressionLevel)
         {
             Watermark = options.Watermark,
