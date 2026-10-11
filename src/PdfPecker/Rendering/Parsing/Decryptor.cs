@@ -85,6 +85,32 @@ internal sealed class Decryptor
     {
         if (m == Method.None || data.Length == 0) return data;
         if (m == Method.Aes256) return AesCbc(_key, data);
+        var objKey = ObjectKey(num, gen, m);
+        return m == Method.Aes128 ? AesCbc(objKey, data) : Rc4(objKey, data);
+    }
+
+    /// <summary>Encrypts a string of a new object written in an incremental update to this file.</summary>
+    public byte[] EncryptString(byte[] data, int num, int gen) => Encrypt(data, num, gen, _stringMethod);
+
+    /// <summary>Encrypts the data of a new stream written in an incremental update to this file.</summary>
+    public byte[] EncryptStream(byte[] data, int num, int gen) => Encrypt(data, num, gen, _streamMethod);
+
+    private byte[] Encrypt(byte[] data, int num, int gen, Method m)
+    {
+        if (m == Method.None) return data;
+        if (m == Method.Rc4) return Rc4(ObjectKey(num, gen, m), data);
+        using var aes = Aes.Create();
+        aes.Key = m == Method.Aes256 ? _key : ObjectKey(num, gen, m);
+        var iv = RandomNumberGenerator.GetBytes(16);
+        var cipher = aes.EncryptCbc(data, iv, PaddingMode.PKCS7);
+        var result = new byte[16 + cipher.Length];
+        iv.CopyTo(result, 0);
+        cipher.CopyTo(result, 16);
+        return result;
+    }
+
+    private byte[] ObjectKey(int num, int gen, Method m)
+    {
         var input = new byte[_key.Length + 5 + (m == Method.Aes128 ? 4 : 0)];
         _key.CopyTo(input, 0);
         int k = _key.Length;
@@ -95,8 +121,7 @@ internal sealed class Decryptor
         input[k + 4] = (byte)(gen >> 8);
         if (m == Method.Aes128) "sAlT"u8.CopyTo(input.AsSpan(k + 5));
         var hash = MD5.HashData(input);
-        var objKey = hash.AsSpan(0, Math.Min(_key.Length + 5, 16)).ToArray();
-        return m == Method.Aes128 ? AesCbc(objKey, data) : Rc4(objKey, data);
+        return hash.AsSpan(0, Math.Min(_key.Length + 5, 16)).ToArray();
     }
 
     // ------------------------------------------------------------------ revisions 2-4

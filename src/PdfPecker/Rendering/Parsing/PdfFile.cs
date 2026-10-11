@@ -27,6 +27,15 @@ internal sealed class PdfFile
 
     public PdfDict Trailer { get; private set; } = new();
 
+    /// <summary>The security handler of an encrypted file, or null.</summary>
+    public Decryptor? Decryptor => _decryptor;
+
+    /// <summary>The offset of the newest cross-reference section, or -1.</summary>
+    public long LastXrefOffset => FindStartXref();
+
+    /// <summary>The highest object number in the cross-reference table.</summary>
+    public int MaxObjectNumber => _xref.Count == 0 ? 0 : _xref.Keys.Max();
+
     private PdfFile(byte[] data)
     {
         Data = data;
