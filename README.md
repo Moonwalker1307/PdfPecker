@@ -84,14 +84,17 @@ var options = new PdfOptions
     Title = "Invoice 42", Author = "Accounts",        // document properties (Title defaults to <title>)
     Bookmarks = true,                                 // PDF bookmarks from h1-h6 (default)
     Compress = true,                                  // Flate-compress page content (default)
-    AllowFileAccess = false,                          // block local file reads when converting untrusted HTML
+    AllowFileAccess = false,                          // true: also read files outside BaseDirectory (trusted HTML only)
     MaxPages = 1000,                                  // refuse longer documents with PdfLimitException (default 100,000)
 };
 byte[] pdf = HtmlToPdf.Convert(html, options);
 ```
 
-For HTML from untrusted users, also set `AllowFileAccess = false` and a low `MaxPages`, and pass a cancellation token
-with a timeout (`HtmlToPdf.Convert(html, options, token)`): cancelling stops the conversion where it is.
+Local images and stylesheets are read only from inside `BaseDirectory` (the input file's folder for `ConvertFile`):
+absolute paths, `file:` URLs, `..` and symbolic links that lead outside it are ignored unless `AllowFileAccess = true`,
+and converting a string without a `BaseDirectory` reads no files at all. For HTML from untrusted users, keep it that
+way, set a low `MaxPages`, and pass a cancellation token with a timeout (`HtmlToPdf.Convert(html, options, token)`):
+cancelling stops the conversion where it is.
 
 A CSS `@page { size: A4 landscape; margin: 15mm }` rule overrides the page size and margins unless
 `IgnoreCssPageRules` is set. PdfPecker never makes network requests on its own: `http(s)` images and stylesheets are only
@@ -209,7 +212,9 @@ image.SavePng("page3.png");
 `ImageOptions` sets `Dpi` (default 150) or a target `Width`/`Height` in pixels, `BackgroundColor` or `Transparent`,
 `RenderAnnotations`, `Password`, `MaxDegreeOfParallelism` and `PngCompression`. A `PdfRenderer` is thread-safe and
 shares decoded fonts and images between pages. Encrypted files open with the user or owner password
-(`PdfPasswordException` otherwise); unreadable files throw `InvalidDataException`.
+(`PdfPasswordException` otherwise); unreadable files throw `InvalidDataException`, as does a page that needs more than
+20 million drawing operations (nested forms can multiply a few bytes into billions). Pass a cancellation token to
+bound the time a page may take.
 
 What the renderer supports:
 
@@ -235,7 +240,7 @@ download the PDF. Markdown can also be converted to HTML.
 
 ```
 dotnet run --project web/PdfPecker.Web -c Release        # then open the URL it prints
-docker build -f web/PdfPecker.Web/Dockerfile -t pdfpecker-web . && docker run -p 8080:8080 pdfpecker-web
+docker build -f web/PdfPecker.Web/Dockerfile -t pdfpecker-web . && docker run -p 8080:8080 --memory 2g pdfpecker-web
 ```
 
 It also exposes the converter as an HTTP API:
@@ -273,9 +278,13 @@ curl -X POST http://localhost:8080/api/convert -F "file=@README.md" -F output=ht
 curl -X POST http://localhost:8080/api/convert -H "Content-Type: application/json" -d '{"markdown":"# Hi","output":"html"}'
 ```
 
-The site never reads files from the server (`AllowFileAccess = false`), limits requests to 5 MB, 15 seconds,
-1,000 pages and 120 conversions per minute per IP, runs a few conversions at a time (answering 503 when busy), and
-stores nothing.
+The site never reads files from the server, limits requests to 5 MB, 15 seconds, 1,000 pages and 120 conversions per
+minute per IP address (per /64 network for IPv6), runs a few conversions at a time (answering 503 when busy or low on
+memory), and stores nothing. Give the container a memory limit (`--memory 2g`): the number of simultaneous conversions
+follows it, and a document that would need more is refused instead of affecting the host. Behind a reverse proxy or
+CDN, set `TrustedProxies` to the proxy's addresses or networks (for example `-e TrustedProxies=10.0.0.0/8`) so the
+rate limit applies to each visitor rather than to the proxy. The page sends a strict Content-Security-Policy (no inline
+script) along with the usual security headers.
 
 ## What is supported
 

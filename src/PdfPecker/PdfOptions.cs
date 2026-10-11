@@ -92,11 +92,13 @@ public sealed class PdfOptions
     public Func<string, byte[]?>? ResourceResolver { get; set; }
 
     /// <summary>
-    /// Allow images and stylesheets to be read from the local file system. Default: true. Set it to false when converting
-    /// untrusted HTML (for example in a web service), so a document cannot pull files from the server into its output.
-    /// <c>data:</c> URIs and <see cref="ResourceResolver"/> keep working.
+    /// Allow images and stylesheets to be read from anywhere on the local file system: absolute paths, <c>file:</c> URLs
+    /// and relative paths that leave <see cref="BaseDirectory"/>. Default: false, so a document reads only files inside its
+    /// base directory (the input file's folder for <c>ConvertFile</c>), and none when there is no base directory.
+    /// Turn it on only for HTML you trust: otherwise a document can pull any file the process can read into its output.
+    /// <c>data:</c> URIs and <see cref="ResourceResolver"/> always work.
     /// </summary>
-    public bool AllowFileAccess { get; set; } = true;
+    public bool AllowFileAccess { get; set; }
 
     /// <summary>
     /// TrueType/OpenType fonts that CSS <c>font-family</c> can use, in addition to the document's own <c>@font-face</c>

@@ -174,11 +174,19 @@ public sealed class PdfRenderer
     {
         options ??= new ImageOptions();
         var result = new byte[PageCount][];
-        Parallel.For(0, PageCount, new ParallelOptions
+        try
         {
-            MaxDegreeOfParallelism = Math.Max(1, options.MaxDegreeOfParallelism),
-            CancellationToken = cancellationToken,
-        }, i => result[i] = RenderPageToPng(i, options, cancellationToken));
+            Parallel.For(0, PageCount, new ParallelOptions
+            {
+                MaxDegreeOfParallelism = Math.Max(1, options.MaxDegreeOfParallelism),
+                CancellationToken = cancellationToken,
+            }, i => result[i] = RenderPageToPng(i, options, cancellationToken));
+        }
+        catch (AggregateException ex) when (ex.InnerExceptions.Count > 0)
+        {
+            // Report a damaged page the same way RenderPage does, not wrapped.
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(ex.InnerExceptions[0]);
+        }
         return result;
     }
 

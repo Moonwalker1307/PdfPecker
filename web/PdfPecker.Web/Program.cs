@@ -9,8 +9,10 @@ const long MaxHtmlBytes = 5 * 1024 * 1024;
 const int MaxPages = 1000;
 var conversionTimeout = TimeSpan.FromSeconds(15);
 // Conversions are CPU and memory heavy: run a few at a time and turn the rest away quickly, so a burst of hostile
-// documents cannot exhaust the server.
-var conversions = new SemaphoreSlim(Math.Max(2, Environment.ProcessorCount));
+// documents cannot exhaust the server. A large document can need about 512 MB while it is laid out, so the memory the
+// runtime may use (the container's memory limit, when one is set) caps the count as well as the CPU count does.
+long memoryLimit = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
+var conversions = new SemaphoreSlim((int)Math.Clamp(memoryLimit / (512L << 20), 1, Math.Max(2, Environment.ProcessorCount)));
 var queueTimeout = TimeSpan.FromSeconds(10);
 
 var builder = WebApplication.CreateSlimBuilder(args);
@@ -26,18 +28,45 @@ builder.Services.AddRateLimiter(o =>
 {
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     o.AddPolicy("convert", ctx => RateLimitPartition.GetFixedWindowLimiter(
-        ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        ClientKey(ctx.Connection.RemoteIpAddress),
         _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1) }));
 });
 
+// Behind a reverse proxy or CDN every request comes from the proxy's address, so the rate limit would be shared by
+// everyone. The TrustedProxies setting (or environment variable) lists the proxies' addresses or networks, e.g.
+// "10.0.0.0/8,172.16.0.0/12"; X-Forwarded-For is believed only from those. Empty: the connection address is used.
+var trustedProxies = (builder.Configuration["TrustedProxies"] ?? "")
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+if (trustedProxies.Length > 0)
+{
+    builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(o =>
+    {
+        o.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
+        o.KnownIPNetworks.Clear();
+        o.KnownProxies.Clear();
+        foreach (var p in trustedProxies)
+            o.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(p.Contains('/') ? p : p + (p.Contains(':') ? "/128" : "/32")));
+    });
+}
+
+// The page loads its script and stylesheet from this site; previews are blob: frames. Inline styles stay allowed for
+// the Markdown-to-HTML preview, which inherits this policy; inline script does not.
+const string SiteCsp = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+    + "connect-src 'self'; frame-src blob:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+// API responses are documents, never pages that load anything.
+const string ApiCsp = "default-src 'none'; frame-ancestors 'none'";
+
 var app = builder.Build();
+if (trustedProxies.Length > 0) app.UseForwardedHeaders();
 app.Use(async (context, next) =>
 {
     var headers = context.Response.Headers;
     headers["X-Content-Type-Options"] = "nosniff";
     headers["X-Frame-Options"] = "DENY";
     headers["Referrer-Policy"] = "no-referrer";
-    headers["Content-Security-Policy"] = "frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+    headers["Content-Security-Policy"] = context.Request.Path.StartsWithSegments("/api") ? ApiCsp : SiteCsp;
+    headers["Cross-Origin-Opener-Policy"] = "same-origin";
+    headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
     try
     {
         await next(context);
@@ -148,7 +177,7 @@ app.MapPost("/api/convert", async (HttpRequest request, CancellationToken ct) =>
         return Results.Problem("HTML output is for Markdown input; send Markdown or ask for a PDF.", statusCode: StatusCodes.Status400BadRequest);
 
     var options = BuildOptions(req);
-    if (!await conversions.WaitAsync(queueTimeout, ct))
+    if (!await TryStartConversion(conversions, queueTimeout, ct))
         return Results.Problem("The server is busy; try again shortly.", statusCode: StatusCodes.Status503ServiceUnavailable);
     var sw = Stopwatch.StartNew();
     byte[] result;
@@ -171,6 +200,11 @@ app.MapPost("/api/convert", async (HttpRequest request, CancellationToken ct) =>
     catch (PdfLimitException ex)
     {
         return Results.Problem(ex.Message, statusCode: StatusCodes.Status422UnprocessableEntity);
+    }
+    catch (OutOfMemoryException)
+    {
+        // Past the container's memory limit the runtime fails the allocation, not the process: refuse this document.
+        return Results.Problem("The document needs more memory than the server can give it.", statusCode: StatusCodes.Status422UnprocessableEntity);
     }
     catch (ArgumentException ex)
     {
@@ -228,7 +262,7 @@ app.MapPost("/api/pdf-to-image", async (HttpRequest request, CancellationToken c
         MaxDimension = 6000,
         MaxDegreeOfParallelism = 2,
     };
-    if (!await conversions.WaitAsync(queueTimeout, ct))
+    if (!await TryStartConversion(conversions, queueTimeout, ct))
         return Results.Problem("The server is busy; try again shortly.", statusCode: StatusCodes.Status503ServiceUnavailable);
     using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
     timeout.CancelAfter(TimeSpan.FromSeconds(30));
@@ -267,6 +301,10 @@ app.MapPost("/api/pdf-to-image", async (HttpRequest request, CancellationToken c
     {
         return Results.Problem(ex.Message, statusCode: StatusCodes.Status422UnprocessableEntity);
     }
+    catch (OutOfMemoryException)
+    {
+        return Results.Problem("The document needs more memory than the server can give it.", statusCode: StatusCodes.Status422UnprocessableEntity);
+    }
     catch (OperationCanceledException) when (!ct.IsCancellationRequested)
     {
         return Results.Problem("The document took too long to render.", statusCode: StatusCodes.Status422UnprocessableEntity);
@@ -303,6 +341,27 @@ static PdfOptions BuildOptions(ConvertRequest req)
         AllowFileAccess = false,
         MaxPages = MaxPages,
     };
+}
+
+// One rate-limit bucket per IPv4 address or IPv6 /64 network (a single client usually owns a whole /64).
+static string ClientKey(System.Net.IPAddress? ip)
+{
+    if (ip == null) return "unknown";
+    if (ip.IsIPv4MappedToIPv6) ip = ip.MapToIPv4();
+    if (ip.AddressFamily != System.Net.Sockets.AddressFamily.InterNetworkV6) return ip.ToString();
+    var bytes = ip.GetAddressBytes();
+    Array.Clear(bytes, 8, 8);
+    return new System.Net.IPAddress(bytes) + "/64";
+}
+
+// Starts a conversion if a slot is free within the queue time and memory is not nearly used up.
+static async Task<bool> TryStartConversion(SemaphoreSlim conversions, TimeSpan queueTimeout, CancellationToken ct)
+{
+    if (!await conversions.WaitAsync(queueTimeout, ct)) return false;
+    var gc = GC.GetGCMemoryInfo();
+    if (gc.MemoryLoadBytes < gc.HighMemoryLoadThresholdBytes) return true;
+    conversions.Release();
+    return false;
 }
 
 static string SafeFileName(string? name, string extension = ".pdf")

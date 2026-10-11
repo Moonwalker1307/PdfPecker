@@ -239,7 +239,53 @@ public class HostileInputTests
         Assert.Equal(0, renderer.PageCount);
     }
 
+    [Fact]
+    public void Nested_form_xobjects_cannot_multiply_drawing_work()
+    {
+        // Twelve forms, each drawing the previous one ten times: 10^11 rectangles from under 2 KB.
+        var objects = new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /XObject << /F11 16 0 R >> >> >>",
+            Stream("<<", "/F11 Do"),
+        };
+        for (int k = 0; k < 12; k++)
+        {
+            var body = k == 0 ? "0 0 1 1 re f" : Repeat($"/F{k - 1} Do ", 10);
+            var res = k == 0 ? "<< >>" : $"<< /XObject << /F{k - 1} {4 + k} 0 R >> >>";
+            objects.Add(Stream($"<< /Type /XObject /Subtype /Form /BBox [0 0 600 800] /Resources {res}", body));
+        }
+        var renderer = PdfRenderer.Open(SimplePdf(objects));
+        var ex = Bounded(() => Record.Exception(() => renderer.RenderPage(0, new ImageOptions { Dpi = 36 })));
+        Assert.IsType<InvalidDataException>(ex);
+        Assert.Contains("too complex", ex.Message);
+
+        // The same nesting with fewer repeats renders normally.
+        objects[3] = Stream("<<", "/F3 Do");
+        objects[2] = objects[2].Replace("/F11 16", "/F3 8");
+        Assert.True(PdfRenderer.Open(SimplePdf(objects)).RenderPage(0, new ImageOptions { Dpi = 36 }).Width > 0);
+
+        static string Stream(string dict, string data) => $"{dict} /Length {data.Length} >>\nstream\n{data}\nendstream";
+    }
+
     // ------------------------------------------------------------------ helpers
+
+    private static byte[] SimplePdf(List<string> objects)
+    {
+        var sb = new StringBuilder("%PDF-1.7\n");
+        var offsets = new List<int>();
+        for (int i = 0; i < objects.Count; i++)
+        {
+            offsets.Add(sb.Length);
+            sb.Append(i + 1).Append(" 0 obj\n").Append(objects[i]).Append("\nendobj\n");
+        }
+        int xref = sb.Length;
+        sb.Append("xref\n0 ").Append(objects.Count + 1).Append("\n0000000000 65535 f \n");
+        foreach (var o in offsets) sb.Append(o.ToString("D10")).Append(" 00000 n \n");
+        sb.Append("trailer << /Size ").Append(objects.Count + 1).Append(" /Root 1 0 R >>\nstartxref\n").Append(xref).Append("\n%%EOF");
+        return Encoding.Latin1.GetBytes(sb.ToString());
+    }
 
     private static byte[] Png(int width, int height, byte colorType, byte[] raw)
     {
