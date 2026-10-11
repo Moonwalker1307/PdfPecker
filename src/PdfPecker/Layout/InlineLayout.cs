@@ -878,10 +878,10 @@ internal sealed partial class LayoutEngine
         float size = s.FontSize;
         float thickness = Math.Max(size * 0.055f, 0.5f);
         if ((s.TextDecoration & TextDecoration.Underline) != 0)
-            _ops.Add(new RectOp(x, baseline + size * 0.1f, w, thickness, s.Color));
+            _ops.Add(new RectOp(x, baseline + size * 0.1f, w, thickness, s.Color) { IsDecoration = true });
         if ((s.TextDecoration & TextDecoration.LineThrough) != 0)
-            _ops.Add(new RectOp(x, baseline - size * 0.3f, w, thickness, s.Color));
+            _ops.Add(new RectOp(x, baseline - size * 0.3f, w, thickness, s.Color) { IsDecoration = true });
         if ((s.TextDecoration & TextDecoration.Overline) != 0)
-            _ops.Add(new RectOp(x, baseline - s.Font.Ascent * size, w, thickness, s.Color));
+            _ops.Add(new RectOp(x, baseline - s.Font.Ascent * size, w, thickness, s.Color) { IsDecoration = true });
     }
 }

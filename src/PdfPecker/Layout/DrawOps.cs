@@ -19,6 +19,7 @@ internal sealed class RectOp : DrawOp
 {
     public float X, Y, W, H;
     public uint Color;
+    public bool IsDecoration; // text underline, overline or line-through: Chrome paints these at fractional x
     public RectOp(float x, float y, float w, float h, uint color) { X = x; Y = y; W = w; H = h; Color = color; }
     public override void Offset(float dx, float dy) { X += dx; Y += dy; }
 }

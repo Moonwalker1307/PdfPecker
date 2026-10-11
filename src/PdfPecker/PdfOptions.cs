@@ -76,6 +76,17 @@ public sealed class PdfOptions
     /// <summary>Page margins in points. Default: 36pt (half an inch) on every side.</summary>
     public PageMargins Margins { get; set; } = new(36);
 
+    /// <summary>
+    /// Scales the page content, like the Scale setting in Chrome's print dialog: at 0.5 the page is laid out twice as
+    /// wide and tall and drawn at half size. The margins keep their size on paper; header and footer text and
+    /// watermarks are scaled with the content. Between 0.1 and 2. Default: 1.
+    /// </summary>
+    /// <remarks>
+    /// IronPDF draws A4 pages at about 0.99916 of Chrome's own size. Set this to 0.99916 to put every box edge where
+    /// IronPDF puts it.
+    /// </remarks>
+    public float Scale { get; set; } = 1f;
+
     /// <summary>Ignore <c>@page</c> size and margin rules in the document's CSS.</summary>
     public bool IgnoreCssPageRules { get; set; }
 
