@@ -524,7 +524,36 @@ internal sealed class StyleResolver
                 else if (CssColor.TryParse(v, s.Color, out var bg)) s.BackgroundColor = CssColor.FlattenOnWhite(bg);
                 break;
             case "background-image":
-                s.BackgroundGradients = inherit ? parent.BackgroundGradients : ParseBackgroundImage(v, s);
+                s.BackgroundImages = inherit ? parent.BackgroundImages : ParseBackgroundImage(v, s);
+                break;
+            case "background-repeat":
+                s.BackgroundRepeats = inherit ? parent.BackgroundRepeats : BackgroundList(v, CssBackground.Repeat) ?? s.BackgroundRepeats;
+                break;
+            case "background-size":
+                s.BackgroundSizes = inherit ? parent.BackgroundSizes
+                    : BackgroundList(v, l => CssBackground.Size(l, em, _rootFontSize, _vw, _vh)) ?? s.BackgroundSizes;
+                break;
+            case "background-position":
+                if (inherit) { s.BackgroundPositionsX = parent.BackgroundPositionsX; s.BackgroundPositionsY = parent.BackgroundPositionsY; break; }
+                if (BackgroundList(v, l => CssBackground.Position(l, em, _rootFontSize, _vw, _vh)) is { } positions)
+                {
+                    s.BackgroundPositionsX = positions.Select(p => p.X).ToArray();
+                    s.BackgroundPositionsY = positions.Select(p => p.Y).ToArray();
+                }
+                break;
+            case "background-position-x":
+                s.BackgroundPositionsX = inherit ? parent.BackgroundPositionsX
+                    : BackgroundList(v, l => CssBackground.Axis(l, true, em, _rootFontSize, _vw, _vh)) ?? s.BackgroundPositionsX;
+                break;
+            case "background-position-y":
+                s.BackgroundPositionsY = inherit ? parent.BackgroundPositionsY
+                    : BackgroundList(v, l => CssBackground.Axis(l, false, em, _rootFontSize, _vw, _vh)) ?? s.BackgroundPositionsY;
+                break;
+            case "background-origin":
+                s.BackgroundOrigins = inherit ? parent.BackgroundOrigins : BackgroundList(v, l => CssBackground.Box(l.Trim().ToLowerInvariant())) ?? s.BackgroundOrigins;
+                break;
+            case "background-clip":
+                s.BackgroundClips = inherit ? parent.BackgroundClips : BackgroundList(v, l => CssBackground.Box(l.Trim().ToLowerInvariant())) ?? s.BackgroundClips;
                 break;
             case "font-family":
                 if (inherit) { s.FontFamily = parent.FontFamily; s.FontFamilyName = parent.FontFamilyName; break; }
@@ -889,13 +918,34 @@ internal sealed class StyleResolver
         };
     }
 
-    private CssGradient[]? ParseBackgroundImage(string v, ComputedStyle s)
+    private BackgroundImage?[]? ParseBackgroundImage(string v, ComputedStyle s)
     {
-        if (v.IndexOf("gradient(", StringComparison.OrdinalIgnoreCase) < 0) return null;
-        var layers = new List<CssGradient>();
-        foreach (var layer in CssParser.SplitTopLevel(v, ','))
-            if (CssGradient.Parse(layer, s.Color, s.FontSize, _rootFontSize, _vw, _vh) is { } g) layers.Add(g);
-        return layers.Count > 0 ? layers.ToArray() : null;
+        var layers = CssParser.SplitTopLevel(v, ',');
+        var result = new BackgroundImage?[layers.Count];
+        bool any = false;
+        for (int i = 0; i < layers.Count; i++)
+        {
+            var layer = layers[i].Trim();
+            if (CssBackground.Url(layer) is { } url) result[i] = new BackgroundImage { Url = url };
+            else if (layer.IndexOf("gradient(", StringComparison.OrdinalIgnoreCase) >= 0
+                     && CssGradient.Parse(layer, s.Color, s.FontSize, _rootFontSize, _vw, _vh) is { } g) result[i] = new BackgroundImage { Gradient = g };
+            any |= result[i] != null;
+        }
+        return any ? result : null;
+    }
+
+    /// <summary>A comma-separated background longhand, one entry per layer; null when any layer is invalid.</summary>
+    private static T[]? BackgroundList<T>(string v, Func<string, T?> parse) where T : struct
+    {
+        var layers = CssParser.SplitTopLevel(v, ',');
+        if (layers.Count == 0) return null;
+        var result = new T[layers.Count];
+        for (int i = 0; i < layers.Count; i++)
+        {
+            if (parse(layers[i]) is not { } item) return null;
+            result[i] = item;
+        }
+        return result;
     }
 
     /// <summary>Parses grid-template-areas: one string per row, "." for unnamed cells. Invalid when an area is not a rectangle.</summary>

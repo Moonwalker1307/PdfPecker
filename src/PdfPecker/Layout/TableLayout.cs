@@ -322,7 +322,7 @@ internal sealed partial class LayoutEngine
 
         float tableBottom = cy + frameB;
         if (!s.Height.IsAuto && !s.Height.IsPercent && tableBottom - tableTop < s.Height.Value) tableBottom = tableTop + s.Height.Value;
-        BoxPainter.Paint(tableGroup, s, bx, tableTop, boxW, tableBottom - tableTop);
+        BoxPainter.Paint(tableGroup, s, bx, tableTop, boxW, tableBottom - tableTop, _images, availW);
         _lastBoxRight = bx + boxW;
         return tableBottom;
     }
@@ -432,7 +432,7 @@ internal sealed partial class LayoutEngine
                 h += cs.BorderTop / 2;
             }
         }
-        BoxPainter.Paint(cell.Group!, cs, x, y, w, h);
+        BoxPainter.Paint(cell.Group!, cs, x, y, w, h, _images, w);
     }
 
     // ------------------------------------------------------------------ intrinsic widths

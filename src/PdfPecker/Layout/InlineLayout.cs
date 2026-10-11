@@ -149,7 +149,7 @@ internal sealed partial class LayoutEngine
                     var ops = new List<DrawOp>();
                     var group = new GroupOp();
                     ops.Add(group);
-                    BoxPainter.Paint(group, s, 0, 0, sw + pl + pr, sh + ptop + pbot);
+                    BoxPainter.Paint(group, s, 0, 0, sw + pl + pr, sh + ptop + pbot, _images);
                     if (s.Visible && svg != null) ops.Add(new SvgOp(pl, ptop, sw, sh, svg));
                     if (ml > 0) { var it_ = Rent(ItemKind.Spacer, s); it_.Width = ml; it_.Href = href; st.Items.Add(it_); }
                     float boxH = sh + ptop + pbot;

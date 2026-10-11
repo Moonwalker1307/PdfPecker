@@ -93,6 +93,20 @@ internal static class PdfTestHelpers
         return Png(size, size, 2, raw.ToArray());
     }
 
+    /// <summary>A PNG of one RGBA colour.</summary>
+    public static byte[] SolidPng(int w, int h, byte r, byte g, byte b, byte a = 255)
+    {
+        var raw = new MemoryStream();
+        for (int y = 0; y < h; y++)
+        {
+            raw.WriteByte(0);
+            for (int x = 0; x < w; x++) { raw.WriteByte(r); raw.WriteByte(g); raw.WriteByte(b); raw.WriteByte(a); }
+        }
+        return Png(w, h, 6, raw.ToArray());
+    }
+
+    public static string DataUri(byte[] png) => "data:image/png;base64," + Convert.ToBase64String(png);
+
     private static byte[] Png(int w, int h, byte colorType, byte[] raw)
     {
         var ms = new MemoryStream();

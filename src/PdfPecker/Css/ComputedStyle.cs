@@ -153,7 +153,12 @@ internal sealed class ComputedStyle
     // ---- Not inherited ----
     public Display Display = Display.Inline;
     public uint BackgroundColor;
-    public CssGradient[]? BackgroundGradients; // background-image layers, topmost first
+    // Background layers, topmost first. Each list repeats when it is shorter than BackgroundImages; null is the initial value.
+    public BackgroundImage?[]? BackgroundImages; // null entries are "none" layers
+    public (BackgroundRepeat X, BackgroundRepeat Y)[]? BackgroundRepeats;
+    public BackgroundOffset[]? BackgroundPositionsX, BackgroundPositionsY;
+    public BackgroundSize[]? BackgroundSizes;
+    public BackgroundBox[]? BackgroundOrigins, BackgroundClips;
     public string? SvgClipPath;                 // clip-path: url(#id), as "#id"
     public Length MarginTop = Length.Zero, MarginRight = Length.Zero, MarginBottom = Length.Zero, MarginLeft = Length.Zero;
     public Length PaddingTop = Length.Zero, PaddingRight = Length.Zero, PaddingBottom = Length.Zero, PaddingLeft = Length.Zero;
@@ -226,7 +231,11 @@ internal sealed class ComputedStyle
         var c = (ComputedStyle)MemberwiseClone();
         c.Display = Display.Inline;
         c.BackgroundColor = 0;
-        c.BackgroundGradients = null;
+        c.BackgroundImages = null;
+        c.BackgroundRepeats = null;
+        c.BackgroundPositionsX = c.BackgroundPositionsY = null;
+        c.BackgroundSizes = null;
+        c.BackgroundOrigins = c.BackgroundClips = null;
         c.SvgClipPath = null;
         c.MarginTop = c.MarginRight = c.MarginBottom = c.MarginLeft = Length.Zero;
         c.PaddingTop = c.PaddingRight = c.PaddingBottom = c.PaddingLeft = Length.Zero;
