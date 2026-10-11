@@ -281,15 +281,63 @@ public class ConversionTests
     }
 
     [Fact]
-    public void File_access_can_be_disabled()
+    public void Files_outside_the_base_directory_need_AllowFileAccess()
     {
         var fixtures = Path.Combine(AppContext.BaseDirectory, "Fixtures");
         var absolute = Path.Combine(fixtures, "rgb.jpg");
-        var html = $"<img src='rgb.jpg'><img src='{absolute}'><img src='file://{absolute}'>";
-        var allowed = ConvertUncompressed(html, new PdfOptions { BaseDirectory = fixtures });
-        var blocked = ConvertUncompressed(html, new PdfOptions { BaseDirectory = fixtures, AllowFileAccess = false });
-        Assert.Contains("/Subtype /Image", Latin1(allowed));
-        Assert.DoesNotContain("/Subtype /Image", Latin1(blocked));
+        int Images(string html, PdfOptions o) => System.Text.RegularExpressions.Regex.Matches(Latin1(ConvertUncompressed(html, o)), "/Subtype /Image").Count;
+
+        // Relative paths inside the base directory work by default; absolute paths and file: URLs do not.
+        Assert.Equal(1, Images("<img src='rgb.jpg'>", new PdfOptions { BaseDirectory = fixtures }));
+        Assert.Equal(0, Images($"<img src='{absolute}'><img src='file://{absolute}'>", new PdfOptions { BaseDirectory = fixtures }));
+        Assert.Equal(2, Images($"<img src='{absolute}'><img src='file://{absolute}'>", new PdfOptions { BaseDirectory = fixtures, AllowFileAccess = true }));
+
+        // No base directory: no files at all.
+        Assert.Equal(0, Images("<img src='rgb.jpg'>", new PdfOptions()));
+
+        // Escaping the base directory with .. needs AllowFileAccess.
+        var sub = Directory.CreateTempSubdirectory("pdfpecker-base");
+        try
+        {
+            var escape = Path.GetRelativePath(sub.FullName, absolute);
+            Assert.StartsWith("..", escape);
+            Assert.Equal(0, Images($"<img src='{escape}'><link rel=stylesheet href='../x.css'>", new PdfOptions { BaseDirectory = sub.FullName }));
+            Assert.Equal(1, Images($"<img src='{escape}'>", new PdfOptions { BaseDirectory = sub.FullName, AllowFileAccess = true }));
+
+            // A symbolic link inside the base directory that points outside it is refused too.
+            if (!OperatingSystem.IsWindows())
+            {
+                File.CreateSymbolicLink(Path.Combine(sub.FullName, "link.jpg"), absolute);
+                Directory.CreateSymbolicLink(Path.Combine(sub.FullName, "dir"), fixtures);
+                File.Copy(absolute, Path.Combine(sub.FullName, "own.jpg"));
+                Assert.Equal(1, Images("<img src='link.jpg'><img src='dir/rgb.jpg'><img src='own.jpg'>", new PdfOptions { BaseDirectory = sub.FullName }));
+            }
+        }
+        finally
+        {
+            sub.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Stylesheets_outside_the_base_directory_need_AllowFileAccess()
+    {
+        var root = Directory.CreateTempSubdirectory("pdfpecker-css");
+        try
+        {
+            var site = Directory.CreateDirectory(Path.Combine(root.FullName, "site"));
+            File.WriteAllText(Path.Combine(root.FullName, "secret.css"), "p { color: #ff0000 }");
+            File.WriteAllText(Path.Combine(site.FullName, "own.css"), "p { color: #00ff00 }");
+            string Pdf(string href, bool any) => Latin1(ConvertUncompressed($"<link rel=stylesheet href='{href}'><p>x</p>",
+                new PdfOptions { BaseDirectory = site.FullName, AllowFileAccess = any }));
+            Assert.Contains("0 1 0 rg", Pdf("own.css", false));
+            Assert.DoesNotContain("1 0 0 rg", Pdf("../secret.css", false));
+            Assert.Contains("1 0 0 rg", Pdf("../secret.css", true));
+        }
+        finally
+        {
+            root.Delete(recursive: true);
+        }
     }
 
     [Fact]

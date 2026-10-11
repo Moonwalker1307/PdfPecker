@@ -1,4 +1,8 @@
 # Build from the repository root:  docker build -f web/PdfPecker.Web/Dockerfile -t pdfpecker-web .
+# Run with a memory limit, so a hostile document cannot take memory from the rest of the host. The app sizes its
+# conversion slots to the limit and refuses documents that would exceed it:
+#   docker run -p 8080:8080 --memory 2g --pids-limit 200 --read-only pdfpecker-web
+# Behind a reverse proxy or CDN, pass its addresses so rate limits apply per visitor: -e TrustedProxies=10.0.0.0/8
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY src/PdfPecker/ src/PdfPecker/

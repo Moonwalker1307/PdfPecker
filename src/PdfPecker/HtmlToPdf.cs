@@ -64,7 +64,7 @@ public static class HtmlToPdf
 
         // Stylesheets in document order: <style> blocks and <link rel="stylesheet">.
         var sheet = new Stylesheet();
-        CollectStyles(doc, sheet, options.AllowFileAccess ? baseDirectory : null, resolver, options.AllowFileAccess);
+        CollectStyles(doc, sheet, baseDirectory, resolver, options.AllowFileAccess);
         if (!string.IsNullOrEmpty(options.UserStyleSheet)) CssParser.ParseStylesheet(options.UserStyleSheet!, sheet);
 
         var page = new PageSetup
@@ -313,14 +313,8 @@ public static class HtmlToPdf
             var bytes = resolver?.Invoke(href!);
             if (bytes != null) return System.Text.Encoding.UTF8.GetString(bytes);
             if (href!.StartsWith("http:", StringComparison.OrdinalIgnoreCase) || href.StartsWith("https:", StringComparison.OrdinalIgnoreCase)) return null;
-            if (!allowFiles) return null;
-            var path = href;
-            if (!Path.IsPathRooted(path))
-            {
-                if (baseDirectory == null) return null;
-                path = Path.Combine(baseDirectory, path);
-            }
-            return File.Exists(path) ? File.ReadAllText(path) : null;
+            var path = LocalFiles.Resolve(href, baseDirectory, allowFiles);
+            return path != null && File.Exists(path) ? File.ReadAllText(path) : null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
