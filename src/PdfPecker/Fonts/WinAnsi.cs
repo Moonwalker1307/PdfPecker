@@ -47,6 +47,10 @@ internal static class WinAnsi
         return u == 0 ? value : u;
     }
 
+    /// <summary>True when the character is in the encoding itself, not just replaced by a close substitute or '?'.</summary>
+    public static bool IsExact(char c)
+        => c >= 0x20 && c < 0x7F || c >= 0xA0 && c <= 0xFF || c >= 0x80 && Table[c] >= 0x80 && Table[c] < 0xA0 && C1[Table[c] - 0x80] == c;
+
     /// <summary>Encodes one character. Returns '?' for characters that the encoding cannot represent.</summary>
     public static byte Encode(char c) => Table[c];
 

@@ -1,4 +1,5 @@
 using PdfPecker.Css;
+using PdfPecker.Fonts;
 using PdfPecker.Html;
 using PdfPecker.Images;
 using PdfPecker.Layout;
@@ -77,10 +78,11 @@ public static class HtmlToPdf
         float declaredTop = DeclaredHeight(headerCandidate), declaredBottom = DeclaredHeight(footerCandidate);
         float viewportH = Math.Max(10, page.ContentHeight - declaredTop - declaredBottom);
 
-        var root = new ComputedStyle { Display = Display.Block };
+        var images = new ImageLoader(baseDirectory, resolver, options.AllowFileAccess);
+        var fonts = FontResolver.Create(sheet.FontFaces, options.Fonts, FetchFont(images));
+        var root = new ComputedStyle { Display = Display.Block, Fonts = fonts };
         var styles = new StyleResolver(sheet, page.ContentWidth, viewportH);
         styles.ResolveTree(doc, root);
-        var images = new ImageLoader(baseDirectory, resolver, options.AllowFileAccess);
 
         var header = FindBand(doc, "data-sticky-pdf-header");
         var footer = FindBand(doc, "data-sticky-pdf-footer");
@@ -101,7 +103,7 @@ public static class HtmlToPdf
         // vh units refer to the space left for the flowing content.
         if (styles.UsedViewportHeight && Math.Abs(page.FlowHeight - viewportH) > 0.01f)
         {
-            root = new ComputedStyle { Display = Display.Block };
+            root = new ComputedStyle { Display = Display.Block, Fonts = fonts };
             new StyleResolver(sheet, page.ContentWidth, page.FlowHeight).ResolveTree(doc, root);
         }
 
@@ -143,6 +145,18 @@ public static class HtmlToPdf
         return writer.Write(engine.Ops, height, engine.Anchors, background, title, options.Author, options.Subject,
             options.FooterText, options.HeaderText, pageBands, engine.Headings);
     }
+
+    private static Func<string, byte[]?> FetchFont(ImageLoader images) => url =>
+    {
+        try
+        {
+            return images.Fetch(url.Trim());
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException or ArgumentException or NotSupportedException)
+        {
+            return null;
+        }
+    };
 
     private static Element? FindByAttribute(Element parent, string attribute)
     {
