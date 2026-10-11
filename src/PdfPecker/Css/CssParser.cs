@@ -36,6 +36,7 @@ internal sealed class Stylesheet
 {
     public readonly List<StyleRule> Rules = new();
     public readonly List<Declaration> PageDeclarations = new(); // from @page
+    public readonly List<List<Declaration>> FontFaces = new(); // @font-face descriptors, one list per rule
     public int NextOrder;
 }
 
@@ -83,6 +84,12 @@ internal static class CssParser
                 {
                     // @page { size; margin } - pseudo pages (:first, :left) are ignored.
                     ParseDeclarations(s.Substring(brace + 1, blockEnd - brace - 1), sheet.PageDeclarations);
+                }
+                else if (atName == "font-face")
+                {
+                    var descriptors = new List<Declaration>();
+                    ParseDeclarations(s.Substring(brace + 1, blockEnd - brace - 1), descriptors);
+                    if (descriptors.Count > 0) sheet.FontFaces.Add(descriptors);
                 }
                 i = Math.Min(blockEnd + 1, end);
                 continue;

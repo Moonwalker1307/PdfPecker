@@ -93,6 +93,33 @@ A CSS `@page { size: A4 landscape; margin: 15mm }` rule overrides the page size 
 `IgnoreCssPageRules` is set. PdfPecker never makes network requests on its own: `http(s)` images and stylesheets are only
 loaded through `ResourceResolver`.
 
+### Fonts
+
+Register TrueType or OpenType fonts and use them by name in CSS. Only the glyphs a document uses are embedded, and
+text can use any Unicode character the fonts have (Greek, Cyrillic, Central European, CJK, ...):
+
+```csharp
+var options = new PdfOptions();
+options.Fonts.AddFile("fonts/OpenSans-Regular.ttf")
+             .AddFile("fonts/OpenSans-Bold.ttf");             // family, weight and style are read from the files
+options.Fonts.Add(bytes, familyName: "sans-serif");           // or override a generic family
+options.Fonts.AddDirectory(@"C:\Windows\Fonts");               // read once, loaded only when used
+byte[] pdf = HtmlToPdf.Convert("<p style=\"font-family: 'Open Sans'\">Łódź, Ελλάδα, Москва</p>", options);
+```
+
+Documents can bring their own fonts with `@font-face` (files, `data:` URIs or `ResourceResolver` URLs; `local()`
+refers to registered fonts):
+
+```css
+@font-face { font-family: Brand; src: url(fonts/brand.woff) format("woff"); font-weight: 400; }
+@font-face { font-family: Brand; src: url(fonts/brand-bold.ttf); font-weight: 700; unicode-range: U+0000-024F; }
+```
+
+A `FontCollection` can be shared between options and parallel conversions. Formats: `.ttf`, `.otf`, `.ttc`
+collections and WOFF (not WOFF2). Fonts are matched like browsers do: by family, then style, then the nearest
+weight; a missing bold or italic face is synthesized. A character that the chosen font lacks is drawn with the next
+font in the `font-family` list that has it, then the standard font, then any other registered font.
+
 ### Watermarks, passwords and PDF/A
 
 ```csharp
@@ -310,15 +337,21 @@ Inside it, `{page}` and `{total-pages}` (or `{pages}`) are replaced with the pag
 interlacing), from files, `data:` URIs or your `ResourceResolver`. Opaque PNGs are passed through without
 re-encoding. Images wider than the page are scaled down to fit.
 
-**Fonts**: the PDF standard fonts. `font-family` maps to Helvetica (sans-serif, Arial, Verdana, ...),
-Times (serif, Georgia, ...) or Courier (monospace, Consolas, ...), each in regular, bold, italic and bold italic.
+**Fonts**: registered and `@font-face` TrueType/OpenType fonts are embedded as subsets (Type0/CIDFontType2 for
+TrueType outlines, CIDFontType0 with an OpenType program for CFF outlines) with a ToUnicode map, so text can be
+searched and copied. Without them, the PDF standard fonts are used: `font-family` maps to Helvetica (sans-serif,
+Arial, Verdana, ...), Times (serif, Georgia, ...) or Courier (monospace, Consolas, ...), each in regular, bold,
+italic and bold italic.
 
 ## Limitations
 
 These are deliberate scope choices for speed and size; they are the first candidates for future work.
 
-- Text uses the standard PDF fonts, so characters are limited to the Windows-1252 set (Western European languages).
-  Other characters are replaced with `?`. Embedding TrueType fonts is not supported yet.
+- Without registered fonts, text uses the standard PDF fonts, so characters are limited to the Windows-1252 set
+  (Western European languages); other characters are replaced with `?`. PDF/A requires embedded fonts, so register
+  fonts for documents that must pass a PDF/A validator.
+- Fonts: no text shaping (ligatures, kerning, Arabic and Indic scripts), no right-to-left text, no WOFF2, and variable
+  fonts use their default instance. SVG `<text>` uses the standard fonts.
 - No JavaScript, forms, `float`, `position`, `::before`/`::after`, `url()` background images, `border-radius`,
   shadows, transforms or GIF/WebP images. SVG files in `<img>` are not drawn.
 - Inline SVG: no embedded images, masks, patterns, markers or filters; `<text>` uses only the first value of
@@ -376,8 +409,9 @@ and `Markdown/HtmlRenderer` writes the HTML, which then takes the same path as a
    styles. Rules are indexed by id, class and tag, and elements with identical inputs share one computed style.
 3. `Layout/LayoutEngine` lays out blocks, inline text (line breaking, justification), lists and tables
    (automatic column widths), paginating as it goes, and produces a flat list of draw operations.
-4. `Pdf/PdfDocumentWriter` writes PDF 1.4: content streams, standard fonts, image XObjects, link annotations,
-   the bookmark outline and the cross-reference table.
+4. `Pdf/PdfDocumentWriter` writes PDF 1.4: content streams, fonts, image XObjects, link annotations,
+   the bookmark outline and the cross-reference table. `Fonts/FontSubsetter` and `Fonts/CffSubsetter` cut embedded
+   fonts down to the glyphs used (with their composite components and the CFF subroutines they call).
 
 The renderer (`Rendering/`) works the other way round: `Parsing/PdfFile` reads the object graph, `PageRenderer`
 interprets content streams, `Fonts/` turns glyphs into outlines (cached as anti-aliased bitmaps), `Images/` decodes
