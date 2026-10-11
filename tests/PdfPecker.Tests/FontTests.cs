@@ -292,4 +292,14 @@ public class FontTests
         static string WithoutDate(byte[] pdf) => Regex.Replace(Latin1(pdf), @"/(CreationDate|ModDate) \(D:\d+Z\)|/ID \[<[0-9A-F]+><[0-9A-F]+>\]", "");
         for (int i = 2; i < results.Length; i++) Assert.Equal(WithoutDate(results[i % 2]), WithoutDate(results[i]));
     }
+
+    [Fact]
+    public void PdfANeverShowsTheNotdefGlyph()
+    {
+        const string html = "<p style='font-family: Work Sans'>A中B</p>";
+        Assert.Contains("<000100000002> Tj", AllContent(HtmlToPdf.Convert(html, WithFonts(Regular))));
+        var options = WithFonts(Regular);
+        options.Conformance = PdfConformance.PdfA2b;
+        Assert.Matches(@"\[<0001>-[\d.]+<0002>\] TJ", AllContent(HtmlToPdf.Convert(html, options)));
+    }
 }

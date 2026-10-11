@@ -969,16 +969,21 @@ internal sealed class PdfDocumentWriter
         b.Ascii(font.SyntheticItalic ? "1 0 0.2 1 " : "1 0 0 1 ").Num(x).Sp().Num(y).Ascii(" Tm ");
 
         // Word spacing (Tw) only applies to the single-byte code 32, so justified text moves spaces explicitly.
+        // PDF/A forbids showing .notdef: characters no font has become blank space of the same width.
         string text = t.Text;
-        bool adjust = t.WordSpacing != 0 && t.Size > 0;
+        bool skipNotdef = Conformance != PdfConformance.None && t.Size > 0;
+        bool adjust = (t.WordSpacing != 0 || skipNotdef) && t.Size > 0;
         float spaceAdjust = adjust ? -t.WordSpacing * 1000f / t.Size : 0;
+        float notdefAdjust = skipNotdef ? -(font.Program.Advance1000(0) + t.CharSpacing * 1000f / t.Size) : 0;
         b.Ascii(adjust ? "[<" : "<");
         for (int i = start, end = start + length; i < end; i++)
         {
             int cp = text[i];
             if (char.IsHighSurrogate(text[i]) && i + 1 < end && char.IsLowSurrogate(text[i + 1])) cp = char.ConvertToUtf32(text[i], text[++i]);
-            Hex4(b, subset.Cid(cp));
-            if (adjust && cp == ' ' && i + 1 < end) b.Ascii(">").Num(spaceAdjust).Ascii("<");
+            int cid = subset.Cid(cp);
+            if (cid == 0 && skipNotdef) b.Ascii(">").Num(notdefAdjust).Ascii("<");
+            else Hex4(b, cid);
+            if (adjust && cp == ' ' && t.WordSpacing != 0 && i + 1 < end) b.Ascii(">").Num(spaceAdjust).Ascii("<");
         }
         b.Ascii(adjust ? ">] TJ\n" : "> Tj\n");
     }
