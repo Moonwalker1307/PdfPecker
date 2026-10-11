@@ -31,6 +31,17 @@ internal sealed partial class LayoutEngine
 
     public List<DrawOp> Ops => _ops;
 
+    /// <summary>Stops the layout when cancelled.</summary>
+    public CancellationToken Cancellation { get; init; }
+
+    /// <summary>The most pages the flow may fill; checked as lines are placed, before their ops pile up.</summary>
+    public int MaxPages { get; init; } = int.MaxValue;
+
+    private void CheckPageLimit(float y)
+    {
+        if (y >= (double)MaxPages * _pageH) throw new PdfLimitException($"The document would have more than {MaxPages:N0} pages (PdfOptions.MaxPages).");
+    }
+
     private sealed class ListMarker
     {
         public string? Text;
@@ -282,6 +293,8 @@ internal sealed partial class LayoutEngine
     /// <summary>Lays out a block-level box whose top border edge is at <paramref name="y"/>. Returns its bottom border edge.</summary>
     private float LayoutBlockBox(Element e, float x, float y, float availW, bool shrinkToFit)
     {
+        Cancellation.ThrowIfCancellationRequested();
+        CheckPageLimit(y);
         var s = e.Style;
         bool table = s.Display == Display.Table;
         int opsStart = _ops.Count;
@@ -529,7 +542,7 @@ internal sealed partial class LayoutEngine
     /// <summary>Computes the used size of an inline &lt;svg&gt; in points and returns its parsed drawing.</summary>
     private SvgImage? SvgSize(Element e, float availW, out float w, out float h)
     {
-        if (!_images.Svgs.TryGetValue(e, out var svg)) _images.Svgs[e] = svg = SvgImage.Build(e);
+        if (!_images.Svgs.TryGetValue(e, out var svg)) _images.Svgs[e] = svg = SvgImage.Build(e, _images.SvgBudget);
         float iw, ih;
         if (svg.Width is { } sw && svg.Height is { } sh) { iw = sw; ih = sh; }
         else if (svg.HasViewBox && svg.ViewBoxWidth > 0 && svg.ViewBoxHeight > 0)

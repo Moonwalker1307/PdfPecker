@@ -58,6 +58,7 @@ internal sealed class StyleResolver
     private int _count;
     private readonly List<Declaration> _scratch = new();
     private readonly bool _hasCustomProperties;
+    private int _resolved;
     private readonly Dictionary<string, List<Declaration>> _inlineCache = new(StringComparer.Ordinal);
     private readonly Dictionary<(string, string), Declaration> _hintCache = new();
     private readonly Dictionary<StyleKey, ComputedStyle> _styleCache = new();
@@ -159,8 +160,12 @@ internal sealed class StyleResolver
         }
     }
 
+    /// <summary>Stops resolving when cancelled.</summary>
+    public CancellationToken Cancellation { get; init; }
+
     private void Resolve(Element e, ComputedStyle parent)
     {
+        if ((++_resolved & 255) == 0) Cancellation.ThrowIfCancellationRequested();
         _count = 0;
         Collect(UaIndex.Value, e, TierUa, TierUaImportant);
         AddHints(e);

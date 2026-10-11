@@ -60,6 +60,12 @@ internal sealed class PdfDocumentWriter
     /// <summary>Draw text in the standard fonts with the bundled, embedded Liberation fonts (always on for PDF/A).</summary>
     public bool EmbedStandardFonts { get; init; }
 
+    /// <summary>The most pages the document may have.</summary>
+    public int MaxPages { get; init; } = int.MaxValue;
+
+    /// <summary>Stops writing when cancelled.</summary>
+    public CancellationToken Cancellation { get; init; }
+
     private bool EmbedStandard => EmbedStandardFonts || Conformance != PdfConformance.None;
 
     /// <summary>The font that draws a run: standard fonts become their bundled replacements when they must be embedded.</summary>
@@ -87,7 +93,15 @@ internal sealed class PdfDocumentWriter
         Func<int, int, List<DrawOp>>? pageBands = null, IReadOnlyList<OutlineHeading>? outline = null)
     {
         float H = _page.FlowHeight;
-        int PageOf(float y) => Math.Max(0, (int)Math.Floor((y + 0.01f) / H));
+        int maxPages = Math.Max(1, MaxPages);
+        int PageOf(float y)
+        {
+            // Compare as doubles: content far down the flow (a huge height or margin) must hit the page limit, not
+            // overflow the page number.
+            double p = Math.Floor((y + 0.01) / H);
+            if (p >= maxPages || double.IsNaN(p)) throw TooManyPages(maxPages);
+            return Math.Max(0, (int)p);
+        }
 
         // 1. Distribute ops over pages.
         var pages = new List<List<Placed>>();
@@ -149,6 +163,7 @@ internal sealed class PdfDocumentWriter
         var bands = new List<Placed>[pageCount];
         for (int p = 0; p < pageCount; p++)
         {
+            Cancellation.ThrowIfCancellationRequested();
             var list = bands[p] = new List<Placed>();
             if (pageBands == null) continue;
             void Flatten(DrawOp op)
@@ -350,6 +365,7 @@ internal sealed class PdfDocumentWriter
         var annotations = new List<(int Id, Placed Link, float Origin, float PageTop)>();
         for (int p = 0; p < pageCount; p++)
         {
+            Cancellation.ThrowIfCancellationRequested();
             content.Clear();
             ResetState();
             if (CssColor.IsVisible(pageBackground))
@@ -511,6 +527,9 @@ internal sealed class PdfDocumentWriter
     }
 
     /// <summary>Nests the headings by level: a heading becomes a child of the nearest earlier heading of a higher level.</summary>
+    private static PdfLimitException TooManyPages(int max)
+        => new($"The document would have more than {max:N0} pages (PdfOptions.MaxPages).");
+
     private static List<OutlineItem> BuildOutline(IReadOnlyList<OutlineHeading>? headings, IReadOnlyDictionary<string, float> anchors)
     {
         var all = new List<OutlineItem>();

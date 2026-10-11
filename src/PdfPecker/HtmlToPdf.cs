@@ -21,6 +21,16 @@ public static class HtmlToPdf
         return Render(html, options ?? new PdfOptions(), options?.BaseDirectory);
     }
 
+    /// <summary>
+    /// Converts an HTML string to a PDF document, stopping with <see cref="OperationCanceledException"/> when
+    /// <paramref name="cancellationToken"/> is cancelled. Use it with a timeout when the HTML comes from untrusted users.
+    /// </summary>
+    public static byte[] Convert(string html, PdfOptions? options, CancellationToken cancellationToken)
+    {
+        if (html == null) throw new ArgumentNullException(nameof(html));
+        return Render(html, options ?? new PdfOptions(), options?.BaseDirectory, cancellationToken);
+    }
+
     /// <summary>Converts an HTML string and writes the PDF to <paramref name="output"/>.</summary>
     public static void Convert(string html, Stream output, PdfOptions? options = null)
     {
@@ -39,10 +49,11 @@ public static class HtmlToPdf
     }
 
     /// <summary>Converts an HTML string to a PDF asynchronously on the thread pool.</summary>
+    /// <remarks>Cancelling <paramref name="cancellationToken"/> stops a conversion that is already running.</remarks>
     public static Task<byte[]> ConvertAsync(string html, PdfOptions? options = null, CancellationToken cancellationToken = default)
-        => Task.Run(() => Convert(html, options), cancellationToken);
+        => Task.Run(() => Convert(html, options, cancellationToken), cancellationToken);
 
-    internal static byte[] Render(string html, PdfOptions options, string? baseDirectory)
+    internal static byte[] Render(string html, PdfOptions options, string? baseDirectory, CancellationToken cancellationToken = default)
     {
         if (options.Conformance != PdfConformance.None && options.Security != null)
             throw new ArgumentException("PDF/A does not allow encryption: set PdfOptions.Conformance or PdfOptions.Security, not both.", nameof(options));
@@ -82,7 +93,7 @@ public static class HtmlToPdf
         var fonts = FontResolver.Create(sheet.FontFaces, options.Fonts, FetchFont(images),
             embedStandard: options.EmbedStandardFonts || options.Conformance != PdfConformance.None);
         var root = new ComputedStyle { Display = Display.Block, Fonts = fonts };
-        var styles = new StyleResolver(sheet, page.ContentWidth, viewportH);
+        var styles = new StyleResolver(sheet, page.ContentWidth, viewportH) { Cancellation = cancellationToken };
         styles.ResolveTree(doc, root);
 
         var header = FindBand(doc, "data-sticky-pdf-header");
@@ -90,8 +101,8 @@ public static class HtmlToPdf
         if (footer == header) footer = null;
         if (header != null || footer != null)
         {
-            if (header != null) { header.Detached = true; page.BandTop = Math.Max(DeclaredHeight(header), BandHeight(header, page, images)); }
-            if (footer != null) { footer.Detached = true; page.BandBottom = Math.Max(DeclaredHeight(footer), BandHeight(footer, page, images)); }
+            if (header != null) { header.Detached = true; page.BandTop = Math.Max(DeclaredHeight(header), BandHeight(header, page, images, cancellationToken)); }
+            if (footer != null) { footer.Detached = true; page.BandBottom = Math.Max(DeclaredHeight(footer), BandHeight(footer, page, images, cancellationToken)); }
             float limit = page.ContentHeight * 0.6f;
             float bands = page.BandTop + page.BandBottom;
             if (bands > limit)
@@ -105,10 +116,10 @@ public static class HtmlToPdf
         if (styles.UsedViewportHeight && Math.Abs(page.FlowHeight - viewportH) > 0.01f)
         {
             root = new ComputedStyle { Display = Display.Block, Fonts = fonts };
-            new StyleResolver(sheet, page.ContentWidth, page.FlowHeight).ResolveTree(doc, root);
+            new StyleResolver(sheet, page.ContentWidth, page.FlowHeight) { Cancellation = cancellationToken }.ResolveTree(doc, root);
         }
 
-        var engine = new LayoutEngine(page.FlowHeight, images);
+        var engine = new LayoutEngine(page.FlowHeight, images) { Cancellation = cancellationToken, MaxPages = Math.Max(1, options.MaxPages) };
         if (options.Bookmarks) engine.Headings = new List<OutlineHeading>();
         float height = engine.Layout(doc, page.ContentWidth);
 
@@ -118,8 +129,8 @@ public static class HtmlToPdf
             pageBands = (p, count) =>
             {
                 var ops = new List<DrawOp>();
-                if (header != null) ops.AddRange(LayoutBandForPage(header, page, images, p, count, alignBottom: false));
-                if (footer != null) ops.AddRange(LayoutBandForPage(footer, page, images, p, count, alignBottom: true));
+                if (header != null) ops.AddRange(LayoutBandForPage(header, page, images, p, count, alignBottom: false, cancellationToken));
+                if (footer != null) ops.AddRange(LayoutBandForPage(footer, page, images, p, count, alignBottom: true, cancellationToken));
                 return ops;
             };
         }
@@ -157,6 +168,8 @@ public static class HtmlToPdf
             WatermarkFont = watermarkFont,
             MarginFont = marginFont,
             EmbedStandardFonts = options.EmbedStandardFonts,
+            MaxPages = options.MaxPages,
+            Cancellation = cancellationToken,
         };
         var pdf = writer.Write(engine.Ops, height, engine.Anchors, background, title, options.Author, options.Subject,
             options.FooterText, options.HeaderText, pageBands, engine.Headings);
@@ -211,14 +224,14 @@ public static class HtmlToPdf
     }
 
     /// <summary>The laid-out height of a band, measured with two-digit page numbers in place of the placeholders.</summary>
-    private static float BandHeight(Element band, PageSetup page, ImageLoader images)
+    private static float BandHeight(Element band, PageSetup page, ImageLoader images, CancellationToken cancellationToken)
     {
         var texts = new List<(TextNode Node, string Original)>();
         CollectPlaceholders(band, texts);
         foreach (var (node, original) in texts) node.Text = ReplacePlaceholders(original, "99", "99");
         try
         {
-            return Math.Max(0, new LayoutEngine(page.ContentHeight, images).LayoutBand(band, page.ContentWidth));
+            return Math.Max(0, new LayoutEngine(page.ContentHeight, images) { Cancellation = cancellationToken }.LayoutBand(band, page.ContentWidth));
         }
         finally
         {
@@ -230,7 +243,7 @@ public static class HtmlToPdf
         => text.Replace("{page}", page).Replace("{total-pages}", pages).Replace("{pages}", pages);
 
     /// <summary>Lays out a band for one page, with {page}, {pages} and {total-pages} replaced in its text.</summary>
-    private static List<DrawOp> LayoutBandForPage(Element band, PageSetup page, ImageLoader images, int pageIndex, int pageCount, bool alignBottom)
+    private static List<DrawOp> LayoutBandForPage(Element band, PageSetup page, ImageLoader images, int pageIndex, int pageCount, bool alignBottom, CancellationToken cancellationToken)
     {
         var texts = new List<(TextNode Node, string Original)>();
         CollectPlaceholders(band, texts);
@@ -240,7 +253,7 @@ public static class HtmlToPdf
             node.Text = ReplacePlaceholders(original, number, total);
         try
         {
-            var engine = new LayoutEngine(page.ContentHeight, images);
+            var engine = new LayoutEngine(page.ContentHeight, images) { Cancellation = cancellationToken };
             float h = engine.LayoutBand(band, page.ContentWidth);
             if (alignBottom)
             {

@@ -146,10 +146,10 @@ internal sealed class PdfImage
             if (type == "IEND") break;
             pos = dataStart + len + 4;
         }
-        if (width <= 0 || height <= 0 || idat.Length == 0) return null;
+        if (width <= 0 || height <= 0 || idat.Length == 0 || (long)width * height > MaxPixels) return null;
 
         int colors = colorType switch { 0 => 1, 2 => 3, 3 => 1, 4 => 2, 6 => 4, _ => 0 };
-        if (colors == 0) return null;
+        if (colors == 0 || bitDepth is not (1 or 2 or 4 or 8 or 16)) return null;
         if (colorType == 3 && palette == null) return null;
 
         bool hasAlpha = colorType is 4 or 6 || trns != null;
@@ -169,7 +169,10 @@ internal sealed class PdfImage
         }
 
         // Full decode: needed to split the alpha channel into a soft mask.
-        byte[] raw = Inflate(idat.ToArray());
+        // The pixel data can be no longer than its rows plus their filter bytes (a little more when interlaced): stop
+        // decompressing there, so a small file cannot inflate into gigabytes.
+        long rowBytes = ((long)width * colors * bitDepth + 7) / 8;
+        byte[] raw = Inflate(idat.ToArray(), (rowBytes + 1) * height + 8L * height + 1024);
         int outColors = colorType is 0 or 4 ? 1 : 3;
         var color = new byte[width * height * outColors];
         var alpha = hasAlpha ? new byte[width * height] : null;
@@ -405,14 +408,23 @@ internal sealed class PdfImage
         }
     }
 
-    private static byte[] Inflate(byte[] zlib)
+    private static byte[] Inflate(byte[] zlib, long maxLength)
     {
         using var input = new MemoryStream(zlib);
         using var z = new ZLibStream(input, CompressionMode.Decompress);
-        using var output = new MemoryStream(zlib.Length * 4);
-        z.CopyTo(output);
+        using var output = new MemoryStream((int)Math.Min(maxLength, Math.Max(256, zlib.Length * 4L)));
+        var buffer = new byte[16384];
+        int n;
+        while ((n = z.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            if (output.Length + n > maxLength) throw new FormatException("The PNG image decompresses to more data than its size allows.");
+            output.Write(buffer, 0, n);
+        }
         return output.ToArray();
     }
+
+    /// <summary>The largest image, in pixels, that is decoded (100 megapixels, as for PDF rendering).</summary>
+    private const long MaxPixels = Rendering.Images.PdfImageDecoder.MaxPixels;
 
     internal static byte[] Deflate(byte[] data, CompressionLevel level = CompressionLevel.Fastest)
     {

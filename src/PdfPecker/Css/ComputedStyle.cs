@@ -132,7 +132,7 @@ internal sealed class ComputedStyle
     public float BorderSpacingH = 1.5f, BorderSpacingV = 1.5f; // 2px
     public string? FontFamilyName;
     public FontResolver? Fonts; // the document's fonts; null when only the standard fonts exist
-    public Dictionary<string, string>? CustomProperties; // custom properties (--name), shared with the parent until changed
+    public CssVarScope? CustomProperties; // custom properties (--name), shared with the parent until changed
 
     // SVG presentation properties (inherited).
     public uint? SvgFill = CssColor.Black;  // null = none

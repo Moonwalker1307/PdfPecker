@@ -85,9 +85,13 @@ var options = new PdfOptions
     Bookmarks = true,                                 // PDF bookmarks from h1-h6 (default)
     Compress = true,                                  // Flate-compress page content (default)
     AllowFileAccess = false,                          // block local file reads when converting untrusted HTML
+    MaxPages = 1000,                                  // refuse longer documents with PdfLimitException (default 100,000)
 };
 byte[] pdf = HtmlToPdf.Convert(html, options);
 ```
+
+For HTML from untrusted users, also set `AllowFileAccess = false` and a low `MaxPages`, and pass a cancellation token
+with a timeout (`HtmlToPdf.Convert(html, options, token)`): cancelling stops the conversion where it is.
 
 A CSS `@page { size: A4 landscape; margin: 15mm }` rule overrides the page size and margins unless
 `IgnoreCssPageRules` is set. PdfPecker never makes network requests on its own: `http(s)` images and stylesheets are only
@@ -269,8 +273,9 @@ curl -X POST http://localhost:8080/api/convert -F "file=@README.md" -F output=ht
 curl -X POST http://localhost:8080/api/convert -H "Content-Type: application/json" -d '{"markdown":"# Hi","output":"html"}'
 ```
 
-The site never reads files from the server (`AllowFileAccess = false`), limits requests to 5 MB, 15 seconds and
-120 conversions per minute per IP, and stores nothing.
+The site never reads files from the server (`AllowFileAccess = false`), limits requests to 5 MB, 15 seconds,
+1,000 pages and 120 conversions per minute per IP, runs a few conversions at a time (answering 503 when busy), and
+stores nothing.
 
 ## What is supported
 

@@ -252,6 +252,18 @@ public class SignatureTests
     }
 
     [Fact]
+    public void Rejects_a_timestamp_without_the_request_nonce()
+    {
+        using var tsaCert = RsaCert("Test TSA", timestamping: true);
+        var client = new HttpClient(new FakeTsa(tsaCert, omitNonce: true));
+        var ex = Assert.Throws<PdfSignatureException>(() => HtmlToPdf.Convert(Html, new PdfOptions
+        {
+            Signature = new PdfSignatureOptions(Cert.Value) { TimestampUrl = "http://tsa.example/", TimestampHttpClient = client },
+        }));
+        Assert.Contains("nonce", ex.Message);
+    }
+
+    [Fact]
     public void Timestamp_failures_are_reported()
     {
         var client = new HttpClient(new StatusHandler(HttpStatusCode.InternalServerError));
@@ -269,7 +281,7 @@ public class SignatureTests
     }
 
     /// <summary>A minimal timestamp authority: answers a TimeStampReq with a token signed by its certificate.</summary>
-    private sealed class FakeTsa(X509Certificate2 cert) : HttpMessageHandler
+    private sealed class FakeTsa(X509Certificate2 cert, bool omitNonce = false) : HttpMessageHandler
     {
         public string? ContentType;
 
@@ -293,7 +305,7 @@ public class SignatureTests
                 }
                 tst.WriteInteger(42);
                 tst.WriteGeneralizedTime(DateTimeOffset.UtcNow, omitFractionalSeconds: true);
-                tst.WriteInteger(req.GetNonce()!.Value.Span);
+                if (!omitNonce) tst.WriteInteger(req.GetNonce()!.Value.Span);
             }
             var cms = new SignedCms(new ContentInfo(new Oid("1.2.840.113549.1.9.16.1.4"), tst.Encode()));
             var signer = new CmsSigner(cert);

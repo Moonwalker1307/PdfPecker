@@ -6,7 +6,10 @@ namespace PdfPecker.Rendering.Parsing;
 internal static class Filters
 {
     /// <summary>Upper bound on the decoded size of one stream, against decompression bombs.</summary>
-    public const int MaxDecodedSize = 512 * 1024 * 1024;
+    public const int MaxDecodedSize = 256 * 1024 * 1024;
+
+    /// <summary>The size one stream may decode to now: the per-stream bound, or less when the page's budget is low.</summary>
+    private static int Limit => (int)Math.Min(MaxDecodedSize, PdfFile.DecodeLimit);
 
     public static string Canonical(string name) => name switch
     {
@@ -62,7 +65,8 @@ internal static class Filters
         failedEarly = false;
         using var input = new MemoryStream(data, offset, data.Length - offset, writable: false);
         using var z = new DeflateStream(input, CompressionMode.Decompress);
-        var output = new MemoryStream(Math.Min(MaxDecodedSize, Math.Max(256, data.Length * 4)));
+        int limit = Limit;
+        var output = new MemoryStream(Math.Min(limit, Math.Max(256, data.Length * 4)));
         var buf = new byte[16384];
         try
         {
@@ -70,7 +74,7 @@ internal static class Filters
             while ((n = z.Read(buf, 0, buf.Length)) > 0)
             {
                 output.Write(buf, 0, n);
-                if (output.Length > MaxDecodedSize) break;
+                if (output.Length > limit) break;
             }
         }
         catch (InvalidDataException)
@@ -164,6 +168,7 @@ internal static class Filters
 
     private static byte[] Lzw(byte[] data, bool earlyChange)
     {
+        int limit = Limit;
         var output = new MemoryStream(data.Length * 3);
         var prefix = new int[4096];
         var suffix = new byte[4096];
@@ -209,12 +214,12 @@ internal static class Filters
                 lengths[next] = lengths[prevCode] + 1;
                 next++;
             }
-            int limit = next + (earlyChange ? 1 : 0);
-            if (limit >= 512 && codeLen == 9) codeLen = 10;
-            else if (limit >= 1024 && codeLen == 10) codeLen = 11;
-            else if (limit >= 2048 && codeLen == 11) codeLen = 12;
+            int codes = next + (earlyChange ? 1 : 0);
+            if (codes >= 512 && codeLen == 9) codeLen = 10;
+            else if (codes >= 1024 && codeLen == 10) codeLen = 11;
+            else if (codes >= 2048 && codeLen == 11) codeLen = 12;
             prevCode = code;
-            if (output.Length > MaxDecodedSize) break;
+            if (output.Length > limit) break;
         }
         return output.ToArray();
     }
@@ -289,6 +294,7 @@ internal static class Filters
 
     private static byte[] RunLength(byte[] data)
     {
+        int limit = Limit;
         var output = new MemoryStream(data.Length * 2);
         int i = 0;
         while (i < data.Length)
@@ -305,6 +311,7 @@ internal static class Filters
             {
                 byte b = data[i++];
                 for (int k = 0; k < 257 - len; k++) output.WriteByte(b);
+                if (output.Length > limit) break; // each 2-byte run expands to 128 bytes
             }
         }
         return output.ToArray();

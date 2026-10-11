@@ -87,7 +87,7 @@ internal sealed class RenderDocument
             _ => new Matrix(sx, 0, 0, -sy, -p.X0 * sx, p.Y1 * sy),
         };
         var r = new PageRenderer(File, _cache, canvas, cancel);
-        r.RenderPage(p.Dict, p.Resources, m, annotations);
+        using (PdfFile.BeginRender(cancel)) r.RenderPage(p.Dict, p.Resources, m, annotations);
         if (background != 0)
         {
             var px = canvas.Pixels;

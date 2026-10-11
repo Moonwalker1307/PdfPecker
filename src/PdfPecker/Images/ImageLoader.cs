@@ -11,6 +11,9 @@ internal sealed class ImageLoader
     /// <summary>Parsed inline SVG drawings, shared by every layout pass of a document (pages, headers, footers).</summary>
     public readonly Dictionary<PdfPecker.Html.Element, PdfPecker.Svg.SvgImage> Svgs = new();
 
+    /// <summary>The drawing work left for the document's inline SVGs.</summary>
+    public readonly PdfPecker.Svg.SvgBudget SvgBudget = new();
+
     public ImageLoader(string? baseDirectory, Func<string, byte[]?>? resolver, bool allowFiles = true)
     {
         _allowFiles = allowFiles;
@@ -29,9 +32,10 @@ internal sealed class ImageLoader
             var bytes = Fetch(src);
             if (bytes != null) img = PdfImage.FromBytes(bytes);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException or ArgumentException or NotSupportedException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException or ArgumentException or NotSupportedException
+                                       or InvalidDataException or OverflowException or IndexOutOfRangeException)
         {
-            img = null; // a missing image must not fail the whole document
+            img = null; // a missing or damaged image must not fail the whole document
         }
         _cache[src] = img;
         return img;

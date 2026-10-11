@@ -47,10 +47,13 @@ internal static class CssParser
     {
         string s = StripComments(css);
         int i = 0;
-        ParseRules(s, ref i, sheet, s.Length);
+        ParseRules(s, ref i, sheet, s.Length, 0);
     }
 
-    private static void ParseRules(string s, ref int i, Stylesheet sheet, int end)
+    // Nested @media blocks deeper than this are skipped, so hostile CSS cannot recurse without bound.
+    private const int MaxMediaNesting = 16;
+
+    private static void ParseRules(string s, ref int i, Stylesheet sheet, int end, int depth)
     {
         while (i < end)
         {
@@ -66,7 +69,9 @@ internal static class CssParser
                 while (i < end && (char.IsLetterOrDigit(s[i]) || s[i] == '-')) i++;
                 string atName = s.Substring(nameStart, i - nameStart).ToLowerInvariant();
                 int brace = IndexOfOutsideQuotes(s, '{', i, end);
-                int semi = IndexOfOutsideQuotes(s, ';', i, end);
+                // Only look for the ';' that ends a statement before the block starts: scanning to the end for every
+                // at-rule would make a sheet full of blocks quadratic.
+                int semi = IndexOfOutsideQuotes(s, ';', i, brace < 0 ? end : brace);
                 if (semi >= 0 && (brace < 0 || semi < brace))
                 {
                     i = semi + 1; // @import, @charset, @namespace: ignored
@@ -75,10 +80,10 @@ internal static class CssParser
                 if (brace < 0) { i = end; break; }
                 string prelude = s.Substring(i, brace - i).Trim();
                 int blockEnd = MatchingBrace(s, brace, end);
-                if (atName == "media" && MediaApplies(prelude))
+                if (atName == "media" && depth < MaxMediaNesting && MediaApplies(prelude))
                 {
                     int inner = brace + 1;
-                    ParseRules(s, ref inner, sheet, blockEnd);
+                    ParseRules(s, ref inner, sheet, blockEnd, depth + 1);
                 }
                 else if (atName == "page" && !prelude.Contains(':'))
                 {

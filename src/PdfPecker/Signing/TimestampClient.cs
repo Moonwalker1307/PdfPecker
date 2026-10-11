@@ -8,6 +8,8 @@ namespace PdfPecker.Signing;
 /// <summary>Requests an RFC 3161 timestamp token over HTTP.</summary>
 internal static class TimestampClient
 {
+    private const int MaxResponseSize = 1024 * 1024;
+
     private static readonly Lazy<HttpClient> Shared = new(() => new HttpClient { Timeout = TimeSpan.FromSeconds(30) });
 
     /// <summary>Returns the TimeStampToken (a CMS ContentInfo) for the hash of <paramref name="data"/>.</summary>
@@ -42,7 +44,14 @@ internal static class TimestampClient
                 throw new PdfSignatureException($"The timestamp server returned HTTP {(int)response.StatusCode}.");
             using var stream = response.Content.ReadAsStream();
             using var ms = new MemoryStream();
-            stream.CopyTo(ms);
+            // A timestamp response is a few kilobytes; do not let a misbehaving server fill memory.
+            var buffer = new byte[16384];
+            int n;
+            while ((n = stream.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                if (ms.Length + n > MaxResponseSize) throw new PdfSignatureException("The timestamp server's answer is too large.");
+                ms.Write(buffer, 0, n);
+            }
             body = ms.ToArray();
         }
         catch (HttpRequestException ex)
@@ -119,5 +128,7 @@ internal static class TimestampClient
             }
             tst.ReadEncodedValue();
         }
+        // RFC 3161 2.4.2: the nonce must be echoed when the request has one; without it the token could be a replay.
+        throw new PdfSignatureException("The timestamp token does not carry the request's nonce.");
     }
 }
