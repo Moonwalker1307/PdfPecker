@@ -183,7 +183,7 @@ options.UseSystemFonts = true;   // looks in C:\Windows\Fonts, /Library/Fonts, /
 var options = new PdfOptions
 {
     // A diagonal stamp on every page. Also: Image (PNG/JPEG bytes), FontSize, Angle, Opacity, Bold, Behind.
-    Watermark = new PdfWatermark { Text = "PRØVEBEREGNING", Color = "#c00000", Opacity = 0.25f },
+    Watermark = new PdfWatermark { Text = "WATERMARK", Color = "#c00000", Opacity = 0.25f },
 
     // AES-256 encryption (PDF 2.0 / Acrobat X and later). Without an OwnerPassword a random one is used,
     // so the permissions cannot be lifted.
