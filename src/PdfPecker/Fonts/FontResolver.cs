@@ -266,6 +266,14 @@ internal sealed class FontResolver
         return style + weight;
     }
 
+    /// <summary>The first standard family named in a CSS font-family list, if any.</summary>
+    public static FontFamily? FirstStandardFamily(string familyList)
+    {
+        foreach (var part in familyList.Split(','))
+            if (StandardFamily(Unquote(part)) is FontFamily f) return f;
+        return null;
+    }
+
     /// <summary>Family names that always mean a standard PDF font.</summary>
     private static FontFamily? StandardFamily(string name) => name.ToLowerInvariant() switch
     {
