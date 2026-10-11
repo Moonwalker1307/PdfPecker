@@ -24,7 +24,10 @@
 
   <ItemGroup>
     <None Include="../../README.md" Pack="true" PackagePath="/" />
+    <None Include="../../THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="/" />
+    <EmbeddedResource Include="Rendering/Fonts/StandardFonts.bin" LogicalName="PdfPecker.Rendering.Fonts.StandardFonts.bin" />
     <InternalsVisibleTo Include="PdfPecker.Tests" />
+    <InternalsVisibleTo Include="FontPackBuilder" />
   </ItemGroup>
 
 </Project>
