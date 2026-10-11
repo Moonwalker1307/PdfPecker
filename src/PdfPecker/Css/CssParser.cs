@@ -369,9 +369,8 @@ internal static class CssParser
                 Add("border-spacing-v", t.Count > 1 ? t[1] : t[0]);
                 return;
             }
-            case "overflow-wrap":
             case "word-wrap":
-            case "word-break":
+                Add("overflow-wrap", value);
                 return;
             case "flex":
                 ExpandFlex(value, output, important);

@@ -66,6 +66,8 @@ internal enum SvgLineJoin : byte { Miter, Round, Bevel }
 internal enum TextAlign : byte { Left, Right, Center, Justify }
 internal enum WhiteSpace : byte { Normal, NoWrap, Pre, PreWrap, PreLine }
 internal enum VerticalAlign : byte { Baseline, Sub, Super, Top, Middle, Bottom, TextTop, TextBottom }
+internal enum OverflowWrap : byte { Normal, BreakWord, Anywhere }
+internal enum WordBreak : byte { Normal, BreakAll, KeepAll }
 internal enum TextTransform : byte { None, Uppercase, Lowercase, Capitalize }
 internal enum BorderStyle : byte { None, Solid, Dashed, Dotted, Double }
 internal enum LineHeightKind : byte { Normal, Factor, Absolute }
@@ -120,6 +122,8 @@ internal sealed class ComputedStyle
     public float LineHeightValue;
     public TextAlign TextAlign;
     public WhiteSpace WhiteSpace;
+    public OverflowWrap OverflowWrap;
+    public WordBreak WordBreak;
     public ListStyleType ListStyleType;
     public bool ListStylePositionInside;
     public TextTransform TextTransform;
@@ -206,7 +210,7 @@ internal sealed class ComputedStyle
         {
             LineHeightKind.Factor => LineHeightValue * FontSize,
             LineHeightKind.Absolute => LineHeightValue,
-            _ => FontSize * Font.NormalLineHeight,
+            _ => Font.NormalLineHeight(FontSize),
         };
 
     // Effective border widths: zero when the style is none.

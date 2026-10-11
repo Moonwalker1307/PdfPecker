@@ -279,8 +279,11 @@ public class FontTests
     public void LineHeightNormalComesFromTheFontMetrics()
     {
         var font = new EmbeddedFont(Assert.Single(FontProgram.Load(Regular)), false, false);
-        Assert.InRange(font.NormalLineHeight, 1.0f, 1.5f);
-        Assert.Equal(1.2f, StandardFont.Get(PdfPecker.Fonts.FontFamily.Helvetica, false, false).NormalLineHeight);
+        Assert.InRange(font.NormalLineHeight(100), 100f, 150f);
+        // Arial/Helvetica at 12px (9pt): ascent 10.86px -> 11, descent 2.54px -> 3, gap 0.39px -> 0, as in Chrome.
+        var helvetica = StandardFont.Get(PdfPecker.Fonts.FontFamily.Helvetica, false, false);
+        Assert.Equal(10.5f, helvetica.NormalLineHeight(9f), 3);
+        Assert.Equal(13.5f, helvetica.NormalLineHeight(12f), 3);
     }
 
     [Fact]

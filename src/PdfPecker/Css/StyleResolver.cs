@@ -647,6 +647,27 @@ internal sealed class StyleResolver
                     _ => s.WhiteSpace,
                 };
                 break;
+            case "overflow-wrap":
+                s.OverflowWrap = lower switch
+                {
+                    "normal" => OverflowWrap.Normal,
+                    "break-word" => OverflowWrap.BreakWord,
+                    "anywhere" => OverflowWrap.Anywhere,
+                    "inherit" => parent.OverflowWrap,
+                    _ => s.OverflowWrap,
+                };
+                break;
+            case "word-break":
+                switch (lower)
+                {
+                    case "normal": s.WordBreak = WordBreak.Normal; break;
+                    case "break-all": s.WordBreak = WordBreak.BreakAll; break;
+                    case "keep-all": s.WordBreak = WordBreak.KeepAll; break;
+                    // Deprecated: the same as word-break: normal with overflow-wrap: anywhere.
+                    case "break-word": s.WordBreak = WordBreak.Normal; s.OverflowWrap = OverflowWrap.Anywhere; break;
+                    case "inherit": s.WordBreak = parent.WordBreak; break;
+                }
+                break;
             case "vertical-align":
                 s.VerticalAlign = lower switch
                 {
@@ -1167,7 +1188,18 @@ internal sealed class StyleResolver
             case "medium": return 1.5f;
             case "thick": return 3.75f;
         }
-        return TryParseLength(lower, em, _rootFontSize, out var len, _vw, _vh) && !len.IsAuto && !len.IsPercent ? Math.Max(0, len.Value) : current;
+        return TryParseLength(lower, em, _rootFontSize, out var len, _vw, _vh) && !len.IsAuto && !len.IsPercent ? SnapBorderWidth(len.Value) : current;
+    }
+
+    /// <summary>
+    /// Border widths are rounded down to whole CSS pixels, and a width under one pixel up to one pixel, as browsers do
+    /// (CSS Values 4 "snap as a border width"): a 1pt border is 1px wide, not 1.33px.
+    /// </summary>
+    internal static float SnapBorderWidth(float pt)
+    {
+        if (pt <= 0) return 0;
+        float px = pt / 0.75f;
+        return (px < 1 ? 1 : MathF.Floor(px + 0.001f)) * 0.75f;
     }
 
     private static BorderStyle ParseBorderStyle(string lower, BorderStyle current)

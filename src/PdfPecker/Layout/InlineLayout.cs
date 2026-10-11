@@ -39,6 +39,8 @@ internal sealed partial class LayoutEngine
 
     private enum ItemKind : byte { Text, Space, Break, Image, Box, Spacer, Anchor }
 
+    private enum BreakAfter : byte { None, Break, SoftHyphen }
+
     private sealed class Item
     {
         public ItemKind Kind;
@@ -48,6 +50,7 @@ internal sealed partial class LayoutEngine
         public int Start, Length;
         public float Width;
         public bool Breakable;
+        public BreakAfter BreakAfter; // a line break opportunity right after this text (hyphen, soft hyphen, ...)
         public string? Href;
         public ComputedStyle? Deco;   // nearest inline ancestor that paints a background
         public PdfImage? Image;
@@ -62,6 +65,7 @@ internal sealed partial class LayoutEngine
             Start = Length = 0;
             Width = Height = BoxBaseline = 0;
             Breakable = false;
+            BreakAfter = BreakAfter.None;
             Href = null;
             Deco = null;
             Image = null;
@@ -285,30 +289,90 @@ internal sealed partial class LayoutEngine
                 if (d == ' ' || d == '\t' || d == '\n' || d == '\r' || d == '\f') break;
                 i++;
             }
-            string src = text;
-            int wStart = start, wLen = i - start;
-            var span = text.AsSpan(start, wLen);
-            if (span.IndexOf('\u00AD') >= 0 || span.IndexOf('\u200B') >= 0 || style.TextTransform != TextTransform.None)
-            {
-                string word = span.ToString().Replace("\u00AD", "").Replace("\u200B", "");
-                if (word.Length == 0) continue;
-                switch (style.TextTransform)
-                {
-                    case TextTransform.Uppercase: word = word.ToUpperInvariant(); break;
-                    case TextTransform.Lowercase: word = word.ToLowerInvariant(); break;
-                    case TextTransform.Capitalize:
-                        if (st.LastWasSpace && char.IsLower(word[0])) word = char.ToUpperInvariant(word[0]) + word.Substring(1);
-                        break;
-                }
-                src = word;
-                wStart = 0;
-                wLen = word.Length;
-            }
-            float w = font.MeasureUnits(src, wStart, wLen) * size / 1000f + style.LetterSpacing * wLen;
-            { var it_ = Rent(ItemKind.Text, style); it_.Source = src; it_.Start = wStart; it_.Length = wLen; it_.Width = w; it_.Href = href; it_.Deco = deco; items.Add(it_); }
-            st.LastWasSpace = false;
-            st.Column += wLen;
+            var span = text.AsSpan(start, i - start);
+            if (span.IndexOfAny(WordBreakChars) >= 0 && breakable) AddWordSegments(st, text, start, i - start, style, href, deco);
+            else AddWord(st, text, start, i - start, style, href, deco, BreakAfter.None);
+            st.Column += i - start;
         }
+    }
+
+    // Characters inside a word that give a line break opportunity (or, for U+200B and U+00AD, are not drawn).
+    private static readonly System.Buffers.SearchValues<char> WordBreakChars = System.Buffers.SearchValues.Create("-?\u00AD\u200B\u2010\u2013\u2014");
+
+    /// <summary>
+    /// Splits a word at its break opportunities as Chrome does: after a hyphen followed by a letter, digit or hyphen,
+    /// after U+2010 and en dashes, around em dashes, after "?" before a letter, at zero-width spaces and at soft hyphens
+    /// (which show a hyphen only when the line breaks there).
+    /// </summary>
+    private void AddWordSegments(CollectState st, string text, int start, int length, ComputedStyle style, string? href, ComputedStyle? deco)
+    {
+        int end = start + length, seg = start;
+        for (int k = start; k < end; k++)
+        {
+            char c = text[k];
+            char next = k + 1 < end ? text[k + 1] : '\0';
+            switch (c)
+            {
+                case '\u00AD':
+                case '\u200B':
+                    AddWord(st, text, seg, k - seg, style, href, deco, c == '\u00AD' ? BreakAfter.SoftHyphen : BreakAfter.Break);
+                    seg = k + 1;
+                    break;
+                case '-':
+                    if (char.IsLetterOrDigit(next) || next == '-') { AddWord(st, text, seg, k + 1 - seg, style, href, deco, BreakAfter.Break); seg = k + 1; }
+                    break;
+                case '?':
+                    if (char.IsLetter(next)) { AddWord(st, text, seg, k + 1 - seg, style, href, deco, BreakAfter.Break); seg = k + 1; }
+                    break;
+                case '\u2010':
+                case '\u2013':
+                    if (next != '\0') { AddWord(st, text, seg, k + 1 - seg, style, href, deco, BreakAfter.Break); seg = k + 1; }
+                    break;
+                case '\u2014':
+                    if (k > seg) AddWord(st, text, seg, k - seg, style, href, deco, BreakAfter.Break);
+                    seg = k;
+                    if (next != '\0') { AddWord(st, text, seg, 1, style, href, deco, BreakAfter.Break); seg = k + 1; }
+                    break;
+            }
+        }
+        if (seg < end) AddWord(st, text, seg, end - seg, style, href, deco, BreakAfter.None);
+        else if (st.Items.Count > 0 && st.Items[^1] is { Kind: ItemKind.Text } last && last.BreakAfter == BreakAfter.SoftHyphen)
+            last.BreakAfter = BreakAfter.None; // a soft hyphen at the end of a word is no break opportunity of its own
+    }
+
+    private void AddWord(CollectState st, string text, int start, int length, ComputedStyle style, string? href, ComputedStyle? deco, BreakAfter breakAfter)
+    {
+        string src = text;
+        int wStart = start, wLen = length;
+        var span = text.AsSpan(start, length);
+        if (span.IndexOf('\u00AD') >= 0 || span.IndexOf('\u200B') >= 0 || style.TextTransform != TextTransform.None)
+        {
+            string word = span.ToString().Replace("\u00AD", "").Replace("\u200B", "");
+            switch (style.TextTransform)
+            {
+                case TextTransform.Uppercase: word = word.ToUpperInvariant(); break;
+                case TextTransform.Lowercase: word = word.ToLowerInvariant(); break;
+                case TextTransform.Capitalize:
+                    if (word.Length > 0 && st.LastWasSpace && char.IsLower(word[0])) word = char.ToUpperInvariant(word[0]) + word.Substring(1);
+                    break;
+            }
+            src = word;
+            wStart = 0;
+            wLen = word.Length;
+        }
+        if (wLen == 0)
+        {
+            // An empty segment (two break characters in a row) still marks the opportunity on the text before it.
+            if (breakAfter != BreakAfter.None && st.Items.Count > 0 && st.Items[^1] is { Kind: ItemKind.Text, BreakAfter: BreakAfter.None } prev) prev.BreakAfter = breakAfter;
+            return;
+        }
+        var font = style.Font;
+        float size = style.FontSize;
+        float w = font.MeasureUnits(src, wStart, wLen) * size / 1000f + style.LetterSpacing * wLen;
+        var it_ = Rent(ItemKind.Text, style);
+        it_.Source = src; it_.Start = wStart; it_.Length = wLen; it_.Width = w; it_.Href = href; it_.Deco = deco; it_.BreakAfter = breakAfter;
+        st.Items.Add(it_);
+        st.LastWasSpace = false;
     }
 
     private static bool HasRenderable(List<Item> items)
@@ -382,6 +446,9 @@ internal sealed partial class LayoutEngine
             // Trailing collapsible/breakable spaces hang and are not counted.
             while (li.Count > 0 && li[li.Count - 1].Kind == ItemKind.Space && (li[li.Count - 1].Breakable || IsCollapsible(li[li.Count - 1].Style)))
                 li.RemoveAt(li.Count - 1);
+            // A line broken at a soft hyphen shows a hyphen.
+            if (!forced && li.Count > 0 && li[^1] is { Kind: ItemKind.Text, BreakAfter: BreakAfter.SoftHyphen } shy)
+                li[^1] = shy.CloneWithText(shy.Text + "-", shy.Width + HyphenWidth(shy.Style));
             float width = 0;
             foreach (var it in li) width += it.Width;
             cur.Width = width;
@@ -423,21 +490,29 @@ internal sealed partial class LayoutEngine
 
             int j = i;
             float gw = 0;
+            bool splittable = false;
             while (j < n)
             {
                 var g = items[j];
                 if (g.Kind == ItemKind.Break || g.Kind == ItemKind.Space && g.Breakable) break;
                 gw += g.Width;
+                if (g.Kind == ItemKind.Text && BreaksAnywhere(g.Style)) splittable = true;
                 j++;
+                if (g.BreakAfter != BreakAfter.None) break;
             }
+            // Room for the hyphen a soft hyphen shows if the line breaks after this chunk.
+            float need = gw;
+            if (j > i && items[j - 1].BreakAfter == BreakAfter.SoftHyphen) need += HyphenWidth(items[j - 1].Style);
+            // word-break: break-all breaks the chunk at the end of the line instead of moving it to the next.
+            bool breakAll = splittable && items[i].Kind == ItemKind.Text && items[i].Style.WordBreak == WordBreak.BreakAll;
 
-            if (HasContent() && curW + gw > avail + Eps)
+            if (HasContent() && curW + need > avail + Eps && !breakAll)
             {
                 Finish(forced: false);
             }
-            if (!HasContent() && gw > avail + Eps)
+            if (splittable && curW + gw > avail + Eps)
             {
-                // A single unbreakable chunk wider than the line: break it between characters.
+                // A chunk wider than the line that overflow-wrap or word-break lets break between characters.
                 for (int k = i; k < j; k++)
                 {
                     var g = items[k];
@@ -450,7 +525,7 @@ internal sealed partial class LayoutEngine
                             curW += g.Width;
                             break;
                         }
-                        if (g.Kind == ItemKind.Text && g.Length > 1)
+                        if (g.Kind == ItemKind.Text && g.Length > 1 && BreaksAnywhere(g.Style))
                         {
                             // Work on the item's slice of its source text: copying the rest of a long word for every
                             // line would make breaking it quadratic.
@@ -470,7 +545,9 @@ internal sealed partial class LayoutEngine
                             if (fit == 0 && !HasContent()) { fit = 1; fw = font.CharWidth(src[start], size) + ls; }
                             if (fit > 0)
                             {
-                                Add(g.Slice(0, fit, fw));
+                                var head = g.Slice(0, fit, fw);
+                                head.BreakAfter = BreakAfter.None;
+                                Add(head);
                                 // The rest is measured exactly once it fits on a line; until then its width only needs
                                 // to exceed the room, so subtracting is enough.
                                 float restW = g.Width - fw;
@@ -490,6 +567,7 @@ internal sealed partial class LayoutEngine
             }
             else
             {
+                // Fits, or may not break: a word too wide for the line overflows it, as in browsers.
                 for (int k = i; k < j; k++) Add(items[k]);
                 curW += gw;
             }
@@ -500,16 +578,21 @@ internal sealed partial class LayoutEngine
         return lines;
     }
 
+    /// <summary>Whether overflow-wrap or word-break lets a word break between any two characters.</summary>
+    private static bool BreaksAnywhere(ComputedStyle s) => s.OverflowWrap != OverflowWrap.Normal || s.WordBreak == WordBreak.BreakAll;
+
+    private static float HyphenWidth(ComputedStyle s) => s.Font.CharWidth('-', s.FontSize) + s.LetterSpacing;
+
     // ------------------------------------------------------------------ placing lines
 
     private static void TextMetrics(ComputedStyle s, out float a, out float d)
     {
-        var f = s.Font;
-        float size = s.FontSize;
-        float asc = f.Ascent * size, desc = -f.Descent * size;
-        float half = (s.LineHeight - (asc + desc)) / 2;
+        s.Font.LineMetrics(s.FontSize, out float asc, out float desc);
+        float lineH = s.LineHeight;
+        // Chrome gives the top half of the leading whole CSS pixels and the rest to the bottom.
+        float half = MathF.Floor((lineH - (asc + desc)) / 2 / 0.75f + 0.001f) * 0.75f;
         a = asc + half;
-        d = desc + half;
+        d = lineH - a;
         float shift = BaselineShift(s);
         a -= shift;
         d += shift;
@@ -768,10 +851,9 @@ internal sealed partial class LayoutEngine
             if (deco == null) { i++; continue; }
             int start = i;
             while (i < items.Count && ReferenceEquals(items[i].Deco, deco)) i++;
-            var f = deco.Font;
-            float size = deco.FontSize;
-            float top = baseline + BaselineShift(deco) - f.Ascent * size - deco.PaddingTop.Resolve(0);
-            float h = (f.Ascent - f.Descent) * size + deco.PaddingTop.Resolve(0) + deco.PaddingBottom.Resolve(0);
+            deco.Font.LineMetrics(deco.FontSize, out float asc, out float desc);
+            float top = baseline + BaselineShift(deco) - asc - deco.PaddingTop.Resolve(0);
+            float h = asc + desc + deco.PaddingTop.Resolve(0) + deco.PaddingBottom.Resolve(0);
             _ops.Add(new RectOp(xs[start], top, xs[i] - xs[start], h, deco.BackgroundColor));
         }
     }
