@@ -40,6 +40,16 @@ internal sealed class SvgShape
 }
 
 /// <summary>
+/// The drawing work left for a document's inline SVGs. &lt;use&gt; can reference groups that reference groups, so a
+/// small drawing can expand exponentially; past the budget, the rest of the drawing is left out.
+/// </summary>
+internal sealed class SvgBudget
+{
+    /// <summary>Elements visited plus path points emitted, shared by every SVG of a document.</summary>
+    public long Remaining = 4_000_000;
+}
+
+/// <summary>
 /// An inline &lt;svg&gt; turned into vector paths and text: path, rect, circle, ellipse, line, polyline, polygon, text,
 /// tspan, g, use and nested svg, with transforms, fill/stroke styling from attributes and CSS, linear and radial
 /// gradients, and clip paths. Images, masks, patterns and filters are not drawn.
@@ -55,10 +65,11 @@ internal sealed class SvgImage
 
     private readonly Dictionary<string, Element> _ids = new(StringComparer.Ordinal);
     private int _clipDepth;
+    private SvgBudget _budget = null!;
 
-    public static SvgImage Build(Element svg)
+    public static SvgImage Build(Element svg, SvgBudget? budget = null)
     {
-        var img = new SvgImage();
+        var img = new SvgImage { _budget = budget ?? new SvgBudget() };
         img.Width = IntrinsicLength(svg.GetAttribute("width"));
         img.Height = IntrinsicLength(svg.GetAttribute("height"));
         var vb = ParseNumbers(svg.GetAttribute("viewbox"));
@@ -111,7 +122,7 @@ internal sealed class SvgImage
 
     private void Render(Element e, Matrix ctm, float opacity, int depth)
     {
-        if (depth > 32) return;
+        if (depth > 32 || --_budget.Remaining < 0) return;
         var s = e.Style;
         if (s == null || s.Display == Display.None) return;
         if (e.GetAttribute("transform") is { } tf) ctm = ParseTransform(tf).Then(ctm);
@@ -246,6 +257,7 @@ internal sealed class SvgImage
     private void Emit(ComputedStyle s, Matrix ctm, float opacity, PathBuilder? path, bool fillable = true)
     {
         if (path == null || path.Verbs.Count == 0 || !s.Visible) return;
+        if ((_budget.Remaining -= path.Points.Count / 2) < 0) return;
         var pts = path.Points.ToArray();
         Bounds(pts, out float minX, out float minY, out float maxX, out float maxY);
         var shape = new SvgShape

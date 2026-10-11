@@ -5,10 +5,22 @@ using Microsoft.AspNetCore.RateLimiting;
 using PdfPecker;
 
 const long MaxHtmlBytes = 5 * 1024 * 1024;
+// Untrusted documents: a long one is refused instead of filling memory (a few bytes of CSS can ask for millions of pages).
+const int MaxPages = 1000;
 var conversionTimeout = TimeSpan.FromSeconds(15);
+// Conversions are CPU and memory heavy: run a few at a time and turn the rest away quickly, so a burst of hostile
+// documents cannot exhaust the server.
+var conversions = new SemaphoreSlim(Math.Max(2, Environment.ProcessorCount));
+var queueTimeout = TimeSpan.FromSeconds(10);
 
 var builder = WebApplication.CreateSlimBuilder(args);
-builder.WebHost.ConfigureKestrel(k => k.Limits.MaxRequestBodySize = MaxHtmlBytes);
+builder.WebHost.ConfigureKestrel(k =>
+{
+    k.Limits.MaxRequestBodySize = MaxHtmlBytes;
+    k.AddServerHeader = false;
+});
+// An HTML form field may be as large as the body allows (the default 4 MB limit would fail with a server error).
+builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(o => o.ValueLengthLimit = (int)MaxHtmlBytes);
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.TypeInfoResolverChain.Insert(0, AppJsonContext.Default));
 builder.Services.AddRateLimiter(o =>
 {
@@ -19,6 +31,24 @@ builder.Services.AddRateLimiter(o =>
 });
 
 var app = builder.Build();
+app.Use(async (context, next) =>
+{
+    var headers = context.Response.Headers;
+    headers["X-Content-Type-Options"] = "nosniff";
+    headers["X-Frame-Options"] = "DENY";
+    headers["Referrer-Policy"] = "no-referrer";
+    headers["Content-Security-Policy"] = "frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+    try
+    {
+        await next(context);
+    }
+    catch (BadHttpRequestException ex) when (!context.Response.HasStarted)
+    {
+        // Too large, malformed or too slowly sent request bodies: the client's fault, not a server error.
+        context.Response.Clear();
+        context.Response.StatusCode = ex.StatusCode;
+    }
+});
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseRateLimiter();
@@ -39,7 +69,14 @@ app.MapPost("/api/convert", async (HttpRequest request, CancellationToken ct) =>
     ConvertRequest? req;
     if (request.HasJsonContentType())
     {
-        req = await request.ReadFromJsonAsync(AppJsonContext.Default.ConvertRequest, ct);
+        try
+        {
+            req = await request.ReadFromJsonAsync(AppJsonContext.Default.ConvertRequest, ct);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return Results.Problem("The JSON body is not valid.", statusCode: StatusCodes.Status400BadRequest);
+        }
     }
     else if (request.HasFormContentType)
     {
@@ -111,24 +148,37 @@ app.MapPost("/api/convert", async (HttpRequest request, CancellationToken ct) =>
         return Results.Problem("HTML output is for Markdown input; send Markdown or ask for a PDF.", statusCode: StatusCodes.Status400BadRequest);
 
     var options = BuildOptions(req);
+    if (!await conversions.WaitAsync(queueTimeout, ct))
+        return Results.Problem("The server is busy; try again shortly.", statusCode: StatusCodes.Status503ServiceUnavailable);
     var sw = Stopwatch.StartNew();
     byte[] result;
+    // The token reaches into the converter, so a document that runs over the time limit really stops using the CPU.
+    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+    timeout.CancelAfter(conversionTimeout);
     try
     {
         result = await Task.Run(() =>
         {
-            if (!markdownInput) return HtmlToPdf.Convert(input, options);
+            if (!markdownInput) return HtmlToPdf.Convert(input, options, timeout.Token);
             var html = MarkdownToHtml.ConvertDocument(input);
-            return htmlOutput ? System.Text.Encoding.UTF8.GetBytes(html) : HtmlToPdf.Convert(html, options);
-        }, ct).WaitAsync(conversionTimeout, ct);
+            return htmlOutput ? System.Text.Encoding.UTF8.GetBytes(html) : HtmlToPdf.Convert(html, options, timeout.Token);
+        }, timeout.Token);
     }
-    catch (TimeoutException)
+    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
     {
         return Results.Problem("The document took too long to convert.", statusCode: StatusCodes.Status422UnprocessableEntity);
+    }
+    catch (PdfLimitException ex)
+    {
+        return Results.Problem(ex.Message, statusCode: StatusCodes.Status422UnprocessableEntity);
     }
     catch (ArgumentException ex)
     {
         return Results.Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest);
+    }
+    finally
+    {
+        conversions.Release();
     }
     sw.Stop();
     request.HttpContext.Response.Headers["X-Conversion-Ms"] = sw.Elapsed.TotalMilliseconds.ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
@@ -178,11 +228,14 @@ app.MapPost("/api/pdf-to-image", async (HttpRequest request, CancellationToken c
         MaxDimension = 6000,
         MaxDegreeOfParallelism = 2,
     };
+    if (!await conversions.WaitAsync(queueTimeout, ct))
+        return Results.Problem("The server is busy; try again shortly.", statusCode: StatusCodes.Status503ServiceUnavailable);
     using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
     timeout.CancelAfter(TimeSpan.FromSeconds(30));
     try
     {
-        var renderer = PdfRenderer.Open(pdf, options.Password);
+        // Opening parses the uploaded file, so it runs off the request thread under the same time limit.
+        var renderer = await Task.Run(() => PdfRenderer.Open(pdf, options.Password), timeout.Token).WaitAsync(timeout.Token);
         var name = Path.GetFileNameWithoutExtension(SafeFileName(fileName));
         if (Int(Field("page")) is int page || renderer.PageCount == 1)
         {
@@ -218,6 +271,10 @@ app.MapPost("/api/pdf-to-image", async (HttpRequest request, CancellationToken c
     {
         return Results.Problem("The document took too long to render.", statusCode: StatusCodes.Status422UnprocessableEntity);
     }
+    finally
+    {
+        conversions.Release();
+    }
 }).RequireRateLimiting("convert").DisableAntiforgery();
 
 app.Run();
@@ -244,6 +301,7 @@ static PdfOptions BuildOptions(ConvertRequest req)
         Conformance = req.PdfA ? PdfConformance.PdfA2b : PdfConformance.None,
         // The HTML comes from anyone on the internet: never let it read files from this server.
         AllowFileAccess = false,
+        MaxPages = MaxPages,
     };
 }
 

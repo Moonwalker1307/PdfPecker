@@ -141,7 +141,8 @@ internal sealed class FontProgram
     }
 
     internal static bool IsFormatError(Exception ex)
-        => ex is FormatException or IndexOutOfRangeException or ArgumentException or OverflowException or InvalidDataException or NotSupportedException;
+        => ex is FormatException or IndexOutOfRangeException or ArgumentException or OverflowException or InvalidDataException or NotSupportedException
+            or EndOfStreamException;
 
     // ------------------------------------------------------------------ lookups
 
@@ -355,12 +356,15 @@ internal sealed class FontProgram
 
     // ------------------------------------------------------------------ WOFF
 
+    private const long MaxWoffSize = 64L * 1024 * 1024;
+
     /// <summary>Unpacks a WOFF 1.0 file into the sfnt it wraps.</summary>
     private static byte[] DecodeWoff(byte[] woff)
     {
         int numTables = BinaryPrimitives.ReadUInt16BigEndian(woff.AsSpan(12));
         uint flavor = BinaryPrimitives.ReadUInt32BigEndian(woff.AsSpan(4));
         var tables = new List<(uint Tag, byte[] Data)>(numTables);
+        long total = 0;
         for (int i = 0; i < numTables; i++)
         {
             var e = woff.AsSpan(44 + i * 20);
@@ -368,7 +372,11 @@ internal sealed class FontProgram
             int off = (int)BinaryPrimitives.ReadUInt32BigEndian(e[4..]);
             int compLen = (int)BinaryPrimitives.ReadUInt32BigEndian(e[8..]);
             int origLen = (int)BinaryPrimitives.ReadUInt32BigEndian(e[12..]);
-            if (off < 0 || compLen < 0 || origLen < 0 || off + compLen > woff.Length) throw new FormatException("Damaged WOFF table.");
+            if (off < 0 || compLen < 0 || origLen < 0 || (long)off + compLen > woff.Length) throw new FormatException("Damaged WOFF table.");
+            // The declared sizes are allocated up front: keep them to what zlib can produce from the data and to a sane
+            // font size, so a small file cannot claim gigabytes.
+            total += origLen;
+            if (total > MaxWoffSize || (long)origLen > (long)compLen * 1100 + 1024) throw new FormatException("Damaged WOFF table.");
             byte[] data;
             if (compLen < origLen)
             {

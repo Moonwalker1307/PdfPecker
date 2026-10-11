@@ -58,6 +58,9 @@ internal sealed class BlockParser
 
     // ---- Line handling -------------------------------------------------------------------------------------------
 
+    /// <summary>The deepest nesting of block containers (block quotes, lists, list items).</summary>
+    internal const int MaxNesting = 100;
+
     private void IncorporateLine(string line)
     {
         var container = _doc;
@@ -94,8 +97,18 @@ internal sealed class BlockParser
         _lastMatchedContainer = container;
 
         bool matchedLeaf = container.Type is MdNodeType.CodeBlock or MdNodeType.HtmlBlock;
+        int depth = 0;
+        for (var p = container; p != _doc; p = p.Parent!) depth++;
         while (!matchedLeaf)
         {
+            // Past the nesting limit, further block markers are plain text: every line walks all open containers,
+            // so unbounded nesting ("- - - - ...", "> > > ...") would make parsing quadratic.
+            if (depth >= MaxNesting)
+            {
+                FindNextNonspace();
+                AdvanceNextNonspace();
+                break;
+            }
             FindNextNonspace();
             if (!_indented && !MaybeSpecial(_nextNonspace < _line.Length ? _line[_nextNonspace] : '\0'))
             {
@@ -109,6 +122,7 @@ internal sealed class BlockParser
                 break;
             }
             container = _tip;
+            depth++;
             if (res == 2) matchedLeaf = true;
         }
 

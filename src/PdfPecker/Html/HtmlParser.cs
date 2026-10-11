@@ -37,6 +37,7 @@ internal sealed class HtmlParser
         var doc = new Element("#document");
         p._stack.Add(doc);
         p.Run();
+        p.FlushMerge();
         return doc;
     }
 
@@ -73,11 +74,31 @@ internal sealed class HtmlParser
     {
         var cur = Current;
         string text = HtmlEntities.Decode(raw);
-        // Merge with a preceding text node (happens around comments).
+        // Merge with a preceding text node (happens around comments and ignored end tags). The pieces are collected in
+        // a builder: appending to the node's string each time would be quadratic for many pieces.
         if (cur.Children.Count > 0 && cur.Children[cur.Children.Count - 1] is TextNode prev)
-            prev.Text += text;
+        {
+            if (_merging != prev)
+            {
+                FlushMerge();
+                _merging = prev;
+                _mergeBuffer.Append(prev.Text);
+            }
+            _mergeBuffer.Append(text);
+        }
         else
             cur.AppendChild(new TextNode(text));
+    }
+
+    private TextNode? _merging;
+    private readonly System.Text.StringBuilder _mergeBuffer = new();
+
+    private void FlushMerge()
+    {
+        if (_merging == null) return;
+        _merging.Text = _mergeBuffer.ToString();
+        _mergeBuffer.Clear();
+        _merging = null;
     }
 
     private void ParseMarkup()
