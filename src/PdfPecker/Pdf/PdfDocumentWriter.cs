@@ -33,6 +33,8 @@ internal sealed class PdfDocumentWriter
     private StandardFont? _textFont;
     private float _textSize, _tw, _tc;
     private float _yOrigin; // distance from the page top to flow y = 0 on the page being written
+    private readonly ByteBuffer _patterns = new(256); // "/P1 << ... >>" entries for the shared resources
+    private int _patternCount;
 
     public PdfDocumentWriter(PageSetup page, bool compress, CompressionLevel level)
     {
@@ -82,6 +84,9 @@ internal sealed class PdfDocumentWriter
                 case RectOp r:
                     if (r.W > 0 && r.H > 0) AddSplit(r, r.Y, r.Y + r.H);
                     break;
+                case GradientOp gr:
+                    if (gr.W > 0 && gr.H > 0) AddSplit(gr, gr.Y, gr.Y + gr.H);
+                    break;
                 case LineOp l:
                     if (l.X1 == l.X2) AddSplit(l, l.Y1, l.Y2);
                     else PageList(PageOf(l.Y1)).Add(new Placed(l, l.Y1, l.Y2));
@@ -120,6 +125,7 @@ internal sealed class PdfDocumentWriter
                 {
                     case GroupOp g: foreach (var o in g.Ops) Flatten(o); break;
                     case RectOp r: if (r.W > 0 && r.H > 0) list.Add(new Placed(r, r.Y, r.Y + r.H)); break;
+                    case GradientOp gr: if (gr.W > 0 && gr.H > 0) list.Add(new Placed(gr, gr.Y, gr.Y + gr.H)); break;
                     case LineOp l: list.Add(new Placed(l, l.Y1, l.Y2)); break;
                     default: list.Add(new Placed(op, 0, 0)); break;
                 }
@@ -135,6 +141,11 @@ internal sealed class PdfDocumentWriter
             foreach (var p in page)
             {
                 if (p.Op is TextOp t) usedFonts[t.Font.Index] = true;
+                else if (p.Op is SvgOp sv)
+                {
+                    foreach (var shape in sv.Image.Shapes)
+                        if (shape.Font != null) usedFonts[shape.Font.Index] = true;
+                }
                 else if (p.Op is ImageOp im && !imageIds.ContainsKey(im.Image))
                 {
                     imageIds[im.Image] = images.Count + 1;
@@ -168,20 +179,6 @@ internal sealed class PdfDocumentWriter
         Begin(pagesId).Ascii("<< /Type /Pages /Count ").Int(pageCount).Ascii(" /Kids [");
         for (int i = 0; i < pageCount; i++) _out.Int(pageIds[i]).Ascii(" 0 R ");
         _out.Ascii("] >>");
-        End();
-
-        // Shared resources.
-        Begin(resourcesId).Ascii("<< /ProcSet [/PDF /Text /ImageB /ImageC /ImageI] /Font <<");
-        for (int i = 0; i < usedFonts.Length; i++)
-            if (usedFonts[i]) _out.Ascii(" /F").Int(i + 1).Sp().Int(fontIds[i]).Ascii(" 0 R");
-        _out.Ascii(" >>");
-        if (images.Count > 0)
-        {
-            _out.Ascii(" /XObject <<");
-            for (int i = 0; i < images.Count; i++) _out.Ascii(" /Im").Int(i + 1).Sp().Int(images[i].ObjectNumber).Ascii(" 0 R");
-            _out.Ascii(" >>");
-        }
-        _out.Ascii(" >>");
         End();
 
         // Info.
@@ -290,6 +287,21 @@ internal sealed class PdfDocumentWriter
             _out.Ascii(" >>");
             End();
         }
+
+        // Shared resources, written last: shading patterns are collected while writing the pages.
+        Begin(resourcesId).Ascii("<< /ProcSet [/PDF /Text /ImageB /ImageC /ImageI] /Font <<");
+        for (int i = 0; i < usedFonts.Length; i++)
+            if (usedFonts[i]) _out.Ascii(" /F").Int(i + 1).Sp().Int(fontIds[i]).Ascii(" 0 R");
+        _out.Ascii(" >>");
+        if (images.Count > 0)
+        {
+            _out.Ascii(" /XObject <<");
+            for (int i = 0; i < images.Count; i++) _out.Ascii(" /Im").Int(i + 1).Sp().Int(images[i].ObjectNumber).Ascii(" 0 R");
+            _out.Ascii(" >>");
+        }
+        if (_patterns.Length > 0) _out.Ascii(" /Pattern <<").Bytes(_patterns.Span).Ascii(" >>");
+        _out.Ascii(" >>");
+        End();
 
         // Cross-reference table and trailer.
         long xref = _out.Length;
@@ -417,6 +429,17 @@ internal sealed class PdfDocumentWriter
                 b.Num(PX(r.X)).Sp().Num(PY(bottom, pageTop)).Sp().Num(r.W).Sp().Num(bottom - top).Ascii(" re f\n");
                 break;
             }
+            case GradientOp gr:
+            {
+                EndText(b);
+                float top = placed.Y0, bottom = placed.Y1;
+                // Gradient space is the op's box; the pattern maps it to the page.
+                var toPage = new Matrix(1, 0, 0, -1, PX(gr.X), PY(gr.Y, pageTop));
+                var name = AddPattern(gr.Gradient, toPage, 0, 0, gr.W, gr.H);
+                b.Ascii("q /Pattern cs /P").Int(name).Ascii(" scn ").Num(PX(gr.X)).Sp().Num(PY(bottom, pageTop)).Sp().Num(gr.W).Sp()
+                    .Num(bottom - top).Ascii(" re f Q\n");
+                break;
+            }
             case LineOp l:
             {
                 EndText(b);
@@ -489,41 +512,89 @@ internal sealed class PdfDocumentWriter
         float left = PX(op.X), top = PY(op.Y, pageTop);
         b.Ascii("q ").Num(left).Sp().Num(top - op.H).Sp().Num(op.W).Sp().Num(op.H).Ascii(" re W n\n");
         // User space (y down) to PDF space (y up).
-        b.Num(sx).Ascii(" 0 0 ").Num(-sy).Sp().Num(left + tx - vx * sx).Sp().Num(top - ty + vy * sy).Ascii(" cm\n");
+        var toPage = new Matrix(sx, 0, 0, -sy, left + tx - vx * sx, top - ty + vy * sy);
+        b.Num(sx).Ascii(" 0 0 ").Num(-sy).Sp().Num(toPage.E).Sp().Num(toPage.F).Ascii(" cm\n");
         foreach (var shape in img.Shapes)
         {
-            var pts = shape.Points;
-            int k = 0;
-            foreach (var verb in shape.Verbs)
+            switch (shape.Kind)
             {
-                switch (verb)
-                {
-                    case SvgShape.MoveTo: b.Num(pts[k]).Sp().Num(pts[k + 1]).Ascii(" m\n"); k += 2; break;
-                    case SvgShape.LineTo: b.Num(pts[k]).Sp().Num(pts[k + 1]).Ascii(" l\n"); k += 2; break;
-                    case SvgShape.CurveTo:
-                        b.Num(pts[k]).Sp().Num(pts[k + 1]).Sp().Num(pts[k + 2]).Sp().Num(pts[k + 3]).Sp().Num(pts[k + 4]).Sp().Num(pts[k + 5]).Ascii(" c\n");
-                        k += 6;
-                        break;
-                    default: b.Ascii("h\n"); break;
-                }
+                case SvgShape.KindClip:
+                    b.Ascii("q\n");
+                    WritePath(b, shape);
+                    b.Ascii(shape.EvenOdd ? "W* n\n" : "W n\n");
+                    continue;
+                case SvgShape.KindEndClip:
+                    b.Ascii("Q\n");
+                    continue;
+                case SvgShape.KindText:
+                    WriteSvgPaint(b, shape, toPage);
+                    var m = shape.TextMatrix;
+                    int mode = shape.HasFill ? (shape.HasStroke ? 2 : 0) : 1;
+                    b.Ascii("BT /F").Int(shape.Font!.Index + 1).Sp().Num(shape.FontSize).Ascii(" Tf ").Int(mode).Ascii(" Tr 0 Tw ")
+                        .Num(shape.CharSpacing).Ascii(" Tc ").Num6(m.A).Sp().Num6(m.B).Sp().Num6(m.C).Sp().Num6(m.D).Sp().Num(m.E).Sp().Num(m.F)
+                        .Ascii(" Tm ");
+                    WriteTextBytes(b, shape.Text!);
+                    b.Ascii(" Tj ET\n");
+                    continue;
             }
-            if (shape.Fill is { } fill)
-            {
-                WriteColor(b, fill);
-                b.Ascii(" rg\n");
-            }
-            if (shape.Stroke is { } stroke)
-            {
-                WriteColor(b, stroke);
-                b.Ascii(" RG ").Num(shape.StrokeWidth).Ascii(" w ").Int((int)shape.LineCap).Ascii(" J ").Int((int)shape.LineJoin).Ascii(" j ")
-                    .Num(shape.MiterLimit).Ascii(" M\n");
-            }
-            if (shape.Fill != null && shape.Stroke != null) b.Ascii(shape.EvenOdd ? "B*\n" : "B\n");
-            else if (shape.Fill != null) b.Ascii(shape.EvenOdd ? "f*\n" : "f\n");
+            WritePath(b, shape);
+            WriteSvgPaint(b, shape, toPage);
+            if (shape.HasFill && shape.HasStroke) b.Ascii(shape.EvenOdd ? "B*\n" : "B\n");
+            else if (shape.HasFill) b.Ascii(shape.EvenOdd ? "f*\n" : "f\n");
             else b.Ascii("S\n");
         }
         b.Ascii("Q\n");
         _fill = 1; // the colour set inside q/Q is gone: force the next fill colour to be written
+    }
+
+    private static void WritePath(ByteBuffer b, SvgShape shape)
+    {
+        var pts = shape.Points;
+        int k = 0;
+        foreach (var verb in shape.Verbs)
+        {
+            switch (verb)
+            {
+                case SvgShape.MoveTo: b.Num(pts[k]).Sp().Num(pts[k + 1]).Ascii(" m\n"); k += 2; break;
+                case SvgShape.LineTo: b.Num(pts[k]).Sp().Num(pts[k + 1]).Ascii(" l\n"); k += 2; break;
+                case SvgShape.CurveTo:
+                    b.Num(pts[k]).Sp().Num(pts[k + 1]).Sp().Num(pts[k + 2]).Sp().Num(pts[k + 3]).Sp().Num(pts[k + 4]).Sp().Num(pts[k + 5]).Ascii(" c\n");
+                    k += 6;
+                    break;
+                default: b.Ascii("h\n"); break;
+            }
+        }
+    }
+
+    /// <summary>Sets the fill and stroke of an SVG shape: colours, or shading patterns for gradients.</summary>
+    private void WriteSvgPaint(ByteBuffer b, SvgShape shape, Matrix toPage)
+    {
+        if (shape.FillGradient is { } fg)
+            b.Ascii("/Pattern cs /P").Int(AddPattern(fg, toPage, shape.MinX, shape.MinY, shape.MaxX, shape.MaxY)).Ascii(" scn\n");
+        else if (shape.Fill is { } fill)
+        {
+            WriteColor(b, fill);
+            b.Ascii(" rg\n");
+        }
+        if (!shape.HasStroke) return;
+        if (shape.StrokeGradient is { } sg)
+            b.Ascii("/Pattern CS /P").Int(AddPattern(sg, toPage, shape.MinX, shape.MinY, shape.MaxX, shape.MaxY)).Ascii(" SCN ");
+        else
+        {
+            WriteColor(b, shape.Stroke!.Value);
+            b.Ascii(" RG ");
+        }
+        b.Num(shape.StrokeWidth).Ascii(" w ").Int((int)shape.LineCap).Ascii(" J ").Int((int)shape.LineJoin).Ascii(" j ")
+            .Num(shape.MiterLimit).Ascii(" M\n");
+    }
+
+    /// <summary>Adds a shading pattern to the shared resources and returns its number.</summary>
+    private int AddPattern(Gradient g, Matrix toPage, float minX, float minY, float maxX, float maxY)
+    {
+        int n = ++_patternCount;
+        _patterns.Ascii(" /P").Int(n).Sp();
+        g.WritePattern(_patterns, toPage, minX, minY, maxX, maxY);
+        return n;
     }
 
     private void WriteMarginText(ByteBuffer b, StandardFont font, string template, int page, int pages, bool top)

@@ -293,13 +293,14 @@ public class LayoutFeatureTests
               <rect x="10" y="10" width="20" height="20" fill="#ff0000"/>
               <g transform="translate(100 0) scale(2)"><circle cx="5" cy="5" r="5" stroke="#0000ff" stroke-width="2"/></g>
               <path d="M0 0L10 10" fill="none"/>
-              <text x="0" y="0">not drawn</text>
+              <text x="0" y="0">drawn as text</text>
             </svg>
             """);
         var svg = SvgImage.Build(ById(doc, "s"));
         Near(75, svg.Width!.Value); Near(37.5f, svg.Height!.Value);
         Assert.True(svg.HasViewBox);
-        Assert.Equal(2, svg.Shapes.Count(s => s.Fill != null));
+        Assert.Equal(2, svg.Shapes.Count(s => s.Kind == SvgShape.KindPath && s.Fill != null));
+        Assert.Single(svg.Shapes, s => s.Kind == SvgShape.KindText);
         var circle = svg.Shapes.Single(s => s.Stroke != null);
         Near(4, circle.StrokeWidth);  // scaled by the group transform
         Assert.True(CssColor.TryParse("#00ff00", 0, out var green));

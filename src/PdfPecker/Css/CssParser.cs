@@ -330,13 +330,17 @@ internal static class CssParser
             case "background":
             {
                 string color = "transparent";
-                foreach (var tok in Tokens(value))
-                {
-                    var lower = tok.ToLowerInvariant();
-                    if (lower.StartsWith("url(", StringComparison.Ordinal) || lower.Contains("gradient(")) continue;
-                    if (CssColor.TryParse(tok, CssColor.Black, out _)) color = tok;
-                }
+                var images = new List<string>();
+                foreach (var layer in SplitTopLevel(value, ','))
+                    foreach (var tok in Tokens(layer))
+                    {
+                        var lower = tok.ToLowerInvariant();
+                        if (lower.Contains("gradient(")) images.Add(tok);
+                        else if (lower.StartsWith("url(", StringComparison.Ordinal)) continue;
+                        else if (CssColor.TryParse(tok, CssColor.Black, out _)) color = tok;
+                    }
                 Add("background-color", color);
+                Add("background-image", images.Count > 0 ? string.Join(", ", images) : "none");
                 return;
             }
             case "font":
@@ -400,21 +404,29 @@ internal static class CssParser
             {
                 var parts = SplitTopLevel(value, '/');
                 string start = parts.Count > 0 ? parts[0].Trim() : "auto";
-                string end = parts.Count > 1 ? parts[1].Trim() : "auto";
+                string end = parts.Count > 1 ? parts[1].Trim() : IdentOrAuto(start);
                 Add(name + "-start", start);
                 Add(name + "-end", end);
                 return;
             }
             case "grid-area":
             {
+                // Omitted values copy the matching start value when it is a name, otherwise they are auto.
                 var parts = SplitTopLevel(value, '/');
                 string Part(int k) => parts.Count > k ? parts[k].Trim() : "auto";
-                Add("grid-row-start", Part(0));
-                Add("grid-column-start", Part(1));
-                Add("grid-row-end", Part(2));
-                Add("grid-column-end", Part(3));
+                string rowStart = Part(0);
+                string colStart = parts.Count > 1 ? Part(1) : IdentOrAuto(rowStart);
+                string rowEnd = parts.Count > 2 ? Part(2) : IdentOrAuto(rowStart);
+                string colEnd = parts.Count > 3 ? Part(3) : IdentOrAuto(colStart);
+                Add("grid-row-start", rowStart);
+                Add("grid-column-start", colStart);
+                Add("grid-row-end", rowEnd);
+                Add("grid-column-end", colEnd);
                 return;
             }
+            case "grid-template":
+                ExpandGridTemplate(value, output, important);
+                return;
             case "place-items":
             case "place-content":
             case "place-self":
@@ -437,6 +449,60 @@ internal static class CssParser
                 output.Add(new Declaration(name, value, important));
                 return;
         }
+    }
+
+    private static string IdentOrAuto(string v)
+    {
+        var t = v.Trim();
+        return t.Length > 0 && (char.IsLetter(t[0]) || t[0] is '_' or '-') && !t.Equals("auto", StringComparison.OrdinalIgnoreCase)
+               && !t.StartsWith("span", StringComparison.OrdinalIgnoreCase) && t.All(c => char.IsLetterOrDigit(c) || c is '-' or '_')
+            ? t : "auto";
+    }
+
+    /// <summary>grid-template: none, "rows / columns", or area strings each optionally followed by a row size, then "/ columns".</summary>
+    private static void ExpandGridTemplate(string value, List<Declaration> output, bool important)
+    {
+        void Add(string n, string v) => output.Add(new Declaration(n, v, important));
+        var v = value.Trim();
+        if (v.Equals("none", StringComparison.OrdinalIgnoreCase))
+        {
+            Add("grid-template-rows", "none");
+            Add("grid-template-columns", "none");
+            Add("grid-template-areas", "none");
+            return;
+        }
+        var parts = SplitTopLevel(v, '/');
+        string rowsPart = parts.Count > 0 ? parts[0].Trim() : "";
+        string columns = parts.Count > 1 ? parts[1].Trim() : "none";
+        if (rowsPart.IndexOf('"') < 0 && rowsPart.IndexOf('\'') < 0)
+        {
+            Add("grid-template-rows", rowsPart.Length > 0 ? rowsPart : "none");
+            Add("grid-template-columns", columns);
+            Add("grid-template-areas", "none");
+            return;
+        }
+        var areas = new StringBuilder();
+        var rows = new StringBuilder();
+        bool pendingRow = false;
+        foreach (var tok in Tokens(rowsPart))
+        {
+            if (tok[0] is '"' or '\'')
+            {
+                if (pendingRow) rows.Append(" auto");
+                areas.Append(' ').Append(tok);
+                pendingRow = true;
+            }
+            else if (tok[0] == '[') rows.Append(' ').Append(tok);
+            else
+            {
+                rows.Append(' ').Append(tok);
+                pendingRow = false;
+            }
+        }
+        if (pendingRow) rows.Append(" auto");
+        Add("grid-template-areas", areas.ToString().Trim());
+        Add("grid-template-rows", rows.ToString().Trim());
+        Add("grid-template-columns", columns);
     }
 
     private static void ExpandFlex(string value, List<Declaration> output, bool important)
