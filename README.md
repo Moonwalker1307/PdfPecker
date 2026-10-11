@@ -82,6 +82,7 @@ var options = new PdfOptions
     UserStyleSheet = "body { font-size: 10pt }",      // extra CSS applied after the document's own
     FooterText = "Page {page} of {pages}",            // also HeaderText
     Title = "Invoice 42", Author = "Accounts",        // document properties (Title defaults to <title>)
+    Bookmarks = true,                                 // PDF bookmarks from h1-h6 (default)
     Compress = true,                                  // Flate-compress page content (default)
     AllowFileAccess = false,                          // block local file reads when converting untrusted HTML
 };
@@ -262,15 +263,15 @@ Selectors: type, `.class`, `#id`, `*`, attribute selectors (`[a]`, `=`, `~=`, `|
 | --- | --- |
 | Box model | `display` (block, inline, inline-block, flex, inline-flex, grid, inline-grid, list-item, table parts, none), `margin`, `padding`, `border` (solid, dashed, dotted, double), `width`, `height`, `min-`/`max-width`, `min-height`, `box-sizing` |
 | Text | `color`, `font`, `font-family`, `font-size`, `font-weight`, `font-style`, `line-height`, `text-align` (incl. justify), `text-decoration`, `text-transform`, `text-indent`, `letter-spacing`, `word-spacing`, `white-space`, `vertical-align` |
-| Backgrounds | `background-color`, `background` (colour part), `opacity` on SVG |
+| Backgrounds | `background-color`, `background-image` and `background` with `linear-gradient()`, `radial-gradient()`, `repeating-linear-gradient()` and `repeating-radial-gradient()` (several layers allowed), `opacity` on SVG |
 | Flexbox | `flex-direction`, `flex-wrap`, `flex-flow`, `flex`, `flex-grow`/`-shrink`/`-basis`, `order`, `justify-content`, `align-items`, `align-self`, `align-content`, `gap`, `margin: auto` |
-| Grid | `grid-template-columns`/`-rows` (lengths, `%`, `fr`, `auto`, `min-content`, `max-content`, `minmax()`, `fit-content()`, `repeat()` incl. `auto-fill`/`auto-fit`), `grid-auto-rows`/`-columns`, `grid-auto-flow`, `grid-column`/`-row` (line numbers and `span`), `grid-area`, `gap`, `justify-items`/`-self`, `align-items`/`-self`, `justify-content`, `align-content`, `place-*` |
+| Grid | `grid-template-columns`/`-rows` (lengths, `%`, `fr`, `auto`, `min-content`, `max-content`, `minmax()`, `fit-content()`, `repeat()` incl. `auto-fill`/`auto-fit`), `grid-auto-rows`/`-columns`, `grid-auto-flow`, `grid-template-areas`, `grid-template`, named lines (`[name]`), `grid-column`/`-row` (line numbers, names and `span`), `grid-area` (incl. area names), `gap`, `justify-items`/`-self`, `align-items`/`-self`, `justify-content`, `align-content`, `place-*` |
 | Columns | `column-count`, `column-width`, `columns`, `column-gap` |
 | Variables | custom properties (`--name: value`) and `var(--name, fallback)`, anywhere including shorthands |
-| SVG | `fill`, `stroke`, `stroke-width`, `fill-opacity`, `stroke-opacity`, `fill-rule`, `stroke-linecap`, `stroke-linejoin`, `stroke-miterlimit` (as CSS or presentation attributes) |
+| SVG | `fill`, `stroke`, `stroke-width`, `fill-opacity`, `stroke-opacity`, `fill-rule`, `stroke-linecap`, `stroke-linejoin`, `stroke-miterlimit`, `clip-path`, `clip-rule`, `text-anchor`, `dominant-baseline` (as CSS or presentation attributes) |
 | Lists | `list-style-type` (disc, circle, square, decimal, decimal-leading-zero, alpha, roman, none), `list-style` |
 | Tables | `border-collapse`, `border-spacing`, cell `vertical-align`, automatic column widths |
-| Paging | `page-break-before`/`after`/`inside`, `break-before`/`after`/`inside`, `@page` size and margins |
+| Paging | `page-break-before`/`after`/`inside`, `break-before`/`after`/`inside` (`always`, `page`, `avoid`), `orphans`, `widows`, `@page` size and margins |
 
 Units: `px`, `pt`, `em`, `rem`, `%`, `mm`, `cm`, `in`, `pc`, `ex`, `ch`, `vw`, `vh`, `vmin`, `vmax` (the viewport is
 the page's content area, minus any running header and footer). Colours: names, `#rgb`, `#rrggbb`,
@@ -278,7 +279,15 @@ the page's content area, minus any running header and footer). Colours: names, `
 
 **Pagination**: lines, images and table rows are never cut in half at a page boundary; table header rows repeat on
 every page a table spans; backgrounds and borders continue across pages. Flex lines and grid rows move to the next
-page as a whole when they don't fit.
+page as a whole when they don't fit. A paragraph that splits leaves at least `orphans` lines (default 2) at the bottom
+of a page and carries at least `widows` lines (default 2) to the next. Headings keep with the content that follows
+them (`break-after: avoid` in the default styles), and `break-before`/`break-after: avoid` does the same for any block.
+`break-inside: avoid` keeps a block or a whole table on one page when it fits.
+
+**Links and bookmarks**: `<a href>` becomes a clickable link, whether inline or a block (a card wrapped in a link),
+and stays clickable on both pages when a page break splits it. External URLs open in the viewer's browser and `#id`
+links jump to the element. Headings `h1`-`h6` become the PDF's bookmarks, nested by level; set
+`PdfOptions.Bookmarks = false` to leave them out.
 
 **Running header and footer**: an element with the `data-sticky-pdf-header` or `data-sticky-pdf-footer` attribute is
 taken out of the flow and drawn at the top or bottom of every page, and the page content flows in the space between.
@@ -292,8 +301,10 @@ Inside it, `{page}` and `{total-pages}` (or `{pages}`) are replaced with the pag
 ```
 
 **SVG**: inline `<svg>` with `path` (all commands, arcs included), `rect` (incl. rounded), `circle`, `ellipse`, `line`,
-`polyline`, `polygon`, `g`, `use`, nested `svg`, `viewBox`, `preserveAspectRatio` and `transform`, drawn as vector
-paths.
+`polyline`, `polygon`, `text` and `tspan` (`x`, `y`, `dx`, `dy`, `text-anchor`, `dominant-baseline`, standard fonts),
+`g`, `use`, nested `svg`, `viewBox`, `preserveAspectRatio` and `transform`, drawn as vector paths. `linearGradient` and
+`radialGradient` (both units, `gradientTransform`, `spreadMethod`, `href` inheritance) become PDF shadings, and
+`clipPath` clips the elements that reference it.
 
 **Images**: JPEG (embedded as-is, RGB, grayscale and CMYK) and PNG (all colour types and bit depths, transparency,
 interlacing), from files, `data:` URIs or your `ResourceResolver`. Opaque PNGs are passed through without
@@ -308,11 +319,12 @@ These are deliberate scope choices for speed and size; they are the first candid
 
 - Text uses the standard PDF fonts, so characters are limited to the Windows-1252 set (Western European languages).
   Other characters are replaced with `?`. Embedding TrueType fonts is not supported yet.
-- No JavaScript, forms, `float`, `position`, `::before`/`::after`, background images, gradients, `border-radius`,
+- No JavaScript, forms, `float`, `position`, `::before`/`::after`, `url()` background images, `border-radius`,
   shadows, transforms or GIF/WebP images. SVG files in `<img>` are not drawn.
-- Inline SVG: no `<text>`, embedded images, clipping, masks, patterns or filters; gradients are drawn in their average
-  colour.
-- Grid: no named lines or `grid-template-areas`, no `dense` packing, no subgrid.
+- Inline SVG: no embedded images, masks, patterns, markers or filters; `<text>` uses only the first value of
+  position lists and no `textPath` layout. Gradient stops with transparency are blended onto white (or, for CSS, onto
+  the element's background colour); `background-size`/`-position` do not apply to gradients.
+- Grid: no `dense` packing, no subgrid; `span <name>` counts as `span 1`.
 - Multi-column: children are kept whole and balanced between columns; a single block is never split across columns.
 - Translucent colours (`rgba`) are blended onto white instead of using real transparency.
 
@@ -364,8 +376,8 @@ and `Markdown/HtmlRenderer` writes the HTML, which then takes the same path as a
    styles. Rules are indexed by id, class and tag, and elements with identical inputs share one computed style.
 3. `Layout/LayoutEngine` lays out blocks, inline text (line breaking, justification), lists and tables
    (automatic column widths), paginating as it goes, and produces a flat list of draw operations.
-4. `Pdf/PdfDocumentWriter` writes PDF 1.4: content streams, standard fonts, image XObjects, link annotations and
-   the cross-reference table.
+4. `Pdf/PdfDocumentWriter` writes PDF 1.4: content streams, standard fonts, image XObjects, link annotations,
+   the bookmark outline and the cross-reference table.
 
 The renderer (`Rendering/`) works the other way round: `Parsing/PdfFile` reads the object graph, `PageRenderer`
 interprets content streams, `Fonts/` turns glyphs into outlines (cached as anti-aliased bitmaps), `Images/` decodes
