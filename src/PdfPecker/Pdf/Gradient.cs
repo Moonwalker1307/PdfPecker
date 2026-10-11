@@ -52,7 +52,18 @@ internal sealed class Gradient
     {
         var m = Transform.Then(toPage);
         b.Ascii("<< /PatternType 2 /Matrix [").Num6(m.A).Sp().Num6(m.B).Sp().Num6(m.C).Sp().Num6(m.D).Sp().Num(m.E).Sp().Num(m.F)
-            .Ascii("] /Shading << /ShadingType ").Int(Radial ? 3 : 2).Ascii(" /ColorSpace /DeviceRGB /Coords [");
+            .Ascii("] /Shading ");
+        WriteShading(b, minX, minY, maxX, maxY);
+        b.Ascii(" >>");
+    }
+
+    /// <summary>
+    /// Writes the shading dictionary in gradient space (before <see cref="Transform"/>). The bounds are in the painted
+    /// shape's space, as for <see cref="WritePattern"/>.
+    /// </summary>
+    public void WriteShading(Pdf.ByteBuffer b, float minX, float minY, float maxX, float maxY)
+    {
+        b.Ascii("<< /ShadingType ").Int(Radial ? 3 : 2).Ascii(" /ColorSpace /DeviceRGB /Coords [");
 
         // Tiling range: gradient parameter values t covered by the shape (repeat and reflect only).
         float t0 = 0, t1 = 1;
@@ -86,7 +97,7 @@ internal sealed class Gradient
             }
             b.Ascii("] >>");
         }
-        b.Ascii(" >> >>");
+        b.Ascii(" >>");
     }
 
     /// <summary>The colour function over [0, 1]: constant before the first stop and after the last, linear in between.</summary>

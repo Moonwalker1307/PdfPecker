@@ -41,6 +41,8 @@ internal sealed class PdfDocumentWriter
     private float _yOrigin; // distance from the page top to flow y = 0 on the page being written
     private readonly ByteBuffer _patterns = new(256); // "/P1 << ... >>" entries for the shared resources
     private int _patternCount;
+    private readonly List<(int Name, byte[] Content, string Dict)> _tilings = new(); // tiling patterns, written as /T1, /T2, ...
+    private List<PdfImage> _imageList = new(); // the images written, by image number - 1
 
     /// <summary>Stamp on every page.</summary>
     public PdfWatermark? Watermark { get; init; }
@@ -130,9 +132,12 @@ internal sealed class PdfDocumentWriter
                 case RectOp r:
                     if (r.W > 0 && r.H > 0) AddSplit(r, r.Y, r.Y + r.H);
                     break;
-                case GradientOp gr:
-                    if (gr.W > 0 && gr.H > 0) AddSplit(gr, gr.Y, gr.Y + gr.H);
+                case BackgroundOp bg:
+                {
+                    var (x0, y0, x1, y1) = bg.Painted();
+                    if (x1 > x0 && y1 > y0) AddSplit(bg, y0, y1);
                     break;
+                }
                 case LineOp l:
                     if (l.X1 == l.X2) AddSplit(l, l.Y1, l.Y2);
                     else PageList(PageOf(l.Y1)).Add(new Placed(l, l.Y1, l.Y2));
@@ -172,7 +177,12 @@ internal sealed class PdfDocumentWriter
                 {
                     case GroupOp g: foreach (var o in g.Ops) Flatten(o); break;
                     case RectOp r: if (r.W > 0 && r.H > 0) list.Add(new Placed(r, r.Y, r.Y + r.H)); break;
-                    case GradientOp gr: if (gr.W > 0 && gr.H > 0) list.Add(new Placed(gr, gr.Y, gr.Y + gr.H)); break;
+                    case BackgroundOp bg:
+                    {
+                        var (_, y0, _, y1) = bg.Painted();
+                        list.Add(new Placed(bg, y0, y1));
+                        break;
+                    }
                     case LineOp l: list.Add(new Placed(l, l.Y1, l.Y2)); break;
                     case LinkOp lk: list.Add(new Placed(lk, lk.Y, lk.Y + lk.H)); break;
                     default: list.Add(new Placed(op, 0, 0)); break;
@@ -202,6 +212,11 @@ internal sealed class PdfDocumentWriter
                 {
                     imageIds[im.Image] = images.Count + 1;
                     images.Add(im.Image);
+                }
+                else if (p.Op is BackgroundOp { Image: { } bgImage } && !imageIds.ContainsKey(bgImage))
+                {
+                    imageIds[bgImage] = images.Count + 1;
+                    images.Add(bgImage);
                 }
             }
         bool hasMargins = footerTemplate != null || headerTemplate != null;
@@ -249,6 +264,7 @@ internal sealed class PdfDocumentWriter
             }
         }
         if (Security != null) _crypt = new PdfEncryptor(Security);
+        _imageList = images;
 
         // 3. Object numbers.
         int next = 1;
@@ -475,6 +491,14 @@ internal sealed class PdfDocumentWriter
             Begin(encryptId);
             _crypt.WriteDictionary(_out);
             End();
+        }
+
+        // Tiling patterns of repeated backgrounds, collected while writing the pages.
+        foreach (var (n, tileContent, tileDict) in _tilings)
+        {
+            int id = next++;
+            WriteStream(id, tileContent, _compress, tileDict);
+            _patterns.Ascii(" /T").Int(n).Sp().Int(id).Ascii(" 0 R");
         }
 
         // Shared resources, written last: shading patterns are collected while writing the pages.
@@ -776,17 +800,10 @@ internal sealed class PdfDocumentWriter
                 b.Num(PX(r.X)).Sp().Num(PY(bottom, pageTop)).Sp().Num(r.W).Sp().Num(bottom - top).Ascii(" re f\n");
                 break;
             }
-            case GradientOp gr:
-            {
+            case BackgroundOp bg:
                 EndText(b);
-                float top = placed.Y0, bottom = placed.Y1;
-                // Gradient space is the op's box; the pattern maps it to the page.
-                var toPage = new Matrix(1, 0, 0, -1, PX(gr.X), PY(gr.Y, pageTop));
-                var name = AddPattern(gr.Gradient, toPage, 0, 0, gr.W, gr.H);
-                b.Ascii("q /Pattern cs /P").Int(name).Ascii(" scn ").Num(PX(gr.X)).Sp().Num(PY(bottom, pageTop)).Sp().Num(gr.W).Sp()
-                    .Num(bottom - top).Ascii(" re f Q\n");
+                WriteBackground(b, bg, placed, pageTop, imageIds);
                 break;
-            }
             case LineOp l:
             {
                 EndText(b);
@@ -937,6 +954,63 @@ internal sealed class PdfDocumentWriter
         }
         b.Num(shape.StrokeWidth).Ascii(" w ").Int((int)shape.LineCap).Ascii(" J ").Int((int)shape.LineJoin).Ascii(" j ")
             .Num(shape.MiterLimit).Ascii(" M\n");
+    }
+
+    /// <summary>Draws one background layer: a single clipped tile, or a tiling pattern filling the painted area.</summary>
+    private void WriteBackground(ByteBuffer b, BackgroundOp bg, in Placed placed, float pageTop, Dictionary<PdfImage, int> imageIds)
+    {
+        var (x0, y0, x1, y1) = bg.Painted();
+        y0 = Math.Max(y0, placed.Y0);
+        y1 = Math.Min(y1, placed.Y1);
+        if (!(x1 > x0 && y1 > y0)) return;
+        float tx = PX(bg.TileX), tw = bg.TileW, th = bg.TileH;
+        const float eps = 0.01f;
+        bool single = (!bg.RepeatX || bg.TileX <= x0 + eps && bg.TileX + tw >= x1 - eps)
+                      && (!bg.RepeatY || bg.TileY <= y0 + eps && bg.TileY + th >= y1 - eps);
+        if (single && bg.Gradient is { } g)
+        {
+            // Gradient space is the tile; the pattern maps it to the page.
+            var toPage = new Matrix(1, 0, 0, -1, tx, PY(bg.TileY, pageTop));
+            int name = AddPattern(g, toPage, x0 - bg.TileX, y0 - bg.TileY, x1 - bg.TileX, y1 - bg.TileY);
+            b.Ascii("q /Pattern cs /P").Int(name).Ascii(" scn ");
+            b.Num(PX(x0)).Sp().Num(PY(y1, pageTop)).Sp().Num(x1 - x0).Sp().Num(y1 - y0).Ascii(" re f Q\n");
+            return;
+        }
+        if (single)
+        {
+            b.Ascii("q ").Num(PX(x0)).Sp().Num(PY(y1, pageTop)).Sp().Num(x1 - x0).Sp().Num(y1 - y0).Ascii(" re W n ")
+                .Num(tw).Ascii(" 0 0 ").Num(th).Sp().Num(tx).Sp().Num(PY(bg.TileY + th, pageTop))
+                .Ascii(" cm /Im").Int(imageIds[bg.Image!]).Ascii(" Do Q\n");
+            return;
+        }
+
+        // A tiling pattern whose cell is the tile, its origin at the tile's bottom-left corner.
+        var cell = new ByteBuffer(64);
+        var dict = new ByteBuffer(256);
+        dict.Ascii("/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 ").Num(tw).Sp().Num(th)
+            .Ascii("] /XStep ").Num(Math.Max(bg.StepX, tw)).Ascii(" /YStep ").Num(Math.Max(bg.StepY, th))
+            .Ascii(" /Matrix [1 0 0 1 ").Num(tx).Sp().Num(PY(bg.TileY + th, pageTop)).Ascii("] /Resources << ");
+        if (bg.Gradient is { } tg)
+        {
+            var m = tg.Transform;
+            cell.Ascii("1 0 0 -1 0 ").Num(th).Ascii(" cm ").Num6(m.A).Sp().Num6(m.B).Sp().Num6(m.C).Sp().Num6(m.D).Sp().Num(m.E).Sp().Num(m.F)
+                .Ascii(" cm /Sh1 sh\n");
+            dict.Ascii("/Shading << /Sh1 ");
+            tg.WriteShading(dict, 0, 0, tw, th);
+            dict.Ascii(" >>");
+        }
+        else
+        {
+            // The written image: PDF/A may have replaced a CMYK image with an RGB copy.
+            var image = _imageList[imageIds[bg.Image!] - 1];
+            cell.Num(tw).Ascii(" 0 0 ").Num(th).Ascii(" 0 0 cm /Im1 Do\n");
+            dict.Ascii("/XObject << /Im1 ").Int(image.ObjectNumber).Ascii(" 0 R >>");
+        }
+        dict.Ascii(" >>");
+        int n = _tilings.Count + 1;
+        _tilings.Add((n, cell.Span.ToArray(), System.Text.Encoding.ASCII.GetString(dict.Span)));
+        b.Ascii("q /Pattern cs /T").Int(n).Ascii(" scn ");
+        b.Num(PX(x0)).Sp().Num(PY(y1, pageTop)).Sp().Num(x1 - x0).Sp().Num(y1 - y0).Ascii(" re f Q\n");
     }
 
     /// <summary>Adds a shading pattern to the shared resources and returns its number.</summary>

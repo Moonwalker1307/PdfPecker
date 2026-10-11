@@ -340,21 +340,8 @@ internal static class CssParser
                 return;
             }
             case "background":
-            {
-                string color = "transparent";
-                var images = new List<string>();
-                foreach (var layer in SplitTopLevel(value, ','))
-                    foreach (var tok in Tokens(layer))
-                    {
-                        var lower = tok.ToLowerInvariant();
-                        if (lower.Contains("gradient(")) images.Add(tok);
-                        else if (lower.StartsWith("url(", StringComparison.Ordinal)) continue;
-                        else if (CssColor.TryParse(tok, CssColor.Black, out _)) color = tok;
-                    }
-                Add("background-color", color);
-                Add("background-image", images.Count > 0 ? string.Join(", ", images) : "none");
+                CssBackground.ExpandShorthand(value, Add);
                 return;
-            }
             case "font":
                 ExpandFont(value, output, important);
                 return;
