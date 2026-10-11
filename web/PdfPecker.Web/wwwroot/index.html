@@ -85,6 +85,9 @@
   <label><input type="checkbox" id="landscape"> Landscape</label>
   <label>Margin (mm) <input type="number" id="margin" value="12.7" min="0" max="50" step="0.1"></label>
   <label><input type="checkbox" id="pageNumbers" checked> Page numbers</label>
+  <label>Watermark <input type="text" id="watermark" size="10" maxlength="200" placeholder="none"></label>
+  <label>Password <input type="password" id="password" size="8" autocomplete="new-password" placeholder="none"></label>
+  <label title="Archival PDF/A-2b; cannot be combined with a password"><input type="checkbox" id="pdfa"> PDF/A</label>
   <span class="spacer"></span>
   <label class="button" for="file">Open file</label>
   <input type="file" id="file" accept=".html,.htm,.md,.markdown,text/html,text/markdown" hidden>
@@ -251,6 +254,9 @@ async function convert() {
         landscape: $("landscape").checked,
         marginMm: parseFloat($("margin").value) || 0,
         pageNumbers: $("pageNumbers").checked,
+        watermark: $("watermark").value,
+        password: $("password").value,
+        pdfa: $("pdfa").checked,
         fileName,
       }),
     });
@@ -312,7 +318,7 @@ document.addEventListener("drop", e => {
   document.body.classList.remove("dragging");
   openFile(e.dataTransfer.files[0]);
 });
-for (const id of ["pageSize", "landscape", "pageNumbers"]) $(id).addEventListener("change", convert);
+for (const id of ["pageSize", "landscape", "pageNumbers", "watermark", "password", "pdfa"]) $(id).addEventListener("change", convert);
 $("inputFormat").addEventListener("change", e => { setInputFormat(e.target.value); convert(); });
 $("output").addEventListener("change", () => { updateOutputLabel(); convert(); });
 $("margin").addEventListener("change", convert);
