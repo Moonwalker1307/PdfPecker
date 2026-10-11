@@ -666,9 +666,19 @@ internal sealed class StyleResolver
                 break;
             case "break-before":
                 s.PageBreakBefore = lower is "always" or "page" or "left" or "right" or "recto" or "verso";
+                s.AvoidBreakBefore = lower is "avoid" or "avoid-page";
                 break;
             case "break-after":
                 s.PageBreakAfter = lower is "always" or "page" or "left" or "right" or "recto" or "verso";
+                s.AvoidBreakAfter = lower is "avoid" or "avoid-page";
+                break;
+            case "orphans":
+                if (inherit) s.Orphans = parent.Orphans;
+                else if (int.TryParse(lower, out int orphans) && orphans > 0) s.Orphans = orphans;
+                break;
+            case "widows":
+                if (inherit) s.Widows = parent.Widows;
+                else if (int.TryParse(lower, out int widows) && widows > 0) s.Widows = widows;
                 break;
             case "break-inside":
                 s.AvoidBreakInside = lower is "avoid" or "avoid-page";

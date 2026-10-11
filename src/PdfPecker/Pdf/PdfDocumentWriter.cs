@@ -50,7 +50,7 @@ internal sealed class PdfDocumentWriter
 
     public byte[] Write(List<DrawOp> ops, float contentHeight, IReadOnlyDictionary<string, float> anchors, uint pageBackground,
         string? title, string? author, string? subject, string? footerTemplate, string? headerTemplate,
-        Func<int, int, List<DrawOp>>? pageBands = null)
+        Func<int, int, List<DrawOp>>? pageBands = null, IReadOnlyList<OutlineHeading>? outline = null)
     {
         float H = _page.FlowHeight;
         int PageOf(float y) => Math.Max(0, (int)Math.Floor((y + 0.01f) / H));
@@ -96,7 +96,7 @@ internal sealed class PdfDocumentWriter
                     PageList(PageOf(sv.Y)).Add(new Placed(sv, 0, 0));
                     break;
                 case LinkOp lk:
-                    PageList(PageOf(lk.Y)).Add(new Placed(lk, 0, 0));
+                    if (lk.W > 0 && lk.H > 0) AddSplit(lk, lk.Y, lk.Y + lk.H); // a link box split by a page break is clickable on both pages
                     break;
                 case CircleOp c:
                     PageList(PageOf(c.Cy - c.R)).Add(new Placed(c, 0, 0));
@@ -121,6 +121,7 @@ internal sealed class PdfDocumentWriter
                     case GroupOp g: foreach (var o in g.Ops) Flatten(o); break;
                     case RectOp r: if (r.W > 0 && r.H > 0) list.Add(new Placed(r, r.Y, r.Y + r.H)); break;
                     case LineOp l: list.Add(new Placed(l, l.Y1, l.Y2)); break;
+                    case LinkOp lk: list.Add(new Placed(lk, lk.Y, lk.Y + lk.H)); break;
                     default: list.Add(new Placed(op, 0, 0)); break;
                 }
             }
@@ -158,12 +159,22 @@ internal sealed class PdfDocumentWriter
         var pageIds = new int[pageCount];
         var contentIds = new int[pageCount];
         for (int i = 0; i < pageCount; i++) { pageIds[i] = next++; contentIds[i] = next++; }
+        _pageIds = pageIds;
+        var outlineItems = BuildOutline(outline, anchors);
+        int outlinesId = 0;
+        if (outlineItems.Count > 0)
+        {
+            outlinesId = next++;
+            foreach (var item in outlineItems) item.Id = next++;
+        }
 
         // 4. Header.
         _out.Ascii("%PDF-1.4\n%").Bytes(new byte[] { 0xE2, 0xE3, 0xCF, 0xD3 }).Nl();
 
         // Catalog, pages tree.
-        Begin(catalogId).Ascii("<< /Type /Catalog /Pages ").Int(pagesId).Ascii(" 0 R >>");
+        Begin(catalogId).Ascii("<< /Type /Catalog /Pages ").Int(pagesId).Ascii(" 0 R");
+        if (outlinesId != 0) _out.Ascii(" /Outlines ").Int(outlinesId).Ascii(" 0 R");
+        _out.Ascii(" >>");
         End();
         Begin(pagesId).Ascii("<< /Type /Pages /Count ").Int(pageCount).Ascii(" /Kids [");
         for (int i = 0; i < pageCount; i++) _out.Int(pageIds[i]).Ascii(" 0 R ");
@@ -211,7 +222,7 @@ internal sealed class PdfDocumentWriter
 
         // Pages, contents, annotations.
         var content = new ByteBuffer(32 * 1024);
-        var annotations = new List<(int Id, LinkOp Link, float Origin, float PageTop)>();
+        var annotations = new List<(int Id, Placed Link, float Origin, float PageTop)>();
         for (int p = 0; p < pageCount; p++)
         {
             content.Clear();
@@ -221,17 +232,17 @@ internal sealed class PdfDocumentWriter
                 SetFill(content, pageBackground);
                 content.Ascii("0 0 ").Num(_page.Width).Sp().Num(_page.Height).Ascii(" re f\n");
             }
-            var pageLinks = new List<(LinkOp Link, float Origin, float PageTop)>();
+            var pageLinks = new List<(Placed Link, float Origin, float PageTop)>();
             _yOrigin = _page.MarginTop + _page.BandTop;
             foreach (var placed in pages[p])
             {
-                if (placed.Op is LinkOp lk) { pageLinks.Add((lk, _yOrigin, p * H)); continue; }
+                if (placed.Op is LinkOp) { pageLinks.Add((placed, _yOrigin, p * H)); continue; }
                 WriteOp(content, placed, p * H, imageIds);
             }
             _yOrigin = _page.MarginTop;
             foreach (var placed in bands[p])
             {
-                if (placed.Op is LinkOp lk) { pageLinks.Add((lk, _yOrigin, 0)); continue; }
+                if (placed.Op is LinkOp) { pageLinks.Add((placed, _yOrigin, 0)); continue; }
                 WriteOp(content, placed, 0, imageIds);
             }
             if (hasMargins)
@@ -265,20 +276,21 @@ internal sealed class PdfDocumentWriter
             WriteStream(contentIds[p], content.Span, _compress, extraDict: null);
         }
 
-        foreach (var (id, link, origin, linkPageTop) in annotations)
+        foreach (var (id, placed, origin, linkPageTop) in annotations)
         {
+            var link = (LinkOp)placed.Op;
             float x1 = _page.MarginLeft + link.X, x2 = x1 + link.W;
-            float yTop = _page.Height - origin - (link.Y - linkPageTop);
-            float yBottom = yTop - link.H;
+            float yTop = _page.Height - origin - (placed.Y0 - linkPageTop);
+            float yBottom = yTop - (placed.Y1 - placed.Y0);
             Begin(id).Ascii("<< /Type /Annot /Subtype /Link /Rect [").Num(x1).Sp().Num(yBottom).Sp().Num(x2).Sp().Num(yTop)
                 .Ascii("] /Border [0 0 0] ");
             if (link.Target.StartsWith("#", StringComparison.Ordinal))
             {
-                if (anchors.TryGetValue(link.Target.Substring(1), out float ay))
+                if (anchors.TryGetValue(Uri.UnescapeDataString(link.Target.Substring(1)), out float ay)
+                    || anchors.TryGetValue(link.Target.Substring(1), out ay))
                 {
-                    int ap = Math.Min(PageOf(ay), pageCount - 1);
-                    float py = _page.Height - _page.MarginTop - _page.BandTop - (ay - ap * H);
-                    _out.Ascii("/Dest [").Int(pageIds[ap]).Ascii(" 0 R /XYZ 0 ").Num(py).Ascii(" null]");
+                    _out.Ascii("/Dest ");
+                    WriteDest(ay);
                 }
             }
             else
@@ -289,6 +301,30 @@ internal sealed class PdfDocumentWriter
             }
             _out.Ascii(" >>");
             End();
+        }
+
+        // Bookmarks.
+        if (outlinesId != 0)
+        {
+            var top = outlineItems.Where(o => o.Parent == null).ToList();
+            Begin(outlinesId).Ascii("<< /Type /Outlines /First ").Int(top[0].Id).Ascii(" 0 R /Last ").Int(top[^1].Id)
+                .Ascii(" 0 R /Count ").Int(outlineItems.Count).Ascii(" >>");
+            End();
+            foreach (var item in outlineItems)
+            {
+                Begin(item.Id).Ascii("<< /Title ");
+                WriteTextString(_out, item.Title);
+                _out.Ascii(" /Parent ").Int(item.Parent?.Id ?? outlinesId).Ascii(" 0 R");
+                if (item.Prev != null) _out.Ascii(" /Prev ").Int(item.Prev.Id).Ascii(" 0 R");
+                if (item.Next != null) _out.Ascii(" /Next ").Int(item.Next.Id).Ascii(" 0 R");
+                if (item.Children.Count > 0)
+                    _out.Ascii(" /First ").Int(item.Children[0].Id).Ascii(" 0 R /Last ").Int(item.Children[^1].Id)
+                        .Ascii(" 0 R /Count ").Int(item.Descendants);
+                _out.Ascii(" /Dest ");
+                WriteDest(item.Y);
+                _out.Ascii(" >>");
+                End();
+            }
         }
 
         // Cross-reference table and trailer.
@@ -306,6 +342,48 @@ internal sealed class PdfDocumentWriter
         return _out.Span.ToArray();
     }
 
+    // ------------------------------------------------------------------ outline
+
+    private sealed class OutlineItem
+    {
+        public string Title = "";
+        public int Level, Id, Descendants;
+        public float Y;
+        public OutlineItem? Parent, Prev, Next;
+        public readonly List<OutlineItem> Children = new();
+    }
+
+    /// <summary>Nests the headings by level: a heading becomes a child of the nearest earlier heading of a higher level.</summary>
+    private static List<OutlineItem> BuildOutline(IReadOnlyList<OutlineHeading>? headings, IReadOnlyDictionary<string, float> anchors)
+    {
+        var all = new List<OutlineItem>();
+        if (headings == null) return all;
+        var stack = new List<OutlineItem>();
+        OutlineItem? lastTop = null;
+        foreach (var h in headings)
+        {
+            if (!anchors.TryGetValue(h.Key, out float y)) continue;
+            var item = new OutlineItem { Title = h.Title, Level = h.Level, Y = y };
+            while (stack.Count > 0 && stack[^1].Level >= h.Level) stack.RemoveAt(stack.Count - 1);
+            if (stack.Count > 0)
+            {
+                var parent = stack[^1];
+                item.Parent = parent;
+                if (parent.Children.Count > 0) { item.Prev = parent.Children[^1]; item.Prev.Next = item; }
+                parent.Children.Add(item);
+                for (var p = parent; p != null; p = p.Parent) p.Descendants++;
+            }
+            else
+            {
+                if (lastTop != null) { item.Prev = lastTop; lastTop.Next = item; }
+                lastTop = item;
+            }
+            stack.Add(item);
+            all.Add(item);
+        }
+        return all;
+    }
+
     // ------------------------------------------------------------------ objects
 
     private ByteBuffer Begin(int id)
@@ -316,6 +394,17 @@ internal sealed class PdfDocumentWriter
     }
 
     private void End() => _out.Ascii("\nendobj\n");
+
+    private int[] _pageIds = Array.Empty<int>();
+
+    /// <summary>Writes an explicit destination for flow position <paramref name="y"/>: its page, scrolled to that height.</summary>
+    private void WriteDest(float y)
+    {
+        float h = _page.FlowHeight;
+        int p = Math.Clamp((int)Math.Floor((y + 0.01f) / h), 0, _pageIds.Length - 1);
+        float py = _page.Height - _page.MarginTop - _page.BandTop - (y - p * h);
+        _out.Ascii("[").Int(_pageIds[p]).Ascii(" 0 R /XYZ 0 ").Num(Math.Min(py, _page.Height)).Ascii(" null]");
+    }
 
     private void WriteStream(int id, ReadOnlySpan<byte> data, bool compress, string? extraDict)
     {
