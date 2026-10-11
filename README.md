@@ -31,6 +31,35 @@ dotnet add <your project> package PdfPecker
 
 The package targets `net10.0` and works on .NET 10 and later.
 
+## System requirements
+
+**Required:** the .NET 10 runtime (or later). Nothing else: the library is pure managed code with no native
+binaries, browser or third-party packages, so it runs wherever .NET 10 runs (Windows, Linux, macOS; x64 and ARM64).
+
+**Recommended:**
+
+- Register the fonts your templates use with `options.Fonts` (see [Fonts](#fonts)); other fonts fall back to Helvetica,
+  Times or Courier metrics.
+- Memory and CPU are small. Measured on a 4-core 2.1 GHz Xeon cloud VM (Linux, .NET 10, Release), each document in a
+  fresh process:
+
+  | Document | Pages | Time, warm | Time, first in process | Peak process memory | Smallest heap that works |
+  | --- | --- | --- | --- | --- | --- |
+  | Payslip, invoice, voucher | 1 to 3 | 1 to 3 ms | 0.2 s | 50 MB | under 16 MB |
+  | Same with PDF/A or embedded fonts | 1 to 3 | 3 to 5 ms | 0.2 s | 56 MB | under 16 MB |
+  | Report with tables | 30 | 30 to 40 ms | 0.3 s | 75 MB | under 16 MB |
+  | Report with tables | 1,000 | 1.7 s | 3 s | 480 MB | 245 MB |
+
+  The process itself starts at about 32 MB; a conversion uses about one core, so throughput grows with cores. PDF/A and
+  font embedding add a few milliseconds and about 5 MB for the embedded font data. Memory grows roughly with page
+  count, so plan about 0.5 MB per page for very long documents.
+- For the website and API container, give it about 2 GB (`--memory 2g`). It runs one conversion per 512 MB of its memory
+  limit (up to one per core) and refuses documents over 1,000 pages, so 2 GB lets four large documents convert at once.
+  Behind a proxy, set `TrustedProxies` (see [Website](#website)).
+
+`dotnet run --project bench/PdfPecker.Benchmarks -c Release -- --requirements [your.html ...]` measures this on your
+own machine and documents.
+
 ## Usage
 
 ```csharp
@@ -463,6 +492,7 @@ dotnet build
 dotnet test
 dotnet run --project samples/PdfPecker.Sample -c Release      # converts samples/PdfPecker.Sample/html/*.html and *.md into ./output
 dotnet run --project bench/PdfPecker.Benchmarks -c Release
+dotnet run --project bench/PdfPecker.Benchmarks -c Release -- --requirements    # memory and CPU per conversion
 dotnet pack src/PdfPecker -c Release -o ./nupkg
 ```
 
