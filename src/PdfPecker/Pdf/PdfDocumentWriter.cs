@@ -68,6 +68,9 @@ internal sealed class PdfDocumentWriter
     /// <summary>Stops writing when cancelled.</summary>
     public CancellationToken Cancellation { get; init; }
 
+    /// <summary>Keywords, Creator, Producer and custom entries for the document information dictionary (and the XMP for PDF/A).</summary>
+    public DocumentProperties Properties { get; init; } = new();
+
     private bool EmbedStandard => EmbedStandardFonts || Conformance != PdfConformance.None;
 
     /// <summary>The font that draws a run: standard fonts become their bundled replacements when they must be embedded.</summary>
@@ -313,33 +316,16 @@ internal sealed class PdfDocumentWriter
         // Info.
         var now = DateTime.UtcNow;
         now = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerSecond));
-        if (pdfa)
-        {
-            // Info and XMP must agree, and XML cannot carry control characters.
-            title = Clean(title);
-            author = Clean(author);
-            subject = Clean(subject);
-        }
-        string date = "D:" + now.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture) + "Z";
-        Begin(infoId).Ascii("<< /Producer ");
-        WriteTextString(_out, "PdfPecker");
-        if (!string.IsNullOrEmpty(title)) { _out.Ascii(" /Title "); WriteTextString(_out, title!); }
-        if (!string.IsNullOrEmpty(author)) { _out.Ascii(" /Author "); WriteTextString(_out, author!); }
-        if (!string.IsNullOrEmpty(subject)) { _out.Ascii(" /Subject "); WriteTextString(_out, subject!); }
-        _out.Ascii(" /CreationDate ");
-        WriteTextString(_out, date);
-        if (pdfa)
-        {
-            _out.Ascii(" /ModDate ");
-            WriteTextString(_out, date);
-        }
-        _out.Ascii(" >>");
+        var props = Properties.WithStandard(title, author, subject);
+        if (pdfa) props = props.Cleaned(); // Info and XMP must agree, and XML cannot carry control characters.
+        Begin(infoId);
+        props.WriteInfo(_out, now, modDate: pdfa, WriteTextString);
         End();
 
         if (pdfa)
         {
             int part = Conformance == PdfConformance.PdfA3b ? 3 : 2;
-            var xmp = PdfA.Xmp(part, "B", title, author, subject, "PdfPecker", now);
+            var xmp = PdfA.Xmp(part, "B", props, now);
             WriteStream(metadataId, xmp, compress: false, "/Type /Metadata /Subtype /XML");
             Begin(outputIntentId).Ascii("<< /Type /OutputIntent /S /GTS_PDFA1 /OutputConditionIdentifier ");
             WriteTextString(_out, PdfA.OutputCondition);
@@ -724,15 +710,6 @@ internal sealed class PdfDocumentWriter
         if (image != null) dict.Ascii(" /XObject << /Iw ").Int(image.ObjectNumber).Ascii(" 0 R >>");
         dict.Ascii(" >>");
         WriteStream(id, b.Span, _compress, System.Text.Encoding.ASCII.GetString(dict.Span));
-    }
-
-    private static string? Clean(string? s)
-    {
-        if (s == null) return null;
-        foreach (char ch in s)
-            if (ch < 0x20 && ch is not ('\t' or '\n' or '\r'))
-                return new string(s.Where(x => x >= 0x20 || x is '\t' or '\n' or '\r').ToArray());
-        return s;
     }
 
     // ------------------------------------------------------------------ content streams

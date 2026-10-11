@@ -107,33 +107,83 @@ internal static class PdfA
     }
 
     /// <summary>The XMP packet. Its values must match the document information dictionary.</summary>
-    public static byte[] Xmp(int part, string conformance, string? title, string? author, string? subject, string producer, DateTime created)
+    public static byte[] Xmp(int part, string conformance, DocumentProperties props, DateTime created)
     {
         string date = created.ToString("yyyy-MM-dd'T'HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture) + "Z";
+        var custom = XmpCustomProperties(props.Custom);
         var sb = new StringBuilder(1500);
-        sb.Append("<?xpacket begin=\"﻿\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n")
+        sb.Append("<?xpacket begin=\"\uFEFF\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n")
           .Append("<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n")
           .Append("<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n")
           .Append("<rdf:Description rdf:about=\"\" xmlns:pdfaid=\"http://www.aiim.org/pdfa/ns/id/\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\"")
-          .Append(" xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\" xmlns:pdf=\"http://ns.adobe.com/pdf/1.3/\">\n")
+          .Append(" xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\" xmlns:pdf=\"http://ns.adobe.com/pdf/1.3/\"");
+        if (custom.Count > 0) sb.Append(" xmlns:pdfx=\"").Append(PdfxNamespace).Append('"');
+        sb.Append(">\n")
           .Append("<pdfaid:part>").Append(part).Append("</pdfaid:part>\n")
           .Append("<pdfaid:conformance>").Append(conformance).Append("</pdfaid:conformance>\n")
           .Append("<dc:format>application/pdf</dc:format>\n");
-        if (!string.IsNullOrEmpty(title))
-            sb.Append("<dc:title><rdf:Alt><rdf:li xml:lang=\"x-default\">").Append(Escape(title!)).Append("</rdf:li></rdf:Alt></dc:title>\n");
-        if (!string.IsNullOrEmpty(author))
-            sb.Append("<dc:creator><rdf:Seq><rdf:li>").Append(Escape(author!)).Append("</rdf:li></rdf:Seq></dc:creator>\n");
-        if (!string.IsNullOrEmpty(subject))
-            sb.Append("<dc:description><rdf:Alt><rdf:li xml:lang=\"x-default\">").Append(Escape(subject!)).Append("</rdf:li></rdf:Alt></dc:description>\n");
-        sb.Append("<pdf:Producer>").Append(Escape(producer)).Append("</pdf:Producer>\n")
+        if (!string.IsNullOrEmpty(props.Title))
+            sb.Append("<dc:title><rdf:Alt><rdf:li xml:lang=\"x-default\">").Append(Escape(props.Title!)).Append("</rdf:li></rdf:Alt></dc:title>\n");
+        if (!string.IsNullOrEmpty(props.Author))
+            sb.Append("<dc:creator><rdf:Seq><rdf:li>").Append(Escape(props.Author!)).Append("</rdf:li></rdf:Seq></dc:creator>\n");
+        if (!string.IsNullOrEmpty(props.Subject))
+            sb.Append("<dc:description><rdf:Alt><rdf:li xml:lang=\"x-default\">").Append(Escape(props.Subject!)).Append("</rdf:li></rdf:Alt></dc:description>\n");
+        if (!string.IsNullOrEmpty(props.Keywords))
+            sb.Append("<pdf:Keywords>").Append(Escape(props.Keywords!)).Append("</pdf:Keywords>\n");
+        if (!string.IsNullOrEmpty(props.Creator))
+            sb.Append("<xmp:CreatorTool>").Append(Escape(props.Creator!)).Append("</xmp:CreatorTool>\n");
+        sb.Append("<pdf:Producer>").Append(Escape(props.ProducerOrDefault)).Append("</pdf:Producer>\n")
           .Append("<xmp:CreateDate>").Append(date).Append("</xmp:CreateDate>\n")
           .Append("<xmp:ModifyDate>").Append(date).Append("</xmp:ModifyDate>\n")
-          .Append("<xmp:MetadataDate>").Append(date).Append("</xmp:MetadataDate>\n")
-          .Append("</rdf:Description>\n</rdf:RDF>\n</x:xmpmeta>\n");
+          .Append("<xmp:MetadataDate>").Append(date).Append("</xmp:MetadataDate>\n");
+        foreach (var (name, value) in custom)
+            sb.Append("<pdfx:").Append(name).Append('>').Append(Escape(value)).Append("</pdfx:").Append(name).Append(">\n");
+        sb.Append("</rdf:Description>\n");
+        if (custom.Count > 0)
+        {
+            // PDF/A allows properties outside the predefined schemas only when an extension schema describes them.
+            sb.Append("<rdf:Description rdf:about=\"\" xmlns:pdfaExtension=\"http://www.aiim.org/pdfa/ns/extension/\"")
+              .Append(" xmlns:pdfaSchema=\"http://www.aiim.org/pdfa/ns/schema#\" xmlns:pdfaProperty=\"http://www.aiim.org/pdfa/ns/property#\">\n")
+              .Append("<pdfaExtension:schemas><rdf:Bag><rdf:li rdf:parseType=\"Resource\">\n")
+              .Append("<pdfaSchema:schema>PDF custom document properties</pdfaSchema:schema>\n")
+              .Append("<pdfaSchema:namespaceURI>").Append(PdfxNamespace).Append("</pdfaSchema:namespaceURI>\n")
+              .Append("<pdfaSchema:prefix>pdfx</pdfaSchema:prefix>\n")
+              .Append("<pdfaSchema:property><rdf:Seq>\n");
+            foreach (var (name, _) in custom)
+                sb.Append("<rdf:li rdf:parseType=\"Resource\"><pdfaProperty:name>").Append(name)
+                  .Append("</pdfaProperty:name><pdfaProperty:valueType>Text</pdfaProperty:valueType>")
+                  .Append("<pdfaProperty:category>external</pdfaProperty:category>")
+                  .Append("<pdfaProperty:description>Custom document property</pdfaProperty:description></rdf:li>\n");
+            sb.Append("</rdf:Seq></pdfaSchema:property>\n</rdf:li></rdf:Bag></pdfaExtension:schemas>\n</rdf:Description>\n");
+        }
+        sb.Append("</rdf:RDF>\n</x:xmpmeta>\n");
         // Padding lets editors update the packet in place.
         for (int i = 0; i < 20; i++) sb.Append(' ', 99).Append('\n');
         sb.Append("<?xpacket end=\"w\"?>");
         return Encoding.UTF8.GetBytes(sb.ToString());
+    }
+
+    /// <summary>The namespace Acrobat uses for custom document properties in XMP.</summary>
+    private const string PdfxNamespace = "http://ns.adobe.com/pdfx/1.3/";
+
+    /// <summary>
+    /// Custom properties as XMP property names: an XML name can't hold every character a PDF name can, so others become
+    /// '_'. A name that collides with an earlier one is left out of the XMP (the information dictionary still has it).
+    /// </summary>
+    private static List<(string Name, string Value)> XmpCustomProperties(IReadOnlyList<KeyValuePair<string, string>> custom)
+    {
+        var list = new List<(string, string)>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var kv in custom)
+        {
+            var sb = new StringBuilder(kv.Key.Length + 1);
+            foreach (char c in kv.Key)
+                sb.Append(char.IsAsciiLetterOrDigit(c) || c is '_' or '-' or '.' ? c : '_');
+            if (!char.IsAsciiLetter(sb[0]) && sb[0] != '_') sb.Insert(0, '_');
+            var name = sb.ToString();
+            if (seen.Add(name)) list.Add((name, kv.Value));
+        }
+        return list;
     }
 
     private static string Escape(string s)
