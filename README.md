@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.png" alt="PdfPecker" width="240"></p>
+
 # PdfPecker
 
 Fast HTML and Markdown to PDF conversion, and PDF to PNG rendering, for .NET, with no dependencies.
