@@ -82,6 +82,7 @@ var options = new PdfOptions
     UserStyleSheet = "body { font-size: 10pt }",      // extra CSS applied after the document's own
     FooterText = "Page {page} of {pages}",            // also HeaderText
     Title = "Invoice 42", Author = "Accounts",        // document properties (Title defaults to <title>)
+    Bookmarks = true,                                 // PDF bookmarks from h1-h6 (default)
     Compress = true,                                  // Flate-compress page content (default)
     AllowFileAccess = false,                          // block local file reads when converting untrusted HTML
 };
@@ -91,6 +92,30 @@ byte[] pdf = HtmlToPdf.Convert(html, options);
 A CSS `@page { size: A4 landscape; margin: 15mm }` rule overrides the page size and margins unless
 `IgnoreCssPageRules` is set. PdfPecker never makes network requests on its own: `http(s)` images and stylesheets are only
 loaded through `ResourceResolver`.
+
+### Watermarks, passwords and PDF/A
+
+```csharp
+var options = new PdfOptions
+{
+    // A diagonal stamp on every page. Also: Image (PNG/JPEG bytes), FontSize, Angle, Opacity, Bold, Behind.
+    Watermark = new PdfWatermark { Text = "PRØVEBEREGNING", Color = "#c00000", Opacity = 0.25f },
+
+    // AES-256 encryption (PDF 2.0 / Acrobat X and later). Without an OwnerPassword a random one is used,
+    // so the permissions cannot be lifted.
+    Security = new PdfSecurity
+    {
+        UserPassword = "1234",                                   // needed to open the file; null = opens freely
+        OwnerPassword = "owner-secret",                          // full access
+        Permissions = PdfPermissions.Print | PdfPermissions.Copy,
+    },
+};
+```
+
+For archiving, set `Conformance = PdfConformance.PdfA2b` (or `PdfA3b`): the PDF gets XMP metadata, an sRGB output intent
+and a file ID, and CMYK JPEGs are converted to RGB. PDF/A does not allow encryption, so combining `Conformance` with
+`Security` throws an `ArgumentException`. AES-256 keys come from a password hash that is slow on purpose, which adds
+about 3 ms to a conversion.
 
 ## PDF to image
 
@@ -166,6 +191,8 @@ curl -X POST http://localhost:8080/api/pdf-to-image -F "file=@report.pdf" -o pag
 ```
 
 `POST /api/convert` also accepts JSON: `{ "html": "...", "pageSize": "A4", "landscape": false, "marginMm": 12.7, "pageNumbers": true }`.
+Add `watermark` (text stamped on every page), `password` (AES-256, needed to open the PDF) or `pdfa: true` (PDF/A-2b) in
+any of the three forms; send passwords in the form or JSON body rather than the query string, which servers tend to log.
 
 Markdown works the same way. The input is read as Markdown when it is uploaded as a `.md`/`.markdown` file, sent as
 `"markdown"` in JSON or as a `markdown` form field, posted with `Content-Type: text/markdown`, or marked with
@@ -213,7 +240,7 @@ Selectors: type, `.class`, `#id`, `*`, attribute selectors (`[a]`, `=`, `~=`, `|
 | SVG | `fill`, `stroke`, `stroke-width`, `fill-opacity`, `stroke-opacity`, `fill-rule`, `stroke-linecap`, `stroke-linejoin`, `stroke-miterlimit`, `clip-path`, `clip-rule`, `text-anchor`, `dominant-baseline` (as CSS or presentation attributes) |
 | Lists | `list-style-type` (disc, circle, square, decimal, decimal-leading-zero, alpha, roman, none), `list-style` |
 | Tables | `border-collapse`, `border-spacing`, cell `vertical-align`, automatic column widths |
-| Paging | `page-break-before`/`after`/`inside`, `break-before`/`after`/`inside`, `@page` size and margins |
+| Paging | `page-break-before`/`after`/`inside`, `break-before`/`after`/`inside` (`always`, `page`, `avoid`), `orphans`, `widows`, `@page` size and margins |
 
 Units: `px`, `pt`, `em`, `rem`, `%`, `mm`, `cm`, `in`, `pc`, `ex`, `ch`, `vw`, `vh`, `vmin`, `vmax` (the viewport is
 the page's content area, minus any running header and footer). Colours: names, `#rgb`, `#rrggbb`,
@@ -221,7 +248,15 @@ the page's content area, minus any running header and footer). Colours: names, `
 
 **Pagination**: lines, images and table rows are never cut in half at a page boundary; table header rows repeat on
 every page a table spans; backgrounds and borders continue across pages. Flex lines and grid rows move to the next
-page as a whole when they don't fit.
+page as a whole when they don't fit. A paragraph that splits leaves at least `orphans` lines (default 2) at the bottom
+of a page and carries at least `widows` lines (default 2) to the next. Headings keep with the content that follows
+them (`break-after: avoid` in the default styles), and `break-before`/`break-after: avoid` does the same for any block.
+`break-inside: avoid` keeps a block or a whole table on one page when it fits.
+
+**Links and bookmarks**: `<a href>` becomes a clickable link, whether inline or a block (a card wrapped in a link),
+and stays clickable on both pages when a page break splits it. External URLs open in the viewer's browser and `#id`
+links jump to the element. Headings `h1`-`h6` become the PDF's bookmarks, nested by level; set
+`PdfOptions.Bookmarks = false` to leave them out.
 
 **Running header and footer**: an element with the `data-sticky-pdf-header` or `data-sticky-pdf-footer` attribute is
 taken out of the flow and drawn at the top or bottom of every page, and the page content flows in the space between.
@@ -310,8 +345,8 @@ and `Markdown/HtmlRenderer` writes the HTML, which then takes the same path as a
    styles. Rules are indexed by id, class and tag, and elements with identical inputs share one computed style.
 3. `Layout/LayoutEngine` lays out blocks, inline text (line breaking, justification), lists and tables
    (automatic column widths), paginating as it goes, and produces a flat list of draw operations.
-4. `Pdf/PdfDocumentWriter` writes PDF 1.4: content streams, standard fonts, image XObjects, link annotations and
-   the cross-reference table.
+4. `Pdf/PdfDocumentWriter` writes PDF 1.4: content streams, standard fonts, image XObjects, link annotations,
+   the bookmark outline and the cross-reference table.
 
 The renderer (`Rendering/`) works the other way round: `Parsing/PdfFile` reads the object graph, `PageRenderer`
 interprets content streams, `Fonts/` turns glyphs into outlines (cached as anti-aliased bitmaps), `Images/` decodes

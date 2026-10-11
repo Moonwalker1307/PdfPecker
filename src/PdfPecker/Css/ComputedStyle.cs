@@ -146,6 +146,7 @@ internal sealed class ComputedStyle
     public bool SvgClipEvenOdd;              // clip-rule
     public byte SvgTextAnchor;               // 0 start, 1 middle, 2 end
     public byte SvgBaseline;                 // dominant-baseline: 0 alphabetic, 1 middle/central, 2 hanging, 3 text-after-edge
+    public int Orphans = 2, Widows = 2; // minimum lines of a paragraph left at the bottom / carried to the top of a page
 
     // ---- Not inherited ----
     public Display Display = Display.Inline;
@@ -162,6 +163,7 @@ internal sealed class ComputedStyle
     public bool BorderBox;
     public VerticalAlign VerticalAlign;
     public bool PageBreakBefore, PageBreakAfter, AvoidBreakInside;
+    public bool AvoidBreakBefore, AvoidBreakAfter; // break-before/after: avoid (keep with the next or previous box)
     public bool Floated;
     public bool ClearBoth;
     public float Opacity = 1;
@@ -232,6 +234,7 @@ internal sealed class ComputedStyle
         c.BorderBox = false;
         c.VerticalAlign = VerticalAlign.Baseline;
         c.PageBreakBefore = c.PageBreakAfter = c.AvoidBreakInside = false;
+        c.AvoidBreakBefore = c.AvoidBreakAfter = false;
         c.Floated = false;
         c.ClearBoth = false;
         c.Opacity = 1;

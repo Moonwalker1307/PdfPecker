@@ -18,7 +18,7 @@ internal sealed class PageSetup
     public float FlowHeight => ContentHeight - BandTop - BandBottom;
 }
 
-/// <summary>Serializes laid-out draw operations into a PDF 1.4 file.</summary>
+/// <summary>Serializes laid-out draw operations into a PDF 1.4 file (PDF 1.7 for PDF/A and AES-256 encryption).</summary>
 internal sealed class PdfDocumentWriter
 {
     private readonly PageSetup _page;
@@ -36,6 +36,17 @@ internal sealed class PdfDocumentWriter
     private readonly ByteBuffer _patterns = new(256); // "/P1 << ... >>" entries for the shared resources
     private int _patternCount;
 
+    /// <summary>Stamp on every page.</summary>
+    public PdfWatermark? Watermark { get; init; }
+
+    /// <summary>Encrypt the file with these passwords.</summary>
+    public PdfSecurity? Security { get; init; }
+
+    /// <summary>Write a PDF/A file.</summary>
+    public PdfConformance Conformance { get; init; }
+
+    private PdfEncryptor? _crypt;
+
     public PdfDocumentWriter(PageSetup page, bool compress, CompressionLevel level)
     {
         _page = page;
@@ -52,7 +63,7 @@ internal sealed class PdfDocumentWriter
 
     public byte[] Write(List<DrawOp> ops, float contentHeight, IReadOnlyDictionary<string, float> anchors, uint pageBackground,
         string? title, string? author, string? subject, string? footerTemplate, string? headerTemplate,
-        Func<int, int, List<DrawOp>>? pageBands = null)
+        Func<int, int, List<DrawOp>>? pageBands = null, IReadOnlyList<OutlineHeading>? outline = null)
     {
         float H = _page.FlowHeight;
         int PageOf(float y) => Math.Max(0, (int)Math.Floor((y + 0.01f) / H));
@@ -101,7 +112,7 @@ internal sealed class PdfDocumentWriter
                     PageList(PageOf(sv.Y)).Add(new Placed(sv, 0, 0));
                     break;
                 case LinkOp lk:
-                    PageList(PageOf(lk.Y)).Add(new Placed(lk, 0, 0));
+                    if (lk.W > 0 && lk.H > 0) AddSplit(lk, lk.Y, lk.Y + lk.H); // a link box split by a page break is clickable on both pages
                     break;
                 case CircleOp c:
                     PageList(PageOf(c.Cy - c.R)).Add(new Placed(c, 0, 0));
@@ -127,6 +138,7 @@ internal sealed class PdfDocumentWriter
                     case RectOp r: if (r.W > 0 && r.H > 0) list.Add(new Placed(r, r.Y, r.Y + r.H)); break;
                     case GradientOp gr: if (gr.W > 0 && gr.H > 0) list.Add(new Placed(gr, gr.Y, gr.Y + gr.H)); break;
                     case LineOp l: list.Add(new Placed(l, l.Y1, l.Y2)); break;
+                    case LinkOp lk: list.Add(new Placed(lk, lk.Y, lk.Y + lk.H)); break;
                     default: list.Add(new Placed(op, 0, 0)); break;
                 }
             }
@@ -156,6 +168,43 @@ internal sealed class PdfDocumentWriter
         var marginFont = StandardFont.Get(FontFamily.Helvetica, false, false);
         if (hasMargins) usedFonts[marginFont.Index] = true;
 
+        var wm = Watermark;
+        StandardFont? wmFont = null;
+        PdfImage? wmImage = null;
+        if (wm != null)
+        {
+            if (wm.Image != null)
+            {
+                wmImage = PdfImage.FromBytes(wm.Image) ?? throw new ArgumentException("The watermark image is not a PNG or JPEG image this library can read.");
+                if (!imageIds.ContainsKey(wmImage))
+                {
+                    imageIds[wmImage] = images.Count + 1;
+                    images.Add(wmImage);
+                }
+            }
+            if (!string.IsNullOrEmpty(wm.Text))
+            {
+                wmFont = StandardFont.Get(FontFamily.Helvetica, wm.Bold, false);
+                usedFonts[wmFont.Index] = true;
+            }
+            if (wmFont == null && wmImage == null) wm = null;
+        }
+
+        bool pdfa = Conformance != PdfConformance.None;
+        if (pdfa)
+        {
+            // An sRGB output intent does not cover DeviceCMYK: convert CMYK images.
+            for (int i = 0; i < images.Count; i++)
+            {
+                var rgb = images[i].ToRgb();
+                if (rgb == null || ReferenceEquals(rgb, images[i])) continue;
+                foreach (var key in imageIds.Where(kv => ReferenceEquals(kv.Key, images[i])).Select(kv => kv.Key).ToList())
+                    imageIds[rgb] = imageIds[key];
+                images[i] = rgb;
+            }
+        }
+        if (Security != null) _crypt = new PdfEncryptor(Security);
+
         // 3. Object numbers.
         int next = 1;
         int catalogId = next++, pagesId = next++, resourcesId = next++, infoId = next++;
@@ -169,12 +218,29 @@ internal sealed class PdfDocumentWriter
         var pageIds = new int[pageCount];
         var contentIds = new int[pageCount];
         for (int i = 0; i < pageCount; i++) { pageIds[i] = next++; contentIds[i] = next++; }
+        _pageIds = pageIds;
+        var outlineItems = BuildOutline(outline, anchors);
+        int outlinesId = 0;
+        if (outlineItems.Count > 0)
+        {
+            outlinesId = next++;
+            foreach (var item in outlineItems) item.Id = next++;
+        }
+        int watermarkId = wm != null ? next++ : 0;
+        int metadataId = 0, outputIntentId = 0, iccId = 0, encryptId = 0;
+        if (pdfa) { metadataId = next++; outputIntentId = next++; iccId = next++; }
+        if (_crypt != null) encryptId = next++;
 
         // 4. Header.
-        _out.Ascii("%PDF-1.4\n%").Bytes(new byte[] { 0xE2, 0xE3, 0xCF, 0xD3 }).Nl();
+        _out.Ascii(pdfa || _crypt != null ? "%PDF-1.7\n%" : "%PDF-1.4\n%").Bytes(new byte[] { 0xE2, 0xE3, 0xCF, 0xD3 }).Nl();
 
         // Catalog, pages tree.
-        Begin(catalogId).Ascii("<< /Type /Catalog /Pages ").Int(pagesId).Ascii(" 0 R >>");
+        Begin(catalogId).Ascii("<< /Type /Catalog /Pages ").Int(pagesId).Ascii(" 0 R");
+        if (outlinesId != 0) _out.Ascii(" /Outlines ").Int(outlinesId).Ascii(" 0 R");
+        if (pdfa) _out.Ascii(" /Metadata ").Int(metadataId).Ascii(" 0 R /OutputIntents [").Int(outputIntentId).Ascii(" 0 R]");
+        // AES-256 (revision 6) is the Adobe extension level 8 to PDF 1.7, standardised in PDF 2.0.
+        if (_crypt != null) _out.Ascii(" /Extensions << /ADBE << /BaseVersion /1.7 /ExtensionLevel 8 >> >>");
+        _out.Ascii(" >>");
         End();
         Begin(pagesId).Ascii("<< /Type /Pages /Count ").Int(pageCount).Ascii(" /Kids [");
         for (int i = 0; i < pageCount; i++) _out.Int(pageIds[i]).Ascii(" 0 R ");
@@ -182,13 +248,44 @@ internal sealed class PdfDocumentWriter
         End();
 
         // Info.
+        var now = DateTime.UtcNow;
+        now = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerSecond));
+        if (pdfa)
+        {
+            // Info and XMP must agree, and XML cannot carry control characters.
+            title = Clean(title);
+            author = Clean(author);
+            subject = Clean(subject);
+        }
+        string date = "D:" + now.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture) + "Z";
         Begin(infoId).Ascii("<< /Producer ");
         WriteTextString(_out, "PdfPecker");
         if (!string.IsNullOrEmpty(title)) { _out.Ascii(" /Title "); WriteTextString(_out, title!); }
         if (!string.IsNullOrEmpty(author)) { _out.Ascii(" /Author "); WriteTextString(_out, author!); }
         if (!string.IsNullOrEmpty(subject)) { _out.Ascii(" /Subject "); WriteTextString(_out, subject!); }
-        _out.Ascii(" /CreationDate (D:").Ascii(DateTime.UtcNow.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture)).Ascii("Z) >>");
+        _out.Ascii(" /CreationDate ");
+        WriteTextString(_out, date);
+        if (pdfa)
+        {
+            _out.Ascii(" /ModDate ");
+            WriteTextString(_out, date);
+        }
+        _out.Ascii(" >>");
         End();
+
+        if (pdfa)
+        {
+            int part = Conformance == PdfConformance.PdfA3b ? 3 : 2;
+            var xmp = PdfA.Xmp(part, "B", title, author, subject, "PdfPecker", now);
+            WriteStream(metadataId, xmp, compress: false, "/Type /Metadata /Subtype /XML");
+            Begin(outputIntentId).Ascii("<< /Type /OutputIntent /S /GTS_PDFA1 /OutputConditionIdentifier ");
+            WriteTextString(_out, PdfA.OutputCondition);
+            _out.Ascii(" /Info ");
+            WriteTextString(_out, PdfA.OutputCondition);
+            _out.Ascii(" /DestOutputProfile ").Int(iccId).Ascii(" 0 R >>");
+            End();
+            WriteStream(iccId, PdfA.SrgbProfile, _compress, "/N 3");
+        }
 
         // Fonts.
         for (int i = 0; i < usedFonts.Length; i++)
@@ -206,9 +303,11 @@ internal sealed class PdfDocumentWriter
             if (img.SMask != null) WriteImage(img.SMask);
         }
 
+        if (wm != null) WriteWatermark(watermarkId, wm, wmFont, wmFont != null ? fontIds[wmFont.Index] : 0, wmImage);
+
         // Pages, contents, annotations.
         var content = new ByteBuffer(32 * 1024);
-        var annotations = new List<(int Id, LinkOp Link, float Origin, float PageTop)>();
+        var annotations = new List<(int Id, Placed Link, float Origin, float PageTop)>();
         for (int p = 0; p < pageCount; p++)
         {
             content.Clear();
@@ -218,17 +317,18 @@ internal sealed class PdfDocumentWriter
                 SetFill(content, pageBackground);
                 content.Ascii("0 0 ").Num(_page.Width).Sp().Num(_page.Height).Ascii(" re f\n");
             }
-            var pageLinks = new List<(LinkOp Link, float Origin, float PageTop)>();
+            if (wm is { Behind: true }) content.Ascii("q /Wm Do Q\n");
+            var pageLinks = new List<(Placed Link, float Origin, float PageTop)>();
             _yOrigin = _page.MarginTop + _page.BandTop;
             foreach (var placed in pages[p])
             {
-                if (placed.Op is LinkOp lk) { pageLinks.Add((lk, _yOrigin, p * H)); continue; }
+                if (placed.Op is LinkOp) { pageLinks.Add((placed, _yOrigin, p * H)); continue; }
                 WriteOp(content, placed, p * H, imageIds);
             }
             _yOrigin = _page.MarginTop;
             foreach (var placed in bands[p])
             {
-                if (placed.Op is LinkOp lk) { pageLinks.Add((lk, _yOrigin, 0)); continue; }
+                if (placed.Op is LinkOp) { pageLinks.Add((placed, _yOrigin, 0)); continue; }
                 WriteOp(content, placed, 0, imageIds);
             }
             if (hasMargins)
@@ -238,6 +338,7 @@ internal sealed class PdfDocumentWriter
                 if (footerTemplate != null) WriteMarginText(content, marginFont, footerTemplate, p + 1, pageCount, top: false);
             }
             EndText(content);
+            if (wm is { Behind: false }) content.Ascii("q /Wm Do Q\n");
 
             var annotIds = new List<int>();
             foreach (var (lk, origin, pageTop) in pageLinks)
@@ -262,20 +363,21 @@ internal sealed class PdfDocumentWriter
             WriteStream(contentIds[p], content.Span, _compress, extraDict: null);
         }
 
-        foreach (var (id, link, origin, linkPageTop) in annotations)
+        foreach (var (id, placed, origin, linkPageTop) in annotations)
         {
+            var link = (LinkOp)placed.Op;
             float x1 = _page.MarginLeft + link.X, x2 = x1 + link.W;
-            float yTop = _page.Height - origin - (link.Y - linkPageTop);
-            float yBottom = yTop - link.H;
+            float yTop = _page.Height - origin - (placed.Y0 - linkPageTop);
+            float yBottom = yTop - (placed.Y1 - placed.Y0);
             Begin(id).Ascii("<< /Type /Annot /Subtype /Link /Rect [").Num(x1).Sp().Num(yBottom).Sp().Num(x2).Sp().Num(yTop)
-                .Ascii("] /Border [0 0 0] ");
+                .Ascii("] /F 4 /Border [0 0 0] ");
             if (link.Target.StartsWith("#", StringComparison.Ordinal))
             {
-                if (anchors.TryGetValue(link.Target.Substring(1), out float ay))
+                if (anchors.TryGetValue(Uri.UnescapeDataString(link.Target.Substring(1)), out float ay)
+                    || anchors.TryGetValue(link.Target.Substring(1), out ay))
                 {
-                    int ap = Math.Min(PageOf(ay), pageCount - 1);
-                    float py = _page.Height - _page.MarginTop - _page.BandTop - (ay - ap * H);
-                    _out.Ascii("/Dest [").Int(pageIds[ap]).Ascii(" 0 R /XYZ 0 ").Num(py).Ascii(" null]");
+                    _out.Ascii("/Dest ");
+                    WriteDest(ay);
                 }
             }
             else
@@ -288,15 +390,47 @@ internal sealed class PdfDocumentWriter
             End();
         }
 
+        // Bookmarks.
+        if (outlinesId != 0)
+        {
+            var top = outlineItems.Where(o => o.Parent == null).ToList();
+            Begin(outlinesId).Ascii("<< /Type /Outlines /First ").Int(top[0].Id).Ascii(" 0 R /Last ").Int(top[^1].Id)
+                .Ascii(" 0 R /Count ").Int(outlineItems.Count).Ascii(" >>");
+            End();
+            foreach (var item in outlineItems)
+            {
+                Begin(item.Id).Ascii("<< /Title ");
+                WriteTextString(_out, item.Title);
+                _out.Ascii(" /Parent ").Int(item.Parent?.Id ?? outlinesId).Ascii(" 0 R");
+                if (item.Prev != null) _out.Ascii(" /Prev ").Int(item.Prev.Id).Ascii(" 0 R");
+                if (item.Next != null) _out.Ascii(" /Next ").Int(item.Next.Id).Ascii(" 0 R");
+                if (item.Children.Count > 0)
+                    _out.Ascii(" /First ").Int(item.Children[0].Id).Ascii(" 0 R /Last ").Int(item.Children[^1].Id)
+                        .Ascii(" 0 R /Count ").Int(item.Descendants);
+                _out.Ascii(" /Dest ");
+                WriteDest(item.Y);
+                _out.Ascii(" >>");
+                End();
+            }
+        }
+
+        if (_crypt != null)
+        {
+            Begin(encryptId);
+            _crypt.WriteDictionary(_out);
+            End();
+        }
+
         // Shared resources, written last: shading patterns are collected while writing the pages.
         Begin(resourcesId).Ascii("<< /ProcSet [/PDF /Text /ImageB /ImageC /ImageI] /Font <<");
         for (int i = 0; i < usedFonts.Length; i++)
             if (usedFonts[i]) _out.Ascii(" /F").Int(i + 1).Sp().Int(fontIds[i]).Ascii(" 0 R");
         _out.Ascii(" >>");
-        if (images.Count > 0)
+        if (images.Count > 0 || wm != null)
         {
             _out.Ascii(" /XObject <<");
             for (int i = 0; i < images.Count; i++) _out.Ascii(" /Im").Int(i + 1).Sp().Int(images[i].ObjectNumber).Ascii(" 0 R");
+            if (wm != null) _out.Ascii(" /Wm ").Int(watermarkId).Ascii(" 0 R");
             _out.Ascii(" >>");
         }
         if (_patterns.Length > 0) _out.Ascii(" /Pattern <<").Bytes(_patterns.Span).Ascii(" >>");
@@ -312,10 +446,58 @@ internal sealed class PdfDocumentWriter
             string off = _offsets[i].ToString("D10", System.Globalization.CultureInfo.InvariantCulture);
             _out.Ascii(off).Ascii(" 00000 n \n");
         }
-        _out.Ascii("trailer\n<< /Size ").Int(count).Ascii(" /Root ").Int(catalogId).Ascii(" 0 R /Info ").Int(infoId)
-            .Ascii(" 0 R >>\nstartxref\n").Int(xref).Ascii("\n%%EOF\n");
+        _out.Ascii("trailer\n<< /Size ").Int(count).Ascii(" /Root ").Int(catalogId).Ascii(" 0 R /Info ").Int(infoId).Ascii(" 0 R");
+        if (encryptId != 0) _out.Ascii(" /Encrypt ").Int(encryptId).Ascii(" 0 R");
+        var fileId = System.Security.Cryptography.RandomNumberGenerator.GetBytes(16);
+        _out.Ascii(" /ID [");
+        PdfEncryptor.Hex(_out, fileId);
+        PdfEncryptor.Hex(_out, fileId);
+        _out.Ascii("] >>\nstartxref\n").Int(xref).Ascii("\n%%EOF\n");
 
+        _crypt?.Dispose();
         return _out.Span.ToArray();
+    }
+
+    // ------------------------------------------------------------------ outline
+
+    private sealed class OutlineItem
+    {
+        public string Title = "";
+        public int Level, Id, Descendants;
+        public float Y;
+        public OutlineItem? Parent, Prev, Next;
+        public readonly List<OutlineItem> Children = new();
+    }
+
+    /// <summary>Nests the headings by level: a heading becomes a child of the nearest earlier heading of a higher level.</summary>
+    private static List<OutlineItem> BuildOutline(IReadOnlyList<OutlineHeading>? headings, IReadOnlyDictionary<string, float> anchors)
+    {
+        var all = new List<OutlineItem>();
+        if (headings == null) return all;
+        var stack = new List<OutlineItem>();
+        OutlineItem? lastTop = null;
+        foreach (var h in headings)
+        {
+            if (!anchors.TryGetValue(h.Key, out float y)) continue;
+            var item = new OutlineItem { Title = h.Title, Level = h.Level, Y = y };
+            while (stack.Count > 0 && stack[^1].Level >= h.Level) stack.RemoveAt(stack.Count - 1);
+            if (stack.Count > 0)
+            {
+                var parent = stack[^1];
+                item.Parent = parent;
+                if (parent.Children.Count > 0) { item.Prev = parent.Children[^1]; item.Prev.Next = item; }
+                parent.Children.Add(item);
+                for (var p = parent; p != null; p = p.Parent) p.Descendants++;
+            }
+            else
+            {
+                if (lastTop != null) { item.Prev = lastTop; lastTop.Next = item; }
+                lastTop = item;
+            }
+            stack.Add(item);
+            all.Add(item);
+        }
+        return all;
     }
 
     // ------------------------------------------------------------------ objects
@@ -329,6 +511,17 @@ internal sealed class PdfDocumentWriter
 
     private void End() => _out.Ascii("\nendobj\n");
 
+    private int[] _pageIds = Array.Empty<int>();
+
+    /// <summary>Writes an explicit destination for flow position <paramref name="y"/>: its page, scrolled to that height.</summary>
+    private void WriteDest(float y)
+    {
+        float h = _page.FlowHeight;
+        int p = Math.Clamp((int)Math.Floor((y + 0.01f) / h), 0, _pageIds.Length - 1);
+        float py = _page.Height - _page.MarginTop - _page.BandTop - (y - p * h);
+        _out.Ascii("[").Int(_pageIds[p]).Ascii(" 0 R /XYZ 0 ").Num(Math.Min(py, _page.Height)).Ascii(" null]");
+    }
+
     private void WriteStream(int id, ReadOnlySpan<byte> data, bool compress, string? extraDict)
     {
         byte[]? compressed = null;
@@ -338,8 +531,10 @@ internal sealed class PdfDocumentWriter
             using (var z = new ZLibStream(ms, _level, leaveOpen: true)) z.Write(data);
             compressed = ms.ToArray();
         }
+        bool filtered = compressed != null;
+        if (_crypt != null) compressed = _crypt.Encrypt(compressed ?? data);
         Begin(id).Ascii("<< /Length ").Int(compressed?.Length ?? data.Length);
-        if (compressed != null) _out.Ascii(" /Filter /FlateDecode");
+        if (filtered) _out.Ascii(" /Filter /FlateDecode");
         if (extraDict != null) _out.Sp().Ascii(extraDict);
         _out.Ascii(" >>\nstream\n");
         if (compressed != null) _out.Bytes(compressed);
@@ -350,14 +545,95 @@ internal sealed class PdfDocumentWriter
 
     private void WriteImage(PdfImage img)
     {
+        string colorSpace = img.ColorSpace;
+        // An indexed colour space carries its palette as a hex string, which must be encrypted like any other string.
+        if (_crypt != null && colorSpace.IndexOf('<') is int lt and >= 0)
+        {
+            int gt = colorSpace.IndexOf('>', lt);
+            var palette = System.Convert.FromHexString(colorSpace.AsSpan(lt + 1, gt - lt - 1));
+            var sb = new ByteBuffer(64 + palette.Length * 2);
+            sb.Ascii(img.ColorSpace.Substring(0, lt));
+            PdfEncryptor.Hex(sb, _crypt.Encrypt(palette));
+            sb.Ascii(img.ColorSpace.Substring(gt + 1));
+            colorSpace = System.Text.Encoding.ASCII.GetString(sb.Span);
+        }
+        var data = _crypt != null ? _crypt.Encrypt(img.Data) : img.Data;
         Begin(img.ObjectNumber).Ascii("<< /Type /XObject /Subtype /Image /Width ").Int(img.Width).Ascii(" /Height ").Int(img.Height)
-            .Ascii(" /ColorSpace ").Ascii(img.ColorSpace).Ascii(" /BitsPerComponent ").Int(img.BitsPerComponent)
+            .Ascii(" /ColorSpace ").Ascii(colorSpace).Ascii(" /BitsPerComponent ").Int(img.BitsPerComponent)
             .Ascii(" /Filter ").Ascii(img.Filter);
         if (img.DecodeParms != null) _out.Ascii(" /DecodeParms ").Ascii(img.DecodeParms);
         if (img.Decode != null) _out.Ascii(" /Decode ").Ascii(img.Decode);
         if (img.SMask != null) _out.Ascii(" /SMask ").Int(img.SMask.ObjectNumber).Ascii(" 0 R");
-        _out.Ascii(" /Length ").Int(img.Data.Length).Ascii(" >>\nstream\n").Bytes(img.Data).Ascii("\nendstream");
+        _out.Ascii(" /Length ").Int(data.Length).Ascii(" >>\nstream\n").Bytes(data).Ascii("\nendstream");
         End();
+    }
+
+    /// <summary>The watermark as a form XObject covering the page, drawn by every page's content stream.</summary>
+    private void WriteWatermark(int id, PdfWatermark wm, StandardFont? font, int fontId, PdfImage? image)
+    {
+        float W = _page.Width, H = _page.Height, cx = W / 2, cy = H / 2;
+        float opacity = Math.Clamp(wm.Opacity, 0, 1);
+        var b = new ByteBuffer(512);
+        b.Ascii("q /Gw gs\n");
+        if (image != null)
+        {
+            float iw = wm.ImageWidth > 0 ? wm.ImageWidth : W / 2;
+            float ih = iw * image.Height / Math.Max(1, image.Width);
+            double a = (wm.Angle ?? 0) * Math.PI / 180;
+            float c = (float)Math.Cos(a), sn = (float)Math.Sin(a);
+            b.Num(iw * c).Sp().Num(iw * sn).Sp().Num(-ih * sn).Sp().Num(ih * c).Sp()
+                .Num(cx - iw * c / 2 + ih * sn / 2).Sp().Num(cy - iw * sn / 2 - ih * c / 2).Ascii(" cm /Iw Do\n");
+            b.Ascii("Q q /Gw gs\n");
+        }
+        if (font != null)
+        {
+            var lines = wm.Text!.Replace("\r\n", "\n").Split('\n');
+            double a = (wm.Angle ?? Math.Atan2(H, W) * 180 / Math.PI) * Math.PI / 180;
+            float c = (float)Math.Cos(a), sn = (float)Math.Sin(a);
+            const float lead = 1.15f, cap = 0.72f;
+            int maxUnits = 1;
+            foreach (var line in lines) maxUnits = Math.Max(maxUnits, font.MeasureUnits(line, 0, line.Length));
+            float size = wm.FontSize;
+            if (size <= 0)
+            {
+                // As large as fits in 80% of the page with the text block rotated.
+                float tw = maxUnits / 1000f, th = lead * (lines.Length - 1) + cap;
+                float ac = Math.Abs(c), asn = Math.Abs(sn);
+                size = Math.Min(0.8f * W / (tw * ac + th * asn), 0.8f * H / (tw * asn + th * ac));
+                size = Math.Clamp(size, 4, 400);
+            }
+            uint color = CssColor.TryParse(wm.Color ?? "", CssColor.Black, out var parsed) ? parsed : 0xFF808080;
+            WriteColor(b, color);
+            b.Ascii(" rg BT /Fw ").Num(size).Ascii(" Tf\n");
+            float blockH = size * (lead * (lines.Length - 1) + cap);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                float xl = -font.Measure(lines[i], size) / 2;
+                float yl = blockH / 2 - cap * size - i * lead * size;
+                b.Num(c).Sp().Num(sn).Sp().Num(-sn).Sp().Num(c).Sp().Num(cx + xl * c - yl * sn).Sp().Num(cy + xl * sn + yl * c).Ascii(" Tm ");
+                WriteTextBytes(b, lines[i]);
+                b.Ascii(" Tj\n");
+            }
+            b.Ascii("ET\n");
+        }
+        b.Ascii("Q\n");
+
+        var dict = new ByteBuffer(256);
+        dict.Ascii("/Type /XObject /Subtype /Form /BBox [0 0 ").Num(W).Sp().Num(H).Ascii("] /Resources << /ExtGState << /Gw << /Type /ExtGState /ca ")
+            .Num(opacity).Ascii(" /CA ").Num(opacity).Ascii(" >> >>");
+        if (font != null) dict.Ascii(" /Font << /Fw ").Int(fontId).Ascii(" 0 R >>");
+        if (image != null) dict.Ascii(" /XObject << /Iw ").Int(image.ObjectNumber).Ascii(" 0 R >>");
+        dict.Ascii(" >>");
+        WriteStream(id, b.Span, _compress, System.Text.Encoding.ASCII.GetString(dict.Span));
+    }
+
+    private static string? Clean(string? s)
+    {
+        if (s == null) return null;
+        foreach (char ch in s)
+            if (ch < 0x20 && ch is not ('\t' or '\n' or '\r'))
+                return new string(s.Where(x => x >= 0x20 || x is '\t' or '\n' or '\r').ToArray());
+        return s;
     }
 
     // ------------------------------------------------------------------ content streams
@@ -626,25 +902,49 @@ internal sealed class PdfDocumentWriter
         b.Byte((byte)')');
     }
 
-    private static void WriteAsciiString(ByteBuffer b, string s)
+    /// <summary>Writes a string object: literal, or encrypted and hex-encoded when the file is encrypted.</summary>
+    private void WriteAsciiString(ByteBuffer b, string s) => WriteStringBytes(b, AsciiStringBytes(s));
+
+    /// <summary>ASCII with other characters percent-encoded as UTF-8 (the form URIs need).</summary>
+    private static byte[] AsciiStringBytes(string s)
     {
-        b.Byte((byte)'(');
+        var raw = new ByteBuffer(s.Length + 8);
         foreach (char ch in s)
         {
             if (ch > 126 || ch < 32)
             {
                 foreach (var u in System.Text.Encoding.UTF8.GetBytes(ch.ToString()))
-                    b.Byte((byte)'%').Ascii(u.ToString("X2"));
+                    raw.Byte((byte)'%').Ascii(u.ToString("X2"));
                 continue;
             }
-            if (ch == '(' || ch == ')' || ch == '\\') b.Byte((byte)'\\');
-            b.Byte((byte)ch);
+            raw.Byte((byte)ch);
+        }
+        return raw.Span.ToArray();
+    }
+
+    private void WriteStringBytes(ByteBuffer b, byte[] raw)
+    {
+        if (_crypt != null)
+        {
+            PdfEncryptor.Hex(b, _crypt.Encrypt(raw));
+            return;
+        }
+        if (raw.Length >= 2 && raw[0] == 0xFE && raw[1] == 0xFF)
+        {
+            PdfEncryptor.Hex(b, raw);
+            return;
+        }
+        b.Byte((byte)'(');
+        foreach (var c in raw)
+        {
+            if (c == (byte)'(' || c == (byte)')' || c == (byte)'\\') b.Byte((byte)'\\');
+            b.Byte(c);
         }
         b.Byte((byte)')');
     }
 
     /// <summary>Writes a PDF text string: PDFDocEncoding-compatible ASCII when possible, UTF-16BE otherwise.</summary>
-    private static void WriteTextString(ByteBuffer b, string s)
+    private void WriteTextString(ByteBuffer b, string s)
     {
         bool ascii = true;
         foreach (char ch in s) if (ch > 126) { ascii = false; break; }
@@ -653,8 +953,14 @@ internal sealed class PdfDocumentWriter
             WriteAsciiString(b, s);
             return;
         }
-        b.Ascii("<FEFF");
-        foreach (char ch in s) b.Ascii(((int)ch).ToString("X4"));
-        b.Byte((byte)'>');
+        var raw = new byte[2 + s.Length * 2];
+        raw[0] = 0xFE;
+        raw[1] = 0xFF;
+        for (int i = 0; i < s.Length; i++)
+        {
+            raw[2 + i * 2] = (byte)(s[i] >> 8);
+            raw[3 + i * 2] = (byte)s[i];
+        }
+        WriteStringBytes(b, raw);
     }
 }
