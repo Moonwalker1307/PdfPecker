@@ -30,8 +30,14 @@ internal sealed class PdfDocumentWriter
     // Content-stream graphics state while writing one page.
     private uint _fill;
     private bool _inText;
-    private StandardFont? _textFont;
+    private TextFont? _textFont;
     private float _textSize, _tw, _tc;
+    private int _tr;           // text rendering mode: 0 fill, 2 fill and stroke (synthetic bold)
+    private uint _stroke;
+    private float _lineWidth;
+    private readonly List<FontRun> _runs = new();
+    private readonly Dictionary<FontProgram, GlyphSubset> _subsets = new();
+    private readonly List<GlyphSubset> _subsetList = new();
     private float _yOrigin; // distance from the page top to flow y = 0 on the page being written
     private readonly ByteBuffer _patterns = new(256); // "/P1 << ... >>" entries for the shared resources
     private int _patternCount;
@@ -152,7 +158,7 @@ internal sealed class PdfDocumentWriter
         foreach (var page in pages.Concat(bands))
             foreach (var p in page)
             {
-                if (p.Op is TextOp t) usedFonts[t.Font.Index] = true;
+                if (p.Op is TextOp t) CollectFonts(t, usedFonts);
                 else if (p.Op is SvgOp sv)
                 {
                     foreach (var shape in sv.Image.Shapes)
@@ -210,6 +216,8 @@ internal sealed class PdfDocumentWriter
         int catalogId = next++, pagesId = next++, resourcesId = next++, infoId = next++;
         var fontIds = new int[usedFonts.Length];
         for (int i = 0; i < usedFonts.Length; i++) if (usedFonts[i]) fontIds[i] = next++;
+        int firstEmbeddedId = next;
+        next += _subsetList.Count * 5; // Type0 font, CIDFont, descriptor, font file, ToUnicode CMap
         foreach (var img in images)
         {
             img.ObjectNumber = next++;
@@ -295,6 +303,7 @@ internal sealed class PdfDocumentWriter
                 .Ascii(" /Encoding /WinAnsiEncoding >>");
             End();
         }
+        for (int i = 0; i < _subsetList.Count; i++) WriteEmbeddedFont(_subsetList[i], firstEmbeddedId + i * 5);
 
         // Images.
         foreach (var img in images)
@@ -425,6 +434,7 @@ internal sealed class PdfDocumentWriter
         Begin(resourcesId).Ascii("<< /ProcSet [/PDF /Text /ImageB /ImageC /ImageI] /Font <<");
         for (int i = 0; i < usedFonts.Length; i++)
             if (usedFonts[i]) _out.Ascii(" /F").Int(i + 1).Sp().Int(fontIds[i]).Ascii(" 0 R");
+        for (int i = 0; i < _subsetList.Count; i++) _out.Ascii(" /E").Int(i + 1).Sp().Int(firstEmbeddedId + i * 5).Ascii(" 0 R");
         _out.Ascii(" >>");
         if (images.Count > 0 || wm != null)
         {
@@ -646,6 +656,9 @@ internal sealed class PdfDocumentWriter
         _textSize = 0;
         _tw = 0;
         _tc = 0;
+        _tr = 0;
+        _stroke = CssColor.Black;
+        _lineWidth = 1;
     }
 
     private float PX(float x) => _page.MarginLeft + x;
@@ -684,17 +697,23 @@ internal sealed class PdfDocumentWriter
                     _textFont = null;
                 }
                 SetFill(b, t.Color);
-                if (!ReferenceEquals(_textFont, t.Font) || _textSize != t.Size)
-                {
-                    _textFont = t.Font;
-                    _textSize = t.Size;
-                    b.Ascii("/F").Int(t.Font.Index + 1).Sp().Num(t.Size).Ascii(" Tf\n");
-                }
                 if (_tw != t.WordSpacing) { _tw = t.WordSpacing; b.Num(t.WordSpacing).Ascii(" Tw\n"); }
                 if (_tc != t.CharSpacing) { _tc = t.CharSpacing; b.Num(t.CharSpacing).Ascii(" Tc\n"); }
-                b.Ascii("1 0 0 1 ").Num(PX(t.X)).Sp().Num(PY(t.Baseline, pageTop)).Ascii(" Tm ");
-                WriteTextBytes(b, t.Text);
-                b.Ascii(" Tj\n");
+                float y = PY(t.Baseline, pageTop);
+                if (t.Font is StandardFont sf)
+                {
+                    WriteStandardRun(b, sf, t, 0, t.Text.Length, PX(t.X), y);
+                    break;
+                }
+                _runs.Clear();
+                t.Font.Split(t.Text, _runs);
+                float x = PX(t.X);
+                foreach (var run in _runs)
+                {
+                    if (run.Font is EmbeddedFont ef) WriteEmbeddedRun(b, ef, t, run.Start, run.Length, x, y);
+                    else WriteStandardRun(b, (StandardFont)run.Font, t, run.Start, run.Length, x, y);
+                    x += RunAdvance(run.Font, t, run.Start, run.Length);
+                }
                 break;
             }
             case RectOp r:
@@ -873,6 +892,193 @@ internal sealed class PdfDocumentWriter
         return n;
     }
 
+    // ------------------------------------------------------------------ text
+
+    private void CollectFonts(TextOp t, bool[] usedFonts)
+    {
+        if (t.Font is StandardFont sf)
+        {
+            usedFonts[sf.Index] = true;
+            return;
+        }
+        _runs.Clear();
+        t.Font.Split(t.Text, _runs);
+        foreach (var run in _runs)
+        {
+            if (run.Font is StandardFont s) { usedFonts[s.Index] = true; continue; }
+            var subset = Subset(((EmbeddedFont)run.Font).Program);
+            string text = t.Text;
+            for (int i = run.Start, end = run.Start + run.Length; i < end; i++)
+            {
+                int cp = text[i];
+                if (char.IsHighSurrogate(text[i]) && i + 1 < end && char.IsLowSurrogate(text[i + 1])) cp = char.ConvertToUtf32(text[i], text[++i]);
+                subset.Cid(cp);
+            }
+        }
+    }
+
+    private GlyphSubset Subset(FontProgram program)
+    {
+        if (!_subsets.TryGetValue(program, out var s))
+        {
+            _subsets[program] = s = new GlyphSubset(program);
+            _subsetList.Add(s);
+        }
+        return s;
+    }
+
+    private void SetFont(ByteBuffer b, TextFont font, string resource, int index, float size)
+    {
+        if (ReferenceEquals(_textFont, font) && _textSize == size) return;
+        _textFont = font;
+        _textSize = size;
+        b.Ascii(resource).Int(index).Sp().Num(size).Ascii(" Tf\n");
+    }
+
+    private void SetRenderMode(ByteBuffer b, int mode)
+    {
+        if (_tr == mode) return;
+        _tr = mode;
+        b.Int(mode).Ascii(" Tr\n");
+    }
+
+    private void WriteStandardRun(ByteBuffer b, StandardFont font, TextOp t, int start, int length, float x, float y)
+    {
+        // Font objects are keyed by the leaf font in SetFont, so an embedded font of the same size is switched back.
+        SetFont(b, font, "/F", font.Index + 1, t.Size);
+        SetRenderMode(b, 0);
+        b.Ascii("1 0 0 1 ").Num(x).Sp().Num(y).Ascii(" Tm ");
+        WriteTextBytes(b, start == 0 && length == t.Text.Length ? t.Text : t.Text.Substring(start, length));
+        b.Ascii(" Tj\n");
+    }
+
+    private void WriteEmbeddedRun(ByteBuffer b, EmbeddedFont font, TextOp t, int start, int length, float x, float y)
+    {
+        var subset = _subsets[font.Program];
+        SetFont(b, font, "/E", _subsetList.IndexOf(subset) + 1, t.Size);
+        if (font.SyntheticBold)
+        {
+            // Stroke the outlines in the fill colour, as browsers widen glyphs for a missing bold face.
+            float k = Math.Clamp((t.Size - 9f) / 27f, 0f, 1f);
+            float width = t.Size * (1f / 24f + (1f / 32f - 1f / 24f) * k);
+            SetRenderMode(b, 2);
+            if (_stroke != t.Color) { _stroke = t.Color; WriteColor(b, t.Color); b.Ascii(" RG\n"); }
+            if (_lineWidth != width) { _lineWidth = width; b.Num(width).Ascii(" w\n"); }
+        }
+        else SetRenderMode(b, 0);
+        b.Ascii(font.SyntheticItalic ? "1 0 0.2 1 " : "1 0 0 1 ").Num(x).Sp().Num(y).Ascii(" Tm ");
+
+        // Word spacing (Tw) only applies to the single-byte code 32, so justified text moves spaces explicitly.
+        // PDF/A forbids showing .notdef: characters no font has become blank space of the same width.
+        string text = t.Text;
+        bool skipNotdef = Conformance != PdfConformance.None && t.Size > 0;
+        bool adjust = (t.WordSpacing != 0 || skipNotdef) && t.Size > 0;
+        float spaceAdjust = adjust ? -t.WordSpacing * 1000f / t.Size : 0;
+        float notdefAdjust = skipNotdef ? -(font.Program.Advance1000(0) + t.CharSpacing * 1000f / t.Size) : 0;
+        b.Ascii(adjust ? "[<" : "<");
+        for (int i = start, end = start + length; i < end; i++)
+        {
+            int cp = text[i];
+            if (char.IsHighSurrogate(text[i]) && i + 1 < end && char.IsLowSurrogate(text[i + 1])) cp = char.ConvertToUtf32(text[i], text[++i]);
+            int cid = subset.Cid(cp);
+            if (cid == 0 && skipNotdef) b.Ascii(">").Num(notdefAdjust).Ascii("<");
+            else Hex4(b, cid);
+            if (adjust && cp == ' ' && t.WordSpacing != 0 && i + 1 < end) b.Ascii(">").Num(spaceAdjust).Ascii("<");
+        }
+        b.Ascii(adjust ? ">] TJ\n" : "> Tj\n");
+    }
+
+    /// <summary>Horizontal advance of a run, including letter and word spacing.</summary>
+    private static float RunAdvance(TextFont font, TextOp t, int start, int length)
+    {
+        float w = font.MeasureUnits(t.Text, start, length) * t.Size / 1000f;
+        string text = t.Text;
+        for (int i = start, end = start + length; i < end; i++)
+        {
+            if (char.IsHighSurrogate(text[i]) && i + 1 < end && char.IsLowSurrogate(text[i + 1])) i++;
+            w += t.CharSpacing;
+            if (text[i] == ' ') w += t.WordSpacing;
+        }
+        return w;
+    }
+
+    private static readonly byte[] HexDigits = "0123456789ABCDEF"u8.ToArray();
+
+    private static void Hex4(ByteBuffer b, int v)
+        => b.Byte(HexDigits[(v >> 12) & 15]).Byte(HexDigits[(v >> 8) & 15]).Byte(HexDigits[(v >> 4) & 15]).Byte(HexDigits[v & 15]);
+
+    /// <summary>Writes the five objects of an embedded font: Type0 font, CIDFont, descriptor, font file and ToUnicode CMap.</summary>
+    private void WriteEmbeddedFont(GlyphSubset subset, int id)
+    {
+        var font = subset.Program;
+        // Subset fonts are marked with a tag in their name.
+        string baseFont = subset.Tag() + "+" + font.PostScriptName;
+        var used = subset.Used().ToList();
+
+        Begin(id).Ascii("<< /Type /Font /Subtype /Type0 /BaseFont /").Ascii(baseFont).Ascii(" /Encoding /Identity-H /DescendantFonts [")
+            .Int(id + 1).Ascii(" 0 R] /ToUnicode ").Int(id + 4).Ascii(" 0 R >>");
+        End();
+
+        Begin(id + 1).Ascii("<< /Type /Font /Subtype /").Ascii(font.IsCff ? "CIDFontType0" : "CIDFontType2").Ascii(" /BaseFont /").Ascii(baseFont)
+            .Ascii(" /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor ").Int(id + 2)
+            .Ascii(" 0 R /DW 1000 /W [");
+        for (int i = 0; i < used.Count;)
+        {
+            int j = i;
+            while (j + 1 < used.Count && used[j + 1].Cid == used[j].Cid + 1) j++;
+            _out.Int(used[i].Cid).Ascii(" [");
+            for (int k = i; k <= j; k++) _out.Int(font.Advance1000(used[k].Gid)).Sp();
+            _out.Ascii("] ");
+            i = j + 1;
+        }
+        _out.Ascii("]");
+        if (!font.IsCff) _out.Ascii(" /CIDToGIDMap /Identity");
+        _out.Ascii(" >>");
+        End();
+
+        float scale = 1000f / font.UnitsPerEm;
+        int flags = 4 | (font.FixedPitch ? 1 : 0) | (font.IsItalic || font.ItalicAngle != 0 ? 64 : 0);
+        int stemV = 50 + (int)(font.WeightClass / 65f * (font.WeightClass / 65f));
+        Begin(id + 2).Ascii("<< /Type /FontDescriptor /FontName /").Ascii(baseFont).Ascii(" /Flags ").Int(flags)
+            .Ascii(" /FontBBox [").Int((int)(font.XMin * scale)).Sp().Int((int)(font.YMin * scale)).Sp()
+            .Int((int)Math.Ceiling(font.XMax * scale)).Sp().Int((int)Math.Ceiling(font.YMax * scale))
+            .Ascii("] /ItalicAngle ").Num(font.ItalicAngle).Ascii(" /Ascent ").Int((int)Math.Round(font.Ascender * scale))
+            .Ascii(" /Descent ").Int((int)Math.Round(-Math.Abs(font.Descender) * scale)).Ascii(" /CapHeight ").Int((int)Math.Round(font.CapHeight * scale))
+            .Ascii(" /StemV ").Int(stemV).Ascii(font.IsCff ? " /FontFile3 " : " /FontFile2 ").Int(id + 3).Ascii(" 0 R >>");
+        End();
+
+        var file = FontSubsetter.Build(subset);
+        WriteStream(id + 3, file, compress: true, extraDict: font.IsCff ? "/Subtype /OpenType" : "/Length1 " + file.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+        var cmap = new ByteBuffer(256 + used.Count * 16);
+        cmap.Ascii("/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n")
+            .Ascii("/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n");
+        var mapped = used.Where(u => u.CodePoint > 0).ToList();
+        for (int i = 0; i < mapped.Count; i += 100)
+        {
+            int n = Math.Min(100, mapped.Count - i);
+            cmap.Int(n).Ascii(" beginbfchar\n");
+            for (int k = i; k < i + n; k++)
+            {
+                cmap.Byte((byte)'<');
+                Hex4(cmap, mapped[k].Cid);
+                cmap.Ascii("> <");
+                int cp = mapped[k].CodePoint;
+                if (cp >= 0x10000)
+                {
+                    cp -= 0x10000;
+                    Hex4(cmap, 0xD800 + (cp >> 10));
+                    Hex4(cmap, 0xDC00 + (cp & 0x3FF));
+                }
+                else Hex4(cmap, cp);
+                cmap.Ascii(">\n");
+            }
+            cmap.Ascii("endbfchar\n");
+        }
+        cmap.Ascii("endcmap\nCMapName currentdict /CMapResource defineresource pop\nend\nend\n");
+        WriteStream(id + 4, cmap.Span, _compress, extraDict: null);
+    }
+
     private void WriteMarginText(ByteBuffer b, StandardFont font, string template, int page, int pages, bool top)
     {
         string text = template.Replace("{page}", page.ToString(System.Globalization.CultureInfo.InvariantCulture))
@@ -882,6 +1088,7 @@ internal sealed class PdfDocumentWriter
         float x = (_page.Width - w) / 2;
         float marginH = top ? _page.MarginTop : _page.MarginBottom;
         float y = top ? _page.Height - marginH / 2 - size / 3 : marginH / 2 - size / 3;
+        if (_tr != 0) { _tr = 0; b.Ascii("0 Tr "); }
         b.Ascii("BT 0.4 0.4 0.4 rg /F").Int(font.Index + 1).Sp().Num(size).Ascii(" Tf 0 Tw 0 Tc 1 0 0 1 ").Num(x).Sp().Num(y).Ascii(" Tm ");
         WriteTextBytes(b, text);
         b.Ascii(" Tj ET\n");

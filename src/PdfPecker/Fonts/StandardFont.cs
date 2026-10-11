@@ -3,12 +3,10 @@ namespace PdfPecker.Fonts;
 internal enum FontFamily : byte { Helvetica, Times, Courier }
 
 /// <summary>One of the PDF standard fonts (no embedding needed), with WinAnsi glyph widths.</summary>
-internal sealed class StandardFont
+internal sealed class StandardFont : TextFont
 {
     public readonly string BaseFont;
     public readonly int Index;          // 0..11, used as resource name /F{Index+1}
-    public readonly float Ascent;       // fraction of the em
-    public readonly float Descent;      // negative fraction of the em
     private readonly short[] _widths;
 
     private StandardFont(string baseFont, int index, short[] widths, int ascent, int descent)
@@ -39,8 +37,14 @@ internal sealed class StandardFont
     public static StandardFont Get(FontFamily family, bool bold, bool italic)
         => All[(int)family * 4 + (bold ? 1 : 0) + (italic ? 2 : 0)];
 
+    // Line-height: normal has always been 1.2 em for the standard fonts.
+    public override float NormalLineHeight => 1.2f;
+
+    /// <summary>True when the WinAnsi encoding has the character itself (not a substitute or '?').</summary>
+    public static bool CanEncode(char c) => WinAnsi.IsExact(c);
+
     /// <summary>Width of the text in 1/1000 em units.</summary>
-    public int MeasureUnits(string s, int start, int length)
+    public override int MeasureUnits(string s, int start, int length)
     {
         var w = _widths;
         int total = 0;
@@ -49,7 +53,7 @@ internal sealed class StandardFont
         return total;
     }
 
-    public float Measure(string s, float size) => MeasureUnits(s, 0, s.Length) * size / 1000f;
+    public int CharUnits(char c) => _widths[WinAnsi.Encode(c)];
 
-    public float CharWidth(char c, float size) => _widths[WinAnsi.Encode(c)] * size / 1000f;
+    public override float CharWidth(char c, float size) => _widths[WinAnsi.Encode(c)] * size / 1000f;
 }

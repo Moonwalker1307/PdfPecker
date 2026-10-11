@@ -159,3 +159,9 @@ without prior written authorization from the Gnome Foundation or Bitstream
 Inc., respectively. For further information, contact: fonts at gnome dot
 org.
 ```
+
+## Test fonts (not part of the library or the NuGet package)
+
+`tests/PdfPecker.Tests/Fixtures/fonts` holds subsets of Work Sans (Copyright 2019 The Work Sans Project Authors) and
+Inter (Copyright 2016-2023 The Inter Project Authors), used only by the tests. Both are licensed under the SIL Open
+Font License 1.1; the license texts are next to the fonts.

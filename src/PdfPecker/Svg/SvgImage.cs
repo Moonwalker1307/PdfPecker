@@ -538,7 +538,7 @@ internal sealed class SvgImage
                 var str = sb.ToString();
                 var st = el.Style;
                 float size = st.FontSize / 0.75f;
-                float w = st.Font.Measure(str, size) + st.LetterSpacing / 0.75f * str.Length;
+                float w = st.StandardFont.Measure(str, size) + st.LetterSpacing / 0.75f * str.Length;
                 runs.Add(new TextRun(str, st, penX, penY, w));
                 penX += w;
             }
@@ -552,7 +552,7 @@ internal sealed class SvgImage
             var trimmed = last.Text.TrimEnd(' ');
             float size = last.Style.FontSize / 0.75f;
             runs[^1] = new TextRun(trimmed, last.Style, last.X, last.Y,
-                last.Style.Font.Measure(trimmed, size) + last.Style.LetterSpacing / 0.75f * trimmed.Length);
+                last.Style.StandardFont.Measure(trimmed, size) + last.Style.LetterSpacing / 0.75f * trimmed.Length);
         }
 
         chunkStarts.Add(runs.Count);
@@ -586,7 +586,7 @@ internal sealed class SvgImage
         {
             Kind = SvgShape.KindText,
             Text = run.Text,
-            Font = s.Font,
+            Font = s.StandardFont,
             FontSize = size,
             CharSpacing = s.LetterSpacing / 0.75f,
             TextMatrix = new Matrix(1, 0, 0, -1, x, y).Then(ctm),
