@@ -118,6 +118,7 @@ internal sealed class ComputedStyle
     public int FontWeight = 400;
     public bool Italic;
     public float FontSize = 12f; // 16px
+    public float ParentFontSize = 12f; // the parent's font size, which sub and super shift by
     public LineHeightKind LineHeightKind = LineHeightKind.Normal;
     public float LineHeightValue;
     public TextAlign TextAlign;
@@ -240,6 +241,7 @@ internal sealed class ComputedStyle
     public ComputedStyle CreateChild()
     {
         var c = (ComputedStyle)MemberwiseClone();
+        c.ParentFontSize = FontSize;
         c.Display = Display.Inline;
         c.BackgroundColor = 0;
         c.BackgroundImages = null;

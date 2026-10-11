@@ -145,4 +145,82 @@ public class BrowserMatchTests
         Assert.Equal(3f, StyleResolver.SnapBorderWidth(3f));         // 4px
         Assert.Equal(0f, StyleResolver.SnapBorderWidth(0f));
     }
+    [Fact]
+    public void Lengths_are_truncated_to_sixty_fourths_of_a_pixel()
+    {
+        // 0.7pt is 0.933px, which Chrome stores as 59/64 px, so ten such boxes stack 0.08pt short of 7pt.
+        Near(59f / 64f * 0.75f, StyleResolver.ToLayoutUnits(0.7f), 0.0001f);
+        var ops = Layout("""
+            <div style="height: 0.7pt"></div><div style="height: 0.7pt"></div><div style="height: 0.7pt"></div>
+            <div style="height: 0.7pt"></div><div style="height: 0.7pt"></div><div style="height: 0.7pt"></div>
+            <div style="height: 0.7pt"></div><div style="height: 0.7pt"></div><div style="height: 0.7pt"></div>
+            <div style="height: 0.7pt"></div><div style="height: 1pt; background: #ff0000"></div>
+            """);
+        Near(10 * 59f / 64f * 0.75f, Box(ops, "#ff0000").Y, 0.001f);
+    }
+
+    [Fact]
+    public void An_empty_paragraph_collapses_its_margins_together()
+    {
+        // Chrome: the empty <p> adds one 12px margin, not two, and nothing for its own height.
+        var ops = Layout("<div style='font: 12px Arial'><div>A</div><p style='margin: 12px 0'></p><div>B</div></div>").OfType<TextOp>().ToList();
+        Near((14 + 12) * 0.75f, ops[1].Baseline - ops[0].Baseline);
+    }
+
+    [Fact]
+    public void A_parent_and_its_first_and_last_child_share_their_margins()
+    {
+        var ops = Layout("""
+            <div style="font: 12px Arial">
+              <div>A</div>
+              <div style="margin: 10px 0 5px"><p style="margin: 20px 0">x</p></div>
+              <div>B</div>
+            </div>
+            """).OfType<TextOp>().ToList();
+        // max(10, 20) above x and max(5, 20) below it.
+        Near((14 + 20) * 0.75f, ops[1].Baseline - ops[0].Baseline);
+        Near((14 + 20) * 0.75f, ops[2].Baseline - ops[1].Baseline);
+    }
+
+    [Fact]
+    public void Padding_keeps_a_child_margin_inside_its_parent()
+    {
+        var ops = Layout("""
+            <div style="font: 12px Arial"><div>A</div><div style="padding-top: 1px; margin-top: 10px"><p style="margin: 20px 0 0">x</p></div></div>
+            """).OfType<TextOp>().ToList();
+        Near((14 + 10 + 1 + 20) * 0.75f, ops[1].Baseline - ops[0].Baseline);
+    }
+
+    [Fact]
+    public void Collapsed_table_columns_floor_fixed_widths_to_whole_pixels()
+    {
+        var ops = Layout("""
+            <table style="border-collapse: collapse; border-spacing: 0">
+              <tr><td style="width: 50.6px; padding: 0; background: #ff0000">a</td>
+                  <td style="width: 50.6px; padding: 0; background: #00ff00">b</td></tr>
+            </table>
+            """);
+        Near(37.5f, Box(ops, "#ff0000").W);
+        Near(Box(ops, "#ff0000").X + 37.5f, Box(ops, "#00ff00").X);
+    }
+
+    [Fact]
+    public void Superscripts_and_subscripts_shift_by_whole_pixels_of_the_parent_font()
+    {
+        // 12px parent: super is raised 12/3 + 1 = 5px, sub is lowered 12/5 + 1 = 3px.
+        var ops = Layout("<p style='font: 12px Arial; margin: 0'>x<sup>2</sup>y<sub>3</sub></p>").OfType<TextOp>().ToList();
+        var x = ops.Single(t => t.Text.StartsWith('x'));
+        Near(x.Baseline - 3.75f, ops.Single(t => t.Text == "2").Baseline);
+        Near(x.Baseline + 2.25f, ops.Single(t => t.Text == "3").Baseline);
+    }
+
+    [Fact]
+    public void Box_edges_are_painted_on_whole_pixels()
+    {
+        // A background starting 10.4px down and 20.6px tall is painted from 10px to 31px, as Chrome does.
+        var content = PdfTestHelpers.AllContent(PdfTestHelpers.ConvertUncompressed("""
+            <body style="margin: 0"><div style="height: 10.4px"></div><div style="height: 20.6px; width: 100px; background: #ff0000"></div></body>
+            """));
+        Assert.Contains(" 75 15.75 re f", content);
+    }
 }

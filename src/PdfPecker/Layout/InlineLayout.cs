@@ -598,14 +598,16 @@ internal sealed partial class LayoutEngine
         d += shift;
     }
 
-    /// <summary>Downward baseline shift for sub/superscripts.</summary>
+    /// <summary>
+    /// Downward baseline shift for sub/superscripts, as Chrome computes it from the parent's font size in whole pixels:
+    /// up by a third plus one pixel, down by a fifth plus one pixel.
+    /// </summary>
     private static float BaselineShift(ComputedStyle s)
-        => s.VerticalAlign switch
-        {
-            VerticalAlign.Super => -0.42f * s.FontSize,
-            VerticalAlign.Sub => 0.25f * s.FontSize,
-            _ => 0,
-        };
+    {
+        if (s.VerticalAlign is not (VerticalAlign.Super or VerticalAlign.Sub)) return 0;
+        int px = (int)MathF.Round(s.ParentFontSize / 0.75f);
+        return s.VerticalAlign == VerticalAlign.Super ? -(px / 3 + 1) * 0.75f : (px / 5 + 1) * 0.75f;
+    }
 
     private float PlaceLines(List<Line> lines, ComputedStyle block, float x, float y, float w, float indent)
     {

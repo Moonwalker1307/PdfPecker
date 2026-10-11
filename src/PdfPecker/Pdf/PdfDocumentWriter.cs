@@ -728,6 +728,8 @@ internal sealed class PdfDocumentWriter
     }
 
     private float PX(float x) => _page.MarginLeft + x;
+
+    private static float SnapPx(float pt) => MathF.Round(pt / 0.75f, MidpointRounding.AwayFromZero) * 0.75f;
     private float PY(float y, float pageTop) => _page.Height - _yOrigin - (y - pageTop);
 
     private void SetFill(ByteBuffer b, uint color)
@@ -765,7 +767,8 @@ internal sealed class PdfDocumentWriter
                 SetFill(b, t.Color);
                 if (_tw != t.WordSpacing) { _tw = t.WordSpacing; b.Num(t.WordSpacing).Ascii(" Tw\n"); }
                 if (_tc != t.CharSpacing) { _tc = t.CharSpacing; b.Num(t.CharSpacing).Ascii(" Tc\n"); }
-                float y = PY(t.Baseline, pageTop);
+                // Chrome puts baselines on whole CSS pixels (horizontal positions stay fractional).
+                float y = PY(pageTop + SnapPx(t.Baseline - pageTop), pageTop);
                 WriteTextLine(b, t, PX(t.X), y);
                 break;
             }
@@ -773,8 +776,12 @@ internal sealed class PdfDocumentWriter
             {
                 EndText(b);
                 SetFill(b, r.Color);
-                float top = placed.Y0, bottom = placed.Y1;
-                b.Num(PX(r.X)).Sp().Num(PY(bottom, pageTop)).Sp().Num(r.W).Sp().Num(bottom - top).Ascii(" re f\n");
+                // Chrome paints boxes on whole CSS pixels: each edge rounds to the nearest pixel of the page.
+                float x0 = SnapPx(r.X), x1 = SnapPx(r.X + r.W);
+                float top = pageTop + SnapPx(placed.Y0 - pageTop), bottom = pageTop + SnapPx(placed.Y1 - pageTop);
+                if (x1 <= x0) { x0 = r.X; x1 = r.X + r.W; }
+                if (bottom <= top) { top = placed.Y0; bottom = placed.Y1; }
+                b.Num(PX(x0)).Sp().Num(PY(bottom, pageTop)).Sp().Num(x1 - x0).Sp().Num(bottom - top).Ascii(" re f\n");
                 break;
             }
             case BackgroundOp bg:

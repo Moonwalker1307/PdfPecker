@@ -103,7 +103,7 @@ internal sealed partial class LayoutEngine
             for (int k = 0; k < span && colIndex < n; k++, colIndex++)
             {
                 if (cs.Width.IsPercent) m.ColPct[colIndex] = cs.Width.Value;
-                else if (!cs.Width.IsAuto) m.ColFixed[colIndex] = cs.Width.Value;
+                else if (!cs.Width.IsAuto) m.ColFixed[colIndex] = FloorPx(cs.Width.Value);
             }
         }
 
@@ -115,13 +115,15 @@ internal sealed partial class LayoutEngine
             {
                 var cs = cell.Td.Style;
                 var (mn, mx) = ContentIntrinsic(cell.Td);
-                float frame = cs.PaddingLeft.Resolve(0) + cs.PaddingRight.Resolve(0) + cs.BorderLeft + cs.BorderRight;
+                // With collapsed borders a cell owns half of each border.
+                float borders = (cs.BorderLeft + cs.BorderRight) * (table.Style.BorderCollapse ? 0.5f : 1f);
+                float frame = cs.PaddingLeft.Resolve(0) + cs.PaddingRight.Resolve(0) + borders;
                 cell.Min = mn + frame;
                 cell.Max = Math.Max(mx + frame, cell.Min);
                 if (cs.Width.IsPercent) cell.PercentWidth = cs.Width.Value;
                 else if (!cs.Width.IsAuto)
                 {
-                    cell.FixedWidth = cs.Width.Value + (cs.BorderBox ? 0 : frame);
+                    cell.FixedWidth = FloorPx(cs.Width.Value + (cs.BorderBox ? 0 : frame));
                     cell.Max = Math.Max(cell.Min, cell.FixedWidth);
                 }
                 if (cell.ColSpan == 1)
@@ -195,6 +197,9 @@ internal sealed partial class LayoutEngine
                 if (c is Element tr && tr.Style?.Display == Display.TableRow) rows.Add(tr);
         }
     }
+
+    // Chrome sizes fixed-width table columns in whole CSS pixels, dropping the fraction.
+    private static float FloorPx(float pt) => MathF.Floor(pt / 0.75f + 0.001f) * 0.75f;
 
     private static int ParseInt(string? s, int fallback) => int.TryParse(s, out int v) ? v : fallback;
 
@@ -272,7 +277,20 @@ internal sealed partial class LayoutEngine
         float frameL, frameR, frameT, frameB;
         if (collapse)
         {
-            frameL = s.BorderLeft / 2; frameR = s.BorderRight / 2; frameT = s.BorderTop / 2; frameB = s.BorderBottom / 2;
+            // The table's half borders are those of the collapsed outer borders: the widest of the table's own border
+            // and the borders of the cells along that edge (CSS 2.1 §17.6.2), as Chrome lays them out.
+            float t = s.BorderTop, b = s.BorderBottom, l = s.BorderLeft, r = s.BorderRight;
+            if (m.Rows.Count > 0)
+            {
+                foreach (var c in m.Rows[0].Cells) t = Math.Max(t, c.Td.Style.BorderTop);
+                foreach (var c in m.Rows[^1].Ending) b = Math.Max(b, c.Td.Style.BorderBottom);
+                foreach (var c in m.Rows[0].Cells)
+                {
+                    if (c.Col == 0) l = Math.Max(l, c.Td.Style.BorderLeft);
+                    if (c.Col + c.ColSpan == m.ColCount) r = Math.Max(r, c.Td.Style.BorderRight);
+                }
+            }
+            frameL = l / 2; frameR = r / 2; frameT = t / 2; frameB = b / 2;
         }
         else
         {
