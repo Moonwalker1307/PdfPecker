@@ -518,20 +518,21 @@ internal sealed class StyleResolver
                 else if (CssColor.TryParse(v, s.Color, out var bg)) s.BackgroundColor = CssColor.FlattenOnWhite(bg);
                 break;
             case "font-family":
-                if (inherit) { s.FontFamily = parent.FontFamily; break; }
+                if (inherit) { s.FontFamily = parent.FontFamily; s.FontFamilyName = parent.FontFamilyName; break; }
                 s.FontFamily = MapFontFamily(v, s.FontFamily);
                 s.FontFamilyName = v;
                 break;
             case "font-weight":
-                s.Bold = lower switch
+                s.FontWeight = lower switch
                 {
-                    "bold" => true,
-                    "bolder" => true,
-                    "normal" => false,
-                    "lighter" => false,
-                    "inherit" => parent.Bold,
-                    _ => int.TryParse(lower, out int w) ? w >= 600 : s.Bold,
+                    "bold" => 700,
+                    "normal" => 400,
+                    "bolder" => parent.FontWeight < 350 ? 400 : parent.FontWeight < 550 ? 700 : Math.Max(900, parent.FontWeight),
+                    "lighter" => parent.FontWeight < 100 ? parent.FontWeight : parent.FontWeight < 550 ? 100 : parent.FontWeight < 750 ? 400 : 700,
+                    "inherit" => parent.FontWeight,
+                    _ => int.TryParse(lower, out int w) && w >= 1 && w <= 1000 ? w : s.FontWeight,
                 };
+                s.Bold = s.FontWeight >= 600;
                 break;
             case "font-style":
                 s.Italic = lower switch { "italic" or "oblique" => true, "normal" => false, "inherit" => parent.Italic, _ => s.Italic };

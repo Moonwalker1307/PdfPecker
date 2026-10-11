@@ -37,7 +37,8 @@ internal sealed class ImageLoader
         return img;
     }
 
-    private byte[]? Fetch(string src)
+    /// <summary>The bytes of a resource (data URI, user resolver or local file), or null.</summary>
+    public byte[]? Fetch(string src)
     {
         if (src.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
         {

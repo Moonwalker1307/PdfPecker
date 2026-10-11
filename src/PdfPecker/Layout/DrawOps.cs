@@ -36,13 +36,13 @@ internal sealed class LineOp : DrawOp
 internal sealed class TextOp : DrawOp
 {
     public float X, Baseline, LineTop; // LineTop decides the page
-    public StandardFont Font;
+    public TextFont Font;
     public float Size;
     public uint Color;
     public string Text;
     public float WordSpacing, CharSpacing;
 
-    public TextOp(float x, float baseline, float lineTop, StandardFont font, float size, uint color, string text, float wordSpacing, float charSpacing)
+    public TextOp(float x, float baseline, float lineTop, TextFont font, float size, uint color, string text, float wordSpacing, float charSpacing)
     {
         X = x; Baseline = baseline; LineTop = lineTop; Font = font; Size = size; Color = color; Text = text;
         WordSpacing = wordSpacing; CharSpacing = charSpacing;

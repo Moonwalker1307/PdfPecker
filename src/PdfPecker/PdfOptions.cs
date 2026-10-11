@@ -84,6 +84,15 @@ public sealed class PdfOptions
     /// </summary>
     public bool AllowFileAccess { get; set; } = true;
 
+    /// <summary>
+    /// TrueType/OpenType fonts that CSS <c>font-family</c> can use, in addition to the document's own <c>@font-face</c>
+    /// rules. Used fonts are embedded as subsets, so text can use any Unicode character they cover. Without them, text
+    /// uses the standard PDF fonts (Helvetica, Times, Courier), which cover Western European characters only.
+    /// A collection can be shared by many options and conversions.
+    /// </summary>
+    /// <example><code>options.Fonts.AddFile("fonts/OpenSans-Regular.ttf").AddFile("fonts/OpenSans-Bold.ttf");</code></example>
+    public FontCollection Fonts { get; set; } = new();
+
     /// <summary>Extra CSS applied after the document's own styles.</summary>
     public string? UserStyleSheet { get; set; }
 

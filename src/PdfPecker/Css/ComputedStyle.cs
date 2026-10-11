@@ -103,6 +103,7 @@ internal sealed class ComputedStyle
     public uint Color = CssColor.Black;
     public FontFamily FontFamily = FontFamily.Times;
     public bool Bold;
+    public int FontWeight = 400;
     public bool Italic;
     public float FontSize = 12f; // 16px
     public LineHeightKind LineHeightKind = LineHeightKind.Normal;
@@ -120,6 +121,7 @@ internal sealed class ComputedStyle
     public bool BorderCollapse;
     public float BorderSpacingH = 1.5f, BorderSpacingV = 1.5f; // 2px
     public string? FontFamilyName;
+    public FontResolver? Fonts; // the document's fonts; null when only the standard fonts exist
     public Dictionary<string, string>? CustomProperties; // custom properties (--name), shared with the parent until changed
 
     // SVG presentation properties (inherited).
@@ -167,9 +169,9 @@ internal sealed class ComputedStyle
     public int ColumnCount;
     public Length ColumnWidth = Length.Auto;
 
-    private StandardFont? _font;
+    private TextFont? _font;
 
-    public StandardFont Font => _font ??= StandardFont.Get(FontFamily, Bold, Italic);
+    public TextFont Font => _font ??= Fonts == null ? StandardFont.Get(FontFamily, Bold, Italic) : Fonts.Resolve(FontFamilyName, FontFamily, FontWeight, Italic);
 
     public void InvalidateFont() => _font = null;
 
@@ -178,7 +180,7 @@ internal sealed class ComputedStyle
         {
             LineHeightKind.Factor => LineHeightValue * FontSize,
             LineHeightKind.Absolute => LineHeightValue,
-            _ => FontSize * 1.2f,
+            _ => FontSize * Font.NormalLineHeight,
         };
 
     // Effective border widths: zero when the style is none.
