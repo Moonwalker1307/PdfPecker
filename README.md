@@ -84,6 +84,8 @@ var options = new PdfOptions
     UserStyleSheet = "body { font-size: 10pt }",      // extra CSS applied after the document's own
     FooterText = "Page {page} of {pages}",            // also HeaderText
     Title = "Invoice 42", Author = "Accounts",        // document properties (Title defaults to <title>)
+    Keywords = "invoice", Creator = "MyApp",          // also Subject, and Producer (default "PdfPecker")
+    CustomProperties = { ["RunId"] = "42" },          // your own properties, in the PDF's document information
     Bookmarks = true,                                 // PDF bookmarks from h1-h6 (default)
     Compress = true,                                  // Flate-compress page content (default)
     AllowFileAccess = false,                          // true: also read files outside BaseDirectory (trusted HTML only)
@@ -200,6 +202,35 @@ incremental update, and it works together with `Security` (encrypted files) and 
 drawn as outlines, so it needs no unembedded font). The CMS structure is built with .NET's own `System.Formats.Asn1` and
 `System.Security.Cryptography`; no extra package is needed. Signing adds a few milliseconds (the RSA or ECDSA operation
 and re-reading the file); conversions without a signature are unaffected.
+
+Custom properties are written to the document information dictionary, where Acrobat shows them under Document
+Properties > Custom and `pdfinfo -custom` lists them. For PDF/A they are also written to the XMP metadata (Acrobat's
+`pdfx` namespace, with the extension schema PDF/A requires), alongside Keywords, Creator and Producer.
+
+## Merging PDFs
+
+`PdfMerger` combines PDFs into one, any PDFs, not only those PdfPecker made:
+
+```csharp
+byte[] merged = PdfMerger.Merge(invoicePdf, termsPdf, attachmentPdf);
+
+// With passwords for encrypted inputs (by position), and properties for the result.
+byte[] merged2 = PdfMerger.Merge(new[] { a, b }, new PdfMergeOptions
+{
+    Passwords = new string?[] { null, "secret" },
+    Title = "Payslips October",
+    CustomProperties = { ["RunId"] = "42" },
+});
+
+PdfMerger.MergeFiles("all.pdf", new[] { "a.pdf", "b.pdf" });
+```
+
+The pages keep their content, fonts, images, links, annotations and layers, and each input's bookmarks follow each
+other. Document properties come from the first input unless `PdfMergeOptions` sets them. The result is never encrypted
+and has no signatures (merging would break them); form fields are no longer fillable, and PDF/A
+conformance, attachments and tags are not carried over. Inputs are handled as untrusted: damaged files are repaired
+where possible, decoding is limited per input, and `MaxPages` (default 100,000) caps the result. Merging four small
+documents takes about 1 ms.
 
 ## PDF to image
 
