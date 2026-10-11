@@ -113,6 +113,16 @@ internal sealed partial class LayoutEngine
         return a + b;
     }
 
+    /// <summary>Where a block box of a flow started, so that layout can rewind to it (break-after/before: avoid).</summary>
+    private struct FlowMark
+    {
+        public int Index, OpsCount, ListIndex, CurrentListIndex;
+        public float Y, PendingMargin, Top;
+        public bool AnyContent;
+        public ListMarker? Marker;
+        public int FirstPage; // page of the box's first painted content
+    }
+
     /// <summary>Lays out the children of a block container. Returns the bottom of the content (including the last child's bottom margin).</summary>
     private float LayoutFlow(Element parent, float x, float y, float w)
     {
@@ -124,31 +134,66 @@ internal sealed partial class LayoutEngine
         int listIndex = 0;
         if (parent.Name == "ol" && int.TryParse(parent.GetAttribute("start"), out int start)) listIndex = start - 1;
 
-        for (int i = 0; i < children.Count; i++)
+        // Keep-with-next: the first box of a run of boxes that must not be separated from what follows them.
+        FlowMark prev = default, chain = default;
+        bool hasPrev = false, hasChain = false, prevAvoidAfter = false;
+        int forcedAt = -1; // the box that was moved to a new page to keep its chain together
+
+        int i;
+        for (i = 0; i <= children.Count; i++)
         {
-            var child = children[i];
-            if (child is TextNode)
+            Element? e = null;
+            if (i < children.Count)
             {
-                (run ??= new List<Node>()).Add(child);
-                continue;
-            }
-            var e = (Element)child;
-            var s = e.Style;
-            if (s == null || s.Display == Display.None || e.Detached) continue;
-            if (IsInlineLevel(e) && !(s.Floated && e.Name != "img"))
-            {
-                (run ??= new List<Node>()).Add(child);
-                continue;
+                var child = children[i];
+                if (child is TextNode)
+                {
+                    (run ??= new List<Node>()).Add(child);
+                    continue;
+                }
+                e = (Element)child;
+                var es = e.Style;
+                if (es == null || es.Display == Display.None || e.Detached) continue;
+                if (IsInlineLevel(e) && !(es.Floated && e.Name != "img"))
+                {
+                    (run ??= new List<Node>()).Add(child);
+                    continue;
+                }
             }
 
             if (run is { Count: > 0 })
             {
                 float before = y;
+                int runOps = _ops.Count;
                 y = FlushInline(run, parent, x, y + pendingMargin, w, !anyContent, out bool produced);
-                if (produced) { pendingMargin = 0; anyContent = true; }
-                else y = before;
                 run.Clear();
+                if (produced)
+                {
+                    pendingMargin = 0;
+                    anyContent = true;
+                    if (hasChain && prevAvoidAfter && KeepTogetherFails(chain, runOps, before, forcedAt))
+                    {
+                        Rewind(chain);
+                        forcedAt = chain.Index;
+                        hasChain = hasPrev = prevAvoidAfter = false;
+                        continue;
+                    }
+                    hasChain = hasPrev = prevAvoidAfter = false;
+                }
+                else y = before;
             }
+            if (e == null) break;
+
+            var s = e.Style;
+            var mark = new FlowMark
+            {
+                Index = i, OpsCount = _ops.Count, ListIndex = listIndex, CurrentListIndex = _currentListIndex,
+                Y = y, PendingMargin = pendingMargin, AnyContent = anyContent, Marker = _marker,
+            };
+            // A forced break wins over avoid.
+            bool joins = _paginate && hasPrev && (prevAvoidAfter || s.AvoidBreakBefore) && !s.PageBreakBefore;
+            if (!joins) hasChain = false;
+            if (joins && !hasChain) { chain = prev; hasChain = true; }
 
             if (s.PageBreakBefore || s.PageBreakAfter) _forcedBreaks++;
             if (s.Display == Display.ListItem)
@@ -160,9 +205,17 @@ internal sealed partial class LayoutEngine
 
             float mt = s.MarginTop.Resolve(w);
             float top = y + CollapseMargins(pendingMargin, mt);
-            if (s.PageBreakBefore) top = NextPage(top);
+            if (s.PageBreakBefore || forcedAt == i) top = NextPage(top);
 
+            int boxOps = _ops.Count;
             float bottom = LayoutBlockBox(e, x, top, w, shrinkToFit: false);
+            if (joins && KeepTogetherFails(chain, boxOps, top, forcedAt))
+            {
+                Rewind(chain);
+                forcedAt = chain.Index;
+                hasChain = hasPrev = prevAvoidAfter = false;
+                continue;
+            }
             anyContent = true;
             pendingMargin = s.MarginBottom.Resolve(w);
             y = bottom;
@@ -171,31 +224,75 @@ internal sealed partial class LayoutEngine
                 y = NextPage(y + pendingMargin);
                 pendingMargin = 0;
             }
-        }
 
-        if (run is { Count: > 0 })
-        {
-            float yy = FlushInline(run, parent, x, y + pendingMargin, w, !anyContent, out bool produced);
-            if (produced) { y = yy; pendingMargin = 0; }
+            mark.Top = top;
+            if (_paginate) mark.FirstPage = FirstContentPage(boxOps, top);
+            prevAvoidAfter = _paginate && s.AvoidBreakAfter && !s.PageBreakAfter;
+            if (!prevAvoidAfter) hasChain = false;
+            prev = mark;
+            hasPrev = !s.PageBreakAfter;
         }
         return y + pendingMargin;
+
+        void Rewind(in FlowMark m)
+        {
+            Truncate(m.OpsCount);
+            i = m.Index - 1;
+            y = m.Y;
+            pendingMargin = m.PendingMargin;
+            anyContent = m.AnyContent;
+            listIndex = m.ListIndex;
+            _currentListIndex = m.CurrentListIndex;
+            _marker = m.Marker;
+            run?.Clear();
+        }
+    }
+
+    /// <summary>
+    /// Whether the content laid out from <paramref name="opsStart"/> begins on a later page than the chain that must stay
+    /// with it, and moving the chain to a new page would help.
+    /// </summary>
+    private bool KeepTogetherFails(in FlowMark chain, int opsStart, float fallbackY, int forcedAt)
+        => chain.Index != forcedAt && !AtPageTop(chain.Top)
+           && FirstContentPage(opsStart, fallbackY) > chain.FirstPage;
+
+    /// <summary>The page of the first text, image or drawing among the ops from <paramref name="from"/>.</summary>
+    private int FirstContentPage(int from, float fallbackY)
+    {
+        for (int i = from; i < _ops.Count; i++)
+            if (FirstContentY(_ops[i]) is { } fy) return PageOf(fy);
+        return PageOf(fallbackY);
+    }
+
+    private static float? FirstContentY(DrawOp op)
+    {
+        switch (op)
+        {
+            case TextOp t: return t.LineTop;
+            case ImageOp im: return im.Y;
+            case SvgOp sv: return sv.Y;
+            case GroupOp g:
+                foreach (var o in g.Ops)
+                    if (FirstContentY(o) is { } y) return y;
+                return null;
+            default: return null;
+        }
     }
 
     /// <summary>Lays out a block-level box whose top border edge is at <paramref name="y"/>. Returns its bottom border edge.</summary>
     private float LayoutBlockBox(Element e, float x, float y, float availW, bool shrinkToFit)
     {
         var s = e.Style;
-        if (s.Display == Display.Table) return LayoutTable(e, x, y, availW);
-
+        bool table = s.Display == Display.Table;
         int opsStart = _ops.Count;
         var savedMarker = _marker;
-        float bottom = LayoutBlockBoxCore(e, x, y, availW, shrinkToFit);
+        float bottom = table ? LayoutTable(e, x, y, availW) : LayoutBlockBoxCore(e, x, y, availW, shrinkToFit);
         if (s.AvoidBreakInside && CrossesPage(y, bottom) && bottom - y <= _pageH && !AtPageTop(y))
         {
             Truncate(opsStart);
             _marker = savedMarker;
             float ny = NextPage(y);
-            bottom = LayoutBlockBoxCore(e, x, ny, availW, shrinkToFit);
+            bottom = table ? LayoutTable(e, x, ny, availW) : LayoutBlockBoxCore(e, x, ny, availW, shrinkToFit);
         }
         return bottom;
     }
@@ -269,6 +366,7 @@ internal sealed partial class LayoutEngine
         else if (s.MarginLeft.IsAuto) ml = Math.Max(0, availW - used - mr);
         float bx = x + ml;
 
+        int opsStart = _ops.Count;
         var group = new GroupOp();
         _ops.Add(group);
 
@@ -332,6 +430,8 @@ internal sealed partial class LayoutEngine
         float bottom = cy + contentH + pb + bb;
         BoxPainter.Paint(group, s, bx, y, used, bottom - y);
         _lastBoxRight = bx + used;
+        if (e.Name == "a" && e.GetAttribute("href") is { Length: > 0 } href) _ops.Add(new LinkOp(bx, y, used, bottom - y, href));
+        if (Headings != null && HeadingLevel(e.Name) is int level and > 0) RecordHeading(e, level, y, opsStart);
         return bottom;
     }
 
@@ -493,6 +593,46 @@ internal sealed partial class LayoutEngine
     private readonly Dictionary<Element, float> _widthOverride = new();
     private readonly Dictionary<Element, float> _heightOverride = new();
 
+    /// <summary>Headings in document order for the PDF outline, or null when no outline is wanted. Each heading's
+    /// position is kept in <see cref="Anchors"/> under its key, so it follows the heading when content is moved.</summary>
+    public List<OutlineHeading>? Headings;
+    private Dictionary<Element, string>? _headingKeys;
+
+    private static int HeadingLevel(string name)
+        => name.Length == 2 && name[0] == 'h' && name[1] >= '1' && name[1] <= '6' ? name[1] - '0' : 0;
+
+    private void RecordHeading(Element e, int level, float top, int opsStart)
+    {
+        _headingKeys ??= new Dictionary<Element, string>();
+        if (!_headingKeys.TryGetValue(e, out var key))
+        {
+            var title = CollapseWhitespace(e.InnerText());
+            if (title.Length == 0) return;
+            key = "\u0001h" + Headings!.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            _headingKeys[e] = key;
+            Headings.Add(new OutlineHeading(title, level, key));
+        }
+        // Point at the first line of text, which may have moved to the next page.
+        float y = top;
+        if (_paginate)
+            for (int i = opsStart; i < _ops.Count; i++)
+                if (FirstContentY(_ops[i]) is { } fy) { if (PageOf(fy) > PageOf(top)) y = fy; break; }
+        SetAnchor(key, y);
+    }
+
+    private static string CollapseWhitespace(string text)
+    {
+        var sb = new System.Text.StringBuilder(text.Length);
+        bool space = false;
+        foreach (char c in text)
+        {
+            if (char.IsWhiteSpace(c)) { space = sb.Length > 0; continue; }
+            if (space) { sb.Append(' '); space = false; }
+            sb.Append(c);
+        }
+        return sb.ToString();
+    }
+
     private void SetAnchor(string id, float y)
     {
         Anchors[id] = y;
@@ -592,3 +732,6 @@ internal sealed partial class LayoutEngine
                 if (Anchors.TryGetValue(id, out float ay)) SetAnchor(id, ay + dy);
     }
 }
+
+/// <summary>A heading that becomes a PDF bookmark: its text, level (1-6) and the key of its position in the anchors.</summary>
+internal readonly record struct OutlineHeading(string Title, int Level, string Key);

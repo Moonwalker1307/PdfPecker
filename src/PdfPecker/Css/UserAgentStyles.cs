@@ -32,6 +32,7 @@ h3 { font-size: 1.17em; margin: 1em 0; font-weight: bold; }
 h4 { font-size: 1em; margin: 1.33em 0; font-weight: bold; }
 h5 { font-size: 0.83em; margin: 1.67em 0; font-weight: bold; }
 h6 { font-size: 0.67em; margin: 2.33em 0; font-weight: bold; }
+h1, h2, h3, h4, h5, h6 { break-after: avoid; } /* keep a heading on the page of the text it introduces */
 ul, ol, menu { margin: 1em 0; padding-left: 40px; }
 ul { list-style-type: disc; }
 ol { list-style-type: decimal; }

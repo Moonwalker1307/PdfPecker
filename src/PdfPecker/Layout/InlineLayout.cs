@@ -11,6 +11,7 @@ internal sealed partial class LayoutEngine
 {
     private readonly StringBuilder _runText = new(256);
     private float[] _xs = new float[64];
+    private float[] _lineA = new float[32], _lineD = new float[32];
 
     // Items are pooled: a document creates one per word, and they are only needed while their paragraph is laid out.
     private readonly List<Item> _itemPool = new();
@@ -503,14 +504,14 @@ internal sealed partial class LayoutEngine
         TextMetrics(block, out float strutA, out float strutD);
         float[] xs = _xs;
 
-        for (int li = 0; li < lines.Count; li++)
+        int n = lines.Count;
+        if (_lineA.Length < n) { _lineA = new float[n * 2]; _lineD = new float[n * 2]; }
+        float[] lineA = _lineA, lineD = _lineD;
+        for (int li = 0; li < n; li++)
         {
-            var line = lines[li];
-            var items = line.Items;
             float maxA = strutA, maxD = strutD;
             bool visible = false;
-            int spaces = 0;
-            foreach (var it in items)
+            foreach (var it in lines[li].Items)
             {
                 float a, d;
                 switch (it.Kind)
@@ -526,21 +527,34 @@ internal sealed partial class LayoutEngine
                         break;
                     default:
                         TextMetrics(it.Style, out a, out d);
-                        if (it.Kind == ItemKind.Space) spaces++;
                         break;
                 }
                 visible = true;
                 if (a > maxA) maxA = a;
                 if (d > maxD) maxD = d;
             }
-            if (!visible)
+            lineA[li] = visible ? maxA : float.NaN;
+            lineD[li] = maxD;
+        }
+        bool[]? breakBefore = _paginate && n > 1 ? PlanBreaks(n, lineA, lineD, y, block.Orphans, block.Widows) : null;
+
+        for (int li = 0; li < n; li++)
+        {
+            var line = lines[li];
+            var items = line.Items;
+            if (float.IsNaN(lineA[li]))
             {
                 foreach (var it in items) SetAnchor(it.AnchorId!, y);
                 continue;
             }
+            float maxA = lineA[li];
+            int spaces = 0;
+            foreach (var it in items)
+                if (it.Kind == ItemKind.Space) spaces++;
 
-            float lineH = maxA + maxD;
+            float lineH = maxA + lineD[li];
             y = FitOnPage(y, lineH);
+            if (breakBefore != null && breakBefore[li]) y = NextPage(y);
             float baseline = y + maxA;
             float lineIndent = li == 0 ? indent : 0;
             float free = w - lineIndent - line.Width;
@@ -626,6 +640,76 @@ internal sealed partial class LayoutEngine
             y += lineH;
         }
         return y;
+    }
+
+    /// <summary>
+    /// Chooses the lines of a paragraph that start a new page so that at least <paramref name="orphans"/> lines stay at the
+    /// bottom of a page and at least <paramref name="widows"/> lines go to the top of the next. Returns null when the
+    /// natural breaks already satisfy both.
+    /// </summary>
+    private bool[]? PlanBreaks(int n, float[] lineA, float[] lineD, float top, int orphans, int widows)
+    {
+        if (orphans <= 1 && widows <= 1) return null;
+        int visibleCount = 0;
+        float total = 0;
+        for (int li = 0; li < n; li++)
+            if (!float.IsNaN(lineA[li])) { visibleCount++; total += lineA[li] + lineD[li]; }
+        if (visibleCount < 2 || !CrossesPage(top, top + total)) return null;
+
+        bool[]? forced = null;
+        for (int attempt = 0; attempt < 8; attempt++)
+        {
+            float y = top;
+            int chunkStart = -1, chunkLines = 0, seen = 0, chunkPage = 0;
+            bool changed = false;
+            for (int li = 0; li < n && !changed; li++)
+            {
+                if (float.IsNaN(lineA[li])) continue;
+                float h = lineA[li] + lineD[li];
+                float fy = FitOnPage(y, h);
+                if (forced != null && forced[li]) fy = NextPage(fy);
+                if (chunkStart >= 0 && PageOf(fy) > chunkPage)
+                {
+                    // A page break before line li: chunkLines lines stay behind, visibleCount - seen lines move on.
+                    // Only the paragraph's first chunk can move as a whole: later chunks already start at a page top.
+                    bool canMoveChunk = chunkLines == seen && !AtPageTop(top);
+                    int after = visibleCount - seen;
+                    if (chunkLines < orphans && canMoveChunk)
+                    {
+                        (forced ??= new bool[n])[chunkStart] = true;
+                        changed = true;
+                    }
+                    else if (after < widows)
+                    {
+                        int need = widows - after, keep = chunkLines - need;
+                        if (keep >= orphans || keep <= 0 && canMoveChunk)
+                        {
+                            int target = keep <= 0 ? chunkStart : NthVisible(lineA, n, chunkStart, keep);
+                            if (target >= 0 && !(forced?[target] ?? false))
+                            {
+                                (forced ??= new bool[n])[target] = true;
+                                changed = true;
+                            }
+                        }
+                    }
+                    chunkStart = -1;
+                }
+                if (chunkStart < 0) { chunkStart = li; chunkLines = 0; chunkPage = PageOf(fy); }
+                chunkLines++;
+                seen++;
+                y = fy + h;
+            }
+            if (!changed) break;
+        }
+        return forced;
+    }
+
+    /// <summary>The index of the visible line <paramref name="k"/> lines after visible line <paramref name="from"/>.</summary>
+    private static int NthVisible(float[] lineA, int n, int from, int k)
+    {
+        for (int li = from + 1; li < n; li++)
+            if (!float.IsNaN(lineA[li]) && --k == 0) return li;
+        return -1;
     }
 
     private static void ImageMetrics(Item it, ComputedStyle block, out float a, out float d)
