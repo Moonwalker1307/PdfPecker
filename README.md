@@ -232,12 +232,12 @@ Selectors: type, `.class`, `#id`, `*`, attribute selectors (`[a]`, `=`, `~=`, `|
 | --- | --- |
 | Box model | `display` (block, inline, inline-block, flex, inline-flex, grid, inline-grid, list-item, table parts, none), `margin`, `padding`, `border` (solid, dashed, dotted, double), `width`, `height`, `min-`/`max-width`, `min-height`, `box-sizing` |
 | Text | `color`, `font`, `font-family`, `font-size`, `font-weight`, `font-style`, `line-height`, `text-align` (incl. justify), `text-decoration`, `text-transform`, `text-indent`, `letter-spacing`, `word-spacing`, `white-space`, `vertical-align` |
-| Backgrounds | `background-color`, `background` (colour part), `opacity` on SVG |
+| Backgrounds | `background-color`, `background-image` and `background` with `linear-gradient()`, `radial-gradient()`, `repeating-linear-gradient()` and `repeating-radial-gradient()` (several layers allowed), `opacity` on SVG |
 | Flexbox | `flex-direction`, `flex-wrap`, `flex-flow`, `flex`, `flex-grow`/`-shrink`/`-basis`, `order`, `justify-content`, `align-items`, `align-self`, `align-content`, `gap`, `margin: auto` |
-| Grid | `grid-template-columns`/`-rows` (lengths, `%`, `fr`, `auto`, `min-content`, `max-content`, `minmax()`, `fit-content()`, `repeat()` incl. `auto-fill`/`auto-fit`), `grid-auto-rows`/`-columns`, `grid-auto-flow`, `grid-column`/`-row` (line numbers and `span`), `grid-area`, `gap`, `justify-items`/`-self`, `align-items`/`-self`, `justify-content`, `align-content`, `place-*` |
+| Grid | `grid-template-columns`/`-rows` (lengths, `%`, `fr`, `auto`, `min-content`, `max-content`, `minmax()`, `fit-content()`, `repeat()` incl. `auto-fill`/`auto-fit`), `grid-auto-rows`/`-columns`, `grid-auto-flow`, `grid-template-areas`, `grid-template`, named lines (`[name]`), `grid-column`/`-row` (line numbers, names and `span`), `grid-area` (incl. area names), `gap`, `justify-items`/`-self`, `align-items`/`-self`, `justify-content`, `align-content`, `place-*` |
 | Columns | `column-count`, `column-width`, `columns`, `column-gap` |
 | Variables | custom properties (`--name: value`) and `var(--name, fallback)`, anywhere including shorthands |
-| SVG | `fill`, `stroke`, `stroke-width`, `fill-opacity`, `stroke-opacity`, `fill-rule`, `stroke-linecap`, `stroke-linejoin`, `stroke-miterlimit` (as CSS or presentation attributes) |
+| SVG | `fill`, `stroke`, `stroke-width`, `fill-opacity`, `stroke-opacity`, `fill-rule`, `stroke-linecap`, `stroke-linejoin`, `stroke-miterlimit`, `clip-path`, `clip-rule`, `text-anchor`, `dominant-baseline` (as CSS or presentation attributes) |
 | Lists | `list-style-type` (disc, circle, square, decimal, decimal-leading-zero, alpha, roman, none), `list-style` |
 | Tables | `border-collapse`, `border-spacing`, cell `vertical-align`, automatic column widths |
 | Paging | `page-break-before`/`after`/`inside`, `break-before`/`after`/`inside` (`always`, `page`, `avoid`), `orphans`, `widows`, `@page` size and margins |
@@ -270,8 +270,10 @@ Inside it, `{page}` and `{total-pages}` (or `{pages}`) are replaced with the pag
 ```
 
 **SVG**: inline `<svg>` with `path` (all commands, arcs included), `rect` (incl. rounded), `circle`, `ellipse`, `line`,
-`polyline`, `polygon`, `g`, `use`, nested `svg`, `viewBox`, `preserveAspectRatio` and `transform`, drawn as vector
-paths.
+`polyline`, `polygon`, `text` and `tspan` (`x`, `y`, `dx`, `dy`, `text-anchor`, `dominant-baseline`, standard fonts),
+`g`, `use`, nested `svg`, `viewBox`, `preserveAspectRatio` and `transform`, drawn as vector paths. `linearGradient` and
+`radialGradient` (both units, `gradientTransform`, `spreadMethod`, `href` inheritance) become PDF shadings, and
+`clipPath` clips the elements that reference it.
 
 **Images**: JPEG (embedded as-is, RGB, grayscale and CMYK) and PNG (all colour types and bit depths, transparency,
 interlacing), from files, `data:` URIs or your `ResourceResolver`. Opaque PNGs are passed through without
@@ -286,11 +288,12 @@ These are deliberate scope choices for speed and size; they are the first candid
 
 - Text uses the standard PDF fonts, so characters are limited to the Windows-1252 set (Western European languages).
   Other characters are replaced with `?`. Embedding TrueType fonts is not supported yet.
-- No JavaScript, forms, `float`, `position`, `::before`/`::after`, background images, gradients, `border-radius`,
+- No JavaScript, forms, `float`, `position`, `::before`/`::after`, `url()` background images, `border-radius`,
   shadows, transforms or GIF/WebP images. SVG files in `<img>` are not drawn.
-- Inline SVG: no `<text>`, embedded images, clipping, masks, patterns or filters; gradients are drawn in their average
-  colour.
-- Grid: no named lines or `grid-template-areas`, no `dense` packing, no subgrid.
+- Inline SVG: no embedded images, masks, patterns, markers or filters; `<text>` uses only the first value of
+  position lists and no `textPath` layout. Gradient stops with transparency are blended onto white (or, for CSS, onto
+  the element's background colour); `background-size`/`-position` do not apply to gradients.
+- Grid: no `dense` packing, no subgrid; `span <name>` counts as `span 1`.
 - Multi-column: children are kept whole and balanced between columns; a single block is never split across columns.
 - Translucent colours (`rgba`) are blended onto white instead of using real transparency.
 
