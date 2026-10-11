@@ -4,6 +4,13 @@ using PdfPecker;
 
 // A dependency-free benchmark harness: warm up, then time many conversions and report percentiles.
 // Usage: dotnet run -c Release [-- iterations]
+//        dotnet run -c Release -- --requirements [extra.html ...]   (memory and CPU per conversion, see Requirements.cs)
+if (args.Length > 0 && args[0].StartsWith("--requirements"))
+{
+    Requirements.Run(args);
+    return;
+}
+
 int iterations = args.Length > 0 && int.TryParse(args[0], out var n) ? n : 200;
 var htmlDir = Path.Combine(AppContext.BaseDirectory, "html");
 
@@ -11,7 +18,7 @@ var cases = new List<(string Name, string Html, string? BaseDir)>
 {
     ("invoice (1 page)", File.ReadAllText(Path.Combine(htmlDir, "invoice.html")), htmlDir),
     ("feature tour (5 pages)", File.ReadAllText(Path.Combine(htmlDir, "report.html")), htmlDir),
-    ("large report (30 pages)", LargeReport(), null),
+    ("large report (30 pages)", Documents.LargeReport(), null),
 };
 
 Console.WriteLine($"PdfPecker benchmark, {iterations} iterations per case, .NET {Environment.Version}, {Environment.ProcessorCount} cores");
@@ -133,24 +140,4 @@ static int CountPages(byte[] pdf)
     int j = i;
     while (char.IsDigit(text[j])) j++;
     return int.Parse(text.AsSpan(i, j - i));
-}
-
-static string LargeReport()
-{
-    var sb = new StringBuilder();
-    sb.Append("<html><head><style>body{font-family:Arial;font-size:10pt} h2{color:#2c5282} table{border-collapse:collapse;width:100%} td,th{border:1px solid #ccc;padding:3px 5px} th{background:#eee} .r{text-align:right} p{text-align:justify}</style></head><body>");
-    for (int s = 1; s <= 20; s++)
-    {
-        sb.Append("<h2>Section ").Append(s).Append("</h2>");
-        for (int p = 0; p < 3; p++)
-            sb.Append("<p>Lorem ipsum dolor sit amet, <b>consectetur</b> adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis <i>nostrud exercitation</i> ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.</p>");
-        sb.Append("<table><thead><tr><th>#</th><th>Product</th><th>Category</th><th class=r>Qty</th><th class=r>Price</th></tr></thead><tbody>");
-        for (int r = 1; r <= 50; r++)
-            sb.Append("<tr><td>").Append(r).Append("</td><td>Product ").Append(s * 100 + r).Append("</td><td>Category ").Append(r % 7)
-              .Append("</td><td class=r>").Append(r * 3 % 17).Append("</td><td class=r>").Append((r * 13.37).ToString("F2", System.Globalization.CultureInfo.InvariantCulture)).Append("</td></tr>");
-        sb.Append("</tbody></table>");
-        sb.Append("<ul><li>First point</li><li>Second point with <a href='https://example.com'>a link</a></li><li>Third point</li></ul>");
-    }
-    sb.Append("</body></html>");
-    return sb.ToString();
 }
