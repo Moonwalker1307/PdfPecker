@@ -1,9 +1,15 @@
 # Third-party notices
 
-PdfPecker contains no third-party code. The PDF renderer includes font data derived from the fonts below, stored in
-a compact outline format in `src/PdfPecker/Rendering/Fonts/StandardFonts.bin` (built by `tools/FontPackBuilder`). It
-is used to draw the 14 standard PDF fonts and fonts that a PDF does not embed. The data is not installed or exposed
-as a font, and it is not distributed under the names below.
+PdfPecker contains no third-party code. It includes the fonts below in two forms:
+
+- The PDF renderer uses font data derived from them, stored in a compact outline format in
+  `src/PdfPecker/Rendering/Fonts/StandardFonts.bin` (built by `tools/FontPackBuilder`), to draw the 14 standard PDF
+  fonts and fonts that a PDF does not embed. This data is not installed or exposed as a font, and it is not
+  distributed under the names below.
+- The twelve Liberation Sans, Serif and Mono font files are shipped unmodified in the library
+  (`src/PdfPecker/Fonts/Bundled`, Brotli-compressed with `tools/FontPackBuilder --bundle` and restored byte for byte
+  when loaded). Subsets of them are embedded in PDFs created with `PdfOptions.EmbedStandardFonts` or PDF/A, as the
+  Open Font License permits for documents.
 
 ## Liberation Fonts 2.x (Sans, Serif and Mono)
 

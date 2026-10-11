@@ -57,6 +57,15 @@ internal sealed class PdfDocumentWriter
     /// <summary>Font for <c>HeaderText</c> and <c>FooterText</c>. Default: Helvetica.</summary>
     public TextFont? MarginFont { get; init; }
 
+    /// <summary>Draw text in the standard fonts with the bundled, embedded Liberation fonts (always on for PDF/A).</summary>
+    public bool EmbedStandardFonts { get; init; }
+
+    private bool EmbedStandard => EmbedStandardFonts || Conformance != PdfConformance.None;
+
+    /// <summary>The font that draws a run: standard fonts become their bundled replacements when they must be embedded.</summary>
+    private TextFont Leaf(TextFont font)
+        => font is StandardFont sf && EmbedStandard && BundledFonts.Get(sf) is { } bundled ? bundled : font;
+
     private PdfEncryptor? _crypt;
 
     public PdfDocumentWriter(PageSetup page, bool compress, CompressionLevel level)
@@ -168,7 +177,11 @@ internal sealed class PdfDocumentWriter
                 else if (p.Op is SvgOp sv)
                 {
                     foreach (var shape in sv.Image.Shapes)
-                        if (shape.Font != null) usedFonts[shape.Font.Index] = true;
+                    {
+                        if (shape.Font == null) continue;
+                        if (Leaf(shape.Font) is EmbeddedFont ef) AddGlyphs(Subset(ef.Program), shape.Text!, 0, shape.Text!.Length);
+                        else usedFonts[shape.Font.Index] = true;
+                    }
                 }
                 else if (p.Op is ImageOp im && !imageIds.ContainsKey(im.Image))
                 {
@@ -845,10 +858,14 @@ internal sealed class PdfDocumentWriter
                     WriteSvgPaint(b, shape, toPage);
                     var m = shape.TextMatrix;
                     int mode = shape.HasFill ? (shape.HasStroke ? 2 : 0) : 1;
-                    b.Ascii("BT /F").Int(shape.Font!.Index + 1).Sp().Num(shape.FontSize).Ascii(" Tf ").Int(mode).Ascii(" Tr 0 Tw ")
+                    var svgFont = Leaf(shape.Font!);
+                    if (svgFont is EmbeddedFont svgEmbedded) b.Ascii("BT /E").Int(_subsetList.IndexOf(_subsets[svgEmbedded.Program]) + 1);
+                    else b.Ascii("BT /F").Int(shape.Font!.Index + 1);
+                    b.Sp().Num(shape.FontSize).Ascii(" Tf ").Int(mode).Ascii(" Tr 0 Tw ")
                         .Num(shape.CharSpacing).Ascii(" Tc ").Num6(m.A).Sp().Num6(m.B).Sp().Num6(m.C).Sp().Num6(m.D).Sp().Num(m.E).Sp().Num(m.F)
                         .Ascii(" Tm ");
-                    WriteTextBytes(b, shape.Text!);
+                    if (svgFont is EmbeddedFont svgFontEmbedded) WriteGlyphHex(b, _subsets[svgFontEmbedded.Program], shape.Text!);
+                    else WriteTextBytes(b, shape.Text!);
                     b.Ascii(" Tj ET\n");
                     continue;
             }
@@ -916,7 +933,7 @@ internal sealed class PdfDocumentWriter
 
     private void CollectFonts(TextOp t, bool[] usedFonts)
     {
-        if (t.Font is StandardFont sf)
+        if (t.Font is StandardFont sf && !EmbedStandard)
         {
             usedFonts[sf.Index] = true;
             return;
@@ -925,22 +942,15 @@ internal sealed class PdfDocumentWriter
         t.Font.Split(t.Text, _runs);
         foreach (var run in _runs)
         {
-            if (run.Font is StandardFont s) { usedFonts[s.Index] = true; continue; }
-            var subset = Subset(((EmbeddedFont)run.Font).Program);
-            string text = t.Text;
-            for (int i = run.Start, end = run.Start + run.Length; i < end; i++)
-            {
-                int cp = text[i];
-                if (char.IsHighSurrogate(text[i]) && i + 1 < end && char.IsLowSurrogate(text[i + 1])) cp = char.ConvertToUtf32(text[i], text[++i]);
-                subset.Cid(cp);
-            }
+            if (Leaf(run.Font) is EmbeddedFont ef) AddGlyphs(Subset(ef.Program), t.Text, run.Start, run.Length);
+            else usedFonts[((StandardFont)run.Font).Index] = true;
         }
     }
 
     /// <summary>Shows a text op starting at (x, y), one run per concrete font.</summary>
     private void WriteTextLine(ByteBuffer b, TextOp t, float x, float y)
     {
-        if (t.Font is StandardFont sf)
+        if (t.Font is StandardFont sf && !EmbedStandard)
         {
             WriteStandardRun(b, sf, t, 0, t.Text.Length, x, y);
             return;
@@ -949,10 +959,33 @@ internal sealed class PdfDocumentWriter
         t.Font.Split(t.Text, _runs);
         foreach (var run in _runs)
         {
-            if (run.Font is EmbeddedFont ef) WriteEmbeddedRun(b, ef, t, run.Start, run.Length, x, y);
+            if (Leaf(run.Font) is EmbeddedFont ef) WriteEmbeddedRun(b, ef, t, run.Start, run.Length, x, y);
             else WriteStandardRun(b, (StandardFont)run.Font, t, run.Start, run.Length, x, y);
             x += RunAdvance(run.Font, t, run.Start, run.Length);
         }
+    }
+
+    private static void AddGlyphs(GlyphSubset subset, string text, int start, int length)
+    {
+        for (int i = start, end = start + length; i < end; i++)
+        {
+            int cp = text[i];
+            if (char.IsHighSurrogate(text[i]) && i + 1 < end && char.IsLowSurrogate(text[i + 1])) cp = char.ConvertToUtf32(text[i], text[++i]);
+            subset.Cid(cp);
+        }
+    }
+
+    /// <summary>Writes text as a hex string of CIDs, for an embedded font with no per-glyph adjustments.</summary>
+    private static void WriteGlyphHex(ByteBuffer b, GlyphSubset subset, string text)
+    {
+        b.Byte((byte)'<');
+        for (int i = 0; i < text.Length; i++)
+        {
+            int cp = text[i];
+            if (char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1])) cp = char.ConvertToUtf32(text[i], text[++i]);
+            Hex4(b, subset.Cid(cp));
+        }
+        b.Byte((byte)'>');
     }
 
     private GlyphSubset Subset(FontProgram program)

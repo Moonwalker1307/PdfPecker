@@ -120,6 +120,12 @@ collections and WOFF (not WOFF2). Fonts are matched like browsers do: by family,
 weight; a missing bold or italic face is synthesized. A character that the chosen font lacks is drawn with the next
 font in the `font-family` list that has it, then the standard font, then any other registered font.
 
+Text without a registered font uses the standard PDF fonts (Helvetica, Times, Courier), which viewers supply
+themselves, so files stay small but are limited to Western European characters. Set `EmbedStandardFonts = true` to
+embed the bundled Liberation fonts in their place instead: they have the same widths, so the layout does not change,
+the text looks the same in every viewer, and any character they cover (Latin, Greek, Cyrillic, ...) works. PDF/A
+always does this. It adds a subset of each font used to the file (typically 10-25 KB per font).
+
 ### Watermarks, passwords and PDF/A
 
 ```csharp
@@ -140,7 +146,8 @@ var options = new PdfOptions
 ```
 
 For archiving, set `Conformance = PdfConformance.PdfA2b` (or `PdfA3b`): the PDF gets XMP metadata, an sRGB output intent
-and a file ID, and CMYK JPEGs are converted to RGB. PDF/A does not allow encryption, so combining `Conformance` with
+and a file ID, and CMYK JPEGs are converted to RGB. All fonts are embedded: text without a registered font uses the
+bundled Liberation fonts (see [Fonts](#fonts)). PDF/A does not allow encryption, so combining `Conformance` with
 `Security` throws an `ArgumentException`. AES-256 keys come from a password hash that is slow on purpose, which adds
 about 3 ms to a conversion.
 
@@ -341,17 +348,18 @@ re-encoding. Images wider than the page are scaled down to fit.
 TrueType outlines, CIDFontType0 with an OpenType program for CFF outlines) with a ToUnicode map, so text can be
 searched and copied. Without them, the PDF standard fonts are used: `font-family` maps to Helvetica (sans-serif,
 Arial, Verdana, ...), Times (serif, Georgia, ...) or Courier (monospace, Consolas, ...), each in regular, bold,
-italic and bold italic.
+italic and bold italic. With `EmbedStandardFonts` or PDF/A, these are replaced by embedded subsets of the bundled,
+metric-compatible Liberation Sans, Serif and Mono.
 
 ## Limitations
 
 These are deliberate scope choices for speed and size; they are the first candidates for future work.
 
-- Without registered fonts, text uses the standard PDF fonts, so characters are limited to the Windows-1252 set
-  (Western European languages); other characters are replaced with `?`. PDF/A requires embedded fonts, so register
-  fonts for documents that must pass a PDF/A validator.
+- Without registered fonts or `EmbedStandardFonts`, text uses the standard PDF fonts, so characters are limited to
+  the Windows-1252 set (Western European languages); other characters are replaced with `?`. The bundled Liberation
+  fonts add Central European, Greek and Cyrillic, but not CJK or other scripts: register fonts for those.
 - Fonts: no text shaping (ligatures, kerning, Arabic and Indic scripts), no right-to-left text, no WOFF2, and variable
-  fonts use their default instance. SVG `<text>` uses the standard fonts.
+  fonts use their default instance. SVG `<text>` uses the standard fonts (embedded as Liberation for PDF/A).
 - No JavaScript, forms, `float`, `position`, `::before`/`::after`, `url()` background images, `border-radius`,
   shadows, transforms or GIF/WebP images. SVG files in `<img>` are not drawn.
 - Inline SVG: no embedded images, masks, patterns, markers or filters; `<text>` uses only the first value of

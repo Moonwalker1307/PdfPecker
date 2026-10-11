@@ -79,7 +79,8 @@ public static class HtmlToPdf
         float viewportH = Math.Max(10, page.ContentHeight - declaredTop - declaredBottom);
 
         var images = new ImageLoader(baseDirectory, resolver, options.AllowFileAccess);
-        var fonts = FontResolver.Create(sheet.FontFaces, options.Fonts, FetchFont(images));
+        var fonts = FontResolver.Create(sheet.FontFaces, options.Fonts, FetchFont(images),
+            embedStandard: options.EmbedStandardFonts || options.Conformance != PdfConformance.None);
         var root = new ComputedStyle { Display = Display.Block, Fonts = fonts };
         var styles = new StyleResolver(sheet, page.ContentWidth, viewportH);
         styles.ResolveTree(doc, root);
@@ -155,6 +156,7 @@ public static class HtmlToPdf
             Conformance = options.Conformance,
             WatermarkFont = watermarkFont,
             MarginFont = marginFont,
+            EmbedStandardFonts = options.EmbedStandardFonts,
         };
         var pdf = writer.Write(engine.Ops, height, engine.Anchors, background, title, options.Author, options.Subject,
             options.FooterText, options.HeaderText, pageBands, engine.Headings);

@@ -11,7 +11,10 @@ internal sealed class EmbeddedFont : TextFont
     private readonly short[] _widths;
     private readonly UnicodeRange? _range;
 
-    public EmbeddedFont(FontProgram program, bool syntheticBold, bool syntheticItalic, UnicodeRange? range = null)
+    private readonly float _normalLineHeight;
+
+    // metrics: line metrics to use instead of the font's own, for a bundled font standing in for a standard font.
+    public EmbeddedFont(FontProgram program, bool syntheticBold, bool syntheticItalic, UnicodeRange? range = null, TextFont? metrics = null)
     {
         Program = program;
         SyntheticBold = syntheticBold;
@@ -23,7 +26,17 @@ internal sealed class EmbeddedFont : TextFont
         Descent = -Math.Abs(program.Descender) / upm;
         LineGap = Math.Max(0, program.LineGap) / upm;
         if (Ascent - Descent <= 0.01f) { Ascent = 0.8f; Descent = -0.2f; }
+        _normalLineHeight = Ascent - Descent + LineGap;
+        if (metrics != null)
+        {
+            Ascent = metrics.Ascent;
+            Descent = metrics.Descent;
+            LineGap = metrics.LineGap;
+            _normalLineHeight = metrics.NormalLineHeight;
+        }
     }
+
+    public override float NormalLineHeight => _normalLineHeight;
 
     /// <summary>True when the font has a glyph for the code point (and its unicode-range, if any, includes it).</summary>
     public bool Covers(int codePoint)

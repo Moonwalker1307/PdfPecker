@@ -43,14 +43,24 @@ internal sealed class FontResolver
     private readonly Dictionary<(string, int, bool), List<EmbeddedFont>> _matched = new();
     private readonly Dictionary<(FontProgram, bool, bool, UnicodeRange?), EmbeddedFont> _fonts = new();
 
-    private FontResolver(FontCollection.Snapshot? collection) => _collection = collection;
+    private readonly bool _embedStandard;
 
-    /// <summary>Creates a resolver, or returns null when the document has no fonts beyond the standard ones.</summary>
-    public static FontResolver? Create(List<List<Declaration>> fontFaceRules, FontCollection? collection, Func<string, byte[]?> fetch)
+    private FontResolver(FontCollection.Snapshot? collection, bool embedStandard)
+    {
+        _collection = collection;
+        _embedStandard = embedStandard;
+    }
+
+    /// <summary>
+    /// Creates a resolver, or returns null when the document has no fonts beyond the standard ones and they need not be
+    /// embedded. With <paramref name="embedStandard"/>, the standard fonts are replaced by the bundled Liberation fonts.
+    /// </summary>
+    public static FontResolver? Create(List<List<Declaration>> fontFaceRules, FontCollection? collection, Func<string, byte[]?> fetch,
+        bool embedStandard = false)
     {
         var snapshot = collection?.GetSnapshot();
         if (snapshot is { All.Count: 0 }) snapshot = null;
-        var r = new FontResolver(snapshot);
+        var r = new FontResolver(snapshot, embedStandard);
         foreach (var rule in fontFaceRules)
         {
             var face = FromFontFaceRule(rule, fetch, snapshot);
@@ -62,7 +72,7 @@ internal sealed class FontResolver
             }
             list.Add(face);
         }
-        return r._docFamilies.Count == 0 && snapshot == null ? null : r;
+        return r._docFamilies.Count == 0 && snapshot == null && !embedStandard ? null : r;
     }
 
     // ------------------------------------------------------------------ @font-face
@@ -189,10 +199,10 @@ internal sealed class FontResolver
                 if (name.Length == 0 || !listed.Add(name)) continue;
                 var fonts = MatchFamily(name, weight, italic);
                 if (fonts.Count > 0) candidates.AddRange(fonts);
-                else if (StandardFamily(name) is FontFamily sf) candidates.Add(StandardFont.Get(sf, bold, italic));
+                else if (StandardFamily(name) is FontFamily sf) candidates.Add(Standard(sf, bold, italic));
             }
         }
-        var standard = StandardFont.Get(generic, bold, italic);
+        var standard = Standard(generic, bold, italic);
         if (candidates.Count == 0) candidates.Add(standard);
 
         var primary = candidates[0];
@@ -211,6 +221,13 @@ internal sealed class FontResolver
         });
         _resolved[key] = result;
         return result;
+    }
+
+    /// <summary>A standard font, or its bundled embeddable replacement when every font must be embedded.</summary>
+    private TextFont Standard(FontFamily family, bool bold, bool italic)
+    {
+        var sf = StandardFont.Get(family, bold, italic);
+        return _embedStandard ? (TextFont?)BundledFonts.Get(sf) ?? sf : sf;
     }
 
     private static bool Covers(TextFont f, int cp)

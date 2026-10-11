@@ -302,4 +302,73 @@ public class FontTests
         options.Conformance = PdfConformance.PdfA2b;
         Assert.Matches(@"\[<0001>-[\d.]+<0002>\] TJ", AllContent(HtmlToPdf.Convert(html, options)));
     }
+
+    // ------------------------------------------------------------------ bundled fonts
+
+    private const string StandardFontsHtml = """
+        <html><body>
+        <h1>Heading</h1>
+        <p style="font-family: Arial">Sans <b>bold</b> <i>italic</i> text, long enough to wrap a few times across the page width for sure.</p>
+        <p style="font-family: Times New Roman">Serif <b><i>bold italic</i></b></p>
+        <pre>Mono 0123</pre>
+        <svg width="100" height="20"><text x="0" y="15" font-family="serif">SVG</text></svg>
+        </body></html>
+        """;
+
+    [Fact]
+    public void PdfAEmbedsTheBundledFontsWhenNoneAreRegistered()
+    {
+        var pdf = Latin1(HtmlToPdf.Convert(StandardFontsHtml, new PdfOptions { Compress = false, Conformance = PdfConformance.PdfA2b }));
+        Assert.DoesNotContain("/Subtype /Type1", pdf);
+        Assert.DoesNotContain("/BaseFont /Helvetica", pdf);
+        foreach (var name in new[] { "LiberationSans", "LiberationSans-Bold", "LiberationSans-Italic", "LiberationSerif", "LiberationSerif-BoldItalic", "LiberationMono" })
+            Assert.Matches(@"/BaseFont /[A-Z]{6}\+" + name + @"\b", pdf);
+        Assert.Contains("/FontFile2", pdf);
+    }
+
+    [Fact]
+    public void PdfAEmbedsTheWatermarkAndFooterFonts()
+    {
+        var options = new PdfOptions
+        {
+            Compress = false, Conformance = PdfConformance.PdfA2b, FooterText = "Page {page} of {total-pages}",
+            Watermark = new PdfWatermark { Text = "DRAFT", Bold = true },
+        };
+        var pdf = Latin1(HtmlToPdf.Convert("<p>Body</p>", options));
+        Assert.DoesNotContain("/Subtype /Type1", pdf);
+        Assert.Matches(@"/BaseFont /[A-Z]{6}\+LiberationSans-Bold\b", pdf);
+    }
+
+    [Fact]
+    public void EmbeddingStandardFontsKeepsTheLayout()
+    {
+        static string Positions(string content) => string.Join("\n", Regex.Matches(content, @"[\d.-]+ [\d.-]+ Td|[\d.-]+ [\d.-]+ [\d.-]+ [\d.-]+ [\d.-]+ [\d.-]+ Tm").Select(m => m.Value));
+        var plain = HtmlToPdf.Convert(StandardFontsHtml, new PdfOptions { Compress = false });
+        var embedded = HtmlToPdf.Convert(StandardFontsHtml, new PdfOptions { Compress = false, EmbedStandardFonts = true });
+        Assert.Contains("/Subtype /Type1", Latin1(plain));
+        Assert.DoesNotContain("/Subtype /Type1", Latin1(embedded));
+        Assert.Equal(PageCount(plain), PageCount(embedded));
+        Assert.Equal(Positions(AllContent(plain)), Positions(AllContent(embedded)));
+    }
+
+    [Fact]
+    public void EmbeddedStandardFontsDrawCharactersOutsideWinAnsi()
+    {
+        var pdf = HtmlToPdf.Convert("<p>Łódź ΩΣ ₹</p>", new PdfOptions { Compress = false, EmbedStandardFonts = true });
+        AssertStructurallyValid(pdf);
+        var text = Latin1(pdf);
+        Assert.Matches(@"/BaseFont /[A-Z]{6}\+LiberationSerif\b", text);
+        Assert.DoesNotContain("/Subtype /Type1", text);
+        // The ToUnicode map carries the characters, so they can be extracted and searched.
+        Assert.Contains("<0141>", text);
+        Assert.Contains("<03A9>", text);
+    }
+
+    [Fact]
+    public void DefaultOutputStillUsesTheStandardFonts()
+    {
+        var text = Latin1(HtmlToPdf.Convert("<p>Hello</p>", new PdfOptions { Compress = false }));
+        Assert.Contains("/BaseFont /Times-Roman", text);
+        Assert.DoesNotContain("/FontFile2", text);
+    }
 }
