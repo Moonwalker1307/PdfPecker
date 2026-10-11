@@ -379,7 +379,8 @@ internal sealed class StyleResolver
     private static readonly HashSet<string> SvgPresentationAttributes = new(StringComparer.Ordinal)
     {
         "fill", "stroke", "stroke-width", "fill-opacity", "stroke-opacity", "fill-rule", "stroke-linecap", "stroke-linejoin",
-        "stroke-miterlimit", "opacity", "display", "visibility", "color",
+        "stroke-miterlimit", "opacity", "display", "visibility", "color", "clip-path", "clip-rule", "text-anchor",
+        "dominant-baseline", "alignment-baseline", "font-size", "font-family", "font-weight", "font-style", "letter-spacing",
     };
 
     /// <summary>True for &lt;svg&gt; and the elements inside it.</summary>
@@ -516,6 +517,9 @@ internal sealed class StyleResolver
             case "background-color":
                 if (inherit) s.BackgroundColor = parent.BackgroundColor;
                 else if (CssColor.TryParse(v, s.Color, out var bg)) s.BackgroundColor = CssColor.FlattenOnWhite(bg);
+                break;
+            case "background-image":
+                s.BackgroundGradients = inherit ? parent.BackgroundGradients : ParseBackgroundImage(v, s);
                 break;
             case "font-family":
                 if (inherit) { s.FontFamily = parent.FontFamily; s.FontFamilyName = parent.FontFamilyName; break; }
@@ -667,9 +671,19 @@ internal sealed class StyleResolver
                 break;
             case "break-before":
                 s.PageBreakBefore = lower is "always" or "page" or "left" or "right" or "recto" or "verso";
+                s.AvoidBreakBefore = lower is "avoid" or "avoid-page";
                 break;
             case "break-after":
                 s.PageBreakAfter = lower is "always" or "page" or "left" or "right" or "recto" or "verso";
+                s.AvoidBreakAfter = lower is "avoid" or "avoid-page";
+                break;
+            case "orphans":
+                if (inherit) s.Orphans = parent.Orphans;
+                else if (int.TryParse(lower, out int orphans) && orphans > 0) s.Orphans = orphans;
+                break;
+            case "widows":
+                if (inherit) s.Widows = parent.Widows;
+                else if (int.TryParse(lower, out int widows) && widows > 0) s.Widows = widows;
                 break;
             case "break-inside":
                 s.AvoidBreakInside = lower is "avoid" or "avoid-page";
@@ -755,6 +769,9 @@ internal sealed class StyleResolver
             case "grid-auto-flow":
                 s.GridAutoFlowColumn = lower.Contains("column");
                 break;
+            case "grid-template-areas":
+                s.GridTemplateAreas = ParseGridAreas(v);
+                break;
             case "grid-column-start": s.GridColumnStart = ParseGridLine(lower); break;
             case "grid-column-end": s.GridColumnEnd = ParseGridLine(lower); break;
             case "grid-row-start": s.GridRowStart = ParseGridLine(lower); break;
@@ -792,6 +809,28 @@ internal sealed class StyleResolver
                 break;
             case "stroke-linejoin":
                 s.SvgLineJoin = lower switch { "round" => SvgLineJoin.Round, "bevel" => SvgLineJoin.Bevel, "miter" or "miter-clip" or "arcs" => SvgLineJoin.Miter, _ => s.SvgLineJoin };
+                break;
+            case "clip-path":
+                s.SvgClipPath = lower.StartsWith("url(", StringComparison.Ordinal) && v.IndexOf(')') is int cp and > 4
+                    ? v.Substring(4, cp - 4).Trim().Trim('"', '\'') : null;
+                break;
+            case "clip-rule":
+                s.SvgClipEvenOdd = lower == "evenodd";
+                break;
+            case "text-anchor":
+                s.SvgTextAnchor = lower switch { "middle" => 1, "end" => 2, "start" => 0, "inherit" => parent.SvgTextAnchor, _ => s.SvgTextAnchor };
+                break;
+            case "dominant-baseline":
+            case "alignment-baseline":
+                s.SvgBaseline = lower switch
+                {
+                    "middle" or "central" => 1,
+                    "hanging" or "text-before-edge" or "before-edge" => 2,
+                    "text-after-edge" or "after-edge" or "ideographic" => 3,
+                    "auto" or "alphabetic" or "baseline" => 0,
+                    "inherit" => parent.SvgBaseline,
+                    _ => s.SvgBaseline,
+                };
                 break;
             case "stroke-miterlimit":
                 if (float.TryParse(lower, NumberStyles.Float, CultureInfo.InvariantCulture, out float ml) && ml >= 1) s.SvgMiterLimit = ml;
@@ -845,26 +884,108 @@ internal sealed class StyleResolver
         };
     }
 
+    private CssGradient[]? ParseBackgroundImage(string v, ComputedStyle s)
+    {
+        if (v.IndexOf("gradient(", StringComparison.OrdinalIgnoreCase) < 0) return null;
+        var layers = new List<CssGradient>();
+        foreach (var layer in CssParser.SplitTopLevel(v, ','))
+            if (CssGradient.Parse(layer, s.Color, s.FontSize, _rootFontSize, _vw, _vh) is { } g) layers.Add(g);
+        return layers.Count > 0 ? layers.ToArray() : null;
+    }
+
+    /// <summary>Parses grid-template-areas: one string per row, "." for unnamed cells. Invalid when an area is not a rectangle.</summary>
+    internal static GridAreas? ParseGridAreas(string v)
+    {
+        var rows = new List<string[]>();
+        int i = 0;
+        while (i < v.Length)
+        {
+            char q = v[i];
+            if (q != '"' && q != '\'') { i++; continue; }
+            int close = v.IndexOf(q, i + 1);
+            if (close < 0) return null;
+            rows.Add(SplitAreaRow(v.Substring(i + 1, close - i - 1)));
+            i = close + 1;
+        }
+        if (rows.Count == 0 || rows[0].Length == 0 || rows.Any(r => r.Length != rows[0].Length)) return null;
+        var areas = new GridAreas { Rows = rows.Count, Columns = rows[0].Length };
+        for (int r = 0; r < rows.Count; r++)
+            for (int c = 0; c < rows[r].Length; c++)
+            {
+                var name = rows[r][c];
+                if (name == ".") continue;
+                if (areas.Areas.TryGetValue(name, out var a))
+                    areas.Areas[name] = (a.RowStart, a.ColStart, Math.Max(a.RowEnd, r + 1), Math.Max(a.ColEnd, c + 1));
+                else areas.Areas[name] = (r, c, r + 1, c + 1);
+            }
+        foreach (var (name, a) in areas.Areas)
+            for (int r = a.RowStart; r < a.RowEnd; r++)
+                for (int c = a.ColStart; c < a.ColEnd; c++)
+                    if (rows[r][c] != name) return null;
+        return areas;
+    }
+
+    /// <summary>Cell tokens of one grid-template-areas row; a run of dots is one null cell token.</summary>
+    private static string[] SplitAreaRow(string row)
+    {
+        var cells = new List<string>();
+        int i = 0;
+        while (i < row.Length)
+        {
+            if (char.IsWhiteSpace(row[i])) { i++; continue; }
+            int start = i;
+            if (row[i] == '.') { while (i < row.Length && row[i] == '.') i++; cells.Add("."); continue; }
+            while (i < row.Length && !char.IsWhiteSpace(row[i]) && row[i] != '.') i++;
+            cells.Add(row.Substring(start, i - start).ToLowerInvariant());
+        }
+        return cells.ToArray();
+    }
+
     private static GridLine ParseGridLine(string lower)
     {
         var t = CssParser.Tokens(lower);
         if (t.Count == 0 || t[0] == "auto") return default;
-        if (t[0] == "span")
-            return new GridLine(0, t.Count > 1 && int.TryParse(t[1], out int sp) && sp > 0 ? Math.Min(sp, 1000) : 1);
-        if (int.TryParse(t[0], out int line) && line != 0) return new GridLine(Math.Clamp(line, -1000, 1000), 0);
-        return default; // named lines are not supported
+        bool span = false;
+        int number = 0;
+        string? name = null;
+        foreach (var tok in t)
+        {
+            if (tok == "span") span = true;
+            else if (int.TryParse(tok, out int n)) number = n;
+            else if (IsIdent(tok)) name = tok;
+            else return default;
+        }
+        if (span)
+        {
+            // "span name" spans to the next line of that name; approximated as the given count of tracks.
+            return new GridLine(0, number > 0 ? Math.Min(number, 1000) : 1);
+        }
+        if (name != null) return new GridLine(number == 0 ? 1 : Math.Clamp(number, -1000, 1000), 0, name);
+        return number != 0 ? new GridLine(Math.Clamp(number, -1000, 1000), 0) : default;
     }
 
-    /// <summary>Parses a grid track list: lengths, percentages, fr, auto, min-content, max-content, minmax(), fit-content() and repeat().</summary>
+    private static bool IsIdent(string tok)
+        => tok.Length > 0 && (char.IsLetter(tok[0]) || tok[0] is '_' or '-') && tok.All(c => char.IsLetterOrDigit(c) || c is '-' or '_');
+
+    /// <summary>
+    /// Parses a grid track list: lengths, percentages, fr, auto, min-content, max-content, minmax(), fit-content(),
+    /// repeat() and [line names].
+    /// </summary>
     private TrackList? ParseTrackList(string lower, float em)
     {
         var list = new TrackList();
         var before = new List<Track>();
         var after = new List<Track>();
         var current = before;
+        List<(string, int, bool)>? names = null;
+        void Name(string tok, int line)
+        {
+            foreach (var n in tok.Trim('[', ']').Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries))
+                (names ??= new()).Add((n, line, current == after));
+        }
         foreach (var tok in CssParser.Tokens(lower))
         {
-            if (tok.StartsWith("[", StringComparison.Ordinal)) continue; // line names
+            if (tok.StartsWith("[", StringComparison.Ordinal)) { Name(tok, current.Count); continue; }
             if (tok.StartsWith("repeat(", StringComparison.Ordinal) && tok.EndsWith(")", StringComparison.Ordinal))
             {
                 var inner = tok.Substring(7, tok.Length - 8);
@@ -872,15 +993,17 @@ internal sealed class StyleResolver
                 if (comma < 0) return null;
                 var countText = inner.Substring(0, comma).Trim();
                 var tracks = new List<Track>();
+                var repeatNames = new List<(string Tok, int Index)>();
                 foreach (var rt in CssParser.Tokens(inner.Substring(comma + 1).Trim()))
                 {
-                    if (rt.StartsWith("[", StringComparison.Ordinal)) continue;
+                    if (rt.StartsWith("[", StringComparison.Ordinal)) { repeatNames.Add((rt, tracks.Count)); continue; }
                     if (!TryParseTrack(rt, em, out var tr)) return null;
                     tracks.Add(tr);
                 }
                 if (tracks.Count == 0) return null;
                 if (countText is "auto-fill" or "auto-fit")
                 {
+                    // Names inside an automatic repetition are not tracked.
                     if (list.AutoRepeat != null) return null;
                     list.AutoRepeat = tracks.ToArray();
                     list.AutoFit = countText == "auto-fit";
@@ -888,7 +1011,11 @@ internal sealed class StyleResolver
                     continue;
                 }
                 if (!int.TryParse(countText, out int count) || count <= 0) return null;
-                for (int k = 0; k < Math.Min(count, 1000); k++) current.AddRange(tracks);
+                for (int k = 0; k < Math.Min(count, 1000); k++)
+                {
+                    foreach (var (nameTok, index) in repeatNames) Name(nameTok, current.Count + index);
+                    current.AddRange(tracks);
+                }
                 continue;
             }
             if (!TryParseTrack(tok, em, out var t)) return null;
@@ -896,6 +1023,7 @@ internal sealed class StyleResolver
         }
         list.Before = before.ToArray();
         list.After = after.ToArray();
+        list.LineNames = names;
         return list.Before.Length + list.After.Length > 0 || list.AutoRepeat != null ? list : null;
     }
 

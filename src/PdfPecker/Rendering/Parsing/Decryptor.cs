@@ -166,7 +166,7 @@ internal sealed class Decryptor
     private static byte[]? Aes256Key(PdfFile file, PdfDict encrypt, int r, byte[] o, byte[] u, string password)
     {
         if (o.Length < 48 || u.Length < 48) return null;
-        var pw = Encoding.UTF8.GetBytes(password);
+        var pw = Encoding.UTF8.GetBytes(password.Normalize(NormalizationForm.FormKC));
         if (pw.Length > 127) pw = pw.AsSpan(0, 127).ToArray();
         var ue = file.GetBytes(encrypt, "UE");
         var oe = file.GetBytes(encrypt, "OE");
@@ -189,41 +189,50 @@ internal sealed class Decryptor
         return null;
     }
 
-    private static byte[] Hash(int r, byte[] pw, ReadOnlySpan<byte> salt, ReadOnlySpan<byte> udata)
+    /// <summary>The revision 5 and 6 password hash (ISO 32000-2, algorithm 2.B). Also used by the writer.</summary>
+    internal static byte[] Hash(int r, byte[] pw, ReadOnlySpan<byte> salt, ReadOnlySpan<byte> udata)
     {
         var input = new byte[pw.Length + salt.Length + udata.Length];
         pw.CopyTo(input, 0);
         salt.CopyTo(input.AsSpan(pw.Length));
         udata.CopyTo(input.AsSpan(pw.Length + salt.Length));
-        var k = SHA256.HashData(input);
-        if (r == 5) return k;
+        var first = SHA256.HashData(input);
+        if (r == 5) return first;
 
+        // K is 32, 48 or 64 bytes; the buffers are sized for the largest round and reused.
+        Span<byte> k = stackalloc byte[64];
+        first.CopyTo(k);
+        int kLen = 32;
+        var k1 = new byte[64 * (pw.Length + 64 + udata.Length)];
+        var e = new byte[k1.Length];
+        var key = new byte[16];
         using var aes = Aes.Create();
         for (int round = 0; ; round++)
         {
-            int blockLen = pw.Length + k.Length + udata.Length;
-            var k1 = new byte[blockLen * 64];
+            int blockLen = pw.Length + kLen + udata.Length, total = blockLen * 64;
             for (int i = 0; i < 64; i++)
             {
-                int off = i * blockLen;
-                pw.CopyTo(k1, off);
-                k.CopyTo(k1, off + pw.Length);
-                udata.CopyTo(k1.AsSpan(off + pw.Length + k.Length));
+                var block = k1.AsSpan(i * blockLen, blockLen);
+                pw.CopyTo(block);
+                k.Slice(0, kLen).CopyTo(block.Slice(pw.Length));
+                udata.CopyTo(block.Slice(pw.Length + kLen));
             }
-            aes.Key = k.AsSpan(0, 16).ToArray();
-            var e = aes.EncryptCbc(k1, k.AsSpan(16, 16), PaddingMode.None);
+            k.Slice(0, 16).CopyTo(key);
+            aes.Key = key;
+            var es = e.AsSpan(0, total);
+            aes.EncryptCbc(k1.AsSpan(0, total), k.Slice(16, 16), es, PaddingMode.None);
             int mod = 0;
-            for (int i = 0; i < 16; i++) mod += e[i];
-            k = (mod % 3) switch
+            for (int i = 0; i < 16; i++) mod += es[i];
+            switch (mod % 3)
             {
-                0 => SHA256.HashData(e),
-                1 => SHA384.HashData(e),
-                _ => SHA512.HashData(e),
-            };
-            if (round >= 63 && e[^1] <= round - 31) break;
+                case 0: kLen = SHA256.HashData(es, k); break;
+                case 1: kLen = SHA384.HashData(es, k); break;
+                default: kLen = SHA512.HashData(es, k); break;
+            }
+            if (round >= 63 && es[total - 1] <= round - 31) break;
             if (round > 1000) break;
         }
-        return k.AsSpan(0, 32).ToArray();
+        return k.Slice(0, 32).ToArray();
     }
 
     private static byte[] AesNoPad(byte[] key, byte[] data)

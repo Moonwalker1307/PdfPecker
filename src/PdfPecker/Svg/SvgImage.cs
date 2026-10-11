@@ -1,29 +1,48 @@
 using System.Globalization;
 using PdfPecker.Css;
+using PdfPecker.Fonts;
 using PdfPecker.Html;
+using PdfPecker.Pdf;
 
 namespace PdfPecker.Svg;
 
-/// <summary>One filled and/or stroked path of an SVG drawing, in the root element's user space.</summary>
+/// <summary>
+/// One item of an SVG drawing, in the root element's user space: a filled and/or stroked path, a run of text, or the
+/// start or end of a clipped group.
+/// </summary>
 internal sealed class SvgShape
 {
     public const byte MoveTo = 0, LineTo = 1, CurveTo = 2, Close = 3;
+    public const byte KindPath = 0, KindText = 1, KindClip = 2, KindEndClip = 3;
 
+    public byte Kind;
     public byte[] Verbs = Array.Empty<byte>();
     public float[] Points = Array.Empty<float>(); // 2 per MoveTo/LineTo, 6 per CurveTo
     public uint? Fill;
-    public bool EvenOdd;
+    public Gradient? FillGradient;
+    public bool EvenOdd;                          // fill-rule, or clip-rule for a clip
     public uint? Stroke;
+    public Gradient? StrokeGradient;
     public float StrokeWidth;
     public SvgLineCap LineCap;
     public SvgLineJoin LineJoin;
     public float MiterLimit = 4;
+    public float MinX, MinY, MaxX, MaxY;          // bounds, for tiling repeating gradients
+
+    // Text runs.
+    public string? Text;
+    public StandardFont? Font;
+    public float FontSize, CharSpacing;
+    public Matrix TextMatrix;
+
+    public bool HasFill => Fill != null || FillGradient != null;
+    public bool HasStroke => Stroke != null || StrokeGradient != null;
 }
 
 /// <summary>
-/// An inline &lt;svg&gt; turned into vector paths: path, rect, circle, ellipse, line, polyline, polygon, g, use and
-/// nested svg, with transforms, fill/stroke styling from attributes and CSS, and gradients drawn in a flat average
-/// colour. Text, images, clipping, masks and filters are not drawn.
+/// An inline &lt;svg&gt; turned into vector paths and text: path, rect, circle, ellipse, line, polyline, polygon, text,
+/// tspan, g, use and nested svg, with transforms, fill/stroke styling from attributes and CSS, linear and radial
+/// gradients, and clip paths. Images, masks, patterns and filters are not drawn.
 /// </summary>
 internal sealed class SvgImage
 {
@@ -35,6 +54,7 @@ internal sealed class SvgImage
     public readonly List<SvgShape> Shapes = new();
 
     private readonly Dictionary<string, Element> _ids = new(StringComparer.Ordinal);
+    private int _clipDepth;
 
     public static SvgImage Build(Element svg)
     {
@@ -84,6 +104,9 @@ internal sealed class SvgImage
         }
     }
 
+    private Element? Reference(string? url)
+        => url != null && url.StartsWith("#", StringComparison.Ordinal) && _ids.TryGetValue(url.Substring(1), out var el) ? el : null;
+
     // ------------------------------------------------------------------ tree walk
 
     private void Render(Element e, Matrix ctm, float opacity, int depth)
@@ -94,6 +117,37 @@ internal sealed class SvgImage
         if (e.GetAttribute("transform") is { } tf) ctm = ParseTransform(tf).Then(ctm);
         float op = opacity * s.Opacity;
 
+        if (Reference(s.SvgClipPath) is { Name: "clippath" } clip && _clipDepth < 8)
+        {
+            // Draw the element, then wrap what it drew in the clip; an empty clip path hides everything.
+            int start = Shapes.Count;
+            var marker = new SvgShape { Kind = SvgShape.KindClip };
+            Shapes.Add(marker);
+            _clipDepth++;
+            RenderElement(e, s, ctm, op, depth);
+            _clipDepth--;
+            if (Shapes.Count == start + 1)
+            {
+                Shapes.RemoveAt(start);
+                return;
+            }
+            var path = ClipPath(clip, ctm, start + 1, out bool evenOdd);
+            if (path == null)
+            {
+                Shapes.RemoveRange(start, Shapes.Count - start);
+                return;
+            }
+            marker.Verbs = path.Verbs.ToArray();
+            marker.Points = path.Points.ToArray();
+            marker.EvenOdd = evenOdd;
+            Shapes.Add(new SvgShape { Kind = SvgShape.KindEndClip });
+            return;
+        }
+        RenderElement(e, s, ctm, op, depth);
+    }
+
+    private void RenderElement(Element e, ComputedStyle s, Matrix ctm, float op, int depth)
+    {
         switch (e.Name)
         {
             case "g":
@@ -117,8 +171,8 @@ internal sealed class SvgImage
             }
             case "use":
             {
-                var href = e.GetAttribute("href") ?? e.GetAttribute("xlink:href");
-                if (href == null || !href.StartsWith("#", StringComparison.Ordinal) || !_ids.TryGetValue(href.Substring(1), out var target)) return;
+                var target = Reference(e.GetAttribute("href") ?? e.GetAttribute("xlink:href"));
+                if (target == null) return;
                 var m = Matrix.Translate(Num(e, "x"), Num(e, "y")).Then(ctm);
                 if (target.Name == "symbol")
                 {
@@ -127,47 +181,60 @@ internal sealed class SvgImage
                 else RenderReferenced(target, e, m, op, depth + 1);
                 return;
             }
+            case "text":
+                RenderText(e, ctm, op);
+                return;
+            case "line":
+                Emit(s, ctm, op, ShapePath(e), fillable: false);
+                return;
+            default:
+                // Not drawn: defs, symbol (only through use), gradients, clipPath, mask, pattern, marker, filter, image, style...
+                if (ShapePath(e) is { } path) Emit(s, ctm, op, path);
+                return;
+        }
+    }
+
+    /// <summary>The outline of a basic shape or path element, in its own user space; null for anything else.</summary>
+    private static PathBuilder? ShapePath(Element e)
+    {
+        switch (e.Name)
+        {
             case "path":
-                Emit(e, s, ctm, op, PathParser.Parse(e.GetAttribute("d")));
-                return;
+                return PathParser.Parse(e.GetAttribute("d"));
             case "rect":
-                Emit(e, s, ctm, op, RectPath(e));
-                return;
+                return RectPath(e);
             case "circle":
             {
                 float r = Num(e, "r");
-                if (r > 0) Emit(e, s, ctm, op, EllipsePath(Num(e, "cx"), Num(e, "cy"), r, r));
-                return;
+                return r > 0 ? EllipsePath(Num(e, "cx"), Num(e, "cy"), r, r) : null;
             }
             case "ellipse":
             {
                 float rx = Num(e, "rx", float.NaN), ry = Num(e, "ry", float.NaN);
                 if (float.IsNaN(rx)) rx = ry;
                 if (float.IsNaN(ry)) ry = rx;
-                if (rx > 0 && ry > 0) Emit(e, s, ctm, op, EllipsePath(Num(e, "cx"), Num(e, "cy"), rx, ry));
-                return;
+                return rx > 0 && ry > 0 ? EllipsePath(Num(e, "cx"), Num(e, "cy"), rx, ry) : null;
             }
             case "line":
             {
                 var p = new PathBuilder();
                 p.MoveTo(Num(e, "x1"), Num(e, "y1"));
                 p.LineTo(Num(e, "x2"), Num(e, "y2"));
-                Emit(e, s, ctm, op, p, fillable: false);
-                return;
+                return p;
             }
             case "polyline":
             case "polygon":
             {
                 var pts = ParseNumbers(e.GetAttribute("points"));
-                if (pts.Count < 4) return;
+                if (pts.Count < 4) return null;
                 var p = new PathBuilder();
                 p.MoveTo(pts[0], pts[1]);
                 for (int i = 2; i + 1 < pts.Count; i += 2) p.LineTo(pts[i], pts[i + 1]);
                 if (e.Name == "polygon") p.Close();
-                Emit(e, s, ctm, op, p);
-                return;
+                return p;
             }
-            // Not drawn: defs, symbol (only through use), gradients, clipPath, mask, pattern, marker, filter, text, image, style...
+            default:
+                return null;
         }
     }
 
@@ -176,35 +243,53 @@ internal sealed class SvgImage
     private void RenderReferenced(Element target, Element use, Matrix m, float opacity, int depth)
         => Render(target, m, opacity * (use.Style?.Opacity ?? 1), depth);
 
-    private void Emit(Element e, ComputedStyle s, Matrix ctm, float opacity, PathBuilder? path, bool fillable = true)
+    private void Emit(ComputedStyle s, Matrix ctm, float opacity, PathBuilder? path, bool fillable = true)
     {
         if (path == null || path.Verbs.Count == 0 || !s.Visible) return;
-        uint? fill = fillable ? Paint(s.SvgFill, s.SvgFillUrl, s.SvgFillOpacity * opacity) : null;
-        uint? stroke = s.SvgStrokeWidth > 0 ? Paint(s.SvgStroke, s.SvgStrokeUrl, s.SvgStrokeOpacity * opacity) : null;
-        if (fill == null && stroke == null) return;
+        var pts = path.Points.ToArray();
+        Bounds(pts, out float minX, out float minY, out float maxX, out float maxY);
         var shape = new SvgShape
         {
             Verbs = path.Verbs.ToArray(),
-            Points = path.Points.ToArray(),
-            Fill = fill,
+            Points = pts,
             EvenOdd = s.SvgEvenOdd,
-            Stroke = stroke,
             StrokeWidth = s.SvgStrokeWidth * ctm.ScaleFactor,
             LineCap = s.SvgLineCap,
             LineJoin = s.SvgLineJoin,
             MiterLimit = s.SvgMiterLimit,
         };
-        var pts = shape.Points;
+        if (fillable) shape.Fill = Paint(s.SvgFill, s.SvgFillUrl, s.SvgFillOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.FillGradient);
+        if (s.SvgStrokeWidth > 0)
+            shape.Stroke = Paint(s.SvgStroke, s.SvgStrokeUrl, s.SvgStrokeOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.StrokeGradient);
+        if (!shape.HasFill && !shape.HasStroke) return;
         for (int i = 0; i + 1 < pts.Length; i += 2) ctm.Apply(ref pts[i], ref pts[i + 1]);
+        Bounds(pts, out shape.MinX, out shape.MinY, out shape.MaxX, out shape.MaxY);
         Shapes.Add(shape);
-        _ = e;
     }
 
-    private uint? Paint(uint? color, string? url, float opacity)
+    private static void Bounds(float[] pts, out float minX, out float minY, out float maxX, out float maxY)
     {
+        minX = minY = float.MaxValue;
+        maxX = maxY = float.MinValue;
+        for (int i = 0; i + 1 < pts.Length; i += 2)
+        {
+            minX = Math.Min(minX, pts[i]); maxX = Math.Max(maxX, pts[i]);
+            minY = Math.Min(minY, pts[i + 1]); maxY = Math.Max(maxY, pts[i + 1]);
+        }
+    }
+
+    /// <summary>A fill or stroke: a flat colour, or a gradient (returned through <paramref name="gradient"/>).</summary>
+    private uint? Paint(uint? color, string? url, float opacity, float minX, float minY, float maxX, float maxY, Matrix ctm, out Gradient? gradient)
+    {
+        gradient = null;
         uint? c = color;
-        if (url != null && url.StartsWith("#", StringComparison.Ordinal) && _ids.TryGetValue(url.Substring(1), out var server))
-            c = GradientColor(server) ?? color;
+        if (Reference(url) is { } server && server.Name is "lineargradient" or "radialgradient")
+        {
+            gradient = BuildGradient(server, opacity, minX, minY, maxX, maxY, ctm, out var solid);
+            if (gradient != null) return null;
+            c = solid; // a one-stop gradient is a plain colour (opacity included); one without stops paints nothing
+            opacity = 1;
+        }
         if (c == null) return null;
         uint v = c.Value;
         float alpha = (v >> 24) / 255f * Math.Clamp(opacity, 0, 1);
@@ -212,49 +297,312 @@ internal sealed class SvgImage
         return CssColor.FlattenOnWhite(((uint)Math.Round(alpha * 255) << 24) | (v & 0xFFFFFF));
     }
 
-    /// <summary>A gradient drawn as a flat colour: the average of its stops.</summary>
-    private uint? GradientColor(Element gradient, int depth = 0)
+    // ------------------------------------------------------------------ gradients
+
+    /// <summary>An attribute of a gradient, following href to the gradients it inherits from.</summary>
+    private string? GradientAttr(Element g, string name)
     {
-        if (gradient.Name is not ("lineargradient" or "radialgradient") || depth > 8) return null;
-        float r = 0, g = 0, b = 0, a = 0;
-        int count = 0;
-        foreach (var c in gradient.Children)
+        for (int depth = 0; g != null && depth < 8; depth++)
         {
-            if (c is not Element stop || stop.Name != "stop") continue;
-            string? color = stop.GetAttribute("stop-color");
-            string? opacity = stop.GetAttribute("stop-opacity");
-            var style = stop.GetAttribute("style");
-            if (style != null)
-            {
-                foreach (var decl in style.Split(';'))
-                {
-                    int colon = decl.IndexOf(':');
-                    if (colon <= 0) continue;
-                    var name = decl.Substring(0, colon).Trim().ToLowerInvariant();
-                    if (name == "stop-color") color = decl.Substring(colon + 1).Trim();
-                    else if (name == "stop-opacity") opacity = decl.Substring(colon + 1).Trim();
-                }
-            }
-            if (!CssColor.TryParse(color ?? "black", CssColor.Black, out uint col)) col = CssColor.Black;
-            float alpha = (col >> 24) / 255f;
-            if (opacity != null && float.TryParse(opacity, NumberStyles.Float, CultureInfo.InvariantCulture, out float o)) alpha *= Math.Clamp(o, 0, 1);
-            r += ((col >> 16) & 0xFF) * alpha;
-            g += ((col >> 8) & 0xFF) * alpha;
-            b += (col & 0xFF) * alpha;
-            a += alpha;
-            count++;
+            if (g.GetAttribute(name) is { } v) return v;
+            var parent = Reference(g.GetAttribute("href") ?? g.GetAttribute("xlink:href"));
+            if (parent == null) break;
+            g = parent;
         }
-        if (count == 0)
+        return null;
+    }
+
+    private List<(float Offset, uint Color)> GradientStops(Element g, float opacity)
+    {
+        var stops = new List<(float, uint)>();
+        for (int depth = 0; depth < 8; depth++)
         {
-            var href = gradient.GetAttribute("href") ?? gradient.GetAttribute("xlink:href");
-            if (href != null && href.StartsWith("#", StringComparison.Ordinal) && _ids.TryGetValue(href.Substring(1), out var parent))
-                return GradientColor(parent, depth + 1);
+            foreach (var c in g.Children)
+            {
+                if (c is not Element stop || stop.Name != "stop") continue;
+                string? color = stop.GetAttribute("stop-color");
+                string? alphaText = stop.GetAttribute("stop-opacity");
+                string? offsetText = stop.GetAttribute("offset");
+                var style = stop.GetAttribute("style");
+                if (style != null)
+                {
+                    foreach (var decl in style.Split(';'))
+                    {
+                        int colon = decl.IndexOf(':');
+                        if (colon <= 0) continue;
+                        var name = decl.Substring(0, colon).Trim().ToLowerInvariant();
+                        if (name == "stop-color") color = decl.Substring(colon + 1).Trim();
+                        else if (name == "stop-opacity") alphaText = decl.Substring(colon + 1).Trim();
+                    }
+                }
+                uint current = stop.Style?.Color ?? CssColor.Black;
+                if (!CssColor.TryParse(color ?? "black", current, out uint col)) col = CssColor.Black;
+                float alpha = (col >> 24) / 255f * Math.Clamp(opacity, 0, 1);
+                if (alphaText != null && float.TryParse(alphaText, NumberStyles.Float, CultureInfo.InvariantCulture, out float o)) alpha *= Math.Clamp(o, 0, 1);
+                float offset = 0;
+                if (offsetText != null)
+                {
+                    offsetText = offsetText.Trim();
+                    bool percent = offsetText.EndsWith("%", StringComparison.Ordinal);
+                    if (float.TryParse(percent ? offsetText[..^1] : offsetText, NumberStyles.Float, CultureInfo.InvariantCulture, out float f))
+                        offset = percent ? f / 100 : f;
+                }
+                stops.Add((offset, ((uint)Math.Round(alpha * 255) << 24) | (col & 0xFFFFFF)));
+            }
+            if (stops.Count > 0) break;
+            var parent = Reference(g.GetAttribute("href") ?? g.GetAttribute("xlink:href"));
+            if (parent == null) break;
+            g = parent;
+        }
+        return stops;
+    }
+
+    /// <summary>
+    /// Builds a gradient for a shape whose bounds (in its own user space) are given. Returns null with a flat colour in
+    /// <paramref name="solid"/> when the gradient has one stop, or null with no colour when it cannot be painted.
+    /// </summary>
+    private Gradient? BuildGradient(Element g, float opacity, float minX, float minY, float maxX, float maxY, Matrix ctm, out uint? solid)
+    {
+        solid = null;
+        var stops = GradientStops(g, opacity);
+        if (stops.Count == 0) return null;
+        if (stops.Count == 1)
+        {
+            solid = stops[0].Color;
             return null;
         }
-        if (a <= 0) return 0;
-        uint R = (uint)Math.Clamp(Math.Round(r / a), 0, 255), G = (uint)Math.Clamp(Math.Round(g / a), 0, 255), B = (uint)Math.Clamp(Math.Round(b / a), 0, 255);
-        uint A = (uint)Math.Clamp(Math.Round(a / count * 255), 0, 255);
-        return (A << 24) | (R << 16) | (G << 8) | B;
+        bool bbox = !string.Equals(GradientAttr(g, "gradientunits")?.Trim(), "userSpaceOnUse", StringComparison.OrdinalIgnoreCase);
+        Matrix units = Matrix.Identity;
+        if (bbox)
+        {
+            float w = maxX - minX, h = maxY - minY;
+            if (!(w > 0) || !(h > 0)) return null;
+            units = Matrix.Scale(w, h).Then(Matrix.Translate(minX, minY));
+        }
+        float vw = HasViewBox ? ViewBoxWidth : (Width ?? 300 * 0.75f) / 0.75f;
+        float vh = HasViewBox ? ViewBoxHeight : (Height ?? 150 * 0.75f) / 0.75f;
+        float Coord(string name, string fallback, float viewport)
+        {
+            var v = (GradientAttr(g, name) ?? fallback).Trim();
+            bool percent = v.EndsWith("%", StringComparison.Ordinal);
+            if (percent) v = v[..^1];
+            if (!bbox && v.EndsWith("px", StringComparison.OrdinalIgnoreCase)) v = v[..^2];
+            if (!float.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out float f)) return 0;
+            return percent ? f / 100 * (bbox ? 1 : viewport) : f;
+        }
+        var grad = new Gradient();
+        (grad.Offsets, grad.Colors) = Gradient.NormalizeStops(stops, 0xFFFFFFFF);
+        if (g.Name == "lineargradient")
+        {
+            grad.X0 = Coord("x1", "0%", vw);
+            grad.Y0 = Coord("y1", "0%", vh);
+            grad.X1 = Coord("x2", "100%", vw);
+            grad.Y1 = Coord("y2", "0%", vh);
+        }
+        else
+        {
+            float diag = MathF.Sqrt((vw * vw + vh * vh) / 2);
+            grad.Radial = true;
+            grad.X1 = Coord("cx", "50%", vw);
+            grad.Y1 = Coord("cy", "50%", vh);
+            grad.R1 = Coord("r", "50%", diag);
+            if (!(grad.R1 > 0)) { solid = stops[^1].Color; return null; }
+            grad.X0 = GradientAttr(g, "fx") != null ? Coord("fx", "50%", vw) : grad.X1;
+            grad.Y0 = GradientAttr(g, "fy") != null ? Coord("fy", "50%", vh) : grad.Y1;
+            grad.R0 = Math.Clamp(Coord("fr", "0%", diag), 0, grad.R1);
+        }
+        grad.Spread = GradientAttr(g, "spreadmethod")?.Trim().ToLowerInvariant() switch
+        {
+            "reflect" => GradientSpread.Reflect,
+            "repeat" => GradientSpread.Repeat,
+            _ => GradientSpread.Pad,
+        };
+        var transform = GradientAttr(g, "gradienttransform") is { } gt ? ParseTransform(gt) : Matrix.Identity;
+        grad.Transform = transform.Then(units).Then(ctm);
+        return grad;
+    }
+
+    // ------------------------------------------------------------------ clip paths
+
+    /// <summary>
+    /// The union of a clipPath's shapes in root user space. Shapes drawn from <paramref name="firstShape"/> on give the
+    /// bounding box for clipPathUnits="objectBoundingBox". Null when the clip path contains nothing.
+    /// </summary>
+    private PathBuilder? ClipPath(Element clip, Matrix ctm, int firstShape, out bool evenOdd)
+    {
+        bool rule = false;
+        evenOdd = false;
+        var m = clip.GetAttribute("transform") is { } tf ? ParseTransform(tf) : Matrix.Identity;
+        if (clip.GetAttribute("clippathunits") is { } u && u.Trim().Equals("objectBoundingBox", StringComparison.OrdinalIgnoreCase))
+        {
+            // The bounding box is taken in root space and mapped back, which is exact without rotation or skew.
+            float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
+            for (int i = firstShape; i < Shapes.Count; i++)
+            {
+                var sh = Shapes[i];
+                if (sh.Kind is SvgShape.KindPath or SvgShape.KindText)
+                {
+                    minX = Math.Min(minX, sh.MinX); minY = Math.Min(minY, sh.MinY);
+                    maxX = Math.Max(maxX, sh.MaxX); maxY = Math.Max(maxY, sh.MaxY);
+                }
+            }
+            if (!(maxX > minX) || !(maxY > minY) || !ctm.TryInvert(out var inv)) return null;
+            float x0 = minX, y0 = minY, x1 = maxX, y1 = maxY;
+            inv.Apply(ref x0, ref y0);
+            inv.Apply(ref x1, ref y1);
+            m = m.Then(Matrix.Scale(x1 - x0, y1 - y0)).Then(Matrix.Translate(x0, y0));
+        }
+        m = m.Then(ctm);
+        var result = new PathBuilder();
+        bool first = true;
+        void Add(Element child, Matrix t, int depth)
+        {
+            if (depth > 8 || child.Style == null || child.Style.Display == Display.None || !child.Style.Visible) return;
+            if (child.GetAttribute("transform") is { } ctf) t = ParseTransform(ctf).Then(t);
+            if (child.Name == "use")
+            {
+                var target = Reference(child.GetAttribute("href") ?? child.GetAttribute("xlink:href"));
+                if (target != null) Add(target, Matrix.Translate(Num(child, "x"), Num(child, "y")).Then(t), depth + 1);
+                return;
+            }
+            var path = ShapePath(child);
+            if (path == null || child.Name == "line") return;
+            if (first) rule = child.Style.SvgClipEvenOdd;
+            first = false;
+            var pts = path.Points;
+            for (int i = 0; i + 1 < pts.Count; i += 2)
+            {
+                float x = pts[i], y = pts[i + 1];
+                t.Apply(ref x, ref y);
+                pts[i] = x; pts[i + 1] = y;
+            }
+            result.Verbs.AddRange(path.Verbs);
+            result.Points.AddRange(pts);
+        }
+        foreach (var c in clip.Children) if (c is Element ce) Add(ce, m, 0);
+        evenOdd = rule;
+        return result.Verbs.Count > 0 ? result : null;
+    }
+
+    // ------------------------------------------------------------------ text
+
+    private readonly struct TextRun
+    {
+        public readonly string Text;
+        public readonly ComputedStyle Style;
+        public readonly float X, Y, Width;
+        public TextRun(string text, ComputedStyle style, float x, float y, float width) { Text = text; Style = style; X = x; Y = y; Width = width; }
+    }
+
+    /// <summary>
+    /// Lays out a &lt;text&gt; element and its tspans: x/y start a new text chunk (aligned by text-anchor), dx/dy shift
+    /// the pen, white space collapses as with xml:space="default". Only the first value of each position list is used.
+    /// </summary>
+    private void RenderText(Element text, Matrix ctm, float opacity)
+    {
+        var runs = new List<TextRun>();
+        var chunkStarts = new List<int>();
+        float penX = 0, penY = 0;
+        bool lastSpace = true;
+
+        void Walk(Element el, int depth)
+        {
+            if (depth > 16 || el.Style == null || el.Style.Display == Display.None) return;
+            var xs = ParseNumbers(el.GetAttribute("x"));
+            var ys = ParseNumbers(el.GetAttribute("y"));
+            if (xs.Count > 0 || ys.Count > 0 || depth == 0) chunkStarts.Add(runs.Count);
+            if (xs.Count > 0) penX = xs[0];
+            if (ys.Count > 0) penY = ys[0];
+            var dxs = ParseNumbers(el.GetAttribute("dx"));
+            var dys = ParseNumbers(el.GetAttribute("dy"));
+            if (dxs.Count > 0) penX += dxs[0];
+            if (dys.Count > 0) penY += dys[0];
+            foreach (var child in el.Children)
+            {
+                if (child is Element ce)
+                {
+                    if (ce.Name is "tspan" or "a" or "textpath") Walk(ce, depth + 1);
+                    continue;
+                }
+                if (child is not TextNode tn) continue;
+                var sb = new System.Text.StringBuilder(tn.Text.Length);
+                foreach (char ch in tn.Text)
+                {
+                    if (ch is '\n' or '\r') continue;
+                    char c = ch == '\t' ? ' ' : ch;
+                    if (c == ' ' && lastSpace) continue;
+                    sb.Append(c);
+                    lastSpace = c == ' ';
+                }
+                if (sb.Length == 0) continue;
+                var str = sb.ToString();
+                var st = el.Style;
+                float size = st.FontSize / 0.75f;
+                float w = st.StandardFont.Measure(str, size) + st.LetterSpacing / 0.75f * str.Length;
+                runs.Add(new TextRun(str, st, penX, penY, w));
+                penX += w;
+            }
+        }
+        Walk(text, 0);
+        if (runs.Count == 0) return;
+        // Trailing white space of the element is dropped.
+        var last = runs[^1];
+        if (last.Text.EndsWith(" ", StringComparison.Ordinal))
+        {
+            var trimmed = last.Text.TrimEnd(' ');
+            float size = last.Style.FontSize / 0.75f;
+            runs[^1] = new TextRun(trimmed, last.Style, last.X, last.Y,
+                last.Style.StandardFont.Measure(trimmed, size) + last.Style.LetterSpacing / 0.75f * trimmed.Length);
+        }
+
+        chunkStarts.Add(runs.Count);
+        for (int k = 0; k + 1 < chunkStarts.Count; k++)
+        {
+            int from = chunkStarts[k], to = chunkStarts[k + 1];
+            if (from >= to) continue;
+            float left = float.MaxValue, right = float.MinValue;
+            for (int i = from; i < to; i++) { left = Math.Min(left, runs[i].X); right = Math.Max(right, runs[i].X + runs[i].Width); }
+            var anchor = runs[from].Style.SvgTextAnchor;
+            float shift = anchor == 1 ? -(right - left) / 2 : anchor == 2 ? -(right - left) : 0;
+            for (int i = from; i < to; i++) EmitText(runs[i], shift, ctm, opacity);
+        }
+    }
+
+    private void EmitText(TextRun run, float shift, Matrix ctm, float opacity)
+    {
+        var s = run.Style;
+        if (!s.Visible || run.Text.Length == 0) return;
+        float size = s.FontSize / 0.75f;
+        float x = run.X + shift;
+        float y = run.Y + s.SvgBaseline switch
+        {
+            1 => 0.35f * size,  // middle, central
+            2 => 0.8f * size,   // hanging, text-before-edge
+            3 => -0.2f * size,  // text-after-edge, ideographic
+            _ => 0,
+        };
+        float minX = x, minY = y - 0.8f * size, maxX = x + run.Width, maxY = y + 0.2f * size;
+        var shape = new SvgShape
+        {
+            Kind = SvgShape.KindText,
+            Text = run.Text,
+            Font = s.StandardFont,
+            FontSize = size,
+            CharSpacing = s.LetterSpacing / 0.75f,
+            TextMatrix = new Matrix(1, 0, 0, -1, x, y).Then(ctm),
+            StrokeWidth = s.SvgStrokeWidth * ctm.ScaleFactor,
+            LineJoin = s.SvgLineJoin,
+            LineCap = s.SvgLineCap,
+            MiterLimit = s.SvgMiterLimit,
+        };
+        shape.Fill = Paint(s.SvgFill, s.SvgFillUrl, s.SvgFillOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.FillGradient);
+        if (s.SvgStrokeWidth > 0)
+            shape.Stroke = Paint(s.SvgStroke, s.SvgStrokeUrl, s.SvgStrokeOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.StrokeGradient);
+        if (!shape.HasFill && !shape.HasStroke) return;
+        var corners = new[] { minX, minY, maxX, minY, maxX, maxY, minX, maxY };
+        for (int i = 0; i < 8; i += 2) ctm.Apply(ref corners[i], ref corners[i + 1]);
+        Bounds(corners, out shape.MinX, out shape.MinY, out shape.MaxX, out shape.MaxY);
+        Shapes.Add(shape);
     }
 
     // ------------------------------------------------------------------ basic shapes
@@ -389,6 +737,14 @@ internal readonly struct Matrix
         float nx = A * x + C * y + E;
         y = B * x + D * y + F;
         x = nx;
+    }
+
+    public bool TryInvert(out Matrix inverse)
+    {
+        float det = A * D - B * C;
+        if (Math.Abs(det) < 1e-12f) { inverse = Identity; return false; }
+        inverse = new Matrix(D / det, -B / det, -C / det, A / det, (C * F - D * E) / det, (B * E - A * F) / det);
+        return true;
     }
 
     /// <summary>Average scale, used for stroke widths.</summary>

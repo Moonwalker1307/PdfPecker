@@ -30,6 +30,38 @@ internal sealed class PdfImage
         return null;
     }
 
+    /// <summary>
+    /// A DeviceRGB copy of a CMYK JPEG, for PDF/A files whose sRGB output intent does not allow DeviceCMYK.
+    /// Returns the image itself when it is not CMYK, or null when it cannot be decoded.
+    /// </summary>
+    public PdfImage? ToRgb()
+    {
+        if (ColorSpace != "/DeviceCMYK") return this;
+        if (Filter != "/DCTDecode") return null;
+        var jpg = Rendering.Images.JpegDecoder.Decode(Data);
+        if (jpg == null || jpg.Value.Components != 4) return null;
+        var (cmyk, w, h, _) = jpg.Value;
+        bool inverted = Decode != null;
+        var rgb = new byte[w * h * 3];
+        var cache = new Dictionary<int, int>();
+        for (int i = 0, o = 0; i + 3 < cmyk.Length && o + 2 < rgb.Length; i += 4, o += 3)
+        {
+            int key = cmyk[i] << 24 | cmyk[i + 1] << 16 | cmyk[i + 2] << 8 | cmyk[i + 3];
+            if (!cache.TryGetValue(key, out int packed))
+            {
+                float c = cmyk[i] / 255f, m = cmyk[i + 1] / 255f, y = cmyk[i + 2] / 255f, k = cmyk[i + 3] / 255f;
+                if (inverted) { c = 1 - c; m = 1 - m; y = 1 - y; k = 1 - k; }
+                var (r, g, b) = Rendering.Content.DeviceCmyk.Convert(c, m, y, k);
+                packed = r << 16 | g << 8 | b;
+                if (cache.Count < 65536) cache[key] = packed;
+            }
+            rgb[o] = (byte)(packed >> 16);
+            rgb[o + 1] = (byte)(packed >> 8);
+            rgb[o + 2] = (byte)packed;
+        }
+        return new PdfImage { Width = w, Height = h, ColorSpace = "/DeviceRGB", BitsPerComponent = 8, Data = Deflate(rgb), SMask = SMask };
+    }
+
     // ------------------------------------------------------------------ JPEG: embedded as-is (DCTDecode)
 
     private static PdfImage? FromJpeg(byte[] d)

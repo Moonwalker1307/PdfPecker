@@ -6,7 +6,7 @@ namespace PdfPecker.Layout;
 /// <summary>
 /// CSS grid layout: line-based and automatic placement (row flow, sparse), track sizing with fixed, percentage, fr,
 /// auto, min-content, max-content and minmax() tracks, repeat() including auto-fill/auto-fit, gaps and box alignment.
-/// Rows are paginated as units. Named lines and areas are not supported.
+/// Named lines and grid-template-areas are resolved to line numbers. Rows are paginated as units.
 /// </summary>
 internal sealed partial class LayoutEngine
 {
@@ -91,15 +91,53 @@ internal sealed partial class LayoutEngine
         else if (start.Span > 0) span = start.Span;
     }
 
+    /// <summary>
+    /// 1-based line numbers by name on one axis: names from the track list, and name-start/name-end lines from
+    /// grid-template-areas. Null when there are none.
+    /// </summary>
+    private static Dictionary<string, List<int>>? LineNames(TrackList? list, int repeatCount, GridAreas? areas, bool columns)
+    {
+        Dictionary<string, List<int>>? names = null;
+        void Add(string name, int line)
+        {
+            names ??= new Dictionary<string, List<int>>(StringComparer.Ordinal);
+            if (!names.TryGetValue(name, out var lines)) names[name] = lines = new List<int>(1);
+            if (!lines.Contains(line)) lines.Add(line);
+        }
+        if (list?.LineNames is { } ln)
+            foreach (var (name, line, inAfter) in ln)
+                Add(name, line + 1 + (inAfter ? list.Before.Length + repeatCount : 0));
+        if (areas != null)
+            foreach (var (name, a) in areas.Areas)
+            {
+                Add(name + "-start", (columns ? a.ColStart : a.RowStart) + 1);
+                Add(name + "-end", (columns ? a.ColEnd : a.RowEnd) + 1);
+            }
+        if (names != null) foreach (var lines in names.Values) lines.Sort();
+        return names;
+    }
+
+    /// <summary>Turns a named line into a line number: "a" means the a-start (or a-end) line of area a, else the line named a.</summary>
+    private static GridLine ResolveName(GridLine gl, Dictionary<string, List<int>>? names, bool isStart)
+    {
+        if (gl.Name == null) return gl;
+        if (names == null) return default;
+        if (!names.TryGetValue(gl.Name + (isStart ? "-start" : "-end"), out var lines) && !names.TryGetValue(gl.Name, out lines)) return default;
+        int n = gl.Line == 0 ? 1 : gl.Line;
+        int index = n > 0 ? Math.Min(n, lines.Count) - 1 : Math.Max(0, lines.Count + n);
+        return new GridLine(lines[index], 0);
+    }
+
     /// <summary>Places the items in the grid (row-major, sparse auto-placement). Returns the number of columns and rows.</summary>
-    private static void PlaceGridItems(List<BoxItem> items, ComputedStyle s, int explicitCols, int explicitRows, out int colCount, out int rowCount)
+    private static void PlaceGridItems(List<BoxItem> items, ComputedStyle s, int explicitCols, int explicitRows,
+        Dictionary<string, List<int>>? colNames, Dictionary<string, List<int>>? rowNames, out int colCount, out int rowCount)
     {
         colCount = Math.Max(1, explicitCols);
         foreach (var it in items)
         {
             var st = it.Style;
-            ResolveSpan(st.GridColumnStart, st.GridColumnEnd, explicitCols, out int c, out int cs);
-            ResolveSpan(st.GridRowStart, st.GridRowEnd, explicitRows, out int r, out int rs);
+            ResolveSpan(ResolveName(st.GridColumnStart, colNames, true), ResolveName(st.GridColumnEnd, colNames, false), explicitCols, out int c, out int cs);
+            ResolveSpan(ResolveName(st.GridRowStart, rowNames, true), ResolveName(st.GridRowEnd, rowNames, false), explicitRows, out int r, out int rs);
             it.Col = c; it.ColSpan = Math.Min(cs, 1000); it.ColFixed = c >= 0;
             it.Row = r; it.RowSpan = Math.Min(rs, 1000); it.RowFixed = r >= 0;
             colCount = Math.Max(colCount, (c >= 0 ? c : 0) + it.ColSpan);
@@ -348,9 +386,12 @@ internal sealed partial class LayoutEngine
         float rowGap = GapOf(s.RowGap, definiteH ?? 0);
 
         var colDefs = ExpandTracks(s.GridTemplateColumns, w, colGap, out int repStart, out int repCount);
-        var rowDefs = ExpandTracks(s.GridTemplateRows, definiteH ?? 0, rowGap, out _, out _);
+        var rowDefs = ExpandTracks(s.GridTemplateRows, definiteH ?? 0, rowGap, out _, out int rowRepCount);
         if (items.Count == 0) return y;
-        PlaceGridItems(items, s, colDefs.Count, rowDefs.Count, out int colCount, out int rowCount);
+        var areas = s.GridTemplateAreas;
+        PlaceGridItems(items, s, Math.Max(colDefs.Count, areas?.Columns ?? 0), Math.Max(rowDefs.Count, areas?.Rows ?? 0),
+            LineNames(s.GridTemplateColumns, repCount, areas, columns: true), LineNames(s.GridTemplateRows, rowRepCount, areas, columns: false),
+            out int colCount, out int rowCount);
 
         var cols = MakeTracks(colDefs, s.GridAutoColumns, colCount);
         if (s.GridTemplateColumns?.AutoFit == true)
@@ -510,14 +551,17 @@ internal sealed partial class LayoutEngine
         var s = e.Style;
         var items = CollectBoxItems(e, 0);
         float gap = GapOf(s.ColumnGap, 0);
-        var colDefs = ExpandTracks(s.GridTemplateColumns, 0, gap, out _, out _);
+        var colDefs = ExpandTracks(s.GridTemplateColumns, 0, gap, out _, out int repCount);
         if (items.Count == 0)
         {
             float fixedSum = 0;
             foreach (var t in colDefs) fixedSum += Math.Max(0, FixedSize(t.Min, 0, false));
             return (fixedSum, fixedSum);
         }
-        PlaceGridItems(items, s, colDefs.Count, 0, out int colCount, out _);
+        var areas = s.GridTemplateAreas;
+        PlaceGridItems(items, s, Math.Max(colDefs.Count, areas?.Columns ?? 0), areas?.Rows ?? 0,
+            LineNames(s.GridTemplateColumns, repCount, areas, columns: true), LineNames(s.GridTemplateRows, 0, areas, columns: false),
+            out int colCount, out _);
         var contributions = new List<(int, int, float, float)>(items.Count);
         var minContrib = new List<(int, int, float, float)>(items.Count);
         foreach (var it in items)

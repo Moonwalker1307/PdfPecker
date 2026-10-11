@@ -289,7 +289,7 @@ public class FontTests
         var options = WithFonts(Regular, Bold);
         var results = new byte[16][];
         Parallel.For(0, results.Length, i => results[i] = HtmlToPdf.Convert($"<p style='font-family: Work Sans'>Doc {i % 2} Łódź <b>ß</b></p>", options));
-        static string WithoutDate(byte[] pdf) => Regex.Replace(Latin1(pdf), @"/CreationDate \(D:\d+Z\)", "");
+        static string WithoutDate(byte[] pdf) => Regex.Replace(Latin1(pdf), @"/(CreationDate|ModDate) \(D:\d+Z\)|/ID \[<[0-9A-F]+><[0-9A-F]+>\]", "");
         for (int i = 2; i < results.Length; i++) Assert.Equal(WithoutDate(results[i % 2]), WithoutDate(results[i]));
     }
 }

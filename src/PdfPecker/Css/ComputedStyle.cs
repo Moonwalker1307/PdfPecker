@@ -39,15 +39,25 @@ internal sealed class TrackList
     public Track[]? AutoRepeat;
     public bool AutoFit;
     public Track[] After = Array.Empty<Track>();
+    // Line names: (name, index of the line within Before or After, whether it is in After).
+    public List<(string Name, int Line, bool InAfter)>? LineNames;
 }
 
-/// <summary>A grid-column-start/end or grid-row-start/end value: auto, a line number or a span.</summary>
+/// <summary>A grid-column-start/end or grid-row-start/end value: auto, a line number, a named line or a span.</summary>
 internal readonly struct GridLine
 {
-    public readonly int Line; // 1-based; negative counts from the end; 0 = auto
+    public readonly int Line; // 1-based; negative counts from the end; 0 = auto. With a name: the nth line of that name
     public readonly int Span; // > 0 for "span n"
-    public GridLine(int line, int span) { Line = line; Span = span; }
-    public bool IsAuto => Line == 0 && Span == 0;
+    public readonly string? Name; // a line name or grid area name
+    public GridLine(int line, int span, string? name = null) { Line = line; Span = span; Name = name; }
+    public bool IsAuto => Line == 0 && Span == 0 && Name == null;
+}
+
+/// <summary>A grid-template-areas value: named rectangles of cells, as 0-based start lines and exclusive end lines.</summary>
+internal sealed class GridAreas
+{
+    public int Rows, Columns;
+    public readonly Dictionary<string, (int RowStart, int ColStart, int RowEnd, int ColEnd)> Areas = new(StringComparer.Ordinal);
 }
 
 internal enum SvgLineCap : byte { Butt, Round, Square }
@@ -135,10 +145,16 @@ internal sealed class ComputedStyle
     public SvgLineCap SvgLineCap;
     public SvgLineJoin SvgLineJoin;
     public float SvgMiterLimit = 4;
+    public bool SvgClipEvenOdd;              // clip-rule
+    public byte SvgTextAnchor;               // 0 start, 1 middle, 2 end
+    public byte SvgBaseline;                 // dominant-baseline: 0 alphabetic, 1 middle/central, 2 hanging, 3 text-after-edge
+    public int Orphans = 2, Widows = 2; // minimum lines of a paragraph left at the bottom / carried to the top of a page
 
     // ---- Not inherited ----
     public Display Display = Display.Inline;
     public uint BackgroundColor;
+    public CssGradient[]? BackgroundGradients; // background-image layers, topmost first
+    public string? SvgClipPath;                 // clip-path: url(#id), as "#id"
     public Length MarginTop = Length.Zero, MarginRight = Length.Zero, MarginBottom = Length.Zero, MarginLeft = Length.Zero;
     public Length PaddingTop = Length.Zero, PaddingRight = Length.Zero, PaddingBottom = Length.Zero, PaddingLeft = Length.Zero;
     public float BorderTopWidth = 1.5f, BorderRightWidth = 1.5f, BorderBottomWidth = 1.5f, BorderLeftWidth = 1.5f; // medium = 3px
@@ -149,6 +165,7 @@ internal sealed class ComputedStyle
     public bool BorderBox;
     public VerticalAlign VerticalAlign;
     public bool PageBreakBefore, PageBreakAfter, AvoidBreakInside;
+    public bool AvoidBreakBefore, AvoidBreakAfter; // break-before/after: avoid (keep with the next or previous box)
     public bool Floated;
     public bool ClearBoth;
     public float Opacity = 1;
@@ -166,12 +183,16 @@ internal sealed class ComputedStyle
     public Track[]? GridAutoColumns, GridAutoRows;
     public bool GridAutoFlowColumn;
     public GridLine GridColumnStart, GridColumnEnd, GridRowStart, GridRowEnd;
+    public GridAreas? GridTemplateAreas;
     public int ColumnCount;
     public Length ColumnWidth = Length.Auto;
 
     private TextFont? _font;
 
     public TextFont Font => _font ??= Fonts == null ? StandardFont.Get(FontFamily, Bold, Italic) : Fonts.Resolve(FontFamilyName, FontFamily, FontWeight, Italic);
+
+    /// <summary>The standard PDF font for this style, used where embedded fonts are not supported (SVG text).</summary>
+    public StandardFont StandardFont => StandardFont.Get(FontFamily, Bold, Italic);
 
     public void InvalidateFont() => _font = null;
 
@@ -205,6 +226,8 @@ internal sealed class ComputedStyle
         var c = (ComputedStyle)MemberwiseClone();
         c.Display = Display.Inline;
         c.BackgroundColor = 0;
+        c.BackgroundGradients = null;
+        c.SvgClipPath = null;
         c.MarginTop = c.MarginRight = c.MarginBottom = c.MarginLeft = Length.Zero;
         c.PaddingTop = c.PaddingRight = c.PaddingBottom = c.PaddingLeft = Length.Zero;
         c.BorderTopWidth = c.BorderRightWidth = c.BorderBottomWidth = c.BorderLeftWidth = 1.5f;
@@ -216,6 +239,7 @@ internal sealed class ComputedStyle
         c.BorderBox = false;
         c.VerticalAlign = VerticalAlign.Baseline;
         c.PageBreakBefore = c.PageBreakAfter = c.AvoidBreakInside = false;
+        c.AvoidBreakBefore = c.AvoidBreakAfter = false;
         c.Floated = false;
         c.ClearBoth = false;
         c.Opacity = 1;
@@ -232,6 +256,7 @@ internal sealed class ComputedStyle
         c.GridAutoColumns = c.GridAutoRows = null;
         c.GridAutoFlowColumn = false;
         c.GridColumnStart = c.GridColumnEnd = c.GridRowStart = c.GridRowEnd = default;
+        c.GridTemplateAreas = null;
         c.ColumnCount = 0;
         c.ColumnWidth = Length.Auto;
         return c;

@@ -1,6 +1,7 @@
 using PdfPecker.Css;
 using PdfPecker.Fonts;
 using PdfPecker.Images;
+using PdfPecker.Pdf;
 using PdfPecker.Svg;
 
 namespace PdfPecker.Layout;
@@ -19,6 +20,15 @@ internal sealed class RectOp : DrawOp
     public float X, Y, W, H;
     public uint Color;
     public RectOp(float x, float y, float w, float h, uint color) { X = x; Y = y; W = w; H = h; Color = color; }
+    public override void Offset(float dx, float dy) { X += dx; Y += dy; }
+}
+
+/// <summary>A rectangle filled with a gradient, whose geometry is relative to the rectangle's top-left corner.</summary>
+internal sealed class GradientOp : DrawOp
+{
+    public float X, Y, W, H;
+    public Gradient Gradient;
+    public GradientOp(float x, float y, float w, float h, Gradient gradient) { X = x; Y = y; W = w; H = h; Gradient = gradient; }
     public override void Offset(float dx, float dy) { X += dx; Y += dy; }
 }
 
@@ -101,6 +111,11 @@ internal static class BoxPainter
         if (!s.Visible) return;
         if (CssColor.IsVisible(s.BackgroundColor) && w > 0 && h > 0)
             group.Ops.Add(new RectOp(x, y, w, h, s.BackgroundColor));
+        if (s.BackgroundGradients is { } layers && w > 0 && h > 0)
+        {
+            uint backdrop = CssColor.IsOpaque(s.BackgroundColor) ? s.BackgroundColor : 0xFFFFFFFF;
+            for (int i = layers.Length - 1; i >= 0; i--) group.Ops.Add(new GradientOp(x, y, w, h, layers[i].Resolve(w, h, backdrop)));
+        }
         if (!s.HasBorder) return;
         float bt = s.BorderTop, br = s.BorderRight, bb = s.BorderBottom, bl = s.BorderLeft;
         Side(group, s.BorderTopStyle, bt, s.BorderTopColor ?? s.Color, x, y, w, bt, horizontal: true);

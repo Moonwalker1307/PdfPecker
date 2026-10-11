@@ -53,6 +53,20 @@ public readonly struct PageMargins
         => new(top * 72f / 25.4f, right * 72f / 25.4f, bottom * 72f / 25.4f, left * 72f / 25.4f);
 }
 
+/// <summary>An archival standard the generated PDF conforms to.</summary>
+public enum PdfConformance
+{
+    /// <summary>A plain PDF.</summary>
+    None,
+    /// <summary>
+    /// PDF/A-2b (ISO 19005-2, level B): fonts embedded, XMP metadata, sRGB output intent, no encryption.
+    /// The usual choice for archiving invoices and payslips.
+    /// </summary>
+    PdfA2b,
+    /// <summary>PDF/A-3b (ISO 19005-3, level B): as PDF/A-2b; the part that also allows attached files.</summary>
+    PdfA3b,
+}
+
 /// <summary>Options for <see cref="HtmlToPdf"/>.</summary>
 public sealed class PdfOptions
 {
@@ -96,6 +110,12 @@ public sealed class PdfOptions
     /// <summary>Extra CSS applied after the document's own styles.</summary>
     public string? UserStyleSheet { get; set; }
 
+    /// <summary>
+    /// Add bookmarks (the PDF outline) built from the h1-h6 headings, nested by level. Default: true.
+    /// Links (<c>&lt;a href&gt;</c>) are always clickable: external URLs open in the browser and <c>#id</c> links jump to the element.
+    /// </summary>
+    public bool Bookmarks { get; set; } = true;
+
     /// <summary>Compress page content streams. Default: true.</summary>
     public bool Compress { get; set; } = true;
 
@@ -114,4 +134,13 @@ public sealed class PdfOptions
 
     /// <summary>Text centred in the top margin of every page. Supports <c>{page}</c> and <c>{pages}</c>.</summary>
     public string? HeaderText { get; set; }
+
+    /// <summary>A text or image stamped on every page, e.g. a diagonal "DRAFT".</summary>
+    public PdfWatermark? Watermark { get; set; }
+
+    /// <summary>Password protection and permissions (AES-256). Cannot be combined with PDF/A <see cref="Conformance"/>.</summary>
+    public PdfSecurity? Security { get; set; }
+
+    /// <summary>Produce an archival PDF/A file. Default: <see cref="PdfConformance.None"/>. Cannot be combined with <see cref="Security"/>.</summary>
+    public PdfConformance Conformance { get; set; }
 }
