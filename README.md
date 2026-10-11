@@ -1,9 +1,10 @@
 # PdfPecker
 
-Fast HTML and Markdown to PDF conversion for .NET, with no dependencies.
+Fast HTML and Markdown to PDF conversion, and PDF to PNG rendering, for .NET, with no dependencies.
 
-PdfPecker has its own HTML parser, Markdown parser, CSS engine, layout engine and PDF writer. It does not start a
-browser, ship native binaries or pull in third-party packages; the NuGet package depends only on the .NET base class library.
+PdfPecker has its own HTML parser, Markdown parser, CSS engine, layout engine and PDF writer, and its own PDF renderer.
+It does not start a browser, ship native binaries or pull in third-party packages; the NuGet package depends only on
+the .NET base class library.
 
 ```csharp
 using PdfPecker;
@@ -91,6 +92,47 @@ A CSS `@page { size: A4 landscape; margin: 15mm }` rule overrides the page size 
 `IgnoreCssPageRules` is set. PdfPecker never makes network requests on its own: `http(s)` images and stylesheets are only
 loaded through `ResourceResolver`.
 
+## PDF to image
+
+`PdfToImage` and `PdfRenderer` render PDF pages to PNG (or raw RGBA pixels). This works for any PDF, not only
+PdfPecker's own output, and also uses no third-party code: the PDF parser, font engines, JPEG and fax decoders,
+rasterizer and PNG encoder are all part of the library.
+
+```csharp
+// Every page as PNG bytes (rendered in parallel), or one page (0-based index)
+byte[][] pages = PdfToImage.Convert(pdfBytes, new ImageOptions { Dpi = 150 });
+byte[] first = PdfToImage.ConvertPage(pdfBytes, 0);
+
+// report.pdf -> out/report-1.png, out/report-2.png, ...
+PdfToImage.ConvertFile("report.pdf", "out");
+
+// Open once, render many pages; RenderedImage also exposes the RGBA pixels
+var renderer = PdfRenderer.Open(pdfBytes, password: null);
+RenderedImage image = renderer.RenderPage(2, new ImageOptions { Width = 800 });
+image.SavePng("page3.png");
+```
+
+`ImageOptions` sets `Dpi` (default 150) or a target `Width`/`Height` in pixels, `BackgroundColor` or `Transparent`,
+`RenderAnnotations`, `Password`, `MaxDegreeOfParallelism` and `PngCompression`. A `PdfRenderer` is thread-safe and
+shares decoded fonts and images between pages. Encrypted files open with the user or owner password
+(`PdfPasswordException` otherwise); unreadable files throw `InvalidDataException`.
+
+What the renderer supports:
+
+- **Files**: cross-reference tables and streams, object streams, incremental updates, damaged files (rebuilt by
+  scanning), RC4 and AES-128/256 encryption, all standard filters (Flate, LZW, ASCII85, ASCIIHex, RunLength, predictors).
+- **Graphics**: paths, fills (non-zero and even-odd), strokes with joins, caps and dashes, clipping, anti-aliasing,
+  all blend modes, constant alpha, soft masks, transparency groups, axial, radial, function and mesh shadings
+  (types 1 to 7), tiling patterns, form XObjects, optional content (layers) and annotation appearances.
+- **Text**: embedded TrueType, OpenType, CFF and Type 1 fonts, Type 3 fonts, CID fonts with CMaps, vertical text,
+  all text rendering modes. The 14 standard fonts and non-embedded fonts are drawn with built-in Liberation and
+  DejaVu-derived faces stretched to the document's widths.
+- **Images**: every bit depth and colour space (Gray, RGB, CMYK, Lab, ICC-based, Indexed, Separation, DeviceN),
+  baseline and progressive JPEG, CCITT fax, stencil masks, colour-key masks and soft masks.
+
+Not supported yet: JPEG 2000 (`JPXDecode`) and JBIG2 images, which are left blank; predefined CJK CMaps and
+non-embedded CJK fonts; ICC profiles (ICC-based colours use their device equivalents).
+
 ## Website
 
 `web/PdfPecker.Web` is a small ASP.NET Core site for converting HTML and Markdown in the browser: paste or open an
@@ -113,6 +155,14 @@ Or upload a file as a form:
 
 ```
 curl -X POST http://localhost:8080/api/convert -F "file=@invoice.html" -F pageSize=A4 -F pageNumbers=true -o invoice.pdf
+```
+
+`POST /api/pdf-to-image` turns a PDF into PNGs: one page with `?page=N` (or when the PDF has one page), otherwise a
+zip with a PNG per page. Options: `dpi` (10 to 300, default 150), `width`, `height` and `password`.
+
+```
+curl -X POST "http://localhost:8080/api/pdf-to-image?page=1&dpi=200" --data-binary @report.pdf -o page1.png
+curl -X POST http://localhost:8080/api/pdf-to-image -F "file=@report.pdf" -o pages.zip
 ```
 
 `POST /api/convert` also accepts JSON: `{ "html": "...", "pageSize": "A4", "landscape": false, "marginMm": 12.7, "pageNumbers": true }`.
@@ -198,6 +248,18 @@ Parsing Markdown to HTML runs at roughly 20 to 45 MB/s, so it is a small part of
 
 The first conversion in a process also pays for JIT compilation (about 150 ms); later ones run at the speeds above.
 
+Rendering PDF pages to images, same machine, one core per page (`PdfRenderer`, first render of each page of a freshly
+opened document, so fonts and images are decoded too):
+
+| Document | Render at 96 DPI | Render at 150 DPI | PNG encoding at 150 DPI |
+| --- | --- | --- | --- |
+| Invoice (1 page) | 13 ms | 19 ms | 24 ms |
+| Feature tour (5 pages) | 7 ms per page | 12 ms per page | 26 ms per page |
+| Large report (30 pages) | 5 ms per page | 10 ms per page | 29 ms per page |
+
+Rendering the same page again (fonts and glyphs cached) takes about 5 ms at 150 DPI. Multi-page conversions render
+pages in parallel.
+
 ## Building
 
 ```
@@ -221,3 +283,9 @@ and `Markdown/HtmlRenderer` writes the HTML, which then takes the same path as a
    (automatic column widths), paginating as it goes, and produces a flat list of draw operations.
 4. `Pdf/PdfDocumentWriter` writes PDF 1.4: content streams, standard fonts, image XObjects, link annotations and
    the cross-reference table.
+
+The renderer (`Rendering/`) works the other way round: `Parsing/PdfFile` reads the object graph, `PageRenderer`
+interprets content streams, `Fonts/` turns glyphs into outlines (cached as anti-aliased bitmaps), `Images/` decodes
+images, and `Graphics/Rasterizer` fills paths with exact area coverage before `PngEncoder` writes the result.
+
+Third-party font data built into the renderer is listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
