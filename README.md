@@ -92,6 +92,30 @@ A CSS `@page { size: A4 landscape; margin: 15mm }` rule overrides the page size 
 `IgnoreCssPageRules` is set. PdfPecker never makes network requests on its own: `http(s)` images and stylesheets are only
 loaded through `ResourceResolver`.
 
+### Watermarks, passwords and PDF/A
+
+```csharp
+var options = new PdfOptions
+{
+    // A diagonal stamp on every page. Also: Image (PNG/JPEG bytes), FontSize, Angle, Opacity, Bold, Behind.
+    Watermark = new PdfWatermark { Text = "PRØVEBEREGNING", Color = "#c00000", Opacity = 0.25f },
+
+    // AES-256 encryption (PDF 2.0 / Acrobat X and later). Without an OwnerPassword a random one is used,
+    // so the permissions cannot be lifted.
+    Security = new PdfSecurity
+    {
+        UserPassword = "1234",                                   // needed to open the file; null = opens freely
+        OwnerPassword = "owner-secret",                          // full access
+        Permissions = PdfPermissions.Print | PdfPermissions.Copy,
+    },
+};
+```
+
+For archiving, set `Conformance = PdfConformance.PdfA2b` (or `PdfA3b`): the PDF gets XMP metadata, an sRGB output intent
+and a file ID, and CMYK JPEGs are converted to RGB. PDF/A does not allow encryption, so combining `Conformance` with
+`Security` throws an `ArgumentException`. AES-256 keys come from a password hash that is slow on purpose, which adds
+about 3 ms to a conversion.
+
 ## PDF to image
 
 `PdfToImage` and `PdfRenderer` render PDF pages to PNG (or raw RGBA pixels). This works for any PDF, not only
@@ -166,6 +190,8 @@ curl -X POST http://localhost:8080/api/pdf-to-image -F "file=@report.pdf" -o pag
 ```
 
 `POST /api/convert` also accepts JSON: `{ "html": "...", "pageSize": "A4", "landscape": false, "marginMm": 12.7, "pageNumbers": true }`.
+Add `watermark` (text stamped on every page), `password` (AES-256, needed to open the PDF) or `pdfa: true` (PDF/A-2b) in
+any of the three forms; send passwords in the form or JSON body rather than the query string, which servers tend to log.
 
 Markdown works the same way. The input is read as Markdown when it is uploaded as a `.md`/`.markdown` file, sent as
 `"markdown"` in JSON or as a `markdown` form field, posted with `Content-Type: text/markdown`, or marked with
