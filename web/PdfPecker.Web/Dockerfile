@@ -4,7 +4,8 @@ WORKDIR /src
 COPY src/PdfPecker/ src/PdfPecker/
 COPY web/PdfPecker.Web/ web/PdfPecker.Web/
 COPY README.md .
-RUN dotnet publish web/PdfPecker.Web -c Release -o /app
+ARG VERSION=0.1.0
+RUN dotnet publish web/PdfPecker.Web -c Release -p:Version=$VERSION -o /app
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app
