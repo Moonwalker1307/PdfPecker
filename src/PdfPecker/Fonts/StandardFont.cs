@@ -9,36 +9,38 @@ internal sealed class StandardFont : TextFont
     public readonly int Index;          // 0..11, used as resource name /F{Index+1}
     private readonly short[] _widths;
 
-    private StandardFont(string baseFont, int index, short[] widths, int ascent, int descent)
+    private StandardFont(string baseFont, int index, short[] widths)
     {
         BaseFont = baseFont;
         Index = index;
         _widths = widths;
-        Ascent = ascent / 1000f;
-        Descent = descent / 1000f;
+        // Line metrics of the metric-compatible Liberation font (hhea, 2048 units per em), which is what browsers use in
+        // place of Helvetica, Times and Courier (Arial, Times New Roman and Courier New): the AFM ascent and descent
+        // describe the glyphs, not the line spacing.
+        (int a, int d, int g) = (index / 4) switch { 0 => (1854, 434, 67), 1 => (1825, 443, 87), _ => (1705, 615, 0) };
+        Ascent = a / 2048f;
+        Descent = -d / 2048f;
+        LineGap = g / 2048f;
     }
 
     public static readonly StandardFont[] All =
     {
-        new("Helvetica", 0, StandardFontMetrics.Helvetica, StandardFontMetrics.Helvetica_Ascent, StandardFontMetrics.Helvetica_Descent),
-        new("Helvetica-Bold", 1, StandardFontMetrics.Helvetica_Bold, StandardFontMetrics.Helvetica_Bold_Ascent, StandardFontMetrics.Helvetica_Bold_Descent),
-        new("Helvetica-Oblique", 2, StandardFontMetrics.Helvetica_Oblique, StandardFontMetrics.Helvetica_Oblique_Ascent, StandardFontMetrics.Helvetica_Oblique_Descent),
-        new("Helvetica-BoldOblique", 3, StandardFontMetrics.Helvetica_BoldOblique, StandardFontMetrics.Helvetica_BoldOblique_Ascent, StandardFontMetrics.Helvetica_BoldOblique_Descent),
-        new("Times-Roman", 4, StandardFontMetrics.Times_Roman, StandardFontMetrics.Times_Roman_Ascent, StandardFontMetrics.Times_Roman_Descent),
-        new("Times-Bold", 5, StandardFontMetrics.Times_Bold, StandardFontMetrics.Times_Bold_Ascent, StandardFontMetrics.Times_Bold_Descent),
-        new("Times-Italic", 6, StandardFontMetrics.Times_Italic, StandardFontMetrics.Times_Italic_Ascent, StandardFontMetrics.Times_Italic_Descent),
-        new("Times-BoldItalic", 7, StandardFontMetrics.Times_BoldItalic, StandardFontMetrics.Times_BoldItalic_Ascent, StandardFontMetrics.Times_BoldItalic_Descent),
-        new("Courier", 8, StandardFontMetrics.Courier, StandardFontMetrics.Courier_Ascent, StandardFontMetrics.Courier_Descent),
-        new("Courier-Bold", 9, StandardFontMetrics.Courier_Bold, StandardFontMetrics.Courier_Bold_Ascent, StandardFontMetrics.Courier_Bold_Descent),
-        new("Courier-Oblique", 10, StandardFontMetrics.Courier_Oblique, StandardFontMetrics.Courier_Oblique_Ascent, StandardFontMetrics.Courier_Oblique_Descent),
-        new("Courier-BoldOblique", 11, StandardFontMetrics.Courier_BoldOblique, StandardFontMetrics.Courier_BoldOblique_Ascent, StandardFontMetrics.Courier_BoldOblique_Descent),
+        new("Helvetica", 0, StandardFontMetrics.Helvetica),
+        new("Helvetica-Bold", 1, StandardFontMetrics.Helvetica_Bold),
+        new("Helvetica-Oblique", 2, StandardFontMetrics.Helvetica_Oblique),
+        new("Helvetica-BoldOblique", 3, StandardFontMetrics.Helvetica_BoldOblique),
+        new("Times-Roman", 4, StandardFontMetrics.Times_Roman),
+        new("Times-Bold", 5, StandardFontMetrics.Times_Bold),
+        new("Times-Italic", 6, StandardFontMetrics.Times_Italic),
+        new("Times-BoldItalic", 7, StandardFontMetrics.Times_BoldItalic),
+        new("Courier", 8, StandardFontMetrics.Courier),
+        new("Courier-Bold", 9, StandardFontMetrics.Courier_Bold),
+        new("Courier-Oblique", 10, StandardFontMetrics.Courier_Oblique),
+        new("Courier-BoldOblique", 11, StandardFontMetrics.Courier_BoldOblique),
     };
 
     public static StandardFont Get(FontFamily family, bool bold, bool italic)
         => All[(int)family * 4 + (bold ? 1 : 0) + (italic ? 2 : 0)];
-
-    // Line-height: normal has always been 1.2 em for the standard fonts.
-    public override float NormalLineHeight => 1.2f;
 
     /// <summary>True when the WinAnsi encoding has the character itself (not a substitute or '?').</summary>
     public static bool CanEncode(char c) => WinAnsi.IsExact(c);

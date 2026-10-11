@@ -114,7 +114,7 @@ public class HostileInputTests
     [Fact]
     public void Long_unbreakable_words_break_in_linear_time()
     {
-        var pdf = Bounded("<p style='width:30px'>" + Repeat("x", 300000) + "</p>");
+        var pdf = Bounded("<p style='width:30px; overflow-wrap:anywhere'>" + Repeat("x", 300000) + "</p>");
         AssertStructurallyValid(pdf);
         // The word is cut into lines that each hold a few characters.
         Assert.True(PageCount(pdf) > 10);
@@ -123,7 +123,7 @@ public class HostileInputTests
     [Fact]
     public void Broken_words_keep_every_character()
     {
-        var pdf = ConvertUncompressed("<p style='width:40pt;font-family:Courier;font-size:10pt'>ABCDEFGHIJKLMNOPQRSTUVWXYZ</p>");
+        var pdf = ConvertUncompressed("<p style='width:40pt;font-family:Courier;font-size:10pt;overflow-wrap:break-word'>ABCDEFGHIJKLMNOPQRSTUVWXYZ</p>");
         var text = string.Concat(System.Text.RegularExpressions.Regex.Matches(Latin1(pdf), @"\(([A-Z]+)\) ?Tj").Select(m => m.Groups[1].Value));
         Assert.Equal("ABCDEFGHIJKLMNOPQRSTUVWXYZ", text);
     }

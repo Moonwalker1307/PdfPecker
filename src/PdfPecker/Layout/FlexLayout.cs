@@ -15,6 +15,7 @@ internal sealed partial class LayoutEngine
         public float Ml, Mr, Mt, Mb;
         public bool AutoMl, AutoMr, AutoMt, AutoMb;
         public float Base, Hypo, MinMain, MaxMain, Main;
+        public float Frame;   // main-axis padding and borders, which shrinking cannot take away
         public bool Frozen;
         public Captured? Box;
         // Grid placement (0-based).
@@ -178,7 +179,10 @@ internal sealed partial class LayoutEngine
             if (it.El != null && !st.FlexBasis.IsAuto) basis = st.FlexBasis.Resolve(w) + (st.BorderBox ? 0 : frame);
             else basis = specified ?? mx;
             it.Base = basis;
-            // min-width: auto means "not smaller than the content" for flex items.
+            it.Frame = frame;
+            // min-width: auto means "not smaller than the content" for flex items: the min-content width of what is inside
+            // the item, not of the item with its own width, or a fixed width could never shrink.
+            if (specified.HasValue && it.El != null && st.Display != Display.Table) mn = ContentIntrinsic(it.El).Min + frame;
             float min = !st.MinWidth.IsAuto && st.MinWidth.Value > 0 ? st.MinWidth.Resolve(w) + (st.BorderBox ? 0 : frame) : Math.Min(mn, specified ?? mn);
             float max = !st.MaxWidth.IsAuto ? st.MaxWidth.Resolve(w) + (st.BorderBox ? 0 : frame) : float.PositiveInfinity;
             it.MinMain = min;
@@ -339,6 +343,9 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>Resolves flexible lengths (§9.7): grows or shrinks the items of one line to fill the main size.</summary>
+    // Shrinking is weighted by the content-box flex base size, so padding and borders do not make an item shrink more.
+    private static float InnerBase(BoxItem it) => Math.Max(0, it.Base - it.Frame);
+
     private static void ResolveFlexibleLengths(List<BoxItem> line, float avail, float gap)
     {
         float outerHypo = gap * (line.Count - 1);
@@ -365,7 +372,7 @@ internal sealed partial class LayoutEngine
                 if (it.Frozen) continue;
                 unfrozen++;
                 factorSum += Factor(it);
-                scaledShrinkSum += it.Style.FlexShrink * it.Base;
+                scaledShrinkSum += it.Style.FlexShrink * InnerBase(it);
             }
             if (unfrozen == 0) break;
             float free = avail - used;
@@ -380,8 +387,8 @@ internal sealed partial class LayoutEngine
                 if (it.Frozen) continue;
                 float target = grow
                     ? it.Base + (factorSum > 0 ? free * it.Style.FlexGrow / factorSum : 0)
-                    : it.Base + (scaledShrinkSum > 0 ? free * it.Style.FlexShrink * it.Base / scaledShrinkSum : 0);
-                float clamped = Math.Clamp(target, it.MinMain, it.MaxMain);
+                    : it.Base + (scaledShrinkSum > 0 ? free * it.Style.FlexShrink * InnerBase(it) / scaledShrinkSum : 0);
+                float clamped = Math.Max(Math.Clamp(target, it.MinMain, it.MaxMain), it.Frame);
                 violation[i] = clamped - target;
                 total += violation[i];
                 it.Main = clamped;

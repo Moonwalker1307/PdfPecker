@@ -99,9 +99,9 @@ public class LayoutFeatureTests
     [Fact]
     public void Var_inside_shorthands_is_expanded_after_substitution()
     {
-        var doc = Styled("<style>:root{--b: 2pt solid #00ff00} div{border: var(--b); margin: var(--m, 1pt 2pt)}</style><div id='d'>x</div>");
+        var doc = Styled("<style>:root{--b: 3pt solid #00ff00} div{border: var(--b); margin: var(--m, 1pt 2pt)}</style><div id='d'>x</div>");
         var s = ById(doc, "d").Style!;
-        Near(2f, s.BorderTopWidth);
+        Near(3f, s.BorderTopWidth);
         Near(1f, s.MarginTop.Value);
         Near(2f, s.MarginRight.Value);
     }
