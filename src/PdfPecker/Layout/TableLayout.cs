@@ -103,7 +103,7 @@ internal sealed partial class LayoutEngine
             for (int k = 0; k < span && colIndex < n; k++, colIndex++)
             {
                 if (cs.Width.IsPercent) m.ColPct[colIndex] = cs.Width.Value;
-                else if (!cs.Width.IsAuto) m.ColFixed[colIndex] = FloorPx(cs.Width.Value);
+                else if (!cs.Width.IsAuto) m.ColFixed[colIndex] = cs.Width.Value;
             }
         }
 
@@ -123,7 +123,7 @@ internal sealed partial class LayoutEngine
                 if (cs.Width.IsPercent) cell.PercentWidth = cs.Width.Value;
                 else if (!cs.Width.IsAuto)
                 {
-                    cell.FixedWidth = FloorPx(cs.Width.Value + (cs.BorderBox ? 0 : frame));
+                    cell.FixedWidth = cs.Width.Value + (cs.BorderBox ? 0 : frame);
                     cell.Max = Math.Max(cell.Min, cell.FixedWidth);
                 }
                 if (cell.ColSpan == 1)
@@ -197,9 +197,6 @@ internal sealed partial class LayoutEngine
                 if (c is Element tr && tr.Style?.Display == Display.TableRow) rows.Add(tr);
         }
     }
-
-    // Chrome sizes fixed-width table columns in whole CSS pixels, dropping the fraction.
-    private static float FloorPx(float pt) => MathF.Floor(pt / 0.75f + 0.001f) * 0.75f;
 
     private static int ParseInt(string? s, int fallback) => int.TryParse(s, out int v) ? v : fallback;
 
