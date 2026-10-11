@@ -170,6 +170,13 @@ public static class HtmlToPdf
             EmbedStandardFonts = options.EmbedStandardFonts,
             MaxPages = options.MaxPages,
             Cancellation = cancellationToken,
+            Properties = new DocumentProperties
+            {
+                Keywords = options.Keywords,
+                Creator = options.Creator,
+                Producer = options.Producer,
+                Custom = DocumentProperties.Validate(options.CustomProperties),
+            },
         };
         var pdf = writer.Write(engine.Ops, height, engine.Anchors, background, title, options.Author, options.Subject,
             options.FooterText, options.HeaderText, pageBands, engine.Headings);

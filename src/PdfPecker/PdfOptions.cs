@@ -138,6 +138,22 @@ public sealed class PdfOptions
 
     public string? Subject { get; set; }
 
+    /// <summary>Keywords for the document properties, e.g. "invoice, 2026".</summary>
+    public string? Keywords { get; set; }
+
+    /// <summary>The application that created the original document, shown as "Application" in viewers.</summary>
+    public string? Creator { get; set; }
+
+    /// <summary>The application that produced the PDF. Default: "PdfPecker".</summary>
+    public string? Producer { get; set; }
+
+    /// <summary>
+    /// Custom document properties, such as an order or employee number, written to the document information dictionary
+    /// (and to the XMP metadata for PDF/A). Names cannot be the standard ones (Title, Author, Subject, Keywords, Creator,
+    /// Producer, CreationDate, ModDate, Trapped); null values are skipped.
+    /// </summary>
+    public IDictionary<string, string> CustomProperties { get; set; } = new Dictionary<string, string>();
+
     /// <summary>Text centred in the bottom margin of every page. <c>{page}</c> and <c>{pages}</c> are replaced, e.g. "Page {page} of {pages}".</summary>
     public string? FooterText { get; set; }
 
