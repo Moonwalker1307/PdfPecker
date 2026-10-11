@@ -6,8 +6,9 @@ namespace PdfPecker.Pdf;
 
 /// <summary>
 /// Writes a new PDF holding the pages of several parsed PDFs. Each input's objects reachable from its pages (and its
-/// bookmarks) are copied once, renumbered; references to the page tree and catalog are dropped, named destinations are
-/// resolved to explicit ones, and signature fields are left out.
+/// bookmarks and form fields) are copied once, renumbered; references to the page tree and catalog are dropped, named
+/// destinations are resolved to explicit ones, and signature fields are left out. Identical streams without references
+/// (images, embedded fonts, ICC profiles), which a run of documents from one template repeats, are written once.
 /// </summary>
 internal sealed class PdfMergeWriter
 {
@@ -18,6 +19,9 @@ internal sealed class PdfMergeWriter
         public readonly Dictionary<int, int> Map = new(); // source object number -> new id; 0 = write null
         public readonly List<int> TopOutline = new(); // source numbers of the top-level bookmarks
         public Dictionary<string, PdfObject>? NamedDests;
+        public readonly List<int> Fields = new(); // source numbers of the top-level form fields kept
+        public readonly Dictionary<int, Dictionary<string, PdfObject>> Overrides = new(); // entries to replace when copying an object
+        public bool NeedAppearances;
     }
 
     private readonly PdfMergeOptions _options;
@@ -25,6 +29,7 @@ internal sealed class PdfMergeWriter
     private ByteBuffer _out = new(1 << 16);
     private readonly List<long> _offsets = new() { 0 }; // by object id; 0 = not written
     private int _nextId;
+    private readonly Dictionary<string, int> _streams = new(StringComparer.Ordinal); // content hash -> id of a written leaf stream
 
     private const int CatalogId = 1, PagesId = 2, InfoId = 3;
 
@@ -41,6 +46,8 @@ internal sealed class PdfMergeWriter
     {
         // 1. Open every input and number its pages, so links between inputs' bookmarks can be chained up front.
         var inputs = new List<Input>(data.Count);
+        var fieldNames = new HashSet<string>(StringComparer.Ordinal);
+        PdfString? formDA = null;
         int pageCount = 0, maxPages = Math.Max(1, _options.MaxPages);
         for (int i = 0; i < data.Count; i++)
         {
@@ -67,12 +74,14 @@ internal sealed class PdfMergeWriter
                 if (catalog?["Pages"] is { } pagesRef)
                     CollectPages(input, pagesRef, null, null, null, null, new HashSet<PdfDict>(ReferenceEqualityComparer.Instance), 0);
                 if (_options.Bookmarks) CollectOutline(input, catalog);
+                CollectFields(input, catalog, fieldNames, ref formDA);
             }
             pageCount += input.Pages.Count;
             if (pageCount > maxPages)
                 throw new PdfLimitException($"The merged document has more than {maxPages} pages (PdfMergeOptions.MaxPages).");
             inputs.Add(input);
         }
+        if (pageCount == 0) throw new InvalidDataException("None of the PDFs has any pages.");
 
         int outlinesId = inputs.Any(x => x.TopOutline.Count > 0) ? NewId() : 0;
         int firstOutline = 0, lastOutline = 0, outlineCount = 0;
@@ -117,6 +126,11 @@ internal sealed class PdfMergeWriter
         // Optional content (layers): every input's groups, and the ones hidden by default.
         var ocgs = new ByteBuffer(64);
         var ocgsOff = new ByteBuffer(64);
+        // Interactive form: every input's fields, and the fonts their default appearances name (the first input's win).
+        var fields = new ByteBuffer(64);
+        var calcOrder = new ByteBuffer(64);
+        var formFonts = new ByteBuffer(64);
+        var formFontNames = new HashSet<string>(StringComparer.Ordinal);
         foreach (var input in inputs)
         {
             using (PdfFile.BeginRender(_cancel))
@@ -127,6 +141,26 @@ internal sealed class PdfMergeWriter
                 {
                     WriteItemsTo(ocgs, input, input.File.GetArray(oc, "OCGs"), queue);
                     WriteItemsTo(ocgsOff, input, input.File.GetArray(input.File.GetDict(oc, "D"), "OFF"), queue);
+                }
+                if (input.Fields.Count > 0)
+                {
+                    var form = input.File.GetDict(input.File.Catalog, "AcroForm")!;
+                    WriteItemsTo(fields, input, new PdfArray(input.Fields.Select(n => (PdfObject)new PdfRef(n, 0)).ToList()), queue);
+                    WriteItemsTo(calcOrder, input, input.File.GetArray(form, "CO"), queue);
+                    if (input.File.GetDict(input.File.GetDict(form, "DR"), "Font") is { } drFonts)
+                    {
+                        var saved = _out;
+                        _out = formFonts;
+                        foreach (var (key, value) in drFonts.Entries)
+                        {
+                            if (!formFontNames.Add(key)) continue;
+                            PdfSyntax.RawName(_out, key);
+                            _out.Sp();
+                            WriteObject(input, value, queue, 1);
+                            _out.Sp();
+                        }
+                        _out = saved;
+                    }
                 }
                 foreach (var num in input.TopOutline)
                 {
@@ -141,6 +175,12 @@ internal sealed class PdfMergeWriter
                     var obj = input.File.GetObject(num) ?? PdfNull.Instance;
                     Begin(id);
                     if (obj is PdfStream s) WriteStream(input, s, queue);
+                    else if (obj is PdfDict od && input.Overrides.TryGetValue(num, out var changes))
+                    {
+                        var entries = new Dictionary<string, PdfObject>(od.Entries, StringComparer.Ordinal);
+                        foreach (var (key, value) in changes) entries[key] = value;
+                        WriteDict(input, new PdfDict(entries), queue, 0);
+                    }
                     else WriteObject(input, obj, queue, 0);
                     End();
                 }
@@ -155,6 +195,15 @@ internal sealed class PdfMergeWriter
             _out.Ascii(" /OCProperties << /OCGs [").Bytes(ocgs.Span).Ascii("] /D << /Order [").Bytes(ocgs.Span).Ascii("]");
             if (ocgsOff.Length > 0) _out.Ascii(" /OFF [").Bytes(ocgsOff.Span).Ascii("]");
             _out.Ascii(" >> >>");
+        }
+        if (fields.Length > 0)
+        {
+            _out.Ascii(" /AcroForm << /Fields [").Bytes(fields.Span).Ascii("]");
+            if (calcOrder.Length > 0) _out.Ascii(" /CO [").Bytes(calcOrder.Span).Ascii("]");
+            if (formFonts.Length > 0) _out.Ascii(" /DR << /Font << ").Bytes(formFonts.Span).Ascii(">> >>");
+            if (formDA != null) { _out.Ascii(" /DA "); PdfSyntax.HexString(_out, formDA.Bytes); }
+            if (inputs.Any(x => x.NeedAppearances)) _out.Ascii(" /NeedAppearances true");
+            _out.Ascii(" >>");
         }
         _out.Ascii(" >>");
         End();
@@ -221,6 +270,55 @@ internal sealed class PdfMergeWriter
         }
         // The old root is replaced by the merged one: its children's /Parent is rewritten when they are written.
         if (rootRef is PdfRef rr && !input.Map.ContainsKey(rr.Num)) input.Map[rr.Num] = 0;
+    }
+
+    /// <summary>
+    /// Picks the input's top-level form fields to keep (all but signatures). A field named like one from an earlier input
+    /// is renamed "name_2", "name_3", ..., since fields with the same name share one value; one that relied on the
+    /// input's default appearance gets it written in, when the merged form's default differs.
+    /// </summary>
+    private static void CollectFields(Input input, PdfDict? catalog, HashSet<string> usedNames, ref PdfString? formDA)
+    {
+        var file = input.File;
+        if (file.GetDict(catalog, "AcroForm") is not { } form || file.GetArray(form, "Fields") is not { } items) return;
+        input.NeedAppearances = file.Resolve(form["NeedAppearances"]) is PdfBool { Value: true };
+        var da = file.Resolve(form["DA"]) as PdfString;
+        formDA ??= da;
+        var own = new List<(int Num, PdfDict Field, string? Name)>();
+        var seen = new HashSet<int>();
+        foreach (var item in items.Items)
+        {
+            if (own.Count >= 100_000) break;
+            if (item is not PdfRef r || !seen.Add(r.Num) || file.Resolve(item) is not PdfDict field) continue;
+            if (file.GetName(field, "FT") == "Sig") continue;
+            own.Add((r.Num, field, (file.Resolve(field["T"]) as PdfString)?.Text));
+        }
+        var ownNames = own.Where(f => f.Name != null).Select(f => f.Name!).ToHashSet(StringComparer.Ordinal);
+        foreach (var (num, field, name) in own)
+        {
+            input.Fields.Add(num);
+            Dictionary<string, PdfObject>? changes = null;
+            if (name != null && usedNames.Contains(name))
+            {
+                string renamed;
+                int k = 2;
+                do renamed = name + "_" + k++; while (usedNames.Contains(renamed) || ownNames.Contains(renamed));
+                ownNames.Add(renamed);
+                (changes ??= new())["T"] = new PdfString(TextStringBytes(renamed));
+            }
+            if (da != null && formDA != null && !da.Bytes.AsSpan().SequenceEqual(formDA.Bytes) && field["DA"] == null)
+                (changes ??= new())["DA"] = da;
+            if (changes != null) input.Overrides[num] = changes;
+        }
+        usedNames.UnionWith(ownNames);
+    }
+
+    private static byte[] TextStringBytes(string s)
+    {
+        foreach (var c in s)
+            if (c > 0x7E || c < 0x20)
+                return new byte[] { 0xFE, 0xFF }.Concat(Encoding.BigEndianUnicode.GetBytes(s)).ToArray();
+        return Encoding.ASCII.GetBytes(s);
     }
 
     private DocumentProperties Properties(PdfFile first)
@@ -484,12 +582,76 @@ internal sealed class PdfMergeWriter
                 WriteObject(input, NamedDest(input, target) ?? PdfNull.Instance, queue, 1);
                 return;
             }
-            id = NewId();
-            input.Map[r.Num] = id;
-            queue.Enqueue((r.Num, id));
+            string? hash = target is PdfStream ts ? LeafStreamHash(input.File, ts) : null;
+            if (hash != null && _streams.TryGetValue(hash, out id))
+            {
+                input.Map[r.Num] = id;
+            }
+            else
+            {
+                id = NewId();
+                input.Map[r.Num] = id;
+                queue.Enqueue((r.Num, id));
+                if (hash != null) _streams[hash] = id;
+            }
         }
         if (id == 0) _out.Ascii("null");
         else _out.Int(id).Ascii(" 0 R");
+    }
+
+    /// <summary>
+    /// A hash of a stream that refers to no other object, as it will be written, so identical copies are written once;
+    /// null for a stream with references or too small to be worth it.
+    /// </summary>
+    private string? LeafStreamHash(PdfFile file, PdfStream s)
+    {
+        if (s.RawData.Length < 256 || s.Entries.Values.Any(HasRef)) return null;
+        var entries = new Dictionary<string, PdfObject>(s.Entries, StringComparer.Ordinal);
+        entries.Remove("Length");
+        RemoveCryptFilter(file, entries);
+        var dict = new ByteBuffer(256);
+        foreach (var (key, value) in entries.OrderBy(e => e.Key, StringComparer.Ordinal))
+        {
+            PdfSyntax.RawName(dict, key);
+            dict.Sp();
+            WriteLeaf(dict, value);
+            dict.Sp();
+        }
+        using var sha = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        sha.AppendData(dict.Span);
+        sha.AppendData(s.RawData);
+        return Convert.ToBase64String(sha.GetHashAndReset());
+
+        static bool HasRef(PdfObject o) => o switch
+        {
+            PdfRef => true,
+            PdfArray a => a.Items.Any(HasRef),
+            PdfDict d => d.Entries.Values.Any(HasRef),
+            _ => false,
+        };
+    }
+
+    /// <summary>Writes an object without references (see <see cref="LeafStreamHash"/>).</summary>
+    private static void WriteLeaf(ByteBuffer b, PdfObject o)
+    {
+        switch (o)
+        {
+            case PdfBool x: b.Ascii(x.Value ? "true" : "false"); break;
+            case PdfNumber n: b.Ascii(n.Value.ToString("R", System.Globalization.CultureInfo.InvariantCulture)); break;
+            case PdfString x: PdfSyntax.HexString(b, x.Bytes); break;
+            case PdfName x: PdfSyntax.RawName(b, x.Value); break;
+            case PdfArray a:
+                b.Byte((byte)'[');
+                foreach (var i in a.Items) { WriteLeaf(b, i); b.Sp(); }
+                b.Byte((byte)']');
+                break;
+            case PdfDict d:
+                b.Ascii("<<");
+                foreach (var (k, v) in d.Entries.OrderBy(e => e.Key, StringComparer.Ordinal)) { PdfSyntax.RawName(b, k); b.Sp(); WriteLeaf(b, v); b.Sp(); }
+                b.Ascii(">>");
+                break;
+            default: b.Ascii("null"); break;
+        }
     }
 
     // ------------------------------------------------------------------ named destinations

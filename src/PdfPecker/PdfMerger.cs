@@ -44,20 +44,21 @@ public sealed class PdfMergeOptions
 }
 
 /// <summary>
-/// Combines PDFs into one: the pages of every input in order, with their bookmarks and links. Any PDF can be merged,
-/// not only those this library creates.
+/// Combines PDFs into one: the pages of every input in order, with their bookmarks, links and form fields. Any PDF can
+/// be merged, not only those this library creates.
 /// </summary>
 /// <remarks>
 /// The result is a new, unencrypted PDF. Digital signatures are not carried over (merging changes the document, which
-/// would break them anyway), nor are form fields' interactivity, PDF/A conformance, attachments or the logical
-/// structure (tags). Inputs are treated as untrusted: damaged files are repaired where possible, and decoding work is
-/// limited per input.
+/// would break them anyway), nor are PDF/A conformance, attachments, page labels or the logical structure (tags). A form
+/// field named like one in an earlier input is renamed "name_2", "name_3", ..., so each copy keeps its value. Streams
+/// that are identical in several inputs (a logo, an embedded font) are written once. Inputs are treated as untrusted:
+/// damaged files are repaired where possible, and decoding work is limited per input.
 /// </remarks>
 public static class PdfMerger
 {
     /// <summary>Merges PDFs, in order.</summary>
     /// <exception cref="PdfPasswordException">An input is encrypted and cannot be opened without a password.</exception>
-    /// <exception cref="InvalidDataException">An input is not a readable PDF.</exception>
+    /// <exception cref="InvalidDataException">An input is not a readable PDF, or none of them has any pages.</exception>
     public static byte[] Merge(params byte[][] pdfs) => Merge(pdfs, null);
 
     /// <summary>Merges PDFs, in order.</summary>
@@ -65,7 +66,7 @@ public static class PdfMerger
     /// <param name="options">Passwords, limits and document properties; null for the defaults.</param>
     /// <param name="cancellationToken">Stops the merge.</param>
     /// <exception cref="PdfPasswordException">An input is encrypted and cannot be opened with the given password.</exception>
-    /// <exception cref="InvalidDataException">An input is not a readable PDF, or decodes to more data than allowed.</exception>
+    /// <exception cref="InvalidDataException">An input is not a readable PDF or decodes to more data than allowed, or none of them has any pages.</exception>
     /// <exception cref="PdfLimitException">The merged document has more than <see cref="PdfMergeOptions.MaxPages"/> pages.</exception>
     /// <exception cref="NotSupportedException">An input uses an encryption handler other than the standard one.</exception>
     public static byte[] Merge(IEnumerable<byte[]> pdfs, PdfMergeOptions? options, CancellationToken cancellationToken = default)

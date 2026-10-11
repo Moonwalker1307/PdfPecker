@@ -255,12 +255,19 @@ byte[] merged2 = PdfMerger.Merge(new[] { a, b }, new PdfMergeOptions
 PdfMerger.MergeFiles("all.pdf", new[] { "a.pdf", "b.pdf" });
 ```
 
-The pages keep their content, fonts, images, links, annotations and layers, and each input's bookmarks follow each
-other. Document properties come from the first input unless `PdfMergeOptions` sets them. The result is never encrypted
-and has no signatures (merging would break them); form fields are no longer fillable, and PDF/A
-conformance, attachments and tags are not carried over. Inputs are handled as untrusted: damaged files are repaired
-where possible, decoding is limited per input, and `MaxPages` (default 100,000) caps the result. Merging four small
-documents takes about 1 ms.
+The pages keep their content, fonts, images, links, annotations, layers and fillable form fields, and each input's
+bookmarks follow each other. A form field named like one in an earlier input is renamed `name_2`, `name_3` and so on, so
+the copies keep their own values. Document properties come from the first input unless `PdfMergeOptions` sets them. The
+result is never encrypted and has no signatures (merging would break them); PDF/A conformance, attachments, page labels
+and tags are not carried over. Images, fonts and other resources that are byte-for-byte the same in several inputs, such
+as a logo on every payslip of a run, are written once.
+
+Inputs are handled as untrusted: damaged files are repaired where possible, decoding is limited per input, and
+`MaxPages` (default 100,000) caps the result. Inputs without any pages throw `InvalidDataException`. Merging was tested
+on PDFs from Chrome (as IronPDF makes them), Ghostscript, LibreOffice, MuPDF, qpdf, ReportLab, pypdf incremental
+updates, scanners (JPEG, CCITT G4, CMYK, OCR text layers) and damaged files (wrong or missing cross-reference tables,
+truncated files, junk before the header); every merged page rendered pixel-identical to its original in Poppler.
+Merging four small documents takes about 1 ms, and 1,000 one-page Chrome payslips about 1 s.
 
 ## PDF to image
 

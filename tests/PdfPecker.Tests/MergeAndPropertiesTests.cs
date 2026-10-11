@@ -319,13 +319,122 @@ public class MergeAndPropertiesTests
     {
         Assert.Throws<ArgumentException>(() => PdfMerger.Merge());
         Assert.Throws<ArgumentException>(() => PdfMerger.Merge(new byte[][] { null! }));
-        // Not a PDF: either refused or merged as an empty document, never a crash.
-        try
-        {
-            var merged = PdfMerger.Merge(Encoding.ASCII.GetBytes("hello, not a pdf"));
-            Assert.Equal(0, PdfRenderer.Open(merged).PageCount);
-        }
-        catch (InvalidDataException) { }
+        // Not a PDF, or a PDF without pages: refused, never a crash or an empty document.
+        Assert.Throws<InvalidDataException>(() => PdfMerger.Merge(Encoding.ASCII.GetBytes("hello, not a pdf")));
+        var empty = BuildPdf("<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [] /Count 0 >>");
+        Assert.Throws<InvalidDataException>(() => PdfMerger.Merge(empty));
+        // An empty input among others is fine.
+        Assert.Equal(1, PdfRenderer.Open(PdfMerger.Merge(empty, HtmlToPdf.Convert(Page("#ff0000")))).PageCount);
+    }
+
+    // ------------------------------------------------------------------ real-world inputs
+
+    /// <summary>A small third-party-style file: a red square, with the size and resources inherited from the page tree.</summary>
+    private static byte[] RedSquare() => BuildPdf(
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 200] /Resources << /ExtGState << /G 5 0 R >> >> >>",
+        "<< /Type /Page /Parent 2 0 R /Contents 4 0 R >>",
+        "<< /Length 33 >>\nstream\n/G gs 1 0 0 rg 20 20 160 160 re f\nendstream",
+        "<< /Type /ExtGState /CA 1 >>");
+
+    public static IEnumerable<object[]> DamagedFiles() => new[]
+    {
+        new object[] { "offsets shifted", (Func<byte[], byte[]>)(d => Insert(d, 9, "%" + new string('x', 40) + "\n")) },
+        new object[] { "startxref wrong", (Func<byte[], byte[]>)(d => Replace(d, "startxref\n", "startxref\n9") ) },
+        new object[] { "xref table missing", (Func<byte[], byte[]>)(d => Encoding.Latin1.GetBytes(Encoding.Latin1.GetString(d)[..Encoding.Latin1.GetString(d).LastIndexOf("xref", StringComparison.Ordinal)] + "%%EOF\n")) },
+        new object[] { "xref subsection starting at 1", (Func<byte[], byte[]>)(d => Replace(d, "xref\n0 6\n0000000000 65535 f \n", "xref\n1 5\n")) },
+        new object[] { "junk before the header", (Func<byte[], byte[]>)(d => Insert(d, 0, "Received: from mail gateway\r\n\r\n")) },
+        new object[] { "CR line ends", (Func<byte[], byte[]>)(d => Encoding.Latin1.GetBytes(Encoding.Latin1.GetString(d).Replace("\n", "\r"))) },
+        new object[] { "trailer cut off", (Func<byte[], byte[]>)(d => d[..(Encoding.Latin1.GetString(d).LastIndexOf("trailer", StringComparison.Ordinal))]) },
+    };
+
+    private static byte[] Insert(byte[] d, int at, string text) => d[..at].Concat(Encoding.Latin1.GetBytes(text)).Concat(d[at..]).ToArray();
+
+    private static byte[] Replace(byte[] d, string from, string to)
+    {
+        var s = Encoding.Latin1.GetString(d);
+        Assert.Contains(from, s);
+        return Encoding.Latin1.GetBytes(s.Replace(from, to));
+    }
+
+    [Theory]
+    [MemberData(nameof(DamagedFiles))]
+    public void Merge_repairs_damaged_files(string damage, Func<byte[], byte[]> mangle)
+    {
+        var merged = PdfMerger.Merge(mangle(RedSquare()), HtmlToPdf.Convert(Page("#0000ff")));
+        PdfTestHelpers.AssertStructurallyValid(merged);
+        var r = PdfRenderer.Open(merged);
+        Assert.Equal(2, r.PageCount);
+        Assert.Equal((200d, 200d), r.GetPageSize(0));
+        var img = r.RenderPage(0, new ImageOptions { Dpi = 72 });
+        int o = (100 * img.Width + 100) * 4;
+        Assert.True(img.Rgba[o] > 200 && img.Rgba[o + 2] < 50, $"{damage}: page 1 is not red");
+    }
+
+    [Fact]
+    public void Merge_uses_the_newest_revision_of_an_incrementally_updated_file()
+    {
+        // The update replaces the page's content stream (red becomes green) and adds an annotation.
+        var original = RedSquare();
+        var text = Encoding.Latin1.GetString(original);
+        int prevXref = int.Parse(Regex.Match(text, @"startxref\n(\d+)").Groups[1].Value);
+        var update = new StringBuilder();
+        int o4 = original.Length + update.Length;
+        update.Append("4 0 obj\n<< /Length 25 >>\nstream\n0 1 0 rg 0 0 200 200 re f\nendstream\nendobj\n");
+        int o3 = original.Length + update.Length;
+        update.Append("3 0 obj\n<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Annots [6 0 R] >>\nendobj\n");
+        int o6 = original.Length + update.Length;
+        update.Append("6 0 obj\n<< /Type /Annot /Subtype /Text /Rect [0 0 20 20] /Contents (Approved) >>\nendobj\n");
+        int xref = original.Length + update.Length;
+        update.Append($"xref\n3 2\n{o3:D10} 00000 n \n{o4:D10} 00000 n \n6 1\n{o6:D10} 00000 n \n");
+        update.Append($"trailer\n<< /Size 7 /Root 1 0 R /Prev {prevXref} >>\nstartxref\n{xref}\n%%EOF\n");
+        var updated = original.Concat(Encoding.Latin1.GetBytes(update.ToString())).ToArray();
+
+        var merged = PdfMerger.Merge(updated, updated);
+        PdfTestHelpers.AssertStructurallyValid(merged);
+        var c = RenderCenter(merged, 1);
+        Assert.True(c.G > 200 && c.R < 50, $"page: {c}");
+        Assert.Equal(2, Regex.Matches(PdfTestHelpers.Latin1(merged), @"/Subtype /Text").Count);
+    }
+
+    [Fact]
+    public void Merge_keeps_form_fields_and_renames_clashing_ones()
+    {
+        var form = BuildPdf(
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [5 0 R 6 0 R] /DR << /Font << /Helv 7 0 R >> >> /DA (/Helv 0 Tf 0 g) /NeedAppearances true /SigFlags 3 >> >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 300 300] >>",
+            "<< /Type /Page /Parent 2 0 R /Annots [5 0 R 6 0 R] >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>",
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (name) /V (Mette) /Rect [10 10 200 30] /P 3 0 R >>",
+            "<< /Type /Annot /Subtype /Widget /FT /Sig /T (signature) /Rect [10 50 200 70] /P 3 0 R >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+        var merged = PdfMerger.Merge(form, form, form);
+        PdfTestHelpers.AssertStructurallyValid(merged);
+        var text = PdfTestHelpers.Latin1(merged);
+        Assert.Matches(@"/AcroForm << /Fields \[\d+ 0 R \d+ 0 R \d+ 0 R \]", text);
+        // Same-named fields would share one value, so the later copies are renamed.
+        Assert.Contains("/T <6e616d65>", text); // name
+        Assert.Contains("/T <6e616d655f32>", text); // name_2
+        Assert.Contains("/T <6e616d655f33>", text); // name_3
+        Assert.Equal(3, Regex.Matches(text, @"/V <4d65747465>").Count); // Mette
+        Assert.Matches(@"/DR << /Font << /Helv \d+ 0 R", text);
+        Assert.Contains("/NeedAppearances true", text);
+        // Signature fields and flags are not carried over.
+        Assert.DoesNotContain("/Sig", text);
+    }
+
+    [Fact]
+    public void Merge_writes_identical_images_and_fonts_once()
+    {
+        var html = $"<p style='font-family:\"Liberation Sans\"'>Payslip</p><img src='data:image/jpeg;base64,{Convert.ToBase64String(Fixture("rgb.jpg"))}'>";
+        var one = HtmlToPdf.Convert(html, new PdfOptions { EmbedStandardFonts = true });
+        var merged = PdfMerger.Merge(Enumerable.Repeat(one, 20), null);
+        PdfTestHelpers.AssertStructurallyValid(merged);
+        var text = PdfTestHelpers.Latin1(merged);
+        Assert.Equal(Regex.Matches(PdfTestHelpers.Latin1(one), "/Subtype /Image").Count, Regex.Matches(text, "/Subtype /Image").Count);
+        Assert.Equal(Regex.Matches(PdfTestHelpers.Latin1(one), "/Length1 ").Count, Regex.Matches(text, "/Length1 ").Count);
+        Assert.True(merged.Length < one.Length * 5, $"{merged.Length} bytes for 20 copies of {one.Length}");
+        Assert.Equal(20, PdfRenderer.Open(merged).PageCount);
     }
 
     [Fact]
