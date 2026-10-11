@@ -133,6 +133,7 @@ internal sealed class ComputedStyle
     public SvgLineCap SvgLineCap;
     public SvgLineJoin SvgLineJoin;
     public float SvgMiterLimit = 4;
+    public int Orphans = 2, Widows = 2; // minimum lines of a paragraph left at the bottom / carried to the top of a page
 
     // ---- Not inherited ----
     public Display Display = Display.Inline;
@@ -147,6 +148,7 @@ internal sealed class ComputedStyle
     public bool BorderBox;
     public VerticalAlign VerticalAlign;
     public bool PageBreakBefore, PageBreakAfter, AvoidBreakInside;
+    public bool AvoidBreakBefore, AvoidBreakAfter; // break-before/after: avoid (keep with the next or previous box)
     public bool Floated;
     public bool ClearBoth;
     public float Opacity = 1;
@@ -214,6 +216,7 @@ internal sealed class ComputedStyle
         c.BorderBox = false;
         c.VerticalAlign = VerticalAlign.Baseline;
         c.PageBreakBefore = c.PageBreakAfter = c.AvoidBreakInside = false;
+        c.AvoidBreakBefore = c.AvoidBreakAfter = false;
         c.Floated = false;
         c.ClearBoth = false;
         c.Opacity = 1;

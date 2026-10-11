@@ -106,6 +106,7 @@ public static class HtmlToPdf
         }
 
         var engine = new LayoutEngine(page.FlowHeight, images);
+        if (options.Bookmarks) engine.Headings = new List<OutlineHeading>();
         float height = engine.Layout(doc, page.ContentWidth);
 
         Func<int, int, List<DrawOp>>? pageBands = null;
@@ -140,7 +141,7 @@ public static class HtmlToPdf
             Conformance = options.Conformance,
         };
         return writer.Write(engine.Ops, height, engine.Anchors, background, title, options.Author, options.Subject,
-            options.FooterText, options.HeaderText, pageBands);
+            options.FooterText, options.HeaderText, pageBands, engine.Headings);
     }
 
     private static Element? FindByAttribute(Element parent, string attribute)

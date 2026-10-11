@@ -101,6 +101,12 @@ public sealed class PdfOptions
     /// <summary>Extra CSS applied after the document's own styles.</summary>
     public string? UserStyleSheet { get; set; }
 
+    /// <summary>
+    /// Add bookmarks (the PDF outline) built from the h1-h6 headings, nested by level. Default: true.
+    /// Links (<c>&lt;a href&gt;</c>) are always clickable: external URLs open in the browser and <c>#id</c> links jump to the element.
+    /// </summary>
+    public bool Bookmarks { get; set; } = true;
+
     /// <summary>Compress page content streams. Default: true.</summary>
     public bool Compress { get; set; } = true;
 
