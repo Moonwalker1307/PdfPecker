@@ -13,7 +13,7 @@ public class ConversionTests
         Assert.Equal(1, PageCount(pdf));
         var content = AllContent(pdf);
         Assert.Contains("(Hello) Tj", content);
-        Assert.Contains("(World) Tj", content);
+        Assert.Contains("[(W)80(orld)] TJ", content); // "Wo" is kerned
     }
 
     [Fact]

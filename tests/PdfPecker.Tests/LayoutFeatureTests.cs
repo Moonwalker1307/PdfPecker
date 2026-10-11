@@ -329,8 +329,9 @@ public class LayoutFeatureTests
     {
         var doc = Styled("<div id='d' style='height:50vh; width:10vw; min-height:100vh'></div>", 500, 800);
         var s = ById(doc, "d").Style!;
-        Near(400, s.Height.Value);
-        Near(50, s.Width.Value);
+        // The viewport is rounded down to whole CSS pixels, as in Chrome: 800pt is 1066.67px, so 100vh is 1066px.
+        Near(399.75f, s.Height.Value);
+        Near(49.95f, s.Width.Value);
         var pdf = HtmlToPdf.Convert("<body style='margin:0'><div style='min-height:100vh;background:#eee'>x</div></body>");
         Assert.Equal(1, PageCount(pdf));
     }

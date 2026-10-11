@@ -899,9 +899,9 @@ internal sealed class PdfDocumentWriter
                     b.Sp().Num(shape.FontSize).Ascii(" Tf ").Int(mode).Ascii(" Tr 0 Tw ")
                         .Num(shape.CharSpacing).Ascii(" Tc ").Num6(m.A).Sp().Num6(m.B).Sp().Num6(m.C).Sp().Num6(m.D).Sp().Num(m.E).Sp().Num(m.F)
                         .Ascii(" Tm ");
-                    if (svgFont is EmbeddedFont svgFontEmbedded) WriteGlyphHex(b, _subsets[svgFontEmbedded.Program], shape.Text!);
-                    else WriteTextBytes(b, shape.Text!);
-                    b.Ascii(" Tj ET\n");
+                    if (svgFont is EmbeddedFont svgFontEmbedded) WriteGlyphHex(b, svgFontEmbedded, _subsets[svgFontEmbedded.Program], shape.Text!);
+                    else WriteStandardText(b, shape.Font!, shape.Text!);
+                    b.Ascii(" ET\n");
                     continue;
             }
             WritePath(b, shape);
@@ -1067,17 +1067,21 @@ internal sealed class PdfDocumentWriter
         }
     }
 
-    /// <summary>Writes text as a hex string of CIDs, for an embedded font with no per-glyph adjustments.</summary>
-    private static void WriteGlyphHex(ByteBuffer b, GlyphSubset subset, string text)
+    /// <summary>Shows text as hex strings of CIDs: with TJ when the font kerns, so kerned pairs can move glyphs.</summary>
+    private static void WriteGlyphHex(ByteBuffer b, EmbeddedFont font, GlyphSubset subset, string text)
     {
-        b.Byte((byte)'<');
+        bool kern = font.HasKerning;
+        int prev = -1;
+        b.Ascii(kern ? "[<" : "<");
         for (int i = 0; i < text.Length; i++)
         {
             int cp = text[i];
             if (char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1])) cp = char.ConvertToUtf32(text[i], text[++i]);
+            if (kern && prev >= 0 && font.KernUnits(prev, cp) is int k && k != 0) b.Ascii(">").Int(-k).Ascii("<");
+            prev = cp;
             Hex4(b, subset.Cid(cp));
         }
-        b.Byte((byte)'>');
+        b.Ascii(kern ? ">] TJ" : "> Tj");
     }
 
     private GlyphSubset Subset(FontProgram program)
@@ -1111,8 +1115,35 @@ internal sealed class PdfDocumentWriter
         SetFont(b, font, "/F", font.Index + 1, t.Size);
         SetRenderMode(b, 0);
         b.Ascii("1 0 0 1 ").Num(x).Sp().Num(y).Ascii(" Tm ");
-        WriteTextBytes(b, start == 0 && length == t.Text.Length ? t.Text : t.Text.Substring(start, length));
-        b.Ascii(" Tj\n");
+        WriteStandardText(b, font, start == 0 && length == t.Text.Length ? t.Text : t.Text.Substring(start, length));
+        b.Ascii("\n");
+    }
+
+    /// <summary>Shows text in a standard font: one string with Tj, or with TJ when kerned pairs move glyphs.</summary>
+    private static void WriteStandardText(ByteBuffer b, TextFont font, string text)
+    {
+        int first = -1;
+        if (font.HasKerning)
+            for (int i = 1; i < text.Length && first < 0; i++)
+                if (font.KernUnits(text[i - 1], text[i]) != 0) first = i;
+        if (first < 0)
+        {
+            WriteTextBytes(b, text);
+            b.Ascii(" Tj");
+            return;
+        }
+        b.Byte((byte)'[');
+        int runStart = 0;
+        for (int i = first; i < text.Length; i++)
+        {
+            int k = font.KernUnits(text[i - 1], text[i]);
+            if (k == 0) continue;
+            WriteTextBytes(b, text.Substring(runStart, i - runStart));
+            b.Int(-k);
+            runStart = i;
+        }
+        WriteTextBytes(b, text.Substring(runStart));
+        b.Ascii("] TJ");
     }
 
     private void WriteEmbeddedRun(ByteBuffer b, EmbeddedFont font, TextOp t, int start, int length, float x, float y)
@@ -1135,14 +1166,19 @@ internal sealed class PdfDocumentWriter
         // PDF/A forbids showing .notdef: characters no font has become blank space of the same width.
         string text = t.Text;
         bool skipNotdef = Conformance != PdfConformance.None && t.Size > 0;
-        bool adjust = (t.WordSpacing != 0 || skipNotdef) && t.Size > 0;
+        // Kerning moves the glyph after a kerned pair, as the layout measured it.
+        bool kern = font.HasKerning && t.Size > 0;
+        bool adjust = (t.WordSpacing != 0 || skipNotdef || kern) && t.Size > 0;
         float spaceAdjust = adjust ? -t.WordSpacing * 1000f / t.Size : 0;
         float notdefAdjust = skipNotdef ? -(font.Program.Advance1000(0) + t.CharSpacing * 1000f / t.Size) : 0;
         b.Ascii(adjust ? "[<" : "<");
+        int prev = -1;
         for (int i = start, end = start + length; i < end; i++)
         {
             int cp = text[i];
             if (char.IsHighSurrogate(text[i]) && i + 1 < end && char.IsLowSurrogate(text[i + 1])) cp = char.ConvertToUtf32(text[i], text[++i]);
+            if (kern && prev >= 0 && font.KernUnits(prev, cp) is int k && k != 0) b.Ascii(">").Int(-k).Ascii("<");
+            prev = cp;
             int cid = subset.Cid(cp);
             if (cid == 0 && skipNotdef) b.Ascii(">").Num(notdefAdjust).Ascii("<");
             else Hex4(b, cid);

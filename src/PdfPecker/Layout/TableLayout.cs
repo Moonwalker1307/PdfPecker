@@ -15,7 +15,7 @@ internal sealed partial class LayoutEngine
         public float PercentWidth = -1;
 
         // Per layout pass.
-        public float Top, NeededH;
+        public float Top, NeededH, ContentH; // ContentH: what the content needs, without the cell's own height
         public int OpsStart, OpsEnd;
         public GroupOp? Group;
         public float X, W;
@@ -36,6 +36,7 @@ internal sealed partial class LayoutEngine
         public int HeadCount; // leading rows that come from <thead>
         public float[] ColMin = Array.Empty<float>(), ColMax = Array.Empty<float>();
         public float[] ColFixed = Array.Empty<float>(), ColPct = Array.Empty<float>();
+        public float[] ColSpecFixed = Array.Empty<float>(), ColSpecPct = Array.Empty<float>(); // from <col> only
         public float[]? RowExtra; // per layout pass: height each row gets on top of its content, to fill the table's height
     }
 
@@ -106,6 +107,9 @@ internal sealed partial class LayoutEngine
                 else if (!cs.Width.IsAuto) m.ColFixed[colIndex] = cs.Width.Value;
             }
         }
+
+        m.ColSpecFixed = (float[])m.ColFixed.Clone();
+        m.ColSpecPct = (float[])m.ColPct.Clone();
 
         float hs = table.Style.BorderCollapse ? 0 : table.Style.BorderSpacingH;
         var spanning = new List<CellModel>();
@@ -263,6 +267,51 @@ internal sealed partial class LayoutEngine
         return w;
     }
 
+    /// <summary>
+    /// Column widths for table-layout: fixed (CSS 2.1 §17.5.2.1): from the columns' and the first row's widths only,
+    /// whatever the content. Columns without a width share what is left equally; when every column has a width, the
+    /// rest is shared in proportion. Content that does not fit overflows its cell.
+    /// </summary>
+    private static float[] FixedColumns(TableModel m, float avail)
+    {
+        int n = m.ColCount;
+        var w = new float[n];
+        var set = new bool[n];
+        avail = Math.Max(avail, 0);
+        // <col> widths first, then the cells of the first row.
+        for (int c = 0; c < n; c++)
+        {
+            if (m.ColSpecPct[c] >= 0) { w[c] = m.ColSpecPct[c] * avail / 100f; set[c] = true; }
+            else if (m.ColSpecFixed[c] >= 0) { w[c] = m.ColSpecFixed[c]; set[c] = true; }
+        }
+        if (m.Rows.Count > 0)
+        {
+            foreach (var cell in m.Rows[0].Cells)
+            {
+                float cw = cell.PercentWidth >= 0 ? cell.PercentWidth * avail / 100f : cell.FixedWidth;
+                if (cw < 0) continue;
+                int first = cell.Col, end = Math.Min(n, cell.Col + cell.ColSpan);
+                bool free = true;
+                for (int c = first; c < end; c++) free &= !set[c];
+                if (!free) continue;
+                for (int c = first; c < end; c++) { w[c] = cw / (end - first); set[c] = true; }
+            }
+        }
+        float used = 0;
+        int unset = 0;
+        for (int c = 0; c < n; c++) { if (set[c]) used += w[c]; else unset++; }
+        float rest = avail - used;
+        if (unset > 0)
+        {
+            for (int c = 0; c < n; c++) if (!set[c]) w[c] = Math.Max(0, rest / unset);
+        }
+        else if (rest > 0 && n > 0)
+        {
+            for (int c = 0; c < n; c++) w[c] += used > 0 ? rest * w[c] / used : rest / n;
+        }
+        return w;
+    }
+
     private float LayoutTable(Element table, float x, float y, float availW)
     {
         var s = table.Style;
@@ -309,7 +358,7 @@ internal sealed partial class LayoutEngine
         else avail = availW - ml - mr - frameL - frameR - gridSpace;
         if (!s.MaxWidth.IsAuto) avail = Math.Min(avail, s.MaxWidth.Resolve(availW) - frameL - frameR - gridSpace);
 
-        var widths = AllocateColumns(m, avail, specified);
+        var widths = specified && s.TableLayoutFixed ? FixedColumns(m, avail) : AllocateColumns(m, avail, specified);
         float contentW = gridSpace;
         foreach (var cw in widths) contentW += cw;
         float boxW = contentW + frameL + frameR;
@@ -449,7 +498,7 @@ internal sealed partial class LayoutEngine
         float contentTop = rowTop + bt + pt;
         float contentBottom = LayoutFlow(td, cell.X + bl + pl, contentTop, Math.Max(0, w - bl - br - pl - pr));
         cell.OpsEnd = _ops.Count;
-        cell.NeededH = bt + pt + (contentBottom - contentTop) + pb + bb;
+        cell.NeededH = cell.ContentH = bt + pt + (contentBottom - contentTop) + pb + bb;
         if (!cs.Height.IsAuto && !cs.Height.IsPercent)
             cell.NeededH = Math.Max(cell.NeededH, cs.Height.Value + (cs.BorderBox ? 0 : bt + pt + pb + bb));
     }
@@ -460,8 +509,9 @@ internal sealed partial class LayoutEngine
         float h = rowBottom - cell.Top;
         float shift = cs.VerticalAlign switch
         {
-            VerticalAlign.Middle => (h - cell.NeededH) / 2,
-            VerticalAlign.Bottom or VerticalAlign.TextBottom => h - cell.NeededH,
+            // The content is aligned within the whole cell, also when the cell's height made it taller than the content.
+            VerticalAlign.Middle => (h - cell.ContentH) / 2,
+            VerticalAlign.Bottom or VerticalAlign.TextBottom => h - cell.ContentH,
             _ => 0,
         };
         if (shift > 0.01f)

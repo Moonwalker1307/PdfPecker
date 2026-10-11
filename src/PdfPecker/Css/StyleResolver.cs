@@ -110,9 +110,12 @@ internal sealed class StyleResolver
     {
         _author = new RuleIndex(authorSheet);
         _hasCustomProperties = authorSheet.Rules.Any(r => r.Declarations.Any(d => d.Property.StartsWith("--", StringComparison.Ordinal)));
-        _vw = viewportWidth / 100f;
-        _vh = viewportHeight / 100f;
+        // Chrome sizes the print viewport in whole CSS pixels, rounded down: 100vh on A4 is 1122px, not 1122.52px.
+        _vw = WholePx(viewportWidth) / 100f;
+        _vh = WholePx(viewportHeight) / 100f;
     }
+
+    private static float WholePx(float pt) => MathF.Floor(pt / 0.75f + 0.001f) * 0.75f;
 
     public void ResolveTree(Element document, ComputedStyle rootStyle)
     {
@@ -705,6 +708,9 @@ internal sealed class StyleResolver
                 break;
             case "visibility":
                 s.Visible = lower is not ("hidden" or "collapse");
+                break;
+            case "table-layout":
+                s.TableLayoutFixed = lower == "fixed";
                 break;
             case "border-collapse":
                 s.BorderCollapse = lower == "collapse";

@@ -399,6 +399,37 @@ internal sealed partial class LayoutEngine
 
     // ------------------------------------------------------------------ flushing a run of inline content
 
+    private float[] _kern = new float[16];
+
+    /// <summary>
+    /// The kerning between neighbouring words and spaces that are drawn as one run of text (same style), which the
+    /// items' own widths leave out: kern[k] is added after item k. Pairs after the last word of the line are not
+    /// counted, as nothing visible follows them. Returns the total.
+    /// </summary>
+    private static float KernBetweenItems(List<Item> items, float[] kern)
+    {
+        int lastText = -1;
+        for (int k = 0; k < items.Count; k++)
+        {
+            kern[k] = 0;
+            if (items[k].Kind == ItemKind.Text) lastText = k;
+        }
+        float total = 0;
+        for (int k = 0; k < lastText; k++)
+        {
+            Item a = items[k], b = items[k + 1];
+            if (a.Kind is not (ItemKind.Text or ItemKind.Space) || b.Kind is not (ItemKind.Text or ItemKind.Space)) continue;
+            if (!ReferenceEquals(a.Style, b.Style) || a.Length == 0 || b.Length == 0) continue;
+            var font = a.Style.Font;
+            if (!font.HasKerning) continue;
+            int units = font.KernUnits(a.Source[a.Start + a.Length - 1], b.Source[b.Start]);
+            if (units == 0) continue;
+            kern[k] = units * a.Style.FontSize / 1000f;
+            total += kern[k];
+        }
+        return total;
+    }
+
     private float FlushInline(List<Node> run, Element container, float x, float y, float w, bool firstInBlock, out bool produced)
     {
         Cancellation.ThrowIfCancellationRequested();
@@ -668,7 +699,9 @@ internal sealed partial class LayoutEngine
             if (breakBefore != null && breakBefore[li]) y = NextPage(y);
             float baseline = y + maxA;
             float lineIndent = li == 0 ? indent : 0;
-            float free = w - lineIndent - line.Width;
+            if (_kern.Length < items.Count) _kern = new float[items.Count * 2];
+            float lineKern = KernBetweenItems(items, _kern);
+            float free = w - lineIndent - line.Width - lineKern;
             float lx = x + lineIndent;
             float extra = 0;
             switch (block.TextAlign)
@@ -686,7 +719,7 @@ internal sealed partial class LayoutEngine
             for (int k = 0; k < items.Count; k++)
             {
                 xs[k] = cx;
-                cx += items[k].Width + (items[k].Kind == ItemKind.Space ? extra : 0);
+                cx += items[k].Width + _kern[k] + (items[k].Kind == ItemKind.Space ? extra : 0);
             }
             xs[items.Count] = cx;
 
