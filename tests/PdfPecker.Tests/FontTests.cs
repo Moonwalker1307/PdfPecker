@@ -371,4 +371,97 @@ public class FontTests
         Assert.Contains("/BaseFont /Times-Roman", text);
         Assert.DoesNotContain("/FontFile2", text);
     }
+
+    // ------------------------------------------------------------------ missing fonts and system fonts
+
+    private static List<string> MissingFonts(string html, PdfOptions? options = null)
+    {
+        var missing = new List<string>();
+        options ??= new PdfOptions();
+        options.MissingFont = missing.Add;
+        HtmlToPdf.Convert(html, options);
+        return missing;
+    }
+
+    [Fact]
+    public void ReportsFamiliesThatFallBackToStandardFonts()
+    {
+        var missing = MissingFonts("""
+            <p style='font-family: "Open Sans", Sans-serif, Serif'>a</p>
+            <p style='font-family: "open sans", Arial'>b</p>
+            <p style='font-family: Verdana, "Segoe UI", sans-serif'>c</p>
+            <p style='font-family: serif'>d</p>
+            """);
+        Assert.Equal(new[] { "Open Sans", "Verdana", "Segoe UI" }, missing);
+    }
+
+    [Fact]
+    public void DoesNotReportRegisteredFontsOrFamiliesAfterAFoundOne()
+    {
+        var options = WithFonts(Regular);
+        var missing = MissingFonts("""
+            <p style='font-family: "Work Sans", "Open Sans"'>a</p>
+            <p style='font-family: Courier, "Open Sans"'>b</p>
+            <p style='font-family: Lato, "Work Sans"'>c</p>
+            """, options);
+        Assert.Equal(new[] { "Lato" }, missing);
+    }
+
+    [Fact]
+    public void ReportsFontFaceRulesWhoseFontCannotBeLoaded()
+    {
+        var missing = MissingFonts("""
+            <style>@font-face { font-family: Brand; src: url(missing.ttf) } @font-face { font-family: Ok; src: url(ok.ttf) }</style>
+            <p style='font-family: Brand'>a</p><p style='font-family: Ok'>b</p>
+            """, new PdfOptions { ResourceResolver = url => url == "ok.ttf" ? Regular : null });
+        Assert.Equal(new[] { "Brand" }, missing);
+    }
+
+    [Fact]
+    public void ReportsTheWatermarkFontAndUnusedStylesNot()
+    {
+        var missing = MissingFonts("<style>.never { font-family: Unused }</style><p>a</p>",
+            new PdfOptions { Watermark = new PdfWatermark { Text = "DRAFT", FontFamily = "Impact, sans-serif" } });
+        Assert.Equal(new[] { "Impact" }, missing);
+    }
+
+    [Fact]
+    public void ThrowingFromTheCallbackFailsTheConversion()
+    {
+        var options = new PdfOptions { MissingFont = f => throw new InvalidOperationException("no " + f) };
+        var ex = Assert.Throws<InvalidOperationException>(() => HtmlToPdf.Convert("<p style='font-family: Lato'>a</p>", options));
+        Assert.Equal("no Lato", ex.Message);
+    }
+
+    [Fact]
+    public void SystemFontDirectoriesAreListed()
+        => Assert.NotEmpty(FontCollection.SystemFontDirectories());
+
+    [Fact]
+    public void UsesInstalledFontsOnlyWhenAllowed()
+    {
+        // Needs at least one installed font that is not a standard-font alias; CI images and desktops have some.
+        var family = FontCollection.Installed.FamilyNames.FirstOrDefault(f => FontResolver.StandardFamily(f) == null
+            && FontCollection.Installed.GetSnapshot().ByFamily[f].Any(face => face.Program?.GlyphId('A') > 0));
+        if (family == null) return;
+        var html = $"<p style='font-family: \"{family}\", sans-serif'>AB</p>";
+
+        var missing = new List<string>();
+        var off = Latin1(HtmlToPdf.Convert(html, new PdfOptions { Compress = false, MissingFont = missing.Add }));
+        Assert.DoesNotContain("/FontFile", off);
+        Assert.Equal(new[] { family }, missing);
+
+        missing.Clear();
+        var on = Latin1(HtmlToPdf.Convert(html, new PdfOptions { Compress = false, UseSystemFonts = true, MissingFont = missing.Add }));
+        Assert.Contains("/FontFile", on);
+        Assert.Empty(missing);
+    }
+
+    [Fact]
+    public void SystemFontsDoNotReplaceStandardFontNames()
+    {
+        var text = Latin1(HtmlToPdf.Convert("<p style='font-family: Arial'>a</p>", new PdfOptions { Compress = false, UseSystemFonts = true }));
+        Assert.Contains("/BaseFont /Helvetica", text);
+        Assert.DoesNotContain("/FontFile", text);
+    }
 }

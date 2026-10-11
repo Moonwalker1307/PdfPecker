@@ -132,6 +132,7 @@ internal sealed class ComputedStyle
     public float BorderSpacingH = 1.5f, BorderSpacingV = 1.5f; // 2px
     public string? FontFamilyName;
     public FontResolver? Fonts; // the document's fonts; null when only the standard fonts exist
+    public MissingFontReport? MissingFonts; // set when PdfOptions.MissingFont is
     public CssVarScope? CustomProperties; // custom properties (--name), shared with the parent until changed
 
     // SVG presentation properties (inherited).
@@ -194,7 +195,13 @@ internal sealed class ComputedStyle
 
     private TextFont? _font;
 
-    public TextFont Font => _font ??= Fonts == null ? StandardFont.Get(FontFamily, Bold, Italic) : Fonts.Resolve(FontFamilyName, FontFamily, FontWeight, Italic);
+    public TextFont Font => _font ??= Fonts == null ? StandardFor() : Fonts.Resolve(FontFamilyName, FontFamily, FontWeight, Italic);
+
+    private TextFont StandardFor()
+    {
+        MissingFonts?.CheckStandardOnly(FontFamilyName);
+        return StandardFont.Get(FontFamily, Bold, Italic);
+    }
 
     /// <summary>The standard PDF font for this style, used where embedded fonts are not supported (SVG text).</summary>
     public StandardFont StandardFont => StandardFont.Get(FontFamily, Bold, Italic);

@@ -44,26 +44,32 @@ internal sealed class FontResolver
     private readonly Dictionary<(FontProgram, bool, bool, UnicodeRange?), EmbeddedFont> _fonts = new();
 
     private readonly bool _embedStandard;
+    private readonly Lazy<FontCollection.Snapshot>? _system; // the system font folders, scanned on first use
+    private readonly MissingFontReport? _report;
 
-    private FontResolver(FontCollection.Snapshot? collection, bool embedStandard)
+    private FontResolver(FontCollection.Snapshot? collection, bool embedStandard, Lazy<FontCollection.Snapshot>? system, MissingFontReport? report)
     {
         _collection = collection;
         _embedStandard = embedStandard;
+        _system = system;
+        _report = report;
     }
 
     /// <summary>
     /// Creates a resolver, or returns null when the document has no fonts beyond the standard ones and they need not be
     /// embedded. With <paramref name="embedStandard"/>, the standard fonts are replaced by the bundled Liberation fonts.
+    /// With <paramref name="systemFonts"/>, families found nowhere else are looked up in the system font folders.
     /// </summary>
     public static FontResolver? Create(List<List<Declaration>> fontFaceRules, FontCollection? collection, Func<string, byte[]?> fetch,
-        bool embedStandard = false)
+        bool embedStandard = false, bool systemFonts = false, MissingFontReport? report = null)
     {
         var snapshot = collection?.GetSnapshot();
         if (snapshot is { All.Count: 0 }) snapshot = null;
-        var r = new FontResolver(snapshot, embedStandard);
+        var system = systemFonts ? new Lazy<FontCollection.Snapshot>(() => FontCollection.Installed.GetSnapshot()) : null;
+        var r = new FontResolver(snapshot, embedStandard, system, report);
         foreach (var rule in fontFaceRules)
         {
-            var face = FromFontFaceRule(rule, fetch, snapshot);
+            var face = FromFontFaceRule(rule, fetch, snapshot, system);
             if (face == null) continue;
             if (!r._docFamilies.TryGetValue(face.Family, out var list))
             {
@@ -72,12 +78,13 @@ internal sealed class FontResolver
             }
             list.Add(face);
         }
-        return r._docFamilies.Count == 0 && snapshot == null && !embedStandard ? null : r;
+        return r._docFamilies.Count == 0 && snapshot == null && !embedStandard && !systemFonts ? null : r;
     }
 
     // ------------------------------------------------------------------ @font-face
 
-    private static FontFace? FromFontFaceRule(List<Declaration> decls, Func<string, byte[]?> fetch, FontCollection.Snapshot? collection)
+    private static FontFace? FromFontFaceRule(List<Declaration> decls, Func<string, byte[]?> fetch, FontCollection.Snapshot? collection,
+        Lazy<FontCollection.Snapshot>? system)
     {
         string? family = null, src = null;
         int wMin = 400, wMax = 400;
@@ -113,7 +120,7 @@ internal sealed class FontResolver
             {
                 try
                 {
-                    var p = LoadSource(item.Trim(), fetch, collection);
+                    var p = LoadSource(item.Trim(), fetch, collection, system);
                     if (p != null) return p;
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException || FontProgram.IsFormatError(ex))
@@ -126,7 +133,8 @@ internal sealed class FontResolver
         return new FontFace(family!, wMin, wMax, italic, range, program);
     }
 
-    private static FontProgram? LoadSource(string item, Func<string, byte[]?> fetch, FontCollection.Snapshot? collection)
+    private static FontProgram? LoadSource(string item, Func<string, byte[]?> fetch, FontCollection.Snapshot? collection,
+        Lazy<FontCollection.Snapshot>? system)
     {
         string? url = null, format = null, local = null;
         foreach (var tok in CssParser.Tokens(item))
@@ -138,10 +146,14 @@ internal sealed class FontResolver
         }
         if (local != null)
         {
-            if (collection == null) return null;
-            foreach (var f in collection.All)
-                if (string.Equals(f.FullName, local, StringComparison.OrdinalIgnoreCase) || string.Equals(f.PostScriptName, local, StringComparison.OrdinalIgnoreCase))
-                    return f.Program;
+            // local() names a font by its full or PostScript name: a registered font, else an installed one when allowed.
+            foreach (var faces in new[] { collection?.All, system?.Value.All })
+            {
+                if (faces == null) continue;
+                foreach (var f in faces)
+                    if (string.Equals(f.FullName, local, StringComparison.OrdinalIgnoreCase) || string.Equals(f.PostScriptName, local, StringComparison.OrdinalIgnoreCase))
+                        return f.Program;
+            }
             return null;
         }
         if (url == null) return null;
@@ -173,7 +185,7 @@ internal sealed class FontResolver
             ? (int)w : null;
     }
 
-    private static string Unquote(string s)
+    internal static string Unquote(string s)
     {
         s = s.Trim();
         if (s.Length >= 2 && (s[0] == '"' || s[0] == '\'') && s[^1] == s[0]) s = s.Substring(1, s.Length - 2);
@@ -200,6 +212,7 @@ internal sealed class FontResolver
                 var fonts = MatchFamily(name, weight, italic);
                 if (fonts.Count > 0) candidates.AddRange(fonts);
                 else if (StandardFamily(name) is FontFamily sf) candidates.Add(Standard(sf, bold, italic));
+                else if (candidates.Count == 0) _report?.Missing(name); // the text falls back to a later family
             }
         }
         var standard = Standard(generic, bold, italic);
@@ -246,7 +259,9 @@ internal sealed class FontResolver
         var key = (family.ToLowerInvariant(), weight, italic);
         if (_matched.TryGetValue(key, out var result)) return result;
         result = new List<EmbeddedFont>();
-        if (!_docFamilies.TryGetValue(family, out var faces) && (_collection == null || !_collection.ByFamily.TryGetValue(family, out faces)))
+        // Installed fonts are only looked up by name, and never for the names that mean a standard font.
+        if (!_docFamilies.TryGetValue(family, out var faces) && (_collection == null || !_collection.ByFamily.TryGetValue(family, out faces))
+            && (_system == null || StandardFamily(family) != null || !_system.Value.ByFamily.TryGetValue(family, out faces)))
         {
             _matched[key] = result;
             return result;
@@ -292,7 +307,7 @@ internal sealed class FontResolver
     }
 
     /// <summary>Family names that always mean a standard PDF font.</summary>
-    private static FontFamily? StandardFamily(string name) => name.ToLowerInvariant() switch
+    internal static FontFamily? StandardFamily(string name) => name.ToLowerInvariant() switch
     {
         "serif" or "times" or "times new roman" or "times-roman" or "ui-serif" => FontFamily.Times,
         "monospace" or "courier" or "courier new" or "ui-monospace" => FontFamily.Courier,

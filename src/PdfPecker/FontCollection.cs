@@ -62,7 +62,7 @@ public sealed class FontCollection
     {
         if (path == null) throw new ArgumentNullException(nameof(path));
         int added = 0;
-        var option = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+        var option = new EnumerationOptions { RecurseSubdirectories = recursive, IgnoreInaccessible = true, AttributesToSkip = 0 };
         foreach (var file in Directory.EnumerateFiles(path, "*", option))
         {
             var ext = Path.GetExtension(file).ToLowerInvariant();
@@ -89,6 +89,54 @@ public sealed class FontCollection
             }
         }
         return added;
+    }
+
+    private static readonly Lazy<FontCollection> SystemFonts = new(LoadSystemFonts);
+
+    /// <summary>The fonts installed on this machine, for <see cref="PdfOptions.UseSystemFonts"/>. Scanned once per process.</summary>
+    internal static FontCollection Installed => SystemFonts.Value;
+
+    private static FontCollection LoadSystemFonts()
+    {
+        var fonts = new FontCollection();
+        foreach (var dir in SystemFontDirectories())
+        {
+            try
+            {
+                if (Directory.Exists(dir)) fonts.AddDirectory(dir);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                // an unreadable folder just has no fonts for us
+            }
+        }
+        return fonts;
+    }
+
+    /// <summary>The folders where Windows, macOS and Linux keep installed fonts, for all users and the current one.</summary>
+    internal static IEnumerable<string> SystemFontDirectories()
+    {
+        string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (OperatingSystem.IsWindows())
+        {
+            yield return Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
+            yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "Windows", "Fonts");
+        }
+        else if (OperatingSystem.IsMacOS())
+        {
+            yield return "/System/Library/Fonts";
+            yield return "/Library/Fonts";
+            if (home.Length > 0) yield return Path.Combine(home, "Library", "Fonts");
+        }
+        else
+        {
+            yield return "/usr/share/fonts";
+            yield return "/usr/local/share/fonts";
+            var dataHome = Environment.GetEnvironmentVariable("XDG_DATA_HOME");
+            if (string.IsNullOrEmpty(dataHome) && home.Length > 0) dataHome = Path.Combine(home, ".local", "share");
+            if (!string.IsNullOrEmpty(dataHome)) yield return Path.Combine(dataHome, "fonts");
+            if (home.Length > 0) yield return Path.Combine(home, ".fonts");
+        }
     }
 
     private void AddFaces(FontProgram p, Func<FontProgram> load, string? familyName)
