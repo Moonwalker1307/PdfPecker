@@ -15,8 +15,8 @@
     <PackageId>PdfPecker</PackageId>
     <Version>0.1.0</Version>
     <Authors>Moonwalker1307</Authors>
-    <Description>Fast, dependency-free HTML to PDF converter for .NET. Its own HTML parser, CSS engine, layout engine and PDF writer: no browser, no native binaries, no third-party packages.</Description>
-    <PackageTags>html;pdf;html-to-pdf;converter;css;report</PackageTags>
+    <Description>Fast, dependency-free HTML and Markdown to PDF converter for .NET. Its own HTML parser, Markdown parser (CommonMark + GFM), CSS engine, layout engine and PDF writer: no browser, no native binaries, no third-party packages.</Description>
+    <PackageTags>html;pdf;html-to-pdf;markdown;markdown-to-pdf;markdown-to-html;commonmark;converter;css;report</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <Copyright>Copyright (c) 2026 Moonwalker1307</Copyright>
