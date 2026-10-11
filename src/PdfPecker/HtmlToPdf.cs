@@ -55,6 +55,8 @@ public static class HtmlToPdf
 
     internal static byte[] Render(string html, PdfOptions options, string? baseDirectory, CancellationToken cancellationToken = default)
     {
+        if (!(options.Scale >= 0.1f && options.Scale <= 2f))
+            throw new ArgumentOutOfRangeException(nameof(options), options.Scale, "PdfOptions.Scale must be between 0.1 and 2.");
         if (options.Conformance != PdfConformance.None && options.Security != null)
             throw new ArgumentException("PDF/A does not allow encryption: set PdfOptions.Conformance or PdfOptions.Security, not both.", nameof(options));
         if (options.Watermark is { } wm && string.IsNullOrEmpty(wm.Text) && wm.Image == null)
@@ -77,6 +79,15 @@ public static class HtmlToPdf
             MarginLeft = options.Margins.Left,
         };
         if (!options.IgnoreCssPageRules) ApplyPageRules(sheet.PageDeclarations, page);
+        if (options.Scale != 1)
+        {
+            // Lay the page out at its paper size divided by the scale, as Chrome's print scale does; the writer then
+            // draws it scaled, so the margins come out at their paper size again.
+            float s = options.Scale;
+            page.Scale = s;
+            page.Width /= s; page.Height /= s;
+            page.MarginTop /= s; page.MarginRight /= s; page.MarginBottom /= s; page.MarginLeft /= s;
+        }
         if (page.ContentWidth < 10 || page.ContentHeight < 10)
             throw new ArgumentException("The page margins leave no room for content.", nameof(options));
 

@@ -12,6 +12,11 @@ internal sealed class PageSetup
     public float Width, Height;
     public float MarginTop, MarginRight, MarginBottom, MarginLeft;
     public float BandTop, BandBottom; // space for running headers and footers at the top and bottom of the content area
+    /// <summary>
+    /// Size on paper of one layout point (PdfOptions.Scale). The other fields are in layout points, so the page is laid
+    /// out at its paper size divided by the scale and drawn scaled.
+    /// </summary>
+    public float Scale = 1;
     public float ContentWidth => Width - MarginLeft - MarginRight;
     public float ContentHeight => Height - MarginTop - MarginBottom;
     /// <summary>Height available to the flowing content on each page.</summary>
@@ -370,6 +375,12 @@ internal sealed class PdfDocumentWriter
             Cancellation.ThrowIfCancellationRequested();
             content.Clear();
             ResetState();
+            if (_page.Scale != 1)
+            {
+                // Num keeps 3 decimals, too few for a scale such as 0.99916.
+                string k = _page.Scale.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
+                content.Ascii("q ").Ascii(k).Ascii(" 0 0 ").Ascii(k).Ascii(" 0 0 cm\n");
+            }
             if (CssColor.IsVisible(pageBackground))
             {
                 SetFill(content, pageBackground);
@@ -397,6 +408,7 @@ internal sealed class PdfDocumentWriter
             }
             EndText(content);
             if (wm is { Behind: false }) content.Ascii("q /Wm Do Q\n");
+            if (_page.Scale != 1) content.Ascii("Q\n");
 
             var annotIds = new List<int>();
             foreach (var (lk, origin, pageTop) in pageLinks)
@@ -407,7 +419,7 @@ internal sealed class PdfDocumentWriter
             }
 
             Begin(pageIds[p]).Ascii("<< /Type /Page /Parent ").Int(pagesId).Ascii(" 0 R /MediaBox [0 0 ")
-                .Num(_page.Width).Sp().Num(_page.Height).Ascii("] /Resources ").Int(resourcesId).Ascii(" 0 R /Contents ")
+                .Num(_page.Width * _page.Scale).Sp().Num(_page.Height * _page.Scale).Ascii("] /Resources ").Int(resourcesId).Ascii(" 0 R /Contents ")
                 .Int(contentIds[p]).Ascii(" 0 R");
             if (annotIds.Count > 0)
             {
@@ -427,6 +439,8 @@ internal sealed class PdfDocumentWriter
             float x1 = _page.MarginLeft + link.X, x2 = x1 + link.W;
             float yTop = _page.Height - origin - (placed.Y0 - linkPageTop);
             float yBottom = yTop - (placed.Y1 - placed.Y0);
+            float k = _page.Scale;
+            x1 *= k; x2 *= k; yTop *= k; yBottom *= k;
             Begin(id).Ascii("<< /Type /Annot /Subtype /Link /Rect [").Num(x1).Sp().Num(yBottom).Sp().Num(x2).Sp().Num(yTop)
                 .Ascii("] /F 4 /Border [0 0 0] ");
             if (link.Target.StartsWith("#", StringComparison.Ordinal))
@@ -589,7 +603,7 @@ internal sealed class PdfDocumentWriter
         float h = _page.FlowHeight;
         int p = Math.Clamp((int)Math.Floor((y + 0.01f) / h), 0, _pageIds.Length - 1);
         float py = _page.Height - _page.MarginTop - _page.BandTop - (y - p * h);
-        _out.Ascii("[").Int(_pageIds[p]).Ascii(" 0 R /XYZ 0 ").Num(Math.Min(py, _page.Height)).Ascii(" null]");
+        _out.Ascii("[").Int(_pageIds[p]).Ascii(" 0 R /XYZ 0 ").Num(Math.Min(py, _page.Height) * _page.Scale).Ascii(" null]");
     }
 
     private void WriteStream(int id, ReadOnlySpan<byte> data, bool compress, string? extraDict)
@@ -777,7 +791,8 @@ internal sealed class PdfDocumentWriter
                 EndText(b);
                 SetFill(b, r.Color);
                 // Chrome paints boxes on whole CSS pixels: each edge rounds to the nearest pixel of the page.
-                float x0 = SnapPx(r.X), x1 = SnapPx(r.X + r.W);
+                // Text decorations only snap vertically.
+                float x0 = r.IsDecoration ? r.X : SnapPx(r.X), x1 = r.IsDecoration ? r.X + r.W : SnapPx(r.X + r.W);
                 float top = pageTop + SnapPx(placed.Y0 - pageTop), bottom = pageTop + SnapPx(placed.Y1 - pageTop);
                 if (x1 <= x0) { x0 = r.X; x1 = r.X + r.W; }
                 if (bottom <= top) { top = placed.Y0; bottom = placed.Y1; }
