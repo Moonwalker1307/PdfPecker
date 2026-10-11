@@ -51,6 +51,12 @@ internal sealed class PdfDocumentWriter
     /// <summary>Write a PDF/A file.</summary>
     public PdfConformance Conformance { get; init; }
 
+    /// <summary>Font for the watermark text. Default: Helvetica (bold when the watermark asks for it).</summary>
+    public TextFont? WatermarkFont { get; init; }
+
+    /// <summary>Font for <c>HeaderText</c> and <c>FooterText</c>. Default: Helvetica.</summary>
+    public TextFont? MarginFont { get; init; }
+
     private PdfEncryptor? _crypt;
 
     public PdfDocumentWriter(PageSetup page, bool compress, CompressionLevel level)
@@ -171,11 +177,16 @@ internal sealed class PdfDocumentWriter
                 }
             }
         bool hasMargins = footerTemplate != null || headerTemplate != null;
-        var marginFont = StandardFont.Get(FontFamily.Helvetica, false, false);
-        if (hasMargins) usedFonts[marginFont.Index] = true;
+        var marginFont = MarginFont ?? StandardFont.Get(FontFamily.Helvetica, false, false);
+        if (hasMargins)
+        {
+            // Page numbers are only known per page: collect every digit.
+            foreach (var template in new[] { headerTemplate, footerTemplate })
+                if (template != null) CollectFonts(new TextOp(0, 0, 0, marginFont, MarginTextSize, 0, template + "0123456789", 0, 0), usedFonts);
+        }
 
         var wm = Watermark;
-        StandardFont? wmFont = null;
+        (List<TextOp> Lines, float Cos, float Sin)? wmText = null;
         PdfImage? wmImage = null;
         if (wm != null)
         {
@@ -190,10 +201,10 @@ internal sealed class PdfDocumentWriter
             }
             if (!string.IsNullOrEmpty(wm.Text))
             {
-                wmFont = StandardFont.Get(FontFamily.Helvetica, wm.Bold, false);
-                usedFonts[wmFont.Index] = true;
+                wmText = LayoutWatermarkText(wm, WatermarkFont ?? StandardFont.Get(FontFamily.Helvetica, wm.Bold, false));
+                foreach (var line in wmText.Value.Lines) CollectFonts(line, usedFonts);
             }
-            if (wmFont == null && wmImage == null) wm = null;
+            if (wmText == null && wmImage == null) wm = null;
         }
 
         bool pdfa = Conformance != PdfConformance.None;
@@ -312,7 +323,14 @@ internal sealed class PdfDocumentWriter
             if (img.SMask != null) WriteImage(img.SMask);
         }
 
-        if (wm != null) WriteWatermark(watermarkId, wm, wmFont, wmFont != null ? fontIds[wmFont.Index] : 0, wmImage);
+        if (wm != null)
+        {
+            var fontDict = new ByteBuffer(128);
+            for (int i = 0; i < usedFonts.Length; i++)
+                if (usedFonts[i]) fontDict.Ascii(" /F").Int(i + 1).Sp().Int(fontIds[i]).Ascii(" 0 R");
+            for (int i = 0; i < _subsetList.Count; i++) fontDict.Ascii(" /E").Int(i + 1).Sp().Int(firstEmbeddedId + i * 5).Ascii(" 0 R");
+            WriteWatermark(watermarkId, wm, wmText, fontDict, wmImage);
+        }
 
         // Pages, contents, annotations.
         var content = new ByteBuffer(32 * 1024);
@@ -578,12 +596,47 @@ internal sealed class PdfDocumentWriter
         End();
     }
 
+    /// <summary>
+    /// The watermark text as one TextOp per line, centred on the origin of a rotated coordinate system whose
+    /// cosine and sine are returned; the form XObject moves that origin to the page centre.
+    /// </summary>
+    private (List<TextOp> Lines, float Cos, float Sin) LayoutWatermarkText(PdfWatermark wm, TextFont font)
+    {
+        float W = _page.Width, H = _page.Height;
+        var lines = wm.Text!.Replace("\r\n", "\n").Split('\n');
+        double a = (wm.Angle ?? Math.Atan2(H, W) * 180 / Math.PI) * Math.PI / 180;
+        float c = (float)Math.Cos(a), sn = (float)Math.Sin(a);
+        const float lead = 1.15f, cap = 0.72f;
+        int maxUnits = 1;
+        foreach (var line in lines) maxUnits = Math.Max(maxUnits, font.MeasureUnits(line, 0, line.Length));
+        float size = wm.FontSize;
+        if (size <= 0)
+        {
+            // As large as fits in 80% of the page with the text block rotated.
+            float tw = maxUnits / 1000f, th = lead * (lines.Length - 1) + cap;
+            float ac = Math.Abs(c), asn = Math.Abs(sn);
+            size = Math.Min(0.8f * W / (tw * ac + th * asn), 0.8f * H / (tw * asn + th * ac));
+            size = Math.Clamp(size, 4, 400);
+        }
+        uint color = CssColor.TryParse(wm.Color ?? "", CssColor.Black, out var parsed) ? parsed : 0xFF808080;
+        float blockH = size * (lead * (lines.Length - 1) + cap);
+        var ops = new List<TextOp>(lines.Length);
+        for (int i = 0; i < lines.Length; i++)
+        {
+            float xl = -font.Measure(lines[i], size) / 2;
+            float yl = blockH / 2 - cap * size - i * lead * size;
+            ops.Add(new TextOp(xl, yl, 0, font, size, color, lines[i], 0, 0));
+        }
+        return (ops, c, sn);
+    }
+
     /// <summary>The watermark as a form XObject covering the page, drawn by every page's content stream.</summary>
-    private void WriteWatermark(int id, PdfWatermark wm, StandardFont? font, int fontId, PdfImage? image)
+    private void WriteWatermark(int id, PdfWatermark wm, (List<TextOp> Lines, float Cos, float Sin)? text, ByteBuffer fontDict, PdfImage? image)
     {
         float W = _page.Width, H = _page.Height, cx = W / 2, cy = H / 2;
         float opacity = Math.Clamp(wm.Opacity, 0, 1);
         var b = new ByteBuffer(512);
+        ResetState();
         b.Ascii("q /Gw gs\n");
         if (image != null)
         {
@@ -595,34 +648,14 @@ internal sealed class PdfDocumentWriter
                 .Num(cx - iw * c / 2 + ih * sn / 2).Sp().Num(cy - iw * sn / 2 - ih * c / 2).Ascii(" cm /Iw Do\n");
             b.Ascii("Q q /Gw gs\n");
         }
-        if (font != null)
+        if (text is { } t)
         {
-            var lines = wm.Text!.Replace("\r\n", "\n").Split('\n');
-            double a = (wm.Angle ?? Math.Atan2(H, W) * 180 / Math.PI) * Math.PI / 180;
-            float c = (float)Math.Cos(a), sn = (float)Math.Sin(a);
-            const float lead = 1.15f, cap = 0.72f;
-            int maxUnits = 1;
-            foreach (var line in lines) maxUnits = Math.Max(maxUnits, font.MeasureUnits(line, 0, line.Length));
-            float size = wm.FontSize;
-            if (size <= 0)
+            b.Num(t.Cos).Sp().Num(t.Sin).Sp().Num(-t.Sin).Sp().Num(t.Cos).Sp().Num(cx).Sp().Num(cy).Ascii(" cm\nBT\n");
+            _fill = 0; // force the colour to be written
+            foreach (var line in t.Lines)
             {
-                // As large as fits in 80% of the page with the text block rotated.
-                float tw = maxUnits / 1000f, th = lead * (lines.Length - 1) + cap;
-                float ac = Math.Abs(c), asn = Math.Abs(sn);
-                size = Math.Min(0.8f * W / (tw * ac + th * asn), 0.8f * H / (tw * asn + th * ac));
-                size = Math.Clamp(size, 4, 400);
-            }
-            uint color = CssColor.TryParse(wm.Color ?? "", CssColor.Black, out var parsed) ? parsed : 0xFF808080;
-            WriteColor(b, color);
-            b.Ascii(" rg BT /Fw ").Num(size).Ascii(" Tf\n");
-            float blockH = size * (lead * (lines.Length - 1) + cap);
-            for (int i = 0; i < lines.Length; i++)
-            {
-                float xl = -font.Measure(lines[i], size) / 2;
-                float yl = blockH / 2 - cap * size - i * lead * size;
-                b.Num(c).Sp().Num(sn).Sp().Num(-sn).Sp().Num(c).Sp().Num(cx + xl * c - yl * sn).Sp().Num(cy + xl * sn + yl * c).Ascii(" Tm ");
-                WriteTextBytes(b, lines[i]);
-                b.Ascii(" Tj\n");
+                SetFill(b, line.Color);
+                WriteTextLine(b, line, line.X, line.Baseline);
             }
             b.Ascii("ET\n");
         }
@@ -631,7 +664,7 @@ internal sealed class PdfDocumentWriter
         var dict = new ByteBuffer(256);
         dict.Ascii("/Type /XObject /Subtype /Form /BBox [0 0 ").Num(W).Sp().Num(H).Ascii("] /Resources << /ExtGState << /Gw << /Type /ExtGState /ca ")
             .Num(opacity).Ascii(" /CA ").Num(opacity).Ascii(" >> >>");
-        if (font != null) dict.Ascii(" /Font << /Fw ").Int(fontId).Ascii(" 0 R >>");
+        if (text != null) dict.Ascii(" /Font <<").Bytes(fontDict.Span).Ascii(" >>");
         if (image != null) dict.Ascii(" /XObject << /Iw ").Int(image.ObjectNumber).Ascii(" 0 R >>");
         dict.Ascii(" >>");
         WriteStream(id, b.Span, _compress, System.Text.Encoding.ASCII.GetString(dict.Span));
@@ -700,20 +733,7 @@ internal sealed class PdfDocumentWriter
                 if (_tw != t.WordSpacing) { _tw = t.WordSpacing; b.Num(t.WordSpacing).Ascii(" Tw\n"); }
                 if (_tc != t.CharSpacing) { _tc = t.CharSpacing; b.Num(t.CharSpacing).Ascii(" Tc\n"); }
                 float y = PY(t.Baseline, pageTop);
-                if (t.Font is StandardFont sf)
-                {
-                    WriteStandardRun(b, sf, t, 0, t.Text.Length, PX(t.X), y);
-                    break;
-                }
-                _runs.Clear();
-                t.Font.Split(t.Text, _runs);
-                float x = PX(t.X);
-                foreach (var run in _runs)
-                {
-                    if (run.Font is EmbeddedFont ef) WriteEmbeddedRun(b, ef, t, run.Start, run.Length, x, y);
-                    else WriteStandardRun(b, (StandardFont)run.Font, t, run.Start, run.Length, x, y);
-                    x += RunAdvance(run.Font, t, run.Start, run.Length);
-                }
+                WriteTextLine(b, t, PX(t.X), y);
                 break;
             }
             case RectOp r:
@@ -917,6 +937,24 @@ internal sealed class PdfDocumentWriter
         }
     }
 
+    /// <summary>Shows a text op starting at (x, y), one run per concrete font.</summary>
+    private void WriteTextLine(ByteBuffer b, TextOp t, float x, float y)
+    {
+        if (t.Font is StandardFont sf)
+        {
+            WriteStandardRun(b, sf, t, 0, t.Text.Length, x, y);
+            return;
+        }
+        _runs.Clear();
+        t.Font.Split(t.Text, _runs);
+        foreach (var run in _runs)
+        {
+            if (run.Font is EmbeddedFont ef) WriteEmbeddedRun(b, ef, t, run.Start, run.Length, x, y);
+            else WriteStandardRun(b, (StandardFont)run.Font, t, run.Start, run.Length, x, y);
+            x += RunAdvance(run.Font, t, run.Start, run.Length);
+        }
+    }
+
     private GlyphSubset Subset(FontProgram program)
     {
         if (!_subsets.TryGetValue(program, out var s))
@@ -1079,22 +1117,23 @@ internal sealed class PdfDocumentWriter
         WriteStream(id + 4, cmap.Span, _compress, extraDict: null);
     }
 
-    private void WriteMarginText(ByteBuffer b, StandardFont font, string template, int page, int pages, bool top)
+    private const float MarginTextSize = 9f;
+
+    private void WriteMarginText(ByteBuffer b, TextFont font, string template, int page, int pages, bool top)
     {
         string text = template.Replace("{page}", page.ToString(System.Globalization.CultureInfo.InvariantCulture))
                               .Replace("{pages}", pages.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        const float size = 9f;
+        const float size = MarginTextSize;
         float w = font.Measure(text, size);
         float x = (_page.Width - w) / 2;
         float marginH = top ? _page.MarginTop : _page.MarginBottom;
         float y = top ? _page.Height - marginH / 2 - size / 3 : marginH / 2 - size / 3;
-        if (_tr != 0) { _tr = 0; b.Ascii("0 Tr "); }
-        b.Ascii("BT 0.4 0.4 0.4 rg /F").Int(font.Index + 1).Sp().Num(size).Ascii(" Tf 0 Tw 0 Tc 1 0 0 1 ").Num(x).Sp().Num(y).Ascii(" Tm ");
-        WriteTextBytes(b, text);
-        b.Ascii(" Tj ET\n");
-        _fill = 0xFF666666;
-        _tw = 0;
-        _tc = 0;
+        b.Ascii("BT\n");
+        if (_tw != 0) { _tw = 0; b.Ascii("0 Tw\n"); }
+        if (_tc != 0) { _tc = 0; b.Ascii("0 Tc\n"); }
+        SetFill(b, 0xFF666666);
+        WriteTextLine(b, new TextOp(0, 0, 0, font, size, 0xFF666666, text, 0, 0), x, y);
+        b.Ascii("ET\n");
     }
 
     private static void WriteTextBytes(ByteBuffer b, string text)
