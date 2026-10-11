@@ -1,0 +1,83 @@
+name: NuGet package
+
+on:
+  pull_request:
+    paths:
+      - src/**
+      - tests/**
+      - samples/**
+      - bench/**
+      - tools/**
+      - README.md
+      - THIRD-PARTY-NOTICES.md
+      - PdfPecker.sln
+      - .github/workflows/nuget.yml
+  push:
+    branches: [main]
+    paths:
+      - src/**
+      - tests/**
+      - samples/**
+      - bench/**
+      - tools/**
+      - README.md
+      - THIRD-PARTY-NOTICES.md
+      - PdfPecker.sln
+      - .github/workflows/nuget.yml
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  VERSION_PREFIX: "1.0"
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Compute version
+        id: version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "release" ]; then
+            version="${TAG#v}"
+            if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+              echo "::error::Release tag '$TAG' is not a version like v1.2.3 or 1.2.3-beta"
+              exit 1
+            fi
+          else
+            version="$VERSION_PREFIX.$GITHUB_RUN_NUMBER-preview"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Version: $version" >> "$GITHUB_STEP_SUMMARY"
+
+      - run: dotnet build -c Release -p:Version=${{ steps.version.outputs.version }}
+      - run: dotnet test -c Release --no-build
+      - run: dotnet pack src/PdfPecker -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PdfPecker.${{ steps.version.outputs.version }}.nupkg
+          path: artifacts/*.nupkg
+
+      - name: Attach package to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" artifacts/*.nupkg --clobber
