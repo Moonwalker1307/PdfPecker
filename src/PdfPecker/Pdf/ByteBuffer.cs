@@ -85,6 +85,22 @@ internal sealed class ByteBuffer
         return this;
     }
 
+    /// <summary>Writes a number with up to 6 decimals, for matrix coefficients and function bounds.</summary>
+    public ByteBuffer Num6(float f)
+    {
+        long scaled = (long)Math.Round(f * 1000000.0);
+        if (scaled % 1000 == 0) return Num(f);
+        if (scaled < 0) { Byte((byte)'-'); scaled = -scaled; }
+        Int(scaled / 1000000);
+        Byte((byte)'.');
+        int frac = (int)(scaled % 1000000);
+        int digits = 6;
+        while (frac % 10 == 0) { frac /= 10; digits--; }
+        Span<byte> tmp = stackalloc byte[6];
+        for (int i = digits - 1; i >= 0; i--) { tmp[i] = (byte)('0' + frac % 10); frac /= 10; }
+        return Bytes(tmp.Slice(0, digits));
+    }
+
     public ByteBuffer Sp() => Byte((byte)' ');
     public ByteBuffer Nl() => Byte((byte)'\n');
 
