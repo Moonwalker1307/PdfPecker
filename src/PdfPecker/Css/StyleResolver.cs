@@ -46,11 +46,18 @@ internal sealed class StyleResolver
 
     private readonly RuleIndex _author;
     private float _rootFontSize = 12f;
+    private readonly float _vw, _vh; // 1vw and 1vh in points
+    private readonly List<Declaration> _expanded = new();
+    private readonly List<KeyValuePair<string, string>> _custom = new();
+
+    /// <summary>True once a declaration with vh, vmin or vmax units has been applied.</summary>
+    public bool UsedViewportHeight { get; private set; }
 
     private long[] _keys = new long[64];
     private Declaration[] _decls = new Declaration[64];
     private int _count;
     private readonly List<Declaration> _scratch = new();
+    private readonly bool _hasCustomProperties;
     private readonly Dictionary<string, List<Declaration>> _inlineCache = new(StringComparer.Ordinal);
     private readonly Dictionary<(string, string), Declaration> _hintCache = new();
     private readonly Dictionary<StyleKey, ComputedStyle> _styleCache = new();
@@ -95,12 +102,28 @@ internal sealed class StyleResolver
         public override int GetHashCode() => _hash;
     }
 
-    public StyleResolver(Stylesheet authorSheet) => _author = new RuleIndex(authorSheet);
+    /// <param name="authorSheet">The document's style rules.</param>
+    /// <param name="viewportWidth">Width in points that 100vw refers to: the page's content width.</param>
+    /// <param name="viewportHeight">Height in points that 100vh refers to: the page's content height.</param>
+    public StyleResolver(Stylesheet authorSheet, float viewportWidth = 595.28f, float viewportHeight = 841.89f)
+    {
+        _author = new RuleIndex(authorSheet);
+        _hasCustomProperties = authorSheet.Rules.Any(r => r.Declarations.Any(d => d.Property.StartsWith("--", StringComparison.Ordinal)));
+        _vw = viewportWidth / 100f;
+        _vh = viewportHeight / 100f;
+    }
 
     public void ResolveTree(Element document, ComputedStyle rootStyle)
     {
         document.Style = rootStyle;
         Prepare(document);
+        // Fragments without an <html> element: custom properties declared on :root or html still apply.
+        if (_hasCustomProperties && !document.Children.Any(c => c is Element { Name: "html" }))
+        {
+            var html = new Element("html") { Parent = document, ElementIndex = 1, ElementSiblingCount = 1 };
+            Resolve(html, rootStyle);
+            rootStyle.CustomProperties = html.Style.CustomProperties;
+        }
         ResolveChildren(document);
     }
 
@@ -168,12 +191,19 @@ internal sealed class StyleResolver
 
         var s = parent.CreateChild();
 
-        // font-size first: em-based lengths in every other property depend on it.
+        // Custom properties first: any other declaration may reference them.
+        _custom.Clear();
+        for (int i = 0; i < _count; i++)
+            if (_decls[i].Property.StartsWith("--", StringComparison.Ordinal)) _custom.Add(new(_decls[i].Property, _decls[i].Value));
+        if (_custom.Count > 0) s.CustomProperties = CssVariables.Compute(parent.CustomProperties, _custom);
+
+        // font-size next: em-based lengths in every other property depend on it.
         for (int i = _count - 1; i >= 0; i--)
         {
             if (_decls[i].Property == "font-size")
             {
-                ApplyFontSize(s, parent, _decls[i].Value);
+                var fs = Substituted(_decls[i].Value, s);
+                if (fs != null) ApplyFontSize(s, parent, fs);
                 break;
             }
         }
@@ -182,7 +212,23 @@ internal sealed class StyleResolver
         for (int i = 0; i < _count; i++)
         {
             var d = _decls[i];
-            if (d.Property != "font-size") Apply(s, parent, d.Property, d.Value);
+            if (!UsedViewportHeight && HasViewportHeightUnit(d.Value)) UsedViewportHeight = true;
+            if (d.Property == "font-size" || d.Property.StartsWith("--", StringComparison.Ordinal)) continue;
+            if (!CssParser.HasVar(d.Value))
+            {
+                Apply(s, parent, d.Property, d.Value);
+                continue;
+            }
+            // var(): substitute, then expand shorthands now that the value is known.
+            var value = CssVariables.Substitute(d.Value, s.CustomProperties);
+            if (value == null) continue; // invalid at computed-value time
+            _expanded.Clear();
+            CssParser.Expand(d.Property, value, d.Important, _expanded);
+            foreach (var x in _expanded)
+            {
+                if (x.Property == "font-size") ApplyFontSize(s, parent, x.Value);
+                else Apply(s, parent, x.Property, x.Value);
+            }
         }
 
         if (s.Floated && s.Display == Display.Inline) s.Display = Display.Block;
@@ -191,6 +237,13 @@ internal sealed class StyleResolver
         _styleCache[_probe.Freeze()] = s;
         Array.Clear(_decls, 0, _count);
     }
+
+    private static bool HasViewportHeightUnit(string v)
+        => v.IndexOf("vh", StringComparison.OrdinalIgnoreCase) >= 0 || v.IndexOf("vmin", StringComparison.OrdinalIgnoreCase) >= 0
+           || v.IndexOf("vmax", StringComparison.OrdinalIgnoreCase) >= 0 || v.IndexOf("var(", StringComparison.OrdinalIgnoreCase) >= 0;
+
+    private static string? Substituted(string value, ComputedStyle s)
+        => CssParser.HasVar(value) ? CssVariables.Substitute(value, s.CustomProperties) : value;
 
     private void Collect(RuleIndex index, Element e, long tier, long importantTier)
     {
@@ -234,6 +287,12 @@ internal sealed class StyleResolver
         if (e.Attributes.Count == 0 && e.Name != "td" && e.Name != "th") return;
         _scratch.Clear();
         string? v;
+        if (IsSvgElement(e))
+        {
+            SvgHints(e);
+            for (int i = 0; i < _scratch.Count; i++) Push(TierHint, 0, 0, i, _scratch[i]);
+            return;
+        }
         switch (e.Name)
         {
             case "img":
@@ -317,6 +376,37 @@ internal sealed class StyleResolver
         for (int i = 0; i < _scratch.Count; i++) Push(TierHint, 0, 0, i, _scratch[i]);
     }
 
+    private static readonly HashSet<string> SvgPresentationAttributes = new(StringComparer.Ordinal)
+    {
+        "fill", "stroke", "stroke-width", "fill-opacity", "stroke-opacity", "fill-rule", "stroke-linecap", "stroke-linejoin",
+        "stroke-miterlimit", "opacity", "display", "visibility", "color",
+    };
+
+    /// <summary>True for &lt;svg&gt; and the elements inside it.</summary>
+    internal static bool IsSvgElement(Element e)
+    {
+        if (e.Name == "svg") return true;
+        for (var p = e.Parent; p != null; p = p.Parent)
+            if (p.Name == "svg") return true;
+        return false;
+    }
+
+    private void SvgHints(Element e)
+    {
+        foreach (var (name, value) in e.Attributes)
+        {
+            if (SvgPresentationAttributes.Contains(name)) Hint(name, value);
+            else if (e.Name == "svg" && name is "width" or "height" && e.Parent?.Name != "svg") Hint(name, SvgLength(value));
+        }
+    }
+
+    private static string SvgLength(string v)
+    {
+        v = v.Trim();
+        // Plain numbers are pixels; values with units or percentages are CSS lengths.
+        return float.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out _) ? v + "px" : v.ToLowerInvariant();
+    }
+
     private void AlignHint(string? align, bool block)
     {
         if (align == null) return;
@@ -379,7 +469,7 @@ internal sealed class StyleResolver
             case "inherit": s.FontSize = parent.FontSize; return;
             case "initial": s.FontSize = 12; return;
             default:
-                if (TryParseLength(v, parent.FontSize, _rootFontSize, out var len) && !len.IsAuto)
+                if (TryParseLength(v, parent.FontSize, _rootFontSize, out var len, _vw, _vh) && !len.IsAuto)
                     s.FontSize = Math.Max(0, len.Resolve(parent.FontSize));
                 return;
         }
@@ -398,9 +488,13 @@ internal sealed class StyleResolver
             case "display":
                 s.Display = lower switch
                 {
-                    "block" or "flow-root" or "flex" or "grid" => Display.Block,
+                    "block" or "flow-root" => Display.Block,
+                    "flex" or "block flex" => Display.Flex,
+                    "grid" or "block grid" => Display.Grid,
+                    "inline-flex" or "inline flex" => Display.InlineFlex,
+                    "inline-grid" or "inline grid" => Display.InlineGrid,
                     "inline" or "contents" => Display.Inline,
-                    "inline-block" or "inline-flex" or "inline-grid" => Display.InlineBlock,
+                    "inline-block" => Display.InlineBlock,
                     "list-item" => Display.ListItem,
                     "table" or "inline-table" => Display.Table,
                     "table-row" => Display.TableRow,
@@ -450,7 +544,7 @@ internal sealed class StyleResolver
                     s.LineHeightKind = LineHeightKind.Factor;
                     s.LineHeightValue = factor;
                 }
-                else if (TryParseLength(lower, em, _rootFontSize, out var lh) && !lh.IsAuto)
+                else if (TryParseLength(lower, em, _rootFontSize, out var lh, _vw, _vh) && !lh.IsAuto)
                 {
                     s.LineHeightKind = LineHeightKind.Absolute;
                     s.LineHeightValue = lh.Resolve(em);
@@ -492,15 +586,15 @@ internal sealed class StyleResolver
                 };
                 break;
             case "text-indent":
-                if (TryParseLength(lower, em, _rootFontSize, out var ti)) s.TextIndent = ti.IsPercent ? 0 : ti.Resolve(0);
+                if (TryParseLength(lower, em, _rootFontSize, out var ti, _vw, _vh)) s.TextIndent = ti.IsPercent ? 0 : ti.Resolve(0);
                 break;
             case "letter-spacing":
                 if (lower == "normal") s.LetterSpacing = 0;
-                else if (TryParseLength(lower, em, _rootFontSize, out var ls)) s.LetterSpacing = ls.Resolve(0);
+                else if (TryParseLength(lower, em, _rootFontSize, out var ls, _vw, _vh)) s.LetterSpacing = ls.Resolve(0);
                 break;
             case "word-spacing":
                 if (lower == "normal") s.WordSpacing = 0;
-                else if (TryParseLength(lower, em, _rootFontSize, out var ws)) s.WordSpacing = ws.Resolve(0);
+                else if (TryParseLength(lower, em, _rootFontSize, out var ws, _vw, _vh)) s.WordSpacing = ws.Resolve(0);
                 break;
             case "white-space":
                 s.WhiteSpace = lower switch
@@ -556,10 +650,10 @@ internal sealed class StyleResolver
                 s.BorderCollapse = lower == "collapse";
                 break;
             case "border-spacing-h":
-                if (TryParseLength(lower, em, _rootFontSize, out var bsh)) s.BorderSpacingH = bsh.Resolve(0);
+                if (TryParseLength(lower, em, _rootFontSize, out var bsh, _vw, _vh)) s.BorderSpacingH = bsh.Resolve(0);
                 break;
             case "border-spacing-v":
-                if (TryParseLength(lower, em, _rootFontSize, out var bsv)) s.BorderSpacingV = bsv.Resolve(0);
+                if (TryParseLength(lower, em, _rootFontSize, out var bsv, _vw, _vh)) s.BorderSpacingV = bsv.Resolve(0);
                 break;
             case "box-sizing":
                 s.BorderBox = lower == "border-box";
@@ -595,6 +689,113 @@ internal sealed class StyleResolver
             case "max-width": SetLength(ref s.MaxWidth, lower == "none" ? "auto" : lower, em, null); break;
             case "max-height": SetLength(ref s.MaxHeight, lower == "none" ? "auto" : lower, em, null); break;
 
+            case "opacity":
+                if (TryParseNumberOrPercent(lower, out float op)) s.Opacity = Math.Clamp(op, 0, 1);
+                break;
+
+            // ---- flexbox, grid, multi-column
+            case "flex-direction":
+                s.FlexDirection = lower switch
+                {
+                    "row" => FlexDirection.Row,
+                    "row-reverse" => FlexDirection.RowReverse,
+                    "column" => FlexDirection.Column,
+                    "column-reverse" => FlexDirection.ColumnReverse,
+                    _ => s.FlexDirection,
+                };
+                break;
+            case "flex-wrap":
+                s.FlexWrap = lower switch { "nowrap" => FlexWrap.NoWrap, "wrap" => FlexWrap.Wrap, "wrap-reverse" => FlexWrap.WrapReverse, _ => s.FlexWrap };
+                break;
+            case "flex-grow":
+                if (float.TryParse(lower, NumberStyles.Float, CultureInfo.InvariantCulture, out float fg) && fg >= 0) s.FlexGrow = fg;
+                break;
+            case "flex-shrink":
+                if (float.TryParse(lower, NumberStyles.Float, CultureInfo.InvariantCulture, out float fsh) && fsh >= 0) s.FlexShrink = fsh;
+                break;
+            case "flex-basis":
+                if (lower is "content" or "auto" or "max-content" or "min-content" or "fit-content") s.FlexBasis = Length.Auto;
+                else SetLength(ref s.FlexBasis, lower, em, null);
+                break;
+            case "order":
+                if (int.TryParse(lower, out int order)) s.Order = order;
+                break;
+            case "justify-content": s.JustifyContent = ParseAlign(lower, s.JustifyContent); break;
+            case "align-items": s.AlignItems = ParseAlign(lower, s.AlignItems); break;
+            case "align-content": s.AlignContent = ParseAlign(lower, s.AlignContent); break;
+            case "justify-items": s.JustifyItems = ParseAlign(lower, s.JustifyItems); break;
+            case "align-self": s.AlignSelf = ParseAlign(lower, s.AlignSelf); break;
+            case "justify-self": s.JustifySelf = ParseAlign(lower, s.JustifySelf); break;
+            case "row-gap":
+            case "column-gap":
+            {
+                Length? gap = null;
+                if (lower != "normal")
+                {
+                    if (!TryParseLength(lower, em, _rootFontSize, out var gl, _vw, _vh) || gl.IsAuto) break;
+                    gap = gl;
+                }
+                if (prop == "row-gap") s.RowGap = gap;
+                else s.ColumnGap = gap;
+                break;
+            }
+            case "grid-template-columns":
+                s.GridTemplateColumns = lower == "none" ? null : ParseTrackList(lower, em);
+                break;
+            case "grid-template-rows":
+                s.GridTemplateRows = lower == "none" ? null : ParseTrackList(lower, em);
+                break;
+            case "grid-auto-columns":
+                s.GridAutoColumns = ParseTrackList(lower, em)?.Before is { Length: > 0 } ac ? ac : null;
+                break;
+            case "grid-auto-rows":
+                s.GridAutoRows = ParseTrackList(lower, em)?.Before is { Length: > 0 } ar ? ar : null;
+                break;
+            case "grid-auto-flow":
+                s.GridAutoFlowColumn = lower.Contains("column");
+                break;
+            case "grid-column-start": s.GridColumnStart = ParseGridLine(lower); break;
+            case "grid-column-end": s.GridColumnEnd = ParseGridLine(lower); break;
+            case "grid-row-start": s.GridRowStart = ParseGridLine(lower); break;
+            case "grid-row-end": s.GridRowEnd = ParseGridLine(lower); break;
+            case "column-count":
+                s.ColumnCount = int.TryParse(lower, out int cc) && cc > 0 ? Math.Min(cc, 100) : 0;
+                break;
+            case "column-width":
+                SetLength(ref s.ColumnWidth, lower, em, null);
+                if (s.ColumnWidth.IsPercent) s.ColumnWidth = Length.Auto;
+                break;
+
+            // ---- SVG presentation properties
+            case "fill":
+                ParsePaint(v, s, inherit ? parent.SvgFill : null, inherit ? parent.SvgFillUrl : null, inherit, out s.SvgFill, out s.SvgFillUrl, s.SvgFill, s.SvgFillUrl);
+                break;
+            case "stroke":
+                ParsePaint(v, s, inherit ? parent.SvgStroke : null, inherit ? parent.SvgStrokeUrl : null, inherit, out s.SvgStroke, out s.SvgStrokeUrl, s.SvgStroke, s.SvgStrokeUrl);
+                break;
+            case "stroke-width":
+                if (float.TryParse(lower, NumberStyles.Float, CultureInfo.InvariantCulture, out float sw)) s.SvgStrokeWidth = Math.Max(0, sw);
+                else if (TryParseLength(lower, em, _rootFontSize, out var swl, _vw, _vh) && !swl.IsAuto && !swl.IsPercent) s.SvgStrokeWidth = Math.Max(0, swl.Value / 0.75f);
+                break;
+            case "fill-opacity":
+                if (TryParseNumberOrPercent(lower, out float fo)) s.SvgFillOpacity = Math.Clamp(fo, 0, 1);
+                break;
+            case "stroke-opacity":
+                if (TryParseNumberOrPercent(lower, out float so)) s.SvgStrokeOpacity = Math.Clamp(so, 0, 1);
+                break;
+            case "fill-rule":
+                s.SvgEvenOdd = lower == "evenodd";
+                break;
+            case "stroke-linecap":
+                s.SvgLineCap = lower switch { "round" => SvgLineCap.Round, "square" => SvgLineCap.Square, "butt" => SvgLineCap.Butt, _ => s.SvgLineCap };
+                break;
+            case "stroke-linejoin":
+                s.SvgLineJoin = lower switch { "round" => SvgLineJoin.Round, "bevel" => SvgLineJoin.Bevel, "miter" or "miter-clip" or "arcs" => SvgLineJoin.Miter, _ => s.SvgLineJoin };
+                break;
+            case "stroke-miterlimit":
+                if (float.TryParse(lower, NumberStyles.Float, CultureInfo.InvariantCulture, out float ml) && ml >= 1) s.SvgMiterLimit = ml;
+                break;
+
             case "border-top-width": s.BorderTopWidth = BorderWidth(lower, em, s.BorderTopWidth); break;
             case "border-right-width": s.BorderRightWidth = BorderWidth(lower, em, s.BorderRightWidth); break;
             case "border-bottom-width": s.BorderBottomWidth = BorderWidth(lower, em, s.BorderBottomWidth); break;
@@ -610,10 +811,168 @@ internal sealed class StyleResolver
         }
     }
 
+    private static bool TryParseNumberOrPercent(string lower, out float value)
+    {
+        if (lower.EndsWith("%", StringComparison.Ordinal))
+        {
+            bool ok = float.TryParse(lower.AsSpan(0, lower.Length - 1), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+            value /= 100f;
+            return ok;
+        }
+        return float.TryParse(lower, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+    }
+
+    private static BoxAlign ParseAlign(string lower, BoxAlign current)
+    {
+        // Drop overflow and baseline-position modifiers: "safe center", "first baseline".
+        var t = lower;
+        foreach (var prefix in new[] { "safe ", "unsafe ", "first ", "last ", "legacy " })
+            if (t.StartsWith(prefix, StringComparison.Ordinal)) t = t.Substring(prefix.Length).Trim();
+        return t switch
+        {
+            "normal" => BoxAlign.Normal,
+            "auto" => BoxAlign.Auto,
+            "start" or "flex-start" or "self-start" or "left" => BoxAlign.Start,
+            "end" or "flex-end" or "self-end" or "right" => BoxAlign.End,
+            "center" => BoxAlign.Center,
+            "stretch" => BoxAlign.Stretch,
+            "baseline" => BoxAlign.Baseline,
+            "space-between" => BoxAlign.SpaceBetween,
+            "space-around" => BoxAlign.SpaceAround,
+            "space-evenly" => BoxAlign.SpaceEvenly,
+            _ => current,
+        };
+    }
+
+    private static GridLine ParseGridLine(string lower)
+    {
+        var t = CssParser.Tokens(lower);
+        if (t.Count == 0 || t[0] == "auto") return default;
+        if (t[0] == "span")
+            return new GridLine(0, t.Count > 1 && int.TryParse(t[1], out int sp) && sp > 0 ? Math.Min(sp, 1000) : 1);
+        if (int.TryParse(t[0], out int line) && line != 0) return new GridLine(Math.Clamp(line, -1000, 1000), 0);
+        return default; // named lines are not supported
+    }
+
+    /// <summary>Parses a grid track list: lengths, percentages, fr, auto, min-content, max-content, minmax(), fit-content() and repeat().</summary>
+    private TrackList? ParseTrackList(string lower, float em)
+    {
+        var list = new TrackList();
+        var before = new List<Track>();
+        var after = new List<Track>();
+        var current = before;
+        foreach (var tok in CssParser.Tokens(lower))
+        {
+            if (tok.StartsWith("[", StringComparison.Ordinal)) continue; // line names
+            if (tok.StartsWith("repeat(", StringComparison.Ordinal) && tok.EndsWith(")", StringComparison.Ordinal))
+            {
+                var inner = tok.Substring(7, tok.Length - 8);
+                int comma = inner.IndexOf(',');
+                if (comma < 0) return null;
+                var countText = inner.Substring(0, comma).Trim();
+                var tracks = new List<Track>();
+                foreach (var rt in CssParser.Tokens(inner.Substring(comma + 1).Trim()))
+                {
+                    if (rt.StartsWith("[", StringComparison.Ordinal)) continue;
+                    if (!TryParseTrack(rt, em, out var tr)) return null;
+                    tracks.Add(tr);
+                }
+                if (tracks.Count == 0) return null;
+                if (countText is "auto-fill" or "auto-fit")
+                {
+                    if (list.AutoRepeat != null) return null;
+                    list.AutoRepeat = tracks.ToArray();
+                    list.AutoFit = countText == "auto-fit";
+                    current = after;
+                    continue;
+                }
+                if (!int.TryParse(countText, out int count) || count <= 0) return null;
+                for (int k = 0; k < Math.Min(count, 1000); k++) current.AddRange(tracks);
+                continue;
+            }
+            if (!TryParseTrack(tok, em, out var t)) return null;
+            current.Add(t);
+        }
+        list.Before = before.ToArray();
+        list.After = after.ToArray();
+        return list.Before.Length + list.After.Length > 0 || list.AutoRepeat != null ? list : null;
+    }
+
+    private bool TryParseTrack(string tok, float em, out Track track)
+    {
+        track = default;
+        if (tok.StartsWith("minmax(", StringComparison.Ordinal) && tok.EndsWith(")", StringComparison.Ordinal))
+        {
+            var parts = CssParser.SplitTopLevel(tok.Substring(7, tok.Length - 8), ',');
+            if (parts.Count != 2 || !TryParseTrackSize(parts[0].Trim(), em, out var min) || !TryParseTrackSize(parts[1].Trim(), em, out var max)) return false;
+            if (min.Kind == TrackSizeKind.Fr) min = new TrackSize(TrackSizeKind.Auto);
+            track = new Track(min, max);
+            return true;
+        }
+        if (tok.StartsWith("fit-content(", StringComparison.Ordinal) && tok.EndsWith(")", StringComparison.Ordinal))
+        {
+            // Approximated as minmax(auto, max-content) capped later by the track's available space.
+            track = new Track(new TrackSize(TrackSizeKind.Auto), new TrackSize(TrackSizeKind.MaxContent));
+            return true;
+        }
+        if (!TryParseTrackSize(tok, em, out var size)) return false;
+        track = size.Kind == TrackSizeKind.Fr ? new Track(new TrackSize(TrackSizeKind.Auto), size) : new Track(size, size);
+        return true;
+    }
+
+    private bool TryParseTrackSize(string tok, float em, out TrackSize size)
+    {
+        size = default;
+        switch (tok)
+        {
+            case "auto": size = new TrackSize(TrackSizeKind.Auto); return true;
+            case "min-content": size = new TrackSize(TrackSizeKind.MinContent); return true;
+            case "max-content": size = new TrackSize(TrackSizeKind.MaxContent); return true;
+        }
+        if (tok.EndsWith("fr", StringComparison.Ordinal))
+        {
+            if (!float.TryParse(tok.AsSpan(0, tok.Length - 2), NumberStyles.Float, CultureInfo.InvariantCulture, out float fr) || fr < 0) return false;
+            size = new TrackSize(TrackSizeKind.Fr, fr);
+            return true;
+        }
+        if (!TryParseLength(tok, em, _rootFontSize, out var len, _vw, _vh) || len.IsAuto) return false;
+        size = len.IsPercent ? new TrackSize(TrackSizeKind.Percent, len.Value) : new TrackSize(TrackSizeKind.Fixed, Math.Max(0, len.Value));
+        return true;
+    }
+
+    private static void ParsePaint(string v, ComputedStyle s, uint? inheritedColor, string? inheritedUrl, bool inherit,
+        out uint? color, out string? url, uint? currentColor, string? currentUrl)
+    {
+        if (inherit) { color = inheritedColor; url = inheritedUrl; return; }
+        var t = v.Trim();
+        if (t.Equals("none", StringComparison.OrdinalIgnoreCase) || t.Equals("transparent", StringComparison.OrdinalIgnoreCase))
+        {
+            color = null;
+            url = null;
+            return;
+        }
+        if (t.StartsWith("url(", StringComparison.OrdinalIgnoreCase))
+        {
+            int close = t.IndexOf(')');
+            url = close > 4 ? t.Substring(4, close - 4).Trim().Trim('"', '\'') : null;
+            var fallback = close >= 0 ? t.Substring(close + 1).Trim() : "";
+            color = fallback.Length > 0 && CssColor.TryParse(fallback, s.Color, out var fc) ? fc : null;
+            return;
+        }
+        if (CssColor.TryParse(t, s.Color, out var c))
+        {
+            color = CssColor.IsVisible(c) ? c : null;
+            url = null;
+            return;
+        }
+        color = currentColor;
+        url = currentUrl;
+    }
+
     private void SetLength(ref Length target, string lower, float em, Length? inherited, bool noAuto = false)
     {
         if (inherited.HasValue) { target = inherited.Value; return; }
-        if (TryParseLength(lower, em, _rootFontSize, out var len) && !(noAuto && len.IsAuto)) target = len;
+        if (TryParseLength(lower, em, _rootFontSize, out var len, _vw, _vh) && !(noAuto && len.IsAuto)) target = len;
     }
 
     private float BorderWidth(string lower, float em, float current)
@@ -624,7 +983,7 @@ internal sealed class StyleResolver
             case "medium": return 1.5f;
             case "thick": return 3.75f;
         }
-        return TryParseLength(lower, em, _rootFontSize, out var len) && !len.IsAuto && !len.IsPercent ? Math.Max(0, len.Value) : current;
+        return TryParseLength(lower, em, _rootFontSize, out var len, _vw, _vh) && !len.IsAuto && !len.IsPercent ? Math.Max(0, len.Value) : current;
     }
 
     private static BorderStyle ParseBorderStyle(string lower, BorderStyle current)
@@ -670,7 +1029,7 @@ internal sealed class StyleResolver
     }
 
     /// <summary>Parses a CSS length. Font-relative units are resolved here; percentages are kept for layout.</summary>
-    public static bool TryParseLength(string v, float em, float rem, out Length len)
+    public static bool TryParseLength(string v, float em, float rem, out Length len, float vw = 5.9528f, float vh = 8.4189f)
     {
         len = default;
         if (v.Length == 0) return false;
@@ -698,8 +1057,10 @@ internal sealed class StyleResolver
             case "mm": pt = n * 72f / 25.4f; break;
             case "q": pt = n * 72f / 101.6f; break;
             case "pc": pt = n * 12f; break;
-            case "vw": pt = n * 5.95f; break; // relative to an A4 page width
-            case "vh": pt = n * 8.42f; break;
+            case "vw": pt = n * vw; break; // 1% of the page's content width
+            case "vh": pt = n * vh; break; // 1% of the page's content height
+            case "vmin": pt = n * Math.Min(vw, vh); break;
+            case "vmax": pt = n * Math.Max(vw, vh); break;
             default: return false;
         }
         len = Length.Pt(pt);

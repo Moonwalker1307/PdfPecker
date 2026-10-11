@@ -8,6 +8,9 @@ internal sealed class ImageLoader
     private readonly bool _allowFiles;
     private readonly Dictionary<string, PdfImage?> _cache = new(StringComparer.Ordinal);
 
+    /// <summary>Parsed inline SVG drawings, shared by every layout pass of a document (pages, headers, footers).</summary>
+    public readonly Dictionary<PdfPecker.Html.Element, PdfPecker.Svg.SvgImage> Svgs = new();
+
     public ImageLoader(string? baseDirectory, Func<string, byte[]?>? resolver, bool allowFiles = true)
     {
         _allowFiles = allowFiles;

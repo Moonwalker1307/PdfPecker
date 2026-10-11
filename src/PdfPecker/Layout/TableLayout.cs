@@ -263,7 +263,7 @@ internal sealed partial class LayoutEngine
     private float LayoutTable(Element table, float x, float y, float availW)
     {
         var s = table.Style;
-        if (table.Id != null) Anchors[table.Id] = y;
+        if (table.Id != null) SetAnchor(table.Id, y);
         var m = GetTableModel(table);
         bool collapse = s.BorderCollapse;
         float hs = collapse ? 0 : s.BorderSpacingH, vs = collapse ? 0 : s.BorderSpacingV;
@@ -384,7 +384,7 @@ internal sealed partial class LayoutEngine
     {
         var td = cell.Td;
         var cs = td.Style;
-        if (td.Id != null) Anchors[td.Id] = rowTop;
+        if (td.Id != null) SetAnchor(td.Id, rowTop);
         float w = (cell.ColSpan - 1) * hs;
         for (int c = cell.Col; c < cell.Col + cell.ColSpan; c++) w += widths[c];
         cell.X = colX[cell.Col];
@@ -446,11 +446,13 @@ internal sealed partial class LayoutEngine
         var s = e.Style;
         float frame = s.PaddingLeft.Resolve(0) + s.PaddingRight.Resolve(0) + s.BorderLeft + s.BorderRight;
         (float, float) result;
-        if (e.Name == "img")
+        if (e.Name is "img" or "svg")
         {
             bool saved = _measuring;
             _measuring = true;
-            ImageSize(e, 100000, out float w, out _);
+            float w;
+            if (e.Name == "img") ImageSize(e, 100000, out w, out _);
+            else SvgSize(e, 100000, out w, out _);
             _measuring = saved;
             result = s.Width.IsPercent ? (0, w + frame) : (w + frame, w + frame);
         }
@@ -471,7 +473,7 @@ internal sealed partial class LayoutEngine
             var (mn, mx) = ContentIntrinsic(e);
             result = (mn + frame, mx + frame);
         }
-        if (!s.Width.IsAuto && !s.Width.IsPercent && e.Name != "img")
+        if (!s.Width.IsAuto && !s.Width.IsPercent && e.Name is not ("img" or "svg"))
         {
             float w = s.Width.Value + (s.BorderBox ? 0 : frame);
             result = (Math.Max(w, s.Display == Display.Table ? result.Item1 : 0), Math.Max(w, s.Display == Display.Table ? result.Item1 : 0));
@@ -485,9 +487,51 @@ internal sealed partial class LayoutEngine
         return result;
     }
 
+    /// <summary>Intrinsic widths of a run of inline content.</summary>
+    private (float Min, float Max) RunIntrinsic(List<Node> nodes)
+    {
+        bool saved = _measuring;
+        _measuring = true;
+        _inlineDepth++;
+        try
+        {
+            var items = CollectInline(nodes, 100000);
+            float min = 0, max = 0, group = 0, line = 0;
+            foreach (var it in items)
+            {
+                if (it.Kind == ItemKind.Break)
+                {
+                    min = Math.Max(min, group);
+                    max = Math.Max(max, line);
+                    group = line = 0;
+                    continue;
+                }
+                if (it.Kind == ItemKind.Space && it.Breakable)
+                {
+                    min = Math.Max(min, group);
+                    group = 0;
+                    line += it.Width;
+                    continue;
+                }
+                group += it.Width;
+                line += it.Width;
+            }
+            return (Math.Max(min, group), Math.Max(max, line));
+        }
+        finally
+        {
+            if (--_inlineDepth == 0) _itemPoolUsed = 0;
+            _measuring = saved;
+        }
+    }
+
     /// <summary>Intrinsic widths of an element's content box.</summary>
     private (float Min, float Max) ContentIntrinsic(Element e)
     {
+        var es = e.Style;
+        if (es.IsFlex) return FlexIntrinsic(e);
+        if (es.IsGrid) return GridIntrinsic(e);
+        if (es.IsMultiColumn) return ColumnsIntrinsic(e);
         float min = 0, max = 0;
         List<Node>? run = null;
         bool saved = _measuring;
@@ -526,7 +570,7 @@ internal sealed partial class LayoutEngine
         {
             if (child is TextNode) { (run ??= new List<Node>()).Add(child); continue; }
             var ce = (Element)child;
-            if (ce.Style == null || ce.Style.Display == Display.None) continue;
+            if (ce.Style == null || ce.Style.Display == Display.None || ce.Detached) continue;
             if (IsInlineLevel(ce)) { (run ??= new List<Node>()).Add(child); continue; }
             FlushRun();
             var (cmin, cmax) = Intrinsic(ce);
