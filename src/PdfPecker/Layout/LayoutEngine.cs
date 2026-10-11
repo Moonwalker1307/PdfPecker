@@ -441,7 +441,7 @@ internal sealed partial class LayoutEngine
         }
 
         float bottom = cy + contentH + pb + bb;
-        BoxPainter.Paint(group, s, bx, y, used, bottom - y);
+        BoxPainter.Paint(group, s, bx, y, used, bottom - y, _images, availW);
         _lastBoxRight = bx + used;
         if (e.Name == "a" && e.GetAttribute("href") is { Length: > 0 } href) _ops.Add(new LinkOp(bx, y, used, bottom - y, href));
         if (Headings != null && HeadingLevel(e.Name) is int level and > 0) RecordHeading(e, level, y, opsStart);

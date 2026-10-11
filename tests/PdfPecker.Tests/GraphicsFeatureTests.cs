@@ -119,7 +119,7 @@ public class GraphicsFeatureTests
     {
         var html = "<div style='height:50pt; background: linear-gradient(to right, #ff0000, #0000ff), #00ff00'></div>";
         var ops = Flatten(Layout(html)).ToList();
-        Assert.Single(ops.OfType<GradientOp>());
+        Assert.Single(ops.OfType<BackgroundOp>());
         Assert.Single(ops.OfType<RectOp>()); // the colour layer underneath
 
         var pdf = ConvertUncompressed("<body style='margin:0'>" + html + "</body>", NoMargins);

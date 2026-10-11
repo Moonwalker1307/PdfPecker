@@ -23,13 +23,30 @@ internal sealed class RectOp : DrawOp
     public override void Offset(float dx, float dy) { X += dx; Y += dy; }
 }
 
-/// <summary>A rectangle filled with a gradient, whose geometry is relative to the rectangle's top-left corner.</summary>
-internal sealed class GradientOp : DrawOp
+/// <summary>
+/// A background layer: an image or a gradient drawn as one tile at (TileX, TileY, TileW, TileH), repeated every StepX /
+/// StepY along the axes that repeat, and clipped to the painting area (ClipX, ClipY, ClipW, ClipH). A gradient's geometry
+/// is relative to the tile's top-left corner.
+/// </summary>
+internal sealed class BackgroundOp : DrawOp
 {
-    public float X, Y, W, H;
-    public Gradient Gradient;
-    public GradientOp(float x, float y, float w, float h, Gradient gradient) { X = x; Y = y; W = w; H = h; Gradient = gradient; }
-    public override void Offset(float dx, float dy) { X += dx; Y += dy; }
+    public float ClipX, ClipY, ClipW, ClipH;
+    public float TileX, TileY, TileW, TileH;
+    public float StepX, StepY;
+    public bool RepeatX, RepeatY;
+    public PdfImage? Image;
+    public Gradient? Gradient;
+
+    public override void Offset(float dx, float dy) { ClipX += dx; ClipY += dy; TileX += dx; TileY += dy; }
+
+    /// <summary>The flow rectangle actually painted: the clip, narrowed to the tile's row or column on axes that do not repeat.</summary>
+    public (float X0, float Y0, float X1, float Y1) Painted()
+    {
+        float x0 = ClipX, y0 = ClipY, x1 = ClipX + ClipW, y1 = ClipY + ClipH;
+        if (!RepeatX) { x0 = Math.Max(x0, TileX); x1 = Math.Min(x1, TileX + TileW); }
+        if (!RepeatY) { y0 = Math.Max(y0, TileY); y1 = Math.Min(y1, TileY + TileH); }
+        return (x0, y0, x1, y1);
+    }
 }
 
 /// <summary>A stroked line for dashed or dotted borders.</summary>
@@ -105,16 +122,29 @@ internal sealed class GroupOp : DrawOp
 
 internal static class BoxPainter
 {
-    /// <summary>Paints background and borders of a border box into <paramref name="group"/>.</summary>
-    public static void Paint(GroupOp group, ComputedStyle s, float x, float y, float w, float h)
+    /// <summary>
+    /// Paints background and borders of a border box into <paramref name="group"/>. <paramref name="images"/> loads
+    /// url() backgrounds; <paramref name="basis"/> is the containing block width that percentage paddings refer to.
+    /// </summary>
+    public static void Paint(GroupOp group, ComputedStyle s, float x, float y, float w, float h, ImageLoader? images = null, float basis = 0)
     {
         if (!s.Visible) return;
-        if (CssColor.IsVisible(s.BackgroundColor) && w > 0 && h > 0)
-            group.Ops.Add(new RectOp(x, y, w, h, s.BackgroundColor));
-        if (s.BackgroundGradients is { } layers && w > 0 && h > 0)
+        if (w > 0 && h > 0)
         {
-            uint backdrop = CssColor.IsOpaque(s.BackgroundColor) ? s.BackgroundColor : 0xFFFFFFFF;
-            for (int i = layers.Length - 1; i >= 0; i--) group.Ops.Add(new GradientOp(x, y, w, h, layers[i].Resolve(w, h, backdrop)));
+            var layers = s.BackgroundImages;
+            if (CssColor.IsVisible(s.BackgroundColor))
+            {
+                // The colour is clipped like the bottom layer.
+                var clip = Layer(s.BackgroundClips, layers == null ? 0 : layers.Length - 1, BackgroundBox.BorderBox);
+                var (cx, cy, cw, ch) = BoxOf(s, clip, x, y, w, h, basis);
+                if (cw > 0 && ch > 0) group.Ops.Add(new RectOp(cx, cy, cw, ch, s.BackgroundColor));
+            }
+            if (layers != null)
+            {
+                uint backdrop = CssColor.IsOpaque(s.BackgroundColor) ? s.BackgroundColor : 0xFFFFFFFF;
+                for (int i = layers.Length - 1; i >= 0; i--)
+                    if (layers[i] is { } layer) PaintLayer(group, s, layer, i, x, y, w, h, images, basis, backdrop);
+            }
         }
         if (!s.HasBorder) return;
         float bt = s.BorderTop, br = s.BorderRight, bb = s.BorderBottom, bl = s.BorderLeft;
@@ -122,6 +152,116 @@ internal static class BoxPainter
         Side(group, s.BorderBottomStyle, bb, s.BorderBottomColor ?? s.Color, x, y + h - bb, w, bb, horizontal: true);
         Side(group, s.BorderLeftStyle, bl, s.BorderLeftColor ?? s.Color, x, y, bl, h, horizontal: false);
         Side(group, s.BorderRightStyle, br, s.BorderRightColor ?? s.Color, x + w - br, y, br, h, horizontal: false);
+    }
+
+    private static T Layer<T>(T[]? list, int i, T initial) => list is { Length: > 0 } ? list[i % list.Length] : initial;
+
+    /// <summary>The border, padding or content box of a border box.</summary>
+    private static (float X, float Y, float W, float H) BoxOf(ComputedStyle s, BackgroundBox box, float x, float y, float w, float h, float basis)
+    {
+        if (box == BackgroundBox.BorderBox) return (x, y, w, h);
+        float l = s.BorderLeft, t = s.BorderTop, r = s.BorderRight, b = s.BorderBottom;
+        if (box == BackgroundBox.ContentBox)
+        {
+            l += s.PaddingLeft.Resolve(basis);
+            t += s.PaddingTop.Resolve(basis);
+            r += s.PaddingRight.Resolve(basis);
+            b += s.PaddingBottom.Resolve(basis);
+        }
+        return (x + l, y + t, Math.Max(0, w - l - r), Math.Max(0, h - t - b));
+    }
+
+    // Tiles smaller than this are not drawn: they are invisible, and a viewer would have to repeat them millions of times.
+    private const float MinTile = 0.05f;
+
+    private static void PaintLayer(GroupOp group, ComputedStyle s, BackgroundImage layer, int i, float x, float y, float w, float h,
+        ImageLoader? images, float basis, uint backdrop)
+    {
+        PdfImage? image = null;
+        float iw = 0, ih = 0;
+        if (layer.Url != null)
+        {
+            image = images?.Load(layer.Url);
+            if (image == null || image.Width <= 0 || image.Height <= 0) return;
+            iw = image.Width * 0.75f; // CSS pixels
+            ih = image.Height * 0.75f;
+        }
+        else if (layer.Gradient == null) return;
+
+        var (ox, oy, ow, oh) = BoxOf(s, Layer(s.BackgroundOrigins, i, BackgroundBox.PaddingBox), x, y, w, h, basis);
+        var (cx, cy, cw, ch) = BoxOf(s, Layer(s.BackgroundClips, i, BackgroundBox.BorderBox), x, y, w, h, basis);
+        if (cw <= 0 || ch <= 0) return;
+
+        // Tile size. A gradient has no intrinsic size or ratio: it fills the positioning area unless sized.
+        var size = Layer(s.BackgroundSizes, i, BackgroundSize.Auto);
+        float tw, th;
+        if (size.Kind != BackgroundSizeKind.Explicit)
+        {
+            if (image == null) { tw = ow; th = oh; }
+            else
+            {
+                float sx = ow / iw, sy = oh / ih;
+                float k = size.Kind == BackgroundSizeKind.Cover ? Math.Max(sx, sy) : Math.Min(sx, sy);
+                tw = iw * k;
+                th = ih * k;
+            }
+        }
+        else
+        {
+            bool autoW = size.Width.IsAuto, autoH = size.Height.IsAuto;
+            tw = size.Width.Resolve(ow);
+            th = size.Height.Resolve(oh);
+            if (autoW && autoH) { tw = image == null ? ow : iw; th = image == null ? oh : ih; }
+            else if (autoW) tw = image == null ? ow : th * iw / ih;
+            else if (autoH) th = image == null ? oh : tw * ih / iw;
+        }
+
+        var (repeatX, repeatY) = Layer(s.BackgroundRepeats, i, (BackgroundRepeat.Repeat, BackgroundRepeat.Repeat));
+        // round: scale the tile so that a whole number fits; an auto other dimension keeps the image's ratio.
+        bool keepRatio = size.Kind == BackgroundSizeKind.Explicit && (size.Width.IsAuto || size.Height.IsAuto) && image != null;
+        if (repeatX == BackgroundRepeat.Round && tw > 0 && ow > 0)
+        {
+            float nw = ow / Math.Max(1, MathF.Round(ow / tw));
+            if (keepRatio && repeatY != BackgroundRepeat.Round) th *= nw / tw;
+            tw = nw;
+        }
+        if (repeatY == BackgroundRepeat.Round && th > 0 && oh > 0)
+        {
+            float nh = oh / Math.Max(1, MathF.Round(oh / th));
+            if (keepRatio && repeatX != BackgroundRepeat.Round) tw *= nh / th;
+            th = nh;
+        }
+        if (!(tw >= MinTile && th >= MinTile) || float.IsInfinity(tw) || float.IsInfinity(th)) return;
+
+        float px = ox + Layer(s.BackgroundPositionsX, i, BackgroundOffset.Start).Resolve(ow - tw);
+        float py = oy + Layer(s.BackgroundPositionsY, i, BackgroundOffset.Start).Resolve(oh - th);
+        float stepX = tw, stepY = th;
+        bool rx = repeatX != BackgroundRepeat.NoRepeat, ry = repeatY != BackgroundRepeat.NoRepeat;
+        // space: as many whole tiles as fit, the first and last touching the edges; one tile or less is not repeated.
+        if (repeatX == BackgroundRepeat.Space)
+        {
+            int n = (int)Math.Floor(ow / tw + 1e-4f);
+            if (n >= 2) { px = ox; stepX = tw + (ow - n * tw) / (n - 1); }
+            else rx = false;
+        }
+        if (repeatY == BackgroundRepeat.Space)
+        {
+            int n = (int)Math.Floor(oh / th + 1e-4f);
+            if (n >= 2) { py = oy; stepY = th + (oh - n * th) / (n - 1); }
+            else ry = false;
+        }
+
+        var op = new BackgroundOp
+        {
+            ClipX = cx, ClipY = cy, ClipW = cw, ClipH = ch,
+            TileX = px, TileY = py, TileW = tw, TileH = th,
+            StepX = stepX, StepY = stepY,
+            RepeatX = rx, RepeatY = ry,
+            Image = image,
+            Gradient = layer.Gradient?.Resolve(tw, th, backdrop),
+        };
+        var (x0, y0, x1, y1) = op.Painted();
+        if (x1 > x0 && y1 > y0) group.Ops.Add(op);
     }
 
     public static void Side(GroupOp group, BorderStyle style, float width, uint color, float x, float y, float w, float h, bool horizontal)

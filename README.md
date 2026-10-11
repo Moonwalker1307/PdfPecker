@@ -313,7 +313,7 @@ Selectors: type, `.class`, `#id`, `*`, attribute selectors (`[a]`, `=`, `~=`, `|
 | --- | --- |
 | Box model | `display` (block, inline, inline-block, flex, inline-flex, grid, inline-grid, list-item, table parts, none), `margin`, `padding`, `border` (solid, dashed, dotted, double), `width`, `height`, `min-`/`max-width`, `min-height`, `box-sizing` |
 | Text | `color`, `font`, `font-family`, `font-size`, `font-weight`, `font-style`, `line-height`, `text-align` (incl. justify), `text-decoration`, `text-transform`, `text-indent`, `letter-spacing`, `word-spacing`, `white-space`, `vertical-align` |
-| Backgrounds | `background-color`, `background-image` and `background` with `linear-gradient()`, `radial-gradient()`, `repeating-linear-gradient()` and `repeating-radial-gradient()` (several layers allowed), `opacity` on SVG |
+| Backgrounds | `background-color`, `background-image` and `background` with `url()` images (PNG with alpha, JPEG), `linear-gradient()`, `radial-gradient()`, `repeating-linear-gradient()` and `repeating-radial-gradient()` (several layers allowed); `background-repeat` (incl. `space`, `round`), `background-position` (incl. edge offsets like `right 10px bottom 5px`), `background-size` (`cover`, `contain`, lengths), `background-origin`, `background-clip`. Repeated images are written once as PDF tiling patterns. `url()` in a linked stylesheet is relative to the stylesheet and follows the same file access rules as `<img>`. `opacity` on SVG |
 | Flexbox | `flex-direction`, `flex-wrap`, `flex-flow`, `flex`, `flex-grow`/`-shrink`/`-basis`, `order`, `justify-content`, `align-items`, `align-self`, `align-content`, `gap`, `margin: auto` |
 | Grid | `grid-template-columns`/`-rows` (lengths, `%`, `fr`, `auto`, `min-content`, `max-content`, `minmax()`, `fit-content()`, `repeat()` incl. `auto-fill`/`auto-fit`), `grid-auto-rows`/`-columns`, `grid-auto-flow`, `grid-template-areas`, `grid-template`, named lines (`[name]`), `grid-column`/`-row` (line numbers, names and `span`), `grid-area` (incl. area names), `gap`, `justify-items`/`-self`, `align-items`/`-self`, `justify-content`, `align-content`, `place-*` |
 | Columns | `column-count`, `column-width`, `columns`, `column-gap` |
@@ -376,11 +376,14 @@ These are deliberate scope choices for speed and size; they are the first candid
   fonts add Central European, Greek and Cyrillic, but not CJK or other scripts: register fonts for those.
 - Fonts: no text shaping (ligatures, kerning, Arabic and Indic scripts), no right-to-left text, no WOFF2, and variable
   fonts use their default instance. SVG `<text>` uses the standard fonts (embedded as Liberation for PDF/A).
-- No JavaScript, forms, `float`, `position`, `::before`/`::after`, `url()` background images, `border-radius`,
-  shadows, transforms or GIF/WebP images. SVG files in `<img>` are not drawn.
+- No JavaScript, forms, `float`, `position`, `::before`/`::after`, `border-radius`, shadows, transforms or GIF/WebP
+  images. SVG files in `<img>` are not drawn.
 - Inline SVG: no embedded images, masks, patterns, markers or filters; `<text>` uses only the first value of
   position lists and no `textPath` layout. Gradient stops with transparency are blended onto white (or, for CSS, onto
-  the element's background colour); `background-size`/`-position` do not apply to gradients.
+  the element's background colour).
+- Backgrounds: no `background-clip: text`, `background-attachment: fixed` scrolls with the box, SVG files as
+  `url()` backgrounds are not drawn, backgrounds of inline elements (`<span>`) show only their colour, and a background
+  image on `<body>` covers the body's box rather than every whole page.
 - Grid: no `dense` packing, no subgrid; `span <name>` counts as `span 1`.
 - Multi-column: children are kept whole and balanced between columns; a single block is never split across columns.
 - Translucent colours (`rgba`) are blended onto white instead of using real transparency.
