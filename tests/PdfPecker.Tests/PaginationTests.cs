@@ -166,6 +166,6 @@ public class PaginationTests
         var text = Latin1(pdf);
         var pages = Regex.Matches(text, @"(\d+) 0 obj\n<< /Type /Page ").Select(m => m.Groups[1].Value).ToList();
         Assert.Equal(2, pages.Count);
-        Assert.Matches($@"/Subtype /Link /Rect \[[^\]]+\] /Border \[0 0 0\] /Dest \[{pages[1]} 0 R /XYZ 0", text);
+        Assert.Matches($@"/Subtype /Link /Rect \[[^\]]+\] /F 4 /Border \[0 0 0\] /Dest \[{pages[1]} 0 R /XYZ 0", text);
     }
 }
