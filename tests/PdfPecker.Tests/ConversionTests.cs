@@ -380,4 +380,28 @@ public class RobustnessTests
         var pdf = HtmlToPdf.Convert("<table style='width:100px'><tr><td>" + new string('W', 500) + "</td></tr></table>");
         PdfTestHelpers.AssertStructurallyValid(pdf);
     }
+    [Fact]
+    public void Scale_lays_the_page_out_larger_and_draws_it_smaller()
+    {
+        // At 0.5 a 210pt-wide content area is laid out 420pt wide, then drawn at half size on the same paper.
+        var pdf = ConvertUncompressed("""
+            <div style="height: 10px; background: #ff0000"></div><a href="https://example.com/">link</a>
+            """, new PdfOptions { PageSize = new PageSize(300, 450), Margins = new PageMargins(45), Scale = 0.5f });
+        AssertStructurallyValid(pdf);
+        var text = Latin1(pdf);
+        Assert.Contains("/MediaBox [0 0 300 450]", text);
+        var content = AllContent(pdf);
+        Assert.StartsWith("q 0.5 0 0 0.5 0 0 cm\n", content);
+        Assert.Contains("90 802.5 420 7.5 re f", content);
+        // The link annotation is in paper coordinates: it starts at the 45pt margin.
+        Assert.Matches(@"/Subtype /Link /Rect \[45 ", text);
+    }
+
+    [Fact]
+    public void Scale_must_be_between_one_tenth_and_two()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => HtmlToPdf.Convert("<p>x</p>", new PdfOptions { Scale = 0 }));
+        Assert.Throws<ArgumentOutOfRangeException>(() => HtmlToPdf.Convert("<p>x</p>", new PdfOptions { Scale = float.NaN }));
+        Assert.Throws<ArgumentOutOfRangeException>(() => HtmlToPdf.Convert("<p>x</p>", new PdfOptions { Scale = 3 }));
+    }
 }
