@@ -710,10 +710,10 @@ internal sealed class StyleResolver
                 s.BorderCollapse = lower == "collapse";
                 break;
             case "border-spacing-h":
-                if (TryParseLength(lower, em, _rootFontSize, out var bsh, _vw, _vh)) s.BorderSpacingH = bsh.Resolve(0);
+                if (TryParseLength(lower, em, _rootFontSize, out var bsh, _vw, _vh)) s.BorderSpacingH = ToLayoutUnits(bsh.Resolve(0));
                 break;
             case "border-spacing-v":
-                if (TryParseLength(lower, em, _rootFontSize, out var bsv, _vw, _vh)) s.BorderSpacingV = bsv.Resolve(0);
+                if (TryParseLength(lower, em, _rootFontSize, out var bsv, _vw, _vh)) s.BorderSpacingV = ToLayoutUnits(bsv.Resolve(0));
                 break;
             case "box-sizing":
                 s.BorderBox = lower == "border-box";
@@ -803,7 +803,7 @@ internal sealed class StyleResolver
                 if (lower != "normal")
                 {
                     if (!TryParseLength(lower, em, _rootFontSize, out var gl, _vw, _vh) || gl.IsAuto) break;
-                    gap = gl;
+                    gap = ToLayoutUnits(gl);
                 }
                 if (prop == "row-gap") s.RowGap = gap;
                 else s.ColumnGap = gap;
@@ -1141,7 +1141,7 @@ internal sealed class StyleResolver
             return true;
         }
         if (!TryParseLength(tok, em, _rootFontSize, out var len, _vw, _vh) || len.IsAuto) return false;
-        size = len.IsPercent ? new TrackSize(TrackSizeKind.Percent, len.Value) : new TrackSize(TrackSizeKind.Fixed, Math.Max(0, len.Value));
+        size = len.IsPercent ? new TrackSize(TrackSizeKind.Percent, len.Value) : new TrackSize(TrackSizeKind.Fixed, Math.Max(0, ToLayoutUnits(len.Value)));
         return true;
     }
 
@@ -1177,8 +1177,16 @@ internal sealed class StyleResolver
     private void SetLength(ref Length target, string lower, float em, Length? inherited, bool noAuto = false)
     {
         if (inherited.HasValue) { target = inherited.Value; return; }
-        if (TryParseLength(lower, em, _rootFontSize, out var len, _vw, _vh) && !(noAuto && len.IsAuto)) target = len;
+        if (TryParseLength(lower, em, _rootFontSize, out var len, _vw, _vh) && !(noAuto && len.IsAuto)) target = ToLayoutUnits(len);
     }
+
+    /// <summary>
+    /// Chrome stores box lengths in units of 1/64 CSS pixel, cutting off the rest (toward zero). Doing the same keeps
+    /// long stacks of boxes sized in mm or pt from drifting away from Chrome's positions.
+    /// </summary>
+    internal static float ToLayoutUnits(float pt) => MathF.Truncate(pt / 0.75f * 64f) / 64f * 0.75f;
+
+    private static Length ToLayoutUnits(Length len) => len.Unit == LengthUnit.Pt ? Length.Pt(ToLayoutUnits(len.Value)) : len;
 
     private float BorderWidth(string lower, float em, float current)
     {

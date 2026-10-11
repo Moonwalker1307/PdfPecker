@@ -359,10 +359,12 @@ public class LayoutFeatureTests
     [Fact]
     public void Single_page_with_footer_fits_min_height_100vh()
     {
+        // The paragraph has no margin: a default <p> margin would collapse through the
+        // min-height:100vh div and push it past the page, which Chrome also does.
         var pdf = HtmlToPdf.Convert("""
             <body style="margin:0"><div style="min-height:100vh">
               <header data-sticky-pdf-header height="17mm">H</header>
-              <p>Body</p>
+              <p style="margin:0">Body</p>
               <footer data-sticky-pdf-footer height="12mm">Side {page} af {total-pages}</footer>
             </div></body>
             """);

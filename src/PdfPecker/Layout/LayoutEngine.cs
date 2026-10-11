@@ -139,6 +139,10 @@ internal sealed partial class LayoutEngine
     {
         float pendingMargin = 0;
         bool anyContent = false;
+        // The parent has taken its first child's top margin as its own (they collapse): don't apply it again.
+        bool absorbFirst = _absorbTop;
+        _absorbTop = false;
+        bool firstBlock = true;
         List<Node>? run = null;
         var children = parent.Children;
 
@@ -214,12 +218,17 @@ internal sealed partial class LayoutEngine
                 _currentListIndex = listIndex;
             }
 
-            float mt = s.MarginTop.Resolve(w);
+            // A box's top margin collapses with those of its first children (CSS 2.1 §8.3.1).
+            float mt = absorbFirst && firstBlock && !anyContent
+                ? 0
+                : CollapseMargins(s.MarginTop.Resolve(w), LeadingMargin(e, w));
+            firstBlock = false;
             float top = y + CollapseMargins(pendingMargin, mt);
             if (s.PageBreakBefore || forcedAt == i) top = NextPage(top);
 
             int boxOps = _ops.Count;
             float bottom = LayoutBlockBox(e, x, top, w, shrinkToFit: false);
+            float trailing = _boxTrailing;
             if (joins && KeepTogetherFails(chain, boxOps, top, forcedAt))
             {
                 Rewind(chain);
@@ -227,8 +236,15 @@ internal sealed partial class LayoutEngine
                 hasChain = hasPrev = prevAvoidAfter = false;
                 continue;
             }
+            float mb = CollapseMargins(s.MarginBottom.Resolve(w), trailing);
+            if (bottom - top < Eps && CollapsesThrough(e) && !s.PageBreakBefore && !s.PageBreakAfter)
+            {
+                // An empty box: its margins collapse with each other and with those around it.
+                pendingMargin = CollapseMargins(CollapseMargins(pendingMargin, mt), mb);
+                continue;
+            }
             anyContent = true;
-            pendingMargin = s.MarginBottom.Resolve(w);
+            pendingMargin = mb;
             y = bottom;
             if (s.PageBreakAfter)
             {
@@ -243,6 +259,7 @@ internal sealed partial class LayoutEngine
             prev = mark;
             hasPrev = !s.PageBreakAfter;
         }
+        _flowTrailing = pendingMargin;
         return y + pendingMargin;
 
         void Rewind(in FlowMark m)
@@ -290,6 +307,56 @@ internal sealed partial class LayoutEngine
         }
     }
 
+    // Margin collapsing between a box and its children: set by LayoutBlockBoxCore and LayoutFlow for their callers.
+    private bool _absorbTop;      // the box being laid out has taken its first child's top margin
+    private float _flowTrailing;  // the bottom margin of the last child of the flow just laid out
+    private float _boxTrailing;   // the bottom margin of its last child that the box just laid out passes on
+
+    /// <summary>A box in normal flow whose margins can collapse with its children's (not a flex, grid, table or column box).</summary>
+    private static bool IsPlainFlow(Element e)
+    {
+        var s = e.Style;
+        return s.Display is Display.Block or Display.ListItem && !s.IsMultiColumn && !s.Floated && e.Name is not ("img" or "svg" or "hr");
+    }
+
+    private static bool CollapsesTop(Element e)
+        => IsPlainFlow(e) && e.Style.BorderTop == 0 && e.Style.PaddingTop.Resolve(0) == 0 && !e.Style.PaddingTop.IsPercent;
+
+    private static bool CollapsesBottom(Element e)
+    {
+        var s = e.Style;
+        return IsPlainFlow(e) && s.BorderBottom == 0 && s.PaddingBottom.Resolve(0) == 0 && !s.PaddingBottom.IsPercent
+               && s.Height.IsAuto && (s.MinHeight.IsAuto || s.MinHeight.Value <= 0);
+    }
+
+    private static bool CollapsesThrough(Element e) => CollapsesTop(e) && CollapsesBottom(e);
+
+    /// <summary>The first child of a box whose top margin collapses with the box's, or null.</summary>
+    private static Element? FirstBlockChild(Element e)
+    {
+        if (!CollapsesTop(e)) return null;
+        foreach (var child in e.Children)
+        {
+            if (child is TextNode t)
+            {
+                if (string.IsNullOrWhiteSpace(t.Text) && IsCollapsible(e.Style)) continue;
+                return null;
+            }
+            var c = (Element)child;
+            if (c.Style == null || c.Style.Display == Display.None || c.Detached) continue;
+            if (IsInlineLevel(c) || c.Style.Floated || c.Style.PageBreakBefore) return null;
+            return c;
+        }
+        return null;
+    }
+
+    /// <summary>The collapsed top margin of a box's first children, which the box takes as part of its own.</summary>
+    private static float LeadingMargin(Element e, float w)
+    {
+        var c = FirstBlockChild(e);
+        return c == null ? 0 : CollapseMargins(c.Style.MarginTop.Resolve(w), LeadingMargin(c, w));
+    }
+
     /// <summary>Lays out a block-level box whose top border edge is at <paramref name="y"/>. Returns its bottom border edge.</summary>
     private float LayoutBlockBox(Element e, float x, float y, float availW, bool shrinkToFit)
     {
@@ -307,6 +374,7 @@ internal sealed partial class LayoutEngine
             float ny = NextPage(y);
             bottom = table ? LayoutTable(e, x, ny, availW) : LayoutBlockBoxCore(e, x, ny, availW, shrinkToFit);
         }
+        if (table) _boxTrailing = 0;
         return bottom;
     }
 
@@ -390,6 +458,7 @@ internal sealed partial class LayoutEngine
             _marker = new ListMarker { Text = MarkerText(s.ListStyleType, _currentListIndex), Type = s.ListStyleType, Style = s, ContentX = cx };
 
         float contentBottom;
+        float trailing = 0;
         if (isImage || isSvg)
         {
             if (_paginate)
@@ -415,7 +484,16 @@ internal sealed partial class LayoutEngine
             if (hasHOverride) definiteH = Math.Max(0, overrideH - frameV);
             else if (!s.Height.IsAuto && !s.Height.IsPercent) definiteH = Math.Max(0, s.Height.Value - (s.BorderBox ? frameV : 0));
             float minH = !s.MinHeight.IsAuto && !s.MinHeight.IsPercent ? Math.Max(0, s.MinHeight.Value - (s.BorderBox ? frameV : 0)) : 0;
+            // A box that is not a formatting context root shares its top and bottom margins with its children's.
+            bool joinsChildren = !shrinkToFit && !hasWOverride && !hasHOverride;
+            _absorbTop = joinsChildren && FirstBlockChild(e) != null;
             contentBottom = LayoutContent(e, cx, cy, contentW, definiteH, minH);
+            _absorbTop = false;
+            if (joinsChildren && CollapsesBottom(e) && !s.IsFlex && !s.IsGrid)
+            {
+                trailing = _flowTrailing;
+                contentBottom -= trailing;
+            }
         }
 
         if (_marker != null && _marker.Style == s)
@@ -445,6 +523,7 @@ internal sealed partial class LayoutEngine
         _lastBoxRight = bx + used;
         if (e.Name == "a" && e.GetAttribute("href") is { Length: > 0 } href) _ops.Add(new LinkOp(bx, y, used, bottom - y, href));
         if (Headings != null && HeadingLevel(e.Name) is int level and > 0) RecordHeading(e, level, y, opsStart);
+        _boxTrailing = trailing;
         return bottom;
     }
 

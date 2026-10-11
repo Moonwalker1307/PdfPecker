@@ -160,7 +160,8 @@ public class StyleTests
         var doc = Styled("<div style='font-size: 10pt'><p id=p style='font-size: 2em; margin-top: 1em; padding-left: 50%'>t</p></div>");
         var s = ById(doc, "p").Style;
         Assert.Equal(20f, s.FontSize);
-        Assert.Equal(20f, s.MarginTop.Value);
+        // Lengths are stored in Chrome's 1/64 px layout units, so 20pt becomes 19.99pt.
+        Assert.Equal(20f, s.MarginTop.Value, 0.05f);
         Assert.True(s.PaddingLeft.IsPercent);
     }
 
