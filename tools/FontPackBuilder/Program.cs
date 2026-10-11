@@ -4,6 +4,28 @@ using PdfPecker.Rendering.Fonts;
 // Builds the compact built-in font pack (StandardFonts.bin) used to render the standard 14 PDF fonts and
 // non-embedded fonts. Inputs: the Liberation 2.x TTFs (SIL OFL 1.1) and DejaVuSans.ttf (Bitstream Vera license).
 // Usage: dotnet run --project tools/FontPackBuilder -- /usr/share/fonts/truetype/liberation /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf [out]
+//
+// With --bundle it instead writes the Liberation TTFs, byte for byte, Brotli-compressed to src/PdfPecker/Fonts/Bundled,
+// where they are embedded for PDF/A and PdfOptions.EmbedStandardFonts:
+// dotnet run --project tools/FontPackBuilder -- --bundle /usr/share/fonts/truetype/liberation [outDir]
+if (args.Length > 0 && args[0] == "--bundle")
+{
+    string from = args.Length > 1 ? args[1] : "/usr/share/fonts/truetype/liberation";
+    string to = args.Length > 2 ? args[2] : Path.Combine("src", "PdfPecker", "Fonts", "Bundled");
+    Directory.CreateDirectory(to);
+    foreach (var family in new[] { "Sans", "Serif", "Mono" })
+    foreach (var style in new[] { "Regular", "Bold", "Italic", "BoldItalic" })
+    {
+        string name = $"Liberation{family}-{style}.ttf";
+        var data = File.ReadAllBytes(Path.Combine(from, name));
+        var packed = new byte[BrotliEncoder.GetMaxCompressedLength(data.Length)];
+        if (!BrotliEncoder.TryCompress(data, packed, out int written, quality: 11, window: 22)) throw new Exception("Brotli failed for " + name);
+        File.WriteAllBytes(Path.Combine(to, name + ".br"), packed.AsSpan(0, written).ToArray());
+        Console.WriteLine($"{name}: {data.Length} -> {written} bytes");
+    }
+    return;
+}
+
 string libDir = args.Length > 0 ? args[0] : "/usr/share/fonts/truetype/liberation";
 string dejavu = args.Length > 1 ? args[1] : "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
 string output = args.Length > 2 ? args[2] : Path.Combine("src", "PdfPecker", "Rendering", "Fonts", "StandardFonts.bin");
