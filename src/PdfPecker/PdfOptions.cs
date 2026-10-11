@@ -145,6 +145,13 @@ public sealed class PdfOptions
     public PdfConformance Conformance { get; set; }
 
     /// <summary>
+    /// Embed the bundled Liberation fonts (metric-compatible with Helvetica, Times and Courier) instead of referring to
+    /// the non-embedded standard PDF fonts. Text then looks the same in every viewer and can use any character those
+    /// fonts cover, at the cost of a larger file. Default: false. Always on for PDF/A, which requires embedded fonts.
+    /// </summary>
+    public bool EmbedStandardFonts { get; set; }
+
+    /// <summary>
     /// Digitally sign the PDF with a certificate. Default: null, unsigned. Works together with <see cref="Security"/>
     /// and <see cref="Conformance"/>.
     /// </summary>
