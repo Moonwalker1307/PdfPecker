@@ -192,16 +192,18 @@ public class BrowserMatchTests
     }
 
     [Fact]
-    public void Collapsed_table_columns_floor_fixed_widths_to_whole_pixels()
+    public void Collapsed_table_columns_keep_fractional_widths_and_round_where_painted()
     {
-        var ops = Layout("""
-            <table style="border-collapse: collapse; border-spacing: 0">
-              <tr><td style="width: 50.6px; padding: 0; background: #ff0000">a</td>
-                  <td style="width: 50.6px; padding: 0; background: #00ff00">b</td></tr>
+        // Chrome keeps 50.6px + 1px of half borders as the column width; only the painted line is rounded,
+        // so the borders between the columns land on 52px and 113px, as in Chrome (the ShSavingsCard head box).
+        var content = PdfTestHelpers.AllContent(PdfTestHelpers.ConvertUncompressed("""
+            <table style="border-collapse: collapse; width: 300px; table-layout: fixed">
+              <tr><td style="width: 50.6px; padding: 0; border: 1px solid #000">a</td>
+                  <td style="width: 60.6px; padding: 0; border: 1px solid #000">b</td><td style="padding: 0; border: 1px solid #000">c</td></tr>
             </table>
-            """);
-        Near(37.5f, Box(ops, "#ff0000").W);
-        Near(Box(ops, "#ff0000").X + 37.5f, Box(ops, "#00ff00").X);
+            """, new PdfOptions { Margins = new PageMargins(0) }));
+        Assert.Matches(@"(^|\n)39 [\d.]+ 0\.75 [\d.]+ re f", content);
+        Assert.Matches(@"(^|\n)84\.75 [\d.]+ 0\.75 [\d.]+ re f", content);
     }
 
     [Fact]
