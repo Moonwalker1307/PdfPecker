@@ -23,6 +23,7 @@ internal sealed class FontProgram
     public readonly bool IsCff;
     public readonly short XMin, YMin, XMax, YMax;
     public readonly int Ascender, Descender, LineGap; // hhea, in font units
+    public readonly int LineAscender, LineDescender, LineGapUnits; // what browsers space lines with: hhea, or OS/2 typo metrics
     public readonly int CapHeight;
     public readonly float ItalicAngle;
     public readonly bool FixedPitch;
@@ -80,14 +81,25 @@ internal sealed class FontProgram
 
         WeightClass = 400;
         CapHeight = (int)(Ascender * 0.7);
+        int? typoA = null, typoD = null, typoG = null;
         if (Table("OS/2") is { } os2 && os2.Length >= 78)
         {
             WeightClass = U16(os2.Offset + 4);
             int fsSelection = U16(os2.Offset + 62);
             IsItalic = (fsSelection & 0x201) != 0; // ITALIC or OBLIQUE
+            // USE_TYPO_METRICS, or an hhea table without line metrics: use the OS/2 typographic values, as Chrome does.
+            if ((fsSelection & 0x80) != 0 || Ascender == 0 && Descender == 0)
+            {
+                typoA = S16(os2.Offset + 68);
+                typoD = S16(os2.Offset + 70);
+                typoG = S16(os2.Offset + 72);
+            }
             if (U16(os2.Offset) >= 2 && os2.Length >= 90) CapHeight = S16(os2.Offset + 88);
         }
         if (WeightClass < 1 || WeightClass > 1000) WeightClass = 400;
+        LineAscender = typoA ?? Ascender;
+        LineDescender = typoD ?? Descender;
+        LineGapUnits = typoG ?? LineGap;
         if ((macStyle & 2) != 0) IsItalic = true;
 
         if (Table("post") is { } post && post.Length >= 16)

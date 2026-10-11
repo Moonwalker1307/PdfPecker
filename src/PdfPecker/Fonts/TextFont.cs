@@ -11,6 +11,7 @@ internal readonly struct FontRun
 /// <summary>A font as seen by layout: metrics and widths in 1/1000 em units.</summary>
 internal abstract class TextFont
 {
+    // Line metrics as browsers use them (hhea, or OS/2 typo metrics when the font asks for them), in fractions of the em.
     public float Ascent;       // fraction of the em
     public float Descent;      // negative fraction of the em
     public float LineGap;      // fraction of the em; line-height: normal = Ascent - Descent + LineGap
@@ -22,8 +23,22 @@ internal abstract class TextFont
 
     public abstract float CharWidth(char c, float size);
 
-    /// <summary>The used value of line-height: normal, as a factor of the font size.</summary>
-    public virtual float NormalLineHeight => Ascent - Descent + LineGap;
+    private const float Px = 0.75f; // one CSS pixel in points
+
+    private static float RoundPx(float pt) => MathF.Floor(pt / Px + 0.5f) * Px;
+
+    /// <summary>
+    /// The ascent and descent at a font size (in points), each rounded to whole CSS pixels as Chrome does, so that line
+    /// boxes come out the same height.
+    /// </summary>
+    public void LineMetrics(float size, out float ascent, out float descent)
+    {
+        ascent = RoundPx(Ascent * size);
+        descent = RoundPx(-Descent * size);
+    }
+
+    /// <summary>The used value of line-height: normal at a font size (in points): the rounded ascent, descent and line gap.</summary>
+    public float NormalLineHeight(float size) => RoundPx(Ascent * size) + RoundPx(-Descent * size) + RoundPx(LineGap * size);
 
     /// <summary>Splits text into runs that each use one concrete font. Most fonts are a single run.</summary>
     public virtual void Split(string text, List<FontRun> runs) => runs.Add(new FontRun(this, 0, text.Length));

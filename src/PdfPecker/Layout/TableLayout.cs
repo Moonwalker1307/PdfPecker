@@ -36,6 +36,7 @@ internal sealed partial class LayoutEngine
         public int HeadCount; // leading rows that come from <thead>
         public float[] ColMin = Array.Empty<float>(), ColMax = Array.Empty<float>();
         public float[] ColFixed = Array.Empty<float>(), ColPct = Array.Empty<float>();
+        public float[]? RowExtra; // per layout pass: height each row gets on top of its content, to fill the table's height
     }
 
     private readonly Dictionary<Element, TableModel> _tables = new();
@@ -317,14 +318,45 @@ internal sealed partial class LayoutEngine
         _ops.Add(tableGroup);
         float cy = y + frameT + vs;
 
+        m.RowExtra = null;
+        if (!s.Height.IsAuto && !s.Height.IsPercent && m.Rows.Count > 0)
+            m.RowExtra = RowExtras(m, s.Height.Value - frameT - frameB - vs, colX, widths, hs, vs, collapse);
         for (int r = 0; r < m.Rows.Count; r++)
             cy = LayoutRow(m, r, cy, colX, widths, hs, vs, collapse, allowMove: true) + vs;
+        m.RowExtra = null;
 
         float tableBottom = cy + frameB;
         if (!s.Height.IsAuto && !s.Height.IsPercent && tableBottom - tableTop < s.Height.Value) tableBottom = tableTop + s.Height.Value;
         BoxPainter.Paint(tableGroup, s, bx, tableTop, boxW, tableBottom - tableTop, _images, availW);
         _lastBoxRight = bx + boxW;
         return tableBottom;
+    }
+
+    /// <summary>
+    /// When a table's height is more than its rows need, shares the difference out over the rows in proportion to their
+    /// heights, as Chrome does (CSS 2.1 §17.5.3). Returns null when the rows already fill the table.
+    /// </summary>
+    private float[]? RowExtras(TableModel m, float available, float[] colX, float[] widths, float hs, float vs, bool collapse)
+    {
+        var heights = new float[m.Rows.Count];
+        var measured = Capture(() =>
+        {
+            float top = 0;
+            for (int r = 0; r < m.Rows.Count; r++)
+            {
+                float bottom = LayoutRow(m, r, top, colX, widths, hs, vs, collapse, allowMove: false);
+                heights[r] = bottom - top;
+                top = bottom + vs;
+            }
+            return top;
+        });
+        float extra = available - measured.Height;
+        if (extra <= Eps) return null;
+        float total = 0;
+        foreach (var h in heights) total += h;
+        var extras = new float[heights.Length];
+        for (int r = 0; r < heights.Length; r++) extras[r] = total > Eps ? extra * heights[r] / total : extra / heights.Length;
+        return extras;
     }
 
     /// <summary>Lays out one table row at <paramref name="rowTop"/> and returns its bottom. A row that would straddle a
@@ -347,6 +379,7 @@ internal sealed partial class LayoutEngine
                 if (cell.RowSpan == 1) rowH = Math.Max(rowH, cell.NeededH);
             var trs = row.Tr.Style;
             if (!trs.Height.IsAuto && !trs.Height.IsPercent) rowH = Math.Max(rowH, trs.Height.Value);
+            if (m.RowExtra != null) rowH = Math.Max(rowH, rowH + m.RowExtra[r]);
             rowBottom = rowTop + rowH;
             foreach (var cell in row.Ending)
                 rowBottom = Math.Max(rowBottom, cell.Top + cell.NeededH);
@@ -513,8 +546,22 @@ internal sealed partial class LayoutEngine
                     line += it.Width;
                     continue;
                 }
-                group += it.Width;
                 line += it.Width;
+                if (it.Kind == ItemKind.Text && (it.Style.WordBreak == WordBreak.BreakAll || it.Style.OverflowWrap == OverflowWrap.Anywhere))
+                {
+                    // overflow-wrap: anywhere and word-break: break-all let the word shrink down to its widest letter.
+                    min = Math.Max(min, group);
+                    group = 0;
+                    var f = it.Style.Font;
+                    for (int k = 0; k < it.Length; k++) min = Math.Max(min, f.CharWidth(it.Source[it.Start + k], it.Style.FontSize) + it.Style.LetterSpacing);
+                    continue;
+                }
+                group += it.Width;
+                if (it.BreakAfter != BreakAfter.None)
+                {
+                    min = Math.Max(min, group + (it.BreakAfter == BreakAfter.SoftHyphen ? HyphenWidth(it.Style) : 0));
+                    group = 0;
+                }
             }
             return (Math.Max(min, group), Math.Max(max, line));
         }

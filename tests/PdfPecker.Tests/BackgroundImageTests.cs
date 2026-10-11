@@ -186,10 +186,10 @@ public class BackgroundImageTests
     [Fact]
     public void Origin_and_clip_use_the_border_padding_and_content_boxes()
     {
-        const string box = "width:100pt; height:50pt; padding:10pt; border:5pt solid black; background-repeat:no-repeat; ";
+        const string box = "width:100pt; height:50pt; padding:10pt; border:6pt solid black; background-repeat:no-repeat; ";
         var initial = Layer(box + $"background-image:url({Wide})");
-        Tile(initial, 5, 5, 30, 15); // origin padding-box, clip border-box
-        Near(130, initial.ClipW);
+        Tile(initial, 6, 6, 30, 15); // origin padding-box, clip border-box
+        Near(132, initial.ClipW);
 
         var content = Layer(box + $"background-image:url({Wide}); background-origin:content-box; background-clip:content-box");
         Tile(content, 0, 0, 30, 15);
@@ -197,7 +197,7 @@ public class BackgroundImageTests
         Near(50, content.ClipH);
 
         var border = Layer(box + $"background-image:url({Wide}); background-origin:border-box; background-position:right bottom");
-        Tile(border, 100, 65, 30, 15);
+        Tile(border, 102, 67, 30, 15);
     }
 
     [Fact]

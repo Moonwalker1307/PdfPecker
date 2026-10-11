@@ -11,8 +11,6 @@ internal sealed class EmbeddedFont : TextFont
     private readonly short[] _widths;
     private readonly UnicodeRange? _range;
 
-    private readonly float _normalLineHeight;
-
     // metrics: line metrics to use instead of the font's own, for a bundled font standing in for a standard font.
     public EmbeddedFont(FontProgram program, bool syntheticBold, bool syntheticItalic, UnicodeRange? range = null, TextFont? metrics = null)
     {
@@ -22,21 +20,17 @@ internal sealed class EmbeddedFont : TextFont
         _range = range;
         _widths = program.CharWidths;
         float upm = program.UnitsPerEm;
-        Ascent = program.Ascender / upm;
-        Descent = -Math.Abs(program.Descender) / upm;
-        LineGap = Math.Max(0, program.LineGap) / upm;
+        Ascent = program.LineAscender / upm;
+        Descent = -Math.Abs(program.LineDescender) / upm;
+        LineGap = Math.Max(0, program.LineGapUnits) / upm;
         if (Ascent - Descent <= 0.01f) { Ascent = 0.8f; Descent = -0.2f; }
-        _normalLineHeight = Ascent - Descent + LineGap;
         if (metrics != null)
         {
             Ascent = metrics.Ascent;
             Descent = metrics.Descent;
             LineGap = metrics.LineGap;
-            _normalLineHeight = metrics.NormalLineHeight;
         }
     }
-
-    public override float NormalLineHeight => _normalLineHeight;
 
     /// <summary>True when the font has a glyph for the code point (and its unicode-range, if any, includes it).</summary>
     public bool Covers(int codePoint)
@@ -85,8 +79,6 @@ internal sealed class FontChain : TextFont
     }
 
     public TextFont Primary => _primary;
-
-    public override float NormalLineHeight => _primary.NormalLineHeight;
 
     private static bool Covers(TextFont f, int cp)
         => f is EmbeddedFont e ? e.Covers(cp) : cp < 0x10000 && StandardFont.CanEncode((char)cp);
