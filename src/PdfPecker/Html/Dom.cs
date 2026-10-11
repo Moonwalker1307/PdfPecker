@@ -30,6 +30,9 @@ internal sealed class Element : Node
     // Filled in by the style resolver.
     public ComputedStyle Style = null!;
 
+    /// <summary>Taken out of the normal flow, e.g. a running page header or footer that is drawn on every page.</summary>
+    public bool Detached;
+
     public Element(string name) => Name = name;
 
     public string? GetAttribute(string name)

@@ -186,7 +186,8 @@ internal static class CssParser
         {
             int colon = part.IndexOf(':');
             if (colon <= 0) continue;
-            string name = part.Substring(0, colon).Trim().ToLowerInvariant();
+            string name = part.Substring(0, colon).Trim();
+            if (!name.StartsWith("--", StringComparison.Ordinal)) name = name.ToLowerInvariant(); // custom properties are case-sensitive
             string value = part.Substring(colon + 1).Trim();
             bool important = false;
             int bang = value.LastIndexOf('!');
@@ -195,7 +196,7 @@ internal static class CssParser
                 important = true;
                 value = value.Substring(0, bang).TrimEnd();
             }
-            if (name.Length == 0 || value.Length == 0) continue;
+            if (name.Length == 0 || value.Length == 0 && !name.StartsWith("--", StringComparison.Ordinal)) continue;
             Expand(name, value, important, output);
         }
     }
@@ -259,9 +260,19 @@ internal static class CssParser
 
     private static readonly string[] Sides = { "top", "right", "bottom", "left" };
 
-    private static void Expand(string name, string value, bool important, List<Declaration> output)
+    /// <summary>True when the value references a custom property and can only be expanded once the element's variables are known.</summary>
+    public static bool HasVar(string value) => value.IndexOf("var(", StringComparison.OrdinalIgnoreCase) >= 0;
+
+    internal static void Expand(string name, string value, bool important, List<Declaration> output)
     {
         void Add(string n, string v) => output.Add(new Declaration(n, v, important));
+
+        // A shorthand whose value uses var() is kept whole; the style resolver substitutes and expands it per element.
+        if (name.StartsWith("--", StringComparison.Ordinal) || HasVar(value))
+        {
+            output.Add(new Declaration(name, value, important));
+            return;
+        }
 
         switch (name)
         {
@@ -359,10 +370,97 @@ internal static class CssParser
             case "word-wrap":
             case "word-break":
                 return;
+            case "flex":
+                ExpandFlex(value, output, important);
+                return;
+            case "flex-flow":
+                foreach (var tok in Tokens(value.ToLowerInvariant()))
+                {
+                    if (tok is "row" or "row-reverse" or "column" or "column-reverse") Add("flex-direction", tok);
+                    else Add("flex-wrap", tok);
+                }
+                return;
+            case "gap":
+            case "grid-gap":
+            {
+                var t = Tokens(value);
+                if (t.Count == 0) return;
+                Add("row-gap", t[0]);
+                Add("column-gap", t.Count > 1 ? t[1] : t[0]);
+                return;
+            }
+            case "grid-row-gap":
+                Add("row-gap", value);
+                return;
+            case "grid-column-gap":
+                Add("column-gap", value);
+                return;
+            case "grid-column":
+            case "grid-row":
+            {
+                var parts = SplitTopLevel(value, '/');
+                string start = parts.Count > 0 ? parts[0].Trim() : "auto";
+                string end = parts.Count > 1 ? parts[1].Trim() : "auto";
+                Add(name + "-start", start);
+                Add(name + "-end", end);
+                return;
+            }
+            case "grid-area":
+            {
+                var parts = SplitTopLevel(value, '/');
+                string Part(int k) => parts.Count > k ? parts[k].Trim() : "auto";
+                Add("grid-row-start", Part(0));
+                Add("grid-column-start", Part(1));
+                Add("grid-row-end", Part(2));
+                Add("grid-column-end", Part(3));
+                return;
+            }
+            case "place-items":
+            case "place-content":
+            case "place-self":
+            {
+                var t = Tokens(value);
+                if (t.Count == 0) return;
+                string suffix = name.Substring(6);
+                Add("align-" + suffix, t[0]);
+                Add("justify-" + suffix, t.Count > 1 ? t[t.Count - 1] : t[0]);
+                return;
+            }
+            case "columns":
+                foreach (var tok in Tokens(value.ToLowerInvariant()))
+                {
+                    if (int.TryParse(tok, out _)) Add("column-count", tok);
+                    else if (tok != "auto") Add("column-width", tok);
+                }
+                return;
             default:
                 output.Add(new Declaration(name, value, important));
                 return;
         }
+    }
+
+    private static void ExpandFlex(string value, List<Declaration> output, bool important)
+    {
+        void Add(string n, string v) => output.Add(new Declaration(n, v, important));
+        var lower = value.Trim().ToLowerInvariant();
+        switch (lower)
+        {
+            case "none": Add("flex-grow", "0"); Add("flex-shrink", "0"); Add("flex-basis", "auto"); return;
+            case "auto": Add("flex-grow", "1"); Add("flex-shrink", "1"); Add("flex-basis", "auto"); return;
+            case "initial": Add("flex-grow", "0"); Add("flex-shrink", "1"); Add("flex-basis", "auto"); return;
+        }
+        string grow = "1", shrink = "1", basis = "0%";
+        int numbers = 0;
+        foreach (var tok in Tokens(lower))
+        {
+            bool isNumber = float.TryParse(tok, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _);
+            if (isNumber && numbers == 0) { grow = tok; numbers++; }
+            else if (isNumber && numbers == 1) { shrink = tok; numbers++; }
+            else basis = tok;
+        }
+        Add("flex-grow", grow);
+        Add("flex-shrink", shrink);
+        Add("flex-basis", basis);
     }
 
     private static string[] FourSides(List<string> t)

@@ -185,7 +185,7 @@ The site never reads files from the server (`AllowFileAccess = false`), limits r
 **HTML**: the common document elements: headings, paragraphs, `div`/`section`-style blocks, `span`, `a` (external links
 and `#id` links inside the document), `b`/`strong`, `i`/`em`, `u`, `s`, `sub`, `sup`, `small`, `big`, `mark`, `code`,
 `pre`, `blockquote`, `hr`, `br`, `ul`/`ol`/`li` (nested, with `start` and `value`), `dl`, `table` (with `thead`,
-`tbody`, `tfoot`, `caption`, `colspan`, `rowspan`, `col width`), `img`, and legacy attributes such as `align`,
+`tbody`, `tfoot`, `caption`, `colspan`, `rowspan`, `col width`), `img`, inline `<svg>`, and legacy attributes such as `align`,
 `valign`, `bgcolor`, `width`, `height`, `border`, `cellpadding`, `cellspacing` and `<font>`. The parser is forgiving
 about unclosed and misnested tags, the way browsers are.
 
@@ -203,18 +203,40 @@ Selectors: type, `.class`, `#id`, `*`, attribute selectors (`[a]`, `=`, `~=`, `|
 
 | Area | Properties |
 | --- | --- |
-| Box model | `display` (block, inline, inline-block, list-item, table parts, none), `margin`, `padding`, `border` (solid, dashed, dotted, double), `width`, `height`, `min-`/`max-width`, `min-height`, `box-sizing` |
+| Box model | `display` (block, inline, inline-block, flex, inline-flex, grid, inline-grid, list-item, table parts, none), `margin`, `padding`, `border` (solid, dashed, dotted, double), `width`, `height`, `min-`/`max-width`, `min-height`, `box-sizing` |
 | Text | `color`, `font`, `font-family`, `font-size`, `font-weight`, `font-style`, `line-height`, `text-align` (incl. justify), `text-decoration`, `text-transform`, `text-indent`, `letter-spacing`, `word-spacing`, `white-space`, `vertical-align` |
-| Backgrounds | `background-color`, `background` (colour part) |
+| Backgrounds | `background-color`, `background` (colour part), `opacity` on SVG |
+| Flexbox | `flex-direction`, `flex-wrap`, `flex-flow`, `flex`, `flex-grow`/`-shrink`/`-basis`, `order`, `justify-content`, `align-items`, `align-self`, `align-content`, `gap`, `margin: auto` |
+| Grid | `grid-template-columns`/`-rows` (lengths, `%`, `fr`, `auto`, `min-content`, `max-content`, `minmax()`, `fit-content()`, `repeat()` incl. `auto-fill`/`auto-fit`), `grid-auto-rows`/`-columns`, `grid-auto-flow`, `grid-column`/`-row` (line numbers and `span`), `grid-area`, `gap`, `justify-items`/`-self`, `align-items`/`-self`, `justify-content`, `align-content`, `place-*` |
+| Columns | `column-count`, `column-width`, `columns`, `column-gap` |
+| Variables | custom properties (`--name: value`) and `var(--name, fallback)`, anywhere including shorthands |
+| SVG | `fill`, `stroke`, `stroke-width`, `fill-opacity`, `stroke-opacity`, `fill-rule`, `stroke-linecap`, `stroke-linejoin`, `stroke-miterlimit` (as CSS or presentation attributes) |
 | Lists | `list-style-type` (disc, circle, square, decimal, decimal-leading-zero, alpha, roman, none), `list-style` |
 | Tables | `border-collapse`, `border-spacing`, cell `vertical-align`, automatic column widths |
 | Paging | `page-break-before`/`after`/`inside`, `break-before`/`after`/`inside`, `@page` size and margins |
 
-Units: `px`, `pt`, `em`, `rem`, `%`, `mm`, `cm`, `in`, `pc`, `ex`, `ch`. Colours: names, `#rgb`, `#rrggbb`,
+Units: `px`, `pt`, `em`, `rem`, `%`, `mm`, `cm`, `in`, `pc`, `ex`, `ch`, `vw`, `vh`, `vmin`, `vmax` (the viewport is
+the page's content area, minus any running header and footer). Colours: names, `#rgb`, `#rrggbb`,
 `#rrggbbaa`, `rgb()`, `rgba()`, `hsl()`, `hsla()`.
 
 **Pagination**: lines, images and table rows are never cut in half at a page boundary; table header rows repeat on
-every page a table spans; backgrounds and borders continue across pages.
+every page a table spans; backgrounds and borders continue across pages. Flex lines and grid rows move to the next
+page as a whole when they don't fit.
+
+**Running header and footer**: an element with the `data-sticky-pdf-header` or `data-sticky-pdf-footer` attribute is
+taken out of the flow and drawn at the top or bottom of every page, and the page content flows in the space between.
+Inside it, `{page}` and `{total-pages}` (or `{pages}`) are replaced with the page number and page count. An optional
+`height` attribute (`height="17mm"`) reserves at least that much space.
+
+```html
+<header data-sticky-pdf-header height="17mm">ACME Ltd · Payslip</header>
+<main>...</main>
+<footer data-sticky-pdf-footer height="12mm">Page {page} of {total-pages}</footer>
+```
+
+**SVG**: inline `<svg>` with `path` (all commands, arcs included), `rect` (incl. rounded), `circle`, `ellipse`, `line`,
+`polyline`, `polygon`, `g`, `use`, nested `svg`, `viewBox`, `preserveAspectRatio` and `transform`, drawn as vector
+paths.
 
 **Images**: JPEG (embedded as-is, RGB, grayscale and CMYK) and PNG (all colour types and bit depths, transparency,
 interlacing), from files, `data:` URIs or your `ResourceResolver`. Opaque PNGs are passed through without
@@ -229,8 +251,12 @@ These are deliberate scope choices for speed and size; they are the first candid
 
 - Text uses the standard PDF fonts, so characters are limited to the Windows-1252 set (Western European languages).
   Other characters are replaced with `?`. Embedding TrueType fonts is not supported yet.
-- No JavaScript, forms, `float`, `position`, flexbox or grid (flex and grid containers lay out as normal blocks),
-  `::before`/`::after`, background images, gradients, `border-radius`, shadows, transforms or SVG/GIF/WebP images.
+- No JavaScript, forms, `float`, `position`, `::before`/`::after`, background images, gradients, `border-radius`,
+  shadows, transforms or GIF/WebP images. SVG files in `<img>` are not drawn.
+- Inline SVG: no `<text>`, embedded images, clipping, masks, patterns or filters; gradients are drawn in their average
+  colour.
+- Grid: no named lines or `grid-template-areas`, no `dense` packing, no subgrid.
+- Multi-column: children are kept whole and balanced between columns; a single block is never split across columns.
 - Translucent colours (`rgba`) are blended onto white instead of using real transparency.
 
 ## Performance

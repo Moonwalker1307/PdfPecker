@@ -1,6 +1,7 @@
 using PdfPecker.Css;
 using PdfPecker.Html;
 using PdfPecker.Images;
+using PdfPecker.Svg;
 
 namespace PdfPecker.Layout;
 
@@ -41,6 +42,15 @@ internal sealed partial class LayoutEngine
     public float Layout(Element document, float width)
         => LayoutFlow(document, 0, 0, width);
 
+    /// <summary>Lays out a running header or footer on its own, unpaginated, at y = 0. Returns its height including margins.</summary>
+    public float LayoutBand(Element band, float width)
+    {
+        _paginate = false;
+        var s = band.Style;
+        float mt = s.MarginTop.IsAuto ? 0 : s.MarginTop.Resolve(width), mb = s.MarginBottom.IsAuto ? 0 : s.MarginBottom.Resolve(width);
+        return LayoutBlockBox(band, 0, mt, width, shrinkToFit: false) + mb;
+    }
+
     // ------------------------------------------------------------------ pagination helpers
 
     private const float Eps = 0.01f;
@@ -73,10 +83,12 @@ internal sealed partial class LayoutEngine
 
     // ------------------------------------------------------------------ block formatting
 
+    private static bool IsAtomicInline(Display d) => d is Display.InlineBlock or Display.InlineFlex or Display.InlineGrid;
+
     private static bool IsInlineLevel(Element e)
     {
         var d = e.Style.Display;
-        if (d == Display.InlineBlock) return true;
+        if (IsAtomicInline(d)) return true;
         if (d != Display.Inline) return false;
         return !ContainsBlock(e);
     }
@@ -85,9 +97,9 @@ internal sealed partial class LayoutEngine
     {
         foreach (var c in e.Children)
         {
-            if (c is not Element ce || ce.Style == null) continue;
+            if (c is not Element ce || ce.Style == null || ce.Detached) continue;
             var d = ce.Style.Display;
-            if (d == Display.None || d == Display.InlineBlock) continue;
+            if (d == Display.None || IsAtomicInline(d)) continue;
             if (d != Display.Inline) return true;
             if (ContainsBlock(ce)) return true;
         }
@@ -122,7 +134,7 @@ internal sealed partial class LayoutEngine
             }
             var e = (Element)child;
             var s = e.Style;
-            if (s == null || s.Display == Display.None) continue;
+            if (s == null || s.Display == Display.None || e.Detached) continue;
             if (IsInlineLevel(e) && !(s.Floated && e.Name != "img"))
             {
                 (run ??= new List<Node>()).Add(child);
@@ -138,6 +150,7 @@ internal sealed partial class LayoutEngine
                 run.Clear();
             }
 
+            if (s.PageBreakBefore || s.PageBreakAfter) _forcedBreaks++;
             if (s.Display == Display.ListItem)
             {
                 listIndex++;
@@ -190,23 +203,40 @@ internal sealed partial class LayoutEngine
     private float LayoutBlockBoxCore(Element e, float x, float y, float availW, bool shrinkToFit)
     {
         var s = e.Style;
-        if (e.Id != null) Anchors[e.Id] = y;
-        if (e.Name == "a" && e.GetAttribute("name") is { } aname) Anchors[aname] = y;
+        if (e.Id != null) SetAnchor(e.Id, y);
+        if (e.Name == "a" && e.GetAttribute("name") is { } aname) SetAnchor(aname, y);
 
         float ml = s.MarginLeft.Resolve(availW), mr = s.MarginRight.Resolve(availW);
         float bl = s.BorderLeft, br = s.BorderRight, bt = s.BorderTop, bb = s.BorderBottom;
         float pl = s.PaddingLeft.Resolve(availW), pr = s.PaddingRight.Resolve(availW);
         float pt = s.PaddingTop.Resolve(availW), pb = s.PaddingBottom.Resolve(availW);
         float frame = bl + br + pl + pr;
+        float frameV = bt + bb + pt + pb;
 
-        bool isImage = e.Name == "img";
+        // Sizes imposed by a flex or grid container (border-box).
+        bool hasWOverride = _widthOverride.TryGetValue(e, out float overrideW);
+        bool hasHOverride = _heightOverride.TryGetValue(e, out float overrideH);
+
+        bool isImage = e.Name == "img", isSvg = e.Name == "svg";
         float imgW = 0, imgH = 0;
         PdfImage? image = null;
+        SvgImage? svg = null;
         float contentW;
-        if (isImage)
+        if (isImage || isSvg)
         {
-            image = ImageSize(e, availW - ml - mr - frame, out imgW, out imgH);
+            float room = hasWOverride ? overrideW - frame : availW - ml - mr - frame;
+            if (isImage) image = ImageSize(e, room, out imgW, out imgH);
+            else svg = SvgSize(e, room, out imgW, out imgH);
+            if (hasWOverride && imgW > 0 && Math.Abs(room - imgW) > Eps)
+            {
+                if (s.Height.IsAuto) imgH *= Math.Max(0, room) / imgW;
+                imgW = Math.Max(0, room);
+            }
             contentW = imgW;
+        }
+        else if (hasWOverride)
+        {
+            contentW = overrideW - frame;
         }
         else if (!s.Width.IsAuto)
         {
@@ -222,12 +252,12 @@ internal sealed partial class LayoutEngine
                 contentW = Math.Min(contentW, max - frame);
             }
         }
-        if (!s.MaxWidth.IsAuto && !isImage)
+        if (!s.MaxWidth.IsAuto && !isImage && !isSvg && !hasWOverride)
         {
             float mw = s.MaxWidth.Resolve(availW) - (s.BorderBox ? frame : 0);
             if (contentW > mw) contentW = mw;
         }
-        if (!s.MinWidth.IsAuto && !isImage)
+        if (!s.MinWidth.IsAuto && !isImage && !isSvg && !hasWOverride)
         {
             float mnw = s.MinWidth.Resolve(availW) - (s.BorderBox ? frame : 0);
             if (contentW < mnw) contentW = mnw;
@@ -249,7 +279,7 @@ internal sealed partial class LayoutEngine
             _marker = new ListMarker { Text = MarkerText(s.ListStyleType, _currentListIndex), Type = s.ListStyleType, Style = s, ContentX = cx };
 
         float contentBottom;
-        if (isImage)
+        if (isImage || isSvg)
         {
             if (_paginate)
             {
@@ -261,6 +291,7 @@ internal sealed partial class LayoutEngine
                 }
             }
             if (image != null && s.Visible) _ops.Add(new ImageOp(cx, cy, imgW, imgH, image));
+            if (svg != null && s.Visible) _ops.Add(new SvgOp(cx, cy, imgW, imgH, svg));
             contentBottom = cy + imgH;
         }
         else if (e.Name == "hr")
@@ -269,7 +300,11 @@ internal sealed partial class LayoutEngine
         }
         else
         {
-            contentBottom = LayoutFlow(e, cx, cy, contentW);
+            float? definiteH = null;
+            if (hasHOverride) definiteH = Math.Max(0, overrideH - frameV);
+            else if (!s.Height.IsAuto && !s.Height.IsPercent) definiteH = Math.Max(0, s.Height.Value - (s.BorderBox ? frameV : 0));
+            float minH = !s.MinHeight.IsAuto && !s.MinHeight.IsPercent ? Math.Max(0, s.MinHeight.Value - (s.BorderBox ? frameV : 0)) : 0;
+            contentBottom = LayoutContent(e, cx, cy, contentW, definiteH, minH);
         }
 
         if (_marker != null && _marker.Style == s)
@@ -279,7 +314,11 @@ internal sealed partial class LayoutEngine
         }
 
         float contentH = contentBottom - cy;
-        if (!s.Height.IsAuto && !s.Height.IsPercent)
+        if (hasHOverride && !isImage && !isSvg)
+        {
+            contentH = Math.Max(0, overrideH - frameV);
+        }
+        else if (!s.Height.IsAuto && !s.Height.IsPercent)
         {
             float h = s.Height.Value - (s.BorderBox ? bt + bb + pt + pb : 0);
             contentH = Math.Max(0, h);
@@ -294,6 +333,16 @@ internal sealed partial class LayoutEngine
         BoxPainter.Paint(group, s, bx, y, used, bottom - y);
         _lastBoxRight = bx + used;
         return bottom;
+    }
+
+    /// <summary>Lays out the content box of a block container according to its display type.</summary>
+    private float LayoutContent(Element e, float x, float y, float w, float? definiteH, float minH)
+    {
+        var s = e.Style;
+        if (s.IsFlex) return LayoutFlex(e, x, y, w, definiteH, minH);
+        if (s.IsGrid) return LayoutGrid(e, x, y, w, definiteH, minH);
+        if (s.IsMultiColumn) return LayoutColumns(e, x, y, w);
+        return LayoutFlow(e, x, y, w);
     }
 
     // ------------------------------------------------------------------ list markers
@@ -371,9 +420,43 @@ internal sealed partial class LayoutEngine
     /// <summary>Computes the used size of an image in points. Returns the decoded image, or null when it could not be loaded.</summary>
     private PdfImage? ImageSize(Element e, float availW, out float w, out float h)
     {
-        var s = e.Style;
         var img = _images.Load(e.GetAttribute("src"));
         float iw = img != null ? img.Width * 0.75f : 0, ih = img != null ? img.Height * 0.75f : 0;
+        ReplacedSize(e, iw, ih, availW, out w, out h);
+        return img;
+    }
+
+    /// <summary>Computes the used size of an inline &lt;svg&gt; in points and returns its parsed drawing.</summary>
+    private SvgImage? SvgSize(Element e, float availW, out float w, out float h)
+    {
+        if (!_images.Svgs.TryGetValue(e, out var svg)) _images.Svgs[e] = svg = SvgImage.Build(e);
+        float iw, ih;
+        if (svg.Width is { } sw && svg.Height is { } sh) { iw = sw; ih = sh; }
+        else if (svg.HasViewBox && svg.ViewBoxWidth > 0 && svg.ViewBoxHeight > 0)
+        {
+            // Only a viewBox: as wide as the container (or a fixed width), with the viewBox's aspect ratio.
+            float ratio = svg.ViewBoxHeight / svg.ViewBoxWidth;
+            if (svg.Width is { } w1) { iw = w1; ih = w1 * ratio; }
+            else if (svg.Height is { } h1) { ih = h1; iw = h1 / ratio; }
+            else
+            {
+                iw = _measuring || availW <= 0 || availW > 50000 ? 225 : availW;
+                ih = iw * ratio;
+            }
+        }
+        else
+        {
+            iw = svg.Width ?? 225; // 300 x 150 px, as in browsers
+            ih = svg.Height ?? 112.5f;
+        }
+        ReplacedSize(e, iw, ih, availW, out w, out h);
+        return svg;
+    }
+
+    /// <summary>Used size of a replaced element from its intrinsic size and its CSS width, height and limits.</summary>
+    private void ReplacedSize(Element e, float iw, float ih, float availW, out float w, out float h)
+    {
+        var s = e.Style;
         bool hasW = !s.Width.IsAuto && !(_measuring && s.Width.IsPercent), hasH = !s.Height.IsAuto && !s.Height.IsPercent;
         w = hasW ? s.Width.Resolve(Math.Max(availW, 0)) : 0;
         h = hasH ? s.Height.Value : 0;
@@ -401,6 +484,111 @@ internal sealed partial class LayoutEngine
         if (_paginate && h > _pageH) { w *= _pageH / h; h = _pageH; }
         if (w < 0) w = 0;
         if (h < 0) h = 0;
-        return img;
+    }
+
+    // ------------------------------------------------------------------ anchors, captured layout, size overrides
+
+    private List<string>? _captureAnchors;
+    private int _forcedBreaks; // forced page breaks seen; captured content without any can be reused when it fits on a page
+    private readonly Dictionary<Element, float> _widthOverride = new();
+    private readonly Dictionary<Element, float> _heightOverride = new();
+
+    private void SetAnchor(string id, float y)
+    {
+        Anchors[id] = y;
+        _captureAnchors?.Add(id);
+    }
+
+    /// <summary>Content laid out on its own (unpaginated, at the origin) so that it can be measured and then moved into place.</summary>
+    private sealed class Captured
+    {
+        public List<DrawOp> Ops = null!;
+        public List<string>? AnchorIds;
+        public float Width, Height; // margin box
+        public float Baseline = float.NaN;
+        public bool ForcedBreaks;
+    }
+
+    private Captured Capture(Func<float> layout)
+    {
+        var savedOps = _ops;
+        bool savedPaginate = _paginate;
+        var savedMarker = _marker;
+        float savedBaseline = _lastBaseline;
+        var savedAnchors = _captureAnchors;
+        float savedRight = _lastBoxRight;
+        _ops = new List<DrawOp>();
+        _paginate = false;
+        _marker = null;
+        _lastBaseline = float.NaN;
+        _captureAnchors = null;
+        _lastBoxRight = 0;
+        int breaks = _forcedBreaks;
+        try
+        {
+            float bottom = layout();
+            return new Captured
+            {
+                Ops = _ops, AnchorIds = _captureAnchors, Height = bottom, Width = _lastBoxRight, Baseline = _lastBaseline,
+                ForcedBreaks = _forcedBreaks != breaks,
+            };
+        }
+        finally
+        {
+            _ops = savedOps;
+            _paginate = savedPaginate;
+            _marker = savedMarker;
+            _lastBaseline = savedBaseline;
+            _captureAnchors = savedAnchors;
+            _lastBoxRight = savedRight;
+        }
+    }
+
+    /// <summary>Lays out a block-level box in a box of <paramref name="outerW"/> (its margin box), optionally with a forced border-box size.</summary>
+    private Captured CaptureBox(Element e, float outerW, bool shrinkToFit, float? borderW = null, float? borderH = null)
+    {
+        var s = e.Style;
+        if (borderW.HasValue) _widthOverride[e] = borderW.Value;
+        if (borderH.HasValue) _heightOverride[e] = borderH.Value;
+        try
+        {
+            float mt = s.MarginTop.IsAuto ? 0 : s.MarginTop.Resolve(outerW), mb = s.MarginBottom.IsAuto ? 0 : s.MarginBottom.Resolve(outerW);
+            float mr = s.MarginRight.IsAuto ? 0 : s.MarginRight.Resolve(outerW);
+            var c = Capture(() => LayoutBlockBox(e, 0, mt, outerW, shrinkToFit) + mb);
+            c.Width += mr;
+            return c;
+        }
+        finally
+        {
+            if (borderW.HasValue) _widthOverride.Remove(e);
+            if (borderH.HasValue) _heightOverride.Remove(e);
+        }
+    }
+
+    /// <summary>Lays out a run of inline content (an anonymous block) at width <paramref name="w"/>.</summary>
+    private Captured CaptureRun(List<Node> run, Element container, float w)
+    {
+        var c = Capture(() => FlushInline(run, container, 0, 0, w, true, out _));
+        c.Width = w;
+        return c;
+    }
+
+    /// <summary>
+    /// Whether content captured without pagination can be used as is at <paramref name="top"/>: pagination only changes
+    /// a layout when something crosses a page boundary or forces a break.
+    /// </summary>
+    private bool Reusable(Captured c, float top) => !_paginate || !c.ForcedBreaks && !CrossesPage(top, top + c.Height);
+
+    /// <summary>Moves captured content to its final position and appends it to the output.</summary>
+    private void Place(Captured c, float dx, float dy)
+    {
+        foreach (var op in c.Ops)
+        {
+            op.Offset(dx, dy);
+            _ops.Add(op);
+        }
+        if (c.AnchorIds != null)
+            foreach (var id in c.AnchorIds)
+                if (Anchors.TryGetValue(id, out float ay)) SetAnchor(id, ay + dy);
     }
 }
