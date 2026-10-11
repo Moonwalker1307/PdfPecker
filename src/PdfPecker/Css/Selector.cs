@@ -80,7 +80,7 @@ internal sealed class Compound
             case PseudoKind.OnlyChild: return e.ElementSiblingCount == 1;
             case PseudoKind.NthChild: return MatchNth(p.A, p.B, e.ElementIndex);
             case PseudoKind.NthLastChild: return MatchNth(p.A, p.B, e.ElementSiblingCount - e.ElementIndex + 1);
-            case PseudoKind.Root: return e.Name == "html" || e.Parent?.Name == "#document" && e.Parent.Children.OfType<Element>().Count() == 1;
+            case PseudoKind.Root: return e.Name == "html" || e.Parent?.Name == "#document" && e.ElementSiblingCount == 1;
             case PseudoKind.Link: return e.Name == "a" && e.HasAttribute("href");
             case PseudoKind.Empty: return e.Children.Count == 0;
             case PseudoKind.Not: return p.Inner != null && !p.Inner.Matches(e);
@@ -91,7 +91,7 @@ internal sealed class Compound
     private static bool MatchNth(int a, int b, int index)
     {
         if (a == 0) return index == b;
-        int n = index - b;
+        long n = (long)index - b; // in long: extreme a and b from the stylesheet must not overflow
         return (a > 0 ? n >= 0 : n <= 0) && n % a == 0;
     }
 }
@@ -128,41 +128,38 @@ internal sealed class Selector
     public bool Matches(Element e)
     {
         if (!Parts[0].Matches(e)) return false;
-        return Parts.Length == 1 || MatchFrom(1, e);
+        return Parts.Length == 1 || MatchFrom(1, e) == MatchResult.Matched;
     }
 
+    // How a failed match tells the combinators to its right whether trying other elements can still help. Without it,
+    // descendant and sibling combinators backtrack exponentially ("div div div ... p" over deep markup).
+    // This is the scheme browsers use (Servo's selectors crate, WebKit's SelectorChecker).
+    private enum MatchResult : byte { Matched, RestartFromLaterSibling, RestartFromDescendant, FailedGlobally }
+
     // Parts[i-1].Combinator describes how Parts[i-1] relates to Parts[i] (its left neighbour).
-    private bool MatchFrom(int i, Element e)
+    private MatchResult MatchFrom(int i, Element e)
     {
-        if (i == Parts.Length) return true;
+        if (i == Parts.Length) return MatchResult.Matched;
         var part = Parts[i];
-        switch (Parts[i - 1].Combinator)
+        var combinator = Parts[i - 1].Combinator;
+        bool sibling = combinator is Combinator.Adjacent or Combinator.Sibling;
+        var candidate = sibling ? e.PreviousElementSibling : ParentElement(e);
+        while (true)
         {
-            case Combinator.Child:
-            {
-                var parent = e.Parent;
-                return parent != null && parent.Name != "#document" && part.Matches(parent) && MatchFrom(i + 1, parent);
-            }
-            case Combinator.Descendant:
-            {
-                for (var anc = e.Parent; anc != null && anc.Name != "#document"; anc = anc.Parent)
-                    if (part.Matches(anc) && MatchFrom(i + 1, anc)) return true;
-                return false;
-            }
-            case Combinator.Adjacent:
-            {
-                var prev = e.PreviousElementSibling;
-                return prev != null && part.Matches(prev) && MatchFrom(i + 1, prev);
-            }
-            case Combinator.Sibling:
-            {
-                for (var prev = e.PreviousElementSibling; prev != null; prev = prev.PreviousElementSibling)
-                    if (part.Matches(prev) && MatchFrom(i + 1, prev)) return true;
-                return false;
-            }
+            // Running out of siblings may still be fixed higher up; running out of ancestors cannot.
+            if (candidate == null) return sibling ? MatchResult.RestartFromDescendant : MatchResult.FailedGlobally;
+            var result = part.Matches(candidate) ? MatchFrom(i + 1, candidate) : MatchResult.RestartFromLaterSibling;
+            if (result is MatchResult.Matched or MatchResult.FailedGlobally || combinator == Combinator.Adjacent) return result;
+            if (combinator == Combinator.Child) return MatchResult.RestartFromDescendant;
+            if (result == MatchResult.RestartFromDescendant && combinator == Combinator.Sibling) return result;
+            candidate = sibling ? candidate.PreviousElementSibling : ParentElement(candidate);
         }
-        return false;
     }
+
+    private static Element? ParentElement(Element e) => e.Parent is { } p && p.Name != "#document" ? p : null;
+
+    // Real selectors stay far below these; the limits keep hostile stylesheets from costing deep recursion.
+    private const int MaxParts = 64, MaxNesting = 8;
 
     /// <summary>Parses one complex selector. Returns null for unsupported syntax, which drops the rule.</summary>
     public static Selector? Parse(string text)
@@ -188,7 +185,8 @@ internal sealed class Selector
                 continue;
             }
             if (parts.Count > 0 && pending == Combinator.None) return null;
-            var compound = ParseCompound(text, ref i);
+            if (parts.Count == MaxParts) return null;
+            var compound = ParseCompound(text, ref i, 0);
             if (compound == null) return null;
             if (parts.Count > 0) compound.Combinator = pending; // relation to the left neighbour, fixed up below
             parts.Add(compound);
@@ -210,7 +208,7 @@ internal sealed class Selector
         return new Selector(rtl);
     }
 
-    private static Compound? ParseCompound(string s, ref int i)
+    private static Compound? ParseCompound(string s, ref int i, int nesting)
     {
         var c = new Compound();
         List<string>? classes = null;
@@ -273,7 +271,7 @@ internal sealed class Selector
                     arg = s.Substring(start, i - start).Trim();
                     i++;
                 }
-                var p = ParsePseudo(name, arg);
+                var p = ParsePseudo(name, arg, nesting);
                 if (p == null) return null;
                 (pseudos ??= new()).Add(p);
                 any = true;
@@ -288,7 +286,7 @@ internal sealed class Selector
         return c;
     }
 
-    private static PseudoCondition? ParsePseudo(string name, string? arg)
+    private static PseudoCondition? ParsePseudo(string name, string? arg, int depth)
     {
         switch (name)
         {
@@ -307,9 +305,9 @@ internal sealed class Selector
             }
             case "not":
             {
-                if (arg == null) return null;
+                if (arg == null || depth >= MaxNesting) return null;
                 int j = 0;
-                var inner = ParseCompound(arg, ref j);
+                var inner = ParseCompound(arg, ref j, depth + 1);
                 if (inner == null || j != arg.Length) return null;
                 return new PseudoCondition { Kind = PseudoKind.Not, Inner = inner };
             }

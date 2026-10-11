@@ -489,19 +489,114 @@ internal sealed class PdfFile
         return pos + 9 <= d.Length && d[pos] == 'e' && d[pos + 1] == 'n' && d[pos + 2] == 'd' && d[pos + 3] == 's' && d[pos + 4] == 't';
     }
 
+    private int[]? _endstreams, _endobjs, _headers;
+
     private int FindEndstream(int from)
     {
+        // Positions of the keywords are found in one pass and binary searched: scanning ahead from every stream with a
+        // wrong /Length would be quadratic on a file made of such streams.
         var d = Data;
-        for (int i = from; i + 9 <= d.Length; i++)
-            if (d[i] == 'e' && d[i + 1] == 'n' && d[i + 2] == 'd' && d[i + 3] == 's' && d[i + 4] == 't' && d[i + 5] == 'r' && d[i + 6] == 'e' && d[i + 7] == 'a' && d[i + 8] == 'm')
-                return i;
-        // Also stop at "endobj" when "endstream" is missing.
-        for (int i = from; i + 6 <= d.Length; i++)
-            if (d[i] == 'e' && d[i + 1] == 'n' && d[i + 2] == 'd' && d[i + 3] == 'o' && d[i + 4] == 'b' && d[i + 5] == 'j') return i;
-        return d.Length;
+        lock (_lock)
+        {
+            if (_endstreams == null)
+            {
+                _endstreams = AllPositions(d, "endstream"u8);
+                _endobjs = AllPositions(d, "endobj"u8);
+                _headers = ObjectHeaders(d);
+            }
+        }
+        // The stream ends at "endstream"; when that is missing, at "endobj" or at the next object, never further: a
+        // file of unterminated streams must not give each one a copy of the rest of the file.
+        int found = Next(_endstreams, from);
+        int endobj = Next(_endobjs!, from), header = Next(_headers!, from);
+        if (found < 0 || endobj >= 0 && endobj < found) found = endobj;
+        if (found < 0 || header >= 0 && header < found) found = header;
+        return found < 0 ? d.Length : found;
+
+        static int[] AllPositions(byte[] data, ReadOnlySpan<byte> keyword)
+        {
+            var list = new List<int>();
+            for (int i = 0; ;)
+            {
+                int k = data.AsSpan(i).IndexOf(keyword);
+                if (k < 0) break;
+                list.Add(i + k);
+                i += k + keyword.Length;
+            }
+            return list.ToArray();
+        }
+
+        // Starts of "num gen obj" headers.
+        static int[] ObjectHeaders(byte[] data)
+        {
+            var list = new List<int>();
+            for (int i = 0; ;)
+            {
+                int k = data.AsSpan(i).IndexOf("obj"u8);
+                if (k < 0) break;
+                int o = i + k;
+                i = o + 3;
+                int p = o - 1;
+                if (p < 0 || !PdfLexer.IsWhite(data[p])) continue;
+                while (p >= 0 && PdfLexer.IsWhite(data[p])) p--;
+                int digits = p;
+                while (p >= 0 && data[p] >= '0' && data[p] <= '9') p--;
+                if (p == digits || p < 0 || !PdfLexer.IsWhite(data[p])) continue;
+                while (p >= 0 && PdfLexer.IsWhite(data[p])) p--;
+                digits = p;
+                while (p >= 0 && data[p] >= '0' && data[p] <= '9') p--;
+                if (p == digits) continue;
+                list.Add(p + 1);
+            }
+            return list.ToArray();
+        }
+
+        static int Next(int[] sorted, int from)
+        {
+            int idx = Array.BinarySearch(sorted, from);
+            if (idx < 0) idx = ~idx;
+            return idx < sorted.Length ? sorted[idx] : -1;
+        }
     }
 
     // ------------------------------------------------------------------ streams
+
+    // Work limits for the page being rendered on this thread (see BeginRender): content streams, forms, fonts and images
+    // drawn many times or decompressing to huge sizes add up, and one page must not decode without bound.
+    [ThreadStatic] private static long t_decodeBudget;
+    [ThreadStatic] private static bool t_budgeted;
+    [ThreadStatic] private static CancellationToken t_cancel;
+
+    /// <summary>The most decoded stream bytes one page render may produce, counting repeated decodes.</summary>
+    public const long MaxDecodedPerPage = 512L * 1024 * 1024;
+
+    /// <summary>What the page being rendered on this thread may still decode.</summary>
+    internal static long DecodeLimit => t_budgeted ? Math.Max(0, t_decodeBudget) : long.MaxValue;
+
+    /// <summary>Applies the per-page decode budget and <paramref name="cancel"/> to decoding on this thread until disposed.</summary>
+    public static RenderScope BeginRender(CancellationToken cancel)
+    {
+        t_budgeted = true;
+        t_decodeBudget = MaxDecodedPerPage;
+        t_cancel = cancel;
+        return default;
+    }
+
+    public readonly struct RenderScope : IDisposable
+    {
+        public void Dispose()
+        {
+            t_budgeted = false;
+            t_cancel = default;
+        }
+    }
+
+    private static void Charge(int decodedBytes)
+    {
+        t_cancel.ThrowIfCancellationRequested();
+        if (t_budgeted && (t_decodeBudget -= decodedBytes) < 0)
+            throw new InvalidDataException("The page decodes to more data than allowed.");
+    }
 
     /// <summary>Decodes a stream through all its filters.</summary>
     public byte[] DecodeStream(PdfStream s) => DecodeStream(s, stopAtImageFilter: false, out _, out _);
@@ -546,7 +641,10 @@ internal sealed class PdfFile
                 }
                 throw new NotSupportedException("Image filter " + filters[i] + " in a non-image stream.");
             }
+            t_cancel.ThrowIfCancellationRequested();
+            if (t_budgeted && t_decodeBudget <= 0) throw new InvalidDataException("The page decodes to more data than allowed.");
             data = Filters.Decode(filters[i], data, parms[i], this);
+            Charge(data.Length);
         }
         return data;
     }

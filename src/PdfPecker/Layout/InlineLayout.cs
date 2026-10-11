@@ -71,6 +71,16 @@ internal sealed partial class LayoutEngine
 
         public string Text => Start == 0 && Length == Source.Length ? Source : Source.Substring(Start, Length);
 
+        /// <summary>A copy showing <paramref name="length"/> characters of this item's text from <paramref name="offset"/>.</summary>
+        public Item Slice(int offset, int length, float width)
+        {
+            var c = (Item)MemberwiseClone();
+            c.Start = Start + offset;
+            c.Length = length;
+            c.Width = width;
+            return c;
+        }
+
         public Item CloneWithText(string text, float width)
         {
             var c = (Item)MemberwiseClone();
@@ -217,6 +227,8 @@ internal sealed partial class LayoutEngine
         return new Item { Kind = ItemKind.Box, Style = s, Width = width, Height = height, BoxBaseline = baseline, BoxOps = ops, Href = href };
     }
 
+    private const string TabSpaces = "        ";
+
     private void AddText(CollectState st, string text, ComputedStyle style, string? href, ComputedStyle? deco)
     {
         var ws = style.WhiteSpace;
@@ -257,9 +269,9 @@ internal sealed partial class LayoutEngine
                     i++;
                     continue;
                 }
+                // A tab is one item covering its spaces up to the next tab stop, not one item per space.
                 int count = c == '\t' ? 8 - st.Column % 8 : 1;
-                for (int k = 0; k < count; k++)
-                    { var it_ = Rent(ItemKind.Space, style); it_.Source = " "; it_.Length = 1; it_.Width = spaceW; it_.Breakable = breakable; it_.Href = href; it_.Deco = deco; items.Add(it_); }
+                { var it_ = Rent(ItemKind.Space, style); it_.Source = TabSpaces; it_.Length = count; it_.Width = spaceW * count; it_.Breakable = breakable; it_.Href = href; it_.Deco = deco; items.Add(it_); }
                 st.Column += count;
                 st.LastWasSpace = true;
                 i++;
@@ -325,6 +337,7 @@ internal sealed partial class LayoutEngine
 
     private float FlushInline(List<Node> run, Element container, float x, float y, float w, bool firstInBlock, out bool produced)
     {
+        Cancellation.ThrowIfCancellationRequested();
         _inlineDepth++;
         try
         {
@@ -357,6 +370,8 @@ internal sealed partial class LayoutEngine
     {
         var lines = new List<Line>();
         var cur = new Line();
+        // Whether the current line holds anything but anchors, kept up to date so checking it costs nothing.
+        bool hasContent = false;
         float curW = 0;
         float avail = availW - firstIndent;
         int n = items.Count;
@@ -373,15 +388,17 @@ internal sealed partial class LayoutEngine
             cur.Forced = forced;
             lines.Add(cur);
             cur = new Line();
+            hasContent = false;
             curW = 0;
             avail = availW;
         }
 
-        bool HasContent()
+        bool HasContent() => hasContent;
+
+        void Add(Item it)
         {
-            foreach (var it in cur.Items)
-                if (it.Kind != ItemKind.Anchor) return true;
-            return false;
+            cur.Items.Add(it);
+            if (it.Kind != ItemKind.Anchor) hasContent = true;
         }
 
         int i = 0;
@@ -390,7 +407,7 @@ internal sealed partial class LayoutEngine
             var it = items[i];
             if (it.Kind == ItemKind.Break)
             {
-                cur.Items.Add(it);
+                Add(it);
                 Finish(forced: true);
                 i++;
                 continue;
@@ -398,7 +415,7 @@ internal sealed partial class LayoutEngine
             if (it.Kind == ItemKind.Space && it.Breakable)
             {
                 if (!HasContent() && IsCollapsible(it.Style)) { i++; continue; }
-                cur.Items.Add(it);
+                Add(it);
                 curW += it.Width;
                 i++;
                 continue;
@@ -429,35 +446,43 @@ internal sealed partial class LayoutEngine
                         float room = avail - curW;
                         if (g.Width <= room + Eps || g.Kind == ItemKind.Anchor)
                         {
-                            cur.Items.Add(g);
+                            Add(g);
                             curW += g.Width;
                             break;
                         }
-                        if (g.Kind == ItemKind.Text && g.Text.Length > 1)
+                        if (g.Kind == ItemKind.Text && g.Length > 1)
                         {
+                            // Work on the item's slice of its source text: copying the rest of a long word for every
+                            // line would make breaking it quadratic.
                             var font = g.Style.Font;
                             float size = g.Style.FontSize, ls = g.Style.LetterSpacing;
+                            string src = g.Source;
+                            int start = g.Start, len = g.Length;
                             int fit = 0;
                             float fw = 0;
-                            while (fit < g.Text.Length)
+                            while (fit < len)
                             {
-                                float cw = font.CharWidth(g.Text[fit], size) + ls;
+                                float cw = font.CharWidth(src[start + fit], size) + ls;
                                 if (fw + cw > room + Eps) break;
                                 fw += cw;
                                 fit++;
                             }
-                            if (fit == 0 && !HasContent()) { fit = 1; fw = font.CharWidth(g.Text[0], size) + ls; }
+                            if (fit == 0 && !HasContent()) { fit = 1; fw = font.CharWidth(src[start], size) + ls; }
                             if (fit > 0)
                             {
-                                cur.Items.Add(g.CloneWithText(g.Text.Substring(0, fit), fw));
-                                var rest = g.Text.Substring(fit);
-                                g = g.CloneWithText(rest, font.MeasureUnits(rest, 0, rest.Length) * size / 1000f + ls * rest.Length);
+                                Add(g.Slice(0, fit, fw));
+                                // The rest is measured exactly once it fits on a line; until then its width only needs
+                                // to exceed the room, so subtracting is enough.
+                                float restW = g.Width - fw;
+                                int restLen = len - fit;
+                                if (restW <= availW + Eps) restW = font.MeasureUnits(src, start + fit, restLen) * size / 1000f + ls * restLen;
+                                g = g.Slice(fit, restLen, restW);
                             }
                             Finish(forced: false);
                             continue;
                         }
                         if (HasContent()) { Finish(forced: false); continue; }
-                        cur.Items.Add(g); // overflows, nothing else we can do
+                        Add(g); // overflows, nothing else we can do
                         curW += g.Width;
                         break;
                     }
@@ -465,7 +490,7 @@ internal sealed partial class LayoutEngine
             }
             else
             {
-                for (int k = i; k < j; k++) cur.Items.Add(items[k]);
+                for (int k = i; k < j; k++) Add(items[k]);
                 curW += gw;
             }
             i = j;
@@ -554,6 +579,7 @@ internal sealed partial class LayoutEngine
 
             float lineH = maxA + lineD[li];
             y = FitOnPage(y, lineH);
+            CheckPageLimit(y);
             if (breakBefore != null && breakBefore[li]) y = NextPage(y);
             float baseline = y + maxA;
             float lineIndent = li == 0 ? indent : 0;

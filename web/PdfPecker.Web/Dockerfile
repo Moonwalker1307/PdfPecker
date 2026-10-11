@@ -7,10 +7,13 @@ COPY README.md .
 ARG VERSION=0.1.0
 RUN dotnet publish web/PdfPecker.Web -c Release -p:Version=$VERSION -o /app
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0
+# Chiseled: Ubuntu without a shell or package manager, only what .NET needs, so there is little to attack.
+# The floating 10.0 tags pick up .NET and OS security patches on every build.
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled
 WORKDIR /app
 COPY --from=build /app .
-ENV ASPNETCORE_URLS=http://+:8080
+ENV ASPNETCORE_URLS=http://+:8080 \
+    DOTNET_EnableDiagnostics=0
 EXPOSE 8080
 USER app
 ENTRYPOINT ["dotnet", "PdfPecker.Web.dll"]

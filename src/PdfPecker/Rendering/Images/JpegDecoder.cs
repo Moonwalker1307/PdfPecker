@@ -200,7 +200,7 @@ internal sealed class JpegDecoder
         int n = d[p + 5];
         if (_width <= 0 || n < 1 || n > 4) throw new InvalidDataException("Bad JPEG frame.");
         if (_height == 0) _height = 1; // DNL-defined height: decode what we can
-        if ((long)_width * _height > 200_000_000) throw new InvalidDataException("JPEG too large.");
+        if ((long)_width * _height > PdfImageDecoder.MaxPixels) throw new InvalidDataException("JPEG too large.");
         _comps = new Component[n];
         for (int i = 0; i < n; i++)
         {

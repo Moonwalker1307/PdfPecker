@@ -116,6 +116,13 @@ public sealed class PdfOptions
     /// </summary>
     public bool Bookmarks { get; set; } = true;
 
+    /// <summary>
+    /// The most pages a document may have; a longer one throws <see cref="PdfLimitException"/>. Default: 100,000.
+    /// Lower it when converting untrusted HTML, where a few bytes of CSS (a huge height, thousands of page breaks)
+    /// can ask for millions of pages.
+    /// </summary>
+    public int MaxPages { get; set; } = 100_000;
+
     /// <summary>Compress page content streams. Default: true.</summary>
     public bool Compress { get; set; } = true;
 
