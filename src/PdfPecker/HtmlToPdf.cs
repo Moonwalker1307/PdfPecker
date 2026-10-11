@@ -41,7 +41,7 @@ public static class HtmlToPdf
     public static Task<byte[]> ConvertAsync(string html, PdfOptions? options = null, CancellationToken cancellationToken = default)
         => Task.Run(() => Convert(html, options), cancellationToken);
 
-    private static byte[] Render(string html, PdfOptions options, string? baseDirectory)
+    internal static byte[] Render(string html, PdfOptions options, string? baseDirectory)
     {
         var doc = HtmlParser.Parse(html);
         var resolver = options.ResourceResolver;

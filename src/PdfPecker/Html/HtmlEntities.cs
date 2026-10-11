@@ -36,6 +36,9 @@ internal static class HtmlEntities
         return d;
     }
 
+    /// <summary>Looks up a named character reference (without '&amp;' and ';').</summary>
+    public static bool TryGetNamed(string name, out string value) => Named.TryGetValue(name, out value!);
+
     /// <summary>Decodes character references in <paramref name="s"/>. Returns the input when it has none.</summary>
     public static string Decode(string s)
     {
