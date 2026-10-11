@@ -1,0 +1,424 @@
+using System.Globalization;
+using System.IO.Compression;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using PdfPecker.Pdf;
+using PdfPecker.Rendering.Parsing;
+
+namespace PdfPecker.Signing;
+
+/// <summary>
+/// Appends a signature field, its widget and the signature dictionary to a PDF as an incremental update, then fills in
+/// the CMS signature over everything but the /Contents hole.
+/// </summary>
+internal static class SignatureWriter
+{
+    private const int ByteRangeWidth = 48;
+
+    public static byte[] Sign(byte[] pdf, PdfSignatureOptions o, string? password)
+    {
+        if (!o.Certificate.HasPrivateKey)
+            throw new ArgumentException("The signing certificate has no private key. Load it from a .pfx file or a certificate store entry that includes the key.", nameof(o));
+        Cms.HashOid(o.HashAlgorithm); // validate early
+
+        var file = PdfFile.Open(pdf, password);
+        var certs = Cms.CertificateChain(o.Certificate, o.ExtraCertificates);
+        var time = o.SigningTime ?? DateTimeOffset.Now;
+        time = time.AddTicks(-(time.Ticks % TimeSpan.TicksPerSecond));
+        Func<byte[], byte[]>? timestamp = string.IsNullOrEmpty(o.TimestampUrl)
+            ? null
+            : signature => TimestampClient.GetToken(o.TimestampUrl!, o.TimestampHttpClient, signature, o.HashAlgorithm);
+
+        int reserve = 2048 + certs.Sum(c => c.RawData.Length) + (timestamp != null ? 12288 : 0);
+        for (int attempt = 0; ; attempt++)
+        {
+            var result = Build(file, pdf, o, certs, time, timestamp, reserve, out int needed);
+            if (result != null) return result;
+            if (attempt > 0) throw new PdfSignatureException("The signature does not fit its reserved space.");
+            reserve = needed + 2048;
+        }
+    }
+
+    private static byte[]? Build(PdfFile file, byte[] pdf, PdfSignatureOptions o, List<X509Certificate2> certs, DateTimeOffset time,
+        Func<byte[], byte[]>? timestamp, int reserve, out int needed)
+    {
+        needed = 0;
+        var trailer = file.Trailer;
+        var rootRef = trailer["Root"] as PdfRef ?? throw new PdfSignatureException("The PDF has no document catalog reference.");
+        var catalog = file.Resolve(rootRef) as PdfDict ?? throw new PdfSignatureException("The PDF has no document catalog.");
+        var crypt = file.Decryptor;
+
+        // Pages, with their inherited media boxes.
+        var pages = new List<(PdfRef Ref, PdfDict Dict, double[] Media)>();
+        void Walk(PdfObject? node, double[] media, int depth)
+        {
+            if (depth > 64 || node is not PdfRef r || file.Resolve(r) is not PdfDict d) return;
+            var box = file.GetNumbers(d, "MediaBox");
+            if (box is { Length: 4 }) media = box;
+            var kids = file.GetArray(d, "Kids");
+            if (kids != null && file.GetName(d, "Type") != "Page")
+                foreach (var k in kids.Items) Walk(k, media, depth + 1);
+            else pages.Add((r, d, media));
+        }
+        Walk(catalog["Pages"], new double[] { 0, 0, 612, 792 }, 0);
+        if (pages.Count == 0) throw new PdfSignatureException("The PDF has no pages.");
+
+        var ap = o.Appearance;
+        int pageIndex = 0;
+        if (ap != null)
+        {
+            pageIndex = ap.Page < 0 ? pages.Count + ap.Page : ap.Page - 1;
+            if (pageIndex < 0 || pageIndex >= pages.Count)
+                throw new ArgumentOutOfRangeException(nameof(o), $"The signature box is on page {ap.Page}, but the PDF has {pages.Count} page(s).");
+            if (ap.Width <= 0 || ap.Height <= 0) throw new ArgumentOutOfRangeException(nameof(o), "The signature box needs a positive width and height.");
+        }
+        var (pageRef, pageDict, media) = pages[pageIndex];
+
+        int next = Math.Max(file.GetInt(trailer, "Size", 0), file.MaxObjectNumber + 1);
+        int widgetNum = next++, apNum = next++, sigNum = next++;
+        var widgetRef = new PdfRef(widgetNum, 0);
+
+        // AcroForm: the signature field joins the existing fields.
+        var acroEntry = catalog["AcroForm"];
+        var acro = Copy(file.Resolve(acroEntry) as PdfDict);
+        var fields = new List<PdfObject>();
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        if (file.GetArray(acro, "Fields") is { } existing)
+            foreach (var f in existing.Items)
+            {
+                fields.Add(f);
+                if (file.Resolve(f) is PdfDict fd && file.Resolve(fd["T"]) is PdfString t) names.Add(t.Text);
+            }
+        fields.Add(widgetRef);
+        acro.Entries["Fields"] = new PdfArray(fields);
+        acro.Entries["SigFlags"] = PdfNumber.Int(3);
+        string fieldName = o.FieldName ?? "";
+        if (fieldName.Length == 0)
+            for (int i = 1; ; i++)
+                if (!names.Contains(fieldName = "Signature" + i.ToString(CultureInfo.InvariantCulture))) break;
+
+        var output = new ByteBuffer(pdf.Length + reserve * 2 + 8192);
+        output.Bytes(pdf);
+        if (pdf.Length == 0 || pdf[^1] != '\n') output.Nl();
+        var offsets = new SortedDictionary<int, (long Offset, int Gen)>();
+
+        void WriteObject(int num, int gen, PdfObject obj)
+        {
+            offsets[num] = (output.Length, gen);
+            output.Int(num).Sp().Int(gen).Ascii(" obj\n");
+            Serialize(output, obj, s => crypt == null ? s : crypt.EncryptString(s, num, gen));
+            output.Ascii("\nendobj\n");
+        }
+
+        // Catalog (or the AcroForm object it points to).
+        if (acroEntry is PdfRef acroRef) WriteObject(acroRef.Num, acroRef.Gen, acro);
+        else
+        {
+            var cat = Copy(catalog);
+            cat.Entries["AcroForm"] = acro;
+            WriteObject(rootRef.Num, rootRef.Gen, cat);
+        }
+
+        // The page's annotations.
+        var annotsEntry = pageDict["Annots"];
+        var annots = new List<PdfObject>();
+        if (file.Resolve(annotsEntry) is PdfArray oldAnnots) annots.AddRange(oldAnnots.Items);
+        annots.Add(widgetRef);
+        if (annotsEntry is PdfRef annotsRef) WriteObject(annotsRef.Num, annotsRef.Gen, new PdfArray(annots));
+        else
+        {
+            var page = Copy(pageDict);
+            page.Entries["Annots"] = new PdfArray(annots);
+            WriteObject(pageRef.Num, pageRef.Gen, page);
+        }
+
+        // Widget annotation, merged with the signature field.
+        float x1 = 0, y1 = 0, w = 0, h = 0;
+        if (ap != null)
+        {
+            w = ap.Width;
+            h = ap.Height;
+            x1 = (float)media[0] + ap.X;
+            y1 = (float)media[3] - ap.Y - h;
+        }
+        var widget = new PdfDict();
+        widget.Entries["Type"] = PdfName.Get("Annot");
+        widget.Entries["Subtype"] = PdfName.Get("Widget");
+        widget.Entries["FT"] = PdfName.Get("Sig");
+        widget.Entries["T"] = Text(fieldName);
+        widget.Entries["V"] = new PdfRef(sigNum, 0);
+        widget.Entries["Rect"] = new PdfArray(new List<PdfObject> { Real(x1), Real(y1), Real(x1 + w), Real(y1 + h) });
+        widget.Entries["P"] = pageRef;
+        widget.Entries["F"] = PdfNumber.Int(132); // Print | Locked
+        var apDict = new PdfDict();
+        apDict.Entries["N"] = new PdfRef(apNum, 0);
+        widget.Entries["AP"] = apDict;
+        WriteObject(widgetNum, 0, widget);
+
+        // Appearance stream: the visible box, or an empty form for an invisible signature.
+        string signer = o.SignerName ?? SignerName(o.Certificate);
+        byte[] content = ap == null ? Array.Empty<byte>() : SignatureAppearanceBuilder.Content(w, h, Lines(ap, o, signer, time), ap.Border);
+        bool flate = content.Length > 64;
+        if (flate)
+        {
+            using var ms = new MemoryStream();
+            using (var z = new ZLibStream(ms, CompressionLevel.Optimal, leaveOpen: true)) z.Write(content);
+            content = ms.ToArray();
+        }
+        if (crypt != null) content = crypt.EncryptStream(content, apNum, 0);
+        offsets[apNum] = (output.Length, 0);
+        output.Int(apNum).Ascii(" 0 obj\n<< /Type /XObject /Subtype /Form /BBox [0 0 ").Num(w).Sp().Num(h)
+            .Ascii("] /Resources << >> /Length ").Int(content.Length);
+        if (flate) output.Ascii(" /Filter /FlateDecode");
+        output.Ascii(" >>\nstream\n").Bytes(content).Ascii("\nendstream\nendobj\n");
+
+        // Signature dictionary with the /ByteRange and /Contents placeholders.
+        offsets[sigNum] = (output.Length, 0);
+        output.Int(sigNum).Ascii(" 0 obj\n<< /Type /Sig /Filter /Adobe.PPKLite /SubFilter /")
+            .Ascii(o.Format == PdfSignatureFormat.PAdES ? "ETSI.CAdES.detached" : "adbe.pkcs7.detached")
+            .Ascii(" /ByteRange [");
+        int byteRangePos = output.Length;
+        output.Ascii(new string(' ', ByteRangeWidth)).Ascii("] /Contents ");
+        int contentsStart = output.Length;
+        output.Byte((byte)'<');
+        for (int i = 0; i < reserve * 2; i++) output.Byte((byte)'0');
+        output.Byte((byte)'>');
+        int contentsEnd = output.Length;
+        Func<byte[], byte[]> sigCrypt = s => crypt == null ? s : crypt.EncryptString(s, sigNum, 0);
+        output.Ascii(" /M ");
+        Serialize(output, new PdfString(Latin(PdfDate(time))), sigCrypt);
+        output.Ascii(" /Name ");
+        Serialize(output, Text(signer), sigCrypt);
+        if (!string.IsNullOrEmpty(o.Reason)) { output.Ascii(" /Reason "); Serialize(output, Text(o.Reason!), sigCrypt); }
+        if (!string.IsNullOrEmpty(o.Location)) { output.Ascii(" /Location "); Serialize(output, Text(o.Location!), sigCrypt); }
+        if (!string.IsNullOrEmpty(o.ContactInfo)) { output.Ascii(" /ContactInfo "); Serialize(output, Text(o.ContactInfo!), sigCrypt); }
+        output.Ascii(" /Prop_Build << /App << /Name /PdfPecker >> >> >>\nendobj\n");
+
+        WriteXref(file, output, offsets, rootRef, next);
+
+        // Fill in the byte range, hash it and sign.
+        byte[] buf = output.RawBuffer;
+        int total = output.Length;
+        string range = string.Create(CultureInfo.InvariantCulture, $"0 {contentsStart} {contentsEnd} {total - contentsEnd}");
+        for (int i = 0; i < range.Length; i++) buf[byteRangePos + i] = (byte)range[i];
+
+        using var hash = IncrementalHash.CreateHash(o.HashAlgorithm);
+        hash.AppendData(buf, 0, contentsStart);
+        hash.AppendData(buf, contentsEnd, total - contentsEnd);
+        byte[] cms = Cms.Sign(hash.GetHashAndReset(), o.Certificate, certs, o.HashAlgorithm, o.Format == PdfSignatureFormat.PAdES, time, timestamp);
+        if (cms.Length > reserve)
+        {
+            needed = cms.Length;
+            return null;
+        }
+        const string hex = "0123456789ABCDEF";
+        for (int i = 0; i < cms.Length; i++)
+        {
+            buf[contentsStart + 1 + 2 * i] = (byte)hex[cms[i] >> 4];
+            buf[contentsStart + 2 + 2 * i] = (byte)hex[cms[i] & 15];
+        }
+        return output.Span.ToArray();
+    }
+
+    /// <summary>Writes the update's cross-reference section: a table, or a stream when the file uses cross-reference streams.</summary>
+    private static void WriteXref(PdfFile file, ByteBuffer output, SortedDictionary<int, (long Offset, int Gen)> offsets, PdfRef rootRef, int next)
+    {
+        var trailer = file.Trailer;
+        long prev = file.LastXrefOffset;
+        bool stream = prev >= 0 && !StartsWithXrefKeyword(file.Data, prev);
+
+        var t = new PdfDict();
+        t.Entries["Root"] = rootRef;
+        if (trailer["Info"] is PdfRef info) t.Entries["Info"] = info;
+        if (trailer["Encrypt"] is { } enc && !enc.IsNull) t.Entries["Encrypt"] = enc;
+        if (file.Resolve(trailer["ID"]) is PdfArray { Count: 2 } id) t.Entries["ID"] = id;
+        else
+        {
+            var fresh = new PdfString(RandomNumberGenerator.GetBytes(16), hex: true);
+            t.Entries["ID"] = new PdfArray(new List<PdfObject> { fresh, fresh });
+        }
+        if (prev >= 0) t.Entries["Prev"] = PdfNumber.Int(prev);
+
+        // Runs of consecutive object numbers.
+        var runs = new List<(int Start, List<(long Offset, int Gen)> Entries)>();
+        void Collect()
+        {
+            runs.Clear();
+            foreach (var (num, entry) in offsets)
+            {
+                if (runs.Count > 0 && runs[^1].Start + runs[^1].Entries.Count == num) runs[^1].Entries.Add(entry);
+                else runs.Add((num, new List<(long, int)> { entry }));
+            }
+        }
+
+        long xrefPos = output.Length;
+        if (!stream)
+        {
+            Collect();
+            output.Ascii("xref\n");
+            foreach (var (start, entries) in runs)
+            {
+                output.Int(start).Sp().Int(entries.Count).Nl();
+                foreach (var (off, gen) in entries)
+                    output.Ascii(off.ToString("D10", CultureInfo.InvariantCulture)).Sp()
+                        .Ascii(gen.ToString("D5", CultureInfo.InvariantCulture)).Ascii(" n\r\n");
+            }
+            t.Entries["Size"] = PdfNumber.Int(next);
+            output.Ascii("trailer\n");
+            Serialize(output, t, s => s);
+        }
+        else
+        {
+            int xrefNum = next++;
+            offsets[xrefNum] = (xrefPos, 0);
+            Collect();
+            var data = new List<byte>();
+            var index = new List<PdfObject>();
+            foreach (var (start, entries) in runs)
+            {
+                index.Add(PdfNumber.Int(start));
+                index.Add(PdfNumber.Int(entries.Count));
+                foreach (var (off, gen) in entries)
+                {
+                    data.Add(1);
+                    for (int s = 32; s >= 0; s -= 8) data.Add((byte)(off >> s));
+                    data.Add((byte)(gen >> 8));
+                    data.Add((byte)gen);
+                }
+            }
+            t.Entries["Type"] = PdfName.Get("XRef");
+            t.Entries["Size"] = PdfNumber.Int(next);
+            t.Entries["W"] = new PdfArray(new List<PdfObject> { PdfNumber.Int(1), PdfNumber.Int(5), PdfNumber.Int(2) });
+            t.Entries["Index"] = new PdfArray(index);
+            t.Entries["Length"] = PdfNumber.Int(data.Count);
+            output.Int(xrefNum).Ascii(" 0 obj\n");
+            Serialize(output, t, s => s);
+            output.Ascii("\nstream\n").Bytes(data.ToArray()).Ascii("\nendstream\nendobj");
+        }
+        output.Ascii("\nstartxref\n").Int(xrefPos).Ascii("\n%%EOF\n");
+    }
+
+    private static bool StartsWithXrefKeyword(byte[] data, long offset)
+    {
+        long p = offset;
+        while (p < data.Length && (data[p] == ' ' || data[p] == '\r' || data[p] == '\n' || data[p] == '\t')) p++;
+        return p + 4 <= data.Length && data[p] == 'x' && data[p + 1] == 'r' && data[p + 2] == 'e' && data[p + 3] == 'f';
+    }
+
+    private static string[] Lines(PdfSignatureAppearance ap, PdfSignatureOptions o, string signer, DateTimeOffset time)
+    {
+        string date = time.ToString("yyyy-MM-dd HH:mm:ss zzz", CultureInfo.InvariantCulture);
+        string text = ap.Text ?? "Digitally signed by {name}\nDate: {date}"
+            + (string.IsNullOrEmpty(o.Reason) ? "" : "\nReason: {reason}")
+            + (string.IsNullOrEmpty(o.Location) ? "" : "\nLocation: {location}");
+        text = text.Replace("{name}", signer).Replace("{date}", date)
+            .Replace("{reason}", o.Reason ?? "").Replace("{location}", o.Location ?? "");
+        return text.Replace("\r\n", "\n").Split('\n');
+    }
+
+    private static string SignerName(X509Certificate2 cert)
+    {
+        var name = cert.GetNameInfo(X509NameType.SimpleName, forIssuer: false);
+        return string.IsNullOrEmpty(name) ? cert.Subject : name;
+    }
+
+    private static string PdfDate(DateTimeOffset t)
+    {
+        var off = t.Offset;
+        string sign = off < TimeSpan.Zero ? "-" : "+";
+        off = off.Duration();
+        return "D:" + t.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture) + sign
+            + off.Hours.ToString("D2", CultureInfo.InvariantCulture) + "'" + off.Minutes.ToString("D2", CultureInfo.InvariantCulture) + "'";
+    }
+
+    private static byte[] Latin(string s) => System.Text.Encoding.Latin1.GetBytes(s);
+
+    /// <summary>A PDF text string: ASCII when possible, otherwise UTF-16BE with a byte order mark.</summary>
+    private static PdfString Text(string s)
+    {
+        if (s.All(ch => ch >= 32 && ch < 127)) return new PdfString(Latin(s));
+        var bytes = new byte[2 + 2 * s.Length];
+        bytes[0] = 0xFE;
+        bytes[1] = 0xFF;
+        for (int i = 0; i < s.Length; i++)
+        {
+            bytes[2 + 2 * i] = (byte)(s[i] >> 8);
+            bytes[3 + 2 * i] = (byte)s[i];
+        }
+        return new PdfString(bytes);
+    }
+
+    private static PdfNumber Real(float v) => PdfNumber.Real(Math.Round(v, 3));
+
+    private static PdfDict Copy(PdfDict? d)
+        => d == null ? new PdfDict() : new PdfDict(new Dictionary<string, PdfObject>(d.Entries, StringComparer.Ordinal));
+
+    /// <summary>Writes a parsed object back in PDF syntax. Strings go through <paramref name="encrypt"/> and are written as hex.</summary>
+    internal static void Serialize(ByteBuffer b, PdfObject? o, Func<byte[], byte[]> encrypt)
+    {
+        switch (o)
+        {
+            case null:
+            case PdfNull:
+                b.Ascii("null");
+                break;
+            case PdfBool bo:
+                b.Ascii(bo.Value ? "true" : "false");
+                break;
+            case PdfNumber n:
+                if (n.IsInteger || n.Value == Math.Floor(n.Value) && Math.Abs(n.Value) < 1e15) b.Int((long)n.Value);
+                else b.Ascii(n.Value.ToString("0.##########", CultureInfo.InvariantCulture));
+                break;
+            case PdfString s:
+                {
+                    const string hex = "0123456789ABCDEF";
+                    var bytes = encrypt(s.Bytes);
+                    b.Byte((byte)'<');
+                    foreach (var x in bytes) b.Byte((byte)hex[x >> 4]).Byte((byte)hex[x & 15]);
+                    b.Byte((byte)'>');
+                    break;
+                }
+            case PdfName name:
+                WriteName(b, name.Value);
+                break;
+            case PdfArray a:
+                b.Byte((byte)'[');
+                for (int i = 0; i < a.Count; i++)
+                {
+                    if (i > 0) b.Sp();
+                    Serialize(b, a[i], encrypt);
+                }
+                b.Byte((byte)']');
+                break;
+            case PdfRef r:
+                b.Int(r.Num).Sp().Int(r.Gen).Ascii(" R");
+                break;
+            case PdfStream:
+                throw new PdfSignatureException("A stream cannot be written inline.");
+            case PdfDict d:
+                b.Ascii("<<");
+                foreach (var (key, value) in d.Entries)
+                {
+                    WriteName(b, key);
+                    b.Sp();
+                    Serialize(b, value, encrypt);
+                    b.Sp();
+                }
+                b.Ascii(">>");
+                break;
+        }
+    }
+
+    private static void WriteName(ByteBuffer b, string name)
+    {
+        const string hex = "0123456789ABCDEF";
+        b.Byte((byte)'/');
+        var bytes = name.All(ch => ch < 256) ? Latin(name) : System.Text.Encoding.UTF8.GetBytes(name);
+        foreach (var x in bytes)
+        {
+            bool regular = x > 0x20 && x < 0x7F && "#()<>[]{}/%".IndexOf((char)x) < 0;
+            if (regular) b.Byte(x);
+            else b.Byte((byte)'#').Byte((byte)hex[x >> 4]).Byte((byte)hex[x & 15]);
+        }
+    }
+}
