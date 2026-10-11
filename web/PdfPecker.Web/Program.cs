@@ -27,7 +27,8 @@ app.MapGet("/health", () => Results.Text("ok"));
 
 // POST /api/convert
 //   multipart/form-data: an uploaded HTML or Markdown (.md) file in the "file" field; options as form fields or query string
-//   application/json:    { "html": "...", "pageSize": "A4", "landscape": false, "marginMm": 12.7, "pageNumbers": true }
+//   application/json:    { "html": "...", "pageSize": "A4", "landscape": false, "marginMm": 12.7, "pageNumbers": true,
+//                          "watermark": "DRAFT", "password": "secret", "pdfa": false }
 //                        or { "markdown": "# Title", "output": "html" }
 //   anything else:       the raw HTML or Markdown as the body, options in the query string
 //                        (?pageSize=Letter&landscape=true&marginMm=10&pageNumbers=true&format=markdown&output=pdf)
@@ -67,6 +68,9 @@ app.MapPost("/api/convert", async (HttpRequest request, CancellationToken ct) =>
             Landscape = bool.TryParse(Field("landscape"), out var fl) && fl,
             MarginMm = float.TryParse(Field("marginMm"), System.Globalization.CultureInfo.InvariantCulture, out var fm) ? fm : null,
             PageNumbers = bool.TryParse(Field("pageNumbers"), out var fp) && fp,
+            Watermark = Field("watermark"),
+            Password = Field("password"),
+            PdfA = bool.TryParse(Field("pdfa"), out var fa) && fa,
         };
     }
     else
@@ -85,6 +89,9 @@ app.MapPost("/api/convert", async (HttpRequest request, CancellationToken ct) =>
             Landscape = bool.TryParse(q["landscape"], out var l) && l,
             MarginMm = float.TryParse(q["marginMm"], System.Globalization.CultureInfo.InvariantCulture, out var m) ? m : null,
             PageNumbers = bool.TryParse(q["pageNumbers"], out var p) && p,
+            Watermark = q["watermark"],
+            Password = q["password"],
+            PdfA = bool.TryParse(q["pdfa"], out var a) && a,
         };
     }
     if (req is null)
@@ -232,6 +239,9 @@ static PdfOptions BuildOptions(ConvertRequest req)
         PageSize = size,
         Margins = new PageMargins(margin),
         FooterText = req.PageNumbers ? "Page {page} of {pages}" : null,
+        Watermark = string.IsNullOrWhiteSpace(req.Watermark) ? null : new PdfWatermark { Text = req.Watermark.Length > 200 ? req.Watermark[..200] : req.Watermark },
+        Security = string.IsNullOrEmpty(req.Password) ? null : new PdfSecurity { UserPassword = req.Password, Permissions = PdfPermissions.All },
+        Conformance = req.PdfA ? PdfConformance.PdfA2b : PdfConformance.None,
         // The HTML comes from anyone on the internet: never let it read files from this server.
         AllowFileAccess = false,
     };
@@ -266,6 +276,12 @@ public sealed class ConvertRequest
     public bool Landscape { get; set; }
     public float? MarginMm { get; set; }
     public bool PageNumbers { get; set; }
+    /// <summary>Text stamped diagonally on every page.</summary>
+    public string? Watermark { get; set; }
+    /// <summary>Password needed to open the PDF (AES-256).</summary>
+    public string? Password { get; set; }
+    /// <summary>Produce PDF/A-2b for archiving (cannot be combined with a password).</summary>
+    public bool PdfA { get; set; }
     public string? FileName { get; set; }
 }
 

@@ -43,6 +43,10 @@ public static class HtmlToPdf
 
     internal static byte[] Render(string html, PdfOptions options, string? baseDirectory)
     {
+        if (options.Conformance != PdfConformance.None && options.Security != null)
+            throw new ArgumentException("PDF/A does not allow encryption: set PdfOptions.Conformance or PdfOptions.Security, not both.", nameof(options));
+        if (options.Watermark is { } wm && string.IsNullOrEmpty(wm.Text) && wm.Image == null)
+            throw new ArgumentException("The watermark needs a Text or an Image.", nameof(options));
         var doc = HtmlParser.Parse(html);
         var resolver = options.ResourceResolver;
 
@@ -129,7 +133,12 @@ public static class HtmlToPdf
             if (t != null) title = System.Text.RegularExpressions.Regex.Replace(t.InnerText(), @"\s+", " ").Trim();
         }
 
-        var writer = new PdfDocumentWriter(page, options.Compress, options.CompressionLevel);
+        var writer = new PdfDocumentWriter(page, options.Compress, options.CompressionLevel)
+        {
+            Watermark = options.Watermark,
+            Security = options.Security,
+            Conformance = options.Conformance,
+        };
         return writer.Write(engine.Ops, height, engine.Anchors, background, title, options.Author, options.Subject,
             options.FooterText, options.HeaderText, pageBands);
     }
