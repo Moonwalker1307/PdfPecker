@@ -5,7 +5,7 @@ internal sealed class ImageLoader
 {
     private readonly string? _baseDirectory;
     private readonly Func<string, byte[]?>? _resolver;
-    private readonly bool _allowFiles;
+    private readonly bool _allowFiles; // files outside the base directory too
     private readonly Dictionary<string, PdfImage?> _cache = new(StringComparer.Ordinal);
 
     /// <summary>Parsed inline SVG drawings, shared by every layout pass of a document (pages, headers, footers).</summary>
@@ -14,7 +14,7 @@ internal sealed class ImageLoader
     /// <summary>The drawing work left for the document's inline SVGs.</summary>
     public readonly PdfPecker.Svg.SvgBudget SvgBudget = new();
 
-    public ImageLoader(string? baseDirectory, Func<string, byte[]?>? resolver, bool allowFiles = true)
+    public ImageLoader(string? baseDirectory, Func<string, byte[]?>? resolver, bool allowFiles = false)
     {
         _allowFiles = allowFiles;
         _baseDirectory = baseDirectory;
@@ -64,8 +64,6 @@ internal sealed class ImageLoader
 
         if (src.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || src.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
             return null; // no network access unless the caller provides a resolver
-        if (!_allowFiles) return null;
-
         string path = src;
         if (src.StartsWith("file:", StringComparison.OrdinalIgnoreCase) && Uri.TryCreate(src, UriKind.Absolute, out var uri))
             path = uri.LocalPath;
@@ -75,11 +73,7 @@ internal sealed class ImageLoader
             if (q >= 0) path = path.Substring(0, q);
             path = Uri.UnescapeDataString(path);
         }
-        if (!Path.IsPathRooted(path))
-        {
-            if (_baseDirectory == null) return null;
-            path = Path.Combine(_baseDirectory, path);
-        }
-        return File.Exists(path) ? File.ReadAllBytes(path) : null;
+        if (LocalFiles.Resolve(path, _baseDirectory, _allowFiles) is not { } file) return null;
+        return File.Exists(file) ? File.ReadAllBytes(file) : null;
     }
 }

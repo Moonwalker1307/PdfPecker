@@ -11,6 +11,12 @@ namespace PdfPecker.Rendering;
 internal sealed partial class PageRenderer
 {
     private const int MaxDepth = 24;
+    /// <summary>
+    /// Operators one page may run, counting every repetition inside form XObjects, patterns and glyphs. Nested forms
+    /// multiply: a few hundred bytes that each draw the next form ten times would otherwise run for days.
+    /// </summary>
+    internal const long MaxOperations = 20_000_000;
+    private const int FormCost = 16; // running a form XObject costs about as much as this many simple operators
     private const float Tolerance = 0.2f; // curve flattening tolerance in device pixels
 
     private readonly PdfFile _file;
@@ -50,9 +56,19 @@ internal sealed partial class PageRenderer
         _patternBase = baseCtm;
         var contents = _file.Resolve(page["Contents"]);
         var data = ConcatContents(contents);
-        if (data.Length > 0) RunContent(data, resources);
-        if (annotations) RenderAnnotations(page, baseCtm);
+        try
+        {
+            if (data.Length > 0) RunContent(data, resources);
+            if (annotations) RenderAnnotations(page, baseCtm);
+        }
+        catch (BudgetExceeded)
+        {
+            throw new InvalidDataException($"The page is too complex to render: it runs more than {MaxOperations:N0} drawing operations.");
+        }
     }
+
+    /// <summary>Thrown past <see cref="MaxOperations"/>; not caught by the per-operator error handling.</summary>
+    private sealed class BudgetExceeded : Exception;
 
     private byte[] ConcatContents(PdfObject? contents)
     {
@@ -89,7 +105,11 @@ internal sealed partial class PageRenderer
         {
             while (parser.Next())
             {
-                if ((++_ops & 1023) == 0) _cancel.ThrowIfCancellationRequested();
+                if ((++_ops & 1023) == 0)
+                {
+                    _cancel.ThrowIfCancellationRequested();
+                    if (_ops > MaxOperations) throw new BudgetExceeded();
+                }
                 try
                 {
                     Execute(parser, resources, stackBase);
@@ -516,6 +536,7 @@ internal sealed partial class PageRenderer
     private void RunForm(PdfStream form, PdfDict? parentRes, Matrix? extra)
     {
         if (_depth >= MaxDepth) return;
+        if ((_ops += FormCost) > MaxOperations) throw new BudgetExceeded();
         var data = SafeDecode(form);
         if (data.Length == 0) return;
         var res = _file.GetDict(form, "Resources") ?? parentRes;
