@@ -5,8 +5,53 @@ namespace PdfPecker.Css;
 internal enum Display : byte
 {
     Inline, Block, ListItem, InlineBlock, Table, TableRow, TableCell, TableRowGroup, TableHeaderGroup,
-    TableFooterGroup, TableCaption, TableColumn, TableColumnGroup, None,
+    TableFooterGroup, TableCaption, TableColumn, TableColumnGroup, None, Flex, InlineFlex, Grid, InlineGrid,
 }
+
+internal enum FlexDirection : byte { Row, RowReverse, Column, ColumnReverse }
+internal enum FlexWrap : byte { NoWrap, Wrap, WrapReverse }
+
+/// <summary>Values of justify-content, align-items, align-self, align-content, justify-items and justify-self.</summary>
+internal enum BoxAlign : byte { Normal, Start, End, Center, Stretch, Baseline, SpaceBetween, SpaceAround, SpaceEvenly, Auto }
+
+internal enum TrackSizeKind : byte { Fixed, Percent, Fr, Auto, MinContent, MaxContent }
+
+/// <summary>One sizing function of a grid track: a length, a percentage, a flexible fraction or a content keyword.</summary>
+internal readonly struct TrackSize
+{
+    public readonly TrackSizeKind Kind;
+    public readonly float Value;
+    public TrackSize(TrackSizeKind kind, float value = 0) { Kind = kind; Value = value; }
+    public bool IsIntrinsic => Kind is TrackSizeKind.Auto or TrackSizeKind.MinContent or TrackSizeKind.MaxContent;
+}
+
+/// <summary>A grid track: minmax(Min, Max). A plain size is minmax(size, size); an fr size is minmax(auto, fr).</summary>
+internal readonly struct Track
+{
+    public readonly TrackSize Min, Max;
+    public Track(TrackSize min, TrackSize max) { Min = min; Max = max; }
+}
+
+/// <summary>A grid-template-columns/rows value. With <see cref="AutoRepeat"/> set, those tracks repeat to fill the container.</summary>
+internal sealed class TrackList
+{
+    public Track[] Before = Array.Empty<Track>();
+    public Track[]? AutoRepeat;
+    public bool AutoFit;
+    public Track[] After = Array.Empty<Track>();
+}
+
+/// <summary>A grid-column-start/end or grid-row-start/end value: auto, a line number or a span.</summary>
+internal readonly struct GridLine
+{
+    public readonly int Line; // 1-based; negative counts from the end; 0 = auto
+    public readonly int Span; // > 0 for "span n"
+    public GridLine(int line, int span) { Line = line; Span = span; }
+    public bool IsAuto => Line == 0 && Span == 0;
+}
+
+internal enum SvgLineCap : byte { Butt, Round, Square }
+internal enum SvgLineJoin : byte { Miter, Round, Bevel }
 
 internal enum TextAlign : byte { Left, Right, Center, Justify }
 internal enum WhiteSpace : byte { Normal, NoWrap, Pre, PreWrap, PreLine }
@@ -75,6 +120,19 @@ internal sealed class ComputedStyle
     public bool BorderCollapse;
     public float BorderSpacingH = 1.5f, BorderSpacingV = 1.5f; // 2px
     public string? FontFamilyName;
+    public Dictionary<string, string>? CustomProperties; // custom properties (--name), shared with the parent until changed
+
+    // SVG presentation properties (inherited).
+    public uint? SvgFill = CssColor.Black;  // null = none
+    public string? SvgFillUrl;               // fill: url(#id)
+    public uint? SvgStroke;
+    public string? SvgStrokeUrl;
+    public float SvgStrokeWidth = 1;         // user units
+    public float SvgFillOpacity = 1, SvgStrokeOpacity = 1;
+    public bool SvgEvenOdd;
+    public SvgLineCap SvgLineCap;
+    public SvgLineJoin SvgLineJoin;
+    public float SvgMiterLimit = 4;
 
     // ---- Not inherited ----
     public Display Display = Display.Inline;
@@ -91,6 +149,23 @@ internal sealed class ComputedStyle
     public bool PageBreakBefore, PageBreakAfter, AvoidBreakInside;
     public bool Floated;
     public bool ClearBoth;
+    public float Opacity = 1;
+
+    // Flexbox, grid and multi-column.
+    public FlexDirection FlexDirection;
+    public FlexWrap FlexWrap;
+    public float FlexGrow, FlexShrink = 1;
+    public Length FlexBasis = Length.Auto;
+    public int Order;
+    public BoxAlign JustifyContent, AlignItems, AlignContent, JustifyItems;
+    public BoxAlign AlignSelf = BoxAlign.Auto, JustifySelf = BoxAlign.Auto;
+    public Length? RowGap, ColumnGap; // null = normal
+    public TrackList? GridTemplateColumns, GridTemplateRows;
+    public Track[]? GridAutoColumns, GridAutoRows;
+    public bool GridAutoFlowColumn;
+    public GridLine GridColumnStart, GridColumnEnd, GridRowStart, GridRowEnd;
+    public int ColumnCount;
+    public Length ColumnWidth = Length.Auto;
 
     private StandardFont? _font;
 
@@ -115,7 +190,12 @@ internal sealed class ComputedStyle
     public bool HasBorder => BorderTopStyle != BorderStyle.None || BorderRightStyle != BorderStyle.None
                              || BorderBottomStyle != BorderStyle.None || BorderLeftStyle != BorderStyle.None;
 
-    public bool IsBlockLevel => Display is not (Display.Inline or Display.InlineBlock);
+    public bool IsBlockLevel => Display is not (Display.Inline or Display.InlineBlock or Display.InlineFlex or Display.InlineGrid);
+
+    public bool IsFlex => Display is Display.Flex or Display.InlineFlex;
+    public bool IsGrid => Display is Display.Grid or Display.InlineGrid;
+    public bool IsMultiColumn => ColumnCount > 1 || !ColumnWidth.IsAuto;
+    public bool IsRow => FlexDirection is FlexDirection.Row or FlexDirection.RowReverse;
 
     /// <summary>Creates the starting style for a child: inherited properties copied, the rest reset.</summary>
     public ComputedStyle CreateChild()
@@ -136,6 +216,22 @@ internal sealed class ComputedStyle
         c.PageBreakBefore = c.PageBreakAfter = c.AvoidBreakInside = false;
         c.Floated = false;
         c.ClearBoth = false;
+        c.Opacity = 1;
+        c.FlexDirection = FlexDirection.Row;
+        c.FlexWrap = FlexWrap.NoWrap;
+        c.FlexGrow = 0;
+        c.FlexShrink = 1;
+        c.FlexBasis = Length.Auto;
+        c.Order = 0;
+        c.JustifyContent = c.AlignItems = c.AlignContent = c.JustifyItems = BoxAlign.Normal;
+        c.AlignSelf = c.JustifySelf = BoxAlign.Auto;
+        c.RowGap = c.ColumnGap = null;
+        c.GridTemplateColumns = c.GridTemplateRows = null;
+        c.GridAutoColumns = c.GridAutoRows = null;
+        c.GridAutoFlowColumn = false;
+        c.GridColumnStart = c.GridColumnEnd = c.GridRowStart = c.GridRowEnd = default;
+        c.ColumnCount = 0;
+        c.ColumnWidth = Length.Auto;
         return c;
     }
 

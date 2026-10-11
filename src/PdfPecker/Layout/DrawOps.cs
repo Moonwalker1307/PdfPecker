@@ -1,6 +1,7 @@
 using PdfPecker.Css;
 using PdfPecker.Fonts;
 using PdfPecker.Images;
+using PdfPecker.Svg;
 
 namespace PdfPecker.Layout;
 
@@ -55,6 +56,15 @@ internal sealed class ImageOp : DrawOp
     public float X, Y, W, H;
     public PdfImage Image;
     public ImageOp(float x, float y, float w, float h, PdfImage image) { X = x; Y = y; W = w; H = h; Image = image; }
+    public override void Offset(float dx, float dy) { X += dx; Y += dy; }
+}
+
+/// <summary>An inline SVG drawing scaled into the box (X, Y, W, H).</summary>
+internal sealed class SvgOp : DrawOp
+{
+    public float X, Y, W, H;
+    public SvgImage Image;
+    public SvgOp(float x, float y, float w, float h, SvgImage image) { X = x; Y = y; W = w; H = h; Image = image; }
     public override void Offset(float dx, float dy) { X += dx; Y += dy; }
 }
 

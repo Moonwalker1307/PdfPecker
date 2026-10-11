@@ -3,6 +3,7 @@ using PdfPecker.Css;
 using PdfPecker.Fonts;
 using PdfPecker.Images;
 using PdfPecker.Layout;
+using PdfPecker.Svg;
 
 namespace PdfPecker.Pdf;
 
@@ -10,8 +11,11 @@ internal sealed class PageSetup
 {
     public float Width, Height;
     public float MarginTop, MarginRight, MarginBottom, MarginLeft;
+    public float BandTop, BandBottom; // space for running headers and footers at the top and bottom of the content area
     public float ContentWidth => Width - MarginLeft - MarginRight;
     public float ContentHeight => Height - MarginTop - MarginBottom;
+    /// <summary>Height available to the flowing content on each page.</summary>
+    public float FlowHeight => ContentHeight - BandTop - BandBottom;
 }
 
 /// <summary>Serializes laid-out draw operations into a PDF 1.4 file.</summary>
@@ -28,6 +32,7 @@ internal sealed class PdfDocumentWriter
     private bool _inText;
     private StandardFont? _textFont;
     private float _textSize, _tw, _tc;
+    private float _yOrigin; // distance from the page top to flow y = 0 on the page being written
 
     public PdfDocumentWriter(PageSetup page, bool compress, CompressionLevel level)
     {
@@ -44,9 +49,10 @@ internal sealed class PdfDocumentWriter
     }
 
     public byte[] Write(List<DrawOp> ops, float contentHeight, IReadOnlyDictionary<string, float> anchors, uint pageBackground,
-        string? title, string? author, string? subject, string? footerTemplate, string? headerTemplate)
+        string? title, string? author, string? subject, string? footerTemplate, string? headerTemplate,
+        Func<int, int, List<DrawOp>>? pageBands = null)
     {
-        float H = _page.ContentHeight;
+        float H = _page.FlowHeight;
         int PageOf(float y) => Math.Max(0, (int)Math.Floor((y + 0.01f) / H));
 
         // 1. Distribute ops over pages.
@@ -86,6 +92,9 @@ internal sealed class PdfDocumentWriter
                 case ImageOp im:
                     PageList(PageOf(im.Y)).Add(new Placed(im, 0, 0));
                     break;
+                case SvgOp sv:
+                    PageList(PageOf(sv.Y)).Add(new Placed(sv, 0, 0));
+                    break;
                 case LinkOp lk:
                     PageList(PageOf(lk.Y)).Add(new Placed(lk, 0, 0));
                     break;
@@ -98,11 +107,31 @@ internal sealed class PdfDocumentWriter
         int pageCount = Math.Max(pages.Count, Math.Max(1, PageOf(Math.Max(0, contentHeight - 0.5f)) + 1));
         while (pages.Count < pageCount) pages.Add(new List<Placed>());
 
+        // Running headers and footers, laid out per page now that the page count is known. Their ops use y from the
+        // top of the content area.
+        var bands = new List<Placed>[pageCount];
+        for (int p = 0; p < pageCount; p++)
+        {
+            var list = bands[p] = new List<Placed>();
+            if (pageBands == null) continue;
+            void Flatten(DrawOp op)
+            {
+                switch (op)
+                {
+                    case GroupOp g: foreach (var o in g.Ops) Flatten(o); break;
+                    case RectOp r: if (r.W > 0 && r.H > 0) list.Add(new Placed(r, r.Y, r.Y + r.H)); break;
+                    case LineOp l: list.Add(new Placed(l, l.Y1, l.Y2)); break;
+                    default: list.Add(new Placed(op, 0, 0)); break;
+                }
+            }
+            foreach (var op in pageBands(p, pageCount)) Flatten(op);
+        }
+
         // 2. Collect resources.
         var usedFonts = new bool[StandardFont.All.Length];
         var images = new List<PdfImage>();
         var imageIds = new Dictionary<PdfImage, int>();
-        foreach (var page in pages)
+        foreach (var page in pages.Concat(bands))
             foreach (var p in page)
             {
                 if (p.Op is TextOp t) usedFonts[t.Font.Index] = true;
@@ -182,7 +211,7 @@ internal sealed class PdfDocumentWriter
 
         // Pages, contents, annotations.
         var content = new ByteBuffer(32 * 1024);
-        var annotations = new List<(int Id, LinkOp Link, int Page)>();
+        var annotations = new List<(int Id, LinkOp Link, float Origin, float PageTop)>();
         for (int p = 0; p < pageCount; p++)
         {
             content.Clear();
@@ -192,11 +221,18 @@ internal sealed class PdfDocumentWriter
                 SetFill(content, pageBackground);
                 content.Ascii("0 0 ").Num(_page.Width).Sp().Num(_page.Height).Ascii(" re f\n");
             }
-            var pageLinks = new List<LinkOp>();
+            var pageLinks = new List<(LinkOp Link, float Origin, float PageTop)>();
+            _yOrigin = _page.MarginTop + _page.BandTop;
             foreach (var placed in pages[p])
             {
-                if (placed.Op is LinkOp lk) { pageLinks.Add(lk); continue; }
+                if (placed.Op is LinkOp lk) { pageLinks.Add((lk, _yOrigin, p * H)); continue; }
                 WriteOp(content, placed, p * H, imageIds);
+            }
+            _yOrigin = _page.MarginTop;
+            foreach (var placed in bands[p])
+            {
+                if (placed.Op is LinkOp lk) { pageLinks.Add((lk, _yOrigin, 0)); continue; }
+                WriteOp(content, placed, 0, imageIds);
             }
             if (hasMargins)
             {
@@ -207,11 +243,11 @@ internal sealed class PdfDocumentWriter
             EndText(content);
 
             var annotIds = new List<int>();
-            foreach (var lk in pageLinks)
+            foreach (var (lk, origin, pageTop) in pageLinks)
             {
                 int id = next++;
                 annotIds.Add(id);
-                annotations.Add((id, lk, p));
+                annotations.Add((id, lk, origin, pageTop));
             }
 
             Begin(pageIds[p]).Ascii("<< /Type /Page /Parent ").Int(pagesId).Ascii(" 0 R /MediaBox [0 0 ")
@@ -229,10 +265,10 @@ internal sealed class PdfDocumentWriter
             WriteStream(contentIds[p], content.Span, _compress, extraDict: null);
         }
 
-        foreach (var (id, link, p) in annotations)
+        foreach (var (id, link, origin, linkPageTop) in annotations)
         {
             float x1 = _page.MarginLeft + link.X, x2 = x1 + link.W;
-            float yTop = _page.Height - _page.MarginTop - (link.Y - p * H);
+            float yTop = _page.Height - origin - (link.Y - linkPageTop);
             float yBottom = yTop - link.H;
             Begin(id).Ascii("<< /Type /Annot /Subtype /Link /Rect [").Num(x1).Sp().Num(yBottom).Sp().Num(x2).Sp().Num(yTop)
                 .Ascii("] /Border [0 0 0] ");
@@ -241,7 +277,7 @@ internal sealed class PdfDocumentWriter
                 if (anchors.TryGetValue(link.Target.Substring(1), out float ay))
                 {
                     int ap = Math.Min(PageOf(ay), pageCount - 1);
-                    float py = _page.Height - _page.MarginTop - (ay - ap * H);
+                    float py = _page.Height - _page.MarginTop - _page.BandTop - (ay - ap * H);
                     _out.Ascii("/Dest [").Int(pageIds[ap]).Ascii(" 0 R /XYZ 0 ").Num(py).Ascii(" null]");
                 }
             }
@@ -325,7 +361,7 @@ internal sealed class PdfDocumentWriter
     }
 
     private float PX(float x) => _page.MarginLeft + x;
-    private float PY(float y, float pageTop) => _page.Height - _page.MarginTop - (y - pageTop);
+    private float PY(float y, float pageTop) => _page.Height - _yOrigin - (y - pageTop);
 
     private void SetFill(ByteBuffer b, uint color)
     {
@@ -400,6 +436,10 @@ internal sealed class PdfDocumentWriter
                     .Ascii(" cm /Im").Int(imageIds[im.Image]).Ascii(" Do Q\n");
                 break;
             }
+            case SvgOp sv:
+                EndText(b);
+                WriteSvg(b, sv, pageTop);
+                break;
             case CircleOp c:
             {
                 EndText(b);
@@ -420,6 +460,70 @@ internal sealed class PdfDocumentWriter
                 break;
             }
         }
+    }
+
+    /// <summary>Draws an SVG drawing: clipped to its box, with the viewBox mapped by preserveAspectRatio.</summary>
+    private void WriteSvg(ByteBuffer b, SvgOp op, float pageTop)
+    {
+        var img = op.Image;
+        if (img.Shapes.Count == 0 || op.W <= 0 || op.H <= 0) return;
+        float sx, sy, tx = 0, ty = 0, vx = 0, vy = 0;
+        if (img.HasViewBox)
+        {
+            vx = img.ViewBoxX;
+            vy = img.ViewBoxY;
+            sx = op.W / img.ViewBoxWidth;
+            sy = op.H / img.ViewBoxHeight;
+            if (img.Align != "none")
+            {
+                float scale = img.Slice ? Math.Max(sx, sy) : Math.Min(sx, sy);
+                sx = sy = scale;
+                float extraX = op.W - img.ViewBoxWidth * scale, extraY = op.H - img.ViewBoxHeight * scale;
+                var a = img.Align;
+                tx = a.StartsWith("xmid", StringComparison.Ordinal) ? extraX / 2 : a.StartsWith("xmax", StringComparison.Ordinal) ? extraX : 0;
+                ty = a.EndsWith("ymid", StringComparison.Ordinal) ? extraY / 2 : a.EndsWith("ymax", StringComparison.Ordinal) ? extraY : 0;
+            }
+        }
+        else sx = sy = 0.75f; // user units are CSS pixels
+
+        float left = PX(op.X), top = PY(op.Y, pageTop);
+        b.Ascii("q ").Num(left).Sp().Num(top - op.H).Sp().Num(op.W).Sp().Num(op.H).Ascii(" re W n\n");
+        // User space (y down) to PDF space (y up).
+        b.Num(sx).Ascii(" 0 0 ").Num(-sy).Sp().Num(left + tx - vx * sx).Sp().Num(top - ty + vy * sy).Ascii(" cm\n");
+        foreach (var shape in img.Shapes)
+        {
+            var pts = shape.Points;
+            int k = 0;
+            foreach (var verb in shape.Verbs)
+            {
+                switch (verb)
+                {
+                    case SvgShape.MoveTo: b.Num(pts[k]).Sp().Num(pts[k + 1]).Ascii(" m\n"); k += 2; break;
+                    case SvgShape.LineTo: b.Num(pts[k]).Sp().Num(pts[k + 1]).Ascii(" l\n"); k += 2; break;
+                    case SvgShape.CurveTo:
+                        b.Num(pts[k]).Sp().Num(pts[k + 1]).Sp().Num(pts[k + 2]).Sp().Num(pts[k + 3]).Sp().Num(pts[k + 4]).Sp().Num(pts[k + 5]).Ascii(" c\n");
+                        k += 6;
+                        break;
+                    default: b.Ascii("h\n"); break;
+                }
+            }
+            if (shape.Fill is { } fill)
+            {
+                WriteColor(b, fill);
+                b.Ascii(" rg\n");
+            }
+            if (shape.Stroke is { } stroke)
+            {
+                WriteColor(b, stroke);
+                b.Ascii(" RG ").Num(shape.StrokeWidth).Ascii(" w ").Int((int)shape.LineCap).Ascii(" J ").Int((int)shape.LineJoin).Ascii(" j ")
+                    .Num(shape.MiterLimit).Ascii(" M\n");
+            }
+            if (shape.Fill != null && shape.Stroke != null) b.Ascii(shape.EvenOdd ? "B*\n" : "B\n");
+            else if (shape.Fill != null) b.Ascii(shape.EvenOdd ? "f*\n" : "f\n");
+            else b.Ascii("S\n");
+        }
+        b.Ascii("Q\n");
+        _fill = 1; // the colour set inside q/Q is gone: force the next fill colour to be written
     }
 
     private void WriteMarginText(ByteBuffer b, StandardFont font, string template, int page, int pages, bool top)

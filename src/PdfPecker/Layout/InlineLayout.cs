@@ -2,6 +2,7 @@ using System.Text;
 using PdfPecker.Css;
 using PdfPecker.Html;
 using PdfPecker.Images;
+using PdfPecker.Svg;
 
 namespace PdfPecker.Layout;
 
@@ -113,7 +114,7 @@ internal sealed partial class LayoutEngine
         }
         var e = (Element)node;
         var s = e.Style;
-        if (s == null || s.Display == Display.None) return;
+        if (s == null || s.Display == Display.None || e.Detached) return;
 
         if (e.Id != null) { var it_ = Rent(ItemKind.Anchor, s); it_.AnchorId = e.Id; st.Items.Add(it_); }
         if (e.Name == "a" && e.GetAttribute("name") is { } aname) { var it_ = Rent(ItemKind.Anchor, s); it_.AnchorId = aname; st.Items.Add(it_); }
@@ -125,6 +126,28 @@ internal sealed partial class LayoutEngine
                 st.LastWasSpace = true;
                 st.Column = 0;
                 return;
+            case "svg":
+            {
+                var svg = SvgSize(e, st.AvailWidth, out float sw, out float sh);
+                if (sw > 0 && sh > 0)
+                {
+                    float ml = s.MarginLeft.IsAuto ? 0 : s.MarginLeft.Resolve(0), mr = s.MarginRight.IsAuto ? 0 : s.MarginRight.Resolve(0);
+                    float pl = s.PaddingLeft.Resolve(0) + s.BorderLeft, pr = s.PaddingRight.Resolve(0) + s.BorderRight;
+                    float ptop = s.PaddingTop.Resolve(0) + s.BorderTop, pbot = s.PaddingBottom.Resolve(0) + s.BorderBottom;
+                    // Drawn as a small inline box so padding and borders work as for any replaced element.
+                    var ops = new List<DrawOp>();
+                    var group = new GroupOp();
+                    ops.Add(group);
+                    BoxPainter.Paint(group, s, 0, 0, sw + pl + pr, sh + ptop + pbot);
+                    if (s.Visible && svg != null) ops.Add(new SvgOp(pl, ptop, sw, sh, svg));
+                    if (ml > 0) { var it_ = Rent(ItemKind.Spacer, s); it_.Width = ml; it_.Href = href; st.Items.Add(it_); }
+                    float boxH = sh + ptop + pbot;
+                    st.Items.Add(new Item { Kind = ItemKind.Box, Style = s, Width = sw + pl + pr, Height = boxH, BoxBaseline = boxH, BoxOps = ops, Href = href ?? LinkOf(e) });
+                    if (mr > 0) { var it_ = Rent(ItemKind.Spacer, s); it_.Width = mr; it_.Href = href; st.Items.Add(it_); }
+                    st.LastWasSpace = false;
+                }
+                return;
+            }
             case "img":
             {
                 var img = ImageSize(e, st.AvailWidth, out float w, out float h);
@@ -142,7 +165,7 @@ internal sealed partial class LayoutEngine
 
         if (e.Name == "a" && e.GetAttribute("href") is { } link && link.Length > 0) href = link;
 
-        if (s.Display == Display.InlineBlock)
+        if (IsAtomicInline(s.Display))
         {
             st.Items.Add(LayoutInlineBlock(e, st.AvailWidth, href));
             st.LastWasSpace = false;
@@ -318,7 +341,7 @@ internal sealed partial class LayoutEngine
         if (!HasRenderable(items))
         {
             foreach (var it in items)
-                if (it.Kind == ItemKind.Anchor) Anchors[it.AnchorId!] = y;
+                if (it.Kind == ItemKind.Anchor) SetAnchor(it.AnchorId!, y);
             produced = false;
             return y;
         }
@@ -512,7 +535,7 @@ internal sealed partial class LayoutEngine
             }
             if (!visible)
             {
-                foreach (var it in items) Anchors[it.AnchorId!] = y;
+                foreach (var it in items) SetAnchor(it.AnchorId!, y);
                 continue;
             }
 
@@ -592,7 +615,7 @@ internal sealed partial class LayoutEngine
                         break;
                     }
                     case ItemKind.Anchor:
-                        Anchors[it.AnchorId!] = y;
+                        SetAnchor(it.AnchorId!, y);
                         break;
                 }
                 i++;
