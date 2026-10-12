@@ -1426,18 +1426,20 @@ internal sealed class PdfDocumentWriter
     private void WriteAsciiString(ByteBuffer b, string s) => WriteStringBytes(b, AsciiStringBytes(s));
 
     /// <summary>ASCII with other characters percent-encoded as UTF-8 (the form URIs need).</summary>
+    /// <summary>An ASCII string for a URI: other characters are percent-encoded as the UTF-8 bytes of their code point.</summary>
     private static byte[] AsciiStringBytes(string s)
     {
         var raw = new ByteBuffer(s.Length + 8);
-        foreach (char ch in s)
+        Span<byte> utf8 = stackalloc byte[4];
+        foreach (var rune in s.EnumerateRunes())
         {
-            if (ch > 126 || ch < 32)
+            if (rune.Value > 126 || rune.Value < 32)
             {
-                foreach (var u in System.Text.Encoding.UTF8.GetBytes(ch.ToString()))
-                    raw.Byte((byte)'%').Ascii(u.ToString("X2"));
+                int n = rune.EncodeToUtf8(utf8);
+                for (int k = 0; k < n; k++) raw.Byte((byte)'%').Ascii(utf8[k].ToString("X2"));
                 continue;
             }
-            raw.Byte((byte)ch);
+            raw.Byte((byte)rune.Value);
         }
         return raw.Span.ToArray();
     }
@@ -1457,6 +1459,15 @@ internal sealed class PdfDocumentWriter
         b.Byte((byte)'(');
         foreach (var c in raw)
         {
+            // Line ends are written as escapes: a reader would turn a bare CR or CR LF in a literal string into LF.
+            switch (c)
+            {
+                case (byte)'\n': b.Byte((byte)'\\').Byte((byte)'n'); continue;
+                case (byte)'\r': b.Byte((byte)'\\').Byte((byte)'r'); continue;
+                case (byte)'\t': b.Byte((byte)'\\').Byte((byte)'t'); continue;
+                case (byte)'\b': b.Byte((byte)'\\').Byte((byte)'b'); continue;
+                case (byte)'\f': b.Byte((byte)'\\').Byte((byte)'f'); continue;
+            }
             if (c == (byte)'(' || c == (byte)')' || c == (byte)'\\') b.Byte((byte)'\\');
             b.Byte(c);
         }
@@ -1470,7 +1481,10 @@ internal sealed class PdfDocumentWriter
         foreach (char ch in s) if (ch > 126) { ascii = false; break; }
         if (ascii)
         {
-            WriteAsciiString(b, s);
+            // Text, not a URI: control characters such as a tab or a line break are kept, not percent-encoded.
+            var bytes = new byte[s.Length];
+            for (int i = 0; i < s.Length; i++) bytes[i] = (byte)s[i];
+            WriteStringBytes(b, bytes);
             return;
         }
         var raw = new byte[2 + s.Length * 2];
