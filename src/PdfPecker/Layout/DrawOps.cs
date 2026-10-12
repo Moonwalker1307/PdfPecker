@@ -57,6 +57,7 @@ internal sealed class BackgroundOp : DrawOp
     public bool RepeatX, RepeatY;
     public PdfImage? Image;
     public Gradient? Gradient;
+    public CornerRadii? ClipRadii; // rounded corners of the clip (border-radius)
 
     public override void Offset(float dx, float dy) { ClipX += dx; ClipY += dy; TileX += dx; TileY += dy; }
 
@@ -67,6 +68,96 @@ internal sealed class BackgroundOp : DrawOp
         if (!RepeatX) { x0 = Math.Max(x0, TileX); x1 = Math.Min(x1, TileX + TileW); }
         if (!RepeatY) { y0 = Math.Max(y0, TileY); y1 = Math.Min(y1, TileY + TileH); }
         return (x0, y0, x1, y1);
+    }
+}
+
+/// <summary>
+/// The radii of a box's four rounded corners (border-radius), in points: horizontal and vertical radius of the top-left,
+/// top-right, bottom-right and bottom-left corner.
+/// </summary>
+internal readonly struct CornerRadii
+{
+    public readonly float TLx, TLy, TRx, TRy, BRx, BRy, BLx, BLy;
+
+    public CornerRadii(float tlx, float tly, float trx, float try_, float brx, float bry, float blx, float bly)
+    {
+        TLx = Math.Max(0, tlx); TLy = Math.Max(0, tly); TRx = Math.Max(0, trx); TRy = Math.Max(0, try_);
+        BRx = Math.Max(0, brx); BRy = Math.Max(0, bry); BLx = Math.Max(0, blx); BLy = Math.Max(0, bly);
+        // A corner with a zero radius on either axis is square.
+        if (TLx == 0 || TLy == 0) TLx = TLy = 0;
+        if (TRx == 0 || TRy == 0) TRx = TRy = 0;
+        if (BRx == 0 || BRy == 0) BRx = BRy = 0;
+        if (BLx == 0 || BLy == 0) BLx = BLy = 0;
+    }
+
+    public bool IsZero => TLx == 0 && TRx == 0 && BRx == 0 && BLx == 0;
+
+    /// <summary>
+    /// The radii of a w × h box: scaled down together when adjacent radii would overlap (CSS Backgrounds 3 §5.5).
+    /// Null when every corner is square.
+    /// </summary>
+    public static CornerRadii? Fit(float tlx, float tly, float trx, float try_, float brx, float bry, float blx, float bly, float w, float h)
+    {
+        var r = new CornerRadii(tlx, tly, trx, try_, brx, bry, blx, bly);
+        if (r.IsZero || w <= 0 || h <= 0) return null;
+        float f = 1;
+        if (r.TLx + r.TRx > 0) f = Math.Min(f, w / (r.TLx + r.TRx));
+        if (r.BLx + r.BRx > 0) f = Math.Min(f, w / (r.BLx + r.BRx));
+        if (r.TLy + r.BLy > 0) f = Math.Min(f, h / (r.TLy + r.BLy));
+        if (r.TRy + r.BRy > 0) f = Math.Min(f, h / (r.TRy + r.BRy));
+        return f < 1 ? r.Scale(f) : r;
+    }
+
+    public CornerRadii Scale(float f) => new(TLx * f, TLy * f, TRx * f, TRy * f, BRx * f, BRy * f, BLx * f, BLy * f);
+
+    /// <summary>The radii of a box inset by the given widths from this one (the padding edge inside a border); null when square.</summary>
+    public CornerRadii? Inset(float top, float right, float bottom, float left)
+    {
+        var r = new CornerRadii(TLx - left, TLy - top, TRx - right, TRy - top, BRx - right, BRy - bottom, BLx - left, BLy - bottom);
+        return r.IsZero ? null : r;
+    }
+
+    /// <summary>The radii of a box grown by <paramref name="d"/> on every side (a box-shadow's spread); square corners stay square.</summary>
+    public CornerRadii Outset(float d)
+    {
+        static float G(float r, float d) => r > 0 ? Math.Max(0, r + d) : 0;
+        return new(G(TLx, d), G(TLy, d), G(TRx, d), G(TRy, d), G(BRx, d), G(BRy, d), G(BLx, d), G(BLy, d));
+    }
+}
+
+/// <summary>
+/// A rounded rectangle (X, Y, W, H) with corner radii <see cref="R"/>: filled, or with <see cref="StrokeWidth"/> stroked
+/// along its outline (dashed or dotted when <see cref="Style"/> says so). With a hole, the part inside the hole is left
+/// out, which makes a rounded border ring or a shadow outside its box. With <see cref="Clip"/>, only the part inside that
+/// polygon is painted: one side of a border whose sides differ.
+/// </summary>
+internal sealed class RoundRectOp : DrawOp
+{
+    public float X, Y, W, H;
+    public CornerRadii R;
+    public uint Color;
+    public bool HasHole;
+    public float HoleX, HoleY, HoleW, HoleH;
+    public CornerRadii HoleR;
+    public float StrokeWidth;
+    public BorderStyle Style = BorderStyle.Solid;
+    public float[]? Clip; // x, y pairs
+
+    public RoundRectOp(float x, float y, float w, float h, CornerRadii r, uint color) { X = x; Y = y; W = w; H = h; R = r; Color = color; }
+
+    public RoundRectOp WithHole(float x, float y, float w, float h, CornerRadii? r)
+    {
+        HasHole = true;
+        HoleX = x; HoleY = y; HoleW = w; HoleH = h;
+        HoleR = r ?? default;
+        return this;
+    }
+
+    public override void Offset(float dx, float dy)
+    {
+        X += dx; Y += dy; HoleX += dx; HoleY += dy;
+        if (Clip != null)
+            for (int i = 0; i < Clip.Length; i += 2) { Clip[i] += dx; Clip[i + 1] += dy; }
     }
 }
 
@@ -103,6 +194,7 @@ internal sealed class ImageOp : DrawOp
 {
     public float X, Y, W, H;
     public PdfImage Image;
+    public CornerRadii? Radii; // rounded corners the image is clipped to
     public ImageOp(float x, float y, float w, float h, PdfImage image) { X = x; Y = y; W = w; H = h; Image = image; }
     public override void Offset(float dx, float dy) { X += dx; Y += dy; }
 }
@@ -152,6 +244,7 @@ internal sealed class LayerOp : GroupOp
     public const float FloatOrder = 0.25f, PositionedOrder = 0.5f;
 
     public float Order;
+    public float Opacity = 1;    // below 1: painted as one transparency group at this opacity
     public bool StackingContext; // its first op, the box's own background, stays below its negative z-index children
     public Matrix? Transform;    // y-down, about the origin
     public float OriginX, OriginY;
@@ -194,7 +287,9 @@ internal static class BoxPainter
         int sides = AllSides, bool collapsedCell = false)
     {
         if (!s.Visible) return;
-        if (s.BoxShadows != null && w > 0 && h > 0) PaintShadows(group, s, x, y, w, h);
+        // Collapsed table borders have no rounded corners.
+        var radii = sides == AllSides && !collapsedCell ? Radii(s, w, h) : null;
+        if (s.BoxShadows != null && w > 0 && h > 0) PaintShadows(group, s, x, y, w, h, radii);
         if (w > 0 && h > 0)
         {
             var layers = s.BackgroundImages;
@@ -203,18 +298,28 @@ internal static class BoxPainter
                 // The colour is clipped like the bottom layer.
                 var clip = Layer(s.BackgroundClips, layers == null ? 0 : layers.Length - 1, BackgroundBox.BorderBox);
                 var (cx, cy, cw, ch) = BoxOf(s, clip, x, y, w, h, basis);
-                if (cw > 0 && ch > 0) group.Ops.Add(new RectOp(cx, cy, cw, ch, s.BackgroundColor));
+                if (cw > 0 && ch > 0)
+                {
+                    if (InnerRadii(radii, cx - x, cy - y, x + w - cx - cw, y + h - cy - ch) is { } cr)
+                        group.Ops.Add(new RoundRectOp(cx, cy, cw, ch, cr, s.BackgroundColor));
+                    else group.Ops.Add(new RectOp(cx, cy, cw, ch, s.BackgroundColor));
+                }
             }
             if (layers != null)
             {
-                uint backdrop = CssColor.IsOpaque(s.BackgroundColor) ? s.BackgroundColor : 0xFFFFFFFF;
+                uint backdrop = CssColor.IsVisible(s.BackgroundColor) ? CssColor.FlattenOnWhite(s.BackgroundColor) : 0xFFFFFFFF;
                 for (int i = layers.Length - 1; i >= 0; i--)
-                    if (layers[i] is { } layer) PaintLayer(group, s, layer, i, x, y, w, h, images, basis, backdrop);
+                    if (layers[i] is { } layer) PaintLayer(group, s, layer, i, x, y, w, h, images, basis, backdrop, radii);
             }
         }
         if (!s.HasBorder) return;
         float bt = s.BorderTop, br = s.BorderRight, bb = s.BorderBottom, bl = s.BorderLeft;
         uint topColor = s.BorderTopColor ?? s.Color;
+        if (radii is { } r && w > 0 && h > 0)
+        {
+            PaintRoundedBorder(group, s, x, y, w, h, r);
+            return;
+        }
         // Chrome fills collapsed table borders side by side, and strokes other boxes' uniform borders.
         if (sides == AllSides && !collapsedCell && bt > 0 && bt == br && bt == bb && bt == bl && 2 * bt < w && 2 * bt < h
             && s.BorderTopStyle == BorderStyle.Solid && s.BorderRightStyle == BorderStyle.Solid
@@ -231,12 +336,90 @@ internal static class BoxPainter
         if ((sides & Right) != 0) Side(group, s.BorderRightStyle, br, s.BorderRightColor ?? s.Color, x + w - br, y, br, h, horizontal: false);
     }
 
+    /// <summary>The border radii of a w × h border box, scaled to fit; null when every corner is square.</summary>
+    public static CornerRadii? Radii(ComputedStyle s, float w, float h)
+    {
+        var r = s.BorderRadii;
+        if (r == null) return null;
+        return CornerRadii.Fit(r[0].Resolve(w), r[1].Resolve(h), r[2].Resolve(w), r[3].Resolve(h),
+            r[4].Resolve(w), r[5].Resolve(h), r[6].Resolve(w), r[7].Resolve(h), w, h);
+    }
+
+    /// <summary>The radii of a box inset from the border box by the given distances.</summary>
+    public static CornerRadii? InnerRadii(CornerRadii? radii, float left, float top, float right, float bottom)
+        => radii is { } r ? r.Inset(top, right, bottom, left) : null;
+
     /// <summary>
-    /// Paints outer box shadows under the box, the first shadow on top. PDF output has no transparency, so a shadow is
-    /// opaque, blended over white by its alpha, and only drawn outside the border box, as browsers clip it there. A blur
-    /// becomes bands that fade out like a Gaussian edge. Inset shadows are not drawn.
+    /// Paints the borders of a box with rounded corners: one ring when the sides are alike, else each side as the part of
+    /// the ring between the lines from its outer to its inner corners.
     /// </summary>
-    public static void PaintShadows(GroupOp group, ComputedStyle s, float x, float y, float w, float h)
+    private static void PaintRoundedBorder(GroupOp group, ComputedStyle s, float x, float y, float w, float h, CornerRadii r)
+    {
+        float bt = s.BorderTop, br = s.BorderRight, bb = s.BorderBottom, bl = s.BorderLeft;
+        float ix = x + bl, iy = y + bt, iw = Math.Max(0, w - bl - br), ih = Math.Max(0, h - bt - bb);
+        var inner = r.Inset(bt, br, bb, bl);
+        var sides = new (float Width, BorderStyle Style, uint Color)[]
+        {
+            (bt, s.BorderTopStyle, s.BorderTopColor ?? s.Color), (br, s.BorderRightStyle, s.BorderRightColor ?? s.Color),
+            (bb, s.BorderBottomStyle, s.BorderBottomColor ?? s.Color), (bl, s.BorderLeftStyle, s.BorderLeftColor ?? s.Color),
+        };
+        bool Shows(int i) => sides[i].Width > 0 && sides[i].Style != BorderStyle.None && CssColor.IsVisible(sides[i].Color);
+        int shown = 0;
+        for (int i = 0; i < 4; i++) if (Shows(i)) shown++;
+        if (shown == 0) return;
+        bool sameColor = true, allSolid = true, alike = shown == 4;
+        uint first = 0;
+        for (int i = 0, n = 0; i < 4; i++)
+        {
+            if (!Shows(i)) continue;
+            if (n++ == 0) first = sides[i].Color;
+            else if (sides[i].Color != first) sameColor = false;
+            if (sides[i].Style is not (BorderStyle.Solid or BorderStyle.Double)) allSolid = false;
+            if (sides[i].Width != sides[0].Width || sides[i].Style != sides[0].Style || sides[i].Color != sides[0].Color) alike = false;
+        }
+        if (alike && sides[0].Style is BorderStyle.Dashed or BorderStyle.Dotted && 2 * bt < w && 2 * bt < h)
+        {
+            group.Ops.Add(new RoundRectOp(x, y, w, h, r, first) { StrokeWidth = bt, Style = sides[0].Style });
+            return;
+        }
+        if (sameColor && allSolid)
+        {
+            // Sides without a border have zero width, so one ring covers exactly the borders that show.
+            group.Ops.Add(new RoundRectOp(x, y, w, h, r, first).WithHole(ix, iy, iw, ih, inner));
+            return;
+        }
+        // Each side is the ring cut along the lines from the outer corners through the inner ones, continued inward past
+        // the curves (as Chrome splits the corners).
+        float x1 = x + w, y1 = y + h, reach = Math.Min(w, h) / 2;
+        (float X, float Y) Toward(float cx, float cy, float dx, float dy)
+        {
+            float k = reach / Math.Max(Math.Max(dx, dy), 0.01f);
+            return (cx + Math.Sign(x + w / 2 - cx) * dx * k, cy + Math.Sign(y + h / 2 - cy) * dy * k);
+        }
+        var tl = Toward(x, y, bl, bt);
+        var tr = Toward(x1, y, br, bt);
+        var brc = Toward(x1, y1, br, bb);
+        var blc = Toward(x, y1, bl, bb);
+        float[][] polys =
+        {
+            new[] { x, y, x1, y, tr.X, tr.Y, tl.X, tl.Y },
+            new[] { x1, y, x1, y1, brc.X, brc.Y, tr.X, tr.Y },
+            new[] { x1, y1, x, y1, blc.X, blc.Y, brc.X, brc.Y },
+            new[] { x, y1, x, y, tl.X, tl.Y, blc.X, blc.Y },
+        };
+        for (int i = 0; i < 4; i++)
+        {
+            if (!Shows(i)) continue;
+            group.Ops.Add(new RoundRectOp(x, y, w, h, r, sides[i].Color) { Clip = polys[i] }.WithHole(ix, iy, iw, ih, inner));
+        }
+    }
+
+    /// <summary>
+    /// Paints outer box shadows under the box, the first shadow on top. A shadow is opaque, blended over white by its
+    /// alpha, and only drawn outside the border box, as browsers clip it there. A blur becomes bands that fade out like a
+    /// Gaussian edge. Inset shadows are not drawn.
+    /// </summary>
+    public static void PaintShadows(GroupOp group, ComputedStyle s, float x, float y, float w, float h, CornerRadii? radii = null)
     {
         var shadows = s.BoxShadows;
         if (shadows == null || w <= 0 || h <= 0) return;
@@ -268,7 +451,9 @@ internal static class BoxPainter
                 uint a = (uint)Math.Clamp(MathF.Round(alpha * cover), 0, 255);
                 if (a == 0) continue;
                 uint c = CssColor.FlattenOnWhite(a << 24 | (color & 0xFFFFFF));
-                Outside(group, sx, sy, sw, shh, x, y, w, h, c);
+                if (radii is { } r)
+                    group.Ops.Add(new RoundRectOp(sx, sy, sw, shh, r.Outset(grow), c).WithHole(x, y, w, h, r));
+                else Outside(group, sx, sy, sw, shh, x, y, w, h, c);
             }
         }
     }
@@ -321,7 +506,7 @@ internal static class BoxPainter
     private const float MinTile = 0.05f;
 
     private static void PaintLayer(GroupOp group, ComputedStyle s, BackgroundImage layer, int i, float x, float y, float w, float h,
-        ImageLoader? images, float basis, uint backdrop)
+        ImageLoader? images, float basis, uint backdrop, CornerRadii? radii)
     {
         PdfImage? image = null;
         float iw = 0, ih = 0;
@@ -405,6 +590,7 @@ internal static class BoxPainter
             RepeatX = rx, RepeatY = ry,
             Image = image,
             Gradient = layer.Gradient?.Resolve(tw, th, backdrop),
+            ClipRadii = InnerRadii(radii, cx - x, cy - y, x + w - cx - cw, y + h - cy - ch),
         };
         var (x0, y0, x1, y1) = op.Painted();
         if (x1 > x0 && y1 > y0) group.Ops.Add(op);

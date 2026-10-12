@@ -305,6 +305,19 @@ internal static class CssParser
                 for (int k = 0; k < 4; k++) Add(name + "-" + Sides[k], four[k]);
                 return;
             }
+            case "border-radius":
+            {
+                // Horizontal radii, then optionally "/" and vertical radii, each one to four values like margin.
+                int slash = value.IndexOf('/');
+                var ht = Tokens(slash < 0 ? value : value.Substring(0, slash));
+                var vt = slash < 0 ? ht : Tokens(value.Substring(slash + 1));
+                if (ht.Count is 0 or > 4 || vt.Count is 0 or > 4) return;
+                var hs = FourSides(ht);
+                var vs = FourSides(vt);
+                string[] corners = { "top-left", "top-right", "bottom-right", "bottom-left" };
+                for (int k = 0; k < 4; k++) Add("border-" + corners[k] + "-radius", hs[k] == vs[k] ? hs[k] : hs[k] + " " + vs[k]);
+                return;
+            }
             case "border-width":
             case "border-style":
             case "border-color":
@@ -312,7 +325,7 @@ internal static class CssParser
                 var t = Tokens(value);
                 if (t.Count == 0 || t.Count > 4) return;
                 var four = FourSides(t);
-                string suffix = name.Substring(6); // "width" / "style" / "color"
+                string suffix = name.Substring(7); // "width" / "style" / "color"
                 for (int k = 0; k < 4; k++) Add("border-" + Sides[k] + "-" + suffix, four[k]);
                 return;
             }

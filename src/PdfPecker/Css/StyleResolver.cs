@@ -352,6 +352,9 @@ internal sealed class StyleResolver
             else if (s.Display == Display.InlineGrid) s.Display = Display.Grid;
             if (s.OutOfFlow) { s.Floated = false; s.Float = FloatSide.None; }
         }
+        // Flex and grid items are laid out as blocks, which carry their own opacity layer.
+        bool inlineBox = s.Display == Display.Inline && !parent.IsFlex && !parent.IsGrid;
+        s.InlineFade = inlineBox ? s.Opacity * (parent.Display == Display.Inline ? parent.InlineFade : 1) : 1;
         s.InvalidateFont();
         _styleCache[_probe.Freeze()] = s;
         Array.Clear(_decls, 0, _count);
@@ -637,11 +640,11 @@ internal sealed class StyleResolver
                 break;
             case "color":
                 if (inherit) s.Color = parent.Color;
-                else if (CssColor.TryParse(v, parent.Color, out var col)) s.Color = CssColor.FlattenOnWhite(col);
+                else if (CssColor.TryParse(v, parent.Color, out var col)) s.Color = col;
                 break;
             case "background-color":
                 if (inherit) s.BackgroundColor = parent.BackgroundColor;
-                else if (CssColor.TryParse(v, s.Color, out var bg)) s.BackgroundColor = CssColor.FlattenOnWhite(bg);
+                else if (CssColor.TryParse(v, s.Color, out var bg)) s.BackgroundColor = bg;
                 break;
             case "background-image":
                 s.BackgroundImages = inherit ? parent.BackgroundImages : ParseBackgroundImage(v, s);
@@ -1084,6 +1087,10 @@ internal sealed class StyleResolver
             case "border-right-style": s.BorderRightStyle = ParseBorderStyle(lower, s.BorderRightStyle); break;
             case "border-bottom-style": s.BorderBottomStyle = ParseBorderStyle(lower, s.BorderBottomStyle); break;
             case "border-left-style": s.BorderLeftStyle = ParseBorderStyle(lower, s.BorderLeftStyle); break;
+            case "border-top-left-radius": SetRadius(s, 0, lower, em, inherit ? parent : null); break;
+            case "border-top-right-radius": SetRadius(s, 1, lower, em, inherit ? parent : null); break;
+            case "border-bottom-right-radius": SetRadius(s, 2, lower, em, inherit ? parent : null); break;
+            case "border-bottom-left-radius": SetRadius(s, 3, lower, em, inherit ? parent : null); break;
             case "border-top-color": s.BorderTopColor = BorderColor(v, s); break;
             case "border-right-color": s.BorderRightColor = BorderColor(v, s); break;
             case "border-bottom-color": s.BorderBottomColor = BorderColor(v, s); break;
@@ -1423,10 +1430,38 @@ internal sealed class StyleResolver
             _ => current,
         };
 
+    /// <summary>Sets one corner's border radius: one length for both axes, or horizontal then vertical.</summary>
+    private void SetRadius(ComputedStyle s, int corner, string lower, float em, ComputedStyle? inherited)
+    {
+        Length h, v;
+        if (inherited != null)
+        {
+            if (inherited.BorderRadii == null) { h = v = Length.Zero; }
+            else { h = inherited.BorderRadii[corner * 2]; v = inherited.BorderRadii[corner * 2 + 1]; }
+        }
+        else
+        {
+            var t = CssParser.Tokens(lower);
+            if (t.Count is 0 or > 2) return;
+            if (!TryParseLength(t[0], em, _rootFontSize, out h, _vw, _vh) || h.IsAuto || h.Value < 0) return;
+            v = h;
+            if (t.Count == 2 && (!TryParseLength(t[1], em, _rootFontSize, out v, _vw, _vh) || v.IsAuto || v.Value < 0)) return;
+        }
+        if (s.BorderRadii == null)
+        {
+            if (h.Value == 0 && v.Value == 0) return;
+            s.BorderRadii = new Length[8];
+            Array.Fill(s.BorderRadii, Length.Zero);
+        }
+        else s.BorderRadii = (Length[])s.BorderRadii.Clone(); // the array may be shared with the style it was copied from
+        s.BorderRadii[corner * 2] = h;
+        s.BorderRadii[corner * 2 + 1] = v;
+    }
+
     private static uint? BorderColor(string v, ComputedStyle s)
     {
         if (v.Equals("currentcolor", StringComparison.OrdinalIgnoreCase)) return null;
-        return CssColor.TryParse(v, s.Color, out var c) ? CssColor.FlattenOnWhite(c) : null;
+        return CssColor.TryParse(v, s.Color, out var c) ? c : null;
     }
 
     private static FontFamily MapFontFamily(string value, FontFamily current)
