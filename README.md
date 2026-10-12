@@ -397,6 +397,9 @@ Selectors: type, `.class`, `#id`, `*`, attribute selectors (`[a]`, `=`, `~=`, `|
 | Grid | `grid-template-columns`/`-rows` (lengths, `%`, `fr`, `auto`, `min-content`, `max-content`, `minmax()`, `fit-content()`, `repeat()` incl. `auto-fill`/`auto-fit`), `grid-auto-rows`/`-columns`, `grid-auto-flow`, `grid-template-areas`, `grid-template`, named lines (`[name]`), `grid-column`/`-row` (line numbers, names and `span`), `grid-area` (incl. area names), `gap`, `justify-items`/`-self`, `align-items`/`-self`, `justify-content`, `align-content`, `place-*` |
 | Columns | `column-count`, `column-width`, `columns`, `column-gap` |
 | Variables | custom properties (`--name: value`) and `var(--name, fallback)`, anywhere including shorthands |
+| Positioning | `float` and `clear`; `position` (`relative`, `absolute`, `fixed`; `sticky` is drawn as `relative`) with `top`, `right`, `bottom` and `left`; `z-index` |
+| Transforms | `transform` (`translate()`, `translateX()`/`Y()`, `scale()`, `scaleX()`/`Y()`, `rotate()`, `skew()`, `skewX()`/`Y()`, `matrix()`) and `transform-origin` |
+| Generated content | `::before` and `::after` with `content` (strings, `attr()`, `counter()`, `counters()`, `open-quote`/`close-quote`), `counter-reset`, `counter-increment`, `counter-set` |
 | SVG | `fill`, `stroke`, `stroke-width`, `fill-opacity`, `stroke-opacity`, `fill-rule`, `stroke-linecap`, `stroke-linejoin`, `stroke-miterlimit`, `clip-path`, `clip-rule`, `text-anchor`, `dominant-baseline` (as CSS or presentation attributes) |
 | Lists | `list-style-type` (disc, circle, square, decimal, decimal-leading-zero, alpha, roman, none), `list-style` |
 | Tables | `border-collapse` (each shared border drawn once, the wider one winning), `border-spacing`, cell `vertical-align`, automatic column widths, `table-layout: fixed`, a table `height` shared out over the rows |
@@ -455,8 +458,7 @@ These are deliberate scope choices for speed and size; they are the first candid
   fonts add Central European, Greek and Cyrillic, but not CJK or other scripts: register fonts for those.
 - Fonts: no text shaping beyond pair kerning (no ligatures, Arabic or Indic scripts), no right-to-left text, no WOFF2, and variable
   fonts use their default instance. SVG `<text>` uses the standard fonts (embedded as Liberation for PDF/A).
-- No JavaScript, forms, `float`, `position`, `::before`/`::after`, `border-radius`, inset shadows, transforms or GIF/WebP
-  images. SVG files in `<img>` are not drawn.
+- No JavaScript, forms, `border-radius`, inset shadows or GIF/WebP images. SVG files in `<img>` are not drawn.
 - Inline SVG: no embedded images, masks, patterns, markers or filters; `<text>` uses only the first value of
   position lists and no `textPath` layout. Gradient stops with transparency are blended onto white (or, for CSS, onto
   the element's background colour).

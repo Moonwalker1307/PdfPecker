@@ -158,8 +158,10 @@ public class JpxJbig2Tests
     {
         // A page information segment claiming 60000 x 60000 pixels, followed by nothing.
         var seg = new byte[] { 0, 0, 0, 0, 0x30, 0, 1, 0, 0, 0, 19, 0, 0, 0xEA, 0x60, 0, 0, 0xEA, 0x60, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0 };
-        try { Jbig2Decoder.Decode(seg, null, 60000, 60000); }
-        catch (InvalidDataException) { }
+        byte[]? rows = null;
+        var ex = Record.Exception(() => rows = Jbig2Decoder.Decode(seg, null, 60000, 60000));
+        Assert.True(ex is InvalidDataException || (ex == null && rows == null),
+            $"Expected the page to be refused, got {ex?.GetType().Name ?? $"{rows?.Length} bytes"}");
     }
 
     private static byte[] ImagePdf(string filter, byte[] data) =>

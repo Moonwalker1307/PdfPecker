@@ -207,6 +207,26 @@ public class LayoutFeatureTests
     }
 
     [Fact]
+    public void Inline_block_in_a_fr_column_contributes_its_min_content_width()
+    {
+        // Like Chrome: the inline-block can wrap, so it does not widen its 1fr column to its unwrapped width.
+        var ops = Layout("""
+            <div style="display:grid; grid-template-columns: 1fr 1fr 1fr">
+              <div style="background:#ff0000">one two three four five six seven eight nine ten</div>
+              <div style="background:#00ff00; text-align:center">
+                <div style="display:inline-block; text-align:left">eleven twelve thirteen fourteen fifteen sixteen seventeen</div>
+              </div>
+              <div style="background:#0000ff; text-align:right">10.242,50</div>
+            </div>
+            """);
+        Near(0, Box(ops, "#ff0000").X);
+        Near(500 / 3f, Box(ops, "#ff0000").W);
+        Near(500 / 3f, Box(ops, "#00ff00").X);
+        Near(500 / 3f, Box(ops, "#00ff00").W);
+        Near(1000 / 3f, Box(ops, "#0000ff").X);
+    }
+
+    [Fact]
     public void Grid_explicit_placement_spans_and_repeat()
     {
         var ops = Layout("""

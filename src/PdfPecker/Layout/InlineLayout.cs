@@ -61,6 +61,7 @@ internal sealed partial class LayoutEngine
         public string? AnchorId;
         public Element? Element;      // a float or an absolutely positioned box
         public float FloatMin;        // a float's min-content width, when measuring
+        public float MinWidth = -1;   // an inline-block's min-content contribution, when measuring (-1: Width)
         public float RelX, RelY;      // offset of position: relative inline ancestors
 
         public void Reset()
@@ -78,6 +79,7 @@ internal sealed partial class LayoutEngine
             AnchorId = null;
             Element = null;
             FloatMin = RelX = RelY = 0;
+            MinWidth = -1;
         }
 
         public string Text => Start == 0 && Length == Source.Length ? Source : Source.Substring(Start, Length);
@@ -248,7 +250,17 @@ internal sealed partial class LayoutEngine
     {
         var c = CaptureBox(e, availW, shrinkToFit: true);
         float baseline = float.IsNaN(c.Baseline) ? c.Height : c.Baseline;
-        return new Item { Kind = ItemKind.Box, Style = e.Style, Width = c.Width, Height = c.Height, BoxBaseline = baseline, Capture = c, Href = href };
+        var item = new Item { Kind = ItemKind.Box, Style = e.Style, Width = c.Width, Height = c.Height, BoxBaseline = baseline, Capture = c, Href = href };
+        if (_measuring)
+        {
+            // An inline-block can wrap its own content, so its min-content contribution is its min-content width,
+            // not the width it takes when laid out at the (very wide) measuring width.
+            var s = e.Style;
+            float margins = (s.MarginLeft.IsAuto || s.MarginLeft.IsPercent ? 0 : s.MarginLeft.Value)
+                            + (s.MarginRight.IsAuto || s.MarginRight.IsPercent ? 0 : s.MarginRight.Value);
+            item.MinWidth = Math.Min(c.Width, Intrinsic(e).Min + margins);
+        }
+        return item;
     }
 
     private const string TabSpaces = "        ";
