@@ -130,7 +130,7 @@ internal sealed class StyleResolver
         // Fragments without an <html> element: custom properties declared on :root or html still apply.
         if (_hasCustomProperties && !document.Children.Any(c => c is Element { Name: "html" }))
         {
-            var html = new Element("html") { Parent = document, ElementIndex = 1, ElementSiblingCount = 1 };
+            var html = new Element("html") { Parent = document, ElementIndex = 1, ElementSiblingCount = 1, TypeIndex = 1, TypeCount = 1 };
             Resolve(html, rootStyle);
             rootStyle.CustomProperties = html.Style.CustomProperties;
         }
@@ -145,6 +145,8 @@ internal sealed class StyleResolver
         foreach (var c in parent.Children) if (c is Element) count++;
         int index = 0;
         Element? prev = null;
+        // The last sibling seen of each element name, for :nth-of-type(). Siblings use only a few names.
+        List<Element>? lastOfName = count > 1 ? new List<Element>(4) : null;
         foreach (var c in parent.Children)
         {
             if (c is not Element e) continue;
@@ -152,11 +154,30 @@ internal sealed class StyleResolver
             e.ElementSiblingCount = count;
             e.PreviousElementSibling = prev;
             prev = e;
+            e.TypeIndex = 1;
+            if (lastOfName != null)
+            {
+                int k = 0;
+                while (k < lastOfName.Count && lastOfName[k].Name != e.Name) k++;
+                if (k == lastOfName.Count) lastOfName.Add(e);
+                else
+                {
+                    e.TypeIndex = lastOfName[k].TypeIndex + 1;
+                    lastOfName[k] = e;
+                }
+            }
             e.Id = e.GetAttribute("id");
             var cls = e.GetAttribute("class");
             if (!string.IsNullOrWhiteSpace(cls))
                 e.Classes = cls!.Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
             Prepare(e);
+        }
+        foreach (var c in parent.Children)
+        {
+            if (c is not Element e) continue;
+            if (lastOfName == null) { e.TypeCount = 1; continue; }
+            foreach (var last in lastOfName)
+                if (last.Name == e.Name) { e.TypeCount = last.TypeIndex; break; }
         }
     }
 
@@ -990,6 +1011,47 @@ internal sealed class StyleResolver
                 if (TryParseNumberOrPercent(lower, out float op)) s.Opacity = Math.Clamp(op, 0, 1);
                 break;
 
+            case "outline-style": s.OutlineStyle = lower == "auto" ? BorderStyle.Solid : ParseBorderStyle(lower, s.OutlineStyle); break;
+            case "outline-width": s.OutlineWidth = BorderWidth(lower, em, s.OutlineWidth); break;
+            case "outline-color":
+                // invert is drawn as the text colour, as browsers without inversion do.
+                s.OutlineColor = lower == "invert" ? null : BorderColor(v, s);
+                break;
+            case "outline-offset":
+                if (TryParseLength(lower, em, _rootFontSize, out var oo, _vw, _vh) && !oo.IsAuto && !oo.IsPercent) s.OutlineOffset = oo.Value;
+                break;
+            case "text-shadow":
+                if (inherit) s.TextShadows = parent.TextShadows;
+                else if (lower == "initial") s.TextShadows = null;
+                else if (BoxShadow.Parse(v, em, _rootFontSize, _vw, _vh) is { } ts && !ts.Any(t => t.Inset || t.Spread != 0))
+                    s.TextShadows = ts.Length > 0 ? ts : null;
+                break;
+            case "text-overflow":
+                // One value for both ends, or start and end: only the end of the line is cut.
+                var tov = CssParser.Tokens(lower);
+                if (tov.Count is 1 or 2) s.TextOverflowEllipsis = tov[^1] == "ellipsis" || tov[^1].StartsWith("\"\u2026", StringComparison.Ordinal);
+                break;
+            case "object-fit":
+                s.ObjectFit = lower switch
+                {
+                    "fill" => ObjectFit.Fill,
+                    "contain" => ObjectFit.Contain,
+                    "cover" => ObjectFit.Cover,
+                    "none" => ObjectFit.None,
+                    "scale-down" => ObjectFit.ScaleDown,
+                    "inherit" => parent.ObjectFit,
+                    _ => s.ObjectFit,
+                };
+                break;
+            case "object-position":
+                if (inherit) { s.ObjectPositionX = parent.ObjectPositionX; s.ObjectPositionY = parent.ObjectPositionY; }
+                else if (CssBackground.Position(lower, em, _rootFontSize, _vw, _vh) is { } opos) { s.ObjectPositionX = opos.X; s.ObjectPositionY = opos.Y; }
+                break;
+            case "aspect-ratio":
+                if (inherit) { s.AspectRatio = parent.AspectRatio; s.AspectRatioAuto = parent.AspectRatioAuto; }
+                else if (ParseAspectRatio(lower, out float ratio, out bool ratioAuto)) { s.AspectRatio = ratio; s.AspectRatioAuto = ratioAuto; }
+                break;
+
             // ---- flexbox, grid, multi-column
             case "flex-direction":
                 s.FlexDirection = lower switch
@@ -1135,6 +1197,25 @@ internal sealed class StyleResolver
             case "border-bottom-color": s.BorderBottomColor = BorderColor(v, s); break;
             case "border-left-color": s.BorderLeftColor = BorderColor(v, s); break;
         }
+    }
+
+    /// <summary>Parses aspect-ratio: auto, a ratio ("16 / 9" or "1.5"), or both. A ratio of zero is treated as auto.</summary>
+    private static bool ParseAspectRatio(string lower, out float ratio, out bool auto)
+    {
+        ratio = 0;
+        auto = false;
+        string rest = lower;
+        if (rest.StartsWith("auto", StringComparison.Ordinal)) { auto = true; rest = rest.Substring(4); }
+        else if (rest.EndsWith("auto", StringComparison.Ordinal)) { auto = true; rest = rest.Substring(0, rest.Length - 4); }
+        rest = rest.Trim();
+        if (rest.Length == 0) return auto;
+        int slash = rest.IndexOf('/');
+        string a = slash < 0 ? rest : rest.Substring(0, slash), b = slash < 0 ? "1" : rest.Substring(slash + 1);
+        if (!float.TryParse(a.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out float w) || w < 0
+            || !float.TryParse(b.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out float h) || h < 0) return false;
+        if (w > 0 && h > 0 && float.IsFinite(w / h)) ratio = w / h;
+        else auto = true; // a degenerate ratio such as 0 / 1 behaves as auto
+        return true;
     }
 
     private static bool TryParseNumberOrPercent(string lower, out float value)

@@ -26,6 +26,8 @@ internal sealed class Element : Node
     public int ElementIndex;        // 1-based position among element siblings
     public int ElementSiblingCount; // number of element siblings including itself
     public Element? PreviousElementSibling;
+    public int TypeIndex;           // 1-based position among element siblings with the same name
+    public int TypeCount;           // number of element siblings with the same name, including itself
 
     // Filled in by the style resolver.
     public ComputedStyle Style = null!;

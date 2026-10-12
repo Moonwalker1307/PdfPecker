@@ -457,6 +457,12 @@ internal sealed partial class LayoutEngine
             contentW = s.Width.Resolve(availW);
             if (s.BorderBox) contentW -= frame;
         }
+        else if (s.AspectRatio > 0 && !s.Height.IsAuto && !s.Height.IsPercent)
+        {
+            // aspect-ratio with a fixed height and an auto width: the width follows from the height.
+            float boxH = s.Height.Value + (s.BorderBox ? 0 : frameV);
+            contentW = RatioOnBorderBox(s) ? boxH * s.AspectRatio - frame : (boxH - frameV) * s.AspectRatio;
+        }
         else
         {
             contentW = availW - ml - mr - frame;
@@ -519,7 +525,7 @@ internal sealed partial class LayoutEngine
                 // Rounded corners clip the image to the content box's curve.
                 var radii = BoxPainter.InnerRadii(BoxPainter.Radii(s, imgW + bl + br + pl + pr, imgH + bt + bb + pt + pb),
                     bl + pl, bt + pt, br + pr, bb + pb);
-                _ops.Add(new ImageOp(cx, cy, imgW, imgH, image) { Radii = radii });
+                AddImage(s, image, cx, cy, imgW, imgH, radii);
             }
             if (svg != null && s.Visible) _ops.Add(new SvgOp(cx, cy, imgW, imgH, svg));
             contentBottom = cy + imgH;
@@ -534,6 +540,7 @@ internal sealed partial class LayoutEngine
             if (hasHOverride) definiteH = Math.Max(0, overrideH - frameV);
             else if (!s.Height.IsAuto && !s.Height.IsPercent) definiteH = Math.Max(0, s.Height.Value - (s.BorderBox ? frameV : 0));
             float minH = !s.MinHeight.IsAuto && !s.MinHeight.IsPercent ? Math.Max(0, s.MinHeight.Value - (s.BorderBox ? frameV : 0)) : 0;
+            if (RatioHeight(s, contentW, frame, frameV, hasHOverride) is float rh) minH = Math.Max(minH, rh);
             // A box that is not a formatting context root shares its top and bottom margins with its children's.
             bool joinsChildren = !shrinkToFit && !hasWOverride && !hasHOverride;
             _absorbTop = joinsChildren && FirstBlockChild(e) != null;
@@ -569,6 +576,8 @@ internal sealed partial class LayoutEngine
             float mh = s.MinHeight.Value - (s.BorderBox ? bt + bb + pt + pb : 0);
             if (contentH < mh) contentH = mh;
         }
+        // aspect-ratio with an auto height: at least the ratio's height; taller content still makes it grow.
+        if (!isImage && !isSvg && RatioHeight(s, contentW, frame, frameV, hasHOverride) is float ratioH && contentH < ratioH) contentH = ratioH;
 
         float bottom = cy + contentH + pb + bb;
         BoxPainter.Paint(group, s, bx, y, used, bottom - y, _images, availW);
@@ -708,6 +717,51 @@ internal sealed partial class LayoutEngine
         return svg;
     }
 
+    /// <summary>Whether aspect-ratio sizes the border box (box-sizing: border-box without "auto") rather than the content box.</summary>
+    private static bool RatioOnBorderBox(ComputedStyle s) => s.BorderBox && !s.AspectRatioAuto;
+
+    /// <summary>The content height aspect-ratio gives a box with an auto height and the given content width, or null.</summary>
+    private static float? RatioHeight(ComputedStyle s, float contentW, float frame, float frameV, bool hasHOverride)
+    {
+        // Percentage heights are treated as auto here, as elsewhere in block layout.
+        if (s.AspectRatio <= 0 || hasHOverride || !s.Height.IsAuto && !s.Height.IsPercent) return null;
+        float h = RatioOnBorderBox(s) ? (contentW + frame) / s.AspectRatio - frameV : contentW / s.AspectRatio;
+        return Math.Max(0, h);
+    }
+
+    /// <summary>
+    /// Draws an image into its content box (x, y, w, h), sized and placed by object-fit and object-position, and clipped
+    /// to the box (and its rounded corners) where it reaches outside.
+    /// </summary>
+    private void AddImage(ComputedStyle s, PdfImage image, float x, float y, float w, float h, CornerRadii? radii)
+    {
+        if (s.ObjectFit == ObjectFit.Fill || image.Width <= 0 || image.Height <= 0 || w <= 0 || h <= 0)
+        {
+            _ops.Add(new ImageOp(x, y, w, h, image) { Radii = radii });
+            return;
+        }
+        float nw = image.Width * 0.75f, nh = image.Height * 0.75f;
+        float contain = Math.Min(w / nw, h / nh);
+        float k = s.ObjectFit switch
+        {
+            ObjectFit.Contain => contain,
+            ObjectFit.Cover => Math.Max(w / nw, h / nh),
+            ObjectFit.ScaleDown => Math.Min(1, contain),
+            _ => 1, // none
+        };
+        float dw = nw * k, dh = nh * k;
+        float dx = x + s.ObjectPositionX.Resolve(w - dw), dy = y + s.ObjectPositionY.Resolve(h - dh);
+        var op = new ImageOp(dx, dy, dw, dh, image);
+        if (radii == null && dx >= x - Eps && dy >= y - Eps && dx + dw <= x + w + Eps && dy + dh <= y + h + Eps)
+        {
+            _ops.Add(op);
+            return;
+        }
+        var clip = new ClipOp(x, y, w, h, radii);
+        clip.Ops.Add(op);
+        _ops.Add(clip);
+    }
+
     /// <summary>Used size of a replaced element from its intrinsic size and its CSS width, height and limits.</summary>
     private void ReplacedSize(Element e, float iw, float ih, float availW, out float w, out float h)
     {
@@ -720,9 +774,12 @@ internal sealed partial class LayoutEngine
             if (hasW) w -= s.PaddingLeft.Resolve(availW) + s.PaddingRight.Resolve(availW) + s.BorderLeft + s.BorderRight;
             if (hasH) h -= s.PaddingTop.Resolve(availW) + s.PaddingBottom.Resolve(availW) + s.BorderTop + s.BorderBottom;
         }
-        if (hasW && !hasH) h = iw > 0 ? w * ih / iw : 0;
-        else if (!hasW && hasH) w = ih > 0 ? h * iw / ih : 0;
-        else if (!hasW && !hasH) { w = iw; h = ih; }
+        // aspect-ratio replaces the natural ratio, unless it says "auto" and the element has one.
+        bool ratioOverride = s.AspectRatio > 0 && !(s.AspectRatioAuto && iw > 0 && ih > 0);
+        float rw = ratioOverride ? s.AspectRatio : iw, rh = ratioOverride ? 1 : ih;
+        if (hasW && !hasH) h = rw > 0 ? w * rh / rw : 0;
+        else if (!hasW && hasH) w = rh > 0 ? h * rw / rh : 0;
+        else if (!hasW && !hasH) { w = iw; h = ratioOverride ? iw / s.AspectRatio : ih; }
 
         if (!s.MaxWidth.IsAuto)
         {

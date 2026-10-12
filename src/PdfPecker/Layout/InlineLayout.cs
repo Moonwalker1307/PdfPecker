@@ -162,10 +162,10 @@ internal sealed partial class LayoutEngine
         if (e.Id != null) { var it_ = Rent(ItemKind.Anchor, s); it_.AnchorId = e.Id; st.Items.Add(it_); }
         if (e.Name == "a" && e.GetAttribute("name") is { } aname) { var it_ = Rent(ItemKind.Anchor, s); it_.AnchorId = aname; st.Items.Add(it_); }
 
-        if ((s.Layered || s.BorderRadii != null && e.Name == "img") && e.Name is "img" or "svg")
+        if ((s.Layered || (s.BorderRadii != null || s.ObjectFit != ObjectFit.Fill || s.OutlineStyle != BorderStyle.None) && e.Name == "img") && e.Name is "img" or "svg")
         {
-            // A transformed, translucent, relatively positioned or rounded image is laid out as a box of its own, which
-            // carries the layer or clips the image.
+            // A transformed, translucent, relatively positioned, rounded or object-fit image is laid out as a box of its
+            // own, which carries the layer or fits and clips the image.
             st.Items.Add(LayoutInlineBlock(e, st.AvailWidth, href ?? LinkOf(e)));
             st.LastWasSpace = false;
             return;
@@ -224,7 +224,7 @@ internal sealed partial class LayoutEngine
             return;
         }
 
-        if (CssColor.IsVisible(s.BackgroundColor) || s.BoxShadows != null) deco = s;
+        if (CssColor.IsVisible(s.BackgroundColor) || s.BoxShadows != null || s.OutlineStyle != BorderStyle.None) deco = s;
         float left = s.PaddingLeft.Resolve(0) + s.BorderLeft + (s.MarginLeft.IsAuto ? 0 : s.MarginLeft.Resolve(0));
         float right = s.PaddingRight.Resolve(0) + s.BorderRight + (s.MarginRight.IsAuto ? 0 : s.MarginRight.Resolve(0));
         int first = st.Items.Count;
@@ -758,6 +758,20 @@ internal sealed partial class LayoutEngine
                     break;
             }
 
+            if (block.TextOverflowEllipsis && block.ClipsX && !_measuring && line.Width + lineKern > lineW - lineIndent + Eps)
+            {
+                Ellipsize(line, block, lineW - lineIndent);
+                spaces = 0;
+                foreach (var it in items)
+                    if (it.Kind == ItemKind.Space) spaces++;
+                if (_kern.Length < items.Count) _kern = new float[items.Count * 2];
+                lineKern = KernBetweenItems(items, _kern);
+                free = lineW - lineIndent - line.Width - lineKern;
+                lx = x + lineLeft + lineIndent;
+                extra = 0;
+                // The cut line fills the box, so alignment no longer moves it.
+            }
+
             // Item positions.
             if (xs.Length < items.Count + 1) _xs = xs = new float[items.Count * 2];
             float cx = lx;
@@ -795,6 +809,7 @@ internal sealed partial class LayoutEngine
                         if (style.Visible)
                         {
                             float bl = baseline + BaselineShift(style) + items[start].RelY;
+                            if (style.TextShadows != null) TextShadows(style, runX, bl, y, sb.ToString(), style.WordSpacing + extra);
                             _ops.Add(new TextOp(runX, bl, y, style.Font, style.FontSize, CssColor.Fade(style.Color, style.InlineFade), sb.ToString(),
                                 style.WordSpacing + extra, style.LetterSpacing));
                             if (style.TextDecoration != TextDecoration.None) Decorate(style, runX, runEnd - runX, bl);
@@ -948,6 +963,12 @@ internal sealed partial class LayoutEngine
                 _ops.Add(shadows);
             }
             if (CssColor.IsVisible(deco.BackgroundColor)) _ops.Add(new RectOp(rx, top, xs[i] - xs[start], h, CssColor.Fade(deco.BackgroundColor, deco.InlineFade)));
+            if (deco.OutlineStyle != BorderStyle.None && deco.Visible)
+            {
+                var outline = new GroupOp();
+                BoxPainter.PaintOutline(outline, deco, rx, top, xs[i] - xs[start], h, null);
+                _ops.Add(outline);
+            }
         }
     }
 
@@ -961,6 +982,93 @@ internal sealed partial class LayoutEngine
             int start = i;
             while (i < items.Count && items[i].Href == href) i++;
             _ops.Add(new LinkOp(xs[start], lineTop, xs[i] - xs[start], lineH, href));
+        }
+    }
+
+    /// <summary>
+    /// Cuts a line that overflows its clipping box (text-overflow: ellipsis): characters and inline boxes at the end are
+    /// dropped until "…", in the block's font, fits within <paramref name="room"/>.
+    /// </summary>
+    private void Ellipsize(Line line, ComputedStyle block, float room)
+    {
+        const string Ellipsis = "\u2026";
+        var font = block.Font;
+        float ew = font.MeasureUnits(Ellipsis, 0, 1) * block.FontSize / 1000f + block.LetterSpacing;
+        float limit = room - ew, used = 0;
+        var items = line.Items;
+        var kept = new List<Item>(items.Count + 1);
+        int k = 0;
+        for (; k < items.Count; k++)
+        {
+            var it = items[k];
+            if (used + it.Width <= limit + Eps) { kept.Add(it); used += it.Width; continue; }
+            if (it.Kind == ItemKind.Text && it.Length > 0)
+            {
+                // As many of the word's characters as fit.
+                var f = it.Style.Font;
+                float size = it.Style.FontSize, ls = it.Style.LetterSpacing, fw = 0;
+                int fit = 0;
+                while (fit < it.Length)
+                {
+                    float cw = f.CharWidth(it.Source[it.Start + fit], size) + ls;
+                    if (used + fw + cw > limit + Eps) break;
+                    fw += cw;
+                    fit++;
+                }
+                if (fit > 0) { kept.Add(it.Slice(0, fit, fw)); used += fw; }
+            }
+            break;
+        }
+        // Anchors and positioned boxes on the cut part still need their positions.
+        for (; k < items.Count; k++)
+            if (items[k].Kind is ItemKind.Anchor or ItemKind.Absolute) kept.Add(items[k]);
+        while (kept.Count > 0 && kept[^1].Kind == ItemKind.Space) { used -= kept[^1].Width; kept.RemoveAt(kept.Count - 1); }
+        var dots = Rent(ItemKind.Text, block);
+        dots.Source = Ellipsis;
+        dots.Length = 1;
+        dots.Width = ew;
+        // The ellipsis takes the place of the last visible item, after any anchors kept at the end.
+        int at = kept.Count;
+        while (at > 0 && kept[at - 1].Kind is ItemKind.Anchor or ItemKind.Absolute) at--;
+        kept.Insert(at, dots);
+        items.Clear();
+        items.AddRange(kept);
+        line.Width = used + ew;
+    }
+
+    /// <summary>
+    /// Paints the text-shadows of a run under it, the first shadow on top. A blurred shadow is approximated by faint
+    /// copies spread around its offset, which soften its edge.
+    /// </summary>
+    private void TextShadows(ComputedStyle style, float x, float baseline, float lineTop, string text, float wordSpacing)
+    {
+        var shadows = style.TextShadows!;
+        for (int i = shadows.Length - 1; i >= 0; i--)
+        {
+            var sh = shadows[i];
+            uint color = CssColor.Fade(sh.Color ?? style.Color, style.InlineFade);
+            if (!CssColor.IsVisible(color)) continue;
+            float sx = x + sh.X, sy = baseline + sh.Y;
+            float blur = Math.Min(sh.Blur, 50);
+            if (blur <= 0.375f)
+            {
+                _ops.Add(new TextOp(sx, sy, lineTop, style.Font, style.FontSize, color, text, wordSpacing, style.LetterSpacing));
+                continue;
+            }
+            // Seventeen faint copies, at the offset and on two rings around it: about two thirds of the alpha where they
+            // all overlap, fading toward the edges.
+            uint faint = (uint)Math.Max(1, MathF.Round((color >> 24) * 0.06f)) << 24 | (color & 0xFFFFFF);
+            _ops.Add(new TextOp(sx, sy, lineTop, style.Font, style.FontSize, faint, text, wordSpacing, style.LetterSpacing));
+            for (int ring = 1; ring <= 2; ring++)
+            {
+                float r = blur * ring / 4;
+                for (int k = 0; k < 8; k++)
+                {
+                    float a = k * MathF.PI / 4 + ring * MathF.PI / 8;
+                    _ops.Add(new TextOp(sx + r * MathF.Cos(a), sy + r * MathF.Sin(a), lineTop, style.Font, style.FontSize, faint, text,
+                        wordSpacing, style.LetterSpacing));
+                }
+            }
         }
     }
 
