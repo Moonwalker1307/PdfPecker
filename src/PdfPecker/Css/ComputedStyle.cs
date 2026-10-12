@@ -146,6 +146,7 @@ internal sealed class ComputedStyle
     public float LetterSpacing;
     public float WordSpacing;
     public bool Visible = true;
+    public bool CanvasBackground; // the background is painted on every page's canvas instead of on this box (html/body propagation)
     public bool BorderCollapse;
     public bool TableLayoutFixed; // table-layout: fixed
     public BoxShadow[]? BoxShadows;
@@ -284,6 +285,7 @@ internal sealed class ComputedStyle
         c.Display = Display.Inline;
         c.BackgroundColor = 0;
         c.BackgroundImages = null;
+        c.CanvasBackground = false;
         c.BackgroundRepeats = null;
         c.BackgroundPositionsX = c.BackgroundPositionsY = null;
         c.BackgroundSizes = null;

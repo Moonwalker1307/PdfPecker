@@ -32,6 +32,12 @@ internal sealed partial class LayoutEngine
 
     public List<DrawOp> Ops => _ops;
 
+    /// <summary>The root element (html), whose border box positions the page canvas background.</summary>
+    public Element? CanvasRoot { get; init; }
+
+    /// <summary>The border box of <see cref="CanvasRoot"/> once laid out.</summary>
+    public (float X, float Y, float W, float H)? CanvasRootBox { get; private set; }
+
     /// <summary>Stops the layout when cancelled.</summary>
     public CancellationToken Cancellation { get; init; }
 
@@ -345,13 +351,16 @@ internal sealed partial class LayoutEngine
                && e.Name is not ("img" or "svg" or "hr");
     }
 
+    // The root element's margins do not collapse with its children's (CSS 2.1 §8.3.1).
+    private static bool IsRoot(Element e) => e.Parent is { Name: "#document" };
+
     private static bool CollapsesTop(Element e)
-        => IsPlainFlow(e) && e.Style.BorderTop == 0 && e.Style.PaddingTop.Resolve(0) == 0 && !e.Style.PaddingTop.IsPercent;
+        => IsPlainFlow(e) && !IsRoot(e) && e.Style.BorderTop == 0 && e.Style.PaddingTop.Resolve(0) == 0 && !e.Style.PaddingTop.IsPercent;
 
     private static bool CollapsesBottom(Element e)
     {
         var s = e.Style;
-        return IsPlainFlow(e) && s.BorderBottom == 0 && s.PaddingBottom.Resolve(0) == 0 && !s.PaddingBottom.IsPercent
+        return IsPlainFlow(e) && !IsRoot(e) && s.BorderBottom == 0 && s.PaddingBottom.Resolve(0) == 0 && !s.PaddingBottom.IsPercent
                && s.Height.IsAuto && (s.MinHeight.IsAuto || s.MinHeight.Value <= 0);
     }
 
@@ -563,6 +572,7 @@ internal sealed partial class LayoutEngine
 
         float bottom = cy + contentH + pb + bb;
         BoxPainter.Paint(group, s, bx, y, used, bottom - y, _images, availW);
+        if (e == CanvasRoot) CanvasRootBox = (bx, y, used, bottom - y);
         if (cbFrame != null)
         {
             _frames.Remove(cbFrame);
