@@ -355,8 +355,7 @@ What the renderer supports:
   baseline and progressive JPEG, JPEG 2000 (`JPXDecode`, including embedded alpha), JBIG2 (generic, text, symbol,
   refinement and halftone regions, with `JBIG2Globals`), CCITT fax, stencil masks, colour-key masks and soft masks.
 
-Not supported yet: predefined CJK CMaps and
-non-embedded CJK fonts; ICC profiles (ICC-based colours use their device equivalents).
+For what the renderer does not support yet, see [Limitations](#limitations).
 
 ## Website
 
@@ -425,8 +424,7 @@ about unclosed and misnested tags, the way browsers are.
 miss is an exotic HTML5 entity name) plus the GitHub Flavored Markdown extensions: tables with column alignment,
 `~~strikethrough~~`, task list items (`- [x]`) and bare `www.`/`https://`/e-mail autolinks. Headings get GitHub-style
 ids, so `[see below](#heading-text)` links work in the PDF too. The parser runs in linear time on hostile input
-(deep nesting, unclosed brackets, long delimiter runs). Not supported: footnotes, definition lists, math and
-front matter.
+(deep nesting, unclosed brackets, long delimiter runs). See [Limitations](#limitations) for what is not supported.
 
 **CSS**: `<style>` blocks, `<link rel="stylesheet">`, inline `style` attributes, `@media print`, and `@page`.
 Selectors: type, `.class`, `#id`, `*`, attribute selectors (`[a]`, `=`, `~=`, `|=`, `^=`, `$=`, `*=`), descendant,
@@ -497,24 +495,72 @@ metric-compatible Liberation Sans, Serif and Mono.
 
 ## Limitations
 
-These are deliberate scope choices for speed and size; they are the first candidates for future work.
+PdfPecker is built for fast conversion of HTML templates you control, not for rendering arbitrary web pages. These are
+the known gaps; most are scope choices for speed and size, and they are the first candidates for future work. Anything
+not listed in [What is supported](#what-is-supported) should be assumed missing.
+
+**By design**
+
+- No JavaScript. Scripts are never run, so content must be in the HTML before conversion (render it server-side first).
+- No network access: `http:`/`https:` stylesheets and images are not downloaded. Supply them through your
+  `ResourceResolver`, as files under `BaseDirectory`, or as `data:` URIs.
+- Form controls (`<input>`, `<select>`, `<textarea>`, `<button>`), `<canvas>`, `<iframe>`, `<video>`, `<audio>`,
+  `<object>` and `<embed>` are not drawn; the PDF has no fillable form fields.
+
+**Text and fonts**
 
 - Without registered fonts or `EmbedStandardFonts`, text uses the standard PDF fonts, so characters are limited to
   the Windows-1252 set (Western European languages); other characters are replaced with `?`. The bundled Liberation
   fonts add Central European, Greek and Cyrillic, but not CJK or other scripts: register fonts for those.
-- Fonts: no text shaping beyond pair kerning and standard ligatures (no contextual alternates, Arabic or Indic scripts), no right-to-left text, and variable
-  fonts use their default instance. SVG `<text>` uses the standard fonts (embedded as Liberation for PDF/A).
-- No JavaScript, forms, inset shadows or GIF/WebP images. SVG files in `<img>` are not drawn.
-- Inline SVG: no embedded images, masks, patterns, markers or filters; `<text>` uses only the first value of
-  position lists and no `textPath` layout. SVG gradient stops with transparency are blended onto white.
-- Backgrounds: no `background-clip: text`, `background-attachment: fixed` scrolls with the box, SVG files as
-  `url()` backgrounds are not drawn, and backgrounds of inline elements (`<span>`) show only their colour.
-- Grid: no `dense` packing, no subgrid; `span <name>` counts as `span 1`.
+- No complex-script shaping: Arabic, Hebrew, Indic and other scripts that need contextual forms or reordering are not
+  laid out correctly, and there is no right-to-left or vertical text (`direction`, `writing-mode`). Shaping is limited
+  to pair kerning and standard ligatures; no contextual alternates, small caps or other OpenType features.
+- Variable fonts use their default instance (`font-variation-settings` and `font-stretch` are ignored).
+- No automatic hyphenation (`hyphens: auto`); words break only at spaces, hyphens, `&shy;` and `&#8203;`.
+- SVG `<text>` uses the standard fonts (embedded as Liberation for PDF/A), only the first value of position lists and
+  no `textPath`.
+
+**CSS**
+
+- No `calc()`, `min()`, `max()` or `clamp()`; a declaration using them is ignored.
+- `@import` is ignored (use `<link rel="stylesheet">`). Rules inside `@supports`, `@layer` and `@container` blocks
+  are skipped, as are `@page :first`/`:left`/`:right` and page margin boxes (`@top-center`; use
+  [running headers and footers](#what-is-supported) instead).
+- Selectors: no `:first-of-type`, `:last-of-type`, `:nth-of-type()`, `:is()`, `:where()`, `:has()` or
+  `::first-letter`/`::first-line`/`::marker`. A rule with an unsupported selector is skipped. `:hover`, `:focus` and
+  similar interaction states never match.
+- Properties not supported: `text-shadow`, `outline`, `text-overflow` (no ellipsis), `filter`, `mix-blend-mode`,
+  `clip-path` on HTML elements (only in SVG), `border-image`, `object-fit`, `aspect-ratio`, `list-style-image`,
+  `column-span`, `column-rule` and inset `box-shadow`.
+- Borders: `groove`, `ridge`, `inset` and `outset` draw as solid, and so do `double` sides on rounded corners.
+- `position: sticky` is drawn as `relative`; `background-attachment: fixed` scrolls with the box.
+- Lists: `list-style-type` covers disc, circle, square, decimal, decimal-leading-zero, alpha and roman only (no Greek,
+  CJK or `@counter-style`).
+
+**Backgrounds and transparency**
+
+- No `background-clip: text`; SVG files as `url()` backgrounds are not drawn; backgrounds of inline elements
+  (`<span>`) show only their colour, not images or gradients.
+- Blurred box shadows and repeating gradients with translucent stops are blended onto the background colour rather
+  than truly see-through; SVG gradient stops with transparency are blended onto white.
+
+**Layout**
+
+- Grid: no `dense` packing and no subgrid; `span <name>` counts as `span 1`.
 - Multi-column: children are kept whole and balanced between columns; a single block is never split across columns.
-- Transparency: blurred box shadows and repeating gradients with translucent stops are blended onto the background
-  colour rather than truly see-through; rounded borders draw double sides as solid.
-- Overflow: table cells do not clip their content; a positioned child with a z-index inside a clipping box stays
+- Overflow: table cells do not clip their content; a positioned child with a `z-index` inside a clipping box stays
   stacked within that box.
+
+**Images and SVG**
+
+- Images: JPEG and PNG only; GIF, WebP, AVIF, BMP and SVG files in `<img>` are not drawn.
+- Inline SVG: no embedded `<image>`, masks, patterns, markers or filters.
+
+**Markdown and the PDF renderer**
+
+- Markdown: no footnotes, definition lists, math or front matter.
+- `PdfRenderer` (PDF to image): no predefined CJK CMaps or non-embedded CJK fonts, and ICC profiles are not applied
+  (ICC-based colours use their device equivalents).
 
 ## Performance
 
