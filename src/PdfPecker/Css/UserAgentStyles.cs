@@ -58,5 +58,7 @@ img { display: inline; }
 fieldset { margin: 0 2px; padding: 0.35em 0.75em 0.625em; border: 2px groove #c0c0c0; }
 legend { padding: 0 2px; }
 input, select, button, textarea { display: none; } /* form controls are not rendered */
+q::before { content: open-quote; }
+q::after { content: close-quote; }
 ";
 }

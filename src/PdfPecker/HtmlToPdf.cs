@@ -132,7 +132,10 @@ public static class HtmlToPdf
             new StyleResolver(sheet, page.ContentWidth, page.FlowHeight) { Cancellation = cancellationToken }.ResolveTree(doc, root);
         }
 
-        var engine = new LayoutEngine(page.FlowHeight, images) { Cancellation = cancellationToken, MaxPages = Math.Max(1, options.MaxPages) };
+        var engine = new LayoutEngine(page.FlowHeight, images)
+        {
+            Cancellation = cancellationToken, MaxPages = Math.Max(1, options.MaxPages), FixedAreaHeight = page.ContentHeight,
+        };
         if (options.Bookmarks) engine.Headings = new List<OutlineHeading>();
         float height = engine.Layout(doc, page.ContentWidth);
 
@@ -195,7 +198,7 @@ public static class HtmlToPdf
             },
         };
         var pdf = writer.Write(engine.Ops, height, engine.Anchors, background, title, options.Author, options.Subject,
-            options.FooterText, options.HeaderText, pageBands, engine.Headings);
+            options.FooterText, options.HeaderText, pageBands, engine.Headings, engine.FixedOps.Count > 0 ? engine.FixedOps : null);
         if (options.Signature != null)
             pdf = PdfSigner.Sign(pdf, options.Signature, options.Security?.OwnerPassword ?? options.Security?.UserPassword);
         return pdf;

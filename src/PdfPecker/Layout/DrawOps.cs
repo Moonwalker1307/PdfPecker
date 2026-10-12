@@ -115,10 +115,50 @@ internal sealed class CircleOp : DrawOp
 }
 
 /// <summary>A slot reserved before an element's content, filled with its background and borders once its size is known.</summary>
-internal sealed class GroupOp : DrawOp
+internal class GroupOp : DrawOp
 {
     public readonly List<DrawOp> Ops = new(2);
     public override void Offset(float dx, float dy) { foreach (var o in Ops) o.Offset(dx, dy); }
+}
+
+/// <summary>
+/// The ops of a float, a positioned or a transformed box: painted in its own layer (CSS 2.1 Appendix E), and drawn with
+/// <see cref="Transform"/> about (<see cref="OriginX"/>, <see cref="OriginY"/>) when it has one.
+/// </summary>
+internal sealed class LayerOp : GroupOp
+{
+    // Painting order among siblings: negative z-index, then the normal flow (0), floats, positioned boxes with z-index
+    // auto or 0, and positive z-index.
+    public const float FloatOrder = 0.25f, PositionedOrder = 0.5f;
+
+    public float Order;
+    public bool StackingContext; // its first op, the box's own background, stays below its negative z-index children
+    public Matrix? Transform;    // y-down, about the origin
+    public float OriginX, OriginY;
+
+    public override void Offset(float dx, float dy)
+    {
+        base.Offset(dx, dy);
+        OriginX += dx;
+        OriginY += dy;
+    }
+
+    /// <summary>Sorts ops into painting order, keeping document order within a layer.</summary>
+    public static void SortLayers(List<DrawOp> ops, int pinned = 0)
+    {
+        bool any = false;
+        foreach (var op in ops)
+        {
+            if (op is not LayerOp layer) continue;
+            any = true;
+            SortLayers(layer.Ops, layer.StackingContext ? 1 : 0);
+        }
+        if (!any) return;
+        var tail = new List<DrawOp>(ops.Count - pinned);
+        for (int i = pinned; i < ops.Count; i++) tail.Add(ops[i]);
+        var sorted = tail.Select((op, i) => (op, i)).OrderBy(t => t.op is LayerOp l ? l.Order : 0).ThenBy(t => t.i).ToList();
+        for (int i = 0; i < sorted.Count; i++) ops[pinned + i] = sorted[i].op;
+    }
 }
 
 internal static class BoxPainter
