@@ -82,6 +82,19 @@ internal enum TextDecoration : byte { None = 0, Underline = 1, LineThrough = 2, 
 
 internal enum LengthUnit : byte { Pt, Percent, Auto }
 
+internal enum Position : byte { Static, Relative, Absolute, Fixed }
+
+internal enum FloatSide : byte { None, Left, Right }
+
+/// <summary>One function of a CSS transform list. Translations are in points, or percentages of the border box when flagged.</summary>
+internal readonly record struct TransformFn(TransformKind Kind, float A, float B = 0, float C = 0, float D = 0, float E = 0, float F = 0,
+    bool PercentX = false, bool PercentY = false);
+
+internal enum TransformKind : byte { Translate, Scale, Rotate, Skew, Matrix }
+
+/// <summary>A counter name with the value of a counter-reset, counter-set or counter-increment.</summary>
+internal readonly record struct CounterOp(string Name, int Value);
+
 /// <summary>A computed length: absolute points, a percentage of the containing block, or auto.</summary>
 internal readonly struct Length
 {
@@ -178,8 +191,17 @@ internal sealed class ComputedStyle
     public bool PageBreakBefore, PageBreakAfter, AvoidBreakInside;
     public bool AvoidBreakBefore, AvoidBreakAfter; // break-before/after: avoid (keep with the next or previous box)
     public bool Floated;
-    public bool ClearBoth;
+    public FloatSide Float;
+    public bool ClearLeft, ClearRight;
     public float Opacity = 1;
+    public Position Position;
+    public Length Top = Length.Auto, Right = Length.Auto, Bottom = Length.Auto, Left = Length.Auto;
+    public int? ZIndex;                         // null = auto
+    public bool FormattingRoot;                 // overflow other than visible, or display: flow-root
+    public TransformFn[]? Transform;            // null = none
+    public Length TransformOriginX = new(50, LengthUnit.Percent), TransformOriginY = new(50, LengthUnit.Percent);
+    public string? Content;                     // the content property as written; null = normal
+    public CounterOp[]? CounterReset, CounterSet, CounterIncrement;
 
     // Flexbox, grid and multi-column.
     public FlexDirection FlexDirection;
@@ -237,6 +259,15 @@ internal sealed class ComputedStyle
     public bool IsMultiColumn => ColumnCount > 1 || !ColumnWidth.IsAuto;
     public bool IsRow => FlexDirection is FlexDirection.Row or FlexDirection.RowReverse;
 
+    /// <summary>Absolutely positioned (absolute or fixed): taken out of the flow and placed against a containing block.</summary>
+    public bool OutOfFlow => Position is Position.Absolute or Position.Fixed;
+
+    /// <summary>Positioned (anything but static): a containing block for absolutely positioned descendants.</summary>
+    public bool Positioned => Position != Position.Static;
+
+    /// <summary>Painted in the positioned layer: positioned, or transformed.</summary>
+    public bool Layered => Position != Position.Static || Transform != null;
+
     /// <summary>Creates the starting style for a child: inherited properties copied, the rest reset.</summary>
     public ComputedStyle CreateChild()
     {
@@ -263,8 +294,17 @@ internal sealed class ComputedStyle
         c.PageBreakBefore = c.PageBreakAfter = c.AvoidBreakInside = false;
         c.AvoidBreakBefore = c.AvoidBreakAfter = false;
         c.Floated = false;
-        c.ClearBoth = false;
+        c.Float = FloatSide.None;
+        c.ClearLeft = c.ClearRight = false;
         c.Opacity = 1;
+        c.Position = Position.Static;
+        c.Top = c.Right = c.Bottom = c.Left = Length.Auto;
+        c.ZIndex = null;
+        c.FormattingRoot = false;
+        c.Transform = null;
+        c.TransformOriginX = c.TransformOriginY = new Length(50, LengthUnit.Percent);
+        c.Content = null;
+        c.CounterReset = c.CounterSet = c.CounterIncrement = null;
         c.FlexDirection = FlexDirection.Row;
         c.FlexWrap = FlexWrap.NoWrap;
         c.FlexGrow = 0;

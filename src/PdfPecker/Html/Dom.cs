@@ -33,6 +33,9 @@ internal sealed class Element : Node
     /// <summary>Taken out of the normal flow, e.g. a running page header or footer that is drawn on every page.</summary>
     public bool Detached;
 
+    /// <summary>A ::before or ::after box made by the style resolver, not by the parser.</summary>
+    public bool Generated;
+
     public Element(string name) => Name = name;
 
     public string? GetAttribute(string name)

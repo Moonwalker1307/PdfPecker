@@ -288,6 +288,14 @@ internal static class CssParser
 
         switch (name)
         {
+            case "inset":
+            {
+                var t = Tokens(value);
+                if (t.Count == 0 || t.Count > 4) return;
+                var four = FourSides(t);
+                for (int k = 0; k < 4; k++) Add(Sides[k], four[k]);
+                return;
+            }
             case "margin":
             case "padding":
             {
