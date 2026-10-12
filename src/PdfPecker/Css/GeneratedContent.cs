@@ -77,6 +77,8 @@ internal static class GeneratedContent
             case "counters":
             {
                 if (args.Count is < 2 or > 3) return false;
+                // The separator must be a quoted string; "counters(item, )" or an unquoted word drops the declaration.
+                if (args[1].Length == 0 || args[1][0] is not ('"' or '\'')) return false;
                 var sep = new StringBuilder();
                 int k = 0;
                 if (!ReadString(args[1], ref k, sep)) return false;
