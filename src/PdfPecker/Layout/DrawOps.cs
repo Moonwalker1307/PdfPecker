@@ -234,6 +234,27 @@ internal class GroupOp : DrawOp
 }
 
 /// <summary>
+/// The content of a box with overflow other than visible: painted only inside (X, Y, W, H), the box's padding box, with
+/// its rounded corners when it has them. An axis that does not clip reaches far out on both sides.
+/// </summary>
+internal sealed class ClipOp : GroupOp
+{
+    public const float Far = 1e6f;
+
+    public float X, Y, W, H;
+    public CornerRadii? Radii;
+
+    public ClipOp(float x, float y, float w, float h, CornerRadii? radii) { X = x; Y = y; W = w; H = h; Radii = radii; }
+
+    public override void Offset(float dx, float dy)
+    {
+        base.Offset(dx, dy);
+        X += dx;
+        Y += dy;
+    }
+}
+
+/// <summary>
 /// The ops of a float, a positioned or a transformed box: painted in its own layer (CSS 2.1 Appendix E), and drawn with
 /// <see cref="Transform"/> about (<see cref="OriginX"/>, <see cref="OriginY"/>) when it has one.
 /// </summary>
@@ -262,6 +283,8 @@ internal sealed class LayerOp : GroupOp
         bool any = false;
         foreach (var op in ops)
         {
+            // A clipped box's content is sorted within the clip, which stays where the box is.
+            if (op is ClipOp clip) SortLayers(clip.Ops);
             if (op is not LayerOp layer) continue;
             any = true;
             SortLayers(layer.Ops, layer.StackingContext ? 1 : 0);
@@ -443,6 +466,12 @@ internal static class BoxPainter
         for (int i = 0; i < 4; i++)
         {
             if (!Shows(i)) continue;
+            if (sides[i].Style is BorderStyle.Dashed or BorderStyle.Dotted && 2 * sides[i].Width < w && 2 * sides[i].Width < h)
+            {
+                // Dashes along the middle of this side's border, cut to its part of the ring.
+                group.Ops.Add(new RoundRectOp(x, y, w, h, r, sides[i].Color) { StrokeWidth = sides[i].Width, Style = sides[i].Style, Clip = polys[i] });
+                continue;
+            }
             group.Ops.Add(new RoundRectOp(x, y, w, h, r, sides[i].Color) { Clip = polys[i] }.WithHole(ix, iy, iw, ih, inner));
         }
     }

@@ -578,6 +578,8 @@ internal sealed partial class LayoutEngine
             _frames.Remove(cbFrame);
             LayoutAbsolutes(cbFrame, bx + bl, y + bt, used - bl - br, bottom - y - bt - bb);
         }
+        if ((s.ClipsX || s.ClipsY) && !isImage && !isSvg && _ops.Count > opsStart + 1)
+            WrapClip(opsStart + 1, s, bx, y, used, bottom - y);
         _lastBoxRight = bx + used;
         _lastBoxX = bx;
         _lastBoxTop = y;
@@ -587,6 +589,25 @@ internal sealed partial class LayoutEngine
         if (Headings != null && HeadingLevel(e.Name) is int level and > 0) RecordHeading(e, level, y, opsStart);
         _boxTrailing = trailing;
         return bottom;
+    }
+
+    /// <summary>
+    /// Moves the ops from <paramref name="start"/>, the content of the border box (x, y, w, h), into a clip to its
+    /// padding box, rounded like its inner border edge.
+    /// </summary>
+    private void WrapClip(int start, ComputedStyle s, float x, float y, float w, float h)
+    {
+        float bl = s.BorderLeft, bt = s.BorderTop, br = s.BorderRight, bb = s.BorderBottom;
+        float px = x + bl, py = y + bt, pw = Math.Max(0, w - bl - br), ph = Math.Max(0, h - bt - bb);
+        // Rounded corners only clip when both axes do.
+        var radii = s.ClipsX && s.ClipsY ? BoxPainter.InnerRadii(BoxPainter.Radii(s, w, h), bl, bt, br, bb) : null;
+        if (!s.ClipsX) { px -= ClipOp.Far; pw += 2 * ClipOp.Far; }
+        if (!s.ClipsY) { py -= ClipOp.Far; ph += 2 * ClipOp.Far; }
+        var clip = new ClipOp(px, py, pw, ph, radii);
+        for (int i = start; i < _ops.Count; i++) clip.Ops.Add(_ops[i]);
+        Truncate(start, keepFloats: true);
+        _ops.Add(clip);
+        _floats.Fold(start);
     }
 
     /// <summary>Lays out the content box of a block container according to its display type.</summary>

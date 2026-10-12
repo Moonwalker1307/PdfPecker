@@ -67,6 +67,7 @@ internal enum TextAlign : byte { Left, Right, Center, Justify }
 internal enum WhiteSpace : byte { Normal, NoWrap, Pre, PreWrap, PreLine }
 internal enum VerticalAlign : byte { Baseline, Sub, Super, Top, Middle, Bottom, TextTop, TextBottom }
 internal enum OverflowWrap : byte { Normal, BreakWord, Anywhere }
+internal enum Overflow : byte { Visible, Clip, Hidden } // Hidden also stands for auto and scroll, which clip alike on paper
 internal enum WordBreak : byte { Normal, BreakAll, KeepAll }
 internal enum TextTransform : byte { None, Uppercase, Lowercase, Capitalize }
 internal enum BorderStyle : byte { None, Solid, Dashed, Dotted, Double }
@@ -207,6 +208,11 @@ internal sealed class ComputedStyle
     public Length Top = Length.Auto, Right = Length.Auto, Bottom = Length.Auto, Left = Length.Auto;
     public int? ZIndex;                         // null = auto
     public bool FormattingRoot;                 // overflow other than visible, or display: flow-root
+    public Overflow OverflowX, OverflowY;
+
+    /// <summary>Whether the box clips its content horizontally and vertically (visible next to hidden computes to auto).</summary>
+    public bool ClipsX => OverflowX == Overflow.Clip || OverflowX == Overflow.Hidden || OverflowX == Overflow.Visible && OverflowY == Overflow.Hidden;
+    public bool ClipsY => OverflowY == Overflow.Clip || OverflowY == Overflow.Hidden || OverflowY == Overflow.Visible && OverflowX == Overflow.Hidden;
     public TransformFn[]? Transform;            // null = none
     public Length TransformOriginX = new(50, LengthUnit.Percent), TransformOriginY = new(50, LengthUnit.Percent);
     public string? Content;                     // the content property as written; null = normal
@@ -312,6 +318,7 @@ internal sealed class ComputedStyle
         c.Top = c.Right = c.Bottom = c.Left = Length.Auto;
         c.ZIndex = null;
         c.FormattingRoot = false;
+        c.OverflowX = c.OverflowY = Overflow.Visible;
         c.Transform = null;
         c.TransformOriginX = c.TransformOriginY = new Length(50, LengthUnit.Percent);
         c.Content = null;
