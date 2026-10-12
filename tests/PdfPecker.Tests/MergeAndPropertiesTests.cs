@@ -30,15 +30,15 @@ public class MergeAndPropertiesTests
         {
             Title = "Lønseddel",
             Keywords = "payslip, 2026",
-            Creator = "DaPrint",
-            Producer = "DaPrint PDF",
+            Creator = "MyApp",
+            Producer = "MyApp PDF",
             CustomProperties = { ["RunId"] = "42", ["CompanyId"] = "Ærø A/S", ["Run Date"] = "2026-10-11" },
         });
         PdfTestHelpers.AssertStructurallyValid(pdf);
         var text = PdfTestHelpers.Latin1(pdf);
-        Assert.Contains("/Producer (DaPrint PDF)", text);
+        Assert.Contains("/Producer (MyApp PDF)", text);
         Assert.Contains("/Keywords (payslip, 2026)", text);
-        Assert.Contains("/Creator (DaPrint)", text);
+        Assert.Contains("/Creator (MyApp)", text);
         Assert.Contains("/RunId (42)", text);
         Assert.Contains("/Run#20Date (2026-10-11)", text);
         Assert.DoesNotContain("PdfPecker", text);
@@ -74,14 +74,14 @@ public class MergeAndPropertiesTests
         {
             Conformance = PdfConformance.PdfA2b,
             Keywords = "a & b",
-            Creator = "DaPrint",
+            Creator = "MyApp",
             CustomProperties = { ["RunId"] = "42", ["1st key"] = "<v>" },
         });
         var text = Encoding.UTF8.GetString(pdf);
         var xmp = text.Substring(text.IndexOf("<x:xmpmeta", StringComparison.Ordinal));
         xmp = xmp.Substring(0, xmp.IndexOf("</x:xmpmeta>", StringComparison.Ordinal) + 12);
         Assert.Contains("<pdf:Keywords>a &amp; b</pdf:Keywords>", xmp);
-        Assert.Contains("<xmp:CreatorTool>DaPrint</xmp:CreatorTool>", xmp);
+        Assert.Contains("<xmp:CreatorTool>MyApp</xmp:CreatorTool>", xmp);
         Assert.Contains("<pdf:Producer>PdfPecker</pdf:Producer>", xmp);
         Assert.Contains("xmlns:pdfx=\"http://ns.adobe.com/pdfx/1.3/\"", xmp);
         Assert.Contains("<pdfx:RunId>42</pdfx:RunId>", xmp);
