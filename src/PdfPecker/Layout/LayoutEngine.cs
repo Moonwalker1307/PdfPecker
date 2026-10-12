@@ -439,7 +439,7 @@ internal sealed partial class LayoutEngine
         if (isImage || isSvg)
         {
             float room = hasWOverride ? overrideW - frame : availW - ml - mr - frame;
-            if (isImage) image = ImageSize(e, room, out imgW, out imgH);
+            if (isImage) image = ImageSize(e, room, out imgW, out imgH, out svg);
             else svg = SvgSize(e, room, out imgW, out imgH);
             if (hasWOverride && imgW > 0 && Math.Abs(room - imgW) > Eps)
             {
@@ -673,10 +673,19 @@ internal sealed partial class LayoutEngine
     // ------------------------------------------------------------------ images
 
     /// <summary>Computes the used size of an image in points. Returns the decoded image, or null when it could not be loaded.</summary>
-    private PdfImage? ImageSize(Element e, float availW, out float w, out float h)
+    private PdfImage? ImageSize(Element e, float availW, out float w, out float h) => ImageSize(e, availW, out w, out h, out _);
+
+    /// <summary>
+    /// Computes the used size of an image in points. Returns the decoded raster image, or null with the drawing in
+    /// <paramref name="svg"/> when the source is an SVG file, or null for both when it could not be loaded.
+    /// </summary>
+    private PdfImage? ImageSize(Element e, float availW, out float w, out float h, out SvgImage? svg)
     {
-        var img = _images.Load(e.GetAttribute("src"));
+        var src = e.GetAttribute("src");
+        var img = _images.Load(src);
+        svg = img == null ? _images.LoadSvg(src) : null;
         float iw = img != null ? img.Width * 0.75f : 0, ih = img != null ? img.Height * 0.75f : 0;
+        if (svg != null) (iw, ih) = SvgNaturalSize(svg, availW); // as for an inline svg element, as in Chrome
         ReplacedSize(e, iw, ih, availW, out w, out h);
         return img;
     }
@@ -685,27 +694,25 @@ internal sealed partial class LayoutEngine
     private SvgImage? SvgSize(Element e, float availW, out float w, out float h)
     {
         if (!_images.Svgs.TryGetValue(e, out var svg)) _images.Svgs[e] = svg = SvgImage.Build(e, _images.SvgBudget);
-        float iw, ih;
-        if (svg.Width is { } sw && svg.Height is { } sh) { iw = sw; ih = sh; }
-        else if (svg.HasViewBox && svg.ViewBoxWidth > 0 && svg.ViewBoxHeight > 0)
+        var (iw, ih) = SvgNaturalSize(svg, availW);
+        ReplacedSize(e, iw, ih, availW, out w, out h);
+        return svg;
+    }
+
+    /// <summary>The size of an SVG drawing before CSS sizes it, in points.</summary>
+    private (float W, float H) SvgNaturalSize(SvgImage svg, float availW)
+    {
+        if (svg.Width is { } sw && svg.Height is { } sh) return (sw, sh);
+        if (svg.HasViewBox && svg.ViewBoxWidth > 0 && svg.ViewBoxHeight > 0)
         {
             // Only a viewBox: as wide as the container (or a fixed width), with the viewBox's aspect ratio.
             float ratio = svg.ViewBoxHeight / svg.ViewBoxWidth;
-            if (svg.Width is { } w1) { iw = w1; ih = w1 * ratio; }
-            else if (svg.Height is { } h1) { ih = h1; iw = h1 / ratio; }
-            else
-            {
-                iw = _measuring || availW <= 0 || availW > 50000 ? 225 : availW;
-                ih = iw * ratio;
-            }
+            if (svg.Width is { } w1) return (w1, w1 * ratio);
+            if (svg.Height is { } h1) return (h1 / ratio, h1);
+            float iw = _measuring || availW <= 0 || availW > 50000 ? 225 : availW;
+            return (iw, iw * ratio);
         }
-        else
-        {
-            iw = svg.Width ?? 225; // 300 x 150 px, as in browsers
-            ih = svg.Height ?? 112.5f;
-        }
-        ReplacedSize(e, iw, ih, availW, out w, out h);
-        return svg;
+        return (svg.Width ?? 225, svg.Height ?? 112.5f); // 300 x 150 px, as in browsers
     }
 
     /// <summary>Used size of a replaced element from its intrinsic size and its CSS width, height and limits.</summary>
