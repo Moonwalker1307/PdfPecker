@@ -275,4 +275,96 @@ public class TransparencyAndRadiusTests
         AssertStructurallyValid(pdf);
         Assert.Contains("/S /Transparency", Latin1(pdf));
     }
+
+    // ---- overflow ----
+
+    [Fact]
+    public void Overflow_values_set_each_axis()
+    {
+        var s = StyleOf("overflow: hidden");
+        Assert.True(s.ClipsX && s.ClipsY && s.FormattingRoot);
+        s = StyleOf("overflow-x: clip");
+        Assert.True(s.ClipsX);
+        Assert.False(s.ClipsY);
+        Assert.False(s.FormattingRoot);
+        s = StyleOf("overflow: visible auto"); // visible next to auto computes to auto
+        Assert.True(s.ClipsX && s.ClipsY);
+        Assert.False(StyleOf("overflow: visible").ClipsX);
+    }
+
+    [Fact]
+    public void Overflow_hidden_cuts_content_at_the_padding_box()
+    {
+        var pdf = Pdf("<div style='width:100pt; height:40pt; overflow:hidden; border:5pt solid #00f'><div style='width:200pt; height:200pt; background:red'></div></div>");
+        AssertStructurallyValid(pdf);
+        Color(255, 0, 0, Pixel(pdf, 50, 25));
+        Color(0, 0, 255, Pixel(pdf, 50, 47));      // the bottom border, not covered
+        Color(255, 255, 255, Pixel(pdf, 50, 80));  // below the box
+        Color(255, 255, 255, Pixel(pdf, 150, 25)); // beside it
+
+        var visible = Pdf("<div style='width:100pt; height:40pt'><div style='width:200pt; height:200pt; background:red'></div></div>");
+        Color(255, 0, 0, Pixel(visible, 150, 80));
+    }
+
+    [Fact]
+    public void Overflow_hidden_follows_the_rounded_corners()
+    {
+        var ops = Ops("<div style='box-sizing:border-box; width:100pt; height:100pt; overflow:hidden; border:8px solid #000; border-radius:50%'><p>x</p></div>");
+        var clip = ops.OfType<ClipOp>().Single();
+        Assert.InRange(clip.W, 87.9f, 88.1f);                // the padding box: 100pt - 2 × 6pt
+        Assert.InRange(clip.Radii!.Value.TLx, 43.9f, 44.1f); // the inner border edge: 50pt - 6pt
+
+        var pdf = Pdf("<div style='width:100pt; height:100pt; overflow:hidden; border-radius:50%'><div style='height:100pt; background:red'></div></div>");
+        Assert.Matches(@"q [\d. ]+ m .* c .*h\nW n", AllContent(pdf));
+        Color(255, 255, 255, Pixel(pdf, 4, 4)); // outside the circle
+        Color(255, 0, 0, Pixel(pdf, 50, 50));
+        Color(255, 0, 0, Pixel(pdf, 2, 50));
+    }
+
+    [Fact]
+    public void Overflow_clip_on_one_axis_leaves_the_other_alone()
+    {
+        var pdf = Pdf("<div style='width:100pt; height:20pt; overflow-x:clip'><div style='width:200pt; height:60pt; background:red'></div></div>");
+        Color(255, 255, 255, Pixel(pdf, 150, 10));
+        Color(255, 0, 0, Pixel(pdf, 50, 50));
+    }
+
+    [Fact]
+    public void Hidden_overflow_adds_no_pages()
+    {
+        var pdf = Pdf("<div style='height:100pt; overflow:hidden'><div style='height:3000pt; background:red'></div></div>");
+        Assert.Equal(1, PageCount(pdf));
+    }
+
+    [Fact]
+    public void Clipped_box_split_by_a_page_break_shows_on_both_pages()
+    {
+        var pdf = HtmlToPdf.Convert("<div style='height:1500pt; overflow:hidden; border-radius:10pt'><p>first</p><p style='margin-top:1200pt'>second <a href='https://example.com'>link</a></p></div>",
+            new PdfOptions { Compress = false });
+        AssertStructurallyValid(pdf);
+        Assert.Equal(2, PageCount(pdf));
+        Assert.Contains("/URI", Latin1(pdf));
+    }
+
+    [Fact]
+    public void Positioned_children_are_sorted_inside_the_clip()
+    {
+        var ops = Ops("<div style='height:50pt; overflow:hidden'><div style='position:relative; z-index:2'>a</div><div>b</div></div>");
+        var clip = ops.OfType<ClipOp>().Single();
+        Assert.IsType<LayerOp>(clip.Ops[^1]);
+    }
+
+    [Fact]
+    public void Dashed_sides_of_a_mixed_rounded_border_stay_dashed()
+    {
+        var sides = Ops("<div style='height:50pt; border:2pt solid red; border-top-style:dashed; border-radius:12pt'></div>").OfType<RoundRectOp>().ToList();
+        Assert.Equal(4, sides.Count);
+        var top = Assert.Single(sides, s => s.StrokeWidth > 0);
+        Assert.Equal(BorderStyle.Dashed, top.Style);
+        Assert.NotNull(top.Clip);
+
+        var pdf = Pdf("<div style='height:50pt; border:2pt solid red; border-top-style:dotted; border-radius:12pt'></div>");
+        AssertStructurallyValid(pdf);
+        Assert.Contains("1 J [0 3] 0 d", AllContent(pdf)); // 2pt snaps to 2px
+    }
 }

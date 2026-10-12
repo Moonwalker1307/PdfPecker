@@ -887,10 +887,24 @@ internal sealed class StyleResolver
             case "overflow":
             case "overflow-x":
             case "overflow-y":
+            {
                 // Any value but visible and clip makes the box a block formatting context root, which contains its floats.
-                foreach (var t in lower.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                var parts = lower.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                foreach (var t in parts)
                     if (t is "hidden" or "auto" or "scroll" or "overlay") s.FormattingRoot = true;
+                if (parts.Length == 0) break;
+                Overflow Parse(string t, Overflow inherited) => t switch
+                {
+                    "visible" => Overflow.Visible,
+                    "clip" => Overflow.Clip,
+                    "hidden" or "auto" or "scroll" or "overlay" => Overflow.Hidden,
+                    "inherit" => inherited,
+                    _ => Overflow.Visible,
+                };
+                if (prop != "overflow-y") s.OverflowX = Parse(parts[0], parent.OverflowX);
+                if (prop != "overflow-x") s.OverflowY = Parse(parts[prop == "overflow" && parts.Length > 1 ? 1 : 0], parent.OverflowY);
                 break;
+            }
             case "transform":
                 if (lower == "none") s.Transform = null;
                 else if (inherit) s.Transform = parent.Transform;

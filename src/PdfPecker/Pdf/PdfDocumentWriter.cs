@@ -113,11 +113,28 @@ internal sealed class PdfDocumentWriter
         public override void Offset(float dx, float dy) => throw new NotSupportedException();
     }
 
-    /// <summary>The links inside a translucent layer that is not transformed: they stay where they are on the page.</summary>
+    /// <summary>The part of a clipped box's content that falls on one page, drawn inside the clip.</summary>
+    private sealed class ClipBlock : DrawOp
+    {
+        public readonly ClipOp Clip;
+        public readonly List<Placed> Items;
+        public ClipBlock(ClipOp clip, List<Placed> items) { Clip = clip; Items = items; }
+        public override void Offset(float dx, float dy) => throw new NotSupportedException();
+    }
+
+    /// <summary>
+    /// The links inside a translucent layer that is not transformed, or inside a clip: they stay where they are on the page.
+    /// </summary>
     private static IEnumerable<Placed> UntransformedLinks(Placed placed)
     {
-        if (placed.Op is not LayerBlock { Layer.Transform: null } block) yield break;
-        foreach (var p in block.Items)
+        var items = placed.Op switch
+        {
+            LayerBlock { Layer.Transform: null } block => block.Items,
+            ClipBlock clip => clip.Items,
+            _ => null,
+        };
+        if (items == null) yield break;
+        foreach (var p in items)
         {
             if (p.Op is LinkOp) yield return p;
             else foreach (var inner in UntransformedLinks(p)) yield return inner;
@@ -130,6 +147,7 @@ internal sealed class PdfDocumentWriter
         foreach (var p in list)
         {
             if (p.Op is LayerBlock tb) { foreach (var inner in Leaves(tb.Items)) yield return inner; }
+            else if (p.Op is ClipBlock cb) { foreach (var inner in Leaves(cb.Items)) yield return inner; }
             else yield return p;
         }
     }
@@ -183,6 +201,17 @@ internal sealed class PdfDocumentWriter
                     var parts = new SortedDictionary<int, List<Placed>>();
                     foreach (var o in layer.Ops) Distribute(o, parts);
                     foreach (var (p, items) in parts) Target(into, p).Add(new Placed(new LayerBlock(layer, items), 0, 0));
+                    break;
+                }
+                case ClipOp clip:
+                {
+                    // Content hidden beyond the clip's last page must not add pages of its own.
+                    var parts = new SortedDictionary<int, List<Placed>>();
+                    foreach (var o in clip.Ops) Distribute(o, parts);
+                    bool clipsY = clip.H < ClipOp.Far;
+                    int first = clipsY ? PageOf(clip.Y) : 0, last = clipsY ? Math.Max(first, PageOf(clip.Y + clip.H - 0.5f)) : int.MaxValue;
+                    foreach (var (p, items) in parts)
+                        if (p >= first && p <= last) Target(into, p).Add(new Placed(new ClipBlock(clip, items), 0, 0));
                     break;
                 }
                 case GroupOp g:
@@ -246,6 +275,13 @@ internal sealed class PdfDocumentWriter
                         var items = new List<Placed>();
                         foreach (var o in layer.Ops) Flatten(o, items);
                         list.Add(new Placed(new LayerBlock(layer, items), 0, 0));
+                        break;
+                    }
+                    case ClipOp clip:
+                    {
+                        var items = new List<Placed>();
+                        foreach (var o in clip.Ops) Flatten(o, items);
+                        list.Add(new Placed(new ClipBlock(clip, items), 0, 0));
                         break;
                     }
                     case GroupOp g: foreach (var o in g.Ops) Flatten(o, list); break;
@@ -1035,6 +1071,25 @@ internal sealed class PdfDocumentWriter
                         if (item.Op is not LinkOp) WriteOp(b, item, pageTop, imageIds);
                     EndText(b);
                 }
+                b.Ascii("Q\n");
+                InvalidateState();
+                break;
+            }
+            case ClipBlock cb:
+            {
+                EndText(b);
+                var c = cb.Clip;
+                // Edges on whole CSS pixels, like the box's background and borders.
+                float x0 = c.X, x1 = c.X + c.W, y0 = c.Y, y1 = c.Y + c.H;
+                if (c.W < ClipOp.Far) { x0 = SnapPx(x0); x1 = SnapPx(x1); }
+                if (c.H < ClipOp.Far) { y0 = SnapPx(y0); y1 = SnapPx(y1); }
+                b.Ascii("q ");
+                if (c.Radii is { } r && !r.IsZero) RoundRectPath(b, x0, y0, Math.Max(0, x1 - x0), Math.Max(0, y1 - y0), r, pageTop);
+                else b.Num(PX(x0)).Sp().Num(PY(y1, pageTop)).Sp().Num(Math.Max(0, x1 - x0)).Sp().Num(Math.Max(0, y1 - y0)).Ascii(" re ");
+                b.Ascii("W n\n");
+                foreach (var item in cb.Items)
+                    if (item.Op is not LinkOp) WriteOp(b, item, pageTop, imageIds);
+                EndText(b);
                 b.Ascii("Q\n");
                 InvalidateState();
                 break;
