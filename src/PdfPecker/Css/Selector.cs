@@ -8,6 +8,9 @@ internal enum AttrOp : byte { Exists, Equals, Includes, DashMatch, Prefix, Suffi
 
 internal enum PseudoKind : byte { FirstChild, LastChild, OnlyChild, NthChild, NthLastChild, Root, Link, Empty, Never, Not }
 
+/// <summary>The pseudo-element a selector's subject names, if any.</summary>
+internal enum PseudoElement : byte { None, Before, After }
+
 internal sealed class AttrCondition
 {
     public string Name = "";
@@ -101,11 +104,13 @@ internal sealed class Selector
 {
     public readonly Compound[] Parts;
     public readonly int Specificity;
+    public readonly PseudoElement PseudoElement;
 
-    public Selector(Compound[] partsRightToLeft)
+    public Selector(Compound[] partsRightToLeft, PseudoElement pseudoElement = PseudoElement.None)
     {
         Parts = partsRightToLeft;
-        int a = 0, b = 0, c = 0;
+        PseudoElement = pseudoElement;
+        int a = 0, b = 0, c = pseudoElement != PseudoElement.None ? 1 : 0;
         foreach (var p in Parts) Count(p, ref a, ref b, ref c);
         Specificity = a * 10000 + b * 100 + c;
     }
@@ -168,9 +173,11 @@ internal sealed class Selector
         int i = 0;
         text = text.Trim();
         Combinator pending = Combinator.None;
+        var pseudoElement = PseudoElement.None;
         while (i < text.Length)
         {
             char ch = text[i];
+            if (pseudoElement != PseudoElement.None) return null; // a pseudo-element ends the selector
             if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r')
             {
                 i++;
@@ -186,7 +193,7 @@ internal sealed class Selector
             }
             if (parts.Count > 0 && pending == Combinator.None) return null;
             if (parts.Count == MaxParts) return null;
-            var compound = ParseCompound(text, ref i, 0);
+            var compound = ParseCompound(text, ref i, 0, ref pseudoElement);
             if (compound == null) return null;
             if (parts.Count > 0) compound.Combinator = pending; // relation to the left neighbour, fixed up below
             parts.Add(compound);
@@ -205,10 +212,10 @@ internal sealed class Selector
         // Right-to-left, rtl[k] needs the relation to rtl[k+1], which is the same value.
         for (int k = 0; k < rtl.Length; k++)
             if (k == rtl.Length - 1) rtl[k].Combinator = Combinator.None;
-        return new Selector(rtl);
+        return new Selector(rtl, pseudoElement);
     }
 
-    private static Compound? ParseCompound(string s, ref int i, int nesting)
+    private static Compound? ParseCompound(string s, ref int i, int nesting, ref PseudoElement pseudoElement)
     {
         var c = new Compound();
         List<string>? classes = null;
@@ -256,8 +263,17 @@ internal sealed class Selector
             if (ch == ':')
             {
                 i++;
-                if (i < s.Length && s[i] == ':') return null; // pseudo-elements are not supported
+                bool doubleColon = i < s.Length && s[i] == ':';
+                if (doubleColon) i++;
                 var name = ReadIdent(s, ref i).ToLowerInvariant();
+                if (doubleColon || name is "before" or "after")
+                {
+                    // ::before and ::after (also with the old single colon); other pseudo-elements drop the rule.
+                    if (nesting > 0 || name is not ("before" or "after")) return null;
+                    pseudoElement = name == "before" ? PseudoElement.Before : PseudoElement.After;
+                    any = true;
+                    break;
+                }
                 string? arg = null;
                 if (i < s.Length && s[i] == '(')
                 {
@@ -307,7 +323,8 @@ internal sealed class Selector
             {
                 if (arg == null || depth >= MaxNesting) return null;
                 int j = 0;
-                var inner = ParseCompound(arg, ref j, depth + 1);
+                var none = PseudoElement.None;
+                var inner = ParseCompound(arg, ref j, depth + 1, ref none);
                 if (inner == null || j != arg.Length) return null;
                 return new PseudoCondition { Kind = PseudoKind.Not, Inner = inner };
             }

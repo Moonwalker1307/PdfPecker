@@ -297,7 +297,7 @@ internal sealed partial class LayoutEngine
             frameB = s.BorderBottom + s.PaddingBottom.Resolve(availW);
         }
         int n = m.ColCount;
-        float gridSpace = (n + 1) * hs;
+        float gridSpace = n > 0 ? (n + 1) * hs : 0; // an empty table has no border spacing, as in Chrome
         bool specified = !s.Width.IsAuto;
         float avail;
         if (specified)
@@ -331,7 +331,7 @@ internal sealed partial class LayoutEngine
         float tableTop = y;
         var tableGroup = new GroupOp();
         _ops.Add(tableGroup);
-        float cy = y + frameT + vs;
+        float cy = y + frameT + (m.Rows.Count > 0 ? vs : 0);
 
         m.RowExtra = null;
         if (!s.Height.IsAuto && !s.Height.IsPercent && m.Rows.Count > 0)
@@ -344,6 +344,10 @@ internal sealed partial class LayoutEngine
         if (!s.Height.IsAuto && !s.Height.IsPercent && tableBottom - tableTop < s.Height.Value) tableBottom = tableTop + s.Height.Value;
         BoxPainter.Paint(tableGroup, s, bx, tableTop, boxW, tableBottom - tableTop, _images, availW);
         _lastBoxRight = bx + boxW;
+        _lastBoxX = bx;
+        _lastBoxTop = tableTop;
+        _lastBoxW = boxW;
+        _lastBoxH = tableBottom - tableTop;
         return tableBottom;
     }
 
@@ -447,7 +451,9 @@ internal sealed partial class LayoutEngine
         _ops.Add(cell.Group);
         cell.OpsStart = _ops.Count;
         float contentTop = rowTop + bt + pt;
+        var outerFloats = EnterFormattingContext();
         float contentBottom = LayoutFlow(td, cell.X + bl + pl, contentTop, Math.Max(0, w - bl - br - pl - pr));
+        contentBottom = LeaveFormattingContext(outerFloats, contentBottom);
         cell.OpsEnd = _ops.Count;
         cell.NeededH = bt + pt + (contentBottom - contentTop) + pb + bb;
         if (!cs.Height.IsAuto && !cs.Height.IsPercent)
@@ -508,7 +514,7 @@ internal sealed partial class LayoutEngine
         {
             var m = GetTableModel(e);
             float hs = s.BorderCollapse ? 0 : s.BorderSpacingH;
-            float mn = (m.ColCount + 1) * hs + frame, mx = mn;
+            float mn = (m.ColCount > 0 ? (m.ColCount + 1) * hs : 0) + frame, mx = mn;
             for (int c = 0; c < m.ColCount; c++)
             {
                 mn += m.ColMin[c];
@@ -558,6 +564,12 @@ internal sealed partial class LayoutEngine
                 {
                     min = Math.Max(min, group);
                     group = 0;
+                    line += it.Width;
+                    continue;
+                }
+                if (it.Kind == ItemKind.Float)
+                {
+                    min = Math.Max(min, it.FloatMin);
                     line += it.Width;
                     continue;
                 }
@@ -621,6 +633,12 @@ internal sealed partial class LayoutEngine
                     line += it.Width;
                     continue;
                 }
+                if (it.Kind == ItemKind.Float)
+                {
+                    min = Math.Max(min, it.FloatMin);
+                    line += it.Width;
+                    continue;
+                }
                 group += it.Width;
                 line += it.Width;
             }
@@ -633,7 +651,8 @@ internal sealed partial class LayoutEngine
             if (child is TextNode) { (run ??= new List<Node>()).Add(child); continue; }
             var ce = (Element)child;
             if (ce.Style == null || ce.Style.Display == Display.None || ce.Detached) continue;
-            if (IsInlineLevel(ce)) { (run ??= new List<Node>()).Add(child); continue; }
+            if (ce.Style.OutOfFlow) continue;
+            if (IsInlineLevel(ce) || ce.Style.Floated) { (run ??= new List<Node>()).Add(child); continue; }
             FlushRun();
             var (cmin, cmax) = Intrinsic(ce);
             var cs = ce.Style;
