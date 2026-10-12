@@ -71,6 +71,17 @@ public class ConversionTests
     }
 
     [Fact]
+    public void Text_strings_escape_tabs_and_line_breaks()
+    {
+        // Titles and bookmarks are text strings: control characters are escaped, not percent-encoded as in a URI.
+        var pdf = ConvertUncompressed("<h1>Heading</h1>", new PdfOptions { Title = "Line one\tTab\nLine two" });
+        var text = Latin1(pdf);
+        Assert.Contains("/Title (Line one\\tTab\\nLine two)", text);
+        Assert.DoesNotContain("%09", text);
+        Assert.DoesNotContain("%0A", text);
+    }
+
+    [Fact]
     public void Only_used_standard_fonts_are_embedded_as_resources()
     {
         var pdf = ConvertUncompressed("<p style='font-family: Arial'>a <b>b</b></p>");
@@ -98,6 +109,15 @@ public class ConversionTests
         var text = Latin1(pdf);
         Assert.Contains("/S /URI /URI (https://example.com/a\\(b\\))", text);
         Assert.Matches(new Regex(@"/Dest \[\d+ 0 R /XYZ 0 [\d.]+ null\]"), text);
+    }
+
+    [Fact]
+    public void Link_uris_encode_characters_outside_the_bmp_as_utf8()
+    {
+        var pdf = ConvertUncompressed("<a href=\"https://example.com/\uD83D\uDE00\">smile</a>");
+        var text = Latin1(pdf);
+        Assert.Contains("/URI (https://example.com/%F0%9F%98%80)", text);
+        Assert.DoesNotContain("%EF%BF%BD", text);
     }
 
     [Fact]

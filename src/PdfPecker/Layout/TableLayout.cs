@@ -692,7 +692,7 @@ internal sealed partial class LayoutEngine
                     for (int k = 0; k < it.Length; k++) min = Math.Max(min, f.CharWidth(it.Source[it.Start + k], it.Style.FontSize) + it.Style.LetterSpacing);
                     continue;
                 }
-                group += it.Width;
+                group += it.MinWidth >= 0 ? it.MinWidth : it.Width;
                 if (it.BreakAfter != BreakAfter.None)
                 {
                     min = Math.Max(min, group + (it.BreakAfter == BreakAfter.SoftHyphen ? HyphenWidth(it.Style) : 0));
@@ -748,7 +748,7 @@ internal sealed partial class LayoutEngine
                     line += it.Width;
                     continue;
                 }
-                group += it.Width;
+                group += it.MinWidth >= 0 ? it.MinWidth : it.Width;
                 line += it.Width;
             }
             min = Math.Max(min, group);
