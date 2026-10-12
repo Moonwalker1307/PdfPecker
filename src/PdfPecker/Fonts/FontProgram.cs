@@ -43,6 +43,8 @@ internal sealed class FontProgram
     private short[]? _charWidths;               // BMP code point -> advance in 1/1000 em
     private Kerning? _kerning;
     private bool _kerningLoaded;
+    private Ligatures? _ligatures;
+    private bool _ligaturesLoaded;
 
     private FontProgram(byte[] data, int dirOffset)
     {
@@ -218,6 +220,24 @@ internal sealed class FontProgram
                     Volatile.Write(ref _kerningLoaded, true);
                 }
                 return _kerning;
+            }
+        }
+    }
+
+    /// <summary>The font's standard ligatures, or null when it has none.</summary>
+    public Ligatures? Ligatures
+    {
+        get
+        {
+            if (Volatile.Read(ref _ligaturesLoaded)) return _ligatures;
+            lock (_lock)
+            {
+                if (!_ligaturesLoaded)
+                {
+                    _ligatures = Ligatures.Load(this);
+                    Volatile.Write(ref _ligaturesLoaded, true);
+                }
+                return _ligatures;
             }
         }
     }

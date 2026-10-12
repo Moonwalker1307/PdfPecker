@@ -323,7 +323,7 @@ internal sealed class PdfDocumentWriter
                     foreach (var shape in sv.Image.Shapes)
                     {
                         if (shape.Font == null) continue;
-                        if (Leaf(shape.Font) is EmbeddedFont ef) AddGlyphs(Subset(ef.Program), shape.Text!, 0, shape.Text!.Length);
+                        if (Leaf(shape.Font) is EmbeddedFont ef) AddGlyphs(ef, shape.Text!, 0, shape.Text!.Length);
                         else usedFonts[shape.Font.Index] = true;
                     }
                 }
@@ -819,6 +819,7 @@ internal sealed class PdfDocumentWriter
         float c = (float)Math.Cos(a), sn = (float)Math.Sin(a);
         const float lead = 1.15f, cap = 0.72f;
         float ls = float.IsFinite(wm.LetterSpacing) ? Math.Clamp(wm.LetterSpacing, -100, 100) : 0;
+        if (ls != 0) font = font.WithoutLigatures(); // as browsers set letter-spaced text
         int maxUnits = 1, maxChars = 0;
         foreach (var line in lines)
         {
@@ -1461,7 +1462,7 @@ internal sealed class PdfDocumentWriter
         t.Font.Split(t.Text, _runs);
         foreach (var run in _runs)
         {
-            if (Leaf(run.Font) is EmbeddedFont ef) AddGlyphs(Subset(ef.Program), t.Text, run.Start, run.Length);
+            if (Leaf(run.Font) is EmbeddedFont ef) AddGlyphs(ef, t.Text, run.Start, run.Length);
             else usedFonts[((StandardFont)run.Font).Index] = true;
         }
     }
@@ -1484,29 +1485,27 @@ internal sealed class PdfDocumentWriter
         }
     }
 
-    private static void AddGlyphs(GlyphSubset subset, string text, int start, int length)
+    private readonly List<ShapedGlyph> _glyphs = new();
+
+    private void AddGlyphs(EmbeddedFont font, string text, int start, int length)
     {
-        for (int i = start, end = start + length; i < end; i++)
-        {
-            int cp = text[i];
-            if (char.IsHighSurrogate(text[i]) && i + 1 < end && char.IsLowSurrogate(text[i + 1])) cp = char.ConvertToUtf32(text[i], text[++i]);
-            subset.Cid(cp);
-        }
+        var subset = Subset(font.Program);
+        font.Shape(text, start, length, _glyphs);
+        foreach (var g in _glyphs) subset.Cid(g, text);
     }
 
     /// <summary>Shows text as hex strings of CIDs: with TJ when the font kerns, so kerned pairs can move glyphs.</summary>
-    private static void WriteGlyphHex(ByteBuffer b, EmbeddedFont font, GlyphSubset subset, string text)
+    private void WriteGlyphHex(ByteBuffer b, EmbeddedFont font, GlyphSubset subset, string text)
     {
         bool kern = font.HasKerning;
         int prev = -1;
         b.Ascii(kern ? "[<" : "<");
-        for (int i = 0; i < text.Length; i++)
+        font.Shape(text, 0, text.Length, _glyphs);
+        foreach (var g in _glyphs)
         {
-            int cp = text[i];
-            if (char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1])) cp = char.ConvertToUtf32(text[i], text[++i]);
-            if (kern && prev >= 0 && font.KernUnits(prev, cp) is int k && k != 0) b.Ascii(">").Int(-k).Ascii("<");
-            prev = cp;
-            Hex4(b, subset.Cid(cp));
+            if (kern && prev >= 0 && font.Program.Kern1000(prev, g.Gid) is int k && k != 0) b.Ascii(">").Int(-k).Ascii("<");
+            prev = g.Gid;
+            Hex4(b, subset.Cid(g, text));
         }
         b.Ascii(kern ? ">] TJ" : "> Tj");
     }
@@ -1599,17 +1598,16 @@ internal sealed class PdfDocumentWriter
         float spaceAdjust = adjust ? -t.WordSpacing * 1000f / t.Size : 0;
         float notdefAdjust = skipNotdef ? -(font.Program.Advance1000(0) + t.CharSpacing * 1000f / t.Size) : 0;
         b.Ascii(adjust ? "[<" : "<");
-        int prev = -1;
-        for (int i = start, end = start + length; i < end; i++)
+        int prev = -1, end = start + length;
+        font.Shape(text, start, length, _glyphs);
+        foreach (var g in _glyphs)
         {
-            int cp = text[i];
-            if (char.IsHighSurrogate(text[i]) && i + 1 < end && char.IsLowSurrogate(text[i + 1])) cp = char.ConvertToUtf32(text[i], text[++i]);
-            if (kern && prev >= 0 && font.KernUnits(prev, cp) is int k && k != 0) b.Ascii(">").Int(-k).Ascii("<");
-            prev = cp;
-            int cid = subset.Cid(cp);
+            if (kern && prev >= 0 && font.Program.Kern1000(prev, g.Gid) is int k && k != 0) b.Ascii(">").Int(-k).Ascii("<");
+            prev = g.Gid;
+            int cid = subset.Cid(g, text);
             if (cid == 0 && skipNotdef) b.Ascii(">").Num(notdefAdjust).Ascii("<");
             else Hex4(b, cid);
-            if (adjust && cp == ' ' && t.WordSpacing != 0 && i + 1 < end) b.Ascii(">").Num(spaceAdjust).Ascii("<");
+            if (adjust && text[g.Start] == ' ' && t.WordSpacing != 0 && g.Start + 1 < end) b.Ascii(">").Num(spaceAdjust).Ascii("<");
         }
         b.Ascii(adjust ? ">] TJ\n" : "> Tj\n");
     }
@@ -1679,7 +1677,7 @@ internal sealed class PdfDocumentWriter
         var cmap = new ByteBuffer(256 + used.Count * 16);
         cmap.Ascii("/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n")
             .Ascii("/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n");
-        var mapped = used.Where(u => u.CodePoint > 0).ToList();
+        var mapped = used.Where(u => u.CodePoint > 0 || u.Text != null).ToList();
         for (int i = 0; i < mapped.Count; i += 100)
         {
             int n = Math.Min(100, mapped.Count - i);
@@ -1690,7 +1688,9 @@ internal sealed class PdfDocumentWriter
                 Hex4(cmap, mapped[k].Cid);
                 cmap.Ascii("> <");
                 int cp = mapped[k].CodePoint;
-                if (cp >= 0x10000)
+                if (mapped[k].Text is { } chars)
+                    foreach (char c in chars) Hex4(cmap, c);
+                else if (cp >= 0x10000)
                 {
                     cp -= 0x10000;
                     Hex4(cmap, 0xD800 + (cp >> 10));

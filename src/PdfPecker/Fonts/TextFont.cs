@@ -29,6 +29,11 @@ internal abstract class TextFont
     /// <summary>The kerning between two code points in 1/1000 em, added to the advance of the first.</summary>
     public virtual int KernUnits(int left, int right) => 0;
 
+    /// <summary>
+    /// The same font with ligatures turned off, as browsers draw text with letter-spacing or font-variant-ligatures: none.
+    /// </summary>
+    public virtual TextFont WithoutLigatures() => this;
+
     private const float Px = 0.75f; // one CSS pixel in points
 
     private static float RoundPx(float pt) => MathF.Floor(pt / Px + 0.5f) * Px;
