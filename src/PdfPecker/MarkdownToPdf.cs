@@ -30,8 +30,11 @@ public static class MarkdownToPdf
         File.WriteAllBytes(pdfPath, HtmlToPdf.Render(html, pdfOptions, baseDir));
     }
 
-    /// <summary>Converts a Markdown string to a PDF asynchronously on the thread pool.</summary>
+    /// <summary>
+    /// Converts a Markdown string to a PDF asynchronously on the thread pool. Cancelling the token also stops a conversion
+    /// that has already started.
+    /// </summary>
     public static Task<byte[]> ConvertAsync(string markdown, PdfOptions? pdfOptions = null, MarkdownOptions? markdownOptions = null,
         CancellationToken cancellationToken = default)
-        => Task.Run(() => Convert(markdown, pdfOptions, markdownOptions), cancellationToken);
+        => Task.Run(() => HtmlToPdf.Convert(MarkdownToHtml.ConvertDocument(markdown, markdownOptions), pdfOptions, cancellationToken), cancellationToken);
 }

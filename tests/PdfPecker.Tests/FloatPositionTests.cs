@@ -183,6 +183,15 @@ public class FloatPositionTests
     }
 
     [Fact]
+    public void CountersWithAnEmptySeparatorAreIgnored()
+    {
+        // Used to throw IndexOutOfRangeException and fail the whole conversion.
+        var (ops, _) = Layout("<style>ol{counter-reset:i} li{display:block;counter-increment:i} li::before{content:counters(i, )}</style>" +
+                              "<ol><li>x</li></ol>");
+        Assert.Contains("x", AllText(ops));
+    }
+
+    [Fact]
     public void QuotesNest()
     {
         var (ops, _) = Layout("<p><q>a <q>b</q></q></p>");
