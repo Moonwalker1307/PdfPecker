@@ -112,7 +112,7 @@ internal sealed partial class LayoutEngine
             var cs = col.Style;
             for (int k = 0; k < span && colIndex < n; k++, colIndex++)
             {
-                if (cs.Width.IsPercent) m.ColPct[colIndex] = cs.Width.Value;
+                if (cs.Width.Unit == LengthUnit.Percent) m.ColPct[colIndex] = cs.Width.Value;
                 else if (!cs.Width.IsAuto) m.ColFixed[colIndex] = cs.Width.Value;
             }
         }
@@ -133,7 +133,7 @@ internal sealed partial class LayoutEngine
                 float frame = cs.PaddingLeft.Resolve(0) + cs.PaddingRight.Resolve(0) + borders;
                 cell.Min = mn + frame;
                 cell.Max = Math.Max(mx + frame, cell.Min);
-                if (cs.Width.IsPercent) cell.PercentWidth = cs.Width.Value;
+                if (cs.Width.Unit == LengthUnit.Percent) cell.PercentWidth = cs.Width.Value;
                 else if (!cs.Width.IsAuto)
                 {
                     cell.FixedWidth = cs.Width.Value + (cs.BorderBox ? 0 : frame);

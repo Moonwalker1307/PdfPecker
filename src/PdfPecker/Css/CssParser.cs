@@ -340,7 +340,7 @@ internal static class CssParser
                 {
                     var lower = tok.ToLowerInvariant();
                     if (IsBorderStyle(lower)) style = lower;
-                    else if (lower is "thin" or "medium" or "thick" || char.IsDigit(lower[0]) || lower[0] == '.') width = lower;
+                    else if (lower is "thin" or "medium" or "thick" || char.IsDigit(lower[0]) || lower[0] == '.' || CssMath.IsMathFunction(lower)) width = lower;
                     else color = tok;
                 }
                 if (name == "border")
