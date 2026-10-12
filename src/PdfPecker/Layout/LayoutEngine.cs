@@ -32,6 +32,12 @@ internal sealed partial class LayoutEngine
 
     public List<DrawOp> Ops => _ops;
 
+    /// <summary>The root element (html), whose border box positions the page canvas background.</summary>
+    public Element? CanvasRoot { get; init; }
+
+    /// <summary>The border box of <see cref="CanvasRoot"/> once laid out.</summary>
+    public (float X, float Y, float W, float H)? CanvasRootBox { get; private set; }
+
     /// <summary>Stops the layout when cancelled.</summary>
     public CancellationToken Cancellation { get; init; }
 
@@ -345,13 +351,16 @@ internal sealed partial class LayoutEngine
                && e.Name is not ("img" or "svg" or "hr");
     }
 
+    // The root element's margins do not collapse with its children's (CSS 2.1 §8.3.1).
+    private static bool IsRoot(Element e) => e.Parent is { Name: "#document" };
+
     private static bool CollapsesTop(Element e)
-        => IsPlainFlow(e) && e.Style.BorderTop == 0 && e.Style.PaddingTop.Resolve(0) == 0 && !e.Style.PaddingTop.IsPercent;
+        => IsPlainFlow(e) && !IsRoot(e) && e.Style.BorderTop == 0 && e.Style.PaddingTop.Resolve(0) == 0 && !e.Style.PaddingTop.IsPercent;
 
     private static bool CollapsesBottom(Element e)
     {
         var s = e.Style;
-        return IsPlainFlow(e) && s.BorderBottom == 0 && s.PaddingBottom.Resolve(0) == 0 && !s.PaddingBottom.IsPercent
+        return IsPlainFlow(e) && !IsRoot(e) && s.BorderBottom == 0 && s.PaddingBottom.Resolve(0) == 0 && !s.PaddingBottom.IsPercent
                && s.Height.IsAuto && (s.MinHeight.IsAuto || s.MinHeight.Value <= 0);
     }
 
@@ -563,11 +572,14 @@ internal sealed partial class LayoutEngine
 
         float bottom = cy + contentH + pb + bb;
         BoxPainter.Paint(group, s, bx, y, used, bottom - y, _images, availW);
+        if (e == CanvasRoot) CanvasRootBox = (bx, y, used, bottom - y);
         if (cbFrame != null)
         {
             _frames.Remove(cbFrame);
             LayoutAbsolutes(cbFrame, bx + bl, y + bt, used - bl - br, bottom - y - bt - bb);
         }
+        if ((s.ClipsX || s.ClipsY) && !isImage && !isSvg && _ops.Count > opsStart + 1)
+            WrapClip(opsStart + 1, s, bx, y, used, bottom - y);
         _lastBoxRight = bx + used;
         _lastBoxX = bx;
         _lastBoxTop = y;
@@ -577,6 +589,25 @@ internal sealed partial class LayoutEngine
         if (Headings != null && HeadingLevel(e.Name) is int level and > 0) RecordHeading(e, level, y, opsStart);
         _boxTrailing = trailing;
         return bottom;
+    }
+
+    /// <summary>
+    /// Moves the ops from <paramref name="start"/>, the content of the border box (x, y, w, h), into a clip to its
+    /// padding box, rounded like its inner border edge.
+    /// </summary>
+    private void WrapClip(int start, ComputedStyle s, float x, float y, float w, float h)
+    {
+        float bl = s.BorderLeft, bt = s.BorderTop, br = s.BorderRight, bb = s.BorderBottom;
+        float px = x + bl, py = y + bt, pw = Math.Max(0, w - bl - br), ph = Math.Max(0, h - bt - bb);
+        // Rounded corners only clip when both axes do.
+        var radii = s.ClipsX && s.ClipsY ? BoxPainter.InnerRadii(BoxPainter.Radii(s, w, h), bl, bt, br, bb) : null;
+        if (!s.ClipsX) { px -= ClipOp.Far; pw += 2 * ClipOp.Far; }
+        if (!s.ClipsY) { py -= ClipOp.Far; ph += 2 * ClipOp.Far; }
+        var clip = new ClipOp(px, py, pw, ph, radii);
+        for (int i = start; i < _ops.Count; i++) clip.Ops.Add(_ops[i]);
+        Truncate(start, keepFloats: true);
+        _ops.Add(clip);
+        _floats.Fold(start);
     }
 
     /// <summary>Lays out the content box of a block container according to its display type.</summary>

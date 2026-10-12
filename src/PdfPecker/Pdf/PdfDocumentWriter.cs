@@ -11,6 +11,7 @@ internal sealed class PageSetup
 {
     public float Width, Height;
     public float MarginTop, MarginRight, MarginBottom, MarginLeft;
+    public uint Background; // @page background colour, painted over the whole sheet
     public float BandTop, BandBottom; // space for running headers and footers at the top and bottom of the content area
     /// <summary>
     /// Size on paper of one layout point (PdfOptions.Scale). The other fields are in layout points, so the page is laid
@@ -113,11 +114,28 @@ internal sealed class PdfDocumentWriter
         public override void Offset(float dx, float dy) => throw new NotSupportedException();
     }
 
-    /// <summary>The links inside a translucent layer that is not transformed: they stay where they are on the page.</summary>
+    /// <summary>The part of a clipped box's content that falls on one page, drawn inside the clip.</summary>
+    private sealed class ClipBlock : DrawOp
+    {
+        public readonly ClipOp Clip;
+        public readonly List<Placed> Items;
+        public ClipBlock(ClipOp clip, List<Placed> items) { Clip = clip; Items = items; }
+        public override void Offset(float dx, float dy) => throw new NotSupportedException();
+    }
+
+    /// <summary>
+    /// The links inside a translucent layer that is not transformed, or inside a clip: they stay where they are on the page.
+    /// </summary>
     private static IEnumerable<Placed> UntransformedLinks(Placed placed)
     {
-        if (placed.Op is not LayerBlock { Layer.Transform: null } block) yield break;
-        foreach (var p in block.Items)
+        var items = placed.Op switch
+        {
+            LayerBlock { Layer.Transform: null } block => block.Items,
+            ClipBlock clip => clip.Items,
+            _ => null,
+        };
+        if (items == null) yield break;
+        foreach (var p in items)
         {
             if (p.Op is LinkOp) yield return p;
             else foreach (var inner in UntransformedLinks(p)) yield return inner;
@@ -130,13 +148,15 @@ internal sealed class PdfDocumentWriter
         foreach (var p in list)
         {
             if (p.Op is LayerBlock tb) { foreach (var inner in Leaves(tb.Items)) yield return inner; }
+            else if (p.Op is ClipBlock cb) { foreach (var inner in Leaves(cb.Items)) yield return inner; }
             else yield return p;
         }
     }
 
     public byte[] Write(List<DrawOp> ops, float contentHeight, IReadOnlyDictionary<string, float> anchors, uint pageBackground,
         string? title, string? author, string? subject, string? footerTemplate, string? headerTemplate,
-        Func<int, int, List<DrawOp>>? pageBands = null, IReadOnlyList<OutlineHeading>? outline = null, List<DrawOp>? fixedOps = null)
+        Func<int, int, List<DrawOp>>? pageBands = null, IReadOnlyList<OutlineHeading>? outline = null, List<DrawOp>? fixedOps = null,
+        Func<int, List<DrawOp>>? pageCanvas = null)
     {
         float H = _page.FlowHeight;
         int maxPages = Math.Max(1, MaxPages);
@@ -185,6 +205,17 @@ internal sealed class PdfDocumentWriter
                     foreach (var (p, items) in parts) Target(into, p).Add(new Placed(new LayerBlock(layer, items), 0, 0));
                     break;
                 }
+                case ClipOp clip:
+                {
+                    // Content hidden beyond the clip's last page must not add pages of its own.
+                    var parts = new SortedDictionary<int, List<Placed>>();
+                    foreach (var o in clip.Ops) Distribute(o, parts);
+                    bool clipsY = clip.H < ClipOp.Far;
+                    int first = clipsY ? PageOf(clip.Y) : 0, last = clipsY ? Math.Max(first, PageOf(clip.Y + clip.H - 0.5f)) : int.MaxValue;
+                    foreach (var (p, items) in parts)
+                        if (p >= first && p <= last) Target(into, p).Add(new Placed(new ClipBlock(clip, items), 0, 0));
+                    break;
+                }
                 case GroupOp g:
                     foreach (var o in g.Ops) Distribute(o, into);
                     break;
@@ -231,12 +262,15 @@ internal sealed class PdfDocumentWriter
 
         // Running headers and footers, laid out per page now that the page count is known. Their ops use y from the
         // top of the content area.
+        // The canvas background of each page goes first, also in y from the top of the content area.
         var bands = new List<Placed>[pageCount];
+        var canvas = new List<Placed>[pageCount];
         for (int p = 0; p < pageCount; p++)
         {
             Cancellation.ThrowIfCancellationRequested();
             var list = bands[p] = new List<Placed>();
-            if (pageBands == null && fixedOps == null) continue;
+            canvas[p] = new List<Placed>();
+            if (pageBands == null && fixedOps == null && pageCanvas == null) continue;
             void Flatten(DrawOp op, List<Placed> list)
             {
                 switch (op)
@@ -246,6 +280,13 @@ internal sealed class PdfDocumentWriter
                         var items = new List<Placed>();
                         foreach (var o in layer.Ops) Flatten(o, items);
                         list.Add(new Placed(new LayerBlock(layer, items), 0, 0));
+                        break;
+                    }
+                    case ClipOp clip:
+                    {
+                        var items = new List<Placed>();
+                        foreach (var o in clip.Ops) Flatten(o, items);
+                        list.Add(new Placed(new ClipBlock(clip, items), 0, 0));
                         break;
                     }
                     case GroupOp g: foreach (var o in g.Ops) Flatten(o, list); break;
@@ -263,6 +304,7 @@ internal sealed class PdfDocumentWriter
                     default: list.Add(new Placed(op, 0, 0)); break;
                 }
             }
+            if (pageCanvas != null) foreach (var op in pageCanvas(p)) Flatten(op, canvas[p]);
             if (pageBands != null) foreach (var op in pageBands(p, pageCount)) Flatten(op, list);
             // position: fixed boxes repeat on every page, as in Chrome's print output.
             if (fixedOps != null) foreach (var op in fixedOps) Flatten(op, list);
@@ -272,7 +314,7 @@ internal sealed class PdfDocumentWriter
         var usedFonts = new bool[StandardFont.All.Length];
         var images = new List<PdfImage>();
         var imageIds = new Dictionary<PdfImage, int>();
-        foreach (var page in pages.Concat(bands))
+        foreach (var page in pages.Concat(bands).Concat(canvas))
             foreach (var p in Leaves(page))
             {
                 if (p.Op is TextOp t) CollectFonts(t, usedFonts);
@@ -458,6 +500,8 @@ internal sealed class PdfDocumentWriter
                 SetFill(content, pageBackground);
                 content.Ascii("0 0 ").Num(_page.Width).Sp().Num(_page.Height).Ascii(" re f\n");
             }
+            _yOrigin = _page.MarginTop;
+            foreach (var placed in canvas[p]) WriteOp(content, placed, 0, imageIds);
             if (wm is { Behind: true }) content.Ascii("q /Wm Do Q\n");
             var pageLinks = new List<(Placed Link, float Origin, float PageTop)>();
             _yOrigin = _page.MarginTop + _page.BandTop;
@@ -1036,6 +1080,25 @@ internal sealed class PdfDocumentWriter
                         if (item.Op is not LinkOp) WriteOp(b, item, pageTop, imageIds);
                     EndText(b);
                 }
+                b.Ascii("Q\n");
+                InvalidateState();
+                break;
+            }
+            case ClipBlock cb:
+            {
+                EndText(b);
+                var c = cb.Clip;
+                // Edges on whole CSS pixels, like the box's background and borders.
+                float x0 = c.X, x1 = c.X + c.W, y0 = c.Y, y1 = c.Y + c.H;
+                if (c.W < ClipOp.Far) { x0 = SnapPx(x0); x1 = SnapPx(x1); }
+                if (c.H < ClipOp.Far) { y0 = SnapPx(y0); y1 = SnapPx(y1); }
+                b.Ascii("q ");
+                if (c.Radii is { } r && !r.IsZero) RoundRectPath(b, x0, y0, Math.Max(0, x1 - x0), Math.Max(0, y1 - y0), r, pageTop);
+                else b.Num(PX(x0)).Sp().Num(PY(y1, pageTop)).Sp().Num(Math.Max(0, x1 - x0)).Sp().Num(Math.Max(0, y1 - y0)).Ascii(" re ");
+                b.Ascii("W n\n");
+                foreach (var item in cb.Items)
+                    if (item.Op is not LinkOp) WriteOp(b, item, pageTop, imageIds);
+                EndText(b);
                 b.Ascii("Q\n");
                 InvalidateState();
                 break;

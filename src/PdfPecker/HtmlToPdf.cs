@@ -132,9 +132,18 @@ public static class HtmlToPdf
             new StyleResolver(sheet, page.ContentWidth, page.FlowHeight) { Cancellation = cancellationToken }.ResolveTree(doc, root);
         }
 
+        // The root element's background, or else the body's, is the canvas background: it fills every page area (as in
+        // Chrome, not the page margins), positioned against the root element's box, and that element's own box does
+        // not paint it again.
+        var htmlEl = doc.FindFirst("html");
+        var body = doc.FindFirst("body");
+        var canvasStyle = HasBackground(htmlEl) ? htmlEl!.Style : HasBackground(body) ? body!.Style : null;
+        if (canvasStyle != null) canvasStyle.CanvasBackground = true;
+
         var engine = new LayoutEngine(page.FlowHeight, images)
         {
             Cancellation = cancellationToken, MaxPages = Math.Max(1, options.MaxPages), FixedAreaHeight = page.ContentHeight,
+            CanvasRoot = htmlEl,
         };
         if (options.Bookmarks) engine.Headings = new List<OutlineHeading>();
         float height = engine.Layout(doc, page.ContentWidth);
@@ -151,11 +160,25 @@ public static class HtmlToPdf
             };
         }
 
-        uint background = 0;
-        var htmlEl = doc.FindFirst("html");
-        var body = doc.FindFirst("body");
-        if (htmlEl?.Style != null && CssColor.IsVisible(htmlEl.Style.BackgroundColor)) background = htmlEl.Style.BackgroundColor;
-        else if (body?.Style != null && CssColor.IsVisible(body.Style.BackgroundColor)) background = body.Style.BackgroundColor;
+        Func<int, List<DrawOp>>? pageCanvas = null;
+        if (canvasStyle != null)
+        {
+            var rootStyle = htmlEl?.Style ?? canvasStyle;
+            // Chrome sizes the positioning area like the root element's border box but puts it at the page area's top
+            // left corner, whatever the root element's margins.
+            var (_, _, rw, rh) = engine.CanvasRootBox ?? (0, 0, page.ContentWidth, height);
+            // html { height: 100% } refers to the page area.
+            if (rootStyle.Height.IsPercent) rh = rootStyle.Height.Resolve(page.ContentHeight);
+            float flowH = page.FlowHeight;
+            pageCanvas = p =>
+            {
+                // y = 0 is the top of the page area; flow y = 0 of page p sits BandTop below it.
+                var group = new GroupOp();
+                BoxPainter.PaintCanvas(group, canvasStyle, rootStyle, 0, page.BandTop - p * flowH, rw, rh,
+                    0, 0, page.ContentWidth, page.ContentHeight, images, page.ContentWidth);
+                return group.Ops;
+            };
+        }
 
         string? title = options.Title;
         if (title == null)
@@ -197,8 +220,8 @@ public static class HtmlToPdf
                 Custom = DocumentProperties.Validate(options.CustomProperties),
             },
         };
-        var pdf = writer.Write(engine.Ops, height, engine.Anchors, background, title, options.Author, options.Subject,
-            options.FooterText, options.HeaderText, pageBands, engine.Headings, engine.FixedOps.Count > 0 ? engine.FixedOps : null);
+        var pdf = writer.Write(engine.Ops, height, engine.Anchors, page.Background, title, options.Author, options.Subject,
+            options.FooterText, options.HeaderText, pageBands, engine.Headings, engine.FixedOps.Count > 0 ? engine.FixedOps : null, pageCanvas);
         if (options.Signature != null)
             pdf = PdfSigner.Sign(pdf, options.Signature, options.Security?.OwnerPassword ?? options.Security?.UserPassword);
         return pdf;
@@ -449,9 +472,17 @@ public static class HtmlToPdf
                 case "margin-right": SetMargin(v, ref page.MarginRight, page.Width); break;
                 case "margin-bottom": SetMargin(v, ref page.MarginBottom, page.Height); break;
                 case "margin-left": SetMargin(v, ref page.MarginLeft, page.Width); break;
+                case "background-color":
+                case "background":
+                    // The page box's own background covers the whole sheet, margins included.
+                    if (CssColor.TryParse(v.Trim(), CssColor.Black, out uint color)) page.Background = color;
+                    break;
             }
         }
     }
+
+    private static bool HasBackground(Element? e) =>
+        e?.Style is { } s && (CssColor.IsVisible(s.BackgroundColor) || s.BackgroundImages?.Any(l => l != null) == true);
 
     private static void SetMargin(string v, ref float target, float basis)
     {

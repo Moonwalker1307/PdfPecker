@@ -234,6 +234,27 @@ internal class GroupOp : DrawOp
 }
 
 /// <summary>
+/// The content of a box with overflow other than visible: painted only inside (X, Y, W, H), the box's padding box, with
+/// its rounded corners when it has them. An axis that does not clip reaches far out on both sides.
+/// </summary>
+internal sealed class ClipOp : GroupOp
+{
+    public const float Far = 1e6f;
+
+    public float X, Y, W, H;
+    public CornerRadii? Radii;
+
+    public ClipOp(float x, float y, float w, float h, CornerRadii? radii) { X = x; Y = y; W = w; H = h; Radii = radii; }
+
+    public override void Offset(float dx, float dy)
+    {
+        base.Offset(dx, dy);
+        X += dx;
+        Y += dy;
+    }
+}
+
+/// <summary>
 /// The ops of a float, a positioned or a transformed box: painted in its own layer (CSS 2.1 Appendix E), and drawn with
 /// <see cref="Transform"/> about (<see cref="OriginX"/>, <see cref="OriginY"/>) when it has one.
 /// </summary>
@@ -262,6 +283,8 @@ internal sealed class LayerOp : GroupOp
         bool any = false;
         foreach (var op in ops)
         {
+            // A clipped box's content is sorted within the clip, which stays where the box is.
+            if (op is ClipOp clip) SortLayers(clip.Ops);
             if (op is not LayerOp layer) continue;
             any = true;
             SortLayers(layer.Ops, layer.StackingContext ? 1 : 0);
@@ -290,7 +313,7 @@ internal static class BoxPainter
         // Collapsed table borders have no rounded corners.
         var radii = sides == AllSides && !collapsedCell ? Radii(s, w, h) : null;
         if (s.BoxShadows != null && w > 0 && h > 0) PaintShadows(group, s, x, y, w, h, radii);
-        if (w > 0 && h > 0)
+        if (w > 0 && h > 0 && !s.CanvasBackground)
         {
             var layers = s.BackgroundImages;
             if (CssColor.IsVisible(s.BackgroundColor))
@@ -334,6 +357,39 @@ internal static class BoxPainter
         if ((sides & Bottom) != 0) Side(group, s.BorderBottomStyle, bb, s.BorderBottomColor ?? s.Color, x, y + h - bb, w, bb, horizontal: true);
         if ((sides & Left) != 0) Side(group, s.BorderLeftStyle, bl, s.BorderLeftColor ?? s.Color, x, y, bl, h, horizontal: false);
         if ((sides & Right) != 0) Side(group, s.BorderRightStyle, br, s.BorderRightColor ?? s.Color, x + w - br, y, br, h, horizontal: false);
+    }
+
+    /// <summary>
+    /// Paints the background of the root element (or the body's, propagated to it) on the canvas: positioned against the
+    /// root element's border box (x, y, w, h), described by <paramref name="box"/>, and filling the whole clip rectangle,
+    /// which is one page area. As in Chrome, background-clip does not apply to the canvas.
+    /// </summary>
+    public static void PaintCanvas(GroupOp group, ComputedStyle s, ComputedStyle box, float x, float y, float w, float h,
+        float clipX, float clipY, float clipW, float clipH, ImageLoader? images, float basis)
+    {
+        if (!s.Visible || clipW <= 0 || clipH <= 0) return;
+        if (CssColor.IsVisible(s.BackgroundColor)) group.Ops.Add(new RectOp(clipX, clipY, clipW, clipH, s.BackgroundColor));
+        var layers = s.BackgroundImages;
+        if (layers == null || w <= 0 || h <= 0) return;
+        uint backdrop = CssColor.IsVisible(s.BackgroundColor) ? CssColor.FlattenOnWhite(s.BackgroundColor) : 0xFFFFFFFF;
+        int first = group.Ops.Count;
+        for (int i = layers.Length - 1; i >= 0; i--)
+            if (layers[i] is { } layer) PaintLayer(group, s, layer, i, x, y, w, h, images, basis, backdrop, null, box, (clipX, clipY, clipW, clipH));
+        // Pages far down the document move the tile far up: bring repeated tiles back to the page, so that a tile as tall
+        // as the page area (html { height: 100% }) is drawn once and not as a pattern with a seam of rounding error.
+        for (int i = first; i < group.Ops.Count; i++)
+        {
+            if (group.Ops[i] is not BackgroundOp bg) continue;
+            if (bg.RepeatX && bg.StepX > 0) bg.TileX = NearTile(bg.TileX, bg.StepX, clipX);
+            if (bg.RepeatY && bg.StepY > 0) bg.TileY = NearTile(bg.TileY, bg.StepY, clipY);
+        }
+    }
+
+    /// <summary>The start of the repeated tile that covers <paramref name="edge"/>, snapped onto it when within rounding.</summary>
+    private static float NearTile(float start, float step, float edge)
+    {
+        double t = start + Math.Floor((edge - (double)start) / step + 1e-4) * step;
+        return Math.Abs(t - edge) < 0.01 ? edge : (float)t;
     }
 
     /// <summary>The border radii of a w × h border box, scaled to fit; null when every corner is square.</summary>
@@ -410,6 +466,12 @@ internal static class BoxPainter
         for (int i = 0; i < 4; i++)
         {
             if (!Shows(i)) continue;
+            if (sides[i].Style is BorderStyle.Dashed or BorderStyle.Dotted && 2 * sides[i].Width < w && 2 * sides[i].Width < h)
+            {
+                // Dashes along the middle of this side's border, cut to its part of the ring.
+                group.Ops.Add(new RoundRectOp(x, y, w, h, r, sides[i].Color) { StrokeWidth = sides[i].Width, Style = sides[i].Style, Clip = polys[i] });
+                continue;
+            }
             group.Ops.Add(new RoundRectOp(x, y, w, h, r, sides[i].Color) { Clip = polys[i] }.WithHole(ix, iy, iw, ih, inner));
         }
     }
@@ -506,7 +568,8 @@ internal static class BoxPainter
     private const float MinTile = 0.05f;
 
     private static void PaintLayer(GroupOp group, ComputedStyle s, BackgroundImage layer, int i, float x, float y, float w, float h,
-        ImageLoader? images, float basis, uint backdrop, CornerRadii? radii)
+        ImageLoader? images, float basis, uint backdrop, CornerRadii? radii,
+        ComputedStyle? box = null, (float X, float Y, float W, float H)? canvas = null)
     {
         PdfImage? image = null;
         float iw = 0, ih = 0;
@@ -519,8 +582,8 @@ internal static class BoxPainter
         }
         else if (layer.Gradient == null) return;
 
-        var (ox, oy, ow, oh) = BoxOf(s, Layer(s.BackgroundOrigins, i, BackgroundBox.PaddingBox), x, y, w, h, basis);
-        var (cx, cy, cw, ch) = BoxOf(s, Layer(s.BackgroundClips, i, BackgroundBox.BorderBox), x, y, w, h, basis);
+        var (ox, oy, ow, oh) = BoxOf(box ?? s, Layer(s.BackgroundOrigins, i, BackgroundBox.PaddingBox), x, y, w, h, basis);
+        var (cx, cy, cw, ch) = canvas ?? BoxOf(s, Layer(s.BackgroundClips, i, BackgroundBox.BorderBox), x, y, w, h, basis);
         if (cw <= 0 || ch <= 0) return;
 
         // Tile size. A gradient has no intrinsic size or ratio: it fills the positioning area unless sized.
@@ -590,7 +653,7 @@ internal static class BoxPainter
             RepeatX = rx, RepeatY = ry,
             Image = image,
             Gradient = layer.Gradient?.Resolve(tw, th, backdrop),
-            ClipRadii = InnerRadii(radii, cx - x, cy - y, x + w - cx - cw, y + h - cy - ch),
+            ClipRadii = canvas == null ? InnerRadii(radii, cx - x, cy - y, x + w - cx - cw, y + h - cy - ch) : null,
         };
         var (x0, y0, x1, y1) = op.Painted();
         if (x1 > x0 && y1 > y0) group.Ops.Add(op);
