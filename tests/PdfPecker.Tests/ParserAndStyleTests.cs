@@ -155,6 +155,22 @@ public class StyleTests
     }
 
     [Fact]
+    public void Display_initial_unset_and_inherit()
+    {
+        // display is not inherited, so initial and unset are its initial value, inline, for any element.
+        var doc = Styled(@"<style>
+            .h { display: none }
+            .i { display: initial }
+            .u { display: unset }
+          </style>
+          <span id=a class='h i'>a</span><div id=b class='h u'>b</div>
+          <section style='display: flex'><span id=c style='display: inherit'>c</span></section>");
+        Assert.Equal(Display.Inline, ById(doc, "a").Style.Display);
+        Assert.Equal(Display.Inline, ById(doc, "b").Style.Display);
+        Assert.Equal(Display.Flex, ById(doc, "c").Style.Display);
+    }
+
+    [Fact]
     public void Em_units_resolve_against_font_size()
     {
         var doc = Styled("<div style='font-size: 10pt'><p id=p style='font-size: 2em; margin-top: 1em; padding-left: 50%'>t</p></div>");

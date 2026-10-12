@@ -628,6 +628,9 @@ internal sealed class StyleResolver
                     "table-column" => Display.TableColumn,
                     "table-column-group" => Display.TableColumnGroup,
                     "none" => Display.None,
+                    // display is not inherited, so unset is its initial value, inline.
+                    "initial" or "unset" => Display.Inline,
+                    "inherit" => parent.Display,
                     _ => s.Display,
                 };
                 if (lower == "flow-root") s.FormattingRoot = true;
