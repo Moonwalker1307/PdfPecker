@@ -598,6 +598,20 @@ internal sealed class PdfFile
             throw new InvalidDataException("The page decodes to more data than allowed.");
     }
 
+    /// <summary>Charges memory an image codec allocates against the page's decode budget, and checks for cancellation.</summary>
+    internal static void ChargeDecoded(long bytes)
+    {
+        t_cancel.ThrowIfCancellationRequested();
+        if (t_budgeted && (t_decodeBudget -= bytes) < 0)
+            throw new InvalidDataException("The page decodes to more data than allowed.");
+    }
+
+    /// <summary>The cancellation token of the render running on this thread.</summary>
+    internal static CancellationToken CurrentCancellation => t_cancel;
+
+    /// <summary>Throws if the render running on this thread was cancelled.</summary>
+    internal static void CheckCancel() => t_cancel.ThrowIfCancellationRequested();
+
     /// <summary>Decodes a stream through all its filters.</summary>
     public byte[] DecodeStream(PdfStream s) => DecodeStream(s, stopAtImageFilter: false, out _, out _);
 
