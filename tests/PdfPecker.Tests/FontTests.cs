@@ -56,6 +56,60 @@ public class FontTests
         }
     }
 
+    [Theory]
+    [InlineData("WorkSans-Regular.woff2")]       // glyf, loca and hmtx transformed
+    [InlineData("WorkSans-Regular-plain.woff2")] // no transforms
+    public void Woff2MatchesTheTrueTypeFont(string file)
+    {
+        var ttf = Assert.Single(FontProgram.Load(Regular));
+        var woff2 = Assert.Single(FontProgram.Load(Font(file)));
+        AssertSameTrueTypeFont(ttf, woff2);
+    }
+
+    [Fact]
+    public void Woff2CffFontKeepsItsCharStrings()
+    {
+        var otf = Assert.Single(FontProgram.Load(InterCff));
+        var woff2 = Assert.Single(FontProgram.Load(Font("Inter-Subr.woff2")));
+        Assert.True(woff2.IsCff);
+        Assert.Equal(otf.FullName, woff2.FullName);
+        var a = otf.Table("CFF ")!.Value;
+        var b = woff2.Table("CFF ")!.Value;
+        Assert.True(otf.Data.AsSpan(a.Offset, a.Length).SequenceEqual(woff2.Data.AsSpan(b.Offset, b.Length)));
+        foreach (char c in "Hamburgefonstiv ÆØÅ") Assert.Equal(otf.Advance(otf.GlyphId(c)), woff2.Advance(woff2.GlyphId(c)));
+    }
+
+    [Fact]
+    public void Woff2CollectionsLoadEveryFont()
+    {
+        var ttc = FontProgram.Load(Font("WorkSans.ttc"));
+        var woff2 = FontProgram.Load(Font("WorkSans.woff2"));
+        Assert.Equal(new[] { 400, 700 }, woff2.Select(f => f.WeightClass));
+        for (int i = 0; i < 2; i++) AssertSameTrueTypeFont(ttc[i], woff2[i]);
+        Assert.Equal(2, new FontCollection().Add(Font("WorkSans.woff2")).Count);
+    }
+
+    private static void AssertSameTrueTypeFont(FontProgram expected, FontProgram actual)
+    {
+        Assert.Equal(expected.NumGlyphs, actual.NumGlyphs);
+        Assert.Equal(expected.FullName, actual.FullName);
+        Assert.Equal((expected.XMin, expected.YMin, expected.XMax, expected.YMax), (actual.XMin, actual.YMin, actual.XMax, actual.YMax));
+        foreach (char c in "Aéß€Ł") Assert.Equal(expected.GlyphId(c), actual.GlyphId(c));
+        // Compare outlines as standalone fonts: a collection's FontProgram holds the whole file.
+        static byte[] Sfnt(FontProgram p) => SfntBuilder.Build(0x00010000, p.Tables.Select(t => (t.Tag, p.Data.AsSpan(t.Offset, t.Length).ToArray())).ToList());
+        var a = TrueTypeFont.Parse(Sfnt(expected))!;
+        var b = TrueTypeFont.Parse(Sfnt(actual))!;
+        for (int g = 0; g < expected.NumGlyphs; g++)
+        {
+            Assert.Equal(expected.Advance(g), actual.Advance(g));
+            Assert.Equal(expected.LeftSideBearing(g), actual.LeftSideBearing(g));
+            var pa = a.GetGlyph(g);
+            var pb = b.GetGlyph(g);
+            Assert.Equal(pa?.Verbs, pb?.Verbs);
+            Assert.Equal(pa?.Points, pb?.Points);
+        }
+    }
+
     [Fact]
     public void CollectionsLoadEveryFont()
     {
@@ -73,7 +127,7 @@ public class FontTests
         Assert.Throws<FormatException>(() => new FontCollection().Add(Regular.AsSpan(0, 200).ToArray()));
         var woff2 = new byte[64];
         "wOF2"u8.CopyTo(woff2);
-        Assert.Throws<NotSupportedException>(() => new FontCollection().Add(woff2));
+        Assert.Throws<FormatException>(() => new FontCollection().Add(woff2));
     }
 
     [Fact]
@@ -185,6 +239,22 @@ public class FontTests
             """;
         var text = Latin1(ConvertUncompressed(html));
         Assert.Contains("+WorkSans-Regular", text);
+    }
+
+    [Fact]
+    public void FontFaceRuleWithWoff2DataUriIsEmbedded()
+    {
+        var uri = "data:font/woff2;base64," + Convert.ToBase64String(Font("WorkSans-Regular.woff2"));
+        var html = $$"""
+            <style>@font-face { font-family: Brand; src: url('{{uri}}') format('woff2'); }
+            p { font-family: Brand; }</style><p>Grüße aus Łódź</p>
+            """;
+        var pdf = ConvertUncompressed(html);
+        AssertStructurallyValid(pdf);
+        var text = Latin1(pdf);
+        Assert.Contains("+WorkSans-Regular", text);
+        Assert.Contains("/FontFile2", text);
+        Assert.NotEmpty(PdfRenderer.Open(pdf).RenderPageToPng(0, new ImageOptions { Dpi = 36 }));
     }
 
     [Fact]

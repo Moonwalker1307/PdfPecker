@@ -159,7 +159,8 @@ internal sealed class FontResolver
         if (url == null) return null;
         // Skip formats we cannot read without downloading them (fetching may be expensive for the caller).
         if (format != null && !format.StartsWith("truetype", StringComparison.Ordinal) && !format.StartsWith("opentype", StringComparison.Ordinal)
-            && format != "woff" && format != "collection" && !format.StartsWith("woff-variations", StringComparison.Ordinal))
+            && format != "woff" && format != "woff2" && format != "collection" && !format.StartsWith("woff-variations", StringComparison.Ordinal)
+            && !format.StartsWith("woff2-variations", StringComparison.Ordinal))
             return null;
         var bytes = fetch(url);
         if (bytes == null) return null;

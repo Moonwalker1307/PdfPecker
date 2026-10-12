@@ -6,7 +6,8 @@ namespace PdfPecker.Fonts;
 
 /// <summary>
 /// A parsed TrueType or OpenType font program (an sfnt), read from a .ttf/.otf file, one font of a collection (.ttc)
-/// or a WOFF file. It gives layout the character map and advance widths, and gives the PDF writer the tables to embed.
+/// or a WOFF or WOFF2 file. It gives layout the character map and advance widths, and gives the PDF writer the tables
+/// to embed.
 /// Instances are immutable after construction apart from lazily built lookup tables, so they can be shared by
 /// documents converted in parallel.
 /// </summary>
@@ -117,7 +118,7 @@ internal sealed class FontProgram
         PostScriptName = SanitizeName(ps ?? FullName);
     }
 
-    /// <summary>Parses a font file: one font for .ttf/.otf/.woff, every font of a .ttc collection.</summary>
+    /// <summary>Parses a font file: one font for .ttf/.otf/.woff/.woff2, every font of a collection.</summary>
     public static List<FontProgram> Load(byte[] data)
     {
         var result = new List<FontProgram>();
@@ -129,6 +130,18 @@ internal sealed class FontProgram
             {
                 data = DecodeWoff(data);
                 sig = BinaryPrimitives.ReadUInt32BigEndian(data);
+            }
+            else if (sig == 0x774F4632) // 'wOF2'
+            {
+                var sfnts = Woff2Decoder.Decode(data);
+                if (sfnts.Count == 1) result.Add(new FontProgram(sfnts[0], 0));
+                else
+                    foreach (var sfnt in sfnts)
+                    {
+                        try { result.Add(new FontProgram(sfnt, 0)); }
+                        catch (Exception ex) when (IsFormatError(ex)) { }
+                    }
+                return result;
             }
             if (sig == 0x74746366) // 'ttcf'
             {
@@ -143,8 +156,6 @@ internal sealed class FontProgram
             }
             if (sig == 0x00010000 || sig == 0x4F54544F || sig == 0x74727565) // 1.0, 'OTTO', 'true'
                 result.Add(new FontProgram(data, 0));
-            else if (sig == 0x774F4632) // 'wOF2'
-                throw new NotSupportedException("WOFF2 fonts are not supported; use TrueType, OpenType or WOFF.");
             else throw new FormatException("Not a TrueType or OpenType font.");
         }
         catch (Exception ex) when (ex is not (FormatException or NotSupportedException) && IsFormatError(ex))
