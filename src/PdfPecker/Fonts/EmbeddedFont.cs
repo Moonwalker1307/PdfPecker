@@ -39,19 +39,29 @@ internal sealed class EmbeddedFont : TextFont
     public int CharUnits(int codePoint)
         => (uint)codePoint < 0x10000 ? _widths[codePoint] : Program.Advance1000(Program.GlyphId(codePoint));
 
+    public override bool HasKerning => Program.Kerning != null;
+
+    public override int KernUnits(int left, int right) => Program.Kern1000(Program.GlyphId(left), Program.GlyphId(right));
+
     public override int MeasureUnits(string s, int start, int length)
     {
         var w = _widths;
-        int total = 0;
+        bool kern = HasKerning;
+        int total = 0, prev = -1;
         for (int i = start, end = start + length; i < end; i++)
         {
-            char c = s[i];
-            if (char.IsHighSurrogate(c) && i + 1 < end && char.IsLowSurrogate(s[i + 1]))
+            int cp = s[i];
+            if (char.IsHighSurrogate(s[i]) && i + 1 < end && char.IsLowSurrogate(s[i + 1]))
             {
-                total += CharUnits(char.ConvertToUtf32(c, s[i + 1]));
-                i++;
+                cp = char.ConvertToUtf32(s[i], s[++i]);
+                total += CharUnits(cp);
             }
-            else total += w[c];
+            else total += w[cp];
+            if (kern)
+            {
+                if (prev >= 0) total += KernUnits(prev, cp);
+                prev = cp;
+            }
         }
         return total;
     }
@@ -98,17 +108,31 @@ internal sealed class FontChain : TextFont
 
     public override int MeasureUnits(string s, int start, int length)
     {
-        int total = 0;
+        int total = 0, prev = -1;
+        TextFont? prevFont = null;
         for (int i = start, end = start + length; i < end; i++)
         {
             int cp = s[i];
             if (char.IsHighSurrogate(s[i]) && i + 1 < end && char.IsLowSurrogate(s[i + 1])) cp = char.ConvertToUtf32(s[i], s[++i]);
-            total += Units(Pick(cp), cp);
+            var f = Pick(cp);
+            total += Units(f, cp);
+            // Pairs drawn with the same font are kerned, as in a run of that font.
+            if (ReferenceEquals(f, prevFont) && f.HasKerning) total += f.KernUnits(prev, cp);
+            prev = cp;
+            prevFont = f;
         }
         return total;
     }
 
     public override float CharWidth(char c, float size) => Units(Pick(c), c) * size / 1000f;
+
+    public override bool HasKerning => _primary.HasKerning;
+
+    public override int KernUnits(int left, int right)
+    {
+        var f = Pick(left);
+        return ReferenceEquals(f, Pick(right)) ? f.KernUnits(left, right) : 0;
+    }
 
     public override void Split(string text, List<FontRun> runs)
     {

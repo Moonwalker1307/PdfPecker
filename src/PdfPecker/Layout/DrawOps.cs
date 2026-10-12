@@ -25,6 +25,26 @@ internal sealed class RectOp : DrawOp
 }
 
 /// <summary>
+/// A border whose four sides are solid and alike, which Chrome strokes as one rectangle instead of filling each side.
+/// Viewers draw a thin stroke and a thin fill differently (pdfium widens a filled sliver to whole pixels), so this
+/// keeps hairline box borders looking as they do in Chrome's PDFs.
+/// </summary>
+internal sealed class BorderRectOp : DrawOp
+{
+    public float X, Y, W, H, Width; // the border box, and the border width
+    public uint Color;
+    public BorderRectOp(float x, float y, float w, float h, float width, uint color) { X = x; Y = y; W = w; H = h; Width = width; Color = color; }
+    public override void Offset(float dx, float dy) { X += dx; Y += dy; }
+
+    /// <summary>The four sides as filled rectangles, for a border split by a page break.</summary>
+    public RectOp[] Sides() => new[]
+    {
+        new RectOp(X, Y, W, Width, Color), new RectOp(X, Y + H - Width, W, Width, Color),
+        new RectOp(X, Y, Width, H, Color), new RectOp(X + W - Width, Y, Width, H, Color),
+    };
+}
+
+/// <summary>
 /// A background layer: an image or a gradient drawn as one tile at (TileX, TileY, TileW, TileH), repeated every StepX /
 /// StepY along the axes that repeat, and clipped to the painting area (ClipX, ClipY, ClipW, ClipH). A gradient's geometry
 /// is relative to the tile's top-left corner.
@@ -163,13 +183,18 @@ internal sealed class LayerOp : GroupOp
 
 internal static class BoxPainter
 {
+    // Border sides for Paint: which of the box's borders to draw.
+    public const int Top = 1, Right = 2, Bottom = 4, Left = 8, AllSides = 15;
+
     /// <summary>
     /// Paints background and borders of a border box into <paramref name="group"/>. <paramref name="images"/> loads
     /// url() backgrounds; <paramref name="basis"/> is the containing block width that percentage paddings refer to.
     /// </summary>
-    public static void Paint(GroupOp group, ComputedStyle s, float x, float y, float w, float h, ImageLoader? images = null, float basis = 0)
+    public static void Paint(GroupOp group, ComputedStyle s, float x, float y, float w, float h, ImageLoader? images = null, float basis = 0,
+        int sides = AllSides, bool collapsedCell = false)
     {
         if (!s.Visible) return;
+        if (s.BoxShadows != null && w > 0 && h > 0) PaintShadows(group, s, x, y, w, h);
         if (w > 0 && h > 0)
         {
             var layers = s.BackgroundImages;
@@ -189,10 +214,90 @@ internal static class BoxPainter
         }
         if (!s.HasBorder) return;
         float bt = s.BorderTop, br = s.BorderRight, bb = s.BorderBottom, bl = s.BorderLeft;
-        Side(group, s.BorderTopStyle, bt, s.BorderTopColor ?? s.Color, x, y, w, bt, horizontal: true);
-        Side(group, s.BorderBottomStyle, bb, s.BorderBottomColor ?? s.Color, x, y + h - bb, w, bb, horizontal: true);
-        Side(group, s.BorderLeftStyle, bl, s.BorderLeftColor ?? s.Color, x, y, bl, h, horizontal: false);
-        Side(group, s.BorderRightStyle, br, s.BorderRightColor ?? s.Color, x + w - br, y, br, h, horizontal: false);
+        uint topColor = s.BorderTopColor ?? s.Color;
+        // Chrome fills collapsed table borders side by side, and strokes other boxes' uniform borders.
+        if (sides == AllSides && !collapsedCell && bt > 0 && bt == br && bt == bb && bt == bl && 2 * bt < w && 2 * bt < h
+            && s.BorderTopStyle == BorderStyle.Solid && s.BorderRightStyle == BorderStyle.Solid
+            && s.BorderBottomStyle == BorderStyle.Solid && s.BorderLeftStyle == BorderStyle.Solid
+            && CssColor.IsVisible(topColor) && (s.BorderRightColor ?? s.Color) == topColor
+            && (s.BorderBottomColor ?? s.Color) == topColor && (s.BorderLeftColor ?? s.Color) == topColor)
+        {
+            group.Ops.Add(new BorderRectOp(x, y, w, h, bt, topColor));
+            return;
+        }
+        if ((sides & Top) != 0) Side(group, s.BorderTopStyle, bt, s.BorderTopColor ?? s.Color, x, y, w, bt, horizontal: true);
+        if ((sides & Bottom) != 0) Side(group, s.BorderBottomStyle, bb, s.BorderBottomColor ?? s.Color, x, y + h - bb, w, bb, horizontal: true);
+        if ((sides & Left) != 0) Side(group, s.BorderLeftStyle, bl, s.BorderLeftColor ?? s.Color, x, y, bl, h, horizontal: false);
+        if ((sides & Right) != 0) Side(group, s.BorderRightStyle, br, s.BorderRightColor ?? s.Color, x + w - br, y, br, h, horizontal: false);
+    }
+
+    /// <summary>
+    /// Paints outer box shadows under the box, the first shadow on top. PDF output has no transparency, so a shadow is
+    /// opaque, blended over white by its alpha, and only drawn outside the border box, as browsers clip it there. A blur
+    /// becomes bands that fade out like a Gaussian edge. Inset shadows are not drawn.
+    /// </summary>
+    public static void PaintShadows(GroupOp group, ComputedStyle s, float x, float y, float w, float h)
+    {
+        var shadows = s.BoxShadows;
+        if (shadows == null || w <= 0 || h <= 0) return;
+        for (int i = shadows.Length - 1; i >= 0; i--)
+        {
+            var sh = shadows[i];
+            if (sh.Inset) continue;
+            uint color = sh.Color ?? s.Color;
+            uint alpha = color >> 24;
+            if (alpha == 0) continue;
+            float blur = Math.Min(sh.Blur, 300), spread = Math.Clamp(sh.Spread, -1000, 1000);
+            // Bands from the outside in, each painted over the one before, so the middle of the edge is half covered.
+            int bands = blur <= 0 ? 1 : Math.Clamp((int)MathF.Ceiling(2 * blur / 0.75f), 2, 24); // about one pixel each
+            float sigma = blur / 2;
+            for (int k = 0; k < bands; k++)
+            {
+                float grow, cover;
+                if (bands == 1) { grow = spread; cover = 1; }
+                else
+                {
+                    // Band k covers grow values from spread + blur down to spread - blur; its colour is the coverage of
+                    // the Gaussian-blurred edge at the band's middle.
+                    float outer = spread + blur - 2 * blur * k / bands, mid = outer - blur / bands;
+                    grow = outer;
+                    cover = 0.5f * Erfc((mid - spread) / (sigma * MathF.Sqrt(2)));
+                }
+                float sx = x + sh.X - grow, sy = y + sh.Y - grow, sw = w + 2 * grow, shh = h + 2 * grow;
+                if (sw <= 0 || shh <= 0) continue;
+                uint a = (uint)Math.Clamp(MathF.Round(alpha * cover), 0, 255);
+                if (a == 0) continue;
+                uint c = CssColor.FlattenOnWhite(a << 24 | (color & 0xFFFFFF));
+                Outside(group, sx, sy, sw, shh, x, y, w, h, c);
+            }
+        }
+    }
+
+    // Paints rectangle (sx, sy, sw, sh) minus the box (x, y, w, h) as up to four rectangles.
+    private static void Outside(GroupOp group, float sx, float sy, float sw, float sh, float x, float y, float w, float h, uint color)
+    {
+        float sr = sx + sw, sb = sy + sh, r = x + w, b = y + h;
+        if (x >= sr || r <= sx || y >= sb || b <= sy)
+        {
+            group.Ops.Add(new RectOp(sx, sy, sw, sh, color));
+            return;
+        }
+        if (y > sy) group.Ops.Add(new RectOp(sx, sy, sw, y - sy, color));
+        if (sb > b) group.Ops.Add(new RectOp(sx, b, sw, sb - b, color));
+        float top = Math.Max(sy, y), bottom = Math.Min(sb, b);
+        if (bottom > top)
+        {
+            if (x > sx) group.Ops.Add(new RectOp(sx, top, x - sx, bottom - top, color));
+            if (sr > r) group.Ops.Add(new RectOp(r, top, sr - r, bottom - top, color));
+        }
+    }
+
+    // Complementary error function (Abramowitz and Stegun 7.1.26), accurate to about 1e-7.
+    private static float Erfc(float z)
+    {
+        float t = 1 / (1 + 0.3275911f * MathF.Abs(z));
+        float y = t * (0.254829592f + t * (-0.284496736f + t * (1.421413741f + t * (-1.453152027f + t * 1.061405429f)))) * MathF.Exp(-z * z);
+        return z >= 0 ? y : 2 - y;
     }
 
     private static T Layer<T>(T[]? list, int i, T initial) => list is { Length: > 0 } ? list[i % list.Length] : initial;

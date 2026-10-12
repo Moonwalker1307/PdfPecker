@@ -24,6 +24,11 @@ public sealed class PdfWatermark
     /// </summary>
     public string? FontFamily { get; set; }
 
+    /// <summary>
+    /// Extra space after each character in points, like CSS letter-spacing, to spread the letters out. Default: 0.
+    /// </summary>
+    public float LetterSpacing { get; set; }
+
     /// <summary>Use the bold font. Default: true.</summary>
     public bool Bold { get; set; } = true;
 

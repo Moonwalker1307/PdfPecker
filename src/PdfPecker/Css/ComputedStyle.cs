@@ -147,6 +147,8 @@ internal sealed class ComputedStyle
     public float WordSpacing;
     public bool Visible = true;
     public bool BorderCollapse;
+    public bool TableLayoutFixed; // table-layout: fixed
+    public BoxShadow[]? BoxShadows;
     public float BorderSpacingH = 1.5f, BorderSpacingV = 1.5f; // 2px
     public string? FontFamilyName;
     public FontResolver? Fonts; // the document's fonts; null when only the standard fonts exist
@@ -321,6 +323,8 @@ internal sealed class ComputedStyle
         c.GridTemplateAreas = null;
         c.ColumnCount = 0;
         c.ColumnWidth = Length.Auto;
+        c.TableLayoutFixed = false;
+        c.BoxShadows = null;
         return c;
     }
 

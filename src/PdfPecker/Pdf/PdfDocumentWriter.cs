@@ -174,6 +174,10 @@ internal sealed class PdfDocumentWriter
                 case RectOp r:
                     if (r.W > 0 && r.H > 0) AddSplit(r, r.Y, r.Y + r.H, into);
                     break;
+                case BorderRectOp br:
+                    if (PageOf(br.Y) == PageOf(br.Y + br.H - 0.5f)) Target(into, PageOf(br.Y)).Add(new Placed(br, br.Y, br.Y + br.H));
+                    else foreach (var side in br.Sides()) Distribute(side, into); // a box split by a page break is open at the break
+                    break;
                 case BackgroundOp bg:
                 {
                     var (x0, y0, x1, y1) = bg.Painted();
@@ -226,6 +230,7 @@ internal sealed class PdfDocumentWriter
                     }
                     case GroupOp g: foreach (var o in g.Ops) Flatten(o, list); break;
                     case RectOp r: if (r.W > 0 && r.H > 0) list.Add(new Placed(r, r.Y, r.Y + r.H)); break;
+                    case BorderRectOp br: list.Add(new Placed(br, br.Y, br.Y + br.H)); break;
                     case BackgroundOp bg:
                     {
                         var (_, y0, _, y1) = bg.Painted();
@@ -410,7 +415,10 @@ internal sealed class PdfDocumentWriter
             WriteWatermark(watermarkId, wm, wmText, fontDict, wmImage);
         }
 
-        // Pages, contents, annotations.
+        // Pages, contents, annotations. A scaled page is written at the size Chrome gives the paper (see PaperSize).
+        float paperW = _page.Width * _page.Scale, paperH = _page.Height * _page.Scale;
+        if (_page.Scale != 1) { paperW = PaperSize(paperW); paperH = PaperSize(paperH); }
+        float paperDy = _paperDy = paperH - _page.Height * _page.Scale;
         var content = new ByteBuffer(32 * 1024);
         var annotations = new List<(int Id, Placed Link, float Origin, float PageTop)>();
         for (int p = 0; p < pageCount; p++)
@@ -420,9 +428,9 @@ internal sealed class PdfDocumentWriter
             ResetState();
             if (_page.Scale != 1)
             {
-                // Num keeps 3 decimals, too few for a scale such as 0.99916.
+                // Num keeps 3 decimals, too few for a scale such as 0.99916. The content keeps to the top of the page.
                 string k = _page.Scale.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
-                content.Ascii("q ").Ascii(k).Ascii(" 0 0 ").Ascii(k).Ascii(" 0 0 cm\n");
+                content.Ascii("q ").Ascii(k).Ascii(" 0 0 ").Ascii(k).Ascii(" 0 ").Num(paperDy).Ascii(" cm\n");
             }
             if (CssColor.IsVisible(pageBackground))
             {
@@ -462,7 +470,7 @@ internal sealed class PdfDocumentWriter
             }
 
             Begin(pageIds[p]).Ascii("<< /Type /Page /Parent ").Int(pagesId).Ascii(" 0 R /MediaBox [0 0 ")
-                .Num(_page.Width * _page.Scale).Sp().Num(_page.Height * _page.Scale).Ascii("] /Resources ").Int(resourcesId).Ascii(" 0 R /Contents ")
+                .Num(paperW).Sp().Num(paperH).Ascii("] /Resources ").Int(resourcesId).Ascii(" 0 R /Contents ")
                 .Int(contentIds[p]).Ascii(" 0 R");
             if (annotIds.Count > 0)
             {
@@ -483,7 +491,7 @@ internal sealed class PdfDocumentWriter
             float yTop = _page.Height - origin - (placed.Y0 - linkPageTop);
             float yBottom = yTop - (placed.Y1 - placed.Y0);
             float k = _page.Scale;
-            x1 *= k; x2 *= k; yTop *= k; yBottom *= k;
+            x1 *= k; x2 *= k; yTop = yTop * k + paperDy; yBottom = yBottom * k + paperDy;
             Begin(id).Ascii("<< /Type /Annot /Subtype /Link /Rect [").Num(x1).Sp().Num(yBottom).Sp().Num(x2).Sp().Num(yTop)
                 .Ascii("] /F 4 /Border [0 0 0] ");
             if (link.Target.StartsWith("#", StringComparison.Ordinal))
@@ -646,8 +654,18 @@ internal sealed class PdfDocumentWriter
         float h = _page.FlowHeight;
         int p = Math.Clamp((int)Math.Floor((y + 0.01f) / h), 0, _pageIds.Length - 1);
         float py = _page.Height - _page.MarginTop - _page.BandTop - (y - p * h);
-        _out.Ascii("[").Int(_pageIds[p]).Ascii(" 0 R /XYZ 0 ").Num(Math.Min(py, _page.Height) * _page.Scale).Ascii(" null]");
+        _out.Ascii("[").Int(_pageIds[p]).Ascii(" 0 R /XYZ 0 ").Num(Math.Min(py, _page.Height) * _page.Scale + _paperDy).Ascii(" null]");
     }
+
+    private float _paperDy; // how far a scaled page's content moves up to stay at the top of the paper
+
+    /// <summary>
+    /// A paper dimension as Chrome prints it: rounded to whole points, then to Chrome's 1/300 inch device units, so A4
+    /// is 594.96 x 841.92 pt. IronPDF, which uses Chrome, writes pages this size; pdfium fits each page to whole pixels,
+    /// so the same size makes it snap thin lines the same way.
+    /// </summary>
+    internal static float PaperSize(float pt)
+        => (float)(Math.Round(Math.Round(pt, MidpointRounding.AwayFromZero) * 300 / 72, MidpointRounding.AwayFromZero) * 0.24);
 
     private void WriteStream(int id, ReadOnlySpan<byte> data, bool compress, string? extraDict)
     {
@@ -706,15 +724,20 @@ internal sealed class PdfDocumentWriter
         double a = (wm.Angle ?? Math.Atan2(H, W) * 180 / Math.PI) * Math.PI / 180;
         float c = (float)Math.Cos(a), sn = (float)Math.Sin(a);
         const float lead = 1.15f, cap = 0.72f;
-        int maxUnits = 1;
-        foreach (var line in lines) maxUnits = Math.Max(maxUnits, font.MeasureUnits(line, 0, line.Length));
+        float ls = float.IsFinite(wm.LetterSpacing) ? Math.Clamp(wm.LetterSpacing, -100, 100) : 0;
+        int maxUnits = 1, maxChars = 0;
+        foreach (var line in lines)
+        {
+            int units = font.MeasureUnits(line, 0, line.Length);
+            if (units >= maxUnits) { maxUnits = units; maxChars = line.Length; }
+        }
         float size = wm.FontSize;
         if (size <= 0)
         {
-            // As large as fits in 80% of the page with the text block rotated.
-            float tw = maxUnits / 1000f, th = lead * (lines.Length - 1) + cap;
+            // As large as fits in 80% of the page with the text block rotated; letter spacing does not scale.
+            float tw = maxUnits / 1000f, th = lead * (lines.Length - 1) + cap, lsw = ls * maxChars;
             float ac = Math.Abs(c), asn = Math.Abs(sn);
-            size = Math.Min(0.8f * W / (tw * ac + th * asn), 0.8f * H / (tw * asn + th * ac));
+            size = Math.Min((0.8f * W - lsw * ac) / (tw * ac + th * asn), (0.8f * H - lsw * asn) / (tw * asn + th * ac));
             size = Math.Clamp(size, 4, 400);
         }
         uint color = CssColor.TryParse(wm.Color ?? "", CssColor.Black, out var parsed) ? parsed : 0xFF808080;
@@ -722,9 +745,10 @@ internal sealed class PdfDocumentWriter
         var ops = new List<TextOp>(lines.Length);
         for (int i = 0; i < lines.Length; i++)
         {
-            float xl = -font.Measure(lines[i], size) / 2;
+            // Centred on the letters: the spacing after the last one is left out.
+            float xl = -(font.Measure(lines[i], size) + ls * Math.Max(0, lines[i].Length - 1)) / 2;
             float yl = blockH / 2 - cap * size - i * lead * size;
-            ops.Add(new TextOp(xl, yl, 0, font, size, color, lines[i], 0, 0));
+            ops.Add(new TextOp(xl, yl, 0, font, size, color, lines[i], 0, ls));
         }
         return (ops, c, sn);
     }
@@ -754,6 +778,7 @@ internal sealed class PdfDocumentWriter
             foreach (var line in t.Lines)
             {
                 SetFill(b, line.Color);
+                if (_tc != line.CharSpacing) { _tc = line.CharSpacing; b.Num(line.CharSpacing).Ascii(" Tc\n"); }
                 WriteTextLine(b, line, line.X, line.Baseline);
             }
             b.Ascii("ET\n");
@@ -854,6 +879,24 @@ internal sealed class PdfDocumentWriter
                 b.Num(PX(x0)).Sp().Num(PY(bottom, pageTop)).Sp().Num(x1 - x0).Sp().Num(bottom - top).Ascii(" re f\n");
                 break;
             }
+            case BorderRectOp br:
+            {
+                EndText(b);
+                // Snapped like the edges of a filled box, then stroked along the middle of the border.
+                float x0 = SnapPx(br.X), x1 = SnapPx(br.X + br.W);
+                float top = pageTop + SnapPx(placed.Y0 - pageTop), bottom = pageTop + SnapPx(placed.Y1 - pageTop);
+                float lw = br.Width, half = lw / 2;
+                if (x1 - x0 <= lw || bottom - top <= lw)
+                {
+                    SetFill(b, br.Color);
+                    b.Num(PX(x0)).Sp().Num(PY(bottom, pageTop)).Sp().Num(x1 - x0).Sp().Num(bottom - top).Ascii(" re f\n");
+                    break;
+                }
+                if (_stroke != br.Color) { _stroke = br.Color; WriteColor(b, br.Color); b.Ascii(" RG\n"); }
+                if (_lineWidth != lw) { _lineWidth = lw; b.Num(lw).Ascii(" w\n"); }
+                b.Num(PX(x0 + half)).Sp().Num(PY(bottom - half, pageTop)).Sp().Num(x1 - x0 - lw).Sp().Num(bottom - top - lw).Ascii(" re S\n");
+                break;
+            }
             case BackgroundOp bg:
                 EndText(b);
                 WriteBackground(b, bg, placed, pageTop, imageIds);
@@ -905,7 +948,7 @@ internal sealed class PdfDocumentWriter
                 {
                     b.Ascii("q ");
                     WriteColor(b, c.Color);
-                    b.Ascii(" RG ").Num(Math.Max(0.5f, r * 0.3f)).Ascii(" w ");
+                    b.Ascii(" RG 0.75 w "); // 1px, as Chrome strokes a circle marker
                 }
                 b.Num(cx + r).Sp().Num(cy).Ascii(" m ");
                 b.Num(cx + r).Sp().Num(cy + k).Sp().Num(cx + k).Sp().Num(cy + r).Sp().Num(cx).Sp().Num(cy + r).Ascii(" c ");
@@ -969,9 +1012,9 @@ internal sealed class PdfDocumentWriter
                     b.Sp().Num(shape.FontSize).Ascii(" Tf ").Int(mode).Ascii(" Tr 0 Tw ")
                         .Num(shape.CharSpacing).Ascii(" Tc ").Num6(m.A).Sp().Num6(m.B).Sp().Num6(m.C).Sp().Num6(m.D).Sp().Num(m.E).Sp().Num(m.F)
                         .Ascii(" Tm ");
-                    if (svgFont is EmbeddedFont svgFontEmbedded) WriteGlyphHex(b, _subsets[svgFontEmbedded.Program], shape.Text!);
-                    else WriteTextBytes(b, shape.Text!);
-                    b.Ascii(" Tj ET\n");
+                    if (svgFont is EmbeddedFont svgFontEmbedded) WriteGlyphHex(b, svgFontEmbedded, _subsets[svgFontEmbedded.Program], shape.Text!);
+                    else WriteStandardText(b, shape.Font!, shape.Text!);
+                    b.Ascii(" ET\n");
                     continue;
             }
             WritePath(b, shape);
@@ -1137,17 +1180,21 @@ internal sealed class PdfDocumentWriter
         }
     }
 
-    /// <summary>Writes text as a hex string of CIDs, for an embedded font with no per-glyph adjustments.</summary>
-    private static void WriteGlyphHex(ByteBuffer b, GlyphSubset subset, string text)
+    /// <summary>Shows text as hex strings of CIDs: with TJ when the font kerns, so kerned pairs can move glyphs.</summary>
+    private static void WriteGlyphHex(ByteBuffer b, EmbeddedFont font, GlyphSubset subset, string text)
     {
-        b.Byte((byte)'<');
+        bool kern = font.HasKerning;
+        int prev = -1;
+        b.Ascii(kern ? "[<" : "<");
         for (int i = 0; i < text.Length; i++)
         {
             int cp = text[i];
             if (char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1])) cp = char.ConvertToUtf32(text[i], text[++i]);
+            if (kern && prev >= 0 && font.KernUnits(prev, cp) is int k && k != 0) b.Ascii(">").Int(-k).Ascii("<");
+            prev = cp;
             Hex4(b, subset.Cid(cp));
         }
-        b.Byte((byte)'>');
+        b.Ascii(kern ? ">] TJ" : "> Tj");
     }
 
     private GlyphSubset Subset(FontProgram program)
@@ -1181,8 +1228,35 @@ internal sealed class PdfDocumentWriter
         SetFont(b, font, "/F", font.Index + 1, t.Size);
         SetRenderMode(b, 0);
         b.Ascii("1 0 0 1 ").Num(x).Sp().Num(y).Ascii(" Tm ");
-        WriteTextBytes(b, start == 0 && length == t.Text.Length ? t.Text : t.Text.Substring(start, length));
-        b.Ascii(" Tj\n");
+        WriteStandardText(b, font, start == 0 && length == t.Text.Length ? t.Text : t.Text.Substring(start, length));
+        b.Ascii("\n");
+    }
+
+    /// <summary>Shows text in a standard font: one string with Tj, or with TJ when kerned pairs move glyphs.</summary>
+    private static void WriteStandardText(ByteBuffer b, TextFont font, string text)
+    {
+        int first = -1;
+        if (font.HasKerning)
+            for (int i = 1; i < text.Length && first < 0; i++)
+                if (font.KernUnits(text[i - 1], text[i]) != 0) first = i;
+        if (first < 0)
+        {
+            WriteTextBytes(b, text);
+            b.Ascii(" Tj");
+            return;
+        }
+        b.Byte((byte)'[');
+        int runStart = 0;
+        for (int i = first; i < text.Length; i++)
+        {
+            int k = font.KernUnits(text[i - 1], text[i]);
+            if (k == 0) continue;
+            WriteTextBytes(b, text.Substring(runStart, i - runStart));
+            b.Int(-k);
+            runStart = i;
+        }
+        WriteTextBytes(b, text.Substring(runStart));
+        b.Ascii("] TJ");
     }
 
     private void WriteEmbeddedRun(ByteBuffer b, EmbeddedFont font, TextOp t, int start, int length, float x, float y)
@@ -1205,14 +1279,19 @@ internal sealed class PdfDocumentWriter
         // PDF/A forbids showing .notdef: characters no font has become blank space of the same width.
         string text = t.Text;
         bool skipNotdef = Conformance != PdfConformance.None && t.Size > 0;
-        bool adjust = (t.WordSpacing != 0 || skipNotdef) && t.Size > 0;
+        // Kerning moves the glyph after a kerned pair, as the layout measured it.
+        bool kern = font.HasKerning && t.Size > 0;
+        bool adjust = (t.WordSpacing != 0 || skipNotdef || kern) && t.Size > 0;
         float spaceAdjust = adjust ? -t.WordSpacing * 1000f / t.Size : 0;
         float notdefAdjust = skipNotdef ? -(font.Program.Advance1000(0) + t.CharSpacing * 1000f / t.Size) : 0;
         b.Ascii(adjust ? "[<" : "<");
+        int prev = -1;
         for (int i = start, end = start + length; i < end; i++)
         {
             int cp = text[i];
             if (char.IsHighSurrogate(text[i]) && i + 1 < end && char.IsLowSurrogate(text[i + 1])) cp = char.ConvertToUtf32(text[i], text[++i]);
+            if (kern && prev >= 0 && font.KernUnits(prev, cp) is int k && k != 0) b.Ascii(">").Int(-k).Ascii("<");
+            prev = cp;
             int cid = subset.Cid(cp);
             if (cid == 0 && skipNotdef) b.Ascii(">").Num(notdefAdjust).Ascii("<");
             else Hex4(b, cid);

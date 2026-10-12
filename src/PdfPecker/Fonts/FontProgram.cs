@@ -40,6 +40,8 @@ internal sealed class FontProgram
     private ushort[]? _bmp;                     // BMP code point -> glyph id
     private Dictionary<int, ushort>? _astral;   // supplementary planes
     private short[]? _charWidths;               // BMP code point -> advance in 1/1000 em
+    private Kerning? _kerning;
+    private bool _kerningLoaded;
 
     private FontProgram(byte[] data, int dirOffset)
     {
@@ -190,6 +192,33 @@ internal sealed class FontProgram
 
     /// <summary>Advance width in 1/1000 em, the unit used by layout and by PDF width arrays.</summary>
     public int Advance1000(int gid) => (int)Math.Round(Advance(gid) * 1000.0 / UnitsPerEm);
+
+    /// <summary>The font's pair kerning, or null when it has none.</summary>
+    public Kerning? Kerning
+    {
+        get
+        {
+            if (Volatile.Read(ref _kerningLoaded)) return _kerning;
+            lock (_lock)
+            {
+                if (!_kerningLoaded)
+                {
+                    _kerning = Kerning.Load(this);
+                    Volatile.Write(ref _kerningLoaded, true);
+                }
+                return _kerning;
+            }
+        }
+    }
+
+    /// <summary>The kerning between two glyphs in 1/1000 em (usually negative), added to the first glyph's advance.</summary>
+    public int Kern1000(int left, int right)
+    {
+        var k = Kerning;
+        if (k == null) return 0;
+        int v = k.Pair(left, right);
+        return v == 0 ? 0 : (int)Math.Round(v * 1000.0 / UnitsPerEm);
+    }
 
     /// <summary>Advance widths in 1/1000 em indexed by BMP code point.</summary>
     public short[] CharWidths => _charWidths ?? BuildCharWidths();

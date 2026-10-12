@@ -23,6 +23,12 @@ internal abstract class TextFont
 
     public abstract float CharWidth(char c, float size);
 
+    /// <summary>True when the font kerns pairs of characters.</summary>
+    public virtual bool HasKerning => false;
+
+    /// <summary>The kerning between two code points in 1/1000 em, added to the advance of the first.</summary>
+    public virtual int KernUnits(int left, int right) => 0;
+
     private const float Px = 0.75f; // one CSS pixel in points
 
     private static float RoundPx(float pt) => MathF.Floor(pt / Px + 0.5f) * Px;
