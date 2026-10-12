@@ -505,7 +505,13 @@ internal sealed partial class LayoutEngine
                     cy = y + bt + pt;
                 }
             }
-            if (image != null && s.Visible) _ops.Add(new ImageOp(cx, cy, imgW, imgH, image));
+            if (image != null && s.Visible)
+            {
+                // Rounded corners clip the image to the content box's curve.
+                var radii = BoxPainter.InnerRadii(BoxPainter.Radii(s, imgW + bl + br + pl + pr, imgH + bt + bb + pt + pb),
+                    bl + pl, bt + pt, br + pr, bb + pb);
+                _ops.Add(new ImageOp(cx, cy, imgW, imgH, image) { Radii = radii });
+            }
             if (svg != null && s.Visible) _ops.Add(new SvgOp(cx, cy, imgW, imgH, svg));
             contentBottom = cy + imgH;
         }

@@ -271,6 +271,7 @@ internal sealed class CssGradient
             ClipStops(stops);
         }
         (g.Offsets, g.Colors) = Gradient.NormalizeStops(stops, backdrop);
+        g.KeepAlpha(stops);
         return g;
     }
 

@@ -186,6 +186,9 @@ internal sealed class ComputedStyle
     public float BorderTopWidth = 1.5f, BorderRightWidth = 1.5f, BorderBottomWidth = 1.5f, BorderLeftWidth = 1.5f; // medium = 3px
     public BorderStyle BorderTopStyle, BorderRightStyle, BorderBottomStyle, BorderLeftStyle;
     public uint? BorderTopColor, BorderRightColor, BorderBottomColor, BorderLeftColor; // null = currentColor
+    // border-radius: horizontal and vertical radius of the top-left, top-right, bottom-right and bottom-left corner
+    // (percentages of the border box's width and height); null when every corner is square.
+    public Length[]? BorderRadii;
     public Length Width = Length.Auto, Height = Length.Auto;
     public Length MinWidth = Length.Zero, MaxWidth = Length.Auto, MinHeight = Length.Zero, MaxHeight = Length.Auto;
     public bool BorderBox;
@@ -196,6 +199,9 @@ internal sealed class ComputedStyle
     public FloatSide Float;
     public bool ClearLeft, ClearRight;
     public float Opacity = 1;
+    // An inline box's opacity times that of the inline boxes around it, up to the block. Inline boxes get no layer of
+    // their own, so their text, decorations and backgrounds are faded instead.
+    public float InlineFade = 1;
     public Position Position;
     public Length Top = Length.Auto, Right = Length.Auto, Bottom = Length.Auto, Left = Length.Auto;
     public int? ZIndex;                         // null = auto
@@ -267,8 +273,8 @@ internal sealed class ComputedStyle
     /// <summary>Positioned (anything but static): a containing block for absolutely positioned descendants.</summary>
     public bool Positioned => Position != Position.Static;
 
-    /// <summary>Painted in the positioned layer: positioned, or transformed.</summary>
-    public bool Layered => Position != Position.Static || Transform != null;
+    /// <summary>Painted in the positioned layer: positioned, transformed or translucent.</summary>
+    public bool Layered => Position != Position.Static || Transform != null || Opacity < 1;
 
     /// <summary>Creates the starting style for a child: inherited properties copied, the rest reset.</summary>
     public ComputedStyle CreateChild()
@@ -288,6 +294,7 @@ internal sealed class ComputedStyle
         c.BorderTopWidth = c.BorderRightWidth = c.BorderBottomWidth = c.BorderLeftWidth = 1.5f;
         c.BorderTopStyle = c.BorderRightStyle = c.BorderBottomStyle = c.BorderLeftStyle = BorderStyle.None;
         c.BorderTopColor = c.BorderRightColor = c.BorderBottomColor = c.BorderLeftColor = null;
+        c.BorderRadii = null;
         c.Width = c.Height = Length.Auto;
         c.MinWidth = c.MinHeight = Length.Zero;
         c.MaxWidth = c.MaxHeight = Length.Auto;

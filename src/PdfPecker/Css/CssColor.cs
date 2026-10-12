@@ -48,6 +48,10 @@ internal static class CssColor
     }
 
     public static bool IsOpaque(uint c) => c >> 24 == 0xFF;
+
+    /// <summary>The colour with its alpha multiplied by <paramref name="opacity"/>.</summary>
+    public static uint Fade(uint c, float opacity)
+        => opacity >= 1 ? c : (uint)MathF.Round((c >> 24) * Math.Clamp(opacity, 0, 1)) << 24 | (c & 0xFFFFFF);
     public static bool IsVisible(uint c) => c >> 24 != 0;
 
     /// <summary>Parses a CSS color. <c>currentColor</c> resolves to <paramref name="current"/>.</summary>
@@ -157,7 +161,7 @@ internal static class CssColor
         return count;
     }
 
-    /// <summary>Blends a translucent color over white, since the writer does not emit transparency groups.</summary>
+    /// <summary>Blends a translucent color over white (box shadows, whose blur bands are painted over each other).</summary>
     public static uint FlattenOnWhite(uint c)
     {
         uint a = c >> 24;
