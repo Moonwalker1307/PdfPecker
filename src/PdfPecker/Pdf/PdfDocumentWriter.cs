@@ -40,6 +40,12 @@ internal sealed class PdfDocumentWriter
     private int _tr;           // text rendering mode: 0 fill, 2 fill and stroke (synthetic bold)
     private uint _stroke;
     private float _lineWidth;
+    private int _fillAlpha = 255, _strokeAlpha = 255; // the constant alphas (0-255) in effect; -1 when unknown
+    private bool _anyAlpha;                           // an alpha other than 1 was set: alphas after Q are unknown
+    private bool _noAlpha;                            // writing a stream without the shared ExtGState resources
+    private readonly SortedSet<int> _fillAlphas = new(), _strokeAlphas = new(), _groupAlphas = new();
+    private readonly List<byte[]> _forms = new(); // transparency groups of translucent layers, written as /Fx1, /Fx2, ...
+    private readonly List<(byte[] Content, string Dict)> _masks = new(); // soft masks of translucent gradients, set by /s1, /s2, ...
     private readonly List<FontRun> _runs = new();
     private readonly Dictionary<FontProgram, GlyphSubset> _subsets = new();
     private readonly List<GlyphSubset> _subsetList = new();
@@ -98,21 +104,32 @@ internal sealed class PdfDocumentWriter
         public Placed(DrawOp op, float y0, float y1) { Op = op; Y0 = y0; Y1 = y1; }
     }
 
-    /// <summary>The part of a transformed layer that falls on one page, drawn with the layer's transform.</summary>
-    private sealed class TransformBlock : DrawOp
+    /// <summary>The part of a transformed or translucent layer that falls on one page, drawn with the layer's transform and opacity.</summary>
+    private sealed class LayerBlock : DrawOp
     {
         public readonly LayerOp Layer;
         public readonly List<Placed> Items;
-        public TransformBlock(LayerOp layer, List<Placed> items) { Layer = layer; Items = items; }
+        public LayerBlock(LayerOp layer, List<Placed> items) { Layer = layer; Items = items; }
         public override void Offset(float dx, float dy) => throw new NotSupportedException();
     }
 
-    /// <summary>The ops to draw, looking inside transformed layers.</summary>
+    /// <summary>The links inside a translucent layer that is not transformed: they stay where they are on the page.</summary>
+    private static IEnumerable<Placed> UntransformedLinks(Placed placed)
+    {
+        if (placed.Op is not LayerBlock { Layer.Transform: null } block) yield break;
+        foreach (var p in block.Items)
+        {
+            if (p.Op is LinkOp) yield return p;
+            else foreach (var inner in UntransformedLinks(p)) yield return inner;
+        }
+    }
+
+    /// <summary>The ops to draw, looking inside transformed and translucent layers.</summary>
     private static IEnumerable<Placed> Leaves(List<Placed> list)
     {
         foreach (var p in list)
         {
-            if (p.Op is TransformBlock tb) { foreach (var inner in Leaves(tb.Items)) yield return inner; }
+            if (p.Op is LayerBlock tb) { foreach (var inner in Leaves(tb.Items)) yield return inner; }
             else yield return p;
         }
     }
@@ -160,12 +177,12 @@ internal sealed class PdfDocumentWriter
         {
             switch (op)
             {
-                case LayerOp { Transform: not null } layer:
+                case LayerOp layer when layer.Transform != null || layer.Opacity < 1:
                 {
                     // Each page gets the part of the layer that falls on it, drawn with the whole layer's transform.
                     var parts = new SortedDictionary<int, List<Placed>>();
                     foreach (var o in layer.Ops) Distribute(o, parts);
-                    foreach (var (p, items) in parts) Target(into, p).Add(new Placed(new TransformBlock(layer, items), 0, 0));
+                    foreach (var (p, items) in parts) Target(into, p).Add(new Placed(new LayerBlock(layer, items), 0, 0));
                     break;
                 }
                 case GroupOp g:
@@ -173,6 +190,9 @@ internal sealed class PdfDocumentWriter
                     break;
                 case RectOp r:
                     if (r.W > 0 && r.H > 0) AddSplit(r, r.Y, r.Y + r.H, into);
+                    break;
+                case RoundRectOp rr:
+                    if (rr.W > 0 && rr.H > 0) AddSplit(rr, rr.Y, rr.Y + rr.H, into); // only the outer shape is painted
                     break;
                 case BorderRectOp br:
                     if (PageOf(br.Y) == PageOf(br.Y + br.H - 0.5f)) Target(into, PageOf(br.Y)).Add(new Placed(br, br.Y, br.Y + br.H));
@@ -221,16 +241,17 @@ internal sealed class PdfDocumentWriter
             {
                 switch (op)
                 {
-                    case LayerOp { Transform: not null } layer:
+                    case LayerOp layer when layer.Transform != null || layer.Opacity < 1:
                     {
                         var items = new List<Placed>();
                         foreach (var o in layer.Ops) Flatten(o, items);
-                        list.Add(new Placed(new TransformBlock(layer, items), 0, 0));
+                        list.Add(new Placed(new LayerBlock(layer, items), 0, 0));
                         break;
                     }
                     case GroupOp g: foreach (var o in g.Ops) Flatten(o, list); break;
                     case RectOp r: if (r.W > 0 && r.H > 0) list.Add(new Placed(r, r.Y, r.Y + r.H)); break;
                     case BorderRectOp br: list.Add(new Placed(br, br.Y, br.Y + br.H)); break;
+                    case RoundRectOp rr: list.Add(new Placed(rr, rr.Y, rr.Y + rr.H)); break;
                     case BackgroundOp bg:
                     {
                         var (_, y0, _, y1) = bg.Painted();
@@ -443,12 +464,14 @@ internal sealed class PdfDocumentWriter
             foreach (var placed in pages[p])
             {
                 if (placed.Op is LinkOp) { pageLinks.Add((placed, _yOrigin, p * H)); continue; }
+                foreach (var link in UntransformedLinks(placed)) pageLinks.Add((link, _yOrigin, p * H));
                 WriteOp(content, placed, p * H, imageIds);
             }
             _yOrigin = _page.MarginTop;
             foreach (var placed in bands[p])
             {
                 if (placed.Op is LinkOp) { pageLinks.Add((placed, _yOrigin, 0)); continue; }
+                foreach (var link in UntransformedLinks(placed)) pageLinks.Add((link, _yOrigin, 0));
                 WriteOp(content, placed, 0, imageIds);
             }
             if (hasMargins)
@@ -552,17 +575,44 @@ internal sealed class PdfDocumentWriter
             _patterns.Ascii(" /T").Int(n).Sp().Int(id).Ascii(" 0 R");
         }
 
+        // Transparency groups of translucent layers. They share the page resources.
+        var formIds = new int[_forms.Count];
+        for (int i = 0; i < _forms.Count; i++)
+        {
+            formIds[i] = next++;
+            WriteStream(formIds[i], _forms[i], _compress, "/Type /XObject /Subtype /Form /BBox [-32767 -32767 32767 32767] "
+                + "/Group << /S /Transparency >> /Resources " + resourcesId.ToString(System.Globalization.CultureInfo.InvariantCulture) + " 0 R");
+        }
+
+        var maskIds = new int[_masks.Count];
+        for (int i = 0; i < _masks.Count; i++)
+        {
+            maskIds[i] = next++;
+            WriteStream(maskIds[i], _masks[i].Content, _compress, _masks[i].Dict);
+        }
+
         // Shared resources, written last: shading patterns are collected while writing the pages.
         Begin(resourcesId).Ascii("<< /ProcSet [/PDF /Text /ImageB /ImageC /ImageI] /Font <<");
         for (int i = 0; i < usedFonts.Length; i++)
             if (usedFonts[i]) _out.Ascii(" /F").Int(i + 1).Sp().Int(fontIds[i]).Ascii(" 0 R");
         for (int i = 0; i < _subsetList.Count; i++) _out.Ascii(" /E").Int(i + 1).Sp().Int(firstEmbeddedId + i * 5).Ascii(" 0 R");
         _out.Ascii(" >>");
-        if (images.Count > 0 || wm != null)
+        if (images.Count > 0 || wm != null || _forms.Count > 0)
         {
             _out.Ascii(" /XObject <<");
             for (int i = 0; i < images.Count; i++) _out.Ascii(" /Im").Int(i + 1).Sp().Int(images[i].ObjectNumber).Ascii(" 0 R");
             if (wm != null) _out.Ascii(" /Wm ").Int(watermarkId).Ascii(" 0 R");
+            for (int i = 0; i < _forms.Count; i++) _out.Ascii(" /Fx").Int(i + 1).Sp().Int(formIds[i]).Ascii(" 0 R");
+            _out.Ascii(" >>");
+        }
+        if (_fillAlphas.Count + _strokeAlphas.Count + _groupAlphas.Count + _masks.Count > 0)
+        {
+            _out.Ascii(" /ExtGState <<");
+            foreach (int a in _fillAlphas) _out.Ascii(" /a").Int(a).Ascii(" << /ca ").Num(a / 255f).Ascii(" >>");
+            foreach (int a in _strokeAlphas) _out.Ascii(" /A").Int(a).Ascii(" << /CA ").Num(a / 255f).Ascii(" >>");
+            foreach (int a in _groupAlphas) _out.Ascii(" /g").Int(a).Ascii(" << /ca ").Num(a / 255f).Ascii(" /CA ").Num(a / 255f).Ascii(" >>");
+            for (int i = 0; i < _masks.Count; i++)
+                _out.Ascii(" /s").Int(i + 1).Ascii(" << /SMask << /Type /Mask /S /Luminosity /G ").Int(maskIds[i]).Ascii(" 0 R >> >>");
             _out.Ascii(" >>");
         }
         if (_patterns.Length > 0) _out.Ascii(" /Pattern <<").Bytes(_patterns.Span).Ascii(" >>");
@@ -760,6 +810,7 @@ internal sealed class PdfDocumentWriter
         float opacity = Math.Clamp(wm.Opacity, 0, 1);
         var b = new ByteBuffer(512);
         ResetState();
+        _noAlpha = true; // the watermark's own resources have no alpha states: its opacity applies to all of it
         b.Ascii("q /Gw gs\n");
         if (image != null)
         {
@@ -784,6 +835,7 @@ internal sealed class PdfDocumentWriter
             b.Ascii("ET\n");
         }
         b.Ascii("Q\n");
+        _noAlpha = false;
 
         var dict = new ByteBuffer(256);
         dict.Ascii("/Type /XObject /Subtype /Form /BBox [0 0 ").Num(W).Sp().Num(H).Ascii("] /Resources << /ExtGState << /Gw << /Type /ExtGState /ca ")
@@ -806,6 +858,7 @@ internal sealed class PdfDocumentWriter
         _tw = _tc = float.NaN;
         _tr = -1;
         _lineWidth = -1;
+        if (_anyAlpha) _fillAlpha = _strokeAlpha = -1;
     }
 
     private void ResetState()
@@ -819,6 +872,7 @@ internal sealed class PdfDocumentWriter
         _tr = 0;
         _stroke = CssColor.Black;
         _lineWidth = 1;
+        _fillAlpha = _strokeAlpha = 255;
     }
 
     private float PX(float x) => _page.MarginLeft + x;
@@ -828,11 +882,49 @@ internal sealed class PdfDocumentWriter
 
     private void SetFill(ByteBuffer b, uint color)
     {
+        SetFillAlpha(b, color);
         if (color == _fill) return;
         _fill = color;
         WriteColor(b, color);
         b.Ascii(" rg\n");
     }
+
+    private void SetStroke(ByteBuffer b, uint color)
+    {
+        SetStrokeAlpha(b, color);
+        if (color == _stroke) return;
+        _stroke = color;
+        WriteColor(b, color);
+        b.Ascii(" RG\n");
+    }
+
+    /// <summary>Sets the fill alpha to the alpha of <paramref name="color"/> (0xAARRGGBB) through an ExtGState.</summary>
+    private void SetFillAlpha(ByteBuffer b, uint color)
+    {
+        int a = (int)(color >> 24);
+        if (a == _fillAlpha || _noAlpha) return;
+        _fillAlpha = a;
+        _anyAlpha = true;
+        _fillAlphas.Add(a);
+        b.Ascii("/a").Int(a).Ascii(" gs\n");
+    }
+
+    private void SetStrokeAlpha(ByteBuffer b, uint color)
+    {
+        int a = (int)(color >> 24);
+        if (a == _strokeAlpha || _noAlpha) return;
+        _strokeAlpha = a;
+        _anyAlpha = true;
+        _strokeAlphas.Add(a);
+        b.Ascii("/A").Int(a).Ascii(" gs\n");
+    }
+
+    /// <summary>The tracked graphics state, saved at q and put back at the matching Q.</summary>
+    private (uint Fill, uint Stroke, float LineWidth, int FillAlpha, int StrokeAlpha) SaveState()
+        => (_fill, _stroke, _lineWidth, _fillAlpha, _strokeAlpha);
+
+    private void RestoreState((uint Fill, uint Stroke, float LineWidth, int FillAlpha, int StrokeAlpha) s)
+        => (_fill, _stroke, _lineWidth, _fillAlpha, _strokeAlpha) = s;
 
     private static void WriteColor(ByteBuffer b, uint color)
     {
@@ -892,7 +984,7 @@ internal sealed class PdfDocumentWriter
                     b.Num(PX(x0)).Sp().Num(PY(bottom, pageTop)).Sp().Num(x1 - x0).Sp().Num(bottom - top).Ascii(" re f\n");
                     break;
                 }
-                if (_stroke != br.Color) { _stroke = br.Color; WriteColor(b, br.Color); b.Ascii(" RG\n"); }
+                SetStroke(b, br.Color);
                 if (_lineWidth != lw) { _lineWidth = lw; b.Num(lw).Ascii(" w\n"); }
                 b.Num(PX(x0 + half)).Sp().Num(PY(bottom - half, pageTop)).Sp().Num(x1 - x0 - lw).Sp().Num(bottom - top - lw).Ascii(" re S\n");
                 break;
@@ -901,17 +993,48 @@ internal sealed class PdfDocumentWriter
                 EndText(b);
                 WriteBackground(b, bg, placed, pageTop, imageIds);
                 break;
-            case TransformBlock tb:
+            case RoundRectOp rr:
+                EndText(b);
+                WriteRoundRect(b, rr, placed, pageTop);
+                break;
+            case LayerBlock tb:
             {
                 EndText(b);
-                // The layer's y-down transform about its origin, mapped into PDF space (y up).
-                var m = tb.Layer.Transform!.Value;
-                float px = PX(tb.Layer.OriginX), py = PY(tb.Layer.OriginY, pageTop);
-                float e = px - m.A * px + m.C * py + m.E, f = py + m.B * px - m.D * py - m.F;
-                b.Ascii("q ").Num6(m.A).Sp().Num6(-m.B).Sp().Num6(-m.C).Sp().Num6(m.D).Sp().Num(e).Sp().Num(f).Ascii(" cm\n");
-                foreach (var item in tb.Items)
-                    if (item.Op is not LinkOp) WriteOp(b, item, pageTop, imageIds);
-                EndText(b);
+                b.Ascii("q ");
+                if (tb.Layer.Transform is { } m)
+                {
+                    // The layer's y-down transform about its origin, mapped into PDF space (y up).
+                    float px = PX(tb.Layer.OriginX), py = PY(tb.Layer.OriginY, pageTop);
+                    float e = px - m.A * px + m.C * py + m.E, f = py + m.B * px - m.D * py - m.F;
+                    b.Num6(m.A).Sp().Num6(-m.B).Sp().Num6(-m.C).Sp().Num6(m.D).Sp().Num(e).Sp().Num(f).Ascii(" cm\n");
+                }
+                if (tb.Layer.Opacity < 1)
+                {
+                    // A translucent layer is a transparency group, painted as a whole at its opacity, so that its own
+                    // overlapping parts do not show through each other.
+                    var group = new ByteBuffer(4096);
+                    _fill = _stroke = 1;
+                    _lineWidth = -1;
+                    _textFont = null;
+                    _textSize = -1;
+                    _tw = _tc = float.NaN;
+                    _tr = -1;
+                    _fillAlpha = _strokeAlpha = -1; // a group starts at alpha 1, but not every viewer resets it
+                    _anyAlpha = true;
+                    foreach (var item in tb.Items)
+                        if (item.Op is not LinkOp) WriteOp(group, item, pageTop, imageIds);
+                    EndText(group);
+                    _forms.Add(group.Span.ToArray());
+                    int alpha = (int)MathF.Round(Math.Clamp(tb.Layer.Opacity, 0, 1) * 255);
+                    _groupAlphas.Add(alpha);
+                    b.Ascii("/g").Int(alpha).Ascii(" gs /Fx").Int(_forms.Count).Ascii(" Do\n");
+                }
+                else
+                {
+                    foreach (var item in tb.Items)
+                        if (item.Op is not LinkOp) WriteOp(b, item, pageTop, imageIds);
+                    EndText(b);
+                }
                 b.Ascii("Q\n");
                 InvalidateState();
                 break;
@@ -919,19 +1042,24 @@ internal sealed class PdfDocumentWriter
             case LineOp l:
             {
                 EndText(b);
+                var saved = SaveState();
                 b.Ascii("q ");
-                WriteColor(b, l.Color);
-                b.Ascii(" RG ").Num(l.Width).Ascii(" w ");
+                SetStroke(b, l.Color);
+                b.Num(l.Width).Ascii(" w ");
                 if (l.Dotted) b.Ascii("1 J [0 ").Num(l.Width * 2).Ascii("] 0 d ");
                 else b.Ascii("[").Num(l.Width * 3).Sp().Num(l.Width * 3).Ascii("] 0 d ");
                 float y1 = l.X1 == l.X2 ? placed.Y0 : l.Y1, y2 = l.X1 == l.X2 ? placed.Y1 : l.Y2;
                 b.Num(PX(l.X1)).Sp().Num(PY(y1, pageTop)).Ascii(" m ").Num(PX(l.X2)).Sp().Num(PY(y2, pageTop)).Ascii(" l S Q\n");
+                RestoreState(saved);
                 break;
             }
             case ImageOp im:
             {
                 EndText(b);
-                b.Ascii("q ").Num(im.W).Ascii(" 0 0 ").Num(im.H).Sp().Num(PX(im.X)).Sp().Num(PY(im.Y + im.H, pageTop))
+                SetFillAlpha(b, CssColor.Black); // an image is painted with the fill alpha
+                b.Ascii("q ");
+                if (im.Radii is { } ir) { RoundRectPath(b, im.X, im.Y, im.W, im.H, ir, pageTop); b.Ascii("W n "); }
+                b.Num(im.W).Ascii(" 0 0 ").Num(im.H).Sp().Num(PX(im.X)).Sp().Num(PY(im.Y + im.H, pageTop))
                     .Ascii(" cm /Im").Int(imageIds[im.Image]).Ascii(" Do Q\n");
                 break;
             }
@@ -943,12 +1071,13 @@ internal sealed class PdfDocumentWriter
             {
                 EndText(b);
                 float cx = PX(c.Cx), cy = PY(c.Cy, pageTop), r = c.R, k = r * 0.5523f;
+                var saved = SaveState();
                 if (c.Filled) SetFill(b, c.Color);
                 else
                 {
                     b.Ascii("q ");
-                    WriteColor(b, c.Color);
-                    b.Ascii(" RG 0.75 w "); // 1px, as Chrome strokes a circle marker
+                    SetStroke(b, c.Color);
+                    b.Ascii("0.75 w "); // 1px, as Chrome strokes a circle marker
                 }
                 b.Num(cx + r).Sp().Num(cy).Ascii(" m ");
                 b.Num(cx + r).Sp().Num(cy + k).Sp().Num(cx + k).Sp().Num(cy + r).Sp().Num(cx).Sp().Num(cy + r).Ascii(" c ");
@@ -956,6 +1085,7 @@ internal sealed class PdfDocumentWriter
                 b.Num(cx - r).Sp().Num(cy - k).Sp().Num(cx - k).Sp().Num(cy - r).Sp().Num(cx).Sp().Num(cy - r).Ascii(" c ");
                 b.Num(cx + k).Sp().Num(cy - r).Sp().Num(cx + r).Sp().Num(cy - k).Sp().Num(cx + r).Sp().Num(cy).Ascii(" c ");
                 b.Ascii(c.Filled ? "f\n" : "S Q\n");
+                if (!c.Filled) RestoreState(saved);
                 break;
             }
         }
@@ -986,6 +1116,7 @@ internal sealed class PdfDocumentWriter
         else sx = sy = 0.75f; // user units are CSS pixels
 
         float left = PX(op.X), top = PY(op.Y, pageTop);
+        var saved = SaveState();
         b.Ascii("q ").Num(left).Sp().Num(top - op.H).Sp().Num(op.W).Sp().Num(op.H).Ascii(" re W n\n");
         // User space (y down) to PDF space (y up).
         var toPage = new Matrix(sx, 0, 0, -sy, left + tx - vx * sx, top - ty + vy * sy);
@@ -1024,7 +1155,7 @@ internal sealed class PdfDocumentWriter
             else b.Ascii("S\n");
         }
         b.Ascii("Q\n");
-        _fill = 1; // the colour set inside q/Q is gone: force the next fill colour to be written
+        RestoreState(saved);
     }
 
     private static void WritePath(ByteBuffer b, SvgShape shape)
@@ -1050,22 +1181,101 @@ internal sealed class PdfDocumentWriter
     private void WriteSvgPaint(ByteBuffer b, SvgShape shape, Matrix toPage)
     {
         if (shape.FillGradient is { } fg)
-            b.Ascii("/Pattern cs /P").Int(AddPattern(fg, toPage, shape.MinX, shape.MinY, shape.MaxX, shape.MaxY)).Ascii(" scn\n");
-        else if (shape.Fill is { } fill)
         {
-            WriteColor(b, fill);
-            b.Ascii(" rg\n");
+            SetFillAlpha(b, CssColor.Black); // the gradient's stops carry the opacity
+            b.Ascii("/Pattern cs /P").Int(AddPattern(fg, toPage, shape.MinX, shape.MinY, shape.MaxX, shape.MaxY)).Ascii(" scn\n");
+            _fill = 1; // not a colour: the next colour must be written
         }
+        else if (shape.Fill is { } fill) SetFill(b, fill);
         if (!shape.HasStroke) return;
         if (shape.StrokeGradient is { } sg)
-            b.Ascii("/Pattern CS /P").Int(AddPattern(sg, toPage, shape.MinX, shape.MinY, shape.MaxX, shape.MaxY)).Ascii(" SCN ");
-        else
         {
-            WriteColor(b, shape.Stroke!.Value);
-            b.Ascii(" RG ");
+            SetStrokeAlpha(b, CssColor.Black);
+            b.Ascii("/Pattern CS /P").Int(AddPattern(sg, toPage, shape.MinX, shape.MinY, shape.MaxX, shape.MaxY)).Ascii(" SCN ");
+            _stroke = 1;
         }
+        else SetStroke(b, shape.Stroke!.Value);
+        _lineWidth = -1;
         b.Num(shape.StrokeWidth).Ascii(" w ").Int((int)shape.LineCap).Ascii(" J ").Int((int)shape.LineJoin).Ascii(" j ")
             .Num(shape.MiterLimit).Ascii(" M\n");
+    }
+
+    /// <summary>Appends the outline of a rounded rectangle given in flow coordinates, as a closed path.</summary>
+    private void RoundRectPath(ByteBuffer b, float x, float y, float w, float h, in CornerRadii r, float pageTop)
+    {
+        const float k = 0.5523f; // a quarter ellipse as one cubic Bézier
+        float r0 = x + w, b0 = y + h;
+        void Line(float px, float py) => b.Num(PX(px)).Sp().Num(PY(py, pageTop)).Ascii(" l ");
+        // A corner from (ax, ay) to (bx, by) around the box corner (cx, cy).
+        void Corner(float ax, float ay, float cx, float cy, float bx, float by)
+        {
+            if (ax == bx && ay == by) return;
+            b.Num(PX(ax + k * (cx - ax))).Sp().Num(PY(ay + k * (cy - ay), pageTop)).Sp()
+                .Num(PX(bx + k * (cx - bx))).Sp().Num(PY(by + k * (cy - by), pageTop)).Sp()
+                .Num(PX(bx)).Sp().Num(PY(by, pageTop)).Ascii(" c ");
+        }
+        b.Num(PX(x + r.TLx)).Sp().Num(PY(y, pageTop)).Ascii(" m ");
+        Line(r0 - r.TRx, y);
+        Corner(r0 - r.TRx, y, r0, y, r0, y + r.TRy);
+        Line(r0, b0 - r.BRy);
+        Corner(r0, b0 - r.BRy, r0, b0, r0 - r.BRx, b0);
+        Line(x + r.BLx, b0);
+        Corner(x + r.BLx, b0, x, b0, x, b0 - r.BLy);
+        Line(x, y + r.TLy);
+        Corner(x, y + r.TLy, x, y, x + r.TLx, y);
+        b.Ascii("h\n");
+    }
+
+    /// <summary>Draws a rounded rectangle, ring or shadow, limited to the part of it on this page.</summary>
+    private void WriteRoundRect(ByteBuffer b, RoundRectOp rr, in Placed placed, float pageTop)
+    {
+        // Edges on whole CSS pixels, like the edges of square boxes.
+        float x0 = SnapPx(rr.X), x1 = SnapPx(rr.X + rr.W), y0 = SnapPx(rr.Y), y1 = SnapPx(rr.Y + rr.H);
+        if (x1 <= x0) { x0 = rr.X; x1 = rr.X + rr.W; }
+        if (y1 <= y0) { y0 = rr.Y; y1 = rr.Y + rr.H; }
+        var saved = SaveState();
+        b.Ascii("q ");
+        if (placed.Y0 > rr.Y + 0.01f || placed.Y1 < rr.Y + rr.H - 0.01f)
+        {
+            // Split by a page break: only this page's slice.
+            b.Num(PX(x0 - 1)).Sp().Num(PY(placed.Y1, pageTop)).Sp().Num(x1 - x0 + 2).Sp().Num(placed.Y1 - placed.Y0).Ascii(" re W n\n");
+        }
+        if (rr.Clip is { Length: >= 6 } poly)
+        {
+            b.Num(PX(poly[0])).Sp().Num(PY(poly[1], pageTop)).Ascii(" m ");
+            for (int i = 2; i < poly.Length; i += 2) b.Num(PX(poly[i])).Sp().Num(PY(poly[i + 1], pageTop)).Ascii(" l ");
+            b.Ascii("h W n\n");
+        }
+        if (rr.HasHole)
+        {
+            // Everything around the outer shape but the hole: the outer shape is then painted without it.
+            float hx0 = SnapPx(rr.HoleX), hx1 = SnapPx(rr.HoleX + rr.HoleW), hy0 = SnapPx(rr.HoleY), hy1 = SnapPx(rr.HoleY + rr.HoleH);
+            if (hx1 <= hx0) { hx0 = rr.HoleX; hx1 = rr.HoleX + rr.HoleW; }
+            if (hy1 <= hy0) { hy0 = rr.HoleY; hy1 = rr.HoleY + rr.HoleH; }
+            float ax = Math.Min(x0, hx0) - 1, ay = Math.Min(y0, hy0) - 1, bx = Math.Max(x1, hx1) + 1, by = Math.Max(y1, hy1) + 1;
+            b.Num(PX(ax)).Sp().Num(PY(by, pageTop)).Sp().Num(bx - ax).Sp().Num(by - ay).Ascii(" re\n");
+            if (hx1 > hx0 && hy1 > hy0) RoundRectPath(b, hx0, hy0, hx1 - hx0, hy1 - hy0, rr.HoleR, pageTop);
+            b.Ascii("W* n\n");
+        }
+        if (rr.StrokeWidth > 0)
+        {
+            // Stroked along the middle of the border.
+            float half = rr.StrokeWidth / 2;
+            SetStroke(b, rr.Color);
+            b.Num(rr.StrokeWidth).Ascii(" w ");
+            if (rr.Style == BorderStyle.Dotted) b.Ascii("1 J [0 ").Num(rr.StrokeWidth * 2).Ascii("] 0 d\n");
+            else if (rr.Style == BorderStyle.Dashed) b.Ascii("[").Num(rr.StrokeWidth * 3).Sp().Num(rr.StrokeWidth * 3).Ascii("] 0 d\n");
+            RoundRectPath(b, x0 + half, y0 + half, x1 - x0 - rr.StrokeWidth, y1 - y0 - rr.StrokeWidth,
+                rr.R.Inset(half, half, half, half) ?? default, pageTop);
+            b.Ascii("S Q\n");
+        }
+        else
+        {
+            SetFill(b, rr.Color);
+            RoundRectPath(b, x0, y0, x1 - x0, y1 - y0, rr.R, pageTop);
+            b.Ascii("f Q\n");
+        }
+        RestoreState(saved);
     }
 
     /// <summary>Draws one background layer: a single clipped tile, or a tiling pattern filling the painted area.</summary>
@@ -1075,6 +1285,20 @@ internal sealed class PdfDocumentWriter
         y0 = Math.Max(y0, placed.Y0);
         y1 = Math.Min(y1, placed.Y1);
         if (!(x1 > x0 && y1 > y0)) return;
+        SetFillAlpha(b, CssColor.Black); // images and patterns are painted with the fill alpha
+        if (bg.ClipRadii is { } cr)
+        {
+            // Rounded corners: clip to the rounded painting area, then paint as usual.
+            b.Ascii("q ");
+            RoundRectPath(b, SnapPx(bg.ClipX), SnapPx(bg.ClipY), SnapPx(bg.ClipX + bg.ClipW) - SnapPx(bg.ClipX),
+                SnapPx(bg.ClipY + bg.ClipH) - SnapPx(bg.ClipY), cr, pageTop);
+            b.Ascii("W n\n");
+            bg.ClipRadii = null;
+            try { WriteBackground(b, bg, placed, pageTop, imageIds); }
+            finally { bg.ClipRadii = cr; }
+            b.Ascii("Q\n");
+            return;
+        }
         float tx = PX(bg.TileX), tw = bg.TileW, th = bg.TileH;
         const float eps = 0.01f;
         bool single = (!bg.RepeatX || bg.TileX <= x0 + eps && bg.TileX + tw >= x1 - eps)
@@ -1083,8 +1307,17 @@ internal sealed class PdfDocumentWriter
         {
             // Gradient space is the tile; the pattern maps it to the page.
             var toPage = new Matrix(1, 0, 0, -1, tx, PY(bg.TileY, pageTop));
-            int name = AddPattern(g, toPage, x0 - bg.TileX, y0 - bg.TileY, x1 - bg.TileX, y1 - bg.TileY);
-            b.Ascii("q /Pattern cs /P").Int(name).Ascii(" scn ");
+            float gx0 = x0 - bg.TileX, gy0 = y0 - bg.TileY, gx1 = x1 - bg.TileX, gy1 = y1 - bg.TileY;
+            b.Ascii("q ");
+            var channel = GradientChannel.Flattened;
+            if (g.Alphas != null)
+            {
+                // Translucent stops: the unblended colours, through a soft mask holding the alphas.
+                channel = GradientChannel.Straight;
+                b.Ascii("/s").Int(AddSoftMask(g, toPage, gx0, gy0, gx1, gy1, PX(x0), PY(y1, pageTop), x1 - x0, y1 - y0)).Ascii(" gs ");
+            }
+            int name = AddPattern(g, toPage, gx0, gy0, gx1, gy1, channel);
+            b.Ascii("/Pattern cs /P").Int(name).Ascii(" scn ");
             b.Num(PX(x0)).Sp().Num(PY(y1, pageTop)).Sp().Num(x1 - x0).Sp().Num(y1 - y0).Ascii(" re f Q\n");
             return;
         }
@@ -1126,12 +1359,30 @@ internal sealed class PdfDocumentWriter
     }
 
     /// <summary>Adds a shading pattern to the shared resources and returns its number.</summary>
-    private int AddPattern(Gradient g, Matrix toPage, float minX, float minY, float maxX, float maxY)
+    private int AddPattern(Gradient g, Matrix toPage, float minX, float minY, float maxX, float maxY,
+        GradientChannel channel = GradientChannel.Flattened)
     {
         int n = ++_patternCount;
         _patterns.Ascii(" /P").Int(n).Sp();
-        g.WritePattern(_patterns, toPage, minX, minY, maxX, maxY);
+        g.WritePattern(_patterns, toPage, minX, minY, maxX, maxY, channel);
         return n;
+    }
+
+    /// <summary>
+    /// Adds a luminosity soft mask holding a gradient's alphas over the rectangle (x, y, w, h) of user space, and returns
+    /// the number of the graphics state that sets it.
+    /// </summary>
+    private int AddSoftMask(Gradient g, Matrix toPage, float minX, float minY, float maxX, float maxY, float x, float y, float w, float h)
+    {
+        var content = new ByteBuffer(64);
+        content.Ascii("/Pattern cs /M scn ").Num(x).Sp().Num(y).Sp().Num(w).Sp().Num(h).Ascii(" re f\n");
+        var dict = new ByteBuffer(256);
+        dict.Ascii("/Type /XObject /Subtype /Form /BBox [").Num(x).Sp().Num(y).Sp().Num(x + w).Sp().Num(y + h)
+            .Ascii("] /Group << /S /Transparency /CS /DeviceGray >> /Resources << /Pattern << /M ");
+        g.WritePattern(dict, toPage, minX, minY, maxX, maxY, GradientChannel.Alpha);
+        dict.Ascii(" >> >>");
+        _masks.Add((content.Span.ToArray(), System.Text.Encoding.ASCII.GetString(dict.Span)));
+        return _masks.Count;
     }
 
     // ------------------------------------------------------------------ text
@@ -1269,7 +1520,7 @@ internal sealed class PdfDocumentWriter
             float k = Math.Clamp((t.Size - 9f) / 27f, 0f, 1f);
             float width = t.Size * (1f / 24f + (1f / 32f - 1f / 24f) * k);
             SetRenderMode(b, 2);
-            if (_stroke != t.Color) { _stroke = t.Color; WriteColor(b, t.Color); b.Ascii(" RG\n"); }
+            SetStroke(b, t.Color);
             if (_lineWidth != width) { _lineWidth = width; b.Num(width).Ascii(" w\n"); }
         }
         else SetRenderMode(b, 0);

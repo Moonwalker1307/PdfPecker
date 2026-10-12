@@ -162,9 +162,10 @@ internal sealed partial class LayoutEngine
         if (e.Id != null) { var it_ = Rent(ItemKind.Anchor, s); it_.AnchorId = e.Id; st.Items.Add(it_); }
         if (e.Name == "a" && e.GetAttribute("name") is { } aname) { var it_ = Rent(ItemKind.Anchor, s); it_.AnchorId = aname; st.Items.Add(it_); }
 
-        if (s.Layered && e.Name is "img" or "svg")
+        if ((s.Layered || s.BorderRadii != null && e.Name == "img") && e.Name is "img" or "svg")
         {
-            // A transformed or relatively positioned image is laid out as a box of its own, which carries the layer.
+            // A transformed, translucent, relatively positioned or rounded image is laid out as a box of its own, which
+            // carries the layer or clips the image.
             st.Items.Add(LayoutInlineBlock(e, st.AvailWidth, href ?? LinkOf(e)));
             st.LastWasSpace = false;
             return;
@@ -794,7 +795,7 @@ internal sealed partial class LayoutEngine
                         if (style.Visible)
                         {
                             float bl = baseline + BaselineShift(style) + items[start].RelY;
-                            _ops.Add(new TextOp(runX, bl, y, style.Font, style.FontSize, style.Color, sb.ToString(),
+                            _ops.Add(new TextOp(runX, bl, y, style.Font, style.FontSize, CssColor.Fade(style.Color, style.InlineFade), sb.ToString(),
                                 style.WordSpacing + extra, style.LetterSpacing));
                             if (style.TextDecoration != TextDecoration.None) Decorate(style, runX, runEnd - runX, bl);
                         }
@@ -946,7 +947,7 @@ internal sealed partial class LayoutEngine
                 BoxPainter.PaintShadows(shadows, deco, rx, top, xs[i] - xs[start], h);
                 _ops.Add(shadows);
             }
-            if (CssColor.IsVisible(deco.BackgroundColor)) _ops.Add(new RectOp(rx, top, xs[i] - xs[start], h, deco.BackgroundColor));
+            if (CssColor.IsVisible(deco.BackgroundColor)) _ops.Add(new RectOp(rx, top, xs[i] - xs[start], h, CssColor.Fade(deco.BackgroundColor, deco.InlineFade)));
         }
     }
 
@@ -968,10 +969,10 @@ internal sealed partial class LayoutEngine
         float size = s.FontSize;
         float thickness = Math.Max(size * 0.055f, 0.5f);
         if ((s.TextDecoration & TextDecoration.Underline) != 0)
-            _ops.Add(new RectOp(x, baseline + size * 0.1f, w, thickness, s.Color) { IsDecoration = true });
+            _ops.Add(new RectOp(x, baseline + size * 0.1f, w, thickness, CssColor.Fade(s.Color, s.InlineFade)) { IsDecoration = true });
         if ((s.TextDecoration & TextDecoration.LineThrough) != 0)
-            _ops.Add(new RectOp(x, baseline - size * 0.3f, w, thickness, s.Color) { IsDecoration = true });
+            _ops.Add(new RectOp(x, baseline - size * 0.3f, w, thickness, CssColor.Fade(s.Color, s.InlineFade)) { IsDecoration = true });
         if ((s.TextDecoration & TextDecoration.Overline) != 0)
-            _ops.Add(new RectOp(x, baseline - s.Font.Ascent * size, w, thickness, s.Color) { IsDecoration = true });
+            _ops.Add(new RectOp(x, baseline - s.Font.Ascent * size, w, thickness, CssColor.Fade(s.Color, s.InlineFade)) { IsDecoration = true });
     }
 }
