@@ -152,12 +152,12 @@ Documents can bring their own fonts with `@font-face` (files, `data:` URIs or `R
 refers to registered fonts):
 
 ```css
-@font-face { font-family: Brand; src: url(fonts/brand.woff) format("woff"); font-weight: 400; }
+@font-face { font-family: Brand; src: url(fonts/brand.woff2) format("woff2"); font-weight: 400; }
 @font-face { font-family: Brand; src: url(fonts/brand-bold.ttf); font-weight: 700; unicode-range: U+0000-024F; }
 ```
 
 A `FontCollection` can be shared between options and parallel conversions. Formats: `.ttf`, `.otf`, `.ttc`
-collections and WOFF (not WOFF2). Fonts are matched like browsers do: by family, then style, then the nearest
+collections, WOFF and WOFF2 (including WOFF2 collections; decoded with .NET's built-in Brotli). Fonts are matched like browsers do: by family, then style, then the nearest
 weight; a missing bold or italic face is synthesized. A character that the chosen font lacks is drawn with the next
 font in the `font-family` list that has it, then the standard font, then any other registered font.
 
@@ -456,7 +456,7 @@ These are deliberate scope choices for speed and size; they are the first candid
 - Without registered fonts or `EmbedStandardFonts`, text uses the standard PDF fonts, so characters are limited to
   the Windows-1252 set (Western European languages); other characters are replaced with `?`. The bundled Liberation
   fonts add Central European, Greek and Cyrillic, but not CJK or other scripts: register fonts for those.
-- Fonts: no text shaping beyond pair kerning (no ligatures, Arabic or Indic scripts), no right-to-left text, no WOFF2, and variable
+- Fonts: no text shaping beyond pair kerning (no ligatures, Arabic or Indic scripts), no right-to-left text, and variable
   fonts use their default instance. SVG `<text>` uses the standard fonts (embedded as Liberation for PDF/A).
 - No JavaScript, forms, `border-radius`, inset shadows or GIF/WebP images. SVG files in `<img>` are not drawn.
 - Inline SVG: no embedded images, masks, patterns, markers or filters; `<text>` uses only the first value of

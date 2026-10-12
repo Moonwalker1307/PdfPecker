@@ -9,7 +9,7 @@ namespace PdfPecker;
 /// which cover Western European characters only.
 /// </summary>
 /// <remarks>
-/// Supported formats: .ttf, .otf, .ttc collections and WOFF. A collection can be shared by many conversions,
+/// Supported formats: .ttf, .otf, .ttc collections, WOFF and WOFF2. A collection can be shared by many conversions,
 /// including parallel ones; parsing happens once. Documents can also bring their own fonts with CSS <c>@font-face</c>.
 /// </remarks>
 public sealed class FontCollection
@@ -46,7 +46,7 @@ public sealed class FontCollection
         return this;
     }
 
-    /// <summary>Registers the fonts in a font file (.ttf, .otf, .ttc or .woff).</summary>
+    /// <summary>Registers the fonts in a font file (.ttf, .otf, .ttc, .woff or .woff2).</summary>
     public FontCollection AddFile(string path, string? familyName = null)
     {
         if (path == null) throw new ArgumentNullException(nameof(path));
@@ -66,7 +66,7 @@ public sealed class FontCollection
         foreach (var file in Directory.EnumerateFiles(path, "*", option))
         {
             var ext = Path.GetExtension(file).ToLowerInvariant();
-            if (ext is not (".ttf" or ".otf" or ".ttc" or ".otc" or ".woff")) continue;
+            if (ext is not (".ttf" or ".otf" or ".ttc" or ".otc" or ".woff" or ".woff2")) continue;
             List<FontProgram> programs;
             try
             {

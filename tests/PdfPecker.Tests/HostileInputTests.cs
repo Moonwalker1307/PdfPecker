@@ -230,6 +230,58 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Woff2_tables_cannot_claim_gigabytes()
+    {
+        var woff2 = new byte[48 + 7 + 8];
+        "wOF2"u8.CopyTo(woff2);
+        BinaryPrimitives.WriteUInt32BigEndian(woff2.AsSpan(4), 0x00010000);
+        BinaryPrimitives.WriteUInt32BigEndian(woff2.AsSpan(8), (uint)woff2.Length);
+        BinaryPrimitives.WriteUInt16BigEndian(woff2.AsSpan(12), 1);
+        BinaryPrimitives.WriteUInt32BigEndian(woff2.AsSpan(20), 8); // compressed size
+        woff2[48] = 7; // post
+        new byte[] { 0x87, 0xFF, 0xFF, 0xFF, 0x7F }.CopyTo(woff2, 49); // claims 2 GB
+        Assert.Throws<FormatException>(() => FontProgram.Load(woff2));
+        var html = $"<style>@font-face{{font-family:f;src:url(data:font/woff2;base64,{Convert.ToBase64String(woff2)})}}</style><p style='font-family:f'>x</p>";
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
+    public void Damaged_woff2_glyph_data_fails_cleanly()
+    {
+        // Damage the decompressed table data (where the glyf reconstruction reads its streams), not just the
+        // Brotli bytes, which would only fail decompression.
+        var file = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "WorkSans-Regular.woff2"));
+        int numTables = BinaryPrimitives.ReadUInt16BigEndian(file.AsSpan(12));
+        int compressedSize = (int)BinaryPrimitives.ReadUInt32BigEndian(file.AsSpan(20));
+        int at = 48;
+        for (int i = 0; i < numTables; i++)
+        {
+            int flags = file[at++];
+            if ((flags & 63) == 63) at += 4;
+            int numbers = (flags & 63) is 10 or 11 ? (flags >> 6 == 3 ? 1 : 2) : (flags >> 6 == 0 ? 1 : 2);
+            for (int k = 0; k < numbers; k++) while ((file[at++] & 0x80) != 0) { }
+        }
+        var header = file.AsSpan(0, at).ToArray();
+        var stream = new MemoryStream();
+        using (var b = new BrotliStream(new MemoryStream(file, at, compressedSize), CompressionMode.Decompress)) b.CopyTo(stream);
+        var clean = stream.ToArray();
+
+        var random = new Random(1234);
+        for (int round = 0; round < 300; round++)
+        {
+            var data = (byte[])clean.Clone();
+            for (int k = 0, n = random.Next(1, 8); k < n; k++) data[random.Next(data.Length)] = (byte)random.Next(256);
+            var packed = new MemoryStream();
+            using (var b = new BrotliStream(packed, CompressionLevel.Fastest, leaveOpen: true)) b.Write(data);
+            var damaged = header.Concat(packed.ToArray()).ToArray();
+            BinaryPrimitives.WriteUInt32BigEndian(damaged.AsSpan(20), (uint)packed.Length);
+            BinaryPrimitives.WriteUInt32BigEndian(damaged.AsSpan(8), (uint)damaged.Length);
+            try { Bounded(() => FontProgram.Load(damaged)); }
+            catch (AggregateException ex) when (ex.InnerException is FormatException) { }
+        }
+    }
+
+    [Fact]
     public void Pdf_with_unterminated_streams_opens_in_linear_time()
     {
         var sb = new StringBuilder("%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj 2 0 obj << /Type /Pages /Kids [] /Count 0 >> endobj\n");
