@@ -83,7 +83,8 @@ public sealed class PdfOptions
     /// </summary>
     /// <remarks>
     /// IronPDF draws A4 pages at about 0.99916 of Chrome's own size. Set this to 0.99916 to put every box edge where
-    /// IronPDF puts it.
+    /// IronPDF puts it. A scaled page is also written at the paper size Chrome gives it (whole points, then Chrome's
+    /// 1/300 inch grid: 594.96 x 841.92 pt for A4), so viewers such as pdfium snap thin lines the same way.
     /// </remarks>
     public float Scale { get; set; } = 1f;
 

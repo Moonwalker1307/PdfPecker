@@ -15,7 +15,7 @@ internal sealed partial class LayoutEngine
         public float PercentWidth = -1;
 
         // Per layout pass.
-        public float Top, NeededH;
+        public float Top, NeededH, ContentH; // ContentH: what the content needs, without the cell's own height
         public int OpsStart, OpsEnd;
         public GroupOp? Group;
         public float X, W;
@@ -36,7 +36,10 @@ internal sealed partial class LayoutEngine
         public int HeadCount; // leading rows that come from <thead>
         public float[] ColMin = Array.Empty<float>(), ColMax = Array.Empty<float>();
         public float[] ColFixed = Array.Empty<float>(), ColPct = Array.Empty<float>();
+        public float[] ColSpecFixed = Array.Empty<float>(), ColSpecPct = Array.Empty<float>(); // from <col> only
         public float[]? RowExtra; // per layout pass: height each row gets on top of its content, to fill the table's height
+        public CellModel?[,] Grid = new CellModel?[0, 0]; // the cell covering each row and column
+        public ComputedStyle TableStyle = null!;
     }
 
     private readonly Dictionary<Element, TableModel> _tables = new();
@@ -87,6 +90,13 @@ internal sealed partial class LayoutEngine
             }
         }
 
+        m.TableStyle = table.Style;
+        m.Grid = new CellModel?[m.Rows.Count, m.ColCount];
+        foreach (var row in m.Rows)
+            foreach (var cell in row.Cells)
+                for (int rr = cell.Row; rr < cell.Row + cell.RowSpan && rr < m.Rows.Count; rr++)
+                    for (int cc = cell.Col; cc < cell.Col + cell.ColSpan && cc < m.ColCount; cc++) m.Grid[rr, cc] = cell;
+
         int n = m.ColCount;
         m.ColMin = new float[n];
         m.ColMax = new float[n];
@@ -106,6 +116,9 @@ internal sealed partial class LayoutEngine
                 else if (!cs.Width.IsAuto) m.ColFixed[colIndex] = cs.Width.Value;
             }
         }
+
+        m.ColSpecFixed = (float[])m.ColFixed.Clone();
+        m.ColSpecPct = (float[])m.ColPct.Clone();
 
         float hs = table.Style.BorderCollapse ? 0 : table.Style.BorderSpacingH;
         var spanning = new List<CellModel>();
@@ -263,6 +276,51 @@ internal sealed partial class LayoutEngine
         return w;
     }
 
+    /// <summary>
+    /// Column widths for table-layout: fixed (CSS 2.1 §17.5.2.1): from the columns' and the first row's widths only,
+    /// whatever the content. Columns without a width share what is left equally; when every column has a width, the
+    /// rest is shared in proportion. Content that does not fit overflows its cell.
+    /// </summary>
+    private static float[] FixedColumns(TableModel m, float avail)
+    {
+        int n = m.ColCount;
+        var w = new float[n];
+        var set = new bool[n];
+        avail = Math.Max(avail, 0);
+        // <col> widths first, then the cells of the first row.
+        for (int c = 0; c < n; c++)
+        {
+            if (m.ColSpecPct[c] >= 0) { w[c] = m.ColSpecPct[c] * avail / 100f; set[c] = true; }
+            else if (m.ColSpecFixed[c] >= 0) { w[c] = m.ColSpecFixed[c]; set[c] = true; }
+        }
+        if (m.Rows.Count > 0)
+        {
+            foreach (var cell in m.Rows[0].Cells)
+            {
+                float cw = cell.PercentWidth >= 0 ? cell.PercentWidth * avail / 100f : cell.FixedWidth;
+                if (cw < 0) continue;
+                int first = cell.Col, end = Math.Min(n, cell.Col + cell.ColSpan);
+                bool free = true;
+                for (int c = first; c < end; c++) free &= !set[c];
+                if (!free) continue;
+                for (int c = first; c < end; c++) { w[c] = cw / (end - first); set[c] = true; }
+            }
+        }
+        float used = 0;
+        int unset = 0;
+        for (int c = 0; c < n; c++) { if (set[c]) used += w[c]; else unset++; }
+        float rest = avail - used;
+        if (unset > 0)
+        {
+            for (int c = 0; c < n; c++) if (!set[c]) w[c] = Math.Max(0, rest / unset);
+        }
+        else if (rest > 0 && n > 0)
+        {
+            for (int c = 0; c < n; c++) w[c] += used > 0 ? rest * w[c] / used : rest / n;
+        }
+        return w;
+    }
+
     private float LayoutTable(Element table, float x, float y, float availW)
     {
         var s = table.Style;
@@ -309,7 +367,7 @@ internal sealed partial class LayoutEngine
         else avail = availW - ml - mr - frameL - frameR - gridSpace;
         if (!s.MaxWidth.IsAuto) avail = Math.Min(avail, s.MaxWidth.Resolve(availW) - frameL - frameR - gridSpace);
 
-        var widths = AllocateColumns(m, avail, specified);
+        var widths = specified && s.TableLayoutFixed ? FixedColumns(m, avail) : AllocateColumns(m, avail, specified);
         float contentW = gridSpace;
         foreach (var cw in widths) contentW += cw;
         float boxW = contentW + frameL + frameR;
@@ -342,7 +400,8 @@ internal sealed partial class LayoutEngine
 
         float tableBottom = cy + frameB;
         if (!s.Height.IsAuto && !s.Height.IsPercent && tableBottom - tableTop < s.Height.Value) tableBottom = tableTop + s.Height.Value;
-        BoxPainter.Paint(tableGroup, s, bx, tableTop, boxW, tableBottom - tableTop, _images, availW);
+        BoxPainter.Paint(tableGroup, s, bx, tableTop, boxW, tableBottom - tableTop, _images, availW,
+            collapse && m.Rows.Count > 0 ? TableSides(m) : BoxPainter.AllSides, collapsedCell: collapse);
         _lastBoxRight = bx + boxW;
         _lastBoxX = bx;
         _lastBoxTop = tableTop;
@@ -424,7 +483,7 @@ internal sealed partial class LayoutEngine
             break;
         }
 
-        foreach (var cell in row.Ending) FinishCell(cell, rowBottom, collapse);
+        foreach (var cell in row.Ending) FinishCell(m, cell, rowBottom, collapse);
 
         var rs = row.Tr.Style;
         if (CssColor.IsVisible(rs.BackgroundColor) && row.Cells.Count + row.Ending.Count > 0)
@@ -455,27 +514,77 @@ internal sealed partial class LayoutEngine
         float contentBottom = LayoutFlow(td, cell.X + bl + pl, contentTop, Math.Max(0, w - bl - br - pl - pr));
         contentBottom = LeaveFormattingContext(outerFloats, contentBottom);
         cell.OpsEnd = _ops.Count;
-        cell.NeededH = bt + pt + (contentBottom - contentTop) + pb + bb;
+        cell.NeededH = cell.ContentH = bt + pt + (contentBottom - contentTop) + pb + bb;
         if (!cs.Height.IsAuto && !cs.Height.IsPercent)
             cell.NeededH = Math.Max(cell.NeededH, cs.Height.Value + (cs.BorderBox ? 0 : bt + pt + pb + bb));
     }
 
-    private void FinishCell(CellModel cell, float rowBottom, bool collapse)
+    /// <summary>
+    /// With collapsed borders, the sides of a cell that it draws: each shared border is drawn once, by the cell whose
+    /// border wins (the wider one; on a tie the cell above or to the left), and an outer border by the cell unless the
+    /// table's own border is wider. A row at the top of a page draws its top border again.
+    /// </summary>
+    private static int CollapsedSides(TableModel m, CellModel cell, bool atPageTop)
+    {
+        var s = cell.Td.Style;
+        var t = m.TableStyle;
+        int rows = m.Rows.Count, cols = m.ColCount;
+        int r0 = cell.Row, r1 = cell.Row + cell.RowSpan - 1, c0 = cell.Col, c1 = cell.Col + cell.ColSpan - 1;
+        int sides = 0;
+        if (atPageTop || (r0 == 0 ? s.BorderTop >= t.BorderTop : s.BorderTop > (m.Grid[r0 - 1, c0]?.Td.Style.BorderBottom ?? 0)))
+            sides |= BoxPainter.Top;
+        if (r1 >= rows - 1 ? s.BorderBottom >= t.BorderBottom : s.BorderBottom >= (m.Grid[r1 + 1, c0]?.Td.Style.BorderTop ?? 0))
+            sides |= BoxPainter.Bottom;
+        if (c0 == 0 ? s.BorderLeft >= t.BorderLeft : s.BorderLeft > (m.Grid[r0, c0 - 1]?.Td.Style.BorderRight ?? 0))
+            sides |= BoxPainter.Left;
+        if (c1 >= cols - 1 ? s.BorderRight >= t.BorderRight : s.BorderRight >= (m.Grid[r0, c1 + 1]?.Td.Style.BorderLeft ?? 0))
+            sides |= BoxPainter.Right;
+        return sides;
+    }
+
+    /// <summary>The sides of a collapsed table's own border that are wider than the cells' borders along them.</summary>
+    private static int TableSides(TableModel m)
+    {
+        var t = m.TableStyle;
+        float top = 0, bottom = 0, left = 0, right = 0;
+        int rows = m.Rows.Count, cols = m.ColCount;
+        for (int c = 0; c < cols && rows > 0; c++)
+        {
+            top = Math.Max(top, m.Grid[0, c]?.Td.Style.BorderTop ?? 0);
+            bottom = Math.Max(bottom, m.Grid[rows - 1, c]?.Td.Style.BorderBottom ?? 0);
+        }
+        for (int r = 0; r < rows && cols > 0; r++)
+        {
+            left = Math.Max(left, m.Grid[r, 0]?.Td.Style.BorderLeft ?? 0);
+            right = Math.Max(right, m.Grid[r, cols - 1]?.Td.Style.BorderRight ?? 0);
+        }
+        int sides = 0;
+        if (t.BorderTop > top) sides |= BoxPainter.Top;
+        if (t.BorderBottom > bottom) sides |= BoxPainter.Bottom;
+        if (t.BorderLeft > left) sides |= BoxPainter.Left;
+        if (t.BorderRight > right) sides |= BoxPainter.Right;
+        return sides;
+    }
+
+    private void FinishCell(TableModel m, CellModel cell, float rowBottom, bool collapse)
     {
         var cs = cell.Td.Style;
         float h = rowBottom - cell.Top;
         float shift = cs.VerticalAlign switch
         {
-            VerticalAlign.Middle => (h - cell.NeededH) / 2,
-            VerticalAlign.Bottom or VerticalAlign.TextBottom => h - cell.NeededH,
+            // The content is aligned within the whole cell, also when the cell's height made it taller than the content.
+            VerticalAlign.Middle => (h - cell.ContentH) / 2,
+            VerticalAlign.Bottom or VerticalAlign.TextBottom => h - cell.ContentH,
             _ => 0,
         };
         if (shift > 0.01f)
             for (int i = cell.OpsStart; i < cell.OpsEnd && i < _ops.Count; i++) _ops[i].Offset(0, shift);
 
         float x = cell.X, y = cell.Top, w = cell.W;
+        int sides = BoxPainter.AllSides;
         if (collapse)
         {
+            sides = CollapsedSides(m, cell, AtPageTop(y));
             x -= cs.BorderLeft / 2;
             w += (cs.BorderLeft + cs.BorderRight) / 2;
             h += cs.BorderBottom / 2;
@@ -486,7 +595,7 @@ internal sealed partial class LayoutEngine
                 h += cs.BorderTop / 2;
             }
         }
-        BoxPainter.Paint(cell.Group!, cs, x, y, w, h, _images, w);
+        BoxPainter.Paint(cell.Group!, cs, x, y, w, h, _images, w, sides, collapsedCell: collapse);
     }
 
     // ------------------------------------------------------------------ intrinsic widths
