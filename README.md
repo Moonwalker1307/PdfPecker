@@ -31,6 +31,51 @@ dotnet add <your project> package PdfPecker
 
 The package targets `net10.0` and works on .NET 10 and later.
 
+## How it compares
+
+The same three documents converted to A4 PDF by PdfPecker and four free .NET alternatives, on one 4-core cloud VM
+(Intel Xeon @ 2.8 GHz, 16 GB, Linux, .NET 10.0.12). Times are medians after a 3-second warm-up; "first PDF" includes
+starting the browser where there is one. Parallel runs one conversion per core at once on the 5-page document. Peak
+memory is the proportional set size (PSS) of the whole process tree, so a browser's helper processes are included
+once and shared pages are not double-counted.
+
+| Converter | Engine | To deploy | First PDF | Invoice, 1 page | Feature tour, 5 pages | Report, 30 pages | Parallel | Peak memory |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **PdfPecker** | own, managed | 3.1 MB DLL | 0.27 s | **0.86 ms** | **2.7 ms** | **39 ms** | **962 docs/s** | **83 MB** |
+| HtmlRenderer.PdfSharp 1.6.1 | own, managed (CSS 2) | 2.4 MB of DLLs | 0.47 s | 5.0 ms | 16 ms | 473 ms | 88 docs/s | 255 MB |
+| wkhtmltopdf 0.12.6 | Qt WebKit, native | about 90 MB with Qt | 0.31 s | 289 ms | 333 ms | 693 ms | 12 docs/s | 164 MB |
+| PuppeteerSharp 25.13 | Chromium 141 | about 600 MB browser | 0.91 s | 128 ms | 166 ms | 539 ms | 12 docs/s | 849 MB |
+| Microsoft.Playwright 1.63 | Chromium 141 | browser + 135 MB driver | 1.08 s | 142 ms | 191 ms | 522 ms | 11 docs/s | 986 MB |
+
+How to read it:
+
+- PdfPecker is 60 to 150 times faster than the Chromium-based converters on the 1 and 5-page documents and about
+  14 times faster on the 30-page report, and uses a tenth of their memory. Per-document overhead (a browser tab, a process
+  start) dominates for the others on small documents.
+- Output is not identical. Chromium is the reference for modern CSS and runs JavaScript, which PdfPecker does not.
+  HtmlRenderer supports only HTML 4 and CSS 2 (it drops the invoice's table header colours), and wkhtmltopdf uses
+  a 2016 WebKit, shrinks content to fit by default (24 pages for the report instead of 29) and was archived in 2023.
+- PDF sizes for the 1 / 5 / 30-page documents: PdfPecker 12 / 26 / 126 KB, Chromium 72 / 139 / 171 KB,
+  wkhtmltopdf 30 / 59 / 191 KB, HtmlRenderer 35 / 65 / 273 KB.
+- Each converter was used the way its documentation suggests for many documents: PdfPecker and HtmlRenderer in
+  process, wkhtmltopdf as one process per document, and PuppeteerSharp and Playwright with one shared browser and a
+  new tab per document (Playwright in one shared browser context, tagged PDF output off for both).
+
+Commercial converters were not measured here. One user compared PdfPecker with **IronPDF 2026.7.2** (Chrome-based)
+on the 26 templates of their production app, on a 22-core development machine after warm-up: IronPDF took 13.6 s
+for all 26 documents one at a time and PdfPecker 17 ms (about 800 times faster), and with 22 in parallel IronPDF made
+9.2 documents/s and PdfPecker 1,143 (about 125 times). 24 of the 26 documents came out identical; the other two differ
+by less than 0.25 mm.
+
+To reproduce the table (needs wkhtmltopdf on `PATH` and a Chromium at `CHROMIUM_PATH`):
+
+```
+dotnet run --project bench/PdfPecker.Comparison -c Release
+```
+
+The comparison project is not part of `PdfPecker.sln`, so its third-party packages never reach the library or its
+tests. Your numbers will differ with hardware and documents.
+
 ## System requirements
 
 **Required:** the .NET 10 runtime (or later). Nothing else: the library is pure managed code with no native
