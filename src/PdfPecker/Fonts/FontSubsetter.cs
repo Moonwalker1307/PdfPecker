@@ -13,6 +13,7 @@ internal sealed class GlyphSubset
     public readonly List<int> Unicode = new() { 0 };  // new id -> first code point that produced it (0 = none)
     private readonly Dictionary<int, int> _byCodePoint = new();
     private readonly Dictionary<int, int> _byGlyph = new() { [0] = 0 };
+    private Dictionary<int, string>? _texts;          // new id -> the characters of a ligature
 
     public GlyphSubset(FontProgram program) => Program = program;
 
@@ -32,11 +33,30 @@ internal sealed class GlyphSubset
         return id;
     }
 
-    /// <summary>(CID, original glyph id, code point) for every glyph used, in CID order.</summary>
-    public IEnumerable<(int Cid, int Gid, int CodePoint)> Used()
+    /// <summary>The CID for a glyph of shaped text: a ligature glyph maps back to all of its characters.</summary>
+    public int Cid(ShapedGlyph g, string text)
     {
-        var list = new List<(int, int, int)>(Glyphs.Count);
-        for (int i = 0; i < Glyphs.Count; i++) list.Add((Program.IsCff ? Glyphs[i] : i, Glyphs[i], Unicode[i]));
+        // Only ligatures replace glyphs, so a glyph for one character is that character's.
+        if (g.Length == 1) return Cid(text[g.Start]);
+        if (g.Length == 2 && char.IsHighSurrogate(text[g.Start])) return Cid(char.ConvertToUtf32(text[g.Start], text[g.Start + 1]));
+        if (_byGlyph.TryGetValue(g.Gid, out int id)) return id;
+        id = Program.IsCff ? g.Gid : Glyphs.Count;
+        _byGlyph[g.Gid] = id;
+        Glyphs.Add(g.Gid);
+        Unicode.Add(0);
+        (_texts ??= new())[Glyphs.Count - 1] = text.Substring(g.Start, g.Length);
+        return id;
+    }
+
+    /// <summary>
+    /// (CID, original glyph id, code point, characters of a ligature) for every glyph used, in CID order. The code
+    /// point is 0 for a ligature.
+    /// </summary>
+    public IEnumerable<(int Cid, int Gid, int CodePoint, string? Text)> Used()
+    {
+        var list = new List<(int, int, int, string?)>(Glyphs.Count);
+        for (int i = 0; i < Glyphs.Count; i++)
+            list.Add((Program.IsCff ? Glyphs[i] : i, Glyphs[i], Unicode[i], Unicode[i] == 0 && _texts != null && _texts.TryGetValue(i, out var t) ? t : null));
         list.Sort((a, b) => a.Item1.CompareTo(b.Item1));
         return list;
     }

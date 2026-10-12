@@ -506,6 +506,20 @@ internal sealed class StyleResolver
         "dominant-baseline", "alignment-baseline", "font-size", "font-family", "font-weight", "font-style", "letter-spacing",
     };
 
+    /// <summary>Whether font-feature-settings turns standard ligatures on or off ("liga" 0), or null when it leaves them.</summary>
+    private static bool? LigaSetting(string value)
+    {
+        bool? result = null;
+        foreach (var part in value.Split(','))
+        {
+            var p = part.Trim();
+            if (p.Length < 6 || (p[0] != '"' && p[0] != '\'') || p[5] != p[0] || p.Substring(1, 4) != "liga") continue;
+            var arg = p.Substring(6).Trim();
+            result = arg is "" or "on" || (int.TryParse(arg, out int n) && n != 0);
+        }
+        return result;
+    }
+
     /// <summary>True for &lt;svg&gt; and the elements inside it.</summary>
     internal static bool IsSvgElement(Element e)
     {
@@ -753,6 +767,17 @@ internal sealed class StyleResolver
             case "letter-spacing":
                 if (lower == "normal") s.LetterSpacing = 0;
                 else if (TryParseLength(lower, em, _rootFontSize, out var ls, _vw, _vh)) s.LetterSpacing = ls.Resolve(0);
+                break;
+            case "font-variant-ligatures":
+                if (lower == "inherit") s.NoLigatures = parent.NoLigatures;
+                else if (lower is "normal" or "initial" or "unset") s.NoLigatures = false;
+                else if (lower == "none") s.NoLigatures = true;
+                else if (lower.Contains("no-common-ligatures")) s.NoLigatures = true;
+                else if (lower.Contains("common-ligatures")) s.NoLigatures = false;
+                break;
+            case "font-feature-settings":
+                if (lower == "inherit") s.NoLigatures = parent.NoLigatures;
+                else if (LigaSetting(lower) is bool liga) s.NoLigatures = !liga;
                 break;
             case "word-spacing":
                 if (lower == "normal") s.WordSpacing = 0;

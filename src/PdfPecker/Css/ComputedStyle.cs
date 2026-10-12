@@ -144,6 +144,7 @@ internal sealed class ComputedStyle
     public TextDecoration TextDecoration; // propagated to descendants, approximated as inherited
     public float TextIndent;
     public float LetterSpacing;
+    public bool NoLigatures; // font-variant-ligatures: none or no-common-ligatures, or font-feature-settings: "liga" 0
     public float WordSpacing;
     public bool Visible = true;
     public bool BorderCollapse;
@@ -230,7 +231,15 @@ internal sealed class ComputedStyle
 
     private TextFont? _font;
 
-    public TextFont Font => _font ??= Fonts == null ? StandardFor() : Fonts.Resolve(FontFamilyName, FontFamily, FontWeight, Italic);
+    /// <summary>The font text is drawn with. Like browsers, letter-spaced text has no ligatures.</summary>
+    public TextFont Font
+    {
+        get
+        {
+            var f = _font ??= Fonts == null ? StandardFor() : Fonts.Resolve(FontFamilyName, FontFamily, FontWeight, Italic);
+            return NoLigatures || LetterSpacing != 0 ? f.WithoutLigatures() : f;
+        }
+    }
 
     private TextFont StandardFor()
     {

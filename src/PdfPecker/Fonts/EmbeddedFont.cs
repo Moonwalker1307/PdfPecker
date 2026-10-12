@@ -10,6 +10,8 @@ internal sealed class EmbeddedFont : TextFont
     public readonly bool SyntheticBold, SyntheticItalic;
     private readonly short[] _widths;
     private readonly UnicodeRange? _range;
+    private readonly Ligatures? _ligatures; // null when the font has none or they are turned off
+    private EmbeddedFont? _withoutLigatures;
 
     // metrics: line metrics to use instead of the font's own, for a bundled font standing in for a standard font.
     public EmbeddedFont(FontProgram program, bool syntheticBold, bool syntheticItalic, UnicodeRange? range = null, TextFont? metrics = null)
@@ -19,6 +21,7 @@ internal sealed class EmbeddedFont : TextFont
         SyntheticItalic = syntheticItalic;
         _range = range;
         _widths = program.CharWidths;
+        _ligatures = program.Ligatures;
         float upm = program.UnitsPerEm;
         Ascent = program.LineAscender / upm;
         Descent = -Math.Abs(program.LineDescender) / upm;
@@ -43,8 +46,57 @@ internal sealed class EmbeddedFont : TextFont
 
     public override int KernUnits(int left, int right) => Program.Kern1000(Program.GlyphId(left), Program.GlyphId(right));
 
+    private EmbeddedFont(EmbeddedFont font) : this(font.Program, font.SyntheticBold, font.SyntheticItalic, font._range)
+    {
+        Ascent = font.Ascent;
+        Descent = font.Descent;
+        LineGap = font.LineGap;
+        _ligatures = null;
+    }
+
+    public override TextFont WithoutLigatures()
+        => _ligatures == null ? this : _withoutLigatures ??= new EmbeddedFont(this);
+
+    /// <summary>True when the text may form a ligature, so it has to be shaped glyph by glyph.</summary>
+    public bool MayLigate(string s, int start, int length)
+    {
+        var lig = _ligatures;
+        if (lig == null || length < 2) return false;
+        int prev = Program.GlyphId(s[start]);
+        for (int i = start + 1, end = start + length; i < end; i++)
+        {
+            int g = Program.GlyphId(s[i]);
+            if (lig.StartsLigature(prev, g)) return true;
+            prev = g;
+        }
+        return false;
+    }
+
+    /// <summary>The glyphs that draw the text: one per character, apart from ligatures.</summary>
+    public void Shape(string s, int start, int length, List<ShapedGlyph> glyphs)
+    {
+        glyphs.Clear();
+        var lig = _ligatures;
+        bool ligate = false;
+        int prev = -1;
+        for (int i = start, end = start + length; i < end; i++)
+        {
+            int cp = s[i], n = 1;
+            if (char.IsHighSurrogate(s[i]) && i + 1 < end && char.IsLowSurrogate(s[i + 1])) { cp = char.ConvertToUtf32(s[i], s[i + 1]); n = 2; }
+            int gid = Program.GlyphId(cp);
+            if (lig != null && !ligate && prev >= 0 && lig.StartsLigature(prev, gid)) ligate = true;
+            glyphs.Add(new ShapedGlyph(gid, i, n));
+            prev = gid;
+            i += n - 1;
+        }
+        if (ligate) lig!.Apply(glyphs);
+    }
+
+    [ThreadStatic] private static List<ShapedGlyph>? t_glyphs;
+
     public override int MeasureUnits(string s, int start, int length)
     {
+        if (MayLigate(s, start, length)) return MeasureShaped(s, start, length);
         var w = _widths;
         bool kern = HasKerning;
         int total = 0, prev = -1;
@@ -62,6 +114,21 @@ internal sealed class EmbeddedFont : TextFont
                 if (prev >= 0) total += KernUnits(prev, cp);
                 prev = cp;
             }
+        }
+        return total;
+    }
+
+    private int MeasureShaped(string s, int start, int length)
+    {
+        var glyphs = t_glyphs ??= new List<ShapedGlyph>();
+        Shape(s, start, length, glyphs);
+        bool kern = HasKerning;
+        int total = 0, prev = -1;
+        foreach (var g in glyphs)
+        {
+            total += g.Length == 1 ? _widths[s[g.Start]] : Program.Advance1000(g.Gid);
+            if (kern && prev >= 0) total += Program.Kern1000(prev, g.Gid);
+            prev = g.Gid;
         }
         return total;
     }
@@ -106,27 +173,33 @@ internal sealed class FontChain : TextFont
         return f;
     }
 
+    // Each stretch of characters drawn with one font is measured as a run of that font, so it is kerned and ligated.
     public override int MeasureUnits(string s, int start, int length)
     {
-        int total = 0, prev = -1;
-        TextFont? prevFont = null;
-        for (int i = start, end = start + length; i < end; i++)
+        int total = 0, runStart = start, end = start + length;
+        TextFont? runFont = null;
+        for (int i = start; i < end; i++)
         {
-            int cp = s[i];
+            int at = i, cp = s[i];
             if (char.IsHighSurrogate(s[i]) && i + 1 < end && char.IsLowSurrogate(s[i + 1])) cp = char.ConvertToUtf32(s[i], s[++i]);
             var f = Pick(cp);
-            total += Units(f, cp);
-            // Pairs drawn with the same font are kerned, as in a run of that font.
-            if (ReferenceEquals(f, prevFont) && f.HasKerning) total += f.KernUnits(prev, cp);
-            prev = cp;
-            prevFont = f;
+            if (ReferenceEquals(f, runFont)) continue;
+            if (runFont != null) total += runFont.MeasureUnits(s, runStart, at - runStart);
+            runFont = f;
+            runStart = at;
         }
+        if (runFont != null) total += runFont.MeasureUnits(s, runStart, end - runStart);
         return total;
     }
 
     public override float CharWidth(char c, float size) => Units(Pick(c), c) * size / 1000f;
 
     public override bool HasKerning => _primary.HasKerning;
+
+    private FontChain? _withoutLigatures;
+
+    public override TextFont WithoutLigatures()
+        => _withoutLigatures ??= new FontChain(_primary.WithoutLigatures(), cp => _fallback(cp)?.WithoutLigatures());
 
     public override int KernUnits(int left, int right)
     {
