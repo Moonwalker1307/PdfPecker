@@ -11,17 +11,23 @@ internal sealed class RuleIndex
     public readonly Dictionary<string, List<StyleRule>> ByClass = new(StringComparer.Ordinal);
     public readonly Dictionary<string, List<StyleRule>> ByTag = new(StringComparer.Ordinal);
     public readonly List<StyleRule> Universal = new();
+    public readonly RuleIndex? PseudoElements; // rules for ::before and ::after, matched against their host
 
-    public RuleIndex(Stylesheet sheet)
+    public RuleIndex(Stylesheet sheet) : this(sheet.Rules, pseudo: false) { }
+
+    private RuleIndex(IEnumerable<StyleRule> rules, bool pseudo)
     {
-        foreach (var r in sheet.Rules)
+        List<StyleRule>? pseudoRules = null;
+        foreach (var r in rules)
         {
+            if (!pseudo && r.Selector.PseudoElement != PseudoElement.None) { (pseudoRules ??= new()).Add(r); continue; }
             var subj = r.Selector.Subject;
             if (subj.Id != null) Add(ById, subj.Id, r);
             else if (subj.Classes != null) Add(ByClass, subj.Classes[0], r);
             else if (subj.Tag != null) Add(ByTag, subj.Tag, r);
             else Universal.Add(r);
         }
+        if (pseudoRules != null) PseudoElements = new RuleIndex(pseudoRules, pseudo: true);
     }
 
     private static void Add(Dictionary<string, List<StyleRule>> d, string key, StyleRule r)
@@ -133,6 +139,8 @@ internal sealed class StyleResolver
 
     private static void Prepare(Element parent)
     {
+        // ::before and ::after boxes from an earlier pass are generated again.
+        parent.Children.RemoveAll(c => c is Element { Generated: true });
         int count = 0;
         foreach (var c in parent.Children) if (c is Element) count++;
         int index = 0;
@@ -154,14 +162,106 @@ internal sealed class StyleResolver
 
     private void ResolveChildren(Element parent)
     {
-        foreach (var c in parent.Children)
+        // Counters created by these children (and the parent's ::before) are in scope until the parent ends.
+        List<string>? scope = null;
+        bool pseudos = HasPseudoRules && CanHaveGenerated(parent);
+        if (pseudos) Generate(parent, PseudoElement.Before, ref scope);
+        var children = parent.Children;
+        for (int i = 0; i < children.Count; i++)
         {
-            if (c is not Element e) continue;
+            if (children[i] is not Element e || e.Generated) continue;
             Resolve(e, parent.Style);
             if (e.Style.Display == Display.None) continue; // descendants are never rendered
+            if (_countersUsed) ApplyCounters(e.Style, ref scope);
             ResolveChildren(e);
         }
+        if (pseudos) Generate(parent, PseudoElement.After, ref scope);
+        if (scope != null)
+            foreach (var name in scope)
+            {
+                var stack = _counters[name];
+                stack.RemoveAt(stack.Count - 1);
+            }
     }
+
+    private bool HasPseudoRules => _author.PseudoElements != null || UaIndex.Value.PseudoElements != null;
+
+    /// <summary>Elements that can hold ::before and ::after boxes: not replaced or void elements, SVG or table internals.</summary>
+    private static bool CanHaveGenerated(Element e)
+    {
+        if (e.Name is "#document" or "img" or "br" or "wbr" or "svg" or "input" or "select" or "textarea" or "video" or "audio"
+            or "iframe" or "canvas" or "object" or "embed" or "meta" or "link" or "style" or "script" or "head" or "title" or "html") return false;
+        var d = e.Style.Display;
+        if (d is Display.None or Display.Table or Display.TableRow or Display.TableRowGroup or Display.TableHeaderGroup
+            or Display.TableFooterGroup or Display.TableColumn or Display.TableColumnGroup) return false;
+        return !IsSvgElement(e);
+    }
+
+    /// <summary>Adds the ::before or ::after box of <paramref name="host"/> when a rule gives it content.</summary>
+    private void Generate(Element host, PseudoElement which, ref List<string>? scope)
+    {
+        _count = 0;
+        if (UaIndex.Value.PseudoElements is { } ua) Collect(ua, host, TierUa, TierUaImportant, which);
+        if (_author.PseudoElements is { } author) Collect(author, host, TierAuthor, TierAuthorImportant, which);
+        if (_count == 0) return;
+        if (_count > 1) Array.Sort(_keys, _decls, 0, _count);
+        var s = Compute(host.Name, host.Style);
+        if (s.Content == null || s.Display == Display.None) return;
+        if (s.CounterReset != null || s.CounterSet != null || s.CounterIncrement != null) { _countersUsed = true; ApplyCounters(s, ref scope); }
+        var text = GeneratedContent.Evaluate(s.Content, host, this);
+        if (text == null) return;
+        var box = new Element(which == PseudoElement.Before ? "::before" : "::after") { Generated = true, Style = s, Parent = host };
+        if (text.Length > 0) box.AppendChild(new TextNode(text));
+        if (which == PseudoElement.Before) host.Children.Insert(0, box);
+        else host.Children.Add(box);
+    }
+
+    // ---------------------------------------------------------------- counters
+
+    private readonly Dictionary<string, List<int>> _counters = new(StringComparer.Ordinal);
+    private bool _countersUsed;
+    internal int QuoteDepth;
+
+    /// <summary>Applies counter-reset, counter-increment and counter-set, in that order (CSS Lists 3).</summary>
+    private void ApplyCounters(ComputedStyle s, ref List<string>? scope)
+    {
+        if (s.CounterReset != null)
+            foreach (var c in s.CounterReset)
+            {
+                if (scope != null && scope.Contains(c.Name)) _counters[c.Name][^1] = c.Value; // a sibling's counter: reset it
+                else
+                {
+                    if (!_counters.TryGetValue(c.Name, out var stack)) _counters[c.Name] = stack = new List<int>();
+                    if (stack.Count >= 64) continue; // runaway nesting
+                    stack.Add(c.Value);
+                    (scope ??= new List<string>()).Add(c.Name);
+                }
+            }
+        if (s.CounterIncrement != null)
+            foreach (var c in s.CounterIncrement)
+            {
+                var stack = Instance(c.Name, ref scope);
+                stack[^1] = unchecked(stack[^1] + c.Value);
+            }
+        if (s.CounterSet != null)
+            foreach (var c in s.CounterSet)
+                Instance(c.Name, ref scope)[^1] = c.Value;
+    }
+
+    /// <summary>The counter's instances, creating one (at 0, scoped to the current parent) when none is in scope.</summary>
+    private List<int> Instance(string name, ref List<string>? scope)
+    {
+        if (!_counters.TryGetValue(name, out var stack)) _counters[name] = stack = new List<int>();
+        if (stack.Count == 0)
+        {
+            stack.Add(0);
+            (scope ??= new List<string>()).Add(name);
+        }
+        return stack;
+    }
+
+    /// <summary>The values of a counter's instances, outermost first; empty when it has none.</summary>
+    internal IReadOnlyList<int> CounterValues(string name) => _counters.TryGetValue(name, out var stack) ? stack : Array.Empty<int>();
 
     /// <summary>Stops resolving when cancelled.</summary>
     public CancellationToken Cancellation { get; init; }
@@ -187,14 +287,19 @@ internal sealed class StyleResolver
         }
 
         if (_count > 1) Array.Sort(_keys, _decls, 0, _count);
+        e.Style = Compute(e.Name, parent);
+        if (e.Style.CounterReset != null || e.Style.CounterSet != null || e.Style.CounterIncrement != null) _countersUsed = true;
+    }
 
+    /// <summary>Computes a style from the sorted declarations in the working buffer, sharing it when it was computed before.</summary>
+    private ComputedStyle Compute(string name, ComputedStyle parent)
+    {
         _probe.Set(parent, _decls, _count);
         if (_styleCache.TryGetValue(_probe, out var shared))
         {
-            e.Style = shared;
-            if (e.Name == "html") _rootFontSize = shared.FontSize;
+            if (name == "html") _rootFontSize = shared.FontSize;
             Array.Clear(_decls, 0, _count);
-            return;
+            return shared;
         }
 
         var s = parent.CreateChild();
@@ -215,7 +320,7 @@ internal sealed class StyleResolver
                 break;
             }
         }
-        if (e.Name == "html") _rootFontSize = s.FontSize;
+        if (name == "html") _rootFontSize = s.FontSize;
 
         for (int i = 0; i < _count; i++)
         {
@@ -239,11 +344,18 @@ internal sealed class StyleResolver
             }
         }
 
-        if (s.Floated && s.Display == Display.Inline) s.Display = Display.Block;
+        // Floats and absolutely positioned boxes are block-level (CSS 2.1 §9.7).
+        if (s.Floated || s.OutOfFlow)
+        {
+            if (s.Display is Display.Inline or Display.InlineBlock) s.Display = Display.Block;
+            else if (s.Display == Display.InlineFlex) s.Display = Display.Flex;
+            else if (s.Display == Display.InlineGrid) s.Display = Display.Grid;
+            if (s.OutOfFlow) { s.Floated = false; s.Float = FloatSide.None; }
+        }
         s.InvalidateFont();
-        e.Style = s;
         _styleCache[_probe.Freeze()] = s;
         Array.Clear(_decls, 0, _count);
+        return s;
     }
 
     private static bool HasViewportHeightUnit(string v)
@@ -253,20 +365,20 @@ internal sealed class StyleResolver
     private static string? Substituted(string value, ComputedStyle s)
         => CssParser.HasVar(value) ? CssVariables.Substitute(value, s.CustomProperties) : value;
 
-    private void Collect(RuleIndex index, Element e, long tier, long importantTier)
+    private void Collect(RuleIndex index, Element e, long tier, long importantTier, PseudoElement which = PseudoElement.None)
     {
-        if (e.Id != null && index.ById.TryGetValue(e.Id, out var byId)) Match(byId, e, tier, importantTier);
+        if (e.Id != null && index.ById.TryGetValue(e.Id, out var byId)) Match(byId, e, tier, importantTier, which);
         foreach (var c in e.Classes)
-            if (index.ByClass.TryGetValue(c, out var byClass)) Match(byClass, e, tier, importantTier);
-        if (index.ByTag.TryGetValue(e.Name, out var byTag)) Match(byTag, e, tier, importantTier);
-        if (index.Universal.Count > 0) Match(index.Universal, e, tier, importantTier);
+            if (index.ByClass.TryGetValue(c, out var byClass)) Match(byClass, e, tier, importantTier, which);
+        if (index.ByTag.TryGetValue(e.Name, out var byTag)) Match(byTag, e, tier, importantTier, which);
+        if (index.Universal.Count > 0) Match(index.Universal, e, tier, importantTier, which);
     }
 
-    private void Match(List<StyleRule> rules, Element e, long tier, long importantTier)
+    private void Match(List<StyleRule> rules, Element e, long tier, long importantTier, PseudoElement which)
     {
         foreach (var r in rules)
         {
-            if (!r.Selector.Matches(e)) continue;
+            if (r.Selector.PseudoElement != which || !r.Selector.Matches(e)) continue;
             var decls = r.Declarations;
             for (int i = 0; i < decls.Length; i++)
                 Push(decls[i].Important ? importantTier : tier, r.Selector.Specificity, r.Order, i, decls[i]);
@@ -497,7 +609,8 @@ internal sealed class StyleResolver
             case "display":
                 s.Display = lower switch
                 {
-                    "block" or "flow-root" => Display.Block,
+                    "block" => Display.Block,
+                    "flow-root" => Display.Block,
                     "flex" or "block flex" => Display.Flex,
                     "grid" or "block grid" => Display.Grid,
                     "inline-flex" or "inline flex" => Display.InlineFlex,
@@ -517,6 +630,7 @@ internal sealed class StyleResolver
                     "none" => Display.None,
                     _ => s.Display,
                 };
+                if (lower == "flow-root") s.FormattingRoot = true;
                 break;
             case "color":
                 if (inherit) s.Color = parent.Color;
@@ -729,10 +843,68 @@ internal sealed class StyleResolver
                 s.BorderBox = lower == "border-box";
                 break;
             case "float":
-                s.Floated = lower is "left" or "right";
+                s.Float = lower switch
+                {
+                    "left" or "inline-start" => FloatSide.Left,
+                    "right" or "inline-end" => FloatSide.Right,
+                    "none" => FloatSide.None,
+                    "inherit" => parent.Float,
+                    _ => s.Float,
+                };
+                s.Floated = s.Float != FloatSide.None;
                 break;
             case "clear":
-                s.ClearBoth = lower != "none";
+                if (inherit) { s.ClearLeft = parent.ClearLeft; s.ClearRight = parent.ClearRight; break; }
+                s.ClearLeft = lower is "left" or "both" or "inline-start";
+                s.ClearRight = lower is "right" or "both" or "inline-end";
+                break;
+            case "position":
+                s.Position = lower switch
+                {
+                    "relative" or "sticky" => Position.Relative,
+                    "absolute" => Position.Absolute,
+                    "fixed" => Position.Fixed,
+                    "static" => Position.Static,
+                    "inherit" => parent.Position,
+                    _ => s.Position,
+                };
+                break;
+            case "top": SetLength(ref s.Top, lower, em, inherit ? parent.Top : (Length?)null); break;
+            case "right": SetLength(ref s.Right, lower, em, inherit ? parent.Right : (Length?)null); break;
+            case "bottom": SetLength(ref s.Bottom, lower, em, inherit ? parent.Bottom : (Length?)null); break;
+            case "left": SetLength(ref s.Left, lower, em, inherit ? parent.Left : (Length?)null); break;
+            case "z-index":
+                if (lower == "auto") s.ZIndex = null;
+                else if (inherit) s.ZIndex = parent.ZIndex;
+                else if (int.TryParse(lower, NumberStyles.Integer, CultureInfo.InvariantCulture, out int z)) s.ZIndex = z;
+                break;
+            case "overflow":
+            case "overflow-x":
+            case "overflow-y":
+                // Any value but visible and clip makes the box a block formatting context root, which contains its floats.
+                foreach (var t in lower.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                    if (t is "hidden" or "auto" or "scroll" or "overlay") s.FormattingRoot = true;
+                break;
+            case "transform":
+                if (lower == "none") s.Transform = null;
+                else if (inherit) s.Transform = parent.Transform;
+                else if (CssTransform.TryParse(lower, em, _rootFontSize, _vw, _vh, out var tf)) s.Transform = tf;
+                break;
+            case "transform-origin":
+                if (inherit) { s.TransformOriginX = parent.TransformOriginX; s.TransformOriginY = parent.TransformOriginY; }
+                else if (CssTransform.TryParseOrigin(lower, em, _rootFontSize, _vw, _vh, out var ox, out var oy)) { s.TransformOriginX = ox; s.TransformOriginY = oy; }
+                break;
+            case "content":
+                s.Content = lower is "normal" or "none" ? null : inherit ? parent.Content : v;
+                break;
+            case "counter-reset":
+                s.CounterReset = inherit ? parent.CounterReset : ParseCounters(v, 0);
+                break;
+            case "counter-set":
+                s.CounterSet = inherit ? parent.CounterSet : ParseCounters(v, 0);
+                break;
+            case "counter-increment":
+                s.CounterIncrement = inherit ? parent.CounterIncrement : ParseCounters(v, 1);
                 break;
             case "break-before":
                 s.PageBreakBefore = lower is "always" or "page" or "left" or "right" or "recto" or "verso";
@@ -1182,6 +1354,23 @@ internal sealed class StyleResolver
         }
         color = currentColor;
         url = currentUrl;
+    }
+
+    /// <summary>Parses a counter-reset, counter-set or counter-increment list: names, each optionally followed by an integer.</summary>
+    private static CounterOp[]? ParseCounters(string v, int defaultValue)
+    {
+        var t = v.Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+        if (t.Length == 0 || t.Length == 1 && t[0].Equals("none", StringComparison.OrdinalIgnoreCase)) return null;
+        var list = new List<CounterOp>();
+        for (int i = 0; i < t.Length; i++)
+        {
+            if (int.TryParse(t[i], NumberStyles.Integer, CultureInfo.InvariantCulture, out _)) return null; // a number without a name
+            string name = t[i];
+            int value = defaultValue;
+            if (i + 1 < t.Length && int.TryParse(t[i + 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int n)) { value = n; i++; }
+            list.Add(new CounterOp(name, value));
+        }
+        return list.ToArray();
     }
 
     private void SetLength(ref Length target, string lower, float em, Length? inherited, bool noAuto = false)

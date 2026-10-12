@@ -37,7 +37,7 @@ internal sealed partial class LayoutEngine
         return it;
     }
 
-    private enum ItemKind : byte { Text, Space, Break, Image, Box, Spacer, Anchor }
+    private enum ItemKind : byte { Text, Space, Break, Image, Box, Spacer, Anchor, Float, Absolute }
 
     private enum BreakAfter : byte { None, Break, SoftHyphen }
 
@@ -57,7 +57,11 @@ internal sealed partial class LayoutEngine
         public float Height;          // image or inline-block height
         public float BoxBaseline;     // inline-block: distance from its top to its baseline
         public List<DrawOp>? BoxOps;
+        public Captured? Capture;     // an inline-block laid out on its own, placed with its anchors and positioned boxes
         public string? AnchorId;
+        public Element? Element;      // a float or an absolutely positioned box
+        public float FloatMin;        // a float's min-content width, when measuring
+        public float RelX, RelY;      // offset of position: relative inline ancestors
 
         public void Reset()
         {
@@ -70,7 +74,10 @@ internal sealed partial class LayoutEngine
             Deco = null;
             Image = null;
             BoxOps = null;
+            Capture = null;
             AnchorId = null;
+            Element = null;
+            FloatMin = RelX = RelY = 0;
         }
 
         public string Text => Start == 0 && Length == Source.Length ? Source : Source.Substring(Start, Length);
@@ -101,6 +108,8 @@ internal sealed partial class LayoutEngine
         public readonly List<Item> Items = new();
         public float Width;
         public bool Forced;
+        // Beside floats: the line's top and its room (left offset and width); NaN when the line simply follows the last.
+        public float Top = float.NaN, Left, Avail = float.NaN;
     }
 
     // ------------------------------------------------------------------ collection
@@ -131,8 +140,33 @@ internal sealed partial class LayoutEngine
         var s = e.Style;
         if (s == null || s.Display == Display.None || e.Detached) return;
 
+        if (s.Floated || s.OutOfFlow)
+        {
+            var oof = Rent(s.Floated ? ItemKind.Float : ItemKind.Absolute, s);
+            oof.Element = e;
+            if (_measuring && s.Floated)
+            {
+                // Measuring: a float takes its width on the line, as it would beside the text.
+                var (fmin, fmax) = Intrinsic(e);
+                float margins = (s.MarginLeft.IsAuto || s.MarginLeft.IsPercent ? 0 : s.MarginLeft.Value)
+                                + (s.MarginRight.IsAuto || s.MarginRight.IsPercent ? 0 : s.MarginRight.Value);
+                oof.Width = fmax + margins;
+                oof.FloatMin = fmin + margins;
+            }
+            st.Items.Add(oof);
+            return;
+        }
+
         if (e.Id != null) { var it_ = Rent(ItemKind.Anchor, s); it_.AnchorId = e.Id; st.Items.Add(it_); }
         if (e.Name == "a" && e.GetAttribute("name") is { } aname) { var it_ = Rent(ItemKind.Anchor, s); it_.AnchorId = aname; st.Items.Add(it_); }
+
+        if (s.Layered && e.Name is "img" or "svg")
+        {
+            // A transformed or relatively positioned image is laid out as a box of its own, which carries the layer.
+            st.Items.Add(LayoutInlineBlock(e, st.AvailWidth, href ?? LinkOf(e)));
+            st.LastWasSpace = false;
+            return;
+        }
 
         switch (e.Name)
         {
@@ -190,9 +224,17 @@ internal sealed partial class LayoutEngine
         if (CssColor.IsVisible(s.BackgroundColor) || s.BoxShadows != null) deco = s;
         float left = s.PaddingLeft.Resolve(0) + s.BorderLeft + (s.MarginLeft.IsAuto ? 0 : s.MarginLeft.Resolve(0));
         float right = s.PaddingRight.Resolve(0) + s.BorderRight + (s.MarginRight.IsAuto ? 0 : s.MarginRight.Resolve(0));
+        int first = st.Items.Count;
         if (left > 0) { var it_ = Rent(ItemKind.Spacer, s); it_.Width = left; it_.Href = href; it_.Deco = deco; st.Items.Add(it_); }
         foreach (var c in e.Children) CollectNode(st, c, href, deco);
         if (right > 0) { var it_ = Rent(ItemKind.Spacer, s); it_.Width = right; it_.Href = href; it_.Deco = deco; st.Items.Add(it_); }
+        if (s.Position == Position.Relative)
+        {
+            // An inline box shifted by position: relative; percentages of the containing block's height are ignored.
+            float dx = !s.Left.IsAuto ? (s.Left.IsPercent ? 0 : s.Left.Value) : !s.Right.IsAuto ? -(s.Right.IsPercent ? 0 : s.Right.Value) : 0;
+            float dy = !s.Top.IsAuto ? (s.Top.IsPercent ? 0 : s.Top.Value) : !s.Bottom.IsAuto ? -(s.Bottom.IsPercent ? 0 : s.Bottom.Value) : 0;
+            for (int k = first; k < st.Items.Count; k++) { st.Items[k].RelX += dx; st.Items[k].RelY += dy; }
+        }
     }
 
     private static string? LinkOf(Element e)
@@ -204,31 +246,9 @@ internal sealed partial class LayoutEngine
 
     private Item LayoutInlineBlock(Element e, float availW, string? href)
     {
-        var savedOps = _ops;
-        bool savedPaginate = _paginate;
-        var savedMarker = _marker;
-        float savedBaseline = _lastBaseline;
-        _ops = new List<DrawOp>();
-        _paginate = false;
-        _marker = null;
-        _lastBaseline = float.NaN;
-
-        var s = e.Style;
-        float mt = s.MarginTop.Resolve(availW), mb = s.MarginBottom.Resolve(availW);
-        float ml = s.MarginLeft.IsAuto ? 0 : s.MarginLeft.Resolve(availW), mr = s.MarginRight.IsAuto ? 0 : s.MarginRight.Resolve(availW);
-        _lastBoxRight = 0;
-        float bottom = LayoutBlockBox(e, 0, mt, availW, shrinkToFit: true);
-        float width = _lastBoxRight + mr;
-        float height = bottom + mb;
-        float baseline = float.IsNaN(_lastBaseline) ? height : _lastBaseline;
-        var ops = _ops;
-
-        _ops = savedOps;
-        _paginate = savedPaginate;
-        _marker = savedMarker;
-        _lastBaseline = savedBaseline;
-        _ = ml;
-        return new Item { Kind = ItemKind.Box, Style = s, Width = width, Height = height, BoxBaseline = baseline, BoxOps = ops, Href = href };
+        var c = CaptureBox(e, availW, shrinkToFit: true);
+        float baseline = float.IsNaN(c.Baseline) ? c.Height : c.Baseline;
+        return new Item { Kind = ItemKind.Box, Style = e.Style, Width = c.Width, Height = c.Height, BoxBaseline = baseline, Capture = c, Href = href };
     }
 
     private const string TabSpaces = "        ";
@@ -387,6 +407,9 @@ internal sealed partial class LayoutEngine
                 case ItemKind.Break:
                 case ItemKind.Spacer:
                     return true;
+                case ItemKind.Float:
+                case ItemKind.Absolute:
+                    break;
                 case ItemKind.Space:
                     if (!IsCollapsible(it.Style)) return true;
                     break;
@@ -450,25 +473,37 @@ internal sealed partial class LayoutEngine
         if (!HasRenderable(items))
         {
             foreach (var it in items)
+            {
                 if (it.Kind == ItemKind.Anchor) SetAnchor(it.AnchorId!, y);
+                else if (it.Kind == ItemKind.Float) PlaceFloat(MeasureFloat(it.Element!, w), y, x, w);
+                else if (it.Kind == ItemKind.Absolute) QueueAbsolute(it.Element!, x, y);
+            }
             produced = false;
             return y;
         }
         var cs = container.Style;
         float indent = firstInBlock ? cs.TextIndent : 0;
-        var lines = BreakLines(items, w, indent);
+        FloatLines? fl = null;
+        if (FloatsBelow(y) || items.Exists(it => it.Kind == ItemKind.Float))
+        {
+            TextMetrics(cs, out float sa, out float sd);
+            fl = new FloatLines { Engine = this, Block = cs, X = x, W = w, Y = y, StrutH = sa + sd };
+        }
+        var lines = BreakLines(items, w, indent, fl);
+        fl?.Flush(lines);
         produced = true;
-        return PlaceLines(lines, cs, x, y, w, indent);
+        return PlaceLines(lines, cs, x, y, w, indent, besideFloats: fl != null);
     }
 
-    private static List<Line> BreakLines(List<Item> items, float availW, float firstIndent)
+    private static List<Line> BreakLines(List<Item> items, float availW, float firstIndent, FloatLines? fl = null)
     {
         var lines = new List<Line>();
         var cur = new Line();
         // Whether the current line holds anything but anchors, kept up to date so checking it costs nothing.
         bool hasContent = false;
         float curW = 0;
-        float avail = availW - firstIndent;
+        fl?.Begin(lines);
+        float avail = (fl?.Avail ?? availW) - firstIndent;
         int n = items.Count;
 
         void Finish(bool forced)
@@ -484,11 +519,13 @@ internal sealed partial class LayoutEngine
             foreach (var it in li) width += it.Width;
             cur.Width = width;
             cur.Forced = forced;
+            fl?.End(cur);
             lines.Add(cur);
             cur = new Line();
             hasContent = false;
             curW = 0;
-            avail = availW;
+            fl?.Begin(lines);
+            avail = fl?.Avail ?? availW;
         }
 
         bool HasContent() => hasContent;
@@ -496,13 +533,23 @@ internal sealed partial class LayoutEngine
         void Add(Item it)
         {
             cur.Items.Add(it);
-            if (it.Kind != ItemKind.Anchor) hasContent = true;
+            if (it.Kind is not (ItemKind.Anchor or ItemKind.Absolute)) hasContent = true;
         }
 
         int i = 0;
         while (i < n)
         {
             var it = items[i];
+            if (it.Kind == ItemKind.Float)
+            {
+                if (fl != null)
+                {
+                    fl.Float(it, curW, HasContent());
+                    avail = fl.Avail - (lines.Count == 0 ? firstIndent : 0);
+                }
+                i++;
+                continue;
+            }
             if (it.Kind == ItemKind.Break)
             {
                 Add(it);
@@ -541,6 +588,13 @@ internal sealed partial class LayoutEngine
             {
                 Finish(forced: false);
             }
+            // Too narrow beside the floats: the line moves down past them until the chunk fits.
+            if (fl != null && !HasContent() && need > avail + Eps)
+                while (fl.Lower())
+                {
+                    avail = fl.Avail - (lines.Count == 0 ? firstIndent : 0);
+                    if (need <= avail + Eps) break;
+                }
             if (splittable && curW + gw > avail + Eps)
             {
                 // A chunk wider than the line that overflow-wrap or word-break lets break between characters.
@@ -640,52 +694,30 @@ internal sealed partial class LayoutEngine
         return s.VerticalAlign == VerticalAlign.Super ? -(px / 3 + 1) * 0.75f : (px / 5 + 1) * 0.75f;
     }
 
-    private float PlaceLines(List<Line> lines, ComputedStyle block, float x, float y, float w, float indent)
+    private float PlaceLines(List<Line> lines, ComputedStyle block, float x, float y, float w, float indent, bool besideFloats = false)
     {
-        TextMetrics(block, out float strutA, out float strutD);
         float[] xs = _xs;
 
         int n = lines.Count;
         if (_lineA.Length < n) { _lineA = new float[n * 2]; _lineD = new float[n * 2]; }
         float[] lineA = _lineA, lineD = _lineD;
-        for (int li = 0; li < n; li++)
-        {
-            float maxA = strutA, maxD = strutD;
-            bool visible = false;
-            foreach (var it in lines[li].Items)
-            {
-                float a, d;
-                switch (it.Kind)
-                {
-                    case ItemKind.Anchor:
-                        continue;
-                    case ItemKind.Image:
-                        ImageMetrics(it, block, out a, out d);
-                        break;
-                    case ItemKind.Box:
-                        a = it.BoxBaseline;
-                        d = it.Height - it.BoxBaseline;
-                        break;
-                    default:
-                        TextMetrics(it.Style, out a, out d);
-                        break;
-                }
-                visible = true;
-                if (a > maxA) maxA = a;
-                if (d > maxD) maxD = d;
-            }
-            lineA[li] = visible ? maxA : float.NaN;
-            lineD[li] = maxD;
-        }
-        bool[]? breakBefore = _paginate && n > 1 ? PlanBreaks(n, lineA, lineD, y, block.Orphans, block.Widows) : null;
+        for (int li = 0; li < n; li++) LineExtent(lines[li], block, out lineA[li], out lineD[li]);
+        // Beside floats the lines' positions were fixed while breaking them.
+        bool[]? breakBefore = _paginate && n > 1 && !besideFloats ? PlanBreaks(n, lineA, lineD, y, block.Orphans, block.Widows) : null;
 
         for (int li = 0; li < n; li++)
         {
             var line = lines[li];
             var items = line.Items;
+            if (!float.IsNaN(line.Top) && line.Top > y) y = line.Top;
+            float lineLeft = float.IsNaN(line.Avail) ? 0 : line.Left, lineW = float.IsNaN(line.Avail) ? w : line.Avail;
             if (float.IsNaN(lineA[li]))
             {
-                foreach (var it in items) SetAnchor(it.AnchorId!, y);
+                foreach (var it in items)
+                {
+                    if (it.Kind == ItemKind.Absolute) QueueAbsolute(it.Element!, x + lineLeft, y);
+                    else SetAnchor(it.AnchorId!, y);
+                }
                 continue;
             }
             float maxA = lineA[li];
@@ -701,8 +733,8 @@ internal sealed partial class LayoutEngine
             float lineIndent = li == 0 ? indent : 0;
             if (_kern.Length < items.Count) _kern = new float[items.Count * 2];
             float lineKern = KernBetweenItems(items, _kern);
-            float free = w - lineIndent - line.Width - lineKern;
-            float lx = x + lineIndent;
+            float free = lineW - lineIndent - line.Width - lineKern;
+            float lx = x + lineLeft + lineIndent;
             float extra = 0;
             switch (block.TextAlign)
             {
@@ -745,10 +777,11 @@ internal sealed partial class LayoutEngine
                             sb.Append(r.Source, r.Start, r.Length);
                             i++;
                         }
-                        float runX = xs[start], runEnd = xs[i];
+                        float rx = items[start].RelX;
+                        float runX = xs[start] + rx, runEnd = xs[i] + rx;
                         if (style.Visible)
                         {
-                            float bl = baseline + BaselineShift(style);
+                            float bl = baseline + BaselineShift(style) + items[start].RelY;
                             _ops.Add(new TextOp(runX, bl, y, style.Font, style.FontSize, style.Color, sb.ToString(),
                                 style.WordSpacing + extra, style.LetterSpacing));
                             if (style.TextDecoration != TextDecoration.None) Decorate(style, runX, runEnd - runX, bl);
@@ -759,19 +792,24 @@ internal sealed partial class LayoutEngine
                         if (it.Image != null)
                         {
                             ImageMetrics(it, block, out float ia, out _);
-                            _ops.Add(new ImageOp(xs[i], baseline - ia, it.Width, it.Height, it.Image));
+                            _ops.Add(new ImageOp(xs[i] + it.RelX, baseline - ia + it.RelY, it.Width, it.Height, it.Image));
                         }
                         break;
                     case ItemKind.Box:
                     {
-                        float dx = xs[i], dy = baseline - it.BoxBaseline;
-                        foreach (var op in it.BoxOps!)
-                        {
-                            op.Offset(dx, dy);
-                            _ops.Add(op);
-                        }
+                        float dx = xs[i] + it.RelX, dy = baseline - it.BoxBaseline + it.RelY;
+                        if (it.Capture != null) Place(it.Capture, dx, dy);
+                        else
+                            foreach (var op in it.BoxOps!)
+                            {
+                                op.Offset(dx, dy);
+                                _ops.Add(op);
+                            }
                         break;
                     }
+                    case ItemKind.Absolute:
+                        QueueAbsolute(it.Element!, xs[i], y);
+                        break;
                     case ItemKind.Anchor:
                         SetAnchor(it.AnchorId!, y);
                         break;
@@ -887,15 +925,16 @@ internal sealed partial class LayoutEngine
             int start = i;
             while (i < items.Count && ReferenceEquals(items[i].Deco, deco)) i++;
             deco.Font.LineMetrics(deco.FontSize, out float asc, out float desc);
-            float top = baseline + BaselineShift(deco) - asc - deco.PaddingTop.Resolve(0);
+            float top = baseline + BaselineShift(deco) - asc - deco.PaddingTop.Resolve(0) + items[start].RelY;
             float h = asc + desc + deco.PaddingTop.Resolve(0) + deco.PaddingBottom.Resolve(0);
+            float rx = xs[start] + items[start].RelX;
             if (deco.BoxShadows != null)
             {
                 var shadows = new GroupOp();
-                BoxPainter.PaintShadows(shadows, deco, xs[start], top, xs[i] - xs[start], h);
+                BoxPainter.PaintShadows(shadows, deco, rx, top, xs[i] - xs[start], h);
                 _ops.Add(shadows);
             }
-            if (CssColor.IsVisible(deco.BackgroundColor)) _ops.Add(new RectOp(xs[start], top, xs[i] - xs[start], h, deco.BackgroundColor));
+            if (CssColor.IsVisible(deco.BackgroundColor)) _ops.Add(new RectOp(rx, top, xs[i] - xs[start], h, deco.BackgroundColor));
         }
     }
 

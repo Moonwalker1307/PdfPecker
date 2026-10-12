@@ -98,9 +98,28 @@ internal sealed class PdfDocumentWriter
         public Placed(DrawOp op, float y0, float y1) { Op = op; Y0 = y0; Y1 = y1; }
     }
 
+    /// <summary>The part of a transformed layer that falls on one page, drawn with the layer's transform.</summary>
+    private sealed class TransformBlock : DrawOp
+    {
+        public readonly LayerOp Layer;
+        public readonly List<Placed> Items;
+        public TransformBlock(LayerOp layer, List<Placed> items) { Layer = layer; Items = items; }
+        public override void Offset(float dx, float dy) => throw new NotSupportedException();
+    }
+
+    /// <summary>The ops to draw, looking inside transformed layers.</summary>
+    private static IEnumerable<Placed> Leaves(List<Placed> list)
+    {
+        foreach (var p in list)
+        {
+            if (p.Op is TransformBlock tb) { foreach (var inner in Leaves(tb.Items)) yield return inner; }
+            else yield return p;
+        }
+    }
+
     public byte[] Write(List<DrawOp> ops, float contentHeight, IReadOnlyDictionary<string, float> anchors, uint pageBackground,
         string? title, string? author, string? subject, string? footerTemplate, string? headerTemplate,
-        Func<int, int, List<DrawOp>>? pageBands = null, IReadOnlyList<OutlineHeading>? outline = null)
+        Func<int, int, List<DrawOp>>? pageBands = null, IReadOnlyList<OutlineHeading>? outline = null, List<DrawOp>? fixedOps = null)
     {
         float H = _page.FlowHeight;
         int maxPages = Math.Max(1, MaxPages);
@@ -120,58 +139,73 @@ internal sealed class PdfDocumentWriter
             while (pages!.Count <= p) pages.Add(new List<Placed>());
             return pages[p];
         }
-        void AddSplit(DrawOp op, float top, float bottom)
+        // The list of a page: the document's own, or, for a transformed layer, the layer's part on that page.
+        List<Placed> Target(SortedDictionary<int, List<Placed>>? into, int p)
+        {
+            if (into == null) return PageList(p);
+            if (!into.TryGetValue(p, out var list)) into[p] = list = new List<Placed>();
+            return list;
+        }
+        void AddSplit(DrawOp op, float top, float bottom, SortedDictionary<int, List<Placed>>? into)
         {
             if (bottom < top) (top, bottom) = (bottom, top);
             int p0 = PageOf(top), p1 = Math.Max(p0, PageOf(bottom - 0.5f));
             for (int p = p0; p <= p1; p++)
             {
                 float y0 = Math.Max(top, p * H), y1 = Math.Min(bottom, (p + 1) * H);
-                if (y1 > y0 || top == bottom) PageList(p).Add(new Placed(op, y0, y1));
+                if (y1 > y0 || top == bottom) Target(into, p).Add(new Placed(op, y0, y1));
             }
         }
-        void Distribute(DrawOp op)
+        void Distribute(DrawOp op, SortedDictionary<int, List<Placed>>? into)
         {
             switch (op)
             {
+                case LayerOp { Transform: not null } layer:
+                {
+                    // Each page gets the part of the layer that falls on it, drawn with the whole layer's transform.
+                    var parts = new SortedDictionary<int, List<Placed>>();
+                    foreach (var o in layer.Ops) Distribute(o, parts);
+                    foreach (var (p, items) in parts) Target(into, p).Add(new Placed(new TransformBlock(layer, items), 0, 0));
+                    break;
+                }
                 case GroupOp g:
-                    foreach (var o in g.Ops) Distribute(o);
+                    foreach (var o in g.Ops) Distribute(o, into);
                     break;
                 case RectOp r:
-                    if (r.W > 0 && r.H > 0) AddSplit(r, r.Y, r.Y + r.H);
+                    if (r.W > 0 && r.H > 0) AddSplit(r, r.Y, r.Y + r.H, into);
                     break;
                 case BorderRectOp br:
-                    if (PageOf(br.Y) == PageOf(br.Y + br.H - 0.5f)) PageList(PageOf(br.Y)).Add(new Placed(br, br.Y, br.Y + br.H));
-                    else foreach (var side in br.Sides()) Distribute(side); // a box split by a page break is open at the break
+                    if (PageOf(br.Y) == PageOf(br.Y + br.H - 0.5f)) Target(into, PageOf(br.Y)).Add(new Placed(br, br.Y, br.Y + br.H));
+                    else foreach (var side in br.Sides()) Distribute(side, into); // a box split by a page break is open at the break
                     break;
                 case BackgroundOp bg:
                 {
                     var (x0, y0, x1, y1) = bg.Painted();
-                    if (x1 > x0 && y1 > y0) AddSplit(bg, y0, y1);
+                    if (x1 > x0 && y1 > y0) AddSplit(bg, y0, y1, into);
                     break;
                 }
                 case LineOp l:
-                    if (l.X1 == l.X2) AddSplit(l, l.Y1, l.Y2);
-                    else PageList(PageOf(l.Y1)).Add(new Placed(l, l.Y1, l.Y2));
+                    if (l.X1 == l.X2) AddSplit(l, l.Y1, l.Y2, into);
+                    else Target(into, PageOf(l.Y1)).Add(new Placed(l, l.Y1, l.Y2));
                     break;
                 case TextOp t:
-                    PageList(PageOf(t.LineTop)).Add(new Placed(t, 0, 0));
+                    Target(into, PageOf(t.LineTop)).Add(new Placed(t, 0, 0));
                     break;
                 case ImageOp im:
-                    PageList(PageOf(im.Y)).Add(new Placed(im, 0, 0));
+                    Target(into, PageOf(im.Y)).Add(new Placed(im, 0, 0));
                     break;
                 case SvgOp sv:
-                    PageList(PageOf(sv.Y)).Add(new Placed(sv, 0, 0));
+                    Target(into, PageOf(sv.Y)).Add(new Placed(sv, 0, 0));
                     break;
                 case LinkOp lk:
-                    if (lk.W > 0 && lk.H > 0) AddSplit(lk, lk.Y, lk.Y + lk.H); // a link box split by a page break is clickable on both pages
+                    if (lk.W > 0 && lk.H > 0) AddSplit(lk, lk.Y, lk.Y + lk.H, into); // a link box split by a page break is clickable on both pages
                     break;
                 case CircleOp c:
-                    PageList(PageOf(c.Cy - c.R)).Add(new Placed(c, 0, 0));
+                    Target(into, PageOf(c.Cy - c.R)).Add(new Placed(c, 0, 0));
                     break;
             }
         }
-        foreach (var op in ops) Distribute(op);
+        foreach (var op in ops) Distribute(op, null);
         int pageCount = Math.Max(pages.Count, Math.Max(1, PageOf(Math.Max(0, contentHeight - 0.5f)) + 1));
         while (pages.Count < pageCount) pages.Add(new List<Placed>());
 
@@ -182,12 +216,19 @@ internal sealed class PdfDocumentWriter
         {
             Cancellation.ThrowIfCancellationRequested();
             var list = bands[p] = new List<Placed>();
-            if (pageBands == null) continue;
-            void Flatten(DrawOp op)
+            if (pageBands == null && fixedOps == null) continue;
+            void Flatten(DrawOp op, List<Placed> list)
             {
                 switch (op)
                 {
-                    case GroupOp g: foreach (var o in g.Ops) Flatten(o); break;
+                    case LayerOp { Transform: not null } layer:
+                    {
+                        var items = new List<Placed>();
+                        foreach (var o in layer.Ops) Flatten(o, items);
+                        list.Add(new Placed(new TransformBlock(layer, items), 0, 0));
+                        break;
+                    }
+                    case GroupOp g: foreach (var o in g.Ops) Flatten(o, list); break;
                     case RectOp r: if (r.W > 0 && r.H > 0) list.Add(new Placed(r, r.Y, r.Y + r.H)); break;
                     case BorderRectOp br: list.Add(new Placed(br, br.Y, br.Y + br.H)); break;
                     case BackgroundOp bg:
@@ -201,7 +242,9 @@ internal sealed class PdfDocumentWriter
                     default: list.Add(new Placed(op, 0, 0)); break;
                 }
             }
-            foreach (var op in pageBands(p, pageCount)) Flatten(op);
+            if (pageBands != null) foreach (var op in pageBands(p, pageCount)) Flatten(op, list);
+            // position: fixed boxes repeat on every page, as in Chrome's print output.
+            if (fixedOps != null) foreach (var op in fixedOps) Flatten(op, list);
         }
 
         // 2. Collect resources.
@@ -209,7 +252,7 @@ internal sealed class PdfDocumentWriter
         var images = new List<PdfImage>();
         var imageIds = new Dictionary<PdfImage, int>();
         foreach (var page in pages.Concat(bands))
-            foreach (var p in page)
+            foreach (var p in Leaves(page))
             {
                 if (p.Op is TextOp t) CollectFonts(t, usedFonts);
                 else if (p.Op is SvgOp sv)
@@ -753,6 +796,18 @@ internal sealed class PdfDocumentWriter
 
     // ------------------------------------------------------------------ content streams
 
+    /// <summary>After Q: the colours and text state set inside are gone, so the next op writes its own.</summary>
+    private void InvalidateState()
+    {
+        _fill = 1;
+        _stroke = 1;
+        _textFont = null;
+        _textSize = -1;
+        _tw = _tc = float.NaN;
+        _tr = -1;
+        _lineWidth = -1;
+    }
+
     private void ResetState()
     {
         _fill = CssColor.Black;
@@ -846,6 +901,21 @@ internal sealed class PdfDocumentWriter
                 EndText(b);
                 WriteBackground(b, bg, placed, pageTop, imageIds);
                 break;
+            case TransformBlock tb:
+            {
+                EndText(b);
+                // The layer's y-down transform about its origin, mapped into PDF space (y up).
+                var m = tb.Layer.Transform!.Value;
+                float px = PX(tb.Layer.OriginX), py = PY(tb.Layer.OriginY, pageTop);
+                float e = px - m.A * px + m.C * py + m.E, f = py + m.B * px - m.D * py - m.F;
+                b.Ascii("q ").Num6(m.A).Sp().Num6(-m.B).Sp().Num6(-m.C).Sp().Num6(m.D).Sp().Num(e).Sp().Num(f).Ascii(" cm\n");
+                foreach (var item in tb.Items)
+                    if (item.Op is not LinkOp) WriteOp(b, item, pageTop, imageIds);
+                EndText(b);
+                b.Ascii("Q\n");
+                InvalidateState();
+                break;
+            }
             case LineOp l:
             {
                 EndText(b);

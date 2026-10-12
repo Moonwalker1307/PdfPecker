@@ -19,6 +19,7 @@ internal sealed partial class LayoutEngine
     private int _currentListIndex;
     private float _lastBaseline = float.NaN;
     private float _lastBoxRight; // right border edge (plus nothing else) of the last block box laid out
+    private float _lastBoxX, _lastBoxTop, _lastBoxW, _lastBoxH; // border box of the last block box laid out
     private readonly Dictionary<Element, (float Min, float Max)> _intrinsicCache = new();
 
     public readonly Dictionary<string, float> Anchors = new(StringComparer.Ordinal);
@@ -51,7 +52,12 @@ internal sealed partial class LayoutEngine
     }
 
     public float Layout(Element document, float width)
-        => LayoutFlow(document, 0, 0, width);
+    {
+        float bottom = LayoutFlow(document, 0, 0, width);
+        if (_floats.Any && _floats.Bottom > bottom) bottom = _floats.Bottom; // the root contains its floats
+        FinishRoot(width);
+        return bottom;
+    }
 
     /// <summary>Lays out a running header or footer on its own, unpaginated, at y = 0. Returns its height including margins.</summary>
     public float LayoutBand(Element band, float width)
@@ -59,7 +65,9 @@ internal sealed partial class LayoutEngine
         _paginate = false;
         var s = band.Style;
         float mt = s.MarginTop.IsAuto ? 0 : s.MarginTop.Resolve(width), mb = s.MarginBottom.IsAuto ? 0 : s.MarginBottom.Resolve(width);
-        return LayoutBlockBox(band, 0, mt, width, shrinkToFit: false) + mb;
+        float bottom = LayoutBlockBox(band, 0, mt, width, shrinkToFit: false) + mb;
+        FinishRoot(width);
+        return bottom;
     }
 
     // ------------------------------------------------------------------ pagination helpers
@@ -87,9 +95,10 @@ internal sealed partial class LayoutEngine
 
     private bool CrossesPage(float top, float bottom) => _paginate && bottom - top > Eps && PageOf(top) != PageOf(bottom - 0.5f);
 
-    private void Truncate(int count)
+    private void Truncate(int count, bool keepFloats = false)
     {
         if (_ops.Count > count) _ops.RemoveRange(count, _ops.Count - count);
+        if (!keepFloats) _floats.Truncate(count);
     }
 
     // ------------------------------------------------------------------ block formatting
@@ -108,7 +117,7 @@ internal sealed partial class LayoutEngine
     {
         foreach (var c in e.Children)
         {
-            if (c is not Element ce || ce.Style == null || ce.Detached) continue;
+            if (c is not Element ce || ce.Style == null || ce.Detached || ce.Style.Floated || ce.Style.OutOfFlow) continue;
             var d = ce.Style.Display;
             if (d == Display.None || IsAtomicInline(d)) continue;
             if (d != Display.Inline) return true;
@@ -169,8 +178,9 @@ internal sealed partial class LayoutEngine
                 e = (Element)child;
                 var es = e.Style;
                 if (es == null || es.Display == Display.None || e.Detached) continue;
-                if (IsInlineLevel(e) && !(es.Floated && e.Name != "img"))
+                if (IsInlineLevel(e) || (es.Floated || es.OutOfFlow) && run is { Count: > 0 })
                 {
+                    // Floats and absolutely positioned boxes among inline content are placed as the lines reach them.
                     (run ??= new List<Node>()).Add(child);
                     continue;
                 }
@@ -200,6 +210,18 @@ internal sealed partial class LayoutEngine
             if (e == null) break;
 
             var s = e.Style;
+            if (s.OutOfFlow)
+            {
+                // Its static position: where its top margin edge would be in the flow.
+                float smt = s.MarginTop.Resolve(w);
+                QueueAbsolute(e, x, y + CollapseMargins(pendingMargin, smt) - smt);
+                continue;
+            }
+            if (s.Floated)
+            {
+                PlaceFloat(MeasureFloat(e, w), y + pendingMargin, x, w);
+                continue;
+            }
             var mark = new FlowMark
             {
                 Index = i, OpsCount = _ops.Count, ListIndex = listIndex, CurrentListIndex = _currentListIndex,
@@ -224,10 +246,13 @@ internal sealed partial class LayoutEngine
                 : CollapseMargins(s.MarginTop.Resolve(w), LeadingMargin(e, w));
             firstBlock = false;
             float top = y + CollapseMargins(pendingMargin, mt);
+            if (s.ClearLeft || s.ClearRight) top = Cleared(s, top);
             if (s.PageBreakBefore || forcedAt == i) top = NextPage(top);
 
             int boxOps = _ops.Count;
-            float bottom = LayoutBlockBox(e, x, top, w, shrinkToFit: false);
+            float bottom;
+            if (FloatsBelow(top) && AvoidsFloats(e)) bottom = LayoutBesideFloats(e, x, ref top, w);
+            else bottom = LayoutBlockBox(e, x, top, w, shrinkToFit: false);
             float trailing = _boxTrailing;
             if (joins && KeepTogetherFails(chain, boxOps, top, forcedAt))
             {
@@ -316,7 +341,8 @@ internal sealed partial class LayoutEngine
     private static bool IsPlainFlow(Element e)
     {
         var s = e.Style;
-        return s.Display is Display.Block or Display.ListItem && !s.IsMultiColumn && !s.Floated && e.Name is not ("img" or "svg" or "hr");
+        return s.Display is Display.Block or Display.ListItem && !s.IsMultiColumn && !s.Floated && !s.OutOfFlow && !s.FormattingRoot
+               && e.Name is not ("img" or "svg" or "hr");
     }
 
     private static bool CollapsesTop(Element e)
@@ -343,8 +369,8 @@ internal sealed partial class LayoutEngine
                 return null;
             }
             var c = (Element)child;
-            if (c.Style == null || c.Style.Display == Display.None || c.Detached) continue;
-            if (IsInlineLevel(c) || c.Style.Floated || c.Style.PageBreakBefore) return null;
+            if (c.Style == null || c.Style.Display == Display.None || c.Detached || c.Style.OutOfFlow || c.Style.Floated) continue;
+            if (IsInlineLevel(c) || c.Style.PageBreakBefore || c.Style.ClearLeft || c.Style.ClearRight) return null;
             return c;
         }
         return null;
@@ -375,6 +401,7 @@ internal sealed partial class LayoutEngine
             bottom = table ? LayoutTable(e, x, ny, availW) : LayoutBlockBoxCore(e, x, ny, availW, shrinkToFit);
         }
         if (table) _boxTrailing = 0;
+        if (s.Layered) FinishLayered(e, opsStart, availW);
         return bottom;
     }
 
@@ -451,6 +478,14 @@ internal sealed partial class LayoutEngine
         var group = new GroupOp();
         _ops.Add(group);
 
+        // Positioned and transformed boxes are the containing block of their absolutely positioned descendants.
+        CbFrame? cbFrame = null;
+        if (s.Positioned || s.Transform != null) _frames.Add(cbFrame = new CbFrame { Transformed = s.Transform != null });
+        // Boxes that start a block formatting context keep their floats inside (CSS 2.1 §9.4.1).
+        bool formattingRoot = shrinkToFit || hasWOverride || hasHOverride || s.Floated || s.OutOfFlow || s.FormattingRoot
+                              || s.IsFlex || s.IsGrid || s.IsMultiColumn || s.Display is Display.TableCell or Display.TableCaption
+                              || e.Parent?.Style is { IsFlex: true } or { IsGrid: true };
+
         float cx = bx + bl + pl;
         float cy = y + bt + pt;
 
@@ -487,7 +522,9 @@ internal sealed partial class LayoutEngine
             // A box that is not a formatting context root shares its top and bottom margins with its children's.
             bool joinsChildren = !shrinkToFit && !hasWOverride && !hasHOverride;
             _absorbTop = joinsChildren && FirstBlockChild(e) != null;
+            var outerFloats = formattingRoot ? EnterFormattingContext() : null;
             contentBottom = LayoutContent(e, cx, cy, contentW, definiteH, minH);
+            if (outerFloats != null) contentBottom = LeaveFormattingContext(outerFloats, contentBottom);
             _absorbTop = false;
             if (joinsChildren && CollapsesBottom(e) && !s.IsFlex && !s.IsGrid)
             {
@@ -520,7 +557,16 @@ internal sealed partial class LayoutEngine
 
         float bottom = cy + contentH + pb + bb;
         BoxPainter.Paint(group, s, bx, y, used, bottom - y, _images, availW);
+        if (cbFrame != null)
+        {
+            _frames.Remove(cbFrame);
+            LayoutAbsolutes(cbFrame, bx + bl, y + bt, used - bl - br, bottom - y - bt - bb);
+        }
         _lastBoxRight = bx + used;
+        _lastBoxX = bx;
+        _lastBoxTop = y;
+        _lastBoxW = used;
+        _lastBoxH = bottom - y;
         if (e.Name == "a" && e.GetAttribute("href") is { Length: > 0 } href) _ops.Add(new LinkOp(bx, y, used, bottom - y, href));
         if (Headings != null && HeadingLevel(e.Name) is int level and > 0) RecordHeading(e, level, y, opsStart);
         _boxTrailing = trailing;
@@ -544,36 +590,12 @@ internal sealed partial class LayoutEngine
         {
             ListStyleType.Decimal => index.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".",
             ListStyleType.DecimalLeadingZero => index.ToString("00", System.Globalization.CultureInfo.InvariantCulture) + ".",
-            ListStyleType.LowerAlpha => Alpha(index, 'a') + ".",
-            ListStyleType.UpperAlpha => Alpha(index, 'A') + ".",
-            ListStyleType.LowerRoman => Roman(index).ToLowerInvariant() + ".",
-            ListStyleType.UpperRoman => Roman(index) + ".",
+            ListStyleType.LowerAlpha => Counters.Alpha(index, 'a') + ".",
+            ListStyleType.UpperAlpha => Counters.Alpha(index, 'A') + ".",
+            ListStyleType.LowerRoman => Counters.Roman(index).ToLowerInvariant() + ".",
+            ListStyleType.UpperRoman => Counters.Roman(index) + ".",
             _ => null,
         };
-
-    private static string Alpha(int n, char a)
-    {
-        if (n <= 0) return n.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        var s = "";
-        while (n > 0)
-        {
-            n--;
-            s = (char)(a + n % 26) + s;
-            n /= 26;
-        }
-        return s;
-    }
-
-    private static string Roman(int n)
-    {
-        if (n <= 0 || n >= 4000) return n.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        int[] values = { 1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1 };
-        string[] numerals = { "M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I" };
-        var sb = new System.Text.StringBuilder();
-        for (int i = 0; i < values.Length; i++)
-            while (n >= values[i]) { sb.Append(numerals[i]); n -= values[i]; }
-        return sb.ToString();
-    }
 
     private void EmitMarker(float baseline, float lineTop)
     {
@@ -743,6 +765,8 @@ internal sealed partial class LayoutEngine
         public float Width, Height; // margin box
         public float Baseline = float.NaN;
         public bool ForcedBreaks;
+        public float BoxX, BoxY, BoxW, BoxH; // border box of the outermost box laid out
+        public List<(Element E, float X, float Y)>? Absolutes; // absolutely positioned boxes still waiting for their containing block
     }
 
     private Captured Capture(Func<float> layout)
@@ -753,6 +777,10 @@ internal sealed partial class LayoutEngine
         float savedBaseline = _lastBaseline;
         var savedAnchors = _captureAnchors;
         float savedRight = _lastBoxRight;
+        var savedFloats = EnterFormattingContext();
+        var boundary = _boundaryPool.TryPop(out var pooled) ? pooled : new CbFrame { Boundary = true };
+        _frames.Add(boundary);
+        _lastBoxX = _lastBoxTop = _lastBoxW = _lastBoxH = 0;
         _ops = new List<DrawOp>();
         _paginate = false;
         _marker = null;
@@ -763,14 +791,22 @@ internal sealed partial class LayoutEngine
         try
         {
             float bottom = layout();
+            if (_floats.Any && _floats.Bottom > bottom) bottom = _floats.Bottom;
+            var absolutes = boundary.Pending.Count > 0 ? boundary.TakePending() : null;
             return new Captured
             {
                 Ops = _ops, AnchorIds = _captureAnchors, Height = bottom, Width = _lastBoxRight, Baseline = _lastBaseline,
                 ForcedBreaks = _forcedBreaks != breaks,
+                BoxX = _lastBoxX, BoxY = _lastBoxTop, BoxW = _lastBoxW, BoxH = _lastBoxH,
+                Absolutes = absolutes,
             };
         }
         finally
         {
+            _frames.Remove(boundary);
+            boundary.TakePending();
+            _boundaryPool.Push(boundary);
+            LeaveFormattingContext(savedFloats, 0);
             _ops = savedOps;
             _paginate = savedPaginate;
             _marker = savedMarker;
@@ -826,6 +862,8 @@ internal sealed partial class LayoutEngine
         if (c.AnchorIds != null)
             foreach (var id in c.AnchorIds)
                 if (Anchors.TryGetValue(id, out float ay)) SetAnchor(id, ay + dy);
+        if (c.Absolutes != null)
+            foreach (var (e, ax, ay) in c.Absolutes) QueueAbsolute(e, ax + dx, ay + dy);
     }
 }
 
