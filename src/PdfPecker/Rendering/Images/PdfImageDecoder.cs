@@ -96,6 +96,7 @@ internal static class PdfImageDecoder
         }
 
         int comps;
+        byte[]? jpxAlpha = null;
         if (imageFilter == "DCTDecode")
         {
             var jpg = JpegDecoder.Decode(data);
@@ -121,9 +122,34 @@ internal static class PdfImageDecoder
             comps = 1;
             cs ??= ColorSpace.Gray;
         }
+        else if (imageFilter == "JPXDecode")
+        {
+            var jpx = JpxDecoder.Decode(data);
+            if (jpx == null) return null;
+            width = jpx.Width;
+            height = jpx.Height;
+            data = jpx.Data;
+            comps = jpx.Components;
+            bpc = 8;
+            decodeArr = null; // ignored for JPEG 2000 images
+            if (cs == null || cs.Components != comps)
+                cs = jpx.Color switch { JpxColor.Gray => ColorSpace.Gray, JpxColor.Cmyk => ColorSpace.Cmyk, _ => ColorSpace.RgbSpace };
+            if (cs.Components != comps) return null;
+            if (file.GetInt(dict, "SMaskInData", 0) != 0) jpxAlpha = jpx.Alpha;
+        }
+        else if (imageFilter == "JBIG2Decode")
+        {
+            var globals = file.GetStream(imageParms, "JBIG2Globals");
+            var bits = Jbig2Decoder.Decode(data, globals != null ? file.DecodeStream(globals) : null, width, height);
+            if (bits == null) return null;
+            data = bits;
+            bpc = 1;
+            comps = 1;
+            cs ??= isMask ? null : ColorSpace.Gray;
+        }
         else if (imageFilter != null)
         {
-            return null; // JPX, JBIG2: not supported
+            return null;
         }
         else
         {
@@ -154,6 +180,13 @@ internal static class PdfImageDecoder
         img.Opaque = true;
 
         if (inline) return img;
+
+        if (jpxAlpha != null && file.Resolve(dict["SMask"]) is not PdfStream)
+        {
+            ApplyAlpha(pixels, jpxAlpha);
+            img.Opaque = false;
+            return img;
+        }
 
         // Soft mask (alpha), explicit stencil mask, or color-key mask.
         if (dict is PdfStream)

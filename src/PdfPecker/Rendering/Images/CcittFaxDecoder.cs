@@ -38,7 +38,23 @@ internal sealed class CcittFaxDecoder
         bool byteAlign = file.GetBool(parms, "EncodedByteAlign", false);
         bool blackIs1 = file.GetBool(parms, "BlackIs1", false);
         if (rows <= 0 || (long)columns * rows > PdfImageDecoder.MaxPixels) return null;
+        return DecodeCore(data, k, columns, rows, byteAlign, blackIs1, out _);
+    }
 
+    /// <summary>
+    /// Decodes T.6 (MMR) data as JBIG2 uses it: packed rows with 1 = black, starting at <paramref name="start"/>. Sets
+    /// <paramref name="end"/> to the byte after the data, skipping an end-of-block code.
+    /// </summary>
+    public static byte[] DecodeMmr(byte[] data, int start, int width, int height, out int end)
+    {
+        var slice = start == 0 ? data : data.AsSpan(Math.Min(start, data.Length)).ToArray();
+        var output = DecodeCore(slice, -1, width, height, false, true, out long bits);
+        end = start + (int)((bits + 7) >> 3);
+        return output;
+    }
+
+    private static byte[] DecodeCore(byte[] data, int k, int columns, int rows, bool byteAlign, bool blackIs1, out long bitsUsed)
+    {
         var dec = new CcittFaxDecoder(data);
         int rowBytes = (columns + 7) / 8;
         var output = new byte[rowBytes * rows];
@@ -86,11 +102,13 @@ internal sealed class CcittFaxDecoder
                 refLine[refCount + 1] = columns;
                 refCount += 2;
             }
+            if (k < 0 && dec.Peek(24) == 0x001001) dec._bit += 24;
         }
         catch (IndexOutOfRangeException)
         {
             // Corrupt data: keep the rows decoded so far.
         }
+        bitsUsed = Math.Min(dec._bit, dec._bitLen);
         // Rows never decoded stay 0: make them white.
         return output;
     }

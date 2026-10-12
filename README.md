@@ -307,9 +307,10 @@ What the renderer supports:
   all text rendering modes. The 14 standard fonts and non-embedded fonts are drawn with built-in Liberation and
   DejaVu-derived faces stretched to the document's widths.
 - **Images**: every bit depth and colour space (Gray, RGB, CMYK, Lab, ICC-based, Indexed, Separation, DeviceN),
-  baseline and progressive JPEG, CCITT fax, stencil masks, colour-key masks and soft masks.
+  baseline and progressive JPEG, JPEG 2000 (`JPXDecode`, including embedded alpha), JBIG2 (generic, text, symbol,
+  refinement and halftone regions, with `JBIG2Globals`), CCITT fax, stencil masks, colour-key masks and soft masks.
 
-Not supported yet: JPEG 2000 (`JPXDecode`) and JBIG2 images, which are left blank; predefined CJK CMaps and
+Not supported yet: predefined CJK CMaps and
 non-embedded CJK fonts; ICC profiles (ICC-based colours use their device equivalents).
 
 ## Website
