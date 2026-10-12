@@ -11,6 +11,7 @@ internal sealed class PageSetup
 {
     public float Width, Height;
     public float MarginTop, MarginRight, MarginBottom, MarginLeft;
+    public uint Background; // @page background colour, painted over the whole sheet
     public float BandTop, BandBottom; // space for running headers and footers at the top and bottom of the content area
     /// <summary>
     /// Size on paper of one layout point (PdfOptions.Scale). The other fields are in layout points, so the page is laid
@@ -136,7 +137,8 @@ internal sealed class PdfDocumentWriter
 
     public byte[] Write(List<DrawOp> ops, float contentHeight, IReadOnlyDictionary<string, float> anchors, uint pageBackground,
         string? title, string? author, string? subject, string? footerTemplate, string? headerTemplate,
-        Func<int, int, List<DrawOp>>? pageBands = null, IReadOnlyList<OutlineHeading>? outline = null, List<DrawOp>? fixedOps = null)
+        Func<int, int, List<DrawOp>>? pageBands = null, IReadOnlyList<OutlineHeading>? outline = null, List<DrawOp>? fixedOps = null,
+        Func<int, List<DrawOp>>? pageCanvas = null)
     {
         float H = _page.FlowHeight;
         int maxPages = Math.Max(1, MaxPages);
@@ -231,12 +233,15 @@ internal sealed class PdfDocumentWriter
 
         // Running headers and footers, laid out per page now that the page count is known. Their ops use y from the
         // top of the content area.
+        // The canvas background of each page goes first, also in y from the top of the content area.
         var bands = new List<Placed>[pageCount];
+        var canvas = new List<Placed>[pageCount];
         for (int p = 0; p < pageCount; p++)
         {
             Cancellation.ThrowIfCancellationRequested();
             var list = bands[p] = new List<Placed>();
-            if (pageBands == null && fixedOps == null) continue;
+            canvas[p] = new List<Placed>();
+            if (pageBands == null && fixedOps == null && pageCanvas == null) continue;
             void Flatten(DrawOp op, List<Placed> list)
             {
                 switch (op)
@@ -263,6 +268,7 @@ internal sealed class PdfDocumentWriter
                     default: list.Add(new Placed(op, 0, 0)); break;
                 }
             }
+            if (pageCanvas != null) foreach (var op in pageCanvas(p)) Flatten(op, canvas[p]);
             if (pageBands != null) foreach (var op in pageBands(p, pageCount)) Flatten(op, list);
             // position: fixed boxes repeat on every page, as in Chrome's print output.
             if (fixedOps != null) foreach (var op in fixedOps) Flatten(op, list);
@@ -272,7 +278,7 @@ internal sealed class PdfDocumentWriter
         var usedFonts = new bool[StandardFont.All.Length];
         var images = new List<PdfImage>();
         var imageIds = new Dictionary<PdfImage, int>();
-        foreach (var page in pages.Concat(bands))
+        foreach (var page in pages.Concat(bands).Concat(canvas))
             foreach (var p in Leaves(page))
             {
                 if (p.Op is TextOp t) CollectFonts(t, usedFonts);
@@ -458,6 +464,8 @@ internal sealed class PdfDocumentWriter
                 SetFill(content, pageBackground);
                 content.Ascii("0 0 ").Num(_page.Width).Sp().Num(_page.Height).Ascii(" re f\n");
             }
+            _yOrigin = _page.MarginTop;
+            foreach (var placed in canvas[p]) WriteOp(content, placed, 0, imageIds);
             if (wm is { Behind: true }) content.Ascii("q /Wm Do Q\n");
             var pageLinks = new List<(Placed Link, float Origin, float PageTop)>();
             _yOrigin = _page.MarginTop + _page.BandTop;
