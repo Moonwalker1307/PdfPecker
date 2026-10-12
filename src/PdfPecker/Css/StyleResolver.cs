@@ -709,6 +709,10 @@ internal sealed class StyleResolver
             case "visibility":
                 s.Visible = lower is not ("hidden" or "collapse");
                 break;
+            case "box-shadow":
+                if (inherit) s.BoxShadows = parent.BoxShadows;
+                else if (BoxShadow.Parse(v, em, _rootFontSize, _vw, _vh) is { } shadows) s.BoxShadows = shadows.Length > 0 ? shadows : null;
+                break;
             case "table-layout":
                 s.TableLayoutFixed = lower == "fixed";
                 break;

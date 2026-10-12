@@ -182,7 +182,7 @@ options.UseSystemFonts = true;   // looks in C:\Windows\Fonts, /Library/Fonts, /
 ```csharp
 var options = new PdfOptions
 {
-    // A diagonal stamp on every page. Also: Image (PNG/JPEG bytes), FontSize, Angle, Opacity, Bold, Behind.
+    // A diagonal stamp on every page. Also: Image (PNG/JPEG bytes), FontSize, LetterSpacing, Angle, Opacity, Bold, Behind.
     Watermark = new PdfWatermark { Text = "WATERMARK", Color = "#c00000", Opacity = 0.25f },
 
     // AES-256 encryption (PDF 2.0 / Acrobat X and later). Without an OwnerPassword a random one is used,
@@ -389,8 +389,8 @@ Selectors: type, `.class`, `#id`, `*`, attribute selectors (`[a]`, `=`, `~=`, `|
 
 | Area | Properties |
 | --- | --- |
-| Box model | `display` (block, inline, inline-block, flex, inline-flex, grid, inline-grid, list-item, table parts, none), `margin`, `padding`, `border` (solid, dashed, dotted, double), `width`, `height`, `min-`/`max-width`, `min-height`, `box-sizing` |
-| Text | `color`, `font`, `font-family`, `font-size`, `font-weight`, `font-style`, `line-height`, `text-align` (incl. justify), `text-decoration`, `text-transform`, `text-indent`, `letter-spacing`, `word-spacing`, `white-space`, `overflow-wrap`/`word-wrap`, `word-break` (`break-all`), `vertical-align`. Lines break as in Chrome: at spaces, after hyphens and dashes, at `&shy;` (showing a hyphen) and `&#8203;`; a word too wide for its line overflows unless `overflow-wrap` or `word-break` allows breaking it. `line-height: normal` comes from the font's own metrics, rounded to whole pixels as Chrome does, and border widths snap to whole pixels |
+| Box model | `display` (block, inline, inline-block, flex, inline-flex, grid, inline-grid, list-item, table parts, none), `margin`, `padding`, `border` (solid, dashed, dotted, double), `box-shadow` (outer shadows; a blur is drawn as fading bands, since the PDF has no transparency), `width`, `height`, `min-`/`max-width`, `min-height`, `box-sizing` |
+| Text | `color`, `font`, `font-family`, `font-size`, `font-weight`, `font-style`, `line-height`, `text-align` (incl. justify), `text-decoration`, `text-transform`, `text-indent`, `letter-spacing`, `word-spacing`, `white-space`, `overflow-wrap`/`word-wrap`, `word-break` (`break-all`), `vertical-align`. Lines break as in Chrome: at spaces, after hyphens and dashes, at `&shy;` (showing a hyphen) and `&#8203;`; a word too wide for its line overflows unless `overflow-wrap` or `word-break` allows breaking it. `line-height: normal` comes from the font's own metrics, rounded to whole pixels as Chrome does, and border widths snap to whole pixels. Text is kerned as in Chrome: from the font's GPOS or `kern` table, and for the standard fonts from the Liberation fonts browsers use in their place |
 | Backgrounds | `background-color`, `background-image` and `background` with `url()` images (PNG with alpha, JPEG), `linear-gradient()`, `radial-gradient()`, `repeating-linear-gradient()` and `repeating-radial-gradient()` (several layers allowed); `background-repeat` (incl. `space`, `round`), `background-position` (incl. edge offsets like `right 10px bottom 5px`), `background-size` (`cover`, `contain`, lengths), `background-origin`, `background-clip`. Repeated images are written once as PDF tiling patterns. `url()` in a linked stylesheet is relative to the stylesheet and follows the same file access rules as `<img>`. `opacity` on SVG |
 | Flexbox | `flex-direction`, `flex-wrap`, `flex-flow`, `flex`, `flex-grow`/`-shrink`/`-basis`, `order`, `justify-content`, `align-items`, `align-self`, `align-content`, `gap`, `margin: auto` |
 | Grid | `grid-template-columns`/`-rows` (lengths, `%`, `fr`, `auto`, `min-content`, `max-content`, `minmax()`, `fit-content()`, `repeat()` incl. `auto-fill`/`auto-fit`), `grid-auto-rows`/`-columns`, `grid-auto-flow`, `grid-template-areas`, `grid-template`, named lines (`[name]`), `grid-column`/`-row` (line numbers, names and `span`), `grid-area` (incl. area names), `gap`, `justify-items`/`-self`, `align-items`/`-self`, `justify-content`, `align-content`, `place-*` |
@@ -398,11 +398,11 @@ Selectors: type, `.class`, `#id`, `*`, attribute selectors (`[a]`, `=`, `~=`, `|
 | Variables | custom properties (`--name: value`) and `var(--name, fallback)`, anywhere including shorthands |
 | SVG | `fill`, `stroke`, `stroke-width`, `fill-opacity`, `stroke-opacity`, `fill-rule`, `stroke-linecap`, `stroke-linejoin`, `stroke-miterlimit`, `clip-path`, `clip-rule`, `text-anchor`, `dominant-baseline` (as CSS or presentation attributes) |
 | Lists | `list-style-type` (disc, circle, square, decimal, decimal-leading-zero, alpha, roman, none), `list-style` |
-| Tables | `border-collapse`, `border-spacing`, cell `vertical-align`, automatic column widths, a table `height` shared out over the rows |
+| Tables | `border-collapse` (each shared border drawn once, the wider one winning), `border-spacing`, cell `vertical-align`, automatic column widths, `table-layout: fixed`, a table `height` shared out over the rows |
 | Paging | `page-break-before`/`after`/`inside`, `break-before`/`after`/`inside` (`always`, `page`, `avoid`), `orphans`, `widows`, `@page` size and margins |
 
 Units: `px`, `pt`, `em`, `rem`, `%`, `mm`, `cm`, `in`, `pc`, `ex`, `ch`, `vw`, `vh`, `vmin`, `vmax` (the viewport is
-the page's content area, minus any running header and footer). Colours: names, `#rgb`, `#rrggbb`,
+the page's content area, minus any running header and footer, in whole pixels as in Chrome). Colours: names, `#rgb`, `#rrggbb`,
 `#rrggbbaa`, `rgb()`, `rgba()`, `hsl()`, `hsla()`.
 
 **Pagination**: lines, images and table rows are never cut in half at a page boundary; table header rows repeat on
@@ -452,9 +452,9 @@ These are deliberate scope choices for speed and size; they are the first candid
 - Without registered fonts or `EmbedStandardFonts`, text uses the standard PDF fonts, so characters are limited to
   the Windows-1252 set (Western European languages); other characters are replaced with `?`. The bundled Liberation
   fonts add Central European, Greek and Cyrillic, but not CJK or other scripts: register fonts for those.
-- Fonts: no text shaping (ligatures, kerning, Arabic and Indic scripts), no right-to-left text, no WOFF2, and variable
+- Fonts: no text shaping beyond pair kerning (no ligatures, Arabic or Indic scripts), no right-to-left text, no WOFF2, and variable
   fonts use their default instance. SVG `<text>` uses the standard fonts (embedded as Liberation for PDF/A).
-- No JavaScript, forms, `float`, `position`, `::before`/`::after`, `border-radius`, shadows, transforms or GIF/WebP
+- No JavaScript, forms, `float`, `position`, `::before`/`::after`, `border-radius`, inset shadows, transforms or GIF/WebP
   images. SVG files in `<img>` are not drawn.
 - Inline SVG: no embedded images, masks, patterns, markers or filters; `<text>` uses only the first value of
   position lists and no `textPath` layout. Gradient stops with transparency are blended onto white (or, for CSS, onto

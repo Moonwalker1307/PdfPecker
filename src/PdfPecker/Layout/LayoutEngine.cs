@@ -586,13 +586,17 @@ internal sealed partial class LayoutEngine
         {
             var font = s.Font;
             float tw = font.Measure(m.Text, size);
-            float gap = size * 0.4f;
+            float gap = font.CharWidth(' ', size); // Chrome's marker text ends with a space: "1. "
             _ops.Add(new TextOp(m.ContentX - gap - tw, baseline, lineTop, font, size, s.Color, m.Text, 0, 0));
             return;
         }
-        float r = size * 0.17f;
-        float cxm = m.ContentX - size * 0.75f;
-        float cym = baseline - size * 0.27f;
+        // Chrome's symbol markers, in whole pixels from the font's rounded ascent: a square of side (2/3 ascent + 1) / 2,
+        // 1px into a marker box that ends 1 + 7px (the marker padding) before the content.
+        s.Font.LineMetrics(size, out float ascentPt, out _);
+        int ascent = (int)MathF.Round(ascentPt / 0.75f), offset = ascent * 2 / 3, side = (offset + 1) / 2;
+        float r = side * 0.75f / 2;
+        float cxm = m.ContentX - (offset + 8 - 1) * 0.75f + r;
+        float cym = baseline - (ascent - 3 * (ascent - offset) / 2) * 0.75f + r;
         switch (m.Type)
         {
             case ListStyleType.Disc:

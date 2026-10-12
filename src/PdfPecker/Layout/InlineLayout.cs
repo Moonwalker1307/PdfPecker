@@ -187,7 +187,7 @@ internal sealed partial class LayoutEngine
             return;
         }
 
-        if (CssColor.IsVisible(s.BackgroundColor)) deco = s;
+        if (CssColor.IsVisible(s.BackgroundColor) || s.BoxShadows != null) deco = s;
         float left = s.PaddingLeft.Resolve(0) + s.BorderLeft + (s.MarginLeft.IsAuto ? 0 : s.MarginLeft.Resolve(0));
         float right = s.PaddingRight.Resolve(0) + s.BorderRight + (s.MarginRight.IsAuto ? 0 : s.MarginRight.Resolve(0));
         if (left > 0) { var it_ = Rent(ItemKind.Spacer, s); it_.Width = left; it_.Href = href; it_.Deco = deco; st.Items.Add(it_); }
@@ -889,7 +889,13 @@ internal sealed partial class LayoutEngine
             deco.Font.LineMetrics(deco.FontSize, out float asc, out float desc);
             float top = baseline + BaselineShift(deco) - asc - deco.PaddingTop.Resolve(0);
             float h = asc + desc + deco.PaddingTop.Resolve(0) + deco.PaddingBottom.Resolve(0);
-            _ops.Add(new RectOp(xs[start], top, xs[i] - xs[start], h, deco.BackgroundColor));
+            if (deco.BoxShadows != null)
+            {
+                var shadows = new GroupOp();
+                BoxPainter.PaintShadows(shadows, deco, xs[start], top, xs[i] - xs[start], h);
+                _ops.Add(shadows);
+            }
+            if (CssColor.IsVisible(deco.BackgroundColor)) _ops.Add(new RectOp(xs[start], top, xs[i] - xs[start], h, deco.BackgroundColor));
         }
     }
 

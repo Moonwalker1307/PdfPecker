@@ -140,6 +140,10 @@ internal sealed class PdfDocumentWriter
                 case RectOp r:
                     if (r.W > 0 && r.H > 0) AddSplit(r, r.Y, r.Y + r.H);
                     break;
+                case BorderRectOp br:
+                    if (PageOf(br.Y) == PageOf(br.Y + br.H - 0.5f)) PageList(PageOf(br.Y)).Add(new Placed(br, br.Y, br.Y + br.H));
+                    else foreach (var side in br.Sides()) Distribute(side); // a box split by a page break is open at the break
+                    break;
                 case BackgroundOp bg:
                 {
                     var (x0, y0, x1, y1) = bg.Painted();
@@ -185,6 +189,7 @@ internal sealed class PdfDocumentWriter
                 {
                     case GroupOp g: foreach (var o in g.Ops) Flatten(o); break;
                     case RectOp r: if (r.W > 0 && r.H > 0) list.Add(new Placed(r, r.Y, r.Y + r.H)); break;
+                    case BorderRectOp br: list.Add(new Placed(br, br.Y, br.Y + br.H)); break;
                     case BackgroundOp bg:
                     {
                         var (_, y0, _, y1) = bg.Painted();
@@ -367,7 +372,10 @@ internal sealed class PdfDocumentWriter
             WriteWatermark(watermarkId, wm, wmText, fontDict, wmImage);
         }
 
-        // Pages, contents, annotations.
+        // Pages, contents, annotations. A scaled page is written at the size Chrome gives the paper (see PaperSize).
+        float paperW = _page.Width * _page.Scale, paperH = _page.Height * _page.Scale;
+        if (_page.Scale != 1) { paperW = PaperSize(paperW); paperH = PaperSize(paperH); }
+        float paperDy = _paperDy = paperH - _page.Height * _page.Scale;
         var content = new ByteBuffer(32 * 1024);
         var annotations = new List<(int Id, Placed Link, float Origin, float PageTop)>();
         for (int p = 0; p < pageCount; p++)
@@ -377,9 +385,9 @@ internal sealed class PdfDocumentWriter
             ResetState();
             if (_page.Scale != 1)
             {
-                // Num keeps 3 decimals, too few for a scale such as 0.99916.
+                // Num keeps 3 decimals, too few for a scale such as 0.99916. The content keeps to the top of the page.
                 string k = _page.Scale.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
-                content.Ascii("q ").Ascii(k).Ascii(" 0 0 ").Ascii(k).Ascii(" 0 0 cm\n");
+                content.Ascii("q ").Ascii(k).Ascii(" 0 0 ").Ascii(k).Ascii(" 0 ").Num(paperDy).Ascii(" cm\n");
             }
             if (CssColor.IsVisible(pageBackground))
             {
@@ -419,7 +427,7 @@ internal sealed class PdfDocumentWriter
             }
 
             Begin(pageIds[p]).Ascii("<< /Type /Page /Parent ").Int(pagesId).Ascii(" 0 R /MediaBox [0 0 ")
-                .Num(_page.Width * _page.Scale).Sp().Num(_page.Height * _page.Scale).Ascii("] /Resources ").Int(resourcesId).Ascii(" 0 R /Contents ")
+                .Num(paperW).Sp().Num(paperH).Ascii("] /Resources ").Int(resourcesId).Ascii(" 0 R /Contents ")
                 .Int(contentIds[p]).Ascii(" 0 R");
             if (annotIds.Count > 0)
             {
@@ -440,7 +448,7 @@ internal sealed class PdfDocumentWriter
             float yTop = _page.Height - origin - (placed.Y0 - linkPageTop);
             float yBottom = yTop - (placed.Y1 - placed.Y0);
             float k = _page.Scale;
-            x1 *= k; x2 *= k; yTop *= k; yBottom *= k;
+            x1 *= k; x2 *= k; yTop = yTop * k + paperDy; yBottom = yBottom * k + paperDy;
             Begin(id).Ascii("<< /Type /Annot /Subtype /Link /Rect [").Num(x1).Sp().Num(yBottom).Sp().Num(x2).Sp().Num(yTop)
                 .Ascii("] /F 4 /Border [0 0 0] ");
             if (link.Target.StartsWith("#", StringComparison.Ordinal))
@@ -603,8 +611,18 @@ internal sealed class PdfDocumentWriter
         float h = _page.FlowHeight;
         int p = Math.Clamp((int)Math.Floor((y + 0.01f) / h), 0, _pageIds.Length - 1);
         float py = _page.Height - _page.MarginTop - _page.BandTop - (y - p * h);
-        _out.Ascii("[").Int(_pageIds[p]).Ascii(" 0 R /XYZ 0 ").Num(Math.Min(py, _page.Height) * _page.Scale).Ascii(" null]");
+        _out.Ascii("[").Int(_pageIds[p]).Ascii(" 0 R /XYZ 0 ").Num(Math.Min(py, _page.Height) * _page.Scale + _paperDy).Ascii(" null]");
     }
+
+    private float _paperDy; // how far a scaled page's content moves up to stay at the top of the paper
+
+    /// <summary>
+    /// A paper dimension as Chrome prints it: rounded to whole points, then to Chrome's 1/300 inch device units, so A4
+    /// is 594.96 x 841.92 pt. IronPDF, which uses Chrome, writes pages this size; pdfium fits each page to whole pixels,
+    /// so the same size makes it snap thin lines the same way.
+    /// </summary>
+    internal static float PaperSize(float pt)
+        => (float)(Math.Round(Math.Round(pt, MidpointRounding.AwayFromZero) * 300 / 72, MidpointRounding.AwayFromZero) * 0.24);
 
     private void WriteStream(int id, ReadOnlySpan<byte> data, bool compress, string? extraDict)
     {
@@ -663,15 +681,20 @@ internal sealed class PdfDocumentWriter
         double a = (wm.Angle ?? Math.Atan2(H, W) * 180 / Math.PI) * Math.PI / 180;
         float c = (float)Math.Cos(a), sn = (float)Math.Sin(a);
         const float lead = 1.15f, cap = 0.72f;
-        int maxUnits = 1;
-        foreach (var line in lines) maxUnits = Math.Max(maxUnits, font.MeasureUnits(line, 0, line.Length));
+        float ls = float.IsFinite(wm.LetterSpacing) ? Math.Clamp(wm.LetterSpacing, -100, 100) : 0;
+        int maxUnits = 1, maxChars = 0;
+        foreach (var line in lines)
+        {
+            int units = font.MeasureUnits(line, 0, line.Length);
+            if (units >= maxUnits) { maxUnits = units; maxChars = line.Length; }
+        }
         float size = wm.FontSize;
         if (size <= 0)
         {
-            // As large as fits in 80% of the page with the text block rotated.
-            float tw = maxUnits / 1000f, th = lead * (lines.Length - 1) + cap;
+            // As large as fits in 80% of the page with the text block rotated; letter spacing does not scale.
+            float tw = maxUnits / 1000f, th = lead * (lines.Length - 1) + cap, lsw = ls * maxChars;
             float ac = Math.Abs(c), asn = Math.Abs(sn);
-            size = Math.Min(0.8f * W / (tw * ac + th * asn), 0.8f * H / (tw * asn + th * ac));
+            size = Math.Min((0.8f * W - lsw * ac) / (tw * ac + th * asn), (0.8f * H - lsw * asn) / (tw * asn + th * ac));
             size = Math.Clamp(size, 4, 400);
         }
         uint color = CssColor.TryParse(wm.Color ?? "", CssColor.Black, out var parsed) ? parsed : 0xFF808080;
@@ -679,9 +702,10 @@ internal sealed class PdfDocumentWriter
         var ops = new List<TextOp>(lines.Length);
         for (int i = 0; i < lines.Length; i++)
         {
-            float xl = -font.Measure(lines[i], size) / 2;
+            // Centred on the letters: the spacing after the last one is left out.
+            float xl = -(font.Measure(lines[i], size) + ls * Math.Max(0, lines[i].Length - 1)) / 2;
             float yl = blockH / 2 - cap * size - i * lead * size;
-            ops.Add(new TextOp(xl, yl, 0, font, size, color, lines[i], 0, 0));
+            ops.Add(new TextOp(xl, yl, 0, font, size, color, lines[i], 0, ls));
         }
         return (ops, c, sn);
     }
@@ -711,6 +735,7 @@ internal sealed class PdfDocumentWriter
             foreach (var line in t.Lines)
             {
                 SetFill(b, line.Color);
+                if (_tc != line.CharSpacing) { _tc = line.CharSpacing; b.Num(line.CharSpacing).Ascii(" Tc\n"); }
                 WriteTextLine(b, line, line.X, line.Baseline);
             }
             b.Ascii("ET\n");
@@ -799,6 +824,24 @@ internal sealed class PdfDocumentWriter
                 b.Num(PX(x0)).Sp().Num(PY(bottom, pageTop)).Sp().Num(x1 - x0).Sp().Num(bottom - top).Ascii(" re f\n");
                 break;
             }
+            case BorderRectOp br:
+            {
+                EndText(b);
+                // Snapped like the edges of a filled box, then stroked along the middle of the border.
+                float x0 = SnapPx(br.X), x1 = SnapPx(br.X + br.W);
+                float top = pageTop + SnapPx(placed.Y0 - pageTop), bottom = pageTop + SnapPx(placed.Y1 - pageTop);
+                float lw = br.Width, half = lw / 2;
+                if (x1 - x0 <= lw || bottom - top <= lw)
+                {
+                    SetFill(b, br.Color);
+                    b.Num(PX(x0)).Sp().Num(PY(bottom, pageTop)).Sp().Num(x1 - x0).Sp().Num(bottom - top).Ascii(" re f\n");
+                    break;
+                }
+                if (_stroke != br.Color) { _stroke = br.Color; WriteColor(b, br.Color); b.Ascii(" RG\n"); }
+                if (_lineWidth != lw) { _lineWidth = lw; b.Num(lw).Ascii(" w\n"); }
+                b.Num(PX(x0 + half)).Sp().Num(PY(bottom - half, pageTop)).Sp().Num(x1 - x0 - lw).Sp().Num(bottom - top - lw).Ascii(" re S\n");
+                break;
+            }
             case BackgroundOp bg:
                 EndText(b);
                 WriteBackground(b, bg, placed, pageTop, imageIds);
@@ -835,7 +878,7 @@ internal sealed class PdfDocumentWriter
                 {
                     b.Ascii("q ");
                     WriteColor(b, c.Color);
-                    b.Ascii(" RG ").Num(Math.Max(0.5f, r * 0.3f)).Ascii(" w ");
+                    b.Ascii(" RG 0.75 w "); // 1px, as Chrome strokes a circle marker
                 }
                 b.Num(cx + r).Sp().Num(cy).Ascii(" m ");
                 b.Num(cx + r).Sp().Num(cy + k).Sp().Num(cx + k).Sp().Num(cy + r).Sp().Num(cx).Sp().Num(cy + r).Ascii(" c ");

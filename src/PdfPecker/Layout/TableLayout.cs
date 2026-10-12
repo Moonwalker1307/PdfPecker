@@ -38,6 +38,8 @@ internal sealed partial class LayoutEngine
         public float[] ColFixed = Array.Empty<float>(), ColPct = Array.Empty<float>();
         public float[] ColSpecFixed = Array.Empty<float>(), ColSpecPct = Array.Empty<float>(); // from <col> only
         public float[]? RowExtra; // per layout pass: height each row gets on top of its content, to fill the table's height
+        public CellModel?[,] Grid = new CellModel?[0, 0]; // the cell covering each row and column
+        public ComputedStyle TableStyle = null!;
     }
 
     private readonly Dictionary<Element, TableModel> _tables = new();
@@ -87,6 +89,13 @@ internal sealed partial class LayoutEngine
                 if (col > m.ColCount) m.ColCount = col;
             }
         }
+
+        m.TableStyle = table.Style;
+        m.Grid = new CellModel?[m.Rows.Count, m.ColCount];
+        foreach (var row in m.Rows)
+            foreach (var cell in row.Cells)
+                for (int rr = cell.Row; rr < cell.Row + cell.RowSpan && rr < m.Rows.Count; rr++)
+                    for (int cc = cell.Col; cc < cell.Col + cell.ColSpan && cc < m.ColCount; cc++) m.Grid[rr, cc] = cell;
 
         int n = m.ColCount;
         m.ColMin = new float[n];
@@ -391,7 +400,8 @@ internal sealed partial class LayoutEngine
 
         float tableBottom = cy + frameB;
         if (!s.Height.IsAuto && !s.Height.IsPercent && tableBottom - tableTop < s.Height.Value) tableBottom = tableTop + s.Height.Value;
-        BoxPainter.Paint(tableGroup, s, bx, tableTop, boxW, tableBottom - tableTop, _images, availW);
+        BoxPainter.Paint(tableGroup, s, bx, tableTop, boxW, tableBottom - tableTop, _images, availW,
+            collapse && m.Rows.Count > 0 ? TableSides(m) : BoxPainter.AllSides, collapsedCell: collapse);
         _lastBoxRight = bx + boxW;
         return tableBottom;
     }
@@ -469,7 +479,7 @@ internal sealed partial class LayoutEngine
             break;
         }
 
-        foreach (var cell in row.Ending) FinishCell(cell, rowBottom, collapse);
+        foreach (var cell in row.Ending) FinishCell(m, cell, rowBottom, collapse);
 
         var rs = row.Tr.Style;
         if (CssColor.IsVisible(rs.BackgroundColor) && row.Cells.Count + row.Ending.Count > 0)
@@ -503,7 +513,54 @@ internal sealed partial class LayoutEngine
             cell.NeededH = Math.Max(cell.NeededH, cs.Height.Value + (cs.BorderBox ? 0 : bt + pt + pb + bb));
     }
 
-    private void FinishCell(CellModel cell, float rowBottom, bool collapse)
+    /// <summary>
+    /// With collapsed borders, the sides of a cell that it draws: each shared border is drawn once, by the cell whose
+    /// border wins (the wider one; on a tie the cell above or to the left), and an outer border by the cell unless the
+    /// table's own border is wider. A row at the top of a page draws its top border again.
+    /// </summary>
+    private static int CollapsedSides(TableModel m, CellModel cell, bool atPageTop)
+    {
+        var s = cell.Td.Style;
+        var t = m.TableStyle;
+        int rows = m.Rows.Count, cols = m.ColCount;
+        int r0 = cell.Row, r1 = cell.Row + cell.RowSpan - 1, c0 = cell.Col, c1 = cell.Col + cell.ColSpan - 1;
+        int sides = 0;
+        if (atPageTop || (r0 == 0 ? s.BorderTop >= t.BorderTop : s.BorderTop > (m.Grid[r0 - 1, c0]?.Td.Style.BorderBottom ?? 0)))
+            sides |= BoxPainter.Top;
+        if (r1 >= rows - 1 ? s.BorderBottom >= t.BorderBottom : s.BorderBottom >= (m.Grid[r1 + 1, c0]?.Td.Style.BorderTop ?? 0))
+            sides |= BoxPainter.Bottom;
+        if (c0 == 0 ? s.BorderLeft >= t.BorderLeft : s.BorderLeft > (m.Grid[r0, c0 - 1]?.Td.Style.BorderRight ?? 0))
+            sides |= BoxPainter.Left;
+        if (c1 >= cols - 1 ? s.BorderRight >= t.BorderRight : s.BorderRight >= (m.Grid[r0, c1 + 1]?.Td.Style.BorderLeft ?? 0))
+            sides |= BoxPainter.Right;
+        return sides;
+    }
+
+    /// <summary>The sides of a collapsed table's own border that are wider than the cells' borders along them.</summary>
+    private static int TableSides(TableModel m)
+    {
+        var t = m.TableStyle;
+        float top = 0, bottom = 0, left = 0, right = 0;
+        int rows = m.Rows.Count, cols = m.ColCount;
+        for (int c = 0; c < cols && rows > 0; c++)
+        {
+            top = Math.Max(top, m.Grid[0, c]?.Td.Style.BorderTop ?? 0);
+            bottom = Math.Max(bottom, m.Grid[rows - 1, c]?.Td.Style.BorderBottom ?? 0);
+        }
+        for (int r = 0; r < rows && cols > 0; r++)
+        {
+            left = Math.Max(left, m.Grid[r, 0]?.Td.Style.BorderLeft ?? 0);
+            right = Math.Max(right, m.Grid[r, cols - 1]?.Td.Style.BorderRight ?? 0);
+        }
+        int sides = 0;
+        if (t.BorderTop > top) sides |= BoxPainter.Top;
+        if (t.BorderBottom > bottom) sides |= BoxPainter.Bottom;
+        if (t.BorderLeft > left) sides |= BoxPainter.Left;
+        if (t.BorderRight > right) sides |= BoxPainter.Right;
+        return sides;
+    }
+
+    private void FinishCell(TableModel m, CellModel cell, float rowBottom, bool collapse)
     {
         var cs = cell.Td.Style;
         float h = rowBottom - cell.Top;
@@ -518,8 +575,10 @@ internal sealed partial class LayoutEngine
             for (int i = cell.OpsStart; i < cell.OpsEnd && i < _ops.Count; i++) _ops[i].Offset(0, shift);
 
         float x = cell.X, y = cell.Top, w = cell.W;
+        int sides = BoxPainter.AllSides;
         if (collapse)
         {
+            sides = CollapsedSides(m, cell, AtPageTop(y));
             x -= cs.BorderLeft / 2;
             w += (cs.BorderLeft + cs.BorderRight) / 2;
             h += cs.BorderBottom / 2;
@@ -530,7 +589,7 @@ internal sealed partial class LayoutEngine
                 h += cs.BorderTop / 2;
             }
         }
-        BoxPainter.Paint(cell.Group!, cs, x, y, w, h, _images, w);
+        BoxPainter.Paint(cell.Group!, cs, x, y, w, h, _images, w, sides, collapsedCell: collapse);
     }
 
     // ------------------------------------------------------------------ intrinsic widths

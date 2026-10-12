@@ -209,8 +209,9 @@ public class ConversionTests
     {
         var content = AllContent(ConvertUncompressed("<div style='background:#00ff00;border:2px solid blue;height:50px'>x</div>"));
         Assert.Contains("0 1 0 rg", content);
-        Assert.Contains("0 0 1 rg", content);
+        Assert.Contains("0 0 1 RG", content); // a uniform border is stroked, as Chrome does
         Assert.Contains(" re f", content);
+        Assert.Contains(" re S", content);
     }
 
     [Fact]
