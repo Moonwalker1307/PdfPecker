@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using PdfPecker.Css;
 using PdfPecker.Html;
 using PdfPecker.Images;
@@ -375,6 +376,29 @@ public class LayoutFeatureTests
         Assert.Equal(pages, CountOf(content, "(Company header) Tj"));
         for (int p = 1; p <= pages; p++) Assert.Contains($"(Side {p} af {pages}) Tj", content);
         Assert.DoesNotContain("{page}", content);
+    }
+
+    [Fact]
+    public void TruncateBandsToWholePoints_rounds_the_declared_header_height_down()
+    {
+        // height="17mm" is 48.19pt; rounded down to 48pt, the flowing content starts 0.19pt higher.
+        const string html = """
+            <body style="margin:0"><header data-sticky-pdf-header height="17mm">H</header><p style="margin:0">Body</p></body>
+            """;
+        float exact = BodyBaseline(new PdfOptions());
+        float truncated = BodyBaseline(new PdfOptions { TruncateBandsToWholePoints = true });
+        Assert.Equal(17 / 25.4f * 72 - 48, truncated - exact, 0.02f);
+
+        // A height that is already whole on paper is kept.
+        Assert.Equal(BodyBaseline(new PdfOptions(), "48pt"), BodyBaseline(new PdfOptions { TruncateBandsToWholePoints = true }, "48pt"));
+
+        float BodyBaseline(PdfOptions options, string height = "17mm")
+        {
+            var content = AllContent(ConvertUncompressed(html.Replace("17mm", height), options));
+            var m = Regex.Match(content, @"(-?[\d.]+) Tm\s*(?:\[\(Body\)|\(Body\))");
+            Assert.True(m.Success, content);
+            return float.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        }
     }
 
     [Fact]
