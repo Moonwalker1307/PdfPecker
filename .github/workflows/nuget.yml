@@ -38,7 +38,6 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  VERSION_PREFIX: "1.0"
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
@@ -52,6 +51,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0 # the release tags give preview builds their version
 
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
@@ -69,7 +69,15 @@ jobs:
               exit 1
             fi
           else
-            version="$VERSION_PREFIX.$GITHUB_RUN_NUMBER-preview"
+            # Previews are pre-releases of the next patch after the latest release, so NuGet sorts them above it and
+            # below the next release: 1.1.1-preview.<run> after v1.1.0.
+            latest=$(git tag --list 'v[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)
+            if [[ "${latest#v}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              next="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
+            else
+              next="1.0.0"
+            fi
+            version="$next-preview.$GITHUB_RUN_NUMBER"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Version: $version" >> "$GITHUB_STEP_SUMMARY"
