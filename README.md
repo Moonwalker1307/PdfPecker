@@ -440,6 +440,7 @@ Selectors: type, `.class`, `#id`, `*`, attribute selectors (`[a]`, `=`, `~=`, `|
 | Grid | `grid-template-columns`/`-rows` (lengths, `%`, `fr`, `auto`, `min-content`, `max-content`, `minmax()`, `fit-content()`, `repeat()` incl. `auto-fill`/`auto-fit`), `grid-auto-rows`/`-columns`, `grid-auto-flow`, `grid-template-areas`, `grid-template`, named lines (`[name]`), `grid-column`/`-row` (line numbers, names and `span`), `grid-area` (incl. area names), `gap`, `justify-items`/`-self`, `align-items`/`-self`, `justify-content`, `align-content`, `place-*` |
 | Columns | `column-count`, `column-width`, `columns`, `column-gap` |
 | Variables | custom properties (`--name: value`) and `var(--name, fallback)`, anywhere including shorthands |
+| Math functions | `calc()`, `min()`, `max()` and `clamp()` for lengths and numbers, nested in any combination and mixing units (`calc(100% - 2em)`, `min(100%, 600px)`, `clamp(1rem, 2.5vw, 2rem)`), with `var()` inside them. Percentages resolve against the property's own reference (the containing block's width for `width` and margins, the parent's font size for `font-size`), so they work in widths, heights, margins, padding, flex bases, grid tracks, gaps, positions, translations, font sizes and borders |
 | Positioning | `float` and `clear`; `position` (`relative`, `absolute`, `fixed`; `sticky` is drawn as `relative`) with `top`, `right`, `bottom` and `left`; `z-index` |
 | Transparency | `opacity` (a block is painted as one PDF transparency group; an inline `<span>` fades its text and background), translucent colours everywhere (`rgba()`, `hsla()`, `#rrggbbaa`, `transparent`), gradients that fade to `transparent` (as a soft mask). PDF/A-2 and 3 allow all of this |
 | Transforms | `transform` (`translate()`, `translateX()`/`Y()`, `scale()`, `scaleX()`/`Y()`, `rotate()`, `skew()`, `skewX()`/`Y()`, `matrix()`) and `transform-origin` |
@@ -522,7 +523,9 @@ not listed in [What is supported](#what-is-supported) should be assumed missing.
 
 **CSS**
 
-- No `calc()`, `min()`, `max()` or `clamp()`; a declaration using them is ignored.
+- Math functions work on lengths and numbers only: not on angles (`rotate(calc(...))`) and not the newer ones (`round()`,
+  `mod()`, `sin()` and so on). A table column width that mixes a percentage with other units (`calc(50% - 10px)`) is
+  sized as `auto`.
 - `@import` is ignored (use `<link rel="stylesheet">`). Rules inside `@supports`, `@layer` and `@container` blocks
   are skipped, as are `@page :first`/`:left`/`:right` and page margin boxes (`@top-center`; use
   [running headers and footers](#what-is-supported) instead).
