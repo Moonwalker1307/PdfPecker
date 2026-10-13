@@ -105,6 +105,7 @@ public static class HtmlToPdf
         var fonts = FontResolver.Create(sheet.FontFaces, options.Fonts, FetchFont(images),
             embedStandard: options.EmbedStandardFonts || options.Conformance != PdfConformance.None,
             systemFonts: options.UseSystemFonts, report: missingFonts);
+        images.Fonts = fonts;
         var root = new ComputedStyle { Display = Display.Block, Fonts = fonts, MissingFonts = missingFonts };
         var styles = new StyleResolver(sheet, page.ContentWidth, viewportH) { Cancellation = cancellationToken };
         styles.ResolveTree(doc, root);

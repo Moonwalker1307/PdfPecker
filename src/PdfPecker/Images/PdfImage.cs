@@ -16,13 +16,15 @@ internal sealed class PdfImage
     public PdfImage? SMask;
     public int ObjectNumber; // assigned by the writer
 
-    /// <summary>Decodes JPEG or PNG data. Returns null for unsupported or corrupt images.</summary>
+    /// <summary>Decodes JPEG, PNG, GIF or WebP data. Returns null for unsupported or corrupt images.</summary>
     public static PdfImage? FromBytes(byte[] data)
     {
         try
         {
             if (data.Length > 3 && data[0] == 0xFF && data[1] == 0xD8) return FromJpeg(data);
             if (data.Length > 8 && data[0] == 0x89 && data[1] == (byte)'P' && data[2] == (byte)'N' && data[3] == (byte)'G') return FromPng(data);
+            if (GifDecoder.IsGif(data)) return FromPixels(GifDecoder.Decode(data, MaxPixels));
+            if (WebPDecoder.IsWebP(data)) return FromPixels(WebPDecoder.Decode(data, MaxPixels));
         }
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or InvalidDataException or EndOfStreamException)
         {
@@ -249,6 +251,16 @@ internal sealed class PdfImage
             };
         }
         return result;
+    }
+
+    /// <summary>Decoded RGB pixels, with a soft mask when some of them are not opaque.</summary>
+    private static PdfImage? FromPixels(DecodedImage? decoded)
+    {
+        if (decoded is not { } d) return null;
+        var image = new PdfImage { Width = d.Width, Height = d.Height, BitsPerComponent = 8, ColorSpace = "/DeviceRGB", Data = Deflate(d.Rgb) };
+        if (d.Alpha != null && HasTransparency(d.Alpha))
+            image.SMask = new PdfImage { Width = d.Width, Height = d.Height, BitsPerComponent = 8, ColorSpace = "/DeviceGray", Data = Deflate(d.Alpha) };
+        return image;
     }
 
     private static bool HasTransparency(byte[] alpha)

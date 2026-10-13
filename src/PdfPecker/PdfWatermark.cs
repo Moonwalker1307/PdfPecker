@@ -9,7 +9,7 @@ public sealed class PdfWatermark
     /// <summary>The watermark text. Use "\n" for more than one line.</summary>
     public string? Text { get; set; }
 
-    /// <summary>A PNG or JPEG image to stamp, centred on the page.</summary>
+    /// <summary>A PNG, JPEG, GIF or WebP image to stamp, centred on the page.</summary>
     public byte[]? Image { get; set; }
 
     /// <summary>Width of the image in points. Default 0: half the page width, keeping the aspect ratio.</summary>
