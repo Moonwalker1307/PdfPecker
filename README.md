@@ -227,7 +227,7 @@ options.UseSystemFonts = true;   // looks in C:\Windows\Fonts, /Library/Fonts, /
 ```csharp
 var options = new PdfOptions
 {
-    // A diagonal stamp on every page. Also: Image (PNG/JPEG bytes), FontSize, LetterSpacing, Angle, Opacity, Bold, Behind.
+    // A diagonal stamp on every page. Also: Image (PNG, JPEG, GIF or WebP bytes), FontSize, LetterSpacing, Angle, Opacity, Bold, Behind.
     Watermark = new PdfWatermark { Text = "WATERMARK", Color = "#c00000", Opacity = 0.25f },
 
     // AES-256 encryption (PDF 2.0 / Acrobat X and later). Without an OwnerPassword a random one is used,
@@ -437,11 +437,12 @@ specificity and `!important` handled as in browsers. Properties:
 | --- | --- |
 | Box model | `display` (block, inline, inline-block, flex, inline-flex, grid, inline-grid, list-item, table parts, none), `margin`, `padding`, `border` (solid, dashed, dotted, double), `border-radius` (incl. elliptical `/` radii and percentages; rounds backgrounds, borders, shadows and images), `box-shadow` (outer shadows; a blur is drawn as fading bands), `overflow` (`hidden`, `clip`, `auto` and `scroll` clip to the padding box, following its rounded corners; `overflow-x`/`overflow-y`), `outline` and `outline-offset` (all border styles; follows rounded corners), `width`, `height`, `min-`/`max-width`, `min-height`, `box-sizing`, `aspect-ratio` (incl. `auto <ratio>`), `object-fit` and `object-position` on images |
 | Text | `color`, `font`, `font-family`, `font-size`, `font-weight`, `font-style`, `line-height`, `text-align` (incl. justify), `text-decoration`, `text-transform`, `text-indent`, `letter-spacing`, `word-spacing`, `white-space`, `overflow-wrap`/`word-wrap`, `word-break` (`break-all`), `vertical-align`, `text-shadow` (several shadows; a blur is drawn as faint copies of the text), `text-overflow: ellipsis` (on a box that clips its overflow). Lines break as in Chrome: at spaces, after hyphens and dashes, at `&shy;` (showing a hyphen) and `&#8203;`; a word too wide for its line overflows unless `overflow-wrap` or `word-break` allows breaking it. `line-height: normal` comes from the font's own metrics, rounded to whole pixels as Chrome does, and border widths snap to whole pixels. Text is kerned as in Chrome: from the font's GPOS or `kern` table, and for the standard fonts from the Liberation fonts browsers use in their place. Embedded fonts get their standard ligatures (GSUB `liga`/`clig`, such as fi and ffi) as in Chrome, except in letter-spaced text; `font-variant-ligatures: none` or `font-feature-settings: "liga" 0` turns them off |
-| Backgrounds | `background-color`, `background-image` and `background` with `url()` images (PNG with alpha, JPEG), `linear-gradient()`, `radial-gradient()`, `repeating-linear-gradient()` and `repeating-radial-gradient()` (several layers allowed); `background-repeat` (incl. `space`, `round`), `background-position` (incl. edge offsets like `right 10px bottom 5px`), `background-size` (`cover`, `contain`, lengths), `background-origin`, `background-clip`. Repeated images are written once as PDF tiling patterns. `url()` in a linked stylesheet is relative to the stylesheet and follows the same file access rules as `<img>`. As in Chrome's print output, the background of `<html>`, or else of `<body>`, fills every page area (images and gradients too, positioned against the root box and continuing from page to page); `@page { background: <colour> }` also colours the page margins. `opacity` on SVG |
+| Backgrounds | `background-color`, `background-image` and `background` with `url()` images (PNG, JPEG, GIF, WebP, and SVG files drawn as vectors), `linear-gradient()`, `radial-gradient()`, `repeating-linear-gradient()` and `repeating-radial-gradient()` (several layers allowed); `background-repeat` (incl. `space`, `round`), `background-position` (incl. edge offsets like `right 10px bottom 5px`), `background-size` (`cover`, `contain`, lengths), `background-origin`, `background-clip`. Repeated images are written once as PDF tiling patterns. `url()` in a linked stylesheet is relative to the stylesheet and follows the same file access rules as `<img>`. As in Chrome's print output, the background of `<html>`, or else of `<body>`, fills every page area (images and gradients too, positioned against the root box and continuing from page to page); `@page { background: <colour> }` also colours the page margins. `opacity` on SVG |
 | Flexbox | `flex-direction`, `flex-wrap`, `flex-flow`, `flex`, `flex-grow`/`-shrink`/`-basis`, `order`, `justify-content`, `align-items`, `align-self`, `align-content`, `gap`, `margin: auto` |
 | Grid | `grid-template-columns`/`-rows` (lengths, `%`, `fr`, `auto`, `min-content`, `max-content`, `minmax()`, `fit-content()`, `repeat()` incl. `auto-fill`/`auto-fit`), `grid-auto-rows`/`-columns`, `grid-auto-flow`, `grid-template-areas`, `grid-template`, named lines (`[name]`), `grid-column`/`-row` (line numbers, names and `span`), `grid-area` (incl. area names), `gap`, `justify-items`/`-self`, `align-items`/`-self`, `justify-content`, `align-content`, `place-*` |
 | Columns | `column-count`, `column-width`, `columns`, `column-gap` |
 | Variables | custom properties (`--name: value`) and `var(--name, fallback)`, anywhere including shorthands |
+| Math functions | `calc()`, `min()`, `max()` and `clamp()` for lengths and numbers, nested in any combination and mixing units (`calc(100% - 2em)`, `min(100%, 600px)`, `clamp(1rem, 2.5vw, 2rem)`), with `var()` inside them. Percentages resolve against the property's own reference (the containing block's width for `width` and margins, the parent's font size for `font-size`), so they work in widths, heights, margins, padding, flex bases, grid tracks, gaps, positions, translations, font sizes and borders |
 | Positioning | `float` and `clear`; `position` (`relative`, `absolute`, `fixed`; `sticky` is drawn as `relative`) with `top`, `right`, `bottom` and `left`; `z-index` |
 | Transparency | `opacity` (a block is painted as one PDF transparency group; an inline `<span>` fades its text and background), translucent colours everywhere (`rgba()`, `hsla()`, `#rrggbbaa`, `transparent`), gradients that fade to `transparent` (as a soft mask). PDF/A-2 and 3 allow all of this |
 | Transforms | `transform` (`translate()`, `translateX()`/`Y()`, `scale()`, `scaleX()`/`Y()`, `rotate()`, `skew()`, `skewX()`/`Y()`, `matrix()`) and `transform-origin` |
@@ -478,15 +479,17 @@ Inside it, `{page}` and `{total-pages}` (or `{pages}`) are replaced with the pag
 <footer data-sticky-pdf-footer height="12mm">Page {page} of {total-pages}</footer>
 ```
 
-**SVG**: inline `<svg>` with `path` (all commands, arcs included), `rect` (incl. rounded), `circle`, `ellipse`, `line`,
+**SVG**: inline `<svg>` and SVG files (in `<img>` and as `url()` backgrounds, including `data:image/svg+xml` URIs) with `path` (all commands, arcs included), `rect` (incl. rounded), `circle`, `ellipse`, `line`,
 `polyline`, `polygon`, `text` and `tspan` (`x`, `y`, `dx`, `dy`, `text-anchor`, `dominant-baseline`, standard fonts),
 `g`, `use`, nested `svg`, `viewBox`, `preserveAspectRatio` and `transform`, drawn as vector paths. `linearGradient` and
 `radialGradient` (both units, `gradientTransform`, `spreadMethod`, `href` inheritance) become PDF shadings, and
-`clipPath` clips the elements that reference it.
+`clipPath` clips the elements that reference it. As in browsers, an SVG file is styled only by its own `<style>`
+elements and attributes, not by the page's CSS, and loads nothing else.
 
-**Images**: JPEG (embedded as-is, RGB, grayscale and CMYK) and PNG (all colour types and bit depths, transparency,
-interlacing), from files, `data:` URIs or your `ResourceResolver`. Opaque PNGs are passed through without
-re-encoding. Images wider than the page are scaled down to fit.
+**Images**: JPEG (embedded as-is, RGB, grayscale and CMYK), PNG (all colour types and bit depths, transparency,
+interlacing), GIF (transparency, interlacing) and WebP (lossy, lossless and with alpha), from files, `data:` URIs or
+your `ResourceResolver`. Animated GIF and WebP files show their first frame. SVG files are drawn as vectors (see SVG
+above). Opaque PNGs are passed through without re-encoding. Images wider than the page are scaled down to fit.
 
 **Fonts**: registered and `@font-face` TrueType/OpenType fonts are embedded as subsets (Type0/CIDFontType2 for
 TrueType outlines, CIDFontType0 with an OpenType program for CFF outlines) with a ToUnicode map, so text can be
@@ -524,7 +527,9 @@ not listed in [What is supported](#what-is-supported) should be assumed missing.
 
 **CSS**
 
-- No `calc()`, `min()`, `max()` or `clamp()`; a declaration using them is ignored.
+- Math functions work on lengths and numbers only: not on angles (`rotate(calc(...))`) and not the newer ones (`round()`,
+  `mod()`, `sin()` and so on). A table column width that mixes a percentage with other units (`calc(50% - 10px)`) is
+  sized as `auto`.
 - `@import` is ignored (use `<link rel="stylesheet">`). Rules inside `@supports`, `@layer` and `@container` blocks
   are skipped, as are `@page :first`/`:left`/`:right` and page margin boxes (`@top-center`; use
   [running headers and footers](#what-is-supported) instead).
@@ -536,7 +541,8 @@ not listed in [What is supported](#what-is-supported) should be assumed missing.
 - `text-shadow` blur is approximated with faint copies of the text rather than a true Gaussian blur, and decorations
   (underlines) get no shadow. `text-overflow` only supports `ellipsis` at the end of the line (`clip` and custom
   strings do nothing). `aspect-ratio` does not take part in min-/max-content sizing (shrink-to-fit widths) and is
-  ignored on tables.
+  ignored on tables. `object-fit` applies to raster images; an SVG file in `<img>` keeps its own
+  `preserveAspectRatio` fit.
 - Borders: `groove`, `ridge`, `inset` and `outset` draw as solid, and so do `double` sides on rounded corners.
 - `position: sticky` is drawn as `relative`; `background-attachment: fixed` scrolls with the box.
 - Lists: `list-style-type` covers disc, circle, square, decimal, decimal-leading-zero, alpha and roman only (no Greek,
@@ -544,8 +550,8 @@ not listed in [What is supported](#what-is-supported) should be assumed missing.
 
 **Backgrounds and transparency**
 
-- No `background-clip: text`; SVG files as `url()` backgrounds are not drawn; backgrounds of inline elements
-  (`<span>`) show only their colour, not images or gradients.
+- No `background-clip: text`; backgrounds of inline elements (`<span>`) show only their colour, not images or
+  gradients.
 - Blurred box shadows and repeating gradients with translucent stops are blended onto the background colour rather
   than truly see-through; SVG gradient stops with transparency are blended onto white.
 
@@ -558,8 +564,9 @@ not listed in [What is supported](#what-is-supported) should be assumed missing.
 
 **Images and SVG**
 
-- Images: JPEG and PNG only; GIF, WebP, AVIF, BMP and SVG files in `<img>` are not drawn.
-- Inline SVG: no embedded `<image>`, masks, patterns, markers or filters.
+- Images: no AVIF, BMP or TIFF. Animated GIF and WebP files show only their first frame.
+- SVG (inline and files): no embedded `<image>`, masks, patterns, markers or filters. Watermark images must be raster
+  images (PNG, JPEG, GIF or WebP).
 
 **Markdown and the PDF renderer**
 

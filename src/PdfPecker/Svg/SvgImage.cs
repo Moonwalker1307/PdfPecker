@@ -95,6 +95,52 @@ internal sealed class SvgImage
         return img;
     }
 
+    /// <summary>The largest SVG file that is parsed (16 MB).</summary>
+    private const int MaxFileLength = 16 << 20;
+
+    /// <summary>True when the data looks like an SVG document: markup whose first element is an svg element.</summary>
+    public static bool IsSvg(byte[] data)
+    {
+        int i = data.Length >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF ? 3 : 0;
+        while (i < data.Length && data[i] is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n') i++;
+        if (i >= data.Length || data[i] != '<') return false;
+        // The svg element comes after any XML declaration, comments and doctype, usually within the first few kilobytes.
+        int limit = Math.Min(data.Length - 4, i + 64 * 1024);
+        for (int k = i; k < limit; k++)
+            if (data[k] == '<' && (data[k + 1] | 0x20) == 's' && (data[k + 2] | 0x20) == 'v' && (data[k + 3] | 0x20) == 'g'
+                && (k + 4 >= data.Length || data[k + 4] is (byte)' ' or (byte)'>' or (byte)'\t' or (byte)'\r' or (byte)'\n' or (byte)'/'))
+                return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Parses an SVG file, styled only by its own &lt;style&gt; elements and presentation attributes (as browsers draw
+    /// an SVG image: the page's CSS does not reach into it, and it loads nothing else). Returns null when it holds no
+    /// svg element.
+    /// </summary>
+    public static SvgImage? FromFile(byte[] data, FontResolver? fonts, SvgBudget budget)
+    {
+        if (data.Length > MaxFileLength || !IsSvg(data)) return null;
+        var doc = HtmlParser.Parse(System.Text.Encoding.UTF8.GetString(data));
+        var svg = doc.FindFirst("svg");
+        if (svg == null) return null;
+        var sheet = new Stylesheet();
+        CollectStyles(svg, sheet);
+        var root = new ComputedStyle { Display = Display.Block, Fonts = fonts };
+        new StyleResolver(sheet).ResolveTree(doc, root);
+        return Build(svg, budget);
+    }
+
+    private static void CollectStyles(Element parent, Stylesheet sheet)
+    {
+        foreach (var c in parent.Children)
+        {
+            if (c is not Element e) continue;
+            if (e.Name == "style") CssParser.ParseStylesheet(e.InnerText(), sheet);
+            else CollectStyles(e, sheet);
+        }
+    }
+
     private static float? IntrinsicLength(string? v)
     {
         if (string.IsNullOrWhiteSpace(v)) return null;

@@ -56,6 +56,7 @@ internal sealed class BackgroundOp : DrawOp
     public float StepX, StepY;
     public bool RepeatX, RepeatY;
     public PdfImage? Image;
+    public SvgImage? Svg;          // an SVG file, drawn as vectors in each tile
     public Gradient? Gradient;
     public CornerRadii? ClipRadii; // rounded corners of the clip (border-radius)
 
@@ -623,26 +624,50 @@ internal static class BoxPainter
         ComputedStyle? box = null, (float X, float Y, float W, float H)? canvas = null)
     {
         PdfImage? image = null;
+        SvgImage? svg = null;
         float iw = 0, ih = 0;
         if (layer.Url != null)
         {
             image = images?.Load(layer.Url);
-            if (image == null || image.Width <= 0 || image.Height <= 0) return;
-            iw = image.Width * 0.75f; // CSS pixels
-            ih = image.Height * 0.75f;
+            if (image == null) svg = images?.LoadSvg(layer.Url);
+            if (svg == null && (image == null || image.Width <= 0 || image.Height <= 0)) return;
+            if (image != null)
+            {
+                iw = image.Width * 0.75f; // CSS pixels
+                ih = image.Height * 0.75f;
+            }
         }
         else if (layer.Gradient == null) return;
 
         var (ox, oy, ow, oh) = BoxOf(box ?? s, Layer(s.BackgroundOrigins, i, BackgroundBox.PaddingBox), x, y, w, h, basis);
         var (cx, cy, cw, ch) = canvas ?? BoxOf(s, Layer(s.BackgroundClips, i, BackgroundBox.BorderBox), x, y, w, h, basis);
         if (cw <= 0 || ch <= 0) return;
+        // hasRatio: the image keeps its aspect ratio when only one side is sized (not so for gradients and SVG files
+        // with neither a size nor a viewBox).
+        bool hasRatio = image != null;
+        if (svg != null)
+        {
+            if (svg.Width is { } sw && svg.Height is { } sh) { iw = sw; ih = sh; hasRatio = true; }
+            else if (svg.HasViewBox && svg.ViewBoxWidth > 0 && svg.ViewBoxHeight > 0 && ow > 0 && oh > 0)
+            {
+                // Only an aspect ratio: as large as fits the positioning area (CSS contain), or one given side.
+                float r = svg.ViewBoxHeight / svg.ViewBoxWidth;
+                if (svg.Width is { } w1) { iw = w1; ih = w1 * r; }
+                else if (svg.Height is { } h1) { iw = h1 / r; ih = h1; }
+                else if (oh / ow > r) { iw = ow; ih = ow * r; }
+                else { iw = oh / r; ih = oh; }
+                hasRatio = true;
+            }
+            else { iw = svg.Width ?? ow; ih = svg.Height ?? oh; }
+            if (!(iw > 0 && ih > 0)) return;
+        }
 
         // Tile size. A gradient has no intrinsic size or ratio: it fills the positioning area unless sized.
         var size = Layer(s.BackgroundSizes, i, BackgroundSize.Auto);
         float tw, th;
         if (size.Kind != BackgroundSizeKind.Explicit)
         {
-            if (image == null) { tw = ow; th = oh; }
+            if (image == null && svg == null) { tw = ow; th = oh; }
             else
             {
                 float sx = ow / iw, sy = oh / ih;
@@ -656,14 +681,14 @@ internal static class BoxPainter
             bool autoW = size.Width.IsAuto, autoH = size.Height.IsAuto;
             tw = size.Width.Resolve(ow);
             th = size.Height.Resolve(oh);
-            if (autoW && autoH) { tw = image == null ? ow : iw; th = image == null ? oh : ih; }
-            else if (autoW) tw = image == null ? ow : th * iw / ih;
-            else if (autoH) th = image == null ? oh : tw * ih / iw;
+            if (autoW && autoH) { tw = image == null && svg == null ? ow : iw; th = image == null && svg == null ? oh : ih; }
+            else if (autoW) tw = hasRatio ? th * iw / ih : svg != null ? iw : ow;
+            else if (autoH) th = hasRatio ? tw * ih / iw : svg != null ? ih : oh;
         }
 
         var (repeatX, repeatY) = Layer(s.BackgroundRepeats, i, (BackgroundRepeat.Repeat, BackgroundRepeat.Repeat));
         // round: scale the tile so that a whole number fits; an auto other dimension keeps the image's ratio.
-        bool keepRatio = size.Kind == BackgroundSizeKind.Explicit && (size.Width.IsAuto || size.Height.IsAuto) && image != null;
+        bool keepRatio = size.Kind == BackgroundSizeKind.Explicit && (size.Width.IsAuto || size.Height.IsAuto) && hasRatio;
         if (repeatX == BackgroundRepeat.Round && tw > 0 && ow > 0)
         {
             float nw = ow / Math.Max(1, MathF.Round(ow / tw));
@@ -703,6 +728,7 @@ internal static class BoxPainter
             StepX = stepX, StepY = stepY,
             RepeatX = rx, RepeatY = ry,
             Image = image,
+            Svg = svg,
             Gradient = layer.Gradient?.Resolve(tw, th, backdrop),
             ClipRadii = canvas == null ? InnerRadii(radii, cx - x, cy - y, x + w - cx - cw, y + h - cy - ch) : null,
         };

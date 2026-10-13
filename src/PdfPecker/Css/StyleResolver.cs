@@ -638,6 +638,8 @@ internal sealed class StyleResolver
     private void Apply(ComputedStyle s, ComputedStyle parent, string prop, string raw)
     {
         string v = raw.Trim();
+        // Math functions that produce plain numbers (opacity: calc(1 / 2)) become the number; lengths are parsed later.
+        if (CssMath.HasMath(v)) v = CssMath.FoldNumbers(v);
         string lower = v.ToLowerInvariant();
         float em = s.FontSize;
         bool inherit = lower == "inherit";
@@ -1453,7 +1455,7 @@ internal sealed class StyleResolver
             return true;
         }
         if (!TryParseLength(tok, em, _rootFontSize, out var len, _vw, _vh) || len.IsAuto) return false;
-        size = len.IsPercent ? new TrackSize(TrackSizeKind.Percent, len.Value) : new TrackSize(TrackSizeKind.Fixed, Math.Max(0, ToLayoutUnits(len.Value)));
+        size = len.Unit == LengthUnit.Calc ? new TrackSize(len) : len.IsPercent ? new TrackSize(TrackSizeKind.Percent, len.Value) : new TrackSize(TrackSizeKind.Fixed, Math.Max(0, ToLayoutUnits(len.Value)));
         return true;
     }
 
@@ -1616,6 +1618,7 @@ internal sealed class StyleResolver
         if (v.Length == 0) return false;
         if (v == "auto") { len = Length.Auto; return true; }
         if (v == "0") { len = Length.Zero; return true; }
+        if (v[^1] == ')') return CssMath.IsMathFunction(v) && CssMath.TryParseLength(v, em, rem, vw, vh, out len);
         int end = v.Length;
         int unitStart = end;
         while (unitStart > 0 && (char.IsLetter(v[unitStart - 1]) || v[unitStart - 1] == '%')) unitStart--;

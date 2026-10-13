@@ -43,6 +43,7 @@ internal sealed class PdfDocumentWriter
     private float _lineWidth;
     private int _fillAlpha = 255, _strokeAlpha = 255; // the constant alphas (0-255) in effect; -1 when unknown
     private bool _anyAlpha;                           // an alpha other than 1 was set: alphas after Q are unknown
+    private int _resourcesId;                         // the shared resources object, for pattern cells that draw SVG images
     private bool _noAlpha;                            // writing a stream without the shared ExtGState resources
     private readonly SortedSet<int> _fillAlphas = new(), _strokeAlphas = new(), _groupAlphas = new();
     private readonly List<byte[]> _forms = new(); // transparency groups of translucent layers, written as /Fx1, /Fx2, ...
@@ -318,15 +319,8 @@ internal sealed class PdfDocumentWriter
             foreach (var p in Leaves(page))
             {
                 if (p.Op is TextOp t) CollectFonts(t, usedFonts);
-                else if (p.Op is SvgOp sv)
-                {
-                    foreach (var shape in sv.Image.Shapes)
-                    {
-                        if (shape.Font == null) continue;
-                        if (Leaf(shape.Font) is EmbeddedFont ef) AddGlyphs(ef, shape.Text!, 0, shape.Text!.Length);
-                        else usedFonts[shape.Font.Index] = true;
-                    }
-                }
+                else if (p.Op is SvgOp sv) CollectSvgFonts(sv.Image, usedFonts);
+                else if (p.Op is BackgroundOp { Svg: { } bgSvg }) CollectSvgFonts(bgSvg, usedFonts);
                 else if (p.Op is ImageOp im && !imageIds.ContainsKey(im.Image))
                 {
                     imageIds[im.Image] = images.Count + 1;
@@ -354,7 +348,7 @@ internal sealed class PdfDocumentWriter
         {
             if (wm.Image != null)
             {
-                wmImage = PdfImage.FromBytes(wm.Image) ?? throw new ArgumentException("The watermark image is not a PNG or JPEG image this library can read.");
+                wmImage = PdfImage.FromBytes(wm.Image) ?? throw new ArgumentException("The watermark image is not a PNG, JPEG, GIF or WebP image this library can read.");
                 if (!imageIds.ContainsKey(wmImage))
                 {
                     imageIds[wmImage] = images.Count + 1;
@@ -388,6 +382,7 @@ internal sealed class PdfDocumentWriter
         // 3. Object numbers.
         int next = 1;
         int catalogId = next++, pagesId = next++, resourcesId = next++, infoId = next++;
+        _resourcesId = resourcesId;
         var fontIds = new int[usedFonts.Length];
         for (int i = 0; i < usedFonts.Length; i++) if (usedFonts[i]) fontIds[i] = next++;
         int firstEmbeddedId = next;
@@ -1129,7 +1124,7 @@ internal sealed class PdfDocumentWriter
             }
             case SvgOp sv:
                 EndText(b);
-                WriteSvg(b, sv, pageTop);
+                WriteSvg(b, sv.Image, PX(sv.X), PY(sv.Y, pageTop), sv.W, sv.H);
                 break;
             case CircleOp c:
             {
@@ -1155,23 +1150,25 @@ internal sealed class PdfDocumentWriter
         }
     }
 
-    /// <summary>Draws an SVG drawing: clipped to its box, with the viewBox mapped by preserveAspectRatio.</summary>
-    private void WriteSvg(ByteBuffer b, SvgOp op, float pageTop)
+    /// <summary>
+    /// Draws an SVG drawing in the box whose top-left corner is (<paramref name="left"/>, <paramref name="top"/>) in PDF
+    /// space: clipped to the box, with the viewBox mapped by preserveAspectRatio.
+    /// </summary>
+    private void WriteSvg(ByteBuffer b, SvgImage img, float left, float top, float w, float h)
     {
-        var img = op.Image;
-        if (img.Shapes.Count == 0 || op.W <= 0 || op.H <= 0) return;
+        if (img.Shapes.Count == 0 || w <= 0 || h <= 0) return;
         float sx, sy, tx = 0, ty = 0, vx = 0, vy = 0;
         if (img.HasViewBox)
         {
             vx = img.ViewBoxX;
             vy = img.ViewBoxY;
-            sx = op.W / img.ViewBoxWidth;
-            sy = op.H / img.ViewBoxHeight;
+            sx = w / img.ViewBoxWidth;
+            sy = h / img.ViewBoxHeight;
             if (img.Align != "none")
             {
                 float scale = img.Slice ? Math.Max(sx, sy) : Math.Min(sx, sy);
                 sx = sy = scale;
-                float extraX = op.W - img.ViewBoxWidth * scale, extraY = op.H - img.ViewBoxHeight * scale;
+                float extraX = w - img.ViewBoxWidth * scale, extraY = h - img.ViewBoxHeight * scale;
                 var a = img.Align;
                 tx = a.StartsWith("xmid", StringComparison.Ordinal) ? extraX / 2 : a.StartsWith("xmax", StringComparison.Ordinal) ? extraX : 0;
                 ty = a.EndsWith("ymid", StringComparison.Ordinal) ? extraY / 2 : a.EndsWith("ymax", StringComparison.Ordinal) ? extraY : 0;
@@ -1179,9 +1176,8 @@ internal sealed class PdfDocumentWriter
         }
         else sx = sy = 0.75f; // user units are CSS pixels
 
-        float left = PX(op.X), top = PY(op.Y, pageTop);
         var saved = SaveState();
-        b.Ascii("q ").Num(left).Sp().Num(top - op.H).Sp().Num(op.W).Sp().Num(op.H).Ascii(" re W n\n");
+        b.Ascii("q ").Num(left).Sp().Num(top - h).Sp().Num(w).Sp().Num(h).Ascii(" re W n\n");
         // User space (y down) to PDF space (y up).
         var toPage = new Matrix(sx, 0, 0, -sy, left + tx - vx * sx, top - ty + vy * sy);
         b.Num(sx).Ascii(" 0 0 ").Num(-sy).Sp().Num(toPage.E).Sp().Num(toPage.F).Ascii(" cm\n");
@@ -1385,6 +1381,32 @@ internal sealed class PdfDocumentWriter
             b.Num(PX(x0)).Sp().Num(PY(y1, pageTop)).Sp().Num(x1 - x0).Sp().Num(y1 - y0).Ascii(" re f Q\n");
             return;
         }
+        if (bg.Svg is { } svg)
+        {
+            if (single)
+            {
+                b.Ascii("q ").Num(PX(x0)).Sp().Num(PY(y1, pageTop)).Sp().Num(x1 - x0).Sp().Num(y1 - y0).Ascii(" re W n\n");
+                WriteSvg(b, svg, tx, PY(bg.TileY, pageTop), tw, th);
+                b.Ascii("Q\n");
+                return;
+            }
+            // Repeated: a tiling pattern whose cell draws the SVG image once. The cell starts from the default
+            // graphics state and uses the shared resources (fonts, alpha states, gradients).
+            var svgCell = new ByteBuffer(256);
+            var saved = SaveState();
+            (_fill, _stroke, _lineWidth, _fillAlpha, _strokeAlpha) = (CssColor.Black, CssColor.Black, 1, 255, 255);
+            WriteSvg(svgCell, svg, 0, th, tw, th);
+            RestoreState(saved);
+            var svgDict = new ByteBuffer(256);
+            svgDict.Ascii("/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 ").Num(tw).Sp().Num(th)
+                .Ascii("] /XStep ").Num(Math.Max(bg.StepX, tw)).Ascii(" /YStep ").Num(Math.Max(bg.StepY, th))
+                .Ascii(" /Matrix [1 0 0 1 ").Num(tx).Sp().Num(PY(bg.TileY + th, pageTop)).Ascii("] /Resources ").Int(_resourcesId).Ascii(" 0 R");
+            int svgTile = _tilings.Count + 1;
+            _tilings.Add((svgTile, svgCell.Span.ToArray(), System.Text.Encoding.ASCII.GetString(svgDict.Span)));
+            b.Ascii("q /Pattern cs /T").Int(svgTile).Ascii(" scn ");
+            b.Num(PX(x0)).Sp().Num(PY(y1, pageTop)).Sp().Num(x1 - x0).Sp().Num(y1 - y0).Ascii(" re f Q\n");
+            return;
+        }
         if (single)
         {
             b.Ascii("q ").Num(PX(x0)).Sp().Num(PY(y1, pageTop)).Sp().Num(x1 - x0).Sp().Num(y1 - y0).Ascii(" re W n ")
@@ -1450,6 +1472,16 @@ internal sealed class PdfDocumentWriter
     }
 
     // ------------------------------------------------------------------ text
+
+    private void CollectSvgFonts(SvgImage svg, bool[] usedFonts)
+    {
+        foreach (var shape in svg.Shapes)
+        {
+            if (shape.Font == null) continue;
+            if (Leaf(shape.Font) is EmbeddedFont ef) AddGlyphs(ef, shape.Text!, 0, shape.Text!.Length);
+            else usedFonts[shape.Font.Index] = true;
+        }
+    }
 
     private void CollectFonts(TextOp t, bool[] usedFonts)
     {

@@ -283,7 +283,7 @@ internal sealed partial class LayoutEngine
                 float? want = null;
                 var align = SelfAlign(it, s.AlignItems);
                 if (st.Height.IsPercent && definiteH.HasValue)
-                    want = st.Height.Value * definiteH.Value / 100f + (st.BorderBox ? 0 : VerticalFrame(st, w));
+                    want = st.Height.Resolve(definiteH.Value) + (st.BorderBox ? 0 : VerticalFrame(st, w));
                 else if (align == BoxAlign.Stretch && st.Height.IsAuto && !it.AutoMt && !it.AutoMb)
                     want = Math.Max(current, cross - it.Mt - it.Mb);
                 if (want is { } h && Math.Abs(h - current) > Eps && (NeedsRelayoutWhenStretched(it) || st.Height.IsPercent))

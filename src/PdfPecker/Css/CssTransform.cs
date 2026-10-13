@@ -20,11 +20,13 @@ internal static class CssTransform
             if (i >= v.Length) break;
             int open = v.IndexOf('(', i);
             if (open < 0) return false;
-            int close = v.IndexOf(')', open);
+            int close = MatchingParen(v, open);
             if (close < 0) return false;
             string name = v.Substring(i, open - i).Trim();
-            var args = v.Substring(open + 1, close - open - 1).Split(',', StringSplitOptions.TrimEntries);
-            if (args.Length == 1 && args[0].Contains(' ')) args = args[0].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            // Arguments may hold calc() and friends, so split outside parentheses only.
+            var inner = v.Substring(open + 1, close - open - 1);
+            var args = CssParser.SplitTopLevel(inner, ',').Select(a => a.Trim()).ToArray();
+            if (args.Length == 1) args = CssParser.Tokens(args[0]).ToArray();
             i = close + 1;
             if (list.Count == MaxFunctions || !TryFunction(name, args, em, rem, vw, vh, list)) return false;
         }
@@ -46,7 +48,15 @@ internal static class CssTransform
                 var second = Length.Zero;
                 if (a.Length == 2 && !TryLength(a[1], em, rem, vw, vh, out second)) return false;
                 var (x, y) = name == "translatey" ? (Length.Zero, first) : (first, second);
-                list.Add(new TransformFn(TransformKind.Translate, x.Value, y.Value, PercentX: x.IsPercent, PercentY: y.IsPercent));
+                if (x.Unit != LengthUnit.Calc && y.Unit != LengthUnit.Calc)
+                {
+                    list.Add(new TransformFn(TransformKind.Translate, x.Value, y.Value, PercentX: x.IsPercent, PercentY: y.IsPercent));
+                    return true;
+                }
+                // calc(50% + 10px): translations add up, so move by the percentage part and then by the points part.
+                if (!x.IsLinear || !y.IsLinear) return false;
+                list.Add(new TransformFn(TransformKind.Translate, PctPart(x), PctPart(y), PercentX: true, PercentY: true));
+                list.Add(new TransformFn(TransformKind.Translate, x.Unit == LengthUnit.Percent ? 0 : x.Value, y.Unit == LengthUnit.Percent ? 0 : y.Value));
                 return true;
             }
             case "scale":
@@ -91,6 +101,19 @@ internal static class CssTransform
             default:
                 return false; // 3D functions and unknown names make the whole value invalid
         }
+    }
+
+    private static float PctPart(Length l) => l.Unit switch { LengthUnit.Percent => l.Value, LengthUnit.Calc => l.Pct, _ => 0 };
+
+    private static int MatchingParen(string v, int open)
+    {
+        int depth = 0;
+        for (int i = open; i < v.Length; i++)
+        {
+            if (v[i] == '(') depth++;
+            else if (v[i] == ')' && --depth == 0) return i;
+        }
+        return -1;
     }
 
     private static bool TryLength(string s, float em, float rem, float vw, float vh, out Length len)

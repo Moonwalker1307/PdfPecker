@@ -21,7 +21,12 @@ internal readonly struct TrackSize
 {
     public readonly TrackSizeKind Kind;
     public readonly float Value;
+    /// <summary>For a Percent track given as a math function (<c>calc(50% - 10px)</c>), the length to resolve.</summary>
+    private readonly Length _calc;
     public TrackSize(TrackSizeKind kind, float value = 0) { Kind = kind; Value = value; }
+    public TrackSize(Length calc) { Kind = TrackSizeKind.Percent; _calc = calc; }
+    /// <summary>A Percent track's size against <paramref name="basis"/>.</summary>
+    public float ResolvePercent(float basis) => _calc.Unit == LengthUnit.Calc ? _calc.Resolve(basis) : Value * basis / 100f;
     public bool IsIntrinsic => Kind is TrackSizeKind.Auto or TrackSizeKind.MinContent or TrackSizeKind.MaxContent;
 }
 
@@ -82,7 +87,8 @@ internal enum ListStyleType : byte
 [Flags]
 internal enum TextDecoration : byte { None = 0, Underline = 1, LineThrough = 2, Overline = 4 }
 
-internal enum LengthUnit : byte { Pt, Percent, Auto }
+/// <summary>Pt and Percent are plain values; Calc is a math function that depends on a percentage (see <see cref="CssMath"/>).</summary>
+internal enum LengthUnit : byte { Pt, Percent, Auto, Calc }
 
 internal enum Position : byte { Static, Relative, Absolute, Fixed }
 
@@ -97,30 +103,59 @@ internal enum TransformKind : byte { Translate, Scale, Rotate, Skew, Matrix }
 /// <summary>A counter name with the value of a counter-reset, counter-set or counter-increment.</summary>
 internal readonly record struct CounterOp(string Name, int Value);
 
-/// <summary>A computed length: absolute points, a percentage of the containing block, or auto.</summary>
+/// <summary>
+/// A computed length: absolute points, a percentage of the containing block, auto, or a <c>calc()</c>-style value that
+/// mixes the two. A Calc length counts as a percentage (it needs the reference length), so code that only knows how to
+/// handle absolute lengths treats it as it treats percentages; <see cref="Resolve"/> gives its value.
+/// </summary>
 internal readonly struct Length
 {
+    /// <summary>Points; for Percent the percentage; for a linear Calc the points part.</summary>
     public readonly float Value;
     public readonly LengthUnit Unit;
+    /// <summary>For Calc only (kept in a separate object so ordinary lengths stay small).</summary>
+    private readonly CalcParts? _calc;
+
+    private sealed record CalcParts(float Pct, Func<float, float>? Fn);
 
     public Length(float value, LengthUnit unit) { Value = value; Unit = unit; }
+
+    private Length(float value, CalcParts calc) { Value = value; Unit = LengthUnit.Calc; _calc = calc; }
 
     public static readonly Length Auto = new(0, LengthUnit.Auto);
     public static readonly Length Zero = new(0, LengthUnit.Pt);
     public static Length Pt(float v) => new(v, LengthUnit.Pt);
+    /// <summary>A sum of points and a percentage, such as <c>calc(100% - 20pt)</c>.</summary>
+    public static Length Calc(float pt, float pct) => new(pt, new CalcParts(pct, null));
+    /// <summary>Any other value that depends on a percentage, such as <c>min(100%, 600pt)</c>: points as a function of the reference length.</summary>
+    public static Length Calc(Func<float, float> fn) => new(0, new CalcParts(0, fn));
 
     public bool IsAuto => Unit == LengthUnit.Auto;
-    public bool IsPercent => Unit == LengthUnit.Percent;
+    /// <summary>True when the value depends on the reference length: a percentage, or a Calc containing one.</summary>
+    public bool IsPercent => Unit is LengthUnit.Percent or LengthUnit.Calc;
+    /// <summary>True for a Calc that is a plain sum of <see cref="Value"/> points and <see cref="Pct"/> percent.</summary>
+    public bool IsLinear => _calc?.Fn == null;
+    /// <summary>For a linear Calc, the percentage part (<c>Value + Pct% of the reference</c>).</summary>
+    public float Pct => _calc?.Pct ?? 0;
 
     public float Resolve(float basis, float autoValue = 0)
         => Unit switch
         {
             LengthUnit.Pt => Value,
             LengthUnit.Percent => Value * basis / 100f,
+            LengthUnit.Calc => _calc!.Fn == null ? Value + _calc.Pct * basis / 100f : Finite(_calc.Fn(basis)),
             _ => autoValue,
         };
 
-    public override string ToString() => Unit switch { LengthUnit.Pt => Value + "pt", LengthUnit.Percent => Value + "%", _ => "auto" };
+    private static float Finite(float v) => float.IsFinite(v) ? v : 0;
+
+    public override string ToString() => Unit switch
+    {
+        LengthUnit.Pt => Value + "pt",
+        LengthUnit.Percent => Value + "%",
+        LengthUnit.Calc => IsLinear ? $"calc({Pct}% + {Value}pt)" : "calc(...)",
+        _ => "auto",
+    };
 }
 
 /// <summary>The computed values of the supported CSS properties for one element. All lengths are in points.</summary>
