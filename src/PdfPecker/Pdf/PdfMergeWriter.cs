@@ -26,190 +26,212 @@ internal sealed class PdfMergeWriter
 
     private readonly PdfMergeOptions _options;
     private readonly CancellationToken _cancel;
-    private ByteBuffer _out = new(1 << 16);
+    private readonly Stream? _sink; // written to as the buffer fills, when merging to a stream synchronously
+    private readonly ByteBuffer _main = new(1 << 16);
+    private ByteBuffer _out;
+    private long _flushed; // bytes already handed out of _main
     private readonly List<long> _offsets = new() { 0 }; // by object id; 0 = not written
     private int _nextId;
     private readonly Dictionary<string, int> _streams = new(StringComparer.Ordinal); // content hash -> id of a written leaf stream
 
     private const int CatalogId = 1, PagesId = 2, InfoId = 3;
+    private const int FlushSize = 1 << 20;
 
-    public PdfMergeWriter(PdfMergeOptions options, CancellationToken cancel)
+    private int _inputs, _pageCount;
+    private readonly List<int> _pageIds = new();
+    private DocumentProperties? _props;
+    // Bookmarks: the merged root, the top-level items so far, and the last one, held back until the next is known.
+    private int _outlinesId, _firstOutline, _lastOutline, _outlineCount;
+    private (int Id, int Prev, ByteBuffer Body)? _pendingOutline;
+    // Optional content (layers): every input's groups, and the ones hidden by default.
+    private readonly ByteBuffer _ocgs = new(64), _ocgsOff = new(64);
+    // Interactive form: every input's fields, and the fonts their default appearances name (the first input's win).
+    private readonly ByteBuffer _fields = new(64), _calcOrder = new(64), _formFonts = new(64);
+    private readonly HashSet<string> _formFontNames = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _fieldNames = new(StringComparer.Ordinal);
+    private PdfString? _formDA;
+    private bool _needAppearances;
+
+    /// <summary>A writer; <paramref name="sink"/> is where the result goes as it is made, or null to keep it in memory (see <see cref="ToArray"/>).</summary>
+    public PdfMergeWriter(PdfMergeOptions options, CancellationToken cancel, Stream? sink = null)
     {
         _options = options;
         _cancel = cancel;
+        _sink = sink;
+        _out = _main;
         _nextId = InfoId + 1;
     }
 
     private int NewId() => _nextId++;
 
+    /// <summary>The number of inputs added so far.</summary>
+    public int InputCount => _inputs;
+
+    /// <summary>Merges PDFs held in memory and returns the result.</summary>
     public byte[] Merge(List<byte[]> data)
     {
-        // 1. Open every input and number its pages, so links between inputs' bookmarks can be chained up front.
-        var inputs = new List<Input>(data.Count);
-        var fieldNames = new HashSet<string>(StringComparer.Ordinal);
-        PdfString? formDA = null;
-        int pageCount = 0, maxPages = Math.Max(1, _options.MaxPages);
-        for (int i = 0; i < data.Count; i++)
+        foreach (var d in data) Add(d);
+        Finish();
+        return ToArray();
+    }
+
+    /// <summary>
+    /// Copies one input's pages, and everything they use, to the output. The input is parsed, written and let go before
+    /// the next one is read, so only one input is held in memory at a time.
+    /// </summary>
+    public void Add(byte[] data)
+    {
+        _cancel.ThrowIfCancellationRequested();
+        int index = _inputs++;
+        if (index == 0) _out.Ascii("%PDF-1.7\n%").Bytes(new byte[] { 0xE2, 0xE3, 0xCF, 0xD3 }).Nl();
+        var input = new Input();
+        string? password = _options.Passwords is { } pw && index < pw.Count ? pw[index] : null;
+        int maxPages = Math.Max(1, _options.MaxPages);
+        using (PdfFile.BeginRender(_cancel))
         {
-            _cancel.ThrowIfCancellationRequested();
-            var input = new Input();
-            string? password = _options.Passwords is { } pw && i < pw.Count ? pw[i] : null;
-            using (PdfFile.BeginRender(_cancel))
+            try
             {
-                try
-                {
-                    input.File = PdfFile.Open(data[i], password);
-                }
-                catch (PdfFormatException ex)
-                {
-                    throw new InvalidDataException($"PDF {i + 1} is not readable: {ex.Message}", ex);
-                }
-                catch (PdfPasswordException ex)
-                {
-                    throw new PdfPasswordException($"PDF {i + 1}: {ex.Message}");
-                }
-                var catalog = input.File.Catalog;
-                if (input.File.Trailer["Root"] is PdfRef root) input.Map[root.Num] = 0;
-                if (input.File.Trailer["Encrypt"] is PdfRef enc) input.Map[enc.Num] = 0;
-                if (catalog?["Pages"] is { } pagesRef)
-                    CollectPages(input, pagesRef, null, null, null, null, new HashSet<PdfDict>(ReferenceEqualityComparer.Instance), 0);
-                if (_options.Bookmarks) CollectOutline(input, catalog);
-                CollectFields(input, catalog, fieldNames, ref formDA);
+                input.File = PdfFile.Open(data, password);
             }
-            pageCount += input.Pages.Count;
-            if (pageCount > maxPages)
+            catch (PdfFormatException ex)
+            {
+                throw new InvalidDataException($"PDF {index + 1} is not readable: {ex.Message}", ex);
+            }
+            catch (PdfPasswordException ex)
+            {
+                throw new PdfPasswordException($"PDF {index + 1}: {ex.Message}");
+            }
+            var catalog = input.File.Catalog;
+            if (input.File.Trailer["Root"] is PdfRef root) input.Map[root.Num] = 0;
+            if (input.File.Trailer["Encrypt"] is PdfRef enc) input.Map[enc.Num] = 0;
+            if (catalog?["Pages"] is { } pagesRef)
+                CollectPages(input, pagesRef, null, null, null, null, new HashSet<PdfDict>(ReferenceEqualityComparer.Instance), 0);
+            _pageCount += input.Pages.Count;
+            if (_pageCount > maxPages)
                 throw new PdfLimitException($"The merged document has more than {maxPages} pages (PdfMergeOptions.MaxPages).");
-            inputs.Add(input);
-        }
-        if (pageCount == 0) throw new InvalidDataException("None of the PDFs has any pages.");
+            if (_options.Bookmarks) CollectOutline(input, catalog);
+            CollectFields(input, catalog, _fieldNames, ref _formDA);
+            if (index == 0) _props = Properties(input.File);
+            _needAppearances |= input.NeedAppearances;
 
-        int outlinesId = inputs.Any(x => x.TopOutline.Count > 0) ? NewId() : 0;
-        int firstOutline = 0, lastOutline = 0, outlineCount = 0;
-        // Top-level bookmarks are chained across inputs: (new id) -> (previous, next).
-        var chain = new Dictionary<int, (int Prev, int Next)>();
-        foreach (var input in inputs)
-        {
-            foreach (var num in input.TopOutline)
+            var queue = new Queue<(int Num, int Id)>();
+            foreach (var p in input.Pages)
             {
-                int id = input.Map[num];
-                if (firstOutline == 0) firstOutline = id;
-                if (lastOutline != 0)
-                {
-                    chain[lastOutline] = (chain.TryGetValue(lastOutline, out var p) ? p.Prev : 0, id);
-                    chain[id] = (lastOutline, 0);
-                }
-                else chain[id] = (0, 0);
-                lastOutline = id;
-                outlineCount++;
+                WritePage(input, p, queue);
+                _pageIds.Add(p.Id);
             }
-        }
-
-        // 2. Write.
-        _out.Ascii("%PDF-1.7\n%").Bytes(new byte[] { 0xE2, 0xE3, 0xCF, 0xD3 }).Nl();
-        var props = Properties(inputs[0].File);
-        Begin(PagesId).Ascii("<< /Type /Pages /Count ").Int(pageCount).Ascii(" /Kids [");
-        foreach (var input in inputs)
-            foreach (var p in input.Pages) _out.Int(p.Id).Ascii(" 0 R ");
-        _out.Ascii("] >>");
-        End();
-        var now = DateTime.UtcNow;
-        Begin(InfoId);
-        props.WriteInfo(_out, now.AddTicks(-(now.Ticks % TimeSpan.TicksPerSecond)), modDate: true, PdfSyntax.TextString);
-        End();
-        if (outlinesId != 0)
-        {
-            Begin(outlinesId).Ascii("<< /Type /Outlines /First ").Int(firstOutline).Ascii(" 0 R /Last ").Int(lastOutline)
-                .Ascii(" 0 R /Count ").Int(outlineCount).Ascii(" >>");
-            End();
-        }
-
-        // Optional content (layers): every input's groups, and the ones hidden by default.
-        var ocgs = new ByteBuffer(64);
-        var ocgsOff = new ByteBuffer(64);
-        // Interactive form: every input's fields, and the fonts their default appearances name (the first input's win).
-        var fields = new ByteBuffer(64);
-        var calcOrder = new ByteBuffer(64);
-        var formFonts = new ByteBuffer(64);
-        var formFontNames = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var input in inputs)
-        {
-            using (PdfFile.BeginRender(_cancel))
+            if (input.File.GetDict(input.File.Catalog, "OCProperties") is { } oc)
             {
-                var queue = new Queue<(int Num, int Id)>();
-                foreach (var p in input.Pages) WritePage(input, p, queue);
-                if (input.File.GetDict(input.File.Catalog, "OCProperties") is { } oc)
+                WriteItemsTo(_ocgs, input, input.File.GetArray(oc, "OCGs"), queue);
+                WriteItemsTo(_ocgsOff, input, input.File.GetArray(input.File.GetDict(oc, "D"), "OFF"), queue);
+            }
+            if (input.Fields.Count > 0)
+            {
+                var form = input.File.GetDict(input.File.Catalog, "AcroForm")!;
+                WriteItemsTo(_fields, input, new PdfArray(input.Fields.Select(n => (PdfObject)new PdfRef(n, 0)).ToList()), queue);
+                WriteItemsTo(_calcOrder, input, input.File.GetArray(form, "CO"), queue);
+                if (input.File.GetDict(input.File.GetDict(form, "DR"), "Font") is { } drFonts)
                 {
-                    WriteItemsTo(ocgs, input, input.File.GetArray(oc, "OCGs"), queue);
-                    WriteItemsTo(ocgsOff, input, input.File.GetArray(input.File.GetDict(oc, "D"), "OFF"), queue);
-                }
-                if (input.Fields.Count > 0)
-                {
-                    var form = input.File.GetDict(input.File.Catalog, "AcroForm")!;
-                    WriteItemsTo(fields, input, new PdfArray(input.Fields.Select(n => (PdfObject)new PdfRef(n, 0)).ToList()), queue);
-                    WriteItemsTo(calcOrder, input, input.File.GetArray(form, "CO"), queue);
-                    if (input.File.GetDict(input.File.GetDict(form, "DR"), "Font") is { } drFonts)
+                    _out = _formFonts;
+                    try
                     {
-                        var saved = _out;
-                        _out = formFonts;
                         foreach (var (key, value) in drFonts.Entries)
                         {
-                            if (!formFontNames.Add(key)) continue;
+                            if (!_formFontNames.Add(key)) continue;
                             PdfSyntax.RawName(_out, key);
                             _out.Sp();
                             WriteObject(input, value, queue, 1);
                             _out.Sp();
                         }
-                        _out = saved;
                     }
-                }
-                foreach (var num in input.TopOutline)
-                {
-                    int id = input.Map[num];
-                    var (prev, next) = chain[id];
-                    WriteOutlineItem(input, num, id, prev, next, outlinesId, queue);
-                }
-                while (queue.Count > 0)
-                {
-                    _cancel.ThrowIfCancellationRequested();
-                    var (num, id) = queue.Dequeue();
-                    var obj = input.File.GetObject(num) ?? PdfNull.Instance;
-                    Begin(id);
-                    if (obj is PdfStream s) WriteStream(input, s, queue);
-                    else if (obj is PdfDict od && input.Overrides.TryGetValue(num, out var changes))
+                    finally
                     {
-                        var entries = new Dictionary<string, PdfObject>(od.Entries, StringComparer.Ordinal);
-                        foreach (var (key, value) in changes) entries[key] = value;
-                        WriteDict(input, new PdfDict(entries), queue, 0);
+                        _out = _main;
                     }
-                    else WriteObject(input, obj, queue, 0);
-                    End();
                 }
             }
-            input.File = null!; // let the parsed objects go
+            // Top-level bookmarks are chained across inputs; the last one waits for its /Next, which a later input may give.
+            if (input.TopOutline.Count > 0 && _outlinesId == 0) _outlinesId = NewId();
+            for (int k = 0; k < input.TopOutline.Count; k++)
+            {
+                int num = input.TopOutline[k], id = input.Map[num];
+                if (_pendingOutline is { } pending)
+                {
+                    WriteOutlineItem(pending.Id, pending.Prev, id, pending.Body);
+                    _pendingOutline = null;
+                }
+                if (_firstOutline == 0) _firstOutline = id;
+                var body = OutlineItemBody(input, num, queue);
+                if (k + 1 < input.TopOutline.Count) WriteOutlineItem(id, _lastOutline, input.Map[input.TopOutline[k + 1]], body);
+                else _pendingOutline = (id, _lastOutline, body);
+                _lastOutline = id;
+                _outlineCount++;
+            }
+            while (queue.Count > 0)
+            {
+                _cancel.ThrowIfCancellationRequested();
+                var (num, id) = queue.Dequeue();
+                var obj = input.File.GetObject(num) ?? PdfNull.Instance;
+                Begin(id);
+                if (obj is PdfStream s) WriteStream(input, s, queue);
+                else if (obj is PdfDict od && input.Overrides.TryGetValue(num, out var changes))
+                {
+                    var entries = new Dictionary<string, PdfObject>(od.Entries, StringComparer.Ordinal);
+                    foreach (var (key, value) in changes) entries[key] = value;
+                    WriteDict(input, new PdfDict(entries), queue, 0);
+                }
+                else WriteObject(input, obj, queue, 0);
+                End();
+            }
+        }
+    }
+
+    /// <summary>Writes the page tree, catalog, cross-reference table and trailer that close the document.</summary>
+    public void Finish()
+    {
+        if (_pageCount == 0) throw new InvalidDataException("None of the PDFs has any pages.");
+        if (_pendingOutline is { } pending)
+        {
+            WriteOutlineItem(pending.Id, pending.Prev, 0, pending.Body);
+            _pendingOutline = null;
+        }
+        Begin(PagesId).Ascii("<< /Type /Pages /Count ").Int(_pageCount).Ascii(" /Kids [");
+        foreach (var id in _pageIds) _out.Int(id).Ascii(" 0 R ");
+        _out.Ascii("] >>");
+        End();
+        var now = DateTime.UtcNow;
+        Begin(InfoId);
+        _props!.WriteInfo(_out, now.AddTicks(-(now.Ticks % TimeSpan.TicksPerSecond)), modDate: true, PdfSyntax.TextString);
+        End();
+        if (_outlinesId != 0)
+        {
+            Begin(_outlinesId).Ascii("<< /Type /Outlines /First ").Int(_firstOutline).Ascii(" 0 R /Last ").Int(_lastOutline)
+                .Ascii(" 0 R /Count ").Int(_outlineCount).Ascii(" >>");
+            End();
         }
 
         Begin(CatalogId).Ascii("<< /Type /Catalog /Pages ").Int(PagesId).Ascii(" 0 R");
-        if (outlinesId != 0) _out.Ascii(" /Outlines ").Int(outlinesId).Ascii(" 0 R");
-        if (ocgs.Length > 0)
+        if (_outlinesId != 0) _out.Ascii(" /Outlines ").Int(_outlinesId).Ascii(" 0 R");
+        if (_ocgs.Length > 0)
         {
-            _out.Ascii(" /OCProperties << /OCGs [").Bytes(ocgs.Span).Ascii("] /D << /Order [").Bytes(ocgs.Span).Ascii("]");
-            if (ocgsOff.Length > 0) _out.Ascii(" /OFF [").Bytes(ocgsOff.Span).Ascii("]");
+            _out.Ascii(" /OCProperties << /OCGs [").Bytes(_ocgs.Span).Ascii("] /D << /Order [").Bytes(_ocgs.Span).Ascii("]");
+            if (_ocgsOff.Length > 0) _out.Ascii(" /OFF [").Bytes(_ocgsOff.Span).Ascii("]");
             _out.Ascii(" >> >>");
         }
-        if (fields.Length > 0)
+        if (_fields.Length > 0)
         {
-            _out.Ascii(" /AcroForm << /Fields [").Bytes(fields.Span).Ascii("]");
-            if (calcOrder.Length > 0) _out.Ascii(" /CO [").Bytes(calcOrder.Span).Ascii("]");
-            if (formFonts.Length > 0) _out.Ascii(" /DR << /Font << ").Bytes(formFonts.Span).Ascii(">> >>");
-            if (formDA != null) { _out.Ascii(" /DA "); PdfSyntax.HexString(_out, formDA.Bytes); }
-            if (inputs.Any(x => x.NeedAppearances)) _out.Ascii(" /NeedAppearances true");
+            _out.Ascii(" /AcroForm << /Fields [").Bytes(_fields.Span).Ascii("]");
+            if (_calcOrder.Length > 0) _out.Ascii(" /CO [").Bytes(_calcOrder.Span).Ascii("]");
+            if (_formFonts.Length > 0) _out.Ascii(" /DR << /Font << ").Bytes(_formFonts.Span).Ascii(">> >>");
+            if (_formDA != null) { _out.Ascii(" /DA "); PdfSyntax.HexString(_out, _formDA.Bytes); }
+            if (_needAppearances) _out.Ascii(" /NeedAppearances true");
             _out.Ascii(" >>");
         }
         _out.Ascii(" >>");
         End();
 
         // Cross-reference table and trailer.
-        long xref = _out.Length;
+        long xref = Position;
         int count = _nextId;
         _out.Ascii("xref\n0 ").Int(count).Ascii("\n0000000000 65535 f \n");
         for (int i = 1; i < count; i++)
@@ -224,8 +246,28 @@ internal sealed class PdfMergeWriter
         PdfSyntax.HexString(_out, id0);
         PdfSyntax.HexString(_out, id0);
         _out.Ascii("] >>\nstartxref\n").Int(xref).Ascii("\n%%EOF\n");
-        return _out.Span.ToArray();
     }
+
+    /// <summary>The whole result, when nothing has been flushed.</summary>
+    public byte[] ToArray() => _main.Span.ToArray();
+
+    /// <summary>Hands what has been written so far to <paramref name="output"/>.</summary>
+    public void Flush(Stream output)
+    {
+        output.Write(_main.Span);
+        _flushed += _main.Length;
+        _main.Clear();
+    }
+
+    /// <inheritdoc cref="Flush"/>
+    public async Task FlushAsync(Stream output, CancellationToken cancellationToken)
+    {
+        await output.WriteAsync(_main.RawBuffer.AsMemory(0, _main.Length), cancellationToken).ConfigureAwait(false);
+        _flushed += _main.Length;
+        _main.Clear();
+    }
+
+    private long Position => _flushed + _main.Length;
 
     // ------------------------------------------------------------------ reading
 
@@ -367,11 +409,15 @@ internal sealed class PdfMergeWriter
     private ByteBuffer Begin(int id)
     {
         while (_offsets.Count <= id) _offsets.Add(0);
-        _offsets[id] = _out.Length;
+        _offsets[id] = Position;
         return _out.Int(id).Ascii(" 0 obj\n");
     }
 
-    private void End() => _out.Ascii("\nendobj\n");
+    private void End()
+    {
+        _out.Ascii("\nendobj\n");
+        if (_sink != null && _main.Length >= FlushSize) Flush(_sink);
+    }
 
     private void WritePage(Input input, (PdfDict Page, int SourceNum, int Id, PdfObject? Resources, PdfObject? MediaBox, PdfObject? CropBox, PdfObject? Rotate) p,
         Queue<(int, int)> queue)
@@ -443,21 +489,36 @@ internal sealed class PdfMergeWriter
         return false;
     }
 
-    private void WriteOutlineItem(Input input, int num, int id, int prev, int next, int parent, Queue<(int, int)> queue)
+    /// <summary>A bookmark's entries other than its links to its neighbours, which are written with <see cref="WriteOutlineItem"/>.</summary>
+    private ByteBuffer OutlineItemBody(Input input, int num, Queue<(int, int)> queue)
     {
         var d = input.File.GetObject(num) as PdfDict ?? new PdfDict();
-        Begin(id).Ascii("<< /Parent ").Int(parent).Ascii(" 0 R");
+        var body = new ByteBuffer(256);
+        _out = body;
+        try
+        {
+            foreach (var (key, value) in d.Entries)
+            {
+                if (key is "Parent" or "Prev" or "Next") continue;
+                _out.Sp();
+                PdfSyntax.RawName(_out, key);
+                _out.Sp();
+                WriteObject(input, value, queue, 1, key);
+            }
+        }
+        finally
+        {
+            _out = _main;
+        }
+        return body;
+    }
+
+    private void WriteOutlineItem(int id, int prev, int next, ByteBuffer body)
+    {
+        Begin(id).Ascii("<< /Parent ").Int(_outlinesId).Ascii(" 0 R");
         if (prev != 0) _out.Ascii(" /Prev ").Int(prev).Ascii(" 0 R");
         if (next != 0) _out.Ascii(" /Next ").Int(next).Ascii(" 0 R");
-        foreach (var (key, value) in d.Entries)
-        {
-            if (key is "Parent" or "Prev" or "Next") continue;
-            _out.Sp();
-            PdfSyntax.RawName(_out, key);
-            _out.Sp();
-            WriteObject(input, value, queue, 1, key);
-        }
-        _out.Ascii(" >>");
+        _out.Bytes(body.Span).Ascii(" >>");
         End();
     }
 

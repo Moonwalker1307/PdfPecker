@@ -477,4 +477,158 @@ public class MergeAndPropertiesTests
             dir.Delete(true);
         }
     }
+
+    // ------------------------------------------------------------------ merging streams
+
+    /// <summary>A stream that can only be read forwards, like a request body.</summary>
+    private sealed class ForwardOnlyStream(byte[] data) : MemoryStream(data)
+    {
+        public override bool CanSeek => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => base.Position; set => throw new NotSupportedException(); }
+    }
+
+    /// <summary>A stream that can only be written forwards, like a response body; it records how much was written when.</summary>
+    private sealed class WriteOnlyStream : Stream
+    {
+        public readonly MemoryStream Data = new();
+        public int Writes;
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) { Writes++; Data.Write(buffer, offset, count); }
+    }
+
+    [Fact]
+    public void Merge_reads_streams_and_writes_to_a_stream()
+    {
+        var red = HtmlToPdf.Convert(Page("#ff0000"));
+        var blue = HtmlToPdf.Convert(Page("#0000ff"));
+        var output = new WriteOnlyStream();
+        PdfMerger.Merge(new Stream[] { new MemoryStream(red), new ForwardOnlyStream(blue) }, output);
+        var merged = output.Data.ToArray();
+        PdfTestHelpers.AssertStructurallyValid(merged);
+        Assert.Equal((255, 0, 0), RenderCenter(merged, 0));
+        Assert.Equal((0, 0, 255), RenderCenter(merged, 1));
+    }
+
+    [Fact]
+    public void Merge_reads_a_stream_from_its_current_position()
+    {
+        var red = HtmlToPdf.Convert(Page("#ff0000"));
+        var input = new MemoryStream();
+        input.Write("junk before the PDF"u8);
+        long start = input.Position;
+        input.Write(red);
+        input.Position = start;
+        using var output = new MemoryStream();
+        PdfMerger.Merge(new[] { input }, output);
+        Assert.Equal(1, PdfRenderer.Open(output.ToArray()).PageCount);
+    }
+
+    [Fact]
+    public async Task MergeAsync_reads_inputs_one_at_a_time_and_writes_as_it_goes()
+    {
+        var pdfs = new[] { HtmlToPdf.Convert(Page("#ff0000")), HtmlToPdf.Convert(Page("#00ff00")), HtmlToPdf.Convert(Page("#0000ff")) };
+        var output = new WriteOnlyStream();
+        var writtenWhenOpened = new List<long>();
+        IEnumerable<Stream> Inputs()
+        {
+            foreach (var pdf in pdfs)
+            {
+                writtenWhenOpened.Add(output.Data.Length);
+                yield return new ForwardOnlyStream(pdf);
+            }
+        }
+        await PdfMerger.MergeAsync(Inputs(), output);
+        var merged = output.Data.ToArray();
+        PdfTestHelpers.AssertStructurallyValid(merged);
+        Assert.Equal(new[] { (255, 0, 0), (0, 255, 0), (0, 0, 255) }, Enumerable.Range(0, 3).Select(i => RenderCenter(merged, i)));
+        // Each input's pages were already written out when the next input was asked for.
+        Assert.Equal(0, writtenWhenOpened[0]);
+        Assert.True(writtenWhenOpened[1] > 0 && writtenWhenOpened[2] > writtenWhenOpened[1], string.Join(", ", writtenWhenOpened));
+    }
+
+    [Fact]
+    public void Merge_to_a_stream_keeps_offsets_right_across_flushes()
+    {
+        // Pages of random text make an output of over a megabyte, written out in parts.
+        var rng = new Random(7);
+        var inputs = new List<byte[]>();
+        for (int i = 0; i < 8; i++)
+        {
+            var words = Enumerable.Range(0, 30_000).Select(_ => new string(Enumerable.Range(0, 6).Select(_ => (char)('a' + rng.Next(26))).ToArray()));
+            inputs.Add(HtmlToPdf.Convert($"<h1>Part {i}</h1><p>{string.Join(' ', words)}</p>"));
+        }
+        var output = new WriteOnlyStream();
+        PdfMerger.Merge(inputs.Select(b => (Stream)new MemoryStream(b)), output);
+        var merged = output.Data.ToArray();
+        Assert.True(output.Writes >= 2, $"{output.Writes} writes of {merged.Length} bytes");
+        PdfTestHelpers.AssertStructurallyValid(merged);
+        Assert.Equal(inputs.Sum(b => PdfRenderer.Open(b).PageCount), PdfRenderer.Open(merged).PageCount);
+        // The same as merging in memory, apart from the dates and file id.
+        static string Stable(byte[] pdf) => Regex.Replace(PdfTestHelpers.Latin1(pdf), @"/(ModDate|CreationDate) \([^)]*\)|/ID \[<[0-9A-Fa-f]+><[0-9A-Fa-f]+>\]", "");
+        Assert.Equal(Stable(PdfMerger.Merge(inputs, null)), Stable(merged));
+    }
+
+    [Fact]
+    public void Merge_chains_bookmarks_across_inputs_without_any()
+    {
+        string Doc(string name) => $"<html><body><h1>{name}</h1></body></html>";
+        var plain = HtmlToPdf.Convert(Page("#ff0000"));
+        using var output = new MemoryStream();
+        PdfMerger.Merge(new[] { HtmlToPdf.Convert(Doc("A")), plain, plain, HtmlToPdf.Convert(Doc("B")), plain }.Select(b => (Stream)new MemoryStream(b)), output);
+        var text = PdfTestHelpers.Latin1(output.ToArray());
+        PdfTestHelpers.AssertStructurallyValid(output.ToArray());
+        var outlines = Regex.Match(text, @"<< /Type /Outlines /First (\d+) 0 R /Last (\d+) 0 R /Count 2 >>");
+        Assert.True(outlines.Success, "merged outline root");
+        string Obj(string id) => Regex.Match(text, $@"\n{id} 0 obj\n(.*?)\nendobj", RegexOptions.Singleline).Groups[1].Value;
+        var first = Obj(outlines.Groups[1].Value);
+        var last = Obj(outlines.Groups[2].Value);
+        Assert.Contains($"/Next {outlines.Groups[2].Value} 0 R", first);
+        Assert.Contains($"/Prev {outlines.Groups[1].Value} 0 R", last);
+        Assert.DoesNotContain("/Next", last);
+        Assert.Contains(Hex("B"), last);
+    }
+
+    [Fact]
+    public async Task Merge_from_streams_checks_its_arguments()
+    {
+        var a = HtmlToPdf.Convert("<p>x</p>");
+        Assert.Throws<ArgumentException>(() => PdfMerger.Merge(Array.Empty<Stream>(), new MemoryStream()));
+        Assert.Throws<ArgumentException>(() => PdfMerger.Merge(new Stream[] { new MemoryStream(a), null! }, new MemoryStream()));
+        Assert.Throws<ArgumentException>(() => PdfMerger.Merge(new[] { new MemoryStream(a) }, new MemoryStream(a, writable: false)));
+        Assert.Throws<ArgumentNullException>(() => PdfMerger.Merge(new[] { new MemoryStream(a) }, null!));
+        await Assert.ThrowsAsync<ArgumentException>(() => PdfMerger.MergeAsync(Array.Empty<Stream>(), new MemoryStream()));
+        await Assert.ThrowsAsync<InvalidDataException>(() => PdfMerger.MergeAsync(new[] { new MemoryStream("not a pdf"u8.ToArray()) }, new MemoryStream()));
+    }
+
+    [Fact]
+    public void MergeFiles_can_overwrite_an_input_and_leaves_nothing_behind_on_failure()
+    {
+        var dir = Directory.CreateTempSubdirectory("pdfpecker-merge");
+        try
+        {
+            var a = Path.Combine(dir.FullName, "a.pdf");
+            var bad = Path.Combine(dir.FullName, "bad.pdf");
+            File.WriteAllBytes(a, HtmlToPdf.Convert("<p>a</p>"));
+            File.WriteAllText(bad, "not a pdf");
+            PdfMerger.MergeFiles(a, new[] { a, a });
+            Assert.Equal(2, PdfRenderer.OpenFile(a).PageCount);
+
+            var output = Path.Combine(dir.FullName, "out.pdf");
+            Assert.Throws<InvalidDataException>(() => PdfMerger.MergeFiles(output, new[] { a, bad }));
+            Assert.Equal(new[] { "a.pdf", "bad.pdf" }, dir.GetFiles().Select(f => f.Name).Order());
+        }
+        finally
+        {
+            dir.Delete(true);
+        }
+    }
 }
