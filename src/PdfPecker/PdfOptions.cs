@@ -82,11 +82,22 @@ public sealed class PdfOptions
     /// watermarks are scaled with the content. Between 0.1 and 2. Default: 1.
     /// </summary>
     /// <remarks>
-    /// IronPDF draws A4 pages at about 0.99916 of Chrome's own size. Set this to 0.99916 to put every box edge where
-    /// IronPDF puts it. A scaled page is also written at the paper size Chrome gives it (whole points, then Chrome's
-    /// 1/300 inch grid: 594.96 x 841.92 pt for A4), so viewers such as pdfium snap thin lines the same way.
+    /// Chrome, and so IronPDF, lays a page out at a whole number of CSS pixels and stretches it to the paper: an A4 page
+    /// is written at 594.96 x 841.92 pt (whole points, then Chrome's 1/300 inch grid), which is 793.28 px wide, and laid
+    /// out 793 px wide. To put every box and glyph where IronPDF puts them, set <see cref="PageSize"/> to
+    /// <c>new PageSize(594.96f, 841.92f)</c> and this to <c>793.28f / 793f</c>, and turn on
+    /// <see cref="TruncateBandsToWholePoints"/>. A scaled page is also written at the paper size Chrome gives it, so
+    /// viewers such as pdfium snap thin lines the same way.
     /// </remarks>
     public float Scale { get; set; } = 1f;
+
+    /// <summary>
+    /// Round the height that a running header or footer reserves with its <c>height</c> attribute down to whole points on
+    /// paper, as Chrome does with page margins: IronPDF turned <c>height="17mm"</c> (48.19 pt) into a 48 pt margin, so the
+    /// flowing content started 0.19 pt higher than the attribute says. A band whose content is taller than its attribute
+    /// still gets the room its content needs. Default: false.
+    /// </summary>
+    public bool TruncateBandsToWholePoints { get; set; }
 
     /// <summary>Ignore <c>@page</c> size and margin rules in the document's CSS.</summary>
     public bool IgnoreCssPageRules { get; set; }

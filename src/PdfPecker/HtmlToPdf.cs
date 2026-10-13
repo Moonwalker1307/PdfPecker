@@ -107,7 +107,8 @@ public static class HtmlToPdf
         // usually be resolved in one pass.
         var headerCandidate = FindByAttribute(doc, "data-sticky-pdf-header");
         var footerCandidate = FindByAttribute(doc, "data-sticky-pdf-footer");
-        float declaredTop = DeclaredHeight(headerCandidate), declaredBottom = DeclaredHeight(footerCandidate);
+        bool truncateBands = options.TruncateBandsToWholePoints;
+        float declaredTop = DeclaredHeight(headerCandidate, page, truncateBands), declaredBottom = DeclaredHeight(footerCandidate, page, truncateBands);
         float viewportH = Math.Max(10, page.ContentHeight - declaredTop - declaredBottom);
 
         var images = new ImageLoader(baseDirectory, resolver, options.AllowFileAccess);
@@ -125,8 +126,8 @@ public static class HtmlToPdf
         if (footer == header) footer = null;
         if (header != null || footer != null)
         {
-            if (header != null) { header.Detached = true; page.BandTop = Math.Max(DeclaredHeight(header), BandHeight(header, page, images, cancellationToken)); }
-            if (footer != null) { footer.Detached = true; page.BandBottom = Math.Max(DeclaredHeight(footer), BandHeight(footer, page, images, cancellationToken)); }
+            if (header != null) { header.Detached = true; page.BandTop = Math.Max(DeclaredHeight(header, page, truncateBands), BandHeight(header, page, images, cancellationToken)); }
+            if (footer != null) { footer.Detached = true; page.BandBottom = Math.Max(DeclaredHeight(footer, page, truncateBands), BandHeight(footer, page, images, cancellationToken)); }
             float limit = page.ContentHeight * 0.6f;
             float bands = page.BandTop + page.BandBottom;
             if (bands > limit)
@@ -261,6 +262,18 @@ public static class HtmlToPdf
             if (found != null) return found;
         }
         return null;
+    }
+
+    /// <summary>
+    /// The height a band reserves with its height attribute, in layout points. With <paramref name="truncate"/>, it is
+    /// rounded down to whole points on paper, as Chrome rounds page margins.
+    /// </summary>
+    private static float DeclaredHeight(Element? band, PageSetup page, bool truncate)
+    {
+        float height = DeclaredHeight(band);
+        if (!truncate || height <= 0) return height;
+        // The small allowance keeps a height that is already whole on paper (48pt) from losing a point to float error.
+        return MathF.Floor(height * page.Scale + 0.001f) / page.Scale;
     }
 
     /// <summary>The band height given by a height attribute (e.g. height="17mm"; plain numbers are pixels), or 0.</summary>
