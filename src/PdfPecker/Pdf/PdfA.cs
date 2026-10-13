@@ -107,7 +107,7 @@ internal static class PdfA
     }
 
     /// <summary>The XMP packet. Its values must match the document information dictionary.</summary>
-    public static byte[] Xmp(int part, string conformance, DocumentProperties props, DateTime created)
+    public static byte[] Xmp(int part, string conformance, DocumentProperties props, DateTime created, PdfEInvoice? invoice = null)
     {
         string date = created.ToString("yyyy-MM-dd'T'HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture) + "Z";
         var custom = XmpCustomProperties(props.Custom);
@@ -139,22 +139,33 @@ internal static class PdfA
         foreach (var (name, value) in custom)
             sb.Append("<pdfx:").Append(name).Append('>').Append(Escape(value)).Append("</pdfx:").Append(name).Append(">\n");
         sb.Append("</rdf:Description>\n");
-        if (custom.Count > 0)
+        if (invoice != null)
+        {
+            sb.Append("<rdf:Description rdf:about=\"\" xmlns:fx=\"").Append(FacturXNamespace).Append("\">\n")
+              .Append("<fx:DocumentType>INVOICE</fx:DocumentType>\n")
+              .Append("<fx:DocumentFileName>").Append(invoice.FileName).Append("</fx:DocumentFileName>\n")
+              .Append("<fx:Version>1.0</fx:Version>\n")
+              .Append("<fx:ConformanceLevel>").Append(invoice.ConformanceLevel).Append("</fx:ConformanceLevel>\n")
+              .Append("</rdf:Description>\n");
+        }
+        if (custom.Count > 0 || invoice != null)
         {
             // PDF/A allows properties outside the predefined schemas only when an extension schema describes them.
             sb.Append("<rdf:Description rdf:about=\"\" xmlns:pdfaExtension=\"http://www.aiim.org/pdfa/ns/extension/\"")
               .Append(" xmlns:pdfaSchema=\"http://www.aiim.org/pdfa/ns/schema#\" xmlns:pdfaProperty=\"http://www.aiim.org/pdfa/ns/property#\">\n")
-              .Append("<pdfaExtension:schemas><rdf:Bag><rdf:li rdf:parseType=\"Resource\">\n")
-              .Append("<pdfaSchema:schema>PDF custom document properties</pdfaSchema:schema>\n")
-              .Append("<pdfaSchema:namespaceURI>").Append(PdfxNamespace).Append("</pdfaSchema:namespaceURI>\n")
-              .Append("<pdfaSchema:prefix>pdfx</pdfaSchema:prefix>\n")
-              .Append("<pdfaSchema:property><rdf:Seq>\n");
-            foreach (var (name, _) in custom)
-                sb.Append("<rdf:li rdf:parseType=\"Resource\"><pdfaProperty:name>").Append(name)
-                  .Append("</pdfaProperty:name><pdfaProperty:valueType>Text</pdfaProperty:valueType>")
-                  .Append("<pdfaProperty:category>external</pdfaProperty:category>")
-                  .Append("<pdfaProperty:description>Custom document property</pdfaProperty:description></rdf:li>\n");
-            sb.Append("</rdf:Seq></pdfaSchema:property>\n</rdf:li></rdf:Bag></pdfaExtension:schemas>\n</rdf:Description>\n");
+              .Append("<pdfaExtension:schemas><rdf:Bag>\n");
+            if (custom.Count > 0)
+                ExtensionSchema(sb, "PDF custom document properties", PdfxNamespace, "pdfx",
+                    custom.Select(c => (c.Name, "Custom document property")));
+            if (invoice != null)
+                ExtensionSchema(sb, "Factur-X PDFA Extension Schema", FacturXNamespace, "fx", new[]
+                {
+                    ("DocumentFileName", "The name of the embedded XML document"),
+                    ("DocumentType", "The type of the hybrid document in capital letters, e.g. INVOICE or ORDER"),
+                    ("Version", "The actual version of the standard applying to the embedded XML document"),
+                    ("ConformanceLevel", "The conformance level of the embedded XML document"),
+                });
+            sb.Append("</rdf:Bag></pdfaExtension:schemas>\n</rdf:Description>\n");
         }
         sb.Append("</rdf:RDF>\n</x:xmpmeta>\n");
         // Padding lets editors update the packet in place.
@@ -162,6 +173,24 @@ internal static class PdfA
         sb.Append("<?xpacket end=\"w\"?>");
         return Encoding.UTF8.GetBytes(sb.ToString());
     }
+
+    private static void ExtensionSchema(StringBuilder sb, string schema, string ns, string prefix, IEnumerable<(string Name, string Description)> properties)
+    {
+        sb.Append("<rdf:li rdf:parseType=\"Resource\">\n")
+          .Append("<pdfaSchema:schema>").Append(schema).Append("</pdfaSchema:schema>\n")
+          .Append("<pdfaSchema:namespaceURI>").Append(ns).Append("</pdfaSchema:namespaceURI>\n")
+          .Append("<pdfaSchema:prefix>").Append(prefix).Append("</pdfaSchema:prefix>\n")
+          .Append("<pdfaSchema:property><rdf:Seq>\n");
+        foreach (var (name, description) in properties)
+            sb.Append("<rdf:li rdf:parseType=\"Resource\"><pdfaProperty:name>").Append(name)
+              .Append("</pdfaProperty:name><pdfaProperty:valueType>Text</pdfaProperty:valueType>")
+              .Append("<pdfaProperty:category>external</pdfaProperty:category>")
+              .Append("<pdfaProperty:description>").Append(description).Append("</pdfaProperty:description></rdf:li>\n");
+        sb.Append("</rdf:Seq></pdfaSchema:property>\n</rdf:li>\n");
+    }
+
+    /// <summary>The Factur-X (and ZUGFeRD 2.1 and later) XMP namespace for invoices.</summary>
+    private const string FacturXNamespace = "urn:factur-x:pdfa:CrossIndustryDocument:invoice:1p0#";
 
     /// <summary>The namespace Acrobat uses for custom document properties in XMP.</summary>
     private const string PdfxNamespace = "http://ns.adobe.com/pdfx/1.3/";

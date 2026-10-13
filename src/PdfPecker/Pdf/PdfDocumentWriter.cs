@@ -66,6 +66,9 @@ internal sealed class PdfDocumentWriter
     /// <summary>Write a PDF/A file.</summary>
     public PdfConformance Conformance { get; init; }
 
+    /// <summary>A Factur-X / ZUGFeRD invoice XML to attach. Needs PDF/A-3 <see cref="Conformance"/>.</summary>
+    public PdfEInvoice? EInvoice { get; init; }
+
     /// <summary>Font for the watermark text. Default: Helvetica (bold when the watermark asks for it).</summary>
     public TextFont? WatermarkFont { get; init; }
 
@@ -406,6 +409,8 @@ internal sealed class PdfDocumentWriter
         int watermarkId = wm != null ? next++ : 0;
         int metadataId = 0, outputIntentId = 0, iccId = 0, encryptId = 0;
         if (pdfa) { metadataId = next++; outputIntentId = next++; iccId = next++; }
+        int fileSpecId = 0, embeddedFileId = 0;
+        if (EInvoice != null) { fileSpecId = next++; embeddedFileId = next++; }
         if (_crypt != null) encryptId = next++;
 
         // 4. Header.
@@ -415,6 +420,13 @@ internal sealed class PdfDocumentWriter
         Begin(catalogId).Ascii("<< /Type /Catalog /Pages ").Int(pagesId).Ascii(" 0 R");
         if (outlinesId != 0) _out.Ascii(" /Outlines ").Int(outlinesId).Ascii(" 0 R");
         if (pdfa) _out.Ascii(" /Metadata ").Int(metadataId).Ascii(" 0 R /OutputIntents [").Int(outputIntentId).Ascii(" 0 R]");
+        if (EInvoice != null)
+        {
+            // PDF/A-3 attachments are associated files (/AF) and also listed in the name tree viewers show.
+            _out.Ascii(" /Names << /EmbeddedFiles << /Names [");
+            WriteTextString(_out, EInvoice.FileName);
+            _out.Sp().Int(fileSpecId).Ascii(" 0 R] >> >> /AF [").Int(fileSpecId).Ascii(" 0 R]");
+        }
         // AES-256 (revision 6) is the Adobe extension level 8 to PDF 1.7, standardised in PDF 2.0.
         if (_crypt != null) _out.Ascii(" /Extensions << /ADBE << /BaseVersion /1.7 /ExtensionLevel 8 >> >>");
         _out.Ascii(" >>");
@@ -436,7 +448,7 @@ internal sealed class PdfDocumentWriter
         if (pdfa)
         {
             int part = Conformance == PdfConformance.PdfA3b ? 3 : 2;
-            var xmp = PdfA.Xmp(part, "B", props, now);
+            var xmp = PdfA.Xmp(part, "B", props, now, EInvoice);
             WriteStream(metadataId, xmp, compress: false, "/Type /Metadata /Subtype /XML");
             Begin(outputIntentId).Ascii("<< /Type /OutputIntent /S /GTS_PDFA1 /OutputConditionIdentifier ");
             WriteTextString(_out, PdfA.OutputCondition);
@@ -445,6 +457,23 @@ internal sealed class PdfDocumentWriter
             _out.Ascii(" /DestOutputProfile ").Int(iccId).Ascii(" 0 R >>");
             End();
             WriteStream(iccId, PdfA.SrgbProfile, _compress, "/N 3");
+        }
+        if (EInvoice is { } invoice)
+        {
+            Begin(fileSpecId).Ascii("<< /Type /Filespec /F ");
+            WriteTextString(_out, invoice.FileName);
+            _out.Ascii(" /UF ");
+            WriteTextString(_out, invoice.FileName);
+            _out.Ascii(" /Desc ");
+            WriteTextString(_out, invoice.Profile == EInvoiceProfile.XRechnung ? "XRechnung invoice" : "Factur-X invoice");
+            _out.Ascii(" /AFRelationship /").Ascii(invoice.RelationshipOrDefault.ToString())
+                .Ascii(" /EF << /F ").Int(embeddedFileId).Ascii(" 0 R /UF ").Int(embeddedFileId).Ascii(" 0 R >> >>");
+            End();
+            var mod = new ByteBuffer(32);
+            WriteTextString(mod, "D:" + now.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture) + "Z");
+            WriteStream(embeddedFileId, invoice.Xml, _compress, "/Type /EmbeddedFile /Subtype /text#2Fxml /Params << /Size "
+                + invoice.Xml.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) + " /ModDate "
+                + System.Text.Encoding.ASCII.GetString(mod.Span) + " >>");
         }
 
         // Fonts.

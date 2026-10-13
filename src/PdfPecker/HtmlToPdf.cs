@@ -57,8 +57,18 @@ public static class HtmlToPdf
     {
         if (!(options.Scale >= 0.1f && options.Scale <= 2f))
             throw new ArgumentOutOfRangeException(nameof(options), options.Scale, "PdfOptions.Scale must be between 0.1 and 2.");
-        if (options.Conformance != PdfConformance.None && options.Security != null)
-            throw new ArgumentException("PDF/A does not allow encryption: set PdfOptions.Conformance or PdfOptions.Security, not both.", nameof(options));
+        var conformance = options.Conformance;
+        if (options.EInvoice != null)
+        {
+            // Factur-X / ZUGFeRD files are PDF/A-3, the part that allows attachments.
+            if (conformance == PdfConformance.None) conformance = PdfConformance.PdfA3b;
+            else if (conformance != PdfConformance.PdfA3b)
+                throw new ArgumentException("An e-invoice needs PDF/A-3: set PdfOptions.Conformance to PdfA3b or leave it at None.", nameof(options));
+        }
+        if (conformance != PdfConformance.None && options.Security != null)
+            throw new ArgumentException(options.EInvoice != null
+                ? "An e-invoice is a PDF/A file, which does not allow encryption: remove PdfOptions.Security."
+                : "PDF/A does not allow encryption: set PdfOptions.Conformance or PdfOptions.Security, not both.", nameof(options));
         if (options.Watermark is { } wm && string.IsNullOrEmpty(wm.Text) && wm.Image == null)
             throw new ArgumentException("The watermark needs a Text or an Image.", nameof(options));
         var doc = HtmlParser.Parse(html);
@@ -103,7 +113,7 @@ public static class HtmlToPdf
         var images = new ImageLoader(baseDirectory, resolver, options.AllowFileAccess);
         var missingFonts = options.MissingFont is { } onMissing ? new MissingFontReport(onMissing) : null;
         var fonts = FontResolver.Create(sheet.FontFaces, options.Fonts, FetchFont(images),
-            embedStandard: options.EmbedStandardFonts || options.Conformance != PdfConformance.None,
+            embedStandard: options.EmbedStandardFonts || conformance != PdfConformance.None,
             systemFonts: options.UseSystemFonts, report: missingFonts);
         images.Fonts = fonts;
         var root = new ComputedStyle { Display = Display.Block, Fonts = fonts, MissingFonts = missingFonts };
@@ -207,7 +217,8 @@ public static class HtmlToPdf
         {
             Watermark = options.Watermark,
             Security = options.Security,
-            Conformance = options.Conformance,
+            Conformance = conformance,
+            EInvoice = options.EInvoice,
             WatermarkFont = watermarkFont,
             MarginFont = marginFont,
             EmbedStandardFonts = options.EmbedStandardFonts,

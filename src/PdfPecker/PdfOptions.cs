@@ -207,6 +207,13 @@ public sealed class PdfOptions
     public PdfConformance Conformance { get; set; }
 
     /// <summary>
+    /// Make a Factur-X / ZUGFeRD e-invoice: the invoice's CII XML is attached to the PDF with the metadata that tells
+    /// software it is there. The file is PDF/A-3b, so <see cref="Conformance"/> must be None (it is then raised to
+    /// PDF/A-3b) or <see cref="PdfConformance.PdfA3b"/>, and <see cref="Security"/> must be null. Default: null.
+    /// </summary>
+    public PdfEInvoice? EInvoice { get; set; }
+
+    /// <summary>
     /// Embed the bundled Liberation fonts (metric-compatible with Helvetica, Times and Courier) instead of referring to
     /// the non-embedded standard PDF fonts. Text then looks the same in every viewer and can use any character those
     /// fonts cover, at the cost of a larger file. Default: false. Always on for PDF/A, which requires embedded fonts.
