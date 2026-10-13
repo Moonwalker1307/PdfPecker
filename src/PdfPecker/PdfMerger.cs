@@ -80,12 +80,129 @@ public static class PdfMerger
         return new PdfMergeWriter(options, cancellationToken).Merge(list);
     }
 
+    /// <summary>
+    /// Merges PDFs read from streams, in order, and writes the result to <paramref name="output"/> as it is made.
+    /// </summary>
+    /// <remarks>
+    /// Inputs are read one at a time, when their turn comes, and let go once their pages are written, so memory use
+    /// follows the largest input rather than all of them together; <paramref name="inputs"/> can be a lazy sequence that
+    /// opens each stream on demand. Each input is read from its current position to its end. The streams are not
+    /// disposed. If merging fails, <paramref name="output"/> holds an incomplete document.
+    /// </remarks>
+    /// <param name="inputs">The PDFs to merge.</param>
+    /// <param name="output">Where the merged PDF is written.</param>
+    /// <param name="options">Passwords, limits and document properties; null for the defaults.</param>
+    /// <param name="cancellationToken">Stops the merge.</param>
+    /// <exception cref="PdfPasswordException">An input is encrypted and cannot be opened with the given password.</exception>
+    /// <exception cref="InvalidDataException">An input is not a readable PDF or decodes to more data than allowed, or none of them has any pages.</exception>
+    /// <exception cref="PdfLimitException">The merged document has more than <see cref="PdfMergeOptions.MaxPages"/> pages.</exception>
+    /// <exception cref="NotSupportedException">An input uses an encryption handler other than the standard one.</exception>
+    public static void Merge(IEnumerable<Stream> inputs, Stream output, PdfMergeOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        CheckArguments(inputs, output);
+        var writer = new PdfMergeWriter(options ?? new PdfMergeOptions(), cancellationToken, output);
+        foreach (var input in inputs)
+        {
+            if (input == null) throw new ArgumentException($"PDF {writer.InputCount + 1} is null.", nameof(inputs));
+            writer.Add(ReadAll(input));
+        }
+        if (writer.InputCount == 0) throw new ArgumentException("Give at least one PDF to merge.", nameof(inputs));
+        writer.Finish();
+        writer.Flush(output);
+        output.Flush();
+    }
+
+    /// <summary>
+    /// Merges PDFs read from streams, in order, and writes the result to <paramref name="output"/> as it is made, reading
+    /// and writing the streams asynchronously (as ASP.NET Core requires of request and response bodies).
+    /// </summary>
+    /// <remarks>
+    /// As <see cref="Merge(IEnumerable{Stream}, Stream, PdfMergeOptions?, CancellationToken)"/>; parsing and writing
+    /// each input is done synchronously between reads.
+    /// </remarks>
+    /// <inheritdoc cref="Merge(IEnumerable{Stream}, Stream, PdfMergeOptions?, CancellationToken)"/>
+    public static async Task MergeAsync(IEnumerable<Stream> inputs, Stream output, PdfMergeOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        CheckArguments(inputs, output);
+        var writer = new PdfMergeWriter(options ?? new PdfMergeOptions(), cancellationToken);
+        foreach (var input in inputs)
+        {
+            if (input == null) throw new ArgumentException($"PDF {writer.InputCount + 1} is null.", nameof(inputs));
+            writer.Add(await ReadAllAsync(input, cancellationToken).ConfigureAwait(false));
+            await writer.FlushAsync(output, cancellationToken).ConfigureAwait(false);
+        }
+        if (writer.InputCount == 0) throw new ArgumentException("Give at least one PDF to merge.", nameof(inputs));
+        writer.Finish();
+        await writer.FlushAsync(output, cancellationToken).ConfigureAwait(false);
+        await output.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>Merges PDF files, in order, and writes the result to <paramref name="outputPath"/>.</summary>
+    /// <remarks>
+    /// The files are read one at a time and the result is written as it is made, so memory use follows the largest
+    /// input. The output file appears only once the merge has succeeded, and may be one of the inputs.
+    /// </remarks>
     public static void MergeFiles(string outputPath, IEnumerable<string> inputPaths, PdfMergeOptions? options = null, CancellationToken cancellationToken = default)
     {
         if (outputPath == null) throw new ArgumentNullException(nameof(outputPath));
         if (inputPaths == null) throw new ArgumentNullException(nameof(inputPaths));
-        var data = inputPaths.Select(File.ReadAllBytes).ToList();
-        File.WriteAllBytes(outputPath, Merge(data, options, cancellationToken));
+        var full = Path.GetFullPath(outputPath);
+        var temp = Path.Combine(Path.GetDirectoryName(full)!, "." + Path.GetFileName(full) + "." + Guid.NewGuid().ToString("N")[..8] + ".tmp");
+        try
+        {
+            using (var output = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 16))
+                Merge(OpenFiles(inputPaths), output, options, cancellationToken);
+            File.Move(temp, full, overwrite: true);
+        }
+        catch
+        {
+            try { File.Delete(temp); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            throw;
+        }
     }
+
+    private static IEnumerable<Stream> OpenFiles(IEnumerable<string> paths)
+    {
+        foreach (var path in paths)
+        {
+            using var stream = File.OpenRead(path ?? throw new ArgumentException("An input path is null.", nameof(paths)));
+            yield return stream;
+        }
+    }
+
+    private static void CheckArguments(IEnumerable<Stream> inputs, Stream output)
+    {
+        if (inputs == null) throw new ArgumentNullException(nameof(inputs));
+        if (output == null) throw new ArgumentNullException(nameof(output));
+        if (!output.CanWrite) throw new ArgumentException("The output stream is not writable.", nameof(output));
+    }
+
+    private static byte[] ReadAll(Stream input)
+    {
+        if (input.CanSeek)
+        {
+            var data = new byte[CheckedLength(input.Length - input.Position)];
+            input.ReadExactly(data);
+            return data;
+        }
+        using var copy = new MemoryStream();
+        input.CopyTo(copy);
+        return copy.ToArray();
+    }
+
+    private static async Task<byte[]> ReadAllAsync(Stream input, CancellationToken cancellationToken)
+    {
+        if (input.CanSeek)
+        {
+            var data = new byte[CheckedLength(input.Length - input.Position)];
+            await input.ReadExactlyAsync(data, cancellationToken).ConfigureAwait(false);
+            return data;
+        }
+        using var copy = new MemoryStream();
+        await input.CopyToAsync(copy, cancellationToken).ConfigureAwait(false);
+        return copy.ToArray();
+    }
+
+    private static int CheckedLength(long length) =>
+        length <= Array.MaxLength ? (int)Math.Max(0, length) : throw new InvalidDataException("An input is larger than 2 GB.");
 }
