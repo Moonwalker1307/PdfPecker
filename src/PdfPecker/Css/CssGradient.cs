@@ -223,7 +223,7 @@ internal sealed class CssGradient
         for (int i = 0; i < count; i++)
         {
             if (_stops[i].Position is not { } p) continue;
-            pos[i] = p.IsPercent ? p.Value / 100f : length > 0 ? p.Value / length : 0;
+            pos[i] = p.Unit == LengthUnit.Percent ? p.Value / 100f : length > 0 ? p.Resolve(length) / length : 0;
             known[i] = true;
         }
         if (!known[0]) { pos[0] = 0; known[0] = true; }

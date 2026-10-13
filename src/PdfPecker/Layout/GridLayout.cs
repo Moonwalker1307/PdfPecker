@@ -32,7 +32,7 @@ internal sealed partial class LayoutEngine
             static float Fixed(TrackSize t, float avail) => t.Kind switch
             {
                 TrackSizeKind.Fixed => t.Value,
-                TrackSizeKind.Percent => t.Value * avail / 100f,
+                TrackSizeKind.Percent => t.ResolvePercent(avail),
                 _ => -1,
             };
             float other = 0;
@@ -224,7 +224,7 @@ internal sealed partial class LayoutEngine
         => t.Kind switch
         {
             TrackSizeKind.Fixed => t.Value,
-            TrackSizeKind.Percent when definite => t.Value * basis / 100f,
+            TrackSizeKind.Percent when definite => t.ResolvePercent(basis),
             _ => -1,
         };
 
@@ -515,7 +515,7 @@ internal sealed partial class LayoutEngine
             {
                 float current = box.Height - it.Mt - it.Mb;
                 float? want = null;
-                if (st.Height.IsPercent) want = st.Height.Value * areaH / 100f + (st.BorderBox ? 0 : VerticalFrame(st, areaW));
+                if (st.Height.IsPercent) want = st.Height.Resolve(areaH) + (st.BorderBox ? 0 : VerticalFrame(st, areaW));
                 else if (align == BoxAlign.Stretch && st.Height.IsAuto && !it.AutoMt && !it.AutoMb) want = Math.Max(current, areaH - it.Mt - it.Mb);
                 if (want is { } hh && Math.Abs(hh - current) > Eps && (NeedsRelayoutWhenStretched(it) || st.Height.IsPercent))
                 {
