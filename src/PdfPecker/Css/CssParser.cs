@@ -363,6 +363,21 @@ internal static class CssParser
             case "background":
                 CssBackground.ExpandShorthand(value, Add);
                 return;
+            case "outline":
+            {
+                string width = "medium", style = "none", color = "currentcolor";
+                foreach (var tok in Tokens(value))
+                {
+                    var lower = tok.ToLowerInvariant();
+                    if (IsBorderStyle(lower) || lower == "auto") style = lower;
+                    else if (lower is "thin" or "medium" or "thick" || char.IsDigit(lower[0]) || lower[0] == '.') width = lower;
+                    else color = tok;
+                }
+                Add("outline-width", width);
+                Add("outline-style", style);
+                Add("outline-color", color);
+                return;
+            }
             case "font":
                 ExpandFont(value, output, important);
                 return;

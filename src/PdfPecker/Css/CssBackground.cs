@@ -19,6 +19,7 @@ internal readonly struct BackgroundOffset
     public BackgroundOffset(Length offset, bool fromEnd) { Offset = offset; FromEnd = fromEnd; }
 
     public static readonly BackgroundOffset Start = new(new Length(0, LengthUnit.Percent), false);
+    public static readonly BackgroundOffset Center = new(new Length(50, LengthUnit.Percent), false);
 
     /// <summary>The image's offset inside a positioning area with <paramref name="free"/> points left over.</summary>
     public float Resolve(float free)
