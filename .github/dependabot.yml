@@ -1,11 +1,7 @@
-# Weekly pull requests when a pinned GitHub Action or the Docker base images get a new version.
+# Weekly pull requests when a pinned GitHub Action gets a new version.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
-    schedule:
-      interval: weekly
-  - package-ecosystem: docker
-    directory: /web/PdfPecker.Web
     schedule:
       interval: weekly
