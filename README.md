@@ -391,12 +391,6 @@ What the renderer supports:
 
 For what the renderer does not support yet, see [Limitations](#limitations).
 
-## Website
-
-The website at [pdfpecker.net](https://pdfpecker.net), which converts HTML and Markdown in the browser and offers the
-converter as an HTTP API, lives in its own repository,
-[PdfPecker.Web](https://github.com/Moonwalker1307/PdfPecker.Web), and is built on the published NuGet package.
-
 ## What is supported
 
 **HTML**: the common document elements: headings, paragraphs, `div`/`section`-style blocks, `span`, `a` (external links
