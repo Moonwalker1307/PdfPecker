@@ -428,13 +428,15 @@ ids, so `[see below](#heading-text)` links work in the PDF too. The parser runs 
 
 **CSS**: `<style>` blocks, `<link rel="stylesheet">`, inline `style` attributes, `@media print`, and `@page`.
 Selectors: type, `.class`, `#id`, `*`, attribute selectors (`[a]`, `=`, `~=`, `|=`, `^=`, `$=`, `*=`), descendant,
-`>`, `+`, `~`, `:first-child`, `:last-child`, `:only-child`, `:nth-child()`, `:nth-last-child()`, `:not()`, `:root`,
-`:link`, `:empty`, with specificity and `!important` handled as in browsers. Properties:
+`>`, `+`, `~`, `:first-child`, `:last-child`, `:only-child`, `:nth-child()`, `:nth-last-child()`, `:first-of-type`,
+`:last-of-type`, `:only-of-type`, `:nth-of-type()`, `:nth-last-of-type()`, `:not()`, `:is()` and `:where()` (all three
+with selector lists; `:is()` and `:where()` skip entries they do not understand), `:root`, `:link`, `:empty`, with
+specificity and `!important` handled as in browsers. Properties:
 
 | Area | Properties |
 | --- | --- |
-| Box model | `display` (block, inline, inline-block, flex, inline-flex, grid, inline-grid, list-item, table parts, none), `margin`, `padding`, `border` (solid, dashed, dotted, double), `border-radius` (incl. elliptical `/` radii and percentages; rounds backgrounds, borders, shadows and images), `box-shadow` (outer shadows; a blur is drawn as fading bands), `overflow` (`hidden`, `clip`, `auto` and `scroll` clip to the padding box, following its rounded corners; `overflow-x`/`overflow-y`), `width`, `height`, `min-`/`max-width`, `min-height`, `box-sizing` |
-| Text | `color`, `font`, `font-family`, `font-size`, `font-weight`, `font-style`, `line-height`, `text-align` (incl. justify), `text-decoration`, `text-transform`, `text-indent`, `letter-spacing`, `word-spacing`, `white-space`, `overflow-wrap`/`word-wrap`, `word-break` (`break-all`), `vertical-align`. Lines break as in Chrome: at spaces, after hyphens and dashes, at `&shy;` (showing a hyphen) and `&#8203;`; a word too wide for its line overflows unless `overflow-wrap` or `word-break` allows breaking it. `line-height: normal` comes from the font's own metrics, rounded to whole pixels as Chrome does, and border widths snap to whole pixels. Text is kerned as in Chrome: from the font's GPOS or `kern` table, and for the standard fonts from the Liberation fonts browsers use in their place. Embedded fonts get their standard ligatures (GSUB `liga`/`clig`, such as fi and ffi) as in Chrome, except in letter-spaced text; `font-variant-ligatures: none` or `font-feature-settings: "liga" 0` turns them off |
+| Box model | `display` (block, inline, inline-block, flex, inline-flex, grid, inline-grid, list-item, table parts, none), `margin`, `padding`, `border` (solid, dashed, dotted, double), `border-radius` (incl. elliptical `/` radii and percentages; rounds backgrounds, borders, shadows and images), `box-shadow` (outer shadows; a blur is drawn as fading bands), `overflow` (`hidden`, `clip`, `auto` and `scroll` clip to the padding box, following its rounded corners; `overflow-x`/`overflow-y`), `outline` and `outline-offset` (all border styles; follows rounded corners), `width`, `height`, `min-`/`max-width`, `min-height`, `box-sizing`, `aspect-ratio` (incl. `auto <ratio>`), `object-fit` and `object-position` on images |
+| Text | `color`, `font`, `font-family`, `font-size`, `font-weight`, `font-style`, `line-height`, `text-align` (incl. justify), `text-decoration`, `text-transform`, `text-indent`, `letter-spacing`, `word-spacing`, `white-space`, `overflow-wrap`/`word-wrap`, `word-break` (`break-all`), `vertical-align`, `text-shadow` (several shadows; a blur is drawn as faint copies of the text), `text-overflow: ellipsis` (on a box that clips its overflow). Lines break as in Chrome: at spaces, after hyphens and dashes, at `&shy;` (showing a hyphen) and `&#8203;`; a word too wide for its line overflows unless `overflow-wrap` or `word-break` allows breaking it. `line-height: normal` comes from the font's own metrics, rounded to whole pixels as Chrome does, and border widths snap to whole pixels. Text is kerned as in Chrome: from the font's GPOS or `kern` table, and for the standard fonts from the Liberation fonts browsers use in their place. Embedded fonts get their standard ligatures (GSUB `liga`/`clig`, such as fi and ffi) as in Chrome, except in letter-spaced text; `font-variant-ligatures: none` or `font-feature-settings: "liga" 0` turns them off |
 | Backgrounds | `background-color`, `background-image` and `background` with `url()` images (PNG, JPEG, GIF, WebP, and SVG files drawn as vectors), `linear-gradient()`, `radial-gradient()`, `repeating-linear-gradient()` and `repeating-radial-gradient()` (several layers allowed); `background-repeat` (incl. `space`, `round`), `background-position` (incl. edge offsets like `right 10px bottom 5px`), `background-size` (`cover`, `contain`, lengths), `background-origin`, `background-clip`. Repeated images are written once as PDF tiling patterns. `url()` in a linked stylesheet is relative to the stylesheet and follows the same file access rules as `<img>`. As in Chrome's print output, the background of `<html>`, or else of `<body>`, fills every page area (images and gradients too, positioned against the root box and continuing from page to page); `@page { background: <colour> }` also colours the page margins. `opacity` on SVG |
 | Flexbox | `flex-direction`, `flex-wrap`, `flex-flow`, `flex`, `flex-grow`/`-shrink`/`-basis`, `order`, `justify-content`, `align-items`, `align-self`, `align-content`, `gap`, `margin: auto` |
 | Grid | `grid-template-columns`/`-rows` (lengths, `%`, `fr`, `auto`, `min-content`, `max-content`, `minmax()`, `fit-content()`, `repeat()` incl. `auto-fill`/`auto-fit`), `grid-auto-rows`/`-columns`, `grid-auto-flow`, `grid-template-areas`, `grid-template`, named lines (`[name]`), `grid-column`/`-row` (line numbers, names and `span`), `grid-area` (incl. area names), `gap`, `justify-items`/`-self`, `align-items`/`-self`, `justify-content`, `align-content`, `place-*` |
@@ -531,12 +533,16 @@ not listed in [What is supported](#what-is-supported) should be assumed missing.
 - `@import` is ignored (use `<link rel="stylesheet">`). Rules inside `@supports`, `@layer` and `@container` blocks
   are skipped, as are `@page :first`/`:left`/`:right` and page margin boxes (`@top-center`; use
   [running headers and footers](#what-is-supported) instead).
-- Selectors: no `:first-of-type`, `:last-of-type`, `:nth-of-type()`, `:is()`, `:where()`, `:has()` or
-  `::first-letter`/`::first-line`/`::marker`. A rule with an unsupported selector is skipped. `:hover`, `:focus` and
-  similar interaction states never match.
-- Properties not supported: `text-shadow`, `outline`, `text-overflow` (no ellipsis), `filter`, `mix-blend-mode`,
-  `clip-path` on HTML elements (only in SVG), `border-image`, `object-fit`, `aspect-ratio`, `list-style-image`,
-  `column-span`, `column-rule` and inset `box-shadow`.
+- Selectors: no `:has()`, `:nth-child(… of S)` or `::first-letter`/`::first-line`/`::marker`. A rule with an
+  unsupported selector is skipped. `:hover`, `:focus` and similar interaction states never match. Selectors inside
+  `:is()`, `:where()` and `:not()` may have at most eight compound parts (one when nested in another of them).
+- Properties not supported: `filter`, `mix-blend-mode`, `clip-path` on HTML elements (only in SVG), `border-image`,
+  `list-style-image`, `column-span`, `column-rule` and inset `box-shadow`.
+- `text-shadow` blur is approximated with faint copies of the text rather than a true Gaussian blur, and decorations
+  (underlines) get no shadow. `text-overflow` only supports `ellipsis` at the end of the line (`clip` and custom
+  strings do nothing). `aspect-ratio` does not take part in min-/max-content sizing (shrink-to-fit widths) and is
+  ignored on tables. `object-fit` applies to raster images; an SVG file in `<img>` keeps its own
+  `preserveAspectRatio` fit.
 - Borders: `groove`, `ridge`, `inset` and `outset` draw as solid, and so do `double` sides on rounded corners.
 - `position: sticky` is drawn as `relative`; `background-attachment: fixed` scrolls with the box.
 - Lists: `list-style-type` covers disc, circle, square, decimal, decimal-leading-zero, alpha and roman only (no Greek,

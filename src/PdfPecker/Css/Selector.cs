@@ -6,7 +6,11 @@ internal enum Combinator : byte { None, Descendant, Child, Adjacent, Sibling }
 
 internal enum AttrOp : byte { Exists, Equals, Includes, DashMatch, Prefix, Suffix, Substring }
 
-internal enum PseudoKind : byte { FirstChild, LastChild, OnlyChild, NthChild, NthLastChild, Root, Link, Empty, Never, Not }
+internal enum PseudoKind : byte
+{
+    FirstChild, LastChild, OnlyChild, NthChild, NthLastChild, FirstOfType, LastOfType, OnlyOfType, NthOfType, NthLastOfType,
+    Root, Link, Empty, Never, Not, Is, Where,
+}
 
 /// <summary>The pseudo-element a selector's subject names, if any.</summary>
 internal enum PseudoElement : byte { None, Before, After }
@@ -21,8 +25,8 @@ internal sealed class AttrCondition
 internal sealed class PseudoCondition
 {
     public PseudoKind Kind;
-    public int A, B; // an+b for nth-child
-    public Compound? Inner; // for :not()
+    public int A, B; // an+b for nth-child and nth-of-type
+    public Selector[]? List; // the selector list of :not(), :is() and :where()
 }
 
 /// <summary>A compound selector such as <c>div.note#main[title]</c>.</summary>
@@ -83,12 +87,26 @@ internal sealed class Compound
             case PseudoKind.OnlyChild: return e.ElementSiblingCount == 1;
             case PseudoKind.NthChild: return MatchNth(p.A, p.B, e.ElementIndex);
             case PseudoKind.NthLastChild: return MatchNth(p.A, p.B, e.ElementSiblingCount - e.ElementIndex + 1);
+            case PseudoKind.FirstOfType: return e.TypeIndex == 1;
+            case PseudoKind.LastOfType: return e.TypeIndex == e.TypeCount;
+            case PseudoKind.OnlyOfType: return e.TypeCount == 1;
+            case PseudoKind.NthOfType: return MatchNth(p.A, p.B, e.TypeIndex);
+            case PseudoKind.NthLastOfType: return MatchNth(p.A, p.B, e.TypeCount - e.TypeIndex + 1);
             case PseudoKind.Root: return e.Name == "html" || e.Parent?.Name == "#document" && e.ElementSiblingCount == 1;
             case PseudoKind.Link: return e.Name == "a" && e.HasAttribute("href");
             case PseudoKind.Empty: return e.Children.Count == 0;
-            case PseudoKind.Not: return p.Inner != null && !p.Inner.Matches(e);
+            case PseudoKind.Not: return !AnyMatches(p.List!, e);
+            case PseudoKind.Is:
+            case PseudoKind.Where: return AnyMatches(p.List!, e);
             default: return false;
         }
+    }
+
+    private static bool AnyMatches(Selector[] list, Element e)
+    {
+        foreach (var sel in list)
+            if (sel.Matches(e)) return true;
+        return false;
     }
 
     private static bool MatchNth(int a, int b, int index)
@@ -122,8 +140,22 @@ internal sealed class Selector
         if (p.Pseudos != null)
             foreach (var ps in p.Pseudos)
             {
-                if (ps.Kind == PseudoKind.Not && ps.Inner != null) Count(ps.Inner, ref a, ref b, ref c);
-                else b++;
+                switch (ps.Kind)
+                {
+                    case PseudoKind.Where: break; // always zero
+                    case PseudoKind.Not:
+                    case PseudoKind.Is:
+                    {
+                        // The specificity of the most specific selector in the list.
+                        int max = 0;
+                        foreach (var sel in ps.List!) max = Math.Max(max, sel.Specificity);
+                        a += max / 10000;
+                        b += max / 100 % 100;
+                        c += max % 100;
+                        break;
+                    }
+                    default: b++; break;
+                }
             }
         if (p.Tag != null) c++;
     }
@@ -164,10 +196,12 @@ internal sealed class Selector
     private static Element? ParentElement(Element e) => e.Parent is { } p && p.Name != "#document" ? p : null;
 
     // Real selectors stay far below these; the limits keep hostile stylesheets from costing deep recursion.
-    private const int MaxParts = 64, MaxNesting = 8;
+    private const int MaxParts = 64, MaxNestedParts = 8, MaxNesting = 8;
 
     /// <summary>Parses one complex selector. Returns null for unsupported syntax, which drops the rule.</summary>
-    public static Selector? Parse(string text)
+    public static Selector? Parse(string text) => Parse(text, 0);
+
+    private static Selector? Parse(string text, int nesting)
     {
         var parts = new List<Compound>();
         int i = 0;
@@ -192,8 +226,10 @@ internal sealed class Selector
                 continue;
             }
             if (parts.Count > 0 && pending == Combinator.None) return null;
-            if (parts.Count == MaxParts) return null;
-            var compound = ParseCompound(text, ref i, 0, ref pseudoElement);
+            // Selectors inside :is(), :where() and :not() are matched once per candidate element of the selector around
+            // them, so they are kept short: a few compounds at the first level, a single compound deeper.
+            if (parts.Count == (nesting == 0 ? MaxParts : nesting == 1 ? MaxNestedParts : 1)) return null;
+            var compound = ParseCompound(text, ref i, nesting, ref pseudoElement);
             if (compound == null) return null;
             if (parts.Count > 0) compound.Combinator = pending; // relation to the left neighbour, fixed up below
             parts.Add(compound);
@@ -313,20 +349,48 @@ internal sealed class Selector
             case "link":
             case "any-link": return new PseudoCondition { Kind = PseudoKind.Link };
             case "empty": return new PseudoCondition { Kind = PseudoKind.Empty };
+            case "first-of-type": return new PseudoCondition { Kind = PseudoKind.FirstOfType };
+            case "last-of-type": return new PseudoCondition { Kind = PseudoKind.LastOfType };
+            case "only-of-type": return new PseudoCondition { Kind = PseudoKind.OnlyOfType };
             case "nth-child":
             case "nth-last-child":
+            case "nth-of-type":
+            case "nth-last-of-type":
             {
                 if (arg == null || !TryParseNth(arg, out int a, out int b)) return null;
-                return new PseudoCondition { Kind = name == "nth-child" ? PseudoKind.NthChild : PseudoKind.NthLastChild, A = a, B = b };
+                var kind = name switch
+                {
+                    "nth-child" => PseudoKind.NthChild,
+                    "nth-last-child" => PseudoKind.NthLastChild,
+                    "nth-of-type" => PseudoKind.NthOfType,
+                    _ => PseudoKind.NthLastOfType,
+                };
+                return new PseudoCondition { Kind = kind, A = a, B = b };
             }
             case "not":
+            case "is":
+            case "matches":
+            case "any":
+            case "-webkit-any":
+            case "where":
             {
                 if (arg == null || depth >= MaxNesting) return null;
-                int j = 0;
-                var none = PseudoElement.None;
-                var inner = ParseCompound(arg, ref j, depth + 1, ref none);
-                if (inner == null || j != arg.Length) return null;
-                return new PseudoCondition { Kind = PseudoKind.Not, Inner = inner };
+                // :is() and :where() take a forgiving list: selectors that do not parse are left out. :not() does not.
+                bool forgiving = name != "not";
+                var list = new List<Selector>();
+                foreach (var part in CssParser.SplitTopLevel(arg, ','))
+                {
+                    var sel = Parse(part, depth + 1);
+                    if (sel == null || sel.PseudoElement != PseudoElement.None)
+                    {
+                        if (forgiving) continue;
+                        return null;
+                    }
+                    list.Add(sel);
+                }
+                if (list.Count == 0 && !forgiving) return null;
+                var kind = name == "not" ? PseudoKind.Not : name == "where" ? PseudoKind.Where : PseudoKind.Is;
+                return new PseudoCondition { Kind = kind, List = list.ToArray() };
             }
             case "hover":
             case "active":

@@ -77,6 +77,7 @@ internal enum WordBreak : byte { Normal, BreakAll, KeepAll }
 internal enum TextTransform : byte { None, Uppercase, Lowercase, Capitalize }
 internal enum BorderStyle : byte { None, Solid, Dashed, Dotted, Double }
 internal enum LineHeightKind : byte { Normal, Factor, Absolute }
+internal enum ObjectFit : byte { Fill, Contain, Cover, None, ScaleDown }
 
 internal enum ListStyleType : byte
 {
@@ -187,6 +188,7 @@ internal sealed class ComputedStyle
     public bool BorderCollapse;
     public bool TableLayoutFixed; // table-layout: fixed
     public BoxShadow[]? BoxShadows;
+    public BoxShadow[]? TextShadows; // text-shadow (inherited); spread and inset are not used
     public float BorderSpacingH = 1.5f, BorderSpacingV = 1.5f; // 2px
     public string? FontFamilyName;
     public FontResolver? Fonts; // the document's fonts; null when only the standard fonts exist
@@ -227,6 +229,14 @@ internal sealed class ComputedStyle
     // border-radius: horizontal and vertical radius of the top-left, top-right, bottom-right and bottom-left corner
     // (percentages of the border box's width and height); null when every corner is square.
     public Length[]? BorderRadii;
+    public BorderStyle OutlineStyle;
+    public float OutlineWidth = 1.5f, OutlineOffset;
+    public uint? OutlineColor; // null = currentColor
+    public ObjectFit ObjectFit;
+    public BackgroundOffset ObjectPositionX = BackgroundOffset.Center, ObjectPositionY = BackgroundOffset.Center;
+    public bool TextOverflowEllipsis;
+    public float AspectRatio;    // width / height; 0 = auto
+    public bool AspectRatioAuto; // "auto <ratio>": a replaced element keeps its natural ratio
     public Length Width = Length.Auto, Height = Length.Auto;
     public Length MinWidth = Length.Zero, MaxWidth = Length.Auto, MinHeight = Length.Zero, MaxHeight = Length.Auto;
     public bool BorderBox;
@@ -347,6 +357,15 @@ internal sealed class ComputedStyle
         c.BorderTopStyle = c.BorderRightStyle = c.BorderBottomStyle = c.BorderLeftStyle = BorderStyle.None;
         c.BorderTopColor = c.BorderRightColor = c.BorderBottomColor = c.BorderLeftColor = null;
         c.BorderRadii = null;
+        c.OutlineStyle = BorderStyle.None;
+        c.OutlineWidth = 1.5f;
+        c.OutlineOffset = 0;
+        c.OutlineColor = null;
+        c.ObjectFit = ObjectFit.Fill;
+        c.ObjectPositionX = c.ObjectPositionY = BackgroundOffset.Center;
+        c.TextOverflowEllipsis = false;
+        c.AspectRatio = 0;
+        c.AspectRatioAuto = false;
         c.Width = c.Height = Length.Auto;
         c.MinWidth = c.MinHeight = Length.Zero;
         c.MaxWidth = c.MaxHeight = Length.Auto;
