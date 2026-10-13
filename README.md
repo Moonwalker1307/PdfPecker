@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/logo.png" alt="PdfPecker" width="240"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/Moonwalker1307/PdfPecker/main/assets/logo.png" alt="PdfPecker" width="240"></p>
 
 # PdfPecker
 
@@ -390,12 +390,6 @@ What the renderer supports:
   refinement and halftone regions, with `JBIG2Globals`), CCITT fax, stencil masks, colour-key masks and soft masks.
 
 For what the renderer does not support yet, see [Limitations](#limitations).
-
-## Website
-
-The website at [pdfpecker.net](https://pdfpecker.net), which converts HTML and Markdown in the browser and offers the
-converter as an HTTP API, lives in its own repository,
-[PdfPecker.Web](https://github.com/Moonwalker1307/PdfPecker.Web), and is built on the published NuGet package.
 
 ## What is supported
 
