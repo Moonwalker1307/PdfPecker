@@ -247,6 +247,28 @@ bundled Liberation fonts (see [Fonts](#fonts)). PDF/A does not allow encryption,
 `Security` throws an `ArgumentException`. AES-256 keys come from a password hash that is slow on purpose, which adds
 about 3 ms to a conversion.
 
+### E-invoices (Factur-X / ZUGFeRD)
+
+Pass the invoice's CII XML (from your invoicing system) and PdfPecker attaches it to the PDF, making a Factur-X /
+ZUGFeRD e-invoice: the pages are the human-readable invoice and the XML is what accounting software reads.
+
+```csharp
+var options = new PdfOptions
+{
+    EInvoice = new PdfEInvoice(File.ReadAllBytes("invoice.xml")),
+};
+File.WriteAllBytes("invoice.pdf", HtmlToPdf.Convert(invoiceHtml, options));
+```
+
+The file is PDF/A-3b, so `Conformance` is raised to `PdfA3b` when it is left at `None` (`PdfA2b` or `Security` throw).
+The XML is embedded unchanged as `factur-x.xml` (`xrechnung.xml` for XRechnung), listed as an associated file, and the
+XMP metadata gets the Factur-X extension schema with the document type, version and profile. The profile (MINIMUM,
+BASIC WL, BASIC, EN 16931, EXTENDED or XRECHNUNG) is read from the XML's guideline ID; pass it as the second constructor
+argument to set it yourself. The relationship to the pages defaults to `Data` for MINIMUM and BASIC WL and `Alternative`
+otherwise; set `Relationship` to change it. PdfPecker checks that the XML is a well-formed Cross Industry Invoice (UBL is
+not allowed in Factur-X) but does not validate its content or build it from invoice data: make sure the visible pages
+show the same invoice. The output passes the Mustang validator (PDF/A-3b via veraPDF, and the XML's schematron).
+
 ### Digital signatures
 
 Sign the PDF with a certificate (a `.pfx` file or one from the certificate store). Adobe Reader then shows who signed
