@@ -98,9 +98,6 @@ binaries, browser or third-party packages, so it runs wherever .NET 10 runs (Win
   The process itself starts at about 32 MB; a conversion uses about one core, so throughput grows with cores. PDF/A and
   font embedding add a few milliseconds and about 5 MB for the embedded font data. Memory grows roughly with page
   count, so plan about 0.5 MB per page for very long documents.
-- For the website and API container, give it about 2 GB (`--memory 2g`). It runs one conversion per 512 MB of its memory
-  limit (up to one per core) and refuses documents over 1,000 pages, so 2 GB lets four large documents convert at once.
-  Behind a proxy, set `TrustedProxies` (see [Website](#website)).
 
 `dotnet run --project bench/PdfPecker.Benchmarks -c Release -- --requirements [your.html ...]` measures this on your
 own machine and documents.
@@ -393,57 +390,9 @@ For what the renderer does not support yet, see [Limitations](#limitations).
 
 ## Website
 
-`web/PdfPecker.Web` is a small ASP.NET Core site for converting HTML and Markdown in the browser: paste or open an
-`.html` or `.md` file (or drag one onto the page), pick page size, orientation, margins and page numbers, and preview or
-download the PDF. Markdown can also be converted to HTML.
-
-```
-dotnet run --project web/PdfPecker.Web -c Release        # then open the URL it prints
-docker build -f web/PdfPecker.Web/Dockerfile -t pdfpecker-web . && docker run -p 8080:8080 --memory 2g pdfpecker-web
-```
-
-It also exposes the converter as an HTTP API:
-
-```
-curl -X POST "http://localhost:8080/api/convert?pageSize=Letter&pageNumbers=true" \
-     -H "Content-Type: text/html" --data-binary @invoice.html -o invoice.pdf
-```
-
-Or upload a file as a form:
-
-```
-curl -X POST http://localhost:8080/api/convert -F "file=@invoice.html" -F pageSize=A4 -F pageNumbers=true -o invoice.pdf
-```
-
-`POST /api/pdf-to-image` turns a PDF into PNGs: one page with `?page=N` (or when the PDF has one page), otherwise a
-zip with a PNG per page. Options: `dpi` (10 to 300, default 150), `width`, `height` and `password`.
-
-```
-curl -X POST "http://localhost:8080/api/pdf-to-image?page=1&dpi=200" --data-binary @report.pdf -o page1.png
-curl -X POST http://localhost:8080/api/pdf-to-image -F "file=@report.pdf" -o pages.zip
-```
-
-`POST /api/convert` also accepts JSON: `{ "html": "...", "pageSize": "A4", "landscape": false, "marginMm": 12.7, "pageNumbers": true }`.
-Add `watermark` (text stamped on every page), `password` (AES-256, needed to open the PDF) or `pdfa: true` (PDF/A-2b) in
-any of the three forms; send passwords in the form or JSON body rather than the query string, which servers tend to log.
-
-Markdown works the same way. The input is read as Markdown when it is uploaded as a `.md`/`.markdown` file, sent as
-`"markdown"` in JSON or as a `markdown` form field, posted with `Content-Type: text/markdown`, or marked with
-`format=markdown`. Add `output=html` to get the HTML page instead of a PDF:
-
-```
-curl -X POST http://localhost:8080/api/convert -F "file=@README.md" -o README.pdf
-curl -X POST http://localhost:8080/api/convert -F "file=@README.md" -F output=html -o README.html
-curl -X POST http://localhost:8080/api/convert -H "Content-Type: application/json" -d '{"markdown":"# Hi","output":"html"}'
-```
-
-The site never reads files from the server, limits requests to 5 MB, 15 seconds, 1,000 pages and 120 conversions per
-minute per IP address (per /64 network for IPv6), runs a few conversions at a time (answering 503 when busy or low on
-memory), and stores nothing. Give the container a memory limit (`--memory 2g`): the number of simultaneous conversions
-follows it, and a document that would need more is refused instead of affecting the host. Behind a reverse proxy or
-CDN, set `TrustedProxies` to the proxy's addresses or networks (for example `-e TrustedProxies=10.0.0.0/8`) so the
-rate limit applies to each visitor rather than to the proxy. The page sends a strict Content-Security-Policy (no inline
-script) along with the usual security headers.
+The website at [pdfpecker.net](https://pdfpecker.net), which converts HTML and Markdown in the browser and offers the
+converter as an HTTP API, lives in its own repository,
+[PdfPecker.Web](https://github.com/Moonwalker1307/PdfPecker.Web), and is built on the published NuGet package.
 
 ## What is supported
 
