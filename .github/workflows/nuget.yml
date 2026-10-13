@@ -69,10 +69,15 @@ jobs:
               exit 1
             fi
           else
-            # Previews take the major.minor of the latest release, so they sort above it: 1.1.<run>-preview after v1.1.0.
-            latest=$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n 1)
-            prefix=$(echo "${latest#v}" | grep -oE '^[0-9]+\.[0-9]+' || true)
-            version="${prefix:-1.0}.$GITHUB_RUN_NUMBER-preview"
+            # Previews are pre-releases of the next patch after the latest release, so NuGet sorts them above it and
+            # below the next release: 1.1.1-preview.<run> after v1.1.0.
+            latest=$(git tag --list 'v[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)
+            if [[ "${latest#v}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              next="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
+            else
+              next="1.0.0"
+            fi
+            version="$next-preview.$GITHUB_RUN_NUMBER"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Version: $version" >> "$GITHUB_STEP_SUMMARY"
