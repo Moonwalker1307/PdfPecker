@@ -2,6 +2,8 @@
 
 # PdfPecker
 
+[![NuGet](https://img.shields.io/nuget/v/PdfPecker.svg)](https://www.nuget.org/packages/PdfPecker)
+
 Fast HTML and Markdown to PDF conversion, and PDF to PNG rendering, for .NET, with no dependencies.
 
 PdfPecker has its own HTML parser, Markdown parser, CSS engine, layout engine and PDF writer, and its own PDF renderer.
