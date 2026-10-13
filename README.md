@@ -1,4 +1,4 @@
-<p align="center"><img src="https://raw.githubusercontent.com/Moonwalker1307/PdfPecker/main/assets/logo.png" alt="PdfPecker" width="240"></p>
+![PdfPecker](https://raw.githubusercontent.com/Moonwalker1307/PdfPecker/main/assets/logo.png)
 
 # PdfPecker
 
