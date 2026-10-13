@@ -131,6 +131,30 @@ internal sealed partial class LayoutEngine
         return st.Items;
     }
 
+    /// <summary>
+    /// Adds an SVG drawing (an inline svg element, or an SVG file in an img element) as a small inline box, so padding
+    /// and borders work as for any replaced element.
+    /// </summary>
+    private void AddInlineSvg(CollectState st, Element e, ComputedStyle s, SvgImage? svg, float sw, float sh, string? href)
+    {
+        if (sw > 0 && sh > 0)
+        {
+            float ml = s.MarginLeft.IsAuto ? 0 : s.MarginLeft.Resolve(0), mr = s.MarginRight.IsAuto ? 0 : s.MarginRight.Resolve(0);
+            float pl = s.PaddingLeft.Resolve(0) + s.BorderLeft, pr = s.PaddingRight.Resolve(0) + s.BorderRight;
+            float ptop = s.PaddingTop.Resolve(0) + s.BorderTop, pbot = s.PaddingBottom.Resolve(0) + s.BorderBottom;
+            var ops = new List<DrawOp>();
+            var group = new GroupOp();
+            ops.Add(group);
+            BoxPainter.Paint(group, s, 0, 0, sw + pl + pr, sh + ptop + pbot, _images);
+            if (s.Visible && svg != null) ops.Add(new SvgOp(pl, ptop, sw, sh, svg));
+            if (ml > 0) { var it_ = Rent(ItemKind.Spacer, s); it_.Width = ml; it_.Href = href; st.Items.Add(it_); }
+            float boxH = sh + ptop + pbot;
+            st.Items.Add(new Item { Kind = ItemKind.Box, Style = s, Width = sw + pl + pr, Height = boxH, BoxBaseline = boxH, BoxOps = ops, Href = href ?? LinkOf(e) });
+            if (mr > 0) { var it_ = Rent(ItemKind.Spacer, s); it_.Width = mr; it_.Href = href; st.Items.Add(it_); }
+            st.LastWasSpace = false;
+        }
+    }
+
     private void CollectNode(CollectState st, Node node, string? href, ComputedStyle? deco)
     {
         if (node is TextNode t)
@@ -181,28 +205,17 @@ internal sealed partial class LayoutEngine
             case "svg":
             {
                 var svg = SvgSize(e, st.AvailWidth, out float sw, out float sh);
-                if (sw > 0 && sh > 0)
-                {
-                    float ml = s.MarginLeft.IsAuto ? 0 : s.MarginLeft.Resolve(0), mr = s.MarginRight.IsAuto ? 0 : s.MarginRight.Resolve(0);
-                    float pl = s.PaddingLeft.Resolve(0) + s.BorderLeft, pr = s.PaddingRight.Resolve(0) + s.BorderRight;
-                    float ptop = s.PaddingTop.Resolve(0) + s.BorderTop, pbot = s.PaddingBottom.Resolve(0) + s.BorderBottom;
-                    // Drawn as a small inline box so padding and borders work as for any replaced element.
-                    var ops = new List<DrawOp>();
-                    var group = new GroupOp();
-                    ops.Add(group);
-                    BoxPainter.Paint(group, s, 0, 0, sw + pl + pr, sh + ptop + pbot, _images);
-                    if (s.Visible && svg != null) ops.Add(new SvgOp(pl, ptop, sw, sh, svg));
-                    if (ml > 0) { var it_ = Rent(ItemKind.Spacer, s); it_.Width = ml; it_.Href = href; st.Items.Add(it_); }
-                    float boxH = sh + ptop + pbot;
-                    st.Items.Add(new Item { Kind = ItemKind.Box, Style = s, Width = sw + pl + pr, Height = boxH, BoxBaseline = boxH, BoxOps = ops, Href = href ?? LinkOf(e) });
-                    if (mr > 0) { var it_ = Rent(ItemKind.Spacer, s); it_.Width = mr; it_.Href = href; st.Items.Add(it_); }
-                    st.LastWasSpace = false;
-                }
+                AddInlineSvg(st, e, s, svg, sw, sh, href);
                 return;
             }
             case "img":
             {
-                var img = ImageSize(e, st.AvailWidth, out float w, out float h);
+                var img = ImageSize(e, st.AvailWidth, out float w, out float h, out var svgFile);
+                if (svgFile != null)
+                {
+                    AddInlineSvg(st, e, s, svgFile, w, h, href);
+                    return;
+                }
                 if (w > 0 && h > 0)
                 {
                     float ml = s.MarginLeft.IsAuto ? 0 : s.MarginLeft.Resolve(0), mr = s.MarginRight.IsAuto ? 0 : s.MarginRight.Resolve(0);

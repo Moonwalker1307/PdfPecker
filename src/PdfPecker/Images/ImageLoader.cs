@@ -1,18 +1,24 @@
 namespace PdfPecker.Images;
 
-/// <summary>Resolves image sources (data URIs, files, or a user callback) and caches decoded images per document.</summary>
+/// <summary>
+/// Resolves image sources (data URIs, files, or a user callback) and caches decoded images per document: raster images
+/// as <see cref="PdfImage"/>, SVG files as vector drawings.
+/// </summary>
 internal sealed class ImageLoader
 {
     private readonly string? _baseDirectory;
     private readonly Func<string, byte[]?>? _resolver;
     private readonly bool _allowFiles; // files outside the base directory too
-    private readonly Dictionary<string, PdfImage?> _cache = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, object?> _cache = new(StringComparer.Ordinal); // PdfImage, SvgImage or null
 
     /// <summary>Parsed inline SVG drawings, shared by every layout pass of a document (pages, headers, footers).</summary>
     public readonly Dictionary<PdfPecker.Html.Element, PdfPecker.Svg.SvgImage> Svgs = new();
 
     /// <summary>The drawing work left for the document's inline SVGs.</summary>
     public readonly PdfPecker.Svg.SvgBudget SvgBudget = new();
+
+    /// <summary>The document's fonts, for the text in SVG images.</summary>
+    public PdfPecker.Fonts.FontResolver? Fonts;
 
     public ImageLoader(string? baseDirectory, Func<string, byte[]?>? resolver, bool allowFiles = false)
     {
@@ -21,16 +27,23 @@ internal sealed class ImageLoader
         _resolver = resolver;
     }
 
-    public PdfImage? Load(string? src)
+    /// <summary>The raster image at <paramref name="src"/>, or null when there is none or it is an SVG file.</summary>
+    public PdfImage? Load(string? src) => LoadAny(src) as PdfImage;
+
+    /// <summary>The SVG drawing at <paramref name="src"/>, or null when there is none or it is a raster image.</summary>
+    public PdfPecker.Svg.SvgImage? LoadSvg(string? src) => LoadAny(src) as PdfPecker.Svg.SvgImage;
+
+    private object? LoadAny(string? src)
     {
         if (string.IsNullOrWhiteSpace(src)) return null;
         src = src!.Trim();
         if (_cache.TryGetValue(src, out var cached)) return cached;
-        PdfImage? img = null;
+        object? img = null;
         try
         {
             var bytes = Fetch(src);
-            if (bytes != null) img = PdfImage.FromBytes(bytes);
+            if (bytes != null)
+                img = PdfImage.FromBytes(bytes) ?? (object?)PdfPecker.Svg.SvgImage.FromFile(bytes, Fonts, SvgBudget);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException or ArgumentException or NotSupportedException
                                        or InvalidDataException or OverflowException or IndexOutOfRangeException)
