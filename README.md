@@ -31,7 +31,7 @@ dotnet nuget add source "$(pwd)/nupkg" --name pdfpecker-local
 dotnet add <your project> package PdfPecker
 ```
 
-The package targets `net10.0` and works on .NET 10 and later.
+The package targets `net8.0`, `net9.0` and `net10.0`, so it works on .NET 8 and later.
 
 ## How it compares
 
@@ -80,8 +80,10 @@ tests. Your numbers will differ with hardware and documents.
 
 ## System requirements
 
-**Required:** the .NET 10 runtime (or later). Nothing else: the library is pure managed code with no native
-binaries, browser or third-party packages, so it runs wherever .NET 10 runs (Windows, Linux, macOS; x64 and ARM64).
+**Required:** the .NET 8, .NET 9 or .NET 10 runtime (or later). Nothing else: the library is pure managed code with no
+native binaries, browser or third-party packages, so it runs wherever .NET runs (Windows, Linux, macOS; x64 and ARM64).
+The rendered pages are the same on every version; only the compressed bytes can differ, because each .NET version ships
+its own zlib build.
 
 **Recommended:**
 

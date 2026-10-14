@@ -614,15 +614,18 @@ internal sealed class BlockParser
         if (line[0] == '|') line = line.Slice(1);
         if (line.Length > 0 && line[^1] == '|' && hasPipe) line = line.Slice(0, line.Length - 1);
         var aligns = new List<TableAlign>();
-        foreach (var range in line.Split('|'))
+        while (true)
         {
-            var cell = line[range].Trim(" \t");
+            int bar = line.IndexOf('|');
+            var cell = (bar < 0 ? line : line.Slice(0, bar)).Trim(" \t");
             if (cell.Length == 0) return null;
             bool left = cell[0] == ':', right = cell[^1] == ':';
             var dashes = cell.Slice(left ? 1 : 0, cell.Length - (left ? 1 : 0) - (right ? 1 : 0));
             if (dashes.Length == 0) return null;
             foreach (var c in dashes) if (c != '-') return null;
             aligns.Add(left && right ? TableAlign.Center : left ? TableAlign.Left : right ? TableAlign.Right : TableAlign.None);
+            if (bar < 0) break;
+            line = line.Slice(bar + 1);
         }
         return aligns.ToArray();
     }
