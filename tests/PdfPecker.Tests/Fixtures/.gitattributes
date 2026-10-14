@@ -1,0 +1,3 @@
+# The tests compare some fixtures byte for byte (UblInvoiceTests keeps the XML as it was), so git must not
+# convert their line endings on checkout.
+* -text
