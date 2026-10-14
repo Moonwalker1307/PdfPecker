@@ -18,6 +18,50 @@ internal sealed partial class LayoutEngine
     private int _itemPoolUsed;
     private int _inlineDepth;
 
+    // A paragraph's collection state, lines and inline runs are reused once it has been placed or measured. Each is
+    // handed back explicitly, so nested layout (an inline-block's own paragraphs) takes fresh ones from the pool.
+    private readonly Stack<CollectState> _statePool = new();
+    private readonly Stack<Line> _linePool = new();
+    private readonly Stack<List<Line>> _lineListPool = new();
+    private readonly Stack<List<Node>> _runPool = new();
+
+    private List<Node> RentRun() => _runPool.Count > 0 ? _runPool.Pop() : new List<Node>();
+
+    private void ReturnRun(List<Node>? run)
+    {
+        if (run == null) return;
+        run.Clear();
+        _runPool.Push(run);
+    }
+
+    private void ReturnState(CollectState st)
+    {
+        st.Items.Clear();
+        _statePool.Push(st);
+    }
+
+    private Line RentLine()
+    {
+        if (!_linePool.TryPop(out var line)) return new Line();
+        line.Width = 0;
+        line.Forced = false;
+        line.Top = float.NaN;
+        line.Left = 0;
+        line.Avail = float.NaN;
+        return line;
+    }
+
+    private void ReturnLines(List<Line> lines)
+    {
+        foreach (var line in lines)
+        {
+            line.Items.Clear();
+            _linePool.Push(line);
+        }
+        lines.Clear();
+        _lineListPool.Push(lines);
+    }
+
     private Item Rent(ItemKind kind, ComputedStyle style)
     {
         Item it;
@@ -124,11 +168,18 @@ internal sealed partial class LayoutEngine
         public float AvailWidth;
     }
 
-    private List<Item> CollectInline(List<Node> run, float availW)
+    /// <summary>The items of a run of inline content. Hand the state back with <see cref="ReturnState"/> when done.</summary>
+    private CollectState CollectInline(List<Node> run, float availW)
     {
-        var st = new CollectState { AvailWidth = availW };
+        if (_statePool.TryPop(out var st))
+        {
+            st.LastWasSpace = true;
+            st.Column = 0;
+        }
+        else st = new CollectState();
+        st.AvailWidth = availW;
         foreach (var node in run) CollectNode(st, node, null, null);
-        return st.Items;
+        return st;
     }
 
     /// <summary>
@@ -495,7 +546,8 @@ internal sealed partial class LayoutEngine
 
     private float FlushInlineCore(List<Node> run, Element container, float x, float y, float w, bool firstInBlock, out bool produced)
     {
-        var items = CollectInline(run, w);
+        var st = CollectInline(run, w);
+        var items = st.Items;
         if (!HasRenderable(items))
         {
             foreach (var it in items)
@@ -504,6 +556,7 @@ internal sealed partial class LayoutEngine
                 else if (it.Kind == ItemKind.Float) PlaceFloat(MeasureFloat(it.Element!, w), y, x, w);
                 else if (it.Kind == ItemKind.Absolute) QueueAbsolute(it.Element!, x, y);
             }
+            ReturnState(st);
             produced = false;
             return y;
         }
@@ -518,13 +571,16 @@ internal sealed partial class LayoutEngine
         var lines = BreakLines(items, w, indent, fl);
         fl?.Flush(lines);
         produced = true;
-        return PlaceLines(lines, cs, x, y, w, indent, besideFloats: fl != null);
+        float bottom = PlaceLines(lines, cs, x, y, w, indent, besideFloats: fl != null);
+        ReturnLines(lines);
+        ReturnState(st);
+        return bottom;
     }
 
-    private static List<Line> BreakLines(List<Item> items, float availW, float firstIndent, FloatLines? fl = null)
+    private List<Line> BreakLines(List<Item> items, float availW, float firstIndent, FloatLines? fl = null)
     {
-        var lines = new List<Line>();
-        var cur = new Line();
+        var lines = _lineListPool.Count > 0 ? _lineListPool.Pop() : new List<Line>();
+        var cur = RentLine();
         // Whether the current line holds anything but anchors, kept up to date so checking it costs nothing.
         bool hasContent = false;
         float curW = 0;
@@ -547,7 +603,7 @@ internal sealed partial class LayoutEngine
             cur.Forced = forced;
             fl?.End(cur);
             lines.Add(cur);
-            cur = new Line();
+            cur = RentLine();
             hasContent = false;
             curW = 0;
             fl?.Begin(lines);
@@ -686,6 +742,8 @@ internal sealed partial class LayoutEngine
         }
         if (cur.Items.Count > 0) Finish(forced: true);
         else if (lines.Count > 0) lines[lines.Count - 1].Forced = true;
+        cur.Items.Clear();
+        _linePool.Push(cur); // the empty line Finish started
         return lines;
     }
 
