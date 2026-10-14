@@ -25,7 +25,7 @@ internal sealed class PageSetup
 }
 
 /// <summary>Serializes laid-out draw operations into a PDF 1.4 file (PDF 1.7 for PDF/A and AES-256 encryption).</summary>
-internal sealed class PdfDocumentWriter
+internal sealed partial class PdfDocumentWriter
 {
     private readonly PageSetup _page;
     private readonly bool _compress;
@@ -172,6 +172,72 @@ internal sealed class PdfDocumentWriter
         public override void Offset(float dx, float dy) => throw new NotSupportedException();
     }
 
+    /// <summary>A form field on one page: its widget's appearance, or, where it cannot be a widget, a drawing of it.</summary>
+    private sealed class FieldBlock : DrawOp
+    {
+        public readonly FieldOp Field;
+        public readonly List<Placed> Items;
+        public FieldBlock(FieldOp field, List<Placed> items) { Field = field; Items = items; }
+        public override void Offset(float dx, float dy) => throw new NotSupportedException();
+    }
+
+    /// <summary>Flattens an op for a list that is drawn as it is, without page splitting: layers, clips and fields become blocks.</summary>
+    private static void Flatten(DrawOp op, List<Placed> list)
+    {
+        switch (op)
+        {
+            case LayerOp layer when layer.Transform != null || layer.Opacity < 1:
+            {
+                var items = new List<Placed>();
+                foreach (var o in layer.Ops) Flatten(o, items);
+                list.Add(new Placed(new LayerBlock(layer, items), 0, 0));
+                break;
+            }
+            case ClipOp clip:
+            {
+                var items = new List<Placed>();
+                foreach (var o in clip.Ops) Flatten(o, items);
+                list.Add(new Placed(new ClipBlock(clip, items), 0, 0));
+                break;
+            }
+            case FieldOp field:
+            {
+                var items = new List<Placed>();
+                foreach (var o in field.Ops) Flatten(o, items);
+                list.Add(new Placed(new FieldBlock(field, items), field.Y, field.Y + field.H));
+                break;
+            }
+            case GroupOp g: foreach (var o in g.Ops) Flatten(o, list); break;
+            case RectOp r: if (r.W > 0 && r.H > 0) list.Add(new Placed(r, r.Y, r.Y + r.H)); break;
+            case BorderRectOp br: list.Add(new Placed(br, br.Y, br.Y + br.H)); break;
+            case RoundRectOp rr: list.Add(new Placed(rr, rr.Y, rr.Y + rr.H)); break;
+            case BackgroundOp bg:
+            {
+                var (_, y0, _, y1) = bg.Painted();
+                list.Add(new Placed(bg, y0, y1));
+                break;
+            }
+            case LineOp l: list.Add(new Placed(l, l.Y1, l.Y2)); break;
+            case LinkOp lk: list.Add(new Placed(lk, lk.Y, lk.Y + lk.H)); break;
+            default: list.Add(new Placed(op, 0, 0)); break;
+        }
+    }
+
+    /// <summary>
+    /// The form fields of a page's flowing content: at the top level, or inside a clip or a layer that is not transformed.
+    /// The others are drawn, not made into widgets.
+    /// </summary>
+    private static void CollectFields(List<Placed> items, List<FieldBlock> fields)
+    {
+        foreach (var p in items)
+            switch (p.Op)
+            {
+                case FieldBlock fb: fields.Add(fb); break;
+                case LayerBlock { Layer.Transform: null } block: CollectFields(block.Items, fields); break;
+                case ClipBlock clip: CollectFields(clip.Items, fields); break;
+            }
+    }
+
     /// <summary>
     /// The links inside a translucent layer that is not transformed, or inside a clip: they stay where they are on the page.
     /// </summary>
@@ -198,6 +264,7 @@ internal sealed class PdfDocumentWriter
         {
             if (p.Op is LayerBlock tb) ForEachLeaf(tb.Items, visit);
             else if (p.Op is ClipBlock cb) ForEachLeaf(cb.Items, visit);
+            else if (p.Op is FieldBlock fb) ForEachLeaf(fb.Items, visit);
             else visit(p);
         }
     }
@@ -266,6 +333,14 @@ internal sealed class PdfDocumentWriter
                         if (p >= first && p <= last) Target(into, p).Add(new Placed(new ClipBlock(clip, items), 0, 0));
                     break;
                 }
+                case FieldOp field:
+                {
+                    // A field stays whole, on the page where it starts.
+                    var items = new List<Placed>();
+                    foreach (var o in field.Ops) Flatten(o, items);
+                    Target(into, PageOf(field.Y)).Add(new Placed(new FieldBlock(field, items), field.Y, field.Y + field.H));
+                    break;
+                }
                 case GroupOp g:
                     foreach (var o in g.Ops) Distribute(o, into);
                     break;
@@ -321,39 +396,6 @@ internal sealed class PdfDocumentWriter
             var list = bands[p] = new List<Placed>();
             canvas[p] = new List<Placed>();
             if (pageBands == null && fixedOps == null && pageCanvas == null) continue;
-            void Flatten(DrawOp op, List<Placed> list)
-            {
-                switch (op)
-                {
-                    case LayerOp layer when layer.Transform != null || layer.Opacity < 1:
-                    {
-                        var items = new List<Placed>();
-                        foreach (var o in layer.Ops) Flatten(o, items);
-                        list.Add(new Placed(new LayerBlock(layer, items), 0, 0));
-                        break;
-                    }
-                    case ClipOp clip:
-                    {
-                        var items = new List<Placed>();
-                        foreach (var o in clip.Ops) Flatten(o, items);
-                        list.Add(new Placed(new ClipBlock(clip, items), 0, 0));
-                        break;
-                    }
-                    case GroupOp g: foreach (var o in g.Ops) Flatten(o, list); break;
-                    case RectOp r: if (r.W > 0 && r.H > 0) list.Add(new Placed(r, r.Y, r.Y + r.H)); break;
-                    case BorderRectOp br: list.Add(new Placed(br, br.Y, br.Y + br.H)); break;
-                    case RoundRectOp rr: list.Add(new Placed(rr, rr.Y, rr.Y + rr.H)); break;
-                    case BackgroundOp bg:
-                    {
-                        var (_, y0, _, y1) = bg.Painted();
-                        list.Add(new Placed(bg, y0, y1));
-                        break;
-                    }
-                    case LineOp l: list.Add(new Placed(l, l.Y1, l.Y2)); break;
-                    case LinkOp lk: list.Add(new Placed(lk, lk.Y, lk.Y + lk.H)); break;
-                    default: list.Add(new Placed(op, 0, 0)); break;
-                }
-            }
             if (pageCanvas != null) foreach (var op in pageCanvas(p)) Flatten(op, canvas[p]);
             if (pageBands != null) foreach (var op in pageBands(p, pageCount)) Flatten(op, list);
             // position: fixed boxes repeat on every page, as in Chrome's print output.
@@ -464,6 +506,7 @@ internal sealed class PdfDocumentWriter
         bool tagged = Structure != null;
         int structRootId = tagged ? next++ : 0;
         if (PdfUA && metadataId == 0) metadataId = next++;
+        var pageFields = AllocateFields(pages, pageCount, ref next);
 
         // 4. Header.
         _out.Ascii(pdfa || _crypt != null || tagged ? "%PDF-1.7\n%" : "%PDF-1.4\n%").Bytes(new byte[] { 0xE2, 0xE3, 0xCF, 0xD3 }).Nl();
@@ -487,6 +530,7 @@ internal sealed class PdfDocumentWriter
             WriteTextString(_out, EInvoice.FileName);
             _out.Sp().Int(fileSpecId).Ascii(" 0 R] >> >> /AF [").Int(fileSpecId).Ascii(" 0 R]");
         }
+        WriteAcroForm();
         // AES-256 (revision 6) is the Adobe extension level 8 to PDF 1.7, standardised in PDF 2.0.
         if (_crypt != null) _out.Ascii(" /Extensions << /ADBE << /BaseVersion /1.7 /ExtensionLevel 8 >> >>");
         _out.Ascii(" >>");
@@ -643,6 +687,20 @@ internal sealed class PdfDocumentWriter
                     annotKeys[id] = parentKey++;
                 }
             }
+            foreach (var field in pageFields[p])
+            {
+                int id = _fieldIds[field];
+                annotIds.Add(id);
+                if (tagged)
+                {
+                    // A widget belongs to its Form element; one outside the structure gets a Form element of its own.
+                    var f = field.Field;
+                    var form = f.Form ?? new StructElem("Form", Structure!.Root) { Alt = f.Field.Tooltip ?? f.Field.Name };
+                    form.Kids.Add(new AnnotRef(id, p));
+                    _mc!.Annotations.Add((id, form));
+                    annotKeys[id] = parentKey++;
+                }
+            }
 
             Begin(pageIds[p]).Ascii("<< /Type /Page /Parent ").Int(pagesId).Ascii(" 0 R /MediaBox [0 0 ")
                 .Num(paperW).Sp().Num(paperH).Ascii("] /Resources ").Int(resourcesId).Ascii(" 0 R /Contents ")
@@ -700,6 +758,8 @@ internal sealed class PdfDocumentWriter
             _out.Ascii(" >>");
             End();
         }
+
+        WriteFields(pageFields, pageIds, H, imageIds, annotKeys, ref next);
 
         // Bookmarks.
         if (outlinesId != 0)
@@ -1334,6 +1394,12 @@ internal sealed class PdfDocumentWriter
                 InvalidateState();
                 break;
             }
+            case FieldBlock fb:
+                // A widget is written on its own; a field that cannot be one is drawn, checked or not.
+                if (_fieldIds.ContainsKey(fb) || fb.Field.Kind is ControlKind.CheckBox or ControlKind.Radio && !fb.Field.Checked) break;
+                foreach (var item in fb.Items)
+                    if (item.Op is not LinkOp) WriteOp(b, item, pageTop, imageIds);
+                break;
             case ClipBlock cb:
             {
                 EndText(b);

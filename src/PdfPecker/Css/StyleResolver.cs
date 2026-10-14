@@ -496,6 +496,24 @@ internal sealed class StyleResolver
                 if ((v = e.GetAttribute("align")) != null) Hint("text-align", v.ToLowerInvariant());
                 if ((v = e.GetAttribute("valign")) != null) Hint("vertical-align", v.ToLowerInvariant());
                 break;
+            case "input" when e.Control is { Kind: Layout.ControlKind.Text }:
+                // Chrome sizes a text field from its size attribute: 0.6em a character, and a little more.
+                if (PositiveInt(e.GetAttribute("size")) is int chars) Hint("width", Em(chars * 0.6f + 1.275f));
+                break;
+            case "textarea":
+                if (PositiveInt(e.GetAttribute("cols")) is int cols) Hint("width", Em(cols * 0.6f + 1.275f));
+                if (PositiveInt(e.GetAttribute("rows")) is int rows) Hint("height", Em(rows * 1.13f));
+                break;
+            case "select" when e.Control is { Kind: Layout.ControlKind.List }:
+            {
+                // A list box shows size rows (four when only multiple is given) of 17px, and room for a scroll bar.
+                Hint("height", "calc(" + Em(e.Control.Rows * 1.275f) + " + 2px)"); // select is border-box
+                Hint("padding-top", "0px");
+                Hint("padding-bottom", "0px");
+                Hint("padding-left", "0px");
+                Hint("padding-right", "16px");
+                break;
+            }
             case "font":
                 if ((v = e.GetAttribute("color")) != null) Hint("color", v);
                 if ((v = e.GetAttribute("face")) != null) Hint("font-family", v);
@@ -594,6 +612,11 @@ internal sealed class StyleResolver
             if (p.Name == "table") return p;
         return null;
     }
+
+    private static int? PositiveInt(string? v)
+        => int.TryParse(v, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int n) && n > 0 ? Math.Min(n, 10000) : null;
+
+    private static string Em(float n) => n.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + "em";
 
     private static string PxOrPercent(string v)
     {

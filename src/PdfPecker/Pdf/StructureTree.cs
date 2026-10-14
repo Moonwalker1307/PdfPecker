@@ -161,6 +161,16 @@ internal sealed class StructureTree
             case "br":
             case "hr":
                 return;
+            case "input":
+            case "select":
+            case "textarea":
+                // A fillable field is a Form element holding its widget; its value is drawn by the widget, not the page.
+                if (e.Control?.Field is { } field)
+                {
+                    _elements[e] = new StructElem("Form", parent) { Alt = field.Tooltip ?? field.Name, Lang = LangOf(e) };
+                    return;
+                }
+                break;
         }
 
         var type = TypeOf(e);
