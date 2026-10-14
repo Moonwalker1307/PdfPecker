@@ -465,7 +465,7 @@ Merging four small documents takes about 1 ms, and 1,000 one-page Chrome payslip
 ## PDF to image
 
 `PdfToImage` and `PdfRenderer` render PDF pages to PNG (or raw RGBA pixels). This works for any PDF, not only
-PdfPecker's own output, and also uses no third-party code: the PDF parser, font engines, JPEG and fax decoders,
+PdfPecker's own output, and also uses no third-party packages: the PDF parser, font engines, JPEG and fax decoders,
 rasterizer and PNG encoder are all part of the library.
 
 ```csharp
@@ -736,4 +736,5 @@ The renderer (`Rendering/`) works the other way round: `Parsing/PdfFile` reads t
 interprets content streams, `Fonts/` turns glyphs into outlines (cached as anti-aliased bitmaps), `Images/` decodes
 images, and `Graphics/Rasterizer` fills paths with exact area coverage before `PngEncoder` writes the result.
 
-Third-party font data built into the renderer is listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+The third-party fonts, font data and code built into the library are listed, with their licenses, in
+[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
