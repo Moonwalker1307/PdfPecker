@@ -247,6 +247,35 @@ bundled Liberation fonts (see [Fonts](#fonts)). PDF/A does not allow encryption,
 `Security` throws an `ArgumentException`. AES-256 keys come from a password hash that is slow on purpose, which adds
 about 3 ms to a conversion.
 
+### Accessibility: tagged PDF and PDF/UA
+
+```csharp
+var options = new PdfOptions
+{
+    Accessibility = PdfAccessibility.PdfUA1,   // or Tagged: the same structure without the PDF/UA claim
+    Language = "da",                           // default: <html lang="...">; for PDF/UA without either, "en"
+    Conformance = PdfConformance.PdfA2b,       // optional: PDF/UA combines with PDF/A
+};
+```
+
+`Tagged` gives the PDF a structure tree built from the HTML, so screen readers, reflow and text extraction follow the
+document rather than the page layout: headings (`H1` to `H6`), paragraphs, lists with their labels, tables with header
+scopes and spans, figures with their alt text, links (tied to their clickable areas), block quotes, code and sections,
+all in document order, with `lang` attributes as the language of the element. Text outside a paragraph (straight in a
+`div`, say) gets one. Backgrounds, borders, running headers and footers, `HeaderText`/`FooterText`, watermarks, repeated
+table headers, fixed boxes and decorative images are artifacts that assistive technology skips.
+
+`PdfUA1` adds what ISO 14289-1 asks beyond the tags: every font embedded (the bundled Liberation fonts stand in for the
+standard ones), the title shown in the viewer's title bar and the PDF/UA identification in the XMP metadata. The output
+passes veraPDF's PDF/UA-1 checks, on its own and together with PDF/A-2b or PDF/A-3b (e-invoices included). It needs a
+title: `Title`, the `<title>` element or else the first heading; without one, conversion throws `ArgumentException`, as
+it does when `Security` leaves out `PdfPermissions.ExtractForAccessibility`.
+
+What the tags can't fix is up to the HTML: give images an `alt` (an image without `alt`, `aria-label` or `title`, or an
+`<svg>` without a `<title>`, counts as decorative), use real headings, lists and `th` cells, and mark purely visual
+content `aria-hidden="true"`. Heading levels that skip one (`h1` then `h3`) are tagged one level below the previous
+heading, as PDF/UA does not allow gaps.
+
 ### E-invoices (Factur-X / ZUGFeRD)
 
 Pass the invoice's CII XML (from your invoicing system) and PdfPecker attaches it to the PDF, making a Factur-X /
@@ -619,10 +648,13 @@ and `Markdown/HtmlRenderer` writes the HTML, which then takes the same path as a
 1. `Html/HtmlParser` builds a DOM in a single pass, applying the browser rules for implied end tags.
 2. `Css/StyleResolver` cascades a user-agent stylesheet, presentational attributes, document stylesheets and inline
    styles. Rules are indexed by id, class and tag, and elements with identical inputs share one computed style.
+   For a tagged PDF, `Pdf/StructureTree` then maps the elements to structure types and gives every text node, image and
+   list marker a slot in that tree.
 3. `Layout/LayoutEngine` lays out blocks, inline text (line breaking, justification), lists and tables
    (automatic column widths), paginating as it goes, and produces a flat list of draw operations.
 4. `Pdf/PdfDocumentWriter` writes PDF 1.4: content streams, fonts, image XObjects, link annotations,
-   the bookmark outline and the cross-reference table. `Fonts/FontSubsetter` and `Fonts/CffSubsetter` cut embedded
+   the bookmark outline and the cross-reference table. A tagged PDF's content is wrapped in marked-content sequences
+   for its slots (or as artifacts), and the structure tree and its parent tree are written last. `Fonts/FontSubsetter` and `Fonts/CffSubsetter` cut embedded
    fonts down to the glyphs used (with their composite components and the CFF subroutines they call).
 
 The renderer (`Rendering/`) works the other way round: `Parsing/PdfFile` reads the object graph, `PageRenderer`

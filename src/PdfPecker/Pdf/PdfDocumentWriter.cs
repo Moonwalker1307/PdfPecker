@@ -87,7 +87,51 @@ internal sealed class PdfDocumentWriter
     /// <summary>Keywords, Creator, Producer and custom entries for the document information dictionary (and the XMP for PDF/A).</summary>
     public DocumentProperties Properties { get; init; } = new();
 
-    private bool EmbedStandard => EmbedStandardFonts || Conformance != PdfConformance.None;
+    /// <summary>Write a tagged PDF with this logical structure. Default: null, untagged.</summary>
+    public StructureTree? Structure { get; init; }
+
+    /// <summary>Claim PDF/UA-1 conformance in the metadata. Needs <see cref="Structure"/>.</summary>
+    public bool PdfUA { get; init; }
+
+    /// <summary>The document's natural language, such as "en-US", for a tagged PDF.</summary>
+    public string? Language { get; init; }
+
+    private bool EmbedStandard => EmbedStandardFonts || Conformance != PdfConformance.None || PdfUA;
+
+    // Tagged PDF: the stream being written, the open marked-content sequence (a ContentSlot or Artifact) and whether
+    // everything is an artifact for now (running headers and footers, fixed boxes, the page canvas).
+    private McStream? _mc;
+    private object? _mcOpen;
+    private bool _forceArtifact;
+    private static readonly object Artifact = new();
+    private readonly List<McStream?> _formStreams = new(); // by form, the marked content of tagged transparency groups
+
+    /// <summary>Starts the marked-content sequence for content of <paramref name="slot"/> (an artifact when null), unless it is open.</summary>
+    private void Mark(ByteBuffer b, ContentSlot? slot)
+    {
+        if (_mc == null) return;
+        object want = _forceArtifact || slot == null ? Artifact : slot;
+        if (ReferenceEquals(_mcOpen, want)) return;
+        EndMarked(b);
+        if (want is ContentSlot s)
+        {
+            int mcid = _mc.Elements.Count;
+            _mc.Elements.Add(s.Parent);
+            s.Refs.Add((_mc, mcid));
+            b.Ascii("/").Ascii(s.Parent.Type).Ascii(" <</MCID ").Int(mcid).Ascii(">> BDC\n");
+        }
+        else b.Ascii("/Artifact BMC\n");
+        _mcOpen = want;
+    }
+
+    /// <summary>Closes the open marked-content sequence, and the text object inside it.</summary>
+    private void EndMarked(ByteBuffer b)
+    {
+        if (_mcOpen == null) return;
+        EndText(b);
+        b.Ascii("EMC\n");
+        _mcOpen = null;
+    }
 
     /// <summary>The font that draws a run: standard fonts become their bundled replacements when they must be embedded.</summary>
     private TextFont Leaf(TextFont font)
@@ -416,14 +460,25 @@ internal sealed class PdfDocumentWriter
         int fileSpecId = 0, embeddedFileId = 0;
         if (EInvoice != null) { fileSpecId = next++; embeddedFileId = next++; }
         if (_crypt != null) encryptId = next++;
+        bool tagged = Structure != null;
+        int structRootId = tagged ? next++ : 0;
+        if (PdfUA && metadataId == 0) metadataId = next++;
 
         // 4. Header.
-        _out.Ascii(pdfa || _crypt != null ? "%PDF-1.7\n%" : "%PDF-1.4\n%").Bytes(new byte[] { 0xE2, 0xE3, 0xCF, 0xD3 }).Nl();
+        _out.Ascii(pdfa || _crypt != null || tagged ? "%PDF-1.7\n%" : "%PDF-1.4\n%").Bytes(new byte[] { 0xE2, 0xE3, 0xCF, 0xD3 }).Nl();
 
         // Catalog, pages tree.
         Begin(catalogId).Ascii("<< /Type /Catalog /Pages ").Int(pagesId).Ascii(" 0 R");
         if (outlinesId != 0) _out.Ascii(" /Outlines ").Int(outlinesId).Ascii(" 0 R");
-        if (pdfa) _out.Ascii(" /Metadata ").Int(metadataId).Ascii(" 0 R /OutputIntents [").Int(outputIntentId).Ascii(" 0 R]");
+        if (metadataId != 0) _out.Ascii(" /Metadata ").Int(metadataId).Ascii(" 0 R");
+        if (pdfa) _out.Ascii(" /OutputIntents [").Int(outputIntentId).Ascii(" 0 R]");
+        if (tagged)
+        {
+            _out.Ascii(" /MarkInfo << /Marked true >> /StructTreeRoot ").Int(structRootId).Ascii(" 0 R");
+            if (!string.IsNullOrEmpty(Language)) { _out.Ascii(" /Lang "); WriteTextString(_out, Language!); }
+            // PDF/UA: viewers show the title, not the file name.
+            if (!string.IsNullOrEmpty(title)) _out.Ascii(" /ViewerPreferences << /DisplayDocTitle true >>");
+        }
         if (EInvoice != null)
         {
             // PDF/A-3 attachments are associated files (/AF) and also listed in the name tree viewers show.
@@ -444,16 +499,19 @@ internal sealed class PdfDocumentWriter
         var now = DateTime.UtcNow;
         now = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerSecond));
         var props = Properties.WithStandard(title, author, subject);
-        if (pdfa) props = props.Cleaned(); // Info and XMP must agree, and XML cannot carry control characters.
+        if (metadataId != 0) props = props.Cleaned(); // Info and XMP must agree, and XML cannot carry control characters.
         Begin(infoId);
-        props.WriteInfo(_out, now, modDate: pdfa, WriteTextString);
+        props.WriteInfo(_out, now, modDate: metadataId != 0, WriteTextString);
         End();
 
+        if (metadataId != 0)
+        {
+            int part = !pdfa ? 0 : Conformance == PdfConformance.PdfA3b ? 3 : 2;
+            var xmp = PdfA.Xmp(part, "B", props, now, EInvoice, PdfUA);
+            WriteStream(metadataId, xmp, compress: false, "/Type /Metadata /Subtype /XML");
+        }
         if (pdfa)
         {
-            int part = Conformance == PdfConformance.PdfA3b ? 3 : 2;
-            var xmp = PdfA.Xmp(part, "B", props, now, EInvoice);
-            WriteStream(metadataId, xmp, compress: false, "/Type /Metadata /Subtype /XML");
             Begin(outputIntentId).Ascii("<< /Type /OutputIntent /S /GTS_PDFA1 /OutputConditionIdentifier ");
             WriteTextString(_out, PdfA.OutputCondition);
             _out.Ascii(" /Info ");
@@ -512,11 +570,15 @@ internal sealed class PdfDocumentWriter
         float paperDy = _paperDy = paperH - _page.Height * _page.Scale;
         var content = new ByteBuffer(32 * 1024);
         var annotations = new List<(int Id, Placed Link, float Origin, float PageTop)>();
+        var pageStreams = new McStream[pageCount];
+        int parentKey = pageCount; // keys 0 to pageCount - 1 of the parent tree are the pages'
+        var annotKeys = new Dictionary<int, int>();
         for (int p = 0; p < pageCount; p++)
         {
             Cancellation.ThrowIfCancellationRequested();
             content.Clear();
             ResetState();
+            if (tagged) { _mc = pageStreams[p] = new McStream(p); _mcOpen = null; }
             if (_page.Scale != 1)
             {
                 // Num keeps 3 decimals, too few for a scale such as 0.99916. The content keeps to the top of the page.
@@ -525,12 +587,15 @@ internal sealed class PdfDocumentWriter
             }
             if (CssColor.IsVisible(pageBackground))
             {
+                Mark(content, null);
                 SetFill(content, pageBackground);
                 content.Ascii("0 0 ").Num(_page.Width).Sp().Num(_page.Height).Ascii(" re f\n");
             }
             _yOrigin = _page.MarginTop;
+            _forceArtifact = true;
             foreach (var placed in canvas[p]) WriteOp(content, placed, 0, imageIds);
-            if (wm is { Behind: true }) content.Ascii("q /Wm Do Q\n");
+            _forceArtifact = false;
+            if (wm is { Behind: true }) { Mark(content, null); content.Ascii("q /Wm Do Q\n"); }
             var pageLinks = new List<(Placed Link, float Origin, float PageTop)>();
             _yOrigin = _page.MarginTop + _page.BandTop;
             foreach (var placed in pages[p])
@@ -540,20 +605,24 @@ internal sealed class PdfDocumentWriter
                 WriteOp(content, placed, p * H, imageIds);
             }
             _yOrigin = _page.MarginTop;
+            _forceArtifact = true;
             foreach (var placed in bands[p])
             {
                 if (placed.Op is LinkOp) { pageLinks.Add((placed, _yOrigin, 0)); continue; }
                 AddUntransformedLinks(placed, pageLinks, _yOrigin, 0);
                 WriteOp(content, placed, 0, imageIds);
             }
+            _forceArtifact = false;
             if (hasMargins)
             {
+                Mark(content, null);
                 EndText(content);
                 if (headerTemplate != null) WriteMarginText(content, marginFont, headerTemplate, p + 1, pageCount, top: true);
                 if (footerTemplate != null) WriteMarginText(content, marginFont, footerTemplate, p + 1, pageCount, top: false);
             }
             EndText(content);
-            if (wm is { Behind: false }) content.Ascii("q /Wm Do Q\n");
+            if (wm is { Behind: false }) { Mark(content, null); content.Ascii("q /Wm Do Q\n"); }
+            EndMarked(content);
             if (_page.Scale != 1) content.Ascii("Q\n");
 
             var annotIds = new List<int>();
@@ -562,6 +631,16 @@ internal sealed class PdfDocumentWriter
                 int id = next++;
                 annotIds.Add(id);
                 annotations.Add((id, lk, origin, pageTop));
+                if (tagged)
+                {
+                    // A link annotation belongs to its Link element; one outside the structure (in a running header,
+                    // say) gets a Link element of its own at the end.
+                    var linkOp = (LinkOp)lk.Op;
+                    var link = linkOp.Link ?? new StructElem("Link", Structure!.Root) { Text = linkOp.Target };
+                    link.Kids.Add(new AnnotRef(id, p));
+                    _mc!.Annotations.Add((id, link));
+                    annotKeys[id] = parentKey++;
+                }
             }
 
             Begin(pageIds[p]).Ascii("<< /Type /Page /Parent ").Int(pagesId).Ascii(" 0 R /MediaBox [0 0 ")
@@ -572,6 +651,11 @@ internal sealed class PdfDocumentWriter
                 _out.Ascii(" /Annots [");
                 foreach (var id in annotIds) _out.Int(id).Ascii(" 0 R ");
                 _out.Ascii("]");
+            }
+            if (tagged)
+            {
+                if (_mc!.Elements.Count > 0) _out.Ascii(" /StructParents ").Int(p);
+                _out.Ascii(" /Tabs /S"); // PDF/UA: annotations in structure order
             }
             _out.Ascii(" >>");
             End();
@@ -589,6 +673,14 @@ internal sealed class PdfDocumentWriter
             x1 *= k; x2 *= k; yTop = yTop * k + paperDy; yBottom = yBottom * k + paperDy;
             Begin(id).Ascii("<< /Type /Annot /Subtype /Link /Rect [").Num(x1).Sp().Num(yBottom).Sp().Num(x2).Sp().Num(yTop)
                 .Ascii("] /F 4 /Border [0 0 0] ");
+            if (annotKeys.TryGetValue(id, out int key))
+            {
+                // PDF/UA: a link's description, for assistive technology.
+                var text = (link.Link?.Text is { Length: > 0 } t ? t : null) ?? link.Target;
+                _out.Ascii("/StructParent ").Int(key).Ascii(" /Contents ");
+                WriteTextString(_out, text);
+                _out.Sp();
+            }
             if (link.Target.StartsWith("#", StringComparison.Ordinal))
             {
                 if (anchors.TryGetValue(Uri.UnescapeDataString(link.Target.Substring(1)), out float ay)
@@ -652,8 +744,21 @@ internal sealed class PdfDocumentWriter
         for (int i = 0; i < _forms.Count; i++)
         {
             formIds[i] = next++;
+            string structParents = "";
+            if (_formStreams.Count > i && _formStreams[i] is { Elements.Count: > 0 } fs)
+            {
+                fs.Key = parentKey++;
+                fs.FormId = formIds[i];
+                structParents = " /StructParents " + fs.Key.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
             WriteStream(formIds[i], _forms[i], _compress, "/Type /XObject /Subtype /Form /BBox [-32767 -32767 32767 32767] "
-                + "/Group << /S /Transparency >> /Resources " + resourcesId.ToString(System.Globalization.CultureInfo.InvariantCulture) + " 0 R");
+                + "/Group << /S /Transparency >> /Resources " + resourcesId.ToString(System.Globalization.CultureInfo.InvariantCulture) + " 0 R"
+                + structParents);
+        }
+        if (tagged)
+        {
+            _mc = null;
+            next = WriteStructure(next, structRootId, parentKey, pageIds, pageStreams, annotKeys);
         }
 
         var maskIds = new int[_masks.Count];
@@ -710,6 +815,93 @@ internal sealed class PdfDocumentWriter
 
         _crypt?.Dispose();
         return _out.Span.ToArray();
+    }
+
+    // ------------------------------------------------------------------ structure
+
+    /// <summary>
+    /// Writes the structure tree of a tagged PDF: its root, the elements, and the parent tree that maps each page's
+    /// marked content and each link annotation back to its element. Returns the next free object number.
+    /// </summary>
+    private int WriteStructure(int next, int rootId, int nextKey, int[] pageIds, McStream[] pageStreams, Dictionary<int, int> annotKeys)
+    {
+        var tree = Structure!;
+        tree.Prune();
+        var elements = new List<StructElem>();
+        void Number(StructElem e)
+        {
+            e.Id = next++;
+            elements.Add(e);
+            foreach (var k in e.Kids)
+                if (k is StructElem c) Number(c);
+        }
+        Number(tree.Root);
+        int parentTreeId = next++;
+
+        Begin(rootId).Ascii("<< /Type /StructTreeRoot /K ").Int(tree.Root.Id).Ascii(" 0 R /ParentTree ").Int(parentTreeId)
+            .Ascii(" 0 R /ParentTreeNextKey ").Int(nextKey).Ascii(" >>");
+        End();
+
+        // The parent tree: a number tree with one flat /Nums array, in key order.
+        var entries = new List<(int Key, McStream? Stream, StructElem? Link)>();
+        foreach (var page in pageStreams)
+        {
+            if (page.Elements.Count > 0) entries.Add((page.Page, page, null));
+            foreach (var (id, link) in page.Annotations) entries.Add((annotKeys[id], null, link));
+        }
+        foreach (var form in _formStreams)
+            if (form is { Key: >= 0 }) entries.Add((form.Key, form, null));
+        entries.Sort((x, y) => x.Key.CompareTo(y.Key));
+        Begin(parentTreeId).Ascii("<< /Nums [");
+        foreach (var (key, stream, link) in entries)
+        {
+            _out.Ascii("\n").Int(key).Sp();
+            if (link != null) { _out.Int(link.Id).Ascii(" 0 R"); continue; }
+            _out.Ascii("[");
+            foreach (var e in stream!.Elements) _out.Int(e.Id).Ascii(" 0 R ");
+            _out.Ascii("]");
+        }
+        _out.Ascii("] >>");
+        End();
+
+        foreach (var e in elements)
+        {
+            Begin(e.Id).Ascii("<< /Type /StructElem /S /").Ascii(e.Type).Ascii(" /P ").Int(e.Parent?.Id ?? rootId).Ascii(" 0 R");
+            if (e.Lang != null) { _out.Ascii(" /Lang "); WriteTextString(_out, e.Lang); }
+            if (e.Alt != null) { _out.Ascii(" /Alt "); WriteTextString(_out, e.Alt); }
+            if (e.Scope != null || e.RowSpan > 1 || e.ColSpan > 1)
+            {
+                _out.Ascii(" /A << /O /Table");
+                if (e.Scope != null) _out.Ascii(" /Scope /").Ascii(e.Scope);
+                if (e.RowSpan > 1) _out.Ascii(" /RowSpan ").Int(e.RowSpan);
+                if (e.ColSpan > 1) _out.Ascii(" /ColSpan ").Int(e.ColSpan);
+                _out.Ascii(" >>");
+            }
+            _out.Ascii(" /K [");
+            foreach (var k in e.Kids)
+            {
+                switch (k)
+                {
+                    case StructElem c:
+                        _out.Int(c.Id).Ascii(" 0 R ");
+                        break;
+                    case ContentSlot slot:
+                        foreach (var (stream, mcid) in slot.Refs)
+                        {
+                            _out.Ascii("<< /Type /MCR /Pg ").Int(pageIds[stream.Page]).Ascii(" 0 R /MCID ").Int(mcid);
+                            if (stream.FormId != 0) _out.Ascii(" /Stm ").Int(stream.FormId).Ascii(" 0 R");
+                            _out.Ascii(" >> ");
+                        }
+                        break;
+                    case AnnotRef annot:
+                        _out.Ascii("<< /Type /OBJR /Pg ").Int(pageIds[annot.Page]).Ascii(" 0 R /Obj ").Int(annot.Id).Ascii(" 0 R >> ");
+                        break;
+                }
+            }
+            _out.Ascii("] >>");
+            End();
+        }
+        return next;
     }
 
     // ------------------------------------------------------------------ outline
@@ -1018,6 +1210,12 @@ internal sealed class PdfDocumentWriter
 
     private void WriteOp(ByteBuffer b, in Placed placed, float pageTop, Dictionary<PdfImage, int> imageIds)
     {
+        if (_mc != null)
+        {
+            // Marked content nests inside the q/Q of clips and layers, which open their own sequences.
+            if (placed.Op is LayerBlock or ClipBlock) EndMarked(b);
+            else Mark(b, placed.Op.Tag);
+        }
         switch (placed.Op)
         {
             case TextOp t:
@@ -1099,10 +1297,16 @@ internal sealed class PdfDocumentWriter
                     _tr = -1;
                     _fillAlpha = _strokeAlpha = -1; // a group starts at alpha 1, but not every viewer resets it
                     _anyAlpha = true;
+                    // A transparency group is a stream of its own, with its own marked-content numbers.
+                    var pageMc = _mc;
+                    if (pageMc != null) _mc = new McStream(pageMc.Page);
                     foreach (var item in tb.Items)
                         if (item.Op is not LinkOp) WriteOp(group, item, pageTop, imageIds);
                     EndText(group);
+                    EndMarked(group);
                     _forms.Add(group.Span.ToArray());
+                    _formStreams.Add(_mc);
+                    _mc = pageMc;
                     int alpha = (int)MathF.Round(Math.Clamp(tb.Layer.Opacity, 0, 1) * 255);
                     _groupAlphas.Add(alpha);
                     b.Ascii("/g").Int(alpha).Ascii(" gs /Fx").Int(_forms.Count).Ascii(" Do\n");
@@ -1112,6 +1316,7 @@ internal sealed class PdfDocumentWriter
                     foreach (var item in tb.Items)
                         if (item.Op is not LinkOp) WriteOp(b, item, pageTop, imageIds);
                     EndText(b);
+                    EndMarked(b);
                 }
                 b.Ascii("Q\n");
                 InvalidateState();
@@ -1126,12 +1331,15 @@ internal sealed class PdfDocumentWriter
                 if (c.W < ClipOp.Far) { x0 = SnapPx(x0); x1 = SnapPx(x1); }
                 if (c.H < ClipOp.Far) { y0 = SnapPx(y0); y1 = SnapPx(y1); }
                 b.Ascii("q ");
+                if (_mc != null) b.Ascii("/Artifact BMC ");
                 if (c.Radii is { } r && !r.IsZero) RoundRectPath(b, x0, y0, Math.Max(0, x1 - x0), Math.Max(0, y1 - y0), r, pageTop);
                 else b.Num(PX(x0)).Sp().Num(PY(y1, pageTop)).Sp().Num(Math.Max(0, x1 - x0)).Sp().Num(Math.Max(0, y1 - y0)).Ascii(" re ");
                 b.Ascii("W n\n");
+                if (_mc != null) b.Ascii("EMC\n");
                 foreach (var item in cb.Items)
                     if (item.Op is not LinkOp) WriteOp(b, item, pageTop, imageIds);
                 EndText(b);
+                EndMarked(b);
                 b.Ascii("Q\n");
                 InvalidateState();
                 break;

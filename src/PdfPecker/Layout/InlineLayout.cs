@@ -2,6 +2,7 @@ using System.Text;
 using PdfPecker.Css;
 using PdfPecker.Html;
 using PdfPecker.Images;
+using PdfPecker.Pdf;
 using PdfPecker.Svg;
 
 namespace PdfPecker.Layout;
@@ -17,6 +18,7 @@ internal sealed partial class LayoutEngine
     private readonly List<Item> _itemPool = new();
     private int _itemPoolUsed;
     private int _inlineDepth;
+    private ContentSlot? _textTag; // the structure slot of the text node being collected, for a tagged PDF
 
     // A paragraph's collection state, lines and inline runs are reused once it has been placed or measured. Each is
     // handed back explicitly, so nested layout (an inline-block's own paragraphs) takes fresh ones from the pool.
@@ -78,6 +80,7 @@ internal sealed partial class LayoutEngine
         _itemPoolUsed++;
         it.Kind = kind;
         it.Style = style;
+        it.Tag = _textTag;
         return it;
     }
 
@@ -107,6 +110,7 @@ internal sealed partial class LayoutEngine
         public float FloatMin;        // a float's min-content width, when measuring
         public float MinWidth = -1;   // an inline-block's min-content contribution, when measuring (-1: Width)
         public float RelX, RelY;      // offset of position: relative inline ancestors
+        public ContentSlot? Tag;      // tagged PDF: the structure slot of the text or image
 
         public void Reset()
         {
@@ -197,7 +201,7 @@ internal sealed partial class LayoutEngine
             var group = new GroupOp();
             ops.Add(group);
             BoxPainter.Paint(group, s, 0, 0, sw + pl + pr, sh + ptop + pbot, _images);
-            if (s.Visible && svg != null) ops.Add(new SvgOp(pl, ptop, sw, sh, svg));
+            if (s.Visible && svg != null) ops.Add(new SvgOp(pl, ptop, sw, sh, svg) { Tag = Tags?.Of(e) });
             if (ml > 0) { var it_ = Rent(ItemKind.Spacer, s); it_.Width = ml; it_.Href = href; st.Items.Add(it_); }
             float boxH = sh + ptop + pbot;
             st.Items.Add(new Item { Kind = ItemKind.Box, Style = s, Width = sw + pl + pr, Height = boxH, BoxBaseline = boxH, BoxOps = ops, Href = href ?? LinkOf(e) });
@@ -210,7 +214,9 @@ internal sealed partial class LayoutEngine
     {
         if (node is TextNode t)
         {
+            if (Tags != null) _textTag = Tags.Of(t);
             AddText(st, t.Text, t.Parent!.Style, href, deco);
+            _textTag = null;
             return;
         }
         var e = (Element)node;
@@ -271,7 +277,7 @@ internal sealed partial class LayoutEngine
                 {
                     float ml = s.MarginLeft.IsAuto ? 0 : s.MarginLeft.Resolve(0), mr = s.MarginRight.IsAuto ? 0 : s.MarginRight.Resolve(0);
                     if (ml > 0) { var it_ = Rent(ItemKind.Spacer, s); it_.Width = ml; it_.Href = href; st.Items.Add(it_); }
-                    { var it_ = Rent(ItemKind.Image, s); it_.Image = s.Visible ? img : null; it_.Width = w; it_.Height = h; it_.Href = href ?? LinkOf(e); st.Items.Add(it_); }
+                    { var it_ = Rent(ItemKind.Image, s); it_.Image = s.Visible ? img : null; it_.Width = w; it_.Height = h; it_.Href = href ?? LinkOf(e); it_.Tag = Tags?.Of(e); st.Items.Add(it_); }
                     if (mr > 0) { var it_ = Rent(ItemKind.Spacer, s); it_.Width = mr; it_.Href = href; st.Items.Add(it_); }
                     st.LastWasSpace = false;
                 }
@@ -871,7 +877,7 @@ internal sealed partial class LayoutEngine
                         while (i < items.Count)
                         {
                             var r = items[i];
-                            if (r.Kind is not (ItemKind.Text or ItemKind.Space) || !ReferenceEquals(r.Style, style)) break;
+                            if (r.Kind is not (ItemKind.Text or ItemKind.Space) || !ReferenceEquals(r.Style, style) || r.Tag != it.Tag) break;
                             sb.Append(r.Source, r.Start, r.Length);
                             i++;
                         }
@@ -882,7 +888,7 @@ internal sealed partial class LayoutEngine
                             float bl = baseline + BaselineShift(style) + items[start].RelY;
                             if (style.TextShadows != null) TextShadows(style, runX, bl, y, sb.ToString(), style.WordSpacing + extra);
                             _ops.Add(new TextOp(runX, bl, y, style.Font, style.FontSize, CssColor.Fade(style.Color, style.InlineFade), sb.ToString(),
-                                style.WordSpacing + extra, style.LetterSpacing));
+                                style.WordSpacing + extra, style.LetterSpacing) { Tag = it.Tag });
                             if (style.TextDecoration != TextDecoration.None) Decorate(style, runX, runEnd - runX, bl);
                         }
                         continue;
@@ -891,7 +897,7 @@ internal sealed partial class LayoutEngine
                         if (it.Image != null)
                         {
                             ImageMetrics(it, block, out float ia, out _);
-                            _ops.Add(new ImageOp(xs[i] + it.RelX, baseline - ia + it.RelY, it.Width, it.Height, it.Image));
+                            _ops.Add(new ImageOp(xs[i] + it.RelX, baseline - ia + it.RelY, it.Width, it.Height, it.Image) { Tag = it.Tag });
                         }
                         break;
                     case ItemKind.Box:
@@ -1051,8 +1057,13 @@ internal sealed partial class LayoutEngine
             var href = items[i].Href;
             if (href == null) { i++; continue; }
             int start = i;
-            while (i < items.Count && items[i].Href == href) i++;
-            _ops.Add(new LinkOp(xs[start], lineTop, xs[i] - xs[start], lineH, href));
+            StructElem? link = null;
+            while (i < items.Count && items[i].Href == href)
+            {
+                link ??= items[i].Tag?.Parent.Closest("Link");
+                i++;
+            }
+            _ops.Add(new LinkOp(xs[start], lineTop, xs[i] - xs[start], lineH, href) { Link = link });
         }
     }
 
@@ -1095,6 +1106,7 @@ internal sealed partial class LayoutEngine
             if (items[k].Kind is ItemKind.Anchor or ItemKind.Absolute) kept.Add(items[k]);
         while (kept.Count > 0 && kept[^1].Kind == ItemKind.Space) { used -= kept[^1].Width; kept.RemoveAt(kept.Count - 1); }
         var dots = Rent(ItemKind.Text, block);
+        dots.Tag = kept.LastOrDefault(k => k.Tag != null)?.Tag;
         dots.Source = Ellipsis;
         dots.Length = 1;
         dots.Width = ew;

@@ -67,6 +67,25 @@ public enum PdfConformance
     PdfA3b,
 }
 
+/// <summary>How the generated PDF serves screen readers and other assistive technology.</summary>
+public enum PdfAccessibility
+{
+    /// <summary>An untagged PDF.</summary>
+    None,
+    /// <summary>
+    /// A tagged PDF: a structure tree built from the HTML (headings, paragraphs, lists, tables, figures with their alt
+    /// text, links), in document order, with the document's language. Backgrounds, borders, running headers and footers
+    /// and decorative images are marked as artifacts.
+    /// </summary>
+    Tagged,
+    /// <summary>
+    /// PDF/UA-1 (ISO 14289-1): tagged as <see cref="Tagged"/>, with every font embedded, the title shown in the viewer's
+    /// title bar and the PDF/UA identification in the metadata. Combines with PDF/A <see cref="PdfOptions.Conformance"/>.
+    /// The document needs a title (<see cref="PdfOptions.Title"/>, the HTML &lt;title&gt; or else its first heading).
+    /// </summary>
+    PdfUA1,
+}
+
 /// <summary>Options for <see cref="HtmlToPdf"/>.</summary>
 public sealed class PdfOptions
 {
@@ -216,6 +235,24 @@ public sealed class PdfOptions
 
     /// <summary>Produce an archival PDF/A file. Default: <see cref="PdfConformance.None"/>. Cannot be combined with <see cref="Security"/>.</summary>
     public PdfConformance Conformance { get; set; }
+
+    /// <summary>
+    /// Tag the PDF for screen readers and other assistive technology, or make it PDF/UA. Default:
+    /// <see cref="PdfAccessibility.None"/>.
+    /// </summary>
+    /// <remarks>
+    /// Images need alt text: an image without an <c>alt</c>, <c>aria-label</c> or <c>title</c> (or an svg without a
+    /// <c>&lt;title&gt;</c>) is treated as decorative, like <c>alt=""</c>. Heading levels that skip one (an h3 right after an
+    /// h1) are tagged one level down from the previous heading, as PDF/UA requires. Content marked <c>aria-hidden="true"</c>
+    /// and fixed-position boxes, which repeat on every page, are artifacts.
+    /// </remarks>
+    public PdfAccessibility Accessibility { get; set; }
+
+    /// <summary>
+    /// The document's language, such as "en-US" or "da", for a tagged PDF. Default: the <c>lang</c> attribute of the
+    /// &lt;html&gt; element; for PDF/UA without either, "en". <c>lang</c> attributes on other elements are tagged too.
+    /// </summary>
+    public string? Language { get; set; }
 
     /// <summary>
     /// Make a Factur-X / ZUGFeRD e-invoice: the invoice's CII XML is attached to the PDF with the metadata that tells

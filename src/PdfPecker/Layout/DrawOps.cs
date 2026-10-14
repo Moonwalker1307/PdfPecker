@@ -12,6 +12,9 @@ namespace PdfPecker.Layout;
 /// </summary>
 internal abstract class DrawOp
 {
+    /// <summary>In a tagged PDF, the structure content this op draws; null for artifacts such as backgrounds and borders.</summary>
+    public ContentSlot? Tag;
+
     public abstract void Offset(float dx, float dy);
 }
 
@@ -213,6 +216,7 @@ internal sealed class LinkOp : DrawOp
 {
     public float X, Y, W, H;
     public string Target; // an absolute URI, or "#id" for an internal destination
+    public StructElem? Link; // in a tagged PDF, the Link element the annotation belongs to
     public LinkOp(float x, float y, float w, float h, string target) { X = x; Y = y; W = w; H = h; Target = target; }
     public override void Offset(float dx, float dy) { X += dx; Y += dy; }
 }
