@@ -1,6 +1,7 @@
 using PdfPecker.Css;
 using PdfPecker.Html;
 using PdfPecker.Images;
+using PdfPecker.Pdf;
 using PdfPecker.Svg;
 
 namespace PdfPecker.Layout;
@@ -38,11 +39,24 @@ internal sealed partial class LayoutEngine
     /// <summary>The border box of <see cref="CanvasRoot"/> once laid out.</summary>
     public (float X, float Y, float W, float H)? CanvasRootBox { get; private set; }
 
+    /// <summary>For a tagged PDF: the document's structure, whose slots the text, image and marker ops are tagged with.</summary>
+    public StructureTree? Tags { get; init; }
+
     /// <summary>Stops the layout when cancelled.</summary>
     public CancellationToken Cancellation { get; init; }
 
     /// <summary>The most pages the flow may fill; checked as lines are placed, before their ops pile up.</summary>
     public int MaxPages { get; init; } = int.MaxValue;
+
+    /// <summary>Makes the content ops from <paramref name="start"/> on artifacts, for content drawn again (repeated table headers).</summary>
+    private static void Untag(List<DrawOp> ops, int start = 0)
+    {
+        for (int i = start; i < ops.Count; i++)
+        {
+            ops[i].Tag = null;
+            if (ops[i] is GroupOp g) Untag(g.Ops);
+        }
+    }
 
     private void CheckPageLimit(float y)
     {
@@ -55,6 +69,7 @@ internal sealed partial class LayoutEngine
         public ListStyleType Type;
         public ComputedStyle Style = null!;
         public float ContentX;
+        public ContentSlot? Tag;
     }
 
     public float Layout(Element document, float width)
@@ -506,7 +521,7 @@ internal sealed partial class LayoutEngine
         float cy = y + bt + pt;
 
         if (s.Display == Display.ListItem && s.ListStyleType != ListStyleType.None)
-            _marker = new ListMarker { Text = MarkerText(s.ListStyleType, _currentListIndex), Type = s.ListStyleType, Style = s, ContentX = cx };
+            _marker = new ListMarker { Text = MarkerText(s.ListStyleType, _currentListIndex), Type = s.ListStyleType, Style = s, ContentX = cx, Tag = Tags?.MarkerOf(e) };
 
         float contentBottom;
         float trailing = 0;
@@ -526,9 +541,9 @@ internal sealed partial class LayoutEngine
                 // Rounded corners clip the image to the content box's curve.
                 var radii = BoxPainter.InnerRadii(BoxPainter.Radii(s, imgW + bl + br + pl + pr, imgH + bt + bb + pt + pb),
                     bl + pl, bt + pt, br + pr, bb + pb);
-                AddImage(s, image, cx, cy, imgW, imgH, radii);
+                AddImage(s, image, cx, cy, imgW, imgH, radii, Tags?.Of(e));
             }
-            if (svg != null && s.Visible) _ops.Add(new SvgOp(cx, cy, imgW, imgH, svg));
+            if (svg != null && s.Visible) _ops.Add(new SvgOp(cx, cy, imgW, imgH, svg) { Tag = Tags?.Of(e) });
             contentBottom = cy + imgH;
         }
         else if (e.Name == "hr")
@@ -595,7 +610,7 @@ internal sealed partial class LayoutEngine
         _lastBoxTop = y;
         _lastBoxW = used;
         _lastBoxH = bottom - y;
-        if (e.Name == "a" && e.GetAttribute("href") is { Length: > 0 } href) _ops.Add(new LinkOp(bx, y, used, bottom - y, href));
+        if (e.Name == "a" && e.GetAttribute("href") is { Length: > 0 } href) _ops.Add(new LinkOp(bx, y, used, bottom - y, href) { Link = Tags?.ElementOf(e) });
         if (Headings != null && HeadingLevel(e.Name) is int level and > 0) RecordHeading(e, level, y, opsStart);
         _boxTrailing = trailing;
         return bottom;
@@ -656,7 +671,7 @@ internal sealed partial class LayoutEngine
             var font = s.Font;
             float tw = font.Measure(m.Text, size);
             float gap = font.CharWidth(' ', size); // Chrome's marker text ends with a space: "1. "
-            _ops.Add(new TextOp(m.ContentX - gap - tw, baseline, lineTop, font, size, s.Color, m.Text, 0, 0));
+            _ops.Add(new TextOp(m.ContentX - gap - tw, baseline, lineTop, font, size, s.Color, m.Text, 0, 0) { Tag = m.Tag });
             return;
         }
         // Chrome's symbol markers, in whole pixels from the font's rounded ascent: a square of side (2/3 ascent + 1) / 2,
@@ -741,11 +756,11 @@ internal sealed partial class LayoutEngine
     /// Draws an image into its content box (x, y, w, h), sized and placed by object-fit and object-position, and clipped
     /// to the box (and its rounded corners) where it reaches outside.
     /// </summary>
-    private void AddImage(ComputedStyle s, PdfImage image, float x, float y, float w, float h, CornerRadii? radii)
+    private void AddImage(ComputedStyle s, PdfImage image, float x, float y, float w, float h, CornerRadii? radii, ContentSlot? tag)
     {
         if (s.ObjectFit == ObjectFit.Fill || image.Width <= 0 || image.Height <= 0 || w <= 0 || h <= 0)
         {
-            _ops.Add(new ImageOp(x, y, w, h, image) { Radii = radii });
+            _ops.Add(new ImageOp(x, y, w, h, image) { Radii = radii, Tag = tag });
             return;
         }
         float nw = image.Width * 0.75f, nh = image.Height * 0.75f;
@@ -759,7 +774,7 @@ internal sealed partial class LayoutEngine
         };
         float dw = nw * k, dh = nh * k;
         float dx = x + s.ObjectPositionX.Resolve(w - dw), dy = y + s.ObjectPositionY.Resolve(h - dh);
-        var op = new ImageOp(dx, dy, dw, dh, image);
+        var op = new ImageOp(dx, dy, dw, dh, image) { Tag = tag };
         if (radii == null && dx >= x - Eps && dy >= y - Eps && dx + dw <= x + w + Eps && dy + dh <= y + h + Eps)
         {
             _ops.Add(op);
