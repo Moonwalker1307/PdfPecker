@@ -18,7 +18,9 @@
     <Description>Fast, dependency-free HTML and Markdown to PDF converter for .NET. Its own HTML parser, Markdown parser (CommonMark + GFM), CSS engine, layout engine and PDF writer: no browser, no native binaries, no third-party packages.</Description>
     <PackageTags>html;pdf;html-to-pdf;markdown;markdown-to-pdf;markdown-to-html;commonmark;converter;css;report;pdfa;zugferd;factur-x;e-invoice;pdf-forms;acroform</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageLicenseExpression>MIT AND OFL-1.1 AND Bitstream-Vera AND APAFML AND BSD-3-Clause</PackageLicenseExpression>
+    <!-- nuget.org only accepts OSI/FSF-approved licenses in an expression (not Bitstream-Vera or APAFML), so the package
+         points at the notices file, which reproduces every license that applies. -->
+    <PackageLicenseFile>THIRD-PARTY-NOTICES.md</PackageLicenseFile>
     <Copyright>Copyright (c) 2026 Moonwalker1307</Copyright>
     <RepositoryUrl>https://github.com/Moonwalker1307/PdfPecker</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
