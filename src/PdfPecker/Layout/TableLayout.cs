@@ -469,8 +469,11 @@ internal sealed partial class LayoutEngine
                 if (r >= m.HeadCount)
                 {
                     float headStart = rowTop;
+                    int headOps = _ops.Count;
                     for (int h = 0; h < m.HeadCount; h++)
                         rowTop = LayoutRow(m, h, rowTop, colX, widths, hs, vs, collapse, allowMove: false) + vs;
+                    // The structure has the header once: its repeats are artifacts.
+                    if (Tags != null) Untag(_ops, headOps);
                     if (rowTop - headStart > _pageH / 2)
                     {
                         // Headers too tall to repeat usefully: drop them again.

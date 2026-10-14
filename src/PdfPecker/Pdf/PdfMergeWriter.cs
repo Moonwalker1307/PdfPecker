@@ -427,8 +427,9 @@ internal sealed class PdfMergeWriter
         Begin(p.Id).Ascii("<< /Type /Page /Parent ").Int(PagesId).Ascii(" 0 R");
         foreach (var (key, value) in p.Page.Entries)
         {
-            // Inherited attributes are written below; /B (article beads) leads to the whole article thread.
-            if (key is "Type" or "Parent" or "B" or "Annots" or "Resources" or "MediaBox" or "CropBox" or "Rotate") continue;
+            // Inherited attributes are written below; /B (article beads) leads to the whole article thread. The structure
+            // tree is not carried over, so neither are the keys into it.
+            if (key is "Type" or "Parent" or "B" or "Annots" or "Resources" or "MediaBox" or "CropBox" or "Rotate" or "StructParents") continue;
             _out.Sp();
             PdfSyntax.RawName(_out, key);
             _out.Sp();
