@@ -381,6 +381,32 @@ not disposed; the sequence is enumerated lazily, so an iterator can open each on
 writes to a temporary file and moves it into place, so the output can be one of the inputs and a failed merge leaves
 no partial file behind.
 
+### Merging PDFs as they arrive
+
+For PDFs that arrive one at a time from elsewhere, such as downloads read a few at a time, use `StreamingPdfMerger`. It
+writes each PDF's pages when it is added and then lets the PDF go, so memory stays at about one input, and between
+inputs you decide what comes next: skip a missing document, or check that anything was added before answering. The
+output can be an HTTP response body or a file; it does not need to be seekable.
+
+```csharp
+var merger = new StreamingPdfMerger(response.Body, new PdfMergeOptions { Title = "Payslips October" });
+foreach (var path in paths)
+{
+    var pdf = await storage.DownloadAsync(path, ct);
+    if (pdf.Length == 0) continue;          // skip a missing document
+    await merger.AddAsync(pdf, ct);
+}
+if (merger.InputCount == 0) return Results.NotFound();
+await merger.CompleteAsync(ct);             // writes the page tree, bookmarks, form and cross-reference table
+
+// Or, from an IAsyncEnumerable<byte[]>:
+int pages = await PdfMerger.MergeAsync(DownloadInOrder(paths), response.Body, cancellationToken: ct);
+```
+
+The result is the same as `PdfMerger.Merge`'s, but the output is only a valid PDF once `Complete` has run. If adding a
+PDF throws (a damaged or encrypted input, `MaxPages` reached), what was written cannot be used and the merger refuses
+further calls. `Passwords` are matched to inputs in the order they are added.
+
 The pages keep their content, fonts, images, links, annotations, layers and fillable form fields, and each input's
 bookmarks follow each other. A form field named like one in an earlier input is renamed `name_2`, `name_3` and so on, so
 the copies keep their own values. Document properties come from the first input unless `PdfMergeOptions` sets them. The

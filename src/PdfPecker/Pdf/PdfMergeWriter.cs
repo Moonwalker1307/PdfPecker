@@ -25,7 +25,7 @@ internal sealed class PdfMergeWriter
     }
 
     private readonly PdfMergeOptions _options;
-    private readonly CancellationToken _cancel;
+    private CancellationToken _cancel;
     private readonly Stream? _sink; // written to as the buffer fills, when merging to a stream synchronously
     private readonly ByteBuffer _main = new(1 << 16);
     private ByteBuffer _out;
@@ -66,6 +66,12 @@ internal sealed class PdfMergeWriter
 
     /// <summary>The number of inputs added so far.</summary>
     public int InputCount => _inputs;
+
+    /// <summary>The number of pages added so far.</summary>
+    public int PageCount => _pageCount;
+
+    /// <summary>Stops the next <see cref="Add"/> or <see cref="Finish"/>, for callers that pass a token per call.</summary>
+    public CancellationToken Cancellation { set => _cancel = value; }
 
     /// <summary>Merges PDFs held in memory and returns the result.</summary>
     public byte[] Merge(List<byte[]> data)
