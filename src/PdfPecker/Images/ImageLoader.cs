@@ -43,7 +43,7 @@ internal sealed class ImageLoader
         {
             var bytes = Fetch(src);
             if (bytes != null)
-                img = PdfImage.FromBytes(bytes) ?? (object?)PdfPecker.Svg.SvgImage.FromFile(bytes, Fonts, SvgBudget);
+                img = DecodedImageCache.Decode(bytes) ?? (object?)PdfPecker.Svg.SvgImage.FromFile(bytes, Fonts, SvgBudget);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException or ArgumentException or NotSupportedException
                                        or InvalidDataException or OverflowException or IndexOutOfRangeException)

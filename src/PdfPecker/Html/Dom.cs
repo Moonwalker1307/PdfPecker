@@ -17,7 +17,11 @@ internal sealed class TextNode : Node
 internal sealed class Element : Node
 {
     public readonly string Name;
-    public readonly List<KeyValuePair<string, string>> Attributes = new(2);
+    private static readonly List<KeyValuePair<string, string>> NoAttributes = new(0);
+    private List<KeyValuePair<string, string>>? _attributes;
+
+    /// <summary>The attributes in source order; add them with <see cref="AddAttribute"/>.</summary>
+    public List<KeyValuePair<string, string>> Attributes => _attributes ?? NoAttributes;
     public readonly List<Node> Children = new();
 
     // Filled in before styling.
@@ -49,6 +53,8 @@ internal sealed class Element : Node
     }
 
     public bool HasAttribute(string name) => GetAttribute(name) != null;
+
+    public void AddAttribute(string name, string value) => (_attributes ??= new(2)).Add(new KeyValuePair<string, string>(name, value));
 
     public void AppendChild(Node node)
     {

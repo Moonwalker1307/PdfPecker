@@ -130,7 +130,7 @@ internal sealed class PdfDocumentWriter
     /// <summary>
     /// The links inside a translucent layer that is not transformed, or inside a clip: they stay where they are on the page.
     /// </summary>
-    private static IEnumerable<Placed> UntransformedLinks(Placed placed)
+    private static void AddUntransformedLinks(Placed placed, List<(Placed Link, float Origin, float PageTop)> links, float origin, float pageTop)
     {
         var items = placed.Op switch
         {
@@ -138,22 +138,22 @@ internal sealed class PdfDocumentWriter
             ClipBlock clip => clip.Items,
             _ => null,
         };
-        if (items == null) yield break;
+        if (items == null) return;
         foreach (var p in items)
         {
-            if (p.Op is LinkOp) yield return p;
-            else foreach (var inner in UntransformedLinks(p)) yield return inner;
+            if (p.Op is LinkOp) links.Add((p, origin, pageTop));
+            else AddUntransformedLinks(p, links, origin, pageTop);
         }
     }
 
     /// <summary>The ops to draw, looking inside transformed and translucent layers.</summary>
-    private static IEnumerable<Placed> Leaves(List<Placed> list)
+    private static void ForEachLeaf(List<Placed> list, Action<Placed> visit)
     {
         foreach (var p in list)
         {
-            if (p.Op is LayerBlock tb) { foreach (var inner in Leaves(tb.Items)) yield return inner; }
-            else if (p.Op is ClipBlock cb) { foreach (var inner in Leaves(cb.Items)) yield return inner; }
-            else yield return p;
+            if (p.Op is LayerBlock tb) ForEachLeaf(tb.Items, visit);
+            else if (p.Op is ClipBlock cb) ForEachLeaf(cb.Items, visit);
+            else visit(p);
         }
     }
 
@@ -177,7 +177,8 @@ internal sealed class PdfDocumentWriter
         var pages = new List<List<Placed>>();
         List<Placed> PageList(int p)
         {
-            while (pages!.Count <= p) pages.Add(new List<Placed>());
+            // Sized like the page before: pages of a document tend to hold about as many ops each.
+            while (pages!.Count <= p) pages.Add(new List<Placed>(pages.Count > 0 ? Math.Max(16, pages[^1].Count) : 16));
             return pages[p];
         }
         // The list of a page: the document's own, or, for a transformed layer, the layer's part on that page.
@@ -318,23 +319,26 @@ internal sealed class PdfDocumentWriter
         var usedFonts = new bool[StandardFont.All.Length];
         var images = new List<PdfImage>();
         var imageIds = new Dictionary<PdfImage, int>();
-        foreach (var page in pages.Concat(bands).Concat(canvas))
-            foreach (var p in Leaves(page))
+        void CollectResources(Placed p)
+        {
+            if (p.Op is TextOp t) CollectFonts(t, usedFonts);
+            else if (p.Op is SvgOp sv) CollectSvgFonts(sv.Image, usedFonts);
+            else if (p.Op is BackgroundOp { Svg: { } bgSvg }) CollectSvgFonts(bgSvg, usedFonts);
+            else if (p.Op is ImageOp im && !imageIds.ContainsKey(im.Image))
             {
-                if (p.Op is TextOp t) CollectFonts(t, usedFonts);
-                else if (p.Op is SvgOp sv) CollectSvgFonts(sv.Image, usedFonts);
-                else if (p.Op is BackgroundOp { Svg: { } bgSvg }) CollectSvgFonts(bgSvg, usedFonts);
-                else if (p.Op is ImageOp im && !imageIds.ContainsKey(im.Image))
-                {
-                    imageIds[im.Image] = images.Count + 1;
-                    images.Add(im.Image);
-                }
-                else if (p.Op is BackgroundOp { Image: { } bgImage } && !imageIds.ContainsKey(bgImage))
-                {
-                    imageIds[bgImage] = images.Count + 1;
-                    images.Add(bgImage);
-                }
+                imageIds[im.Image] = images.Count + 1;
+                images.Add(im.Image);
             }
+            else if (p.Op is BackgroundOp { Image: { } bgImage } && !imageIds.ContainsKey(bgImage))
+            {
+                imageIds[bgImage] = images.Count + 1;
+                images.Add(bgImage);
+            }
+        }
+        Action<Placed> collectResources = CollectResources;
+        foreach (var page in pages) ForEachLeaf(page, collectResources);
+        foreach (var page in bands) ForEachLeaf(page, collectResources);
+        foreach (var page in canvas) ForEachLeaf(page, collectResources);
         bool hasMargins = footerTemplate != null || headerTemplate != null;
         var marginFont = MarginFont ?? StandardFont.Get(FontFamily.Helvetica, false, false);
         if (hasMargins)
@@ -532,14 +536,14 @@ internal sealed class PdfDocumentWriter
             foreach (var placed in pages[p])
             {
                 if (placed.Op is LinkOp) { pageLinks.Add((placed, _yOrigin, p * H)); continue; }
-                foreach (var link in UntransformedLinks(placed)) pageLinks.Add((link, _yOrigin, p * H));
+                AddUntransformedLinks(placed, pageLinks, _yOrigin, p * H);
                 WriteOp(content, placed, p * H, imageIds);
             }
             _yOrigin = _page.MarginTop;
             foreach (var placed in bands[p])
             {
                 if (placed.Op is LinkOp) { pageLinks.Add((placed, _yOrigin, 0)); continue; }
-                foreach (var link in UntransformedLinks(placed)) pageLinks.Add((link, _yOrigin, 0));
+                AddUntransformedLinks(placed, pageLinks, _yOrigin, 0);
                 WriteOp(content, placed, 0, imageIds);
             }
             if (hasMargins)
@@ -785,23 +789,28 @@ internal sealed class PdfDocumentWriter
     internal static float PaperSize(float pt)
         => (float)(Math.Round(Math.Round(pt, MidpointRounding.AwayFromZero) * 300 / 72, MidpointRounding.AwayFromZero) * 0.24);
 
+    // Reused for every compressed stream, so compressing a page does not allocate a new buffer each time.
+    private MemoryStream? _deflated;
+
     private void WriteStream(int id, ReadOnlySpan<byte> data, bool compress, string? extraDict)
     {
-        byte[]? compressed = null;
+        ReadOnlySpan<byte> body = data;
+        bool filtered = false;
         if (compress && data.Length > 64)
         {
-            using var ms = new MemoryStream(data.Length / 3 + 64);
+            var ms = _deflated ??= new MemoryStream(Math.Max(4096, data.Length / 3 + 64));
+            ms.SetLength(0);
             using (var z = new ZLibStream(ms, _level, leaveOpen: true)) z.Write(data);
-            compressed = ms.ToArray();
+            body = ms.GetBuffer().AsSpan(0, (int)ms.Length);
+            filtered = true;
         }
-        bool filtered = compressed != null;
-        if (_crypt != null) compressed = _crypt.Encrypt(compressed ?? data);
-        Begin(id).Ascii("<< /Length ").Int(compressed?.Length ?? data.Length);
+        byte[]? encrypted = _crypt?.Encrypt(body);
+        if (encrypted != null) body = encrypted;
+        Begin(id).Ascii("<< /Length ").Int(body.Length);
         if (filtered) _out.Ascii(" /Filter /FlateDecode");
         if (extraDict != null) _out.Sp().Ascii(extraDict);
         _out.Ascii(" >>\nstream\n");
-        if (compressed != null) _out.Bytes(compressed);
-        else _out.Bytes(data);
+        _out.Bytes(body);
         _out.Ascii("\nendstream");
         End();
     }

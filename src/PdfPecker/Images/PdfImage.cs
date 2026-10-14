@@ -16,6 +16,15 @@ internal sealed class PdfImage
     public PdfImage? SMask;
     public int ObjectNumber; // assigned by the writer
 
+    /// <summary>A copy for another document: it shares the pixel data, which is never changed, but not the object number.</summary>
+    public PdfImage Copy()
+    {
+        var copy = (PdfImage)MemberwiseClone();
+        copy.ObjectNumber = 0;
+        copy.SMask = SMask?.Copy();
+        return copy;
+    }
+
     /// <summary>Decodes JPEG, PNG, GIF or WebP data. Returns null for unsupported or corrupt images.</summary>
     public static PdfImage? FromBytes(byte[] data)
     {

@@ -29,7 +29,25 @@ internal sealed class HtmlParser
     private int _pos;
     private readonly List<Element> _stack = new();
 
-    private HtmlParser(string src) => _src = src;
+    // Tag and attribute names as written, mapped to their lower-case strings: a document repeats the same few names, so
+    // each gets one string instead of one per tag.
+    private readonly Dictionary<string, string> _names = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string>.AlternateLookup<ReadOnlySpan<char>> _nameLookup;
+
+    private HtmlParser(string src)
+    {
+        _src = src;
+        _nameLookup = _names.GetAlternateLookup<ReadOnlySpan<char>>();
+    }
+
+    private string Name(ReadOnlySpan<char> written)
+    {
+        if (_nameLookup.TryGetValue(written, out var name)) return name;
+        var key = written.ToString();
+        name = key.ToLowerInvariant();
+        _names[key] = name;
+        return name;
+    }
 
     public static Element Parse(string html)
     {
@@ -131,7 +149,7 @@ internal sealed class HtmlParser
             p++;
             int nameStart = p;
             while (p < s.Length && !IsNameEnd(s[p])) p++;
-            string name = s.Substring(nameStart, p - nameStart).ToLowerInvariant();
+            string name = Name(s.AsSpan(nameStart, p - nameStart));
             SkipPast('>', p);
             if (name.Length > 0) CloseElement(name);
             return;
@@ -141,7 +159,7 @@ internal sealed class HtmlParser
         {
             int nameStart = p;
             while (p < s.Length && !IsNameEnd(s[p])) p++;
-            string name = s.Substring(nameStart, p - nameStart).ToLowerInvariant();
+            string name = Name(s.AsSpan(nameStart, p - nameStart));
             var el = new Element(name);
             bool selfClosing = ParseAttributes(el, ref p);
             _pos = p;
@@ -206,7 +224,7 @@ internal sealed class HtmlParser
 
             int nameStart = p;
             while (p < s.Length && s[p] > ' ' && s[p] != '=' && s[p] != '>' && !(s[p] == '/' && p + 1 < s.Length && s[p + 1] == '>')) p++;
-            string attrName = s.Substring(nameStart, p - nameStart).ToLowerInvariant();
+            string attrName = Name(s.AsSpan(nameStart, p - nameStart));
             while (p < s.Length && s[p] <= ' ') p++;
             string value = "";
             if (p < s.Length && s[p] == '=')
@@ -229,7 +247,7 @@ internal sealed class HtmlParser
                 }
             }
             if (attrName.Length > 0 && el.GetAttribute(attrName) == null)
-                el.Attributes.Add(new KeyValuePair<string, string>(attrName, value));
+                el.AddAttribute(attrName, value);
         }
         return selfClosing;
     }

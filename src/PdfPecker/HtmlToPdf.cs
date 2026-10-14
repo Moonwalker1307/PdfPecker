@@ -105,8 +105,10 @@ public static class HtmlToPdf
         // the flow and drawn at the top and bottom of every page; the flowing content gets the space in between.
         // Their height attributes (e.g. height="17mm") give the first estimate of that space, so that vh units can
         // usually be resolved in one pass.
-        var headerCandidate = FindByAttribute(doc, "data-sticky-pdf-header");
-        var footerCandidate = FindByAttribute(doc, "data-sticky-pdf-footer");
+        // Most documents have no bands: one search of the source spares walking the whole tree four times.
+        bool mayHaveBands = html.Contains("data-sticky-pdf-", StringComparison.OrdinalIgnoreCase);
+        var headerCandidate = mayHaveBands ? FindByAttribute(doc, "data-sticky-pdf-header") : null;
+        var footerCandidate = mayHaveBands ? FindByAttribute(doc, "data-sticky-pdf-footer") : null;
         bool truncateBands = options.TruncateBandsToWholePoints;
         float declaredTop = DeclaredHeight(headerCandidate, page, truncateBands), declaredBottom = DeclaredHeight(footerCandidate, page, truncateBands);
         float viewportH = Math.Max(10, page.ContentHeight - declaredTop - declaredBottom);
