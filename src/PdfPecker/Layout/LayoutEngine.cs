@@ -178,7 +178,7 @@ internal sealed partial class LayoutEngine
                 var child = children[i];
                 if (child is TextNode)
                 {
-                    (run ??= new List<Node>()).Add(child);
+                    (run ??= RentRun()).Add(child);
                     continue;
                 }
                 e = (Element)child;
@@ -187,7 +187,7 @@ internal sealed partial class LayoutEngine
                 if (IsInlineLevel(e) || (es.Floated || es.OutOfFlow) && run is { Count: > 0 })
                 {
                     // Floats and absolutely positioned boxes among inline content are placed as the lines reach them.
-                    (run ??= new List<Node>()).Add(child);
+                    (run ??= RentRun()).Add(child);
                     continue;
                 }
             }
@@ -291,6 +291,7 @@ internal sealed partial class LayoutEngine
             hasPrev = !s.PageBreakAfter;
         }
         _flowTrailing = pendingMargin;
+        ReturnRun(run);
         return y + pendingMargin;
 
         void Rewind(in FlowMark m)

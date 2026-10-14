@@ -260,4 +260,40 @@ public class ImageFormatTests
         Assert.Contains("(Hello SVG)", pdf);
         Assert.Contains("/BaseFont /Times-Roman", pdf);
     }
+
+    // ---- decoded image cache ----
+
+    [Fact]
+    public void A_decoded_image_is_reused_as_a_separate_copy()
+    {
+        var png = RgbaPng(8);
+        var first = DecodedImageCache.Decode(png)!;
+        var second = DecodedImageCache.Decode(png)!;
+        Assert.NotSame(first, second);
+        Assert.NotSame(first.SMask, second.SMask);
+        Assert.Same(first.Data, second.Data); // the pixel data is shared, the object numbers are not
+        first.ObjectNumber = 7;
+        Assert.Equal(0, second.ObjectNumber);
+        Assert.Equal(0, DecodedImageCache.Decode(png)!.ObjectNumber);
+    }
+
+    [Fact]
+    public void Documents_with_the_same_image_convert_alike_in_parallel()
+    {
+        // One document uses the image twice (two sources, two XObjects), the other once: each must number its own copies.
+        var uri = PdfTestHelpers.DataUri(RgbaPng(6));
+        var twice = $"<p>a<img src='{uri}'> <img src='{uri.Replace("image/png", "image/PNG")}'></p>";
+        var once = $"<p>b<img src='{uri}'></p>";
+        var expectedTwice = ConvertUncompressed(twice);
+        var expectedOnce = ConvertUncompressed(once);
+        Parallel.For(0, 64, i =>
+        {
+            var pdf = ConvertUncompressed(i % 2 == 0 ? twice : once);
+            Assert.Equal(StripVolatile(i % 2 == 0 ? expectedTwice : expectedOnce), StripVolatile(pdf));
+        });
+        Assert.Equal(2, Regex.Matches(Latin1(expectedTwice), "/Subtype /Image /Width 6 /Height 6 /ColorSpace /DeviceRGB").Count);
+
+        static string StripVolatile(byte[] pdf)
+            => Regex.Replace(Regex.Replace(Latin1(pdf), @"\(D:[^)]*\)", "(D:)"), @"/ID \[<[0-9A-Fa-f]+> ?<[0-9A-Fa-f]+>\]", "/ID []");
+    }
 }

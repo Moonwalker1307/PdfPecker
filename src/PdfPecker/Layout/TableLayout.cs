@@ -658,7 +658,8 @@ internal sealed partial class LayoutEngine
         _inlineDepth++;
         try
         {
-            var items = CollectInline(nodes, 100000);
+            var st = CollectInline(nodes, 100000);
+            var items = st.Items;
             float min = 0, max = 0, group = 0, line = 0;
             foreach (var it in items)
             {
@@ -699,6 +700,7 @@ internal sealed partial class LayoutEngine
                     group = 0;
                 }
             }
+            ReturnState(st);
             return (Math.Max(min, group), Math.Max(max, line));
         }
         finally
@@ -723,7 +725,8 @@ internal sealed partial class LayoutEngine
         void FlushRun()
         {
             if (run == null || run.Count == 0) return;
-            var items = CollectInline(run, 100000);
+            var st = CollectInline(run, 100000);
+            var items = st.Items;
             run.Clear();
             float group = 0, line = 0;
             foreach (var it in items)
@@ -753,15 +756,16 @@ internal sealed partial class LayoutEngine
             }
             min = Math.Max(min, group);
             max = Math.Max(max, line);
+            ReturnState(st);
         }
 
         foreach (var child in e.Children)
         {
-            if (child is TextNode) { (run ??= new List<Node>()).Add(child); continue; }
+            if (child is TextNode) { (run ??= RentRun()).Add(child); continue; }
             var ce = (Element)child;
             if (ce.Style == null || ce.Style.Display == Display.None || ce.Detached) continue;
             if (ce.Style.OutOfFlow) continue;
-            if (IsInlineLevel(ce) || ce.Style.Floated) { (run ??= new List<Node>()).Add(child); continue; }
+            if (IsInlineLevel(ce) || ce.Style.Floated) { (run ??= RentRun()).Add(child); continue; }
             FlushRun();
             var (cmin, cmax) = Intrinsic(ce);
             var cs = ce.Style;
@@ -771,6 +775,7 @@ internal sealed partial class LayoutEngine
             max = Math.Max(max, cmax + margins);
         }
         FlushRun();
+        ReturnRun(run);
         _measuring = saved;
         return (min, max);
     }
