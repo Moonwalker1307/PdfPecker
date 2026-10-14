@@ -7,13 +7,13 @@ using PdfPecker.Pdf;
 namespace PdfPecker.Svg;
 
 /// <summary>
-/// One item of an SVG drawing, in the root element's user space: a filled and/or stroked path, a run of text, or the
-/// start or end of a clipped group.
+/// One item of an SVG drawing, in the root element's user space: a filled and/or stroked path, a run of text, the
+/// start or end of a clipped or masked group, or filtered content.
 /// </summary>
 internal sealed class SvgShape
 {
     public const byte MoveTo = 0, LineTo = 1, CurveTo = 2, Close = 3;
-    public const byte KindPath = 0, KindText = 1, KindClip = 2, KindEndClip = 3;
+    public const byte KindPath = 0, KindText = 1, KindClip = 2, KindEndClip = 3, KindMask = 4, KindEndMask = 5, KindFilter = 6;
 
     public byte Kind;
     public byte[] Verbs = Array.Empty<byte>();
@@ -35,8 +35,25 @@ internal sealed class SvgShape
     public float FontSize, CharSpacing;
     public Matrix TextMatrix;
 
-    public bool HasFill => Fill != null || FillGradient != null;
-    public bool HasStroke => Stroke != null || StrokeGradient != null;
+    // Tiled fills and strokes (pattern elements).
+    public SvgPattern? FillPattern, StrokePattern;
+
+    // Masks: the mask's content (Points hold the mask region); filters: the content the filter applies to.
+    public List<SvgShape>? Children;
+    public bool MaskAlpha;                        // mask-type: alpha, else luminance
+    public SvgFilter? Filter;
+
+    public bool HasFill => Fill != null || FillGradient != null || FillPattern != null;
+    public bool HasStroke => Stroke != null || StrokeGradient != null || StrokePattern != null;
+}
+
+/// <summary>A pattern element's tile: shapes in tile space, repeated every Width × Height and mapped to the root.</summary>
+internal sealed class SvgPattern
+{
+    public List<SvgShape> Shapes = new();
+    public float Width, Height;
+    public Matrix ToRoot;      // tile space to the root element's user space
+    public byte Alpha = 255;   // fill-opacity or stroke-opacity of the painted shape
 }
 
 /// <summary>
@@ -52,19 +69,19 @@ internal sealed class SvgBudget
 /// <summary>
 /// An inline &lt;svg&gt; turned into vector paths and text: path, rect, circle, ellipse, line, polyline, polygon, text,
 /// tspan, g, use and nested svg, with transforms, fill/stroke styling from attributes and CSS, linear and radial
-/// gradients, and clip paths. Images, masks, patterns and filters are not drawn.
+/// gradients, patterns, markers, clip paths, masks and filters (filters are drawn as images). Images are not drawn.
 /// </summary>
-internal sealed class SvgImage
+internal sealed partial class SvgImage
 {
     public float? Width, Height; // intrinsic size in points, when given
     public bool HasViewBox;
     public float ViewBoxX, ViewBoxY, ViewBoxWidth, ViewBoxHeight;
     public string Align = "xmidymid";
     public bool Slice;
-    public readonly List<SvgShape> Shapes = new();
+    public List<SvgShape> Shapes { get; private set; } = new();
 
     private readonly Dictionary<string, Element> _ids = new(StringComparer.Ordinal);
-    private int _clipDepth;
+    private int _clipDepth, _maskDepth, _filterDepth, _patternDepth;
     private SvgBudget _budget = null!;
 
     public static SvgImage Build(Element svg, SvgBudget? budget = null)
@@ -174,20 +191,29 @@ internal sealed class SvgImage
         if (e.GetAttribute("transform") is { } tf) ctm = ParseTransform(tf).Then(ctm);
         float op = opacity * s.Opacity;
 
-        if (Reference(s.SvgClipPath) is { Name: "clippath" } clip && _clipDepth < 8)
+        // Effects nest in the order SVG applies them: the filter first, then the clip path, then the mask. Each is
+        // applied to what the element drew. Nesting is bounded so that the PDF's save/restore depth stays small.
+        var filter = _filterDepth < 4 && Reference(s.SvgFilter) is { Name: "filter" } f ? f : null;
+        var clip = _clipDepth < 8 && Reference(s.SvgClipPath) is { Name: "clippath" } c ? c : null;
+        var mask = _maskDepth < 4 && Reference(s.SvgMask) is { Name: "mask" } m ? m : null;
+        int start = Shapes.Count;
+        if (filter != null) _filterDepth++;
+        if (clip != null) _clipDepth++;
+        if (mask != null) _maskDepth++;
+        try { RenderElement(e, s, ctm, op, depth); }
+        finally
         {
-            // Draw the element, then wrap what it drew in the clip; an empty clip path hides everything.
-            int start = Shapes.Count;
+            if (filter != null) _filterDepth--;
+            if (clip != null) _clipDepth--;
+            if (mask != null) _maskDepth--;
+        }
+        if (Shapes.Count == start) return;
+        if (filter != null && !ApplyFilter(filter, ctm, start)) return;
+        if (clip != null)
+        {
+            // Wrap what the element drew in the clip; an empty clip path hides everything.
             var marker = new SvgShape { Kind = SvgShape.KindClip };
-            Shapes.Add(marker);
-            _clipDepth++;
-            RenderElement(e, s, ctm, op, depth);
-            _clipDepth--;
-            if (Shapes.Count == start + 1)
-            {
-                Shapes.RemoveAt(start);
-                return;
-            }
+            Shapes.Insert(start, marker);
             var path = ClipPath(clip, ctm, start + 1, out bool evenOdd);
             if (path == null)
             {
@@ -198,9 +224,8 @@ internal sealed class SvgImage
             marker.Points = path.Points.ToArray();
             marker.EvenOdd = evenOdd;
             Shapes.Add(new SvgShape { Kind = SvgShape.KindEndClip });
-            return;
         }
-        RenderElement(e, s, ctm, op, depth);
+        if (mask != null) ApplyMask(mask, ctm, start, depth);
     }
 
     private void RenderElement(Element e, ComputedStyle s, Matrix ctm, float op, int depth)
@@ -242,11 +267,19 @@ internal sealed class SvgImage
                 RenderText(e, ctm, op);
                 return;
             case "line":
-                Emit(s, ctm, op, ShapePath(e), fillable: false);
+            {
+                var line = ShapePath(e);
+                Emit(s, ctm, op, line, fillable: false);
+                if (line != null) RenderMarkers(s, ctm, op, line, depth);
                 return;
+            }
             default:
                 // Not drawn: defs, symbol (only through use), gradients, clipPath, mask, pattern, marker, filter, image, style...
-                if (ShapePath(e) is { } path) Emit(s, ctm, op, path);
+                if (ShapePath(e) is { } path)
+                {
+                    Emit(s, ctm, op, path);
+                    if (e.Name is "path" or "polyline" or "polygon") RenderMarkers(s, ctm, op, path, depth);
+                }
                 return;
         }
     }
@@ -316,9 +349,9 @@ internal sealed class SvgImage
             LineJoin = s.SvgLineJoin,
             MiterLimit = s.SvgMiterLimit,
         };
-        if (fillable) shape.Fill = Paint(s.SvgFill, s.SvgFillUrl, s.SvgFillOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.FillGradient);
+        if (fillable) shape.Fill = Paint(s.SvgFill, s.SvgFillUrl, s.SvgFillOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.FillGradient, out shape.FillPattern);
         if (s.SvgStrokeWidth > 0)
-            shape.Stroke = Paint(s.SvgStroke, s.SvgStrokeUrl, s.SvgStrokeOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.StrokeGradient);
+            shape.Stroke = Paint(s.SvgStroke, s.SvgStrokeUrl, s.SvgStrokeOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.StrokeGradient, out shape.StrokePattern);
         if (!shape.HasFill && !shape.HasStroke) return;
         for (int i = 0; i + 1 < pts.Length; i += 2) ctm.Apply(ref pts[i], ref pts[i + 1]);
         Bounds(pts, out shape.MinX, out shape.MinY, out shape.MaxX, out shape.MaxY);
@@ -336,11 +369,24 @@ internal sealed class SvgImage
         }
     }
 
-    /// <summary>A fill or stroke: a flat colour, or a gradient (returned through <paramref name="gradient"/>).</summary>
-    private uint? Paint(uint? color, string? url, float opacity, float minX, float minY, float maxX, float maxY, Matrix ctm, out Gradient? gradient)
+    /// <summary>
+    /// A fill or stroke: a flat colour, a gradient (returned through <paramref name="gradient"/>) or a pattern (returned
+    /// through <paramref name="pattern"/>).
+    /// </summary>
+    private uint? Paint(uint? color, string? url, float opacity, float minX, float minY, float maxX, float maxY, Matrix ctm,
+        out Gradient? gradient, out SvgPattern? pattern)
     {
         gradient = null;
+        pattern = null;
         uint? c = color;
+        if (Reference(url) is { Name: "pattern" } tile)
+        {
+            float a = Math.Clamp(opacity, 0, 1);
+            if (a <= 0.002f) return null;
+            pattern = BuildPattern(tile, minX, minY, maxX, maxY, ctm);
+            if (pattern != null) pattern.Alpha = (byte)Math.Round(a * 255);
+            return null;
+        }
         if (Reference(url) is { } server && server.Name is "lineargradient" or "radialgradient")
         {
             gradient = BuildGradient(server, opacity, minX, minY, maxX, maxY, ctm, out var solid);
@@ -352,7 +398,7 @@ internal sealed class SvgImage
         uint v = c.Value;
         float alpha = (v >> 24) / 255f * Math.Clamp(opacity, 0, 1);
         if (alpha <= 0.002f) return null;
-        return CssColor.FlattenOnWhite(((uint)Math.Round(alpha * 255) << 24) | (v & 0xFFFFFF));
+        return ((uint)Math.Round(alpha * 255) << 24) | (v & 0xFFFFFF);
     }
 
     // ------------------------------------------------------------------ gradients
@@ -653,9 +699,9 @@ internal sealed class SvgImage
             LineCap = s.SvgLineCap,
             MiterLimit = s.SvgMiterLimit,
         };
-        shape.Fill = Paint(s.SvgFill, s.SvgFillUrl, s.SvgFillOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.FillGradient);
+        shape.Fill = Paint(s.SvgFill, s.SvgFillUrl, s.SvgFillOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.FillGradient, out shape.FillPattern);
         if (s.SvgStrokeWidth > 0)
-            shape.Stroke = Paint(s.SvgStroke, s.SvgStrokeUrl, s.SvgStrokeOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.StrokeGradient);
+            shape.Stroke = Paint(s.SvgStroke, s.SvgStrokeUrl, s.SvgStrokeOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.StrokeGradient, out shape.StrokePattern);
         if (!shape.HasFill && !shape.HasStroke) return;
         var corners = new[] { minX, minY, maxX, minY, maxX, maxY, minX, maxY };
         for (int i = 0; i < 8; i += 2) ctm.Apply(ref corners[i], ref corners[i + 1]);
@@ -813,6 +859,14 @@ internal sealed class PathBuilder
 {
     public readonly List<byte> Verbs = new();
     public readonly List<float> Points = new();
+    public List<int>? Ends; // for path data: the verb count after each command (an arc is several curves); else every verb ends one
+
+    /// <summary>Marks the end of a path command, for markers.</summary>
+    public void EndCommand()
+    {
+        Ends ??= new List<int>();
+        if (Verbs.Count > 0 && (Ends.Count == 0 || Ends[^1] != Verbs.Count)) Ends.Add(Verbs.Count);
+    }
 
     public void MoveTo(float x, float y) { Verbs.Add(SvgShape.MoveTo); Points.Add(x); Points.Add(y); }
     public void LineTo(float x, float y) { Verbs.Add(SvgShape.LineTo); Points.Add(x); Points.Add(y); }
@@ -1038,11 +1092,17 @@ internal static class PathParser
                     return Finish(p);
             }
             prev = cmd;
+            p.EndCommand();
         }
         return Finish(p);
     }
 
-    private static PathBuilder? Finish(PathBuilder p) => p.Verbs.Count > 0 ? p : null;
+    private static PathBuilder? Finish(PathBuilder p)
+    {
+        if (p.Verbs.Count == 0) return null;
+        p.EndCommand(); // a command cut short by bad data still ends where it stopped
+        return p;
+    }
 
     private static void EnsureStart(PathBuilder p, ref bool hasCurrent, float x, float y)
     {
