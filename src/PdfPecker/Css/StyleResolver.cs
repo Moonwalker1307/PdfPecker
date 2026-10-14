@@ -543,7 +543,14 @@ internal sealed class StyleResolver
         "fill", "stroke", "stroke-width", "fill-opacity", "stroke-opacity", "fill-rule", "stroke-linecap", "stroke-linejoin",
         "stroke-miterlimit", "opacity", "display", "visibility", "color", "clip-path", "clip-rule", "text-anchor",
         "dominant-baseline", "alignment-baseline", "font-size", "font-family", "font-weight", "font-style", "letter-spacing",
+        "mask", "mask-type", "filter", "marker", "marker-start", "marker-mid", "marker-end", "flood-color", "flood-opacity",
+        "color-interpolation-filters",
     };
+
+    /// <summary>The fragment of a url(#id) reference, as "#id"; null for none or anything else.</summary>
+    private static string? SvgUrl(string v, string lower)
+        => lower.StartsWith("url(", StringComparison.Ordinal) && v.IndexOf(')') is int end and > 4
+            ? v.Substring(4, end - 4).Trim().Trim('"', '\'') : null;
 
     /// <summary>Whether font-feature-settings turns standard ligatures on or off ("liga" 0), or null when it leaves them.</summary>
     private static bool? LigaSetting(string value)
@@ -1180,8 +1187,37 @@ internal sealed class StyleResolver
                 s.SvgLineJoin = lower switch { "round" => SvgLineJoin.Round, "bevel" => SvgLineJoin.Bevel, "miter" or "miter-clip" or "arcs" => SvgLineJoin.Miter, _ => s.SvgLineJoin };
                 break;
             case "clip-path":
-                s.SvgClipPath = lower.StartsWith("url(", StringComparison.Ordinal) && v.IndexOf(')') is int cp and > 4
-                    ? v.Substring(4, cp - 4).Trim().Trim('"', '\'') : null;
+                s.SvgClipPath = SvgUrl(v, lower);
+                break;
+            case "mask":
+                s.SvgMask = SvgUrl(v, lower);
+                break;
+            case "mask-type":
+                s.SvgMaskAlpha = lower == "alpha";
+                break;
+            case "filter":
+                s.SvgFilter = SvgUrl(v, lower);
+                break;
+            case "marker":
+                s.SvgMarkerStart = s.SvgMarkerMid = s.SvgMarkerEnd = lower == "inherit" ? parent.SvgMarkerStart : SvgUrl(v, lower);
+                break;
+            case "marker-start":
+                s.SvgMarkerStart = lower == "inherit" ? parent.SvgMarkerStart : SvgUrl(v, lower);
+                break;
+            case "marker-mid":
+                s.SvgMarkerMid = lower == "inherit" ? parent.SvgMarkerMid : SvgUrl(v, lower);
+                break;
+            case "marker-end":
+                s.SvgMarkerEnd = lower == "inherit" ? parent.SvgMarkerEnd : SvgUrl(v, lower);
+                break;
+            case "flood-color":
+                if (CssColor.TryParse(v, s.Color, out uint flood)) s.SvgFloodColor = flood;
+                break;
+            case "flood-opacity":
+                if (TryParseNumberOrPercent(lower, out float fop)) s.SvgFloodOpacity = Math.Clamp(fop, 0, 1);
+                break;
+            case "color-interpolation-filters":
+                s.SvgFilterSrgb = lower switch { "srgb" => true, "linearrgb" or "auto" => false, "inherit" => parent.SvgFilterSrgb, _ => s.SvgFilterSrgb };
                 break;
             case "clip-rule":
                 s.SvgClipEvenOdd = lower == "evenodd";

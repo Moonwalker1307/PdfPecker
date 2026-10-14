@@ -47,7 +47,8 @@ internal sealed partial class PdfDocumentWriter
     private bool _noAlpha;                            // writing a stream without the shared ExtGState resources
     private readonly SortedSet<int> _fillAlphas = new(), _strokeAlphas = new(), _groupAlphas = new();
     private readonly List<byte[]> _forms = new(); // transparency groups of translucent layers, written as /Fx1, /Fx2, ...
-    private readonly List<(byte[] Content, string Dict)> _masks = new(); // soft masks of translucent gradients, set by /s1, /s2, ...
+    private readonly List<(byte[] Content, string Dict, bool Alpha)> _masks = new(); // soft masks (gradient alphas, SVG masks), set by /s1, /s2, ...
+    private readonly List<PdfImage> _rasters = new(); // SVG filter results, written as /Xr1, /Xr2, ...
     private readonly List<FontRun> _runs = new();
     private readonly Dictionary<FontProgram, GlyphSubset> _subsets = new();
     private readonly List<GlyphSubset> _subsetList = new();
@@ -87,7 +88,51 @@ internal sealed partial class PdfDocumentWriter
     /// <summary>Keywords, Creator, Producer and custom entries for the document information dictionary (and the XMP for PDF/A).</summary>
     public DocumentProperties Properties { get; init; } = new();
 
-    private bool EmbedStandard => EmbedStandardFonts || Conformance != PdfConformance.None;
+    /// <summary>Write a tagged PDF with this logical structure. Default: null, untagged.</summary>
+    public StructureTree? Structure { get; init; }
+
+    /// <summary>Claim PDF/UA-1 conformance in the metadata. Needs <see cref="Structure"/>.</summary>
+    public bool PdfUA { get; init; }
+
+    /// <summary>The document's natural language, such as "en-US", for a tagged PDF.</summary>
+    public string? Language { get; init; }
+
+    private bool EmbedStandard => EmbedStandardFonts || Conformance != PdfConformance.None || PdfUA;
+
+    // Tagged PDF: the stream being written, the open marked-content sequence (a ContentSlot or Artifact) and whether
+    // everything is an artifact for now (running headers and footers, fixed boxes, the page canvas).
+    private McStream? _mc;
+    private object? _mcOpen;
+    private bool _forceArtifact;
+    private static readonly object Artifact = new();
+    private readonly List<McStream?> _formStreams = new(); // by form, the marked content of tagged transparency groups
+
+    /// <summary>Starts the marked-content sequence for content of <paramref name="slot"/> (an artifact when null), unless it is open.</summary>
+    private void Mark(ByteBuffer b, ContentSlot? slot)
+    {
+        if (_mc == null) return;
+        object want = _forceArtifact || slot == null ? Artifact : slot;
+        if (ReferenceEquals(_mcOpen, want)) return;
+        EndMarked(b);
+        if (want is ContentSlot s)
+        {
+            int mcid = _mc.Elements.Count;
+            _mc.Elements.Add(s.Parent);
+            s.Refs.Add((_mc, mcid));
+            b.Ascii("/").Ascii(s.Parent.Type).Ascii(" <</MCID ").Int(mcid).Ascii(">> BDC\n");
+        }
+        else b.Ascii("/Artifact BMC\n");
+        _mcOpen = want;
+    }
+
+    /// <summary>Closes the open marked-content sequence, and the text object inside it.</summary>
+    private void EndMarked(ByteBuffer b)
+    {
+        if (_mcOpen == null) return;
+        EndText(b);
+        b.Ascii("EMC\n");
+        _mcOpen = null;
+    }
 
     /// <summary>The font that draws a run: standard fonts become their bundled replacements when they must be embedded.</summary>
     private TextFont Leaf(TextFont font)
@@ -458,15 +503,26 @@ internal sealed partial class PdfDocumentWriter
         int fileSpecId = 0, embeddedFileId = 0;
         if (EInvoice != null) { fileSpecId = next++; embeddedFileId = next++; }
         if (_crypt != null) encryptId = next++;
+        bool tagged = Structure != null;
+        int structRootId = tagged ? next++ : 0;
+        if (PdfUA && metadataId == 0) metadataId = next++;
         var pageFields = AllocateFields(pages, pageCount, ref next);
 
         // 4. Header.
-        _out.Ascii(pdfa || _crypt != null ? "%PDF-1.7\n%" : "%PDF-1.4\n%").Bytes(new byte[] { 0xE2, 0xE3, 0xCF, 0xD3 }).Nl();
+        _out.Ascii(pdfa || _crypt != null || tagged ? "%PDF-1.7\n%" : "%PDF-1.4\n%").Bytes(new byte[] { 0xE2, 0xE3, 0xCF, 0xD3 }).Nl();
 
         // Catalog, pages tree.
         Begin(catalogId).Ascii("<< /Type /Catalog /Pages ").Int(pagesId).Ascii(" 0 R");
         if (outlinesId != 0) _out.Ascii(" /Outlines ").Int(outlinesId).Ascii(" 0 R");
-        if (pdfa) _out.Ascii(" /Metadata ").Int(metadataId).Ascii(" 0 R /OutputIntents [").Int(outputIntentId).Ascii(" 0 R]");
+        if (metadataId != 0) _out.Ascii(" /Metadata ").Int(metadataId).Ascii(" 0 R");
+        if (pdfa) _out.Ascii(" /OutputIntents [").Int(outputIntentId).Ascii(" 0 R]");
+        if (tagged)
+        {
+            _out.Ascii(" /MarkInfo << /Marked true >> /StructTreeRoot ").Int(structRootId).Ascii(" 0 R");
+            if (!string.IsNullOrEmpty(Language)) { _out.Ascii(" /Lang "); WriteTextString(_out, Language!); }
+            // PDF/UA: viewers show the title, not the file name.
+            if (!string.IsNullOrEmpty(title)) _out.Ascii(" /ViewerPreferences << /DisplayDocTitle true >>");
+        }
         if (EInvoice != null)
         {
             // PDF/A-3 attachments are associated files (/AF) and also listed in the name tree viewers show.
@@ -488,16 +544,19 @@ internal sealed partial class PdfDocumentWriter
         var now = DateTime.UtcNow;
         now = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerSecond));
         var props = Properties.WithStandard(title, author, subject);
-        if (pdfa) props = props.Cleaned(); // Info and XMP must agree, and XML cannot carry control characters.
+        if (metadataId != 0) props = props.Cleaned(); // Info and XMP must agree, and XML cannot carry control characters.
         Begin(infoId);
-        props.WriteInfo(_out, now, modDate: pdfa, WriteTextString);
+        props.WriteInfo(_out, now, modDate: metadataId != 0, WriteTextString);
         End();
 
+        if (metadataId != 0)
+        {
+            int part = !pdfa ? 0 : Conformance == PdfConformance.PdfA3b ? 3 : 2;
+            var xmp = PdfA.Xmp(part, "B", props, now, EInvoice, PdfUA);
+            WriteStream(metadataId, xmp, compress: false, "/Type /Metadata /Subtype /XML");
+        }
         if (pdfa)
         {
-            int part = Conformance == PdfConformance.PdfA3b ? 3 : 2;
-            var xmp = PdfA.Xmp(part, "B", props, now, EInvoice);
-            WriteStream(metadataId, xmp, compress: false, "/Type /Metadata /Subtype /XML");
             Begin(outputIntentId).Ascii("<< /Type /OutputIntent /S /GTS_PDFA1 /OutputConditionIdentifier ");
             WriteTextString(_out, PdfA.OutputCondition);
             _out.Ascii(" /Info ");
@@ -556,11 +615,15 @@ internal sealed partial class PdfDocumentWriter
         float paperDy = _paperDy = paperH - _page.Height * _page.Scale;
         var content = new ByteBuffer(32 * 1024);
         var annotations = new List<(int Id, Placed Link, float Origin, float PageTop)>();
+        var pageStreams = new McStream[pageCount];
+        int parentKey = pageCount; // keys 0 to pageCount - 1 of the parent tree are the pages'
+        var annotKeys = new Dictionary<int, int>();
         for (int p = 0; p < pageCount; p++)
         {
             Cancellation.ThrowIfCancellationRequested();
             content.Clear();
             ResetState();
+            if (tagged) { _mc = pageStreams[p] = new McStream(p); _mcOpen = null; }
             if (_page.Scale != 1)
             {
                 // Num keeps 3 decimals, too few for a scale such as 0.99916. The content keeps to the top of the page.
@@ -569,12 +632,15 @@ internal sealed partial class PdfDocumentWriter
             }
             if (CssColor.IsVisible(pageBackground))
             {
+                Mark(content, null);
                 SetFill(content, pageBackground);
                 content.Ascii("0 0 ").Num(_page.Width).Sp().Num(_page.Height).Ascii(" re f\n");
             }
             _yOrigin = _page.MarginTop;
+            _forceArtifact = true;
             foreach (var placed in canvas[p]) WriteOp(content, placed, 0, imageIds);
-            if (wm is { Behind: true }) content.Ascii("q /Wm Do Q\n");
+            _forceArtifact = false;
+            if (wm is { Behind: true }) { Mark(content, null); content.Ascii("q /Wm Do Q\n"); }
             var pageLinks = new List<(Placed Link, float Origin, float PageTop)>();
             _yOrigin = _page.MarginTop + _page.BandTop;
             foreach (var placed in pages[p])
@@ -584,20 +650,24 @@ internal sealed partial class PdfDocumentWriter
                 WriteOp(content, placed, p * H, imageIds);
             }
             _yOrigin = _page.MarginTop;
+            _forceArtifact = true;
             foreach (var placed in bands[p])
             {
                 if (placed.Op is LinkOp) { pageLinks.Add((placed, _yOrigin, 0)); continue; }
                 AddUntransformedLinks(placed, pageLinks, _yOrigin, 0);
                 WriteOp(content, placed, 0, imageIds);
             }
+            _forceArtifact = false;
             if (hasMargins)
             {
+                Mark(content, null);
                 EndText(content);
                 if (headerTemplate != null) WriteMarginText(content, marginFont, headerTemplate, p + 1, pageCount, top: true);
                 if (footerTemplate != null) WriteMarginText(content, marginFont, footerTemplate, p + 1, pageCount, top: false);
             }
             EndText(content);
-            if (wm is { Behind: false }) content.Ascii("q /Wm Do Q\n");
+            if (wm is { Behind: false }) { Mark(content, null); content.Ascii("q /Wm Do Q\n"); }
+            EndMarked(content);
             if (_page.Scale != 1) content.Ascii("Q\n");
 
             var annotIds = new List<int>();
@@ -606,8 +676,31 @@ internal sealed partial class PdfDocumentWriter
                 int id = next++;
                 annotIds.Add(id);
                 annotations.Add((id, lk, origin, pageTop));
+                if (tagged)
+                {
+                    // A link annotation belongs to its Link element; one outside the structure (in a running header,
+                    // say) gets a Link element of its own at the end.
+                    var linkOp = (LinkOp)lk.Op;
+                    var link = linkOp.Link ?? new StructElem("Link", Structure!.Root) { Text = linkOp.Target };
+                    link.Kids.Add(new AnnotRef(id, p));
+                    _mc!.Annotations.Add((id, link));
+                    annotKeys[id] = parentKey++;
+                }
             }
-            foreach (var field in pageFields[p]) annotIds.Add(_fieldIds[field]);
+            foreach (var field in pageFields[p])
+            {
+                int id = _fieldIds[field];
+                annotIds.Add(id);
+                if (tagged)
+                {
+                    // A widget belongs to its Form element; one outside the structure gets a Form element of its own.
+                    var f = field.Field;
+                    var form = f.Form ?? new StructElem("Form", Structure!.Root) { Alt = f.Field.Tooltip ?? f.Field.Name };
+                    form.Kids.Add(new AnnotRef(id, p));
+                    _mc!.Annotations.Add((id, form));
+                    annotKeys[id] = parentKey++;
+                }
+            }
 
             Begin(pageIds[p]).Ascii("<< /Type /Page /Parent ").Int(pagesId).Ascii(" 0 R /MediaBox [0 0 ")
                 .Num(paperW).Sp().Num(paperH).Ascii("] /Resources ").Int(resourcesId).Ascii(" 0 R /Contents ")
@@ -617,6 +710,11 @@ internal sealed partial class PdfDocumentWriter
                 _out.Ascii(" /Annots [");
                 foreach (var id in annotIds) _out.Int(id).Ascii(" 0 R ");
                 _out.Ascii("]");
+            }
+            if (tagged)
+            {
+                if (_mc!.Elements.Count > 0) _out.Ascii(" /StructParents ").Int(p);
+                _out.Ascii(" /Tabs /S"); // PDF/UA: annotations in structure order
             }
             _out.Ascii(" >>");
             End();
@@ -634,6 +732,14 @@ internal sealed partial class PdfDocumentWriter
             x1 *= k; x2 *= k; yTop = yTop * k + paperDy; yBottom = yBottom * k + paperDy;
             Begin(id).Ascii("<< /Type /Annot /Subtype /Link /Rect [").Num(x1).Sp().Num(yBottom).Sp().Num(x2).Sp().Num(yTop)
                 .Ascii("] /F 4 /Border [0 0 0] ");
+            if (annotKeys.TryGetValue(id, out int key))
+            {
+                // PDF/UA: a link's description, for assistive technology.
+                var text = (link.Link?.Text is { Length: > 0 } t ? t : null) ?? link.Target;
+                _out.Ascii("/StructParent ").Int(key).Ascii(" /Contents ");
+                WriteTextString(_out, text);
+                _out.Sp();
+            }
             if (link.Target.StartsWith("#", StringComparison.Ordinal))
             {
                 if (anchors.TryGetValue(Uri.UnescapeDataString(link.Target.Substring(1)), out float ay)
@@ -653,7 +759,7 @@ internal sealed partial class PdfDocumentWriter
             End();
         }
 
-        WriteFields(pageFields, pageIds, H, imageIds, ref next);
+        WriteFields(pageFields, pageIds, H, imageIds, annotKeys, ref next);
 
         // Bookmarks.
         if (outlinesId != 0)
@@ -699,8 +805,21 @@ internal sealed partial class PdfDocumentWriter
         for (int i = 0; i < _forms.Count; i++)
         {
             formIds[i] = next++;
+            string structParents = "";
+            if (_formStreams.Count > i && _formStreams[i] is { Elements.Count: > 0 } fs)
+            {
+                fs.Key = parentKey++;
+                fs.FormId = formIds[i];
+                structParents = " /StructParents " + fs.Key.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
             WriteStream(formIds[i], _forms[i], _compress, "/Type /XObject /Subtype /Form /BBox [-32767 -32767 32767 32767] "
-                + "/Group << /S /Transparency >> /Resources " + resourcesId.ToString(System.Globalization.CultureInfo.InvariantCulture) + " 0 R");
+                + "/Group << /S /Transparency >> /Resources " + resourcesId.ToString(System.Globalization.CultureInfo.InvariantCulture) + " 0 R"
+                + structParents);
+        }
+        if (tagged)
+        {
+            _mc = null;
+            next = WriteStructure(next, structRootId, parentKey, pageIds, pageStreams, annotKeys);
         }
 
         var maskIds = new int[_masks.Count];
@@ -710,18 +829,28 @@ internal sealed partial class PdfDocumentWriter
             WriteStream(maskIds[i], _masks[i].Content, _compress, _masks[i].Dict);
         }
 
+        // Images of SVG filter results.
+        foreach (var raster in _rasters)
+        {
+            raster.ObjectNumber = next++;
+            if (raster.SMask != null) raster.SMask.ObjectNumber = next++;
+            WriteImage(raster);
+            if (raster.SMask != null) WriteImage(raster.SMask);
+        }
+
         // Shared resources, written last: shading patterns are collected while writing the pages.
         Begin(resourcesId).Ascii("<< /ProcSet [/PDF /Text /ImageB /ImageC /ImageI] /Font <<");
         for (int i = 0; i < usedFonts.Length; i++)
             if (usedFonts[i]) _out.Ascii(" /F").Int(i + 1).Sp().Int(fontIds[i]).Ascii(" 0 R");
         for (int i = 0; i < _subsetList.Count; i++) _out.Ascii(" /E").Int(i + 1).Sp().Int(firstEmbeddedId + i * 5).Ascii(" 0 R");
         _out.Ascii(" >>");
-        if (images.Count > 0 || wm != null || _forms.Count > 0)
+        if (images.Count > 0 || wm != null || _forms.Count > 0 || _rasters.Count > 0)
         {
             _out.Ascii(" /XObject <<");
             for (int i = 0; i < images.Count; i++) _out.Ascii(" /Im").Int(i + 1).Sp().Int(images[i].ObjectNumber).Ascii(" 0 R");
             if (wm != null) _out.Ascii(" /Wm ").Int(watermarkId).Ascii(" 0 R");
             for (int i = 0; i < _forms.Count; i++) _out.Ascii(" /Fx").Int(i + 1).Sp().Int(formIds[i]).Ascii(" 0 R");
+            for (int i = 0; i < _rasters.Count; i++) _out.Ascii(" /Xr").Int(i + 1).Sp().Int(_rasters[i].ObjectNumber).Ascii(" 0 R");
             _out.Ascii(" >>");
         }
         if (_fillAlphas.Count + _strokeAlphas.Count + _groupAlphas.Count + _masks.Count > 0)
@@ -731,7 +860,8 @@ internal sealed partial class PdfDocumentWriter
             foreach (int a in _strokeAlphas) _out.Ascii(" /A").Int(a).Ascii(" << /CA ").Num(a / 255f).Ascii(" >>");
             foreach (int a in _groupAlphas) _out.Ascii(" /g").Int(a).Ascii(" << /ca ").Num(a / 255f).Ascii(" /CA ").Num(a / 255f).Ascii(" >>");
             for (int i = 0; i < _masks.Count; i++)
-                _out.Ascii(" /s").Int(i + 1).Ascii(" << /SMask << /Type /Mask /S /Luminosity /G ").Int(maskIds[i]).Ascii(" 0 R >> >>");
+                _out.Ascii(" /s").Int(i + 1).Ascii(_masks[i].Alpha ? " << /SMask << /Type /Mask /S /Alpha /G " : " << /SMask << /Type /Mask /S /Luminosity /G ")
+                    .Int(maskIds[i]).Ascii(" 0 R >> >>");
             _out.Ascii(" >>");
         }
         if (_patterns.Length > 0) _out.Ascii(" /Pattern <<").Bytes(_patterns.Span).Ascii(" >>");
@@ -757,6 +887,93 @@ internal sealed partial class PdfDocumentWriter
 
         _crypt?.Dispose();
         return _out.Span.ToArray();
+    }
+
+    // ------------------------------------------------------------------ structure
+
+    /// <summary>
+    /// Writes the structure tree of a tagged PDF: its root, the elements, and the parent tree that maps each page's
+    /// marked content and each link annotation back to its element. Returns the next free object number.
+    /// </summary>
+    private int WriteStructure(int next, int rootId, int nextKey, int[] pageIds, McStream[] pageStreams, Dictionary<int, int> annotKeys)
+    {
+        var tree = Structure!;
+        tree.Prune();
+        var elements = new List<StructElem>();
+        void Number(StructElem e)
+        {
+            e.Id = next++;
+            elements.Add(e);
+            foreach (var k in e.Kids)
+                if (k is StructElem c) Number(c);
+        }
+        Number(tree.Root);
+        int parentTreeId = next++;
+
+        Begin(rootId).Ascii("<< /Type /StructTreeRoot /K ").Int(tree.Root.Id).Ascii(" 0 R /ParentTree ").Int(parentTreeId)
+            .Ascii(" 0 R /ParentTreeNextKey ").Int(nextKey).Ascii(" >>");
+        End();
+
+        // The parent tree: a number tree with one flat /Nums array, in key order.
+        var entries = new List<(int Key, McStream? Stream, StructElem? Link)>();
+        foreach (var page in pageStreams)
+        {
+            if (page.Elements.Count > 0) entries.Add((page.Page, page, null));
+            foreach (var (id, link) in page.Annotations) entries.Add((annotKeys[id], null, link));
+        }
+        foreach (var form in _formStreams)
+            if (form is { Key: >= 0 }) entries.Add((form.Key, form, null));
+        entries.Sort((x, y) => x.Key.CompareTo(y.Key));
+        Begin(parentTreeId).Ascii("<< /Nums [");
+        foreach (var (key, stream, link) in entries)
+        {
+            _out.Ascii("\n").Int(key).Sp();
+            if (link != null) { _out.Int(link.Id).Ascii(" 0 R"); continue; }
+            _out.Ascii("[");
+            foreach (var e in stream!.Elements) _out.Int(e.Id).Ascii(" 0 R ");
+            _out.Ascii("]");
+        }
+        _out.Ascii("] >>");
+        End();
+
+        foreach (var e in elements)
+        {
+            Begin(e.Id).Ascii("<< /Type /StructElem /S /").Ascii(e.Type).Ascii(" /P ").Int(e.Parent?.Id ?? rootId).Ascii(" 0 R");
+            if (e.Lang != null) { _out.Ascii(" /Lang "); WriteTextString(_out, e.Lang); }
+            if (e.Alt != null) { _out.Ascii(" /Alt "); WriteTextString(_out, e.Alt); }
+            if (e.Scope != null || e.RowSpan > 1 || e.ColSpan > 1)
+            {
+                _out.Ascii(" /A << /O /Table");
+                if (e.Scope != null) _out.Ascii(" /Scope /").Ascii(e.Scope);
+                if (e.RowSpan > 1) _out.Ascii(" /RowSpan ").Int(e.RowSpan);
+                if (e.ColSpan > 1) _out.Ascii(" /ColSpan ").Int(e.ColSpan);
+                _out.Ascii(" >>");
+            }
+            _out.Ascii(" /K [");
+            foreach (var k in e.Kids)
+            {
+                switch (k)
+                {
+                    case StructElem c:
+                        _out.Int(c.Id).Ascii(" 0 R ");
+                        break;
+                    case ContentSlot slot:
+                        foreach (var (stream, mcid) in slot.Refs)
+                        {
+                            _out.Ascii("<< /Type /MCR /Pg ").Int(pageIds[stream.Page]).Ascii(" 0 R /MCID ").Int(mcid);
+                            if (stream.FormId != 0) _out.Ascii(" /Stm ").Int(stream.FormId).Ascii(" 0 R");
+                            _out.Ascii(" >> ");
+                        }
+                        break;
+                    case AnnotRef annot:
+                        _out.Ascii("<< /Type /OBJR /Pg ").Int(pageIds[annot.Page]).Ascii(" 0 R /Obj ").Int(annot.Id).Ascii(" 0 R >> ");
+                        break;
+                }
+            }
+            _out.Ascii("] >>");
+            End();
+        }
+        return next;
     }
 
     // ------------------------------------------------------------------ outline
@@ -1065,6 +1282,12 @@ internal sealed partial class PdfDocumentWriter
 
     private void WriteOp(ByteBuffer b, in Placed placed, float pageTop, Dictionary<PdfImage, int> imageIds)
     {
+        if (_mc != null)
+        {
+            // Marked content nests inside the q/Q of clips and layers, which open their own sequences.
+            if (placed.Op is LayerBlock or ClipBlock) EndMarked(b);
+            else Mark(b, placed.Op.Tag);
+        }
         switch (placed.Op)
         {
             case TextOp t:
@@ -1146,10 +1369,16 @@ internal sealed partial class PdfDocumentWriter
                     _tr = -1;
                     _fillAlpha = _strokeAlpha = -1; // a group starts at alpha 1, but not every viewer resets it
                     _anyAlpha = true;
+                    // A transparency group is a stream of its own, with its own marked-content numbers.
+                    var pageMc = _mc;
+                    if (pageMc != null) _mc = new McStream(pageMc.Page);
                     foreach (var item in tb.Items)
                         if (item.Op is not LinkOp) WriteOp(group, item, pageTop, imageIds);
                     EndText(group);
+                    EndMarked(group);
                     _forms.Add(group.Span.ToArray());
+                    _formStreams.Add(_mc);
+                    _mc = pageMc;
                     int alpha = (int)MathF.Round(Math.Clamp(tb.Layer.Opacity, 0, 1) * 255);
                     _groupAlphas.Add(alpha);
                     b.Ascii("/g").Int(alpha).Ascii(" gs /Fx").Int(_forms.Count).Ascii(" Do\n");
@@ -1159,6 +1388,7 @@ internal sealed partial class PdfDocumentWriter
                     foreach (var item in tb.Items)
                         if (item.Op is not LinkOp) WriteOp(b, item, pageTop, imageIds);
                     EndText(b);
+                    EndMarked(b);
                 }
                 b.Ascii("Q\n");
                 InvalidateState();
@@ -1179,12 +1409,15 @@ internal sealed partial class PdfDocumentWriter
                 if (c.W < ClipOp.Far) { x0 = SnapPx(x0); x1 = SnapPx(x1); }
                 if (c.H < ClipOp.Far) { y0 = SnapPx(y0); y1 = SnapPx(y1); }
                 b.Ascii("q ");
+                if (_mc != null) b.Ascii("/Artifact BMC ");
                 if (c.Radii is { } r && !r.IsZero) RoundRectPath(b, x0, y0, Math.Max(0, x1 - x0), Math.Max(0, y1 - y0), r, pageTop);
                 else b.Num(PX(x0)).Sp().Num(PY(y1, pageTop)).Sp().Num(Math.Max(0, x1 - x0)).Sp().Num(Math.Max(0, y1 - y0)).Ascii(" re ");
                 b.Ascii("W n\n");
+                if (_mc != null) b.Ascii("EMC\n");
                 foreach (var item in cb.Items)
                     if (item.Op is not LinkOp) WriteOp(b, item, pageTop, imageIds);
                 EndText(b);
+                EndMarked(b);
                 b.Ascii("Q\n");
                 InvalidateState();
                 break;
@@ -1272,17 +1505,47 @@ internal sealed partial class PdfDocumentWriter
         // User space (y down) to PDF space (y up).
         var toPage = new Matrix(sx, 0, 0, -sy, left + tx - vx * sx, top - ty + vy * sy);
         b.Num(sx).Ascii(" 0 0 ").Num(-sy).Sp().Num(toPage.E).Sp().Num(toPage.F).Ascii(" cm\n");
-        foreach (var shape in img.Shapes)
+        WriteSvgShapes(b, img.Shapes, toPage);
+        b.Ascii("Q\n");
+        RestoreState(saved);
+    }
+
+    /// <summary>
+    /// Writes SVG shapes in the drawing's user space (already set up by a cm). <paramref name="toPage"/> maps that space
+    /// to the default space of the stream, where shading and tiling patterns are placed.
+    /// </summary>
+    private void WriteSvgShapes(ByteBuffer b, List<SvgShape> shapes, Matrix toPage)
+    {
+        var states = new Stack<(uint, uint, float, int, int)>();
+        foreach (var shape in shapes)
         {
             switch (shape.Kind)
             {
                 case SvgShape.KindClip:
+                    states.Push(SaveState());
                     b.Ascii("q\n");
                     WritePath(b, shape);
                     b.Ascii(shape.EvenOdd ? "W* n\n" : "W n\n");
                     continue;
+                case SvgShape.KindMask:
+                {
+                    // The soft mask's coordinates are those in effect when it is set: the stream's default space, where
+                    // its patterns are placed too. Then back to user space for the masked shapes.
+                    int mask = AddSvgMask(shape, toPage);
+                    states.Push(SaveState());
+                    b.Ascii("q ");
+                    if (toPage.TryInvert(out var back)) WriteMatrix(b, back).Ascii(" cm ");
+                    b.Ascii("/s").Int(mask).Ascii(" gs ");
+                    WriteMatrix(b, toPage).Ascii(" cm\n");
+                    continue;
+                }
                 case SvgShape.KindEndClip:
+                case SvgShape.KindEndMask:
                     b.Ascii("Q\n");
+                    if (states.Count > 0) RestoreState(states.Pop());
+                    continue;
+                case SvgShape.KindFilter:
+                    WriteSvgFilter(b, shape, toPage);
                     continue;
                 case SvgShape.KindText:
                     WriteSvgPaint(b, shape, toPage);
@@ -1305,8 +1568,141 @@ internal sealed partial class PdfDocumentWriter
             else if (shape.HasFill) b.Ascii(shape.EvenOdd ? "f*\n" : "f\n");
             else b.Ascii("S\n");
         }
-        b.Ascii("Q\n");
+        // Unbalanced groups (none are made, but a cut-off drawing must not leave the stream's state saved).
+        while (states.Count > 0)
+        {
+            b.Ascii("Q\n");
+            RestoreState(states.Pop());
+        }
+    }
+
+    private static ByteBuffer WriteMatrix(ByteBuffer b, Matrix m)
+        => b.Num6(m.A).Sp().Num6(m.B).Sp().Num6(m.C).Sp().Num6(m.D).Sp().Num(m.E).Sp().Num(m.F);
+
+    /// <summary>
+    /// Adds the soft mask of an SVG mask: a transparency group drawing the mask content inside the mask region, in the
+    /// stream's default space. Returns the number of the graphics state that sets it.
+    /// </summary>
+    private int AddSvgMask(SvgShape mask, Matrix toPage)
+    {
+        var content = new ByteBuffer(256);
+        var saved = SaveState();
+        // The group starts from the graphics state of the masked content: nothing about its colours is known.
+        (_fill, _stroke, _lineWidth, _fillAlpha, _strokeAlpha) = (1, 1, -1, -1, -1);
+        _anyAlpha = true;
+        WriteMatrix(content, toPage).Ascii(" cm\n");
+        WritePath(content, mask);
+        content.Ascii("W n\n");
+        WriteSvgShapes(content, mask.Children!, toPage);
         RestoreState(saved);
+        string dict = "/Type /XObject /Subtype /Form /BBox [-32767 -32767 32767 32767] /Group << /S /Transparency /CS /DeviceRGB >> /Resources "
+            + _resourcesId.ToString(System.Globalization.CultureInfo.InvariantCulture) + " 0 R";
+        _masks.Add((content.Span.ToArray(), dict, mask.MaskAlpha));
+        return _masks.Count;
+    }
+
+    /// <summary>Adds a tiling pattern repeating an SVG pattern's tile and returns its number.</summary>
+    private int AddSvgTiling(SvgPattern pattern, Matrix toPage)
+    {
+        var cell = new ByteBuffer(256);
+        var saved = SaveState();
+        // A pattern cell starts from the default graphics state and uses the shared resources.
+        (_fill, _stroke, _lineWidth, _fillAlpha, _strokeAlpha) = (CssColor.Black, CssColor.Black, 1, 255, 255);
+        WriteSvgShapes(cell, pattern.Shapes, Matrix.Identity);
+        RestoreState(saved);
+        var m = pattern.ToRoot.Then(toPage);
+        var dict = new ByteBuffer(256);
+        dict.Ascii("/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 ").Num(pattern.Width).Sp().Num(pattern.Height)
+            .Ascii("] /XStep ").Num(pattern.Width).Ascii(" /YStep ").Num(pattern.Height).Ascii(" /Matrix [");
+        WriteMatrix(dict, m).Ascii("] /Resources ").Int(_resourcesId).Ascii(" 0 R");
+        int n = _tilings.Count + 1;
+        _tilings.Add((n, cell.Span.ToArray(), System.Text.Encoding.ASCII.GetString(dict.Span)));
+        return n;
+    }
+
+    /// <summary>The resolution of SVG filter results: pixels per point (2 is 144 dpi), and the most pixels one may have.</summary>
+    private const float FilterPixelsPerPoint = 2;
+    private const long MaxFilterPixels = 4_000_000;
+
+    /// <summary>
+    /// Draws filtered SVG content: the content is rendered to pixels over the filter region, the filter runs on them,
+    /// and the result is drawn as an image with an alpha mask.
+    /// </summary>
+    private void WriteSvgFilter(ByteBuffer b, SvgShape shape, Matrix toPage)
+    {
+        var f = shape.Filter!;
+        if (!(f.W > 0 && f.H > 0)) return;
+        // Pixels per root unit, from the size of a root unit in the stream's default space.
+        float kx = MathF.Sqrt(toPage.A * toPage.A + toPage.B * toPage.B) * FilterPixelsPerPoint;
+        float ky = MathF.Sqrt(toPage.C * toPage.C + toPage.D * toPage.D) * FilterPixelsPerPoint;
+        double pw = Math.Ceiling(f.W * kx), ph = Math.Ceiling(f.H * ky);
+        if (!(pw >= 1 && ph >= 1)) return;
+        if (pw * ph > MaxFilterPixels)
+        {
+            double k = Math.Sqrt(MaxFilterPixels / (pw * ph));
+            pw = Math.Max(1, Math.Floor(pw * k));
+            ph = Math.Max(1, Math.Floor(ph * k));
+        }
+        int w = (int)pw, h = (int)ph;
+        var source = RasterizeSvg(shape.Children!, f.X, f.Y, f.W, f.H, w, h);
+        if (source == null) return;
+        var result = f.Apply(source, w, h, w / f.W, h / f.H);
+        var rgb = new byte[w * h * 3];
+        var alpha = new byte[w * h];
+        bool any = false;
+        for (int i = 0, o = 0; i < w * h; i++, o += 3)
+        {
+            float a = Math.Clamp(result[i * 4 + 3], 0, 1);
+            if (a <= 0) continue;
+            any = true;
+            alpha[i] = (byte)MathF.Round(a * 255);
+            rgb[o] = (byte)MathF.Round(Math.Clamp(result[i * 4] / a, 0, 1) * 255);
+            rgb[o + 1] = (byte)MathF.Round(Math.Clamp(result[i * 4 + 1] / a, 0, 1) * 255);
+            rgb[o + 2] = (byte)MathF.Round(Math.Clamp(result[i * 4 + 2] / a, 0, 1) * 255);
+        }
+        if (!any) return;
+        var image = new PdfImage
+        {
+            Width = w, Height = h, Data = PdfImage.Deflate(rgb),
+            SMask = new PdfImage { Width = w, Height = h, ColorSpace = "/DeviceGray", Data = PdfImage.Deflate(alpha) },
+        };
+        _rasters.Add(image);
+        SetFillAlpha(b, CssColor.Black); // an image is painted with the fill alpha
+        // The image's unit square onto the region, its first row at the top (user space has y down).
+        b.Ascii("q ").Num(f.W).Ascii(" 0 0 ").Num(-f.H).Sp().Num(f.X).Sp().Num(f.Y + f.H).Ascii(" cm /Xr").Int(_rasters.Count).Ascii(" Do Q\n");
+    }
+
+    /// <summary>
+    /// Renders SVG shapes over the root-space rectangle (x, y, w, h) into a pixels × pixels image, through a one-page
+    /// PDF of their own. Returns premultiplied sRGB floats (RGBA), or null when the shapes cannot be rendered.
+    /// </summary>
+    private float[]? RasterizeSvg(List<SvgShape> shapes, float x, float y, float w, float h, int pixelsW, int pixelsH)
+    {
+        var drawing = new SvgImage { HasViewBox = true, ViewBoxX = x, ViewBoxY = y, ViewBoxWidth = w, ViewBoxHeight = h, Align = "none" };
+        drawing.Shapes.AddRange(shapes);
+        var page = new PageSetup { Width = pixelsW, Height = pixelsH };
+        byte[] pdf;
+        try
+        {
+            var writer = new PdfDocumentWriter(page, compress: false, CompressionLevel.NoCompression) { Cancellation = Cancellation };
+            pdf = writer.Write(new List<DrawOp> { new SvgOp(0, 0, pixelsW, pixelsH, drawing) }, pixelsH,
+                new Dictionary<string, float>(), 0, null, null, null, null, null);
+        }
+        catch (PdfLimitException) { return null; }
+        var rendered = PdfRenderer.Open(pdf).RenderPage(0, new ImageOptions { Width = pixelsW, Height = pixelsH, Transparent = true }, Cancellation);
+        if (rendered.Width != pixelsW || rendered.Height != pixelsH) return null;
+        var px = rendered.Premultiplied;
+        var result = new float[px.Length * 4];
+        for (int i = 0; i < px.Length; i++)
+        {
+            uint p = px[i];
+            if (p == 0) continue;
+            result[i * 4] = (p & 255) / 255f;
+            result[i * 4 + 1] = ((p >> 8) & 255) / 255f;
+            result[i * 4 + 2] = ((p >> 16) & 255) / 255f;
+            result[i * 4 + 3] = (p >> 24) / 255f;
+        }
+        return result;
     }
 
     private static void WritePath(ByteBuffer b, SvgShape shape)
@@ -1337,12 +1733,26 @@ internal sealed partial class PdfDocumentWriter
             b.Ascii("/Pattern cs /P").Int(AddPattern(fg, toPage, shape.MinX, shape.MinY, shape.MaxX, shape.MaxY)).Ascii(" scn\n");
             _fill = 1; // not a colour: the next colour must be written
         }
+        else if (shape.FillPattern is { } fp)
+        {
+            int tile = AddSvgTiling(fp, toPage);
+            SetFillAlpha(b, (uint)fp.Alpha << 24);
+            b.Ascii("/Pattern cs /T").Int(tile).Ascii(" scn\n");
+            _fill = 1;
+        }
         else if (shape.Fill is { } fill) SetFill(b, fill);
         if (!shape.HasStroke) return;
         if (shape.StrokeGradient is { } sg)
         {
             SetStrokeAlpha(b, CssColor.Black);
             b.Ascii("/Pattern CS /P").Int(AddPattern(sg, toPage, shape.MinX, shape.MinY, shape.MaxX, shape.MaxY)).Ascii(" SCN ");
+            _stroke = 1;
+        }
+        else if (shape.StrokePattern is { } spat)
+        {
+            int tile = AddSvgTiling(spat, toPage);
+            SetStrokeAlpha(b, (uint)spat.Alpha << 24);
+            b.Ascii("/Pattern CS /T").Int(tile).Ascii(" SCN ");
             _stroke = 1;
         }
         else SetStroke(b, shape.Stroke!.Value);
@@ -1558,17 +1968,24 @@ internal sealed partial class PdfDocumentWriter
             .Ascii("] /Group << /S /Transparency /CS /DeviceGray >> /Resources << /Pattern << /M ");
         g.WritePattern(dict, toPage, minX, minY, maxX, maxY, GradientChannel.Alpha);
         dict.Ascii(" >> >>");
-        _masks.Add((content.Span.ToArray(), System.Text.Encoding.ASCII.GetString(dict.Span)));
+        _masks.Add((content.Span.ToArray(), System.Text.Encoding.ASCII.GetString(dict.Span), false));
         return _masks.Count;
     }
 
     // ------------------------------------------------------------------ text
 
-    private void CollectSvgFonts(SvgImage svg, bool[] usedFonts)
+    private void CollectSvgFonts(SvgImage svg, bool[] usedFonts) => CollectSvgFonts(svg.Shapes, usedFonts, 0);
+
+    /// <summary>The fonts of SVG text, also inside masks and pattern tiles (filtered content is drawn as an image).</summary>
+    private void CollectSvgFonts(List<SvgShape> shapes, bool[] usedFonts, int depth)
     {
-        foreach (var shape in svg.Shapes)
+        if (depth > 16) return;
+        foreach (var shape in shapes)
         {
-            if (shape.Font == null) continue;
+            if (shape.Kind == SvgShape.KindMask && shape.Children != null) CollectSvgFonts(shape.Children, usedFonts, depth + 1);
+            if (shape.FillPattern != null) CollectSvgFonts(shape.FillPattern.Shapes, usedFonts, depth + 1);
+            if (shape.StrokePattern != null) CollectSvgFonts(shape.StrokePattern.Shapes, usedFonts, depth + 1);
+            if (shape.Font == null || shape.Kind != SvgShape.KindText) continue;
             if (Leaf(shape.Font) is EmbeddedFont ef) AddGlyphs(ef, shape.Text!, 0, shape.Text!.Length);
             else usedFonts[shape.Font.Index] = true;
         }

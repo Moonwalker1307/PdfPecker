@@ -69,6 +69,9 @@ public static class HtmlToPdf
             throw new ArgumentException(options.EInvoice != null
                 ? "An e-invoice is a PDF/A file, which does not allow encryption: remove PdfOptions.Security."
                 : "PDF/A does not allow encryption: set PdfOptions.Conformance or PdfOptions.Security, not both.", nameof(options));
+        bool pdfua = options.Accessibility == PdfAccessibility.PdfUA1;
+        if (pdfua && options.Security is { } security && (security.Permissions & PdfPermissions.ExtractForAccessibility) == 0)
+            throw new ArgumentException("PDF/UA needs PdfPermissions.ExtractForAccessibility, so screen readers can read an encrypted file.", nameof(options));
         if (options.Watermark is { } wm && string.IsNullOrEmpty(wm.Text) && wm.Image == null)
             throw new ArgumentException("The watermark needs a Text or an Image.", nameof(options));
         var doc = HtmlParser.Parse(html);
@@ -117,7 +120,7 @@ public static class HtmlToPdf
         var images = new ImageLoader(baseDirectory, resolver, options.AllowFileAccess);
         var missingFonts = options.MissingFont is { } onMissing ? new MissingFontReport(onMissing) : null;
         var fonts = FontResolver.Create(sheet.FontFaces, options.Fonts, FetchFont(images),
-            embedStandard: options.EmbedStandardFonts || conformance != PdfConformance.None,
+            embedStandard: options.EmbedStandardFonts || conformance != PdfConformance.None || pdfua,
             systemFonts: options.UseSystemFonts, report: missingFonts);
         images.Fonts = fonts;
         var root = new ComputedStyle { Display = Display.Block, Fonts = fonts, MissingFonts = missingFonts };
@@ -155,10 +158,13 @@ public static class HtmlToPdf
         var canvasStyle = HasBackground(htmlEl) ? htmlEl!.Style : HasBackground(body) ? body!.Style : null;
         if (canvasStyle != null) canvasStyle.CanvasBackground = true;
 
+        // The logical structure of a tagged PDF follows the HTML in document order, whatever the layout does.
+        var structure = options.Accessibility != PdfAccessibility.None ? StructureTree.Build(doc) : null;
+
         var engine = new LayoutEngine(page.FlowHeight, images)
         {
             Cancellation = cancellationToken, MaxPages = Math.Max(1, options.MaxPages), FixedAreaHeight = page.ContentHeight,
-            CanvasRoot = htmlEl,
+            CanvasRoot = htmlEl, Tags = structure,
         };
         if (options.Bookmarks) engine.Headings = new List<OutlineHeading>();
         float height = engine.Layout(doc, page.ContentWidth);
@@ -201,6 +207,11 @@ public static class HtmlToPdf
             var t = doc.FindFirst("title");
             if (t != null) title = System.Text.RegularExpressions.Regex.Replace(t.InnerText(), @"\s+", " ").Trim();
         }
+        if (pdfua && string.IsNullOrEmpty(title))
+        {
+            title = structure!.FirstHeading
+                    ?? throw new ArgumentException("PDF/UA needs a document title: set PdfOptions.Title or give the HTML a <title>.", nameof(options));
+        }
 
         // The watermark and the header/footer text use the body's font family when it names an embedded font, else Helvetica.
         TextFont? marginFont = null, watermarkFont = null;
@@ -228,6 +239,9 @@ public static class HtmlToPdf
             EmbedStandardFonts = options.EmbedStandardFonts,
             MaxPages = options.MaxPages,
             Cancellation = cancellationToken,
+            Structure = structure,
+            PdfUA = pdfua,
+            Language = structure == null ? null : options.Language ?? structure.Language ?? (pdfua ? "en" : null),
             Properties = new DocumentProperties
             {
                 Keywords = options.Keywords,

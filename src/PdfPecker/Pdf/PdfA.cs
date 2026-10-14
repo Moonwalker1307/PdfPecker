@@ -106,8 +106,11 @@ internal static class PdfA
         return d;
     }
 
-    /// <summary>The XMP packet. Its values must match the document information dictionary.</summary>
-    public static byte[] Xmp(int part, string conformance, DocumentProperties props, DateTime created, PdfEInvoice? invoice = null)
+    /// <summary>
+    /// The XMP packet. Its values must match the document information dictionary. <paramref name="part"/> is the PDF/A
+    /// part, or 0 for a file that is not PDF/A; <paramref name="pdfua"/> claims PDF/UA-1.
+    /// </summary>
+    public static byte[] Xmp(int part, string conformance, DocumentProperties props, DateTime created, PdfEInvoice? invoice = null, bool pdfua = false)
     {
         string date = created.ToString("yyyy-MM-dd'T'HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture) + "Z";
         var custom = XmpCustomProperties(props.Custom);
@@ -118,10 +121,11 @@ internal static class PdfA
           .Append("<rdf:Description rdf:about=\"\" xmlns:pdfaid=\"http://www.aiim.org/pdfa/ns/id/\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\"")
           .Append(" xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\" xmlns:pdf=\"http://ns.adobe.com/pdf/1.3/\"");
         if (custom.Count > 0) sb.Append(" xmlns:pdfx=\"").Append(PdfxNamespace).Append('"');
-        sb.Append(">\n")
-          .Append("<pdfaid:part>").Append(part).Append("</pdfaid:part>\n")
-          .Append("<pdfaid:conformance>").Append(conformance).Append("</pdfaid:conformance>\n")
-          .Append("<dc:format>application/pdf</dc:format>\n");
+        sb.Append(">\n");
+        if (part > 0)
+            sb.Append("<pdfaid:part>").Append(part).Append("</pdfaid:part>\n")
+              .Append("<pdfaid:conformance>").Append(conformance).Append("</pdfaid:conformance>\n");
+        sb.Append("<dc:format>application/pdf</dc:format>\n");
         if (!string.IsNullOrEmpty(props.Title))
             sb.Append("<dc:title><rdf:Alt><rdf:li xml:lang=\"x-default\">").Append(Escape(props.Title!)).Append("</rdf:li></rdf:Alt></dc:title>\n");
         if (!string.IsNullOrEmpty(props.Author))
@@ -139,6 +143,9 @@ internal static class PdfA
         foreach (var (name, value) in custom)
             sb.Append("<pdfx:").Append(name).Append('>').Append(Escape(value)).Append("</pdfx:").Append(name).Append(">\n");
         sb.Append("</rdf:Description>\n");
+        if (pdfua)
+            sb.Append("<rdf:Description rdf:about=\"\" xmlns:pdfuaid=\"").Append(PdfUaNamespace).Append("\">\n")
+              .Append("<pdfuaid:part>1</pdfuaid:part>\n</rdf:Description>\n");
         if (invoice != null)
         {
             sb.Append("<rdf:Description rdf:about=\"\" xmlns:fx=\"").Append(FacturXNamespace).Append("\">\n")
@@ -148,7 +155,9 @@ internal static class PdfA
               .Append("<fx:ConformanceLevel>").Append(invoice.ConformanceLevel).Append("</fx:ConformanceLevel>\n")
               .Append("</rdf:Description>\n");
         }
-        if (custom.Count > 0 || invoice != null)
+        // PDF/A allows properties outside its predefined schemas only when an extension schema describes them.
+        bool uaSchema = pdfua && part > 0;
+        if (custom.Count > 0 || invoice != null || uaSchema)
         {
             // PDF/A allows properties outside the predefined schemas only when an extension schema describes them.
             sb.Append("<rdf:Description rdf:about=\"\" xmlns:pdfaExtension=\"http://www.aiim.org/pdfa/ns/extension/\"")
@@ -157,6 +166,9 @@ internal static class PdfA
             if (custom.Count > 0)
                 ExtensionSchema(sb, "PDF custom document properties", PdfxNamespace, "pdfx",
                     custom.Select(c => (c.Name, "Custom document property")));
+            if (uaSchema)
+                ExtensionSchema(sb, "PDF/UA Universal Accessibility Schema", PdfUaNamespace, "pdfuaid",
+                    new[] { ("part", "Indicates, which part of ISO 14289 standard is followed") }, "Integer", "internal");
             if (invoice != null)
                 ExtensionSchema(sb, "Factur-X PDFA Extension Schema", FacturXNamespace, "fx", new[]
                 {
@@ -174,7 +186,8 @@ internal static class PdfA
         return Encoding.UTF8.GetBytes(sb.ToString());
     }
 
-    private static void ExtensionSchema(StringBuilder sb, string schema, string ns, string prefix, IEnumerable<(string Name, string Description)> properties)
+    private static void ExtensionSchema(StringBuilder sb, string schema, string ns, string prefix, IEnumerable<(string Name, string Description)> properties,
+        string valueType = "Text", string category = "external")
     {
         sb.Append("<rdf:li rdf:parseType=\"Resource\">\n")
           .Append("<pdfaSchema:schema>").Append(schema).Append("</pdfaSchema:schema>\n")
@@ -183,11 +196,14 @@ internal static class PdfA
           .Append("<pdfaSchema:property><rdf:Seq>\n");
         foreach (var (name, description) in properties)
             sb.Append("<rdf:li rdf:parseType=\"Resource\"><pdfaProperty:name>").Append(name)
-              .Append("</pdfaProperty:name><pdfaProperty:valueType>Text</pdfaProperty:valueType>")
-              .Append("<pdfaProperty:category>external</pdfaProperty:category>")
+              .Append("</pdfaProperty:name><pdfaProperty:valueType>").Append(valueType).Append("</pdfaProperty:valueType>")
+              .Append("<pdfaProperty:category>").Append(category).Append("</pdfaProperty:category>")
               .Append("<pdfaProperty:description>").Append(description).Append("</pdfaProperty:description></rdf:li>\n");
         sb.Append("</rdf:Seq></pdfaSchema:property>\n</rdf:li>\n");
     }
+
+    /// <summary>The PDF/UA identification schema (ISO 14289-1).</summary>
+    private const string PdfUaNamespace = "http://www.aiim.org/pdfua/ns/id/";
 
     /// <summary>The Factur-X (and ZUGFeRD 2.1 and later) XMP namespace for invoices.</summary>
     private const string FacturXNamespace = "urn:factur-x:pdfa:CrossIndustryDocument:invoice:1p0#";

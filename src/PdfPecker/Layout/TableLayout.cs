@@ -469,8 +469,11 @@ internal sealed partial class LayoutEngine
                 if (r >= m.HeadCount)
                 {
                     float headStart = rowTop;
+                    int headOps = _ops.Count;
                     for (int h = 0; h < m.HeadCount; h++)
                         rowTop = LayoutRow(m, h, rowTop, colX, widths, hs, vs, collapse, allowMove: false) + vs;
+                    // The structure has the header once: its repeats are artifacts.
+                    if (Tags != null) Untag(_ops, headOps);
                     if (rowTop - headStart > _pageH / 2)
                     {
                         // Headers too tall to repeat usefully: drop them again.
@@ -580,6 +583,8 @@ internal sealed partial class LayoutEngine
         if (shift > 0.01f)
             for (int i = cell.OpsStart; i < cell.OpsEnd && i < _ops.Count; i++) _ops[i].Offset(0, shift);
 
+        if ((cs.ClipsX || cs.ClipsY) && cell.OpsEnd > cell.OpsStart && cell.OpsEnd <= _ops.Count) ClipCell(cell, h, collapse);
+
         float x = cell.X, y = cell.Top, w = cell.W;
         int sides = BoxPainter.AllSides;
         if (collapse)
@@ -596,6 +601,28 @@ internal sealed partial class LayoutEngine
             }
         }
         BoxPainter.Paint(cell.Group!, cs, x, y, w, h, _images, w, sides, collapsedCell: collapse);
+    }
+
+    /// <summary>
+    /// Moves a cell's content into a clip to its padding box (overflow other than visible). Later cells keep their op
+    /// indices: the clip takes the place of the first op and empty groups stand in for the rest.
+    /// </summary>
+    private void ClipCell(CellModel cell, float h, bool collapse)
+    {
+        var cs = cell.Td.Style;
+        float bl = collapse ? cs.BorderLeft / 2 : cs.BorderLeft, br = collapse ? cs.BorderRight / 2 : cs.BorderRight;
+        float bt = collapse ? cs.BorderTop / 2 : cs.BorderTop, bb = collapse ? cs.BorderBottom / 2 : cs.BorderBottom;
+        float px = cell.X + bl, py = cell.Top + bt, pw = Math.Max(0, cell.W - bl - br), ph = Math.Max(0, h - bt - bb);
+        var radii = cs.ClipsX && cs.ClipsY && !collapse ? BoxPainter.InnerRadii(BoxPainter.Radii(cs, cell.W, h), bl, bt, br, bb) : null;
+        if (!cs.ClipsX) { px -= ClipOp.Far; pw += 2 * ClipOp.Far; }
+        if (!cs.ClipsY) { py -= ClipOp.Far; ph += 2 * ClipOp.Far; }
+        var clip = new ClipOp(px, py, pw, ph, radii);
+        for (int i = cell.OpsStart; i < cell.OpsEnd; i++)
+        {
+            clip.Ops.Add(_ops[i]);
+            _ops[i] = new GroupOp();
+        }
+        _ops[cell.OpsStart] = clip;
     }
 
     // ------------------------------------------------------------------ intrinsic widths

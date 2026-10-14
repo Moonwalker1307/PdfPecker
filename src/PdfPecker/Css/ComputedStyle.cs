@@ -209,6 +209,8 @@ internal sealed class ComputedStyle
     public bool SvgClipEvenOdd;              // clip-rule
     public byte SvgTextAnchor;               // 0 start, 1 middle, 2 end
     public byte SvgBaseline;                 // dominant-baseline: 0 alphabetic, 1 middle/central, 2 hanging, 3 text-after-edge
+    public string? SvgMarkerStart, SvgMarkerMid, SvgMarkerEnd; // marker-start/mid/end: url(#id), as "#id"
+    public bool SvgFilterSrgb;               // color-interpolation-filters: sRGB (else linearRGB)
     public int Orphans = 2, Widows = 2; // minimum lines of a paragraph left at the bottom / carried to the top of a page
 
     // ---- Not inherited ----
@@ -221,6 +223,10 @@ internal sealed class ComputedStyle
     public BackgroundSize[]? BackgroundSizes;
     public BackgroundBox[]? BackgroundOrigins, BackgroundClips;
     public string? SvgClipPath;                 // clip-path: url(#id), as "#id"
+    public string? SvgMask, SvgFilter;          // mask and filter: url(#id), as "#id"
+    public bool SvgMaskAlpha;                   // mask-type: alpha (else luminance)
+    public uint SvgFloodColor = CssColor.Black; // flood-color
+    public float SvgFloodOpacity = 1;           // flood-opacity
     public Length MarginTop = Length.Zero, MarginRight = Length.Zero, MarginBottom = Length.Zero, MarginLeft = Length.Zero;
     public Length PaddingTop = Length.Zero, PaddingRight = Length.Zero, PaddingBottom = Length.Zero, PaddingLeft = Length.Zero;
     public float BorderTopWidth = 1.5f, BorderRightWidth = 1.5f, BorderBottomWidth = 1.5f, BorderLeftWidth = 1.5f; // medium = 3px
@@ -351,6 +357,10 @@ internal sealed class ComputedStyle
         c.BackgroundSizes = null;
         c.BackgroundOrigins = c.BackgroundClips = null;
         c.SvgClipPath = null;
+        c.SvgMask = c.SvgFilter = null;
+        c.SvgMaskAlpha = false;
+        c.SvgFloodColor = CssColor.Black;
+        c.SvgFloodOpacity = 1;
         c.MarginTop = c.MarginRight = c.MarginBottom = c.MarginLeft = Length.Zero;
         c.PaddingTop = c.PaddingRight = c.PaddingBottom = c.PaddingLeft = Length.Zero;
         c.BorderTopWidth = c.BorderRightWidth = c.BorderBottomWidth = c.BorderLeftWidth = 1.5f;

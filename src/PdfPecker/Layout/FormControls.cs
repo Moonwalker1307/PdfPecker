@@ -61,6 +61,8 @@ internal static class FormControls
         var names = new Dictionary<string, int>(StringComparer.Ordinal);
         var groups = new Dictionary<string, RadioGroup>(StringComparer.Ordinal);
         var counters = new Dictionary<string, int>(StringComparer.Ordinal);
+        var labels = new Dictionary<string, Element>(StringComparer.Ordinal);
+        CollectLabels(root, labels);
         Walk(root);
 
         void Walk(Element e)
@@ -98,7 +100,7 @@ internal static class FormControls
                 Name = Unique(e.GetAttribute("name"), fallback),
                 ReadOnly = e.HasAttribute("readonly"),
                 Required = e.HasAttribute("required"),
-                Tooltip = Tooltip(e),
+                Tooltip = Tooltip(e, labels),
             };
             switch (e.Name)
             {
@@ -133,7 +135,7 @@ internal static class FormControls
                                 group = new RadioGroup { Name = Unique(groupName, "radio") };
                                 if (groupName.Length > 0) groups[groupName] = group;
                             }
-                            var f = new PdfFormField { Name = group.Name, Group = group, Tooltip = Tooltip(e) };
+                            var f = new PdfFormField { Name = group.Name, Group = group, Tooltip = Tooltip(e, labels) };
                             // Each button needs its own state name: the value, or its position in the group.
                             f.OnState = state.Length > 0 && state != "on" ? state : "Choice";
                             int count = 1;
@@ -263,10 +265,37 @@ internal static class FormControls
         return false;
     }
 
-    private static string? Tooltip(Element e)
+    /// <summary>The field's description: its title or aria-label, or else the text of its label.</summary>
+    private static string? Tooltip(Element e, Dictionary<string, Element> labels)
     {
         var t = e.GetAttribute("title") ?? e.GetAttribute("aria-label");
-        return string.IsNullOrWhiteSpace(t) ? null : t.Trim();
+        if (!string.IsNullOrWhiteSpace(t)) return t.Trim();
+        Element? label = null;
+        if (e.GetAttribute("id") is { Length: > 0 } id) labels.TryGetValue(id, out label);
+        for (var p = e.Parent; label == null && p != null; p = p.Parent)
+            if (p.Name == "label") label = p;
+        if (label == null) return null;
+        var sb = new System.Text.StringBuilder();
+        LabelText(label, sb);
+        var text = Collapse(sb.ToString());
+        return text.Length == 0 ? null : text;
+    }
+
+    private static void LabelText(Element e, System.Text.StringBuilder sb)
+    {
+        foreach (var c in e.Children)
+            if (c is TextNode t) sb.Append(t.Text);
+            else if (c is Element el && el.Name is not ("input" or "select" or "textarea" or "button" or "script" or "style")) LabelText(el, sb);
+    }
+
+    private static void CollectLabels(Element e, Dictionary<string, Element> labels)
+    {
+        foreach (var c in e.Children)
+            if (c is Element el)
+            {
+                if (el.Name == "label" && el.GetAttribute("for") is { Length: > 0 } f) labels.TryAdd(f, el);
+                CollectLabels(el, labels);
+            }
     }
 
     /// <summary>A field name: PDF joins the names of nested fields with periods, so a period cannot be part of one.</summary>

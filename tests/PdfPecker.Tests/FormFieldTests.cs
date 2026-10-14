@@ -210,6 +210,34 @@ public class FormFieldTests
         Assert.Single(ys);
     }
 
+    [Fact]
+    public void LabelsDescribeFields()
+    {
+        var pdf = HtmlToPdf.Convert("""
+            <label>First name <input name="first"></label>
+            <label for="last">Last name</label> <input id="last" name="last">
+            <input name="plain">
+            """);
+        var (file, fields) = Read(pdf);
+        Assert.Equal("First name", Text(file, fields["first"], "TU"));
+        Assert.Equal("Last name", Text(file, fields["last"], "TU"));
+        Assert.Null(fields["plain"]["TU"]);
+    }
+
+    [Fact]
+    public void TaggedFormPutsWidgetsInFormElements()
+    {
+        var pdf = PdfTestHelpers.ConvertUncompressed("<html lang='en'><head><title>Form</title></head><body>" + Form.Split("<body>")[1],
+            new PdfOptions { Accessibility = PdfAccessibility.PdfUA1 });
+        var (file, fields) = Read(pdf);
+        var widgets = fields.Values.SelectMany(f => file.GetArray(f, "Kids")?.Items.Select(k => (PdfDict)file.Resolve(k)!) ?? new[] { f }).ToList();
+        Assert.Equal(12, widgets.Count);
+        Assert.All(widgets, w => Assert.True(file.GetInt(w, "StructParent", -1) >= 0));
+        var text = PdfTestHelpers.Latin1(pdf);
+        Assert.Equal(12, System.Text.RegularExpressions.Regex.Matches(text, "/S /Form ").Count);
+        Assert.Contains("/Type /OBJR", text);
+    }
+
     private static (int R, int G, int B) Pixel(byte[] pdf, int x, int y)
     {
         var img = PdfRenderer.Open(pdf).RenderPage(0, new ImageOptions { Dpi = 72 });

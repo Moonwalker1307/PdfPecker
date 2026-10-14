@@ -248,6 +248,35 @@ bundled Liberation fonts (see [Fonts](#fonts)). PDF/A does not allow encryption,
 `Security` throws an `ArgumentException`. AES-256 keys come from a password hash that is slow on purpose, which adds
 about 3 ms to a conversion.
 
+### Accessibility: tagged PDF and PDF/UA
+
+```csharp
+var options = new PdfOptions
+{
+    Accessibility = PdfAccessibility.PdfUA1,   // or Tagged: the same structure without the PDF/UA claim
+    Language = "da",                           // default: <html lang="...">; for PDF/UA without either, "en"
+    Conformance = PdfConformance.PdfA2b,       // optional: PDF/UA combines with PDF/A
+};
+```
+
+`Tagged` gives the PDF a structure tree built from the HTML, so screen readers, reflow and text extraction follow the
+document rather than the page layout: headings (`H1` to `H6`), paragraphs, lists with their labels, tables with header
+scopes and spans, figures with their alt text, links (tied to their clickable areas), block quotes, code and sections,
+all in document order, with `lang` attributes as the language of the element. Text outside a paragraph (straight in a
+`div`, say) gets one. Backgrounds, borders, running headers and footers, `HeaderText`/`FooterText`, watermarks, repeated
+table headers, fixed boxes and decorative images are artifacts that assistive technology skips.
+
+`PdfUA1` adds what ISO 14289-1 asks beyond the tags: every font embedded (the bundled Liberation fonts stand in for the
+standard ones), the title shown in the viewer's title bar and the PDF/UA identification in the XMP metadata. The output
+passes veraPDF's PDF/UA-1 checks, on its own and together with PDF/A-2b or PDF/A-3b (e-invoices included). It needs a
+title: `Title`, the `<title>` element or else the first heading; without one, conversion throws `ArgumentException`, as
+it does when `Security` leaves out `PdfPermissions.ExtractForAccessibility`.
+
+What the tags can't fix is up to the HTML: give images an `alt` (an image without `alt`, `aria-label` or `title`, or an
+`<svg>` without a `<title>`, counts as decorative), use real headings, lists and `th` cells, and mark purely visual
+content `aria-hidden="true"`. Heading levels that skip one (`h1` then `h3`) are tagged one level below the previous
+heading, as PDF/UA does not allow gaps.
+
 ### E-invoices (Factur-X / ZUGFeRD)
 
 Pass the invoice's CII XML (from your invoicing system) and PdfPecker attaches it to the PDF, making a Factur-X /
@@ -354,12 +383,13 @@ byte[] flat = HtmlToPdf.Convert(html, new PdfOptions { FormFields = false });
 
 Fields are named after the `name` attribute (a period becomes `_`, since PDF uses it to nest fields; a repeated name
 gets `_2`, `_3`, ...; a control without a name gets `text1`, `checkbox1`, ...). `readonly` and `required` set the
-field's flags, `title` or `aria-label` becomes its tooltip, and a `placeholder` is drawn in grey while the field is
+field's flags, `title`, `aria-label` or its `<label>` becomes its tooltip, and a `placeholder` is drawn in grey while the field is
 empty. Disabled controls (or controls in a disabled `<fieldset>`) are drawn but not fillable, and hidden inputs are
 left out. Each field has its own appearance, so the PDF looks right before anyone touches it and in viewers that never
 redraw fields; while a field is edited, the viewer draws its text in Helvetica, Courier or Times at the control's size
 and colour. Forms work with `Security` (the values are encrypted with the rest), `Conformance` (veraPDF passes the
-fields as PDF/A-2b and 3b), `Signature` (the signature field joins the form) and `PdfMerger` (repeated names are
+fields as PDF/A-2b and 3b), `Accessibility` (each widget sits in a `Form` element described by its label, title
+or name, and veraPDF passes PDF/UA-1), `Signature` (the signature field joins the form) and `PdfMerger` (repeated names are
 renamed).
 
 ## Merging PDFs
@@ -391,6 +421,32 @@ as ASP.NET Core requires for request and response bodies. Input streams are read
 not disposed; the sequence is enumerated lazily, so an iterator can open each one only when its turn comes. `MergeFiles`
 writes to a temporary file and moves it into place, so the output can be one of the inputs and a failed merge leaves
 no partial file behind.
+
+### Merging PDFs as they arrive
+
+For PDFs that arrive one at a time from elsewhere, such as downloads read a few at a time, use `StreamingPdfMerger`. It
+writes each PDF's pages when it is added and then lets the PDF go, so memory stays at about one input, and between
+inputs you decide what comes next: skip a missing document, or check that anything was added before answering. The
+output can be an HTTP response body or a file; it does not need to be seekable.
+
+```csharp
+var merger = new StreamingPdfMerger(response.Body, new PdfMergeOptions { Title = "Payslips October" });
+foreach (var path in paths)
+{
+    var pdf = await storage.DownloadAsync(path, ct);
+    if (pdf.Length == 0) continue;          // skip a missing document
+    await merger.AddAsync(pdf, ct);
+}
+if (merger.InputCount == 0) return Results.NotFound();
+await merger.CompleteAsync(ct);             // writes the page tree, bookmarks, form and cross-reference table
+
+// Or, from an IAsyncEnumerable<byte[]>:
+int pages = await PdfMerger.MergeAsync(DownloadInOrder(paths), response.Body, cancellationToken: ct);
+```
+
+The result is the same as `PdfMerger.Merge`'s, but the output is only a valid PDF once `Complete` has run. If adding a
+PDF throws (a damaged or encrypted input, `MaxPages` reached), what was written cannot be used and the merger refuses
+further calls. `Passwords` are matched to inputs in the order they are added.
 
 The pages keep their content, fonts, images, links, annotations, layers and fillable form fields, and each input's
 bookmarks follow each other. A form field named like one in an earlier input is renamed `name_2`, `name_3` and so on, so
@@ -473,7 +529,7 @@ specificity and `!important` handled as in browsers. Properties:
 
 | Area | Properties |
 | --- | --- |
-| Box model | `display` (block, inline, inline-block, flex, inline-flex, grid, inline-grid, list-item, table parts, none), `margin`, `padding`, `border` (solid, dashed, dotted, double), `border-radius` (incl. elliptical `/` radii and percentages; rounds backgrounds, borders, shadows and images), `box-shadow` (outer shadows; a blur is drawn as fading bands), `overflow` (`hidden`, `clip`, `auto` and `scroll` clip to the padding box, following its rounded corners; `overflow-x`/`overflow-y`), `outline` and `outline-offset` (all border styles; follows rounded corners), `width`, `height`, `min-`/`max-width`, `min-height`, `box-sizing`, `aspect-ratio` (incl. `auto <ratio>`), `object-fit` and `object-position` on images |
+| Box model | `display` (block, inline, inline-block, flex, inline-flex, grid, inline-grid, list-item, table parts, none), `margin`, `padding`, `border` (solid, dashed, dotted, double), `border-radius` (incl. elliptical `/` radii and percentages; rounds backgrounds, borders, shadows and images), `box-shadow` (outer shadows; a blur is drawn as fading bands), `overflow` (`hidden`, `clip`, `auto` and `scroll` clip to the padding box, following its rounded corners, also in table cells; `overflow-x`/`overflow-y`), `outline` and `outline-offset` (all border styles; follows rounded corners), `width`, `height`, `min-`/`max-width`, `min-height`, `box-sizing`, `aspect-ratio` (incl. `auto <ratio>`), `object-fit` and `object-position` on images |
 | Text | `color`, `font`, `font-family`, `font-size`, `font-weight`, `font-style`, `line-height`, `text-align` (incl. justify), `text-decoration`, `text-transform`, `text-indent`, `letter-spacing`, `word-spacing`, `white-space`, `overflow-wrap`/`word-wrap`, `word-break` (`break-all`), `vertical-align`, `text-shadow` (several shadows; a blur is drawn as faint copies of the text), `text-overflow: ellipsis` (on a box that clips its overflow). Lines break as in Chrome: at spaces, after hyphens and dashes, at `&shy;` (showing a hyphen) and `&#8203;`; a word too wide for its line overflows unless `overflow-wrap` or `word-break` allows breaking it. `line-height: normal` comes from the font's own metrics, rounded to whole pixels as Chrome does, and border widths snap to whole pixels. Text is kerned as in Chrome: from the font's GPOS or `kern` table, and for the standard fonts from the Liberation fonts browsers use in their place. Embedded fonts get their standard ligatures (GSUB `liga`/`clig`, such as fi and ffi) as in Chrome, except in letter-spaced text; `font-variant-ligatures: none` or `font-feature-settings: "liga" 0` turns them off |
 | Backgrounds | `background-color`, `background-image` and `background` with `url()` images (PNG, JPEG, GIF, WebP, and SVG files drawn as vectors), `linear-gradient()`, `radial-gradient()`, `repeating-linear-gradient()` and `repeating-radial-gradient()` (several layers allowed); `background-repeat` (incl. `space`, `round`), `background-position` (incl. edge offsets like `right 10px bottom 5px`), `background-size` (`cover`, `contain`, lengths), `background-origin`, `background-clip`. Repeated images are written once as PDF tiling patterns. `url()` in a linked stylesheet is relative to the stylesheet and follows the same file access rules as `<img>`. As in Chrome's print output, the background of `<html>`, or else of `<body>`, fills every page area (images and gradients too, positioned against the root box and continuing from page to page); `@page { background: <colour> }` also colours the page margins. `opacity` on SVG |
 | Flexbox | `flex-direction`, `flex-wrap`, `flex-flow`, `flex`, `flex-grow`/`-shrink`/`-basis`, `order`, `justify-content`, `align-items`, `align-self`, `align-content`, `gap`, `margin: auto` |
@@ -485,7 +541,7 @@ specificity and `!important` handled as in browsers. Properties:
 | Transparency | `opacity` (a block is painted as one PDF transparency group; an inline `<span>` fades its text and background), translucent colours everywhere (`rgba()`, `hsla()`, `#rrggbbaa`, `transparent`), gradients that fade to `transparent` (as a soft mask). PDF/A-2 and 3 allow all of this |
 | Transforms | `transform` (`translate()`, `translateX()`/`Y()`, `scale()`, `scaleX()`/`Y()`, `rotate()`, `skew()`, `skewX()`/`Y()`, `matrix()`) and `transform-origin` |
 | Generated content | `::before` and `::after` with `content` (strings, `attr()`, `counter()`, `counters()`, `open-quote`/`close-quote`), `counter-reset`, `counter-increment`, `counter-set` |
-| SVG | `fill`, `stroke`, `stroke-width`, `fill-opacity`, `stroke-opacity`, `fill-rule`, `stroke-linecap`, `stroke-linejoin`, `stroke-miterlimit`, `clip-path`, `clip-rule`, `text-anchor`, `dominant-baseline` (as CSS or presentation attributes) |
+| SVG | `fill`, `stroke`, `stroke-width`, `fill-opacity`, `stroke-opacity`, `fill-rule`, `stroke-linecap`, `stroke-linejoin`, `stroke-miterlimit`, `clip-path`, `clip-rule`, `mask`, `mask-type`, `filter`, `marker`, `marker-start`/`-mid`/`-end`, `flood-color`, `flood-opacity`, `color-interpolation-filters`, `text-anchor`, `dominant-baseline` (as CSS or presentation attributes) |
 | Lists | `list-style-type` (disc, circle, square, decimal, decimal-leading-zero, alpha, roman, none), `list-style` |
 | Tables | `border-collapse` (each shared border drawn once, the wider one winning), `border-spacing`, cell `vertical-align`, automatic column widths, `table-layout: fixed`, a table `height` shared out over the rows |
 | Paging | `page-break-before`/`after`/`inside`, `break-before`/`after`/`inside` (`always`, `page`, `avoid`), `orphans`, `widows`, `@page` size and margins |
@@ -521,7 +577,13 @@ Inside it, `{page}` and `{total-pages}` (or `{pages}`) are replaced with the pag
 `polyline`, `polygon`, `text` and `tspan` (`x`, `y`, `dx`, `dy`, `text-anchor`, `dominant-baseline`, standard fonts),
 `g`, `use`, nested `svg`, `viewBox`, `preserveAspectRatio` and `transform`, drawn as vector paths. `linearGradient` and
 `radialGradient` (both units, `gradientTransform`, `spreadMethod`, `href` inheritance) become PDF shadings, and
-`clipPath` clips the elements that reference it. As in browsers, an SVG file is styled only by its own `<style>`
+`pattern` fills and strokes (both units, `viewBox`, `patternTransform`, `href` inheritance) become PDF tiling patterns.
+`clipPath` clips the elements that reference it, and `mask` (luminance or alpha, both units) becomes a PDF soft mask.
+`marker` draws arrowheads and dots at the vertices of paths, lines, polylines and polygons (`orient` incl. `auto` and
+`auto-start-reverse`, `markerUnits`, `viewBox`, `refX`/`refY`, clipped to the marker unless `overflow="visible"`).
+`filter` is applied in pixels, at 144 dpi, and drawn as an image: `feGaussianBlur`, `feOffset`, `feDropShadow`,
+`feFlood`, `feMerge`, `feComposite` (all operators), `feBlend` (separable modes), `feColorMatrix`,
+`feComponentTransfer` and `feMorphology`, in linearRGB or sRGB. As in browsers, an SVG file is styled only by its own `<style>`
 elements and attributes, not by the page's CSS, and loads nothing else.
 
 **Images**: JPEG (embedded as-is, RGB, grayscale and CMYK), PNG (all colour types and bit depths, transparency,
@@ -582,7 +644,7 @@ not listed in [What is supported](#what-is-supported) should be assumed missing.
   strings do nothing). `aspect-ratio` does not take part in min-/max-content sizing (shrink-to-fit widths) and is
   ignored on tables. `object-fit` applies to raster images; an SVG file in `<img>` keeps its own
   `preserveAspectRatio` fit.
-- Borders: `groove`, `ridge`, `inset` and `outset` draw as solid, and so do `double` sides on rounded corners.
+- Borders: `groove`, `ridge`, `inset` and `outset` draw as solid.
 - `position: sticky` is drawn as `relative`; `background-attachment: fixed` scrolls with the box.
 - Lists: `list-style-type` covers disc, circle, square, decimal, decimal-leading-zero, alpha and roman only (no Greek,
   CJK or `@counter-style`).
@@ -598,13 +660,14 @@ not listed in [What is supported](#what-is-supported) should be assumed missing.
 
 - Grid: no `dense` packing and no subgrid; `span <name>` counts as `span 1`.
 - Multi-column: children are kept whole and balanced between columns; a single block is never split across columns.
-- Overflow: table cells do not clip their content; a positioned child with a `z-index` inside a clipping box stays
-  stacked within that box.
+- Overflow: a positioned child with a `z-index` inside a clipping box stays stacked within that box.
 
 **Images and SVG**
 
 - Images: no AVIF, BMP or TIFF. Animated GIF and WebP files show only their first frame.
-- SVG (inline and files): no embedded `<image>`, masks, patterns, markers or filters. Watermark images must be raster
+- SVG (inline and files): no embedded `<image>`. Filters have no `feTurbulence`, `feImage`, `feTile`,
+  `feConvolveMatrix`, `feDisplacementMap` or lighting (these pass their input through unchanged) and ignore primitive
+  subregions; filtered content becomes an image (text in it is no longer selectable). Watermark images must be raster
   images (PNG, JPEG, GIF or WebP).
 
 **Markdown and the PDF renderer**
@@ -660,10 +723,13 @@ and `Markdown/HtmlRenderer` writes the HTML, which then takes the same path as a
 1. `Html/HtmlParser` builds a DOM in a single pass, applying the browser rules for implied end tags.
 2. `Css/StyleResolver` cascades a user-agent stylesheet, presentational attributes, document stylesheets and inline
    styles. Rules are indexed by id, class and tag, and elements with identical inputs share one computed style.
+   For a tagged PDF, `Pdf/StructureTree` then maps the elements to structure types and gives every text node, image and
+   list marker a slot in that tree.
 3. `Layout/LayoutEngine` lays out blocks, inline text (line breaking, justification), lists and tables
    (automatic column widths), paginating as it goes, and produces a flat list of draw operations.
 4. `Pdf/PdfDocumentWriter` writes PDF 1.4: content streams, fonts, image XObjects, link annotations,
-   the bookmark outline and the cross-reference table. `Fonts/FontSubsetter` and `Fonts/CffSubsetter` cut embedded
+   the bookmark outline and the cross-reference table. A tagged PDF's content is wrapped in marked-content sequences
+   for its slots (or as artifacts), and the structure tree and its parent tree are written last. `Fonts/FontSubsetter` and `Fonts/CffSubsetter` cut embedded
    fonts down to the glyphs used (with their composite components and the CFF subroutines they call).
 
 The renderer (`Rendering/`) works the other way round: `Parsing/PdfFile` reads the object graph, `PageRenderer`

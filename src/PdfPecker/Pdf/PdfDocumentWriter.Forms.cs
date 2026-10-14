@@ -78,10 +78,14 @@ internal sealed partial class PdfDocumentWriter
     }
 
     /// <summary>Writes the widgets, their appearance streams, the radio groups and the fonts of the default appearances.</summary>
-    private void WriteFields(List<FieldBlock>[] pageFields, int[] pageIds, float flowH, Dictionary<PdfImage, int> imageIds, ref int next)
+    private void WriteFields(List<FieldBlock>[] pageFields, int[] pageIds, float flowH, Dictionary<PdfImage, int> imageIds,
+        Dictionary<int, int> annotKeys, ref int next)
     {
         if (_fieldIds.Count == 0) return;
         float k = _page.Scale, origin = _page.MarginTop + _page.BandTop;
+        // An appearance is not page content: it has no marked content of its own.
+        var savedMc = _mc;
+        _mc = null;
         for (int p = 0; p < pageFields.Length; p++)
             foreach (var fb in pageFields[p])
             {
@@ -117,6 +121,7 @@ internal sealed partial class PdfDocumentWriter
 
                 Begin(_fieldIds[fb]).Ascii("<< /Type /Annot /Subtype /Widget /Rect [").Num(x1).Sp().Num(yBottom).Sp().Num(x2).Sp().Num(yTop)
                     .Ascii("] /F 4 /P ").Int(pageIds[p]).Ascii(" 0 R");
+                if (annotKeys.TryGetValue(_fieldIds[fb], out int key)) _out.Ascii(" /StructParent ").Int(key);
                 if (field.Group is { } group)
                 {
                     _out.Ascii(" /Parent ").Int(_radioGroups[group].Id).Ascii(" 0 R");
@@ -203,6 +208,8 @@ internal sealed partial class PdfDocumentWriter
                 _out.Ascii(" >>");
                 End();
             }
+
+        _mc = savedMc;
 
         foreach (var (group, (id, kids)) in _radioGroups)
         {

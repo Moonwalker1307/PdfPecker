@@ -25,7 +25,7 @@ internal sealed class PdfMergeWriter
     }
 
     private readonly PdfMergeOptions _options;
-    private readonly CancellationToken _cancel;
+    private CancellationToken _cancel;
     private readonly Stream? _sink; // written to as the buffer fills, when merging to a stream synchronously
     private readonly ByteBuffer _main = new(1 << 16);
     private ByteBuffer _out;
@@ -66,6 +66,12 @@ internal sealed class PdfMergeWriter
 
     /// <summary>The number of inputs added so far.</summary>
     public int InputCount => _inputs;
+
+    /// <summary>The number of pages added so far.</summary>
+    public int PageCount => _pageCount;
+
+    /// <summary>Stops the next <see cref="Add"/> or <see cref="Finish"/>, for callers that pass a token per call.</summary>
+    public CancellationToken Cancellation { set => _cancel = value; }
 
     /// <summary>Merges PDFs held in memory and returns the result.</summary>
     public byte[] Merge(List<byte[]> data)
@@ -427,8 +433,9 @@ internal sealed class PdfMergeWriter
         Begin(p.Id).Ascii("<< /Type /Page /Parent ").Int(PagesId).Ascii(" 0 R");
         foreach (var (key, value) in p.Page.Entries)
         {
-            // Inherited attributes are written below; /B (article beads) leads to the whole article thread.
-            if (key is "Type" or "Parent" or "B" or "Annots" or "Resources" or "MediaBox" or "CropBox" or "Rotate") continue;
+            // Inherited attributes are written below; /B (article beads) leads to the whole article thread. The structure
+            // tree is not carried over, so neither are the keys into it.
+            if (key is "Type" or "Parent" or "B" or "Annots" or "Resources" or "MediaBox" or "CropBox" or "Rotate" or "StructParents") continue;
             _out.Sp();
             PdfSyntax.RawName(_out, key);
             _out.Sp();
