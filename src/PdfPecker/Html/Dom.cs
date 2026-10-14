@@ -42,6 +42,9 @@ internal sealed class Element : Node
     /// <summary>A ::before or ::after box made by the style resolver, not by the parser.</summary>
     public bool Generated;
 
+    /// <summary>For input, textarea, select and button elements: the form control they draw.</summary>
+    public Layout.FormControl? Control;
+
     public Element(string name) => Name = name;
 
     public string? GetAttribute(string name)

@@ -165,6 +165,15 @@ public sealed class PdfOptions
     public bool Bookmarks { get; set; } = true;
 
     /// <summary>
+    /// Turn form controls into fillable PDF form fields (AcroForm). Default: true. Text inputs and textareas become
+    /// text fields, check boxes and radio buttons become buttons (radio buttons with the same name are one field),
+    /// and selects become drop-down or list boxes, named after their <c>name</c> attribute and filled with their
+    /// current values. Disabled controls and buttons are drawn but not fillable. When false, every control is drawn
+    /// as it is, with its value, as in a browser's print output.
+    /// </summary>
+    public bool FormFields { get; set; } = true;
+
+    /// <summary>
     /// The most pages a document may have; a longer one throws <see cref="PdfLimitException"/>. Default: 100,000.
     /// Lower it when converting untrusted HTML, where a few bytes of CSS (a huge height, thousands of page breaks)
     /// can ask for millions of pages.

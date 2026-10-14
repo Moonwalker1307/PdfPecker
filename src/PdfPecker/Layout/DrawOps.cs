@@ -217,6 +217,24 @@ internal sealed class LinkOp : DrawOp
     public override void Offset(float dx, float dy) { X += dx; Y += dy; }
 }
 
+/// <summary>
+/// An interactive form field over the box (X, Y, W, H): a widget annotation whose appearance is <see cref="GroupOp.Ops"/>,
+/// the field's value (or, for a check box or radio button, its checked look).
+/// </summary>
+internal sealed class FieldOp : GroupOp
+{
+    public float X, Y, W, H;
+    public PdfFormField Field;
+    public ControlKind Kind;
+    public bool Checked;
+    public TextFont Font;   // the value's font and size, for the field's default appearance when a viewer redraws it
+    public float FontSize;
+    public uint Color;
+    public int Align;       // 0 left, 1 centred, 2 right
+    public FieldOp(float x, float y, float w, float h, PdfFormField field) { X = x; Y = y; W = w; H = h; Field = field; Font = null!; }
+    public override void Offset(float dx, float dy) { base.Offset(dx, dy); X += dx; Y += dy; }
+}
+
 /// <summary>A filled or stroked circle (list markers).</summary>
 internal sealed class CircleOp : DrawOp
 {

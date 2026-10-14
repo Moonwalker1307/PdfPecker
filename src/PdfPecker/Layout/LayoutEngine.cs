@@ -582,6 +582,7 @@ internal sealed partial class LayoutEngine
 
         float bottom = cy + contentH + pb + bb;
         BoxPainter.Paint(group, s, bx, y, used, bottom - y, _images, availW);
+        if (e.Control is { } control) FinishControl(e, control, opsStart + 1, bx, y, used, bottom - y, contentBottom - cy, contentH);
         if (e == CanvasRoot) CanvasRootBox = (bx, y, used, bottom - y);
         if (cbFrame != null)
         {

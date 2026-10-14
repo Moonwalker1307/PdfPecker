@@ -162,6 +162,7 @@ var options = new PdfOptions
     Keywords = "invoice", Creator = "MyApp",          // also Subject, and Producer (default "PdfPecker")
     CustomProperties = { ["RunId"] = "42" },          // your own properties, in the PDF's document information
     Bookmarks = true,                                 // PDF bookmarks from h1-h6 (default)
+    FormFields = true,                                // inputs, selects and textareas become fillable fields (default)
     Compress = true,                                  // Flate-compress page content (default)
     AllowFileAccess = false,                          // true: also read files outside BaseDirectory (trusted HTML only)
     MaxPages = 1000,                                  // refuse longer documents with PdfLimitException (default 100,000)
@@ -321,6 +322,45 @@ and re-reading the file); conversions without a signature are unaffected.
 Custom properties are written to the document information dictionary, where Acrobat shows them under Document
 Properties > Custom and `pdfinfo -custom` lists them. For PDF/A they are also written to the XMP metadata (Acrobat's
 `pdfx` namespace, with the extension schema PDF/A requires), alongside Keywords, Creator and Producer.
+
+### Fillable forms
+
+Form controls become fillable PDF form fields (AcroForm), drawn as Chrome prints them and filled with their current
+values. Adobe Reader, Preview, Chrome, Firefox and other viewers let the reader fill them in and save the result.
+
+```csharp
+var html = """
+    <p>Name <input name="name" value="Jane Doe" required></p>
+    <p><label><input type="checkbox" name="newsletter" checked> Send me the newsletter</label></p>
+    <p><input type="radio" name="size" value="S"> S <input type="radio" name="size" value="M" checked> M</p>
+    <p><select name="country"><option value="dk">Denmark</option><option value="se">Sweden</option></select></p>
+    <p><textarea name="comments" rows="4" cols="40"></textarea></p>
+    """;
+byte[] pdf = HtmlToPdf.Convert(html);
+
+// Or print the controls as they are, without form fields:
+byte[] flat = HtmlToPdf.Convert(html, new PdfOptions { FormFields = false });
+```
+
+| HTML | PDF field |
+|------|-----------|
+| `<input>` of type `text`, `email`, `tel`, `url`, `search`, `number`, `date` and the like | Text field (`maxlength` sets the maximum length) |
+| `<input type="password">` | Password text field; the value is drawn as dots and not stored |
+| `<textarea>` | Multi-line text field |
+| `<input type="checkbox">` | Check box; its `value` is the export value (default `Yes`) |
+| `<input type="radio">` | Radio buttons: those with the same `name` are one field, and each `value` is a choice |
+| `<select>` | Drop-down list (combo box); with `multiple` or `size` > 1 a list box, multi-select with `multiple` |
+| `<button>`, `<input type="submit">`, `reset`, `button` | Drawn only: a PDF has nothing to submit |
+
+Fields are named after the `name` attribute (a period becomes `_`, since PDF uses it to nest fields; a repeated name
+gets `_2`, `_3`, ...; a control without a name gets `text1`, `checkbox1`, ...). `readonly` and `required` set the
+field's flags, `title` or `aria-label` becomes its tooltip, and a `placeholder` is drawn in grey while the field is
+empty. Disabled controls (or controls in a disabled `<fieldset>`) are drawn but not fillable, and hidden inputs are
+left out. Each field has its own appearance, so the PDF looks right before anyone touches it and in viewers that never
+redraw fields; while a field is edited, the viewer draws its text in Helvetica, Courier or Times at the control's size
+and colour. Forms work with `Security` (the values are encrypted with the rest), `Conformance` (veraPDF passes the
+fields as PDF/A-2b and 3b), `Signature` (the signature field joins the form) and `PdfMerger` (repeated names are
+renamed).
 
 ## Merging PDFs
 
@@ -507,8 +547,9 @@ not listed in [What is supported](#what-is-supported) should be assumed missing.
 - No JavaScript. Scripts are never run, so content must be in the HTML before conversion (render it server-side first).
 - No network access: `http:`/`https:` stylesheets and images are not downloaded. Supply them through your
   `ResourceResolver`, as files under `BaseDirectory`, or as `data:` URIs.
-- Form controls (`<input>`, `<select>`, `<textarea>`, `<button>`), `<canvas>`, `<iframe>`, `<video>`, `<audio>`,
-  `<object>` and `<embed>` are not drawn; the PDF has no fillable form fields.
+- `<canvas>`, `<iframe>`, `<video>`, `<audio>`, `<object>` and `<embed>` are not drawn, nor are file, range, colour and
+  image inputs. Form fields have no JavaScript (no calculations, formats or submit actions), and a field inside a
+  transformed box, a running header or footer, or a `position: fixed` box is drawn but not fillable.
 
 **Text and fonts**
 
