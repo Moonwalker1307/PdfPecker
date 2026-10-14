@@ -2,7 +2,8 @@ namespace PdfPecker.Images;
 
 /// <summary>
 /// Decoder for lossy WebP: one VP8 key frame (RFC 6386), converted from YUV 4:2:0 to RGB with the same fixed-point
-/// arithmetic and chroma upsampling as libwebp, so the pixels match what browsers show.
+/// arithmetic and chroma upsampling as libwebp, so the pixels match what browsers show. It follows libwebp's decoder
+/// closely and is covered by libwebp's BSD license (see THIRD-PARTY-NOTICES.md).
 /// </summary>
 internal sealed class Vp8Decoder
 {

@@ -1,15 +1,23 @@
 # Third-party notices
 
-PdfPecker contains no third-party code. It includes the fonts below in two forms:
+PdfPecker is licensed under the MIT license (see `LICENSE`). The library and its NuGet package also contain the
+third-party material below, each under its own license, which is reproduced in this file:
 
-- The PDF renderer uses font data derived from them, stored in a compact outline format in
-  `src/PdfPecker/Rendering/Fonts/StandardFonts.bin` (built by `tools/FontPackBuilder`), to draw the 14 standard PDF
-  fonts and fonts that a PDF does not embed. This data is not installed or exposed as a font, and it is not
-  distributed under the names below.
 - The twelve Liberation Sans, Serif and Mono font files are shipped unmodified in the library
   (`src/PdfPecker/Fonts/Bundled`, Brotli-compressed with `tools/FontPackBuilder --bundle` and restored byte for byte
   when loaded). Subsets of them are embedded in PDFs created with `PdfOptions.EmbedStandardFonts` or PDF/A, as the
   Open Font License permits for documents.
+- The PDF renderer uses font data derived from the Liberation fonts and DejaVu Sans, stored in a compact outline
+  format in `src/PdfPecker/Rendering/Fonts/StandardFonts.bin` (built by `tools/FontPackBuilder`), to draw the 14
+  standard PDF fonts and fonts that a PDF does not embed. This data is not installed or exposed as a font, it is not
+  distributed under the names below, and it remains under the fonts' own licenses.
+- The advance widths of the 14 standard PDF fonts in `src/PdfPecker/Fonts/StandardFontMetrics.Data.cs` were generated
+  from Adobe's Core 14 AFM files.
+- The lossy WebP decoder (`src/PdfPecker/Images/Vp8Decoder.cs`) follows libwebp's decoder closely (its work buffer
+  layout, YUV to RGB conversion, chroma upsampling and loop filters), so it is covered by libwebp's license.
+
+The NuGet package's license expression is `MIT AND OFL-1.1 AND Bitstream-Vera AND APAFML AND BSD-3-Clause`, and
+this file ships in the package next to the README.
 
 ## Liberation Fonts 2.x (Sans, Serif and Mono)
 
@@ -119,11 +127,19 @@ DEALINGS IN THE FONT SOFTWARE.
 
 ## DejaVu Sans (used for the Symbol and ZapfDingbats glyphs)
 
-DejaVu changes are in the public domain. The glyphs derived from Bitstream Vera are covered by this license:
-
-Copyright (c) 2003 by Bitstream, Inc. All Rights Reserved. Bitstream Vera is a trademark of Bitstream, Inc.
+Source: https://github.com/dejavu-fonts/dejavu-fonts
 
 ```
+Fonts are (c) Bitstream (see below). DejaVu changes are in public domain.
+Glyphs imported from Arev fonts are (c) Tavmjong Bah (see below)
+
+
+Bitstream Vera Fonts Copyright
+------------------------------
+
+Copyright (c) 2003 by Bitstream, Inc. All Rights Reserved. Bitstream Vera is
+a trademark of Bitstream, Inc.
+
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of the fonts accompanying this license ("Fonts") and associated
 documentation files (the "Font Software"), to reproduce and distribute the
@@ -164,10 +180,108 @@ otherwise to promote the sale, use or other dealings in this Font Software
 without prior written authorization from the Gnome Foundation or Bitstream
 Inc., respectively. For further information, contact: fonts at gnome dot
 org.
+
+Arev Fonts Copyright
+------------------------------
+
+Copyright (c) 2006 by Tavmjong Bah. All Rights Reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the fonts accompanying this license ("Fonts") and
+associated documentation files (the "Font Software"), to reproduce
+and distribute the modifications to the Bitstream Vera Font Software,
+including without limitation the rights to use, copy, merge, publish,
+distribute, and/or sell copies of the Font Software, and to permit
+persons to whom the Font Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright and trademark notices and this permission notice
+shall be included in all copies of one or more of the Font Software
+typefaces.
+
+The Font Software may be modified, altered, or added to, and in
+particular the designs of glyphs or characters in the Fonts may be
+modified and additional glyphs or characters may be added to the
+Fonts, only if the fonts are renamed to names not containing either
+the words "Tavmjong Bah" or the word "Arev".
+
+This License becomes null and void to the extent applicable to Fonts
+or Font Software that has been modified and is distributed under the 
+"Tavmjong Bah Arev" names.
+
+The Font Software may be sold as part of a larger software package but
+no copy of one or more of the Font Software typefaces may be sold by
+itself.
+
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL
+TAVMJONG BAH BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE.
+
+Except as contained in this notice, the name of Tavmjong Bah shall not
+be used in advertising or otherwise to promote the sale, use or other
+dealings in this Font Software without prior written authorization
+from Tavmjong Bah. For further information, contact: tavmjong @ free
+. fr.
+```
+
+## Adobe Core 14 AFM font metrics
+
+The AFM files are copyright Adobe Systems Incorporated. PdfPecker keeps only the advance widths of the characters in
+WinAnsiEncoding, converted to C# arrays; it does not include the AFM files themselves. Adobe's notice for them:
+
+```
+This file and the 14 PostScript(R) AFM files it accompanies may be used, copied, and distributed for any purpose and
+without charge, with or without modification, provided that all copyright notices are retained; that the AFM files
+are not distributed without this file; that all modifications to this file or any of the AFM files are prominently
+noted in the modified file(s); and that this paragraph is not modified. Adobe Systems has no responsibility or
+obligation to support the use of the AFM files.
+```
+
+## libwebp
+
+Source: https://chromium.googlesource.com/webm/libwebp
+
+```
+Copyright (c) 2010, Google Inc. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+  * Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+
+  * Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in
+    the documentation and/or other materials provided with the
+    distribution.
+
+  * Neither the name of Google nor the names of its contributors may
+    be used to endorse or promote products derived from this software
+    without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
 ## Test fonts (not part of the library or the NuGet package)
 
 `tests/PdfPecker.Tests/Fixtures/fonts` holds subsets of Work Sans (Copyright 2019 The Work Sans Project Authors) and
-Inter (Copyright 2016-2023 The Inter Project Authors), used only by the tests. Both are licensed under the SIL Open
-Font License 1.1; the license texts are next to the fonts.
+Inter (Copyright 2016-2023 The Inter Project Authors), licensed under the SIL Open Font License 1.1, and of Roboto
+(Copyright 2011 Google Inc.), licensed under the Apache License 2.0. They are used only by the tests, and their
+license texts are next to the fonts.
