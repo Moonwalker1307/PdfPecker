@@ -47,7 +47,8 @@ internal sealed class PdfDocumentWriter
     private bool _noAlpha;                            // writing a stream without the shared ExtGState resources
     private readonly SortedSet<int> _fillAlphas = new(), _strokeAlphas = new(), _groupAlphas = new();
     private readonly List<byte[]> _forms = new(); // transparency groups of translucent layers, written as /Fx1, /Fx2, ...
-    private readonly List<(byte[] Content, string Dict)> _masks = new(); // soft masks of translucent gradients, set by /s1, /s2, ...
+    private readonly List<(byte[] Content, string Dict, bool Alpha)> _masks = new(); // soft masks (gradient alphas, SVG masks), set by /s1, /s2, ...
+    private readonly List<PdfImage> _rasters = new(); // SVG filter results, written as /Xr1, /Xr2, ...
     private readonly List<FontRun> _runs = new();
     private readonly Dictionary<FontProgram, GlyphSubset> _subsets = new();
     private readonly List<GlyphSubset> _subsetList = new();
@@ -768,18 +769,28 @@ internal sealed class PdfDocumentWriter
             WriteStream(maskIds[i], _masks[i].Content, _compress, _masks[i].Dict);
         }
 
+        // Images of SVG filter results.
+        foreach (var raster in _rasters)
+        {
+            raster.ObjectNumber = next++;
+            if (raster.SMask != null) raster.SMask.ObjectNumber = next++;
+            WriteImage(raster);
+            if (raster.SMask != null) WriteImage(raster.SMask);
+        }
+
         // Shared resources, written last: shading patterns are collected while writing the pages.
         Begin(resourcesId).Ascii("<< /ProcSet [/PDF /Text /ImageB /ImageC /ImageI] /Font <<");
         for (int i = 0; i < usedFonts.Length; i++)
             if (usedFonts[i]) _out.Ascii(" /F").Int(i + 1).Sp().Int(fontIds[i]).Ascii(" 0 R");
         for (int i = 0; i < _subsetList.Count; i++) _out.Ascii(" /E").Int(i + 1).Sp().Int(firstEmbeddedId + i * 5).Ascii(" 0 R");
         _out.Ascii(" >>");
-        if (images.Count > 0 || wm != null || _forms.Count > 0)
+        if (images.Count > 0 || wm != null || _forms.Count > 0 || _rasters.Count > 0)
         {
             _out.Ascii(" /XObject <<");
             for (int i = 0; i < images.Count; i++) _out.Ascii(" /Im").Int(i + 1).Sp().Int(images[i].ObjectNumber).Ascii(" 0 R");
             if (wm != null) _out.Ascii(" /Wm ").Int(watermarkId).Ascii(" 0 R");
             for (int i = 0; i < _forms.Count; i++) _out.Ascii(" /Fx").Int(i + 1).Sp().Int(formIds[i]).Ascii(" 0 R");
+            for (int i = 0; i < _rasters.Count; i++) _out.Ascii(" /Xr").Int(i + 1).Sp().Int(_rasters[i].ObjectNumber).Ascii(" 0 R");
             _out.Ascii(" >>");
         }
         if (_fillAlphas.Count + _strokeAlphas.Count + _groupAlphas.Count + _masks.Count > 0)
@@ -789,7 +800,8 @@ internal sealed class PdfDocumentWriter
             foreach (int a in _strokeAlphas) _out.Ascii(" /A").Int(a).Ascii(" << /CA ").Num(a / 255f).Ascii(" >>");
             foreach (int a in _groupAlphas) _out.Ascii(" /g").Int(a).Ascii(" << /ca ").Num(a / 255f).Ascii(" /CA ").Num(a / 255f).Ascii(" >>");
             for (int i = 0; i < _masks.Count; i++)
-                _out.Ascii(" /s").Int(i + 1).Ascii(" << /SMask << /Type /Mask /S /Luminosity /G ").Int(maskIds[i]).Ascii(" 0 R >> >>");
+                _out.Ascii(" /s").Int(i + 1).Ascii(_masks[i].Alpha ? " << /SMask << /Type /Mask /S /Alpha /G " : " << /SMask << /Type /Mask /S /Luminosity /G ")
+                    .Int(maskIds[i]).Ascii(" 0 R >> >>");
             _out.Ascii(" >>");
         }
         if (_patterns.Length > 0) _out.Ascii(" /Pattern <<").Bytes(_patterns.Span).Ascii(" >>");
@@ -1427,17 +1439,47 @@ internal sealed class PdfDocumentWriter
         // User space (y down) to PDF space (y up).
         var toPage = new Matrix(sx, 0, 0, -sy, left + tx - vx * sx, top - ty + vy * sy);
         b.Num(sx).Ascii(" 0 0 ").Num(-sy).Sp().Num(toPage.E).Sp().Num(toPage.F).Ascii(" cm\n");
-        foreach (var shape in img.Shapes)
+        WriteSvgShapes(b, img.Shapes, toPage);
+        b.Ascii("Q\n");
+        RestoreState(saved);
+    }
+
+    /// <summary>
+    /// Writes SVG shapes in the drawing's user space (already set up by a cm). <paramref name="toPage"/> maps that space
+    /// to the default space of the stream, where shading and tiling patterns are placed.
+    /// </summary>
+    private void WriteSvgShapes(ByteBuffer b, List<SvgShape> shapes, Matrix toPage)
+    {
+        var states = new Stack<(uint, uint, float, int, int)>();
+        foreach (var shape in shapes)
         {
             switch (shape.Kind)
             {
                 case SvgShape.KindClip:
+                    states.Push(SaveState());
                     b.Ascii("q\n");
                     WritePath(b, shape);
                     b.Ascii(shape.EvenOdd ? "W* n\n" : "W n\n");
                     continue;
+                case SvgShape.KindMask:
+                {
+                    // The soft mask's coordinates are those in effect when it is set: the stream's default space, where
+                    // its patterns are placed too. Then back to user space for the masked shapes.
+                    int mask = AddSvgMask(shape, toPage);
+                    states.Push(SaveState());
+                    b.Ascii("q ");
+                    if (toPage.TryInvert(out var back)) WriteMatrix(b, back).Ascii(" cm ");
+                    b.Ascii("/s").Int(mask).Ascii(" gs ");
+                    WriteMatrix(b, toPage).Ascii(" cm\n");
+                    continue;
+                }
                 case SvgShape.KindEndClip:
+                case SvgShape.KindEndMask:
                     b.Ascii("Q\n");
+                    if (states.Count > 0) RestoreState(states.Pop());
+                    continue;
+                case SvgShape.KindFilter:
+                    WriteSvgFilter(b, shape, toPage);
                     continue;
                 case SvgShape.KindText:
                     WriteSvgPaint(b, shape, toPage);
@@ -1460,8 +1502,141 @@ internal sealed class PdfDocumentWriter
             else if (shape.HasFill) b.Ascii(shape.EvenOdd ? "f*\n" : "f\n");
             else b.Ascii("S\n");
         }
-        b.Ascii("Q\n");
+        // Unbalanced groups (none are made, but a cut-off drawing must not leave the stream's state saved).
+        while (states.Count > 0)
+        {
+            b.Ascii("Q\n");
+            RestoreState(states.Pop());
+        }
+    }
+
+    private static ByteBuffer WriteMatrix(ByteBuffer b, Matrix m)
+        => b.Num6(m.A).Sp().Num6(m.B).Sp().Num6(m.C).Sp().Num6(m.D).Sp().Num(m.E).Sp().Num(m.F);
+
+    /// <summary>
+    /// Adds the soft mask of an SVG mask: a transparency group drawing the mask content inside the mask region, in the
+    /// stream's default space. Returns the number of the graphics state that sets it.
+    /// </summary>
+    private int AddSvgMask(SvgShape mask, Matrix toPage)
+    {
+        var content = new ByteBuffer(256);
+        var saved = SaveState();
+        // The group starts from the graphics state of the masked content: nothing about its colours is known.
+        (_fill, _stroke, _lineWidth, _fillAlpha, _strokeAlpha) = (1, 1, -1, -1, -1);
+        _anyAlpha = true;
+        WriteMatrix(content, toPage).Ascii(" cm\n");
+        WritePath(content, mask);
+        content.Ascii("W n\n");
+        WriteSvgShapes(content, mask.Children!, toPage);
         RestoreState(saved);
+        string dict = "/Type /XObject /Subtype /Form /BBox [-32767 -32767 32767 32767] /Group << /S /Transparency /CS /DeviceRGB >> /Resources "
+            + _resourcesId.ToString(System.Globalization.CultureInfo.InvariantCulture) + " 0 R";
+        _masks.Add((content.Span.ToArray(), dict, mask.MaskAlpha));
+        return _masks.Count;
+    }
+
+    /// <summary>Adds a tiling pattern repeating an SVG pattern's tile and returns its number.</summary>
+    private int AddSvgTiling(SvgPattern pattern, Matrix toPage)
+    {
+        var cell = new ByteBuffer(256);
+        var saved = SaveState();
+        // A pattern cell starts from the default graphics state and uses the shared resources.
+        (_fill, _stroke, _lineWidth, _fillAlpha, _strokeAlpha) = (CssColor.Black, CssColor.Black, 1, 255, 255);
+        WriteSvgShapes(cell, pattern.Shapes, Matrix.Identity);
+        RestoreState(saved);
+        var m = pattern.ToRoot.Then(toPage);
+        var dict = new ByteBuffer(256);
+        dict.Ascii("/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 ").Num(pattern.Width).Sp().Num(pattern.Height)
+            .Ascii("] /XStep ").Num(pattern.Width).Ascii(" /YStep ").Num(pattern.Height).Ascii(" /Matrix [");
+        WriteMatrix(dict, m).Ascii("] /Resources ").Int(_resourcesId).Ascii(" 0 R");
+        int n = _tilings.Count + 1;
+        _tilings.Add((n, cell.Span.ToArray(), System.Text.Encoding.ASCII.GetString(dict.Span)));
+        return n;
+    }
+
+    /// <summary>The resolution of SVG filter results: pixels per point (2 is 144 dpi), and the most pixels one may have.</summary>
+    private const float FilterPixelsPerPoint = 2;
+    private const long MaxFilterPixels = 4_000_000;
+
+    /// <summary>
+    /// Draws filtered SVG content: the content is rendered to pixels over the filter region, the filter runs on them,
+    /// and the result is drawn as an image with an alpha mask.
+    /// </summary>
+    private void WriteSvgFilter(ByteBuffer b, SvgShape shape, Matrix toPage)
+    {
+        var f = shape.Filter!;
+        if (!(f.W > 0 && f.H > 0)) return;
+        // Pixels per root unit, from the size of a root unit in the stream's default space.
+        float kx = MathF.Sqrt(toPage.A * toPage.A + toPage.B * toPage.B) * FilterPixelsPerPoint;
+        float ky = MathF.Sqrt(toPage.C * toPage.C + toPage.D * toPage.D) * FilterPixelsPerPoint;
+        double pw = Math.Ceiling(f.W * kx), ph = Math.Ceiling(f.H * ky);
+        if (!(pw >= 1 && ph >= 1)) return;
+        if (pw * ph > MaxFilterPixels)
+        {
+            double k = Math.Sqrt(MaxFilterPixels / (pw * ph));
+            pw = Math.Max(1, Math.Floor(pw * k));
+            ph = Math.Max(1, Math.Floor(ph * k));
+        }
+        int w = (int)pw, h = (int)ph;
+        var source = RasterizeSvg(shape.Children!, f.X, f.Y, f.W, f.H, w, h);
+        if (source == null) return;
+        var result = f.Apply(source, w, h, w / f.W, h / f.H);
+        var rgb = new byte[w * h * 3];
+        var alpha = new byte[w * h];
+        bool any = false;
+        for (int i = 0, o = 0; i < w * h; i++, o += 3)
+        {
+            float a = Math.Clamp(result[i * 4 + 3], 0, 1);
+            if (a <= 0) continue;
+            any = true;
+            alpha[i] = (byte)MathF.Round(a * 255);
+            rgb[o] = (byte)MathF.Round(Math.Clamp(result[i * 4] / a, 0, 1) * 255);
+            rgb[o + 1] = (byte)MathF.Round(Math.Clamp(result[i * 4 + 1] / a, 0, 1) * 255);
+            rgb[o + 2] = (byte)MathF.Round(Math.Clamp(result[i * 4 + 2] / a, 0, 1) * 255);
+        }
+        if (!any) return;
+        var image = new PdfImage
+        {
+            Width = w, Height = h, Data = PdfImage.Deflate(rgb),
+            SMask = new PdfImage { Width = w, Height = h, ColorSpace = "/DeviceGray", Data = PdfImage.Deflate(alpha) },
+        };
+        _rasters.Add(image);
+        SetFillAlpha(b, CssColor.Black); // an image is painted with the fill alpha
+        // The image's unit square onto the region, its first row at the top (user space has y down).
+        b.Ascii("q ").Num(f.W).Ascii(" 0 0 ").Num(-f.H).Sp().Num(f.X).Sp().Num(f.Y + f.H).Ascii(" cm /Xr").Int(_rasters.Count).Ascii(" Do Q\n");
+    }
+
+    /// <summary>
+    /// Renders SVG shapes over the root-space rectangle (x, y, w, h) into a pixels × pixels image, through a one-page
+    /// PDF of their own. Returns premultiplied sRGB floats (RGBA), or null when the shapes cannot be rendered.
+    /// </summary>
+    private float[]? RasterizeSvg(List<SvgShape> shapes, float x, float y, float w, float h, int pixelsW, int pixelsH)
+    {
+        var drawing = new SvgImage { HasViewBox = true, ViewBoxX = x, ViewBoxY = y, ViewBoxWidth = w, ViewBoxHeight = h, Align = "none" };
+        drawing.Shapes.AddRange(shapes);
+        var page = new PageSetup { Width = pixelsW, Height = pixelsH };
+        byte[] pdf;
+        try
+        {
+            var writer = new PdfDocumentWriter(page, compress: false, CompressionLevel.NoCompression) { Cancellation = Cancellation };
+            pdf = writer.Write(new List<DrawOp> { new SvgOp(0, 0, pixelsW, pixelsH, drawing) }, pixelsH,
+                new Dictionary<string, float>(), 0, null, null, null, null, null);
+        }
+        catch (PdfLimitException) { return null; }
+        var rendered = PdfRenderer.Open(pdf).RenderPage(0, new ImageOptions { Width = pixelsW, Height = pixelsH, Transparent = true }, Cancellation);
+        if (rendered.Width != pixelsW || rendered.Height != pixelsH) return null;
+        var px = rendered.Premultiplied;
+        var result = new float[px.Length * 4];
+        for (int i = 0; i < px.Length; i++)
+        {
+            uint p = px[i];
+            if (p == 0) continue;
+            result[i * 4] = (p & 255) / 255f;
+            result[i * 4 + 1] = ((p >> 8) & 255) / 255f;
+            result[i * 4 + 2] = ((p >> 16) & 255) / 255f;
+            result[i * 4 + 3] = (p >> 24) / 255f;
+        }
+        return result;
     }
 
     private static void WritePath(ByteBuffer b, SvgShape shape)
@@ -1492,12 +1667,26 @@ internal sealed class PdfDocumentWriter
             b.Ascii("/Pattern cs /P").Int(AddPattern(fg, toPage, shape.MinX, shape.MinY, shape.MaxX, shape.MaxY)).Ascii(" scn\n");
             _fill = 1; // not a colour: the next colour must be written
         }
+        else if (shape.FillPattern is { } fp)
+        {
+            int tile = AddSvgTiling(fp, toPage);
+            SetFillAlpha(b, (uint)fp.Alpha << 24);
+            b.Ascii("/Pattern cs /T").Int(tile).Ascii(" scn\n");
+            _fill = 1;
+        }
         else if (shape.Fill is { } fill) SetFill(b, fill);
         if (!shape.HasStroke) return;
         if (shape.StrokeGradient is { } sg)
         {
             SetStrokeAlpha(b, CssColor.Black);
             b.Ascii("/Pattern CS /P").Int(AddPattern(sg, toPage, shape.MinX, shape.MinY, shape.MaxX, shape.MaxY)).Ascii(" SCN ");
+            _stroke = 1;
+        }
+        else if (shape.StrokePattern is { } spat)
+        {
+            int tile = AddSvgTiling(spat, toPage);
+            SetStrokeAlpha(b, (uint)spat.Alpha << 24);
+            b.Ascii("/Pattern CS /T").Int(tile).Ascii(" SCN ");
             _stroke = 1;
         }
         else SetStroke(b, shape.Stroke!.Value);
@@ -1713,17 +1902,24 @@ internal sealed class PdfDocumentWriter
             .Ascii("] /Group << /S /Transparency /CS /DeviceGray >> /Resources << /Pattern << /M ");
         g.WritePattern(dict, toPage, minX, minY, maxX, maxY, GradientChannel.Alpha);
         dict.Ascii(" >> >>");
-        _masks.Add((content.Span.ToArray(), System.Text.Encoding.ASCII.GetString(dict.Span)));
+        _masks.Add((content.Span.ToArray(), System.Text.Encoding.ASCII.GetString(dict.Span), false));
         return _masks.Count;
     }
 
     // ------------------------------------------------------------------ text
 
-    private void CollectSvgFonts(SvgImage svg, bool[] usedFonts)
+    private void CollectSvgFonts(SvgImage svg, bool[] usedFonts) => CollectSvgFonts(svg.Shapes, usedFonts, 0);
+
+    /// <summary>The fonts of SVG text, also inside masks and pattern tiles (filtered content is drawn as an image).</summary>
+    private void CollectSvgFonts(List<SvgShape> shapes, bool[] usedFonts, int depth)
     {
-        foreach (var shape in svg.Shapes)
+        if (depth > 16) return;
+        foreach (var shape in shapes)
         {
-            if (shape.Font == null) continue;
+            if (shape.Kind == SvgShape.KindMask && shape.Children != null) CollectSvgFonts(shape.Children, usedFonts, depth + 1);
+            if (shape.FillPattern != null) CollectSvgFonts(shape.FillPattern.Shapes, usedFonts, depth + 1);
+            if (shape.StrokePattern != null) CollectSvgFonts(shape.StrokePattern.Shapes, usedFonts, depth + 1);
+            if (shape.Font == null || shape.Kind != SvgShape.KindText) continue;
             if (Leaf(shape.Font) is EmbeddedFont ef) AddGlyphs(ef, shape.Text!, 0, shape.Text!.Length);
             else usedFonts[shape.Font.Index] = true;
         }

@@ -54,6 +54,9 @@ public sealed class RenderedImage
         _compression = compression;
     }
 
+    /// <summary>The pixels, premultiplied, as 0xAABBGGRR.</summary>
+    internal uint[] Premultiplied => _premultiplied;
+
     /// <summary>Width in pixels.</summary>
     public int Width { get; }
 
