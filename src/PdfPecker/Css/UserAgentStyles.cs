@@ -57,7 +57,31 @@ nobr { white-space: nowrap; }
 img { display: inline; }
 fieldset { margin: 0 2px; padding: 0.35em 0.75em 0.625em; border: 2px groove #c0c0c0; }
 legend { padding: 0 2px; }
-input, select, button, textarea { display: none; } /* form controls are not rendered */
+/* Form controls, drawn as Chrome prints them; their values are laid out in pdf-field-value children. */
+input, select, button, textarea {
+  display: inline-block; font-family: sans-serif; font-size: 13.333px; font-weight: normal; font-style: normal;
+  color: black; line-height: normal; letter-spacing: normal; word-spacing: normal; text-transform: none;
+  text-indent: 0; text-align: left; text-shadow: none; white-space: normal;
+}
+input, select, textarea { background-color: white; border: 1px solid #767676; }
+input { padding: 2px 3px; border-radius: 2px; width: 13.275em; }
+input[type=hidden], input[type=image], input[type=file], input[type=range], input[type=color] { display: none; }
+input[type=checkbox], input[type=radio] { width: 13px; height: 13px; padding: 0; box-sizing: border-box; }
+input[type=checkbox] { margin: 3px 3px 3px 4px; border-radius: 2px; }
+input[type=radio] { margin: 3px 3px 0 5px; border-radius: 50%; }
+input[type=submit], input[type=reset], input[type=button], button {
+  width: auto; padding: 2px 7px; border: 1px solid #767676; border-radius: 3px; background-color: #efefef; text-align: center; box-sizing: border-box;
+}
+textarea { font-family: monospace; padding: 2px; width: 13.275em; height: 2.26em; border-radius: 2px; }
+select { padding: 1px 20px 1px 4px; border-radius: 2px; box-sizing: border-box; }
+input[disabled], textarea[disabled], select[disabled], button[disabled] { color: #6d6d6d; border-color: #c3c3c3; }
+pdf-field-value { display: block; white-space: pre; }
+pdf-field-value[placeholder] { color: #757575; }
+pdf-field-value[sizer] { visibility: hidden; height: 0; }
+pdf-field-value[option] { padding: 1px 2px; }
+pdf-field-value[selected] { background-color: #cecece; }
+textarea pdf-field-value { white-space: pre-wrap; overflow-wrap: break-word; }
+option, optgroup { display: none; }
 q::before { content: open-quote; }
 q::after { content: close-quote; }
 ";

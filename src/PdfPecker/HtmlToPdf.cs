@@ -75,6 +75,7 @@ public static class HtmlToPdf
         if (options.Watermark is { } wm && string.IsNullOrEmpty(wm.Text) && wm.Image == null)
             throw new ArgumentException("The watermark needs a Text or an Image.", nameof(options));
         var doc = HtmlParser.Parse(html);
+        if (MayHaveControls(html)) FormControls.Prepare(doc, options.FormFields);
         var resolver = options.ResourceResolver;
 
         // Stylesheets in document order: <style> blocks and <link rel="stylesheet">.
@@ -279,6 +280,11 @@ public static class HtmlToPdf
         }
         return null;
     }
+
+    /// <summary>Whether the source can hold form controls: most documents have none, which spares a walk of the tree.</summary>
+    private static bool MayHaveControls(string html)
+        => html.Contains("<input", StringComparison.OrdinalIgnoreCase) || html.Contains("<select", StringComparison.OrdinalIgnoreCase)
+           || html.Contains("<textarea", StringComparison.OrdinalIgnoreCase) || html.Contains("<button", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// The height a band reserves with its height attribute, in layout points. With <paramref name="truncate"/>, it is
