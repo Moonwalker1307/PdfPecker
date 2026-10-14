@@ -494,10 +494,29 @@ internal static class BoxPainter
             group.Ops.Add(new RoundRectOp(x, y, w, h, r, first) { StrokeWidth = bt, Style = sides[0].Style });
             return;
         }
-        if (sameColor && allSolid)
+        bool Doubled(int i) => sides[i].Style == BorderStyle.Double && sides[i].Width >= 2.25f;
+        bool anyDouble = false;
+        for (int i = 0; i < 4; i++) if (Shows(i) && Doubled(i)) anyDouble = true;
+        if (sameColor && allSolid && !anyDouble)
         {
             // Sides without a border have zero width, so one ring covers exactly the borders that show.
             group.Ops.Add(new RoundRectOp(x, y, w, h, r, first).WithHole(ix, iy, iw, ih, inner));
+            return;
+        }
+        // A double border is two rings, each a third of the border's width, with the middle third left open; the
+        // dividing curves follow the corners inset by a third and by two thirds of the widths.
+        float ta = bt / 3, ra = br / 3, ba = bb / 3, la = bl / 3;
+        RoundRectOp OuterThird(uint color, float[]? clip)
+            => new RoundRectOp(x, y, w, h, r, color) { Clip = clip }
+                .WithHole(x + la, y + ta, Math.Max(0, w - la - ra), Math.Max(0, h - ta - ba), r.Inset(ta, ra, ba, la));
+        RoundRectOp InnerThird(uint color, float[]? clip)
+            => new RoundRectOp(x + 2 * la, y + 2 * ta, Math.Max(0, w - 2 * la - 2 * ra), Math.Max(0, h - 2 * ta - 2 * ba),
+                    r.Inset(2 * ta, 2 * ra, 2 * ba, 2 * la) ?? default, color) { Clip = clip }
+                .WithHole(ix, iy, iw, ih, inner);
+        if (alike && anyDouble)
+        {
+            group.Ops.Add(OuterThird(first, null));
+            group.Ops.Add(InnerThird(first, null));
             return;
         }
         // Each side is the ring cut along the lines from the outer corners through the inner ones, continued inward past
@@ -526,6 +545,12 @@ internal static class BoxPainter
             {
                 // Dashes along the middle of this side's border, cut to its part of the ring.
                 group.Ops.Add(new RoundRectOp(x, y, w, h, r, sides[i].Color) { StrokeWidth = sides[i].Width, Style = sides[i].Style, Clip = polys[i] });
+                continue;
+            }
+            if (Doubled(i))
+            {
+                group.Ops.Add(OuterThird(sides[i].Color, polys[i]));
+                group.Ops.Add(InnerThird(sides[i].Color, (float[])polys[i].Clone())); // ops offset their clip in place
                 continue;
             }
             group.Ops.Add(new RoundRectOp(x, y, w, h, r, sides[i].Color) { Clip = polys[i] }.WithHole(ix, iy, iw, ih, inner));
