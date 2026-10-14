@@ -269,6 +269,24 @@ otherwise; set `Relationship` to change it. PdfPecker checks that the XML is a w
 not allowed in Factur-X) but does not validate its content or build it from invoice data: make sure the visible pages
 show the same invoice. The output passes the Mustang validator (PDF/A-3b via veraPDF, and the XML's schematron).
 
+### PDF attachments in UBL e-invoices (Peppol, OIOUBL)
+
+Peppol BIS Billing 3.0, OIOUBL, EHF, XRechnung UBL and other UBL e-invoices are XML only: the XML is the invoice, and
+the PDF travels inside it as an attachment. `UblInvoice.AttachPdf` adds one to the invoice or credit note your
+invoicing system made:
+
+```csharp
+byte[] pdf = HtmlToPdf.Convert(invoiceHtml);
+byte[] xml = UblInvoice.AttachPdf(File.ReadAllBytes("invoice.xml"), pdf, "INV-1001.pdf");
+```
+
+The PDF goes in as an `AdditionalDocumentReference` with `EmbeddedDocumentBinaryObject` (`mimeCode="application/pdf"`
+and the file name), after any attachments already there and where the UBL schema expects it. The rest of the XML,
+including its indentation, encoding and declaration, is kept as it was. The reference ID defaults to the file name; pass
+`id` and `description` to set them. For OIOUBL 2.1 (UBL 2.0) the description is written as the `DocumentType` OIOUBL
+requires, `PDF` by default. The output passes the UBL schemas, the Peppol BIS 3.0 and EN 16931 schematrons, and the
+OIOUBL 2.1 schematron. PdfPecker does not build or validate the rest of the invoice.
+
 ### Digital signatures
 
 Sign the PDF with a certificate (a `.pfx` file or one from the certificate store). Adobe Reader then shows who signed
