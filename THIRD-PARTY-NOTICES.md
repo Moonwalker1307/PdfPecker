@@ -16,8 +16,35 @@ third-party material below, each under its own license, which is reproduced in t
 - The lossy WebP decoder (`src/PdfPecker/Images/Vp8Decoder.cs`) follows libwebp's decoder closely (its work buffer
   layout, YUV to RGB conversion, chroma upsampling and loop filters), so it is covered by libwebp's license.
 
-The NuGet package's license expression is `MIT AND OFL-1.1 AND Bitstream-Vera AND APAFML AND BSD-3-Clause`, and
-this file ships in the package next to the README.
+In SPDX terms the library is `MIT AND OFL-1.1 AND Bitstream-Vera AND APAFML AND BSD-3-Clause`. nuget.org accepts
+only OSI or FSF-approved licenses in a license expression, so this file is the NuGet package's license file instead,
+and it ships in the package next to the README.
+
+## PdfPecker
+
+```
+MIT License
+
+Copyright (c) 2026 Moonwalker1307
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 ## Liberation Fonts 2.x (Sans, Serif and Mono)
 
