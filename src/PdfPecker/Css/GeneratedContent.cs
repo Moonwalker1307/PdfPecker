@@ -102,6 +102,14 @@ internal static class GeneratedContent
         }
     }
 
+    /// <summary>The text of a whole quoted CSS string, with escapes decoded.</summary>
+    internal static string? UnquoteString(string v)
+    {
+        int i = 0;
+        var sb = new StringBuilder();
+        return v.Length >= 2 && v[0] is '"' or '\'' && ReadString(v, ref i, sb) && i == v.Length ? sb.ToString() : null;
+    }
+
     /// <summary>Reads a quoted string with CSS escapes (\" \\ \A \201C) at <paramref name="i"/>.</summary>
     private static bool ReadString(string v, ref int i, StringBuilder sb)
     {

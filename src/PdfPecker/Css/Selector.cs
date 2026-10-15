@@ -14,7 +14,7 @@ internal enum PseudoKind : byte
 }
 
 /// <summary>The pseudo-element a selector's subject names, if any.</summary>
-internal enum PseudoElement : byte { None, Before, After }
+internal enum PseudoElement : byte { None, Before, After, Marker }
 
 internal sealed class AttrCondition
 {
@@ -481,9 +481,9 @@ internal sealed class Selector
                 var name = ReadIdent(s, ref i).ToLowerInvariant();
                 if (doubleColon || name is "before" or "after")
                 {
-                    // ::before and ::after (also with the old single colon); other pseudo-elements drop the rule.
-                    if (nesting > 0 || name is not ("before" or "after")) return null;
-                    pseudoElement = name == "before" ? PseudoElement.Before : PseudoElement.After;
+                    // ::before, ::after (also with the old single colon) and ::marker; other pseudo-elements drop the rule.
+                    if (nesting > 0 || name is not ("before" or "after" or "marker")) return null;
+                    pseudoElement = name == "before" ? PseudoElement.Before : name == "after" ? PseudoElement.After : PseudoElement.Marker;
                     any = true;
                     break;
                 }

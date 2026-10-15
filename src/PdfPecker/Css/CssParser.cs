@@ -606,6 +606,7 @@ internal static class CssParser
                 {
                     var lower = tok.ToLowerInvariant();
                     if (lower is "inside" or "outside") Add("list-style-position", lower);
+                    else if (lower[0] is '"' or '\'') Add("list-style-type", tok);
                     else if (!lower.StartsWith("url(", StringComparison.Ordinal)) Add("list-style-type", lower);
                 }
                 return;

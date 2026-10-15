@@ -183,6 +183,7 @@ internal sealed class ComputedStyle
     public OverflowWrap OverflowWrap;
     public WordBreak WordBreak;
     public ListStyleType ListStyleType;
+    public string? ListStyleString;          // list-style-type: "string": the marker text
     public bool ListStylePositionInside;
     public TextTransform TextTransform;
     public TextDecoration TextDecoration; // propagated to descendants, approximated as inherited

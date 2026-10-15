@@ -205,6 +205,7 @@ internal sealed class StyleResolver
             Resolve(e, parent.Style);
             if (e.Style.Display == Display.None) continue; // descendants are never rendered
             if (_countersUsed) ApplyCounters(e.Style, ref scope);
+            if (e.Style.Display == Display.ListItem && HasPseudoRules) ResolveMarker(e);
             ResolveChildren(e);
         }
         if (pseudos) Generate(parent, PseudoElement.After, ref scope);
@@ -247,6 +248,19 @@ internal sealed class StyleResolver
         if (text.Length > 0) box.AppendChild(new TextNode(text));
         if (which == PseudoElement.Before) host.Children.Insert(0, box);
         else host.Children.Add(box);
+    }
+
+    /// <summary>The style and content of a list item's ::marker, when rules give it one.</summary>
+    private void ResolveMarker(Element e)
+    {
+        _count = 0;
+        if (UaIndex.Value.PseudoElements is { } ua) Collect(ua, e, TierUa, TierUaImportant, PseudoElement.Marker);
+        if (_author.PseudoElements is { } author) Collect(author, e, TierAuthor, TierAuthorImportant, PseudoElement.Marker);
+        if (_count == 0) { e.MarkerStyle = null; e.MarkerContent = null; return; }
+        if (_count > 1) Array.Sort(_keys, _decls, 0, _count);
+        var s = Compute("::marker", e.Style);
+        e.MarkerStyle = s;
+        e.MarkerContent = s.Content != null ? GeneratedContent.Evaluate(s.Content, e, this) : null;
     }
 
     // ---------------------------------------------------------------- counters
@@ -1009,6 +1023,14 @@ internal sealed class StyleResolver
                 };
                 break;
             case "list-style-type":
+                if (GeneratedContent.UnquoteString(v) is { } markerText)
+                {
+                    // A string is the marker text itself.
+                    s.ListStyleString = markerText;
+                    s.ListStyleType = ListStyleType.Disc;
+                    break;
+                }
+                s.ListStyleString = lower == "inherit" ? parent.ListStyleString : null;
                 s.ListStyleType = lower switch
                 {
                     "disc" => ListStyleType.Disc,
