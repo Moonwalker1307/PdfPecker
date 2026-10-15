@@ -273,6 +273,33 @@ and shaped too, with `direction` deciding which way a text chunk runs from its `
 the original characters in logical order. A font without OpenType Arabic
 features is shaped with the Unicode presentation forms instead.
 
+### Hyphenation
+
+`hyphens: auto` hyphenates words with the TeX hyphenation patterns (Liang's algorithm) of the text's language: the
+nearest `lang` attribute, else `PdfOptions.Language`. As in Chrome, a word is hyphenated only where it does not fit on
+its line, and a hyphen (or the `hyphenate-character`) is shown at the break. Words shorter than five letters, words with
+digits or other non-letters inside, URLs and e-mail addresses, and capitalized English words are not hyphenated, and a
+word with `&shy;` breaks only there. Patterns for English (US patterns for every `en` tag), Danish, German, Dutch and
+Norwegian (`nb`, `nn`, `no`) are built in and loaded on first use; others can be supplied as TeX pattern files, such as
+those of the [hyph-utf8](https://github.com/hyphenation/tex-hyphen) project:
+
+```csharp
+var options = new PdfOptions
+{
+    // Your own patterns for a language (they take precedence over the built-in ones).
+    Hyphenation = new Dictionary<string, HyphenationPatterns>
+    {
+        ["sv"] = new HyphenationPatterns(File.ReadAllText("hyph-sv.tex"), leftMin: 2, rightMin: 2),
+    },
+};
+byte[] pdf = HtmlToPdf.Convert("""
+    <html lang="da"><body style="hyphens: auto; text-align: justify">
+      <p>Arbejdsmarkedsbidraget betales af lønmodtageren.</p>
+      <p lang="sv">Avstavning med egna mönster.</p>
+    </body></html>
+    """, options);
+```
+
 ### Watermarks, passwords and PDF/A
 
 ```csharp
@@ -597,7 +624,7 @@ and `:where()` skip entries they do not understand), `:root`, `:link`, `:empty`,
 | Area | Properties |
 | --- | --- |
 | Box model | `display` (block, inline, inline-block, flex, inline-flex, grid, inline-grid, list-item, table parts, none), `margin`, `padding` (also the logical `margin-inline`/`-block` and `padding-inline`/`-block` properties and their `-start`/`-end` longhands), `border` (solid, dashed, dotted, double), `border-radius` (incl. elliptical `/` radii and percentages; rounds backgrounds, borders, shadows and images), `box-shadow` (outer shadows; a blur is drawn as fading bands), `overflow` (`hidden`, `clip`, `auto` and `scroll` clip to the padding box, following its rounded corners, also in table cells; `overflow-x`/`overflow-y`), `outline` and `outline-offset` (all border styles; follows rounded corners), `width`, `height`, `min-`/`max-width`, `min-height`, `box-sizing`, `aspect-ratio` (incl. `auto <ratio>`), `object-fit` and `object-position` on images |
-| Text | `color`, `font`, `font-family`, `font-size`, `font-weight`, `font-style`, `line-height`, `text-align` (incl. justify, `start` and `end`), `direction`, `unicode-bidi`, `text-decoration`, `text-transform`, `text-indent`, `letter-spacing`, `word-spacing`, `white-space`, `overflow-wrap`/`word-wrap`, `word-break` (`break-all`), `vertical-align`, `text-shadow` (several shadows; a blur is drawn as faint copies of the text), `text-overflow: ellipsis` (on a box that clips its overflow), `text-decoration-style` (`solid`, `double`, `dotted`, `dashed`, `wavy`), `text-decoration-color`, `text-decoration-thickness`, `text-underline-offset`, `text-align-last`, `tab-size`, `font-variant: small-caps` (synthesized from capitals when the font has none), `line-clamp` and `-webkit-line-clamp` (with an ellipsis), `hyphens: manual | none`. Lines break as in Chrome: at spaces, after hyphens and dashes, at `&shy;` (showing a hyphen) and `&#8203;`; a word too wide for its line overflows unless `overflow-wrap` or `word-break` allows breaking it. `line-height: normal` comes from the font's own metrics, rounded to whole pixels as Chrome does, and border widths snap to whole pixels. Text is kerned as in Chrome: from the font's GPOS or `kern` table, and for the standard fonts from the Liberation fonts browsers use in their place. Embedded fonts get their standard ligatures (GSUB `liga`/`clig`, such as fi and ffi) as in Chrome, except in letter-spaced text; `font-variant-ligatures: none` or `font-feature-settings: "liga" 0` turns them off |
+| Text | `color`, `font`, `font-family`, `font-size`, `font-weight`, `font-style`, `line-height`, `text-align` (incl. justify, `start` and `end`), `direction`, `unicode-bidi`, `text-decoration`, `text-transform`, `text-indent`, `letter-spacing`, `word-spacing`, `white-space`, `overflow-wrap`/`word-wrap`, `word-break` (`break-all`), `vertical-align`, `text-shadow` (several shadows; a blur is drawn as faint copies of the text), `text-overflow: ellipsis` (on a box that clips its overflow), `text-decoration-style` (`solid`, `double`, `dotted`, `dashed`, `wavy`), `text-decoration-color`, `text-decoration-thickness`, `text-underline-offset`, `text-align-last`, `tab-size`, `font-variant: small-caps` (synthesized from capitals when the font has none), `line-clamp` and `-webkit-line-clamp` (with an ellipsis), `hyphens: manual | none | auto` (see [Hyphenation](#hyphenation)), `hyphenate-character`. Lines break as in Chrome: at spaces, after hyphens and dashes, at `&shy;` (showing a hyphen) and `&#8203;`; a word too wide for its line overflows unless `overflow-wrap` or `word-break` allows breaking it. `line-height: normal` comes from the font's own metrics, rounded to whole pixels as Chrome does, and border widths snap to whole pixels. Text is kerned as in Chrome: from the font's GPOS or `kern` table, and for the standard fonts from the Liberation fonts browsers use in their place. Embedded fonts get their standard ligatures (GSUB `liga`/`clig`, such as fi and ffi) as in Chrome, except in letter-spaced text; `font-variant-ligatures: none` or `font-feature-settings: "liga" 0` turns them off |
 | Backgrounds | `background-color`, `background-image` and `background` with `url()` images (PNG, JPEG, GIF, WebP, and SVG files drawn as vectors), `linear-gradient()`, `radial-gradient()`, `conic-gradient()` (pie charts and colour wheels, drawn as smooth PDF shadings) and their `repeating-` forms (several layers allowed); `background-repeat` (incl. `space`, `round`), `background-position` (incl. edge offsets like `right 10px bottom 5px`), `background-size` (`cover`, `contain`, lengths), `background-origin`, `background-clip`. Repeated images are written once as PDF tiling patterns. `url()` in a linked stylesheet is relative to the stylesheet and follows the same file access rules as `<img>`. As in Chrome's print output, the background of `<html>`, or else of `<body>`, fills every page area (images and gradients too, positioned against the root box and continuing from page to page); `@page { background: <colour> }` also colours the page margins. `opacity` on SVG |
 | Flexbox | `flex-direction`, `flex-wrap`, `flex-flow`, `flex`, `flex-grow`/`-shrink`/`-basis`, `order`, `justify-content`, `align-items`, `align-self`, `align-content`, `gap`, `margin: auto` |
 | Grid | `grid-auto-flow: dense` packing, `grid-template-columns`/`-rows` (lengths, `%`, `fr`, `auto`, `min-content`, `max-content`, `minmax()`, `fit-content()`, `repeat()` incl. `auto-fill`/`auto-fit`), `grid-auto-rows`/`-columns`, `grid-auto-flow`, `grid-template-areas`, `grid-template`, named lines (`[name]`), `grid-column`/`-row` (line numbers, names and `span`), `grid-area` (incl. area names), `gap`, `justify-items`/`-self`, `align-items`/`-self`, `justify-content`, `align-content`, `place-*` |
@@ -724,7 +751,8 @@ not listed in [What is supported](#what-is-supported) should be assumed missing.
 - In Latin and other simple scripts, shaping is limited to pair kerning and standard ligatures; no contextual
   alternates or other OpenType features (`small-caps` is synthesized from scaled capitals).
 - Variable fonts use their default instance (`font-variation-settings` and `font-stretch` are ignored).
-- No automatic hyphenation (`hyphens: auto`); words break only at spaces, hyphens, `&shy;` and `&#8203;`.
+- Automatic hyphenation (`hyphens: auto`) has built-in patterns for English, Danish, German, Dutch and Norwegian only;
+  other languages need their patterns in `PdfOptions.Hyphenation`. `hyphenate-limit-chars` is not supported.
 - SVG `<text>` uses only the first value of position lists and has no `textPath`; in a text chunk with right-to-left
   text, `dx` on its `tspan`s is ignored.
 
