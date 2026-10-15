@@ -74,23 +74,30 @@ internal static class SignatureWriter
         }
         var (pageRef, pageDict, media) = pages[pageIndex];
 
-        int next = Math.Max(file.GetInt(trailer, "Size", 0), file.MaxObjectNumber + 1);
-        int widgetNum = next++, apNum = next++, sigNum = next++;
-        var widgetRef = new PdfRef(widgetNum, 0);
-
-        // AcroForm: the signature field joins the existing fields.
+        // AcroForm: the signature goes into the named empty signature field when there is one, else into a new field.
         var acroEntry = catalog["AcroForm"];
         var acro = Copy(file.Resolve(acroEntry) as PdfDict);
-        var fields = new List<PdfObject>();
         var names = new HashSet<string>(StringComparer.Ordinal);
-        if (file.GetArray(acro, "Fields") is { } existing)
-            foreach (var f in existing.Items)
-            {
-                fields.Add(f);
-                if (file.Resolve(f) is PdfDict fd && file.Resolve(fd["T"]) is PdfString t) names.Add(t.Text);
-            }
-        fields.Add(widgetRef);
-        acro.Entries["Fields"] = new PdfArray(fields);
+        var target = FindField(file, file.GetArray(acro, "Fields"), o.FieldName, names);
+        if (target != null)
+        {
+            if (FieldType(file, target.Field) != "Sig")
+                throw new PdfSignatureException($"The field \"{o.FieldName}\" is not a signature field.");
+            if (file.Resolve(target.Field["V"]) is { IsNull: false })
+                throw new PdfSignatureException($"The signature field \"{o.FieldName}\" is already signed.");
+        }
+
+        int next = Math.Max(file.GetInt(trailer, "Size", 0), file.MaxObjectNumber + 1);
+        var widgetRef = target?.WidgetRef ?? new PdfRef(next++, 0);
+        int apNum = next++, sigNum = next++;
+
+        if (target == null)
+        {
+            var fields = new List<PdfObject>();
+            if (file.GetArray(acro, "Fields") is { } existing) fields.AddRange(existing.Items);
+            fields.Add(widgetRef);
+            acro.Entries["Fields"] = new PdfArray(fields);
+        }
         acro.Entries["SigFlags"] = PdfNumber.Int(3);
         string fieldName = o.FieldName ?? "";
         if (fieldName.Length == 0)
@@ -119,41 +126,65 @@ internal static class SignatureWriter
             WriteObject(rootRef.Num, rootRef.Gen, cat);
         }
 
-        // The page's annotations.
-        var annotsEntry = pageDict["Annots"];
-        var annots = new List<PdfObject>();
-        if (file.Resolve(annotsEntry) is PdfArray oldAnnots) annots.AddRange(oldAnnots.Items);
-        annots.Add(widgetRef);
-        if (annotsEntry is PdfRef annotsRef) WriteObject(annotsRef.Num, annotsRef.Gen, new PdfArray(annots));
+        float x1 = 0, y1 = 0, w = 0, h = 0;
+        PdfDict widget;
+        if (target == null)
+        {
+            // The page's annotations.
+            var annotsEntry = pageDict["Annots"];
+            var annots = new List<PdfObject>();
+            if (file.Resolve(annotsEntry) is PdfArray oldAnnots) annots.AddRange(oldAnnots.Items);
+            annots.Add(widgetRef);
+            if (annotsEntry is PdfRef annotsRef) WriteObject(annotsRef.Num, annotsRef.Gen, new PdfArray(annots));
+            else
+            {
+                var page = Copy(pageDict);
+                page.Entries["Annots"] = new PdfArray(annots);
+                WriteObject(pageRef.Num, pageRef.Gen, page);
+            }
+
+            // Widget annotation, merged with the signature field.
+            if (ap != null)
+            {
+                w = ap.Width;
+                h = ap.Height;
+                x1 = (float)media[0] + ap.X;
+                y1 = (float)media[3] - ap.Y - h;
+            }
+            widget = new PdfDict();
+            widget.Entries["Type"] = PdfName.Get("Annot");
+            widget.Entries["Subtype"] = PdfName.Get("Widget");
+            widget.Entries["FT"] = PdfName.Get("Sig");
+            widget.Entries["T"] = Text(fieldName);
+            widget.Entries["V"] = new PdfRef(sigNum, 0);
+            widget.Entries["Rect"] = new PdfArray(new List<PdfObject> { Real(x1), Real(y1), Real(x1 + w), Real(y1 + h) });
+            widget.Entries["P"] = pageRef;
+            widget.Entries["F"] = PdfNumber.Int(132); // Print | Locked
+        }
         else
         {
-            var page = Copy(pageDict);
-            page.Entries["Annots"] = new PdfArray(annots);
-            WriteObject(pageRef.Num, pageRef.Gen, page);
+            // The existing field keeps its place on the page; the signature box fills its rectangle.
+            widget = Copy(target.Widget);
+            if (file.GetNumbers(widget, "Rect") is { Length: 4 } rect)
+            {
+                w = (float)Math.Abs(rect[2] - rect[0]);
+                h = (float)Math.Abs(rect[3] - rect[1]);
+            }
+            widget.Entries["F"] = PdfNumber.Int(file.GetInt(widget, "F", 0) | 132);
+            if (ReferenceEquals(target.Field, target.Widget)) widget.Entries["V"] = new PdfRef(sigNum, 0);
+            else
+            {
+                var field = Copy(target.Field);
+                field.Entries["V"] = new PdfRef(sigNum, 0);
+                WriteObject(target.FieldRef.Num, target.FieldRef.Gen, field);
+            }
+            // A visible field shows the signer even when no appearance was asked for.
+            if (ap == null && w > 0 && h > 0) ap = new PdfSignatureAppearance();
         }
-
-        // Widget annotation, merged with the signature field.
-        float x1 = 0, y1 = 0, w = 0, h = 0;
-        if (ap != null)
-        {
-            w = ap.Width;
-            h = ap.Height;
-            x1 = (float)media[0] + ap.X;
-            y1 = (float)media[3] - ap.Y - h;
-        }
-        var widget = new PdfDict();
-        widget.Entries["Type"] = PdfName.Get("Annot");
-        widget.Entries["Subtype"] = PdfName.Get("Widget");
-        widget.Entries["FT"] = PdfName.Get("Sig");
-        widget.Entries["T"] = Text(fieldName);
-        widget.Entries["V"] = new PdfRef(sigNum, 0);
-        widget.Entries["Rect"] = new PdfArray(new List<PdfObject> { Real(x1), Real(y1), Real(x1 + w), Real(y1 + h) });
-        widget.Entries["P"] = pageRef;
-        widget.Entries["F"] = PdfNumber.Int(132); // Print | Locked
         var apDict = new PdfDict();
         apDict.Entries["N"] = new PdfRef(apNum, 0);
         widget.Entries["AP"] = apDict;
-        WriteObject(widgetNum, 0, widget);
+        WriteObject(widgetRef.Num, widgetRef.Gen, widget);
 
         // Appearance stream: the visible box, or an empty form for an invisible signature.
         string signer = o.SignerName ?? SignerName(o.Certificate);
@@ -218,6 +249,56 @@ internal static class SignatureWriter
             buf[contentsStart + 2 + 2 * i] = (byte)hex[cms[i] & 15];
         }
         return output.Span.ToArray();
+    }
+
+    private sealed record ExistingField(PdfRef FieldRef, PdfDict Field, PdfRef WidgetRef, PdfDict Widget);
+
+    /// <summary>
+    /// The form field with the fully qualified <paramref name="name"/> ("parent.child") and its widget, or null; collects the
+    /// top-level field names into <paramref name="topNames"/> on the way.
+    /// </summary>
+    private static ExistingField? FindField(PdfFile file, PdfArray? fields, string? name, HashSet<string> topNames)
+    {
+        if (fields == null) return null;
+        ExistingField? found = null;
+        var seen = new HashSet<int>();
+        void Walk(PdfArray kids, string prefix, int depth)
+        {
+            if (depth > 32) return;
+            foreach (var k in kids.Items)
+            {
+                if (k is not PdfRef r || seen.Count >= 100_000 || !seen.Add(r.Num) || file.Resolve(r) is not PdfDict d) continue;
+                if (file.Resolve(d["T"]) is not PdfString t) continue; // a widget of its parent
+                if (depth == 0) topNames.Add(t.Text);
+                string full = prefix.Length == 0 ? t.Text : prefix + "." + t.Text;
+                if (found == null && full == name) found = WithWidget(file, r, d, full);
+                else if (file.GetArray(d, "Kids") is { } sub) Walk(sub, full, depth + 1);
+            }
+        }
+        Walk(fields, "", 0);
+        return found;
+    }
+
+    private static ExistingField WithWidget(PdfFile file, PdfRef fieldRef, PdfDict field, string name)
+    {
+        if (file.GetName(field, "Subtype") == "Widget") return new ExistingField(fieldRef, field, fieldRef, field);
+        if (file.GetArray(field, "Kids") is { } kids)
+            foreach (var k in kids.Items)
+                if (k is PdfRef kr && file.Resolve(kr) is PdfDict kd && kd["T"] == null && file.GetName(kd, "Subtype") == "Widget")
+                    return new ExistingField(fieldRef, field, kr, kd);
+        throw new PdfSignatureException($"The signature field \"{name}\" has no widget annotation to sign.");
+    }
+
+    /// <summary>A field's type, inherited from its ancestors when it has none of its own.</summary>
+    private static string? FieldType(PdfFile file, PdfDict field)
+    {
+        PdfDict? f = field;
+        for (int i = 0; f != null && i < 32; i++)
+        {
+            if (file.GetName(f, "FT") is { } ft) return ft;
+            f = file.GetDict(f, "Parent");
+        }
+        return null;
     }
 
     /// <summary>Writes the update's cross-reference section: a table, or a stream when the file uses cross-reference streams.</summary>

@@ -174,6 +174,17 @@ public sealed class PdfOptions
     /// <example><code>options.MissingFont = family => logger.LogWarning("Font {Family} is not registered", family);</code></example>
     public Action<string>? MissingFont { get; set; }
 
+    /// <summary>
+    /// Called with each character that no available font can draw, so it shows as an empty box (or, in PDF/A, as blank
+    /// space). Each character is reported once per conversion, as a string (two chars for one outside the Basic
+    /// Multilingual Plane); spaces, control characters, invisible formatting characters and characters the standard fonts
+    /// draw as a close substitute (such as ✓ as v) are not reported. It is called
+    /// before any output is written: throw from it to fail the conversion, for example in a test that guards a template's
+    /// fonts. Default: null.
+    /// </summary>
+    /// <example><code>options.MissingCharacter = ch => throw new InvalidOperationException($"No font has U+{char.ConvertToUtf32(ch, 0):X4}");</code></example>
+    public Action<string>? MissingCharacter { get; set; }
+
     /// <summary>Extra CSS applied after the document's own styles.</summary>
     public string? UserStyleSheet { get; set; }
 
