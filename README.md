@@ -225,6 +225,13 @@ options.MissingFont = family => logger.LogWarning("Font {Family} is not availabl
 options.UseSystemFonts = true;   // looks in C:\Windows\Fonts, /Library/Fonts, /usr/share/fonts, ...
 ```
 
+Likewise, a character that no font has is drawn as an empty box (blank space in PDF/A). `MissingCharacter` is called
+once for each such character before anything is written, so a test can make sure a template's fonts cover its data:
+
+```csharp
+options.MissingCharacter = ch => throw new InvalidOperationException($"No font has U+{char.ConvertToUtf32(ch, 0):X4}");
+```
+
 ### Watermarks, passwords and PDF/A
 
 ```csharp
@@ -341,7 +348,14 @@ var options = new PdfOptions
 
 // Or sign any existing PDF; earlier signatures stay valid.
 byte[] signed = PdfSigner.Sign(File.ReadAllBytes("in.pdf"), new PdfSignatureOptions(cert));
+
+// A contract template with empty signature fields: sign into one by name, at its place on the page.
+byte[] countersigned = PdfSigner.Sign(contract, new PdfSignatureOptions(cert) { FieldName = "Buyer" });
 ```
+
+When `FieldName` names an empty signature field the PDF already has (`"Parties.Buyer"` for a nested one), the signature
+goes into it and the box fills the field's rectangle; signing a field of another type or one that is already signed
+throws `PdfSignatureException`. Any other name adds a new field.
 
 Signatures are PAdES baseline (`ETSI.CAdES.detached`) by default, or classic `adbe.pkcs7.detached` with
 `Format = PdfSignatureFormat.Pkcs7Detached`; RSA and ECDSA keys with SHA-256/384/512. The signature is appended as an
@@ -415,6 +429,10 @@ PdfMerger.MergeFiles("all.pdf", new[] { "a.pdf", "b.pdf" });
 PdfMerger.Merge(new[] { invoiceStream, termsStream }, outputStream);
 await PdfMerger.MergeAsync(uploads.Select(f => f.OpenReadStream()), response.Body);
 ```
+
+Tagged inputs stay tagged: their structure trees are joined under one root, so the merged file is still accessible,
+and when every input is PDF/UA-1 the result says so too (veraPDF passes it). An input in another language than the
+first keeps its language on its own part of the tree. Untagged inputs merge as before.
 
 With streams (and `MergeFiles`), only one input is held in memory at a time and the merged document goes to the output
 as each input is done, so memory follows the largest input rather than the whole batch: merging 100 files of 32 MB in

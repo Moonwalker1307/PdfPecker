@@ -97,6 +97,11 @@ internal sealed partial class PdfDocumentWriter
     /// <summary>The document's natural language, such as "en-US", for a tagged PDF.</summary>
     public string? Language { get; init; }
 
+    /// <summary>Called once with each character no font can draw; see <see cref="PdfOptions.MissingCharacter"/>.</summary>
+    public Action<string>? MissingCharacter { get; init; }
+
+    private HashSet<int>? _missingReported;
+
     private bool EmbedStandard => EmbedStandardFonts || Conformance != PdfConformance.None || PdfUA;
 
     // Tagged PDF: the stream being written, the open marked-content sequence (a ContentSlot or Artifact) and whether
@@ -1988,6 +1993,7 @@ internal sealed partial class PdfDocumentWriter
             if (shape.Font == null || shape.Kind != SvgShape.KindText) continue;
             if (Leaf(shape.Font) is EmbeddedFont ef) AddGlyphs(ef, shape.Text!, 0, shape.Text!.Length);
             else usedFonts[shape.Font.Index] = true;
+            CheckCharacters(shape.Font, shape.Text!, 0, shape.Text!.Length);
         }
     }
 
@@ -1996,6 +2002,7 @@ internal sealed partial class PdfDocumentWriter
         if (t.Font is StandardFont sf && !EmbedStandard)
         {
             usedFonts[sf.Index] = true;
+            CheckCharacters(sf, t.Text, 0, t.Text.Length);
             return;
         }
         _runs.Clear();
@@ -2004,7 +2011,31 @@ internal sealed partial class PdfDocumentWriter
         {
             if (Leaf(run.Font) is EmbeddedFont ef) AddGlyphs(ef, t.Text, run.Start, run.Length);
             else usedFonts[((StandardFont)run.Font).Index] = true;
+            CheckCharacters(run.Font, t.Text, run.Start, run.Length);
         }
+    }
+
+    /// <summary>Reports the characters of a run that its font has no glyph for, when <see cref="MissingCharacter"/> is set.</summary>
+    private void CheckCharacters(TextFont font, string text, int start, int length)
+    {
+        if (MissingCharacter == null) return;
+        var embedded = Leaf(font) as EmbeddedFont;
+        for (int i = start, end = start + length; i < end; i++)
+        {
+            int cp = text[i];
+            if (char.IsHighSurrogate(text[i]) && i + 1 < end && char.IsLowSurrogate(text[i + 1])) cp = char.ConvertToUtf32(text[i], text[++i]);
+            if (Invisible(cp)) continue;
+            bool has = embedded != null
+                ? embedded.Program.GlyphId(cp) != 0
+                : cp == '?' || (cp < 0x10000 && WinAnsi.Encode((char)cp) != (byte)'?');
+            if (has || !(_missingReported ??= new()).Add(cp)) continue;
+            MissingCharacter(char.ConvertFromUtf32(char.IsSurrogate((char)cp) && cp < 0x10000 ? 0xFFFD : cp));
+        }
+
+        // Spaces, controls and format characters (soft hyphen, zero-width space and joiners, variation selectors) draw nothing.
+        static bool Invisible(int cp)
+            => cp <= 0x20 || (cp >= 0x7F && cp <= 0xA0) || cp == 0xAD || (cp >= 0x2000 && cp <= 0x200F) || (cp >= 0x2028 && cp <= 0x202F)
+               || (cp >= 0x205F && cp <= 0x206F) || cp == 0x3000 || cp == 0xFEFF || (cp >= 0xFE00 && cp <= 0xFE0F) || (cp >= 0xE0100 && cp <= 0xE01EF);
     }
 
     /// <summary>Shows a text op starting at (x, y), one run per concrete font.</summary>
