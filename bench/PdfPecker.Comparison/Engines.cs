@@ -23,6 +23,8 @@ static class Engines
         "wkhtmltopdf" => new WkHtmlToPdfEngine(),
         "puppeteer" => new PuppeteerEngine(await Puppeteer.LaunchAsync(new LaunchOptions { Headless = true, ExecutablePath = ChromiumPath, Args = ChromiumArgs })),
         "playwright" => await PlaywrightEngine.Create(ChromiumPath, ChromiumArgs),
+        "itext" => new ITextEngine(),
+        "syncfusion" => new SyncfusionEngine(),
         _ => throw new ArgumentException($"Unknown engine '{name}'"),
     };
 
@@ -128,6 +130,63 @@ static class Engines
         {
             await _browser.DisposeAsync();
             _playwright.Dispose();
+        }
+    }
+
+    // iText pdfHTML (AGPL or commercial): managed, its own layout engine. Building a font provider is expensive, so
+    // as iText's knowledge base suggests it is created once and reused (one per thread, as it is not thread-safe).
+    sealed class ITextEngine : IEngine
+    {
+        readonly ThreadLocal<iText.Html2pdf.Resolver.Font.DefaultFontProvider> _fonts = new(() => new());
+
+        public Task<byte[]> Convert(string htmlPath)
+        {
+            using var ms = new MemoryStream();
+            var props = new iText.Html2pdf.ConverterProperties().SetBaseUri(Path.GetDirectoryName(htmlPath) + "/")
+                .SetFontProvider(_fonts.Value);
+            iText.Html2pdf.HtmlConverter.ConvertToPdf(File.ReadAllText(htmlPath), ms, props);
+            return Task.FromResult(ms.ToArray());
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    // Syncfusion HTML to PDF (commercial; runs as a trial without a licence key): drives its bundled Chrome (Blink).
+    // Its support forum advises one converter per thread and ReuseBrowserProcess to keep a browser between
+    // conversions, so converters are pooled, one per concurrent conversion.
+    sealed class SyncfusionEngine : IEngine
+    {
+        readonly System.Collections.Concurrent.ConcurrentBag<Syncfusion.HtmlConverter.HtmlToPdfConverter> _pool = new();
+        readonly System.Collections.Concurrent.ConcurrentBag<Syncfusion.HtmlConverter.HtmlToPdfConverter> _all = new();
+
+        static Syncfusion.HtmlConverter.HtmlToPdfConverter NewConverter()
+        {
+            // AdditionalDelay defaults to 2 seconds of waiting for scripts; these documents have none, and the other
+            // Chromium engines don't wait either.
+            var settings = new Syncfusion.HtmlConverter.BlinkConverterSettings { PdfPageSize = Syncfusion.Pdf.PdfPageSize.A4, AdditionalDelay = 0 };
+            foreach (var a in ChromiumArgs) settings.CommandLineArguments.Add(a);
+            settings.CommandLineArguments.Add("--disable-setuid-sandbox");
+            return new Syncfusion.HtmlConverter.HtmlToPdfConverter { ConverterSettings = settings, ReuseBrowserProcess = true };
+        }
+
+        public Task<byte[]> Convert(string htmlPath)
+        {
+            if (!_pool.TryTake(out var converter)) { converter = NewConverter(); _all.Add(converter); }
+            try
+            {
+                var doc = converter.Convert(htmlPath);
+                using var ms = new MemoryStream();
+                doc.Save(ms);
+                doc.Close(true);
+                return Task.FromResult(ms.ToArray());
+            }
+            finally { _pool.Add(converter); }
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            foreach (var c in _all) c.Close();
+            return ValueTask.CompletedTask;
         }
     }
 }
