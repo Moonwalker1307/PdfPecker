@@ -1,0 +1,46 @@
+<!doctype html>
+<html><head><title>Paged media</title>
+<style>
+@page { size: A5; margin: 20mm 15mm;
+  @top-center { content: string(chapter); font-size: 9pt; color: #555 }
+  @bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 9pt } }
+@page cover { margin: 0; background: #1d3557;
+  @top-center { content: none } @bottom-right { content: none } }
+@page wide { size: A5 landscape;
+  @top-center { content: "Wide: " string(chapter) } }
+@page :left { @bottom-left { content: "left page"; font-size: 8pt } }
+body { font-family: sans-serif; font-size: 11pt; margin: 0 }
+.cover { page: cover; height: 100%; color: white; padding: 40mm 15mm; box-sizing: border-box }
+.cover h1 { font-size: 30pt; margin: 0 }
+h2 { string-set: chapter content(); break-before: page }
+nav ul { list-style: none; padding: 0 }
+nav a { color: inherit; text-decoration: none }
+nav a::after { content: leader(dotted) target-counter(attr(href), page) }
+nav li.solid a::after { content: leader(solid) target-counter(attr(href), page, upper-roman) }
+.table-section { page: wide }
+table { border-collapse: collapse; width: 100% }
+td, th { border: 1px solid #999; padding: 4px }
+.pie { width: 60mm; height: 60mm; border-radius: 50%; background: conic-gradient(#e63946 0 25%, #f4a261 0 60%, #2a9d8f 0) }
+</style></head>
+<body>
+<div class="cover"><h1>The Book</h1><p>Paged media test</p></div>
+<nav><h3>Contents</h3><ul>
+<li><a href="#intro">Introduction</a></li>
+<li><a href="#data">Data tables</a></li>
+<li class="solid"><a href="#charts">Charts</a></li>
+<li><a href="#end">The end of a rather long chapter title that wraps onto a second line</a></li>
+</ul></nav>
+<h2 id="intro">Introduction</h2>
+<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<p style="height:120mm">Tall paragraph to push onto the next page.</p>
+<p>Second page of the introduction.</p>
+<div class="table-section">
+<h2 id="data">Data tables</h2>
+<table><tr><th>A</th><th>B</th><th>C</th><th>D</th><th>E</th><th>F</th></tr>
+<tr><td>1</td><td>2</td><td>3</td><td>4</td><td>5</td><td>6</td></tr></table>
+</div>
+<h2 id="charts">Charts</h2>
+<div class="pie"></div>
+<h2 id="end">The end</h2>
+<p>Done.</p>
+</body></html>

@@ -325,6 +325,7 @@ internal sealed partial class LayoutEngine
     {
         var s = table.Style;
         if (table.Id != null) SetAnchor(table.Id, y);
+        if (table.LayoutKey != null) SetAnchor(table.LayoutKey, y);
         var m = GetTableModel(table);
         bool collapse = s.BorderCollapse;
         float hs = collapse ? 0 : s.BorderSpacingH, vs = collapse ? 0 : s.BorderSpacingV;

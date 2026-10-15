@@ -130,88 +130,151 @@ public static class HtmlToPdf
             embedStandard: options.EmbedStandardFonts || conformance != PdfConformance.None || pdfua,
             systemFonts: options.UseSystemFonts, report: missingFonts);
         images.Fonts = fonts;
-        var root = new ComputedStyle { Display = Display.Block, Fonts = fonts, MissingFonts = missingFonts };
-        var styles = new StyleResolver(sheet, page.ContentWidth, viewportH) { Cancellation = cancellationToken };
-        styles.ResolveTree(doc, root);
+        // Pagination results that generated content uses: the pages of target-counter() and the running strings.
+        var paged = new PagedContent();
+        float viewport = viewportH;
+        ComputedStyle root = null!;
+        StyleResolver Resolve()
+        {
+            root = new ComputedStyle { Display = Display.Block, Fonts = fonts, MissingFonts = missingFonts };
+            var r = new StyleResolver(sheet, page.ContentWidth, viewport) { Cancellation = cancellationToken, Paged = paged };
+            r.ResolveTree(doc, root);
+            return r;
+        }
+        var styles = Resolve();
 
         var header = FindBand(doc, "data-sticky-pdf-header");
         var footer = FindBand(doc, "data-sticky-pdf-footer");
         if (footer == header) footer = null;
-        if (header != null || footer != null)
+        if (header != null) header.Detached = true;
+        if (footer != null) footer.Detached = true;
+        void ReserveBands(PageSetup setup)
         {
-            if (header != null) { header.Detached = true; page.BandTop = Math.Max(DeclaredHeight(header, page, truncateBands), BandHeight(header, page, images, cancellationToken)); }
-            if (footer != null) { footer.Detached = true; page.BandBottom = Math.Max(DeclaredHeight(footer, page, truncateBands), BandHeight(footer, page, images, cancellationToken)); }
-            float limit = page.ContentHeight * 0.6f;
-            float bands = page.BandTop + page.BandBottom;
+            if (header == null && footer == null) return;
+            if (header != null) setup.BandTop = Math.Max(DeclaredHeight(header, setup, truncateBands), BandHeight(header, setup, images, cancellationToken));
+            if (footer != null) setup.BandBottom = Math.Max(DeclaredHeight(footer, setup, truncateBands), BandHeight(footer, setup, images, cancellationToken));
+            float limit = setup.ContentHeight * 0.6f;
+            float bands = setup.BandTop + setup.BandBottom;
             if (bands > limit)
             {
-                page.BandTop *= limit / bands;
-                page.BandBottom *= limit / bands;
+                setup.BandTop *= limit / bands;
+                setup.BandBottom *= limit / bands;
             }
         }
+        ReserveBands(page);
 
         // vh units refer to the space left for the flowing content.
         if (styles.UsedViewportHeight && Math.Abs(page.FlowHeight - viewportH) > 0.01f)
         {
-            root = new ComputedStyle { Display = Display.Block, Fonts = fonts, MissingFonts = missingFonts };
-            new StyleResolver(sheet, page.ContentWidth, page.FlowHeight) { Cancellation = cancellationToken }.ResolveTree(doc, root);
+            viewport = page.FlowHeight;
+            styles = Resolve();
         }
 
-        // The root element's background, or else the body's, is the canvas background: it fills every page area (as in
-        // Chrome, not the page margins), positioned against the root element's box, and that element's own box does
-        // not paint it again.
         var htmlEl = doc.FindFirst("html");
         var body = doc.FindFirst("body");
-        var canvasStyle = HasBackground(htmlEl) ? htmlEl!.Style : HasBackground(body) ? body!.Style : null;
-        if (canvasStyle != null) canvasStyle.CanvasBackground = true;
+        var headings = options.Bookmarks ? new List<OutlineHeading>() : null;
 
-        // The logical structure of a tagged PDF follows the HTML in document order, whatever the layout does.
-        var structure = options.Accessibility != PdfAccessibility.None ? StructureTree.Build(doc) : null;
-
-        var engine = new LayoutEngine(page.FlowHeight, images)
+        // Named pages (page: wide with @page wide { ... }): each run of content on one named page gets that page's setup.
+        var setups = new Dictionary<string, PageSetup>(StringComparer.Ordinal);
+        PageSetup SetupFor(string? name)
         {
-            Cancellation = cancellationToken, MaxPages = Math.Max(1, options.MaxPages), FixedAreaHeight = page.ContentHeight,
-            CanvasRoot = htmlEl, Tags = structure,
-        };
-        if (options.Bookmarks) engine.Headings = new List<OutlineHeading>();
-        float height = engine.Layout(doc, page.ContentWidth);
-
-        // Page-margin boxes of @page rules (@top-center and the like), laid out per page like the bands.
-        var marginBoxes = !options.IgnoreCssPageRules && PageMarginBoxes.AnyIn(sheet.PageRules)
-            ? new PageMarginBoxes(sheet.PageRules, () => new ComputedStyle { Display = Display.Block, Fonts = fonts, MissingFonts = missingFonts },
-                page, images, cancellationToken)
-            : null;
-        Func<int, int, List<DrawOp>>? pageBands = null;
-        if (header != null || footer != null || marginBoxes != null)
-        {
-            pageBands = (p, count) =>
+            if (name == null || options.IgnoreCssPageRules || !sheet.PageRules.Any(r => r.Name == name && r.Selector.Length == 0)) return page;
+            if (setups.TryGetValue(name, out var cached)) return cached;
+            var setup = new PageSetup
             {
-                var ops = new List<DrawOp>();
-                if (marginBoxes != null) ops.AddRange(marginBoxes.Layout(p, count));
-                if (header != null) ops.AddRange(LayoutBandForPage(header, page, images, p, count, alignBottom: false, cancellationToken));
-                if (footer != null) ops.AddRange(LayoutBandForPage(footer, page, images, p, count, alignBottom: true, cancellationToken));
-                return ops;
+                Width = options.PageSize.Width, Height = options.PageSize.Height,
+                MarginTop = options.Margins.Top, MarginRight = options.Margins.Right, MarginBottom = options.Margins.Bottom, MarginLeft = options.Margins.Left,
             };
+            ApplyPageRules(sheet.PageDeclarations, setup);
+            foreach (var rule in sheet.PageRules)
+                if (rule.Name == name && rule.Selector.Length == 0) ApplyPageRules(rule.Declarations, setup);
+            if (options.Scale != 1)
+            {
+                float s = options.Scale;
+                setup.Scale = s;
+                setup.Width /= s; setup.Height /= s;
+                setup.MarginTop /= s; setup.MarginRight /= s; setup.MarginBottom /= s; setup.MarginLeft /= s;
+            }
+            if (setup.ContentWidth < 10 || setup.ContentHeight < 10)
+                throw new ArgumentException($"The margins of @page {name} leave no room for content.", nameof(options));
+            ReserveBands(setup);
+            return setups[name] = setup;
         }
 
-        Func<int, List<DrawOp>>? pageCanvas = null;
-        if (canvasStyle != null)
+        // Layout, repeated when generated content shows page numbers (target-counter): they are known after a layout,
+        // and a layout with them can move content again, so there is at most a third.
+        ComputedStyle? canvasStyle;
+        StructureTree? structure;
+        List<PageRun> runs;
+        Dictionary<string, int>? targetPages = null;
+        for (int pass = 0; ; pass++)
         {
-            var rootStyle = htmlEl?.Style ?? canvasStyle;
-            // Chrome sizes the positioning area like the root element's border box but puts it at the page area's top
-            // left corner, whatever the root element's margins.
-            var (_, _, rw, rh) = engine.CanvasRootBox ?? (0, 0, page.ContentWidth, height);
-            // html { height: 100% } refers to the page area.
-            if (rootStyle.Height.IsPercent) rh = rootStyle.Height.Resolve(page.ContentHeight);
-            float flowH = page.FlowHeight;
-            pageCanvas = p =>
+            // The root element's background, or else the body's, is the canvas background: it fills every page area (as
+            // in Chrome, not the page margins), positioned against the root element's box, and that element's own box
+            // does not paint it again.
+            canvasStyle = HasBackground(htmlEl) ? htmlEl!.Style : HasBackground(body) ? body!.Style : null;
+            if (canvasStyle != null) canvasStyle.CanvasBackground = true;
+
+            // The logical structure of a tagged PDF follows the HTML in document order, whatever the layout does.
+            structure = options.Accessibility != PdfAccessibility.None ? StructureTree.Build(doc) : null;
+            headings?.Clear();
+            runs = styles.UsedPageNames ? SplitByPageName(doc) : new List<PageRun> { new() };
+            foreach (var run in runs)
             {
-                // y = 0 is the top of the page area; flow y = 0 of page p sits BandTop below it.
-                var group = new GroupOp();
-                BoxPainter.PaintCanvas(group, canvasStyle, rootStyle, 0, page.BandTop - p * flowH, rw, rh,
-                    0, 0, page.ContentWidth, page.ContentHeight, images, page.ContentWidth);
-                return group.Ops;
-            };
+                run.Page = SetupFor(run.Name);
+                var restore = run.Keep is { } keep ? KeepOnly(keep) : null;
+                try
+                {
+                    run.Engine = new LayoutEngine(run.Page.FlowHeight, images)
+                    {
+                        Cancellation = cancellationToken, MaxPages = Math.Max(1, options.MaxPages), FixedAreaHeight = run.Page.ContentHeight,
+                        CanvasRoot = htmlEl, Tags = structure, Headings = headings,
+                    };
+                    run.Height = run.Engine.Layout(doc, run.Page.ContentWidth);
+                }
+                finally
+                {
+                    restore?.Invoke();
+                }
+            }
+            if (!paged.UsesTargets || pass == 2) break;
+            var pages = PagesOfAnchors(runs);
+            if (targetPages != null && pages.Count == targetPages.Count && !pages.Except(targetPages).Any()) break;
+            targetPages = pages;
+            paged.PageOfId = id => pages.TryGetValue(id, out int n) ? n : null;
+            styles = Resolve();
+        }
+
+        var sections = new List<PageSection>(runs.Count);
+        foreach (var run in runs)
+        {
+            var engine = run.Engine;
+            Func<int, List<DrawOp>>? pageCanvas = null;
+            if (canvasStyle != null)
+            {
+                var rootStyle = htmlEl?.Style ?? canvasStyle;
+                var setup = run.Page;
+                // Chrome sizes the positioning area like the root element's border box but puts it at the page area's top
+                // left corner, whatever the root element's margins.
+                var (_, _, rw, rh) = engine.CanvasRootBox ?? (0, 0, setup.ContentWidth, run.Height);
+                // html { height: 100% } refers to the page area.
+                if (rootStyle.Height.IsPercent) rh = rootStyle.Height.Resolve(setup.ContentHeight);
+                float flowH = setup.FlowHeight;
+                var painted = canvasStyle;
+                pageCanvas = p =>
+                {
+                    // y = 0 is the top of the page area; flow y = 0 of page p sits BandTop below it.
+                    var group = new GroupOp();
+                    BoxPainter.PaintCanvas(group, painted, rootStyle, 0, setup.BandTop - p * flowH, rw, rh,
+                        0, 0, setup.ContentWidth, setup.ContentHeight, images, setup.ContentWidth);
+                    return group.Ops;
+                };
+            }
+            sections.Add(new PageSection
+            {
+                Page = run.Page, Ops = engine.Ops, ContentHeight = run.Height, Anchors = engine.Anchors,
+                FixedOps = engine.FixedOps.Count > 0 ? engine.FixedOps : null, Canvas = pageCanvas,
+            });
         }
 
         string? title = options.Title;
@@ -264,11 +327,155 @@ public static class HtmlToPdf
                 Custom = DocumentProperties.Validate(options.CustomProperties),
             },
         };
-        var pdf = writer.Write(engine.Ops, height, engine.Anchors, page.Background, title, options.Author, options.Subject,
-            options.FooterText, options.HeaderText, pageBands, engine.Headings, engine.FixedOps.Count > 0 ? engine.FixedOps : null, pageCanvas);
+        // Page-margin boxes of @page rules (@top-center and the like), laid out per page like the bands.
+        var marginBoxes = !options.IgnoreCssPageRules && PageMarginBoxes.AnyIn(sheet.PageRules)
+            ? new PageMarginBoxes(sheet.PageRules, () => new ComputedStyle { Display = Display.Block, Fonts = fonts, MissingFonts = missingFonts },
+                page, images, cancellationToken, paged)
+            : null;
+        Func<int, int, List<DrawOp>>? pageBands = null;
+        if (header != null || footer != null || marginBoxes != null)
+        {
+            var strings = styles.Strings;
+            pageBands = (p, count) =>
+            {
+                var run = runs[writer.SectionOfPage(p).Section];
+                var ops = new List<DrawOp>();
+                if (marginBoxes != null)
+                {
+                    // Running strings (string-set) for string(), from the pages their elements landed on.
+                    if (paged.Running == null && strings.Count > 0)
+                    {
+                        var assignments = new List<(string, int, float, string)>(strings.Count);
+                        foreach (var a in strings)
+                            for (int s = 0; s < runs.Count; s++)
+                                if (runs[s].Engine.Anchors.TryGetValue(a.Key, out float y))
+                                {
+                                    var (page, top) = writer.PageAt(s, y);
+                                    assignments.Add((a.Name, page, top, a.Value));
+                                    break;
+                                }
+                        paged.Running = new RunningStrings(assignments);
+                    }
+                    ops.AddRange(marginBoxes.Layout(p, count, run.Page, run.Name));
+                }
+                if (header != null) ops.AddRange(LayoutBandForPage(header, run.Page, images, p, count, alignBottom: false, cancellationToken));
+                if (footer != null) ops.AddRange(LayoutBandForPage(footer, run.Page, images, p, count, alignBottom: true, cancellationToken));
+                return ops;
+            };
+        }
+        var pdf = writer.Write(sections, page.Background, title, options.Author, options.Subject,
+            options.FooterText, options.HeaderText, pageBands, headings);
         if (options.Signature != null)
             pdf = PdfSigner.Sign(pdf, options.Signature, options.Security?.OwnerPassword ?? options.Security?.UserPassword);
         return pdf;
+    }
+
+    /// <summary>A run of content laid out on one page setup: a named page's, or the document's.</summary>
+    private sealed class PageRun
+    {
+        public string? Name;
+        /// <summary>The run's top-level nodes and the elements that contain them; null for the whole document.</summary>
+        public (HashSet<Node> Units, HashSet<Element> Ancestors)? Keep;
+        public PageSetup Page = null!;
+        public LayoutEngine Engine = null!;
+        public float Height;
+    }
+
+    /// <summary>
+    /// Splits the document where the page name (the page property) of its block-level boxes changes, as CSS Paged
+    /// Media puts boxes with another page name on a new page. Content without a page of its own (whitespace, boxes
+    /// out of the flow) stays with the run it is in.
+    /// </summary>
+    private static List<PageRun> SplitByPageName(Element doc)
+    {
+        var runs = new List<PageRun>();
+        var units = new List<List<Node>>();
+        var pending = new List<Node>();
+        void Add(Node n, string? name, bool any)
+        {
+            if (any && runs.Count == 0) { pending.Add(n); return; }
+            if (!any && (runs.Count == 0 || runs[^1].Name != name))
+            {
+                runs.Add(new PageRun { Name = name });
+                units.Add(new List<Node>(pending));
+                pending.Clear();
+            }
+            units[^1].Add(n);
+        }
+        void Walk(Element e)
+        {
+            foreach (var c in e.Children)
+            {
+                if (c is Element ce && InFlowBlock(ce))
+                {
+                    if (IsBlockContainer(ce.Style) && !Uniform(ce, ce.Style.PageName)) Walk(ce);
+                    else Add(ce, ce.Style.PageName, false);
+                }
+                else Add(c, e.Style?.PageName, HasNoPage(c));
+            }
+        }
+        Walk(doc);
+        if (runs.Count <= 1) return new List<PageRun> { new() { Name = runs.Count == 1 ? runs[0].Name : null } };
+        for (int i = 0; i < runs.Count; i++)
+        {
+            var ancestors = new HashSet<Element>();
+            foreach (var n in units[i])
+                for (var a = n.Parent; a != null && ancestors.Add(a); a = a.Parent) { }
+            runs[i].Keep = (new HashSet<Node>(units[i]), ancestors);
+        }
+        return runs;
+
+        static bool InFlowBlock(Element e) => e.Style is { } s && s.Display != Display.None && !e.Detached && s.IsBlockLevel
+                                              && s.Position is not (Position.Absolute or Position.Fixed);
+        static bool IsBlockContainer(ComputedStyle s) => s.Display is Display.Block or Display.ListItem;
+        static bool Uniform(Element e, string? name)
+        {
+            foreach (var c in e.Children)
+                if (c is Element ce && InFlowBlock(ce) && (ce.Style.PageName != name || IsBlockContainer(ce.Style) && !Uniform(ce, name))) return false;
+            return true;
+        }
+        // Whitespace, hidden elements and boxes out of the flow go with whatever page they fall on.
+        static bool HasNoPage(Node n) => n is TextNode t
+            ? string.IsNullOrWhiteSpace(t.Text)
+            : n is not Element { Detached: false, Style: { Display: not Display.None, Position: not (Position.Absolute or Position.Fixed) } };
+    }
+
+    /// <summary>Takes the nodes of other runs out of the tree; the returned action puts them back.</summary>
+    private static Action KeepOnly((HashSet<Node> Units, HashSet<Element> Ancestors) keep)
+    {
+        var removed = new List<(Element Parent, Node[] Children)>();
+        void Filter(Element e)
+        {
+            removed.Add((e, e.Children.ToArray()));
+            e.Children.RemoveAll(c => !keep.Units.Contains(c) && !(c is Element ce && keep.Ancestors.Contains(ce)));
+            foreach (var c in e.Children)
+                if (c is Element ce && keep.Ancestors.Contains(ce)) Filter(ce);
+        }
+        foreach (var a in keep.Ancestors)
+            if (a.Parent == null) Filter(a);
+        return () =>
+        {
+            foreach (var (parent, children) in removed)
+            {
+                parent.Children.Clear();
+                parent.Children.AddRange(children);
+            }
+        };
+    }
+
+    /// <summary>The page number (1-based) of each id's element in the laid-out runs, for target-counter().</summary>
+    private static Dictionary<string, int> PagesOfAnchors(List<PageRun> runs)
+    {
+        var pages = new Dictionary<string, int>(StringComparer.Ordinal);
+        int first = 0;
+        foreach (var run in runs)
+        {
+            float h = run.Page.FlowHeight;
+            foreach (var (key, y) in run.Engine.Anchors)
+                if (key.Length > 0 && key[0] != '\u0001') pages.TryAdd(key, first + Math.Max(0, (int)Math.Floor((y + 0.01) / h)) + 1);
+            first += PageSection.PagesFor(run.Height, h);
+        }
+        return pages;
     }
 
     private static Func<string, byte[]?> FetchFont(ImageLoader images) => url =>

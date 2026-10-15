@@ -84,7 +84,7 @@ internal sealed partial class LayoutEngine
         return it;
     }
 
-    private enum ItemKind : byte { Text, Space, Break, Image, Box, Spacer, Anchor, Float, Absolute }
+    private enum ItemKind : byte { Text, Space, Break, Image, Box, Spacer, Anchor, Float, Absolute, Leader }
 
     private enum BreakAfter : byte { None, Break, SoftHyphen }
 
@@ -215,7 +215,8 @@ internal sealed partial class LayoutEngine
         if (node is TextNode t)
         {
             if (Tags != null) _textTag = Tags.Of(t);
-            AddText(st, t.Text, t.Parent!.Style, href, deco);
+            if (t.Parent!.Generated && t.Text.IndexOf(GeneratedContent.LeaderStart) >= 0) AddWithLeaders(st, t.Text, t.Parent.Style, href, deco);
+            else AddText(st, t.Text, t.Parent!.Style, href, deco);
             _textTag = null;
             return;
         }
@@ -242,6 +243,7 @@ internal sealed partial class LayoutEngine
 
         if (e.Id != null) { var it_ = Rent(ItemKind.Anchor, s); it_.AnchorId = e.Id; st.Items.Add(it_); }
         if (e.Name == "a" && e.GetAttribute("name") is { } aname) { var it_ = Rent(ItemKind.Anchor, s); it_.AnchorId = aname; st.Items.Add(it_); }
+        if (e.LayoutKey != null) { var it_ = Rent(ItemKind.Anchor, s); it_.AnchorId = e.LayoutKey; st.Items.Add(it_); }
 
         if ((s.Layered || (s.BorderRadii != null || s.ObjectFit != ObjectFit.Fill || s.OutlineStyle != BorderStyle.None) && e.Name == "img") && e.Name is "img" or "svg")
         {
@@ -335,6 +337,31 @@ internal sealed partial class LayoutEngine
     }
 
     private static readonly string TabSpaces = new(' ', 64);
+
+    /// <summary>Generated text with leaders (leader() in content): the text around them, and a leader item for each.</summary>
+    private void AddWithLeaders(CollectState st, string text, ComputedStyle style, string? href, ComputedStyle? deco)
+    {
+        int i = 0;
+        while (i < text.Length)
+        {
+            int start = text.IndexOf(GeneratedContent.LeaderStart, i);
+            int end = start < 0 ? -1 : text.IndexOf(GeneratedContent.LeaderEnd, start + 1);
+            if (start < 0 || end < 0)
+            {
+                AddText(st, text.Substring(i), style, href, deco);
+                return;
+            }
+            if (start > i) AddText(st, text.Substring(i, start - i), style, href, deco);
+            var leader = Rent(ItemKind.Leader, style);
+            leader.Source = text.Substring(start + 1, end - start - 1);
+            leader.Length = leader.Source.Length;
+            leader.Href = href;
+            leader.Deco = deco;
+            st.Items.Add(leader);
+            st.LastWasSpace = false;
+            i = end + 1;
+        }
+    }
 
     private void AddText(CollectState st, string text, ComputedStyle style, string? href, ComputedStyle? deco)
     {
@@ -888,10 +915,15 @@ internal sealed partial class LayoutEngine
             float lineKern = KernBetweenItems(items, _kern);
             float free = lineW - lineIndent - line.Width - lineKern;
             float lx = x + lineLeft + lineIndent;
-            float extra = 0;
+            float extra = 0, leaderW = 0;
+            int leaders = 0;
+            foreach (var it in items)
+                if (it.Kind == ItemKind.Leader) leaders++;
             // text-align-last aligns the last line and lines before a forced break; a justified block's last line
             // otherwise starts at the left.
             var align = line.Forced && block.TextAlignLast is { } lastAlign ? lastAlign : block.TextAlign;
+            // Leaders take the line's free space, so the text after them ends at the line's end.
+            if (leaders > 0) { leaderW = Math.Max(0, free) / leaders; align = TextAlign.Left; }
             switch (align)
             {
                 case TextAlign.Right: if (free > 0) lx += free; break;
@@ -921,7 +953,7 @@ internal sealed partial class LayoutEngine
             for (int k = 0; k < items.Count; k++)
             {
                 xs[k] = cx;
-                cx += items[k].Width + _kern[k] + (items[k].Kind == ItemKind.Space ? extra : 0);
+                cx += items[k].Width + _kern[k] + items[k].Kind switch { ItemKind.Space => extra, ItemKind.Leader => leaderW, _ => 0 };
             }
             xs[items.Count] = cx;
 
@@ -984,6 +1016,9 @@ internal sealed partial class LayoutEngine
                     case ItemKind.Anchor:
                         SetAnchor(it.AnchorId!, y);
                         break;
+                    case ItemKind.Leader:
+                        if (it.Style.Visible) DrawLeader(it, x, xs[i] + it.RelX, xs[i + 1] + it.RelX, baseline + BaselineShift(it.Style) + it.RelY, y);
+                        break;
                 }
                 i++;
             }
@@ -993,6 +1028,27 @@ internal sealed partial class LayoutEngine
             y += lineH;
         }
         return y;
+    }
+
+    /// <summary>
+    /// Draws a leader's pattern between <paramref name="from"/> and <paramref name="to"/>, the copies aligned to a grid
+    /// from the block's left edge so that the leaders of a table of contents line up, with room left at both ends.
+    /// </summary>
+    private void DrawLeader(Item it, float blockLeft, float from, float to, float baseline, float lineTop)
+    {
+        var style = it.Style;
+        var pattern = it.Source;
+        float pw = style.Font.Measure(pattern, style.FontSize) + style.LetterSpacing * pattern.Length;
+        if (!(pw > 0.01f)) return;
+        // A visible gap between the text and the pattern on both sides, unless the pattern is blank.
+        float gap = string.IsNullOrWhiteSpace(pattern) ? 0 : style.FontSize * 0.25f;
+        float start = blockLeft + MathF.Ceiling((from + gap - blockLeft) / pw - 0.001f) * pw;
+        int count = (int)Math.Floor((to - gap - start) / pw + 0.001f);
+        if (count <= 0) return;
+        var text = new System.Text.StringBuilder(pattern.Length * count);
+        for (int k = 0; k < count; k++) text.Append(pattern);
+        _ops.Add(new TextOp(start, baseline, lineTop, style.Font, style.FontSize, CssColor.Fade(style.Color, style.InlineFade), text.ToString(),
+            style.WordSpacing, style.LetterSpacing) { Tag = it.Tag });
     }
 
     /// <summary>

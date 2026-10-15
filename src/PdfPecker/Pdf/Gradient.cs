@@ -9,14 +9,26 @@ internal enum GradientSpread : byte { Pad, Reflect, Repeat }
 internal enum GradientChannel : byte { Flattened, Straight, Alpha }
 
 /// <summary>
-/// A resolved linear or radial gradient, written as a PDF shading pattern. Geometry is in gradient space;
+/// A resolved linear, radial or conic gradient, written as a PDF shading pattern. Geometry is in gradient space;
 /// <see cref="Transform"/> maps it into the space of the shape it paints.
 /// </summary>
 internal sealed class Gradient
 {
     public bool Radial;
     // Linear: from (X0, Y0) to (X1, Y1). Radial: from the focal circle (X0, Y0, R0) to the end circle (X1, Y1, R1).
+    // Conic: centred on (X0, Y0).
     public float X0, Y0, R0, X1, Y1, R1;
+    /// <summary>
+    /// A conic gradient: the colour depends on the angle around (X0, Y0), clockwise from <see cref="From"/> degrees
+    /// (0 is up). PDF has no such shading, so it is written as a function shading whose PostScript calculator function
+    /// computes the angle, as Chrome does; the function is a stream object numbered <see cref="FunctionId"/> (and
+    /// <see cref="AlphaFunctionId"/> for the alphas of translucent stops).
+    /// </summary>
+    public bool Conic;
+    public float From;
+    // Repeating conic gradients: the stops cover [RepeatStart, RepeatStart + RepeatPeriod] of the turn, repeated.
+    public float RepeatStart, RepeatPeriod;
+    public int FunctionId, AlphaFunctionId;
     public float[] Offsets = Array.Empty<float>(); // ascending, in [0, 1]
     public uint[] Colors = Array.Empty<uint>();    // opaque 0xFFRRGGBB
     // Translucent stops, kept apart for painting with a soft mask: the stop colours unblended, and their alphas.
@@ -112,6 +124,14 @@ internal sealed class Gradient
             _ => Colors,
         };
         bool gray = channel == GradientChannel.Alpha && Alphas != null;
+        if (Conic)
+        {
+            // A function shading over the painted bounds, a little padded; the function does the rest.
+            b.Ascii(gray ? "<< /ShadingType 1 /ColorSpace /DeviceGray /Domain [" : "<< /ShadingType 1 /ColorSpace /DeviceRGB /Domain [")
+                .Num(minX - 1).Sp().Num(maxX + 1).Sp().Num(minY - 1).Sp().Num(maxY + 1).Ascii("] /Function ")
+                .Int(gray ? AlphaFunctionId : FunctionId).Ascii(" 0 R >>");
+            return;
+        }
         b.Ascii("<< /ShadingType ").Int(Radial ? 3 : 2).Ascii(gray ? " /ColorSpace /DeviceGray /Coords [" : " /ColorSpace /DeviceRGB /Coords [");
 
         // Tiling range: gradient parameter values t covered by the shape (repeat and reflect only).
@@ -184,6 +204,71 @@ internal sealed class Gradient
         b.Ascii("] /C1 [");
         if (gray) b.Num(c1 / 255f); else Rgb(b, c1);
         b.Ascii("] /N 1 >>");
+    }
+
+    /// <summary>The dictionary entries of a conic gradient's function stream.</summary>
+    public static string ConicFunctionDict(bool gray)
+        => "/FunctionType 4 /Domain [-100000 100000 -100000 100000] /Range [" + (gray ? "0 1" : "0 1 0 1 0 1") + "]";
+
+    /// <summary>
+    /// The PostScript calculator program of a conic gradient: (x, y) in gradient space, y down, to a colour (or, for
+    /// <paramref name="gray"/>, the alpha).
+    /// </summary>
+    public byte[] ConicFunction(bool gray)
+    {
+        // Translucent stops are painted unblended through a soft mask holding the alphas (the gray function).
+        var colors = gray ? Alphas! : StraightColors ?? Colors;
+        var b = new Pdf.ByteBuffer(256);
+        // Stack: x y. The angle of (x - cx, y - cy) clockwise from up is atan(x - cx, cy - y) in degrees; the centre
+        // itself (atan of 0, 0 is an error) takes angle 0.
+        b.Ascii("{ ").Num(Y0).Ascii(" exch sub exch ").Num(X0).Ascii(" sub exch 2 copy abs exch abs add 0.0001 lt { pop pop 0 } { atan } ifelse ")
+            .Num(From).Ascii(" sub dup 0 lt { 360 add } if 360 div ");
+        if (RepeatPeriod > 0) b.Num6(RepeatStart).Ascii(" sub ").Num6(RepeatPeriod).Ascii(" div dup floor sub ");
+
+        // Segments between consecutive stops, as for the other gradients; t is on the stack.
+        var segs = new List<(float From, float To, uint C0, uint C1)>(Offsets.Length + 1);
+        if (Offsets[0] > 0) segs.Add((0, Offsets[0], colors[0], colors[0]));
+        for (int i = 0; i + 1 < Offsets.Length; i++)
+            if (Offsets[i + 1] > Offsets[i]) segs.Add((Offsets[i], Offsets[i + 1], colors[i], colors[i + 1]));
+        if (Offsets[^1] < 1) segs.Add((Offsets[^1], 1, colors[^1], colors[^1]));
+        if (segs.Count == 0) segs.Add((0, 1, colors[^1], colors[^1]));
+        for (int i = 0; i < segs.Count; i++)
+        {
+            var (from, to, c0, c1) = segs[i];
+            bool last = i == segs.Count - 1;
+            if (!last) b.Ascii("dup ").Num6(to).Ascii(" le { ");
+            if (c0 == c1)
+            {
+                b.Ascii("pop ");
+                Channels(b, c0, gray);
+            }
+            else
+            {
+                // s = (t - from) / (to - from), then each channel c0 + s * (c1 - c0).
+                b.Num6(from).Ascii(" sub ").Num6(1 / (to - from)).Ascii(" mul ");
+                if (gray) b.Num6((c1 - (float)c0) / 255f).Ascii(" mul ").Num6(c0 / 255f).Ascii(" add ");
+                else
+                {
+                    for (int shift = 16; shift >= 0; shift -= 8)
+                    {
+                        float v0 = (c0 >> shift & 0xFF) / 255f, v1 = (c1 >> shift & 0xFF) / 255f;
+                        if (shift > 0) b.Ascii("dup ");
+                        b.Num6(v1 - v0).Ascii(" mul ").Num6(v0).Ascii(" add ");
+                        if (shift > 0) b.Ascii("exch ");
+                    }
+                }
+            }
+            if (!last) b.Ascii("} { ");
+        }
+        for (int i = 0; i < segs.Count - 1; i++) b.Ascii("} ifelse ");
+        b.Ascii("}");
+        return b.Span.ToArray();
+    }
+
+    private static void Channels(Pdf.ByteBuffer b, uint c, bool gray)
+    {
+        if (gray) b.Num6(c / 255f).Sp();
+        else b.Num6((c >> 16 & 0xFF) / 255f).Sp().Num6((c >> 8 & 0xFF) / 255f).Sp().Num6((c & 0xFF) / 255f).Sp();
     }
 
     private static void Rgb(Pdf.ByteBuffer b, uint c)
