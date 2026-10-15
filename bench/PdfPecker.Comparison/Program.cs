@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 
-// Compares PdfPecker with other free .NET HTML-to-PDF converters on the same documents and machine.
+// Compares PdfPecker with other .NET HTML-to-PDF converters on the same documents and machine.
 // Usage: dotnet run -c Release                      run every engine, each in a fresh process, and print a Markdown table
 //        dotnet run -c Release -- <engine>          run one engine in this process and print its result as JSON
 // Chromium-based engines use CHROMIUM_PATH (default /opt/pw-browsers/chromium); wkhtmltopdf must be on PATH.
@@ -15,7 +15,7 @@ if (args.Length > 0 && args[0] != "all")
     return;
 }
 
-var engines = new[] { "pdfpecker", "htmlrenderer", "wkhtmltopdf", "puppeteer", "playwright" };
+var engines = new[] { "pdfpecker", "htmlrenderer", "itext", "wkhtmltopdf", "puppeteer", "playwright", "syncfusion" };
 var results = new List<Result>();
 foreach (var engine in engines)
 {
