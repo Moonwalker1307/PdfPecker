@@ -65,6 +65,10 @@ public static class HtmlToPdf
             else if (conformance != PdfConformance.PdfA3b)
                 throw new ArgumentException("An e-invoice needs PDF/A-3: set PdfOptions.Conformance to PdfA3b or leave it at None.", nameof(options));
         }
+        var attachments = EmbeddedFiles.Prepare(options.Attachments, options.EInvoice);
+        if (conformance == PdfConformance.PdfA2b && attachments.Count > 0)
+            throw new ArgumentException("PDF/A-2b allows attaching only PDF/A files, which PdfPecker does not check: "
+                + "set PdfOptions.Conformance to PdfA3b, which allows any attachment, or to None for a plain PDF.", nameof(options));
         if (conformance != PdfConformance.None && options.Security != null)
             throw new ArgumentException(options.EInvoice != null
                 ? "An e-invoice is a PDF/A file, which does not allow encryption: remove PdfOptions.Security."
@@ -310,6 +314,7 @@ public static class HtmlToPdf
             Security = options.Security,
             Conformance = conformance,
             EInvoice = options.EInvoice,
+            Attachments = attachments,
             WatermarkFont = watermarkFont,
             MarginFont = marginFont,
             EmbedStandardFonts = options.EmbedStandardFonts,

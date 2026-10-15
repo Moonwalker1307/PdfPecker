@@ -282,6 +282,16 @@ public sealed class PdfOptions
     public PdfEInvoice? EInvoice { get; set; }
 
     /// <summary>
+    /// Files to attach to the PDF (embedded files), shown in the viewer's attachments panel. File names must be unique.
+    /// Attachments do not change <see cref="Conformance"/>: they work in a plain PDF, with <see cref="Security"/> (they
+    /// are encrypted too) and with PDF/A-3b, where they become associated files with their
+    /// <see cref="PdfAttachment.Relationship"/>. PDF/A-2b allows only PDF/A attachments, so attachments with
+    /// <see cref="PdfConformance.PdfA2b"/> throw <see cref="ArgumentException"/>. Default: empty.
+    /// </summary>
+    /// <example><code>options.Attachments.Add(new PdfAttachment("data.csv", csvBytes) { Relationship = PdfAttachmentRelationship.Data });</code></example>
+    public IList<PdfAttachment> Attachments { get; set; } = new List<PdfAttachment>();
+
+    /// <summary>
     /// Embed the bundled Liberation fonts (metric-compatible with Helvetica, Times and Courier) instead of referring to
     /// the non-embedded standard PDF fonts. Text then looks the same in every viewer and can use any character those
     /// fonts cover, at the cost of a larger file. Default: false. Always on for PDF/A, which requires embedded fonts.
