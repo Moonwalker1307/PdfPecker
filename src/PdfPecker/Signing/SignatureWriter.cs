@@ -302,7 +302,7 @@ internal static class SignatureWriter
     }
 
     /// <summary>Writes the update's cross-reference section: a table, or a stream when the file uses cross-reference streams.</summary>
-    private static void WriteXref(PdfFile file, ByteBuffer output, SortedDictionary<int, (long Offset, int Gen)> offsets, PdfRef rootRef, int next)
+    internal static void WriteXref(PdfFile file, ByteBuffer output, SortedDictionary<int, (long Offset, int Gen)> offsets, PdfRef rootRef, int next)
     {
         var trailer = file.Trailer;
         long prev = file.LastXrefOffset;
@@ -415,7 +415,7 @@ internal static class SignatureWriter
     private static byte[] Latin(string s) => System.Text.Encoding.Latin1.GetBytes(s);
 
     /// <summary>A PDF text string: ASCII when possible, otherwise UTF-16BE with a byte order mark.</summary>
-    private static PdfString Text(string s)
+    internal static PdfString Text(string s)
     {
         if (s.All(ch => ch >= 32 && ch < 127)) return new PdfString(Latin(s));
         var bytes = new byte[2 + 2 * s.Length];

@@ -49,7 +49,8 @@ public sealed class PdfMergeOptions
 /// </summary>
 /// <remarks>
 /// The result is a new, unencrypted PDF. Digital signatures are not carried over (merging changes the document, which
-/// would break them anyway), nor are PDF/A conformance, attachments, page labels or the logical structure (tags). A form
+/// would break them anyway), nor are PDF/A conformance, page labels or the logical structure (tags). Attachments
+/// (embedded files) are kept, an attachment named like one in an earlier input becoming "name (2).ext". A form
 /// field named like one in an earlier input is renamed "name_2", "name_3", ..., so each copy keeps its value. Streams
 /// that are identical in several inputs (a logo, an embedded font) are written once. Inputs are treated as untrusted:
 /// damaged files are repaired where possible, and decoding work is limited per input. The byte[] overloads hold every
