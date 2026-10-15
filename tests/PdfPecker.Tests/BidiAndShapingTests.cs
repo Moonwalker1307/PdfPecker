@@ -140,4 +140,49 @@ public class BidiAndShapingTests
             "<ul><li>عربي</li></ul><div style=\"display:flex\"><span>ا</span><span>ب</span></div></div>");
         AssertStructurallyValid(pdf);
     }
+
+    private static float EllipsisX(byte[] pdf)
+    {
+        var m = Regex.Match(AllContent(pdf), "1 0 0 1 (-?[\\d.]+) -?[\\d.]+ Tm \\(\u0085\\) Tj");
+        Assert.True(m.Success, "no ellipsis drawn");
+        return float.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
+    }
+
+    [Theory]
+    [InlineData("white-space:nowrap;overflow:hidden;text-overflow:ellipsis")]
+    [InlineData("overflow:hidden;line-clamp:1")]
+    public void The_ellipsis_of_right_to_left_text_is_on_the_left(string style)
+    {
+        string Html(string dir) => "<!doctype html><style>@page{margin:0} body{margin:0} " + FontFaces + "</style>" +
+            $"<div dir=\"{dir}\" style=\"width:200px;font:20px He,Helvetica;{style}\">זהו משפט ארוך בעברית שלא נכנס לתיבה הקטנה</div>";
+        // The box is 150pt wide: right to left the text is cut at its left end, left to right at its right end.
+        Assert.True(EllipsisX(ConvertUncompressed(Html("rtl"))) < 2);
+        Assert.True(EllipsisX(ConvertUncompressed(Html("ltr"))) > 130);
+    }
+
+    [Fact]
+    public void Svg_text_with_arabic_is_shaped_and_right_aligned_at_its_start()
+    {
+        var pdf = ConvertUncompressed("<!doctype html><style>" + FontFaces + "</style>" +
+            "<svg width=\"300\" height=\"60\"><text x=\"290\" y=\"40\" direction=\"rtl\" font-family=\"Ar\" font-size=\"20\">بِسْمِ</text></svg>");
+        string content = AllContent(pdf);
+        // Drawn with the registered font, its harakat raised and lowered with text rise (Ts).
+        Assert.Contains("/E1 ", content);
+        Assert.Contains(" Ts ", content);
+        Assert.Matches(new Regex(@"<[0-9A-F]{4}> <0628>"), Latin1(pdf));
+    }
+
+    [Fact]
+    public void Spaces_are_drawn_with_the_font_that_measured_them()
+    {
+        // Latin words in an Arabic font fall back to Helvetica, but the spaces between them are the Arabic font's, as
+        // in browsers, and as the layout measured them.
+        var arabic = new EmbeddedFont(Assert.Single(FontProgram.Load(Arabic)), false, false);
+        var helvetica = StandardFont.Get(FontFamily.Helvetica, false, false);
+        var chain = new FontChain(arabic, _ => helvetica);
+        var runs = new List<FontRun>();
+        chain.Split("Widget Pro", runs);
+        Assert.Equal(new[] { (0, 6), (6, 1), (7, 3) }, runs.Select(r => (r.Start, r.Length)));
+        Assert.Same(arabic, runs[1].Font);
+    }
 }

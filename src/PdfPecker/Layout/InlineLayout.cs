@@ -945,16 +945,16 @@ internal sealed partial class LayoutEngine
 
             if (block.TextOverflowEllipsis && block.ClipsX && !_measuring && line.Width + lineKern > lineW - lineIndent + Eps)
             {
-                Ellipsize(line, block, lineW - lineIndent);
+                Ellipsize(line, block, lineW - lineIndent, visual: true, rtl);
                 spaces = 0;
                 foreach (var it in items)
                     if (it.Kind == ItemKind.Space) spaces++;
                 if (_kern.Length < items.Count) _kern = new float[items.Count * 2];
                 lineKern = KernBetweenItems(items, _kern);
                 free = lineW - lineIndent - line.Width - lineKern;
-                lx = x + lineLeft + lineIndent;
+                lx = x + lineLeft + (rtl ? Math.Max(0, free) : lineIndent);
                 extra = 0;
-                // The cut line fills the box, so alignment no longer moves it.
+                // The cut line fills the box from its start, so alignment no longer moves it.
             }
 
             // Item positions.
@@ -1205,15 +1205,20 @@ internal sealed partial class LayoutEngine
 
     /// <summary>
     /// Cuts a line that overflows its clipping box (text-overflow: ellipsis): characters and inline boxes at the end are
-    /// dropped until "…", in the block's font, fits within <paramref name="room"/>.
+    /// dropped until "…", in the block's font, fits within <paramref name="room"/>. The line's items are in logical
+    /// order, or in visual order when <paramref name="visual"/> is set; a right-to-left line ends on the left.
     /// </summary>
-    private void Ellipsize(Line line, ComputedStyle block, float room)
+    private void Ellipsize(Line line, ComputedStyle block, float room, bool visual = false, bool rtl = false)
     {
         const string Ellipsis = "\u2026";
         var font = block.Font;
         float ew = font.MeasureUnits(Ellipsis, 0, 1) * block.FontSize / 1000f + block.LetterSpacing;
         float limit = room - ew, used = 0;
         var items = line.Items;
+        byte para = items.Count > 0 ? items[0].Para : (byte)0;
+        // A right-to-left line is cut at its left end: it is worked on from right to left and turned back at the end.
+        bool reversed = visual && rtl;
+        if (reversed) items.Reverse();
         var kept = new List<Item>(items.Count + 1);
         int k = 0;
         for (; k < items.Count; k++)
@@ -1222,18 +1227,35 @@ internal sealed partial class LayoutEngine
             if (used + it.Width <= limit + Eps) { kept.Add(it); used += it.Width; continue; }
             if (it.Kind == ItemKind.Text && it.Length > 0)
             {
-                // As many of the word's characters as fit.
+                // As many of the word's characters as fit, from the side the line starts at: in visual order, a word
+                // running against the line keeps its logical end.
                 var f = it.Style.Font;
                 float size = it.Style.FontSize, ls = it.Style.LetterSpacing, fw = 0;
+                bool keepEnd = visual && ((it.Level & 1) != 0) != rtl;
                 int fit = 0;
-                while (fit < it.Length)
+                if (it.Level == 0 && !keepEnd)
                 {
-                    float cw = f.CharWidth(it.Source[it.Start + fit], size) + ls;
-                    if (used + fw + cw > limit + Eps) break;
-                    fw += cw;
-                    fit++;
+                    while (fit < it.Length)
+                    {
+                        float cw = f.CharWidth(it.Source[it.Start + fit], size) + ls;
+                        if (used + fw + cw > limit + Eps) break;
+                        fw += cw;
+                        fit++;
+                    }
                 }
-                if (fit > 0) { kept.Add(it.Slice(0, fit, fw)); used += fw; }
+                else
+                {
+                    // Shaped text is measured as a whole, since joining changes the widths of its letters.
+                    while (fit < it.Length)
+                    {
+                        int from = keepEnd ? it.Start + it.Length - fit - 1 : it.Start;
+                        float cw = f.MeasureUnits(it.Source, from, fit + 1) * size / 1000f + ls * (fit + 1);
+                        if (used + cw > limit + Eps) break;
+                        fw = cw;
+                        fit++;
+                    }
+                }
+                if (fit > 0) { kept.Add(it.Slice(keepEnd ? it.Length - fit : 0, fit, fw)); used += fw; }
             }
             break;
         }
@@ -1246,10 +1268,12 @@ internal sealed partial class LayoutEngine
         dots.Source = Ellipsis;
         dots.Length = 1;
         dots.Width = ew;
+        dots.Level = dots.Para = para;
         // The ellipsis takes the place of the last visible item, after any anchors kept at the end.
         int at = kept.Count;
         while (at > 0 && kept[at - 1].Kind is ItemKind.Anchor or ItemKind.Absolute) at--;
         kept.Insert(at, dots);
+        if (reversed) kept.Reverse();
         items.Clear();
         items.AddRange(kept);
         line.Width = used + ew;
