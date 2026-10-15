@@ -8,6 +8,8 @@ class library: never add a PackageReference to `src/PdfPecker`.
 
 - Always create a new branch for each piece of work, from the latest `origin/main`. Never reuse a branch name, even
   one whose pull request is merged.
+- Name the branch after the feature or fix, in lowercase words joined by hyphens, e.g. `add-claude-md` or
+  `rtl-svg-text`, never a random or generic name.
 
 ## Build and test
 
