@@ -89,8 +89,11 @@ internal sealed partial class PdfDocumentWriter
     /// <summary>Write a PDF/A file.</summary>
     public PdfConformance Conformance { get; init; }
 
-    /// <summary>A Factur-X / ZUGFeRD invoice XML to attach. Needs PDF/A-3 <see cref="Conformance"/>.</summary>
+    /// <summary>A Factur-X / ZUGFeRD invoice, for the XMP metadata. Its XML is one of the <see cref="Attachments"/>.</summary>
     public PdfEInvoice? EInvoice { get; init; }
+
+    /// <summary>Files to embed, sorted by name and with unique names (see <see cref="EmbeddedFiles.Prepare"/>).</summary>
+    public IReadOnlyList<PdfAttachment> Attachments { get; init; } = Array.Empty<PdfAttachment>();
 
     /// <summary>Font for the watermark text. Default: Helvetica (bold when the watermark asks for it).</summary>
     public TextFont? WatermarkFont { get; init; }
@@ -586,8 +589,8 @@ internal sealed partial class PdfDocumentWriter
         int watermarkId = wm != null ? next++ : 0;
         int metadataId = 0, outputIntentId = 0, iccId = 0, encryptId = 0;
         if (pdfa) { metadataId = next++; outputIntentId = next++; iccId = next++; }
-        int fileSpecId = 0, embeddedFileId = 0;
-        if (EInvoice != null) { fileSpecId = next++; embeddedFileId = next++; }
+        var fileSpecIds = new int[Attachments.Count];
+        for (int i = 0; i < fileSpecIds.Length; i++) { fileSpecIds[i] = next; next += 2; } // file specification, embedded file
         if (_crypt != null) encryptId = next++;
         bool tagged = Structure != null;
         int structRootId = tagged ? next++ : 0;
@@ -614,12 +617,19 @@ internal sealed partial class PdfDocumentWriter
             // PDF/UA: viewers show the title, not the file name.
             if (!string.IsNullOrEmpty(title)) _out.Ascii(" /ViewerPreferences << /DisplayDocTitle true >>");
         }
-        if (EInvoice != null)
+        if (fileSpecIds.Length > 0)
         {
-            // PDF/A-3 attachments are associated files (/AF) and also listed in the name tree viewers show.
+            // Attachments are listed in the name tree viewers show and are associated files (/AF), as PDF/A-3 needs.
             _out.Ascii(" /Names << /EmbeddedFiles << /Names [");
-            WriteTextString(_out, EInvoice.FileName);
-            _out.Sp().Int(fileSpecId).Ascii(" 0 R] >> >> /AF [").Int(fileSpecId).Ascii(" 0 R]");
+            for (int i = 0; i < fileSpecIds.Length; i++)
+            {
+                if (i > 0) _out.Sp();
+                WriteTextString(_out, Attachments[i].FileName);
+                _out.Sp().Int(fileSpecIds[i]).Ascii(" 0 R");
+            }
+            _out.Ascii("] >> >> /AF [");
+            for (int i = 0; i < fileSpecIds.Length; i++) _out.Ascii(i > 0 ? " " : "").Int(fileSpecIds[i]).Ascii(" 0 R");
+            _out.Ascii("]");
         }
         WriteAcroForm();
         // AES-256 (revision 6) is the Adobe extension level 8 to PDF 1.7, standardised in PDF 2.0.
@@ -659,23 +669,7 @@ internal sealed partial class PdfDocumentWriter
             End();
             WriteStream(iccId, PdfA.SrgbProfile, _compress, "/N 3");
         }
-        if (EInvoice is { } invoice)
-        {
-            Begin(fileSpecId).Ascii("<< /Type /Filespec /F ");
-            WriteTextString(_out, invoice.FileName);
-            _out.Ascii(" /UF ");
-            WriteTextString(_out, invoice.FileName);
-            _out.Ascii(" /Desc ");
-            WriteTextString(_out, invoice.Profile == EInvoiceProfile.XRechnung ? "XRechnung invoice" : "Factur-X invoice");
-            _out.Ascii(" /AFRelationship /").Ascii(invoice.RelationshipOrDefault.ToString())
-                .Ascii(" /EF << /F ").Int(embeddedFileId).Ascii(" 0 R /UF ").Int(embeddedFileId).Ascii(" 0 R >> >>");
-            End();
-            var mod = new ByteBuffer(32);
-            WriteTextString(mod, "D:" + now.ToString("yyyyMMddHHmmss", System.Globalization.CultureInfo.InvariantCulture) + "Z");
-            WriteStream(embeddedFileId, invoice.Xml, _compress, "/Type /EmbeddedFile /Subtype /text#2Fxml /Params << /Size "
-                + invoice.Xml.Length.ToString(System.Globalization.CultureInfo.InvariantCulture) + " /ModDate "
-                + System.Text.Encoding.ASCII.GetString(mod.Span) + " >>");
-        }
+        for (int i = 0; i < fileSpecIds.Length; i++) WriteAttachment(Attachments[i], fileSpecIds[i], now);
 
         // Fonts.
         for (int i = 0; i < usedFonts.Length; i++)
@@ -1182,6 +1176,43 @@ internal sealed partial class PdfDocumentWriter
     }
 
     // ------------------------------------------------------------------ objects
+
+    /// <summary>
+    /// Writes an attachment's file specification (with the /Desc PDF/UA asks for and PDF/A-3's /AFRelationship) at
+    /// <paramref name="specId"/> and its embedded file stream at the next number.
+    /// </summary>
+    private void WriteAttachment(PdfAttachment a, int specId, DateTime now)
+    {
+        int fileId = specId + 1;
+        Begin(specId).Ascii("<< /Type /Filespec /F ");
+        WriteTextString(_out, a.FileName);
+        _out.Ascii(" /UF ");
+        WriteTextString(_out, a.FileName);
+        _out.Ascii(" /Desc ");
+        WriteTextString(_out, string.IsNullOrEmpty(a.Description) ? a.FileName : a.Description);
+        _out.Ascii(" /AFRelationship /").Ascii(a.Relationship.ToString())
+            .Ascii(" /EF << /F ").Int(fileId).Ascii(" 0 R /UF ").Int(fileId).Ascii(" 0 R >> >>");
+        End();
+        var dict = new ByteBuffer(160);
+        dict.Ascii("/Type /EmbeddedFile /Subtype ");
+        PdfSyntax.Name(dict, a.MimeTypeOrGuess);
+        dict.Ascii(" /Params << /Size ").Int(a.Data.Length);
+        if (a.CreationDate is { } created)
+        {
+            dict.Ascii(" /CreationDate ");
+            WriteTextString(dict, EmbeddedFiles.PdfDate(created));
+        }
+        dict.Ascii(" /ModDate ");
+        WriteTextString(dict, a.ModDate is { } mod ? EmbeddedFiles.PdfDate(mod) : EmbeddedFiles.PdfDate(now));
+        if (!a.OmitChecksum)
+        {
+            dict.Ascii(" /CheckSum ");
+            var md5 = System.Security.Cryptography.MD5.HashData(a.Data);
+            PdfEncryptor.Hex(dict, _crypt != null ? _crypt.Encrypt(md5) : md5);
+        }
+        dict.Ascii(" >>");
+        WriteStream(fileId, a.Data, _compress, System.Text.Encoding.ASCII.GetString(dict.Span));
+    }
 
     private ByteBuffer Begin(int id)
     {

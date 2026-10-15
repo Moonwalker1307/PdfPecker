@@ -70,8 +70,12 @@ public static class HtmlToPdf
                 throw new ArgumentException("An e-invoice needs a PDF/A level that allows attachments: set PdfOptions.Conformance to "
                     + "PdfA3b, PdfA3u or PdfA4f, or leave it at None for PdfA3b.", nameof(options));
         }
-        else if (conformance == PdfConformance.PdfA4f)
-            throw new ArgumentException("PDF/A-4f is for files with attachments: use it with PdfOptions.EInvoice, or use PdfA4.", nameof(options));
+        var attachments = EmbeddedFiles.Prepare(options.Attachments, options.EInvoice);
+        if (conformance == PdfConformance.PdfA4f && attachments.Count == 0)
+            throw new ArgumentException("PDF/A-4f is for files with attachments: use it with PdfOptions.Attachments or EInvoice, or use PdfA4.", nameof(options));
+        if (conformance is PdfConformance.PdfA2b or PdfConformance.PdfA2u or PdfConformance.PdfA4 && attachments.Count > 0)
+            throw new ArgumentException($"PDF/A-{conformance.ToString()[4..].ToLowerInvariant()} allows attaching only PDF/A files, which PdfPecker does not check: "
+                + "set PdfOptions.Conformance to PdfA3b, PdfA3u or PdfA4f, which allow any attachment, or to None for a plain PDF.", nameof(options));
         // PDF/UA-1 and PDF/A-2 and -3 are based on PDF 1.7, PDF/UA-2 and PDF/A-4 on PDF 2.0: a file is one or the other.
         if (options.Accessibility == PdfAccessibility.PdfUA2 && conformance != PdfConformance.None && !PdfA.IsPdf20(conformance))
             throw new ArgumentException($"PDF/UA-2 is based on PDF 2.0 and {conformance} on PDF 1.7: combine PdfUA2 with PdfA4 or PdfA4f, "
@@ -149,9 +153,13 @@ public static class HtmlToPdf
         var paged = new PagedContent();
         float viewport = viewportH;
         ComputedStyle root = null!;
+        // hyphens: auto: the language of the text is its nearest lang attribute, else PdfOptions.Language.
+        var hyphenation = HyphenationTable(options.Hyphenation);
+        string? htmlLang = doc.Children.OfType<Element>().FirstOrDefault(c => c.Name == "html") is { } htmlElement
+            ? htmlElement.GetAttribute("lang") ?? htmlElement.GetAttribute("xml:lang") : null;
         StyleResolver Resolve()
         {
-            root = new ComputedStyle { Display = Display.Block, Fonts = fonts, MissingFonts = missingFonts };
+            root = new ComputedStyle { Display = Display.Block, Fonts = fonts, MissingFonts = missingFonts, Lang = options.Language, Hyphenation = hyphenation };
             var r = new StyleResolver(sheet, page.ContentWidth, viewport) { Cancellation = cancellationToken, Paged = paged };
             r.ResolveTree(doc, root);
             return r;
@@ -325,6 +333,7 @@ public static class HtmlToPdf
             Security = options.Security,
             Conformance = conformance,
             EInvoice = options.EInvoice,
+            Attachments = attachments,
             WatermarkFont = watermarkFont,
             MarginFont = marginFont,
             EmbedStandardFonts = options.EmbedStandardFonts,
@@ -344,7 +353,7 @@ public static class HtmlToPdf
         };
         // Page-margin boxes of @page rules (@top-center and the like), laid out per page like the bands.
         var marginBoxes = !options.IgnoreCssPageRules && PageMarginBoxes.AnyIn(sheet.PageRules)
-            ? new PageMarginBoxes(sheet.PageRules, () => new ComputedStyle { Display = Display.Block, Fonts = fonts, MissingFonts = missingFonts },
+            ? new PageMarginBoxes(sheet.PageRules, () => new ComputedStyle { Display = Display.Block, Fonts = fonts, MissingFonts = missingFonts, Lang = htmlLang ?? options.Language, Hyphenation = hyphenation },
                 page, images, cancellationToken, paged)
             : null;
         Func<int, int, List<DrawOp>>? pageBands = null;
@@ -394,6 +403,16 @@ public static class HtmlToPdf
         public PageSetup Page = null!;
         public LayoutEngine Engine = null!;
         public float Height;
+    }
+
+    /// <summary>PdfOptions.Hyphenation with its language tags in lower case with hyphens, as the layout looks them up.</summary>
+    private static Dictionary<string, HyphenationPatterns>? HyphenationTable(IDictionary<string, HyphenationPatterns>? patterns)
+    {
+        if (patterns == null || patterns.Count == 0) return null;
+        var table = new Dictionary<string, HyphenationPatterns>(StringComparer.Ordinal);
+        foreach (var (lang, p) in patterns)
+            if (!string.IsNullOrWhiteSpace(lang) && p != null) table[lang.Trim().Replace('_', '-').ToLowerInvariant()] = p;
+        return table;
     }
 
     /// <summary>

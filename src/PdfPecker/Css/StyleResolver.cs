@@ -571,6 +571,8 @@ internal sealed class StyleResolver
         _scratch.Clear();
         string? v;
         if (e.HasAttribute("dir") || e.Name == "bdi") DirHints(e);
+        // The content language, inherited, for hyphens: auto. An empty lang means an unknown language.
+        if ((e.GetAttribute("lang") ?? e.GetAttribute("xml:lang")) is { } lang) Hint(LangProperty, lang.Trim() is { Length: > 0 } tag ? tag : "und");
         if (IsSvgElement(e))
         {
             SvgHints(e);
@@ -792,6 +794,9 @@ internal sealed class StyleResolver
         if (a == "center" && block) { Hint("margin-left", "auto"); Hint("margin-right", "auto"); }
         else if (a is "middle" or "top" or "bottom") Hint("vertical-align", a);
     }
+
+    // The internal property that carries the lang attribute into the computed style.
+    private const string LangProperty = "-pdfpecker-lang";
 
     private void Hint(string property, string value)
     {
@@ -1018,6 +1023,16 @@ internal sealed class StyleResolver
             case "hyphens":
             case "-webkit-hyphens":
                 s.NoHyphens = lower == "inherit" ? parent.NoHyphens : lower == "none";
+                s.HyphensAuto = lower == "inherit" ? parent.HyphensAuto : lower == "auto";
+                break;
+            case "hyphenate-character":
+            case "-webkit-hyphenate-character":
+                if (inherit) s.HyphenateCharacter = parent.HyphenateCharacter;
+                else if (lower == "auto" || lower == "initial" || lower == "unset") s.HyphenateCharacter = null;
+                else if (GeneratedContent.UnquoteString(v) is { } hyphen) s.HyphenateCharacter = hyphen;
+                break;
+            case LangProperty:
+                s.Lang = v;
                 break;
             case "font-variant-caps":
                 s.SmallCaps = lower switch
