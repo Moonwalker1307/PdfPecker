@@ -60,6 +60,9 @@ internal sealed class PdfMergeWriter
     private readonly HashSet<string> _roleNames = new(StringComparer.Ordinal), _classNames = new(StringComparer.Ordinal);
     private PdfString? _lang;
     private bool _allPdfUa = true; // every input so far claims PDF/UA-1, so the result can too
+    // Attachments: every input's embedded files, by name-tree key (a name used before gets " (2)", " (3)", ...).
+    private readonly List<(byte[] Key, ByteBuffer Value)> _attachments = new();
+    private readonly HashSet<string> _attachmentNames = new(StringComparer.Ordinal);
 
     /// <summary>A writer; <paramref name="sink"/> is where the result goes as it is made, or null to keep it in memory (see <see cref="ToArray"/>).</summary>
     public PdfMergeWriter(PdfMergeOptions options, CancellationToken cancel, Stream? sink = null)
@@ -167,6 +170,7 @@ internal sealed class PdfMergeWriter
                 }
             }
             if (input.StructOffset >= 0) WriteStructure(input, queue);
+            CopyAttachments(input, catalog, queue);
             // Top-level bookmarks are chained across inputs; the last one waits for its /Next, which a later input may give.
             if (input.TopOutline.Count > 0 && _outlinesId == 0) _outlinesId = NewId();
             for (int k = 0; k < input.TopOutline.Count; k++)
@@ -259,6 +263,17 @@ internal sealed class PdfMergeWriter
             if (!string.IsNullOrEmpty(_props!.Title)) _out.Ascii(" /ViewerPreferences << /DisplayDocTitle true >>");
         }
         if (_lang != null) { _out.Ascii(" /Lang "); PdfSyntax.HexString(_out, _lang.Bytes); }
+        if (_attachments.Count > 0)
+        {
+            _attachments.Sort((x, y) => x.Key.AsSpan().SequenceCompareTo(y.Key));
+            _out.Ascii(" /Names << /EmbeddedFiles << /Names [");
+            foreach (var (key, value) in _attachments)
+            {
+                PdfSyntax.HexString(_out, key);
+                _out.Sp().Bytes(value.Span).Sp();
+            }
+            _out.Ascii("] >> >>");
+        }
         if (_ocgs.Length > 0)
         {
             _out.Ascii(" /OCProperties << /OCGs [").Bytes(_ocgs.Span).Ascii("] /D << /Order [").Bytes(_ocgs.Span).Ascii("]");
@@ -627,6 +642,33 @@ internal sealed class PdfMergeWriter
             _out.Sp().Int((long)n.Value + input.StructOffset);
         }
         return true;
+    }
+
+    /// <summary>Copies the input's embedded files (its attachments), renaming a name an earlier input used.</summary>
+    private void CopyAttachments(Input input, PdfDict? catalog, Queue<(int, int)> queue)
+    {
+        foreach (var (key, value) in EmbeddedFiles.NameTree(input.File, catalog))
+        {
+            string name = key.Text;
+            if (!_attachmentNames.Add(name))
+            {
+                string stem = Path.GetFileNameWithoutExtension(name), ext = Path.GetExtension(name);
+                int k = 2;
+                while (!_attachmentNames.Add(name = $"{stem} ({k}){ext}")) k++;
+            }
+            var buffer = new ByteBuffer(32);
+            var saved = _out;
+            _out = buffer;
+            try
+            {
+                WriteObject(input, value, queue, 1);
+            }
+            finally
+            {
+                _out = saved;
+            }
+            _attachments.Add((EmbeddedFiles.KeyBytes(name), buffer));
+        }
     }
 
     /// <summary>Writes the (referenced) items of an array to another buffer, separated by spaces.</summary>
