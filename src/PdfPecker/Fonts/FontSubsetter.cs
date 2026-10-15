@@ -36,15 +36,18 @@ internal sealed class GlyphSubset
     /// <summary>The CID for a glyph of shaped text: a ligature glyph maps back to all of its characters.</summary>
     public int Cid(ShapedGlyph g, string text)
     {
-        // Only ligatures replace glyphs, so a glyph for one character is that character's.
-        if (g.Length == 1) return Cid(text[g.Start]);
-        if (g.Length == 2 && char.IsHighSurrogate(text[g.Start])) return Cid(char.ConvertToUtf32(text[g.Start], text[g.Start + 1]));
+        // A glyph for one character that is the character's own glyph (not a contextual form or a mirror) is mapped by
+        // the character.
+        if (g.Length == 1 && Program.GlyphId(text[g.Start]) == g.Gid) return Cid(text[g.Start]);
+        if (g.Length == 2 && char.IsHighSurrogate(text[g.Start]) && char.ConvertToUtf32(text[g.Start], text[g.Start + 1]) is int cp
+            && Program.GlyphId(cp) == g.Gid)
+            return Cid(cp);
         if (_byGlyph.TryGetValue(g.Gid, out int id)) return id;
         id = Program.IsCff ? g.Gid : Glyphs.Count;
         _byGlyph[g.Gid] = id;
         Glyphs.Add(g.Gid);
         Unicode.Add(0);
-        (_texts ??= new())[Glyphs.Count - 1] = text.Substring(g.Start, g.Length);
+        if (g.Length > 0) (_texts ??= new())[Glyphs.Count - 1] = text.Substring(g.Start, g.Length);
         return id;
     }
 

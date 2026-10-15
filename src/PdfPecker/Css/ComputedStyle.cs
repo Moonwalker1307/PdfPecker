@@ -69,7 +69,8 @@ internal sealed class GridAreas
 internal enum SvgLineCap : byte { Butt, Round, Square }
 internal enum SvgLineJoin : byte { Miter, Round, Bevel }
 
-internal enum TextAlign : byte { Left, Right, Center, Justify }
+internal enum TextAlign : byte { Left, Right, Center, Justify, Start, End } // Start and End follow the direction
+internal enum UnicodeBidi : byte { Normal, Embed, Isolate, BidiOverride, IsolateOverride, Plaintext }
 internal enum WhiteSpace : byte { Normal, NoWrap, Pre, PreWrap, PreLine }
 internal enum VerticalAlign : byte { Baseline, Sub, Super, Top, Middle, Bottom, TextTop, TextBottom }
 internal enum OverflowWrap : byte { Normal, BreakWord, Anywhere }
@@ -174,7 +175,8 @@ internal sealed class ComputedStyle
     public float ParentFontSize = 12f; // the parent's font size, which sub and super shift by
     public LineHeightKind LineHeightKind = LineHeightKind.Normal;
     public float LineHeightValue;
-    public TextAlign TextAlign;
+    public TextAlign TextAlign = TextAlign.Start;
+    public bool Rtl;                         // direction: rtl
     public TextAlign? TextAlignLast;         // null = auto
     public int TabSize = 8;                  // in spaces
     public bool NoHyphens;                   // hyphens: none (soft hyphens are no break opportunity)
@@ -229,6 +231,7 @@ internal sealed class ComputedStyle
 
     // ---- Not inherited ----
     public Display Display = Display.Inline;
+    public UnicodeBidi UnicodeBidi;
     public uint BackgroundColor;
     // Background layers, topmost first. Each list repeats when it is shorter than BackgroundImages; null is the initial value.
     public BackgroundImage?[]? BackgroundImages; // null entries are "none" layers
@@ -356,6 +359,14 @@ internal sealed class ComputedStyle
     public bool IsMultiColumn => ColumnCount > 1 || !ColumnWidth.IsAuto;
     public bool IsRow => FlexDirection is FlexDirection.Row or FlexDirection.RowReverse;
 
+    /// <summary>text-align with start and end resolved for a paragraph of the given direction.</summary>
+    public static TextAlign Resolve(TextAlign align, bool rtl) => align switch
+    {
+        TextAlign.Start => rtl ? TextAlign.Right : TextAlign.Left,
+        TextAlign.End => rtl ? TextAlign.Left : TextAlign.Right,
+        _ => align,
+    };
+
     /// <summary>Absolutely positioned (absolute or fixed): taken out of the flow and placed against a containing block.</summary>
     public bool OutOfFlow => Position is Position.Absolute or Position.Fixed;
 
@@ -420,6 +431,7 @@ internal sealed class ComputedStyle
         c.Content = null;
         c.CounterReset = c.CounterSet = c.CounterIncrement = null;
         c.FlexDirection = FlexDirection.Row;
+        c.UnicodeBidi = UnicodeBidi.Normal;
         c.FlexWrap = FlexWrap.NoWrap;
         c.FlexGrow = 0;
         c.FlexShrink = 1;

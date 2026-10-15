@@ -431,6 +431,16 @@ internal sealed class StyleResolver
             if (_decls[i].Property.StartsWith("--", StringComparison.Ordinal)) _custom.Add(new(_decls[i].Property, _decls[i].Value));
         if (_custom.Count > 0) s.CustomProperties = CssVariables.Compute(parent.CustomProperties, _custom);
 
+        // direction before the logical properties (padding-inline-start, ...) that depend on it.
+        for (int i = _count - 1; i >= 0; i--)
+        {
+            if (_decls[i].Property == "direction")
+            {
+                if (Substituted(_decls[i].Value, s) is { } dir) Apply(s, parent, "direction", dir);
+                break;
+            }
+        }
+
         // font-size next: em-based lengths in every other property depend on it.
         for (int i = _count - 1; i >= 0; i--)
         {
@@ -557,9 +567,10 @@ internal sealed class StyleResolver
 
     private void AddHints(Element e)
     {
-        if (e.Attributes.Count == 0 && e.Name != "td" && e.Name != "th") return;
+        if (e.Attributes.Count == 0 && e.Name != "td" && e.Name != "th" && e.Name != "bdi") return;
         _scratch.Clear();
         string? v;
+        if (e.HasAttribute("dir") || e.Name == "bdi") DirHints(e);
         if (IsSvgElement(e))
         {
             SvgHints(e);
@@ -718,6 +729,60 @@ internal sealed class StyleResolver
         v = v.Trim();
         // Plain numbers are pixels; values with units or percentages are CSS lengths.
         return float.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out _) ? v + "px" : v.ToLowerInvariant();
+    }
+
+    // The dir attribute (and bdi, which defaults to dir=auto): the direction, and an isolated run of text. dir=auto
+    // takes the direction of the first strong character of the content, as HTML specifies.
+    private void DirHints(Element e)
+    {
+        var dir = e.GetAttribute("dir")?.Trim().ToLowerInvariant();
+        if (dir is not ("ltr" or "rtl"))
+        {
+            if (dir != "auto" && e.Name != "bdi") return;
+            dir = FirstStrongDirection(e) ? "rtl" : "ltr";
+        }
+        Hint("direction", dir);
+        if (e.Name != "bdo") Hint("unicode-bidi", "isolate");
+    }
+
+    // True when the first strong character of the element's text is right to left; descendants with their own dir
+    // attribute, and script and style elements, are skipped.
+    private static bool FirstStrongDirection(Element e)
+    {
+        foreach (var c in e.Children)
+        {
+            if (c is TextNode t)
+            {
+                foreach (char ch in t.Text)
+                {
+                    var bc = Text.UnicodeTables.Bidi(ch);
+                    if (bc == Text.BidiClass.L) return false;
+                    if (bc is Text.BidiClass.R or Text.BidiClass.AL) return true;
+                }
+            }
+            else if (c is Element ce && ce.Name is not ("script" or "style" or "bdi") && !ce.HasAttribute("dir"))
+            {
+                if (HasStrong(ce, out bool rtl)) return rtl;
+            }
+        }
+        return false;
+
+        static bool HasStrong(Element e, out bool rtl)
+        {
+            foreach (var c in e.Children)
+            {
+                if (c is TextNode t)
+                    foreach (char ch in t.Text)
+                    {
+                        var bc = Text.UnicodeTables.Bidi(ch);
+                        if (bc == Text.BidiClass.L) { rtl = false; return true; }
+                        if (bc is Text.BidiClass.R or Text.BidiClass.AL) { rtl = true; return true; }
+                    }
+                else if (c is Element ce && ce.Name is not ("script" or "style" or "bdi") && !ce.HasAttribute("dir") && HasStrong(ce, out rtl)) return true;
+            }
+            rtl = false;
+            return false;
+        }
     }
 
     private void AlignHint(string? align, bool block)
@@ -914,8 +979,10 @@ internal sealed class StyleResolver
             case "text-align":
                 s.TextAlign = lower switch
                 {
-                    "left" or "start" or "-webkit-left" => TextAlign.Left,
-                    "right" or "end" or "-webkit-right" => TextAlign.Right,
+                    "start" => TextAlign.Start,
+                    "end" => TextAlign.End,
+                    "left" or "-webkit-left" => TextAlign.Left,
+                    "right" or "-webkit-right" => TextAlign.Right,
                     "center" or "middle" or "-webkit-center" => TextAlign.Center,
                     "justify" or "justify-all" => TextAlign.Justify,
                     "inherit" => parent.TextAlign,
@@ -927,8 +994,10 @@ internal sealed class StyleResolver
                 s.TextAlignLast = lower switch
                 {
                     "auto" or "initial" or "unset" => null,
-                    "left" or "start" => TextAlign.Left,
-                    "right" or "end" => TextAlign.Right,
+                    "start" => TextAlign.Start,
+                    "end" => TextAlign.End,
+                    "left" => TextAlign.Left,
+                    "right" => TextAlign.Right,
                     "center" => TextAlign.Center,
                     "justify" => TextAlign.Justify,
                     "inherit" => parent.TextAlignLast,
@@ -1284,6 +1353,31 @@ internal sealed class StyleResolver
             case "padding-top": SetLength(ref s.PaddingTop, lower, em, inherit ? parent.PaddingTop : (Length?)null, noAuto: true); break;
             case "padding-right": SetLength(ref s.PaddingRight, lower, em, inherit ? parent.PaddingRight : (Length?)null, noAuto: true); break;
             case "padding-bottom": SetLength(ref s.PaddingBottom, lower, em, inherit ? parent.PaddingBottom : (Length?)null, noAuto: true); break;
+            case "direction":
+                s.Rtl = lower switch { "rtl" => true, "ltr" => false, "inherit" => parent.Rtl, "initial" => false, _ => s.Rtl };
+                break;
+            case "unicode-bidi":
+                s.UnicodeBidi = lower switch
+                {
+                    "normal" => UnicodeBidi.Normal,
+                    "embed" => UnicodeBidi.Embed,
+                    "isolate" or "-webkit-isolate" => UnicodeBidi.Isolate,
+                    "bidi-override" => UnicodeBidi.BidiOverride,
+                    "isolate-override" or "-webkit-isolate-override" => UnicodeBidi.IsolateOverride,
+                    "plaintext" or "-webkit-plaintext" => UnicodeBidi.Plaintext,
+                    "inherit" => parent.UnicodeBidi,
+                    _ => s.UnicodeBidi,
+                };
+                break;
+            // Logical properties map to the physical side the direction gives.
+            case "margin-inline-start": Apply(s, parent, s.Rtl ? "margin-right" : "margin-left", raw); break;
+            case "margin-inline-end": Apply(s, parent, s.Rtl ? "margin-left" : "margin-right", raw); break;
+            case "padding-inline-start": Apply(s, parent, s.Rtl ? "padding-right" : "padding-left", raw); break;
+            case "padding-inline-end": Apply(s, parent, s.Rtl ? "padding-left" : "padding-right", raw); break;
+            case "margin-block-start": Apply(s, parent, "margin-top", raw); break;
+            case "margin-block-end": Apply(s, parent, "margin-bottom", raw); break;
+            case "padding-block-start": Apply(s, parent, "padding-top", raw); break;
+            case "padding-block-end": Apply(s, parent, "padding-bottom", raw); break;
             case "padding-left": SetLength(ref s.PaddingLeft, lower, em, inherit ? parent.PaddingLeft : (Length?)null, noAuto: true); break;
             case "width": SetLength(ref s.Width, lower, em, inherit ? parent.Width : (Length?)null); break;
             case "height": SetLength(ref s.Height, lower, em, inherit ? parent.Height : (Length?)null); break;
