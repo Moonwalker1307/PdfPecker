@@ -278,6 +278,13 @@ public sealed class PdfOptions
     public string? Language { get; set; }
 
     /// <summary>
+    /// Hyphenation patterns for <c>hyphens: auto</c>, by language tag (such as "sv" or "en-GB"; a tag also matches
+    /// longer tags of its language, so "sv" covers "sv-FI"). They take precedence over the patterns built into the
+    /// library, which cover English, Danish, German, Dutch and Norwegian. Default: null.
+    /// </summary>
+    public IDictionary<string, HyphenationPatterns>? Hyphenation { get; set; }
+
+    /// <summary>
     /// Make a Factur-X / ZUGFeRD e-invoice: the invoice's CII XML is attached to the PDF with the metadata that tells
     /// software it is there. The file is PDF/A-3b, so <see cref="Conformance"/> must be None (it is then raised to
     /// PDF/A-3b) or <see cref="PdfConformance.PdfA3b"/>, and <see cref="Security"/> must be null. Default: null.
