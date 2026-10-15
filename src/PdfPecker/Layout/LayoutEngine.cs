@@ -70,6 +70,8 @@ internal sealed partial class LayoutEngine
         public ListStyleType Type;
         public ComputedStyle Style = null!;
         public float ContentX;
+        public float ContentRight; // right to left, the marker goes after the content's right edge
+        public bool Rtl;
         public ContentSlot? Tag;
     }
 
@@ -507,6 +509,9 @@ internal sealed partial class LayoutEngine
         float used = contentW + frame;
         if (s.MarginLeft.IsAuto && s.MarginRight.IsAuto) ml = Math.Max(0, (availW - used) / 2);
         else if (s.MarginLeft.IsAuto) ml = Math.Max(0, availW - used - mr);
+        // In a right-to-left containing block an over-constrained box keeps its right margin (it sits at the right).
+        else if (!shrinkToFit && !s.Floated && !s.OutOfFlow && e.Parent?.Style is { Rtl: true } && !hasWOverride)
+            ml = Math.Max(0, availW - used - mr);
         float bx = x + ml;
 
         int opsStart = _ops.Count;
@@ -531,7 +536,7 @@ internal sealed partial class LayoutEngine
             _marker = new ListMarker
             {
                 Text = custom ?? MarkerText(s.ListStyleType, _currentListIndex), Custom = custom != null, Type = s.ListStyleType,
-                Style = e.MarkerStyle ?? s, ContentX = cx, Tag = Tags?.MarkerOf(e),
+                Style = e.MarkerStyle ?? s, ContentX = cx, ContentRight = cx + contentW, Rtl = s.Rtl, Tag = Tags?.MarkerOf(e),
             };
         }
 
@@ -684,6 +689,12 @@ internal sealed partial class LayoutEngine
             var font = s.Font;
             float tw = font.Measure(m.Text, size) + s.LetterSpacing * m.Text.Length;
             float gap = m.Custom ? 0 : font.CharWidth(' ', size); // Chrome's marker text ends with a space: "1. "
+            if (m.Rtl)
+            {
+                // Right to left the marker follows the content's right edge, its text in right-to-left order (".1").
+                _ops.Add(new TextOp(m.ContentRight + gap, baseline, lineTop, font, size, s.Color, VisualMarkerText(m.Text), 0, 0) { Tag = m.Tag });
+                return;
+            }
             _ops.Add(new TextOp(m.ContentX - gap - tw, baseline, lineTop, font, size, s.Color, m.Text, 0, 0) { Tag = m.Tag });
             return;
         }
@@ -692,7 +703,7 @@ internal sealed partial class LayoutEngine
         s.Font.LineMetrics(size, out float ascentPt, out _);
         int ascent = (int)MathF.Round(ascentPt / 0.75f), offset = ascent * 2 / 3, side = (offset + 1) / 2;
         float r = side * 0.75f / 2;
-        float cxm = m.ContentX - (offset + 8 - 1) * 0.75f + r;
+        float cxm = m.Rtl ? m.ContentRight + (offset + 8 - 1) * 0.75f - r : m.ContentX - (offset + 8 - 1) * 0.75f + r;
         float cym = baseline - (ascent - 3 * (ascent - offset) / 2) * 0.75f + r;
         switch (m.Type)
         {

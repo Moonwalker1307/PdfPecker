@@ -34,6 +34,7 @@ internal sealed partial class LayoutEngine
         public readonly List<RowModel> Rows = new();
         public int ColCount;
         public int HeadCount; // leading rows that come from <thead>
+        public bool Rtl;      // direction: rtl, so the first column is on the right
         public float[] ColMin = Array.Empty<float>(), ColMax = Array.Empty<float>();
         public float[] ColFixed = Array.Empty<float>(), ColPct = Array.Empty<float>();
         public float[] ColSpecFixed = Array.Empty<float>(), ColSpecPct = Array.Empty<float>(); // from <col> only
@@ -373,7 +374,9 @@ internal sealed partial class LayoutEngine
         float boxW = contentW + frameL + frameR;
         if (s.MarginLeft.IsAuto && s.MarginRight.IsAuto) ml = Math.Max(0, (availW - boxW) / 2);
         else if (s.MarginLeft.IsAuto) ml = Math.Max(0, availW - boxW - mr);
+        else if (table.Parent?.Style is { Rtl: true } && !s.Floated && !s.OutOfFlow) ml = Math.Max(0, availW - boxW - mr);
         float bx = x + ml;
+        m.Rtl = s.Rtl;
 
         var colX = new float[n + 1];
         float cxp = bx + frameL + hs;
@@ -450,7 +453,7 @@ internal sealed partial class LayoutEngine
         {
             rowGroup = new GroupOp();
             _ops.Add(rowGroup);
-            foreach (var cell in row.Cells) LayoutCell(cell, rowTop, colX, widths, hs, collapse);
+            foreach (var cell in row.Cells) LayoutCell(cell, rowTop, colX, widths, hs, collapse, m.Rtl);
 
             float rowH = 0;
             foreach (var cell in row.Cells)
@@ -494,14 +497,15 @@ internal sealed partial class LayoutEngine
         return rowBottom;
     }
 
-    private void LayoutCell(CellModel cell, float rowTop, float[] colX, float[] widths, float hs, bool collapse)
+    private void LayoutCell(CellModel cell, float rowTop, float[] colX, float[] widths, float hs, bool collapse, bool rtl)
     {
         var td = cell.Td;
         var cs = td.Style;
         if (td.Id != null) SetAnchor(td.Id, rowTop);
         float w = (cell.ColSpan - 1) * hs;
         for (int c = cell.Col; c < cell.Col + cell.ColSpan; c++) w += widths[c];
-        cell.X = colX[cell.Col];
+        // Right to left, the columns run from the right: the cell's span is mirrored within the table.
+        cell.X = rtl ? colX[0] + colX[^1] - hs - colX[cell.Col] - w : colX[cell.Col];
         cell.W = w;
         cell.Top = rowTop;
 

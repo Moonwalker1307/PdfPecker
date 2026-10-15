@@ -516,6 +516,18 @@ internal static class CssParser
                 for (int k = 0; k < 4; k++) Add(Sides[k], four[k]);
                 return;
             }
+            case "margin-inline":
+            case "padding-inline":
+            case "margin-block":
+            case "padding-block":
+            {
+                // One value for both sides, or start and end.
+                var t = Tokens(value);
+                if (t.Count is 0 or > 2) return;
+                Add(name + "-start", t[0]);
+                Add(name + "-end", t[^1]);
+                return;
+            }
             case "margin":
             case "padding":
             {

@@ -2003,12 +2003,15 @@ internal sealed partial class PdfDocumentWriter
         t.Font.Split(t.Text, _runs);
         foreach (var run in _runs)
         {
-            if (Leaf(run.Font) is EmbeddedFont ef) AddGlyphs(ef, t.Text, run.Start, run.Length);
+            if (Leaf(run.Font) is EmbeddedFont ef) AddGlyphs(ef, t.Text, run.Start, run.Length, t.Rtl);
             else usedFonts[((StandardFont)run.Font).Index] = true;
         }
     }
 
-    /// <summary>Shows a text op starting at (x, y), one run per concrete font.</summary>
+    /// <summary>
+    /// Shows a text op starting at (x, y), one run per concrete font. Right-to-left text is drawn from its last run to
+    /// its first.
+    /// </summary>
     private void WriteTextLine(ByteBuffer b, TextOp t, float x, float y)
     {
         if (t.Font is StandardFont sf && !EmbedStandard)
@@ -2018,8 +2021,9 @@ internal sealed partial class PdfDocumentWriter
         }
         _runs.Clear();
         t.Font.Split(t.Text, _runs);
-        foreach (var run in _runs)
+        for (int r = 0; r < _runs.Count; r++)
         {
+            var run = _runs[t.Rtl ? _runs.Count - 1 - r : r];
             if (Leaf(run.Font) is EmbeddedFont ef) WriteEmbeddedRun(b, ef, t, run.Start, run.Length, x, y);
             else WriteStandardRun(b, (StandardFont)run.Font, t, run.Start, run.Length, x, y);
             x += RunAdvance(run.Font, t, run.Start, run.Length);
@@ -2028,10 +2032,10 @@ internal sealed partial class PdfDocumentWriter
 
     private readonly List<ShapedGlyph> _glyphs = new();
 
-    private void AddGlyphs(EmbeddedFont font, string text, int start, int length)
+    private void AddGlyphs(EmbeddedFont font, string text, int start, int length, bool rtl = false)
     {
         var subset = Subset(font.Program);
-        font.Shape(text, start, length, _glyphs);
+        font.Shape(text, start, length, _glyphs, rtl);
         foreach (var g in _glyphs) subset.Cid(g, text);
     }
 
@@ -2082,7 +2086,8 @@ internal sealed partial class PdfDocumentWriter
         SetFont(b, font, "/F", font.Index + 1, t.Size);
         SetRenderMode(b, 0);
         b.Ascii("1 0 0 1 ").Num(x).Sp().Num(y).Ascii(" Tm ");
-        WriteStandardText(b, font, start == 0 && length == t.Text.Length ? t.Text : t.Text.Substring(start, length));
+        string text = start == 0 && length == t.Text.Length ? t.Text : t.Text.Substring(start, length);
+        WriteStandardText(b, font, t.Rtl ? Text.Bidi.VisualText(text) : text);
         b.Ascii("\n");
     }
 
@@ -2138,19 +2143,61 @@ internal sealed partial class PdfDocumentWriter
         bool adjust = (t.WordSpacing != 0 || skipNotdef || kern) && t.Size > 0;
         float spaceAdjust = adjust ? -t.WordSpacing * 1000f / t.Size : 0;
         float notdefAdjust = skipNotdef ? -(font.Program.Advance1000(0) + t.CharSpacing * 1000f / t.Size) : 0;
-        b.Ascii(adjust ? "[<" : "<");
-        int prev = -1, end = start + length;
-        font.Shape(text, start, length, _glyphs);
-        foreach (var g in _glyphs)
+        bool positioned = font.Shape(text, start, length, _glyphs, t.Rtl);
+        if (t.Rtl) _glyphs.Reverse();
+        if (positioned && t.Size > 0)
         {
-            if (kern && prev >= 0 && font.Program.Kern1000(prev, g.Gid) is int k && k != 0) b.Ascii(">").Int(-k).Ascii("<");
+            WritePositionedGlyphs(b, font, subset, t, skipNotdef, notdefAdjust, spaceAdjust);
+            return;
+        }
+        b.Ascii(adjust ? "[<" : "<");
+        int prev = -1;
+        for (int k = 0; k < _glyphs.Count; k++)
+        {
+            var g = _glyphs[k];
+            // Right to left the glyphs are drawn last first, and a kerned pair is the drawn one's logical successor.
+            if (kern && prev >= 0 && (t.Rtl ? font.Program.Kern1000(g.Gid, prev) : font.Program.Kern1000(prev, g.Gid)) is int kv && kv != 0)
+                b.Ascii(">").Int(-kv).Ascii("<");
             prev = g.Gid;
             int cid = subset.Cid(g, text);
             if (cid == 0 && skipNotdef) b.Ascii(">").Num(notdefAdjust).Ascii("<");
             else Hex4(b, cid);
-            if (adjust && text[g.Start] == ' ' && t.WordSpacing != 0 && g.Start + 1 < end) b.Ascii(">").Num(spaceAdjust).Ascii("<");
+            if (adjust && text[g.Start] == ' ' && t.WordSpacing != 0 && k + 1 < _glyphs.Count) b.Ascii(">").Num(spaceAdjust).Ascii("<");
         }
         b.Ascii(adjust ? ">] TJ\n" : "> Tj\n");
+    }
+
+    /// <summary>
+    /// Shows glyphs that complex shaping positioned, in drawing order: TJ moves each glyph by its offset and corrects
+    /// its advance to the shaped one, and a vertical offset (a mark above or below its base) raises it with Ts.
+    /// </summary>
+    private void WritePositionedGlyphs(ByteBuffer b, EmbeddedFont font, GlyphSubset subset, TextOp t, bool skipNotdef, float notdefAdjust, float spaceAdjust)
+    {
+        string text = t.Text;
+        b.Ascii("[<");
+        for (int k = 0; k < _glyphs.Count; k++)
+        {
+            var g = _glyphs[k];
+            int cid = subset.Cid(g, text);
+            float width = font.Program.Advance1000(g.Gid);
+            if (cid == 0 && skipNotdef)
+            {
+                b.Ascii(">").Num(notdefAdjust - g.Advance + width).Ascii("<");
+                continue;
+            }
+            if (g.Dy != 0)
+            {
+                // The raised glyph is shown on its own, between two TJ arrays.
+                b.Ascii(">] TJ ").Num(g.Dy * t.Size / 1000f).Ascii(" Ts [<");
+            }
+            if (g.Dx != 0) b.Ascii(">").Num(-g.Dx).Ascii("<");
+            Hex4(b, cid);
+            float after = g.Dx + width - g.Advance;
+            if (t.WordSpacing != 0 && g.Length > 0 && text[g.Start] == ' ' && k + 1 < _glyphs.Count) after += spaceAdjust;
+            if (after != 0) b.Ascii(">").Num(after).Ascii("<");
+            if (g.Dy != 0) b.Ascii(">] TJ 0 Ts [<");
+        }
+        b.Ascii(">] TJ\n");
     }
 
     /// <summary>Horizontal advance of a run, including letter and word spacing.</summary>

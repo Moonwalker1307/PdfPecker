@@ -238,6 +238,32 @@ options.MissingFont = family => logger.LogWarning("Font {Family} is not availabl
 options.UseSystemFonts = true;   // looks in C:\Windows\Fonts, /Library/Fonts, /usr/share/fonts, ...
 ```
 
+### Right-to-left text: Arabic and Hebrew
+
+Arabic and Hebrew are laid out right to left and shaped like browsers do, with PdfPecker's own implementation of the
+Unicode Bidirectional Algorithm (UAX #9, passing all of Unicode's conformance tests) and of OpenType shaping (GSUB and
+GPOS, following HarfBuzz). Arabic letters join, lam-alef and other ligatures form, and harakat and Hebrew points are
+placed on their letters by the font's mark positioning. Mixed text (an English product name or a number inside an
+Arabic sentence) is put in the right order, and brackets are mirrored. Register a font that has the script, then set
+the direction with the `dir` attribute or CSS `direction`:
+
+```csharp
+var options = new PdfOptions();
+options.Fonts.AddFile("fonts/NotoNaskhArabic-Regular.ttf");
+byte[] pdf = HtmlToPdf.Convert("""
+    <html dir="rtl" lang="ar"><body style="font-family: 'Noto Naskh Arabic'">
+      <h1>فاتورة رقم ٢٠٢٦/١٥</h1>
+      <p>المبلغ الإجمالي: 1,250.00 DKK</p>
+    </body></html>
+    """, options);
+```
+
+In a right-to-left block, text aligns right (`text-align: start`), and table columns, flex rows, grid columns and list
+markers run from the right. `dir="auto"`, `<bdi>` and `<bdo>` work as in browsers, and so do `unicode-bidi`,
+`text-align: start`/`end` and the logical margin and padding properties (`margin-inline-start`, `padding-inline-end`,
+...). Copied or extracted text gives back the original characters in logical order. A font without OpenType Arabic
+features is shaped with the Unicode presentation forms instead.
+
 ### Watermarks, passwords and PDF/A
 
 ```csharp
@@ -526,7 +552,8 @@ For what the renderer does not support yet, see [Limitations](#limitations).
 and `#id` links inside the document), `b`/`strong`, `i`/`em`, `u`, `s`, `sub`, `sup`, `small`, `big`, `mark`, `code`,
 `pre`, `blockquote`, `hr`, `br`, `ul`/`ol`/`li` (nested, with `start` and `value`), `dl`, `table` (with `thead`,
 `tbody`, `tfoot`, `caption`, `colspan`, `rowspan`, `col width`), `img`, inline `<svg>`, and legacy attributes such as `align`,
-`valign`, `bgcolor`, `width`, `height`, `border`, `cellpadding`, `cellspacing` and `<font>`. The parser is forgiving
+`valign`, `bgcolor`, `width`, `height`, `border`, `cellpadding`, `cellspacing` and `<font>`. The `dir` attribute
+(`ltr`, `rtl` and `auto`), `<bdi>` and `<bdo>` set the text direction. The parser is forgiving
 about unclosed and misnested tags, the way browsers are.
 
 **Markdown**: [CommonMark 0.31](https://spec.commonmark.org/0.31.2/) (651 of the 652 spec examples pass; the one
@@ -544,8 +571,8 @@ specificity and `!important` handled as in browsers. Properties:
 
 | Area | Properties |
 | --- | --- |
-| Box model | `display` (block, inline, inline-block, flex, inline-flex, grid, inline-grid, list-item, table parts, none), `margin`, `padding`, `border` (solid, dashed, dotted, double), `border-radius` (incl. elliptical `/` radii and percentages; rounds backgrounds, borders, shadows and images), `box-shadow` (outer shadows; a blur is drawn as fading bands), `overflow` (`hidden`, `clip`, `auto` and `scroll` clip to the padding box, following its rounded corners, also in table cells; `overflow-x`/`overflow-y`), `outline` and `outline-offset` (all border styles; follows rounded corners), `width`, `height`, `min-`/`max-width`, `min-height`, `box-sizing`, `aspect-ratio` (incl. `auto <ratio>`), `object-fit` and `object-position` on images |
-| Text | `color`, `font`, `font-family`, `font-size`, `font-weight`, `font-style`, `line-height`, `text-align` (incl. justify), `text-decoration`, `text-transform`, `text-indent`, `letter-spacing`, `word-spacing`, `white-space`, `overflow-wrap`/`word-wrap`, `word-break` (`break-all`), `vertical-align`, `text-shadow` (several shadows; a blur is drawn as faint copies of the text), `text-overflow: ellipsis` (on a box that clips its overflow). Lines break as in Chrome: at spaces, after hyphens and dashes, at `&shy;` (showing a hyphen) and `&#8203;`; a word too wide for its line overflows unless `overflow-wrap` or `word-break` allows breaking it. `line-height: normal` comes from the font's own metrics, rounded to whole pixels as Chrome does, and border widths snap to whole pixels. Text is kerned as in Chrome: from the font's GPOS or `kern` table, and for the standard fonts from the Liberation fonts browsers use in their place. Embedded fonts get their standard ligatures (GSUB `liga`/`clig`, such as fi and ffi) as in Chrome, except in letter-spaced text; `font-variant-ligatures: none` or `font-feature-settings: "liga" 0` turns them off |
+| Box model | `display` (block, inline, inline-block, flex, inline-flex, grid, inline-grid, list-item, table parts, none), `margin`, `padding` (also the logical `margin-inline`/`-block` and `padding-inline`/`-block` properties and their `-start`/`-end` longhands), `border` (solid, dashed, dotted, double), `border-radius` (incl. elliptical `/` radii and percentages; rounds backgrounds, borders, shadows and images), `box-shadow` (outer shadows; a blur is drawn as fading bands), `overflow` (`hidden`, `clip`, `auto` and `scroll` clip to the padding box, following its rounded corners, also in table cells; `overflow-x`/`overflow-y`), `outline` and `outline-offset` (all border styles; follows rounded corners), `width`, `height`, `min-`/`max-width`, `min-height`, `box-sizing`, `aspect-ratio` (incl. `auto <ratio>`), `object-fit` and `object-position` on images |
+| Text | `color`, `font`, `font-family`, `font-size`, `font-weight`, `font-style`, `line-height`, `text-align` (incl. justify, `start` and `end`), `direction`, `unicode-bidi`, `text-decoration`, `text-transform`, `text-indent`, `letter-spacing`, `word-spacing`, `white-space`, `overflow-wrap`/`word-wrap`, `word-break` (`break-all`), `vertical-align`, `text-shadow` (several shadows; a blur is drawn as faint copies of the text), `text-overflow: ellipsis` (on a box that clips its overflow). Lines break as in Chrome: at spaces, after hyphens and dashes, at `&shy;` (showing a hyphen) and `&#8203;`; a word too wide for its line overflows unless `overflow-wrap` or `word-break` allows breaking it. `line-height: normal` comes from the font's own metrics, rounded to whole pixels as Chrome does, and border widths snap to whole pixels. Text is kerned as in Chrome: from the font's GPOS or `kern` table, and for the standard fonts from the Liberation fonts browsers use in their place. Embedded fonts get their standard ligatures (GSUB `liga`/`clig`, such as fi and ffi) as in Chrome, except in letter-spaced text; `font-variant-ligatures: none` or `font-feature-settings: "liga" 0` turns them off |
 | Backgrounds | `background-color`, `background-image` and `background` with `url()` images (PNG, JPEG, GIF, WebP, and SVG files drawn as vectors), `linear-gradient()`, `radial-gradient()`, `repeating-linear-gradient()` and `repeating-radial-gradient()` (several layers allowed); `background-repeat` (incl. `space`, `round`), `background-position` (incl. edge offsets like `right 10px bottom 5px`), `background-size` (`cover`, `contain`, lengths), `background-origin`, `background-clip`. Repeated images are written once as PDF tiling patterns. `url()` in a linked stylesheet is relative to the stylesheet and follows the same file access rules as `<img>`. As in Chrome's print output, the background of `<html>`, or else of `<body>`, fills every page area (images and gradients too, positioned against the root box and continuing from page to page); `@page { background: <colour> }` also colours the page margins. `opacity` on SVG |
 | Flexbox | `flex-direction`, `flex-wrap`, `flex-flow`, `flex`, `flex-grow`/`-shrink`/`-basis`, `order`, `justify-content`, `align-items`, `align-self`, `align-content`, `gap`, `margin: auto` |
 | Grid | `grid-template-columns`/`-rows` (lengths, `%`, `fr`, `auto`, `min-content`, `max-content`, `minmax()`, `fit-content()`, `repeat()` incl. `auto-fill`/`auto-fit`), `grid-auto-rows`/`-columns`, `grid-auto-flow`, `grid-template-areas`, `grid-template`, named lines (`[name]`), `grid-column`/`-row` (line numbers, names and `span`), `grid-area` (incl. area names), `gap`, `justify-items`/`-self`, `align-items`/`-self`, `justify-content`, `align-content`, `place-*` |
@@ -633,9 +660,13 @@ not listed in [What is supported](#what-is-supported) should be assumed missing.
 - Without registered fonts or `EmbedStandardFonts`, text uses the standard PDF fonts, so characters are limited to
   the Windows-1252 set (Western European languages); other characters are replaced with `?`. The bundled Liberation
   fonts add Central European, Greek and Cyrillic, but not CJK or other scripts: register fonts for those.
-- No complex-script shaping: Arabic, Hebrew, Indic and other scripts that need contextual forms or reordering are not
-  laid out correctly, and there is no right-to-left or vertical text (`direction`, `writing-mode`). Shaping is limited
-  to pair kerning and standard ligatures; no contextual alternates, small caps or other OpenType features.
+- Complex-script shaping covers Arabic and Hebrew (and other scripts written with Arabic letters, such as Persian and
+  Urdu). Devanagari and other Indic scripts, Thai, Khmer, Myanmar and Syriac are not shaped, so their vowel signs
+  and conjuncts come out wrong, and Thai text breaks only at spaces. There is no vertical text (`writing-mode`).
+- In Latin and other simple scripts, shaping is limited to pair kerning and standard ligatures; no contextual
+  alternates, small caps or other OpenType features.
+- Right-to-left text in SVG `<text>` is not reordered or shaped, and `text-overflow: ellipsis` is always placed at the
+  right end of a line.
 - Variable fonts use their default instance (`font-variation-settings` and `font-stretch` are ignored).
 - No automatic hyphenation (`hyphens: auto`); words break only at spaces, hyphens, `&shy;` and `&#8203;`.
 - SVG `<text>` uses the standard fonts (embedded as Liberation for PDF/A), only the first value of position lists and
@@ -741,7 +772,10 @@ and `Markdown/HtmlRenderer` writes the HTML, which then takes the same path as a
    For a tagged PDF, `Pdf/StructureTree` then maps the elements to structure types and gives every text node, image and
    list marker a slot in that tree.
 3. `Layout/LayoutEngine` lays out blocks, inline text (line breaking, justification), lists and tables
-   (automatic column widths), paginating as it goes, and produces a flat list of draw operations.
+   (automatic column widths), paginating as it goes, and produces a flat list of draw operations. Inline content with
+   right-to-left text gets its embedding levels from `Text/Bidi` (UAX #9), and each line is put in visual order after
+   it is broken. `Fonts/ComplexShaper` shapes Arabic and Hebrew runs with the font's GSUB and GPOS tables
+   (`Fonts/OpenTypeLayout`).
 4. `Pdf/PdfDocumentWriter` writes PDF 1.4: content streams, fonts, image XObjects, link annotations,
    the bookmark outline and the cross-reference table. A tagged PDF's content is wrapped in marked-content sequences
    for its slots (or as artifacts), and the structure tree and its parent tree are written last. `Fonts/FontSubsetter` and `Fonts/CffSubsetter` cut embedded

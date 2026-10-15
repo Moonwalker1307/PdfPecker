@@ -84,7 +84,7 @@ internal sealed partial class LayoutEngine
         return it;
     }
 
-    private enum ItemKind : byte { Text, Space, Break, Image, Box, Spacer, Anchor, Float, Absolute }
+    private enum ItemKind : byte { Text, Space, Break, Image, Box, Spacer, Anchor, Float, Absolute, Bidi } // Bidi: controls in Source
 
     private enum BreakAfter : byte { None, Break, SoftHyphen }
 
@@ -111,6 +111,7 @@ internal sealed partial class LayoutEngine
         public float MinWidth = -1;   // an inline-block's min-content contribution, when measuring (-1: Width)
         public float RelX, RelY;      // offset of position: relative inline ancestors
         public ContentSlot? Tag;      // tagged PDF: the structure slot of the text or image
+        public byte Level, Para;      // bidi embedding level, and the level of its paragraph
 
         public void Reset()
         {
@@ -128,6 +129,7 @@ internal sealed partial class LayoutEngine
             Element = null;
             FloatMin = RelX = RelY = 0;
             MinWidth = -1;
+            Level = Para = 0;
         }
 
         public string Text => Start == 0 && Length == Source.Length ? Source : Source.Substring(Start, Length);
@@ -298,9 +300,12 @@ internal sealed partial class LayoutEngine
         float left = s.PaddingLeft.Resolve(0) + s.BorderLeft + (s.MarginLeft.IsAuto ? 0 : s.MarginLeft.Resolve(0));
         float right = s.PaddingRight.Resolve(0) + s.BorderRight + (s.MarginRight.IsAuto ? 0 : s.MarginRight.Resolve(0));
         int first = st.Items.Count;
+        var (bidiOpen, bidiClose) = BidiControls(s);
+        if (bidiOpen != null) AddBidiControl(st, s, bidiOpen);
         if (left > 0) { var it_ = Rent(ItemKind.Spacer, s); it_.Width = left; it_.Href = href; it_.Deco = deco; st.Items.Add(it_); }
         foreach (var c in e.Children) CollectNode(st, c, href, deco);
         if (right > 0) { var it_ = Rent(ItemKind.Spacer, s); it_.Width = right; it_.Href = href; it_.Deco = deco; st.Items.Add(it_); }
+        if (bidiClose != null) AddBidiControl(st, s, bidiClose);
         if (s.Position == Position.Relative)
         {
             // An inline box shifted by position: relative; percentages of the containing block's height are ignored.
@@ -578,7 +583,7 @@ internal sealed partial class LayoutEngine
         {
             Item a = items[k], b = items[k + 1];
             if (a.Kind is not (ItemKind.Text or ItemKind.Space) || b.Kind is not (ItemKind.Text or ItemKind.Space)) continue;
-            if (!ReferenceEquals(a.Style, b.Style) || a.Length == 0 || b.Length == 0) continue;
+            if (!ReferenceEquals(a.Style, b.Style) || a.Length == 0 || b.Length == 0 || a.Level != 0 || b.Level != 0) continue;
             var font = a.Style.Font;
             if (!font.HasKerning) continue;
             int units = font.KernUnits(a.Source[a.Start + a.Length - 1], b.Source[b.Start]);
@@ -620,6 +625,7 @@ internal sealed partial class LayoutEngine
             return y;
         }
         var cs = container.Style;
+        ResolveBidi(items, cs);
         float indent = firstInBlock ? cs.TextIndent : 0;
         FloatLines? fl = null;
         if (FloatsBelow(y) || items.Exists(it => it.Kind == ItemKind.Float))
@@ -674,7 +680,7 @@ internal sealed partial class LayoutEngine
         void Add(Item it)
         {
             cur.Items.Add(it);
-            if (it.Kind is not (ItemKind.Anchor or ItemKind.Absolute)) hasContent = true;
+            if (it.Kind is not (ItemKind.Anchor or ItemKind.Absolute or ItemKind.Bidi)) hasContent = true;
         }
 
         int i = 0;
@@ -869,7 +875,7 @@ internal sealed partial class LayoutEngine
                 foreach (var it in items)
                 {
                     if (it.Kind == ItemKind.Absolute) QueueAbsolute(it.Element!, x + lineLeft, y);
-                    else SetAnchor(it.AnchorId!, y);
+                    else if (it.Kind == ItemKind.Anchor) SetAnchor(it.AnchorId!, y);
                 }
                 continue;
             }
@@ -884,20 +890,24 @@ internal sealed partial class LayoutEngine
             if (breakBefore != null && breakBefore[li]) y = NextPage(y);
             float baseline = y + maxA;
             float lineIndent = li == 0 ? indent : 0;
+            // Bidirectional text: the items in visual order; a right-to-left paragraph starts at the right, where its
+            // text-indent goes.
+            bool rtl = ReorderLine(items, ref _lineLevels);
             if (_kern.Length < items.Count) _kern = new float[items.Count * 2];
             float lineKern = KernBetweenItems(items, _kern);
             float free = lineW - lineIndent - line.Width - lineKern;
-            float lx = x + lineLeft + lineIndent;
+            float lx = x + lineLeft + (rtl ? 0 : lineIndent);
             float extra = 0;
             // text-align-last aligns the last line and lines before a forced break; a justified block's last line
-            // otherwise starts at the left.
-            var align = line.Forced && block.TextAlignLast is { } lastAlign ? lastAlign : block.TextAlign;
+            // otherwise starts at the start.
+            var align = ComputedStyle.Resolve(line.Forced && block.TextAlignLast is { } lastAlign ? lastAlign : block.TextAlign, rtl);
             switch (align)
             {
                 case TextAlign.Right: if (free > 0) lx += free; break;
                 case TextAlign.Center: if (free > 0) lx += free / 2; break;
                 case TextAlign.Justify:
                     if ((!line.Forced || block.TextAlignLast == TextAlign.Justify) && spaces > 0 && free > 0) extra = free / spaces;
+                    else if (rtl && free > 0) lx += free;
                     break;
             }
 
@@ -943,18 +953,22 @@ internal sealed partial class LayoutEngine
                         while (i < items.Count)
                         {
                             var r = items[i];
-                            if (r.Kind is not (ItemKind.Text or ItemKind.Space) || !ReferenceEquals(r.Style, style) || r.Tag != it.Tag) break;
-                            sb.Append(r.Source, r.Start, r.Length);
+                            if (r.Kind is not (ItemKind.Text or ItemKind.Space) || !ReferenceEquals(r.Style, style) || r.Tag != it.Tag || r.Level != it.Level) break;
                             i++;
                         }
+                        // Right-to-left words are drawn as one run in logical order, which the writer lays out from the
+                        // right; the visual order of the items is the reverse.
+                        bool rtlRun = (it.Level & 1) != 0;
+                        for (int k = rtlRun ? i - 1 : start; rtlRun ? k >= start : k < i; k += rtlRun ? -1 : 1)
+                            sb.Append(items[k].Source, items[k].Start, items[k].Length);
                         float rx = items[start].RelX;
                         float runX = xs[start] + rx, runEnd = xs[i] + rx;
                         if (style.Visible)
                         {
                             float bl = baseline + BaselineShift(style) + items[start].RelY;
-                            if (style.TextShadows != null) TextShadows(style, runX, bl, y, sb.ToString(), style.WordSpacing + extra);
+                            if (style.TextShadows != null) TextShadows(style, runX, bl, y, sb.ToString(), style.WordSpacing + extra, rtlRun);
                             _ops.Add(new TextOp(runX, bl, y, style.Font, style.FontSize, CssColor.Fade(style.Color, style.InlineFade), sb.ToString(),
-                                style.WordSpacing + extra, style.LetterSpacing) { Tag = it.Tag });
+                                style.WordSpacing + extra, style.LetterSpacing) { Tag = it.Tag, Rtl = rtlRun });
                             if (style.TextDecoration != TextDecoration.None) Decorate(style, runX, runEnd - runX, bl);
                         }
                         continue;
@@ -1189,7 +1203,7 @@ internal sealed partial class LayoutEngine
     /// Paints the text-shadows of a run under it, the first shadow on top. A blurred shadow is approximated by faint
     /// copies spread around its offset, which soften its edge.
     /// </summary>
-    private void TextShadows(ComputedStyle style, float x, float baseline, float lineTop, string text, float wordSpacing)
+    private void TextShadows(ComputedStyle style, float x, float baseline, float lineTop, string text, float wordSpacing, bool rtl)
     {
         var shadows = style.TextShadows!;
         for (int i = shadows.Length - 1; i >= 0; i--)
@@ -1201,13 +1215,13 @@ internal sealed partial class LayoutEngine
             float blur = Math.Min(sh.Blur, 50);
             if (blur <= 0.375f)
             {
-                _ops.Add(new TextOp(sx, sy, lineTop, style.Font, style.FontSize, color, text, wordSpacing, style.LetterSpacing));
+                _ops.Add(new TextOp(sx, sy, lineTop, style.Font, style.FontSize, color, text, wordSpacing, style.LetterSpacing) { Rtl = rtl });
                 continue;
             }
             // Seventeen faint copies, at the offset and on two rings around it: about two thirds of the alpha where they
             // all overlap, fading toward the edges.
             uint faint = (uint)Math.Max(1, MathF.Round((color >> 24) * 0.06f)) << 24 | (color & 0xFFFFFF);
-            _ops.Add(new TextOp(sx, sy, lineTop, style.Font, style.FontSize, faint, text, wordSpacing, style.LetterSpacing));
+            _ops.Add(new TextOp(sx, sy, lineTop, style.Font, style.FontSize, faint, text, wordSpacing, style.LetterSpacing) { Rtl = rtl });
             for (int ring = 1; ring <= 2; ring++)
             {
                 float r = blur * ring / 4;
@@ -1215,7 +1229,7 @@ internal sealed partial class LayoutEngine
                 {
                     float a = k * MathF.PI / 4 + ring * MathF.PI / 8;
                     _ops.Add(new TextOp(sx + r * MathF.Cos(a), sy + r * MathF.Sin(a), lineTop, style.Font, style.FontSize, faint, text,
-                        wordSpacing, style.LetterSpacing));
+                        wordSpacing, style.LetterSpacing) { Rtl = rtl });
                 }
             }
         }

@@ -200,7 +200,7 @@ public class StyleTests
         Assert.False(ById(doc, "b").Style.Bold);
         Assert.Equal(0xFF123456u, ById(doc, "l").Style.Color);
         Assert.Equal(TextAlign.Center, ById(doc, "a").Style.TextAlign);
-        Assert.Equal(TextAlign.Left, ById(doc, "b").Style.TextAlign);
+        Assert.Equal(TextAlign.Start, ById(doc, "b").Style.TextAlign);
     }
 
     [Fact]
