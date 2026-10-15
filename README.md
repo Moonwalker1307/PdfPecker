@@ -637,8 +637,8 @@ The pages keep their content, fonts, images, links, annotations, layers and fill
 bookmarks follow each other. A form field named like one in an earlier input is renamed `name_2`, `name_3` and so on, so
 the copies keep their own values. Document properties come from the first input unless `PdfMergeOptions` sets them. The
 result is never encrypted (pass it to `PdfProtector.Encrypt` to protect it) and has no signatures (merging would break
-them); PDF/A conformance, page labels and tags are not carried over. Attachments are kept, with one named like an
-earlier input's listed as `name (2).ext`. Images, fonts and other resources that are byte-for-byte the same in several inputs, such
+them); PDF/A conformance is not carried over. Page labels are kept (pages of an input without them are numbered as in
+that input), and attachments too, with one named like an earlier input's listed as `name (2).ext`. Images, fonts and other resources that are byte-for-byte the same in several inputs, such
 as a logo on every payslip of a run, are written once.
 
 Inputs are handled as untrusted: damaged files are repaired where possible, decoding is limited per input, and
@@ -647,6 +647,39 @@ on PDFs from Chrome (as IronPDF makes them), Ghostscript, LibreOffice, MuPDF, qp
 updates, scanners (JPEG, CCITT G4, CMYK, OCR text layers) and damaged files (wrong or missing cross-reference tables,
 truncated files, junk before the header); every merged page rendered pixel-identical to its original in Poppler.
 Merging four small documents takes about 1 ms, and 1,000 one-page Chrome payslips about 1 s.
+
+### Extracting, reordering and splitting pages
+
+`PdfPages` works on the pages of any existing PDF. Pages are numbered from 1, and ranges are written like `"1-3,5,8-"`
+(pages 1 to 3, 5, and 8 to the end): `"3,1,2"` reorders, `"1,1"` repeats, `"5-3"` runs backwards and `"last"` is the
+last page. `PdfPageRange.Parse` reads a range once for reuse; a page past the end throws `ArgumentOutOfRangeException`
+("Page 9 is out of range: the PDF has 5 pages.").
+
+```csharp
+byte[] summary = PdfPages.Extract(report, "1-3,5");              // or new[] { 3, 1, 2 }
+byte[] withoutCover = PdfPages.Remove(report, "1");
+byte[] turned = PdfPages.Rotate(scan, 90, "2,4");                 // clockwise; null pages = every page
+byte[][] parts = PdfPages.Split(report, 10);                      // 10 pages each
+byte[][] chapters = PdfPages.Split(report, "1-4", "5-9", "10-");
+int pages = PdfPages.Count(report);
+
+// Encrypted input, files, streams.
+byte[] page = PdfPages.Extract(secret, "2", new PdfPagesOptions { Password = "pw", Title = "Page 2" });
+PdfPages.ExtractFile("report.pdf", "summary.pdf", "1-3");
+PdfPages.SplitFile("report.pdf", 1, n => $"report-{n}.pdf");
+
+// Selected pages of several PDFs merged into one (also StreamingPdfMerger.Add(pdf, pages)).
+byte[] merged = PdfMerger.Merge(new[] { new PdfMergeInput(invoice, "1"), new PdfMergeInput(terms, "2-") });
+```
+
+For the pages taken, the result keeps their content, links and other annotations, the form fields with a widget on
+them, the bookmarks that go to them, page labels, the document properties and language. Links and bookmarks to pages
+left out are dropped (a bookmark with a kept bookmark below it stays, without a destination); links between pages taken
+go to their new place. A tagged input stays tagged: structure elements are kept when some of their content is on a page
+taken, so a PDF/UA-1 input gives a PDF/UA-1 result (veraPDF passes extracted, removed and split parts). A page taken more
+than once is copied with its links, but its form fields stay on the first copy and the later copies are not tagged, so
+such a result no longer claims PDF/UA. `Split` parses the PDF once for all parts. As with merging, the result is not
+encrypted and has no signatures.
 
 ## Stamping PDFs
 
