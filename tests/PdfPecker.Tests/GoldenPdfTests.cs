@@ -71,6 +71,9 @@ public class GoldenPdfTests
         var a = Normalize(Render(html));
         var b = Normalize(Render(html));
         Assert.Null(FirstDifference(a, b));
+        // Another zlib build compresses differently; only the inflated content counts.
+        var smallest = new PdfOptions { EmbedStandardFonts = true, AllowFileAccess = true, CompressionLevel = System.IO.Compression.CompressionLevel.SmallestSize };
+        Assert.Null(FirstDifference(a, Normalize(HtmlToPdf.Convert(File.ReadAllText(html), smallest))));
         var options = new PdfOptions { Compress = false };
         var c = Normalize(HtmlToPdf.Convert("<p>one</p>", options));
         var d = Normalize(HtmlToPdf.Convert("<p>two</p>", options));
@@ -103,7 +106,12 @@ public class GoldenPdfTests
                 int len = length.Success ? int.Parse(length.Groups[1].Value) : 0;
                 int dataAt = streamAt + "stream\n".Length;
                 var data = pdf.AsSpan(dataAt, Math.Min(len, pdf.Length - dataAt)).ToArray();
-                if (dict.Contains("/FlateDecode", StringComparison.Ordinal)) data = Inflate(data);
+                if (dict.Contains("/FlateDecode", StringComparison.Ordinal))
+                {
+                    data = Inflate(data);
+                    // The compressed length depends on the zlib build; the inflated data is compared instead.
+                    dict = dict.Remove(length.Index, length.Length);
+                }
                 stream = Dates.Replace(Encoding.Latin1.GetString(data), "");
                 end = text.IndexOf("endobj", dataAt + len, StringComparison.Ordinal);
                 objects.Add(new PdfObject(int.Parse(m.Groups[1].Value), Dates.Replace(dict, ""), stream));
