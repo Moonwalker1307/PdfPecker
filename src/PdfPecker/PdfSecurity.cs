@@ -28,6 +28,8 @@ public enum PdfPermissions
 
 /// <summary>
 /// Password protection for the generated PDF: AES-256 encryption (PDF 2.0 / Acrobat X standard security handler, revision 6).
+/// Set it as <see cref="PdfOptions.Security"/> while converting, or pass it to <see cref="PdfProtector.Encrypt(byte[], PdfSecurity, string?)"/>
+/// to protect an existing PDF.
 /// </summary>
 public sealed class PdfSecurity
 {

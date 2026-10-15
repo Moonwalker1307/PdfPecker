@@ -452,7 +452,7 @@ internal sealed class PdfFile
                     if (end > p && Data[end - 1] == '\r') end--;
                 }
                 var raw = Data.AsSpan(p, Math.Max(0, end - p)).ToArray();
-                if (decrypt && _decryptor != null && num != _encryptObjNum && GetName(dict, "Type") != "XRef")
+                if (decrypt && _decryptor != null && num != _encryptObjNum && StreamIsEncrypted(dict))
                     raw = _decryptor.DecryptStream(raw, num, gen);
                 var s = new PdfStream(dict.Entries, raw) { ObjectNumber = num };
                 if (decrypt && _decryptor != null && num != _encryptObjNum) DecryptStrings(s, num, gen);
@@ -462,6 +462,26 @@ internal sealed class PdfFile
         }
         if (decrypt && _decryptor != null && num != _encryptObjNum) obj = DecryptStrings(obj, num, gen);
         return obj;
+    }
+
+    /// <summary>
+    /// Whether a stream's data is encrypted: not a cross-reference stream, not the XMP metadata of a file encrypted with
+    /// /EncryptMetadata false, and not a stream whose own /Crypt filter is the Identity filter (the default when the
+    /// filter names none).
+    /// </summary>
+    private bool StreamIsEncrypted(PdfDict dict)
+    {
+        var type = GetName(dict, "Type");
+        if (type == "XRef" || type == "Metadata" && !_decryptor!.EncryptMetadata) return false;
+        var filter = dict["Filter"];
+        PdfObject? parms = dict["DecodeParms"];
+        if (filter is PdfArray fa && fa.Count > 0)
+        {
+            filter = fa[0];
+            parms = parms is PdfArray pa && pa.Count > 0 ? pa[0] : null;
+        }
+        if (filter is not PdfName { Value: "Crypt" }) return true;
+        return parms is PdfDict pd && pd["Name"] is PdfName { Value: var name } && name != "Identity";
     }
 
     private PdfObject DecryptStrings(PdfObject o, int num, int gen)

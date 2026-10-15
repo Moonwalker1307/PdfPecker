@@ -325,6 +325,33 @@ bundled Liberation fonts (see [Fonts](#fonts)). PDF/A does not allow encryption,
 `Security` throws an `ArgumentException`. AES-256 keys come from a password hash that is slow on purpose, which adds
 about 3 ms to a conversion.
 
+To add, change or remove the password of a PDF you already have (from any producer, not only PdfPecker), use
+`PdfProtector`:
+
+```csharp
+// Encrypt any PDF with AES-256
+byte[] locked = PdfProtector.Encrypt(pdf, new PdfSecurity { UserPassword = "1234", Permissions = PdfPermissions.Print });
+
+// Change the passwords or permissions of an encrypted PDF (give its current user or owner password)
+byte[] relocked = PdfProtector.Encrypt(locked, new PdfSecurity { UserPassword = "5678" }, password: "1234");
+
+// Remove the encryption, and with it the permission restrictions
+byte[] open = PdfProtector.Decrypt(locked, "1234");
+
+// Stream overloads, and a check
+PdfProtector.Encrypt(inputStream, outputStream, security);
+bool encrypted = PdfProtector.IsEncrypted(pdf);
+```
+
+Encrypted inputs can use RC4 (40 to 128 bit), AES-128 or AES-256; the output of `Encrypt` is always AES-256. Like
+other PDF tools, `PdfProtector` accepts the user password as well as the owner password (or none, for a file that only
+restricts permissions), so anyone who can open a document can also lift its permissions. A wrong password throws
+`PdfPasswordException`. The document is rewritten as a whole and keeps its pages, bookmarks, links, form fields and
+values, tags, metadata, page labels and attachments; earlier revisions from incremental updates are dropped. Signed
+PDFs are refused with an `ArgumentException` (rewriting them would break the signatures; sign after encrypting
+instead), as is encrypting a PDF/A file, or a PDF/UA file without `PdfPermissions.ExtractForAccessibility`.
+`Decrypt` returns a PDF that is not encrypted unchanged.
+
 `Watermark` applies while converting HTML; to stamp a PDF you already have, see [Stamping PDFs](#stamping-pdfs).
 
 ### Accessibility: tagged PDF and PDF/UA
@@ -579,8 +606,9 @@ further calls. `Passwords` are matched to inputs in the order they are added.
 The pages keep their content, fonts, images, links, annotations, layers and fillable form fields, and each input's
 bookmarks follow each other. A form field named like one in an earlier input is renamed `name_2`, `name_3` and so on, so
 the copies keep their own values. Document properties come from the first input unless `PdfMergeOptions` sets them. The
-result is never encrypted and has no signatures (merging would break them); PDF/A conformance, page labels and tags
-are not carried over. Attachments are kept, with one named like an earlier input's listed as `name (2).ext`. Images, fonts and other resources that are byte-for-byte the same in several inputs, such
+result is never encrypted (pass it to `PdfProtector.Encrypt` to protect it) and has no signatures (merging would break
+them); PDF/A conformance, page labels and tags are not carried over. Attachments are kept, with one named like an
+earlier input's listed as `name (2).ext`. Images, fonts and other resources that are byte-for-byte the same in several inputs, such
 as a logo on every payslip of a run, are written once.
 
 Inputs are handled as untrusted: damaged files are repaired where possible, decoding is limited per input, and
