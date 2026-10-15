@@ -58,22 +58,37 @@ public static class HtmlToPdf
         if (!(options.Scale >= 0.1f && options.Scale <= 2f))
             throw new ArgumentOutOfRangeException(nameof(options), options.Scale, "PdfOptions.Scale must be between 0.1 and 2.");
         var conformance = options.Conformance;
+        if (!Enum.IsDefined(conformance))
+            throw new ArgumentOutOfRangeException(nameof(options), conformance, "Unknown PdfOptions.Conformance.");
+        if (!Enum.IsDefined(options.Accessibility))
+            throw new ArgumentOutOfRangeException(nameof(options), options.Accessibility, "Unknown PdfOptions.Accessibility.");
         if (options.EInvoice != null)
         {
-            // Factur-X / ZUGFeRD files are PDF/A-3, the part that allows attachments.
+            // Factur-X / ZUGFeRD files are PDF/A-3, the part that allows attachments; PDF/A-4f allows them too.
             if (conformance == PdfConformance.None) conformance = PdfConformance.PdfA3b;
-            else if (conformance != PdfConformance.PdfA3b)
-                throw new ArgumentException("An e-invoice needs PDF/A-3: set PdfOptions.Conformance to PdfA3b or leave it at None.", nameof(options));
+            else if (conformance is not (PdfConformance.PdfA3b or PdfConformance.PdfA3u or PdfConformance.PdfA4f))
+                throw new ArgumentException("An e-invoice needs a PDF/A level that allows attachments: set PdfOptions.Conformance to "
+                    + "PdfA3b, PdfA3u or PdfA4f, or leave it at None for PdfA3b.", nameof(options));
         }
         var attachments = EmbeddedFiles.Prepare(options.Attachments, options.EInvoice);
-        if (conformance == PdfConformance.PdfA2b && attachments.Count > 0)
-            throw new ArgumentException("PDF/A-2b allows attaching only PDF/A files, which PdfPecker does not check: "
-                + "set PdfOptions.Conformance to PdfA3b, which allows any attachment, or to None for a plain PDF.", nameof(options));
+        if (conformance == PdfConformance.PdfA4f && attachments.Count == 0)
+            throw new ArgumentException("PDF/A-4f is for files with attachments: use it with PdfOptions.Attachments or EInvoice, or use PdfA4.", nameof(options));
+        if (conformance is PdfConformance.PdfA2b or PdfConformance.PdfA2u or PdfConformance.PdfA4 && attachments.Count > 0)
+            throw new ArgumentException($"PDF/A-{conformance.ToString()[4..].ToLowerInvariant()} allows attaching only PDF/A files, which PdfPecker does not check: "
+                + "set PdfOptions.Conformance to PdfA3b, PdfA3u or PdfA4f, which allow any attachment, or to None for a plain PDF.", nameof(options));
+        // PDF/UA-1 and PDF/A-2 and -3 are based on PDF 1.7, PDF/UA-2 and PDF/A-4 on PDF 2.0: a file is one or the other.
+        if (options.Accessibility == PdfAccessibility.PdfUA2 && conformance != PdfConformance.None && !PdfA.IsPdf20(conformance))
+            throw new ArgumentException($"PDF/UA-2 is based on PDF 2.0 and {conformance} on PDF 1.7: combine PdfUA2 with PdfA4 or PdfA4f, "
+                + "or use PdfUA1.", nameof(options));
+        if (options.Accessibility == PdfAccessibility.PdfUA1 && PdfA.IsPdf20(conformance))
+            throw new ArgumentException($"PDF/UA-1 is based on PDF 1.7 and {conformance} on PDF 2.0: combine PdfA4 with PdfUA2, "
+                + "or use PDF/A-2 or PDF/A-3 with PdfUA1.", nameof(options));
         if (conformance != PdfConformance.None && options.Security != null)
             throw new ArgumentException(options.EInvoice != null
                 ? "An e-invoice is a PDF/A file, which does not allow encryption: remove PdfOptions.Security."
                 : "PDF/A does not allow encryption: set PdfOptions.Conformance or PdfOptions.Security, not both.", nameof(options));
-        bool pdfua = options.Accessibility == PdfAccessibility.PdfUA1;
+        int uaPart = options.Accessibility switch { PdfAccessibility.PdfUA1 => 1, PdfAccessibility.PdfUA2 => 2, _ => 0 };
+        bool pdfua = uaPart > 0;
         if (pdfua && options.Security is { } security && (security.Permissions & PdfPermissions.ExtractForAccessibility) == 0)
             throw new ArgumentException("PDF/UA needs PdfPermissions.ExtractForAccessibility, so screen readers can read an encrypted file.", nameof(options));
         if (options.Watermark is { } wm && string.IsNullOrEmpty(wm.Text) && wm.Image == null)
@@ -326,7 +341,7 @@ public static class HtmlToPdf
             MaxPages = options.MaxPages,
             Cancellation = cancellationToken,
             Structure = structure,
-            PdfUA = pdfua,
+            PdfUAPart = uaPart,
             Language = structure == null ? null : options.Language ?? structure.Language ?? (pdfua ? "en" : null),
             Properties = new DocumentProperties
             {
