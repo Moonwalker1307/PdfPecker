@@ -11,17 +11,44 @@ namespace PdfPecker.Pdf;
 /// joined under one root, with their parent-tree keys shifted so they stay apart. Identical streams without references
 /// (images, embedded fonts, ICC profiles), which a run of documents from one template repeats, are written once.
 /// </summary>
+/// <remarks>
+/// An input can be given a <see cref="PageSpec"/>: which pages to take, in which order, and which to turn. Pages left out
+/// map to null, and what only they use is not copied: their annotations, links to them, bookmarks to them (unless an
+/// included bookmark is below one, which then stays without a destination), form fields with widgets only on them, and
+/// structure elements with content only on them, along with their parent-tree entries. A page taken again is written as
+/// a copy without structure keys, form widgets or popups; its other annotations are copied too.
+/// </remarks>
 internal sealed class PdfMergeWriter
 {
+    /// <summary>Which pages of an input to take, in order, and which of them to turn.</summary>
+    internal sealed class PageSpec
+    {
+        public PdfPageRange? Pages; // null = every page
+        public bool Invert; // Pages are the ones to leave out
+        public int Rotate; // degrees clockwise, a multiple of 90, added to the pages' rotation
+        public PdfPageRange? RotatePages; // the pages Rotate applies to; null = all
+    }
+
+    private readonly record struct SourcePage(PdfDict Page, int Num, PdfObject? Resources, PdfObject? MediaBox, PdfObject? CropBox, PdfObject? Rotate);
+
+    private readonly record struct OutPage(int Src, int Id, bool Repeat, int Turn);
+
     private sealed class Input
     {
         public PdfFile File = null!;
-        public readonly List<(PdfDict Page, int SourceNum, int Id, PdfObject? Resources, PdfObject? MediaBox, PdfObject? CropBox, PdfObject? Rotate)> Pages = new();
+        public readonly List<SourcePage> Source = new(); // every page of the input
+        public readonly List<OutPage> Out = new(); // the pages written, in order
+        public readonly HashSet<int> PageNums = new(); // object numbers of the input's pages
+        public bool Partial, Repeats; // some pages are left out; some are taken more than once
+        public HashSet<int>? KeptAnnots; // with Partial: annotations on included pages that are kept
+        public readonly HashSet<int> DroppedKeys = new(); // with Partial: parent-tree keys of content left out
+        public List<PdfObject>? StructKids; // with Partial: the structure root's kids that are kept
+        public readonly Dictionary<int, Dictionary<string, PdfObject>> IdOverrides = new(); // by new id, for copies of annotations
         public readonly Dictionary<int, int> Map = new(); // source object number -> new id; 0 = write null
         public readonly List<int> TopOutline = new(); // source numbers of the top-level bookmarks
         public Dictionary<string, PdfObject>? NamedDests;
         public readonly List<int> Fields = new(); // source numbers of the top-level form fields kept
-        public readonly Dictionary<int, Dictionary<string, PdfObject>> Overrides = new(); // entries to replace when copying an object
+        public readonly Dictionary<int, Dictionary<string, PdfObject>> Overrides = new(); // entries to replace when copying an object; null removes
         public bool NeedAppearances;
         public int StructOffset = -1; // added to the input's parent-tree keys; -1 = untagged, its keys are dropped
         public SortedDictionary<int, PdfObject>? ParentNums;
@@ -60,13 +87,21 @@ internal sealed class PdfMergeWriter
     private readonly HashSet<string> _roleNames = new(StringComparer.Ordinal), _classNames = new(StringComparer.Ordinal);
     private PdfString? _lang;
     private bool _allPdfUa = true; // every input so far claims PDF/UA-1, so the result can too
+    // Page labels of every page written; written when any input has them.
+    private readonly List<(string? Style, PdfString? Prefix, int Value)> _labels = new();
+    private bool _anyLabels;
+    private readonly bool _single; // one input: messages say "the PDF" rather than "PDF 1"
+
+    /// <summary>The most pages an input given a <see cref="PageSpec"/> may have.</summary>
+    private const int MaxSourcePages = 1_000_000;
 
     /// <summary>A writer; <paramref name="sink"/> is where the result goes as it is made, or null to keep it in memory (see <see cref="ToArray"/>).</summary>
-    public PdfMergeWriter(PdfMergeOptions options, CancellationToken cancel, Stream? sink = null)
+    public PdfMergeWriter(PdfMergeOptions options, CancellationToken cancel, Stream? sink = null, bool single = false)
     {
         _options = options;
         _cancel = cancel;
         _sink = sink;
+        _single = single;
         _out = _main;
         _nextId = InfoId + 1;
     }
@@ -79,7 +114,7 @@ internal sealed class PdfMergeWriter
     /// <summary>The number of pages added so far.</summary>
     public int PageCount => _pageCount;
 
-    /// <summary>Stops the next <see cref="Add"/> or <see cref="Finish"/>, for callers that pass a token per call.</summary>
+    /// <summary>Stops the next <see cref="Add(byte[], PageSpec)"/> or <see cref="Finish"/>, for callers that pass a token per call.</summary>
     public CancellationToken Cancellation { set => _cancel = value; }
 
     /// <summary>Merges PDFs held in memory and returns the result.</summary>
@@ -94,44 +129,68 @@ internal sealed class PdfMergeWriter
     /// Copies one input's pages, and everything they use, to the output. The input is parsed, written and let go before
     /// the next one is read, so only one input is held in memory at a time.
     /// </summary>
-    public void Add(byte[] data)
+    public void Add(byte[] data, PageSpec? spec = null)
     {
         _cancel.ThrowIfCancellationRequested();
         int index = _inputs++;
-        if (index == 0) _out.Ascii("%PDF-1.7\n%").Bytes(new byte[] { 0xE2, 0xE3, 0xCF, 0xD3 }).Nl();
-        var input = new Input();
         string? password = _options.Passwords is { } pw && index < pw.Count ? pw[index] : null;
-        int maxPages = Math.Max(1, _options.MaxPages);
         using (PdfFile.BeginRender(_cancel))
+            AddFile(Open(data, password, _single ? null : $"PDF {index + 1}"), index, spec);
+    }
+
+    /// <summary>Copies pages of a PDF that is already open (to split one PDF into several without parsing it again).</summary>
+    public void Add(PdfFile file, PageSpec? spec)
+    {
+        _cancel.ThrowIfCancellationRequested();
+        int index = _inputs++;
+        using (PdfFile.BeginRender(_cancel))
+            AddFile(file, index, spec);
+    }
+
+    /// <summary>Parses a PDF, with messages naming it as <paramref name="label"/> (null: "The PDF").</summary>
+    public static PdfFile Open(byte[] data, string? password, string? label)
+    {
+        try
         {
-            try
-            {
-                input.File = PdfFile.Open(data, password);
-            }
-            catch (PdfFormatException ex)
-            {
-                throw new InvalidDataException($"PDF {index + 1} is not readable: {ex.Message}", ex);
-            }
-            catch (PdfPasswordException ex)
-            {
-                throw new PdfPasswordException($"PDF {index + 1}: {ex.Message}");
-            }
+            return PdfFile.Open(data, password);
+        }
+        catch (PdfFormatException ex)
+        {
+            throw new InvalidDataException($"{label ?? "The PDF"} is not readable: {ex.Message}", ex);
+        }
+        catch (PdfPasswordException ex) when (label != null)
+        {
+            throw new PdfPasswordException($"{label}: {ex.Message}");
+        }
+    }
+
+    private void AddFile(PdfFile file, int index, PageSpec? spec)
+    {
+        if (index == 0) _out.Ascii("%PDF-1.7\n%").Bytes(new byte[] { 0xE2, 0xE3, 0xCF, 0xD3 }).Nl();
+        var input = new Input { File = file };
+        int maxPages = Math.Max(1, _options.MaxPages);
+        {
             var catalog = input.File.Catalog;
             if (input.File.Trailer["Root"] is PdfRef root) input.Map[root.Num] = 0;
             if (input.File.Trailer["Encrypt"] is PdfRef enc) input.Map[enc.Num] = 0;
+            bool selecting = spec?.Pages != null;
             if (catalog?["Pages"] is { } pagesRef)
-                CollectPages(input, pagesRef, null, null, null, null, new HashSet<PdfDict>(ReferenceEqualityComparer.Instance), 0);
-            _pageCount += input.Pages.Count;
+                CollectPages(input, pagesRef, null, null, null, null, new HashSet<PdfDict>(ReferenceEqualityComparer.Instance), 0,
+                    selecting ? Math.Max(maxPages, MaxSourcePages) : maxPages, selecting ? $"{Label(index)} has" : "The merged document has");
+            SelectPages(input, spec, index, maxPages);
+            _pageCount += input.Out.Count;
             if (_pageCount > maxPages)
                 throw new PdfLimitException($"The merged document has more than {maxPages} pages (PdfMergeOptions.MaxPages).");
+            if (input.Partial) FilterAnnotations(input);
             if (_options.Bookmarks) CollectOutline(input, catalog);
             CollectFields(input, catalog, _fieldNames, ref _formDA);
             CollectStructure(input, catalog);
+            CollectLabels(input, catalog);
             if (index == 0) _props = Properties(input.File);
             _needAppearances |= input.NeedAppearances;
 
             var queue = new Queue<(int Num, int Id)>();
-            foreach (var p in input.Pages)
+            foreach (var p in input.Out)
             {
                 WritePage(input, p, queue);
                 _pageIds.Add(p.Id);
@@ -191,16 +250,39 @@ internal sealed class PdfMergeWriter
                 var obj = input.File.GetObject(num) ?? PdfNull.Instance;
                 Begin(id);
                 if (obj is PdfStream s) WriteStream(input, s, queue);
-                else if (obj is PdfDict od && input.Overrides.TryGetValue(num, out var changes))
-                {
-                    var entries = new Dictionary<string, PdfObject>(od.Entries, StringComparer.Ordinal);
-                    foreach (var (key, value) in changes) entries[key] = value;
-                    WriteDict(input, new PdfDict(entries), queue, 0);
-                }
+                else if (obj is PdfDict od && (input.Overrides.ContainsKey(num) || input.IdOverrides.ContainsKey(id)))
+                    WriteDict(input, Overridden(input, od, num, id), queue, 0);
                 else WriteObject(input, obj, queue, 0);
                 End();
             }
         }
+    }
+
+    private string Label(int index) => _single ? "The PDF" : $"PDF {index + 1}";
+
+    /// <summary>A dictionary with the entries <see cref="Input.Overrides"/> (by source number) and <see cref="Input.IdOverrides"/> (by new id) replace or remove.</summary>
+    private static PdfDict Overridden(Input input, PdfDict d, int num, int id)
+    {
+        var entries = new Dictionary<string, PdfObject>(d.Entries, StringComparer.Ordinal);
+        if (num != 0 && input.Overrides.TryGetValue(num, out var changes)) Apply(changes);
+        if (id != 0 && input.IdOverrides.TryGetValue(id, out var copyChanges)) Apply(copyChanges);
+        return new PdfDict(entries);
+
+        void Apply(Dictionary<string, PdfObject> c)
+        {
+            foreach (var (key, value) in c)
+            {
+                if (value.IsNull) entries.Remove(key);
+                else entries[key] = value;
+            }
+        }
+    }
+
+    /// <summary>Adds an entry to replace (or, with null, remove) when the input's object <paramref name="num"/> is copied.</summary>
+    private static void SetOverride(Input input, int num, string key, PdfObject value)
+    {
+        if (!input.Overrides.TryGetValue(num, out var changes)) input.Overrides[num] = changes = new Dictionary<string, PdfObject>(StringComparer.Ordinal);
+        changes[key] = value;
     }
 
     /// <summary>Writes the page tree, catalog, cross-reference table and trailer that close the document.</summary>
@@ -259,6 +341,7 @@ internal sealed class PdfMergeWriter
             if (!string.IsNullOrEmpty(_props!.Title)) _out.Ascii(" /ViewerPreferences << /DisplayDocTitle true >>");
         }
         if (_lang != null) { _out.Ascii(" /Lang "); PdfSyntax.HexString(_out, _lang.Bytes); }
+        if (_anyLabels) WritePageLabels();
         if (_ocgs.Length > 0)
         {
             _out.Ascii(" /OCProperties << /OCGs [").Bytes(_ocgs.Span).Ascii("] /D << /Order [").Bytes(_ocgs.Span).Ascii("]");
@@ -319,7 +402,7 @@ internal sealed class PdfMergeWriter
     // ------------------------------------------------------------------ reading
 
     private void CollectPages(Input input, PdfObject node, PdfObject? res, PdfObject? media, PdfObject? crop, PdfObject? rotate,
-        HashSet<PdfDict> seen, int depth)
+        HashSet<PdfDict> seen, int depth, int limit, string tooMany)
     {
         var file = input.File;
         if (depth > 64 || file.Resolve(node) is not PdfDict dict || !seen.Add(dict)) return;
@@ -332,15 +415,120 @@ internal sealed class PdfMergeWriter
         {
             // An intermediate node: references to it (a page's /Parent) are dropped.
             if (node is PdfRef r) input.Map[r.Num] = 0;
-            foreach (var k in kids.Items) CollectPages(input, k, res, media, crop, rotate, seen, depth + 1);
+            foreach (var k in kids.Items) CollectPages(input, k, res, media, crop, rotate, seen, depth + 1, limit, tooMany);
             return;
         }
-        if (input.Pages.Count + 1 > Math.Max(1, _options.MaxPages))
-            throw new PdfLimitException($"The merged document has more than {_options.MaxPages} pages (PdfMergeOptions.MaxPages).");
-        int id = NewId();
+        if (input.Source.Count + 1 > limit)
+            throw new PdfLimitException(limit == Math.Max(1, _options.MaxPages)
+                ? $"{tooMany} more than {limit} pages (PdfMergeOptions.MaxPages)."
+                : $"{tooMany} more than {limit} pages.");
         int num = node is PdfRef pr ? pr.Num : 0;
-        if (num != 0) input.Map[num] = id;
-        input.Pages.Add((dict, num, id, res, media, crop, rotate));
+        if (num != 0) input.PageNums.Add(num);
+        input.Source.Add(new SourcePage(dict, num, res, media, crop, rotate));
+    }
+
+    /// <summary>The number of pages of a parsed PDF, found as <see cref="CollectPages"/> finds them.</summary>
+    public static int CountPages(PdfFile file)
+    {
+        var seen = new HashSet<PdfDict>(ReferenceEqualityComparer.Instance);
+        int count = 0;
+        Walk(file.Catalog?["Pages"], 0);
+        return count;
+
+        void Walk(PdfObject? node, int depth)
+        {
+            if (depth > 64 || file.Resolve(node) is not PdfDict dict || !seen.Add(dict) || count > MaxSourcePages) return;
+            if (file.GetArray(dict, "Kids") is { } kids && file.GetName(dict, "Type") != "Page")
+                foreach (var k in kids.Items) Walk(k, depth + 1);
+            else count++;
+        }
+    }
+
+    /// <summary>
+    /// Decides which pages are written, in which order, and gives each its new id. A page's references lead to its first
+    /// copy; those of a page left out are written as null.
+    /// </summary>
+    private void SelectPages(Input input, PageSpec? spec, int index, int maxPages)
+    {
+        int count = input.Source.Count;
+        string what = _single ? "the PDF" : $"PDF {index + 1}";
+        List<int> order;
+        if (spec?.Pages == null) order = Enumerable.Range(0, count).ToList();
+        else if (spec.Invert)
+        {
+            var drop = spec.Pages.Mark(count, what);
+            order = Enumerable.Range(0, count).Where(i => !drop[i]).ToList();
+            if (order.Count == 0) throw new ArgumentException($"Removing these pages would leave none: {what} has {count} page{(count == 1 ? "" : "s")}.", "pages");
+        }
+        else order = spec.Pages.Resolve(count, what, maxPages - _pageCount);
+        if (_pageCount + order.Count > maxPages)
+            throw new PdfLimitException($"The merged document has more than {maxPages} pages (PdfMergeOptions.MaxPages).");
+        bool[]? turned = spec is { Rotate: not 0 } ? spec.RotatePages?.Mark(count, what) ?? Enumerable.Repeat(true, count).ToArray() : null;
+        var used = new bool[count];
+        foreach (int src in order)
+        {
+            bool repeat = used[src];
+            used[src] = true;
+            input.Repeats |= repeat;
+            int id = NewId();
+            var page = input.Source[src];
+            if (!repeat && page.Num != 0) input.Map[page.Num] = id;
+            input.Out.Add(new OutPage(src, id, repeat, turned != null && turned[src] ? spec!.Rotate : 0));
+        }
+        for (int i = 0; i < count; i++)
+        {
+            if (used[i]) continue;
+            input.Partial = true;
+            if (input.Source[i].Num != 0) input.Map[input.Source[i].Num] = 0;
+        }
+    }
+
+    /// <summary>Whether <paramref name="o"/> is (a reference to) a page of the input that is left out.</summary>
+    private static bool IsLeftOut(Input input, PdfObject? o)
+        => o is PdfRef r && input.PageNums.Contains(r.Num) && IsDropped(input, r.Num);
+
+    /// <summary>Whether the input's object <paramref name="num"/> is left out of the result.</summary>
+    private static bool IsDropped(Input input, int num) => input.Map.TryGetValue(num, out int id) && id == 0;
+
+    /// <summary>The page a bookmark or link goes to (the first item of its destination), or null.</summary>
+    private PdfObject? DestPage(Input input, PdfDict d)
+    {
+        var file = input.File;
+        var dest = d["Dest"];
+        if (dest == null && file.GetDict(d, "A") is { } a && file.GetName(a, "S") == "GoTo") dest = a["D"];
+        dest = file.Resolve(dest);
+        if (dest is PdfString or PdfName) dest = NamedDest(input, dest);
+        if (dest is PdfDict dd) dest = file.Resolve(dd["D"]);
+        return dest is PdfArray { Count: > 0 } arr ? arr[0] : null;
+    }
+
+    /// <summary>
+    /// With pages left out: drops their annotations, and links on the pages kept that go to them, and notes the
+    /// structure keys of what is dropped so their parent-tree entries go too.
+    /// </summary>
+    private void FilterAnnotations(Input input)
+    {
+        var file = input.File;
+        var kept = input.KeptAnnots = new HashSet<int>();
+        var dropped = new HashSet<int>();
+        var included = new bool[input.Source.Count];
+        foreach (var o in input.Out) included[o.Src] = true;
+        for (int i = 0; i < input.Source.Count; i++)
+        {
+            var page = input.Source[i].Page;
+            if (!included[i] && file.Resolve(page["StructParents"]) is PdfNumber { IsInteger: true } pk) input.DroppedKeys.Add(pk.IntValue);
+            if (file.GetArray(page, "Annots") is not { } annots) continue;
+            foreach (var a in annots.Items)
+            {
+                if (a is not PdfRef r || file.Resolve(r) is not PdfDict ad) continue;
+                bool drop = !included[i] || (file.GetName(ad, "Subtype") == "Link" && IsLeftOut(input, DestPage(input, ad)));
+                if (!drop) { kept.Add(r.Num); continue; }
+                dropped.Add(r.Num);
+                if (file.Resolve(ad["StructParent"]) is PdfNumber { IsInteger: true } k) input.DroppedKeys.Add(k.IntValue);
+            }
+        }
+        foreach (var num in dropped)
+            if (!kept.Contains(num)) input.Map[num] = 0;
     }
 
     private void CollectOutline(Input input, PdfDict? catalog)
@@ -349,16 +537,75 @@ internal sealed class PdfMergeWriter
         var rootRef = catalog?["Outlines"];
         if (file.Resolve(rootRef) is not PdfDict root) return;
         var seen = new HashSet<int>();
-        var item = root["First"];
-        while (item is PdfRef r && seen.Add(r.Num) && seen.Count <= 100_000)
+        if (input.Partial)
         {
-            if (file.GetObject(r.Num) is not PdfDict d) break;
-            if (!input.Map.ContainsKey(r.Num)) input.Map[r.Num] = NewId();
-            input.TopOutline.Add(r.Num);
-            item = d["Next"];
+            input.TopOutline.AddRange(FilterOutlineLevel(input, root["First"], seen, 0, out _));
+            foreach (var num in input.TopOutline)
+                if (!input.Map.ContainsKey(num)) input.Map[num] = NewId();
+        }
+        else
+        {
+            var item = root["First"];
+            while (item is PdfRef r && seen.Add(r.Num) && seen.Count <= 100_000)
+            {
+                if (file.GetObject(r.Num) is not PdfDict d) break;
+                if (!input.Map.ContainsKey(r.Num)) input.Map[r.Num] = NewId();
+                input.TopOutline.Add(r.Num);
+                item = d["Next"];
+            }
         }
         // The old root is replaced by the merged one: its children's /Parent is rewritten when they are written.
         if (rootRef is PdfRef rr && !input.Map.ContainsKey(rr.Num)) input.Map[rr.Num] = 0;
+    }
+
+    /// <summary>
+    /// The bookmarks of one level that are kept when pages are left out: those that go to a page kept or nowhere, and those
+    /// with a kept bookmark below them (which lose their destination when it is a page left out). The kept ones are
+    /// linked to each other, and <paramref name="visible"/> is how many lines they show, counting open children.
+    /// </summary>
+    private List<int> FilterOutlineLevel(Input input, PdfObject? first, HashSet<int> seen, int depth, out int visible)
+    {
+        var file = input.File;
+        var kept = new List<int>();
+        visible = 0;
+        var item = first;
+        while (item is PdfRef r && seen.Add(r.Num) && seen.Count <= 100_000)
+        {
+            if (file.GetObject(r.Num) is not PdfDict d) break;
+            item = d["Next"];
+            int below = 0;
+            var kids = depth < 64 ? FilterOutlineLevel(input, d["First"], seen, depth + 1, out below) : new List<int>();
+            bool leftOut = IsLeftOut(input, DestPage(input, d));
+            if (leftOut && kids.Count == 0)
+            {
+                input.Map[r.Num] = 0;
+                continue;
+            }
+            kept.Add(r.Num);
+            if (leftOut)
+            {
+                SetOverride(input, r.Num, "Dest", PdfNull.Instance);
+                SetOverride(input, r.Num, "A", PdfNull.Instance);
+            }
+            bool open = file.GetInt(d, "Count", 0) > 0;
+            if (kids.Count == 0)
+            {
+                foreach (var key in new[] { "First", "Last", "Count" }) SetOverride(input, r.Num, key, PdfNull.Instance);
+            }
+            else
+            {
+                SetOverride(input, r.Num, "First", new PdfRef(kids[0], 0));
+                SetOverride(input, r.Num, "Last", new PdfRef(kids[^1], 0));
+                SetOverride(input, r.Num, "Count", PdfNumber.Int(open ? below : -below));
+            }
+            visible += 1 + (open ? below : 0);
+        }
+        for (int i = 0; i < kept.Count; i++)
+        {
+            SetOverride(input, kept[i], "Prev", i > 0 ? new PdfRef(kept[i - 1], 0) : PdfNull.Instance);
+            SetOverride(input, kept[i], "Next", i + 1 < kept.Count ? new PdfRef(kept[i + 1], 0) : PdfNull.Instance);
+        }
+        return kept;
     }
 
     /// <summary>
@@ -380,6 +627,11 @@ internal sealed class PdfMergeWriter
             if (own.Count >= 100_000) break;
             if (item is not PdfRef r || !seen.Add(r.Num) || file.Resolve(item) is not PdfDict field) continue;
             if (file.GetName(field, "FT") == "Sig") continue;
+            if (input.Partial && FieldStatus(input, r.Num, field, 0, seen) < 0)
+            {
+                input.Map[r.Num] = 0;
+                continue;
+            }
             own.Add((r.Num, field, (file.Resolve(field["T"]) as PdfString)?.Text));
         }
         var ownNames = own.Where(f => f.Name != null).Select(f => f.Name!).ToHashSet(StringComparer.Ordinal);
@@ -397,9 +649,48 @@ internal sealed class PdfMergeWriter
             }
             if (da != null && formDA != null && !da.Bytes.AsSpan().SequenceEqual(formDA.Bytes) && field["DA"] == null)
                 (changes ??= new())["DA"] = da;
-            if (changes != null) input.Overrides[num] = changes;
+            if (changes != null)
+                foreach (var (key, value) in changes) SetOverride(input, num, key, value);
         }
         usedNames.UnionWith(ownNames);
+    }
+
+    /// <summary>
+    /// With pages left out: 1 when a form field (or widget) has a widget on a page kept, -1 when all its widgets are on
+    /// pages left out, 0 when it has none. Kids that are left out are dropped from the field's /Kids.
+    /// </summary>
+    private static int FieldStatus(Input input, int num, PdfDict field, int depth, HashSet<int> seen)
+    {
+        var file = input.File;
+        bool anyKept = false, anyDropped = false;
+        if (file.GetName(field, "Subtype") == "Widget")
+        {
+            if (input.KeptAnnots!.Contains(num)) anyKept = true;
+            else if (IsDropped(input, num) || IsLeftOut(input, field["P"])) anyDropped = true;
+            else if (field["P"] is PdfRef p && input.PageNums.Contains(p.Num)) anyKept = true;
+        }
+        if (depth < 32 && file.GetArray(field, "Kids") is { } kids)
+        {
+            var keptKids = new List<PdfObject>();
+            bool changed = false;
+            foreach (var k in kids.Items)
+            {
+                if (k is PdfRef kr && seen.Add(kr.Num) && file.Resolve(kr) is PdfDict kd)
+                {
+                    int s = FieldStatus(input, kr.Num, kd, depth + 1, seen);
+                    if (s < 0)
+                    {
+                        input.Map[kr.Num] = 0;
+                        anyDropped = changed = true;
+                        continue;
+                    }
+                    anyKept |= s > 0;
+                }
+                keptKids.Add(k);
+            }
+            if (changed && anyKept) SetOverride(input, num, "Kids", new PdfArray(keptKids));
+        }
+        return anyKept ? 1 : anyDropped ? -1 : 0;
     }
 
     /// <summary>
@@ -410,7 +701,8 @@ internal sealed class PdfMergeWriter
     private void CollectStructure(Input input, PdfDict? catalog)
     {
         var file = input.File;
-        _allPdfUa &= ClaimsPdfUa(file, catalog);
+        // A page taken twice is copied without its tags, so the copy is no longer accessible.
+        _allPdfUa &= ClaimsPdfUa(file, catalog) && !input.Repeats;
         var lang = file.Resolve(catalog?["Lang"]) as PdfString;
         bool otherLang = lang != null && _lang != null && !lang.Bytes.AsSpan().SequenceEqual(_lang.Bytes);
         _lang ??= lang;
@@ -427,7 +719,144 @@ internal sealed class PdfMergeWriter
         if (otherLang)
             foreach (var k in KidsOf(file, root["K"]))
                 if (k is PdfRef kr && file.Resolve(kr) is PdfDict kd && kd["Lang"] == null && !input.Overrides.ContainsKey(kr.Num))
-                    input.Overrides[kr.Num] = new Dictionary<string, PdfObject> { ["Lang"] = lang! };
+                    SetOverride(input, kr.Num, "Lang", lang!);
+        if (input.Partial) FilterStructure(input, root);
+    }
+
+    /// <summary>
+    /// With pages left out: keeps the structure elements with content on a page kept, or with no content at all, and
+    /// drops the rest; kept elements lose their kids on pages left out, and their /Pg when it is one.
+    /// </summary>
+    private static void FilterStructure(Input input, PdfDict root)
+    {
+        var kids = new List<PdfObject>();
+        var seen = new HashSet<int>();
+        int budget = 1_000_000;
+        foreach (var k in KidsOf(input.File, root["K"]))
+        {
+            var (status, kid) = FilterStructKid(input, k, 0, seen, 0, ref budget);
+            if (status >= 0) kids.Add(kid);
+        }
+        input.StructKids = kids;
+    }
+
+    /// <summary>
+    /// 1 when a structure element's kid has content on a page kept, -1 when only on pages left out, 0 when it has none; and
+    /// the kid to write (a direct element changed in place is a new dictionary).
+    /// </summary>
+    private static (int Status, PdfObject Kid) FilterStructKid(Input input, PdfObject kid, int page, HashSet<int> seen, int depth, ref int budget)
+    {
+        var file = input.File;
+        switch (file.Resolve(kid))
+        {
+            case PdfNumber:
+                return (OnPage(page), kid);
+            case PdfDict d when file.GetName(d, "Type") == "MCR":
+                return (OnPage(d["Pg"] is PdfRef mp ? mp.Num : page), kid);
+            case PdfDict d when file.GetName(d, "Type") == "OBJR":
+                if (d["Obj"] is PdfRef obj && IsDropped(input, obj.Num)) return (-1, kid);
+                return (OnPage(d["Pg"] is PdfRef op ? op.Num : page), kid);
+            case PdfDict d:
+                if (kid is PdfRef r && !seen.Add(r.Num)) return (1, kid); // shared or a cycle: left as it is
+                if (depth > 256 || --budget < 0) return (1, kid);
+                int own = d["Pg"] is PdfRef pg ? pg.Num : page;
+                bool anyKept = false, anyDropped = false, changed = false;
+                var kept = new List<PdfObject>();
+                var k = d["K"];
+                var items = file.Resolve(k) is PdfArray ka ? ka.Items : k != null ? new List<PdfObject> { k } : new List<PdfObject>();
+                foreach (var item in items)
+                {
+                    var (s, written) = FilterStructKid(input, item, own, seen, depth + 1, ref budget);
+                    if (s < 0)
+                    {
+                        anyDropped = changed = true;
+                        continue;
+                    }
+                    anyKept |= s > 0;
+                    changed |= !ReferenceEquals(written, item);
+                    kept.Add(written);
+                }
+                int status = anyKept ? 1 : anyDropped ? -1 : 0;
+                if (status < 0)
+                {
+                    if (kid is PdfRef dr) input.Map[dr.Num] = 0;
+                    return (status, kid);
+                }
+                var changes = new Dictionary<string, PdfObject>(StringComparer.Ordinal);
+                if (changed) changes["K"] = new PdfArray(kept);
+                if (IsLeftOut(input, d["Pg"])) changes["Pg"] = PdfNull.Instance;
+                if (changes.Count == 0) return (status, kid);
+                if (kid is PdfRef er)
+                {
+                    foreach (var (key, value) in changes) SetOverride(input, er.Num, key, value);
+                    return (status, kid);
+                }
+                var entries = new Dictionary<string, PdfObject>(d.Entries, StringComparer.Ordinal);
+                foreach (var (key, value) in changes)
+                {
+                    if (value.IsNull) entries.Remove(key);
+                    else entries[key] = value;
+                }
+                return (status, new PdfDict(entries));
+            default:
+                return (0, kid);
+        }
+
+        int OnPage(int num) => num != 0 && input.PageNums.Contains(num) && IsDropped(input, num) ? -1 : 1;
+    }
+
+    /// <summary>
+    /// Notes the label of every page written (such as "iii" or "A-2") from the input's /PageLabels; a page of an input
+    /// without them is labelled with its number in that input.
+    /// </summary>
+    private void CollectLabels(Input input, PdfDict? catalog)
+    {
+        var file = input.File;
+        SortedDictionary<int, PdfObject>? ranges = null;
+        if (file.GetDict(catalog, "PageLabels") is { } tree)
+        {
+            ranges = new SortedDictionary<int, PdfObject>();
+            CollectNums(file, tree, ranges, new HashSet<PdfDict>(ReferenceEqualityComparer.Instance), 0);
+            if (ranges.Count == 0) ranges = null;
+        }
+        _anyLabels |= ranges != null;
+        var starts = ranges?.Keys.ToArray();
+        foreach (var o in input.Out)
+        {
+            int at = starts == null ? -1 : Array.BinarySearch(starts, o.Src);
+            if (at < 0 && starts != null) at = ~at - 1;
+            if (at < 0)
+            {
+                _labels.Add(("D", null, o.Src + 1));
+                continue;
+            }
+            var range = file.Resolve(ranges![starts![at]]) as PdfDict;
+            string? style = file.GetName(range, "S") is "D" or "R" or "r" or "A" or "a" ? file.GetName(range, "S") : null;
+            long first = Math.Max(1, file.GetInt(range, "St", 1));
+            _labels.Add((style, file.Resolve(range?["P"]) as PdfString, (int)Math.Min(int.MaxValue, first + o.Src - starts[at])));
+        }
+    }
+
+    /// <summary>Writes the page labels as ranges: a new one starts where a page's label does not follow on from the one before.</summary>
+    private void WritePageLabels()
+    {
+        _out.Ascii(" /PageLabels << /Nums [");
+        for (int i = 0; i < _labels.Count; i++)
+        {
+            var (style, prefix, value) = _labels[i];
+            if (i > 0)
+            {
+                var (s0, p0, v0) = _labels[i - 1];
+                bool samePrefix = prefix == null ? p0 == null : p0 != null && prefix.Bytes.AsSpan().SequenceEqual(p0.Bytes);
+                if (s0 == style && samePrefix && (style == null || value == v0 + 1)) continue;
+            }
+            _out.Int(i).Ascii(" <<");
+            if (style != null) { _out.Ascii(" /S "); PdfSyntax.RawName(_out, style); }
+            if (prefix != null) { _out.Ascii(" /P "); PdfSyntax.HexString(_out, prefix.Bytes); }
+            if (style != null && value != 1) _out.Ascii(" /St ").Int(value);
+            _out.Ascii(" >> ");
+        }
+        _out.Ascii("] >>");
     }
 
     /// <summary>Whether the input's XMP metadata identifies it as PDF/UA-1.</summary>
@@ -530,16 +959,18 @@ internal sealed class PdfMergeWriter
         if (_sink != null && _main.Length >= FlushSize) Flush(_sink);
     }
 
-    private void WritePage(Input input, (PdfDict Page, int SourceNum, int Id, PdfObject? Resources, PdfObject? MediaBox, PdfObject? CropBox, PdfObject? Rotate) p,
-        Queue<(int, int)> queue)
+    private void WritePage(Input input, OutPage o, Queue<(int, int)> queue)
     {
         _cancel.ThrowIfCancellationRequested();
         var file = input.File;
-        Begin(p.Id).Ascii("<< /Type /Page /Parent ").Int(PagesId).Ascii(" 0 R");
+        var p = input.Source[o.Src];
+        Begin(o.Id).Ascii("<< /Type /Page /Parent ").Int(PagesId).Ascii(" 0 R");
         foreach (var (key, value) in p.Page.Entries)
         {
             // Inherited attributes are written below; /B (article beads) leads to the whole article thread.
             if (key is "Type" or "Parent" or "B" or "Annots" or "Resources" or "MediaBox" or "CropBox" or "Rotate") continue;
+            // A second copy of a page is not in the structure tree.
+            if (o.Repeat && key is "StructParents" or "StructParent") continue;
             if (WriteStructKey(input, key, value)) continue;
             _out.Sp();
             PdfSyntax.RawName(_out, key);
@@ -552,13 +983,42 @@ internal sealed class PdfMergeWriter
         if (p.MediaBox != null) WriteObject(input, p.MediaBox, queue, 0);
         else _out.Ascii("[0 0 612 792]");
         if (p.CropBox != null) { _out.Ascii(" /CropBox "); WriteObject(input, p.CropBox, queue, 0); }
-        if (p.Rotate != null) { _out.Ascii(" /Rotate "); WriteObject(input, p.Rotate, queue, 0); }
+        if (o.Turn != 0)
+        {
+            int turned = ((file.GetIntValue(p.Rotate) / 90 * 90 + o.Turn) % 360 + 360) % 360;
+            _out.Ascii(" /Rotate ").Int(turned);
+        }
+        else if (p.Rotate != null) { _out.Ascii(" /Rotate "); WriteObject(input, p.Rotate, queue, 0); }
         if (file.GetArray(p.Page, "Annots") is { } annots)
         {
             _out.Ascii(" /Annots [");
             foreach (var a in annots.Items)
             {
                 if (file.Resolve(a) is not PdfDict ad || IsSignatureField(file, ad)) continue;
+                if (a is PdfRef dropped && IsDropped(input, dropped.Num)) continue;
+                if (input.Partial && a is not PdfRef && file.GetName(ad, "Subtype") == "Link" && IsLeftOut(input, DestPage(input, ad))) continue;
+                if (o.Repeat)
+                {
+                    // A copy has annotations of its own; a form field's widget and a popup belong to one page.
+                    if (file.GetName(ad, "Subtype") is "Widget" or "Popup") continue;
+                    var copy = new Dictionary<string, PdfObject>(StringComparer.Ordinal)
+                    {
+                        ["P"] = PdfNull.Instance, ["StructParent"] = PdfNull.Instance, ["Popup"] = PdfNull.Instance,
+                    };
+                    if (a is PdfRef ar)
+                    {
+                        int id = NewId();
+                        input.IdOverrides[id] = copy;
+                        queue.Enqueue((ar.Num, id));
+                        _out.Int(id).Ascii(" 0 R ");
+                    }
+                    else
+                    {
+                        WriteDict(input, Without(ad, copy.Keys), queue, 1);
+                        _out.Sp();
+                    }
+                    continue;
+                }
                 WriteObject(input, a, queue, 1);
                 _out.Sp();
             }
@@ -566,6 +1026,13 @@ internal sealed class PdfMergeWriter
         }
         _out.Ascii(" >>");
         End();
+
+        static PdfDict Without(PdfDict d, IEnumerable<string> keys)
+        {
+            var entries = new Dictionary<string, PdfObject>(d.Entries, StringComparer.Ordinal);
+            foreach (var key in keys) entries.Remove(key);
+            return new PdfDict(entries);
+        }
     }
 
     /// <summary>Adds a tagged input's top-level structure elements, parent-tree entries and role and class maps to the merged ones.</summary>
@@ -577,7 +1044,7 @@ internal sealed class PdfMergeWriter
         try
         {
             _out = _structKids;
-            foreach (var k in KidsOf(file, root["K"]))
+            foreach (var k in input.StructKids ?? KidsOf(file, root["K"]))
             {
                 WriteObject(input, k, queue, 1);
                 _out.Sp();
@@ -585,6 +1052,8 @@ internal sealed class PdfMergeWriter
             _out = _parentNums;
             foreach (var (key, value) in input.ParentNums!)
             {
+                // With pages left out, entries for what is dropped go too.
+                if (input.Partial && (input.DroppedKeys.Contains(key) || !LeadsToKeptElement(value))) continue;
                 _out.Int(key + input.StructOffset).Sp();
                 WriteObject(input, value, queue, 1);
                 _out.Sp();
@@ -596,6 +1065,13 @@ internal sealed class PdfMergeWriter
         {
             _out = saved;
         }
+
+        bool LeadsToKeptElement(PdfObject value) => file.Resolve(value) switch
+        {
+            PdfArray a => a.Items.Any(i => i is PdfRef r && !IsDropped(input, r.Num)),
+            PdfDict => value is not PdfRef r || !IsDropped(input, r.Num),
+            _ => false,
+        };
 
         // The first input's entry wins for a name two inputs map differently.
         void WriteMapTo(ByteBuffer target, HashSet<string> names, PdfDict? map)
@@ -639,7 +1115,8 @@ internal sealed class PdfMergeWriter
         {
             foreach (var item in items.Items)
             {
-                if (item is not PdfRef) continue; // optional content groups are always indirect
+                if (item is not PdfRef r) continue; // optional content groups are always indirect
+                if (IsDropped(input, r.Num)) continue; // a form field left out with its pages
                 WriteObject(input, item, queue, 1);
                 _out.Sp();
             }
@@ -666,6 +1143,7 @@ internal sealed class PdfMergeWriter
     private ByteBuffer OutlineItemBody(Input input, int num, Queue<(int, int)> queue)
     {
         var d = input.File.GetObject(num) as PdfDict ?? new PdfDict();
+        if (input.Overrides.ContainsKey(num)) d = Overridden(input, d, num, 0);
         var body = new ByteBuffer(256);
         _out = body;
         try

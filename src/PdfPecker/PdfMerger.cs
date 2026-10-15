@@ -49,8 +49,9 @@ public sealed class PdfMergeOptions
 /// </summary>
 /// <remarks>
 /// The result is a new, unencrypted PDF. Digital signatures are not carried over (merging changes the document, which
-/// would break them anyway), nor are PDF/A conformance, attachments, page labels or the logical structure (tags). A form
-/// field named like one in an earlier input is renamed "name_2", "name_3", ..., so each copy keeps its value. Streams
+/// would break them anyway), nor are PDF/A conformance or attachments; tagged inputs stay tagged, and page labels are
+/// kept. A form field named like one in an earlier input is renamed "name_2", "name_3", ..., so each copy keeps its value.
+/// To take only some pages of an input, give it a <see cref="PdfMergeInput"/> with a <see cref="PdfPageRange"/>. Streams
 /// that are identical in several inputs (a logo, an embedded font) are written once. Inputs are treated as untrusted:
 /// damaged files are repaired where possible, and decoding work is limited per input. The byte[] overloads hold every
 /// input and the result in memory; the Stream overloads, <see cref="MergeAsync(IAsyncEnumerable{byte[]}, Stream, PdfMergeOptions?, CancellationToken)"/>
@@ -81,6 +82,33 @@ public static class PdfMerger
         options ??= new PdfMergeOptions();
         return new PdfMergeWriter(options, cancellationToken).Merge(list);
     }
+
+    /// <summary>
+    /// Merges the chosen pages of PDFs, in order: for example <c>Merge(new[] { new PdfMergeInput(a, "1-3"), new
+    /// PdfMergeInput(b, "2,1") })</c>. Pages can be reordered and repeated; what only the pages left out use (their
+    /// bookmarks, links to them, their form fields and tags) is left out too (see <see cref="PdfPages"/>).
+    /// </summary>
+    /// <param name="inputs">The PDFs to merge, each with the pages to take (null for all).</param>
+    /// <param name="options">Passwords, limits and document properties; null for the defaults.</param>
+    /// <param name="cancellationToken">Stops the merge.</param>
+    /// <exception cref="ArgumentOutOfRangeException">A page is past the last page of its PDF.</exception>
+    /// <exception cref="PdfPasswordException">An input is encrypted and cannot be opened with the given password.</exception>
+    /// <exception cref="InvalidDataException">An input is not a readable PDF or decodes to more data than allowed, or none of them has any pages.</exception>
+    /// <exception cref="PdfLimitException">The merged document has more than <see cref="PdfMergeOptions.MaxPages"/> pages.</exception>
+    public static byte[] Merge(IEnumerable<PdfMergeInput> inputs, PdfMergeOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        if (inputs == null) throw new ArgumentNullException(nameof(inputs));
+        var list = inputs.ToList();
+        if (list.Count == 0) throw new ArgumentException("Give at least one PDF to merge.", nameof(inputs));
+        for (int i = 0; i < list.Count; i++)
+            if (list[i] == null) throw new ArgumentException($"PDF {i + 1} is null.", nameof(inputs));
+        var writer = new PdfMergeWriter(options ?? new PdfMergeOptions(), cancellationToken);
+        foreach (var input in list) writer.Add(input.Pdf, Spec(input.Pages));
+        writer.Finish();
+        return writer.ToArray();
+    }
+
+    internal static PdfMergeWriter.PageSpec? Spec(PdfPageRange? pages) => pages == null ? null : new PdfMergeWriter.PageSpec { Pages = pages };
 
     /// <summary>
     /// Merges PDFs read from streams, in order, and writes the result to <paramref name="output"/> as it is made.
@@ -177,12 +205,19 @@ public static class PdfMerger
     {
         if (outputPath == null) throw new ArgumentNullException(nameof(outputPath));
         if (inputPaths == null) throw new ArgumentNullException(nameof(inputPaths));
+        WriteFile(outputPath, output => Merge(OpenFiles(inputPaths), output, options, cancellationToken));
+    }
+
+    /// <summary>Writes a file through a temporary one that is moved into place once <paramref name="write"/> succeeds.</summary>
+    internal static void WriteFile(string outputPath, Action<Stream> write)
+    {
+        if (outputPath == null) throw new ArgumentNullException(nameof(outputPath));
         var full = Path.GetFullPath(outputPath);
         var temp = Path.Combine(Path.GetDirectoryName(full)!, "." + Path.GetFileName(full) + "." + Guid.NewGuid().ToString("N")[..8] + ".tmp");
         try
         {
             using (var output = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 16))
-                Merge(OpenFiles(inputPaths), output, options, cancellationToken);
+                write(output);
             File.Move(temp, full, overwrite: true);
         }
         catch
@@ -208,7 +243,7 @@ public static class PdfMerger
         if (!output.CanWrite) throw new ArgumentException("The output stream is not writable.", nameof(output));
     }
 
-    private static byte[] ReadAll(Stream input)
+    internal static byte[] ReadAll(Stream input)
     {
         if (input.CanSeek)
         {
@@ -282,14 +317,33 @@ public sealed class StreamingPdfMerger
     public void Add(byte[] pdf, CancellationToken cancellationToken = default)
     {
         if (pdf == null) throw new ArgumentNullException(nameof(pdf));
-        Run(() => { Write(pdf, cancellationToken); _writer.Flush(_output); });
+        Run(() => { Write(pdf, null, cancellationToken); _writer.Flush(_output); });
     }
 
-    /// <inheritdoc cref="Add"/>
+    /// <inheritdoc cref="Add(byte[], CancellationToken)"/>
     public Task AddAsync(byte[] pdf, CancellationToken cancellationToken = default)
     {
         if (pdf == null) throw new ArgumentNullException(nameof(pdf));
-        return RunAsync(() => Write(pdf, cancellationToken), cancellationToken);
+        return RunAsync(() => Write(pdf, null, cancellationToken), cancellationToken);
+    }
+
+    /// <summary>Writes the chosen pages of the next PDF, in the given order, and everything they use, to the output.</summary>
+    /// <param name="pdf">The PDF.</param>
+    /// <param name="pages">The pages to take (see <see cref="PdfPageRange"/>); null for every page.</param>
+    /// <param name="cancellationToken">Stops the work.</param>
+    /// <exception cref="ArgumentOutOfRangeException">A page is past the last page.</exception>
+    /// <inheritdoc cref="Add(byte[], CancellationToken)"/>
+    public void Add(byte[] pdf, PdfPageRange? pages, CancellationToken cancellationToken = default)
+    {
+        if (pdf == null) throw new ArgumentNullException(nameof(pdf));
+        Run(() => { Write(pdf, pages, cancellationToken); _writer.Flush(_output); });
+    }
+
+    /// <inheritdoc cref="Add(byte[], PdfPageRange?, CancellationToken)"/>
+    public Task AddAsync(byte[] pdf, PdfPageRange? pages, CancellationToken cancellationToken = default)
+    {
+        if (pdf == null) throw new ArgumentNullException(nameof(pdf));
+        return RunAsync(() => Write(pdf, pages, cancellationToken), cancellationToken);
     }
 
     /// <summary>Writes the end of the merged PDF. The output is not flushed or closed.</summary>
@@ -302,10 +356,10 @@ public sealed class StreamingPdfMerger
     public Task CompleteAsync(CancellationToken cancellationToken = default) =>
         RunAsync(() => Finish(cancellationToken), cancellationToken);
 
-    private void Write(byte[] pdf, CancellationToken cancellationToken)
+    private void Write(byte[] pdf, PdfPageRange? pages, CancellationToken cancellationToken)
     {
         _writer.Cancellation = cancellationToken;
-        _writer.Add(pdf);
+        _writer.Add(pdf, PdfMerger.Spec(pages));
     }
 
     private void Finish(CancellationToken cancellationToken)
