@@ -1,0 +1,29 @@
+<!doctype html><html><head><style>
+body { font-family: sans-serif; font-size: 13px; margin: 0; }
+h2 { font-size: 15px; margin: 14px 0 6px; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; }
+.row figure { margin: 0; text-align: center; font-size: 11px; }
+.check { background: repeating-linear-gradient(45deg, #ddd 0 6px, #fff 6px 12px); }
+.pattern { height: 70px; background: url(dots.svg); border: 1px solid #999; }
+.badge { height: 90px; background: #fafafa url(logo.svg) no-repeat center / contain; border: 1px solid #999; }
+</style></head><body>
+<h2>SVG files in img elements</h2>
+<div class="row">
+  <figure><img src="logo.svg" width="200"><figcaption>viewBox only, width 200</figcaption></figure>
+  <figure style="width:120px"><img src="logo.svg"><figcaption>no size, in a 120px box</figcaption></figure>
+  <figure><img src="icon.svg"><img src="icon.svg" style="width:48px"><figcaption>24px icon, 48px</figcaption></figure>
+</div>
+<p>Inline icon <img src="icon.svg" style="height:1em;vertical-align:middle"> in a line of text, and a data URI
+<img style="height:16px;vertical-align:middle" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Ccircle cx='5' cy='5' r='5' fill='%2343a047'/%3E%3C/svg%3E"> too.</p>
+<h2>SVG backgrounds</h2>
+<div class="pattern"></div>
+<div class="badge"></div>
+<h2>WebP and GIF</h2>
+<div class="row">
+  <figure><img src="photo.webp"><figcaption>lossy</figcaption></figure>
+  <figure class="check"><img src="alpha.webp"><figcaption>lossy + alpha</figcaption></figure>
+  <figure class="check"><img src="lossless.webp"><figcaption>lossless</figcaption></figure>
+  <figure class="check"><img src="trans.gif"><figcaption>GIF transparency</figcaption></figure>
+  <figure><img src="anim.gif"><figcaption>animated GIF</figcaption></figure>
+</div>
+</body></html>

@@ -1,0 +1,20 @@
+<html><body style="font-family: Arial">
+<h2>Registration</h2>
+<form>
+<p><label>Name <input type="text" name="name" value="Jane Doe" title="Full name"></label></p>
+<p><label>Email <input type="email" name="email" placeholder="you@example.com" required></label></p>
+<p><label>Password <input type="password" name="pw" value="secret"></label></p>
+<p><label>Big <input type="text" name="big" style="width:300px;height:30px;font-size:16px;text-align:center" value="Centered"></label></p>
+<p><label><input type="checkbox" name="news" checked> Newsletter</label>
+   <label><input type="checkbox" name="terms" value="agree"> Terms</label>
+   <label><input type="checkbox" disabled checked> Disabled</label></p>
+<p>Size: <label><input type="radio" name="size" value="S"> S</label>
+<label><input type="radio" name="size" value="M" checked> M</label>
+<label><input type="radio" name="size" value="L"> L</label></p>
+<p>Country <select name="country"><option value="dk">Denmark</option><option value="se" selected>Sweden</option><option value="no">Norway — long name</option></select></p>
+<p>Colors <select name="colors" multiple size="3"><option selected>Red</option><option>Green</option><option selected>Blue</option><option>Yellow</option></select></p>
+<p>Comments<br><textarea name="comments" rows="4" cols="40">First line
+Second line æøå</textarea></p>
+<p><button type="submit">Send</button> <input type="reset"></p>
+<input type="hidden" name="h" value="x">
+</form></body></html>

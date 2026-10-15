@@ -668,6 +668,14 @@ internal sealed partial class LayoutEngine
             float w = s.Width.Value + (s.BorderBox ? 0 : frame);
             result = (Math.Max(w, s.Display == Display.Table ? result.Item1 : 0), Math.Max(w, s.Display == Display.Table ? result.Item1 : 0));
         }
+        else if (s.Width.IsAuto && s.AspectRatio > 0 && !s.Height.IsAuto && !s.Height.IsPercent && e.Name is not ("img" or "svg")
+                 && s.Display != Display.Table)
+        {
+            // aspect-ratio with a definite height: the width follows from the height, and the content can only widen it.
+            float frameV = s.PaddingTop.Resolve(0) + s.PaddingBottom.Resolve(0) + s.BorderTop + s.BorderBottom;
+            float w = s.BorderBox && !s.AspectRatioAuto ? s.Height.Value * s.AspectRatio : (s.Height.Value - (s.BorderBox ? frameV : 0)) * s.AspectRatio + frame;
+            result = (Math.Max(w, result.Item1), Math.Max(w, result.Item1));
+        }
         if (!s.MaxWidth.IsAuto && !s.MaxWidth.IsPercent)
         {
             float mw = s.MaxWidth.Value + (s.BorderBox ? 0 : frame);

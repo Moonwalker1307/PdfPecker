@@ -23,21 +23,84 @@ internal sealed class StyleRule
     public readonly Selector Selector;
     public readonly Declaration[] Declarations;
     public readonly int Order;
+    public readonly CascadeLayer? Layer; // null for rules outside any @layer
 
-    public StyleRule(Selector selector, Declaration[] declarations, int order)
+    public StyleRule(Selector selector, Declaration[] declarations, int order, CascadeLayer? layer = null)
     {
         Selector = selector;
         Declarations = declarations;
         Order = order;
+        Layer = layer;
     }
 }
+
+/// <summary>
+/// A cascade layer (<c>@layer</c>). Layers are ordered by their first appearance; a layer's sub-layers come before the
+/// layer's own rules, and rules outside every layer come last, so they win over layered ones.
+/// </summary>
+internal sealed class CascadeLayer
+{
+    public readonly string Name;
+    public readonly List<CascadeLayer> Children = new();
+    public int Rank; // 0 = the earliest layer; set by Stylesheet.RankLayers
+
+    public CascadeLayer(string name) => Name = name;
+
+    public CascadeLayer Child(string name)
+    {
+        foreach (var c in Children)
+            if (c.Name == name) return c;
+        var layer = new CascadeLayer(name);
+        if (Children.Count < 1000) Children.Add(layer);
+        return layer;
+    }
+}
+
+/// <summary>An <c>@page</c> rule: its page selector, declarations and margin boxes (<c>@top-center</c> and so on).</summary>
+internal sealed class PageRule
+{
+    public string Selector = ""; // "", ":first", ":left", ":right" or ":blank"
+    public readonly List<Declaration> Declarations = new();
+    public readonly Dictionary<string, List<Declaration>> MarginBoxes = new(StringComparer.Ordinal);
+    public int Specificity => Selector switch { ":first" or ":blank" => 2, ":left" or ":right" => 1, _ => 0 };
+}
+
+/// <summary>A custom property registered with <c>@property</c>.</summary>
+internal sealed record RegisteredProperty(string Name, string? InitialValue, bool Inherits);
 
 internal sealed class Stylesheet
 {
     public readonly List<StyleRule> Rules = new();
-    public readonly List<Declaration> PageDeclarations = new(); // from @page
+    public readonly List<Declaration> PageDeclarations = new(); // from @page rules without a page selector
+    public readonly List<PageRule> PageRules = new();
     public readonly List<List<Declaration>> FontFaces = new(); // @font-face descriptors, one list per rule
+    public readonly List<RegisteredProperty> RegisteredProperties = new();
+    public readonly CascadeLayer LayerRoot = new("");
+    public MediaContext Media = new();
     public int NextOrder;
+    private int _anonymousLayers;
+    private bool _ranked;
+
+    internal string AnonymousLayerName() => "\0anon" + _anonymousLayers++;
+
+    /// <summary>Numbers the layers in cascade order (sub-layers before their parent) and returns how many there are.</summary>
+    public int RankLayers()
+    {
+        int next = 0;
+        void Visit(CascadeLayer layer)
+        {
+            foreach (var c in layer.Children) Visit(c);
+            if (layer != LayerRoot) layer.Rank = Math.Min(next++, MaxLayerRank);
+        }
+        Visit(LayerRoot);
+        _ranked = true;
+        return next;
+    }
+
+    /// <summary>Ranks above this share the last rank: far more layers than any stylesheet uses.</summary>
+    public const int MaxLayerRank = 250;
+
+    public bool LayersRanked => _ranked;
 }
 
 /// <summary>Parses CSS stylesheets and declaration blocks. Shorthands are expanded into longhands while parsing.</summary>
@@ -47,13 +110,14 @@ internal static class CssParser
     {
         string s = StripComments(css);
         int i = 0;
-        ParseRules(s, ref i, sheet, s.Length, 0);
+        ParseRules(s, ref i, sheet, s.Length, 0, null);
     }
 
-    // Nested @media blocks deeper than this are skipped, so hostile CSS cannot recurse without bound.
+    // Nested @media, @supports and @layer blocks (and nested style rules) deeper than this are skipped, so hostile CSS
+    // cannot recurse without bound.
     private const int MaxMediaNesting = 16;
 
-    private static void ParseRules(string s, ref int i, Stylesheet sheet, int end, int depth)
+    private static void ParseRules(string s, ref int i, Stylesheet sheet, int end, int depth, CascadeLayer? layer)
     {
         while (i < end)
         {
@@ -74,28 +138,31 @@ internal static class CssParser
                 int semi = IndexOfOutsideQuotes(s, ';', i, brace < 0 ? end : brace);
                 if (semi >= 0 && (brace < 0 || semi < brace))
                 {
-                    i = semi + 1; // @import, @charset, @namespace: ignored
+                    // "@layer a, b;" fixes the order of layers; @import, @charset and @namespace are ignored.
+                    if (atName == "layer")
+                        foreach (var name in SplitTopLevel(s.Substring(i, semi - i), ','))
+                            LayerFor(sheet, layer, name.Trim());
+                    i = semi + 1;
                     continue;
                 }
                 if (brace < 0) { i = end; break; }
                 string prelude = s.Substring(i, brace - i).Trim();
                 int blockEnd = MatchingBrace(s, brace, end);
-                if (atName == "media" && depth < MaxMediaNesting && MediaApplies(prelude))
+                if (depth < MaxMediaNesting && ConditionalBlock(atName, prelude, sheet, layer, out var inner))
                 {
-                    int inner = brace + 1;
-                    ParseRules(s, ref inner, sheet, blockEnd, depth + 1);
+                    int start = brace + 1;
+                    ParseRules(s, ref start, sheet, blockEnd, depth + 1, inner);
                 }
-                else if (atName == "page" && !prelude.Contains(':'))
-                {
-                    // @page { size; margin } - pseudo pages (:first, :left) are ignored.
-                    ParseDeclarations(s.Substring(brace + 1, blockEnd - brace - 1), sheet.PageDeclarations);
-                }
+                else if (atName == "page")
+                    ParsePage(prelude, s.Substring(brace + 1, blockEnd - brace - 1), sheet);
                 else if (atName == "font-face")
                 {
                     var descriptors = new List<Declaration>();
                     ParseDeclarations(s.Substring(brace + 1, blockEnd - brace - 1), descriptors);
                     if (descriptors.Count > 0) sheet.FontFaces.Add(descriptors);
                 }
+                else if (atName == "property")
+                    ParseProperty(prelude, s.Substring(brace + 1, blockEnd - brace - 1), sheet);
                 i = Math.Min(blockEnd + 1, end);
                 continue;
             }
@@ -104,38 +171,191 @@ internal static class CssParser
             if (open < 0) { i = end; break; }
             int close = MatchingBrace(s, open, end);
             string selectorText = s.Substring(i, open - i);
-            string body = s.Substring(open + 1, close - open - 1);
             i = Math.Min(close + 1, end);
-
-            var decls = new List<Declaration>();
-            ParseDeclarations(body, decls);
-            if (decls.Count == 0) continue;
-            var declArray = decls.ToArray();
-            foreach (var selText in SplitTopLevel(selectorText, ','))
-            {
-                var sel = Selector.Parse(selText);
-                if (sel != null) sheet.Rules.Add(new StyleRule(sel, declArray, sheet.NextOrder++));
-            }
+            var selectors = SplitTopLevel(selectorText, ',');
+            for (int k = 0; k < selectors.Count; k++) selectors[k] = selectors[k].Trim();
+            ParseStyleBlock(s, open + 1, close, selectors, sheet, layer, depth);
         }
     }
 
-    private static bool MediaApplies(string prelude)
+    /// <summary>
+    /// For @media, @supports and @layer blocks: whether their rules apply, and the layer they go into. A block layer
+    /// without a name is a new anonymous layer.
+    /// </summary>
+    private static bool ConditionalBlock(string atName, string prelude, Stylesheet sheet, CascadeLayer? layer, out CascadeLayer? inner)
     {
-        // Print output: honour "print" and "all" (and queries with no media type), skip screen/speech-only blocks.
-        var p = prelude.ToLowerInvariant();
-        foreach (var query in p.Split(','))
+        inner = layer;
+        switch (atName)
         {
-            var q = query.Trim();
-            if (q.StartsWith("not ", StringComparison.Ordinal)) continue;
-            if (q.StartsWith("only ", StringComparison.Ordinal)) q = q.Substring(5);
-            if (q.StartsWith("print", StringComparison.Ordinal) || q.StartsWith("all", StringComparison.Ordinal) || q.StartsWith("(", StringComparison.Ordinal))
-            {
-                // Width-based queries are evaluated loosely: assume a page is a "wide" medium.
-                if (q.Contains("max-width")) continue;
+            case "media":
+                return MediaQuery.Matches(prelude, sheet.Media);
+            case "supports":
+                return CssSupports.Evaluate(prelude);
+            case "layer":
+                inner = LayerFor(sheet, layer, prelude.Length == 0 ? sheet.AnonymousLayerName() : prelude);
                 return true;
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>The layer named <paramref name="name"/> (dotted for sub-layers) inside <paramref name="parent"/>, created on first use.</summary>
+    private static CascadeLayer LayerFor(Stylesheet sheet, CascadeLayer? parent, string name)
+    {
+        var layer = parent ?? sheet.LayerRoot;
+        foreach (var part in name.Split('.'))
+        {
+            var n = part.Trim();
+            if (n.Length > 0) layer = layer.Child(n);
+        }
+        return layer;
+    }
+
+    /// <summary>
+    /// Parses a style rule's block: its declarations and any nested rules (CSS Nesting). Declarations that follow a
+    /// nested rule come after it in the cascade, as in Chrome.
+    /// </summary>
+    private static void ParseStyleBlock(string s, int start, int end, List<string> selectors, Stylesheet sheet, CascadeLayer? layer, int depth)
+    {
+        if (IndexOfOutsideQuotes(s, '{', start, end) < 0)
+        {
+            AddRule(s.Substring(start, end - start), selectors, sheet, layer);
+            return;
+        }
+        int i = start, declStart = start;
+        while (i < end)
+        {
+            int brace = IndexOfOutsideQuotes(s, '{', i, end);
+            if (brace < 0) break;
+            // The nested rule's prelude starts after the last ';' (or '}') before its '{'.
+            int preludeStart = brace;
+            while (preludeStart > declStart && s[preludeStart - 1] != ';' && s[preludeStart - 1] != '}') preludeStart--;
+            if (preludeStart > declStart) AddRule(s.Substring(declStart, preludeStart - declStart), selectors, sheet, layer);
+            int close = MatchingBrace(s, brace, end);
+            var prelude = s.Substring(preludeStart, brace - preludeStart).Trim();
+            if (depth < MaxMediaNesting)
+            {
+                if (prelude.StartsWith('@'))
+                {
+                    int nameEnd = 1;
+                    while (nameEnd < prelude.Length && (char.IsLetterOrDigit(prelude[nameEnd]) || prelude[nameEnd] == '-')) nameEnd++;
+                    var atName = prelude.Substring(1, nameEnd - 1).ToLowerInvariant();
+                    if (ConditionalBlock(atName, prelude.Substring(nameEnd).Trim(), sheet, layer, out var inner))
+                        ParseStyleBlock(s, brace + 1, close, selectors, sheet, inner, depth + 1);
+                }
+                else if (prelude.Length > 0)
+                    ParseStyleBlock(s, brace + 1, close, NestedSelectors(selectors, prelude), sheet, layer, depth + 1);
+            }
+            i = declStart = Math.Min(close + 1, end);
+        }
+        if (declStart < end) AddRule(s.Substring(declStart, end - declStart), selectors, sheet, layer);
+    }
+
+    private static void AddRule(string body, List<string> selectors, Stylesheet sheet, CascadeLayer? layer)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return;
+        var decls = new List<Declaration>();
+        ParseDeclarations(body, decls);
+        if (decls.Count == 0) return;
+        var declArray = decls.ToArray();
+        foreach (var selText in selectors)
+        {
+            var sel = Selector.Parse(selText);
+            if (sel != null) sheet.Rules.Add(new StyleRule(sel, declArray, sheet.NextOrder++, layer));
+        }
+    }
+
+    /// <summary>
+    /// Resolves the selectors of a nested rule against its parent's: "&amp;" stands for the parent, and a selector
+    /// without one is relative to it (a descendant, or after a leading combinator). Each parent selector is substituted
+    /// in turn, so ".a, .b { &amp;:hover {} }" gives ".a:hover" and ".b:hover".
+    /// </summary>
+    private static List<string> NestedSelectors(List<string> parents, string nested)
+    {
+        var result = new List<string>();
+        foreach (var raw in SplitTopLevel(nested, ','))
+        {
+            var child = raw.Trim();
+            if (child.Length == 0) continue;
+            foreach (var parent in parents)
+            {
+                if (result.Count >= 256) return result;
+                if (child.IndexOf('&') >= 0) result.Add(child.Replace("&", parent));
+                else result.Add(parent + " " + child);
             }
         }
-        return false;
+        return result;
+    }
+
+    /// <summary>Parses an @page rule: "@page", "@page :first" and so on, with declarations and margin boxes.</summary>
+    private static void ParsePage(string prelude, string body, Stylesheet sheet)
+    {
+        var selector = prelude.Trim().ToLowerInvariant();
+        // Named pages ("@page wide") are not supported; ":first", ":left", ":right" and ":blank" are.
+        if (selector.Length > 0 && selector is not (":first" or ":left" or ":right" or ":blank")) return;
+        var rule = new PageRule { Selector = selector };
+        int i = 0, declStart = 0;
+        var declText = new System.Text.StringBuilder();
+        while (i < body.Length)
+        {
+            int at = IndexOfOutsideQuotes(body, '@', i, body.Length);
+            if (at < 0) break;
+            int brace = IndexOfOutsideQuotes(body, '{', at, body.Length);
+            if (brace < 0) break;
+            declText.Append(body, declStart, at - declStart).Append(';');
+            int close = MatchingBrace(body, brace, body.Length);
+            var name = body.Substring(at + 1, brace - at - 1).Trim().ToLowerInvariant();
+            if (PageMarginBoxNames.Contains(name))
+            {
+                var decls = new List<Declaration>();
+                ParseDeclarations(body.Substring(brace + 1, Math.Max(0, close - brace - 1)), decls);
+                if (rule.MarginBoxes.TryGetValue(name, out var existing)) existing.AddRange(decls);
+                else rule.MarginBoxes[name] = decls;
+            }
+            i = declStart = Math.Min(close + 1, body.Length);
+        }
+        declText.Append(body, declStart, body.Length - declStart);
+        ParseDeclarations(declText.ToString(), rule.Declarations);
+        sheet.PageRules.Add(rule);
+        if (selector.Length == 0) sheet.PageDeclarations.AddRange(rule.Declarations);
+    }
+
+    /// <summary>The sixteen page-margin boxes of CSS Paged Media.</summary>
+    internal static readonly HashSet<string> PageMarginBoxNames = new(StringComparer.Ordinal)
+    {
+        "top-left-corner", "top-left", "top-center", "top-right", "top-right-corner",
+        "bottom-left-corner", "bottom-left", "bottom-center", "bottom-right", "bottom-right-corner",
+        "left-top", "left-middle", "left-bottom", "right-top", "right-middle", "right-bottom",
+    };
+
+    /// <summary>Parses an @property rule; one without a valid "inherits" descriptor is ignored, as the spec requires.</summary>
+    private static void ParseProperty(string prelude, string body, Stylesheet sheet)
+    {
+        var name = prelude.Trim();
+        if (!name.StartsWith("--", StringComparison.Ordinal) || name.Length < 3) return;
+        string? initial = null, syntax = null;
+        bool? inherits = null;
+        foreach (var part in SplitTopLevel(body, ';'))
+        {
+            int colon = part.IndexOf(':');
+            if (colon <= 0) continue;
+            var key = part.Substring(0, colon).Trim().ToLowerInvariant();
+            var value = part.Substring(colon + 1).Trim();
+            switch (key)
+            {
+                case "initial-value": initial = value; break;
+                case "syntax": syntax = value.Trim('"', '\'', ' '); break;
+                case "inherits":
+                    inherits = value.ToLowerInvariant() switch { "true" => true, "false" => false, _ => null };
+                    break;
+            }
+        }
+        if (inherits == null || syntax == null) return;
+        // A syntax other than "*" needs an initial value.
+        if (syntax != "*" && string.IsNullOrEmpty(initial)) return;
+        if (sheet.RegisteredProperties.Count >= 1024) return;
+        sheet.RegisteredProperties.RemoveAll(p => p.Name == name); // the last registration wins
+        sheet.RegisteredProperties.Add(new RegisteredProperty(name, string.IsNullOrEmpty(initial) ? null : initial, inherits.Value));
     }
 
     private static int MatchingBrace(string s, int open, int end)
@@ -386,6 +606,7 @@ internal static class CssParser
                 {
                     var lower = tok.ToLowerInvariant();
                     if (lower is "inside" or "outside") Add("list-style-position", lower);
+                    else if (lower[0] is '"' or '\'') Add("list-style-type", tok);
                     else if (!lower.StartsWith("url(", StringComparison.Ordinal)) Add("list-style-type", lower);
                 }
                 return;
@@ -395,8 +616,24 @@ internal static class CssParser
                 Add(name.Substring(5), value.ToLowerInvariant());
                 return;
             case "text-decoration":
-                Add("text-decoration-line", value);
+            {
+                // Line keywords, a style, a thickness and a colour, in any order; missing parts reset.
+                var lines = new List<string>();
+                string style = "solid", thickness = "auto", color = "currentcolor";
+                foreach (var tok in Tokens(value))
+                {
+                    var t = tok.ToLowerInvariant();
+                    if (t is "none" or "underline" or "overline" or "line-through" or "blink") { if (t != "none") lines.Add(t); }
+                    else if (t is "solid" or "double" or "dotted" or "dashed" or "wavy") style = t;
+                    else if (t is "auto" or "from-font" || char.IsDigit(t[0]) || t[0] == '.' || CssMath.IsMathFunction(t)) thickness = t;
+                    else color = tok;
+                }
+                Add("text-decoration-line", lines.Count == 0 ? "none" : string.Join(" ", lines));
+                Add("text-decoration-style", style);
+                Add("text-decoration-thickness", thickness);
+                Add("text-decoration-color", color);
                 return;
+            }
             case "border-spacing":
             {
                 var t = Tokens(value);
@@ -470,6 +707,43 @@ internal static class CssParser
                 string suffix = name.Substring(6);
                 Add("align-" + suffix, t[0]);
                 Add("justify-" + suffix, t.Count > 1 ? t[t.Count - 1] : t[0]);
+                return;
+            }
+            case "font-variant":
+            {
+                // The caps and ligature parts; numeric, east-asian and the rest are not supported.
+                var lower = value.Trim().ToLowerInvariant();
+                if (lower is "normal" or "none" or "inherit" or "initial" or "unset")
+                {
+                    Add("font-variant-caps", lower == "none" ? "normal" : lower);
+                    Add("font-variant-ligatures", lower);
+                    return;
+                }
+                string caps = "normal";
+                var ligatures = new List<string>();
+                foreach (var t in Tokens(lower))
+                {
+                    if (t is "small-caps" or "all-small-caps" or "petite-caps" or "all-petite-caps" or "unicase" or "titling-caps") caps = t;
+                    else if (t.EndsWith("ligatures", StringComparison.Ordinal) || t.EndsWith("contextual", StringComparison.Ordinal)) ligatures.Add(t);
+                }
+                Add("font-variant-caps", caps);
+                Add("font-variant-ligatures", ligatures.Count == 0 ? "normal" : string.Join(" ", ligatures));
+                return;
+            }
+            case "column-rule":
+            {
+                // Width, style and colour in any order, like a border side.
+                string width = "medium", style = "none", color = "currentcolor";
+                foreach (var tok in Tokens(value))
+                {
+                    var lower = tok.ToLowerInvariant();
+                    if (IsBorderStyle(lower)) style = lower;
+                    else if (lower is "thin" or "medium" or "thick" || char.IsDigit(lower[0]) || lower[0] == '.' || CssMath.IsMathFunction(lower)) width = lower;
+                    else color = tok;
+                }
+                Add("column-rule-width", width);
+                Add("column-rule-style", style);
+                Add("column-rule-color", color);
                 return;
             }
             case "columns":
@@ -582,14 +856,15 @@ internal static class CssParser
         if (lower is "caption" or "icon" or "menu" or "message-box" or "small-caption" or "status-bar") return;
 
         var tokens = Tokens(value);
-        string style = "normal", weight = "normal", size = "medium", lineHeight = "normal";
+        string style = "normal", weight = "normal", size = "medium", lineHeight = "normal", caps = "normal";
         int i = 0;
         for (; i < tokens.Count; i++)
         {
             var t = tokens[i].ToLowerInvariant();
             if (t is "italic" or "oblique") style = t;
             else if (t is "bold" or "bolder" or "lighter" || t.Length == 3 && char.IsDigit(t[0]) && t.EndsWith("00", StringComparison.Ordinal)) weight = t;
-            else if (t is "normal" or "small-caps") { }
+            else if (t == "small-caps") caps = t;
+            else if (t == "normal") { }
             else break;
         }
         if (i >= tokens.Count) return;
@@ -615,6 +890,7 @@ internal static class CssParser
         Add("font-weight", weight);
         Add("font-size", size);
         Add("line-height", lineHeight);
+        Add("font-variant-caps", caps);
         if (family.Length > 0) Add("font-family", family);
     }
 }
