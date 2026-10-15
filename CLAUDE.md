@@ -44,5 +44,8 @@ dotnet test -f net10.0 --filter "FullyQualifiedName~MarkdownTests"   # one class
 - Library must stay trimmable and AOT-compatible: no reflection-based code.
 - Code comments and docs are plain, full sentences explaining why, not what.
 - Adding or changing a bundled font or data source: update `THIRD-PARTY-NOTICES.md`.
+- `README.md` is the short overview (also shown on nuget.org): pitch, install, quick start, a one-line feature list and
+  the comparison table. The full manual is at pdfpecker.net/docs, generated from `docs/*.md` in the PdfPecker.Web
+  repository; a new feature gets a README line and a docs change there, which goes live with the next NuGet release.
 - Commit subjects are short imperative or descriptive sentences, no prefixes (e.g. "Right-to-left text in SVG and
   RTL ellipsis").

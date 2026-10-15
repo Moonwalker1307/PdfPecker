@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using PdfPecker;
 
-// Memory and CPU needed per conversion, for the README's system requirements.
+// Memory and CPU needed per conversion, for the system requirements in the docs (pdfpecker.net/docs).
 // Every measurement runs in a fresh child process, so its peak memory belongs to that one document alone:
 //   - time and CPU of the first conversion (JIT included) and of later ones once warmed up,
 //   - peak resident memory of the process and peak managed heap during a conversion,
