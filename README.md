@@ -4,7 +4,7 @@
 
 [![NuGet](https://img.shields.io/nuget/v/PdfPecker.svg)](https://www.nuget.org/packages/PdfPecker)
 
-Fast HTML and Markdown to PDF conversion, and PDF to PNG rendering, for .NET, with no dependencies.
+Fast HTML and Markdown to PDF conversion, and PDF to PNG, JPEG and WebP rendering, for .NET, with no dependencies.
 
 PdfPecker has its own HTML parser, Markdown parser, CSS engine, layout engine and PDF writer, and its own PDF renderer.
 It does not start a browser, ship native binaries or pull in third-party packages; the NuGet package depends only on
@@ -697,9 +697,9 @@ unreadable file or one without pages throws `InvalidDataException`.
 
 ## PDF to image
 
-`PdfToImage` and `PdfRenderer` render PDF pages to PNG (or raw RGBA pixels). This works for any PDF, not only
-PdfPecker's own output, and also uses no third-party packages: the PDF parser, font engines, JPEG and fax decoders,
-rasterizer and PNG encoder are all part of the library.
+`PdfToImage` and `PdfRenderer` render PDF pages to PNG, JPEG or WebP (or raw RGBA pixels). This works for any PDF,
+not only PdfPecker's own output, and also uses no third-party packages: the PDF parser, font engines, JPEG and fax
+decoders, rasterizer and the PNG, JPEG and WebP encoders are all part of the library.
 
 ```csharp
 // Every page as PNG bytes (rendered in parallel), or one page (0-based index)
@@ -709,14 +709,34 @@ byte[] first = PdfToImage.ConvertPage(pdfBytes, 0);
 // report.pdf -> out/report-1.png, out/report-2.png, ...
 PdfToImage.ConvertFile("report.pdf", "out");
 
+// JPEG or lossless WebP: report.pdf -> out/report-1.jpg, ... (or .webp)
+PdfToImage.ConvertFile("report.pdf", "out", new ImageOptions { Format = PdfImageFormat.Jpeg, Quality = 90 });
+byte[][] webps = PdfToImage.Convert(pdfBytes, new ImageOptions { Format = PdfImageFormat.WebP });
+
 // Open once, render many pages; RenderedImage also exposes the RGBA pixels
 var renderer = PdfRenderer.Open(pdfBytes, password: null);
 RenderedImage image = renderer.RenderPage(2, new ImageOptions { Width = 800 });
 image.SavePng("page3.png");
+File.WriteAllBytes("page3.jpg", image.ToJpeg(quality: 85));
+File.WriteAllBytes("page3.webp", image.ToWebP());
 ```
 
+Output formats (`ImageOptions.Format`, default `Png`; `RenderedImage.Encode()`/`Save()` use it too):
+
+- **PNG**: lossless, RGB for opaque pages and RGBA otherwise.
+- **JPEG**: baseline JFIF with the standard (IJG) quantisation tables scaled by `Quality` (1 to 100, default 85) and
+  Huffman tables optimised per image. Below quality 90 colour is subsampled 4:2:0; from 90 it keeps full resolution
+  (4:4:4), which keeps coloured text sharp. JPEG has no transparency, so a `Transparent` render is flattened onto
+  `BackgroundColor` (white by default). At quality 90 a 150 DPI text page decodes at about 45 dB PSNR.
+- **WebP**: always lossless (VP8L), alpha included, decoding to exactly the PNG's pixels and usually 50% to 70%
+  smaller. Pages with up to 256 colours use a palette (packed 2, 4 or 8 pixels per byte when small); others use
+  subtract-green and per-tile prediction, then LZ77, a colour cache and canonical prefix codes. Here `Quality` is the
+  compression effort: higher spends more time searching for a smaller file and never changes a pixel. Lossy WebP is
+  not written. WebP is limited to 16,384 pixels per side (JPEG to 65,535); larger images throw `NotSupportedException`.
+
 `ImageOptions` sets `Dpi` (default 150) or a target `Width`/`Height` in pixels, `BackgroundColor` or `Transparent`,
-`RenderAnnotations`, `Password`, `MaxDegreeOfParallelism` and `PngCompression`. A `PdfRenderer` is thread-safe and
+`RenderAnnotations`, `Password`, `MaxDegreeOfParallelism`, `PngCompression`, `Format` and `Quality` (an
+`ArgumentOutOfRangeException` outside 1 to 100). A `PdfRenderer` is thread-safe and
 shares decoded fonts and images between pages. Encrypted files open with the user or owner password
 (`PdfPasswordException` otherwise); unreadable files throw `InvalidDataException`, as does a page that needs more than
 20 million drawing operations (nested forms can multiply a few bytes into billions). Pass a cancellation token to
@@ -947,7 +967,8 @@ not listed in [What is supported](#what-is-supported) should be assumed missing.
 
 - Markdown: no footnotes, definition lists, math or front matter.
 - `PdfRenderer` (PDF to image): no predefined CJK CMaps or non-embedded CJK fonts, and ICC profiles are not applied
-  (ICC-based colours use their device equivalents).
+  (ICC-based colours use their device equivalents). WebP output is lossless only (no lossy VP8), and JPEG output is
+  baseline only (no progressive or arithmetic coding).
 
 ## Performance
 
@@ -974,7 +995,8 @@ opened document, so fonts and images are decoded too):
 | Large report (30 pages) | 5 ms per page | 10 ms per page | 29 ms per page |
 
 Rendering the same page again (fonts and glyphs cached) takes about 5 ms at 150 DPI. Multi-page conversions render
-pages in parallel.
+pages in parallel. Encoding one 150 DPI A4 page (1240 x 1754) takes about 15 to 60 ms as PNG, 20 to 70 ms as JPEG
+and 40 to 85 ms as WebP at the default quality, depending on content.
 
 ## Building
 
@@ -1010,7 +1032,8 @@ and `Markdown/HtmlRenderer` writes the HTML, which then takes the same path as a
 
 The renderer (`Rendering/`) works the other way round: `Parsing/PdfFile` reads the object graph, `PageRenderer`
 interprets content streams, `Fonts/` turns glyphs into outlines (cached as anti-aliased bitmaps), `Images/` decodes
-images, and `Graphics/Rasterizer` fills paths with exact area coverage before `PngEncoder` writes the result.
+images, and `Graphics/Rasterizer` fills paths with exact area coverage before `PngEncoder`, `JpegEncoder` or
+`WebPEncoder` writes the result.
 
 The third-party fonts, font data and code built into the library are listed, with their licenses, in
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
