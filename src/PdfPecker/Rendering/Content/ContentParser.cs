@@ -35,11 +35,18 @@ internal sealed class ContentParser
 
     public ContentParser(byte[] data) => _lx = new PdfLexer(data);
 
+    /// <summary>Where the current operator's operands start (after the previous operator), as a byte offset.</summary>
+    public int Start { get; private set; }
+
+    /// <summary>The byte offset just past the current operator (past EI for an inline image).</summary>
+    public int End => _lx.Pos;
+
     /// <summary>Advances to the next operator. Returns false at the end of the stream.</summary>
     public bool Next()
     {
         Operands.Clear();
         var lx = _lx;
+        Start = lx.Pos;
         while (true)
         {
             var k = lx.Next();

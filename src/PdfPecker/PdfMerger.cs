@@ -208,7 +208,7 @@ public static class PdfMerger
         if (!output.CanWrite) throw new ArgumentException("The output stream is not writable.", nameof(output));
     }
 
-    private static byte[] ReadAll(Stream input)
+    internal static byte[] ReadAll(Stream input)
     {
         if (input.CanSeek)
         {
