@@ -69,6 +69,7 @@ internal sealed class StyleResolver
     private readonly Dictionary<(string, string), Declaration> _hintCache = new();
     private readonly Dictionary<StyleKey, ComputedStyle> _styleCache = new();
     private readonly StyleKey _probe = new();
+    private readonly List<Declaration> _registeredEach = new(), _registeredRoot = new();
 
     /// <summary>
     /// Elements with the same parent style and the same winning declarations get the same computed style. This makes
@@ -114,8 +115,17 @@ internal sealed class StyleResolver
     /// <param name="viewportHeight">Height in points that 100vh refers to: the page's content height.</param>
     public StyleResolver(Stylesheet authorSheet, float viewportWidth = 595.28f, float viewportHeight = 841.89f)
     {
+        authorSheet.RankLayers();
         _author = new RuleIndex(authorSheet);
-        _hasCustomProperties = authorSheet.Rules.Any(r => r.Declarations.Any(d => d.Property.StartsWith("--", StringComparison.Ordinal)));
+        if (authorSheet.RegisteredProperties.Count > 0)
+        {
+            // Registered custom properties start at their initial value: on every element when they do not inherit,
+            // on the root when they do. These act as the lowest-priority declarations.
+            foreach (var p in authorSheet.RegisteredProperties)
+                (p.Inherits ? _registeredRoot : _registeredEach).Add(new Declaration(p.Name, p.InitialValue ?? "initial", false));
+        }
+        _hasCustomProperties = authorSheet.RegisteredProperties.Count > 0
+                               || authorSheet.Rules.Any(r => r.Declarations.Any(d => d.Property.StartsWith("--", StringComparison.Ordinal)));
         // Chrome sizes the print viewport in whole CSS pixels, rounded down: 100vh on A4 is 1122px, not 1122.52px.
         _vw = WholePx(viewportWidth) / 100f;
         _vh = WholePx(viewportHeight) / 100f;
@@ -225,6 +235,7 @@ internal sealed class StyleResolver
         if (UaIndex.Value.PseudoElements is { } ua) Collect(ua, host, TierUa, TierUaImportant, which);
         if (_author.PseudoElements is { } author) Collect(author, host, TierAuthor, TierAuthorImportant, which);
         if (_count == 0) return;
+        for (int i = 0; i < _registeredEach.Count; i++) Push(TierUa, 0, 0, i, _registeredEach[i]);
         if (_count > 1) Array.Sort(_keys, _decls, 0, _count);
         var s = Compute(host.Name, host.Style);
         if (s.Content == null || s.Display == Display.None) return;
@@ -291,6 +302,7 @@ internal sealed class StyleResolver
     {
         if ((++_resolved & 255) == 0) Cancellation.ThrowIfCancellationRequested();
         _count = 0;
+        if (_registeredEach.Count > 0 || _registeredRoot.Count > 0) PushRegistered(e);
         Collect(UaIndex.Value, e, TierUa, TierUaImportant);
         AddHints(e);
         Collect(_author, e, TierAuthor, TierAuthorImportant);
@@ -310,6 +322,13 @@ internal sealed class StyleResolver
         if (_count > 1) Array.Sort(_keys, _decls, 0, _count);
         e.Style = Compute(e.Name, parent);
         if (e.Style.CounterReset != null || e.Style.CounterSet != null || e.Style.CounterIncrement != null) _countersUsed = true;
+    }
+
+    private void PushRegistered(Element e)
+    {
+        for (int i = 0; i < _registeredEach.Count; i++) Push(TierUa, 0, 0, i, _registeredEach[i]);
+        if (e.Name == "html" || e.Parent is { Name: "#document" })
+            for (int i = 0; i < _registeredRoot.Count; i++) Push(TierUa, 0, 0, _registeredEach.Count + i, _registeredRoot[i]);
     }
 
     /// <summary>Computes a style from the sorted declarations in the working buffer, sharing it when it was computed before.</summary>
@@ -404,22 +423,32 @@ internal sealed class StyleResolver
         {
             if (r.Selector.PseudoElement != which || !r.Selector.Matches(e)) continue;
             var decls = r.Declarations;
+            // Cascade layers: later layers win over earlier ones and unlayered rules over all of them; for !important
+            // declarations the order is reversed.
+            int layer = r.Layer is { } l ? l.Rank : UnlayeredRank;
+            int importantLayer = r.Layer is { } il ? UnlayeredRank - il.Rank : 0;
             for (int i = 0; i < decls.Length; i++)
-                Push(decls[i].Important ? importantTier : tier, r.Selector.Specificity, r.Order, i, decls[i]);
+            {
+                bool important = decls[i].Important;
+                Push(important ? importantTier : tier, r.Selector.Specificity, r.Order, i, decls[i], important ? importantLayer : layer);
+            }
         }
     }
 
-    private void Push(long tier, int specificity, int order, int declIndex, Declaration d)
+    private const int UnlayeredRank = Stylesheet.MaxLayerRank + 1;
+
+    private void Push(long tier, int specificity, int order, int declIndex, Declaration d, int layer = 0)
     {
         if (_count == _keys.Length)
         {
             Array.Resize(ref _keys, _count * 2);
             Array.Resize(ref _decls, _count * 2);
         }
-        long key = tier << 56
-                   | (long)Math.Min(specificity, 0xFFFFF) << 36
-                   | (long)Math.Min(order, 0xFFFFF) << 16
-                   | (long)Math.Min(declIndex, 0xFFFF);
+        long key = tier << 60
+                   | (long)layer << 52
+                   | (long)Math.Min(specificity, 0xFFFFF) << 32
+                   | (long)Math.Min(order, 0xFFFFF) << 12
+                   | (long)Math.Min(declIndex, 0xFFF);
         _keys[_count] = key;
         _decls[_count++] = d;
     }

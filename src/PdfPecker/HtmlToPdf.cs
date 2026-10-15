@@ -79,9 +79,14 @@ public static class HtmlToPdf
         var resolver = options.ResourceResolver;
 
         // Stylesheets in document order: <style> blocks and <link rel="stylesheet">.
-        var sheet = new Stylesheet();
-        CollectStyles(doc, sheet, baseDirectory, resolver, options.AllowFileAccess);
-        if (!string.IsNullOrEmpty(options.UserStyleSheet)) CssParser.ParseStylesheet(options.UserStyleSheet!, sheet);
+        // Media queries see the page area, as in Chrome's print preview: first as the options give it, then, when an
+        // @page rule changes the size or margins and a query depends on it, as the rule makes it.
+        var media = new MediaContext
+        {
+            Width = options.PageSize.Width - options.Margins.Left - options.Margins.Right,
+            Height = options.PageSize.Height - options.Margins.Top - options.Margins.Bottom,
+        };
+        var sheet = ReadStyles(doc, media, options, baseDirectory, resolver);
 
         var page = new PageSetup
         {
@@ -93,6 +98,8 @@ public static class HtmlToPdf
             MarginLeft = options.Margins.Left,
         };
         if (!options.IgnoreCssPageRules) ApplyPageRules(sheet.PageDeclarations, page);
+        if (media.UsedSize && (Math.Abs(media.Width - page.ContentWidth) > 0.01f || Math.Abs(media.Height - page.ContentHeight) > 0.01f))
+            sheet = ReadStyles(doc, new MediaContext { Width = page.ContentWidth, Height = page.ContentHeight }, options, baseDirectory, resolver);
         if (options.Scale != 1)
         {
             // Lay the page out at its paper size divided by the scale, as Chrome's print scale does; the writer then
@@ -373,6 +380,14 @@ public static class HtmlToPdf
         }
     }
 
+    private static Stylesheet ReadStyles(Element doc, MediaContext media, PdfOptions options, string? baseDirectory, Func<string, byte[]?>? resolver)
+    {
+        var sheet = new Stylesheet { Media = media };
+        CollectStyles(doc, sheet, baseDirectory, resolver, options.AllowFileAccess);
+        if (!string.IsNullOrEmpty(options.UserStyleSheet)) CssParser.ParseStylesheet(options.UserStyleSheet!, sheet);
+        return sheet;
+    }
+
     private static void CollectStyles(Element parent, Stylesheet sheet, string? baseDirectory, Func<string, byte[]?>? resolver, bool allowFiles)
     {
         foreach (var child in parent.Children)
@@ -381,14 +396,14 @@ public static class HtmlToPdf
             if (e.Name == "style")
             {
                 var media = e.GetAttribute("media");
-                if (media == null || MediaMatches(media)) CssParser.ParseStylesheet(e.InnerText(), sheet);
+                if (media == null || MediaQuery.Matches(media, sheet.Media)) CssParser.ParseStylesheet(e.InnerText(), sheet);
                 continue;
             }
             if (e.Name == "link" && (e.GetAttribute("rel") ?? "").IndexOf("stylesheet", StringComparison.OrdinalIgnoreCase) >= 0)
             {
                 var media = e.GetAttribute("media");
                 var href = e.GetAttribute("href");
-                var css = media == null || MediaMatches(media) ? LoadText(href, baseDirectory, resolver, allowFiles) : null;
+                var css = media == null || MediaQuery.Matches(media, sheet.Media) ? LoadText(href, baseDirectory, resolver, allowFiles) : null;
                 if (css != null) CssParser.ParseStylesheet(RebaseUrls(css, href!), sheet);
                 continue;
             }
@@ -453,11 +468,7 @@ public static class HtmlToPdf
     private static bool IsAbsoluteReference(string url)
         => url.Length == 0 || url[0] is '/' or '\\' or '#' || System.Text.RegularExpressions.Regex.IsMatch(url, "^[A-Za-z][A-Za-z0-9+.-]*:");
 
-    private static bool MediaMatches(string media)
-    {
-        var m = media.ToLowerInvariant();
-        return m.Length == 0 || m.Contains("print") || m.Contains("all");
-    }
+
 
     private static string? LoadText(string? href, string? baseDirectory, Func<string, byte[]?>? resolver, bool allowFiles)
     {
