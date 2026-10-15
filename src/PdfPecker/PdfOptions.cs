@@ -89,6 +89,9 @@ public enum PdfAccessibility
 /// <summary>Options for <see cref="HtmlToPdf"/>.</summary>
 public sealed class PdfOptions
 {
+    /// <summary>A shallow copy, to change a few settings without touching the caller's options.</summary>
+    internal PdfOptions Clone() => (PdfOptions)MemberwiseClone();
+
     /// <summary>Page size. Default: A4. A CSS <c>@page { size: ... }</c> rule overrides it unless <see cref="IgnoreCssPageRules"/> is set.</summary>
     public PageSize PageSize { get; set; } = PageSize.A4;
 
