@@ -426,11 +426,17 @@ internal sealed partial class LayoutEngine
                 i++;
             }
             var span = text.AsSpan(start, i - start);
-            if (span.IndexOfAny(WordBreakChars) >= 0 && breakable) AddWordSegments(st, text, start, i - start, style, href, deco);
-            else AddWord(st, text, start, i - start, style, href, deco, BreakAfter.None);
+            // hyphens: auto, except in words that have soft hyphens: those break only there, as CSS Text specifies.
+            // Nor in URLs and e-mail addresses.
+            bool hyphenate = breakable && style.HyphensAuto && span.IndexOf('\u00AD') < 0 && !LooksLikeAddress(span);
+            if (span.IndexOfAny(WordBreakChars) >= 0 && breakable) AddWordSegments(st, text, start, i - start, style, href, deco, hyphenate);
+            else AddWord(st, text, start, i - start, style, href, deco, BreakAfter.None, hyphenate);
             st.Column += i - start;
         }
     }
+
+    private static bool LooksLikeAddress(ReadOnlySpan<char> word) =>
+        word.IndexOf('@') >= 0 || word.IndexOf("://", StringComparison.Ordinal) >= 0 || word.StartsWith("www.", StringComparison.OrdinalIgnoreCase);
 
     // Characters inside a word that give a line break opportunity (or, for U+200B and U+00AD, are not drawn).
     private static readonly System.Buffers.SearchValues<char> WordBreakChars = System.Buffers.SearchValues.Create("-?\u00AD\u200B\u2010\u2013\u2014");
@@ -440,7 +446,7 @@ internal sealed partial class LayoutEngine
     /// after U+2010 and en dashes, around em dashes, after "?" before a letter, at zero-width spaces and at soft hyphens
     /// (which show a hyphen only when the line breaks there).
     /// </summary>
-    private void AddWordSegments(CollectState st, string text, int start, int length, ComputedStyle style, string? href, ComputedStyle? deco)
+    private void AddWordSegments(CollectState st, string text, int start, int length, ComputedStyle style, string? href, ComputedStyle? deco, bool hyphenate)
     {
         int end = start + length, seg = start;
         for (int k = start; k < end; k++)
@@ -451,32 +457,32 @@ internal sealed partial class LayoutEngine
             {
                 case '\u00AD':
                 case '\u200B':
-                    AddWord(st, text, seg, k - seg, style, href, deco, c == '\u200B' ? BreakAfter.Break : style.NoHyphens ? BreakAfter.None : BreakAfter.SoftHyphen);
+                    AddWord(st, text, seg, k - seg, style, href, deco, c == '\u200B' ? BreakAfter.Break : style.NoHyphens ? BreakAfter.None : BreakAfter.SoftHyphen, hyphenate);
                     seg = k + 1;
                     break;
                 case '-':
-                    if (char.IsLetterOrDigit(next) || next == '-') { AddWord(st, text, seg, k + 1 - seg, style, href, deco, BreakAfter.Break); seg = k + 1; }
+                    if (char.IsLetterOrDigit(next) || next == '-') { AddWord(st, text, seg, k + 1 - seg, style, href, deco, BreakAfter.Break, hyphenate); seg = k + 1; }
                     break;
                 case '?':
-                    if (char.IsLetter(next)) { AddWord(st, text, seg, k + 1 - seg, style, href, deco, BreakAfter.Break); seg = k + 1; }
+                    if (char.IsLetter(next)) { AddWord(st, text, seg, k + 1 - seg, style, href, deco, BreakAfter.Break, hyphenate); seg = k + 1; }
                     break;
                 case '\u2010':
                 case '\u2013':
-                    if (next != '\0') { AddWord(st, text, seg, k + 1 - seg, style, href, deco, BreakAfter.Break); seg = k + 1; }
+                    if (next != '\0') { AddWord(st, text, seg, k + 1 - seg, style, href, deco, BreakAfter.Break, hyphenate); seg = k + 1; }
                     break;
                 case '\u2014':
-                    if (k > seg) AddWord(st, text, seg, k - seg, style, href, deco, BreakAfter.Break);
+                    if (k > seg) AddWord(st, text, seg, k - seg, style, href, deco, BreakAfter.Break, hyphenate);
                     seg = k;
-                    if (next != '\0') { AddWord(st, text, seg, 1, style, href, deco, BreakAfter.Break); seg = k + 1; }
+                    if (next != '\0') { AddWord(st, text, seg, 1, style, href, deco, BreakAfter.Break, hyphenate); seg = k + 1; }
                     break;
             }
         }
-        if (seg < end) AddWord(st, text, seg, end - seg, style, href, deco, BreakAfter.None);
+        if (seg < end) AddWord(st, text, seg, end - seg, style, href, deco, BreakAfter.None, hyphenate);
         else if (st.Items.Count > 0 && st.Items[^1] is { Kind: ItemKind.Text } last && last.BreakAfter == BreakAfter.SoftHyphen)
             last.BreakAfter = BreakAfter.None; // a soft hyphen at the end of a word is no break opportunity of its own
     }
 
-    private void AddWord(CollectState st, string text, int start, int length, ComputedStyle style, string? href, ComputedStyle? deco, BreakAfter breakAfter)
+    private void AddWord(CollectState st, string text, int start, int length, ComputedStyle style, string? href, ComputedStyle? deco, BreakAfter breakAfter, bool hyphenate = false)
     {
         string src = text;
         int wStart = start, wLen = length;
@@ -507,8 +513,37 @@ internal sealed partial class LayoutEngine
             AddSmallCaps(st, src.Substring(wStart, wLen), style, href, deco, breakAfter);
             return;
         }
+        if (hyphenate && HyphenatorFor(style) is { } hyphenator
+            && hyphenator.Hyphenate(src.AsSpan(wStart, wLen), _hyphenBreaks, skipCapitalized: IsEnglish(style.Lang!)) > 0)
+        {
+            // The pieces between the break points are words of their own that break like soft hyphens: only where the
+            // word does not fit, showing a hyphen there.
+            int from = 0;
+            foreach (int at in _hyphenBreaks)
+            {
+                AddText(st, src, wStart + from, at - from, style, href, deco, BreakAfter.SoftHyphen);
+                from = at;
+            }
+            AddText(st, src, wStart + from, wLen - from, style, href, deco, breakAfter);
+            return;
+        }
         AddText(st, src, wStart, wLen, style, href, deco, breakAfter);
     }
+
+    private readonly List<int> _hyphenBreaks = new();
+    private readonly Dictionary<string, Text.Hyphenator?> _hyphenators = new(StringComparer.Ordinal);
+
+    /// <summary>The hyphenation patterns of the style's language, or null without a language or patterns for it.</summary>
+    private Text.Hyphenator? HyphenatorFor(ComputedStyle style)
+    {
+        if (style.Lang is not { } lang) return null;
+        if (!_hyphenators.TryGetValue(lang, out var h)) _hyphenators[lang] = h = Text.Hyphenator.For(lang, style.Hyphenation);
+        return h;
+    }
+
+    // Chrome does not hyphenate capitalized English words.
+    private static bool IsEnglish(string lang) =>
+        lang.StartsWith("en", StringComparison.OrdinalIgnoreCase) && (lang.Length == 2 || lang[2] is '-' or '_');
 
     private void AddText(CollectState st, string src, int start, int length, ComputedStyle style, string? href, ComputedStyle? deco, BreakAfter breakAfter)
     {
@@ -688,7 +723,7 @@ internal sealed partial class LayoutEngine
                 li.RemoveAt(li.Count - 1);
             // A line broken at a soft hyphen shows a hyphen.
             if (!forced && li.Count > 0 && li[^1] is { Kind: ItemKind.Text, BreakAfter: BreakAfter.SoftHyphen } shy)
-                li[^1] = shy.CloneWithText(shy.Text + "-", shy.Width + HyphenWidth(shy.Style));
+                li[^1] = shy.CloneWithText(shy.Text + HyphenText(shy.Style), shy.Width + HyphenWidth(shy.Style));
             float width = 0;
             foreach (var it in li) width += it.Width;
             cur.Width = width;
@@ -842,7 +877,12 @@ internal sealed partial class LayoutEngine
     /// <summary>Whether overflow-wrap or word-break lets a word break between any two characters.</summary>
     private static bool BreaksAnywhere(ComputedStyle s) => s.OverflowWrap != OverflowWrap.Normal || s.WordBreak == WordBreak.BreakAll;
 
-    private static float HyphenWidth(ComputedStyle s) => s.Font.CharWidth('-', s.FontSize) + s.LetterSpacing;
+    /// <summary>The text shown where a line breaks at a soft hyphen or hyphenation point (hyphenate-character).</summary>
+    private static string HyphenText(ComputedStyle s) => s.HyphenateCharacter ?? "-";
+
+    private static float HyphenWidth(ComputedStyle s) => s.HyphenateCharacter is { } h
+        ? s.Font.MeasureUnits(h, 0, h.Length) * s.FontSize / 1000f + s.LetterSpacing * h.Length
+        : s.Font.CharWidth('-', s.FontSize) + s.LetterSpacing;
 
     // ------------------------------------------------------------------ placing lines
 
