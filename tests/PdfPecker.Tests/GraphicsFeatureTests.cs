@@ -213,6 +213,28 @@ public class GraphicsFeatureTests
     }
 
     [Fact]
+    public void Svg_text_is_put_in_visual_order_with_its_direction()
+    {
+        var doc = Styled("""
+            <svg id="s" width="400" height="100" font-family="Helvetica">
+              <text x="10" y="20" font-size="20">ab <tspan fill="red">אבג</tspan> cd</text>
+              <text x="300" y="60" font-size="20" direction="rtl">ab cd</text>
+            </svg>
+            """);
+        var texts = SvgImage.Build(ById(doc, "s")).Shapes.Where(s => s.Kind == SvgShape.KindText).ToList();
+        // Left to right, the Hebrew word stays between the Latin ones and is drawn right to left.
+        Assert.Equal(new[] { "ab ", "אבג", " cd" }, texts.Take(3).Select(t => t.Text));
+        Assert.Equal(new[] { false, true, false }, texts.Take(3).Select(t => t.Rtl));
+        Assert.True(texts[0].TextMatrix.E < texts[1].TextMatrix.E && texts[1].TextMatrix.E < texts[2].TextMatrix.E);
+        Near(10, texts[0].TextMatrix.E, 0.01f);
+        // Right to left, text-anchor: start puts the end of the text (its right end) at x.
+        var rtl = texts.Skip(3).ToList();
+        var font = (PdfPecker.Fonts.StandardFont)rtl[0].Font!;
+        float total = rtl.Sum(t => font.Measure(t.Text!, 20));
+        Near(300 - total, rtl.Min(t => t.TextMatrix.E), 0.01f);
+    }
+
+    [Fact]
     public void Svg_text_is_laid_out_with_anchors_and_tspans()
     {
         var doc = Styled("""
@@ -225,7 +247,7 @@ public class GraphicsFeatureTests
             """);
         var texts = SvgImage.Build(ById(doc, "s")).Shapes.Where(s => s.Kind == SvgShape.KindText).ToList();
         Assert.Equal(new[] { "Hello ", "big", " world", "A" }, texts.Select(t => t.Text));
-        Assert.Contains("Bold", texts[1].Font!.BaseFont);
+        Assert.Contains("Bold", ((PdfPecker.Fonts.StandardFont)texts[1].Font!).BaseFont);
         Assert.Equal(0xFFFF0000u, texts[1].Fill);
         var font = texts[0].Font!;
         float total = font.Measure("Hello ", 20) + texts[1].Font!.Measure("big", 20) + font.Measure(" world", 20);

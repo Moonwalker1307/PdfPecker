@@ -268,7 +268,9 @@ byte[] pdf = HtmlToPdf.Convert("""
 In a right-to-left block, text aligns right (`text-align: start`), and table columns, flex rows, grid columns and list
 markers run from the right. `dir="auto"`, `<bdi>` and `<bdo>` work as in browsers, and so do `unicode-bidi`,
 `text-align: start`/`end` and the logical margin and padding properties (`margin-inline-start`, `padding-inline-end`,
-...). Copied or extracted text gives back the original characters in logical order. A font without OpenType Arabic
+...). `text-overflow: ellipsis` and `line-clamp` cut right-to-left lines at their left end. SVG `<text>` is reordered
+and shaped too, with `direction` deciding which way a text chunk runs from its `x`. Copied or extracted text gives back
+the original characters in logical order. A font without OpenType Arabic
 features is shaped with the Unicode presentation forms instead.
 
 ### Watermarks, passwords and PDF/A
@@ -671,7 +673,8 @@ nav a::after { content: leader(dotted) target-counter(attr(href), page) }
 Chrome supports named pages and margin boxes, but not running strings, `target-counter()` or `leader()`.
 
 **SVG**: inline `<svg>` and SVG files (in `<img>` and as `url()` backgrounds, including `data:image/svg+xml` URIs) with `path` (all commands, arcs included), `rect` (incl. rounded), `circle`, `ellipse`, `line`,
-`polyline`, `polygon`, `text` and `tspan` (`x`, `y`, `dx`, `dy`, `text-anchor`, `dominant-baseline`, standard fonts),
+`polyline`, `polygon`, `text` and `tspan` (`x`, `y`, `dx`, `dy`, `text-anchor`, `dominant-baseline`, `direction`,
+registered fonts and right-to-left text),
 `g`, `use`, nested `svg`, `viewBox`, `preserveAspectRatio` and `transform`, drawn as vector paths. `linearGradient` and
 `radialGradient` (both units, `gradientTransform`, `spreadMethod`, `href` inheritance) become PDF shadings, and
 `pattern` fills and strokes (both units, `viewBox`, `patternTransform`, `href` inheritance) become PDF tiling patterns.
@@ -720,12 +723,10 @@ not listed in [What is supported](#what-is-supported) should be assumed missing.
   and conjuncts come out wrong, and Thai text breaks only at spaces. There is no vertical text (`writing-mode`).
 - In Latin and other simple scripts, shaping is limited to pair kerning and standard ligatures; no contextual
   alternates or other OpenType features (`small-caps` is synthesized from scaled capitals).
-- Right-to-left text in SVG `<text>` is not reordered or shaped, and `text-overflow: ellipsis` is always placed at the
-  right end of a line.
 - Variable fonts use their default instance (`font-variation-settings` and `font-stretch` are ignored).
 - No automatic hyphenation (`hyphens: auto`); words break only at spaces, hyphens, `&shy;` and `&#8203;`.
-- SVG `<text>` uses the standard fonts (embedded as Liberation for PDF/A), only the first value of position lists and
-  no `textPath`.
+- SVG `<text>` uses only the first value of position lists and has no `textPath`; in a text chunk with right-to-left
+  text, `dx` on its `tspan`s is ignored.
 
 **CSS**
 
