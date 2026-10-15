@@ -564,7 +564,7 @@ specificity and `!important` handled as in browsers. Properties:
 | SVG | `fill`, `stroke`, `stroke-width`, `fill-opacity`, `stroke-opacity`, `fill-rule`, `stroke-linecap`, `stroke-linejoin`, `stroke-miterlimit`, `clip-path`, `clip-rule`, `mask`, `mask-type`, `filter`, `marker`, `marker-start`/`-mid`/`-end`, `flood-color`, `flood-opacity`, `color-interpolation-filters`, `text-anchor`, `dominant-baseline` (as CSS or presentation attributes) |
 | Lists | `list-style-type` (disc, circle, square, decimal, decimal-leading-zero, alpha, roman, none), `list-style` |
 | Tables | `border-collapse` (each shared border drawn once, the wider one winning), `border-spacing`, cell `vertical-align`, automatic column widths, `table-layout: fixed`, a table `height` shared out over the rows |
-| Paging | `page-break-before`/`after`/`inside`, `break-before`/`after`/`inside` (`always`, `page`, `avoid`), `orphans`, `widows`, `@page` size and margins |
+| Paging | `page-break-before`/`after`/`inside`, `break-before`/`after`/`inside` (`always`, `page`, `avoid`), `orphans`, `widows`, `@page` size and margins, `@page :first`/`:left`/`:right`, page margin boxes (`@top-center` and the other fifteen, with `content: "Page " counter(page) " of " counter(pages)`) |
 
 Units: `px`, `pt`, `em`, `rem`, `%`, `mm`, `cm`, `in`, `pc`, `ex`, `ch`, `vw`, `vh`, `vmin`, `vmax` (the viewport is
 the page's content area, minus any running header and footer, in whole pixels as in Chrome). Colours: names, `#rgb`, `#rrggbb`,
@@ -648,17 +648,14 @@ not listed in [What is supported](#what-is-supported) should be assumed missing.
 
 **CSS**
 
-- Math functions work on lengths and numbers only: not on angles (`rotate(calc(...))`) and not the newer ones (`round()`,
-  `mod()`, `sin()` and so on). A table column width that mixes a percentage with other units (`calc(50% - 10px)`) is
-  sized as `auto`.
-- `@import` is ignored (use `<link rel="stylesheet">`). Rules inside `@supports`, `@layer` and `@container` blocks
-  are skipped, as are `@page :first`/`:left`/`:right` and page margin boxes (`@top-center`; use
-  [running headers and footers](#what-is-supported) instead).
-- Selectors: no `:has()`, `:nth-child(… of S)` or `::first-letter`/`::first-line`/`::marker`. A rule with an
+- A table column width that mixes a percentage with other units (`calc(50% - 10px)`) is sized as `auto`.
+- `@import` is ignored (use `<link rel="stylesheet">`), and rules inside `@container` blocks are skipped.
+- Paged media: no named pages (`page`), running elements (`string-set`, `running()`) or `target-counter()`.
+- Selectors: no `::first-letter`/`::first-line`. A rule with an
   unsupported selector is skipped. `:hover`, `:focus` and similar interaction states never match. Selectors inside
   `:is()`, `:where()` and `:not()` may have at most eight compound parts (one when nested in another of them).
 - Properties not supported: `filter`, `mix-blend-mode`, `clip-path` on HTML elements (only in SVG), `border-image`,
-  `list-style-image`, `column-span`, `column-rule` and inset `box-shadow`.
+  `list-style-image` and inset `box-shadow`.
 - `text-shadow` blur is approximated with faint copies of the text rather than a true Gaussian blur, and decorations
   (underlines) get no shadow. `text-overflow` only supports `ellipsis` at the end of the line (`clip` and custom
   strings do nothing). `aspect-ratio` does not take part in min-/max-content sizing (shrink-to-fit widths) and is
@@ -678,7 +675,7 @@ not listed in [What is supported](#what-is-supported) should be assumed missing.
 
 **Layout**
 
-- Grid: no `dense` packing and no subgrid; `span <name>` counts as `span 1`.
+- Grid: no subgrid.
 - Multi-column: children are kept whole and balanced between columns; a single block is never split across columns.
 - Overflow: a positioned child with a `z-index` inside a clipping box stays stacked within that box.
 
