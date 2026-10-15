@@ -1,0 +1,26 @@
+<!doctype html>
+<html><head><style>
+body { font-family: Helvetica, Arial, sans-serif; margin: 24px; color: #222; }
+h2 { font-size: 16px; margin: 18px 0 8px; }
+.row { display: flex; gap: 16px; align-items: flex-start; }
+.card { width: 200px; border-radius: 16px; overflow: hidden; border: 1px solid #ccc; background: #fff; }
+.card .banner { height: 70px; background: linear-gradient(135deg, #4f46e5, #ec4899); }
+.card .body { padding: 10px 12px; font-size: 12px; }
+.avatar { width: 90px; height: 90px; border-radius: 50%; overflow: hidden; border: 3px solid #4f46e5; }
+.avatar img { width: 120px; height: 120px; margin: -15px; display: block; }
+.trim { width: 200px; height: 52px; overflow: hidden; border: 1px solid #999; padding: 6px; font-size: 12px; border-radius: 8px; background: #fffbe6; }
+.xclip { width: 160px; overflow-x: clip; border: 1px dashed #999; font-size: 12px; white-space: nowrap; }
+.mixed { width: 200px; height: 60px; border: 3px solid #0a7; border-top-style: dashed; border-bottom-style: dotted; border-radius: 14px; padding: 8px; font-size: 12px; }
+</style></head><body>
+<h2>Card with rounded corners clips its banner</h2>
+<div class="row">
+  <div class="card"><div class="banner"></div><div class="body"><b>Invoice #1042</b><br>Paid on 12 October 2026</div></div>
+  <div class="avatar"><img src="logo.png"></div>
+</div>
+<h2>Long text cut at the box (overflow: hidden)</h2>
+<div class="trim">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.</div>
+<h2>overflow-x: clip cuts sideways only</h2>
+<div class="xclip">This line is far too wide for its box and gets cut at the right edge.</div>
+<h2>Rounded border mixing dashed, solid and dotted sides</h2>
+<div class="mixed">Top dashed, sides solid, bottom dotted.</div>
+</body></html>

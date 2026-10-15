@@ -9,24 +9,27 @@ internal enum AttrOp : byte { Exists, Equals, Includes, DashMatch, Prefix, Suffi
 internal enum PseudoKind : byte
 {
     FirstChild, LastChild, OnlyChild, NthChild, NthLastChild, FirstOfType, LastOfType, OnlyOfType, NthOfType, NthLastOfType,
-    Root, Link, Empty, Never, Not, Is, Where,
+    Root, Link, Empty, Never, Not, Is, Where, Has, HasAnchor, Lang, Checked, Disabled, Enabled, Required, Optional, ReadOnly,
+    ReadWrite, PlaceholderShown, Default, Always,
 }
 
 /// <summary>The pseudo-element a selector's subject names, if any.</summary>
-internal enum PseudoElement : byte { None, Before, After }
+internal enum PseudoElement : byte { None, Before, After, Marker }
 
 internal sealed class AttrCondition
 {
     public string Name = "";
     public AttrOp Op;
     public string Value = "";
+    public bool IgnoreCase; // the "i" flag: [type="a" i]
 }
 
 internal sealed class PseudoCondition
 {
     public PseudoKind Kind;
     public int A, B; // an+b for nth-child and nth-of-type
-    public Selector[]? List; // the selector list of :not(), :is() and :where()
+    public Selector[]? List; // the selector list of :not(), :is(), :where(), :has() (relative) and :nth-child(... of S)
+    public string[]? Langs; // the ranges of :lang()
 }
 
 /// <summary>A compound selector such as <c>div.note#main[title]</c>.</summary>
@@ -62,6 +65,7 @@ internal sealed class Compound
     {
         var v = e.GetAttribute(a.Name);
         if (v == null) return false;
+        if (a.IgnoreCase && a.Op != AttrOp.Exists) return MatchAttrIgnoreCase(v, a);
         switch (a.Op)
         {
             case AttrOp.Exists: return true;
@@ -78,6 +82,27 @@ internal sealed class Compound
         return false;
     }
 
+    private static bool MatchAttrIgnoreCase(string v, AttrCondition a)
+    {
+        const StringComparison ic = StringComparison.OrdinalIgnoreCase;
+        switch (a.Op)
+        {
+            case AttrOp.Equals: return string.Equals(v, a.Value, ic);
+            case AttrOp.Prefix: return a.Value.Length > 0 && v.StartsWith(a.Value, ic);
+            case AttrOp.Suffix: return a.Value.Length > 0 && v.EndsWith(a.Value, ic);
+            case AttrOp.Substring: return a.Value.Length > 0 && v.Contains(a.Value, ic);
+            case AttrOp.DashMatch: return string.Equals(v, a.Value, ic) || v.StartsWith(a.Value + "-", ic);
+            case AttrOp.Includes:
+                foreach (var part in v.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                    if (string.Equals(part, a.Value, ic)) return true;
+                return false;
+        }
+        return false;
+    }
+
+    /// <summary>The element :has() is being matched for; its relative selectors start at this element.</summary>
+    [ThreadStatic] private static Element? _hasAnchor;
+
     private static bool MatchPseudo(Element e, PseudoCondition p)
     {
         switch (p.Kind)
@@ -85,8 +110,9 @@ internal sealed class Compound
             case PseudoKind.FirstChild: return e.ElementIndex == 1;
             case PseudoKind.LastChild: return e.ElementIndex == e.ElementSiblingCount;
             case PseudoKind.OnlyChild: return e.ElementSiblingCount == 1;
-            case PseudoKind.NthChild: return MatchNth(p.A, p.B, e.ElementIndex);
-            case PseudoKind.NthLastChild: return MatchNth(p.A, p.B, e.ElementSiblingCount - e.ElementIndex + 1);
+            case PseudoKind.NthChild: return p.List == null ? MatchNth(p.A, p.B, e.ElementIndex) : MatchNthOf(e, p, fromEnd: false);
+            case PseudoKind.NthLastChild:
+                return p.List == null ? MatchNth(p.A, p.B, e.ElementSiblingCount - e.ElementIndex + 1) : MatchNthOf(e, p, fromEnd: true);
             case PseudoKind.FirstOfType: return e.TypeIndex == 1;
             case PseudoKind.LastOfType: return e.TypeIndex == e.TypeCount;
             case PseudoKind.OnlyOfType: return e.TypeCount == 1;
@@ -98,8 +124,145 @@ internal sealed class Compound
             case PseudoKind.Not: return !AnyMatches(p.List!, e);
             case PseudoKind.Is:
             case PseudoKind.Where: return AnyMatches(p.List!, e);
+            case PseudoKind.Has: return MatchHas(e, p.List!);
+            case PseudoKind.HasAnchor: return ReferenceEquals(e, _hasAnchor);
+            case PseudoKind.Lang: return MatchLang(e, p.Langs!);
+            case PseudoKind.Always: return true;
+            case PseudoKind.Checked:
+                return e.Name == "input" && IsCheckable(e) && e.HasAttribute("checked") || e.Name == "option" && e.HasAttribute("selected");
+            case PseudoKind.Default:
+                return e.Name == "input" && IsCheckable(e) && e.HasAttribute("checked") || e.Name == "option" && e.HasAttribute("selected");
+            case PseudoKind.Disabled: return IsFormElement(e) && IsDisabled(e);
+            case PseudoKind.Enabled: return IsFormElement(e) && !IsDisabled(e);
+            case PseudoKind.Required: return IsRequirable(e) && e.HasAttribute("required");
+            case PseudoKind.Optional: return IsRequirable(e) && !e.HasAttribute("required");
+            case PseudoKind.ReadWrite: return IsReadWrite(e);
+            case PseudoKind.ReadOnly: return !IsReadWrite(e);
+            case PseudoKind.PlaceholderShown:
+                return (e.Name == "textarea" ? e.InnerText().Length == 0 : e.Name == "input" && string.IsNullOrEmpty(e.GetAttribute("value")))
+                       && e.HasAttribute("placeholder") && (e.Name == "textarea" || IsTextInput(e));
             default: return false;
         }
+    }
+
+    private static string InputType(Element e) => (e.GetAttribute("type") ?? "text").Trim().ToLowerInvariant();
+
+    private static bool IsCheckable(Element e) => InputType(e) is "checkbox" or "radio";
+
+    private static bool IsTextInput(Element e)
+        => InputType(e) is "text" or "search" or "url" or "tel" or "email" or "password" or "number" or "date" or "month"
+            or "week" or "time" or "datetime-local" or "";
+
+    private static bool IsFormElement(Element e) => e.Name is "button" or "input" or "select" or "textarea" or "optgroup" or "option" or "fieldset";
+
+    private static bool IsRequirable(Element e) => e.Name is "select" or "textarea" || e.Name == "input" && InputType(e) is not ("hidden" or "button" or "submit" or "reset" or "image" or "range" or "color");
+
+    private static bool IsDisabled(Element e)
+    {
+        if (e.HasAttribute("disabled")) return true;
+        if (e.Name == "option" && e.Parent is { Name: "optgroup" } g && g.HasAttribute("disabled")) return true;
+        // A disabled fieldset disables its controls, except those in its first legend.
+        for (var child = e; child.Parent is { } parent; child = parent)
+        {
+            if (parent.Name != "fieldset" || !parent.HasAttribute("disabled")) continue;
+            Element? firstLegend = null;
+            foreach (var c in parent.Children)
+                if (c is Element { Name: "legend" } l) { firstLegend = l; break; }
+            if (!ReferenceEquals(child, firstLegend)) return true;
+        }
+        return false;
+    }
+
+    private static bool IsReadWrite(Element e)
+    {
+        if (e.Name == "textarea") return !e.HasAttribute("readonly") && !IsDisabled(e);
+        if (e.Name == "input") return IsTextInput(e) && !e.HasAttribute("readonly") && !IsDisabled(e);
+        for (var x = e; x != null; x = x.Parent)
+        {
+            var ce = x.GetAttribute("contenteditable");
+            if (ce == null) continue;
+            return ce.Length == 0 || ce.Equals("true", StringComparison.OrdinalIgnoreCase) || ce.Equals("plaintext-only", StringComparison.OrdinalIgnoreCase);
+        }
+        return false;
+    }
+
+    private static bool MatchLang(Element e, string[] ranges)
+    {
+        string? lang = null;
+        for (var x = e; x != null && lang == null; x = x.Parent) lang = x.GetAttribute("lang") ?? x.GetAttribute("xml:lang");
+        if (lang == null) return false;
+        foreach (var r in ranges)
+        {
+            if (r == "*") return lang.Length > 0;
+            if (string.Equals(lang, r, StringComparison.OrdinalIgnoreCase)
+                || lang.Length > r.Length && lang[r.Length] == '-' && lang.StartsWith(r, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>:nth-child(An+B of S): the position counts only the siblings that match S.</summary>
+    private static bool MatchNthOf(Element e, PseudoCondition p, bool fromEnd)
+    {
+        if (!AnyMatches(p.List!, e) || e.Parent == null) return false;
+        int index = 0;
+        var siblings = e.Parent.Children;
+        bool passed = false;
+        for (int k = fromEnd ? siblings.Count - 1 : 0; k >= 0 && k < siblings.Count; k += fromEnd ? -1 : 1)
+        {
+            if (siblings[k] is not Element s || s.Generated) continue;
+            if (AnyMatches(p.List!, s)) index++;
+            if (ReferenceEquals(s, e)) { passed = true; break; }
+        }
+        return passed && MatchNth(p.A, p.B, index);
+    }
+
+    /// <summary>
+    /// :has(): some element, found from <paramref name="e"/> along each relative selector's leading combinator, matches
+    /// it. Each relative selector ends (on its left) in an anchor compound that only matches <paramref name="e"/>.
+    /// </summary>
+    private static bool MatchHas(Element e, Selector[] relative)
+    {
+        var saved = _hasAnchor;
+        _hasAnchor = e;
+        try
+        {
+            foreach (var sel in relative)
+            {
+                var lead = sel.Parts[^2].Combinator;
+                if (lead is Combinator.Descendant or Combinator.Child)
+                {
+                    // A lone child compound ("> a") only needs the children.
+                    if (AnyDescendantMatches(e, sel, childrenOnly: lead == Combinator.Child && sel.Parts.Length == 2)) return true;
+                }
+                else if (e.Parent != null)
+                {
+                    var siblings = e.Parent.Children;
+                    int k = siblings.IndexOf(e);
+                    bool adjacentOnly = lead == Combinator.Adjacent && sel.Parts.Length == 2;
+                    for (k++; k < siblings.Count; k++)
+                    {
+                        if (siblings[k] is not Element s || s.Generated) continue;
+                        if (sel.Matches(s)) return true;
+                        if (adjacentOnly) break;
+                        // Deeper parts ("+ a b") can match inside a following sibling.
+                        if (sel.Parts.Length > 2 && AnyDescendantMatches(s, sel, childrenOnly: false)) return true;
+                    }
+                }
+            }
+            return false;
+        }
+        finally { _hasAnchor = saved; }
+    }
+
+    private static bool AnyDescendantMatches(Element root, Selector sel, bool childrenOnly)
+    {
+        foreach (var c in root.Children)
+        {
+            if (c is not Element e || e.Generated) continue;
+            if (sel.Matches(e)) return true;
+            if (!childrenOnly && AnyDescendantMatches(e, sel, false)) return true;
+        }
+        return false;
     }
 
     private static bool AnyMatches(Selector[] list, Element e)
@@ -142,9 +305,23 @@ internal sealed class Selector
             {
                 switch (ps.Kind)
                 {
-                    case PseudoKind.Where: break; // always zero
+                    case PseudoKind.Where:
+                    case PseudoKind.HasAnchor:
+                        break; // always zero
+                    case PseudoKind.NthChild when ps.List != null:
+                    case PseudoKind.NthLastChild when ps.List != null:
+                    {
+                        // A pseudo-class plus the most specific selector of the "of" list.
+                        int max = 0;
+                        foreach (var sel in ps.List!) max = Math.Max(max, sel.Specificity);
+                        a += max / 10000;
+                        b += max / 100 % 100 + 1;
+                        c += max % 100;
+                        break;
+                    }
                     case PseudoKind.Not:
                     case PseudoKind.Is:
+                    case PseudoKind.Has:
                     {
                         // The specificity of the most specific selector in the list.
                         int max = 0;
@@ -304,9 +481,9 @@ internal sealed class Selector
                 var name = ReadIdent(s, ref i).ToLowerInvariant();
                 if (doubleColon || name is "before" or "after")
                 {
-                    // ::before and ::after (also with the old single colon); other pseudo-elements drop the rule.
-                    if (nesting > 0 || name is not ("before" or "after")) return null;
-                    pseudoElement = name == "before" ? PseudoElement.Before : PseudoElement.After;
+                    // ::before, ::after (also with the old single colon) and ::marker; other pseudo-elements drop the rule.
+                    if (nesting > 0 || name is not ("before" or "after" or "marker")) return null;
+                    pseudoElement = name == "before" ? PseudoElement.Before : name == "after" ? PseudoElement.After : PseudoElement.Marker;
                     any = true;
                     break;
                 }
@@ -357,7 +534,24 @@ internal sealed class Selector
             case "nth-of-type":
             case "nth-last-of-type":
             {
-                if (arg == null || !TryParseNth(arg, out int a, out int b)) return null;
+                if (arg == null) return null;
+                Selector[]? of = null;
+                if (name is "nth-child" or "nth-last-child" && OfIndex(arg) is int ofAt and > 0)
+                {
+                    // :nth-child(An+B of S): the position among the siblings matching S.
+                    if (depth >= MaxNesting) return null;
+                    var list = new List<Selector>();
+                    foreach (var part in CssParser.SplitTopLevel(arg.Substring(ofAt + 4), ','))
+                    {
+                        var sel = Parse(part, depth + 1);
+                        if (sel == null || sel.PseudoElement != PseudoElement.None) return null;
+                        list.Add(sel);
+                    }
+                    if (list.Count == 0) return null;
+                    of = list.ToArray();
+                    arg = arg.Substring(0, ofAt);
+                }
+                if (!TryParseNth(arg, out int a, out int b)) return null;
                 var kind = name switch
                 {
                     "nth-child" => PseudoKind.NthChild,
@@ -365,8 +559,43 @@ internal sealed class Selector
                     "nth-of-type" => PseudoKind.NthOfType,
                     _ => PseudoKind.NthLastOfType,
                 };
-                return new PseudoCondition { Kind = kind, A = a, B = b };
+                return new PseudoCondition { Kind = kind, A = a, B = b, List = of };
             }
+            case "has":
+            {
+                // Relative selectors; :has() may not nest inside another :has().
+                if (arg == null || depth >= MaxNesting || _parsingHas) return null;
+                var list = new List<Selector>();
+                _parsingHas = true;
+                try
+                {
+                    foreach (var part in CssParser.SplitTopLevel(arg, ','))
+                    {
+                        var rel = ParseRelative(part.Trim(), depth + 1);
+                        if (rel == null) return null;
+                        list.Add(rel);
+                    }
+                }
+                finally { _parsingHas = false; }
+                return list.Count == 0 ? null : new PseudoCondition { Kind = PseudoKind.Has, List = list.ToArray() };
+            }
+            case "lang":
+            {
+                if (string.IsNullOrWhiteSpace(arg)) return null;
+                var langs = CssParser.SplitTopLevel(arg, ',').Select(l => l.Trim().Trim('"', '\'')).Where(l => l.Length > 0).ToArray();
+                return langs.Length == 0 ? null : new PseudoCondition { Kind = PseudoKind.Lang, Langs = langs };
+            }
+            case "checked": return new PseudoCondition { Kind = PseudoKind.Checked };
+            case "default": return new PseudoCondition { Kind = PseudoKind.Default };
+            case "disabled": return new PseudoCondition { Kind = PseudoKind.Disabled };
+            case "enabled": return new PseudoCondition { Kind = PseudoKind.Enabled };
+            case "required": return new PseudoCondition { Kind = PseudoKind.Required };
+            case "optional": return new PseudoCondition { Kind = PseudoKind.Optional };
+            case "read-only": return new PseudoCondition { Kind = PseudoKind.ReadOnly };
+            case "read-write": return new PseudoCondition { Kind = PseudoKind.ReadWrite };
+            case "placeholder-shown": return new PseudoCondition { Kind = PseudoKind.PlaceholderShown };
+            case "scope": return new PseudoCondition { Kind = PseudoKind.Root };
+            case "defined": return new PseudoCondition { Kind = PseudoKind.Always };
             case "not":
             case "is":
             case "matches":
@@ -398,12 +627,55 @@ internal sealed class Selector
             case "visited":
             case "focus-within":
             case "focus-visible":
-            case "checked":
-            case "disabled":
+            case "target":
+            case "target-within":
+            case "indeterminate":
+            case "fullscreen":
+            case "modal":
+            case "popover-open":
+            case "playing":
+            case "paused":
+            case "autofill":
+            case "user-invalid":
+            case "user-valid":
                 return new PseudoCondition { Kind = PseudoKind.Never };
             default:
                 return null;
         }
+    }
+
+    [ThreadStatic] private static bool _parsingHas;
+
+    /// <summary>The index of " of " in an :nth-child() argument, or -1.</summary>
+    private static int OfIndex(string arg)
+    {
+        for (int i = 0; i + 4 <= arg.Length; i++)
+            if (char.IsWhiteSpace(arg[i]) && string.Compare(arg, i + 1, "of", 0, 2, StringComparison.OrdinalIgnoreCase) == 0
+                && i + 3 < arg.Length && char.IsWhiteSpace(arg[i + 3])) return i;
+        return -1;
+    }
+
+    /// <summary>
+    /// Parses a relative selector of :has() ("&gt; img", "+ p", "a b") and adds the anchor compound on its left, joined by
+    /// the leading combinator (a descendant one when there is none).
+    /// </summary>
+    private static Selector? ParseRelative(string text, int depth)
+    {
+        if (text.Length == 0) return null;
+        var lead = Combinator.Descendant;
+        if (text[0] is '>' or '+' or '~')
+        {
+            lead = text[0] == '>' ? Combinator.Child : text[0] == '+' ? Combinator.Adjacent : Combinator.Sibling;
+            text = text.Substring(1).TrimStart();
+        }
+        var sel = Parse(text, depth);
+        if (sel == null || sel.PseudoElement != PseudoElement.None) return null;
+        var parts = new Compound[sel.Parts.Length + 1];
+        Array.Copy(sel.Parts, parts, sel.Parts.Length);
+        // Parts are shared with nothing else, so the leftmost one can take the leading combinator.
+        parts[^2].Combinator = lead;
+        parts[^1] = new Compound { Pseudos = new[] { new PseudoCondition { Kind = PseudoKind.HasAnchor } } };
+        return new Selector(parts);
     }
 
     private static bool TryParseNth(string arg, out int a, out int b)
@@ -447,7 +719,13 @@ internal sealed class Selector
         }
         a.Name = body.Substring(0, nameEnd).Trim().ToLowerInvariant();
         var v = body.Substring(opIdx + 1).Trim();
-        if (v.EndsWith(" i", StringComparison.OrdinalIgnoreCase)) v = v.Substring(0, v.Length - 2).TrimEnd();
+        if (v.EndsWith(" i", StringComparison.OrdinalIgnoreCase) || v.Length > 2 && v[^2] is '"' or '\'' && v[^1] is 'i' or 'I')
+        {
+            a.IgnoreCase = true;
+            v = v.Substring(0, v.Length - 1).TrimEnd();
+        }
+        else if (v.EndsWith(" s", StringComparison.OrdinalIgnoreCase) || v.Length > 2 && v[^2] is '"' or '\'' && v[^1] is 's' or 'S')
+            v = v.Substring(0, v.Length - 1).TrimEnd();
         if (v.Length >= 2 && (v[0] == '"' || v[0] == '\'') && v[v.Length - 1] == v[0]) v = v.Substring(1, v.Length - 2);
         a.Value = v;
         return a.Name.Length > 0 ? a : null;

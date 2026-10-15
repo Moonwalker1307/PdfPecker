@@ -42,6 +42,10 @@ internal sealed class Element : Node
     /// <summary>A ::before or ::after box made by the style resolver, not by the parser.</summary>
     public bool Generated;
 
+    /// <summary>The style of this list item's ::marker, when a rule styles it; its content replaces the marker text.</summary>
+    public Css.ComputedStyle? MarkerStyle;
+    public string? MarkerContent;
+
     /// <summary>For input, textarea, select and button elements: the form control they draw.</summary>
     public Layout.FormControl? Control;
 

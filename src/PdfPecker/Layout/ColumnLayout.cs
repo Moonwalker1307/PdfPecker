@@ -30,7 +30,8 @@ internal sealed partial class LayoutEngine
         if (n <= 1) return LayoutFlow(e, x, y, w);
         float colW = Math.Max(0, (w - (n - 1) * gap) / n);
 
-        // Children as unbreakable pieces: block-level elements and runs of inline content.
+        // Children as unbreakable pieces: block-level elements and runs of inline content. An element with
+        // column-span: all ends the columns before it, spans the whole width, and starts a new set of columns after it.
         var pieces = new List<Captured>();
         List<Node>? run = null;
         void FlushRun()
@@ -42,6 +43,7 @@ internal sealed partial class LayoutEngine
             if (content) pieces.Add(CaptureRun(new List<Node>(run), e, colW));
             run.Clear();
         }
+        float cy = y;
         foreach (var child in e.Children)
         {
             if (child is TextNode) { (run ??= new List<Node>()).Add(child); continue; }
@@ -49,11 +51,29 @@ internal sealed partial class LayoutEngine
             if (ce.Style == null || ce.Style.Display == Display.None || ce.Detached) continue;
             if (IsInlineLevel(ce)) { (run ??= new List<Node>()).Add(child); continue; }
             FlushRun();
+            if (ce.Style.ColumnSpanAll && !ce.Style.Floated && !ce.Style.OutOfFlow)
+            {
+                cy = FlowColumns(pieces, s, n, x, cy, colW, gap);
+                pieces.Clear();
+                var span = CaptureBox(ce, w, shrinkToFit: false);
+                if (_paginate && !AtPageTop(cy) && cy + span.Height > (PageOf(cy) + 1) * _pageH + Eps && span.Height <= _pageH)
+                    cy = NextPage(cy);
+                Place(span, x, cy);
+                cy += span.Height;
+                continue;
+            }
             pieces.Add(CaptureBox(ce, colW, shrinkToFit: false));
         }
         FlushRun();
-        if (pieces.Count == 0) return y;
+        cy = FlowColumns(pieces, s, n, x, cy, colW, gap);
+        _lastBoxRight = Math.Max(_lastBoxRight, x + w);
+        return cy;
+    }
 
+    /// <summary>Balances pieces over n columns from y, continuing on later pages as needed. Returns the bottom.</summary>
+    private float FlowColumns(List<Captured> pieces, ComputedStyle s, int n, float x, float y, float colW, float gap)
+    {
+        if (pieces.Count == 0) return y;
         float top = y;
         int next = 0;
         float bottom = y;
@@ -63,7 +83,7 @@ internal sealed partial class LayoutEngine
             float room = _paginate ? (PageOf(top) + 1) * _pageH - top : float.PositiveInfinity;
             if (balanced <= room + Eps)
             {
-                bottom = PlaceColumns(pieces, ref next, n, balanced, x, top, colW, gap, fillAll: true);
+                bottom = PlaceColumns(pieces, ref next, n, balanced, x, top, colW, gap, fillAll: true, s);
                 break;
             }
             if (!AtPageTop(top) && pieces[next].Height > room + Eps)
@@ -72,12 +92,40 @@ internal sealed partial class LayoutEngine
                 continue;
             }
             // Fill the columns to the bottom of this page, then carry on on the next one.
-            PlaceColumns(pieces, ref next, n, room, x, top, colW, gap, fillAll: false);
+            PlaceColumns(pieces, ref next, n, room, x, top, colW, gap, fillAll: false, s);
             top = (PageOf(top) + 1) * _pageH;
             bottom = top;
         }
-        _lastBoxRight = Math.Max(_lastBoxRight, x + w);
         return bottom;
+    }
+
+    /// <summary>column-rule: a line in the middle of each gap between columns that hold content.</summary>
+    private void ColumnRules(ComputedStyle s, int usedColumns, float x, float top, float bottom, float colW, float gap)
+    {
+        if (s.ColumnRuleStyle == BorderStyle.None || s.ColumnRuleWidth <= 0 || bottom <= top) return;
+        float rw = s.ColumnRuleWidth, h = bottom - top;
+        uint color = s.ColumnRuleColor ?? s.Color;
+        for (int col = 1; col < usedColumns; col++)
+        {
+            float mid = x + col * (colW + gap) - gap / 2;
+            switch (s.ColumnRuleStyle)
+            {
+                case BorderStyle.Dotted:
+                case BorderStyle.Dashed:
+                    _ops.Add(new LineOp(mid, top, mid, bottom, rw, color, dotted: s.ColumnRuleStyle == BorderStyle.Dotted));
+                    break;
+                case BorderStyle.Double when rw >= 2.25f:
+                {
+                    float line = rw / 3;
+                    _ops.Add(new RectOp(mid - rw / 2, top, line, h, color));
+                    _ops.Add(new RectOp(mid + rw / 2 - line, top, line, h, color));
+                    break;
+                }
+                default:
+                    _ops.Add(new RectOp(mid - rw / 2, top, rw, h, color));
+                    break;
+            }
+        }
     }
 
     /// <summary>The smallest column height that fits pieces[start..] into n columns, keeping each piece whole.</summary>
@@ -117,9 +165,10 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>Places pieces into up to n columns of height h. Returns the bottom of the tallest column.</summary>
-    private float PlaceColumns(List<Captured> pieces, ref int next, int n, float h, float x, float top, float colW, float gap, bool fillAll)
+    private float PlaceColumns(List<Captured> pieces, ref int next, int n, float h, float x, float top, float colW, float gap, bool fillAll, ComputedStyle s)
     {
         float maxBottom = top;
+        int used = 0;
         for (int col = 0; col < n && next < pieces.Count; col++)
         {
             float cy = top;
@@ -133,8 +182,11 @@ internal sealed partial class LayoutEngine
                 cy += p.Height;
                 next++;
             }
+            if (cy > top) used = col + 1;
             maxBottom = Math.Max(maxBottom, cy);
         }
+        // The rules run the height of the column row: the columns' height, or the page's rest when they fill it.
+        ColumnRules(s, used, x, top, fillAll ? maxBottom : Math.Max(maxBottom, top + h), colW, gap);
         return maxBottom;
     }
 
