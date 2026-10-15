@@ -180,6 +180,10 @@ internal sealed class ComputedStyle
     public TextAlign? TextAlignLast;         // null = auto
     public int TabSize = 8;                  // in spaces
     public bool NoHyphens;                   // hyphens: none (soft hyphens are no break opportunity)
+    public bool HyphensAuto;                 // hyphens: auto (words also break where the language's patterns allow)
+    public string? HyphenateCharacter;       // hyphenate-character: "string"; null = auto (a hyphen-minus)
+    public string? Lang;                     // the content language: the nearest lang attribute, else PdfOptions.Language
+    public IReadOnlyDictionary<string, HyphenationPatterns>? Hyphenation; // PdfOptions.Hyphenation, keys in lower case
     public byte SmallCaps;                   // font-variant-caps: 1 small-caps, 2 all-small-caps (synthesized)
     public WhiteSpace WhiteSpace;
     public OverflowWrap OverflowWrap;
