@@ -118,6 +118,14 @@ internal sealed partial class LayoutEngine
         return (PageOf(y) + 1) * _pageH;
     }
 
+    /// <summary>True when the ops draw nothing: only the empty groups that boxes reserve for their backgrounds.</summary>
+    private static bool NothingDrawn(List<DrawOp> ops)
+    {
+        foreach (var op in ops)
+            if (op is not GroupOp g || !NothingDrawn(g.Ops)) return false;
+        return true;
+    }
+
     private bool CrossesPage(float top, float bottom) => _paginate && bottom - top > Eps && PageOf(top) != PageOf(bottom - 0.5f);
 
     private void Truncate(int count, bool keepFloats = false)
@@ -272,7 +280,9 @@ internal sealed partial class LayoutEngine
             firstBlock = false;
             float top = y + CollapseMargins(pendingMargin, mt);
             if (s.ClearLeft || s.ClearRight) top = Cleared(s, top);
-            if (s.PageBreakBefore || forcedAt == i) top = NextPage(top);
+            // A forced break before anything has been drawn (the first box of the document or of a named page's run)
+            // would only leave an empty page: Chrome ignores it.
+            if (forcedAt == i || s.PageBreakBefore && (PageOf(top) > 0 || !NothingDrawn(_ops))) top = NextPage(top);
 
             int boxOps = _ops.Count;
             float bottom;
@@ -625,6 +635,7 @@ internal sealed partial class LayoutEngine
         _lastBoxH = bottom - y;
         if (e.Name == "a" && e.GetAttribute("href") is { Length: > 0 } href) _ops.Add(new LinkOp(bx, y, used, bottom - y, href) { Link = Tags?.ElementOf(e) });
         if (Headings != null && HeadingLevel(e.Name) is int level and > 0) RecordHeading(e, level, y, opsStart);
+        if (e.LayoutKey != null) SetAnchor(e.LayoutKey, ContentTop(y, opsStart));
         _boxTrailing = trailing;
         return bottom;
     }
@@ -860,12 +871,17 @@ internal sealed partial class LayoutEngine
             _headingKeys[e] = key;
             Headings.Add(new OutlineHeading(title, level, key));
         }
-        // Point at the first line of text, which may have moved to the next page.
+        SetAnchor(key, ContentTop(top, opsStart));
+    }
+
+    /// <summary>Where a box starts for anchors: its top, or its first line of text when that moved to the next page.</summary>
+    private float ContentTop(float top, int opsStart)
+    {
         float y = top;
         if (_paginate)
             for (int i = opsStart; i < _ops.Count; i++)
                 if (FirstContentY(_ops[i]) is { } fy) { if (PageOf(fy) > PageOf(top)) y = fy; break; }
-        SetAnchor(key, y);
+        return y;
     }
 
     private static string CollapseWhitespace(string text)

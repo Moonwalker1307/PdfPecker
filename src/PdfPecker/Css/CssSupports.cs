@@ -37,7 +37,7 @@ internal static class CssSupports
         "border-left-width", "border-top-style", "border-right-style", "border-bottom-style", "border-left-style",
         "border-top-color", "border-right-color", "border-bottom-color", "border-left-color", "border-top-left-radius",
         "border-top-right-radius", "border-bottom-right-radius", "border-bottom-left-radius", "tab-size",
-        "line-clamp", "-webkit-line-clamp", "hyphens", "size",
+        "line-clamp", "-webkit-line-clamp", "hyphens", "size", "string-set", "page",
     };
 
     /// <summary>Whether this library applies the property.</summary>

@@ -5,14 +5,14 @@ using PdfPecker.Svg;
 namespace PdfPecker.Css;
 
 /// <summary>
-/// A CSS linear-gradient(), radial-gradient() or repeating variant, as specified. Lengths that depend on the box are
+/// A CSS linear-gradient(), radial-gradient(), conic-gradient() or repeating variant, as specified. Lengths that depend on the box are
 /// kept until <see cref="Resolve"/> knows its size.
 /// </summary>
 internal sealed class CssGradient
 {
     private enum RadialSize : byte { FarthestCorner, FarthestSide, ClosestCorner, ClosestSide, Explicit }
 
-    public bool Radial, Repeating;
+    public bool Radial, Conic, Repeating;
     private float? _angle;          // degrees, clockwise from "to top"
     private int _toX, _toY = 1;     // "to <side-or-corner>" when there is no angle: -1 left/top, 1 right/bottom
     private bool _circle;
@@ -35,6 +35,8 @@ internal sealed class CssGradient
             case "repeating-linear-gradient": g.Repeating = true; break;
             case "radial-gradient": g.Radial = true; break;
             case "repeating-radial-gradient": g.Radial = g.Repeating = true; break;
+            case "conic-gradient": g.Conic = true; break;
+            case "repeating-conic-gradient": g.Conic = g.Repeating = true; break;
             default: return null; // -webkit-gradient() and prefixed legacy syntaxes are not supported
         }
         var args = CssParser.SplitTopLevel(v.Substring(paren + 1, v.Length - paren - 2), ',');
@@ -43,7 +45,9 @@ internal sealed class CssGradient
         var head = CssParser.Tokens(args[0].Trim().ToLowerInvariant());
         if (head.Count > 0 && !CssColor.TryParse(head[0], currentColor, out _))
         {
-            if (g.Radial ? !g.ParseRadialShape(head, em, rem, vw, vh) : !g.ParseDirection(head)) return null;
+            bool ok = g.Conic ? g.ParseConicHead(head, em, rem, vw, vh)
+                : g.Radial ? g.ParseRadialShape(head, em, rem, vw, vh) : g.ParseDirection(head);
+            if (!ok) return null;
             first = 1;
         }
         for (int i = first; i < args.Count; i++)
@@ -58,7 +62,16 @@ internal sealed class CssGradient
             if (toks.Count == 1) { g._stops.Add((color, null)); continue; }
             for (int k = 1; k < toks.Count && k < 3; k++)
             {
-                if (!StyleResolver.TryParseLength(toks[k].ToLowerInvariant(), em, rem, out var pos, vw, vh) || pos.IsAuto) return null;
+                var t = toks[k].ToLowerInvariant();
+                Length pos;
+                if (g.Conic)
+                {
+                    // Conic stops are angles, or percentages of the full turn.
+                    if (t == "0") pos = new Length(0, LengthUnit.Percent);
+                    else if (ColorFunctions.TryAngle(t, out double deg)) pos = new Length((float)(deg / 3.6), LengthUnit.Percent);
+                    else if (!StyleResolver.TryParseLength(t, em, rem, out pos, vw, vh) || !pos.IsPercent || pos.Unit != LengthUnit.Percent) return null;
+                }
+                else if (!StyleResolver.TryParseLength(t, em, rem, out pos, vw, vh) || pos.IsAuto) return null;
                 g._stops.Add((color, pos));
             }
         }
@@ -95,6 +108,45 @@ internal sealed class CssGradient
         }
         if (a == "0") { _angle = 0; return true; }
         return false;
+    }
+
+    /// <summary>The start of a conic-gradient(): <c>from &lt;angle&gt;</c>, <c>at &lt;position&gt;</c> and an ignored <c>in &lt;colorspace&gt;</c>.</summary>
+    private bool ParseConicHead(List<string> t, float em, float rem, float vw, float vh)
+    {
+        int i = 0;
+        bool any = false;
+        while (i < t.Count)
+        {
+            if (t[i] == "from" && i + 1 < t.Count && ColorFunctions.TryAngle(t[i + 1], out double deg))
+            {
+                _angle = (float)deg;
+                i += 2;
+            }
+            else if (t[i] == "in")
+            {
+                // Interpolation colour space: stops are interpolated in sRGB.
+                i += 2;
+                if (i < t.Count && t[i] is "shorter" or "longer" or "increasing" or "decreasing") i += 2;
+            }
+            else if (t[i] == "at")
+            {
+                int end = i + 1;
+                while (end < t.Count && t[end] is not ("from" or "in")) end++;
+                var pos = t.GetRange(i + 1, end - i - 1);
+                if (pos.Count == 0 || pos.Count > 2) return false;
+                if (pos.Count == 1 && pos[0] is "top" or "bottom") _posY = Keyword(pos[0]);
+                else
+                {
+                    if (pos.Count == 2 && (pos[0] is "top" or "bottom" || pos[1] is "left" or "right")) (pos[0], pos[1]) = (pos[1], pos[0]);
+                    if (!PositionPart(pos[0], em, rem, vw, vh, out _posX)) return false;
+                    if (pos.Count > 1 && !PositionPart(pos[1], em, rem, vw, vh, out _posY)) return false;
+                }
+                i = end;
+            }
+            else return false;
+            any = true;
+        }
+        return any;
     }
 
     private bool ParseRadialShape(List<string> t, float em, float rem, float vw, float vh)
@@ -164,7 +216,16 @@ internal sealed class CssGradient
     {
         var g = new Gradient { Radial = Radial, Spread = Repeating ? GradientSpread.Repeat : GradientSpread.Pad };
         float length; // the gradient line or ray, which stop lengths are measured against
-        if (!Radial)
+        if (Conic)
+        {
+            g.Conic = true;
+            g.X0 = _posX.Resolve(w);
+            g.Y0 = _posY.Resolve(h);
+            float from = (_angle ?? 0) % 360;
+            g.From = from < 0 ? from + 360 : from;
+            length = 1; // stops are fractions of the turn
+        }
+        else if (!Radial)
         {
             float dx, dy;
             if (_angle is { } deg)
@@ -243,6 +304,14 @@ internal sealed class CssGradient
         {
             float start = pos[0], period = pos[count - 1] - pos[0];
             if (period <= 1e-4f) g.Spread = GradientSpread.Pad; // degenerate: painted as the last colour below
+            else if (Conic)
+            {
+                // The turn repeats [first stop, last stop]; the function maps each angle into that period.
+                g.Spread = GradientSpread.Pad;
+                g.RepeatStart = start;
+                g.RepeatPeriod = period;
+                for (int i = 0; i < count; i++) pos[i] = (pos[i] - start) / period;
+            }
             else
             {
                 // Move the geometry so that [first stop, last stop] becomes one period.
@@ -259,7 +328,7 @@ internal sealed class CssGradient
         if (Radial) { g.X0 = g.X1; g.Y0 = g.Y1; }
 
         var stops = new List<(float, uint)>(Math.Max(2, count));
-        if (count == 1 || Repeating && g.Spread == GradientSpread.Pad)
+        if (count == 1 || Repeating && g.Spread == GradientSpread.Pad && g.RepeatPeriod == 0)
         {
             stops.Add((0, _stops[count - 1].Color));
             stops.Add((1, _stops[count - 1].Color));
