@@ -52,6 +52,12 @@ internal sealed class PdfStampWriter
     private readonly Dictionary<int, PageInfo> _stamped = new(); // by object number
     private int _gsId;
 
+    /// <summary>
+    /// Whether the target is PDF/A or tagged (and so possibly PDF/UA), where every font must be embedded: an HTML stamp
+    /// for it is then rendered with embedded fonts, or it would break the file's conformance.
+    /// </summary>
+    public bool NeedsEmbeddedFonts { get; }
+
     /// <summary>The most decoded content a stamp page may have: it is copied into the output whole.</summary>
     private const int MaxStampContent = 64 << 20;
 
@@ -85,6 +91,7 @@ internal sealed class PdfStampWriter
             CollectPages(_target, catalog["Pages"]);
             if (_target.Pages.Count == 0) throw new InvalidDataException("The PDF has no pages.");
             _tagged = file.GetDict(catalog, "StructTreeRoot") != null;
+            NeedsEmbeddedFonts = _tagged || EmbeddedFiles.PdfAPart(file) > 0;
         }
     }
 

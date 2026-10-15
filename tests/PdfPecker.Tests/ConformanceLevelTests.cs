@@ -191,4 +191,36 @@ public class ConformanceLevelTests
         var cids = Regex.Matches(shown.Groups[1].Value, "<([0-9A-F]+)>").SelectMany(m => m.Groups[1].Value.Chunk(4).Select(c => new string(c)));
         Assert.DoesNotContain("0000", cids);
     }
+
+    [Theory]
+    [InlineData(PdfConformance.PdfA2u)]
+    [InlineData(PdfConformance.PdfA4)]
+    public void Levels_that_allow_only_PdfA_attachments_refuse_others(PdfConformance level)
+    {
+        var options = new PdfOptions { Conformance = level };
+        options.Attachments.Add(new PdfAttachment("data.csv", "a,b"u8.ToArray()));
+        var ex = Assert.Throws<ArgumentException>(() => HtmlToPdf.Convert(Html, options));
+        Assert.Contains("allows attaching only PDF/A files", ex.Message);
+    }
+
+    [Fact]
+    public void PdfA4f_takes_any_attachment_and_attachments_can_be_added_later()
+    {
+        var options = new PdfOptions { Conformance = PdfConformance.PdfA4f };
+        options.Attachments.Add(new PdfAttachment("data.csv", "a,b"u8.ToArray()));
+        var pdf = HtmlToPdf.Convert(Html, options);
+        var added = PdfAttachments.Add(pdf, new PdfAttachment("notes.txt", "hi"u8.ToArray()));
+        Assert.Equal(new[] { "data.csv", "notes.txt" }, PdfAttachments.List(added).Select(a => a.FileName).Order());
+        var a4 = HtmlToPdf.Convert(Html, new PdfOptions { Conformance = PdfConformance.PdfA4 });
+        Assert.Throws<ArgumentException>(() => PdfAttachments.Add(a4, new PdfAttachment("notes.txt", "hi"u8.ToArray())));
+    }
+
+    [Fact]
+    public void An_html_stamp_on_a_PdfA_file_embeds_its_fonts()
+    {
+        var a4 = HtmlToPdf.Convert(Html, new PdfOptions { Conformance = PdfConformance.PdfA4 });
+        var stamped = PdfTestHelpers.Latin1(PdfStamper.StampHtml(a4, "<p>PAID</p>"));
+        Assert.DoesNotContain("/BaseFont /Helvetica", stamped);
+        Assert.Contains("/FontFile2", stamped);
+    }
 }

@@ -459,10 +459,12 @@ byte[] more = PdfAttachments.Add(File.ReadAllBytes("scan.pdf"), new PdfAttachmen
 Each file is written with its MIME type, size, dates and MD5 checksum, in the document's embedded-files list sorted by
 name, and as an associated file (`/AF`) with its relationship to the pages, as PDF/A-3 requires. File names must be
 unique (`ArgumentException` otherwise; an attachment can't take the e-invoice's `factur-x.xml`). Attachments don't change
-`Conformance`: without one the file is a plain PDF, PDF/A-3b allows any attachment, and PDF/A-2b, which allows only
-PDF/A files as attachments, throws `ArgumentException` rather than produce a file that fails validation. With
-`Security` the attachments are encrypted with the rest of the file, and for PDF/UA each one gets the description
-ISO 14289 asks for. The output passes veraPDF's PDF/A-3b and PDF/UA-1 checks.
+`Conformance`: without one the file is a plain PDF, PDF/A-3b, PDF/A-3u and PDF/A-4f allow any attachment, and PDF/A-2b,
+PDF/A-2u and PDF/A-4, which allow only PDF/A files as attachments, throw `ArgumentException` rather than produce a file
+that fails validation. With `Security` the attachments are encrypted with the rest of the file, and for PDF/UA each one
+gets the description ISO 14289 asks for. The output passes veraPDF's PDF/A-3b, PDF/A-3u, PDF/A-4f, PDF/UA-1 and
+PDF/UA-2 checks. `PdfAttachments.Add` likewise refuses PDF/A-1, PDF/A-2 and PDF/A-4 files, and adds to PDF/A-3 and
+PDF/A-4f files.
 
 `PdfAttachments.Add` appends the files as an incremental update, so the original bytes, and any digital signatures
 over them, stay as they were; an encrypted PDF (pass its password) stays encrypted, a PDF/A-3 file gets the new

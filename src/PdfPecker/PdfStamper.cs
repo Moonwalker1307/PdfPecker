@@ -177,6 +177,7 @@ public static class PdfStamper
                 o.Security = null;
                 o.Conformance = PdfConformance.None;
                 o.EInvoice = null;
+                if (writer.NeedsEmbeddedFonts) o.EmbedStandardFonts = true;
                 rendered[key] = file = PdfStampWriter.OpenStamp(HtmlToPdf.Convert(html, o, cancellationToken), null, cancellationToken);
             }
             return file;
