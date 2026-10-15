@@ -713,7 +713,7 @@ internal sealed class PdfMergeWriter
     }
 
     /// <summary>The input's decryption is already undone, so a /Crypt filter in the chain must go too.</summary>
-    private static void RemoveCryptFilter(PdfFile file, Dictionary<string, PdfObject> entries)
+    internal static void RemoveCryptFilter(PdfFile file, Dictionary<string, PdfObject> entries)
     {
         var filter = file.Resolve(entries.GetValueOrDefault("Filter"));
         if (filter is PdfName { Value: "Crypt" })
