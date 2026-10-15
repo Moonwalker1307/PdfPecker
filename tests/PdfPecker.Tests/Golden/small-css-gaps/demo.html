@@ -1,0 +1,41 @@
+<!doctype html>
+<html><head><style>
+body { font-family: Helvetica, Arial, sans-serif; margin: 24px; color: #222; }
+h2 { font-size: 14px; margin: 14px 0 6px; }
+table { border-collapse: collapse; width: 100%; }
+td { padding: 4px 8px; border-bottom: 1px solid #ddd; }
+tr:nth-of-type(even) td { background: #f0f4ff; }
+tr:first-of-type td { font-weight: bold; }
+:is(h1, h2):where(.accent) { color: #c03; }
+li:not(.skip, .hidden) { color: #060; }
+.row { display: flex; gap: 12px; }
+.frame { width: 110px; height: 70px; border: 1px solid #888; }
+.cover { object-fit: cover; }
+.contain { object-fit: contain; background: #eee; }
+.none { object-fit: none; object-position: right bottom; }
+.trunc { width: 230px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border: 1px solid #ccc; padding: 4px; }
+.outlined { display: inline-block; padding: 6px 10px; margin: 8px; outline: 2px dashed #c03; outline-offset: 3px; }
+.rounded { display: inline-block; padding: 6px 10px; margin: 8px; border-radius: 8px; background: #def; outline: 3px solid #36c; }
+.shadow { font-size: 26px; font-weight: bold; text-shadow: 2px 2px 0 #f90; }
+.glow { font-size: 26px; font-weight: bold; color: #fff; text-shadow: 0 0 6px #000; }
+.ratio { width: 160px; aspect-ratio: 16 / 9; background: linear-gradient(135deg, #36c, #c3f); color: #fff; padding: 6px; box-sizing: border-box; }
+</style></head><body>
+<h2 class="accent">Selectors: :nth-of-type, :first-of-type, :is(), :where(), :not(list)</h2>
+<table><tr><td>Item</td><td>Qty</td></tr><tr><td>Apples</td><td>3</td></tr><tr><td>Pears</td><td>5</td></tr><tr><td>Plums</td><td>7</td></tr></table>
+<ul><li>green</li><li class="skip">not green</li><li>green</li></ul>
+<h2>object-fit / object-position</h2>
+<div class="row">
+<img class="frame" src="logo.png">
+<img class="frame cover" src="logo.png">
+<img class="frame contain" src="logo.png">
+<img class="frame none" src="logo.png">
+</div>
+<h2>text-overflow: ellipsis</h2>
+<div class="trunc">This sentence is much too long to fit inside its narrow box, so it is cut off.</div>
+<h2>outline</h2>
+<span class="outlined">dashed outline, offset 3px</span><span class="rounded">outline on rounded box</span>
+<h2>text-shadow</h2>
+<div class="shadow">Hard shadow</div><div class="glow">Soft glow</div>
+<h2>aspect-ratio</h2>
+<div class="ratio">16 / 9</div>
+</body></html>

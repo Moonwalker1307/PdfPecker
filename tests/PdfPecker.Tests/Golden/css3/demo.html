@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>CSS3 demo</title>
+<style>
+@layer base, theme;
+@layer theme { h1 { color: oklch(45% 0.15 260); } }
+@layer base { h1 { color: red; font: 700 22pt/1.2 sans-serif; margin: 0 0 6pt } }
+@property --accent { syntax: '<color>'; inherits: true; initial-value: #0a7d5a; }
+@page { size: A4; margin: 22mm 18mm;
+  @top-left { content: 'CSS3 feature demo'; font: 9pt sans-serif; color: #666 }
+  @top-right { content: 'Page ' counter(page) ' of ' counter(pages); font: 9pt sans-serif; color: #666 }
+  @bottom-center { content: counter(page, lower-roman); font: 9pt sans-serif } }
+@page :first { @top-left { content: none } }
+:root { --brand: color-mix(in oklab, var(--accent) 70%, white); }
+body { font: 10.5pt/1.45 serif; color: #222; }
+h2 { font: 700 13pt sans-serif; color: var(--accent); margin: 14pt 0 4pt;
+  & + p { margin-top: 0 } }
+.swatches { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4pt; }
+.swatches div { height: 26pt; border-radius: 4pt; font: 7pt sans-serif; color: white; padding: 2pt }
+.card:has(img, .badge) { border: 1.5pt solid var(--accent); }
+.card { padding: 6pt; border: 1pt dashed #aaa; margin: 4pt 0 }
+.badge { background: var(--brand); padding: 1pt 4pt; border-radius: 3pt; font: 8pt sans-serif }
+tr:nth-child(odd of .data) { background: hsl(210 40% 95%) }
+table { border-collapse: collapse; width: 100% } td { padding: 2pt 6pt; border-bottom: .5pt solid #ccc }
+.deco a { text-decoration: underline wavy hwb(0 0% 20%) 1pt; text-underline-offset: 2pt; color: inherit }
+.deco .dbl { text-decoration: underline double lab(50% 40 -60) } .deco .dot { text-decoration: line-through dotted }
+.cols { columns: 3; column-gap: 14pt; column-rule: 1pt dotted #999; font-size: 9pt }
+.cols h3 { column-span: all; font: 700 10pt sans-serif; margin: 4pt 0; border-bottom: 1pt solid #ccc }
+.dense { display: grid; grid-template-columns: repeat(4, 1fr); grid-auto-rows: 18pt; grid-auto-flow: row dense; gap: 3pt }
+.dense div { background: #dfe9f5; font: 8pt sans-serif; padding: 2pt } .dense .w { grid-column: span 3; background: #f5e3d0 }
+.clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; width: 60% }
+.caps { font-variant: small-caps; letter-spacing: .5pt }
+.last { text-align: justify; text-align-last: center; width: 70% }
+ul.arrows li::marker { content: '\2192  '; color: var(--accent) }
+ul.dash { list-style-type: '\2014  ' }
+.tilt { display: inline-block; rotate: -4deg; translate: 0 2pt; scale: 1.1; background: #fff3b0; padding: 2pt 6pt }
+.math { width: calc(round(nearest, 63.4%, 10%)); height: 8pt; background: oklab(70% -0.1 0.1) }
+@supports (display: grid) and selector(:has(a)) { .supports::after { content: ' (supported)'; color: green } }
+@media print and (min-width: 400px) { .media::after { content: ' (print, wide page)'; color: green } }
+</style></head>
+<body>
+<h1>CSS3 in PdfPecker</h1>
+<p>Heading colour comes from <code>@layer theme</code> beating <code>@layer base</code>, written in <code>oklch()</code>.</p>
+
+<h2>Colour functions</h2>
+<div class="swatches">
+ <div style="background: oklch(60% 0.18 30)">oklch</div><div style="background: lab(55% 50 40)">lab</div>
+ <div style="background: lch(55% 60 280)">lch</div><div style="background: hwb(150 10% 30%)">hwb</div>
+ <div style="background: color(display-p3 0.2 0.5 0.8)">display-p3</div><div style="background: color-mix(in oklch, teal, orange 40%)">color-mix</div>
+</div>
+
+<h2>Selectors</h2>
+<div class="card">Card with a <span class="badge">badge</span>: solid border from <code>:has()</code>.</div>
+<div class="card">Card without one: dashed border.</div>
+<table><tr class="data"><td>Row 1</td><td>data</td></tr><tr class="note"><td>note</td><td>skipped by of-selector</td></tr>
+<tr class="data"><td>Row 2</td><td>data</td></tr><tr class="data"><td>Row 3</td><td>data</td></tr></table>
+
+<h2>Text decoration</h2>
+<p class="deco"><a>Wavy underline with offset</a>, <span class="dbl">double underline</span>, <span class="dot">dotted strike</span>.</p>
+<p class="caps">Small Caps Synthesized From Capitals</p>
+<p class="last">Justified paragraph whose final line is centred with text-align-last. Justified paragraph whose final line is centred.</p>
+<p class="clamp">Line clamp keeps only two lines and ends with an ellipsis. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco.</p>
+
+<h2>Lists</h2>
+<ul class="arrows"><li>::marker with custom content and colour</li><li>Second item</li></ul>
+<ul class="dash"><li>String list-style-type</li><li>Second item</li></ul>
+
+<h2>Multi-column</h2>
+<div class="cols"><h3>column-span: all heading</h3>
+<p>Column rules sit in the gaps between columns. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<p>Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit.</p></div>
+
+<h2>Grid dense packing</h2>
+<div class="dense"><div class="w">wide 1</div><div class="w">wide 2</div><div>small 1</div><div>small 2</div></div>
+
+<h2>Transforms, math, @supports, @media</h2>
+<p><span class="tilt">translate + rotate + scale</span></p>
+<div class="math"></div>
+<p class="supports">@supports with selector()</p>
+<p class="media">Media query on the page size</p>
+<p style="break-before: page">Second page: the header shows "Page 2 of 2", the first page has no title in the top-left.</p>
+</body></html>

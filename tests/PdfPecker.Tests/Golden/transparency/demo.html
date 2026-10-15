@@ -1,0 +1,59 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+@page { size: A4; margin: 15mm; }
+body { font-family: Arial, sans-serif; font-size: 13px; color: #222; }
+h2 { font-size: 15px; margin: 14px 0 6px; }
+.row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-start; }
+.card { width: 150px; height: 70px; padding: 8px; box-sizing: border-box; }
+.r1 { background: #3b82f6; color: white; border-radius: 12px; }
+.r2 { background: #fde68a; border: 3px solid #b45309; border-radius: 16px; }
+.r3 { background: #e0f2fe; border: 2px dashed #0369a1; border-radius: 10px; }
+.r4 { background: #dcfce7; border-radius: 50%; }
+.r5 { background: #fee2e2; border-radius: 30px 4px / 12px 4px; border: 2px solid #dc2626; }
+.r6 { border-top: 4px solid #ef4444; border-right: 4px solid #22c55e; border-bottom: 4px solid #3b82f6; border-left: 4px solid #eab308; border-radius: 14px; }
+.r7 { background: #6366f1; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.35); color: white; }
+.r8 { background: linear-gradient(90deg, #f97316, #ec4899); border-radius: 20px; color: white; }
+.r9 { border: 2px dotted #7c3aed; border-radius: 20px; }
+.stack { position: relative; height: 90px; }
+.stack div { position: absolute; width: 80px; height: 60px; border-radius: 8px; }
+.a1 { left: 0; top: 0; background: rgba(239,68,68,0.6); }
+.a2 { left: 40px; top: 20px; background: rgba(59,130,246,0.6); }
+.a3 { left: 80px; top: 0; background: hsla(140, 70%, 40%, 0.5); }
+.op { background: #111; color: white; padding: 8px; border-radius: 6px; width: 200px; }
+.over { position: relative; width: 300px; height: 70px; background: repeating-linear-gradient(45deg, #fbbf24 0 10px, #fff 10px 20px); }
+.over .layer { position: absolute; inset: 10px; background: #1d4ed8; opacity: 0.5; color: white; padding: 6px; }
+.over .layer span { background: #ef4444; padding: 2px; }
+img.avatar { width: 64px; height: 64px; border-radius: 50%; }
+img.rounded { width: 120px; height: 64px; border-radius: 12px; border: 3px solid #333; object-fit: cover; }
+.bgimg { width: 150px; height: 70px; border-radius: 18px; background: url(logo.png) center / cover; border: 2px solid #444; }
+</style></head><body>
+<h2>border-radius</h2>
+<div class="row">
+<div class="card r1">Solid 12px</div>
+<div class="card r2">Border 3px, 16px</div>
+<div class="card r3">Dashed</div>
+<div class="card r4">50%</div>
+<div class="card r5">Elliptic</div>
+<div class="card r6">Four colours</div>
+<div class="card r7">Shadow</div>
+<div class="card r8">Gradient</div>
+<div class="card r9">Dotted</div>
+<div class="bgimg"></div>
+</div>
+<h2>Translucent colours</h2>
+<div class="stack"><div class="a1"></div><div class="a2"></div><div class="a3"></div></div>
+<p style="color: rgba(0,0,0,0.5)">Half-transparent text over white. <span style="background: rgba(255,200,0,0.4)">Highlighted with rgba background.</span> <span style="color: #c00; opacity: 0.4">Inline span with opacity 0.4.</span></p>
+<h2>opacity</h2>
+<div class="row">
+<div class="op" style="opacity: 1">opacity 1</div>
+<div class="op" style="opacity: 0.6">opacity 0.6</div>
+<div class="op" style="opacity: 0.25">opacity 0.25</div>
+</div>
+<div class="over" style="margin-top:10px"><div class="layer">Group opacity: <span>red span</span> stays one layer</div></div>
+<h2>Images</h2>
+<div class="row">
+<img class="avatar" src="logo.png"> <img class="rounded" src="logo.png"> <img src="logo.png" style="width:64px;height:64px;opacity:0.4">
+</div>
+<h2>Translucent border over a background</h2>
+<div style="background: #0ea5e9; padding: 12px;"><div style="border: 6px solid rgba(255,255,255,0.5); padding: 8px; border-radius: 10px; color:white">rgba border</div></div>
+</body></html>
