@@ -59,10 +59,11 @@ internal sealed class CascadeLayer
 /// <summary>An <c>@page</c> rule: its page selector, declarations and margin boxes (<c>@top-center</c> and so on).</summary>
 internal sealed class PageRule
 {
+    public string Name = "";     // the page name of a named page rule (@page wide), or ""
     public string Selector = ""; // "", ":first", ":left", ":right" or ":blank"
     public readonly List<Declaration> Declarations = new();
     public readonly Dictionary<string, List<Declaration>> MarginBoxes = new(StringComparer.Ordinal);
-    public int Specificity => Selector switch { ":first" or ":blank" => 2, ":left" or ":right" => 1, _ => 0 };
+    public int Specificity => (Name.Length > 0 ? 4 : 0) + Selector switch { ":first" or ":blank" => 2, ":left" or ":right" => 1, _ => 0 };
 }
 
 /// <summary>A custom property registered with <c>@property</c>.</summary>
@@ -290,10 +291,21 @@ internal static class CssParser
     /// <summary>Parses an @page rule: "@page", "@page :first" and so on, with declarations and margin boxes.</summary>
     private static void ParsePage(string prelude, string body, Stylesheet sheet)
     {
-        var selector = prelude.Trim().ToLowerInvariant();
-        // Named pages ("@page wide") are not supported; ":first", ":left", ":right" and ":blank" are.
-        if (selector.Length > 0 && selector is not (":first" or ":left" or ":right" or ":blank")) return;
-        var rule = new PageRule { Selector = selector };
+        // Page selectors: an optional page name (named pages) and an optional :first, :left, :right or :blank;
+        // several separated by commas.
+        var selectors = new List<(string Name, string Pseudo)>();
+        foreach (var part in prelude.Split(','))
+        {
+            var sel = part.Trim();
+            int colon = sel.IndexOf(':');
+            var name = colon < 0 ? sel : sel.Substring(0, colon).TrimEnd();
+            var pseudo = colon < 0 ? "" : sel.Substring(colon).ToLowerInvariant();
+            if (pseudo.Length > 0 && pseudo is not (":first" or ":left" or ":right" or ":blank")) return;
+            if (name.Length > 0 && !IsPageName(name)) return;
+            selectors.Add((name, pseudo));
+        }
+        if (selectors.Count == 0) return;
+        var rule = new PageRule { Name = selectors[0].Name, Selector = selectors[0].Pseudo };
         int i = 0, declStart = 0;
         var declText = new System.Text.StringBuilder();
         while (i < body.Length)
@@ -316,8 +328,28 @@ internal static class CssParser
         }
         declText.Append(body, declStart, body.Length - declStart);
         ParseDeclarations(declText.ToString(), rule.Declarations);
-        sheet.PageRules.Add(rule);
-        if (selector.Length == 0) sheet.PageDeclarations.AddRange(rule.Declarations);
+        foreach (var (name, pseudo) in selectors)
+        {
+            var r = rule;
+            if (name != rule.Name || pseudo != rule.Selector)
+            {
+                r = new PageRule { Name = name, Selector = pseudo };
+                r.Declarations.AddRange(rule.Declarations);
+                foreach (var (box, decls) in rule.MarginBoxes) r.MarginBoxes[box] = decls;
+            }
+            sheet.PageRules.Add(r);
+            if (name.Length == 0 && pseudo.Length == 0) sheet.PageDeclarations.AddRange(r.Declarations);
+        }
+    }
+
+    /// <summary>A page name: a CSS identifier, not "auto".</summary>
+    internal static bool IsPageName(string name)
+    {
+        if (name.Length == 0 || name.Equals("auto", StringComparison.OrdinalIgnoreCase)) return false;
+        if (!(char.IsLetter(name[0]) || name[0] is '_' or '-')) return false;
+        foreach (char c in name)
+            if (!(char.IsLetterOrDigit(c) || c is '_' or '-')) return false;
+        return true;
     }
 
     /// <summary>The sixteen page-margin boxes of CSS Paged Media.</summary>

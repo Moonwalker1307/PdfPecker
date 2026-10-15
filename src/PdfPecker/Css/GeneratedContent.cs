@@ -4,7 +4,11 @@ using PdfPecker.Html;
 
 namespace PdfPecker.Css;
 
-/// <summary>Evaluates the content property of ::before and ::after: strings, attr(), counter(), counters() and quotes.</summary>
+/// <summary>
+/// Evaluates the content property of ::before, ::after and margin boxes, and the values of string-set: strings,
+/// attr(), counter(), counters(), quotes, and the paged-media functions string(), content(), target-counter(),
+/// target-text() and leader().
+/// </summary>
 internal static class GeneratedContent
 {
     // Chrome's quotes for English: curly double quotes outside, curly single quotes inside.
@@ -92,6 +96,74 @@ internal static class GeneratedContent
                 }
                 return true;
             }
+            case "string":
+            {
+                // A running string, in a margin box: string(name[, first | start | last | first-except]).
+                if (args.Count is < 1 or > 2) return false;
+                var paged = resolver.Paged;
+                if (paged.Running != null)
+                    sb.Append(paged.Running.Get(args[0].Trim(), paged.CurrentPage, args.Count == 2 ? args[1].Trim().ToLowerInvariant() : "first"));
+                return true;
+            }
+            case "content":
+            {
+                // The element's own text (string-set): content(), content(text), content(before | after | first-letter).
+                var which = args.Count > 0 ? args[0].Trim().ToLowerInvariant() : "text";
+                sb.Append(TextOf(host, which));
+                return true;
+            }
+            case "target-counter":
+            {
+                // target-counter(attr(href), page[, style]): a counter's value at the element a link points to.
+                if (args.Count is < 2 or > 3) return false;
+                var paged = resolver.Paged;
+                paged.UsesTargets = true;
+                var id = TargetId(args[0], host);
+                var counter = args[1].Trim();
+                string style = args.Count == 3 ? args[2].Trim().ToLowerInvariant() : "decimal";
+                int value = 0;
+                if (id != null)
+                {
+                    if (counter == "page") value = paged.PageOfId?.Invoke(id) ?? 0;
+                    else
+                    {
+                        paged.WantedCounters.Add(counter);
+                        if (paged.CounterSnapshots.TryGetValue(id, out var values) && values.TryGetValue(counter, out int v)) value = v;
+                    }
+                }
+                sb.Append(Counters.Format(value, style));
+                return true;
+            }
+            case "target-text":
+            {
+                // target-text(attr(href)[, content | before | after | first-letter]): the text of the element linked to.
+                if (args.Count is < 1 or > 2) return false;
+                resolver.Paged.UsesTargets = true;
+                var id = TargetId(args[0], host);
+                var target = id != null ? resolver.ElementById(host, id) : null;
+                if (target != null)
+                {
+                    var which = args.Count == 2 ? args[1].Trim().ToLowerInvariant() : "content";
+                    sb.Append(TextOf(target, which == "content" ? "text" : which));
+                }
+                return true;
+            }
+            case "leader":
+            {
+                // leader(dotted | solid | space | "string"): fills the rest of the line; laid out by the inline layout.
+                if (args.Count != 1) return false;
+                var a = args[0].Trim();
+                string? pattern = a.ToLowerInvariant() switch
+                {
+                    "dotted" => ". ",
+                    "solid" => "_",
+                    "space" => " ",
+                    _ => a.Length > 0 && a[0] is '"' or '\'' ? UnquoteString(a) : null,
+                };
+                if (string.IsNullOrEmpty(pattern)) return false;
+                sb.Append(LeaderStart).Append(pattern.Replace(LeaderStart, ' ').Replace(LeaderEnd, ' ')).Append(LeaderEnd);
+                return true;
+            }
             case "url":
             case "image-set":
             case "linear-gradient":
@@ -100,6 +172,86 @@ internal static class GeneratedContent
             default:
                 return false;
         }
+    }
+
+    /// <summary>
+    /// Marks a leader in generated text: LeaderStart, the pattern, LeaderEnd. These are interlinear annotation
+    /// characters, which never occur in documents; the inline layout turns the run into a leader.
+    /// </summary>
+    internal const char LeaderStart = '\uFFF9', LeaderEnd = '\uFFFB';
+
+    /// <summary>The id a target function points to: attr(href) or a "#id" string or url(#id); null when not a fragment.</summary>
+    private static string? TargetId(string arg, Element host)
+    {
+        var a = arg.Trim();
+        string? url;
+        if (a.StartsWith("attr(", StringComparison.OrdinalIgnoreCase) && a.EndsWith(")", StringComparison.Ordinal))
+            url = host.GetAttribute(a.Substring(5, a.Length - 6).Trim().Split(' ')[0].ToLowerInvariant());
+        else if (a.StartsWith("url(", StringComparison.OrdinalIgnoreCase) && a.EndsWith(")", StringComparison.Ordinal))
+        {
+            var inner = a.Substring(4, a.Length - 5).Trim();
+            url = UnquoteString(inner) ?? inner;
+        }
+        else url = UnquoteString(a);
+        if (url == null) return null;
+        url = url.Trim();
+        if (!url.StartsWith("#", StringComparison.Ordinal) || url.Length < 2) return null;
+        var id = url.Substring(1);
+        try { return Uri.UnescapeDataString(id); }
+        catch (UriFormatException) { return id; }
+    }
+
+    /// <summary>An element's text for content() and target-text(): its own text, its ::before or ::after, or its first letter.</summary>
+    internal static string TextOf(Element e, string which)
+    {
+        switch (which)
+        {
+            case "before":
+            case "after":
+            {
+                var name = which == "before" ? "::before" : "::after";
+                foreach (var c in e.Children)
+                    if (c is Element { Generated: true } g && g.Name == name) return Collapse(g.InnerText());
+                return "";
+            }
+            case "first-letter":
+            {
+                var text = OwnText(e);
+                return text.Length == 0 ? "" : char.IsSurrogatePair(text, 0) ? text.Substring(0, 2) : text.Substring(0, 1);
+            }
+            default:
+                return OwnText(e);
+        }
+    }
+
+    /// <summary>The element's text without its generated content, whitespace collapsed.</summary>
+    private static string OwnText(Element e)
+    {
+        var sb = new StringBuilder();
+        Append(e, sb);
+        return Collapse(sb.ToString());
+
+        static void Append(Element e, StringBuilder sb)
+        {
+            foreach (var c in e.Children)
+            {
+                if (c is TextNode t) sb.Append(t.Text);
+                else if (c is Element { Generated: false } ce) Append(ce, sb);
+            }
+        }
+    }
+
+    private static string Collapse(string text)
+    {
+        var sb = new StringBuilder(text.Length);
+        bool space = false;
+        foreach (char c in text)
+        {
+            if (char.IsWhiteSpace(c)) { space = sb.Length > 0; continue; }
+            if (space) { sb.Append(' '); space = false; }
+            sb.Append(c);
+        }
+        return sb.ToString();
     }
 
     /// <summary>The text of a whole quoted CSS string, with escapes decoded.</summary>

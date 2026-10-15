@@ -238,6 +238,13 @@ options.MissingFont = family => logger.LogWarning("Font {Family} is not availabl
 options.UseSystemFonts = true;   // looks in C:\Windows\Fonts, /Library/Fonts, /usr/share/fonts, ...
 ```
 
+Likewise, a character that no font has is drawn as an empty box (blank space in PDF/A). `MissingCharacter` is called
+once for each such character before anything is written, so a test can make sure a template's fonts cover its data:
+
+```csharp
+options.MissingCharacter = ch => throw new InvalidOperationException($"No font has U+{char.ConvertToUtf32(ch, 0):X4}");
+```
+
 ### Right-to-left text: Arabic and Hebrew
 
 Arabic and Hebrew are laid out right to left and shaped like browsers do, with PdfPecker's own implementation of the
@@ -380,7 +387,14 @@ var options = new PdfOptions
 
 // Or sign any existing PDF; earlier signatures stay valid.
 byte[] signed = PdfSigner.Sign(File.ReadAllBytes("in.pdf"), new PdfSignatureOptions(cert));
+
+// A contract template with empty signature fields: sign into one by name, at its place on the page.
+byte[] countersigned = PdfSigner.Sign(contract, new PdfSignatureOptions(cert) { FieldName = "Buyer" });
 ```
+
+When `FieldName` names an empty signature field the PDF already has (`"Parties.Buyer"` for a nested one), the signature
+goes into it and the box fills the field's rectangle; signing a field of another type or one that is already signed
+throws `PdfSignatureException`. Any other name adds a new field.
 
 Signatures are PAdES baseline (`ETSI.CAdES.detached`) by default, or classic `adbe.pkcs7.detached` with
 `Format = PdfSignatureFormat.Pkcs7Detached`; RSA and ECDSA keys with SHA-256/384/512. The signature is appended as an
@@ -454,6 +468,10 @@ PdfMerger.MergeFiles("all.pdf", new[] { "a.pdf", "b.pdf" });
 PdfMerger.Merge(new[] { invoiceStream, termsStream }, outputStream);
 await PdfMerger.MergeAsync(uploads.Select(f => f.OpenReadStream()), response.Body);
 ```
+
+Tagged inputs stay tagged: their structure trees are joined under one root, so the merged file is still accessible,
+and when every input is PDF/UA-1 the result says so too (veraPDF passes it). An input in another language than the
+first keeps its language on its own part of the tree. Untagged inputs merge as before.
 
 With streams (and `MergeFiles`), only one input is held in memory at a time and the merged document goes to the output
 as each input is done, so memory follows the largest input rather than the whole batch: merging 100 files of 32 MB in
@@ -562,35 +580,42 @@ miss is an exotic HTML5 entity name) plus the GitHub Flavored Markdown extension
 ids, so `[see below](#heading-text)` links work in the PDF too. The parser runs in linear time on hostile input
 (deep nesting, unclosed brackets, long delimiter runs). See [Limitations](#limitations) for what is not supported.
 
-**CSS**: `<style>` blocks, `<link rel="stylesheet">`, inline `style` attributes, `@media print`, and `@page`.
-Selectors: type, `.class`, `#id`, `*`, attribute selectors (`[a]`, `=`, `~=`, `|=`, `^=`, `$=`, `*=`), descendant,
-`>`, `+`, `~`, `:first-child`, `:last-child`, `:only-child`, `:nth-child()`, `:nth-last-child()`, `:first-of-type`,
-`:last-of-type`, `:only-of-type`, `:nth-of-type()`, `:nth-last-of-type()`, `:not()`, `:is()` and `:where()` (all three
-with selector lists; `:is()` and `:where()` skip entries they do not understand), `:root`, `:link`, `:empty`, with
-specificity and `!important` handled as in browsers. Properties:
+**CSS**: `<style>` blocks, `<link rel="stylesheet">`, inline `style` attributes, `@media` (media queries level 4:
+`print`, `width`/`height` and `orientation` of the page area, ranges such as `(400px <= width <= 800px)`, `and`, `or`,
+`not`), `@supports` (property tests, `selector()`, `and`/`or`/`not`), `@layer` cascade layers, CSS nesting (`&`),
+`@property` (initial values and inheritance of registered custom properties) and `@page` (see
+[Paged media](#paged-media)). Selectors: type, `.class`, `#id`, `*`, attribute selectors (`[a]`, `=`, `~=`, `|=`,
+`^=`, `$=`, `*=`, with `i`/`s` flags), descendant, `>`, `+`, `~`, `:first-child`, `:last-child`, `:only-child`,
+`:nth-child()` and `:nth-last-child()` (incl. `of S`), `:first-of-type`, `:last-of-type`, `:only-of-type`,
+`:nth-of-type()`, `:nth-last-of-type()`, `:not()`, `:is()`, `:where()` and `:has()` (all with selector lists; `:is()`
+and `:where()` skip entries they do not understand), `:root`, `:link`, `:empty`, `:lang()`, form states (`:checked`,
+`:disabled`, `:enabled`, `:required`, `:optional`, `:read-only`, `:placeholder-shown` and the like), `::before`,
+`::after` and `::marker`, with specificity and `!important` handled as in browsers. Properties:
 
 | Area | Properties |
 | --- | --- |
 | Box model | `display` (block, inline, inline-block, flex, inline-flex, grid, inline-grid, list-item, table parts, none), `margin`, `padding` (also the logical `margin-inline`/`-block` and `padding-inline`/`-block` properties and their `-start`/`-end` longhands), `border` (solid, dashed, dotted, double), `border-radius` (incl. elliptical `/` radii and percentages; rounds backgrounds, borders, shadows and images), `box-shadow` (outer shadows; a blur is drawn as fading bands), `overflow` (`hidden`, `clip`, `auto` and `scroll` clip to the padding box, following its rounded corners, also in table cells; `overflow-x`/`overflow-y`), `outline` and `outline-offset` (all border styles; follows rounded corners), `width`, `height`, `min-`/`max-width`, `min-height`, `box-sizing`, `aspect-ratio` (incl. `auto <ratio>`), `object-fit` and `object-position` on images |
-| Text | `color`, `font`, `font-family`, `font-size`, `font-weight`, `font-style`, `line-height`, `text-align` (incl. justify, `start` and `end`), `direction`, `unicode-bidi`, `text-decoration`, `text-transform`, `text-indent`, `letter-spacing`, `word-spacing`, `white-space`, `overflow-wrap`/`word-wrap`, `word-break` (`break-all`), `vertical-align`, `text-shadow` (several shadows; a blur is drawn as faint copies of the text), `text-overflow: ellipsis` (on a box that clips its overflow). Lines break as in Chrome: at spaces, after hyphens and dashes, at `&shy;` (showing a hyphen) and `&#8203;`; a word too wide for its line overflows unless `overflow-wrap` or `word-break` allows breaking it. `line-height: normal` comes from the font's own metrics, rounded to whole pixels as Chrome does, and border widths snap to whole pixels. Text is kerned as in Chrome: from the font's GPOS or `kern` table, and for the standard fonts from the Liberation fonts browsers use in their place. Embedded fonts get their standard ligatures (GSUB `liga`/`clig`, such as fi and ffi) as in Chrome, except in letter-spaced text; `font-variant-ligatures: none` or `font-feature-settings: "liga" 0` turns them off |
-| Backgrounds | `background-color`, `background-image` and `background` with `url()` images (PNG, JPEG, GIF, WebP, and SVG files drawn as vectors), `linear-gradient()`, `radial-gradient()`, `repeating-linear-gradient()` and `repeating-radial-gradient()` (several layers allowed); `background-repeat` (incl. `space`, `round`), `background-position` (incl. edge offsets like `right 10px bottom 5px`), `background-size` (`cover`, `contain`, lengths), `background-origin`, `background-clip`. Repeated images are written once as PDF tiling patterns. `url()` in a linked stylesheet is relative to the stylesheet and follows the same file access rules as `<img>`. As in Chrome's print output, the background of `<html>`, or else of `<body>`, fills every page area (images and gradients too, positioned against the root box and continuing from page to page); `@page { background: <colour> }` also colours the page margins. `opacity` on SVG |
+| Text | `color`, `font`, `font-family`, `font-size`, `font-weight`, `font-style`, `line-height`, `text-align` (incl. justify, `start` and `end`), `direction`, `unicode-bidi`, `text-decoration`, `text-transform`, `text-indent`, `letter-spacing`, `word-spacing`, `white-space`, `overflow-wrap`/`word-wrap`, `word-break` (`break-all`), `vertical-align`, `text-shadow` (several shadows; a blur is drawn as faint copies of the text), `text-overflow: ellipsis` (on a box that clips its overflow), `text-decoration-style` (`solid`, `double`, `dotted`, `dashed`, `wavy`), `text-decoration-color`, `text-decoration-thickness`, `text-underline-offset`, `text-align-last`, `tab-size`, `font-variant: small-caps` (synthesized from capitals when the font has none), `line-clamp` and `-webkit-line-clamp` (with an ellipsis), `hyphens: manual | none`. Lines break as in Chrome: at spaces, after hyphens and dashes, at `&shy;` (showing a hyphen) and `&#8203;`; a word too wide for its line overflows unless `overflow-wrap` or `word-break` allows breaking it. `line-height: normal` comes from the font's own metrics, rounded to whole pixels as Chrome does, and border widths snap to whole pixels. Text is kerned as in Chrome: from the font's GPOS or `kern` table, and for the standard fonts from the Liberation fonts browsers use in their place. Embedded fonts get their standard ligatures (GSUB `liga`/`clig`, such as fi and ffi) as in Chrome, except in letter-spaced text; `font-variant-ligatures: none` or `font-feature-settings: "liga" 0` turns them off |
+| Backgrounds | `background-color`, `background-image` and `background` with `url()` images (PNG, JPEG, GIF, WebP, and SVG files drawn as vectors), `linear-gradient()`, `radial-gradient()`, `conic-gradient()` (pie charts and colour wheels, drawn as smooth PDF shadings) and their `repeating-` forms (several layers allowed); `background-repeat` (incl. `space`, `round`), `background-position` (incl. edge offsets like `right 10px bottom 5px`), `background-size` (`cover`, `contain`, lengths), `background-origin`, `background-clip`. Repeated images are written once as PDF tiling patterns. `url()` in a linked stylesheet is relative to the stylesheet and follows the same file access rules as `<img>`. As in Chrome's print output, the background of `<html>`, or else of `<body>`, fills every page area (images and gradients too, positioned against the root box and continuing from page to page); `@page { background: <colour> }` also colours the page margins. `opacity` on SVG |
 | Flexbox | `flex-direction`, `flex-wrap`, `flex-flow`, `flex`, `flex-grow`/`-shrink`/`-basis`, `order`, `justify-content`, `align-items`, `align-self`, `align-content`, `gap`, `margin: auto` |
-| Grid | `grid-template-columns`/`-rows` (lengths, `%`, `fr`, `auto`, `min-content`, `max-content`, `minmax()`, `fit-content()`, `repeat()` incl. `auto-fill`/`auto-fit`), `grid-auto-rows`/`-columns`, `grid-auto-flow`, `grid-template-areas`, `grid-template`, named lines (`[name]`), `grid-column`/`-row` (line numbers, names and `span`), `grid-area` (incl. area names), `gap`, `justify-items`/`-self`, `align-items`/`-self`, `justify-content`, `align-content`, `place-*` |
-| Columns | `column-count`, `column-width`, `columns`, `column-gap` |
+| Grid | `grid-auto-flow: dense` packing, `grid-template-columns`/`-rows` (lengths, `%`, `fr`, `auto`, `min-content`, `max-content`, `minmax()`, `fit-content()`, `repeat()` incl. `auto-fill`/`auto-fit`), `grid-auto-rows`/`-columns`, `grid-auto-flow`, `grid-template-areas`, `grid-template`, named lines (`[name]`), `grid-column`/`-row` (line numbers, names and `span`), `grid-area` (incl. area names), `gap`, `justify-items`/`-self`, `align-items`/`-self`, `justify-content`, `align-content`, `place-*` |
+| Columns | `column-count`, `column-width`, `columns`, `column-gap`, `column-rule` (all border styles), `column-span: all` |
 | Variables | custom properties (`--name: value`) and `var(--name, fallback)`, anywhere including shorthands |
-| Math functions | `calc()`, `min()`, `max()` and `clamp()` for lengths and numbers, nested in any combination and mixing units (`calc(100% - 2em)`, `min(100%, 600px)`, `clamp(1rem, 2.5vw, 2rem)`), with `var()` inside them. Percentages resolve against the property's own reference (the containing block's width for `width` and margins, the parent's font size for `font-size`), so they work in widths, heights, margins, padding, flex bases, grid tracks, gaps, positions, translations, font sizes and borders |
+| Math functions | `calc()`, `min()`, `max()`, `clamp()`, `round()`, `mod()`, `rem()`, `abs()`, `sign()`, `sin()`, `cos()`, `tan()`, `asin()`, `acos()`, `atan()`, `atan2()`, `pow()`, `sqrt()`, `hypot()`, `log()` and `exp()` for lengths, numbers and angles, nested in any combination and mixing units (`calc(100% - 2em)`, `min(100%, 600px)`, `clamp(1rem, 2.5vw, 2rem)`), with `var()` inside them. Percentages resolve against the property's own reference (the containing block's width for `width` and margins, the parent's font size for `font-size`), so they work in widths, heights, margins, padding, flex bases, grid tracks, gaps, positions, translations, font sizes and borders |
 | Positioning | `float` and `clear`; `position` (`relative`, `absolute`, `fixed`; `sticky` is drawn as `relative`) with `top`, `right`, `bottom` and `left`; `z-index` |
 | Transparency | `opacity` (a block is painted as one PDF transparency group; an inline `<span>` fades its text and background), translucent colours everywhere (`rgba()`, `hsla()`, `#rrggbbaa`, `transparent`), gradients that fade to `transparent` (as a soft mask). PDF/A-2 and 3 allow all of this |
-| Transforms | `transform` (`translate()`, `translateX()`/`Y()`, `scale()`, `scaleX()`/`Y()`, `rotate()`, `skew()`, `skewX()`/`Y()`, `matrix()`) and `transform-origin` |
-| Generated content | `::before` and `::after` with `content` (strings, `attr()`, `counter()`, `counters()`, `open-quote`/`close-quote`), `counter-reset`, `counter-increment`, `counter-set` |
+| Transforms | `transform` (`translate()`, `translateX()`/`Y()`, `scale()`, `scaleX()`/`Y()`, `rotate()`, `skew()`, `skewX()`/`Y()`, `matrix()`), `transform-origin`, and the individual `translate`, `rotate` and `scale` properties |
+| Generated content | `::before`, `::after` and `::marker` with `content` (strings, `attr()`, `counter()`, `counters()`, `open-quote`/`close-quote`, and for paged media `target-counter()`, `target-text()`, `leader()`, `string()` and `content()`), `counter-reset`, `counter-increment`, `counter-set`, `string-set` |
 | SVG | `fill`, `stroke`, `stroke-width`, `fill-opacity`, `stroke-opacity`, `fill-rule`, `stroke-linecap`, `stroke-linejoin`, `stroke-miterlimit`, `clip-path`, `clip-rule`, `mask`, `mask-type`, `filter`, `marker`, `marker-start`/`-mid`/`-end`, `flood-color`, `flood-opacity`, `color-interpolation-filters`, `text-anchor`, `dominant-baseline` (as CSS or presentation attributes) |
-| Lists | `list-style-type` (disc, circle, square, decimal, decimal-leading-zero, alpha, roman, none), `list-style` |
+| Lists | `list-style-type` (disc, circle, square, decimal, decimal-leading-zero, alpha, roman, none, or a string such as `'— '`), `list-style`, `::marker` (content, colour, font) |
 | Tables | `border-collapse` (each shared border drawn once, the wider one winning), `border-spacing`, cell `vertical-align`, automatic column widths, `table-layout: fixed`, a table `height` shared out over the rows |
-| Paging | `page-break-before`/`after`/`inside`, `break-before`/`after`/`inside` (`always`, `page`, `avoid`), `orphans`, `widows`, `@page` size and margins |
+| Paging | `page-break-before`/`after`/`inside`, `break-before`/`after`/`inside` (`always`, `page`, `avoid`), `orphans`, `widows`, `@page` size, margins and background, `@page :first`/`:left`/`:right`, the sixteen page-margin boxes (`@top-center` and the like), named pages (`page`), `string-set` (see [Paged media](#paged-media)) |
 
 Units: `px`, `pt`, `em`, `rem`, `%`, `mm`, `cm`, `in`, `pc`, `ex`, `ch`, `vw`, `vh`, `vmin`, `vmax` (the viewport is
 the page's content area, minus any running header and footer, in whole pixels as in Chrome). Colours: names, `#rgb`, `#rrggbb`,
-`#rrggbbaa`, `rgb()`, `rgba()`, `hsl()`, `hsla()`.
+`#rrggbbaa`, `rgb()`, `rgba()`, `hsl()`, `hsla()` (comma or space syntax), `hwb()`, `lab()`, `lch()`, `oklab()`,
+`oklch()`, `color()` (sRGB, Display P3 and the other predefined spaces, mapped to sRGB), `color-mix()`,
+`light-dark()` (the light value) and `currentColor`.
 
 **Pagination**: lines, images and table rows are never cut in half at a page boundary; table header rows repeat on
 every page a table spans; backgrounds and borders continue across pages. Flex lines and grid rows move to the next
@@ -614,6 +639,36 @@ Inside it, `{page}` and `{total-pages}` (or `{pages}`) are replaced with the pag
 <main>...</main>
 <footer data-sticky-pdf-footer height="12mm">Page {page} of {total-pages}</footer>
 ```
+
+### Paged media
+
+`@page` rules set the page size, margins and background, and their margin boxes (`@top-left`, `@top-center`,
+`@bottom-right` and the other thirteen) print headers and footers with `counter(page)` and `counter(pages)`, chosen
+per page with `:first`, `:left` and `:right`. On top of that:
+
+- **Named pages**: `page: wide` puts an element on pages styled by `@page wide { ... }`, with their own size,
+  orientation, margins, background and margin boxes. Content on another named page starts a new page, so a landscape
+  table or a full-bleed cover can sit between portrait pages.
+- **Running headers**: `string-set` copies text from the document (`content()`, `attr()`, strings and counters) into
+  a named string, and `string(name)` shows it in a margin box: the chapter title in the page header, say. As in the
+  spec, `string(name, first | start | last | first-except)` picks which value a page shows.
+- **Tables of contents**: `target-counter(attr(href), page)` shows the page number of the element a link points to,
+  and `leader(dotted)` (or `solid`, `space`, or a string) fills the space before it. `target-text()` shows the
+  linked element's text. The document is laid out again with the numbers it finds, so they are always right.
+
+```css
+@page { size: A4; margin: 20mm;
+  @top-center { content: string(chapter) }
+  @bottom-right { content: "Page " counter(page) " of " counter(pages) } }
+@page cover { margin: 0; background: #1d3557; @top-center { content: none } @bottom-right { content: none } }
+@page wide { size: A4 landscape }
+.cover { page: cover }
+.wide-table { page: wide }
+h2 { string-set: chapter content(); break-before: page }
+nav a::after { content: leader(dotted) target-counter(attr(href), page) }
+```
+
+Chrome supports named pages and margin boxes, but not running strings, `target-counter()` or `leader()`.
 
 **SVG**: inline `<svg>` and SVG files (in `<img>` and as `url()` backgrounds, including `data:image/svg+xml` URIs) with `path` (all commands, arcs included), `rect` (incl. rounded), `circle`, `ellipse`, `line`,
 `polyline`, `polygon`, `text` and `tspan` (`x`, `y`, `dx`, `dy`, `text-anchor`, `dominant-baseline`, standard fonts),
@@ -664,7 +719,7 @@ not listed in [What is supported](#what-is-supported) should be assumed missing.
   Urdu). Devanagari and other Indic scripts, Thai, Khmer, Myanmar and Syriac are not shaped, so their vowel signs
   and conjuncts come out wrong, and Thai text breaks only at spaces. There is no vertical text (`writing-mode`).
 - In Latin and other simple scripts, shaping is limited to pair kerning and standard ligatures; no contextual
-  alternates, small caps or other OpenType features.
+  alternates or other OpenType features (`small-caps` is synthesized from scaled capitals).
 - Right-to-left text in SVG `<text>` is not reordered or shaped, and `text-overflow: ellipsis` is always placed at the
   right end of a line.
 - Variable fonts use their default instance (`font-variation-settings` and `font-stretch` are ignored).
@@ -674,17 +729,15 @@ not listed in [What is supported](#what-is-supported) should be assumed missing.
 
 **CSS**
 
-- Math functions work on lengths and numbers only: not on angles (`rotate(calc(...))`) and not the newer ones (`round()`,
-  `mod()`, `sin()` and so on). A table column width that mixes a percentage with other units (`calc(50% - 10px)`) is
-  sized as `auto`.
-- `@import` is ignored (use `<link rel="stylesheet">`). Rules inside `@supports`, `@layer` and `@container` blocks
-  are skipped, as are `@page :first`/`:left`/`:right` and page margin boxes (`@top-center`; use
-  [running headers and footers](#what-is-supported) instead).
-- Selectors: no `:has()`, `:nth-child(… of S)` or `::first-letter`/`::first-line`/`::marker`. A rule with an
-  unsupported selector is skipped. `:hover`, `:focus` and similar interaction states never match. Selectors inside
-  `:is()`, `:where()` and `:not()` may have at most eight compound parts (one when nested in another of them).
+- A table column width that mixes a percentage with other units (`calc(50% - 10px)`) is sized as `auto`.
+- `@import` is ignored (use `<link rel="stylesheet">`), and rules inside `@container` blocks are skipped. `@page`
+  rules for `:first`, `:left` and `:right` pages can style margin boxes but not change the page size or margins.
+  A named page's `:first` is the document's first page, as in Chrome, not the first page of the named run.
+- Selectors: no `::first-letter`/`::first-line`. A rule with an unsupported selector is skipped. `:hover`, `:focus`
+  and similar interaction states never match. Selectors inside `:is()`, `:where()` and `:not()` may have at most eight
+  compound parts (one when nested in another of them).
 - Properties not supported: `filter`, `mix-blend-mode`, `clip-path` on HTML elements (only in SVG), `border-image`,
-  `list-style-image`, `column-span`, `column-rule` and inset `box-shadow`.
+  `list-style-image`, `font-variant-numeric` and inset `box-shadow`. No relative colours (`rgb(from …)`).
 - `text-shadow` blur is approximated with faint copies of the text rather than a true Gaussian blur, and decorations
   (underlines) get no shadow. `text-overflow` only supports `ellipsis` at the end of the line (`clip` and custom
   strings do nothing). `aspect-ratio` does not take part in min-/max-content sizing (shrink-to-fit widths) and is
@@ -692,8 +745,8 @@ not listed in [What is supported](#what-is-supported) should be assumed missing.
   `preserveAspectRatio` fit.
 - Borders: `groove`, `ridge`, `inset` and `outset` draw as solid.
 - `position: sticky` is drawn as `relative`; `background-attachment: fixed` scrolls with the box.
-- Lists: `list-style-type` covers disc, circle, square, decimal, decimal-leading-zero, alpha and roman only (no Greek,
-  CJK or `@counter-style`).
+- Lists: `list-style-type` covers disc, circle, square, decimal, decimal-leading-zero, alpha, roman and strings only
+  (no Greek, CJK or `@counter-style`).
 
 **Backgrounds and transparency**
 
@@ -704,7 +757,7 @@ not listed in [What is supported](#what-is-supported) should be assumed missing.
 
 **Layout**
 
-- Grid: no `dense` packing and no subgrid; `span <name>` counts as `span 1`.
+- Grid: no subgrid.
 - Multi-column: children are kept whole and balanced between columns; a single block is never split across columns.
 - Overflow: a positioned child with a `z-index` inside a clipping box stays stacked within that box.
 

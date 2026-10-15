@@ -37,9 +37,9 @@ internal static class CssSupports
         "border-left-width", "border-top-style", "border-right-style", "border-bottom-style", "border-left-style",
         "border-top-color", "border-right-color", "border-bottom-color", "border-left-color", "border-top-left-radius",
         "border-top-right-radius", "border-bottom-right-radius", "border-bottom-left-radius", "tab-size",
-        "line-clamp", "-webkit-line-clamp", "hyphens", "size", "direction", "unicode-bidi", "margin-inline", "margin-inline-start",
-        "margin-inline-end", "padding-inline", "padding-inline-start", "padding-inline-end", "margin-block", "margin-block-start",
-        "margin-block-end", "padding-block", "padding-block-start", "padding-block-end",
+        "line-clamp", "-webkit-line-clamp", "hyphens", "size", "string-set", "page", "direction", "unicode-bidi", "margin-inline",
+        "margin-inline-start", "margin-inline-end", "padding-inline", "padding-inline-start", "padding-inline-end", "margin-block",
+        "margin-block-start", "margin-block-end", "padding-block", "padding-block-start", "padding-block-end",
     };
 
     /// <summary>Whether this library applies the property.</summary>

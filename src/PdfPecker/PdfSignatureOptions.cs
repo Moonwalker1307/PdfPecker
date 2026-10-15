@@ -80,7 +80,11 @@ public sealed class PdfSignatureOptions
     /// <summary>The signer's name. Default: the certificate's common name.</summary>
     public string? SignerName { get; set; }
 
-    /// <summary>The name of the signature field. Default: "Signature1" (or the next free number).</summary>
+    /// <summary>
+    /// The name of the signature field. When the PDF already has an empty signature field with this (fully qualified) name,
+    /// the signature goes into it, at the field's own place on its page; a field of another type, or one already signed,
+    /// is an error. Otherwise a new field with this name is added. Default: "Signature1" (or the next free number).
+    /// </summary>
     public string? FieldName { get; set; }
 
     /// <summary>Show a signature box on a page. Default: null, an invisible signature.</summary>

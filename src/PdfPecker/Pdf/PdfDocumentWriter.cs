@@ -24,10 +24,28 @@ internal sealed class PageSetup
     public float FlowHeight => ContentHeight - BandTop - BandBottom;
 }
 
+/// <summary>
+/// A run of pages with one page setup: the content of a named page group (<c>@page wide { size: landscape }</c>), or
+/// the whole document. Its draw ops, anchors and fixed boxes use y from the top of its own flow.
+/// </summary>
+internal sealed class PageSection
+{
+    public PageSetup Page = null!;
+    public List<DrawOp> Ops = null!;
+    public float ContentHeight;
+    public IReadOnlyDictionary<string, float> Anchors = new Dictionary<string, float>();
+    public List<DrawOp>? FixedOps;
+    /// <summary>The canvas background of the section's page with the given index within the section.</summary>
+    public Func<int, List<DrawOp>>? Canvas;
+    /// <summary>The number of pages the content needs, from its height: at least one.</summary>
+    public static int PagesFor(float contentHeight, float flowHeight)
+        => Math.Max(1, (int)Math.Floor((Math.Max(0, contentHeight - 0.5f) + 0.01) / flowHeight) + 1);
+}
+
 /// <summary>Serializes laid-out draw operations into a PDF 1.4 file (PDF 1.7 for PDF/A and AES-256 encryption).</summary>
 internal sealed partial class PdfDocumentWriter
 {
-    private readonly PageSetup _page;
+    private PageSetup _page; // the setup of the page being written
     private readonly bool _compress;
     private readonly CompressionLevel _level;
     private readonly ByteBuffer _out = new(64 * 1024);
@@ -54,6 +72,7 @@ internal sealed partial class PdfDocumentWriter
     private readonly List<GlyphSubset> _subsetList = new();
     private float _yOrigin; // distance from the page top to flow y = 0 on the page being written
     private readonly ByteBuffer _patterns = new(256); // "/P1 << ... >>" entries for the shared resources
+    private readonly List<Gradient> _conics = new();  // conic gradients, whose functions are stream objects
     private int _patternCount;
     private readonly List<(int Name, byte[] Content, string Dict)> _tilings = new(); // tiling patterns, written as /T1, /T2, ...
     private List<PdfImage> _imageList = new(); // the images written, by image number - 1
@@ -96,6 +115,11 @@ internal sealed partial class PdfDocumentWriter
 
     /// <summary>The document's natural language, such as "en-US", for a tagged PDF.</summary>
     public string? Language { get; init; }
+
+    /// <summary>Called once with each character no font can draw; see <see cref="PdfOptions.MissingCharacter"/>.</summary>
+    public Action<string>? MissingCharacter { get; init; }
+
+    private HashSet<int>? _missingReported;
 
     private bool EmbedStandard => EmbedStandardFonts || Conformance != PdfConformance.None || PdfUA;
 
@@ -273,15 +297,27 @@ internal sealed partial class PdfDocumentWriter
         string? title, string? author, string? subject, string? footerTemplate, string? headerTemplate,
         Func<int, int, List<DrawOp>>? pageBands = null, IReadOnlyList<OutlineHeading>? outline = null, List<DrawOp>? fixedOps = null,
         Func<int, List<DrawOp>>? pageCanvas = null)
+        => Write(new[] { new PageSection { Page = _page, Ops = ops, ContentHeight = contentHeight, Anchors = anchors, FixedOps = fixedOps, Canvas = pageCanvas } },
+            pageBackground, title, author, subject, footerTemplate, headerTemplate, pageBands, outline);
+
+    /// <summary>
+    /// Writes the sections' pages in order. <paramref name="pageBands"/> gets the page's index in the whole document;
+    /// the outline's keys are looked up in the sections' anchors.
+    /// </summary>
+    public byte[] Write(IReadOnlyList<PageSection> sections, uint pageBackground,
+        string? title, string? author, string? subject, string? footerTemplate, string? headerTemplate,
+        Func<int, int, List<DrawOp>>? pageBands = null, IReadOnlyList<OutlineHeading>? outline = null)
     {
+        var firstSetup = _page = sections[0].Page;
         float H = _page.FlowHeight;
+        int pageOffset = 0; // pages of the sections before the one being distributed
         int maxPages = Math.Max(1, MaxPages);
         int PageOf(float y)
         {
             // Compare as doubles: content far down the flow (a huge height or margin) must hit the page limit, not
             // overflow the page number.
             double p = Math.Floor((y + 0.01) / H);
-            if (p >= maxPages || double.IsNaN(p)) throw TooManyPages(maxPages);
+            if (p + pageOffset >= maxPages || double.IsNaN(p)) throw TooManyPages(maxPages);
             return Math.Max(0, (int)p);
         }
 
@@ -296,7 +332,7 @@ internal sealed partial class PdfDocumentWriter
         // The list of a page: the document's own, or, for a transformed layer, the layer's part on that page.
         List<Placed> Target(SortedDictionary<int, List<Placed>>? into, int p)
         {
-            if (into == null) return PageList(p);
+            if (into == null) return PageList(pageOffset + p);
             if (!into.TryGetValue(p, out var list)) into[p] = list = new List<Placed>();
             return list;
         }
@@ -381,9 +417,39 @@ internal sealed partial class PdfDocumentWriter
                     break;
             }
         }
-        foreach (var op in ops) Distribute(op, null);
-        int pageCount = Math.Max(pages.Count, Math.Max(1, PageOf(Math.Max(0, contentHeight - 0.5f)) + 1));
-        while (pages.Count < pageCount) pages.Add(new List<Placed>());
+        // Each section's pages follow the last section's; the per-page arrays say which section a page is in and
+        // where in that section's flow it starts. Anchors go into one space: a section's flow y plus the flow length
+        // of the sections before it.
+        var pageSection = new List<int>();
+        var sectionFirst = new int[sections.Count];
+        var sectionBase = new float[sections.Count + 1];
+        for (int si = 0; si < sections.Count; si++)
+        {
+            var section = sections[si];
+            _page = section.Page;
+            H = _page.FlowHeight;
+            pageOffset = sectionFirst[si] = pageSection.Count;
+            foreach (var op in section.Ops) Distribute(op, null);
+            int sectionPages = Math.Max(pages.Count - pageOffset, Math.Max(1, PageOf(Math.Max(0, section.ContentHeight - 0.5f)) + 1));
+            while (pages.Count < pageOffset + sectionPages) pages.Add(new List<Placed>());
+            for (int k = 0; k < sectionPages; k++) pageSection.Add(si);
+            sectionBase[si + 1] = sectionBase[si] + sectionPages * H;
+        }
+        int pageCount = pages.Count;
+        _page = firstSetup;
+        H = _page.FlowHeight;
+        _sections = sections;
+        _pageSection = pageSection.ToArray();
+        _sectionFirst = sectionFirst;
+        _sectionBase = sectionBase;
+        IReadOnlyDictionary<string, float> anchors = sections[0].Anchors;
+        if (sections.Count > 1)
+        {
+            var merged = new Dictionary<string, float>(StringComparer.Ordinal);
+            for (int si = 0; si < sections.Count; si++)
+                foreach (var (key, y) in sections[si].Anchors) merged.TryAdd(key, sectionBase[si] + y);
+            anchors = merged;
+        }
 
         // Running headers and footers, laid out per page now that the page count is known. Their ops use y from the
         // top of the content area.
@@ -395,8 +461,10 @@ internal sealed partial class PdfDocumentWriter
             Cancellation.ThrowIfCancellationRequested();
             var list = bands[p] = new List<Placed>();
             canvas[p] = new List<Placed>();
-            if (pageBands == null && fixedOps == null && pageCanvas == null) continue;
-            if (pageCanvas != null) foreach (var op in pageCanvas(p)) Flatten(op, canvas[p]);
+            var section = sections[_pageSection[p]];
+            var fixedOps = section.FixedOps;
+            if (pageBands == null && fixedOps == null && section.Canvas == null) continue;
+            if (section.Canvas != null) foreach (var op in section.Canvas(p - _sectionFirst[_pageSection[p]])) Flatten(op, canvas[p]);
             if (pageBands != null) foreach (var op in pageBands(p, pageCount)) Flatten(op, list);
             // position: fixed boxes repeat on every page, as in Chrome's print output.
             if (fixedOps != null) foreach (var op in fixedOps) Flatten(op, list);
@@ -408,6 +476,11 @@ internal sealed partial class PdfDocumentWriter
         var imageIds = new Dictionary<PdfImage, int>();
         void CollectResources(Placed p)
         {
+            if (p.Op is BackgroundOp { Gradient: { Conic: true, FunctionId: 0 } conic })
+            {
+                conic.FunctionId = -1; // numbered with the other objects below
+                _conics.Add(conic);
+            }
             if (p.Op is TextOp t) CollectFonts(t, usedFonts);
             else if (p.Op is SvgOp sv) CollectSvgFonts(sv.Image, usedFonts);
             else if (p.Op is BackgroundOp { Svg: { } bgSvg }) CollectSvgFonts(bgSvg, usedFonts);
@@ -507,6 +580,11 @@ internal sealed partial class PdfDocumentWriter
         int structRootId = tagged ? next++ : 0;
         if (PdfUA && metadataId == 0) metadataId = next++;
         var pageFields = AllocateFields(pages, pageCount, ref next);
+        foreach (var conic in _conics)
+        {
+            conic.FunctionId = next++;
+            if (conic.Alphas != null) conic.AlphaFunctionId = next++;
+        }
 
         // 4. Header.
         _out.Ascii(pdfa || _crypt != null || tagged ? "%PDF-1.7\n%" : "%PDF-1.4\n%").Bytes(new byte[] { 0xE2, 0xE3, 0xCF, 0xD3 }).Nl();
@@ -610,11 +688,8 @@ internal sealed partial class PdfDocumentWriter
         }
 
         // Pages, contents, annotations. A scaled page is written at the size Chrome gives the paper (see PaperSize).
-        float paperW = _page.Width * _page.Scale, paperH = _page.Height * _page.Scale;
-        if (_page.Scale != 1) { paperW = PaperSize(paperW); paperH = PaperSize(paperH); }
-        float paperDy = _paperDy = paperH - _page.Height * _page.Scale;
         var content = new ByteBuffer(32 * 1024);
-        var annotations = new List<(int Id, Placed Link, float Origin, float PageTop)>();
+        var annotations = new List<(int Id, Placed Link, float Origin, float PageTop, int Page)>();
         var pageStreams = new McStream[pageCount];
         int parentKey = pageCount; // keys 0 to pageCount - 1 of the parent tree are the pages'
         var annotKeys = new Dictionary<int, int>();
@@ -623,6 +698,7 @@ internal sealed partial class PdfDocumentWriter
             Cancellation.ThrowIfCancellationRequested();
             content.Clear();
             ResetState();
+            float paperW = SetPage(p, out float paperH), paperDy = _paperDy, pageTop = PageTop(p);
             if (tagged) { _mc = pageStreams[p] = new McStream(p); _mcOpen = null; }
             if (_page.Scale != 1)
             {
@@ -630,24 +706,26 @@ internal sealed partial class PdfDocumentWriter
                 string k = _page.Scale.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
                 content.Ascii("q ").Ascii(k).Ascii(" 0 0 ").Ascii(k).Ascii(" 0 ").Num(paperDy).Ascii(" cm\n");
             }
-            if (CssColor.IsVisible(pageBackground))
+            // A named page's own @page background, or the document's.
+            uint background = _sections.Count > 1 ? _page.Background : pageBackground;
+            if (CssColor.IsVisible(background))
             {
                 Mark(content, null);
-                SetFill(content, pageBackground);
+                SetFill(content, background);
                 content.Ascii("0 0 ").Num(_page.Width).Sp().Num(_page.Height).Ascii(" re f\n");
             }
             _yOrigin = _page.MarginTop;
             _forceArtifact = true;
             foreach (var placed in canvas[p]) WriteOp(content, placed, 0, imageIds);
             _forceArtifact = false;
-            if (wm is { Behind: true }) { Mark(content, null); content.Ascii("q /Wm Do Q\n"); }
+            if (wm is { Behind: true }) { Mark(content, null); content.Ascii(WatermarkDo(firstSetup)); }
             var pageLinks = new List<(Placed Link, float Origin, float PageTop)>();
             _yOrigin = _page.MarginTop + _page.BandTop;
             foreach (var placed in pages[p])
             {
-                if (placed.Op is LinkOp) { pageLinks.Add((placed, _yOrigin, p * H)); continue; }
-                AddUntransformedLinks(placed, pageLinks, _yOrigin, p * H);
-                WriteOp(content, placed, p * H, imageIds);
+                if (placed.Op is LinkOp) { pageLinks.Add((placed, _yOrigin, pageTop)); continue; }
+                AddUntransformedLinks(placed, pageLinks, _yOrigin, pageTop);
+                WriteOp(content, placed, pageTop, imageIds);
             }
             _yOrigin = _page.MarginTop;
             _forceArtifact = true;
@@ -666,16 +744,16 @@ internal sealed partial class PdfDocumentWriter
                 if (footerTemplate != null) WriteMarginText(content, marginFont, footerTemplate, p + 1, pageCount, top: false);
             }
             EndText(content);
-            if (wm is { Behind: false }) { Mark(content, null); content.Ascii("q /Wm Do Q\n"); }
+            if (wm is { Behind: false }) { Mark(content, null); content.Ascii(WatermarkDo(firstSetup)); }
             EndMarked(content);
             if (_page.Scale != 1) content.Ascii("Q\n");
 
             var annotIds = new List<int>();
-            foreach (var (lk, origin, pageTop) in pageLinks)
+            foreach (var (lk, origin, linkTop) in pageLinks)
             {
                 int id = next++;
                 annotIds.Add(id);
-                annotations.Add((id, lk, origin, pageTop));
+                annotations.Add((id, lk, origin, linkTop, p));
                 if (tagged)
                 {
                     // A link annotation belongs to its Link element; one outside the structure (in a running header,
@@ -722,8 +800,10 @@ internal sealed partial class PdfDocumentWriter
             WriteStream(contentIds[p], content.Span, _compress, extraDict: null);
         }
 
-        foreach (var (id, placed, origin, linkPageTop) in annotations)
+        foreach (var (id, placed, origin, linkPageTop, linkPage) in annotations)
         {
+            SetPage(linkPage, out _);
+            float paperDy = _paperDy;
             var link = (LinkOp)placed.Op;
             float x1 = _page.MarginLeft + link.X, x2 = x1 + link.W;
             float yTop = _page.Height - origin - (placed.Y0 - linkPageTop);
@@ -759,7 +839,8 @@ internal sealed partial class PdfDocumentWriter
             End();
         }
 
-        WriteFields(pageFields, pageIds, H, imageIds, annotKeys, ref next);
+        WriteFields(pageFields, pageIds, imageIds, annotKeys, ref next);
+        SetPage(0, out _);
 
         // Bookmarks.
         if (outlinesId != 0)
@@ -790,6 +871,12 @@ internal sealed partial class PdfDocumentWriter
             Begin(encryptId);
             _crypt.WriteDictionary(_out);
             End();
+        }
+
+        foreach (var conic in _conics)
+        {
+            WriteStream(conic.FunctionId, conic.ConicFunction(gray: false), _compress, Gradient.ConicFunctionDict(gray: false));
+            if (conic.AlphaFunctionId != 0) WriteStream(conic.AlphaFunctionId, conic.ConicFunction(gray: true), _compress, Gradient.ConicFunctionDict(gray: true));
         }
 
         // Tiling patterns of repeated backgrounds, collected while writing the pages.
@@ -1037,10 +1124,63 @@ internal sealed partial class PdfDocumentWriter
     /// <summary>Writes an explicit destination for flow position <paramref name="y"/>: its page, scrolled to that height.</summary>
     private void WriteDest(float y)
     {
-        float h = _page.FlowHeight;
-        int p = Math.Clamp((int)Math.Floor((y + 0.01f) / h), 0, _pageIds.Length - 1);
-        float py = _page.Height - _page.MarginTop - _page.BandTop - (y - p * h);
-        _out.Ascii("[").Int(_pageIds[p]).Ascii(" 0 R /XYZ 0 ").Num(Math.Min(py, _page.Height) * _page.Scale + _paperDy).Ascii(" null]");
+        // The section the position is in, then the page within the section.
+        int si = 0;
+        while (si + 1 < _sections.Count && y >= _sectionBase[si + 1] - 0.01f) si++;
+        y -= _sectionBase[si];
+        var page = _sections[si].Page;
+        float h = page.FlowHeight;
+        int last = si + 1 < _sections.Count ? _sectionFirst[si + 1] - 1 : _pageIds.Length - 1;
+        int p = Math.Clamp(_sectionFirst[si] + (int)Math.Floor((y + 0.01f) / h), _sectionFirst[si], last);
+        float py = page.Height - page.MarginTop - page.BandTop - (y - (p - _sectionFirst[si]) * h);
+        float paperDy = PaperDy(page);
+        _out.Ascii("[").Int(_pageIds[p]).Ascii(" 0 R /XYZ 0 ").Num(Math.Min(py, page.Height) * page.Scale + paperDy).Ascii(" null]");
+    }
+
+    private IReadOnlyList<PageSection> _sections = Array.Empty<PageSection>();
+
+    /// <summary>While writing: the section a page (0-based, in the whole document) belongs to, and its index in the section.</summary>
+    internal (int Section, int Local) SectionOfPage(int page) => (_pageSection[page], page - _sectionFirst[_pageSection[page]]);
+
+    /// <summary>While writing: the page (0-based, in the whole document) of a y in a section's flow, and the y on that page.</summary>
+    internal (int Page, float Y) PageAt(int section, float y)
+    {
+        float h = _sections[section].Page.FlowHeight;
+        int local = Math.Max(0, (int)Math.Floor((y + 0.01) / h));
+        return (_sectionFirst[section] + local, y - local * h);
+    }
+    private int[] _pageSection = Array.Empty<int>(), _sectionFirst = Array.Empty<int>();
+    private float[] _sectionBase = Array.Empty<float>();
+
+    /// <summary>Makes page <paramref name="p"/>'s setup current and returns its paper width (and height); sets <see cref="_paperDy"/>.</summary>
+    private float SetPage(int p, out float paperH)
+    {
+        _page = _sections[_pageSection[p]].Page;
+        float paperW = _page.Width * _page.Scale;
+        paperH = _page.Height * _page.Scale;
+        if (_page.Scale != 1) { paperW = PaperSize(paperW); paperH = PaperSize(paperH); }
+        _paperDy = paperH - _page.Height * _page.Scale;
+        return paperW;
+    }
+
+    private float PaperDy(PageSetup page)
+        => page.Scale == 1 ? 0 : PaperSize(page.Height * page.Scale) - page.Height * page.Scale;
+
+    /// <summary>Where page <paramref name="p"/> starts in its section's flow.</summary>
+    private float PageTop(int p)
+    {
+        int si = _pageSection[p];
+        return (p - _sectionFirst[si]) * _sections[si].Page.FlowHeight;
+    }
+
+    /// <summary>Draws the watermark, made for the first page's size, centred on the current page.</summary>
+    private string WatermarkDo(PageSetup first)
+    {
+        float dx = (_page.Width - first.Width) / 2, dy = (_page.Height - first.Height) / 2;
+        if (Math.Abs(dx) < 0.001f && Math.Abs(dy) < 0.001f) return "q /Wm Do Q\n";
+        var b = new ByteBuffer(48);
+        b.Ascii("q 1 0 0 1 ").Num(dx).Sp().Num(dy).Ascii(" cm /Wm Do Q\n");
+        return System.Text.Encoding.ASCII.GetString(b.Span);
     }
 
     private float _paperDy; // how far a scaled page's content moves up to stay at the top of the paper
@@ -1989,6 +2129,7 @@ internal sealed partial class PdfDocumentWriter
             if (shape.Font == null || shape.Kind != SvgShape.KindText) continue;
             if (Leaf(shape.Font) is EmbeddedFont ef) AddGlyphs(ef, shape.Text!, 0, shape.Text!.Length);
             else usedFonts[shape.Font.Index] = true;
+            CheckCharacters(shape.Font, shape.Text!, 0, shape.Text!.Length);
         }
     }
 
@@ -1997,6 +2138,7 @@ internal sealed partial class PdfDocumentWriter
         if (t.Font is StandardFont sf && !EmbedStandard)
         {
             usedFonts[sf.Index] = true;
+            CheckCharacters(sf, t.Text, 0, t.Text.Length);
             return;
         }
         _runs.Clear();
@@ -2005,7 +2147,31 @@ internal sealed partial class PdfDocumentWriter
         {
             if (Leaf(run.Font) is EmbeddedFont ef) AddGlyphs(ef, t.Text, run.Start, run.Length, t.Rtl);
             else usedFonts[((StandardFont)run.Font).Index] = true;
+            CheckCharacters(run.Font, t.Text, run.Start, run.Length);
         }
+    }
+
+    /// <summary>Reports the characters of a run that its font has no glyph for, when <see cref="MissingCharacter"/> is set.</summary>
+    private void CheckCharacters(TextFont font, string text, int start, int length)
+    {
+        if (MissingCharacter == null) return;
+        var embedded = Leaf(font) as EmbeddedFont;
+        for (int i = start, end = start + length; i < end; i++)
+        {
+            int cp = text[i];
+            if (char.IsHighSurrogate(text[i]) && i + 1 < end && char.IsLowSurrogate(text[i + 1])) cp = char.ConvertToUtf32(text[i], text[++i]);
+            if (Invisible(cp)) continue;
+            bool has = embedded != null
+                ? embedded.Program.GlyphId(cp) != 0
+                : cp == '?' || (cp < 0x10000 && WinAnsi.Encode((char)cp) != (byte)'?');
+            if (has || !(_missingReported ??= new()).Add(cp)) continue;
+            MissingCharacter(char.ConvertFromUtf32(char.IsSurrogate((char)cp) && cp < 0x10000 ? 0xFFFD : cp));
+        }
+
+        // Spaces, controls and format characters (soft hyphen, zero-width space and joiners, variation selectors) draw nothing.
+        static bool Invisible(int cp)
+            => cp <= 0x20 || (cp >= 0x7F && cp <= 0xA0) || cp == 0xAD || (cp >= 0x2000 && cp <= 0x200F) || (cp >= 0x2028 && cp <= 0x202F)
+               || (cp >= 0x205F && cp <= 0x206F) || cp == 0x3000 || cp == 0xFEFF || (cp >= 0xFE00 && cp <= 0xFE0F) || (cp >= 0xE0100 && cp <= 0xE01EF);
     }
 
     /// <summary>

@@ -7,7 +7,8 @@ namespace PdfPecker.Pdf;
 /// <summary>
 /// Writes a new PDF holding the pages of several parsed PDFs. Each input's objects reachable from its pages (and its
 /// bookmarks and form fields) are copied once, renumbered; references to the page tree and catalog are dropped, named
-/// destinations are resolved to explicit ones, and signature fields are left out. Identical streams without references
+/// destinations are resolved to explicit ones, and signature fields are left out. Tagged inputs' structure trees are
+/// joined under one root, with their parent-tree keys shifted so they stay apart. Identical streams without references
 /// (images, embedded fonts, ICC profiles), which a run of documents from one template repeats, are written once.
 /// </summary>
 internal sealed class PdfMergeWriter
@@ -22,6 +23,8 @@ internal sealed class PdfMergeWriter
         public readonly List<int> Fields = new(); // source numbers of the top-level form fields kept
         public readonly Dictionary<int, Dictionary<string, PdfObject>> Overrides = new(); // entries to replace when copying an object
         public bool NeedAppearances;
+        public int StructOffset = -1; // added to the input's parent-tree keys; -1 = untagged, its keys are dropped
+        public SortedDictionary<int, PdfObject>? ParentNums;
     }
 
     private readonly PdfMergeOptions _options;
@@ -51,6 +54,12 @@ internal sealed class PdfMergeWriter
     private readonly HashSet<string> _fieldNames = new(StringComparer.Ordinal);
     private PdfString? _formDA;
     private bool _needAppearances;
+    // Logical structure: the merged root, its kids, the merged parent tree and role map, and the document language.
+    private int _structRootId, _parentTreeNext;
+    private readonly ByteBuffer _structKids = new(64), _parentNums = new(64), _roleMap = new(64), _classMap = new(64);
+    private readonly HashSet<string> _roleNames = new(StringComparer.Ordinal), _classNames = new(StringComparer.Ordinal);
+    private PdfString? _lang;
+    private bool _allPdfUa = true; // every input so far claims PDF/UA-1, so the result can too
 
     /// <summary>A writer; <paramref name="sink"/> is where the result goes as it is made, or null to keep it in memory (see <see cref="ToArray"/>).</summary>
     public PdfMergeWriter(PdfMergeOptions options, CancellationToken cancel, Stream? sink = null)
@@ -117,6 +126,7 @@ internal sealed class PdfMergeWriter
                 throw new PdfLimitException($"The merged document has more than {maxPages} pages (PdfMergeOptions.MaxPages).");
             if (_options.Bookmarks) CollectOutline(input, catalog);
             CollectFields(input, catalog, _fieldNames, ref _formDA);
+            CollectStructure(input, catalog);
             if (index == 0) _props = Properties(input.File);
             _needAppearances |= input.NeedAppearances;
 
@@ -156,6 +166,7 @@ internal sealed class PdfMergeWriter
                     }
                 }
             }
+            if (input.StructOffset >= 0) WriteStructure(input, queue);
             // Top-level bookmarks are chained across inputs; the last one waits for its /Next, which a later input may give.
             if (input.TopOutline.Count > 0 && _outlinesId == 0) _outlinesId = NewId();
             for (int k = 0; k < input.TopOutline.Count; k++)
@@ -216,8 +227,38 @@ internal sealed class PdfMergeWriter
             End();
         }
 
+        if (_structRootId != 0)
+        {
+            int parentTreeId = NewId();
+            Begin(_structRootId).Ascii("<< /Type /StructTreeRoot /K [").Bytes(_structKids.Span).Ascii("] /ParentTree ").Int(parentTreeId)
+                .Ascii(" 0 R /ParentTreeNextKey ").Int(_parentTreeNext);
+            if (_roleMap.Length > 0) _out.Ascii(" /RoleMap << ").Bytes(_roleMap.Span).Ascii(">>");
+            if (_classMap.Length > 0) _out.Ascii(" /ClassMap << ").Bytes(_classMap.Span).Ascii(">>");
+            _out.Ascii(" >>");
+            End();
+            Begin(parentTreeId).Ascii("<< /Nums [").Bytes(_parentNums.Span).Ascii("] >>");
+            End();
+        }
+
+        // When every input is PDF/UA-1, so is the result: its metadata says so, with the merged title.
+        int metadataId = 0;
+        if (_allPdfUa && _structRootId != 0)
+        {
+            var xmp = PdfA.Xmp(0, "", _props!, now.AddTicks(-(now.Ticks % TimeSpan.TicksPerSecond)), pdfua: true);
+            metadataId = NewId();
+            Begin(metadataId).Ascii("<< /Type /Metadata /Subtype /XML /Length ").Int(xmp.Length).Ascii(" >>\nstream\n").Bytes(xmp).Ascii("\nendstream");
+            End();
+        }
+
         Begin(CatalogId).Ascii("<< /Type /Catalog /Pages ").Int(PagesId).Ascii(" 0 R");
+        if (metadataId != 0) _out.Ascii(" /Metadata ").Int(metadataId).Ascii(" 0 R");
         if (_outlinesId != 0) _out.Ascii(" /Outlines ").Int(_outlinesId).Ascii(" 0 R");
+        if (_structRootId != 0)
+        {
+            _out.Ascii(" /MarkInfo << /Marked true >> /StructTreeRoot ").Int(_structRootId).Ascii(" 0 R");
+            if (!string.IsNullOrEmpty(_props!.Title)) _out.Ascii(" /ViewerPreferences << /DisplayDocTitle true >>");
+        }
+        if (_lang != null) { _out.Ascii(" /Lang "); PdfSyntax.HexString(_out, _lang.Bytes); }
         if (_ocgs.Length > 0)
         {
             _out.Ascii(" /OCProperties << /OCGs [").Bytes(_ocgs.Span).Ascii("] /D << /Order [").Bytes(_ocgs.Span).Ascii("]");
@@ -361,6 +402,70 @@ internal sealed class PdfMergeWriter
         usedNames.UnionWith(ownNames);
     }
 
+    /// <summary>
+    /// Takes in a tagged input's structure tree: its root becomes the merged root, and its parent-tree keys are moved past
+    /// the earlier inputs'. Sets the document language from the first input that has one; a later input in another
+    /// language gets it on its top-level structure elements.
+    /// </summary>
+    private void CollectStructure(Input input, PdfDict? catalog)
+    {
+        var file = input.File;
+        _allPdfUa &= ClaimsPdfUa(file, catalog);
+        var lang = file.Resolve(catalog?["Lang"]) as PdfString;
+        bool otherLang = lang != null && _lang != null && !lang.Bytes.AsSpan().SequenceEqual(_lang.Bytes);
+        _lang ??= lang;
+        if (file.GetDict(catalog, "StructTreeRoot") is not { } root) return;
+        if (_structRootId == 0) _structRootId = NewId();
+        if (catalog!["StructTreeRoot"] is PdfRef rootRef) input.Map[rootRef.Num] = _structRootId;
+        var nums = new SortedDictionary<int, PdfObject>();
+        CollectNums(file, file.GetDict(root, "ParentTree"), nums, new HashSet<PdfDict>(ReferenceEqualityComparer.Instance), 0);
+        int nextKey = Math.Max(file.GetInt(root, "ParentTreeNextKey", 0), nums.Count > 0 ? nums.Keys.Last() + 1 : 0);
+        if ((long)_parentTreeNext + nextKey > int.MaxValue / 2) return; // keys out of any sane range: leave this input untagged
+        input.StructOffset = _parentTreeNext;
+        input.ParentNums = nums;
+        _parentTreeNext += nextKey;
+        if (otherLang)
+            foreach (var k in KidsOf(file, root["K"]))
+                if (k is PdfRef kr && file.Resolve(kr) is PdfDict kd && kd["Lang"] == null && !input.Overrides.ContainsKey(kr.Num))
+                    input.Overrides[kr.Num] = new Dictionary<string, PdfObject> { ["Lang"] = lang! };
+    }
+
+    /// <summary>Whether the input's XMP metadata identifies it as PDF/UA-1.</summary>
+    private static bool ClaimsPdfUa(PdfFile file, PdfDict? catalog)
+    {
+        if (file.GetDict(catalog, "StructTreeRoot") == null || file.Resolve(catalog!["Metadata"]) is not PdfStream meta) return false;
+        try
+        {
+            var xmp = Encoding.UTF8.GetString(file.DecodeStream(meta));
+            return xmp.Contains("http://www.aiim.org/pdfua/ns/id/", StringComparison.Ordinal)
+                && System.Text.RegularExpressions.Regex.IsMatch(xmp, @"pdfuaid:part\s*(>\s*|=\s*[""'])1\b");
+        }
+        catch (PdfFormatException)
+        {
+            return false;
+        }
+    }
+
+    private static IEnumerable<PdfObject> KidsOf(PdfFile file, PdfObject? k)
+        => file.Resolve(k) switch
+        {
+            PdfArray a => a.Items,
+            PdfDict => new[] { k! },
+            _ => Array.Empty<PdfObject>(),
+        };
+
+    private static void CollectNums(PdfFile file, PdfDict? node, SortedDictionary<int, PdfObject> into, HashSet<PdfDict> seen, int depth)
+    {
+        if (node == null || depth > 32 || !seen.Add(node) || into.Count > 1_000_000) return;
+        if (file.GetArray(node, "Nums") is { } nums)
+            for (int i = 0; i + 1 < nums.Count; i += 2)
+                if (file.Resolve(nums[i]) is PdfNumber { IsInteger: true } n && n.Value >= 0 && n.Value < int.MaxValue / 2)
+                    into.TryAdd((int)n.Value, nums[i + 1]);
+        if (file.GetArray(node, "Kids") is { } kids)
+            foreach (var kid in kids.Items)
+                CollectNums(file, file.Resolve(kid) as PdfDict, into, seen, depth + 1);
+    }
+
     private static byte[] TextStringBytes(string s)
     {
         foreach (var c in s)
@@ -433,9 +538,9 @@ internal sealed class PdfMergeWriter
         Begin(p.Id).Ascii("<< /Type /Page /Parent ").Int(PagesId).Ascii(" 0 R");
         foreach (var (key, value) in p.Page.Entries)
         {
-            // Inherited attributes are written below; /B (article beads) leads to the whole article thread. The structure
-            // tree is not carried over, so neither are the keys into it.
-            if (key is "Type" or "Parent" or "B" or "Annots" or "Resources" or "MediaBox" or "CropBox" or "Rotate" or "StructParents") continue;
+            // Inherited attributes are written below; /B (article beads) leads to the whole article thread.
+            if (key is "Type" or "Parent" or "B" or "Annots" or "Resources" or "MediaBox" or "CropBox" or "Rotate") continue;
+            if (WriteStructKey(input, key, value)) continue;
             _out.Sp();
             PdfSyntax.RawName(_out, key);
             _out.Sp();
@@ -461,6 +566,67 @@ internal sealed class PdfMergeWriter
         }
         _out.Ascii(" >>");
         End();
+    }
+
+    /// <summary>Adds a tagged input's top-level structure elements, parent-tree entries and role and class maps to the merged ones.</summary>
+    private void WriteStructure(Input input, Queue<(int, int)> queue)
+    {
+        var file = input.File;
+        var root = file.GetDict(file.Catalog, "StructTreeRoot")!;
+        var saved = _out;
+        try
+        {
+            _out = _structKids;
+            foreach (var k in KidsOf(file, root["K"]))
+            {
+                WriteObject(input, k, queue, 1);
+                _out.Sp();
+            }
+            _out = _parentNums;
+            foreach (var (key, value) in input.ParentNums!)
+            {
+                _out.Int(key + input.StructOffset).Sp();
+                WriteObject(input, value, queue, 1);
+                _out.Sp();
+            }
+            WriteMapTo(_roleMap, _roleNames, file.GetDict(root, "RoleMap"));
+            WriteMapTo(_classMap, _classNames, file.GetDict(root, "ClassMap"));
+        }
+        finally
+        {
+            _out = saved;
+        }
+
+        // The first input's entry wins for a name two inputs map differently.
+        void WriteMapTo(ByteBuffer target, HashSet<string> names, PdfDict? map)
+        {
+            if (map == null) return;
+            _out = target;
+            foreach (var (key, value) in map.Entries)
+            {
+                if (!names.Add(key)) continue;
+                PdfSyntax.RawName(_out, key);
+                _out.Sp();
+                WriteObject(input, value, queue, 1);
+                _out.Sp();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Writes a /StructParent or /StructParents entry with the input's key offset, or leaves it out for an untagged input;
+    /// false for any other key.
+    /// </summary>
+    private bool WriteStructKey(Input input, string key, PdfObject value)
+    {
+        if (key is not ("StructParent" or "StructParents")) return false;
+        if (input.StructOffset >= 0 && input.File.Resolve(value) is PdfNumber { IsInteger: true } n && n.Value >= 0 && n.Value < int.MaxValue / 2)
+        {
+            _out.Sp();
+            PdfSyntax.RawName(_out, key);
+            _out.Sp().Int((long)n.Value + input.StructOffset);
+        }
+        return true;
     }
 
     /// <summary>Writes the (referenced) items of an array to another buffer, separated by spaces.</summary>
@@ -537,6 +703,7 @@ internal sealed class PdfMergeWriter
         _out.Ascii("<<");
         foreach (var (key, value) in entries)
         {
+            if (WriteStructKey(input, key, value)) continue;
             _out.Sp();
             PdfSyntax.RawName(_out, key);
             _out.Sp();
@@ -627,6 +794,7 @@ internal sealed class PdfMergeWriter
         _out.Ascii("<<");
         foreach (var (key, value) in d.Entries)
         {
+            if (WriteStructKey(input, key, value)) continue;
             _out.Sp();
             PdfSyntax.RawName(_out, key);
             _out.Sp();
@@ -673,7 +841,8 @@ internal sealed class PdfMergeWriter
     /// </summary>
     private string? LeafStreamHash(PdfFile file, PdfStream s)
     {
-        if (s.RawData.Length < 256 || s.Entries.Values.Any(HasRef)) return null;
+        // A key into the structure tree is shifted per input, so such a stream is never shared.
+        if (s.RawData.Length < 256 || s.Entries.Values.Any(HasRef) || s.Entries.ContainsKey("StructParents")) return null;
         var entries = new Dictionary<string, PdfObject>(s.Entries, StringComparer.Ordinal);
         entries.Remove("Length");
         RemoveCryptFilter(file, entries);

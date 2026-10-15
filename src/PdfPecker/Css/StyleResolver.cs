@@ -59,6 +59,38 @@ internal sealed class StyleResolver
     /// <summary>True once a declaration with vh, vmin or vmax units has been applied.</summary>
     public bool UsedViewportHeight { get; private set; }
 
+    /// <summary>Pagination results that generated content uses (target-counter(), string()); shared between passes.</summary>
+    public PagedContent Paged { get; init; } = new();
+
+    /// <summary>The string-set assignments of the last resolution, in document order.</summary>
+    public List<StringAssignment> Strings { get; } = new();
+
+    /// <summary>Some element has a page property other than auto (named pages).</summary>
+    public bool UsedPageNames { get; private set; }
+
+    private Dictionary<string, Element>? _byId;
+
+    /// <summary>The element with this id in the document <paramref name="any"/> belongs to (the first one).</summary>
+    internal Element? ElementById(Element any, string id)
+    {
+        if (_byId == null)
+        {
+            _byId = new Dictionary<string, Element>(StringComparer.Ordinal);
+            var root = any;
+            while (root.Parent != null) root = root.Parent;
+            var stack = new Stack<Element>();
+            stack.Push(root);
+            while (stack.Count > 0)
+            {
+                var e = stack.Pop();
+                if (e.GetAttribute("id") is { } eid) _byId.TryAdd(eid, e);
+                for (int i = e.Children.Count - 1; i >= 0; i--)
+                    if (e.Children[i] is Element c && !c.Generated) stack.Push(c);
+            }
+        }
+        return _byId.TryGetValue(id, out var found) ? found : null;
+    }
+
     private long[] _keys = new long[64];
     private Declaration[] _decls = new Declaration[64];
     private int _count;
@@ -137,6 +169,8 @@ internal sealed class StyleResolver
     public void ResolveTree(Element document, ComputedStyle rootStyle)
     {
         document.Style = rootStyle;
+        Strings.Clear();
+        _byId = null;
         Prepare(document);
         // Fragments without an <html> element: custom properties declared on :root or html still apply.
         if (_hasCustomProperties && !document.Children.Any(c => c is Element { Name: "html" }))
@@ -178,6 +212,7 @@ internal sealed class StyleResolver
                 }
             }
             e.Id = e.GetAttribute("id");
+            e.LayoutKey = null;
             var cls = e.GetAttribute("class");
             if (!string.IsNullOrWhiteSpace(cls))
                 e.Classes = cls!.Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
@@ -205,8 +240,10 @@ internal sealed class StyleResolver
             Resolve(e, parent.Style);
             if (e.Style.Display == Display.None) continue; // descendants are never rendered
             if (_countersUsed) ApplyCounters(e.Style, ref scope);
+            if (e.Id != null && Paged.WantedCounters.Count > 0) SnapshotCounters(e.Id);
             if (e.Style.Display == Display.ListItem && HasPseudoRules) ResolveMarker(e);
             ResolveChildren(e);
+            if (e.Style.StringSet != null) SetStrings(e);
         }
         if (pseudos) Generate(parent, PseudoElement.After, ref scope);
         if (scope != null)
@@ -215,6 +252,32 @@ internal sealed class StyleResolver
                 var stack = _counters[name];
                 stack.RemoveAt(stack.Count - 1);
             }
+    }
+
+    /// <summary>Keeps the values of the counters target-counter() asks for at an element with an id.</summary>
+    private void SnapshotCounters(string id)
+    {
+        var values = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var name in Paged.WantedCounters)
+            if (_counters.TryGetValue(name, out var stack) && stack.Count > 0) values[name] = stack[^1];
+        Paged.CounterSnapshots[id] = values;
+    }
+
+    /// <summary>Evaluates an element's string-set: "name content-list" pairs separated by commas.</summary>
+    private void SetStrings(Element e)
+    {
+        foreach (var part in CssParser.SplitTopLevel(e.Style.StringSet!, ','))
+        {
+            var p = part.Trim();
+            int sp = 0;
+            while (sp < p.Length && !char.IsWhiteSpace(p[sp])) sp++;
+            if (sp == 0 || sp >= p.Length) continue;
+            var name = p.Substring(0, sp);
+            var value = GeneratedContent.Evaluate(p.Substring(sp).Trim(), e, this);
+            if (value == null) continue;
+            e.LayoutKey ??= "\u0001s" + Strings.Count.ToString(CultureInfo.InvariantCulture);
+            Strings.Add(new StringAssignment(e, name, value, e.LayoutKey));
+        }
     }
 
     private bool HasPseudoRules => _author.PseudoElements != null || UaIndex.Value.PseudoElements != null;
@@ -964,6 +1027,17 @@ internal sealed class StyleResolver
                     "inherit" => parent.SmallCaps,
                     _ => 0,
                 };
+                break;
+            case "string-set":
+                s.StringSet = lower is "none" ? null : inherit ? parent.StringSet : v;
+                break;
+            case "page":
+                if (inherit || lower == "auto") s.PageName = parent.PageName;
+                else if (CssParser.Tokens(v) is { Count: 1 } name && CssParser.IsPageName(name[0]))
+                {
+                    s.PageName = name[0];
+                    UsedPageNames = true;
+                }
                 break;
             case "-webkit-line-clamp":
             case "line-clamp":
