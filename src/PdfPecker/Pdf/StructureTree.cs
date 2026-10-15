@@ -13,6 +13,7 @@ internal sealed class StructElem
     public readonly StructElem? Parent;
     public readonly List<object> Kids = new(2); // StructElem, ContentSlot or AnnotRef
     public string? Alt, Lang, Scope;
+    public string? ListNumbering; // an L element's numbering, once its items have Lbl elements
     public string? Text;       // a link's text, the description of its annotation
     public int RowSpan = 1, ColSpan = 1;
     public int Id;             // object number, once written
@@ -77,6 +78,7 @@ internal sealed class StructureTree
     private readonly Dictionary<Node, ContentSlot> _content = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<Element, StructElem> _elements = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<Element, ContentSlot> _markers = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<string, StructElem> _targets = new(StringComparer.Ordinal);
     private int _lastHeading;
 
     /// <summary>The slot for a text node, or for an img or svg element.</summary>
@@ -84,6 +86,12 @@ internal sealed class StructureTree
 
     /// <summary>The structure element of an element that has one of its own, such as a link.</summary>
     public StructElem? ElementOf(Element e) => _elements.TryGetValue(e, out var se) ? se : null;
+
+    /// <summary>
+    /// The structure element a link to <c>#<paramref name="id"/></c> goes to: the element with that id (or name, for an
+    /// <c>a</c>) when it has one of its own, else the element that holds it.
+    /// </summary>
+    public StructElem? TargetOf(string id) => _targets.TryGetValue(id, out var se) ? se : null;
 
     /// <summary>The Lbl slot of a list item's marker.</summary>
     public ContentSlot? MarkerOf(Element li) => _markers.TryGetValue(li, out var slot) ? slot : null;
@@ -146,6 +154,9 @@ internal sealed class StructureTree
 
     private void VisitElement(Element e, StructElem parent)
     {
+        // Link targets: the element itself when it gets a structure element (set below), else the one that holds it.
+        if (e.Id != null) _targets[e.Id] = parent;
+        if (e.Name == "a" && e.GetAttribute("name") is { Length: > 0 } name) _targets[name] = parent;
         switch (e.Name)
         {
             case "img":
@@ -183,6 +194,8 @@ internal sealed class StructureTree
         }
         var se = new StructElem(type, parent) { Lang = lang };
         _elements[e] = se;
+        if (e.Id != null) _targets[e.Id] = se;
+        if (e.Name == "a" && e.GetAttribute("name") is { Length: > 0 } anchorName) _targets[anchorName] = se;
         if (type == "Link") se.Text = System.Text.RegularExpressions.Regex.Replace(e.InnerText(), @"\s+", " ").Trim();
         if (type[0] == 'H' && type.Length == 2 && FirstHeading == null)
         {
@@ -193,7 +206,11 @@ internal sealed class StructureTree
         {
             case "LI":
                 if (e.Style.Display == Display.ListItem && e.Style.ListStyleType != ListStyleType.None)
+                {
                     _markers[e] = new ContentSlot(new StructElem("Lbl", se));
+                    // A list with labels says how they number its items (PDF/UA-2), as its first marked item draws them.
+                    if (parent.Type == "L") parent.ListNumbering ??= Numbering(e.Style.ListStyleType);
+                }
                 VisitChildren(e, new StructElem("LBody", se));
                 return;
             case "TH":
@@ -205,6 +222,19 @@ internal sealed class StructureTree
         }
         VisitChildren(e, se);
     }
+
+    /// <summary>The ListNumbering attribute value for a list marker style.</summary>
+    private static string Numbering(ListStyleType type) => type switch
+    {
+        ListStyleType.Circle => "Circle",
+        ListStyleType.Square => "Square",
+        ListStyleType.Decimal or ListStyleType.DecimalLeadingZero => "Decimal",
+        ListStyleType.LowerAlpha => "LowerAlpha",
+        ListStyleType.UpperAlpha => "UpperAlpha",
+        ListStyleType.LowerRoman => "LowerRoman",
+        ListStyleType.UpperRoman => "UpperRoman",
+        _ => "Disc",
+    };
 
     private string? TypeOf(Element e)
     {
@@ -228,6 +258,8 @@ internal sealed class StructureTree
             case "th": return "TH";
             case "td": return "TD";
             case "caption": case "figcaption": return "Caption";
+            // A figure with a caption groups the two, so the caption is its group's first or last child.
+            case "figure": return e.Children.Any(c => c is Element { Name: "figcaption" }) ? "Sect" : null;
             case "a": return e.GetAttribute("href") is { Length: > 0 } ? "Link" : null;
             case "blockquote": return "BlockQuote";
             case "q": return "Quote";

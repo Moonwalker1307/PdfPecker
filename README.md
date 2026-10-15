@@ -292,10 +292,27 @@ var options = new PdfOptions
 };
 ```
 
-For archiving, set `Conformance = PdfConformance.PdfA2b` (or `PdfA3b`): the PDF gets XMP metadata, an sRGB output intent
-and a file ID, and CMYK JPEGs are converted to RGB. All fonts are embedded: text without a registered font uses the
-bundled Liberation fonts (see [Fonts](#fonts)). PDF/A does not allow encryption, so combining `Conformance` with
-`Security` throws an `ArgumentException`. AES-256 keys come from a password hash that is slow on purpose, which adds
+For archiving, set `Conformance = PdfConformance.PdfA2b` (or another level below): the PDF gets XMP metadata, an sRGB
+output intent and a file ID, and CMYK JPEGs are converted to RGB. All fonts are embedded: text without a registered font
+uses the bundled Liberation fonts (see [Fonts](#fonts)). PDF/A does not allow encryption, so combining `Conformance` with
+`Security` throws an `ArgumentException`.
+
+```csharp
+var options = new PdfOptions { Conformance = PdfConformance.PdfA4 };
+```
+
+| Level | Standard | File | Use it for |
+|---|---|---|---|
+| `PdfA2b`, `PdfA3b` | ISO 19005-2/-3, level B | PDF 1.7 | the usual archive format; part 3 also allows attachments (e-invoices) |
+| `PdfA2u`, `PdfA3u` | ISO 19005-2/-3, level U | PDF 1.7 | as level B, plus a Unicode mapping for every character, so text can be searched and copied |
+| `PdfA4` | ISO 19005-4:2020 | PDF 2.0 | the current part; identified in the XMP only (`pdfaid:rev` 2020, no conformance letter), no document information dictionary |
+| `PdfA4f` | ISO 19005-4:2020, with files | PDF 2.0 | PDF/A-4 with attachments: only with `EInvoice` (it throws without one) |
+
+Every font is embedded with a ToUnicode map, and a character no font has is left out as blank space rather than drawn as
+`.notdef` (in SVG text too), so levels U cost nothing over B. A PDF 2.0 file keeps the title, author, keywords and custom
+properties in its XMP metadata, since PDF 2.0 deprecates the information dictionary. Every level, on its own and with
+PDF/UA, passes veraPDF 1.28 (flavours 2b, 2u, 3b, 3u, 4 and 4f) on documents with text, tables, lists, images, links,
+form fields, SVG and Markdown. AES-256 keys come from a password hash that is slow on purpose, which adds
 about 3 ms to a conversion.
 
 ### Accessibility: tagged PDF and PDF/UA
@@ -303,9 +320,9 @@ about 3 ms to a conversion.
 ```csharp
 var options = new PdfOptions
 {
-    Accessibility = PdfAccessibility.PdfUA1,   // or Tagged: the same structure without the PDF/UA claim
+    Accessibility = PdfAccessibility.PdfUA1,   // or PdfUA2, or Tagged: the same structure without the PDF/UA claim
     Language = "da",                           // default: <html lang="...">; for PDF/UA without either, "en"
-    Conformance = PdfConformance.PdfA2b,       // optional: PDF/UA combines with PDF/A
+    Conformance = PdfConformance.PdfA2b,       // optional: PDF/UA-1 combines with PDF/A-2 and 3, PDF/UA-2 with PDF/A-4
 };
 ```
 
@@ -321,6 +338,14 @@ standard ones), the title shown in the viewer's title bar and the PDF/UA identif
 passes veraPDF's PDF/UA-1 checks, on its own and together with PDF/A-2b or PDF/A-3b (e-invoices included). It needs a
 title: `Title`, the `<title>` element or else the first heading; without one, conversion throws `ArgumentException`, as
 it does when `Security` leaves out `PdfPermissions.ExtractForAccessibility`.
+
+`PdfUA2` (ISO 14289-2:2024) is the PDF 2.0 successor: the file is written as PDF 2.0, its tags are in the PDF 2.0
+structure namespace (block quotes, quotes and code, which PDF 2.0 dropped, keep their PDF 1.7 type and are role mapped
+to `Div` and `Span`), links and bookmarks go to structure destinations (the element they point at, not only its page),
+lists state their numbering and form fields describe themselves, and the XMP says `pdfuaid:part` 2 with `pdfuaid:rev`
+2024. It has the same title and language requirements as `PdfUA1` and passes veraPDF's PDF/UA-2 checks, on its own and
+with `PdfA4`. PDF/UA-1 and PDF/A-2 and 3 are based on PDF 1.7, PDF/UA-2 and PDF/A-4 on PDF 2.0, so `PdfUA2` with
+`PdfA2b` (or any PDF/A-2 or 3 level) and `PdfUA1` with `PdfA4` throw `ArgumentException`.
 
 What the tags can't fix is up to the HTML: give images an `alt` (an image without `alt`, `aria-label` or `title`, or an
 `<svg>` without a `<title>`, counts as decorative), use real headings, lists and `th` cells, and mark purely visual
@@ -340,7 +365,9 @@ var options = new PdfOptions
 File.WriteAllBytes("invoice.pdf", HtmlToPdf.Convert(invoiceHtml, options));
 ```
 
-The file is PDF/A-3b, so `Conformance` is raised to `PdfA3b` when it is left at `None` (`PdfA2b` or `Security` throw).
+The file is PDF/A-3b, so `Conformance` is raised to `PdfA3b` when it is left at `None`; `PdfA3u` and `PdfA4f` (PDF/A-4
+with attachments) work too, while the other levels and `Security` throw. Factur-X and ZUGFeRD specify PDF/A-3, so
+keep the default unless the receiver asks for PDF/A-4f.
 The XML is embedded unchanged as `factur-x.xml` (`xrechnung.xml` for XRechnung), listed as an associated file, and the
 XMP metadata gets the Factur-X extension schema with the document type, version and profile. The profile (MINIMUM,
 BASIC WL, BASIC, EN 16931, EXTENDED or XRECHNUNG) is read from the XML's guideline ID; pass it as the second constructor
@@ -472,7 +499,8 @@ await PdfMerger.MergeAsync(uploads.Select(f => f.OpenReadStream()), response.Bod
 ```
 
 Tagged inputs stay tagged: their structure trees are joined under one root, so the merged file is still accessible,
-and when every input is PDF/UA-1 the result says so too (veraPDF passes it). An input in another language than the
+and when every input is PDF/UA-1 the result says so too (veraPDF passes it). The merged file is PDF 1.7, so PDF/UA-2
+inputs stay tagged but the result claims no PDF/UA level. An input in another language than the
 first keeps its language on its own part of the tree. Untagged inputs merge as before.
 
 With streams (and `MergeFiles`), only one input is held in memory at a time and the merged document goes to the output

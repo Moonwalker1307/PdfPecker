@@ -244,7 +244,7 @@ internal sealed class PdfMergeWriter
         int metadataId = 0;
         if (_allPdfUa && _structRootId != 0)
         {
-            var xmp = PdfA.Xmp(0, "", _props!, now.AddTicks(-(now.Ticks % TimeSpan.TicksPerSecond)), pdfua: true);
+            var xmp = PdfA.Xmp(0, null, _props!, now.AddTicks(-(now.Ticks % TimeSpan.TicksPerSecond)), uaPart: 1);
             metadataId = NewId();
             Begin(metadataId).Ascii("<< /Type /Metadata /Subtype /XML /Length ").Int(xmp.Length).Ascii(" >>\nstream\n").Bytes(xmp).Ascii("\nendstream");
             End();

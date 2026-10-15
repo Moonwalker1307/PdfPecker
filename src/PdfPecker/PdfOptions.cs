@@ -65,6 +65,24 @@ public enum PdfConformance
     PdfA2b,
     /// <summary>PDF/A-3b (ISO 19005-3, level B): as PDF/A-2b; the part that also allows attached files.</summary>
     PdfA3b,
+    /// <summary>
+    /// PDF/A-2u (ISO 19005-2, level U): PDF/A-2b plus a Unicode mapping for every character, so text can be searched
+    /// and copied reliably. Every font is embedded with a ToUnicode map, so this costs nothing over PDF/A-2b.
+    /// </summary>
+    PdfA2u,
+    /// <summary>PDF/A-3u (ISO 19005-3, level U): PDF/A-3b plus a Unicode mapping for every character, as <see cref="PdfA2u"/>.</summary>
+    PdfA3u,
+    /// <summary>
+    /// PDF/A-4 (ISO 19005-4:2020), based on PDF 2.0: the file is written as PDF 2.0, identified in the XMP metadata
+    /// only (no document information dictionary), with embedded fonts, Unicode text and an sRGB output intent. Combines
+    /// with <see cref="PdfAccessibility.PdfUA2"/>, not with <see cref="PdfAccessibility.PdfUA1"/>.
+    /// </summary>
+    PdfA4,
+    /// <summary>
+    /// PDF/A-4f (ISO 19005-4:2020, with embedded files): as <see cref="PdfA4"/>, for a file that carries attachments of
+    /// any kind. It needs an attachment: use it with <see cref="PdfOptions.EInvoice"/>, whose XML it attaches.
+    /// </summary>
+    PdfA4f,
 }
 
 /// <summary>How the generated PDF serves screen readers and other assistive technology.</summary>
@@ -82,8 +100,16 @@ public enum PdfAccessibility
     /// PDF/UA-1 (ISO 14289-1): tagged as <see cref="Tagged"/>, with every font embedded, the title shown in the viewer's
     /// title bar and the PDF/UA identification in the metadata. Combines with PDF/A <see cref="PdfOptions.Conformance"/>.
     /// The document needs a title (<see cref="PdfOptions.Title"/>, the HTML &lt;title&gt; or else its first heading).
+    /// PDF/UA-1 is based on PDF 1.7, so it combines with PDF/A-2 and PDF/A-3, not with PDF/A-4.
     /// </summary>
     PdfUA1,
+    /// <summary>
+    /// PDF/UA-2 (ISO 14289-2:2024), based on PDF 2.0: tagged with the PDF 2.0 structure namespace, the file written
+    /// as PDF 2.0, with every font embedded, the title shown in the viewer's title bar, the document's language and the
+    /// PDF/UA-2 identification in the metadata. Combines with <see cref="PdfConformance.PdfA4"/> (or none), not with
+    /// PDF/A-2 or PDF/A-3, which are based on PDF 1.7. The document needs a title, as for <see cref="PdfUA1"/>.
+    /// </summary>
+    PdfUA2,
 }
 
 /// <summary>Options for <see cref="HtmlToPdf"/>.</summary>
@@ -253,7 +279,11 @@ public sealed class PdfOptions
     /// <summary>Password protection and permissions (AES-256). Cannot be combined with PDF/A <see cref="Conformance"/>.</summary>
     public PdfSecurity? Security { get; set; }
 
-    /// <summary>Produce an archival PDF/A file. Default: <see cref="PdfConformance.None"/>. Cannot be combined with <see cref="Security"/>.</summary>
+    /// <summary>
+    /// Produce an archival PDF/A file. Default: <see cref="PdfConformance.None"/>. Cannot be combined with
+    /// <see cref="Security"/>. PDF/A-4 levels write a PDF 2.0 file and combine only with <see cref="PdfAccessibility.PdfUA2"/>
+    /// among the PDF/UA levels; PDF/A-2 and PDF/A-3 only with <see cref="PdfAccessibility.PdfUA1"/>.
+    /// </summary>
     public PdfConformance Conformance { get; set; }
 
     /// <summary>
@@ -277,7 +307,8 @@ public sealed class PdfOptions
     /// <summary>
     /// Make a Factur-X / ZUGFeRD e-invoice: the invoice's CII XML is attached to the PDF with the metadata that tells
     /// software it is there. The file is PDF/A-3b, so <see cref="Conformance"/> must be None (it is then raised to
-    /// PDF/A-3b) or <see cref="PdfConformance.PdfA3b"/>, and <see cref="Security"/> must be null. Default: null.
+    /// PDF/A-3b), <see cref="PdfConformance.PdfA3b"/>, <see cref="PdfConformance.PdfA3u"/> or
+    /// <see cref="PdfConformance.PdfA4f"/>, and <see cref="Security"/> must be null. Default: null.
     /// </summary>
     public PdfEInvoice? EInvoice { get; set; }
 

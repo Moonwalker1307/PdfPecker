@@ -27,7 +27,7 @@ internal static class PdfTestHelpers
     public static void AssertStructurallyValid(byte[] pdf)
     {
         var text = Latin1(pdf);
-        Assert.Matches(@"^%PDF-1\.[47]\n", text);
+        Assert.Matches(@"^%PDF-(1\.[47]|2\.0)\n", text);
         Assert.EndsWith("%%EOF\n", text);
         var startxref = Regex.Match(text, @"startxref\n(\d+)\n%%EOF\n$");
         Assert.True(startxref.Success, "Missing startxref");
