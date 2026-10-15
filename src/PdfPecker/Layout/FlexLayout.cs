@@ -157,7 +157,8 @@ internal sealed partial class LayoutEngine
     private float LayoutFlexRow(Element e, List<BoxItem> items, float x, float y, float w, float? definiteH, float minH)
     {
         var s = e.Style;
-        bool reverse = s.FlexDirection == FlexDirection.RowReverse;
+        // Right to left, a row's main start is on the right: laid out like row-reverse.
+        bool reverse = (s.FlexDirection == FlexDirection.RowReverse) != s.Rtl;
         var justify = s.JustifyContent;
         if (reverse)
         {

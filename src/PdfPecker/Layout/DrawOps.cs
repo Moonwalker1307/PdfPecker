@@ -185,6 +185,7 @@ internal sealed class TextOp : DrawOp
     public uint Color;
     public string Text;
     public float WordSpacing, CharSpacing;
+    public bool Rtl; // the text is in logical order and drawn right to left (its glyphs reversed)
 
     public TextOp(float x, float baseline, float lineTop, TextFont font, float size, uint color, string text, float wordSpacing, float charSpacing)
     {

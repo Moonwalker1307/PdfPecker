@@ -73,8 +73,20 @@ internal sealed class EmbeddedFont : TextFont
     }
 
     /// <summary>The glyphs that draw the text: one per character, apart from ligatures.</summary>
-    public void Shape(string s, int start, int length, List<ShapedGlyph> glyphs)
+    public void Shape(string s, int start, int length, List<ShapedGlyph> glyphs) => Shape(s, start, length, glyphs, rtl: false);
+
+    /// <summary>
+    /// The glyphs that draw the text, in logical order. Returns true when complex shaping positioned them (their
+    /// Advance, Dx and Dy apply instead of the font's advances and kerning). Right to left, mirrored characters such as
+    /// brackets take their mirror's glyph.
+    /// </summary>
+    public bool Shape(string s, int start, int length, List<ShapedGlyph> glyphs, bool rtl)
     {
+        if (ComplexShaper.Handles(s, start, length))
+        {
+            ComplexShaper.Shape(Program, s, start, length, rtl, glyphs);
+            return true;
+        }
         glyphs.Clear();
         var lig = _ligatures;
         bool ligate = false;
@@ -84,18 +96,21 @@ internal sealed class EmbeddedFont : TextFont
             int cp = s[i], n = 1;
             if (char.IsHighSurrogate(s[i]) && i + 1 < end && char.IsLowSurrogate(s[i + 1])) { cp = char.ConvertToUtf32(s[i], s[i + 1]); n = 2; }
             int gid = Program.GlyphId(cp);
+            if (rtl && Text.UnicodeTables.Mirror(cp) is int m && m != cp && Program.GlyphId(m) is int mg && mg != 0) gid = mg;
             if (lig != null && !ligate && prev >= 0 && lig.StartsLigature(prev, gid)) ligate = true;
             glyphs.Add(new ShapedGlyph(gid, i, n));
             prev = gid;
             i += n - 1;
         }
         if (ligate) lig!.Apply(glyphs);
+        return false;
     }
 
     [ThreadStatic] private static List<ShapedGlyph>? t_glyphs;
 
     public override int MeasureUnits(string s, int start, int length)
     {
+        if (ComplexShaper.Handles(s, start, length)) return MeasureComplex(s, start, length);
         if (MayLigate(s, start, length)) return MeasureShaped(s, start, length);
         var w = _widths;
         bool kern = HasKerning;
@@ -133,6 +148,15 @@ internal sealed class EmbeddedFont : TextFont
         return total;
     }
 
+    private int MeasureComplex(string s, int start, int length)
+    {
+        var glyphs = t_glyphs ??= new List<ShapedGlyph>();
+        ComplexShaper.Shape(Program, s, start, length, ComplexShaper.GuessRtl(s, start, length), glyphs);
+        float total = 0;
+        foreach (var g in glyphs) total += g.Advance;
+        return (int)MathF.Round(total);
+    }
+
     public override float CharWidth(char c, float size) => _widths[c] * size / 1000f;
 }
 
@@ -163,6 +187,10 @@ internal sealed class FontChain : TextFont
     private static int Units(TextFont f, int cp)
         => f is EmbeddedFont e ? e.CharUnits(cp) : ((StandardFont)f).CharUnits((char)cp);
 
+    // Combining marks and joiners are drawn with the font of the character before them when it has them, so that they
+    // shape with it.
+    private static bool StaysInRun(int cp) => cp >= 0x0300 && (cp is 0x200C or 0x200D || Text.UnicodeTables.IsMark(cp));
+
     /// <summary>The font that draws a code point.</summary>
     public TextFont Pick(int cp)
     {
@@ -182,7 +210,7 @@ internal sealed class FontChain : TextFont
         {
             int at = i, cp = s[i];
             if (char.IsHighSurrogate(s[i]) && i + 1 < end && char.IsLowSurrogate(s[i + 1])) cp = char.ConvertToUtf32(s[i], s[++i]);
-            var f = Pick(cp);
+            var f = runFont != null && StaysInRun(cp) && Covers(runFont, cp) ? runFont : Pick(cp);
             if (ReferenceEquals(f, runFont)) continue;
             if (runFont != null) total += runFont.MeasureUnits(s, runStart, at - runStart);
             runFont = f;
@@ -216,7 +244,7 @@ internal sealed class FontChain : TextFont
             int start = i, cp = text[i];
             if (char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1])) cp = char.ConvertToUtf32(text[i], text[++i]);
             // Spaces stay with the run they are in, so that a fallback character does not split a run more than needed.
-            var f = cp == ' ' && current != null && Covers(current, cp) ? current : Pick(cp);
+            var f = (cp == ' ' || StaysInRun(cp)) && current != null && Covers(current, cp) ? current : Pick(cp);
             if (!ReferenceEquals(f, current))
             {
                 if (current != null) runs.Add(new FontRun(current, runStart, start - runStart));

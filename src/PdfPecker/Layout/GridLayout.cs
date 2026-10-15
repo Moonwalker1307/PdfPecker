@@ -580,6 +580,8 @@ internal sealed partial class LayoutEngine
             var st = it.Style;
             int lastRow = Math.Min(rowCount, it.Row + it.RowSpan) - 1;
             float areaX = colX[it.Col], areaW = AreaWidth(it);
+            // Right to left, the columns run from the right edge of the grid container.
+            if (s.Rtl) areaX = x + x + w - areaX - areaW;
             float areaY = rowY[it.Row], areaH = rowY[lastRow] + rows[lastRow].Base - areaY;
             var box = it.Box!;
 

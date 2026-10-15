@@ -350,6 +350,7 @@ internal sealed partial class LayoutEngine
                 case ItemKind.Anchor:
                 case ItemKind.Float:
                 case ItemKind.Absolute:
+                case ItemKind.Bidi:
                     continue;
                 case ItemKind.Image:
                     ImageMetrics(it, block, out a, out d);

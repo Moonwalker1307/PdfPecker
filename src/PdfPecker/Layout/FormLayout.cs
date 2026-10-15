@@ -58,7 +58,7 @@ internal sealed partial class LayoutEngine
             field.Font = s.Font;
             field.FontSize = s.FontSize;
             field.Color = s.Color;
-            field.Align = s.TextAlign switch { TextAlign.Center => 1, TextAlign.Right => 2, _ => 0 };
+            field.Align = ComputedStyle.Resolve(s.TextAlign, s.Rtl) switch { TextAlign.Center => 1, TextAlign.Right => 2, _ => 0 };
             field.Form = Tags?.ElementOf(e);
             WrapOps(start, field);
         }

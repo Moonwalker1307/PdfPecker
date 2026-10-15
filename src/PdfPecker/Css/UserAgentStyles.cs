@@ -23,7 +23,7 @@ colgroup { display: table-column-group; }
 body { margin: 8px; }
 p, dl { margin: 1em 0; }
 blockquote, figure { margin: 1em 40px; }
-dd { margin-left: 40px; }
+dd { margin-inline-start: 40px; }
 address { font-style: italic; }
 center { text-align: center; }
 h1 { font-size: 2em; margin: 0.67em 0; font-weight: bold; }
@@ -33,7 +33,7 @@ h4 { font-size: 1em; margin: 1.33em 0; font-weight: bold; }
 h5 { font-size: 0.83em; margin: 1.67em 0; font-weight: bold; }
 h6 { font-size: 0.67em; margin: 2.33em 0; font-weight: bold; }
 h1, h2, h3, h4, h5, h6 { break-after: avoid; } /* keep a heading on the page of the text it introduces */
-ul, ol, menu { margin: 1em 0; padding-left: 40px; }
+ul, ol, menu { margin: 1em 0; padding-inline-start: 40px; }
 ul { list-style-type: disc; }
 ol { list-style-type: decimal; }
 ul ul, ol ul { list-style-type: circle; margin-top: 0; margin-bottom: 0; }
@@ -54,6 +54,8 @@ sub { vertical-align: sub; font-size: smaller; }
 sup { vertical-align: super; font-size: smaller; }
 mark { background-color: yellow; color: black; }
 nobr { white-space: nowrap; }
+bdi, output { unicode-bidi: isolate; }
+bdo { unicode-bidi: isolate-override; }
 img { display: inline; }
 fieldset { margin: 0 2px; padding: 0.35em 0.75em 0.625em; border: 2px groove #c0c0c0; }
 legend { padding: 0 2px; }

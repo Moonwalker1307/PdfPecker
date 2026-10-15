@@ -45,6 +45,8 @@ internal sealed class FontProgram
     private bool _kerningLoaded;
     private Ligatures? _ligatures;
     private bool _ligaturesLoaded;
+    private OpenTypeLayout? _layout;
+    private bool _layoutLoaded;
 
     private FontProgram(byte[] data, int dirOffset)
     {
@@ -238,6 +240,32 @@ internal sealed class FontProgram
                     Volatile.Write(ref _ligaturesLoaded, true);
                 }
                 return _ligatures;
+            }
+        }
+    }
+
+    /// <summary>The font's OpenType layout tables for complex shaping, or null when it has neither GSUB nor GPOS.</summary>
+    public OpenTypeLayout? Layout
+    {
+        get
+        {
+            if (Volatile.Read(ref _layoutLoaded)) return _layout;
+            lock (_lock)
+            {
+                if (!_layoutLoaded)
+                {
+                    try
+                    {
+                        var l = new OpenTypeLayout(this);
+                        _layout = l.HasGsub || l.HasGpos ? l : null;
+                    }
+                    catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException)
+                    {
+                        _layout = null;
+                    }
+                    Volatile.Write(ref _layoutLoaded, true);
+                }
+                return _layout;
             }
         }
     }

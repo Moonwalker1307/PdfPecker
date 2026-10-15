@@ -1,11 +1,21 @@
 namespace PdfPecker.Fonts;
 
-/// <summary>A glyph of shaped text and the characters it stands for (several for a ligature).</summary>
+/// <summary>
+/// A glyph of shaped text and the characters it stands for (several for a ligature, none for the extra glyphs of a
+/// decomposition). Complex shaping also gives its advance and offset in 1/1000 em, which replace the font's advance
+/// and kerning.
+/// </summary>
 internal readonly struct ShapedGlyph
 {
     public readonly int Gid;
     public readonly int Start, Length; // the characters in the source string
+    public readonly float Advance, Dx, Dy;
     public ShapedGlyph(int gid, int start, int length) { Gid = gid; Start = start; Length = length; }
+
+    public ShapedGlyph(int gid, int start, int length, float advance, float dx, float dy)
+    {
+        Gid = gid; Start = start; Length = length; Advance = advance; Dx = dx; Dy = dy;
+    }
 }
 
 /// <summary>
