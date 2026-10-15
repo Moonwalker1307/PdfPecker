@@ -140,7 +140,7 @@ public class SelectorAndBoxEffectTests
     }
 
     [Fact]
-    public void Nested_is_selectors_over_deep_markup_stay_fast()
+    public async Task Nested_is_selectors_over_deep_markup_stay_fast()
     {
         var sel = new StringBuilder();
         for (int i = 0; i < 60; i++) sel.Append(":is(div div div div div div div div, div div span) ");
@@ -148,8 +148,9 @@ public class SelectorAndBoxEffectTests
         var html = "<style>" + sel + "{color:red}</style>" + string.Concat(Enumerable.Repeat("<div>", 250)) + "<p>x</p>"
                    + string.Concat(Enumerable.Repeat("<p>y</p>", 200));
         var task = Task.Run(() => HtmlToPdf.Convert(html));
-        Assert.True(task.Wait(TimeSpan.FromSeconds(20)), "Did not finish in time");
-        AssertStructurallyValid(task.Result);
+        var finished = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(20)));
+        Assert.True(finished == task, "Did not finish in time");
+        AssertStructurallyValid(await task);
     }
 
     // ---- properties ----
