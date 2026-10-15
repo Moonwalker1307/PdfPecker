@@ -5,6 +5,22 @@ using PdfPecker.Rendering.Parsing;
 
 namespace PdfPecker;
 
+/// <summary>The file format <see cref="PdfToImage"/> and <see cref="RenderedImage.Encode"/> produce.</summary>
+public enum PdfImageFormat
+{
+    /// <summary>Lossless PNG: RGB when the page is opaque, RGBA otherwise. The default.</summary>
+    Png,
+
+    /// <summary>
+    /// Baseline JPEG (JFIF). Lossy and without transparency: transparent areas are flattened onto
+    /// <see cref="ImageOptions.BackgroundColor"/> (composited over white when that colour is itself translucent).
+    /// </summary>
+    Jpeg,
+
+    /// <summary>Lossless WebP (VP8L), keeping alpha exactly. Usually smaller than PNG.</summary>
+    WebP,
+}
+
 /// <summary>Options for rendering PDF pages to images.</summary>
 public sealed class ImageOptions
 {
@@ -35,6 +51,24 @@ public sealed class ImageOptions
     /// <summary>PNG compression. Default <see cref="CompressionLevel.Fastest"/>.</summary>
     public CompressionLevel PngCompression { get; set; } = CompressionLevel.Fastest;
 
+    /// <summary>The encoded format of <see cref="PdfToImage"/> results and of <see cref="RenderedImage.Encode"/>. Default <see cref="PdfImageFormat.Png"/>.</summary>
+    public PdfImageFormat Format { get; set; } = PdfImageFormat.Png;
+
+    private int _quality = 85;
+
+    /// <summary>
+    /// Quality from 1 to 100, default 85. For <see cref="PdfImageFormat.Jpeg"/> it scales the standard quantisation
+    /// tables as libjpeg does (90 and up also keep full-resolution colour instead of 4:2:0 subsampling). WebP output is
+    /// always lossless, so for <see cref="PdfImageFormat.WebP"/> it is the compression effort: higher values search
+    /// harder for smaller files and take longer, but never change a pixel. PNG ignores it (see <see cref="PngCompression"/>).
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is not between 1 and 100.</exception>
+    public int Quality
+    {
+        get => _quality;
+        set => _quality = value is >= 1 and <= 100 ? value : throw new ArgumentOutOfRangeException(nameof(value), value, "Quality must be between 1 and 100.");
+    }
+
     /// <summary>Upper limit for either image dimension in pixels, protecting against huge pages. Default 20000.</summary>
     public int MaxDimension { get; set; } = 20000;
 }
@@ -44,15 +78,26 @@ public sealed class RenderedImage
 {
     private readonly uint[] _premultiplied; // 0xAABBGGRR, premultiplied alpha
     private readonly CompressionLevel _compression;
+    private readonly int _quality;
+    private readonly uint _matte; // 0xRRGGBB that JPEG flattens transparency onto
     private byte[]? _rgba;
 
-    internal RenderedImage(int width, int height, uint[] premultiplied, CompressionLevel compression)
+    internal RenderedImage(int width, int height, uint[] premultiplied, ImageOptions options)
     {
         Width = width;
         Height = height;
         _premultiplied = premultiplied;
-        _compression = compression;
+        _compression = options.PngCompression;
+        Format = options.Format;
+        _quality = options.Quality;
+        // BackgroundColor over white, so a transparent or translucent background still gives a defined matte.
+        uint bg = options.BackgroundColor, a = bg >> 24;
+        uint Channel(int shift) => (((bg >> shift) & 255) * a + 255 * (255 - a) + 127) / 255;
+        _matte = Channel(16) << 16 | Channel(8) << 8 | Channel(0);
     }
+
+    /// <summary>The format <see cref="Encode"/> and <see cref="Save"/> write, from <see cref="ImageOptions.Format"/>.</summary>
+    public PdfImageFormat Format { get; }
 
     /// <summary>The pixels, premultiplied, as 0xAABBGGRR.</summary>
     internal uint[] Premultiplied => _premultiplied;
@@ -71,11 +116,45 @@ public sealed class RenderedImage
 
     /// <summary>Writes the image as a PNG file.</summary>
     public void SavePng(string path) => File.WriteAllBytes(path, ToPng());
+
+    /// <summary>
+    /// Encodes the image as baseline JPEG. JPEG has no alpha: transparent and translucent pixels are flattened onto
+    /// <see cref="ImageOptions.BackgroundColor"/> (composited over white).
+    /// </summary>
+    /// <param name="quality">1 to 100; null uses <see cref="ImageOptions.Quality"/>.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="quality"/> is not between 1 and 100.</exception>
+    /// <exception cref="NotSupportedException">A dimension exceeds 65,535 pixels.</exception>
+    public byte[] ToJpeg(int? quality = null) => JpegEncoder.Encode(_premultiplied, Width, Height, quality ?? _quality, _matte);
+
+    /// <summary>Encodes the image as lossless WebP (VP8L), alpha included.</summary>
+    /// <param name="quality">The compression effort, 1 to 100; null uses <see cref="ImageOptions.Quality"/>. It never changes pixels.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="quality"/> is not between 1 and 100.</exception>
+    /// <exception cref="NotSupportedException">A dimension exceeds 16,384 pixels, the WebP limit.</exception>
+    public byte[] ToWebP(int? quality = null) => WebPEncoder.Encode(_premultiplied, Width, Height, quality ?? _quality);
+
+    /// <summary>Encodes the image in <see cref="Format"/>.</summary>
+    public byte[] Encode() => Format switch
+    {
+        PdfImageFormat.Jpeg => ToJpeg(),
+        PdfImageFormat.WebP => ToWebP(),
+        _ => ToPng(),
+    };
+
+    /// <summary>Writes the image to a file in <see cref="Format"/> (the path is used as given, whatever its extension).</summary>
+    public void Save(string path) => File.WriteAllBytes(path, Encode());
+
+    /// <summary>The usual file extension of a format, with the dot: ".png", ".jpg" or ".webp".</summary>
+    public static string GetFileExtension(PdfImageFormat format) => format switch
+    {
+        PdfImageFormat.Jpeg => ".jpg",
+        PdfImageFormat.WebP => ".webp",
+        _ => ".png",
+    };
 }
 
 /// <summary>
 /// An opened PDF document that renders pages to images. Parsing, fonts (TrueType, CFF, Type 1, Type 3), images
-/// (including JPEG and CCITT fax decoding), rasterization and PNG encoding are implemented in this library.
+/// (including JPEG and CCITT fax decoding), rasterization and PNG, JPEG and WebP encoding are implemented in this library.
 /// </summary>
 /// <remarks>Instances are thread-safe: several pages can be rendered in parallel. Fonts and images are shared between pages.</remarks>
 public sealed class PdfRenderer
@@ -165,15 +244,26 @@ public sealed class PdfRenderer
         {
             throw new InvalidDataException(ex.Message, ex);
         }
-        return new RenderedImage(w, h, canvas.Pixels, options.PngCompression);
+        return new RenderedImage(w, h, canvas.Pixels, options);
     }
 
     /// <summary>Renders one page and encodes it as PNG.</summary>
     public byte[] RenderPageToPng(int pageIndex, ImageOptions? options = null, CancellationToken cancellationToken = default)
         => RenderPage(pageIndex, options, cancellationToken).ToPng();
 
+    /// <summary>Renders one page and encodes it in <see cref="ImageOptions.Format"/>.</summary>
+    public byte[] RenderPageEncoded(int pageIndex, ImageOptions? options = null, CancellationToken cancellationToken = default)
+        => RenderPage(pageIndex, options, cancellationToken).Encode();
+
     /// <summary>Renders all pages (in parallel) and encodes each as PNG, in page order.</summary>
     public byte[][] RenderAllToPng(ImageOptions? options = null, CancellationToken cancellationToken = default)
+        => RenderAll(options, static img => img.ToPng(), cancellationToken);
+
+    /// <summary>Renders all pages (in parallel) and encodes each in <see cref="ImageOptions.Format"/>, in page order.</summary>
+    public byte[][] RenderAllEncoded(ImageOptions? options = null, CancellationToken cancellationToken = default)
+        => RenderAll(options, static img => img.Encode(), cancellationToken);
+
+    private byte[][] RenderAll(ImageOptions? options, Func<RenderedImage, byte[]> encode, CancellationToken cancellationToken)
     {
         options ??= new ImageOptions();
         var result = new byte[PageCount][];
@@ -183,7 +273,7 @@ public sealed class PdfRenderer
             {
                 MaxDegreeOfParallelism = Math.Max(1, options.MaxDegreeOfParallelism),
                 CancellationToken = cancellationToken,
-            }, i => result[i] = RenderPageToPng(i, options, cancellationToken));
+            }, i => result[i] = encode(RenderPage(i, options, cancellationToken)));
         }
         catch (AggregateException ex) when (ex.InnerExceptions.Count > 0)
         {
@@ -200,40 +290,45 @@ public sealed class PdfRenderer
     }
 }
 
-/// <summary>Converts PDF pages to PNG images. Everything is implemented in this library, with no dependencies beyond the .NET base class library.</summary>
+/// <summary>
+/// Converts PDF pages to PNG, JPEG or WebP images (<see cref="ImageOptions.Format"/>). Everything is implemented in
+/// this library, with no dependencies beyond the .NET base class library.
+/// </summary>
 /// <remarks>All methods are static and thread-safe. For rendering several pages of one document, <see cref="PdfRenderer"/> avoids re-parsing.</remarks>
 public static class PdfToImage
 {
     /// <summary>Returns the number of pages in a PDF.</summary>
     public static int GetPageCount(byte[] pdf, string? password = null) => PdfRenderer.Open(pdf, password).PageCount;
 
-    /// <summary>Renders one page (0-based index) to PNG.</summary>
+    /// <summary>Renders one page (0-based index) to an image in <see cref="ImageOptions.Format"/> (PNG by default).</summary>
     public static byte[] ConvertPage(byte[] pdf, int pageIndex = 0, ImageOptions? options = null)
-        => PdfRenderer.Open(pdf, options?.Password).RenderPageToPng(pageIndex, options);
+        => PdfRenderer.Open(pdf, options?.Password).RenderPageEncoded(pageIndex, options);
 
-    /// <summary>Renders every page to PNG, in page order. Pages are rendered in parallel.</summary>
+    /// <summary>Renders every page to an image in <see cref="ImageOptions.Format"/>, in page order. Pages are rendered in parallel.</summary>
     public static byte[][] Convert(byte[] pdf, ImageOptions? options = null)
-        => PdfRenderer.Open(pdf, options?.Password).RenderAllToPng(options);
+        => PdfRenderer.Open(pdf, options?.Password).RenderAllEncoded(options);
 
     /// <summary>Renders every page asynchronously on the thread pool.</summary>
     public static Task<byte[][]> ConvertAsync(byte[] pdf, ImageOptions? options = null, CancellationToken cancellationToken = default)
-        => Task.Run(() => PdfRenderer.Open(pdf, options?.Password).RenderAllToPng(options, cancellationToken), cancellationToken);
+        => Task.Run(() => PdfRenderer.Open(pdf, options?.Password).RenderAllEncoded(options, cancellationToken), cancellationToken);
 
     /// <summary>
-    /// Renders a PDF file's pages to PNG files in <paramref name="outputDirectory"/>, named
-    /// <c>{file name}-{page number}.png</c> (page numbers start at 1). Returns the written paths.
+    /// Renders a PDF file's pages to image files in <paramref name="outputDirectory"/>, named
+    /// <c>{file name}-{page number}</c> plus <c>.png</c>, <c>.jpg</c> or <c>.webp</c> after <see cref="ImageOptions.Format"/>
+    /// (page numbers start at 1). Returns the written paths.
     /// </summary>
     public static IReadOnlyList<string> ConvertFile(string pdfPath, string outputDirectory, ImageOptions? options = null)
     {
         var renderer = PdfRenderer.OpenFile(pdfPath, options?.Password);
         Directory.CreateDirectory(outputDirectory);
         var name = Path.GetFileNameWithoutExtension(pdfPath);
-        var pngs = renderer.RenderAllToPng(options);
-        var paths = new string[pngs.Length];
-        for (int i = 0; i < pngs.Length; i++)
+        var images = renderer.RenderAllEncoded(options);
+        var extension = RenderedImage.GetFileExtension(options?.Format ?? PdfImageFormat.Png);
+        var paths = new string[images.Length];
+        for (int i = 0; i < images.Length; i++)
         {
-            paths[i] = Path.Combine(outputDirectory, $"{name}-{i + 1}.png");
-            File.WriteAllBytes(paths[i], pngs[i]);
+            paths[i] = Path.Combine(outputDirectory, $"{name}-{i + 1}{extension}");
+            File.WriteAllBytes(paths[i], images[i]);
         }
         return paths;
     }
