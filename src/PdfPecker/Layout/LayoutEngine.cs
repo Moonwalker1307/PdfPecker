@@ -66,6 +66,7 @@ internal sealed partial class LayoutEngine
     private sealed class ListMarker
     {
         public string? Text;
+        public bool Custom; // the text comes from ::marker content or a string list-style-type: no space is added after it
         public ListStyleType Type;
         public ComputedStyle Style = null!;
         public float ContentX;
@@ -81,6 +82,9 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>Lays out a running header or footer on its own, unpaginated, at y = 0. Returns its height including margins.</summary>
+    /// <summary>Min-content and max-content border-box widths of a block-level element.</summary>
+    public (float Min, float Max) MeasureIntrinsic(Element e) => Intrinsic(e);
+
     public float LayoutBand(Element band, float width)
     {
         _paginate = false;
@@ -520,8 +524,16 @@ internal sealed partial class LayoutEngine
         float cx = bx + bl + pl;
         float cy = y + bt + pt;
 
-        if (s.Display == Display.ListItem && s.ListStyleType != ListStyleType.None)
-            _marker = new ListMarker { Text = MarkerText(s.ListStyleType, _currentListIndex), Type = s.ListStyleType, Style = s, ContentX = cx, Tag = Tags?.MarkerOf(e) };
+        if (s.Display == Display.ListItem && (s.ListStyleType != ListStyleType.None || e.MarkerContent != null))
+        {
+            // ::marker { content } and list-style-type: "string" give the marker's own text, drawn as written.
+            var custom = e.MarkerContent ?? s.ListStyleString;
+            _marker = new ListMarker
+            {
+                Text = custom ?? MarkerText(s.ListStyleType, _currentListIndex), Custom = custom != null, Type = s.ListStyleType,
+                Style = e.MarkerStyle ?? s, ContentX = cx, Tag = Tags?.MarkerOf(e),
+            };
+        }
 
         float contentBottom;
         float trailing = 0;
@@ -670,8 +682,8 @@ internal sealed partial class LayoutEngine
         if (m.Text != null)
         {
             var font = s.Font;
-            float tw = font.Measure(m.Text, size);
-            float gap = font.CharWidth(' ', size); // Chrome's marker text ends with a space: "1. "
+            float tw = font.Measure(m.Text, size) + s.LetterSpacing * m.Text.Length;
+            float gap = m.Custom ? 0 : font.CharWidth(' ', size); // Chrome's marker text ends with a space: "1. "
             _ops.Add(new TextOp(m.ContentX - gap - tw, baseline, lineTop, font, size, s.Color, m.Text, 0, 0) { Tag = m.Tag });
             return;
         }

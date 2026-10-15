@@ -171,6 +171,7 @@ internal sealed class LineOp : DrawOp
     public float X1, Y1, X2, Y2, Width;
     public uint Color;
     public bool Dotted;
+    public bool Solid; // a solid line with round caps (wavy text decorations); otherwise dashed or dotted
     public LineOp(float x1, float y1, float x2, float y2, float width, uint color, bool dotted)
     { X1 = x1; Y1 = y1; X2 = x2; Y2 = y2; Width = width; Color = color; Dotted = dotted; }
     public override void Offset(float dx, float dy) { X1 += dx; X2 += dx; Y1 += dy; Y2 += dy; }

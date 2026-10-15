@@ -68,17 +68,24 @@ internal static class CssColor
             int close = v.LastIndexOf(')');
             if (close < paren) close = v.Length;
             var args = v.Slice(paren + 1, close - paren - 1);
-            if (fn.Equals("rgb", StringComparison.OrdinalIgnoreCase) || fn.Equals("rgba", StringComparison.OrdinalIgnoreCase))
-                return TryParseRgb(args, out color);
-            if (fn.Equals("hsl", StringComparison.OrdinalIgnoreCase) || fn.Equals("hsla", StringComparison.OrdinalIgnoreCase))
-                return TryParseHsl(args, out color);
-            return false;
+            if (close != v.Length - 1) return false;
+            return ColorFunctions.TryParse(fn.ToString(), args.ToString(), current, out color);
         }
         var s = v.ToString();
         if (s.Equals("transparent", StringComparison.OrdinalIgnoreCase)) { color = Transparent; return true; }
         if (s.Equals("currentcolor", StringComparison.OrdinalIgnoreCase)) { color = current; return true; }
-        return Named.TryGetValue(s, out color);
+        return Named.TryGetValue(s, out color) || System.TryGetValue(s, out color);
     }
+
+    // CSS system colours, with the values Chrome uses in its light colour scheme.
+    private static readonly Dictionary<string, uint> System = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["canvas"] = 0xFFFFFFFF, ["canvastext"] = Black, ["linktext"] = 0xFF0000EE, ["visitedtext"] = 0xFF551A8B,
+        ["activetext"] = 0xFFFF0000, ["buttonface"] = 0xFFEFEFEF, ["buttontext"] = Black, ["buttonborder"] = 0xFF767676,
+        ["field"] = 0xFFFFFFFF, ["fieldtext"] = Black, ["highlight"] = 0xFFB5D5FF, ["highlighttext"] = Black,
+        ["selecteditem"] = 0xFFB5D5FF, ["selecteditemtext"] = Black, ["mark"] = 0xFFFFFF00, ["marktext"] = Black,
+        ["graytext"] = 0xFF808080, ["accentcolor"] = 0xFF0075FF, ["accentcolortext"] = 0xFFFFFFFF,
+    };
 
     private static bool TryParseHex(ReadOnlySpan<char> h, out uint color)
     {
@@ -102,63 +109,6 @@ internal static class CssColor
         return false;
 
         static uint Dup(uint x) => x << 4 | x;
-    }
-
-    private static bool TryParseRgb(ReadOnlySpan<char> args, out uint color)
-    {
-        color = 0;
-        Span<float> parts = stackalloc float[4];
-        int n = SplitNumbers(args, parts, out bool[] percent);
-        if (n < 3) return false;
-        uint r = Channel(parts[0], percent[0]), g = Channel(parts[1], percent[1]), b = Channel(parts[2], percent[2]);
-        float a = n >= 4 ? (percent[3] ? parts[3] / 100f : parts[3]) : 1f;
-        color = (uint)Math.Round(Math.Clamp(a, 0, 1) * 255) << 24 | r << 16 | g << 8 | b;
-        return true;
-
-        static uint Channel(float v, bool pct) => (uint)Math.Round(Math.Clamp(pct ? v * 2.55f : v, 0, 255));
-    }
-
-    private static bool TryParseHsl(ReadOnlySpan<char> args, out uint color)
-    {
-        color = 0;
-        Span<float> parts = stackalloc float[4];
-        int n = SplitNumbers(args, parts, out bool[] percent);
-        if (n < 3) return false;
-        float h = (parts[0] % 360 + 360) % 360 / 360f, s = Math.Clamp(parts[1] / 100f, 0, 1), l = Math.Clamp(parts[2] / 100f, 0, 1);
-        float a = n >= 4 ? (percent[3] ? parts[3] / 100f : parts[3]) : 1f;
-        float q = l < 0.5f ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
-        uint r = (uint)Math.Round(Hue(p, q, h + 1f / 3) * 255), g = (uint)Math.Round(Hue(p, q, h) * 255), b = (uint)Math.Round(Hue(p, q, h - 1f / 3) * 255);
-        color = (uint)Math.Round(Math.Clamp(a, 0, 1) * 255) << 24 | r << 16 | g << 8 | b;
-        return true;
-
-        static float Hue(float p, float q, float t)
-        {
-            if (t < 0) t += 1;
-            if (t > 1) t -= 1;
-            if (t < 1f / 6) return p + (q - p) * 6 * t;
-            if (t < 0.5f) return q;
-            if (t < 2f / 3) return p + (q - p) * (2f / 3 - t) * 6;
-            return p;
-        }
-    }
-
-    private static int SplitNumbers(ReadOnlySpan<char> args, Span<float> output, out bool[] percent)
-    {
-        percent = new bool[4];
-        int count = 0, i = 0;
-        while (i < args.Length && count < 4)
-        {
-            while (i < args.Length && (args[i] == ',' || args[i] == ' ' || args[i] == '/' || args[i] == '\t')) i++;
-            int start = i;
-            while (i < args.Length && args[i] != ',' && args[i] != ' ' && args[i] != '/' && args[i] != '\t') i++;
-            if (i == start) break;
-            var tok = args.Slice(start, i - start);
-            if (tok.EndsWith("deg".AsSpan())) tok = tok.Slice(0, tok.Length - 3);
-            if (tok.Length > 0 && tok[tok.Length - 1] == '%') { percent[count] = true; tok = tok.Slice(0, tok.Length - 1); }
-            if (!float.TryParse(tok, NumberStyles.Float, CultureInfo.InvariantCulture, out float f)) return count;
-            output[count++] = f;
-        }
-        return count;
     }
 
     /// <summary>Blends a translucent color over white (box shadows, whose blur bands are painted over each other).</summary>

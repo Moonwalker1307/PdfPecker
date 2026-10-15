@@ -68,7 +68,7 @@ internal sealed partial class LayoutEngine
     private static int LineToIndex(int line, int explicitCount) => line > 0 ? line - 1 : explicitCount + 1 + line;
 
     /// <summary>Resolves an item's start index and span on one axis; start is -1 when it is auto.</summary>
-    private static void ResolveSpan(GridLine start, GridLine end, int explicitCount, out int index, out int span)
+    private static void ResolveSpan(GridLine start, GridLine end, int explicitCount, Dictionary<string, List<int>>? names, out int index, out int span)
     {
         index = -1;
         span = 1;
@@ -81,14 +81,52 @@ internal sealed partial class LayoutEngine
                 if (endIndex < index) (index, endIndex) = (endIndex, index);
                 span = Math.Max(1, endIndex - index);
             }
+            else if (start.Span > 0 && start.SpanName != null)
+            {
+                // "span name" before a definite end: back to the nth line of that name before the end.
+                int startLine = NthNamedLine(names, start.SpanName, endIndex + 1, start.Span, forward: false);
+                index = startLine > 0 ? startLine - 1 : 0;
+                span = Math.Max(1, endIndex - index);
+            }
             else
             {
                 span = start.Span > 0 ? start.Span : 1;
                 index = Math.Max(0, endIndex - span);
             }
         }
-        else if (end.Span > 0) span = end.Span;
+        else if (end.Span > 0)
+        {
+            span = end.Span;
+            // "span name" after a definite start: on to the nth line of that name after the start.
+            if (end.SpanName != null && index >= 0)
+            {
+                int endLine = NthNamedLine(names, end.SpanName, index + 1, end.Span, forward: true);
+                // With too few lines of that name, the span ends past the explicit grid, as if they were all implicit.
+                span = endLine > 0 ? Math.Max(1, endLine - 1 - index) : Math.Max(1, explicitCount + end.Span - index);
+            }
+        }
         else if (start.Span > 0) span = start.Span;
+    }
+
+    /// <summary>
+    /// The 1-based number of the nth line named <paramref name="name"/> after (or before) line <paramref name="from"/>,
+    /// or 0 when there are not that many.
+    /// </summary>
+    private static int NthNamedLine(Dictionary<string, List<int>>? names, string name, int from, int n, bool forward)
+    {
+        if (names == null || !names.TryGetValue(name, out var lines)) return 0;
+        int count = 0;
+        if (forward)
+        {
+            foreach (var line in lines)
+                if (line > from && ++count == n) return line;
+        }
+        else
+        {
+            for (int k = lines.Count - 1; k >= 0; k--)
+                if (lines[k] < from && ++count == n) return lines[k];
+        }
+        return 0;
     }
 
     /// <summary>
@@ -128,20 +166,52 @@ internal sealed partial class LayoutEngine
         return new GridLine(lines[index], 0);
     }
 
-    /// <summary>Places the items in the grid (row-major, sparse auto-placement). Returns the number of columns and rows.</summary>
+    /// <summary>
+    /// Places the items in the grid (grid-auto-flow: row or column, sparse or dense). Returns the number of columns and
+    /// rows. Column flow is row flow with the axes swapped.
+    /// </summary>
     private static void PlaceGridItems(List<BoxItem> items, ComputedStyle s, int explicitCols, int explicitRows,
         Dictionary<string, List<int>>? colNames, Dictionary<string, List<int>>? rowNames, out int colCount, out int rowCount)
     {
-        colCount = Math.Max(1, explicitCols);
+        bool columnFlow = s.GridAutoFlowColumn, dense = s.GridAutoFlowDense;
         foreach (var it in items)
         {
             var st = it.Style;
-            ResolveSpan(ResolveName(st.GridColumnStart, colNames, true), ResolveName(st.GridColumnEnd, colNames, false), explicitCols, out int c, out int cs);
-            ResolveSpan(ResolveName(st.GridRowStart, rowNames, true), ResolveName(st.GridRowEnd, rowNames, false), explicitRows, out int r, out int rs);
+            ResolveSpan(ResolveName(st.GridColumnStart, colNames, true), ResolveName(st.GridColumnEnd, colNames, false), explicitCols, colNames, out int c, out int cs);
+            ResolveSpan(ResolveName(st.GridRowStart, rowNames, true), ResolveName(st.GridRowEnd, rowNames, false), explicitRows, rowNames, out int r, out int rs);
             it.Col = c; it.ColSpan = Math.Min(cs, 1000); it.ColFixed = c >= 0;
             it.Row = r; it.RowSpan = Math.Min(rs, 1000); it.RowFixed = r >= 0;
-            colCount = Math.Max(colCount, (c >= 0 ? c : 0) + it.ColSpan);
+            if (columnFlow) Transpose(it);
         }
+        int across = PlaceRowMajor(items, columnFlow ? explicitRows : explicitCols, dense, out int along);
+        if (columnFlow)
+        {
+            foreach (var it in items) Transpose(it);
+            colCount = Math.Max(explicitCols, along);
+            rowCount = across;
+        }
+        else
+        {
+            colCount = across;
+            rowCount = Math.Max(explicitRows, along);
+        }
+
+        static void Transpose(BoxItem it)
+        {
+            (it.Col, it.Row) = (it.Row, it.Col);
+            (it.ColSpan, it.RowSpan) = (it.RowSpan, it.ColSpan);
+            (it.ColFixed, it.RowFixed) = (it.RowFixed, it.ColFixed);
+        }
+    }
+
+    /// <summary>
+    /// Auto-placement along rows (CSS Grid 8.5): the number of columns is fixed by the explicit grid and the definite
+    /// placements, and rows are added as needed. Returns the column count; <paramref name="rowCount"/> gets the rows used.
+    /// </summary>
+    private static int PlaceRowMajor(List<BoxItem> items, int explicitCols, bool dense, out int rowCount)
+    {
+        int colCount = Math.Max(1, explicitCols);
+        foreach (var it in items) colCount = Math.Max(colCount, (it.ColFixed ? it.Col : 0) + it.ColSpan);
         colCount = Math.Min(colCount, 1000);
 
         var occupied = new List<bool[]>();
@@ -175,15 +245,17 @@ internal sealed partial class LayoutEngine
             it.Col = Math.Min(col, Math.Max(0, cols - it.ColSpan));
             Occupy(it);
         }
-        // 3. Everything else, with a cursor that only moves forward.
+        // 3. Everything else. Sparse packing keeps a cursor that only moves forward; dense packing starts every search
+        // from the first row, so later small items fill the holes left by earlier big ones.
         int curRow = 0, curCol = 0;
         foreach (var it in items)
         {
             if (it.RowFixed) continue;
             it.ColSpan = Math.Min(it.ColSpan, cols);
+            if (dense) curRow = curCol = 0;
             if (it.ColFixed)
             {
-                if (it.Col < curCol) curRow++;
+                if (!dense && it.Col < curCol) curRow++;
                 curCol = it.Col;
                 while (!Free(curRow, it.Col, it.RowSpan, it.ColSpan)) curRow++;
                 it.Row = curRow;
@@ -202,8 +274,9 @@ internal sealed partial class LayoutEngine
             Occupy(it);
             curCol = it.Col + it.ColSpan;
         }
-        rowCount = Math.Max(explicitRows, occupied.Count);
+        rowCount = occupied.Count;
         foreach (var it in items) rowCount = Math.Max(rowCount, it.Row + it.RowSpan);
+        return colCount;
     }
 
     private static GridTrack[] MakeTracks(List<Track> explicitTracks, Track[]? autoTracks, int count)
