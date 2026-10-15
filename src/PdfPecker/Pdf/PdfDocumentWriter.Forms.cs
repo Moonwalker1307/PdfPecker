@@ -78,11 +78,10 @@ internal sealed partial class PdfDocumentWriter
     }
 
     /// <summary>Writes the widgets, their appearance streams, the radio groups and the fonts of the default appearances.</summary>
-    private void WriteFields(List<FieldBlock>[] pageFields, int[] pageIds, float flowH, Dictionary<PdfImage, int> imageIds,
+    private void WriteFields(List<FieldBlock>[] pageFields, int[] pageIds, Dictionary<PdfImage, int> imageIds,
         Dictionary<int, int> annotKeys, ref int next)
     {
         if (_fieldIds.Count == 0) return;
-        float k = _page.Scale, origin = _page.MarginTop + _page.BandTop;
         // An appearance is not page content: it has no marked content of its own.
         var savedMc = _mc;
         _mc = null;
@@ -91,7 +90,9 @@ internal sealed partial class PdfDocumentWriter
             {
                 var f = fb.Field;
                 var field = f.Field;
-                float pageTop = p * flowH;
+                SetPage(p, out _);
+                float k = _page.Scale, origin = _page.MarginTop + _page.BandTop;
+                float pageTop = PageTop(p);
                 float x1 = (_page.MarginLeft + f.X) * k, x2 = x1 + f.W * k;
                 float yTop = (_page.Height - origin - (f.Y - pageTop)) * k + _paperDy, yBottom = yTop - f.H * k;
                 float w = x2 - x1, h = yTop - yBottom;

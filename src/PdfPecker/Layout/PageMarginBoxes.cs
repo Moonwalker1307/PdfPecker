@@ -16,13 +16,17 @@ internal sealed class PageMarginBoxes
 {
     private readonly List<PageRule> _rules;
     private readonly Func<ComputedStyle> _initial;
-    private readonly PageSetup _page;
+    private PageSetup _page; // the setup of the page being laid out
     private readonly ImageLoader _images;
     private readonly CancellationToken _cancellation;
+    private readonly PagedContent? _paged;
 
     // initial makes a style with initial values: margin boxes inherit from the page, not from the document.
-    public PageMarginBoxes(List<PageRule> rules, Func<ComputedStyle> initial, PageSetup page, ImageLoader images, CancellationToken cancellation)
+    // paged gives string() the running strings.
+    public PageMarginBoxes(List<PageRule> rules, Func<ComputedStyle> initial, PageSetup page, ImageLoader images, CancellationToken cancellation,
+        PagedContent? paged = null)
     {
+        _paged = paged;
         // Rules of lower specificity first, in source order otherwise: later declarations win.
         _rules = rules.Where(r => r.MarginBoxes.Count > 0 || r.Declarations.Count > 0)
             .Select((r, i) => (r, i)).OrderBy(x => x.r.Specificity).ThenBy(x => x.i).Select(x => x.r).ToList();
@@ -46,15 +50,20 @@ internal sealed class PageMarginBoxes
     };
 
     /// <summary>The margin boxes of one page, as draw ops with y from the top of the page area and x from its left edge.</summary>
-    public List<DrawOp> Layout(int pageIndex, int pageCount)
+    public List<DrawOp> Layout(int pageIndex, int pageCount) => Layout(pageIndex, pageCount, _page, null);
+
+    /// <summary>The margin boxes of a page with its own setup: a named page's (<paramref name="pageName"/>).</summary>
+    public List<DrawOp> Layout(int pageIndex, int pageCount, PageSetup page, string? pageName)
     {
+        _page = page;
+        if (_paged != null) _paged.CurrentPage = pageIndex;
         var ops = new List<DrawOp>();
         // The page context: declarations of the @page rules that apply, and each margin box's declarations.
         var context = new List<Declaration>();
         var boxes = new Dictionary<string, List<Declaration>>(StringComparer.Ordinal);
         foreach (var rule in _rules)
         {
-            if (!Applies(rule.Selector, pageIndex)) continue;
+            if (!Applies(rule, pageIndex, pageName)) continue;
             context.AddRange(rule.Declarations);
             foreach (var (name, decls) in rule.MarginBoxes)
             {
@@ -130,8 +139,12 @@ internal sealed class PageMarginBoxes
         }
     }
 
-    /// <summary>Whether an @page rule's selector matches the page: the first page is a right page.</summary>
-    private static bool Applies(string selector, int pageIndex) => selector switch
+    /// <summary>
+    /// Whether an @page rule's selector matches the page: its page name, if any, and :first (the document's first
+    /// page, as in Chrome), :left or :right (the first page is a right page).
+    /// </summary>
+    private static bool Applies(PageRule rule, int pageIndex, string? pageName)
+        => (rule.Name.Length == 0 || rule.Name == pageName) && rule.Selector switch
     {
         "" => true,
         ":first" => pageIndex == 0,
@@ -178,7 +191,7 @@ internal sealed class PageMarginBoxes
     /// </summary>
     private Built? Build(string name, List<Declaration> decls, List<Declaration> context, int pageIndex, int pageCount, float? width, float? height)
     {
-        var resolver = new StyleResolver(new Stylesheet(), _page.ContentWidth, _page.ContentHeight);
+        var resolver = new StyleResolver(new Stylesheet(), _page.ContentWidth, _page.ContentHeight) { Paged = _paged ?? new PagedContent() };
         resolver.SetCounter("page", pageIndex + 1);
         resolver.SetCounter("pages", pageCount);
 

@@ -283,6 +283,8 @@ internal sealed class ComputedStyle
     public TransformFn[]? Translate, Rotate, Scale; // the individual transform properties; null = none
     public Length TransformOriginX = new(50, LengthUnit.Percent), TransformOriginY = new(50, LengthUnit.Percent);
     public string? Content;                     // the content property as written; null = normal
+    public string? StringSet;                   // string-set as written (named strings for running headers); null = none
+    public string? PageName;                    // page: the named page this box goes on (inherited; null = auto)
     public CounterOp[]? CounterReset, CounterSet, CounterIncrement;
 
     // Flexbox, grid and multi-column.
@@ -438,6 +440,7 @@ internal sealed class ComputedStyle
         c.ColumnRuleColor = null;
         c.ColumnSpanAll = false;
         c.LineClamp = 0;
+        c.StringSet = null;
         c.TableLayoutFixed = false;
         c.BoxShadows = null;
         return c;
