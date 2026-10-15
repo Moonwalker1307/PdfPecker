@@ -35,7 +35,7 @@ The package targets `net8.0`, `net9.0` and `net10.0`, so it works on .NET 8 and 
 
 ## How it compares
 
-The same three documents converted to A4 PDF by PdfPecker and four free .NET alternatives, on one 4-core cloud VM
+The same three documents converted to A4 PDF by PdfPecker and six .NET alternatives, on one 4-core cloud VM
 (Intel Xeon @ 2.8 GHz, 16 GB, Linux, .NET 10.0.12). Times are medians after a 3-second warm-up; "first PDF" includes
 starting the browser where there is one. Parallel runs one conversion per core at once on the 5-page document. Peak
 memory is the proportional set size (PSS) of the whole process tree, so a browser's helper processes are included
@@ -45,9 +45,15 @@ once and shared pages are not double-counted.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | **PdfPecker** | own, managed | 3.1 MB DLL | 0.27 s | **0.86 ms** | **2.7 ms** | **39 ms** | **962 docs/s** | **83 MB** |
 | HtmlRenderer.PdfSharp 1.6.1 | own, managed (CSS 2) | 2.4 MB of DLLs | 0.47 s | 5.0 ms | 16 ms | 473 ms | 88 docs/s | 255 MB |
+| iText pdfHTML 6.3.4 \* | own, managed | 11 MB of DLLs | 1.68 s | 41 ms | 242 ms | 4.2 s | 8 docs/s | 614 MB |
 | wkhtmltopdf 0.12.6 | Qt WebKit, native | about 90 MB with Qt | 0.31 s | 289 ms | 333 ms | 693 ms | 12 docs/s | 164 MB |
 | PuppeteerSharp 25.13 | Chromium 141 | about 600 MB browser | 0.91 s | 128 ms | 166 ms | 539 ms | 12 docs/s | 849 MB |
 | Microsoft.Playwright 1.63 | Chromium 141 | browser + 135 MB driver | 1.08 s | 142 ms | 191 ms | 522 ms | 11 docs/s | 986 MB |
+| Syncfusion HTML to PDF 35.1.40 \* | Chrome (Blink), bundled | about 545 MB with Chrome | 2.52 s | 263 ms | 314 ms | 1.7 s | 1 doc/s | 2,195 MB |
+
+\* Measured later (October 2026) on the same VM type with the same program. In that run the other converters were up to
+70% slower than in the table above and PdfPecker slightly faster, so these two rows are approximate and, if anything,
+a little slower than a like-for-like run would show.
 
 How to read it:
 
@@ -57,13 +63,20 @@ How to read it:
 - Output is not identical. Chromium is the reference for modern CSS and runs JavaScript, which PdfPecker does not.
   HtmlRenderer supports only HTML 4 and CSS 2 (it drops the invoice's table header colours), and wkhtmltopdf uses
   a 2016 WebKit, shrinks content to fit by default (24 pages for the report instead of 29) and was archived in 2023.
+- iText pdfHTML lays out the documents itself, like PdfPecker, but its time grows faster than the page count: 242 ms for
+  5 pages and 4.2 s for the 30-page report, which is one long table.
+- Syncfusion ran as a trial without a licence key, which adds a line of text to each page. Its `AdditionalDelay`
+  (2 seconds of waiting for scripts by default) was set to 0, as the other Chromium converters don't wait either. With
+  its default settings it scales content down, so the report took 13 pages instead of 29.
 - PDF sizes for the 1 / 5 / 30-page documents: PdfPecker 12 / 26 / 126 KB, Chromium 72 / 139 / 171 KB,
-  wkhtmltopdf 30 / 59 / 191 KB, HtmlRenderer 35 / 65 / 273 KB.
+  wkhtmltopdf 30 / 59 / 191 KB, HtmlRenderer 35 / 65 / 273 KB, iText 26 / 45 / 104 KB, Syncfusion 42 / 89 / 132 KB.
 - Each converter was used the way its documentation suggests for many documents: PdfPecker and HtmlRenderer in
   process, wkhtmltopdf as one process per document, and PuppeteerSharp and Playwright with one shared browser and a
-  new tab per document (Playwright in one shared browser context, tagged PDF output off for both).
+  new tab per document (Playwright in one shared browser context, tagged PDF output off for both). iText reuses one
+  font provider per thread, as its knowledge base advises. Syncfusion keeps one converter per concurrent conversion with
+  `ReuseBrowserProcess` on, as its support forum advises, so the parallel run starts four browsers.
 
-Commercial converters were not measured here. One user compared PdfPecker with **IronPDF 2026.7.2** (Chrome-based)
+IronPDF was not measured here. One user compared PdfPecker with **IronPDF 2026.7.2** (Chrome-based)
 on the 26 templates of their production app, on a 22-core development machine after warm-up: IronPDF took 13.6 s
 for all 26 documents one at a time and PdfPecker 17 ms (about 800 times faster), and with 22 in parallel IronPDF made
 9.2 documents/s and PdfPecker 1,143 (about 125 times). 24 of the 26 documents came out identical; the other two differ

@@ -12,6 +12,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="itext.pdfhtml" Version="6.3.4" />
+    <PackageReference Include="Syncfusion.HtmlToPdfConverter.Net.Linux" Version="35.1.40" />
     <ProjectReference Include="../../src/PdfPecker/PdfPecker.csproj" />
     <PackageReference Include="PuppeteerSharp" Version="25.13.1" />
     <PackageReference Include="Microsoft.Playwright" Version="1.63.0" />
