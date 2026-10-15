@@ -197,7 +197,10 @@ internal static class EmbeddedFiles
         return pairs;
     }
 
-    /// <summary>The PDF/A part the document's XMP metadata claims (1, 2, 3 or 4), or 0.</summary>
+    /// <summary>
+    /// The PDF/A part the document's XMP metadata claims (1, 2, 3 or 4), or 0. PDF/A-4f counts as 3, since both allow
+    /// any attachment and list them in /AF.
+    /// </summary>
     public static int PdfAPart(PdfFile file)
     {
         if (file.GetStream(file.Catalog, "Metadata") is not { } meta) return 0;
@@ -211,7 +214,11 @@ internal static class EmbeddedFiles
             return 0;
         }
         var m = Regex.Match(xmp, @"pdfaid:part\s*(?:>|=\s*[""'])\s*(\d)");
-        return m.Success ? m.Groups[1].Value[0] - '0' : 0;
+        if (!m.Success) return 0;
+        int part = m.Groups[1].Value[0] - '0';
+        // PDF/A-4f is the PDF/A-4 level that allows any attachment, as PDF/A-3 does; plain PDF/A-4 allows only PDF/A files.
+        if (part == 4 && Regex.IsMatch(xmp, @"pdfaid:conformance\s*(?:>|=\s*[""'])\s*[Ff]")) return 3;
+        return part;
     }
 
     // ------------------------------------------------------------------ appending
@@ -223,8 +230,8 @@ internal static class EmbeddedFiles
         var rootRef = trailer["Root"] as PdfRef ?? throw new InvalidDataException("The PDF has no document catalog reference.");
         var catalog = file.Resolve(rootRef) as PdfDict ?? throw new InvalidDataException("The PDF has no document catalog.");
         int part = PdfAPart(file);
-        if (part is 1 or 2)
-            throw new ArgumentException($"The PDF is PDF/A-{part}, which allows attaching only PDF/A files; PdfPecker attaches files to PDF/A-3 and other PDFs.", nameof(pdf));
+        if (part is 1 or 2 or 4)
+            throw new ArgumentException($"The PDF is PDF/A-{part}, which allows attaching only PDF/A files; PdfPecker attaches files to PDF/A-3, PDF/A-4f and other PDFs.", nameof(pdf));
         var existing = NameTree(file, catalog);
         var taken = existing.Select(p => p.Key.Text).ToHashSet(StringComparer.Ordinal);
         foreach (var a in attachments)

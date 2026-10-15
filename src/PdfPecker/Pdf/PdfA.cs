@@ -107,11 +107,32 @@ internal static class PdfA
     }
 
     /// <summary>
-    /// The XMP packet. Its values must match the document information dictionary. <paramref name="part"/> is the PDF/A
-    /// part, or 0 for a file that is not PDF/A; <paramref name="pdfua"/> claims PDF/UA-1.
+    /// The PDF/A identification of a conformance level: the part of ISO 19005, the conformance letter (null for plain
+    /// PDF/A-4, which has none) and the revision year PDF/A-4 states (0 before part 4).
     /// </summary>
-    public static byte[] Xmp(int part, string conformance, DocumentProperties props, DateTime created, PdfEInvoice? invoice = null, bool pdfua = false)
+    public static (int Part, string? Conformance, int Rev) Identification(PdfConformance conformance) => conformance switch
     {
+        PdfConformance.PdfA2b => (2, "B", 0),
+        PdfConformance.PdfA2u => (2, "U", 0),
+        PdfConformance.PdfA3b => (3, "B", 0),
+        PdfConformance.PdfA3u => (3, "U", 0),
+        PdfConformance.PdfA4 => (4, null, 2020),
+        PdfConformance.PdfA4f => (4, "F", 2020),
+        _ => (0, null, 0),
+    };
+
+    /// <summary>Whether a PDF/A level is based on PDF 2.0 (PDF/A-4), so the file is written as PDF 2.0.</summary>
+    public static bool IsPdf20(PdfConformance conformance) => conformance is PdfConformance.PdfA4 or PdfConformance.PdfA4f;
+
+    /// <summary>
+    /// The XMP packet. Its values must match the document information dictionary. <paramref name="part"/> is the PDF/A
+    /// part, or 0 for a file that is not PDF/A, with its <paramref name="conformance"/> letter (none for PDF/A-4) and
+    /// <paramref name="rev"/>ision year (PDF/A-4); <paramref name="uaPart"/> claims PDF/UA-1 or PDF/UA-2 (0: neither).
+    /// </summary>
+    public static byte[] Xmp(int part, string? conformance, DocumentProperties props, DateTime created, PdfEInvoice? invoice = null,
+        int uaPart = 0, int rev = 0)
+    {
+        bool pdfua = uaPart > 0;
         string date = created.ToString("yyyy-MM-dd'T'HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture) + "Z";
         var custom = XmpCustomProperties(props.Custom);
         var sb = new StringBuilder(1500);
@@ -123,8 +144,11 @@ internal static class PdfA
         if (custom.Count > 0) sb.Append(" xmlns:pdfx=\"").Append(PdfxNamespace).Append('"');
         sb.Append(">\n");
         if (part > 0)
-            sb.Append("<pdfaid:part>").Append(part).Append("</pdfaid:part>\n")
-              .Append("<pdfaid:conformance>").Append(conformance).Append("</pdfaid:conformance>\n");
+        {
+            sb.Append("<pdfaid:part>").Append(part).Append("</pdfaid:part>\n");
+            if (rev > 0) sb.Append("<pdfaid:rev>").Append(rev).Append("</pdfaid:rev>\n");
+            if (conformance != null) sb.Append("<pdfaid:conformance>").Append(conformance).Append("</pdfaid:conformance>\n");
+        }
         sb.Append("<dc:format>application/pdf</dc:format>\n");
         if (!string.IsNullOrEmpty(props.Title))
             sb.Append("<dc:title><rdf:Alt><rdf:li xml:lang=\"x-default\">").Append(Escape(props.Title!)).Append("</rdf:li></rdf:Alt></dc:title>\n");
@@ -145,7 +169,10 @@ internal static class PdfA
         sb.Append("</rdf:Description>\n");
         if (pdfua)
             sb.Append("<rdf:Description rdf:about=\"\" xmlns:pdfuaid=\"").Append(PdfUaNamespace).Append("\">\n")
-              .Append("<pdfuaid:part>1</pdfuaid:part>\n</rdf:Description>\n");
+              .Append("<pdfuaid:part>").Append(uaPart).Append("</pdfuaid:part>\n")
+              // PDF/UA-2 also states the revision year of ISO 14289-2.
+              .Append(uaPart >= 2 ? "<pdfuaid:rev>2024</pdfuaid:rev>\n" : "")
+              .Append("</rdf:Description>\n");
         if (invoice != null)
         {
             sb.Append("<rdf:Description rdf:about=\"\" xmlns:fx=\"").Append(FacturXNamespace).Append("\">\n")
@@ -155,9 +182,11 @@ internal static class PdfA
               .Append("<fx:ConformanceLevel>").Append(invoice.ConformanceLevel).Append("</fx:ConformanceLevel>\n")
               .Append("</rdf:Description>\n");
         }
-        // PDF/A allows properties outside its predefined schemas only when an extension schema describes them.
-        bool uaSchema = pdfua && part > 0;
-        if (custom.Count > 0 || invoice != null || uaSchema)
+        // PDF/A-2 and PDF/A-3 allow properties outside their predefined schemas only when an extension schema describes
+        // them; PDF/A-4 dropped that rule.
+        bool extensions = part is 2 or 3;
+        bool uaSchema = pdfua && extensions;
+        if (extensions && (custom.Count > 0 || invoice != null || uaSchema))
         {
             // PDF/A allows properties outside the predefined schemas only when an extension schema describes them.
             sb.Append("<rdf:Description rdf:about=\"\" xmlns:pdfaExtension=\"http://www.aiim.org/pdfa/ns/extension/\"")

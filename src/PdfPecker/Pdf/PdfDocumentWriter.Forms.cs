@@ -122,7 +122,12 @@ internal sealed partial class PdfDocumentWriter
 
                 Begin(_fieldIds[fb]).Ascii("<< /Type /Annot /Subtype /Widget /Rect [").Num(x1).Sp().Num(yBottom).Sp().Num(x2).Sp().Num(yTop)
                     .Ascii("] /F 4 /P ").Int(pageIds[p]).Ascii(" 0 R");
-                if (annotKeys.TryGetValue(_fieldIds[fb], out int key)) _out.Ascii(" /StructParent ").Int(key);
+                if (annotKeys.TryGetValue(_fieldIds[fb], out int key))
+                {
+                    // A tagged widget describes itself for assistive technology (PDF/UA-2 asks for it when no label does).
+                    _out.Ascii(" /StructParent ").Int(key).Ascii(" /Contents ");
+                    WriteTextString(_out, field.Tooltip ?? field.Name);
+                }
                 if (field.Group is { } group)
                 {
                     _out.Ascii(" /Parent ").Int(_radioGroups[group].Id).Ascii(" 0 R");

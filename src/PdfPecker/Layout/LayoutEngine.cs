@@ -880,7 +880,7 @@ internal sealed partial class LayoutEngine
             if (title.Length == 0) return;
             key = "\u0001h" + Headings!.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
             _headingKeys[e] = key;
-            Headings.Add(new OutlineHeading(title, level, key));
+            Headings.Add(new OutlineHeading(title, level, key, e));
         }
         SetAnchor(key, ContentTop(top, opsStart));
     }
@@ -1024,5 +1024,8 @@ internal sealed partial class LayoutEngine
     }
 }
 
-/// <summary>A heading that becomes a PDF bookmark: its text, level (1-6) and the key of its position in the anchors.</summary>
-internal readonly record struct OutlineHeading(string Title, int Level, string Key);
+/// <summary>
+/// A heading that becomes a PDF bookmark: its text, level (1-6), the key of its position in the anchors and its element
+/// (for the structure destination of a PDF/UA-2 bookmark).
+/// </summary>
+internal readonly record struct OutlineHeading(string Title, int Level, string Key, Element? Element = null);

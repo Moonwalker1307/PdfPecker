@@ -42,7 +42,10 @@ internal sealed class PageSection
         => Math.Max(1, (int)Math.Floor((Math.Max(0, contentHeight - 0.5f) + 0.01) / flowHeight) + 1);
 }
 
-/// <summary>Serializes laid-out draw operations into a PDF 1.4 file (PDF 1.7 for PDF/A and AES-256 encryption).</summary>
+/// <summary>
+/// Serializes laid-out draw operations into a PDF 1.4 file (PDF 1.7 for PDF/A-2 and PDF/A-3, tagging and AES-256
+/// encryption; PDF 2.0 for PDF/A-4 and PDF/UA-2).
+/// </summary>
 internal sealed partial class PdfDocumentWriter
 {
     private PageSetup _page; // the setup of the page being written
@@ -113,8 +116,13 @@ internal sealed partial class PdfDocumentWriter
     /// <summary>Write a tagged PDF with this logical structure. Default: null, untagged.</summary>
     public StructureTree? Structure { get; init; }
 
-    /// <summary>Claim PDF/UA-1 conformance in the metadata. Needs <see cref="Structure"/>.</summary>
-    public bool PdfUA { get; init; }
+    /// <summary>Claim PDF/UA-1 (1) or PDF/UA-2 (2) conformance in the metadata; 0 claims neither. Needs <see cref="Structure"/>.</summary>
+    public int PdfUAPart { get; init; }
+
+    private bool PdfUA => PdfUAPart > 0;
+
+    /// <summary>PDF/A-4 and PDF/UA-2 are based on PDF 2.0: the file is written as PDF 2.0.</summary>
+    private bool Pdf20 => PdfA.IsPdf20(Conformance) || PdfUAPart >= 2;
 
     /// <summary>The document's natural language, such as "en-US", for a tagged PDF.</summary>
     public string? Language { get; init; }
@@ -125,6 +133,9 @@ internal sealed partial class PdfDocumentWriter
     private HashSet<int>? _missingReported;
 
     private bool EmbedStandard => EmbedStandardFonts || Conformance != PdfConformance.None || PdfUA;
+
+    /// <summary>PDF/A and PDF/UA forbid showing the .notdef glyph.</summary>
+    private bool NoNotdef => Conformance != PdfConformance.None || PdfUA;
 
     // Tagged PDF: the stream being written, the open marked-content sequence (a ContentSlot or Artifact) and whether
     // everything is an artifact for now (running headers and footers, fixed boxes, the page canvas).
@@ -551,7 +562,9 @@ internal sealed partial class PdfDocumentWriter
 
         // 3. Object numbers.
         int next = 1;
-        int catalogId = next++, pagesId = next++, resourcesId = next++, infoId = next++;
+        // PDF 2.0 deprecates the document information dictionary (PDF/A-4 allows only its ModDate): the XMP metadata
+        // carries the properties instead.
+        int catalogId = next++, pagesId = next++, resourcesId = next++, infoId = Pdf20 ? 0 : next++;
         _resourcesId = resourcesId;
         var fontIds = new int[usedFonts.Length];
         for (int i = 0; i < usedFonts.Length; i++) if (usedFonts[i]) fontIds[i] = next++;
@@ -590,7 +603,7 @@ internal sealed partial class PdfDocumentWriter
         }
 
         // 4. Header.
-        _out.Ascii(pdfa || _crypt != null || tagged ? "%PDF-1.7\n%" : "%PDF-1.4\n%").Bytes(new byte[] { 0xE2, 0xE3, 0xCF, 0xD3 }).Nl();
+        _out.Ascii(Pdf20 ? "%PDF-2.0\n%" : pdfa || _crypt != null || tagged ? "%PDF-1.7\n%" : "%PDF-1.4\n%").Bytes(new byte[] { 0xE2, 0xE3, 0xCF, 0xD3 }).Nl();
 
         // Catalog, pages tree.
         Begin(catalogId).Ascii("<< /Type /Catalog /Pages ").Int(pagesId).Ascii(" 0 R");
@@ -620,7 +633,7 @@ internal sealed partial class PdfDocumentWriter
         }
         WriteAcroForm();
         // AES-256 (revision 6) is the Adobe extension level 8 to PDF 1.7, standardised in PDF 2.0.
-        if (_crypt != null) _out.Ascii(" /Extensions << /ADBE << /BaseVersion /1.7 /ExtensionLevel 8 >> >>");
+        if (_crypt != null && !Pdf20) _out.Ascii(" /Extensions << /ADBE << /BaseVersion /1.7 /ExtensionLevel 8 >> >>");
         _out.Ascii(" >>");
         End();
         Begin(pagesId).Ascii("<< /Type /Pages /Count ").Int(pageCount).Ascii(" /Kids [");
@@ -633,14 +646,17 @@ internal sealed partial class PdfDocumentWriter
         now = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerSecond));
         var props = Properties.WithStandard(title, author, subject);
         if (metadataId != 0) props = props.Cleaned(); // Info and XMP must agree, and XML cannot carry control characters.
-        Begin(infoId);
-        props.WriteInfo(_out, now, modDate: metadataId != 0, WriteTextString);
-        End();
+        if (infoId != 0)
+        {
+            Begin(infoId);
+            props.WriteInfo(_out, now, modDate: metadataId != 0, WriteTextString);
+            End();
+        }
 
         if (metadataId != 0)
         {
-            int part = !pdfa ? 0 : Conformance == PdfConformance.PdfA3b ? 3 : 2;
-            var xmp = PdfA.Xmp(part, "B", props, now, EInvoice, PdfUA);
+            var (part, level, rev) = PdfA.Identification(Conformance);
+            var xmp = PdfA.Xmp(part, level, props, now, EInvoice, PdfUAPart, rev);
             WriteStream(metadataId, xmp, compress: false, "/Type /Metadata /Subtype /XML");
         }
         if (pdfa)
@@ -794,6 +810,9 @@ internal sealed partial class PdfDocumentWriter
             WriteStream(contentIds[p], content.Span, _compress, extraDict: null);
         }
 
+        // The structure elements get their object numbers now: PDF 2.0 links and bookmarks refer to them.
+        var structElements = tagged ? NumberStructure(ref next) : null;
+
         foreach (var (id, placed, origin, linkPageTop, linkPage) in annotations)
         {
             SetPage(linkPage, out _);
@@ -816,12 +835,10 @@ internal sealed partial class PdfDocumentWriter
             }
             if (link.Target.StartsWith("#", StringComparison.Ordinal))
             {
-                if (anchors.TryGetValue(Uri.UnescapeDataString(link.Target.Substring(1)), out float ay)
-                    || anchors.TryGetValue(link.Target.Substring(1), out ay))
-                {
-                    _out.Ascii("/Dest ");
-                    WriteDest(ay);
-                }
+                string anchor = Uri.UnescapeDataString(link.Target.Substring(1));
+                if (!anchors.TryGetValue(anchor, out float ay) && anchors.TryGetValue(link.Target.Substring(1), out ay))
+                    anchor = link.Target.Substring(1);
+                if (anchors.ContainsKey(anchor)) WriteGoTo(ay, Structure?.TargetOf(anchor));
             }
             else
             {
@@ -853,8 +870,8 @@ internal sealed partial class PdfDocumentWriter
                 if (item.Children.Count > 0)
                     _out.Ascii(" /First ").Int(item.Children[0].Id).Ascii(" 0 R /Last ").Int(item.Children[^1].Id)
                         .Ascii(" 0 R /Count ").Int(item.Descendants);
-                _out.Ascii(" /Dest ");
-                WriteDest(item.Y);
+                _out.Sp();
+                WriteGoTo(item.Y, item.Heading is { } h ? Structure?.ElementOf(h) : null);
                 _out.Ascii(" >>");
                 End();
             }
@@ -900,7 +917,7 @@ internal sealed partial class PdfDocumentWriter
         if (tagged)
         {
             _mc = null;
-            next = WriteStructure(next, structRootId, parentKey, pageIds, pageStreams, annotKeys);
+            next = WriteStructure(next, structElements!, structRootId, parentKey, pageIds, pageStreams, annotKeys);
         }
 
         var maskIds = new int[_masks.Count];
@@ -958,7 +975,8 @@ internal sealed partial class PdfDocumentWriter
             string off = _offsets[i].ToString("D10", System.Globalization.CultureInfo.InvariantCulture);
             _out.Ascii(off).Ascii(" 00000 n \n");
         }
-        _out.Ascii("trailer\n<< /Size ").Int(count).Ascii(" /Root ").Int(catalogId).Ascii(" 0 R /Info ").Int(infoId).Ascii(" 0 R");
+        _out.Ascii("trailer\n<< /Size ").Int(count).Ascii(" /Root ").Int(catalogId).Ascii(" 0 R");
+        if (infoId != 0) _out.Ascii(" /Info ").Int(infoId).Ascii(" 0 R");
         if (encryptId != 0) _out.Ascii(" /Encrypt ").Int(encryptId).Ascii(" 0 R");
         var fileId = System.Security.Cryptography.RandomNumberGenerator.GetBytes(16);
         _out.Ascii(" /ID [");
@@ -976,24 +994,49 @@ internal sealed partial class PdfDocumentWriter
     /// Writes the structure tree of a tagged PDF: its root, the elements, and the parent tree that maps each page's
     /// marked content and each link annotation back to its element. Returns the next free object number.
     /// </summary>
-    private int WriteStructure(int next, int rootId, int nextKey, int[] pageIds, McStream[] pageStreams, Dictionary<int, int> annotKeys)
+    private int WriteStructure(int next, List<StructElem> elements, int rootId, int nextKey, int[] pageIds, McStream[] pageStreams,
+        Dictionary<int, int> annotKeys)
     {
         var tree = Structure!;
-        tree.Prune();
-        var elements = new List<StructElem>();
-        void Number(StructElem e)
-        {
-            e.Id = next++;
-            elements.Add(e);
-            foreach (var k in e.Kids)
-                if (k is StructElem c) Number(c);
-        }
-        Number(tree.Root);
         int parentTreeId = next++;
 
+        // PDF 2.0 files put every element in the PDF 2.0 standard structure namespace; the PDF 1.7 types that PDF 2.0
+        // dropped stay in the PDF 1.7 namespace, role mapped to their nearest PDF 2.0 type.
+        int ns2Id = 0, ns17Id = 0;
+        if (Pdf20)
+        {
+            ns2Id = next++;
+            if (elements.Any(e => Pdf17Only(e.Type) != null)) ns17Id = next++;
+        }
+
         Begin(rootId).Ascii("<< /Type /StructTreeRoot /K ").Int(tree.Root.Id).Ascii(" 0 R /ParentTree ").Int(parentTreeId)
-            .Ascii(" 0 R /ParentTreeNextKey ").Int(nextKey).Ascii(" >>");
+            .Ascii(" 0 R /ParentTreeNextKey ").Int(nextKey);
+        if (ns2Id != 0)
+        {
+            _out.Ascii(" /Namespaces [").Int(ns2Id).Ascii(" 0 R");
+            if (ns17Id != 0) _out.Ascii(" ").Int(ns17Id).Ascii(" 0 R");
+            _out.Ascii("]");
+        }
+        _out.Ascii(" >>");
         End();
+        if (ns2Id != 0)
+        {
+            // Through WriteTextString, so an encrypted file encrypts the namespace names like every other string.
+            Begin(ns2Id).Ascii("<< /Type /Namespace /NS ");
+            WriteTextString(_out, "http://iso.org/pdf2/ssn");
+            _out.Ascii(" >>");
+            End();
+        }
+        if (ns17Id != 0)
+        {
+            Begin(ns17Id).Ascii("<< /Type /Namespace /NS ");
+            WriteTextString(_out, "http://iso.org/pdf/ssn");
+            _out.Ascii(" /RoleMapNS <<");
+            foreach (var type in elements.Select(e => e.Type).Where(t => Pdf17Only(t) != null).Distinct())
+                _out.Ascii(" /").Ascii(type).Ascii(" [/").Ascii(Pdf17Only(type)!).Sp().Int(ns2Id).Ascii(" 0 R]");
+            _out.Ascii(" >> >>");
+            End();
+        }
 
         // The parent tree: a number tree with one flat /Nums array, in key order.
         var entries = new List<(int Key, McStream? Stream, StructElem? Link)>();
@@ -1020,6 +1063,7 @@ internal sealed partial class PdfDocumentWriter
         foreach (var e in elements)
         {
             Begin(e.Id).Ascii("<< /Type /StructElem /S /").Ascii(e.Type).Ascii(" /P ").Int(e.Parent?.Id ?? rootId).Ascii(" 0 R");
+            if (ns2Id != 0) _out.Ascii(" /NS ").Int(Pdf17Only(e.Type) != null ? ns17Id : ns2Id).Ascii(" 0 R");
             if (e.Lang != null) { _out.Ascii(" /Lang "); WriteTextString(_out, e.Lang); }
             if (e.Alt != null) { _out.Ascii(" /Alt "); WriteTextString(_out, e.Alt); }
             if (e.Scope != null || e.RowSpan > 1 || e.ColSpan > 1)
@@ -1030,6 +1074,7 @@ internal sealed partial class PdfDocumentWriter
                 if (e.ColSpan > 1) _out.Ascii(" /ColSpan ").Int(e.ColSpan);
                 _out.Ascii(" >>");
             }
+            if (e.ListNumbering != null) _out.Ascii(" /A << /O /List /ListNumbering /").Ascii(e.ListNumbering).Ascii(" >>");
             _out.Ascii(" /K [");
             foreach (var k in e.Kids)
             {
@@ -1057,6 +1102,33 @@ internal sealed partial class PdfDocumentWriter
         return next;
     }
 
+    /// <summary>Leaves out the structure elements without content and numbers the others, in tree order.</summary>
+    private List<StructElem> NumberStructure(ref int next)
+    {
+        Structure!.Prune();
+        var elements = new List<StructElem>();
+        int id = next;
+        void Number(StructElem e)
+        {
+            e.Id = id++;
+            elements.Add(e);
+            foreach (var k in e.Kids)
+                if (k is StructElem c) Number(c);
+        }
+        Number(Structure.Root);
+        next = id;
+        return elements;
+    }
+
+    /// <summary>For a PDF 1.7 structure type that PDF 2.0 dropped, the PDF 2.0 type it is role mapped to; else null.</summary>
+    private static string? Pdf17Only(string type) => type switch
+    {
+        "BlockQuote" => "Div",
+        "Quote" or "Code" => "Span",
+        "Art" => "Sect",
+        _ => null,
+    };
+
     // ------------------------------------------------------------------ outline
 
     private sealed class OutlineItem
@@ -1064,6 +1136,7 @@ internal sealed partial class PdfDocumentWriter
         public string Title = "";
         public int Level, Id, Descendants;
         public float Y;
+        public Html.Element? Heading;
         public OutlineItem? Parent, Prev, Next;
         public readonly List<OutlineItem> Children = new();
     }
@@ -1081,7 +1154,7 @@ internal sealed partial class PdfDocumentWriter
         foreach (var h in headings)
         {
             if (!anchors.TryGetValue(h.Key, out float y)) continue;
-            var item = new OutlineItem { Title = h.Title, Level = h.Level, Y = y };
+            var item = new OutlineItem { Title = h.Title, Level = h.Level, Y = y, Heading = h.Element };
             while (stack.Count > 0 && stack[^1].Level >= h.Level) stack.RemoveAt(stack.Count - 1);
             if (stack.Count > 0)
             {
@@ -1152,8 +1225,32 @@ internal sealed partial class PdfDocumentWriter
 
     private int[] _pageIds = Array.Empty<int>();
 
-    /// <summary>Writes an explicit destination for flow position <paramref name="y"/>: its page, scrolled to that height.</summary>
-    private void WriteDest(float y)
+    /// <summary>
+    /// Writes the destination of a link or bookmark to flow position <paramref name="y"/> (a <c>/Dest</c> entry). A
+    /// PDF 2.0 tagged file goes there with a GoTo action that also names the structure element (<paramref name="target"/>,
+    /// or the nearest ancestor that was written), a structure destination as PDF/UA-2 requires.
+    /// </summary>
+    private void WriteGoTo(float y, StructElem? target)
+    {
+        while (target is { Id: 0 }) target = target.Parent;
+        if (!Pdf20 || target == null)
+        {
+            _out.Ascii("/Dest ");
+            WriteDest(y);
+            return;
+        }
+        _out.Ascii("/A << /S /GoTo /D ");
+        WriteDest(y);
+        _out.Ascii(" /SD ");
+        WriteDest(y, target.Id);
+        _out.Ascii(" >>");
+    }
+
+    /// <summary>
+    /// Writes an explicit destination for flow position <paramref name="y"/>: its page, scrolled to that height; or, with
+    /// <paramref name="structId"/>, the structure destination of that element, scrolled the same.
+    /// </summary>
+    private void WriteDest(float y, int structId = 0)
     {
         // The section the position is in, then the page within the section.
         int si = 0;
@@ -1165,7 +1262,7 @@ internal sealed partial class PdfDocumentWriter
         int p = Math.Clamp(_sectionFirst[si] + (int)Math.Floor((y + 0.01f) / h), _sectionFirst[si], last);
         float py = page.Height - page.MarginTop - page.BandTop - (y - (p - _sectionFirst[si]) * h);
         float paperDy = PaperDy(page);
-        _out.Ascii("[").Int(_pageIds[p]).Ascii(" 0 R /XYZ 0 ").Num(Math.Min(py, page.Height) * page.Scale + paperDy).Ascii(" null]");
+        _out.Ascii("[").Int(structId != 0 ? structId : _pageIds[p]).Ascii(" 0 R /XYZ 0 ").Num(Math.Min(py, page.Height) * page.Scale + paperDy).Ascii(" null]");
     }
 
     private IReadOnlyList<PageSection> _sections = Array.Empty<PageSection>();
@@ -1729,7 +1826,7 @@ internal sealed partial class PdfDocumentWriter
                     b.Sp().Num(shape.FontSize).Ascii(" Tf ").Int(mode).Ascii(" Tr 0 Tw ")
                         .Num(shape.CharSpacing).Ascii(" Tc ").Num6(m.A).Sp().Num6(m.B).Sp().Num6(m.C).Sp().Num6(m.D).Sp().Num(m.E).Sp().Num(m.F)
                         .Ascii(" Tm ");
-                    if (svgFont is EmbeddedFont svgFontEmbedded) WriteGlyphHex(b, svgFontEmbedded, _subsets[svgFontEmbedded.Program], shape.Text!, shape.FontSize, shape.Rtl);
+                    if (svgFont is EmbeddedFont svgFontEmbedded) WriteGlyphHex(b, svgFontEmbedded, _subsets[svgFontEmbedded.Program], shape.Text!, shape.FontSize, shape.Rtl, shape.CharSpacing);
                     else WriteStandardText(b, shape.Font!, shape.Rtl ? Text.Bidi.VisualText(shape.Text!) : shape.Text!);
                     b.Ascii(" ET\n");
                     continue;
@@ -2240,26 +2337,31 @@ internal sealed partial class PdfDocumentWriter
     /// Shows text as hex strings of CIDs: with TJ when the font kerns, so kerned pairs can move glyphs, or when complex
     /// shaping positioned the glyphs. Right-to-left text is shown last glyph first.
     /// </summary>
-    private void WriteGlyphHex(ByteBuffer b, EmbeddedFont font, GlyphSubset subset, string text, float size, bool rtl)
+    private void WriteGlyphHex(ByteBuffer b, EmbeddedFont font, GlyphSubset subset, string text, float size, bool rtl, float charSpacing = 0)
     {
         bool positioned = font.Shape(text, 0, text.Length, _glyphs, rtl);
         if (rtl) _glyphs.Reverse();
+        // PDF/A and PDF/UA forbid showing .notdef: characters the font lacks become blank space of the same width.
+        bool skipNotdef = NoNotdef && size > 0;
+        float notdefAdjust = skipNotdef ? -(font.Program.Advance1000(0) + charSpacing * 1000f / size) : 0;
         if (positioned && size > 0)
         {
-            WritePositionedGlyphs(b, font, subset, text, size, 0, false, 0, 0);
+            WritePositionedGlyphs(b, font, subset, text, size, 0, skipNotdef, notdefAdjust, 0);
             return;
         }
-        bool kern = font.HasKerning;
+        bool array = font.HasKerning || skipNotdef;
         int prev = -1;
-        b.Ascii(kern ? "[<" : "<");
+        b.Ascii(array ? "[<" : "<");
         foreach (var g in _glyphs)
         {
-            if (kern && prev >= 0 && (rtl ? font.Program.Kern1000(g.Gid, prev) : font.Program.Kern1000(prev, g.Gid)) is int k && k != 0)
+            if (font.HasKerning && prev >= 0 && (rtl ? font.Program.Kern1000(g.Gid, prev) : font.Program.Kern1000(prev, g.Gid)) is int k && k != 0)
                 b.Ascii(">").Int(-k).Ascii("<");
             prev = g.Gid;
-            Hex4(b, subset.Cid(g, text));
+            int cid = subset.Cid(g, text);
+            if (cid == 0 && skipNotdef) b.Ascii(">").Num(notdefAdjust).Ascii("<");
+            else Hex4(b, cid);
         }
-        b.Ascii(kern ? ">] TJ" : "> Tj");
+        b.Ascii(array ? ">] TJ" : "> Tj");
     }
 
     private GlyphSubset Subset(FontProgram program)
@@ -2344,7 +2446,7 @@ internal sealed partial class PdfDocumentWriter
         // Word spacing (Tw) only applies to the single-byte code 32, so justified text moves spaces explicitly.
         // PDF/A forbids showing .notdef: characters no font has become blank space of the same width.
         string text = t.Text;
-        bool skipNotdef = Conformance != PdfConformance.None && t.Size > 0;
+        bool skipNotdef = NoNotdef && t.Size > 0;
         // Kerning moves the glyph after a kerned pair, as the layout measured it.
         bool kern = font.HasKerning && t.Size > 0;
         bool adjust = (t.WordSpacing != 0 || skipNotdef || kern) && t.Size > 0;
