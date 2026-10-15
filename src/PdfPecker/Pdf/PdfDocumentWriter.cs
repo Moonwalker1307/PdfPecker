@@ -1694,12 +1694,12 @@ internal sealed partial class PdfDocumentWriter
                     int mode = shape.HasFill ? (shape.HasStroke ? 2 : 0) : 1;
                     var svgFont = Leaf(shape.Font!);
                     if (svgFont is EmbeddedFont svgEmbedded) b.Ascii("BT /E").Int(_subsetList.IndexOf(_subsets[svgEmbedded.Program]) + 1);
-                    else b.Ascii("BT /F").Int(shape.Font!.Index + 1);
+                    else b.Ascii("BT /F").Int(((StandardFont)shape.Font!).Index + 1);
                     b.Sp().Num(shape.FontSize).Ascii(" Tf ").Int(mode).Ascii(" Tr 0 Tw ")
                         .Num(shape.CharSpacing).Ascii(" Tc ").Num6(m.A).Sp().Num6(m.B).Sp().Num6(m.C).Sp().Num6(m.D).Sp().Num(m.E).Sp().Num(m.F)
                         .Ascii(" Tm ");
-                    if (svgFont is EmbeddedFont svgFontEmbedded) WriteGlyphHex(b, svgFontEmbedded, _subsets[svgFontEmbedded.Program], shape.Text!);
-                    else WriteStandardText(b, shape.Font!, shape.Text!);
+                    if (svgFont is EmbeddedFont svgFontEmbedded) WriteGlyphHex(b, svgFontEmbedded, _subsets[svgFontEmbedded.Program], shape.Text!, shape.FontSize, shape.Rtl);
+                    else WriteStandardText(b, shape.Font!, shape.Rtl ? Text.Bidi.VisualText(shape.Text!) : shape.Text!);
                     b.Ascii(" ET\n");
                     continue;
             }
@@ -2127,8 +2127,8 @@ internal sealed partial class PdfDocumentWriter
             if (shape.FillPattern != null) CollectSvgFonts(shape.FillPattern.Shapes, usedFonts, depth + 1);
             if (shape.StrokePattern != null) CollectSvgFonts(shape.StrokePattern.Shapes, usedFonts, depth + 1);
             if (shape.Font == null || shape.Kind != SvgShape.KindText) continue;
-            if (Leaf(shape.Font) is EmbeddedFont ef) AddGlyphs(ef, shape.Text!, 0, shape.Text!.Length);
-            else usedFonts[shape.Font.Index] = true;
+            if (Leaf(shape.Font) is EmbeddedFont ef) AddGlyphs(ef, shape.Text!, 0, shape.Text!.Length, shape.Rtl);
+            else usedFonts[((StandardFont)shape.Font).Index] = true;
             CheckCharacters(shape.Font, shape.Text!, 0, shape.Text!.Length);
         }
     }
@@ -2205,16 +2205,26 @@ internal sealed partial class PdfDocumentWriter
         foreach (var g in _glyphs) subset.Cid(g, text);
     }
 
-    /// <summary>Shows text as hex strings of CIDs: with TJ when the font kerns, so kerned pairs can move glyphs.</summary>
-    private void WriteGlyphHex(ByteBuffer b, EmbeddedFont font, GlyphSubset subset, string text)
+    /// <summary>
+    /// Shows text as hex strings of CIDs: with TJ when the font kerns, so kerned pairs can move glyphs, or when complex
+    /// shaping positioned the glyphs. Right-to-left text is shown last glyph first.
+    /// </summary>
+    private void WriteGlyphHex(ByteBuffer b, EmbeddedFont font, GlyphSubset subset, string text, float size, bool rtl)
     {
+        bool positioned = font.Shape(text, 0, text.Length, _glyphs, rtl);
+        if (rtl) _glyphs.Reverse();
+        if (positioned && size > 0)
+        {
+            WritePositionedGlyphs(b, font, subset, text, size, 0, false, 0, 0);
+            return;
+        }
         bool kern = font.HasKerning;
         int prev = -1;
         b.Ascii(kern ? "[<" : "<");
-        font.Shape(text, 0, text.Length, _glyphs);
         foreach (var g in _glyphs)
         {
-            if (kern && prev >= 0 && font.Program.Kern1000(prev, g.Gid) is int k && k != 0) b.Ascii(">").Int(-k).Ascii("<");
+            if (kern && prev >= 0 && (rtl ? font.Program.Kern1000(g.Gid, prev) : font.Program.Kern1000(prev, g.Gid)) is int k && k != 0)
+                b.Ascii(">").Int(-k).Ascii("<");
             prev = g.Gid;
             Hex4(b, subset.Cid(g, text));
         }
@@ -2313,7 +2323,7 @@ internal sealed partial class PdfDocumentWriter
         if (t.Rtl) _glyphs.Reverse();
         if (positioned && t.Size > 0)
         {
-            WritePositionedGlyphs(b, font, subset, t, skipNotdef, notdefAdjust, spaceAdjust);
+            WritePositionedGlyphs(b, font, subset, t.Text, t.Size, t.WordSpacing, skipNotdef, notdefAdjust, spaceAdjust);
             return;
         }
         b.Ascii(adjust ? "[<" : "<");
@@ -2337,9 +2347,9 @@ internal sealed partial class PdfDocumentWriter
     /// Shows glyphs that complex shaping positioned, in drawing order: TJ moves each glyph by its offset and corrects
     /// its advance to the shaped one, and a vertical offset (a mark above or below its base) raises it with Ts.
     /// </summary>
-    private void WritePositionedGlyphs(ByteBuffer b, EmbeddedFont font, GlyphSubset subset, TextOp t, bool skipNotdef, float notdefAdjust, float spaceAdjust)
+    private void WritePositionedGlyphs(ByteBuffer b, EmbeddedFont font, GlyphSubset subset, string text, float size, float wordSpacing,
+        bool skipNotdef, float notdefAdjust, float spaceAdjust)
     {
-        string text = t.Text;
         b.Ascii("[<");
         for (int k = 0; k < _glyphs.Count; k++)
         {
@@ -2354,12 +2364,12 @@ internal sealed partial class PdfDocumentWriter
             if (g.Dy != 0)
             {
                 // The raised glyph is shown on its own, between two TJ arrays.
-                b.Ascii(">] TJ ").Num(g.Dy * t.Size / 1000f).Ascii(" Ts [<");
+                b.Ascii(">] TJ ").Num(g.Dy * size / 1000f).Ascii(" Ts [<");
             }
             if (g.Dx != 0) b.Ascii(">").Num(-g.Dx).Ascii("<");
             Hex4(b, cid);
             float after = g.Dx + width - g.Advance;
-            if (t.WordSpacing != 0 && g.Length > 0 && text[g.Start] == ' ' && k + 1 < _glyphs.Count) after += spaceAdjust;
+            if (wordSpacing != 0 && g.Length > 0 && text[g.Start] == ' ' && k + 1 < _glyphs.Count) after += spaceAdjust;
             if (after != 0) b.Ascii(">").Num(after).Ascii("<");
             if (g.Dy != 0) b.Ascii(">] TJ 0 Ts [<");
         }

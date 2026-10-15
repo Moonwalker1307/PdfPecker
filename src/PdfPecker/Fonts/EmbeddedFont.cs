@@ -243,8 +243,9 @@ internal sealed class FontChain : TextFont
         {
             int start = i, cp = text[i];
             if (char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1])) cp = char.ConvertToUtf32(text[i], text[++i]);
-            // Spaces stay with the run they are in, so that a fallback character does not split a run more than needed.
-            var f = (cp == ' ' || StaysInRun(cp)) && current != null && Covers(current, cp) ? current : Pick(cp);
+            // Marks and joiners stay with the run they are in. Spaces are drawn with the font that measured them (the
+            // primary font, as in browsers), or text after a fallback run would be drawn where the layout did not put it.
+            var f = StaysInRun(cp) && current != null && Covers(current, cp) ? current : Pick(cp);
             if (!ReferenceEquals(f, current))
             {
                 if (current != null) runs.Add(new FontRun(current, runStart, start - runStart));

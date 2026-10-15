@@ -3,6 +3,7 @@ using PdfPecker.Css;
 using PdfPecker.Fonts;
 using PdfPecker.Html;
 using PdfPecker.Pdf;
+using PdfPecker.Text;
 
 namespace PdfPecker.Svg;
 
@@ -31,7 +32,8 @@ internal sealed class SvgShape
 
     // Text runs.
     public string? Text;
-    public StandardFont? Font;
+    public TextFont? Font;                        // one concrete font: a standard or an embedded one
+    public bool Rtl;                              // drawn right to left (shaped and shown last glyph first)
     public float FontSize, CharSpacing;
     public Matrix TextMatrix;
 
@@ -642,7 +644,7 @@ internal sealed partial class SvgImage
                 var str = sb.ToString();
                 var st = el.Style;
                 float size = st.FontSize / 0.75f;
-                float w = st.StandardFont.Measure(str, size) + st.LetterSpacing / 0.75f * str.Length;
+                float w = st.Font.Measure(str, size) + st.LetterSpacing / 0.75f * str.Length;
                 runs.Add(new TextRun(str, st, penX, penY, w));
                 penX += w;
             }
@@ -656,7 +658,7 @@ internal sealed partial class SvgImage
             var trimmed = last.Text.TrimEnd(' ');
             float size = last.Style.FontSize / 0.75f;
             runs[^1] = new TextRun(trimmed, last.Style, last.X, last.Y,
-                last.Style.StandardFont.Measure(trimmed, size) + last.Style.LetterSpacing / 0.75f * trimmed.Length);
+                last.Style.Font.Measure(trimmed, size) + last.Style.LetterSpacing / 0.75f * trimmed.Length);
         }
 
         chunkStarts.Add(runs.Count);
@@ -667,15 +669,109 @@ internal sealed partial class SvgImage
             float left = float.MaxValue, right = float.MinValue;
             for (int i = from; i < to; i++) { left = Math.Min(left, runs[i].X); right = Math.Max(right, runs[i].X + runs[i].Width); }
             var anchor = runs[from].Style.SvgTextAnchor;
+            if (text.Style!.Rtl || NeedsBidi(runs, from, to))
+            {
+                EmitBidiChunk(runs, from, to, text.Style.Rtl, anchor, ctm, opacity);
+                continue;
+            }
             float shift = anchor == 1 ? -(right - left) / 2 : anchor == 2 ? -(right - left) : 0;
-            for (int i = from; i < to; i++) EmitText(runs[i], shift, ctm, opacity);
+            for (int i = from; i < to; i++) EmitText(runs[i], shift, ctm, opacity, rtl: false);
         }
     }
 
-    private void EmitText(TextRun run, float shift, Matrix ctm, float opacity)
+    private static bool NeedsBidi(List<TextRun> runs, int from, int to)
+    {
+        for (int i = from; i < to; i++)
+            foreach (char c in runs[i].Text)
+                if (c >= 0x0590 && UnicodeTables.NeedsBidi(c)) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Lays out a text chunk with right-to-left text: its characters are put in visual order by the Unicode
+    /// Bidirectional Algorithm, with the direction of the &lt;text&gt; element, and drawn one after another from the
+    /// chunk's start. Right to left, text-anchor: start puts the chunk's right end at its x, as in browsers.
+    /// </summary>
+    private void EmitBidiChunk(List<TextRun> runs, int from, int to, bool rtl, int anchor, Matrix ctm, float opacity)
+    {
+        var all = new System.Text.StringBuilder();
+        for (int i = from; i < to; i++) all.Append(runs[i].Text);
+        string s = all.ToString();
+        if (s.Length == 0) return;
+        var types = new BidiClass[s.Length];
+        var cps = new int[s.Length];
+        for (int k = 0; k < s.Length; k++)
+        {
+            int cp = s[k];
+            if (char.IsHighSurrogate(s[k]) && k + 1 < s.Length && char.IsLowSurrogate(s[k + 1])) cp = char.ConvertToUtf32(s[k], s[k + 1]);
+            else if (char.IsLowSurrogate(s[k]) && k > 0 && char.IsHighSurrogate(s[k - 1])) cp = char.ConvertToUtf32(s[k - 1], s[k]);
+            types[k] = UnicodeTables.Bidi(cp);
+            cps[k] = char.IsLowSurrogate(s[k]) ? 0 : cp;
+        }
+        int para = rtl ? 1 : 0;
+        var levels = Bidi.ResolveLevels(types, cps, para);
+        Bidi.ResetWhitespace(types, levels, para);
+
+        // Pieces of one run and one level, measured in their own style.
+        var pieces = new List<(int Run, int Start, int Length, float Width)>();
+        var pieceLevels = new List<byte>();
+        int offset = 0;
+        for (int i = from; i < to; i++)
+        {
+            var run = runs[i];
+            for (int k = 0; k < run.Text.Length;)
+            {
+                int end = k + 1;
+                while (end < run.Text.Length && levels[offset + end] == levels[offset + k]) end++;
+                var st = run.Style;
+                float size = st.FontSize / 0.75f;
+                float w = st.Font.MeasureUnits(run.Text, k, end - k) * size / 1000f + st.LetterSpacing / 0.75f * (end - k);
+                pieces.Add((i, k, end - k, w));
+                pieceLevels.Add(levels[offset + k]);
+                k = end;
+            }
+            offset += run.Text.Length;
+        }
+        float total = 0;
+        foreach (var p in pieces) total += p.Width;
+        float x = runs[from].X;
+        // text-anchor start and end are the start and end of the text in its direction.
+        x += anchor == 1 ? -total / 2 : (anchor == 2) != rtl ? -total : 0;
+        foreach (int k in Bidi.VisualOrder(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(pieceLevels)))
+        {
+            var p = pieces[k];
+            var run = runs[p.Run];
+            var piece = new TextRun(run.Text.Substring(p.Start, p.Length), run.Style, x, run.Y, p.Width);
+            EmitText(piece, 0, ctm, opacity, (pieceLevels[k] & 1) != 0);
+            x += p.Width;
+        }
+    }
+
+    /// <summary>Adds a run of text as one shape per font that draws part of it; right to left, the last part is leftmost.</summary>
+    private void EmitText(TextRun run, float shift, Matrix ctm, float opacity, bool rtl)
     {
         var s = run.Style;
         if (!s.Visible || run.Text.Length == 0) return;
+        var fontRuns = new List<FontRun>();
+        s.Font.Split(run.Text, fontRuns);
+        if (fontRuns.Count == 1)
+        {
+            EmitTextShape(run, fontRuns[0].Font, shift, ctm, opacity, rtl);
+            return;
+        }
+        float size = s.FontSize / 0.75f, x = run.X;
+        for (int r = 0; r < fontRuns.Count; r++)
+        {
+            var fr = fontRuns[rtl ? fontRuns.Count - 1 - r : r];
+            float w = fr.Font.MeasureUnits(run.Text, fr.Start, fr.Length) * size / 1000f + s.LetterSpacing / 0.75f * fr.Length;
+            EmitTextShape(new TextRun(run.Text.Substring(fr.Start, fr.Length), s, x, run.Y, w), fr.Font, shift, ctm, opacity, rtl);
+            x += w;
+        }
+    }
+
+    private void EmitTextShape(TextRun run, TextFont font, float shift, Matrix ctm, float opacity, bool rtl)
+    {
+        var s = run.Style;
         float size = s.FontSize / 0.75f;
         float x = run.X + shift;
         float y = run.Y + s.SvgBaseline switch
@@ -690,7 +786,8 @@ internal sealed partial class SvgImage
         {
             Kind = SvgShape.KindText,
             Text = run.Text,
-            Font = s.StandardFont,
+            Font = font,
+            Rtl = rtl,
             FontSize = size,
             CharSpacing = s.LetterSpacing / 0.75f,
             TextMatrix = new Matrix(1, 0, 0, -1, x, y).Then(ctm),
