@@ -238,6 +238,13 @@ options.MissingFont = family => logger.LogWarning("Font {Family} is not availabl
 options.UseSystemFonts = true;   // looks in C:\Windows\Fonts, /Library/Fonts, /usr/share/fonts, ...
 ```
 
+Likewise, a character that no font has is drawn as an empty box (blank space in PDF/A). `MissingCharacter` is called
+once for each such character before anything is written, so a test can make sure a template's fonts cover its data:
+
+```csharp
+options.MissingCharacter = ch => throw new InvalidOperationException($"No font has U+{char.ConvertToUtf32(ch, 0):X4}");
+```
+
 ### Watermarks, passwords and PDF/A
 
 ```csharp
@@ -354,7 +361,14 @@ var options = new PdfOptions
 
 // Or sign any existing PDF; earlier signatures stay valid.
 byte[] signed = PdfSigner.Sign(File.ReadAllBytes("in.pdf"), new PdfSignatureOptions(cert));
+
+// A contract template with empty signature fields: sign into one by name, at its place on the page.
+byte[] countersigned = PdfSigner.Sign(contract, new PdfSignatureOptions(cert) { FieldName = "Buyer" });
 ```
+
+When `FieldName` names an empty signature field the PDF already has (`"Parties.Buyer"` for a nested one), the signature
+goes into it and the box fills the field's rectangle; signing a field of another type or one that is already signed
+throws `PdfSignatureException`. Any other name adds a new field.
 
 Signatures are PAdES baseline (`ETSI.CAdES.detached`) by default, or classic `adbe.pkcs7.detached` with
 `Format = PdfSignatureFormat.Pkcs7Detached`; RSA and ECDSA keys with SHA-256/384/512. The signature is appended as an
@@ -428,6 +442,10 @@ PdfMerger.MergeFiles("all.pdf", new[] { "a.pdf", "b.pdf" });
 PdfMerger.Merge(new[] { invoiceStream, termsStream }, outputStream);
 await PdfMerger.MergeAsync(uploads.Select(f => f.OpenReadStream()), response.Body);
 ```
+
+Tagged inputs stay tagged: their structure trees are joined under one root, so the merged file is still accessible,
+and when every input is PDF/UA-1 the result says so too (veraPDF passes it). An input in another language than the
+first keeps its language on its own part of the tree. Untagged inputs merge as before.
 
 With streams (and `MergeFiles`), only one input is held in memory at a time and the merged document goes to the output
 as each input is done, so memory follows the largest input rather than the whole batch: merging 100 files of 32 MB in
@@ -559,7 +577,7 @@ specificity and `!important` handled as in browsers. Properties:
 | SVG | `fill`, `stroke`, `stroke-width`, `fill-opacity`, `stroke-opacity`, `fill-rule`, `stroke-linecap`, `stroke-linejoin`, `stroke-miterlimit`, `clip-path`, `clip-rule`, `mask`, `mask-type`, `filter`, `marker`, `marker-start`/`-mid`/`-end`, `flood-color`, `flood-opacity`, `color-interpolation-filters`, `text-anchor`, `dominant-baseline` (as CSS or presentation attributes) |
 | Lists | `list-style-type` (disc, circle, square, decimal, decimal-leading-zero, alpha, roman, none), `list-style` |
 | Tables | `border-collapse` (each shared border drawn once, the wider one winning), `border-spacing`, cell `vertical-align`, automatic column widths, `table-layout: fixed`, a table `height` shared out over the rows |
-| Paging | `page-break-before`/`after`/`inside`, `break-before`/`after`/`inside` (`always`, `page`, `avoid`), `orphans`, `widows`, `@page` size and margins |
+| Paging | `page-break-before`/`after`/`inside`, `break-before`/`after`/`inside` (`always`, `page`, `avoid`), `orphans`, `widows`, `@page` size and margins, `@page :first`/`:left`/`:right`, page margin boxes (`@top-center` and the other fifteen, with `content: "Page " counter(page) " of " counter(pages)`) |
 
 Units: `px`, `pt`, `em`, `rem`, `%`, `mm`, `cm`, `in`, `pc`, `ex`, `ch`, `vw`, `vh`, `vmin`, `vmax` (the viewport is
 the page's content area, minus any running header and footer, in whole pixels as in Chrome). Colours: names, `#rgb`, `#rrggbb`,
@@ -643,17 +661,14 @@ not listed in [What is supported](#what-is-supported) should be assumed missing.
 
 **CSS**
 
-- Math functions work on lengths and numbers only: not on angles (`rotate(calc(...))`) and not the newer ones (`round()`,
-  `mod()`, `sin()` and so on). A table column width that mixes a percentage with other units (`calc(50% - 10px)`) is
-  sized as `auto`.
-- `@import` is ignored (use `<link rel="stylesheet">`). Rules inside `@supports`, `@layer` and `@container` blocks
-  are skipped, as are `@page :first`/`:left`/`:right` and page margin boxes (`@top-center`; use
-  [running headers and footers](#what-is-supported) instead).
-- Selectors: no `:has()`, `:nth-child(… of S)` or `::first-letter`/`::first-line`/`::marker`. A rule with an
+- A table column width that mixes a percentage with other units (`calc(50% - 10px)`) is sized as `auto`.
+- `@import` is ignored (use `<link rel="stylesheet">`), and rules inside `@container` blocks are skipped.
+- Paged media: no named pages (`page`), running elements (`string-set`, `running()`) or `target-counter()`.
+- Selectors: no `::first-letter`/`::first-line`. A rule with an
   unsupported selector is skipped. `:hover`, `:focus` and similar interaction states never match. Selectors inside
   `:is()`, `:where()` and `:not()` may have at most eight compound parts (one when nested in another of them).
 - Properties not supported: `filter`, `mix-blend-mode`, `clip-path` on HTML elements (only in SVG), `border-image`,
-  `list-style-image`, `column-span`, `column-rule` and inset `box-shadow`.
+  `list-style-image` and inset `box-shadow`.
 - `text-shadow` blur is approximated with faint copies of the text rather than a true Gaussian blur, and decorations
   (underlines) get no shadow. `text-overflow` only supports `ellipsis` at the end of the line (`clip` and custom
   strings do nothing). `aspect-ratio` does not take part in min-/max-content sizing (shrink-to-fit widths) and is
@@ -673,7 +688,7 @@ not listed in [What is supported](#what-is-supported) should be assumed missing.
 
 **Layout**
 
-- Grid: no `dense` packing and no subgrid; `span <name>` counts as `span 1`.
+- Grid: no subgrid.
 - Multi-column: children are kept whole and balanced between columns; a single block is never split across columns.
 - Overflow: a positioned child with a `z-index` inside a clipping box stays stacked within that box.
 

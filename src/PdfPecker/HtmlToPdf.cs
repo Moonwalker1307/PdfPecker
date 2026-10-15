@@ -250,6 +250,7 @@ public static class HtmlToPdf
             WatermarkFont = watermarkFont,
             MarginFont = marginFont,
             EmbedStandardFonts = options.EmbedStandardFonts,
+            MissingCharacter = options.MissingCharacter,
             MaxPages = options.MaxPages,
             Cancellation = cancellationToken,
             Structure = structure,
