@@ -65,6 +65,10 @@ public static class HtmlToPdf
             else if (conformance != PdfConformance.PdfA3b)
                 throw new ArgumentException("An e-invoice needs PDF/A-3: set PdfOptions.Conformance to PdfA3b or leave it at None.", nameof(options));
         }
+        var attachments = EmbeddedFiles.Prepare(options.Attachments, options.EInvoice);
+        if (conformance == PdfConformance.PdfA2b && attachments.Count > 0)
+            throw new ArgumentException("PDF/A-2b allows attaching only PDF/A files, which PdfPecker does not check: "
+                + "set PdfOptions.Conformance to PdfA3b, which allows any attachment, or to None for a plain PDF.", nameof(options));
         if (conformance != PdfConformance.None && options.Security != null)
             throw new ArgumentException(options.EInvoice != null
                 ? "An e-invoice is a PDF/A file, which does not allow encryption: remove PdfOptions.Security."
@@ -134,9 +138,13 @@ public static class HtmlToPdf
         var paged = new PagedContent();
         float viewport = viewportH;
         ComputedStyle root = null!;
+        // hyphens: auto: the language of the text is its nearest lang attribute, else PdfOptions.Language.
+        var hyphenation = HyphenationTable(options.Hyphenation);
+        string? htmlLang = doc.Children.OfType<Element>().FirstOrDefault(c => c.Name == "html") is { } htmlElement
+            ? htmlElement.GetAttribute("lang") ?? htmlElement.GetAttribute("xml:lang") : null;
         StyleResolver Resolve()
         {
-            root = new ComputedStyle { Display = Display.Block, Fonts = fonts, MissingFonts = missingFonts };
+            root = new ComputedStyle { Display = Display.Block, Fonts = fonts, MissingFonts = missingFonts, Lang = options.Language, Hyphenation = hyphenation };
             var r = new StyleResolver(sheet, page.ContentWidth, viewport) { Cancellation = cancellationToken, Paged = paged };
             r.ResolveTree(doc, root);
             return r;
@@ -310,6 +318,7 @@ public static class HtmlToPdf
             Security = options.Security,
             Conformance = conformance,
             EInvoice = options.EInvoice,
+            Attachments = attachments,
             WatermarkFont = watermarkFont,
             MarginFont = marginFont,
             EmbedStandardFonts = options.EmbedStandardFonts,
@@ -329,7 +338,7 @@ public static class HtmlToPdf
         };
         // Page-margin boxes of @page rules (@top-center and the like), laid out per page like the bands.
         var marginBoxes = !options.IgnoreCssPageRules && PageMarginBoxes.AnyIn(sheet.PageRules)
-            ? new PageMarginBoxes(sheet.PageRules, () => new ComputedStyle { Display = Display.Block, Fonts = fonts, MissingFonts = missingFonts },
+            ? new PageMarginBoxes(sheet.PageRules, () => new ComputedStyle { Display = Display.Block, Fonts = fonts, MissingFonts = missingFonts, Lang = htmlLang ?? options.Language, Hyphenation = hyphenation },
                 page, images, cancellationToken, paged)
             : null;
         Func<int, int, List<DrawOp>>? pageBands = null;
@@ -379,6 +388,16 @@ public static class HtmlToPdf
         public PageSetup Page = null!;
         public LayoutEngine Engine = null!;
         public float Height;
+    }
+
+    /// <summary>PdfOptions.Hyphenation with its language tags in lower case with hyphens, as the layout looks them up.</summary>
+    private static Dictionary<string, HyphenationPatterns>? HyphenationTable(IDictionary<string, HyphenationPatterns>? patterns)
+    {
+        if (patterns == null || patterns.Count == 0) return null;
+        var table = new Dictionary<string, HyphenationPatterns>(StringComparer.Ordinal);
+        foreach (var (lang, p) in patterns)
+            if (!string.IsNullOrWhiteSpace(lang) && p != null) table[lang.Trim().Replace('_', '-').ToLowerInvariant()] = p;
+        return table;
     }
 
     /// <summary>

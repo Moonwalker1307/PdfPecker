@@ -89,6 +89,9 @@ public enum PdfAccessibility
 /// <summary>Options for <see cref="HtmlToPdf"/>.</summary>
 public sealed class PdfOptions
 {
+    /// <summary>A shallow copy, to change a few settings without touching the caller's options.</summary>
+    internal PdfOptions Clone() => (PdfOptions)MemberwiseClone();
+
     /// <summary>Page size. Default: A4. A CSS <c>@page { size: ... }</c> rule overrides it unless <see cref="IgnoreCssPageRules"/> is set.</summary>
     public PageSize PageSize { get; set; } = PageSize.A4;
 
@@ -275,11 +278,28 @@ public sealed class PdfOptions
     public string? Language { get; set; }
 
     /// <summary>
+    /// Hyphenation patterns for <c>hyphens: auto</c>, by language tag (such as "sv" or "en-GB"; a tag also matches
+    /// longer tags of its language, so "sv" covers "sv-FI"). They take precedence over the patterns built into the
+    /// library, which cover English, Danish, German, Dutch and Norwegian. Default: null.
+    /// </summary>
+    public IDictionary<string, HyphenationPatterns>? Hyphenation { get; set; }
+
+    /// <summary>
     /// Make a Factur-X / ZUGFeRD e-invoice: the invoice's CII XML is attached to the PDF with the metadata that tells
     /// software it is there. The file is PDF/A-3b, so <see cref="Conformance"/> must be None (it is then raised to
     /// PDF/A-3b) or <see cref="PdfConformance.PdfA3b"/>, and <see cref="Security"/> must be null. Default: null.
     /// </summary>
     public PdfEInvoice? EInvoice { get; set; }
+
+    /// <summary>
+    /// Files to attach to the PDF (embedded files), shown in the viewer's attachments panel. File names must be unique.
+    /// Attachments do not change <see cref="Conformance"/>: they work in a plain PDF, with <see cref="Security"/> (they
+    /// are encrypted too) and with PDF/A-3b, where they become associated files with their
+    /// <see cref="PdfAttachment.Relationship"/>. PDF/A-2b allows only PDF/A attachments, so attachments with
+    /// <see cref="PdfConformance.PdfA2b"/> throw <see cref="ArgumentException"/>. Default: empty.
+    /// </summary>
+    /// <example><code>options.Attachments.Add(new PdfAttachment("data.csv", csvBytes) { Relationship = PdfAttachmentRelationship.Data });</code></example>
+    public IList<PdfAttachment> Attachments { get; set; } = new List<PdfAttachment>();
 
     /// <summary>
     /// Embed the bundled Liberation fonts (metric-compatible with Helvetica, Times and Courier) instead of referring to

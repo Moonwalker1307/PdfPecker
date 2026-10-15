@@ -49,9 +49,10 @@ public sealed class PdfMergeOptions
 /// </summary>
 /// <remarks>
 /// The result is a new, unencrypted PDF. Digital signatures are not carried over (merging changes the document, which
-/// would break them anyway), nor are PDF/A conformance or attachments; tagged inputs stay tagged, and page labels are
-/// kept. A form field named like one in an earlier input is renamed "name_2", "name_3", ..., so each copy keeps its value.
-/// To take only some pages of an input, give it a <see cref="PdfMergeInput"/> with a <see cref="PdfPageRange"/>. Streams
+/// would break them anyway), nor is PDF/A conformance; tagged inputs stay tagged, and page labels are kept. Attachments
+/// (embedded files) are kept, an attachment named like one in an earlier input becoming "name (2).ext". A form field
+/// named like one in an earlier input is renamed "name_2", "name_3", ..., so each copy keeps its value. To take only
+/// some pages of an input, give it a <see cref="PdfMergeInput"/> with a <see cref="PdfPageRange"/>. Streams
 /// that are identical in several inputs (a logo, an embedded font) are written once. Inputs are treated as untrusted:
 /// damaged files are repaired where possible, and decoding work is limited per input. The byte[] overloads hold every
 /// input and the result in memory; the Stream overloads, <see cref="MergeAsync(IAsyncEnumerable{byte[]}, Stream, PdfMergeOptions?, CancellationToken)"/>

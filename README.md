@@ -273,6 +273,33 @@ and shaped too, with `direction` deciding which way a text chunk runs from its `
 the original characters in logical order. A font without OpenType Arabic
 features is shaped with the Unicode presentation forms instead.
 
+### Hyphenation
+
+`hyphens: auto` hyphenates words with the TeX hyphenation patterns (Liang's algorithm) of the text's language: the
+nearest `lang` attribute, else `PdfOptions.Language`. As in Chrome, a word is hyphenated only where it does not fit on
+its line, and a hyphen (or the `hyphenate-character`) is shown at the break. Words shorter than five letters, words with
+digits or other non-letters inside, URLs and e-mail addresses, and capitalized English words are not hyphenated, and a
+word with `&shy;` breaks only there. Patterns for English (US patterns for every `en` tag), Danish, German, Dutch and
+Norwegian (`nb`, `nn`, `no`) are built in and loaded on first use; others can be supplied as TeX pattern files, such as
+those of the [hyph-utf8](https://github.com/hyphenation/tex-hyphen) project:
+
+```csharp
+var options = new PdfOptions
+{
+    // Your own patterns for a language (they take precedence over the built-in ones).
+    Hyphenation = new Dictionary<string, HyphenationPatterns>
+    {
+        ["sv"] = new HyphenationPatterns(File.ReadAllText("hyph-sv.tex"), leftMin: 2, rightMin: 2),
+    },
+};
+byte[] pdf = HtmlToPdf.Convert("""
+    <html lang="da"><body style="hyphens: auto; text-align: justify">
+      <p>Arbejdsmarkedsbidraget betales af lønmodtageren.</p>
+      <p lang="sv">Avstavning med egna mönster.</p>
+    </body></html>
+    """, options);
+```
+
 ### Watermarks, passwords and PDF/A
 
 ```csharp
@@ -297,6 +324,8 @@ and a file ID, and CMYK JPEGs are converted to RGB. All fonts are embedded: text
 bundled Liberation fonts (see [Fonts](#fonts)). PDF/A does not allow encryption, so combining `Conformance` with
 `Security` throws an `ArgumentException`. AES-256 keys come from a password hash that is slow on purpose, which adds
 about 3 ms to a conversion.
+
+`Watermark` applies while converting HTML; to stamp a PDF you already have, see [Stamping PDFs](#stamping-pdfs).
 
 ### Accessibility: tagged PDF and PDF/UA
 
@@ -348,6 +377,44 @@ argument to set it yourself. The relationship to the pages defaults to `Data` fo
 otherwise; set `Relationship` to change it. PdfPecker checks that the XML is a well-formed Cross Industry Invoice (UBL is
 not allowed in Factur-X) but does not validate its content or build it from invoice data: make sure the visible pages
 show the same invoice. The output passes the Mustang validator (PDF/A-3b via veraPDF, and the XML's schematron).
+Other files can be attached next to the invoice with `Attachments` (see below).
+
+### Attachments (embedded files)
+
+Any file can travel inside the PDF, listed in the viewer's attachments panel: the source spreadsheet of a report, the
+data behind a chart, a signed contract.
+
+```csharp
+var options = new PdfOptions { Conformance = PdfConformance.PdfA3b }; // optional
+options.Attachments.Add(new PdfAttachment("figures.csv", csvBytes)
+{
+    Description = "The figures behind the charts",          // default: the file name
+    Relationship = PdfAttachmentRelationship.Data,           // Source, Data, Alternative, Supplement or Unspecified
+    // MimeType = "text/csv",                                // default: guessed from the extension
+    // CreationDate = ..., ModDate = ...                     // default: ModDate is the time of conversion
+});
+options.Attachments.Add(PdfAttachment.FromFile("contract.pdf"));
+byte[] pdf = HtmlToPdf.Convert(html, options);
+
+// Read them back, or attach files to a PDF made elsewhere.
+foreach (PdfAttachment a in PdfAttachments.List(pdf)) Console.WriteLine($"{a.FileName}: {a.Data.Length} bytes");
+byte[]? csv = PdfAttachments.Extract(pdf, "figures.csv");
+byte[] more = PdfAttachments.Add(File.ReadAllBytes("scan.pdf"), new PdfAttachment("notes.txt", notes));
+```
+
+Each file is written with its MIME type, size, dates and MD5 checksum, in the document's embedded-files list sorted by
+name, and as an associated file (`/AF`) with its relationship to the pages, as PDF/A-3 requires. File names must be
+unique (`ArgumentException` otherwise; an attachment can't take the e-invoice's `factur-x.xml`). Attachments don't change
+`Conformance`: without one the file is a plain PDF, PDF/A-3b allows any attachment, and PDF/A-2b, which allows only
+PDF/A files as attachments, throws `ArgumentException` rather than produce a file that fails validation. With
+`Security` the attachments are encrypted with the rest of the file, and for PDF/UA each one gets the description
+ISO 14289 asks for. The output passes veraPDF's PDF/A-3b and PDF/UA-1 checks.
+
+`PdfAttachments.Add` appends the files as an incremental update, so the original bytes, and any digital signatures
+over them, stay as they were; an encrypted PDF (pass its password) stays encrypted, a PDF/A-3 file gets the new
+associated files, and PDF/A-1 and PDF/A-2 files are refused. `List` and `Extract` read the embedded-files list and
+associated files of any PDF, decrypting with the password you pass; files attached to page annotations (the paper-clip
+icons) are not read.
 
 ### PDF attachments in UBL e-invoices (Peppol, OIOUBL)
 
@@ -512,8 +579,9 @@ further calls. `Passwords` are matched to inputs in the order they are added.
 The pages keep their content, fonts, images, links, annotations, layers and fillable form fields, and each input's
 bookmarks follow each other. A form field named like one in an earlier input is renamed `name_2`, `name_3` and so on, so
 the copies keep their own values. Document properties come from the first input unless `PdfMergeOptions` sets them. The
-result is never encrypted and has no signatures (merging would break them); PDF/A conformance and attachments are not
-carried over. Page labels are kept (pages of an input without them are numbered as in that input). Images, fonts and other resources that are byte-for-byte the same in several inputs, such
+result is never encrypted and has no signatures (merging would break them); PDF/A conformance is not carried over.
+Page labels are kept (pages of an input without them are numbered as in that input), and attachments too, with one
+named like an earlier input's listed as `name (2).ext`. Images, fonts and other resources that are byte-for-byte the same in several inputs, such
 as a logo on every payslip of a run, are written once.
 
 Inputs are handled as untrusted: damaged files are repaired where possible, decoding is limited per input, and
@@ -555,6 +623,50 @@ taken, so a PDF/UA-1 input gives a PDF/UA-1 result (veraPDF passes extracted, re
 than once is copied with its links, but its form fields stay on the first copy and the later copies are not tagged, so
 such a result no longer claims PDF/UA. `Split` parses the PDF once for all parts. As with merging, the result is not
 encrypted and has no signatures.
+
+## Stamping PDFs
+
+`PdfStamper` puts a page of one PDF on top of the pages of another, such as a "PAID" or "COPY" stamp, or underneath
+them, such as company letterhead. Any PDF can be stamped, not only those PdfPecker made:
+
+```csharp
+// A one-page stamp PDF, fitted and centred on every page, half transparent.
+byte[] paid = PdfStamper.Stamp(invoicePdf, paidStampPdf, new PdfStampOptions { Opacity = 0.5f });
+
+// Letterhead under the content: the stamp's first page on page 1, its second page on all the others.
+byte[] letter = PdfStamper.Stamp(letterPdf, letterheadPdf, new PdfStampOptions { Underlay = true, MatchPages = true });
+
+// Actual size in the top right corner, 20 pt in from each edge, on the first page only.
+byte[] copy = PdfStamper.Stamp(pdf, copyStampPdf, new PdfStampOptions
+{
+    Position = PdfStampPosition.TopRight, Scale = 1, OffsetX = -20, OffsetY = 20, Pages = i => i == 0,
+});
+
+// The stamp as HTML, rendered at each page's size with no margins.
+byte[] stamped = PdfStamper.StampHtml(pdf,
+    "<div style='position:absolute; right:30pt; top:30pt; border:3pt solid #c00; color:#c00; font:bold 28pt sans-serif'>PAID</div>");
+
+PdfStamper.StampFile("in.pdf", "stamp.pdf", "out.pdf");
+PdfStamper.Stamp(inputStream, stampStream, outputStream);
+```
+
+`StampPage` picks the stamp PDF's page (0-based), `Pages` the pages to stamp (by 0-based index), `Scale` the size (0,
+the default, fits the stamp page on the page keeping its aspect ratio; 1 is its own size), and `Position`, `OffsetX`
+(right) and `OffsetY` (down) where it goes. The stamp is placed as the page is displayed, so it is upright on rotated
+pages and sits in the crop box. The stamp page is copied in once as a form XObject, so its text stays text and its
+graphics stay sharp, however many pages show it. The page's own content is wrapped so a graphics state it leaves
+behind cannot shift or recolour an overlay. Underlays are hidden by pages that paint an opaque background, and
+annotations (links, form fields) are always drawn above the page content, overlays included.
+
+Everything else in the document is kept: annotations, form fields and their values, bookmarks, named destinations,
+attachments, metadata, page labels and the structure tree of a tagged PDF, in which the stamp is marked as an
+artifact (a PDF/UA-1 document stamped this way still passes veraPDF, as does a PDF/A-2b one when the stamp has embedded
+fonts). The stamp page's own annotations, form fields and tags are not copied. The result is written out in full, not
+as an incremental update. A signed PDF is refused with `InvalidOperationException`, since stamping would break the
+signatures; set `InvalidateSignatures = true` to stamp it anyway, or stamp before signing. Encrypted inputs open with
+`Password` (and `StampPassword` for the stamp); the result is not encrypted unless `Security` is set. Both inputs are
+handled as untrusted, like merge inputs: damaged files are repaired where possible, decoding is limited, and an
+unreadable file or one without pages throws `InvalidDataException`.
 
 ## PDF to image
 
@@ -630,7 +742,7 @@ and `:where()` skip entries they do not understand), `:root`, `:link`, `:empty`,
 | Area | Properties |
 | --- | --- |
 | Box model | `display` (block, inline, inline-block, flex, inline-flex, grid, inline-grid, list-item, table parts, none), `margin`, `padding` (also the logical `margin-inline`/`-block` and `padding-inline`/`-block` properties and their `-start`/`-end` longhands), `border` (solid, dashed, dotted, double), `border-radius` (incl. elliptical `/` radii and percentages; rounds backgrounds, borders, shadows and images), `box-shadow` (outer shadows; a blur is drawn as fading bands), `overflow` (`hidden`, `clip`, `auto` and `scroll` clip to the padding box, following its rounded corners, also in table cells; `overflow-x`/`overflow-y`), `outline` and `outline-offset` (all border styles; follows rounded corners), `width`, `height`, `min-`/`max-width`, `min-height`, `box-sizing`, `aspect-ratio` (incl. `auto <ratio>`), `object-fit` and `object-position` on images |
-| Text | `color`, `font`, `font-family`, `font-size`, `font-weight`, `font-style`, `line-height`, `text-align` (incl. justify, `start` and `end`), `direction`, `unicode-bidi`, `text-decoration`, `text-transform`, `text-indent`, `letter-spacing`, `word-spacing`, `white-space`, `overflow-wrap`/`word-wrap`, `word-break` (`break-all`), `vertical-align`, `text-shadow` (several shadows; a blur is drawn as faint copies of the text), `text-overflow: ellipsis` (on a box that clips its overflow), `text-decoration-style` (`solid`, `double`, `dotted`, `dashed`, `wavy`), `text-decoration-color`, `text-decoration-thickness`, `text-underline-offset`, `text-align-last`, `tab-size`, `font-variant: small-caps` (synthesized from capitals when the font has none), `line-clamp` and `-webkit-line-clamp` (with an ellipsis), `hyphens: manual | none`. Lines break as in Chrome: at spaces, after hyphens and dashes, at `&shy;` (showing a hyphen) and `&#8203;`; a word too wide for its line overflows unless `overflow-wrap` or `word-break` allows breaking it. `line-height: normal` comes from the font's own metrics, rounded to whole pixels as Chrome does, and border widths snap to whole pixels. Text is kerned as in Chrome: from the font's GPOS or `kern` table, and for the standard fonts from the Liberation fonts browsers use in their place. Embedded fonts get their standard ligatures (GSUB `liga`/`clig`, such as fi and ffi) as in Chrome, except in letter-spaced text; `font-variant-ligatures: none` or `font-feature-settings: "liga" 0` turns them off |
+| Text | `color`, `font`, `font-family`, `font-size`, `font-weight`, `font-style`, `line-height`, `text-align` (incl. justify, `start` and `end`), `direction`, `unicode-bidi`, `text-decoration`, `text-transform`, `text-indent`, `letter-spacing`, `word-spacing`, `white-space`, `overflow-wrap`/`word-wrap`, `word-break` (`break-all`), `vertical-align`, `text-shadow` (several shadows; a blur is drawn as faint copies of the text), `text-overflow: ellipsis` (on a box that clips its overflow), `text-decoration-style` (`solid`, `double`, `dotted`, `dashed`, `wavy`), `text-decoration-color`, `text-decoration-thickness`, `text-underline-offset`, `text-align-last`, `tab-size`, `font-variant: small-caps` (synthesized from capitals when the font has none), `line-clamp` and `-webkit-line-clamp` (with an ellipsis), `hyphens: manual | none | auto` (see [Hyphenation](#hyphenation)), `hyphenate-character`. Lines break as in Chrome: at spaces, after hyphens and dashes, at `&shy;` (showing a hyphen) and `&#8203;`; a word too wide for its line overflows unless `overflow-wrap` or `word-break` allows breaking it. `line-height: normal` comes from the font's own metrics, rounded to whole pixels as Chrome does, and border widths snap to whole pixels. Text is kerned as in Chrome: from the font's GPOS or `kern` table, and for the standard fonts from the Liberation fonts browsers use in their place. Embedded fonts get their standard ligatures (GSUB `liga`/`clig`, such as fi and ffi) as in Chrome, except in letter-spaced text; `font-variant-ligatures: none` or `font-feature-settings: "liga" 0` turns them off |
 | Backgrounds | `background-color`, `background-image` and `background` with `url()` images (PNG, JPEG, GIF, WebP, and SVG files drawn as vectors), `linear-gradient()`, `radial-gradient()`, `conic-gradient()` (pie charts and colour wheels, drawn as smooth PDF shadings) and their `repeating-` forms (several layers allowed); `background-repeat` (incl. `space`, `round`), `background-position` (incl. edge offsets like `right 10px bottom 5px`), `background-size` (`cover`, `contain`, lengths), `background-origin`, `background-clip`. Repeated images are written once as PDF tiling patterns. `url()` in a linked stylesheet is relative to the stylesheet and follows the same file access rules as `<img>`. As in Chrome's print output, the background of `<html>`, or else of `<body>`, fills every page area (images and gradients too, positioned against the root box and continuing from page to page); `@page { background: <colour> }` also colours the page margins. `opacity` on SVG |
 | Flexbox | `flex-direction`, `flex-wrap`, `flex-flow`, `flex`, `flex-grow`/`-shrink`/`-basis`, `order`, `justify-content`, `align-items`, `align-self`, `align-content`, `gap`, `margin: auto` |
 | Grid | `grid-auto-flow: dense` packing, `grid-template-columns`/`-rows` (lengths, `%`, `fr`, `auto`, `min-content`, `max-content`, `minmax()`, `fit-content()`, `repeat()` incl. `auto-fill`/`auto-fit`), `grid-auto-rows`/`-columns`, `grid-auto-flow`, `grid-template-areas`, `grid-template`, named lines (`[name]`), `grid-column`/`-row` (line numbers, names and `span`), `grid-area` (incl. area names), `gap`, `justify-items`/`-self`, `align-items`/`-self`, `justify-content`, `align-content`, `place-*` |
@@ -757,7 +869,8 @@ not listed in [What is supported](#what-is-supported) should be assumed missing.
 - In Latin and other simple scripts, shaping is limited to pair kerning and standard ligatures; no contextual
   alternates or other OpenType features (`small-caps` is synthesized from scaled capitals).
 - Variable fonts use their default instance (`font-variation-settings` and `font-stretch` are ignored).
-- No automatic hyphenation (`hyphens: auto`); words break only at spaces, hyphens, `&shy;` and `&#8203;`.
+- Automatic hyphenation (`hyphens: auto`) has built-in patterns for English, Danish, German, Dutch and Norwegian only;
+  other languages need their patterns in `PdfOptions.Hyphenation`. `hyphenate-limit-chars` is not supported.
 - SVG `<text>` uses only the first value of position lists and has no `textPath`; in a text chunk with right-to-left
   text, `dx` on its `tspan`s is ignored.
 
