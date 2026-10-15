@@ -17,12 +17,16 @@ internal sealed class Decryptor
     private readonly byte[] _key;
     private readonly Method _streamMethod, _stringMethod;
 
-    private Decryptor(byte[] key, Method stm, Method str)
+    private Decryptor(byte[] key, Method stm, Method str, bool encryptMetadata)
     {
         _key = key;
         _streamMethod = stm;
         _stringMethod = str;
+        EncryptMetadata = encryptMetadata;
     }
+
+    /// <summary>False when the XMP metadata streams were left unencrypted (/EncryptMetadata false).</summary>
+    public bool EncryptMetadata { get; }
 
     public static Decryptor Create(PdfFile file, PdfDict encrypt, byte[] id0, string? password)
     {
@@ -32,7 +36,8 @@ internal sealed class Decryptor
         int r = file.GetInt(encrypt, "R", 2);
         byte[] o = file.GetBytes(encrypt, "O") ?? Array.Empty<byte>();
         byte[] u = file.GetBytes(encrypt, "U") ?? Array.Empty<byte>();
-        int p = file.GetInt(encrypt, "P", 0);
+        // A 32-bit field: some writers give it unsigned (4294963396 for -3900).
+        int p = (int)(uint)(long)file.Num(encrypt["P"]);
         int lengthBits = file.GetInt(encrypt, "Length", 40);
         bool encryptMetadata = (file.Resolve(encrypt["EncryptMetadata"]) as PdfBool)?.Value ?? true;
 
@@ -74,7 +79,7 @@ internal sealed class Decryptor
         }
         if (key == null)
             throw new PdfPasswordException(string.IsNullOrEmpty(password) ? "The PDF is password protected." : "The password is incorrect.");
-        return new Decryptor(key, stm, str);
+        return new Decryptor(key, stm, str, encryptMetadata);
     }
 
     public byte[] DecryptStream(byte[] data, int num, int gen) => Decrypt(data, num, gen, _streamMethod);
