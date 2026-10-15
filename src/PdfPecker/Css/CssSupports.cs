@@ -11,7 +11,7 @@ internal static class CssSupports
         "display", "color", "background", "background-color", "background-image", "background-repeat", "background-size",
         "background-position", "background-position-x", "background-position-y", "background-origin", "background-clip",
         "font", "font-family", "font-size", "font-weight", "font-style", "font-variant", "font-variant-ligatures",
-        "font-variant-caps", "font-variant-numeric", "font-feature-settings", "line-height", "text-align", "text-align-last",
+        "font-variant-caps", "font-feature-settings", "line-height", "text-align", "text-align-last",
         "text-decoration", "text-decoration-line", "text-decoration-color", "text-decoration-style", "text-decoration-thickness",
         "text-underline-offset", "text-transform", "text-indent", "letter-spacing", "word-spacing", "white-space",
         "overflow-wrap", "word-wrap", "word-break", "vertical-align", "list-style", "list-style-type", "list-style-position",
@@ -37,7 +37,7 @@ internal static class CssSupports
         "border-left-width", "border-top-style", "border-right-style", "border-bottom-style", "border-left-style",
         "border-top-color", "border-right-color", "border-bottom-color", "border-left-color", "border-top-left-radius",
         "border-top-right-radius", "border-bottom-right-radius", "border-bottom-left-radius", "tab-size",
-        "line-clamp", "-webkit-line-clamp", "hyphens", "size", "page",
+        "line-clamp", "-webkit-line-clamp", "hyphens", "size",
     };
 
     /// <summary>Whether this library applies the property.</summary>

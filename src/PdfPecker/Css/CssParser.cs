@@ -615,8 +615,24 @@ internal static class CssParser
                 Add(name.Substring(5), value.ToLowerInvariant());
                 return;
             case "text-decoration":
-                Add("text-decoration-line", value);
+            {
+                // Line keywords, a style, a thickness and a colour, in any order; missing parts reset.
+                var lines = new List<string>();
+                string style = "solid", thickness = "auto", color = "currentcolor";
+                foreach (var tok in Tokens(value))
+                {
+                    var t = tok.ToLowerInvariant();
+                    if (t is "none" or "underline" or "overline" or "line-through" or "blink") { if (t != "none") lines.Add(t); }
+                    else if (t is "solid" or "double" or "dotted" or "dashed" or "wavy") style = t;
+                    else if (t is "auto" or "from-font" || char.IsDigit(t[0]) || t[0] == '.' || CssMath.IsMathFunction(t)) thickness = t;
+                    else color = tok;
+                }
+                Add("text-decoration-line", lines.Count == 0 ? "none" : string.Join(" ", lines));
+                Add("text-decoration-style", style);
+                Add("text-decoration-thickness", thickness);
+                Add("text-decoration-color", color);
                 return;
+            }
             case "border-spacing":
             {
                 var t = Tokens(value);
@@ -690,6 +706,43 @@ internal static class CssParser
                 string suffix = name.Substring(6);
                 Add("align-" + suffix, t[0]);
                 Add("justify-" + suffix, t.Count > 1 ? t[t.Count - 1] : t[0]);
+                return;
+            }
+            case "font-variant":
+            {
+                // The caps and ligature parts; numeric, east-asian and the rest are not supported.
+                var lower = value.Trim().ToLowerInvariant();
+                if (lower is "normal" or "none" or "inherit" or "initial" or "unset")
+                {
+                    Add("font-variant-caps", lower == "none" ? "normal" : lower);
+                    Add("font-variant-ligatures", lower);
+                    return;
+                }
+                string caps = "normal";
+                var ligatures = new List<string>();
+                foreach (var t in Tokens(lower))
+                {
+                    if (t is "small-caps" or "all-small-caps" or "petite-caps" or "all-petite-caps" or "unicase" or "titling-caps") caps = t;
+                    else if (t.EndsWith("ligatures", StringComparison.Ordinal) || t.EndsWith("contextual", StringComparison.Ordinal)) ligatures.Add(t);
+                }
+                Add("font-variant-caps", caps);
+                Add("font-variant-ligatures", ligatures.Count == 0 ? "normal" : string.Join(" ", ligatures));
+                return;
+            }
+            case "column-rule":
+            {
+                // Width, style and colour in any order, like a border side.
+                string width = "medium", style = "none", color = "currentcolor";
+                foreach (var tok in Tokens(value))
+                {
+                    var lower = tok.ToLowerInvariant();
+                    if (IsBorderStyle(lower)) style = lower;
+                    else if (lower is "thin" or "medium" or "thick" || char.IsDigit(lower[0]) || lower[0] == '.' || CssMath.IsMathFunction(lower)) width = lower;
+                    else color = tok;
+                }
+                Add("column-rule-width", width);
+                Add("column-rule-style", style);
+                Add("column-rule-color", color);
                 return;
             }
             case "columns":
@@ -802,14 +855,15 @@ internal static class CssParser
         if (lower is "caption" or "icon" or "menu" or "message-box" or "small-caption" or "status-bar") return;
 
         var tokens = Tokens(value);
-        string style = "normal", weight = "normal", size = "medium", lineHeight = "normal";
+        string style = "normal", weight = "normal", size = "medium", lineHeight = "normal", caps = "normal";
         int i = 0;
         for (; i < tokens.Count; i++)
         {
             var t = tokens[i].ToLowerInvariant();
             if (t is "italic" or "oblique") style = t;
             else if (t is "bold" or "bolder" or "lighter" || t.Length == 3 && char.IsDigit(t[0]) && t.EndsWith("00", StringComparison.Ordinal)) weight = t;
-            else if (t is "normal" or "small-caps") { }
+            else if (t == "small-caps") caps = t;
+            else if (t == "normal") { }
             else break;
         }
         if (i >= tokens.Count) return;
@@ -835,6 +889,7 @@ internal static class CssParser
         Add("font-weight", weight);
         Add("font-size", size);
         Add("line-height", lineHeight);
+        Add("font-variant-caps", caps);
         if (family.Length > 0) Add("font-family", family);
     }
 }

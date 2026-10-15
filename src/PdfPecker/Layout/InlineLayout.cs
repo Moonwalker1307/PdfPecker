@@ -334,7 +334,7 @@ internal sealed partial class LayoutEngine
         return item;
     }
 
-    private const string TabSpaces = "        ";
+    private static readonly string TabSpaces = new(' ', 64);
 
     private void AddText(CollectState st, string text, ComputedStyle style, string? href, ComputedStyle? deco)
     {
@@ -377,7 +377,8 @@ internal sealed partial class LayoutEngine
                     continue;
                 }
                 // A tab is one item covering its spaces up to the next tab stop, not one item per space.
-                int count = c == '\t' ? 8 - st.Column % 8 : 1;
+                int tab = Math.Max(1, style.TabSize);
+                int count = c == '\t' ? (style.TabSize == 0 ? 0 : tab - st.Column % tab) : 1;
                 { var it_ = Rent(ItemKind.Space, style); it_.Source = TabSpaces; it_.Length = count; it_.Width = spaceW * count; it_.Breakable = breakable; it_.Href = href; it_.Deco = deco; items.Add(it_); }
                 st.Column += count;
                 st.LastWasSpace = true;
@@ -418,7 +419,7 @@ internal sealed partial class LayoutEngine
             {
                 case '\u00AD':
                 case '\u200B':
-                    AddWord(st, text, seg, k - seg, style, href, deco, c == '\u00AD' ? BreakAfter.SoftHyphen : BreakAfter.Break);
+                    AddWord(st, text, seg, k - seg, style, href, deco, c == '\u200B' ? BreakAfter.Break : style.NoHyphens ? BreakAfter.None : BreakAfter.SoftHyphen);
                     seg = k + 1;
                     break;
                 case '-':
@@ -469,13 +470,65 @@ internal sealed partial class LayoutEngine
             if (breakAfter != BreakAfter.None && st.Items.Count > 0 && st.Items[^1] is { Kind: ItemKind.Text, BreakAfter: BreakAfter.None } prev) prev.BreakAfter = breakAfter;
             return;
         }
+        if (style.SmallCaps != 0 && NeedsSmallCaps(src, wStart, wLen, style.SmallCaps == 2))
+        {
+            AddSmallCaps(st, src.Substring(wStart, wLen), style, href, deco, breakAfter);
+            return;
+        }
+        AddText(st, src, wStart, wLen, style, href, deco, breakAfter);
+    }
+
+    private void AddText(CollectState st, string src, int start, int length, ComputedStyle style, string? href, ComputedStyle? deco, BreakAfter breakAfter)
+    {
         var font = style.Font;
         float size = style.FontSize;
-        float w = font.MeasureUnits(src, wStart, wLen) * size / 1000f + style.LetterSpacing * wLen;
+        float w = font.MeasureUnits(src, start, length) * size / 1000f + style.LetterSpacing * length;
         var it_ = Rent(ItemKind.Text, style);
-        it_.Source = src; it_.Start = wStart; it_.Length = wLen; it_.Width = w; it_.Href = href; it_.Deco = deco; it_.BreakAfter = breakAfter;
+        it_.Source = src; it_.Start = start; it_.Length = length; it_.Width = w; it_.Href = href; it_.Deco = deco; it_.BreakAfter = breakAfter;
         st.Items.Add(it_);
         st.LastWasSpace = false;
+    }
+
+    private static bool NeedsSmallCaps(string s, int start, int length, bool all)
+    {
+        for (int k = start; k < start + length; k++)
+            if (char.IsLower(s[k]) || all && char.IsUpper(s[k])) return true;
+        return false;
+    }
+
+    // Synthesized small capitals are capitals at 70% of the font size, as Chrome makes them.
+    private const float SmallCapsScale = 0.7f;
+    private readonly Dictionary<ComputedStyle, ComputedStyle> _smallCapsStyles = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>
+    /// font-variant-caps: small-caps (and all-small-caps) without a font that has them: lower-case letters (and, for
+    /// all-small-caps, capitals too) become smaller capitals. The pieces of a word keep it unbreakable.
+    /// </summary>
+    private void AddSmallCaps(CollectState st, string word, ComputedStyle style, string? href, ComputedStyle? deco, BreakAfter breakAfter)
+    {
+        if (!_smallCapsStyles.TryGetValue(style, out var small))
+        {
+            small = style.Clone();
+            small.FontSize = style.FontSize * SmallCapsScale;
+            // Decorations keep the full size's thickness and position, so a line under mixed capitals stays straight.
+            small.DecorationThickness ??= Length.Pt(Math.Max(style.FontSize * 0.055f, 0.5f));
+            small.UnderlineOffset ??= Length.Pt(style.FontSize * 0.1f);
+            small.InvalidateFont();
+            _smallCapsStyles[style] = small;
+        }
+        bool all = style.SmallCaps == 2;
+        int k = 0;
+        while (k < word.Length)
+        {
+            bool lower = IsSmall(word[k]);
+            int end = k + 1;
+            while (end < word.Length && IsSmall(word[end]) == lower) end++;
+            var piece = lower ? word.Substring(k, end - k).ToUpperInvariant() : word.Substring(k, end - k);
+            AddText(st, piece, 0, piece.Length, lower ? small : style, href, deco, end == word.Length ? breakAfter : BreakAfter.None);
+            k = end;
+        }
+
+        bool IsSmall(char c) => char.IsLower(c) || all && char.IsUpper(c);
     }
 
     private static bool HasRenderable(List<Item> items)
@@ -789,6 +842,16 @@ internal sealed partial class LayoutEngine
         float[] xs = _xs;
 
         int n = lines.Count;
+        if (block.LineClamp > 0 && n > block.LineClamp)
+        {
+            // Line clamping: only the first lines are laid out, the last of them ending in an ellipsis.
+            n = block.LineClamp;
+            var last = lines[n - 1];
+            lines.RemoveRange(n, lines.Count - n);
+            float room = (float.IsNaN(last.Avail) ? w : last.Avail) - (n == 1 ? indent : 0);
+            Ellipsize(last, block, room);
+            last.Forced = true;
+        }
         if (_lineA.Length < n) { _lineA = new float[n * 2]; _lineD = new float[n * 2]; }
         float[] lineA = _lineA, lineD = _lineD;
         for (int li = 0; li < n; li++) LineExtent(lines[li], block, out lineA[li], out lineD[li]);
@@ -826,12 +889,15 @@ internal sealed partial class LayoutEngine
             float free = lineW - lineIndent - line.Width - lineKern;
             float lx = x + lineLeft + lineIndent;
             float extra = 0;
-            switch (block.TextAlign)
+            // text-align-last aligns the last line and lines before a forced break; a justified block's last line
+            // otherwise starts at the left.
+            var align = line.Forced && block.TextAlignLast is { } lastAlign ? lastAlign : block.TextAlign;
+            switch (align)
             {
                 case TextAlign.Right: if (free > 0) lx += free; break;
                 case TextAlign.Center: if (free > 0) lx += free / 2; break;
                 case TextAlign.Justify:
-                    if (!line.Forced && spaces > 0 && free > 0) extra = free / spaces;
+                    if ((!line.Forced || block.TextAlignLast == TextAlign.Justify) && spaces > 0 && free > 0) extra = free / spaces;
                     break;
             }
 
@@ -1158,12 +1224,53 @@ internal sealed partial class LayoutEngine
     private void Decorate(ComputedStyle s, float x, float w, float baseline)
     {
         float size = s.FontSize;
-        float thickness = Math.Max(size * 0.055f, 0.5f);
+        float thickness = s.DecorationThickness is { } dt ? Math.Max(dt.Resolve(size), 0.1f) : Math.Max(size * 0.055f, 0.5f);
+        uint color = CssColor.Fade(s.DecorationColor ?? s.Color, s.InlineFade);
         if ((s.TextDecoration & TextDecoration.Underline) != 0)
-            _ops.Add(new RectOp(x, baseline + size * 0.1f, w, thickness, CssColor.Fade(s.Color, s.InlineFade)) { IsDecoration = true });
+            DecorationLine(s.DecorationStyle, x, baseline + (s.UnderlineOffset is { } uo ? uo.Resolve(size) : size * 0.1f), w, thickness, color, below: true);
         if ((s.TextDecoration & TextDecoration.LineThrough) != 0)
-            _ops.Add(new RectOp(x, baseline - size * 0.3f, w, thickness, CssColor.Fade(s.Color, s.InlineFade)) { IsDecoration = true });
+            DecorationLine(s.DecorationStyle, x, baseline - size * 0.3f, w, thickness, color, below: true);
         if ((s.TextDecoration & TextDecoration.Overline) != 0)
-            _ops.Add(new RectOp(x, baseline - s.Font.Ascent * size, w, thickness, CssColor.Fade(s.Color, s.InlineFade)) { IsDecoration = true });
+            DecorationLine(s.DecorationStyle, x, baseline - s.Font.Ascent * size, w, thickness, color, below: false);
+    }
+
+    /// <summary>One decoration line with its top edge at <paramref name="y"/>, in the given text-decoration-style.</summary>
+    private void DecorationLine(DecorationStyle style, float x, float y, float w, float t, uint color, bool below)
+    {
+        if (w <= 0) return;
+        switch (style)
+        {
+            case DecorationStyle.Double:
+            {
+                // Two lines a thickness apart; the second goes away from the text.
+                float second = below ? y + 2 * t : y - 2 * t;
+                _ops.Add(new RectOp(x, y, w, t, color) { IsDecoration = true });
+                _ops.Add(new RectOp(x, second, w, t, color) { IsDecoration = true });
+                break;
+            }
+            case DecorationStyle.Dotted:
+            case DecorationStyle.Dashed:
+                _ops.Add(new LineOp(x, y + t / 2, x + w, y + t / 2, t, color, dotted: style == DecorationStyle.Dotted));
+                break;
+            case DecorationStyle.Wavy:
+            {
+                // A wave of short straight segments with round joins, about three thicknesses high.
+                float amplitude = Math.Max(t * 1.5f, 0.75f), wavelength = Math.Max(t * 6, 3f);
+                float mid = y + (below ? amplitude : -amplitude) + t / 2;
+                int segments = Math.Clamp((int)MathF.Ceiling(w / wavelength * 8), 1, 4000);
+                float px = x, py = mid;
+                for (int k = 1; k <= segments; k++)
+                {
+                    float nx = x + w * k / segments;
+                    float ny = mid - amplitude * MathF.Sin((nx - x) / wavelength * 2 * MathF.PI);
+                    _ops.Add(new LineOp(px, py, nx, ny, t, color, dotted: false) { Solid = true });
+                    px = nx; py = ny;
+                }
+                break;
+            }
+            default:
+                _ops.Add(new RectOp(x, y, w, t, color) { IsDecoration = true });
+                break;
+        }
     }
 }

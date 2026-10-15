@@ -54,7 +54,8 @@ internal readonly struct GridLine
     public readonly int Line; // 1-based; negative counts from the end; 0 = auto. With a name: the nth line of that name
     public readonly int Span; // > 0 for "span n"
     public readonly string? Name; // a line name or grid area name
-    public GridLine(int line, int span, string? name = null) { Line = line; Span = span; Name = name; }
+    public readonly string? SpanName; // "span n name": spans to the nth line of that name
+    public GridLine(int line, int span, string? name = null, string? spanName = null) { Line = line; Span = span; Name = name; SpanName = spanName; }
     public bool IsAuto => Line == 0 && Span == 0 && Name == null;
 }
 
@@ -86,6 +87,8 @@ internal enum ListStyleType : byte
 
 [Flags]
 internal enum TextDecoration : byte { None = 0, Underline = 1, LineThrough = 2, Overline = 4 }
+
+internal enum DecorationStyle : byte { Solid, Double, Dotted, Dashed, Wavy }
 
 /// <summary>Pt and Percent are plain values; Calc is a math function that depends on a percentage (see <see cref="CssMath"/>).</summary>
 internal enum LengthUnit : byte { Pt, Percent, Auto, Calc }
@@ -172,6 +175,10 @@ internal sealed class ComputedStyle
     public LineHeightKind LineHeightKind = LineHeightKind.Normal;
     public float LineHeightValue;
     public TextAlign TextAlign;
+    public TextAlign? TextAlignLast;         // null = auto
+    public int TabSize = 8;                  // in spaces
+    public bool NoHyphens;                   // hyphens: none (soft hyphens are no break opportunity)
+    public byte SmallCaps;                   // font-variant-caps: 1 small-caps, 2 all-small-caps (synthesized)
     public WhiteSpace WhiteSpace;
     public OverflowWrap OverflowWrap;
     public WordBreak WordBreak;
@@ -179,6 +186,12 @@ internal sealed class ComputedStyle
     public bool ListStylePositionInside;
     public TextTransform TextTransform;
     public TextDecoration TextDecoration; // propagated to descendants, approximated as inherited
+    // text-decoration-color, -style, -thickness and text-underline-offset, propagated with the decoration. The colour is
+    // fixed to the decorating box's color when it sets the line, as Chrome draws a link's underline in the link colour.
+    public uint? DecorationColor;          // null = currentColor
+    public DecorationStyle DecorationStyle;
+    public Length? DecorationThickness;    // null = auto; percentages of 1em
+    public Length? UnderlineOffset;        // null = auto; from the alphabetic baseline
     public float TextIndent;
     public float LetterSpacing;
     public bool NoLigatures; // font-variant-ligatures: none or no-common-ligatures, or font-feature-settings: "liga" 0
@@ -265,7 +278,8 @@ internal sealed class ComputedStyle
     /// <summary>Whether the box clips its content horizontally and vertically (visible next to hidden computes to auto).</summary>
     public bool ClipsX => OverflowX == Overflow.Clip || OverflowX == Overflow.Hidden || OverflowX == Overflow.Visible && OverflowY == Overflow.Hidden;
     public bool ClipsY => OverflowY == Overflow.Clip || OverflowY == Overflow.Hidden || OverflowY == Overflow.Visible && OverflowX == Overflow.Hidden;
-    public TransformFn[]? Transform;            // null = none
+    public TransformFn[]? Transform;            // null = none; includes translate, rotate and scale once computed
+    public TransformFn[]? Translate, Rotate, Scale; // the individual transform properties; null = none
     public Length TransformOriginX = new(50, LengthUnit.Percent), TransformOriginY = new(50, LengthUnit.Percent);
     public string? Content;                     // the content property as written; null = normal
     public CounterOp[]? CounterReset, CounterSet, CounterIncrement;
@@ -281,11 +295,16 @@ internal sealed class ComputedStyle
     public Length? RowGap, ColumnGap; // null = normal
     public TrackList? GridTemplateColumns, GridTemplateRows;
     public Track[]? GridAutoColumns, GridAutoRows;
-    public bool GridAutoFlowColumn;
+    public bool GridAutoFlowColumn, GridAutoFlowDense;
     public GridLine GridColumnStart, GridColumnEnd, GridRowStart, GridRowEnd;
     public GridAreas? GridTemplateAreas;
     public int ColumnCount;
     public Length ColumnWidth = Length.Auto;
+    public BorderStyle ColumnRuleStyle;
+    public float ColumnRuleWidth = 1.5f; // medium
+    public uint? ColumnRuleColor;        // null = currentColor
+    public bool ColumnSpanAll;           // column-span: all
+    public int LineClamp;                // -webkit-line-clamp / line-clamp: lines shown, then an ellipsis; 0 = none
 
     private TextFont? _font;
 
@@ -393,6 +412,7 @@ internal sealed class ComputedStyle
         c.FormattingRoot = false;
         c.OverflowX = c.OverflowY = Overflow.Visible;
         c.Transform = null;
+        c.Translate = c.Rotate = c.Scale = null;
         c.TransformOriginX = c.TransformOriginY = new Length(50, LengthUnit.Percent);
         c.Content = null;
         c.CounterReset = c.CounterSet = c.CounterIncrement = null;
@@ -407,11 +427,16 @@ internal sealed class ComputedStyle
         c.RowGap = c.ColumnGap = null;
         c.GridTemplateColumns = c.GridTemplateRows = null;
         c.GridAutoColumns = c.GridAutoRows = null;
-        c.GridAutoFlowColumn = false;
+        c.GridAutoFlowColumn = c.GridAutoFlowDense = false;
         c.GridColumnStart = c.GridColumnEnd = c.GridRowStart = c.GridRowEnd = default;
         c.GridTemplateAreas = null;
         c.ColumnCount = 0;
         c.ColumnWidth = Length.Auto;
+        c.ColumnRuleStyle = BorderStyle.None;
+        c.ColumnRuleWidth = 1.5f;
+        c.ColumnRuleColor = null;
+        c.ColumnSpanAll = false;
+        c.LineClamp = 0;
         c.TableLayoutFixed = false;
         c.BoxShadows = null;
         return c;

@@ -176,12 +176,18 @@ public static class HtmlToPdf
         if (options.Bookmarks) engine.Headings = new List<OutlineHeading>();
         float height = engine.Layout(doc, page.ContentWidth);
 
+        // Page-margin boxes of @page rules (@top-center and the like), laid out per page like the bands.
+        var marginBoxes = !options.IgnoreCssPageRules && PageMarginBoxes.AnyIn(sheet.PageRules)
+            ? new PageMarginBoxes(sheet.PageRules, () => new ComputedStyle { Display = Display.Block, Fonts = fonts, MissingFonts = missingFonts },
+                page, images, cancellationToken)
+            : null;
         Func<int, int, List<DrawOp>>? pageBands = null;
-        if (header != null || footer != null)
+        if (header != null || footer != null || marginBoxes != null)
         {
             pageBands = (p, count) =>
             {
                 var ops = new List<DrawOp>();
+                if (marginBoxes != null) ops.AddRange(marginBoxes.Layout(p, count));
                 if (header != null) ops.AddRange(LayoutBandForPage(header, page, images, p, count, alignBottom: false, cancellationToken));
                 if (footer != null) ops.AddRange(LayoutBandForPage(footer, page, images, p, count, alignBottom: true, cancellationToken));
                 return ops;

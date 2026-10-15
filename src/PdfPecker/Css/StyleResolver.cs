@@ -70,6 +70,7 @@ internal sealed class StyleResolver
     private readonly Dictionary<StyleKey, ComputedStyle> _styleCache = new();
     private readonly StyleKey _probe = new();
     private readonly List<Declaration> _registeredEach = new(), _registeredRoot = new();
+    private bool _decorationLineSet;
 
     /// <summary>
     /// Elements with the same parent style and the same winning declarations get the same computed style. This makes
@@ -292,6 +293,9 @@ internal sealed class StyleResolver
         return stack;
     }
 
+    /// <summary>Gives a counter a single instance with this value (the page and pages counters of margin boxes).</summary>
+    internal void SetCounter(string name, int value) => _counters[name] = new List<int> { value };
+
     /// <summary>The values of a counter's instances, outermost first; empty when it has none.</summary>
     internal IReadOnlyList<int> CounterValues(string name) => _counters.TryGetValue(name, out var stack) ? stack : Array.Empty<int>();
 
@@ -382,6 +386,25 @@ internal sealed class StyleResolver
                 if (x.Property == "font-size") ApplyFontSize(s, parent, x.Value);
                 else Apply(s, parent, x.Property, x.Value);
             }
+        }
+
+        // A box that sets its text decoration fixes the decoration's colour to its own colour (currentColor here), so
+        // descendants with another colour keep it.
+        if (_decorationLineSet)
+        {
+            _decorationLineSet = false;
+            if (s.DecorationColor == null && s.TextDecoration != TextDecoration.None) s.DecorationColor = s.Color;
+        }
+
+        // translate, rotate and scale apply before the transform property, in that order.
+        if (s.Translate != null || s.Rotate != null || s.Scale != null)
+        {
+            var all = new List<TransformFn>();
+            if (s.Translate != null) all.AddRange(s.Translate);
+            if (s.Rotate != null) all.AddRange(s.Rotate);
+            if (s.Scale != null) all.AddRange(s.Scale);
+            if (s.Transform != null) all.AddRange(s.Transform);
+            s.Transform = all.ToArray();
         }
 
         // Floats and absolutely positioned boxes are block-level (CSS 2.1 §9.7).
@@ -716,6 +739,9 @@ internal sealed class StyleResolver
                     "inline-grid" or "inline grid" => Display.InlineGrid,
                     "inline" or "contents" => Display.Inline,
                     "inline-block" => Display.InlineBlock,
+                    // The legacy box of line clamping (display: -webkit-box; -webkit-box-orient: vertical) lays out as a block.
+                    "-webkit-box" => Display.Block,
+                    "-webkit-inline-box" => Display.InlineBlock,
                     "list-item" => Display.ListItem,
                     "table" or "inline-table" => Display.Table,
                     "table-row" => Display.TableRow,
@@ -814,10 +840,51 @@ internal sealed class StyleResolver
                     "left" or "start" or "-webkit-left" => TextAlign.Left,
                     "right" or "end" or "-webkit-right" => TextAlign.Right,
                     "center" or "middle" or "-webkit-center" => TextAlign.Center,
-                    "justify" => TextAlign.Justify,
+                    "justify" or "justify-all" => TextAlign.Justify,
                     "inherit" => parent.TextAlign,
                     _ => s.TextAlign,
                 };
+                if (lower == "justify-all") s.TextAlignLast = TextAlign.Justify;
+                break;
+            case "text-align-last":
+                s.TextAlignLast = lower switch
+                {
+                    "auto" or "initial" or "unset" => null,
+                    "left" or "start" => TextAlign.Left,
+                    "right" or "end" => TextAlign.Right,
+                    "center" => TextAlign.Center,
+                    "justify" => TextAlign.Justify,
+                    "inherit" => parent.TextAlignLast,
+                    _ => s.TextAlignLast,
+                };
+                break;
+            case "tab-size":
+            case "-moz-tab-size":
+                if (inherit) s.TabSize = parent.TabSize;
+                else if (int.TryParse(lower, NumberStyles.Integer, CultureInfo.InvariantCulture, out int tabs) && tabs >= 0) s.TabSize = Math.Min(tabs, 64);
+                else if (TryParseLength(v, em, _rootFontSize, out var tabLen, _vw, _vh) && !tabLen.IsAuto && !tabLen.IsPercent)
+                {
+                    // A length is turned into whole spaces of the current font.
+                    float space = Math.Max(0.01f, s.Font.CharWidth(' ', s.FontSize) + s.LetterSpacing + s.WordSpacing);
+                    s.TabSize = Math.Clamp((int)MathF.Round(tabLen.Value / space), 0, 64);
+                }
+                break;
+            case "hyphens":
+            case "-webkit-hyphens":
+                s.NoHyphens = lower == "inherit" ? parent.NoHyphens : lower == "none";
+                break;
+            case "font-variant-caps":
+                s.SmallCaps = lower switch
+                {
+                    "small-caps" or "petite-caps" => 1,
+                    "all-small-caps" or "all-petite-caps" => 2,
+                    "inherit" => parent.SmallCaps,
+                    _ => 0,
+                };
+                break;
+            case "-webkit-line-clamp":
+            case "line-clamp":
+                s.LineClamp = int.TryParse(lower, NumberStyles.Integer, CultureInfo.InvariantCulture, out int clamp) && clamp > 0 ? Math.Min(clamp, 10000) : 0;
                 break;
             case "text-decoration-line":
             {
@@ -830,8 +897,36 @@ internal sealed class StyleResolver
                     else if (t == "overline") td |= TextDecoration.Overline;
                 }
                 s.TextDecoration = td;
+                _decorationLineSet = true;
                 break;
             }
+            case "text-decoration-color":
+                if (inherit) s.DecorationColor = parent.DecorationColor;
+                else if (lower == "currentcolor") { s.DecorationColor = null; _decorationLineSet = true; }
+                else if (CssColor.TryParse(v, s.Color, out var dc)) s.DecorationColor = dc;
+                break;
+            case "text-decoration-style":
+                s.DecorationStyle = lower switch
+                {
+                    "solid" => DecorationStyle.Solid,
+                    "double" => DecorationStyle.Double,
+                    "dotted" => DecorationStyle.Dotted,
+                    "dashed" => DecorationStyle.Dashed,
+                    "wavy" => DecorationStyle.Wavy,
+                    "inherit" => parent.DecorationStyle,
+                    _ => s.DecorationStyle,
+                };
+                break;
+            case "text-decoration-thickness":
+                if (inherit) s.DecorationThickness = parent.DecorationThickness;
+                else if (lower is "auto" or "from-font" or "initial" or "unset") s.DecorationThickness = null;
+                else if (TryParseLength(v, em, _rootFontSize, out var dt, _vw, _vh) && !dt.IsAuto) s.DecorationThickness = dt;
+                break;
+            case "text-underline-offset":
+                if (inherit) s.UnderlineOffset = parent.UnderlineOffset;
+                else if (lower is "auto" or "initial" or "unset") s.UnderlineOffset = null;
+                else if (TryParseLength(v, em, _rootFontSize, out var uo, _vw, _vh) && !uo.IsAuto) s.UnderlineOffset = uo;
+                break;
             case "text-transform":
                 s.TextTransform = lower switch
                 {
@@ -1017,6 +1112,39 @@ internal sealed class StyleResolver
                 else if (inherit) s.Transform = parent.Transform;
                 else if (CssTransform.TryParse(lower, em, _rootFontSize, _vw, _vh, out var tf)) s.Transform = tf;
                 break;
+            case "translate":
+            {
+                // translate: x [y [z]]; a z offset is ignored (no 3D).
+                var t = CssParser.Tokens(lower);
+                if (lower is "none" or "initial" or "unset") s.Translate = null;
+                else if (inherit) s.Translate = parent.Translate;
+                else if (t.Count is >= 1 and <= 3 && CssTransform.TryParse("translate(" + t[0] + ", " + (t.Count > 1 ? t[1] : "0") + ")",
+                             em, _rootFontSize, _vw, _vh, out var tr)) s.Translate = tr;
+                break;
+            }
+            case "rotate":
+            {
+                // rotate: angle, or "z angle"; rotations about x, y or a vector are 3D and ignored.
+                var t = CssParser.Tokens(lower);
+                if (lower is "none" or "initial" or "unset") s.Rotate = null;
+                else if (inherit) s.Rotate = parent.Rotate;
+                else if (t.Count == 2 && t[0] == "z" || t.Count == 1)
+                {
+                    if (CssTransform.TryParse("rotate(" + t[^1] + ")", em, _rootFontSize, _vw, _vh, out var ro)) s.Rotate = ro;
+                }
+                else if (t.Count == 4 && t[0] == "0" && t[1] == "0" && float.TryParse(t[2], NumberStyles.Float, CultureInfo.InvariantCulture, out float z) && z > 0
+                         && CssTransform.TryParse("rotate(" + t[3] + ")", em, _rootFontSize, _vw, _vh, out var rz)) s.Rotate = rz;
+                break;
+            }
+            case "scale":
+            {
+                var t = CssParser.Tokens(lower);
+                if (lower is "none" or "initial" or "unset") s.Scale = null;
+                else if (inherit) s.Scale = parent.Scale;
+                else if (t.Count is >= 1 and <= 3 && CssTransform.TryParse("scale(" + t[0] + ", " + (t.Count > 1 ? t[1] : t[0]) + ")",
+                             em, _rootFontSize, _vw, _vh, out var sc)) s.Scale = sc;
+                break;
+            }
             case "transform-origin":
                 if (inherit) { s.TransformOriginX = parent.TransformOriginX; s.TransformOriginY = parent.TransformOriginY; }
                 else if (CssTransform.TryParseOrigin(lower, em, _rootFontSize, _vw, _vh, out var ox, out var oy)) { s.TransformOriginX = ox; s.TransformOriginY = oy; }
@@ -1173,6 +1301,7 @@ internal sealed class StyleResolver
                 break;
             case "grid-auto-flow":
                 s.GridAutoFlowColumn = lower.Contains("column");
+                s.GridAutoFlowDense = lower.Contains("dense");
                 break;
             case "grid-template-areas":
                 s.GridTemplateAreas = ParseGridAreas(v);
@@ -1188,6 +1317,10 @@ internal sealed class StyleResolver
                 SetLength(ref s.ColumnWidth, lower, em, null);
                 if (s.ColumnWidth.IsPercent) s.ColumnWidth = Length.Auto;
                 break;
+            case "column-rule-style": s.ColumnRuleStyle = ParseBorderStyle(lower, s.ColumnRuleStyle); break;
+            case "column-rule-width": s.ColumnRuleWidth = BorderWidth(lower, em, s.ColumnRuleWidth); break;
+            case "column-rule-color": s.ColumnRuleColor = BorderColor(v, s); break;
+            case "column-span": s.ColumnSpanAll = lower == "all"; break;
 
             // ---- SVG presentation properties
             case "fill":
@@ -1435,8 +1568,9 @@ internal sealed class StyleResolver
         }
         if (span)
         {
-            // "span name" spans to the next line of that name; approximated as the given count of tracks.
-            return new GridLine(0, number > 0 ? Math.Min(number, 1000) : 1);
+            // "span 2" spans two tracks; "span name" (or "span 2 name") spans to the next (second) line of that name.
+            if (number < 0) return default;
+            return new GridLine(0, number > 0 ? Math.Min(number, 1000) : 1, null, name);
         }
         if (name != null) return new GridLine(number == 0 ? 1 : Math.Clamp(number, -1000, 1000), 0, name);
         return number != 0 ? new GridLine(Math.Clamp(number, -1000, 1000), 0) : default;

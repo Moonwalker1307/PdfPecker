@@ -81,6 +81,9 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>Lays out a running header or footer on its own, unpaginated, at y = 0. Returns its height including margins.</summary>
+    /// <summary>Min-content and max-content border-box widths of a block-level element.</summary>
+    public (float Min, float Max) MeasureIntrinsic(Element e) => Intrinsic(e);
+
     public float LayoutBand(Element band, float width)
     {
         _paginate = false;
