@@ -15,10 +15,19 @@ internal sealed partial class SvgImage
     /// </summary>
     private void RenderImage(Element e, ComputedStyle s, Matrix ctm, float opacity)
     {
+        if (!s.Visible) return;
+        DrawImage((e.GetAttribute("href") ?? e.GetAttribute("xlink:href"))?.Trim(), Num(e, "x"), Num(e, "y"),
+            Num(e, "width", float.NaN), Num(e, "height", float.NaN), e.GetAttribute("preserveaspectratio"), ctm, opacity);
+    }
+
+    /// <summary>
+    /// Draws the image at <paramref name="href"/> into the viewport (x, y, w, h) of user space; a NaN width or height
+    /// comes from the image.
+    /// </summary>
+    private void DrawImage(string? href, float x, float y, float w, float h, string? aspectRatio, Matrix ctm, float opacity)
+    {
         // An SVG image can embed SVG images; a few levels are plenty, and the limit stops a drawing embedding itself.
-        if (_load == null || !s.Visible || _imageDepth >= 4) return;
-        var href = (e.GetAttribute("href") ?? e.GetAttribute("xlink:href"))?.Trim();
-        if (string.IsNullOrEmpty(href)) return;
+        if (_load == null || _imageDepth >= 4 || string.IsNullOrEmpty(href)) return;
         object? source;
         _imageDepth++;
         try { source = _load(href); }
@@ -50,8 +59,6 @@ internal sealed partial class SvgImage
         if (!(cw > 0 && ch > 0)) return;
 
         // A missing width or height comes from the image, keeping its aspect ratio (SVG 2 auto sizing).
-        float x = Num(e, "x"), y = Num(e, "y");
-        float w = Num(e, "width", float.NaN), h = Num(e, "height", float.NaN);
         if (float.IsNaN(w) && float.IsNaN(h)) { w = cw; h = ch; }
         else if (float.IsNaN(w)) w = h * cw / ch;
         else if (float.IsNaN(h)) h = w * ch / cw;
@@ -61,7 +68,7 @@ internal sealed partial class SvgImage
         bool slice = false;
         if (scales)
         {
-            var (align, isSlice) = AspectRatio(e.GetAttribute("preserveaspectratio"));
+            var (align, isSlice) = AspectRatio(aspectRatio);
             slice = isSlice;
             sx = w / cw;
             sy = h / ch;

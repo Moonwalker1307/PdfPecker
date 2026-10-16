@@ -257,6 +257,7 @@ internal sealed class ComputedStyle
     public bool SvgMaskAlpha;                   // mask-type: alpha (else luminance)
     public uint SvgFloodColor = CssColor.Black; // flood-color
     public float SvgFloodOpacity = 1;           // flood-opacity
+    public uint SvgLightingColor = 0xFFFFFFFFu; // lighting-color
     public ClipShape? ClipShape;                // clip-path: a basic shape or a reference box, on HTML elements
     public string? BlendMode;                   // mix-blend-mode, as a PDF blend mode name; null = normal
     public string?[]? BackgroundBlendModes;     // background-blend-mode per layer, as PDF names (null = normal); null = all normal
@@ -426,6 +427,7 @@ internal sealed class ComputedStyle
         c.SvgMaskAlpha = false;
         c.SvgFloodColor = CssColor.Black;
         c.SvgFloodOpacity = 1;
+        c.SvgLightingColor = 0xFFFFFFFFu;
         c.ClipShape = null;
         c.BlendMode = null;
         c.BackgroundBlendModes = null;

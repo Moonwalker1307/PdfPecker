@@ -32,7 +32,7 @@ internal static class CssSupports
         "column-width", "column-rule", "column-rule-width", "column-rule-style", "column-rule-color", "column-span",
         "fill", "stroke", "stroke-width", "fill-opacity", "stroke-opacity", "fill-rule", "stroke-linecap", "stroke-linejoin",
         "stroke-miterlimit", "clip-path", "clip-rule", "mask", "mask-type", "filter", "marker", "marker-start", "marker-mid",
-        "marker-end", "flood-color", "flood-opacity", "color-interpolation-filters", "text-anchor", "dominant-baseline",
+        "marker-end", "flood-color", "flood-opacity", "lighting-color", "color-interpolation-filters", "text-anchor", "dominant-baseline",
         "alignment-baseline", "border", "border-top", "border-right", "border-bottom", "border-left", "border-width",
         "border-style", "border-color", "border-radius", "border-top-width", "border-right-width", "border-bottom-width",
         "border-left-width", "border-top-style", "border-right-style", "border-bottom-style", "border-left-style",
@@ -132,6 +132,7 @@ internal static class CssSupports
             case "text-decoration-color":
             case "column-rule-color":
             case "flood-color":
+            case "lighting-color":
                 return CssColor.TryParse(value, CssColor.Black, out _);
             case "display":
                 return lower is "block" or "inline" or "inline-block" or "flex" or "inline-flex" or "grid" or "inline-grid"

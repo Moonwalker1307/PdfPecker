@@ -6,16 +6,21 @@ namespace PdfPecker.Svg;
 
 /// <summary>
 /// An SVG filter: its region in root user space and its primitives, run on the pixels of the filtered content.
-/// Supported: feGaussianBlur, feOffset, feDropShadow, feFlood, feMerge, feComposite, feBlend, feColorMatrix,
-/// feComponentTransfer and feMorphology. Other primitives pass their input through unchanged. Primitive subregions
-/// are not used: every primitive covers the whole filter region.
+/// Every primitive of SVG 1.1 and feDropShadow, each within its primitive subregion. Lengths of the primitives'
+/// own pixel grids (convolution kernels, lighting normals) are device pixels, as in browsers.
 /// </summary>
-internal sealed class SvgFilter
+internal sealed partial class SvgFilter
 {
     public float X, Y, W, H; // the filter region, root user space
     public readonly List<Primitive> Primitives = new();
+    public Matrix ToUser = Matrix.Identity; // root space to the user space of the filtered element
+    public float UserScale = 1;             // root units per user unit
 
-    internal enum Kind : byte { Blur, Offset, DropShadow, Flood, Merge, Composite, Blend, ColorMatrix, ComponentTransfer, Morphology, PassThrough }
+    internal enum Kind : byte
+    {
+        Blur, Offset, DropShadow, Flood, Merge, Composite, Blend, ColorMatrix, ComponentTransfer, Morphology, PassThrough,
+        Turbulence, Image, Tile, ConvolveMatrix, DisplacementMap, DiffuseLighting, SpecularLighting,
+    }
 
     internal sealed class Primitive
     {
@@ -30,6 +35,39 @@ internal sealed class SvgFilter
         public float[]? Matrix;           // 4 × 5 colour matrix
         public Transfer?[]? Functions;    // R, G, B, A
         public bool Linear = true;        // color-interpolation-filters: linearRGB
+
+        // The primitive subregion: in root space when given, and in user space (for turbulence tiles) either way.
+        public bool HasRegion;
+        public float RX, RY, RW, RH, UX, UY, UW, UH;
+
+        // feTurbulence.
+        public float FreqX, FreqY;
+        public int Octaves = 1, Seed;
+        public bool Stitch, Fractal;
+
+        // feImage: what it draws, in root space, rendered over the filter region by the writer.
+        public List<SvgShape>? Shapes;
+        public Element? Element;
+
+        // feConvolveMatrix.
+        public int OrderX = 3, OrderY = 3, TargetX, TargetY;
+        public float[]? Kernel;
+        public float Divisor, Bias;
+        public bool PreserveAlpha;
+
+        // feDisplacementMap (Sx, Sy hold the scale in root units) and lighting.
+        public int XChannel = 3, YChannel = 3;
+        public float SurfaceScale = 1, Constant = 1, SpecularExponent = 1;
+        public Light? Light;
+    }
+
+    /// <summary>A light source of feDiffuseLighting or feSpecularLighting; positions in root space, z in root units.</summary>
+    internal sealed class Light
+    {
+        public byte Type; // 0 distant, 1 point, 2 spot
+        public float Azimuth, Elevation;
+        public float X, Y, Z, PointsAtX, PointsAtY, PointsAtZ;
+        public float SpotExponent = 1, ConeCos = float.NaN;
     }
 
     internal sealed class Transfer
@@ -65,13 +103,17 @@ internal sealed class SvgFilter
     // ------------------------------------------------------------------ parsing
 
     /// <summary>
-    /// Reads the primitives of a filter element. Lengths are user units of <paramref name="ctm"/>, times the bounding box
-    /// size (<paramref name="unitX"/>, <paramref name="unitY"/>) for primitiveUnits="objectBoundingBox". Returns null
-    /// when the filter has no primitives (it then draws nothing).
+    /// Reads the primitives of a filter element. Lengths are user units of <paramref name="ctm"/>, or fractions of the
+    /// bounding box <paramref name="box"/> for primitiveUnits="objectBoundingBox" (<paramref name="primitiveBox"/>).
+    /// <paramref name="region"/> is the filter region and <paramref name="viewport"/> the size percentages refer to,
+    /// both in user space. Returns null when the filter has no primitives (it then draws nothing).
     /// </summary>
-    public static SvgFilter? Parse(Element filter, Matrix ctm, float unitX, float unitY)
+    public static SvgFilter? Parse(Element filter, Matrix ctm, bool primitiveBox, (float X, float Y, float W, float H) box,
+        (float X, float Y, float W, float H) region, (float W, float H) viewport)
     {
-        var f = new SvgFilter();
+        var f = new SvgFilter { UserScale = ctm.ScaleFactor };
+        if (ctm.TryInvert(out var toUser)) f.ToUser = toUser;
+        float unitX = primitiveBox ? box.W : 1, unitY = primitiveBox ? box.H : 1;
         // Lengths along x and y of user space, measured in root space.
         float lx = MathF.Sqrt(ctm.A * ctm.A + ctm.B * ctm.B) * unitX, ly = MathF.Sqrt(ctm.C * ctm.C + ctm.D * ctm.D) * unitY;
         foreach (var child in filter.Children)
@@ -84,6 +126,7 @@ internal sealed class SvgFilter
                 Result = e.GetAttribute("result")?.Trim(),
                 Linear = e.Style?.SvgFilterSrgb != true,
             };
+            Subregion(e, p, ctm, primitiveBox, box, region, viewport);
             void Offset()
             {
                 float dx = Number(e, "dx", p.Kind == Kind.DropShadow ? 2 : 0) * unitX, dy = Number(e, "dy", p.Kind == Kind.DropShadow ? 2 : 0) * unitY;
@@ -162,6 +205,45 @@ internal sealed class SvgFilter
                     p.Operator = (e.GetAttribute("operator") ?? "erode").Trim().ToLowerInvariant();
                     Pair("radius", 0);
                     break;
+                case "feturbulence":
+                {
+                    p.Kind = Kind.Turbulence;
+                    var freq = SvgImage.ParseNumbers(e.GetAttribute("basefrequency"));
+                    p.FreqX = freq.Count > 0 ? freq[0] : 0;
+                    p.FreqY = freq.Count > 1 ? freq[1] : p.FreqX;
+                    if (p.FreqX < 0 || p.FreqY < 0) p.FreqX = p.FreqY = 0;
+                    p.Octaves = (int)Math.Clamp(Number(e, "numoctaves", 1), 0, 24);
+                    p.Seed = (int)Math.Clamp(MathF.Round(Number(e, "seed", 0)), int.MinValue + 1, int.MaxValue);
+                    p.Stitch = string.Equals(e.GetAttribute("stitchtiles")?.Trim(), "stitch", StringComparison.OrdinalIgnoreCase);
+                    p.Fractal = string.Equals(e.GetAttribute("type")?.Trim(), "fractalNoise", StringComparison.OrdinalIgnoreCase);
+                    break;
+                }
+                case "feimage":
+                    p.Kind = Kind.Image;
+                    p.Element = e; // drawn by the SVG image, which can render elements and load files
+                    break;
+                case "fetile":
+                    p.Kind = Kind.Tile;
+                    break;
+                case "feconvolvematrix":
+                    p.Kind = Kind.ConvolveMatrix;
+                    ParseConvolve(e, p);
+                    break;
+                case "fedisplacementmap":
+                {
+                    p.Kind = Kind.DisplacementMap;
+                    float scale = Number(e, "scale", 0);
+                    p.Sx = scale * lx;
+                    p.Sy = scale * ly;
+                    p.XChannel = Channel(e.GetAttribute("xchannelselector"));
+                    p.YChannel = Channel(e.GetAttribute("ychannelselector"));
+                    break;
+                }
+                case "fediffuselighting":
+                case "fespecularlighting":
+                    p.Kind = e.Name == "fediffuselighting" ? Kind.DiffuseLighting : Kind.SpecularLighting;
+                    ParseLighting(e, p, ctm, primitiveBox, box);
+                    break;
                 default:
                     p.Kind = Kind.PassThrough;
                     break;
@@ -214,12 +296,17 @@ internal sealed class SvgFilter
 
     // ------------------------------------------------------------------ pixels
 
-    /// <summary>A w × h image of premultiplied RGBA floats, in linearRGB or sRGB.</summary>
+    /// <summary>
+    /// A w × h image of premultiplied RGBA floats, in linearRGB or sRGB, transparent outside its subregion (pixel
+    /// columns X0 to X1 and rows Y0 to Y1, ends excluded).
+    /// </summary>
     private sealed class Image
     {
         public readonly float[] P;
         public readonly bool Linear;
+        public int X0, Y0, X1, Y1;
         public Image(float[] p, bool linear) { P = p; Linear = linear; }
+        public Image(float[] p, bool linear, Image regionOf) : this(p, linear) { (X0, Y0, X1, Y1) = (regionOf.X0, regionOf.Y0, regionOf.X1, regionOf.Y1); }
     }
 
     private static readonly float[] ToLinearTable = BuildTable(toLinear: true), ToSrgbTable = BuildTable(toLinear: false);
@@ -256,16 +343,17 @@ internal sealed class SvgFilter
             dst[i + 2] = Lookup(table, src[i + 2] / a) * a;
             dst[i + 3] = a;
         }
-        return new Image(dst, linear);
+        return new Image(dst, linear, img);
     }
 
     /// <summary>
     /// Runs the filter on the content's pixels (premultiplied sRGB, w × h covering the filter region), with
-    /// <paramref name="scaleX"/> and <paramref name="scaleY"/> pixels per root unit. Returns premultiplied sRGB.
+    /// <paramref name="scaleX"/> and <paramref name="scaleY"/> pixels per root unit. <paramref name="rasterize"/> renders
+    /// shapes over the filter region in the same way, for feImage. Returns premultiplied sRGB.
     /// </summary>
-    public float[] Apply(float[] sourcePixels, int w, int h, float scaleX, float scaleY)
+    public float[] Apply(float[] sourcePixels, int w, int h, float scaleX, float scaleY, Func<List<SvgShape>, float[]?>? rasterize = null)
     {
-        var source = new Image(sourcePixels, false);
+        var source = new Image(sourcePixels, false) { X1 = w, Y1 = h };
         Image? alpha = null;
         var results = new Dictionary<string, Image>(StringComparer.Ordinal);
         Image last = source;
@@ -280,17 +368,40 @@ internal sealed class SvgFilter
                     {
                         var a = new float[sourcePixels.Length];
                         for (int i = 3; i < a.Length; i += 4) a[i] = sourcePixels[i];
-                        alpha = new Image(a, false);
+                        alpha = new Image(a, false, source);
                     }
                     return alpha;
                 case "BackgroundImage" or "BackgroundAlpha" or "FillPaint" or "StrokePaint":
-                    return new Image(new float[sourcePixels.Length], false);
+                    return new Image(new float[sourcePixels.Length], false, source);
                 default:
                     return results.TryGetValue(name, out var r) ? r : last;
             }
         }
         foreach (var p in Primitives)
         {
+            // The subregion: given, else the union of the inputs' (all of the filter region without inputs).
+            int x0, y0, x1, y1;
+            if (p.HasRegion)
+            {
+                x0 = Math.Clamp((int)MathF.Floor((p.RX - X) * scaleX + 0.001f), 0, w);
+                y0 = Math.Clamp((int)MathF.Floor((p.RY - Y) * scaleY + 0.001f), 0, h);
+                x1 = Math.Clamp((int)MathF.Ceiling((p.RX + p.RW - X) * scaleX - 0.001f), x0, w);
+                y1 = Math.Clamp((int)MathF.Ceiling((p.RY + p.RH - Y) * scaleY - 0.001f), y0, h);
+            }
+            else if (p.Kind is Kind.Flood or Kind.Turbulence or Kind.Image or Kind.Tile) (x0, y0, x1, y1) = (0, 0, w, h); // feTile fills the filter region, as in browsers
+            else
+            {
+                var inputs = p.Kind == Kind.Merge ? (p.Inputs ?? new List<string?>()).Select(Input).ToList()
+                    : p.Kind is Kind.Composite or Kind.Blend or Kind.DisplacementMap ? new List<Image> { Input(p.In), Input(p.In2) }
+                    : new List<Image> { Input(p.In) };
+                if (inputs.Count == 0) (x0, y0, x1, y1) = (0, 0, w, h);
+                else
+                {
+                    (x0, y0, x1, y1) = (w, h, 0, 0);
+                    foreach (var i in inputs) { x0 = Math.Min(x0, i.X0); y0 = Math.Min(y0, i.Y0); x1 = Math.Max(x1, i.X1); y1 = Math.Max(y1, i.Y1); }
+                    if (x1 < x0 || y1 < y0) (x0, y0, x1, y1) = (0, 0, 0, 0);
+                }
+            }
             Image result = p.Kind switch
             {
                 Kind.Blur => new Image(Blur(Convert(Input(p.In), p.Linear).P, w, h, p.Sx * scaleX, p.Sy * scaleY), p.Linear),
@@ -303,12 +414,32 @@ internal sealed class SvgFilter
                 Kind.ColorMatrix => new Image(ColorMatrix(Convert(Input(p.In), p.Linear).P, p.Matrix), p.Linear),
                 Kind.ComponentTransfer => new Image(ComponentTransfer(Convert(Input(p.In), p.Linear).P, p.Functions!), p.Linear),
                 Kind.Morphology => new Image(Morphology(Convert(Input(p.In), p.Linear).P, w, h, p.Sx * scaleX, p.Sy * scaleY, p.Operator == "dilate"), p.Linear),
+                Kind.Turbulence => new Image(Turbulence(p, w, h, scaleX, scaleY, x0, y0, x1, y1), p.Linear),
+                Kind.Image => new Image(p.Shapes is { Count: > 0 } shapes && rasterize?.Invoke(shapes) is { } drawn ? drawn : new float[w * h * 4], false),
+                Kind.Tile => new Image(Tile(Convert(Input(p.In), p.Linear), w, x0, y0, x1, y1), p.Linear),
+                Kind.ConvolveMatrix => new Image(Convolve(Convert(Input(p.In), p.Linear).P, w, h, p), p.Linear),
+                Kind.DisplacementMap => Displace(Input(p.In), Convert(Input(p.In2), p.Linear), w, h, p.Sx * scaleX, p.Sy * scaleY, p),
+                Kind.DiffuseLighting or Kind.SpecularLighting => new Image(Lighting(Convert(Input(p.In), p.Linear).P, w, h, scaleX, scaleY, p), p.Linear),
                 _ => Input(p.In),
             };
+            result = Clip(result, w, h, x0, y0, x1, y1);
             last = result;
             if (!string.IsNullOrEmpty(p.Result)) results[p.Result] = result;
         }
         return Convert(last, false).P;
+    }
+
+    /// <summary>The image made transparent outside the subregion (a copy when that changes pixels), with that region.</summary>
+    private static Image Clip(Image img, int w, int h, int x0, int y0, int x1, int y1)
+    {
+        var src = img.P;
+        var dst = src;
+        if (x0 > 0 || y0 > 0 || x1 < w || y1 < h)
+        {
+            dst = new float[src.Length];
+            for (int y = y0; y < y1; y++) Array.Copy(src, (y * w + x0) * 4, dst, (y * w + x0) * 4, (x1 - x0) * 4);
+        }
+        return new Image(dst, img.Linear) { X0 = x0, Y0 = y0, X1 = x1, Y1 = y1 };
     }
 
     private static float[] Flood(int w, int h, uint color, bool linear)
