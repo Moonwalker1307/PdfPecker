@@ -256,10 +256,49 @@ public class SelectorAndBoxEffectTests
         Assert.Equal(Red, texts[0].Color);
         Assert.Equal(texts[1].X + 2, texts[0].X, 0.01f);
         Assert.Equal(texts[1].Baseline + 3, texts[0].Baseline, 0.01f);
-        // A blurred shadow is softened with faint copies.
-        var blurred = Ops("<p style='text-shadow: 0 0 4pt rgba(0,0,0,0.5)'>Glow</p>").OfType<TextOp>().ToList();
-        Assert.Equal(18, blurred.Count);
-        Assert.True(blurred[0].Color >> 24 < 0x80);
+    }
+
+    /// <summary>The ops without the contents of text-shadow layers, which are drawn only as the shadows' pixels.</summary>
+    private static List<DrawOp> Unshadowed(List<DrawOp> ops)
+    {
+        var inside = ops.OfType<LayerOp>().Where(l => l.TextShadow).SelectMany(l => l.Ops).ToHashSet();
+        return ops.Where(o => !inside.Contains(o)).ToList();
+    }
+
+    [Fact]
+    public void Blurred_text_shadows_are_one_layer_of_pixels_per_run()
+    {
+        // Two blurred shadows and a sharp one in between: the sharp one stays text, each blurred one is a layer whose
+        // filter blurs the text's alpha by half the blur radius.
+        var ops = Unshadowed(Ops("<p style='color:#000; text-shadow: 1pt 1pt 4pt red, 2pt 2pt blue, 0 0 10pt rgba(0,0,0,0.5)'>Glow</p>"));
+        var layers = ops.OfType<LayerOp>().ToList();
+        Assert.Equal(2, layers.Count);
+        Assert.All(layers, l => Assert.True(l.TextShadow && l.RasterReplaces && l.Raster!.TextShadows));
+        Assert.Equal(5f, layers[0].Raster!.Primitives[0].Sx, 0.01f); // the last shadow is painted first
+        Assert.Equal(2f, layers[1].Raster!.Primitives[0].Sx, 0.01f);
+        Assert.Equal(Red, layers[1].Raster!.Primitives[2].Color);
+        // The layer's text is opaque, so a transparent text still casts its shadow.
+        Assert.Equal(Black, Assert.IsType<TextOp>(Assert.Single(layers[0].Ops)).Color);
+        var texts = ops.OfType<TextOp>().ToList();
+        Assert.Equal(2, texts.Count);
+        Assert.Equal(Blue, texts[0].Color);
+        Assert.True(ops.IndexOf(layers[0]) < ops.IndexOf(texts[0]) && ops.IndexOf(texts[0]) < ops.IndexOf(layers[1]));
+    }
+
+    [Fact]
+    public void Text_shadows_include_the_decorations()
+    {
+        var ops = Unshadowed(Ops("<p style='color:#000; text-decoration: underline line-through; text-shadow: 2pt 3pt #f00, 0 0 4pt blue'>Shadow</p>"));
+        var rects = ops.OfType<RectOp>().Where(r => r.IsDecoration).ToList();
+        // The sharp shadow's two lines in red, offset, then the text's own two lines in black.
+        Assert.Equal(4, rects.Count);
+        Assert.Equal(Red, rects[0].Color);
+        Assert.Equal(Black, rects[2].Color);
+        Assert.Equal(rects[2].X + 2, rects[0].X, 0.01f);
+        Assert.Equal(rects[2].Y + 3, rects[0].Y, 0.01f);
+        // The blurred shadow's layer holds the run and both lines.
+        var layer = Assert.Single(ops.OfType<LayerOp>());
+        Assert.Equal(2, layer.Ops.OfType<RectOp>().Count());
     }
 
     [Fact]

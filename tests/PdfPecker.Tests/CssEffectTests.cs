@@ -320,6 +320,73 @@ public class CssEffectTests
     }
 
     [Fact]
+    public void A_blurred_box_keeps_its_text_as_invisible_text()
+    {
+        var pdf = Pdf("<p style='filter:blur(2px)'>Blurred words</p><p style='filter:drop-shadow(2px 2px 2px red)'>Shadowed</p>");
+        var content = AllContent(pdf);
+        Assert.Contains("(Blurred words)", content);
+        Assert.Contains("3 Tr", content);
+        // Only the blurred box's text is invisible: the text over a drop-shadow is drawn as text.
+        Assert.Single(Regex.Matches(content, @"\b3 Tr"));
+        Assert.Matches(@"0 Tr\s+1 0 0 1 [-\d. ]+ Tm \(Shadowed\)", content);
+        // The pixels of the first paragraph are still the blurred image: no sharp glyphs on top.
+        var img = Render(pdf);
+        Assert.InRange(Enumerable.Range(0, img.Width * 27).Min(i => img.Rgba[i * 4]), 30, 254);
+    }
+
+    [Fact]
+    public void A_blurred_box_keeps_its_text_tagged()
+    {
+        var pdf = HtmlToPdf.Convert("<title>t</title><h1 style='filter:blur(1px)'>Heading</h1><p>Body</p>",
+            new PdfOptions { Accessibility = PdfAccessibility.PdfUA1, Compress = false });
+        AssertStructurallyValid(pdf);
+        var content = AllContent(pdf);
+        Assert.Matches(new Regex(@"/H1 <</MCID \d+>> BDC((?!EMC).)*3 Tr((?!EMC).)*T[Jj]", RegexOptions.Singleline), content);
+        Assert.Contains("/Artifact BMC", content);
+    }
+
+    [Fact]
+    public void Blurred_text_shadow_is_a_gaussian_blur()
+    {
+        // A thick underline of transparent text with a 20px blur: the shadow's profile across the line is the line
+        // convolved with a Gaussian of 10px deviation (as in Chrome).
+        var pdf = Pdf("<div style='padding:40px 40px 0;height:200px;font-size:40px;color:transparent;text-decoration:underline;"
+                      + "text-decoration-thickness:20px;text-underline-offset:80px;text-shadow:0 0 20px #000'>IIIIIIIIIIIIIII</div>");
+        var img = PdfRenderer.Open(pdf).RenderPage(0, new ImageOptions { Dpi = 96 });
+        int Gray(int y) => img.Rgba[(y * img.Width + 200) * 4];
+        int darkest = Enumerable.Range(100, 150).OrderBy(Gray).First();
+        // At the middle of a 20px line under a 10px deviation, 68% coverage; 20px out from the middle, 6.7%.
+        Assert.InRange(Gray(darkest), 255 - 0.68 * 255 - 12, 255 - 0.68 * 255 + 12);
+        Assert.InRange(Gray(darkest + 20), 255 - 0.16 * 255 - 12, 255 - 0.16 * 255 + 12);
+        Assert.InRange(Gray(darkest - 30), 245, 255);
+        // The glyphs themselves are transparent: their shadow is a soft grey, never black.
+        Assert.True(Enumerable.Range(0, img.Width * img.Height).All(i => img.Rgba[i * 4] > 40));
+    }
+
+    [Fact]
+    public void The_same_shadowed_text_shares_one_image()
+    {
+        var pdf = Pdf(string.Concat(Enumerable.Repeat("<p style='text-shadow:0 0 4px #000'>Repeated</p>", 20)) + "<p style='text-shadow:0 0 4px #000'>Other</p>");
+        var text = Latin1(pdf);
+        Assert.Equal(2, Regex.Matches(text, "/SMask").Count);
+        Assert.Equal(21, Regex.Matches(AllContent(pdf), @"/Xr\d+ Do").Count);
+        Assert.Contains("/Predictor 15", text);
+    }
+
+    [Fact]
+    public void Blurred_text_shadows_work_in_pdf_a()
+    {
+        var html = "<title>Shadows</title><h1 style='text-shadow: 2px 2px 4px #888; text-decoration: underline'>Title</h1><p style='filter:blur(1px)'>Blurred</p>";
+        var pdfa = HtmlToPdf.Convert(html, new PdfOptions { Conformance = PdfConformance.PdfA2b, Compress = false });
+        AssertStructurallyValid(pdfa);
+        Assert.Contains("/SMask", Latin1(pdfa));
+        var tagged = HtmlToPdf.Convert(html, new PdfOptions { Accessibility = PdfAccessibility.PdfUA1, Compress = false });
+        AssertStructurallyValid(tagged);
+        // The heading's text is tagged once: the shadow is an artifact.
+        Assert.Single(Regex.Matches(AllContent(tagged), @"/H1 <</MCID"));
+    }
+
+    [Fact]
     public void Drop_shadow_of_a_box_over_two_pages_shows_on_both()
     {
         var options = new PdfOptions { Margins = new PageMargins(20), Compress = false };

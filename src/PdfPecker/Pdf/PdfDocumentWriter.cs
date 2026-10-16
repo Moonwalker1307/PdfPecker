@@ -62,7 +62,9 @@ internal sealed partial class PdfDocumentWriter
     private bool _inText;
     private TextFont? _textFont;
     private float _textSize, _tw, _tc;
-    private int _tr;           // text rendering mode: 0 fill, 2 fill and stroke (synthetic bold)
+    private int _tr;           // text rendering mode: 0 fill, 2 fill and stroke (synthetic bold), 3 invisible
+    // Writing only the text of content drawn as pixels, invisibly, so that it can still be selected, searched and tagged.
+    private bool _invisibleText;
     private uint _stroke;
     private float _lineWidth;
     private int _fillAlpha = 255, _strokeAlpha = 255; // the constant alphas (0-255) in effect; -1 when unknown
@@ -1604,6 +1606,8 @@ internal sealed partial class PdfDocumentWriter
 
     private void WriteOp(ByteBuffer b, in Placed placed, float pageTop, Dictionary<PdfImage, int> imageIds)
     {
+        // Over the pixels of a blurred box only its text is written, and none of the shadows of text in it.
+        if (_invisibleText && placed.Op is not (TextOp or ClipBlock or LayerBlock { Layer.TextShadow: false })) return;
         if (_mc != null)
         {
             // Marked content nests inside the q/Q of clips and layers, which open their own sequences.
@@ -1696,7 +1700,7 @@ internal sealed partial class PdfDocumentWriter
                     b.Ascii(tb.Layer.ClipEvenOdd ? "W* n\n" : "W n\n");
                     if (_mc != null) b.Ascii("EMC\n");
                 }
-                if (tb.Layer.NeedsGroup)
+                if (tb.Layer.NeedsGroup && !_invisibleText)
                 {
                     // A translucent or blended layer is a transparency group, painted as a whole at its opacity and with
                     // its blend mode, so that its own overlapping parts do not show through each other.
@@ -1849,13 +1853,26 @@ internal sealed partial class PdfDocumentWriter
     private void WriteLayerContent(ByteBuffer b, LayerBlock tb, float pageTop, Dictionary<PdfImage, int> imageIds)
     {
         var layer = tb.Layer;
-        if (layer.Raster != null)
+        if (layer.Raster != null && !_invisibleText)
         {
             EndText(b);
             if (_mc != null) { EndMarked(b); b.Ascii("/Artifact BMC\n"); }
             WriteLayerRaster(b, layer, pageTop);
             if (_mc != null) b.Ascii("EMC\n");
-            if (layer.RasterReplaces) return;
+            if (layer.RasterReplaces)
+            {
+                if (layer.TextShadow) return;
+                // The image hides the text in it from search and selection: the same text again, invisible, brings it back.
+                _invisibleText = true;
+                try
+                {
+                    foreach (var item in tb.Items)
+                        if (item.Op is not LinkOp) WriteOp(b, item, pageTop, imageIds);
+                    EndText(b);
+                }
+                finally { _invisibleText = false; }
+                return;
+            }
         }
         foreach (var item in tb.Items)
             if (item.Op is not LinkOp) WriteOp(b, item, pageTop, imageIds);
@@ -2116,21 +2133,31 @@ internal sealed partial class PdfDocumentWriter
         var rgb = new byte[w * h * 3];
         var alpha = new byte[w * h];
         bool any = false;
+        byte r = 0, g = 0, bl = 0;
         for (int i = 0, o = 0; i < w * h; i++, o += 3)
         {
             float a = Math.Clamp(result[i * 4 + 3], 0, 1);
-            if (a <= 0) continue;
-            any = true;
-            alpha[i] = (byte)MathF.Round(a * 255);
-            rgb[o] = (byte)MathF.Round(Math.Clamp(result[i * 4] / a, 0, 1) * 255);
-            rgb[o + 1] = (byte)MathF.Round(Math.Clamp(result[i * 4 + 1] / a, 0, 1) * 255);
-            rgb[o + 2] = (byte)MathF.Round(Math.Clamp(result[i * 4 + 2] / a, 0, 1) * 255);
+            byte a8 = (byte)MathF.Round(a * 255);
+            if (a8 > 0)
+            {
+                any = true;
+                alpha[i] = a8;
+                r = (byte)MathF.Round(Math.Clamp(result[i * 4] / a, 0, 1) * 255);
+                g = (byte)MathF.Round(Math.Clamp(result[i * 4 + 1] / a, 0, 1) * 255);
+                bl = (byte)MathF.Round(Math.Clamp(result[i * 4 + 2] / a, 0, 1) * 255);
+            }
+            // A transparent pixel keeps the colour before it, which costs nothing to compress where black would.
+            rgb[o] = r;
+            rgb[o + 1] = g;
+            rgb[o + 2] = bl;
         }
         if (!any) return null;
+        var colorData = PdfImage.DeflatePredicted(rgb, w, h, 3, out string colorParms);
+        var alphaData = PdfImage.DeflatePredicted(alpha, w, h, 1, out string alphaParms);
         return new PdfImage
         {
-            Width = w, Height = h, Data = PdfImage.Deflate(rgb),
-            SMask = new PdfImage { Width = w, Height = h, ColorSpace = "/DeviceGray", Data = PdfImage.Deflate(alpha) },
+            Width = w, Height = h, Data = colorData, DecodeParms = colorParms,
+            SMask = new PdfImage { Width = w, Height = h, ColorSpace = "/DeviceGray", Data = alphaData, DecodeParms = alphaParms },
         };
     }
 
@@ -2603,6 +2630,7 @@ internal sealed partial class PdfDocumentWriter
 
     private void SetRenderMode(ByteBuffer b, int mode)
     {
+        if (_invisibleText) mode = 3;
         if (_tr == mode) return;
         _tr = mode;
         b.Int(mode).Ascii(" Tr\n");
