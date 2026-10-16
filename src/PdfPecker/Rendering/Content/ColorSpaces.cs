@@ -57,8 +57,16 @@ internal abstract class ColorSpace
         var family = (file.Resolve(a[0]) as PdfName)?.Value;
         switch (family)
         {
-            case "DeviceGray": case "G": case "CalGray": return Gray;
-            case "DeviceRGB": case "RGB": case "CalRGB": return RgbSpace;
+            case "DeviceGray": case "G": return Gray;
+            case "DeviceRGB": case "RGB": return RgbSpace;
+            case "CalGray":
+            case "CalRGB":
+            {
+                var d = a.Count > 1 ? file.Resolve(a[1]) as PdfDict : null;
+                bool rgb = family == "CalRGB";
+                return CalSpace.Create(rgb, file.GetNumbers(d, "WhitePoint"), rgb ? file.GetNumbers(d, "Gamma") : null,
+                    rgb ? null : file.Num(d?["Gamma"], 1), rgb ? file.GetNumbers(d, "Matrix") : null) ?? (rgb ? RgbSpace : Gray);
+            }
             case "DeviceCMYK": case "CMYK": return Cmyk;
             case "ICCBased":
             {
@@ -199,6 +207,84 @@ internal sealed class LabSpace : ColorSpace
     }
 
     private static double Gamma(double v) => v <= 0.0031308 ? 12.92 * v : 1.055 * Math.Pow(v, 1 / 2.4) - 0.055;
+}
+
+/// <summary>
+/// CalGray and CalRGB (ISO 32000-1, 8.6.5.2 and 8.6.5.3): each component is raised to its gamma, CalRGB components are
+/// then mixed by the matrix into CIE XYZ, and the result is adapted to D65 by scaling with the white point (as
+/// <see cref="LabSpace"/> does) and encoded as sRGB.
+/// </summary>
+internal sealed class CalSpace : ColorSpace
+{
+    private readonly int _n;
+    private readonly double[] _gamma;
+    /// <summary>Row-major 3x3 matrix from the gamma-applied components straight to linear sRGB.</summary>
+    public readonly double[] ToLinearSrgb;
+
+    private static readonly double[] XyzToSrgb = { 3.2406, -1.5372, -0.4986, -0.9689, 1.8758, 0.0415, 0.0557, -0.2040, 1.0570 };
+
+    private CalSpace(int n, double[] gamma, double[] toLinear)
+    {
+        _n = n;
+        _gamma = gamma;
+        ToLinearSrgb = toLinear;
+    }
+
+    /// <summary>Returns null when the white point is missing or invalid, so the caller can fall back to the device space.</summary>
+    public static CalSpace? Create(bool rgb, double[]? whitePoint, double[]? gammas, double? gray, double[]? matrix)
+    {
+        if (whitePoint is not { Length: >= 3 } || whitePoint[0] <= 0 || whitePoint[1] <= 0 || whitePoint[2] <= 0) return null;
+        static double G(double g) => g > 0 && double.IsFinite(g) ? g : 1;
+        if (!rgb)
+        {
+            // Gray maps to a multiple of the white point, which the adaptation turns into D65 white: a neutral grey with
+            // linear sRGB value A^G, so no matrix is needed.
+            return new CalSpace(1, new[] { G(gray ?? 1) }, new double[] { 1, 0, 0, 0, 1, 0, 0, 0, 1 });
+        }
+        var gamma = gammas is { Length: >= 3 } ? new[] { G(gammas[0]), G(gammas[1]), G(gammas[2]) } : new double[] { 1, 1, 1 };
+        var m = matrix is { Length: >= 9 } && matrix.Take(9).All(double.IsFinite) ? matrix : new double[] { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
+        // The PDF matrix lists XA YA ZA, XB YB ZB, XC YC ZC: column j holds the XYZ of component j.
+        double[] adapt = { 0.9505 / whitePoint[0], 1 / whitePoint[1], 1.089 / whitePoint[2] };
+        var toLinear = new double[9];
+        for (int r = 0; r < 3; r++)
+        for (int c = 0; c < 3; c++)
+        {
+            double sum = 0;
+            for (int k = 0; k < 3; k++) sum += XyzToSrgb[r * 3 + k] * adapt[k] * m[c * 3 + k];
+            toLinear[r * 3 + c] = sum;
+        }
+        return new CalSpace(3, gamma, toLinear);
+    }
+
+    public override int Components => _n;
+    public override string Name => _n == 1 ? "CalGray" : "CalRGB";
+
+    public override uint ToRgb(ReadOnlySpan<float> c)
+    {
+        if (c.Length < _n) return 0;
+        if (_n == 1)
+        {
+            int g = Byte(Encode(Linear(c[0], 0)));
+            return (uint)(g | g << 8 | g << 16);
+        }
+        double a = Linear(c[0], 0), b = Linear(c[1], 1), cc = Linear(c[2], 2);
+        var m = ToLinearSrgb;
+        return Rgb(Encode(m[0] * a + m[1] * b + m[2] * cc), Encode(m[3] * a + m[4] * b + m[5] * cc), Encode(m[6] * a + m[7] * b + m[8] * cc));
+    }
+
+    /// <summary>A component in 0-1 raised to its gamma.</summary>
+    public double Linear(double v, int component) => v <= 0 ? 0 : Math.Pow(Math.Min(v, 1), _gamma[component]);
+
+    /// <summary>Linear sRGB to the sRGB transfer curve.</summary>
+    public static double Encode(double v) => v <= 0.0031308 ? 12.92 * v : 1.055 * Math.Pow(Math.Min(v, 1), 1 / 2.4) - 0.055;
+
+    private static byte[]? _encodeTable;
+
+    /// <summary>
+    /// <see cref="Encode"/> sampled at 4096 points of linear light and rounded to 8 bits, so images avoid a power per
+    /// pixel; the spacing keeps the error under one level even on the steep dark end of the curve.
+    /// </summary>
+    public static byte[] EncodeTable => _encodeTable ??= Enumerable.Range(0, 4096).Select(i => (byte)Byte(Encode(i / 4095.0))).ToArray();
 }
 
 internal sealed class IndexedSpace : ColorSpace

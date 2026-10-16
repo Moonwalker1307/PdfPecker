@@ -1,3 +1,4 @@
+using PdfPecker.Fonts.Cff;
 using PdfPecker.Rendering.Graphics;
 
 namespace PdfPecker.Rendering.Fonts;
@@ -6,10 +7,10 @@ namespace PdfPecker.Rendering.Fonts;
 internal sealed class CffFont : IGlyphSource
 {
     private readonly byte[] _d;
-    private (int Start, int[] Offsets) _charStrings;
-    private (int Start, int[] Offsets) _gsubrs;
-    private (int Start, int[] Offsets) _subrs;
-    private readonly List<(int Start, int[] Offsets)> _fdSubrs = new();
+    private CffIndex _charStrings;
+    private CffIndex _gsubrs;
+    private CffIndex _subrs;
+    private readonly List<CffIndex> _fdSubrs = new();
     private readonly List<(double DefaultWidth, double NominalWidth)> _fdWidths = new();
     private readonly List<Matrix?> _fdMatrix = new();
     private byte[]? _fdSelect;
@@ -23,7 +24,7 @@ internal sealed class CffFont : IGlyphSource
 
     public bool IsCid { get; private set; }
     public Matrix FontMatrix { get; private set; } = Matrix.Scale(0.001, 0.001);
-    public int GlyphCount => _charStrings.Offsets.Length - 1;
+    public int GlyphCount => _charStrings.Count;
 
     /// <summary>The font's built-in encoding: code to glyph id (0 when unmapped).</summary>
     public int[] BuiltinEncoding { get; private set; } = new int[256];
@@ -37,7 +38,7 @@ internal sealed class CffFont : IGlyphSource
             var f = new CffFont(data);
             return f.Load() ? f : null;
         }
-        catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or OverflowException or InvalidOperationException)
+        catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or FormatException or OverflowException or InvalidOperationException)
         {
             return null;
         }
@@ -48,53 +49,58 @@ internal sealed class CffFont : IGlyphSource
         var d = _d;
         if (d.Length < 4 || d[0] != 1) return false; // CFF2 is not supported
         int pos = d[2];
-        var names = ReadIndex(ref pos);
-        var topDicts = ReadIndex(ref pos);
-        var strings = ReadIndex(ref pos);
-        _gsubrs = ReadIndex(ref pos);
-        if (topDicts.Offsets.Length < 2) return false;
+        var names = CffIndex.Read(d, ref pos);
+        var topDicts = CffIndex.Read(d, ref pos);
+        var strings = CffIndex.Read(d, ref pos);
+        _gsubrs = CffIndex.Read(d, ref pos);
+        if (topDicts.Count < 1) return false;
 
-        _strings = new string[strings.Offsets.Length - 1];
+        _strings = new string[strings.Count];
         for (int i = 0; i < _strings.Length; i++)
-            _strings[i] = System.Text.Encoding.Latin1.GetString(d, strings.Start + strings.Offsets[i], strings.Offsets[i + 1] - strings.Offsets[i]);
+        {
+            var (start, end) = strings.Range(i);
+            _strings[i] = System.Text.Encoding.Latin1.GetString(d, start, end - start);
+        }
 
-        var top = ReadDict(topDicts.Start + topDicts.Offsets[0], topDicts.Start + topDicts.Offsets[1]);
+        var (topStart, topEnd) = topDicts.Range(0);
+        var top = CffDict.Parse(d, topStart, topEnd);
         if (!top.TryGetValue(17, out var cs) || cs.Length < 1) return false;
         int csPos = (int)cs[0];
-        _charStrings = ReadIndex(ref csPos);
-        int nGlyphs = _charStrings.Offsets.Length - 1;
+        _charStrings = CffIndex.Read(d, ref csPos);
+        int nGlyphs = _charStrings.Count;
         if (nGlyphs <= 0) return false;
         _cache = new PathData?[nGlyphs];
         _widths = new double[nGlyphs];
         Array.Fill(_widths, double.NaN);
 
-        if (top.TryGetValue(12 << 8 | 7, out var fm) && fm.Length >= 6)
+        if (top.TryGetValue(OpFontMatrix, out var fm) && fm.Length >= 6)
             FontMatrix = new Matrix(fm[0], fm[1], fm[2], fm[3], fm[4], fm[5]);
-        IsCid = top.ContainsKey(12 << 8 | 30);
+        IsCid = top.ContainsKey(CffDict.Escape + 30); // ROS
 
         if (top.TryGetValue(18, out var priv) && priv.Length >= 2) ReadPrivate((int)priv[1], (int)priv[0], out _subrs, out _defaultWidth, out _nominalWidth);
 
         if (IsCid)
         {
-            if (top.TryGetValue(12 << 8 | 36, out var fdArr) && fdArr.Length >= 1)
+            if (top.TryGetValue(CffDict.Escape + 36, out var fdArr) && fdArr.Length >= 1) // FDArray
             {
                 int p = (int)fdArr[0];
-                var fds = ReadIndex(ref p);
-                for (int i = 0; i + 1 < fds.Offsets.Length; i++)
+                var fds = CffIndex.Read(d, ref p);
+                for (int i = 0; i < fds.Count; i++)
                 {
-                    var fd = ReadDict(fds.Start + fds.Offsets[i], fds.Start + fds.Offsets[i + 1]);
-                    (int, int[]) subrs = (0, Array.Empty<int>());
+                    var (fdStart, fdEnd) = fds.Range(i);
+                    var fd = CffDict.Parse(d, fdStart, fdEnd);
+                    CffIndex subrs = default;
                     double dw = 0, nw = 0;
                     if (fd.TryGetValue(18, out var fp) && fp.Length >= 2) ReadPrivate((int)fp[1], (int)fp[0], out subrs, out dw, out nw);
                     _fdSubrs.Add(subrs);
                     _fdWidths.Add((dw, nw));
-                    _fdMatrix.Add(fd.TryGetValue(12 << 8 | 7, out var m) && m.Length >= 6 ? new Matrix(m[0], m[1], m[2], m[3], m[4], m[5]) : null);
+                    _fdMatrix.Add(fd.TryGetValue(OpFontMatrix, out var m) && m.Length >= 6 ? new Matrix(m[0], m[1], m[2], m[3], m[4], m[5]) : null);
                 }
                 // A font-dict matrix scales glyph space; the top matrix then defaults to identity.
                 if (_fdMatrix.Count > 0 && _fdMatrix[0] is Matrix fdm)
-                    FontMatrix = top.ContainsKey(12 << 8 | 7) ? fdm.Multiply(FontMatrix) : fdm;
+                    FontMatrix = top.ContainsKey(OpFontMatrix) ? fdm.Multiply(FontMatrix) : fdm;
             }
-            if (top.TryGetValue(12 << 8 | 37, out var fdSel) && fdSel.Length >= 1) ReadFdSelect((int)fdSel[0], nGlyphs);
+            if (top.TryGetValue(CffDict.Escape + 37, out var fdSel) && fdSel.Length >= 1) ReadFdSelect((int)fdSel[0], nGlyphs);
         }
 
         // Charset.
@@ -122,18 +128,20 @@ internal sealed class CffFont : IGlyphSource
         return true;
     }
 
-    private void ReadPrivate(int offset, int size, out (int, int[]) subrs, out double defaultWidth, out double nominalWidth)
+    private const int OpFontMatrix = CffDict.Escape + 7;
+
+    private void ReadPrivate(int offset, int size, out CffIndex subrs, out double defaultWidth, out double nominalWidth)
     {
-        subrs = (0, Array.Empty<int>());
+        subrs = default;
         defaultWidth = nominalWidth = 0;
         if (offset <= 0 || offset + size > _d.Length) return;
-        var p = ReadDict(offset, offset + size);
+        var p = CffDict.Parse(_d, offset, offset + size);
         if (p.TryGetValue(20, out var dw) && dw.Length > 0) defaultWidth = dw[0];
         if (p.TryGetValue(21, out var nw) && nw.Length > 0) nominalWidth = nw[0];
         if (p.TryGetValue(19, out var so) && so.Length > 0)
         {
             int sp = offset + (int)so[0];
-            if (sp > 0 && sp < _d.Length) subrs = ReadIndex(ref sp);
+            if (sp > 0 && sp < _d.Length) subrs = CffIndex.Read(_d, ref sp);
         }
     }
 
@@ -265,76 +273,6 @@ internal sealed class CffFont : IGlyphSource
         return _widths[gid];
     }
 
-    // ------------------------------------------------------------------ INDEX and DICT
-
-    private (int Start, int[] Offsets) ReadIndex(ref int pos)
-    {
-        var d = _d;
-        int count = d[pos] << 8 | d[pos + 1];
-        pos += 2;
-        if (count == 0) return (pos, new[] { 0 });
-        int offSize = d[pos++];
-        if (offSize < 1 || offSize > 4) throw new ArgumentException("Bad CFF INDEX.");
-        var offsets = new int[count + 1];
-        for (int i = 0; i <= count; i++)
-        {
-            int v = 0;
-            for (int k = 0; k < offSize; k++) v = v << 8 | d[pos + i * offSize + k];
-            offsets[i] = v - 1;
-        }
-        int start = pos + (count + 1) * offSize;
-        pos = start + offsets[count];
-        if (pos > d.Length || pos < start) throw new ArgumentException("Bad CFF INDEX.");
-        return (start, offsets);
-    }
-
-    private Dictionary<int, double[]> ReadDict(int start, int end)
-    {
-        var d = _d;
-        var dict = new Dictionary<int, double[]>();
-        var operands = new List<double>();
-        int p = start;
-        while (p < end)
-        {
-            int b = d[p];
-            if (b <= 21)
-            {
-                int op = b;
-                p++;
-                if (b == 12) op = 12 << 8 | d[p++];
-                dict[op] = operands.ToArray();
-                operands.Clear();
-            }
-            else if (b == 28) { operands.Add((short)(d[p + 1] << 8 | d[p + 2])); p += 3; }
-            else if (b == 29) { operands.Add(d[p + 1] << 24 | d[p + 2] << 16 | d[p + 3] << 8 | d[p + 4]); p += 5; }
-            else if (b == 30)
-            {
-                p++;
-                var sb = new System.Text.StringBuilder();
-                bool done = false;
-                while (!done && p < end)
-                {
-                    int nib2 = d[p++];
-                    foreach (int nib in new[] { nib2 >> 4, nib2 & 15 })
-                    {
-                        if (nib <= 9) sb.Append((char)('0' + nib));
-                        else if (nib == 10) sb.Append('.');
-                        else if (nib == 11) sb.Append('E');
-                        else if (nib == 12) sb.Append("E-");
-                        else if (nib == 14) sb.Append('-');
-                        else if (nib == 15) { done = true; break; }
-                    }
-                }
-                operands.Add(double.TryParse(sb.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var r) ? r : 0);
-            }
-            else if (b >= 32 && b <= 246) { operands.Add(b - 139); p++; }
-            else if (b >= 247 && b <= 250) { operands.Add((b - 247) * 256 + d[p + 1] + 108); p += 2; }
-            else if (b >= 251 && b <= 254) { operands.Add(-(b - 251) * 256 - d[p + 1] - 108); p += 2; }
-            else p++;
-        }
-        return dict;
-    }
-
     // ------------------------------------------------------------------ Type 2 charstrings
 
     public PathData? GetGlyph(int gid)
@@ -353,7 +291,8 @@ internal sealed class CffFont : IGlyphSource
         var st = new T2State { Path = path, Subrs = subrs, DefaultWidth = dw, NominalWidth = nw, Width = double.NaN };
         try
         {
-            Run(st, _charStrings.Start + _charStrings.Offsets[gid], _charStrings.Start + _charStrings.Offsets[gid + 1], 0);
+            var (start, end) = _charStrings.Range(gid);
+            Run(st, start, end, 0);
         }
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException) { }
         if (st.Open) path.ClosePath();
@@ -365,36 +304,34 @@ internal sealed class CffFont : IGlyphSource
     private sealed class T2State
     {
         public PathData Path = null!;
-        public int Budget = 200_000; // charstring bytes per glyph: guards against subroutine call explosions
-        public (int Start, int[] Offsets) Subrs;
+        public CharstringBudget Budget = new(int.MaxValue); // guards against subroutine call explosions
+        public CffIndex Subrs;
         public double DefaultWidth, NominalWidth, Width;
-        public readonly double[] Stack = new double[96];
-        public int Sp;
+        public readonly Type2Stack Stack = new(96);
+
+        public int Sp
+        {
+            get => Stack.Count;
+            set => Stack.Count = value;
+        }
         public double X, Y;
         public int Stems;
         public bool HaveWidth, Open, Ended;
         public readonly double[] Transient = new double[32];
     }
 
-    private static int Bias(int count) => count < 1240 ? 107 : count < 33900 ? 1131 : 32768;
-
     private void Run(T2State s, int p, int end, int depth)
     {
-        if (depth > 10) return;
-        var d = _d;
-        var st = s.Stack;
-        while (p < end && !s.Ended && --s.Budget > 0)
+        if (depth > Type2.MaxSubrDepth) return;
+        ReadOnlySpan<byte> d = _d;
+        var stack = s.Stack;
+        var st = stack.Items;
+        while (p < end && !s.Ended && s.Budget.Spend())
         {
             int b = d[p++];
-            if (b >= 32 || b == 28)
+            if (Type2.IsNumber(b))
             {
-                double v;
-                if (b == 28) { v = (short)(d[p] << 8 | d[p + 1]); p += 2; }
-                else if (b <= 246) v = b - 139;
-                else if (b <= 250) { v = (b - 247) * 256 + d[p++] + 108; }
-                else if (b <= 254) { v = -(b - 251) * 256 - d[p++] - 108; }
-                else { v = (d[p] << 24 | d[p + 1] << 16 | d[p + 2] << 8 | d[p + 3]) / 65536.0; p += 4; }
-                if (s.Sp < st.Length) st[s.Sp++] = v;
+                stack.PushNumber(d, b, ref p); // a full stack drops the number
                 continue;
             }
             switch (b)
@@ -408,7 +345,7 @@ internal sealed class CffFont : IGlyphSource
                     TakeWidth(s, s.Sp % 2 == 1);
                     s.Stems += s.Sp / 2;
                     s.Sp = 0;
-                    p += (s.Stems + 7) / 8;
+                    p += Type2.MaskBytes(s.Stems);
                     break;
                 case 21: // rmoveto
                     TakeWidth(s, s.Sp > 2);
@@ -506,10 +443,11 @@ internal sealed class CffFont : IGlyphSource
                 {
                     if (s.Sp < 1) return;
                     var subrs = b == 10 ? s.Subrs : _gsubrs;
-                    int count = subrs.Offsets.Length - 1;
-                    int idx = (int)st[--s.Sp] + Bias(count);
+                    int count = subrs.Count;
+                    int idx = (int)stack.Pop() + Type2.SubrBias(count);
                     if (idx < 0 || idx >= count) break;
-                    Run(s, subrs.Start + subrs.Offsets[idx], subrs.Start + subrs.Offsets[idx + 1], depth + 1);
+                    var (subrStart, subrEnd) = subrs.Range(idx);
+                    Run(s, subrStart, subrEnd, depth + 1);
                     break;
                 }
                 case 11: // return
@@ -551,7 +489,7 @@ internal sealed class CffFont : IGlyphSource
 
     private void Escape(T2State s, int op)
     {
-        var st = s.Stack;
+        var st = s.Stack.Items;
         switch (op)
         {
             case 35: // flex
@@ -633,7 +571,7 @@ internal sealed class CffFont : IGlyphSource
         if (hasExtra && s.Sp > 0)
         {
             s.Width = s.NominalWidth + s.Stack[0];
-            Array.Copy(s.Stack, 1, s.Stack, 0, s.Sp - 1);
+            Array.Copy(s.Stack.Items, 1, s.Stack.Items, 0, s.Sp - 1);
             s.Sp--;
         }
         else s.Width = s.DefaultWidth;
