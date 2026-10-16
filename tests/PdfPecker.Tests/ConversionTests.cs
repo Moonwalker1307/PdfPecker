@@ -319,7 +319,9 @@ public class ConversionTests
         Assert.Equal(0, Images("<img src='rgb.jpg'>", new PdfOptions()));
 
         // Escaping the base directory with .. needs AllowFileAccess.
-        var sub = Directory.CreateTempSubdirectory("pdfpecker-base");
+        // The base directory sits next to the fixtures, not in the temp folder: on Windows CI the temp folder is on another
+        // drive, and no relative path leads from one drive to another.
+        var sub = Directory.CreateDirectory(Path.Combine(AppContext.BaseDirectory, "pdfpecker-base-" + Guid.NewGuid().ToString("N")));
         try
         {
             var escape = Path.GetRelativePath(sub.FullName, absolute);
