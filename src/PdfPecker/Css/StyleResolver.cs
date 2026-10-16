@@ -65,6 +65,9 @@ internal sealed class StyleResolver
     /// <summary>The string-set assignments of the last resolution, in document order.</summary>
     public List<StringAssignment> Strings { get; } = new();
 
+    /// <summary>The counter styles of list-style-type and counter(): the predefined ones and the sheet's @counter-style rules.</summary>
+    public CounterStyles CounterStyles { get; init; }
+
     /// <summary>Some element has a page property other than auto (named pages).</summary>
     public bool UsedPageNames { get; private set; }
 
@@ -152,6 +155,7 @@ internal sealed class StyleResolver
         _author = new RuleIndex(authorSheet);
         _firstLetterRules = authorSheet.Rules.Any(r => r.Selector.PseudoElement == PseudoElement.FirstLetter);
         _firstLineRules = authorSheet.Rules.Any(r => r.Selector.PseudoElement == PseudoElement.FirstLine);
+        CounterStyles = CounterStyles.From(authorSheet.CounterStyles);
         if (authorSheet.RegisteredProperties.Count > 0)
         {
             // Registered custom properties start at their initial value: on every element when they do not inherit,
@@ -1324,24 +1328,56 @@ internal sealed class StyleResolver
                     // A string is the marker text itself.
                     s.ListStyleString = markerText;
                     s.ListStyleType = ListStyleType.Disc;
+                    s.ListCounterStyle = null;
                     break;
                 }
-                s.ListStyleString = lower == "inherit" ? parent.ListStyleString : null;
-                s.ListStyleType = lower switch
+                if (lower is "inherit" or "unset")
+                {
+                    s.ListStyleString = parent.ListStyleString;
+                    s.ListStyleType = parent.ListStyleType;
+                    s.ListCounterStyle = parent.ListCounterStyle;
+                    break;
+                }
+                if (lower is "initial") lower = "disc";
+                var listBullet = lower switch
                 {
                     "disc" => ListStyleType.Disc,
                     "circle" => ListStyleType.Circle,
                     "square" => ListStyleType.Square,
-                    "decimal" => ListStyleType.Decimal,
-                    "decimal-leading-zero" => ListStyleType.DecimalLeadingZero,
-                    "lower-alpha" or "lower-latin" => ListStyleType.LowerAlpha,
-                    "upper-alpha" or "upper-latin" => ListStyleType.UpperAlpha,
-                    "lower-roman" => ListStyleType.LowerRoman,
-                    "upper-roman" => ListStyleType.UpperRoman,
+                    "disclosure-open" => ListStyleType.DisclosureOpen,
+                    "disclosure-closed" => ListStyleType.DisclosureClosed,
                     "none" => ListStyleType.None,
-                    "inherit" => parent.ListStyleType,
-                    _ => s.ListStyleType,
+                    _ => (ListStyleType?)null,
                 };
+                if (listBullet is { } listBulletType)
+                {
+                    // The bullets are drawn as shapes, as Chrome draws them, and cannot be redefined by @counter-style.
+                    s.ListStyleType = listBulletType;
+                    s.ListStyleString = null;
+                    s.ListCounterStyle = null;
+                }
+                else if (CounterStyles.TryGet(v, out var listCounter))
+                {
+                    s.ListStyleString = null;
+                    s.ListCounterStyle = listCounter;
+                    s.ListStyleType = listCounter.Name switch
+                    {
+                        "decimal" => ListStyleType.Decimal,
+                        "decimal-leading-zero" => ListStyleType.DecimalLeadingZero,
+                        "lower-alpha" or "lower-latin" => ListStyleType.LowerAlpha,
+                        "upper-alpha" or "upper-latin" => ListStyleType.UpperAlpha,
+                        "lower-roman" => ListStyleType.LowerRoman,
+                        "upper-roman" => ListStyleType.UpperRoman,
+                        _ => ListStyleType.Other,
+                    };
+                }
+                break;
+            case "list-style-image":
+                if (lower is "inherit" or "unset") s.ListStyleImage = parent.ListStyleImage;
+                else if (lower is "none" or "initial") s.ListStyleImage = null;
+                else if (CssBackground.Url(v) is { } listImage) s.ListStyleImage = listImage;
+                // Gradients and image-set() are not drawn as markers: like an image that fails to load, the type shows.
+                else if (lower.Contains("gradient(", StringComparison.Ordinal) || lower.StartsWith("image-set(", StringComparison.Ordinal)) s.ListStyleImage = null;
                 break;
             case "list-style-position":
                 s.ListStylePositionInside = lower == "inside";

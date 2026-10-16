@@ -399,7 +399,7 @@ public static class HtmlToPdf
         // Page-margin boxes of @page rules (@top-center and the like), laid out per page like the bands.
         var marginBoxes = !options.IgnoreCssPageRules && PageMarginBoxes.AnyIn(sheet.PageRules)
             ? new PageMarginBoxes(sheet.PageRules, () => new ComputedStyle { Display = Display.Block, Fonts = fonts, MissingFonts = missingFonts, Lang = htmlLang ?? options.Language, Hyphenation = hyphenation },
-                page, images, cancellationToken, paged)
+                page, images, cancellationToken, paged, styles.CounterStyles)
             : null;
         Func<int, int, List<DrawOp>>? pageBands = null;
         if (header != null || footer != null || marginBoxes != null)

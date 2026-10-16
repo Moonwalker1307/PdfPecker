@@ -75,7 +75,8 @@ internal static class GeneratedContent
             {
                 if (args.Count is < 1 or > 2) return false;
                 var values = resolver.CounterValues(args[0]);
-                sb.Append(Counters.Format(values.Count > 0 ? values[^1] : 0, args.Count == 2 ? args[1].ToLowerInvariant() : "decimal"));
+                if (!TryStyle(resolver, args.Count == 2 ? args[1] : "decimal", out var counterStyle)) return false;
+                sb.Append(Format(counterStyle, values.Count > 0 ? values[^1] : 0));
                 return true;
             }
             case "counters":
@@ -87,12 +88,12 @@ internal static class GeneratedContent
                 int k = 0;
                 if (!ReadString(args[1], ref k, sep)) return false;
                 var values = resolver.CounterValues(args[0]);
-                string style = args.Count == 3 ? args[2].ToLowerInvariant() : "decimal";
-                if (values.Count == 0) sb.Append(Counters.Format(0, style));
+                if (!TryStyle(resolver, args.Count == 3 ? args[2] : "decimal", out var countersStyle)) return false;
+                if (values.Count == 0) sb.Append(Format(countersStyle, 0));
                 for (int v = 0; v < values.Count; v++)
                 {
                     if (v > 0) sb.Append(sep);
-                    sb.Append(Counters.Format(values[v], style));
+                    sb.Append(Format(countersStyle, values[v]));
                 }
                 return true;
             }
@@ -120,7 +121,7 @@ internal static class GeneratedContent
                 paged.UsesTargets = true;
                 var id = TargetId(args[0], host);
                 var counter = args[1].Trim();
-                string style = args.Count == 3 ? args[2].Trim().ToLowerInvariant() : "decimal";
+                if (!TryStyle(resolver, args.Count == 3 ? args[2] : "decimal", out var targetStyle)) return false;
                 int value = 0;
                 if (id != null)
                 {
@@ -131,7 +132,7 @@ internal static class GeneratedContent
                         if (paged.CounterSnapshots.TryGetValue(id, out var values) && values.TryGetValue(counter, out int v)) value = v;
                     }
                 }
-                sb.Append(Counters.Format(value, style));
+                sb.Append(Format(targetStyle, value));
                 return true;
             }
             case "target-text":
@@ -173,6 +174,19 @@ internal static class GeneratedContent
                 return false;
         }
     }
+
+    /// <summary>The counter style a counter function names, with none as a style that writes nothing.</summary>
+    private static bool TryStyle(StyleResolver resolver, string name, out CounterStyle? style)
+    {
+        style = null;
+        var n = name.Trim();
+        if (n.Equals("none", StringComparison.OrdinalIgnoreCase)) return true;
+        if (!resolver.CounterStyles.TryGet(n, out var found)) return false;
+        style = found;
+        return true;
+    }
+
+    private static string Format(CounterStyle? style, int value) => style?.Represent(value) ?? "";
 
     /// <summary>
     /// Marks a leader in generated text: LeaderStart, the pattern, LeaderEnd. These are interlinear annotation
@@ -333,48 +347,5 @@ internal static class GeneratedContent
         var last = s.Substring(start).Trim();
         if (last.Length > 0 || list.Count > 0) list.Add(last);
         return list;
-    }
-}
-
-/// <summary>Counter and list marker numbering in the predefined counter styles.</summary>
-internal static class Counters
-{
-    public static string Format(int n, string style)
-        => style switch
-        {
-            "none" => "",
-            "disc" => "•",
-            "circle" => "◦",
-            "square" => "▪",
-            "decimal-leading-zero" => n is >= 0 and < 10 ? "0" + n.ToString(CultureInfo.InvariantCulture) : n.ToString(CultureInfo.InvariantCulture),
-            "lower-alpha" or "lower-latin" => Alpha(n, 'a'),
-            "upper-alpha" or "upper-latin" => Alpha(n, 'A'),
-            "lower-roman" => Roman(n).ToLowerInvariant(),
-            "upper-roman" => Roman(n),
-            _ => n.ToString(CultureInfo.InvariantCulture),
-        };
-
-    public static string Alpha(int n, char a)
-    {
-        if (n <= 0) return n.ToString(CultureInfo.InvariantCulture);
-        var s = "";
-        while (n > 0)
-        {
-            n--;
-            s = (char)(a + n % 26) + s;
-            n /= 26;
-        }
-        return s;
-    }
-
-    public static string Roman(int n)
-    {
-        if (n <= 0 || n >= 4000) return n.ToString(CultureInfo.InvariantCulture);
-        int[] values = { 1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1 };
-        string[] numerals = { "M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I" };
-        var sb = new StringBuilder();
-        for (int i = 0; i < values.Length; i++)
-            while (n >= values[i]) { sb.Append(numerals[i]); n -= values[i]; }
-        return sb.ToString();
     }
 }
