@@ -1,7 +1,7 @@
 # CLAUDE.md
 
-PdfPecker is a dependency-free .NET library: HTML/Markdown to PDF, and PDF to PNG, JPEG or WebP. It has its own HTML parser, Markdown
-parser, CSS engine, layout engine, PDF writer and PDF renderer. The NuGet package may depend only on the .NET base
+PdfPecker is a dependency-free .NET library: HTML/Markdown to PDF, and PDF to PNG, JPEG or WebP. It has its own HTML
+parser, Markdown parser, CSS engine, layout engine, PDF writer and PDF renderer. The NuGet package may depend only on the .NET base
 class library: never add a PackageReference to `src/PdfPecker`.
 
 ## Git
@@ -31,15 +31,31 @@ dotnet test -f net10.0 --filter "FullyQualifiedName~MarkdownTests"   # one class
   improvements with `PDFPECKER_UPDATE_COMMONMARK=1`. `.github/workflows/conformance.yml` validates PDF/A and PDF/UA
   samples from `tools/ConformanceSamples` with veraPDF (run it locally as the workflow does); rules that fail today
   are listed in `tools/ConformanceSamples/known-failures.txt`, and a new failure fails the job.
-- Golden tests (`tests/PdfPecker.Tests/Golden/**`) compare output against `*.expected.pdf`. When an output change is
-  intended, regenerate with `PDFPECKER_UPDATE_GOLDEN=1 dotnet test --filter GoldenPdfTests -f net10.0` and say in the
-  commit/PR which baselines changed and why. Never regenerate just to make a failing test pass.
+- Golden tests (`tests/PdfPecker.Tests/Golden/**`) compare output against `*.expected.pdf`, and `RendererGoldenTests`
+  compare the renderer's PNGs of those PDFs. When an output change is intended, regenerate with
+  `PDFPECKER_UPDATE_GOLDEN=1 dotnet test --filter "FullyQualifiedName~GoldenPdfTests|FullyQualifiedName~RendererGoldenTests" -f net10.0` and say in the
+  commit/PR which baselines changed and why. Never regenerate just to make a failing test pass. A refactor must leave
+  every golden unchanged.
+- Hostile-input tests live in the `HostileInputCollection` xUnit collection and must finish within its time bound. A bug
+  fix for malformed input gets a regression test there; a new parser of untrusted input also gets resource limits and a
+  target in `fuzz/PdfPecker.Fuzz`. Malformed input may only surface as the exceptions the public API documents.
+- CI (`.github/workflows/`): `nuget.yml` builds and tests all three runtimes on Linux, runs the tests on Windows,
+  publishes a Native AOT sample and reports coverage; `conformance.yml` runs veraPDF; `codeql.yml` runs CodeQL. Nightly,
+  `perf.yml` compares the benchmark with the previous night's run and `fuzz.yml` fuzzes every target.
 
 ## Layout
 
 - `src/PdfPecker/` – public API at the top level (`HtmlToPdf`, `MarkdownToPdf`, `PdfToImage`, `PdfMerger`,
   `PdfSigner`, `PdfOptions`, ...). Pipeline in `HtmlToPdf.cs`: `Html/` parse → `Css/` `StyleResolver` →
   `Layout/` `LayoutEngine` → `Pdf/` `PdfDocumentWriter`. `Rendering/` is the separate PDF-to-image renderer.
+- Large classes are split into partial-class files by concern (`PdfDocumentWriter.Text.cs`, `StyleResolver.Cascade.cs`,
+  ...); put new code in the file for its concern.
+- Shared low-level code, which new code must reuse instead of copying:
+  - `Pdf/PdfObjectWriter.cs`, `PdfXref.cs` and `PdfUpdateWriter.cs` write PDF objects, xref sections and incremental
+    updates for every writer (merge, stamp, sign, LTV, forms, attachments). `PdfObjectSyntax` presets keep each
+    writer's exact bytes.
+  - `Fonts/Cff/` reads CFF and CFF2 (INDEX, DICT, Type 2 numbers and the charstring budget) for the subsetter, the
+    CFF2 instancer and the renderer.
 - `tests/PdfPecker.Tests/` – xUnit; `Fixtures/` holds input files, `Golden/` the baseline PDFs.
 - `bench/PdfPecker.Benchmarks` – in the solution. `bench/PdfPecker.Comparison` – deliberately not in the solution so
   its third-party packages never reach the library or tests.
