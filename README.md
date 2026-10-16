@@ -17,7 +17,7 @@ byte[] pdf = HtmlToPdf.Convert("<h1>Hello</h1><p>World</p>");
 File.WriteAllBytes("hello.pdf", pdf);
 ```
 
-**Documentation: [pdfpecker.net/docs](https://pdfpecker.net/docs/)**
+**Documentation: [pdfpecker.net/docs](https://pdfpecker.net/docs/)** · [HTML to PDF in C#: a step-by-step guide](https://pdfpecker.net/docs/html-to-pdf-csharp/)
 
 ## Install
 
