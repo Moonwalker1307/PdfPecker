@@ -2,9 +2,10 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using PdfPecker;
+using PdfPecker.Images;
 
-// A short, machine-readable run for the performance regression check in .github/workflows/perf.yml: about 20 seconds,
-// three cases, JSON output. Allocation per conversion is deterministic, so the workflow compares it tightly; time is
+// A short, machine-readable run for the performance regression check in .github/workflows/perf.yml: about 30 seconds,
+// six cases, JSON output. Allocation per conversion is deterministic, so the workflow compares it tightly; time is
 // noisy on shared runners, so it is compared with a wide margin.
 // Usage: dotnet run -c Release -- --perf results.json
 static class Perf
@@ -18,6 +19,17 @@ static class Perf
         var results = new List<(string Name, double MeanMs, long AllocBytes, double? PerSecond)>();
         results.Add(Measure("invoice", invoice, htmlDir, runs: 100));
         results.Add(Measure("report-30", report, null, runs: 15));
+
+        // The image decoders and the renderer, on the test fixtures. One run decodes every fixture once, or renders one
+        // page, so the figures are per pass over the fixtures.
+        var fixtureDir = Path.Combine(AppContext.BaseDirectory, "fixtures");
+        var bmps = Fixtures(fixtureDir, "*.bmp");
+        var webps = Fixtures(fixtureDir, "*.webp");
+        results.Add(Measure("decode-bmp", () => { foreach (var b in bmps) BmpDecoder.Decode(b, MaxPixels); }, runs: 20000));
+        results.Add(Measure("decode-webp", () => { foreach (var w in webps) WebPDecoder.Decode(w, MaxPixels); }, runs: 1000));
+        var pdf = File.ReadAllBytes(Path.Combine(fixtureDir, "features.pdf"));
+        var imageOptions = new ImageOptions { Dpi = 96 };
+        results.Add(Measure("render-png", () => PdfToImage.ConvertPage(pdf, 0, imageOptions), runs: 30));
 
         // Throughput with every core busy; documents per second is the figure, so higher is better.
         var options = new PdfOptions { BaseDirectory = htmlDir };
@@ -41,16 +53,27 @@ static class Perf
         File.WriteAllText(outputPath, json.ToString());
     }
 
+    // The pixel limit the library uses when it loads images for a document.
+    const long MaxPixels = 100_000_000;
+
+    static byte[][] Fixtures(string dir, string pattern)
+        => Directory.GetFiles(dir, pattern).Order(StringComparer.Ordinal).Select(File.ReadAllBytes).ToArray();
+
     static (string, double, long, double?) Measure(string name, string html, string? baseDir, int runs)
     {
         var options = new PdfOptions { BaseDirectory = baseDir };
+        return Measure(name, () => HtmlToPdf.Convert(html, options), runs);
+    }
+
+    static (string, double, long, double?) Measure(string name, Action run, int runs)
+    {
         // Warm up so tiered JIT has produced optimized code before anything is timed.
         var warm = Stopwatch.StartNew();
-        while (warm.Elapsed.TotalSeconds < 2) HtmlToPdf.Convert(html, options);
+        while (warm.Elapsed.TotalSeconds < 2) run();
 
         long allocBefore = GC.GetAllocatedBytesForCurrentThread();
         long t0 = Stopwatch.GetTimestamp();
-        for (int i = 0; i < runs; i++) HtmlToPdf.Convert(html, options);
+        for (int i = 0; i < runs; i++) run();
         double mean = Stopwatch.GetElapsedTime(t0).TotalMilliseconds / runs;
         long alloc = (GC.GetAllocatedBytesForCurrentThread() - allocBefore) / runs;
         return (name, mean, alloc, null);
