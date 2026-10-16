@@ -4,6 +4,7 @@ using System.Text;
 using PdfPecker.Css;
 using PdfPecker.Fonts;
 using PdfPecker.Html;
+using PdfPecker.Images;
 using static PdfPecker.Tests.PdfTestHelpers;
 
 namespace PdfPecker.Tests;
@@ -371,6 +372,151 @@ public class HostileInputTests
             s.Write(Encoding.ASCII.GetBytes(type));
             s.Write(data);
             s.Write(new byte[4]); // CRC: not checked by the decoder
+        }
+    }
+
+    /// <summary>Runs <paramref name="work"/> on one thread and returns its result with the bytes that thread allocated.</summary>
+    private static (T Result, long Allocated) Allocating<T>(Func<T> work) => Bounded(() =>
+    {
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        var result = work();
+        return (result, GC.GetAllocatedBytesForCurrentThread() - before);
+    });
+
+    /// <summary>A little-endian TIFF of one image directory whose tags all hold one LONG, followed by <paramref name="data"/>.</summary>
+    private static byte[] Tiff((int Tag, uint Value)[] tags, byte[] data, int dataOffsetTag)
+    {
+        int dataAt = 8 + 2 + tags.Length * 12 + 4;
+        var d = new byte[dataAt + data.Length];
+        "II*\0"u8.CopyTo(d);
+        BinaryPrimitives.WriteUInt32LittleEndian(d.AsSpan(4), 8);
+        BinaryPrimitives.WriteUInt16LittleEndian(d.AsSpan(8), (ushort)tags.Length);
+        int at = 10;
+        foreach (var (tag, value) in tags.OrderBy(t => t.Tag))
+        {
+            BinaryPrimitives.WriteUInt16LittleEndian(d.AsSpan(at), (ushort)tag);
+            BinaryPrimitives.WriteUInt16LittleEndian(d.AsSpan(at + 2), 4);
+            BinaryPrimitives.WriteUInt32LittleEndian(d.AsSpan(at + 4), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(d.AsSpan(at + 8), tag == dataOffsetTag ? (uint)dataAt : value);
+            at += 12;
+        }
+        data.CopyTo(d, dataAt);
+        return d;
+    }
+
+    [Theory]
+    [InlineData(32773)] // PackBits
+    [InlineData(8)] // Deflate
+    [InlineData(1)] // uncompressed
+    public void Tiff_tile_far_larger_than_the_image_is_not_allocated(int compression)
+    {
+        // A 1 x 1 image of eight 16-bit samples in one 10000 x 10000 tile: 1.6 GB for the tile from a few bytes.
+        var tiff = Tiff(new[]
+        {
+            (256, 1u), (257, 1u), (258, 16u), (259, (uint)compression), (262, 1u), (277, 8u),
+            (322, 10000u), (323, 10000u), (324, 0u), (325, 16u),
+        }, new byte[16], 324);
+        var (_, allocated) = Allocating(() => TiffDecoder.Decode(tiff, 100_000_000));
+        Assert.True(allocated < 64 << 20, $"Allocated {allocated:N0} bytes");
+    }
+
+    [Fact]
+    public void Tiff_strips_sharing_one_lzw_blob_decode_only_their_own_size()
+    {
+        // 1000 strips of one row each all point at the same LZW data, which decodes to about 256 KB of zeros: each strip
+        // needs 16 bytes, so decoding the whole blob for each would be over ten thousand times the image.
+        var lzw = new List<byte>();
+        int bits = 0, count = 0;
+        void Code(int c) { bits = bits << 9 | c; count += 9; while (count >= 8) { lzw.Add((byte)(bits >> (count - 8))); count -= 8; } }
+        for (int cycle = 0; cycle < 8; cycle++)
+        {
+            Code(256);
+            Code(0);
+            for (int c = 258; c < 510; c++) Code(c); // each code is the previous one plus another zero, still 9 bits wide
+        }
+        Code(257);
+        if (count > 0) lzw.Add((byte)(bits << (8 - count)));
+        var data = lzw.ToArray();
+
+        const int rows = 1000;
+        var tiff = Tiff(new[]
+        {
+            (256, 16u), (257, (uint)rows), (258, 8u), (259, 5u), (262, 1u), (277, 1u), (278, 1u), (273, 0u), (279, 0u),
+        }, data, 273);
+        // Point every strip at the one blob through offset and byte-count arrays appended after it.
+        int blobAt = tiff.Length - data.Length, offsetsAt = tiff.Length, countsAt = offsetsAt + rows * 4;
+        Array.Resize(ref tiff, tiff.Length + rows * 8);
+        for (int i = 0; i < rows; i++)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(tiff.AsSpan(offsetsAt + i * 4), (uint)blobAt);
+            BinaryPrimitives.WriteUInt32LittleEndian(tiff.AsSpan(countsAt + i * 4), (uint)data.Length);
+        }
+        // The directory holds the tags in order: 273 is the sixth entry and 279 the ninth.
+        foreach (var (index, at) in new[] { (5, offsetsAt), (8, countsAt) })
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(tiff.AsSpan(10 + index * 12 + 4), rows);
+            BinaryPrimitives.WriteUInt32LittleEndian(tiff.AsSpan(10 + index * 12 + 8), (uint)at);
+        }
+
+        // Refusing the file and decoding each strip only as far as its own 16 bytes are both fine.
+        var (_, allocated) = Allocating(() => TiffDecoder.Decode(tiff, 100_000_000));
+        Assert.True(allocated < 200 << 20, $"Allocated {allocated:N0} bytes");
+    }
+
+    [Fact]
+    public void Animated_webp_with_a_huge_canvas_and_a_tiny_frame_is_not_allocated()
+    {
+        // The lossless frame of a small fixture as the first frame of an animation on a 10000 x 10000 canvas.
+        var source = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "images", "lossless-palette.webp"));
+        int vp8l = Encoding.ASCII.GetString(source).IndexOf("VP8L", StringComparison.Ordinal);
+        var frame = source.AsSpan(vp8l, 8 + BinaryPrimitives.ReadInt32LittleEndian(source.AsSpan(vp8l + 4))).ToArray();
+        if (frame.Length % 2 == 1) Array.Resize(ref frame, frame.Length + 1);
+
+        var webp = new MemoryStream();
+        void Chunk(string fourCc, byte[] body)
+        {
+            webp.Write(Encoding.ASCII.GetBytes(fourCc));
+            webp.Write(BitConverter.GetBytes(body.Length));
+            webp.Write(body);
+        }
+        webp.Write("RIFF\0\0\0\0WEBP"u8);
+        var vp8x = new byte[10];
+        vp8x[0] = 0x02; // animation
+        vp8x[4] = (9999 & 0xFF); vp8x[5] = 9999 >> 8; vp8x[7] = (9999 & 0xFF); vp8x[8] = 9999 >> 8;
+        Chunk("VP8X", vp8x);
+        Chunk("ANIM", new byte[6]);
+        Chunk("ANMF", new byte[16].Concat(frame).ToArray()); // offset 0, frame size and timing left at zero
+        var bytes = webp.ToArray();
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(4), bytes.Length - 8);
+
+        var (_, allocated) = Allocating(() => WebPDecoder.Decode(bytes, 100_000_000));
+        Assert.True(allocated < 64 << 20, $"Allocated {allocated:N0} bytes");
+    }
+
+    [Fact]
+    public void Device_files_and_pipes_are_not_read_as_images_or_stylesheets()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        var dir = Directory.CreateTempSubdirectory("pdfpecker-fifo");
+        try
+        {
+            // A pipe nobody writes to blocks whoever opens it; /dev/zero never ends.
+            var fifo = Path.Combine(dir.FullName, "pipe.css");
+            using (var mkfifo = System.Diagnostics.Process.Start("mkfifo", fifo)) mkfifo.WaitForExit();
+            Assert.True(File.Exists(fifo));
+            var html = $"<link rel=stylesheet href='{fifo}'><link rel=stylesheet href='/dev/zero'>"
+                + $"<img src='/dev/zero'><img src='file:///dev/zero'><img src='pipe.css'><p>text</p>";
+            var options = new PdfOptions { BaseDirectory = dir.FullName, AllowFileAccess = true };
+            var (pdf, allocated) = Allocating(() => HtmlToPdf.Convert(html, options));
+            AssertStructurallyValid(pdf);
+            Assert.True(allocated < 256 << 20, $"Allocated {allocated:N0} bytes");
+            // Without AllowFileAccess the pipe inside the base directory is still in reach.
+            AssertStructurallyValid(Bounded(() => HtmlToPdf.Convert("<img src='pipe.css'><link rel=stylesheet href='pipe.css'>",
+                new PdfOptions { BaseDirectory = dir.FullName })));
+        }
+        finally
+        {
+            dir.Delete(true);
         }
     }
 
