@@ -77,13 +77,15 @@ internal enum OverflowWrap : byte { Normal, BreakWord, Anywhere }
 internal enum Overflow : byte { Visible, Clip, Hidden } // Hidden also stands for auto and scroll, which clip alike on paper
 internal enum WordBreak : byte { Normal, BreakAll, KeepAll }
 internal enum TextTransform : byte { None, Uppercase, Lowercase, Capitalize }
-internal enum BorderStyle : byte { None, Solid, Dashed, Dotted, Double }
+internal enum BorderStyle : byte { None, Solid, Dashed, Dotted, Double, Groove, Ridge, Inset, Outset }
 internal enum LineHeightKind : byte { Normal, Factor, Absolute }
 internal enum ObjectFit : byte { Fill, Contain, Cover, None, ScaleDown }
 
 internal enum ListStyleType : byte
 {
     Disc, Circle, Square, Decimal, DecimalLeadingZero, LowerAlpha, UpperAlpha, LowerRoman, UpperRoman, None,
+    DisclosureOpen, DisclosureClosed,
+    Other, // any other counter style: ListCounterStyle
 }
 
 [Flags]
@@ -193,6 +195,8 @@ internal sealed class ComputedStyle
     public WordBreak WordBreak;
     public ListStyleType ListStyleType;
     public string? ListStyleString;          // list-style-type: "string": the marker text
+    public CounterStyle? ListCounterStyle;   // the counter style of a text marker; null for the bullets, a string and none
+    public string? ListStyleImage;           // list-style-image: the url
     public bool ListStylePositionInside;
     public TextTransform TextTransform;
     public TextDecoration TextDecoration; // propagated to descendants, approximated as inherited
@@ -253,6 +257,11 @@ internal sealed class ComputedStyle
     public bool SvgMaskAlpha;                   // mask-type: alpha (else luminance)
     public uint SvgFloodColor = CssColor.Black; // flood-color
     public float SvgFloodOpacity = 1;           // flood-opacity
+    public ClipShape? ClipShape;                // clip-path: a basic shape or a reference box, on HTML elements
+    public string? BlendMode;                   // mix-blend-mode, as a PDF blend mode name; null = normal
+    public string?[]? BackgroundBlendModes;     // background-blend-mode per layer, as PDF names (null = normal); null = all normal
+    public bool Isolate;                        // isolation: isolate
+    public FilterFunction[]? Filters;           // filter functions on HTML elements; null = none
     public Length MarginTop = Length.Zero, MarginRight = Length.Zero, MarginBottom = Length.Zero, MarginLeft = Length.Zero;
     public Length PaddingTop = Length.Zero, PaddingRight = Length.Zero, PaddingBottom = Length.Zero, PaddingLeft = Length.Zero;
     public float BorderTopWidth = 1.5f, BorderRightWidth = 1.5f, BorderBottomWidth = 1.5f, BorderLeftWidth = 1.5f; // medium = 3px
@@ -261,12 +270,20 @@ internal sealed class ComputedStyle
     // border-radius: horizontal and vertical radius of the top-left, top-right, bottom-right and bottom-left corner
     // (percentages of the border box's width and height); null when every corner is square.
     public Length[]? BorderRadii;
+    // border-image. Null slices, widths and outsets are the initial values: 100%, 1 and 0 on every side.
+    public BackgroundImage? BorderImageSource;
+    public BorderImageValue[]? BorderImageSlice; // top, right, bottom, left
+    public bool BorderImageFill;
+    public BorderImageValue[]? BorderImageWidths, BorderImageOutsets;
+    public BorderImageRepeat BorderImageRepeatX, BorderImageRepeatY;
     public BorderStyle OutlineStyle;
     public float OutlineWidth = 1.5f, OutlineOffset;
     public uint? OutlineColor; // null = currentColor
     public ObjectFit ObjectFit;
     public BackgroundOffset ObjectPositionX = BackgroundOffset.Center, ObjectPositionY = BackgroundOffset.Center;
-    public bool TextOverflowEllipsis;
+    /// <summary>What replaces the cut end of an overflowing line (text-overflow): "…" for ellipsis, a custom string, or null for clip.</summary>
+    public string? TextOverflow;
+    public bool TextOverflowEllipsis => TextOverflow != null;
     public float AspectRatio;    // width / height; 0 = auto
     public bool AspectRatioAuto; // "auto <ratio>": a replaced element keeps its natural ratio
     public Length Width = Length.Auto, Height = Length.Auto;
@@ -386,7 +403,10 @@ internal sealed class ComputedStyle
     public bool Positioned => Position != Position.Static;
 
     /// <summary>Painted in the positioned layer: positioned, transformed or translucent.</summary>
-    public bool Layered => Position != Position.Static || Transform != null || Opacity < 1;
+    public bool Layered => Position != Position.Static || Transform != null || Opacity < 1 || HasEffects;
+
+    /// <summary>Clipped, blended, isolated or filtered: painted as a layer of its own, which is a stacking context.</summary>
+    public bool HasEffects => ClipShape != null || SvgClipPath != null || BlendMode != null || Isolate || Filters != null;
 
     /// <summary>Creates the starting style for a child: inherited properties copied, the rest reset.</summary>
     public ComputedStyle CreateChild()
@@ -406,19 +426,28 @@ internal sealed class ComputedStyle
         c.SvgMaskAlpha = false;
         c.SvgFloodColor = CssColor.Black;
         c.SvgFloodOpacity = 1;
+        c.ClipShape = null;
+        c.BlendMode = null;
+        c.BackgroundBlendModes = null;
+        c.Isolate = false;
+        c.Filters = null;
         c.MarginTop = c.MarginRight = c.MarginBottom = c.MarginLeft = Length.Zero;
         c.PaddingTop = c.PaddingRight = c.PaddingBottom = c.PaddingLeft = Length.Zero;
         c.BorderTopWidth = c.BorderRightWidth = c.BorderBottomWidth = c.BorderLeftWidth = 1.5f;
         c.BorderTopStyle = c.BorderRightStyle = c.BorderBottomStyle = c.BorderLeftStyle = BorderStyle.None;
         c.BorderTopColor = c.BorderRightColor = c.BorderBottomColor = c.BorderLeftColor = null;
         c.BorderRadii = null;
+        c.BorderImageSource = null;
+        c.BorderImageSlice = c.BorderImageWidths = c.BorderImageOutsets = null;
+        c.BorderImageFill = false;
+        c.BorderImageRepeatX = c.BorderImageRepeatY = BorderImageRepeat.Stretch;
         c.OutlineStyle = BorderStyle.None;
         c.OutlineWidth = 1.5f;
         c.OutlineOffset = 0;
         c.OutlineColor = null;
         c.ObjectFit = ObjectFit.Fill;
         c.ObjectPositionX = c.ObjectPositionY = BackgroundOffset.Center;
-        c.TextOverflowEllipsis = false;
+        c.TextOverflow = null;
         c.AspectRatio = 0;
         c.AspectRatioAuto = false;
         c.Width = c.Height = Length.Auto;

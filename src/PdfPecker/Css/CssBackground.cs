@@ -232,7 +232,7 @@ internal static class CssBackground
     }
 
     /// <summary>Puts spaces around slashes outside functions and strings so "center/cover" splits into tokens.</summary>
-    private static string SpaceSlashes(string s)
+    internal static string SpaceSlashes(string s)
     {
         if (s.IndexOf('/') < 0) return s;
         var sb = new System.Text.StringBuilder(s.Length + 4);

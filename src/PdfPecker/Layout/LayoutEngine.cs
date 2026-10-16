@@ -72,8 +72,11 @@ internal sealed partial class LayoutEngine
     private sealed class ListMarker
     {
         public string? Text;
-        public bool Custom; // the text comes from ::marker content or a string list-style-type: no space is added after it
+        public bool Custom; // the text comes from ::marker content or a string list-style-type: drawn as written
         public ListStyleType Type;
+        public PdfImage? Image; // list-style-image: a raster image or an SVG drawing, ImageW by ImageH points
+        public SvgImage? Svg;
+        public float ImageW, ImageH;
         public ComputedStyle Style = null!;
         public float ContentX;
         public float ContentRight; // right to left, the marker goes after the content's right edge
@@ -537,7 +540,9 @@ internal sealed partial class LayoutEngine
 
         // Positioned and transformed boxes are the containing block of their absolutely positioned descendants.
         CbFrame? cbFrame = null;
-        if (s.Positioned || s.Transform != null) _frames.Add(cbFrame = new CbFrame { Transformed = s.Transform != null });
+        // A filter makes the box their containing block too, even for fixed ones, as a transform does.
+        bool contains = s.Transform != null || s.Filters != null;
+        if (s.Positioned || contains) _frames.Add(cbFrame = new CbFrame { Transformed = contains });
         // Boxes that start a block formatting context keep their floats inside (CSS 2.1 §9.4.1).
         bool formattingRoot = shrinkToFit || hasWOverride || hasHOverride || s.Floated || s.OutOfFlow || s.FormattingRoot
                               || s.IsFlex || s.IsGrid || s.IsMultiColumn || s.Display is Display.TableCell or Display.TableCaption
@@ -546,15 +551,19 @@ internal sealed partial class LayoutEngine
         float cx = bx + bl + pl;
         float cy = y + bt + pt;
 
-        if (s.Display == Display.ListItem && (s.ListStyleType != ListStyleType.None || e.MarkerContent != null))
+        if (s.Display == Display.ListItem && (s.ListStyleType != ListStyleType.None || e.MarkerContent != null || s.ListStyleImage != null))
         {
             // ::marker { content } and list-style-type: "string" give the marker's own text, drawn as written.
             var custom = e.MarkerContent ?? s.ListStyleString;
-            _marker = new ListMarker
+            var marker = new ListMarker
             {
-                Text = custom ?? MarkerText(s.ListStyleType, _currentListIndex), Custom = custom != null, Type = s.ListStyleType,
+                Custom = custom != null, Type = s.ListStyleType,
                 Style = e.MarkerStyle ?? s, ContentX = cx, ContentRight = cx + contentW, Rtl = s.Rtl, Tag = Tags?.MarkerOf(e),
             };
+            // list-style-image wins over the type unless ::marker has content; an image that does not load falls back to the type.
+            if (e.MarkerContent != null || s.ListStyleImage is not { } imageSrc || !LoadMarkerImage(marker, imageSrc))
+                marker.Text = custom ?? s.ListCounterStyle?.MarkerText(_currentListIndex);
+            if (marker.Text != null || marker.Image != null || marker.Svg != null || s.ListStyleType != ListStyleType.None) _marker = marker;
         }
 
         float contentBottom;
@@ -683,17 +692,35 @@ internal sealed partial class LayoutEngine
 
     // ------------------------------------------------------------------ list markers
 
-    private static string? MarkerText(ListStyleType type, int index)
-        => type switch
+    /// <summary>
+    /// Loads a list-style-image and sizes it as Chrome does: a raster image at its pixel size, an SVG drawing at its
+    /// width and height, and a drawing without them at half the font's ascent (wide, with its viewBox's aspect ratio).
+    /// </summary>
+    private bool LoadMarkerImage(ListMarker m, string src)
+    {
+        var image = _images.Load(src);
+        var svg = image == null ? _images.LoadSvg(src) : null;
+        if (image == null && svg == null) return false;
+        if (image != null)
         {
-            ListStyleType.Decimal => index.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".",
-            ListStyleType.DecimalLeadingZero => index.ToString("00", System.Globalization.CultureInfo.InvariantCulture) + ".",
-            ListStyleType.LowerAlpha => Counters.Alpha(index, 'a') + ".",
-            ListStyleType.UpperAlpha => Counters.Alpha(index, 'A') + ".",
-            ListStyleType.LowerRoman => Counters.Roman(index).ToLowerInvariant() + ".",
-            ListStyleType.UpperRoman => Counters.Roman(index) + ".",
-            _ => null,
-        };
+            if (image.Width <= 0 || image.Height <= 0) return false;
+            m.Image = image;
+            m.ImageW = image.Width * 0.75f;
+            m.ImageH = image.Height * 0.75f;
+            return true;
+        }
+        m.Style.Font.LineMetrics(m.Style.FontSize, out float ascentPt, out _);
+        float side = MathF.Round(ascentPt / 0.75f) / 2 * 0.75f;
+        float? ratio = svg!.HasViewBox && svg.ViewBoxWidth > 0 && svg.ViewBoxHeight > 0 ? svg.ViewBoxHeight / svg.ViewBoxWidth : null;
+        if (svg.Width is { } w && svg.Height is { } h) (m.ImageW, m.ImageH) = (w, h);
+        else if (svg.Width is { } w1 && ratio is { } r1) (m.ImageW, m.ImageH) = (w1, w1 * r1);
+        else if (svg.Height is { } h1 && ratio is { } r2) (m.ImageW, m.ImageH) = (h1 / r2, h1);
+        else if (ratio is { } r3) (m.ImageW, m.ImageH) = (side, side * r3);
+        else (m.ImageW, m.ImageH) = (side, side);
+        if (m.ImageW <= 0 || m.ImageH <= 0) return false;
+        m.Svg = svg;
+        return true;
+    }
 
     private void EmitMarker(float baseline, float lineTop)
     {
@@ -702,18 +729,46 @@ internal sealed partial class LayoutEngine
         var s = m.Style;
         if (!s.Visible) return;
         float size = s.FontSize;
+        if (m.Type is ListStyleType.DisclosureOpen or ListStyleType.DisclosureClosed && m.Text == null && m.Image == null && m.Svg == null)
+        {
+            // Chrome's disclosure triangles fill a square of 0.66 times the font size in whole pixels, standing on the
+            // baseline in a marker box that ends 1 + 7px (the marker padding) before the content.
+            int px = (int)(size / 0.75f * 0.66f + 0.001f);
+            float triangle = px * 0.75f;
+            float left = m.Rtl ? m.ContentRight + 8 * 0.75f : m.ContentX - (px + 8) * 0.75f;
+            _ops.Add(new SvgOp(left, baseline - triangle, triangle, triangle, DisclosureTriangle(m.Type == ListStyleType.DisclosureOpen, m.Rtl, s.Color)));
+            return;
+        }
+        if (m.Image != null || m.Svg != null)
+        {
+            // An image marker sits on the baseline, 7px (the marker padding) before the content.
+            float ix = m.Rtl ? m.ContentRight + 5.25f : m.ContentX - 5.25f - m.ImageW, iy = baseline - m.ImageH;
+            if (m.Image != null) _ops.Add(new ImageOp(ix, iy, m.ImageW, m.ImageH, m.Image));
+            else _ops.Add(new SvgOp(ix, iy, m.ImageW, m.ImageH, m.Svg!));
+            return;
+        }
         if (m.Text != null)
         {
             var font = s.Font;
-            float tw = font.Measure(m.Text, size) + s.LetterSpacing * m.Text.Length;
-            float gap = m.Custom ? 0 : font.CharWidth(' ', size); // Chrome's marker text ends with a space: "1. "
+            var text = m.Text;
+            float gap = 0;
+            if (!m.Custom)
+            {
+                // A counter style's suffix usually ends with a space ("1. "): it is the gap before the content, not drawn.
+                int end = text.Length;
+                while (end > 0 && text[end - 1] == ' ') end--;
+                gap = (text.Length - end) * font.CharWidth(' ', size);
+                text = text.Substring(0, end);
+                if (text.Length == 0) return;
+            }
+            float tw = font.Measure(text, size) + s.LetterSpacing * text.Length;
             if (m.Rtl)
             {
                 // Right to left the marker follows the content's right edge, its text in right-to-left order (".1").
-                _ops.Add(new TextOp(m.ContentRight + gap, baseline, lineTop, font, size, s.Color, VisualMarkerText(m.Text), 0, 0) { Tag = m.Tag });
+                _ops.Add(new TextOp(m.ContentRight + gap, baseline, lineTop, font, size, s.Color, VisualMarkerText(text), 0, 0) { Tag = m.Tag });
                 return;
             }
-            _ops.Add(new TextOp(m.ContentX - gap - tw, baseline, lineTop, font, size, s.Color, m.Text, 0, 0) { Tag = m.Tag });
+            _ops.Add(new TextOp(m.ContentX - gap - tw, baseline, lineTop, font, size, s.Color, text, 0, 0) { Tag = m.Tag });
             return;
         }
         // Chrome's symbol markers, in whole pixels from the font's rounded ascent: a square of side (2/3 ascent + 1) / 2,
@@ -735,6 +790,24 @@ internal sealed partial class LayoutEngine
                 _ops.Add(new RectOp(cxm - r, cym - r, 2 * r, 2 * r, s.Color));
                 break;
         }
+    }
+
+    /// <summary>
+    /// The disclosure-open and disclosure-closed markers: a triangle pointing down, or towards the inline end, in the
+    /// unit square, with the corners Chrome uses.
+    /// </summary>
+    private static SvgImage DisclosureTriangle(bool open, bool rtl, uint color)
+    {
+        float[] points = open ? new[] { 0f, 0.07f, 1f, 0.07f, 0.5f, 0.93f }
+            : rtl ? new[] { 1f, 0f, 0.14f, 0.5f, 1f, 1f }
+            : new[] { 0f, 0f, 0.86f, 0.5f, 0f, 1f };
+        var svg = new SvgImage { HasViewBox = true, ViewBoxWidth = 1, ViewBoxHeight = 1 };
+        svg.Shapes.Add(new SvgShape
+        {
+            Verbs = new[] { SvgShape.MoveTo, SvgShape.LineTo, SvgShape.LineTo, SvgShape.Close }, Points = points, Fill = color,
+            MinX = 0, MinY = 0, MaxX = 1, MaxY = 1,
+        });
+        return svg;
     }
 
     // ------------------------------------------------------------------ images

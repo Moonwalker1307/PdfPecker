@@ -205,7 +205,7 @@ internal sealed class StructureTree
         switch (type)
         {
             case "LI":
-                if (e.Style.Display == Display.ListItem && e.Style.ListStyleType != ListStyleType.None)
+                if (e.Style.Display == Display.ListItem && (e.Style.ListStyleType != ListStyleType.None || e.Style.ListStyleImage != null))
                 {
                     _markers[e] = new ContentSlot(new StructElem("Lbl", se));
                     // A list with labels says how they number its items (PDF/UA-2), as its first marked item draws them.
@@ -233,6 +233,8 @@ internal sealed class StructureTree
         ListStyleType.UpperAlpha => "UpperAlpha",
         ListStyleType.LowerRoman => "LowerRoman",
         ListStyleType.UpperRoman => "UpperRoman",
+        // Other counter styles have no PDF name: the labels are in the Lbl elements.
+        ListStyleType.Other => "None",
         _ => "Disc",
     };
 
