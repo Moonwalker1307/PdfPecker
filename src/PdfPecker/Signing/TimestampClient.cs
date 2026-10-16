@@ -16,10 +16,17 @@ internal static class TimestampClient
     /// Returns the TimeStampToken (a CMS ContentInfo) for the hash of <paramref name="data"/>. With <paramref name="async"/>
     /// false the request is sent synchronously and the returned task is already complete.
     /// </summary>
-    public static async ValueTask<byte[]> GetTokenAsync(string url, HttpClient? client, byte[] data, HashAlgorithmName hash,
+    public static ValueTask<byte[]> GetTokenAsync(string url, HttpClient? client, byte[] data, HashAlgorithmName hash,
+        bool async, CancellationToken cancellationToken)
+        => GetTokenForImprintAsync(url, client, Cms.HashData(hash, data), hash, async, cancellationToken);
+
+    /// <summary>
+    /// Returns the TimeStampToken for an already computed hash: a document timestamp hashes the file's byte ranges
+    /// itself instead of handing over the data.
+    /// </summary>
+    public static async ValueTask<byte[]> GetTokenForImprintAsync(string url, HttpClient? client, byte[] imprint, HashAlgorithmName hash,
         bool async, CancellationToken cancellationToken)
     {
-        byte[] imprint = Cms.HashData(hash, data);
         byte[] nonce = RandomNumberGenerator.GetBytes(8);
         nonce[0] &= 0x7F; // positive
         if (nonce[0] == 0) nonce[0] = 1;
