@@ -14,7 +14,7 @@ namespace PdfPecker.Pdf;
 /// content stream before or after theirs that draws it. The stamp's objects reachable from its page's resources are
 /// copied the same way, without their links into the stamp document's page tree and structure tree.
 /// </summary>
-internal sealed class PdfStampWriter
+internal sealed class PdfStampWriter : PdfObjectWriter
 {
     private sealed class Source
     {
@@ -41,7 +41,7 @@ internal sealed class PdfStampWriter
     private readonly Source _target;
     private readonly bool _tagged;
     private readonly ByteBuffer _out = new(1 << 16);
-    private readonly List<long> _offsets = new() { 0 };
+    private readonly PdfXref _xref = new();
     private int _nextId = 1;
     private PdfEncryptor? _crypt;
     private readonly Dictionary<PdfFile, Source> _stamps = new(ReferenceEqualityComparer.Instance);
@@ -51,6 +51,7 @@ internal sealed class PdfStampWriter
     private readonly List<(int Id, byte[] Data)> _pendingStreams = new();
     private readonly Dictionary<int, PageInfo> _stamped = new(); // by object number
     private int _gsId;
+    private Source _source = null!; // the source being copied, for the hooks of the shared object writer
 
     /// <summary>
     /// Whether the target is PDF/A or tagged (and so possibly PDF/UA), where every font must be embedded: an HTML stamp
@@ -61,7 +62,7 @@ internal sealed class PdfStampWriter
     /// <summary>The most decoded content a stamp page may have: it is copied into the output whole.</summary>
     private const int MaxStampContent = 64 << 20;
 
-    public PdfStampWriter(byte[] pdf, PdfStampOptions options, CancellationToken cancel)
+    public PdfStampWriter(byte[] pdf, PdfStampOptions options, CancellationToken cancel) : base(PdfObjectSyntax.Stamp)
     {
         _options = options;
         _cancel = cancel;
@@ -141,7 +142,7 @@ internal sealed class PdfStampWriter
             _stamped[page.Num] = page;
         }
 
-        if (_options.Security != null) _crypt = new PdfEncryptor(_options.Security);
+        if (_options.Security != null) Encryption = _crypt = new PdfEncryptor(_options.Security);
         try
         {
             var file = _target.File;
@@ -169,24 +170,11 @@ internal sealed class PdfStampWriter
 
                 long xref = _out.Length;
                 int count = _nextId;
-                _out.Ascii("xref\n0 ").Int(count).Ascii("\n0000000000 65535 f \n");
-                for (int i = 1; i < count; i++)
-                {
-                    if (i < _offsets.Count && _offsets[i] > 0)
-                        _out.Ascii(_offsets[i].ToString("D10", CultureInfo.InvariantCulture)).Ascii(" 00000 n \n");
-                    else
-                        _out.Ascii("0000000000 00000 f \n");
-                }
-                _out.Ascii("trailer\n<< /Size ").Int(count).Ascii(" /Root ").Int(rootId).Ascii(" 0 R");
-                if (infoId != 0) _out.Ascii(" /Info ").Int(infoId).Ascii(" 0 R");
-                if (encryptId != 0) _out.Ascii(" /Encrypt ").Int(encryptId).Ascii(" 0 R");
+                _xref.WriteTable(_out, count);
                 // The document keeps its permanent identifier; the second part marks this version.
                 var first = file.Resolve(file.Trailer["ID"]) is PdfArray ids && ids.Count > 0 && file.Resolve(ids[0]) is PdfString s && s.Bytes.Length is > 0 and <= 64
                     ? s.Bytes : RandomNumberGenerator.GetBytes(16);
-                _out.Ascii(" /ID [");
-                PdfEncryptor.Hex(_out, first);
-                PdfEncryptor.Hex(_out, RandomNumberGenerator.GetBytes(16));
-                _out.Ascii("] >>\nstartxref\n").Int(xref).Ascii("\n%%EOF\n");
+                PdfXref.WriteTrailer(_out, count, rootId, infoId, encryptId, first, RandomNumberGenerator.GetBytes(16), upperHexId: true, xref);
             }
             return _out.Span.ToArray();
         }
@@ -296,14 +284,9 @@ internal sealed class PdfStampWriter
 
     private int NewId() => _nextId++;
 
-    private ByteBuffer Begin(int id)
-    {
-        while (_offsets.Count <= id) _offsets.Add(0);
-        _offsets[id] = _out.Length;
-        return _out.Int(id).Ascii(" 0 obj\n");
-    }
+    private ByteBuffer Begin(int id) => _xref.Begin(_out, id);
 
-    private void End() => _out.Ascii("\nendobj\n");
+    private void End() => PdfXref.End(_out);
 
     /// <summary>The id an object gets in the output: a reference is copied when the queue reaches it, a direct object now.</summary>
     private int IdFor(Source source, PdfObject? o)
@@ -341,7 +324,7 @@ internal sealed class PdfStampWriter
                     var obj = source.File.GetObject(num) ?? PdfNull.Instance;
                     Begin(id);
                     if (source == _target && _stamped.TryGetValue(num, out var page)) WriteStampedPage(page);
-                    else if (obj is PdfStream s) WriteStream(source, s);
+                    else if (obj is PdfStream s) { _source = source; WriteStream(_out, source.File, s); }
                     else WriteObject(source, obj, 0);
                     End();
                 }
@@ -618,79 +601,39 @@ internal sealed class PdfStampWriter
 
     private void WriteEntry(Source source, string key, PdfObject value, int depth)
     {
-        // Keys into the stamp document's structure tree have no meaning here.
-        if (source.IsStamp && key is "StructParent" or "StructParents") return;
-        _out.Sp();
-        PdfSyntax.RawName(_out, key);
-        _out.Sp();
-        WriteObject(source, value, depth + 1);
-    }
-
-    private void WriteStream(Source source, PdfStream s)
-    {
-        var entries = new Dictionary<string, PdfObject>(s.Entries, StringComparer.Ordinal);
-        entries.Remove("Length");
-        PdfMergeWriter.RemoveCryptFilter(source.File, entries);
-        var data = _crypt != null ? _crypt.Encrypt(s.RawData) : s.RawData;
-        _out.Ascii("<<");
-        foreach (var (key, value) in entries) WriteEntry(source, key, value, 1);
-        _out.Ascii(" /Length ").Int(data.Length).Ascii(" >>\nstream\n").Bytes(data).Ascii("\nendstream");
+        _source = source;
+        WriteEntry(_out, null, key, value, depth);
     }
 
     private void WriteObject(Source source, PdfObject? o, int depth)
     {
-        if (depth > 256) { _out.Ascii("null"); return; }
-        switch (o)
+        _source = source;
+        WriteObject(_out, o, depth);
+    }
+
+    /// <summary>Leaves out keys into the stamp document's structure tree, which have no meaning here.</summary>
+    protected override void WriteEntry(ByteBuffer b, PdfDict? owner, string key, PdfObject value, int depth)
+    {
+        if (_source.IsStamp && key is "StructParent" or "StructParents") return;
+        base.WriteEntry(b, owner, key, value, depth);
+    }
+
+    /// <summary>A reference is renumbered, and its object queued to be copied when it is met first.</summary>
+    protected override void WriteRef(ByteBuffer b, PdfRef r)
+    {
+        var source = _source;
+        if (!source.Map.TryGetValue(r.Num, out int id))
         {
-            case PdfBool b:
-                _out.Ascii(b.Value ? "true" : "false");
-                break;
-            case PdfNumber n:
-                if (n.IsInteger) _out.Int((long)n.Value);
-                else _out.Ascii(double.IsFinite(n.Value) ? n.Value.ToString("0.##########", CultureInfo.InvariantCulture) : "0");
-                break;
-            case PdfString s:
-                if (_crypt != null) PdfEncryptor.Hex(_out, _crypt.Encrypt(s.Bytes));
-                else PdfSyntax.HexString(_out, s.Bytes);
-                break;
-            case PdfName nm:
-                PdfSyntax.RawName(_out, nm.Value);
-                break;
-            case PdfRef r:
-                if (!source.Map.TryGetValue(r.Num, out int id))
-                {
-                    var target = source.File.GetObject(r.Num);
-                    if (target == null || target.IsNull) id = 0;
-                    else
-                    {
-                        id = NewId();
-                        source.Queue.Enqueue((r.Num, id));
-                    }
-                    source.Map[r.Num] = id;
-                }
-                if (id == 0) _out.Ascii("null");
-                else _out.Int(id).Ascii(" 0 R");
-                break;
-            case PdfArray a:
-                _out.Byte((byte)'[');
-                for (int i = 0; i < a.Count; i++)
-                {
-                    if (i > 0) _out.Sp();
-                    WriteObject(source, a[i], depth + 1);
-                }
-                _out.Byte((byte)']');
-                break;
-            case PdfStream:
-                _out.Ascii("null"); // a stream can only be an indirect object
-                break;
-            case PdfDict d:
-                _out.Ascii("<<");
-                foreach (var (key, value) in d.Entries) WriteEntry(source, key, value, depth);
-                _out.Ascii(" >>");
-                break;
-            default:
-                _out.Ascii("null");
-                break;
+            var target = source.File.GetObject(r.Num);
+            if (target == null || target.IsNull) id = 0;
+            else
+            {
+                id = NewId();
+                source.Queue.Enqueue((r.Num, id));
+            }
+            source.Map[r.Num] = id;
         }
+        if (id == 0) b.Ascii("null");
+        else b.Int(id).Ascii(" 0 R");
     }
 }
