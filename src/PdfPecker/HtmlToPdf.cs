@@ -878,7 +878,10 @@ public static class HtmlToPdf
             if (bytes != null) return System.Text.Encoding.UTF8.GetString(bytes);
             if (href!.StartsWith("http:", StringComparison.OrdinalIgnoreCase) || href.StartsWith("https:", StringComparison.OrdinalIgnoreCase)) return null;
             var path = LocalFiles.Resolve(href, baseDirectory, allowFiles);
-            return path != null && File.Exists(path) ? File.ReadAllText(path) : null;
+            if (path == null || LocalFiles.Read(path) is not { } file) return null;
+            // As File.ReadAllText reads it: UTF-8 unless a byte order mark says otherwise.
+            using var reader = new StreamReader(new MemoryStream(file), System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            return reader.ReadToEnd();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {

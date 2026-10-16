@@ -73,6 +73,10 @@ internal static class WebPDecoder
         }
         if (frame is not { } f) return null;
         if (offsetX == 0 && offsetY == 0 && f.Width == canvasW && f.Height == canvasH) return f;
+        // Around the frame the canvas is only transparent pixels, which the header asks for with no data behind them: a
+        // huge canvas from a tiny file and a small frame is not allocated, as with GIF screens.
+        long canvasPixels = (long)canvasW * canvasH;
+        if (canvasPixels > 1 << 22 && canvasPixels > 4L * f.Width * f.Height && canvasPixels > d.Length * 1000L) return null;
 
         var rgb = new byte[canvasW * canvasH * 3];
         var alpha = new byte[canvasW * canvasH];

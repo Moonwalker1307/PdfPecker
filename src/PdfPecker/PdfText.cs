@@ -279,7 +279,7 @@ public static class PdfText
         {
             var glyphs = doc.CollectText(index, options.IncludeAnnotations, cancellationToken);
             var (w, h) = doc.PageSize(index);
-            return TextLayout.Build(glyphs, index + 1, w, h, options.ExpandLigatures);
+            return TextLayout.Build(glyphs, index + 1, w, h, options.ExpandLigatures, cancellationToken);
         }
         catch (PdfFormatException ex)
         {
