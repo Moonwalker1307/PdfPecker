@@ -31,6 +31,9 @@ internal sealed class PageSetup
 internal sealed class PageSection
 {
     public PageSetup Page = null!;
+    private PageGrid? _grid;
+    /// <summary>The setups and heights of the section's pages; every page has <see cref="Page"/> unless set.</summary>
+    public PageGrid Grid { get => _grid ??= new PageGrid(Page); set => _grid = value; }
     public List<DrawOp> Ops = null!;
     public float ContentHeight;
     public IReadOnlyDictionary<string, float> Anchors = new Dictionary<string, float>();
@@ -322,15 +325,15 @@ internal sealed partial class PdfDocumentWriter
         string? title, string? author, string? subject, string? footerTemplate, string? headerTemplate,
         Func<int, int, List<DrawOp>>? pageBands = null, IReadOnlyList<OutlineHeading>? outline = null)
     {
-        var firstSetup = _page = sections[0].Page;
-        float H = _page.FlowHeight;
+        var firstSetup = _page = sections[0].Grid.SetupOf(0);
+        var grid = sections[0].Grid;
         int pageOffset = 0; // pages of the sections before the one being distributed
         int maxPages = Math.Max(1, MaxPages);
         int PageOf(float y)
         {
             // Compare as doubles: content far down the flow (a huge height or margin) must hit the page limit, not
             // overflow the page number.
-            double p = Math.Floor((y + 0.01) / H);
+            double p = grid.PageOf(y + 0.01);
             if (p + pageOffset >= maxPages || double.IsNaN(p)) throw TooManyPages(maxPages);
             return Math.Max(0, (int)p);
         }
@@ -356,7 +359,7 @@ internal sealed partial class PdfDocumentWriter
             int p0 = PageOf(top), p1 = Math.Max(p0, PageOf(bottom - 0.5f));
             for (int p = p0; p <= p1; p++)
             {
-                float y0 = Math.Max(top, p * H), y1 = Math.Min(bottom, (p + 1) * H);
+                float y0 = Math.Max(top, grid.Start(p)), y1 = Math.Min(bottom, grid.Start(p + 1));
                 if (y1 > y0 || top == bottom) Target(into, p).Add(new Placed(op, y0, y1));
             }
         }
@@ -440,18 +443,16 @@ internal sealed partial class PdfDocumentWriter
         for (int si = 0; si < sections.Count; si++)
         {
             var section = sections[si];
-            _page = section.Page;
-            H = _page.FlowHeight;
+            grid = section.Grid;
             pageOffset = sectionFirst[si] = pageSection.Count;
             foreach (var op in section.Ops) Distribute(op, null);
             int sectionPages = Math.Max(pages.Count - pageOffset, Math.Max(1, PageOf(Math.Max(0, section.ContentHeight - 0.5f)) + 1));
             while (pages.Count < pageOffset + sectionPages) pages.Add(new List<Placed>());
             for (int k = 0; k < sectionPages; k++) pageSection.Add(si);
-            sectionBase[si + 1] = sectionBase[si] + sectionPages * H;
+            sectionBase[si + 1] = sectionBase[si] + grid.Start(sectionPages);
         }
         int pageCount = pages.Count;
         _page = firstSetup;
-        H = _page.FlowHeight;
         _sections = sections;
         _pageSection = pageSection.ToArray();
         _sectionFirst = sectionFirst;
@@ -717,7 +718,7 @@ internal sealed partial class PdfDocumentWriter
                 content.Ascii("q ").Ascii(k).Ascii(" 0 0 ").Ascii(k).Ascii(" 0 ").Num(paperDy).Ascii(" cm\n");
             }
             // A named page's own @page background, or the document's.
-            uint background = _sections.Count > 1 ? _page.Background : pageBackground;
+            uint background = _sections.Count > 1 || _sections[0].Grid.Varies ? _page.Background : pageBackground;
             if (CssColor.IsVisible(background))
             {
                 Mark(content, null);
@@ -1256,11 +1257,11 @@ internal sealed partial class PdfDocumentWriter
         int si = 0;
         while (si + 1 < _sections.Count && y >= _sectionBase[si + 1] - 0.01f) si++;
         y -= _sectionBase[si];
-        var page = _sections[si].Page;
-        float h = page.FlowHeight;
+        var grid = _sections[si].Grid;
         int last = si + 1 < _sections.Count ? _sectionFirst[si + 1] - 1 : _pageIds.Length - 1;
-        int p = Math.Clamp(_sectionFirst[si] + (int)Math.Floor((y + 0.01f) / h), _sectionFirst[si], last);
-        float py = page.Height - page.MarginTop - page.BandTop - (y - (p - _sectionFirst[si]) * h);
+        int p = Math.Clamp(_sectionFirst[si] + grid.PageOf(y + 0.01f), _sectionFirst[si], last);
+        var page = grid.SetupOf(p - _sectionFirst[si]);
+        float py = page.Height - page.MarginTop - page.BandTop - (y - grid.Start(p - _sectionFirst[si]));
         float paperDy = PaperDy(page);
         _out.Ascii("[").Int(structId != 0 ? structId : _pageIds[p]).Ascii(" 0 R /XYZ 0 ").Num(Math.Min(py, page.Height) * page.Scale + paperDy).Ascii(" null]");
     }
@@ -1273,9 +1274,9 @@ internal sealed partial class PdfDocumentWriter
     /// <summary>While writing: the page (0-based, in the whole document) of a y in a section's flow, and the y on that page.</summary>
     internal (int Page, float Y) PageAt(int section, float y)
     {
-        float h = _sections[section].Page.FlowHeight;
-        int local = Math.Max(0, (int)Math.Floor((y + 0.01) / h));
-        return (_sectionFirst[section] + local, y - local * h);
+        var grid = _sections[section].Grid;
+        int local = Math.Max(0, (int)grid.PageOf(y + 0.01));
+        return (_sectionFirst[section] + local, y - grid.Start(local));
     }
     private int[] _pageSection = Array.Empty<int>(), _sectionFirst = Array.Empty<int>();
     private float[] _sectionBase = Array.Empty<float>();
@@ -1283,7 +1284,7 @@ internal sealed partial class PdfDocumentWriter
     /// <summary>Makes page <paramref name="p"/>'s setup current and returns its paper width (and height); sets <see cref="_paperDy"/>.</summary>
     private float SetPage(int p, out float paperH)
     {
-        _page = _sections[_pageSection[p]].Page;
+        _page = _sections[_pageSection[p]].Grid.SetupOf(p - _sectionFirst[_pageSection[p]]);
         float paperW = _page.Width * _page.Scale;
         paperH = _page.Height * _page.Scale;
         if (_page.Scale != 1) { paperW = PaperSize(paperW); paperH = PaperSize(paperH); }
@@ -1298,7 +1299,7 @@ internal sealed partial class PdfDocumentWriter
     private float PageTop(int p)
     {
         int si = _pageSection[p];
-        return (p - _sectionFirst[si]) * _sections[si].Page.FlowHeight;
+        return _sections[si].Grid.Start(p - _sectionFirst[si]);
     }
 
     /// <summary>Draws the watermark, made for the first page's size, centred on the current page.</summary>
