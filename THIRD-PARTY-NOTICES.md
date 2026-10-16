@@ -469,8 +469,9 @@ SOFTWARE.
 
 ## Test fonts (not part of the library or the NuGet package)
 
-`tests/PdfPecker.Tests/Fixtures/fonts` holds subsets of Work Sans (Copyright 2019 The Work Sans Project Authors) and
-Inter (Copyright 2016-2023 The Inter Project Authors), Noto Sans Arabic (Copyright 2022 The Noto Project Authors) and
-Noto Sans Hebrew (Copyright 2024 The Noto Project Authors), licensed under the SIL Open Font License 1.1, and of Roboto
+`tests/PdfPecker.Tests/Fixtures/fonts` holds subsets of Work Sans (Copyright 2019 The Work Sans Project Authors),
+Inter (Copyright 2016-2023 The Inter Project Authors, also its variable version), Roboto Flex (Copyright 2017 The
+Roboto Flex Project Authors), Noto Sans Arabic (Copyright 2022 The Noto Project Authors) and Noto Sans Hebrew
+(Copyright 2024 The Noto Project Authors), licensed under the SIL Open Font License 1.1, and of Roboto
 (Copyright 2011 Google Inc.), licensed under the Apache License 2.0. They are used only by the tests, and their
 license texts are next to the fonts.
