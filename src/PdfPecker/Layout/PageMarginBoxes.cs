@@ -38,6 +38,12 @@ internal sealed class PageMarginBoxes
         _cancellation = cancellation;
     }
 
+    /// <summary>
+    /// The first page is a left page: the document's root element is right to left, so its pages progress from right to
+    /// left (CSS Paged Media 3, 4.2).
+    /// </summary>
+    public bool FirstPageLeft { get; init; }
+
     /// <summary>True when some @page rule has a margin box.</summary>
     public static bool AnyIn(List<PageRule> rules) => rules.Any(r => r.MarginBoxes.Count > 0);
 
@@ -65,7 +71,7 @@ internal sealed class PageMarginBoxes
         var boxes = new Dictionary<string, List<Declaration>>(StringComparer.Ordinal);
         foreach (var rule in _rules)
         {
-            if (!Applies(rule, pageIndex, pageName)) continue;
+            if (!Applies(rule, pageIndex, pageName, FirstPageLeft)) continue;
             context.AddRange(rule.Declarations);
             foreach (var (name, decls) in rule.MarginBoxes)
             {
@@ -143,15 +149,15 @@ internal sealed class PageMarginBoxes
 
     /// <summary>
     /// Whether an @page rule's selector matches the page: its page name, if any, and :first (the document's first
-    /// page, as in Chrome), :left or :right (the first page is a right page).
+    /// page, as in Chrome), :left or :right (the first page is a right page, or a left page in a right-to-left document).
     /// </summary>
-    private static bool Applies(PageRule rule, int pageIndex, string? pageName)
+    private static bool Applies(PageRule rule, int pageIndex, string? pageName, bool firstPageLeft)
         => (rule.Name.Length == 0 || rule.Name == pageName) && rule.Selector switch
     {
         "" => true,
         ":first" => pageIndex == 0,
-        ":right" => pageIndex % 2 == 0,
-        ":left" => pageIndex % 2 == 1,
+        ":right" => pageIndex % 2 == (firstPageLeft ? 1 : 0),
+        ":left" => pageIndex % 2 == (firstPageLeft ? 0 : 1),
         _ => false, // :blank: pages are never left blank by forced breaks here
     };
 

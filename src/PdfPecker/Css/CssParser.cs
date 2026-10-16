@@ -24,13 +24,16 @@ internal sealed class StyleRule
     public readonly Declaration[] Declarations;
     public readonly int Order;
     public readonly CascadeLayer? Layer; // null for rules outside any @layer
+    /// <summary>The conditions of the @container blocks around the rule, outermost first; null outside any.</summary>
+    public readonly ContainerQuery[]? Containers;
 
-    public StyleRule(Selector selector, Declaration[] declarations, int order, CascadeLayer? layer = null)
+    public StyleRule(Selector selector, Declaration[] declarations, int order, CascadeLayer? layer = null, ContainerQuery[]? containers = null)
     {
         Selector = selector;
         Declarations = declarations;
         Order = order;
         Layer = layer;
+        Containers = containers;
     }
 }
 
@@ -63,6 +66,8 @@ internal sealed class PageRule
     public string Selector = ""; // "", ":first", ":left", ":right" or ":blank"
     public readonly List<Declaration> Declarations = new();
     public readonly Dictionary<string, List<Declaration>> MarginBoxes = new(StringComparer.Ordinal);
+    /// <summary>The declarations of the rule's <c>@footnote</c> area, or null when it has none.</summary>
+    public List<Declaration>? Footnote;
     public int Specificity => (Name.Length > 0 ? 4 : 0) + Selector switch { ":first" or ":blank" => 2, ":left" or ":right" => 1, _ => 0 };
 }
 
@@ -80,6 +85,26 @@ internal sealed class Stylesheet
     public readonly CascadeLayer LayerRoot = new("");
     public MediaContext Media = new();
     public int NextOrder;
+
+    /// <summary>Some rule is inside an @container block.</summary>
+    public bool HasContainerRules;
+
+    private int _unitsCheckedAt = -1;
+    private bool _containerUnits;
+
+    /// <summary>Some declaration uses cq units (checked again only when rules were added since).</summary>
+    public bool HasContainerUnits
+    {
+        get
+        {
+            if (_unitsCheckedAt != Rules.Count)
+            {
+                _containerUnits = Rules.Exists(r => Array.Exists(r.Declarations, d => ContainerQuery.HasContainerUnit(d.Value)));
+                _unitsCheckedAt = Rules.Count;
+            }
+            return _containerUnits;
+        }
+    }
 
     /// <summary>
     /// Loads the stylesheet an <c>@import</c> names: the URL as written, and for a URL given as a plain string the
@@ -129,7 +154,7 @@ internal static class CssParser
         sheet.CurrentHref = href;
         try
         {
-            ParseRules(s, ref i, sheet, s.Length, 0, null);
+            ParseRules(s, ref i, sheet, s.Length, 0, null, null);
         }
         finally
         {
@@ -205,7 +230,7 @@ internal static class CssParser
         {
             string s = StripComments(imported.Css);
             int k = 0;
-            ParseRules(s, ref k, sheet, s.Length, 0, into);
+            ParseRules(s, ref k, sheet, s.Length, 0, into, null);
         }
         finally
         {
@@ -221,7 +246,7 @@ internal static class CssParser
     // cannot recurse without bound.
     private const int MaxMediaNesting = 16;
 
-    private static void ParseRules(string s, ref int i, Stylesheet sheet, int end, int depth, CascadeLayer? layer)
+    private static void ParseRules(string s, ref int i, Stylesheet sheet, int end, int depth, CascadeLayer? layer, ContainerQuery[]? containers)
     {
         // @import is only valid at the top of a sheet, before any rule other than @charset and @layer statements.
         bool importsAllowed = depth == 0;
@@ -266,10 +291,10 @@ internal static class CssParser
                 importsAllowed = false;
                 string prelude = s.Substring(i, brace - i).Trim();
                 int blockEnd = MatchingBrace(s, brace, end);
-                if (depth < MaxMediaNesting && ConditionalBlock(atName, prelude, sheet, layer, out var inner))
+                if (depth < MaxMediaNesting && ConditionalBlock(atName, prelude, sheet, layer, containers, out var inner, out var innerContainers))
                 {
                     int start = brace + 1;
-                    ParseRules(s, ref start, sheet, blockEnd, depth + 1, inner);
+                    ParseRules(s, ref start, sheet, blockEnd, depth + 1, inner, innerContainers);
                 }
                 else if (atName == "page")
                     ParsePage(prelude, s.Substring(brace + 1, blockEnd - brace - 1), sheet);
@@ -296,19 +321,27 @@ internal static class CssParser
             i = Math.Min(close + 1, end);
             var selectors = SplitTopLevel(selectorText, ',');
             for (int k = 0; k < selectors.Count; k++) selectors[k] = selectors[k].Trim();
-            ParseStyleBlock(s, open + 1, close, selectors, sheet, layer, depth);
+            ParseStyleBlock(s, open + 1, close, selectors, sheet, layer, containers, depth);
         }
     }
 
     /// <summary>
-    /// For @media, @supports and @layer blocks: whether their rules apply, and the layer they go into. A block layer
-    /// without a name is a new anonymous layer.
+    /// For @media, @supports, @layer and @container blocks: whether their rules apply, the layer they go into and the
+    /// container conditions they depend on. A block layer without a name is a new anonymous layer. Container
+    /// conditions are kept with the rules, as only the style resolver knows the containers' sizes.
     /// </summary>
-    private static bool ConditionalBlock(string atName, string prelude, Stylesheet sheet, CascadeLayer? layer, out CascadeLayer? inner)
+    private static bool ConditionalBlock(string atName, string prelude, Stylesheet sheet, CascadeLayer? layer, ContainerQuery[]? containers,
+        out CascadeLayer? inner, out ContainerQuery[]? innerContainers)
     {
         inner = layer;
+        innerContainers = containers;
         switch (atName)
         {
+            case "container":
+                if (ContainerQuery.Parse(prelude) is not { } query) return false;
+                innerContainers = containers == null ? new[] { query } : [.. containers, query];
+                sheet.HasContainerRules = true;
+                return true;
             case "media":
                 return MediaQuery.Matches(prelude, sheet.Media);
             case "supports":
@@ -337,11 +370,12 @@ internal static class CssParser
     /// Parses a style rule's block: its declarations and any nested rules (CSS Nesting). Declarations that follow a
     /// nested rule come after it in the cascade, as in Chrome.
     /// </summary>
-    private static void ParseStyleBlock(string s, int start, int end, List<string> selectors, Stylesheet sheet, CascadeLayer? layer, int depth)
+    private static void ParseStyleBlock(string s, int start, int end, List<string> selectors, Stylesheet sheet, CascadeLayer? layer,
+        ContainerQuery[]? containers, int depth)
     {
         if (IndexOfOutsideQuotes(s, '{', start, end) < 0)
         {
-            AddRule(s.Substring(start, end - start), selectors, sheet, layer);
+            AddRule(s.Substring(start, end - start), selectors, sheet, layer, containers);
             return;
         }
         int i = start, declStart = start;
@@ -352,7 +386,7 @@ internal static class CssParser
             // The nested rule's prelude starts after the last ';' (or '}') before its '{'.
             int preludeStart = brace;
             while (preludeStart > declStart && s[preludeStart - 1] != ';' && s[preludeStart - 1] != '}') preludeStart--;
-            if (preludeStart > declStart) AddRule(s.Substring(declStart, preludeStart - declStart), selectors, sheet, layer);
+            if (preludeStart > declStart) AddRule(s.Substring(declStart, preludeStart - declStart), selectors, sheet, layer, containers);
             int close = MatchingBrace(s, brace, end);
             var prelude = s.Substring(preludeStart, brace - preludeStart).Trim();
             if (depth < MaxMediaNesting)
@@ -362,18 +396,18 @@ internal static class CssParser
                     int nameEnd = 1;
                     while (nameEnd < prelude.Length && (char.IsLetterOrDigit(prelude[nameEnd]) || prelude[nameEnd] == '-')) nameEnd++;
                     var atName = prelude.Substring(1, nameEnd - 1).ToLowerInvariant();
-                    if (ConditionalBlock(atName, prelude.Substring(nameEnd).Trim(), sheet, layer, out var inner))
-                        ParseStyleBlock(s, brace + 1, close, selectors, sheet, inner, depth + 1);
+                    if (ConditionalBlock(atName, prelude.Substring(nameEnd).Trim(), sheet, layer, containers, out var inner, out var innerContainers))
+                        ParseStyleBlock(s, brace + 1, close, selectors, sheet, inner, innerContainers, depth + 1);
                 }
                 else if (prelude.Length > 0)
-                    ParseStyleBlock(s, brace + 1, close, NestedSelectors(selectors, prelude), sheet, layer, depth + 1);
+                    ParseStyleBlock(s, brace + 1, close, NestedSelectors(selectors, prelude), sheet, layer, containers, depth + 1);
             }
             i = declStart = Math.Min(close + 1, end);
         }
-        if (declStart < end) AddRule(s.Substring(declStart, end - declStart), selectors, sheet, layer);
+        if (declStart < end) AddRule(s.Substring(declStart, end - declStart), selectors, sheet, layer, containers);
     }
 
-    private static void AddRule(string body, List<string> selectors, Stylesheet sheet, CascadeLayer? layer)
+    private static void AddRule(string body, List<string> selectors, Stylesheet sheet, CascadeLayer? layer, ContainerQuery[]? containers)
     {
         if (string.IsNullOrWhiteSpace(body)) return;
         var decls = new List<Declaration>();
@@ -383,7 +417,7 @@ internal static class CssParser
         foreach (var selText in selectors)
         {
             var sel = Selector.Parse(selText);
-            if (sel != null) sheet.Rules.Add(new StyleRule(sel, declArray, sheet.NextOrder++, layer));
+            if (sel != null) sheet.Rules.Add(new StyleRule(sel, declArray, sheet.NextOrder++, layer, containers));
         }
     }
 
@@ -445,6 +479,10 @@ internal static class CssParser
                 if (rule.MarginBoxes.TryGetValue(name, out var existing)) existing.AddRange(decls);
                 else rule.MarginBoxes[name] = decls;
             }
+            else if (name == "footnote")
+            {
+                ParseDeclarations(body.Substring(brace + 1, Math.Max(0, close - brace - 1)), rule.Footnote ??= new List<Declaration>());
+            }
             i = declStart = Math.Min(close + 1, body.Length);
         }
         declText.Append(body, declStart, body.Length - declStart);
@@ -457,6 +495,7 @@ internal static class CssParser
                 r = new PageRule { Name = name, Selector = pseudo };
                 r.Declarations.AddRange(rule.Declarations);
                 foreach (var (box, decls) in rule.MarginBoxes) r.MarginBoxes[box] = decls;
+                r.Footnote = rule.Footnote;
             }
             sheet.PageRules.Add(r);
             if (name.Length == 0 && pseudo.Length == 0) sheet.PageDeclarations.AddRange(r.Declarations);
@@ -645,6 +684,14 @@ internal static class CssParser
 
     private static readonly string[] Sides = { "top", "right", "bottom", "left" };
 
+    /// <summary>A container-name value: none, or one or more container names.</summary>
+    internal static bool ContainerNamesValid(string names)
+    {
+        var parts = names.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 1 && parts[0].Equals("none", StringComparison.OrdinalIgnoreCase)) return true;
+        return parts.Length > 0 && Array.TrueForAll(parts, ContainerQuery.IsName);
+    }
+
     /// <summary>True when the value references a custom property and can only be expanded once the element's variables are known.</summary>
     public static bool HasVar(string value) => value.IndexOf("var(", StringComparison.OrdinalIgnoreCase) >= 0;
 
@@ -661,6 +708,25 @@ internal static class CssParser
 
         switch (name)
         {
+            case "container":
+            {
+                // container: <name> [ / <type> ]; the type is normal when left out.
+                var v = value.Trim();
+                if (v.ToLowerInvariant() is "inherit" or "initial" or "unset" or "revert" or "revert-layer")
+                {
+                    Add("container-name", v);
+                    Add("container-type", v);
+                    return;
+                }
+                int slash = v.IndexOf('/');
+                var names = (slash < 0 ? v : v.Substring(0, slash)).Trim();
+                var type = slash < 0 ? "normal" : v.Substring(slash + 1).Trim();
+                // An invalid part makes the whole declaration invalid.
+                if (type.ToLowerInvariant() is not ("normal" or "size" or "inline-size") || !ContainerNamesValid(names)) return;
+                Add("container-name", names);
+                Add("container-type", type);
+                return;
+            }
             case "inset":
             {
                 var t = Tokens(value);

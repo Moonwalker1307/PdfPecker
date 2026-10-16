@@ -38,6 +38,13 @@ internal sealed class PageSection
     public float ContentHeight;
     public IReadOnlyDictionary<string, float> Anchors = new Dictionary<string, float>();
     public List<DrawOp>? FixedOps;
+    /// <summary>The footnote areas of the section's pages, in flow coordinates at the bottom of their pages.</summary>
+    public List<DrawOp>? FootnoteOps;
+    /// <summary>
+    /// The height a page's footnote area (by its index within the section) takes from the bottom of the page's flow:
+    /// the flow's boxes are cut off there, as at the end of a page.
+    /// </summary>
+    public Func<int, float>? FootnoteReserve;
     /// <summary>The canvas background of the section's page with the given index within the section.</summary>
     public Func<int, List<DrawOp>>? Canvas;
     /// <summary>The number of pages the content needs, from its height: at least one.</summary>
@@ -62,7 +69,9 @@ internal sealed partial class PdfDocumentWriter
     private bool _inText;
     private TextFont? _textFont;
     private float _textSize, _tw, _tc;
-    private int _tr;           // text rendering mode: 0 fill, 2 fill and stroke (synthetic bold)
+    private int _tr;           // text rendering mode: 0 fill, 2 fill and stroke (synthetic bold), 3 invisible
+    // Writing only the text of content drawn as pixels, invisibly, so that it can still be selected, searched and tagged.
+    private bool _invisibleText;
     private uint _stroke;
     private float _lineWidth;
     private int _fillAlpha = 255, _strokeAlpha = 255; // the constant alphas (0-255) in effect; -1 when unknown
@@ -89,6 +98,9 @@ internal sealed partial class PdfDocumentWriter
 
     /// <summary>Stamp on every page.</summary>
     public PdfWatermark? Watermark { get; init; }
+
+    /// <summary>The document is right to left: its pages progress from right to left (/ViewerPreferences /Direction).</summary>
+    public bool RightToLeft { get; init; }
 
     /// <summary>Encrypt the file with these passwords.</summary>
     public PdfSecurity? Security { get; init; }
@@ -347,6 +359,7 @@ internal sealed partial class PdfDocumentWriter
 
         // 1. Distribute ops over pages.
         var pages = new List<List<Placed>>();
+        Func<int, float>? footnoteCut = null; // the space footnote areas take at the bottom of the pages being distributed
         List<Placed> PageList(int p)
         {
             // Sized like the page before: pages of a document tend to hold about as many ops each.
@@ -366,7 +379,7 @@ internal sealed partial class PdfDocumentWriter
             int p0 = PageOf(top), p1 = Math.Max(p0, PageOf(bottom - 0.5f));
             for (int p = p0; p <= p1; p++)
             {
-                float y0 = Math.Max(top, grid.Start(p)), y1 = Math.Min(bottom, grid.Start(p + 1));
+                float y0 = Math.Max(top, grid.Start(p)), y1 = Math.Min(bottom, grid.Start(p + 1) - (footnoteCut?.Invoke(p) ?? 0));
                 if (y1 > y0 || top == bottom) Target(into, p).Add(new Placed(op, y0, y1));
             }
         }
@@ -452,7 +465,10 @@ internal sealed partial class PdfDocumentWriter
             var section = sections[si];
             grid = section.Grid;
             pageOffset = sectionFirst[si] = pageSection.Count;
+            footnoteCut = section.FootnoteReserve;
             foreach (var op in section.Ops) Distribute(op, null);
+            footnoteCut = null;
+            if (section.FootnoteOps != null) foreach (var op in section.FootnoteOps) Distribute(op, null);
             int sectionPages = Math.Max(pages.Count - pageOffset, Math.Max(1, PageOf(Math.Max(0, section.ContentHeight - 0.5f)) + 1));
             while (pages.Count < pageOffset + sectionPages) pages.Add(new List<Placed>());
             for (int k = 0; k < sectionPages; k++) pageSection.Add(si);
@@ -628,9 +644,12 @@ internal sealed partial class PdfDocumentWriter
         {
             _out.Ascii(" /MarkInfo << /Marked true >> /StructTreeRoot ").Int(structRootId).Ascii(" 0 R");
             if (!string.IsNullOrEmpty(Language)) { _out.Ascii(" /Lang "); WriteTextString(_out, Language!); }
-            // PDF/UA: viewers show the title, not the file name.
-            if (!string.IsNullOrEmpty(title)) _out.Ascii(" /ViewerPreferences << /DisplayDocTitle true >>");
         }
+        // PDF/UA: viewers show the title, not the file name. A right-to-left document's pages progress from right to
+        // left, which a viewer showing two pages side by side needs to know to put them in the right order.
+        bool displayTitle = tagged && !string.IsNullOrEmpty(title);
+        if (displayTitle || RightToLeft)
+            _out.Ascii(" /ViewerPreferences <<").Ascii(displayTitle ? " /DisplayDocTitle true" : "").Ascii(RightToLeft ? " /Direction /R2L" : "").Ascii(" >>");
         if (fileSpecIds.Length > 0)
         {
             // Attachments are listed in the name tree viewers show and are associated files (/AF), as PDF/A-3 needs.
@@ -1031,6 +1050,18 @@ internal sealed partial class PdfDocumentWriter
 
         Begin(rootId).Ascii("<< /Type /StructTreeRoot /K ").Int(tree.Root.Id).Ascii(" 0 R /ParentTree ").Int(parentTreeId)
             .Ascii(" 0 R /ParentTreeNextKey ").Int(nextKey);
+        // Elements with identifiers (footnote Notes) are listed in the ID tree, in the byte order of their identifiers.
+        var identified = elements.Where(e => e.ElementId != null).OrderBy(e => e.ElementId, StringComparer.Ordinal).ToList();
+        if (identified.Count > 0)
+        {
+            _out.Ascii(" /IDTree << /Names [");
+            foreach (var e in identified)
+            {
+                WriteAsciiString(_out, e.ElementId!);
+                _out.Sp().Int(e.Id).Ascii(" 0 R ");
+            }
+            _out.Ascii("] >>");
+        }
         if (ns2Id != 0)
         {
             _out.Ascii(" /Namespaces [").Int(ns2Id).Ascii(" 0 R");
@@ -1086,6 +1117,7 @@ internal sealed partial class PdfDocumentWriter
             if (ns2Id != 0) _out.Ascii(" /NS ").Int(Pdf17Only(e.Type) != null ? ns17Id : ns2Id).Ascii(" 0 R");
             if (e.Lang != null) { _out.Ascii(" /Lang "); WriteTextString(_out, e.Lang); }
             if (e.Alt != null) { _out.Ascii(" /Alt "); WriteTextString(_out, e.Alt); }
+            if (e.ElementId != null) { _out.Ascii(" /ID "); WriteAsciiString(_out, e.ElementId); }
             if (e.Scope != null || e.RowSpan > 1 || e.ColSpan > 1)
             {
                 _out.Ascii(" /A << /O /Table");
@@ -1146,6 +1178,7 @@ internal sealed partial class PdfDocumentWriter
         "BlockQuote" => "Div",
         "Quote" or "Code" => "Span",
         "Art" => "Sect",
+        "Note" => "FENote",
         _ => null,
     };
 
@@ -1604,6 +1637,8 @@ internal sealed partial class PdfDocumentWriter
 
     private void WriteOp(ByteBuffer b, in Placed placed, float pageTop, Dictionary<PdfImage, int> imageIds)
     {
+        // Over the pixels of a blurred box only its text is written, and none of the shadows of text in it.
+        if (_invisibleText && placed.Op is not (TextOp or ClipBlock or LayerBlock { Layer.TextShadow: false })) return;
         if (_mc != null)
         {
             // Marked content nests inside the q/Q of clips and layers, which open their own sequences.
@@ -1696,7 +1731,7 @@ internal sealed partial class PdfDocumentWriter
                     b.Ascii(tb.Layer.ClipEvenOdd ? "W* n\n" : "W n\n");
                     if (_mc != null) b.Ascii("EMC\n");
                 }
-                if (tb.Layer.NeedsGroup)
+                if (tb.Layer.NeedsGroup && !_invisibleText)
                 {
                     // A translucent or blended layer is a transparency group, painted as a whole at its opacity and with
                     // its blend mode, so that its own overlapping parts do not show through each other.
@@ -1797,7 +1832,7 @@ internal sealed partial class PdfDocumentWriter
             }
             case SvgOp sv:
                 EndText(b);
-                WriteSvg(b, sv.Image, PX(sv.X), PY(sv.Y, pageTop), sv.W, sv.H);
+                WriteSvg(b, sv.Image, PX(sv.X), PY(sv.Y, pageTop), sv.W, sv.H, sv.StretchUserSpace);
                 break;
             case CircleOp c:
             {
@@ -1849,13 +1884,26 @@ internal sealed partial class PdfDocumentWriter
     private void WriteLayerContent(ByteBuffer b, LayerBlock tb, float pageTop, Dictionary<PdfImage, int> imageIds)
     {
         var layer = tb.Layer;
-        if (layer.Raster != null)
+        if (layer.Raster != null && !_invisibleText)
         {
             EndText(b);
             if (_mc != null) { EndMarked(b); b.Ascii("/Artifact BMC\n"); }
             WriteLayerRaster(b, layer, pageTop);
             if (_mc != null) b.Ascii("EMC\n");
-            if (layer.RasterReplaces) return;
+            if (layer.RasterReplaces)
+            {
+                if (layer.TextShadow) return;
+                // The image hides the text in it from search and selection: the same text again, invisible, brings it back.
+                _invisibleText = true;
+                try
+                {
+                    foreach (var item in tb.Items)
+                        if (item.Op is not LinkOp) WriteOp(b, item, pageTop, imageIds);
+                    EndText(b);
+                }
+                finally { _invisibleText = false; }
+                return;
+            }
         }
         foreach (var item in tb.Items)
             if (item.Op is not LinkOp) WriteOp(b, item, pageTop, imageIds);
@@ -1865,7 +1913,7 @@ internal sealed partial class PdfDocumentWriter
     /// Draws an SVG drawing in the box whose top-left corner is (<paramref name="left"/>, <paramref name="top"/>) in PDF
     /// space: clipped to the box, with the viewBox mapped by preserveAspectRatio.
     /// </summary>
-    private void WriteSvg(ByteBuffer b, SvgImage img, float left, float top, float w, float h)
+    private void WriteSvg(ByteBuffer b, SvgImage img, float left, float top, float w, float h, bool stretch = false)
     {
         if (img.Shapes.Count == 0 || w <= 0 || h <= 0) return;
         float sx, sy, tx = 0, ty = 0, vx = 0, vy = 0;
@@ -1885,7 +1933,12 @@ internal sealed partial class PdfDocumentWriter
                 ty = a.EndsWith("ymid", StringComparison.Ordinal) ? extraY / 2 : a.EndsWith("ymax", StringComparison.Ordinal) ? extraY : 0;
             }
         }
-        else sx = sy = 0.75f; // user units are CSS pixels
+        else
+        {
+            // User units are CSS pixels. Stretched, each natural dimension (in points) the file gives maps to the box.
+            sx = stretch && img.Width is > 0 and float nw ? 0.75f * w / nw : 0.75f;
+            sy = stretch && img.Height is > 0 and float nh ? 0.75f * h / nh : 0.75f;
+        }
 
         var saved = SaveState();
         b.Ascii("q ").Num(left).Sp().Num(top - h).Sp().Num(w).Sp().Num(h).Ascii(" re W n\n");
@@ -2116,21 +2169,31 @@ internal sealed partial class PdfDocumentWriter
         var rgb = new byte[w * h * 3];
         var alpha = new byte[w * h];
         bool any = false;
+        byte r = 0, g = 0, bl = 0;
         for (int i = 0, o = 0; i < w * h; i++, o += 3)
         {
             float a = Math.Clamp(result[i * 4 + 3], 0, 1);
-            if (a <= 0) continue;
-            any = true;
-            alpha[i] = (byte)MathF.Round(a * 255);
-            rgb[o] = (byte)MathF.Round(Math.Clamp(result[i * 4] / a, 0, 1) * 255);
-            rgb[o + 1] = (byte)MathF.Round(Math.Clamp(result[i * 4 + 1] / a, 0, 1) * 255);
-            rgb[o + 2] = (byte)MathF.Round(Math.Clamp(result[i * 4 + 2] / a, 0, 1) * 255);
+            byte a8 = (byte)MathF.Round(a * 255);
+            if (a8 > 0)
+            {
+                any = true;
+                alpha[i] = a8;
+                r = (byte)MathF.Round(Math.Clamp(result[i * 4] / a, 0, 1) * 255);
+                g = (byte)MathF.Round(Math.Clamp(result[i * 4 + 1] / a, 0, 1) * 255);
+                bl = (byte)MathF.Round(Math.Clamp(result[i * 4 + 2] / a, 0, 1) * 255);
+            }
+            // A transparent pixel keeps the colour before it, which costs nothing to compress where black would.
+            rgb[o] = r;
+            rgb[o + 1] = g;
+            rgb[o + 2] = bl;
         }
         if (!any) return null;
+        var colorData = PdfImage.DeflatePredicted(rgb, w, h, 3, out string colorParms);
+        var alphaData = PdfImage.DeflatePredicted(alpha, w, h, 1, out string alphaParms);
         return new PdfImage
         {
-            Width = w, Height = h, Data = PdfImage.Deflate(rgb),
-            SMask = new PdfImage { Width = w, Height = h, ColorSpace = "/DeviceGray", Data = PdfImage.Deflate(alpha) },
+            Width = w, Height = h, Data = colorData, DecodeParms = colorParms,
+            SMask = new PdfImage { Width = w, Height = h, ColorSpace = "/DeviceGray", Data = alphaData, DecodeParms = alphaParms },
         };
     }
 
@@ -2603,6 +2666,7 @@ internal sealed partial class PdfDocumentWriter
 
     private void SetRenderMode(ByteBuffer b, int mode)
     {
+        if (_invisibleText) mode = 3;
         if (_tr == mode) return;
         _tr = mode;
         b.Int(mode).Ascii(" Tr\n");

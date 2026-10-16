@@ -1,12 +1,13 @@
 using System.IO.Compression;
 using PdfPecker.Css;
+using PdfPecker.Fonts;
 using PdfPecker.Images;
 using PdfPecker.Layout;
 using PdfPecker.Svg;
 
 namespace PdfPecker.Pdf;
 
-/// <summary>The pixels of HTML filters with blur() or drop-shadow().</summary>
+/// <summary>The pixels of HTML filters with blur() or drop-shadow(), and of blurred text-shadows.</summary>
 internal sealed partial class PdfDocumentWriter
 {
     // The flow range of the page whose flowing content is being written; NaN while writing anything else.
@@ -17,10 +18,15 @@ internal sealed partial class PdfDocumentWriter
     private readonly Dictionary<LayerOp, (int Index, float X, float Y, float W, float H, float ContentTop, float ContentBottom)> _layerRasters
         = new(ReferenceEqualityComparer.Instance);
 
+    // The images of blurred text-shadows by what they show, relative to the content's bounds: the same words in the same
+    // font under the same shadows are made once, wherever they are.
+    private Dictionary<string, (int Index, float Dx, float Dy, float W, float H, float ContentBottom)>? _shadowImages;
+    private Dictionary<TextFont, int>? _shadowFonts;
+
     /// <summary>Draws the filtered pixels of a layer: the shadows under its content, or the blurred content.</summary>
     private void WriteLayerRaster(ByteBuffer b, LayerOp layer, float pageTop)
     {
-        if (!_layerRasters.TryGetValue(layer, out var r)) _layerRasters[layer] = r = RasterizeLayer(layer);
+        if (!_layerRasters.TryGetValue(layer, out var r)) _layerRasters[layer] = r = layer.TextShadow ? RasterizeShadow(layer) : RasterizeLayer(layer);
         if (r.Index == 0) return;
         SetFillAlpha(b, CssColor.Black); // an image is painted with the fill alpha
         b.Ascii("q ");
@@ -47,7 +53,8 @@ internal sealed partial class PdfDocumentWriter
         // The filter region: the content grown by how far the blurs and shadows reach.
         float rx = x0 + f.X, ry = y0 + f.Y, rw = x1 - x0 + f.W, rh = y1 - y0 + f.H;
         if (!(rw > 0 && rh > 0) || ry + rh <= 1 || rw > 1e5f || rh > 1e6f) return default;
-        double pw = Math.Ceiling(rw * FilterPixelsPerPoint), ph = Math.Ceiling(rh * FilterPixelsPerPoint);
+        float density = layer.RasterDensity > 0 ? layer.RasterDensity : FilterPixelsPerPoint;
+        double pw = Math.Ceiling(rw * density), ph = Math.Ceiling(rh * density);
         if (pw * ph > MaxFilterPixels)
         {
             double k = Math.Sqrt(MaxFilterPixels / (pw * ph));
@@ -67,12 +74,88 @@ internal sealed partial class PdfDocumentWriter
             pdf = writer.Write(new List<DrawOp> { scaled }, ry + rh, new Dictionary<string, float>(), 0, null, null, null, null, null);
         }
         catch (PdfLimitException) { return default; }
+        if (f.TextShadows)
+        {
+            // Only the shape of the text matters to its shadows.
+            var rendered = PdfRenderer.Open(pdf).RenderPage(0, new ImageOptions { Width = w, Height = h, Transparent = true }, Cancellation);
+            if (rendered.Width != w || rendered.Height != h) return default;
+            var px = rendered.Premultiplied;
+            var alpha = new float[px.Length];
+            for (int i = 0; i < px.Length; i++) alpha[i] = (px[i] >> 24) / 255f;
+            if (f.ApplyShadows(alpha, w, h, w / rw, h / rh) is not var (rgb, mask)) return default;
+            _rasters.Add(new PdfImage
+            {
+                Width = w, Height = h, Data = PdfImage.DeflatePredicted(rgb, w, h, 3, out string colorParms), DecodeParms = colorParms,
+                SMask = new PdfImage
+                {
+                    Width = w, Height = h, ColorSpace = "/DeviceGray", Data = PdfImage.DeflatePredicted(mask, w, h, 1, out string alphaParms), DecodeParms = alphaParms,
+                },
+            });
+            return (_rasters.Count, rx, ry, rw, rh, y0, y1);
+        }
         var source = RenderPremultiplied(pdf, w, h);
         if (source == null) return default;
         var image = FilterImage(f.Apply(source, w, h, w / rw, h / rh), w, h);
         if (image == null) return default;
         _rasters.Add(image);
         return (_rasters.Count, rx, ry, rw, rh, y0, y1);
+    }
+
+    /// <summary>
+    /// The image of a layer of blurred text-shadows, shared with every earlier layer that holds the same text and
+    /// decorations at the same places relative to each other under the same filter.
+    /// </summary>
+    private (int, float, float, float, float, float, float) RasterizeShadow(LayerOp layer)
+    {
+        var key = ShadowKey(layer, out float x0, out float y0);
+        _shadowImages ??= new Dictionary<string, (int, float, float, float, float, float)>(StringComparer.Ordinal);
+        if (key != null && _shadowImages.TryGetValue(key, out var shared))
+            return shared.Index == 0 ? default : (shared.Index, x0 + shared.Dx, y0 + shared.Dy, shared.W, shared.H, y0, y0 + shared.ContentBottom);
+        var r = RasterizeLayer(layer);
+        if (key != null) _shadowImages[key] = (r.Item1, r.Item2 - x0, r.Item3 - y0, r.Item4, r.Item5, r.Item7 - y0);
+        return r;
+    }
+
+    /// <summary>
+    /// What a layer of text-shadows draws, as a string, with positions relative to its bounds' top-left corner
+    /// (<paramref name="x0"/>, <paramref name="y0"/>); null when it holds something else.
+    /// </summary>
+    private string? ShadowKey(LayerOp layer, out float x0, out float y0)
+    {
+        float bx1 = float.MinValue, by1 = float.MinValue;
+        x0 = y0 = float.MaxValue;
+        foreach (var op in layer.Ops) Bounds(op, ref x0, ref y0, ref bx1, ref by1);
+        if (!(bx1 > x0 && by1 > y0)) return null;
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var sb = new System.Text.StringBuilder();
+        sb.Append(layer.RasterDensity.ToString("R", inv)).Append('|');
+        foreach (var p in layer.Raster!.Primitives)
+            sb.Append((int)p.Kind).Append(',').Append(p.Sx.ToString("R", inv)).Append(',').Append(p.Dx.ToString("R", inv)).Append(',')
+                .Append(p.Dy.ToString("R", inv)).Append(',').Append(p.Color).Append(';');
+        string Rel(float v, float origin) => MathF.Round(v - origin, 2).ToString("R", inv);
+        foreach (var op in layer.Ops)
+        {
+            switch (op)
+            {
+                case TextOp t:
+                    _shadowFonts ??= new Dictionary<TextFont, int>(ReferenceEqualityComparer.Instance);
+                    if (!_shadowFonts.TryGetValue(t.Font, out int font)) _shadowFonts[t.Font] = font = _shadowFonts.Count;
+                    sb.Append("|T").Append(font).Append(',').Append(t.Size.ToString("R", inv)).Append(',').Append(Rel(t.X, x0)).Append(',')
+                        .Append(Rel(t.Baseline, y0)).Append(',').Append(t.WordSpacing.ToString("R", inv)).Append(',')
+                        .Append(t.CharSpacing.ToString("R", inv)).Append(',').Append(t.Rtl ? 'r' : 'l').Append(',').Append(t.Text.Length).Append(':').Append(t.Text);
+                    break;
+                case RectOp r:
+                    sb.Append("|R").Append(Rel(r.X, x0)).Append(',').Append(Rel(r.Y, y0)).Append(',').Append(Rel(r.W, 0)).Append(',').Append(Rel(r.H, 0));
+                    break;
+                case LineOp l:
+                    sb.Append("|L").Append(Rel(l.X1, x0)).Append(',').Append(Rel(l.Y1, y0)).Append(',').Append(Rel(l.X2, x0)).Append(',')
+                        .Append(Rel(l.Y2, y0)).Append(',').Append(Rel(l.Width, 0)).Append(l.Dotted ? 'd' : l.Solid ? 's' : 'a');
+                    break;
+                default:
+                    return null;
+            }
+        }
+        return sb.ToString();
     }
 
     /// <summary>Grows the rectangle to take in what an op paints, in flow coordinates (generously for text).</summary>

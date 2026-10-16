@@ -266,9 +266,30 @@ internal sealed partial class LayoutEngine
         public float StrutH;
         public readonly List<PendingFloat> Waiting = new(); // floats that did not fit beside the current line
 
+        // Pages of different widths: the block's content box on each kind of page, and the page the current line was
+        // measured for. A line that ends up on a page with other geometry is reported in Moved (its index) and
+        // MovedHeight, so that the paragraph can be broken again with HeightHints saying which lines are taller than
+        // the line height. ForcedBefore holds the lines that start a new page to keep orphans and widows.
+        public PageBox? Pages;
+        public Dictionary<int, float>? HeightHints;
+        public bool[]? ForcedBefore;
+        public int Moved = -1;
+        public float MovedHeight;
+        private int _index, _measuredPage;
+
+        /// <summary>The block's content box on the page the current line goes on.</summary>
+        private (float X, float W) Box => Pages == null ? (X, W) : (Pages.X[PageBox.Kind(_measuredPage)], Pages.W[PageBox.Kind(_measuredPage)]);
+
         private void Measure()
         {
-            var (l, r) = Engine._floats.Band(Y, StrutH, X, X + W);
+            if (Pages != null)
+            {
+                float h = StrutH;
+                if (HeightHints != null && HeightHints.TryGetValue(_index, out float hint) && hint > h) h = hint;
+                _measuredPage = Engine.PageOf(Engine.FitOnPage(Y, h));
+            }
+            var (bx, bw) = Box;
+            var (l, r) = Engine._floats.Band(Y, StrutH, bx, bx + bw);
             Left = l - X;
             Avail = r - l;
         }
@@ -281,9 +302,13 @@ internal sealed partial class LayoutEngine
                 var last = lines[^1];
                 Y = last.Top + Engine.LineBoxHeight(last, Block);
             }
+            _index = lines.Count;
+            if (ForcedBefore != null && _index < ForcedBefore.Length && ForcedBefore[_index]) Y = Engine.NextPage(Y);
             if (Waiting.Count > 0)
             {
-                foreach (var f in Waiting) Engine.PlaceFloat(f, Y, X, W);
+                if (Pages != null) Measure();
+                var (bx, bw) = Box;
+                foreach (var f in Waiting) Engine.PlaceFloat(f, Y, bx, bw);
                 Waiting.Clear();
             }
             Measure();
@@ -292,13 +317,14 @@ internal sealed partial class LayoutEngine
         /// <summary>A float met in the text: placed beside the current line when it fits there, else after the line.</summary>
         public void Float(Item it, float used, bool hasContent)
         {
-            var f = Engine.MeasureFloat(it.Element!, W);
+            var (bx, bw) = Box;
+            var f = Engine.MeasureFloat(it.Element!, bw);
             if (hasContent && (Waiting.Count > 0 || f.Width > Avail - used + Eps))
             {
                 Waiting.Add(f);
                 return;
             }
-            Engine.PlaceFloat(f, Y, X, W);
+            Engine.PlaceFloat(f, Y, bx, bw);
             Measure();
         }
 
@@ -319,6 +345,11 @@ internal sealed partial class LayoutEngine
             line.Top = h > 0 ? Engine.FitOnPage(Y, h) : Y;
             line.Left = Left;
             line.Avail = Avail;
+            if (Pages != null && Moved < 0 && h > 0 && !Pages.Same(Engine.PageOf(line.Top), _measuredPage))
+            {
+                Moved = _index;
+                MovedHeight = h;
+            }
         }
 
         /// <summary>Places the floats still waiting once the last line is done.</summary>
@@ -326,7 +357,10 @@ internal sealed partial class LayoutEngine
         {
             if (Waiting.Count == 0) return;
             if (lines.Count > 0) Y = lines[^1].Top + Engine.LineBoxHeight(lines[^1], Block);
-            foreach (var f in Waiting) Engine.PlaceFloat(f, Y, X, W);
+            _index = lines.Count;
+            if (Pages != null) Measure();
+            var (bx, bw) = Box;
+            foreach (var f in Waiting) Engine.PlaceFloat(f, Y, bx, bw);
             Waiting.Clear();
         }
     }

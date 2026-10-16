@@ -15,6 +15,8 @@ internal sealed partial class SvgFilter
     public readonly List<Primitive> Primitives = new();
     public Matrix ToUser = Matrix.Identity; // root space to the user space of the filtered element
     public float UserScale = 1;             // root units per user unit
+    // Made by the layout for blurred text-shadows, in the one shape that ApplyShadows runs.
+    public bool TextShadows;
 
     internal enum Kind : byte
     {
@@ -521,19 +523,149 @@ internal sealed partial class SvgFilter
 
     private static void BlurAxis(ref float[] a, ref float[] tmp, int w, int h, float sigma, bool horizontal)
     {
+        foreach (var (before, after) in BoxPasses(sigma)) { Box(a, tmp, w, h, before, after, horizontal); (a, tmp) = (tmp, a); }
+    }
+
+    /// <summary>
+    /// The three box blurs that approximate a Gaussian of deviation <paramref name="sigma"/> pixels, as the SVG
+    /// specification gives them: how far each reaches before and after the pixel.
+    /// </summary>
+    private static (int Before, int After)[] BoxPasses(float sigma)
+    {
         int d = (int)MathF.Floor(sigma * 3 * MathF.Sqrt(2 * MathF.PI) / 4 + 0.5f);
         d = Math.Clamp(d, 1, 2000);
-        if (d % 2 == 1)
+        // An even size: two boxes of size d, off centre to either side, then one of size d + 1 centred on the pixel.
+        return d % 2 == 1 ? new[] { (d / 2, d / 2), (d / 2, d / 2), (d / 2, d / 2) } : new[] { (d / 2, d / 2 - 1), (d / 2 - 1, d / 2), (d / 2, d / 2) };
+    }
+
+    /// <summary>
+    /// Blurs one channel of w × h values, rows with running sums along them and columns with a running sum per column,
+    /// so that both passes read memory in order.
+    /// </summary>
+    private static float[] BlurChannel(float[] src, int w, int h, float sx, float sy)
+    {
+        var a = src;
+        var tmp = new float[src.Length];
+        if (sx > 0.01f)
+            foreach (var (before, after) in BoxPasses(sx))
+            {
+                float inv = 1f / (before + after + 1);
+                for (int y = 0; y < h; y++)
+                {
+                    int row = y * w;
+                    double sum = 0;
+                    for (int k = 0; k <= Math.Min(after, w - 1); k++) sum += a[row + k];
+                    for (int x = 0; x < w; x++)
+                    {
+                        tmp[row + x] = (float)(sum * inv);
+                        int add = x + after + 1, remove = x - before;
+                        if (add < w) sum += a[row + add];
+                        if (remove >= 0) sum -= a[row + remove];
+                    }
+                }
+                (a, tmp) = (tmp, a == src ? new float[src.Length] : a);
+            }
+        if (sy > 0.01f)
         {
-            for (int pass = 0; pass < 3; pass++) { Box(a, tmp, w, h, d / 2, d / 2, horizontal); (a, tmp) = (tmp, a); }
+            var sums = new double[w];
+            foreach (var (before, after) in BoxPasses(sy))
+            {
+                float inv = 1f / (before + after + 1);
+                Array.Clear(sums);
+                for (int k = 0; k <= Math.Min(after, h - 1); k++)
+                    for (int x = 0; x < w; x++) sums[x] += a[k * w + x];
+                for (int y = 0; y < h; y++)
+                {
+                    int row = y * w, add = (y + after + 1) * w, remove = (y - before) * w;
+                    for (int x = 0; x < w; x++) tmp[row + x] = (float)(sums[x] * inv);
+                    if (y + after + 1 < h) for (int x = 0; x < w; x++) sums[x] += a[add + x];
+                    if (y - before >= 0) for (int x = 0; x < w; x++) sums[x] -= a[remove + x];
+                }
+                (a, tmp) = (tmp, a == src ? new float[src.Length] : a);
+            }
         }
-        else
+        return a;
+    }
+
+    /// <summary>
+    /// Runs a filter made for blurred text-shadows (each shadow a blur of the source's alpha, an offset, a flood and a
+    /// composite, then a merge) on the content's alpha alone, w × h values: the same pixels as <see cref="Apply"/> in a
+    /// fraction of its time and memory, which matters with an image for every line of shadowed text. Returns straight
+    /// sRGB colour and alpha bytes, or null when nothing shows.
+    /// </summary>
+    public (byte[] Rgb, byte[] Alpha)? ApplyShadows(float[] alpha, int w, int h, float scaleX, float scaleY)
+    {
+        int n = w * h;
+        float[]? r = null, g = null, b = null;
+        var acc = new float[n];
+        uint first = 0;
+        bool oneColor = true;
+        for (int k = 0; k + 3 < Primitives.Count; k += 4)
         {
-            // Two boxes of size d, off centre to either side, then one of size d + 1 centred on the pixel.
-            Box(a, tmp, w, h, d / 2, d / 2 - 1, horizontal); (a, tmp) = (tmp, a);
-            Box(a, tmp, w, h, d / 2 - 1, d / 2, horizontal); (a, tmp) = (tmp, a);
-            Box(a, tmp, w, h, d / 2, d / 2, horizontal); (a, tmp) = (tmp, a);
+            var (blur, offset, flood) = (Primitives[k], Primitives[k + 1], Primitives[k + 2]);
+            var a = BlurChannel(alpha, w, h, blur.Sx * scaleX, blur.Sy * scaleY);
+            int ox = (int)MathF.Round(offset.Dx * scaleX), oy = (int)MathF.Round(offset.Dy * scaleY);
+            uint c = flood.Color;
+            float ca = (c >> 24) / 255f;
+            if (k == 0) first = c;
+            else if ((c & 0xFFFFFF) != (first & 0xFFFFFF) && r == null)
+            {
+                // Shadows of different colours: keep premultiplied colour, so far all of the first colour.
+                oneColor = false;
+                r = new float[n]; g = new float[n]; b = new float[n];
+                float fr = ((first >> 16) & 255) / 255f, fg = ((first >> 8) & 255) / 255f, fb = (first & 255) / 255f;
+                for (int i = 0; i < n; i++) { r[i] = fr * acc[i]; g[i] = fg * acc[i]; b[i] = fb * acc[i]; }
+            }
+            float cr = ((c >> 16) & 255) / 255f, cg = ((c >> 8) & 255) / 255f, cb = (c & 255) / 255f;
+            // This shadow over the ones before it, moved by whole pixels as feOffset moves them.
+            for (int y = Math.Max(0, oy); y < Math.Min(h, h + oy); y++)
+            {
+                int row = (y - oy) * w;
+                for (int x = Math.Max(0, ox); x < Math.Min(w, w + ox); x++)
+                {
+                    float sa = a[row + x - ox] * ca;
+                    if (sa <= 0) continue;
+                    int o = y * w + x;
+                    float keep = 1 - sa;
+                    acc[o] = sa + acc[o] * keep;
+                    if (r != null)
+                    {
+                        r[o] = cr * sa + r[o] * keep;
+                        g![o] = cg * sa + g[o] * keep;
+                        b![o] = cb * sa + b[o] * keep;
+                    }
+                }
+            }
         }
+        var alphaBytes = new byte[n];
+        bool any = false;
+        for (int i = 0; i < n; i++)
+        {
+            byte v = (byte)MathF.Round(Math.Clamp(acc[i], 0, 1) * 255);
+            alphaBytes[i] = v;
+            any |= v != 0;
+        }
+        if (!any) return null;
+        var rgb = new byte[n * 3];
+        if (oneColor)
+        {
+            for (int i = 0; i < rgb.Length; i += 3) { rgb[i] = (byte)(first >> 16); rgb[i + 1] = (byte)(first >> 8); rgb[i + 2] = (byte)first; }
+            return (rgb, alphaBytes);
+        }
+        byte lr = 0, lg = 0, lb = 0;
+        for (int i = 0; i < n; i++)
+        {
+            float av = acc[i];
+            if (alphaBytes[i] > 0)
+            {
+                lr = (byte)MathF.Round(Math.Clamp(r![i] / av, 0, 1) * 255);
+                lg = (byte)MathF.Round(Math.Clamp(g![i] / av, 0, 1) * 255);
+                lb = (byte)MathF.Round(Math.Clamp(b![i] / av, 0, 1) * 255);
+            }
+            // A transparent pixel keeps the colour before it, which compresses best.
+            rgb[i * 3] = lr; rgb[i * 3 + 1] = lg; rgb[i * 3 + 2] = lb;
+        }
+        return (rgb, alphaBytes);
     }
 
     /// <summary>The average of the pixels from <paramref name="before"/> before to <paramref name="after"/> after each pixel.</summary>

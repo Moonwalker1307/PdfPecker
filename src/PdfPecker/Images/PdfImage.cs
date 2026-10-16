@@ -571,6 +571,38 @@ internal sealed class PdfImage
     /// <summary>The largest image, in pixels, that is decoded (100 megapixels, as for PDF rendering).</summary>
     private const long MaxPixels = Rendering.Images.PdfImageDecoder.MaxPixels;
 
+    /// <summary>
+    /// Compresses 8-bit pixels with PNG row filters (/Predictor 15): Paeth on every row but the first, which suits the
+    /// smooth images of blurs and shadows; they then compress several times better than the plain pixels.
+    /// </summary>
+    internal static byte[] DeflatePredicted(byte[] pixels, int width, int height, int colors, out string decodeParms)
+    {
+        int stride = width * colors;
+        var output = new byte[(stride + 1L) * height];
+        for (int row = 0; row < height; row++)
+        {
+            int line = row * stride, prev = line - stride, at = row * (stride + 1) + 1;
+            if (row == 0)
+            {
+                output[at - 1] = 1; // Sub
+                for (int i = 0; i < stride; i++) output[at + i] = (byte)(pixels[i] - (i >= colors ? pixels[i - colors] : 0));
+                continue;
+            }
+            output[at - 1] = 4; // Paeth
+            for (int i = 0; i < colors; i++) output[at + i] = (byte)(pixels[line + i] - pixels[prev + i]);
+            for (int i = colors; i < stride; i++)
+            {
+                int left = pixels[line + i - colors], up = pixels[prev + i], upLeft = pixels[prev + i - colors];
+                int p = left + up - upLeft, pa = Math.Abs(p - left), pb = Math.Abs(p - up), pc = Math.Abs(p - upLeft);
+                int predicted = pa <= pb && pa <= pc ? left : pb <= pc ? up : upLeft;
+                output[at + i] = (byte)(pixels[line + i] - predicted);
+            }
+        }
+        decodeParms = "<< /Predictor 15 /Colors " + colors.ToString(System.Globalization.CultureInfo.InvariantCulture) + " /BitsPerComponent 8 /Columns "
+            + width.ToString(System.Globalization.CultureInfo.InvariantCulture) + " >>";
+        return Deflate(output, CompressionLevel.Optimal);
+    }
+
     internal static byte[] Deflate(byte[] data, CompressionLevel level = CompressionLevel.Fastest)
     {
         using var output = new MemoryStream(data.Length / 2 + 64);

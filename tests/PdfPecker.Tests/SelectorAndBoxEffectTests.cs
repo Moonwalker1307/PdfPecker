@@ -153,6 +153,57 @@ public class SelectorAndBoxEffectTests
         AssertStructurallyValid(await task);
     }
 
+    [Fact]
+    public void Nested_lists_take_full_complex_selectors()
+    {
+        // Nine compounds inside :is(), and complex selectors two and three lists deep.
+        var doc = Styled(@"<style>
+            :is(.a .b .c .d .e .f .g .h .i) em { color: red }
+            p:not(:is(section > div .x, aside .y)) { color: blue }
+            :where(:is(main :not(nav .q) > b, .z)) i { color: red }
+            li:has(> span :is(.k ~ .m b)) { color: blue }
+          </style>
+          <div class=a><div class=b><div class=c><div class=d><div class=e><div class=f><div class=g><div class=h><div class=i>
+            <em id=e1>x</em></div></div></div></div></div></div></div></div></div>
+          <section><div><p id=p1 class=x>a</p></div></section><aside><p id=p2 class=y>b</p></aside><p id=p3 class=x>c</p>
+          <main><div><b><i id=i1>x</i></b></div><nav><div class=q><b><i id=i2>y</i></b></div></nav></main>
+          <ul><li id=l1><span><s class=k></s><s class=m><b>z</b></s></span></li><li id=l2><span><s class=m><b>z</b></s></span></li></ul>");
+        Assert.Equal(Red, ColorOf(doc, "e1"));
+        Assert.Equal(Black, ColorOf(doc, "p1"));
+        Assert.Equal(Black, ColorOf(doc, "p2"));
+        Assert.Equal(Blue, ColorOf(doc, "p3"));
+        Assert.Equal(Red, ColorOf(doc, "i1"));
+        Assert.Equal(Black, ColorOf(doc, "i2"));
+        Assert.Equal(Blue, ColorOf(doc, "l1"));
+        Assert.Equal(Black, ColorOf(doc, "l2"));
+    }
+
+    [Fact]
+    public void Nested_lists_keep_parse_limits()
+    {
+        Assert.NotNull(Selector.Parse(":is(" + string.Join(" ", Enumerable.Repeat("a", 20)) + ")"));
+        Assert.NotNull(Selector.Parse(":is(a :not(b :is(c d > e)))"));
+        Assert.NotNull(Selector.Parse(":is(a, :has(> b c ~ d e))"));
+        // Very deep nesting is dropped rather than recursed into.
+        Assert.NotNull(Selector.Parse(string.Concat(Enumerable.Repeat(":not(a ", 15)) + "b" + new string(')', 15)));
+        Assert.Null(Selector.Parse(string.Concat(Enumerable.Repeat(":not(a ", 40)) + "b" + new string(')', 40)));
+    }
+
+    [Fact]
+    public async Task Deeply_nested_complex_lists_over_deep_markup_stay_fast()
+    {
+        // Each level holds a complex selector and the next level: matched naively, every level multiplies the work by the
+        // depth of the markup.
+        var sel = "div div p";
+        for (int i = 0; i < 12; i++) sel = $":is(div {sel}, div div div span) div";
+        var html = "<style>" + sel + " p, :not(" + sel + ") i {color:red} div:has(div div :is(" + sel + ")) {color:blue}</style>"
+                   + string.Concat(Enumerable.Repeat("<div>", 200)) + string.Concat(Enumerable.Repeat("<p>x</p><i>y</i>", 200));
+        var task = Task.Run(() => HtmlToPdf.Convert(html));
+        var finished = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(20)));
+        Assert.True(finished == task, "Did not finish in time");
+        AssertStructurallyValid(await task);
+    }
+
     // ---- properties ----
 
     [Fact]
@@ -256,10 +307,49 @@ public class SelectorAndBoxEffectTests
         Assert.Equal(Red, texts[0].Color);
         Assert.Equal(texts[1].X + 2, texts[0].X, 0.01f);
         Assert.Equal(texts[1].Baseline + 3, texts[0].Baseline, 0.01f);
-        // A blurred shadow is softened with faint copies.
-        var blurred = Ops("<p style='text-shadow: 0 0 4pt rgba(0,0,0,0.5)'>Glow</p>").OfType<TextOp>().ToList();
-        Assert.Equal(18, blurred.Count);
-        Assert.True(blurred[0].Color >> 24 < 0x80);
+    }
+
+    /// <summary>The ops without the contents of text-shadow layers, which are drawn only as the shadows' pixels.</summary>
+    private static List<DrawOp> Unshadowed(List<DrawOp> ops)
+    {
+        var inside = ops.OfType<LayerOp>().Where(l => l.TextShadow).SelectMany(l => l.Ops).ToHashSet();
+        return ops.Where(o => !inside.Contains(o)).ToList();
+    }
+
+    [Fact]
+    public void Blurred_text_shadows_are_one_layer_of_pixels_per_run()
+    {
+        // Two blurred shadows and a sharp one in between: the sharp one stays text, each blurred one is a layer whose
+        // filter blurs the text's alpha by half the blur radius.
+        var ops = Unshadowed(Ops("<p style='color:#000; text-shadow: 1pt 1pt 4pt red, 2pt 2pt blue, 0 0 10pt rgba(0,0,0,0.5)'>Glow</p>"));
+        var layers = ops.OfType<LayerOp>().ToList();
+        Assert.Equal(2, layers.Count);
+        Assert.All(layers, l => Assert.True(l.TextShadow && l.RasterReplaces && l.Raster!.TextShadows));
+        Assert.Equal(5f, layers[0].Raster!.Primitives[0].Sx, 0.01f); // the last shadow is painted first
+        Assert.Equal(2f, layers[1].Raster!.Primitives[0].Sx, 0.01f);
+        Assert.Equal(Red, layers[1].Raster!.Primitives[2].Color);
+        // The layer's text is opaque, so a transparent text still casts its shadow.
+        Assert.Equal(Black, Assert.IsType<TextOp>(Assert.Single(layers[0].Ops)).Color);
+        var texts = ops.OfType<TextOp>().ToList();
+        Assert.Equal(2, texts.Count);
+        Assert.Equal(Blue, texts[0].Color);
+        Assert.True(ops.IndexOf(layers[0]) < ops.IndexOf(texts[0]) && ops.IndexOf(texts[0]) < ops.IndexOf(layers[1]));
+    }
+
+    [Fact]
+    public void Text_shadows_include_the_decorations()
+    {
+        var ops = Unshadowed(Ops("<p style='color:#000; text-decoration: underline line-through; text-shadow: 2pt 3pt #f00, 0 0 4pt blue'>Shadow</p>"));
+        var rects = ops.OfType<RectOp>().Where(r => r.IsDecoration).ToList();
+        // The sharp shadow's two lines in red, offset, then the text's own two lines in black.
+        Assert.Equal(4, rects.Count);
+        Assert.Equal(Red, rects[0].Color);
+        Assert.Equal(Black, rects[2].Color);
+        Assert.Equal(rects[2].X + 2, rects[0].X, 0.01f);
+        Assert.Equal(rects[2].Y + 3, rects[0].Y, 0.01f);
+        // The blurred shadow's layer holds the run and both lines.
+        var layer = Assert.Single(ops.OfType<LayerOp>());
+        Assert.Equal(2, layer.Ops.OfType<RectOp>().Count());
     }
 
     [Fact]
