@@ -5,7 +5,10 @@ using PdfPecker.Layout;
 
 namespace PdfPecker.Tests;
 
-/// <summary>Groove, ridge, inset and outset borders, inset box shadows, text-overflow strings and calc() table widths.</summary>
+/// <summary>
+/// Groove, ridge, inset and outset borders, inset box shadows, text-overflow strings, calc() table widths and
+/// ::first-letter.
+/// </summary>
 public class BorderStyleAndShadowTests
 {
     private static (int R, int G, int B) Pixel(string html, int x, int y)
@@ -141,10 +144,11 @@ public class BorderStyleAndShadowTests
 
     // ---- text-overflow ----
 
-    private static List<TextOp> TextOps(string html)
+    private static List<TextOp> TextOps(string html, string css = "")
     {
         var doc = HtmlParser.Parse(html);
         var sheet = new Stylesheet();
+        CssParser.ParseStylesheet(css, sheet);
         new StyleResolver(sheet, 500, 800).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
         var engine = new LayoutEngine(800, new ImageLoader(null, null, false));
         engine.Layout(doc, 500);
@@ -200,5 +204,62 @@ public class BorderStyleAndShadowTests
                    + "<td style='width:calc(50% - 40px);padding:0;background:#f00'>a</td><td style='padding:0;background:#00f'>a</td></tr></table>";
         Near(255, 0, 0, Pixel(html, 195, 2));
         Near(0, 0, 255, Pixel(html, 205, 2));
+    }
+
+    // ---- ::first-letter ----
+
+    [Fact]
+    public void First_letter_styles_the_first_letter_only()
+    {
+        var texts = TextOps("<p>Once upon a time</p>", "p::first-letter { color: #a00; font-size: 30px }");
+        var o = texts.First(t => t.Text.Trim().Length > 0);
+        Assert.Equal("O", o.Text);
+        Assert.Equal(0xFFAA0000u, o.Color);
+        Assert.Equal(22.5f, o.Size);
+        Assert.StartsWith("nce", texts[1].Text, StringComparison.Ordinal);
+        Assert.NotEqual(0xFFAA0000u, texts[1].Color);
+    }
+
+    [Fact]
+    public void First_letter_takes_the_punctuation_before_it_and_looks_inside_inline_and_block_children()
+    {
+        Assert.Equal("\"Q", TextOps("<p>\"Quoted\" text</p>", "p:first-letter { color: blue }").First().Text);
+        var nested = TextOps("<div><p><b>Bold</b> text</p><p>Second</p></div>", "div::first-letter { color: green }");
+        Assert.Equal("B", nested[0].Text);
+        Assert.Equal(0xFF008000u, nested[0].Color);
+        Assert.DoesNotContain(nested.Skip(1), t => t.Color == 0xFF008000u);
+    }
+
+    [Fact]
+    public void A_floated_first_letter_is_a_drop_cap()
+    {
+        var texts = TextOps("<p style='width:300px'>Once upon a time there was a small library that turned HTML into PDF without help.</p>",
+            "p::first-letter { float: left; font-size: 48px; line-height: 1 }");
+        var cap = texts.First(t => t.Text == "O");
+        var second = texts.Where(t => t.Text != "O").ToList();
+        // The first two lines of text start to the right of the cap.
+        Assert.True(second[0].X > cap.X + 20, $"{second[0].X} vs {cap.X}");
+        var line2 = second.First(t => t.Baseline > second[0].Baseline + 1);
+        Assert.True(line2.X > cap.X + 20);
+    }
+
+    [Fact]
+    public void First_letter_is_put_back_before_styles_are_resolved_again()
+    {
+        var doc = HtmlParser.Parse("<p>Once upon a time</p>");
+        var sheet = new Stylesheet();
+        CssParser.ParseStylesheet("p::first-letter { color: red }", sheet);
+        new StyleResolver(sheet, 500, 800).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
+        new StyleResolver(sheet, 500, 800).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
+        var p = Descendants(doc).First(e => e.Name == "p");
+        Assert.Single(p.Children.OfType<Element>(), e => e.Name == "::first-letter");
+        Assert.Equal("Once upon a time", string.Concat(Descendants(p).SelectMany(e => e.Children).Concat(p.Children).OfType<TextNode>().Select(t => t.Text)));
+    }
+
+    [Fact]
+    public void There_is_no_first_letter_after_an_image_or_in_a_line_of_punctuation()
+    {
+        Assert.DoesNotContain(TextOps("<p><img src='x.png' width=10 height=10>Text</p>", "p::first-letter { color: red }"), t => t.Color == 0xFFFF0000u);
+        Assert.DoesNotContain(TextOps("<p>... ok</p>", "p::first-letter { color: red }"), t => t.Color == 0xFFFF0000u);
     }
 }

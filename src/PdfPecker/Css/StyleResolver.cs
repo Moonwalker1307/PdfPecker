@@ -150,6 +150,7 @@ internal sealed class StyleResolver
     {
         authorSheet.RankLayers();
         _author = new RuleIndex(authorSheet);
+        _firstLetterRules = authorSheet.Rules.Any(r => r.Selector.PseudoElement == PseudoElement.FirstLetter);
         if (authorSheet.RegisteredProperties.Count > 0)
         {
             // Registered custom properties start at their initial value: on every element when they do not inherit,
@@ -184,7 +185,15 @@ internal sealed class StyleResolver
 
     private static void Prepare(Element parent)
     {
-        // ::before and ::after boxes from an earlier pass are generated again.
+        // ::before, ::after and ::first-letter boxes from an earlier pass are generated again; a first letter goes back
+        // into the text it was taken from.
+        for (int i = parent.Children.Count - 1; i >= 0; i--)
+        {
+            if (parent.Children[i] is not Element { Generated: true, Name: FirstLetterName } letter) continue;
+            var text = letter.Children.Count == 1 && letter.Children[0] is TextNode t ? t.Text : "";
+            if (i + 1 < parent.Children.Count && parent.Children[i + 1] is TextNode rest) rest.Text = text + rest.Text;
+            else parent.Children.Insert(i + 1, new TextNode(text) { Parent = parent });
+        }
         parent.Children.RemoveAll(c => c is Element { Generated: true });
         int count = 0;
         foreach (var c in parent.Children) if (c is Element) count++;
@@ -243,6 +252,8 @@ internal sealed class StyleResolver
             if (e.Id != null && Paged.WantedCounters.Count > 0) SnapshotCounters(e.Id);
             if (e.Style.Display == Display.ListItem && HasPseudoRules) ResolveMarker(e);
             ResolveChildren(e);
+            if (_firstLetterRules && e.Style.Display is Display.Block or Display.ListItem or Display.InlineBlock or Display.TableCell
+                    or Display.TableCaption) GenerateFirstLetter(e);
             if (e.Style.StringSet != null) SetStrings(e);
         }
         if (pseudos) Generate(parent, PseudoElement.After, ref scope);
@@ -313,6 +324,86 @@ internal sealed class StyleResolver
         else host.Children.Add(box);
     }
 
+    private const string FirstLetterName = "::first-letter";
+
+    /// <summary>
+    /// Wraps the first letter of a block's first line in a ::first-letter box when rules style it, together with the
+    /// punctuation around it (CSS Pseudo-Elements 4 §2.2). The letter may sit in an inline descendant, a ::before box
+    /// or the first block inside this one; an image or other atomic box before any text means there is no first letter.
+    /// </summary>
+    private void GenerateFirstLetter(Element host)
+    {
+        _count = 0;
+        if (UaIndex.Value.PseudoElements is { } ua) Collect(ua, host, TierUa, TierUaImportant, PseudoElement.FirstLetter);
+        if (_author.PseudoElements is { } author) Collect(author, host, TierAuthor, TierAuthorImportant, PseudoElement.FirstLetter);
+        if (_count == 0) return;
+        if (FindFirstText(host) is not { } found)
+        {
+            Array.Clear(_decls, 0, _count);
+            return;
+        }
+        var (owner, index, start, length) = found;
+        var node = (TextNode)owner.Children[index];
+        if (_count > 1) Array.Sort(_keys, _decls, 0, _count);
+        var s = Compute(FirstLetterName, owner.Style);
+        // A first letter that floats or is absolutely positioned becomes a block box; otherwise it stays inline.
+        if (s.Float != FloatSide.None || s.Position is Position.Absolute or Position.Fixed) s.Display = Display.Block;
+        else if (s.Display != Display.Inline) s.Display = Display.Inline;
+        var letter = new Element(FirstLetterName) { Generated = true, Style = s, Parent = owner };
+        letter.AppendChild(new TextNode(node.Text.Substring(start, length)));
+        var rest = node.Text.Substring(start + length);
+        node.Text = node.Text.Substring(0, start);
+        owner.Children.Insert(index + 1, letter);
+        if (rest.Length > 0) owner.Children.Insert(index + 2, new TextNode(rest) { Parent = owner });
+    }
+
+    /// <summary>
+    /// The text node holding the first letter of <paramref name="e"/>'s first line, and where in it the letter and the
+    /// punctuation around it start and how long they are; null when the first line starts with something else.
+    /// </summary>
+    private static (Element Owner, int Index, int Start, int Length)? FindFirstText(Element e)
+    {
+        for (int i = 0; i < e.Children.Count; i++)
+        {
+            switch (e.Children[i])
+            {
+                case TextNode t:
+                {
+                    var text = t.Text;
+                    int k = 0;
+                    while (k < text.Length && char.IsWhiteSpace(text[k])) k++;
+                    if (k == text.Length) continue;
+                    int start = k;
+                    while (k < text.Length && IsFirstLetterPunctuation(text, k)) k++;
+                    if (k == text.Length || char.IsWhiteSpace(text[k])) return null; // only punctuation: no letter
+                    k += char.IsSurrogatePair(text, k) ? 2 : 1;
+                    while (k < text.Length && CharUnicodeInfo.GetUnicodeCategory(text[k]) is UnicodeCategory.NonSpacingMark
+                               or UnicodeCategory.EnclosingMark or UnicodeCategory.SpacingCombiningMark) k++;
+                    while (k < text.Length && IsFirstLetterPunctuation(text, k)) k++;
+                    return (e, i, start, k - start);
+                }
+                case Element c:
+                {
+                    var s = c.Style;
+                    if (s == null || s.Display == Display.None) continue;
+                    // Out-of-flow boxes are not on the first line.
+                    if (s.Float != FloatSide.None || s.Position is Position.Absolute or Position.Fixed) continue;
+                    if (c.Name is "br" or "img" or "svg" or "input" or "select" or "textarea" or "button" or "video" or "audio" or "iframe"
+                        or "canvas" or "object" or "embed") return null;
+                    if (c.Name == FirstLetterName) return null; // a nested block already took it
+                    if (s.Display is Display.Inline or Display.Block or Display.ListItem) return FindFirstText(c);
+                    return null; // an inline-block, table, flex or grid box starts the line
+                }
+            }
+        }
+        return null;
+    }
+
+    // Punctuation that goes with the first letter: the Ps, Pe, Pi, Pf and Po classes, as CSS Pseudo-Elements says.
+    private static bool IsFirstLetterPunctuation(string text, int k)
+        => CharUnicodeInfo.GetUnicodeCategory(text[k]) is UnicodeCategory.OpenPunctuation or UnicodeCategory.ClosePunctuation
+            or UnicodeCategory.InitialQuotePunctuation or UnicodeCategory.FinalQuotePunctuation or UnicodeCategory.OtherPunctuation;
+
     /// <summary>The style and content of a list item's ::marker, when rules give it one.</summary>
     private void ResolveMarker(Element e)
     {
@@ -330,6 +421,7 @@ internal sealed class StyleResolver
 
     private readonly Dictionary<string, List<int>> _counters = new(StringComparer.Ordinal);
     private bool _countersUsed;
+    private readonly bool _firstLetterRules;
     internal int QuoteDepth;
 
     /// <summary>Applies counter-reset, counter-increment and counter-set, in that order (CSS Lists 3).</summary>
