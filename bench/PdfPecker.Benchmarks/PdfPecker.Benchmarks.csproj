@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <None Include="../../samples/PdfPecker.Sample/html/**" LinkBase="html" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../tests/PdfPecker.Tests/Fixtures/images/*.tif" LinkBase="tiff" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

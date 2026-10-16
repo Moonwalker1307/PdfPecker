@@ -18,6 +18,7 @@ static class Perf
         var results = new List<(string Name, double MeanMs, long AllocBytes, double? PerSecond)>();
         results.Add(Measure("invoice", invoice, htmlDir, runs: 100));
         results.Add(Measure("report-30", report, null, runs: 15));
+        results.Add(Measure("decode-tiff", DecodeTiffFixtures(), runs: 300));
 
         // Throughput with every core busy; documents per second is the figure, so higher is better.
         var options = new PdfOptions { BaseDirectory = htmlDir };
@@ -54,5 +55,29 @@ static class Perf
         double mean = Stopwatch.GetElapsedTime(t0).TotalMilliseconds / runs;
         long alloc = (GC.GetAllocatedBytesForCurrentThread() - allocBefore) / runs;
         return (name, mean, alloc, null);
+    }
+
+    static (string, double, long, double?) Measure(string name, Action run, int runs)
+    {
+        var warm = Stopwatch.StartNew();
+        while (warm.Elapsed.TotalSeconds < 2) run();
+
+        long allocBefore = GC.GetAllocatedBytesForCurrentThread();
+        long t0 = Stopwatch.GetTimestamp();
+        for (int i = 0; i < runs; i++) run();
+        double mean = Stopwatch.GetElapsedTime(t0).TotalMilliseconds / runs;
+        long alloc = (GC.GetAllocatedBytesForCurrentThread() - allocBefore) / runs;
+        return (name, mean, alloc, null);
+    }
+
+    // Decodes every TIFF fixture (each compression, strips and tiles, planar, 1 to 16 bits) once per run. It calls the
+    // decoder directly, because a conversion would serve repeated images from its cache and mostly measure layout.
+    static Action DecodeTiffFixtures()
+    {
+        var files = Directory.GetFiles(Path.Combine(AppContext.BaseDirectory, "tiff"), "*.tif").Order().Select(File.ReadAllBytes).ToArray();
+        return () =>
+        {
+            foreach (var file in files) PdfPecker.Images.TiffDecoder.Decode(file, PdfPecker.Rendering.Images.PdfImageDecoder.MaxPixels);
+        };
     }
 }
