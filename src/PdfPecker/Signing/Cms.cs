@@ -112,10 +112,18 @@ internal static class Cms
         var w = new AsnWriter(AsnEncodingRules.DER);
         using (w.PushSequence())
         {
-            w.WriteIntegerUnsigned(signature.AsSpan(0, half));
-            w.WriteIntegerUnsigned(signature.AsSpan(half));
+            w.WriteIntegerUnsigned(Minimal(signature.AsSpan(0, half)));
+            w.WriteIntegerUnsigned(Minimal(signature.AsSpan(half)));
         }
         return w.Encode();
+
+        // r and s are fixed-width in P1363, so about one signature in 128 has a leading zero byte, which DER forbids.
+        static ReadOnlySpan<byte> Minimal(ReadOnlySpan<byte> value)
+        {
+            int i = 0;
+            while (i < value.Length - 1 && value[i] == 0) i++;
+            return value.Slice(i);
+        }
     }
 
     /// <summary>
