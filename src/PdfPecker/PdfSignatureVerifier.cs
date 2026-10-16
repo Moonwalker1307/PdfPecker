@@ -25,8 +25,9 @@ public sealed class PdfSignatureVerificationOptions
     public X509RevocationMode RevocationMode { get; set; } = X509RevocationMode.NoCheck;
 
     /// <summary>
-    /// The time at which certificates must be valid. Default: the time of a valid timestamp when the signature has one,
-    /// else the signing time the signer claims, else now.
+    /// The time at which certificates must be valid. Default: the time of the signature's timestamp when it is valid and
+    /// trusted (see <see cref="PdfSignatureVerification.TimestampTrusted"/>), else now. The signing time the signer claims
+    /// is never used, because the signer chooses it.
     /// </summary>
     public DateTimeOffset? VerificationTime { get; set; }
 }
@@ -99,13 +100,23 @@ public sealed class PdfSignatureVerification
     /// <summary>Whether the timestamp token is intact and covers this signature; null without a timestamp.</summary>
     public bool? TimestampValid { get; internal set; }
 
+    /// <summary>
+    /// Whether the timestamp authority is trusted: its certificate chains to the same trusted roots as the signer's and
+    /// is meant for timestamping. Only a trusted timestamp's time is used to check the signer's certificate, since anyone
+    /// can make a token that states any time. Null without a timestamp.
+    /// </summary>
+    public bool? TimestampTrusted { get; internal set; }
+
     /// <summary>Whether the signer's certificate chains to a trusted root and is valid at the verification time.</summary>
     public bool ChainTrusted { get; internal set; }
 
     /// <summary>Why the chain is not trusted, one entry per problem from <see cref="X509Chain"/>; empty when it is.</summary>
     public IReadOnlyList<string> ChainErrors { get; internal set; } = Array.Empty<string>();
 
-    /// <summary>Everything found wrong, in plain words; empty for a valid signature.</summary>
+    /// <summary>
+    /// Everything found wrong, in plain words; empty for a valid signature, except that an untrusted timestamp is listed
+    /// even when the signature is valid without it.
+    /// </summary>
     public IReadOnlyList<string> Problems { get; internal set; } = Array.Empty<string>();
 
     /// <summary>
@@ -241,9 +252,23 @@ public static class PdfSignatureVerifier
                 if (tokenAttr != null)
                 {
                     v.HasTimestamp = true;
-                    v.TimestampValid = CheckTimestamp(tokenAttr, cms.Signer.Signature, out var time, out var tsProblem);
+                    v.TimestampValid = CheckTimestamp(tokenAttr, cms.Signer.Signature, out var time, out var tsa, out var tsCerts, out var tsProblem);
                     v.TimestampTime = time;
+                    v.TimestampTrusted = false;
                     if (tsProblem != null) problems.Add(tsProblem);
+                    else if (tsa != null && time != null)
+                    {
+                        // The token's own signature only proves it was made with the key in it, so the authority must
+                        // be one the caller trusts before its time may stand in for the time of signing.
+                        var tsaErrors = BuildChain(tsa, tsCerts, dssCerts, options, time.Value, out bool tsaTrusted);
+                        if (!HasTimestampingUsage(tsa))
+                        {
+                            tsaTrusted = false;
+                            tsaErrors.Add("The certificate is not meant for timestamping.");
+                        }
+                        v.TimestampTrusted = tsaTrusted;
+                        if (!tsaTrusted) problems.Add("The timestamp is not trusted, so its time is not used: " + string.Join("; ", tsaErrors));
+                    }
                 }
             }
             if (!v.DigestMatches) problems.Add("The signed part of the document has been changed: its hash does not match the signature.");
@@ -253,8 +278,19 @@ public static class PdfSignatureVerifier
 
             if (signer != null)
             {
-                var time = options.VerificationTime ?? (v.TimestampValid == true ? v.TimestampTime : null) ?? v.SigningTime ?? DateTimeOffset.UtcNow;
-                v.ChainErrors = BuildChain(signer, certs, dssCerts, options, time, out bool trusted);
+                // A document timestamp is checked at its own time, as the authority it chains to vouches for that time.
+                // A signature is checked at the time of a trusted timestamp, or now: the signing time it claims is the
+                // signer's own word and would let an expired or not yet valid certificate pass.
+                bool trustedTime = f.IsDocumentTimestamp ? v.TimestampValid == true : v.TimestampTrusted == true;
+                var time = options.VerificationTime ?? (trustedTime ? v.TimestampTime : null) ?? DateTimeOffset.UtcNow;
+                var chainErrors = BuildChain(signer, certs, dssCerts, options, time, out bool trusted);
+                if (f.IsDocumentTimestamp && !HasTimestampingUsage(signer))
+                {
+                    trusted = false;
+                    chainErrors.Add("The certificate is not meant for timestamping.");
+                }
+                v.ChainErrors = chainErrors;
+                if (f.IsDocumentTimestamp) v.TimestampTrusted = trusted;
                 v.ChainTrusted = trusted;
                 if (!trusted) problems.Add("The signer's certificate is not trusted: " + string.Join("; ", v.ChainErrors));
             }
@@ -267,10 +303,16 @@ public static class PdfSignatureVerifier
         return v;
     }
 
-    /// <summary>Checks a signature timestamp: its own CMS signature, and that it covers <paramref name="signatureValue"/>.</summary>
-    private static bool CheckTimestamp(byte[] token, byte[] signatureValue, out DateTimeOffset? time, out string? problem)
+    /// <summary>
+    /// Checks a signature timestamp: its own CMS signature, and that it covers <paramref name="signatureValue"/>. Whether
+    /// the authority in <paramref name="tsa"/> is trusted is for the caller to decide.
+    /// </summary>
+    private static bool CheckTimestamp(byte[] token, byte[] signatureValue, out DateTimeOffset? time, out X509Certificate2? tsa,
+        out List<X509Certificate2> tsCerts, out string? problem)
     {
         time = null;
+        tsa = null;
+        tsCerts = new List<X509Certificate2>();
         problem = null;
         try
         {
@@ -287,9 +329,10 @@ public static class PdfSignatureVerifier
                 problem = "The timestamp token is for a different signature.";
                 return false;
             }
-            var certs = cms.Certificates.Select(CmsReader.LoadCertificate).OfType<X509Certificate2>().ToList();
+            tsCerts = cms.Certificates.Select(CmsReader.LoadCertificate).OfType<X509Certificate2>().ToList();
+            tsa = CmsReader.FindSigner(cms.Signer, tsCerts);
             var digestHash = CmsReader.HashFromOid(cms.Signer.DigestOid) ?? throw new CryptographicException("Unsupported timestamp digest.");
-            var (digestOk, sigOk) = CmsReader.Verify(cms.Signer, CmsReader.Hash(digestHash, cms.Content), CmsReader.FindSigner(cms.Signer, certs));
+            var (digestOk, sigOk) = CmsReader.Verify(cms.Signer, CmsReader.Hash(digestHash, cms.Content), tsa);
             if (!digestOk || !sigOk) problem = "The timestamp token's own signature does not verify.";
             return digestOk && sigOk;
         }
@@ -324,8 +367,33 @@ public static class PdfSignatureVerifier
             if (s.Status != X509ChainStatusFlags.NoError)
                 errors.Add(string.IsNullOrWhiteSpace(s.StatusInformation) ? s.Status.ToString() : s.StatusInformation.Trim());
         if (!trusted && errors.Count == 0) errors.Add("The certificate chain could not be built.");
+        // X509Chain does not look at what the end certificate may be used for. A certificate whose key usage is limited
+        // to, say, encryption was not issued for signing, so its signatures are not the holder's.
+        if (signer.Extensions[KeyUsageOid] is X509KeyUsageExtension ku
+            && (ku.KeyUsages & (X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.NonRepudiation)) == 0)
+        {
+            trusted = false;
+            errors.Add("The certificate's key usage does not allow digital signatures.");
+        }
         return errors;
     }
+
+    private const string KeyUsageOid = "2.5.29.15";
+    private const string ExtendedKeyUsageOid = "2.5.29.37";
+    private const string IdKpTimeStamping = "1.3.6.1.5.5.7.3.8";
+
+    /// <summary>Whether the certificate's extended key usage names timestamping, which RFC 3161 requires of an authority.</summary>
+    private static bool HasTimestampingUsage(X509Certificate2 cert)
+    {
+        if (cert.Extensions[ExtendedKeyUsageOid] is not X509EnhancedKeyUsageExtension eku) return false;
+        foreach (var oid in eku.EnhancedKeyUsages)
+            if (oid.Value == IdKpTimeStamping) return true;
+        return false;
+    }
+
+    // Certificates are a few kilobytes; this leaves room for hundreds of real ones while bounding what a store of
+    // compression bombs can make the verifier inflate.
+    private const long MaxStoreDecoded = 64L * 1024 * 1024;
 
     /// <summary>Certificates in the document security store, which help build chains for signatures made LTV-ready.</summary>
     private static List<X509Certificate2> DssCertificates(PdfFile file)
@@ -335,8 +403,8 @@ public static class PdfSignatureVerifier
         {
             var certs = file.GetArray(file.GetDict(file.Catalog, "DSS"), "Certs");
             if (certs == null) return list;
-            foreach (var item in certs.Items.Take(1000))
-                if (file.Resolve(item) is PdfStream s && CmsReader.LoadCertificate(file.DecodeStream(s)) is { } c) list.Add(c);
+            foreach (var (data, _) in LtvWriter.DecodeStoreStreams(file, certs, 1000, MaxStoreDecoded))
+                if (CmsReader.LoadCertificate(data) is { } c) list.Add(c);
         }
         catch (Exception ex) when (ex is PdfFormatException or InvalidDataException or NotSupportedException)
         {
