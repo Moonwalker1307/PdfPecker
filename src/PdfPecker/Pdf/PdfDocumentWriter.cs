@@ -62,7 +62,7 @@ internal sealed partial class PdfDocumentWriter
     private readonly bool _compress;
     private readonly CompressionLevel _level;
     private readonly ByteBuffer _out = new(64 * 1024);
-    private readonly List<long> _offsets = new() { 0 };
+    private readonly PdfXref _xref = new();
 
     // Content-stream graphics state while writing one page.
     private uint _fill;
@@ -1007,21 +1007,10 @@ internal sealed partial class PdfDocumentWriter
 
         // Cross-reference table and trailer.
         long xref = _out.Length;
-        int count = _offsets.Count;
-        _out.Ascii("xref\n0 ").Int(count).Ascii("\n0000000000 65535 f \n");
-        for (int i = 1; i < count; i++)
-        {
-            string off = _offsets[i].ToString("D10", System.Globalization.CultureInfo.InvariantCulture);
-            _out.Ascii(off).Ascii(" 00000 n \n");
-        }
-        _out.Ascii("trailer\n<< /Size ").Int(count).Ascii(" /Root ").Int(catalogId).Ascii(" 0 R");
-        if (infoId != 0) _out.Ascii(" /Info ").Int(infoId).Ascii(" 0 R");
-        if (encryptId != 0) _out.Ascii(" /Encrypt ").Int(encryptId).Ascii(" 0 R");
+        int count = _xref.Count;
+        _xref.WriteTable(_out, count, allInUse: true);
         var fileId = System.Security.Cryptography.RandomNumberGenerator.GetBytes(16);
-        _out.Ascii(" /ID [");
-        PdfEncryptor.Hex(_out, fileId);
-        PdfEncryptor.Hex(_out, fileId);
-        _out.Ascii("] >>\nstartxref\n").Int(xref).Ascii("\n%%EOF\n");
+        PdfXref.WriteTrailer(_out, count, catalogId, infoId, encryptId, fileId, fileId, upperHexId: true, xref);
 
         _crypt?.Dispose();
         return _out.Span.ToArray();
@@ -1261,20 +1250,15 @@ internal sealed partial class PdfDocumentWriter
         {
             dict.Ascii(" /CheckSum ");
             var md5 = System.Security.Cryptography.MD5.HashData(a.Data);
-            PdfEncryptor.Hex(dict, _crypt != null ? _crypt.Encrypt(md5) : md5);
+            PdfSyntax.Hex(dict, _crypt != null ? _crypt.Encrypt(md5) : md5, upper: true);
         }
         dict.Ascii(" >>");
         WriteStream(fileId, a.Data, _compress, System.Text.Encoding.ASCII.GetString(dict.Span));
     }
 
-    private ByteBuffer Begin(int id)
-    {
-        while (_offsets.Count <= id) _offsets.Add(0);
-        _offsets[id] = _out.Length;
-        return _out.Int(id).Ascii(" 0 obj\n");
-    }
+    private ByteBuffer Begin(int id) => _xref.Begin(_out, id);
 
-    private void End() => _out.Ascii("\nendobj\n");
+    private void End() => PdfXref.End(_out);
 
     private int[] _pageIds = Array.Empty<int>();
 
@@ -1410,7 +1394,7 @@ internal sealed partial class PdfDocumentWriter
             var palette = System.Convert.FromHexString(colorSpace.AsSpan(lt + 1, gt - lt - 1));
             var sb = new ByteBuffer(64 + palette.Length * 2);
             sb.Ascii(img.ColorSpace.Substring(0, lt));
-            PdfEncryptor.Hex(sb, _crypt.Encrypt(palette));
+            PdfSyntax.Hex(sb, _crypt.Encrypt(palette), upper: true);
             sb.Ascii(img.ColorSpace.Substring(gt + 1));
             colorSpace = System.Text.Encoding.ASCII.GetString(sb.Span);
         }
@@ -2948,12 +2932,12 @@ internal sealed partial class PdfDocumentWriter
     {
         if (_crypt != null)
         {
-            PdfEncryptor.Hex(b, _crypt.Encrypt(raw));
+            PdfSyntax.Hex(b, _crypt.Encrypt(raw), upper: true);
             return;
         }
         if (raw.Length >= 2 && raw[0] == 0xFE && raw[1] == 0xFF)
         {
-            PdfEncryptor.Hex(b, raw);
+            PdfSyntax.Hex(b, raw, upper: true);
             return;
         }
         b.Byte((byte)'(');
