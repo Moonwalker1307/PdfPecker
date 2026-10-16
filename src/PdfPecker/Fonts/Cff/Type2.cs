@@ -1,0 +1,95 @@
+using System.Runtime.CompilerServices;
+
+namespace PdfPecker.Fonts.Cff;
+
+/// <summary>
+/// The parts of a Type 2 (CFF and CFF2) charstring interpreter that every walker shares: number decoding, subroutine
+/// numbering, the nesting limit and the hint mask size. The walkers themselves stay separate, because each acts on a
+/// different set of operators and reacts differently to damaged charstrings (the renderer draws what it can, the
+/// subsetter and instancer give up on the font).
+/// </summary>
+internal static class Type2
+{
+    /// <summary>The Type 2 limit on subroutine nesting.</summary>
+    public const int MaxSubrDepth = 10;
+
+    /// <summary>True when the byte starts a number rather than an operator.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool IsNumber(int b) => b >= 32 || b == 28;
+
+    /// <summary>Decodes the number whose first byte <paramref name="b"/> was just read; pos is the byte after it.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static double ReadNumber(ReadOnlySpan<byte> cs, int b, ref int pos)
+    {
+        if (b <= 246)
+        {
+            if (b != 28) return b - 139;
+            pos += 2;
+            return (short)(cs[pos - 2] << 8 | cs[pos - 1]);
+        }
+        if (b <= 250) return (b - 247) * 256 + cs[pos++] + 108;
+        if (b <= 254) return -(b - 251) * 256 - cs[pos++] - 108;
+        pos += 4;
+        return (cs[pos - 4] << 24 | cs[pos - 3] << 16 | cs[pos - 2] << 8 | cs[pos - 1]) / 65536.0; // 16.16 fixed
+    }
+
+    /// <summary>Subroutine numbers are stored minus a bias that depends on how many subroutines there are.</summary>
+    public static int SubrBias(int count) => count < 1240 ? 107 : count < 33900 ? 1131 : 32768;
+
+    /// <summary>The bytes of a hintmask or cntrmask: one bit per stem hint declared so far.</summary>
+    public static int MaskBytes(int stems) => (stems + 7) / 8;
+}
+
+/// <summary>The operand stack of a Type 2 charstring, with a fixed capacity.</summary>
+internal sealed class Type2Stack
+{
+    public readonly double[] Items;
+    public int Count { get; set; }
+
+    public Type2Stack(int capacity) => Items = new double[capacity];
+
+    /// <summary>
+    /// Decodes a number (see <see cref="Type2.ReadNumber"/>) and pushes it; returns false, dropping the number, when the
+    /// stack is full.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool PushNumber(ReadOnlySpan<byte> cs, int b, ref int pos)
+    {
+        double v = Type2.ReadNumber(cs, b, ref pos);
+        if (Count >= Items.Length) return false;
+        Items[Count++] = v;
+        return true;
+    }
+
+    /// <summary>An operand counted from the bottom; with Count this also allows stack[^1] for the top.</summary>
+    public double this[int i]
+    {
+        get => Items[i];
+        set => Items[i] = value;
+    }
+
+    public double Pop() => Items[--Count];
+    public void Clear() => Count = 0;
+}
+
+/// <summary>
+/// Subroutines that each call the next many times expand exponentially within the nesting limit, so every walker
+/// bounds the charstring tokens it runs per glyph, and per font where a font may have tens of thousands of glyphs.
+/// </summary>
+internal struct CharstringBudget
+{
+    public const int PerGlyph = 200_000;
+    private int _glyph, _font;
+
+    public CharstringBudget(int perFont)
+    {
+        _glyph = PerGlyph;
+        _font = perFont;
+    }
+
+    public void StartGlyph() => _glyph = PerGlyph;
+
+    /// <summary>Counts one token; false once the glyph or the font has run out.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Spend() => --_glyph >= 0 && --_font >= 0;
+}
