@@ -48,11 +48,18 @@ internal static class TiffDecoder
         }
     }
 
-    public static PdfImage? Decode(byte[] d, long maxPixels)
+    /// <summary>Decodes one image of the file; <paramref name="page"/> counts the directories from 0.</summary>
+    public static PdfImage? Decode(byte[] d, long maxPixels, int page = 0)
     {
         if (!IsTiff(d)) return null;
         var r = new Reader(d);
         long ifd = r.U32(4);
+        // Each directory ends with the offset of the next one; the bound stops a directory chain that loops.
+        for (int skip = 0; skip < page && skip < 1 << 16; skip++)
+        {
+            if (ifd < 8 || ifd + 2 > d.Length) return null;
+            ifd = r.U32(ifd + 2 + r.U16(ifd) * 12L);
+        }
         if (ifd < 8 || ifd + 2 > d.Length) return null;
         int count = r.U16(ifd);
         var tags = new Dictionary<int, Entry>();

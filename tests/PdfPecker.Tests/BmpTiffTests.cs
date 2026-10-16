@@ -31,7 +31,7 @@ public class BmpTiffTests
     }
 
     /// <summary>The RGBA pixels of a decoded image, read back from its PDF image data.</summary>
-    private static byte[] Rgba(PdfImage img)
+    internal static byte[] Rgba(PdfImage img)
     {
         Assert.Equal("/FlateDecode", img.Filter);
         var data = Inflate(img.Data);

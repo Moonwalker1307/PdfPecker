@@ -4,7 +4,7 @@
 
 [![NuGet](https://img.shields.io/nuget/v/PdfPecker.svg)](https://www.nuget.org/packages/PdfPecker)
 
-Fast HTML and Markdown to PDF conversion, and PDF to PNG, JPEG and WebP rendering, for .NET, with no dependencies.
+Fast HTML and Markdown to PDF conversion, and PDF to PNG, JPEG, WebP and TIFF rendering, for .NET, with no dependencies.
 
 PdfPecker has its own HTML parser, Markdown parser, CSS engine, layout engine and PDF writer, and its own PDF renderer.
 It does not start a browser, ship native binaries or pull in third-party packages; the NuGet package depends only on
@@ -47,10 +47,11 @@ var options = new PdfOptions
 options.Fonts.AddFile("fonts/OpenSans-Regular.ttf");
 byte[] letter = HtmlToPdf.Convert(html, options);
 
-// Markdown to PDF, merging, and PDF pages to PNG
+// Markdown to PDF, merging, PDF pages to PNG, and a whole PDF to one black and white fax TIFF
 byte[] guide = MarkdownToPdf.Convert(File.ReadAllText("README.md"));
 byte[] merged = PdfMerger.Merge(invoicePdf, termsPdf);
 byte[][] pngs = PdfToImage.Convert(pdf, new ImageOptions { Dpi = 150 });
+byte[] tiff = PdfToImage.ConvertToTiff(pdf, new ImageOptions { Dpi = 200, TiffColorMode = TiffColorMode.BlackAndWhite });
 ```
 
 All methods are static and thread-safe, so you can convert many documents in parallel.
@@ -86,7 +87,8 @@ All methods are static and thread-safe, so you can convert many documents in par
   [More](https://pdfpecker.net/docs/e-invoices/)
 - **Existing PDFs**: merge (also streamed), extract, reorder, rotate and split pages, stamp or underlay pages, and extract their text with positions.
   [More](https://pdfpecker.net/docs/merging/)
-- **PDF to image**: PdfPecker's own renderer turns any PDF page into PNG, JPEG or WebP. [More](https://pdfpecker.net/docs/pdf-to-image/)
+- **PDF to image**: PdfPecker's own renderer turns any PDF page into PNG, JPEG or WebP, or a whole PDF into one
+  multi-page TIFF in colour, greyscale or black and white (LZW, Deflate or CCITT Group 4 fax compression). [More](https://pdfpecker.net/docs/pdf-to-image/)
 
 PdfPecker is built for HTML templates you control: it runs no JavaScript and never fetches anything from the network on
 its own. See the [limitations](https://pdfpecker.net/docs/limitations/) for what it does not do yet.
