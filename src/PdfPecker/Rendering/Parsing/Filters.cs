@@ -166,10 +166,10 @@ internal static class Filters
 
     // ------------------------------------------------------------------ LZW
 
-    internal static byte[] Lzw(byte[] data, bool earlyChange)
+    internal static byte[] Lzw(byte[] data, bool earlyChange, int maxOutput = int.MaxValue)
     {
-        int limit = Limit;
-        var output = new MemoryStream(data.Length * 3);
+        int limit = Math.Min(Limit, maxOutput);
+        var output = new MemoryStream((int)Math.Min(data.Length * 3L, limit + 1L));
         var prefix = new int[4096];
         var suffix = new byte[4096];
         var lengths = new int[4096];
