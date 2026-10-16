@@ -566,6 +566,39 @@ public class HostileInputTests
             foreach (var d in Descendants(c)) yield return d;
         }
     }
+
+    [Fact]
+    public void Many_certificate_store_entries_pointing_at_one_compression_bomb_are_decoded_once_within_a_budget()
+    {
+        // Two hundred megabytes of zeros compress to a few hundred kilobytes; a thousand references to it would decode
+        // two hundred gigabytes if every entry were decoded on its own.
+        var bomb = new MemoryStream();
+        using (var z = new ZLibStream(bomb, CompressionLevel.SmallestSize, leaveOpen: true))
+            for (int i = 0; i < 200; i++) z.Write(new byte[1 << 20]);
+        static byte[] L(string t) => Encoding.Latin1.GetBytes(t);
+        var refs = new StringBuilder();
+        for (int i = 0; i < 1000; i++) refs.Append("4 0 R ");
+        var objects = new List<byte[]>
+        {
+            L("1 0 obj\n<< /Type /Catalog /Pages 2 0 R /DSS 5 0 R >>\nendobj\n"),
+            L("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"),
+            L("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] >>\nendobj\n"),
+            L("4 0 obj\n<< /Length " + bomb.Length + " /Filter /FlateDecode >>\nstream\n").Concat(bomb.ToArray()).Concat(L("\nendstream\nendobj\n")).ToArray(),
+            L("5 0 obj\n<< /Certs [" + refs + "] >>\nendobj\n"),
+        };
+        var ms = new MemoryStream();
+        ms.Write(L("%PDF-1.7\n"));
+        var offsets = new List<long>();
+        foreach (var o in objects) { offsets.Add(ms.Position); ms.Write(o); }
+        long xref = ms.Position;
+        var sb = new StringBuilder("xref\n0 " + (offsets.Count + 1) + "\n0000000000 65535 f \n");
+        foreach (var o in offsets) sb.Append(o.ToString("D10")).Append(" 00000 n \n");
+        sb.Append("trailer\n<< /Size " + (offsets.Count + 1) + " /Root 1 0 R >>\nstartxref\n" + xref + "\n%%EOF\n");
+        ms.Write(L(sb.ToString()));
+        var pdf = ms.ToArray();
+
+        Assert.Empty(Bounded(() => PdfSignatureVerifier.Verify(pdf)));
+    }
 }
 
 [CollectionDefinition(Name, DisableParallelization = true)]
