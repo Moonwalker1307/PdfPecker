@@ -69,7 +69,8 @@ All methods are static and thread-safe, so you can convert many documents in par
   (`font-weight`, `font-stretch`, `font-variation-settings`) and OpenType features such as tabular figures
   (`font-variant-numeric`, `font-feature-settings`).
   [More](https://pdfpecker.net/docs/fonts/)
-- **Right-to-left and hyphenation**: Arabic and Hebrew with bidi and shaping, and `hyphens: auto`.
+- **Right-to-left, CJK and hyphenation**: Arabic and Hebrew with bidi and shaping, Chinese, Japanese and Korean line
+  breaking with kinsoku rules, and `hyphens: auto`.
   [More](https://pdfpecker.net/docs/languages/)
 - **PDF/A, passwords and watermarks**: PDF/A-2, 3 and 4, AES-256 encryption and permissions, also for existing PDFs;
   text, image and SVG watermarks.
@@ -77,8 +78,9 @@ All methods are static and thread-safe, so you can convert many documents in par
 - **Accessibility**: tagged PDF, PDF/UA-1 and PDF/UA-2 built from your HTML. [More](https://pdfpecker.net/docs/accessibility/)
 - **Fillable forms**: HTML inputs, check boxes, radio buttons, selects and text areas become PDF form fields.
   [More](https://pdfpecker.net/docs/forms/)
-- **Digital signatures**: PAdES signatures, visible boxes, timestamps and existing signature fields; verification of
-  signed PDFs, and long-term validation (DSS with OCSP and CRLs, document timestamps).
+- **Digital signatures**: PAdES signatures, visible boxes, timestamps, existing signature fields, external signers such
+  as HSMs, smart cards or cloud key vaults, verification of signed PDFs, and long-term validation (DSS with OCSP and
+  CRLs, document timestamps).
   [More](https://pdfpecker.net/docs/signatures/)
 - **E-invoices and attachments**: Factur-X and ZUGFeRD, PDFs in Peppol and OIOUBL invoices, and any embedded file.
   [More](https://pdfpecker.net/docs/e-invoices/)

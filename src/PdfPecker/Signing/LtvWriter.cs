@@ -409,7 +409,8 @@ internal static class LtvWriter
         using var hash = IncrementalHash.CreateHash(o.TimestampHashAlgorithm);
         hash.AppendData(buf, 0, contentsStart);
         hash.AppendData(buf, contentsEnd, total - contentsEnd);
-        byte[] token = TimestampClient.GetTokenForImprint(o.TimestampUrl!, o.TimestampHttpClient, hash.GetHashAndReset(), o.TimestampHashAlgorithm);
+        byte[] token = TimestampClient.GetTokenForImprintAsync(o.TimestampUrl!, o.TimestampHttpClient, hash.GetHashAndReset(), o.TimestampHashAlgorithm,
+            async: false, CancellationToken.None).GetAwaiter().GetResult();
         if (token.Length > reserve)
         {
             needed = token.Length;

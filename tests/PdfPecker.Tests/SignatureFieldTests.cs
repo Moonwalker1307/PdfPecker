@@ -22,7 +22,7 @@ public class SignatureFieldTests
     /// A one-page form with an empty signature field "Approver" (field and widget in one), a text field "Name", and a
     /// signature field "Parties.Buyer" whose widget is a separate kid.
     /// </summary>
-    private static byte[] Template()
+    internal static byte[] Template()
     {
         var objects = new[]
         {

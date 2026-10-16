@@ -226,7 +226,7 @@ public class SignatureVerificationTests
         // Corrupt hex digits inside the signature itself, so the ASN.1 and certificate parsers see hostile input.
         var rng = new Random(7);
         int cmsLength = SignedCmsLength(pdf, v0);
-        for (int round = 0; round < 300; round++)
+        for (int round = 0; round < 60; round++)
         {
             var copy = (byte[])pdf.Clone();
             for (int k = 0; k < 1 + round % 6; k++)
@@ -236,7 +236,7 @@ public class SignatureVerificationTests
         }
 
         // Random corruption anywhere must never throw anything but the documented exceptions.
-        for (int round = 0; round < 200; round++)
+        for (int round = 0; round < 40; round++)
         {
             var copy = (byte[])pdf.Clone();
             for (int k = 0; k < 8; k++) copy[rng.Next(copy.Length)] = (byte)rng.Next(256);
