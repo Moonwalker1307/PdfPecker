@@ -23,7 +23,7 @@ internal static class DecodedImageCache
     private static readonly LinkedList<Entry> Entries = new(); // most recently used first
     private static long _bytes;
 
-    /// <summary>Decodes JPEG, PNG, GIF or WebP data, or returns a copy of the same image decoded earlier.</summary>
+    /// <summary>Decodes JPEG, PNG, GIF, WebP, BMP or TIFF data, or returns a copy of the same image decoded earlier.</summary>
     public static PdfImage? Decode(byte[] data)
     {
         var hash = SHA256.HashData(data);

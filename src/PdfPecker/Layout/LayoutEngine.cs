@@ -760,7 +760,7 @@ internal sealed partial class LayoutEngine
     /// <summary>Computes the used size of an inline &lt;svg&gt; in points and returns its parsed drawing.</summary>
     private SvgImage? SvgSize(Element e, float availW, out float w, out float h)
     {
-        if (!_images.Svgs.TryGetValue(e, out var svg)) _images.Svgs[e] = svg = SvgImage.Build(e, _images.SvgBudget);
+        if (!_images.Svgs.TryGetValue(e, out var svg)) _images.Svgs[e] = svg = SvgImage.Build(e, _images.SvgBudget, _images.LoadAny);
         var (iw, ih) = SvgNaturalSize(svg, availW);
         ReplacedSize(e, iw, ih, availW, out w, out h);
         return svg;

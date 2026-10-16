@@ -58,8 +58,8 @@ All methods are static and thread-safe, so you can convert many documents in par
 ## Features
 
 - **HTML and CSS**: flexbox, grid, multi-column, floats and positioning, transforms, transparency, gradients,
-  `var()` and `calc()`, media queries, `@import`, nesting and cascade layers, inline SVG and SVG files, PNG, JPEG, GIF
-  and WebP. [More](https://pdfpecker.net/docs/html-and-css/)
+  `var()` and `calc()`, media queries, `@import`, nesting and cascade layers, inline SVG and SVG files (with embedded
+  images), PNG, JPEG, GIF, WebP, BMP and TIFF. [More](https://pdfpecker.net/docs/html-and-css/)
 - **Paged media**: `@page` sizes and margin boxes, its own margins for the first page and mirrored left and right pages,
   named pages, running headers, tables of contents with page numbers, repeated table headers, orphans, widows and
   break control. [More](https://pdfpecker.net/docs/paged-media/)
@@ -68,7 +68,8 @@ All methods are static and thread-safe, so you can convert many documents in par
   [More](https://pdfpecker.net/docs/fonts/)
 - **Right-to-left and hyphenation**: Arabic and Hebrew with bidi and shaping, and `hyphens: auto`.
   [More](https://pdfpecker.net/docs/languages/)
-- **PDF/A, passwords and watermarks**: PDF/A-2, 3 and 4, AES-256 encryption and permissions, also for existing PDFs.
+- **PDF/A, passwords and watermarks**: PDF/A-2, 3 and 4, AES-256 encryption and permissions, also for existing PDFs;
+  text, image and SVG watermarks.
   [More](https://pdfpecker.net/docs/pdfa-and-passwords/)
 - **Accessibility**: tagged PDF, PDF/UA-1 and PDF/UA-2 built from your HTML. [More](https://pdfpecker.net/docs/accessibility/)
 - **Fillable forms**: HTML inputs, check boxes, radio buttons, selects and text areas become PDF form fields.
