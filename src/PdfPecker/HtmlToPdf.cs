@@ -270,6 +270,7 @@ public static class HtmlToPdf
         StructureTree? structure;
         List<PageRun> runs;
         Dictionary<string, int>? targetPages = null;
+        int containerPasses = 0;
         for (int pass = 0; ; pass++)
         {
             // The root element's background, or else the body's, is the canvas background: it fills every page area (as
@@ -304,6 +305,16 @@ public static class HtmlToPdf
                     restore?.Invoke();
                 }
                 documentPage += run.Grid.PagesFor(run.Height);
+            }
+            // Container queries and cq units are evaluated against the sizes of the previous layout (none in the
+            // first), so a layout that sizes a container differently is followed by another style pass and layout.
+            // Nested containers settle one level per pass; the limit stops content that flips a query back and forth.
+            if (containerPasses < MaxContainerPasses && styles.ContainerSizesChanged())
+            {
+                containerPasses++;
+                styles = Resolve();
+                pass--; // not a pass for the page numbers of target-counter()
+                continue;
             }
             if (!paged.UsesTargets || pass == 2) break;
             var pages = PagesOfAnchors(runs);
@@ -612,6 +623,8 @@ public static class HtmlToPdf
         if (float.TryParse(attr, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float px)) return Math.Max(0, px * 0.75f);
         return StyleResolver.TryParseLength(attr!, 12, 12, out var len) && !len.IsAuto && !len.IsPercent ? Math.Max(0, len.Value) : 0;
     }
+
+    private const int MaxContainerPasses = 6;
 
     private static Element? FindBand(Element parent, string attribute)
     {

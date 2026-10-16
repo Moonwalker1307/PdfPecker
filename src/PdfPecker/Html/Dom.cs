@@ -53,6 +53,12 @@ internal sealed class Element : Node
     /// <summary>For input, textarea, select and button elements: the form control they draw.</summary>
     public Layout.FormControl? Control;
 
+    /// <summary>
+    /// For a query container: the size of its content box at its last layout, in points, or NaN before it was laid
+    /// out. Container queries and cq units of the next style pass read it.
+    /// </summary>
+    public float ContainerWidth = float.NaN, ContainerHeight = float.NaN;
+
     public Element(string name) => Name = name;
 
     public string? GetAttribute(string name)

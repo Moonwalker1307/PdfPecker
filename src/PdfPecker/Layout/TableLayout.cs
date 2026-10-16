@@ -664,6 +664,11 @@ internal sealed partial class LayoutEngine
             }
             result = (mn, mx);
         }
+        else if (HasSizeContainment(s))
+        {
+            // Inline-size containment: the content does not count towards the box's min- and max-content widths.
+            result = (frame, frame);
+        }
         else
         {
             var (mn, mx) = ContentIntrinsic(e);

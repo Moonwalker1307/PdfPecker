@@ -107,6 +107,13 @@ internal sealed class StyleResolver
     private readonly List<Declaration> _registeredEach = new(), _registeredRoot = new();
     private bool _decorationLineSet;
 
+    // Query containers (container-type or container-name) around the element being resolved, outermost first, and
+    // every container met in this pass with the size its content box had then.
+    private readonly List<Element> _containers = new();
+    private readonly List<(Element Element, float Width, float Height)> _containersSeen = new();
+    private readonly bool _containerRules;
+    private bool _containerUnits; // a declaration uses cq units, so styles that use them cannot be shared
+
     /// <summary>
     /// Elements with the same parent style and the same winning declarations get the same computed style. This makes
     /// repeated structures (table rows, list items, paragraphs) nearly free to style.
@@ -155,6 +162,8 @@ internal sealed class StyleResolver
         _author = new RuleIndex(authorSheet);
         _firstLetterRules = authorSheet.Rules.Any(r => r.Selector.PseudoElement == PseudoElement.FirstLetter);
         _firstLineRules = authorSheet.Rules.Any(r => r.Selector.PseudoElement == PseudoElement.FirstLine);
+        _containerRules = authorSheet.HasContainerRules;
+        _containerUnits = authorSheet.HasContainerUnits;
         CounterStyles = CounterStyles.From(authorSheet.CounterStyles);
         if (authorSheet.RegisteredProperties.Count > 0)
         {
@@ -177,15 +186,92 @@ internal sealed class StyleResolver
         document.Style = rootStyle;
         Strings.Clear();
         _byId = null;
+        _containers.Clear();
+        _containersSeen.Clear();
         Prepare(document);
-        // Fragments without an <html> element: custom properties declared on :root or html still apply.
-        if (_hasCustomProperties && !document.Children.Any(c => c is Element { Name: "html" }))
+        // cq units outside every container fall back to the viewport units; a style pass of another document (an SVG
+        // image) in the middle of this one gets its own.
+        var savedUnits = ContainerQuery.SetUnits(float.NaN, float.NaN);
+        try
         {
-            var html = new Element("html") { Parent = document, ElementIndex = 1, ElementSiblingCount = 1, TypeIndex = 1, TypeCount = 1 };
-            Resolve(html, rootStyle);
-            rootStyle.CustomProperties = html.Style.CustomProperties;
+            // Fragments without an <html> element: custom properties declared on :root or html still apply.
+            if (_hasCustomProperties && !document.Children.Any(c => c is Element { Name: "html" }))
+            {
+                var html = new Element("html") { Parent = document, ElementIndex = 1, ElementSiblingCount = 1, TypeIndex = 1, TypeCount = 1 };
+                Resolve(html, rootStyle);
+                rootStyle.CustomProperties = html.Style.CustomProperties;
+            }
+            ResolveChildren(document);
         }
-        ResolveChildren(document);
+        finally
+        {
+            ContainerQuery.RestoreUnits(savedUnits);
+        }
+    }
+
+    /// <summary>
+    /// Whether the layout that followed this pass gave a query container another size than the one its container
+    /// queries and cq units were evaluated with, so that the styles have to be resolved again. Always false for
+    /// documents that use neither.
+    /// </summary>
+    public bool ContainerSizesChanged()
+    {
+        if (!_containerRules && !_containerUnits) return false;
+        foreach (var (e, w, h) in _containersSeen)
+            if (!SameSize(e.ContainerWidth, w) || !SameSize(e.ContainerHeight, h)) return true;
+        return false;
+
+        static bool SameSize(float a, float b) => float.IsNaN(a) ? float.IsNaN(b) : !float.IsNaN(b) && Math.Abs(a - b) < 0.01f;
+    }
+
+    private static bool IsContainer(ComputedStyle s) => s.ContainerType != ContainerType.Normal || s.ContainerNames != null;
+
+    private void PushContainer(Element e)
+    {
+        _containers.Add(e);
+        _containersSeen.Add((e, e.ContainerWidth, e.ContainerHeight));
+        SetContainerUnits();
+    }
+
+    private void PopContainer()
+    {
+        _containers.RemoveAt(_containers.Count - 1);
+        SetContainerUnits();
+    }
+
+    /// <summary>cq units refer to the nearest container that can be queried on their axis: any size container for the
+    /// inline axis, a container-type: size one for the block axis.</summary>
+    private void SetContainerUnits()
+    {
+        float w = float.NaN, h = float.NaN;
+        bool haveW = false, haveH = false;
+        for (int i = _containers.Count - 1; i >= 0 && !(haveW && haveH); i--)
+        {
+            var c = _containers[i];
+            if (!haveW && c.Style.ContainerType != ContainerType.Normal) { w = c.ContainerWidth / 100f; haveW = true; }
+            if (!haveH && c.Style.ContainerType == ContainerType.Size) { h = c.ContainerHeight / 100f; haveH = true; }
+        }
+        ContainerQuery.SetUnits(w, h);
+    }
+
+    /// <summary>
+    /// Whether the conditions of the @container blocks around a rule hold for <paramref name="e"/> (or its
+    /// pseudo-element). Each selects its own query container: the nearest ancestor container with the name it asks
+    /// for and a type that covers the axes it tests; for a style() query without a name, the parent, as every element
+    /// is a style container. Without one, or before the container's size is known, the condition is false.
+    /// </summary>
+    private bool ContainersMatch(ContainerQuery[] queries, Element e, PseudoElement which)
+    {
+        foreach (var q in queries)
+        {
+            Element? container = null;
+            if (!q.NeedsSize && q.Name == null) container = which != PseudoElement.None ? e : e.Parent;
+            else
+                for (int i = _containers.Count - 1; i >= 0 && container == null; i--)
+                    if (q.Accepts(_containers[i].Style)) container = _containers[i];
+            if (container?.Style == null || !q.Matches(container, _rootFontSize)) return false;
+        }
+        return true;
     }
 
     private static void Prepare(Element parent)
@@ -254,6 +340,8 @@ internal sealed class StyleResolver
             if (children[i] is not Element e || e.Generated) continue;
             Resolve(e, parent.Style);
             if (e.Style.Display == Display.None) continue; // descendants are never rendered
+            bool container = IsContainer(e.Style);
+            if (container) PushContainer(e);
             if (_countersUsed) ApplyCounters(e.Style, ref scope);
             if (e.Id != null && Paged.WantedCounters.Count > 0) SnapshotCounters(e.Id);
             if (e.Style.Display == Display.ListItem && HasPseudoRules) ResolveMarker(e);
@@ -265,6 +353,7 @@ internal sealed class StyleResolver
                 if (_firstLetterRules) GenerateFirstLetter(e);
             }
             if (e.Style.StringSet != null) SetStrings(e);
+            if (container) PopContainer();
         }
         if (pseudos) Generate(parent, PseudoElement.After, ref scope);
         if (scope != null)
@@ -537,6 +626,7 @@ internal sealed class StyleResolver
                 parsed = new List<Declaration>();
                 CssParser.ParseDeclarations(inline!, parsed);
                 _inlineCache[inline!] = parsed;
+                if (!_containerUnits && ContainerQuery.HasContainerUnit(inline!)) _containerUnits = true;
             }
             for (int i = 0; i < parsed.Count; i++)
                 Push(parsed[i].Important ? TierInlineImportant : TierInline, 0, 0, i, parsed[i]);
@@ -557,8 +647,10 @@ internal sealed class StyleResolver
     /// <summary>Computes a style from the sorted declarations in the working buffer, sharing it when it was computed before.</summary>
     private ComputedStyle Compute(string name, ComputedStyle parent)
     {
-        _probe.Set(parent, _decls, _count);
-        if (_styleCache.TryGetValue(_probe, out var shared))
+        // A style with cq units depends on the containers around the element, which the cache key does not include.
+        bool cacheable = !_containerUnits || !UsesContainerUnits();
+        if (cacheable) _probe.Set(parent, _decls, _count);
+        if (cacheable && _styleCache.TryGetValue(_probe, out var shared))
         {
             if (name == "html") _rootFontSize = shared.FontSize;
             Array.Clear(_decls, 0, _count);
@@ -648,9 +740,17 @@ internal sealed class StyleResolver
         bool inlineBox = s.Display == Display.Inline && !parent.IsFlex && !parent.IsGrid;
         s.InlineFade = inlineBox ? s.Opacity * (parent.Display == Display.Inline ? parent.InlineFade : 1) : 1;
         s.InvalidateFont();
-        _styleCache[_probe.Freeze()] = s;
+        if (cacheable) _styleCache[_probe.Freeze()] = s;
         Array.Clear(_decls, 0, _count);
         return s;
+    }
+
+    /// <summary>Whether a declaration in the working buffer uses cq units, or may through var().</summary>
+    private bool UsesContainerUnits()
+    {
+        for (int i = 0; i < _count; i++)
+            if (ContainerQuery.HasContainerUnit(_decls[i].Value) || CssParser.HasVar(_decls[i].Value)) return true;
+        return false;
     }
 
     private static bool HasViewportHeightUnit(string v)
@@ -673,7 +773,7 @@ internal sealed class StyleResolver
     {
         foreach (var r in rules)
         {
-            if (r.Selector.PseudoElement != which || !r.Selector.Matches(e)) continue;
+            if (r.Selector.PseudoElement != which || r.Containers != null && !ContainersMatch(r.Containers, e, which) || !r.Selector.Matches(e)) continue;
             var decls = r.Declarations;
             // Cascade layers: later layers win over earlier ones and unlayered rules over all of them; for !important
             // declarations the order is reversed.
@@ -1661,6 +1761,21 @@ internal sealed class StyleResolver
                 if (inherit) { s.AspectRatio = parent.AspectRatio; s.AspectRatioAuto = parent.AspectRatioAuto; }
                 else if (ParseAspectRatio(lower, out float ratio, out bool ratioAuto)) { s.AspectRatio = ratio; s.AspectRatioAuto = ratioAuto; }
                 break;
+            case "container-type":
+                s.ContainerType = lower switch
+                {
+                    "inline-size" => ContainerType.InlineSize,
+                    "size" => ContainerType.Size,
+                    "normal" or "initial" or "unset" or "revert" or "revert-layer" => ContainerType.Normal,
+                    "inherit" => parent.ContainerType,
+                    _ => s.ContainerType,
+                };
+                break;
+            case "container-name":
+                if (inherit) s.ContainerNames = parent.ContainerNames;
+                else if (lower is "none" or "initial" or "unset" or "revert" or "revert-layer") s.ContainerNames = null;
+                else if (CssParser.ContainerNamesValid(v)) s.ContainerNames = v.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+                break;
 
             // ---- flexbox, grid, multi-column
             case "flex-direction":
@@ -2349,7 +2464,10 @@ internal sealed class StyleResolver
             case "vh": pt = n * vh; break; // 1% of the page's content height
             case "vmin": pt = n * Math.Min(vw, vh); break;
             case "vmax": pt = n * Math.Max(vw, vh); break;
-            default: return false;
+            default:
+                if (ContainerQuery.UnitValue(unit.ToString(), vw, vh) is not float cq) return false;
+                pt = n * cq;
+                break;
         }
         len = Length.Pt(pt);
         return true;

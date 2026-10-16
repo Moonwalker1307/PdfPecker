@@ -81,6 +81,9 @@ internal enum BorderStyle : byte { None, Solid, Dashed, Dotted, Double, Groove, 
 internal enum LineHeightKind : byte { Normal, Factor, Absolute }
 internal enum ObjectFit : byte { Fill, Contain, Cover, None, ScaleDown }
 
+/// <summary>Values of container-type: which axes of the box container queries can test.</summary>
+internal enum ContainerType : byte { Normal, InlineSize, Size }
+
 internal enum ListStyleType : byte
 {
     Disc, Circle, Square, Decimal, DecimalLeadingZero, LowerAlpha, UpperAlpha, LowerRoman, UpperRoman, None,
@@ -287,6 +290,8 @@ internal sealed class ComputedStyle
     public bool TextOverflowEllipsis => TextOverflow != null;
     public float AspectRatio;    // width / height; 0 = auto
     public bool AspectRatioAuto; // "auto <ratio>": a replaced element keeps its natural ratio
+    public ContainerType ContainerType;
+    public string[]? ContainerNames; // container-name; null for none
     public Length Width = Length.Auto, Height = Length.Auto;
     public Length MinWidth = Length.Zero, MaxWidth = Length.Auto, MinHeight = Length.Zero, MaxHeight = Length.Auto;
     public bool BorderBox;
@@ -452,6 +457,8 @@ internal sealed class ComputedStyle
         c.TextOverflow = null;
         c.AspectRatio = 0;
         c.AspectRatioAuto = false;
+        c.ContainerType = ContainerType.Normal;
+        c.ContainerNames = null;
         c.Width = c.Height = Length.Auto;
         c.MinWidth = c.MinHeight = Length.Zero;
         c.MaxWidth = c.MaxHeight = Length.Auto;

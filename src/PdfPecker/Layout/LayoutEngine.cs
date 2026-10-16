@@ -150,6 +150,14 @@ internal sealed partial class LayoutEngine
 
     private static bool IsAtomicInline(Display d) => d is Display.InlineBlock or Display.InlineFlex or Display.InlineGrid;
 
+    /// <summary>
+    /// A container-type other than normal gives the box size containment on one or both axes. Containment does not
+    /// apply to inline boxes and the inner boxes of tables, which are not query containers either.
+    /// </summary>
+    private static bool HasSizeContainment(ComputedStyle s)
+        => s.ContainerType != ContainerType.Normal && s.Display is not (Display.Inline or Display.TableRow or Display.TableCell
+            or Display.TableRowGroup or Display.TableHeaderGroup or Display.TableFooterGroup or Display.TableColumn or Display.TableColumnGroup);
+
     private static bool IsInlineLevel(Element e)
     {
         var d = e.Style.Display;
@@ -620,7 +628,9 @@ internal sealed partial class LayoutEngine
             EmitMarker(cy + s.Font.Ascent * s.FontSize, cy);
         }
 
-        float contentH = contentBottom - cy;
+        // Size containment (container-type: size): the box is as tall as it would be without content.
+        bool container = HasSizeContainment(s) && !isImage && !isSvg;
+        float contentH = container && s.ContainerType == ContainerType.Size ? 0 : contentBottom - cy;
         if (hasHOverride && !isImage && !isSvg)
         {
             contentH = Math.Max(0, overrideH - frameV);
@@ -637,6 +647,12 @@ internal sealed partial class LayoutEngine
         }
         // aspect-ratio with an auto height: at least the ratio's height; taller content still makes it grow.
         if (!isImage && !isSvg && RatioHeight(s, contentW, frame, frameV, hasHOverride) is float ratioH && contentH < ratioH) contentH = ratioH;
+        if (container && !_measuring)
+        {
+            // The next style pass evaluates container queries and cq units against this size.
+            e.ContainerWidth = contentW;
+            e.ContainerHeight = contentH;
+        }
 
         float bottom = cy + contentH + pb + bb;
         BoxPainter.Paint(group, s, bx, y, used, bottom - y, _images, availW);
