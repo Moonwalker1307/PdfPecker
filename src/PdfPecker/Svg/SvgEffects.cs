@@ -56,7 +56,7 @@ internal sealed partial class SvgImage
         for (int i = from; i < Shapes.Count; i++)
         {
             var sh = Shapes[i];
-            if (sh.Kind is SvgShape.KindPath or SvgShape.KindText or SvgShape.KindFilter)
+            if (sh.Kind is SvgShape.KindPath or SvgShape.KindText or SvgShape.KindFilter or SvgShape.KindImage)
             {
                 minX = Math.Min(minX, sh.MinX); minY = Math.Min(minY, sh.MinY);
                 maxX = Math.Max(maxX, sh.MaxX); maxY = Math.Max(maxY, sh.MaxY);
@@ -434,7 +434,7 @@ internal sealed partial class SvgImage
         shape.MaxX = shape.MaxY = float.MinValue;
         foreach (var c in children)
         {
-            if (c.Kind is not (SvgShape.KindPath or SvgShape.KindText or SvgShape.KindFilter)) continue;
+            if (c.Kind is not (SvgShape.KindPath or SvgShape.KindText or SvgShape.KindFilter or SvgShape.KindImage)) continue;
             shape.MinX = Math.Min(shape.MinX, c.MinX); shape.MinY = Math.Min(shape.MinY, c.MinY);
             shape.MaxX = Math.Max(shape.MaxX, c.MaxX); shape.MaxY = Math.Max(shape.MaxY, c.MaxY);
         }

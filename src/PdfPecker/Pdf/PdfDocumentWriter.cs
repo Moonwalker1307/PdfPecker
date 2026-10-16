@@ -75,7 +75,8 @@ internal sealed partial class PdfDocumentWriter
     private readonly SortedSet<(int Alpha, string Blend)> _blendStates = new(); // /g<alpha><Blend>: group alpha and blend mode
     private readonly SortedSet<string> _layerBlends = new(StringComparer.Ordinal); // /b<Blend>: a background layer's blend mode
     private readonly List<(byte[] Content, string Dict, bool Alpha)> _masks = new(); // soft masks (gradient alphas, SVG masks), set by /s1, /s2, ...
-    private readonly List<PdfImage> _rasters = new(); // SVG and HTML filter results, written as /Xr1, /Xr2, ...
+    private readonly List<PdfImage> _rasters = new(); // SVG and HTML filter results and SVG image elements, written as /Xr1, /Xr2, ...
+    private readonly Dictionary<PdfImage, int> _rasterNumbers = new(); // the /Xr number of each image an SVG embeds
     private readonly List<FontRun> _runs = new();
     private readonly Dictionary<FontProgram, GlyphSubset> _subsets = new();
     private readonly List<GlyphSubset> _subsetList = new();
@@ -103,6 +104,9 @@ internal sealed partial class PdfDocumentWriter
 
     /// <summary>Font for the watermark text. Default: Helvetica (bold when the watermark asks for it).</summary>
     public TextFont? WatermarkFont { get; init; }
+
+    /// <summary>The watermark image when it is an SVG file, parsed with the document's fonts.</summary>
+    public SvgImage? WatermarkSvg { get; init; }
 
     /// <summary>Font for <c>HeaderText</c> and <c>FooterText</c>. Default: Helvetica.</summary>
     public TextFont? MarginFont { get; init; }
@@ -529,11 +533,16 @@ internal sealed partial class PdfDocumentWriter
         var wm = Watermark;
         (List<TextOp> Lines, float Cos, float Sin)? wmText = null;
         PdfImage? wmImage = null;
+        SvgImage? wmSvg = null;
         if (wm != null)
         {
-            if (wm.Image != null)
+            if (wm.Image != null && (wmImage = PdfImage.FromBytes(wm.Image)) == null)
             {
-                wmImage = PdfImage.FromBytes(wm.Image) ?? throw new ArgumentException("The watermark image is not a PNG, JPEG, GIF or WebP image this library can read.");
+                wmSvg = WatermarkSvg ?? throw new ArgumentException("The watermark image is not a PNG, JPEG, GIF, WebP, BMP, TIFF or SVG image this library can read.");
+                CollectSvgFonts(wmSvg, usedFonts);
+            }
+            if (wmImage != null)
+            {
                 if (!imageIds.ContainsKey(wmImage))
                 {
                     imageIds[wmImage] = images.Count + 1;
@@ -545,7 +554,7 @@ internal sealed partial class PdfDocumentWriter
                 wmText = LayoutWatermarkText(wm, WatermarkFont ?? StandardFont.Get(FontFamily.Helvetica, wm.Bold, false));
                 foreach (var line in wmText.Value.Lines) CollectFonts(line, usedFonts);
             }
-            if (wmText == null && wmImage == null) wm = null;
+            if (wmText == null && wmImage == null && wmSvg == null) wm = null;
         }
 
         bool pdfa = Conformance != PdfConformance.None;
@@ -591,6 +600,7 @@ internal sealed partial class PdfDocumentWriter
             foreach (var item in outlineItems) item.Id = next++;
         }
         int watermarkId = wm != null ? next++ : 0;
+        int watermarkSvgId = wmSvg != null ? next++ : 0;
         int metadataId = 0, outputIntentId = 0, iccId = 0, encryptId = 0;
         if (pdfa) { metadataId = next++; outputIntentId = next++; iccId = next++; }
         var fileSpecIds = new int[Attachments.Count];
@@ -698,7 +708,7 @@ internal sealed partial class PdfDocumentWriter
             for (int i = 0; i < usedFonts.Length; i++)
                 if (usedFonts[i]) fontDict.Ascii(" /F").Int(i + 1).Sp().Int(fontIds[i]).Ascii(" 0 R");
             for (int i = 0; i < _subsetList.Count; i++) fontDict.Ascii(" /E").Int(i + 1).Sp().Int(firstEmbeddedId + i * 5).Ascii(" 0 R");
-            WriteWatermark(watermarkId, wm, wmText, fontDict, wmImage);
+            WriteWatermark(watermarkId, wm, wmText, fontDict, wmImage, wmSvg, watermarkSvgId);
         }
 
         // Pages, contents, annotations. A scaled page is written at the size Chrome gives the paper (see PaperSize).
@@ -1424,7 +1434,8 @@ internal sealed partial class PdfDocumentWriter
     }
 
     /// <summary>The watermark as a form XObject covering the page, drawn by every page's content stream.</summary>
-    private void WriteWatermark(int id, PdfWatermark wm, (List<TextOp> Lines, float Cos, float Sin)? text, ByteBuffer fontDict, PdfImage? image)
+    private void WriteWatermark(int id, PdfWatermark wm, (List<TextOp> Lines, float Cos, float Sin)? text, ByteBuffer fontDict, PdfImage? image,
+        SvgImage? svg, int svgId)
     {
         float W = _page.Width, H = _page.Height, cx = W / 2, cy = H / 2;
         float opacity = Math.Clamp(wm.Opacity, 0, 1);
@@ -1441,6 +1452,28 @@ internal sealed partial class PdfDocumentWriter
             b.Num(iw * c).Sp().Num(iw * sn).Sp().Num(-ih * sn).Sp().Num(ih * c).Sp()
                 .Num(cx - iw * c / 2 + ih * sn / 2).Sp().Num(cy - iw * sn / 2 - ih * c / 2).Ascii(" cm /Iw Do\n");
             b.Ascii("Q q /Gw gs\n");
+        }
+        else if (svg != null)
+        {
+            // The drawing is a transparency group of its own with the shared resources: its own translucent parts keep
+            // their alpha, and the watermark's opacity applies to the group as a whole.
+            float iw = wm.ImageWidth > 0 ? wm.ImageWidth : W / 2;
+            float ih = iw * SvgAspect(svg);
+            double a = (wm.Angle ?? 0) * Math.PI / 180;
+            float c = (float)Math.Cos(a), sn = (float)Math.Sin(a);
+            b.Num(c).Sp().Num(sn).Sp().Num(-sn).Sp().Num(c).Sp()
+                .Num(cx - iw * c / 2 + ih * sn / 2).Sp().Num(cy - iw * sn / 2 - ih * c / 2).Ascii(" cm /Iw Do\n");
+            b.Ascii("Q q /Gw gs\n");
+            var drawing = new ByteBuffer(1024);
+            var saved = SaveState();
+            _noAlpha = false;
+            (_fill, _stroke, _lineWidth, _fillAlpha, _strokeAlpha) = (1, 1, -1, -1, -1);
+            _anyAlpha = true;
+            WriteSvg(drawing, svg, 0, ih, iw, ih);
+            RestoreState(saved);
+            _noAlpha = true;
+            WriteStream(svgId, drawing.Span, _compress, "/Type /XObject /Subtype /Form /BBox [0 0 " + Fmt(iw) + " " + Fmt(ih)
+                + "] /Group << /S /Transparency >> /Resources " + _resourcesId.ToString(System.Globalization.CultureInfo.InvariantCulture) + " 0 R");
         }
         if (text is { } t)
         {
@@ -1462,9 +1495,20 @@ internal sealed partial class PdfDocumentWriter
             .Num(opacity).Ascii(" /CA ").Num(opacity).Ascii(" >> >>");
         if (text != null) dict.Ascii(" /Font <<").Bytes(fontDict.Span).Ascii(" >>");
         if (image != null) dict.Ascii(" /XObject << /Iw ").Int(image.ObjectNumber).Ascii(" 0 R >>");
+        else if (svg != null) dict.Ascii(" /XObject << /Iw ").Int(svgId).Ascii(" 0 R >>");
         dict.Ascii(" >>");
         WriteStream(id, b.Span, _compress, System.Text.Encoding.ASCII.GetString(dict.Span));
     }
+
+    /// <summary>Height over width of an SVG drawing: from its width and height, else its viewBox, else 300 × 150.</summary>
+    private static float SvgAspect(SvgImage svg)
+    {
+        if (svg.Width is > 0 and var w && svg.Height is > 0 and var h) return h / w;
+        if (svg.HasViewBox) return svg.ViewBoxHeight / svg.ViewBoxWidth;
+        return 0.5f;
+    }
+
+    private static string Fmt(float v) => v.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
 
     // ------------------------------------------------------------------ content streams
 
@@ -1890,6 +1934,9 @@ internal sealed partial class PdfDocumentWriter
                 case SvgShape.KindFilter:
                     WriteSvgFilter(b, shape, toPage);
                     continue;
+                case SvgShape.KindImage:
+                    WriteSvgImage(b, shape, toPage);
+                    continue;
                 case SvgShape.KindText:
                     WriteSvgPaint(b, shape, toPage);
                     var m = shape.TextMatrix;
@@ -1961,6 +2008,54 @@ internal sealed partial class PdfDocumentWriter
         int n = _tilings.Count + 1;
         _tilings.Add((n, cell.Span.ToArray(), System.Text.Encoding.ASCII.GetString(dict.Span)));
         return n;
+    }
+
+    /// <summary>
+    /// Draws an SVG image element: a raster image as an image XObject (one per image, however often it is drawn), or an
+    /// embedded SVG drawing's shapes in their own space. A translucent drawing is a transparency group, so that its
+    /// overlapping parts do not show through each other.
+    /// </summary>
+    private void WriteSvgImage(ByteBuffer b, SvgShape shape, Matrix toPage)
+    {
+        if (shape.Image is { } source)
+        {
+            if (!_rasterNumbers.TryGetValue(source, out int n))
+            {
+                // A copy: the same image may also be drawn by an img element, numbered with the page images.
+                var image = Conformance != PdfConformance.None ? source.ToRgb() : source;
+                n = image == null ? 0 : _rasters.Count + 1;
+                if (image != null) _rasters.Add(image.Copy());
+                _rasterNumbers[source] = n;
+            }
+            if (n == 0) return;
+            SetFillAlpha(b, (uint)shape.ImageAlpha << 24); // an image is painted with the fill alpha
+            b.Ascii("q ");
+            WriteMatrix(b, shape.ImageMatrix).Ascii(" cm /Xr").Int(n).Ascii(" Do Q\n");
+            return;
+        }
+        if (shape.Children is not { Count: > 0 } children) return;
+        var inner = shape.ImageMatrix.Then(toPage);
+        var saved = SaveState();
+        if (shape.ImageAlpha == 255)
+        {
+            b.Ascii("q ");
+            WriteMatrix(b, shape.ImageMatrix).Ascii(" cm\n");
+            WriteSvgShapes(b, children, inner);
+            b.Ascii("Q\n");
+            RestoreState(saved);
+            return;
+        }
+        var group = new ByteBuffer(1024);
+        (_fill, _stroke, _lineWidth, _fillAlpha, _strokeAlpha) = (1, 1, -1, -1, -1); // a group starts from unknown colours
+        _anyAlpha = true;
+        WriteMatrix(group, shape.ImageMatrix).Ascii(" cm\n");
+        WriteSvgShapes(group, children, inner);
+        RestoreState(saved);
+        _forms.Add(group.Span.ToArray());
+        _formIsolated.Add(false);
+        _formStreams.Add(null);
+        _groupAlphas.Add(shape.ImageAlpha);
+        b.Ascii("q /g").Int(shape.ImageAlpha).Ascii(" gs /Fx").Int(_forms.Count).Ascii(" Do Q\n");
     }
 
     /// <summary>The resolution of SVG filter results: pixels per point (2 is 144 dpi), and the most pixels one may have.</summary>
@@ -2357,7 +2452,7 @@ internal sealed partial class PdfDocumentWriter
         if (depth > 16) return;
         foreach (var shape in shapes)
         {
-            if (shape.Kind == SvgShape.KindMask && shape.Children != null) CollectSvgFonts(shape.Children, usedFonts, depth + 1);
+            if (shape.Kind is SvgShape.KindMask or SvgShape.KindImage && shape.Children != null) CollectSvgFonts(shape.Children, usedFonts, depth + 1);
             if (shape.FillPattern != null) CollectSvgFonts(shape.FillPattern.Shapes, usedFonts, depth + 1);
             if (shape.StrokePattern != null) CollectSvgFonts(shape.StrokePattern.Shapes, usedFonts, depth + 1);
             if (shape.Font == null || shape.Kind != SvgShape.KindText) continue;

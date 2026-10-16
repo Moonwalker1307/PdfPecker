@@ -43,6 +43,7 @@ internal sealed class JpegDecoder
     private int _restartInterval;
     private int _adobeTransform = -1;
     private bool _jfif;
+    private bool? _colorTransform; // set by the container (TIFF says whether its JPEG data is YCbCr), else from markers
     private int _eobRun;
 
     // Bit reader.
@@ -57,9 +58,15 @@ internal sealed class JpegDecoder
     private JpegDecoder(byte[] d) => _d = d;
 
     /// <summary>Decodes a JPEG. Returns null if the data is not a supported JPEG.</summary>
-    public static (byte[] Data, int Width, int Height, int Components)? Decode(byte[] data)
+    public static (byte[] Data, int Width, int Height, int Components)? Decode(byte[] data) => Decode(data, null);
+
+    /// <summary>
+    /// Decodes a JPEG whose three components are YCbCr (<paramref name="colorTransform"/> true) or RGB (false), or as
+    /// its markers say (null).
+    /// </summary>
+    public static (byte[] Data, int Width, int Height, int Components)? Decode(byte[] data, bool? colorTransform)
     {
-        var j = new JpegDecoder(data);
+        var j = new JpegDecoder(data) { _colorTransform = colorTransform };
         try
         {
             var result = j.Run();
@@ -299,16 +306,19 @@ internal sealed class JpegDecoder
         return e;
     }
 
+    /// <summary>A Huffman table a scan uses; a damaged file can name one it never defined.</summary>
+    private static Huffman Table(Huffman?[] tables, int index) => tables[index] ?? throw new InvalidDataException("Undefined Huffman table");
+
     private void DecodeBlock(Component c, int offset, int ss, int se, int ah, int al)
     {
         var blk = c.Coeffs.AsSpan(offset, 64);
         if (!_progressive)
         {
-            int t = Receive(_dc[c.DcTable]!);
+            int t = Receive(Table(_dc, c.DcTable));
             int diff = t == 0 ? 0 : Extend(GetBits(t), t);
             c.Pred += diff;
             blk[0] = (short)c.Pred;
-            var ac = _ac[c.AcTable]!;
+            var ac = Table(_ac, c.AcTable);
             for (int k = 1; k < 64;)
             {
                 int rs = Receive(ac);
@@ -330,7 +340,7 @@ internal sealed class JpegDecoder
             // DC scan.
             if (ah == 0)
             {
-                int t = Receive(_dc[c.DcTable]!);
+                int t = Receive(Table(_dc, c.DcTable));
                 int diff = t == 0 ? 0 : Extend(GetBits(t), t);
                 c.Pred += diff;
                 blk[0] = (short)(c.Pred << al);
@@ -342,7 +352,7 @@ internal sealed class JpegDecoder
         {
             // AC first pass.
             if (_eobRun > 0) { _eobRun--; return; }
-            var ac = _ac[c.AcTable]!;
+            var ac = Table(_ac, c.AcTable);
             for (int k = ss; k <= se;)
             {
                 int rs = Receive(ac);
@@ -368,7 +378,7 @@ internal sealed class JpegDecoder
         // AC refinement.
         {
             int p1 = 1 << al, m1 = -1 << al;
-            var ac = _ac[c.AcTable]!;
+            var ac = Table(_ac, c.AcTable);
             int k = ss;
             if (_eobRun <= 0)
             {
@@ -527,7 +537,8 @@ internal sealed class JpegDecoder
 
         int n = _comps.Length;
         var output = new byte[_width * _height * n];
-        bool transform = n == 3 ? _adobeTransform != 0 || _jfif || _adobeTransform < 0 && !(_comps[0].Id == 'R' && _comps[1].Id == 'G' && _comps[2].Id == 'B')
+        bool transform = n == 3 && _colorTransform is { } forced ? forced
+            : n == 3 ? _adobeTransform != 0 || _jfif || _adobeTransform < 0 && !(_comps[0].Id == 'R' && _comps[1].Id == 'G' && _comps[2].Id == 'B')
             : n == 4 && _adobeTransform == 2;
         var rowBufs = new int[n][];
         for (int i = 0; i < n; i++) rowBufs[i] = new int[_width];

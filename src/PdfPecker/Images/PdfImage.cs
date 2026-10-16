@@ -96,7 +96,7 @@ internal sealed class PdfImage
         return (pixels, colors);
     }
 
-    /// <summary>Decodes JPEG, PNG, GIF or WebP data. Returns null for unsupported or corrupt images.</summary>
+        /// <summary>Decodes JPEG, PNG, GIF, WebP, BMP or TIFF data. Returns null for unsupported or corrupt images.</summary>
     public static PdfImage? FromBytes(byte[] data)
     {
         try
@@ -105,8 +105,11 @@ internal sealed class PdfImage
             if (data.Length > 8 && data[0] == 0x89 && data[1] == (byte)'P' && data[2] == (byte)'N' && data[3] == (byte)'G') return FromPng(data);
             if (GifDecoder.IsGif(data)) return FromPixels(GifDecoder.Decode(data, MaxPixels));
             if (WebPDecoder.IsWebP(data)) return FromPixels(WebPDecoder.Decode(data, MaxPixels));
+            if (BmpDecoder.IsBmp(data))
+                return BmpDecoder.Wrapped(data) is { } wrapped && !BmpDecoder.IsBmp(wrapped) ? FromBytes(wrapped) : FromPixels(BmpDecoder.Decode(data, MaxPixels));
+            if (TiffDecoder.IsTiff(data)) return TiffDecoder.Decode(data, MaxPixels);
         }
-        catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or InvalidDataException or EndOfStreamException)
+        catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or InvalidDataException or EndOfStreamException or OverflowException)
         {
         }
         return null;
@@ -384,7 +387,7 @@ internal sealed class PdfImage
     }
 
     /// <summary>Decoded RGB pixels, with a soft mask when some of them are not opaque.</summary>
-    private static PdfImage? FromPixels(DecodedImage? decoded)
+    internal static PdfImage? FromPixels(DecodedImage? decoded)
     {
         if (decoded is not { } d) return null;
         var image = new PdfImage { Width = d.Width, Height = d.Height, BitsPerComponent = 8, ColorSpace = "/DeviceRGB", Data = Deflate(d.Rgb) };
