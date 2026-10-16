@@ -1069,7 +1069,7 @@ internal sealed partial class LayoutEngine
                         if (style.Visible)
                         {
                             float bl = baseline + BaselineShift(style) + items[start].RelY;
-                            if (style.TextShadows != null) TextShadows(style, runX, bl, y, sb.ToString(), style.WordSpacing + extra, rtlRun);
+                            if (style.TextShadows != null) TextShadows(style, runX, runEnd - runX, bl, y, sb.ToString(), style.WordSpacing + extra, rtlRun);
                             _ops.Add(new TextOp(runX, bl, y, style.Font, style.FontSize, CssColor.Fade(style.Color, style.InlineFade), sb.ToString(),
                                 style.WordSpacing + extra, style.LetterSpacing) { Tag = it.Tag, Rtl = rtlRun });
                             if (style.TextDecoration != TextDecoration.None) Decorate(style, runX, runEnd - runX, bl);
@@ -1351,46 +1351,94 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>
-    /// Paints the text-shadows of a run under it, the first shadow on top. A blurred shadow is approximated by faint
-    /// copies spread around its offset, which soften its edge.
+    /// Paints the text-shadows of a run under it, the first shadow on top, each with the shadows of the run's
+    /// decorations. A shadow without blur is a copy of the text in the shadow's colour; blurred shadows are the text's
+    /// pixels through a Gaussian blur, as browsers draw them, with consecutive blurred shadows made in one image.
     /// </summary>
-    private void TextShadows(ComputedStyle style, float x, float baseline, float lineTop, string text, float wordSpacing, bool rtl)
+    private void TextShadows(ComputedStyle style, float x, float w, float baseline, float lineTop, string text, float wordSpacing, bool rtl)
     {
         var shadows = style.TextShadows!;
+        List<(BoxShadow Shadow, uint Color)>? blurred = null;
         for (int i = shadows.Length - 1; i >= 0; i--)
         {
             var sh = shadows[i];
             uint color = CssColor.Fade(sh.Color ?? style.Color, style.InlineFade);
             if (!CssColor.IsVisible(color)) continue;
-            float sx = x + sh.X, sy = baseline + sh.Y;
-            float blur = Math.Min(sh.Blur, 50);
-            if (blur <= 0.375f)
+            if (sh.Blur > 0.375f)
             {
-                _ops.Add(new TextOp(sx, sy, lineTop, style.Font, style.FontSize, color, text, wordSpacing, style.LetterSpacing) { Rtl = rtl });
+                (blurred ??= new()).Add((sh, color));
                 continue;
             }
-            // Seventeen faint copies, at the offset and on two rings around it: about two thirds of the alpha where they
-            // all overlap, fading toward the edges.
-            uint faint = (uint)Math.Max(1, MathF.Round((color >> 24) * 0.06f)) << 24 | (color & 0xFFFFFF);
-            _ops.Add(new TextOp(sx, sy, lineTop, style.Font, style.FontSize, faint, text, wordSpacing, style.LetterSpacing) { Rtl = rtl });
-            for (int ring = 1; ring <= 2; ring++)
-            {
-                float r = blur * ring / 4;
-                for (int k = 0; k < 8; k++)
-                {
-                    float a = k * MathF.PI / 4 + ring * MathF.PI / 8;
-                    _ops.Add(new TextOp(sx + r * MathF.Cos(a), sy + r * MathF.Sin(a), lineTop, style.Font, style.FontSize, faint, text,
-                        wordSpacing, style.LetterSpacing) { Rtl = rtl });
-                }
-            }
+            if (blurred != null) { BlurredTextShadows(style, x, w, baseline, lineTop, text, wordSpacing, rtl, blurred); blurred = null; }
+            float sx = x + sh.X, sy = baseline + sh.Y;
+            _ops.Add(new TextOp(sx, sy, lineTop, style.Font, style.FontSize, color, text, wordSpacing, style.LetterSpacing) { Rtl = rtl });
+            if (style.TextDecoration != TextDecoration.None) Decorate(style, sx, w, sy, color);
         }
+        if (blurred != null) BlurredTextShadows(style, x, w, baseline, lineTop, text, wordSpacing, rtl, blurred);
     }
 
-    private void Decorate(ComputedStyle s, float x, float w, float baseline)
+    /// <summary>
+    /// Blurred text-shadows, bottom one first: a layer holding the run and its decorations, whose filter makes the
+    /// shadows from the shape of what it holds and draws them in place of it.
+    /// </summary>
+    private void BlurredTextShadows(ComputedStyle style, float x, float w, float baseline, float lineTop, string text, float wordSpacing, bool rtl,
+        List<(BoxShadow Shadow, uint Color)> shadows)
+    {
+        // The shadow takes its colour from the shadow alone: the text's own colour, even transparent, only gives the shape.
+        var layer = new LayerOp { RasterReplaces = true, TextShadow = true };
+        layer.Ops.Add(new TextOp(x, baseline, lineTop, style.Font, style.FontSize, CssColor.Black, text, wordSpacing, style.LetterSpacing) { Rtl = rtl });
+        if (style.TextDecoration != TextDecoration.None)
+        {
+            int before = _ops.Count;
+            Decorate(style, x, w, baseline, CssColor.Black);
+            for (int k = before; k < _ops.Count; k++) layer.Ops.Add(_ops[k]);
+            _ops.RemoveRange(before, _ops.Count - before);
+        }
+        layer.Raster = TextShadowFilter(shadows, out float minSigma);
+        // A blur several pixels wide loses nothing at a lower resolution: about three pixels per deviation is enough.
+        layer.RasterDensity = Math.Clamp(3 / minSigma, 1, 2);
+        _ops.Add(layer);
+    }
+
+    /// <summary>
+    /// The filter of blurred text-shadows: for each, the alpha of the text blurred (the CSS blur radius is twice the
+    /// deviation, as for box-shadow), offset and filled with the shadow's colour, merged bottom first.
+    /// </summary>
+    private static SvgFilter TextShadowFilter(List<(BoxShadow Shadow, uint Color)> shadows, out float minSigma)
+    {
+        var f = new SvgFilter { TextShadows = true };
+        var merged = new List<string?>();
+        float reachX = 0, reachY = 0;
+        minSigma = float.MaxValue;
+        for (int k = 0; k < shadows.Count; k++)
+        {
+            var (sh, color) = shadows[k];
+            // Larger blurs are capped, which keeps the image a reasonable size.
+            float sigma = Math.Min(sh.Blur, 150) / 2;
+            minSigma = Math.Min(minSigma, sigma);
+            string result = "s" + k.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            f.Primitives.Add(new SvgFilter.Primitive { Kind = SvgFilter.Kind.Blur, In = "SourceAlpha", Result = "b", Sx = sigma, Sy = sigma, Linear = false });
+            f.Primitives.Add(new SvgFilter.Primitive { Kind = SvgFilter.Kind.Offset, In = "b", Result = "b", Dx = sh.X, Dy = sh.Y, Linear = false });
+            f.Primitives.Add(new SvgFilter.Primitive { Kind = SvgFilter.Kind.Flood, Result = "f", Color = color, Linear = false });
+            f.Primitives.Add(new SvgFilter.Primitive { Kind = SvgFilter.Kind.Composite, In = "f", In2 = "b", Operator = "in", Result = result, Linear = false });
+            merged.Add(result);
+            reachX = Math.Max(reachX, Math.Abs(sh.X) + 3 * sigma);
+            reachY = Math.Max(reachY, Math.Abs(sh.Y) + 3 * sigma);
+        }
+        f.Primitives.Add(new SvgFilter.Primitive { Kind = SvgFilter.Kind.Merge, Inputs = merged, Linear = false });
+        f.X = -reachX;
+        f.Y = -reachY;
+        f.W = 2 * reachX;
+        f.H = 2 * reachY;
+        return f;
+    }
+
+    /// <summary>The decorations of a run, in their own colour or in <paramref name="shadow"/>, the colour of a text-shadow.</summary>
+    private void Decorate(ComputedStyle s, float x, float w, float baseline, uint? shadow = null)
     {
         float size = s.FontSize;
         float thickness = s.DecorationThickness is { } dt ? Math.Max(dt.Resolve(size), 0.1f) : Math.Max(size * 0.055f, 0.5f);
-        uint color = CssColor.Fade(s.DecorationColor ?? s.Color, s.InlineFade);
+        uint color = shadow ?? CssColor.Fade(s.DecorationColor ?? s.Color, s.InlineFade);
         if ((s.TextDecoration & TextDecoration.Underline) != 0)
             DecorationLine(s.DecorationStyle, x, baseline + (s.UnderlineOffset is { } uo ? uo.Resolve(size) : size * 0.1f), w, thickness, color, below: true);
         if ((s.TextDecoration & TextDecoration.LineThrough) != 0)

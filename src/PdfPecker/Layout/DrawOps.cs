@@ -311,6 +311,11 @@ internal sealed class LayerOp : GroupOp
     // drawn instead of the content (blur); without, under it (the shadows of drop-shadow()).
     public SvgFilter? Raster;
     public bool RasterReplaces;
+    // Pixels per point of the filtered image; 0 for the writer's default. A wide blur has no fine detail to keep.
+    public float RasterDensity;
+    // The blurred text-shadows of a run of text: drawn only as pixels, never as invisible text, since the shadow is
+    // not the text.
+    public bool TextShadow;
 
     /// <summary>Whether the layer is drawn as a block of its own: transformed, translucent, blended, clipped or filtered.</summary>
     public bool NeedsBlock => Transform != null || Opacity < 1 || BlendMode != null || Isolated || ClipVerbs != null || Raster != null;
