@@ -77,7 +77,8 @@ All methods are static and thread-safe, so you can convert many documents in par
 - **Accessibility**: tagged PDF, PDF/UA-1 and PDF/UA-2 built from your HTML. [More](https://pdfpecker.net/docs/accessibility/)
 - **Fillable forms**: HTML inputs, check boxes, radio buttons, selects and text areas become PDF form fields.
   [More](https://pdfpecker.net/docs/forms/)
-- **Digital signatures**: PAdES signatures, visible boxes, timestamps and existing signature fields.
+- **Digital signatures**: PAdES signatures, visible boxes, timestamps and existing signature fields; verification of
+  signed PDFs, and long-term validation (DSS with OCSP and CRLs, document timestamps).
   [More](https://pdfpecker.net/docs/signatures/)
 - **E-invoices and attachments**: Factur-X and ZUGFeRD, PDFs in Peppol and OIOUBL invoices, and any embedded file.
   [More](https://pdfpecker.net/docs/e-invoices/)

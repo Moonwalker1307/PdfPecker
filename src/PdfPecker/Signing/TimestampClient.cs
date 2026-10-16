@@ -14,8 +14,11 @@ internal static class TimestampClient
 
     /// <summary>Returns the TimeStampToken (a CMS ContentInfo) for the hash of <paramref name="data"/>.</summary>
     public static byte[] GetToken(string url, HttpClient? client, byte[] data, HashAlgorithmName hash)
+        => GetTokenForImprint(url, client, Cms.HashData(hash, data), hash);
+
+    /// <summary>Returns the TimeStampToken for an already computed hash, as a document timestamp needs.</summary>
+    public static byte[] GetTokenForImprint(string url, HttpClient? client, byte[] imprint, HashAlgorithmName hash)
     {
-        byte[] imprint = Cms.HashData(hash, data);
         byte[] nonce = RandomNumberGenerator.GetBytes(8);
         nonce[0] &= 0x7F; // positive
         if (nonce[0] == 0) nonce[0] = 1;
