@@ -69,7 +69,8 @@ All methods are static and thread-safe, so you can convert many documents in par
   (`font-weight`, `font-stretch`, `font-variation-settings`) and OpenType features such as tabular figures
   (`font-variant-numeric`, `font-feature-settings`).
   [More](https://pdfpecker.net/docs/fonts/)
-- **Right-to-left and hyphenation**: Arabic and Hebrew with bidi and shaping, and `hyphens: auto`.
+- **Right-to-left, CJK and hyphenation**: Arabic and Hebrew with bidi and shaping, Chinese, Japanese and Korean line
+  breaking with kinsoku rules, and `hyphens: auto`.
   [More](https://pdfpecker.net/docs/languages/)
 - **PDF/A, passwords and watermarks**: PDF/A-2, 3 and 4, AES-256 encryption and permissions, also for existing PDFs;
   text, image and SVG watermarks.
