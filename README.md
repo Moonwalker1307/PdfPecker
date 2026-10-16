@@ -47,46 +47,33 @@ var options = new PdfOptions
 options.Fonts.AddFile("fonts/OpenSans-Regular.ttf");
 byte[] letter = HtmlToPdf.Convert(html, options);
 
-// Markdown to PDF, merging, and PDF pages to PNG
+// Markdown to PDF or HTML, merging, and PDF pages to PNG
 byte[] guide = MarkdownToPdf.Convert(File.ReadAllText("README.md"));
+string guideHtml = MarkdownToHtml.Convert(File.ReadAllText("README.md"));
 byte[] merged = PdfMerger.Merge(invoicePdf, termsPdf);
 byte[][] pngs = PdfToImage.Convert(pdf, new ImageOptions { Dpi = 150 });
+
+// Open a PDF once and render its pages one at a time, or in parallel
+var renderer = PdfRenderer.Open(pdf);
+renderer.RenderPage(0, new ImageOptions { Dpi = 150 }).Save("page1.png");
 ```
 
 The conversion methods are static and thread-safe, so you can convert many documents in parallel. The few instance types are `FontCollection` and `PdfRenderer`, which can be shared by parallel work, and `StreamingPdfMerger`, which builds one output and is used from one thread at a time.
 
 ## Features
 
-- **HTML and CSS**: flexbox, grid, multi-column, floats and positioning, transforms, transparency, gradients,
-  `var()` and `calc()`, relative colours, media and container queries, `@import`, nesting and cascade layers, `filter`,
-  `clip-path`, blend modes, `border-image`, inset shadows, blurred text shadows, `aspect-ratio`, `::first-letter` and
-  `::first-line`, `@counter-style` and list images, inline SVG and SVG files (with embedded images and every SVG filter), PNG, JPEG, GIF, WebP, BMP and TIFF. [More](https://pdfpecker.net/docs/html-and-css/)
-- **Paged media**: `@page` sizes and margin boxes, its own margins for the first page and mirrored left and right pages,
-  content laid out at each page's own width, right-to-left page order, named pages, running headers, footnotes
-  (`float: footnote`), tables of contents with page numbers, repeated table headers, orphans, widows and break control. [More](https://pdfpecker.net/docs/paged-media/)
+- **HTML and CSS**: flexbox, grid, floats, positioning, transforms, gradients, filters, media and container queries, inline SVG, and PNG, JPEG, GIF, WebP, BMP and TIFF images. [More](https://pdfpecker.net/docs/html-and-css/)
+- **Paged media**: `@page` sizes and margin boxes, running headers, footnotes, tables of contents with page numbers, and break control. [More](https://pdfpecker.net/docs/paged-media/)
 - **Markdown**: CommonMark 0.31 and GitHub Flavored Markdown to PDF or HTML. [More](https://pdfpecker.net/docs/markdown/)
-- **Fonts**: TrueType, OpenType, WOFF and WOFF2, subset and embedded, with `@font-face`, kerning, ligatures, variable fonts
-  (`font-weight`, `font-stretch`, `font-variation-settings`) and OpenType features such as tabular figures
-  (`font-variant-numeric`, `font-feature-settings`).
-  [More](https://pdfpecker.net/docs/fonts/)
-- **Right-to-left, CJK and hyphenation**: Arabic and Hebrew with bidi and shaping, Chinese, Japanese and Korean line
-  breaking with kinsoku rules, and `hyphens: auto`.
-  [More](https://pdfpecker.net/docs/languages/)
-- **PDF/A, passwords and watermarks**: PDF/A-2, 3 and 4, AES-256 encryption and permissions, also for existing PDFs;
-  text, image and SVG watermarks.
-  [More](https://pdfpecker.net/docs/pdfa-and-passwords/)
+- **Fonts**: TrueType, OpenType, WOFF and WOFF2, subset and embedded, with kerning, ligatures, variable fonts and OpenType features. [More](https://pdfpecker.net/docs/fonts/)
+- **Languages**: Arabic and Hebrew with bidi and shaping, CJK line breaking, and hyphenation. [More](https://pdfpecker.net/docs/languages/)
+- **PDF/A, passwords and watermarks**: PDF/A-2, 3 and 4, AES-256 encryption, and text, image and SVG watermarks. [More](https://pdfpecker.net/docs/pdfa-and-passwords/)
 - **Accessibility**: tagged PDF, PDF/UA-1 and PDF/UA-2 built from your HTML. [More](https://pdfpecker.net/docs/accessibility/)
-- **Fillable forms**: HTML inputs, check boxes, radio buttons, selects and text areas become PDF form fields; read, fill and flatten the fields of existing PDFs.
-  [More](https://pdfpecker.net/docs/forms/)
-- **Digital signatures**: PAdES signatures, visible boxes, timestamps, existing signature fields, external signers such
-  as HSMs, smart cards or cloud key vaults, verification of signed PDFs, and long-term validation (DSS with OCSP and
-  CRLs, document timestamps).
-  [More](https://pdfpecker.net/docs/signatures/)
-- **E-invoices and attachments**: Factur-X and ZUGFeRD, PDFs in Peppol and OIOUBL invoices, and any embedded file.
-  [More](https://pdfpecker.net/docs/e-invoices/)
-- **Existing PDFs**: merge (also streamed), extract, reorder, rotate and split pages, stamp or underlay pages, and extract their text with positions.
-  [More](https://pdfpecker.net/docs/merging/)
-- **PDF to image**: PdfPecker's own renderer turns any PDF page into PNG, JPEG or WebP. [More](https://pdfpecker.net/docs/pdf-to-image/)
+- **Forms**: HTML inputs become fillable PDF fields; read, fill and flatten the fields of existing PDFs. [More](https://pdfpecker.net/docs/forms/)
+- **Digital signatures**: PAdES signing, timestamps, external signers, verification and long-term validation. [More](https://pdfpecker.net/docs/signatures/)
+- **E-invoices and attachments**: Factur-X and ZUGFeRD, PDFs in Peppol and OIOUBL invoices, and any embedded file. [More](https://pdfpecker.net/docs/e-invoices/)
+- **Existing PDFs**: merge (also streamed), split, reorder, rotate, stamp and extract text with positions. [More](https://pdfpecker.net/docs/merging/)
+- **PDF to image**: renders any PDF page, including JPEG 2000, JBIG2 and CCITT images, to PNG, JPEG or WebP. [More](https://pdfpecker.net/docs/pdf-to-image/)
 
 PdfPecker is built for HTML templates you control: it runs no JavaScript and never fetches anything from the network on
 its own. See the [limitations](https://pdfpecker.net/docs/limitations/) for what it does not do yet.
@@ -124,8 +111,10 @@ dotnet test
 dotnet run --project samples/PdfPecker.Sample -c Release      # converts samples/PdfPecker.Sample/html/*.html and *.md into ./output
 dotnet run --project bench/PdfPecker.Benchmarks -c Release
 dotnet run --project bench/PdfPecker.Benchmarks -c Release -- --requirements    # memory and CPU per conversion
-dotnet pack src/PdfPecker -c Release -o ./nupkg
+dotnet pack src/PdfPecker -c Release -o ./nupkg                # also checks the public API against the last release
 ```
+
+How to fuzz the parsers is in [fuzz/README.md](fuzz/README.md).
 
 ## License
 
