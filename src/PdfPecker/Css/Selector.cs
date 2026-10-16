@@ -14,7 +14,7 @@ internal enum PseudoKind : byte
 }
 
 /// <summary>The pseudo-element a selector's subject names, if any.</summary>
-internal enum PseudoElement : byte { None, Before, After, Marker, FirstLetter, FirstLine }
+internal enum PseudoElement : byte { None, Before, After, Marker, FirstLetter, FirstLine, FootnoteCall, FootnoteMarker }
 
 internal sealed class AttrCondition
 {
@@ -483,13 +483,16 @@ internal sealed class Selector
                 {
                     // ::before, ::after, ::first-letter, ::first-line (also with the old single colon) and ::marker;
                     // other pseudo-elements drop the rule.
-                    if (nesting > 0 || name is not ("before" or "after" or "marker" or "first-letter" or "first-line")) return null;
+                    if (nesting > 0 || name is not ("before" or "after" or "marker" or "first-letter" or "first-line" or "footnote-call"
+                            or "footnote-marker")) return null;
                     pseudoElement = name switch
                     {
                         "before" => PseudoElement.Before,
                         "after" => PseudoElement.After,
                         "first-letter" => PseudoElement.FirstLetter,
                         "first-line" => PseudoElement.FirstLine,
+                        "footnote-call" => PseudoElement.FootnoteCall,
+                        "footnote-marker" => PseudoElement.FootnoteMarker,
                         _ => PseudoElement.Marker,
                     };
                     any = true;

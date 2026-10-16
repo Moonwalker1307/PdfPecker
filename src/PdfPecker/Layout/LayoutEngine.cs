@@ -86,10 +86,13 @@ internal sealed partial class LayoutEngine
 
     public float Layout(Element document, float width)
     {
+        _rootWidth = width;
         float bottom = LayoutFlow(document, 0, 0, width);
         if (_floats.Any && _floats.Bottom > bottom) bottom = _floats.Bottom; // the root contains its floats
+        FinishFootnotes();
         FinishRoot(width);
-        return bottom;
+        // A footnote continued past the last page of content needs a page of its own.
+        return Math.Max(bottom, FootnotesBottom());
     }
 
     /// <summary>Lays out a running header or footer on its own, unpaginated, at y = 0. Returns its height including margins.</summary>
@@ -121,7 +124,9 @@ internal sealed partial class LayoutEngine
         int p = PageOf(y);
         if (h > _grid.Height(p + 1)) return y;
         float pageEnd = _grid.Start(p + 1);
-        return y + h > pageEnd + Eps ? pageEnd : y;
+        // The page's footnote area takes the bottom of its flow.
+        float flowEnd = _footnoteReserve.Count > 0 ? pageEnd - FootnoteReserve(p) : pageEnd;
+        return y + h > flowEnd + Eps ? pageEnd : y;
     }
 
     private float NextPage(float y)
@@ -138,12 +143,15 @@ internal sealed partial class LayoutEngine
         return true;
     }
 
-    private bool CrossesPage(float top, float bottom) => _paginate && bottom - top > Eps && PageOf(top) != PageOf(bottom - 0.5f);
+    private bool CrossesPage(float top, float bottom) => _paginate && bottom - top > Eps
+        && (PageOf(top) != PageOf(bottom - 0.5f) || _footnoteReserve.Count > 0 && bottom > FlowEnd(PageOf(top)) + Eps);
 
     private void Truncate(int count, bool keepFloats = false)
     {
         if (_ops.Count > count) _ops.RemoveRange(count, _ops.Count - count);
         if (!keepFloats) _floats.Truncate(count);
+        // keepFloats means the ops were moved into one op at count, not removed: their footnotes stay.
+        if (_footnoteCalls.Count > 0) TruncateFootnotes(count, wrapped: keepFloats);
     }
 
     // ------------------------------------------------------------------ block formatting
@@ -939,6 +947,7 @@ internal sealed partial class LayoutEngine
     // ------------------------------------------------------------------ anchors, captured layout, size overrides
 
     private List<string>? _captureAnchors;
+    private bool _capturing;
     private int _forcedBreaks; // forced page breaks seen; captured content without any can be reused when it fits on a page
     private readonly Dictionary<Element, float> _widthOverride = new();
     private readonly Dictionary<Element, float> _heightOverride = new();
@@ -991,7 +1000,10 @@ internal sealed partial class LayoutEngine
     private void SetAnchor(string id, float y)
     {
         Anchors[id] = y;
-        _captureAnchors?.Add(id);
+        // Inside captured content, the anchors move with it when it is placed (and footnote calls are placed then).
+        if (_capturing) (_captureAnchors ??= new List<string>()).Add(id);
+        // A footnote call in content that was laid out on its own and has now been moved into place.
+        if (Footnotes != null && _paginate && id.Length > 2 && id[0] == '\u0001' && id[1] == 'c') PlaceFootnoteCallAt(id, y);
     }
 
     /// <summary>Content laid out on its own (unpaginated, at the origin) so that it can be measured and then moved into place.</summary>
@@ -1013,6 +1025,7 @@ internal sealed partial class LayoutEngine
         var savedMarker = _marker;
         float savedBaseline = _lastBaseline;
         var savedAnchors = _captureAnchors;
+        bool savedCapturing = _capturing;
         float savedRight = _lastBoxRight;
         var savedFloats = EnterFormattingContext();
         var boundary = _boundaryPool.TryPop(out var pooled) ? pooled : new CbFrame { Boundary = true };
@@ -1023,6 +1036,7 @@ internal sealed partial class LayoutEngine
         _marker = null;
         _lastBaseline = float.NaN;
         _captureAnchors = null;
+        _capturing = true;
         _lastBoxRight = 0;
         int breaks = _forcedBreaks;
         try
@@ -1049,6 +1063,7 @@ internal sealed partial class LayoutEngine
             _marker = savedMarker;
             _lastBaseline = savedBaseline;
             _captureAnchors = savedAnchors;
+            _capturing = savedCapturing;
             _lastBoxRight = savedRight;
         }
     }

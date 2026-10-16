@@ -25,6 +25,15 @@ internal sealed class PagedContent
 
     /// <summary>The page (0-based) whose margin boxes are being generated.</summary>
     public int CurrentPage;
+
+    /// <summary>
+    /// The value <c>@page { counter-reset: footnote }</c> gives the footnote counter at the top of every page, so
+    /// footnotes are numbered per page; null when no @page rule resets it.
+    /// </summary>
+    public int? FootnotePageReset;
+
+    /// <summary>The page (0-based, in the whole document) of each footnote's call, by footnote index, from the last layout.</summary>
+    public Func<int, int?>? FootnotePageOf;
 }
 
 /// <summary>A <c>string-set</c> assignment: the element's name and value, and the anchor key that finds its page.</summary>

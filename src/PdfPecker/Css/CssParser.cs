@@ -63,6 +63,8 @@ internal sealed class PageRule
     public string Selector = ""; // "", ":first", ":left", ":right" or ":blank"
     public readonly List<Declaration> Declarations = new();
     public readonly Dictionary<string, List<Declaration>> MarginBoxes = new(StringComparer.Ordinal);
+    /// <summary>The declarations of the rule's <c>@footnote</c> area, or null when it has none.</summary>
+    public List<Declaration>? Footnote;
     public int Specificity => (Name.Length > 0 ? 4 : 0) + Selector switch { ":first" or ":blank" => 2, ":left" or ":right" => 1, _ => 0 };
 }
 
@@ -445,6 +447,10 @@ internal static class CssParser
                 if (rule.MarginBoxes.TryGetValue(name, out var existing)) existing.AddRange(decls);
                 else rule.MarginBoxes[name] = decls;
             }
+            else if (name == "footnote")
+            {
+                ParseDeclarations(body.Substring(brace + 1, Math.Max(0, close - brace - 1)), rule.Footnote ??= new List<Declaration>());
+            }
             i = declStart = Math.Min(close + 1, body.Length);
         }
         declText.Append(body, declStart, body.Length - declStart);
@@ -457,6 +463,7 @@ internal static class CssParser
                 r = new PageRule { Name = name, Selector = pseudo };
                 r.Declarations.AddRange(rule.Declarations);
                 foreach (var (box, decls) in rule.MarginBoxes) r.MarginBoxes[box] = decls;
+                r.Footnote = rule.Footnote;
             }
             sheet.PageRules.Add(r);
             if (name.Length == 0 && pseudo.Length == 0) sheet.PageDeclarations.AddRange(r.Declarations);

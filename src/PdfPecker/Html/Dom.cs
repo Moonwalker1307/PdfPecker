@@ -50,6 +50,12 @@ internal sealed class Element : Node
     /// <summary>An anchor key under which layout records where this element starts (string-set elements).</summary>
     public string? LayoutKey;
 
+    /// <summary>A footnote (float: footnote): its number among the document's footnotes, from 0 in document order; else -1.</summary>
+    public int FootnoteIndex = -1;
+
+    /// <summary>For a ::footnote-call box: the footnote it calls.</summary>
+    public Element? FootnoteBody;
+
     /// <summary>For input, textarea, select and button elements: the form control they draw.</summary>
     public Layout.FormControl? Control;
 
