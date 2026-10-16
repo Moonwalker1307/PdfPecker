@@ -5,9 +5,12 @@ namespace PdfPecker;
 /// <summary>A page size in PostScript points (1/72 inch).</summary>
 public readonly struct PageSize
 {
+    /// <summary>The width in points.</summary>
     public float Width { get; }
+    /// <summary>The height in points.</summary>
     public float Height { get; }
 
+    /// <summary>Creates a page size from a width and height in points.</summary>
     public PageSize(float width, float height)
     {
         if (width <= 0 || height <= 0) throw new ArgumentOutOfRangeException(nameof(width), "Page dimensions must be positive.");
@@ -15,10 +18,15 @@ public readonly struct PageSize
         Height = height;
     }
 
+    /// <summary>ISO A3, 297 x 420 mm.</summary>
     public static PageSize A3 => new(841.89f, 1190.55f);
+    /// <summary>ISO A4, 210 x 297 mm.</summary>
     public static PageSize A4 => new(595.28f, 841.89f);
+    /// <summary>ISO A5, 148 x 210 mm.</summary>
     public static PageSize A5 => new(419.53f, 595.28f);
+    /// <summary>US Letter, 8.5 x 11 inches.</summary>
     public static PageSize Letter => new(612f, 792f);
+    /// <summary>US Legal, 8.5 x 14 inches.</summary>
     public static PageSize Legal => new(612f, 1008f);
 
     /// <summary>The same size rotated to landscape orientation.</summary>
@@ -27,19 +35,26 @@ public readonly struct PageSize
     /// <summary>Creates a page size from millimetres.</summary>
     public static PageSize FromMillimeters(float width, float height) => new(width * 72f / 25.4f, height * 72f / 25.4f);
 
+    /// <summary>The size as width x height in points, e.g. "595.28x841.89pt".</summary>
     public override string ToString() => $"{Width}x{Height}pt";
 }
 
 /// <summary>Page margins in points.</summary>
 public readonly struct PageMargins
 {
+    /// <summary>The top margin in points.</summary>
     public float Top { get; }
+    /// <summary>The right margin in points.</summary>
     public float Right { get; }
+    /// <summary>The bottom margin in points.</summary>
     public float Bottom { get; }
+    /// <summary>The left margin in points.</summary>
     public float Left { get; }
 
+    /// <summary>Creates margins that are the same on all four sides, in points.</summary>
     public PageMargins(float all) : this(all, all, all, all) { }
 
+    /// <summary>Creates margins in points, in CSS order: top, right, bottom, left.</summary>
     public PageMargins(float top, float right, float bottom, float left)
     {
         Top = top;

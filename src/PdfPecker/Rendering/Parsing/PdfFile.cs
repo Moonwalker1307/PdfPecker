@@ -593,11 +593,14 @@ internal sealed class PdfFile
     /// <summary>What the page being rendered on this thread may still decode.</summary>
     internal static long DecodeLimit => t_budgeted ? Math.Max(0, t_decodeBudget) : long.MaxValue;
 
-    /// <summary>Applies the per-page decode budget and <paramref name="cancel"/> to decoding on this thread until disposed.</summary>
-    public static RenderScope BeginRender(CancellationToken cancel)
+    /// <summary>
+    /// Applies a decode budget (by default the per-page one) and <paramref name="cancel"/> to decoding on this thread
+    /// until disposed.
+    /// </summary>
+    public static RenderScope BeginRender(CancellationToken cancel, long budget = MaxDecodedPerPage)
     {
         t_budgeted = true;
-        t_decodeBudget = MaxDecodedPerPage;
+        t_decodeBudget = budget;
         t_cancel = cancel;
         return default;
     }

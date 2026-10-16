@@ -71,6 +71,7 @@ public sealed class PdfAttachment
     /// <summary>The MIME type written: <see cref="MimeType"/> or one guessed from the extension.</summary>
     internal string MimeTypeOrGuess => string.IsNullOrWhiteSpace(MimeType) ? EmbeddedFiles.GuessMimeType(FileName) : MimeType!.Trim();
 
+    /// <summary>The file name and size, for debugging and logs.</summary>
     public override string ToString() => $"{FileName} ({Data.Length} bytes)";
 }
 

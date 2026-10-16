@@ -36,6 +36,17 @@ public sealed class PdfLtvOptions
     public HttpClient? HttpClient { get; set; }
 
     /// <summary>
+    /// Decides which OCSP and CRL URLs may be contacted when <see cref="FetchRevocationData"/> is on. It is called with
+    /// each URL, redirect targets included, before the request; return false to skip it, as if the certificate did not
+    /// name it. The URLs come from certificates in the PDF, so use this to keep requests away from internal hosts.
+    /// Default: null, so every http and https URL is allowed. Whatever the filter says, one call contacts at most 32
+    /// distinct URLs, follows at most 3 redirects per CRL download (never from https to http) and stops fetching after
+    /// two minutes in total. A supplied <see cref="HttpClient"/> whose handler follows redirects itself does so without
+    /// asking the filter.
+    /// </summary>
+    public Func<Uri, bool>? UrlFilter { get; set; }
+
+    /// <summary>
     /// URL of an RFC 3161 timestamp server. When set, a document timestamp is added after the validation data, which
     /// seals it and the signatures with a trusted time (PAdES B-LTA). To make that timestamp long-term verifiable as
     /// well, call <see cref="PdfSigner.AddValidationData"/> again later without a timestamp URL.
