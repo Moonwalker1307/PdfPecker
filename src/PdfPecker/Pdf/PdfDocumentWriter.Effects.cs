@@ -23,21 +23,26 @@ internal sealed partial class PdfDocumentWriter
     private Dictionary<string, (int Index, float Dx, float Dy, float W, float H, float ContentBottom)>? _shadowImages;
     private Dictionary<TextFont, int>? _shadowFonts;
 
-    /// <summary>Draws the filtered pixels of a layer: the shadows under its content, or the blurred content.</summary>
-    private void WriteLayerRaster(ByteBuffer b, LayerOp layer, float pageTop)
+    /// <summary>
+    /// Draws the filtered pixels of a layer: the shadows under its content, or the blurred content. Returns false when
+    /// the filter is beyond its work budget and was left out.
+    /// </summary>
+    private bool WriteLayerRaster(ByteBuffer b, LayerOp layer, float pageTop)
     {
         if (!_layerRasters.TryGetValue(layer, out var r)) _layerRasters[layer] = r = layer.TextShadow ? RasterizeShadow(layer) : RasterizeLayer(layer);
-        if (r.Index == 0) return;
+        if (r.Index < 0) return false;
+        if (r.Index == 0) return true;
         SetFillAlpha(b, CssColor.Black); // an image is painted with the fill alpha
         b.Ascii("q ");
         // Content that goes on to another page is in the image too: keep to this page's part of the flow.
         if (!float.IsNaN(_flowTop) && (r.ContentTop < _flowTop - 0.5f || r.ContentBottom > _flowBottom + 0.5f))
         {
             float top = Math.Max(r.Y, _flowTop), bottom = Math.Min(r.Y + r.H, _flowBottom);
-            if (bottom <= top) { b.Ascii("Q\n"); return; }
+            if (bottom <= top) { b.Ascii("Q\n"); return true; }
             b.Num(PX(r.X)).Sp().Num(PY(bottom, pageTop)).Sp().Num(r.W).Sp().Num(bottom - top).Ascii(" re W n ");
         }
         b.Num(r.W).Ascii(" 0 0 ").Num(r.H).Sp().Num(PX(r.X)).Sp().Num(PY(r.Y + r.H, pageTop)).Ascii(" cm /Xr").Int(r.Index).Ascii(" Do Q\n");
+        return true;
     }
 
     /// <summary>
@@ -62,6 +67,7 @@ internal sealed partial class PdfDocumentWriter
             ph = Math.Max(1, Math.Floor(ph * k));
         }
         int w = (int)pw, h = (int)ph;
+        if (!f.WithinBudget(w, h)) return (-1, 0, 0, 0, 0, 0, 0); // drawn without the filter
         // A page of w × h points shows the flow rectangle (rx, ry, rw, rh) scaled to fill it, one point per pixel: the
         // margins move the flow's origin off the page (and keep all of it on the first page), and a layer scales it.
         var page = new PageSetup { Width = w, Height = h, MarginLeft = -rx, MarginTop = -ry, MarginBottom = -1e6f };
@@ -82,7 +88,7 @@ internal sealed partial class PdfDocumentWriter
             var px = rendered.Premultiplied;
             var alpha = new float[px.Length];
             for (int i = 0; i < px.Length; i++) alpha[i] = (px[i] >> 24) / 255f;
-            if (f.ApplyShadows(alpha, w, h, w / rw, h / rh) is not var (rgb, mask)) return default;
+            if (f.ApplyShadows(alpha, w, h, w / rw, h / rh, Cancellation) is not var (rgb, mask)) return default;
             _rasters.Add(new PdfImage
             {
                 Width = w, Height = h, Data = PdfImage.DeflatePredicted(rgb, w, h, 3, out string colorParms), DecodeParms = colorParms,
@@ -95,7 +101,7 @@ internal sealed partial class PdfDocumentWriter
         }
         var source = RenderPremultiplied(pdf, w, h);
         if (source == null) return default;
-        var image = FilterImage(f.Apply(source, w, h, w / rw, h / rh), w, h);
+        var image = FilterImage(f.Apply(source, w, h, w / rw, h / rh, Cancellation), w, h);
         if (image == null) return default;
         _rasters.Add(image);
         return (_rasters.Count, rx, ry, rw, rh, y0, y1);
