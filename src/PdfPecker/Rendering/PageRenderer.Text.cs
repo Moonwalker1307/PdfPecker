@@ -18,6 +18,7 @@ internal sealed partial class PageRenderer
 
     private void NextLine()
     {
+        _textMoved = true;
         _tlm = Matrix.Translation(0, -_gs.Leading).Multiply(_tlm);
         _tm = _tlm;
     }
@@ -44,7 +45,7 @@ internal sealed partial class PageRenderer
         if (font == null) return;
         var gs = _gs;
         int mode = gs.TextRender;
-        bool fill = mode is 0 or 2 or 4 or 6, stroke = mode is 1 or 2 or 5 or 6, clip = mode >= 4;
+        bool fill = mode is 0 or 2 or 4 or 6, stroke = mode is 1 or 2 or 5 or 6, clip = mode >= 4 && _text == null;
         if (clip) _textClip ??= new PathData();
         double fs = gs.FontSize, th = gs.HScale;
         bool canFill = fill && _hidden == 0 && SetupPaint(false);
@@ -64,7 +65,11 @@ internal sealed partial class PageRenderer
                 trm = Matrix.Translation(-vx * fs * th, -vy * fs).Multiply(new Matrix(fs * th, 0, 0, fs, 0, gs.Rise)).Multiply(_tm).Multiply(gs.Ctm);
             }
 
-            if (font.Kind == FontKind.Type3)
+            if (_text != null)
+            {
+                if (_hidden == 0) CollectGlyph(font, code, w0, w1, vertical);
+            }
+            else if (font.Kind == FontKind.Type3)
             {
                 if (_hidden == 0) DrawType3Glyph(font, code, trm, res);
             }
@@ -109,6 +114,47 @@ internal sealed partial class PageRenderer
                 _tm = Matrix.Translation(tx, 0).Multiply(_tm);
             }
         }
+    }
+
+    /// <summary>
+    /// Records a glyph for text extraction. Invisible text (render mode 3) is kept: it is how scanned pages carry their
+    /// recognised text.
+    /// </summary>
+    private void CollectGlyph(PdfFont font, int code, double w0, double w1, bool vertical)
+    {
+        var gs = _gs;
+        double fs = gs.FontSize, th = gs.HScale;
+        var trm = new Matrix(fs * th, 0, 0, fs, 0, gs.Rise).Multiply(_tm).Multiply(gs.Ctm);
+        var (x, y) = trm.Apply(0, 0);
+        // Character spacing belongs to the glyph so letter-spaced text does not read as separate words; word spacing
+        // does not, so a widened space still reads as a word gap.
+        double advance = Math.Abs(fs) > 1e-9 ? Math.Max(0, w0 + gs.CharSpacing / fs) : w0;
+        var (ex, ey) = vertical ? trm.Apply(0, w1) : trm.Apply(advance, 0);
+        double xLen = Math.Sqrt(trm.A * trm.A + trm.B * trm.B), yLen = Math.Sqrt(trm.C * trm.C + trm.D * trm.D);
+        // Vertical text runs down the text space's y axis, so its lines follow that axis.
+        double dx = vertical ? -trm.C : trm.A, dy = vertical ? -trm.D : trm.B, size = yLen;
+        double len = Math.Sqrt(dx * dx + dy * dy);
+        if (!(len > 1e-9) || !double.IsFinite(x) || !double.IsFinite(y) || !double.IsFinite(ex) || !double.IsFinite(ey)) return;
+        string? text;
+        if (_actualText != null)
+        {
+            if (_actualTextShown)
+            {
+                _text!.ExtendLast(ex, ey);
+                return;
+            }
+            _actualTextShown = true;
+            text = _actualText;
+        }
+        else text = font.Unicode(code);
+        if (string.IsNullOrEmpty(text)) return;
+        bool moved = _textMoved;
+        _textMoved = false;
+        _text!.Add(new TextGlyph
+        {
+            Text = text, Moved = moved, X = x, Y = y, EndX = ex, EndY = ey, DirX = dx / len, DirY = dy / len, Size = size,
+            SpaceWidth = vertical ? 0 : font.SpaceWidth * xLen, Font = font.BaseFont,
+        });
     }
 
     private void ApplyTextClip()

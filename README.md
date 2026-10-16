@@ -76,14 +76,15 @@ All methods are static and thread-safe, so you can convert many documents in par
   text, image and SVG watermarks.
   [More](https://pdfpecker.net/docs/pdfa-and-passwords/)
 - **Accessibility**: tagged PDF, PDF/UA-1 and PDF/UA-2 built from your HTML. [More](https://pdfpecker.net/docs/accessibility/)
-- **Fillable forms**: HTML inputs, check boxes, radio buttons, selects and text areas become PDF form fields.
+- **Fillable forms**: HTML inputs, check boxes, radio buttons, selects and text areas become PDF form fields; read, fill and flatten the fields of existing PDFs.
   [More](https://pdfpecker.net/docs/forms/)
-- **Digital signatures**: PAdES signatures, visible boxes, timestamps, existing signature fields, and external signers
-  such as HSMs, smart cards or cloud key vaults.
+- **Digital signatures**: PAdES signatures, visible boxes, timestamps, existing signature fields, external signers such
+  as HSMs, smart cards or cloud key vaults, verification of signed PDFs, and long-term validation (DSS with OCSP and
+  CRLs, document timestamps).
   [More](https://pdfpecker.net/docs/signatures/)
 - **E-invoices and attachments**: Factur-X and ZUGFeRD, PDFs in Peppol and OIOUBL invoices, and any embedded file.
   [More](https://pdfpecker.net/docs/e-invoices/)
-- **Existing PDFs**: merge (also streamed), extract, reorder, rotate and split pages, and stamp or underlay pages.
+- **Existing PDFs**: merge (also streamed), extract, reorder, rotate and split pages, stamp or underlay pages, and extract their text with positions.
   [More](https://pdfpecker.net/docs/merging/)
 - **PDF to image**: PdfPecker's own renderer turns any PDF page into PNG, JPEG or WebP. [More](https://pdfpecker.net/docs/pdf-to-image/)
 
