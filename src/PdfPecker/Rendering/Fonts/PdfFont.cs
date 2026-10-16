@@ -171,7 +171,9 @@ internal sealed class PdfFont
     /// <summary>The text a character code stands for, or null when the font does not say.</summary>
     public string? Unicode(int code)
     {
-        if (_toUnicode?.ToUnicode((uint)code) is { Length: > 0 } mapped) return mapped;
+        // An empty mapping is deliberate: the extra glyphs of a shaped cluster stand for no characters of their own, and
+        // falling back to the font's cmap would repeat a character the cluster's first glyph already gives.
+        if (_toUnicode?.ToUnicode((uint)code) is { } mapped) return mapped;
         if (Kind == FontKind.Cid)
         {
             if (_unicodeCodes) return code is > 0 and <= 0xFFFF && !char.IsSurrogate((char)code) ? ((char)code).ToString() : null;
