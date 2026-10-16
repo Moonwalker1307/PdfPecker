@@ -17,6 +17,7 @@ internal sealed class Jbig2Decoder
     private const int MaxFill = 256; // arithmetic decoding far past the end of the data means the data is damaged
 
     private long _work;
+    private long _imagePixels = PdfImageDecoder.MaxPixels; // the size of the image in the PDF, which bounds a region
 
     private void Work(long n)
     {
@@ -128,7 +129,7 @@ internal sealed class Jbig2Decoder
     public static byte[]? Decode(byte[] data, byte[]? globals, int width, int height)
     {
         if (width <= 0 || height <= 0 || (long)width * height > PdfImageDecoder.MaxPixels) return null;
-        var dec = new Jbig2Decoder();
+        var dec = new Jbig2Decoder { _imagePixels = (long)width * height };
         try
         {
             if (globals != null) dec.Run(globals, height);
@@ -1216,8 +1217,16 @@ internal sealed class Jbig2Decoder
         Bitmap[]? pats = null;
         foreach (int r in seg.Refs) if (_patterns.TryGetValue(r, out pats)) break;
         if (pats == null || pats.Length == 0 || info.W <= 0 || info.H <= 0) return null;
-        if (gw == 0 || gh == 0 || (long)gw * gh > PdfImageDecoder.MaxPixels) return null;
+        // The region is drawn on a page no larger than the image, and every grid cell covers at least a pixel of the
+        // region in any real file. Both sizes come from the segment header, so without these bounds a few bytes could
+        // ask for gigabytes: the region, the skip bitmap, the bit-planes and the gray-scale values all scale with them.
+        // Each side is checked before the product, which two 32-bit sides could overflow even as a long.
+        long regionPixels = (long)info.W * info.H;
+        if (regionPixels > _imagePixels || gw == 0 || gh == 0 || gw > regionPixels || gh > regionPixels) return null;
+        long cells = (long)gw * gh;
+        if (cells > regionPixels) return null;
         int ngw = (int)gw, ngh = (int)gh;
+        Work(cells * sizeof(int)); // the gray-scale values below
         var region = NewBitmap(info.W, info.H);
         region.Fill(defPixel);
         int hpw = pats[0].W, hph = pats[0].H;

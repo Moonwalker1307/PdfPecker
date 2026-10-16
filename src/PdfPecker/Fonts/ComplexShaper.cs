@@ -78,7 +78,14 @@ internal static class ComplexShaper
     private static readonly ConcurrentDictionary<(FontProgram, Script), Plan> s_plans = new();
 
     private static Plan GetPlan(FontProgram font, OpenTypeLayout? ot, Script script)
-        => s_plans.GetOrAdd((font, script), static (key, ot) => BuildPlan(ot, key.Item2), ot);
+        => s_plans.GetOrAdd((font, script), static (key, ot) =>
+        {
+            // OpenTypeLayout checks the lists a plan reads when it loads the font; should a damaged font still get
+            // past that, its text is shaped without the layout tables rather than failing the document. The plan is
+            // cached, so this runs once per font and script.
+            try { return BuildPlan(ot, key.Item2); }
+            catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException) { return new Plan(); }
+        }, ot);
 
     private static Plan BuildPlan(OpenTypeLayout? ot, Script script)
     {
