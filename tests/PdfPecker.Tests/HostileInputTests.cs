@@ -128,6 +128,19 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Nested_floats_that_paginate_are_laid_out_once_per_level()
+    {
+        // Found by the fuzzer: target html, timeout-1abcdf31. A float that holds a forced break cannot be moved into
+        // place as measured, so it is laid out again on the page, and so was every float nested in it, once per level
+        // above it. The parser stops nesting at 256 levels, so the rest of the floats are siblings in the innermost one.
+        var html = Repeat("<div style='float:left'>", 250) + Repeat("<div style='float:left'></div>", 8000)
+                   + "<p>before the break</p><h2 style='page-break-before:always'>after the break</h2>";
+        var pdf = Bounded(html);
+        AssertStructurallyValid(pdf);
+        Assert.Equal(2, PageCount(pdf));
+    }
+
+    [Fact]
     public void Broken_words_keep_every_character()
     {
         var pdf = ConvertUncompressed("<p style='width:40pt;font-family:Courier;font-size:10pt;overflow-wrap:break-word'>ABCDEFGHIJKLMNOPQRSTUVWXYZ</p>");
