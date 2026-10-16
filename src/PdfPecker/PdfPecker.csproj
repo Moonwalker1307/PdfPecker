@@ -51,6 +51,7 @@
     <EmbeddedResource Include="Text/Hyphenation/*.hyph.br" LogicalName="PdfPecker.Text.Hyphenation.%(Filename)%(Extension)" />
     <InternalsVisibleTo Include="PdfPecker.Tests" />
     <InternalsVisibleTo Include="FontPackBuilder" />
+    <InternalsVisibleTo Include="PdfPecker.Fuzz" />
   </ItemGroup>
 
 </Project>
