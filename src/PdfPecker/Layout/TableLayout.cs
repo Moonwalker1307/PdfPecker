@@ -114,7 +114,7 @@ internal sealed partial class LayoutEngine
             for (int k = 0; k < span && colIndex < n; k++, colIndex++)
             {
                 if (cs.Width.Unit == LengthUnit.Percent) m.ColPct[colIndex] = cs.Width.Value;
-                else if (!cs.Width.IsAuto) m.ColFixed[colIndex] = cs.Width.Value;
+                else if (!cs.Width.IsAuto && cs.Width.Unit != LengthUnit.Calc) m.ColFixed[colIndex] = cs.Width.Value;
             }
         }
 
@@ -134,8 +134,9 @@ internal sealed partial class LayoutEngine
                 float frame = cs.PaddingLeft.Resolve(0) + cs.PaddingRight.Resolve(0) + borders;
                 cell.Min = mn + frame;
                 cell.Max = Math.Max(mx + frame, cell.Min);
+                // A width mixing a percentage with other units, such as calc(50% - 10px), is auto, as in Chrome.
                 if (cs.Width.Unit == LengthUnit.Percent) cell.PercentWidth = cs.Width.Value;
-                else if (!cs.Width.IsAuto)
+                else if (!cs.Width.IsAuto && cs.Width.Unit != LengthUnit.Calc)
                 {
                     cell.FixedWidth = cs.Width.Value + (cs.BorderBox ? 0 : frame);
                     cell.Max = Math.Max(cell.Min, cell.FixedWidth);

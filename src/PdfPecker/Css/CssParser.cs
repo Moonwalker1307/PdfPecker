@@ -76,6 +76,7 @@ internal sealed class Stylesheet
     public readonly List<PageRule> PageRules = new();
     public readonly List<List<Declaration>> FontFaces = new(); // @font-face descriptors, one list per rule
     public readonly List<RegisteredProperty> RegisteredProperties = new();
+    public readonly List<CounterStyleRule> CounterStyles = new(); // @counter-style rules, in source order
     public readonly CascadeLayer LayerRoot = new("");
     public MediaContext Media = new();
     public int NextOrder;
@@ -280,6 +281,9 @@ internal static class CssParser
                 }
                 else if (atName == "property")
                     ParseProperty(prelude, s.Substring(brace + 1, blockEnd - brace - 1), sheet);
+                else if (atName == "counter-style" && sheet.CounterStyles.Count < 1024
+                         && CounterStyleRule.Parse(prelude, s.Substring(brace + 1, blockEnd - brace - 1)) is { } counterStyle)
+                    sheet.CounterStyles.Add(counterStyle);
                 i = Math.Min(blockEnd + 1, end);
                 continue;
             }
@@ -732,6 +736,8 @@ internal static class CssParser
                         Add("border-" + side + "-style", style);
                         Add("border-" + side + "-color", color);
                     }
+                    // The border shorthand also resets border-image, which it cannot set.
+                    foreach (var longhand in CssBorderImage.Longhands) Add(longhand, "initial");
                 }
                 else
                 {
@@ -743,6 +749,9 @@ internal static class CssParser
             }
             case "background":
                 CssBackground.ExpandShorthand(value, Add);
+                return;
+            case "border-image":
+                CssBorderImage.ExpandShorthand(value, Add);
                 return;
             case "outline":
             {
@@ -763,14 +772,42 @@ internal static class CssParser
                 ExpandFont(value, output, important);
                 return;
             case "list-style":
+            {
+                // The shorthand sets all three longhands; "none" is the type or the image, whichever is not given.
+                string? position = null, image = null, type = null;
+                int nones = 0;
                 foreach (var tok in Tokens(value))
                 {
                     var lower = tok.ToLowerInvariant();
-                    if (lower is "inside" or "outside") Add("list-style-position", lower);
-                    else if (lower[0] is '"' or '\'') Add("list-style-type", tok);
-                    else if (!lower.StartsWith("url(", StringComparison.Ordinal)) Add("list-style-type", lower);
+                    if (lower is "inside" or "outside")
+                    {
+                        if (position != null) return;
+                        position = lower;
+                    }
+                    else if (lower == "none") nones++;
+                    else if (lower.StartsWith("url(", StringComparison.Ordinal) || lower.Contains("gradient(", StringComparison.Ordinal)
+                             || lower.StartsWith("image-set(", StringComparison.Ordinal))
+                    {
+                        if (image != null) return;
+                        image = tok;
+                    }
+                    else
+                    {
+                        if (type != null) return;
+                        type = tok;
+                    }
                 }
+                if (nones > 2 || nones == 2 && (type != null || image != null) || nones == 1 && type != null && image != null) return;
+                if (nones > 0)
+                {
+                    if (type == null) type = "none";
+                    if (image == null) image = "none";
+                }
+                Add("list-style-position", position ?? "outside");
+                Add("list-style-image", image ?? "none");
+                Add("list-style-type", type ?? "disc");
                 return;
+            }
             case "page-break-before":
             case "page-break-after":
             case "page-break-inside":
@@ -872,23 +909,27 @@ internal static class CssParser
             }
             case "font-variant":
             {
-                // The caps and ligature parts; numeric, east-asian and the rest are not supported.
+                // The caps, ligature and numeric parts; east-asian and the rest are not supported.
                 var lower = value.Trim().ToLowerInvariant();
                 if (lower is "normal" or "none" or "inherit" or "initial" or "unset")
                 {
                     Add("font-variant-caps", lower == "none" ? "normal" : lower);
                     Add("font-variant-ligatures", lower);
+                    Add("font-variant-numeric", lower == "none" ? "normal" : lower);
                     return;
                 }
                 string caps = "normal";
                 var ligatures = new List<string>();
+                var numeric = new List<string>();
                 foreach (var t in Tokens(lower))
                 {
                     if (t is "small-caps" or "all-small-caps" or "petite-caps" or "all-petite-caps" or "unicase" or "titling-caps") caps = t;
                     else if (t.EndsWith("ligatures", StringComparison.Ordinal) || t.EndsWith("contextual", StringComparison.Ordinal)) ligatures.Add(t);
+                    else if (t.EndsWith("-nums", StringComparison.Ordinal) || t.EndsWith("-fractions", StringComparison.Ordinal) || t is "ordinal" or "slashed-zero") numeric.Add(t);
                 }
                 Add("font-variant-caps", caps);
                 Add("font-variant-ligatures", ligatures.Count == 0 ? "normal" : string.Join(" ", ligatures));
+                Add("font-variant-numeric", numeric.Count == 0 ? "normal" : string.Join(" ", numeric));
                 return;
             }
             case "column-rule":
@@ -1017,7 +1058,7 @@ internal static class CssParser
         if (lower is "caption" or "icon" or "menu" or "message-box" or "small-caption" or "status-bar") return;
 
         var tokens = Tokens(value);
-        string style = "normal", weight = "normal", size = "medium", lineHeight = "normal", caps = "normal";
+        string style = "normal", weight = "normal", size = "medium", lineHeight = "normal", caps = "normal", stretch = "normal";
         int i = 0;
         for (; i < tokens.Count; i++)
         {
@@ -1025,6 +1066,8 @@ internal static class CssParser
             if (t is "italic" or "oblique") style = t;
             else if (t is "bold" or "bolder" or "lighter" || t.Length == 3 && char.IsDigit(t[0]) && t.EndsWith("00", StringComparison.Ordinal)) weight = t;
             else if (t == "small-caps") caps = t;
+            else if (t is "ultra-condensed" or "extra-condensed" or "condensed" or "semi-condensed" or "semi-expanded" or "expanded"
+                     or "extra-expanded" or "ultra-expanded") stretch = t;
             else if (t == "normal") { }
             else break;
         }
@@ -1052,6 +1095,8 @@ internal static class CssParser
         Add("font-size", size);
         Add("line-height", lineHeight);
         Add("font-variant-caps", caps);
+        Add("font-stretch", stretch);
+        Add("font-variant-numeric", "normal");
         if (family.Length > 0) Add("font-family", family);
     }
 }

@@ -57,6 +57,24 @@ internal sealed class EmbeddedFont : TextFont
     public override TextFont WithoutLigatures()
         => _ligatures == null ? this : _withoutLigatures ??= new EmbeddedFont(this);
 
+    private System.Collections.Concurrent.ConcurrentDictionary<string, TextFont>? _variants;
+
+    public override TextFont WithFeatures(string features)
+    {
+        var program = Program.WithFeatures(features);
+        if (ReferenceEquals(program, Program)) return this;
+        var variants = LazyInitializer.EnsureInitialized(ref _variants, () => new());
+        return variants.GetOrAdd(features, _ => new EmbeddedFont(this, program));
+    }
+
+    private EmbeddedFont(EmbeddedFont font, FontProgram program) : this(program, font.SyntheticBold, font.SyntheticItalic, font._range)
+    {
+        Ascent = font.Ascent;
+        Descent = font.Descent;
+        LineGap = font.LineGap;
+        if (font._ligatures == null) _ligatures = null;
+    }
+
     /// <summary>True when the text may form a ligature, so it has to be shaped glyph by glyph.</summary>
     public bool MayLigate(string s, int start, int length)
     {
@@ -228,6 +246,12 @@ internal sealed class FontChain : TextFont
 
     public override TextFont WithoutLigatures()
         => _withoutLigatures ??= new FontChain(_primary.WithoutLigatures(), cp => _fallback(cp)?.WithoutLigatures());
+
+    private System.Collections.Concurrent.ConcurrentDictionary<string, FontChain>? _variants;
+
+    public override TextFont WithFeatures(string features)
+        => LazyInitializer.EnsureInitialized(ref _variants, () => new())
+            .GetOrAdd(features, k => new FontChain(_primary.WithFeatures(k), cp => _fallback(cp)?.WithFeatures(k)));
 
     public override int KernUnits(int left, int right)
     {
