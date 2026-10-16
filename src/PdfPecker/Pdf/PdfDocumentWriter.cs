@@ -1008,7 +1008,9 @@ internal sealed partial class PdfDocumentWriter
         // Cross-reference table and trailer.
         long xref = _out.Length;
         int count = _xref.Count;
-        _xref.WriteTable(_out, count, allInUse: true);
+        // This writer numbers its objects up front and must write every one of them.
+        System.Diagnostics.Debug.Assert(_xref.FirstMissing(count) < 0, "An object id was handed out but never written.");
+        _xref.WriteTable(_out, count);
         var fileId = System.Security.Cryptography.RandomNumberGenerator.GetBytes(16);
         PdfXref.WriteTrailer(_out, count, catalogId, infoId, encryptId, fileId, fileId, upperHexId: true, xref);
 
