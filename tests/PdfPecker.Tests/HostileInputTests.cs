@@ -355,6 +355,66 @@ public class HostileInputTests
         static string Stream(string dict, string data) => $"{dict} /Length {data.Length} >>\nstream\n{data}\nendstream";
     }
 
+    [Fact]
+    public void Text_extraction_of_a_letter_with_a_million_combining_marks_stays_linear()
+    {
+        // Code 1 is a combining acute accent drawn with no width, so every mark sits on the letter before it. The
+        // trailing letters make the marks a minority, so they are joined to that letter rather than kept on their own.
+        var pdf = TextPdf("BT /F1 12 Tf 72 700 Td (C" + new string('\x01', 999_999) + ") Tj 0 -20 Td (" + new string('B', 1_000_000) + ") Tj ET", 0);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var page = Bounded(() => PdfText.ExtractPage(pdf, 1, null, cts.Token));
+        Assert.Equal(2, page.Lines.Count);
+        Assert.Equal("C" + new string('\u0301', 999_999), page.Lines[0].Text);
+        Assert.Equal(new string('B', 1_000_000), page.Lines[1].Text);
+    }
+
+    [Fact]
+    public void Text_extraction_of_a_million_combining_marks_away_from_any_letter_stays_linear()
+    {
+        // Here the marks have a width, so they run on past their letter and each is kept as a character of its own.
+        var pdf = TextPdf("BT /F1 12 Tf 72 700 Td (C" + new string('\x01', 999_999) + ") Tj 0 -20 Td (" + new string('B', 1_000_000) + ") Tj ET", 600);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var page = Bounded(() => PdfText.ExtractPage(pdf, 1, null, cts.Token));
+        Assert.Equal(2, page.Lines.Count);
+        Assert.Equal(999_999, page.Lines[0].Text.Count(c => c == '\u0301'));
+    }
+
+    [Fact]
+    public void Text_extraction_of_a_right_to_left_letter_and_a_million_spaces_stays_linear()
+    {
+        // Code A is a Hebrew alef: one right-to-left letter makes the line go through bidi ordering, where every space
+        // is a neutral that looks for its nearest strong neighbours.
+        var pdf = TextPdf("BT /F1 12 Tf 72 700 Td (A" + new string(' ', 1_000_000) + "A) Tj ET", 0);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var page = Bounded(() => PdfText.ExtractPage(pdf, 1, null, cts.Token));
+        Assert.Equal("\u05D0 \u05D0", page.Text);
+    }
+
+    /// <summary>
+    /// A one-page PDF showing <paramref name="content"/>, compressed, in a font mapping code 1 to U+0301, drawn
+    /// <paramref name="markWidth"/> wide, and A to U+05D0.
+    /// </summary>
+    private static byte[] TextPdf(string content, int markWidth)
+    {
+        const string cmap = "/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapName /Test def\n"
+            + "1 begincodespacerange <00> <FF> endcodespacerange\n"
+            + "5 beginbfchar <01> <0301> <20> <0020> <41> <05D0> <42> <0042> <43> <0043> endbfchar\n"
+            + "endcmap CMapName currentdict /CMap defineresource pop end end";
+        var widths = markWidth + " " + string.Join(" ", Enumerable.Repeat("600", 66));
+        using var ms = new MemoryStream();
+        using (var zs = new ZLibStream(ms, CompressionLevel.Optimal, leaveOpen: true)) zs.Write(Encoding.Latin1.GetBytes(content));
+        var data = Encoding.Latin1.GetString(ms.ToArray());
+        return SimplePdf(new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 6 0 R >>",
+            $"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /FirstChar 1 /LastChar 67 /Widths [{widths}] /ToUnicode 5 0 R >>",
+            $"<< /Length {cmap.Length} >>\nstream\n{cmap}\nendstream",
+            $"<< /Length {data.Length} /Filter /FlateDecode >>\nstream\n{data}\nendstream",
+        });
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private static byte[] SimplePdf(List<string> objects)
@@ -598,6 +658,117 @@ public class HostileInputTests
         var pdf = ms.ToArray();
 
         Assert.Empty(Bounded(() => PdfSignatureVerifier.Verify(pdf)));
+    }
+}
+
+/// <summary>Hostile CFF and CFF2 fonts whose subroutines fan out exponentially.</summary>
+[Collection(HostileInputCollection.Name)]
+public class CffSubroutineTests
+{
+    private static byte[] Fixture(string name) => File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", name));
+
+    private static byte[] Bounded(string html)
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        return HtmlToPdf.Convert(html, null, cts.Token);
+    }
+
+    private static string FontFace(byte[] font)
+        => $"<style>@font-face{{font-family:f;src:url(data:font/otf;base64,{Convert.ToBase64String(font)})}}</style>";
+
+    [Fact]
+    public void Cff_subroutines_that_fan_out_do_not_hang_subsetting()
+    {
+        // Every glyph of Inter becomes a call into global subroutines that each call the next a thousand times.
+        var font = ReplaceTable(Fixture("Inter-Subr.otf"), "CFF ", n => FanOutCff(cff2: false, n));
+        AssertStructurallyValid(Bounded(FontFace(font) + "<p style='font-family:f'>xyz</p>"));
+    }
+
+    [Fact]
+    public void Cff2_subroutines_that_fan_out_do_not_hang_instancing()
+    {
+        // A bold run makes the converter instance the CFF2 variable font, which runs every glyph's charstring.
+        var font = ReplaceTable(Fixture("VarTestCFF-Subset.otf"), "CFF2", n => FanOutCff(cff2: true, n));
+        AssertStructurallyValid(Bounded(FontFace(font) + "<p style='font-family:f'>Hen <b>Hen</b></p>"));
+    }
+
+    private static byte[] ReplaceTable(byte[] font, string tag, Func<int, byte[]> table)
+    {
+        var p = Assert.Single(FontProgram.Load(font));
+        var replacement = table(p.NumGlyphs);
+        var tables = p.Tables.Select(t => (t.Tag, t.Tag == FontProgram.Tag(tag) ? replacement : p.Data.AsSpan(t.Offset, t.Length).ToArray())).ToList();
+        return SfntBuilder.Build(0x4F54544F, tables); // 'OTTO'
+    }
+
+    /// <summary>
+    /// A CFF (or CFF2) table whose glyphs all call global subroutine 0, and whose subroutine i calls subroutine i + 1
+    /// a thousand times: 1000^8 calls if walked naively. With fewer than 1240 subroutines the bias is 107, so
+    /// subroutine i is the one-byte number i - 107.
+    /// </summary>
+    private static byte[] FanOutCff(bool cff2, int glyphs)
+    {
+        const int levels = 9, fanOut = 1000; // nine levels stay within the nesting limit of ten, with the glyph itself
+        var subrs = new byte[levels][];
+        for (int i = 0; i < levels; i++)
+        {
+            var s = new List<byte>();
+            if (i + 1 < levels)
+                for (int k = 0; k < fanOut; k++) { s.Add((byte)(i + 1 - 107 + 139)); s.Add(29); } // n callgsubr
+            if (!cff2) s.Add(11); // return
+            subrs[i] = s.ToArray();
+        }
+        var glyph = cff2 ? new byte[] { 32, 29 } : new byte[] { 32, 29, 14 }; // -107 callgsubr (endchar)
+        var charStrings = Index(cff2, Enumerable.Repeat(glyph, glyphs).ToArray());
+        var gsubrs = Index(cff2, subrs);
+
+        var o = new List<byte>();
+        if (cff2)
+        {
+            o.AddRange(new byte[] { 2, 0, 5, 0, 6 }); // version 2, header size 5, Top DICT length 6
+            o.AddRange(TopDict(5 + 6 + gsubrs.Length));
+        }
+        else
+        {
+            o.AddRange(new byte[] { 1, 0, 4, 4 });
+            o.AddRange(Index(false, new[] { "F"u8.ToArray() }));
+            int topSize = Index(false, new[] { TopDict(0) }).Length;
+            o.AddRange(Index(false, new[] { TopDict(o.Count + topSize + 2 + gsubrs.Length) }));
+            o.AddRange(new byte[] { 0, 0 }); // empty String INDEX
+        }
+        o.AddRange(gsubrs);
+        o.AddRange(charStrings);
+        return o.ToArray();
+
+        // The Top DICT holds only the CharStrings offset, as a five-byte integer so that its size is known up front.
+        static byte[] TopDict(int charStrings)
+        {
+            var b = new byte[6];
+            b[0] = 29;
+            BinaryPrimitives.WriteInt32BigEndian(b.AsSpan(1), charStrings);
+            b[5] = 17;
+            return b;
+        }
+
+        static byte[] Index(bool cff2, byte[][] items)
+        {
+            var o = new List<byte>();
+            var count = new byte[4];
+            BinaryPrimitives.WriteInt32BigEndian(count, items.Length);
+            o.AddRange(cff2 ? count : count[2..]);
+            o.Add(4);
+            var off = new byte[4];
+            int at = 1;
+            BinaryPrimitives.WriteInt32BigEndian(off, at);
+            o.AddRange(off);
+            foreach (var item in items)
+            {
+                at += item.Length;
+                BinaryPrimitives.WriteInt32BigEndian(off, at);
+                o.AddRange(off);
+            }
+            foreach (var item in items) o.AddRange(item);
+            return o.ToArray();
+        }
     }
 }
 
