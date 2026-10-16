@@ -195,7 +195,11 @@ internal static class PdfImageDecoder
             if (smask != null)
             {
                 var alpha = DecodeAlpha(file, smask, width, height, resources);
-                if (alpha != null) ApplyAlpha(pixels, alpha);
+                if (alpha != null)
+                {
+                    if (file.GetNumbers(smask, "Matte") is { } matte && matte.Length >= cs!.Components) UnblendMatte(pixels, alpha, cs, matte);
+                    ApplyAlpha(pixels, alpha);
+                }
                 img.Opaque = false;
             }
             else
@@ -206,10 +210,9 @@ internal static class PdfImageDecoder
                     var m = Decode(file, ms, Array.Empty<byte>(), false, resources, false);
                     if (m?.Stencil != null)
                     {
-                        var alpha = Resample(m.Stencil, m.Width, m.Height, width, height);
-                        // In an explicit mask, 1 (stencil "paint") marks pixels that are masked out.
-                        for (int i = 0; i < alpha.Length; i++) alpha[i] = (byte)(255 - alpha[i]);
-                        ApplyAlpha(pixels, alpha);
+                        // An explicit mask's samples mean what they mean in a stencil mask (ISO 32000-1, 8.9.6.3): where
+                        // the stencil would paint, the base image shows, so the stencil coverage is the image's alpha.
+                        ApplyAlpha(pixels, Resample(m.Stencil, m.Width, m.Height, width, height));
                         img.Opaque = false;
                     }
                 }
@@ -320,6 +323,42 @@ internal static class PdfImageDecoder
             return;
         }
 
+        // CalRGB: gamma tables per component over all sample values, a matrix multiply and a table for the sRGB curve,
+        // so a large image costs no power functions per pixel.
+        if (cs is CalSpace cal && comps == 3 && bpc <= 8)
+        {
+            var lin = new double[3][];
+            for (int i = 0; i < 3; i++)
+            {
+                lin[i] = new double[maxV + 1];
+                for (int v = 0; v <= maxV; v++) lin[i][v] = cal.Linear(decode![2 * i] + v * (decode[2 * i + 1] - decode[2 * i]) / maxV, i);
+            }
+            var m = cal.ToLinearSrgb;
+            var enc = CalSpace.EncodeTable;
+            static int Index(double v) => v <= 0 ? 0 : v >= 1 ? 4095 : (int)(v * 4095 + 0.5);
+            for (int y = 0; y < h; y++)
+            {
+                long bitPos = (long)y * rowBytes * 8;
+                int o = y * w;
+                for (int x = 0; x < w; x++)
+                {
+                    double a = 0, b = 0, c = 0;
+                    for (int i = 0; i < 3; i++, bitPos += bpc)
+                    {
+                        long bi = bitPos >> 3;
+                        int v = bpc == 8 ? (bi < data.Length ? data[bi] : 0) : bi < data.Length ? (data[bi] >> (8 - bpc - (int)(bitPos & 7))) & maxV : 0;
+                        double l = lin[i][v];
+                        if (i == 0) a = l; else if (i == 1) b = l; else c = l;
+                    }
+                    int r = enc[Index(m[0] * a + m[1] * b + m[2] * c)];
+                    int g = enc[Index(m[3] * a + m[4] * b + m[5] * c)];
+                    int bl = enc[Index(m[6] * a + m[7] * b + m[8] * c)];
+                    pixels[o + x] = (uint)(r | g << 8 | bl << 16) | 0xFF000000;
+                }
+            }
+            return;
+        }
+
         // Single-component spaces (gray, indexed, separation, ICC gray): a lookup table over all sample values.
         if (comps == 1 && bpc <= 8)
         {
@@ -416,7 +455,6 @@ internal static class PdfImageDecoder
         if (img?.Pixels == null) return null;
         var gray = new byte[img.Width * img.Height];
         for (int i = 0; i < gray.Length; i++) gray[i] = (byte)(img.Pixels[i] & 0xFF); // gray images: R = G = B
-        // /Matte (pre-blended colors) is not un-blended; the effect is minor for typical masks.
         return img.Width == w && img.Height == h ? gray : Resample(gray, img.Width, img.Height, w, h);
     }
 
@@ -435,6 +473,31 @@ internal static class PdfImageDecoder
         }
         return dst;
     }
+
+    /// <summary>
+    /// Undoes the pre-blending a /Matte entry declares: the samples were stored as m + alpha * (c - m), so compositing
+    /// them as they are would mix in the matte colour twice (ISO 32000-1, 11.6.5.3). The matte is converted to RGB and
+    /// un-blended there, which is exact for the device spaces and close enough for the others.
+    /// </summary>
+    private static void UnblendMatte(uint[] pixels, byte[] alpha, ColorSpace cs, double[] matte)
+    {
+        Span<float> mc = stackalloc float[cs.Components];
+        for (int i = 0; i < mc.Length; i++) mc[i] = (float)matte[i];
+        uint m = cs.ToRgb(mc);
+        int mr = (int)(m & 0xFF), mg = (int)(m >> 8 & 0xFF), mb = (int)(m >> 16 & 0xFF);
+        int n = Math.Min(pixels.Length, alpha.Length);
+        for (int i = 0; i < n; i++)
+        {
+            int a = alpha[i];
+            // Fully transparent samples carry no colour to recover, and opaque ones are not blended at all.
+            if (a == 0 || a == 255) continue;
+            uint p = pixels[i];
+            int r = Unblend((int)(p & 0xFF), mr, a), g = Unblend((int)(p >> 8 & 0xFF), mg, a), b = Unblend((int)(p >> 16 & 0xFF), mb, a);
+            pixels[i] = (p & 0xFF000000) | (uint)(r | g << 8 | b << 16);
+        }
+    }
+
+    private static int Unblend(int c, int m, int a) => Math.Clamp(m + ((c - m) * 255 + (c >= m ? a / 2 : -a / 2)) / a, 0, 255);
 
     private static void ApplyAlpha(uint[] pixels, byte[] alpha)
     {

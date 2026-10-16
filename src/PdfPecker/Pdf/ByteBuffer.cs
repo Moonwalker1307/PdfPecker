@@ -68,7 +68,9 @@ internal sealed class ByteBuffer
     /// <summary>Writes a number with at most 3 decimals and no exponent, as PDF requires.</summary>
     public ByteBuffer Num(float f)
     {
-        long scaled = (long)Math.Round(f * 1000.0);
+        // A NaN or infinity is not valid PDF syntax, and negating long.MinValue below would overflow.
+        if (!float.IsFinite(f)) return Byte((byte)'0');
+        long scaled = ToLong(Math.Round(f * 1000.0));
         if (scaled < 0) { Byte((byte)'-'); scaled = -scaled; }
         long ip = scaled / 1000;
         int frac = (int)(scaled % 1000);
@@ -88,7 +90,8 @@ internal sealed class ByteBuffer
     /// <summary>Writes a number with up to 6 decimals, for matrix coefficients and function bounds.</summary>
     public ByteBuffer Num6(float f)
     {
-        long scaled = (long)Math.Round(f * 1000000.0);
+        if (!float.IsFinite(f)) return Byte((byte)'0');
+        long scaled = ToLong(Math.Round(f * 1000000.0));
         if (scaled % 1000 == 0) return Num(f);
         if (scaled < 0) { Byte((byte)'-'); scaled = -scaled; }
         Int(scaled / 1000000);
@@ -100,6 +103,10 @@ internal sealed class ByteBuffer
         for (int i = digits - 1; i >= 0; i--) { tmp[i] = (byte)('0' + frac % 10); frac /= 10; }
         return Bytes(tmp.Slice(0, digits));
     }
+
+    // .NET 8 turns an out-of-range double into long.MinValue while .NET 9 saturates, so clamp first to write the same
+    // bytes on every runtime; the clamp leaves every number a page can hold unchanged.
+    private static long ToLong(double d) => (long)Math.Clamp(d, -9e18, 9e18);
 
     public ByteBuffer Sp() => Byte((byte)' ');
     public ByteBuffer Nl() => Byte((byte)'\n');

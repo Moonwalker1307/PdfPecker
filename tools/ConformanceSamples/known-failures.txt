@@ -1,0 +1,3 @@
+# veraPDF rules that the generated samples are known to fail, one per line: profile flavour clause testNumber.
+# check.py fails the conformance job on any failing rule that is not listed here, so the list only stops regressions;
+# remove a line when the library is fixed (check.py prints a note when a listed rule no longer fails).

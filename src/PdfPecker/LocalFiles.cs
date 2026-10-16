@@ -36,6 +36,26 @@ internal static class LocalFiles
         return full;
     }
 
+    /// <summary>The largest file a document's reference may read: far more than any real image or stylesheet.</summary>
+    internal const long MaxFileSize = 256L * 1024 * 1024;
+
+    /// <summary>
+    /// The contents of the regular file at <paramref name="path"/>, or null when it is missing, empty, larger than
+    /// <see cref="MaxFileSize"/> or not a regular file.
+    /// </summary>
+    public static byte[]? Read(string path)
+    {
+        // Devices such as /dev/zero never end and a named pipe blocks whoever opens it until something writes to it.
+        // Both report no length, as do empty files that have nothing to offer anyway, so only files with a length are
+        // opened, and no more than that length is read.
+        var info = new FileInfo(path);
+        if (!info.Exists || info.Length is <= 0 or > MaxFileSize) return null;
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1, FileOptions.SequentialScan);
+        var bytes = new byte[info.Length];
+        int read = stream.ReadAtLeast(bytes, bytes.Length, throwOnEndOfStream: false);
+        return read == bytes.Length ? bytes : bytes.AsSpan(0, read).ToArray();
+    }
+
     private static bool IsInside(string full, string root)
         => full.Length > root.Length && full.StartsWith(root, PathComparison)
            && (Path.EndsInDirectorySeparator(root) // a drive or file-system root

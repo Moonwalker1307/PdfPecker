@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Security.Cryptography;
 using PdfPecker.Rendering.Parsing;
 
@@ -10,21 +9,22 @@ namespace PdfPecker.Pdf;
 /// <see cref="PdfEncryptor"/> is given, encrypted again with AES-256. Earlier revisions (incremental updates), unused
 /// objects and object streams are not kept; the result has one classic cross-reference table.
 /// </summary>
-internal sealed class PdfRewriter
+internal sealed class PdfRewriter : PdfObjectWriter
 {
     private readonly PdfFile _file;
     private readonly PdfEncryptor? _crypt;
     private readonly ByteBuffer _out;
     private readonly Dictionary<int, int> _map = new(); // source object number -> new id; 0 = write null
     private readonly Queue<(int Num, int Id)> _queue = new();
-    private readonly List<long> _offsets = new() { 0 };
+    private readonly PdfXref _xref = new();
     private int _nextId = 1;
     private int _rootNum = -1;
 
-    private PdfRewriter(PdfFile file, PdfEncryptor? crypt)
+    private PdfRewriter(PdfFile file, PdfEncryptor? crypt) : base(PdfObjectSyntax.Rewrite)
     {
         _file = file;
         _crypt = crypt;
+        Encryption = crypt;
         _out = new ByteBuffer(Math.Max(4096, file.Data.Length + file.Data.Length / 8));
     }
 
@@ -67,25 +67,12 @@ internal sealed class PdfRewriter
 
         long xref = _out.Length;
         int count = _nextId;
-        _out.Ascii("xref\n0 ").Int(count).Ascii("\n0000000000 65535 f \n");
-        for (int i = 1; i < count; i++)
-        {
-            if (i < _offsets.Count && _offsets[i] > 0)
-                _out.Ascii(_offsets[i].ToString("D10", CultureInfo.InvariantCulture)).Ascii(" 00000 n \n");
-            else
-                _out.Ascii("0000000000 00000 f \n");
-        }
+        _xref.WriteTable(_out, count);
         // The first identifier stays the document's permanent one; the second marks this new version.
         var id0 = _file.Resolve(trailer["ID"]) is PdfArray ids && ids.Count > 0 && _file.Resolve(ids[0]) is PdfString { Bytes.Length: > 0 } s
             ? s.Bytes
             : RandomNumberGenerator.GetBytes(16);
-        _out.Ascii("trailer\n<< /Size ").Int(count).Ascii(" /Root ").Int(rootId).Ascii(" 0 R");
-        if (infoId != 0) _out.Ascii(" /Info ").Int(infoId).Ascii(" 0 R");
-        if (encryptId != 0) _out.Ascii(" /Encrypt ").Int(encryptId).Ascii(" 0 R");
-        _out.Ascii(" /ID [");
-        PdfSyntax.HexString(_out, id0); // never encrypted
-        PdfSyntax.HexString(_out, RandomNumberGenerator.GetBytes(16));
-        _out.Ascii("] >>\nstartxref\n").Int(xref).Ascii("\n%%EOF\n");
+        PdfXref.WriteTrailer(_out, count, rootId, infoId, encryptId, id0, RandomNumberGenerator.GetBytes(16), upperHexId: false, xref);
     }
 
     private int TopLevel(PdfObject? o, bool isRoot)
@@ -113,22 +100,17 @@ internal sealed class PdfRewriter
         return (1, 4);
     }
 
-    private ByteBuffer Begin(int id)
-    {
-        while (_offsets.Count <= id) _offsets.Add(0);
-        _offsets[id] = _out.Length;
-        return _out.Int(id).Ascii(" 0 obj\n");
-    }
+    private ByteBuffer Begin(int id) => _xref.Begin(_out, id);
 
-    private void End() => _out.Ascii("\nendobj\n");
+    private void End() => PdfXref.End(_out);
 
     private void WriteIndirect(int id, PdfObject obj, bool isRoot)
     {
         PdfFile.CheckCancel();
         Begin(id);
-        if (obj is PdfStream s) WriteStream(s);
-        else if (isRoot && _crypt != null && obj is PdfDict catalog) WriteDict(WithExtensionLevel(catalog), 0);
-        else WriteObject(obj, 0);
+        if (obj is PdfStream s) WriteStream(_out, _file, s);
+        else if (isRoot && _crypt != null && obj is PdfDict catalog) WriteDict(_out, WithExtensionLevel(catalog), 0);
+        else WriteObject(_out, obj);
         End();
     }
 
@@ -149,81 +131,8 @@ internal sealed class PdfRewriter
         return new PdfDict(entries);
     }
 
-    private void WriteStream(PdfStream s)
-    {
-        var entries = new Dictionary<string, PdfObject>(s.Entries, StringComparer.Ordinal);
-        entries.Remove("Length");
-        PdfMergeWriter.RemoveCryptFilter(_file, entries);
-        var data = _crypt != null ? _crypt.Encrypt(s.RawData) : s.RawData;
-        _out.Ascii("<<");
-        foreach (var (key, value) in entries)
-        {
-            _out.Sp();
-            PdfSyntax.RawName(_out, key);
-            _out.Sp();
-            WriteObject(value, 1);
-        }
-        _out.Ascii(" /Length ").Int(data.Length).Ascii(" >>\nstream\n").Bytes(data).Ascii("\nendstream");
-    }
-
-    private void WriteDict(PdfDict d, int depth)
-    {
-        _out.Ascii("<<");
-        foreach (var (key, value) in d.Entries)
-        {
-            _out.Sp();
-            PdfSyntax.RawName(_out, key);
-            _out.Sp();
-            WriteObject(value, depth + 1);
-        }
-        _out.Ascii(" >>");
-    }
-
-    private void WriteObject(PdfObject? o, int depth)
-    {
-        if (depth > 256) { _out.Ascii("null"); return; }
-        switch (o)
-        {
-            case PdfBool b:
-                _out.Ascii(b.Value ? "true" : "false");
-                break;
-            case PdfNumber n:
-                if (n.IsInteger) _out.Int((long)n.Value);
-                else _out.Ascii(double.IsFinite(n.Value) ? n.Value.ToString("0.##########", CultureInfo.InvariantCulture) : "0");
-                break;
-            case PdfString s:
-                if (_crypt != null) PdfSyntax.HexString(_out, _crypt.Encrypt(s.Bytes));
-                else PdfSyntax.HexString(_out, s.Bytes);
-                break;
-            case PdfName nm:
-                PdfSyntax.RawName(_out, nm.Value);
-                break;
-            case PdfRef r:
-                WriteRef(r);
-                break;
-            case PdfArray a:
-                _out.Byte((byte)'[');
-                for (int i = 0; i < a.Count; i++)
-                {
-                    if (i > 0) _out.Sp();
-                    WriteObject(a[i], depth + 1);
-                }
-                _out.Byte((byte)']');
-                break;
-            case PdfStream:
-                // A stream can only be an indirect object; a direct one cannot occur in parsed data.
-                _out.Ascii("null");
-                break;
-            case PdfDict d:
-                WriteDict(d, depth);
-                break;
-            default:
-                _out.Ascii("null");
-                break;
-        }
-    }
-
-    private void WriteRef(PdfRef r)
+    /// <summary>A reference is renumbered, and its object queued to be copied when it is met first.</summary>
+    protected override void WriteRef(ByteBuffer b, PdfRef r)
     {
         if (!_map.TryGetValue(r.Num, out int id))
         {
@@ -239,7 +148,7 @@ internal sealed class PdfRewriter
             }
             _map[r.Num] = id;
         }
-        if (id == 0) _out.Ascii("null");
-        else _out.Int(id).Ascii(" 0 R");
+        if (id == 0) b.Ascii("null");
+        else b.Int(id).Ascii(" 0 R");
     }
 }

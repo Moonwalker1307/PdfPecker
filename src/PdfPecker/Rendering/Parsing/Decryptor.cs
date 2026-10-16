@@ -1,10 +1,11 @@
 using System.Security.Cryptography;
 using System.Text;
+using PdfPecker.Pdf;
 
 namespace PdfPecker.Rendering.Parsing;
 
 /// <summary>The PDF standard security handler (RC4 40-128 bit, AES-128, AES-256; revisions 2 to 6).</summary>
-internal sealed class Decryptor
+internal sealed class Decryptor : IPdfObjectEncryption
 {
     private enum Method { None, Rc4, Aes128, Aes256 }
 

@@ -1,17 +1,9 @@
 name: NuGet package
 
 on:
+  # Every pull request is built and tested, so the checks can be made required without a PR that touches other
+  # files waiting for checks that never start.
   pull_request:
-    paths:
-      - src/**
-      - tests/**
-      - samples/**
-      - bench/**
-      - tools/**
-      - README.md
-      - THIRD-PARTY-NOTICES.md
-      - PdfPecker.sln
-      - .github/workflows/nuget.yml
   push:
     branches: [main]
     paths:
@@ -23,6 +15,7 @@ on:
       - README.md
       - THIRD-PARTY-NOTICES.md
       - PdfPecker.sln
+      - global.json
       - .github/workflows/nuget.yml
   release:
     types: [published]
@@ -88,12 +81,77 @@ jobs:
 
       - run: dotnet build -c Release -p:Version=${{ steps.version.outputs.version }}
       - run: dotnet test -c Release --no-build
+
+      # Coverage is a separate pass on net10.0 and never fails the build: instrumentation makes the tests that bound
+      # their run time (hostile input, damaged streams) many times slower, so they would fail for the wrong reason.
+      - name: Coverage
+        continue-on-error: true
+        run: dotnet test -c Release --no-build -f net10.0 --filter "FullyQualifiedName!~HostileInputTests" --collect:"XPlat Code Coverage" --results-directory coverage
+
+      - name: Coverage summary
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import glob
+          import xml.etree.ElementTree as ET
+          reports = glob.glob("coverage/*/coverage.cobertura.xml")
+          if reports:
+              print(f"Line coverage: {float(ET.parse(reports[0]).getroot().get('line-rate')):.1%} (net10.0 tests)")
+          else:
+              print("No coverage report was produced.")
+          PY
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage
+          path: coverage/**/coverage.cobertura.xml
+
       - run: dotnet pack src/PdfPecker -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: PdfPecker.${{ steps.version.outputs.version }}.nupkg
-          path: artifacts/*.nupkg
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
+
+  # Build and tests on Windows, for net10.0 only. The tests have not been run on Windows yet, so a failure here must not
+  # block a pull request: continue-on-error keeps the check green until the job has passed reliably, then remove it
+  # and make the job a required check.
+  windows:
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - run: dotnet build -c Release -f net10.0 tests/PdfPecker.Tests
+      - run: dotnet test -c Release -f net10.0 --no-build tests/PdfPecker.Tests
+
+  # IsAotCompatible only turns on the analyzers; publishing and running the sample as a native executable proves the
+  # library really works trimmed and ahead-of-time compiled.
+  native-aot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish the sample with native AOT
+        run: dotnet publish samples/PdfPecker.Sample -c Release -p:PublishAot=true -p:TreatWarningsAsErrors=true -o aot
+
+      - name: Convert the sample documents
+        run: |
+          ./aot/PdfPecker.Sample aot/html aot-output
+          test "$(ls aot-output/*.pdf | wc -l)" -ge 1
 
   release:
     if: github.event_name == 'release'

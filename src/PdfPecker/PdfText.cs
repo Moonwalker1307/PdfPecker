@@ -196,9 +196,12 @@ public static class PdfText
     {
         options ??= new PdfTextOptions();
         var doc = Open(pdf, options.Password);
-        var range = options.Pages ?? PdfPageRange.All;
         int max = Math.Max(0, options.MaxPages);
-        var indices = range.Resolve(doc.Pages.Count, "the PDF", max);
+        // Without a page selection a PDF with no pages simply has no text, as PdfRenderer.RenderAllPages returns no
+        // images for it; only a selection the PDF cannot satisfy is the caller's error.
+        var indices = options.Pages is { } range
+            ? range.Resolve(doc.Pages.Count, "the PDF", max)
+            : Enumerable.Range(0, Math.Min(doc.Pages.Count, max + 1)).ToList();
         if (indices.Count > max)
             throw new PdfLimitException($"The text of more than {max:N0} pages would be read (PdfTextOptions.MaxPages).");
         var result = new PdfTextPage[indices.Count];
@@ -279,7 +282,7 @@ public static class PdfText
         {
             var glyphs = doc.CollectText(index, options.IncludeAnnotations, cancellationToken);
             var (w, h) = doc.PageSize(index);
-            return TextLayout.Build(glyphs, index + 1, w, h, options.ExpandLigatures);
+            return TextLayout.Build(glyphs, index + 1, w, h, options.ExpandLigatures, cancellationToken);
         }
         catch (PdfFormatException ex)
         {

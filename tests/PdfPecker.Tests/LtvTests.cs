@@ -252,7 +252,7 @@ public class LtvTests
     [Fact]
     public void Adds_a_document_timestamp_for_B_LTA()
     {
-        using var tsa = SignatureVerificationTests.SelfSigned("Test TSA");
+        using var tsa = SignatureVerificationTests.SelfSigned("Test TSA", timestamping: true);
         var signed = SignedPdf();
         var ltv = PdfSigner.AddValidationData(signed, new PdfLtvOptions
         {
@@ -319,5 +319,95 @@ public class LtvTests
         Assert.Throws<PdfSignatureException>(() => PdfSigner.AddValidationData(HtmlToPdf.Convert(Html)));
         Assert.Throws<ArgumentException>(() => PdfSigner.AddValidationData(SignedPdf(), new PdfLtvOptions { OcspResponses = new[] { new byte[] { 1, 2, 3 } } }));
         Assert.Throws<ArgumentException>(() => PdfSigner.AddValidationData(SignedPdf(), new PdfLtvOptions { Crls = new[] { new byte[] { 0x30, 0x00 } } }));
+    }
+
+    /// <summary>Answers every request with <paramref name="answer"/>, and records the URLs asked for.</summary>
+    private sealed class Recorder(Func<string, HttpResponseMessage> answer) : HttpMessageHandler
+    {
+        public readonly List<string> Requests = new();
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => Task.FromResult(Send(request, cancellationToken));
+
+        protected override HttpResponseMessage Send(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            string url = request.RequestUri!.ToString();
+            lock (Requests) Requests.Add(url);
+            return answer(url);
+        }
+    }
+
+    private static HttpResponseMessage Redirect(string to) => new(HttpStatusCode.Found) { Headers = { Location = new Uri(to) } };
+
+    /// <summary>A PDF signed by a certificate of the test root that names the given OCSP responders and CRLs.</summary>
+    private static byte[] SignedWithUrls(string[] ocspUrls, string[] crlUrls)
+    {
+        using var key = RSA.Create(2048);
+        var req = new CertificateRequest("CN=Many URLs, O=PdfPecker Tests", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        req.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, true));
+        if (ocspUrls.Length > 0) req.CertificateExtensions.Add(new X509AuthorityInformationAccessExtension(ocspUrls, null));
+        if (crlUrls.Length > 0) req.CertificateExtensions.Add(CertificateRevocationListBuilder.BuildCrlDistributionPointExtension(crlUrls));
+        using var cert = req.Create(Ca.Value.Root, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1), RandomNumberGenerator.GetBytes(8));
+        using var signer = X509CertificateLoader.LoadPkcs12(cert.CopyWithPrivateKey(key).Export(X509ContentType.Pfx, "pw"), "pw");
+        return HtmlToPdf.Convert(Html, new PdfOptions { Signature = new PdfSignatureOptions(signer) });
+    }
+
+    [Fact]
+    public void A_certificate_naming_many_URLs_cannot_make_it_fetch_without_limit()
+    {
+        var ocsp = Enumerable.Range(0, 40).Select(i => $"http://ocsp{i}.test/").ToArray();
+        var crl = Enumerable.Range(0, 40).Select(i => $"http://crl{i}.test/ca.crl").ToArray();
+        var handler = new Recorder(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
+        var ex = Assert.Throws<PdfSignatureException>(() => PdfSigner.AddValidationData(SignedWithUrls(ocsp, crl), new PdfLtvOptions
+        {
+            Certificates = new[] { Ca.Value.Root },
+            FetchRevocationData = true,
+            HttpClient = new HttpClient(handler),
+        }));
+        Assert.InRange(handler.Requests.Count, 1, 32);
+        Assert.Contains("limit", ex.Message);
+    }
+
+    [Fact]
+    public void Redirects_are_followed_a_few_times_within_the_same_scheme()
+    {
+        var pdf = SignedWithUrls(Array.Empty<string>(), new[] { "http://crl.test/old.crl" });
+        var handler = new Recorder(url => url switch
+        {
+            "http://crl.test/old.crl" => Redirect(CrlUrl),
+            CrlUrl => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Ca.Value.Crl()) },
+            _ => new HttpResponseMessage(HttpStatusCode.NotFound),
+        });
+        var ltv = PdfSigner.AddValidationData(pdf, new PdfLtvOptions { Certificates = new[] { Ca.Value.Root }, FetchRevocationData = true, HttpClient = new HttpClient(handler) });
+        Assert.Equal(new[] { "http://crl.test/old.crl", CrlUrl }, handler.Requests);
+        var file = PdfFile.Open(ltv, null);
+        Assert.Single(file.GetArray(Dss(file), "CRLs")!.Items);
+
+        // An endless chain of redirects stops after a few.
+        int n = 0;
+        var loop = new Recorder(_ => Redirect($"http://crl.test/{++n}.crl"));
+        Assert.Throws<PdfSignatureException>(() => PdfSigner.AddValidationData(pdf, new PdfLtvOptions { Certificates = new[] { Ca.Value.Root }, FetchRevocationData = true, HttpClient = new HttpClient(loop) }));
+        Assert.InRange(loop.Requests.Count, 2, 4);
+
+        // A redirect to another scheme is not followed.
+        var https = SignedWithUrls(Array.Empty<string>(), new[] { "https://crl.test/ca.crl" });
+        var downgrade = new Recorder(url => url.StartsWith("https:", StringComparison.Ordinal) ? Redirect(CrlUrl) : new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Ca.Value.Crl()) });
+        Assert.Throws<PdfSignatureException>(() => PdfSigner.AddValidationData(https, new PdfLtvOptions { Certificates = new[] { Ca.Value.Root }, FetchRevocationData = true, HttpClient = new HttpClient(downgrade) }));
+        Assert.Equal(new[] { "https://crl.test/ca.crl" }, downgrade.Requests);
+    }
+
+    [Fact]
+    public void The_URL_filter_can_veto_requests()
+    {
+        var handler = new FakeCa(Ca.Value);
+        var seen = new List<Uri>();
+        PdfSigner.AddValidationData(SignedPdf(), new PdfLtvOptions
+        {
+            Certificates = new[] { Ca.Value.Root },
+            FetchRevocationData = true,
+            HttpClient = new HttpClient(handler),
+            UrlFilter = uri => { seen.Add(uri); return uri.Host != "ocsp.test"; },
+        });
+        Assert.Equal(new[] { new Uri(OcspUrl), new Uri(CrlUrl) }, seen);
+        Assert.Equal(new[] { CrlUrl }, handler.Requests);
     }
 }

@@ -212,17 +212,18 @@ internal static class Revocation
         return w.Encode();
     }
 
-    /// <summary>Asks the certificate's OCSP responders for its status; null when it names none.</summary>
-    public static OcspInfo? FetchOcsp(X509Certificate2 cert, X509Certificate2 issuer, HttpClient? client, List<string> errors)
+    /// <summary>Asks the certificate's OCSP responders for its status; null when it names none or none answers.</summary>
+    public static OcspInfo? FetchOcsp(X509Certificate2 cert, X509Certificate2 issuer, RevocationFetcher fetcher, List<string> errors)
     {
         foreach (var url in OcspUrls(cert))
         {
             try
             {
-                var body = Send(client, new HttpRequestMessage(HttpMethod.Post, url)
+                var body = fetcher.Send(url, () => new HttpRequestMessage(HttpMethod.Post, url)
                 {
                     Content = new ByteArrayContent(OcspRequest(cert, issuer)) { Headers = { ContentType = new MediaTypeHeaderValue("application/ocsp-request") } },
-                }, MaxOcspSize);
+                }, MaxOcspSize, errors);
+                if (body == null) continue;
                 var info = ReadOcsp(body);
                 if (info != null && Covers(info, cert)) return info;
                 errors.Add($"The OCSP responder {url} sent no usable answer for {cert.Subject}.");
@@ -235,14 +236,15 @@ internal static class Revocation
         return null;
     }
 
-    /// <summary>Downloads the certificate's CRL; null when it names none.</summary>
-    public static byte[]? FetchCrl(X509Certificate2 cert, HttpClient? client, List<string> errors)
+    /// <summary>Downloads the certificate's CRL; null when it names none or none can be fetched.</summary>
+    public static byte[]? FetchCrl(X509Certificate2 cert, RevocationFetcher fetcher, List<string> errors)
     {
         foreach (var url in CrlUrls(cert))
         {
             try
             {
-                var body = Send(client, new HttpRequestMessage(HttpMethod.Get, url), MaxCrlSize);
+                var body = fetcher.GetCrl(url, MaxCrlSize, errors);
+                if (body == null) continue;
                 if (CrlIssuer(body) is { } issuer && issuer.AsSpan().SequenceEqual(cert.IssuerName.RawData)) return body;
                 errors.Add($"The CRL at {url} is not a CRL from {cert.Issuer}.");
             }
@@ -253,16 +255,87 @@ internal static class Revocation
         }
         return null;
     }
+}
 
-    private static byte[] Send(HttpClient? client, HttpRequestMessage request, int maxSize)
+/// <summary>
+/// Makes the OCSP and CRL requests of one <see cref="PdfSigner.AddValidationData"/> call. The URLs come from
+/// certificates in the PDF, which may be hostile, so the number of URLs and requests and the total time are capped,
+/// redirects are followed only a few times and within the same scheme, and the caller's filter sees every URL.
+/// </summary>
+internal sealed class RevocationFetcher : IDisposable
+{
+    /// <summary>The most distinct URLs, redirect targets included, one call may contact.</summary>
+    public const int MaxUrls = 32;
+
+    // OCSP requests differ per certificate, so one responder can be asked several times; this bounds the repeats.
+    private const int MaxRequests = 64;
+    private const int MaxRedirects = 3;
+    private static readonly TimeSpan PerRequest = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan Total = TimeSpan.FromMinutes(2);
+
+    // Redirects are followed here rather than by the handler, so each hop is checked like any other URL.
+    private static readonly Lazy<HttpClient> Shared = new(() => new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = PerRequest });
+
+    private readonly HttpClient _client;
+    private readonly Func<Uri, bool>? _filter;
+    private readonly HashSet<string> _urls = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, byte[]> _crls = new(StringComparer.Ordinal);
+    private readonly CancellationTokenSource _deadline = new(Total);
+    private int _requests;
+    private bool _limitReported;
+
+    public RevocationFetcher(HttpClient? client, Func<Uri, bool>? filter)
     {
-        using (request)
+        _client = client ?? Shared.Value;
+        _filter = filter;
+    }
+
+    public void Dispose() => _deadline.Dispose();
+
+    /// <summary>Downloads a CRL, reusing the answer when several certificates share a distribution point.</summary>
+    public byte[]? GetCrl(string url, int maxSize, List<string> errors)
+    {
+        if (_crls.TryGetValue(url, out var cached)) return cached;
+        var body = Send(url, () => new HttpRequestMessage(HttpMethod.Get, url), maxSize, errors);
+        if (body != null) _crls[url] = body;
+        return body;
+    }
+
+    /// <summary>
+    /// Sends the request <paramref name="create"/> makes for <paramref name="url"/>. Returns null when the URL is not to
+    /// be contacted (adding the reason to <paramref name="errors"/> when it is a limit), and throws
+    /// <see cref="PdfSignatureException"/> when the server fails.
+    /// </summary>
+    public byte[]? Send(string url, Func<HttpRequestMessage> create, int maxSize, List<string> errors)
+    {
+        var uri = new Uri(url);
+        for (int hop = 0; ; hop++)
         {
+            if (!Allowed(uri, errors)) return null;
+            using var request = create();
+            request.RequestUri = uri;
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_deadline.Token);
+            timeout.CancelAfter(PerRequest);
+            var token = timeout.Token;
             try
             {
-                using var response = (client ?? Shared.Value).Send(request, HttpCompletionOption.ResponseHeadersRead);
-                if (!response.IsSuccessStatusCode) throw new PdfSignatureException($"HTTP {(int)response.StatusCode}.");
-                using var stream = response.Content.ReadAsStream();
+                using var response = _client.Send(request, HttpCompletionOption.ResponseHeadersRead, token);
+                int status = (int)response.StatusCode;
+                if (status is >= 300 and < 400 && response.Headers.Location is { } location)
+                {
+                    // Only a GET may be repeated elsewhere, and only within its scheme: a redirect must not turn an
+                    // https request into an http one, nor send a POST body somewhere the certificate does not name.
+                    var next = location.IsAbsoluteUri ? location : new Uri(uri, location);
+                    if (request.Method != HttpMethod.Get || hop >= MaxRedirects || !string.Equals(next.Scheme, uri.Scheme, StringComparison.OrdinalIgnoreCase))
+                        throw new PdfSignatureException($"HTTP {status}: the redirect to {next} is not followed.");
+                    uri = next;
+                    continue;
+                }
+                if (!response.IsSuccessStatusCode) throw new PdfSignatureException($"HTTP {status}.");
+                // HttpClient's own timeout ends once the headers are in, so a server that sends the body slowly is
+                // stopped by closing the response when the time is up.
+                using var stop = token.Register(static r => ((IDisposable)r!).Dispose(), response);
+                using var stream = response.Content.ReadAsStream(token);
                 using var ms = new MemoryStream();
                 var buffer = new byte[16384];
                 int n;
@@ -271,16 +344,48 @@ internal static class Revocation
                     if (ms.Length + n > maxSize) throw new PdfSignatureException("The answer is too large.");
                     ms.Write(buffer, 0, n);
                 }
+                token.ThrowIfCancellationRequested();
                 return ms.ToArray();
             }
-            catch (HttpRequestException ex)
+            catch (Exception ex) when (ex is OperationCanceledException || (token.IsCancellationRequested && ex is IOException or ObjectDisposedException or HttpRequestException))
+            {
+                if (_deadline.IsCancellationRequested) return Limit(errors, TimeLimitMessage);
+                throw new PdfSignatureException("The server did not answer in time.", ex);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or IOException)
             {
                 throw new PdfSignatureException("The server could not be reached: " + ex.Message, ex);
             }
-            catch (TaskCanceledException ex)
-            {
-                throw new PdfSignatureException("The server did not answer in time.", ex);
-            }
         }
+    }
+
+    private static string TimeLimitMessage => $"Fetching revocation data took longer than the limit of {Total.TotalMinutes:0} minutes.";
+
+    private bool Allowed(Uri uri, List<string> errors)
+    {
+        if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) return false;
+        if (_deadline.IsCancellationRequested)
+        {
+            Limit(errors, TimeLimitMessage);
+            return false;
+        }
+        string key = uri.AbsoluteUri;
+        if ((!_urls.Contains(key) && _urls.Count >= MaxUrls) || _requests >= MaxRequests)
+        {
+            Limit(errors, $"The certificates name more OCSP and CRL addresses than the limit of {MaxUrls} per call; the rest were not contacted.");
+            return false;
+        }
+        // A vetoed URL is skipped as if the certificate did not name it.
+        if (_filter != null && !_filter(uri)) return false;
+        _urls.Add(key);
+        _requests++;
+        return true;
+    }
+
+    private byte[]? Limit(List<string> errors, string message)
+    {
+        if (!_limitReported) errors.Add(message);
+        _limitReported = true;
+        return null;
     }
 }

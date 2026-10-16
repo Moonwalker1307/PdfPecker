@@ -13,7 +13,7 @@ internal sealed class GlyphSubset
     public readonly List<int> Unicode = new() { 0 };  // new id -> first code point that produced it (0 = none)
     private readonly Dictionary<int, int> _byCodePoint = new();
     private readonly Dictionary<int, int> _byGlyph = new() { [0] = 0 };
-    private Dictionary<int, string>? _texts;          // new id -> the characters of a ligature
+    private Dictionary<int, string>? _texts;          // new id -> the characters of a shaped glyph ("" for none)
 
     public GlyphSubset(FontProgram program) => Program = program;
 
@@ -29,31 +29,73 @@ internal sealed class GlyphSubset
             Glyphs.Add(gid);
             Unicode.Add(codePoint);
         }
+        else if (gid != 0 && !HasText(id))
+        {
+            // The glyph was first drawn as an extra glyph of a shaped cluster, which carries no characters of its own;
+            // its own character is the better mapping.
+            int index = Index(id);
+            Unicode[index] = codePoint;
+            _texts?.Remove(index);
+        }
         _byCodePoint[codePoint] = id;
         return id;
     }
 
-    /// <summary>The CID for a glyph of shaped text: a ligature glyph maps back to all of its characters.</summary>
-    public int Cid(ShapedGlyph g, string text)
+    /// <summary>
+    /// The CID for glyph k of shaped text: a ligature glyph maps back to all of its characters. Its neighbours tell
+    /// whether shaping split its cluster into several glyphs.
+    /// </summary>
+    public int Cid(List<ShapedGlyph> glyphs, int k, string text)
     {
+        var g = glyphs[k];
         // A glyph for one character that is the character's own glyph (not a contextual form or a mirror) is mapped by
         // the character.
         if (g.Length == 1 && Program.GlyphId(text[g.Start]) == g.Gid) return Cid(text[g.Start]);
         if (g.Length == 2 && char.IsHighSurrogate(text[g.Start]) && char.ConvertToUtf32(text[g.Start], text[g.Start + 1]) is int cp
             && Program.GlyphId(cp) == g.Gid)
             return Cid(cp);
-        if (_byGlyph.TryGetValue(g.Gid, out int id)) return id;
+        // PDF/A level U and PDF/UA require every drawn glyph to map to Unicode, shaped glyphs included, so a glyph maps
+        // to the characters of its cluster. When shaping split a cluster into several glyphs, the extra glyphs (Length 0)
+        // map to nothing, because the first glyph already carries the cluster's text and repeating it would double the
+        // characters in extracted text. A split character with a canonical decomposition, such as alef with hamza drawn
+        // as alef and a separate hamza, maps part by part instead: the alef glyph is shared with plain alef, and a CMap
+        // maps each code once, so the whole character on it would turn every plain alef into alef with hamza.
+        string mapped;
+        bool split = (k > 0 && glyphs[k - 1].Start == g.Start && glyphs[k - 1].Length == 0)
+            || (k + 1 < glyphs.Count && glyphs[k + 1].Start == g.Start && glyphs[k + 1].Length == 0);
+        if (g.Length == 0)
+            mapped = g.Start < text.Length && Text.UnicodeTables.Decompose(text[g.Start], out _, out int second) && second != 0
+                ? char.ConvertFromUtf32(second) : "";
+        else if (split && g.Length == 1 && Text.UnicodeTables.Decompose(text[g.Start], out int first, out int rest) && rest != 0)
+            mapped = char.ConvertFromUtf32(first);
+        else mapped = text.Substring(g.Start, g.Length);
+        // A glyph id reused for other characters keeps its first mapping.
+        if (_byGlyph.TryGetValue(g.Gid, out int id))
+        {
+            if (id != 0 && mapped.Length > 0 && !HasText(id)) (_texts ??= new())[Index(id)] = mapped;
+            return id;
+        }
         id = Program.IsCff ? g.Gid : Glyphs.Count;
         _byGlyph[g.Gid] = id;
         Glyphs.Add(g.Gid);
         Unicode.Add(0);
-        if (g.Length > 0) (_texts ??= new())[Glyphs.Count - 1] = text.Substring(g.Start, g.Length);
+        (_texts ??= new())[Glyphs.Count - 1] = mapped;
         return id;
     }
 
+    // The index into Glyphs and Unicode of a CID: CFF subsets keep the original glyph ids as CIDs.
+    private int Index(int id) => Program.IsCff ? Glyphs.IndexOf(id) : id;
+
+    // True when the CID maps to at least one character.
+    private bool HasText(int id)
+    {
+        int index = Index(id);
+        return Unicode[index] != 0 || (_texts != null && _texts.TryGetValue(index, out var t) && t.Length > 0);
+    }
+
     /// <summary>
-    /// (CID, original glyph id, code point, characters of a ligature) for every glyph used, in CID order. The code
-    /// point is 0 for a ligature.
+    /// (CID, original glyph id, code point, characters of a shaped glyph) for every glyph used, in CID order. The code
+    /// point is 0 for a shaped glyph, whose characters are empty when it is an extra glyph of its cluster.
     /// </summary>
     public IEnumerable<(int Cid, int Gid, int CodePoint, string? Text)> Used()
     {

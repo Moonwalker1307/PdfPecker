@@ -4,6 +4,7 @@ using System.Text;
 using PdfPecker.Css;
 using PdfPecker.Fonts;
 using PdfPecker.Html;
+using PdfPecker.Images;
 using static PdfPecker.Tests.PdfTestHelpers;
 
 namespace PdfPecker.Tests;
@@ -168,6 +169,33 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Svg_filter_work_is_bounded()
+    {
+        // Ten-thousand-fold kernels on four million pixels: tens of billions of operations for each primitive.
+        string kernel = string.Join(" ", Enumerable.Repeat("1", 64 * 64));
+        var sb = new StringBuilder("<body style='margin:0'><svg width=1000 height=1000><filter id=f x=0 y=0 width=1000 height=1000 filterUnits=userSpaceOnUse>");
+        for (int i = 0; i < 20; i++) sb.Append($"<feConvolveMatrix order=64 kernelMatrix='{kernel}'/><feMorphology radius=200/>");
+        sb.Append("</filter><rect width=1000 height=1000 fill='#ff0000' filter='url(#f)'/></svg></body>");
+        var pdf = Bounded(() => Bounded(sb.ToString(), new PdfOptions { Compress = false }));
+        AssertStructurallyValid(pdf);
+        // A filter beyond the budget is left out, and the element drawn as it would be without it.
+        var text = Latin1(pdf);
+        Assert.DoesNotContain("/Subtype /Image", text);
+        Assert.Contains("1 0 0 rg", text);
+    }
+
+    [Fact]
+    public void Svg_morphology_with_a_wide_radius_runs_in_linear_time()
+    {
+        var sb = new StringBuilder("<body style='margin:0'><svg width=1000 height=1000><filter id=f x=0 y=0 width=1000 height=1000 filterUnits=userSpaceOnUse>");
+        for (int i = 0; i < 8; i++) sb.Append($"<feMorphology operator='{(i % 2 == 0 ? "dilate" : "erode")}' radius=200/>");
+        sb.Append("</filter><rect x=300 y=300 width=400 height=400 fill='#ff0000' filter='url(#f)'/></svg></body>");
+        var pdf = Bounded(() => Bounded(sb.ToString(), new PdfOptions { Compress = false }));
+        AssertStructurallyValid(pdf);
+        Assert.Contains("/Subtype /Image", Latin1(pdf));
+    }
+
+    [Fact]
     public void Text_split_by_many_ignored_tags_is_merged_in_linear_time()
     {
         AssertStructurallyValid(Bounded("<p>" + Repeat("a</em>", 200000) + "</p>"));
@@ -327,6 +355,66 @@ public class HostileInputTests
         static string Stream(string dict, string data) => $"{dict} /Length {data.Length} >>\nstream\n{data}\nendstream";
     }
 
+    [Fact]
+    public void Text_extraction_of_a_letter_with_a_million_combining_marks_stays_linear()
+    {
+        // Code 1 is a combining acute accent drawn with no width, so every mark sits on the letter before it. The
+        // trailing letters make the marks a minority, so they are joined to that letter rather than kept on their own.
+        var pdf = TextPdf("BT /F1 12 Tf 72 700 Td (C" + new string('\x01', 999_999) + ") Tj 0 -20 Td (" + new string('B', 1_000_000) + ") Tj ET", 0);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var page = Bounded(() => PdfText.ExtractPage(pdf, 1, null, cts.Token));
+        Assert.Equal(2, page.Lines.Count);
+        Assert.Equal("C" + new string('\u0301', 999_999), page.Lines[0].Text);
+        Assert.Equal(new string('B', 1_000_000), page.Lines[1].Text);
+    }
+
+    [Fact]
+    public void Text_extraction_of_a_million_combining_marks_away_from_any_letter_stays_linear()
+    {
+        // Here the marks have a width, so they run on past their letter and each is kept as a character of its own.
+        var pdf = TextPdf("BT /F1 12 Tf 72 700 Td (C" + new string('\x01', 999_999) + ") Tj 0 -20 Td (" + new string('B', 1_000_000) + ") Tj ET", 600);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var page = Bounded(() => PdfText.ExtractPage(pdf, 1, null, cts.Token));
+        Assert.Equal(2, page.Lines.Count);
+        Assert.Equal(999_999, page.Lines[0].Text.Count(c => c == '\u0301'));
+    }
+
+    [Fact]
+    public void Text_extraction_of_a_right_to_left_letter_and_a_million_spaces_stays_linear()
+    {
+        // Code A is a Hebrew alef: one right-to-left letter makes the line go through bidi ordering, where every space
+        // is a neutral that looks for its nearest strong neighbours.
+        var pdf = TextPdf("BT /F1 12 Tf 72 700 Td (A" + new string(' ', 1_000_000) + "A) Tj ET", 0);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var page = Bounded(() => PdfText.ExtractPage(pdf, 1, null, cts.Token));
+        Assert.Equal("\u05D0 \u05D0", page.Text);
+    }
+
+    /// <summary>
+    /// A one-page PDF showing <paramref name="content"/>, compressed, in a font mapping code 1 to U+0301, drawn
+    /// <paramref name="markWidth"/> wide, and A to U+05D0.
+    /// </summary>
+    private static byte[] TextPdf(string content, int markWidth)
+    {
+        const string cmap = "/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapName /Test def\n"
+            + "1 begincodespacerange <00> <FF> endcodespacerange\n"
+            + "5 beginbfchar <01> <0301> <20> <0020> <41> <05D0> <42> <0042> <43> <0043> endbfchar\n"
+            + "endcmap CMapName currentdict /CMap defineresource pop end end";
+        var widths = markWidth + " " + string.Join(" ", Enumerable.Repeat("600", 66));
+        using var ms = new MemoryStream();
+        using (var zs = new ZLibStream(ms, CompressionLevel.Optimal, leaveOpen: true)) zs.Write(Encoding.Latin1.GetBytes(content));
+        var data = Encoding.Latin1.GetString(ms.ToArray());
+        return SimplePdf(new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 6 0 R >>",
+            $"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /FirstChar 1 /LastChar 67 /Widths [{widths}] /ToUnicode 5 0 R >>",
+            $"<< /Length {cmap.Length} >>\nstream\n{cmap}\nendstream",
+            $"<< /Length {data.Length} /Filter /FlateDecode >>\nstream\n{data}\nendstream",
+        });
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private static byte[] SimplePdf(List<string> objects)
@@ -374,6 +462,151 @@ public class HostileInputTests
         }
     }
 
+    /// <summary>Runs <paramref name="work"/> on one thread and returns its result with the bytes that thread allocated.</summary>
+    private static (T Result, long Allocated) Allocating<T>(Func<T> work) => Bounded(() =>
+    {
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        var result = work();
+        return (result, GC.GetAllocatedBytesForCurrentThread() - before);
+    });
+
+    /// <summary>A little-endian TIFF of one image directory whose tags all hold one LONG, followed by <paramref name="data"/>.</summary>
+    private static byte[] Tiff((int Tag, uint Value)[] tags, byte[] data, int dataOffsetTag)
+    {
+        int dataAt = 8 + 2 + tags.Length * 12 + 4;
+        var d = new byte[dataAt + data.Length];
+        "II*\0"u8.CopyTo(d);
+        BinaryPrimitives.WriteUInt32LittleEndian(d.AsSpan(4), 8);
+        BinaryPrimitives.WriteUInt16LittleEndian(d.AsSpan(8), (ushort)tags.Length);
+        int at = 10;
+        foreach (var (tag, value) in tags.OrderBy(t => t.Tag))
+        {
+            BinaryPrimitives.WriteUInt16LittleEndian(d.AsSpan(at), (ushort)tag);
+            BinaryPrimitives.WriteUInt16LittleEndian(d.AsSpan(at + 2), 4);
+            BinaryPrimitives.WriteUInt32LittleEndian(d.AsSpan(at + 4), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(d.AsSpan(at + 8), tag == dataOffsetTag ? (uint)dataAt : value);
+            at += 12;
+        }
+        data.CopyTo(d, dataAt);
+        return d;
+    }
+
+    [Theory]
+    [InlineData(32773)] // PackBits
+    [InlineData(8)] // Deflate
+    [InlineData(1)] // uncompressed
+    public void Tiff_tile_far_larger_than_the_image_is_not_allocated(int compression)
+    {
+        // A 1 x 1 image of eight 16-bit samples in one 10000 x 10000 tile: 1.6 GB for the tile from a few bytes.
+        var tiff = Tiff(new[]
+        {
+            (256, 1u), (257, 1u), (258, 16u), (259, (uint)compression), (262, 1u), (277, 8u),
+            (322, 10000u), (323, 10000u), (324, 0u), (325, 16u),
+        }, new byte[16], 324);
+        var (_, allocated) = Allocating(() => TiffDecoder.Decode(tiff, 100_000_000));
+        Assert.True(allocated < 64 << 20, $"Allocated {allocated:N0} bytes");
+    }
+
+    [Fact]
+    public void Tiff_strips_sharing_one_lzw_blob_decode_only_their_own_size()
+    {
+        // 1000 strips of one row each all point at the same LZW data, which decodes to about 256 KB of zeros: each strip
+        // needs 16 bytes, so decoding the whole blob for each would be over ten thousand times the image.
+        var lzw = new List<byte>();
+        int bits = 0, count = 0;
+        void Code(int c) { bits = bits << 9 | c; count += 9; while (count >= 8) { lzw.Add((byte)(bits >> (count - 8))); count -= 8; } }
+        for (int cycle = 0; cycle < 8; cycle++)
+        {
+            Code(256);
+            Code(0);
+            for (int c = 258; c < 510; c++) Code(c); // each code is the previous one plus another zero, still 9 bits wide
+        }
+        Code(257);
+        if (count > 0) lzw.Add((byte)(bits << (8 - count)));
+        var data = lzw.ToArray();
+
+        const int rows = 1000;
+        var tiff = Tiff(new[]
+        {
+            (256, 16u), (257, (uint)rows), (258, 8u), (259, 5u), (262, 1u), (277, 1u), (278, 1u), (273, 0u), (279, 0u),
+        }, data, 273);
+        // Point every strip at the one blob through offset and byte-count arrays appended after it.
+        int blobAt = tiff.Length - data.Length, offsetsAt = tiff.Length, countsAt = offsetsAt + rows * 4;
+        Array.Resize(ref tiff, tiff.Length + rows * 8);
+        for (int i = 0; i < rows; i++)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(tiff.AsSpan(offsetsAt + i * 4), (uint)blobAt);
+            BinaryPrimitives.WriteUInt32LittleEndian(tiff.AsSpan(countsAt + i * 4), (uint)data.Length);
+        }
+        // The directory holds the tags in order: 273 is the sixth entry and 279 the ninth.
+        foreach (var (index, at) in new[] { (5, offsetsAt), (8, countsAt) })
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(tiff.AsSpan(10 + index * 12 + 4), rows);
+            BinaryPrimitives.WriteUInt32LittleEndian(tiff.AsSpan(10 + index * 12 + 8), (uint)at);
+        }
+
+        // Refusing the file and decoding each strip only as far as its own 16 bytes are both fine.
+        var (_, allocated) = Allocating(() => TiffDecoder.Decode(tiff, 100_000_000));
+        Assert.True(allocated < 200 << 20, $"Allocated {allocated:N0} bytes");
+    }
+
+    [Fact]
+    public void Animated_webp_with_a_huge_canvas_and_a_tiny_frame_is_not_allocated()
+    {
+        // The lossless frame of a small fixture as the first frame of an animation on a 10000 x 10000 canvas.
+        var source = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "images", "lossless-palette.webp"));
+        int vp8l = Encoding.ASCII.GetString(source).IndexOf("VP8L", StringComparison.Ordinal);
+        var frame = source.AsSpan(vp8l, 8 + BinaryPrimitives.ReadInt32LittleEndian(source.AsSpan(vp8l + 4))).ToArray();
+        if (frame.Length % 2 == 1) Array.Resize(ref frame, frame.Length + 1);
+
+        var webp = new MemoryStream();
+        void Chunk(string fourCc, byte[] body)
+        {
+            webp.Write(Encoding.ASCII.GetBytes(fourCc));
+            webp.Write(BitConverter.GetBytes(body.Length));
+            webp.Write(body);
+        }
+        webp.Write("RIFF\0\0\0\0WEBP"u8);
+        var vp8x = new byte[10];
+        vp8x[0] = 0x02; // animation
+        vp8x[4] = (9999 & 0xFF); vp8x[5] = 9999 >> 8; vp8x[7] = (9999 & 0xFF); vp8x[8] = 9999 >> 8;
+        Chunk("VP8X", vp8x);
+        Chunk("ANIM", new byte[6]);
+        Chunk("ANMF", new byte[16].Concat(frame).ToArray()); // offset 0, frame size and timing left at zero
+        var bytes = webp.ToArray();
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(4), bytes.Length - 8);
+
+        var (_, allocated) = Allocating(() => WebPDecoder.Decode(bytes, 100_000_000));
+        Assert.True(allocated < 64 << 20, $"Allocated {allocated:N0} bytes");
+    }
+
+    [Fact]
+    public void Device_files_and_pipes_are_not_read_as_images_or_stylesheets()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        var dir = Directory.CreateTempSubdirectory("pdfpecker-fifo");
+        try
+        {
+            // A pipe nobody writes to blocks whoever opens it; /dev/zero never ends.
+            var fifo = Path.Combine(dir.FullName, "pipe.css");
+            using (var mkfifo = System.Diagnostics.Process.Start("mkfifo", fifo)) mkfifo.WaitForExit();
+            Assert.True(File.Exists(fifo));
+            var html = $"<link rel=stylesheet href='{fifo}'><link rel=stylesheet href='/dev/zero'>"
+                + $"<img src='/dev/zero'><img src='file:///dev/zero'><img src='pipe.css'><p>text</p>";
+            var options = new PdfOptions { BaseDirectory = dir.FullName, AllowFileAccess = true };
+            var (pdf, allocated) = Allocating(() => HtmlToPdf.Convert(html, options));
+            AssertStructurallyValid(pdf);
+            Assert.True(allocated < 256 << 20, $"Allocated {allocated:N0} bytes");
+            // Without AllowFileAccess the pipe inside the base directory is still in reach.
+            AssertStructurallyValid(Bounded(() => HtmlToPdf.Convert("<img src='pipe.css'><link rel=stylesheet href='pipe.css'>",
+                new PdfOptions { BaseDirectory = dir.FullName })));
+        }
+        finally
+        {
+            dir.Delete(true);
+        }
+    }
+
     private static Element Styled(string html)
     {
         var doc = HtmlParser.Parse(html);
@@ -391,6 +624,150 @@ public class HostileInputTests
         {
             yield return c;
             foreach (var d in Descendants(c)) yield return d;
+        }
+    }
+
+    [Fact]
+    public void Many_certificate_store_entries_pointing_at_one_compression_bomb_are_decoded_once_within_a_budget()
+    {
+        // Two hundred megabytes of zeros compress to a few hundred kilobytes; a thousand references to it would decode
+        // two hundred gigabytes if every entry were decoded on its own.
+        var bomb = new MemoryStream();
+        using (var z = new ZLibStream(bomb, CompressionLevel.SmallestSize, leaveOpen: true))
+            for (int i = 0; i < 200; i++) z.Write(new byte[1 << 20]);
+        static byte[] L(string t) => Encoding.Latin1.GetBytes(t);
+        var refs = new StringBuilder();
+        for (int i = 0; i < 1000; i++) refs.Append("4 0 R ");
+        var objects = new List<byte[]>
+        {
+            L("1 0 obj\n<< /Type /Catalog /Pages 2 0 R /DSS 5 0 R >>\nendobj\n"),
+            L("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"),
+            L("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] >>\nendobj\n"),
+            L("4 0 obj\n<< /Length " + bomb.Length + " /Filter /FlateDecode >>\nstream\n").Concat(bomb.ToArray()).Concat(L("\nendstream\nendobj\n")).ToArray(),
+            L("5 0 obj\n<< /Certs [" + refs + "] >>\nendobj\n"),
+        };
+        var ms = new MemoryStream();
+        ms.Write(L("%PDF-1.7\n"));
+        var offsets = new List<long>();
+        foreach (var o in objects) { offsets.Add(ms.Position); ms.Write(o); }
+        long xref = ms.Position;
+        var sb = new StringBuilder("xref\n0 " + (offsets.Count + 1) + "\n0000000000 65535 f \n");
+        foreach (var o in offsets) sb.Append(o.ToString("D10")).Append(" 00000 n \n");
+        sb.Append("trailer\n<< /Size " + (offsets.Count + 1) + " /Root 1 0 R >>\nstartxref\n" + xref + "\n%%EOF\n");
+        ms.Write(L(sb.ToString()));
+        var pdf = ms.ToArray();
+
+        Assert.Empty(Bounded(() => PdfSignatureVerifier.Verify(pdf)));
+    }
+}
+
+/// <summary>Hostile CFF and CFF2 fonts whose subroutines fan out exponentially.</summary>
+[Collection(HostileInputCollection.Name)]
+public class CffSubroutineTests
+{
+    private static byte[] Fixture(string name) => File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", name));
+
+    private static byte[] Bounded(string html)
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        return HtmlToPdf.Convert(html, null, cts.Token);
+    }
+
+    private static string FontFace(byte[] font)
+        => $"<style>@font-face{{font-family:f;src:url(data:font/otf;base64,{Convert.ToBase64String(font)})}}</style>";
+
+    [Fact]
+    public void Cff_subroutines_that_fan_out_do_not_hang_subsetting()
+    {
+        // Every glyph of Inter becomes a call into global subroutines that each call the next a thousand times.
+        var font = ReplaceTable(Fixture("Inter-Subr.otf"), "CFF ", n => FanOutCff(cff2: false, n));
+        AssertStructurallyValid(Bounded(FontFace(font) + "<p style='font-family:f'>xyz</p>"));
+    }
+
+    [Fact]
+    public void Cff2_subroutines_that_fan_out_do_not_hang_instancing()
+    {
+        // A bold run makes the converter instance the CFF2 variable font, which runs every glyph's charstring.
+        var font = ReplaceTable(Fixture("VarTestCFF-Subset.otf"), "CFF2", n => FanOutCff(cff2: true, n));
+        AssertStructurallyValid(Bounded(FontFace(font) + "<p style='font-family:f'>Hen <b>Hen</b></p>"));
+    }
+
+    private static byte[] ReplaceTable(byte[] font, string tag, Func<int, byte[]> table)
+    {
+        var p = Assert.Single(FontProgram.Load(font));
+        var replacement = table(p.NumGlyphs);
+        var tables = p.Tables.Select(t => (t.Tag, t.Tag == FontProgram.Tag(tag) ? replacement : p.Data.AsSpan(t.Offset, t.Length).ToArray())).ToList();
+        return SfntBuilder.Build(0x4F54544F, tables); // 'OTTO'
+    }
+
+    /// <summary>
+    /// A CFF (or CFF2) table whose glyphs all call global subroutine 0, and whose subroutine i calls subroutine i + 1
+    /// a thousand times: 1000^8 calls if walked naively. With fewer than 1240 subroutines the bias is 107, so
+    /// subroutine i is the one-byte number i - 107.
+    /// </summary>
+    private static byte[] FanOutCff(bool cff2, int glyphs)
+    {
+        const int levels = 9, fanOut = 1000; // nine levels stay within the nesting limit of ten, with the glyph itself
+        var subrs = new byte[levels][];
+        for (int i = 0; i < levels; i++)
+        {
+            var s = new List<byte>();
+            if (i + 1 < levels)
+                for (int k = 0; k < fanOut; k++) { s.Add((byte)(i + 1 - 107 + 139)); s.Add(29); } // n callgsubr
+            if (!cff2) s.Add(11); // return
+            subrs[i] = s.ToArray();
+        }
+        var glyph = cff2 ? new byte[] { 32, 29 } : new byte[] { 32, 29, 14 }; // -107 callgsubr (endchar)
+        var charStrings = Index(cff2, Enumerable.Repeat(glyph, glyphs).ToArray());
+        var gsubrs = Index(cff2, subrs);
+
+        var o = new List<byte>();
+        if (cff2)
+        {
+            o.AddRange(new byte[] { 2, 0, 5, 0, 6 }); // version 2, header size 5, Top DICT length 6
+            o.AddRange(TopDict(5 + 6 + gsubrs.Length));
+        }
+        else
+        {
+            o.AddRange(new byte[] { 1, 0, 4, 4 });
+            o.AddRange(Index(false, new[] { "F"u8.ToArray() }));
+            int topSize = Index(false, new[] { TopDict(0) }).Length;
+            o.AddRange(Index(false, new[] { TopDict(o.Count + topSize + 2 + gsubrs.Length) }));
+            o.AddRange(new byte[] { 0, 0 }); // empty String INDEX
+        }
+        o.AddRange(gsubrs);
+        o.AddRange(charStrings);
+        return o.ToArray();
+
+        // The Top DICT holds only the CharStrings offset, as a five-byte integer so that its size is known up front.
+        static byte[] TopDict(int charStrings)
+        {
+            var b = new byte[6];
+            b[0] = 29;
+            BinaryPrimitives.WriteInt32BigEndian(b.AsSpan(1), charStrings);
+            b[5] = 17;
+            return b;
+        }
+
+        static byte[] Index(bool cff2, byte[][] items)
+        {
+            var o = new List<byte>();
+            var count = new byte[4];
+            BinaryPrimitives.WriteInt32BigEndian(count, items.Length);
+            o.AddRange(cff2 ? count : count[2..]);
+            o.Add(4);
+            var off = new byte[4];
+            int at = 1;
+            BinaryPrimitives.WriteInt32BigEndian(off, at);
+            o.AddRange(off);
+            foreach (var item in items)
+            {
+                at += item.Length;
+                BinaryPrimitives.WriteInt32BigEndian(off, at);
+                o.AddRange(off);
+            }
+            foreach (var item in items) o.AddRange(item);
+            return o.ToArray();
         }
     }
 }

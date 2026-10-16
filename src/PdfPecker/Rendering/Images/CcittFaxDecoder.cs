@@ -70,6 +70,7 @@ internal sealed class CcittFaxDecoder
         int refCount = 0;
         refLine[refCount++] = columns;
         refLine[refCount++] = columns;
+        int decodedRows = 0;
         try
         {
             for (int row = 0; row < rows; row++)
@@ -103,6 +104,7 @@ internal sealed class CcittFaxDecoder
                     pos = Math.Max(pos, end);
                     black = !black;
                 }
+                decodedRows = row + 1;
                 Array.Copy(codLine, refLine, codCount);
                 refCount = codCount;
                 refLine[refCount] = columns;
@@ -116,7 +118,9 @@ internal sealed class CcittFaxDecoder
             // Corrupt data: keep the rows decoded so far.
         }
         bitsUsed = Math.Min(dec._bit, dec._bitLen);
-        // Rows never decoded stay 0: make them white.
+        // Rows the data ran out before are still 0 bits, which is black unless BlackIs1; paper white is the honest
+        // stand-in for missing scan lines.
+        if (!blackIs1) output.AsSpan(decodedRows * rowBytes).Fill(0xFF);
         return output;
     }
 

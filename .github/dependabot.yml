@@ -1,7 +1,17 @@
-# Weekly pull requests when a pinned GitHub Action gets a new version.
+# Weekly pull requests when a pinned GitHub Action or a test package gets a new version. The library has no package
+# references, and bench/PdfPecker.Comparison is left out on purpose: its competitor versions are the ones the published
+# benchmark table was measured with.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+
+  - package-ecosystem: nuget
+    directory: /tests/PdfPecker.Tests
+    schedule:
+      interval: weekly
+    groups:
+      nuget-minor-and-patch:
+        update-types: [minor, patch]

@@ -208,22 +208,25 @@ internal sealed class JpegDecoder
         if (_width <= 0 || n < 1 || n > 4) throw new InvalidDataException("Bad JPEG frame.");
         if (_height == 0) _height = 1; // DNL-defined height: decode what we can
         if ((long)_width * _height > PdfImageDecoder.MaxPixels) throw new InvalidDataException("JPEG too large.");
-        _comps = new Component[n];
+        // The components are published only once the whole header has been read: a truncated header must not leave
+        // half-built components behind for the partial output that Decode makes of a damaged file.
+        var comps = new Component[n];
         for (int i = 0; i < n; i++)
         {
             int o = p + 6 + i * 3;
-            _comps[i] = new Component { Id = d[o], H = Math.Max(1, d[o + 1] >> 4), V = Math.Max(1, d[o + 1] & 15), Tq = d[o + 2] & 3 };
+            comps[i] = new Component { Id = d[o], H = Math.Max(1, d[o + 1] >> 4), V = Math.Max(1, d[o + 1] & 15), Tq = d[o + 2] & 3 };
         }
-        _hMax = _comps.Max(c => c.H);
-        _vMax = _comps.Max(c => c.V);
+        _hMax = comps.Max(c => c.H);
+        _vMax = comps.Max(c => c.V);
         _mcusX = (_width + 8 * _hMax - 1) / (8 * _hMax);
         _mcusY = (_height + 8 * _vMax - 1) / (8 * _vMax);
-        foreach (var c in _comps)
+        foreach (var c in comps)
         {
             c.BlocksPerLine = _mcusX * c.H;
             c.BlocksPerColumn = _mcusY * c.V;
             c.Coeffs = new short[c.BlocksPerLine * c.BlocksPerColumn * 64];
         }
+        _comps = comps;
     }
 
     // ------------------------------------------------------------------ scans

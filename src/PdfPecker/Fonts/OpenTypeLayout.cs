@@ -20,8 +20,9 @@ internal struct GlyphInfo
 /// <summary>
 /// The GSUB, GPOS and GDEF tables of a font, and the code that applies their lookups to a run of glyphs: all GSUB lookup
 /// types (alternates take the first alternate) and all GPOS lookup types, with lookup flags, mark attachment classes
-/// and mark filtering sets. Device tables and variations are not applied. Malformed tables throw
-/// IndexOutOfRangeException, which the shaper turns into unshaped text.
+/// and mark filtering sets. Device tables and variations are not applied. The lists read to plan the shaping are
+/// checked when the font is loaded; malformed subtables throw IndexOutOfRangeException while a lookup is applied, which
+/// the shaper turns into unshaped text.
 /// </summary>
 internal sealed class OpenTypeLayout
 {
@@ -37,15 +38,61 @@ internal sealed class OpenTypeLayout
     public OpenTypeLayout(FontProgram font)
     {
         _d = font.Data;
-        if (font.Table("GSUB") is { Length: >= 10 } gsub && U16(gsub.Offset) == 1) _gsub = gsub.Offset;
-        if (font.Table("GPOS") is { Length: >= 10 } gpos && U16(gpos.Offset) == 1) _gpos = gpos.Offset;
+        // The script, feature and lookup lists and the glyph class definitions are read outside the lookups' own
+        // error handling (to plan the shaping and classify every glyph), so they are checked once here: a table
+        // whose lists run past the end of the font is ignored, and the text is shaped without it.
+        if (font.Table("GSUB") is { Length: >= 10 } gsub && U16(gsub.Offset) == 1 && ValidLists(gsub.Offset)) _gsub = gsub.Offset;
+        if (font.Table("GPOS") is { Length: >= 10 } gpos && U16(gpos.Offset) == 1 && ValidLists(gpos.Offset)) _gpos = gpos.Offset;
         if (font.Table("GDEF") is { Length: >= 12 } gdef && U16(gdef.Offset) == 1)
         {
             int g = gdef.Offset;
-            if (U16(g + 4) != 0) _glyphClassDef = g + U16(g + 4);
-            if (U16(g + 10) != 0) _markAttachClassDef = g + U16(g + 10);
+            if (U16(g + 4) != 0 && ValidClassDef(g + U16(g + 4))) _glyphClassDef = g + U16(g + 4);
+            if (U16(g + 10) != 0 && ValidClassDef(g + U16(g + 10))) _markAttachClassDef = g + U16(g + 10);
             if (U16(g + 2) >= 2 && gdef.Length >= 14 && U16(g + 12) != 0) _markGlyphSets = g + U16(g + 12);
         }
+    }
+
+    /// <summary>Whether <paramref name="length"/> bytes at <paramref name="offset"/> are inside the font data.</summary>
+    private bool Fits(int offset, int length) => offset >= 0 && (long)offset + length <= _d.Length;
+
+    /// <summary>
+    /// Whether everything <see cref="FeatureLookups"/> and <see cref="ApplyLookup"/> read before reaching a lookup's
+    /// subtables is inside the font: the script list with each script's default language system, the feature list
+    /// with each feature's lookup indices, and the lookup list's offsets.
+    /// </summary>
+    private bool ValidLists(int table)
+    {
+        int scripts = table + U16(table + 4);
+        if (!Fits(scripts, 2) || !Fits(scripts + 2, U16(scripts) * 6)) return false;
+        for (int i = 0, n = U16(scripts); i < n; i++)
+        {
+            int s = scripts + U16(scripts + 2 + i * 6 + 4);
+            if (!Fits(s, 2)) return false;
+            if (U16(s) == 0) continue;
+            int langSys = s + U16(s);
+            if (!Fits(langSys, 6) || !Fits(langSys + 6, U16(langSys + 4) * 2)) return false;
+        }
+        int features = table + U16(table + 6);
+        if (!Fits(features, 2) || !Fits(features + 2, U16(features) * 6)) return false;
+        for (int i = 0, n = U16(features); i < n; i++)
+        {
+            int f = features + U16(features + 2 + i * 6 + 4);
+            if (!Fits(f, 4) || !Fits(f + 4, U16(f + 2) * 2)) return false;
+        }
+        int lookups = table + U16(table + 8);
+        return Fits(lookups, 2) && Fits(lookups + 2, U16(lookups) * 2);
+    }
+
+    /// <summary>Whether a class definition table, which <see cref="GlyphProps"/> reads for every glyph, is inside the font.</summary>
+    private bool ValidClassDef(int def)
+    {
+        if (!Fits(def, 4)) return false;
+        return U16(def) switch
+        {
+            1 => Fits(def, 6) && Fits(def + 6, U16(def + 4) * 2),
+            2 => Fits(def + 4, U16(def + 2) * 6),
+            _ => true, // an unknown format classifies nothing and reads no further
+        };
     }
 
     public bool HasGsub => _gsub >= 0;

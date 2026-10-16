@@ -77,6 +77,7 @@ internal static class LtvWriter
         var errors = new List<string>();
         var vris = new SortedDictionary<string, Vri>(StringComparer.Ordinal);
         var fetched = new Dictionary<string, (int Ocsp, int Crl)>(StringComparer.Ordinal);
+        using var fetcher = new RevocationFetcher(o.HttpClient, o.UrlFilter);
         foreach (var sig in signatures)
         {
             if (sig.Contents == null) continue;
@@ -121,12 +122,12 @@ internal static class LtvWriter
                     {
                         got = (-1, -1);
                         var certErrors = new List<string>();
-                        if (issuer != null && Revocation.FetchOcsp(cert, issuer, o.HttpClient, certErrors) is { } ocsp)
+                        if (issuer != null && Revocation.FetchOcsp(cert, issuer, fetcher, certErrors) is { } ocsp)
                         {
                             got.Ocsp = ocsps.Add(ocsp.Encoded);
                             foreach (var c in ocsp.Certificates) vri.Certs.Add(certs.Add(c));
                         }
-                        else if (Revocation.FetchCrl(cert, o.HttpClient, certErrors) is { } crl) got.Crl = crls.Add(crl);
+                        else if (Revocation.FetchCrl(cert, fetcher, certErrors) is { } crl) got.Crl = crls.Add(crl);
                         else errors.AddRange(certErrors);
                         fetched[cert.Thumbprint] = got;
                     }
@@ -198,16 +199,37 @@ internal static class LtvWriter
         }
     }
 
+    // An existing store may hold large CRLs that must be carried over, so its budget is wider than the verifier's.
+    private const long MaxExistingStoreDecoded = 512L * 1024 * 1024;
+
     private static void ReadExisting(PdfFile file, PdfDict? dss, string key, Pool pool)
     {
         var array = file.GetArray(dss, key);
         if (array == null) return;
-        foreach (var item in array.Items.Take(10_000))
+        foreach (var (data, item) in DecodeStoreStreams(file, array, 10_000, MaxExistingStoreDecoded)) pool.Add(data, item);
+    }
+
+    /// <summary>
+    /// Decodes the streams of a store array (/Certs, /OCSPs or /CRLs) with their array items, each stream once however
+    /// often it is listed, and stops when <paramref name="budget"/> decoded bytes are used up. Without both, a store
+    /// listing one compression bomb thousands of times would make it inflate the bomb thousands of times.
+    /// Streams that cannot be decoded are skipped.
+    /// </summary>
+    internal static List<(byte[] Data, PdfObject Item)> DecodeStoreStreams(PdfFile file, PdfArray array, int maxItems, long budget)
+    {
+        var result = new List<(byte[], PdfObject)>();
+        var seen = new HashSet<PdfStream>(ReferenceEqualityComparer.Instance);
+        using (PdfFile.BeginRender(CancellationToken.None, budget))
         {
-            if (file.Resolve(item) is not PdfStream s) continue;
-            try { pool.Add(file.DecodeStream(s), item); }
-            catch (Exception ex) when (ex is PdfFormatException or InvalidDataException or NotSupportedException) { }
+            foreach (var item in array.Items.Take(maxItems))
+            {
+                if (file.Resolve(item) is not PdfStream s || !seen.Add(s)) continue;
+                try { result.Add((file.DecodeStream(s), item)); }
+                catch (InvalidDataException) when (PdfFile.DecodeLimit == 0) { break; }
+                catch (Exception ex) when (ex is PdfFormatException or InvalidDataException or NotSupportedException) { }
+            }
         }
+        return result;
     }
 
     private static byte[] WriteDss(PdfFile file, byte[] pdf, PdfDict? existingDss, Pool certs, Pool ocsps, Pool crls,
@@ -219,10 +241,7 @@ internal static class LtvWriter
         var crypt = file.Decryptor;
         int next = Math.Max(file.GetInt(trailer, "Size", 0), file.MaxObjectNumber + 1);
 
-        var output = new ByteBuffer(pdf.Length + 65536);
-        output.Bytes(pdf);
-        if (pdf.Length == 0 || pdf[^1] != '\n') output.Nl();
-        var offsets = new SortedDictionary<int, (long Offset, int Gen)>();
+        var update = new PdfUpdateWriter(file, pdf, 65536);
 
         List<PdfObject> WriteStreams(Pool pool)
         {
@@ -233,8 +252,7 @@ internal static class LtvWriter
                 int num = next++;
                 byte[] data = Deflate(pool.Items[i]);
                 if (crypt != null) data = crypt.EncryptStream(data, num, 0);
-                offsets[num] = (output.Length, 0);
-                output.Int(num).Ascii(" 0 obj\n<< /Length ").Int(data.Length).Ascii(" /Filter /FlateDecode >>\nstream\n")
+                update.Begin(num, 0).Ascii("<< /Length ").Int(data.Length).Ascii(" /Filter /FlateDecode >>\nstream\n")
                     .Bytes(data).Ascii("\nendstream\nendobj\n");
                 refs.Add(new PdfRef(num, 0));
             }
@@ -265,7 +283,7 @@ internal static class LtvWriter
         dss.Entries["VRI"] = vriDict;
 
         var dssRef = catalog["DSS"] as PdfRef ?? new PdfRef(next++, 0);
-        WriteObject(output, offsets, crypt, dssRef.Num, dssRef.Gen, dss);
+        update.WriteObject(dssRef.Num, dssRef.Gen, dss);
 
         // The catalog changes when the store is new, and to declare the ETSI extension that PDF 1.7 readers look for.
         var extensions = file.GetDict(catalog, "Extensions");
@@ -283,10 +301,10 @@ internal static class LtvWriter
                 ext.Entries["ESIC"] = esic;
                 cat.Entries["Extensions"] = ext;
             }
-            WriteObject(output, offsets, crypt, rootRef.Num, rootRef.Gen, cat);
+            update.WriteObject(rootRef.Num, rootRef.Gen, cat);
         }
-        SignatureWriter.WriteXref(file, output, offsets, rootRef, next);
-        return output.Span.ToArray();
+        update.Finish(rootRef, next);
+        return update.Output.Span.ToArray();
     }
 
     private static bool IsPdf2(PdfFile file, PdfDict catalog)
@@ -320,7 +338,6 @@ internal static class LtvWriter
         var trailer = file.Trailer;
         var rootRef = trailer["Root"] as PdfRef ?? throw new PdfSignatureException("The PDF has no document catalog reference.");
         var catalog = file.Catalog!;
-        var crypt = file.Decryptor;
         var page = FirstPage(file, catalog["Pages"], 0) ?? throw new PdfSignatureException("The PDF has no pages.");
 
         var acroEntry = catalog["AcroForm"];
@@ -343,17 +360,15 @@ internal static class LtvWriter
         acro.Entries["Fields"] = new PdfArray(fields);
         acro.Entries["SigFlags"] = PdfNumber.Int(3);
 
-        var output = new ByteBuffer(pdf.Length + reserve * 2 + 8192);
-        output.Bytes(pdf);
-        if (pdf.Length == 0 || pdf[^1] != '\n') output.Nl();
-        var offsets = new SortedDictionary<int, (long Offset, int Gen)>();
+        var update = new PdfUpdateWriter(file, pdf, reserve * 2 + 8192);
+        var output = update.Output;
 
-        if (acroEntry is PdfRef acroRef) WriteObject(output, offsets, crypt, acroRef.Num, acroRef.Gen, acro);
+        if (acroEntry is PdfRef acroRef) update.WriteObject(acroRef.Num, acroRef.Gen, acro);
         else
         {
             var cat = Copy(catalog);
             cat.Entries["AcroForm"] = acro;
-            WriteObject(output, offsets, crypt, rootRef.Num, rootRef.Gen, cat);
+            update.WriteObject(rootRef.Num, rootRef.Gen, cat);
         }
 
         var (pageRef, pageDict) = page;
@@ -361,12 +376,12 @@ internal static class LtvWriter
         var annots = new List<PdfObject>();
         if (file.Resolve(annotsEntry) is PdfArray oldAnnots) annots.AddRange(oldAnnots.Items);
         annots.Add(new PdfRef(widgetNum, 0));
-        if (annotsEntry is PdfRef annotsRef) WriteObject(output, offsets, crypt, annotsRef.Num, annotsRef.Gen, new PdfArray(annots));
+        if (annotsEntry is PdfRef annotsRef) update.WriteObject(annotsRef.Num, annotsRef.Gen, new PdfArray(annots));
         else
         {
             var p = Copy(pageDict);
             p.Entries["Annots"] = new PdfArray(annots);
-            WriteObject(output, offsets, crypt, pageRef.Num, pageRef.Gen, p);
+            update.WriteObject(pageRef.Num, pageRef.Gen, p);
         }
 
         var widget = new PdfDict();
@@ -382,14 +397,12 @@ internal static class LtvWriter
         var apDict = new PdfDict();
         apDict.Entries["N"] = new PdfRef(apNum, 0);
         widget.Entries["AP"] = apDict;
-        WriteObject(output, offsets, crypt, widgetNum, 0, widget);
+        update.WriteObject(widgetNum, 0, widget);
 
         // An empty appearance, so PDF/A validators find the widget complete.
-        offsets[apNum] = (output.Length, 0);
-        output.Int(apNum).Ascii(" 0 obj\n<< /Type /XObject /Subtype /Form /BBox [0 0 0 0] /Resources << >> /Length 0 >>\nstream\n\nendstream\nendobj\n");
+        update.Begin(apNum, 0).Ascii("<< /Type /XObject /Subtype /Form /BBox [0 0 0 0] /Resources << >> /Length 0 >>\nstream\n\nendstream\nendobj\n");
 
-        offsets[sigNum] = (output.Length, 0);
-        output.Int(sigNum).Ascii(" 0 obj\n<< /Type /DocTimeStamp /Filter /Adobe.PPKLite /SubFilter /ETSI.RFC3161 /ByteRange [");
+        update.Begin(sigNum, 0).Ascii("<< /Type /DocTimeStamp /Filter /Adobe.PPKLite /SubFilter /ETSI.RFC3161 /ByteRange [");
         int byteRangePos = output.Length;
         output.Ascii(new string(' ', ByteRangeWidth)).Ascii("] /Contents ");
         int contentsStart = output.Length;
@@ -399,7 +412,7 @@ internal static class LtvWriter
         int contentsEnd = output.Length;
         output.Ascii(" >>\nendobj\n");
 
-        SignatureWriter.WriteXref(file, output, offsets, rootRef, next);
+        update.Finish(rootRef, next);
 
         byte[] buf = output.RawBuffer;
         int total = output.Length;
@@ -433,14 +446,6 @@ internal static class LtvWriter
         foreach (var k in kids.Items)
             if (FirstPage(file, k, depth + 1) is { } found) return found;
         return null;
-    }
-
-    private static void WriteObject(ByteBuffer output, SortedDictionary<int, (long Offset, int Gen)> offsets, Decryptor? crypt, int num, int gen, PdfObject obj)
-    {
-        offsets[num] = (output.Length, gen);
-        output.Int(num).Sp().Int(gen).Ascii(" obj\n");
-        SignatureWriter.Serialize(output, obj, s => crypt == null ? s : crypt.EncryptString(s, num, gen));
-        output.Ascii("\nendobj\n");
     }
 
     private static byte[] Deflate(byte[] data)

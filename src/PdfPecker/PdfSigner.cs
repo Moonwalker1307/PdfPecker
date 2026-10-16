@@ -5,7 +5,9 @@ namespace PdfPecker;
 /// <summary>Thrown when a PDF cannot be signed, e.g. because the timestamp server or the external signer failed.</summary>
 public sealed class PdfSignatureException : Exception
 {
+    /// <summary>Creates the exception with a message saying why signing failed.</summary>
     public PdfSignatureException(string message) : base(message) { }
+    /// <summary>Creates the exception with a message and the error that caused it.</summary>
     public PdfSignatureException(string message, Exception inner) : base(message, inner) { }
 }
 

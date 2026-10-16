@@ -505,29 +505,15 @@ internal sealed partial class PdfFormEditor
 
     private byte[] WriteIncremental(byte[] original)
     {
-        var crypt = _file.Decryptor;
-        var output = new ByteBuffer(original.Length + 65536);
-        output.Bytes(original);
-        if (original.Length == 0 || original[^1] != '\n') output.Nl();
-        var offsets = new SortedDictionary<int, (long Offset, int Gen)>();
+        var update = new PdfUpdateWriter(_file, original, 65536);
         foreach (var (num, (gen, obj)) in _changed.OrderBy(kv => kv.Key))
         {
             _cancel.ThrowIfCancellationRequested();
-            offsets[num] = (output.Length, gen);
-            output.Int(num).Sp().Int(gen).Ascii(" obj\n");
-            Func<byte[], byte[]> encrypt = s => crypt == null ? s : crypt.EncryptString(s, num, gen);
-            if (obj is PdfStream s)
-            {
-                var data = crypt == null ? s.RawData : crypt.EncryptStream(s.RawData, num, gen);
-                var entries = new Dictionary<string, PdfObject>(s.Entries, StringComparer.Ordinal) { ["Length"] = PdfNumber.Int(data.Length) };
-                SignatureWriter.Serialize(output, new PdfDict(entries), encrypt);
-                output.Ascii("\nstream\n").Bytes(data).Ascii("\nendstream");
-            }
-            else SignatureWriter.Serialize(output, obj, encrypt);
-            output.Ascii("\nendobj\n");
+            if (obj is PdfStream s) update.WriteStream(num, gen, new Dictionary<string, PdfObject>(s.Entries, StringComparer.Ordinal), s.RawData);
+            else update.WriteObject(num, gen, obj);
         }
-        SignatureWriter.WriteXref(_file, output, offsets, _rootRef, _next);
-        return output.Span.ToArray();
+        update.Finish(_rootRef, _next);
+        return update.Output.Span.ToArray();
     }
 
     // ------------------------------------------------------------------ helpers
