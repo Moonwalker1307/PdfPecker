@@ -12,6 +12,16 @@ internal enum BidiClass : byte
 /// <summary>How a character joins its neighbours in cursive scripts (Arabic, Syriac, N'Ko, ...).</summary>
 internal enum JoiningType : byte { U, L, R, D, T, Alaph, DalathRish }
 
+/// <summary>
+/// The Line_Break classes of UAX #14 that the line breaker tells apart, in the order tools/UnicodeTables writes them.
+/// XX stands for every other class, alphabetic letters among them; emoji bases are ID and emoji modifiers CM.
+/// </summary>
+internal enum LineBreakClass : byte
+{
+    XX, NU, PR, PO, IS, SY, HY, BA, BB, B2, GL, WJ, ZW, CM, ZWJ, QU,
+    EX, IN, OP, CL, CP, NS, CJ, ID, H2, H3, JL, JV, JT,
+}
+
 /// <summary>Lookups in the generated Unicode tables.</summary>
 internal static partial class UnicodeTables
 {
@@ -51,6 +61,14 @@ internal static partial class UnicodeTables
             else hi = mid - 1;
         }
         return lo;
+    }
+
+    /// <summary>The Line_Break class of a character, and whether it is East Asian wide or fullwidth.</summary>
+    public static LineBreakClass LineBreak(int cp, out bool wide)
+    {
+        int v = LineBreakValues[FindRange(LineBreakStarts, cp)];
+        wide = (v & 0x80) != 0;
+        return (LineBreakClass)(v & 0x7F);
     }
 
     /// <summary>True for characters that are strong right-to-left, Arabic numbers, or explicit bidi controls.</summary>
