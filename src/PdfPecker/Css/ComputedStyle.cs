@@ -171,6 +171,9 @@ internal sealed class ComputedStyle
     public bool Bold;
     public int FontWeight = 400;
     public bool Italic;
+    public float FontStretch = 100;          // font-stretch as a percentage of normal width
+    public string? FontVariationSettings;    // font-variation-settings, as written; null = normal
+    public bool FontOpticalSizingNone;       // font-optical-sizing: none
     public float FontSize = 12f; // 16px
     public float ParentFontSize = 12f; // the parent's font size, which sub and super shift by
     public LineHeightKind LineHeightKind = LineHeightKind.Normal;
@@ -325,7 +328,8 @@ internal sealed class ComputedStyle
     {
         get
         {
-            var f = _font ??= Fonts == null ? StandardFor() : Fonts.Resolve(FontFamilyName, FontFamily, FontWeight, Italic);
+            var f = _font ??= Fonts == null ? StandardFor() : Fonts.Resolve(FontFamilyName, FontFamily, FontWeight, Italic,
+                new FontVariation(FontStretch, FontOpticalSizingNone ? 0 : FontSize / 0.75f, FontVariationSettings));
             if ((FontVariantNumeric != null || FontFeatureSettings != null) && FontFeatures.Key(FontVariantNumeric, FontFeatureSettings) is { } features)
                 f = f.WithFeatures(features);
             return NoLigatures || LetterSpacing != 0 ? f.WithoutLigatures() : f;

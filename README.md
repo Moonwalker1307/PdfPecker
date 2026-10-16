@@ -17,7 +17,7 @@ byte[] pdf = HtmlToPdf.Convert("<h1>Hello</h1><p>World</p>");
 File.WriteAllBytes("hello.pdf", pdf);
 ```
 
-**Documentation: [pdfpecker.net/docs](https://pdfpecker.net/docs/)**
+**Documentation: [pdfpecker.net/docs](https://pdfpecker.net/docs/)** · [HTML to PDF in C#: a step-by-step guide](https://pdfpecker.net/docs/html-to-pdf-csharp/)
 
 ## Install
 
@@ -64,8 +64,9 @@ All methods are static and thread-safe, so you can convert many documents in par
   named pages, running headers, tables of contents with page numbers, repeated table headers, orphans, widows and
   break control. [More](https://pdfpecker.net/docs/paged-media/)
 - **Markdown**: CommonMark 0.31 and GitHub Flavored Markdown to PDF or HTML. [More](https://pdfpecker.net/docs/markdown/)
-- **Fonts**: TrueType, OpenType, WOFF and WOFF2, subset and embedded, with `@font-face`, kerning, ligatures and OpenType
-  features such as tabular figures (`font-variant-numeric`, `font-feature-settings`).
+- **Fonts**: TrueType, OpenType, WOFF and WOFF2, subset and embedded, with `@font-face`, kerning, ligatures, variable fonts
+  (`font-weight`, `font-stretch`, `font-variation-settings`) and OpenType features such as tabular figures
+  (`font-variant-numeric`, `font-feature-settings`).
   [More](https://pdfpecker.net/docs/fonts/)
 - **Right-to-left and hyphenation**: Arabic and Hebrew with bidi and shaping, and `hyphens: auto`.
   [More](https://pdfpecker.net/docs/languages/)

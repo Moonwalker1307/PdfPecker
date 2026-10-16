@@ -33,7 +33,7 @@ internal sealed class FontProgram
     public readonly string FamilyName;          // name ID 1
     public readonly string? TypographicFamily;  // name ID 16
     public readonly string FullName;            // name ID 4
-    public readonly string PostScriptName;      // name ID 6, sanitized for use as a PDF name
+    public string PostScriptName { get; private set; } // name ID 6, sanitized for use as a PDF name
     private readonly int _numHMetrics;
     private readonly int _hmtx, _hmtxLength;
 
@@ -47,6 +47,8 @@ internal sealed class FontProgram
     private bool _ligaturesLoaded;
     private OpenTypeLayout? _layout;
     private bool _layoutLoaded;
+    private VariationAxis[]? _axes;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, FontProgram> _instances = new(StringComparer.Ordinal);
     private System.Collections.Concurrent.ConcurrentDictionary<string, FontProgram>? _featureVariants;
 
     private FontProgram(byte[] data, int dirOffset)
@@ -207,7 +209,8 @@ internal sealed class FontProgram
         catch (Exception ex) when (IsFormatError(ex)) { map = null; }
         if (map == null) return this;
         var bmp = _bmp ?? BuildCharMap();
-        // The variant shares the font data and every table reader; only the character map and widths differ.
+        // The variant shares the font data and every table reader; only the character map and widths differ. Features
+        // are applied after a variable font is instanced, so a variant never makes instances of its own.
         var variant = (FontProgram)MemberwiseClone();
         var mapped = new ushort[bmp.Length];
         for (int c = 0; c < bmp.Length; c++) mapped[c] = bmp[c] < map.Length ? (ushort)map[bmp[c]] : bmp[c];
@@ -233,6 +236,66 @@ internal sealed class FontProgram
         int off = _numHMetrics * 4 + (gid - _numHMetrics) * 2;
         return off + 2 <= _hmtxLength ? S16(_hmtx + off) : (short)0;
     }
+
+    /// <summary>The design axes of a variable font; empty for a static font.</summary>
+    public VariationAxis[] Axes
+    {
+        get
+        {
+            var axes = Volatile.Read(ref _axes);
+            if (axes != null) return axes;
+            try { axes = FontVariations.CanInstance(this) ? FontVariations.ReadAxes(this) : Array.Empty<VariationAxis>(); }
+            catch (Exception ex) when (IsFormatError(ex)) { axes = Array.Empty<VariationAxis>(); }
+            Volatile.Write(ref _axes, axes);
+            return axes;
+        }
+    }
+
+    /// <summary>The axis with a tag, if the font varies along it.</summary>
+    public VariationAxis? Axis(uint tag)
+    {
+        foreach (var a in Axes) if (a.Tag == tag) return a;
+        return null;
+    }
+
+    /// <summary>
+    /// The static instance of a variable font at the given axis values (design units, such as wght 700); axes not
+    /// given keep their default. Returns this font when it is not variable, when the values are its default (except for
+    /// CFF2 fonts), or when the font's variation data is damaged. Instances are cached, so documents share them.
+    /// </summary>
+    public FontProgram Instance(IReadOnlyDictionary<uint, float> values)
+    {
+        var axes = Axes;
+        if (axes.Length == 0 || values.Count == 0) return this;
+        try
+        {
+            var coords = FontVariations.Normalize(this, axes, values);
+            // CFF2 outlines are converted even at the default, since few PDF readers can draw them.
+            if (coords.All(c => c == 0) && Table("CFF2") == null) return this;
+            var key = string.Join(",", coords.Select(c => ((int)MathF.Round(c * 16384)).ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            if (_instances.TryGetValue(key, out var cached)) return cached;
+            if (_instances.Count >= MaxInstances) return this;
+            var instance = new FontProgram(FontVariations.Instance(this, coords, values, axes), 0);
+            // A name of its own, so the instances of one font are told apart in the PDF.
+            var suffix = new System.Text.StringBuilder();
+            for (int i = 0; i < axes.Length; i++)
+            {
+                if (coords[i] == 0) continue;
+                float v = values.TryGetValue(axes[i].Tag, out var given) ? Math.Clamp(given, axes[i].Min, axes[i].Max) : axes[i].Default;
+                suffix.Append('-').Append(axes[i].Name.Trim()).Append(MathF.Round(v, 1).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+            instance.PostScriptName = SanitizeName(PostScriptName + suffix);
+            return _instances.GetOrAdd(key, instance);
+        }
+        catch (Exception ex) when (IsFormatError(ex) || ex is InvalidOperationException)
+        {
+            return this;
+        }
+    }
+
+    // One font keeps at most this many instances, so a stylesheet with many weights cannot grow memory without bound;
+    // further locations use the default instance.
+    private const int MaxInstances = 64;
 
     /// <summary>Advance width in 1/1000 em, the unit used by layout and by PDF width arrays.</summary>
     public int Advance1000(int gid) => (int)Math.Round(Advance(gid) * 1000.0 / UnitsPerEm);

@@ -694,6 +694,15 @@ internal sealed class StyleResolver
         => lower.StartsWith("url(", StringComparison.Ordinal) && v.IndexOf(')') is int end and > 4
             ? v.Substring(4, end - 4).Trim().Trim('"', '\'') : null;
 
+    /// <summary>A font-stretch keyword or percentage as a percentage of the normal width; null when invalid.</summary>
+    internal static float? FontStretchPercent(string v) => v switch
+    {
+        "ultra-condensed" => 50, "extra-condensed" => 62.5f, "condensed" => 75, "semi-condensed" => 87.5f, "normal" => 100,
+        "semi-expanded" => 112.5f, "expanded" => 125, "extra-expanded" => 150, "ultra-expanded" => 200,
+        _ => v.EndsWith('%') && float.TryParse(v.AsSpan(0, v.Length - 1), System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out float p) && p >= 0 ? p : null,
+    };
+
     /// <summary>Whether font-feature-settings turns standard ligatures on or off ("liga" 0), or null when it leaves them.</summary>
     private static bool? LigaSetting(string value)
     {
@@ -963,6 +972,16 @@ internal sealed class StyleResolver
                     _ => int.TryParse(lower, out int w) && w >= 1 && w <= 1000 ? w : s.FontWeight,
                 };
                 s.Bold = s.FontWeight >= 600;
+                break;
+            case "font-stretch":
+                if (inherit) s.FontStretch = parent.FontStretch;
+                else if (FontStretchPercent(lower) is float stretch) s.FontStretch = stretch;
+                break;
+            case "font-variation-settings":
+                s.FontVariationSettings = inherit ? parent.FontVariationSettings : lower is "normal" or "initial" or "unset" ? null : v;
+                break;
+            case "font-optical-sizing":
+                s.FontOpticalSizingNone = inherit ? parent.FontOpticalSizingNone : lower == "none";
                 break;
             case "font-style":
                 s.Italic = lower switch { "italic" or "oblique" => true, "normal" => false, "inherit" => parent.Italic, _ => s.Italic };
