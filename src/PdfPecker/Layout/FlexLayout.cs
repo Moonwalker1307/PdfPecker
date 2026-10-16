@@ -104,7 +104,7 @@ internal sealed partial class LayoutEngine
     {
         if (it.El == null) return false;
         var s = it.Style;
-        return CssColor.IsVisible(s.BackgroundColor) || s.BackgroundImages != null || s.HasBorder || s.IsFlex || s.IsGrid;
+        return CssColor.IsVisible(s.BackgroundColor) || s.BackgroundImages != null || s.HasBorder || s.BorderImageSource != null || s.IsFlex || s.IsGrid;
     }
 
     private static BoxAlign SelfAlign(BoxItem it, BoxAlign containerValue)

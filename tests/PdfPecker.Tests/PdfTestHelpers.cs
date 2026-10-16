@@ -105,6 +105,22 @@ internal static class PdfTestHelpers
         return Png(w, h, 6, raw.ToArray());
     }
 
+    /// <summary>An opaque RGB PNG whose pixels <paramref name="color"/> gives, from x and y.</summary>
+    public static byte[] PixelPng(int w, int h, Func<int, int, (byte R, byte G, byte B)> color)
+    {
+        var raw = new MemoryStream();
+        for (int y = 0; y < h; y++)
+        {
+            raw.WriteByte(0);
+            for (int x = 0; x < w; x++)
+            {
+                var (r, g, b) = color(x, y);
+                raw.WriteByte(r); raw.WriteByte(g); raw.WriteByte(b);
+            }
+        }
+        return Png(w, h, 2, raw.ToArray());
+    }
+
     public static string DataUri(byte[] png) => "data:image/png;base64," + Convert.ToBase64String(png);
 
     private static byte[] Png(int w, int h, byte colorType, byte[] raw)
