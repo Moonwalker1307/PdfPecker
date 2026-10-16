@@ -241,10 +241,7 @@ internal static class LtvWriter
         var crypt = file.Decryptor;
         int next = Math.Max(file.GetInt(trailer, "Size", 0), file.MaxObjectNumber + 1);
 
-        var output = new ByteBuffer(pdf.Length + 65536);
-        output.Bytes(pdf);
-        if (pdf.Length == 0 || pdf[^1] != '\n') output.Nl();
-        var offsets = new SortedDictionary<int, (long Offset, int Gen)>();
+        var update = new PdfUpdateWriter(file, pdf, 65536);
 
         List<PdfObject> WriteStreams(Pool pool)
         {
@@ -255,8 +252,7 @@ internal static class LtvWriter
                 int num = next++;
                 byte[] data = Deflate(pool.Items[i]);
                 if (crypt != null) data = crypt.EncryptStream(data, num, 0);
-                offsets[num] = (output.Length, 0);
-                output.Int(num).Ascii(" 0 obj\n<< /Length ").Int(data.Length).Ascii(" /Filter /FlateDecode >>\nstream\n")
+                update.Begin(num, 0).Ascii("<< /Length ").Int(data.Length).Ascii(" /Filter /FlateDecode >>\nstream\n")
                     .Bytes(data).Ascii("\nendstream\nendobj\n");
                 refs.Add(new PdfRef(num, 0));
             }
@@ -287,7 +283,7 @@ internal static class LtvWriter
         dss.Entries["VRI"] = vriDict;
 
         var dssRef = catalog["DSS"] as PdfRef ?? new PdfRef(next++, 0);
-        WriteObject(output, offsets, crypt, dssRef.Num, dssRef.Gen, dss);
+        update.WriteObject(dssRef.Num, dssRef.Gen, dss);
 
         // The catalog changes when the store is new, and to declare the ETSI extension that PDF 1.7 readers look for.
         var extensions = file.GetDict(catalog, "Extensions");
@@ -305,10 +301,10 @@ internal static class LtvWriter
                 ext.Entries["ESIC"] = esic;
                 cat.Entries["Extensions"] = ext;
             }
-            WriteObject(output, offsets, crypt, rootRef.Num, rootRef.Gen, cat);
+            update.WriteObject(rootRef.Num, rootRef.Gen, cat);
         }
-        SignatureWriter.WriteXref(file, output, offsets, rootRef, next);
-        return output.Span.ToArray();
+        update.Finish(rootRef, next);
+        return update.Output.Span.ToArray();
     }
 
     private static bool IsPdf2(PdfFile file, PdfDict catalog)
@@ -342,7 +338,6 @@ internal static class LtvWriter
         var trailer = file.Trailer;
         var rootRef = trailer["Root"] as PdfRef ?? throw new PdfSignatureException("The PDF has no document catalog reference.");
         var catalog = file.Catalog!;
-        var crypt = file.Decryptor;
         var page = FirstPage(file, catalog["Pages"], 0) ?? throw new PdfSignatureException("The PDF has no pages.");
 
         var acroEntry = catalog["AcroForm"];
@@ -365,17 +360,15 @@ internal static class LtvWriter
         acro.Entries["Fields"] = new PdfArray(fields);
         acro.Entries["SigFlags"] = PdfNumber.Int(3);
 
-        var output = new ByteBuffer(pdf.Length + reserve * 2 + 8192);
-        output.Bytes(pdf);
-        if (pdf.Length == 0 || pdf[^1] != '\n') output.Nl();
-        var offsets = new SortedDictionary<int, (long Offset, int Gen)>();
+        var update = new PdfUpdateWriter(file, pdf, reserve * 2 + 8192);
+        var output = update.Output;
 
-        if (acroEntry is PdfRef acroRef) WriteObject(output, offsets, crypt, acroRef.Num, acroRef.Gen, acro);
+        if (acroEntry is PdfRef acroRef) update.WriteObject(acroRef.Num, acroRef.Gen, acro);
         else
         {
             var cat = Copy(catalog);
             cat.Entries["AcroForm"] = acro;
-            WriteObject(output, offsets, crypt, rootRef.Num, rootRef.Gen, cat);
+            update.WriteObject(rootRef.Num, rootRef.Gen, cat);
         }
 
         var (pageRef, pageDict) = page;
@@ -383,12 +376,12 @@ internal static class LtvWriter
         var annots = new List<PdfObject>();
         if (file.Resolve(annotsEntry) is PdfArray oldAnnots) annots.AddRange(oldAnnots.Items);
         annots.Add(new PdfRef(widgetNum, 0));
-        if (annotsEntry is PdfRef annotsRef) WriteObject(output, offsets, crypt, annotsRef.Num, annotsRef.Gen, new PdfArray(annots));
+        if (annotsEntry is PdfRef annotsRef) update.WriteObject(annotsRef.Num, annotsRef.Gen, new PdfArray(annots));
         else
         {
             var p = Copy(pageDict);
             p.Entries["Annots"] = new PdfArray(annots);
-            WriteObject(output, offsets, crypt, pageRef.Num, pageRef.Gen, p);
+            update.WriteObject(pageRef.Num, pageRef.Gen, p);
         }
 
         var widget = new PdfDict();
@@ -404,14 +397,12 @@ internal static class LtvWriter
         var apDict = new PdfDict();
         apDict.Entries["N"] = new PdfRef(apNum, 0);
         widget.Entries["AP"] = apDict;
-        WriteObject(output, offsets, crypt, widgetNum, 0, widget);
+        update.WriteObject(widgetNum, 0, widget);
 
         // An empty appearance, so PDF/A validators find the widget complete.
-        offsets[apNum] = (output.Length, 0);
-        output.Int(apNum).Ascii(" 0 obj\n<< /Type /XObject /Subtype /Form /BBox [0 0 0 0] /Resources << >> /Length 0 >>\nstream\n\nendstream\nendobj\n");
+        update.Begin(apNum, 0).Ascii("<< /Type /XObject /Subtype /Form /BBox [0 0 0 0] /Resources << >> /Length 0 >>\nstream\n\nendstream\nendobj\n");
 
-        offsets[sigNum] = (output.Length, 0);
-        output.Int(sigNum).Ascii(" 0 obj\n<< /Type /DocTimeStamp /Filter /Adobe.PPKLite /SubFilter /ETSI.RFC3161 /ByteRange [");
+        update.Begin(sigNum, 0).Ascii("<< /Type /DocTimeStamp /Filter /Adobe.PPKLite /SubFilter /ETSI.RFC3161 /ByteRange [");
         int byteRangePos = output.Length;
         output.Ascii(new string(' ', ByteRangeWidth)).Ascii("] /Contents ");
         int contentsStart = output.Length;
@@ -421,7 +412,7 @@ internal static class LtvWriter
         int contentsEnd = output.Length;
         output.Ascii(" >>\nendobj\n");
 
-        SignatureWriter.WriteXref(file, output, offsets, rootRef, next);
+        update.Finish(rootRef, next);
 
         byte[] buf = output.RawBuffer;
         int total = output.Length;
@@ -455,14 +446,6 @@ internal static class LtvWriter
         foreach (var k in kids.Items)
             if (FirstPage(file, k, depth + 1) is { } found) return found;
         return null;
-    }
-
-    private static void WriteObject(ByteBuffer output, SortedDictionary<int, (long Offset, int Gen)> offsets, Decryptor? crypt, int num, int gen, PdfObject obj)
-    {
-        offsets[num] = (output.Length, gen);
-        output.Int(num).Sp().Int(gen).Ascii(" obj\n");
-        SignatureWriter.Serialize(output, obj, s => crypt == null ? s : crypt.EncryptString(s, num, gen));
-        output.Ascii("\nendobj\n");
     }
 
     private static byte[] Deflate(byte[] data)

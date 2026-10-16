@@ -238,19 +238,8 @@ internal static class EmbeddedFiles
             if (taken.Contains(a.FileName))
                 throw new ArgumentException($"The PDF already has an attachment named \"{a.FileName}\".", nameof(attachments));
 
-        var crypt = file.Decryptor;
         int next = Math.Max(file.GetInt(trailer, "Size", 0), file.MaxObjectNumber + 1);
-        var output = new ByteBuffer(pdf.Length + attachments.Sum(a => a.Data.Length) + 4096);
-        output.Bytes(pdf);
-        if (pdf.Length == 0 || pdf[^1] != '\n') output.Nl();
-        var offsets = new SortedDictionary<int, (long Offset, int Gen)>();
-        void WriteObject(int num, PdfObject obj, int gen = 0)
-        {
-            offsets[num] = (output.Length, gen);
-            output.Int(num).Sp().Int(gen).Ascii(" obj\n");
-            SignatureWriter.Serialize(output, obj, s => crypt == null ? s : crypt.EncryptString(s, num, gen));
-            output.Ascii("\nendobj\n");
-        }
+        var update = new PdfUpdateWriter(file, pdf, attachments.Sum(a => a.Data.Length) + 4096);
 
         var now = DateTime.UtcNow;
         now = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerSecond));
@@ -268,22 +257,20 @@ internal static class EmbeddedFiles
                 using (var z = new ZLibStream(ms, CompressionLevel.Optimal, leaveOpen: true)) z.Write(content);
                 if (ms.Length < content.Length) { content = ms.ToArray(); flate = true; }
             }
-            if (crypt != null) content = crypt.EncryptStream(content, fileNum, 0);
             var parms = new PdfDict();
             parms.Entries["Size"] = PdfNumber.Int(a.Data.Length);
             if (a.CreationDate is { } created) parms.Entries["CreationDate"] = new PdfString(Encoding.ASCII.GetBytes(PdfDate(created)));
             parms.Entries["ModDate"] = new PdfString(Encoding.ASCII.GetBytes(a.ModDate is { } mod ? PdfDate(mod) : PdfDate(now)));
             if (!a.OmitChecksum) parms.Entries["CheckSum"] = new PdfString(MD5.HashData(a.Data), hex: true);
-            var dict = new PdfDict();
-            dict.Entries["Type"] = PdfName.Get("EmbeddedFile");
-            dict.Entries["Subtype"] = PdfName.Get(a.MimeTypeOrGuess);
-            dict.Entries["Params"] = parms;
-            dict.Entries["Length"] = PdfNumber.Int(content.Length);
-            if (flate) dict.Entries["Filter"] = PdfName.Get("FlateDecode");
-            offsets[fileNum] = (output.Length, 0);
-            output.Int(fileNum).Ascii(" 0 obj\n");
-            SignatureWriter.Serialize(output, dict, s => crypt == null ? s : crypt.EncryptString(s, fileNum, 0));
-            output.Ascii("\nstream\n").Bytes(content).Ascii("\nendstream\nendobj\n");
+            var dict = new Dictionary<string, PdfObject>(StringComparer.Ordinal)
+            {
+                ["Type"] = PdfName.Get("EmbeddedFile"),
+                ["Subtype"] = PdfName.Get(a.MimeTypeOrGuess),
+                ["Params"] = parms,
+                ["Length"] = PdfNull.Instance, // set to the encrypted length, in this place
+            };
+            if (flate) dict["Filter"] = PdfName.Get("FlateDecode");
+            update.WriteStream(fileNum, 0, dict, content);
 
             // Its file specification.
             var spec = new PdfDict();
@@ -296,7 +283,7 @@ internal static class EmbeddedFiles
             ef.Entries["F"] = new PdfRef(fileNum, 0);
             ef.Entries["UF"] = new PdfRef(fileNum, 0);
             spec.Entries["EF"] = ef;
-            WriteObject(specNum, spec);
+            update.WriteObject(specNum, 0, spec);
             entries.Add((KeyBytes(a.FileName), new PdfRef(specNum, 0)));
             newSpecs.Add(new PdfRef(specNum, 0));
         }
@@ -306,7 +293,7 @@ internal static class EmbeddedFiles
         int treeNum = next++;
         var tree = new PdfDict();
         tree.Entries["Names"] = new PdfArray(entries.SelectMany(e => new PdfObject[] { new PdfString(e.Key), e.Value }).ToList());
-        WriteObject(treeNum, tree);
+        update.WriteObject(treeNum, 0, tree);
 
         var cat = Copy(catalog);
         var names = Copy(file.GetDict(catalog, "Names"));
@@ -319,9 +306,9 @@ internal static class EmbeddedFiles
             af.AddRange(newSpecs);
             cat.Entries["AF"] = new PdfArray(af);
         }
-        WriteObject(rootRef.Num, cat, rootRef.Gen);
-        SignatureWriter.WriteXref(file, output, offsets, rootRef, next);
-        return output.Span.ToArray();
+        update.WriteObject(rootRef.Num, rootRef.Gen, cat);
+        update.Finish(rootRef, next);
+        return update.Output.Span.ToArray();
     }
 
     private static PdfDict Copy(PdfDict? d)

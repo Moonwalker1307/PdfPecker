@@ -154,29 +154,26 @@ internal sealed class PdfImage
     /// </summary>
     public (byte[] Rgb, int Width, int Height)? DecodeRgb()
     {
-        var head = new System.Text.StringBuilder("%PDF-1.4\n");
-        int objOffset = head.Length;
-        head.Append("1 0 obj\n<< /Type /XObject /Subtype /Image /Width ").Append(Width).Append(" /Height ").Append(Height)
-            .Append(" /ColorSpace ").Append(ColorSpace).Append(" /BitsPerComponent ").Append(BitsPerComponent);
-        if (Filter.Length > 0) head.Append(" /Filter ").Append(Filter);
-        if (DecodeParms != null) head.Append(" /DecodeParms ").Append(DecodeParms);
-        if (Decode != null) head.Append(" /Decode ").Append(Decode);
-        head.Append(" /Length ").Append(Data.Length).Append(" >>\nstream\n");
-        var tail = "\nendstream\nendobj\n";
-        long catalog = head.Length + Data.Length + tail.Length;
-        const string CatalogObj = "2 0 obj\n<< /Type /Catalog /Pages 3 0 R >>\nendobj\n3 0 obj\n<< /Type /Pages /Count 0 /Kids [] >>\nendobj\n";
-        long pages = catalog + CatalogObj.IndexOf("3 0 obj", StringComparison.Ordinal);
-        long xref = catalog + CatalogObj.Length;
-        static string Entry(long offset) => offset.ToString("D10", System.Globalization.CultureInfo.InvariantCulture) + " 00000 n \n";
-        var trailer = CatalogObj + "xref\n0 4\n0000000000 65535 f \n" + Entry(objOffset) + Entry(catalog) + Entry(pages)
-            + "trailer\n<< /Size 4 /Root 2 0 R >>\nstartxref\n" + xref.ToString(System.Globalization.CultureInfo.InvariantCulture) + "\n%%EOF\n";
-        using var pdf = new MemoryStream();
-        pdf.Write(System.Text.Encoding.Latin1.GetBytes(head.ToString()));
-        pdf.Write(Data);
-        pdf.Write(System.Text.Encoding.Latin1.GetBytes(tail + trailer));
+        var pdf = new Pdf.ByteBuffer(Data.Length + 1024);
+        var objects = new Pdf.PdfXref();
+        pdf.Ascii("%PDF-1.4\n");
+        objects.Begin(pdf, 1).Ascii("<< /Type /XObject /Subtype /Image /Width ").Int(Width).Ascii(" /Height ").Int(Height)
+            .Ascii(" /ColorSpace ").Ascii(ColorSpace).Ascii(" /BitsPerComponent ").Int(BitsPerComponent);
+        if (Filter.Length > 0) pdf.Ascii(" /Filter ").Ascii(Filter);
+        if (DecodeParms != null) pdf.Ascii(" /DecodeParms ").Ascii(DecodeParms);
+        if (Decode != null) pdf.Ascii(" /Decode ").Ascii(Decode);
+        pdf.Ascii(" /Length ").Int(Data.Length).Ascii(" >>\nstream\n").Bytes(Data).Ascii("\nendstream");
+        Pdf.PdfXref.End(pdf);
+        objects.Begin(pdf, 2).Ascii("<< /Type /Catalog /Pages 3 0 R >>");
+        Pdf.PdfXref.End(pdf);
+        objects.Begin(pdf, 3).Ascii("<< /Type /Pages /Count 0 /Kids [] >>");
+        Pdf.PdfXref.End(pdf);
+        long xref = pdf.Length;
+        objects.WriteTable(pdf, 4);
+        Pdf.PdfXref.WriteTrailer(pdf, 4, 2, 0, 0, default, default, upperHexId: false, xref);
         try
         {
-            var file = Rendering.Parsing.PdfFile.Open(pdf.ToArray(), null);
+            var file = Rendering.Parsing.PdfFile.Open(pdf.Span.ToArray(), null);
             if (file.GetObject(1) is not Rendering.Parsing.PdfStream stream) return null;
             var decoded = Rendering.Images.PdfImageDecoder.Decode(file, stream, Array.Empty<byte>(), alreadyDecoded: false, null, inline: false);
             if (decoded?.Pixels is not { } px) return null;
