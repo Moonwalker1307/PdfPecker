@@ -1,0 +1,72 @@
+name: Performance
+
+# Runs the short benchmark nightly on main and compares it with the last successful run, so a slowdown or an
+# allocation increase is noticed within a day instead of at the next release.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # lists and downloads the previous run's artifact
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - run: dotnet build -c Release bench/PdfPecker.Benchmarks
+
+      - name: Run the benchmark
+        run: dotnet bench/PdfPecker.Benchmarks/bin/Release/net10.0/PdfPecker.Benchmarks.dll --perf perf.json
+
+      # Only successful runs count as a baseline, so a regression that failed this job does not become the new normal.
+      # A first run, or one whose artifact has expired, has no baseline and passes.
+      - name: Download the previous successful result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          previous=$(gh run list --workflow perf.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty' || true)
+          if [ -n "$previous" ]; then
+            gh run download "$previous" --name perf-results --dir baseline || echo "No usable artifact in run $previous."
+          fi
+          if [ -f baseline/perf.json ]; then echo "Baseline: run $previous"; else echo "No baseline found."; fi
+
+      - name: Compare with the baseline
+        run: |
+          args=(perf.json)
+          if [ -f baseline/perf.json ]; then args+=(baseline/perf.json); fi
+          set +e
+          python3 .github/scripts/perf-compare.py "${args[@]}" | tee perf-summary.md
+          status=${PIPESTATUS[0]}
+          { echo "## Performance"; echo; cat perf-summary.md; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: perf-results
+          path: |
+            perf.json
+            perf-summary.md
+          retention-days: 90
