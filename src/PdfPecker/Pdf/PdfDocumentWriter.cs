@@ -1888,9 +1888,10 @@ internal sealed partial class PdfDocumentWriter
         {
             EndText(b);
             if (_mc != null) { EndMarked(b); b.Ascii("/Artifact BMC\n"); }
-            WriteLayerRaster(b, layer, pageTop);
+            bool filtered = WriteLayerRaster(b, layer, pageTop);
             if (_mc != null) b.Ascii("EMC\n");
-            if (layer.RasterReplaces)
+            // A blur beyond its work budget leaves the content as it is; shadows beyond it are left out.
+            if (layer.RasterReplaces && (filtered || layer.TextShadow))
             {
                 if (layer.TextShadow) return;
                 // The image hides the text in it from search and selection: the same text again, invisible, brings it back.
@@ -2151,9 +2152,15 @@ internal sealed partial class PdfDocumentWriter
             ph = Math.Max(1, Math.Floor(ph * k));
         }
         int w = (int)pw, h = (int)ph;
+        if (!f.WithinBudget(w, h))
+        {
+            // Too much work: the content is drawn without the filter, as a filter that can not run is left out.
+            WriteSvgShapes(b, shape.Children!, toPage);
+            return;
+        }
         var source = RasterizeSvg(shape.Children!, f.X, f.Y, f.W, f.H, w, h);
         if (source == null) return;
-        var image = FilterImage(f.Apply(source, w, h, w / f.W, h / f.H, shapes => RasterizeSvg(shapes, f.X, f.Y, f.W, f.H, w, h)), w, h);
+        var image = FilterImage(f.Apply(source, w, h, w / f.W, h / f.H, Cancellation, shapes => RasterizeSvg(shapes, f.X, f.Y, f.W, f.H, w, h)), w, h);
         if (image == null) return;
         _rasters.Add(image);
         SetFillAlpha(b, CssColor.Black); // an image is painted with the fill alpha
