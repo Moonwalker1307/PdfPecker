@@ -58,10 +58,11 @@ All methods are static and thread-safe, so you can convert many documents in par
 ## Features
 
 - **HTML and CSS**: flexbox, grid, multi-column, floats and positioning, transforms, transparency, gradients,
-  `var()` and `calc()`, media queries, nesting and cascade layers, inline SVG and SVG files, PNG, JPEG, GIF and WebP.
-  [More](https://pdfpecker.net/docs/html-and-css/)
-- **Paged media**: `@page` sizes and margin boxes, named pages, running headers, tables of contents with page numbers,
-  repeated table headers, orphans, widows and break control. [More](https://pdfpecker.net/docs/paged-media/)
+  `var()` and `calc()`, media queries, `@import`, nesting and cascade layers, inline SVG and SVG files, PNG, JPEG, GIF
+  and WebP. [More](https://pdfpecker.net/docs/html-and-css/)
+- **Paged media**: `@page` sizes and margin boxes, its own margins for the first page and mirrored left and right pages,
+  named pages, running headers, tables of contents with page numbers, repeated table headers, orphans, widows and
+  break control. [More](https://pdfpecker.net/docs/paged-media/)
 - **Markdown**: CommonMark 0.31 and GitHub Flavored Markdown to PDF or HTML. [More](https://pdfpecker.net/docs/markdown/)
 - **Fonts**: TrueType, OpenType, WOFF and WOFF2, subset and embedded, with `@font-face`, kerning and ligatures.
   [More](https://pdfpecker.net/docs/fonts/)

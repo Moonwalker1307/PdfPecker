@@ -184,16 +184,16 @@ internal sealed partial class LayoutEngine
     {
         // Chrome sizes the initial containing block (its viewport) in whole CSS pixels.
         width = WholePx(width);
-        LayoutAbsolutes(_frames[0], 0, 0, width, WholePx(_pageH));
+        LayoutAbsolutes(_frames[0], 0, 0, width, WholePx(_grid.Height(0)));
         if (_fixedFrame.Pending.Count > 0)
         {
-            float areaH = WholePx(float.IsNaN(FixedAreaHeight) ? _pageH : FixedAreaHeight);
+            float areaH = WholePx(float.IsNaN(FixedAreaHeight) ? _grid.Height(0) : FixedAreaHeight);
             var list = _fixedFrame.TakePending()!;
             var c = Capture(() =>
             {
                 _frames.Add(new CbFrame { Transformed = true });
                 foreach (var (e, sx, sy) in list)
-                    LayoutAbsolute(e, sx, sy - PageOf(sy) * _pageH, 0, 0, width, areaH);
+                    LayoutAbsolute(e, sx, sy - _grid.Start(PageOf(sy)), 0, 0, width, areaH);
                 LayoutAbsolutes(_frames[^1], 0, 0, width, areaH);
                 _frames.RemoveAt(_frames.Count - 1);
                 return 0;

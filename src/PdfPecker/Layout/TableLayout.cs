@@ -466,7 +466,7 @@ internal sealed partial class LayoutEngine
             foreach (var cell in row.Ending)
                 rowBottom = Math.Max(rowBottom, cell.Top + cell.NeededH);
 
-            if (allowMove && attempt == 0 && CrossesPage(rowTop, rowBottom) && rowBottom - rowTop <= _pageH && !AtPageTop(rowTop))
+            if (allowMove && attempt == 0 && CrossesPage(rowTop, rowBottom) && rowBottom - rowTop <= _grid.Height(PageOf(rowTop) + 1) && !AtPageTop(rowTop))
             {
                 Truncate(rowStartOps);
                 rowTop = NextPage(rowTop);
@@ -478,7 +478,7 @@ internal sealed partial class LayoutEngine
                         rowTop = LayoutRow(m, h, rowTop, colX, widths, hs, vs, collapse, allowMove: false) + vs;
                     // The structure has the header once: its repeats are artifacts.
                     if (Tags != null) Untag(_ops, headOps);
-                    if (rowTop - headStart > _pageH / 2)
+                    if (rowTop - headStart > _grid.Height(PageOf(headStart)) / 2)
                     {
                         // Headers too tall to repeat usefully: drop them again.
                         Truncate(rowStartOps);

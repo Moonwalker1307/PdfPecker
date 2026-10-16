@@ -79,6 +79,19 @@ internal sealed class Stylesheet
     public readonly CascadeLayer LayerRoot = new("");
     public MediaContext Media = new();
     public int NextOrder;
+
+    /// <summary>
+    /// Loads the stylesheet an <c>@import</c> names: the URL as written, and for a URL given as a plain string the
+    /// importing sheet's own href (null for a style block), as url() references of a linked sheet are already made
+    /// relative to the document. Returns the sheet's text with its url() references rebased, and its href; null when
+    /// it cannot be loaded. Without a loader, @import is ignored.
+    /// </summary>
+    public Func<string, string?, (string Css, string Href)?>? ImportLoader;
+
+    /// <summary>The href of the sheet being parsed, for the @import rules in it.</summary>
+    internal string? CurrentHref;
+    internal readonly List<string> ImportChain = new(); // hrefs of the sheets being imported, against import cycles
+    internal int ImportCount;
     private int _anonymousLayers;
     private bool _ranked;
 
@@ -107,12 +120,101 @@ internal sealed class Stylesheet
 /// <summary>Parses CSS stylesheets and declaration blocks. Shorthands are expanded into longhands while parsing.</summary>
 internal static class CssParser
 {
-    public static void ParseStylesheet(string css, Stylesheet sheet)
+    public static void ParseStylesheet(string css, Stylesheet sheet, string? href = null)
     {
         string s = StripComments(css);
         int i = 0;
-        ParseRules(s, ref i, sheet, s.Length, 0, null);
+        var saved = sheet.CurrentHref;
+        sheet.CurrentHref = href;
+        try
+        {
+            ParseRules(s, ref i, sheet, s.Length, 0, null);
+        }
+        finally
+        {
+            sheet.CurrentHref = saved;
+        }
     }
+
+    // Imported sheets nested deeper than this, and imports beyond the second limit in one document, are skipped, so a
+    // hostile set of sheets that import each other cannot multiply without bound.
+    private const int MaxImportNesting = 8, MaxImports = 64;
+
+    /// <summary>
+    /// An <c>@import</c> rule: url("a.css") or "a.css", then optionally layer or layer(name), supports(condition) and
+    /// a media query list. The imported rules go where the rule is, as if written there, in the layer it names.
+    /// </summary>
+    private static void Import(string prelude, Stylesheet sheet, CascadeLayer? layer)
+    {
+        if (sheet.ImportLoader == null || sheet.ImportChain.Count >= MaxImportNesting || sheet.ImportCount >= MaxImports) return;
+        string p = prelude.Trim();
+        string target;
+        bool plainString;
+        int i;
+        if (p.StartsWith("url(", StringComparison.OrdinalIgnoreCase))
+        {
+            int close = MediaQuery.MatchingParen(p, 3);
+            if (close < 0) return;
+            target = Unquote(p.Substring(4, close - 4).Trim());
+            plainString = false;
+            i = close + 1;
+        }
+        else if (p.Length > 0 && p[0] is '"' or '\'')
+        {
+            int close = p.IndexOf(p[0], 1);
+            if (close < 0) return;
+            target = p.Substring(1, close - 1);
+            plainString = true;
+            i = close + 1;
+        }
+        else return;
+        if (target.Trim().Length == 0) return;
+
+        string rest = p.Substring(i).TrimStart();
+        var into = layer;
+        if (rest.StartsWith("layer", StringComparison.OrdinalIgnoreCase) && (rest.Length == 5 || rest[5] == '(' || char.IsWhiteSpace(rest[5])))
+        {
+            string name = "";
+            if (rest.Length > 5 && rest[5] == '(')
+            {
+                int close = MediaQuery.MatchingParen(rest, 5);
+                if (close < 0) return;
+                name = rest.Substring(6, close - 6).Trim();
+                if (name.Length == 0) return;
+                rest = rest.Substring(close + 1).TrimStart();
+            }
+            else rest = rest.Substring(5).TrimStart();
+            into = LayerFor(sheet, layer, name.Length == 0 ? sheet.AnonymousLayerName() : name);
+        }
+        if (rest.StartsWith("supports(", StringComparison.OrdinalIgnoreCase))
+        {
+            int close = MediaQuery.MatchingParen(rest, 8);
+            if (close < 0 || !CssSupports.Evaluate(rest.Substring(8, close - 7))) return;
+            rest = rest.Substring(close + 1).TrimStart();
+        }
+        if (rest.Length > 0 && !MediaQuery.Matches(rest, sheet.Media)) return;
+
+        var loaded = sheet.ImportLoader(target, plainString ? sheet.CurrentHref : null);
+        if (loaded is not { } imported || sheet.ImportChain.Contains(imported.Href)) return;
+        sheet.ImportCount++;
+        sheet.ImportChain.Add(imported.Href);
+        var saved = sheet.CurrentHref;
+        sheet.CurrentHref = imported.Href;
+        try
+        {
+            string s = StripComments(imported.Css);
+            int k = 0;
+            ParseRules(s, ref k, sheet, s.Length, 0, into);
+        }
+        finally
+        {
+            sheet.CurrentHref = saved;
+            sheet.ImportChain.RemoveAt(sheet.ImportChain.Count - 1);
+        }
+    }
+
+    private static string Unquote(string s)
+        => s.Length >= 2 && s[0] is '"' or '\'' && s[^1] == s[0] ? s.Substring(1, s.Length - 2) : s;
 
     // Nested @media, @supports and @layer blocks (and nested style rules) deeper than this are skipped, so hostile CSS
     // cannot recurse without bound.
@@ -120,6 +222,8 @@ internal static class CssParser
 
     private static void ParseRules(string s, ref int i, Stylesheet sheet, int end, int depth, CascadeLayer? layer)
     {
+        // @import is only valid at the top of a sheet, before any rule other than @charset and @layer statements.
+        bool importsAllowed = depth == 0;
         while (i < end)
         {
             while (i < end && (char.IsWhiteSpace(s[i]) || s[i] == ';')) i++;
@@ -139,14 +243,26 @@ internal static class CssParser
                 int semi = IndexOfOutsideQuotes(s, ';', i, brace < 0 ? end : brace);
                 if (semi >= 0 && (brace < 0 || semi < brace))
                 {
-                    // "@layer a, b;" fixes the order of layers; @import, @charset and @namespace are ignored.
+                    // "@layer a, b;" fixes the order of layers; @charset and @namespace are ignored.
                     if (atName == "layer")
                         foreach (var name in SplitTopLevel(s.Substring(i, semi - i), ','))
                             LayerFor(sheet, layer, name.Trim());
+                    else if (atName == "import")
+                    {
+                        if (importsAllowed) Import(s.Substring(i, semi - i), sheet, layer);
+                    }
+                    else if (atName != "charset") importsAllowed = false;
                     i = semi + 1;
                     continue;
                 }
-                if (brace < 0) { i = end; break; }
+                if (brace < 0)
+                {
+                    // An @import at the very end of a sheet needs no semicolon.
+                    if (atName == "import" && importsAllowed) Import(s.Substring(i, end - i), sheet, layer);
+                    i = end;
+                    break;
+                }
+                importsAllowed = false;
                 string prelude = s.Substring(i, brace - i).Trim();
                 int blockEnd = MatchingBrace(s, brace, end);
                 if (depth < MaxMediaNesting && ConditionalBlock(atName, prelude, sheet, layer, out var inner))
@@ -168,6 +284,7 @@ internal static class CssParser
                 continue;
             }
 
+            importsAllowed = false;
             int open = IndexOfOutsideQuotes(s, '{', i, end);
             if (open < 0) { i = end; break; }
             int close = MatchingBrace(s, open, end);
