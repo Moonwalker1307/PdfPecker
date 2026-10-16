@@ -12,8 +12,12 @@ internal static class TimestampClient
 
     private static readonly Lazy<HttpClient> Shared = new(() => new HttpClient { Timeout = TimeSpan.FromSeconds(30) });
 
-    /// <summary>Returns the TimeStampToken (a CMS ContentInfo) for the hash of <paramref name="data"/>.</summary>
-    public static byte[] GetToken(string url, HttpClient? client, byte[] data, HashAlgorithmName hash)
+    /// <summary>
+    /// Returns the TimeStampToken (a CMS ContentInfo) for the hash of <paramref name="data"/>. With <paramref name="async"/>
+    /// false the request is sent synchronously and the returned task is already complete.
+    /// </summary>
+    public static async ValueTask<byte[]> GetTokenAsync(string url, HttpClient? client, byte[] data, HashAlgorithmName hash,
+        bool async, CancellationToken cancellationToken)
     {
         byte[] imprint = Cms.HashData(hash, data);
         byte[] nonce = RandomNumberGenerator.GetBytes(8);
@@ -39,15 +43,22 @@ internal static class TimestampClient
         byte[] body;
         try
         {
-            using var response = (client ?? Shared.Value).Send(request);
+            var http = client ?? Shared.Value;
+            using var response = async
+                ? await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false)
+                : http.Send(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             if (!response.IsSuccessStatusCode)
                 throw new PdfSignatureException($"The timestamp server returned HTTP {(int)response.StatusCode}.");
-            using var stream = response.Content.ReadAsStream();
+            using var stream = async
+                ? await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false)
+                : response.Content.ReadAsStream(cancellationToken);
             using var ms = new MemoryStream();
             // A timestamp response is a few kilobytes; do not let a misbehaving server fill memory.
             var buffer = new byte[16384];
             int n;
-            while ((n = stream.Read(buffer, 0, buffer.Length)) > 0)
+            while ((n = async
+                       ? await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)
+                       : stream.Read(buffer, 0, buffer.Length)) > 0)
             {
                 if (ms.Length + n > MaxResponseSize) throw new PdfSignatureException("The timestamp server's answer is too large.");
                 ms.Write(buffer, 0, n);
@@ -58,7 +69,7 @@ internal static class TimestampClient
         {
             throw new PdfSignatureException("The timestamp server could not be reached: " + ex.Message, ex);
         }
-        catch (TaskCanceledException ex)
+        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
             throw new PdfSignatureException("The timestamp server did not answer in time.", ex);
         }

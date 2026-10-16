@@ -6,7 +6,8 @@ namespace PdfPecker.Signing;
 
 /// <summary>
 /// Builds the detached CMS SignedData (RFC 5652) that goes into a PDF signature's /Contents, with the CAdES signed
-/// attributes PAdES requires. Encoded with System.Formats.Asn1 and signed with the certificate's RSA or ECDSA key.
+/// attributes PAdES requires. Encoded with System.Formats.Asn1 and signed with the certificate's RSA or ECDSA key, or by
+/// an external signer that holds the key elsewhere.
 /// </summary>
 internal static class Cms
 {
@@ -18,6 +19,8 @@ internal static class Cms
     private const string IdSigningCertificateV2 = "1.2.840.113549.1.9.16.2.47";
     private const string IdTimestampToken = "1.2.840.113549.1.9.16.2.14";
     private const string IdRsaEncryption = "1.2.840.113549.1.1.1";
+    private const string IdRsaPss = "1.2.840.113549.1.1.10";
+    private const string IdMgf1 = "1.2.840.113549.1.1.8";
 
     internal static string HashOid(HashAlgorithmName h) => h.Name switch
     {
@@ -35,19 +38,11 @@ internal static class Cms
     };
 
     /// <summary>
-    /// Signs <paramref name="digest"/> (the hash of the PDF's signed byte ranges). <paramref name="timestamp"/>, when
-    /// given, receives the signature value and returns an RFC 3161 timestamp token to embed.
+    /// The DER-encoded signed attributes (a SET) for <paramref name="digest"/>, the hash of the PDF's signed byte ranges.
+    /// These bytes are what the signer's key signs.
     /// </summary>
-    public static byte[] Sign(byte[] digest, X509Certificate2 cert, IReadOnlyList<X509Certificate2> certs, HashAlgorithmName hash,
-        bool pades, DateTimeOffset signingTime, Func<byte[], byte[]>? timestamp)
+    public static byte[] SignedAttributes(byte[] digest, X509Certificate2 cert, HashAlgorithmName hash, bool pades, DateTimeOffset signingTime)
     {
-        string hashOid = HashOid(hash);
-        using var rsa = cert.GetRSAPrivateKey();
-        using var ecdsa = rsa == null ? cert.GetECDsaPrivateKey() : null;
-        if (rsa == null && ecdsa == null)
-            throw new ArgumentException("The signing certificate has no RSA or ECDSA private key. Load it from a .pfx file or a certificate store entry that includes the key.");
-
-        // Signed attributes, DER-encoded as a SET for signing; the same content is stored with an implicit [0] tag.
         var attrs = new AsnWriter(AsnEncodingRules.DER);
         using (attrs.PushSetOf())
         {
@@ -57,13 +52,80 @@ internal static class Cms
             WriteAttribute(attrs, IdMessageDigest, w => w.WriteOctetString(digest));
             WriteAttribute(attrs, IdSigningCertificateV2, w => WriteSigningCertificateV2(w, cert, hash));
         }
-        byte[] signedAttrs = attrs.Encode();
+        return attrs.Encode();
+    }
 
-        byte[] signature = rsa != null
-            ? rsa.SignData(signedAttrs, hash, RSASignaturePadding.Pkcs1)
-            : ecdsa!.SignData(signedAttrs, hash, DSASignatureFormat.Rfc3279DerSequence);
-        byte[]? token = timestamp?.Invoke(signature);
+    /// <summary>Signs <paramref name="signedAttrs"/> with the certificate's own RSA (PKCS#1 v1.5) or ECDSA private key.</summary>
+    public static (byte[] Signature, PdfSignatureAlgorithm Algorithm) SignWithPrivateKey(X509Certificate2 cert, byte[] signedAttrs, HashAlgorithmName hash)
+    {
+        using var rsa = cert.GetRSAPrivateKey();
+        if (rsa != null) return (rsa.SignData(signedAttrs, hash, RSASignaturePadding.Pkcs1), PdfSignatureAlgorithm.RsaPkcs1);
+        using var ecdsa = cert.GetECDsaPrivateKey();
+        if (ecdsa != null) return (ecdsa.SignData(signedAttrs, hash, DSASignatureFormat.Rfc3279DerSequence), PdfSignatureAlgorithm.Ecdsa);
+        throw new ArgumentException("The signing certificate has no RSA or ECDSA private key. Load it from a .pfx file or a certificate store entry that includes the key.");
+    }
 
+    /// <summary>
+    /// Checks that the certificate's public key suits <paramref name="algorithm"/>, so a mismatch fails before the external
+    /// signer is called (which may cost money or a PIN prompt).
+    /// </summary>
+    public static void CheckKeyType(X509Certificate2 cert, PdfSignatureAlgorithm algorithm)
+    {
+        bool rsa = algorithm is PdfSignatureAlgorithm.RsaPkcs1 or PdfSignatureAlgorithm.RsaPss;
+        string oid = cert.PublicKey.Oid.Value ?? "";
+        bool isRsa = oid == IdRsaEncryption;
+        bool isEc = oid == "1.2.840.10045.2.1";
+        if (rsa && !isRsa) throw new ArgumentException($"The external signer uses {algorithm}, but the certificate's public key is not an RSA key.");
+        if (!rsa && !isEc) throw new ArgumentException("The external signer uses ECDSA, but the certificate's public key is not an EC key.");
+    }
+
+    /// <summary>
+    /// Verifies a signature returned by an external signer against the certificate's public key and returns it in the
+    /// form CMS stores. An external signer that uses the wrong key, the wrong padding or the wrong hash would otherwise
+    /// produce a PDF that every viewer reports as broken, long after the mistake was made. ECDSA signatures are accepted
+    /// both DER-encoded (as AWS KMS and PKCS#11 wrappers often return them) and as raw r||s (as Azure Key Vault and
+    /// .NET's own <see cref="ECDsa.SignHash(byte[])"/> return them); CMS needs DER.
+    /// </summary>
+    public static byte[] CheckExternalSignature(X509Certificate2 cert, PdfSignatureAlgorithm algorithm, byte[] signedAttrs, HashAlgorithmName hash, byte[]? signature)
+    {
+        if (signature == null || signature.Length == 0) throw new PdfSignatureException("The external signer returned no signature.");
+        if (algorithm == PdfSignatureAlgorithm.Ecdsa)
+        {
+            using var ec = cert.GetECDsaPublicKey() ?? throw new PdfSignatureException("The certificate has no EC public key.");
+            if (ec.VerifyData(signedAttrs, signature, hash, DSASignatureFormat.Rfc3279DerSequence)) return signature;
+            if (ec.VerifyData(signedAttrs, signature, hash, DSASignatureFormat.IeeeP1363FixedFieldConcatenation))
+                return P1363ToDer(signature);
+        }
+        else
+        {
+            using var rsa = cert.GetRSAPublicKey() ?? throw new PdfSignatureException("The certificate has no RSA public key.");
+            var padding = algorithm == PdfSignatureAlgorithm.RsaPss ? RSASignaturePadding.Pss : RSASignaturePadding.Pkcs1;
+            if (rsa.VerifyData(signedAttrs, signature, hash, padding)) return signature;
+        }
+        throw new PdfSignatureException("The external signer's signature does not verify with the certificate's public key. "
+            + "Check that the signer uses the certificate's key, the declared algorithm and the hash algorithm of the request.");
+    }
+
+    private static byte[] P1363ToDer(byte[] signature)
+    {
+        int half = signature.Length / 2;
+        var w = new AsnWriter(AsnEncodingRules.DER);
+        using (w.PushSequence())
+        {
+            w.WriteIntegerUnsigned(signature.AsSpan(0, half));
+            w.WriteIntegerUnsigned(signature.AsSpan(half));
+        }
+        return w.Encode();
+    }
+
+    /// <summary>
+    /// The detached CMS SignedData around a finished signature. <paramref name="token"/>, when given, is an RFC 3161
+    /// timestamp token over the signature value, stored as an unsigned attribute.
+    /// </summary>
+    public static byte[] Assemble(byte[] signedAttrs, byte[] signature, PdfSignatureAlgorithm algorithm, byte[]? token,
+        X509Certificate2 cert, IReadOnlyList<X509Certificate2> certs, HashAlgorithmName hash)
+    {
+        string hashOid = HashOid(hash);
         var w = new AsnWriter(AsnEncodingRules.DER);
         using (w.PushSequence()) // ContentInfo
         {
@@ -86,8 +148,12 @@ internal static class Cms
                     var tagged = (byte[])signedAttrs.Clone();
                     tagged[0] = 0xA0;
                     w.WriteEncodedValue(tagged);
-                    if (rsa != null) WriteAlgorithm(w, IdRsaEncryption, nullParams: true);
-                    else WriteAlgorithm(w, EcdsaOid(hash), nullParams: false);
+                    switch (algorithm)
+                    {
+                        case PdfSignatureAlgorithm.RsaPkcs1: WriteAlgorithm(w, IdRsaEncryption, nullParams: true); break;
+                        case PdfSignatureAlgorithm.RsaPss: WritePssAlgorithm(w, hash); break;
+                        default: WriteAlgorithm(w, EcdsaOid(hash), nullParams: false); break;
+                    }
                     w.WriteOctetString(signature);
                     if (token != null)
                     {
@@ -99,6 +165,38 @@ internal static class Cms
         }
         return w.Encode();
     }
+
+    // RSASSA-PSS-params (RFC 4055): the hash, MGF1 with the same hash, and a salt as long as the hash, which is what .NET,
+    // Azure Key Vault (PS256/384/512) and AWS KMS (RSASSA_PSS_SHA_*) produce. Every field is written because the defaults
+    // are SHA-1 and a 20-byte salt.
+    private static void WritePssAlgorithm(AsnWriter w, HashAlgorithmName hash)
+    {
+        string hashOid = HashOid(hash);
+        using (w.PushSequence())
+        {
+            w.WriteObjectIdentifier(IdRsaPss);
+            using (w.PushSequence())
+            {
+                using (w.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 0, isConstructed: true)))
+                    WriteAlgorithm(w, hashOid, nullParams: true);
+                using (w.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 1, isConstructed: true)))
+                using (w.PushSequence())
+                {
+                    w.WriteObjectIdentifier(IdMgf1);
+                    WriteAlgorithm(w, hashOid, nullParams: true);
+                }
+                using (w.PushSequence(new Asn1Tag(TagClass.ContextSpecific, 2, isConstructed: true)))
+                    w.WriteInteger(HashLength(hash));
+            }
+        }
+    }
+
+    internal static int HashLength(HashAlgorithmName hash) => hash.Name switch
+    {
+        "SHA384" => 48,
+        "SHA512" => 64,
+        _ => 32,
+    };
 
     private static void WriteAttribute(AsnWriter w, string oid, Action<AsnWriter> value)
     {
