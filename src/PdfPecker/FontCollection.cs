@@ -155,7 +155,12 @@ public sealed class FontCollection
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException || FontProgram.IsFormatError(ex)) { return null; }
         });
         foreach (var name in names)
-            _faces.Add(new FontFace(name, p.WeightClass, p.WeightClass, p.IsItalic, null, program, p.FullName, p.PostScriptName));
+        {
+            // A variable font covers the weights of its weight axis.
+            int wMin = p.WeightClass, wMax = p.WeightClass;
+            if (p.Axis(FontVariations.Wght) is { } wght) { wMin = (int)Math.Ceiling(wght.Min); wMax = (int)Math.Floor(wght.Max); }
+            _faces.Add(new FontFace(name, wMin, wMax, p.IsItalic, null, program, p.FullName, p.PostScriptName));
+        }
     }
 
     internal sealed class Snapshot

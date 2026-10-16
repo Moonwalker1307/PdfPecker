@@ -1017,7 +1017,7 @@ internal static class CssParser
         if (lower is "caption" or "icon" or "menu" or "message-box" or "small-caption" or "status-bar") return;
 
         var tokens = Tokens(value);
-        string style = "normal", weight = "normal", size = "medium", lineHeight = "normal", caps = "normal";
+        string style = "normal", weight = "normal", size = "medium", lineHeight = "normal", caps = "normal", stretch = "normal";
         int i = 0;
         for (; i < tokens.Count; i++)
         {
@@ -1025,6 +1025,8 @@ internal static class CssParser
             if (t is "italic" or "oblique") style = t;
             else if (t is "bold" or "bolder" or "lighter" || t.Length == 3 && char.IsDigit(t[0]) && t.EndsWith("00", StringComparison.Ordinal)) weight = t;
             else if (t == "small-caps") caps = t;
+            else if (t is "ultra-condensed" or "extra-condensed" or "condensed" or "semi-condensed" or "semi-expanded" or "expanded"
+                     or "extra-expanded" or "ultra-expanded") stretch = t;
             else if (t == "normal") { }
             else break;
         }
@@ -1052,6 +1054,7 @@ internal static class CssParser
         Add("font-size", size);
         Add("line-height", lineHeight);
         Add("font-variant-caps", caps);
+        Add("font-stretch", stretch);
         if (family.Length > 0) Add("font-family", family);
     }
 }
