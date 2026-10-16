@@ -201,7 +201,9 @@ internal sealed class StyleResolver
                 Resolve(html, rootStyle);
                 rootStyle.CustomProperties = html.Style.CustomProperties;
             }
-            ResolveChildren(document);
+            var saved = Compound.BeginMatching();
+            try { ResolveChildren(document); }
+            finally { Compound.EndMatching(saved); }
         }
         finally
         {

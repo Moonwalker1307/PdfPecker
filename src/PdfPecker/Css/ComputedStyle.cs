@@ -293,7 +293,7 @@ internal sealed class ComputedStyle
     public ContainerType ContainerType;
     public string[]? ContainerNames; // container-name; null for none
     public Length Width = Length.Auto, Height = Length.Auto;
-    public Length MinWidth = Length.Zero, MaxWidth = Length.Auto, MinHeight = Length.Zero, MaxHeight = Length.Auto;
+    public Length MinWidth = Length.Auto, MaxWidth = Length.Auto, MinHeight = Length.Zero, MaxHeight = Length.Auto;
     public bool BorderBox;
     public VerticalAlign VerticalAlign;
     public bool PageBreakBefore, PageBreakAfter, AvoidBreakInside;
@@ -460,7 +460,8 @@ internal sealed class ComputedStyle
         c.ContainerType = ContainerType.Normal;
         c.ContainerNames = null;
         c.Width = c.Height = Length.Auto;
-        c.MinWidth = c.MinHeight = Length.Zero;
+        c.MinWidth = Length.Auto; // min-width: auto, which differs from 0 for boxes with aspect-ratio
+        c.MinHeight = Length.Zero;
         c.MaxWidth = c.MaxHeight = Length.Auto;
         c.BorderBox = false;
         c.VerticalAlign = VerticalAlign.Baseline;

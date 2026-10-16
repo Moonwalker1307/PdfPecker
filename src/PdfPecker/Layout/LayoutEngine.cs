@@ -507,11 +507,12 @@ internal sealed partial class LayoutEngine
             contentW = s.Width.Resolve(availW);
             if (s.BorderBox) contentW -= frame;
         }
-        else if (s.AspectRatio > 0 && !s.Height.IsAuto && !s.Height.IsPercent)
+        else if (s.AspectRatio > 0 && ClampedHeight(s) is float ratioFrom)
         {
-            // aspect-ratio with a fixed height and an auto width: the width follows from the height.
-            float boxH = s.Height.Value + (s.BorderBox ? 0 : frameV);
-            contentW = RatioOnBorderBox(s) ? boxH * s.AspectRatio - frame : (boxH - frameV) * s.AspectRatio;
+            // aspect-ratio with a fixed height and an auto width: the width follows from the height. With min-width: auto
+            // and visible overflow, content wider than that still widens the box (CSS Sizing 4 automatic minimum size).
+            contentW = RatioWidth(s, ratioFrom, frame, frameV);
+            if (s.MinWidth.IsAuto && !s.ClipsX) contentW = Math.Max(contentW, Intrinsic(e).Min - frame);
         }
         else
         {
@@ -520,6 +521,12 @@ internal sealed partial class LayoutEngine
             {
                 var (_, max) = Intrinsic(e);
                 contentW = Math.Min(contentW, max - frame);
+            }
+            // min-height and max-height carry over to the width through the ratio.
+            if (s.AspectRatio > 0)
+            {
+                var (tmin, tmax) = TransferredWidthLimits(s, frame, frameV);
+                contentW = Math.Max(Math.Min(contentW, tmax), tmin);
             }
         }
         if (!s.MaxWidth.IsAuto && !isImage && !isSvg && !hasWOverride)
@@ -594,7 +601,16 @@ internal sealed partial class LayoutEngine
                     bl + pl, bt + pt, br + pr, bb + pb);
                 AddImage(s, image, cx, cy, imgW, imgH, radii, Tags?.Of(e));
             }
-            if (svg != null && s.Visible) _ops.Add(new SvgOp(cx, cy, imgW, imgH, svg) { Tag = Tags?.Of(e) });
+            if (svg != null && s.Visible)
+            {
+                if (isImage)
+                {
+                    var radii = BoxPainter.InnerRadii(BoxPainter.Radii(s, imgW + bl + br + pl + pr, imgH + bt + bb + pt + pb),
+                        bl + pl, bt + pt, br + pr, bb + pb);
+                    AddSvgImage(_ops, s, svg, cx, cy, imgW, imgH, radii, Tags?.Of(e));
+                }
+                else _ops.Add(new SvgOp(cx, cy, imgW, imgH, svg) { Tag = Tags?.Of(e) });
+            }
             contentBottom = cy + imgH;
         }
         else if (e.Name == "hr")
@@ -605,9 +621,10 @@ internal sealed partial class LayoutEngine
         {
             float? definiteH = null;
             if (hasHOverride) definiteH = Math.Max(0, overrideH - frameV);
-            else if (!s.Height.IsAuto && !s.Height.IsPercent) definiteH = Math.Max(0, s.Height.Value - (s.BorderBox ? frameV : 0));
+            else if (ClampedHeight(s) is float h) definiteH = Math.Max(0, h - (s.BorderBox ? frameV : 0));
             float minH = !s.MinHeight.IsAuto && !s.MinHeight.IsPercent ? Math.Max(0, s.MinHeight.Value - (s.BorderBox ? frameV : 0)) : 0;
-            if (RatioHeight(s, contentW, frame, frameV, hasHOverride) is float rh) minH = Math.Max(minH, rh);
+            if (RatioHeight(s, contentW, frame, frameV, hasHOverride) is float rh)
+                minH = Math.Max(minH, Math.Min(rh, MaxContentHeight(s, frameV)));
             // A box that is not a formatting context root shares its top and bottom margins with its children's.
             bool joinsChildren = !shrinkToFit && !hasWOverride && !hasHOverride;
             _absorbTop = joinsChildren && FirstBlockChild(e) != null;
@@ -640,13 +657,18 @@ internal sealed partial class LayoutEngine
             float h = s.Height.Value - (s.BorderBox ? bt + bb + pt + pb : 0);
             contentH = Math.Max(0, h);
         }
+        // aspect-ratio with an auto height: at least the ratio's height; taller content still makes it grow, except in a
+        // flex container, whose content overflows it as in Chrome.
+        if (!isImage && !isSvg && RatioHeight(s, contentW, frame, frameV, hasHOverride) is float ratioH && (contentH < ratioH || s.IsFlex))
+            contentH = ratioH;
+        // max-height limits the box, and content beyond it overflows; min-height wins over max-height. Flex and grid
+        // containers that size the box have applied both already.
+        if (!isImage && !isSvg && !hasHOverride) contentH = Math.Min(contentH, MaxContentHeight(s, frameV));
         if (!s.MinHeight.IsAuto && !s.MinHeight.IsPercent)
         {
             float mh = s.MinHeight.Value - (s.BorderBox ? bt + bb + pt + pb : 0);
             if (contentH < mh) contentH = mh;
         }
-        // aspect-ratio with an auto height: at least the ratio's height; taller content still makes it grow.
-        if (!isImage && !isSvg && RatioHeight(s, contentW, frame, frameV, hasHOverride) is float ratioH && contentH < ratioH) contentH = ratioH;
         if (container && !_measuring)
         {
             // The next style pass evaluates container queries and cq units against this size.
@@ -874,6 +896,44 @@ internal sealed partial class LayoutEngine
     /// <summary>Whether aspect-ratio sizes the border box (box-sizing: border-box without "auto") rather than the content box.</summary>
     private static bool RatioOnBorderBox(ComputedStyle s) => s.BorderBox && !s.AspectRatioAuto;
 
+    /// <summary>
+    /// The height property limited by min-height and max-height, in the terms of box-sizing, when it is a fixed length;
+    /// otherwise null. Percentages count as auto, as elsewhere in block layout.
+    /// </summary>
+    internal static float? ClampedHeight(ComputedStyle s)
+    {
+        if (s.Height.IsAuto || s.Height.IsPercent) return null;
+        float h = s.Height.Value;
+        if (!s.MaxHeight.IsAuto && !s.MaxHeight.IsPercent) h = Math.Min(h, s.MaxHeight.Value);
+        if (!s.MinHeight.IsAuto && !s.MinHeight.IsPercent) h = Math.Max(h, s.MinHeight.Value);
+        return h;
+    }
+
+    /// <summary>The largest content height max-height allows, or infinity.</summary>
+    private static float MaxContentHeight(ComputedStyle s, float frameV)
+        => s.MaxHeight.IsAuto || s.MaxHeight.IsPercent ? float.PositiveInfinity : Math.Max(0, s.MaxHeight.Value - (s.BorderBox ? frameV : 0));
+
+    /// <summary>The content width aspect-ratio pairs with a height given in the terms of box-sizing.</summary>
+    internal static float RatioWidth(ComputedStyle s, float height, float frame, float frameV)
+    {
+        float boxH = height + (s.BorderBox ? 0 : frameV);
+        return Math.Max(0, RatioOnBorderBox(s) ? boxH * s.AspectRatio - frame : (boxH - frameV) * s.AspectRatio);
+    }
+
+    /// <summary>
+    /// The limits min-height and max-height put on the content width of a box with aspect-ratio and no fixed height,
+    /// carried over through the ratio (CSS Sizing 4 §5.1, transferred min and max sizes).
+    /// </summary>
+    internal static (float Min, float Max) TransferredWidthLimits(ComputedStyle s, float frame, float frameV)
+    {
+        float min = 0, max = float.PositiveInfinity;
+        if (s.AspectRatio <= 0 || !s.Height.IsAuto && !s.Height.IsPercent) return (min, max);
+        if (!s.MinHeight.IsAuto && !s.MinHeight.IsPercent && s.MinHeight.Value > 0) min = RatioWidth(s, s.MinHeight.Value, frame, frameV);
+        if (!s.MaxHeight.IsAuto && !s.MaxHeight.IsPercent) max = RatioWidth(s, s.MaxHeight.Value, frame, frameV);
+        // A max-height below min-height loses, as max-width does to min-width.
+        return (min, Math.Max(min, max));
+    }
+
     /// <summary>The content height aspect-ratio gives a box with an auto height and the given content width, or null.</summary>
     private static float? RatioHeight(ComputedStyle s, float contentW, float frame, float frameV, bool hasHOverride)
     {
@@ -914,6 +974,70 @@ internal sealed partial class LayoutEngine
         var clip = new ClipOp(x, y, w, h, radii);
         clip.Ops.Add(op);
         _ops.Add(clip);
+    }
+
+    /// <summary>
+    /// Adds an SVG file drawn by an img element into its content box (x, y, w, h), as Chrome draws it: object-fit sizes
+    /// the drawing's viewport (its concrete object size) from the file's natural size and ratio, object-position places
+    /// that viewport, and the file's own viewBox and preserveAspectRatio then fit the drawing inside it. The drawing is
+    /// clipped to the content box (and its rounded corners) where it reaches outside.
+    /// </summary>
+    private static void AddSvgImage(List<DrawOp> ops, ComputedStyle s, SvgImage svg, float x, float y, float w, float h, CornerRadii? radii,
+        ContentSlot? tag)
+    {
+        var (cw, ch) = ConcreteObjectSize(s.ObjectFit, svg, w, h);
+        float dx = x + s.ObjectPositionX.Resolve(w - cw), dy = y + s.ObjectPositionY.Resolve(h - ch);
+        var op = new SvgOp(dx, dy, cw, ch, svg) { Tag = tag, StretchUserSpace = !svg.HasViewBox };
+        if (radii == null && dx >= x - Eps && dy >= y - Eps && dx + cw <= x + w + Eps && dy + ch <= y + h + Eps)
+        {
+            ops.Add(op);
+            return;
+        }
+        var clip = new ClipOp(x, y, w, h, radii);
+        clip.Ops.Add(op);
+        ops.Add(clip);
+    }
+
+    /// <summary>
+    /// The concrete object size object-fit gives an SVG file in a w x h content box (CSS Images 3 §5.5). Its natural width
+    /// and height are those of its width and height attributes, and its natural ratio theirs, else the viewBox's.
+    /// </summary>
+    private static (float W, float H) ConcreteObjectSize(ObjectFit fit, SvgImage svg, float w, float h)
+    {
+        float? nw = svg.Width is > 0 ? svg.Width : null, nh = svg.Height is > 0 ? svg.Height : null;
+        float ratio = nw is float rw && nh is float rh ? rw / rh
+            : svg.HasViewBox && svg.ViewBoxWidth > 0 && svg.ViewBoxHeight > 0 ? svg.ViewBoxWidth / svg.ViewBoxHeight : 0;
+        (float, float) Fit(bool cover)
+        {
+            if (ratio <= 0 || w <= 0 || h <= 0) return (w, h);
+            bool wide = w / h > ratio; // the box is wider than the drawing
+            return wide != cover ? (h * ratio, h) : (w, w / ratio);
+        }
+        (float, float) Natural()
+        {
+            // The default sizing algorithm with the content box as the default object size.
+            if (nw is float a && nh is float b) return (a, b);
+            if (ratio > 0)
+            {
+                if (nw is float a1) return (a1, a1 / ratio);
+                if (nh is float b1) return (b1 * ratio, b1);
+                return Fit(cover: false);
+            }
+            return (nw ?? w, nh ?? h);
+        }
+        switch (fit)
+        {
+            case ObjectFit.Contain: return Fit(cover: false);
+            case ObjectFit.Cover: return Fit(cover: true);
+            case ObjectFit.None: return Natural();
+            case ObjectFit.ScaleDown:
+            {
+                var none = Natural();
+                var contain = Fit(cover: false);
+                return none.Item1 <= contain.Item1 && none.Item2 <= contain.Item2 ? none : contain;
+            }
+            default: return (w, h);
+        }
     }
 
     /// <summary>Used size of a replaced element from its intrinsic size and its CSS width, height and limits.</summary>
