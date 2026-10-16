@@ -1421,10 +1421,16 @@ internal sealed class StyleResolver
                     s.TextShadows = ts.Length > 0 ? ts : null;
                 break;
             case "text-overflow":
-                // One value for both ends, or start and end: only the end of the line is cut.
-                var tov = CssParser.Tokens(lower);
-                if (tov.Count is 1 or 2) s.TextOverflowEllipsis = tov[^1] == "ellipsis" || tov[^1].StartsWith("\"\u2026", StringComparison.Ordinal);
+            {
+                // One value for both ends, or start and end: only the end of the line is cut, as in Chrome.
+                var tov = CssParser.Tokens(v.Trim());
+                if (inherit || tov.Count is not (1 or 2)) break;
+                var end = tov[^1];
+                if (GeneratedContent.UnquoteString(end) is { } str) s.TextOverflow = str;
+                else if (end.Equals("ellipsis", StringComparison.OrdinalIgnoreCase)) s.TextOverflow = "\u2026";
+                else if (end.Equals("clip", StringComparison.OrdinalIgnoreCase) || end.Equals("initial", StringComparison.OrdinalIgnoreCase)) s.TextOverflow = null;
                 break;
+            }
             case "object-fit":
                 s.ObjectFit = lower switch
                 {
@@ -1972,7 +1978,11 @@ internal sealed class StyleResolver
         => lower switch
         {
             "none" or "hidden" => BorderStyle.None,
-            "solid" or "groove" or "ridge" or "inset" or "outset" => BorderStyle.Solid,
+            "solid" => BorderStyle.Solid,
+            "groove" => BorderStyle.Groove,
+            "ridge" => BorderStyle.Ridge,
+            "inset" => BorderStyle.Inset,
+            "outset" => BorderStyle.Outset,
             "dashed" => BorderStyle.Dashed,
             "dotted" => BorderStyle.Dotted,
             "double" => BorderStyle.Double,

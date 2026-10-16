@@ -361,6 +361,7 @@ internal static class BoxPainter
                     if (layers[i] is { } layer) PaintLayer(group, s, layer, i, x, y, w, h, images, basis, backdrop, radii);
             }
         }
+        if (s.BoxShadows != null && w > 0 && h > 0 && !s.CanvasBackground) PaintInsetShadows(group, s, x, y, w, h, radii);
         if (s.HasBorder) PaintBorders(group, s, x, y, w, h, sides, collapsedCell, radii);
         if (s.OutlineStyle != BorderStyle.None && !collapsedCell) PaintOutline(group, s, x, y, w, h, radii);
     }
@@ -405,10 +406,10 @@ internal static class BoxPainter
             group.Ops.Add(new BorderRectOp(ox, oy, ow, oh, width, color));
             return;
         }
-        Side(group, style, width, color, ox, oy, ow, width, horizontal: true);
-        Side(group, style, width, color, ox, oy + oh - width, ow, width, horizontal: true);
-        Side(group, style, width, color, ox, oy, width, oh, horizontal: false);
-        Side(group, style, width, color, ox + ow - width, oy, width, oh, horizontal: false);
+        Side(group, style, width, color, ox, oy, ow, width, horizontal: true, SideTop);
+        Side(group, style, width, color, ox, oy + oh - width, ow, width, horizontal: true, SideBottom);
+        Side(group, style, width, color, ox, oy, width, oh, horizontal: false, SideLeft);
+        Side(group, style, width, color, ox + ow - width, oy, width, oh, horizontal: false, SideRight);
     }
 
     private static void PaintBorders(GroupOp group, ComputedStyle s, float x, float y, float w, float h, int sides, bool collapsedCell, CornerRadii? radii)
@@ -418,6 +419,13 @@ internal static class BoxPainter
         if (radii is { } r && w > 0 && h > 0)
         {
             PaintRoundedBorder(group, s, x, y, w, h, r);
+            return;
+        }
+        // Sides of the 3D styles differ in shade, so they meet along mitred corners like the sides of a rounded border.
+        if (sides == AllSides && !collapsedCell && w > 0 && h > 0
+            && (Is3D(s.BorderTopStyle) || Is3D(s.BorderRightStyle) || Is3D(s.BorderBottomStyle) || Is3D(s.BorderLeftStyle)))
+        {
+            PaintRoundedBorder(group, s, x, y, w, h, default);
             return;
         }
         // Chrome fills collapsed table borders side by side, and strokes other boxes' uniform borders.
@@ -430,10 +438,51 @@ internal static class BoxPainter
             group.Ops.Add(new BorderRectOp(x, y, w, h, bt, topColor));
             return;
         }
-        if ((sides & Top) != 0) Side(group, s.BorderTopStyle, bt, s.BorderTopColor ?? s.Color, x, y, w, bt, horizontal: true);
-        if ((sides & Bottom) != 0) Side(group, s.BorderBottomStyle, bb, s.BorderBottomColor ?? s.Color, x, y + h - bb, w, bb, horizontal: true);
-        if ((sides & Left) != 0) Side(group, s.BorderLeftStyle, bl, s.BorderLeftColor ?? s.Color, x, y, bl, h, horizontal: false);
-        if ((sides & Right) != 0) Side(group, s.BorderRightStyle, br, s.BorderRightColor ?? s.Color, x + w - br, y, br, h, horizontal: false);
+        if ((sides & Top) != 0) Side(group, Collapsed(s.BorderTopStyle, collapsedCell), bt, s.BorderTopColor ?? s.Color, x, y, w, bt, horizontal: true, SideTop);
+        if ((sides & Bottom) != 0) Side(group, Collapsed(s.BorderBottomStyle, collapsedCell), bb, s.BorderBottomColor ?? s.Color, x, y + h - bb, w, bb, horizontal: true, SideBottom);
+        if ((sides & Left) != 0) Side(group, Collapsed(s.BorderLeftStyle, collapsedCell), bl, s.BorderLeftColor ?? s.Color, x, y, bl, h, horizontal: false, SideLeft);
+        if ((sides & Right) != 0) Side(group, Collapsed(s.BorderRightStyle, collapsedCell), br, s.BorderRightColor ?? s.Color, x + w - br, y, br, h, horizontal: false, SideRight);
+    }
+
+    // Indexes of the sides for the 3D border styles, in the order of the border shorthand.
+    private const int SideTop = 0, SideRight = 1, SideBottom = 2, SideLeft = 3;
+
+    /// <summary>True for groove, ridge, inset and outset: the border styles drawn in two shades of their colour.</summary>
+    public static bool Is3D(BorderStyle style) => style is BorderStyle.Groove or BorderStyle.Ridge or BorderStyle.Inset or BorderStyle.Outset;
+
+    // In the collapsing border model inset means ridge and outset means groove (CSS 2.1 §17.6.2.1).
+    private static BorderStyle Collapsed(BorderStyle style, bool collapsed)
+        => !collapsed ? style : style switch { BorderStyle.Inset => BorderStyle.Ridge, BorderStyle.Outset => BorderStyle.Groove, _ => style };
+
+    /// <summary>
+    /// The colour of one side of a 3D border, as Chrome shades it: the top and left of an inset border (and the bottom
+    /// and right of an outset one) are darkened; the other sides keep the colour, unless it is too dark to show a
+    /// difference, when they are lightened instead. A groove is an inset outer half with an outset inner half, a ridge
+    /// the reverse.
+    /// </summary>
+    public static uint Shade3D(BorderStyle style, int side, uint color, bool innerHalf = false)
+    {
+        if (style is BorderStyle.Groove or BorderStyle.Ridge)
+            style = (style == BorderStyle.Groove) != innerHalf ? BorderStyle.Inset : BorderStyle.Outset;
+        if (style is not (BorderStyle.Inset or BorderStyle.Outset)) return color;
+        bool darken = (side is SideTop or SideLeft) == (style == BorderStyle.Inset);
+        uint a = color & 0xFF000000;
+        float r = (color >> 16 & 0xFF) / 255f, g = (color >> 8 & 0xFF) / 255f, b = (color & 0xFF) / 255f;
+        float v = Math.Max(r, Math.Max(g, b));
+        if (darken)
+        {
+            float k = v > 0 ? Math.Max(0, (v - 0.33f) / v) : 0;
+            return a | Channel(r * k) << 16 | Channel(g * k) << 8 | Channel(b * k);
+        }
+        // How dark the colour looks; the weights and the threshold reproduce which colours Chrome lightens (grey up to
+        // #363636, red up to #7f0000, green up to #004000, and nearly every blue).
+        float lum = 0.215f * MathF.Pow(r, 1.8f) + 0.73f * MathF.Pow(g, 1.8f) + 0.055f * MathF.Pow(b, 1.8f);
+        if (lum >= 0.0622f) return color;
+        float m = Math.Min(1, v + 0.33f) / Math.Max(v, 1e-6f);
+        if (v == 0) return a | 0x545454;
+        return a | Channel(r * m) << 16 | Channel(g * m) << 8 | Channel(b * m);
+
+        static uint Channel(float c) => (uint)Math.Clamp(c * 255.999f, 0, 255);
     }
 
     /// <summary>
@@ -568,6 +617,22 @@ internal static class BoxPainter
                 group.Ops.Add(new RoundRectOp(x, y, w, h, r, sides[i].Color) { StrokeWidth = sides[i].Width, Style = sides[i].Style, Clip = polys[i] });
                 continue;
             }
+            if (sides[i].Style is BorderStyle.Groove or BorderStyle.Ridge && sides[i].Width >= 2)
+            {
+                // The outer and inner halves of the ring, each in its own shade.
+                float th = bt / 2, rh = br / 2, bh = bb / 2, lh = bl / 2;
+                group.Ops.Add(new RoundRectOp(x, y, w, h, r, Shade3D(sides[i].Style, i, sides[i].Color)) { Clip = polys[i] }
+                    .WithHole(x + lh, y + th, Math.Max(0, w - lh - rh), Math.Max(0, h - th - bh), r.Inset(th, rh, bh, lh)));
+                group.Ops.Add(new RoundRectOp(x + lh, y + th, Math.Max(0, w - lh - rh), Math.Max(0, h - th - bh), r.Inset(th, rh, bh, lh) ?? default,
+                        Shade3D(sides[i].Style, i, sides[i].Color, innerHalf: true)) { Clip = (float[])polys[i].Clone() }
+                    .WithHole(ix, iy, iw, ih, inner));
+                continue;
+            }
+            if (Is3D(sides[i].Style))
+            {
+                group.Ops.Add(new RoundRectOp(x, y, w, h, r, Shade3D(sides[i].Style, i, sides[i].Color)) { Clip = polys[i] }.WithHole(ix, iy, iw, ih, inner));
+                continue;
+            }
             if (Doubled(i))
             {
                 group.Ops.Add(OuterThird(sides[i].Color, polys[i]));
@@ -581,7 +646,7 @@ internal static class BoxPainter
     /// <summary>
     /// Paints outer box shadows under the box, the first shadow on top. A shadow is opaque, blended over white by its
     /// alpha, and only drawn outside the border box, as browsers clip it there. A blur becomes bands that fade out like a
-    /// Gaussian edge. Inset shadows are not drawn.
+    /// Gaussian edge. Inset shadows are painted by <see cref="PaintInsetShadows"/>.
     /// </summary>
     public static void PaintShadows(GroupOp group, ComputedStyle s, float x, float y, float w, float h, CornerRadii? radii = null)
     {
@@ -620,6 +685,64 @@ internal static class BoxPainter
                 else Outside(group, sx, sy, sw, shh, x, y, w, h, c);
             }
         }
+    }
+
+    /// <summary>
+    /// Paints inset box shadows inside the padding box, over the background and under the borders, the first shadow on
+    /// top. The shadow fills the padding box outside a hole: the padding box moved by the offset and shrunk by the
+    /// spread. A blur becomes rings around the hole, each in its own translucent shade, so that what lies under them
+    /// (a background image) still shows through.
+    /// </summary>
+    public static void PaintInsetShadows(GroupOp group, ComputedStyle s, float x, float y, float w, float h, CornerRadii? radii)
+    {
+        var shadows = s.BoxShadows;
+        if (shadows == null) return;
+        float bl = s.BorderLeft, bt = s.BorderTop, br = s.BorderRight, bb = s.BorderBottom;
+        float px = x + bl, py = y + bt, pw = w - bl - br, ph = h - bt - bb;
+        if (pw <= 0 || ph <= 0) return;
+        var padR = InnerRadii(radii, bl, bt, br, bb);
+        ClipOp? clip = null;
+        for (int i = shadows.Length - 1; i >= 0; i--)
+        {
+            var sh = shadows[i];
+            if (!sh.Inset) continue;
+            uint color = sh.Color ?? s.Color;
+            uint alpha = color >> 24;
+            if (alpha == 0) continue;
+            float blur = Math.Min(sh.Blur, 300), spread = Math.Clamp(sh.Spread, -1000, 1000);
+            clip ??= new ClipOp(px, py, pw, ph, padR);
+            // Far enough out to cover the padding box wherever the hole is.
+            float reach = Math.Abs(sh.X) + Math.Abs(sh.Y) + blur + Math.Abs(spread) + 2;
+            float ox = px - reach, oy = py - reach, ow = pw + 2 * reach, oh = ph + 2 * reach;
+            (float X, float Y, float W, float H, CornerRadii R) Hole(float inset)
+            {
+                var r = padR is { } pr ? pr.Outset(-inset) : default;
+                return (px + sh.X + inset, py + sh.Y + inset, Math.Max(0, pw - 2 * inset), Math.Max(0, ph - 2 * inset), r);
+            }
+            uint Shade(float cover) => (uint)Math.Clamp(MathF.Round(alpha * cover), 0, 255) << 24 | (color & 0xFFFFFF);
+            int bands = blur <= 0 ? 0 : Math.Clamp((int)MathF.Ceiling(2 * blur / 0.75f), 2, 24); // about one pixel each
+            float sigma = blur / 2;
+            // Band k is the ring between the hole inset by edge(k + 1) and the larger hole inset by edge(k); the
+            // insets run from spread + blur, where the shadow fades out, down to spread - blur.
+            float Edge(int k) => spread + blur - 2 * blur * k / bands;
+            var last = Hole(bands == 0 ? spread : Edge(bands));
+            var outer = new RoundRectOp(ox, oy, ow, oh, default, color);
+            if (last.W > 0 && last.H > 0) outer.WithHole(last.X, last.Y, last.W, last.H, last.R);
+            clip.Ops.Add(outer);
+            for (int k = 0; k < bands; k++)
+            {
+                var big = Hole(Edge(k + 1));
+                if (big.W <= 0 || big.H <= 0) continue;
+                float mid = Edge(k) - blur / bands;
+                uint c = Shade(0.5f * Erfc((mid - spread) / (sigma * MathF.Sqrt(2))));
+                if (c >> 24 == 0) continue;
+                var ring = new RoundRectOp(big.X, big.Y, big.W, big.H, big.R, c);
+                var small = Hole(Edge(k));
+                if (small.W > 0 && small.H > 0) ring.WithHole(small.X, small.Y, small.W, small.H, small.R);
+                clip.Ops.Add(ring);
+            }
+        }
+        if (clip != null) group.Ops.Add(clip);
     }
 
     // Paints rectangle (sx, sy, sw, sh) minus the box (x, y, w, h) as up to four rectangles.
@@ -786,11 +909,35 @@ internal static class BoxPainter
         if (x1 > x0 && y1 > y0) group.Ops.Add(op);
     }
 
-    public static void Side(GroupOp group, BorderStyle style, float width, uint color, float x, float y, float w, float h, bool horizontal)
+    /// <summary>
+    /// Paints one side of a border as the rectangle (x, y, w, h). <paramref name="which"/> (0 top, 1 right, 2 bottom,
+    /// 3 left) shades the 3D styles; without it they are drawn solid.
+    /// </summary>
+    public static void Side(GroupOp group, BorderStyle style, float width, uint color, float x, float y, float w, float h, bool horizontal, int which = -1)
     {
         if (width <= 0 || style == BorderStyle.None || !CssColor.IsVisible(color)) return;
         switch (style)
         {
+            case BorderStyle.Groove or BorderStyle.Ridge when which >= 0 && width >= 2:
+            {
+                // The half nearer the outside of the box first.
+                uint outer = Shade3D(style, which, color), inner = Shade3D(style, which, color, innerHalf: true);
+                bool outerFirst = which is SideTop or SideLeft;
+                if (horizontal)
+                {
+                    group.Ops.Add(new RectOp(x, y, w, h / 2, outerFirst ? outer : inner));
+                    group.Ops.Add(new RectOp(x, y + h / 2, w, h / 2, outerFirst ? inner : outer));
+                }
+                else
+                {
+                    group.Ops.Add(new RectOp(x, y, w / 2, h, outerFirst ? outer : inner));
+                    group.Ops.Add(new RectOp(x + w / 2, y, w / 2, h, outerFirst ? inner : outer));
+                }
+                break;
+            }
+            case BorderStyle.Groove or BorderStyle.Ridge or BorderStyle.Inset or BorderStyle.Outset when which >= 0:
+                group.Ops.Add(new RectOp(x, y, w, h, Shade3D(style, which, color)));
+                break;
             case BorderStyle.Dashed:
             case BorderStyle.Dotted:
                 if (horizontal) group.Ops.Add(new LineOp(x, y + h / 2, x + w, y + h / 2, h, color, style == BorderStyle.Dotted));

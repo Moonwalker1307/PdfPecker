@@ -77,7 +77,7 @@ internal enum OverflowWrap : byte { Normal, BreakWord, Anywhere }
 internal enum Overflow : byte { Visible, Clip, Hidden } // Hidden also stands for auto and scroll, which clip alike on paper
 internal enum WordBreak : byte { Normal, BreakAll, KeepAll }
 internal enum TextTransform : byte { None, Uppercase, Lowercase, Capitalize }
-internal enum BorderStyle : byte { None, Solid, Dashed, Dotted, Double }
+internal enum BorderStyle : byte { None, Solid, Dashed, Dotted, Double, Groove, Ridge, Inset, Outset }
 internal enum LineHeightKind : byte { Normal, Factor, Absolute }
 internal enum ObjectFit : byte { Fill, Contain, Cover, None, ScaleDown }
 
@@ -261,7 +261,9 @@ internal sealed class ComputedStyle
     public uint? OutlineColor; // null = currentColor
     public ObjectFit ObjectFit;
     public BackgroundOffset ObjectPositionX = BackgroundOffset.Center, ObjectPositionY = BackgroundOffset.Center;
-    public bool TextOverflowEllipsis;
+    /// <summary>What replaces the cut end of an overflowing line (text-overflow): "…" for ellipsis, a custom string, or null for clip.</summary>
+    public string? TextOverflow;
+    public bool TextOverflowEllipsis => TextOverflow != null;
     public float AspectRatio;    // width / height; 0 = auto
     public bool AspectRatioAuto; // "auto <ratio>": a replaced element keeps its natural ratio
     public Length Width = Length.Auto, Height = Length.Auto;
@@ -410,7 +412,7 @@ internal sealed class ComputedStyle
         c.OutlineColor = null;
         c.ObjectFit = ObjectFit.Fill;
         c.ObjectPositionX = c.ObjectPositionY = BackgroundOffset.Center;
-        c.TextOverflowEllipsis = false;
+        c.TextOverflow = null;
         c.AspectRatio = 0;
         c.AspectRatioAuto = false;
         c.Width = c.Height = Length.Auto;

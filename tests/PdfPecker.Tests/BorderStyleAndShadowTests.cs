@@ -1,0 +1,204 @@
+using PdfPecker.Css;
+using PdfPecker.Html;
+using PdfPecker.Images;
+using PdfPecker.Layout;
+
+namespace PdfPecker.Tests;
+
+/// <summary>Groove, ridge, inset and outset borders, inset box shadows, text-overflow strings and calc() table widths.</summary>
+public class BorderStyleAndShadowTests
+{
+    private static (int R, int G, int B) Pixel(string html, int x, int y)
+    {
+        var pdf = HtmlToPdf.Convert(html, new PdfOptions { Margins = new PageMargins(0) });
+        var img = PdfRenderer.Open(pdf).RenderPage(0, new ImageOptions { Dpi = 96 });
+        int i = (y * img.Width + x) * 4;
+        return (img.Rgba[i], img.Rgba[i + 1], img.Rgba[i + 2]);
+    }
+
+    private static void Near(int r, int g, int b, (int R, int G, int B) actual, int tolerance = 12)
+        => Assert.True(Math.Abs(actual.R - r) <= tolerance && Math.Abs(actual.G - g) <= tolerance && Math.Abs(actual.B - b) <= tolerance,
+            $"Expected ({r}, {g}, {b}), got {actual}");
+
+    private const string Body = "<body style='margin:0'>";
+
+    private static IEnumerable<Element> Descendants(Element e)
+    {
+        foreach (var c in e.Children.OfType<Element>())
+        {
+            yield return c;
+            foreach (var d in Descendants(c)) yield return d;
+        }
+    }
+
+    // ---- 3D border colours ----
+
+    [Theory]
+    // Measured in Chrome: the dark side of an inset border, then its light side.
+    [InlineData(0xCC0000u, 0x780000u, 0xCC0000u)]
+    [InlineData(0x000000u, 0x000000u, 0x545454u)]
+    [InlineData(0xFFFFFFu, 0xABABABu, 0xFFFFFFu)]
+    [InlineData(0xC0C0C0u, 0x6C6C6Cu, 0xC0C0C0u)]
+    [InlineData(0x333333u, 0x000000u, 0x878787u)]
+    [InlineData(0x404040u, 0x000000u, 0x404040u)]
+    [InlineData(0x7F0000u, 0x2B0000u, 0xD30000u)]
+    [InlineData(0x0000C0u, 0x00006Cu, 0x0000FFu)]
+    public void Inset_sides_are_shaded_as_in_Chrome(uint color, uint dark, uint light)
+    {
+        uint c = 0xFF000000 | color;
+        Assert.Equal(0xFF000000 | dark, BoxPainter.Shade3D(BorderStyle.Inset, 0, c));
+        Assert.Equal(0xFF000000 | dark, BoxPainter.Shade3D(BorderStyle.Inset, 3, c));
+        Assert.Equal(0xFF000000 | light, BoxPainter.Shade3D(BorderStyle.Inset, 2, c));
+        Assert.Equal(0xFF000000 | light, BoxPainter.Shade3D(BorderStyle.Inset, 1, c));
+        // Outset is the reverse.
+        Assert.Equal(0xFF000000 | light, BoxPainter.Shade3D(BorderStyle.Outset, 0, c));
+        Assert.Equal(0xFF000000 | dark, BoxPainter.Shade3D(BorderStyle.Outset, 2, c));
+    }
+
+    [Fact]
+    public void Inset_and_outset_borders_draw_two_shades()
+    {
+        string Box(string style) => Body + $"<div style='width:40px;height:40px;border:20px {style} #c00'></div>";
+        Near(0x78, 0, 0, Pixel(Box("inset"), 40, 5));   // top
+        Near(0x78, 0, 0, Pixel(Box("inset"), 5, 40));   // left
+        Near(0xCC, 0, 0, Pixel(Box("inset"), 40, 75));  // bottom
+        Near(0xCC, 0, 0, Pixel(Box("inset"), 75, 40));  // right
+        Near(0xCC, 0, 0, Pixel(Box("outset"), 40, 5));
+        Near(0x78, 0, 0, Pixel(Box("outset"), 40, 75));
+    }
+
+    [Fact]
+    public void Groove_and_ridge_borders_split_each_side_in_two_halves()
+    {
+        string Box(string style) => Body + $"<div style='width:40px;height:40px;border:20px {style} #c00'></div>";
+        // A groove's top is dark outside and light inside; a ridge the other way round.
+        Near(0x78, 0, 0, Pixel(Box("groove"), 40, 4));
+        Near(0xCC, 0, 0, Pixel(Box("groove"), 40, 15));
+        Near(0xCC, 0, 0, Pixel(Box("groove"), 40, 75));
+        Near(0x78, 0, 0, Pixel(Box("groove"), 40, 65));
+        Near(0xCC, 0, 0, Pixel(Box("ridge"), 40, 4));
+        Near(0x78, 0, 0, Pixel(Box("ridge"), 40, 15));
+    }
+
+    [Fact]
+    public void Three_d_borders_with_rounded_corners_are_shaded()
+    {
+        var html = Body + "<div style='width:60px;height:40px;border:12px outset #c00;border-radius:16px'></div>";
+        Near(0xCC, 0, 0, Pixel(html, 42, 5));
+        Near(0x78, 0, 0, Pixel(html, 42, 58));
+    }
+
+    [Fact]
+    public void Three_d_border_styles_are_parsed()
+    {
+        var doc = HtmlParser.Parse("<div style='border-style: groove ridge inset outset'></div>");
+        new StyleResolver(new Stylesheet(), 500, 800).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
+        var s = Descendants(doc).First(e => e.Name == "div").Style;
+        Assert.Equal(BorderStyle.Groove, s.BorderTopStyle);
+        Assert.Equal(BorderStyle.Ridge, s.BorderRightStyle);
+        Assert.Equal(BorderStyle.Inset, s.BorderBottomStyle);
+        Assert.Equal(BorderStyle.Outset, s.BorderLeftStyle);
+    }
+
+    // ---- inset box-shadow ----
+
+    [Fact]
+    public void An_inset_spread_shadow_paints_inside_the_padding_box()
+    {
+        var html = Body + "<div style='width:100px;height:60px;background:#ff0;box-shadow:inset 0 0 0 10px #00f'></div>";
+        Near(0, 0, 255, Pixel(html, 5, 30));
+        Near(0, 0, 255, Pixel(html, 50, 55));
+        Near(255, 255, 0, Pixel(html, 50, 30));
+    }
+
+    [Fact]
+    public void An_offset_inset_shadow_lies_along_the_top_and_left_edges_inside_the_border()
+    {
+        var html = Body + "<div style='width:100px;height:60px;border:4px solid #000;box-shadow:inset 8px 8px 0 #f00'></div>";
+        Near(0, 0, 0, Pixel(html, 2, 30));      // the border stays on top
+        Near(255, 0, 0, Pixel(html, 8, 30));    // the shadow just inside the left border
+        Near(255, 0, 0, Pixel(html, 50, 8));    // and the top border
+        Near(255, 255, 255, Pixel(html, 100, 60));
+    }
+
+    [Fact]
+    public void A_blurred_inset_shadow_fades_toward_the_middle()
+    {
+        var html = Body + "<div style='width:120px;height:120px;box-shadow:inset 0 0 20px #000'></div>";
+        var edge = Pixel(html, 1, 60);
+        var inner = Pixel(html, 15, 60);
+        var middle = Pixel(html, 60, 60);
+        Assert.True(edge.R < inner.R && inner.R < middle.R, $"{edge} {inner} {middle}");
+        Near(255, 255, 255, middle, 4);
+    }
+
+    [Fact]
+    public void A_translucent_inset_shadow_lets_the_background_show_through()
+    {
+        var html = Body + "<div style='width:100px;height:60px;background:#0f0;box-shadow:inset 0 0 0 10px rgba(255,0,0,.5)'></div>";
+        Near(128, 128, 0, Pixel(html, 5, 30), 20);
+    }
+
+    // ---- text-overflow ----
+
+    private static List<TextOp> TextOps(string html)
+    {
+        var doc = HtmlParser.Parse(html);
+        var sheet = new Stylesheet();
+        new StyleResolver(sheet, 500, 800).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
+        var engine = new LayoutEngine(800, new ImageLoader(null, null, false));
+        engine.Layout(doc, 500);
+        var list = new List<TextOp>();
+        void Add(IEnumerable<DrawOp> ops)
+        {
+            foreach (var o in ops)
+            {
+                if (o is TextOp t) list.Add(t);
+                if (o is GroupOp g) Add(g.Ops);
+            }
+        }
+        Add(engine.Ops);
+        return list;
+    }
+
+    private const string Cut = "width:120px;overflow:hidden;white-space:nowrap;";
+
+    [Fact]
+    public void Text_overflow_takes_a_custom_string()
+    {
+        var texts = TextOps($"<div style='{Cut}text-overflow:\" [more]\"'>The quick brown fox jumps over the lazy dog</div>");
+        Assert.EndsWith(" [more]", texts[^1].Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(texts, t => t.Text.Contains("lazy"));
+    }
+
+    [Fact]
+    public void Text_overflow_clip_cuts_without_a_mark()
+    {
+        var texts = TextOps($"<div style='{Cut}text-overflow:clip'>The quick brown fox jumps over the lazy dog</div>");
+        Assert.DoesNotContain(texts, t => t.Text.Contains('\u2026'));
+        var ellipsis = TextOps($"<div style='{Cut}text-overflow:ellipsis'>The quick brown fox jumps over the lazy dog</div>");
+        Assert.EndsWith("\u2026", ellipsis[^1].Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Text_overflow_strings_decode_escapes_and_take_the_end_value()
+    {
+        var doc = HtmlParser.Parse("<div id=a style='text-overflow: clip \"\\2192\"'></div><div id=b style='text-overflow: ellipsis'></div>");
+        new StyleResolver(new Stylesheet(), 500, 800).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
+        var divs = Descendants(doc).Where(e => e.Name == "div").ToList();
+        Assert.Equal("\u2192", divs[0].Style.TextOverflow);
+        Assert.Equal("\u2026", divs[1].Style.TextOverflow);
+    }
+
+    // ---- calc() table widths ----
+
+    [Fact]
+    public void A_cell_width_mixing_a_percentage_with_a_length_is_auto_as_in_Chrome()
+    {
+        // Chrome sizes these cells as if they had no width: two cells with the same content share the table equally.
+        var html = Body + "<table style='width:400px;border-spacing:0'><tr>"
+                   + "<td style='width:calc(50% - 40px);padding:0;background:#f00'>a</td><td style='padding:0;background:#00f'>a</td></tr></table>";
+        Near(255, 0, 0, Pixel(html, 195, 2));
+        Near(0, 0, 255, Pixel(html, 205, 2));
+    }
+}

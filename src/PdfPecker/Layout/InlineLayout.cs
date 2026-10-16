@@ -922,7 +922,7 @@ internal sealed partial class LayoutEngine
             var last = lines[n - 1];
             lines.RemoveRange(n, lines.Count - n);
             float room = (float.IsNaN(last.Avail) ? w : last.Avail) - (n == 1 ? indent : 0);
-            Ellipsize(last, block, room);
+            Ellipsize(last, block, room, mark: "\u2026");
             last.Forced = true;
         }
         if (_lineA.Length < n) { _lineA = new float[n * 2]; _lineD = new float[n * 2]; }
@@ -1244,15 +1244,15 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>
-    /// Cuts a line that overflows its clipping box (text-overflow: ellipsis): characters and inline boxes at the end are
-    /// dropped until "…", in the block's font, fits within <paramref name="room"/>. The line's items are in logical
+    /// Cuts a line that overflows its clipping box (text-overflow: ellipsis or a string): characters and inline boxes at
+    /// the end are dropped until "…" (or the string), in the block's font, fits within <paramref name="room"/>. The line's items are in logical
     /// order, or in visual order when <paramref name="visual"/> is set; a right-to-left line ends on the left.
     /// </summary>
-    private void Ellipsize(Line line, ComputedStyle block, float room, bool visual = false, bool rtl = false)
+    private void Ellipsize(Line line, ComputedStyle block, float room, bool visual = false, bool rtl = false, string? mark = null)
     {
-        const string Ellipsis = "\u2026";
+        string ellipsis = mark ?? block.TextOverflow ?? "\u2026";
         var font = block.Font;
-        float ew = font.MeasureUnits(Ellipsis, 0, 1) * block.FontSize / 1000f + block.LetterSpacing;
+        float ew = font.MeasureUnits(ellipsis, 0, ellipsis.Length) * block.FontSize / 1000f + block.LetterSpacing * ellipsis.Length;
         float limit = room - ew, used = 0;
         var items = line.Items;
         byte para = items.Count > 0 ? items[0].Para : (byte)0;
@@ -1305,8 +1305,8 @@ internal sealed partial class LayoutEngine
         while (kept.Count > 0 && kept[^1].Kind == ItemKind.Space) { used -= kept[^1].Width; kept.RemoveAt(kept.Count - 1); }
         var dots = Rent(ItemKind.Text, block);
         dots.Tag = kept.LastOrDefault(k => k.Tag != null)?.Tag;
-        dots.Source = Ellipsis;
-        dots.Length = 1;
+        dots.Source = ellipsis;
+        dots.Length = ellipsis.Length;
         dots.Width = ew;
         dots.Level = dots.Para = para;
         // The ellipsis takes the place of the last visible item, after any anchors kept at the end.
