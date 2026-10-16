@@ -21,7 +21,8 @@ internal static class TextLayout
         public double V, Size;
     }
 
-    public static PdfTextPage Build(List<TextGlyph> glyphs, int pageNumber, double width, double height, bool expandLigatures)
+    public static PdfTextPage Build(List<TextGlyph> glyphs, int pageNumber, double width, double height, bool expandLigatures,
+        CancellationToken cancellationToken = default)
     {
         // Glyphs whose baselines point the same way are laid out together; rotated text gets its own lines.
         var groups = new Dictionary<int, List<int>>();
@@ -37,13 +38,15 @@ internal static class TextLayout
 
         var lines = new List<PdfTextLine>();
         var sb = new StringBuilder();
+        var attached = new MarkTargets(glyphs);
         foreach (var angle in groups.Keys.OrderBy(a => a))
         {
             double rad = angle * Math.PI / 180, cx = Math.Cos(rad), cy = Math.Sin(rad);
-            var groupLines = BuildLines(glyphs, groups[angle], cx, cy);
+            var groupLines = BuildLines(glyphs, groups[angle], cx, cy, attached, cancellationToken);
             Line? previous = null;
             foreach (var line in groupLines)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var textLine = MakeLine(glyphs, line, cx, cy, angle, expandLigatures);
                 if (textLine == null) continue;
                 if (sb.Length > 0)
@@ -61,7 +64,8 @@ internal static class TextLayout
     }
 
     /// <summary>Clusters glyphs into lines by baseline, top to bottom, each sorted along the baseline.</summary>
-    private static List<Line> BuildLines(List<TextGlyph> glyphs, List<int> indices, double cx, double cy)
+    private static List<Line> BuildLines(List<TextGlyph> glyphs, List<int> indices, double cx, double cy, MarkTargets attached,
+        CancellationToken cancellationToken)
     {
         var items = new List<Item>(indices.Count);
         foreach (int i in indices)
@@ -96,8 +100,13 @@ internal static class TextLayout
         }
         foreach (var line in lines) line.Items.Sort((a, b) => a.U0 != b.U0 ? a.U0.CompareTo(b.U0) : a.Glyph.CompareTo(b.Glyph));
         marks.Sort((a, b) => a.Glyph.CompareTo(b.Glyph));
-        foreach (var mark in marks)
-            if (!AttachToNeighbour(glyphs, mark, cx, cy)) AttachMark(glyphs, lines, mark);
+        for (int m = 0; m < marks.Count; m++)
+        {
+            if ((m & 0xFFF) == 0) cancellationToken.ThrowIfCancellationRequested();
+            if (!AttachToNeighbour(glyphs, marks[m], cx, cy, attached)) AttachMark(glyphs, lines, marks[m], attached);
+        }
+        // The lines of this group are written out next, so they must see the marks joined to their letters.
+        attached.Flush();
         return lines;
     }
 
@@ -106,12 +115,10 @@ internal static class TextLayout
     /// letters, which PDFs draw in visual order with each mark before its letter, else the one before it. Marks are
     /// often placed over the edge of their letter, so this is more reliable than position, which only checks it.
     /// </summary>
-    private static bool AttachToNeighbour(List<TextGlyph> glyphs, Item mark, double cx, double cy)
+    private static bool AttachToNeighbour(List<TextGlyph> glyphs, Item mark, double cx, double cy, MarkTargets attached)
     {
-        int prev = mark.Glyph - 1, next = mark.Glyph + 1;
-        while (prev >= 0 && IsMark(glyphs[prev].Text)) prev--;
-        while (next < glyphs.Count && IsMark(glyphs[next].Text)) next++;
-        bool rtl = next < glyphs.Count && ClassOf(glyphs[next].Text) is BidiClass.R or BidiClass.AL;
+        int prev = attached.PreviousLetter(mark.Glyph), next = attached.NextLetter(mark.Glyph);
+        bool rtl = next < glyphs.Count && attached.ClassOf(next) is BidiClass.R or BidiClass.AL;
         foreach (int target in rtl ? new[] { next, prev } : new[] { prev, next })
         {
             if (target < 0 || target >= glyphs.Count) continue;
@@ -120,16 +127,15 @@ internal static class TextLayout
             if (u1 < u0) (u0, u1) = (u1, u0);
             double centre = (mark.U0 + mark.U1) / 2;
             double d = centre < u0 ? u0 - centre : centre > u1 ? centre - u1 : 0;
-            if (Math.Abs(v - mark.V) > 1.2 * Math.Max(g.Size, mark.Size) || d > 0.5 * mark.Size || IsSpace(g.Text)) continue;
-            g.Text += glyphs[mark.Glyph].Text;
-            glyphs[target] = g;
+            if (Math.Abs(v - mark.V) > 1.2 * Math.Max(g.Size, mark.Size) || d > 0.5 * mark.Size || attached.IsSpace(target)) continue;
+            attached.Append(target, mark.Glyph);
             return true;
         }
         return false;
     }
 
     /// <summary>Appends a combining mark to the letter it is drawn on: the nearest line, then the glyph under its centre.</summary>
-    private static void AttachMark(List<TextGlyph> glyphs, List<Line> lines, Item mark)
+    private static void AttachMark(List<TextGlyph> glyphs, List<Line> lines, Item mark, MarkTargets attached)
     {
         int lo = 0, hi = lines.Count - 1;
         while (lo < hi)
@@ -144,11 +150,16 @@ internal static class TextLayout
         if (best != null && Math.Abs(best.V - mark.V) <= 1.2 * Math.Max(best.Size, mark.Size))
         {
             double centre = (mark.U0 + mark.U1) / 2, bestDistance = double.MaxValue;
-            foreach (var it in best.Items)
+            // The items are sorted along the baseline, so only the few that start just before the mark's centre and the
+            // first one after it are looked at: a letter further back would have to be drawn across many others to be
+            // nearer, and looking at every letter for every mark is quadratic on a line of many marks.
+            var items = best.Items;
+            int end = FirstAfter(items, centre);
+            for (int k = Math.Max(0, end - MarkWindow); k <= end && k < items.Count; k++)
             {
+                var it = items[k];
                 double d = centre < it.U0 ? it.U0 - centre : centre > it.U1 ? centre - it.U1 : 0;
                 if (d < bestDistance) { bestDistance = d; target = it.Glyph; }
-                if (it.U0 > centre) break;
             }
             if (bestDistance > mark.Size) target = -1;
         }
@@ -156,13 +167,120 @@ internal static class TextLayout
         {
             // A mark with no letter near it is kept as a character of its own on the nearest line.
             if (best == null) lines.Add(best = new Line { V = mark.V, Size = mark.Size });
-            int at = best.Items.FindIndex(it => it.U0 > mark.U0);
-            best.Items.Insert(at < 0 ? best.Items.Count : at, mark);
+            best.Items.Insert(FirstAfter(best.Items, mark.U0), mark);
             return;
         }
-        var g = glyphs[target];
-        g.Text += glyphs[mark.Glyph].Text;
-        glyphs[target] = g;
+        attached.Append(target, mark.Glyph);
+    }
+
+    /// <summary>How many items before a mark's centre <see cref="AttachMark"/> considers as the letter it sits on.</summary>
+    private const int MarkWindow = 32;
+
+    /// <summary>The index of the first of <paramref name="items"/>, sorted by start, that starts after <paramref name="u"/>.</summary>
+    private static int FirstAfter(List<Item> items, double u)
+    {
+        int lo = 0, hi = items.Count;
+        while (lo < hi)
+        {
+            int mid = (lo + hi) / 2;
+            if (items[mid].U0 > u) hi = mid; else lo = mid + 1;
+        }
+        return lo;
+    }
+
+    /// <summary>
+    /// The marks joined to letters while a group's lines are built. A letter can collect any number of marks, so they
+    /// are gathered in a builder and written into its text once, instead of copying the growing text for every mark;
+    /// the letter's bidi class and whether it is a space are kept up to date as marks arrive, so reading them never
+    /// rescans that text. The nearest letters on either side of each glyph are found once, in one pass each way, so a
+    /// long run of marks is not walked again for every mark in it. Whether a glyph is a mark never changes, as glyphs
+    /// always have text and adding marks to a letter leaves it a letter.
+    /// </summary>
+    private sealed class MarkTargets
+    {
+        private readonly List<TextGlyph> _glyphs;
+        private readonly StringBuilder?[] _text;
+        private readonly BidiClass?[] _class;
+        private readonly bool?[] _space;
+        private readonly List<int> _pending = new();
+        private int[]? _previous, _next;
+
+        public MarkTargets(List<TextGlyph> glyphs)
+        {
+            _glyphs = glyphs;
+            _text = new StringBuilder?[glyphs.Count];
+            _class = new BidiClass?[glyphs.Count];
+            _space = new bool?[glyphs.Count];
+        }
+
+        /// <summary>The nearest glyph before <paramref name="i"/> that is not a mark, or -1.</summary>
+        public int PreviousLetter(int i)
+        {
+            if (_previous == null) FindLetters();
+            return _previous![i];
+        }
+
+        /// <summary>The nearest glyph after <paramref name="i"/> that is not a mark, or the glyph count.</summary>
+        public int NextLetter(int i)
+        {
+            if (_next == null) FindLetters();
+            return _next![i];
+        }
+
+        private void FindLetters()
+        {
+            int n = _glyphs.Count;
+            var isMark = new bool[n];
+            for (int i = 0; i < n; i++) isMark[i] = IsMark(_glyphs[i].Text);
+            _previous = new int[n];
+            _next = new int[n];
+            for (int i = 0, last = -1; i < n; i++)
+            {
+                _previous[i] = last;
+                if (!isMark[i]) last = i;
+            }
+            for (int i = n - 1, last = n; i >= 0; i--)
+            {
+                _next[i] = last;
+                if (!isMark[i]) last = i;
+            }
+        }
+
+        public BidiClass ClassOf(int i) => _class[i] ??= TextLayout.ClassOf(Text(i));
+
+        public bool IsSpace(int i) => _space[i] ??= TextLayout.IsSpace(Text(i));
+
+        /// <summary>Joins the text of the mark glyph <paramref name="mark"/> to glyph <paramref name="target"/>.</summary>
+        public void Append(int target, int mark)
+        {
+            string text = Text(mark);
+            var cls = ClassOf(target);
+            bool space = IsSpace(target);
+            if (_text[target] is not { } sb)
+            {
+                _text[target] = sb = new StringBuilder(_glyphs[target].Text);
+                _pending.Add(target);
+            }
+            sb.Append(text);
+            // Reading on from where the letter's own text left off gives the class of the joined text.
+            _class[target] = TextLayout.ClassOf(text, cls);
+            _space[target] = space && TextLayout.IsSpace(text);
+        }
+
+        /// <summary>Writes the marks gathered so far into the text of their letters.</summary>
+        public void Flush()
+        {
+            foreach (int i in _pending)
+            {
+                var g = _glyphs[i];
+                g.Text = _text[i]!.ToString();
+                _glyphs[i] = g;
+                _text[i] = null;
+            }
+            _pending.Clear();
+        }
+
+        private string Text(int i) => _text[i] is { } sb ? sb.ToString() : _glyphs[i].Text;
     }
 
     private static bool IsMark(string text)
@@ -306,13 +424,33 @@ internal static class TextLayout
                 _ => 0,
             };
         }
+        // The nearest strong or number direction on each side of every item, and the nearest strong one, found in one
+        // pass each way so a long run of neutrals is not walked again for every item in it.
+        var leftAny = new int[n];
+        var leftStrong = new int[n];
+        var rightAny = new int[n];
+        var rightStrong = new int[n];
+        for (int i = 0, any = 0, strong = 0; i < n; i++)
+        {
+            leftAny[i] = any;
+            leftStrong[i] = strong;
+            if (dir[i] != 0) any = dir[i];
+            if (dir[i] is 1 or 2) strong = dir[i];
+        }
+        for (int i = n - 1, any = 0, strong = 0; i >= 0; i--)
+        {
+            rightAny[i] = any;
+            rightStrong[i] = strong;
+            if (dir[i] != 0) any = dir[i];
+            if (dir[i] is 1 or 2) strong = dir[i];
+        }
         for (int i = 0; i < n; i++)
         {
             int d = dir[i];
             if (d == 0)
             {
                 // A neutral between two runs of the same direction takes it; numbers count as right to left here.
-                int left = Neighbour(dir, i, -1), right = Neighbour(dir, i, 1);
+                int left = leftAny[i], right = rightAny[i];
                 bool leftR = left is 2 or 3, rightR = right is 2 or 3;
                 if (left == 1 && right == 1) d = 1;
                 else if (leftR && rightR) d = 2;
@@ -321,7 +459,7 @@ internal static class TextLayout
             else if (d == 3)
             {
                 // Numbers next to right-to-left text are read left to right within it.
-                int left = Neighbour(dir, i, -1, skipNumbers: true), right = Neighbour(dir, i, 1, skipNumbers: true);
+                int left = leftStrong[i], right = rightStrong[i];
                 d = rtl || left == 2 || right == 2 ? 3 : 1;
             }
             levels[i] = d switch
@@ -334,19 +472,13 @@ internal static class TextLayout
         return Bidi.VisualOrder(levels);
     }
 
-    private static int Neighbour(int[] dir, int i, int step, bool skipNumbers = false)
+    /// <summary>
+    /// The bidi class of a glyph's text: its first strong character, else its first number or space. Passing the class
+    /// of earlier text as <paramref name="result"/> continues from it, giving the class of the two joined.
+    /// </summary>
+    private static BidiClass ClassOf(string text, BidiClass result = BidiClass.ON)
     {
-        for (int k = i + step; k >= 0 && k < dir.Length; k += step)
-        {
-            if (dir[k] == 0 || skipNumbers && dir[k] == 3) continue;
-            return dir[k];
-        }
-        return 0;
-    }
-
-    private static BidiClass ClassOf(string text)
-    {
-        var result = BidiClass.ON;
+        if (result is BidiClass.L or BidiClass.R or BidiClass.AL) return result;
         for (int i = 0; i < text.Length; i++)
         {
             int cp = char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]) ? char.ConvertToUtf32(text[i], text[i + 1]) : text[i];
