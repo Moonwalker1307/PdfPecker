@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+
 namespace PdfPecker.Images;
 
 /// <summary>
@@ -6,169 +8,270 @@ namespace PdfPecker.Images;
 /// </summary>
 internal static class WebPDecoder
 {
-    public static bool IsWebP(byte[] d)
-        => d.Length >= 16 && d[0] == 'R' && d[1] == 'I' && d[2] == 'F' && d[3] == 'F' && d[8] == 'W' && d[9] == 'E' && d[10] == 'B' && d[11] == 'P';
+    // The RIFF header is "RIFF", the size of everything after it, and "WEBP"; then come the chunks.
+    private const int RiffHeaderLength = 12;
+    private const int RiffSizeField = 4;
+    private const int MinLength = 16;
+
+    // VP8X holds flags, then the canvas width and height minus one in 24 bits each.
+    private const int CanvasHeaderLength = 10;
+    private const int CanvasWidthField = 4;
+    private const int CanvasHeightField = 7;
+
+    // ANMF starts with the frame's offset halved, its size, duration and flags, then holds the frame's own chunks.
+    private const int FrameHeaderLength = 16;
+    private const int FrameXField = 0;
+    private const int FrameYField = 3;
+
+    // The ALPH header byte: compression in bits 0-1, prediction filter in bits 2-3, reserved bits 6-7.
+    private const int AlphaCompressionMask = 0x03;
+    private const int AlphaFilterShift = 2;
+    private const int AlphaFilterMask = 0x03;
+    private const int AlphaReservedShift = 6;
+    private const int RawAlpha = 0;
+    private const int LosslessAlpha = 1;
+
+    private const uint Vp8Tag = 'V' | 'P' << 8 | '8' << 16 | ' ' << 24;
+    private const uint Vp8LTag = 'V' | 'P' << 8 | '8' << 16 | 'L' << 24;
+    private const uint Vp8XTag = 'V' | 'P' << 8 | '8' << 16 | 'X' << 24;
+    private const uint AlphTag = 'A' | 'L' << 8 | 'P' << 16 | 'H' << 24;
+    private const uint AnmfTag = 'A' | 'N' << 8 | 'M' << 16 | 'F' << 24;
+
+    private enum AlphaFilter
+    {
+        None = 0,
+        Horizontal = 1,
+        Vertical = 2,
+        Gradient = 3,
+    }
+
+    public static bool IsWebP(ReadOnlySpan<byte> data)
+        => data.Length >= MinLength && data.StartsWith("RIFF"u8) && data[8..RiffHeaderLength].SequenceEqual("WEBP"u8);
 
     /// <summary>The decoded picture, or null when the data is not a readable WebP image.</summary>
-    public static DecodedImage? Decode(byte[] d, long maxPixels)
+    public static DecodedImage? Decode(byte[] data, long maxPixels)
     {
-        if (!IsWebP(d)) return null;
-        long riffEnd = 8L + (uint)(d[4] | d[5] << 8 | d[6] << 16 | d[7] << 24);
-        int end = (int)Math.Min(d.Length, riffEnd);
-        int canvasW = 0, canvasH = 0;
-        int pos = 12;
-        int alphaPos = -1, alphaLen = 0;
-        while (pos + 8 <= end)
+        if (!IsWebP(data)) return null;
+        // The RIFF size may claim more than the file holds, or less, when something is appended after the image.
+        long riffEnd = 8L + BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(RiffSizeField));
+        var chunks = new ChunkReader(data, RiffHeaderLength, (int)Math.Min(data.Length, riffEnd));
+        int canvasWidth = 0, canvasHeight = 0;
+        Chunk? alpha = null;
+        while (chunks.TryRead(out var chunk))
         {
-            string fourCc = System.Text.Encoding.ASCII.GetString(d, pos, 4);
-            long size = (uint)(d[pos + 4] | d[pos + 5] << 8 | d[pos + 6] << 16 | d[pos + 7] << 24);
-            int body = pos + 8;
-            int len = (int)Math.Min(size, end - body);
-            switch (fourCc)
+            switch (chunk.Tag)
             {
-                case "VP8X":
-                    if (len >= 10)
+                case Vp8XTag:
+                    if (chunk.Length >= CanvasHeaderLength)
                     {
-                        canvasW = (d[body + 4] | d[body + 5] << 8 | d[body + 6] << 16) + 1;
-                        canvasH = (d[body + 7] | d[body + 8] << 8 | d[body + 9] << 16) + 1;
-                        if ((long)canvasW * canvasH > maxPixels) return null;
+                        var canvas = data.AsSpan(chunk.Offset, CanvasHeaderLength);
+                        canvasWidth = ReadUInt24(canvas[CanvasWidthField..]) + 1;
+                        canvasHeight = ReadUInt24(canvas[CanvasHeightField..]) + 1;
+                        if ((long)canvasWidth * canvasHeight > maxPixels) return null;
                     }
                     break;
-                case "ALPH":
-                    alphaPos = body;
-                    alphaLen = len;
+                case AlphTag:
+                    alpha = chunk;
                     break;
-                case "VP8 ":
-                case "VP8L":
-                    return DecodeFrame(d, fourCc, body, len, alphaPos, alphaLen, maxPixels);
-                case "ANMF":
-                    return len >= 16 && canvasW > 0 ? FirstFrame(d, body, len, canvasW, canvasH, maxPixels) : null;
+                case Vp8Tag:
+                case Vp8LTag:
+                    return DecodeFrame(data, chunk, alpha, maxPixels);
+                case AnmfTag:
+                    // A frame needs the canvas that the VP8X chunk declares before it.
+                    return chunk.Length >= FrameHeaderLength && canvasWidth > 0
+                        ? FirstFrame(data, chunk, canvasWidth, canvasHeight, maxPixels)
+                        : null;
             }
-            pos = body + (int)Math.Min(size + (size & 1), int.MaxValue - body);
         }
         return null;
     }
 
     /// <summary>The first frame of an animation, placed on the transparent canvas.</summary>
-    private static DecodedImage? FirstFrame(byte[] d, int body, int len, int canvasW, int canvasH, long maxPixels)
+    private static DecodedImage? FirstFrame(byte[] data, Chunk frameChunk, int canvasWidth, int canvasHeight, long maxPixels)
     {
-        int offsetX = 2 * (d[body] | d[body + 1] << 8 | d[body + 2] << 16);
-        int offsetY = 2 * (d[body + 3] | d[body + 4] << 8 | d[body + 5] << 16);
-        int end = body + len, pos = body + 16;
-        int alphaPos = -1, alphaLen = 0;
-        DecodedImage? frame = null;
-        while (pos + 8 <= end)
+        var header = data.AsSpan(frameChunk.Offset, FrameHeaderLength);
+        int offsetX = 2 * ReadUInt24(header[FrameXField..]);
+        int offsetY = 2 * ReadUInt24(header[FrameYField..]);
+        var chunks = new ChunkReader(data, frameChunk.Offset + FrameHeaderLength, frameChunk.Offset + frameChunk.Length);
+        Chunk? alpha = null;
+        DecodedImage? decoded = null;
+        while (chunks.TryRead(out var chunk))
         {
-            string fourCc = System.Text.Encoding.ASCII.GetString(d, pos, 4);
-            long size = (uint)(d[pos + 4] | d[pos + 5] << 8 | d[pos + 6] << 16 | d[pos + 7] << 24);
-            int chunk = pos + 8;
-            int chunkLen = (int)Math.Min(size, end - chunk);
-            if (fourCc == "ALPH") { alphaPos = chunk; alphaLen = chunkLen; }
-            else if (fourCc is "VP8 " or "VP8L")
+            if (chunk.Tag == AlphTag)
             {
-                frame = DecodeFrame(d, fourCc, chunk, chunkLen, alphaPos, alphaLen, maxPixels);
+                alpha = chunk;
+            }
+            else if (chunk.Tag is Vp8Tag or Vp8LTag)
+            {
+                decoded = DecodeFrame(data, chunk, alpha, maxPixels);
                 break;
             }
-            pos = chunk + (int)Math.Min(size + (size & 1), int.MaxValue - chunk);
         }
-        if (frame is not { } f) return null;
-        if (offsetX == 0 && offsetY == 0 && f.Width == canvasW && f.Height == canvasH) return f;
+        if (decoded is not { } frame) return null;
+        if (offsetX == 0 && offsetY == 0 && frame.Width == canvasWidth && frame.Height == canvasHeight) return frame;
         // Around the frame the canvas is only transparent pixels, which the header asks for with no data behind them: a
         // huge canvas from a tiny file and a small frame is not allocated, as with GIF screens.
-        long canvasPixels = (long)canvasW * canvasH;
-        if (canvasPixels > 1 << 22 && canvasPixels > 4L * f.Width * f.Height && canvasPixels > d.Length * 1000L) return null;
+        long canvasPixels = (long)canvasWidth * canvasHeight;
+        if (canvasPixels > 1 << 22 && canvasPixels > 4L * frame.Width * frame.Height && canvasPixels > data.Length * 1000L) return null;
 
-        var rgb = new byte[canvasW * canvasH * 3];
-        var alpha = new byte[canvasW * canvasH];
-        for (int y = 0; y < f.Height && offsetY + y < canvasH; y++)
-            for (int x = 0; x < f.Width && offsetX + x < canvasW; x++)
-            {
-                int s = y * f.Width + x, t = (offsetY + y) * canvasW + offsetX + x;
-                rgb[t * 3] = f.Rgb[s * 3];
-                rgb[t * 3 + 1] = f.Rgb[s * 3 + 1];
-                rgb[t * 3 + 2] = f.Rgb[s * 3 + 2];
-                alpha[t] = f.Alpha?[s] ?? 255;
-            }
-        return new DecodedImage(canvasW, canvasH, rgb, alpha);
+        var rgb = new byte[canvasWidth * canvasHeight * 3];
+        var alphaPlane = new byte[canvasWidth * canvasHeight];
+        // The frame is clipped to the canvas; a frame that starts past its edge leaves the canvas empty.
+        int visibleWidth = Math.Min(frame.Width, canvasWidth - offsetX);
+        int visibleHeight = Math.Min(frame.Height, canvasHeight - offsetY);
+        if (visibleWidth <= 0) visibleHeight = 0;
+        for (int y = 0; y < visibleHeight; y++)
+        {
+            int source = y * frame.Width, target = (offsetY + y) * canvasWidth + offsetX;
+            frame.Rgb.AsSpan(source * 3, visibleWidth * 3).CopyTo(rgb.AsSpan(target * 3));
+            var alphaRow = alphaPlane.AsSpan(target, visibleWidth);
+            if (frame.Alpha == null) alphaRow.Fill(255);
+            else frame.Alpha.AsSpan(source, visibleWidth).CopyTo(alphaRow);
+        }
+        return new DecodedImage(canvasWidth, canvasHeight, rgb, alphaPlane);
     }
 
-    private static DecodedImage? DecodeFrame(byte[] d, string fourCc, int body, int len, int alphaPos, int alphaLen, long maxPixels)
+    /// <summary>Decodes a VP8L image, or a VP8 image with the alpha plane of an ALPH chunk that came before it.</summary>
+    private static DecodedImage? DecodeFrame(byte[] data, Chunk image, Chunk? alpha, long maxPixels)
     {
-        if (fourCc == "VP8L")
+        if (image.Tag == Vp8LTag)
         {
-            var argb = Vp8lDecoder.Decode(d, body, len, maxPixels, out int w, out int h, out _);
+            var argb = Vp8lDecoder.Decode(data, image.Offset, image.Length, maxPixels, out int width, out int height, out _);
             if (argb == null) return null;
-            var rgb = new byte[w * h * 3];
-            var alpha = new byte[w * h];
+            var rgb = new byte[width * height * 3];
+            var alphaPlane = new byte[width * height];
             for (int i = 0; i < argb.Length; i++)
             {
-                uint p = argb[i];
-                rgb[i * 3] = (byte)(p >> 16);
-                rgb[i * 3 + 1] = (byte)(p >> 8);
-                rgb[i * 3 + 2] = (byte)p;
-                alpha[i] = (byte)(p >> 24);
+                uint pixel = argb[i];
+                rgb[i * 3] = (byte)(pixel >> 16);
+                rgb[i * 3 + 1] = (byte)(pixel >> 8);
+                rgb[i * 3 + 2] = (byte)pixel;
+                alphaPlane[i] = (byte)(pixel >> 24);
             }
-            return new DecodedImage(w, h, rgb, alpha);
+            return new DecodedImage(width, height, rgb, alphaPlane);
         }
 
-        var image = Vp8Decoder.Decode(d, body, len, maxPixels);
-        if (image is not { } img || alphaPos < 0) return image;
+        var lossy = Vp8Decoder.Decode(data, image.Offset, image.Length, maxPixels);
+        if (lossy is not { } picture || alpha is not { } alphaChunk) return lossy;
         // A missing or damaged alpha plane leaves the picture opaque.
-        var plane = DecodeAlpha(d, alphaPos, alphaLen, img.Width, img.Height, maxPixels);
-        return plane == null ? img : img with { Alpha = plane };
+        var plane = DecodeAlpha(data, alphaChunk, picture.Width, picture.Height, maxPixels);
+        return plane == null ? picture : picture with { Alpha = plane };
     }
 
     /// <summary>The alpha plane of a lossy image (the ALPH chunk): raw or lossless-coded, then unfiltered.</summary>
-    private static byte[]? DecodeAlpha(byte[] d, int pos, int len, int width, int height, long maxPixels)
+    private static byte[]? DecodeAlpha(byte[] data, Chunk chunk, int width, int height, long maxPixels)
     {
-        if (len <= 1) return null;
-        int header = d[pos];
-        int method = header & 3, filter = (header >> 2) & 3, reserved = header >> 6;
-        if (method > 1 || reserved != 0) return null;
+        if (chunk.Length <= 1) return null;
+        int header = data[chunk.Offset];
+        int compression = header & AlphaCompressionMask;
+        var filter = (AlphaFilter)((header >> AlphaFilterShift) & AlphaFilterMask);
+        if (compression is not (RawAlpha or LosslessAlpha) || header >> AlphaReservedShift != 0) return null;
+
         int count = width * height;
-        var values = new byte[count];
-        if (method == 0)
+        var plane = new byte[count];
+        int streamOffset = chunk.Offset + 1, streamLength = chunk.Length - 1;
+        if (compression == RawAlpha)
         {
-            if (len - 1 < count) return null;
-            Array.Copy(d, pos + 1, values, 0, count);
+            if (streamLength < count) return null;
+            data.AsSpan(streamOffset, count).CopyTo(plane);
         }
         else
         {
-            var argb = Vp8lDecoder.DecodeStream(d, pos + 1, len - 1, width, height, maxPixels);
+            // The plane is coded as a headerless lossless image whose green channel holds the alpha values.
+            var argb = Vp8lDecoder.DecodeStream(data, streamOffset, streamLength, width, height, maxPixels);
             if (argb == null) return null;
-            for (int i = 0; i < count; i++) values[i] = (byte)(argb[i] >> 8); // the green channel
+            for (int i = 0; i < count; i++) plane[i] = (byte)(argb[i] >> 8);
         }
-        if (filter != 0) Unfilter(values, width, height, filter);
-        return values;
+        if (filter != AlphaFilter.None) Unfilter(plane, width, height, filter);
+        return plane;
     }
 
-    /// <summary>Undoes the horizontal (1), vertical (2) or gradient (3) prediction of an alpha plane, in place.</summary>
-    private static void Unfilter(byte[] a, int width, int height, int filter)
+    /// <summary>Undoes the horizontal, vertical or gradient prediction of an alpha plane, in place.</summary>
+    private static void Unfilter(Span<byte> plane, int width, int height, AlphaFilter filter)
     {
         for (int y = 0; y < height; y++)
         {
-            int row = y * width, prev = row - width;
-            if (y == 0 || filter == 1)
+            var row = plane.Slice(y * width, width);
+            if (y == 0)
             {
-                // The first row predicts from the left; with the horizontal filter, later rows start from above.
-                byte pred = y == 0 ? (byte)0 : a[prev];
-                for (int x = 0; x < width; x++) pred = a[row + x] = (byte)(pred + a[row + x]);
+                // Every filter predicts the first row from the left, starting from zero.
+                AddLeftPrediction(row, 0);
+                continue;
             }
-            else if (filter == 2)
+            var above = plane.Slice((y - 1) * width, width);
+            switch (filter)
             {
-                for (int x = 0; x < width; x++) a[row + x] = (byte)(a[prev + x] + a[row + x]);
-            }
-            else
-            {
-                int left = a[prev], topLeft = a[prev];
-                for (int x = 0; x < width; x++)
+                case AlphaFilter.Horizontal:
+                    // Later rows start from the pixel above, then predict from the left.
+                    AddLeftPrediction(row, above[0]);
+                    break;
+                case AlphaFilter.Vertical:
+                    for (int x = 0; x < width; x++) row[x] += above[x];
+                    break;
+                default:
                 {
-                    int top = a[prev + x];
-                    int g = left + top - topLeft;
-                    left = a[row + x] = (byte)(a[row + x] + (g < 0 ? 0 : g > 255 ? 255 : g));
-                    topLeft = top;
+                    // The first pixel takes the one above, as left and top-left both start there.
+                    int left = above[0], topLeft = above[0];
+                    for (int x = 0; x < width; x++)
+                    {
+                        int top = above[x];
+                        int gradient = Math.Clamp(left + top - topLeft, 0, 255);
+                        left = row[x] = (byte)(row[x] + gradient);
+                        topLeft = top;
+                    }
+                    break;
                 }
             }
+        }
+    }
+
+    private static void AddLeftPrediction(Span<byte> row, byte start)
+    {
+        byte predicted = start;
+        for (int x = 0; x < row.Length; x++) predicted = row[x] = (byte)(predicted + row[x]);
+    }
+
+    private static int ReadUInt24(ReadOnlySpan<byte> bytes) => bytes[0] | bytes[1] << 8 | bytes[2] << 16;
+
+    /// <summary>A chunk's FourCC, and where its body starts in the file and how much of it the file holds.</summary>
+    private readonly record struct Chunk(uint Tag, int Offset, int Length);
+
+    /// <summary>Walks the RIFF chunks between two offsets, each a FourCC, a 32-bit size, the body and a pad byte.</summary>
+    private ref struct ChunkReader
+    {
+        private const int ChunkHeaderLength = 8;
+
+        private readonly ReadOnlySpan<byte> data;
+        private readonly int end;
+        private int position;
+
+        public ChunkReader(ReadOnlySpan<byte> data, int start, int end)
+        {
+            this.data = data;
+            this.end = end;
+            position = start;
+        }
+
+        /// <summary>
+        /// Reads the next chunk header; the body is cut at the end of the range. A size that reaches past int.MaxValue
+        /// leaves the position there, so the next header read throws ArgumentOutOfRangeException, which the caller
+        /// treats as a damaged image.
+        /// </summary>
+        public bool TryRead(out Chunk chunk)
+        {
+            if (position + ChunkHeaderLength > end)
+            {
+                chunk = default;
+                return false;
+            }
+            var header = data.Slice(position, ChunkHeaderLength);
+            uint tag = BinaryPrimitives.ReadUInt32LittleEndian(header);
+            long size = BinaryPrimitives.ReadUInt32LittleEndian(header[4..]);
+            int body = position + ChunkHeaderLength;
+            chunk = new Chunk(tag, body, (int)Math.Min(size, end - body));
+            // Chunk bodies are padded to an even length.
+            position = body + (int)Math.Min(size + (size & 1), int.MaxValue - body);
+            return true;
         }
     }
 }
