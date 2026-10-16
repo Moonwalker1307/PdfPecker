@@ -8,7 +8,6 @@
     <RootNamespace>PdfPecker</RootNamespace>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <NoWarn>$(NoWarn);CS1591</NoWarn>
     <IsTrimmable>true</IsTrimmable>
     <IsAotCompatible>true</IsAotCompatible>
 
@@ -26,6 +25,20 @@
     <Copyright>Copyright (c) 2026 Moonwalker1307</Copyright>
     <RepositoryUrl>https://github.com/Moonwalker1307/PdfPecker</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+    <!-- Pack compares the public API with the last release on nuget.org and fails on a breaking change, so one cannot
+         ship in a minor release by accident. Raise the baseline after each release; a deliberate break needs a major
+         version and a CompatibilitySuppressions.xml entry. -->
+    <EnablePackageValidation>true</EnablePackageValidation>
+    <PackageValidationBaselineVersion>1.9.0</PackageValidationBaselineVersion>
+  </PropertyGroup>
+
+  <!-- CI builds use repository-relative source paths in the PDB, so builds are reproducible from the same commit. -->
+  <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
   </PropertyGroup>
 
   <ItemGroup>

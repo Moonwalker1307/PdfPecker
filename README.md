@@ -53,7 +53,7 @@ byte[] merged = PdfMerger.Merge(invoicePdf, termsPdf);
 byte[][] pngs = PdfToImage.Convert(pdf, new ImageOptions { Dpi = 150 });
 ```
 
-All methods are static and thread-safe, so you can convert many documents in parallel.
+The conversion methods are static and thread-safe, so you can convert many documents in parallel. The few instance types are `FontCollection` and `PdfRenderer`, which can be shared by parallel work, and `StreamingPdfMerger`, which builds one output and is used from one thread at a time.
 
 ## Features
 
