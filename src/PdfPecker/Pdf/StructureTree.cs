@@ -15,6 +15,7 @@ internal sealed class StructElem
     public string? Alt, Lang, Scope;
     public string? ListNumbering; // an L element's numbering, once its items have Lbl elements
     public string? Text;       // a link's text, the description of its annotation
+    public string? ElementId;  // the element identifier (/ID) a Note needs
     public int RowSpan = 1, ColSpan = 1;
     public int Id;             // object number, once written
     public bool HasContent;    // marked content or an annotation somewhere below it
@@ -108,7 +109,7 @@ internal sealed class StructureTree
 
     /// <summary>Structure types that can hold text directly; text in any other gets an anonymous paragraph.</summary>
     private static bool HoldsText(string type) => type is "P" or "H1" or "H2" or "H3" or "H4" or "H5" or "H6" or "Lbl" or "LBody"
-        or "TD" or "TH" or "Caption" or "Link" or "Code" or "Quote" or "Span";
+        or "TD" or "TH" or "Caption" or "Link" or "Code" or "Quote" or "Span" or "Note";
 
     private static bool IsInline(ComputedStyle s)
         => !s.Floated && !s.OutOfFlow && s.Display is Display.Inline or Display.InlineBlock or Display.InlineFlex or Display.InlineGrid;
@@ -126,6 +127,21 @@ internal sealed class StructureTree
                 if (target == null && !blank) target = anonymous = new StructElem("P", container);
                 // Whitespace between blocks stays an artifact; inside a paragraph it belongs to the text.
                 if (target != null) _content[t] = SlotIn(target);
+                continue;
+            }
+            if (child is Element { FootnoteIndex: >= 0 } footnote && footnote.Style is { Display: not Display.None })
+            {
+                // A footnote is out of the flow but read where its call is: a Note in the text, which the call links to.
+                var holder = holdsText ? container : anonymous ??= new StructElem("P", container);
+                var note = new StructElem("Note", holder)
+                {
+                    Lang = LangOf(footnote),
+                    ElementId = "fn" + (footnote.FootnoteIndex + 1).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                };
+                _elements[footnote] = note;
+                _targets[Layout.FootnoteSetup.BodyKey(footnote.FootnoteIndex)] = note;
+                if (footnote.Id != null) _targets[footnote.Id] = note;
+                VisitChildren(footnote, note);
                 continue;
             }
             if (child is not Element c || Skipped(c)) continue;
@@ -197,6 +213,7 @@ internal sealed class StructureTree
         if (e.Id != null) _targets[e.Id] = se;
         if (e.Name == "a" && e.GetAttribute("name") is { Length: > 0 } anchorName) _targets[anchorName] = se;
         if (type == "Link") se.Text = System.Text.RegularExpressions.Regex.Replace(e.InnerText(), @"\s+", " ").Trim();
+        if (e.FootnoteBody != null) se.Text = ("Footnote " + se.Text).Trim();
         if (type[0] == 'H' && type.Length == 2 && FirstHeading == null)
         {
             var text = System.Text.RegularExpressions.Regex.Replace(e.InnerText(), @"\s+", " ").Trim();
@@ -263,6 +280,7 @@ internal sealed class StructureTree
             // A figure with a caption groups the two, so the caption is its group's first or last child.
             case "figure": return e.Children.Any(c => c is Element { Name: "figcaption" }) ? "Sect" : null;
             case "a": return e.GetAttribute("href") is { Length: > 0 } ? "Link" : null;
+            case "::footnote-call": return e.FootnoteBody != null ? "Link" : null;
             case "blockquote": return "BlockQuote";
             case "q": return "Quote";
             case "code": case "kbd": case "samp": return "Code";

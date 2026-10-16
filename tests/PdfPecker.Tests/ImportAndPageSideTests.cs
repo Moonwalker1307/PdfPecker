@@ -169,15 +169,131 @@ public class ImportAndPageSideTests
         Assert.Single(Regex.Matches(content, @"1 1 0 rg\n0 0 [\d.]+ [\d.]+ re f"));
     }
 
+    /// <summary>The widths of the rectangles filled in red, in page order.</summary>
+    private static List<float> RedWidths(byte[] pdf)
+        => Regex.Matches(AllContent(pdf), @"1 0 0 rg\n[\d.]+ [\d.]+ ([\d.]+) [\d.]+ re f").Select(m => float.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture)).ToList();
+
     [Fact]
-    public void Narrower_pages_set_the_width_of_the_whole_flow()
+    public void Percentage_widths_are_resolved_on_each_page()
     {
         var pdf = ConvertUncompressed(@"<style>@page { size: 400pt 400pt; margin: 20pt } @page :first { margin-right: 120pt }</style>
             <div style='width:100%;background:#ff0000;height:900pt'></div>");
-        // The first page's area is 260pt wide; every page's box is that wide, so none overflows.
-        var widths = Regex.Matches(AllContent(pdf), @"1 0 0 rg\n[\d.]+ [\d.]+ ([\d.]+) [\d.]+ re f").Select(m => float.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture)).ToList();
-        Assert.NotEmpty(widths);
-        Assert.All(widths, w => Assert.Equal(260, w, 0.5f));
+        // As in Chrome, the box is as wide as each page's area: 260pt on the first page, 360pt on the others.
+        Assert.Equal(new[] { 260f, 360f, 360f }, RedWidths(pdf).Select(w => MathF.Round(w)));
+    }
+
+    [Fact]
+    public void Lines_take_the_width_of_the_page_they_are_on()
+    {
+        var words = string.Join(" ", Enumerable.Range(0, 1500).Select(i => $"word{i}"));
+        var pdf = ConvertUncompressed(@"<!doctype html><style>@page { size: 400px 300px; margin: 20px } @page :left { margin-left: 120px }
+            body { margin: 0; font: 12px/16px sans-serif }</style><body><p>" + words + "</p>");
+        var pages = TextPositions(pdf);
+        // Right pages are 360px wide and left pages 260px, and each page's lines fill its width: the same words per page
+        // as in Chrome.
+        Assert.Equal("word0", pages[0][0].Text.Split(' ')[0]);
+        Assert.Equal("word119", pages[1][0].Text.Split(' ')[0]);
+        Assert.Equal("word199", pages[2][0].Text.Split(' ')[0]);
+        Assert.Equal("word311", pages[3][0].Text.Split(' ')[0]);
+        Assert.Equal(90, pages[1][0].X, 0.5f); // 120px
+        Assert.Equal(15, pages[0][0].X, 0.5f);
+        AssertStructurallyValid(pdf);
+    }
+
+    [Fact]
+    public void A_line_pushed_to_a_narrower_page_is_measured_for_it()
+    {
+        // Courier 10px is 6px a character. The first page is 360px wide and the second 260px. The sixteenth line starts
+        // 240px down the 260px page, where the line height fits but the tall T does not: the line moves to the second
+        // page and must be broken for its width.
+        var lines = string.Concat(Enumerable.Repeat("abcd<br>", 15));
+        var words = string.Join(" ", Enumerable.Repeat("abcd", 60));
+        var pdf = ConvertUncompressed(@"<!doctype html><style>@page { size: 400px 300px; margin: 20px } @page :left { margin-left: 120px }
+            body { margin: 0; font: 10px/16px Courier } p { margin: 0 }</style><body><p>" + lines
+            + "<span style='font-size:40px;line-height:44px'>T</span> " + words + "</p>");
+        var pages = TextPositions(pdf);
+        Assert.Equal(15, pages[0].Count);
+        var tall = pages[1].Where(t => Math.Abs(t.Y - pages[1][0].Y) < 0.5f).ToList();
+        Assert.Equal("T", tall[0].Text);
+        // The small words after the T must end within the page's 260px, which starts at 120px (90pt).
+        Assert.Equal(90, tall[0].X, 0.5f);
+        var last = tall[^1];
+        float right = (last.X - 90) / 0.75f + last.Text.TrimEnd().Length * 6;
+        Assert.InRange(right, 200, 260.5f);
+    }
+
+    [Fact]
+    public void Boxes_spanning_pages_of_different_widths_are_painted_per_page()
+    {
+        var text = string.Join(" ", Enumerable.Range(0, 600).Select(i => $"w{i}"));
+        var pdf = ConvertUncompressed(@"<!doctype html><style>@page { size: 400px 300px; margin: 20px } @page :left { margin-left: 120px }
+            body { margin: 0; font: 12px/16px sans-serif } div { background: #ff0000 }</style><body><div>" + text + "</div>");
+        // The red background is 360px (270pt) wide on right pages and 260px (195pt) on left pages.
+        var widths = RedWidths(pdf).Select(w => MathF.Round(w)).ToList();
+        Assert.True(widths.Count >= 3);
+        Assert.Equal(270, widths[0]);
+        Assert.Equal(195, widths[1]);
+        Assert.Equal(270, widths[2]);
+    }
+
+    [Fact]
+    public void Tables_are_sized_again_on_each_page()
+    {
+        var rows = string.Concat(Enumerable.Range(0, 40).Select(i => $"<tr><td>r{i} a</td><td>b</td></tr>"));
+        var pdf = ConvertUncompressed(@"<!doctype html><html><head><style>@page { size: 400px 300px; margin: 20px } @page :left { margin-left: 120px }
+            body { margin: 0; font: 12px/16px sans-serif } table { width: 100%; border-collapse: collapse } td { border: 1px solid #000 }</style></head>
+            <body><table>" + rows + "</table></body></html>");
+        var pages = TextPositions(pdf);
+        // As in Chrome, the second column starts at 294px on the 360px right pages and at 318px on the 260px left pages,
+        // where the columns shrink in proportion.
+        Assert.Equal(220.5f, pages[0].First(t => t.Text == "b").X, 0.5f);
+        Assert.Equal(238.5f, pages[1].First(t => t.Text == "b").X, 0.5f);
+        Assert.Equal(220.5f, pages[2].First(t => t.Text == "b").X, 0.5f);
+    }
+
+    [Fact]
+    public void Centred_boxes_are_centred_on_each_page()
+    {
+        var text = string.Join(" ", Enumerable.Range(0, 600).Select(i => $"w{i}"));
+        var pdf = ConvertUncompressed(@"<!doctype html><style>@page { size: 400px 300px; margin: 20px } @page :left { margin-left: 60px; margin-right: 40px }
+            body { margin: 0; font: 12px/16px sans-serif } main { width: 200px; margin: 0 auto }</style><body><main>" + text + "</main>");
+        var pages = TextPositions(pdf);
+        // Right pages: 20px + (360 - 200) / 2 = 100px; left pages: 60px + (300 - 200) / 2 = 110px.
+        Assert.Equal(75, pages[0][0].X, 0.5f);
+        Assert.Equal(82.5f, pages[1][0].X, 0.5f);
+        Assert.Equal(75, pages[2][0].X, 0.5f);
+    }
+
+    [Fact]
+    public void A_right_to_left_document_starts_on_a_left_page()
+    {
+        var words = string.Join(" ", Enumerable.Range(0, 600).Select(i => $"word{i}"));
+        const string css = "<style>@page { size: 400px 300px; margin: 20px } @page :left { margin-left: 120px } @page :right { margin-right: 80px } body { margin: 0; font: 12px/16px sans-serif }</style>";
+        // As in Chrome, the root element's direction decides: its pages progress from right to left, so the first is a
+        // left page. The body's direction does not.
+        var rtl = ConvertUncompressed("<!doctype html><html dir=rtl>" + css + "<body><p>" + words + "</p></html>");
+        var rtlPages = TextPositions(rtl);
+        Assert.True(rtlPages[0].Min(t => t.X) >= 89.5f); // a left page: its area starts at 120px
+        Assert.True(rtlPages[1].Min(t => t.X) < 30);
+        Assert.Contains("/ViewerPreferences << /Direction /R2L >>", Latin1(rtl));
+
+        var bodyOnly = ConvertUncompressed("<!doctype html><html>" + css + "<body dir=rtl><p>" + words + "</p></body></html>");
+        var ltrPages = TextPositions(bodyOnly);
+        Assert.True(ltrPages[0].Min(t => t.X) < 30);
+        Assert.True(ltrPages[1].Min(t => t.X) >= 89.5f);
+        Assert.DoesNotContain("/Direction", Latin1(bodyOnly));
+        AssertStructurallyValid(rtl);
+    }
+
+    [Fact]
+    public void Right_to_left_documents_put_left_page_margin_boxes_on_the_first_page()
+    {
+        const string css = "<style>@page :left { @top-center { content: 'LEFT' } } @page :right { @top-center { content: 'RIGHT' } }</style>";
+        var html = "<p>a</p><p style='break-before:page'>b</p>";
+        var rtl = AllContent(ConvertUncompressed("<html dir=rtl>" + css + html + "</html>"));
+        Assert.True(rtl.IndexOf("(LEFT)", StringComparison.Ordinal) < rtl.IndexOf("(RIGHT)", StringComparison.Ordinal));
+        var ltr = AllContent(ConvertUncompressed("<html>" + css + html + "</html>"));
+        Assert.True(ltr.IndexOf("(RIGHT)", StringComparison.Ordinal) < ltr.IndexOf("(LEFT)", StringComparison.Ordinal));
     }
 
     [Fact]

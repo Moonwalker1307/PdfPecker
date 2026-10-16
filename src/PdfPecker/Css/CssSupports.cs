@@ -42,7 +42,8 @@ internal static class CssSupports
         "line-clamp", "-webkit-line-clamp", "hyphens", "hyphenate-character", "size", "string-set", "page", "direction", "unicode-bidi", "margin-inline",
         "margin-inline-start", "margin-inline-end", "padding-inline", "padding-inline-start", "padding-inline-end", "margin-block",
         "margin-block-start", "margin-block-end", "padding-block", "padding-block-start", "padding-block-end",
-        "mix-blend-mode", "background-blend-mode", "isolation",
+        "mix-blend-mode", "background-blend-mode", "isolation", "container", "container-type", "container-name",
+        "footnote-display", "footnote-policy",
     };
 
     /// <summary>Whether this library applies the property.</summary>
@@ -86,8 +87,8 @@ internal static class CssSupports
                     "selector" => Selector.Parse(arg) != null,
                     "font-format" => arg.ToLowerInvariant() is "truetype" or "opentype" or "woff" or "woff2" or "collection",
                     "font-tech" => arg.ToLowerInvariant() is "features-opentype",
-                    "at-rule" => arg.ToLowerInvariant() is "@media" or "@supports" or "@layer" or "@import" or "@page" or "@font-face"
-                        or "@property" or "@counter-style" or "@charset" or "@namespace",
+                    "at-rule" => arg.ToLowerInvariant() is "@media" or "@supports" or "@layer" or "@import" or "@page" or "@font-face" or "@container"
+                        or "@property" or "@counter-style" or "@charset" or "@namespace" or "@footnote",
                     _ => false,
                 };
                 i = close + 1;
@@ -141,6 +142,23 @@ internal static class CssSupports
                     or "table-column" or "table-column-group" or "block flex" or "block grid" or "inline flex" or "inline grid";
             case "position":
                 return lower is "static" or "relative" or "absolute" or "fixed" or "sticky";
+            case "container-type":
+                return lower is "normal" or "size" or "inline-size";
+            case "container-name":
+                return CssParser.ContainerNamesValid(value);
+            case "container":
+            {
+                int slash = value.IndexOf('/');
+                var names = (slash < 0 ? value : value.Substring(0, slash)).Trim();
+                var type = slash < 0 ? "normal" : lower.Substring(slash + 1).Trim();
+                return type is "normal" or "size" or "inline-size" && CssParser.ContainerNamesValid(names);
+            }
+            case "float":
+                return lower is "left" or "right" or "none" or "inline-start" or "inline-end" or "footnote";
+            case "footnote-display":
+                return lower is "block" or "inline" or "compact";
+            case "footnote-policy":
+                return lower is "auto" or "line" or "block";
         }
         // Other values: functions this library does not know make the value unsupported.
         foreach (var fn in new[] { "attr(", "anchor(", "env(", "image-set(", "element(", "paint(", "cross-fade(" })

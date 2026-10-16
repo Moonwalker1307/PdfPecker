@@ -278,7 +278,7 @@ internal static class MediaQuery
         return true;
     }
 
-    private static bool TryRatio(string v, out double ratio)
+    internal static bool TryRatio(string v, out double ratio)
     {
         ratio = 0;
         var parts = v.Split('/');

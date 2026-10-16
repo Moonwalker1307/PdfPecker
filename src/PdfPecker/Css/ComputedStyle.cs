@@ -82,6 +82,9 @@ internal enum BorderStyle : byte { None, Solid, Dashed, Dotted, Double, Groove, 
 internal enum LineHeightKind : byte { Normal, Factor, Absolute }
 internal enum ObjectFit : byte { Fill, Contain, Cover, None, ScaleDown }
 
+/// <summary>Values of container-type: which axes of the box container queries can test.</summary>
+internal enum ContainerType : byte { Normal, InlineSize, Size }
+
 internal enum ListStyleType : byte
 {
     Disc, Circle, Square, Decimal, DecimalLeadingZero, LowerAlpha, UpperAlpha, LowerRoman, UpperRoman, None,
@@ -100,6 +103,12 @@ internal enum LengthUnit : byte { Pt, Percent, Auto, Calc }
 internal enum Position : byte { Static, Relative, Absolute, Fixed }
 
 internal enum FloatSide : byte { None, Left, Right }
+
+/// <summary>How a footnote sits in the footnote area (footnote-display); compact is laid out as inline.</summary>
+internal enum FootnoteDisplay : byte { Block, Inline, Compact }
+
+/// <summary>What happens when a footnote does not fit on the page of its call (footnote-policy).</summary>
+internal enum FootnotePolicy : byte { Auto, Line, Block }
 
 /// <summary>One function of a CSS transform list. Translations are in points, or percentages of the border box when flagged.</summary>
 internal readonly record struct TransformFn(TransformKind Kind, float A, float B = 0, float C = 0, float D = 0, float E = 0, float F = 0,
@@ -289,14 +298,20 @@ internal sealed class ComputedStyle
     public bool TextOverflowEllipsis => TextOverflow != null;
     public float AspectRatio;    // width / height; 0 = auto
     public bool AspectRatioAuto; // "auto <ratio>": a replaced element keeps its natural ratio
+    public ContainerType ContainerType;
+    public string[]? ContainerNames; // container-name; null for none
     public Length Width = Length.Auto, Height = Length.Auto;
-    public Length MinWidth = Length.Zero, MaxWidth = Length.Auto, MinHeight = Length.Zero, MaxHeight = Length.Auto;
+    public Length MinWidth = Length.Auto, MaxWidth = Length.Auto, MinHeight = Length.Zero, MaxHeight = Length.Auto;
     public bool BorderBox;
     public VerticalAlign VerticalAlign;
     public bool PageBreakBefore, PageBreakAfter, AvoidBreakInside;
     public bool AvoidBreakBefore, AvoidBreakAfter; // break-before/after: avoid (keep with the next or previous box)
     public bool Floated;
     public FloatSide Float;
+    /// <summary>float: footnote: the box leaves the flow for the footnote area of the page its call lands on.</summary>
+    public bool Footnote;
+    public FootnoteDisplay FootnoteDisplay;
+    public FootnotePolicy FootnotePolicy;
     public bool ClearLeft, ClearRight;
     public float Opacity = 1;
     // An inline box's opacity times that of the inline boxes around it, up to the block. Inline boxes get no layer of
@@ -454,8 +469,11 @@ internal sealed class ComputedStyle
         c.TextOverflow = null;
         c.AspectRatio = 0;
         c.AspectRatioAuto = false;
+        c.ContainerType = ContainerType.Normal;
+        c.ContainerNames = null;
         c.Width = c.Height = Length.Auto;
-        c.MinWidth = c.MinHeight = Length.Zero;
+        c.MinWidth = Length.Auto; // min-width: auto, which differs from 0 for boxes with aspect-ratio
+        c.MinHeight = Length.Zero;
         c.MaxWidth = c.MaxHeight = Length.Auto;
         c.BorderBox = false;
         c.VerticalAlign = VerticalAlign.Baseline;
@@ -463,6 +481,9 @@ internal sealed class ComputedStyle
         c.AvoidBreakBefore = c.AvoidBreakAfter = false;
         c.Floated = false;
         c.Float = FloatSide.None;
+        c.Footnote = false;
+        c.FootnoteDisplay = FootnoteDisplay.Block;
+        c.FootnotePolicy = FootnotePolicy.Auto;
         c.ClearLeft = c.ClearRight = false;
         c.Opacity = 1;
         c.Position = Position.Static;

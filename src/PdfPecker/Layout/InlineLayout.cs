@@ -195,7 +195,7 @@ internal sealed partial class LayoutEngine
     /// Adds an SVG drawing (an inline svg element, or an SVG file in an img element) as a small inline box, so padding
     /// and borders work as for any replaced element.
     /// </summary>
-    private void AddInlineSvg(CollectState st, Element e, ComputedStyle s, SvgImage? svg, float sw, float sh, string? href)
+    private void AddInlineSvg(CollectState st, Element e, ComputedStyle s, SvgImage? svg, float sw, float sh, string? href, bool file = false)
     {
         if (sw > 0 && sh > 0)
         {
@@ -206,7 +206,16 @@ internal sealed partial class LayoutEngine
             var group = new GroupOp();
             ops.Add(group);
             BoxPainter.Paint(group, s, 0, 0, sw + pl + pr, sh + ptop + pbot, _images);
-            if (s.Visible && svg != null) ops.Add(new SvgOp(pl, ptop, sw, sh, svg) { Tag = Tags?.Of(e) });
+            if (s.Visible && svg != null)
+            {
+                if (file)
+                {
+                    // An SVG file in an img element: sized and placed by object-fit and object-position.
+                    var radii = BoxPainter.InnerRadii(BoxPainter.Radii(s, sw + pl + pr, sh + ptop + pbot), pl, ptop, pr, pbot);
+                    AddSvgImage(ops, s, svg, pl, ptop, sw, sh, radii, Tags?.Of(e));
+                }
+                else ops.Add(new SvgOp(pl, ptop, sw, sh, svg) { Tag = Tags?.Of(e) });
+            }
             if (ml > 0) { var it_ = Rent(ItemKind.Spacer, s); it_.Width = ml; it_.Href = href; st.Items.Add(it_); }
             float boxH = sh + ptop + pbot;
             st.Items.Add(new Item { Kind = ItemKind.Box, Style = s, Width = sw + pl + pr, Height = boxH, BoxBaseline = boxH, BoxOps = ops, Href = href ?? LinkOf(e) });
@@ -249,6 +258,14 @@ internal sealed partial class LayoutEngine
         if (e.Id != null) { var it_ = Rent(ItemKind.Anchor, s); it_.AnchorId = e.Id; st.Items.Add(it_); }
         if (e.Name == "a" && e.GetAttribute("name") is { } aname) { var it_ = Rent(ItemKind.Anchor, s); it_.AnchorId = aname; st.Items.Add(it_); }
         if (e.LayoutKey != null) { var it_ = Rent(ItemKind.Anchor, s); it_.AnchorId = e.LayoutKey; st.Items.Add(it_); }
+        if (e.FootnoteBody is { FootnoteIndex: >= 0 } footnote)
+        {
+            // A footnote call: its place decides the footnote's page, and it links to the footnote.
+            var it_ = Rent(ItemKind.Anchor, s);
+            it_.AnchorId = FootnoteSetup.CallKey(footnote.FootnoteIndex);
+            st.Items.Add(it_);
+            href = "#" + FootnoteSetup.BodyKey(footnote.FootnoteIndex);
+        }
 
         if ((s.Layered || (s.BorderRadii != null || s.ObjectFit != ObjectFit.Fill || s.OutlineStyle != BorderStyle.None) && e.Name == "img") && e.Name is "img" or "svg")
         {
@@ -277,7 +294,7 @@ internal sealed partial class LayoutEngine
                 var img = ImageSize(e, st.AvailWidth, out float w, out float h, out var svgFile);
                 if (svgFile != null)
                 {
-                    AddInlineSvg(st, e, s, svgFile, w, h, href);
+                    AddInlineSvg(st, e, s, svgFile, w, h, href, file: true);
                     return;
                 }
                 if (w > 0 && h > 0)
@@ -706,10 +723,12 @@ internal sealed partial class LayoutEngine
     private float FlushInline(List<Node> run, Element container, float x, float y, float w, bool firstInBlock, out bool produced)
     {
         Cancellation.ThrowIfCancellationRequested();
+        var pages = _inlinePageBox;
+        _inlinePageBox = null;
         _inlineDepth++;
         try
         {
-            return FlushInlineCore(run, container, x, y, w, firstInBlock, out produced);
+            return FlushInlineCore(run, container, x, y, w, firstInBlock, pages, out produced);
         }
         finally
         {
@@ -717,7 +736,7 @@ internal sealed partial class LayoutEngine
         }
     }
 
-    private float FlushInlineCore(List<Node> run, Element container, float x, float y, float w, bool firstInBlock, out bool produced)
+    private float FlushInlineCore(List<Node> run, Element container, float x, float y, float w, bool firstInBlock, PageBox? pages, out bool produced)
     {
         var st = CollectInline(run, w);
         var items = st.Items;
@@ -737,11 +756,12 @@ internal sealed partial class LayoutEngine
         ResolveBidi(items, cs);
         float indent = firstInBlock ? cs.TextIndent : 0;
         FloatLines? fl = null;
-        if (FloatsBelow(y) || items.Exists(it => it.Kind == ItemKind.Float))
-        {
-            TextMetrics(cs, out float sa, out float sd);
-            fl = new FloatLines { Engine = this, Block = cs, X = x, W = w, Y = y, StrutH = sa + sd };
-        }
+        bool besideFloats = FloatsBelow(y) || items.Exists(it => it.Kind == ItemKind.Float);
+        // On pages of different widths each line is measured for the page it goes on, as lines beside floats are.
+        if (_measuring || !_paginate) pages = null;
+        TextMetrics(cs, out float strutA, out float strutD);
+        FloatLines NewLines() => new() { Engine = this, Block = cs, X = x, W = w, Y = y, StrutH = strutA + strutD, Pages = pages };
+        if (besideFloats || pages != null) fl = NewLines();
         // With a ::first-line style the items are collected twice, styled for the first line and as usual, and the line
         // breaker switches from the first list to the second once the first line is full.
         CollectState? first = null;
@@ -751,10 +771,42 @@ internal sealed partial class LayoutEngine
             if (first.Items.Count == items.Count) ResolveBidi(first.Items, cs);
             else { ReturnState(first); first = null; } // small caps split the words differently: no first-line style
         }
-        var lines = first != null ? BreakLines(first.Items, w, indent, fl, after: items) : BreakLines(items, w, indent, fl);
-        fl?.Flush(lines);
+        int opsMark = _ops.Count;
+        List<Line> Break(FloatLines? f)
+        {
+            var broken = first != null ? BreakLines(first.Items, w, indent, f, after: items) : BreakLines(items, w, indent, f);
+            f?.Flush(broken);
+            return broken;
+        }
+        var lines = Break(fl);
+        if (pages != null)
+        {
+            // A line that went to another page than the one it was measured for, being taller than the paragraph's
+            // line height, is measured again for that page; and lines that move to keep orphans and widows are
+            // measured for the page they move to. Each change can move the lines after it, so the paragraph is broken
+            // again until it settles.
+            Dictionary<int, float>? hints = null;
+            bool[]? plan = null;
+            for (int attempt = 0; attempt < 8; attempt++)
+            {
+                if (fl!.Moved >= 0) (hints ??= new())[fl.Moved] = fl.MovedHeight;
+                else
+                {
+                    if (besideFloats) break;
+                    var next = PlanLineBreaks(lines, cs, y);
+                    if (SamePlan(next, plan)) break;
+                    plan = next;
+                }
+                ReturnLines(lines);
+                Truncate(opsMark); // the floats the lines placed
+                fl = NewLines();
+                fl.HeightHints = hints;
+                fl.ForcedBefore = plan;
+                lines = Break(fl);
+            }
+        }
         produced = true;
-        float bottom = PlaceLines(lines, cs, x, y, w, indent, besideFloats: fl != null);
+        float bottom = PlaceLines(lines, cs, x, y, w, indent, besideFloats);
         ReturnLines(lines);
         if (first != null) ReturnState(first);
         ReturnState(st);
@@ -1005,6 +1057,8 @@ internal sealed partial class LayoutEngine
         if (_lineA.Length < n) { _lineA = new float[n * 2]; _lineD = new float[n * 2]; }
         float[] lineA = _lineA, lineD = _lineD;
         for (int li = 0; li < n; li++) LineExtent(lines[li], block, out lineA[li], out lineD[li]);
+        // Placing a footnote lays it out, which reuses the shared line buffers: these lines keep their own copy.
+        if (Footnotes != null && _paginate) { lineA = (float[])lineA.Clone(); lineD = (float[])lineD.Clone(); }
         // Beside floats the lines' positions were fixed while breaking them.
         bool[]? breakBefore = _paginate && n > 1 && !besideFloats ? PlanBreaks(n, lineA, lineD, y, block.Orphans, block.Widows) : null;
 
@@ -1032,6 +1086,7 @@ internal sealed partial class LayoutEngine
             y = FitOnPage(y, lineH);
             CheckPageLimit(y);
             if (breakBefore != null && breakBefore[li]) y = NextPage(y);
+            if (Footnotes != null && _paginate && !_measuring) y = PlaceFootnoteCalls(items, y, lineH);
             float baseline = y + maxA;
             float lineIndent = li == 0 ? indent : 0;
             // Bidirectional text: the items in visual order; a right-to-left paragraph starts at the right, where its
@@ -1087,6 +1142,9 @@ internal sealed partial class LayoutEngine
             PaintInlineBackgrounds(items, xs, baseline);
             EmitLinks(items, xs, y, lineH);
 
+            // Footnote calls inside inline boxes are placed once the line is drawn, not while its buffers are in use.
+            bool deferCalls = _deferFootnoteCalls;
+            if (Footnotes != null) _deferFootnoteCalls = true;
             int i = 0;
             while (i < items.Count)
             {
@@ -1115,7 +1173,7 @@ internal sealed partial class LayoutEngine
                         if (style.Visible)
                         {
                             float bl = baseline + BaselineShift(style) + items[start].RelY;
-                            if (style.TextShadows != null) TextShadows(style, runX, bl, y, sb.ToString(), style.WordSpacing + extra, rtlRun);
+                            if (style.TextShadows != null) TextShadows(style, runX, runEnd - runX, bl, y, sb.ToString(), style.WordSpacing + extra, rtlRun);
                             _ops.Add(new TextOp(runX, bl, y, style.Font, style.FontSize, CssColor.Fade(style.Color, style.InlineFade), sb.ToString(),
                                 style.WordSpacing + extra, style.LetterSpacing) { Tag = it.Tag, Rtl = rtlRun });
                             if (style.TextDecoration != TextDecoration.None) Decorate(style, runX, runEnd - runX, bl);
@@ -1154,6 +1212,8 @@ internal sealed partial class LayoutEngine
                 i++;
             }
 
+            _deferFootnoteCalls = deferCalls;
+            if (_deferredFootnoteCalls is { Count: > 0 } && !deferCalls) PlaceDeferredFootnoteCalls();
             _lastBaseline = baseline;
             if (_marker != null) EmitMarker(baseline, y);
             y += lineH;
@@ -1242,6 +1302,25 @@ internal sealed partial class LayoutEngine
             if (!changed) break;
         }
         return forced;
+    }
+
+    /// <summary>The lines that start a new page to keep orphans and widows, as PlaceLines will choose them; null for none.</summary>
+    private bool[]? PlanLineBreaks(List<Line> lines, ComputedStyle block, float top)
+    {
+        int n = lines.Count;
+        if (n < 2 || block.LineClamp > 0) return null;
+        var a = new float[n];
+        var d = new float[n];
+        for (int li = 0; li < n; li++) LineExtent(lines[li], block, out a[li], out d[li]);
+        return PlanBreaks(n, a, d, top, block.Orphans, block.Widows);
+    }
+
+    private static bool SamePlan(bool[]? a, bool[]? b)
+    {
+        int n = Math.Max(a?.Length ?? 0, b?.Length ?? 0);
+        for (int i = 0; i < n; i++)
+            if ((a != null && i < a.Length && a[i]) != (b != null && i < b.Length && b[i])) return false;
+        return true;
     }
 
     /// <summary>The index of the visible line <paramref name="k"/> lines after visible line <paramref name="from"/>.</summary>
@@ -1397,46 +1476,94 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>
-    /// Paints the text-shadows of a run under it, the first shadow on top. A blurred shadow is approximated by faint
-    /// copies spread around its offset, which soften its edge.
+    /// Paints the text-shadows of a run under it, the first shadow on top, each with the shadows of the run's
+    /// decorations. A shadow without blur is a copy of the text in the shadow's colour; blurred shadows are the text's
+    /// pixels through a Gaussian blur, as browsers draw them, with consecutive blurred shadows made in one image.
     /// </summary>
-    private void TextShadows(ComputedStyle style, float x, float baseline, float lineTop, string text, float wordSpacing, bool rtl)
+    private void TextShadows(ComputedStyle style, float x, float w, float baseline, float lineTop, string text, float wordSpacing, bool rtl)
     {
         var shadows = style.TextShadows!;
+        List<(BoxShadow Shadow, uint Color)>? blurred = null;
         for (int i = shadows.Length - 1; i >= 0; i--)
         {
             var sh = shadows[i];
             uint color = CssColor.Fade(sh.Color ?? style.Color, style.InlineFade);
             if (!CssColor.IsVisible(color)) continue;
-            float sx = x + sh.X, sy = baseline + sh.Y;
-            float blur = Math.Min(sh.Blur, 50);
-            if (blur <= 0.375f)
+            if (sh.Blur > 0.375f)
             {
-                _ops.Add(new TextOp(sx, sy, lineTop, style.Font, style.FontSize, color, text, wordSpacing, style.LetterSpacing) { Rtl = rtl });
+                (blurred ??= new()).Add((sh, color));
                 continue;
             }
-            // Seventeen faint copies, at the offset and on two rings around it: about two thirds of the alpha where they
-            // all overlap, fading toward the edges.
-            uint faint = (uint)Math.Max(1, MathF.Round((color >> 24) * 0.06f)) << 24 | (color & 0xFFFFFF);
-            _ops.Add(new TextOp(sx, sy, lineTop, style.Font, style.FontSize, faint, text, wordSpacing, style.LetterSpacing) { Rtl = rtl });
-            for (int ring = 1; ring <= 2; ring++)
-            {
-                float r = blur * ring / 4;
-                for (int k = 0; k < 8; k++)
-                {
-                    float a = k * MathF.PI / 4 + ring * MathF.PI / 8;
-                    _ops.Add(new TextOp(sx + r * MathF.Cos(a), sy + r * MathF.Sin(a), lineTop, style.Font, style.FontSize, faint, text,
-                        wordSpacing, style.LetterSpacing) { Rtl = rtl });
-                }
-            }
+            if (blurred != null) { BlurredTextShadows(style, x, w, baseline, lineTop, text, wordSpacing, rtl, blurred); blurred = null; }
+            float sx = x + sh.X, sy = baseline + sh.Y;
+            _ops.Add(new TextOp(sx, sy, lineTop, style.Font, style.FontSize, color, text, wordSpacing, style.LetterSpacing) { Rtl = rtl });
+            if (style.TextDecoration != TextDecoration.None) Decorate(style, sx, w, sy, color);
         }
+        if (blurred != null) BlurredTextShadows(style, x, w, baseline, lineTop, text, wordSpacing, rtl, blurred);
     }
 
-    private void Decorate(ComputedStyle s, float x, float w, float baseline)
+    /// <summary>
+    /// Blurred text-shadows, bottom one first: a layer holding the run and its decorations, whose filter makes the
+    /// shadows from the shape of what it holds and draws them in place of it.
+    /// </summary>
+    private void BlurredTextShadows(ComputedStyle style, float x, float w, float baseline, float lineTop, string text, float wordSpacing, bool rtl,
+        List<(BoxShadow Shadow, uint Color)> shadows)
+    {
+        // The shadow takes its colour from the shadow alone: the text's own colour, even transparent, only gives the shape.
+        var layer = new LayerOp { RasterReplaces = true, TextShadow = true };
+        layer.Ops.Add(new TextOp(x, baseline, lineTop, style.Font, style.FontSize, CssColor.Black, text, wordSpacing, style.LetterSpacing) { Rtl = rtl });
+        if (style.TextDecoration != TextDecoration.None)
+        {
+            int before = _ops.Count;
+            Decorate(style, x, w, baseline, CssColor.Black);
+            for (int k = before; k < _ops.Count; k++) layer.Ops.Add(_ops[k]);
+            _ops.RemoveRange(before, _ops.Count - before);
+        }
+        layer.Raster = TextShadowFilter(shadows, out float minSigma);
+        // A blur several pixels wide loses nothing at a lower resolution: about three pixels per deviation is enough.
+        layer.RasterDensity = Math.Clamp(3 / minSigma, 1, 2);
+        _ops.Add(layer);
+    }
+
+    /// <summary>
+    /// The filter of blurred text-shadows: for each, the alpha of the text blurred (the CSS blur radius is twice the
+    /// deviation, as for box-shadow), offset and filled with the shadow's colour, merged bottom first.
+    /// </summary>
+    private static SvgFilter TextShadowFilter(List<(BoxShadow Shadow, uint Color)> shadows, out float minSigma)
+    {
+        var f = new SvgFilter { TextShadows = true };
+        var merged = new List<string?>();
+        float reachX = 0, reachY = 0;
+        minSigma = float.MaxValue;
+        for (int k = 0; k < shadows.Count; k++)
+        {
+            var (sh, color) = shadows[k];
+            // Larger blurs are capped, which keeps the image a reasonable size.
+            float sigma = Math.Min(sh.Blur, 150) / 2;
+            minSigma = Math.Min(minSigma, sigma);
+            string result = "s" + k.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            f.Primitives.Add(new SvgFilter.Primitive { Kind = SvgFilter.Kind.Blur, In = "SourceAlpha", Result = "b", Sx = sigma, Sy = sigma, Linear = false });
+            f.Primitives.Add(new SvgFilter.Primitive { Kind = SvgFilter.Kind.Offset, In = "b", Result = "b", Dx = sh.X, Dy = sh.Y, Linear = false });
+            f.Primitives.Add(new SvgFilter.Primitive { Kind = SvgFilter.Kind.Flood, Result = "f", Color = color, Linear = false });
+            f.Primitives.Add(new SvgFilter.Primitive { Kind = SvgFilter.Kind.Composite, In = "f", In2 = "b", Operator = "in", Result = result, Linear = false });
+            merged.Add(result);
+            reachX = Math.Max(reachX, Math.Abs(sh.X) + 3 * sigma);
+            reachY = Math.Max(reachY, Math.Abs(sh.Y) + 3 * sigma);
+        }
+        f.Primitives.Add(new SvgFilter.Primitive { Kind = SvgFilter.Kind.Merge, Inputs = merged, Linear = false });
+        f.X = -reachX;
+        f.Y = -reachY;
+        f.W = 2 * reachX;
+        f.H = 2 * reachY;
+        return f;
+    }
+
+    /// <summary>The decorations of a run, in their own colour or in <paramref name="shadow"/>, the colour of a text-shadow.</summary>
+    private void Decorate(ComputedStyle s, float x, float w, float baseline, uint? shadow = null)
     {
         float size = s.FontSize;
         float thickness = s.DecorationThickness is { } dt ? Math.Max(dt.Resolve(size), 0.1f) : Math.Max(size * 0.055f, 0.5f);
-        uint color = CssColor.Fade(s.DecorationColor ?? s.Color, s.InlineFade);
+        uint color = shadow ?? CssColor.Fade(s.DecorationColor ?? s.Color, s.InlineFade);
         if ((s.TextDecoration & TextDecoration.Underline) != 0)
             DecorationLine(s.DecorationStyle, x, baseline + (s.UnderlineOffset is { } uo ? uo.Resolve(size) : size * 0.1f), w, thickness, color, below: true);
         if ((s.TextDecoration & TextDecoration.LineThrough) != 0)

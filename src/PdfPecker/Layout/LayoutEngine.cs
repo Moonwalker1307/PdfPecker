@@ -86,10 +86,15 @@ internal sealed partial class LayoutEngine
 
     public float Layout(Element document, float width)
     {
+        _pageBox = RootPageBox(width);
+        _rootWidth = width;
         float bottom = LayoutFlow(document, 0, 0, width);
+        _pageBox = null;
         if (_floats.Any && _floats.Bottom > bottom) bottom = _floats.Bottom; // the root contains its floats
+        FinishFootnotes();
         FinishRoot(width);
-        return bottom;
+        // A footnote continued past the last page of content needs a page of its own.
+        return Math.Max(bottom, FootnotesBottom());
     }
 
     /// <summary>Lays out a running header or footer on its own, unpaginated, at y = 0. Returns its height including margins.</summary>
@@ -121,7 +126,9 @@ internal sealed partial class LayoutEngine
         int p = PageOf(y);
         if (h > _grid.Height(p + 1)) return y;
         float pageEnd = _grid.Start(p + 1);
-        return y + h > pageEnd + Eps ? pageEnd : y;
+        // The page's footnote area takes the bottom of its flow.
+        float flowEnd = _footnoteReserve.Count > 0 ? pageEnd - FootnoteReserve(p) : pageEnd;
+        return y + h > flowEnd + Eps ? pageEnd : y;
     }
 
     private float NextPage(float y)
@@ -138,17 +145,28 @@ internal sealed partial class LayoutEngine
         return true;
     }
 
-    private bool CrossesPage(float top, float bottom) => _paginate && bottom - top > Eps && PageOf(top) != PageOf(bottom - 0.5f);
+    private bool CrossesPage(float top, float bottom) => _paginate && bottom - top > Eps
+        && (PageOf(top) != PageOf(bottom - 0.5f) || _footnoteReserve.Count > 0 && bottom > FlowEnd(PageOf(top)) + Eps);
 
     private void Truncate(int count, bool keepFloats = false)
     {
         if (_ops.Count > count) _ops.RemoveRange(count, _ops.Count - count);
         if (!keepFloats) _floats.Truncate(count);
+        // keepFloats means the ops were moved into one op at count, not removed: their footnotes stay.
+        if (_footnoteCalls.Count > 0) TruncateFootnotes(count, wrapped: keepFloats);
     }
 
     // ------------------------------------------------------------------ block formatting
 
     private static bool IsAtomicInline(Display d) => d is Display.InlineBlock or Display.InlineFlex or Display.InlineGrid;
+
+    /// <summary>
+    /// A container-type other than normal gives the box size containment on one or both axes. Containment does not
+    /// apply to inline boxes and the inner boxes of tables, which are not query containers either.
+    /// </summary>
+    private static bool HasSizeContainment(ComputedStyle s)
+        => s.ContainerType != ContainerType.Normal && s.Display is not (Display.Inline or Display.TableRow or Display.TableCell
+            or Display.TableRowGroup or Display.TableHeaderGroup or Display.TableFooterGroup or Display.TableColumn or Display.TableColumnGroup);
 
     private static bool IsInlineLevel(Element e)
     {
@@ -191,6 +209,10 @@ internal sealed partial class LayoutEngine
     /// <summary>Lays out the children of a block container. Returns the bottom of the content (including the last child's bottom margin).</summary>
     private float LayoutFlow(Element parent, float x, float y, float w)
     {
+        // The flow's content box on each kind of page, when pages differ in width: its boxes and lines take the
+        // geometry of the page they are on.
+        var pages = _pageBox;
+        _pageBox = null;
         float pendingMargin = 0;
         bool anyContent = false;
         // The parent has taken its first child's top margin as its own (they collapse): don't apply it again.
@@ -235,7 +257,11 @@ internal sealed partial class LayoutEngine
             {
                 float before = y;
                 int runOps = _ops.Count;
-                y = FlushInline(run, parent, x, y + pendingMargin, w, !anyContent, out bool produced);
+                // The lines' content (inline blocks, percentages) is sized for the page the paragraph starts on; each
+                // line then takes the width of its own page.
+                var (ix, iw) = pages != null ? OnPage(pages, y + pendingMargin) : (x, w);
+                _inlinePageBox = pages;
+                y = FlushInline(run, parent, ix, y + pendingMargin, iw, !anyContent, out bool produced);
                 run.Clear();
                 if (produced)
                 {
@@ -259,12 +285,14 @@ internal sealed partial class LayoutEngine
             {
                 // Its static position: where its top margin edge would be in the flow.
                 float smt = s.MarginTop.Resolve(w);
-                QueueAbsolute(e, x, y + CollapseMargins(pendingMargin, smt) - smt);
+                float sy = y + CollapseMargins(pendingMargin, smt) - smt;
+                QueueAbsolute(e, pages != null ? OnPage(pages, sy).X : x, sy);
                 continue;
             }
             if (s.Floated)
             {
-                PlaceFloat(MeasureFloat(e, w), y + pendingMargin, x, w);
+                var (fx, fw) = pages != null ? OnPage(pages, y + pendingMargin) : (x, w);
+                PlaceFloat(MeasureFloat(e, fw), y + pendingMargin, fx, fw);
                 continue;
             }
             var mark = new FlowMark
@@ -298,8 +326,13 @@ internal sealed partial class LayoutEngine
 
             int boxOps = _ops.Count;
             float bottom;
-            if (FloatsBelow(top) && AvoidsFloats(e)) bottom = LayoutBesideFloats(e, x, ref top, w);
-            else bottom = LayoutBlockBox(e, x, top, w, shrinkToFit: false);
+            var (bx, bw) = pages != null ? OnPage(pages, top) : (x, w);
+            if (FloatsBelow(top) && AvoidsFloats(e)) bottom = LayoutBesideFloats(e, bx, ref top, bw);
+            else
+            {
+                _childPageBox = pages;
+                bottom = LayoutBlockBox(e, bx, top, bw, shrinkToFit: false);
+            }
             float trailing = _boxTrailing;
             if (joins && KeepTogetherFails(chain, boxOps, top, forcedAt))
             {
@@ -443,13 +476,22 @@ internal sealed partial class LayoutEngine
         bool table = s.Display == Display.Table;
         int opsStart = _ops.Count;
         var savedMarker = _marker;
-        float bottom = table ? LayoutTable(e, x, y, availW) : LayoutBlockBoxCore(e, x, y, availW, shrinkToFit);
+        // The containing block on each kind of page, when pages differ in width, which the box takes on.
+        var pages = _childPageBox;
+        _childPageBox = null;
+        if (!table) _childPageBox = pages;
+        float bottom = table ? LayoutTable(e, x, y, availW, pages) : LayoutBlockBoxCore(e, x, y, availW, shrinkToFit);
         if (s.AvoidBreakInside && CrossesPage(y, bottom) && bottom - y <= _grid.Height(PageOf(y) + 1) && !AtPageTop(y))
         {
             Truncate(opsStart);
             _marker = savedMarker;
             float ny = NextPage(y);
-            bottom = table ? LayoutTable(e, x, ny, availW) : LayoutBlockBoxCore(e, x, ny, availW, shrinkToFit);
+            if (pages != null)
+            {
+                (x, availW) = OnPage(pages, ny);
+                if (!table) _childPageBox = pages;
+            }
+            bottom = table ? LayoutTable(e, x, ny, availW, pages) : LayoutBlockBoxCore(e, x, ny, availW, shrinkToFit);
         }
         if (table) _boxTrailing = 0;
         if (s.Layered) FinishLayered(e, opsStart, availW);
@@ -458,6 +500,8 @@ internal sealed partial class LayoutEngine
 
     private float LayoutBlockBoxCore(Element e, float x, float y, float availW, bool shrinkToFit)
     {
+        var parentPages = _childPageBox;
+        _childPageBox = null;
         var s = e.Style;
         if (e.Id != null) SetAnchor(e.Id, y);
         if (e.Name == "a" && e.GetAttribute("name") is { } aname) SetAnchor(aname, y);
@@ -494,44 +538,11 @@ internal sealed partial class LayoutEngine
         {
             contentW = overrideW - frame;
         }
-        else if (!s.Width.IsAuto)
-        {
-            contentW = s.Width.Resolve(availW);
-            if (s.BorderBox) contentW -= frame;
-        }
-        else if (s.AspectRatio > 0 && !s.Height.IsAuto && !s.Height.IsPercent)
-        {
-            // aspect-ratio with a fixed height and an auto width: the width follows from the height.
-            float boxH = s.Height.Value + (s.BorderBox ? 0 : frameV);
-            contentW = RatioOnBorderBox(s) ? boxH * s.AspectRatio - frame : (boxH - frameV) * s.AspectRatio;
-        }
-        else
-        {
-            contentW = availW - ml - mr - frame;
-            if (shrinkToFit)
-            {
-                var (_, max) = Intrinsic(e);
-                contentW = Math.Min(contentW, max - frame);
-            }
-        }
-        if (!s.MaxWidth.IsAuto && !isImage && !isSvg && !hasWOverride)
-        {
-            float mw = s.MaxWidth.Resolve(availW) - (s.BorderBox ? frame : 0);
-            if (contentW > mw) contentW = mw;
-        }
-        if (!s.MinWidth.IsAuto && !isImage && !isSvg && !hasWOverride)
-        {
-            float mnw = s.MinWidth.Resolve(availW) - (s.BorderBox ? frame : 0);
-            if (contentW < mnw) contentW = mnw;
-        }
+        else contentW = FlowContentWidth(e, availW, ml, mr, frame, frameV, shrinkToFit);
         if (contentW < 0) contentW = 0;
 
         float used = contentW + frame;
-        if (s.MarginLeft.IsAuto && s.MarginRight.IsAuto) ml = Math.Max(0, (availW - used) / 2);
-        else if (s.MarginLeft.IsAuto) ml = Math.Max(0, availW - used - mr);
-        // In a right-to-left containing block an over-constrained box keeps its right margin (it sits at the right).
-        else if (!shrinkToFit && !s.Floated && !s.OutOfFlow && e.Parent?.Style is { Rtl: true } && !hasWOverride)
-            ml = Math.Max(0, availW - used - mr);
+        ml = UsedMarginLeft(e, availW, used, ml, mr, shrinkToFit || hasWOverride);
         float bx = x + ml;
 
         int opsStart = _ops.Count;
@@ -547,6 +558,11 @@ internal sealed partial class LayoutEngine
         bool formattingRoot = shrinkToFit || hasWOverride || hasHOverride || s.Floated || s.OutOfFlow || s.FormattingRoot
                               || s.IsFlex || s.IsGrid || s.IsMultiColumn || s.Display is Display.TableCell or Display.TableCaption
                               || e.Parent?.Style is { IsFlex: true } or { IsGrid: true };
+        // On pages of different widths a box in normal flow is as wide on each page as that page makes it.
+        var pages = parentPages != null && FollowsPages(e, shrinkToFit, hasWOverride || hasHOverride || isImage || isSvg, formattingRoot)
+            ? PageGeometry(e, parentPages)
+            : null;
+        if (pages is { Varies: false }) pages = null;
 
         float cx = bx + bl + pl;
         float cy = y + bt + pt;
@@ -586,7 +602,16 @@ internal sealed partial class LayoutEngine
                     bl + pl, bt + pt, br + pr, bb + pb);
                 AddImage(s, image, cx, cy, imgW, imgH, radii, Tags?.Of(e));
             }
-            if (svg != null && s.Visible) _ops.Add(new SvgOp(cx, cy, imgW, imgH, svg) { Tag = Tags?.Of(e) });
+            if (svg != null && s.Visible)
+            {
+                if (isImage)
+                {
+                    var radii = BoxPainter.InnerRadii(BoxPainter.Radii(s, imgW + bl + br + pl + pr, imgH + bt + bb + pt + pb),
+                        bl + pl, bt + pt, br + pr, bb + pb);
+                    AddSvgImage(_ops, s, svg, cx, cy, imgW, imgH, radii, Tags?.Of(e));
+                }
+                else _ops.Add(new SvgOp(cx, cy, imgW, imgH, svg) { Tag = Tags?.Of(e) });
+            }
             contentBottom = cy + imgH;
         }
         else if (e.Name == "hr")
@@ -597,14 +622,17 @@ internal sealed partial class LayoutEngine
         {
             float? definiteH = null;
             if (hasHOverride) definiteH = Math.Max(0, overrideH - frameV);
-            else if (!s.Height.IsAuto && !s.Height.IsPercent) definiteH = Math.Max(0, s.Height.Value - (s.BorderBox ? frameV : 0));
+            else if (ClampedHeight(s) is float h) definiteH = Math.Max(0, h - (s.BorderBox ? frameV : 0));
             float minH = !s.MinHeight.IsAuto && !s.MinHeight.IsPercent ? Math.Max(0, s.MinHeight.Value - (s.BorderBox ? frameV : 0)) : 0;
-            if (RatioHeight(s, contentW, frame, frameV, hasHOverride) is float rh) minH = Math.Max(minH, rh);
+            if (RatioHeight(s, contentW, frame, frameV, hasHOverride) is float rh)
+                minH = Math.Max(minH, Math.Min(rh, MaxContentHeight(s, frameV)));
             // A box that is not a formatting context root shares its top and bottom margins with its children's.
             bool joinsChildren = !shrinkToFit && !hasWOverride && !hasHOverride;
             _absorbTop = joinsChildren && FirstBlockChild(e) != null;
             var outerFloats = formattingRoot ? EnterFormattingContext() : null;
+            _pageBox = pages;
             contentBottom = LayoutContent(e, cx, cy, contentW, definiteH, minH);
+            _pageBox = null;
             if (outerFloats != null) contentBottom = LeaveFormattingContext(outerFloats, contentBottom);
             _absorbTop = false;
             if (joinsChildren && CollapsesBottom(e) && !s.IsFlex && !s.IsGrid)
@@ -620,7 +648,9 @@ internal sealed partial class LayoutEngine
             EmitMarker(cy + s.Font.Ascent * s.FontSize, cy);
         }
 
-        float contentH = contentBottom - cy;
+        // Size containment (container-type: size): the box is as tall as it would be without content.
+        bool container = HasSizeContainment(s) && !isImage && !isSvg;
+        float contentH = container && s.ContainerType == ContainerType.Size ? 0 : contentBottom - cy;
         if (hasHOverride && !isImage && !isSvg)
         {
             contentH = Math.Max(0, overrideH - frameV);
@@ -630,16 +660,28 @@ internal sealed partial class LayoutEngine
             float h = s.Height.Value - (s.BorderBox ? bt + bb + pt + pb : 0);
             contentH = Math.Max(0, h);
         }
+        // aspect-ratio with an auto height: at least the ratio's height; taller content still makes it grow, except in a
+        // flex container, whose content overflows it as in Chrome.
+        if (!isImage && !isSvg && RatioHeight(s, contentW, frame, frameV, hasHOverride) is float ratioH && (contentH < ratioH || s.IsFlex))
+            contentH = ratioH;
+        // max-height limits the box, and content beyond it overflows; min-height wins over max-height. Flex and grid
+        // containers that size the box have applied both already.
+        if (!isImage && !isSvg && !hasHOverride) contentH = Math.Min(contentH, MaxContentHeight(s, frameV));
         if (!s.MinHeight.IsAuto && !s.MinHeight.IsPercent)
         {
             float mh = s.MinHeight.Value - (s.BorderBox ? bt + bb + pt + pb : 0);
             if (contentH < mh) contentH = mh;
         }
-        // aspect-ratio with an auto height: at least the ratio's height; taller content still makes it grow.
-        if (!isImage && !isSvg && RatioHeight(s, contentW, frame, frameV, hasHOverride) is float ratioH && contentH < ratioH) contentH = ratioH;
+        if (container && !_measuring)
+        {
+            // The next style pass evaluates container queries and cq units against this size.
+            e.ContainerWidth = contentW;
+            e.ContainerHeight = contentH;
+        }
 
         float bottom = cy + contentH + pb + bb;
-        BoxPainter.Paint(group, s, bx, y, used, bottom - y, _images, availW);
+        if (pages != null && !SameOnPages(pages, y, bottom)) PaintOnPages(group, s, pages, y, bottom);
+        else BoxPainter.Paint(group, s, bx, y, used, bottom - y, _images, availW);
         if (e.Control is { } control) FinishControl(e, control, opsStart + 1, bx, y, used, bottom - y, contentBottom - cy, contentH);
         if (e == CanvasRoot) CanvasRootBox = (bx, y, used, bottom - y);
         if (cbFrame != null)
@@ -659,6 +701,67 @@ internal sealed partial class LayoutEngine
         if (e.LayoutKey != null) SetAnchor(e.LayoutKey, ContentTop(y, opsStart));
         _boxTrailing = trailing;
         return bottom;
+    }
+
+    /// <summary>
+    /// The content width of a block box that is not replaced and has no size imposed by a flex or grid container, from
+    /// its width, aspect-ratio and min- and max-width, in a containing block <paramref name="availW"/> wide.
+    /// </summary>
+    private float FlowContentWidth(Element e, float availW, float ml, float mr, float frame, float frameV, bool shrinkToFit)
+    {
+        var s = e.Style;
+        float contentW;
+        if (!s.Width.IsAuto)
+        {
+            contentW = s.Width.Resolve(availW);
+            if (s.BorderBox) contentW -= frame;
+        }
+        else if (s.AspectRatio > 0 && ClampedHeight(s) is float ratioFrom)
+        {
+            // aspect-ratio with a fixed height and an auto width: the width follows from the height. With min-width: auto
+            // and visible overflow, content wider than that still widens the box (CSS Sizing 4 automatic minimum size).
+            contentW = RatioWidth(s, ratioFrom, frame, frameV);
+            if (s.MinWidth.IsAuto && !s.ClipsX) contentW = Math.Max(contentW, Intrinsic(e).Min - frame);
+        }
+        else
+        {
+            contentW = availW - ml - mr - frame;
+            if (shrinkToFit)
+            {
+                var (_, max) = Intrinsic(e);
+                contentW = Math.Min(contentW, max - frame);
+            }
+            // min-height and max-height carry over to the width through the ratio.
+            if (s.AspectRatio > 0)
+            {
+                var (tmin, tmax) = TransferredWidthLimits(s, frame, frameV);
+                contentW = Math.Max(Math.Min(contentW, tmax), tmin);
+            }
+        }
+        if (!s.MaxWidth.IsAuto)
+        {
+            float mw = s.MaxWidth.Resolve(availW) - (s.BorderBox ? frame : 0);
+            if (contentW > mw) contentW = mw;
+        }
+        if (!s.MinWidth.IsAuto)
+        {
+            float mnw = s.MinWidth.Resolve(availW) - (s.BorderBox ? frame : 0);
+            if (contentW < mnw) contentW = mnw;
+        }
+        return contentW;
+    }
+
+    /// <summary>
+    /// The used left margin of a block box <paramref name="used"/> wide: auto margins share the free space, and in a
+    /// right-to-left containing block an over-constrained box keeps its right margin, so it sits at the right.
+    /// </summary>
+    private static float UsedMarginLeft(Element e, float availW, float used, float ml, float mr, bool sized)
+    {
+        var s = e.Style;
+        if (s.MarginLeft.IsAuto && s.MarginRight.IsAuto) return Math.Max(0, (availW - used) / 2);
+        if (s.MarginLeft.IsAuto) return Math.Max(0, availW - used - mr);
+        if (!sized && !s.Floated && !s.OutOfFlow && e.Parent?.Style is { Rtl: true }) return Math.Max(0, availW - used - mr);
+        return ml;
     }
 
     /// <summary>
@@ -858,6 +961,44 @@ internal sealed partial class LayoutEngine
     /// <summary>Whether aspect-ratio sizes the border box (box-sizing: border-box without "auto") rather than the content box.</summary>
     private static bool RatioOnBorderBox(ComputedStyle s) => s.BorderBox && !s.AspectRatioAuto;
 
+    /// <summary>
+    /// The height property limited by min-height and max-height, in the terms of box-sizing, when it is a fixed length;
+    /// otherwise null. Percentages count as auto, as elsewhere in block layout.
+    /// </summary>
+    internal static float? ClampedHeight(ComputedStyle s)
+    {
+        if (s.Height.IsAuto || s.Height.IsPercent) return null;
+        float h = s.Height.Value;
+        if (!s.MaxHeight.IsAuto && !s.MaxHeight.IsPercent) h = Math.Min(h, s.MaxHeight.Value);
+        if (!s.MinHeight.IsAuto && !s.MinHeight.IsPercent) h = Math.Max(h, s.MinHeight.Value);
+        return h;
+    }
+
+    /// <summary>The largest content height max-height allows, or infinity.</summary>
+    private static float MaxContentHeight(ComputedStyle s, float frameV)
+        => s.MaxHeight.IsAuto || s.MaxHeight.IsPercent ? float.PositiveInfinity : Math.Max(0, s.MaxHeight.Value - (s.BorderBox ? frameV : 0));
+
+    /// <summary>The content width aspect-ratio pairs with a height given in the terms of box-sizing.</summary>
+    internal static float RatioWidth(ComputedStyle s, float height, float frame, float frameV)
+    {
+        float boxH = height + (s.BorderBox ? 0 : frameV);
+        return Math.Max(0, RatioOnBorderBox(s) ? boxH * s.AspectRatio - frame : (boxH - frameV) * s.AspectRatio);
+    }
+
+    /// <summary>
+    /// The limits min-height and max-height put on the content width of a box with aspect-ratio and no fixed height,
+    /// carried over through the ratio (CSS Sizing 4 §5.1, transferred min and max sizes).
+    /// </summary>
+    internal static (float Min, float Max) TransferredWidthLimits(ComputedStyle s, float frame, float frameV)
+    {
+        float min = 0, max = float.PositiveInfinity;
+        if (s.AspectRatio <= 0 || !s.Height.IsAuto && !s.Height.IsPercent) return (min, max);
+        if (!s.MinHeight.IsAuto && !s.MinHeight.IsPercent && s.MinHeight.Value > 0) min = RatioWidth(s, s.MinHeight.Value, frame, frameV);
+        if (!s.MaxHeight.IsAuto && !s.MaxHeight.IsPercent) max = RatioWidth(s, s.MaxHeight.Value, frame, frameV);
+        // A max-height below min-height loses, as max-width does to min-width.
+        return (min, Math.Max(min, max));
+    }
+
     /// <summary>The content height aspect-ratio gives a box with an auto height and the given content width, or null.</summary>
     private static float? RatioHeight(ComputedStyle s, float contentW, float frame, float frameV, bool hasHOverride)
     {
@@ -900,6 +1041,70 @@ internal sealed partial class LayoutEngine
         _ops.Add(clip);
     }
 
+    /// <summary>
+    /// Adds an SVG file drawn by an img element into its content box (x, y, w, h), as Chrome draws it: object-fit sizes
+    /// the drawing's viewport (its concrete object size) from the file's natural size and ratio, object-position places
+    /// that viewport, and the file's own viewBox and preserveAspectRatio then fit the drawing inside it. The drawing is
+    /// clipped to the content box (and its rounded corners) where it reaches outside.
+    /// </summary>
+    private static void AddSvgImage(List<DrawOp> ops, ComputedStyle s, SvgImage svg, float x, float y, float w, float h, CornerRadii? radii,
+        ContentSlot? tag)
+    {
+        var (cw, ch) = ConcreteObjectSize(s.ObjectFit, svg, w, h);
+        float dx = x + s.ObjectPositionX.Resolve(w - cw), dy = y + s.ObjectPositionY.Resolve(h - ch);
+        var op = new SvgOp(dx, dy, cw, ch, svg) { Tag = tag, StretchUserSpace = !svg.HasViewBox };
+        if (radii == null && dx >= x - Eps && dy >= y - Eps && dx + cw <= x + w + Eps && dy + ch <= y + h + Eps)
+        {
+            ops.Add(op);
+            return;
+        }
+        var clip = new ClipOp(x, y, w, h, radii);
+        clip.Ops.Add(op);
+        ops.Add(clip);
+    }
+
+    /// <summary>
+    /// The concrete object size object-fit gives an SVG file in a w x h content box (CSS Images 3 §5.5). Its natural width
+    /// and height are those of its width and height attributes, and its natural ratio theirs, else the viewBox's.
+    /// </summary>
+    private static (float W, float H) ConcreteObjectSize(ObjectFit fit, SvgImage svg, float w, float h)
+    {
+        float? nw = svg.Width is > 0 ? svg.Width : null, nh = svg.Height is > 0 ? svg.Height : null;
+        float ratio = nw is float rw && nh is float rh ? rw / rh
+            : svg.HasViewBox && svg.ViewBoxWidth > 0 && svg.ViewBoxHeight > 0 ? svg.ViewBoxWidth / svg.ViewBoxHeight : 0;
+        (float, float) Fit(bool cover)
+        {
+            if (ratio <= 0 || w <= 0 || h <= 0) return (w, h);
+            bool wide = w / h > ratio; // the box is wider than the drawing
+            return wide != cover ? (h * ratio, h) : (w, w / ratio);
+        }
+        (float, float) Natural()
+        {
+            // The default sizing algorithm with the content box as the default object size.
+            if (nw is float a && nh is float b) return (a, b);
+            if (ratio > 0)
+            {
+                if (nw is float a1) return (a1, a1 / ratio);
+                if (nh is float b1) return (b1 * ratio, b1);
+                return Fit(cover: false);
+            }
+            return (nw ?? w, nh ?? h);
+        }
+        switch (fit)
+        {
+            case ObjectFit.Contain: return Fit(cover: false);
+            case ObjectFit.Cover: return Fit(cover: true);
+            case ObjectFit.None: return Natural();
+            case ObjectFit.ScaleDown:
+            {
+                var none = Natural();
+                var contain = Fit(cover: false);
+                return none.Item1 <= contain.Item1 && none.Item2 <= contain.Item2 ? none : contain;
+            }
+            default: return (w, h);
+        }
+    }
+
     /// <summary>Used size of a replaced element from its intrinsic size and its CSS width, height and limits.</summary>
     private void ReplacedSize(Element e, float iw, float ih, float availW, out float w, out float h)
     {
@@ -939,6 +1144,7 @@ internal sealed partial class LayoutEngine
     // ------------------------------------------------------------------ anchors, captured layout, size overrides
 
     private List<string>? _captureAnchors;
+    private bool _capturing;
     private int _forcedBreaks; // forced page breaks seen; captured content without any can be reused when it fits on a page
     private readonly Dictionary<Element, float> _widthOverride = new();
     private readonly Dictionary<Element, float> _heightOverride = new();
@@ -991,7 +1197,10 @@ internal sealed partial class LayoutEngine
     private void SetAnchor(string id, float y)
     {
         Anchors[id] = y;
-        _captureAnchors?.Add(id);
+        // Inside captured content, the anchors move with it when it is placed (and footnote calls are placed then).
+        if (_capturing) (_captureAnchors ??= new List<string>()).Add(id);
+        // A footnote call in content that was laid out on its own and has now been moved into place.
+        if (Footnotes != null && _paginate && id.Length > 2 && id[0] == '\u0001' && id[1] == 'c') PlaceFootnoteCallAt(id, y);
     }
 
     /// <summary>Content laid out on its own (unpaginated, at the origin) so that it can be measured and then moved into place.</summary>
@@ -1013,6 +1222,7 @@ internal sealed partial class LayoutEngine
         var savedMarker = _marker;
         float savedBaseline = _lastBaseline;
         var savedAnchors = _captureAnchors;
+        bool savedCapturing = _capturing;
         float savedRight = _lastBoxRight;
         var savedFloats = EnterFormattingContext();
         var boundary = _boundaryPool.TryPop(out var pooled) ? pooled : new CbFrame { Boundary = true };
@@ -1023,6 +1233,7 @@ internal sealed partial class LayoutEngine
         _marker = null;
         _lastBaseline = float.NaN;
         _captureAnchors = null;
+        _capturing = true;
         _lastBoxRight = 0;
         int breaks = _forcedBreaks;
         try
@@ -1049,6 +1260,7 @@ internal sealed partial class LayoutEngine
             _marker = savedMarker;
             _lastBaseline = savedBaseline;
             _captureAnchors = savedAnchors;
+            _capturing = savedCapturing;
             _lastBoxRight = savedRight;
         }
     }
