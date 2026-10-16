@@ -58,8 +58,9 @@ All methods are static and thread-safe, so you can convert many documents in par
 ## Features
 
 - **HTML and CSS**: flexbox, grid, multi-column, floats and positioning, transforms, transparency, gradients,
-  `var()` and `calc()`, media queries, `@import`, nesting and cascade layers, inline SVG and SVG files, PNG, JPEG, GIF
-  and WebP. [More](https://pdfpecker.net/docs/html-and-css/)
+  `var()` and `calc()`, relative colours, media queries, `@import`, nesting and cascade layers, `filter`, `clip-path`,
+  blend modes, `border-image`, inset shadows, `::first-letter` and `::first-line`, `@counter-style` and list images,
+  inline SVG and SVG files, PNG, JPEG, GIF and WebP. [More](https://pdfpecker.net/docs/html-and-css/)
 - **Paged media**: `@page` sizes and margin boxes, its own margins for the first page and mirrored left and right pages,
   named pages, running headers, tables of contents with page numbers, repeated table headers, orphans, widows and
   break control. [More](https://pdfpecker.net/docs/paged-media/)
