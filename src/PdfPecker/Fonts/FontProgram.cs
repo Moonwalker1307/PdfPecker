@@ -230,8 +230,8 @@ internal sealed class FontProgram
 
     /// <summary>
     /// The static instance of a variable font at the given axis values (design units, such as wght 700); axes not
-    /// given keep their default. Returns this font when it is not variable, when the values are its default, or when
-    /// the font's variation data is damaged. Instances are cached, so documents share them.
+    /// given keep their default. Returns this font when it is not variable, when the values are its default (except for
+    /// CFF2 fonts), or when the font's variation data is damaged. Instances are cached, so documents share them.
     /// </summary>
     public FontProgram Instance(IReadOnlyDictionary<uint, float> values)
     {
@@ -240,7 +240,8 @@ internal sealed class FontProgram
         try
         {
             var coords = FontVariations.Normalize(this, axes, values);
-            if (coords.All(c => c == 0)) return this;
+            // CFF2 outlines are converted even at the default, since few PDF readers can draw them.
+            if (coords.All(c => c == 0) && Table("CFF2") == null) return this;
             var key = string.Join(",", coords.Select(c => ((int)MathF.Round(c * 16384)).ToString(System.Globalization.CultureInfo.InvariantCulture)));
             if (_instances.TryGetValue(key, out var cached)) return cached;
             if (_instances.Count >= MaxInstances) return this;

@@ -9,10 +9,10 @@ internal readonly record struct VariationAxis(uint Tag, float Min, float Default
 }
 
 /// <summary>
-/// Makes static instances of TrueType-flavoured variable fonts: the outlines and advance widths at one point of the
-/// design space, as a plain font the rest of the library embeds and measures like any other. PDF has no variable
-/// fonts, so this is what a browser's print output does too. CFF2 (PostScript-flavoured) variable fonts keep their
-/// default instance.
+/// Makes static instances of variable fonts: the outlines, advance widths and kerning at one point of the design
+/// space, as a plain font the rest of the library embeds and measures like any other. PDF has no variable fonts, so
+/// this is what a browser's print output does too. TrueType outlines get their gvar deltas; CFF2 outlines become a
+/// static CFF table (see <see cref="Cff2Instancer"/>).
 /// </summary>
 internal static class FontVariations
 {
@@ -21,7 +21,7 @@ internal static class FontVariations
     // Tables that describe variations or hinting of the default instance: an instance has no use for them.
     private static readonly HashSet<uint> Dropped = new[]
     {
-        "fvar", "gvar", "avar", "HVAR", "VVAR", "MVAR", "STAT", "cvar", "fpgm", "prep", "cvt ", "hdmx", "LTSH", "VDMX", "DSIG", "gasp",
+        "fvar", "gvar", "avar", "CFF2", "HVAR", "VVAR", "MVAR", "STAT", "cvar", "fpgm", "prep", "cvt ", "hdmx", "LTSH", "VDMX", "DSIG", "gasp",
     }.Select(FontProgram.Tag).ToHashSet();
 
     /// <summary>The axes of a variable font, or an empty array.</summary>
@@ -95,61 +95,81 @@ internal static class FontVariations
         }
     }
 
-    /// <summary>True when the font's outlines can be instanced: glyf outlines with gvar variations.</summary>
+    /// <summary>True when the font's outlines can be instanced: glyf outlines with gvar variations, or CFF2 outlines.</summary>
     public static bool CanInstance(FontProgram p)
-        => !p.IsCff && p.Table("fvar") != null && p.Table("gvar") != null && p.Table("glyf") != null && p.Table("loca") != null;
+        => p.Table("fvar") != null
+            && (p.Table("CFF2") != null || !p.IsCff && p.Table("gvar") != null && p.Table("glyf") != null && p.Table("loca") != null);
 
     /// <summary>A static font at the normalized coordinates, as sfnt bytes.</summary>
     public static byte[] Instance(FontProgram p, float[] coords, IReadOnlyDictionary<uint, float> userValues, VariationAxis[] axes)
     {
-        var head = p.Table("head")!.Value;
-        bool longLoca = p.S16(head.Offset + 50) != 0;
-        var loca = p.Table("loca")!.Value;
-        var glyf = p.Table("glyf")!.Value;
         int n = p.NumGlyphs;
-        if (loca.Length < (n + 1) * (longLoca ? 4 : 2)) throw new FormatException("The font's loca table is too short.");
-        int GlyphStart(int g) => longLoca ? (int)p.U32(loca.Offset + g * 4) : p.U16(loca.Offset + g * 2) * 2;
-
-        var gvar = new Gvar(p, coords);
-        var glyphs = new byte[n][];
-        var advances = new int[n];
-        var lsbs = new short[n];
-        var bboxes = new (short XMin, short YMin, short XMax, short YMax)?[n];
-        for (int g = 0; g < n; g++)
+        int[] advances;
+        short[] lsbs;
+        (short XMin, short YMin, short XMax, short YMax)?[] bboxes;
+        var replaced = new Dictionary<uint, byte[]>();
+        uint sfntVersion = 0x00010000;
+        if (p.Table("CFF2") != null)
         {
-            int start = GlyphStart(g), end = GlyphStart(g + 1);
-            if (start < 0 || start > glyf.Length) start = 0;
-            if (end < start || end > glyf.Length) end = start;
-            int advance = p.Advance(g);
-            short lsb = p.LeftSideBearing(g);
-            if (end - start < 10)
+            var cff = Cff2Instancer.Instance(p, coords, p.PostScriptName);
+            (advances, lsbs, bboxes) = (cff.Advances, cff.Lsbs, cff.Boxes);
+            replaced[0x43464620] = cff.Cff; // 'CFF '
+            sfntVersion = 0x4F54544F;
+        }
+        else
+        {
+            var head = p.Table("head")!.Value;
+            bool longLoca = p.S16(head.Offset + 50) != 0;
+            var loca = p.Table("loca")!.Value;
+            var glyf = p.Table("glyf")!.Value;
+            if (loca.Length < (n + 1) * (longLoca ? 4 : 2)) throw new FormatException("The font's loca table is too short.");
+            int GlyphStart(int g) => longLoca ? (int)p.U32(loca.Offset + g * 4) : p.U16(loca.Offset + g * 2) * 2;
+
+            var gvar = new Gvar(p, coords);
+            var glyphs = new byte[n][];
+            advances = new int[n];
+            lsbs = new short[n];
+            bboxes = new (short XMin, short YMin, short XMax, short YMax)?[n];
+            for (int g = 0; g < n; g++)
             {
-                // An empty glyph (a space): only its advance can vary.
-                var phantom = new float[8] { -lsb, 0, advance - lsb, 0, 0, 0, 0, 0 };
-                gvar.Apply(g, null, null, phantom, 0);
-                glyphs[g] = Array.Empty<byte>();
-                advances[g] = Math.Max(0, (int)MathF.Round(phantom[2] - phantom[0]));
-                lsbs[g] = 0;
-                continue;
+                int start = GlyphStart(g), end = GlyphStart(g + 1);
+                if (start < 0 || start > glyf.Length) start = 0;
+                if (end < start || end > glyf.Length) end = start;
+                int advance = p.Advance(g);
+                short lsb = p.LeftSideBearing(g);
+                if (end - start < 10)
+                {
+                    // An empty glyph (a space): only its advance can vary.
+                    var phantom = new float[8] { -lsb, 0, advance - lsb, 0, 0, 0, 0, 0 };
+                    gvar.Apply(g, null, null, phantom, 0);
+                    glyphs[g] = Array.Empty<byte>();
+                    advances[g] = Math.Max(0, (int)MathF.Round(phantom[2] - phantom[0]));
+                    lsbs[g] = 0;
+                    continue;
+                }
+                var (data, adv, l, box) = InstanceGlyph(p, glyf.Offset + start, end - start, g, advance, lsb, gvar);
+                glyphs[g] = data;
+                advances[g] = adv;
+                lsbs[g] = l;
+                bboxes[g] = box;
             }
-            var (data, adv, l, box) = InstanceGlyph(p, glyf.Offset + start, end - start, g, advance, lsb, gvar);
-            glyphs[g] = data;
-            advances[g] = adv;
-            lsbs[g] = l;
-            bboxes[g] = box;
+
+            // Composite glyphs got the bounding boxes of their components only roughly: the boxes matter little in a PDF.
+            var glyfOut = new MemoryStream();
+            var locaOut = new byte[(n + 1) * 4];
+            for (int g = 0; g < n; g++)
+            {
+                BinaryPrimitives.WriteUInt32BigEndian(locaOut.AsSpan(g * 4), (uint)glyfOut.Length);
+                glyfOut.Write(glyphs[g]);
+                while (glyfOut.Length % 4 != 0) glyfOut.WriteByte(0);
+            }
+            BinaryPrimitives.WriteUInt32BigEndian(locaOut.AsSpan(n * 4), (uint)glyfOut.Length);
+            replaced[0x676C7966] = glyfOut.ToArray(); // glyf
+            replaced[0x6C6F6361] = locaOut;           // loca
         }
 
-        // Composite glyphs got the bounding boxes of their components only roughly: the boxes matter little in a PDF.
         var tables = new List<(uint Tag, byte[] Data)>();
-        var glyfOut = new MemoryStream();
-        var locaOut = new byte[(n + 1) * 4];
-        for (int g = 0; g < n; g++)
-        {
-            BinaryPrimitives.WriteUInt32BigEndian(locaOut.AsSpan(g * 4), (uint)glyfOut.Length);
-            glyfOut.Write(glyphs[g]);
-            while (glyfOut.Length % 4 != 0) glyfOut.WriteByte(0);
-        }
-        BinaryPrimitives.WriteUInt32BigEndian(locaOut.AsSpan(n * 4), (uint)glyfOut.Length);
+        var gdefStore = VariationStore.FromGdef(p, coords);
 
         var hmtx = new byte[n * 4];
         int maxAdvance = 0;
@@ -173,13 +193,15 @@ internal static class FontVariations
         {
             if (Dropped.Contains(tag)) continue;
             var data = p.Data.AsSpan(offset, length).ToArray();
+            if (replaced.Remove(tag, out var instanced)) data = instanced;
             switch (tag)
             {
-                case 0x676C7966: data = glyfOut.ToArray(); break; // glyf
-                case 0x6C6F6361: data = locaOut; break;            // loca
                 case 0x686D7478: data = hmtx; break;               // hmtx
+                case 0x47504F53 when gdefStore != null:            // GPOS: kerning and anchors of the instance
+                    data = GposVariations.Instance(data, gdefStore);
+                    break;
                 case 0x68656164 when data.Length >= 54:            // head: long loca offsets, new bounding box
-                    BinaryPrimitives.WriteInt16BigEndian(data.AsSpan(50), 1);
+                    if (sfntVersion != 0x4F54544F) BinaryPrimitives.WriteInt16BigEndian(data.AsSpan(50), 1);
                     if (xMinAll <= xMaxAll)
                     {
                         BinaryPrimitives.WriteInt16BigEndian(data.AsSpan(36), xMinAll);
@@ -202,7 +224,8 @@ internal static class FontVariations
             }
             tables.Add((tag, data));
         }
-        return SfntBuilder.Build(0x00010000, tables);
+        foreach (var (tag, data) in replaced) tables.Add((tag, data));
+        return SfntBuilder.Build(sfntVersion, tables);
     }
 
     private static int WidthClass(float percent) => percent switch

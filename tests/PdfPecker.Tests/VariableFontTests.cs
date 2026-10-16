@@ -10,10 +10,12 @@ namespace PdfPecker.Tests;
 /// </summary>
 public class VariableFontTests
 {
-    // Subsets of Inter (wght 100-900) and Roboto Flex (opsz, wght, wdth, slnt); SIL Open Font License, see Fixtures/fonts.
+    // Subsets of Inter (wght 100-900), Roboto Flex (opsz, wght, wdth, slnt) and Source Sans 3; SIL Open Font License,
+    // see Fixtures/fonts.
     private static byte[] Font(string name) => File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", name));
     private static readonly byte[] Inter = Font("Inter-Variable-Subset.ttf");
     private static readonly byte[] Flex = Font("RobotoFlex-Subset.ttf");
+    private static readonly byte[] Cff2 = Font("VarTestCFF-Subset.otf"); // Source Sans 3, renamed: wght 200-900, CFF2 outlines
 
     private static string DataUri(byte[] font) => "data:font/ttf;base64," + Convert.ToBase64String(font);
 
@@ -193,5 +195,50 @@ public class VariableFontTests
             """, new PdfOptions { Conformance = PdfConformance.PdfA2b, Compress = false });
         Assert.Matches(@"/FontFile2 \d+ 0 R", Latin1(pdf));
         Assert.Matches(@"-wght700\b", Latin1(pdf));
+    }
+
+    [Theory]
+    [InlineData(200, 634, 526, 520)]
+    [InlineData(900, 682, 582, 584)]
+    public void Cff2_instances_become_cff_fonts_with_the_advances_fontTools_gives(int weight, int h, int n, int a)
+    {
+        var p = FontProgram.Load(Cff2)[0].Instance(At(("wght", weight)));
+        Assert.NotNull(p.Table("CFF "));
+        Assert.Null(p.Table("CFF2"));
+        Assert.Empty(p.Axes);
+        Assert.Equal(1, p.Data[p.Table("CFF ")!.Value.Offset]); // CFF version 1
+        Assert.InRange(p.Advance(p.GlyphId('H')), h - 1, h + 1);
+        Assert.InRange(p.Advance(p.GlyphId('n')), n - 1, n + 1);
+        Assert.InRange(p.Advance(p.GlyphId('A')), a - 1, a + 1);
+    }
+
+    [Fact]
+    public void Cff2_fonts_embed_as_cff_and_render()
+    {
+        var pdf = ConvertUncompressed($$"""
+            <style>@font-face { font-family: V; src: url('{{DataUri(Cff2)}}'); }</style><p style='font-family: V'>Hen <b>Hen</b></p>
+            """);
+        var text = Latin1(pdf);
+        Assert.Matches(@"/BaseFont /[A-Z]{6}\+VarTestCFF[^/\s]*-wght700\b", text);
+        Assert.Contains("/Subtype /OpenType", text);
+        Assert.DoesNotContain("2 Tr", AllContent(pdf));
+        AssertStructurallyValid(pdf);
+        // The renderer reads the converted outlines: the bold word has more ink than the regular one.
+        var png = PdfToImage.ConvertPage(pdf, 0, new ImageOptions { Dpi = 100 });
+        Assert.True(png.Length > 1000);
+    }
+
+    [Theory]
+    [InlineData("Inter-Variable-Subset.ttf", 900, "AV", -180, -140)]   // values from fontTools' instancer
+    [InlineData("Inter-Variable-Subset.ttf", 900, "Yo", -282, -157)]
+    [InlineData("VarTestCFF-Subset.otf", 900, "r.", -100, -32)]
+    [InlineData("VarTestCFF-Subset.otf", 300, "P.", -100, -96)]
+    public void Kerning_follows_the_instance(string font, int weight, string pair, int expected, int atDefault)
+    {
+        var p = FontProgram.Load(Font(font))[0];
+        int Kern(FontProgram f) => f.Kerning!.Pair(f.GlyphId(pair[0]), f.GlyphId(pair[1]));
+        var instance = p.Instance(At(("wght", weight)));
+        Assert.Equal(expected, Kern(instance));
+        Assert.Equal(atDefault, Kern(p));
     }
 }
