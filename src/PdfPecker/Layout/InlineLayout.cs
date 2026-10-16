@@ -662,10 +662,12 @@ internal sealed partial class LayoutEngine
     private float FlushInline(List<Node> run, Element container, float x, float y, float w, bool firstInBlock, out bool produced)
     {
         Cancellation.ThrowIfCancellationRequested();
+        var pages = _inlinePageBox;
+        _inlinePageBox = null;
         _inlineDepth++;
         try
         {
-            return FlushInlineCore(run, container, x, y, w, firstInBlock, out produced);
+            return FlushInlineCore(run, container, x, y, w, firstInBlock, pages, out produced);
         }
         finally
         {
@@ -673,7 +675,7 @@ internal sealed partial class LayoutEngine
         }
     }
 
-    private float FlushInlineCore(List<Node> run, Element container, float x, float y, float w, bool firstInBlock, out bool produced)
+    private float FlushInlineCore(List<Node> run, Element container, float x, float y, float w, bool firstInBlock, PageBox? pages, out bool produced)
     {
         var st = CollectInline(run, w);
         var items = st.Items;
@@ -693,11 +695,12 @@ internal sealed partial class LayoutEngine
         ResolveBidi(items, cs);
         float indent = firstInBlock ? cs.TextIndent : 0;
         FloatLines? fl = null;
-        if (FloatsBelow(y) || items.Exists(it => it.Kind == ItemKind.Float))
-        {
-            TextMetrics(cs, out float sa, out float sd);
-            fl = new FloatLines { Engine = this, Block = cs, X = x, W = w, Y = y, StrutH = sa + sd };
-        }
+        bool besideFloats = FloatsBelow(y) || items.Exists(it => it.Kind == ItemKind.Float);
+        // On pages of different widths each line is measured for the page it goes on, as lines beside floats are.
+        if (_measuring || !_paginate) pages = null;
+        TextMetrics(cs, out float strutA, out float strutD);
+        FloatLines NewLines() => new() { Engine = this, Block = cs, X = x, W = w, Y = y, StrutH = strutA + strutD, Pages = pages };
+        if (besideFloats || pages != null) fl = NewLines();
         // With a ::first-line style the items are collected twice, styled for the first line and as usual, and the line
         // breaker switches from the first list to the second once the first line is full.
         CollectState? first = null;
@@ -707,10 +710,42 @@ internal sealed partial class LayoutEngine
             if (first.Items.Count == items.Count) ResolveBidi(first.Items, cs);
             else { ReturnState(first); first = null; } // small caps split the words differently: no first-line style
         }
-        var lines = first != null ? BreakLines(first.Items, w, indent, fl, after: items) : BreakLines(items, w, indent, fl);
-        fl?.Flush(lines);
+        int opsMark = _ops.Count;
+        List<Line> Break(FloatLines? f)
+        {
+            var broken = first != null ? BreakLines(first.Items, w, indent, f, after: items) : BreakLines(items, w, indent, f);
+            f?.Flush(broken);
+            return broken;
+        }
+        var lines = Break(fl);
+        if (pages != null)
+        {
+            // A line that went to another page than the one it was measured for, being taller than the paragraph's
+            // line height, is measured again for that page; and lines that move to keep orphans and widows are
+            // measured for the page they move to. Each change can move the lines after it, so the paragraph is broken
+            // again until it settles.
+            Dictionary<int, float>? hints = null;
+            bool[]? plan = null;
+            for (int attempt = 0; attempt < 8; attempt++)
+            {
+                if (fl!.Moved >= 0) (hints ??= new())[fl.Moved] = fl.MovedHeight;
+                else
+                {
+                    if (besideFloats) break;
+                    var next = PlanLineBreaks(lines, cs, y);
+                    if (SamePlan(next, plan)) break;
+                    plan = next;
+                }
+                ReturnLines(lines);
+                Truncate(opsMark); // the floats the lines placed
+                fl = NewLines();
+                fl.HeightHints = hints;
+                fl.ForcedBefore = plan;
+                lines = Break(fl);
+            }
+        }
         produced = true;
-        float bottom = PlaceLines(lines, cs, x, y, w, indent, besideFloats: fl != null);
+        float bottom = PlaceLines(lines, cs, x, y, w, indent, besideFloats);
         ReturnLines(lines);
         if (first != null) ReturnState(first);
         ReturnState(st);
@@ -1196,6 +1231,25 @@ internal sealed partial class LayoutEngine
             if (!changed) break;
         }
         return forced;
+    }
+
+    /// <summary>The lines that start a new page to keep orphans and widows, as PlaceLines will choose them; null for none.</summary>
+    private bool[]? PlanLineBreaks(List<Line> lines, ComputedStyle block, float top)
+    {
+        int n = lines.Count;
+        if (n < 2 || block.LineClamp > 0) return null;
+        var a = new float[n];
+        var d = new float[n];
+        for (int li = 0; li < n; li++) LineExtent(lines[li], block, out a[li], out d[li]);
+        return PlanBreaks(n, a, d, top, block.Orphans, block.Widows);
+    }
+
+    private static bool SamePlan(bool[]? a, bool[]? b)
+    {
+        int n = Math.Max(a?.Length ?? 0, b?.Length ?? 0);
+        for (int i = 0; i < n; i++)
+            if ((a != null && i < a.Length && a[i]) != (b != null && i < b.Length && b[i])) return false;
+        return true;
     }
 
     /// <summary>The index of the visible line <paramref name="k"/> lines after visible line <paramref name="from"/>.</summary>

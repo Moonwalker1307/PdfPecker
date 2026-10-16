@@ -323,7 +323,10 @@ internal sealed partial class LayoutEngine
         return w;
     }
 
-    private float LayoutTable(Element table, float x, float y, float availW)
+    /// <summary>The columns of a table on one kind of page: their left edges (and the right end) and widths.</summary>
+    private sealed record TableColumns(float[] ColX, float[] Widths);
+
+    private float LayoutTable(Element table, float x, float y, float availW, PageBox? pages = null)
     {
         var s = table.Style;
         if (table.Id != null) SetAnchor(table.Id, y);
@@ -331,6 +334,69 @@ internal sealed partial class LayoutEngine
         var m = GetTableModel(table);
         bool collapse = s.BorderCollapse;
         float hs = collapse ? 0 : s.BorderSpacingH, vs = collapse ? 0 : s.BorderSpacingV;
+        var (bx, boxW, frameT, frameB, colX, widths) = TableGeometry(table, m, x, availW);
+        m.Rtl = s.Rtl;
+
+        // On pages of different widths, as in Chrome, the table is sized again for each page and its rows take the
+        // columns of the page they are on.
+        TableColumns[]? pageColumns = null;
+        PageBox? tableBox = null;
+        if (pages != null)
+        {
+            pageColumns = new TableColumns[3];
+            tableBox = new PageBox();
+            for (int k = 0; k < 3; k++)
+            {
+                var g = TableGeometry(table, m, pages.X[k], pages.W[k]);
+                pageColumns[k] = new TableColumns(g.ColX, g.Widths);
+                tableBox.BX[k] = tableBox.X[k] = g.Bx;
+                tableBox.BW[k] = tableBox.W[k] = g.BoxW;
+                tableBox.AW[k] = pages.W[k];
+            }
+            if (!tableBox.Varies) pageColumns = null;
+        }
+
+        foreach (var caption in m.Captions)
+        {
+            float cmt = caption.Style.MarginTop.Resolve(boxW);
+            y = LayoutBlockBox(caption, bx, y + cmt, boxW, shrinkToFit: false) + caption.Style.MarginBottom.Resolve(boxW);
+        }
+
+        float tableTop = y;
+        var tableGroup = new GroupOp();
+        _ops.Add(tableGroup);
+        float cy = y + frameT + (m.Rows.Count > 0 ? vs : 0);
+
+        m.RowExtra = null;
+        if (!s.Height.IsAuto && !s.Height.IsPercent && m.Rows.Count > 0)
+            m.RowExtra = RowExtras(m, s.Height.Value - frameT - frameB - vs, colX, widths, hs, vs, collapse);
+        for (int r = 0; r < m.Rows.Count; r++)
+            cy = LayoutRow(m, r, cy, colX, widths, hs, vs, collapse, allowMove: true, pageColumns) + vs;
+        m.RowExtra = null;
+
+        float tableBottom = cy + frameB;
+        if (!s.Height.IsAuto && !s.Height.IsPercent && tableBottom - tableTop < s.Height.Value) tableBottom = tableTop + s.Height.Value;
+        int sides = collapse && m.Rows.Count > 0 ? TableSides(m) : BoxPainter.AllSides;
+        if (pageColumns != null && !SameOnPages(tableBox!, tableTop, tableBottom))
+            PaintOnPages(tableGroup, s, tableBox!, tableTop, tableBottom, sides, collapse);
+        else BoxPainter.Paint(tableGroup, s, bx, tableTop, boxW, tableBottom - tableTop, _images, availW, sides, collapsedCell: collapse);
+        _lastBoxRight = bx + boxW;
+        _lastBoxX = bx;
+        _lastBoxTop = tableTop;
+        _lastBoxW = boxW;
+        _lastBoxH = tableBottom - tableTop;
+        return tableBottom;
+    }
+
+    /// <summary>
+    /// A table's border box and columns in a containing block <paramref name="availW"/> wide at <paramref name="x"/>,
+    /// with the top and bottom of its frame (border and padding, or half the collapsed borders).
+    /// </summary>
+    private static (float Bx, float BoxW, float FrameT, float FrameB, float[] ColX, float[] Widths) TableGeometry(Element table, TableModel m, float x, float availW)
+    {
+        var s = table.Style;
+        bool collapse = s.BorderCollapse;
+        float hs = collapse ? 0 : s.BorderSpacingH;
         float ml = s.MarginLeft.Resolve(availW), mr = s.MarginRight.Resolve(availW);
         float frameL, frameR, frameT, frameB;
         if (collapse)
@@ -378,41 +444,12 @@ internal sealed partial class LayoutEngine
         else if (s.MarginLeft.IsAuto) ml = Math.Max(0, availW - boxW - mr);
         else if (table.Parent?.Style is { Rtl: true } && !s.Floated && !s.OutOfFlow) ml = Math.Max(0, availW - boxW - mr);
         float bx = x + ml;
-        m.Rtl = s.Rtl;
 
         var colX = new float[n + 1];
         float cxp = bx + frameL + hs;
         for (int c = 0; c < n; c++) { colX[c] = cxp; cxp += widths[c] + hs; }
         colX[n] = cxp;
-
-        foreach (var caption in m.Captions)
-        {
-            float cmt = caption.Style.MarginTop.Resolve(boxW);
-            y = LayoutBlockBox(caption, bx, y + cmt, boxW, shrinkToFit: false) + caption.Style.MarginBottom.Resolve(boxW);
-        }
-
-        float tableTop = y;
-        var tableGroup = new GroupOp();
-        _ops.Add(tableGroup);
-        float cy = y + frameT + (m.Rows.Count > 0 ? vs : 0);
-
-        m.RowExtra = null;
-        if (!s.Height.IsAuto && !s.Height.IsPercent && m.Rows.Count > 0)
-            m.RowExtra = RowExtras(m, s.Height.Value - frameT - frameB - vs, colX, widths, hs, vs, collapse);
-        for (int r = 0; r < m.Rows.Count; r++)
-            cy = LayoutRow(m, r, cy, colX, widths, hs, vs, collapse, allowMove: true) + vs;
-        m.RowExtra = null;
-
-        float tableBottom = cy + frameB;
-        if (!s.Height.IsAuto && !s.Height.IsPercent && tableBottom - tableTop < s.Height.Value) tableBottom = tableTop + s.Height.Value;
-        BoxPainter.Paint(tableGroup, s, bx, tableTop, boxW, tableBottom - tableTop, _images, availW,
-            collapse && m.Rows.Count > 0 ? TableSides(m) : BoxPainter.AllSides, collapsedCell: collapse);
-        _lastBoxRight = bx + boxW;
-        _lastBoxX = bx;
-        _lastBoxTop = tableTop;
-        _lastBoxW = boxW;
-        _lastBoxH = tableBottom - tableTop;
-        return tableBottom;
+        return (bx, boxW, frameT, frameB, colX, widths);
     }
 
     /// <summary>
@@ -444,7 +481,8 @@ internal sealed partial class LayoutEngine
 
     /// <summary>Lays out one table row at <paramref name="rowTop"/> and returns its bottom. A row that would straddle a
     /// page boundary moves to the next page, where the table's header rows are repeated first.</summary>
-    private float LayoutRow(TableModel m, int r, float rowTop, float[] colX, float[] widths, float hs, float vs, bool collapse, bool allowMove)
+    private float LayoutRow(TableModel m, int r, float rowTop, float[] colX, float[] widths, float hs, float vs, bool collapse, bool allowMove,
+        TableColumns[]? pageColumns = null)
     {
         var row = m.Rows[r];
         int n = m.ColCount;
@@ -453,6 +491,7 @@ internal sealed partial class LayoutEngine
         GroupOp rowGroup = null!;
         for (int attempt = 0; attempt < 2; attempt++)
         {
+            if (pageColumns != null) (colX, widths) = pageColumns[PageBox.Kind(PageOf(rowTop))];
             rowGroup = new GroupOp();
             _ops.Add(rowGroup);
             foreach (var cell in row.Cells) LayoutCell(cell, rowTop, colX, widths, hs, collapse, m.Rtl);
@@ -476,7 +515,7 @@ internal sealed partial class LayoutEngine
                     float headStart = rowTop;
                     int headOps = _ops.Count;
                     for (int h = 0; h < m.HeadCount; h++)
-                        rowTop = LayoutRow(m, h, rowTop, colX, widths, hs, vs, collapse, allowMove: false) + vs;
+                        rowTop = LayoutRow(m, h, rowTop, colX, widths, hs, vs, collapse, allowMove: false, pageColumns) + vs;
                     // The structure has the header once: its repeats are artifacts.
                     if (Tags != null) Untag(_ops, headOps);
                     if (rowTop - headStart > _grid.Height(PageOf(headStart)) / 2)

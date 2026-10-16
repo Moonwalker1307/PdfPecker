@@ -225,15 +225,17 @@ public static class HtmlToPdf
         }
 
         // @page :first, :left and :right rules that change the size, margins or background give those pages their own
-        // setup. The first page of the document is a right page, as in left-to-right books.
+        // setup. The first page of the document is a right page, as in left-to-right books, and a left page when the root
+        // element is right to left, as in Chrome: the pages then progress from right to left (CSS Paged Media 3, 4.2).
         bool pageVariants = !options.IgnoreCssPageRules
                             && sheet.PageRules.Any(r => r.Selector is ":first" or ":left" or ":right" && r.Declarations.Count > 0);
+        bool rtlPages = htmlEl?.Style is { Rtl: true };
         var variants = new Dictionary<(string?, bool, bool), PageSetup>();
         PageSetup VariantFor(string? name, int documentPage)
         {
             var plain = SetupFor(name);
             if (!pageVariants) return plain;
-            bool first = documentPage == 0, right = documentPage % 2 == 0;
+            bool first = documentPage == 0, right = documentPage % 2 == (rtlPages ? 1 : 0);
             if (variants.TryGetValue((name, first, right), out var cached)) return cached;
             var setup = new PageSetup
             {
@@ -287,8 +289,8 @@ public static class HtmlToPdf
             {
                 run.Page = SetupFor(run.Name);
                 run.Grid = new PageGrid(VariantFor(run.Name, documentPage), VariantFor(run.Name, documentPage + 1), VariantFor(run.Name, documentPage + 2));
-                // Pages of different widths share one layout, at the narrowest width, so no page's content overflows.
-                run.Width = Math.Min(run.Grid.SetupOf(0).ContentWidth, Math.Min(run.Grid.SetupOf(1).ContentWidth, run.Grid.SetupOf(2).ContentWidth));
+                // The layout starts at the first page's width; on pages of other widths the content takes their width.
+                run.Width = run.Grid.SetupOf(0).ContentWidth;
                 var restore = run.Keep is { } keep ? KeepOnly(keep) : null;
                 try
                 {
@@ -375,6 +377,7 @@ public static class HtmlToPdf
         var writer = new PdfDocumentWriter(page, options.Compress, options.CompressionLevel)
         {
             Watermark = options.Watermark,
+            RightToLeft = rtlPages,
             Security = options.Security,
             Conformance = conformance,
             EInvoice = options.EInvoice,
@@ -400,7 +403,7 @@ public static class HtmlToPdf
         // Page-margin boxes of @page rules (@top-center and the like), laid out per page like the bands.
         var marginBoxes = !options.IgnoreCssPageRules && PageMarginBoxes.AnyIn(sheet.PageRules)
             ? new PageMarginBoxes(sheet.PageRules, () => new ComputedStyle { Display = Display.Block, Fonts = fonts, MissingFonts = missingFonts, Lang = htmlLang ?? options.Language, Hyphenation = hyphenation },
-                page, images, cancellationToken, paged, styles.CounterStyles)
+                page, images, cancellationToken, paged, styles.CounterStyles) { FirstPageLeft = rtlPages }
             : null;
         Func<int, int, List<DrawOp>>? pageBands = null;
         if (header != null || footer != null || marginBoxes != null)
