@@ -1,0 +1,69 @@
+name: Conformance
+
+# Validates the PDF/A and PDF/UA output with veraPDF, which the unit tests cannot do: they only check the header and the
+# XMP. The commonmark spec suite runs with the normal tests (MarkdownSpecTests).
+on:
+  pull_request:
+    paths:
+      - src/**
+      - tests/**
+      - tools/ConformanceSamples/**
+      - .github/workflows/conformance.yml
+  push:
+    branches: [main]
+    paths:
+      - src/**
+      - tests/**
+      - tools/ConformanceSamples/**
+      - .github/workflows/conformance.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  verapdf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # The veraPDF version is pinned in the pom (org.verapdf.apps:greenfield-apps), and the jars come from Maven Central.
+      - name: Fetch veraPDF
+        run: >
+          mvn -B -q -f tools/ConformanceSamples/verapdf/pom.xml dependency:copy-dependencies
+          -DoutputDirectory="$RUNNER_TEMP/verapdf"
+
+      - name: Generate sample PDFs
+        run: dotnet run -c Release --project tools/ConformanceSamples -- "$RUNNER_TEMP/samples"
+
+      # Fails on any rule that tools/ConformanceSamples/known-failures.txt does not list.
+      - name: Validate with veraPDF
+        run: python3 -I tools/ConformanceSamples/check.py "$RUNNER_TEMP/samples" "$RUNNER_TEMP/verapdf"
+
+      - name: Keep the samples
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: conformance-samples
+          path: ${{ runner.temp }}/samples
+          retention-days: 7
