@@ -34,6 +34,9 @@ internal abstract class TextFont
     /// </summary>
     public virtual TextFont WithoutLigatures() => this;
 
+    /// <summary>The same font with OpenType features applied (a key from <see cref="FontFeatures.Key"/>).</summary>
+    public virtual TextFont WithFeatures(string features) => this;
+
     private const float Px = 0.75f; // one CSS pixel in points
 
     private static float RoundPx(float pt) => MathF.Floor(pt / Px + 0.5f) * Px;

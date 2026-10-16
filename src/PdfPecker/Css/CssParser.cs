@@ -872,23 +872,27 @@ internal static class CssParser
             }
             case "font-variant":
             {
-                // The caps and ligature parts; numeric, east-asian and the rest are not supported.
+                // The caps, ligature and numeric parts; east-asian and the rest are not supported.
                 var lower = value.Trim().ToLowerInvariant();
                 if (lower is "normal" or "none" or "inherit" or "initial" or "unset")
                 {
                     Add("font-variant-caps", lower == "none" ? "normal" : lower);
                     Add("font-variant-ligatures", lower);
+                    Add("font-variant-numeric", lower == "none" ? "normal" : lower);
                     return;
                 }
                 string caps = "normal";
                 var ligatures = new List<string>();
+                var numeric = new List<string>();
                 foreach (var t in Tokens(lower))
                 {
                     if (t is "small-caps" or "all-small-caps" or "petite-caps" or "all-petite-caps" or "unicase" or "titling-caps") caps = t;
                     else if (t.EndsWith("ligatures", StringComparison.Ordinal) || t.EndsWith("contextual", StringComparison.Ordinal)) ligatures.Add(t);
+                    else if (t.EndsWith("-nums", StringComparison.Ordinal) || t.EndsWith("-fractions", StringComparison.Ordinal) || t is "ordinal" or "slashed-zero") numeric.Add(t);
                 }
                 Add("font-variant-caps", caps);
                 Add("font-variant-ligatures", ligatures.Count == 0 ? "normal" : string.Join(" ", ligatures));
+                Add("font-variant-numeric", numeric.Count == 0 ? "normal" : string.Join(" ", numeric));
                 return;
             }
             case "column-rule":
@@ -1052,6 +1056,7 @@ internal static class CssParser
         Add("font-size", size);
         Add("line-height", lineHeight);
         Add("font-variant-caps", caps);
+        Add("font-variant-numeric", "normal");
         if (family.Length > 0) Add("font-family", family);
     }
 }

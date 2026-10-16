@@ -1125,8 +1125,25 @@ internal sealed class StyleResolver
                 else if (lower.Contains("common-ligatures")) s.NoLigatures = false;
                 break;
             case "font-feature-settings":
-                if (lower == "inherit") s.NoLigatures = parent.NoLigatures;
-                else if (LigaSetting(lower) is bool liga) s.NoLigatures = !liga;
+                if (lower == "inherit")
+                {
+                    s.NoLigatures = parent.NoLigatures;
+                    s.FontFeatureSettings = parent.FontFeatureSettings;
+                }
+                else
+                {
+                    if (LigaSetting(lower) is bool liga) s.NoLigatures = !liga;
+                    // Tags are case-sensitive, so the value is kept as written.
+                    s.FontFeatureSettings = lower is "normal" or "initial" or "unset" ? null : v;
+                }
+                break;
+            case "font-variant-numeric":
+                s.FontVariantNumeric = lower switch
+                {
+                    "inherit" => parent.FontVariantNumeric,
+                    "normal" or "initial" or "unset" => null,
+                    _ => lower,
+                };
                 break;
             case "word-spacing":
                 if (lower == "normal") s.WordSpacing = 0;
