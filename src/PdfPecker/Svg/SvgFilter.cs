@@ -329,6 +329,38 @@ internal sealed partial class SvgFilter
 
     private static float Lookup(float[] table, float c) => table[(int)(Math.Clamp(c, 0, 1) * TableSize + 0.5f)];
 
+    /// <summary>
+    /// The most work one filter may take, in pixel operations, and the most primitives it may have. Every primitive is
+    /// linear in the pixels except for the kernels and octaves that the document chooses, so a few primitives with large
+    /// ones on the largest region would otherwise run for hours. A filter beyond these is left out, as browsers leave out
+    /// one they can not run, rather than failing the document.
+    /// </summary>
+    internal const long MaxWork = 500_000_000;
+    internal const int MaxPrimitives = 256;
+
+    /// <summary>Whether running the filter on w × h pixels stays within <see cref="MaxWork"/>.</summary>
+    public bool WithinBudget(int w, int h)
+    {
+        if (Primitives.Count > MaxPrimitives) return false;
+        // A fixed part per primitive covers the work that does not grow with the pixels.
+        long pixels = (long)w * h + 256, work = 0;
+        foreach (var p in Primitives)
+        {
+            long perPixel = p.Kind switch
+            {
+                Kind.Blur or Kind.DropShadow or Kind.Morphology => 8, // running sums and extremes, whatever the radius
+                Kind.ConvolveMatrix => p.Kernel != null ? (long)p.OrderX * p.OrderY : 1,
+                Kind.Turbulence => 16L * Math.Max(1, p.Octaves), // four channels of noise for each octave
+                Kind.DiffuseLighting or Kind.SpecularLighting => 16,
+                Kind.Merge => 1 + (p.Inputs?.Count ?? 0),
+                _ => 2,
+            };
+            work += pixels * perPixel;
+            if (work > MaxWork) return false;
+        }
+        return true;
+    }
+
     /// <summary>The image in the wanted colour space (a copy when it changes).</summary>
     private static Image Convert(Image img, bool linear)
     {
@@ -353,7 +385,8 @@ internal sealed partial class SvgFilter
     /// <paramref name="scaleX"/> and <paramref name="scaleY"/> pixels per root unit. <paramref name="rasterize"/> renders
     /// shapes over the filter region in the same way, for feImage. Returns premultiplied sRGB.
     /// </summary>
-    public float[] Apply(float[] sourcePixels, int w, int h, float scaleX, float scaleY, Func<List<SvgShape>, float[]?>? rasterize = null)
+    public float[] Apply(float[] sourcePixels, int w, int h, float scaleX, float scaleY, CancellationToken cancel = default,
+        Func<List<SvgShape>, float[]?>? rasterize = null)
     {
         var source = new Image(sourcePixels, false) { X1 = w, Y1 = h };
         Image? alpha = null;
@@ -381,6 +414,7 @@ internal sealed partial class SvgFilter
         }
         foreach (var p in Primitives)
         {
+            cancel.ThrowIfCancellationRequested();
             // The subregion: given, else the union of the inputs' (all of the filter region without inputs).
             int x0, y0, x1, y1;
             if (p.HasRegion)
@@ -593,7 +627,7 @@ internal sealed partial class SvgFilter
     /// fraction of its time and memory, which matters with an image for every line of shadowed text. Returns straight
     /// sRGB colour and alpha bytes, or null when nothing shows.
     /// </summary>
-    public (byte[] Rgb, byte[] Alpha)? ApplyShadows(float[] alpha, int w, int h, float scaleX, float scaleY)
+    public (byte[] Rgb, byte[] Alpha)? ApplyShadows(float[] alpha, int w, int h, float scaleX, float scaleY, CancellationToken cancel = default)
     {
         int n = w * h;
         float[]? r = null, g = null, b = null;
@@ -602,6 +636,7 @@ internal sealed partial class SvgFilter
         bool oneColor = true;
         for (int k = 0; k + 3 < Primitives.Count; k += 4)
         {
+            cancel.ThrowIfCancellationRequested();
             var (blur, offset, flood) = (Primitives[k], Primitives[k + 1], Primitives[k + 2]);
             var a = BlurChannel(alpha, w, h, blur.Sx * scaleX, blur.Sy * scaleY);
             int ox = (int)MathF.Round(offset.Dx * scaleX), oy = (int)MathF.Round(offset.Dy * scaleY);
@@ -698,31 +733,56 @@ internal sealed partial class SvgFilter
         if (ix <= 0 && iy <= 0) return src;
         var tmp = new float[src.Length];
         var dst = new float[src.Length];
-        MorphAxis(src, tmp, w, h, ix, dilate, horizontal: true);
-        MorphAxis(tmp, dst, w, h, iy, dilate, horizontal: false);
+        MorphAxis(src, tmp, w, h, Math.Max(ix, 0), dilate, horizontal: true);
+        MorphAxis(tmp, dst, w, h, Math.Max(iy, 0), dilate, horizontal: false);
         return dst;
     }
 
+    /// <summary>
+    /// The minimum or maximum over a window of 2r + 1 pixels along each line, by van Herk and Gil-Werman's method: the
+    /// line is cut into blocks of the window's size, and every window is the union of the end of one block and the start
+    /// of the next, so a running extreme from each block's start and from its end gives every window in three steps a
+    /// pixel, whatever the radius. Minimum and maximum are exact, so this matches searching each window.
+    /// </summary>
     private static void MorphAxis(float[] src, float[] dst, int w, int h, int r, bool dilate, bool horizontal)
     {
         int lines = horizontal ? h : w, len = horizontal ? w : h, step = horizontal ? 4 : w * 4;
-        for (int line = 0; line < lines; line++)
+        int k = 2 * r + 1;
+        System.Threading.Tasks.Parallel.For(0, lines, () => (new float[len], new float[len]), (line, _, buffers) =>
         {
+            var (fromStart, fromEnd) = buffers;
             int origin = horizontal ? line * w * 4 : line * 4;
-            for (int i = 0; i < len; i++)
-                for (int c = 0; c < 4; c++)
+            for (int c = 0; c < 4; c++)
+            {
+                int o = origin + c;
+                for (int i = 0; i < len; i++)
                 {
-                    float v = dilate ? 0 : 1;
-                    for (int k = Math.Max(0, i - r); k <= Math.Min(len - 1, i + r); k++)
-                    {
-                        float s = src[origin + k * step + c];
-                        v = dilate ? Math.Max(v, s) : Math.Min(v, s);
-                    }
-                    // Erosion at the edge sees transparent black beyond it.
-                    if (!dilate && (i - r < 0 || i + r > len - 1)) v = 0;
-                    dst[origin + i * step + c] = v;
+                    float s = src[o + i * step];
+                    fromStart[i] = i % k == 0 ? s : dilate ? Math.Max(fromStart[i - 1], s) : Math.Min(fromStart[i - 1], s);
                 }
-        }
+                for (int i = len - 1; i >= 0; i--)
+                {
+                    float s = src[o + i * step];
+                    fromEnd[i] = i == len - 1 || (i + 1) % k == 0 ? s : dilate ? Math.Max(fromEnd[i + 1], s) : Math.Min(fromEnd[i + 1], s);
+                }
+                for (int i = 0; i < len; i++)
+                {
+                    float v;
+                    // Erosion at the edge sees transparent black beyond it; dilation only what is inside.
+                    if (!dilate && (i - r < 0 || i + r > len - 1)) v = 0;
+                    else
+                    {
+                        int a = Math.Max(0, i - r), b = Math.Min(len - 1, i + r);
+                        // In one block the window starts the block or ends the line (it is cut short only at the ends).
+                        if (a / k == b / k) v = a % k == 0 ? fromStart[b] : fromEnd[a];
+                        else v = dilate ? Math.Max(fromEnd[a], fromStart[b]) : Math.Min(fromEnd[a], fromStart[b]);
+                        v = dilate ? Math.Max(v, 0) : Math.Min(v, 1); // as a search that starts from transparent or opaque
+                    }
+                    dst[o + i * step] = v;
+                }
+            }
+            return buffers;
+        }, _ => { });
     }
 
     private static float[] Composite(float[] a, float[] b, Primitive p)
