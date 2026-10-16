@@ -51,6 +51,20 @@ internal sealed class SvgShape
     public Matrix ImageMatrix;
     public byte ImageAlpha = 255;
 
+    /// <summary>A copy with its fill, stroke, gradient and pattern colours mapped, and those of the shapes inside it.</summary>
+    public SvgShape Recolored(Func<uint, uint> map)
+    {
+        var c = (SvgShape)MemberwiseClone();
+        if (Fill is { } fill) c.Fill = map(fill);
+        if (Stroke is { } stroke) c.Stroke = map(stroke);
+        c.FillGradient = FillGradient?.Recolored(map);
+        c.StrokeGradient = StrokeGradient?.Recolored(map);
+        c.FillPattern = FillPattern?.Recolored(map);
+        c.StrokePattern = StrokePattern?.Recolored(map);
+        c.Children = Children?.Select(s => s.Recolored(map)).ToList();
+        return c;
+    }
+
     public bool HasFill => Fill != null || FillGradient != null || FillPattern != null;
     public bool HasStroke => Stroke != null || StrokeGradient != null || StrokePattern != null;
 }
@@ -62,6 +76,13 @@ internal sealed class SvgPattern
     public float Width, Height;
     public Matrix ToRoot;      // tile space to the root element's user space
     public byte Alpha = 255;   // fill-opacity or stroke-opacity of the painted shape
+
+    public SvgPattern Recolored(Func<uint, uint> map)
+    {
+        var c = (SvgPattern)MemberwiseClone();
+        c.Shapes = Shapes.Select(s => s.Recolored(map)).ToList();
+        return c;
+    }
 }
 
 /// <summary>
@@ -123,6 +144,31 @@ internal sealed partial class SvgImage
         foreach (var child in svg.Children)
             if (child is Element e) img.Render(e, Matrix.Identity, 1, 0);
         return img;
+    }
+
+    /// <summary>A copy of the drawing with every colour mapped, for an HTML filter's colour functions.</summary>
+    public SvgImage Recolored(Func<uint, uint> map)
+    {
+        var c = (SvgImage)MemberwiseClone();
+        c.Shapes = Shapes.Select(s => s.Recolored(map)).ToList();
+        return c;
+    }
+
+    /// <summary>
+    /// A clipPath element of an inline SVG used by an HTML element's clip-path, as a path in points. Its user space is
+    /// the border box (x, y, w, h) in CSS pixels, or the border box itself for clipPathUnits="objectBoundingBox".
+    /// Null when the clip path contains nothing.
+    /// </summary>
+    public static PathBuilder? HtmlClipPath(Element clip, float x, float y, float w, float h, out bool evenOdd)
+    {
+        var img = new SvgImage { _budget = new SvgBudget() };
+        var root = clip;
+        while (root.Parent is { } parent && parent.Name != "#document") root = parent;
+        img.CollectIds(root);
+        bool box = clip.GetAttribute("clippathunits") is { } u && u.Trim().Equals("objectBoundingBox", StringComparison.OrdinalIgnoreCase);
+        var units = box ? Matrix.Scale(w, h) : Matrix.Scale(0.75f, 0.75f);
+        var m = clip.GetAttribute("transform") is { } tf ? ParseTransform(tf) : Matrix.Identity;
+        return img.ClipShapes(clip, m.Then(units).Then(Matrix.Translate(x, y)), out evenOdd);
     }
 
     /// <summary>The largest SVG file that is parsed (16 MB).</summary>
@@ -550,7 +596,6 @@ internal sealed partial class SvgImage
     /// </summary>
     private PathBuilder? ClipPath(Element clip, Matrix ctm, int firstShape, out bool evenOdd)
     {
-        bool rule = false;
         evenOdd = false;
         var m = clip.GetAttribute("transform") is { } tf ? ParseTransform(tf) : Matrix.Identity;
         if (clip.GetAttribute("clippathunits") is { } u && u.Trim().Equals("objectBoundingBox", StringComparison.OrdinalIgnoreCase))
@@ -572,7 +617,13 @@ internal sealed partial class SvgImage
             inv.Apply(ref x1, ref y1);
             m = m.Then(Matrix.Scale(x1 - x0, y1 - y0)).Then(Matrix.Translate(x0, y0));
         }
-        m = m.Then(ctm);
+        return ClipShapes(clip, m.Then(ctm), out evenOdd);
+    }
+
+    /// <summary>The union of a clipPath's shapes, mapped by <paramref name="m"/>; null when it contains nothing.</summary>
+    private PathBuilder? ClipShapes(Element clip, Matrix m, out bool evenOdd)
+    {
+        bool rule = false;
         var result = new PathBuilder();
         bool first = true;
         void Add(Element child, Matrix t, int depth)

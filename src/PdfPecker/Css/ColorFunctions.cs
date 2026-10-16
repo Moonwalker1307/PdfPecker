@@ -5,7 +5,8 @@ namespace PdfPecker.Css;
 /// <summary>
 /// The colour functions of CSS Color 4 and 5: <c>rgb()</c> and <c>hsl()</c> in both syntaxes, <c>hwb()</c>, <c>lab()</c>,
 /// <c>lch()</c>, <c>oklab()</c>, <c>oklch()</c>, <c>color()</c> with the predefined colour spaces, <c>color-mix()</c> and
-/// <c>light-dark()</c>. Colours are worked on as unclamped sRGB (so wide-gamut colours survive a mix) and clipped to
+/// <c>light-dark()</c>, and the relative colour syntax of CSS Color 5 (<c>rgb(from &lt;color&gt; r g b / alpha)</c> and the
+/// same for every function but <c>color-mix()</c>), whose channel keywords can be used in math functions. Colours are worked on as unclamped sRGB (so wide-gamut colours survive a mix) and clipped to
 /// sRGB at the end, as Chrome does when it prints.
 /// </summary>
 internal static class ColorFunctions
@@ -51,6 +52,7 @@ internal static class ColorFunctions
     {
         color = default;
         if (depth > MaxDepth) return false;
+        if (fn is not ("color-mix" or "light-dark") && StartsWithWord(args, "from")) return Relative(fn, args, current, depth, out color);
         switch (fn)
         {
             case "rgb":
@@ -89,7 +91,7 @@ internal static class ColorFunctions
 
     /// <summary>
     /// Splits the arguments into three components and an optional alpha. Accepts the legacy comma syntax (when
-    /// <paramref name="legacy"/>) and the modern space syntax with "/ alpha". Relative colours ("from") are not supported.
+    /// <paramref name="legacy"/>) and the modern space syntax with "/ alpha". Relative colours ("from") are handled before.
     /// </summary>
     private static bool Components(string args, bool legacy, out Component[] comps, out Component? alpha)
     {
@@ -114,18 +116,7 @@ internal static class ColorFunctions
             comps = list.ToArray();
             return true;
         }
-        int slash = -1;
-        for (int i = 0, depth = 0; i < s.Length && slash < 0; i++)
-        {
-            if (s[i] == '(') depth++;
-            else if (s[i] == ')') depth--;
-            else if (s[i] == '/' && depth == 0) slash = i;
-        }
-        if (slash >= 0)
-        {
-            main = s.Substring(0, slash);
-            alphaText = s.Substring(slash + 1).Trim();
-        }
+        SplitAlpha(s, out main, out alphaText);
         foreach (var tok in CssParser.Tokens(main))
         {
             if (!TryComponent(tok, out var c)) return false;
@@ -140,6 +131,164 @@ internal static class ColorFunctions
         comps = list.ToArray();
         return true;
     }
+
+    /// <summary>Splits "c1 c2 c3 / alpha" at the slash that is not inside a function.</summary>
+    private static void SplitAlpha(string s, out string main, out string? alpha)
+    {
+        main = s;
+        alpha = null;
+        for (int i = 0, depth = 0; i < s.Length; i++)
+        {
+            if (s[i] == '(') depth++;
+            else if (s[i] == ')') depth--;
+            else if (s[i] == '/' && depth == 0)
+            {
+                main = s.Substring(0, i);
+                alpha = s.Substring(i + 1).Trim();
+                return;
+            }
+        }
+    }
+
+    private static bool StartsWithWord(string s, string word)
+    {
+        var t = s.AsSpan().TrimStart();
+        return t.Length > word.Length && t.StartsWith(word, StringComparison.OrdinalIgnoreCase) && char.IsWhiteSpace(t[word.Length]);
+    }
+
+    // ---------------------------------------------------------------- relative colours (CSS Color 5)
+
+    /// <summary>
+    /// A relative colour: "from &lt;origin&gt;" then the channels, where the function's channel keywords (r g b, h s l,
+    /// l c h and so on, and alpha) stand for the origin colour's values in that function's colour space, as plain
+    /// numbers. The keywords are replaced by their values and the result is parsed as an ordinary colour, so they work
+    /// on their own and inside calc() and the other math functions. Without "/ alpha" the origin's alpha is kept.
+    /// </summary>
+    private static bool Relative(string fn, string args, uint current, int depth, out Rgba color)
+    {
+        color = default;
+        var s = args.TrimStart().Substring(4).Trim();
+        SplitAlpha(s, out var main, out var alphaText);
+        var tokens = CssParser.Tokens(main);
+        if (tokens.Count < 1 || !TryParseAny(tokens[0], current, depth + 1, out var origin)) return false;
+        int first = 1;
+        string? space = null;
+        if (fn == "color")
+        {
+            if (tokens.Count < 2) return false;
+            space = tokens[1].ToLowerInvariant();
+            first = 2;
+        }
+        if (tokens.Count - first != 3 || !Channels(fn, space, origin, out var names, out var values)) return false;
+        var sb = new System.Text.StringBuilder();
+        if (space != null) sb.Append(space).Append(' ');
+        for (int i = 0; i < 3; i++)
+        {
+            var channel = Substitute(tokens[first + i], names, values);
+            if (channel == null) return false;
+            sb.Append(channel).Append(' ');
+        }
+        sb.Append("/ ");
+        if (alphaText == null) sb.Append(Format(origin.A));
+        else if (Substitute(alphaText, names, values) is { } a) sb.Append(a);
+        else return false;
+        return TryParse(fn, sb.ToString(), current, depth + 1, out color);
+    }
+
+    /// <summary>The channel keywords of a colour function and the origin colour's value for each, the last being alpha.</summary>
+    private static bool Channels(string fn, string? space, Rgba origin, out string[] names, out double[] values)
+    {
+        names = Array.Empty<string>();
+        values = Array.Empty<double>();
+        double[] v;
+        switch (fn)
+        {
+            case "rgb":
+            case "rgba":
+                names = new[] { "r", "g", "b" };
+                v = new[] { origin.R * 255, origin.G * 255, origin.B * 255 };
+                break;
+            case "hsl":
+            case "hsla":
+            {
+                // Saturation and lightness are numbers on the percentage scale: s is 100 for a saturated colour.
+                var (h, sat, l) = RgbToHsl(origin.R, origin.G, origin.B);
+                names = new[] { "h", "s", "l" };
+                v = new[] { h, sat * 100, l * 100 };
+                break;
+            }
+            case "hwb":
+            {
+                if (!TryToSpace("hwb", origin, out var w, out _)) return false;
+                names = new[] { "h", "w", "b" };
+                v = new[] { w[2], w[0] * 100, w[1] * 100 };
+                break;
+            }
+            case "lab":
+            case "oklab":
+                if (!TryToSpace(fn, origin, out v, out _)) return false;
+                names = new[] { "l", "a", "b" };
+                break;
+            case "lch":
+            case "oklch":
+                if (!TryToSpace(fn, origin, out v, out _)) return false;
+                names = new[] { "l", "c", "h" };
+                break;
+            case "color":
+                if (space == null || !TryToSpace(space, origin, out v, out _)) return false;
+                names = space.StartsWith("xyz", StringComparison.Ordinal) ? new[] { "x", "y", "z" } : new[] { "r", "g", "b" };
+                break;
+            default:
+                return false;
+        }
+        names = new[] { names[0], names[1], names[2], "alpha" };
+        // A missing hue (an achromatic origin) is 0 when a keyword refers to it.
+        values = new[] { Finite(v[0]), Finite(v[1]), Finite(v[2]), origin.A };
+        return true;
+
+        static double Finite(double d) => double.IsFinite(d) ? d : 0;
+    }
+
+    /// <summary>
+    /// Replaces the channel keywords in a component (an identifier on its own, not a function name or a unit) with
+    /// their values; null when an identifier remains that is neither none nor a math keyword.
+    /// </summary>
+    private static string? Substitute(string component, string[] names, double[] values)
+    {
+        var sb = new System.Text.StringBuilder(component.Length + 8);
+        int i = 0, n = component.Length;
+        while (i < n)
+        {
+            char c = component[i];
+            bool startsIdent = char.IsLetter(c) || c == '-' && i + 1 < n && char.IsLetter(component[i + 1]);
+            bool afterNumber = i > 0 && (char.IsLetterOrDigit(component[i - 1]) || component[i - 1] is '.' or '_' or '-' or '%');
+            if (!startsIdent || afterNumber)
+            {
+                sb.Append(c);
+                i++;
+                continue;
+            }
+            int start = i;
+            while (i < n && (char.IsLetterOrDigit(component[i]) || component[i] is '-' or '_')) i++;
+            var ident = component.Substring(start, i - start);
+            if (i < n && component[i] == '(') { sb.Append(ident); continue; }
+            int k = Array.FindIndex(names, x => x.Equals(ident, StringComparison.OrdinalIgnoreCase));
+            if (k >= 0)
+            {
+                // In brackets, so that "calc(10 - a)" with a negative a stays a valid expression.
+                bool alone = start == 0 && i == n;
+                var value = Format(values[k]);
+                sb.Append(alone || values[k] >= 0 ? value : "(" + value + ")");
+                continue;
+            }
+            var lower = ident.ToLowerInvariant();
+            if (lower is not ("none" or "pi" or "e" or "infinity" or "-infinity" or "nearest" or "up" or "down" or "to-zero")) return null;
+            sb.Append(ident);
+        }
+        return sb.ToString();
+    }
+
+    private static string Format(double v) => v.ToString("0.##########", CultureInfo.InvariantCulture);
 
     private static bool TryComponent(string tok, out Component c)
     {
@@ -443,6 +592,32 @@ internal static class ColorFunctions
                 v = new[] { Encode(p.Item1), Encode(p.Item2), Encode(p.Item3) };
                 return true;
             }
+            case "a98-rgb":
+            {
+                static double Enc(double v) => Math.Sign(v) * Math.Pow(Math.Abs(v), 256.0 / 563);
+                var p = MulM(XyzToLinA98, MulM(LinSrgbToXyz, lin));
+                v = new[] { Enc(p.Item1), Enc(p.Item2), Enc(p.Item3) };
+                return true;
+            }
+            case "prophoto-rgb":
+            {
+                static double Enc(double v) => Math.Abs(v) >= 1.0 / 512 ? Math.Sign(v) * Math.Pow(Math.Abs(v), 1 / 1.8) : 16 * v;
+                var p = MulM(XyzD50ToLinProPhoto, MulM(D65ToD50, MulM(LinSrgbToXyz, lin)));
+                v = new[] { Enc(p.Item1), Enc(p.Item2), Enc(p.Item3) };
+                return true;
+            }
+            case "rec2020":
+            {
+                static double Enc(double v)
+                {
+                    const double alpha = 1.09929682680944, beta = 0.018053968510807;
+                    double abs = Math.Abs(v);
+                    return abs > beta ? Math.Sign(v) * (alpha * Math.Pow(abs, 0.45) - (alpha - 1)) : 4.5 * v;
+                }
+                var p = MulM(XyzToLinRec2020, MulM(LinSrgbToXyz, lin));
+                v = new[] { Enc(p.Item1), Enc(p.Item2), Enc(p.Item3) };
+                return true;
+            }
             case "xyz":
             case "xyz-d65":
             {
@@ -676,6 +851,8 @@ internal static class ColorFunctions
         0.02703136138641234, 0.07068885253582723, 0.9913375368376388,
     };
 
+    private static readonly double[] XyzToLinA98 = Invert(LinA98ToXyz);
+
     private static readonly double[] LinRec2020ToXyz =
     {
         0.6369580483012914, 0.14461690358620832, 0.1688809751641721,
@@ -689,6 +866,10 @@ internal static class ColorFunctions
         0.2880711282292934, 0.7118432178101014, 0.00008565396060525902,
         0.0, 0.0, 0.8251046025104601,
     };
+
+    private static readonly double[] XyzToLinRec2020 = Invert(LinRec2020ToXyz);
+
+    private static readonly double[] XyzD50ToLinProPhoto = Invert(LinProPhotoToXyzD50);
 
     private static readonly double[] D50ToD65 =
     {

@@ -96,7 +96,9 @@ public class Css3Tests
     }
 
     [Theory]
-    [InlineData("rgb(from red r g b)")]
+    [InlineData("rgb(from red r g)")]
+    [InlineData("rgb(from red r g frobnicate)")]
+    [InlineData("rgb(from notacolour r g b)")]
     [InlineData("oklch(50% 0.1)")]
     [InlineData("color(unknown 1 0 0)")]
     [InlineData("color-mix(red, blue)")]
@@ -273,7 +275,11 @@ public class Css3Tests
     [InlineData("(made-up-property: 1)", false)]
     [InlineData("not (made-up-property: 1)", true)]
     [InlineData("(made-up: 1) or (color: oklch(50% 0.1 20))", true)]
-    [InlineData("(color: rgb(from red r g b))", false)]
+    [InlineData("(color: rgb(from red r g b))", true)]
+    [InlineData("(color: rgb(from red r g q))", false)]
+    [InlineData("(list-style-image: url(a.png))", true)]
+    [InlineData("at-rule(@counter-style)", true)]
+    [InlineData("at-rule(@frobnicate)", false)]
     [InlineData("selector(:has(a))", true)]
     [InlineData("selector(:frobnicate)", false)]
     [InlineData("((-webkit-hyphens:none)) and (not (margin-trim:inline))", false)]

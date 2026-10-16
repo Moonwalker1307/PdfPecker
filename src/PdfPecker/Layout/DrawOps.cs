@@ -62,6 +62,12 @@ internal sealed class BackgroundOp : DrawOp
     public SvgImage? Svg;          // an SVG file, drawn as vectors in each tile
     public Gradient? Gradient;
     public CornerRadii? ClipRadii; // rounded corners of the clip (border-radius)
+    /// <summary>
+    /// Where the whole image lies relative to the tile's top-left corner, when the tile shows only part of it (a slice of
+    /// a border image); null when the image fills the tile. A tile never paints outside itself.
+    /// </summary>
+    public (float X, float Y, float W, float H)? Inner;
+    public string? BlendMode;      // background-blend-mode as a PDF name; null = normal
 
     public override void Offset(float dx, float dy) { ClipX += dx; ClipY += dy; TileX += dx; TileY += dy; }
 
@@ -281,8 +287,8 @@ internal sealed class ClipOp : GroupOp
 }
 
 /// <summary>
-/// The ops of a float, a positioned or a transformed box: painted in its own layer (CSS 2.1 Appendix E), and drawn with
-/// <see cref="Transform"/> about (<see cref="OriginX"/>, <see cref="OriginY"/>) when it has one.
+/// The ops of a float, a positioned, transformed, clipped, blended or filtered box: painted in its own layer (CSS 2.1
+/// Appendix E), and drawn with <see cref="Transform"/> about (<see cref="OriginX"/>, <see cref="OriginY"/>) when it has one.
 /// </summary>
 internal sealed class LayerOp : GroupOp
 {
@@ -295,12 +301,30 @@ internal sealed class LayerOp : GroupOp
     public bool StackingContext; // its first op, the box's own background, stays below its negative z-index children
     public Matrix? Transform;    // y-down, about the origin
     public float OriginX, OriginY;
+    public string? BlendMode;    // mix-blend-mode as a PDF name: painted as a group blended with what is below
+    public bool Isolated;        // isolation: isolate, or a box whose background layers blend only with each other
+    // clip-path: the outline the layer is painted inside, in flow coordinates before the transform.
+    public byte[]? ClipVerbs;    // SvgShape.MoveTo, LineTo, CurveTo and Close
+    public float[]? ClipPoints;
+    public bool ClipEvenOdd;
+    // A filter with blur() or drop-shadow(): run on the pixels of the layer's content. With RasterReplaces the result is
+    // drawn instead of the content (blur); without, under it (the shadows of drop-shadow()).
+    public SvgFilter? Raster;
+    public bool RasterReplaces;
+
+    /// <summary>Whether the layer is drawn as a block of its own: transformed, translucent, blended, clipped or filtered.</summary>
+    public bool NeedsBlock => Transform != null || Opacity < 1 || BlendMode != null || Isolated || ClipVerbs != null || Raster != null;
+
+    /// <summary>Whether the layer is painted as one transparency group.</summary>
+    public bool NeedsGroup => Opacity < 1 || BlendMode != null || Isolated;
 
     public override void Offset(float dx, float dy)
     {
         base.Offset(dx, dy);
         OriginX += dx;
         OriginY += dy;
+        if (ClipPoints != null)
+            for (int i = 0; i + 1 < ClipPoints.Length; i += 2) { ClipPoints[i] += dx; ClipPoints[i + 1] += dy; }
     }
 
     /// <summary>Sorts ops into painting order, keeping document order within a layer.</summary>
@@ -342,6 +366,15 @@ internal static class BoxPainter
         if (w > 0 && h > 0 && !s.CanvasBackground)
         {
             var layers = s.BackgroundImages;
+            // With background-blend-mode, the background is a group of its own: its layers blend with each other and
+            // with the background colour, not with what is behind the box.
+            var outer = group;
+            if (layers != null && s.BackgroundBlendModes != null)
+            {
+                var isolated = new LayerOp { Isolated = true };
+                group.Ops.Add(isolated);
+                group = isolated;
+            }
             if (CssColor.IsVisible(s.BackgroundColor))
             {
                 // The colour is clipped like the bottom layer.
@@ -358,10 +391,21 @@ internal static class BoxPainter
             {
                 uint backdrop = CssColor.IsVisible(s.BackgroundColor) ? CssColor.FlattenOnWhite(s.BackgroundColor) : 0xFFFFFFFF;
                 for (int i = layers.Length - 1; i >= 0; i--)
-                    if (layers[i] is { } layer) PaintLayer(group, s, layer, i, x, y, w, h, images, basis, backdrop, radii);
+                {
+                    if (layers[i] is not { } layer) continue;
+                    int before = group.Ops.Count;
+                    PaintLayer(group, s, layer, i, x, y, w, h, images, basis, backdrop, radii);
+                    if (s.BackgroundBlendModes is { Length: > 0 } modes && group.Ops.Count > before && group.Ops[^1] is BackgroundOp bg)
+                        bg.BlendMode = modes[i % modes.Length];
+                }
             }
+            group = outer;
         }
-        if (s.HasBorder) PaintBorders(group, s, x, y, w, h, sides, collapsedCell, radii);
+        if (s.BoxShadows != null && w > 0 && h > 0 && !s.CanvasBackground) PaintInsetShadows(group, s, x, y, w, h, radii);
+        // A border image replaces the border styles; when its image cannot be shown, the styles are drawn instead.
+        // It does not apply to collapsed table borders.
+        bool borderImage = s.BorderImageSource != null && !collapsedCell && PaintBorderImage(group, s, x, y, w, h, images);
+        if (s.HasBorder && !borderImage) PaintBorders(group, s, x, y, w, h, sides, collapsedCell, radii);
         if (s.OutlineStyle != BorderStyle.None && !collapsedCell) PaintOutline(group, s, x, y, w, h, radii);
     }
 
@@ -405,10 +449,10 @@ internal static class BoxPainter
             group.Ops.Add(new BorderRectOp(ox, oy, ow, oh, width, color));
             return;
         }
-        Side(group, style, width, color, ox, oy, ow, width, horizontal: true);
-        Side(group, style, width, color, ox, oy + oh - width, ow, width, horizontal: true);
-        Side(group, style, width, color, ox, oy, width, oh, horizontal: false);
-        Side(group, style, width, color, ox + ow - width, oy, width, oh, horizontal: false);
+        Side(group, style, width, color, ox, oy, ow, width, horizontal: true, SideTop);
+        Side(group, style, width, color, ox, oy + oh - width, ow, width, horizontal: true, SideBottom);
+        Side(group, style, width, color, ox, oy, width, oh, horizontal: false, SideLeft);
+        Side(group, style, width, color, ox + ow - width, oy, width, oh, horizontal: false, SideRight);
     }
 
     private static void PaintBorders(GroupOp group, ComputedStyle s, float x, float y, float w, float h, int sides, bool collapsedCell, CornerRadii? radii)
@@ -418,6 +462,13 @@ internal static class BoxPainter
         if (radii is { } r && w > 0 && h > 0)
         {
             PaintRoundedBorder(group, s, x, y, w, h, r);
+            return;
+        }
+        // Sides of the 3D styles differ in shade, so they meet along mitred corners like the sides of a rounded border.
+        if (sides == AllSides && !collapsedCell && w > 0 && h > 0
+            && (Is3D(s.BorderTopStyle) || Is3D(s.BorderRightStyle) || Is3D(s.BorderBottomStyle) || Is3D(s.BorderLeftStyle)))
+        {
+            PaintRoundedBorder(group, s, x, y, w, h, default);
             return;
         }
         // Chrome fills collapsed table borders side by side, and strokes other boxes' uniform borders.
@@ -430,10 +481,51 @@ internal static class BoxPainter
             group.Ops.Add(new BorderRectOp(x, y, w, h, bt, topColor));
             return;
         }
-        if ((sides & Top) != 0) Side(group, s.BorderTopStyle, bt, s.BorderTopColor ?? s.Color, x, y, w, bt, horizontal: true);
-        if ((sides & Bottom) != 0) Side(group, s.BorderBottomStyle, bb, s.BorderBottomColor ?? s.Color, x, y + h - bb, w, bb, horizontal: true);
-        if ((sides & Left) != 0) Side(group, s.BorderLeftStyle, bl, s.BorderLeftColor ?? s.Color, x, y, bl, h, horizontal: false);
-        if ((sides & Right) != 0) Side(group, s.BorderRightStyle, br, s.BorderRightColor ?? s.Color, x + w - br, y, br, h, horizontal: false);
+        if ((sides & Top) != 0) Side(group, Collapsed(s.BorderTopStyle, collapsedCell), bt, s.BorderTopColor ?? s.Color, x, y, w, bt, horizontal: true, SideTop);
+        if ((sides & Bottom) != 0) Side(group, Collapsed(s.BorderBottomStyle, collapsedCell), bb, s.BorderBottomColor ?? s.Color, x, y + h - bb, w, bb, horizontal: true, SideBottom);
+        if ((sides & Left) != 0) Side(group, Collapsed(s.BorderLeftStyle, collapsedCell), bl, s.BorderLeftColor ?? s.Color, x, y, bl, h, horizontal: false, SideLeft);
+        if ((sides & Right) != 0) Side(group, Collapsed(s.BorderRightStyle, collapsedCell), br, s.BorderRightColor ?? s.Color, x + w - br, y, br, h, horizontal: false, SideRight);
+    }
+
+    // Indexes of the sides for the 3D border styles, in the order of the border shorthand.
+    private const int SideTop = 0, SideRight = 1, SideBottom = 2, SideLeft = 3;
+
+    /// <summary>True for groove, ridge, inset and outset: the border styles drawn in two shades of their colour.</summary>
+    public static bool Is3D(BorderStyle style) => style is BorderStyle.Groove or BorderStyle.Ridge or BorderStyle.Inset or BorderStyle.Outset;
+
+    // In the collapsing border model inset means ridge and outset means groove (CSS 2.1 §17.6.2.1).
+    private static BorderStyle Collapsed(BorderStyle style, bool collapsed)
+        => !collapsed ? style : style switch { BorderStyle.Inset => BorderStyle.Ridge, BorderStyle.Outset => BorderStyle.Groove, _ => style };
+
+    /// <summary>
+    /// The colour of one side of a 3D border, as Chrome shades it: the top and left of an inset border (and the bottom
+    /// and right of an outset one) are darkened; the other sides keep the colour, unless it is too dark to show a
+    /// difference, when they are lightened instead. A groove is an inset outer half with an outset inner half, a ridge
+    /// the reverse.
+    /// </summary>
+    public static uint Shade3D(BorderStyle style, int side, uint color, bool innerHalf = false)
+    {
+        if (style is BorderStyle.Groove or BorderStyle.Ridge)
+            style = (style == BorderStyle.Groove) != innerHalf ? BorderStyle.Inset : BorderStyle.Outset;
+        if (style is not (BorderStyle.Inset or BorderStyle.Outset)) return color;
+        bool darken = (side is SideTop or SideLeft) == (style == BorderStyle.Inset);
+        uint a = color & 0xFF000000;
+        float r = (color >> 16 & 0xFF) / 255f, g = (color >> 8 & 0xFF) / 255f, b = (color & 0xFF) / 255f;
+        float v = Math.Max(r, Math.Max(g, b));
+        if (darken)
+        {
+            float k = v > 0 ? Math.Max(0, (v - 0.33f) / v) : 0;
+            return a | Channel(r * k) << 16 | Channel(g * k) << 8 | Channel(b * k);
+        }
+        // How dark the colour looks; the weights and the threshold reproduce which colours Chrome lightens (grey up to
+        // #363636, red up to #7f0000, green up to #004000, and nearly every blue).
+        float lum = 0.215f * MathF.Pow(r, 1.8f) + 0.73f * MathF.Pow(g, 1.8f) + 0.055f * MathF.Pow(b, 1.8f);
+        if (lum >= 0.0622f) return color;
+        float m = Math.Min(1, v + 0.33f) / Math.Max(v, 1e-6f);
+        if (v == 0) return a | 0x545454;
+        return a | Channel(r * m) << 16 | Channel(g * m) << 8 | Channel(b * m);
+
+        static uint Channel(float c) => (uint)Math.Clamp(c * 255.999f, 0, 255);
     }
 
     /// <summary>
@@ -568,6 +660,22 @@ internal static class BoxPainter
                 group.Ops.Add(new RoundRectOp(x, y, w, h, r, sides[i].Color) { StrokeWidth = sides[i].Width, Style = sides[i].Style, Clip = polys[i] });
                 continue;
             }
+            if (sides[i].Style is BorderStyle.Groove or BorderStyle.Ridge && sides[i].Width >= 2)
+            {
+                // The outer and inner halves of the ring, each in its own shade.
+                float th = bt / 2, rh = br / 2, bh = bb / 2, lh = bl / 2;
+                group.Ops.Add(new RoundRectOp(x, y, w, h, r, Shade3D(sides[i].Style, i, sides[i].Color)) { Clip = polys[i] }
+                    .WithHole(x + lh, y + th, Math.Max(0, w - lh - rh), Math.Max(0, h - th - bh), r.Inset(th, rh, bh, lh)));
+                group.Ops.Add(new RoundRectOp(x + lh, y + th, Math.Max(0, w - lh - rh), Math.Max(0, h - th - bh), r.Inset(th, rh, bh, lh) ?? default,
+                        Shade3D(sides[i].Style, i, sides[i].Color, innerHalf: true)) { Clip = (float[])polys[i].Clone() }
+                    .WithHole(ix, iy, iw, ih, inner));
+                continue;
+            }
+            if (Is3D(sides[i].Style))
+            {
+                group.Ops.Add(new RoundRectOp(x, y, w, h, r, Shade3D(sides[i].Style, i, sides[i].Color)) { Clip = polys[i] }.WithHole(ix, iy, iw, ih, inner));
+                continue;
+            }
             if (Doubled(i))
             {
                 group.Ops.Add(OuterThird(sides[i].Color, polys[i]));
@@ -581,7 +689,7 @@ internal static class BoxPainter
     /// <summary>
     /// Paints outer box shadows under the box, the first shadow on top. A shadow is opaque, blended over white by its
     /// alpha, and only drawn outside the border box, as browsers clip it there. A blur becomes bands that fade out like a
-    /// Gaussian edge. Inset shadows are not drawn.
+    /// Gaussian edge. Inset shadows are painted by <see cref="PaintInsetShadows"/>.
     /// </summary>
     public static void PaintShadows(GroupOp group, ComputedStyle s, float x, float y, float w, float h, CornerRadii? radii = null)
     {
@@ -620,6 +728,64 @@ internal static class BoxPainter
                 else Outside(group, sx, sy, sw, shh, x, y, w, h, c);
             }
         }
+    }
+
+    /// <summary>
+    /// Paints inset box shadows inside the padding box, over the background and under the borders, the first shadow on
+    /// top. The shadow fills the padding box outside a hole: the padding box moved by the offset and shrunk by the
+    /// spread. A blur becomes rings around the hole, each in its own translucent shade, so that what lies under them
+    /// (a background image) still shows through.
+    /// </summary>
+    public static void PaintInsetShadows(GroupOp group, ComputedStyle s, float x, float y, float w, float h, CornerRadii? radii)
+    {
+        var shadows = s.BoxShadows;
+        if (shadows == null) return;
+        float bl = s.BorderLeft, bt = s.BorderTop, br = s.BorderRight, bb = s.BorderBottom;
+        float px = x + bl, py = y + bt, pw = w - bl - br, ph = h - bt - bb;
+        if (pw <= 0 || ph <= 0) return;
+        var padR = InnerRadii(radii, bl, bt, br, bb);
+        ClipOp? clip = null;
+        for (int i = shadows.Length - 1; i >= 0; i--)
+        {
+            var sh = shadows[i];
+            if (!sh.Inset) continue;
+            uint color = sh.Color ?? s.Color;
+            uint alpha = color >> 24;
+            if (alpha == 0) continue;
+            float blur = Math.Min(sh.Blur, 300), spread = Math.Clamp(sh.Spread, -1000, 1000);
+            clip ??= new ClipOp(px, py, pw, ph, padR);
+            // Far enough out to cover the padding box wherever the hole is.
+            float reach = Math.Abs(sh.X) + Math.Abs(sh.Y) + blur + Math.Abs(spread) + 2;
+            float ox = px - reach, oy = py - reach, ow = pw + 2 * reach, oh = ph + 2 * reach;
+            (float X, float Y, float W, float H, CornerRadii R) Hole(float inset)
+            {
+                var r = padR is { } pr ? pr.Outset(-inset) : default;
+                return (px + sh.X + inset, py + sh.Y + inset, Math.Max(0, pw - 2 * inset), Math.Max(0, ph - 2 * inset), r);
+            }
+            uint Shade(float cover) => (uint)Math.Clamp(MathF.Round(alpha * cover), 0, 255) << 24 | (color & 0xFFFFFF);
+            int bands = blur <= 0 ? 0 : Math.Clamp((int)MathF.Ceiling(2 * blur / 0.75f), 2, 24); // about one pixel each
+            float sigma = blur / 2;
+            // Band k is the ring between the hole inset by edge(k + 1) and the larger hole inset by edge(k); the
+            // insets run from spread + blur, where the shadow fades out, down to spread - blur.
+            float Edge(int k) => spread + blur - 2 * blur * k / bands;
+            var last = Hole(bands == 0 ? spread : Edge(bands));
+            var outer = new RoundRectOp(ox, oy, ow, oh, default, color);
+            if (last.W > 0 && last.H > 0) outer.WithHole(last.X, last.Y, last.W, last.H, last.R);
+            clip.Ops.Add(outer);
+            for (int k = 0; k < bands; k++)
+            {
+                var big = Hole(Edge(k + 1));
+                if (big.W <= 0 || big.H <= 0) continue;
+                float mid = Edge(k) - blur / bands;
+                uint c = Shade(0.5f * Erfc((mid - spread) / (sigma * MathF.Sqrt(2))));
+                if (c >> 24 == 0) continue;
+                var ring = new RoundRectOp(big.X, big.Y, big.W, big.H, big.R, c);
+                var small = Hole(Edge(k));
+                if (small.W > 0 && small.H > 0) ring.WithHole(small.X, small.Y, small.W, small.H, small.R);
+                clip.Ops.Add(ring);
+            }
+        }
+        if (clip != null) group.Ops.Add(clip);
     }
 
     // Paints rectangle (sx, sy, sw, sh) minus the box (x, y, w, h) as up to four rectangles.
@@ -786,11 +952,231 @@ internal static class BoxPainter
         if (x1 > x0 && y1 > y0) group.Ops.Add(op);
     }
 
-    public static void Side(GroupOp group, BorderStyle style, float width, uint color, float x, float y, float w, float h, bool horizontal)
+    /// <summary>
+    /// Paints the border image of a border box (CSS Backgrounds 3 §6): the image is cut into nine parts by the slice
+    /// lines, and each part is scaled, and repeated along its edge, into the matching part of the border image area,
+    /// which is the border box grown by the outsets. Each part becomes a background op, so that images, SVG files and
+    /// gradients take the usual paths, also in the renderer: a raster slice cut out as an image of its own, or else the
+    /// whole image placed so that only its slice shows in the tile. False when nothing could be loaded, so that the
+    /// border styles are drawn instead.
+    /// </summary>
+    private static bool PaintBorderImage(GroupOp group, ComputedStyle s, float x, float y, float w, float h, ImageLoader? images)
+    {
+        var source = s.BorderImageSource!;
+        PdfImage? image = null;
+        SvgImage? svg = null;
+        if (source.Url != null)
+        {
+            image = images?.Load(source.Url);
+            if (image is { Width: <= 0 } or { Height: <= 0 }) image = null;
+            if (image == null) svg = images?.LoadSvg(source.Url);
+            if (image == null && svg == null) return false;
+        }
+        else if (source.Gradient == null) return false;
+        if (!(w > 0 && h > 0)) return true;
+
+        // The border widths that border-image-width multiplies; a side whose style is none has none.
+        float[] border = { s.BorderTop, s.BorderRight, s.BorderBottom, s.BorderLeft };
+        var outsets = s.BorderImageOutsets;
+        float[] o = new float[4];
+        // Outsets are capped like a shadow's spread, so that a huge one cannot paint, and add, pages far away.
+        for (int k = 0; k < 4; k++)
+            o[k] = outsets == null ? 0 : Math.Clamp(outsets[k].IsNumber ? outsets[k].Number * border[k] : outsets[k].Length.Resolve(0), 0, 1000);
+        float ax = x - o[3], ay = y - o[0], aw = w + o[1] + o[3], ah = h + o[0] + o[2];
+        if (!(aw > 0 && ah > 0) || !float.IsFinite(aw) || !float.IsFinite(ah)) return true;
+
+        // The image's size: its natural one, or for a gradient (and an SVG file without one) the border image area's.
+        float iw, ih;
+        bool natural = true;
+        if (image != null) { iw = image.Width * 0.75f; ih = image.Height * 0.75f; }
+        else if (svg != null)
+        {
+            if (svg.Width is { } sw && svg.Height is { } sh) { iw = sw; ih = sh; }
+            else if (svg.HasViewBox && svg.ViewBoxWidth > 0 && svg.ViewBoxHeight > 0)
+            {
+                // Only an aspect ratio: as large as fits the area (CSS contain), or one given side.
+                float r = svg.ViewBoxHeight / svg.ViewBoxWidth;
+                if (svg.Width is { } w1) { iw = w1; ih = w1 * r; }
+                else if (svg.Height is { } h1) { iw = h1 / r; ih = h1; }
+                else if (ah / aw > r) { iw = aw; ih = aw * r; natural = false; }
+                else { iw = ah / r; ih = ah; natural = false; }
+            }
+            else { iw = svg.Width ?? aw; ih = svg.Height ?? ah; natural = svg.Width != null && svg.Height != null; }
+        }
+        else { iw = aw; ih = ah; natural = false; }
+        if (!(iw > 0 && ih > 0) || !float.IsFinite(iw) || !float.IsFinite(ih)) return true;
+
+        // Slices, in the image's points: numbers are image pixels (CSS pixels for vector images), percentages refer to
+        // the image's width for the left and right slice and to its height for the top and bottom one.
+        var slices = s.BorderImageSlice;
+        float Slice(int k, float size)
+        {
+            if (slices == null) return size; // 100%
+            var v = slices[k];
+            return Math.Clamp(v.IsNumber ? v.Number * 0.75f : v.Length.Resolve(size), 0, size);
+        }
+        float st = Slice(0, ih), sr = Slice(1, iw), sb = Slice(2, ih), sl = Slice(3, iw);
+
+        // Widths of the border image area's edges: a multiple of the border width, a length, a percentage of the area,
+        // or auto (the slice's own size, or the border width for an image without one).
+        var widths = s.BorderImageWidths;
+        float Width(int k, float slice, float basis)
+        {
+            if (widths == null) return border[k];
+            var v = widths[k];
+            // Capped so that a huge multiple stays finite for the scaling below.
+            float width = v.IsNumber ? v.Number * border[k] : v.IsAuto ? natural ? slice : border[k] : v.Length.Resolve(basis);
+            return width > 0 ? Math.Min(width, 1e6f) : 0;
+        }
+        float wt = Width(0, st, ah), wr = Width(1, sr, aw), wb = Width(2, sb, ah), wl = Width(3, sl, aw);
+        // Edges that overlap are scaled down together until they meet.
+        float f = 1;
+        if (wl + wr > aw) f = Math.Min(f, aw / (wl + wr));
+        if (wt + wb > ah) f = Math.Min(f, ah / (wt + wb));
+        if (f < 1) { wt *= f; wr *= f; wb *= f; wl *= f; }
+
+        float midW = aw - wl - wr, midH = ah - wt - wb;   // the area's middle
+        float smw = iw - sl - sr, smh = ih - st - sb;     // the image's middle
+        float mx = ax + wl, my = ay + wt;
+        var rx = s.BorderImageRepeatX;
+        var ry = s.BorderImageRepeatY;
+        uint backdrop = CssColor.IsVisible(s.BackgroundColor) ? CssColor.FlattenOnWhite(s.BackgroundColor) : 0xFFFFFFFF;
+
+        // A raster image is cut into its nine slices (corners, edges, middle), which are then drawn whole; when it cannot
+        // be cut, each part draws the whole image clipped to its slice.
+        PdfImage?[]? cuts = null;
+        if (image != null && images != null)
+        {
+            (int, int, int, int) Px(float sx, float sy, float sw, float sh)
+            {
+                int x0 = (int)MathF.Round(sx / 0.75f), y0 = (int)MathF.Round(sy / 0.75f);
+                return (x0, y0, (int)MathF.Round((sx + sw) / 0.75f) - x0, (int)MathF.Round((sy + sh) / 0.75f) - y0);
+            }
+            cuts = images.Slices(image, new[]
+            {
+                Px(0, 0, sl, st), Px(iw - sr, 0, sr, st), Px(iw - sr, ih - sb, sr, sb), Px(0, ih - sb, sl, sb),
+                Px(sl, 0, smw, st), Px(sl, ih - sb, smw, sb), Px(0, st, sl, smh), Px(iw - sr, st, sr, smh),
+                s.BorderImageFill ? Px(sl, st, smw, smh) : (0, 0, 0, 0),
+            });
+        }
+
+        // Paints the slice (sx, sy, sw, sh) of the image, which is cut slice k, into the region (dx, dy, dw, dh), as
+        // tiles of tw × th points laid out along each axis by its repeat keyword.
+        void Part(int k, float sx, float sy, float sw, float sh, float dx, float dy, float dw, float dh, float tw, float th,
+            BorderImageRepeat repeatX, BorderImageRepeat repeatY)
+        {
+            if (!(sw > 0 && sh > 0 && dw > 0 && dh > 0 && tw > 0 && th > 0)) return;
+            var cut = cuts?[k];
+            if (cuts != null && cut == null) return; // less than a pixel
+            if (Axis(dx, dw, tw, repeatX) is not { } ex || Axis(dy, dh, th, repeatY) is not { } ey) return;
+            float kx = ex.Size / sw, ky = ey.Size / sh;
+            var inner = (X: -sx * kx, Y: -sy * ky, W: iw * kx, H: ih * ky);
+            Gradient? gradient = null;
+            if (source.Gradient is { } cg)
+            {
+                // The gradient is laid out over the whole image, then scaled and moved with it into the tile.
+                gradient = cg.Resolve(iw, ih, backdrop);
+                gradient.Transform = gradient.Transform.Then(Matrix.Scale(kx, ky)).Then(Matrix.Translate(inner.X, inner.Y));
+            }
+            var op = new BackgroundOp
+            {
+                ClipX = dx, ClipY = dy, ClipW = dw, ClipH = dh,
+                TileX = ex.Start, TileY = ey.Start, TileW = ex.Size, TileH = ey.Size,
+                StepX = ex.Step, StepY = ey.Step,
+                RepeatX = ex.Repeat, RepeatY = ey.Repeat,
+                Image = cut ?? image,
+                Svg = svg,
+                Gradient = gradient,
+                Inner = cut != null ? null : inner,
+            };
+            var (x0, y0, x1, y1) = op.Painted();
+            if (x1 > x0 && y1 > y0) group.Ops.Add(op);
+        }
+
+        // The corners are stretched into their regions.
+        const BorderImageRepeat Stretch = BorderImageRepeat.Stretch;
+        Part(0, 0, 0, sl, st, ax, ay, wl, wt, wl, wt, Stretch, Stretch);
+        Part(1, iw - sr, 0, sr, st, ax + aw - wr, ay, wr, wt, wr, wt, Stretch, Stretch);
+        Part(2, iw - sr, ih - sb, sr, sb, ax + aw - wr, ay + ah - wb, wr, wb, wr, wb, Stretch, Stretch);
+        Part(3, 0, ih - sb, sl, sb, ax, ay + ah - wb, wl, wb, wl, wb, Stretch, Stretch);
+        // The edges are as thick as their region and keep the slice's proportions along it, before repeating.
+        float kt = st > 0 ? wt / st : 0, kb = sb > 0 ? wb / sb : 0, kl = sl > 0 ? wl / sl : 0, kr = sr > 0 ? wr / sr : 0;
+        Part(4, sl, 0, smw, st, mx, ay, midW, wt, smw * kt, wt, rx, Stretch);
+        Part(5, sl, ih - sb, smw, sb, mx, ay + ah - wb, midW, wb, smw * kb, wb, rx, Stretch);
+        Part(6, 0, st, sl, smh, ax, my, wl, midH, wl, smh * kl, Stretch, ry);
+        Part(7, iw - sr, st, sr, smh, ax + aw - wr, my, wr, midH, wr, smh * kr, Stretch, ry);
+        // The middle, with fill only: scaled like the top edge across and like the left edge down, or failing those,
+        // like the bottom and the right edge, or not at all.
+        if (s.BorderImageFill)
+        {
+            float hx = kt > 0 ? kt : kb > 0 ? kb : 1;
+            float hy = kl > 0 ? kl : kr > 0 ? kr : 1;
+            Part(8, sl, st, smw, smh, mx, my, midW, midH, smw * hx, smh * hy, rx, ry);
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Lays out tiles of <paramref name="size"/> along one axis of a border image region (start, length): stretched
+    /// over it, repeated from its middle, rounded to a whole number of tiles, or a whole number of tiles with equal
+    /// gaps around them. Null when no tile is drawn.
+    /// </summary>
+    private static (float Start, float Size, float Step, bool Repeat)? Axis(float start, float length, float size, BorderImageRepeat repeat)
+    {
+        switch (repeat)
+        {
+            case BorderImageRepeat.Stretch:
+                return (start, length, length, false);
+            case BorderImageRepeat.Round:
+            {
+                float n = Math.Max(1, MathF.Round(length / size));
+                float t = length / n;
+                return t < MinTile ? null : (start, t, t, n > 1);
+            }
+            case BorderImageRepeat.Space:
+            {
+                if (size < MinTile) return null;
+                float n = MathF.Floor(length / size + 1e-4f);
+                if (n < 1) return null;
+                float gap = Math.Max(0, (length - n * size) / (n + 1));
+                return (start + gap, size, size + gap, n > 1);
+            }
+            default:
+                if (size < MinTile) return null;
+                // One tile is centred on the region, the others continue from it in both directions.
+                return (start + (length - size) / 2, size, size, size < length);
+        }
+    }
+
+    /// <summary>
+    /// Paints one side of a border as the rectangle (x, y, w, h). <paramref name="which"/> (0 top, 1 right, 2 bottom,
+    /// 3 left) shades the 3D styles; without it they are drawn solid.
+    /// </summary>
+    public static void Side(GroupOp group, BorderStyle style, float width, uint color, float x, float y, float w, float h, bool horizontal, int which = -1)
     {
         if (width <= 0 || style == BorderStyle.None || !CssColor.IsVisible(color)) return;
         switch (style)
         {
+            case BorderStyle.Groove or BorderStyle.Ridge when which >= 0 && width >= 2:
+            {
+                // The half nearer the outside of the box first.
+                uint outer = Shade3D(style, which, color), inner = Shade3D(style, which, color, innerHalf: true);
+                bool outerFirst = which is SideTop or SideLeft;
+                if (horizontal)
+                {
+                    group.Ops.Add(new RectOp(x, y, w, h / 2, outerFirst ? outer : inner));
+                    group.Ops.Add(new RectOp(x, y + h / 2, w, h / 2, outerFirst ? inner : outer));
+                }
+                else
+                {
+                    group.Ops.Add(new RectOp(x, y, w / 2, h, outerFirst ? outer : inner));
+                    group.Ops.Add(new RectOp(x + w / 2, y, w / 2, h, outerFirst ? inner : outer));
+                }
+                break;
+            }
+            case BorderStyle.Groove or BorderStyle.Ridge or BorderStyle.Inset or BorderStyle.Outset when which >= 0:
+                group.Ops.Add(new RectOp(x, y, w, h, Shade3D(style, which, color)));
+                break;
             case BorderStyle.Dashed:
             case BorderStyle.Dotted:
                 if (horizontal) group.Ops.Add(new LineOp(x, y + h / 2, x + w, y + h / 2, h, color, style == BorderStyle.Dotted));

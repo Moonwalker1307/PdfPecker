@@ -11,10 +11,11 @@ internal static class CssSupports
         "display", "color", "background", "background-color", "background-image", "background-repeat", "background-size",
         "background-position", "background-position-x", "background-position-y", "background-origin", "background-clip",
         "font", "font-family", "font-size", "font-weight", "font-style", "font-variant", "font-variant-ligatures",
-        "font-variant-caps", "font-feature-settings", "line-height", "text-align", "text-align-last",
+        "font-variant-caps", "font-variant-numeric", "font-feature-settings", "font-stretch", "font-variation-settings", "font-optical-sizing", "line-height", "text-align", "text-align-last",
         "text-decoration", "text-decoration-line", "text-decoration-color", "text-decoration-style", "text-decoration-thickness",
         "text-underline-offset", "text-transform", "text-indent", "letter-spacing", "word-spacing", "white-space",
         "overflow-wrap", "word-wrap", "word-break", "vertical-align", "list-style", "list-style-type", "list-style-position",
+        "list-style-image",
         "visibility", "box-shadow", "table-layout", "border-collapse", "border-spacing", "box-sizing", "float", "clear",
         "position", "inset", "top", "right", "bottom", "left", "z-index", "overflow", "overflow-x", "overflow-y", "transform",
         "transform-origin", "translate", "rotate", "scale", "content", "counter-reset", "counter-set", "counter-increment",
@@ -36,10 +37,12 @@ internal static class CssSupports
         "border-style", "border-color", "border-radius", "border-top-width", "border-right-width", "border-bottom-width",
         "border-left-width", "border-top-style", "border-right-style", "border-bottom-style", "border-left-style",
         "border-top-color", "border-right-color", "border-bottom-color", "border-left-color", "border-top-left-radius",
-        "border-top-right-radius", "border-bottom-right-radius", "border-bottom-left-radius", "tab-size",
+        "border-top-right-radius", "border-bottom-right-radius", "border-bottom-left-radius", "border-image",
+        "border-image-source", "border-image-slice", "border-image-width", "border-image-outset", "border-image-repeat", "tab-size",
         "line-clamp", "-webkit-line-clamp", "hyphens", "hyphenate-character", "size", "string-set", "page", "direction", "unicode-bidi", "margin-inline",
         "margin-inline-start", "margin-inline-end", "padding-inline", "padding-inline-start", "padding-inline-end", "margin-block",
         "margin-block-start", "margin-block-end", "padding-block", "padding-block-start", "padding-block-end",
+        "mix-blend-mode", "background-blend-mode", "isolation",
     };
 
     /// <summary>Whether this library applies the property.</summary>
@@ -83,6 +86,8 @@ internal static class CssSupports
                     "selector" => Selector.Parse(arg) != null,
                     "font-format" => arg.ToLowerInvariant() is "truetype" or "opentype" or "woff" or "woff2" or "collection",
                     "font-tech" => arg.ToLowerInvariant() is "features-opentype",
+                    "at-rule" => arg.ToLowerInvariant() is "@media" or "@supports" or "@layer" or "@import" or "@page" or "@font-face"
+                        or "@property" or "@counter-style" or "@charset" or "@namespace",
                     _ => false,
                 };
                 i = close + 1;

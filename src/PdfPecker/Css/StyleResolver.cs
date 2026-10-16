@@ -65,6 +65,9 @@ internal sealed class StyleResolver
     /// <summary>The string-set assignments of the last resolution, in document order.</summary>
     public List<StringAssignment> Strings { get; } = new();
 
+    /// <summary>The counter styles of list-style-type and counter(): the predefined ones and the sheet's @counter-style rules.</summary>
+    public CounterStyles CounterStyles { get; init; }
+
     /// <summary>Some element has a page property other than auto (named pages).</summary>
     public bool UsedPageNames { get; private set; }
 
@@ -150,6 +153,9 @@ internal sealed class StyleResolver
     {
         authorSheet.RankLayers();
         _author = new RuleIndex(authorSheet);
+        _firstLetterRules = authorSheet.Rules.Any(r => r.Selector.PseudoElement == PseudoElement.FirstLetter);
+        _firstLineRules = authorSheet.Rules.Any(r => r.Selector.PseudoElement == PseudoElement.FirstLine);
+        CounterStyles = CounterStyles.From(authorSheet.CounterStyles);
         if (authorSheet.RegisteredProperties.Count > 0)
         {
             // Registered custom properties start at their initial value: on every element when they do not inherit,
@@ -184,7 +190,15 @@ internal sealed class StyleResolver
 
     private static void Prepare(Element parent)
     {
-        // ::before and ::after boxes from an earlier pass are generated again.
+        // ::before, ::after and ::first-letter boxes from an earlier pass are generated again; a first letter goes back
+        // into the text it was taken from.
+        for (int i = parent.Children.Count - 1; i >= 0; i--)
+        {
+            if (parent.Children[i] is not Element { Generated: true, Name: FirstLetterName } letter) continue;
+            var text = letter.Children.Count == 1 && letter.Children[0] is TextNode t ? t.Text : "";
+            if (i + 1 < parent.Children.Count && parent.Children[i + 1] is TextNode rest) rest.Text = text + rest.Text;
+            else parent.Children.Insert(i + 1, new TextNode(text) { Parent = parent });
+        }
         parent.Children.RemoveAll(c => c is Element { Generated: true });
         int count = 0;
         foreach (var c in parent.Children) if (c is Element) count++;
@@ -213,6 +227,7 @@ internal sealed class StyleResolver
             }
             e.Id = e.GetAttribute("id");
             e.LayoutKey = null;
+            e.FirstLine = null;
             var cls = e.GetAttribute("class");
             if (!string.IsNullOrWhiteSpace(cls))
                 e.Classes = cls!.Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
@@ -243,6 +258,12 @@ internal sealed class StyleResolver
             if (e.Id != null && Paged.WantedCounters.Count > 0) SnapshotCounters(e.Id);
             if (e.Style.Display == Display.ListItem && HasPseudoRules) ResolveMarker(e);
             ResolveChildren(e);
+            if ((_firstLetterRules || _firstLineRules) && e.Style.Display is Display.Block or Display.ListItem or Display.InlineBlock
+                    or Display.TableCell or Display.TableCaption)
+            {
+                if (_firstLineRules) ResolveFirstLine(e);
+                if (_firstLetterRules) GenerateFirstLetter(e);
+            }
             if (e.Style.StringSet != null) SetStrings(e);
         }
         if (pseudos) Generate(parent, PseudoElement.After, ref scope);
@@ -313,6 +334,126 @@ internal sealed class StyleResolver
         else host.Children.Add(box);
     }
 
+    private const string FirstLetterName = "::first-letter";
+
+    /// <summary>
+    /// Wraps the first letter of a block's first line in a ::first-letter box when rules style it, together with the
+    /// punctuation around it (CSS Pseudo-Elements 4 §2.2). The letter may sit in an inline descendant, a ::before box
+    /// or the first block inside this one; an image or other atomic box before any text means there is no first letter.
+    /// </summary>
+    private void GenerateFirstLetter(Element host)
+    {
+        _count = 0;
+        if (UaIndex.Value.PseudoElements is { } ua) Collect(ua, host, TierUa, TierUaImportant, PseudoElement.FirstLetter);
+        if (_author.PseudoElements is { } author) Collect(author, host, TierAuthor, TierAuthorImportant, PseudoElement.FirstLetter);
+        if (_count == 0) return;
+        if (FindFirstText(host) is not { } found)
+        {
+            Array.Clear(_decls, 0, _count);
+            return;
+        }
+        var (owner, index, start, length) = found;
+        var node = (TextNode)owner.Children[index];
+        if (_count > 1) Array.Sort(_keys, _decls, 0, _count);
+        // The first letter is inside the first line, so it inherits the ::first-line style.
+        var parentStyle = owner.Style;
+        for (var a = owner; a != null; a = a == host ? null : a.Parent)
+            if (a.FirstLine is { } fl) { parentStyle = fl.Map(owner.Style); break; }
+        var s = Compute(FirstLetterName, parentStyle);
+        // A first letter that floats or is absolutely positioned becomes a block box; otherwise it stays inline.
+        if (s.Float != FloatSide.None || s.Position is Position.Absolute or Position.Fixed) s.Display = Display.Block;
+        else if (s.Display != Display.Inline) s.Display = Display.Inline;
+        var letter = new Element(FirstLetterName) { Generated = true, Style = s, Parent = owner };
+        letter.AppendChild(new TextNode(node.Text.Substring(start, length)));
+        var rest = node.Text.Substring(start + length);
+        node.Text = node.Text.Substring(0, start);
+        owner.Children.Insert(index + 1, letter);
+        if (rest.Length > 0) owner.Children.Insert(index + 2, new TextNode(rest) { Parent = owner });
+    }
+
+    /// <summary>
+    /// The text node holding the first letter of <paramref name="e"/>'s first line, and where in it the letter and the
+    /// punctuation around it start and how long they are; null when the first line starts with something else.
+    /// </summary>
+    private static (Element Owner, int Index, int Start, int Length)? FindFirstText(Element e)
+    {
+        for (int i = 0; i < e.Children.Count; i++)
+        {
+            switch (e.Children[i])
+            {
+                case TextNode t:
+                {
+                    var text = t.Text;
+                    int k = 0;
+                    while (k < text.Length && char.IsWhiteSpace(text[k])) k++;
+                    if (k == text.Length) continue;
+                    int start = k;
+                    while (k < text.Length && IsFirstLetterPunctuation(text, k)) k++;
+                    if (k == text.Length || char.IsWhiteSpace(text[k])) return null; // only punctuation: no letter
+                    k += char.IsSurrogatePair(text, k) ? 2 : 1;
+                    while (k < text.Length && CharUnicodeInfo.GetUnicodeCategory(text[k]) is UnicodeCategory.NonSpacingMark
+                               or UnicodeCategory.EnclosingMark or UnicodeCategory.SpacingCombiningMark) k++;
+                    while (k < text.Length && IsFirstLetterPunctuation(text, k)) k++;
+                    return (e, i, start, k - start);
+                }
+                case Element c:
+                {
+                    var s = c.Style;
+                    if (s == null || s.Display == Display.None) continue;
+                    // Out-of-flow boxes are not on the first line.
+                    if (s.Float != FloatSide.None || s.Position is Position.Absolute or Position.Fixed) continue;
+                    if (c.Name is "br" or "img" or "svg" or "input" or "select" or "textarea" or "button" or "video" or "audio" or "iframe"
+                        or "canvas" or "object" or "embed") return null;
+                    if (c.Name == FirstLetterName) return null; // a nested block already took it
+                    if (s.Display is Display.Inline or Display.Block or Display.ListItem) return FindFirstText(c);
+                    return null; // an inline-block, table, flex or grid box starts the line
+                }
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Works out a block's ::first-line style, when rules give it one, and hands it to the element whose inline content
+    /// makes the first line: the block itself, or the first block nested at its start. Layout applies it to the text
+    /// of that line.
+    /// </summary>
+    private void ResolveFirstLine(Element host)
+    {
+        _count = 0;
+        if (UaIndex.Value.PseudoElements is { } ua) Collect(ua, host, TierUa, TierUaImportant, PseudoElement.FirstLine);
+        if (_author.PseudoElements is { } author) Collect(author, host, TierAuthor, TierAuthorImportant, PseudoElement.FirstLine);
+        if (_count == 0) return;
+        if (_count > 1) Array.Sort(_keys, _decls, 0, _count);
+        var line = Compute("::first-line", host.Style);
+        var target = host;
+        while (FirstBlockChild(target) is { } inner) target = inner;
+        // A ::first-line of a nested block was resolved first and stays: it is the more specific of the two.
+        target.FirstLine ??= new FirstLineStyle(host.Style, line);
+    }
+
+    /// <summary>The block that starts <paramref name="e"/>'s content, when no text or inline box comes before it.</summary>
+    private static Element? FirstBlockChild(Element e)
+    {
+        foreach (var c in e.Children)
+        {
+            if (c is TextNode t)
+            {
+                if (string.IsNullOrWhiteSpace(t.Text)) continue;
+                return null;
+            }
+            if (c is not Element child || child.Style is not { } s || s.Display == Display.None) continue;
+            if (s.Float != FloatSide.None || s.Position is Position.Absolute or Position.Fixed) continue;
+            return s.Display is Display.Block or Display.ListItem ? child : null;
+        }
+        return null;
+    }
+
+    // Punctuation that goes with the first letter: the Ps, Pe, Pi, Pf and Po classes, as CSS Pseudo-Elements says.
+    private static bool IsFirstLetterPunctuation(string text, int k)
+        => CharUnicodeInfo.GetUnicodeCategory(text[k]) is UnicodeCategory.OpenPunctuation or UnicodeCategory.ClosePunctuation
+            or UnicodeCategory.InitialQuotePunctuation or UnicodeCategory.FinalQuotePunctuation or UnicodeCategory.OtherPunctuation;
+
     /// <summary>The style and content of a list item's ::marker, when rules give it one.</summary>
     private void ResolveMarker(Element e)
     {
@@ -330,6 +471,7 @@ internal sealed class StyleResolver
 
     private readonly Dictionary<string, List<int>> _counters = new(StringComparer.Ordinal);
     private bool _countersUsed;
+    private readonly bool _firstLetterRules, _firstLineRules;
     internal int QuoteDepth;
 
     /// <summary>Applies counter-reset, counter-increment and counter-set, in that order (CSS Lists 3).</summary>
@@ -694,6 +836,15 @@ internal sealed class StyleResolver
         => lower.StartsWith("url(", StringComparison.Ordinal) && v.IndexOf(')') is int end and > 4
             ? v.Substring(4, end - 4).Trim().Trim('"', '\'') : null;
 
+    /// <summary>A font-stretch keyword or percentage as a percentage of the normal width; null when invalid.</summary>
+    internal static float? FontStretchPercent(string v) => v switch
+    {
+        "ultra-condensed" => 50, "extra-condensed" => 62.5f, "condensed" => 75, "semi-condensed" => 87.5f, "normal" => 100,
+        "semi-expanded" => 112.5f, "expanded" => 125, "extra-expanded" => 150, "ultra-expanded" => 200,
+        _ => v.EndsWith('%') && float.TryParse(v.AsSpan(0, v.Length - 1), System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out float p) && p >= 0 ? p : null,
+    };
+
     /// <summary>Whether font-feature-settings turns standard ligatures on or off ("liga" 0), or null when it leaves them.</summary>
     private static bool? LigaSetting(string value)
     {
@@ -964,6 +1115,16 @@ internal sealed class StyleResolver
                 };
                 s.Bold = s.FontWeight >= 600;
                 break;
+            case "font-stretch":
+                if (inherit) s.FontStretch = parent.FontStretch;
+                else if (FontStretchPercent(lower) is float stretch) s.FontStretch = stretch;
+                break;
+            case "font-variation-settings":
+                s.FontVariationSettings = inherit ? parent.FontVariationSettings : lower is "normal" or "initial" or "unset" ? null : v;
+                break;
+            case "font-optical-sizing":
+                s.FontOpticalSizingNone = inherit ? parent.FontOpticalSizingNone : lower == "none";
+                break;
             case "font-style":
                 s.Italic = lower switch { "italic" or "oblique" => true, "normal" => false, "inherit" => parent.Italic, _ => s.Italic };
                 break;
@@ -1125,8 +1286,25 @@ internal sealed class StyleResolver
                 else if (lower.Contains("common-ligatures")) s.NoLigatures = false;
                 break;
             case "font-feature-settings":
-                if (lower == "inherit") s.NoLigatures = parent.NoLigatures;
-                else if (LigaSetting(lower) is bool liga) s.NoLigatures = !liga;
+                if (lower == "inherit")
+                {
+                    s.NoLigatures = parent.NoLigatures;
+                    s.FontFeatureSettings = parent.FontFeatureSettings;
+                }
+                else
+                {
+                    if (LigaSetting(lower) is bool liga) s.NoLigatures = !liga;
+                    // Tags are case-sensitive, so the value is kept as written.
+                    s.FontFeatureSettings = lower is "normal" or "initial" or "unset" ? null : v;
+                }
+                break;
+            case "font-variant-numeric":
+                s.FontVariantNumeric = lower switch
+                {
+                    "inherit" => parent.FontVariantNumeric,
+                    "normal" or "initial" or "unset" => null,
+                    _ => lower,
+                };
                 break;
             case "word-spacing":
                 if (lower == "normal") s.WordSpacing = 0;
@@ -1186,24 +1364,56 @@ internal sealed class StyleResolver
                     // A string is the marker text itself.
                     s.ListStyleString = markerText;
                     s.ListStyleType = ListStyleType.Disc;
+                    s.ListCounterStyle = null;
                     break;
                 }
-                s.ListStyleString = lower == "inherit" ? parent.ListStyleString : null;
-                s.ListStyleType = lower switch
+                if (lower is "inherit" or "unset")
+                {
+                    s.ListStyleString = parent.ListStyleString;
+                    s.ListStyleType = parent.ListStyleType;
+                    s.ListCounterStyle = parent.ListCounterStyle;
+                    break;
+                }
+                if (lower is "initial") lower = "disc";
+                var listBullet = lower switch
                 {
                     "disc" => ListStyleType.Disc,
                     "circle" => ListStyleType.Circle,
                     "square" => ListStyleType.Square,
-                    "decimal" => ListStyleType.Decimal,
-                    "decimal-leading-zero" => ListStyleType.DecimalLeadingZero,
-                    "lower-alpha" or "lower-latin" => ListStyleType.LowerAlpha,
-                    "upper-alpha" or "upper-latin" => ListStyleType.UpperAlpha,
-                    "lower-roman" => ListStyleType.LowerRoman,
-                    "upper-roman" => ListStyleType.UpperRoman,
+                    "disclosure-open" => ListStyleType.DisclosureOpen,
+                    "disclosure-closed" => ListStyleType.DisclosureClosed,
                     "none" => ListStyleType.None,
-                    "inherit" => parent.ListStyleType,
-                    _ => s.ListStyleType,
+                    _ => (ListStyleType?)null,
                 };
+                if (listBullet is { } listBulletType)
+                {
+                    // The bullets are drawn as shapes, as Chrome draws them, and cannot be redefined by @counter-style.
+                    s.ListStyleType = listBulletType;
+                    s.ListStyleString = null;
+                    s.ListCounterStyle = null;
+                }
+                else if (CounterStyles.TryGet(v, out var listCounter))
+                {
+                    s.ListStyleString = null;
+                    s.ListCounterStyle = listCounter;
+                    s.ListStyleType = listCounter.Name switch
+                    {
+                        "decimal" => ListStyleType.Decimal,
+                        "decimal-leading-zero" => ListStyleType.DecimalLeadingZero,
+                        "lower-alpha" or "lower-latin" => ListStyleType.LowerAlpha,
+                        "upper-alpha" or "upper-latin" => ListStyleType.UpperAlpha,
+                        "lower-roman" => ListStyleType.LowerRoman,
+                        "upper-roman" => ListStyleType.UpperRoman,
+                        _ => ListStyleType.Other,
+                    };
+                }
+                break;
+            case "list-style-image":
+                if (lower is "inherit" or "unset") s.ListStyleImage = parent.ListStyleImage;
+                else if (lower is "none" or "initial") s.ListStyleImage = null;
+                else if (CssBackground.Url(v) is { } listImage) s.ListStyleImage = listImage;
+                // Gradients and image-set() are not drawn as markers: like an image that fails to load, the type shows.
+                else if (lower.Contains("gradient(", StringComparison.Ordinal) || lower.StartsWith("image-set(", StringComparison.Ordinal)) s.ListStyleImage = null;
                 break;
             case "list-style-position":
                 s.ListStylePositionInside = lower == "inside";
@@ -1421,10 +1631,16 @@ internal sealed class StyleResolver
                     s.TextShadows = ts.Length > 0 ? ts : null;
                 break;
             case "text-overflow":
-                // One value for both ends, or start and end: only the end of the line is cut.
-                var tov = CssParser.Tokens(lower);
-                if (tov.Count is 1 or 2) s.TextOverflowEllipsis = tov[^1] == "ellipsis" || tov[^1].StartsWith("\"\u2026", StringComparison.Ordinal);
+            {
+                // One value for both ends, or start and end: only the end of the line is cut, as in Chrome.
+                var tov = CssParser.Tokens(v.Trim());
+                if (inherit || tov.Count is not (1 or 2)) break;
+                var end = tov[^1];
+                if (GeneratedContent.UnquoteString(end) is { } str) s.TextOverflow = str;
+                else if (end.Equals("ellipsis", StringComparison.OrdinalIgnoreCase)) s.TextOverflow = "\u2026";
+                else if (end.Equals("clip", StringComparison.OrdinalIgnoreCase) || end.Equals("initial", StringComparison.OrdinalIgnoreCase)) s.TextOverflow = null;
                 break;
+            }
             case "object-fit":
                 s.ObjectFit = lower switch
                 {
@@ -1554,7 +1770,33 @@ internal sealed class StyleResolver
                 s.SvgLineJoin = lower switch { "round" => SvgLineJoin.Round, "bevel" => SvgLineJoin.Bevel, "miter" or "miter-clip" or "arcs" => SvgLineJoin.Miter, _ => s.SvgLineJoin };
                 break;
             case "clip-path":
-                s.SvgClipPath = SvgUrl(v, lower);
+                if (inherit) { s.SvgClipPath = parent.SvgClipPath; s.ClipShape = parent.ClipShape; }
+                else if (lower is "none" or "initial" or "unset") { s.SvgClipPath = null; s.ClipShape = null; }
+                else if (SvgUrl(v, lower) is { } clipUrl) { s.SvgClipPath = clipUrl; s.ClipShape = null; }
+                else if (ClipShape.Parse(v, em, _rootFontSize, _vw, _vh) is { } shape) { s.ClipShape = shape; s.SvgClipPath = null; }
+                break;
+            case "mix-blend-mode":
+                if (inherit) s.BlendMode = parent.BlendMode;
+                else if (lower is "initial" or "unset") s.BlendMode = null;
+                else if (BlendModes.PdfName(lower, out bool blendValid) is var blend && blendValid) s.BlendMode = blend;
+                break;
+            case "background-blend-mode":
+            {
+                if (inherit) { s.BackgroundBlendModes = parent.BackgroundBlendModes; break; }
+                if (lower is "initial" or "unset") { s.BackgroundBlendModes = null; break; }
+                var parts = CssParser.SplitTopLevel(lower, ',');
+                var modes = new string?[parts.Count];
+                bool ok = parts.Count > 0, any = false;
+                for (int i = 0; i < parts.Count && ok; i++)
+                {
+                    modes[i] = BlendModes.PdfName(parts[i].Trim(), out ok);
+                    any |= modes[i] != null;
+                }
+                if (ok) s.BackgroundBlendModes = any ? modes : null;
+                break;
+            }
+            case "isolation":
+                s.Isolate = lower == "isolate" || inherit && parent.Isolate;
                 break;
             case "mask":
                 s.SvgMask = SvgUrl(v, lower);
@@ -1563,7 +1805,10 @@ internal sealed class StyleResolver
                 s.SvgMaskAlpha = lower == "alpha";
                 break;
             case "filter":
-                s.SvgFilter = SvgUrl(v, lower);
+                if (inherit) { s.SvgFilter = parent.SvgFilter; s.Filters = parent.Filters; }
+                else if (lower is "none" or "initial" or "unset") { s.SvgFilter = null; s.Filters = null; }
+                else if (SvgUrl(v, lower) is { } filterUrl && CssParser.Tokens(lower).Count == 1) { s.SvgFilter = filterUrl; s.Filters = null; }
+                else if (FilterFunction.Parse(v, em, _rootFontSize, _vw, _vh) is { } filters) { s.Filters = filters.Length > 0 ? filters : null; s.SvgFilter = null; }
                 break;
             case "marker":
                 s.SvgMarkerStart = s.SvgMarkerMid = s.SvgMarkerEnd = lower == "inherit" ? parent.SvgMarkerStart : SvgUrl(v, lower);
@@ -1627,6 +1872,31 @@ internal sealed class StyleResolver
             case "border-right-color": s.BorderRightColor = BorderColor(v, s); break;
             case "border-bottom-color": s.BorderBottomColor = BorderColor(v, s); break;
             case "border-left-color": s.BorderLeftColor = BorderColor(v, s); break;
+            case "border-image-source":
+                if (inherit) s.BorderImageSource = parent.BorderImageSource;
+                else if (lower is "none" or "initial" or "unset") s.BorderImageSource = null;
+                else if (ParseBackgroundImage(v, s) is [{ } source]) s.BorderImageSource = source;
+                break;
+            case "border-image-slice":
+                if (inherit) { s.BorderImageSlice = parent.BorderImageSlice; s.BorderImageFill = parent.BorderImageFill; }
+                else if (lower is "initial" or "unset") { s.BorderImageSlice = null; s.BorderImageFill = false; }
+                else if (CssBorderImage.Slice(lower) is { } slice) { s.BorderImageSlice = slice.Slice; s.BorderImageFill = slice.Fill; }
+                break;
+            case "border-image-width":
+                if (inherit) s.BorderImageWidths = parent.BorderImageWidths;
+                else if (lower is "initial" or "unset") s.BorderImageWidths = null;
+                else s.BorderImageWidths = CssBorderImage.Widths(lower, false, em, _rootFontSize, _vw, _vh) ?? s.BorderImageWidths;
+                break;
+            case "border-image-outset":
+                if (inherit) s.BorderImageOutsets = parent.BorderImageOutsets;
+                else if (lower is "initial" or "unset") s.BorderImageOutsets = null;
+                else s.BorderImageOutsets = CssBorderImage.Widths(lower, true, em, _rootFontSize, _vw, _vh) ?? s.BorderImageOutsets;
+                break;
+            case "border-image-repeat":
+                if (inherit) (s.BorderImageRepeatX, s.BorderImageRepeatY) = (parent.BorderImageRepeatX, parent.BorderImageRepeatY);
+                else if (lower is "initial" or "unset") s.BorderImageRepeatX = s.BorderImageRepeatY = BorderImageRepeat.Stretch;
+                else if (CssBorderImage.Repeat(lower) is { } rep) (s.BorderImageRepeatX, s.BorderImageRepeatY) = rep;
+                break;
         }
     }
 
@@ -1975,7 +2245,11 @@ internal sealed class StyleResolver
         => lower switch
         {
             "none" or "hidden" => BorderStyle.None,
-            "solid" or "groove" or "ridge" or "inset" or "outset" => BorderStyle.Solid,
+            "solid" => BorderStyle.Solid,
+            "groove" => BorderStyle.Groove,
+            "ridge" => BorderStyle.Ridge,
+            "inset" => BorderStyle.Inset,
+            "outset" => BorderStyle.Outset,
             "dashed" => BorderStyle.Dashed,
             "dotted" => BorderStyle.Dotted,
             "double" => BorderStyle.Double,
