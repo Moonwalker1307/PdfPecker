@@ -38,6 +38,12 @@ internal sealed partial class PageRenderer
     private readonly Stack<bool> _marked = new();
     private OptionalContent? _oc;
     private long _ops;
+    // Text extraction: when set, glyphs go to the collector and nothing is painted, clipped or decoded for pixels.
+    private readonly TextCollector? _text;
+    private string? _actualText; // the /ActualText of the marked content being run, which replaces its glyphs
+    private bool _actualTextShown;
+    private readonly Stack<(string? Text, bool Shown)> _actualStack = new();
+    private bool _textMoved; // the text position was set, not advanced, since the last glyph
 
     public PageRenderer(PdfFile file, RenderCache cache, Canvas canvas, CancellationToken cancel)
     {
@@ -46,6 +52,13 @@ internal sealed partial class PageRenderer
         _canvas = canvas;
         _cancel = cancel;
         _gs = new GraphicsState { Clip = new ClipRegion(0, 0, canvas.Width, canvas.Height) };
+    }
+
+    /// <summary>A renderer that runs pages for their text: the glyphs go to <paramref name="text"/>.</summary>
+    public PageRenderer(PdfFile file, RenderCache cache, TextCollector text, CancellationToken cancel)
+        : this(file, cache, new Canvas(1, 1, 0), cancel)
+    {
+        _text = text;
     }
 
     /// <summary>Renders a page's contents and (optionally) its annotation appearances with the given base transform.</summary>
@@ -100,6 +113,7 @@ internal sealed partial class PageRenderer
         int stackBase = _stack.Count;
         int markedBase = _marked.Count;
         int hiddenBase = _hidden;
+        int actualBase = _actualStack.Count;
         var parser = new ContentParser(data);
         try
         {
@@ -127,6 +141,7 @@ internal sealed partial class PageRenderer
             while (_stack.Count > stackBase) _gs = _stack.Pop();
             while (_marked.Count > markedBase) _marked.Pop();
             _hidden = hiddenBase;
+            while (_actualStack.Count > actualBase) (_actualText, _actualTextShown) = _actualStack.Pop();
             _depth--;
         }
     }
@@ -212,6 +227,7 @@ internal sealed partial class PageRenderer
             case "BT":
                 _tm = _tlm = Matrix.Identity;
                 _textClip = null;
+                _textMoved = true;
                 break;
             case "ET":
                 if (_textClip != null) { ApplyTextClip(); _textClip = null; }
@@ -230,7 +246,7 @@ internal sealed partial class PageRenderer
                 }
                 break;
             case "Td":
-                if (n >= 2) { _tlm = Matrix.Translation(N(p, 0), N(p, 1)).Multiply(_tlm); _tm = _tlm; }
+                if (n >= 2) { _tlm = Matrix.Translation(N(p, 0), N(p, 1)).Multiply(_tlm); _tm = _tlm; _textMoved = true; }
                 break;
             case "TD":
                 if (n >= 2)
@@ -238,10 +254,11 @@ internal sealed partial class PageRenderer
                     _gs.Leading = -N(p, 1);
                     _tlm = Matrix.Translation(N(p, 0), N(p, 1)).Multiply(_tlm);
                     _tm = _tlm;
+                    _textMoved = true;
                 }
                 break;
             case "Tm":
-                if (n >= 6) { _tlm = _tm = new Matrix(N(p, 0), N(p, 1), N(p, 2), N(p, 3), N(p, 4), N(p, 5)); }
+                if (n >= 6) { _tlm = _tm = new Matrix(N(p, 0), N(p, 1), N(p, 2), N(p, 3), N(p, 4), N(p, 5)); _textMoved = true; }
                 break;
             case "T*":
                 NextLine();
@@ -276,15 +293,16 @@ internal sealed partial class PageRenderer
                 if (n >= 1 && ops[0].Name is string xname) DoXObject(xname, res);
                 break;
             case "BI":
-                if (p.InlineDict != null && p.InlineData != null && _hidden == 0) DrawInlineImage(p.InlineDict, p.InlineData, res);
+                if (p.InlineDict != null && p.InlineData != null && _hidden == 0 && _text == null) DrawInlineImage(p.InlineDict, p.InlineData, res);
                 break;
             case "sh":
-                if (n >= 1 && ops[0].Name is string shName && _hidden == 0) PaintShadingOperator(shName, res);
+                if (n >= 1 && ops[0].Name is string shName && _hidden == 0 && _text == null) PaintShadingOperator(shName, res);
                 break;
 
             // ---------------------------------------------------------- marked content
             case "BMC":
                 _marked.Push(false);
+                if (_text != null) _actualStack.Push((_actualText, _actualTextShown));
                 break;
             case "BDC":
             {
@@ -297,11 +315,30 @@ internal sealed partial class PageRenderer
                 }
                 _marked.Push(hide);
                 if (hide) _hidden++;
+                if (_text != null) BeginActualText(p, res);
                 break;
             }
             case "EMC":
                 if (_marked.Count > 0 && _marked.Pop()) _hidden--;
+                if (_text != null && _actualStack.Count > 0) (_actualText, _actualTextShown) = _actualStack.Pop();
                 break;
+        }
+    }
+
+    /// <summary>
+    /// Starts marked content for text extraction: a span with /ActualText stands for its glyphs, unless it is inside
+    /// another such span, whose text then covers both.
+    /// </summary>
+    private void BeginActualText(ContentParser p, PdfDict? res)
+    {
+        _actualStack.Push((_actualText, _actualTextShown));
+        var ops = p.Operands;
+        if (_actualText != null || ops.Count < 2) return;
+        var props = ops[1].Kind == OperandKind.Name ? _file.Resolve(_file.GetDict(res, "Properties")?[ops[1].Name!]) as PdfDict : ops[1].Dict;
+        if (_file.Resolve(props?["ActualText"]) is PdfString actual)
+        {
+            _actualText = actual.Text;
+            _actualTextShown = false;
         }
     }
 
@@ -361,7 +398,7 @@ internal sealed partial class PageRenderer
     private bool SetupPaint(bool stroke)
     {
         var gs = _gs;
-        if (_hidden > 0 || gs.Clip.IsEmpty) return false;
+        if (_text != null || _hidden > 0 || gs.Clip.IsEmpty) return false;
         float alpha = stroke ? gs.StrokeAlpha : gs.FillAlpha;
         if (alpha <= 0) return false;
         var pattern = stroke ? gs.StrokePattern : gs.FillPattern;
@@ -441,6 +478,7 @@ internal sealed partial class PageRenderer
 
     private void ApplyClip(bool evenOdd)
     {
+        if (_text != null) return; // text is extracted whether or not a clip hides it
         var ctm = _gs.Ctm;
         if (_path.IsEmpty)
         {
@@ -523,7 +561,7 @@ internal sealed partial class PageRenderer
         var subtype = _file.GetName(xobj, "Subtype");
         if (subtype == "Image")
         {
-            if (_hidden > 0) return;
+            if (_hidden > 0 || _text != null) return;
             DrawImageXObject(xobj, res);
         }
         else if (subtype == "Form" || xobj["BBox"] != null)
@@ -561,7 +599,7 @@ internal sealed partial class PageRenderer
             // An isolated group (/I true) is drawn on its own transparent canvas even when it is opaque, so that blend
             // modes inside it blend only with each other and not with the page below.
             if (isolatedGroup && (_gs.FillAlpha < 1 || _gs.SoftMask != null || _gs.Blend != BlendMode.Normal || _file.GetBool(group, "I", false))
-                && _hidden == 0)
+                && _hidden == 0 && _text == null)
             {
                 RenderGroup(data, res);
             }
@@ -620,6 +658,7 @@ internal sealed partial class PageRenderer
     /// <summary>Renders an ExtGState soft mask group to a per-pixel mask over the whole canvas.</summary>
     private byte[]? BuildSoftMask(PdfDict sm)
     {
+        if (_text != null) return null;
         var g = _file.GetStream(sm, "G");
         if (g == null) return null;
         bool luminosity = _file.GetName(sm, "S") != "Alpha";
