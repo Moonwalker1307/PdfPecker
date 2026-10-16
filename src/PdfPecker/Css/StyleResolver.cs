@@ -1698,7 +1698,33 @@ internal sealed class StyleResolver
                 s.SvgLineJoin = lower switch { "round" => SvgLineJoin.Round, "bevel" => SvgLineJoin.Bevel, "miter" or "miter-clip" or "arcs" => SvgLineJoin.Miter, _ => s.SvgLineJoin };
                 break;
             case "clip-path":
-                s.SvgClipPath = SvgUrl(v, lower);
+                if (inherit) { s.SvgClipPath = parent.SvgClipPath; s.ClipShape = parent.ClipShape; }
+                else if (lower is "none" or "initial" or "unset") { s.SvgClipPath = null; s.ClipShape = null; }
+                else if (SvgUrl(v, lower) is { } clipUrl) { s.SvgClipPath = clipUrl; s.ClipShape = null; }
+                else if (ClipShape.Parse(v, em, _rootFontSize, _vw, _vh) is { } shape) { s.ClipShape = shape; s.SvgClipPath = null; }
+                break;
+            case "mix-blend-mode":
+                if (inherit) s.BlendMode = parent.BlendMode;
+                else if (lower is "initial" or "unset") s.BlendMode = null;
+                else if (BlendModes.PdfName(lower, out bool blendValid) is var blend && blendValid) s.BlendMode = blend;
+                break;
+            case "background-blend-mode":
+            {
+                if (inherit) { s.BackgroundBlendModes = parent.BackgroundBlendModes; break; }
+                if (lower is "initial" or "unset") { s.BackgroundBlendModes = null; break; }
+                var parts = CssParser.SplitTopLevel(lower, ',');
+                var modes = new string?[parts.Count];
+                bool ok = parts.Count > 0, any = false;
+                for (int i = 0; i < parts.Count && ok; i++)
+                {
+                    modes[i] = BlendModes.PdfName(parts[i].Trim(), out ok);
+                    any |= modes[i] != null;
+                }
+                if (ok) s.BackgroundBlendModes = any ? modes : null;
+                break;
+            }
+            case "isolation":
+                s.Isolate = lower == "isolate" || inherit && parent.Isolate;
                 break;
             case "mask":
                 s.SvgMask = SvgUrl(v, lower);
@@ -1707,7 +1733,10 @@ internal sealed class StyleResolver
                 s.SvgMaskAlpha = lower == "alpha";
                 break;
             case "filter":
-                s.SvgFilter = SvgUrl(v, lower);
+                if (inherit) { s.SvgFilter = parent.SvgFilter; s.Filters = parent.Filters; }
+                else if (lower is "none" or "initial" or "unset") { s.SvgFilter = null; s.Filters = null; }
+                else if (SvgUrl(v, lower) is { } filterUrl && CssParser.Tokens(lower).Count == 1) { s.SvgFilter = filterUrl; s.Filters = null; }
+                else if (FilterFunction.Parse(v, em, _rootFontSize, _vw, _vh) is { } filters) { s.Filters = filters.Length > 0 ? filters : null; s.SvgFilter = null; }
                 break;
             case "marker":
                 s.SvgMarkerStart = s.SvgMarkerMid = s.SvgMarkerEnd = lower == "inherit" ? parent.SvgMarkerStart : SvgUrl(v, lower);

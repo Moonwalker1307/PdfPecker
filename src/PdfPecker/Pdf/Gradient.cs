@@ -85,6 +85,16 @@ internal sealed class Gradient
         Alphas = alphas;
     }
 
+    /// <summary>A copy with every stop colour mapped (a filter's colour functions); the alphas stay.</summary>
+    public Gradient Recolored(Func<uint, uint> map)
+    {
+        var g = (Gradient)MemberwiseClone();
+        g.FunctionId = g.AlphaFunctionId = 0;
+        g.Colors = Colors.Select(map).ToArray();
+        g.StraightColors = StraightColors?.Select(map).ToArray();
+        return g;
+    }
+
     /// <summary>Blends a translucent colour over an opaque backdrop: the writer does not emit transparency.</summary>
     public static uint Flatten(uint c, uint backdrop)
     {

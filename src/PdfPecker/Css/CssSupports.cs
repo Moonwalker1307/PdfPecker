@@ -41,6 +41,7 @@ internal static class CssSupports
         "line-clamp", "-webkit-line-clamp", "hyphens", "hyphenate-character", "size", "string-set", "page", "direction", "unicode-bidi", "margin-inline",
         "margin-inline-start", "margin-inline-end", "padding-inline", "padding-inline-start", "padding-inline-end", "margin-block",
         "margin-block-start", "margin-block-end", "padding-block", "padding-block-start", "padding-block-end",
+        "mix-blend-mode", "background-blend-mode", "isolation",
     };
 
     /// <summary>Whether this library applies the property.</summary>
