@@ -64,7 +64,8 @@ All methods are static and thread-safe, so you can convert many documents in par
   named pages, running headers, tables of contents with page numbers, repeated table headers, orphans, widows and
   break control. [More](https://pdfpecker.net/docs/paged-media/)
 - **Markdown**: CommonMark 0.31 and GitHub Flavored Markdown to PDF or HTML. [More](https://pdfpecker.net/docs/markdown/)
-- **Fonts**: TrueType, OpenType, WOFF and WOFF2, subset and embedded, with `@font-face`, kerning and ligatures.
+- **Fonts**: TrueType, OpenType, WOFF and WOFF2, subset and embedded, with `@font-face`, kerning, ligatures and variable fonts
+  (`font-weight`, `font-stretch`, `font-variation-settings`).
   [More](https://pdfpecker.net/docs/fonts/)
 - **Right-to-left and hyphenation**: Arabic and Hebrew with bidi and shaping, and `hyphens: auto`.
   [More](https://pdfpecker.net/docs/languages/)

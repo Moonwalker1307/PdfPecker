@@ -6,18 +6,20 @@ namespace PdfPecker.Fonts;
 internal sealed class FontFace
 {
     public readonly string Family;
-    public readonly int WeightMin, WeightMax;
+    private readonly int _weightMin, _weightMax;
+    private readonly bool _weightAuto; // no font-weight descriptor: a variable font covers its whole weight axis
     public readonly bool Italic;
     public readonly UnicodeRange? Range;
     public readonly string? FullName, PostScriptName; // for CSS local()
     private readonly Lazy<FontProgram?> _program;
 
     public FontFace(string family, int weightMin, int weightMax, bool italic, UnicodeRange? range, Lazy<FontProgram?> program,
-        string? fullName = null, string? postScriptName = null)
+        string? fullName = null, string? postScriptName = null, bool weightAuto = false)
     {
         Family = family;
-        WeightMin = weightMin;
-        WeightMax = weightMax;
+        _weightMin = weightMin;
+        _weightMax = weightMax;
+        _weightAuto = weightAuto;
         Italic = italic;
         Range = range;
         _program = program;
@@ -27,6 +29,20 @@ internal sealed class FontFace
 
     /// <summary>The font program, loaded on first use; null when it cannot be loaded.</summary>
     public FontProgram? Program => _program.Value;
+
+    /// <summary>The weights the face covers: as declared, or for a variable font without a declaration, its weight axis.</summary>
+    public int WeightMin => _weightAuto && Program?.Axis(FontVariations.Wght) is { } a ? (int)Math.Ceiling(a.Min) : _weightMin;
+
+    public int WeightMax => _weightAuto && Program?.Axis(FontVariations.Wght) is { } a ? (int)Math.Floor(a.Max) : _weightMax;
+}
+
+/// <summary>
+/// What picks the instance of a variable font besides weight and style: font-stretch (a percentage), the font size in
+/// CSS pixels for the optical size axis (0 with font-optical-sizing: none), and font-variation-settings as written.
+/// </summary>
+internal readonly record struct FontVariation(float Stretch, float OpticalSize, string? Settings)
+{
+    public static readonly FontVariation Normal = new(100, 0, null);
 }
 
 /// <summary>
@@ -39,8 +55,8 @@ internal sealed class FontResolver
     private readonly Dictionary<string, List<FontFace>> _docFamilies = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _docOrder = new();
     private readonly FontCollection.Snapshot? _collection;
-    private readonly Dictionary<(string, int, bool, FontFamily), TextFont> _resolved = new();
-    private readonly Dictionary<(string, int, bool), List<EmbeddedFont>> _matched = new();
+    private readonly Dictionary<(string, int, bool, FontFamily, FontVariation), TextFont> _resolved = new();
+    private readonly Dictionary<(string, int, bool, FontVariation), List<EmbeddedFont>> _matched = new();
     private readonly Dictionary<(FontProgram, bool, bool, UnicodeRange?), EmbeddedFont> _fonts = new();
 
     private readonly bool _embedStandard;
@@ -88,6 +104,7 @@ internal sealed class FontResolver
     {
         string? family = null, src = null;
         int wMin = 400, wMax = 400;
+        bool weightGiven = false;
         bool italic = false;
         UnicodeRange? range = null;
         foreach (var d in decls)
@@ -103,6 +120,7 @@ internal sealed class FontResolver
                     var parts = v.Split(' ', StringSplitOptions.RemoveEmptyEntries);
                     if (parts.Length >= 1 && ParseWeight(parts[0]) is int a)
                     {
+                        weightGiven = true;
                         wMin = wMax = a;
                         if (parts.Length >= 2 && ParseWeight(parts[1]) is int b) { wMin = Math.Min(a, b); wMax = Math.Max(a, b); }
                     }
@@ -130,7 +148,7 @@ internal sealed class FontResolver
             }
             return null;
         });
-        return new FontFace(family!, wMin, wMax, italic, range, program);
+        return new FontFace(family!, wMin, wMax, italic, range, program, weightAuto: !weightGiven);
     }
 
     private static FontProgram? LoadSource(string item, Func<string, byte[]?> fetch, FontCollection.Snapshot? collection,
@@ -196,9 +214,12 @@ internal sealed class FontResolver
     // ------------------------------------------------------------------ matching
 
     /// <summary>The font for a computed style: a chain over the font-family list with per-character fallback.</summary>
-    public TextFont Resolve(string? familyList, FontFamily generic, int weight, bool italic)
+    public TextFont Resolve(string? familyList, FontFamily generic, int weight, bool italic) => Resolve(familyList, generic, weight, italic, FontVariation.Normal);
+
+    /// <summary>The font for a computed style, with the instance of variable fonts its variation values pick.</summary>
+    public TextFont Resolve(string? familyList, FontFamily generic, int weight, bool italic, FontVariation variation)
     {
-        var key = (familyList ?? "", weight, italic, generic);
+        var key = (familyList ?? "", weight, italic, generic, variation);
         if (_resolved.TryGetValue(key, out var cached)) return cached;
 
         bool bold = weight >= 600;
@@ -210,7 +231,7 @@ internal sealed class FontResolver
             {
                 var name = Unquote(part);
                 if (name.Length == 0 || !listed.Add(name)) continue;
-                var fonts = MatchFamily(name, weight, italic);
+                var fonts = MatchFamily(name, weight, italic, variation);
                 if (fonts.Count > 0) candidates.AddRange(fonts);
                 else if (StandardFamily(name) is FontFamily sf) candidates.Add(Standard(sf, bold, italic));
                 else if (candidates.Count == 0) _report?.Missing(name); // the text falls back to a later family
@@ -228,7 +249,7 @@ internal sealed class FontResolver
             foreach (var family in AllFamilies())
             {
                 if (listed.Contains(family)) continue;
-                foreach (var f in MatchFamily(family, weight, italic))
+                foreach (var f in MatchFamily(family, weight, italic, variation))
                     if (f.Covers(cp)) return f;
             }
             return null;
@@ -255,9 +276,9 @@ internal sealed class FontResolver
     }
 
     /// <summary>The best faces of a family for a weight and style (several when @font-face splits it by unicode-range).</summary>
-    private List<EmbeddedFont> MatchFamily(string family, int weight, bool italic)
+    private List<EmbeddedFont> MatchFamily(string family, int weight, bool italic, FontVariation variation)
     {
-        var key = (family.ToLowerInvariant(), weight, italic);
+        var key = (family.ToLowerInvariant(), weight, italic, variation);
         if (_matched.TryGetValue(key, out var result)) return result;
         result = new List<EmbeddedFont>();
         // Installed fonts are only looked up by name, and never for the names that mean a standard font.
@@ -278,12 +299,48 @@ internal sealed class FontResolver
             bestScore = score;
             bool synthBold = weight >= 600 && face.WeightMax < 600;
             bool synthItalic = italic && !face.Italic;
+            if (program.Axes.Length > 0) program = Instance(program, face, weight, italic, variation, ref synthItalic);
             var fk = (program, synthBold, synthItalic, face.Range);
             if (!_fonts.TryGetValue(fk, out var font)) _fonts[fk] = font = new EmbeddedFont(program, synthBold, synthItalic, face.Range);
             result.Add(font);
         }
         _matched[key] = result;
         return result;
+    }
+
+    /// <summary>
+    /// The instance of a variable font for the style, as CSS Fonts level 4 picks it: the weight within the face's
+    /// declared range, the width from font-stretch, italic from an ital or slnt axis when the face is not italic itself,
+    /// the optical size from the font size, and then font-variation-settings over all of them.
+    /// </summary>
+    private static FontProgram Instance(FontProgram program, FontFace face, int weight, bool italic, FontVariation variation, ref bool synthItalic)
+    {
+        var values = new Dictionary<uint, float>();
+        if (program.Axis(FontVariations.Wght) != null) values[FontVariations.Wght] = Math.Clamp(weight, face.WeightMin, Math.Max(face.WeightMin, face.WeightMax));
+        if (program.Axis(FontVariations.Wdth) != null) values[FontVariations.Wdth] = variation.Stretch;
+        if (italic && !face.Italic)
+        {
+            if (program.Axis(FontVariations.Ital) != null) { values[FontVariations.Ital] = 1; synthItalic = false; }
+            else if (program.Axis(FontVariations.Slnt) is { } slnt && slnt.Min < 0) { values[FontVariations.Slnt] = Math.Max(slnt.Min, -14); synthItalic = false; }
+        }
+        if (variation.OpticalSize > 0 && program.Axis(FontVariations.Opsz) != null) values[FontVariations.Opsz] = variation.OpticalSize;
+        if (variation.Settings != null)
+            foreach (var (tag, value) in ParseVariationSettings(variation.Settings)) values[tag] = value;
+        return program.Instance(values);
+    }
+
+    /// <summary>font-variation-settings: "wght" 650, "wdth" 80. Invalid entries are skipped.</summary>
+    internal static IEnumerable<(uint Tag, float Value)> ParseVariationSettings(string settings)
+    {
+        foreach (var part in CssParser.SplitTopLevel(settings, ','))
+        {
+            var tokens = CssParser.Tokens(part.Trim());
+            if (tokens.Count != 2) continue;
+            var tag = Unquote(tokens[0]);
+            if (tag.Length != 4 || tag.Any(c => c < 0x20 || c > 0x7E) || tokens[0].Trim()[0] is not ('"' or '\'')) continue;
+            if (!float.TryParse(tokens[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float value)) continue;
+            yield return (FontProgram.Tag(tag), value);
+        }
     }
 
     /// <summary>Lower is better: style first, then weight in the order CSS Fonts level 4 prescribes.</summary>
