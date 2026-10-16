@@ -1,4 +1,4 @@
-using System.Buffers.Binary;
+using PdfPecker.Fonts.Cff;
 
 namespace PdfPecker.Fonts;
 
@@ -10,7 +10,7 @@ namespace PdfPecker.Fonts;
 internal static class CffSubsetter
 {
     private const int OpCharset = 15, OpEncoding = 16, OpCharStrings = 17, OpPrivate = 18;
-    private const int OpFdArray = 1236, OpFdSelect = 1237; // escaped operators 12 36 and 12 37
+    private const int OpFdArray = CffDict.Escape + 36, OpFdSelect = CffDict.Escape + 37;
 
     public static byte[]? Subset(byte[] cff, ICollection<int> keep)
     {
@@ -28,17 +28,17 @@ internal static class CffSubsetter
     {
         if (d.Length < 4 || d[0] != 1) return null; // CFF version 1 only (CFF2 is embedded whole)
         int pos = d[2];
-        var name = ReadIndex(d, ref pos);
-        var top = ReadIndex(d, ref pos);
-        var strings = ReadIndex(d, ref pos);
-        var gsubrs = ReadIndex(d, ref pos);
+        var name = CffIndex.Read(d, ref pos);
+        var top = CffIndex.Read(d, ref pos);
+        var strings = CffIndex.Read(d, ref pos);
+        var gsubrs = CffIndex.Read(d, ref pos);
         if (top.Count != 1) return null;
-        var topDict = ParseDict(top.Item(0));
+        var topDict = ParseDict(d, top.CheckedRange(0));
 
         int charStringsOff = Operand(topDict, OpCharStrings, 0);
         if (charStringsOff <= 0) return null;
         int csPos = charStringsOff;
-        var charStrings = ReadIndex(d, ref csPos);
+        var charStrings = CffIndex.Read(d, ref csPos);
         int nGlyphs = charStrings.Count;
 
         // charset: 0..2 are predefined; otherwise copy its bytes.
@@ -55,11 +55,11 @@ internal static class CffSubsetter
             int fdSelectOff = Operand(topDict, OpFdSelect, 0);
             fdSelect = d.AsSpan(fdSelectOff, FdSelectLength(d, fdSelectOff, nGlyphs)).ToArray();
             int fdPos = Operand(topDict, OpFdArray, 0);
-            var fdArray = ReadIndex(d, ref fdPos);
+            var fdArray = CffIndex.Read(d, ref fdPos);
             fdDicts = new List<List<DictEntry>>();
             for (int i = 0; i < fdArray.Count; i++)
             {
-                var fd = ParseDict(fdArray.Item(i));
+                var fd = ParseDict(d, fdArray.CheckedRange(i));
                 fdDicts.Add(fd);
                 AddPrivate(d, fd, blocks, privateSizes);
             }
@@ -72,15 +72,15 @@ internal static class CffSubsetter
         foreach (int g in keep) if ((uint)g < (uint)nGlyphs) used[g] = true;
         var items = new byte[nGlyphs][];
         var endchar = new byte[] { 14 };
-        var usage = new SubrUsage(gsubrs, blocks);
+        var usage = new SubrUsage(d, gsubrs, blocks);
         for (int g = 0; g < nGlyphs; g++)
         {
             if (!used[g]) { items[g] = endchar; continue; }
-            var cs = charStrings.Item(g);
+            var cs = charStrings.Item(d, g);
             items[g] = cs.ToArray();
             usage.Glyph(cs, fdSelect != null ? FdOf(fdSelect, g) : 0);
         }
-        var newCharStrings = WriteIndex(items);
+        var newCharStrings = CffIndex.Write(items);
 
         // Subroutines no used glyph calls become empty; their numbering (and so the charstrings) stays the same.
         var privates = new List<byte[]>(blocks.Count);
@@ -88,7 +88,7 @@ internal static class CffSubsetter
         {
             var b = blocks[i];
             if (b.Subrs is not { } local) { privates.Add(b.Prefix); continue; }
-            var subrs = Prune(local, usage.LocalUsed[i]);
+            var subrs = Prune(d, local, usage.LocalUsed[i]);
             var block = new byte[b.Prefix.Length + subrs.Length];
             b.Prefix.CopyTo(block, 0);
             subrs.CopyTo(block, b.Prefix.Length);
@@ -96,7 +96,7 @@ internal static class CffSubsetter
         }
 
         // Layout: header, Name, Top DICT, Strings, Global Subrs, charset, FDSelect, CharStrings, FDArray, Privates.
-        var headerAndIndexes = new List<byte[]> { d.AsSpan(0, d[2]).ToArray(), name.Raw(d), null!, strings.Raw(d), Prune(gsubrs, usage.GlobalUsed) };
+        var headerAndIndexes = new List<byte[]> { d.AsSpan(0, d[2]).ToArray(), name.Raw(d), null!, strings.Raw(d), Prune(d, gsubrs, usage.GlobalUsed) };
         byte[] EncodeTop(int charsetAt, int fdSelectAt, int charStringsAt, int fdArrayAt, int privateAt)
         {
             var o = new List<byte>(128);
@@ -105,23 +105,23 @@ internal static class CffSubsetter
                 switch (e.Op)
                 {
                     case OpEncoding: continue; // OpenType CFF fonts are encoded through the cmap; CIDs are glyph ids here
-                    case OpCharset: if (charset == null) { o.AddRange(e.Raw); continue; } Int5(o, charsetAt); break;
-                    case OpFdSelect: Int5(o, fdSelectAt); break;
-                    case OpCharStrings: Int5(o, charStringsAt); break;
-                    case OpFdArray: Int5(o, fdArrayAt); break;
+                    case OpCharset: if (charset == null) { o.AddRange(e.Raw); continue; } CffDict.WriteInt32(o, charsetAt); break;
+                    case OpFdSelect: CffDict.WriteInt32(o, fdSelectAt); break;
+                    case OpCharStrings: CffDict.WriteInt32(o, charStringsAt); break;
+                    case OpFdArray: CffDict.WriteInt32(o, fdArrayAt); break;
                     case OpPrivate:
                         if (cid) continue;
-                        Int5(o, privateSizes[0]);
-                        Int5(o, privateAt);
+                        CffDict.WriteInt32(o, privateSizes[0]);
+                        CffDict.WriteInt32(o, privateAt);
                         break;
                     default: o.AddRange(e.Raw); continue;
                 }
-                Operator(o, e.Op);
+                CffDict.WriteOperator(o, e.Op);
             }
             return o.ToArray();
         }
 
-        int topSize = WriteIndex(new[] { EncodeTop(0, 0, 0, 0, 0) }).Length; // offsets are fixed-size, so the size is final
+        int topSize = CffIndex.Write(new[] { EncodeTop(0, 0, 0, 0, 0) }).Length; // offsets are fixed-size, so the size is final
         int at = headerAndIndexes[0].Length + headerAndIndexes[1].Length + topSize + headerAndIndexes[3].Length + headerAndIndexes[4].Length;
         int charsetAt = at; at += charset?.Length ?? 0;
         int fdSelectAt = at; at += fdSelect?.Length ?? 0;
@@ -133,12 +133,12 @@ internal static class CffSubsetter
         {
             // FD dicts point at their Private DICTs, which follow the FDArray; the FDArray's size does not depend on them.
             var fdItems = fdDicts!.Select(fd => EncodeFd(fd, 0, 0)).ToArray();
-            int fdArraySize = WriteIndex(fdItems).Length;
+            int fdArraySize = CffIndex.Write(fdItems).Length;
             at += fdArraySize;
             for (int i = 0; i < privates.Count; i++) { privateAt[i] = at; at += privates[i].Length; }
             int k = 0;
             fdItems = fdDicts!.Select(fd => EncodeFd(fd, privateSizes[k], privateAt[k++])).ToArray();
-            newFdArray = WriteIndex(fdItems);
+            newFdArray = CffIndex.Write(fdItems);
         }
         else if (privates.Count > 0)
         {
@@ -146,7 +146,7 @@ internal static class CffSubsetter
             at += privates[0].Length;
         }
 
-        headerAndIndexes[2] = WriteIndex(new[] { EncodeTop(charsetAt, fdSelectAt, charStringsAt, fdArrayAt, privates.Count > 0 ? privateAt[0] : 0) });
+        headerAndIndexes[2] = CffIndex.Write(new[] { EncodeTop(charsetAt, fdSelectAt, charStringsAt, fdArrayAt, privates.Count > 0 ? privateAt[0] : 0) });
         var result = new byte[at];
         int w = 0;
         foreach (var part in headerAndIndexes) { part.CopyTo(result, w); w += part.Length; }
@@ -165,9 +165,9 @@ internal static class CffSubsetter
         foreach (var e in fd)
         {
             if (e.Op != OpPrivate) { o.AddRange(e.Raw); continue; }
-            Int5(o, privateSize);
-            Int5(o, privateAt);
-            Operator(o, OpPrivate);
+            CffDict.WriteInt32(o, privateSize);
+            CffDict.WriteInt32(o, privateAt);
+            CffDict.WriteOperator(o, OpPrivate);
         }
         return o.ToArray();
     }
@@ -176,7 +176,7 @@ internal static class CffSubsetter
     private sealed class PrivateBlock
     {
         public byte[] Prefix = Array.Empty<byte>();
-        public Index? Subrs;
+        public CffIndex? Subrs;
     }
 
     private static void AddPrivate(byte[] d, List<DictEntry> dict, List<PrivateBlock> blocks, List<int> sizes)
@@ -187,22 +187,23 @@ internal static class CffSubsetter
         if (e.Raw == null || e.Operands.Count < 2) { sizes.Add(0); return; }
         int size = (int)e.Operands[0], off = (int)e.Operands[1];
         sizes.Add(size);
-        var priv = ParseDict(d.AsSpan(off, size));
+        if ((uint)off > (uint)d.Length || (uint)size > (uint)(d.Length - off)) throw new FormatException("Damaged CFF Private DICT.");
+        var priv = ParseDict(d, (off, off + size));
         int subrs = Operand(priv, 19, 0); // Subrs, relative to the Private DICT
         if (subrs >= size)
         {
             int p = off + subrs;
-            block.Subrs = ReadIndex(d, ref p);
+            block.Subrs = CffIndex.Read(d, ref p);
             block.Prefix = d.AsSpan(off, subrs).ToArray();
         }
         else block.Prefix = d.AsSpan(off, size).ToArray();
     }
 
-    private static byte[] Prune(Index index, bool[] used)
+    private static byte[] Prune(byte[] d, CffIndex index, bool[] used)
     {
         var items = new byte[index.Count][];
-        for (int i = 0; i < items.Length; i++) items[i] = used[i] ? index.Item(i).ToArray() : Array.Empty<byte>();
-        return WriteIndex(items);
+        for (int i = 0; i < items.Length; i++) items[i] = used[i] ? index.Item(d, i).ToArray() : Array.Empty<byte>();
+        return CffIndex.Write(items);
     }
 
     private static int FdOf(byte[] fdSelect, int gid)
@@ -222,91 +223,83 @@ internal static class CffSubsetter
     /// <summary>Finds the subroutines used by a set of Type 2 charstrings by walking their operators.</summary>
     private sealed class SubrUsage
     {
-        private readonly Index _global;
+        private readonly byte[] _d;
+        private readonly CffIndex _global;
         private readonly List<PrivateBlock> _blocks;
         public readonly bool[] GlobalUsed;
         public readonly bool[][] LocalUsed;
-        private readonly double[] _stack = new double[64];
-        private int _sp, _stems;
+        private readonly Type2Stack _stack = new(64);
+        private int _stems;
         private bool _done;
 
-        // Subroutines that each call the next many times expand exponentially within the nesting limit, so the walk is
-        // bounded per glyph (as the renderer bounds its charstrings) and per font, since a document may use thousands
-        // of glyphs. A font past either bound is not subset but embedded whole, which keeps every subroutine.
-        private const int GlyphBudget = 200_000, FontBudget = 50_000_000;
-        private int _glyphBudget, _fontBudget = FontBudget;
+        // The walk is bounded per glyph and per font, since a document may use thousands of glyphs. A font past either
+        // bound is not subset but embedded whole, which keeps every subroutine.
+        private CharstringBudget _budget = new(50_000_000);
 
-        public SubrUsage(Index global, List<PrivateBlock> blocks)
+        public SubrUsage(byte[] d, CffIndex global, List<PrivateBlock> blocks)
         {
+            _d = d;
             _global = global;
             _blocks = blocks;
             GlobalUsed = new bool[global.Count];
             LocalUsed = blocks.Select(b => new bool[b.Subrs?.Count ?? 0]).ToArray();
         }
 
-        private static int Bias(int count) => count < 1240 ? 107 : count < 33900 ? 1131 : 32768;
-
         public void Glyph(ReadOnlySpan<byte> cs, int fd)
         {
-            _sp = 0;
+            _stack.Clear();
             _stems = 0;
             _done = false;
-            _glyphBudget = GlyphBudget;
+            _budget.StartGlyph();
             if ((uint)fd >= (uint)_blocks.Count) fd = 0;
             Run(cs, fd, 0);
         }
 
         private void Run(ReadOnlySpan<byte> cs, int fd, int depth)
         {
-            if (depth > 10) return; // the Type 2 limit on subroutine nesting
+            if (depth > Type2.MaxSubrDepth) return;
+            var stack = _stack;
             int i = 0;
             while (i < cs.Length && !_done)
             {
-                if (--_glyphBudget < 0 || --_fontBudget < 0) throw new InvalidOperationException("CFF charstrings call too many subroutines.");
-                int b = cs[i];
-                if (b >= 32 || b == 28)
+                if (!_budget.Spend()) throw new InvalidOperationException("CFF charstrings call too many subroutines.");
+                int b = cs[i++];
+                if (Type2.IsNumber(b))
                 {
-                    double v;
-                    if (b == 28) { v = (short)(cs[i + 1] << 8 | cs[i + 2]); i += 3; }
-                    else if (b <= 246) { v = b - 139; i++; }
-                    else if (b <= 250) { v = (b - 247) * 256 + cs[i + 1] + 108; i += 2; }
-                    else if (b <= 254) { v = -(b - 251) * 256 - cs[i + 1] - 108; i += 2; }
-                    else { v = BinaryPrimitives.ReadInt32BigEndian(cs[(i + 1)..]) / 65536.0; i += 5; }
-                    if (_sp < _stack.Length) _stack[_sp++] = v;
+                    stack.PushNumber(cs, b, ref i);
                     continue;
                 }
-                i++;
                 switch (b)
                 {
                     case 1: case 3: case 18: case 23: // hstem, vstem, hstemhm, vstemhm
-                        _stems += _sp / 2;
-                        _sp = 0;
+                        _stems += stack.Count / 2;
+                        stack.Clear();
                         break;
                     case 19: case 20: // hintmask, cntrmask: an implicit vstem may precede them
-                        _stems += _sp / 2;
-                        _sp = 0;
-                        i += (_stems + 7) / 8;
+                        _stems += stack.Count / 2;
+                        stack.Clear();
+                        i += Type2.MaskBytes(_stems);
                         break;
                     case 10: // callsubr
                     {
                         var local = _blocks[fd].Subrs;
-                        if (_sp == 0 || local is not { } subrs) { _sp = 0; break; }
-                        int n = (int)_stack[--_sp] + Bias(subrs.Count);
+                        if (stack.Count == 0 || local is not { } subrs) { stack.Clear(); break; }
+                        int n = (int)stack.Pop() + Type2.SubrBias(subrs.Count);
                         if ((uint)n < (uint)subrs.Count)
                         {
                             LocalUsed[fd][n] = true;
-                            Run(subrs.Item(n), fd, depth + 1);
+                            Run(subrs.Item(_d, n), fd, depth + 1);
                         }
                         break;
                     }
                     case 29: // callgsubr
                     {
-                        if (_sp == 0) break;
-                        int n = (int)_stack[--_sp] + Bias(_global.Count);
+                        if (stack.Count == 0) break;
+                        int n = (int)stack.Pop() + Type2.SubrBias(_global.Count);
                         if ((uint)n < (uint)_global.Count)
                         {
                             GlobalUsed[n] = true;
-                            Run(_global.Item(n), fd, depth + 1);
+                            Run(_global.Item(_d, n), fd, depth + 1);
                         }
                         break;
                     }
@@ -317,81 +310,14 @@ internal static class CffSubsetter
                         return;
                     case 12: // escape: two-byte operators (flex and arithmetic) consume their operands
                         i++;
-                        _sp = 0;
+                        stack.Clear();
                         break;
                     default:
-                        _sp = 0;
+                        stack.Clear();
                         break;
                 }
             }
         }
-    }
-
-    // ------------------------------------------------------------------ INDEX
-
-    private readonly struct Index
-    {
-        public readonly int Start, End, Count, OffSize, DataStart;
-        private readonly byte[] _d;
-
-        public Index(byte[] d, int start, int end, int count, int offSize, int dataStart)
-        {
-            _d = d; Start = start; End = end; Count = count; OffSize = offSize; DataStart = dataStart;
-        }
-
-        private int Offset(int i)
-        {
-            int p = Start + 3 + i * OffSize, v = 0;
-            for (int k = 0; k < OffSize; k++) v = v << 8 | _d[p + k];
-            return v;
-        }
-
-        public ReadOnlySpan<byte> Item(int i)
-        {
-            int a = Offset(i), b = Offset(i + 1);
-            if (a < 1 || b < a || DataStart + b - 1 > End) throw new FormatException("Damaged CFF INDEX.");
-            return _d.AsSpan(DataStart + a - 1, b - a);
-        }
-
-        public byte[] Raw(byte[] d) => d.AsSpan(Start, End - Start).ToArray();
-    }
-
-    private static Index ReadIndex(byte[] d, ref int pos)
-    {
-        int start = pos;
-        int count = d[pos] << 8 | d[pos + 1];
-        if (count == 0) { pos += 2; return new Index(d, start, pos, 0, 1, pos); }
-        int offSize = d[pos + 2];
-        if (offSize < 1 || offSize > 4) throw new FormatException("Damaged CFF INDEX.");
-        int last = 0;
-        for (int k = 0; k < offSize; k++) last = last << 8 | d[pos + 3 + count * offSize + k];
-        int dataStart = pos + 3 + (count + 1) * offSize;
-        pos = dataStart + last - 1;
-        if (pos > d.Length || pos < dataStart) throw new FormatException("Damaged CFF INDEX.");
-        return new Index(d, start, pos, count, offSize, dataStart);
-    }
-
-    private static byte[] WriteIndex(IReadOnlyList<byte[]> items)
-    {
-        if (items.Count == 0) return new byte[2];
-        int total = 1;
-        foreach (var it in items) total += it.Length;
-        int offSize = total <= 0xFF ? 1 : total <= 0xFFFF ? 2 : total <= 0xFFFFFF ? 3 : 4;
-        var o = new byte[3 + (items.Count + 1) * offSize + total - 1];
-        BinaryPrimitives.WriteUInt16BigEndian(o, (ushort)items.Count);
-        o[2] = (byte)offSize;
-        int off = 1, p = 3, data = 3 + (items.Count + 1) * offSize;
-        for (int i = 0; i <= items.Count; i++)
-        {
-            for (int k = offSize - 1; k >= 0; k--) o[p++] = (byte)(off >> (8 * k));
-            if (i < items.Count)
-            {
-                items[i].CopyTo(o, data);
-                data += items[i].Length;
-                off += items[i].Length;
-            }
-        }
-        return o;
     }
 
     // ------------------------------------------------------------------ DICT
@@ -403,40 +329,24 @@ internal static class CffSubsetter
         public byte[] Raw; // operands and operator as they were encoded
     }
 
-    private static List<DictEntry> ParseDict(ReadOnlySpan<byte> dict)
+    /// <summary>
+    /// The DICT's entries in order, each with the bytes it was encoded as, so that the entries this does not rewrite are
+    /// copied exactly. Real numbers read as 0: none of the operators rewritten here take one.
+    /// </summary>
+    private static List<DictEntry> ParseDict(byte[] d, (int Start, int End) range)
     {
+        var (start, end) = range;
         var entries = new List<DictEntry>();
         var operands = new List<double>();
-        int start = 0, i = 0;
-        while (i < dict.Length)
+        var r = new CffDictReader(d, start, end, cff2: false);
+        while (r.Next())
         {
-            int b = dict[i];
-            if (b <= 21)
-            {
-                int op = b;
-                i++;
-                if (b == 12) op = 1200 + dict[i++];
-                entries.Add(new DictEntry { Op = op, Operands = operands, Raw = dict[start..i].ToArray() });
-                operands = new List<double>();
-                start = i;
-            }
-            else if (b == 28) { operands.Add((short)(dict[i + 1] << 8 | dict[i + 2])); i += 3; }
-            else if (b == 29) { operands.Add(BinaryPrimitives.ReadInt32BigEndian(dict[(i + 1)..])); i += 5; }
-            else if (b == 30)
-            {
-                // Real number: nibbles until 0xf; the value is not needed for the operators rewritten here.
-                i++;
-                while (i < dict.Length)
-                {
-                    int v = dict[i++];
-                    if ((v & 0x0F) == 0x0F || (v >> 4) == 0x0F) break;
-                }
-                operands.Add(0);
-            }
-            else if (b >= 32 && b <= 246) { operands.Add(b - 139); i++; }
-            else if (b >= 247 && b <= 250) { operands.Add((b - 247) * 256 + dict[i + 1] + 108); i += 2; }
-            else if (b >= 251 && b <= 254) { operands.Add(-(b - 251) * 256 - dict[i + 1] - 108); i += 2; }
-            else throw new FormatException("Damaged CFF DICT.");
+            // A token cut off by the end of the DICT, or a reserved byte, is a damaged font.
+            if (r.Position > end || r.Kind == CffDictToken.Reserved) throw new FormatException("Damaged CFF DICT.");
+            if (r.Kind == CffDictToken.Operand) { operands.Add(r.IsReal ? 0 : r.Operand); continue; }
+            entries.Add(new DictEntry { Op = r.Operator, Operands = operands, Raw = d.AsSpan(start, r.Position - start).ToArray() });
+            operands = new List<double>();
+            start = r.Position;
         }
         return entries;
     }
@@ -446,18 +356,6 @@ internal static class CffSubsetter
         foreach (var e in dict)
             if (e.Op == op && e.Operands.Count > index) return (int)e.Operands[index];
         return -1;
-    }
-
-    private static void Int5(List<byte> o, int v)
-    {
-        o.Add(29);
-        o.Add((byte)(v >> 24)); o.Add((byte)(v >> 16)); o.Add((byte)(v >> 8)); o.Add((byte)v);
-    }
-
-    private static void Operator(List<byte> o, int op)
-    {
-        if (op >= 1200) { o.Add(12); o.Add((byte)(op - 1200)); }
-        else o.Add((byte)op);
     }
 
     // ------------------------------------------------------------------ charset and FDSelect sizes

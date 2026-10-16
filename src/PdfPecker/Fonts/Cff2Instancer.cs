@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Globalization;
+using PdfPecker.Fonts.Cff;
 
 namespace PdfPecker.Fonts;
 
@@ -20,9 +21,9 @@ internal static class Cff2Instancer
         if (d.Length < 5 || d[0] != 2) throw new FormatException("Not a CFF2 table.");
         int headerSize = d[2], topLength = d[3] << 8 | d[4];
         if (headerSize + topLength > d.Length) throw new FormatException("Bad CFF2 header.");
-        var top = ParseDict(d, headerSize, headerSize + topLength, null, 0);
+        var top = CffDict.ParseCff2(d, headerSize, headerSize + topLength, null);
         int gsubrPos = headerSize + topLength;
-        var gsubrs = ReadIndex(d, ref gsubrPos);
+        var gsubrs = CffIndex.ReadCff2(d, ref gsubrPos);
 
         VariationStore? store = null;
         if (top.TryGetValue(24, out var vs) && vs.Length > 0)
@@ -34,31 +35,31 @@ internal static class Cff2Instancer
 
         if (!top.TryGetValue(17, out var cs) || cs.Length == 0) throw new FormatException("CFF2 without CharStrings.");
         int csPos = (int)cs[0];
-        var charStrings = ReadIndex(d, ref csPos);
+        var charStrings = CffIndex.ReadCff2(d, ref csPos);
         int n = charStrings.Count;
 
         // Font DICTs: each has a Private DICT with its local subroutines and default vsindex.
-        var fds = new List<(Index Subrs, int VsIndex)>();
-        if (top.TryGetValue(1236, out var fdArrayOff) && fdArrayOff.Length > 0)
+        var fds = new List<(CffIndex Subrs, int VsIndex)>();
+        if (top.TryGetValue(CffDict.Escape + 36, out var fdArrayOff) && fdArrayOff.Length > 0)
         {
             int pos = (int)fdArrayOff[0];
-            var fdArray = ReadIndex(d, ref pos);
+            var fdArray = CffIndex.ReadCff2(d, ref pos);
             for (int i = 0; i < fdArray.Count; i++)
             {
                 var (s, e) = fdArray.Range(i);
-                var fd = ParseDict(d, s, e, null, 0);
-                Index subrs = default;
+                var fd = CffDict.ParseCff2(d, s, e, null);
+                CffIndex subrs = default;
                 int vsindex = 0;
                 if (fd.TryGetValue(18, out var priv) && priv.Length >= 2)
                 {
                     int size = (int)priv[0], off = (int)priv[1];
                     if (off < 0 || size < 0 || off + size > d.Length) throw new FormatException("Bad CFF2 Private DICT.");
-                    var pd = ParseDict(d, off, off + size, store, 0);
+                    var pd = CffDict.ParseCff2(d, off, off + size, store);
                     if (pd.TryGetValue(22, out var v) && v.Length > 0) vsindex = (int)v[0];
                     if (pd.TryGetValue(19, out var sub) && sub.Length > 0)
                     {
                         int sp = off + (int)sub[0];
-                        subrs = ReadIndex(d, ref sp);
+                        subrs = CffIndex.ReadCff2(d, ref sp);
                     }
                 }
                 fds.Add((subrs, vsindex));
@@ -66,7 +67,7 @@ internal static class Cff2Instancer
         }
         if (fds.Count == 0) fds.Add((default, 0));
         var fdOf = new byte[n];
-        if (top.TryGetValue(1237, out var fdSelect) && fdSelect.Length > 0) ReadFdSelect(d, (int)fdSelect[0], fdOf, fds.Count);
+        if (top.TryGetValue(CffDict.Escape + 37, out var fdSelect) && fdSelect.Length > 0) ReadFdSelect(d, (int)fdSelect[0], fdOf, fds.Count);
 
         // HVAR moves the advance widths; the left side bearing is the outline's own.
         Func<int, float>? advanceDelta = null;
@@ -99,43 +100,11 @@ internal static class Cff2Instancer
             lsbs[g] = box?.Item1 ?? 0;
         }
 
-        double[]? matrix = top.TryGetValue(1207, out var fm) && fm.Length == 6 ? fm : null;
+        double[]? matrix = top.TryGetValue(CffDict.Escape + 7, out var fm) && fm.Length == 6 ? fm : null;
         return new Result(WriteCff(fontName, glyphs, matrix), advances, lsbs, boxes);
     }
 
     // ---- Reading CFF2 ----
-
-    /// <summary>An INDEX: its items' start and end offsets in the table.</summary>
-    private readonly struct Index
-    {
-        private readonly int[]? _offsets;
-        public Index(int[] offsets) => _offsets = offsets;
-        public int Count => _offsets == null ? 0 : _offsets.Length - 1;
-        public (int Start, int End) Range(int i) => (_offsets![i], _offsets[i + 1]);
-    }
-
-    /// <summary>A CFF2 INDEX (a 32-bit count); also reads a CFF INDEX when the count width is given as 2.</summary>
-    private static Index ReadIndex(byte[] d, ref int pos)
-    {
-        if (pos < 0 || pos + 4 > d.Length) throw new FormatException("Bad CFF2 INDEX.");
-        long count = BinaryPrimitives.ReadUInt32BigEndian(d.AsSpan(pos));
-        pos += 4;
-        if (count == 0) return new Index(new[] { pos });
-        int offSize = d[pos++];
-        if (offSize is < 1 or > 4 || pos + (count + 1) * offSize > d.Length) throw new FormatException("Bad CFF2 INDEX.");
-        int dataStart = pos + (int)(count + 1) * offSize - 1;
-        var offsets = new int[count + 1];
-        for (int i = 0; i <= count; i++)
-        {
-            uint v = 0;
-            for (int b = 0; b < offSize; b++) v = v << 8 | d[pos + i * offSize + b];
-            long abs = dataStart + (long)v;
-            if (abs > d.Length || i > 0 && abs < offsets[i - 1]) throw new FormatException("Bad CFF2 INDEX offset.");
-            offsets[i] = (int)abs;
-        }
-        pos = offsets[count];
-        return new Index(offsets);
-    }
 
     private static void ReadFdSelect(byte[] d, int o, byte[] fdOf, int fdCount)
     {
@@ -161,100 +130,31 @@ internal static class Cff2Instancer
         else throw new FormatException("Unknown FDSelect format.");
     }
 
-    /// <summary>A DICT as operator → operands (escaped operators are 1200 + the second byte); blends are resolved.</summary>
-    private static Dictionary<int, double[]> ParseDict(byte[] d, int pos, int end, VariationStore? store, int vsindex)
-    {
-        var result = new Dictionary<int, double[]>();
-        var stack = new List<double>();
-        while (pos < end)
-        {
-            int b = d[pos];
-            if (b <= 24)
-            {
-                int op = b == 12 ? 1200 + d[pos + 1] : b;
-                pos += b == 12 ? 2 : 1;
-                if (op == 23) // blend: n defaults, then n × regions deltas, then n
-                {
-                    int count = (int)stack[^1];
-                    var scalars = store?.RegionScalars(vsindex) ?? Array.Empty<float>();
-                    stack.RemoveAt(stack.Count - 1);
-                    int first = stack.Count - count * (scalars.Length + 1);
-                    if (first < 0) throw new FormatException("Bad blend in a CFF2 DICT.");
-                    for (int i = 0; i < count; i++)
-                        for (int k = 0; k < scalars.Length; k++)
-                            stack[first + i] += stack[first + count + i * scalars.Length + k] * scalars[k];
-                    stack.RemoveRange(first + count, stack.Count - first - count);
-                    continue;
-                }
-                if (op == 22 && stack.Count > 0) vsindex = (int)stack[^1];
-                result[op] = stack.ToArray();
-                stack.Clear();
-            }
-            else if (b == 28) { stack.Add((short)(d[pos + 1] << 8 | d[pos + 2])); pos += 3; }
-            else if (b == 29) { stack.Add(BinaryPrimitives.ReadInt32BigEndian(d.AsSpan(pos + 1))); pos += 5; }
-            else if (b == 30) { stack.Add(ReadReal(d, ref pos)); }
-            else if (b >= 32 && b <= 246) { stack.Add(b - 139); pos++; }
-            else if (b >= 247 && b <= 250) { stack.Add((b - 247) * 256 + d[pos + 1] + 108); pos += 2; }
-            else if (b >= 251 && b <= 254) { stack.Add(-(b - 251) * 256 - d[pos + 1] - 108); pos += 2; }
-            else throw new FormatException("Bad CFF2 DICT.");
-        }
-        return result;
-    }
-
-    private static double ReadReal(byte[] d, ref int pos)
-    {
-        pos++;
-        var s = new System.Text.StringBuilder();
-        while (true)
-        {
-            int b = d[pos++];
-            for (int half = 0; half < 2; half++)
-            {
-                int nib = half == 0 ? b >> 4 : b & 15;
-                switch (nib)
-                {
-                    case <= 9: s.Append((char)('0' + nib)); break;
-                    case 0xA: s.Append('.'); break;
-                    case 0xB: s.Append('E'); break;
-                    case 0xC: s.Append("E-"); break;
-                    case 0xE: s.Append('-'); break;
-                    case 0xF:
-                        return double.TryParse(s.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : 0;
-                }
-            }
-        }
-    }
-
     // ---- Running charstrings ----
 
     /// <summary>Runs CFF2 charstrings into an outline in absolute coordinates, then writes it as a CFF charstring.</summary>
     private sealed class Charstring
     {
         private readonly byte[] _d;
-        private readonly Index _gsubrs;
+        private readonly CffIndex _gsubrs;
         private readonly VariationStore? _store;
         private readonly Dictionary<int, float[]> _scalars = new();
-        private readonly List<double> _stack = new();
+        private readonly Type2Stack _stack = new(513); // the CFF2 limit
         private readonly List<(byte Op, double[] P)> _path = new(); // 'M', 'L' or 'C' with absolute points
-        private Index _subrs;
+        private CffIndex _subrs;
         private float[] _blend = Array.Empty<float>();
         private double _x, _y;
         private int _stems, _depth;
 
-        // Subroutines that each call the next many times expand exponentially within the nesting limit, so a glyph
-        // gets a bounded number of charstring bytes (as in the renderer), and so does the font, since it may have tens
-        // of thousands of glyphs. A font past either bound is treated as damaged and left as it is.
-        private const int GlyphBudget = 200_000, FontBudget = 100_000_000;
-        private int _glyphBudget, _fontBudget = FontBudget;
+        // A font past the budget is treated as damaged and left as it is.
+        private CharstringBudget _budget = new(100_000_000);
 
-        public Charstring(byte[] d, Index gsubrs, VariationStore? store)
+        public Charstring(byte[] d, CffIndex gsubrs, VariationStore? store)
         {
             _d = d;
             _gsubrs = gsubrs;
             _store = store;
         }
-
-        private static int Bias(int count) => count < 1240 ? 107 : count < 33900 ? 1131 : 32768;
 
         private float[] Scalars(int vsindex)
         {
@@ -263,7 +163,7 @@ internal static class Cff2Instancer
             return s;
         }
 
-        public void Run(int start, int end, Index subrs, int vsindex)
+        public void Run(int start, int end, CffIndex subrs, int vsindex)
         {
             _subrs = subrs;
             _blend = Scalars(vsindex);
@@ -272,26 +172,23 @@ internal static class Cff2Instancer
             _x = _y = 0;
             _stems = 0;
             _depth = 0;
-            _glyphBudget = GlyphBudget;
+            _budget.StartGlyph();
             Execute(start, end);
         }
 
         private void Execute(int pos, int end)
         {
-            if (++_depth > 10) throw new FormatException("CFF2 subroutines nest too deep.");
+            // The glyph's own charstring counts as the first level here.
+            if (++_depth > Type2.MaxSubrDepth) throw new FormatException("CFF2 subroutines nest too deep.");
             var s = _stack;
+            ReadOnlySpan<byte> d = _d;
             while (pos < end)
             {
-                if (--_glyphBudget < 0 || --_fontBudget < 0) throw new FormatException("CFF2 charstrings call too many subroutines.");
-                int b = _d[pos++];
-                if (b >= 32 || b == 28)
+                if (!_budget.Spend()) throw new FormatException("CFF2 charstrings call too many subroutines.");
+                int b = d[pos++];
+                if (Type2.IsNumber(b))
                 {
-                    if (b == 28) { s.Add((short)(_d[pos] << 8 | _d[pos + 1])); pos += 2; }
-                    else if (b <= 246) s.Add(b - 139);
-                    else if (b <= 250) s.Add((b - 247) * 256 + _d[pos++] + 108);
-                    else if (b <= 254) s.Add(-(b - 251) * 256 - _d[pos++] - 108);
-                    else { s.Add(BinaryPrimitives.ReadInt32BigEndian(_d.AsSpan(pos)) / 65536.0); pos += 4; }
-                    if (s.Count > 513) throw new FormatException("CFF2 stack overflow.");
+                    if (!s.PushNumber(d, b, ref pos)) throw new FormatException("CFF2 stack overflow.");
                     continue;
                 }
                 switch (b)
@@ -303,7 +200,7 @@ internal static class Cff2Instancer
                     case 19: case 20: // hintmask, cntrmask: arguments left on the stack are vertical stems
                         _stems += s.Count / 2;
                         s.Clear();
-                        pos += (_stems + 7) / 8;
+                        pos += Type2.MaskBytes(_stems);
                         break;
                     case 21: Move(s[^2], s[^1]); s.Clear(); break;
                     case 22: Move(s[^1], 0); s.Clear(); break;
@@ -315,9 +212,9 @@ internal static class Cff2Instancer
                     case 6: case 7:
                     {
                         bool horizontal = b == 6;
-                        foreach (var v in s)
+                        for (int i = 0; i < s.Count; i++)
                         {
-                            if (horizontal) Line(v, 0); else Line(0, v);
+                            if (horizontal) Line(s[i], 0); else Line(0, s[i]);
                             horizontal = !horizontal;
                         }
                         s.Clear();
@@ -377,8 +274,7 @@ internal static class Cff2Instancer
                     case 10: case 29: // callsubr, callgsubr
                     {
                         var index = b == 10 ? _subrs : _gsubrs;
-                        int i = (int)s[^1] + Bias(index.Count);
-                        s.RemoveAt(s.Count - 1);
+                        int i = (int)s.Pop() + Type2.SubrBias(index.Count);
                         if ((uint)i >= (uint)index.Count) throw new FormatException("Bad CFF2 subroutine.");
                         var (ss, se) = index.Range(i);
                         Execute(ss, se);
@@ -392,19 +288,18 @@ internal static class Cff2Instancer
                         break;
                     case 16: // blend
                     {
-                        int count = (int)s[^1];
-                        s.RemoveAt(s.Count - 1);
+                        int count = (int)s.Pop();
                         int k = _blend.Length, first = s.Count - count * (k + 1);
                         if (count < 0 || first < 0) throw new FormatException("Bad CFF2 blend.");
                         for (int i = 0; i < count; i++)
                             for (int j = 0; j < k; j++)
                                 s[first + i] += s[first + count + i * k + j] * _blend[j];
-                        s.RemoveRange(first + count, s.Count - first - count);
+                        s.Count = first + count;
                         break;
                     }
                     case 12:
                     {
-                        int op = _d[pos++];
+                        int op = d[pos++];
                         switch (op)
                         {
                             case 35 when s.Count >= 12: // flex
@@ -510,12 +405,12 @@ internal static class Cff2Instancer
     {
         int n = glyphs.Length;
         var header = new byte[] { 1, 0, 4, 4 };
-        var nameIndex = Index1(new[] { System.Text.Encoding.ASCII.GetBytes(name) });
-        var strings = Index1(new[] { "Adobe"u8.ToArray(), "Identity"u8.ToArray() });
-        var gsubrs = Index1(Array.Empty<byte[]>());
+        var nameIndex = CffIndex.Write(new[] { System.Text.Encoding.ASCII.GetBytes(name) });
+        var strings = CffIndex.Write(new[] { "Adobe"u8.ToArray(), "Identity"u8.ToArray() });
+        var gsubrs = CffIndex.Write(Array.Empty<byte[]>());
         var charset = n > 1 ? new byte[] { 2, 0, 1, (byte)((n - 2) >> 8), (byte)(n - 2) } : new byte[] { 0 };
         var fdSelect = new byte[] { 3, 0, 1, 0, 0, 0, (byte)(n >> 8), (byte)n };
-        var charStrings = Index1(glyphs);
+        var charStrings = CffIndex.Write(glyphs);
         var privateDict = new byte[] { 139, 20, 139, 21 }; // defaultWidthX 0, nominalWidthX 0
 
         byte[] TopDict(int charsetOff, int fdSelectOff, int charStringsOff, int fdArrayOff)
@@ -528,22 +423,22 @@ internal static class Cff2Instancer
                 foreach (var v in matrix) Real(t, v);
                 t.Add(12); t.Add(7);
             }
-            Int32(t, charsetOff); t.Add(15);
-            Int32(t, fdSelectOff); t.Add(12); t.Add(37);
-            Int32(t, charStringsOff); t.Add(17);
-            Int32(t, fdArrayOff); t.Add(12); t.Add(36);
+            CffDict.WriteInt32(t, charsetOff); t.Add(15);
+            CffDict.WriteInt32(t, fdSelectOff); t.Add(12); t.Add(37);
+            CffDict.WriteInt32(t, charStringsOff); t.Add(17);
+            CffDict.WriteInt32(t, fdArrayOff); t.Add(12); t.Add(36);
             return t.ToArray();
         }
         byte[] FontDict(int privateOff)
         {
             var t = new List<byte>();
-            Int32(t, privateDict.Length); Int32(t, privateOff); t.Add(18);
+            CffDict.WriteInt32(t, privateDict.Length); CffDict.WriteInt32(t, privateOff); t.Add(18);
             return t.ToArray();
         }
 
         // Offsets are written as 5-byte numbers, so the DICTs have the same size before and after they are known.
-        int topSize = Index1(new[] { TopDict(0, 0, 0, 0) }).Length;
-        int fdArraySize = Index1(new[] { FontDict(0) }).Length;
+        int topSize = CffIndex.Write(new[] { TopDict(0, 0, 0, 0) }).Length;
+        int fdArraySize = CffIndex.Write(new[] { FontDict(0) }).Length;
         int charsetOff = header.Length + nameIndex.Length + topSize + strings.Length + gsubrs.Length;
         int fdSelectOff = charsetOff + charset.Length;
         int charStringsOff = fdSelectOff + fdSelect.Length;
@@ -553,47 +448,21 @@ internal static class Cff2Instancer
         var o = new MemoryStream();
         o.Write(header);
         o.Write(nameIndex);
-        o.Write(Index1(new[] { TopDict(charsetOff, fdSelectOff, charStringsOff, fdArrayOff) }));
+        o.Write(CffIndex.Write(new[] { TopDict(charsetOff, fdSelectOff, charStringsOff, fdArrayOff) }));
         o.Write(strings);
         o.Write(gsubrs);
         o.Write(charset);
         o.Write(fdSelect);
         o.Write(charStrings);
-        o.Write(Index1(new[] { FontDict(privateOff) }));
+        o.Write(CffIndex.Write(new[] { FontDict(privateOff) }));
         o.Write(privateDict);
-        return o.ToArray();
-    }
-
-    private static byte[] Index1(byte[][] items)
-    {
-        if (items.Length == 0) return new byte[] { 0, 0 };
-        long total = 1;
-        foreach (var it in items) total += it.Length;
-        int offSize = total <= 0xFF ? 1 : total <= 0xFFFF ? 2 : total <= 0xFFFFFF ? 3 : 4;
-        var o = new MemoryStream();
-        o.WriteByte((byte)(items.Length >> 8));
-        o.WriteByte((byte)items.Length);
-        o.WriteByte((byte)offSize);
-        long off = 1;
-        for (int i = 0; i <= items.Length; i++)
-        {
-            for (int b = offSize - 1; b >= 0; b--) o.WriteByte((byte)(off >> (b * 8)));
-            if (i < items.Length) off += items[i].Length;
-        }
-        foreach (var it in items) o.Write(it);
         return o.ToArray();
     }
 
     private static void Int(List<byte> o, int v)
     {
         if (v >= -107 && v <= 107) o.Add((byte)(v + 139));
-        else Int32(o, v);
-    }
-
-    private static void Int32(List<byte> o, int v)
-    {
-        o.Add(29);
-        o.Add((byte)(v >> 24)); o.Add((byte)(v >> 16)); o.Add((byte)(v >> 8)); o.Add((byte)v);
+        else CffDict.WriteInt32(o, v);
     }
 
     private static void Real(List<byte> o, double v)
