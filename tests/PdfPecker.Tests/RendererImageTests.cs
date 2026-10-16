@@ -364,6 +364,16 @@ public class RendererImageTests
         AssertAt(img, 2, 8 * 4 - 6, 255, 255, 255); // row 1 is white
     }
 
+    [Fact]
+    public void Ccitt_rows_missing_from_the_data_are_white()
+    {
+        // The data holds 8 rows but the image is 12 high: rows that were never decoded must not come out black.
+        var img = DrawImage(10, 12, "/BitsPerComponent 1 /ColorSpace /DeviceGray /Filter /CCITTFaxDecode /DecodeParms << /Columns 10 /Rows 12 /K -1 >>",
+            TestEncoders.Ccitt(FaxRows(), -1), 4);
+        AssertColor(Px(img, 2, 2), 0, 0, 0, 2, "Row 0: ");
+        for (int y = 8; y < 12; y++) AssertColor(Px(img, 18, y * 4 + 2), 255, 255, 255, 2, $"Row {y}: ");
+    }
+
     // ---------------------------------------------------------------- DCT with an Adobe marker
 
     [Fact]
@@ -444,6 +454,56 @@ public class RendererImageTests
         var img = Render(pdf.Build(8, 4, "q 8 0 0 4 0 0 cm /Im Do Q", $"/XObject << /Im {im} 0 R >>"));
         AssertAt(img, 2, 2, 255, 255, 255); // pure red is keyed out
         AssertAt(img, 6, 2, 0, 0, 255);
+    }
+
+    [Theory]
+    [InlineData(0, new byte[] { 128, 0, 0 })]     // red at alpha one half pre-blended with black
+    [InlineData(1, new byte[] { 255, 127, 127 })] // the same red pre-blended with white
+    public void Smask_matte_un_blends_the_pre_multiplied_colors(int matte, byte[] stored)
+    {
+        // With /Matte the samples are c' = m + alpha * (c - m); the reader recovers c before compositing, so both images
+        // are full red at half alpha and give the same result over a black page (ISO 32000-1, 11.6.5.3).
+        var pdf = new FixturePdf();
+        int mask = pdf.AddStream($"/Type /XObject /Subtype /Image /Width 1 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceGray /Matte [{matte} {matte} {matte}]",
+            new byte[] { 128 });
+        int im = pdf.AddStream($"/Type /XObject /Subtype /Image /Width 1 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceRGB /SMask {mask} 0 R", stored);
+        var img = Render(pdf.Build(4, 4, "0 g 0 0 4 4 re f q 4 0 0 4 0 0 cm /Im Do Q", $"/XObject << /Im {im} 0 R >>"));
+        AssertAt(img, 2, 2, 128, 0, 0, 2);
+    }
+
+    [Fact]
+    public void Smask_matte_leaves_fully_transparent_samples_alone()
+    {
+        var pdf = new FixturePdf();
+        int mask = pdf.AddStream("/Type /XObject /Subtype /Image /Width 2 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceGray /Matte [1 1 1]", new byte[] { 0, 255 });
+        int im = pdf.AddStream($"/Type /XObject /Subtype /Image /Width 2 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceRGB /SMask {mask} 0 R", Uniform(2, 0, 0, 255));
+        var img = Render(pdf.Build(8, 4, "0 g 0 0 8 4 re f q 8 0 0 4 0 0 cm /Im Do Q", $"/XObject << /Im {im} 0 R >>"));
+        AssertAt(img, 2, 2, 0, 0, 0, 2);
+        AssertAt(img, 6, 2, 0, 0, 255, 2);
+    }
+
+    [Fact]
+    public void Explicit_mask_shows_the_base_image_where_mask_samples_are_zero()
+    {
+        // An explicit mask's samples mean what an image mask's do: with the default Decode [0 1], 0 marks the area to
+        // paint and 1 masks it out (ISO 32000-1, 8.9.6.2 and 8.9.6.3).
+        var pdf = new FixturePdf();
+        int mask = pdf.AddStream("/Type /XObject /Subtype /Image /Width 2 /Height 1 /ImageMask true /BitsPerComponent 1", new byte[] { 0b0100_0000 });
+        int im = pdf.AddStream($"/Type /XObject /Subtype /Image /Width 2 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceRGB /Mask {mask} 0 R", Uniform(2, 255, 0, 0));
+        var img = Render(pdf.Build(8, 4, "q 8 0 0 4 0 0 cm /Im Do Q", $"/XObject << /Im {im} 0 R >>"));
+        AssertAt(img, 2, 2, 255, 0, 0); // sample 0: painted
+        AssertAt(img, 6, 2, 255, 255, 255); // sample 1: masked out
+    }
+
+    [Fact]
+    public void Explicit_mask_with_a_reversed_decode_array_flips_the_mask()
+    {
+        var pdf = new FixturePdf();
+        int mask = pdf.AddStream("/Type /XObject /Subtype /Image /Width 2 /Height 1 /ImageMask true /BitsPerComponent 1 /Decode [1 0]", new byte[] { 0b0100_0000 });
+        int im = pdf.AddStream($"/Type /XObject /Subtype /Image /Width 2 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceRGB /Mask {mask} 0 R", Uniform(2, 255, 0, 0));
+        var img = Render(pdf.Build(8, 4, "q 8 0 0 4 0 0 cm /Im Do Q", $"/XObject << /Im {im} 0 R >>"));
+        AssertAt(img, 2, 2, 255, 255, 255);
+        AssertAt(img, 6, 2, 255, 0, 0);
     }
 
     // ---------------------------------------------------------------- soft-mask groups
@@ -628,6 +688,17 @@ public class RendererImageTests
             ? NonSeparable(mode)
             : Enumerable.Range(0, 3).Select(i => Separable(mode, Backdrop[i], Source[i])).ToArray();
         AssertAt(img, 20, 20, (int)Math.Round(expected[0] * 255), (int)Math.Round(expected[1] * 255), (int)Math.Round(expected[2] * 255), 4);
+    }
+
+    [Fact]
+    public void Blend_mode_array_uses_the_first_mode_the_reader_recognises()
+    {
+        // An array lets a writer name a newer mode followed by fallbacks; names the reader does not know are skipped
+        // (ISO 32000-1, 11.6.3).
+        var pdf = new FixturePdf();
+        int gs = pdf.Add("<< /Type /ExtGState /BM [/NoSuchMode /Multiply /Screen] >>");
+        var img = Render(pdf.Build(40, 40, "0.8 0.4 0.2 rg 0 0 40 40 re f /GS gs 0.3 0.6 0.9 rg 10 10 20 20 re f", $"/ExtGState << /GS {gs} 0 R >>"));
+        AssertAt(img, 20, 20, (int)Math.Round(0.24 * 255), (int)Math.Round(0.24 * 255), (int)Math.Round(0.18 * 255), 4);
     }
 
     [Fact]

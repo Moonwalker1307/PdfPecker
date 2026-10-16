@@ -259,6 +259,58 @@ public class RendererColorTests
         AssertColor(Fill(cal, "1"), 255, 255, 255, 2);
     }
 
+    private const string SrgbMatrix = "/Matrix [0.4124 0.2126 0.0193 0.3576 0.7152 0.1192 0.1805 0.0722 0.9505]";
+
+    [Fact]
+    public void Calgray_with_gamma_one_is_linear_light()
+    {
+        // CalGray with Gamma 1 gives luminance Y = A, so half luminance is sRGB 188, not 128 (ISO 32000-1, 8.6.5.2).
+        AssertColor(Fill("[/CalGray << /WhitePoint [0.9505 1 1.089] >>]", "0.5"), 188, 188, 188, 3);
+        AssertColor(Fill("[/CalGray << /WhitePoint [0.9505 1 1.089] /Gamma 1 >>]", "0"), 0, 0, 0, 2);
+    }
+
+    [Fact]
+    public void Calrgb_with_gamma_one_and_srgb_primaries_is_linear_srgb()
+    {
+        string cal = $"[/CalRGB << /WhitePoint [0.9505 1 1.089] /Gamma [1 1 1] {SrgbMatrix} >>]";
+        AssertColor(Fill(cal, "0.5 0.5 0.5"), 188, 188, 188, 3);
+        AssertColor(Fill(cal, "0 1 0"), 0, 255, 0, 4);
+    }
+
+    [Fact]
+    public void Calrgb_adapts_a_d50_white_point_to_srgb_white()
+    {
+        // White in the document's white point must come out as sRGB white, whatever that white point is. The matrix is the
+        // sRGB primaries adapted to D50.
+        const string cal = "[/CalRGB << /WhitePoint [0.9642 1 0.8249] /Gamma [1.8 1.8 1.8] /Matrix [0.4361 0.2225 0.0139 0.3851 0.7169 0.0971 0.1431 0.0606 0.7141] >>]";
+        AssertColor(Fill(cal, "1 1 1"), 255, 255, 255, 3);
+        var mid = Fill(cal, "0.5 0.5 0.5");
+        Assert.True(Math.Abs(mid.R - mid.G) <= 3 && Math.Abs(mid.G - mid.B) <= 3, $"Neutral input should stay neutral, got {mid}");
+    }
+
+    [Fact]
+    public void Calrgb_with_the_default_identity_matrix_keeps_black_and_white()
+    {
+        // Without /Matrix the components are X, Y and Z directly; white and black must still come out near white and black.
+        const string cal = "[/CalRGB << /WhitePoint [0.9505 1 1.089] >>]";
+        AssertColor(Fill(cal, "0 0 0"), 0, 0, 0, 2);
+        var white = Fill(cal, "1 1 1");
+        Assert.True(white.R >= 230 && white.G >= 230 && white.B >= 230, $"Expected near white, got {white}");
+    }
+
+    [Fact]
+    public void Calrgb_image_matches_the_same_calrgb_fill()
+    {
+        // 8-bit CalRGB images take a table-driven path; it must agree with the per-colour conversion.
+        string cal = $"[/CalRGB << /WhitePoint [0.9505 1 1.089] /Gamma [1 1.8 2.2] {SrgbMatrix} >>]";
+        var pdf = new FixturePdf();
+        int im = pdf.AddStream($"/Type /XObject /Subtype /Image /Width 1 /Height 1 /BitsPerComponent 8 /ColorSpace {cal}", new byte[] { 128, 64, 200 });
+        var img = Render(pdf.Build(4, 4, "q 4 0 0 4 0 0 cm /Im Do Q", $"/XObject << /Im {im} 0 R >>"));
+        var fill = Fill(cal, $"{F(128 / 255.0)} {F(64 / 255.0)} {F(200 / 255.0)}");
+        AssertColor(At(img, 2, 2), fill.R, fill.G, fill.B, 2);
+        AssertColor(Fill(cal, "0.5 0 0"), 188, 0, 0, 3);
+    }
+
     [Fact]
     public void Iccbased_uses_its_alternate_space()
     {
