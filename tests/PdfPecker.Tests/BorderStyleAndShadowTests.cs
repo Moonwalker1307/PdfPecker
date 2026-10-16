@@ -7,7 +7,7 @@ namespace PdfPecker.Tests;
 
 /// <summary>
 /// Groove, ridge, inset and outset borders, inset box shadows, text-overflow strings, calc() table widths and
-/// ::first-letter.
+/// ::first-letter and ::first-line.
 /// </summary>
 public class BorderStyleAndShadowTests
 {
@@ -261,5 +261,55 @@ public class BorderStyleAndShadowTests
     {
         Assert.DoesNotContain(TextOps("<p><img src='x.png' width=10 height=10>Text</p>", "p::first-letter { color: red }"), t => t.Color == 0xFFFF0000u);
         Assert.DoesNotContain(TextOps("<p>... ok</p>", "p::first-letter { color: red }"), t => t.Color == 0xFFFF0000u);
+    }
+
+    // ---- ::first-line ----
+
+    private const string Long = "The first line of this paragraph is styled while the rest of the text keeps the normal style it had.";
+
+    [Fact]
+    public void First_line_styles_only_the_text_on_the_first_line()
+    {
+        var texts = TextOps($"<p style='width:300px'>{Long}</p>", "p::first-line { color: #a00; text-transform: uppercase }");
+        float first = texts[0].Baseline;
+        Assert.All(texts.Where(t => t.Baseline == first && t.Text.Trim().Length > 0), t =>
+        {
+            Assert.Equal(0xFFAA0000u, t.Color);
+            Assert.Equal(t.Text.ToUpperInvariant(), t.Text);
+        });
+        var rest = texts.Where(t => t.Baseline > first && t.Text.Trim().Length > 0).ToList();
+        Assert.NotEmpty(rest);
+        Assert.All(rest, t => Assert.NotEqual(0xFFAA0000u, t.Color));
+        Assert.Contains(rest, t => t.Text != t.Text.ToUpperInvariant());
+    }
+
+    [Fact]
+    public void First_line_keeps_what_inline_elements_set_themselves()
+    {
+        var texts = TextOps("<p style='width:600px'>Some <em style='color:blue'>blue</em> words</p>", "p::first-line { color: red }");
+        Assert.Equal(0xFF0000FFu, texts.Single(t => t.Text.Contains("blue")).Color);
+        Assert.Equal(0xFFFF0000u, texts.First(t => t.Text.Contains("Some")).Color);
+    }
+
+    [Fact]
+    public void A_larger_first_line_is_broken_with_its_own_font_size()
+    {
+        var plain = TextOps($"<p style='width:300px'>{Long}</p>");
+        var big = TextOps($"<p style='width:300px'>{Long}</p>", "p::first-line { font-size: 24px }");
+        int Words(List<TextOp> t) => string.Join("", t.Where(o => o.Baseline == t[0].Baseline).Select(o => o.Text)).Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
+        Assert.True(Words(big) < Words(plain));
+        Assert.Equal(18f, big[0].Size);
+        // The second line is back to the paragraph's size.
+        Assert.Equal(12f, big.First(t => t.Baseline > big[0].Baseline).Size);
+    }
+
+    [Fact]
+    public void First_line_of_a_block_reaches_into_its_first_child_block_and_the_first_letter_inherits_it()
+    {
+        var texts = TextOps($"<div style='width:300px'><p>{Long}</p></div>", "div::first-line { color: green } div::first-letter { font-size: 2em }");
+        Assert.Equal("T", texts[0].Text);
+        Assert.Equal(0xFF008000u, texts[0].Color);
+        Assert.Equal(24f, texts[0].Size);
+        Assert.Equal(0xFF008000u, texts[1].Color);
     }
 }

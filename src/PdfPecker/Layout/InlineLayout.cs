@@ -172,10 +172,11 @@ internal sealed partial class LayoutEngine
         public bool LastWasSpace = true;
         public int Column;
         public float AvailWidth;
+        public FirstLineStyle? FirstLine; // set while collecting the text of a block's first line
     }
 
     /// <summary>The items of a run of inline content. Hand the state back with <see cref="ReturnState"/> when done.</summary>
-    private CollectState CollectInline(List<Node> run, float availW)
+    private CollectState CollectInline(List<Node> run, float availW, FirstLineStyle? firstLine = null)
     {
         if (_statePool.TryPop(out var st))
         {
@@ -184,7 +185,9 @@ internal sealed partial class LayoutEngine
         }
         else st = new CollectState();
         st.AvailWidth = availW;
+        st.FirstLine = firstLine;
         foreach (var node in run) CollectNode(st, node, null, null);
+        st.FirstLine = null;
         return st;
     }
 
@@ -218,7 +221,7 @@ internal sealed partial class LayoutEngine
         {
             if (Tags != null) _textTag = Tags.Of(t);
             if (t.Parent!.Generated && t.Text.IndexOf(GeneratedContent.LeaderStart) >= 0) AddWithLeaders(st, t.Text, t.Parent.Style, href, deco);
-            else AddText(st, t.Text, t.Parent!.Style, href, deco);
+            else AddText(st, t.Text, st.FirstLine is { } fl ? fl.Map(t.Parent!.Style) : t.Parent!.Style, href, deco);
             _textTag = null;
             return;
         }
@@ -695,16 +698,30 @@ internal sealed partial class LayoutEngine
             TextMetrics(cs, out float sa, out float sd);
             fl = new FloatLines { Engine = this, Block = cs, X = x, W = w, Y = y, StrutH = sa + sd };
         }
-        var lines = BreakLines(items, w, indent, fl);
+        // With a ::first-line style the items are collected twice, styled for the first line and as usual, and the line
+        // breaker switches from the first list to the second once the first line is full.
+        CollectState? first = null;
+        if (firstInBlock && container.FirstLine is { } firstLine && !_measuring)
+        {
+            first = CollectInline(run, w, firstLine);
+            if (first.Items.Count == items.Count) ResolveBidi(first.Items, cs);
+            else { ReturnState(first); first = null; } // small caps split the words differently: no first-line style
+        }
+        var lines = first != null ? BreakLines(first.Items, w, indent, fl, after: items) : BreakLines(items, w, indent, fl);
         fl?.Flush(lines);
         produced = true;
         float bottom = PlaceLines(lines, cs, x, y, w, indent, besideFloats: fl != null);
         ReturnLines(lines);
+        if (first != null) ReturnState(first);
         ReturnState(st);
         return bottom;
     }
 
-    private List<Line> BreakLines(List<Item> items, float availW, float firstIndent, FloatLines? fl = null)
+    /// <summary>
+    /// Breaks items into lines. With <paramref name="after"/>, a list matching <paramref name="items"/> item for item,
+    /// the lines after the first are made from that list instead (::first-line).
+    /// </summary>
+    private List<Line> BreakLines(List<Item> items, float availW, float firstIndent, FloatLines? fl = null, List<Item>? after = null)
     {
         var lines = _lineListPool.Count > 0 ? _lineListPool.Pop() : new List<Line>();
         var cur = RentLine();
@@ -735,6 +752,11 @@ internal sealed partial class LayoutEngine
             curW = 0;
             fl?.Begin(lines);
             avail = fl?.Avail ?? availW;
+            if (after != null)
+            {
+                items = after;
+                after = null;
+            }
         }
 
         bool HasContent() => hasContent;
@@ -795,7 +817,16 @@ internal sealed partial class LayoutEngine
 
             if (HasContent() && curW + need > avail + Eps && !breakAll)
             {
+                bool switching = after != null;
                 Finish(forced: false);
+                if (switching)
+                {
+                    // The chunk moves to the second line, in its usual style.
+                    gw = 0;
+                    for (int k = i; k < j; k++) gw += items[k].Width;
+                    need = gw;
+                    if (items[j - 1].BreakAfter == BreakAfter.SoftHyphen) need += HyphenWidth(items[j - 1].Style);
+                }
             }
             // Too narrow beside the floats: the line moves down past them until the chunk fits.
             if (fl != null && !HasContent() && need > avail + Eps)

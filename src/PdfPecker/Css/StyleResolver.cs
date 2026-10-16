@@ -151,6 +151,7 @@ internal sealed class StyleResolver
         authorSheet.RankLayers();
         _author = new RuleIndex(authorSheet);
         _firstLetterRules = authorSheet.Rules.Any(r => r.Selector.PseudoElement == PseudoElement.FirstLetter);
+        _firstLineRules = authorSheet.Rules.Any(r => r.Selector.PseudoElement == PseudoElement.FirstLine);
         if (authorSheet.RegisteredProperties.Count > 0)
         {
             // Registered custom properties start at their initial value: on every element when they do not inherit,
@@ -222,6 +223,7 @@ internal sealed class StyleResolver
             }
             e.Id = e.GetAttribute("id");
             e.LayoutKey = null;
+            e.FirstLine = null;
             var cls = e.GetAttribute("class");
             if (!string.IsNullOrWhiteSpace(cls))
                 e.Classes = cls!.Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
@@ -252,8 +254,12 @@ internal sealed class StyleResolver
             if (e.Id != null && Paged.WantedCounters.Count > 0) SnapshotCounters(e.Id);
             if (e.Style.Display == Display.ListItem && HasPseudoRules) ResolveMarker(e);
             ResolveChildren(e);
-            if (_firstLetterRules && e.Style.Display is Display.Block or Display.ListItem or Display.InlineBlock or Display.TableCell
-                    or Display.TableCaption) GenerateFirstLetter(e);
+            if ((_firstLetterRules || _firstLineRules) && e.Style.Display is Display.Block or Display.ListItem or Display.InlineBlock
+                    or Display.TableCell or Display.TableCaption)
+            {
+                if (_firstLineRules) ResolveFirstLine(e);
+                if (_firstLetterRules) GenerateFirstLetter(e);
+            }
             if (e.Style.StringSet != null) SetStrings(e);
         }
         if (pseudos) Generate(parent, PseudoElement.After, ref scope);
@@ -345,7 +351,11 @@ internal sealed class StyleResolver
         var (owner, index, start, length) = found;
         var node = (TextNode)owner.Children[index];
         if (_count > 1) Array.Sort(_keys, _decls, 0, _count);
-        var s = Compute(FirstLetterName, owner.Style);
+        // The first letter is inside the first line, so it inherits the ::first-line style.
+        var parentStyle = owner.Style;
+        for (var a = owner; a != null; a = a == host ? null : a.Parent)
+            if (a.FirstLine is { } fl) { parentStyle = fl.Map(owner.Style); break; }
+        var s = Compute(FirstLetterName, parentStyle);
         // A first letter that floats or is absolutely positioned becomes a block box; otherwise it stays inline.
         if (s.Float != FloatSide.None || s.Position is Position.Absolute or Position.Fixed) s.Display = Display.Block;
         else if (s.Display != Display.Inline) s.Display = Display.Inline;
@@ -399,6 +409,42 @@ internal sealed class StyleResolver
         return null;
     }
 
+    /// <summary>
+    /// Works out a block's ::first-line style, when rules give it one, and hands it to the element whose inline content
+    /// makes the first line: the block itself, or the first block nested at its start. Layout applies it to the text
+    /// of that line.
+    /// </summary>
+    private void ResolveFirstLine(Element host)
+    {
+        _count = 0;
+        if (UaIndex.Value.PseudoElements is { } ua) Collect(ua, host, TierUa, TierUaImportant, PseudoElement.FirstLine);
+        if (_author.PseudoElements is { } author) Collect(author, host, TierAuthor, TierAuthorImportant, PseudoElement.FirstLine);
+        if (_count == 0) return;
+        if (_count > 1) Array.Sort(_keys, _decls, 0, _count);
+        var line = Compute("::first-line", host.Style);
+        var target = host;
+        while (FirstBlockChild(target) is { } inner) target = inner;
+        // A ::first-line of a nested block was resolved first and stays: it is the more specific of the two.
+        target.FirstLine ??= new FirstLineStyle(host.Style, line);
+    }
+
+    /// <summary>The block that starts <paramref name="e"/>'s content, when no text or inline box comes before it.</summary>
+    private static Element? FirstBlockChild(Element e)
+    {
+        foreach (var c in e.Children)
+        {
+            if (c is TextNode t)
+            {
+                if (string.IsNullOrWhiteSpace(t.Text)) continue;
+                return null;
+            }
+            if (c is not Element child || child.Style is not { } s || s.Display == Display.None) continue;
+            if (s.Float != FloatSide.None || s.Position is Position.Absolute or Position.Fixed) continue;
+            return s.Display is Display.Block or Display.ListItem ? child : null;
+        }
+        return null;
+    }
+
     // Punctuation that goes with the first letter: the Ps, Pe, Pi, Pf and Po classes, as CSS Pseudo-Elements says.
     private static bool IsFirstLetterPunctuation(string text, int k)
         => CharUnicodeInfo.GetUnicodeCategory(text[k]) is UnicodeCategory.OpenPunctuation or UnicodeCategory.ClosePunctuation
@@ -421,7 +467,7 @@ internal sealed class StyleResolver
 
     private readonly Dictionary<string, List<int>> _counters = new(StringComparer.Ordinal);
     private bool _countersUsed;
-    private readonly bool _firstLetterRules;
+    private readonly bool _firstLetterRules, _firstLineRules;
     internal int QuoteDepth;
 
     /// <summary>Applies counter-reset, counter-increment and counter-set, in that order (CSS Lists 3).</summary>

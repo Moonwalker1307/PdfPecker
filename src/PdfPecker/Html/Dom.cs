@@ -45,6 +45,8 @@ internal sealed class Element : Node
     /// <summary>The style of this list item's ::marker, when a rule styles it; its content replaces the marker text.</summary>
     public Css.ComputedStyle? MarkerStyle;
     public string? MarkerContent;
+    /// <summary>The ::first-line style of the block whose first line this element's inline content starts, if any.</summary>
+    public Css.FirstLineStyle? FirstLine;
     /// <summary>An anchor key under which layout records where this element starts (string-set elements).</summary>
     public string? LayoutKey;
 
