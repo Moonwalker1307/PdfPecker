@@ -1,13 +1,3 @@
 # veraPDF rules that the generated samples are known to fail, one per line: profile flavour clause testNumber.
 # check.py fails the conformance job on any failing rule that is not listed here, so the list only stops regressions;
 # remove a line when the library is fixed (check.py prints a note when a listed rule no longer fails).
-#
-# All of these come from rtl-scripts.pdf: two glyphs of the embedded Noto Sans Arabic subset (codes 8 and 17, presumably
-# shaped ligature glyphs, absent from the ToUnicode CMap) are drawn without a Unicode mapping, which breaks the requirement of
-# PDF/A level U and of PDF/UA. The level B profiles do not require it and pass.
-pdfa-2u 2u 6.2.11.7.2 1
-pdfa-3u 3u 6.2.11.7.2 1
-pdfua-1 ua1 7.21.7 1
-pdfua-2-pdfa-4 ua2 8.4.5.8 1
-pdfa-2b-pdfua-1 ua1 7.21.7 1
-pdfa-3b-pdfua-1 ua1 7.21.7 1

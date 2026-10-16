@@ -97,7 +97,7 @@ internal sealed partial class PdfDocumentWriter
     {
         var subset = Subset(font.Program);
         font.Shape(text, start, length, _glyphs, rtl);
-        foreach (var g in _glyphs) subset.Cid(g, text);
+        for (int k = 0; k < _glyphs.Count; k++) subset.Cid(_glyphs, k, text);
     }
 
     /// <summary>
@@ -119,12 +119,13 @@ internal sealed partial class PdfDocumentWriter
         bool array = font.HasKerning || skipNotdef;
         int prev = -1;
         b.Ascii(array ? "[<" : "<");
-        foreach (var g in _glyphs)
+        for (int i = 0; i < _glyphs.Count; i++)
         {
+            var g = _glyphs[i];
             if (font.HasKerning && prev >= 0 && (rtl ? font.Program.Kern1000(g.Gid, prev) : font.Program.Kern1000(prev, g.Gid)) is int k && k != 0)
                 b.Ascii(">").Int(-k).Ascii("<");
             prev = g.Gid;
-            int cid = subset.Cid(g, text);
+            int cid = subset.Cid(_glyphs, i, text);
             if (cid == 0 && skipNotdef) b.Ascii(">").Num(notdefAdjust).Ascii("<");
             else Hex4(b, cid);
         }
@@ -236,7 +237,7 @@ internal sealed partial class PdfDocumentWriter
             if (kern && prev >= 0 && (t.Rtl ? font.Program.Kern1000(g.Gid, prev) : font.Program.Kern1000(prev, g.Gid)) is int kv && kv != 0)
                 b.Ascii(">").Int(-kv).Ascii("<");
             prev = g.Gid;
-            int cid = subset.Cid(g, text);
+            int cid = subset.Cid(_glyphs, k, text);
             if (cid == 0 && skipNotdef) b.Ascii(">").Num(notdefAdjust).Ascii("<");
             else Hex4(b, cid);
             if (adjust && text[g.Start] == ' ' && t.WordSpacing != 0 && k + 1 < _glyphs.Count) b.Ascii(">").Num(spaceAdjust).Ascii("<");
@@ -255,7 +256,7 @@ internal sealed partial class PdfDocumentWriter
         for (int k = 0; k < _glyphs.Count; k++)
         {
             var g = _glyphs[k];
-            int cid = subset.Cid(g, text);
+            int cid = subset.Cid(_glyphs, k, text);
             float width = font.Program.Advance1000(g.Gid);
             if (cid == 0 && skipNotdef)
             {
@@ -342,6 +343,8 @@ internal sealed partial class PdfDocumentWriter
         var cmap = new ByteBuffer(256 + used.Count * 16);
         cmap.Ascii("/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n")
             .Ascii("/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n");
+        // Every drawn glyph but .notdef gets an entry, as PDF/A level U and PDF/UA require; the extra glyphs of a shaped
+        // cluster map to an empty string, so extracted text holds the cluster's characters once.
         var mapped = used.Where(u => u.CodePoint > 0 || u.Text != null).ToList();
         for (int i = 0; i < mapped.Count; i += 100)
         {
