@@ -24,6 +24,7 @@ internal sealed partial class LayoutEngine
         public List<FloatBox> Boxes => _boxes ?? None;
         public float MinTop = float.NegativeInfinity; // a float's top may not be above an earlier float's top
         public float Bottom = float.NegativeInfinity; // lowest float bottom
+        private int _lastOps = -1; // no float's OpsIndex is above this, so that folding usually has nothing to look at
 
         public bool Any => _boxes is { Count: > 0 };
 
@@ -31,6 +32,7 @@ internal sealed partial class LayoutEngine
         {
             _boxes?.Clear();
             MinTop = Bottom = float.NegativeInfinity;
+            _lastOps = -1;
         }
 
         public void Add(FloatBox box)
@@ -38,6 +40,7 @@ internal sealed partial class LayoutEngine
             (_boxes ??= new List<FloatBox>()).Add(box);
             if (box.Y0 > MinTop) MinTop = box.Y0;
             if (box.Y1 > Bottom) Bottom = box.Y1;
+            if (box.OpsIndex > _lastOps) _lastOps = box.OpsIndex;
         }
 
         /// <summary>Forgets the floats whose ops were removed.</summary>
@@ -49,16 +52,22 @@ internal sealed partial class LayoutEngine
             if (n == Boxes.Count) return;
             Boxes.RemoveRange(n, Boxes.Count - n);
             MinTop = Bottom = float.NegativeInfinity;
+            _lastOps = -1;
             foreach (var b in Boxes)
             {
                 if (b.Y0 > MinTop) MinTop = b.Y0;
                 if (b.Y1 > Bottom) Bottom = b.Y1;
+                if (b.OpsIndex > _lastOps) _lastOps = b.OpsIndex;
             }
         }
 
         /// <summary>The ops of floats at or after <paramref name="start"/> were folded into one op at that index.</summary>
         public void Fold(int start)
         {
+            // Every float placed wraps its own ops in a layer and folds, so looking at every float each time would make
+            // a formatting context with n floats cost n squared; usually no float is past start and there is nothing to do.
+            if (_lastOps <= start) return;
+            _lastOps = start;
             for (int i = 0; i < Boxes.Count; i++)
                 if (Boxes[i].OpsIndex > start) { var b = Boxes[i]; b.OpsIndex = start; Boxes[i] = b; }
         }
@@ -183,11 +192,32 @@ internal sealed partial class LayoutEngine
     {
         public Element Element = null!;
         public Captured Box = null!;
+        public float CbW;
+        public bool SizeOnly; // Box holds the size of an earlier measurement but no ops: it is laid out when placed
         public float Width => Box.Width;
     }
 
+    /// <summary>The size of each float measured so far, by element and containing block width.</summary>
+    private readonly Dictionary<(Element, float), (float Width, float Height, bool ForcedBreaks)> _floatSizes = new();
+
     private PendingFloat MeasureFloat(Element e, float cbW)
-        => new() { Element = e, Box = CaptureBox(e, cbW, shrinkToFit: true) };
+    {
+        // A float that is laid out again on the page, because it crosses a page boundary or forces a break, measures
+        // the floats inside it again. Measuring them in full each time would lay out a float nested n deep n times,
+        // once for each float around it, so a size measured before is reused and the float is only laid out when it
+        // is placed. Measurement is unpaginated, so the same element in the same width always gets the same size.
+        if (_paginate && _floatSizes.TryGetValue((e, cbW), out var size))
+        {
+            return new()
+            {
+                Element = e, CbW = cbW, SizeOnly = true,
+                Box = new Captured { Ops = [], Width = size.Width, Height = size.Height, ForcedBreaks = size.ForcedBreaks },
+            };
+        }
+        var c = CaptureBox(e, cbW, shrinkToFit: true);
+        _floatSizes[(e, cbW)] = (c.Width, c.Height, c.ForcedBreaks);
+        return new() { Element = e, CbW = cbW, Box = c };
+    }
 
     /// <summary>
     /// Places a float as high as it can go, but not above <paramref name="y"/> nor above earlier floats, beside the floats
@@ -216,6 +246,7 @@ internal sealed partial class LayoutEngine
         float bottom;
         if (Reusable(c, top))
         {
+            if (f.SizeOnly) c = CaptureBox(e, f.CbW, shrinkToFit: true);
             Place(c, x, top);
             bottom = top + fh;
         }
