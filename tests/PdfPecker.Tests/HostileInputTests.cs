@@ -168,6 +168,33 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Svg_filter_work_is_bounded()
+    {
+        // Ten-thousand-fold kernels on four million pixels: tens of billions of operations for each primitive.
+        string kernel = string.Join(" ", Enumerable.Repeat("1", 64 * 64));
+        var sb = new StringBuilder("<body style='margin:0'><svg width=1000 height=1000><filter id=f x=0 y=0 width=1000 height=1000 filterUnits=userSpaceOnUse>");
+        for (int i = 0; i < 20; i++) sb.Append($"<feConvolveMatrix order=64 kernelMatrix='{kernel}'/><feMorphology radius=200/>");
+        sb.Append("</filter><rect width=1000 height=1000 fill='#ff0000' filter='url(#f)'/></svg></body>");
+        var pdf = Bounded(() => Bounded(sb.ToString(), new PdfOptions { Compress = false }));
+        AssertStructurallyValid(pdf);
+        // A filter beyond the budget is left out, and the element drawn as it would be without it.
+        var text = Latin1(pdf);
+        Assert.DoesNotContain("/Subtype /Image", text);
+        Assert.Contains("1 0 0 rg", text);
+    }
+
+    [Fact]
+    public void Svg_morphology_with_a_wide_radius_runs_in_linear_time()
+    {
+        var sb = new StringBuilder("<body style='margin:0'><svg width=1000 height=1000><filter id=f x=0 y=0 width=1000 height=1000 filterUnits=userSpaceOnUse>");
+        for (int i = 0; i < 8; i++) sb.Append($"<feMorphology operator='{(i % 2 == 0 ? "dilate" : "erode")}' radius=200/>");
+        sb.Append("</filter><rect x=300 y=300 width=400 height=400 fill='#ff0000' filter='url(#f)'/></svg></body>");
+        var pdf = Bounded(() => Bounded(sb.ToString(), new PdfOptions { Compress = false }));
+        AssertStructurallyValid(pdf);
+        Assert.Contains("/Subtype /Image", Latin1(pdf));
+    }
+
+    [Fact]
     public void Text_split_by_many_ignored_tags_is_merged_in_linear_time()
     {
         AssertStructurallyValid(Bounded("<p>" + Repeat("a</em>", 200000) + "</p>"));
