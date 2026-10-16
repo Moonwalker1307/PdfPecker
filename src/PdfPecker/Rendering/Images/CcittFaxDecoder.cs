@@ -283,7 +283,7 @@ internal sealed class CcittFaxDecoder
     }
 
 
-    private static List<(string, int)> WhiteCodes()
+    internal static List<(string Code, int Run)> WhiteCodes()
     {
         string[] term =
         {
@@ -308,7 +308,7 @@ internal sealed class CcittFaxDecoder
         return list;
     }
 
-    private static List<(string, int)> BlackCodes()
+    internal static List<(string Code, int Run)> BlackCodes()
     {
         string[] term =
         {

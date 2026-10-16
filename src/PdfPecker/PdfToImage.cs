@@ -19,6 +19,52 @@ public enum PdfImageFormat
 
     /// <summary>Lossless WebP (VP8L), keeping alpha exactly. Usually smaller than PNG.</summary>
     WebP,
+
+    /// <summary>
+    /// TIFF, one page per file here; <see cref="PdfToImage.ConvertToTiff"/> writes every page into one multi-page file.
+    /// Colour, greyscale or black and white after <see cref="ImageOptions.TiffColorMode"/>, compressed as
+    /// <see cref="ImageOptions.TiffCompression"/> says.
+    /// </summary>
+    Tiff,
+}
+
+/// <summary>The pixel format of TIFF output.</summary>
+public enum TiffColorMode
+{
+    /// <summary>8-bit RGB, with an alpha channel when the page has transparency. The default.</summary>
+    Color,
+
+    /// <summary>8-bit greyscale. Transparency is flattened onto <see cref="ImageOptions.BackgroundColor"/>.</summary>
+    Grayscale,
+
+    /// <summary>
+    /// 1 bit per pixel: pixels darker than <see cref="ImageOptions.TiffThreshold"/> are black. The usual choice for fax and
+    /// document archives. Transparency is flattened onto <see cref="ImageOptions.BackgroundColor"/>.
+    /// </summary>
+    BlackAndWhite,
+}
+
+/// <summary>The compression of TIFF output. Every option is lossless.</summary>
+public enum TiffCompression
+{
+    /// <summary>No compression: the largest files, readable by anything.</summary>
+    None,
+
+    /// <summary>LZW with the horizontal predictor. Read by every TIFF reader; the default for colour and greyscale.</summary>
+    Lzw,
+
+    /// <summary>Deflate (zlib) with the horizontal predictor. Usually smaller than LZW; not read by some older software.</summary>
+    Deflate,
+
+    /// <summary>PackBits run-length coding: fast, and fine for flat colours, but weak on anything else.</summary>
+    PackBits,
+
+    /// <summary>
+    /// CCITT Group 4 fax coding, the smallest by far for text pages and what fax and archive systems expect. It is bilevel
+    /// only, so it always writes black and white whatever <see cref="ImageOptions.TiffColorMode"/> says. The default for
+    /// <see cref="TiffColorMode.BlackAndWhite"/>.
+    /// </summary>
+    CcittGroup4,
 }
 
 /// <summary>Options for rendering PDF pages to images.</summary>
@@ -71,6 +117,28 @@ public sealed class ImageOptions
 
     /// <summary>Upper limit for either image dimension in pixels, protecting against huge pages. Default 20000.</summary>
     public int MaxDimension { get; set; } = 20000;
+
+    /// <summary>The pixel format of TIFF output. Default <see cref="PdfPecker.TiffColorMode.Color"/>.</summary>
+    public TiffColorMode TiffColorMode { get; set; } = TiffColorMode.Color;
+
+    /// <summary>
+    /// The compression of TIFF output. Null, the default, picks <see cref="PdfPecker.TiffCompression.CcittGroup4"/> for
+    /// black and white and <see cref="PdfPecker.TiffCompression.Lzw"/> otherwise.
+    /// </summary>
+    public TiffCompression? TiffCompression { get; set; }
+
+    private int _tiffThreshold = 128;
+
+    /// <summary>
+    /// For black and white TIFF output: pixels whose brightness (0 to 255) is below this become black. Default 128;
+    /// raise it to keep light grey text and thin lines, lower it to drop pale backgrounds.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is not between 1 and 255.</exception>
+    public int TiffThreshold
+    {
+        get => _tiffThreshold;
+        set => _tiffThreshold = value is >= 1 and <= 255 ? value : throw new ArgumentOutOfRangeException(nameof(value), value, "TiffThreshold must be between 1 and 255.");
+    }
 }
 
 /// <summary>A rendered page image.</summary>
@@ -79,13 +147,22 @@ public sealed class RenderedImage
     private readonly uint[] _premultiplied; // 0xAABBGGRR, premultiplied alpha
     private readonly CompressionLevel _compression;
     private readonly int _quality;
-    private readonly uint _matte; // 0xRRGGBB that JPEG flattens transparency onto
+    private readonly uint _matte; // 0xRRGGBB that JPEG, greyscale and black and white TIFF flatten transparency onto
+    private readonly TiffColorMode _tiffColorMode;
+    private readonly TiffCompression? _tiffCompression;
+    private readonly int _tiffThreshold;
+    private readonly double _dpiX, _dpiY;
     private byte[]? _rgba;
 
-    internal RenderedImage(int width, int height, uint[] premultiplied, ImageOptions options)
+    internal RenderedImage(int width, int height, uint[] premultiplied, ImageOptions options, double dpiX = 72, double dpiY = 72)
     {
         Width = width;
         Height = height;
+        _dpiX = dpiX;
+        _dpiY = dpiY;
+        _tiffColorMode = options.TiffColorMode;
+        _tiffCompression = options.TiffCompression;
+        _tiffThreshold = options.TiffThreshold;
         _premultiplied = premultiplied;
         _compression = options.PngCompression;
         Format = options.Format;
@@ -132,29 +209,46 @@ public sealed class RenderedImage
     /// <exception cref="NotSupportedException">A dimension exceeds 16,384 pixels, the WebP limit.</exception>
     public byte[] ToWebP(int? quality = null) => WebPEncoder.Encode(_premultiplied, Width, Height, quality ?? _quality);
 
+    /// <summary>
+    /// Encodes the image as a single-page TIFF, with its resolution recorded. Colour mode, compression and threshold
+    /// come from <see cref="ImageOptions.TiffColorMode"/>, <see cref="ImageOptions.TiffCompression"/> and
+    /// <see cref="ImageOptions.TiffThreshold"/>.
+    /// </summary>
+    /// <param name="compression">The compression; null uses <see cref="ImageOptions.TiffCompression"/>.</param>
+    public byte[] ToTiff(TiffCompression? compression = null) => TiffEncoder.Write(new[] { EncodeTiffPage(compression) });
+
+    internal TiffEncoder.Page EncodeTiffPage(TiffCompression? compression = null)
+    {
+        var mode = _tiffColorMode;
+        var c = compression ?? _tiffCompression ?? (mode == TiffColorMode.BlackAndWhite ? TiffCompression.CcittGroup4 : TiffCompression.Lzw);
+        return TiffEncoder.EncodePage(_premultiplied, Width, Height, _dpiX, _dpiY, c, mode, _matte, _tiffThreshold);
+    }
+
     /// <summary>Encodes the image in <see cref="Format"/>.</summary>
     public byte[] Encode() => Format switch
     {
         PdfImageFormat.Jpeg => ToJpeg(),
         PdfImageFormat.WebP => ToWebP(),
+        PdfImageFormat.Tiff => ToTiff(),
         _ => ToPng(),
     };
 
     /// <summary>Writes the image to a file in <see cref="Format"/> (the path is used as given, whatever its extension).</summary>
     public void Save(string path) => File.WriteAllBytes(path, Encode());
 
-    /// <summary>The usual file extension of a format, with the dot: ".png", ".jpg" or ".webp".</summary>
+    /// <summary>The usual file extension of a format, with the dot: ".png", ".jpg", ".webp" or ".tif".</summary>
     public static string GetFileExtension(PdfImageFormat format) => format switch
     {
         PdfImageFormat.Jpeg => ".jpg",
         PdfImageFormat.WebP => ".webp",
+        PdfImageFormat.Tiff => ".tif",
         _ => ".png",
     };
 }
 
 /// <summary>
 /// An opened PDF document that renders pages to images. Parsing, fonts (TrueType, CFF, Type 1, Type 3), images
-/// (including JPEG and CCITT fax decoding), rasterization and PNG, JPEG and WebP encoding are implemented in this library.
+/// (including JPEG and CCITT fax decoding), rasterization and PNG, JPEG, WebP and TIFF encoding are implemented in this library.
 /// </summary>
 /// <remarks>Instances are thread-safe: several pages can be rendered in parallel. Fonts and images are shared between pages.</remarks>
 public sealed class PdfRenderer
@@ -224,6 +318,8 @@ public sealed class PdfRenderer
         }
         int max = Math.Max(1, options.MaxDimension);
         double limit = Math.Min(max / Math.Max(pw * sx, 1e-9), max / Math.Max(ph * sy, 1e-9));
+        // A requested Dpi is recorded as given, not as the slightly stretched scale below.
+        double? dpi = options.Width == null && options.Height == null && limit >= 1 ? options.Dpi : null;
         if (limit < 1) { sx *= limit; sy *= limit; }
         w = Math.Max(1, (int)Math.Round(pw * sx));
         h = Math.Max(1, (int)Math.Round(ph * sy));
@@ -244,7 +340,7 @@ public sealed class PdfRenderer
         {
             throw new InvalidDataException(ex.Message, ex);
         }
-        return new RenderedImage(w, h, canvas.Pixels, options);
+        return new RenderedImage(w, h, canvas.Pixels, options, dpi ?? sx * 72, dpi ?? sy * 72);
     }
 
     /// <summary>Renders one page and encodes it as PNG.</summary>
@@ -263,10 +359,19 @@ public sealed class PdfRenderer
     public byte[][] RenderAllEncoded(ImageOptions? options = null, CancellationToken cancellationToken = default)
         => RenderAll(options, static img => img.Encode(), cancellationToken);
 
-    private byte[][] RenderAll(ImageOptions? options, Func<RenderedImage, byte[]> encode, CancellationToken cancellationToken)
+    /// <summary>
+    /// Renders all pages (in parallel) into one multi-page TIFF, in page order, after
+    /// <see cref="ImageOptions.TiffColorMode"/>, <see cref="ImageOptions.TiffCompression"/> and
+    /// <see cref="ImageOptions.TiffThreshold"/>. <see cref="ImageOptions.Format"/> is not used.
+    /// </summary>
+    /// <exception cref="NotSupportedException">The file would pass 4 GB, the limit of the TIFF format.</exception>
+    public byte[] RenderAllToTiff(ImageOptions? options = null, CancellationToken cancellationToken = default)
+        => TiffEncoder.Write(RenderAll(options, static img => img.EncodeTiffPage(), cancellationToken));
+
+    private T[] RenderAll<T>(ImageOptions? options, Func<RenderedImage, T> encode, CancellationToken cancellationToken)
     {
         options ??= new ImageOptions();
-        var result = new byte[PageCount][];
+        var result = new T[PageCount];
         try
         {
             Parallel.For(0, PageCount, new ParallelOptions
@@ -291,7 +396,8 @@ public sealed class PdfRenderer
 }
 
 /// <summary>
-/// Converts PDF pages to PNG, JPEG or WebP images (<see cref="ImageOptions.Format"/>). Everything is implemented in
+/// Converts PDF pages to PNG, JPEG, WebP or TIFF images (<see cref="ImageOptions.Format"/>), or a whole PDF to one
+/// multi-page TIFF (<see cref="ConvertToTiff"/>). Everything is implemented in
 /// this library, with no dependencies beyond the .NET base class library.
 /// </summary>
 /// <remarks>All methods are static and thread-safe. For rendering several pages of one document, <see cref="PdfRenderer"/> avoids re-parsing.</remarks>
@@ -313,8 +419,25 @@ public static class PdfToImage
         => Task.Run(() => PdfRenderer.Open(pdf, options?.Password).RenderAllEncoded(options, cancellationToken), cancellationToken);
 
     /// <summary>
+    /// Renders every page into one multi-page TIFF, in page order: colour, greyscale or black and white with
+    /// <see cref="ImageOptions.TiffColorMode"/>, compressed after <see cref="ImageOptions.TiffCompression"/>, at
+    /// <see cref="ImageOptions.Dpi"/>. Pages are rendered in parallel.
+    /// </summary>
+    /// <exception cref="NotSupportedException">The file would pass 4 GB, the limit of the TIFF format.</exception>
+    public static byte[] ConvertToTiff(byte[] pdf, ImageOptions? options = null)
+        => PdfRenderer.Open(pdf, options?.Password).RenderAllToTiff(options);
+
+    /// <summary>Renders every page into one multi-page TIFF (see <see cref="ConvertToTiff"/>) on the thread pool.</summary>
+    public static Task<byte[]> ConvertToTiffAsync(byte[] pdf, ImageOptions? options = null, CancellationToken cancellationToken = default)
+        => Task.Run(() => PdfRenderer.Open(pdf, options?.Password).RenderAllToTiff(options, cancellationToken), cancellationToken);
+
+    /// <summary>Renders a PDF file into one multi-page TIFF file (see <see cref="ConvertToTiff"/>).</summary>
+    public static void ConvertFileToTiff(string pdfPath, string tiffPath, ImageOptions? options = null)
+        => File.WriteAllBytes(tiffPath, PdfRenderer.OpenFile(pdfPath, options?.Password).RenderAllToTiff(options));
+
+    /// <summary>
     /// Renders a PDF file's pages to image files in <paramref name="outputDirectory"/>, named
-    /// <c>{file name}-{page number}</c> plus <c>.png</c>, <c>.jpg</c> or <c>.webp</c> after <see cref="ImageOptions.Format"/>
+    /// <c>{file name}-{page number}</c> plus <c>.png</c>, <c>.jpg</c>, <c>.webp</c> or <c>.tif</c> after <see cref="ImageOptions.Format"/>
     /// (page numbers start at 1). Returns the written paths.
     /// </summary>
     public static IReadOnlyList<string> ConvertFile(string pdfPath, string outputDirectory, ImageOptions? options = null)

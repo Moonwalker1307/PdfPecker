@@ -4,7 +4,7 @@
 
 [![NuGet](https://img.shields.io/nuget/v/PdfPecker.svg)](https://www.nuget.org/packages/PdfPecker)
 
-Fast HTML and Markdown to PDF conversion, and PDF to PNG, JPEG and WebP rendering, for .NET, with no dependencies.
+Fast HTML and Markdown to PDF conversion, and PDF to PNG, JPEG, WebP and TIFF rendering, for .NET, with no dependencies.
 
 PdfPecker has its own HTML parser, Markdown parser, CSS engine, layout engine and PDF writer, and its own PDF renderer.
 It does not start a browser, ship native binaries or pull in third-party packages; the NuGet package depends only on
@@ -47,11 +47,12 @@ var options = new PdfOptions
 options.Fonts.AddFile("fonts/OpenSans-Regular.ttf");
 byte[] letter = HtmlToPdf.Convert(html, options);
 
-// Markdown to PDF or HTML, merging, and PDF pages to PNG
+// Markdown to PDF or HTML, merging, PDF pages to PNG, and a whole PDF to one black and white fax TIFF
 byte[] guide = MarkdownToPdf.Convert(File.ReadAllText("README.md"));
 string guideHtml = MarkdownToHtml.Convert(File.ReadAllText("README.md"));
 byte[] merged = PdfMerger.Merge(invoicePdf, termsPdf);
 byte[][] pngs = PdfToImage.Convert(pdf, new ImageOptions { Dpi = 150 });
+byte[] tiff = PdfToImage.ConvertToTiff(pdf, new ImageOptions { Dpi = 200, TiffColorMode = TiffColorMode.BlackAndWhite });
 
 // Open a PDF once and render its pages one at a time, or in parallel
 var renderer = PdfRenderer.Open(pdf);
@@ -73,7 +74,7 @@ The conversion methods are static and thread-safe, so you can convert many docum
 - **Digital signatures**: PAdES signing, timestamps, external signers, verification and long-term validation. [More](https://pdfpecker.net/docs/signatures/)
 - **E-invoices and attachments**: Factur-X and ZUGFeRD, PDFs in Peppol and OIOUBL invoices, and any embedded file. [More](https://pdfpecker.net/docs/e-invoices/)
 - **Existing PDFs**: merge (also streamed), split, reorder, rotate, stamp and extract text with positions. [More](https://pdfpecker.net/docs/merging/)
-- **PDF to image**: renders any PDF page, including JPEG 2000, JBIG2 and CCITT images, to PNG, JPEG or WebP. [More](https://pdfpecker.net/docs/pdf-to-image/)
+- **PDF to image**: renders any PDF page, including JPEG 2000, JBIG2 and CCITT images, to PNG, JPEG or WebP, or a whole PDF to one multi-page TIFF (colour, greyscale or black and white with CCITT Group 4). [More](https://pdfpecker.net/docs/pdf-to-image/)
 
 PdfPecker is built for HTML templates you control: it runs no JavaScript and never fetches anything from the network on
 its own. See the [limitations](https://pdfpecker.net/docs/limitations/) for what it does not do yet.
