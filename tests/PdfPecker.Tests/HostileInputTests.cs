@@ -395,6 +395,117 @@ public class HostileInputTests
     }
 }
 
+/// <summary>Hostile CFF and CFF2 fonts whose subroutines fan out exponentially.</summary>
+[Collection(HostileInputCollection.Name)]
+public class CffSubroutineTests
+{
+    private static byte[] Fixture(string name) => File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", name));
+
+    private static byte[] Bounded(string html)
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        return HtmlToPdf.Convert(html, null, cts.Token);
+    }
+
+    private static string FontFace(byte[] font)
+        => $"<style>@font-face{{font-family:f;src:url(data:font/otf;base64,{Convert.ToBase64String(font)})}}</style>";
+
+    [Fact]
+    public void Cff_subroutines_that_fan_out_do_not_hang_subsetting()
+    {
+        // Every glyph of Inter becomes a call into global subroutines that each call the next a thousand times.
+        var font = ReplaceTable(Fixture("Inter-Subr.otf"), "CFF ", n => FanOutCff(cff2: false, n));
+        AssertStructurallyValid(Bounded(FontFace(font) + "<p style='font-family:f'>xyz</p>"));
+    }
+
+    [Fact]
+    public void Cff2_subroutines_that_fan_out_do_not_hang_instancing()
+    {
+        // A bold run makes the converter instance the CFF2 variable font, which runs every glyph's charstring.
+        var font = ReplaceTable(Fixture("VarTestCFF-Subset.otf"), "CFF2", n => FanOutCff(cff2: true, n));
+        AssertStructurallyValid(Bounded(FontFace(font) + "<p style='font-family:f'>Hen <b>Hen</b></p>"));
+    }
+
+    private static byte[] ReplaceTable(byte[] font, string tag, Func<int, byte[]> table)
+    {
+        var p = Assert.Single(FontProgram.Load(font));
+        var replacement = table(p.NumGlyphs);
+        var tables = p.Tables.Select(t => (t.Tag, t.Tag == FontProgram.Tag(tag) ? replacement : p.Data.AsSpan(t.Offset, t.Length).ToArray())).ToList();
+        return SfntBuilder.Build(0x4F54544F, tables); // 'OTTO'
+    }
+
+    /// <summary>
+    /// A CFF (or CFF2) table whose glyphs all call global subroutine 0, and whose subroutine i calls subroutine i + 1
+    /// a thousand times: 1000^8 calls if walked naively. With fewer than 1240 subroutines the bias is 107, so
+    /// subroutine i is the one-byte number i - 107.
+    /// </summary>
+    private static byte[] FanOutCff(bool cff2, int glyphs)
+    {
+        const int levels = 9, fanOut = 1000; // nine levels stay within the nesting limit of ten, with the glyph itself
+        var subrs = new byte[levels][];
+        for (int i = 0; i < levels; i++)
+        {
+            var s = new List<byte>();
+            if (i + 1 < levels)
+                for (int k = 0; k < fanOut; k++) { s.Add((byte)(i + 1 - 107 + 139)); s.Add(29); } // n callgsubr
+            if (!cff2) s.Add(11); // return
+            subrs[i] = s.ToArray();
+        }
+        var glyph = cff2 ? new byte[] { 32, 29 } : new byte[] { 32, 29, 14 }; // -107 callgsubr (endchar)
+        var charStrings = Index(cff2, Enumerable.Repeat(glyph, glyphs).ToArray());
+        var gsubrs = Index(cff2, subrs);
+
+        var o = new List<byte>();
+        if (cff2)
+        {
+            o.AddRange(new byte[] { 2, 0, 5, 0, 6 }); // version 2, header size 5, Top DICT length 6
+            o.AddRange(TopDict(5 + 6 + gsubrs.Length));
+        }
+        else
+        {
+            o.AddRange(new byte[] { 1, 0, 4, 4 });
+            o.AddRange(Index(false, new[] { "F"u8.ToArray() }));
+            int topSize = Index(false, new[] { TopDict(0) }).Length;
+            o.AddRange(Index(false, new[] { TopDict(o.Count + topSize + 2 + gsubrs.Length) }));
+            o.AddRange(new byte[] { 0, 0 }); // empty String INDEX
+        }
+        o.AddRange(gsubrs);
+        o.AddRange(charStrings);
+        return o.ToArray();
+
+        // The Top DICT holds only the CharStrings offset, as a five-byte integer so that its size is known up front.
+        static byte[] TopDict(int charStrings)
+        {
+            var b = new byte[6];
+            b[0] = 29;
+            BinaryPrimitives.WriteInt32BigEndian(b.AsSpan(1), charStrings);
+            b[5] = 17;
+            return b;
+        }
+
+        static byte[] Index(bool cff2, byte[][] items)
+        {
+            var o = new List<byte>();
+            var count = new byte[4];
+            BinaryPrimitives.WriteInt32BigEndian(count, items.Length);
+            o.AddRange(cff2 ? count : count[2..]);
+            o.Add(4);
+            var off = new byte[4];
+            int at = 1;
+            BinaryPrimitives.WriteInt32BigEndian(off, at);
+            o.AddRange(off);
+            foreach (var item in items)
+            {
+                at += item.Length;
+                BinaryPrimitives.WriteInt32BigEndian(off, at);
+                o.AddRange(off);
+            }
+            foreach (var item in items) o.AddRange(item);
+            return o.ToArray();
+        }
+    }
+}
+
 [CollectionDefinition(Name, DisableParallelization = true)]
 public sealed class HostileInputCollection
 {
