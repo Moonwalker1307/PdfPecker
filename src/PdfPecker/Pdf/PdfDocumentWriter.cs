@@ -2131,6 +2131,8 @@ internal sealed partial class PdfDocumentWriter
             return;
         }
         float tx = PX(bg.TileX), tw = bg.TileW, th = bg.TileH;
+        // The image inside the tile, relative to the tile's top-left corner: all of it unless the tile shows a slice.
+        var (ix, iy, iw, ih) = bg.Inner ?? (0, 0, tw, th);
         const float eps = 0.01f;
         bool single = (!bg.RepeatX || bg.TileX <= x0 + eps && bg.TileX + tw >= x1 - eps)
                       && (!bg.RepeatY || bg.TileY <= y0 + eps && bg.TileY + th >= y1 - eps);
@@ -2157,7 +2159,7 @@ internal sealed partial class PdfDocumentWriter
             if (single)
             {
                 b.Ascii("q ").Num(PX(x0)).Sp().Num(PY(y1, pageTop)).Sp().Num(x1 - x0).Sp().Num(y1 - y0).Ascii(" re W n\n");
-                WriteSvg(b, svg, tx, PY(bg.TileY, pageTop), tw, th);
+                WriteSlicedSvg(b, svg, tx + ix, PY(bg.TileY + iy, pageTop), iw, ih, bg.Inner != null);
                 b.Ascii("Q\n");
                 return;
             }
@@ -2166,7 +2168,7 @@ internal sealed partial class PdfDocumentWriter
             var svgCell = new ByteBuffer(256);
             var saved = SaveState();
             (_fill, _stroke, _lineWidth, _fillAlpha, _strokeAlpha) = (CssColor.Black, CssColor.Black, 1, 255, 255);
-            WriteSvg(svgCell, svg, 0, th, tw, th);
+            WriteSlicedSvg(svgCell, svg, ix, th - iy, iw, ih, bg.Inner != null);
             RestoreState(saved);
             var svgDict = new ByteBuffer(256);
             svgDict.Ascii("/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 ").Num(tw).Sp().Num(th)
@@ -2181,7 +2183,7 @@ internal sealed partial class PdfDocumentWriter
         if (single)
         {
             b.Ascii("q ").Num(PX(x0)).Sp().Num(PY(y1, pageTop)).Sp().Num(x1 - x0).Sp().Num(y1 - y0).Ascii(" re W n ")
-                .Num(tw).Ascii(" 0 0 ").Num(th).Sp().Num(tx).Sp().Num(PY(bg.TileY + th, pageTop))
+                .Num(iw).Ascii(" 0 0 ").Num(ih).Sp().Num(tx + ix).Sp().Num(PY(bg.TileY + iy + ih, pageTop))
                 .Ascii(" cm /Im").Int(imageIds[bg.Image!]).Ascii(" Do Q\n");
             return;
         }
@@ -2205,7 +2207,7 @@ internal sealed partial class PdfDocumentWriter
         {
             // The written image: PDF/A may have replaced a CMYK image with an RGB copy.
             var image = _imageList[imageIds[bg.Image!] - 1];
-            cell.Num(tw).Ascii(" 0 0 ").Num(th).Ascii(" 0 0 cm /Im1 Do\n");
+            cell.Num(iw).Ascii(" 0 0 ").Num(ih).Sp().Num(ix).Sp().Num(th - iy - ih).Ascii(" cm /Im1 Do\n");
             dict.Ascii("/XObject << /Im1 ").Int(image.ObjectNumber).Ascii(" 0 R >>");
         }
         dict.Ascii(" >>");
@@ -2213,6 +2215,24 @@ internal sealed partial class PdfDocumentWriter
         _tilings.Add((n, cell.Span.ToArray(), System.Text.Encoding.ASCII.GetString(dict.Span)));
         b.Ascii("q /Pattern cs /T").Int(n).Ascii(" scn ");
         b.Num(PX(x0)).Sp().Num(PY(y1, pageTop)).Sp().Num(x1 - x0).Sp().Num(y1 - y0).Ascii(" re f Q\n");
+    }
+
+    /// <summary>
+    /// Draws an SVG image into (left, top, w, h). An SVG file without a viewBox keeps its scale whatever box it is drawn
+    /// into, but the slices of a border image (<paramref name="sliced"/>) scale the image as a picture, so it is drawn at
+    /// its own size and the whole drawing scaled to the box.
+    /// </summary>
+    private void WriteSlicedSvg(ByteBuffer b, SvgImage svg, float left, float top, float w, float h, bool sliced)
+    {
+        if (sliced && !svg.HasViewBox && svg.Width is { } nw && svg.Height is { } nh && nw > 0 && nh > 0 && (w != nw || h != nh))
+        {
+            b.Ascii("q ").Num6(w / nw).Ascii(" 0 0 ").Num6(h / nh).Sp().Num(left).Sp().Num(top).Ascii(" cm\n");
+            WriteSvg(b, svg, 0, 0, nw, nh);
+            b.Ascii("Q\n");
+            InvalidateState();
+            return;
+        }
+        WriteSvg(b, svg, left, top, w, h);
     }
 
     /// <summary>Adds a shading pattern to the shared resources and returns its number.</summary>

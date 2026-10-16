@@ -256,6 +256,12 @@ internal sealed class ComputedStyle
     // border-radius: horizontal and vertical radius of the top-left, top-right, bottom-right and bottom-left corner
     // (percentages of the border box's width and height); null when every corner is square.
     public Length[]? BorderRadii;
+    // border-image. Null slices, widths and outsets are the initial values: 100%, 1 and 0 on every side.
+    public BackgroundImage? BorderImageSource;
+    public BorderImageValue[]? BorderImageSlice; // top, right, bottom, left
+    public bool BorderImageFill;
+    public BorderImageValue[]? BorderImageWidths, BorderImageOutsets;
+    public BorderImageRepeat BorderImageRepeatX, BorderImageRepeatY;
     public BorderStyle OutlineStyle;
     public float OutlineWidth = 1.5f, OutlineOffset;
     public uint? OutlineColor; // null = currentColor
@@ -406,6 +412,10 @@ internal sealed class ComputedStyle
         c.BorderTopStyle = c.BorderRightStyle = c.BorderBottomStyle = c.BorderLeftStyle = BorderStyle.None;
         c.BorderTopColor = c.BorderRightColor = c.BorderBottomColor = c.BorderLeftColor = null;
         c.BorderRadii = null;
+        c.BorderImageSource = null;
+        c.BorderImageSlice = c.BorderImageWidths = c.BorderImageOutsets = null;
+        c.BorderImageFill = false;
+        c.BorderImageRepeatX = c.BorderImageRepeatY = BorderImageRepeat.Stretch;
         c.OutlineStyle = BorderStyle.None;
         c.OutlineWidth = 1.5f;
         c.OutlineOffset = 0;

@@ -732,6 +732,8 @@ internal static class CssParser
                         Add("border-" + side + "-style", style);
                         Add("border-" + side + "-color", color);
                     }
+                    // The border shorthand also resets border-image, which it cannot set.
+                    foreach (var longhand in CssBorderImage.Longhands) Add(longhand, "initial");
                 }
                 else
                 {
@@ -743,6 +745,9 @@ internal static class CssParser
             }
             case "background":
                 CssBackground.ExpandShorthand(value, Add);
+                return;
+            case "border-image":
+                CssBorderImage.ExpandShorthand(value, Add);
                 return;
             case "outline":
             {

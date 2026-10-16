@@ -62,6 +62,11 @@ internal sealed class BackgroundOp : DrawOp
     public SvgImage? Svg;          // an SVG file, drawn as vectors in each tile
     public Gradient? Gradient;
     public CornerRadii? ClipRadii; // rounded corners of the clip (border-radius)
+    /// <summary>
+    /// Where the whole image lies relative to the tile's top-left corner, when the tile shows only part of it (a slice of
+    /// a border image); null when the image fills the tile. A tile never paints outside itself.
+    /// </summary>
+    public (float X, float Y, float W, float H)? Inner;
 
     public override void Offset(float dx, float dy) { ClipX += dx; ClipY += dy; TileX += dx; TileY += dy; }
 
@@ -362,7 +367,10 @@ internal static class BoxPainter
             }
         }
         if (s.BoxShadows != null && w > 0 && h > 0 && !s.CanvasBackground) PaintInsetShadows(group, s, x, y, w, h, radii);
-        if (s.HasBorder) PaintBorders(group, s, x, y, w, h, sides, collapsedCell, radii);
+        // A border image replaces the border styles; when its image cannot be shown, the styles are drawn instead.
+        // It does not apply to collapsed table borders.
+        bool borderImage = s.BorderImageSource != null && !collapsedCell && PaintBorderImage(group, s, x, y, w, h, images);
+        if (s.HasBorder && !borderImage) PaintBorders(group, s, x, y, w, h, sides, collapsedCell, radii);
         if (s.OutlineStyle != BorderStyle.None && !collapsedCell) PaintOutline(group, s, x, y, w, h, radii);
     }
 
@@ -907,6 +915,202 @@ internal static class BoxPainter
         };
         var (x0, y0, x1, y1) = op.Painted();
         if (x1 > x0 && y1 > y0) group.Ops.Add(op);
+    }
+
+    /// <summary>
+    /// Paints the border image of a border box (CSS Backgrounds 3 §6): the image is cut into nine parts by the slice
+    /// lines, and each part is scaled, and repeated along its edge, into the matching part of the border image area,
+    /// which is the border box grown by the outsets. Each part becomes a background op, so that images, SVG files and
+    /// gradients take the usual paths, also in the renderer: a raster slice cut out as an image of its own, or else the
+    /// whole image placed so that only its slice shows in the tile. False when nothing could be loaded, so that the
+    /// border styles are drawn instead.
+    /// </summary>
+    private static bool PaintBorderImage(GroupOp group, ComputedStyle s, float x, float y, float w, float h, ImageLoader? images)
+    {
+        var source = s.BorderImageSource!;
+        PdfImage? image = null;
+        SvgImage? svg = null;
+        if (source.Url != null)
+        {
+            image = images?.Load(source.Url);
+            if (image is { Width: <= 0 } or { Height: <= 0 }) image = null;
+            if (image == null) svg = images?.LoadSvg(source.Url);
+            if (image == null && svg == null) return false;
+        }
+        else if (source.Gradient == null) return false;
+        if (!(w > 0 && h > 0)) return true;
+
+        // The border widths that border-image-width multiplies; a side whose style is none has none.
+        float[] border = { s.BorderTop, s.BorderRight, s.BorderBottom, s.BorderLeft };
+        var outsets = s.BorderImageOutsets;
+        float[] o = new float[4];
+        // Outsets are capped like a shadow's spread, so that a huge one cannot paint, and add, pages far away.
+        for (int k = 0; k < 4; k++)
+            o[k] = outsets == null ? 0 : Math.Clamp(outsets[k].IsNumber ? outsets[k].Number * border[k] : outsets[k].Length.Resolve(0), 0, 1000);
+        float ax = x - o[3], ay = y - o[0], aw = w + o[1] + o[3], ah = h + o[0] + o[2];
+        if (!(aw > 0 && ah > 0) || !float.IsFinite(aw) || !float.IsFinite(ah)) return true;
+
+        // The image's size: its natural one, or for a gradient (and an SVG file without one) the border image area's.
+        float iw, ih;
+        bool natural = true;
+        if (image != null) { iw = image.Width * 0.75f; ih = image.Height * 0.75f; }
+        else if (svg != null)
+        {
+            if (svg.Width is { } sw && svg.Height is { } sh) { iw = sw; ih = sh; }
+            else if (svg.HasViewBox && svg.ViewBoxWidth > 0 && svg.ViewBoxHeight > 0)
+            {
+                // Only an aspect ratio: as large as fits the area (CSS contain), or one given side.
+                float r = svg.ViewBoxHeight / svg.ViewBoxWidth;
+                if (svg.Width is { } w1) { iw = w1; ih = w1 * r; }
+                else if (svg.Height is { } h1) { iw = h1 / r; ih = h1; }
+                else if (ah / aw > r) { iw = aw; ih = aw * r; natural = false; }
+                else { iw = ah / r; ih = ah; natural = false; }
+            }
+            else { iw = svg.Width ?? aw; ih = svg.Height ?? ah; natural = svg.Width != null && svg.Height != null; }
+        }
+        else { iw = aw; ih = ah; natural = false; }
+        if (!(iw > 0 && ih > 0) || !float.IsFinite(iw) || !float.IsFinite(ih)) return true;
+
+        // Slices, in the image's points: numbers are image pixels (CSS pixels for vector images), percentages refer to
+        // the image's width for the left and right slice and to its height for the top and bottom one.
+        var slices = s.BorderImageSlice;
+        float Slice(int k, float size)
+        {
+            if (slices == null) return size; // 100%
+            var v = slices[k];
+            return Math.Clamp(v.IsNumber ? v.Number * 0.75f : v.Length.Resolve(size), 0, size);
+        }
+        float st = Slice(0, ih), sr = Slice(1, iw), sb = Slice(2, ih), sl = Slice(3, iw);
+
+        // Widths of the border image area's edges: a multiple of the border width, a length, a percentage of the area,
+        // or auto (the slice's own size, or the border width for an image without one).
+        var widths = s.BorderImageWidths;
+        float Width(int k, float slice, float basis)
+        {
+            if (widths == null) return border[k];
+            var v = widths[k];
+            // Capped so that a huge multiple stays finite for the scaling below.
+            float width = v.IsNumber ? v.Number * border[k] : v.IsAuto ? natural ? slice : border[k] : v.Length.Resolve(basis);
+            return width > 0 ? Math.Min(width, 1e6f) : 0;
+        }
+        float wt = Width(0, st, ah), wr = Width(1, sr, aw), wb = Width(2, sb, ah), wl = Width(3, sl, aw);
+        // Edges that overlap are scaled down together until they meet.
+        float f = 1;
+        if (wl + wr > aw) f = Math.Min(f, aw / (wl + wr));
+        if (wt + wb > ah) f = Math.Min(f, ah / (wt + wb));
+        if (f < 1) { wt *= f; wr *= f; wb *= f; wl *= f; }
+
+        float midW = aw - wl - wr, midH = ah - wt - wb;   // the area's middle
+        float smw = iw - sl - sr, smh = ih - st - sb;     // the image's middle
+        float mx = ax + wl, my = ay + wt;
+        var rx = s.BorderImageRepeatX;
+        var ry = s.BorderImageRepeatY;
+        uint backdrop = CssColor.IsVisible(s.BackgroundColor) ? CssColor.FlattenOnWhite(s.BackgroundColor) : 0xFFFFFFFF;
+
+        // A raster image is cut into its nine slices (corners, edges, middle), which are then drawn whole; when it cannot
+        // be cut, each part draws the whole image clipped to its slice.
+        PdfImage?[]? cuts = null;
+        if (image != null && images != null)
+        {
+            (int, int, int, int) Px(float sx, float sy, float sw, float sh)
+            {
+                int x0 = (int)MathF.Round(sx / 0.75f), y0 = (int)MathF.Round(sy / 0.75f);
+                return (x0, y0, (int)MathF.Round((sx + sw) / 0.75f) - x0, (int)MathF.Round((sy + sh) / 0.75f) - y0);
+            }
+            cuts = images.Slices(image, new[]
+            {
+                Px(0, 0, sl, st), Px(iw - sr, 0, sr, st), Px(iw - sr, ih - sb, sr, sb), Px(0, ih - sb, sl, sb),
+                Px(sl, 0, smw, st), Px(sl, ih - sb, smw, sb), Px(0, st, sl, smh), Px(iw - sr, st, sr, smh),
+                s.BorderImageFill ? Px(sl, st, smw, smh) : (0, 0, 0, 0),
+            });
+        }
+
+        // Paints the slice (sx, sy, sw, sh) of the image, which is cut slice k, into the region (dx, dy, dw, dh), as
+        // tiles of tw × th points laid out along each axis by its repeat keyword.
+        void Part(int k, float sx, float sy, float sw, float sh, float dx, float dy, float dw, float dh, float tw, float th,
+            BorderImageRepeat repeatX, BorderImageRepeat repeatY)
+        {
+            if (!(sw > 0 && sh > 0 && dw > 0 && dh > 0 && tw > 0 && th > 0)) return;
+            var cut = cuts?[k];
+            if (cuts != null && cut == null) return; // less than a pixel
+            if (Axis(dx, dw, tw, repeatX) is not { } ex || Axis(dy, dh, th, repeatY) is not { } ey) return;
+            float kx = ex.Size / sw, ky = ey.Size / sh;
+            var inner = (X: -sx * kx, Y: -sy * ky, W: iw * kx, H: ih * ky);
+            Gradient? gradient = null;
+            if (source.Gradient is { } cg)
+            {
+                // The gradient is laid out over the whole image, then scaled and moved with it into the tile.
+                gradient = cg.Resolve(iw, ih, backdrop);
+                gradient.Transform = gradient.Transform.Then(Matrix.Scale(kx, ky)).Then(Matrix.Translate(inner.X, inner.Y));
+            }
+            var op = new BackgroundOp
+            {
+                ClipX = dx, ClipY = dy, ClipW = dw, ClipH = dh,
+                TileX = ex.Start, TileY = ey.Start, TileW = ex.Size, TileH = ey.Size,
+                StepX = ex.Step, StepY = ey.Step,
+                RepeatX = ex.Repeat, RepeatY = ey.Repeat,
+                Image = cut ?? image,
+                Svg = svg,
+                Gradient = gradient,
+                Inner = cut != null ? null : inner,
+            };
+            var (x0, y0, x1, y1) = op.Painted();
+            if (x1 > x0 && y1 > y0) group.Ops.Add(op);
+        }
+
+        // The corners are stretched into their regions.
+        const BorderImageRepeat Stretch = BorderImageRepeat.Stretch;
+        Part(0, 0, 0, sl, st, ax, ay, wl, wt, wl, wt, Stretch, Stretch);
+        Part(1, iw - sr, 0, sr, st, ax + aw - wr, ay, wr, wt, wr, wt, Stretch, Stretch);
+        Part(2, iw - sr, ih - sb, sr, sb, ax + aw - wr, ay + ah - wb, wr, wb, wr, wb, Stretch, Stretch);
+        Part(3, 0, ih - sb, sl, sb, ax, ay + ah - wb, wl, wb, wl, wb, Stretch, Stretch);
+        // The edges are as thick as their region and keep the slice's proportions along it, before repeating.
+        float kt = st > 0 ? wt / st : 0, kb = sb > 0 ? wb / sb : 0, kl = sl > 0 ? wl / sl : 0, kr = sr > 0 ? wr / sr : 0;
+        Part(4, sl, 0, smw, st, mx, ay, midW, wt, smw * kt, wt, rx, Stretch);
+        Part(5, sl, ih - sb, smw, sb, mx, ay + ah - wb, midW, wb, smw * kb, wb, rx, Stretch);
+        Part(6, 0, st, sl, smh, ax, my, wl, midH, wl, smh * kl, Stretch, ry);
+        Part(7, iw - sr, st, sr, smh, ax + aw - wr, my, wr, midH, wr, smh * kr, Stretch, ry);
+        // The middle, with fill only: scaled like the top edge across and like the left edge down, or failing those,
+        // like the bottom and the right edge, or not at all.
+        if (s.BorderImageFill)
+        {
+            float hx = kt > 0 ? kt : kb > 0 ? kb : 1;
+            float hy = kl > 0 ? kl : kr > 0 ? kr : 1;
+            Part(8, sl, st, smw, smh, mx, my, midW, midH, smw * hx, smh * hy, rx, ry);
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Lays out tiles of <paramref name="size"/> along one axis of a border image region (start, length): stretched
+    /// over it, repeated from its middle, rounded to a whole number of tiles, or a whole number of tiles with equal
+    /// gaps around them. Null when no tile is drawn.
+    /// </summary>
+    private static (float Start, float Size, float Step, bool Repeat)? Axis(float start, float length, float size, BorderImageRepeat repeat)
+    {
+        switch (repeat)
+        {
+            case BorderImageRepeat.Stretch:
+                return (start, length, length, false);
+            case BorderImageRepeat.Round:
+            {
+                float n = Math.Max(1, MathF.Round(length / size));
+                float t = length / n;
+                return t < MinTile ? null : (start, t, t, n > 1);
+            }
+            case BorderImageRepeat.Space:
+            {
+                if (size < MinTile) return null;
+                float n = MathF.Floor(length / size + 1e-4f);
+                if (n < 1) return null;
+                float gap = Math.Max(0, (length - n * size) / (n + 1));
+                return (start + gap, size, size + gap, n > 1);
+            }
+            default:
+                if (size < MinTile) return null;
+                // One tile is centred on the region, the others continue from it in both directions.
+                return (start + (length - size) / 2, size, size, size < length);
+        }
     }
 
     /// <summary>
