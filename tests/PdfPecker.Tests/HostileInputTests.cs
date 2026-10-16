@@ -12,6 +12,12 @@ namespace PdfPecker.Tests;
 /// Small inputs that used to make the converter run for hours, exhaust memory or crash: each must now finish quickly
 /// (the cancellation token fails the test instead of hanging the run) or stop at a limit.
 /// </summary>
+/// <remarks>
+/// Several of these run up to a work budget, such as twenty million drawing operations, against a wall-clock bound.
+/// On a busy CI runner that also tests three target frameworks at once, competing with the rest of the suite made them
+/// miss that bound, so they run in their own collection after the parallel tests instead of alongside them.
+/// </remarks>
+[Collection(HostileInputCollection.Name)]
 public class HostileInputTests
 {
     private static string Repeat(string s, int n) => new StringBuilder(s.Length * n).Insert(0, s, n).ToString();
@@ -387,4 +393,10 @@ public class HostileInputTests
             foreach (var d in Descendants(c)) yield return d;
         }
     }
+}
+
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class HostileInputCollection
+{
+    public const string Name = "Hostile input";
 }
