@@ -20,13 +20,15 @@ internal sealed class PageMarginBoxes
     private readonly ImageLoader _images;
     private readonly CancellationToken _cancellation;
     private readonly PagedContent? _paged;
+    private readonly CounterStyles _counterStyles;
 
     // initial makes a style with initial values: margin boxes inherit from the page, not from the document.
     // paged gives string() the running strings.
     public PageMarginBoxes(List<PageRule> rules, Func<ComputedStyle> initial, PageSetup page, ImageLoader images, CancellationToken cancellation,
-        PagedContent? paged = null)
+        PagedContent? paged = null, CounterStyles? counterStyles = null)
     {
         _paged = paged;
+        _counterStyles = counterStyles ?? CounterStyles.Predefined;
         // Rules of lower specificity first, in source order otherwise: later declarations win.
         _rules = rules.Where(r => r.MarginBoxes.Count > 0 || r.Declarations.Count > 0)
             .Select((r, i) => (r, i)).OrderBy(x => x.r.Specificity).ThenBy(x => x.i).Select(x => x.r).ToList();
@@ -191,7 +193,7 @@ internal sealed class PageMarginBoxes
     /// </summary>
     private Built? Build(string name, List<Declaration> decls, List<Declaration> context, int pageIndex, int pageCount, float? width, float? height)
     {
-        var resolver = new StyleResolver(new Stylesheet(), _page.ContentWidth, _page.ContentHeight) { Paged = _paged ?? new PagedContent() };
+        var resolver = new StyleResolver(new Stylesheet(), _page.ContentWidth, _page.ContentHeight) { Paged = _paged ?? new PagedContent(), CounterStyles = _counterStyles };
         resolver.SetCounter("page", pageIndex + 1);
         resolver.SetCounter("pages", pageCount);
 

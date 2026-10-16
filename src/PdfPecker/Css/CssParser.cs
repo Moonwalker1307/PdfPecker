@@ -76,6 +76,7 @@ internal sealed class Stylesheet
     public readonly List<PageRule> PageRules = new();
     public readonly List<List<Declaration>> FontFaces = new(); // @font-face descriptors, one list per rule
     public readonly List<RegisteredProperty> RegisteredProperties = new();
+    public readonly List<CounterStyleRule> CounterStyles = new(); // @counter-style rules, in source order
     public readonly CascadeLayer LayerRoot = new("");
     public MediaContext Media = new();
     public int NextOrder;
@@ -280,6 +281,9 @@ internal static class CssParser
                 }
                 else if (atName == "property")
                     ParseProperty(prelude, s.Substring(brace + 1, blockEnd - brace - 1), sheet);
+                else if (atName == "counter-style" && sheet.CounterStyles.Count < 1024
+                         && CounterStyleRule.Parse(prelude, s.Substring(brace + 1, blockEnd - brace - 1)) is { } counterStyle)
+                    sheet.CounterStyles.Add(counterStyle);
                 i = Math.Min(blockEnd + 1, end);
                 continue;
             }
@@ -763,14 +767,42 @@ internal static class CssParser
                 ExpandFont(value, output, important);
                 return;
             case "list-style":
+            {
+                // The shorthand sets all three longhands; "none" is the type or the image, whichever is not given.
+                string? position = null, image = null, type = null;
+                int nones = 0;
                 foreach (var tok in Tokens(value))
                 {
                     var lower = tok.ToLowerInvariant();
-                    if (lower is "inside" or "outside") Add("list-style-position", lower);
-                    else if (lower[0] is '"' or '\'') Add("list-style-type", tok);
-                    else if (!lower.StartsWith("url(", StringComparison.Ordinal)) Add("list-style-type", lower);
+                    if (lower is "inside" or "outside")
+                    {
+                        if (position != null) return;
+                        position = lower;
+                    }
+                    else if (lower == "none") nones++;
+                    else if (lower.StartsWith("url(", StringComparison.Ordinal) || lower.Contains("gradient(", StringComparison.Ordinal)
+                             || lower.StartsWith("image-set(", StringComparison.Ordinal))
+                    {
+                        if (image != null) return;
+                        image = tok;
+                    }
+                    else
+                    {
+                        if (type != null) return;
+                        type = tok;
+                    }
                 }
+                if (nones > 2 || nones == 2 && (type != null || image != null) || nones == 1 && type != null && image != null) return;
+                if (nones > 0)
+                {
+                    if (type == null) type = "none";
+                    if (image == null) image = "none";
+                }
+                Add("list-style-position", position ?? "outside");
+                Add("list-style-image", image ?? "none");
+                Add("list-style-type", type ?? "disc");
                 return;
+            }
             case "page-break-before":
             case "page-break-after":
             case "page-break-inside":

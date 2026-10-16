@@ -15,6 +15,7 @@ internal static class CssSupports
         "text-decoration", "text-decoration-line", "text-decoration-color", "text-decoration-style", "text-decoration-thickness",
         "text-underline-offset", "text-transform", "text-indent", "letter-spacing", "word-spacing", "white-space",
         "overflow-wrap", "word-wrap", "word-break", "vertical-align", "list-style", "list-style-type", "list-style-position",
+        "list-style-image",
         "visibility", "box-shadow", "table-layout", "border-collapse", "border-spacing", "box-sizing", "float", "clear",
         "position", "inset", "top", "right", "bottom", "left", "z-index", "overflow", "overflow-x", "overflow-y", "transform",
         "transform-origin", "translate", "rotate", "scale", "content", "counter-reset", "counter-set", "counter-increment",
@@ -83,6 +84,8 @@ internal static class CssSupports
                     "selector" => Selector.Parse(arg) != null,
                     "font-format" => arg.ToLowerInvariant() is "truetype" or "opentype" or "woff" or "woff2" or "collection",
                     "font-tech" => arg.ToLowerInvariant() is "features-opentype",
+                    "at-rule" => arg.ToLowerInvariant() is "@media" or "@supports" or "@layer" or "@import" or "@page" or "@font-face"
+                        or "@property" or "@counter-style" or "@charset" or "@namespace",
                     _ => false,
                 };
                 i = close + 1;

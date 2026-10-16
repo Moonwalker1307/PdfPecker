@@ -84,6 +84,8 @@ internal enum ObjectFit : byte { Fill, Contain, Cover, None, ScaleDown }
 internal enum ListStyleType : byte
 {
     Disc, Circle, Square, Decimal, DecimalLeadingZero, LowerAlpha, UpperAlpha, LowerRoman, UpperRoman, None,
+    DisclosureOpen, DisclosureClosed,
+    Other, // any other counter style: ListCounterStyle
 }
 
 [Flags]
@@ -190,6 +192,8 @@ internal sealed class ComputedStyle
     public WordBreak WordBreak;
     public ListStyleType ListStyleType;
     public string? ListStyleString;          // list-style-type: "string": the marker text
+    public CounterStyle? ListCounterStyle;   // the counter style of a text marker; null for the bullets, a string and none
+    public string? ListStyleImage;           // list-style-image: the url
     public bool ListStylePositionInside;
     public TextTransform TextTransform;
     public TextDecoration TextDecoration; // propagated to descendants, approximated as inherited
