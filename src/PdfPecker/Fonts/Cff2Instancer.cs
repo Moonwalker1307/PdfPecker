@@ -241,6 +241,12 @@ internal static class Cff2Instancer
         private double _x, _y;
         private int _stems, _depth;
 
+        // Subroutines that each call the next many times expand exponentially within the nesting limit, so a glyph
+        // gets a bounded number of charstring bytes (as in the renderer), and so does the font, since it may have tens
+        // of thousands of glyphs. A font past either bound is treated as damaged and left as it is.
+        private const int GlyphBudget = 200_000, FontBudget = 100_000_000;
+        private int _glyphBudget, _fontBudget = FontBudget;
+
         public Charstring(byte[] d, Index gsubrs, VariationStore? store)
         {
             _d = d;
@@ -266,6 +272,7 @@ internal static class Cff2Instancer
             _x = _y = 0;
             _stems = 0;
             _depth = 0;
+            _glyphBudget = GlyphBudget;
             Execute(start, end);
         }
 
@@ -275,6 +282,7 @@ internal static class Cff2Instancer
             var s = _stack;
             while (pos < end)
             {
+                if (--_glyphBudget < 0 || --_fontBudget < 0) throw new FormatException("CFF2 charstrings call too many subroutines.");
                 int b = _d[pos++];
                 if (b >= 32 || b == 28)
                 {
