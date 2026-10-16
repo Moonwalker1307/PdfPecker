@@ -1,17 +1,9 @@
 name: NuGet package
 
 on:
+  # Every pull request is built and tested, so the checks can be made required without a PR that touches other
+  # files waiting for checks that never start.
   pull_request:
-    paths:
-      - src/**
-      - tests/**
-      - samples/**
-      - bench/**
-      - tools/**
-      - README.md
-      - THIRD-PARTY-NOTICES.md
-      - PdfPecker.sln
-      - .github/workflows/nuget.yml
   push:
     branches: [main]
     paths:
@@ -93,7 +85,30 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: PdfPecker.${{ steps.version.outputs.version }}.nupkg
-          path: artifacts/*.nupkg
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
+
+  # IsAotCompatible only turns on the analyzers; publishing and running the sample as a native executable proves the
+  # library really works trimmed and ahead-of-time compiled.
+  native-aot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish the sample with native AOT
+        run: dotnet publish samples/PdfPecker.Sample -c Release -p:PublishAot=true -p:TreatWarningsAsErrors=true -o aot
+
+      - name: Convert the sample documents
+        run: |
+          ./aot/PdfPecker.Sample aot/html aot-output
+          test "$(ls aot-output/*.pdf | wc -l)" -ge 1
 
   release:
     if: github.event_name == 'release'
