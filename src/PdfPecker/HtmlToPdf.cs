@@ -93,6 +93,11 @@ public static class HtmlToPdf
             throw new ArgumentException("PDF/UA needs PdfPermissions.ExtractForAccessibility, so screen readers can read an encrypted file.", nameof(options));
         if (options.Watermark is { } wm && string.IsNullOrEmpty(wm.Text) && wm.Image == null)
             throw new ArgumentException("The watermark needs a Text or an Image.", nameof(options));
+        // Only the caller's own options can be wrong in a way worth an exception; @page rules come from the document,
+        // which may be untrusted, so their margins are fitted to the page further down instead.
+        if ((options.PageSize.Width - options.Margins.Left - options.Margins.Right) / options.Scale < MinContentSize
+            || (options.PageSize.Height - options.Margins.Top - options.Margins.Bottom) / options.Scale < MinContentSize)
+            throw new ArgumentException("The page margins leave no room for content.", nameof(options));
         var doc = HtmlParser.Parse(html);
         if (MayHaveControls(html)) FormControls.Prepare(doc, options.FormFields);
         var resolver = options.ResourceResolver;
@@ -128,8 +133,7 @@ public static class HtmlToPdf
             page.Width /= s; page.Height /= s;
             page.MarginTop /= s; page.MarginRight /= s; page.MarginBottom /= s; page.MarginLeft /= s;
         }
-        if (page.ContentWidth < 10 || page.ContentHeight < 10)
-            throw new ArgumentException("The page margins leave no room for content.", nameof(options));
+        FitMargins(page);
 
         // Running header and footer: elements marked data-sticky-pdf-header / data-sticky-pdf-footer are taken out of
         // the flow and drawn at the top and bottom of every page; the flowing content gets the space in between.
@@ -219,8 +223,7 @@ public static class HtmlToPdf
                 setup.Width /= s; setup.Height /= s;
                 setup.MarginTop /= s; setup.MarginRight /= s; setup.MarginBottom /= s; setup.MarginLeft /= s;
             }
-            if (setup.ContentWidth < 10 || setup.ContentHeight < 10)
-                throw new ArgumentException($"The margins of @page {name} leave no room for content.", nameof(options));
+            FitMargins(setup);
             ReserveBands(setup);
             return setups[name] = setup;
         }
@@ -261,8 +264,7 @@ public static class HtmlToPdf
                 setup.Width /= s; setup.Height /= s;
                 setup.MarginTop /= s; setup.MarginRight /= s; setup.MarginBottom /= s; setup.MarginLeft /= s;
             }
-            if (setup.ContentWidth < 10 || setup.ContentHeight < 10)
-                throw new ArgumentException($"The margins of @page {(name == null ? "" : name)}{(first ? ":first" : side)} leave no room for content.", nameof(options));
+            FitMargins(setup);
             ReserveBands(setup);
             return variants[(name, first, right)] = setup;
         }
@@ -943,6 +945,33 @@ public static class HtmlToPdf
 
     private static bool HasBackground(Element? e) =>
         e?.Style is { } s && (CssColor.IsVisible(s.BackgroundColor) || s.BackgroundImages?.Any(l => l != null) == true);
+
+    /// <summary>The smallest content area, in layout points, that a page may have in either direction.</summary>
+    private const float MinContentSize = 10;
+
+    /// <summary>
+    /// Shrinks @page margins (and a tiny @page size) that leave less than <see cref="MinContentSize"/> for content. A
+    /// browser prints such a document rather than refusing it, and the document's CSS may be untrusted, so it must not
+    /// be able to make the conversion fail. The margins keep their proportions to each other.
+    /// </summary>
+    private static void FitMargins(PageSetup page)
+    {
+        FitAxis(ref page.Width, ref page.MarginLeft, ref page.MarginRight);
+        FitAxis(ref page.Height, ref page.MarginTop, ref page.MarginBottom);
+
+        static void FitAxis(ref float size, ref float start, ref float end)
+        {
+            if (size - start - end >= MinContentSize) return;
+            if (!(size >= MinContentSize)) size = MinContentSize;
+            float margins = start + end, room = size - MinContentSize;
+            if (margins > 0 && float.IsFinite(margins) && float.IsFinite(room))
+            {
+                start *= room / margins;
+                end *= room / margins;
+            }
+            else start = end = 0; // an infinite or NaN margin has no proportion to keep
+        }
+    }
 
     private static void SetMargin(string v, ref float target, float basis)
     {

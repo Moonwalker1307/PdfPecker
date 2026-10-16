@@ -758,7 +758,10 @@ internal sealed partial class PageRenderer
             if (rect == null || rect.Length < 4) continue;
             double rx0 = Math.Min(rect[0], rect[2]), ry0 = Math.Min(rect[1], rect[3]);
             double rx1 = Math.Max(rect[0], rect[2]), ry1 = Math.Max(rect[1], rect[3]);
-            var bbox = _file.GetNumbers(form, "BBox") ?? new double[] { 0, 0, rx1 - rx0, ry1 - ry0 };
+            // An appearance mapped onto an empty rectangle covers no pixels.
+            if (!(rx1 - rx0 > 0 && ry1 - ry0 > 0)) continue;
+            // A damaged /BBox with fewer than four numbers is treated as missing, as for other form XObjects.
+            var bbox = _file.GetNumbers(form, "BBox") is { Length: >= 4 } box ? box : new double[] { 0, 0, rx1 - rx0, ry1 - ry0 };
             var fm = Matrix.FromArray(_file.GetNumbers(form, "Matrix"));
             // Transform the bounding box by the form matrix, then map that box onto the annotation rectangle.
             double bx0 = double.MaxValue, by0 = double.MaxValue, bx1 = double.MinValue, by1 = double.MinValue;

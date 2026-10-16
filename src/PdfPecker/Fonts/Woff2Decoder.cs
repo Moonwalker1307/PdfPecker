@@ -89,8 +89,16 @@ internal static class Woff2Decoder
         if (compressedSize > file.Length - start) throw new FormatException("The WOFF2 file is truncated.");
         if (streamSize > compressedSize * 1100 + 1024) throw new FormatException("Damaged WOFF2 data.");
         var stream = new byte[streamSize];
-        using (var brotli = new BrotliStream(new MemoryStream(file, start, (int)compressedSize), CompressionMode.Decompress))
+        try
+        {
+            using var brotli = new BrotliStream(new MemoryStream(file, start, (int)compressedSize), CompressionMode.Decompress);
             brotli.ReadExactly(stream);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or EndOfStreamException)
+        {
+            // BrotliStream reports corrupt data as an invalid operation; to the caller it is a damaged font file.
+            throw new FormatException("Damaged WOFF2 data.", ex);
+        }
 
         var tables = new byte[]?[numTables];
         var sfnts = new List<byte[]>(fonts.Count);

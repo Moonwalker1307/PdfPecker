@@ -64,7 +64,7 @@ internal sealed class FontProgram
             _tables[tag] = (off, len);
         }
 
-        var head = Table("head") ?? throw new FormatException("The font has no head table.");
+        var head = Table("head") is { Length: >= 54 } headTable ? headTable : throw new FormatException("The font has no complete head table.");
         UnitsPerEm = U16(head.Offset + 18);
         if (UnitsPerEm < 16 || UnitsPerEm > 16384) UnitsPerEm = 1000;
         XMin = S16(head.Offset + 36);
@@ -73,10 +73,10 @@ internal sealed class FontProgram
         YMax = S16(head.Offset + 42);
         int macStyle = U16(head.Offset + 44);
 
-        var maxp = Table("maxp") ?? throw new FormatException("The font has no maxp table.");
+        var maxp = Table("maxp") is { Length: >= 6 } maxpTable ? maxpTable : throw new FormatException("The font has no complete maxp table.");
         NumGlyphs = U16(maxp.Offset + 4);
 
-        var hhea = Table("hhea") ?? throw new FormatException("The font has no hhea table.");
+        var hhea = Table("hhea") is { Length: >= 36 } hheaTable ? hheaTable : throw new FormatException("The font has no complete hhea table.");
         Ascender = S16(hhea.Offset + 4);
         Descender = S16(hhea.Offset + 6);
         LineGap = S16(hhea.Offset + 8);
@@ -573,8 +573,17 @@ internal sealed class FontProgram
             if (compLen < origLen)
             {
                 data = new byte[origLen];
-                using var z = new ZLibStream(new MemoryStream(woff, off, compLen), CompressionMode.Decompress);
-                z.ReadExactly(data);
+                try
+                {
+                    using var z = new ZLibStream(new MemoryStream(woff, off, compLen), CompressionMode.Decompress);
+                    z.ReadExactly(data);
+                }
+                catch (Exception ex) when (ex is IOException or InvalidOperationException)
+                {
+                    // The stream reads from memory, so any I/O error is corrupt zlib data, which newer runtimes report
+                    // as ZLibException rather than InvalidDataException; to the caller it is a damaged font file.
+                    throw new FormatException("Damaged WOFF table.", ex);
+                }
             }
             else data = woff.AsSpan(off, origLen).ToArray();
             tables.Add((tag, data));
