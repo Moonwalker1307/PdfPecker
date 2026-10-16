@@ -84,7 +84,7 @@ All methods are static and thread-safe, so you can convert many documents in par
   [More](https://pdfpecker.net/docs/signatures/)
 - **E-invoices and attachments**: Factur-X and ZUGFeRD, PDFs in Peppol and OIOUBL invoices, and any embedded file.
   [More](https://pdfpecker.net/docs/e-invoices/)
-- **Existing PDFs**: merge (also streamed), extract, reorder, rotate and split pages, and stamp or underlay pages.
+- **Existing PDFs**: merge (also streamed), extract, reorder, rotate and split pages, stamp or underlay pages, and extract their text with positions.
   [More](https://pdfpecker.net/docs/merging/)
 - **PDF to image**: PdfPecker's own renderer turns any PDF page into PNG, JPEG or WebP. [More](https://pdfpecker.net/docs/pdf-to-image/)
 

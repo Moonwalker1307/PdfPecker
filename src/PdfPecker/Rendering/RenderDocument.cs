@@ -72,6 +72,28 @@ internal sealed class RenderDocument
         return p.Rotate % 180 == 0 ? (w, h) : (h, w);
     }
 
+    /// <summary>The transform from a page's user space to points on the displayed page, origin top left, y downward.</summary>
+    private static Matrix PageMatrix(PageInfo p, double sx, double sy) => p.Rotate switch
+    {
+        90 => new Matrix(0, sy, sx, 0, -p.Y0 * sx, -p.X0 * sy),
+        180 => new Matrix(-sx, 0, 0, sy, p.X1 * sx, -p.Y0 * sy),
+        270 => new Matrix(0, -sy, -sx, 0, p.Y1 * sx, p.X1 * sy),
+        _ => new Matrix(sx, 0, 0, -sy, -p.X0 * sx, p.Y1 * sy),
+    };
+
+    /// <summary>
+    /// Runs a page for its text: the glyphs it shows, in content order, positioned in points on the displayed page (after
+    /// /Rotate and /UserUnit), origin top left.
+    /// </summary>
+    public List<TextGlyph> CollectText(int index, bool annotations, CancellationToken cancel)
+    {
+        var p = Pages[index];
+        var collector = new TextCollector();
+        var r = new PageRenderer(File, _cache, collector, cancel);
+        using (PdfFile.BeginRender(cancel)) r.RenderPage(p.Dict, p.Resources, PageMatrix(p, p.UserUnit, p.UserUnit), annotations);
+        return collector.Glyphs;
+    }
+
     /// <summary>Renders a page at the given pixels per point (x and y) onto a canvas of premultiplied RGBA pixels.</summary>
     public Canvas Render(int index, double scaleX, double scaleY, int width, int height, uint background, bool annotations, CancellationToken cancel)
     {
@@ -79,13 +101,7 @@ internal sealed class RenderDocument
         // Pages are drawn on a transparent backdrop, as PDF blend modes expect, then put on the background.
         var canvas = new Canvas(width, height, 0);
         double sx = scaleX * p.UserUnit, sy = scaleY * p.UserUnit;
-        Matrix m = p.Rotate switch
-        {
-            90 => new Matrix(0, sy, sx, 0, -p.Y0 * sx, -p.X0 * sy),
-            180 => new Matrix(-sx, 0, 0, sy, p.X1 * sx, -p.Y0 * sy),
-            270 => new Matrix(0, -sy, -sx, 0, p.Y1 * sx, p.X1 * sy),
-            _ => new Matrix(sx, 0, 0, -sy, -p.X0 * sx, p.Y1 * sy),
-        };
+        var m = PageMatrix(p, sx, sy);
         var r = new PageRenderer(File, _cache, canvas, cancel);
         using (PdfFile.BeginRender(cancel)) r.RenderPage(p.Dict, p.Resources, m, annotations);
         if (background != 0)
