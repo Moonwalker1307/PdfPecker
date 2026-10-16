@@ -360,14 +360,35 @@ internal sealed partial class LayoutEngine
         int n = m.ColCount;
         float gridSpace = n > 0 ? (n + 1) * hs : 0; // an empty table has no border spacing, as in Chrome
         bool specified = !s.Width.IsAuto;
-        float avail;
-        if (specified)
+        float frameH = frameL + frameR, frameV = frameT + frameB;
+        // aspect-ratio and an auto width: a fixed height (or a min-height wider than the content) sets the width as a
+        // specified one would; a max-height only narrows the room the columns get. Neither makes the table narrower
+        // than its columns' min-content widths, which the intrinsic widths already include.
+        float ratioW = -1, ratioMax = float.PositiveInfinity;
+        if (!specified && s.AspectRatio > 0)
         {
-            float tw = s.Width.Resolve(availW);
-            if (!s.BorderBox) tw += frameL + frameR;
-            avail = tw - frameL - frameR - gridSpace;
+            var (tableMin, tableMax) = Intrinsic(table);
+            if (ClampedHeight(s) is float h) ratioW = Math.Max(RatioWidth(s, h, frameH, frameV) + frameH, tableMin);
+            else
+            {
+                var (tmin, tmax) = TransferredWidthLimits(s, frameH, frameV);
+                ratioMax = Math.Max(tmax + frameH, tableMin);
+                if (tmin > 0 && tableMax <= tmin + frameH + 0.01f) ratioW = tmin + frameH;
+            }
         }
-        else avail = availW - ml - mr - frameL - frameR - gridSpace;
+        float avail;
+        if (specified || ratioW >= 0)
+        {
+            float tw = ratioW;
+            if (specified)
+            {
+                tw = s.Width.Resolve(availW);
+                if (!s.BorderBox) tw += frameH;
+            }
+            avail = tw - frameH - gridSpace;
+            specified = true;
+        }
+        else avail = Math.Min(availW - ml - mr, ratioMax) - frameH - gridSpace;
         if (!s.MaxWidth.IsAuto) avail = Math.Min(avail, s.MaxWidth.Resolve(availW) - frameL - frameR - gridSpace);
 
         var widths = specified && s.TableLayoutFixed ? FixedColumns(m, avail) : AllocateColumns(m, avail, specified);
@@ -397,14 +418,15 @@ internal sealed partial class LayoutEngine
         float cy = y + frameT + (m.Rows.Count > 0 ? vs : 0);
 
         m.RowExtra = null;
-        if (!s.Height.IsAuto && !s.Height.IsPercent && m.Rows.Count > 0)
-            m.RowExtra = RowExtras(m, s.Height.Value - frameT - frameB - vs, colX, widths, hs, vs, collapse);
+        float? tableH = TableHeight(s, boxW, frameH, frameV);
+        if (tableH is float th && m.Rows.Count > 0)
+            m.RowExtra = RowExtras(m, th - frameT - frameB - vs, colX, widths, hs, vs, collapse);
         for (int r = 0; r < m.Rows.Count; r++)
             cy = LayoutRow(m, r, cy, colX, widths, hs, vs, collapse, allowMove: true) + vs;
         m.RowExtra = null;
 
         float tableBottom = cy + frameB;
-        if (!s.Height.IsAuto && !s.Height.IsPercent && tableBottom - tableTop < s.Height.Value) tableBottom = tableTop + s.Height.Value;
+        if (tableH is float minBottom && tableBottom - tableTop < minBottom) tableBottom = tableTop + minBottom;
         BoxPainter.Paint(tableGroup, s, bx, tableTop, boxW, tableBottom - tableTop, _images, availW,
             collapse && m.Rows.Count > 0 ? TableSides(m) : BoxPainter.AllSides, collapsedCell: collapse);
         _lastBoxRight = bx + boxW;
@@ -413,6 +435,27 @@ internal sealed partial class LayoutEngine
         _lastBoxW = boxW;
         _lastBoxH = tableBottom - tableTop;
         return tableBottom;
+    }
+
+    /// <summary>
+    /// The border-box height a table is at least as tall as: its height, or the one aspect-ratio gives its width, limited
+    /// by min-height and max-height; null when nothing sets one. Rows taller than that still make the table grow.
+    /// </summary>
+    private static float? TableHeight(ComputedStyle s, float boxW, float frameH, float frameV)
+    {
+        float extra = s.BorderBox ? 0 : frameV;
+        float? h = null;
+        if (!s.Height.IsAuto && !s.Height.IsPercent) h = s.Height.Value + extra;
+        else if (s.AspectRatio > 0)
+        {
+            // Chrome takes the table's content width for the width the ratio divides, whatever box-sizing says, and
+            // applies the frame on top only when the ratio sizes the content box. This matches its output.
+            float c = Math.Max(0, boxW - frameH);
+            h = RatioOnBorderBox(s) ? c / s.AspectRatio : Math.Max(0, c - frameH) / s.AspectRatio + frameV;
+        }
+        if (h != null && !s.MaxHeight.IsAuto && !s.MaxHeight.IsPercent) h = Math.Min(h.Value, s.MaxHeight.Value + extra);
+        if (!s.MinHeight.IsAuto && !s.MinHeight.IsPercent && s.MinHeight.Value > 0) h = Math.Max(h ?? 0, s.MinHeight.Value + extra);
+        return h;
     }
 
     /// <summary>
@@ -674,13 +717,26 @@ internal sealed partial class LayoutEngine
             float w = s.Width.Value + (s.BorderBox ? 0 : frame);
             result = (Math.Max(w, s.Display == Display.Table ? result.Item1 : 0), Math.Max(w, s.Display == Display.Table ? result.Item1 : 0));
         }
-        else if (s.Width.IsAuto && s.AspectRatio > 0 && !s.Height.IsAuto && !s.Height.IsPercent && e.Name is not ("img" or "svg")
-                 && s.Display != Display.Table)
+        else if (s.Width.IsAuto && s.AspectRatio > 0 && e.Name is not ("img" or "svg"))
         {
-            // aspect-ratio with a definite height: the width follows from the height, and the content can only widen it.
             float frameV = s.PaddingTop.Resolve(0) + s.PaddingBottom.Resolve(0) + s.BorderTop + s.BorderBottom;
-            float w = s.BorderBox && !s.AspectRatioAuto ? s.Height.Value * s.AspectRatio : (s.Height.Value - (s.BorderBox ? frameV : 0)) * s.AspectRatio + frame;
-            result = (Math.Max(w, result.Item1), Math.Max(w, result.Item1));
+            bool table = s.Display == Display.Table;
+            if (ClampedHeight(s) is float h)
+            {
+                // aspect-ratio with a definite height: the width follows from the height. Content can only widen it while
+                // min-width is auto and the overflow is visible (a table is never narrower than its columns).
+                float w = RatioWidth(s, h, frame, frameV) + frame;
+                float floor = table || s.MinWidth.IsAuto && !s.ClipsX ? result.Item1 : 0;
+                result = (Math.Max(w, floor), Math.Max(w, floor));
+            }
+            else
+            {
+                // min-height and max-height carry over to the width through the ratio.
+                var (tmin, tmax) = TransferredWidthLimits(s, frame, frameV);
+                float mn = Math.Max(Math.Min(result.Item1, tmax + frame), tmin + frame);
+                float mx = Math.Max(Math.Min(result.Item2, tmax + frame), tmin + frame);
+                result = table ? (Math.Max(mn, result.Item1), Math.Max(mx, result.Item1)) : (mn, mx);
+            }
         }
         if (!s.MaxWidth.IsAuto && !s.MaxWidth.IsPercent)
         {

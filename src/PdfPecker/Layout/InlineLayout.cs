@@ -195,7 +195,7 @@ internal sealed partial class LayoutEngine
     /// Adds an SVG drawing (an inline svg element, or an SVG file in an img element) as a small inline box, so padding
     /// and borders work as for any replaced element.
     /// </summary>
-    private void AddInlineSvg(CollectState st, Element e, ComputedStyle s, SvgImage? svg, float sw, float sh, string? href)
+    private void AddInlineSvg(CollectState st, Element e, ComputedStyle s, SvgImage? svg, float sw, float sh, string? href, bool file = false)
     {
         if (sw > 0 && sh > 0)
         {
@@ -206,7 +206,16 @@ internal sealed partial class LayoutEngine
             var group = new GroupOp();
             ops.Add(group);
             BoxPainter.Paint(group, s, 0, 0, sw + pl + pr, sh + ptop + pbot, _images);
-            if (s.Visible && svg != null) ops.Add(new SvgOp(pl, ptop, sw, sh, svg) { Tag = Tags?.Of(e) });
+            if (s.Visible && svg != null)
+            {
+                if (file)
+                {
+                    // An SVG file in an img element: sized and placed by object-fit and object-position.
+                    var radii = BoxPainter.InnerRadii(BoxPainter.Radii(s, sw + pl + pr, sh + ptop + pbot), pl, ptop, pr, pbot);
+                    AddSvgImage(ops, s, svg, pl, ptop, sw, sh, radii, Tags?.Of(e));
+                }
+                else ops.Add(new SvgOp(pl, ptop, sw, sh, svg) { Tag = Tags?.Of(e) });
+            }
             if (ml > 0) { var it_ = Rent(ItemKind.Spacer, s); it_.Width = ml; it_.Href = href; st.Items.Add(it_); }
             float boxH = sh + ptop + pbot;
             st.Items.Add(new Item { Kind = ItemKind.Box, Style = s, Width = sw + pl + pr, Height = boxH, BoxBaseline = boxH, BoxOps = ops, Href = href ?? LinkOf(e) });
@@ -277,7 +286,7 @@ internal sealed partial class LayoutEngine
                 var img = ImageSize(e, st.AvailWidth, out float w, out float h, out var svgFile);
                 if (svgFile != null)
                 {
-                    AddInlineSvg(st, e, s, svgFile, w, h, href);
+                    AddInlineSvg(st, e, s, svgFile, w, h, href, file: true);
                     return;
                 }
                 if (w > 0 && h > 0)

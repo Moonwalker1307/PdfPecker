@@ -30,6 +30,10 @@ internal sealed class PseudoCondition
     public int A, B; // an+b for nth-child and nth-of-type
     public Selector[]? List; // the selector list of :not(), :is(), :where(), :has() (relative) and :nth-child(... of S)
     public string[]? Langs; // the ranges of :lang()
+
+    // Set when the list holds a selector with combinators or another list. Matching such a list walks the tree, and the
+    // selector around it asks again for each element it tries, so the result is remembered per element.
+    public bool Memoize;
 }
 
 /// <summary>A compound selector such as <c>div.note#main[title]</c>.</summary>
@@ -121,10 +125,10 @@ internal sealed class Compound
             case PseudoKind.Root: return e.Name == "html" || e.Parent?.Name == "#document" && e.ElementSiblingCount == 1;
             case PseudoKind.Link: return e.Name == "a" && e.HasAttribute("href");
             case PseudoKind.Empty: return e.Children.Count == 0;
-            case PseudoKind.Not: return !AnyMatches(p.List!, e);
+            case PseudoKind.Not: return !ListMatches(p, e);
             case PseudoKind.Is:
-            case PseudoKind.Where: return AnyMatches(p.List!, e);
-            case PseudoKind.Has: return MatchHas(e, p.List!);
+            case PseudoKind.Where: return ListMatches(p, e);
+            case PseudoKind.Has: return Remembered(p, e) ?? Remember(p, e, MatchHas(e, p.List!));
             case PseudoKind.HasAnchor: return ReferenceEquals(e, _hasAnchor);
             case PseudoKind.Lang: return MatchLang(e, p.Langs!);
             case PseudoKind.Always: return true;
@@ -203,14 +207,14 @@ internal sealed class Compound
     /// <summary>:nth-child(An+B of S): the position counts only the siblings that match S.</summary>
     private static bool MatchNthOf(Element e, PseudoCondition p, bool fromEnd)
     {
-        if (!AnyMatches(p.List!, e) || e.Parent == null) return false;
+        if (!ListMatches(p, e) || e.Parent == null) return false;
         int index = 0;
         var siblings = e.Parent.Children;
         bool passed = false;
         for (int k = fromEnd ? siblings.Count - 1 : 0; k >= 0 && k < siblings.Count; k += fromEnd ? -1 : 1)
         {
             if (siblings[k] is not Element s || s.Generated) continue;
-            if (AnyMatches(p.List!, s)) index++;
+            if (ListMatches(p, s)) index++;
             if (ReferenceEquals(s, e)) { passed = true; break; }
         }
         return passed && MatchNth(p.A, p.B, index);
@@ -264,6 +268,35 @@ internal sealed class Compound
         }
         return false;
     }
+
+    /// <summary>
+    /// Results of selector lists per element while a tree is being styled. Without them a list nested in a complex
+    /// selector is matched again for every element the outer selector tries, so each level of nesting multiplies the
+    /// work; with them every list is matched at most once per element. The results stay valid only while the tree does
+    /// not change, so the cache lives for one <see cref="StyleResolver.ResolveTree"/>.
+    /// </summary>
+    [ThreadStatic] private static Dictionary<(PseudoCondition, Element), bool>? _memo;
+
+    /// <summary>Starts remembering list results; returns the previous cache for <see cref="EndMatching"/>.</summary>
+    internal static object? BeginMatching()
+    {
+        var saved = _memo;
+        _memo = new Dictionary<(PseudoCondition, Element), bool>();
+        return saved;
+    }
+
+    internal static void EndMatching(object? saved) => _memo = (Dictionary<(PseudoCondition, Element), bool>?)saved;
+
+    private static bool? Remembered(PseudoCondition p, Element e)
+        => p.Memoize && _memo != null && _memo.TryGetValue((p, e), out bool hit) ? hit : null;
+
+    private static bool Remember(PseudoCondition p, Element e, bool result)
+    {
+        if (p.Memoize && _memo != null) _memo[(p, e)] = result;
+        return result;
+    }
+
+    private static bool ListMatches(PseudoCondition p, Element e) => Remembered(p, e) ?? Remember(p, e, AnyMatches(p.List!, e));
 
     private static bool AnyMatches(Selector[] list, Element e)
     {
@@ -372,8 +405,9 @@ internal sealed class Selector
 
     private static Element? ParentElement(Element e) => e.Parent is { } p && p.Name != "#document" ? p : null;
 
-    // Real selectors stay far below these; the limits keep hostile stylesheets from costing deep recursion.
-    private const int MaxParts = 64, MaxNestedParts = 8, MaxNesting = 8;
+    // Real selectors stay far below these; the limits keep hostile stylesheets from costing deep recursion. Matching
+    // cost is bounded separately, by remembering the results of nested lists (see Compound.BeginMatching).
+    private const int MaxParts = 64, MaxNesting = 16;
 
     /// <summary>Parses one complex selector. Returns null for unsupported syntax, which drops the rule.</summary>
     public static Selector? Parse(string text) => Parse(text, 0);
@@ -403,9 +437,7 @@ internal sealed class Selector
                 continue;
             }
             if (parts.Count > 0 && pending == Combinator.None) return null;
-            // Selectors inside :is(), :where() and :not() are matched once per candidate element of the selector around
-            // them, so they are kept short: a few compounds at the first level, a single compound deeper.
-            if (parts.Count == (nesting == 0 ? MaxParts : nesting == 1 ? MaxNestedParts : 1)) return null;
+            if (parts.Count == MaxParts) return null;
             var compound = ParseCompound(text, ref i, nesting, ref pseudoElement);
             if (compound == null) return null;
             if (parts.Count > 0) compound.Combinator = pending; // relation to the left neighbour, fixed up below
@@ -567,7 +599,7 @@ internal sealed class Selector
                     "nth-of-type" => PseudoKind.NthOfType,
                     _ => PseudoKind.NthLastOfType,
                 };
-                return new PseudoCondition { Kind = kind, A = a, B = b, List = of };
+                return new PseudoCondition { Kind = kind, A = a, B = b, List = of, Memoize = of != null && IsComplex(of) };
             }
             case "has":
             {
@@ -585,7 +617,7 @@ internal sealed class Selector
                     }
                 }
                 finally { _parsingHas = false; }
-                return list.Count == 0 ? null : new PseudoCondition { Kind = PseudoKind.Has, List = list.ToArray() };
+                return list.Count == 0 ? null : new PseudoCondition { Kind = PseudoKind.Has, List = list.ToArray(), Memoize = true };
             }
             case "lang":
             {
@@ -627,7 +659,8 @@ internal sealed class Selector
                 }
                 if (list.Count == 0 && !forgiving) return null;
                 var kind = name == "not" ? PseudoKind.Not : name == "where" ? PseudoKind.Where : PseudoKind.Is;
-                return new PseudoCondition { Kind = kind, List = list.ToArray() };
+                var selectors = list.ToArray();
+                return new PseudoCondition { Kind = kind, List = selectors, Memoize = IsComplex(selectors) };
             }
             case "hover":
             case "active":
@@ -653,6 +686,19 @@ internal sealed class Selector
     }
 
     [ThreadStatic] private static bool _parsingHas;
+
+    /// <summary>Whether matching the list can walk the tree: some selector has a combinator or a list of its own.</summary>
+    private static bool IsComplex(Selector[] list)
+    {
+        foreach (var sel in list)
+        {
+            if (sel.Parts.Length > 1) return true;
+            if (sel.Parts[0].Pseudos is { } pseudos)
+                foreach (var p in pseudos)
+                    if (p.List != null) return true;
+        }
+        return false;
+    }
 
     /// <summary>The index of " of " in an :nth-child() argument, or -1.</summary>
     private static int OfIndex(string arg)
