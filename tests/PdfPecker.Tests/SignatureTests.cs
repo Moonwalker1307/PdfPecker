@@ -280,8 +280,11 @@ public class SignatureTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => Task.FromResult(Send(request, cancellationToken));
     }
 
-    /// <summary>A minimal timestamp authority: answers a TimeStampReq with a token signed by its certificate.</summary>
-    internal sealed class FakeTsa(X509Certificate2 cert, bool omitNonce = false) : HttpMessageHandler
+    /// <summary>
+    /// A minimal timestamp authority: answers a TimeStampReq with a token signed by its certificate, stating the current
+    /// time or <c>time</c> when given, which lets a test play a dishonest authority that backdates its tokens.
+    /// </summary>
+    internal sealed class FakeTsa(X509Certificate2 cert, bool omitNonce = false, DateTimeOffset? time = null) : HttpMessageHandler
     {
         public string? ContentType;
 
@@ -304,7 +307,7 @@ public class SignatureTests
                     tst.WriteOctetString(req.GetMessageHash().Span);
                 }
                 tst.WriteInteger(42);
-                tst.WriteGeneralizedTime(DateTimeOffset.UtcNow, omitFractionalSeconds: true);
+                tst.WriteGeneralizedTime(time ?? DateTimeOffset.UtcNow, omitFractionalSeconds: true);
                 if (!omitNonce) tst.WriteInteger(req.GetNonce()!.Value.Span);
             }
             var cms = new SignedCms(new ContentInfo(new Oid("1.2.840.113549.1.9.16.1.4"), tst.Encode()));

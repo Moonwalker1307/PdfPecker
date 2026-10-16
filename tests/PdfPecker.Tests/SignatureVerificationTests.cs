@@ -10,7 +10,7 @@ public class SignatureVerificationTests
 {
     private const string Html = "<html><head><title>Invoice</title></head><body><h1>Faktura 1001</h1><p>Total: 1.250,00 kr.</p></body></html>";
 
-    internal static X509Certificate2 SelfSigned(string cn, bool ec = false)
+    internal static X509Certificate2 SelfSigned(string cn, bool ec = false, bool timestamping = false)
     {
         if (ec)
         {
@@ -21,6 +21,7 @@ public class SignatureVerificationTests
         using var key = RSA.Create(2048);
         var req = new CertificateRequest($"CN={cn}, O=PdfPecker Tests", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
         req.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.NonRepudiation, true));
+        if (timestamping) req.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection { new Oid("1.3.6.1.5.5.7.3.8") }, true));
         using var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
         return X509CertificateLoader.LoadPkcs12(cert.Export(X509ContentType.Pfx, "pw"), "pw");
     }
@@ -162,15 +163,17 @@ public class SignatureVerificationTests
     [Fact]
     public void A_timestamped_signature_reports_the_timestamp()
     {
-        using var tsa = SelfSigned("Test TSA");
+        using var tsa = SelfSigned("Test TSA", timestamping: true);
         var pdf = Signed(new PdfSignatureOptions(Cert.Value)
         {
             TimestampUrl = "http://tsa.example/",
             TimestampHttpClient = new HttpClient(new SignatureTests.FakeTsa(tsa)),
         });
-        var v = Assert.Single(PdfSignatureVerifier.Verify(pdf, Trusting(Cert.Value)));
+        var v = Assert.Single(PdfSignatureVerifier.Verify(pdf, Trusting(Cert.Value, tsa)));
         Assert.True(v.HasTimestamp);
         Assert.True(v.TimestampValid);
+        Assert.True(v.TimestampTrusted);
+        Assert.Empty(v.Problems);
         Assert.True(Math.Abs((v.TimestampTime!.Value - DateTimeOffset.UtcNow).TotalMinutes) < 5);
         Assert.True(v.Valid, string.Join("\n", v.Problems));
     }
@@ -281,5 +284,89 @@ public class SignatureVerificationTests
         cms.Decode(Convert.FromHexString(hex));
         cms.CheckSignature(verifySignatureOnly: true);
         Assert.Equal(cms.SignerInfos[0].Certificate!.Thumbprint, v.SignerCertificate!.Thumbprint);
+    }
+
+    /// <summary>A self-signed RSA certificate with the given validity, key usage and, optionally, the timeStamping usage.</summary>
+    private static X509Certificate2 MakeCert(string cn, DateTimeOffset notBefore, DateTimeOffset notAfter,
+        X509KeyUsageFlags usage = X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.NonRepudiation, bool timestamping = false)
+    {
+        using var key = RSA.Create(2048);
+        var req = new CertificateRequest($"CN={cn}, O=PdfPecker Tests", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        req.CertificateExtensions.Add(new X509KeyUsageExtension(usage, true));
+        if (timestamping) req.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection { new Oid("1.3.6.1.5.5.7.3.8") }, true));
+        using var cert = req.CreateSelfSigned(notBefore, notAfter);
+        return X509CertificateLoader.LoadPkcs12(cert.Export(X509ContentType.Pfx, "pw"), "pw");
+    }
+
+    private static readonly DateTimeOffset TwoYearsAgo = DateTimeOffset.UtcNow.AddYears(-2);
+
+    /// <summary>A certificate that was valid two years ago and expired a year ago.</summary>
+    private static X509Certificate2 ExpiredSigner() => MakeCert("Expired Signer", DateTimeOffset.UtcNow.AddYears(-3), DateTimeOffset.UtcNow.AddYears(-1));
+
+    /// <summary>A signature by <paramref name="signer"/> claiming to be two years old, timestamped by <paramref name="tsa"/> with that time.</summary>
+    private static byte[] Backdated(X509Certificate2 signer, X509Certificate2? tsa)
+        => Signed(new PdfSignatureOptions(signer)
+        {
+            SigningTime = TwoYearsAgo,
+            TimestampUrl = tsa == null ? null : "http://tsa.example/",
+            TimestampHttpClient = tsa == null ? null : new HttpClient(new SignatureTests.FakeTsa(tsa, time: TwoYearsAgo)),
+        });
+
+    [Fact]
+    public void A_backdated_timestamp_from_an_untrusted_authority_does_not_rescue_an_expired_certificate()
+    {
+        using var signer = ExpiredSigner();
+        // Anyone can make a self-signed "timestamp authority" and have it state whatever time they like.
+        using var rogueTsa = MakeCert("Rogue TSA", DateTimeOffset.UtcNow.AddYears(-5), DateTimeOffset.UtcNow.AddYears(5), timestamping: true);
+        var v = Assert.Single(PdfSignatureVerifier.Verify(Backdated(signer, rogueTsa), Trusting(signer)));
+        Assert.True(v.TimestampValid);
+        Assert.False(v.TimestampTrusted);
+        Assert.False(v.ChainTrusted);
+        Assert.False(v.Valid);
+        Assert.Contains(v.Problems, p => p.StartsWith("The timestamp is not trusted", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_timestamp_from_a_trusted_authority_proves_the_certificate_was_valid_when_signing()
+    {
+        using var signer = ExpiredSigner();
+        using var tsa = MakeCert("Trusted TSA", DateTimeOffset.UtcNow.AddYears(-5), DateTimeOffset.UtcNow.AddYears(5), timestamping: true);
+        var v = Assert.Single(PdfSignatureVerifier.Verify(Backdated(signer, tsa), Trusting(signer, tsa)));
+        Assert.True(v.TimestampTrusted);
+        Assert.True(v.Valid, string.Join("\n", v.Problems));
+        Assert.Empty(v.Problems);
+    }
+
+    [Fact]
+    public void A_timestamp_certificate_without_the_timestamping_usage_is_not_trusted()
+    {
+        using var signer = ExpiredSigner();
+        using var tsa = MakeCert("Not a TSA", DateTimeOffset.UtcNow.AddYears(-5), DateTimeOffset.UtcNow.AddYears(5));
+        var v = Assert.Single(PdfSignatureVerifier.Verify(Backdated(signer, tsa), Trusting(signer, tsa)));
+        Assert.True(v.TimestampValid);
+        Assert.False(v.TimestampTrusted);
+        Assert.False(v.Valid);
+    }
+
+    [Fact]
+    public void The_claimed_signing_time_is_not_used_to_validate_the_certificate()
+    {
+        using var signer = ExpiredSigner();
+        var v = Assert.Single(PdfSignatureVerifier.Verify(Backdated(signer, null), Trusting(signer)));
+        Assert.Equal(TwoYearsAgo.ToUnixTimeSeconds(), v.SigningTime!.Value.ToUnixTimeSeconds());
+        Assert.Null(v.TimestampTrusted);
+        Assert.True(v.IsIntact);
+        Assert.False(v.ChainTrusted);
+        Assert.False(v.Valid);
+    }
+
+    [Fact]
+    public void A_certificate_whose_key_usage_excludes_signing_is_not_trusted()
+    {
+        using var signer = MakeCert("Encryption Only", DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1), X509KeyUsageFlags.KeyEncipherment);
+        var v = Assert.Single(PdfSignatureVerifier.Verify(Signed(new PdfSignatureOptions(signer)), Trusting(signer)));
+        Assert.True(v.IsIntact);
+        Assert.False(v.ChainTrusted);
+        Assert.Contains(v.ChainErrors, e => e.Contains("key usage", StringComparison.Ordinal));
     }
 }

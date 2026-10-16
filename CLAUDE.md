@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-PdfPecker is a dependency-free .NET library: HTML/Markdown to PDF, and PDF to PNG. It has its own HTML parser, Markdown
+PdfPecker is a dependency-free .NET library: HTML/Markdown to PDF, and PDF to PNG, JPEG or WebP. It has its own HTML parser, Markdown
 parser, CSS engine, layout engine, PDF writer and PDF renderer. The NuGet package may depend only on the .NET base
 class library: never add a PackageReference to `src/PdfPecker`.
 
@@ -22,6 +22,10 @@ dotnet test -f net10.0 --filter "FullyQualifiedName~MarkdownTests"   # one class
 - Library and tests target `net8.0`, `net9.0` and `net10.0`; CI runs all three. If only one SDK/runtime is installed
   locally, pass `-f net10.0` (or whichever is installed).
 - `TreatWarningsAsErrors` is on in the library, so a warning breaks the build.
+- Every public member needs an XML doc comment (CS1591 is an error).
+- `dotnet pack` validates the public API against the last release (`PackageValidationBaselineVersion` in
+  `src/PdfPecker/PdfPecker.csproj`). Raise it to the new version after each release; a breaking change belongs only in a
+  major version.
 - Golden tests (`tests/PdfPecker.Tests/Golden/**`) compare output against `*.expected.pdf`. When an output change is
   intended, regenerate with `PDFPECKER_UPDATE_GOLDEN=1 dotnet test --filter GoldenPdfTests -f net10.0` and say in the
   commit/PR which baselines changed and why. Never regenerate just to make a failing test pass.
@@ -30,7 +34,7 @@ dotnet test -f net10.0 --filter "FullyQualifiedName~MarkdownTests"   # one class
 
 - `src/PdfPecker/` – public API at the top level (`HtmlToPdf`, `MarkdownToPdf`, `PdfToImage`, `PdfMerger`,
   `PdfSigner`, `PdfOptions`, ...). Pipeline in `HtmlToPdf.cs`: `Html/` parse → `Css/` `StyleResolver` →
-  `Layout/` `LayoutEngine` → `Pdf/` `PdfDocumentWriter`. `Rendering/` is the separate PDF-to-PNG renderer.
+  `Layout/` `LayoutEngine` → `Pdf/` `PdfDocumentWriter`. `Rendering/` is the separate PDF-to-image renderer.
 - `tests/PdfPecker.Tests/` – xUnit; `Fixtures/` holds input files, `Golden/` the baseline PDFs.
 - `bench/PdfPecker.Benchmarks` – in the solution. `bench/PdfPecker.Comparison` – deliberately not in the solution so
   its third-party packages never reach the library or tests.
