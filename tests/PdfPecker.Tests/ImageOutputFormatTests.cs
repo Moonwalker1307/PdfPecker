@@ -166,6 +166,7 @@ public class ImageOutputFormatTests
     [InlineData(PdfImageFormat.Png, ".png")]
     [InlineData(PdfImageFormat.Jpeg, ".jpg")]
     [InlineData(PdfImageFormat.WebP, ".webp")]
+    [InlineData(PdfImageFormat.Tiff, ".tif")]
     public void ConvertFile_uses_the_format_extension(PdfImageFormat format, string extension)
     {
         var dir = Path.Combine(Path.GetTempPath(), "pdfpecker-fmt-" + Guid.NewGuid().ToString("N"));
@@ -183,6 +184,7 @@ public class ImageOutputFormatTests
             {
                 case PdfImageFormat.Png: Assert.Equal(0x89, bytes[0]); break;
                 case PdfImageFormat.Jpeg: Assert.NotNull(JpegDecoder.Decode(bytes)); break;
+                case PdfImageFormat.Tiff: Assert.NotNull(TiffDecoder.Decode(bytes, 1L << 32)); break;
                 default: Assert.NotNull(WebPDecoder.Decode(bytes, 1L << 32)); break;
             }
         }

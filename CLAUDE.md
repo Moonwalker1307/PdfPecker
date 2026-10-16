@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-PdfPecker is a dependency-free .NET library: HTML/Markdown to PDF, and PDF to PNG, JPEG or WebP. It has its own HTML
+PdfPecker is a dependency-free .NET library: HTML/Markdown to PDF, and PDF to PNG, JPEG, WebP or TIFF. It has its own HTML
 parser, Markdown parser, CSS engine, layout engine, PDF writer and PDF renderer. The NuGet package may depend only on the .NET base
 class library: never add a PackageReference to `src/PdfPecker`.
 
