@@ -248,6 +248,7 @@ internal sealed class ComputedStyle
     public bool SvgMaskAlpha;                   // mask-type: alpha (else luminance)
     public uint SvgFloodColor = CssColor.Black; // flood-color
     public float SvgFloodOpacity = 1;           // flood-opacity
+    public uint SvgLightingColor = 0xFFFFFFFFu; // lighting-color
     public Length MarginTop = Length.Zero, MarginRight = Length.Zero, MarginBottom = Length.Zero, MarginLeft = Length.Zero;
     public Length PaddingTop = Length.Zero, PaddingRight = Length.Zero, PaddingBottom = Length.Zero, PaddingLeft = Length.Zero;
     public float BorderTopWidth = 1.5f, BorderRightWidth = 1.5f, BorderBottomWidth = 1.5f, BorderLeftWidth = 1.5f; // medium = 3px
@@ -398,6 +399,7 @@ internal sealed class ComputedStyle
         c.SvgMaskAlpha = false;
         c.SvgFloodColor = CssColor.Black;
         c.SvgFloodOpacity = 1;
+        c.SvgLightingColor = 0xFFFFFFFFu;
         c.MarginTop = c.MarginRight = c.MarginBottom = c.MarginLeft = Length.Zero;
         c.PaddingTop = c.PaddingRight = c.PaddingBottom = c.PaddingLeft = Length.Zero;
         c.BorderTopWidth = c.BorderRightWidth = c.BorderBottomWidth = c.BorderLeftWidth = 1.5f;
