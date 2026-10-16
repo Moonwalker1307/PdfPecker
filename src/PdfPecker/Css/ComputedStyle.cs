@@ -205,6 +205,8 @@ internal sealed class ComputedStyle
     public float TextIndent;
     public float LetterSpacing;
     public bool NoLigatures; // font-variant-ligatures: none or no-common-ligatures, or font-feature-settings: "liga" 0
+    public string? FontVariantNumeric;   // font-variant-numeric keywords; null = normal
+    public string? FontFeatureSettings;  // font-feature-settings as written; null = normal
     public float WordSpacing;
     public bool Visible = true;
     public bool CanvasBackground; // the background is painted on every page's canvas instead of on this box (html/body propagation)
@@ -328,6 +330,8 @@ internal sealed class ComputedStyle
         {
             var f = _font ??= Fonts == null ? StandardFor() : Fonts.Resolve(FontFamilyName, FontFamily, FontWeight, Italic,
                 new FontVariation(FontStretch, FontOpticalSizingNone ? 0 : FontSize / 0.75f, FontVariationSettings));
+            if ((FontVariantNumeric != null || FontFeatureSettings != null) && FontFeatures.Key(FontVariantNumeric, FontFeatureSettings) is { } features)
+                f = f.WithFeatures(features);
             return NoLigatures || LetterSpacing != 0 ? f.WithoutLigatures() : f;
         }
     }
