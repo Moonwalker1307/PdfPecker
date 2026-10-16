@@ -27,6 +27,19 @@ internal sealed class ImageLoader
         _resolver = resolver;
     }
 
+    private readonly Dictionary<(PdfImage Image, string Rects), PdfImage?[]?> _slices = new();
+
+    /// <summary>
+    /// The rectangles of <paramref name="image"/> cut out as images of their own (see <see cref="PdfImage.Cut"/>), cut
+    /// once per document, so that boxes with the same border image share the slices' image objects.
+    /// </summary>
+    public PdfImage?[]? Slices(PdfImage image, (int X, int Y, int W, int H)[] rects)
+    {
+        var key = (image, string.Join(";", rects));
+        if (!_slices.TryGetValue(key, out var slices)) _slices[key] = slices = image.Cut(rects);
+        return slices;
+    }
+
     /// <summary>The raster image at <paramref name="src"/>, or null when there is none or it is an SVG file.</summary>
     public PdfImage? Load(string? src) => LoadAny(src) as PdfImage;
 

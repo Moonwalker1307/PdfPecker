@@ -1624,6 +1624,31 @@ internal sealed class StyleResolver
             case "border-right-color": s.BorderRightColor = BorderColor(v, s); break;
             case "border-bottom-color": s.BorderBottomColor = BorderColor(v, s); break;
             case "border-left-color": s.BorderLeftColor = BorderColor(v, s); break;
+            case "border-image-source":
+                if (inherit) s.BorderImageSource = parent.BorderImageSource;
+                else if (lower is "none" or "initial" or "unset") s.BorderImageSource = null;
+                else if (ParseBackgroundImage(v, s) is [{ } source]) s.BorderImageSource = source;
+                break;
+            case "border-image-slice":
+                if (inherit) { s.BorderImageSlice = parent.BorderImageSlice; s.BorderImageFill = parent.BorderImageFill; }
+                else if (lower is "initial" or "unset") { s.BorderImageSlice = null; s.BorderImageFill = false; }
+                else if (CssBorderImage.Slice(lower) is { } slice) { s.BorderImageSlice = slice.Slice; s.BorderImageFill = slice.Fill; }
+                break;
+            case "border-image-width":
+                if (inherit) s.BorderImageWidths = parent.BorderImageWidths;
+                else if (lower is "initial" or "unset") s.BorderImageWidths = null;
+                else s.BorderImageWidths = CssBorderImage.Widths(lower, false, em, _rootFontSize, _vw, _vh) ?? s.BorderImageWidths;
+                break;
+            case "border-image-outset":
+                if (inherit) s.BorderImageOutsets = parent.BorderImageOutsets;
+                else if (lower is "initial" or "unset") s.BorderImageOutsets = null;
+                else s.BorderImageOutsets = CssBorderImage.Widths(lower, true, em, _rootFontSize, _vw, _vh) ?? s.BorderImageOutsets;
+                break;
+            case "border-image-repeat":
+                if (inherit) (s.BorderImageRepeatX, s.BorderImageRepeatY) = (parent.BorderImageRepeatX, parent.BorderImageRepeatY);
+                else if (lower is "initial" or "unset") s.BorderImageRepeatX = s.BorderImageRepeatY = BorderImageRepeat.Stretch;
+                else if (CssBorderImage.Repeat(lower) is { } rep) (s.BorderImageRepeatX, s.BorderImageRepeatY) = rep;
+                break;
         }
     }
 

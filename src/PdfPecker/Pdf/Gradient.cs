@@ -126,6 +126,24 @@ internal sealed class Gradient
         bool gray = channel == GradientChannel.Alpha && Alphas != null;
         if (Conic)
         {
+            // The domain is in gradient space: map the painted bounds back through the transform (a scaled slice of
+            // a border image).
+            var tm = Transform;
+            if (!(tm.A == 1 && tm.B == 0 && tm.C == 0 && tm.D == 1 && tm.E == 0 && tm.F == 0) && tm.TryInvert(out var inv))
+            {
+                float ax = minX, ay = minY, bx = maxX, by = maxY;
+                minX = minY = float.MaxValue;
+                maxX = maxY = float.MinValue;
+                Span<float> xs = stackalloc float[] { ax, bx, bx, ax };
+                Span<float> ys = stackalloc float[] { ay, ay, by, by };
+                for (int k = 0; k < 4; k++)
+                {
+                    float px = xs[k], py = ys[k];
+                    inv.Apply(ref px, ref py);
+                    minX = Math.Min(minX, px); maxX = Math.Max(maxX, px);
+                    minY = Math.Min(minY, py); maxY = Math.Max(maxY, py);
+                }
+            }
             // A function shading over the painted bounds, a little padded; the function does the rest.
             b.Ascii(gray ? "<< /ShadingType 1 /ColorSpace /DeviceGray /Domain [" : "<< /ShadingType 1 /ColorSpace /DeviceRGB /Domain [")
                 .Num(minX - 1).Sp().Num(maxX + 1).Sp().Num(minY - 1).Sp().Num(maxY + 1).Ascii("] /Function ")

@@ -25,6 +25,77 @@ internal sealed class PdfImage
         return copy;
     }
 
+    /// <summary>
+    /// Cuts the given rectangles (in pixels) out of this image as images of their own: the slices of a border image.
+    /// Drawing a slice out of the whole image instead would let a viewer's smoothing blend in the pixels around it. A
+    /// rectangle with no pixels gives null; the whole result is null when the image's encoding cannot be cut here
+    /// (CMYK, other than 8 bits per component, or an unusual filter).
+    /// </summary>
+    public PdfImage?[]? Cut((int X, int Y, int W, int H)[] rects)
+    {
+        try
+        {
+            if (Pixels() is not { } color) return null;
+            byte[]? alpha = null;
+            if (SMask != null)
+            {
+                if (SMask.Width != Width || SMask.Height != Height || SMask.Pixels() is not { Colors: 1 } mask) return null;
+                alpha = mask.Data;
+            }
+            var result = new PdfImage?[rects.Length];
+            for (int i = 0; i < rects.Length; i++)
+            {
+                var (x, y, w, h) = rects[i];
+                if (w <= 0 || h <= 0 || x < 0 || y < 0 || x + w > Width || y + h > Height) continue;
+                var image = new PdfImage { Width = w, Height = h, ColorSpace = ColorSpace, Data = Deflate(CopyRect(color.Data, color.Colors, x, y, w, h)) };
+                if (alpha != null) image.SMask = new PdfImage { Width = w, Height = h, ColorSpace = "/DeviceGray", Data = Deflate(CopyRect(alpha, 1, x, y, w, h)) };
+                result[i] = image;
+            }
+            return result;
+        }
+        catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or InvalidDataException or FormatException or EndOfStreamException)
+        {
+            return null;
+        }
+    }
+
+    private byte[] CopyRect(byte[] pixels, int colors, int x, int y, int w, int h)
+    {
+        var part = new byte[w * h * colors];
+        for (int row = 0; row < h; row++)
+            Buffer.BlockCopy(pixels, ((y + row) * Width + x) * colors, part, row * w * colors, w * colors);
+        return part;
+    }
+
+    /// <summary>The image's samples, 8 bits each and one to three per pixel, without row filters; null when not supported.</summary>
+    private (byte[] Data, int Colors)? Pixels()
+    {
+        if (BitsPerComponent != 8 || Decode != null || (long)Width * Height > MaxPixels) return null;
+        int colors = ColorSpace == "/DeviceRGB" ? 3 : ColorSpace == "/DeviceGray" || ColorSpace.StartsWith("[/Indexed", StringComparison.Ordinal) ? 1 : 0;
+        if (colors == 0) return null;
+        long size = (long)Width * Height * colors;
+        if (Filter == "/DCTDecode")
+        {
+            if (Rendering.Images.JpegDecoder.Decode(Data) is not { } jpg || jpg.Width != Width || jpg.Height != Height
+                || jpg.Components != colors || jpg.Data.Length < size) return null;
+            return (jpg.Data, colors);
+        }
+        if (Filter != "/FlateDecode") return null;
+        if (DecodeParms == null)
+        {
+            var raw = Inflate(Data, size);
+            return raw.Length >= size ? (raw, colors) : null;
+        }
+        // The PNG row filters of an image passed through from a PNG file.
+        if (!DecodeParms.StartsWith("<< /Predictor 15 ", StringComparison.Ordinal)) return null;
+        int stride = Width * colors;
+        var filtered = Inflate(Data, (stride + 1L) * Height);
+        UnfilterInPlace(filtered, stride, Height, colors);
+        var pixels = new byte[size];
+        for (int row = 0; row < Height; row++) Buffer.BlockCopy(filtered, row * (stride + 1) + 1, pixels, row * stride, stride);
+        return (pixels, colors);
+    }
+
     /// <summary>Decodes JPEG, PNG, GIF or WebP data. Returns null for unsupported or corrupt images.</summary>
     public static PdfImage? FromBytes(byte[] data)
     {
