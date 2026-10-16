@@ -71,8 +71,11 @@ internal sealed partial class PdfDocumentWriter
     private bool _noAlpha;                            // writing a stream without the shared ExtGState resources
     private readonly SortedSet<int> _fillAlphas = new(), _strokeAlphas = new(), _groupAlphas = new();
     private readonly List<byte[]> _forms = new(); // transparency groups of translucent layers, written as /Fx1, /Fx2, ...
+    private readonly List<bool> _formIsolated = new(); // by form: an isolated group (blended or isolation: isolate)
+    private readonly SortedSet<(int Alpha, string Blend)> _blendStates = new(); // /g<alpha><Blend>: group alpha and blend mode
+    private readonly SortedSet<string> _layerBlends = new(StringComparer.Ordinal); // /b<Blend>: a background layer's blend mode
     private readonly List<(byte[] Content, string Dict, bool Alpha)> _masks = new(); // soft masks (gradient alphas, SVG masks), set by /s1, /s2, ...
-    private readonly List<PdfImage> _rasters = new(); // SVG filter results, written as /Xr1, /Xr2, ...
+    private readonly List<PdfImage> _rasters = new(); // SVG and HTML filter results, written as /Xr1, /Xr2, ...
     private readonly List<FontRun> _runs = new();
     private readonly Dictionary<FontProgram, GlyphSubset> _subsets = new();
     private readonly List<GlyphSubset> _subsetList = new();
@@ -227,7 +230,7 @@ internal sealed partial class PdfDocumentWriter
     {
         switch (op)
         {
-            case LayerOp layer when layer.Transform != null || layer.Opacity < 1:
+            case LayerOp { NeedsBlock: true } layer:
             {
                 var items = new List<Placed>();
                 foreach (var o in layer.Ops) Flatten(o, items);
@@ -367,7 +370,7 @@ internal sealed partial class PdfDocumentWriter
         {
             switch (op)
             {
-                case LayerOp layer when layer.Transform != null || layer.Opacity < 1:
+                case LayerOp { NeedsBlock: true } layer:
                 {
                     // Each page gets the part of the layer that falls on it, drawn with the whole layer's transform.
                     var parts = new SortedDictionary<int, List<Placed>>();
@@ -732,12 +735,14 @@ internal sealed partial class PdfDocumentWriter
             if (wm is { Behind: true }) { Mark(content, null); content.Ascii(WatermarkDo(firstSetup)); }
             var pageLinks = new List<(Placed Link, float Origin, float PageTop)>();
             _yOrigin = _page.MarginTop + _page.BandTop;
+            (_flowTop, _flowBottom) = (pageTop, pageTop + _page.FlowHeight);
             foreach (var placed in pages[p])
             {
                 if (placed.Op is LinkOp) { pageLinks.Add((placed, _yOrigin, pageTop)); continue; }
                 AddUntransformedLinks(placed, pageLinks, _yOrigin, pageTop);
                 WriteOp(content, placed, pageTop, imageIds);
             }
+            _flowTop = _flowBottom = float.NaN;
             _yOrigin = _page.MarginTop;
             _forceArtifact = true;
             foreach (var placed in bands[p])
@@ -912,7 +917,8 @@ internal sealed partial class PdfDocumentWriter
                 structParents = " /StructParents " + fs.Key.ToString(System.Globalization.CultureInfo.InvariantCulture);
             }
             WriteStream(formIds[i], _forms[i], _compress, "/Type /XObject /Subtype /Form /BBox [-32767 -32767 32767 32767] "
-                + "/Group << /S /Transparency >> /Resources " + resourcesId.ToString(System.Globalization.CultureInfo.InvariantCulture) + " 0 R"
+                + (_formIsolated[i] ? "/Group << /S /Transparency /I true >> /Resources " : "/Group << /S /Transparency >> /Resources ")
+                + resourcesId.ToString(System.Globalization.CultureInfo.InvariantCulture) + " 0 R"
                 + structParents);
         }
         if (tagged)
@@ -952,12 +958,15 @@ internal sealed partial class PdfDocumentWriter
             for (int i = 0; i < _rasters.Count; i++) _out.Ascii(" /Xr").Int(i + 1).Sp().Int(_rasters[i].ObjectNumber).Ascii(" 0 R");
             _out.Ascii(" >>");
         }
-        if (_fillAlphas.Count + _strokeAlphas.Count + _groupAlphas.Count + _masks.Count > 0)
+        if (_fillAlphas.Count + _strokeAlphas.Count + _groupAlphas.Count + _blendStates.Count + _layerBlends.Count + _masks.Count > 0)
         {
             _out.Ascii(" /ExtGState <<");
             foreach (int a in _fillAlphas) _out.Ascii(" /a").Int(a).Ascii(" << /ca ").Num(a / 255f).Ascii(" >>");
             foreach (int a in _strokeAlphas) _out.Ascii(" /A").Int(a).Ascii(" << /CA ").Num(a / 255f).Ascii(" >>");
             foreach (int a in _groupAlphas) _out.Ascii(" /g").Int(a).Ascii(" << /ca ").Num(a / 255f).Ascii(" /CA ").Num(a / 255f).Ascii(" >>");
+            foreach (var blend in _layerBlends) _out.Ascii(" /b").Ascii(blend).Ascii(" << /BM /").Ascii(blend).Ascii(" >>");
+            foreach (var (a, blend) in _blendStates)
+                _out.Ascii(" /g").Int(a).Ascii(blend).Ascii(" << /ca ").Num(a / 255f).Ascii(" /CA ").Num(a / 255f).Ascii(" /BM /").Ascii(blend).Ascii(" >>");
             for (int i = 0; i < _masks.Count; i++)
                 _out.Ascii(" /s").Int(i + 1).Ascii(_masks[i].Alpha ? " << /SMask << /Type /Mask /S /Alpha /G " : " << /SMask << /Type /Mask /S /Luminosity /G ")
                     .Int(maskIds[i]).Ascii(" 0 R >> >>");
@@ -1608,7 +1617,17 @@ internal sealed partial class PdfDocumentWriter
             }
             case BackgroundOp bg:
                 EndText(b);
-                WriteBackground(b, bg, placed, pageTop, imageIds);
+                if (bg.BlendMode is { } mode)
+                {
+                    // background-blend-mode: the layer blends with the layers and colour already painted in its group.
+                    var saved = SaveState();
+                    _layerBlends.Add(mode);
+                    b.Ascii("q /b").Ascii(mode).Ascii(" gs\n");
+                    WriteBackground(b, bg, placed, pageTop, imageIds);
+                    b.Ascii("Q\n");
+                    RestoreState(saved);
+                }
+                else WriteBackground(b, bg, placed, pageTop, imageIds);
                 break;
             case RoundRectOp rr:
                 EndText(b);
@@ -1625,10 +1644,18 @@ internal sealed partial class PdfDocumentWriter
                     float e = px - m.A * px + m.C * py + m.E, f = py + m.B * px - m.D * py - m.F;
                     b.Num6(m.A).Sp().Num6(-m.B).Sp().Num6(-m.C).Sp().Num6(m.D).Sp().Num(e).Sp().Num(f).Ascii(" cm\n");
                 }
-                if (tb.Layer.Opacity < 1)
+                if (tb.Layer.ClipVerbs is { } clipVerbs)
                 {
-                    // A translucent layer is a transparency group, painted as a whole at its opacity, so that its own
-                    // overlapping parts do not show through each other.
+                    // clip-path: the outline in the layer's own space, so that a transform turns it with the content.
+                    if (_mc != null) b.Ascii("/Artifact BMC ");
+                    WriteFlowPath(b, clipVerbs, tb.Layer.ClipPoints!, pageTop);
+                    b.Ascii(tb.Layer.ClipEvenOdd ? "W* n\n" : "W n\n");
+                    if (_mc != null) b.Ascii("EMC\n");
+                }
+                if (tb.Layer.NeedsGroup)
+                {
+                    // A translucent or blended layer is a transparency group, painted as a whole at its opacity and with
+                    // its blend mode, so that its own overlapping parts do not show through each other.
                     var group = new ByteBuffer(4096);
                     _fill = _stroke = 1;
                     _lineWidth = -1;
@@ -1641,21 +1668,29 @@ internal sealed partial class PdfDocumentWriter
                     // A transparency group is a stream of its own, with its own marked-content numbers.
                     var pageMc = _mc;
                     if (pageMc != null) _mc = new McStream(pageMc.Page);
-                    foreach (var item in tb.Items)
-                        if (item.Op is not LinkOp) WriteOp(group, item, pageTop, imageIds);
+                    WriteLayerContent(group, tb, pageTop, imageIds);
                     EndText(group);
                     EndMarked(group);
                     _forms.Add(group.Span.ToArray());
+                    _formIsolated.Add(tb.Layer.BlendMode != null || tb.Layer.Isolated);
                     _formStreams.Add(_mc);
                     _mc = pageMc;
                     int alpha = (int)MathF.Round(Math.Clamp(tb.Layer.Opacity, 0, 1) * 255);
-                    _groupAlphas.Add(alpha);
-                    b.Ascii("/g").Int(alpha).Ascii(" gs /Fx").Int(_forms.Count).Ascii(" Do\n");
+                    if (tb.Layer.BlendMode is { } blend)
+                    {
+                        _blendStates.Add((alpha, blend));
+                        b.Ascii("/g").Int(alpha).Ascii(blend);
+                    }
+                    else
+                    {
+                        _groupAlphas.Add(alpha);
+                        b.Ascii("/g").Int(alpha);
+                    }
+                    b.Ascii(" gs /Fx").Int(_forms.Count).Ascii(" Do\n");
                 }
                 else
                 {
-                    foreach (var item in tb.Items)
-                        if (item.Op is not LinkOp) WriteOp(b, item, pageTop, imageIds);
+                    WriteLayerContent(b, tb, pageTop, imageIds);
                     EndText(b);
                     EndMarked(b);
                 }
@@ -1742,6 +1777,44 @@ internal sealed partial class PdfDocumentWriter
                 break;
             }
         }
+    }
+
+    /// <summary>Writes a path given in flow coordinates (SvgShape verbs) in the page's PDF space.</summary>
+    private void WriteFlowPath(ByteBuffer b, byte[] verbs, float[] pts, float pageTop)
+    {
+        int k = 0;
+        foreach (var verb in verbs)
+        {
+            switch (verb)
+            {
+                case SvgShape.MoveTo: b.Num(PX(pts[k])).Sp().Num(PY(pts[k + 1], pageTop)).Ascii(" m "); k += 2; break;
+                case SvgShape.LineTo: b.Num(PX(pts[k])).Sp().Num(PY(pts[k + 1], pageTop)).Ascii(" l "); k += 2; break;
+                case SvgShape.CurveTo:
+                    b.Num(PX(pts[k])).Sp().Num(PY(pts[k + 1], pageTop)).Sp().Num(PX(pts[k + 2])).Sp().Num(PY(pts[k + 3], pageTop)).Sp()
+                        .Num(PX(pts[k + 4])).Sp().Num(PY(pts[k + 5], pageTop)).Ascii(" c ");
+                    k += 6;
+                    break;
+                default: b.Ascii("h "); break;
+            }
+        }
+        // An empty outline clips everything away.
+        if (verbs.Length == 0) b.Ascii("0 0 m h ");
+    }
+
+    /// <summary>The content of a layer: its ops, or for a filter that runs on pixels, the filtered image under or in place of them.</summary>
+    private void WriteLayerContent(ByteBuffer b, LayerBlock tb, float pageTop, Dictionary<PdfImage, int> imageIds)
+    {
+        var layer = tb.Layer;
+        if (layer.Raster != null)
+        {
+            EndText(b);
+            if (_mc != null) { EndMarked(b); b.Ascii("/Artifact BMC\n"); }
+            WriteLayerRaster(b, layer, pageTop);
+            if (_mc != null) b.Ascii("EMC\n");
+            if (layer.RasterReplaces) return;
+        }
+        foreach (var item in tb.Items)
+            if (item.Op is not LinkOp) WriteOp(b, item, pageTop, imageIds);
     }
 
     /// <summary>
@@ -1916,7 +1989,17 @@ internal sealed partial class PdfDocumentWriter
         int w = (int)pw, h = (int)ph;
         var source = RasterizeSvg(shape.Children!, f.X, f.Y, f.W, f.H, w, h);
         if (source == null) return;
-        var result = f.Apply(source, w, h, w / f.W, h / f.H);
+        var image = FilterImage(f.Apply(source, w, h, w / f.W, h / f.H), w, h);
+        if (image == null) return;
+        _rasters.Add(image);
+        SetFillAlpha(b, CssColor.Black); // an image is painted with the fill alpha
+        // The image's unit square onto the region, its first row at the top (user space has y down).
+        b.Ascii("q ").Num(f.W).Ascii(" 0 0 ").Num(-f.H).Sp().Num(f.X).Sp().Num(f.Y + f.H).Ascii(" cm /Xr").Int(_rasters.Count).Ascii(" Do Q\n");
+    }
+
+    /// <summary>A filter's result (premultiplied sRGB floats) as an RGB image with an alpha mask; null when it is all transparent.</summary>
+    private static PdfImage? FilterImage(float[] result, int w, int h)
+    {
         var rgb = new byte[w * h * 3];
         var alpha = new byte[w * h];
         bool any = false;
@@ -1930,16 +2013,12 @@ internal sealed partial class PdfDocumentWriter
             rgb[o + 1] = (byte)MathF.Round(Math.Clamp(result[i * 4 + 1] / a, 0, 1) * 255);
             rgb[o + 2] = (byte)MathF.Round(Math.Clamp(result[i * 4 + 2] / a, 0, 1) * 255);
         }
-        if (!any) return;
-        var image = new PdfImage
+        if (!any) return null;
+        return new PdfImage
         {
             Width = w, Height = h, Data = PdfImage.Deflate(rgb),
             SMask = new PdfImage { Width = w, Height = h, ColorSpace = "/DeviceGray", Data = PdfImage.Deflate(alpha) },
         };
-        _rasters.Add(image);
-        SetFillAlpha(b, CssColor.Black); // an image is painted with the fill alpha
-        // The image's unit square onto the region, its first row at the top (user space has y down).
-        b.Ascii("q ").Num(f.W).Ascii(" 0 0 ").Num(-f.H).Sp().Num(f.X).Sp().Num(f.Y + f.H).Ascii(" cm /Xr").Int(_rasters.Count).Ascii(" Do Q\n");
     }
 
     /// <summary>
@@ -1959,6 +2038,12 @@ internal sealed partial class PdfDocumentWriter
                 new Dictionary<string, float>(), 0, null, null, null, null, null);
         }
         catch (PdfLimitException) { return null; }
+        return RenderPremultiplied(pdf, pixelsW, pixelsH);
+    }
+
+    /// <summary>The first page of a PDF rendered at pixelsW × pixelsH on transparency, as premultiplied sRGB floats (RGBA).</summary>
+    private float[]? RenderPremultiplied(byte[] pdf, int pixelsW, int pixelsH)
+    {
         var rendered = PdfRenderer.Open(pdf).RenderPage(0, new ImageOptions { Width = pixelsW, Height = pixelsH, Transparent = true }, Cancellation);
         if (rendered.Width != pixelsW || rendered.Height != pixelsH) return null;
         var px = rendered.Premultiplied;

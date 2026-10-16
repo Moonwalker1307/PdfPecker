@@ -558,7 +558,10 @@ internal sealed partial class PageRenderer
             }
             var group = _file.GetDict(form, "Group");
             bool isolatedGroup = group != null && _file.GetName(group, "S") == "Transparency";
-            if (isolatedGroup && (_gs.FillAlpha < 1 || _gs.SoftMask != null || _gs.Blend != BlendMode.Normal) && _hidden == 0)
+            // An isolated group (/I true) is drawn on its own transparent canvas even when it is opaque, so that blend
+            // modes inside it blend only with each other and not with the page below.
+            if (isolatedGroup && (_gs.FillAlpha < 1 || _gs.SoftMask != null || _gs.Blend != BlendMode.Normal || _file.GetBool(group, "I", false))
+                && _hidden == 0)
             {
                 RenderGroup(data, res);
             }

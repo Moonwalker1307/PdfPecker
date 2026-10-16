@@ -166,8 +166,9 @@ internal sealed partial class LayoutEngine
             _lastBoxTop += dy;
         }
         float order = s.ZIndex is { } z && z != 0 ? z : LayerOp.PositionedOrder;
-        var layer = WrapLayer(opsStart, order, stackingContext: s.ZIndex != null || s.Transform != null || s.Opacity < 1);
+        var layer = WrapLayer(opsStart, order, stackingContext: s.ZIndex != null || s.Transform != null || s.Opacity < 1 || s.HasEffects);
         layer.Opacity = s.Opacity;
+        if (s.HasEffects) ApplyEffects(e, layer, cbW);
         if (s.Transform is { } fns)
         {
             float w = _lastBoxW, h = _lastBoxH;

@@ -62,6 +62,7 @@ internal sealed class BackgroundOp : DrawOp
     public SvgImage? Svg;          // an SVG file, drawn as vectors in each tile
     public Gradient? Gradient;
     public CornerRadii? ClipRadii; // rounded corners of the clip (border-radius)
+    public string? BlendMode;      // background-blend-mode as a PDF name; null = normal
 
     public override void Offset(float dx, float dy) { ClipX += dx; ClipY += dy; TileX += dx; TileY += dy; }
 
@@ -281,8 +282,8 @@ internal sealed class ClipOp : GroupOp
 }
 
 /// <summary>
-/// The ops of a float, a positioned or a transformed box: painted in its own layer (CSS 2.1 Appendix E), and drawn with
-/// <see cref="Transform"/> about (<see cref="OriginX"/>, <see cref="OriginY"/>) when it has one.
+/// The ops of a float, a positioned, transformed, clipped, blended or filtered box: painted in its own layer (CSS 2.1
+/// Appendix E), and drawn with <see cref="Transform"/> about (<see cref="OriginX"/>, <see cref="OriginY"/>) when it has one.
 /// </summary>
 internal sealed class LayerOp : GroupOp
 {
@@ -295,12 +296,30 @@ internal sealed class LayerOp : GroupOp
     public bool StackingContext; // its first op, the box's own background, stays below its negative z-index children
     public Matrix? Transform;    // y-down, about the origin
     public float OriginX, OriginY;
+    public string? BlendMode;    // mix-blend-mode as a PDF name: painted as a group blended with what is below
+    public bool Isolated;        // isolation: isolate, or a box whose background layers blend only with each other
+    // clip-path: the outline the layer is painted inside, in flow coordinates before the transform.
+    public byte[]? ClipVerbs;    // SvgShape.MoveTo, LineTo, CurveTo and Close
+    public float[]? ClipPoints;
+    public bool ClipEvenOdd;
+    // A filter with blur() or drop-shadow(): run on the pixels of the layer's content. With RasterReplaces the result is
+    // drawn instead of the content (blur); without, under it (the shadows of drop-shadow()).
+    public SvgFilter? Raster;
+    public bool RasterReplaces;
+
+    /// <summary>Whether the layer is drawn as a block of its own: transformed, translucent, blended, clipped or filtered.</summary>
+    public bool NeedsBlock => Transform != null || Opacity < 1 || BlendMode != null || Isolated || ClipVerbs != null || Raster != null;
+
+    /// <summary>Whether the layer is painted as one transparency group.</summary>
+    public bool NeedsGroup => Opacity < 1 || BlendMode != null || Isolated;
 
     public override void Offset(float dx, float dy)
     {
         base.Offset(dx, dy);
         OriginX += dx;
         OriginY += dy;
+        if (ClipPoints != null)
+            for (int i = 0; i + 1 < ClipPoints.Length; i += 2) { ClipPoints[i] += dx; ClipPoints[i + 1] += dy; }
     }
 
     /// <summary>Sorts ops into painting order, keeping document order within a layer.</summary>
@@ -342,6 +361,15 @@ internal static class BoxPainter
         if (w > 0 && h > 0 && !s.CanvasBackground)
         {
             var layers = s.BackgroundImages;
+            // With background-blend-mode, the background is a group of its own: its layers blend with each other and
+            // with the background colour, not with what is behind the box.
+            var outer = group;
+            if (layers != null && s.BackgroundBlendModes != null)
+            {
+                var isolated = new LayerOp { Isolated = true };
+                group.Ops.Add(isolated);
+                group = isolated;
+            }
             if (CssColor.IsVisible(s.BackgroundColor))
             {
                 // The colour is clipped like the bottom layer.
@@ -358,8 +386,15 @@ internal static class BoxPainter
             {
                 uint backdrop = CssColor.IsVisible(s.BackgroundColor) ? CssColor.FlattenOnWhite(s.BackgroundColor) : 0xFFFFFFFF;
                 for (int i = layers.Length - 1; i >= 0; i--)
-                    if (layers[i] is { } layer) PaintLayer(group, s, layer, i, x, y, w, h, images, basis, backdrop, radii);
+                {
+                    if (layers[i] is not { } layer) continue;
+                    int before = group.Ops.Count;
+                    PaintLayer(group, s, layer, i, x, y, w, h, images, basis, backdrop, radii);
+                    if (s.BackgroundBlendModes is { Length: > 0 } modes && group.Ops.Count > before && group.Ops[^1] is BackgroundOp bg)
+                        bg.BlendMode = modes[i % modes.Length];
+                }
             }
+            group = outer;
         }
         if (s.HasBorder) PaintBorders(group, s, x, y, w, h, sides, collapsedCell, radii);
         if (s.OutlineStyle != BorderStyle.None && !collapsedCell) PaintOutline(group, s, x, y, w, h, radii);

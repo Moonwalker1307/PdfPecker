@@ -248,6 +248,11 @@ internal sealed class ComputedStyle
     public bool SvgMaskAlpha;                   // mask-type: alpha (else luminance)
     public uint SvgFloodColor = CssColor.Black; // flood-color
     public float SvgFloodOpacity = 1;           // flood-opacity
+    public ClipShape? ClipShape;                // clip-path: a basic shape or a reference box, on HTML elements
+    public string? BlendMode;                   // mix-blend-mode, as a PDF blend mode name; null = normal
+    public string?[]? BackgroundBlendModes;     // background-blend-mode per layer, as PDF names (null = normal); null = all normal
+    public bool Isolate;                        // isolation: isolate
+    public FilterFunction[]? Filters;           // filter functions on HTML elements; null = none
     public Length MarginTop = Length.Zero, MarginRight = Length.Zero, MarginBottom = Length.Zero, MarginLeft = Length.Zero;
     public Length PaddingTop = Length.Zero, PaddingRight = Length.Zero, PaddingBottom = Length.Zero, PaddingLeft = Length.Zero;
     public float BorderTopWidth = 1.5f, BorderRightWidth = 1.5f, BorderBottomWidth = 1.5f, BorderLeftWidth = 1.5f; // medium = 3px
@@ -378,7 +383,10 @@ internal sealed class ComputedStyle
     public bool Positioned => Position != Position.Static;
 
     /// <summary>Painted in the positioned layer: positioned, transformed or translucent.</summary>
-    public bool Layered => Position != Position.Static || Transform != null || Opacity < 1;
+    public bool Layered => Position != Position.Static || Transform != null || Opacity < 1 || HasEffects;
+
+    /// <summary>Clipped, blended, isolated or filtered: painted as a layer of its own, which is a stacking context.</summary>
+    public bool HasEffects => ClipShape != null || SvgClipPath != null || BlendMode != null || Isolate || Filters != null;
 
     /// <summary>Creates the starting style for a child: inherited properties copied, the rest reset.</summary>
     public ComputedStyle CreateChild()
@@ -398,6 +406,11 @@ internal sealed class ComputedStyle
         c.SvgMaskAlpha = false;
         c.SvgFloodColor = CssColor.Black;
         c.SvgFloodOpacity = 1;
+        c.ClipShape = null;
+        c.BlendMode = null;
+        c.BackgroundBlendModes = null;
+        c.Isolate = false;
+        c.Filters = null;
         c.MarginTop = c.MarginRight = c.MarginBottom = c.MarginLeft = Length.Zero;
         c.PaddingTop = c.PaddingRight = c.PaddingBottom = c.PaddingLeft = Length.Zero;
         c.BorderTopWidth = c.BorderRightWidth = c.BorderBottomWidth = c.BorderLeftWidth = 1.5f;
