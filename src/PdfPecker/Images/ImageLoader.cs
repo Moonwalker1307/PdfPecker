@@ -10,6 +10,7 @@ internal sealed class ImageLoader
     private readonly Func<string, byte[]?>? _resolver;
     private readonly bool _allowFiles; // files outside the base directory too
     private readonly Dictionary<string, object?> _cache = new(StringComparer.Ordinal); // PdfImage, SvgImage or null
+    private readonly HashSet<string> _loading = new(StringComparer.Ordinal); // SVG files being parsed, which may embed images
 
     /// <summary>Parsed inline SVG drawings, shared by every layout pass of a document (pages, headers, footers).</summary>
     public readonly Dictionary<PdfPecker.Html.Element, PdfPecker.Svg.SvgImage> Svgs = new();
@@ -46,26 +47,39 @@ internal sealed class ImageLoader
     /// <summary>The SVG drawing at <paramref name="src"/>, or null when there is none or it is a raster image.</summary>
     public PdfPecker.Svg.SvgImage? LoadSvg(string? src) => LoadAny(src) as PdfPecker.Svg.SvgImage;
 
-    private object? LoadAny(string? src)
+    /// <summary>The raster image or SVG drawing at <paramref name="src"/>, for the image elements of inline SVG.</summary>
+    public object? LoadAny(string? src)
     {
         if (string.IsNullOrWhiteSpace(src)) return null;
         src = src!.Trim();
         if (_cache.TryGetValue(src, out var cached)) return cached;
+        if (!_loading.Add(src)) return null; // an SVG file that embeds itself
         object? img = null;
         try
         {
             var bytes = Fetch(src);
             if (bytes != null)
-                img = DecodedImageCache.Decode(bytes) ?? (object?)PdfPecker.Svg.SvgImage.FromFile(bytes, Fonts, SvgBudget);
+                img = DecodedImageCache.Decode(bytes) ?? (object?)PdfPecker.Svg.SvgImage.FromFile(bytes, Fonts, SvgBudget, LoadEmbedded);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException or ArgumentException or NotSupportedException
                                        or InvalidDataException or OverflowException or IndexOutOfRangeException)
         {
             img = null; // a missing or damaged image must not fail the whole document
         }
+        finally { _loading.Remove(src); }
         _cache[src] = img;
         return img;
     }
+
+    /// <summary>
+    /// An image embedded in an SVG file. Browsers load only data URIs for an SVG shown as an image, so a file's
+    /// drawing looks the same wherever it is used.
+    /// </summary>
+    public object? LoadEmbedded(string src)
+        => src.TrimStart().StartsWith("data:", StringComparison.OrdinalIgnoreCase) ? LoadAny(src) : null;
+
+    /// <summary>Parses SVG file data (such as a watermark) with the document's fonts; its images may be data URIs.</summary>
+    public PdfPecker.Svg.SvgImage? ParseSvg(byte[] data) => PdfPecker.Svg.SvgImage.FromFile(data, Fonts, SvgBudget, LoadEmbedded);
 
     /// <summary>The bytes of a resource (data URI, user resolver or local file), or null.</summary>
     public byte[]? Fetch(string src)

@@ -166,7 +166,7 @@ internal static class Filters
 
     // ------------------------------------------------------------------ LZW
 
-    private static byte[] Lzw(byte[] data, bool earlyChange)
+    internal static byte[] Lzw(byte[] data, bool earlyChange)
     {
         int limit = Limit;
         var output = new MemoryStream(data.Length * 3);

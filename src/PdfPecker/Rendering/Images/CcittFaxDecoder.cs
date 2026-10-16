@@ -42,6 +42,13 @@ internal sealed class CcittFaxDecoder
     }
 
     /// <summary>
+    /// Decodes fax data of a TIFF strip or tile: K &lt; 0 for T.6, 0 for one-dimensional T.4, &gt; 0 for two-dimensional
+    /// T.4. Returns packed rows where 1 is white (or black with <paramref name="blackIs1"/>).
+    /// </summary>
+    public static byte[] Decode(byte[] data, int k, int columns, int rows, bool byteAlign, bool blackIs1)
+        => DecodeCore(data, k, columns, rows, byteAlign, blackIs1, out _);
+
+    /// <summary>
     /// Decodes T.6 (MMR) data as JBIG2 uses it: packed rows with 1 = black, starting at <paramref name="start"/>. Sets
     /// <paramref name="end"/> to the byte after the data, skipping an end-of-block code.
     /// </summary>

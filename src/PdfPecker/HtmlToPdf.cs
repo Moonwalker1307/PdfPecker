@@ -380,6 +380,7 @@ public static class HtmlToPdf
             EInvoice = options.EInvoice,
             Attachments = attachments,
             WatermarkFont = watermarkFont,
+            WatermarkSvg = options.Watermark?.Image is { } wmData && Svg.SvgImage.IsSvg(wmData) ? images.ParseSvg(wmData) : null,
             MarginFont = marginFont,
             EmbedStandardFonts = options.EmbedStandardFonts,
             MissingCharacter = options.MissingCharacter,

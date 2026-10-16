@@ -9,12 +9,12 @@ namespace PdfPecker.Svg;
 
 /// <summary>
 /// One item of an SVG drawing, in the root element's user space: a filled and/or stroked path, a run of text, the
-/// start or end of a clipped or masked group, or filtered content.
+/// start or end of a clipped or masked group, filtered content, or an embedded image.
 /// </summary>
 internal sealed class SvgShape
 {
     public const byte MoveTo = 0, LineTo = 1, CurveTo = 2, Close = 3;
-    public const byte KindPath = 0, KindText = 1, KindClip = 2, KindEndClip = 3, KindMask = 4, KindEndMask = 5, KindFilter = 6;
+    public const byte KindPath = 0, KindText = 1, KindClip = 2, KindEndClip = 3, KindMask = 4, KindEndMask = 5, KindFilter = 6, KindImage = 7;
 
     public byte Kind;
     public byte[] Verbs = Array.Empty<byte>();
@@ -44,6 +44,12 @@ internal sealed class SvgShape
     public List<SvgShape>? Children;
     public bool MaskAlpha;                        // mask-type: alpha, else luminance
     public SvgFilter? Filter;
+
+    // Images: a raster image drawn through ImageMatrix (its unit square onto root space), or an SVG drawing whose
+    // shapes are in Children and whose root space ImageMatrix maps onto this one.
+    public PdfPecker.Images.PdfImage? Image;
+    public Matrix ImageMatrix;
+    public byte ImageAlpha = 255;
 
     /// <summary>A copy with its fill, stroke, gradient and pattern colours mapped, and those of the shapes inside it.</summary>
     public SvgShape Recolored(Func<uint, uint> map)
@@ -92,7 +98,7 @@ internal sealed class SvgBudget
 /// <summary>
 /// An inline &lt;svg&gt; turned into vector paths and text: path, rect, circle, ellipse, line, polyline, polygon, text,
 /// tspan, g, use and nested svg, with transforms, fill/stroke styling from attributes and CSS, linear and radial
-/// gradients, patterns, markers, clip paths, masks and filters (filters are drawn as images). Images are not drawn.
+/// gradients, patterns, markers, clip paths, masks, filters (drawn as images) and embedded raster or SVG images.
 /// </summary>
 internal sealed partial class SvgImage
 {
@@ -106,10 +112,15 @@ internal sealed partial class SvgImage
     private readonly Dictionary<string, Element> _ids = new(StringComparer.Ordinal);
     private int _clipDepth, _maskDepth, _filterDepth, _patternDepth;
     private SvgBudget _budget = null!;
+    private Func<string, object?>? _load; // the PdfImage or SvgImage at an image element's href, or null
 
-    public static SvgImage Build(Element svg, SvgBudget? budget = null)
+    /// <summary>
+    /// Builds the drawing of an svg element. <paramref name="load"/> resolves the href of image elements to a PdfImage
+    /// or an SvgImage; without it, image elements draw nothing.
+    /// </summary>
+    public static SvgImage Build(Element svg, SvgBudget? budget = null, Func<string, object?>? load = null)
     {
-        var img = new SvgImage { _budget = budget ?? new SvgBudget() };
+        var img = new SvgImage { _budget = budget ?? new SvgBudget(), _load = load };
         img.Width = IntrinsicLength(svg.GetAttribute("width"));
         img.Height = IntrinsicLength(svg.GetAttribute("height"));
         var vb = ParseNumbers(svg.GetAttribute("viewbox"));
@@ -180,10 +191,10 @@ internal sealed partial class SvgImage
 
     /// <summary>
     /// Parses an SVG file, styled only by its own &lt;style&gt; elements and presentation attributes (as browsers draw
-    /// an SVG image: the page's CSS does not reach into it, and it loads nothing else). Returns null when it holds no
-    /// svg element.
+    /// an SVG image: the page's CSS does not reach into it). Its image elements are resolved by
+    /// <paramref name="load"/>, which browsers limit to data URIs. Returns null when it holds no svg element.
     /// </summary>
-    public static SvgImage? FromFile(byte[] data, FontResolver? fonts, SvgBudget budget)
+    public static SvgImage? FromFile(byte[] data, FontResolver? fonts, SvgBudget budget, Func<string, object?>? load = null)
     {
         if (data.Length > MaxFileLength || !IsSvg(data)) return null;
         var doc = HtmlParser.Parse(System.Text.Encoding.UTF8.GetString(data));
@@ -193,7 +204,7 @@ internal sealed partial class SvgImage
         CollectStyles(svg, sheet);
         var root = new ComputedStyle { Display = Display.Block, Fonts = fonts };
         new StyleResolver(sheet).ResolveTree(doc, root);
-        return Build(svg, budget);
+        return Build(svg, budget, load);
     }
 
     private static void CollectStyles(Element parent, Stylesheet sheet)
@@ -314,6 +325,9 @@ internal sealed partial class SvgImage
             case "text":
                 RenderText(e, ctm, op);
                 return;
+            case "image":
+                RenderImage(e, s, ctm, op);
+                return;
             case "line":
             {
                 var line = ShapePath(e);
@@ -322,7 +336,7 @@ internal sealed partial class SvgImage
                 return;
             }
             default:
-                // Not drawn: defs, symbol (only through use), gradients, clipPath, mask, pattern, marker, filter, image, style...
+                // Not drawn: defs, symbol (only through use), gradients, clipPath, mask, pattern, marker, filter, style...
                 if (ShapePath(e) is { } path)
                 {
                     Emit(s, ctm, op, path);
