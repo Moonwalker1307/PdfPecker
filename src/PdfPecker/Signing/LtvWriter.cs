@@ -77,6 +77,7 @@ internal static class LtvWriter
         var errors = new List<string>();
         var vris = new SortedDictionary<string, Vri>(StringComparer.Ordinal);
         var fetched = new Dictionary<string, (int Ocsp, int Crl)>(StringComparer.Ordinal);
+        using var fetcher = new RevocationFetcher(o.HttpClient, o.UrlFilter);
         foreach (var sig in signatures)
         {
             if (sig.Contents == null) continue;
@@ -121,12 +122,12 @@ internal static class LtvWriter
                     {
                         got = (-1, -1);
                         var certErrors = new List<string>();
-                        if (issuer != null && Revocation.FetchOcsp(cert, issuer, o.HttpClient, certErrors) is { } ocsp)
+                        if (issuer != null && Revocation.FetchOcsp(cert, issuer, fetcher, certErrors) is { } ocsp)
                         {
                             got.Ocsp = ocsps.Add(ocsp.Encoded);
                             foreach (var c in ocsp.Certificates) vri.Certs.Add(certs.Add(c));
                         }
-                        else if (Revocation.FetchCrl(cert, o.HttpClient, certErrors) is { } crl) got.Crl = crls.Add(crl);
+                        else if (Revocation.FetchCrl(cert, fetcher, certErrors) is { } crl) got.Crl = crls.Add(crl);
                         else errors.AddRange(certErrors);
                         fetched[cert.Thumbprint] = got;
                     }
@@ -198,16 +199,37 @@ internal static class LtvWriter
         }
     }
 
+    // An existing store may hold large CRLs that must be carried over, so its budget is wider than the verifier's.
+    private const long MaxExistingStoreDecoded = 512L * 1024 * 1024;
+
     private static void ReadExisting(PdfFile file, PdfDict? dss, string key, Pool pool)
     {
         var array = file.GetArray(dss, key);
         if (array == null) return;
-        foreach (var item in array.Items.Take(10_000))
+        foreach (var (data, item) in DecodeStoreStreams(file, array, 10_000, MaxExistingStoreDecoded)) pool.Add(data, item);
+    }
+
+    /// <summary>
+    /// Decodes the streams of a store array (/Certs, /OCSPs or /CRLs) with their array items, each stream once however
+    /// often it is listed, and stops when <paramref name="budget"/> decoded bytes are used up. Without both, a store
+    /// listing one compression bomb thousands of times would make it inflate the bomb thousands of times.
+    /// Streams that cannot be decoded are skipped.
+    /// </summary>
+    internal static List<(byte[] Data, PdfObject Item)> DecodeStoreStreams(PdfFile file, PdfArray array, int maxItems, long budget)
+    {
+        var result = new List<(byte[], PdfObject)>();
+        var seen = new HashSet<PdfStream>(ReferenceEqualityComparer.Instance);
+        using (PdfFile.BeginRender(CancellationToken.None, budget))
         {
-            if (file.Resolve(item) is not PdfStream s) continue;
-            try { pool.Add(file.DecodeStream(s), item); }
-            catch (Exception ex) when (ex is PdfFormatException or InvalidDataException or NotSupportedException) { }
+            foreach (var item in array.Items.Take(maxItems))
+            {
+                if (file.Resolve(item) is not PdfStream s || !seen.Add(s)) continue;
+                try { result.Add((file.DecodeStream(s), item)); }
+                catch (InvalidDataException) when (PdfFile.DecodeLimit == 0) { break; }
+                catch (Exception ex) when (ex is PdfFormatException or InvalidDataException or NotSupportedException) { }
+            }
         }
+        return result;
     }
 
     private static byte[] WriteDss(PdfFile file, byte[] pdf, PdfDict? existingDss, Pool certs, Pool ocsps, Pool crls,
