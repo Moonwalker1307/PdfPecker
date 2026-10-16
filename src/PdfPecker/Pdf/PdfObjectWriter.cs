@@ -26,12 +26,6 @@ internal sealed class PdfObjectSyntax
     /// <summary>A real with an integral value below 10^15 is written as an integer, which spells -0 as 0.</summary>
     public bool IntegralRealsAsIntegers { get; init; }
 
-    /// <summary>NaN and the infinities, which a reader can parse from an absurdly long number, are written as 0.</summary>
-    public bool NonFiniteAsZero { get; init; }
-
-    /// <summary>A name with characters beyond Latin-1 is written as UTF-8, rather than one (truncated) byte per character.</summary>
-    public bool Utf8Names { get; init; }
-
     /// <summary>Hex strings with the digits A-F in upper case.</summary>
     public bool UpperHexStrings { get; init; }
 
@@ -45,18 +39,18 @@ internal sealed class PdfObjectSyntax
     public int MaxDepth { get; init; } = int.MaxValue;
 
     /// <summary>The writers that copy parsed objects into a new file (merging, stamping, encrypting).</summary>
-    public static readonly PdfObjectSyntax Rewrite = new() { NonFiniteAsZero = true, MaxDepth = 256 };
+    public static readonly PdfObjectSyntax Rewrite = new() { MaxDepth = 256 };
 
     /// <summary>
     /// <see cref="Rewrite"/> with encrypted strings in upper-case hex, as the stamper writes them with the encryptor's
     /// own hex writer.
     /// </summary>
-    public static readonly PdfObjectSyntax Stamp = new() { NonFiniteAsZero = true, MaxDepth = 256, UpperHexEncryptedStrings = true };
+    public static readonly PdfObjectSyntax Stamp = new() { MaxDepth = 256, UpperHexEncryptedStrings = true };
 
     /// <summary>The incremental updates (signatures, validation data, attachments, form filling).</summary>
     public static readonly PdfObjectSyntax Update = new()
     {
-        CompactDictionaries = true, IntegralRealsAsIntegers = true, Utf8Names = true, UpperHexStrings = true, UpperHexEncryptedStrings = true,
+        CompactDictionaries = true, IntegralRealsAsIntegers = true, UpperHexStrings = true, UpperHexEncryptedStrings = true,
         ThrowOnDirectStream = true,
     };
 }
@@ -166,7 +160,7 @@ internal class PdfObjectWriter
     {
         double v = n.Value;
         if (n.IsInteger || (Syntax.IntegralRealsAsIntegers && v == Math.Floor(v) && Math.Abs(v) < 1e15)) b.Int((long)v);
-        else if (Syntax.NonFiniteAsZero && !double.IsFinite(v)) b.Byte((byte)'0');
+        else if (!double.IsFinite(v)) b.Byte((byte)'0');
         else b.Ascii(v.ToString("0.##########", CultureInfo.InvariantCulture));
     }
 
@@ -179,7 +173,9 @@ internal class PdfObjectWriter
 
     public void WriteName(ByteBuffer b, string name)
     {
-        if (Syntax.Utf8Names && !IsLatin1(name)) PdfSyntax.Name(b, Encoding.UTF8.GetBytes(name));
+        // The parser keeps one char per byte, so a parsed name (all chars up to U+00FF) is written back as the same bytes,
+        // while a name made in code with other characters is UTF-8 rather than cut to one byte per character.
+        if (!IsLatin1(name)) PdfSyntax.Name(b, Encoding.UTF8.GetBytes(name));
         else PdfSyntax.RawName(b, name);
     }
 
