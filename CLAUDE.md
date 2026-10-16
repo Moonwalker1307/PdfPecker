@@ -26,6 +26,11 @@ dotnet test -f net10.0 --filter "FullyQualifiedName~MarkdownTests"   # one class
 - `dotnet pack` validates the public API against the last release (`PackageValidationBaselineVersion` in
   `src/PdfPecker/PdfPecker.csproj`). Raise it to the new version after each release; a breaking change belongs only in a
   major version.
+- Two external conformance checks: `MarkdownSpecTests` runs the CommonMark 0.31.2 examples (downloaded into the temp
+  folder, skipped offline) and fails when an example listed in `Fixtures/commonmark-passing.txt` regresses; record
+  improvements with `PDFPECKER_UPDATE_COMMONMARK=1`. `.github/workflows/conformance.yml` validates PDF/A and PDF/UA
+  samples from `tools/ConformanceSamples` with veraPDF (run it locally as the workflow does); rules that fail today
+  are listed in `tools/ConformanceSamples/known-failures.txt`, and a new failure fails the job.
 - Golden tests (`tests/PdfPecker.Tests/Golden/**`) compare output against `*.expected.pdf`. When an output change is
   intended, regenerate with `PDFPECKER_UPDATE_GOLDEN=1 dotnet test --filter GoldenPdfTests -f net10.0` and say in the
   commit/PR which baselines changed and why. Never regenerate just to make a failing test pass.
