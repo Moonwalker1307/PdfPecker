@@ -620,8 +620,10 @@ internal sealed class BlockParser
             var cell = (bar < 0 ? line : line.Slice(0, bar)).Trim(" \t");
             if (cell.Length == 0) return null;
             bool left = cell[0] == ':', right = cell[^1] == ':';
-            var dashes = cell.Slice(left ? 1 : 0, cell.Length - (left ? 1 : 0) - (right ? 1 : 0));
-            if (dashes.Length == 0) return null;
+            // A lone ":" is both the left and the right colon; it has no dashes and is not a delimiter cell.
+            int start = left ? 1 : 0, end = cell.Length - (right ? 1 : 0);
+            if (end <= start) return null;
+            var dashes = cell[start..end];
             foreach (var c in dashes) if (c != '-') return null;
             aligns.Add(left && right ? TableAlign.Center : left ? TableAlign.Left : right ? TableAlign.Right : TableAlign.None);
             if (bar < 0) break;
