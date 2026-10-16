@@ -1939,17 +1939,7 @@ internal sealed partial class PdfDocumentWriter
                     continue;
                 case SvgShape.KindText:
                     WriteSvgPaint(b, shape, toPage);
-                    var m = shape.TextMatrix;
-                    int mode = shape.HasFill ? (shape.HasStroke ? 2 : 0) : 1;
-                    var svgFont = Leaf(shape.Font!);
-                    if (svgFont is EmbeddedFont svgEmbedded) b.Ascii("BT /E").Int(_subsetList.IndexOf(_subsets[svgEmbedded.Program]) + 1);
-                    else b.Ascii("BT /F").Int(((StandardFont)shape.Font!).Index + 1);
-                    b.Sp().Num(shape.FontSize).Ascii(" Tf ").Int(mode).Ascii(" Tr 0 Tw ")
-                        .Num(shape.CharSpacing).Ascii(" Tc ").Num6(m.A).Sp().Num6(m.B).Sp().Num6(m.C).Sp().Num6(m.D).Sp().Num(m.E).Sp().Num(m.F)
-                        .Ascii(" Tm ");
-                    if (svgFont is EmbeddedFont svgFontEmbedded) WriteGlyphHex(b, svgFontEmbedded, _subsets[svgFontEmbedded.Program], shape.Text!, shape.FontSize, shape.Rtl, shape.CharSpacing);
-                    else WriteStandardText(b, shape.Font!, shape.Rtl ? Text.Bidi.VisualText(shape.Text!) : shape.Text!);
-                    b.Ascii(" ET\n");
+                    WriteSvgText(b, shape, shape.HasFill ? (shape.HasStroke ? 2 : 0) : 1);
                     continue;
             }
             WritePath(b, shape);
@@ -1963,6 +1953,32 @@ internal sealed partial class PdfDocumentWriter
         {
             b.Ascii("Q\n");
             RestoreState(states.Pop());
+        }
+    }
+
+    /// <summary>Writes an SVG text run with the text rendering mode given (3 draws nothing but keeps the text selectable).</summary>
+    private void WriteSvgText(ByteBuffer b, SvgShape shape, int mode)
+    {
+        var m = shape.TextMatrix;
+        var svgFont = Leaf(shape.Font!);
+        if (svgFont is EmbeddedFont svgEmbedded) b.Ascii("BT /E").Int(_subsetList.IndexOf(_subsets[svgEmbedded.Program]) + 1);
+        else b.Ascii("BT /F").Int(((StandardFont)shape.Font!).Index + 1);
+        b.Sp().Num(shape.FontSize).Ascii(" Tf ").Int(mode).Ascii(" Tr 0 Tw ")
+            .Num(shape.CharSpacing).Ascii(" Tc ").Num6(m.A).Sp().Num6(m.B).Sp().Num6(m.C).Sp().Num6(m.D).Sp().Num(m.E).Sp().Num(m.F)
+            .Ascii(" Tm ");
+        if (svgFont is EmbeddedFont svgFontEmbedded) WriteGlyphHex(b, svgFontEmbedded, _subsets[svgFontEmbedded.Program], shape.Text!, shape.FontSize, shape.Rtl, shape.CharSpacing);
+        else WriteStandardText(b, shape.Font!, shape.Rtl ? Text.Bidi.VisualText(shape.Text!) : shape.Text!);
+        b.Ascii(" ET\n");
+    }
+
+    /// <summary>The text runs drawn by filtered content, written as invisible text over the filter's image.</summary>
+    private void WriteInvisibleSvgText(ByteBuffer b, List<SvgShape> shapes, int depth)
+    {
+        if (depth > 16) return;
+        foreach (var shape in shapes)
+        {
+            if (shape.Kind == SvgShape.KindText) WriteSvgText(b, shape, 3);
+            else if (shape.Kind == SvgShape.KindFilter && shape.Children != null) WriteInvisibleSvgText(b, shape.Children, depth + 1);
         }
     }
 
@@ -2084,12 +2100,14 @@ internal sealed partial class PdfDocumentWriter
         int w = (int)pw, h = (int)ph;
         var source = RasterizeSvg(shape.Children!, f.X, f.Y, f.W, f.H, w, h);
         if (source == null) return;
-        var image = FilterImage(f.Apply(source, w, h, w / f.W, h / f.H), w, h);
+        var image = FilterImage(f.Apply(source, w, h, w / f.W, h / f.H, shapes => RasterizeSvg(shapes, f.X, f.Y, f.W, f.H, w, h)), w, h);
         if (image == null) return;
         _rasters.Add(image);
         SetFillAlpha(b, CssColor.Black); // an image is painted with the fill alpha
         // The image's unit square onto the region, its first row at the top (user space has y down).
         b.Ascii("q ").Num(f.W).Ascii(" 0 0 ").Num(-f.H).Sp().Num(f.X).Sp().Num(f.Y + f.H).Ascii(" cm /Xr").Int(_rasters.Count).Ascii(" Do Q\n");
+        // The image hides the text in it from search and selection: the same text again, invisible, brings it back.
+        WriteInvisibleSvgText(b, shape.Children!, 0);
     }
 
     /// <summary>A filter's result (premultiplied sRGB floats) as an RGB image with an alpha mask; null when it is all transparent.</summary>
@@ -2446,13 +2464,13 @@ internal sealed partial class PdfDocumentWriter
 
     private void CollectSvgFonts(SvgImage svg, bool[] usedFonts) => CollectSvgFonts(svg.Shapes, usedFonts, 0);
 
-    /// <summary>The fonts of SVG text, also inside masks and pattern tiles (filtered content is drawn as an image).</summary>
+    /// <summary>The fonts of SVG text, also inside masks, pattern tiles, embedded drawings and filtered content.</summary>
     private void CollectSvgFonts(List<SvgShape> shapes, bool[] usedFonts, int depth)
     {
         if (depth > 16) return;
         foreach (var shape in shapes)
         {
-            if (shape.Kind is SvgShape.KindMask or SvgShape.KindImage && shape.Children != null) CollectSvgFonts(shape.Children, usedFonts, depth + 1);
+            if (shape.Kind is SvgShape.KindMask or SvgShape.KindImage or SvgShape.KindFilter && shape.Children != null) CollectSvgFonts(shape.Children, usedFonts, depth + 1);
             if (shape.FillPattern != null) CollectSvgFonts(shape.FillPattern.Shapes, usedFonts, depth + 1);
             if (shape.StrokePattern != null) CollectSvgFonts(shape.StrokePattern.Shapes, usedFonts, depth + 1);
             if (shape.Font == null || shape.Kind != SvgShape.KindText) continue;

@@ -411,10 +411,28 @@ internal sealed partial class SvgImage
             h *= bh;
         }
         if (!(w > 0 && h > 0)) return Drop(start);
-        // Lengths of the primitives in root units: user units scaled by the transform (or fractions of the bounding box).
-        float unitX = primitiveBox ? bw : 1, unitY = primitiveBox ? bh : 1;
-        var effect = SvgFilter.Parse(filter, ctm, unitX, unitY);
+        var effect = SvgFilter.Parse(filter, ctm, primitiveBox, (bx, by, bw, bh), (x, y, w, h), (vw, vh));
         if (effect == null) return Drop(start);
+        // feImage draws a file or an element of this drawing: its shapes are rendered with the filter's other inputs.
+        foreach (var p in effect.Primitives)
+        {
+            if (p.Kind != SvgFilter.Kind.Image || p.Element is not { } image) continue;
+            var href = (image.GetAttribute("href") ?? image.GetAttribute("xlink:href"))?.Trim();
+            _filterDepth++; // an element can draw itself through its own filter's feImage
+            try
+            {
+                p.Shapes = Capture(() =>
+                {
+                    if (href != null && href.StartsWith("#", StringComparison.Ordinal))
+                    {
+                        if (Reference(href) is { } target) Render(target, ctm, 1, 1);
+                    }
+                    else DrawImage(href, p.UX, p.UY, p.UW, p.UH, image.GetAttribute("preserveaspectratio"), ctm, 1);
+                });
+            }
+            finally { _filterDepth--; }
+            p.Element = null;
+        }
         // The filter region in root space: the bounds of its transformed corners.
         var (_, corners) = RectOutline(x, y, w, h, ctm);
         float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
