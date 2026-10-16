@@ -96,14 +96,20 @@ internal sealed class DocumentProperties
     }
 }
 
-/// <summary>Low-level PDF syntax shared by the writers.</summary>
+/// <summary>Low-level PDF syntax shared by the writers: names and strings.</summary>
 internal static class PdfSyntax
 {
+    private static ReadOnlySpan<byte> UpperDigits => "0123456789ABCDEF"u8;
+    private static ReadOnlySpan<byte> LowerDigits => "0123456789abcdef"u8;
+
     /// <summary>Writes a name object: <c>/</c> plus the UTF-8 bytes, with delimiters, whitespace, '#' and non-ASCII as #xx.</summary>
-    public static void Name(ByteBuffer b, string name)
+    public static void Name(ByteBuffer b, string name) => Name(b, Encoding.UTF8.GetBytes(name));
+
+    /// <summary>Writes a name object from its bytes.</summary>
+    public static void Name(ByteBuffer b, ReadOnlySpan<byte> name)
     {
         b.Byte((byte)'/');
-        foreach (var c in Encoding.UTF8.GetBytes(name)) NameByte(b, c);
+        foreach (var c in name) NameByte(b, c);
     }
 
     /// <summary>Writes a name object from its raw bytes (as a parsed name holds them, one char per byte).</summary>
@@ -117,7 +123,7 @@ internal static class PdfSyntax
     {
         if (c < 0x21 || c > 0x7E || c is (byte)'#' or (byte)'/' or (byte)'%' or (byte)'(' or (byte)')' or (byte)'<' or (byte)'>'
             or (byte)'[' or (byte)']' or (byte)'{' or (byte)'}')
-            b.Byte((byte)'#').Ascii(c.ToString("X2"));
+            b.Byte((byte)'#').Byte(UpperDigits[c >> 4]).Byte(UpperDigits[c & 15]);
         else b.Byte(c);
     }
 
@@ -146,11 +152,15 @@ internal static class PdfSyntax
         HexString(b, raw);
     }
 
-    /// <summary>Writes a string object as hex.</summary>
-    public static void HexString(ByteBuffer b, ReadOnlySpan<byte> bytes)
+    /// <summary>Writes a string object as hex, in lower case.</summary>
+    public static void HexString(ByteBuffer b, ReadOnlySpan<byte> bytes) => Hex(b, bytes, upper: false);
+
+    /// <summary>Writes a string object as hex: <c>&lt;...&gt;</c> with two digits per byte.</summary>
+    public static void Hex(ByteBuffer b, ReadOnlySpan<byte> bytes, bool upper)
     {
+        var digits = upper ? UpperDigits : LowerDigits;
         b.Byte((byte)'<');
-        foreach (var c in bytes) b.Ascii(c.ToString("x2"));
+        foreach (var x in bytes) b.Byte(digits[x >> 4]).Byte(digits[x & 15]);
         b.Byte((byte)'>');
     }
 }

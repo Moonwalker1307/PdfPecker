@@ -18,7 +18,7 @@ namespace PdfPecker.Pdf;
 /// structure elements with content only on them, along with their parent-tree entries. A page taken again is written as
 /// a copy without structure keys, form widgets or popups; its other annotations are copied too.
 /// </remarks>
-internal sealed class PdfMergeWriter
+internal sealed class PdfMergeWriter : PdfObjectWriter
 {
     /// <summary>Which pages of an input to take, in order, and which of them to turn.</summary>
     internal sealed class PageSpec
@@ -60,7 +60,7 @@ internal sealed class PdfMergeWriter
     private readonly ByteBuffer _main = new(1 << 16);
     private ByteBuffer _out;
     private long _flushed; // bytes already handed out of _main
-    private readonly List<long> _offsets = new() { 0 }; // by object id; 0 = not written
+    private readonly PdfXref _xref = new();
     private int _nextId;
     private readonly Dictionary<string, int> _streams = new(StringComparer.Ordinal); // content hash -> id of a written leaf stream
 
@@ -97,9 +97,13 @@ internal sealed class PdfMergeWriter
     // Attachments: every input's embedded files, by name-tree key (a name used before gets " (2)", " (3)", ...).
     private readonly List<(byte[] Key, ByteBuffer Value)> _attachments = new();
     private readonly HashSet<string> _attachmentNames = new(StringComparer.Ordinal);
+    // The input being copied, and its objects still to copy, for the hooks of the shared object writer.
+    private Input _input = null!;
+    private Queue<(int Num, int Id)> _queue = null!;
 
     /// <summary>A writer; <paramref name="sink"/> is where the result goes as it is made, or null to keep it in memory (see <see cref="ToArray"/>).</summary>
     public PdfMergeWriter(PdfMergeOptions options, CancellationToken cancel, Stream? sink = null, bool single = false)
+        : base(PdfObjectSyntax.Rewrite)
     {
         _options = options;
         _cancel = cancel;
@@ -193,6 +197,8 @@ internal sealed class PdfMergeWriter
             _needAppearances |= input.NeedAppearances;
 
             var queue = new Queue<(int Num, int Id)>();
+            _input = input;
+            _queue = queue;
             foreach (var p in input.Out)
             {
                 WritePage(input, p, queue);
@@ -200,14 +206,14 @@ internal sealed class PdfMergeWriter
             }
             if (input.File.GetDict(input.File.Catalog, "OCProperties") is { } oc)
             {
-                WriteItemsTo(_ocgs, input, input.File.GetArray(oc, "OCGs"), queue);
-                WriteItemsTo(_ocgsOff, input, input.File.GetArray(input.File.GetDict(oc, "D"), "OFF"), queue);
+                WriteItemsTo(_ocgs, input, input.File.GetArray(oc, "OCGs"));
+                WriteItemsTo(_ocgsOff, input, input.File.GetArray(input.File.GetDict(oc, "D"), "OFF"));
             }
             if (input.Fields.Count > 0)
             {
                 var form = input.File.GetDict(input.File.Catalog, "AcroForm")!;
-                WriteItemsTo(_fields, input, new PdfArray(input.Fields.Select(n => (PdfObject)new PdfRef(n, 0)).ToList()), queue);
-                WriteItemsTo(_calcOrder, input, input.File.GetArray(form, "CO"), queue);
+                WriteItemsTo(_fields, input, new PdfArray(input.Fields.Select(n => (PdfObject)new PdfRef(n, 0)).ToList()));
+                WriteItemsTo(_calcOrder, input, input.File.GetArray(form, "CO"));
                 if (input.File.GetDict(input.File.GetDict(form, "DR"), "Font") is { } drFonts)
                 {
                     _out = _formFonts;
@@ -218,7 +224,7 @@ internal sealed class PdfMergeWriter
                             if (!_formFontNames.Add(key)) continue;
                             PdfSyntax.RawName(_out, key);
                             _out.Sp();
-                            WriteObject(input, value, queue, 1);
+                            WriteValue(_out, value, 1);
                             _out.Sp();
                         }
                     }
@@ -228,8 +234,8 @@ internal sealed class PdfMergeWriter
                     }
                 }
             }
-            if (input.StructOffset >= 0) WriteStructure(input, queue);
-            CopyAttachments(input, catalog, queue);
+            if (input.StructOffset >= 0) WriteStructure(input);
+            CopyAttachments(input, catalog);
             // Top-level bookmarks are chained across inputs; the last one waits for its /Next, which a later input may give.
             if (input.TopOutline.Count > 0 && _outlinesId == 0) _outlinesId = NewId();
             for (int k = 0; k < input.TopOutline.Count; k++)
@@ -241,7 +247,7 @@ internal sealed class PdfMergeWriter
                     _pendingOutline = null;
                 }
                 if (_firstOutline == 0) _firstOutline = id;
-                var body = OutlineItemBody(input, num, queue);
+                var body = OutlineItemBody(input, num);
                 if (k + 1 < input.TopOutline.Count) WriteOutlineItem(id, _lastOutline, input.Map[input.TopOutline[k + 1]], body);
                 else _pendingOutline = (id, _lastOutline, body);
                 _lastOutline = id;
@@ -253,12 +259,14 @@ internal sealed class PdfMergeWriter
                 var (num, id) = queue.Dequeue();
                 var obj = input.File.GetObject(num) ?? PdfNull.Instance;
                 Begin(id);
-                if (obj is PdfStream s) WriteStream(input, s, queue);
+                if (obj is PdfStream s) WriteStream(_out, input.File, s);
                 else if (obj is PdfDict od && (input.Overrides.ContainsKey(num) || input.IdOverrides.ContainsKey(id)))
-                    WriteDict(input, Overridden(input, od, num, id), queue, 0);
-                else WriteObject(input, obj, queue, 0);
+                    WriteDict(_out, Overridden(input, od, num, id), 0);
+                else WriteObject(_out, obj);
                 End();
             }
+            _input = null!;
+            _queue = null!;
         }
     }
 
@@ -378,19 +386,9 @@ internal sealed class PdfMergeWriter
         // Cross-reference table and trailer.
         long xref = Position;
         int count = _nextId;
-        _out.Ascii("xref\n0 ").Int(count).Ascii("\n0000000000 65535 f \n");
-        for (int i = 1; i < count; i++)
-        {
-            if (i < _offsets.Count && _offsets[i] > 0)
-                _out.Ascii(_offsets[i].ToString("D10", System.Globalization.CultureInfo.InvariantCulture)).Ascii(" 00000 n \n");
-            else
-                _out.Ascii("0000000000 00000 f \n");
-        }
+        _xref.WriteTable(_out, count);
         var id0 = RandomNumberGenerator.GetBytes(16);
-        _out.Ascii("trailer\n<< /Size ").Int(count).Ascii(" /Root ").Int(CatalogId).Ascii(" 0 R /Info ").Int(InfoId).Ascii(" 0 R /ID [");
-        PdfSyntax.HexString(_out, id0);
-        PdfSyntax.HexString(_out, id0);
-        _out.Ascii("] >>\nstartxref\n").Int(xref).Ascii("\n%%EOF\n");
+        PdfXref.WriteTrailer(_out, count, CatalogId, InfoId, 0, id0, id0, upperHexId: false, xref);
     }
 
     /// <summary>The whole result, when nothing has been flushed.</summary>
@@ -961,16 +959,11 @@ internal sealed class PdfMergeWriter
 
     // ------------------------------------------------------------------ writing
 
-    private ByteBuffer Begin(int id)
-    {
-        while (_offsets.Count <= id) _offsets.Add(0);
-        _offsets[id] = Position;
-        return _out.Int(id).Ascii(" 0 obj\n");
-    }
+    private ByteBuffer Begin(int id) => _xref.Begin(_out, id, Position);
 
     private void End()
     {
-        _out.Ascii("\nendobj\n");
+        PdfXref.End(_out);
         if (_sink != null && _main.Length >= FlushSize) Flush(_sink);
     }
 
@@ -986,24 +979,24 @@ internal sealed class PdfMergeWriter
             if (key is "Type" or "Parent" or "B" or "Annots" or "Resources" or "MediaBox" or "CropBox" or "Rotate") continue;
             // A second copy of a page is not in the structure tree.
             if (o.Repeat && key is "StructParents" or "StructParent") continue;
-            if (WriteStructKey(input, key, value)) continue;
+            if (WriteStructKey(_out, input, key, value)) continue;
             _out.Sp();
             PdfSyntax.RawName(_out, key);
             _out.Sp();
-            WriteObject(input, value, queue, 0, key);
+            WriteValue(_out, value, 0, key);
         }
         _out.Ascii(" /Resources ");
-        WriteObject(input, p.Resources ?? new PdfDict(), queue, 0);
+        WriteValue(_out, p.Resources ?? new PdfDict(), 0);
         _out.Ascii(" /MediaBox ");
-        if (p.MediaBox != null) WriteObject(input, p.MediaBox, queue, 0);
+        if (p.MediaBox != null) WriteValue(_out, p.MediaBox, 0);
         else _out.Ascii("[0 0 612 792]");
-        if (p.CropBox != null) { _out.Ascii(" /CropBox "); WriteObject(input, p.CropBox, queue, 0); }
+        if (p.CropBox != null) { _out.Ascii(" /CropBox "); WriteValue(_out, p.CropBox, 0); }
         if (o.Turn != 0)
         {
             int turned = ((file.GetIntValue(p.Rotate) / 90 * 90 + o.Turn) % 360 + 360) % 360;
             _out.Ascii(" /Rotate ").Int(turned);
         }
-        else if (p.Rotate != null) { _out.Ascii(" /Rotate "); WriteObject(input, p.Rotate, queue, 0); }
+        else if (p.Rotate != null) { _out.Ascii(" /Rotate "); WriteValue(_out, p.Rotate, 0); }
         if (file.GetArray(p.Page, "Annots") is { } annots)
         {
             _out.Ascii(" /Annots [");
@@ -1029,12 +1022,12 @@ internal sealed class PdfMergeWriter
                     }
                     else
                     {
-                        WriteDict(input, Without(ad, copy.Keys), queue, 1);
+                        WriteDict(_out, Without(ad, copy.Keys), 1);
                         _out.Sp();
                     }
                     continue;
                 }
-                WriteObject(input, a, queue, 1);
+                WriteValue(_out, a, 1);
                 _out.Sp();
             }
             _out.Ascii("]");
@@ -1051,7 +1044,7 @@ internal sealed class PdfMergeWriter
     }
 
     /// <summary>Adds a tagged input's top-level structure elements, parent-tree entries and role and class maps to the merged ones.</summary>
-    private void WriteStructure(Input input, Queue<(int, int)> queue)
+    private void WriteStructure(Input input)
     {
         var file = input.File;
         var root = file.GetDict(file.Catalog, "StructTreeRoot")!;
@@ -1061,7 +1054,7 @@ internal sealed class PdfMergeWriter
             _out = _structKids;
             foreach (var k in input.StructKids ?? KidsOf(file, root["K"]))
             {
-                WriteObject(input, k, queue, 1);
+                WriteValue(_out, k, 1);
                 _out.Sp();
             }
             _out = _parentNums;
@@ -1070,7 +1063,7 @@ internal sealed class PdfMergeWriter
                 // With pages left out, entries for what is dropped go too.
                 if (input.Partial && (input.DroppedKeys.Contains(key) || !LeadsToKeptElement(value))) continue;
                 _out.Int(key + input.StructOffset).Sp();
-                WriteObject(input, value, queue, 1);
+                WriteValue(_out, value, 1);
                 _out.Sp();
             }
             WriteMapTo(_roleMap, _roleNames, file.GetDict(root, "RoleMap"));
@@ -1098,7 +1091,7 @@ internal sealed class PdfMergeWriter
                 if (!names.Add(key)) continue;
                 PdfSyntax.RawName(_out, key);
                 _out.Sp();
-                WriteObject(input, value, queue, 1);
+                WriteValue(_out, value, 1);
                 _out.Sp();
             }
         }
@@ -1108,20 +1101,20 @@ internal sealed class PdfMergeWriter
     /// Writes a /StructParent or /StructParents entry with the input's key offset, or leaves it out for an untagged input;
     /// false for any other key.
     /// </summary>
-    private bool WriteStructKey(Input input, string key, PdfObject value)
+    private bool WriteStructKey(ByteBuffer b, Input input, string key, PdfObject value)
     {
         if (key is not ("StructParent" or "StructParents")) return false;
         if (input.StructOffset >= 0 && input.File.Resolve(value) is PdfNumber { IsInteger: true } n && n.Value >= 0 && n.Value < int.MaxValue / 2)
         {
-            _out.Sp();
-            PdfSyntax.RawName(_out, key);
-            _out.Sp().Int((long)n.Value + input.StructOffset);
+            b.Sp();
+            PdfSyntax.RawName(b, key);
+            b.Sp().Int((long)n.Value + input.StructOffset);
         }
         return true;
     }
 
     /// <summary>Copies the input's embedded files (its attachments), renaming a name an earlier input used.</summary>
-    private void CopyAttachments(Input input, PdfDict? catalog, Queue<(int, int)> queue)
+    private void CopyAttachments(Input input, PdfDict? catalog)
     {
         foreach (var (key, value) in EmbeddedFiles.NameTree(input.File, catalog))
         {
@@ -1137,7 +1130,7 @@ internal sealed class PdfMergeWriter
             _out = buffer;
             try
             {
-                WriteObject(input, value, queue, 1);
+                WriteValue(_out, value, 1);
             }
             finally
             {
@@ -1148,7 +1141,7 @@ internal sealed class PdfMergeWriter
     }
 
     /// <summary>Writes the (referenced) items of an array to another buffer, separated by spaces.</summary>
-    private void WriteItemsTo(ByteBuffer target, Input input, PdfArray? items, Queue<(int, int)> queue)
+    private void WriteItemsTo(ByteBuffer target, Input input, PdfArray? items)
     {
         if (items == null) return;
         var saved = _out;
@@ -1159,7 +1152,7 @@ internal sealed class PdfMergeWriter
             {
                 if (item is not PdfRef r) continue; // optional content groups are always indirect
                 if (IsDropped(input, r.Num)) continue; // a form field left out with its pages
-                WriteObject(input, item, queue, 1);
+                WriteValue(_out, item, 1);
                 _out.Sp();
             }
         }
@@ -1182,7 +1175,7 @@ internal sealed class PdfMergeWriter
     }
 
     /// <summary>A bookmark's entries other than its links to its neighbours, which are written with <see cref="WriteOutlineItem"/>.</summary>
-    private ByteBuffer OutlineItemBody(Input input, int num, Queue<(int, int)> queue)
+    private ByteBuffer OutlineItemBody(Input input, int num)
     {
         var d = input.File.GetObject(num) as PdfDict ?? new PdfDict();
         if (input.Overrides.ContainsKey(num)) d = Overridden(input, d, num, 0);
@@ -1196,7 +1189,7 @@ internal sealed class PdfMergeWriter
                 _out.Sp();
                 PdfSyntax.RawName(_out, key);
                 _out.Sp();
-                WriteObject(input, value, queue, 1, key);
+                WriteValue(_out, value, 1, key);
             }
         }
         finally
@@ -1215,129 +1208,52 @@ internal sealed class PdfMergeWriter
         End();
     }
 
-    private void WriteStream(Input input, PdfStream s, Queue<(int, int)> queue)
+    /// <summary>
+    /// Writes an entry's value; a destination given by name is written as the explicit one it names, as the name tree is
+    /// not copied.
+    /// </summary>
+    private void WriteValue(ByteBuffer b, PdfObject? o, int depth, string? key = null)
     {
-        var entries = new Dictionary<string, PdfObject>(s.Entries, StringComparer.Ordinal);
-        entries.Remove("Length");
-        RemoveCryptFilter(input.File, entries);
-        _out.Ascii("<<");
-        foreach (var (key, value) in entries)
+        var input = _input;
+        if (key == "Dest")
         {
-            if (WriteStructKey(input, key, value)) continue;
-            _out.Sp();
-            PdfSyntax.RawName(_out, key);
-            _out.Sp();
-            WriteObject(input, value, queue, 1, key);
-        }
-        _out.Ascii(" /Length ").Int(s.RawData.Length).Ascii(" >>\nstream\n").Bytes(s.RawData).Ascii("\nendstream");
-    }
-
-    /// <summary>The input's decryption is already undone, so a /Crypt filter in the chain must go too.</summary>
-    internal static void RemoveCryptFilter(PdfFile file, Dictionary<string, PdfObject> entries)
-    {
-        var filter = file.Resolve(entries.GetValueOrDefault("Filter"));
-        if (filter is PdfName { Value: "Crypt" })
-        {
-            entries.Remove("Filter");
-            entries.Remove("DecodeParms");
-        }
-        else if (filter is PdfArray fa && fa.Items.Any(f => file.Resolve(f) is PdfName { Value: "Crypt" }))
-        {
-            var parms = file.Resolve(entries.GetValueOrDefault("DecodeParms")) as PdfArray;
-            var nf = new List<PdfObject>();
-            var np = new List<PdfObject>();
-            for (int i = 0; i < fa.Count; i++)
+            if (o is PdfString or PdfName) { WriteObject(b, NamedDest(input, o) ?? PdfNull.Instance, depth + 1); return; }
+            // A named destination behind a reference.
+            if (o is PdfRef r && !input.Map.ContainsKey(r.Num) && input.File.GetObject(r.Num) is PdfString or PdfName)
             {
-                if (file.Resolve(fa[i]) is PdfName { Value: "Crypt" }) continue;
-                nf.Add(fa[i]);
-                np.Add(parms != null && i < parms.Count ? parms[i] : PdfNull.Instance);
+                WriteObject(b, NamedDest(input, input.File.GetObject(r.Num)!) ?? PdfNull.Instance, 1);
+                return;
             }
-            entries["Filter"] = new PdfArray(nf);
-            if (parms != null) entries["DecodeParms"] = new PdfArray(np);
         }
+        WriteObject(b, o, depth);
     }
 
-    private void WriteObject(Input input, PdfObject? o, Queue<(int, int)> queue, int depth, string? key = null)
+    /// <summary>
+    /// Shifts structure keys, and points a go-to action naming its destination at the page instead, since the name tree
+    /// is not copied.
+    /// </summary>
+    protected override void WriteEntry(ByteBuffer b, PdfDict? owner, string key, PdfObject value, int depth)
     {
-        if (depth > 256) { _out.Ascii("null"); return; }
-        switch (o)
-        {
-            case null:
-            case PdfNull:
-                _out.Ascii("null");
-                break;
-            case PdfBool b:
-                _out.Ascii(b.Value ? "true" : "false");
-                break;
-            case PdfNumber n:
-                if (n.IsInteger) _out.Int((long)n.Value);
-                else _out.Ascii(double.IsFinite(n.Value) ? n.Value.ToString("0.##########", System.Globalization.CultureInfo.InvariantCulture) : "0");
-                break;
-            case PdfString s:
-                if (key == "Dest") { WriteObject(input, NamedDest(input, s) ?? PdfNull.Instance, queue, depth + 1); break; }
-                PdfSyntax.HexString(_out, s.Bytes);
-                break;
-            case PdfName nm:
-                if (key == "Dest") { WriteObject(input, NamedDest(input, nm) ?? PdfNull.Instance, queue, depth + 1); break; }
-                PdfSyntax.RawName(_out, nm.Value);
-                break;
-            case PdfRef r:
-                WriteRef(input, r, queue, key);
-                break;
-            case PdfArray a:
-                _out.Byte((byte)'[');
-                for (int i = 0; i < a.Count; i++)
-                {
-                    if (i > 0) _out.Sp();
-                    WriteObject(input, a[i], queue, depth + 1);
-                }
-                _out.Byte((byte)']');
-                break;
-            case PdfStream:
-                // A stream can only be an indirect object; a direct one cannot occur in parsed data.
-                _out.Ascii("null");
-                break;
-            case PdfDict d:
-                WriteDict(input, d, queue, depth);
-                break;
-            default:
-                _out.Ascii("null");
-                break;
-        }
-    }
-
-    private void WriteDict(Input input, PdfDict d, Queue<(int, int)> queue, int depth)
-    {
+        var input = _input;
+        if (WriteStructKey(b, input, key, value)) return;
+        b.Sp();
+        PdfSyntax.RawName(b, key);
+        b.Sp();
         var file = input.File;
-        // A go-to action naming its destination: point it at the page instead, since the name tree is not copied.
-        bool goTo = file.GetName(d, "S") == "GoTo";
-        _out.Ascii("<<");
-        foreach (var (key, value) in d.Entries)
-        {
-            if (WriteStructKey(input, key, value)) continue;
-            _out.Sp();
-            PdfSyntax.RawName(_out, key);
-            _out.Sp();
-            if (goTo && key == "D" && file.Resolve(value) is PdfString or PdfName)
-                WriteObject(input, NamedDest(input, file.Resolve(value)!) ?? PdfNull.Instance, queue, depth + 1);
-            else
-                WriteObject(input, value, queue, depth + 1, key);
-        }
-        _out.Ascii(" >>");
+        if (owner != null && key == "D" && file.Resolve(value) is PdfString or PdfName && file.GetName(owner, "S") == "GoTo")
+            WriteObject(b, NamedDest(input, file.Resolve(value)!) ?? PdfNull.Instance, depth + 1);
+        else
+            WriteValue(b, value, depth + 1, key);
     }
 
-    private void WriteRef(Input input, PdfRef r, Queue<(int, int)> queue, string? key)
+    /// <summary>A reference is renumbered, its object queued to be copied, or a stream identical to one written shares its copy.</summary>
+    protected override void WriteRef(ByteBuffer b, PdfRef r)
     {
+        var input = _input;
         if (!input.Map.TryGetValue(r.Num, out int id))
         {
             var target = input.File.GetObject(r.Num);
-            if (target == null || target.IsNull) { input.Map[r.Num] = 0; _out.Ascii("null"); return; }
-            // A named destination behind a reference.
-            if (key == "Dest" && target is PdfString or PdfName)
-            {
-                WriteObject(input, NamedDest(input, target) ?? PdfNull.Instance, queue, 1);
-                return;
-            }
+            if (target == null || target.IsNull) { input.Map[r.Num] = 0; b.Ascii("null"); return; }
             string? hash = target is PdfStream ts ? LeafStreamHash(input.File, ts) : null;
             if (hash != null && _streams.TryGetValue(hash, out id))
             {
@@ -1347,12 +1263,12 @@ internal sealed class PdfMergeWriter
             {
                 id = NewId();
                 input.Map[r.Num] = id;
-                queue.Enqueue((r.Num, id));
+                _queue.Enqueue((r.Num, id));
                 if (hash != null) _streams[hash] = id;
             }
         }
-        if (id == 0) _out.Ascii("null");
-        else _out.Int(id).Ascii(" 0 R");
+        if (id == 0) b.Ascii("null");
+        else b.Int(id).Ascii(" 0 R");
     }
 
     /// <summary>

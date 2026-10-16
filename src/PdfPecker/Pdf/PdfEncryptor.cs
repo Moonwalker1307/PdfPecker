@@ -9,7 +9,7 @@ namespace PdfPecker.Pdf;
 /// the passwords and encrypts strings and streams. With AES-256 every object uses the same file key, each string or stream
 /// getting its own random initialization vector.
 /// </summary>
-internal sealed class PdfEncryptor : IDisposable
+internal sealed class PdfEncryptor : IPdfObjectEncryption, IDisposable
 {
     private readonly byte[] _fileKey = RandomNumberGenerator.GetBytes(32);
     private readonly Aes _aes = Aes.Create();
@@ -89,26 +89,17 @@ internal sealed class PdfEncryptor : IDisposable
     {
         b.Ascii("<< /Filter /Standard /V 5 /R 6 /Length 256 /CF << /StdCF << /Type /CryptFilter /AuthEvent /DocOpen /CFM /AESV3 /Length 32 >> >>")
             .Ascii(" /StmF /StdCF /StrF /StdCF /P ").Int(P).Ascii(" /EncryptMetadata true");
-        Hex(b.Ascii(" /O "), O);
-        Hex(b.Ascii(" /U "), U);
-        Hex(b.Ascii(" /OE "), OE);
-        Hex(b.Ascii(" /UE "), UE);
-        Hex(b.Ascii(" /Perms "), Perms);
+        PdfSyntax.Hex(b.Ascii(" /O "), O, upper: true);
+        PdfSyntax.Hex(b.Ascii(" /U "), U, upper: true);
+        PdfSyntax.Hex(b.Ascii(" /OE "), OE, upper: true);
+        PdfSyntax.Hex(b.Ascii(" /UE "), UE, upper: true);
+        PdfSyntax.Hex(b.Ascii(" /Perms "), Perms, upper: true);
         b.Ascii(" >>");
     }
 
-    public static void Hex(ByteBuffer b, ReadOnlySpan<byte> data)
-    {
-        b.Byte((byte)'<');
-        foreach (var x in data)
-        {
-            b.Byte(HexDigit(x >> 4));
-            b.Byte(HexDigit(x & 15));
-        }
-        b.Byte((byte)'>');
-    }
-
-    private static byte HexDigit(int v) => (byte)(v < 10 ? '0' + v : 'A' + v - 10);
+    // AES-256 uses the file key for every object, so the object number and generation play no part.
+    byte[] IPdfObjectEncryption.EncryptString(byte[] data, int num, int gen) => Encrypt(data);
+    byte[] IPdfObjectEncryption.EncryptStream(byte[] data, int num, int gen) => Encrypt(data);
 
     public void Dispose() => _aes.Dispose();
 }
