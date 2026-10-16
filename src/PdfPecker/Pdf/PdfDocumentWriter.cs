@@ -92,6 +92,9 @@ internal sealed partial class PdfDocumentWriter
     /// <summary>Stamp on every page.</summary>
     public PdfWatermark? Watermark { get; init; }
 
+    /// <summary>The document is right to left: its pages progress from right to left (/ViewerPreferences /Direction).</summary>
+    public bool RightToLeft { get; init; }
+
     /// <summary>Encrypt the file with these passwords.</summary>
     public PdfSecurity? Security { get; init; }
 
@@ -630,9 +633,12 @@ internal sealed partial class PdfDocumentWriter
         {
             _out.Ascii(" /MarkInfo << /Marked true >> /StructTreeRoot ").Int(structRootId).Ascii(" 0 R");
             if (!string.IsNullOrEmpty(Language)) { _out.Ascii(" /Lang "); WriteTextString(_out, Language!); }
-            // PDF/UA: viewers show the title, not the file name.
-            if (!string.IsNullOrEmpty(title)) _out.Ascii(" /ViewerPreferences << /DisplayDocTitle true >>");
         }
+        // PDF/UA: viewers show the title, not the file name. A right-to-left document's pages progress from right to
+        // left, which a viewer showing two pages side by side needs to know to put them in the right order.
+        bool displayTitle = tagged && !string.IsNullOrEmpty(title);
+        if (displayTitle || RightToLeft)
+            _out.Ascii(" /ViewerPreferences <<").Ascii(displayTitle ? " /DisplayDocTitle true" : "").Ascii(RightToLeft ? " /Direction /R2L" : "").Ascii(" >>");
         if (fileSpecIds.Length > 0)
         {
             // Attachments are listed in the name tree viewers show and are associated files (/AF), as PDF/A-3 needs.

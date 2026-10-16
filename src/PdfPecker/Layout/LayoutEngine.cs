@@ -86,7 +86,9 @@ internal sealed partial class LayoutEngine
 
     public float Layout(Element document, float width)
     {
+        _pageBox = RootPageBox(width);
         float bottom = LayoutFlow(document, 0, 0, width);
+        _pageBox = null;
         if (_floats.Any && _floats.Bottom > bottom) bottom = _floats.Bottom; // the root contains its floats
         FinishRoot(width);
         return bottom;
@@ -199,6 +201,10 @@ internal sealed partial class LayoutEngine
     /// <summary>Lays out the children of a block container. Returns the bottom of the content (including the last child's bottom margin).</summary>
     private float LayoutFlow(Element parent, float x, float y, float w)
     {
+        // The flow's content box on each kind of page, when pages differ in width: its boxes and lines take the
+        // geometry of the page they are on.
+        var pages = _pageBox;
+        _pageBox = null;
         float pendingMargin = 0;
         bool anyContent = false;
         // The parent has taken its first child's top margin as its own (they collapse): don't apply it again.
@@ -243,7 +249,11 @@ internal sealed partial class LayoutEngine
             {
                 float before = y;
                 int runOps = _ops.Count;
-                y = FlushInline(run, parent, x, y + pendingMargin, w, !anyContent, out bool produced);
+                // The lines' content (inline blocks, percentages) is sized for the page the paragraph starts on; each
+                // line then takes the width of its own page.
+                var (ix, iw) = pages != null ? OnPage(pages, y + pendingMargin) : (x, w);
+                _inlinePageBox = pages;
+                y = FlushInline(run, parent, ix, y + pendingMargin, iw, !anyContent, out bool produced);
                 run.Clear();
                 if (produced)
                 {
@@ -267,12 +277,14 @@ internal sealed partial class LayoutEngine
             {
                 // Its static position: where its top margin edge would be in the flow.
                 float smt = s.MarginTop.Resolve(w);
-                QueueAbsolute(e, x, y + CollapseMargins(pendingMargin, smt) - smt);
+                float sy = y + CollapseMargins(pendingMargin, smt) - smt;
+                QueueAbsolute(e, pages != null ? OnPage(pages, sy).X : x, sy);
                 continue;
             }
             if (s.Floated)
             {
-                PlaceFloat(MeasureFloat(e, w), y + pendingMargin, x, w);
+                var (fx, fw) = pages != null ? OnPage(pages, y + pendingMargin) : (x, w);
+                PlaceFloat(MeasureFloat(e, fw), y + pendingMargin, fx, fw);
                 continue;
             }
             var mark = new FlowMark
@@ -306,8 +318,13 @@ internal sealed partial class LayoutEngine
 
             int boxOps = _ops.Count;
             float bottom;
-            if (FloatsBelow(top) && AvoidsFloats(e)) bottom = LayoutBesideFloats(e, x, ref top, w);
-            else bottom = LayoutBlockBox(e, x, top, w, shrinkToFit: false);
+            var (bx, bw) = pages != null ? OnPage(pages, top) : (x, w);
+            if (FloatsBelow(top) && AvoidsFloats(e)) bottom = LayoutBesideFloats(e, bx, ref top, bw);
+            else
+            {
+                _childPageBox = pages;
+                bottom = LayoutBlockBox(e, bx, top, bw, shrinkToFit: false);
+            }
             float trailing = _boxTrailing;
             if (joins && KeepTogetherFails(chain, boxOps, top, forcedAt))
             {
@@ -451,13 +468,22 @@ internal sealed partial class LayoutEngine
         bool table = s.Display == Display.Table;
         int opsStart = _ops.Count;
         var savedMarker = _marker;
-        float bottom = table ? LayoutTable(e, x, y, availW) : LayoutBlockBoxCore(e, x, y, availW, shrinkToFit);
+        // The containing block on each kind of page, when pages differ in width, which the box takes on.
+        var pages = _childPageBox;
+        _childPageBox = null;
+        if (!table) _childPageBox = pages;
+        float bottom = table ? LayoutTable(e, x, y, availW, pages) : LayoutBlockBoxCore(e, x, y, availW, shrinkToFit);
         if (s.AvoidBreakInside && CrossesPage(y, bottom) && bottom - y <= _grid.Height(PageOf(y) + 1) && !AtPageTop(y))
         {
             Truncate(opsStart);
             _marker = savedMarker;
             float ny = NextPage(y);
-            bottom = table ? LayoutTable(e, x, ny, availW) : LayoutBlockBoxCore(e, x, ny, availW, shrinkToFit);
+            if (pages != null)
+            {
+                (x, availW) = OnPage(pages, ny);
+                if (!table) _childPageBox = pages;
+            }
+            bottom = table ? LayoutTable(e, x, ny, availW, pages) : LayoutBlockBoxCore(e, x, ny, availW, shrinkToFit);
         }
         if (table) _boxTrailing = 0;
         if (s.Layered) FinishLayered(e, opsStart, availW);
@@ -466,6 +492,8 @@ internal sealed partial class LayoutEngine
 
     private float LayoutBlockBoxCore(Element e, float x, float y, float availW, bool shrinkToFit)
     {
+        var parentPages = _childPageBox;
+        _childPageBox = null;
         var s = e.Style;
         if (e.Id != null) SetAnchor(e.Id, y);
         if (e.Name == "a" && e.GetAttribute("name") is { } aname) SetAnchor(aname, y);
@@ -502,51 +530,11 @@ internal sealed partial class LayoutEngine
         {
             contentW = overrideW - frame;
         }
-        else if (!s.Width.IsAuto)
-        {
-            contentW = s.Width.Resolve(availW);
-            if (s.BorderBox) contentW -= frame;
-        }
-        else if (s.AspectRatio > 0 && ClampedHeight(s) is float ratioFrom)
-        {
-            // aspect-ratio with a fixed height and an auto width: the width follows from the height. With min-width: auto
-            // and visible overflow, content wider than that still widens the box (CSS Sizing 4 automatic minimum size).
-            contentW = RatioWidth(s, ratioFrom, frame, frameV);
-            if (s.MinWidth.IsAuto && !s.ClipsX) contentW = Math.Max(contentW, Intrinsic(e).Min - frame);
-        }
-        else
-        {
-            contentW = availW - ml - mr - frame;
-            if (shrinkToFit)
-            {
-                var (_, max) = Intrinsic(e);
-                contentW = Math.Min(contentW, max - frame);
-            }
-            // min-height and max-height carry over to the width through the ratio.
-            if (s.AspectRatio > 0)
-            {
-                var (tmin, tmax) = TransferredWidthLimits(s, frame, frameV);
-                contentW = Math.Max(Math.Min(contentW, tmax), tmin);
-            }
-        }
-        if (!s.MaxWidth.IsAuto && !isImage && !isSvg && !hasWOverride)
-        {
-            float mw = s.MaxWidth.Resolve(availW) - (s.BorderBox ? frame : 0);
-            if (contentW > mw) contentW = mw;
-        }
-        if (!s.MinWidth.IsAuto && !isImage && !isSvg && !hasWOverride)
-        {
-            float mnw = s.MinWidth.Resolve(availW) - (s.BorderBox ? frame : 0);
-            if (contentW < mnw) contentW = mnw;
-        }
+        else contentW = FlowContentWidth(e, availW, ml, mr, frame, frameV, shrinkToFit);
         if (contentW < 0) contentW = 0;
 
         float used = contentW + frame;
-        if (s.MarginLeft.IsAuto && s.MarginRight.IsAuto) ml = Math.Max(0, (availW - used) / 2);
-        else if (s.MarginLeft.IsAuto) ml = Math.Max(0, availW - used - mr);
-        // In a right-to-left containing block an over-constrained box keeps its right margin (it sits at the right).
-        else if (!shrinkToFit && !s.Floated && !s.OutOfFlow && e.Parent?.Style is { Rtl: true } && !hasWOverride)
-            ml = Math.Max(0, availW - used - mr);
+        ml = UsedMarginLeft(e, availW, used, ml, mr, shrinkToFit || hasWOverride);
         float bx = x + ml;
 
         int opsStart = _ops.Count;
@@ -562,6 +550,11 @@ internal sealed partial class LayoutEngine
         bool formattingRoot = shrinkToFit || hasWOverride || hasHOverride || s.Floated || s.OutOfFlow || s.FormattingRoot
                               || s.IsFlex || s.IsGrid || s.IsMultiColumn || s.Display is Display.TableCell or Display.TableCaption
                               || e.Parent?.Style is { IsFlex: true } or { IsGrid: true };
+        // On pages of different widths a box in normal flow is as wide on each page as that page makes it.
+        var pages = parentPages != null && FollowsPages(e, shrinkToFit, hasWOverride || hasHOverride || isImage || isSvg, formattingRoot)
+            ? PageGeometry(e, parentPages)
+            : null;
+        if (pages is { Varies: false }) pages = null;
 
         float cx = bx + bl + pl;
         float cy = y + bt + pt;
@@ -629,7 +622,9 @@ internal sealed partial class LayoutEngine
             bool joinsChildren = !shrinkToFit && !hasWOverride && !hasHOverride;
             _absorbTop = joinsChildren && FirstBlockChild(e) != null;
             var outerFloats = formattingRoot ? EnterFormattingContext() : null;
+            _pageBox = pages;
             contentBottom = LayoutContent(e, cx, cy, contentW, definiteH, minH);
+            _pageBox = null;
             if (outerFloats != null) contentBottom = LeaveFormattingContext(outerFloats, contentBottom);
             _absorbTop = false;
             if (joinsChildren && CollapsesBottom(e) && !s.IsFlex && !s.IsGrid)
@@ -677,7 +672,8 @@ internal sealed partial class LayoutEngine
         }
 
         float bottom = cy + contentH + pb + bb;
-        BoxPainter.Paint(group, s, bx, y, used, bottom - y, _images, availW);
+        if (pages != null && !SameOnPages(pages, y, bottom)) PaintOnPages(group, s, pages, y, bottom);
+        else BoxPainter.Paint(group, s, bx, y, used, bottom - y, _images, availW);
         if (e.Control is { } control) FinishControl(e, control, opsStart + 1, bx, y, used, bottom - y, contentBottom - cy, contentH);
         if (e == CanvasRoot) CanvasRootBox = (bx, y, used, bottom - y);
         if (cbFrame != null)
@@ -697,6 +693,67 @@ internal sealed partial class LayoutEngine
         if (e.LayoutKey != null) SetAnchor(e.LayoutKey, ContentTop(y, opsStart));
         _boxTrailing = trailing;
         return bottom;
+    }
+
+    /// <summary>
+    /// The content width of a block box that is not replaced and has no size imposed by a flex or grid container, from
+    /// its width, aspect-ratio and min- and max-width, in a containing block <paramref name="availW"/> wide.
+    /// </summary>
+    private float FlowContentWidth(Element e, float availW, float ml, float mr, float frame, float frameV, bool shrinkToFit)
+    {
+        var s = e.Style;
+        float contentW;
+        if (!s.Width.IsAuto)
+        {
+            contentW = s.Width.Resolve(availW);
+            if (s.BorderBox) contentW -= frame;
+        }
+        else if (s.AspectRatio > 0 && ClampedHeight(s) is float ratioFrom)
+        {
+            // aspect-ratio with a fixed height and an auto width: the width follows from the height. With min-width: auto
+            // and visible overflow, content wider than that still widens the box (CSS Sizing 4 automatic minimum size).
+            contentW = RatioWidth(s, ratioFrom, frame, frameV);
+            if (s.MinWidth.IsAuto && !s.ClipsX) contentW = Math.Max(contentW, Intrinsic(e).Min - frame);
+        }
+        else
+        {
+            contentW = availW - ml - mr - frame;
+            if (shrinkToFit)
+            {
+                var (_, max) = Intrinsic(e);
+                contentW = Math.Min(contentW, max - frame);
+            }
+            // min-height and max-height carry over to the width through the ratio.
+            if (s.AspectRatio > 0)
+            {
+                var (tmin, tmax) = TransferredWidthLimits(s, frame, frameV);
+                contentW = Math.Max(Math.Min(contentW, tmax), tmin);
+            }
+        }
+        if (!s.MaxWidth.IsAuto)
+        {
+            float mw = s.MaxWidth.Resolve(availW) - (s.BorderBox ? frame : 0);
+            if (contentW > mw) contentW = mw;
+        }
+        if (!s.MinWidth.IsAuto)
+        {
+            float mnw = s.MinWidth.Resolve(availW) - (s.BorderBox ? frame : 0);
+            if (contentW < mnw) contentW = mnw;
+        }
+        return contentW;
+    }
+
+    /// <summary>
+    /// The used left margin of a block box <paramref name="used"/> wide: auto margins share the free space, and in a
+    /// right-to-left containing block an over-constrained box keeps its right margin, so it sits at the right.
+    /// </summary>
+    private static float UsedMarginLeft(Element e, float availW, float used, float ml, float mr, bool sized)
+    {
+        var s = e.Style;
+        if (s.MarginLeft.IsAuto && s.MarginRight.IsAuto) return Math.Max(0, (availW - used) / 2);
+        if (s.MarginLeft.IsAuto) return Math.Max(0, availW - used - mr);
+        if (!sized && !s.Floated && !s.OutOfFlow && e.Parent?.Style is { Rtl: true }) return Math.Max(0, availW - used - mr);
+        return ml;
     }
 
     /// <summary>
