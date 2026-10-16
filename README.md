@@ -76,7 +76,7 @@ All methods are static and thread-safe, so you can convert many documents in par
   text, image and SVG watermarks.
   [More](https://pdfpecker.net/docs/pdfa-and-passwords/)
 - **Accessibility**: tagged PDF, PDF/UA-1 and PDF/UA-2 built from your HTML. [More](https://pdfpecker.net/docs/accessibility/)
-- **Fillable forms**: HTML inputs, check boxes, radio buttons, selects and text areas become PDF form fields.
+- **Fillable forms**: HTML inputs, check boxes, radio buttons, selects and text areas become PDF form fields; read, fill and flatten the fields of existing PDFs.
   [More](https://pdfpecker.net/docs/forms/)
 - **Digital signatures**: PAdES signatures, visible boxes, timestamps, existing signature fields, external signers such
   as HSMs, smart cards or cloud key vaults, verification of signed PDFs, and long-term validation (DSS with OCSP and
