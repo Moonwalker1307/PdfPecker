@@ -327,6 +327,66 @@ public class HostileInputTests
         static string Stream(string dict, string data) => $"{dict} /Length {data.Length} >>\nstream\n{data}\nendstream";
     }
 
+    [Fact]
+    public void Text_extraction_of_a_letter_with_a_million_combining_marks_stays_linear()
+    {
+        // Code 1 is a combining acute accent drawn with no width, so every mark sits on the letter before it. The
+        // trailing letters make the marks a minority, so they are joined to that letter rather than kept on their own.
+        var pdf = TextPdf("BT /F1 12 Tf 72 700 Td (C" + new string('\x01', 999_999) + ") Tj 0 -20 Td (" + new string('B', 1_000_000) + ") Tj ET", 0);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var page = Bounded(() => PdfText.ExtractPage(pdf, 1, null, cts.Token));
+        Assert.Equal(2, page.Lines.Count);
+        Assert.Equal("C" + new string('\u0301', 999_999), page.Lines[0].Text);
+        Assert.Equal(new string('B', 1_000_000), page.Lines[1].Text);
+    }
+
+    [Fact]
+    public void Text_extraction_of_a_million_combining_marks_away_from_any_letter_stays_linear()
+    {
+        // Here the marks have a width, so they run on past their letter and each is kept as a character of its own.
+        var pdf = TextPdf("BT /F1 12 Tf 72 700 Td (C" + new string('\x01', 999_999) + ") Tj 0 -20 Td (" + new string('B', 1_000_000) + ") Tj ET", 600);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var page = Bounded(() => PdfText.ExtractPage(pdf, 1, null, cts.Token));
+        Assert.Equal(2, page.Lines.Count);
+        Assert.Equal(999_999, page.Lines[0].Text.Count(c => c == '\u0301'));
+    }
+
+    [Fact]
+    public void Text_extraction_of_a_right_to_left_letter_and_a_million_spaces_stays_linear()
+    {
+        // Code A is a Hebrew alef: one right-to-left letter makes the line go through bidi ordering, where every space
+        // is a neutral that looks for its nearest strong neighbours.
+        var pdf = TextPdf("BT /F1 12 Tf 72 700 Td (A" + new string(' ', 1_000_000) + "A) Tj ET", 0);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var page = Bounded(() => PdfText.ExtractPage(pdf, 1, null, cts.Token));
+        Assert.Equal("\u05D0 \u05D0", page.Text);
+    }
+
+    /// <summary>
+    /// A one-page PDF showing <paramref name="content"/>, compressed, in a font mapping code 1 to U+0301, drawn
+    /// <paramref name="markWidth"/> wide, and A to U+05D0.
+    /// </summary>
+    private static byte[] TextPdf(string content, int markWidth)
+    {
+        const string cmap = "/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CMapName /Test def\n"
+            + "1 begincodespacerange <00> <FF> endcodespacerange\n"
+            + "5 beginbfchar <01> <0301> <20> <0020> <41> <05D0> <42> <0042> <43> <0043> endbfchar\n"
+            + "endcmap CMapName currentdict /CMap defineresource pop end end";
+        var widths = markWidth + " " + string.Join(" ", Enumerable.Repeat("600", 66));
+        using var ms = new MemoryStream();
+        using (var zs = new ZLibStream(ms, CompressionLevel.Optimal, leaveOpen: true)) zs.Write(Encoding.Latin1.GetBytes(content));
+        var data = Encoding.Latin1.GetString(ms.ToArray());
+        return SimplePdf(new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 6 0 R >>",
+            $"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /FirstChar 1 /LastChar 67 /Widths [{widths}] /ToUnicode 5 0 R >>",
+            $"<< /Length {cmap.Length} >>\nstream\n{cmap}\nendstream",
+            $"<< /Length {data.Length} /Filter /FlateDecode >>\nstream\n{data}\nendstream",
+        });
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private static byte[] SimplePdf(List<string> objects)
