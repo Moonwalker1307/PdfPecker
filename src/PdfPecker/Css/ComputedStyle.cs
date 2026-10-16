@@ -103,6 +103,12 @@ internal enum Position : byte { Static, Relative, Absolute, Fixed }
 
 internal enum FloatSide : byte { None, Left, Right }
 
+/// <summary>How a footnote sits in the footnote area (footnote-display); compact is laid out as inline.</summary>
+internal enum FootnoteDisplay : byte { Block, Inline, Compact }
+
+/// <summary>What happens when a footnote does not fit on the page of its call (footnote-policy).</summary>
+internal enum FootnotePolicy : byte { Auto, Line, Block }
+
 /// <summary>One function of a CSS transform list. Translations are in points, or percentages of the border box when flagged.</summary>
 internal readonly record struct TransformFn(TransformKind Kind, float A, float B = 0, float C = 0, float D = 0, float E = 0, float F = 0,
     bool PercentX = false, bool PercentY = false);
@@ -300,6 +306,10 @@ internal sealed class ComputedStyle
     public bool AvoidBreakBefore, AvoidBreakAfter; // break-before/after: avoid (keep with the next or previous box)
     public bool Floated;
     public FloatSide Float;
+    /// <summary>float: footnote: the box leaves the flow for the footnote area of the page its call lands on.</summary>
+    public bool Footnote;
+    public FootnoteDisplay FootnoteDisplay;
+    public FootnotePolicy FootnotePolicy;
     public bool ClearLeft, ClearRight;
     public float Opacity = 1;
     // An inline box's opacity times that of the inline boxes around it, up to the block. Inline boxes get no layer of
@@ -469,6 +479,9 @@ internal sealed class ComputedStyle
         c.AvoidBreakBefore = c.AvoidBreakAfter = false;
         c.Floated = false;
         c.Float = FloatSide.None;
+        c.Footnote = false;
+        c.FootnoteDisplay = FootnoteDisplay.Block;
+        c.FootnotePolicy = FootnotePolicy.Auto;
         c.ClearLeft = c.ClearRight = false;
         c.Opacity = 1;
         c.Position = Position.Static;

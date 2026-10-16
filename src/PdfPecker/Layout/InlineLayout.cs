@@ -258,6 +258,14 @@ internal sealed partial class LayoutEngine
         if (e.Id != null) { var it_ = Rent(ItemKind.Anchor, s); it_.AnchorId = e.Id; st.Items.Add(it_); }
         if (e.Name == "a" && e.GetAttribute("name") is { } aname) { var it_ = Rent(ItemKind.Anchor, s); it_.AnchorId = aname; st.Items.Add(it_); }
         if (e.LayoutKey != null) { var it_ = Rent(ItemKind.Anchor, s); it_.AnchorId = e.LayoutKey; st.Items.Add(it_); }
+        if (e.FootnoteBody is { FootnoteIndex: >= 0 } footnote)
+        {
+            // A footnote call: its place decides the footnote's page, and it links to the footnote.
+            var it_ = Rent(ItemKind.Anchor, s);
+            it_.AnchorId = FootnoteSetup.CallKey(footnote.FootnoteIndex);
+            st.Items.Add(it_);
+            href = "#" + FootnoteSetup.BodyKey(footnote.FootnoteIndex);
+        }
 
         if ((s.Layered || (s.BorderRadii != null || s.ObjectFit != ObjectFit.Fill || s.OutlineStyle != BorderStyle.None) && e.Name == "img") && e.Name is "img" or "svg")
         {
@@ -1003,6 +1011,8 @@ internal sealed partial class LayoutEngine
         if (_lineA.Length < n) { _lineA = new float[n * 2]; _lineD = new float[n * 2]; }
         float[] lineA = _lineA, lineD = _lineD;
         for (int li = 0; li < n; li++) LineExtent(lines[li], block, out lineA[li], out lineD[li]);
+        // Placing a footnote lays it out, which reuses the shared line buffers: these lines keep their own copy.
+        if (Footnotes != null && _paginate) { lineA = (float[])lineA.Clone(); lineD = (float[])lineD.Clone(); }
         // Beside floats the lines' positions were fixed while breaking them.
         bool[]? breakBefore = _paginate && n > 1 && !besideFloats ? PlanBreaks(n, lineA, lineD, y, block.Orphans, block.Widows) : null;
 
@@ -1030,6 +1040,7 @@ internal sealed partial class LayoutEngine
             y = FitOnPage(y, lineH);
             CheckPageLimit(y);
             if (breakBefore != null && breakBefore[li]) y = NextPage(y);
+            if (Footnotes != null && _paginate && !_measuring) y = PlaceFootnoteCalls(items, y, lineH);
             float baseline = y + maxA;
             float lineIndent = li == 0 ? indent : 0;
             // Bidirectional text: the items in visual order; a right-to-left paragraph starts at the right, where its
@@ -1085,6 +1096,9 @@ internal sealed partial class LayoutEngine
             PaintInlineBackgrounds(items, xs, baseline);
             EmitLinks(items, xs, y, lineH);
 
+            // Footnote calls inside inline boxes are placed once the line is drawn, not while its buffers are in use.
+            bool deferCalls = _deferFootnoteCalls;
+            if (Footnotes != null) _deferFootnoteCalls = true;
             int i = 0;
             while (i < items.Count)
             {
@@ -1152,6 +1166,8 @@ internal sealed partial class LayoutEngine
                 i++;
             }
 
+            _deferFootnoteCalls = deferCalls;
+            if (_deferredFootnoteCalls is { Count: > 0 } && !deferCalls) PlaceDeferredFootnoteCalls();
             _lastBaseline = baseline;
             if (_marker != null) EmitMarker(baseline, y);
             y += lineH;

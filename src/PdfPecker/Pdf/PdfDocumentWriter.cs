@@ -38,6 +38,13 @@ internal sealed class PageSection
     public float ContentHeight;
     public IReadOnlyDictionary<string, float> Anchors = new Dictionary<string, float>();
     public List<DrawOp>? FixedOps;
+    /// <summary>The footnote areas of the section's pages, in flow coordinates at the bottom of their pages.</summary>
+    public List<DrawOp>? FootnoteOps;
+    /// <summary>
+    /// The height a page's footnote area (by its index within the section) takes from the bottom of the page's flow:
+    /// the flow's boxes are cut off there, as at the end of a page.
+    /// </summary>
+    public Func<int, float>? FootnoteReserve;
     /// <summary>The canvas background of the section's page with the given index within the section.</summary>
     public Func<int, List<DrawOp>>? Canvas;
     /// <summary>The number of pages the content needs, from its height: at least one.</summary>
@@ -352,6 +359,7 @@ internal sealed partial class PdfDocumentWriter
 
         // 1. Distribute ops over pages.
         var pages = new List<List<Placed>>();
+        Func<int, float>? footnoteCut = null; // the space footnote areas take at the bottom of the pages being distributed
         List<Placed> PageList(int p)
         {
             // Sized like the page before: pages of a document tend to hold about as many ops each.
@@ -371,7 +379,7 @@ internal sealed partial class PdfDocumentWriter
             int p0 = PageOf(top), p1 = Math.Max(p0, PageOf(bottom - 0.5f));
             for (int p = p0; p <= p1; p++)
             {
-                float y0 = Math.Max(top, grid.Start(p)), y1 = Math.Min(bottom, grid.Start(p + 1));
+                float y0 = Math.Max(top, grid.Start(p)), y1 = Math.Min(bottom, grid.Start(p + 1) - (footnoteCut?.Invoke(p) ?? 0));
                 if (y1 > y0 || top == bottom) Target(into, p).Add(new Placed(op, y0, y1));
             }
         }
@@ -457,7 +465,10 @@ internal sealed partial class PdfDocumentWriter
             var section = sections[si];
             grid = section.Grid;
             pageOffset = sectionFirst[si] = pageSection.Count;
+            footnoteCut = section.FootnoteReserve;
             foreach (var op in section.Ops) Distribute(op, null);
+            footnoteCut = null;
+            if (section.FootnoteOps != null) foreach (var op in section.FootnoteOps) Distribute(op, null);
             int sectionPages = Math.Max(pages.Count - pageOffset, Math.Max(1, PageOf(Math.Max(0, section.ContentHeight - 0.5f)) + 1));
             while (pages.Count < pageOffset + sectionPages) pages.Add(new List<Placed>());
             for (int k = 0; k < sectionPages; k++) pageSection.Add(si);
@@ -1039,6 +1050,18 @@ internal sealed partial class PdfDocumentWriter
 
         Begin(rootId).Ascii("<< /Type /StructTreeRoot /K ").Int(tree.Root.Id).Ascii(" 0 R /ParentTree ").Int(parentTreeId)
             .Ascii(" 0 R /ParentTreeNextKey ").Int(nextKey);
+        // Elements with identifiers (footnote Notes) are listed in the ID tree, in the byte order of their identifiers.
+        var identified = elements.Where(e => e.ElementId != null).OrderBy(e => e.ElementId, StringComparer.Ordinal).ToList();
+        if (identified.Count > 0)
+        {
+            _out.Ascii(" /IDTree << /Names [");
+            foreach (var e in identified)
+            {
+                WriteAsciiString(_out, e.ElementId!);
+                _out.Sp().Int(e.Id).Ascii(" 0 R ");
+            }
+            _out.Ascii("] >>");
+        }
         if (ns2Id != 0)
         {
             _out.Ascii(" /Namespaces [").Int(ns2Id).Ascii(" 0 R");
@@ -1094,6 +1117,7 @@ internal sealed partial class PdfDocumentWriter
             if (ns2Id != 0) _out.Ascii(" /NS ").Int(Pdf17Only(e.Type) != null ? ns17Id : ns2Id).Ascii(" 0 R");
             if (e.Lang != null) { _out.Ascii(" /Lang "); WriteTextString(_out, e.Lang); }
             if (e.Alt != null) { _out.Ascii(" /Alt "); WriteTextString(_out, e.Alt); }
+            if (e.ElementId != null) { _out.Ascii(" /ID "); WriteAsciiString(_out, e.ElementId); }
             if (e.Scope != null || e.RowSpan > 1 || e.ColSpan > 1)
             {
                 _out.Ascii(" /A << /O /Table");
@@ -1154,6 +1178,7 @@ internal sealed partial class PdfDocumentWriter
         "BlockQuote" => "Div",
         "Quote" or "Code" => "Span",
         "Art" => "Sect",
+        "Note" => "FENote",
         _ => null,
     };
 

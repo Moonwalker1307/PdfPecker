@@ -86,5 +86,9 @@ textarea pdf-field-value { white-space: pre-wrap; overflow-wrap: break-word; }
 option, optgroup { display: none; }
 q::before { content: open-quote; }
 q::after { content: close-quote; }
+/* CSS footnotes (float: footnote), numbered by the footnote counter: a superscript call in the text, as Prince and
+   WeasyPrint show it, and a marker before the footnote. */
+::footnote-call { content: counter(footnote); vertical-align: super; font-size: 83%; }
+::footnote-marker { content: counter(footnote) "". ""; }
 ";
 }

@@ -151,6 +151,7 @@ public static class HtmlToPdf
         images.Fonts = fonts;
         // Pagination results that generated content uses: the pages of target-counter() and the running strings.
         var paged = new PagedContent();
+        if (!options.IgnoreCssPageRules) paged.FootnotePageReset = FootnotePageReset(sheet.PageRules);
         float viewport = viewportH;
         ComputedStyle root = null!;
         // hyphens: auto: the language of the text is its nearest lang attribute, else PdfOptions.Language.
@@ -266,12 +267,27 @@ public static class HtmlToPdf
             return variants[(name, first, right)] = setup;
         }
 
-        // Layout, repeated when generated content shows page numbers (target-counter): they are known after a layout,
-        // and a layout with them can move content again, so there is at most a third.
+        // The footnote area of a run's pages: the @footnote rules of the document's @page rules and of its named page.
+        var footnoteAreas = new Dictionary<string, ComputedStyle>(StringComparer.Ordinal);
+        ComputedStyle FootnoteArea(string? name)
+        {
+            var key = name ?? "";
+            if (footnoteAreas.TryGetValue(key, out var cached)) return cached;
+            var decls = options.IgnoreCssPageRules ? new List<Declaration>()
+                : sheet.PageRules.Where(r => r.Footnote != null && r.Selector.Length == 0 && (r.Name.Length == 0 || r.Name == name))
+                    .OrderBy(r => r.Specificity).SelectMany(r => r.Footnote!).ToList();
+            var initial = new ComputedStyle { Display = Display.Block, Fonts = fonts, MissingFonts = missingFonts, Lang = htmlLang ?? options.Language, Hyphenation = hyphenation };
+            return footnoteAreas[key] = FootnoteSetup.AreaStyle(decls, initial, page.ContentWidth, page.ContentHeight);
+        }
+
+        // Layout, repeated when generated content shows page numbers (target-counter) or footnotes are numbered per
+        // page: the pages are known after a layout, and a layout with them can move content again, so there is at
+        // most a third.
         ComputedStyle? canvasStyle;
         StructureTree? structure;
         List<PageRun> runs;
         Dictionary<string, int>? targetPages = null;
+        Dictionary<int, int>? footnotePages = null;
         int containerPasses = 0;
         for (int pass = 0; ; pass++)
         {
@@ -299,6 +315,7 @@ public static class HtmlToPdf
                     {
                         Cancellation = cancellationToken, MaxPages = Math.Max(1, options.MaxPages), FixedAreaHeight = run.Page.ContentHeight,
                         CanvasRoot = htmlEl, Tags = structure, Headings = headings,
+                        Footnotes = styles.Footnotes.Count == 0 ? null : new FootnoteSetup(styles.Footnotes.ToArray(), FootnoteArea(run.Name)),
                     };
                     run.Height = run.Engine.Layout(doc, run.Width);
                 }
@@ -318,11 +335,30 @@ public static class HtmlToPdf
                 pass--; // not a pass for the page numbers of target-counter()
                 continue;
             }
-            if (!paged.UsesTargets || pass == 2) break;
-            var pages = PagesOfAnchors(runs);
-            if (targetPages != null && pages.Count == targetPages.Count && !pages.Except(targetPages).Any()) break;
-            targetPages = pages;
-            paged.PageOfId = id => pages.TryGetValue(id, out int n) ? n : null;
+            if (pass == 2) break;
+            bool again = false;
+            if (paged.UsesTargets)
+            {
+                var pages = PagesOfAnchors(runs);
+                if (targetPages == null || pages.Count != targetPages.Count || pages.Except(targetPages).Any())
+                {
+                    targetPages = pages;
+                    paged.PageOfId = id => pages.TryGetValue(id, out int n) ? n : null;
+                    again = true;
+                }
+            }
+            if (paged.FootnotePageReset != null && styles.Footnotes.Count > 0)
+            {
+                // Footnotes numbered per page: their numbers depend on the pages their calls landed on.
+                var pages = PagesOfFootnotes(runs);
+                if (footnotePages == null || pages.Count != footnotePages.Count || pages.Except(footnotePages).Any())
+                {
+                    footnotePages = pages;
+                    paged.FootnotePageOf = k => pages.TryGetValue(k, out int n) ? n : null;
+                    again = true;
+                }
+            }
+            if (!again) break;
             styles = Resolve();
         }
 
@@ -355,6 +391,8 @@ public static class HtmlToPdf
             {
                 Page = run.Page, Grid = run.Grid, Ops = engine.Ops, ContentHeight = run.Height, Anchors = engine.Anchors,
                 FixedOps = engine.FixedOps.Count > 0 ? engine.FixedOps : null, Canvas = pageCanvas,
+                FootnoteOps = engine.FootnoteOps.Count > 0 ? engine.FootnoteOps : null,
+                FootnoteReserve = engine.FootnoteOps.Count > 0 ? engine.FootnoteReserve : null,
             });
         }
 
@@ -575,6 +613,39 @@ public static class HtmlToPdf
             first += grid.PagesFor(run.Height);
         }
         return pages;
+    }
+
+    /// <summary>The page (0-based, in the whole document) of each footnote's call in the laid-out runs.</summary>
+    private static Dictionary<int, int> PagesOfFootnotes(List<PageRun> runs)
+    {
+        var pages = new Dictionary<int, int>();
+        int first = 0;
+        foreach (var run in runs)
+        {
+            foreach (var (index, page) in run.Engine.FootnoteCallPages) pages.TryAdd(index, first + page);
+            first += run.Grid.PagesFor(run.Height);
+        }
+        return pages;
+    }
+
+    /// <summary>
+    /// The value an @page rule's counter-reset gives the footnote counter (CSS GCPM: footnotes numbered per page), or
+    /// null when no @page rule resets it.
+    /// </summary>
+    private static int? FootnotePageReset(List<PageRule> rules)
+    {
+        int? value = null;
+        foreach (var rule in rules.OrderBy(r => r.Specificity))
+            foreach (var d in rule.Declarations)
+            {
+                if (d.Property != "counter-reset") continue;
+                var tokens = CssParser.Tokens(d.Value.Trim());
+                int at = tokens.IndexOf("footnote");
+                if (at < 0) continue;
+                value = at + 1 < tokens.Count && int.TryParse(tokens[at + 1], System.Globalization.NumberStyles.AllowLeadingSign,
+                    System.Globalization.CultureInfo.InvariantCulture, out int v) ? v : 0;
+            }
+        return value;
     }
 
     private static Func<string, byte[]?> FetchFont(ImageLoader images) => url =>

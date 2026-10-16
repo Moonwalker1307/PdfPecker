@@ -56,7 +56,7 @@ internal sealed partial class LayoutEngine
                 cy = FlowColumns(pieces, s, n, x, cy, colW, gap);
                 pieces.Clear();
                 var span = CaptureBox(ce, w, shrinkToFit: false);
-                if (_paginate && !AtPageTop(cy) && cy + span.Height > _grid.Start(PageOf(cy) + 1) + Eps && span.Height <= _grid.Height(PageOf(cy) + 1))
+                if (_paginate && !AtPageTop(cy) && cy + span.Height > FlowEnd(PageOf(cy)) + Eps && span.Height <= _grid.Height(PageOf(cy) + 1))
                     cy = NextPage(cy);
                 Place(span, x, cy);
                 cy += span.Height;
@@ -80,7 +80,7 @@ internal sealed partial class LayoutEngine
         while (next < pieces.Count)
         {
             float balanced = BalanceColumns(pieces, next, n);
-            float room = _paginate ? _grid.Start(PageOf(top) + 1) - top : float.PositiveInfinity;
+            float room = _paginate ? FlowEnd(PageOf(top)) - top : float.PositiveInfinity;
             if (balanced <= room + Eps)
             {
                 bottom = PlaceColumns(pieces, ref next, n, balanced, x, top, colW, gap, fillAll: true, s);
