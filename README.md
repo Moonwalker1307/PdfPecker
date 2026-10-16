@@ -94,28 +94,27 @@ its own. See the [limitations](https://pdfpecker.net/docs/limitations/) for what
 ## How it compares
 
 The same three documents converted to A4 PDF by PdfPecker and six .NET alternatives, on one 4-core cloud VM
-(Intel Xeon @ 2.8 GHz, 16 GB, Linux, .NET 10.0.12). Times are medians after a 3-second warm-up; "first PDF" includes
-starting the browser where there is one. Parallel runs one conversion per core at once on the 5-page document. Peak
-memory is the proportional set size (PSS) of the whole process tree, so a browser's helper processes are included
-once and shared pages are not double-counted.
+(Intel Xeon @ 2.1 GHz, 16 GB, Linux, .NET 10.0.12), with PdfPecker 1.9.0. Times are medians after a 3-second warm-up,
+averaged over two runs; "first PDF" includes starting the browser where there is one. Parallel runs one conversion per
+core at once on the 5-page document. Peak memory is the proportional set size (PSS) of the whole process tree, so a
+browser's helper processes are included once and shared pages are not double-counted.
 
-PdfPecker is 60 to 150 times faster than the Chromium-based converters on the small documents and uses a tenth of their
+PdfPecker is 50 to 150 times faster than the Chromium-based converters on the small documents and uses a fifth of their
 memory. How to read the table, how it was measured and how to run it yourself is in
 [Performance](https://pdfpecker.net/docs/performance/).
 
 | Converter | Engine | To deploy | First PDF | Invoice, 1 page | Feature tour, 5 pages | Report, 30 pages | Parallel | Peak memory |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| **PdfPecker** | own, managed | 3.1 MB DLL | 0.27 s | **0.86 ms** | **2.7 ms** | **39 ms** | **962 docs/s** | **83 MB** |
-| HtmlRenderer.PdfSharp 1.6.1 | own, managed (CSS 2) | 2.4 MB of DLLs | 0.47 s | 5.0 ms | 16 ms | 473 ms | 88 docs/s | 255 MB |
-| iText pdfHTML 6.3.4 \* | own, managed | 11 MB of DLLs | 1.68 s | 41 ms | 242 ms | 4.2 s | 8 docs/s | 614 MB |
-| wkhtmltopdf 0.12.6 | Qt WebKit, native | about 90 MB with Qt | 0.31 s | 289 ms | 333 ms | 693 ms | 12 docs/s | 164 MB |
-| PuppeteerSharp 25.13 | Chromium 141 | about 600 MB browser | 0.91 s | 128 ms | 166 ms | 539 ms | 12 docs/s | 849 MB |
-| Microsoft.Playwright 1.63 | Chromium 141 | browser + 135 MB driver | 1.08 s | 142 ms | 191 ms | 522 ms | 11 docs/s | 986 MB |
-| Syncfusion HTML to PDF 35.1.40 \* | Chrome (Blink), bundled | about 545 MB with Chrome | 2.52 s | 263 ms | 314 ms | 1.7 s | 1 doc/s | 2,195 MB |
+| **PdfPecker** | own, managed | 4.0 MB DLL | 0.34 s | **0.77 ms** | **2.5 ms** | **22 ms** | **1,466 docs/s** | **195 MB** |
+| HtmlRenderer.PdfSharp 1.6.1 | own, managed (CSS 2) | 2.4 MB of DLLs | 0.45 s | 4.2 ms | 13 ms | 281 ms | 202 docs/s | 352 MB |
+| iText pdfHTML 6.3.4 | own, managed | 11 MB of DLLs | 1.19 s | 21 ms | 127 ms | 2.0 s | 16 docs/s | 711 MB |
+| wkhtmltopdf 0.12.6 | Qt WebKit, native | about 90 MB with Qt | 0.31 s | 279 ms | 308 ms | 576 ms | 13 docs/s | 280 MB |
+| PuppeteerSharp 25.13 | Chromium 141 | about 600 MB browser | 1.15 s | 102 ms | 135 ms | 431 ms | 17 docs/s | 872 MB |
+| Microsoft.Playwright 1.63 | Chromium 141 | browser + 135 MB driver | 0.96 s | 116 ms | 159 ms | 466 ms | 12 docs/s | 1,016 MB |
+| Syncfusion HTML to PDF 35.1.40 | Chrome (Blink), bundled | about 545 MB with Chrome | 2.48 s | 159 ms | 209 ms | 0.87 s | 4 docs/s | 2,212 MB |
 
-\* Measured later (October 2026) on the same VM type with the same program. In that run the other converters were up to
-70% slower than in the table above and PdfPecker slightly faster, so these two rows are approximate and, if anything,
-a little slower than a like-for-like run would show.
+Most of PdfPecker's peak memory is the .NET garbage collector's allocation budget, which .NET sizes from the CPU cache
+(260 MB of L3 on this VM). With `DOTNET_GCgen0size=0x1000000` (16 MB) the same run peaks at 88 MB.
 
 ## Building
 
