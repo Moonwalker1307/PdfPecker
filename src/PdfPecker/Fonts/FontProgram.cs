@@ -49,6 +49,7 @@ internal sealed class FontProgram
     private bool _layoutLoaded;
     private VariationAxis[]? _axes;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, FontProgram> _instances = new(StringComparer.Ordinal);
+    private System.Collections.Concurrent.ConcurrentDictionary<string, FontProgram>? _featureVariants;
 
     private FontProgram(byte[] data, int dirOffset)
     {
@@ -189,6 +190,35 @@ internal sealed class FontProgram
         var bmp = _bmp ?? BuildCharMap();
         if ((uint)codePoint < 0x10000) return bmp[codePoint];
         return _astral != null && _astral.TryGetValue(codePoint, out var g) ? g : 0;
+    }
+
+    /// <summary>
+    /// This font with OpenType features such as tabular figures applied to its character map (a key from
+    /// <see cref="FontFeatures.Key"/>). Returns this font when the features change nothing. Variants are cached.
+    /// </summary>
+    public FontProgram WithFeatures(string features)
+    {
+        var variants = LazyInitializer.EnsureInitialized(ref _featureVariants, () => new());
+        return variants.GetOrAdd(features, MakeVariant);
+    }
+
+    private FontProgram MakeVariant(string features)
+    {
+        int[]? map;
+        try { map = FontFeatures.Substitutions(this, features); }
+        catch (Exception ex) when (IsFormatError(ex)) { map = null; }
+        if (map == null) return this;
+        var bmp = _bmp ?? BuildCharMap();
+        // The variant shares the font data and every table reader; only the character map and widths differ. Features
+        // are applied after a variable font is instanced, so a variant never makes instances of its own.
+        var variant = (FontProgram)MemberwiseClone();
+        var mapped = new ushort[bmp.Length];
+        for (int c = 0; c < bmp.Length; c++) mapped[c] = bmp[c] < map.Length ? (ushort)map[bmp[c]] : bmp[c];
+        variant._astral = _astral?.ToDictionary(kv => kv.Key, kv => kv.Value < map.Length ? (ushort)map[kv.Value] : kv.Value);
+        variant._bmp = mapped;
+        variant._charWidths = null;
+        variant._featureVariants = null;
+        return variant;
     }
 
     /// <summary>Advance width of a glyph in font units.</summary>
