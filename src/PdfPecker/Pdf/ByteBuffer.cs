@@ -68,6 +68,8 @@ internal sealed class ByteBuffer
     /// <summary>Writes a number with at most 3 decimals and no exponent, as PDF requires.</summary>
     public ByteBuffer Num(float f)
     {
+        // A NaN or infinity is not valid PDF syntax, and negating long.MinValue below would overflow.
+        if (!float.IsFinite(f)) return Byte((byte)'0');
         long scaled = (long)Math.Round(f * 1000.0);
         if (scaled < 0) { Byte((byte)'-'); scaled = -scaled; }
         long ip = scaled / 1000;
@@ -88,6 +90,7 @@ internal sealed class ByteBuffer
     /// <summary>Writes a number with up to 6 decimals, for matrix coefficients and function bounds.</summary>
     public ByteBuffer Num6(float f)
     {
+        if (!float.IsFinite(f)) return Byte((byte)'0');
         long scaled = (long)Math.Round(f * 1000000.0);
         if (scaled % 1000 == 0) return Num(f);
         if (scaled < 0) { Byte((byte)'-'); scaled = -scaled; }

@@ -22,19 +22,28 @@ internal sealed class PdfXref
         return b.Int(id).Ascii(" 0 obj\n");
     }
 
+    /// <summary>The first id from 1 to <paramref name="count"/> - 1 that was never begun, or -1 when every id was written.</summary>
+    public int FirstMissing(int count)
+    {
+        for (int i = 1; i < count; i++)
+            if (i >= _offsets.Count || _offsets[i] <= 0) return i;
+        return -1;
+    }
+
     public static void End(ByteBuffer b) => b.Ascii("\nendobj\n");
 
     /// <summary>
     /// Writes the cross-reference table for objects 0 to <paramref name="count"/> - 1. An id that was never written is
-    /// marked free, unless <paramref name="allInUse"/> is set by a writer that writes every id it hands out.
+    /// marked free: no object can start at offset 0, where the file header is, so listing it as in use would point a reader
+    /// at the header.
     /// </summary>
-    public void WriteTable(ByteBuffer b, int count, bool allInUse = false)
+    public void WriteTable(ByteBuffer b, int count)
     {
         b.Ascii("xref\n0 ").Int(count).Ascii("\n0000000000 65535 f \n");
         for (int i = 1; i < count; i++)
         {
             long offset = i < _offsets.Count ? _offsets[i] : 0;
-            if (allInUse || offset > 0) Padded(b, offset, 10).Ascii(" 00000 n \n");
+            if (offset > 0) Padded(b, offset, 10).Ascii(" 00000 n \n");
             else b.Ascii("0000000000 00000 f \n");
         }
     }
