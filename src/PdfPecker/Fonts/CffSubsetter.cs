@@ -230,6 +230,12 @@ internal static class CffSubsetter
         private int _sp, _stems;
         private bool _done;
 
+        // Subroutines that each call the next many times expand exponentially within the nesting limit, so the walk is
+        // bounded per glyph (as the renderer bounds its charstrings) and per font, since a document may use thousands
+        // of glyphs. A font past either bound is not subset but embedded whole, which keeps every subroutine.
+        private const int GlyphBudget = 200_000, FontBudget = 50_000_000;
+        private int _glyphBudget, _fontBudget = FontBudget;
+
         public SubrUsage(Index global, List<PrivateBlock> blocks)
         {
             _global = global;
@@ -245,6 +251,7 @@ internal static class CffSubsetter
             _sp = 0;
             _stems = 0;
             _done = false;
+            _glyphBudget = GlyphBudget;
             if ((uint)fd >= (uint)_blocks.Count) fd = 0;
             Run(cs, fd, 0);
         }
@@ -255,6 +262,7 @@ internal static class CffSubsetter
             int i = 0;
             while (i < cs.Length && !_done)
             {
+                if (--_glyphBudget < 0 || --_fontBudget < 0) throw new InvalidOperationException("CFF charstrings call too many subroutines.");
                 int b = cs[i];
                 if (b >= 32 || b == 28)
                 {

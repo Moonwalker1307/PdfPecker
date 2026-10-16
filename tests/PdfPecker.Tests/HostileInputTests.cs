@@ -4,6 +4,7 @@ using System.Text;
 using PdfPecker.Css;
 using PdfPecker.Fonts;
 using PdfPecker.Html;
+using PdfPecker.Images;
 using static PdfPecker.Tests.PdfTestHelpers;
 
 namespace PdfPecker.Tests;
@@ -461,6 +462,151 @@ public class HostileInputTests
         }
     }
 
+    /// <summary>Runs <paramref name="work"/> on one thread and returns its result with the bytes that thread allocated.</summary>
+    private static (T Result, long Allocated) Allocating<T>(Func<T> work) => Bounded(() =>
+    {
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        var result = work();
+        return (result, GC.GetAllocatedBytesForCurrentThread() - before);
+    });
+
+    /// <summary>A little-endian TIFF of one image directory whose tags all hold one LONG, followed by <paramref name="data"/>.</summary>
+    private static byte[] Tiff((int Tag, uint Value)[] tags, byte[] data, int dataOffsetTag)
+    {
+        int dataAt = 8 + 2 + tags.Length * 12 + 4;
+        var d = new byte[dataAt + data.Length];
+        "II*\0"u8.CopyTo(d);
+        BinaryPrimitives.WriteUInt32LittleEndian(d.AsSpan(4), 8);
+        BinaryPrimitives.WriteUInt16LittleEndian(d.AsSpan(8), (ushort)tags.Length);
+        int at = 10;
+        foreach (var (tag, value) in tags.OrderBy(t => t.Tag))
+        {
+            BinaryPrimitives.WriteUInt16LittleEndian(d.AsSpan(at), (ushort)tag);
+            BinaryPrimitives.WriteUInt16LittleEndian(d.AsSpan(at + 2), 4);
+            BinaryPrimitives.WriteUInt32LittleEndian(d.AsSpan(at + 4), 1);
+            BinaryPrimitives.WriteUInt32LittleEndian(d.AsSpan(at + 8), tag == dataOffsetTag ? (uint)dataAt : value);
+            at += 12;
+        }
+        data.CopyTo(d, dataAt);
+        return d;
+    }
+
+    [Theory]
+    [InlineData(32773)] // PackBits
+    [InlineData(8)] // Deflate
+    [InlineData(1)] // uncompressed
+    public void Tiff_tile_far_larger_than_the_image_is_not_allocated(int compression)
+    {
+        // A 1 x 1 image of eight 16-bit samples in one 10000 x 10000 tile: 1.6 GB for the tile from a few bytes.
+        var tiff = Tiff(new[]
+        {
+            (256, 1u), (257, 1u), (258, 16u), (259, (uint)compression), (262, 1u), (277, 8u),
+            (322, 10000u), (323, 10000u), (324, 0u), (325, 16u),
+        }, new byte[16], 324);
+        var (_, allocated) = Allocating(() => TiffDecoder.Decode(tiff, 100_000_000));
+        Assert.True(allocated < 64 << 20, $"Allocated {allocated:N0} bytes");
+    }
+
+    [Fact]
+    public void Tiff_strips_sharing_one_lzw_blob_decode_only_their_own_size()
+    {
+        // 1000 strips of one row each all point at the same LZW data, which decodes to about 256 KB of zeros: each strip
+        // needs 16 bytes, so decoding the whole blob for each would be over ten thousand times the image.
+        var lzw = new List<byte>();
+        int bits = 0, count = 0;
+        void Code(int c) { bits = bits << 9 | c; count += 9; while (count >= 8) { lzw.Add((byte)(bits >> (count - 8))); count -= 8; } }
+        for (int cycle = 0; cycle < 8; cycle++)
+        {
+            Code(256);
+            Code(0);
+            for (int c = 258; c < 510; c++) Code(c); // each code is the previous one plus another zero, still 9 bits wide
+        }
+        Code(257);
+        if (count > 0) lzw.Add((byte)(bits << (8 - count)));
+        var data = lzw.ToArray();
+
+        const int rows = 1000;
+        var tiff = Tiff(new[]
+        {
+            (256, 16u), (257, (uint)rows), (258, 8u), (259, 5u), (262, 1u), (277, 1u), (278, 1u), (273, 0u), (279, 0u),
+        }, data, 273);
+        // Point every strip at the one blob through offset and byte-count arrays appended after it.
+        int blobAt = tiff.Length - data.Length, offsetsAt = tiff.Length, countsAt = offsetsAt + rows * 4;
+        Array.Resize(ref tiff, tiff.Length + rows * 8);
+        for (int i = 0; i < rows; i++)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(tiff.AsSpan(offsetsAt + i * 4), (uint)blobAt);
+            BinaryPrimitives.WriteUInt32LittleEndian(tiff.AsSpan(countsAt + i * 4), (uint)data.Length);
+        }
+        // The directory holds the tags in order: 273 is the sixth entry and 279 the ninth.
+        foreach (var (index, at) in new[] { (5, offsetsAt), (8, countsAt) })
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(tiff.AsSpan(10 + index * 12 + 4), rows);
+            BinaryPrimitives.WriteUInt32LittleEndian(tiff.AsSpan(10 + index * 12 + 8), (uint)at);
+        }
+
+        // Refusing the file and decoding each strip only as far as its own 16 bytes are both fine.
+        var (_, allocated) = Allocating(() => TiffDecoder.Decode(tiff, 100_000_000));
+        Assert.True(allocated < 200 << 20, $"Allocated {allocated:N0} bytes");
+    }
+
+    [Fact]
+    public void Animated_webp_with_a_huge_canvas_and_a_tiny_frame_is_not_allocated()
+    {
+        // The lossless frame of a small fixture as the first frame of an animation on a 10000 x 10000 canvas.
+        var source = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "images", "lossless-palette.webp"));
+        int vp8l = Encoding.ASCII.GetString(source).IndexOf("VP8L", StringComparison.Ordinal);
+        var frame = source.AsSpan(vp8l, 8 + BinaryPrimitives.ReadInt32LittleEndian(source.AsSpan(vp8l + 4))).ToArray();
+        if (frame.Length % 2 == 1) Array.Resize(ref frame, frame.Length + 1);
+
+        var webp = new MemoryStream();
+        void Chunk(string fourCc, byte[] body)
+        {
+            webp.Write(Encoding.ASCII.GetBytes(fourCc));
+            webp.Write(BitConverter.GetBytes(body.Length));
+            webp.Write(body);
+        }
+        webp.Write("RIFF\0\0\0\0WEBP"u8);
+        var vp8x = new byte[10];
+        vp8x[0] = 0x02; // animation
+        vp8x[4] = (9999 & 0xFF); vp8x[5] = 9999 >> 8; vp8x[7] = (9999 & 0xFF); vp8x[8] = 9999 >> 8;
+        Chunk("VP8X", vp8x);
+        Chunk("ANIM", new byte[6]);
+        Chunk("ANMF", new byte[16].Concat(frame).ToArray()); // offset 0, frame size and timing left at zero
+        var bytes = webp.ToArray();
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(4), bytes.Length - 8);
+
+        var (_, allocated) = Allocating(() => WebPDecoder.Decode(bytes, 100_000_000));
+        Assert.True(allocated < 64 << 20, $"Allocated {allocated:N0} bytes");
+    }
+
+    [Fact]
+    public void Device_files_and_pipes_are_not_read_as_images_or_stylesheets()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        var dir = Directory.CreateTempSubdirectory("pdfpecker-fifo");
+        try
+        {
+            // A pipe nobody writes to blocks whoever opens it; /dev/zero never ends.
+            var fifo = Path.Combine(dir.FullName, "pipe.css");
+            using (var mkfifo = System.Diagnostics.Process.Start("mkfifo", fifo)) mkfifo.WaitForExit();
+            Assert.True(File.Exists(fifo));
+            var html = $"<link rel=stylesheet href='{fifo}'><link rel=stylesheet href='/dev/zero'>"
+                + $"<img src='/dev/zero'><img src='file:///dev/zero'><img src='pipe.css'><p>text</p>";
+            var options = new PdfOptions { BaseDirectory = dir.FullName, AllowFileAccess = true };
+            var (pdf, allocated) = Allocating(() => HtmlToPdf.Convert(html, options));
+            AssertStructurallyValid(pdf);
+            Assert.True(allocated < 256 << 20, $"Allocated {allocated:N0} bytes");
+            // Without AllowFileAccess the pipe inside the base directory is still in reach.
+            AssertStructurallyValid(Bounded(() => HtmlToPdf.Convert("<img src='pipe.css'><link rel=stylesheet href='pipe.css'>",
+                new PdfOptions { BaseDirectory = dir.FullName })));
+        }
+        finally
+        {
+            dir.Delete(true);
+        }
+    }
+
     private static Element Styled(string html)
     {
         var doc = HtmlParser.Parse(html);
@@ -512,6 +658,117 @@ public class HostileInputTests
         var pdf = ms.ToArray();
 
         Assert.Empty(Bounded(() => PdfSignatureVerifier.Verify(pdf)));
+    }
+}
+
+/// <summary>Hostile CFF and CFF2 fonts whose subroutines fan out exponentially.</summary>
+[Collection(HostileInputCollection.Name)]
+public class CffSubroutineTests
+{
+    private static byte[] Fixture(string name) => File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", name));
+
+    private static byte[] Bounded(string html)
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        return HtmlToPdf.Convert(html, null, cts.Token);
+    }
+
+    private static string FontFace(byte[] font)
+        => $"<style>@font-face{{font-family:f;src:url(data:font/otf;base64,{Convert.ToBase64String(font)})}}</style>";
+
+    [Fact]
+    public void Cff_subroutines_that_fan_out_do_not_hang_subsetting()
+    {
+        // Every glyph of Inter becomes a call into global subroutines that each call the next a thousand times.
+        var font = ReplaceTable(Fixture("Inter-Subr.otf"), "CFF ", n => FanOutCff(cff2: false, n));
+        AssertStructurallyValid(Bounded(FontFace(font) + "<p style='font-family:f'>xyz</p>"));
+    }
+
+    [Fact]
+    public void Cff2_subroutines_that_fan_out_do_not_hang_instancing()
+    {
+        // A bold run makes the converter instance the CFF2 variable font, which runs every glyph's charstring.
+        var font = ReplaceTable(Fixture("VarTestCFF-Subset.otf"), "CFF2", n => FanOutCff(cff2: true, n));
+        AssertStructurallyValid(Bounded(FontFace(font) + "<p style='font-family:f'>Hen <b>Hen</b></p>"));
+    }
+
+    private static byte[] ReplaceTable(byte[] font, string tag, Func<int, byte[]> table)
+    {
+        var p = Assert.Single(FontProgram.Load(font));
+        var replacement = table(p.NumGlyphs);
+        var tables = p.Tables.Select(t => (t.Tag, t.Tag == FontProgram.Tag(tag) ? replacement : p.Data.AsSpan(t.Offset, t.Length).ToArray())).ToList();
+        return SfntBuilder.Build(0x4F54544F, tables); // 'OTTO'
+    }
+
+    /// <summary>
+    /// A CFF (or CFF2) table whose glyphs all call global subroutine 0, and whose subroutine i calls subroutine i + 1
+    /// a thousand times: 1000^8 calls if walked naively. With fewer than 1240 subroutines the bias is 107, so
+    /// subroutine i is the one-byte number i - 107.
+    /// </summary>
+    private static byte[] FanOutCff(bool cff2, int glyphs)
+    {
+        const int levels = 9, fanOut = 1000; // nine levels stay within the nesting limit of ten, with the glyph itself
+        var subrs = new byte[levels][];
+        for (int i = 0; i < levels; i++)
+        {
+            var s = new List<byte>();
+            if (i + 1 < levels)
+                for (int k = 0; k < fanOut; k++) { s.Add((byte)(i + 1 - 107 + 139)); s.Add(29); } // n callgsubr
+            if (!cff2) s.Add(11); // return
+            subrs[i] = s.ToArray();
+        }
+        var glyph = cff2 ? new byte[] { 32, 29 } : new byte[] { 32, 29, 14 }; // -107 callgsubr (endchar)
+        var charStrings = Index(cff2, Enumerable.Repeat(glyph, glyphs).ToArray());
+        var gsubrs = Index(cff2, subrs);
+
+        var o = new List<byte>();
+        if (cff2)
+        {
+            o.AddRange(new byte[] { 2, 0, 5, 0, 6 }); // version 2, header size 5, Top DICT length 6
+            o.AddRange(TopDict(5 + 6 + gsubrs.Length));
+        }
+        else
+        {
+            o.AddRange(new byte[] { 1, 0, 4, 4 });
+            o.AddRange(Index(false, new[] { "F"u8.ToArray() }));
+            int topSize = Index(false, new[] { TopDict(0) }).Length;
+            o.AddRange(Index(false, new[] { TopDict(o.Count + topSize + 2 + gsubrs.Length) }));
+            o.AddRange(new byte[] { 0, 0 }); // empty String INDEX
+        }
+        o.AddRange(gsubrs);
+        o.AddRange(charStrings);
+        return o.ToArray();
+
+        // The Top DICT holds only the CharStrings offset, as a five-byte integer so that its size is known up front.
+        static byte[] TopDict(int charStrings)
+        {
+            var b = new byte[6];
+            b[0] = 29;
+            BinaryPrimitives.WriteInt32BigEndian(b.AsSpan(1), charStrings);
+            b[5] = 17;
+            return b;
+        }
+
+        static byte[] Index(bool cff2, byte[][] items)
+        {
+            var o = new List<byte>();
+            var count = new byte[4];
+            BinaryPrimitives.WriteInt32BigEndian(count, items.Length);
+            o.AddRange(cff2 ? count : count[2..]);
+            o.Add(4);
+            var off = new byte[4];
+            int at = 1;
+            BinaryPrimitives.WriteInt32BigEndian(off, at);
+            o.AddRange(off);
+            foreach (var item in items)
+            {
+                at += item.Length;
+                BinaryPrimitives.WriteInt32BigEndian(off, at);
+                o.AddRange(off);
+            }
+            foreach (var item in items) o.AddRange(item);
+            return o.ToArray();
+        }
     }
 }
 

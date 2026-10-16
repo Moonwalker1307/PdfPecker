@@ -92,6 +92,9 @@ internal static class TiffDecoder
         int chunkW = tiled ? (int)One(322, 0) : w;
         int chunkH = tiled ? (int)One(323, 0) : (int)Math.Clamp(One(278, h), 1, h);
         if (chunkW <= 0 || chunkH <= 0 || (long)chunkW * chunkH > maxPixels) return null;
+        // Tiles are multiples of 16 pixels, so one never needs to be more than 15 pixels wider or taller than the
+        // image; a bigger one would only be allocated and decoded to be cut away.
+        if (tiled && (chunkW > (w + 15L) / 16 * 16 || chunkH > (h + 15L) / 16 * 16)) return null;
         var offsets = Many(tiled ? 324 : 273);
         var byteCounts = Many(tiled ? 325 : 279);
         int across = (w + chunkW - 1) / chunkW, down = (h + chunkH - 1) / chunkH;
@@ -104,6 +107,14 @@ internal static class TiffDecoder
         // No compression here makes more than about 2000 bytes from one: a few bytes cannot fill a huge image, so it is
         // not allocated for them.
         if ((long)w * h > 1 << 22 && rawBytes > d.Length * 2000L) return null;
+        // Every chunk decodes to at most its own size, so this is all the chunks together can make. Tiles that cross
+        // the right and bottom edges pad the image, but never to more than twice its size, rounded up to whole tiles.
+        long paddedBytes = (((w + 15L) / 16 * 16 * chunkSamples * bps + 7) / 8) * ((h + 15L) / 16 * 16) * planes;
+        long chunkBytes = ((long)chunkW * chunkSamples * bps + 7) / 8 * chunkH * across * down * planes;
+        if (chunkBytes > 4 * paddedBytes) return null;
+        // Chunks may share data, as blank tiles often do, but a thousand pointing at one large blob would copy and decode
+        // it a thousand times: what they read together stays in proportion to the file and the image.
+        long readBudget = d.Length + 4 * chunkBytes;
         var plane = new byte[planes][];
         for (int p = 0; p < planes; p++) plane[p] = new byte[planeRowBytes * h];
         var tables = tags.TryGetValue(347, out var jt) ? r.Bytes(jt) : null;
@@ -119,6 +130,7 @@ internal static class TiffDecoder
             long length = index < byteCounts.Length ? byteCounts[index] : d.Length - start;
             if (start <= 0 || start >= d.Length) continue; // a missing chunk stays blank
             length = Math.Min(length, d.Length - start);
+            if ((readBudget -= Math.Max(length, 0)) < 0) return null;
             var raw = d.AsSpan((int)start, (int)length).ToArray();
             int rows = Math.Min(chunkH, h - cy * chunkH);
             int expected = chunkRowBytes * chunkH;
@@ -128,7 +140,7 @@ internal static class TiffDecoder
                 case 1: data = raw; break;
                 case 5:
                     if (raw.Length > 1 && raw[0] == 0 && (raw[1] & 1) != 0) return null; // old-style LZW, bits in the other order
-                    data = Filters.Lzw(raw, true);
+                    data = Filters.Lzw(raw, true, expected); // strips may share one blob, so each stops at its own size
                     break;
                 case 8 or 32946: data = Inflate(raw, expected); break;
                 case 32773: data = PackBits(raw, expected); break;
