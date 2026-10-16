@@ -2,7 +2,7 @@ using PdfPecker.Signing;
 
 namespace PdfPecker;
 
-/// <summary>Thrown when a PDF cannot be signed, e.g. because the timestamp server failed.</summary>
+/// <summary>Thrown when a PDF cannot be signed, e.g. because the timestamp server or the external signer failed.</summary>
 public sealed class PdfSignatureException : Exception
 {
     public PdfSignatureException(string message) : base(message) { }
@@ -23,12 +23,48 @@ public static class PdfSigner
     /// <param name="options">The certificate and signature settings.</param>
     /// <param name="password">The user or owner password, when the PDF is encrypted.</param>
     /// <exception cref="PdfPasswordException">The PDF is encrypted and the password does not open it.</exception>
-    /// <exception cref="PdfSignatureException">The timestamp server failed.</exception>
+    /// <exception cref="PdfSignatureException">The timestamp server failed, or the external signer's signature does not verify.</exception>
     public static byte[] Sign(byte[] pdf, PdfSignatureOptions options, string? password = null)
     {
         if (pdf == null) throw new ArgumentNullException(nameof(pdf));
         if (options == null) throw new ArgumentNullException(nameof(options));
         return SignatureWriter.Sign(pdf, options, password);
+    }
+
+    /// <summary>
+    /// Signs <paramref name="pdf"/> asynchronously: an asynchronous <see cref="PdfExternalSigner"/> (a cloud key vault)
+    /// and the timestamp server are awaited instead of blocking a thread. Otherwise the same as <see cref="Sign"/>.
+    /// </summary>
+    /// <param name="pdf">The PDF to sign.</param>
+    /// <param name="options">The certificate and signature settings.</param>
+    /// <param name="password">The user or owner password, when the PDF is encrypted.</param>
+    /// <param name="cancellationToken">Cancels the external signer and the timestamp request.</param>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and the password does not open it.</exception>
+    /// <exception cref="PdfSignatureException">The timestamp server failed, or the external signer's signature does not verify.</exception>
+    public static Task<byte[]> SignAsync(byte[] pdf, PdfSignatureOptions options, string? password = null, CancellationToken cancellationToken = default)
+    {
+        if (pdf == null) throw new ArgumentNullException(nameof(pdf));
+        if (options == null) throw new ArgumentNullException(nameof(options));
+        return SignatureWriter.SignAsync(pdf, options, password, async: true, cancellationToken).AsTask();
+    }
+
+    /// <summary>
+    /// Makes the signatures in <paramref name="pdf"/> long-term verifiable: adds a Document Security Store with every
+    /// certificate in their chains (including their timestamp authorities') and the OCSP responses and CRLs that show the
+    /// certificates were not revoked, so the signatures can be checked after the certificates expire (PAdES B-LT). With
+    /// <see cref="PdfLtvOptions.TimestampUrl"/> a document timestamp follows (PAdES B-LTA). Everything is appended as
+    /// incremental updates, so the existing signatures stay valid.
+    /// </summary>
+    /// <param name="pdf">A signed PDF.</param>
+    /// <param name="options">Extra certificates, revocation data, and whether to fetch it. Default: store the chains only, offline.</param>
+    /// <param name="password">The user or owner password, when the PDF is encrypted.</param>
+    /// <exception cref="PdfSignatureException">The PDF has no signatures, or fetching revocation data or the timestamp failed.</exception>
+    /// <exception cref="InvalidDataException">The file is not a readable PDF.</exception>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and the password does not open it.</exception>
+    public static byte[] AddValidationData(byte[] pdf, PdfLtvOptions? options = null, string? password = null)
+    {
+        if (pdf == null) throw new ArgumentNullException(nameof(pdf));
+        return LtvWriter.AddValidationData(pdf, options ?? new PdfLtvOptions(), password);
     }
 
     /// <summary>Signs a PDF file and writes the signed copy to <paramref name="outputPath"/> (which may be the same path).</summary>
