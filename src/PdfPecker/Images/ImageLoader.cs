@@ -114,6 +114,6 @@ internal sealed class ImageLoader
             path = Uri.UnescapeDataString(path);
         }
         if (LocalFiles.Resolve(path, _baseDirectory, _allowFiles) is not { } file) return null;
-        return File.Exists(file) ? File.ReadAllBytes(file) : null;
+        return LocalFiles.Read(file);
     }
 }

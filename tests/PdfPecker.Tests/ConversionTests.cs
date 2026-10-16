@@ -307,17 +307,21 @@ public class ConversionTests
         var fixtures = Path.Combine(AppContext.BaseDirectory, "Fixtures");
         var absolute = Path.Combine(fixtures, "rgb.jpg");
         int Images(string html, PdfOptions o) => System.Text.RegularExpressions.Regex.Matches(Latin1(ConvertUncompressed(html, o)), "/Subtype /Image").Count;
+        // A well-formed file URL: on Windows "file://" plus a drive path with backslashes is not one.
+        var fileUrl = new Uri(absolute).AbsoluteUri;
 
         // Relative paths inside the base directory work by default; absolute paths and file: URLs do not.
         Assert.Equal(1, Images("<img src='rgb.jpg'>", new PdfOptions { BaseDirectory = fixtures }));
-        Assert.Equal(0, Images($"<img src='{absolute}'><img src='file://{absolute}'>", new PdfOptions { BaseDirectory = fixtures }));
-        Assert.Equal(2, Images($"<img src='{absolute}'><img src='file://{absolute}'>", new PdfOptions { BaseDirectory = fixtures, AllowFileAccess = true }));
+        Assert.Equal(0, Images($"<img src='{absolute}'><img src='{fileUrl}'>", new PdfOptions { BaseDirectory = fixtures }));
+        Assert.Equal(2, Images($"<img src='{absolute}'><img src='{fileUrl}'>", new PdfOptions { BaseDirectory = fixtures, AllowFileAccess = true }));
 
         // No base directory: no files at all.
         Assert.Equal(0, Images("<img src='rgb.jpg'>", new PdfOptions()));
 
         // Escaping the base directory with .. needs AllowFileAccess.
-        var sub = Directory.CreateTempSubdirectory("pdfpecker-base");
+        // The base directory sits next to the fixtures, not in the temp folder: on Windows CI the temp folder is on another
+        // drive, and no relative path leads from one drive to another.
+        var sub = Directory.CreateDirectory(Path.Combine(AppContext.BaseDirectory, "pdfpecker-base-" + Guid.NewGuid().ToString("N")));
         try
         {
             var escape = Path.GetRelativePath(sub.FullName, absolute);

@@ -12,7 +12,8 @@
     <IsAotCompatible>true</IsAotCompatible>
 
     <PackageId>PdfPecker</PackageId>
-    <Version>0.1.0</Version>
+    <!-- Local builds pack as a pre-release above the API baseline; CI passes the real version. -->
+    <Version>1.9.1-dev</Version>
     <Authors>Moonwalker1307</Authors>
     <Description>Fast, dependency-free HTML and Markdown to PDF converter for C# and .NET. Its own HTML parser, Markdown parser (CommonMark + GFM), CSS engine, layout engine and PDF writer: no browser, no native binaries, no third-party packages.</Description>
     <PackageTags>html;pdf;html-to-pdf;htmltopdf;pdf-generator;pdf-generation;csharp;dotnet;aspnetcore;invoice;markdown;markdown-to-pdf;markdown-to-html;commonmark;converter;css;report;pdfa;zugferd;factur-x;e-invoice;pdf-forms;acroform</PackageTags>
@@ -50,6 +51,7 @@
     <EmbeddedResource Include="Text/Hyphenation/*.hyph.br" LogicalName="PdfPecker.Text.Hyphenation.%(Filename)%(Extension)" />
     <InternalsVisibleTo Include="PdfPecker.Tests" />
     <InternalsVisibleTo Include="FontPackBuilder" />
+    <InternalsVisibleTo Include="PdfPecker.Fuzz" />
   </ItemGroup>
 
 </Project>

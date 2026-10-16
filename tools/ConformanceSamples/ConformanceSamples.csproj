@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Writes sample PDFs for every conformance level PdfPecker supports, for validation with veraPDF (see check.py and
+       .github/workflows/conformance.yml). Run from the repository root:
+       dotnet run -c Release (project tools/ConformanceSamples) with the output folder as the argument
+       Not part of PdfPecker.sln, like the other tools. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/PdfPecker/PdfPecker.csproj" />
+  </ItemGroup>
+
+</Project>
