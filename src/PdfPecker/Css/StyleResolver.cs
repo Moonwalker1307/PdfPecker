@@ -1580,6 +1580,18 @@ internal sealed class StyleResolver
                     case "inherit": s.WordBreak = parent.WordBreak; break;
                 }
                 break;
+            case "line-break":
+                s.LineBreak = lower switch
+                {
+                    "auto" => LineBreak.Auto,
+                    "loose" => LineBreak.Loose,
+                    "normal" => LineBreak.Normal,
+                    "strict" => LineBreak.Strict,
+                    "anywhere" => LineBreak.Anywhere,
+                    "inherit" => parent.LineBreak,
+                    _ => s.LineBreak,
+                };
+                break;
             case "vertical-align":
                 s.VerticalAlign = lower switch
                 {

@@ -16,33 +16,75 @@ internal static class SignatureWriter
     private const int ByteRangeWidth = 48;
 
     public static byte[] Sign(byte[] pdf, PdfSignatureOptions o, string? password)
+        => SignAsync(pdf, o, password, async: false, CancellationToken.None).GetAwaiter().GetResult();
+
+    /// <summary>
+    /// Signs the PDF. With <paramref name="async"/> false nothing is awaited that has not already completed, so the
+    /// synchronous API can run the same code and read the result without blocking on a pending task.
+    /// </summary>
+    public static async ValueTask<byte[]> SignAsync(byte[] pdf, PdfSignatureOptions o, string? password, bool async, CancellationToken cancellationToken)
     {
-        if (!o.Certificate.HasPrivateKey)
-            throw new ArgumentException("The signing certificate has no private key. Load it from a .pfx file or a certificate store entry that includes the key.", nameof(o));
+        var external = o.ExternalSigner;
+        if (external != null) Cms.CheckKeyType(o.Certificate, external.Algorithm);
+        else if (!o.Certificate.HasPrivateKey)
+            throw new ArgumentException("The signing certificate has no private key. Load it from a .pfx file or a certificate store entry that includes the key, or sign with a PdfExternalSigner.", nameof(o));
         Cms.HashOid(o.HashAlgorithm); // validate early
 
         var file = PdfFile.Open(pdf, password);
         var certs = Cms.CertificateChain(o.Certificate, o.ExtraCertificates);
         var time = o.SigningTime ?? DateTimeOffset.Now;
         time = time.AddTicks(-(time.Ticks % TimeSpan.TicksPerSecond));
-        Func<byte[], byte[]>? timestamp = string.IsNullOrEmpty(o.TimestampUrl)
-            ? null
-            : signature => TimestampClient.GetToken(o.TimestampUrl!, o.TimestampHttpClient, signature, o.HashAlgorithm);
+        bool pades = o.Format == PdfSignatureFormat.PAdES;
 
-        int reserve = 2048 + certs.Sum(c => c.RawData.Length) + (timestamp != null ? 12288 : 0);
+        int reserve = 2048 + certs.Sum(c => c.RawData.Length) + (string.IsNullOrEmpty(o.TimestampUrl) ? 0 : 12288);
         for (int attempt = 0; ; attempt++)
         {
-            var result = Build(file, pdf, o, certs, time, timestamp, reserve, out int needed);
-            if (result != null) return result;
+            cancellationToken.ThrowIfCancellationRequested();
+            var prepared = Build(file, pdf, o, time, reserve);
+
+            byte[] signedAttrs = Cms.SignedAttributes(prepared.Digest, o.Certificate, o.HashAlgorithm, pades, time);
+            byte[] signature;
+            PdfSignatureAlgorithm algorithm;
+            if (external == null) (signature, algorithm) = Cms.SignWithPrivateKey(o.Certificate, signedAttrs, o.HashAlgorithm);
+            else
+            {
+                algorithm = external.Algorithm;
+                var request = new PdfSignatureRequest(o.Certificate, algorithm, o.HashAlgorithm, signedAttrs, Cms.HashData(o.HashAlgorithm, signedAttrs));
+                byte[] raw = await external.SignAsync(request, async, cancellationToken).ConfigureAwait(false);
+                signature = Cms.CheckExternalSignature(o.Certificate, algorithm, signedAttrs, o.HashAlgorithm, raw);
+            }
+            byte[]? token = string.IsNullOrEmpty(o.TimestampUrl)
+                ? null
+                : await TimestampClient.GetTokenAsync(o.TimestampUrl!, o.TimestampHttpClient, signature, o.HashAlgorithm, async, cancellationToken).ConfigureAwait(false);
+            byte[] cms = Cms.Assemble(signedAttrs, signature, algorithm, token, o.Certificate, certs, o.HashAlgorithm);
+
+            if (cms.Length <= reserve) return prepared.Fill(cms);
             if (attempt > 0) throw new PdfSignatureException("The signature does not fit its reserved space.");
-            reserve = needed + 2048;
+            reserve = cms.Length + 2048;
         }
     }
 
-    private static byte[]? Build(PdfFile file, byte[] pdf, PdfSignatureOptions o, List<X509Certificate2> certs, DateTimeOffset time,
-        Func<byte[], byte[]>? timestamp, int reserve, out int needed)
+    /// <summary>The signed file with an empty /Contents hole, and the digest of everything around the hole.</summary>
+    private sealed class Prepared(ByteBuffer output, int contentsStart, byte[] digest)
     {
-        needed = 0;
+        public byte[] Digest { get; } = digest;
+
+        /// <summary>Writes <paramref name="cms"/> as hex into the hole and returns the finished file.</summary>
+        public byte[] Fill(byte[] cms)
+        {
+            const string hex = "0123456789ABCDEF";
+            byte[] buf = output.RawBuffer;
+            for (int i = 0; i < cms.Length; i++)
+            {
+                buf[contentsStart + 1 + 2 * i] = (byte)hex[cms[i] >> 4];
+                buf[contentsStart + 2 + 2 * i] = (byte)hex[cms[i] & 15];
+            }
+            return output.Span.ToArray();
+        }
+    }
+
+    private static Prepared Build(PdfFile file, byte[] pdf, PdfSignatureOptions o, DateTimeOffset time, int reserve)
+    {
         var trailer = file.Trailer;
         var rootRef = trailer["Root"] as PdfRef ?? throw new PdfSignatureException("The PDF has no document catalog reference.");
         var catalog = file.Resolve(rootRef) as PdfDict ?? throw new PdfSignatureException("The PDF has no document catalog.");
@@ -236,19 +278,7 @@ internal static class SignatureWriter
         using var hash = IncrementalHash.CreateHash(o.HashAlgorithm);
         hash.AppendData(buf, 0, contentsStart);
         hash.AppendData(buf, contentsEnd, total - contentsEnd);
-        byte[] cms = Cms.Sign(hash.GetHashAndReset(), o.Certificate, certs, o.HashAlgorithm, o.Format == PdfSignatureFormat.PAdES, time, timestamp);
-        if (cms.Length > reserve)
-        {
-            needed = cms.Length;
-            return null;
-        }
-        const string hex = "0123456789ABCDEF";
-        for (int i = 0; i < cms.Length; i++)
-        {
-            buf[contentsStart + 1 + 2 * i] = (byte)hex[cms[i] >> 4];
-            buf[contentsStart + 2 + 2 * i] = (byte)hex[cms[i] & 15];
-        }
-        return output.Span.ToArray();
+        return new Prepared(output, contentsStart, hash.GetHashAndReset());
     }
 
     private sealed record ExistingField(PdfRef FieldRef, PdfDict Field, PdfRef WidgetRef, PdfDict Widget);

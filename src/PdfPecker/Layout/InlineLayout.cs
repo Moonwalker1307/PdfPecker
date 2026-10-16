@@ -445,14 +445,58 @@ internal sealed partial class LayoutEngine
                 if (d == ' ' || d == '\t' || d == '\n' || d == '\r' || d == '\f') break;
                 i++;
             }
-            var span = text.AsSpan(start, i - start);
-            // hyphens: auto, except in words that have soft hyphens: those break only there, as CSS Text specifies.
-            // Nor in URLs and e-mail addresses.
-            bool hyphenate = breakable && style.HyphensAuto && span.IndexOf('\u00AD') < 0 && !LooksLikeAddress(span);
-            if (span.IndexOfAny(WordBreakChars) >= 0 && breakable) AddWordSegments(st, text, start, i - start, style, href, deco, hyphenate);
-            else AddWord(st, text, start, i - start, style, href, deco, BreakAfter.None, hyphenate);
+            if (breakable && Text.LineBreaker.HasEastAsian(text.AsSpan(start, i - start))) AddEastAsianWord(st, text, start, i - start, style, href, deco);
+            else AddBreakableWord(st, text, start, i - start, style, href, deco, breakable);
             st.Column += i - start;
         }
+    }
+
+    private void AddBreakableWord(CollectState st, string text, int start, int length, ComputedStyle style, string? href, ComputedStyle? deco, bool breakable)
+    {
+        var span = text.AsSpan(start, length);
+        // hyphens: auto, except in words that have soft hyphens: those break only there, as CSS Text specifies.
+        // Nor in URLs and e-mail addresses.
+        bool hyphenate = breakable && style.HyphensAuto && span.IndexOf('\u00AD') < 0 && !LooksLikeAddress(span);
+        if (span.IndexOfAny(WordBreakChars) >= 0 && breakable) AddWordSegments(st, text, start, length, style, href, deco, hyphenate);
+        else AddWord(st, text, start, length, style, href, deco, BreakAfter.None, hyphenate);
+    }
+
+    /// <summary>
+    /// A word with Chinese, Japanese or Korean text, which breaks between its characters without spaces: each piece
+    /// between two opportunities becomes a word of its own that may end a line, and nothing is drawn between them.
+    /// </summary>
+    private void AddEastAsianWord(CollectState st, string text, int start, int length, ComputedStyle style, string? href, ComputedStyle? deco)
+    {
+        bool keepAll = style.WordBreak == WordBreak.KeepAll;
+        var strictness = style.LineBreak switch
+        {
+            LineBreak.Loose => Text.LineBreakStrictness.Loose,
+            LineBreak.Normal or LineBreak.Anywhere => Text.LineBreakStrictness.Normal,
+            // auto is strict, as in Chrome: no line starts with a small kana or a prolonged sound mark.
+            _ => Text.LineBreakStrictness.Strict,
+        };
+        // Text that continues from the previous inline element, as in 漢<b>字</b>, may break at the element boundary.
+        if (!st.LastWasSpace && st.Items.Count > 0 && st.Items[^1] is { Kind: ItemKind.Text, BreakAfter: BreakAfter.None, Length: > 0 } prev
+            && prev.Style.WhiteSpace is WhiteSpace.Normal or WhiteSpace.PreWrap or WhiteSpace.PreLine
+            && Text.LineBreaker.BreakBetween(LastCodePoint(prev.Source, prev.Start + prev.Length), FirstCodePoint(text, start), keepAll, strictness))
+            prev.BreakAfter = BreakAfter.Break;
+        var span = text.AsSpan(start, length);
+        int seg = 0;
+        while (seg < length)
+        {
+            int next = Text.LineBreaker.NextBreak(span, seg, keepAll, strictness);
+            int before = st.Items.Count;
+            AddBreakableWord(st, text, start + seg, next - seg, style, href, deco, breakable: true);
+            if (next < length && st.Items.Count > before && st.Items[^1] is { Kind: ItemKind.Text, BreakAfter: BreakAfter.None } last)
+                last.BreakAfter = BreakAfter.Break;
+            seg = next;
+        }
+
+        static int FirstCodePoint(string s, int at) =>
+            char.IsHighSurrogate(s[at]) && at + 1 < s.Length && char.IsLowSurrogate(s[at + 1]) ? char.ConvertToUtf32(s[at], s[at + 1]) : s[at];
+
+        static int LastCodePoint(string s, int end) =>
+            end >= 2 && char.IsLowSurrogate(s[end - 1]) && char.IsHighSurrogate(s[end - 2]) ? char.ConvertToUtf32(s[end - 2], s[end - 1]) : s[end - 1];
     }
 
     private static bool LooksLikeAddress(ReadOnlySpan<char> word) =>
@@ -864,8 +908,9 @@ internal sealed partial class LayoutEngine
             // Room for the hyphen a soft hyphen shows if the line breaks after this chunk.
             float need = gw;
             if (j > i && items[j - 1].BreakAfter == BreakAfter.SoftHyphen) need += HyphenWidth(items[j - 1].Style);
-            // word-break: break-all breaks the chunk at the end of the line instead of moving it to the next.
-            bool breakAll = splittable && items[i].Kind == ItemKind.Text && items[i].Style.WordBreak == WordBreak.BreakAll;
+            // word-break: break-all and line-break: anywhere break the chunk at the end of the line instead of moving it to
+            // the next.
+            bool breakAll = splittable && items[i].Kind == ItemKind.Text && (items[i].Style.WordBreak == WordBreak.BreakAll || items[i].Style.LineBreak == LineBreak.Anywhere);
 
             if (HasContent() && curW + need > avail + Eps && !breakAll)
             {
@@ -957,8 +1002,9 @@ internal sealed partial class LayoutEngine
         return lines;
     }
 
-    /// <summary>Whether overflow-wrap or word-break lets a word break between any two characters.</summary>
-    private static bool BreaksAnywhere(ComputedStyle s) => s.OverflowWrap != OverflowWrap.Normal || s.WordBreak == WordBreak.BreakAll;
+    /// <summary>Whether overflow-wrap, word-break or line-break lets a word break between any two characters.</summary>
+    private static bool BreaksAnywhere(ComputedStyle s) =>
+        s.OverflowWrap != OverflowWrap.Normal || s.WordBreak == WordBreak.BreakAll || s.LineBreak == LineBreak.Anywhere;
 
     /// <summary>The text shown where a line breaks at a soft hyphen or hyphenation point (hyphenate-character).</summary>
     private static string HyphenText(ComputedStyle s) => s.HyphenateCharacter ?? "-";

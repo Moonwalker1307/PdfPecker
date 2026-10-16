@@ -76,6 +76,7 @@ internal enum VerticalAlign : byte { Baseline, Sub, Super, Top, Middle, Bottom, 
 internal enum OverflowWrap : byte { Normal, BreakWord, Anywhere }
 internal enum Overflow : byte { Visible, Clip, Hidden } // Hidden also stands for auto and scroll, which clip alike on paper
 internal enum WordBreak : byte { Normal, BreakAll, KeepAll }
+internal enum LineBreak : byte { Auto, Loose, Normal, Strict, Anywhere }
 internal enum TextTransform : byte { None, Uppercase, Lowercase, Capitalize }
 internal enum BorderStyle : byte { None, Solid, Dashed, Dotted, Double, Groove, Ridge, Inset, Outset }
 internal enum LineHeightKind : byte { Normal, Factor, Absolute }
@@ -202,6 +203,7 @@ internal sealed class ComputedStyle
     public WhiteSpace WhiteSpace;
     public OverflowWrap OverflowWrap;
     public WordBreak WordBreak;
+    public LineBreak LineBreak;              // line-break: how strictly Chinese and Japanese text breaks
     public ListStyleType ListStyleType;
     public string? ListStyleString;          // list-style-type: "string": the marker text
     public CounterStyle? ListCounterStyle;   // the counter style of a text marker; null for the bullets, a string and none

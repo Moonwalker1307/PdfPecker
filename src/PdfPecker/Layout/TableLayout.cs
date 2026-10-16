@@ -825,9 +825,11 @@ internal sealed partial class LayoutEngine
                     continue;
                 }
                 line += it.Width;
-                if (it.Kind == ItemKind.Text && (it.Style.WordBreak == WordBreak.BreakAll || it.Style.OverflowWrap == OverflowWrap.Anywhere))
+                if (it.Kind == ItemKind.Text && (it.Style.WordBreak == WordBreak.BreakAll || it.Style.OverflowWrap == OverflowWrap.Anywhere
+                    || it.Style.LineBreak == LineBreak.Anywhere))
                 {
-                    // overflow-wrap: anywhere and word-break: break-all let the word shrink down to its widest letter.
+                    // overflow-wrap: anywhere, word-break: break-all and line-break: anywhere let the word shrink down to
+                    // its widest letter.
                     min = Math.Max(min, group);
                     group = 0;
                     var f = it.Style.Font;

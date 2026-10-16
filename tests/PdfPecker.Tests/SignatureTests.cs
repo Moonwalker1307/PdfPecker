@@ -281,7 +281,7 @@ public class SignatureTests
     }
 
     /// <summary>A minimal timestamp authority: answers a TimeStampReq with a token signed by its certificate.</summary>
-    private sealed class FakeTsa(X509Certificate2 cert, bool omitNonce = false) : HttpMessageHandler
+    internal sealed class FakeTsa(X509Certificate2 cert, bool omitNonce = false) : HttpMessageHandler
     {
         public string? ContentType;
 
