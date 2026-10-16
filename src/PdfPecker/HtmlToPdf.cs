@@ -224,6 +224,46 @@ public static class HtmlToPdf
             return setups[name] = setup;
         }
 
+        // @page :first, :left and :right rules that change the size, margins or background give those pages their own
+        // setup. The first page of the document is a right page, as in left-to-right books.
+        bool pageVariants = !options.IgnoreCssPageRules
+                            && sheet.PageRules.Any(r => r.Selector is ":first" or ":left" or ":right" && r.Declarations.Count > 0);
+        var variants = new Dictionary<(string?, bool, bool), PageSetup>();
+        PageSetup VariantFor(string? name, int documentPage)
+        {
+            var plain = SetupFor(name);
+            if (!pageVariants) return plain;
+            bool first = documentPage == 0, right = documentPage % 2 == 0;
+            if (variants.TryGetValue((name, first, right), out var cached)) return cached;
+            var setup = new PageSetup
+            {
+                Width = options.PageSize.Width, Height = options.PageSize.Height,
+                MarginTop = options.Margins.Top, MarginRight = options.Margins.Right, MarginBottom = options.Margins.Bottom, MarginLeft = options.Margins.Left,
+            };
+            // The rules that match the page, of lower specificity first and in source order otherwise.
+            var side = right ? ":right" : ":left";
+            foreach (var rule in sheet.PageRules
+                         .Where(r => (r.Name.Length == 0 || r.Name == name) && (r.Selector.Length == 0 || r.Selector == side || first && r.Selector == ":first"))
+                         .OrderBy(r => r.Specificity))
+                ApplyPageRules(rule.Declarations, setup);
+            if (setup.Width == plain.Width * plain.Scale && setup.Height == plain.Height * plain.Scale
+                && setup.MarginTop == plain.MarginTop * plain.Scale && setup.MarginRight == plain.MarginRight * plain.Scale
+                && setup.MarginBottom == plain.MarginBottom * plain.Scale && setup.MarginLeft == plain.MarginLeft * plain.Scale
+                && setup.Background == plain.Background)
+                return variants[(name, first, right)] = plain;
+            if (options.Scale != 1)
+            {
+                float s = options.Scale;
+                setup.Scale = s;
+                setup.Width /= s; setup.Height /= s;
+                setup.MarginTop /= s; setup.MarginRight /= s; setup.MarginBottom /= s; setup.MarginLeft /= s;
+            }
+            if (setup.ContentWidth < 10 || setup.ContentHeight < 10)
+                throw new ArgumentException($"The margins of @page {(name == null ? "" : name)}{(first ? ":first" : side)} leave no room for content.", nameof(options));
+            ReserveBands(setup);
+            return variants[(name, first, right)] = setup;
+        }
+
         // Layout, repeated when generated content shows page numbers (target-counter): they are known after a layout,
         // and a layout with them can move content again, so there is at most a third.
         ComputedStyle? canvasStyle;
@@ -242,23 +282,28 @@ public static class HtmlToPdf
             structure = options.Accessibility != PdfAccessibility.None ? StructureTree.Build(doc) : null;
             headings?.Clear();
             runs = styles.UsedPageNames ? SplitByPageName(doc) : new List<PageRun> { new() };
+            int documentPage = 0;
             foreach (var run in runs)
             {
                 run.Page = SetupFor(run.Name);
+                run.Grid = new PageGrid(VariantFor(run.Name, documentPage), VariantFor(run.Name, documentPage + 1), VariantFor(run.Name, documentPage + 2));
+                // Pages of different widths share one layout, at the narrowest width, so no page's content overflows.
+                run.Width = Math.Min(run.Grid.SetupOf(0).ContentWidth, Math.Min(run.Grid.SetupOf(1).ContentWidth, run.Grid.SetupOf(2).ContentWidth));
                 var restore = run.Keep is { } keep ? KeepOnly(keep) : null;
                 try
                 {
-                    run.Engine = new LayoutEngine(run.Page.FlowHeight, images)
+                    run.Engine = new LayoutEngine(run.Grid, images)
                     {
                         Cancellation = cancellationToken, MaxPages = Math.Max(1, options.MaxPages), FixedAreaHeight = run.Page.ContentHeight,
                         CanvasRoot = htmlEl, Tags = structure, Headings = headings,
                     };
-                    run.Height = run.Engine.Layout(doc, run.Page.ContentWidth);
+                    run.Height = run.Engine.Layout(doc, run.Width);
                 }
                 finally
                 {
                     restore?.Invoke();
                 }
+                documentPage += run.Grid.PagesFor(run.Height);
             }
             if (!paged.UsesTargets || pass == 2) break;
             var pages = PagesOfAnchors(runs);
@@ -276,26 +321,26 @@ public static class HtmlToPdf
             if (canvasStyle != null)
             {
                 var rootStyle = htmlEl?.Style ?? canvasStyle;
-                var setup = run.Page;
+                var grid = run.Grid;
                 // Chrome sizes the positioning area like the root element's border box but puts it at the page area's top
                 // left corner, whatever the root element's margins.
-                var (_, _, rw, rh) = engine.CanvasRootBox ?? (0, 0, setup.ContentWidth, run.Height);
-                // html { height: 100% } refers to the page area.
-                if (rootStyle.Height.IsPercent) rh = rootStyle.Height.Resolve(setup.ContentHeight);
-                float flowH = setup.FlowHeight;
+                var (_, _, rw, rhBox) = engine.CanvasRootBox ?? (0, 0, run.Width, run.Height);
                 var painted = canvasStyle;
                 pageCanvas = p =>
                 {
                     // y = 0 is the top of the page area; flow y = 0 of page p sits BandTop below it.
+                    var setup = grid.SetupOf(p);
+                    // html { height: 100% } refers to the page area.
+                    float rh = rootStyle.Height.IsPercent ? rootStyle.Height.Resolve(setup.ContentHeight) : rhBox;
                     var group = new GroupOp();
-                    BoxPainter.PaintCanvas(group, painted, rootStyle, 0, setup.BandTop - p * flowH, rw, rh,
+                    BoxPainter.PaintCanvas(group, painted, rootStyle, 0, setup.BandTop - grid.Start(p), rw, rh,
                         0, 0, setup.ContentWidth, setup.ContentHeight, images, setup.ContentWidth);
                     return group.Ops;
                 };
             }
             sections.Add(new PageSection
             {
-                Page = run.Page, Ops = engine.Ops, ContentHeight = run.Height, Anchors = engine.Anchors,
+                Page = run.Page, Grid = run.Grid, Ops = engine.Ops, ContentHeight = run.Height, Anchors = engine.Anchors,
                 FixedOps = engine.FixedOps.Count > 0 ? engine.FixedOps : null, Canvas = pageCanvas,
             });
         }
@@ -362,7 +407,9 @@ public static class HtmlToPdf
             var strings = styles.Strings;
             pageBands = (p, count) =>
             {
-                var run = runs[writer.SectionOfPage(p).Section];
+                var (section, local) = writer.SectionOfPage(p);
+                var run = runs[section];
+                var setup = run.Grid.SetupOf(local);
                 var ops = new List<DrawOp>();
                 if (marginBoxes != null)
                 {
@@ -380,10 +427,10 @@ public static class HtmlToPdf
                                 }
                         paged.Running = new RunningStrings(assignments);
                     }
-                    ops.AddRange(marginBoxes.Layout(p, count, run.Page, run.Name));
+                    ops.AddRange(marginBoxes.Layout(p, count, setup, run.Name));
                 }
-                if (header != null) ops.AddRange(LayoutBandForPage(header, run.Page, images, p, count, alignBottom: false, cancellationToken));
-                if (footer != null) ops.AddRange(LayoutBandForPage(footer, run.Page, images, p, count, alignBottom: true, cancellationToken));
+                if (header != null) ops.AddRange(LayoutBandForPage(header, setup, images, p, count, alignBottom: false, cancellationToken));
+                if (footer != null) ops.AddRange(LayoutBandForPage(footer, setup, images, p, count, alignBottom: true, cancellationToken));
                 return ops;
             };
         }
@@ -401,6 +448,9 @@ public static class HtmlToPdf
         /// <summary>The run's top-level nodes and the elements that contain them; null for the whole document.</summary>
         public (HashSet<Node> Units, HashSet<Element> Ancestors)? Keep;
         public PageSetup Page = null!;
+        /// <summary>The setups of the run's pages: <see cref="Page"/>, or another for pages with :first, :left or :right rules.</summary>
+        public PageGrid Grid = null!;
+        public float Width;
         public LayoutEngine Engine = null!;
         public float Height;
     }
@@ -504,10 +554,10 @@ public static class HtmlToPdf
         int first = 0;
         foreach (var run in runs)
         {
-            float h = run.Page.FlowHeight;
+            var grid = run.Grid;
             foreach (var (key, y) in run.Engine.Anchors)
-                if (key.Length > 0 && key[0] != '\u0001') pages.TryAdd(key, first + Math.Max(0, (int)Math.Floor((y + 0.01) / h)) + 1);
-            first += PageSection.PagesFor(run.Height, h);
+                if (key.Length > 0 && key[0] != '\u0001') pages.TryAdd(key, first + Math.Max(0, (int)grid.PageOf(y + 0.01)) + 1);
+            first += grid.PagesFor(run.Height);
         }
         return pages;
     }
@@ -631,7 +681,20 @@ public static class HtmlToPdf
     private static Stylesheet ReadStyles(Element doc, MediaContext media, PdfOptions options, string? baseDirectory, Func<string, byte[]?>? resolver)
     {
         var sheet = new Stylesheet { Media = media };
-        CollectStyles(doc, sheet, baseDirectory, resolver, options.AllowFileAccess);
+        bool allowFiles = options.AllowFileAccess;
+        sheet.ImportLoader = (url, importer) =>
+        {
+            // A URL written as a plain string is relative to the importing sheet; url() ones were rebased with it.
+            var href = url.Trim();
+            if (importer != null && !IsAbsoluteReference(href))
+            {
+                int slash = importer.LastIndexOfAny(new[] { '/', '\\' });
+                if (slash >= 0 && !IsAbsoluteReference(importer)) href = importer.Substring(0, slash + 1) + href;
+            }
+            var css = LoadText(href, baseDirectory, resolver, allowFiles);
+            return css == null ? null : (RebaseUrls(css, href), href);
+        };
+        CollectStyles(doc, sheet, baseDirectory, resolver, allowFiles);
         if (!string.IsNullOrEmpty(options.UserStyleSheet)) CssParser.ParseStylesheet(options.UserStyleSheet!, sheet);
         return sheet;
     }
@@ -652,7 +715,7 @@ public static class HtmlToPdf
                 var media = e.GetAttribute("media");
                 var href = e.GetAttribute("href");
                 var css = media == null || MediaQuery.Matches(media, sheet.Media) ? LoadText(href, baseDirectory, resolver, allowFiles) : null;
-                if (css != null) CssParser.ParseStylesheet(RebaseUrls(css, href!), sheet);
+                if (css != null) CssParser.ParseStylesheet(RebaseUrls(css, href!), sheet, href);
                 continue;
             }
             CollectStyles(e, sheet, baseDirectory, resolver, allowFiles);

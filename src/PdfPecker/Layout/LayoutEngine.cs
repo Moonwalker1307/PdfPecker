@@ -12,7 +12,7 @@ namespace PdfPecker.Layout;
 /// </summary>
 internal sealed partial class LayoutEngine
 {
-    private readonly float _pageH;
+    private readonly PageGrid _grid;
     private readonly ImageLoader _images;
     private List<DrawOp> _ops = new(256);
     private bool _paginate = true;
@@ -26,8 +26,14 @@ internal sealed partial class LayoutEngine
     public readonly Dictionary<string, float> Anchors = new(StringComparer.Ordinal);
 
     public LayoutEngine(float pageContentHeight, ImageLoader images)
+        : this(new PageGrid(new PageSetup { Height = pageContentHeight }), images)
     {
-        _pageH = pageContentHeight;
+    }
+
+    /// <summary>A layout whose pages have the flow heights of the grid's pages.</summary>
+    public LayoutEngine(PageGrid pages, ImageLoader images)
+    {
+        _grid = pages;
         _images = images;
     }
 
@@ -60,7 +66,7 @@ internal sealed partial class LayoutEngine
 
     private void CheckPageLimit(float y)
     {
-        if (y >= (double)MaxPages * _pageH) throw new PdfLimitException($"The document would have more than {MaxPages:N0} pages (PdfOptions.MaxPages).");
+        if (y >= (_grid.Uniform ? (double)MaxPages * _grid.Height(0) : _grid.Start(MaxPages))) throw new PdfLimitException($"The document would have more than {MaxPages:N0} pages (PdfOptions.MaxPages).");
     }
 
     private sealed class ListMarker
@@ -101,23 +107,24 @@ internal sealed partial class LayoutEngine
 
     private const float Eps = 0.01f;
 
-    private int PageOf(float y) => (int)Math.Floor((y + Eps) / _pageH);
+    private int PageOf(float y) => _grid.PageOf(y + Eps);
 
-    private bool AtPageTop(float y) => y - PageOf(y) * _pageH < 0.5f;
+    private bool AtPageTop(float y) => y - _grid.Start(PageOf(y)) < 0.5f;
 
     /// <summary>Returns the y at which a box of height h should start so that it does not straddle a page boundary.</summary>
     private float FitOnPage(float y, float h)
     {
-        if (!_paginate || h > _pageH) return y;
+        if (!_paginate) return y;
         int p = PageOf(y);
-        float pageEnd = (p + 1) * _pageH;
+        if (h > _grid.Height(p + 1)) return y;
+        float pageEnd = _grid.Start(p + 1);
         return y + h > pageEnd + Eps ? pageEnd : y;
     }
 
     private float NextPage(float y)
     {
         if (!_paginate || AtPageTop(y)) return y;
-        return (PageOf(y) + 1) * _pageH;
+        return _grid.Start(PageOf(y) + 1);
     }
 
     /// <summary>True when the ops draw nothing: only the empty groups that boxes reserve for their backgrounds.</summary>
@@ -434,7 +441,7 @@ internal sealed partial class LayoutEngine
         int opsStart = _ops.Count;
         var savedMarker = _marker;
         float bottom = table ? LayoutTable(e, x, y, availW) : LayoutBlockBoxCore(e, x, y, availW, shrinkToFit);
-        if (s.AvoidBreakInside && CrossesPage(y, bottom) && bottom - y <= _pageH && !AtPageTop(y))
+        if (s.AvoidBreakInside && CrossesPage(y, bottom) && bottom - y <= _grid.Height(PageOf(y) + 1) && !AtPageTop(y))
         {
             Truncate(opsStart);
             _marker = savedMarker;
@@ -851,7 +858,7 @@ internal sealed partial class LayoutEngine
         }
         // Never let an image run off the page.
         if (availW > 0 && w > availW) { h *= availW / w; w = availW; }
-        if (_paginate && h > _pageH) { w *= _pageH / h; h = _pageH; }
+        if (_paginate && h > _grid.MinHeight) { w *= _grid.MinHeight / h; h = _grid.MinHeight; }
         if (w < 0) w = 0;
         if (h < 0) h = 0;
     }
