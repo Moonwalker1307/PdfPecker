@@ -146,7 +146,7 @@ public class TiffOutputTests
     }
 
     [Fact]
-    public void ConvertToTiff_writes_every_page_into_one_file()
+    public async Task ConvertToTiff_writes_every_page_into_one_file()
     {
         var pdf = SamplePdf(3);
         var options = new ImageOptions { Dpi = 50, TiffColorMode = TiffColorMode.BlackAndWhite };
@@ -163,7 +163,7 @@ public class TiffOutputTests
         }
         Assert.Null(TiffDecoder.Decode(tiff, 1L << 30, 3));
         Assert.Equal(tiff, renderer.RenderAllToTiff(options));
-        Assert.Equal(tiff, PdfToImage.ConvertToTiffAsync(pdf, options).GetAwaiter().GetResult());
+        Assert.Equal(tiff, await PdfToImage.ConvertToTiffAsync(pdf, options));
         Assert.False(Tags(PdfToImage.ConvertToTiff(SamplePdf())).ContainsKey(254)); // one page: not marked as part of several
     }
 
