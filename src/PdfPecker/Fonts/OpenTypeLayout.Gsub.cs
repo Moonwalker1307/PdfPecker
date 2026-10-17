@@ -66,6 +66,7 @@ internal sealed partial class OpenTypeLayout
             buf.RemoveAt(i); // a deletion
             return true;
         }
+        if (buf.Count - 1 > c.MaxLength - count) return false; // the run would grow past its limit
         var g = buf[i];
         bool ligature = (g.Props & Ligature) != 0;
         // Each glyph is read as it is inserted, so a sequence cut off by the end of the font leaves the glyphs before.
