@@ -12,7 +12,7 @@ using PdfPecker.Rendering.Parsing;
 using PdfPecker.Text;
 
 // A short, machine-readable run for the performance regression check in .github/workflows/perf.yml: about 30 seconds,
-// sixteen cases, JSON output. Allocation per conversion is deterministic, so the workflow compares it tightly; time is
+// seventeen cases, JSON output. Allocation per conversion is deterministic, so the workflow compares it tightly; time is
 // noisy on shared runners, so it is compared with a wide margin and only against runs on the same processor model.
 // Usage: dotnet run -c Release -- --perf results.json
 static class Perf
@@ -56,6 +56,20 @@ static class Perf
             foreach (var j in jpegs) PdfPecker.Rendering.Images.JpegDecoder.Decode(j);
             PdfPecker.Rendering.Images.CcittFaxDecoder.Decode(fax, -1, faxWidth, faxHeight, byteAlign: false, blackIs1: false);
         }, runs: 30));
+
+        // The image encoders on their own, which render-png only times together with rendering: the first page of
+        // features.pdf at 96 dpi as lossless WebP, JPEG (4:2:0) and RGB PNG at the default settings, and the same page
+        // with a transparent background as RGBA PNG and WebP with alpha. One run encodes each once.
+        var page = PdfRenderer.Open(pdf).RenderPage(0, imageOptions);
+        var transparentPage = PdfRenderer.Open(pdf).RenderPage(0, new ImageOptions { Dpi = 96, Transparent = true });
+        results.Add(Measure("encode-webp-jpeg-png", () =>
+        {
+            page.ToWebP();
+            page.ToJpeg();
+            page.ToPng();
+            transparentPage.ToWebP();
+            transparentPage.ToPng();
+        }, runs: 10));
 
         // The renderer's PDF functions and colour spaces, which shadings, tint transforms and images call per sample.
         var functions = new FunctionWorkload();
