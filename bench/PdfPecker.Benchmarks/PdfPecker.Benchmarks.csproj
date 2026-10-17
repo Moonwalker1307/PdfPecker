@@ -16,7 +16,7 @@
   <ItemGroup>
     <None Include="../../samples/PdfPecker.Sample/html/**" LinkBase="html" CopyToOutputDirectory="PreserveNewest" />
     <None Include="../../tests/PdfPecker.Tests/Fixtures/images/*.bmp;../../tests/PdfPecker.Tests/Fixtures/images/*.webp;../../tests/PdfPecker.Tests/Fixtures/images/*.tif;../../tests/PdfPecker.Tests/Fixtures/features.pdf;../../tests/PdfPecker.Tests/Fixtures/objstm-cairo.pdf;../../tests/PdfPecker.Tests/Fixtures/encrypted-rc4-40.pdf;../../tests/PdfPecker.Tests/Fixtures/encrypted-aes128.pdf;../../tests/PdfPecker.Tests/Fixtures/password.pdf" LinkBase="fixtures" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="../../tests/PdfPecker.Tests/Fixtures/fonts/*.ttf;../../tests/PdfPecker.Tests/Fixtures/fonts/*.otf" LinkBase="fixtures/fonts" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../tests/PdfPecker.Tests/Fixtures/fonts/*.ttf;../../tests/PdfPecker.Tests/Fixtures/fonts/*.otf;../../tests/PdfPecker.Tests/Fixtures/fonts/*.ttc;../../tests/PdfPecker.Tests/Fixtures/fonts/*.woff;../../tests/PdfPecker.Tests/Fixtures/fonts/*.woff2" LinkBase="fixtures/fonts" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
