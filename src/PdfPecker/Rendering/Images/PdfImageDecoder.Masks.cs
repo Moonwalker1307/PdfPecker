@@ -28,7 +28,9 @@ internal static partial class PdfImageDecoder
         var mask = file.Resolve(dict["Mask"]);
         if (mask is PdfStream maskStream)
         {
-            var stencil = Decode(file, maskStream, Array.Empty<byte>(), false, resources, false);
+            // The mask is decoded like a soft mask, without its own masks: a valid one is an image mask, which has
+            // none, and following them let a mask that leads back to the image recurse until the stack overflowed.
+            var stencil = Decode(file, maskStream, Array.Empty<byte>(), false, resources, true);
             if (stencil?.Stencil != null)
             {
                 // An explicit mask's samples mean what they mean in a stencil mask (ISO 32000-1, 8.9.6.3): where

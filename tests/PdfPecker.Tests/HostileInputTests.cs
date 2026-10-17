@@ -1040,6 +1040,74 @@ public class SeacRecursionTests
     }
 }
 
+/// <summary>
+/// Image XObjects whose /Mask or /SMask leads back to an image already being decoded, directly or through another
+/// image: decoding an explicit mask used to apply that mask's own masks too, which recursed until the stack
+/// overflowed, which no handler can catch and which ends the whole process.
+/// </summary>
+[Collection(HostileInputCollection.Name)]
+public class ImageMaskRecursionTests
+{
+    private const string Rgb = "/Type /XObject /Subtype /Image /Width 2 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceRGB";
+    private const string Gray = "/Type /XObject /Subtype /Image /Width 2 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceGray";
+    private static readonly byte[] Red = { 255, 0, 0, 255, 0, 0 };
+    private static readonly byte[] HalfGray = { 128, 128 };
+
+    [Fact]
+    public void Explicit_mask_that_is_the_image_itself_is_ignored()
+    {
+        // An explicit mask must be an image mask; one that is not is ignored, so the image stays opaque.
+        var pdf = new FixturePdf();
+        int a = pdf.NextNumber;
+        pdf.AddStream($"{Rgb} /Mask {a} 0 R", Red);
+        AssertImageColor(pdf, a, 255, 0, 0);
+    }
+
+    [Fact]
+    public void Explicit_masks_that_form_a_cycle_are_ignored()
+    {
+        var pdf = new FixturePdf();
+        int a = pdf.NextNumber, b = a + 1;
+        pdf.AddStream($"{Rgb} /Mask {b} 0 R", Red);
+        pdf.AddStream($"{Rgb} /Mask {a} 0 R", Red);
+        AssertImageColor(pdf, a, 255, 0, 0);
+    }
+
+    [Fact]
+    public void Explicit_mask_whose_soft_mask_is_the_image_is_ignored()
+    {
+        var pdf = new FixturePdf();
+        int a = pdf.NextNumber, b = a + 1;
+        pdf.AddStream($"{Rgb} /Mask {b} 0 R", Red);
+        pdf.AddStream($"{Gray} /SMask {a} 0 R", HalfGray);
+        AssertImageColor(pdf, a, 255, 0, 0);
+    }
+
+    [Fact]
+    public void Soft_mask_that_leads_back_to_the_image_still_applies()
+    {
+        // A soft mask's own masks are not followed, so the half-grey soft mask applies and its /Mask is not looked at.
+        var pdf = new FixturePdf();
+        int a = pdf.NextNumber, b = a + 1, c = a + 2;
+        pdf.AddStream($"{Rgb} /SMask {b} 0 R", Red);
+        pdf.AddStream($"{Gray} /Mask {a} 0 R", HalfGray);
+        AssertImageColor(pdf, a, 255, 127, 127);
+
+        // An image that is its own soft mask takes its red channel, which is full, as its alpha.
+        pdf.AddStream($"{Rgb} /SMask {c} 0 R", Red);
+        AssertImageColor(pdf, c, 255, 0, 0);
+    }
+
+    private static void AssertImageColor(FixturePdf pdf, int image, int r, int g, int b)
+    {
+        var bytes = pdf.Build(8, 4, "q 8 0 0 4 0 0 cm /Im Do Q", $"/XObject << /Im {image} 0 R >>");
+        var task = Task.Run(() => FixturePdf.Render(bytes));
+        Assert.True(task.Wait(TimeSpan.FromSeconds(20)), "rendering the image did not finish in time");
+        FixturePdf.AssertAt(task.Result, 2, 2, r, g, b);
+        FixturePdf.AssertAt(task.Result, 6, 2, r, g, b);
+    }
+}
+
 [CollectionDefinition(Name, DisableParallelization = true)]
 public sealed class HostileInputCollection
 {
