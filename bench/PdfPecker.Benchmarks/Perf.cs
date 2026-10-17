@@ -5,7 +5,7 @@ using PdfPecker;
 using PdfPecker.Images;
 
 // A short, machine-readable run for the performance regression check in .github/workflows/perf.yml: about 30 seconds,
-// six cases, JSON output. Allocation per conversion is deterministic, so the workflow compares it tightly; time is
+// seven cases, JSON output. Allocation per conversion is deterministic, so the workflow compares it tightly; time is
 // noisy on shared runners, so it is compared with a wide margin.
 // Usage: dotnet run -c Release -- --perf results.json
 static class Perf
@@ -25,8 +25,10 @@ static class Perf
         var fixtureDir = Path.Combine(AppContext.BaseDirectory, "fixtures");
         var bmps = Fixtures(fixtureDir, "*.bmp");
         var webps = Fixtures(fixtureDir, "*.webp");
+        var tiffs = Fixtures(fixtureDir, "*.tif");
         results.Add(Measure("decode-bmp", () => { foreach (var b in bmps) BmpDecoder.Decode(b, MaxPixels); }, runs: 20000));
         results.Add(Measure("decode-webp", () => { foreach (var w in webps) WebPDecoder.Decode(w, MaxPixels); }, runs: 1000));
+        results.Add(Measure("decode-tiff", () => { foreach (var t in tiffs) TiffDecoder.Decode(t, MaxPixels); }, runs: 300));
         var pdf = File.ReadAllBytes(Path.Combine(fixtureDir, "features.pdf"));
         var imageOptions = new ImageOptions { Dpi = 96 };
         results.Add(Measure("render-png", () => PdfToImage.ConvertPage(pdf, 0, imageOptions), runs: 30));
