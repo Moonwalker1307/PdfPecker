@@ -1,0 +1,44 @@
+name: Bug report
+description: Output that looks wrong, a crash, or an exception you didn't expect.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. A small input file that shows the problem is the most useful thing you can give us.
+        Security problems go through [private reporting](https://github.com/Moonwalker1307/PdfPecker/security/advisories/new) instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected and what you got. Screenshots of the PDF or image help.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Input and code
+      description: |
+        The smallest HTML, Markdown or PDF that shows it (paste it, or attach the file), and the call with the options
+        you used. Please leave out anything private.
+      render: csharp
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: PdfPecker version
+      placeholder: "1.9.0"
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: .NET version and OS
+      placeholder: ".NET 10 on Windows 11"
+  - type: textarea
+    id: exception
+    attributes:
+      label: Exception and stack trace
+      description: If it threw, paste the full exception.
+      render: text
