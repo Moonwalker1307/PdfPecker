@@ -39,6 +39,8 @@ internal sealed partial class CffFont
     {
         private readonly CffFont _font;
         private readonly PrivateValues _private;
+        private readonly int _gid;
+        private readonly bool _seacComponents;
         private readonly PathData _path = new();
         private readonly Type2Stack _stack = new(StackCapacity);
         private readonly double[] _transient = new double[TransientArraySize];
@@ -48,10 +50,12 @@ internal sealed partial class CffFont
         private int _stems;
         private bool _haveWidth, _open, _ended;
 
-        public Type2Glyph(CffFont font, PrivateValues values)
+        public Type2Glyph(CffFont font, PrivateValues values, int gid, bool seacComponents)
         {
             _font = font;
             _private = values;
+            _gid = gid;
+            _seacComponents = seacComponents;
         }
 
         /// <summary>The advance the charstring declared, or the Private DICT's default.</summary>
@@ -247,11 +251,13 @@ internal sealed partial class CffFont
 
         private void Seac(double adx, double ady, int baseChar, int accentChar)
         {
-            if (baseChar < 0 || baseChar > 255 || accentChar < 0 || accentChar > 255) return;
+            // A component's own seac is not followed, and a component that is the glyph itself is left out.
+            if (!_seacComponents || baseChar < 0 || baseChar > 255 || accentChar < 0 || accentChar > 255) return;
             int baseGid = Encodings.Standard[baseChar] is { } baseName ? _font.GlyphByName(baseName) : -1;
             int accentGid = Encodings.Standard[accentChar] is { } accentName ? _font.GlyphByName(accentName) : -1;
-            if (baseGid > 0 && _font.GetGlyph(baseGid) is { } basePath) basePath.AppendTransformed(_path, Matrix.Identity);
-            if (accentGid > 0 && _font.GetGlyph(accentGid) is { } accentPath) accentPath.AppendTransformed(_path, Matrix.Translation(adx, ady));
+            if (baseGid > 0 && baseGid != _gid && _font.SeacComponent(baseGid) is { } basePath) basePath.AppendTransformed(_path, Matrix.Identity);
+            if (accentGid > 0 && accentGid != _gid && _font.SeacComponent(accentGid) is { } accentPath)
+                accentPath.AppendTransformed(_path, Matrix.Translation(adx, ady));
         }
 
         // The escaped operators: the flex curves clear the stack like the other path operators; the arithmetic and
