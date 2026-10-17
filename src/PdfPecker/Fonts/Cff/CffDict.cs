@@ -11,90 +11,129 @@ internal enum CffDictToken { Operand, Operator, Reserved }
 /// </summary>
 internal struct CffDictReader
 {
-    private readonly byte[] _d;
+    // Bytes up to this one are operators in CFF; CFF2 adds vsindex (22), blend (23) and vstore (24), which are
+    // reserved in CFF.
+    private const int LastCffOperator = 21, LastCff2Operator = 24;
+    private const int EscapeOperator = 12;
+
+    // The first byte of an operand says how it is encoded.
+    private const int ShortIntOperand = 28, LongIntOperand = 29, RealOperand = 30;
+    private const int SmallIntFirst = 32, SmallIntLast = 246, SmallIntBias = 139;
+    private const int PositiveFirst = 247, PositiveLast = 250, NegativeFirst = 251, NegativeLast = 254;
+    private const int TwoByteBias = 108;
+
+    // The nibbles of a real number.
+    private const int DecimalPoint = 0xA, Exponent = 0xB, NegativeExponent = 0xC, Minus = 0xE, EndOfNumber = 0xF;
+
+    private readonly byte[] _data;
     private readonly int _end;
     private readonly bool _cff2;
 
-    /// <summary>The next byte to read; after the last token it may lie past the end when that token was cut off.</summary>
-    public int Position;
-    public CffDictToken Kind;
-    public double Operand;
-    public bool IsReal;
-
-    /// <summary>The operator; an escaped one (12 x) is <see cref="CffDict.Escape"/> + x.</summary>
-    public int Operator;
-
-    public CffDictReader(byte[] d, int start, int end, bool cff2)
+    public CffDictReader(byte[] data, int start, int end, bool cff2)
     {
-        _d = d;
+        _data = data;
         Position = start;
         _end = end;
         _cff2 = cff2;
-        Kind = default;
-        Operand = 0;
-        IsReal = false;
-        Operator = 0;
     }
+
+    /// <summary>The next byte to read; after the last token it may lie past the end when that token was cut off.</summary>
+    public int Position { get; private set; }
+
+    public CffDictToken Kind { get; private set; }
+
+    public double Operand { get; private set; }
+
+    public bool IsReal { get; private set; }
+
+    /// <summary>The operator; an escaped one (12 x) is <see cref="CffDict.Escape"/> + x.</summary>
+    public int Operator { get; private set; }
 
     public bool Next()
     {
         if (Position >= _end) return false;
-        var d = _d;
-        int p = Position;
-        int b = d[p];
+        int at = Position;
+        int first = _data[at];
         IsReal = false;
-        // CFF2 adds the operators vsindex (22), blend (23) and vstore (24); in CFF they are reserved.
-        if (b <= 21 || _cff2 && b <= 24)
+        if (first <= LastCffOperator || _cff2 && first <= LastCff2Operator)
         {
             Kind = CffDictToken.Operator;
-            Operator = b == 12 ? CffDict.Escape + d[p + 1] : b;
-            p += b == 12 ? 2 : 1;
+            bool escaped = first == EscapeOperator;
+            Operator = escaped ? CffDict.Escape + _data[at + 1] : first;
+            Position = at + (escaped ? 2 : 1);
         }
         else
         {
             Kind = CffDictToken.Operand;
-            if (b == 28) { Operand = (short)(d[p + 1] << 8 | d[p + 2]); p += 3; }
-            else if (b == 29) { Operand = d[p + 1] << 24 | d[p + 2] << 16 | d[p + 3] << 8 | d[p + 4]; p += 5; }
-            else if (b == 30) { Operand = ReadReal(ref p); IsReal = true; }
-            else if (b >= 32 && b <= 246) { Operand = b - 139; p++; }
-            else if (b >= 247 && b <= 250) { Operand = (b - 247) * 256 + d[p + 1] + 108; p += 2; }
-            else if (b >= 251 && b <= 254) { Operand = -(b - 251) * 256 - d[p + 1] - 108; p += 2; }
-            else { Kind = CffDictToken.Reserved; p++; }
+            Position = ReadOperand(first, at);
         }
-        Position = p;
         return true;
+    }
+
+    // Decodes the operand that starts at the byte and returns the position after it.
+    private int ReadOperand(int first, int at)
+    {
+        var d = _data;
+        switch (first)
+        {
+            case ShortIntOperand:
+                Operand = (short)(d[at + 1] << 8 | d[at + 2]);
+                return at + 3;
+            case LongIntOperand:
+                Operand = d[at + 1] << 24 | d[at + 2] << 16 | d[at + 3] << 8 | d[at + 4];
+                return at + 5;
+            case RealOperand:
+                int afterReal = ReadReal(at);
+                IsReal = true;
+                return afterReal;
+            case >= SmallIntFirst and <= SmallIntLast:
+                Operand = first - SmallIntBias;
+                return at + 1;
+            case >= PositiveFirst and <= PositiveLast:
+                Operand = (first - PositiveFirst) * 256 + d[at + 1] + TwoByteBias;
+                return at + 2;
+            case >= NegativeFirst and <= NegativeLast:
+                Operand = -(first - NegativeFirst) * 256 - d[at + 1] - TwoByteBias;
+                return at + 2;
+            default:
+                Kind = CffDictToken.Reserved;
+                return at + 1;
+        }
     }
 
     /// <summary>
     /// A real number: decimal nibbles up to an 0xF nibble. In CFF a real cut off by the end of the DICT keeps the digits
     /// read so far; the CFF2 reader has always read on into the following bytes and rejected a real that never ends.
     /// </summary>
-    private double ReadReal(ref int p)
+    private int ReadReal(int at)
     {
-        var d = _d;
-        int limit = _cff2 ? d.Length : _end;
-        p++;
-        var s = new StringBuilder();
+        int limit = _cff2 ? _data.Length : _end;
+        int p = at + 1;
+        var text = new StringBuilder();
         bool done = false;
         while (!done && p < limit)
         {
-            int b = d[p++];
-            for (int half = 0; half < 2 && !done; half++)
-            {
-                int nib = half == 0 ? b >> 4 : b & 15;
-                switch (nib)
-                {
-                    case <= 9: s.Append((char)('0' + nib)); break;
-                    case 0xA: s.Append('.'); break;
-                    case 0xB: s.Append('E'); break;
-                    case 0xC: s.Append("E-"); break;
-                    case 0xE: s.Append('-'); break;
-                    case 0xF: done = true; break;
-                }
-            }
+            int b = _data[p++];
+            done = AppendNibble(text, b >> 4) || AppendNibble(text, b & 15);
         }
         if (!done && _cff2) throw new FormatException("Bad CFF2 DICT real number.");
-        return double.TryParse(s.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : 0;
+        Operand = double.TryParse(text.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out var value) ? value : 0;
+        return p;
+    }
+
+    // Appends what the nibble stands for; true when it ends the number. The reserved nibble 0xD adds nothing.
+    private static bool AppendNibble(StringBuilder text, int nibble)
+    {
+        switch (nibble)
+        {
+            case <= 9: text.Append((char)('0' + nibble)); break;
+            case DecimalPoint: text.Append('.'); break;
+            case Exponent: text.Append('E'); break;
+            case NegativeExponent: text.Append("E-"); break;
+            case Minus: text.Append('-'); break;
+            case EndOfNumber: return true;
+        }
+        return false;
     }
 }
 
@@ -103,6 +142,11 @@ internal static class CffDict
 {
     /// <summary>Escaped operators (12 x) are keyed as this + x.</summary>
     public const int Escape = 1200;
+
+    // CFF2 operators that the DICT parser itself acts on.
+    private const int VsindexOperator = 22, BlendOperator = 23;
+
+    private const byte EscapeByte = 12, LongIntByte = 29;
 
     /// <summary>
     /// A CFF DICT as operator → operands; a repeated operator keeps its last operands. Reserved bytes are skipped, so a
@@ -116,37 +160,48 @@ internal static class CffDict
 
     private static Dictionary<int, double[]> Parse(byte[] d, int start, int end, bool cff2, VariationStore? store)
     {
-        var result = new Dictionary<int, double[]>();
-        var stack = new List<double>();
+        var entries = new Dictionary<int, double[]>();
+        var operands = new List<double>();
         int vsindex = 0;
-        var r = new CffDictReader(d, start, end, cff2);
-        while (r.Next())
+        var reader = new CffDictReader(d, start, end, cff2);
+        while (reader.Next())
         {
-            if (r.Kind == CffDictToken.Operand) { stack.Add(r.Operand); continue; }
-            if (r.Kind == CffDictToken.Reserved)
+            if (reader.Kind == CffDictToken.Operand)
+            {
+                operands.Add(reader.Operand);
+                continue;
+            }
+            if (reader.Kind == CffDictToken.Reserved)
             {
                 if (cff2) throw new FormatException("Bad CFF2 DICT.");
                 continue;
             }
-            int op = r.Operator;
-            if (cff2 && op == 23) // blend: n defaults, then n × regions deltas, then n
+            int op = reader.Operator;
+            if (cff2 && op == BlendOperator)
             {
-                int count = (int)stack[^1];
-                var scalars = store?.RegionScalars(vsindex) ?? Array.Empty<float>();
-                stack.RemoveAt(stack.Count - 1);
-                int first = stack.Count - count * (scalars.Length + 1);
-                if (first < 0) throw new FormatException("Bad blend in a CFF2 DICT.");
-                for (int i = 0; i < count; i++)
-                    for (int k = 0; k < scalars.Length; k++)
-                        stack[first + i] += stack[first + count + i * scalars.Length + k] * scalars[k];
-                stack.RemoveRange(first + count, stack.Count - first - count);
+                ResolveBlend(operands, store, vsindex);
                 continue;
             }
-            if (cff2 && op == 22 && stack.Count > 0) vsindex = (int)stack[^1];
-            result[op] = stack.ToArray();
-            stack.Clear();
+            if (cff2 && op == VsindexOperator && operands.Count > 0) vsindex = (int)operands[^1];
+            entries[op] = operands.ToArray();
+            operands.Clear();
         }
-        return result;
+        return entries;
+    }
+
+    // A blend operator takes n default values, then n × regions deltas, then n. It leaves the n values with the
+    // deltas, weighted by the region scalars, added in.
+    private static void ResolveBlend(List<double> operands, VariationStore? store, int vsindex)
+    {
+        int count = (int)operands[^1];
+        var scalars = store?.RegionScalars(vsindex) ?? Array.Empty<float>();
+        operands.RemoveAt(operands.Count - 1);
+        int first = operands.Count - count * (scalars.Length + 1);
+        if (first < 0) throw new FormatException("Bad blend in a CFF2 DICT.");
+        for (int i = 0; i < count; i++)
+            for (int k = 0; k < scalars.Length; k++)
+                operands[first + i] += operands[first + count + i * scalars.Length + k] * scalars[k];
+        operands.RemoveRange(first + count, operands.Count - first - count);
     }
 
     /// <summary>
@@ -155,13 +210,13 @@ internal static class CffDict
     /// </summary>
     public static void WriteInt32(List<byte> o, int v)
     {
-        o.Add(29);
+        o.Add(LongIntByte);
         o.Add((byte)(v >> 24)); o.Add((byte)(v >> 16)); o.Add((byte)(v >> 8)); o.Add((byte)v);
     }
 
     public static void WriteOperator(List<byte> o, int op)
     {
-        if (op >= Escape) { o.Add(12); o.Add((byte)(op - Escape)); }
+        if (op >= Escape) { o.Add(EscapeByte); o.Add((byte)(op - Escape)); }
         else o.Add((byte)op);
     }
 }
