@@ -50,7 +50,7 @@ internal sealed partial class LayoutEngine
         TextMetrics(cs, out float strutA, out float strutD);
         var paragraph = new Paragraph(this, items, cs, x, y, w, indent, strutA + strutD, pages);
         FloatLines? fl = besideFloats || pages != null ? paragraph.NewLines() : null;
-        paragraph.First = FirstLineItems(run, container, firstInBlock, w, items.Count, cs);
+        paragraph.First = FirstLineItems(run, container, firstInBlock, w, items, cs);
         int opsMark = _ops.Count;
         var lines = paragraph.Break(fl);
         if (pages != null)
@@ -100,20 +100,31 @@ internal sealed partial class LayoutEngine
 
     /// <summary>
     /// With a ::first-line style the items are collected a second time, styled for the first line, and the line breaker
-    /// switches from that list to the usual one once the first line is full. Null when there is no such style, or
-    /// when small caps split the words differently, so the lists would not match item for item.
+    /// switches from that list to the usual one once the first line is full. Small capitals, bidi levels and
+    /// hyphenation may cut the text into other items in each list, so the breaker finds its place in the usual list by
+    /// the characters before it. Null when there is no such style.
     /// </summary>
-    private CollectState? FirstLineItems(List<Node> run, Element container, bool firstInBlock, float w, int itemCount, ComputedStyle cs)
+    private CollectState? FirstLineItems(List<Node> run, Element container, bool firstInBlock, float w, List<Item> items, ComputedStyle cs)
     {
         if (!firstInBlock || container.FirstLine is not { } firstLine || _measuring) return null;
         var first = CollectInline(run, w, firstLine);
-        if (first.Items.Count == itemCount)
-        {
-            ResolveBidi(first.Items, cs);
-            return first;
-        }
+        ResolveBidi(first.Items, cs);
+        // text-transform and small capitals change letters but not their number, so both lists hold as many
+        // characters. Were that ever not so, the breaker could not find its place, and the first line keeps the usual
+        // style rather than losing or repeating text.
+        if (ContentLength(first.Items) == ContentLength(items)) return first;
         ReturnState(first);
         return null;
+    }
+
+    /// <summary>How much content an item holds: its characters if it is text, otherwise one.</summary>
+    private static int ContentUnits(Item it) => it.IsText ? it.Length : 1;
+
+    private static long ContentLength(List<Item> items)
+    {
+        long n = 0;
+        foreach (var it in items) n += ContentUnits(it);
+        return n;
     }
 
     /// <summary>A paragraph being laid out: what its line breaker needs, and the lines beside floats it may be broken with.</summary>
