@@ -1,4 +1,6 @@
 using System.Xml;
+using PdfPecker.Pdf;
+using PdfPecker.Rendering.Parsing;
 
 namespace PdfPecker;
 
@@ -64,6 +66,80 @@ public sealed class PdfEInvoice
         Profile = profile;
     }
 
+    private PdfEInvoice(byte[] xml, EInvoiceProfile profile, EInvoiceRelationship? relationship)
+    {
+        Xml = xml;
+        Profile = profile;
+        Relationship = relationship;
+    }
+
+    /// <summary>
+    /// The e-invoice embedded in a Factur-X, ZUGFeRD 2.x or XRechnung PDF, or null when the PDF carries none. The XML is
+    /// returned unchanged; PdfPecker does not interpret or validate it.
+    /// </summary>
+    /// <remarks>
+    /// The invoice is the attachment the XMP metadata names (DocumentFileName), else one named factur-x.xml,
+    /// zugferd-invoice.xml or xrechnung.xml, else any other attached Cross Industry Invoice. The profile comes from the
+    /// XML's guideline, else from the XMP conformance level, else EN 16931. ZUGFeRD 1.0 invoices use an older schema
+    /// and are not found; <see cref="PdfAttachments.List"/> still returns them.
+    /// </remarks>
+    /// <param name="pdf">The PDF.</param>
+    /// <param name="password">The user or owner password of an encrypted PDF.</param>
+    /// <exception cref="InvalidDataException">The PDF cannot be read.</exception>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and the password is missing or wrong.</exception>
+    public static PdfEInvoice? Read(byte[] pdf, string? password = null)
+    {
+        var file = PdfAttachments.Open(pdf, password);
+        try
+        {
+            var xmp = EmbeddedFiles.Xmp(file);
+            var named = xmp == null ? null : EmbeddedFiles.XmpProperty(xmp, "DocumentFileName");
+            // The XMP name wins over the usual names, which win over any other XML file; OrderBy keeps the list's order otherwise.
+            var candidates = EmbeddedFiles.Read(file)
+                .Select(f => (File: f, Rank: Rank(f.FileName, named)))
+                .Where(c => c.Rank >= 0)
+                .OrderBy(c => c.Rank);
+            foreach (var (found, _) in candidates)
+            {
+                byte[] xml;
+                string? guideline;
+                try
+                {
+                    xml = EmbeddedFiles.Decode(file, found.Stream);
+                    guideline = ReadGuideline(xml);
+                }
+                catch (Exception ex) when (ex is ArgumentException or PdfFormatException or InvalidDataException)
+                {
+                    // Not a Cross Industry Invoice, or a stream that does not decode: look at the next candidate.
+                    continue;
+                }
+                var profile = ProfileFromGuideline(guideline)
+                    ?? ProfileFromConformanceLevel(xmp == null ? null : EmbeddedFiles.XmpProperty(xmp, "ConformanceLevel"))
+                    ?? EInvoiceProfile.En16931;
+                var relationship = file.GetName(found.Spec, "AFRelationship") switch
+                {
+                    "Alternative" => EInvoiceRelationship.Alternative,
+                    "Data" => EInvoiceRelationship.Data,
+                    "Source" => EInvoiceRelationship.Source,
+                    _ => (EInvoiceRelationship?)null,
+                };
+                return new PdfEInvoice(xml, profile, relationship);
+            }
+            return null;
+        }
+        catch (PdfFormatException ex)
+        {
+            throw new InvalidDataException("The PDF is not readable: " + ex.Message, ex);
+        }
+
+        static int Rank(string fileName, string? named)
+        {
+            if (named != null && string.Equals(fileName, named, StringComparison.OrdinalIgnoreCase)) return 0;
+            if (fileName.ToLowerInvariant() is "factur-x.xml" or "zugferd-invoice.xml" or "xrechnung.xml") return 1;
+            return fileName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase) ? 2 : -1;
+        }
+    }
+
     /// <summary>The CII XML, embedded unchanged.</summary>
     public byte[] Xml { get; }
 
@@ -104,6 +180,18 @@ public sealed class PdfEInvoice
         if (id.StartsWith("urn:cen.eu:en16931:2017")) return EInvoiceProfile.En16931;
         return null;
     }
+
+    /// <summary>The profile an XMP ConformanceLevel names, or null. ZUGFeRD 2.0 called EN 16931 COMFORT.</summary>
+    internal static EInvoiceProfile? ProfileFromConformanceLevel(string? level) => level?.Trim().ToUpperInvariant() switch
+    {
+        "MINIMUM" => EInvoiceProfile.Minimum,
+        "BASIC WL" => EInvoiceProfile.BasicWL,
+        "BASIC" => EInvoiceProfile.Basic,
+        "EN 16931" or "COMFORT" => EInvoiceProfile.En16931,
+        "EXTENDED" => EInvoiceProfile.Extended,
+        "XRECHNUNG" => EInvoiceProfile.XRechnung,
+        _ => null,
+    };
 
     /// <summary>Checks that the XML is a Cross Industry Invoice and returns its guideline ID, or null.</summary>
     private static string? ReadGuideline(byte[] xml)

@@ -136,7 +136,7 @@ public static class PdfAttachments
         return EmbeddedFiles.Append(Open(pdf, password), pdf, list);
     }
 
-    private static PdfFile Open(byte[] pdf, string? password)
+    internal static PdfFile Open(byte[] pdf, string? password)
     {
         ArgumentNullException.ThrowIfNull(pdf);
         try

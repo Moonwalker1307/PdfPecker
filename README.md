@@ -72,7 +72,7 @@ The conversion methods are static and thread-safe, so you can convert many docum
 - **Accessibility**: tagged PDF, PDF/UA-1 and PDF/UA-2 built from your HTML. [More](https://pdfpecker.net/docs/accessibility/)
 - **Forms**: HTML inputs become fillable PDF fields; read, fill and flatten the fields of existing PDFs. [More](https://pdfpecker.net/docs/forms/)
 - **Digital signatures**: PAdES signing, timestamps, external signers, verification and long-term validation. [More](https://pdfpecker.net/docs/signatures/)
-- **E-invoices and attachments**: Factur-X and ZUGFeRD, PDFs in Peppol and OIOUBL invoices, and any embedded file. [More](https://pdfpecker.net/docs/e-invoices/)
+- **E-invoices and attachments**: Factur-X and ZUGFeRD (embed the XML, or read it back from a received PDF), PDFs in Peppol and OIOUBL invoices, and any embedded file. [More](https://pdfpecker.net/docs/e-invoices/)
 - **Existing PDFs**: merge (also streamed), split, reorder, rotate, stamp and extract text with positions. [More](https://pdfpecker.net/docs/merging/)
 - **PDF to image**: renders any PDF page, including JPEG 2000, JBIG2 and CCITT images, to PNG, JPEG or WebP, or a whole PDF to one multi-page TIFF (colour, greyscale or black and white with CCITT Group 4). [More](https://pdfpecker.net/docs/pdf-to-image/)
 
