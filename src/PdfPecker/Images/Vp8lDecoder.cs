@@ -4,13 +4,32 @@ namespace PdfPecker.Images;
 /// Decoder for lossless WebP (the VP8L bitstream): prefix-coded ARGB pixels with LZ77 back-references and a colour
 /// cache, undone through up to four image transforms. Also decodes the lossless alpha planes of lossy WebP images.
 /// </summary>
-internal sealed class Vp8lDecoder
+internal ref partial struct Vp8lDecoder
 {
-    private const int PredictorTransform = 0, CrossColorTransform = 1, SubtractGreenTransform = 2, ColorIndexingTransform = 3;
-    private const int NumLiteralCodes = 256, NumLengthCodes = 24, NumDistanceCodes = 40, MaxCacheBits = 11;
-    private static readonly int[] CodeLengthCodeOrder = { 17, 18, 0, 1, 2, 3, 4, 5, 16, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
+    // The chunk starts with a signature byte, then the width and height minus one in 14 bits each, a hint that alpha
+    // is used, and a version number that must be zero.
+    private const byte Signature = 0x2F;
+    private const int MinChunkLength = 5;
+    private const int SizeBits = 14;
+    private const int VersionBits = 3;
+
+    // The alphabets of a prefix code group: the first code holds the green values, then the back-reference lengths,
+    // then the colour cache indexes; the last code holds the back-reference distances.
+    private const int NumLiteralCodes = 256;
+    private const int NumLengthCodes = 24;
+    private const int NumDistanceCodes = 40;
+    private const int MaxCacheBits = 11;
+
+    // A transform is a 2-bit type; predictor and cross-colour tiles are 2^(3-bit value + 2) pixels wide; a palette has
+    // up to 256 colours, and up to 16 of them let several pixels share one coded pixel.
+    private const int TransformTypeBits = 2;
+    private const int TileSizeBits = 3;
+    private const int MinTileBits = 2;
+    private const int PaletteSizeBits = 8;
+    private const int EntropyImageBits = 3;
 
     // Distance codes 1..120 map to nearby pixels: high nibble is the row above, low nibble is 8 minus the column offset.
+    private const int NumPlaneCodes = 120;
     private static readonly byte[] CodeToPlane =
     {
         0x18, 0x07, 0x17, 0x19, 0x28, 0x06, 0x27, 0x29, 0x16, 0x1a, 0x26, 0x2a, 0x38, 0x05, 0x37, 0x39, 0x15, 0x1b, 0x36, 0x3a,
@@ -21,24 +40,21 @@ internal sealed class Vp8lDecoder
         0x4f, 0x10, 0x20, 0x62, 0x6e, 0x30, 0x73, 0x7d, 0x51, 0x5f, 0x40, 0x72, 0x7e, 0x61, 0x6f, 0x50, 0x71, 0x7f, 0x60, 0x70,
     };
 
-    private readonly BitReader _br;
-    private readonly long _maxPixels;
-    private readonly List<Transform> _transforms = new();
-    private int _seenTransforms;
-    private long _work; // pixels decoded in all images of the stream, against the pixel budget
-    private long _tableEntries; // prefix code lookup entries kept, against a memory budget
+    // A stream only needs more prefix code lookup entries than this when its header is damaged or hostile.
     private const long MaxTableEntries = 1 << 24;
+
+    private BitReader reader;
+    private readonly long maxPixels;
+    private readonly List<Transform> transforms = new();
+    private int seenTransforms; // one bit per transform type, as each may appear only once
+    private long work; // pixels decoded in all images of the stream, against the pixel budget
+    private long tableEntries; // prefix code lookup entries kept, against MaxTableEntries
+    private int[]? codeLengths; // the code lengths of the prefix code being read, a buffer shared by all of them
 
     private Vp8lDecoder(byte[] data, int offset, int length, long maxPixels)
     {
-        _br = new BitReader(data, offset, length);
-        _maxPixels = maxPixels;
-    }
-
-    private sealed class Transform
-    {
-        public int Type, Bits, XSize;
-        public uint[]? Data;
+        reader = new BitReader(Range(data, offset, length));
+        this.maxPixels = maxPixels;
     }
 
     /// <summary>Decodes a VP8L chunk (with its signature and size header) to ARGB pixels, or returns null.</summary>
@@ -46,33 +62,42 @@ internal sealed class Vp8lDecoder
     {
         width = height = 0;
         hasAlpha = false;
-        if (length < 5 || data[offset] != 0x2F) return null;
-        var dec = new Vp8lDecoder(data, offset + 1, length - 1, maxPixels);
-        width = (int)dec._br.Read(14) + 1;
-        height = (int)dec._br.Read(14) + 1;
-        hasAlpha = dec._br.Read(1) == 1;
-        if (dec._br.Read(3) != 0) return null; // version
+        if (length < MinChunkLength || data[offset] != Signature) return null;
+        var decoder = new Vp8lDecoder(data, offset + 1, length - 1, maxPixels);
+        width = (int)decoder.reader.Read(SizeBits) + 1;
+        height = (int)decoder.reader.Read(SizeBits) + 1;
+        hasAlpha = decoder.reader.ReadBit();
+        if (decoder.reader.Read(VersionBits) != 0) return null;
         if ((long)width * height > maxPixels) return null;
-        return dec.DecodeMain(width, height);
+        return decoder.DecodeImage(width, height);
     }
 
     /// <summary>Decodes a headerless VP8L stream of a known size (the lossless alpha plane of a lossy image).</summary>
     public static uint[]? DecodeStream(byte[] data, int offset, int length, int width, int height, long maxPixels)
     {
         if ((long)width * height > maxPixels) return null;
-        return new Vp8lDecoder(data, offset, length, maxPixels).DecodeMain(width, height);
+        return new Vp8lDecoder(data, offset, length, maxPixels).DecodeImage(width, height);
     }
 
-    private uint[]? DecodeMain(int width, int height)
+    /// <summary>The bytes from <paramref name="offset"/> on, at most <paramref name="length"/> of them and none past the end.</summary>
+    private static ReadOnlySpan<byte> Range(byte[] data, int offset, int length)
+    {
+        int end = Math.Min(data.Length, offset + Math.Max(0, length));
+        return end > offset ? data.AsSpan(offset, end - offset) : default;
+    }
+
+    /// <summary>Reads the transforms and the coded image, then undoes the transforms, the last one read first.</summary>
+    private uint[]? DecodeImage(int width, int height)
     {
         try
         {
-            int xsize = width;
-            while (_br.Read(1) == 1)
-                if (!ReadTransform(ref xsize, height)) return null;
-            var pixels = DecodeImageStream(xsize, height, true);
+            // Colour indexing packs several pixels into one, so the coded image can be narrower than the picture.
+            int codedWidth = width;
+            while (reader.ReadBit())
+                if (!ReadTransform(ref codedWidth, height)) return null;
+            var pixels = DecodeImageStream(codedWidth, height, isMainImage: true);
             if (pixels == null) return null;
-            for (int i = _transforms.Count - 1; i >= 0; i--) pixels = Inverse(_transforms[i], pixels, height);
+            for (int i = transforms.Count - 1; i >= 0; i--) pixels = transforms[i].Undo(pixels, height);
             return pixels;
         }
         catch (InvalidDataException)
@@ -83,506 +108,240 @@ internal sealed class Vp8lDecoder
 
     private static int SubSampleSize(int size, int bits) => (size + (1 << bits) - 1) >> bits;
 
-    private bool ReadTransform(ref int xsize, int ysize)
+    private bool ReadTransform(ref int codedWidth, int height)
     {
-        int type = (int)_br.Read(2);
-        if ((_seenTransforms & (1 << type)) != 0) return false; // each transform at most once
-        _seenTransforms |= 1 << type;
-        var t = new Transform { Type = type, XSize = xsize };
+        var type = (TransformType)reader.Read(TransformTypeBits);
+        int typeBit = 1 << (int)type;
+        if ((seenTransforms & typeBit) != 0) return false;
+        seenTransforms |= typeBit;
         switch (type)
         {
-            case PredictorTransform:
-            case CrossColorTransform:
-                t.Bits = (int)_br.Read(3) + 2;
-                t.Data = DecodeImageStream(SubSampleSize(xsize, t.Bits), SubSampleSize(ysize, t.Bits), false);
-                if (t.Data == null) return false;
-                break;
-            case ColorIndexingTransform:
+            case TransformType.Predictor:
+            case TransformType.CrossColor:
             {
-                int colors = (int)_br.Read(8) + 1;
-                t.Bits = colors > 16 ? 0 : colors > 4 ? 1 : colors > 2 ? 2 : 3;
-                var table = DecodeImageStream(colors, 1, false);
-                if (table == null) return false;
-                // The palette is delta coded; entries past its end are transparent black.
-                var map = new uint[1 << (8 >> t.Bits)];
-                map[0] = table[0];
-                for (int i = 1; i < colors && i < map.Length; i++) map[i] = AddPixels(table[i], map[i - 1]);
-                t.Data = map;
-                xsize = SubSampleSize(xsize, t.Bits);
+                int tileBits = (int)reader.Read(TileSizeBits) + MinTileBits;
+                var tiles = DecodeImageStream(SubSampleSize(codedWidth, tileBits), SubSampleSize(height, tileBits), isMainImage: false);
+                if (tiles == null) return false;
+                transforms.Add(new Transform(type, tileBits, codedWidth, tiles));
+                break;
+            }
+            case TransformType.SubtractGreen:
+                transforms.Add(new Transform(type, 0, codedWidth, null));
+                break;
+            case TransformType.ColorIndexing:
+            {
+                int colors = (int)reader.Read(PaletteSizeBits) + 1;
+                int packingBits = PackingBits(colors);
+                var palette = DecodeImageStream(colors, 1, isMainImage: false);
+                if (palette == null) return false;
+                transforms.Add(new Transform(type, packingBits, codedWidth, ExpandPalette(palette, colors, packingBits)));
+                codedWidth = SubSampleSize(codedWidth, packingBits);
                 break;
             }
         }
-        _transforms.Add(t);
         return true;
     }
 
     // ------------------------------------------------------------------ entropy-coded image
 
-    private uint[]? DecodeImageStream(int xsize, int ysize, bool level0)
+    /// <summary>
+    /// One prefix-coded image: the main image, or a transform's tiles, a palette or an entropy image. Only the main
+    /// image may have an entropy image of its own, which chooses one of several groups of prefix codes per tile.
+    /// </summary>
+    private uint[]? DecodeImageStream(int width, int height, bool isMainImage)
     {
-        long pixels = (long)xsize * ysize;
-        _work += pixels;
-        if (pixels > _maxPixels || _work > _maxPixels * 2) return null;
+        long pixelCount = (long)width * height;
+        work += pixelCount;
+        if (pixelCount > maxPixels || work > maxPixels * 2) return null;
 
-        int cacheBits = 0;
-        if (_br.Read(1) == 1)
+        if (!TryReadColorCacheBits(out int cacheBits)) return null;
+        var entropyImage = default(EntropyImage);
+        if (isMainImage && reader.ReadBit() && !TryReadEntropyImage(width, height, out entropyImage)) return null;
+        var groups = ReadPrefixCodeGroups(entropyImage, cacheBits);
+        return groups == null ? null : DecodePixels(width, (int)pixelCount, groups, entropyImage, cacheBits);
+    }
+
+    private bool TryReadColorCacheBits(out int cacheBits)
+    {
+        cacheBits = 0;
+        if (!reader.ReadBit()) return true;
+        cacheBits = (int)reader.Read(4);
+        return cacheBits is >= 1 and <= MaxCacheBits;
+    }
+
+    /// <summary>Reads the entropy image and turns its pixels into the indexes of their prefix code groups.</summary>
+    private bool TryReadEntropyImage(int width, int height, out EntropyImage entropyImage)
+    {
+        int tileBits = (int)reader.Read(EntropyImageBits) + MinTileBits;
+        int tilesPerRow = SubSampleSize(width, tileBits);
+        var groups = DecodeImageStream(tilesPerRow, SubSampleSize(height, tileBits), isMainImage: false);
+        if (groups == null)
         {
-            cacheBits = (int)_br.Read(4);
-            if (cacheBits is < 1 or > MaxCacheBits) return null;
+            entropyImage = default;
+            return false;
         }
-
-        // Meta prefix codes: an entropy image choosing the code group of each block of pixels.
-        int huffBits = 0, huffXSize = 0;
-        uint[]? huffImage = null;
-        int groupCount = 1;
-        if (level0 && _br.Read(1) == 1)
+        // The group index is in the red and green channels.
+        uint largest = 0;
+        for (int i = 0; i < groups.Length; i++)
         {
-            huffBits = (int)_br.Read(3) + 2;
-            huffXSize = SubSampleSize(xsize, huffBits);
-            huffImage = DecodeImageStream(huffXSize, SubSampleSize(ysize, huffBits), false);
-            if (huffImage == null) return null;
-            int max = 0;
-            for (int i = 0; i < huffImage.Length; i++)
-            {
-                int g = (int)(huffImage[i] >> 8) & 0xFFFF;
-                huffImage[i] = (uint)g;
-                if (g > max) max = g;
-            }
-            groupCount = max + 1;
+            uint group = (groups[i] >> 8) & 0xFFFF;
+            groups[i] = group;
+            largest = Math.Max(largest, group);
         }
+        entropyImage = new EntropyImage(tileBits, tilesPerRow, groups, (int)largest);
+        return true;
+    }
 
-        int cacheSize = cacheBits > 0 ? 1 << cacheBits : 0;
-        var groups = new Huffman[groupCount][];
-        var used = new bool[groupCount];
-        if (huffImage != null) foreach (var g in huffImage) used[g] = true;
-        else used[0] = true;
-        var lengths = new int[NumLiteralCodes + NumLengthCodes + (1 << MaxCacheBits)];
-        for (int g = 0; g < groupCount; g++)
+    /// <summary>
+    /// Reads every prefix code group of the image. All of them are in the stream, but only the ones the entropy image
+    /// refers to are kept, and only those count against the lookup table budget.
+    /// </summary>
+    private PrefixCodeGroup[]? ReadPrefixCodeGroups(in EntropyImage entropyImage, int cacheBits)
+    {
+        var used = new bool[entropyImage.GroupCount];
+        if (entropyImage.Groups is { } indexes)
+            foreach (uint index in indexes) used[index] = true;
+        else
+            used[0] = true;
+
+        int greenAlphabet = NumLiteralCodes + NumLengthCodes + (cacheBits > 0 ? 1 << cacheBits : 0);
+        var groups = new PrefixCodeGroup[used.Length];
+        for (int i = 0; i < groups.Length; i++)
         {
-            // Every group is in the stream, but only the ones the entropy image refers to are kept.
-            var codes = new Huffman[5];
-            for (int j = 0; j < 5; j++)
-            {
-                int alphabet = j == 0 ? NumLiteralCodes + NumLengthCodes + cacheSize : j == 4 ? NumDistanceCodes : 256;
-                codes[j] = ReadHuffmanCode(alphabet, lengths) ?? throw new InvalidDataException("Bad prefix code.");
-                if (used[g] && (_tableEntries += codes[j].TableSize) > MaxTableEntries) return null;
-            }
-            if (used[g]) groups[g] = codes;
+            bool kept = used[i];
+            if (!TryReadKeptCode(greenAlphabet, kept, out var green)
+                || !TryReadKeptCode(NumLiteralCodes, kept, out var red)
+                || !TryReadKeptCode(NumLiteralCodes, kept, out var blue)
+                || !TryReadKeptCode(NumLiteralCodes, kept, out var alpha)
+                || !TryReadKeptCode(NumDistanceCodes, kept, out var distance))
+                return null;
+            if (kept) groups[i] = new PrefixCodeGroup(green, red, blue, alpha, distance);
         }
+        return groups;
+    }
 
-        var data = new uint[pixels];
-        var cache = cacheSize > 0 ? new uint[cacheSize] : null;
-        int cacheShift = 32 - cacheBits;
-        int pos = 0, x = 0, y = 0, total = (int)pixels;
+    /// <summary>Reads one prefix code of a group; false when a kept code takes the lookup tables over their budget.</summary>
+    private bool TryReadKeptCode(int alphabetSize, bool kept, out PrefixCode code)
+    {
+        code = ReadPrefixCode(alphabetSize) ?? throw new InvalidDataException("Bad prefix code.");
+        return !kept || (tableEntries += code.TableSize) <= MaxTableEntries;
+    }
+
+    /// <summary>Decodes the pixels of an image: literal colours, back-references to earlier pixels and colour cache hits.</summary>
+    private uint[] DecodePixels(int width, int pixelCount, PrefixCodeGroup[] groups, in EntropyImage entropyImage, int cacheBits)
+    {
+        var pixels = new uint[pixelCount];
+        var cache = new ColorCache(cacheBits);
+        var groupIndexes = entropyImage.Groups;
+        int tileBits = entropyImage.TileBits, tilesPerRow = entropyImage.TilesPerRow;
+        int position = 0, x = 0, y = 0;
         var group = groups[0];
-        while (pos < total)
+        while (position < pixels.Length)
         {
-            if (huffImage != null) group = groups[huffImage[(y >> huffBits) * huffXSize + (x >> huffBits)]];
-            int code = group[0].Read(_br);
+            if (groupIndexes != null) group = groups[groupIndexes[(y >> tileBits) * tilesPerRow + (x >> tileBits)]];
+            int code = group.Green.Read(ref reader);
             if (code < NumLiteralCodes)
             {
-                int red = group[1].Read(_br), blue = group[2].Read(_br), alpha = group[3].Read(_br);
+                int red = group.Red.Read(ref reader), blue = group.Blue.Read(ref reader), alpha = group.Alpha.Read(ref reader);
                 uint argb = (uint)(alpha << 24 | red << 16 | code << 8 | blue);
-                data[pos++] = argb;
-                if (cache != null) cache[(0x1e35a7bd * argb) >> cacheShift] = argb;
-                if (++x == xsize) { x = 0; y++; }
+                pixels[position++] = argb;
+                cache.Insert(argb);
+                if (++x == width)
+                {
+                    x = 0;
+                    y++;
+                }
             }
             else if (code < NumLiteralCodes + NumLengthCodes)
             {
-                int length = CopyDistance(code - NumLiteralCodes);
-                int distSymbol = group[4].Read(_br);
-                int dist = PlaneCodeToDistance(xsize, CopyDistance(distSymbol));
-                if (dist > pos || length > total - pos) throw new InvalidDataException("Bad back-reference.");
-                for (int k = 0; k < length; k++, pos++)
+                int length = ReadLengthOrDistance(code - NumLiteralCodes);
+                int distance = PlaneCodeToDistance(width, ReadLengthOrDistance(group.Distance.Read(ref reader)));
+                if (distance > position || length > pixels.Length - position) throw new InvalidDataException("Bad back-reference.");
+                // The copy may overlap what it writes, which repeats the last pixels, so it goes one pixel at a time.
+                for (int end = position + length; position < end; position++)
                 {
-                    uint argb = data[pos - dist];
-                    data[pos] = argb;
-                    if (cache != null) cache[(0x1e35a7bd * argb) >> cacheShift] = argb;
+                    uint argb = pixels[position - distance];
+                    pixels[position] = argb;
+                    cache.Insert(argb);
                 }
                 x += length;
-                while (x >= xsize) { x -= xsize; y++; }
+                while (x >= width)
+                {
+                    x -= width;
+                    y++;
+                }
             }
             else
             {
-                int key = code - NumLiteralCodes - NumLengthCodes;
-                if (cache == null || key >= cache.Length) throw new InvalidDataException("Bad colour cache index.");
-                data[pos++] = cache[key];
-                if (++x == xsize) { x = 0; y++; }
+                if (!cache.TryLookup(code - NumLiteralCodes - NumLengthCodes, out uint argb)) throw new InvalidDataException("Bad colour cache index.");
+                pixels[position++] = argb;
+                if (++x == width)
+                {
+                    x = 0;
+                    y++;
+                }
             }
-            if (_br.Overrun) throw new InvalidDataException("Truncated lossless WebP data.");
+            if (reader.Overrun) throw new InvalidDataException("Truncated lossless WebP data.");
         }
-        return data;
+        return pixels;
     }
 
-    private int CopyDistance(int symbol)
+    /// <summary>A back-reference length or distance: the first four symbols are the value itself, later ones take extra bits.</summary>
+    private int ReadLengthOrDistance(int symbol)
     {
         if (symbol < 4) return symbol + 1;
         int extraBits = (symbol - 2) >> 1;
         int offset = (2 + (symbol & 1)) << extraBits;
-        return offset + (int)_br.Read(extraBits) + 1;
+        return offset + (int)reader.Read(extraBits) + 1;
     }
 
-    private static int PlaneCodeToDistance(int xsize, int planeCode)
+    /// <summary>Distance codes up to 120 name a pixel near the current one; larger codes are a plain distance plus 120.</summary>
+    private static int PlaneCodeToDistance(int width, int planeCode)
     {
-        if (planeCode > 120) return planeCode - 120;
-        int distCode = CodeToPlane[planeCode - 1];
-        int yOffset = distCode >> 4, xOffset = 8 - (distCode & 0xF);
-        int dist = yOffset * xsize + xOffset;
-        return dist >= 1 ? dist : 1;
+        if (planeCode > NumPlaneCodes) return planeCode - NumPlaneCodes;
+        int plane = CodeToPlane[planeCode - 1];
+        int rows = plane >> 4, columns = 8 - (plane & 0xF);
+        int distance = rows * width + columns;
+        return distance >= 1 ? distance : 1;
     }
 
-    private Huffman? ReadHuffmanCode(int alphabet, int[] lengths)
+    /// <summary>
+    /// The tiles of the main image and the prefix code group each one uses; <see cref="Groups"/> is null when the
+    /// whole image uses one group.
+    /// </summary>
+    private readonly record struct EntropyImage(int TileBits, int TilesPerRow, uint[]? Groups, int LargestGroup)
     {
-        Array.Clear(lengths, 0, Math.Max(alphabet, 256));
-        if (_br.Read(1) == 1)
-        {
-            // Simple code: one or two symbols.
-            int count = (int)_br.Read(1) + 1;
-            int first = (int)_br.Read(_br.Read(1) == 0 ? 1 : 8);
-            lengths[first] = 1;
-            if (count == 2) lengths[_br.Read(8)] = 1;
-        }
-        else
-        {
-            var codeLengthLengths = new int[CodeLengthCodeOrder.Length];
-            int n = (int)_br.Read(4) + 4;
-            for (int i = 0; i < n; i++) codeLengthLengths[CodeLengthCodeOrder[i]] = (int)_br.Read(3);
-            var lengthCode = Huffman.Build(codeLengthLengths, codeLengthLengths.Length);
-            if (lengthCode == null) return null;
-
-            int maxSymbol = alphabet;
-            if (_br.Read(1) == 1)
-            {
-                int bits = 2 + 2 * (int)_br.Read(3);
-                maxSymbol = 2 + (int)_br.Read(bits);
-                if (maxSymbol > alphabet) return null;
-            }
-            int symbol = 0, previous = 8;
-            while (symbol < alphabet)
-            {
-                if (maxSymbol-- == 0) break;
-                int len = lengthCode.Read(_br);
-                if (len < 16)
-                {
-                    lengths[symbol++] = len;
-                    if (len != 0) previous = len;
-                }
-                else
-                {
-                    int slot = len - 16;
-                    int repeat = (int)_br.Read(slot == 0 ? 2 : slot == 1 ? 3 : 7) + (slot == 2 ? 11 : 3);
-                    if (symbol + repeat > alphabet) return null;
-                    int value = slot == 0 ? previous : 0;
-                    while (repeat-- > 0) lengths[symbol++] = value;
-                }
-            }
-        }
-        if (_br.Overrun) return null;
-        return Huffman.Build(lengths, alphabet);
+        public int GroupCount => Groups == null ? 1 : LargestGroup + 1;
     }
 
-    // ------------------------------------------------------------------ inverse transforms
-
-    private static uint[] Inverse(Transform t, uint[] src, int height)
+    /// <summary>Recently seen colours, at a hash of their value, that later pixels can refer to by that hash.</summary>
+    private readonly struct ColorCache
     {
-        int width = t.XSize;
-        switch (t.Type)
+        private const uint HashMultiplier = 0x1e35a7bd;
+
+        private readonly uint[]? entries;
+        private readonly int shift;
+
+        public ColorCache(int bits)
         {
-            case SubtractGreenTransform:
-                for (int i = 0; i < src.Length; i++)
-                {
-                    uint argb = src[i], green = (argb >> 8) & 0xFF;
-                    uint redBlue = (argb & 0x00FF00FF) + (green << 16 | green);
-                    src[i] = (argb & 0xFF00FF00) | (redBlue & 0x00FF00FF);
-                }
-                return src;
-            case CrossColorTransform:
-            {
-                int tiles = SubSampleSize(width, t.Bits);
-                for (int y = 0; y < height; y++)
-                {
-                    int row = y * width, tileRow = (y >> t.Bits) * tiles;
-                    for (int x = 0; x < width; x++)
-                    {
-                        uint m = t.Data![tileRow + (x >> t.Bits)];
-                        sbyte greenToRed = (sbyte)m, greenToBlue = (sbyte)(m >> 8), redToBlue = (sbyte)(m >> 16);
-                        uint argb = src[row + x];
-                        sbyte green = (sbyte)(argb >> 8);
-                        int red = (int)(argb >> 16) & 0xFF, blue = (int)argb & 0xFF;
-                        red = (red + (greenToRed * green >> 5)) & 0xFF;
-                        blue += greenToBlue * green >> 5;
-                        blue += redToBlue * (sbyte)red >> 5;
-                        src[row + x] = (argb & 0xFF00FF00) | (uint)red << 16 | (uint)(blue & 0xFF);
-                    }
-                }
-                return src;
-            }
-            case PredictorTransform:
-            {
-                int tiles = SubSampleSize(width, t.Bits);
-                // The first row predicts from the left (its first pixel from opaque black), the first column from above.
-                src[0] = AddPixels(src[0], 0xFF000000);
-                for (int x = 1; x < width; x++) src[x] = AddPixels(src[x], src[x - 1]);
-                for (int y = 1; y < height; y++)
-                {
-                    int row = y * width, tileRow = (y >> t.Bits) * tiles;
-                    src[row] = AddPixels(src[row], src[row - width]);
-                    for (int x = 1; x < width; x++)
-                    {
-                        int mode = (int)(t.Data![tileRow + (x >> t.Bits)] >> 8) & 0xF;
-                        int p = row + x;
-                        // The top-right of the last pixel in a row is the first pixel of the current row.
-                        src[p] = AddPixels(src[p], Predict(mode, src[p - 1], src[p - width], src[p - width - 1], src[p - width + 1]));
-                    }
-                }
-                return src;
-            }
-            default: // colour indexing
-            {
-                var map = t.Data!;
-                if (t.Bits == 0)
-                {
-                    for (int i = 0; i < src.Length; i++)
-                    {
-                        int index = (int)(src[i] >> 8) & 0xFF;
-                        src[i] = index < map.Length ? map[index] : 0;
-                    }
-                    return src;
-                }
-                int packedWidth = SubSampleSize(width, t.Bits);
-                int bitsPerPixel = 8 >> t.Bits, perByte = 1 << t.Bits;
-                uint mask = (1u << bitsPerPixel) - 1;
-                var dst = new uint[(long)width * height];
-                for (int y = 0; y < height; y++)
-                {
-                    uint packed = 0;
-                    for (int x = 0; x < width; x++)
-                    {
-                        if ((x & (perByte - 1)) == 0) packed = (src[y * packedWidth + (x >> t.Bits)] >> 8) & 0xFF;
-                        dst[y * width + x] = map[packed & mask];
-                        packed >>= bitsPerPixel;
-                    }
-                }
-                return dst;
-            }
-        }
-    }
-
-    private static uint Predict(int mode, uint left, uint top, uint topLeft, uint topRight) => mode switch
-    {
-        1 => left,
-        2 => top,
-        3 => topRight,
-        4 => topLeft,
-        5 => Average2(Average2(left, topRight), top),
-        6 => Average2(left, topLeft),
-        7 => Average2(left, top),
-        8 => Average2(topLeft, top),
-        9 => Average2(top, topRight),
-        10 => Average2(Average2(left, topLeft), Average2(top, topRight)),
-        11 => Select(top, left, topLeft),
-        12 => ClampedAddSubtractFull(left, top, topLeft),
-        13 => ClampedAddSubtractHalf(Average2(left, top), topLeft),
-        _ => 0xFF000000,
-    };
-
-    private static uint AddPixels(uint a, uint b)
-    {
-        uint alphaGreen = (a & 0xFF00FF00) + (b & 0xFF00FF00);
-        uint redBlue = (a & 0x00FF00FF) + (b & 0x00FF00FF);
-        return (alphaGreen & 0xFF00FF00) | (redBlue & 0x00FF00FF);
-    }
-
-    private static uint Average2(uint a, uint b) => (((a ^ b) & 0xFEFEFEFE) >> 1) + (a & b);
-
-    private static uint Select(uint a, uint b, uint c)
-    {
-        int Sub3(int shift)
-        {
-            int av = (int)(a >> shift) & 0xFF, bv = (int)(b >> shift) & 0xFF, cv = (int)(c >> shift) & 0xFF;
-            return Math.Abs(bv - cv) - Math.Abs(av - cv);
-        }
-        int paMinusPb = Sub3(24) + Sub3(16) + Sub3(8) + Sub3(0);
-        return paMinusPb <= 0 ? a : b;
-    }
-
-    private static int Clip255(int v) => v < 0 ? 0 : v > 255 ? 255 : v;
-
-    private static uint ClampedAddSubtractFull(uint a, uint b, uint c)
-    {
-        uint result = 0;
-        for (int shift = 0; shift < 32; shift += 8)
-        {
-            int v = (int)(a >> shift & 0xFF) + (int)(b >> shift & 0xFF) - (int)(c >> shift & 0xFF);
-            result |= (uint)Clip255(v) << shift;
-        }
-        return result;
-    }
-
-    private static uint ClampedAddSubtractHalf(uint avg, uint c)
-    {
-        uint result = 0;
-        for (int shift = 0; shift < 32; shift += 8)
-        {
-            int a = (int)(avg >> shift & 0xFF), b = (int)(c >> shift & 0xFF);
-            result |= (uint)Clip255(a + (a - b) / 2) << shift;
-        }
-        return result;
-    }
-
-    // ------------------------------------------------------------------ bits and prefix codes
-
-    /// <summary>Reads bits least significant first. Reading past the end yields zeros and sets <see cref="Overrun"/>.</summary>
-    internal sealed class BitReader
-    {
-        private readonly byte[] _data;
-        private int _pos;
-        private readonly int _end;
-        private ulong _bits;
-        private int _count;
-        public bool Overrun;
-
-        public BitReader(byte[] data, int offset, int length)
-        {
-            _data = data;
-            _pos = offset;
-            _end = Math.Min(data.Length, offset + Math.Max(0, length));
+            entries = bits > 0 ? new uint[1 << bits] : null;
+            shift = 32 - bits;
         }
 
-        private void Fill()
+        public void Insert(uint argb)
         {
-            while (_count <= 56 && _pos < _end)
-            {
-                _bits |= (ulong)_data[_pos++] << _count;
-                _count += 8;
-            }
+            if (entries != null) entries[(HashMultiplier * argb) >> shift] = argb;
         }
 
-        public uint Peek(int n)
+        public bool TryLookup(int key, out uint argb)
         {
-            if (_count < n) Fill();
-            return (uint)(_bits & ((1UL << n) - 1));
-        }
-
-        public void Skip(int n)
-        {
-            if (n > _count)
+            if (entries == null || key >= entries.Length)
             {
-                Overrun = true;
-                _bits = 0;
-                _count = 0;
-                return;
+                argb = 0;
+                return false;
             }
-            _bits >>= n;
-            _count -= n;
-        }
-
-        public uint Read(int n)
-        {
-            if (n == 0) return 0;
-            uint v = Peek(n);
-            Skip(n);
-            return v;
-        }
-    }
-
-    /// <summary>A canonical prefix code, read through a lookup table on its first bits.</summary>
-    internal sealed class Huffman
-    {
-        private const int TableBits = 9;
-        private int _single = -1;
-        private int _tableBits;
-        private int[] _table = Array.Empty<int>(); // symbol << 4 | length, or -1 for longer codes
-        private int[] _counts = Array.Empty<int>();
-        private int[] _symbols = Array.Empty<int>();
-
-        public int TableSize => _table.Length;
-
-        public static Huffman? Build(int[] lengths, int alphabet)
-        {
-            var h = new Huffman();
-            var counts = new int[16];
-            int used = 0, last = 0, maxLen = 0;
-            for (int s = 0; s < alphabet; s++)
-            {
-                int len = lengths[s];
-                if (len == 0) continue;
-                if (len > 15) return null;
-                counts[len]++;
-                used++;
-                last = s;
-                if (len > maxLen) maxLen = len;
-            }
-            if (used == 0) return null;
-            if (used == 1)
-            {
-                h._single = last; // a code of one symbol takes no bits
-                return h;
-            }
-            // The code must be complete: neither over-subscribed nor with unused codes.
-            int left = 1;
-            for (int len = 1; len < 16; len++)
-            {
-                left = (left << 1) - counts[len];
-                if (left < 0) return null;
-            }
-            if (left != 0) return null;
-
-            var offsets = new int[16];
-            for (int len = 1; len < 15; len++) offsets[len + 1] = offsets[len] + counts[len];
-            var symbols = new int[used];
-            for (int s = 0; s < alphabet; s++)
-                if (lengths[s] != 0) symbols[offsets[lengths[s]]++] = s;
-            h._counts = counts;
-            h._symbols = symbols;
-
-            // Lookup table for codes up to TableBits long, indexed by the next bits of the stream (least significant first).
-            h._tableBits = Math.Min(maxLen, TableBits);
-            var table = new int[1 << h._tableBits];
-            Array.Fill(table, -1);
-            int code = 0, index = 0;
-            for (int len = 1; len <= maxLen; len++)
-            {
-                for (int k = 0; k < counts[len]; k++, index++, code++)
-                {
-                    if (len > h._tableBits) continue;
-                    int reversed = Reverse(code, len);
-                    for (int r = reversed; r < table.Length; r += 1 << len) table[r] = symbols[index] << 4 | len;
-                }
-                code <<= 1;
-            }
-            h._table = table;
-            return h;
-        }
-
-        private static int Reverse(int code, int len)
-        {
-            int r = 0;
-            for (int i = 0; i < len; i++) { r = r << 1 | (code & 1); code >>= 1; }
-            return r;
-        }
-
-        public int Read(BitReader br)
-        {
-            if (_single >= 0) return _single;
-            int entry = _table[br.Peek(_tableBits)];
-            if (entry >= 0)
-            {
-                br.Skip(entry & 0xF);
-                return entry >> 4;
-            }
-            // A long code: walk it one bit at a time.
-            int code = 0, first = 0, index = 0;
-            for (int len = 1; len < 16; len++)
-            {
-                code |= (int)br.Read(1);
-                int count = _counts[len];
-                if (code - first < count) return _symbols[index + code - first];
-                index += count;
-                first = (first + count) << 1;
-                code <<= 1;
-            }
-            throw new InvalidDataException("Bad prefix code.");
+            argb = entries[key];
+            return true;
         }
     }
 }
