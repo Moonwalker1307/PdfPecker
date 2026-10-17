@@ -319,7 +319,24 @@ internal sealed partial class CffFont : IGlyphSource
         if (gid < 0 || gid >= _cache.Length) return null;
         var cached = Volatile.Read(ref _cache[gid]);
         if (cached != null) return cached;
-        var glyph = new Type2Glyph(this, PrivateFor(gid));
+        var glyph = Build(gid, seacComponents: true);
+        var path = glyph.Finish();
+        _widths[gid] = glyph.Width;
+        Volatile.Write(ref _cache[gid], path);
+        return path;
+    }
+
+    /// <summary>
+    /// The outline of a seac component. The spec allows only one level of seac, so the component's own seac is not
+    /// followed: that is what stops a glyph whose components lead back to it from recursing until the stack
+    /// overflows. The result is not cached, so a glyph looks the same whether it was drawn alone or as a component.
+    /// </summary>
+    private PathData? SeacComponent(int gid)
+        => gid < 0 || gid >= _cache.Length ? null : Build(gid, seacComponents: false).Finish();
+
+    private Type2Glyph Build(int gid, bool seacComponents)
+    {
+        var glyph = new Type2Glyph(this, PrivateFor(gid), gid, seacComponents);
         try
         {
             var (start, end) = _charStrings.Range(gid);
@@ -329,10 +346,7 @@ internal sealed partial class CffFont : IGlyphSource
         {
             // A damaged charstring draws what it managed to before the damage.
         }
-        var path = glyph.Finish();
-        _widths[gid] = glyph.Width;
-        Volatile.Write(ref _cache[gid], path);
-        return path;
+        return glyph;
     }
 
     // A CID-keyed font selects a glyph's subroutines and widths through FDSelect; other glyphs use the top-level ones.

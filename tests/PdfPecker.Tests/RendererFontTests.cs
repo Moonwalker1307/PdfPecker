@@ -32,12 +32,13 @@ public class RendererFontTests
     }
 
     /// <summary>Assembles a charstring from numbers and operator names.</summary>
-    private static byte[] CharString(string program)
+    internal static byte[] CharString(string program)
     {
         var o = new List<byte>();
         foreach (var token in program.Split(' ', StringSplitOptions.RemoveEmptyEntries))
         {
             if (int.TryParse(token, out int n)) { Number(o, n); continue; }
+            if (token == "seac") { o.Add(12); o.Add(6); continue; }
             o.Add(token switch
             {
                 "hlineto" => 6, "vlineto" => 7, "rrcurveto" => 8, "closepath" => 9, "callsubr" => 10, "return" => 11, "hsbw" => 13,
@@ -48,7 +49,7 @@ public class RendererFontTests
         return o.ToArray();
     }
 
-    private static byte[] Type1Program(string cleartextEncoding, (string Name, string Program)[] glyphs, string[]? subrs = null)
+    internal static byte[] Type1Program(string cleartextEncoding, (string Name, string Program)[] glyphs, string[]? subrs = null)
     {
         var clear = "%!PS-AdobeFont-1.0: TestType1 1.0\n12 dict begin\n/FontInfo 1 dict dup begin /FullName (TestType1) def end readonly def\n" +
                     "/FontName /TestType1 def\n/PaintType 0 def\n/FontType 1 def\n/FontMatrix [0.001 0 0 0.001 0 0] readonly def\n" +

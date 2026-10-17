@@ -5,6 +5,8 @@ using PdfPecker.Css;
 using PdfPecker.Fonts;
 using PdfPecker.Html;
 using PdfPecker.Images;
+using PdfPecker.Rendering.Fonts;
+using PdfPecker.Rendering.Graphics;
 using static PdfPecker.Tests.PdfTestHelpers;
 
 namespace PdfPecker.Tests;
@@ -895,6 +897,133 @@ public class CffSubroutineTests
             BinaryPrimitives.WriteInt32BigEndian(count, items.Length);
             o.AddRange(cff2 ? count : count[2..]);
             o.Add(4);
+            var off = new byte[4];
+            int at = 1;
+            BinaryPrimitives.WriteInt32BigEndian(off, at);
+            o.AddRange(off);
+            foreach (var item in items)
+            {
+                at += item.Length;
+                BinaryPrimitives.WriteInt32BigEndian(off, at);
+                o.AddRange(off);
+            }
+            foreach (var item in items) o.AddRange(item);
+            return o.ToArray();
+        }
+    }
+}
+
+/// <summary>
+/// Accented glyphs (seac) whose base or accent is the glyph itself, or a glyph whose seac points back: building one
+/// used to recurse until the stack overflowed, which no handler can catch and which ends the whole process.
+/// </summary>
+[Collection(HostileInputCollection.Name)]
+public class SeacRecursionTests
+{
+    // Standard encoding codes, and the glyph ids the ISOAdobe charset gives those names (SID = gid).
+    private const int CodeA = 65, CodeC = 67, CodeD = 68, CodeE = 69;
+    private const int GidA = 34, GidC = 36, GidD = 37, GidE = 38, GidF = 39;
+
+    // A small triangle: one move, two lines and the close that endchar adds.
+    private const string Triangle = "10 10 rmoveto 50 0 rlineto 0 50 rlineto";
+
+    [Fact]
+    public void Cff_seac_that_refers_to_itself_or_a_cycle_does_not_overflow_the_stack()
+    {
+        var charStrings = new byte[GidF + 1][];
+        for (int gid = 0; gid < charStrings.Length; gid++) charStrings[gid] = Type2("endchar");
+        charStrings[GidA] = Type2($"{Triangle} 0 0 {CodeA} {CodeE} endchar"); // A = A + E
+        charStrings[GidC] = Type2($"{Triangle} 0 0 {CodeD} {CodeE} endchar"); // C = D + E, and D = C + E
+        charStrings[GidD] = Type2($"{Triangle} 0 0 {CodeC} {CodeE} endchar");
+        charStrings[GidE] = Type2(Triangle + " endchar");
+        charStrings[GidF] = Type2($"{Triangle} 0 0 {CodeE} {CodeE} endchar"); // a valid seac: F = E + E
+
+        var font = CffFont.Parse(Cff(charStrings));
+        Assert.NotNull(font);
+        AssertBounded(() =>
+        {
+            Assert.Equal(2, Contours(font!.GetGlyph(GidA))); // its own outline and the accent; the self-reference is dropped
+            Assert.Equal(3, Contours(font.GetGlyph(GidC))); // its own outline, D's own outline and the accent
+            Assert.Equal(3, Contours(font.GetGlyph(GidD)));
+            Assert.Equal(3, Contours(font.GetGlyph(GidF))); // a valid seac keeps both components
+        });
+    }
+
+    [Fact]
+    public void Type1_seac_that_refers_to_itself_or_a_cycle_does_not_overflow_the_stack()
+    {
+        const string triangle = "0 600 hsbw " + Triangle;
+        var program = RendererFontTests.Type1Program("/Encoding StandardEncoding def", new[]
+        {
+            ("A", $"{triangle} 0 0 0 {CodeA} {CodeE} seac"),
+            ("C", $"{triangle} 0 0 0 {CodeD} {CodeE} seac"),
+            ("D", $"{triangle} 0 0 0 {CodeC} {CodeE} seac"),
+            ("E", triangle + " endchar"),
+            ("F", $"{triangle} 0 0 0 {CodeE} {CodeE} seac"),
+        });
+        var font = Type1Font.Parse(program, Encoding.Latin1.GetString(program).IndexOf("eexec\n", StringComparison.Ordinal) + 6);
+        Assert.NotNull(font);
+        AssertBounded(() =>
+        {
+            Assert.Equal(2, Contours(font!.GetGlyph(font.GlyphByName("A"))));
+            Assert.Equal(3, Contours(font.GetGlyph(font.GlyphByName("C"))));
+            Assert.Equal(3, Contours(font.GetGlyph(font.GlyphByName("D"))));
+            Assert.Equal(3, Contours(font.GetGlyph(font.GlyphByName("F"))));
+        });
+    }
+
+    private static void AssertBounded(Action action)
+    {
+        var task = Task.Run(action);
+        Assert.True(task.Wait(TimeSpan.FromSeconds(20)), "building the glyphs did not finish in time");
+    }
+
+    private static int Contours(PathData? path)
+    {
+        Assert.NotNull(path);
+        return path!.Verbs.Count(v => v == PathData.MoveTo);
+    }
+
+    /// <summary>Assembles a Type 2 charstring from small numbers and the operators these tests use.</summary>
+    private static byte[] Type2(string program)
+    {
+        var o = new List<byte>();
+        foreach (var token in program.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (int.TryParse(token, out int n)) { o.Add((byte)(n + 139)); continue; }
+            o.Add(token switch { "rlineto" => 5, "endchar" => 14, "rmoveto" => 21, _ => throw new ArgumentException(token) });
+        }
+        return o.ToArray();
+    }
+
+    /// <summary>
+    /// A bare CFF font: no strings, no subroutines, no Private DICT, the ISOAdobe charset and the standard encoding,
+    /// so that glyph id i is named by standard string i.
+    /// </summary>
+    private static byte[] Cff(byte[][] charStrings)
+    {
+        var o = new List<byte> { 1, 0, 4, 4 };
+        o.AddRange(Index(new[] { "F"u8.ToArray() }));
+        int topSize = Index(new[] { TopDict(0) }).Length;
+        o.AddRange(Index(new[] { TopDict(o.Count + topSize + 2 + 2) }));
+        o.AddRange(new byte[] { 0, 0 }); // empty String INDEX
+        o.AddRange(new byte[] { 0, 0 }); // empty Global Subr INDEX
+        o.AddRange(Index(charStrings));
+        return o.ToArray();
+
+        // The Top DICT holds only the CharStrings offset, as a five-byte integer so that its size is known up front.
+        static byte[] TopDict(int charStrings)
+        {
+            var b = new byte[6];
+            b[0] = 29;
+            BinaryPrimitives.WriteInt32BigEndian(b.AsSpan(1), charStrings);
+            b[5] = 17;
+            return b;
+        }
+
+        static byte[] Index(byte[][] items)
+        {
+            var o = new List<byte> { (byte)(items.Length >> 8), (byte)items.Length, 4 };
             var off = new byte[4];
             int at = 1;
             BinaryPrimitives.WriteInt32BigEndian(off, at);
