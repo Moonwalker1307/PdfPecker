@@ -7,10 +7,11 @@ Exits 1 when a case allocates more than ALLOC_LIMIT more bytes, or is more than 
 own speed is taken out. Allocation per conversion is deterministic, so its limit is tight and needs no correction.
 
 Time is not: GitHub's hosted runners come in several processor models and are shared, so the same commit measured
-twice a few minutes apart came out 20 to 70 percent slower in every case. The median of the cases' time ratios is
-taken as the runner's speed against the baseline's, and each case is judged by how far it strays from that median, so
-one case that slows down is still caught while a slower runner is not. A broad slowdown of every case cannot be told
-apart from a slower runner, so it only fails when both runs report the same processor model; otherwise it is shown.
+twice a few minutes apart came out 20 to 90 percent slower, and not by the same factor in every case. Time is
+therefore only judged against a baseline from the same processor model, which the workflow picks from recent runs.
+There, the median of the cases' time ratios is taken as the runner's speed against the baseline's, and a case fails
+when it strays more than TIME_LIMIT from that median, or when the median itself is more than TIME_LIMIT slower. On a
+different processor the times are shown but not judged.
 
 Without a baseline the run only reports the numbers and passes. A case that the baseline does not have yet, because it
 was added since, is reported as new and not compared.
@@ -21,9 +22,6 @@ import sys
 
 TIME_LIMIT = 0.25
 ALLOC_LIMIT = 0.10
-# On a different processor the cases do not all scale alike (a GC-heavy case leans more on memory than a decoder), so
-# the limit for a case against the median is wider there.
-OTHER_CPU_TIME_LIMIT = 0.40
 
 
 def load(path):
@@ -60,7 +58,6 @@ def main():
         elif base["meanMs"]:
             ratios.append(cur["meanMs"] / base["meanMs"])
     runner = statistics.median(ratios) if ratios else 1.0
-    case_limit = TIME_LIMIT if same_cpu else OTHER_CPU_TIME_LIMIT
 
     print("| Case | Time | vs baseline | Alloc/op (KB) | vs baseline |")
     print("|---|---:|---:|---:|---:|")
@@ -76,10 +73,10 @@ def main():
         alloc = f"{cur['allocBytes'] / 1024:.0f}" if cur["allocBytes"] else "n/a"
         alloc_delta = change(cur["allocBytes"], base["allocBytes"]) if base and cur["allocBytes"] else None
 
-        if time_delta is not None:
+        if time_delta is not None and same_cpu:
             against_runner = (1 + time_delta) / runner - 1
-            if against_runner > case_limit:
-                failures.append(f"{name}: {time_delta:+.0%} slower, {against_runner:+.0%} against the other cases (limit {case_limit:+.0%})")
+            if against_runner > TIME_LIMIT:
+                failures.append(f"{name}: {time_delta:+.0%} slower, {against_runner:+.0%} against the other cases (limit {TIME_LIMIT:+.0%})")
         if alloc_delta is not None and alloc_delta > ALLOC_LIMIT:
             failures.append(f"{name}: {alloc_delta:+.0%} allocated bytes (limit {ALLOC_LIMIT:+.0%})")
 
@@ -91,12 +88,11 @@ def main():
         machine = f"same processor ({cpu})" if same_cpu else f"{cpu or 'unknown processor'}, baseline on {base_cpu or 'an unrecorded processor'}"
         print(f"Runner speed against the baseline: {runner - 1:+.0%} median over the cases; {machine}.")
         print()
-        if runner - 1 > TIME_LIMIT:
-            if same_cpu:
-                failures.append(f"every case: {runner - 1:+.0%} slower on the same processor (limit {TIME_LIMIT:+.0%})")
-            else:
-                print(f"Every case is {runner - 1:+.0%} slower, but on a different processor, so this is not counted as a regression.")
-                print()
+        if not same_cpu:
+            print("No earlier run on this processor model, so times are shown but not judged; allocation still is.")
+            print()
+        elif runner - 1 > TIME_LIMIT:
+            failures.append(f"every case: {runner - 1:+.0%} slower on the same processor (limit {TIME_LIMIT:+.0%})")
     if not baseline:
         print("No baseline from an earlier run, so nothing was compared.")
     elif failures:
@@ -104,7 +100,8 @@ def main():
         for f in failures:
             print(f"- {f}")
     else:
-        print(f"Within limits: time {case_limit:.0%} against the other cases, allocation {ALLOC_LIMIT:.0%}.")
+        judged = f"time {TIME_LIMIT:.0%}, " if same_cpu else ""
+        print(f"Within limits: {judged}allocation {ALLOC_LIMIT:.0%}.")
     return 1 if failures else 0
 
 
