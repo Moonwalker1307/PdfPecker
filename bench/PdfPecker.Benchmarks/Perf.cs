@@ -125,6 +125,12 @@ static class Perf
         var css = LargeStylesheet();
         results.Add(Measure("parse-css", () => CssParser.ParseStylesheet(css, new Stylesheet()), runs: 50));
 
+        // Variable fonts: static instances of the test fonts with gvar and with CFF2 outlines at eight points from the
+        // minimum to the maximum of every axis, through fvar, avar, gvar with its inferred deltas, HVAR, GDEF and GPOS
+        // and the CFF2 charstrings. The fonts are loaded and the points normalized once, so a run makes the instances.
+        var variableFonts = VariableFontInstances(Path.Combine(fixtureDir, "fonts"));
+        results.Add(Measure("instance-fonts", () => { foreach (var v in variableFonts) FontVariations.Instance(v.Font, v.Coords, v.Values, v.Axes); }, runs: 100));
+
         // Throughput with every core busy; documents per second is the figure, so higher is better.
         var options = new PdfOptions { BaseDirectory = htmlDir };
         for (int i = 0; i < 20; i++) HtmlToPdf.Convert(invoice, options);
@@ -348,6 +354,22 @@ static class Perf
             var values = axes.ToDictionary(a => a.Tag, a => (a.Min + a.Max) / 2);
             FontVariations.Instance(font, FontVariations.Normalize(font, axes, values), values, axes);
         }
+    }
+
+    static List<(FontProgram Font, float[] Coords, Dictionary<uint, float> Values, VariationAxis[] Axes)> VariableFontInstances(string dir)
+    {
+        var instances = new List<(FontProgram, float[], Dictionary<uint, float>, VariationAxis[])>();
+        foreach (var name in new[] { "Inter-Variable-Subset.ttf", "RobotoFlex-Subset.ttf", "VarTestCFF-Subset.otf" })
+        {
+            var font = FontProgram.Load(File.ReadAllBytes(Path.Combine(dir, name)))[0];
+            var axes = FontVariations.ReadAxes(font);
+            for (int i = 0; i < 8; i++)
+            {
+                var values = axes.ToDictionary(a => a.Tag, a => a.Min + (a.Max - a.Min) * i / 7);
+                instances.Add((font, FontVariations.Normalize(font, axes, values), values, axes));
+            }
+        }
+        return instances;
     }
 
     // The text of a document with Latin, accented, Arabic, Hebrew and CJK characters, numbers and punctuation.
