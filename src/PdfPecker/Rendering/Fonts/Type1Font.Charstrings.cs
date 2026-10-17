@@ -38,7 +38,24 @@ internal sealed partial class Type1Font
         if (gid < 0 || gid >= _cache.Length) return null;
         var cached = Volatile.Read(ref _cache[gid]);
         if (cached != null) return cached;
-        var glyph = new Type1Glyph(this);
+        var glyph = Build(gid, seacComponents: true);
+        var path = glyph.Finish();
+        _widths[gid] = glyph.Width;
+        Volatile.Write(ref _cache[gid], path);
+        return path;
+    }
+
+    /// <summary>
+    /// The outline of a seac component. The spec allows only one level of seac, so the component's own seac is not
+    /// followed: that is what stops a glyph whose components lead back to it from recursing until the stack
+    /// overflows. The result is not cached, so a glyph looks the same whether it was drawn alone or as a component.
+    /// </summary>
+    private PathData? SeacComponent(int gid)
+        => gid < 0 || gid >= _cache.Length ? null : Build(gid, seacComponents: false).Finish();
+
+    private Type1Glyph Build(int gid, bool seacComponents)
+    {
+        var glyph = new Type1Glyph(this, gid, seacComponents);
         try
         {
             glyph.Run(_charStrings[gid], 0);
@@ -47,10 +64,7 @@ internal sealed partial class Type1Font
         {
             // A damaged charstring draws what it managed to before the damage.
         }
-        var path = glyph.Finish();
-        _widths[gid] = glyph.Width;
-        Volatile.Write(ref _cache[gid], path);
-        return path;
+        return glyph;
     }
 
     /// <summary>Interprets one glyph's charstring: the pen, the operand stack, the PostScript stack and flex state.</summary>
@@ -66,7 +80,15 @@ internal sealed partial class Type1Font
         private double _x, _y, _sidebearingX;
         private bool _open, _ended, _flex;
 
-        public Type1Glyph(Type1Font font) => _font = font;
+        private readonly int _gid;
+        private readonly bool _seacComponents;
+
+        public Type1Glyph(Type1Font font, int gid, bool seacComponents)
+        {
+            _font = font;
+            _gid = gid;
+            _seacComponents = seacComponents;
+        }
 
         public double Width { get; private set; }
 
@@ -280,12 +302,12 @@ internal sealed partial class Type1Font
 
         private void Seac(double accentSidebearingX, double adx, double ady, int baseChar, int accentChar)
         {
-            if (baseChar is < 0 or > 255 || accentChar is < 0 or > 255) return;
+            // A component's own seac is not followed, and a component that is the glyph itself is left out.
+            if (!_seacComponents || baseChar is < 0 or > 255 || accentChar is < 0 or > 255) return;
             int baseGid = Encodings.Standard[baseChar] is { } baseName ? _font.GlyphByName(baseName) : -1;
             int accentGid = Encodings.Standard[accentChar] is { } accentName ? _font.GlyphByName(accentName) : -1;
-            int count = _font._charStrings.Count;
-            if (baseGid >= 0 && baseGid < count && _font.GetGlyph(baseGid) is { } basePath) basePath.AppendTransformed(_path, Matrix.Identity);
-            if (accentGid >= 0 && accentGid < count && _font.GetGlyph(accentGid) is { } accentPath)
+            if (baseGid != _gid && _font.SeacComponent(baseGid) is { } basePath) basePath.AppendTransformed(_path, Matrix.Identity);
+            if (accentGid != _gid && _font.SeacComponent(accentGid) is { } accentPath)
                 accentPath.AppendTransformed(_path, Matrix.Translation(adx - accentSidebearingX, ady));
         }
 
