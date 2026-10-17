@@ -108,6 +108,12 @@ static class Perf
         var markdown = MarkdownDocument(Path.Combine(htmlDir, "guide.md"));
         results.Add(Measure("parse-markdown", () => new BlockParser(gfm: true).Parse(markdown), runs: 100));
 
+        // The Markdown inline parser: paragraphs dense with emphasis, strikethrough, code spans, inline and reference
+        // links, images, autolinks, raw HTML, entities, escapes, hard breaks, GFM bare URLs and e-mail addresses, and
+        // delimiters and brackets that stay literal, so that inline parsing dominates.
+        var inlineMarkdown = InlineMarkdownDocument();
+        results.Add(Measure("parse-markdown-inlines", () => new BlockParser(gfm: true).Parse(inlineMarkdown), runs: 50));
+
         // Box painting: a generated page of boxes with every border style, rounded corners, outer and inset shadows with
         // blur and spread, gradient and image backgrounds with each size and repeat, border images, outlines, text
         // decorations and a few transformed, translucent and clipped boxes, laid out and written as a PDF.
@@ -440,6 +446,26 @@ static class Perf
             sb.Append("<div class=\"note\">\nraw *html*\n</div>\n\n<!-- a comment\nover lines -->\n\n***\n\n");
         }
         sb.Append(File.ReadAllText(guidePath));
+        return sb.ToString();
+    }
+
+    // About 300 KB of inline-heavy Markdown, the same on every run: four hundred paragraphs that each use every kind of inline.
+    static string InlineMarkdownDocument()
+    {
+        var sb = new StringBuilder();
+        sb.Append("[docs]: https://example.com/docs \"Documentation\"\n[api]: <https://example.com/api> 'API'\n[Ref Label]: /ref (Title)\n\n");
+        for (int s = 1; s <= 400; s++)
+        {
+            sb.Append("Lorem *ipsum* dolor **sit** amet, ***consectetur*** _adipiscing_ __elit__, sed *do **eiusmod** tempor* incididunt ")
+              .Append("~~ut~~ labore et `dolore` magna ``aliqua ` with`` a tick, see [the docs] and [the api][api] or [ref label][], ")
+              .Append("an [inline link](https://example.com/").Append(s).Append(" \"Title ").Append(s).Append("\") and ![an image](img/").Append(s)
+              .Append(".png 'alt').  \n")
+              .Append("A hard break above, <https://example.org/a?b=").Append(s).Append("> and <user").Append(s).Append("@example.com>, ")
+              .Append("raw <span class=\"x\">html</span> and <!-- a comment -->, entities &amp; &copy; &#169; &#x1F600; &nope; and escapes \\* \\_ \\[ \\`.\\\n")
+              .Append("Bare www.example.com/path?q=").Append(s).Append(", https://example.net/x_(y)). and mail ").Append("first.last+").Append(s)
+              .Append("@mail.example.org. Unmatched * and _ and ** and [ and ] and ![ and ` here, a*b*c, snake_case_name, 2*3*4.\n")
+              .Append("Nested [link *with **strong** text* and `code`](/u (t)) and [not a link] (x) and [x](<a b> \"q\").\n\n");
+        }
         return sb.ToString();
     }
 
