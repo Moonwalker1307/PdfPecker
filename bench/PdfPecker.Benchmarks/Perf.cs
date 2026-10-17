@@ -47,6 +47,12 @@ static class Perf
         var fonts = Fixtures(Path.Combine(fixtureDir, "fonts"), "*.ttf").Concat(Fixtures(Path.Combine(fixtureDir, "fonts"), "*.otf")).ToArray();
         results.Add(Measure("parse-font-tables", () => { foreach (var f in fonts) ParseFontTables(f); }, runs: 300));
 
+        // Opening PDFs and decoding every stream of them: the lexer, the filters and the decryptor, on the test fixtures
+        // (RC4, AES-128 and an unencrypted file with an object stream) and on a generated 30-page report, plain and with
+        // AES-256. One run opens and decodes each file once.
+        var parseInputs = ParseInputs(fixtureDir, report);
+        results.Add(Measure("parse-pdf", () => { foreach (var (data, password) in parseInputs) OpenAndDecodeAll(data, password); }, runs: 60));
+
         // Throughput with every core busy; documents per second is the figure, so higher is better.
         var options = new PdfOptions { BaseDirectory = htmlDir };
         for (int i = 0; i < 20; i++) HtmlToPdf.Convert(invoice, options);
@@ -92,6 +98,33 @@ static class Perf
             if (axes.Length == 0 || !FontVariations.CanInstance(font)) continue;
             var values = axes.ToDictionary(a => a.Tag, a => (a.Min + a.Max) / 2);
             FontVariations.Instance(font, FontVariations.Normalize(font, axes, values), values, axes);
+        }
+    }
+
+    static (byte[] Data, string? Password)[] ParseInputs(string fixtureDir, string report)
+    {
+        var generated = HtmlToPdf.Convert(report);
+        var security = new PdfSecurity { UserPassword = "user", OwnerPassword = "owner" };
+        return
+        [
+            (File.ReadAllBytes(Path.Combine(fixtureDir, "features.pdf")), null),
+            (File.ReadAllBytes(Path.Combine(fixtureDir, "objstm-cairo.pdf")), null),
+            (File.ReadAllBytes(Path.Combine(fixtureDir, "encrypted-rc4-40.pdf")), "user"),
+            (File.ReadAllBytes(Path.Combine(fixtureDir, "encrypted-aes128.pdf")), "user"),
+            (File.ReadAllBytes(Path.Combine(fixtureDir, "password.pdf")), "secret"),
+            (generated, null),
+            (PdfProtector.Encrypt(generated, security), "user"),
+        ];
+    }
+
+    // Image streams are left encoded, as the renderer does until it needs their pixels.
+    static void OpenAndDecodeAll(byte[] data, string? password)
+    {
+        var file = PdfFile.Open(data, password);
+        int last = file.MaxObjectNumber;
+        for (int number = 1; number <= last; number++)
+        {
+            if (file.GetObject(number) is PdfStream stream) file.DecodeStream(stream, stopAtImageFilter: true, out _, out _);
         }
     }
 
