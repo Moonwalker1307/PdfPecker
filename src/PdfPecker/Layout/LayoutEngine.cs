@@ -331,6 +331,7 @@ internal sealed partial class LayoutEngine
             int boxOps = _ops.Count;
             float bottom;
             var (bx, bw) = pages != null ? OnPage(pages, top) : (x, w);
+            KeepProbe? passed = null;
             if (FloatsBelow(top) && AvoidsFloats(e)) bottom = LayoutBesideFloats(e, bx, ref top, bw);
             else
             {
@@ -339,10 +340,14 @@ internal sealed partial class LayoutEngine
                 var childProbe = joins && chain.Index != forcedAt && !AtPageTop(chain.Top) && CanProbe(e)
                     ? new KeepProbe(boxOps, chain.FirstPage)
                     : null;
+                // A flow that is probed itself hands its probe to its first box, whose first content is this flow's.
+                // Otherwise a box that only wraps the next level, such as a div around the next heading, is laid out in
+                // full before the probe can stop, and each level again lays out everything below it twice.
+                passed = childProbe == null && probe != null && !hasPrev && CanProbe(e) && FirstContent(probe) == null ? probe : null;
                 var markerBefore = _marker;
                 int listBefore = _currentListIndex;
                 _childPageBox = pages;
-                _childProbe = childProbe;
+                _childProbe = childProbe ?? passed;
                 bottom = LayoutBlockBox(e, bx, top, bw, shrinkToFit: false);
                 _childProbe = null;
                 if (childProbe is { Stopped: true } && !KeepTogetherFails(chain, boxOps, top, forcedAt))
@@ -385,7 +390,9 @@ internal sealed partial class LayoutEngine
             if (!prevAvoidAfter) hasChain = false;
             prev = mark;
             hasPrev = !s.PageBreakAfter;
-            if (probe != null && Probed(ref probe)) break;
+            // The box stopped with the probe this flow handed it: its first content is past the chain's page, which
+            // nothing after it can change, and laying out its siblings would only record their headings too early.
+            if (passed is { Stopped: true } || probe != null && Probed(ref probe)) break;
         }
         _flowTrailing = pendingMargin;
         ReturnRun(run);

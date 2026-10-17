@@ -75,6 +75,10 @@ public class HostileInputTests
     [Theory]
     [InlineData("<h2>text-shadow</h2>\n<di</span>\n")] // the fuzz finding: each malformed tag opens an inline element
     [InlineData("<h2>Heading</h2><div>")]
+    // A later fuzz finding (html, timeout-d2edd0b0): the box after each heading starts with another box, here the
+    // anonymous block of a div inside a span, so the heading's box only contains the next heading one level down.
+    [InlineData("<h1>Heading</h1><span><div>")]
+    [InlineData("<h1>Heading</h1><div><div>")]
     public void Headings_kept_with_nested_boxes_do_not_lay_out_each_level_twice(string level)
     {
         // Each heading must stay with the box after it, whose first content is the next heading. Where a heading moves
