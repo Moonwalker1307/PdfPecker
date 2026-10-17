@@ -1,0 +1,26 @@
+name: Feature request
+description: A CSS property, HTML element, PDF feature or API you'd like PdfPecker to support.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        PdfPecker has no dependencies and runs no JavaScript, so requests that need a browser engine or a third-party
+        package are out of scope. Everything else is worth asking for.
+  - type: textarea
+    id: need
+    attributes:
+      label: What you want to do
+      description: The document or task you're working on, and what PdfPecker can't do today.
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: Example
+      description: HTML, CSS or code showing the feature, and how a browser renders it if that's the reference.
+  - type: textarea
+    id: workaround
+    attributes:
+      label: Current workaround
+      description: How you work around it now, if at all.

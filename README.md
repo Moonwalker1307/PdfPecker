@@ -116,6 +116,9 @@ dotnet pack src/PdfPecker -c Release -o ./nupkg                # also checks the
 
 How to fuzz the parsers is in [fuzz/README.md](fuzz/README.md).
 
+To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md). Report security problems privately as described in
+[SECURITY.md](SECURITY.md).
+
 ## License
 
 MIT. The third-party fonts, font data and code built into the library are listed, with their licenses, in
