@@ -131,6 +131,13 @@ static class Perf
         var variableFonts = VariableFontInstances(Path.Combine(fixtureDir, "fonts"));
         results.Add(Measure("instance-fonts", () => { foreach (var v in variableFonts) FontVariations.Instance(v.Font, v.Coords, v.Values, v.Axes); }, runs: 100));
 
+        // Complex text shaping: Arabic paragraphs with vowel marks and Hebrew ones with points, shaped word by word and
+        // whole in both directions through the GSUB (joining forms, required and standard ligatures) and GPOS (kerning,
+        // cursive attachment, mark-to-base, mark-to-ligature and mark-to-mark) lookups of the Noto test fonts.
+        var shapingRuns = ShapingRuns(Path.Combine(fixtureDir, "fonts"));
+        var shaped = new List<ShapedGlyph>();
+        results.Add(Measure("shape-complex", () => { foreach (var (font, text, rtl) in shapingRuns) ComplexShaper.Shape(font, text, 0, text.Length, rtl, shaped); }, runs: 500));
+
         // SVG filters: a page of filtered shapes whose chains run every primitive (blurs, offsets, drop shadows, floods,
         // merges, each composite operator and blend mode, colour matrices, transfer functions, morphology, turbulence,
         // convolution with each edge mode, displacement, tiling and both lightings with each light), plus paragraphs of
@@ -420,6 +427,25 @@ static class Perf
             }
         }
         return instances;
+    }
+
+    static List<(FontProgram Font, string Text, bool Rtl)> ShapingRuns(string dir)
+    {
+        const string arabic = "بِسْمِ اللَّهِ الرَّحْمَنِ الرَّحِيمِ. كِتَابٌ جَمِيلٌ وَقَلَمٌ عَلَى الطَّاوِلَةِ، لا إله إلا الله. "
+            + "مرحبا بالعالم في كل مكان، العربية لغة جميلة تكتب من اليمين إلى اليسار وتتصل حروفها ببعضها في الكلمة الواحدة.";
+        const string hebrew = "בְּרֵאשִׁית בָּרָא אֱלֹהִים אֵת הַשָּׁמַיִם וְאֵת הָאָרֶץ. שָׁלוֹם עֲלֵיכֶם, יִשְׂרָאֵל. "
+            + "עברית נכתבת מימין לשמאל, והאותיות שלה עומדות כל אחת לבדה עם ניקוד מתחת ומעל לאותיות.";
+        var runs = new List<(FontProgram, string, bool)>();
+        foreach (var (name, text) in new[] { ("NotoSansArabic-Subset.ttf", arabic), ("NotoSansHebrew-Subset.ttf", hebrew) })
+        {
+            var font = FontProgram.Load(File.ReadAllBytes(Path.Combine(dir, name)))[0];
+            foreach (bool rtl in new[] { true, false })
+            {
+                runs.Add((font, text, rtl));
+                foreach (var word in text.Split(' ')) runs.Add((font, word, rtl));
+            }
+        }
+        return runs;
     }
 
     // The text of a document with Latin, accented, Arabic, Hebrew and CJK characters, numbers and punctuation.
