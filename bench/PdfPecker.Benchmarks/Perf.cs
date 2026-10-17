@@ -45,6 +45,17 @@ static class Perf
             .Append(PdfToImage.ConvertPage(pdf, 0, new ImageOptions { Dpi = 96, Format = PdfImageFormat.WebP })).ToArray();
         results.Add(Measure("decode-webp-lossless", () => { foreach (var w in losslessWebps) WebPDecoder.Decode(w, MaxPixels); }, runs: 50));
 
+        // The JPEG and CCITT fax decoders, which photographs in pages and scanned PDFs go through: the JPEG fixtures, the
+        // first page of features.pdf at 96 dpi written by the library's own JPEG encoder (4:2:0), and the same page at
+        // 150 dpi in black and white as Group 4 fax data. One run decodes each once.
+        var jpegs = Fixtures(fixtureDir, "*.jpg").Append(PdfToImage.ConvertPage(pdf, 0, new ImageOptions { Dpi = 96, Format = PdfImageFormat.Jpeg })).ToArray();
+        var (fax, faxWidth, faxHeight) = Group4Page(pdf);
+        results.Add(Measure("decode-jpeg-ccitt", () =>
+        {
+            foreach (var j in jpegs) PdfPecker.Rendering.Images.JpegDecoder.Decode(j);
+            PdfPecker.Rendering.Images.CcittFaxDecoder.Decode(fax, -1, faxWidth, faxHeight, byteAlign: false, blackIs1: false);
+        }, runs: 30));
+
         // The renderer's PDF functions and colour spaces, which shadings, tint transforms and images call per sample.
         var functions = new FunctionWorkload();
         results.Add(Measure("eval-functions", functions.Run, runs: 100));
@@ -105,6 +116,16 @@ static class Perf
 
     static byte[][] Fixtures(string dir, string pattern)
         => Directory.GetFiles(dir, pattern).Order(StringComparer.Ordinal).Select(File.ReadAllBytes).ToArray();
+
+    /// <summary>The first page of a PDF at 150 dpi, thresholded to black and white and coded as Group 4 fax data.</summary>
+    static (byte[] Data, int Width, int Height) Group4Page(byte[] pdf)
+    {
+        var page = PdfRenderer.Open(pdf).RenderPage(0, new ImageOptions { Dpi = 150 });
+        var rgba = page.Rgba;
+        var black = new byte[page.Width * page.Height];
+        for (int i = 0; i < black.Length; i++) black[i] = rgba[i * 4] + rgba[i * 4 + 1] + rgba[i * 4 + 2] < 3 * 128 ? (byte)1 : (byte)0;
+        return (PdfPecker.Rendering.CcittFaxEncoder.EncodeGroup4(black, page.Width, page.Height), page.Width, page.Height);
+    }
 
     static void ParseFontTables(byte[] data)
     {
