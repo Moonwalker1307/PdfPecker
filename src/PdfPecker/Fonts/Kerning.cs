@@ -10,16 +10,44 @@ namespace PdfPecker.Fonts;
 /// </summary>
 internal sealed class Kerning
 {
-    private readonly byte[] _d;
-    private readonly List<int> _pairPos = new();       // offsets of PairPos subtables, in lookup order
-    private readonly int _kern = -1, _kernPairs;       // legacy kern table: offset of the first pair, and count
+    // GPOS lookup types.
+    private const int PairPositioningLookup = 2;
+    private const int ExtensionLookup = 9;
+
+    // Pair positioning subtables: one pair set per first glyph (format 1), or a matrix of glyph classes (format 2).
+    private const int PairSetFormat = 1, ClassPairFormat = 2;
+    private const int FormatField = 0, CoverageField = 2, ValueFormat1Field = 4, ValueFormat2Field = 6;
+
+    // Format 1: the pair sets are indexed by the first glyph's coverage index. A pair set holds its record count
+    // and then records of the second glyph followed by the two value records.
+    private const int PairSetCountField = 8, PairSetOffsetsField = 10;
+    private const int PairSetRecordsField = 2, SecondGlyphLength = 2;
+
+    // Format 2: the glyphs' classes, then a matrix with a row per class of the first glyph.
+    private const int ClassDef1Field = 8, ClassDef2Field = 10, Class1CountField = 12, Class2CountField = 14;
+    private const int ClassRecordsField = 16;
+
+    // Legacy 'kern' table: a header, then subtables, each with a header of its own and sorted 6-byte pair records.
+    private const int KernHeaderLength = 4, KernSubtableHeaderLength = 14, KernPairLength = 6;
+    private const int KernCountField = 2, KernSubtableLengthField = 2, KernCoverageField = 4, KernPairCountField = 6;
+    private const int KernValueField = 4;
+    private const int KernMinimumSubtableLength = 6;
+    // Coverage bits: horizontal, minimum values, cross-stream and the format in the high byte.
+    private const int KernCoverageMask = 0xFF07, KernHorizontalFormat0 = 1;
+
+    private static readonly uint[] KernFeature = [FontProgram.Tag("kern")];
+
+    private readonly TableReader _reader;
+    private readonly List<int> _pairPositioning = new(); // offsets of PairPos subtables, in lookup order
+    private readonly int _kernPairsOffset = -1, _kernPairCount; // legacy kern table: offset of the first pair, and count
     private readonly ConcurrentDictionary<int, short> _cache = new();
 
     private Kerning(FontProgram font)
     {
-        _d = font.Data;
+        _reader = new TableReader(font.Data);
         if (font.Table("GPOS") is { } gpos) ReadGpos(gpos.Offset, gpos.Length);
-        if (_pairPos.Count == 0 && font.Table("kern") is { } kern) (_kern, _kernPairs) = ReadKern(kern.Offset, kern.Length);
+        if (_pairPositioning.Count == 0 && font.Table("kern") is { } kern)
+            (_kernPairsOffset, _kernPairCount) = ReadKern(kern.Offset, kern.Length);
     }
 
     /// <summary>The font's kerning, or null when it has none.</summary>
@@ -27,8 +55,8 @@ internal sealed class Kerning
     {
         try
         {
-            var k = new Kerning(font);
-            return k._pairPos.Count > 0 || k._kernPairs > 0 ? k : null;
+            var kerning = new Kerning(font);
+            return kerning._pairPositioning.Count > 0 || kerning._kernPairCount > 0 ? kerning : null;
         }
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException)
         {
@@ -41,64 +69,26 @@ internal sealed class Kerning
     {
         if ((left | right) > 0xFFFF || left == 0 || right == 0) return 0;
         int key = left << 16 | right;
-        if (_cache.TryGetValue(key, out short v)) return v;
+        if (_cache.TryGetValue(key, out short cached)) return cached;
         int value;
-        try { value = _pairPos.Count > 0 ? LookupGpos(left, right) : LookupKern(left, right); }
+        try { value = _pairPositioning.Count > 0 ? LookupGpos(left, right) : LookupKern(left, right); }
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException) { value = 0; }
-        v = (short)Math.Clamp(value, short.MinValue, short.MaxValue);
-        _cache.TryAdd(key, v);
-        return v;
+        short clamped = (short)Math.Clamp(value, short.MinValue, short.MaxValue);
+        _cache.TryAdd(key, clamped);
+        return clamped;
     }
-
-    private int U16(int o) => _d[o] << 8 | _d[o + 1];
-    private short S16(int o) => (short)(_d[o] << 8 | _d[o + 1]);
-    private uint U32(int o) => (uint)(_d[o] << 24 | _d[o + 1] << 16 | _d[o + 2] << 8 | _d[o + 3]);
 
     private void ReadGpos(int gpos, int length)
     {
-        if (length < 10 || U16(gpos) != 1) return;
-        int scripts = gpos + U16(gpos + 4), features = gpos + U16(gpos + 6), lookups = gpos + U16(gpos + 8);
-
-        // The 'kern' features of the Latin script (or the default script) in its default language system.
-        int langSys = -1, fallback = -1;
-        for (int i = 0, n = U16(scripts); i < n; i++)
+        if (!LayoutLists.TryOpen(_reader, gpos, length, out var lists)) return;
+        foreach (int index in lists.FindLookupIndexes(KernFeature))
         {
-            uint tag = U32(scripts + 2 + i * 6);
-            int script = scripts + U16(scripts + 2 + i * 6 + 4);
-            int def = U16(script);
-            if (def == 0) continue;
-            if (tag == FontProgram.Tag("latn")) langSys = script + def;
-            else if (tag == FontProgram.Tag("DFLT") || fallback < 0) fallback = script + def;
-        }
-        if (langSys < 0) langSys = fallback;
-        if (langSys < 0) return;
-
-        var lookupIndices = new SortedSet<int>();
-        int featureCount = U16(features);
-        for (int i = 0, n = U16(langSys + 4); i < n; i++)
-        {
-            int fi = U16(langSys + 6 + i * 2);
-            if (fi >= featureCount || U32(features + 2 + fi * 6) != FontProgram.Tag("kern")) continue;
-            int feature = features + U16(features + 2 + fi * 6 + 4);
-            for (int j = 0, m = U16(feature + 2); j < m; j++) lookupIndices.Add(U16(feature + 4 + j * 2));
-        }
-
-        int lookupCount = U16(lookups);
-        foreach (int li in lookupIndices)
-        {
-            if (li >= lookupCount) continue;
-            int lookup = lookups + U16(lookups + 2 + li * 2);
-            int type = U16(lookup);
-            for (int s = 0, n = U16(lookup + 4); s < n; s++)
+            if (lists.Lookup(index) is not { } lookup) continue;
+            for (int i = 0; i < lookup.SubtableCount; i++)
             {
-                int sub = lookup + U16(lookup + 6 + s * 2);
-                int subType = type;
-                if (type == 9) // extension: the real subtable is behind a 32-bit offset
-                {
-                    subType = U16(sub + 2);
-                    sub += (int)U32(sub + 4);
-                }
-                if (subType == 2 && (U16(sub) == 1 || U16(sub) == 2)) _pairPos.Add(sub);
+                var (type, subtable) = lookup.Subtable(i, ExtensionLookup);
+                if (type == PairPositioningLookup && _reader.U16(subtable + FormatField) is PairSetFormat or ClassPairFormat)
+                    _pairPositioning.Add(subtable);
             }
         }
     }
@@ -106,113 +96,80 @@ internal sealed class Kerning
     private int LookupGpos(int left, int right)
     {
         // Each subtable that covers the pair adjusts it; real fonts list a pair once.
-        foreach (int sub in _pairPos)
+        foreach (int subtable in _pairPositioning)
         {
-            int coverage = CoverageIndex(sub + U16(sub + 2), left);
+            int coverage = new CoverageTable(_reader, subtable + _reader.U16(subtable + CoverageField)).IndexOf(left);
             if (coverage < 0) continue;
-            int vf1 = U16(sub + 4), vf2 = U16(sub + 6);
-            int size1 = ValueSize(vf1), size2 = ValueSize(vf2);
-            if (U16(sub) == 1)
-            {
-                if (coverage >= U16(sub + 8)) continue;
-                int set = sub + U16(sub + 10 + coverage * 2);
-                int lo = 0, hi = U16(set) - 1, rec = 2 + size1 + size2;
-                while (lo <= hi)
-                {
-                    int mid = (lo + hi) >> 1;
-                    int r = set + 2 + mid * rec;
-                    int g = U16(r);
-                    if (g == right) return XAdvance(r + 2, vf1);
-                    if (g < right) lo = mid + 1; else hi = mid - 1;
-                }
-            }
-            else
-            {
-                int c1 = ClassOf(sub + U16(sub + 8), left), c2 = ClassOf(sub + U16(sub + 10), right);
-                int class1Count = U16(sub + 12), class2Count = U16(sub + 14);
-                if (c1 >= class1Count || c2 >= class2Count) continue;
-                int r = sub + 16 + (c1 * class2Count + c2) * (size1 + size2);
-                return XAdvance(r, vf1);
-            }
+            int format1 = _reader.U16(subtable + ValueFormat1Field), format2 = _reader.U16(subtable + ValueFormat2Field);
+            bool found = _reader.U16(subtable + FormatField) == PairSetFormat
+                ? TryLookupPairSet(subtable, coverage, format1, format2, right, out int value)
+                : TryLookupClasses(subtable, format1, format2, left, right, out value);
+            if (found) return value;
         }
         return 0;
     }
 
-    private static int ValueSize(int format) => 2 * System.Numerics.BitOperations.PopCount((uint)(format & 0xFF));
+    private bool TryLookupPairSet(int subtable, int coverage, int format1, int format2, int right, out int value)
+    {
+        value = 0;
+        if (coverage >= _reader.U16(subtable + PairSetCountField)) return false;
+        int pairSet = subtable + _reader.U16(subtable + PairSetOffsetsField + coverage * 2);
+        int recordLength = SecondGlyphLength + ValueRecord.Size(format1) + ValueRecord.Size(format2);
+        int low = 0, high = _reader.U16(pairSet) - 1;
+        while (low <= high)
+        {
+            int middle = (low + high) >> 1;
+            int record = pairSet + PairSetRecordsField + middle * recordLength;
+            int secondGlyph = _reader.U16(record);
+            if (secondGlyph == right)
+            {
+                value = ReadXAdvance(record + SecondGlyphLength, format1);
+                return true;
+            }
+            if (secondGlyph < right) low = middle + 1; else high = middle - 1;
+        }
+        return false;
+    }
+
+    private bool TryLookupClasses(int subtable, int format1, int format2, int left, int right, out int value)
+    {
+        value = 0;
+        int leftClass = new ClassDefTable(_reader, subtable + _reader.U16(subtable + ClassDef1Field)).ClassOf(left);
+        int rightClass = new ClassDefTable(_reader, subtable + _reader.U16(subtable + ClassDef2Field)).ClassOf(right);
+        int leftClassCount = _reader.U16(subtable + Class1CountField), rightClassCount = _reader.U16(subtable + Class2CountField);
+        if (leftClass >= leftClassCount || rightClass >= rightClassCount) return false;
+        int recordLength = ValueRecord.Size(format1) + ValueRecord.Size(format2);
+        int record = subtable + ClassRecordsField + (leftClass * rightClassCount + rightClass) * recordLength;
+        value = ReadXAdvance(record, format1);
+        return true;
+    }
 
     // The XAdvance field of a ValueRecord: XPlacement and YPlacement come first when present.
-    private int XAdvance(int record, int format)
+    private int ReadXAdvance(int record, int format)
     {
-        if ((format & 4) == 0) return 0;
-        int skip = ((format & 1) != 0 ? 2 : 0) + ((format & 2) != 0 ? 2 : 0);
-        return S16(record + skip);
-    }
-
-    private int CoverageIndex(int cov, int glyph)
-    {
-        int format = U16(cov), n = U16(cov + 2);
-        int lo = 0, hi = n - 1;
-        while (lo <= hi)
-        {
-            int mid = (lo + hi) >> 1;
-            if (format == 1)
-            {
-                int g = U16(cov + 4 + mid * 2);
-                if (g == glyph) return mid;
-                if (g < glyph) lo = mid + 1; else hi = mid - 1;
-            }
-            else if (format == 2)
-            {
-                int r = cov + 4 + mid * 6;
-                int start = U16(r), end = U16(r + 2);
-                if (glyph < start) hi = mid - 1;
-                else if (glyph > end) lo = mid + 1;
-                else return U16(r + 4) + glyph - start;
-            }
-            else return -1;
-        }
-        return -1;
-    }
-
-    private int ClassOf(int cd, int glyph)
-    {
-        int format = U16(cd);
-        if (format == 1)
-        {
-            int start = U16(cd + 2), n = U16(cd + 4);
-            return glyph >= start && glyph < start + n ? U16(cd + 6 + (glyph - start) * 2) : 0;
-        }
-        if (format == 2)
-        {
-            int lo = 0, hi = U16(cd + 2) - 1;
-            while (lo <= hi)
-            {
-                int mid = (lo + hi) >> 1;
-                int r = cd + 4 + mid * 6;
-                if (glyph < U16(r)) hi = mid - 1;
-                else if (glyph > U16(r + 2)) lo = mid + 1;
-                else return U16(r + 4);
-            }
-        }
-        return 0;
+        if ((format & ValueRecord.XAdvance) == 0) return 0;
+        int skipped = ((format & ValueRecord.XPlacement) != 0 ? 2 : 0) + ((format & ValueRecord.YPlacement) != 0 ? 2 : 0);
+        return _reader.S16(record + skipped);
     }
 
     // The first horizontal format 0 subtable of a version 0 (Windows) kern table.
-    private (int, int) ReadKern(int kern, int length)
+    private (int PairsOffset, int PairCount) ReadKern(int kern, int length)
     {
-        if (length < 4 || U16(kern) != 0) return (-1, 0);
-        int end = kern + length, p = kern + 4;
-        for (int i = 0, n = U16(kern + 2); i < n && p + 14 <= end; i++)
+        if (length < KernHeaderLength || _reader.U16(kern) != 0) return (-1, 0);
+        int end = kern + length, subtable = kern + KernHeaderLength;
+        for (int i = 0, count = _reader.U16(kern + KernCountField); i < count && subtable + KernSubtableHeaderLength <= end; i++)
         {
-            int subLength = U16(p + 2), coverage = U16(p + 4);
+            int subtableLength = _reader.U16(subtable + KernSubtableLengthField);
+            int coverage = _reader.U16(subtable + KernCoverageField);
             // Horizontal, format 0, not minimum values and not cross-stream.
-            if ((coverage & 0xFF07) == 1)
+            if ((coverage & KernCoverageMask) == KernHorizontalFormat0)
             {
-                int pairs = Math.Min(U16(p + 6), (end - (p + 14)) / 6);
-                return (p + 14, pairs);
+                int pairsOffset = subtable + KernSubtableHeaderLength;
+                int pairCount = Math.Min(_reader.U16(subtable + KernPairCountField), (end - pairsOffset) / KernPairLength);
+                return (pairsOffset, pairCount);
             }
-            if (subLength < 6) break;
-            p += subLength;
+            if (subtableLength < KernMinimumSubtableLength) break;
+            subtable += subtableLength;
         }
         return (-1, 0);
     }
@@ -220,14 +177,14 @@ internal sealed class Kerning
     private int LookupKern(int left, int right)
     {
         uint key = (uint)(left << 16 | right);
-        int lo = 0, hi = _kernPairs - 1;
-        while (lo <= hi)
+        int low = 0, high = _kernPairCount - 1;
+        while (low <= high)
         {
-            int mid = (lo + hi) >> 1;
-            int r = _kern + mid * 6;
-            uint k = U32(r);
-            if (k == key) return S16(r + 4);
-            if (k < key) lo = mid + 1; else hi = mid - 1;
+            int middle = (low + high) >> 1;
+            int record = _kernPairsOffset + middle * KernPairLength;
+            uint candidate = _reader.U32(record);
+            if (candidate == key) return _reader.S16(record + KernValueField);
+            if (candidate < key) low = middle + 1; else high = middle - 1;
         }
         return 0;
     }
