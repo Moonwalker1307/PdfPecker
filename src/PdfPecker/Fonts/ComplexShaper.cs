@@ -168,14 +168,15 @@ internal static class ComplexShaper
         buf.RemoveAll(g => UnicodeTables.IsDefaultIgnorable(g.CodePoint));
         if (Joins(script) && !plan.HasForms) PresentationForms(font, buf, ligate: !plan.HasRlig);
 
-        int nextLigId = 1;
+        // GSUB and GPOS share one work budget for the run, so a font cannot spend it twice over.
+        int nextLigId = 1, operations = OpenTypeLayout.OperationBudget(buf.Count);
         if (ot != null)
         {
             try
             {
                 foreach (var stage in plan.Gsub)
                     foreach (var (lookup, mask) in stage)
-                        ot.ApplyLookup(buf, false, lookup, mask, rtl, ref nextLigId);
+                        ot.ApplyLookup(buf, false, lookup, mask, rtl, ref nextLigId, ref operations);
             }
             catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException)
             {
@@ -194,7 +195,7 @@ internal static class ComplexShaper
         {
             try
             {
-                foreach (var (lookup, mask) in plan.Gpos) ot.ApplyLookup(buf, true, lookup, mask, rtl, ref nextLigId);
+                foreach (var (lookup, mask) in plan.Gpos) ot.ApplyLookup(buf, true, lookup, mask, rtl, ref nextLigId, ref operations);
             }
             catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException)
             {

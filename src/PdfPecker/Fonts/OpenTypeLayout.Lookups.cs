@@ -27,6 +27,12 @@ internal sealed partial class OpenTypeLayout
     // Mark glyph sets in GDEF: a format, a count and 32-bit offsets of one coverage table per set.
     private const int MarkGlyphSetCountField = 2, MarkGlyphSetCoveragesField = 4;
 
+    // The work a shaping call may do in its lookups, counted in steps (see OperationBudget). Real fonts stay far below:
+    // Noto Nastaliq Urdu, the heaviest of the Arabic, Hebrew, Syriac and N'Ko fonts measured, takes under 900 steps per
+    // glyph for its hardest words and under 400 over long text. A crafted font stops after some tens of milliseconds
+    // per thousand glyphs instead of running for hours.
+    private const int BaseOperations = 100_000, OperationsPerGlyph = 5_000;
+
     /// <summary>The run being shaped and the lookup being applied to it, kept per thread so applying one allocates nothing.</summary>
     private sealed class LookupState
     {
@@ -38,17 +44,35 @@ internal sealed partial class OpenTypeLayout
         public int Depth;
         public int NextLigId = 1;
 
+        /// <summary>The steps the shaping call has left; see <see cref="OperationBudget"/>.</summary>
+        public int Operations;
+
         /// <summary>The marks a ligature keeps after it, reused from ligature to ligature.</summary>
         public readonly List<GlyphInfo> KeptMarks = new();
     }
 
     [ThreadStatic] private static LookupState? t_state;
 
-    /// <summary>Applies one lookup over the whole run, to the glyphs that have one of the mask bits.</summary>
-    public void ApplyLookup(List<GlyphInfo> buf, bool gpos, int lookupIndex, uint mask, bool rtl, ref int nextLigId)
+    /// <summary>
+    /// The steps the lookups of one shaping call of <paramref name="glyphs"/> glyphs may take: every subtable, rule and
+    /// ligature tried, lookup record followed and glyph looked at for a match counts one.
+    /// </summary>
+    /// <remarks>
+    /// Contextual rules apply lookups that can apply contextual rules again, up to the nesting limit, and a lookup's
+    /// subtables and a rule set's rules are offsets that may all point to the same one, so a small font can multiply
+    /// the work for each glyph without bound. Once the budget is spent no lookup applies any further, and the glyphs
+    /// stay as substituted and positioned so far, as they do when a malformed subtable stops the shaping.
+    /// </remarks>
+    public static int OperationBudget(int glyphs) => (int)Math.Min(int.MaxValue, BaseOperations + (long)OperationsPerGlyph * glyphs);
+
+    /// <summary>
+    /// Applies one lookup over the whole run, to the glyphs that have one of the mask bits, taking its steps from
+    /// <paramref name="operations"/>, which <see cref="OperationBudget"/> starts for the shaping call.
+    /// </summary>
+    public void ApplyLookup(List<GlyphInfo> buf, bool gpos, int lookupIndex, uint mask, bool rtl, ref int nextLigId, ref int operations)
     {
         int table = gpos ? _gpos : _gsub;
-        if (table < 0) return;
+        if (table < 0 || operations <= 0) return;
         int lookup = LookupOffset(table, lookupIndex);
         if (lookup < 0) return;
         var c = t_state ??= new LookupState();
@@ -58,18 +82,28 @@ internal sealed partial class OpenTypeLayout
         c.LookupMask = mask;
         c.Depth = 0;
         c.NextLigId = nextLigId;
+        c.Operations = operations;
         int type = _reader.U16(lookup + LookupTypeField);
         c.LookupFlag = LookupFlagOf(lookup);
         if (!gpos && SubtableType(lookup, type) == ReverseChainingSubstitution) ApplyBackwards(c, lookup);
         else ApplyForwards(c, lookup);
         nextLigId = c.NextLigId;
+        operations = c.Operations;
+    }
+
+    /// <summary>Counts one step of the shaping call; false once its budget is spent, and from then on.</summary>
+    private static bool Spend(LookupState c)
+    {
+        if (c.Operations <= 0) return false;
+        c.Operations--;
+        return true;
     }
 
     // Reverse chaining substitutions go from the end of the run to its start, and replace one glyph at a time.
     private void ApplyBackwards(LookupState c, int lookup)
     {
         var buf = c.Buf;
-        for (int i = buf.Count - 1; i >= 0; i--)
+        for (int i = buf.Count - 1; i >= 0 && c.Operations > 0; i--)
             if ((buf[i].Mask & c.LookupMask) != 0 && Matches(c, buf[i])) ApplySubtables(c, lookup, ref i, reverse: true);
     }
 
@@ -77,7 +111,7 @@ internal sealed partial class OpenTypeLayout
     {
         var buf = c.Buf;
         int i = 0;
-        while (i < buf.Count)
+        while (i < buf.Count && c.Operations > 0)
         {
             if ((buf[i].Mask & c.LookupMask) != 0 && Matches(c, buf[i]))
             {
@@ -115,7 +149,7 @@ internal sealed partial class OpenTypeLayout
     {
         var subtables = new LayoutLookup(_reader, lookup);
         int extension = c.Gpos ? ExtensionPositioning : ExtensionSubstitution;
-        for (int s = 0; s < subtables.SubtableCount; s++)
+        for (int s = 0; s < subtables.SubtableCount && Spend(c); s++)
         {
             var (type, subtable) = subtables.Subtable(s, extension);
             bool applied = reverse ? ReverseChainSingle(c, subtable, i)
@@ -150,7 +184,7 @@ internal sealed partial class OpenTypeLayout
     private int NextMatch(LookupState c, int i)
     {
         var buf = c.Buf;
-        for (int j = i + 1; j < buf.Count; j++)
+        for (int j = i + 1; j < buf.Count && Spend(c); j++)
             if (Matches(c, buf[j])) return j;
         return -1;
     }
@@ -159,7 +193,7 @@ internal sealed partial class OpenTypeLayout
     private int PreviousMatch(LookupState c, int i)
     {
         var buf = c.Buf;
-        for (int j = i - 1; j >= 0; j--)
+        for (int j = i - 1; j >= 0 && Spend(c); j--)
             if (Matches(c, buf[j])) return j;
         return -1;
     }
