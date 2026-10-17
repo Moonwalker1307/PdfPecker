@@ -1149,7 +1149,9 @@ internal static class PathParser
                 cmd = c;
                 lx.Pos++;
             }
-            else if (cmd == ' ' || !lx.AtNumber()) break;
+            // A closepath takes no numbers, so numbers after one are an error that ends the path, as is a number before
+            // the first command; repeating the closepath for them would never move past them.
+            else if (cmd is ' ' or 'Z' or 'z' || !lx.AtNumber()) break;
             else if (cmd == 'M') cmd = 'L'; // extra coordinate pairs after a moveto are linetos
             else if (cmd == 'm') cmd = 'l';
 
