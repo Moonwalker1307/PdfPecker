@@ -5,13 +5,14 @@ using PdfPecker;
 using PdfPecker.Fonts;
 using PdfPecker.Fonts.Cff;
 using PdfPecker.Images;
+using PdfPecker.Markdown;
 using PdfPecker.Rendering.Content;
 using PdfPecker.Rendering.Fonts;
 using PdfPecker.Rendering.Parsing;
 using PdfPecker.Text;
 
 // A short, machine-readable run for the performance regression check in .github/workflows/perf.yml: about 30 seconds,
-// fourteen cases, JSON output. Allocation per conversion is deterministic, so the workflow compares it tightly; time is
+// sixteen cases, JSON output. Allocation per conversion is deterministic, so the workflow compares it tightly; time is
 // noisy on shared runners, so it is compared with a wide margin and only against runs on the same processor model.
 // Usage: dotnet run -c Release -- --perf results.json
 static class Perf
@@ -87,6 +88,11 @@ static class Perf
         var parseInputs = ParseInputs(fixtureDir, report);
         results.Add(Measure("parse-pdf", () => { foreach (var (data, password) in parseInputs) OpenAndDecodeAll(data, password); }, runs: 60));
 
+        // The Markdown parser: block structure and inlines of a large document, with every kind of block (nested lists,
+        // task items, quotes, fences, indented code, tables, HTML blocks, reference definitions) and the sample guide.
+        var markdown = MarkdownDocument(Path.Combine(htmlDir, "guide.md"));
+        results.Add(Measure("parse-markdown", () => new BlockParser(gfm: true).Parse(markdown), runs: 100));
+
         // Throughput with every core busy; documents per second is the figure, so higher is better.
         var options = new PdfOptions { BaseDirectory = htmlDir };
         for (int i = 0; i < 20; i++) HtmlToPdf.Convert(invoice, options);
@@ -125,6 +131,28 @@ static class Perf
         var black = new byte[page.Width * page.Height];
         for (int i = 0; i < black.Length; i++) black[i] = rgba[i * 4] + rgba[i * 4 + 1] + rgba[i * 4 + 2] < 3 * 128 ? (byte)1 : (byte)0;
         return (PdfPecker.Rendering.CcittFaxEncoder.EncodeGroup4(black, page.Width, page.Height), page.Width, page.Height);
+    }
+
+    // About 200 KB of Markdown, the same on every run: sections that cycle through the block kinds, then the sample guide.
+    static string MarkdownDocument(string guidePath)
+    {
+        var sb = new StringBuilder();
+        sb.Append("[docs]: https://example.com/docs \"Documentation\"\n[api]: <https://example.com/api> 'API'\n\n");
+        for (int s = 1; s <= 120; s++)
+        {
+            sb.Append("# Section ").Append(s).Append("\n\n");
+            sb.Append("Lorem ipsum dolor sit amet, *consectetur* adipiscing elit, **sed do eiusmod** tempor incididunt ut labore, see [the docs] and [the api][api] or `code`.\n");
+            sb.Append("A second line of the same paragraph with a [link](https://example.com/").Append(s).Append(") and an ![image](a.png).\n\n");
+            sb.Append("Setext heading ").Append(s).Append("\n---\n\n");
+            sb.Append("- first item\n- [ ] open task\n- [x] done task\n  1. nested one\n  2. nested two\n     - deeper\n       > quoted in a list\n- last item\n\n");
+            sb.Append("> A block quote that spans\nlazy continuation\n>\n> > and nests\n\n");
+            sb.Append("```csharp\nvar x = ").Append(s).Append(";\nConsole.WriteLine(x);\n```\n\n");
+            sb.Append("    indented code\n\n    more code\n\n");
+            sb.Append("| Name | Qty | Price |\n|:-----|:---:|------:|\n| Apple | ").Append(s).Append(" | 1.20 |\n| Pear | 2 |\n| Plum | 3 | 0.80 | extra |\n\n");
+            sb.Append("<div class=\"note\">\nraw *html*\n</div>\n\n<!-- a comment\nover lines -->\n\n***\n\n");
+        }
+        sb.Append(File.ReadAllText(guidePath));
+        return sb.ToString();
     }
 
     static void ParseFontTables(byte[] data)
