@@ -11,7 +11,7 @@ using PdfPecker.Rendering.Parsing;
 using PdfPecker.Text;
 
 // A short, machine-readable run for the performance regression check in .github/workflows/perf.yml: about 30 seconds,
-// thirteen cases, JSON output. Allocation per conversion is deterministic, so the workflow compares it tightly; time is
+// fourteen cases, JSON output. Allocation per conversion is deterministic, so the workflow compares it tightly; time is
 // noisy on shared runners, so it is compared with a wide margin and only against runs on the same processor model.
 // Usage: dotnet run -c Release -- --perf results.json
 static class Perf
@@ -38,6 +38,12 @@ static class Perf
         var pdf = File.ReadAllBytes(Path.Combine(fixtureDir, "features.pdf"));
         var imageOptions = new ImageOptions { Dpi = 96 };
         results.Add(Measure("render-png", () => PdfToImage.ConvertPage(pdf, 0, imageOptions), runs: 30));
+
+        // Lossless WebP on its own, as the fixtures of decode-webp are small and mostly lossy: the lossless fixtures and
+        // the first page of features.pdf at 96 dpi, written by the library's own encoder. One run decodes each once.
+        var losslessWebps = Fixtures(fixtureDir, "lossless*.webp")
+            .Append(PdfToImage.ConvertPage(pdf, 0, new ImageOptions { Dpi = 96, Format = PdfImageFormat.WebP })).ToArray();
+        results.Add(Measure("decode-webp-lossless", () => { foreach (var w in losslessWebps) WebPDecoder.Decode(w, MaxPixels); }, runs: 50));
 
         // The renderer's PDF functions and colour spaces, which shadings, tint transforms and images call per sample.
         var functions = new FunctionWorkload();
