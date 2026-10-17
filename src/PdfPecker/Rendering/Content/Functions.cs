@@ -325,6 +325,9 @@ internal sealed class PostScriptFunction : PdfFunction
     public override void Eval(ReadOnlySpan<double> input, Span<double> output)
     {
         Span<double> st = stackalloc double[128];
+        // Roll's scratch buffer is taken once here: stack memory taken inside the loop is only freed when Eval returns,
+        // so a program of many rolls would run off the end of the thread's stack.
+        Span<double> rollBuffer = stackalloc double[st.Length];
         int sp = 0;
         for (int i = 0; i < Inputs && sp < st.Length; i++) st[sp++] = ClipInput(i < input.Length ? input[i] : 0, i);
         int steps = 0;
@@ -376,7 +379,7 @@ internal sealed class PostScriptFunction : PdfFunction
                     if (n <= 0 || n > sp) break;
                     j = ((j % n) + n) % n;
                     if (j == 0) break;
-                    Span<double> tmp = stackalloc double[n];
+                    var tmp = rollBuffer.Slice(0, n);
                     st.Slice(sp - n, n).CopyTo(tmp);
                     for (int k = 0; k < n; k++) st[sp - n + (k + j) % n] = tmp[k];
                     break;
