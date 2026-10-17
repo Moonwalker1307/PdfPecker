@@ -58,7 +58,9 @@ dotnet test -f net10.0 --filter "FullyQualifiedName~MarkdownTests"   # one class
     CFF2 instancer and the renderer.
 - `tests/PdfPecker.Tests/` – xUnit; `Fixtures/` holds input files, `Golden/` the baseline PDFs.
 - `bench/PdfPecker.Benchmarks` – in the solution. `bench/PdfPecker.Comparison` – deliberately not in the solution so
-  its third-party packages never reach the library or tests.
+  its third-party packages never reach the library or tests. Cloud VMs differ too much to compare a run with the
+  README table, so judge a performance change with `bench/compare-versions.sh <base-ref>`, which runs both versions
+  in turns on one machine.
 - `fuzz/PdfPecker.Fuzz` – dependency-free mutation fuzzer for the parsers of untrusted input (nightly in
   `.github/workflows/fuzz.yml`); how to run it and to turn a finding into a test is in `fuzz/README.md`.
 - `tools/` – generators for checked-in data; don't hand-edit their output:

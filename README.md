@@ -82,27 +82,25 @@ its own. See the [limitations](https://pdfpecker.net/docs/limitations/) for what
 ## How it compares
 
 The same three documents converted to A4 PDF by PdfPecker and six .NET alternatives, on one 4-core cloud VM
-(Intel Xeon @ 2.1 GHz, 16 GB, Linux, .NET 10.0.12), with PdfPecker 1.9.0. Times are medians after a 3-second warm-up,
-averaged over two runs; "first PDF" includes starting the browser where there is one. Parallel runs one conversion per
-core at once on the 5-page document. Peak memory is the proportional set size (PSS) of the whole process tree, so a
-browser's helper processes are included once and shared pages are not double-counted.
+(Intel Xeon @ 2.8 GHz, 33 MB L3, 16 GB, Linux, .NET 10.0.12). Times are medians after a 3-second warm-up, averaged
+over two runs; "first PDF" includes starting the browser where there is one. Parallel runs one conversion per core at
+once on the 5-page document. Peak memory is the proportional set size (PSS) of the whole process tree, so a browser's
+helper processes are included once and shared pages are not double-counted; .NET processes run with a 16 MB GC gen0
+budget, as .NET would otherwise size it from the CPU cache.
 
-PdfPecker is 50 to 150 times faster than the Chromium-based converters on the small documents and uses a fifth of their
+PdfPecker is 60 to 220 times faster than the Chromium-based converters on the small documents and uses a tenth of their
 memory. How to read the table, how it was measured and how to run it yourself is in
 [Performance](https://pdfpecker.net/docs/performance/).
 
 | Converter | Engine | To deploy | First PDF | Invoice, 1 page | Feature tour, 5 pages | Report, 30 pages | Parallel | Peak memory |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| **PdfPecker** | own, managed | 4.0 MB DLL | 0.34 s | **0.77 ms** | **2.5 ms** | **22 ms** | **1,466 docs/s** | **195 MB** |
-| HtmlRenderer.PdfSharp 1.6.1 | own, managed (CSS 2) | 2.4 MB of DLLs | 0.45 s | 4.2 ms | 13 ms | 281 ms | 202 docs/s | 352 MB |
-| iText pdfHTML 6.3.4 | own, managed | 11 MB of DLLs | 1.19 s | 21 ms | 127 ms | 2.0 s | 16 docs/s | 711 MB |
-| wkhtmltopdf 0.12.6 | Qt WebKit, native | about 90 MB with Qt | 0.31 s | 279 ms | 308 ms | 576 ms | 13 docs/s | 280 MB |
-| PuppeteerSharp 25.13 | Chromium 141 | about 600 MB browser | 1.15 s | 102 ms | 135 ms | 431 ms | 17 docs/s | 872 MB |
-| Microsoft.Playwright 1.63 | Chromium 141 | browser + 135 MB driver | 0.96 s | 116 ms | 159 ms | 466 ms | 12 docs/s | 1,016 MB |
-| Syncfusion HTML to PDF 35.1.40 | Chrome (Blink), bundled | about 545 MB with Chrome | 2.48 s | 159 ms | 209 ms | 0.87 s | 4 docs/s | 2,212 MB |
-
-Most of PdfPecker's peak memory is the .NET garbage collector's allocation budget, which .NET sizes from the CPU cache
-(260 MB of L3 on this VM). With `DOTNET_GCgen0size=0x1000000` (16 MB) the same run peaks at 88 MB.
+| **PdfPecker** | own, managed | 4.2 MB DLL | 0.40 s | **0.86 ms** | **3.5 ms** | **45 ms** | **818 docs/s** | **90 MB** |
+| HtmlRenderer.PdfSharp 1.6.1 | own, managed (CSS 2) | 2.4 MB of DLLs | 0.58 s | 6.3 ms | 21 ms | 639 ms | 72 docs/s | 236 MB |
+| iText pdfHTML 6.3.4 | own, managed | 11 MB of DLLs | 1.44 s | 34 ms | 209 ms | 3.4 s | 9 docs/s | 624 MB |
+| wkhtmltopdf 0.12.6 | Qt WebKit, native | about 90 MB with Qt | 0.36 s | 310 ms | 356 ms | 780 ms | 11 docs/s | 164 MB |
+| PuppeteerSharp 25.13 | Chromium 141 | about 600 MB browser | 1.43 s | 153 ms | 217 ms | 792 ms | 11 docs/s | 829 MB |
+| Microsoft.Playwright 1.63 | Chromium 141 | browser + 135 MB driver | 1.36 s | 194 ms | 247 ms | 726 ms | 8 docs/s | 967 MB |
+| Syncfusion HTML to PDF 35.1.40 | Chrome (Blink), bundled | about 545 MB with Chrome | 2.83 s | 264 ms | 320 ms | 1.1 s | 2 docs/s | 2,193 MB |
 
 ## Building
 
@@ -112,6 +110,7 @@ dotnet test
 dotnet run --project samples/PdfPecker.Sample -c Release      # converts samples/PdfPecker.Sample/html/*.html and *.md into ./output
 dotnet run --project bench/PdfPecker.Benchmarks -c Release
 dotnet run --project bench/PdfPecker.Benchmarks -c Release -- --requirements    # memory and CPU per conversion
+bench/compare-versions.sh v1.9.0                               # this checkout against a release, in turns on this machine
 dotnet pack src/PdfPecker -c Release -o ./nupkg                # also checks the public API against the last release
 ```
 
