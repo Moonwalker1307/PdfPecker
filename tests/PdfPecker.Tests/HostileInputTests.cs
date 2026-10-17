@@ -48,6 +48,38 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(sb.ToString()));
     }
 
+    // Lower-case words, which small capitals keep whole; the test texts add words that bidi and small capitals each cut
+    // in two, in different places (aB|א and A|Bא).
+    private const string Lower = "lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor";
+
+    // Small capitals and bidi levels cut a ::first-line's words into other pieces than the usual lines' words. The
+    // first-line pieces were resolved for bidi only after their count had been compared with the usual pieces', so
+    // when the counts happened to match before that, the line breaker read past the end of the usual list once the
+    // first line was full.
+    [Theory]
+    [InlineData("font-variant: small-caps", Lower + " aBא")]
+    [InlineData("font-variant: small-caps", "aBא " + Lower + " aBא aBא")]
+    [InlineData("font-variant: small-caps; letter-spacing: 3px", Lower + " aBא")]
+    [InlineData("font-variant: small-caps; word-spacing: 9px", Lower + " aBא")]
+    [InlineData("font-variant: small-caps; font-size: 30px", Lower + " aBא")]
+    [InlineData("font-variant: small-caps; font-weight: bold", "123年4月5日 اللَّهِ תל־אביב elit " + Lower + " aBא")]
+    [InlineData("font-variant: small-caps; text-transform: uppercase", Lower + " aBא")]
+    [InlineData("font-variant: all-small-caps", "lorem <bdi>ipsum aBא</bdi> <span dir=rtl>dolor aBא</span> " + Lower + " aBא")]
+    [InlineData("font-variant: small-caps", "lorem aBא<br>" + Lower + " aBא")]
+    [InlineData("font-variant: small-caps", "loremipsumdolorsitametconsecteturadipiscingelit aBא " + Lower + " aBא")]
+    [InlineData("text-transform: lowercase", "Hyphenation Extraordinarily Complicated Hyphenation Extraordinarily Complicated aBא")]
+    [InlineData("text-transform: uppercase; font-size: 20px", "hyphenation extraordinarily complicated hyphenation extraordinarily complicated aBא")]
+    public void First_line_cut_into_other_pieces_than_the_usual_lines_renders(string firstLine, string text)
+    {
+        foreach (string block in new[] { "", "direction: rtl;", "overflow-wrap: anywhere;", "unicode-bidi: plaintext;", "hyphens: auto;" })
+            foreach (string firstLetter in new[] { "", "p::first-letter { color: red }" })
+            {
+                var html = $"<style>p::first-line {{ {firstLine} }} {firstLetter}</style>"
+                    + $"<p lang=en style='width: 120px; {block}'>{text}</p>";
+                AssertStructurallyValid(Bounded(html));
+            }
+    }
+
     [Fact]
     public void Many_custom_properties_on_many_elements_stay_linear()
     {
