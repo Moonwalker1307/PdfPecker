@@ -568,7 +568,7 @@ internal sealed partial class SvgImage
         else
         {
             float diag = MathF.Sqrt((vw * vw + vh * vh) / 2);
-            grad.Radial = true;
+            grad.Kind = GradientKind.Radial;
             grad.X1 = Coord("cx", "50%", vw);
             grad.Y1 = Coord("cy", "50%", vh);
             grad.R1 = Coord("r", "50%", diag);
