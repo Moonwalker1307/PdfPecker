@@ -144,6 +144,12 @@ static class Perf
         // blurred text-shadows in one and in several colours, laid out and written as a PDF.
         results.Add(Measure("svg-filters", FilterPage(), null, runs: 20));
 
+        // SVG path data: eight hundred path strings of some forty commands each, every command absolute and relative,
+        // with implicit repeats, smooth curves, arcs with packed flags, exponents and numbers run together ("1-2",
+        // ".5.5"), parsed into paths with the quadratics and arcs turned into cubics.
+        var pathData = SvgPathData();
+        results.Add(Measure("parse-svg-paths", () => { foreach (var d in pathData) PdfPecker.Svg.PathParser.Parse(d); }, runs: 100));
+
         // Throughput with every core busy; documents per second is the figure, so higher is better.
         var options = new PdfOptions { BaseDirectory = htmlDir };
         for (int i = 0; i < 20; i++) HtmlToPdf.Convert(invoice, options);
@@ -225,6 +231,66 @@ static class Perf
                             var stopList = k == 2 ? stop.Replace("20px", "72deg").Replace("40px", "0.2turn").Replace("2em", "1rad") : stop;
                             list.Add(repeating + kinds[k] + "(" + head + stopList + ")" + size);
                         }
+        return list;
+    }
+
+    // Path strings, the same on every run, in the forms drawing tools and minifiers write. A number is run into the one
+    // before it only where it still reads as a number of its own: after a sign, or a leading point after a fraction.
+    static List<string> SvgPathData()
+    {
+        var rng = new Random(17);
+        string Number() => rng.Next(6) switch
+        {
+            0 => "-" + rng.Next(100) + "." + rng.Next(1000),
+            1 => "." + rng.Next(1, 100),
+            2 => rng.Next(1, 10) + "e" + rng.Next(-2, 3),
+            _ => (rng.Next(-5000, 5000) / 10.0).ToString(CultureInfo.InvariantCulture),
+        };
+        var sb = new StringBuilder();
+        string previous = "";
+        void Append(string number)
+        {
+            bool packs = number[0] == '-' || (number[0] == '.' && previous.Contains('.') && !previous.Contains('e'));
+            if (!packs || rng.Next(2) == 0) sb.Append(rng.Next(3) == 0 ? ',' : ' ');
+            sb.Append(number);
+            previous = number;
+        }
+        const string commands = "LHVCSQTAZ";
+        var list = new List<string>();
+        for (int p = 0; p < 800; p++)
+        {
+            sb.Clear();
+            sb.Append(rng.Next(2) == 0 ? 'M' : 'm');
+            previous = "";
+            Append(Number());
+            Append(Number());
+            for (int c = 0; c < 40; c++)
+            {
+                char command = commands[rng.Next(commands.Length)];
+                if (rng.Next(2) == 0) command = char.ToLowerInvariant(command);
+                sb.Append(command);
+                previous = "";
+                int repeats = command is 'Z' or 'z' ? 0 : rng.Next(4) == 0 ? 3 : 1;
+                for (int r = 0; r < repeats; r++)
+                {
+                    if (command is 'A' or 'a')
+                    {
+                        Append(rng.Next(1, 80).ToString(CultureInfo.InvariantCulture));
+                        Append(rng.Next(1, 80).ToString(CultureInfo.InvariantCulture));
+                        Append(rng.Next(360).ToString(CultureInfo.InvariantCulture));
+                        // Flags are single digits, so minified data runs them into each other and into the next number.
+                        sb.Append(rng.Next(2) == 0 ? " 0 1 " : " 01");
+                        previous = rng.Next(100).ToString(CultureInfo.InvariantCulture);
+                        sb.Append(previous);
+                        Append(Number());
+                        continue;
+                    }
+                    int arity = char.ToUpperInvariant(command) switch { 'H' or 'V' => 1, 'L' or 'T' => 2, 'S' or 'Q' => 4, _ => 6 };
+                    for (int i = 0; i < arity; i++) Append(Number());
+                }
+            }
+            list.Add(sb.ToString());
+        }
         return list;
     }
 
