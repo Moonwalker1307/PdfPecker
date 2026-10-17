@@ -47,6 +47,11 @@ static class Perf
         var fonts = Fixtures(Path.Combine(fixtureDir, "fonts"), "*.ttf").Concat(Fixtures(Path.Combine(fixtureDir, "fonts"), "*.otf")).ToArray();
         results.Add(Measure("parse-font-tables", () => { foreach (var f in fonts) ParseFontTables(f); }, runs: 300));
 
+        // The renderer's font programs: TrueType outlines and cmaps, CFF charstrings, a Type 1 program and an embedded
+        // CMap. A pass parses every program afresh and traces every glyph, so no outline is cached from the one before.
+        var rendererFonts = new RendererFontWorkload(fonts);
+        results.Add(Measure("parse-render-fonts", rendererFonts.Run, runs: 50));
+
         // Opening PDFs and decoding every stream of them: the lexer, the filters and the decryptor, on the test fixtures
         // (RC4, AES-128 and an unencrypted file with an object stream) and on a generated 30-page report, plain and with
         // AES-256. One run opens and decodes each file once.
@@ -177,6 +182,178 @@ static class Perf
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
         return System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString();
+    }
+}
+
+/// <summary>
+/// One run parses each test font with the renderer's TrueType reader, traces every glyph and looks the printable ASCII
+/// characters up in its Unicode cmap; parses the CFF table of each OpenType font and traces its glyphs; parses a Type 1
+/// program and traces its glyphs; and parses an embedded CMap and maps a run of two-byte codes through it. The Type 1
+/// program and the CMap are built here, because no fixture holds one: the program has hints, flex, subroutines and
+/// accented composites, and the CMap has cidrange, cidchar, bfchar and bfrange sections of the sizes real fonts write.
+/// </summary>
+sealed class RendererFontWorkload
+{
+    const int CMapCodes = 0x4000;
+
+    readonly byte[][] _sfnts, _cffs;
+    readonly byte[] _type1, _cmap;
+    readonly int _type1Length1;
+    long _checksum;
+
+    public RendererFontWorkload(byte[][] fonts)
+    {
+        _sfnts = fonts;
+        _cffs = fonts.Select(TrueTypeFont.Parse).Select(f => f?.CffTable).OfType<byte[]>().ToArray();
+        (_type1, _type1Length1) = Type1Program();
+        _cmap = Encoding.ASCII.GetBytes(CMapText());
+    }
+
+    public void Run()
+    {
+        long sum = 0;
+        foreach (var data in _sfnts)
+        {
+            var font = TrueTypeFont.Parse(data)!;
+            sum += Trace(font);
+            for (int c = 0x20; c < 0x7F; c++) sum += font.Lookup(3, 1, c);
+        }
+        foreach (var data in _cffs) sum += Trace(CffFont.Parse(data)!);
+        sum += Trace(Type1Font.Parse(_type1, _type1Length1)!);
+
+        var cmap = CMap.Parse(_cmap)!;
+        Span<byte> bytes = stackalloc byte[2];
+        for (int code = 0; code < CMapCodes; code++)
+        {
+            bytes[0] = (byte)(code >> 8);
+            bytes[1] = (byte)code;
+            int pos = 0;
+            sum += cmap.ToCid(cmap.NextCode(bytes, ref pos, out _)) + (cmap.ToUnicode((uint)code)?.Length ?? 0);
+        }
+        _checksum += sum;
+    }
+
+    static long Trace(IGlyphSource font)
+    {
+        long sum = 0;
+        for (int gid = 0; gid < font.GlyphCount; gid++)
+        {
+            if (font.GetGlyph(gid) is { } path) sum += path.Points.Count;
+            sum += (long)font.Advance(gid);
+        }
+        return sum;
+    }
+
+    // Sixty glyphs of lines and curves, each with stem hints and a flex, a subroutine for hint replacement, and ten
+    // accented composites (seac), eexec-encrypted as a PDF embeds it. The cleartext length is what FontFile's Length1 says.
+    static (byte[] Program, int Length1) Type1Program()
+    {
+        const string clear = "%!PS-AdobeFont-1.0: PerfType1 1.0\n12 dict begin\n/FontName /PerfType1 def\n/PaintType 0 def\n/FontType 1 def\n" +
+            "/FontMatrix [0.001 0 0 0.001 0 0] readonly def\n/Encoding StandardEncoding def\n/FontBBox {0 0 1000 1000} readonly def\n" +
+            "currentdict end\ncurrentfile eexec\n";
+        var random = new Random(1);
+        var glyphs = new List<(string Name, string Program)> { (".notdef", "0 500 hsbw endchar") };
+        for (int i = 0; i < 60; i++)
+        {
+            var program = new StringBuilder($"0 {500 + random.Next(300)} hsbw 0 {random.Next(50)} hstem {random.Next(50, 100)} 40 vstem 0 callsubr ");
+            program.Append($"{random.Next(50, 100)} {random.Next(50, 100)} rmoveto ");
+            for (int segment = random.Next(3, 12); segment > 0; segment--)
+            {
+                program.Append(random.Next(3) == 0
+                    ? $"{random.Next(-200, 200)} {random.Next(-200, 200)} rlineto "
+                    : $"{random.Next(-150, 150)} {random.Next(-150, 150)} {random.Next(-150, 150)} {random.Next(-150, 150)} {random.Next(-150, 150)} {random.Next(-150, 150)} rrcurveto ");
+            }
+            program.Append("1 callsubr ");
+            for (int point = 0; point < 7; point++) program.Append($"{random.Next(-40, 40)} {random.Next(-40, 40)} rmoveto 2 callsubr ");
+            program.Append($"50 {random.Next(500)} {random.Next(500)} 0 callothersubr pop pop setcurrentpoint closepath endchar");
+            glyphs.Add(($"g{i}", program.ToString()));
+        }
+        for (int i = 0; i < 10; i++) glyphs.Add(($"c{i}", $"0 600 hsbw 0 {random.Next(100, 300)} {random.Next(100, 300)} {65 + i} {65 + 32 + i} seac"));
+        // The standard Subrs 0 to 3 drive flex and hint replacement; Subr 4 is a hint replacement body.
+        string[] subrs =
+        {
+            "3 0 callothersubr pop pop setcurrentpoint return", "0 1 callothersubr return", "0 2 callothersubr return", "return",
+            "0 50 hstem 100 40 vstem return",
+        };
+
+        var encrypted = new List<byte>();
+        void Text(string s) => encrypted.AddRange(Encoding.Latin1.GetBytes(s));
+        void Binary(string intro, string program, string outro)
+        {
+            var bytes = Encrypt(Charstring(program), 4330);
+            Text($"{intro}{bytes.Length} RD ");
+            encrypted.AddRange(bytes);
+            Text($" {outro}\n");
+        }
+        Text("dup /Private 8 dict dup begin\n/RD {string currentfile exch readstring pop} executeonly def\n/ND {noaccess def} executeonly def\n" +
+            "/NP {noaccess put} executeonly def\n/BlueValues [] def\n/password 5839 def\n");
+        Text($"/Subrs {subrs.Length} array\n");
+        for (int i = 0; i < subrs.Length; i++) Binary($"dup {i} ", subrs[i], "NP");
+        Text("ND\n");
+        Text($"2 index /CharStrings {glyphs.Count} dict dup begin\n");
+        foreach (var (name, program) in glyphs) Binary($"/{name} ", program, "ND");
+        Text("end\nend\nreadonly put\nnoaccess put\ndup /FontName get exch definefont pop\nmark currentfile closefile\n");
+        var cleartext = Encoding.Latin1.GetBytes(clear);
+        return (cleartext.Concat(Encrypt(encrypted.ToArray(), 55665)).ToArray(), cleartext.Length);
+    }
+
+    // The Type 1 cipher with four leading bytes, for eexec and for charstrings alike.
+    static byte[] Encrypt(byte[] plain, int key)
+    {
+        var output = new byte[plain.Length + 4];
+        int r = key;
+        for (int i = 0; i < output.Length; i++)
+        {
+            int c = (i < 4 ? 0 : plain[i - 4]) ^ (r >> 8);
+            r = ((c + r) * 52845 + 22719) & 0xFFFF;
+            output[i] = (byte)c;
+        }
+        return output;
+    }
+
+    static byte[] Charstring(string program)
+    {
+        var bytes = new List<byte>();
+        foreach (var token in program.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (int.TryParse(token, out int n))
+            {
+                if (n is >= -107 and <= 107) bytes.Add((byte)(n + 139));
+                else if (n is >= 108 and <= 1131) bytes.AddRange(new[] { (byte)(247 + (n - 108 >> 8)), (byte)(n - 108) });
+                else if (n is >= -1131 and <= -108) bytes.AddRange(new[] { (byte)(251 + (-n - 108 >> 8)), (byte)(-n - 108) });
+                else bytes.AddRange(new[] { (byte)255, (byte)(n >> 24), (byte)(n >> 16), (byte)(n >> 8), (byte)n });
+                continue;
+            }
+            bytes.AddRange(token switch
+            {
+                "hstem" => new byte[] { 1 }, "vstem" => new byte[] { 3 }, "vmoveto" => new byte[] { 4 }, "rlineto" => new byte[] { 5 },
+                "hlineto" => new byte[] { 6 }, "vlineto" => new byte[] { 7 }, "rrcurveto" => new byte[] { 8 }, "closepath" => new byte[] { 9 },
+                "callsubr" => new byte[] { 10 }, "return" => new byte[] { 11 }, "hsbw" => new byte[] { 13 }, "endchar" => new byte[] { 14 },
+                "rmoveto" => new byte[] { 21 }, "hmoveto" => new byte[] { 22 }, "seac" => new byte[] { 12, 6 }, "callothersubr" => new byte[] { 12, 16 },
+                "pop" => new byte[] { 12, 17 }, "setcurrentpoint" => new byte[] { 12, 33 },
+                _ => throw new ArgumentException(token),
+            });
+        }
+        return bytes.ToArray();
+    }
+
+    // An embedded CMap of the shape subsetters write: a two-byte codespace, CID ranges and single CIDs, and a ToUnicode
+    // half with single characters, a ligature string and ranges, including one with a destination array.
+    static string CMapText()
+    {
+        var text = new StringBuilder("%!PS-Adobe-3.0 Resource-CMap\n/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n" +
+            "/CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> def\n/CMapName /Perf-H def\n/CMapType 1 def\n" +
+            "1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n");
+        text.Append("100 begincidrange\n");
+        for (int i = 0; i < 100; i++) text.Append($"<{i * 64:X4}> <{i * 64 + 47:X4}> {i * 48 + 1}\n");
+        text.Append("endcidrange\n100 begincidchar\n");
+        for (int i = 0; i < 100; i++) text.Append($"<{0x2000 + i * 3:X4}> {7000 + i}\n");
+        text.Append("endcidchar\n100 beginbfchar\n");
+        for (int i = 0; i < 100; i++) text.Append($"<{i * 64:X4}> <{0x20 + i:X4}>\n");
+        text.Append("<3000> <00660066006C>\nendbfchar\n100 beginbfrange\n");
+        for (int i = 0; i < 99; i++) text.Append($"<{i * 64 + 1:X4}> <{i * 64 + 47:X4}> <{0x100 + i * 47:X4}>\n");
+        text.Append("<3100> <3102> [<0041> <0042> <0043>]\nendbfrange\nendcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n");
+        return text.ToString();
     }
 }
 
