@@ -2,10 +2,13 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using PdfPecker;
+using PdfPecker.Fonts;
+using PdfPecker.Fonts.Cff;
 using PdfPecker.Images;
+using PdfPecker.Rendering.Fonts;
 
 // A short, machine-readable run for the performance regression check in .github/workflows/perf.yml: about 30 seconds,
-// seven cases, JSON output. Allocation per conversion is deterministic, so the workflow compares it tightly; time is
+// eight cases, JSON output. Allocation per conversion is deterministic, so the workflow compares it tightly; time is
 // noisy on shared runners, so it is compared with a wide margin.
 // Usage: dotnet run -c Release -- --perf results.json
 static class Perf
@@ -32,6 +35,11 @@ static class Perf
         var pdf = File.ReadAllBytes(Path.Combine(fixtureDir, "features.pdf"));
         var imageOptions = new ImageOptions { Dpi = 96 };
         results.Add(Measure("render-png", () => PdfToImage.ConvertPage(pdf, 0, imageOptions), runs: 30));
+
+        // The font tables: kerning pairs, ligature lookups, variation deltas (GDEF, GPOS, CFF2) and CFF parsing and
+        // subsetting, on each test font. A pass loads every font afresh, so none of it is cached from the one before.
+        var fonts = Fixtures(Path.Combine(fixtureDir, "fonts"), "*.ttf").Concat(Fixtures(Path.Combine(fixtureDir, "fonts"), "*.otf")).ToArray();
+        results.Add(Measure("parse-font-tables", () => { foreach (var f in fonts) ParseFontTables(f); }, runs: 300));
 
         // Throughput with every core busy; documents per second is the figure, so higher is better.
         var options = new PdfOptions { BaseDirectory = htmlDir };
@@ -60,6 +68,26 @@ static class Perf
 
     static byte[][] Fixtures(string dir, string pattern)
         => Directory.GetFiles(dir, pattern).Order(StringComparer.Ordinal).Select(File.ReadAllBytes).ToArray();
+
+    static void ParseFontTables(byte[] data)
+    {
+        foreach (var font in FontProgram.Load(data))
+        {
+            var kerning = font.Kerning;
+            var ligatures = font.Ligatures;
+            if (kerning != null && ligatures != null) kerning.Pair(ligatures.StartsLigature(1) ? 1 : 2, 3);
+            if (font.Table("CFF ") is { } cff)
+            {
+                var table = font.Data.AsSpan(cff.Offset, cff.Length).ToArray();
+                CffFont.Parse(table);
+                CffSubsetter.Subset(table, [0, 1, 2, 3, 10, 25]);
+            }
+            var axes = FontVariations.ReadAxes(font);
+            if (axes.Length == 0 || !FontVariations.CanInstance(font)) continue;
+            var values = axes.ToDictionary(a => a.Tag, a => (a.Min + a.Max) / 2);
+            FontVariations.Instance(font, FontVariations.Normalize(font, axes, values), values, axes);
+        }
+    }
 
     static (string, double, long, double?) Measure(string name, string html, string? baseDir, int runs)
     {
