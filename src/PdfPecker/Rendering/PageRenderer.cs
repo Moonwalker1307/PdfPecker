@@ -17,6 +17,19 @@ internal sealed partial class PageRenderer
     /// </summary>
     internal const long MaxOperations = 20_000_000;
     private const int FormCost = 16; // running a form XObject costs about as much as this many simple operators
+    /// <summary>
+    /// Pixels of an offscreen canvas (a soft mask or transparency group) that count as one operator. Such a canvas is
+    /// the size of the page and every pixel of it is cleared and read back, however few operators draw into it, so a
+    /// page that sets thousands of masks would otherwise do billions of pixels of work within the operator budget. At
+    /// this rate a letter page may still build about 600 such canvases at 150 dpi, or 150 at 300 dpi.
+    /// </summary>
+    private const int LayerPixelsPerOperation = 64;
+    /// <summary>
+    /// How deeply soft masks may nest, a mask's group setting another mask and so on. Files nest two or three; a group
+    /// that sets the next mask twice doubles the work at every level, which the content depth limit alone lets reach
+    /// millions of full-page masks.
+    /// </summary>
+    private const int MaxSoftMaskDepth = 8;
     private const float Tolerance = 0.2f; // curve flattening tolerance in device pixels
 
     private readonly PdfFile _file;
@@ -38,6 +51,7 @@ internal sealed partial class PageRenderer
     private readonly Stack<bool> _marked = new();
     private OptionalContent? _oc;
     private long _ops;
+    private int _softMaskDepth; // soft masks being built, one inside the group of the other
     // Text extraction: when set, glyphs go to the collector and nothing is painted, clipped or decoded for pixels.
     private readonly TextCollector? _text;
     private string? _actualText; // the /ActualText of the marked content being run, which replaces its glyphs
@@ -632,6 +646,7 @@ internal sealed partial class PageRenderer
     {
         var clip = _gs.Clip;
         if (clip.IsEmpty) return;
+        ChargeLayer();
         float alpha = _gs.FillAlpha;
         var blend = _gs.Blend;
         var softMask = _gs.SoftMask;
@@ -663,12 +678,25 @@ internal sealed partial class PageRenderer
         pt.Shader = null;
     }
 
+    /// <summary>
+    /// Charges an offscreen canvas against the operation budget by its area, and checks for cancellation, which the
+    /// content loop only does every thousand operators: that many masks at print resolution take seconds.
+    /// </summary>
+    private void ChargeLayer()
+    {
+        _cancel.ThrowIfCancellationRequested();
+        if ((_ops += (long)_canvas.Width * _canvas.Height / LayerPixelsPerOperation) > MaxOperations) throw new BudgetExceeded();
+    }
+
     /// <summary>Renders an ExtGState soft mask group to a per-pixel mask over the whole canvas.</summary>
     private byte[]? BuildSoftMask(PdfDict sm)
     {
         if (_text != null) return null;
         var g = _file.GetStream(sm, "G");
         if (g == null) return null;
+        // A mask nested deeper than MaxSoftMaskDepth is ignored, as if its group had set none.
+        if (_softMaskDepth >= MaxSoftMaskDepth) return null;
+        ChargeLayer();
         bool luminosity = _file.GetName(sm, "S") != "Alpha";
         uint backdrop = 0;
         if (luminosity)
@@ -690,12 +718,14 @@ internal sealed partial class PageRenderer
         _gs.Blend = BlendMode.Normal;
         _gs.SoftMask = null;
         _canvas = layer;
+        _softMaskDepth++;
         try
         {
             RunForm(g, null, null);
         }
         finally
         {
+            _softMaskDepth--;
             _canvas = mainCanvas;
             _gs = saved;
             _patternBase = savedBase;
