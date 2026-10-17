@@ -729,6 +729,32 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void A_registered_font_is_not_kept_alive_after_its_conversion()
+    {
+        // The fuzzer's font targets ran out of heap after a few thousand inputs, at whatever font method happened to
+        // be running (memory-2506a272, memory-ff834f82, memory-de8e202b), and no single input reproduced it: every
+        // font that shaped Arabic or Indic text stayed reachable from a static cache of shaping plans.
+        var weak = ConvertWithOwnFont(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "NotoSansArabic-Subset.ttf")));
+        for (int i = 0; i < 5 && weak.IsAlive; i++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
+        Assert.False(weak.IsAlive, "The font program is still reachable after the conversion and its font collection are gone.");
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static WeakReference ConvertWithOwnFont(byte[] font)
+    {
+        var fonts = new FontCollection();
+        fonts.Add(font, "Ar");
+        AssertStructurallyValid(Bounded("<p style='font-family:Ar'>العربية</p>", new PdfOptions { Fonts = fonts }));
+        var program = fonts.GetSnapshot().All[0].Program;
+        Assert.NotNull(program);
+        return new WeakReference(program);
+    }
+
+    [Fact]
     public void Form_whose_catalog_disappears_when_the_object_table_is_rebuilt_is_invalid_data()
     {
         // Found by the fuzzer: target pdf-form, exception-1abf4c6e. Here the scan finds a trailer, in a comment, that
