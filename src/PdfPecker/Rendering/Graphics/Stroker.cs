@@ -9,24 +9,50 @@ internal enum LineJoin : byte { Miter = 0, Round = 1, Bevel = 2 }
 /// </summary>
 internal sealed class Stroker
 {
+    /// <summary>
+    /// The most outline points the dashes of one stroke may make, each dash a quad and its two caps. The dash array's
+    /// numbers and the path's length are both up to the file, so a few bytes can ask for billions of dashes; past this,
+    /// the stroke is drawn solid, as Skia does past a million dashes. At some thirty bytes a point on the way through
+    /// the rasterizer this is about thirty megabytes: 250,000 dashes with butt caps, or some 30,000 round dots ten
+    /// points wide at 300 dpi, far more than a page shows.
+    /// </summary>
+    internal const int MaxDashPoints = 1_000_000;
+
     private readonly FlatPath _dashed = new();
     private float[] _xs = new float[256], _ys = new float[256];
 
-    public void Stroke(FlatPath src, FlatPath dst, float width, LineCap cap, LineJoin join, float miterLimit,
-        float[]? dash, float dashPhase, float tolerance)
+    /// <summary>
+    /// Strokes <paramref name="src"/> into fill polygons in <paramref name="dst"/>. A dash pattern whose period is
+    /// shorter than <paramref name="minDashPeriod"/> cannot show its gaps at the output resolution, so it is stroked
+    /// solid, the way it looks from a distance.
+    /// </summary>
+    /// <returns>How many outline points the dashes made, which the caller charges to its work budget; 0 if not dashed.</returns>
+    public int Stroke(FlatPath src, FlatPath dst, float width, LineCap cap, LineJoin join, float miterLimit,
+        float[]? dash, float dashPhase, float tolerance, float minDashPeriod)
     {
         dst.Clear();
         float hw = width / 2;
-        if (!(hw > 0)) return;
+        if (!(hw > 0)) return 0;
+        int dashPoints = 0;
         if (dash != null && dash.Length > 0)
         {
             float total = 0;
             bool valid = true;
             foreach (var d in dash) { if (d < 0 || float.IsNaN(d)) valid = false; total += d; }
-            if (valid && total > 0 && total * 1000 > Math.Max(src.MaxX - src.MinX, src.MaxY - src.MinY) * 0.0001f)
+            if (valid && total > 0)
             {
-                Dash(src, _dashed, dash, dashPhase, hw);
-                src = _dashed;
+                // An odd array repeats with on and off swapped, so its period is twice its sum and every entry is a dash once.
+                float period = dash.Length % 2 == 1 ? total * 2 : total;
+                int dashesPerPeriod = dash.Length % 2 == 1 ? dash.Length : dash.Length / 2;
+                // Each contour may start and end with a partial period.
+                double dashes = Length(src) / period * dashesPerPeriod + (src.ContourCount + 1.0) * dashesPerPeriod;
+                double points = dashes * (4 + 2 * CapPoints(cap, hw, tolerance));
+                if (period >= minDashPeriod && points <= MaxDashPoints)
+                {
+                    Dash(src, _dashed, dash, dashPhase, hw);
+                    src = _dashed;
+                    dashPoints = (int)points;
+                }
             }
         }
         for (int c = 0; c < src.ContourCount; c++)
@@ -34,6 +60,34 @@ internal sealed class Stroker
             int s = src.Starts[c], e = src.ContourEnd(c);
             StrokeContour(src, s, e, src.Closed[c], dst, hw, cap, join, miterLimit, tolerance);
         }
+        return dashPoints;
+    }
+
+    /// <summary>The outline points of one cap, as <see cref="Cap"/> makes them.</summary>
+    private static int CapPoints(LineCap cap, float hw, float tol) => cap switch
+    {
+        LineCap.Round => ArcSegments(hw, MathF.PI, tol) + 2,
+        LineCap.Square => 4,
+        _ => 0,
+    };
+
+    /// <summary>The length of all of a path's contours, closing segments included.</summary>
+    private static double Length(FlatPath src)
+    {
+        double length = 0;
+        for (int c = 0; c < src.ContourCount; c++)
+        {
+            int s = src.Starts[c], e = src.ContourEnd(c);
+            int n = e - s;
+            int segs = n < 2 ? 0 : src.Closed[c] ? n : n - 1;
+            for (int i = 0; i < segs; i++)
+            {
+                int a = s + i, b = s + (i + 1) % n;
+                double dx = src.Pts[b * 2] - src.Pts[a * 2], dy = src.Pts[b * 2 + 1] - src.Pts[a * 2 + 1];
+                length += Math.Sqrt(dx * dx + dy * dy);
+            }
+        }
+        return length;
     }
 
     private void StrokeContour(FlatPath src, int s, int e, bool closed, FlatPath dst, float hw, LineCap cap, LineJoin join,
