@@ -17,6 +17,7 @@ internal sealed partial class PageRenderer
     /// </summary>
     internal const long MaxOperations = 20_000_000;
     private const int FormCost = 16; // running a form XObject costs about as much as this many simple operators
+    private const int DashPointsPerOperation = 4; // a line segment strokes to a quad of four points
     /// <summary>
     /// Pixels of an offscreen canvas (a soft mask or transparency group) that count as one operator. Such a canvas is
     /// the size of the page and every pixel of it is cleared and read back, however few operators draw into it, so a
@@ -485,7 +486,10 @@ internal sealed partial class PageRenderer
         float tol = (float)(Tolerance / maxScale);
         // Stroke in user space, then transform the outline: correct for any (even non-uniform) transform.
         _flat.Flatten(path, Matrix.Identity, tol);
-        _stroker.Stroke(_flat, _strokePoly, (float)width, gs.Cap, gs.Join, gs.MiterLimit, gs.Dash, gs.DashPhase, tol);
+        // A dash pattern shorter than half a pixel in the most stretched direction is stroked solid.
+        int dashPoints = _stroker.Stroke(_flat, _strokePoly, (float)width, gs.Cap, gs.Join, gs.MiterLimit, gs.Dash,
+            gs.DashPhase, tol, (float)(0.5 / maxScale));
+        if (dashPoints > 0) ChargeDashes(dashPoints);
         _strokePoly.Transform(ctm);
         FillFlat(_strokePoly, false);
     }
@@ -686,6 +690,17 @@ internal sealed partial class PageRenderer
     {
         _cancel.ThrowIfCancellationRequested();
         if ((_ops += (long)_canvas.Width * _canvas.Height / LayerPixelsPerOperation) > MaxOperations) throw new BudgetExceeded();
+    }
+
+    /// <summary>
+    /// Charges a dashed stroke against the operation budget by the outline its dashes make, a line segment's worth of
+    /// work for every quad: one stroke operator may draw a quarter of a million dashes. It also checks for cancellation,
+    /// which the content loop only does every thousand operators.
+    /// </summary>
+    private void ChargeDashes(int outlinePoints)
+    {
+        _cancel.ThrowIfCancellationRequested();
+        if ((_ops += outlinePoints / DashPointsPerOperation) > MaxOperations) throw new BudgetExceeded();
     }
 
     /// <summary>Renders an ExtGState soft mask group to a per-pixel mask over the whole canvas.</summary>
