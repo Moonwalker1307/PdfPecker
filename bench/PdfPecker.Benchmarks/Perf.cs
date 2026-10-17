@@ -12,7 +12,7 @@ using PdfPecker.Rendering.Parsing;
 using PdfPecker.Text;
 
 // A short, machine-readable run for the performance regression check in .github/workflows/perf.yml: about 30 seconds,
-// seventeen cases, JSON output. Allocation per conversion is deterministic, so the workflow compares it tightly; time is
+// eighteen cases, JSON output. Allocation per conversion is deterministic, so the workflow compares it tightly; time is
 // noisy on shared runners, so it is compared with a wide margin and only against runs on the same processor model.
 // Usage: dotnet run -c Release -- --perf results.json
 static class Perf
@@ -112,6 +112,12 @@ static class Perf
         // decorations and a few transformed, translucent and clipped boxes, laid out and written as a PDF.
         results.Add(Measure("paint-boxes", DrawingPage(), htmlDir, runs: 30));
 
+        // Inline layout: a text-heavy page of justified and hyphenated paragraphs with soft hyphens, dashes and long
+        // words, every white-space mode with tabs, letter and word spacing, small caps and text transforms, inline
+        // boxes and images, sub- and superscripts, decorations and shadows, right-to-left and East Asian text, a line
+        // cut with an ellipsis, a clamped paragraph, leaders and text beside floats, laid out and written as a PDF.
+        results.Add(Measure("inline-text", TextPage(), htmlDir, runs: 30));
+
         // Throughput with every core busy; documents per second is the figure, so higher is better.
         var options = new PdfOptions { BaseDirectory = htmlDir };
         for (int i = 0; i < 20; i++) HtmlToPdf.Convert(invoice, options);
@@ -157,6 +163,58 @@ static class Perf
     // styles; outer and inset box shadows, sharp and blurred, with spread; colour, gradient and image backgrounds with
     // each background-size and background-repeat; border images from a gradient and from the logo; outlines; and text
     // decorations, transforms, opacity, overflow clips and a clip-path on some boxes.
+    // A text-heavy page, the same on every run, that takes every path of inline layout: paragraphs that are justified
+    // and hyphenated, with soft hyphens, zero-width spaces, dashes and words too long for the line; each white-space
+    // mode with tabs and preserved newlines; letter and word spacing, small caps, text transforms and a ::first-line
+    // style; inline blocks, images, sub- and superscripts, padded inline boxes, links and footnote calls; decorations in
+    // each style and sharp and blurred text shadows; Arabic, Hebrew and East Asian text; a nowrap line cut with an
+    // ellipsis, a clamped paragraph, leaders, text beside floats and two columns.
+    static string TextPage(int sections = 10)
+    {
+        const string Lorem = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.";
+        const string English = "The quick brown fox jumps over the lazy dog while extraordinarily knowledgeable internationalization specialists contemplate antidisestablishmentarianism and photosynthesis in well-known state-of-the-art laboratories; the characteristically uncharacteristic documentation nevertheless remains incomprehensible.";
+        const string Shy = "Super­cali­fragi­listic­expi­ali­docious words with soft­hyphens, zero​width​spaces, en–dashes, em—dashes and twenty-one hyphen-ated com-pounds break where they may — or not.";
+        const string Arabic = "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ مرحبا بالعالم ١٢٣ كتاب مدرسة";
+        const string Hebrew = "שָׁלוֹם עוֹלָם עברית ספר בית תל־אביב ירושלים 123";
+        const string Cjk = "日本語のテキストはスペースなしで改行されます。これはペンです。東京都千代田区、中文排版测试，标点符号！한국어 텍스트도 있습니다。シャンプーとトーキョー「引用」（括弧）";
+
+        var sb = new StringBuilder();
+        sb.Append("<html lang='en'><head><style>");
+        sb.Append("body{font:9pt Arial;margin:12px} p{margin:0 0 4px} .j{text-align:justify;hyphens:auto} .c{columns:2;column-gap:10px} ");
+        sb.Append(".sc{font-variant:small-caps} .up{text-transform:uppercase} .cap{text-transform:capitalize} .ls{letter-spacing:1px;word-spacing:3px} ");
+        sb.Append(".nw{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:200px} .clamp{-webkit-line-clamp:2;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical} ");
+        sb.Append("pre{font:8pt 'Courier New';tab-size:4;margin:2px 0} .pw{white-space:pre-wrap;width:220px} .pl{white-space:pre-line} .bs{white-space:break-spaces;width:150px} ");
+        sb.Append(".ib{display:inline-block;width:60px;border:1px solid #888;padding:2px;vertical-align:middle} .fl{float:left;width:70px;height:40px;background:#ddd;margin:2px 6px 2px 0} .fr{float:right;width:50px;height:60px;background:#eee;margin:2px 0 2px 6px} ");
+        sb.Append(".rtl{direction:rtl;text-align:right} .ba{word-break:break-all;width:120px} .kа{word-break:keep-all} .aw{overflow-wrap:anywhere;width:100px} .st{line-break:strict;width:140px} .lo{line-break:loose;width:140px} ");
+        sb.Append(".toc span:first-child::after{content:leader(dotted)} .toc2 span:first-child::after{content:leader('_ ')} .fn{float:footnote;font-size:7pt} @page{@footnote{border-top:1pt solid black;padding-top:2pt}} ");
+        sb.Append(".dec{text-decoration:underline} .dw{text-decoration:underline wavy red} .dd{text-decoration:line-through double} .ts{text-shadow:1px 1px 2px rgba(0,0,0,0.5)} .tb{text-shadow:0 0 4px blue} ");
+        sb.Append(".bg{background:#ffd;padding:1px 3px;border:1px solid #cc9;border-radius:3px} .rel{position:relative;top:-2px} .ti{text-indent:2em} .tal{text-align:justify;text-align-last:center} .fl1::first-line{font-weight:bold;color:#246} .fl1::first-letter{font-size:200%;float:left;line-height:0.8} ");
+        sb.Append("</style></head><body>");
+
+        for (int i = 0; i < sections; i++)
+        {
+            sb.Append("<p class='j ti'>").Append(Lorem).Append(' ').Append(English).Append(" <b>").Append(Shy).Append("</b> <i>").Append(Lorem.Substring(0, 120)).Append("</i></p>");
+            sb.Append("<p class='fl1 tal'>").Append(English).Append(' ').Append(Lorem).Append("</p>");
+            sb.Append("<p class='ls'>").Append(Lorem.Substring(0, 200)).Append(" <span class='sc'>").Append(English.Substring(0, 100)).Append("</span> <span class='up'>").Append(Shy.Substring(0, 80)).Append("</span> <span class='cap'>").Append(Lorem.Substring(0, 90)).Append("</span></p>");
+            sb.Append("<p>").Append(Lorem.Substring(0, 80)).Append(" <span class='ib'>inline block ").Append(i).Append("</span> <img src='logo.png' style='width:24px;vertical-align:middle'> <sup>").Append(i).Append("</sup> text<sub>sub</sub> <span class='bg'>boxed inline</span> <span class='rel'>shifted</span> <a href='#p").Append(i).Append("'>a link that wraps across the line end</a> <span class='dec'>underlined words</span> <span class='dw'>wavy</span> <span class='dd'>struck</span> <span class='ts'>shadowed text</span> <span class='tb'>blurred shadow</span> <span class='fn'>A footnote about item ").Append(i).Append(".</span> ").Append(English.Substring(0, 120)).Append("</p>");
+            sb.Append("<p class='rtl'>").Append(Arabic).Append(" PDF 2024 ").Append(Hebrew).Append(" <b>").Append(Arabic).Append("</b></p>");
+            sb.Append("<p>").Append(Cjk).Append(' ').Append(English.Substring(0, 60)).Append(' ').Append(Cjk).Append("</p>");
+            sb.Append("<div class='st'>").Append(Cjk).Append("</div><div class='lo'>").Append(Cjk).Append("</div>");
+            sb.Append("<p class='nw'>").Append(English).Append("</p><p class='clamp'>").Append(Lorem).Append("</p>");
+            sb.Append("<pre>\tfunction\tname(a, b) {\n\t\treturn a + b;\t// tabs\n\t}\n").Append(English.Substring(0, 70)).Append("</pre>");
+            sb.Append("<div class='pw'>").Append(Shy).Append("\n   leading spaces   kept\n").Append(English.Substring(0, 90)).Append("</div>");
+            sb.Append("<div class='pl'>").Append(Lorem.Substring(0, 60)).Append("\n\nnew   lines\n").Append(English.Substring(0, 40)).Append("</div>");
+            sb.Append("<div class='bs'>").Append(Lorem.Substring(0, 100)).Append("     ").Append(English.Substring(0, 50)).Append("</div>");
+            sb.Append("<div class='ba'>").Append(Lorem.Substring(0, 150)).Append(" longwordwithoutanybreakopportunityatall</div><div class='aw'>Pneumonoultramicroscopicsilicovolcanoconiosis ").Append(English.Substring(0, 50)).Append("</div>");
+            sb.Append("<div><div class='fl'></div><div class='fr'></div>").Append(Lorem).Append(' ').Append(English).Append("</div>");
+            sb.Append("<p class='toc'><span>Chapter ").Append(i + 1).Append(" Introduction to typesetting</span><span>").Append(i * 7 + 3).Append("</span></p>");
+            sb.Append("<p class='toc2'><span>Section ").Append(i + 1).Append(".1 Line breaking</span><span>").Append(i * 7 + 5).Append("</span></p>");
+            sb.Append("<div class='c'><p class='j'>").Append(English).Append(' ').Append(Lorem).Append("</p><p>").Append(Shy).Append(' ').Append(English).Append("</p></div>");
+        }
+        sb.Append("</body></html>");
+        return sb.ToString();
+    }
+
     static string DrawingPage()
     {
         string[] styles = { "solid", "dashed", "dotted", "double", "groove", "ridge", "inset", "outset" };
