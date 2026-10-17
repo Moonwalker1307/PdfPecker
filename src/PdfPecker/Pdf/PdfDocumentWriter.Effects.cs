@@ -67,7 +67,7 @@ internal sealed partial class PdfDocumentWriter
             ph = Math.Max(1, Math.Floor(ph * k));
         }
         int w = (int)pw, h = (int)ph;
-        if (!f.WithinBudget(w, h)) return (-1, 0, 0, 0, 0, 0, 0); // drawn without the filter
+        if (!f.WithinBudget(w, h) || !_filterBudget.TrySpend(f.DocumentWork(w, h))) return (-1, 0, 0, 0, 0, 0, 0); // drawn without the filter
         // A page of w × h points shows the flow rectangle (rx, ry, rw, rh) scaled to fill it, one point per pixel: the
         // margins move the flow's origin off the page (and keep all of it on the first page), and a layer scales it.
         var page = new PageSetup { Width = w, Height = h, MarginLeft = -rx, MarginTop = -ry, MarginBottom = -1e6f };
@@ -76,7 +76,7 @@ internal sealed partial class PdfDocumentWriter
         byte[] pdf;
         try
         {
-            var writer = new PdfDocumentWriter(page, compress: false, CompressionLevel.NoCompression) { Cancellation = Cancellation };
+            var writer = new PdfDocumentWriter(page, compress: false, CompressionLevel.NoCompression) { Cancellation = Cancellation, _filterBudget = _filterBudget };
             pdf = writer.Write(new List<DrawOp> { scaled }, ry + rh, new Dictionary<string, float>(), 0, null, null, null, null, null);
         }
         catch (PdfLimitException) { return default; }

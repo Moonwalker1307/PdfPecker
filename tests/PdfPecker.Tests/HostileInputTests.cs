@@ -258,6 +258,24 @@ public class HostileInputTests
         Assert.Contains("1 0 0 rg", text);
     }
 
+    [Theory]
+    // html, timeout-1f7d8566: a thousand blurred circles, each filter well within its own budget.
+    [InlineData("<svg width='760' height='760'><filter id='blur'><feGaussianBlur stdDeviation='4'/></filter>",
+        "<circle cx='160' cy='160' r='160' fill='#cc3333' filter='url(#blur)'/>", "</svg>")]
+    [InlineData("<body style='margin:0'>", "<div style='width:400px;height:300px;background:#cc3333;filter:blur(4px)'></div>", "</body>")]
+    public void Many_small_filters_share_one_work_budget(string before, string element, string after)
+    {
+        // Every filter renders its content through a page of its own and compresses its result, and each one here is
+        // well within its own budget, so the filters of the page ran for minutes before they shared one budget.
+        var pdf = Bounded(() => Bounded(before + Repeat(element, 2000) + after, new PdfOptions { Compress = false }));
+        AssertStructurallyValid(pdf);
+        var text = Latin1(pdf);
+        // The first filters run, each an image with an alpha mask; the elements after the document's budget is spent
+        // are drawn without them.
+        Assert.InRange(CountOf(text, "/Subtype /Image") / 2, 1, 1999);
+        Assert.Contains("0.8 0.2 0.2 rg", text);
+    }
+
     [Fact]
     public void Svg_morphology_with_a_wide_radius_runs_in_linear_time()
     {

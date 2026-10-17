@@ -237,6 +237,9 @@ internal sealed partial class PdfDocumentWriter
     // of nested filters doubled the resolution of the one around it, up to the pixel cap at each level.
     private float _svgFilterDensity = FilterPixelsPerPoint;
 
+    // The work the document's filters have spent, shared with the writers that render filtered content for this one.
+    private SvgFilterBudget _filterBudget = new();
+
     /// <summary>
     /// Draws filtered SVG content: the content is rendered to pixels over the filter region, the filter runs on them,
     /// and the result is drawn as an image with an alpha mask.
@@ -257,7 +260,7 @@ internal sealed partial class PdfDocumentWriter
             ph = Math.Max(1, Math.Floor(ph * k));
         }
         int w = (int)pw, h = (int)ph;
-        if (!f.WithinBudget(w, h))
+        if (!f.WithinBudget(w, h) || !_filterBudget.TrySpend(f.DocumentWork(w, h)))
         {
             // Too much work: the content is drawn without the filter, as a filter that can not run is left out.
             WriteSvgShapes(b, shape.Children!, toPage);
@@ -321,7 +324,7 @@ internal sealed partial class PdfDocumentWriter
         byte[] pdf;
         try
         {
-            var writer = new PdfDocumentWriter(page, compress: false, CompressionLevel.NoCompression) { Cancellation = Cancellation, _svgFilterDensity = 1 };
+            var writer = new PdfDocumentWriter(page, compress: false, CompressionLevel.NoCompression) { Cancellation = Cancellation, _svgFilterDensity = 1, _filterBudget = _filterBudget };
             pdf = writer.Write(new List<DrawOp> { new SvgOp(0, 0, pixelsW, pixelsH, drawing) }, pixelsH,
                 new Dictionary<string, float>(), 0, null, null, null, null, null);
         }
