@@ -312,4 +312,24 @@ public class BorderStyleAndShadowTests
         Assert.Equal(24f, texts[0].Size);
         Assert.Equal(0xFF008000u, texts[1].Color);
     }
+
+    // Small capitals cut aBא into A|Bא and bidi into aB|א, and hyphenation of a lower-case first line breaks a word the
+    // usual items keep whole: the first line still ends where its own items say, and the next starts right after it.
+    [Theory]
+    [InlineData("width:120px", "lorem ipsum dolor sit amet consectetur adipiscing elit aBא", "font-variant: small-caps")]
+    [InlineData("width:120px; overflow-wrap:anywhere", "loremipsumdolorsitametconsecteturadipiscingelit aBא lorem", "font-variant: small-caps")]
+    [InlineData("width:120px; direction:rtl", "lorem <bdi>ipsum aBא</bdi> <span dir=rtl>dolor aBא</span> sit amet consectetur aBא", "font-variant: small-caps")]
+    [InlineData("width:300px", "lorem aBא<br>ipsum aBא dolor", "font-variant: small-caps; letter-spacing: 2px; word-spacing: 5px")]
+    [InlineData("width:150px; hyphens:auto", "Hyphenation Extraordinarily Complicated Hyphenation Extraordinarily", "text-transform: lowercase")]
+    public void A_first_line_cut_into_other_pieces_keeps_its_style_and_all_the_text(string style, string html, string firstLine)
+    {
+        var texts = TextOps($"<p lang=en style='{style}'>{html}</p>", $"p::first-line {{ {firstLine}; color: red }}");
+        float first = texts.Min(t => t.Baseline);
+        Assert.All(texts.Where(t => t.Baseline == first), t => Assert.Equal(0xFFFF0000u, t.Color));
+        Assert.Contains(texts, t => t.Baseline > first);
+        Assert.All(texts.Where(t => t.Baseline > first), t => Assert.NotEqual(0xFFFF0000u, t.Color));
+        // Nothing is lost or drawn twice where the first line's items give way to the usual ones.
+        static string Letters(string s) => string.Concat(s.ToUpperInvariant().Where(c => !char.IsWhiteSpace(c) && c != '-').Order());
+        Assert.Equal(Letters(System.Text.RegularExpressions.Regex.Replace(html, "<[^>]*>", "")), Letters(string.Concat(texts.Select(t => t.Text))));
+    }
 }

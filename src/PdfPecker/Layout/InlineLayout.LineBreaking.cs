@@ -44,7 +44,7 @@ internal sealed partial class LayoutEngine
         private readonly LayoutEngine _engine;
         private readonly float _availW, _firstIndent;
         private readonly FloatLines? _fl;
-        private readonly int _count;
+        private int _count;
         private List<Item> _items;
         private List<Item>? _after;
         public readonly List<Line> Lines;
@@ -76,7 +76,7 @@ internal sealed partial class LayoutEngine
             if (!it.IsMarker) _hasContent = true;
         }
 
-        /// <summary>Ends the current line and starts the next; the ::first-line items give way to the usual ones.</summary>
+        /// <summary>Ends the current line and starts the next; <see cref="Resume"/> then finds where it starts.</summary>
         private void Finish(bool forced)
         {
             var li = _cur.Items;
@@ -97,11 +97,42 @@ internal sealed partial class LayoutEngine
             _curW = 0;
             _fl?.Begin(Lines);
             _avail = _fl?.Avail ?? _availW;
-            if (_after != null)
+        }
+
+        /// <summary>
+        /// The index the line after a finished one starts at: <paramref name="next"/>, or, once the first line is
+        /// finished, the same place in the usual items, which replace the ::first-line ones. Both lists hold the same
+        /// characters, but small capitals, bidi levels and hyphenation can cut them into different items, so the place
+        /// is found by counting characters, and one for every other item, up to <paramref name="offset"/> characters
+        /// into item <paramref name="next"/>. A usual word that the first line ends inside is cut there.
+        /// </summary>
+        private int Resume(int next, int offset = 0)
+        {
+            if (_after is not { } after) return next;
+            _after = null;
+            int target = offset;
+            for (int k = 0; k < next; k++) target += ContentUnits(_items[k]);
+            _items = after;
+            _count = after.Count;
+            int at = 0;
+            for (int m = 0; m < after.Count; m++)
             {
-                _items = _after;
-                _after = null;
+                if (at >= target) return m;
+                var it = after[m];
+                if (at + ContentUnits(it) > target)
+                {
+                    int cut = target - at, length = it.Length - cut;
+                    var s = it.Style;
+                    var rest = it.Slice(cut, length, TextWidth(s.Font, it.Source, it.Start + cut, length, s.FontSize, s.LetterSpacing));
+                    var items = new List<Item>(after.Count - m) { rest };
+                    for (int r = m + 1; r < after.Count; r++) items.Add(after[r]);
+                    _items = items;
+                    _count = items.Count;
+                    return 0;
+                }
+                at += ContentUnits(it);
             }
+            return after.Count;
         }
 
         public void Run()
@@ -124,7 +155,7 @@ internal sealed partial class LayoutEngine
                 {
                     Add(it);
                     Finish(forced: true);
-                    i++;
+                    i = Resume(i + 1);
                     continue;
                 }
                 if (it.Kind == ItemKind.Space && it.Breakable)
@@ -166,14 +197,6 @@ internal sealed partial class LayoutEngine
             return j;
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private float ChunkWidth(int i, int j)
-        {
-            float width = 0;
-            for (int k = i; k < j; k++) width += _items[k].Width;
-            return width;
-        }
-
         /// <summary>The room a chunk needs: its width, plus the hyphen a soft hyphen shows if the line breaks after it.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private float Needed(int i, int j, float width)
@@ -197,8 +220,10 @@ internal sealed partial class LayoutEngine
                 Finish(forced: false);
                 if (switching)
                 {
-                    // The chunk moves to the second line, in its usual style.
-                    gw = ChunkWidth(i, j);
+                    // The chunk moves to the second line, in its usual style, and is taken again from the usual items.
+                    i = Resume(i);
+                    j = ChunkEnd(i, out gw, out splittable);
+                    if (j == i) return i;
                     need = Needed(i, j, gw);
                 }
             }
@@ -212,7 +237,8 @@ internal sealed partial class LayoutEngine
             if (splittable && _curW + gw > _avail + Eps)
             {
                 // A chunk wider than the line that overflow-wrap or word-break lets break between characters.
-                for (int k = i; k < j; k++) AddSplittable(_items[k]);
+                for (int k = i; k < j; k++)
+                    if (AddSplittable(k) is var resume and >= 0) return resume;
             }
             else
             {
@@ -225,10 +251,13 @@ internal sealed partial class LayoutEngine
 
         /// <summary>
         /// Adds an item of a chunk that breaks between characters: as much of a word as fits ends the line, and the rest
-        /// goes on from the next line.
+        /// goes on from the next line. Returns -1, or, when the first line ended inside the chunk, the index of the
+        /// usual items the rest of the chunk starts at.
         /// </summary>
-        private void AddSplittable(Item g)
+        private int AddSplittable(int k)
         {
+            var whole = _items[k];
+            var g = whole;
             while (true)
             {
                 float room = _avail - _curW;
@@ -236,18 +265,19 @@ internal sealed partial class LayoutEngine
                 {
                     Add(g);
                     _curW += g.Width;
-                    return;
+                    return -1;
                 }
                 if (g.IsText && g.Length > 1 && BreaksAnywhere(g.Style))
-                {
                     g = BreakWord(g, room);
-                    Finish(forced: false);
-                    continue;
+                else if (!_hasContent)
+                {
+                    Add(g); // overflows, nothing else we can do
+                    _curW += g.Width;
+                    return -1;
                 }
-                if (_hasContent) { Finish(forced: false); continue; }
-                Add(g); // overflows, nothing else we can do
-                _curW += g.Width;
-                return;
+                bool switching = _after != null;
+                Finish(forced: false);
+                if (switching) return Resume(k, whole.Length - g.Length);
             }
         }
 
