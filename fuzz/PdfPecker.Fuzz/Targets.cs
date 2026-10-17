@@ -16,6 +16,15 @@ internal sealed class Target
     public string[] Dictionary { get; init; } = Array.Empty<string>();
     public (string Open, string Close)[] Nesters { get; init; } = Array.Empty<(string, string)>();
 
+    /// <summary>
+    /// A per-input time limit for targets whose legitimate worst case at <see cref="MaxSize"/> is slower than the
+    /// default --timeout. It only raises the limit; a longer --timeout still wins.
+    /// </summary>
+    public TimeSpan MinTimeout { get; init; }
+
+    /// <summary>The time limit for one input: --timeout, or <see cref="MinTimeout"/> when that is longer.</summary>
+    public TimeSpan TimeoutFor(TimeSpan requested) => requested > MinTimeout ? requested : MinTimeout;
+
     /// <summary>Also accept the exceptions that the library's own callers catch around this decoder (see <see cref="IsExpected"/>).</summary>
     public bool LenientDecoder { get; init; }
 
@@ -174,6 +183,10 @@ internal static class Targets
             {
                 Name = "svg", Extension = ".svg", Text = true, MaxSize = 128 * 1024, Seeds = c => c.SvgSnippets(),
                 Dictionary = SvgWords, Nesters = SvgNesters,
+                // Every filtered shape gets its own raster pass, so 128 KB of small blurred shapes legitimately takes
+                // about 10 s on a laptop, run twice below, and longer on a CI runner. The cost is linear and the filter
+                // code honours cancellation, so only a limit well above that separates real hangs from big inputs.
+                MinTimeout = TimeSpan.FromSeconds(30),
                 Run = (d, ct) =>
                 {
                     var svg = Encoding.UTF8.GetString(d);
