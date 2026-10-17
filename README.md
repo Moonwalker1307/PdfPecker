@@ -94,7 +94,7 @@ memory. How to read the table, how it was measured and how to run it yourself is
 
 | Converter | Engine | To deploy | First PDF | Invoice, 1 page | Feature tour, 5 pages | Report, 30 pages | Parallel | Peak memory |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| **PdfPecker** | own, managed | 4.2 MB DLL | 0.40 s | **0.86 ms** | **3.5 ms** | **45 ms** | **818 docs/s** | **90 MB** |
+| **PdfPecker** | own, managed | 4.3 MB DLL | 0.40 s | **0.86 ms** | **3.5 ms** | **45 ms** | **818 docs/s** | **90 MB** |
 | HtmlRenderer.PdfSharp 1.6.1 | own, managed (CSS 2) | 2.4 MB of DLLs | 0.58 s | 6.3 ms | 21 ms | 639 ms | 72 docs/s | 236 MB |
 | iText pdfHTML 6.3.4 | own, managed | 11 MB of DLLs | 1.44 s | 34 ms | 209 ms | 3.4 s | 9 docs/s | 624 MB |
 | wkhtmltopdf 0.12.6 | Qt WebKit, native | about 90 MB with Qt | 0.36 s | 310 ms | 356 ms | 780 ms | 11 docs/s | 164 MB |
@@ -110,7 +110,7 @@ dotnet test
 dotnet run --project samples/PdfPecker.Sample -c Release      # converts samples/PdfPecker.Sample/html/*.html and *.md into ./output
 dotnet run --project bench/PdfPecker.Benchmarks -c Release
 dotnet run --project bench/PdfPecker.Benchmarks -c Release -- --requirements    # memory and CPU per conversion
-bench/compare-versions.sh v1.9.0                               # this checkout against a release, in turns on this machine
+bench/compare-versions.sh v1.10.0                              # this checkout against a release, in turns on this machine
 dotnet pack src/PdfPecker -c Release -o ./nupkg                # also checks the public API against the last release
 ```
 
