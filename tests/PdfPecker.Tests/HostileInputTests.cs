@@ -231,6 +231,18 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Svg_path_numbers_after_a_closepath_end_the_path()
+    {
+        // A closepath reads no numbers, so numbers after it were taken as one more closepath that never moved past
+        // them, adding close verbs until memory ran out. Like any other error in path data, they now end the path.
+        var path = Bounded(() => Svg.PathParser.Parse("M0 0 L10 0 L10 10 z 5 5 L0 10"));
+        Assert.NotNull(path);
+        Assert.Equal(new[] { Svg.SvgShape.MoveTo, Svg.SvgShape.LineTo, Svg.SvgShape.LineTo, Svg.SvgShape.Close }, path.Verbs);
+        AssertStructurallyValid(Bounded("<svg width=20 height=20><path d='M0 0 L10 0 L10 10 Z 5'/></svg>"
+            + "<div style=\"width:20px;height:20px;background:red;clip-path:path('M0 0 L10 0 L10 10 z,1')\"></div>"));
+    }
+
+    [Fact]
     public void Svg_filter_work_is_bounded()
     {
         // Ten-thousand-fold kernels on four million pixels: tens of billions of operations for each primitive.
