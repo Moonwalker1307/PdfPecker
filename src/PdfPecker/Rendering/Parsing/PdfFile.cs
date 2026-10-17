@@ -220,12 +220,18 @@ internal sealed class PdfFile
     // ------------------------------------------------------------------ reconstruction
 
     /// <summary>Rebuilds the object table by scanning the file for "n g obj" headers.</summary>
-    private void Reconstruct()
+    /// <param name="opened">
+    /// True when the file already opened through its own cross-reference table and only one entry was found wrong
+    /// later. A scan that then finds no catalog keeps that table and trailer instead of failing: the file was readable
+    /// a moment ago, and this runs deep inside a caller that does not expect the reader's exception.
+    /// </param>
+    private void Reconstruct(bool opened = false)
     {
         lock (_lock)
         {
             if (_reconstructed) return;
             _reconstructed = true;
+            var previous = _xref;
             var table = new Dictionary<int, XrefEntry>();
             var d = Data;
             PdfDict? trailer = null;
@@ -304,6 +310,13 @@ internal sealed class PdfFile
                     }
                 }
             }
+            if (trailer == null && opened)
+            {
+                _xref = previous;
+                _cache.Clear();
+                _objStreams.Clear();
+                return;
+            }
             if (trailer == null) throw new PdfFormatException("No document catalog found; the file is not a readable PDF.");
             Trailer = trailer;
         }
@@ -346,7 +359,7 @@ internal sealed class PdfFile
                     // The table points somewhere wrong: rebuild it once and retry.
                     _loading.Remove(num);
                     var trailer = Trailer;
-                    Reconstruct();
+                    Reconstruct(opened: true);
                     if (trailer["Root"] != null && Trailer != trailer && Resolve(trailer["Root"]) is PdfDict) Trailer = Merge(Trailer, trailer);
                     if (_cache.TryGetValue(num, out cached)) return cached;
                     _loading.Add(num);

@@ -715,6 +715,36 @@ public class HostileInputTests
         Assert.Throws<InvalidDataException>(() => PdfForm.GetFields(pdf));
         Assert.Throws<InvalidDataException>(() => PdfSignatureVerifier.Verify(pdf));
     }
+
+    [Fact]
+    public void Rebuilding_the_object_table_late_without_finding_a_catalog_keeps_the_table_that_worked()
+    {
+        // Found by the fuzzer: targets pdf-merge and pdf-form, exception-d2faeb46. The catalog opens through the
+        // cross-reference stream, but the page tree entry is wrong, so the table is rebuilt by scanning for object
+        // headers. That scan finds none and used to throw the reader's internal exception from deep inside the call.
+        var pdf = HiddenHeaderPdf("");
+        Assert.Empty(PdfForm.GetFields(pdf));
+        Assert.Throws<InvalidDataException>(() => PdfMerger.Merge(new[] { pdf }));
+        Assert.Equal("", PdfText.Extract(pdf));
+    }
+
+    /// <summary>
+    /// A PDF whose catalog and cross-reference stream follow a regular character, so that a scan for "n g obj" headers
+    /// misses them while the cross-reference stream still finds them, and whose page tree entry points nowhere.
+    /// <paramref name="extra"/> is inserted after the catalog.
+    /// </summary>
+    private static byte[] HiddenHeaderPdf(string extra)
+    {
+        var b = new List<byte>(Encoding.ASCII.GetBytes("%PDF-1.5\nx"));
+        int catalog = b.Count;
+        b.AddRange(Encoding.ASCII.GetBytes("1 0 obj<</Type/Catalog/Pages 2 0 R/AcroForm<</Fields[]>>>>endobj\n" + extra + "x"));
+        int xref = b.Count;
+        byte[] rows = [0, 0, 0, 255, 1, (byte)(catalog >> 8), (byte)catalog, 0, 1, 0, 5, 0, 1, (byte)(xref >> 8), (byte)xref, 0];
+        b.AddRange(Encoding.ASCII.GetBytes($"3 0 obj<</Type/XRef/Size 4/W[1 2 1]/Root 1 0 R/Length {rows.Length}>>stream\n"));
+        b.AddRange(rows);
+        b.AddRange(Encoding.ASCII.GetBytes($"\nendstream\nendobj\nstartxref\n{xref}\n%%EOF\n"));
+        return b.ToArray();
+    }
 }
 
 /// <summary>Hostile CFF and CFF2 fonts whose subroutines fan out exponentially.</summary>
