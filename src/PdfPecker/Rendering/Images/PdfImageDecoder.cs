@@ -1,75 +1,25 @@
 using PdfPecker.Rendering.Content;
-using PdfPecker.Rendering.Graphics;
 using PdfPecker.Rendering.Parsing;
 
 namespace PdfPecker.Rendering.Images;
 
-/// <summary>A decoded raster image: premultiplied RGBA pixels, or (for stencil masks) coverage only.</summary>
-internal sealed class DecodedImage
-{
-    public int Width, Height;
-    public uint[]? Pixels;   // premultiplied RGBA, row 0 = top
-    public byte[]? Stencil;  // ImageMask: 255 = paint with the fill color
-    public bool Interpolate;
-    public bool Opaque;
-
-    private DecodedImage? _half;
-
-    /// <summary>A copy at half resolution (box filter), for drawing images much smaller than their pixel size.</summary>
-    public DecodedImage Half()
-    {
-        if (_half != null) return _half;
-        int w = Math.Max(1, Width / 2), h = Math.Max(1, Height / 2);
-        var r = new DecodedImage { Width = w, Height = h, Interpolate = Interpolate, Opaque = Opaque };
-        if (Pixels != null)
-        {
-            var src = Pixels;
-            var dst = new uint[w * h];
-            for (int y = 0; y < h; y++)
-            {
-                int y0 = Math.Min(Height - 1, y * 2), y1 = Math.Min(Height - 1, y * 2 + 1);
-                for (int x = 0; x < w; x++)
-                {
-                    int x0 = Math.Min(Width - 1, x * 2), x1 = Math.Min(Width - 1, x * 2 + 1);
-                    uint a = src[y0 * Width + x0], b = src[y0 * Width + x1], c = src[y1 * Width + x0], d = src[y1 * Width + x1];
-                    dst[y * w + x] = Avg4(a, b, c, d);
-                }
-            }
-            r.Pixels = dst;
-        }
-        if (Stencil != null)
-        {
-            var src = Stencil;
-            var dst = new byte[w * h];
-            for (int y = 0; y < h; y++)
-            {
-                int y0 = Math.Min(Height - 1, y * 2), y1 = Math.Min(Height - 1, y * 2 + 1);
-                for (int x = 0; x < w; x++)
-                {
-                    int x0 = Math.Min(Width - 1, x * 2), x1 = Math.Min(Width - 1, x * 2 + 1);
-                    dst[y * w + x] = (byte)((src[y0 * Width + x0] + src[y0 * Width + x1] + src[y1 * Width + x0] + src[y1 * Width + x1] + 2) >> 2);
-                }
-            }
-            r.Stencil = dst;
-        }
-        Interlocked.CompareExchange(ref _half, r, null);
-        return _half;
-    }
-
-    private static uint Avg4(uint a, uint b, uint c, uint d)
-    {
-        uint rb = ((a & 0x00FF00FF) + (b & 0x00FF00FF) + (c & 0x00FF00FF) + (d & 0x00FF00FF) + 0x00020002) >> 2 & 0x00FF00FF;
-        uint ag = (((a >> 8) & 0x00FF00FF) + ((b >> 8) & 0x00FF00FF) + ((c >> 8) & 0x00FF00FF) + ((d >> 8) & 0x00FF00FF) + 0x00020002) >> 2 & 0x00FF00FF;
-        return rb | ag << 8;
-    }
-
-    public long ByteSize => (Pixels?.LongLength ?? 0) * 4 + (Stencil?.LongLength ?? 0);
-}
-
 /// <summary>Decodes image XObjects and inline images: all bit depths, color spaces, Decode arrays, masks and soft masks.</summary>
-internal static class PdfImageDecoder
+internal static partial class PdfImageDecoder
 {
     public const long MaxPixels = 100_000_000;
+
+    /// <summary>
+    /// The samples of an image once its image filter (if any) has been undone: their size and layout may come from the
+    /// coded data rather than the image dictionary.
+    /// </summary>
+    private struct Samples
+    {
+        public byte[] Data;
+        public int Width, Height, BitsPerComponent, Components;
+        public ColorSpace? ColorSpace; // null only for a stencil mask
+        public double[]? Decode;
+        public byte[]? JpxAlpha; // the alpha channel of a JPEG 2000 image with SMaskInData
+    }
 
     public static DecodedImage? Decode(PdfFile file, PdfDict dict, byte[] rawOrDecoded, bool alreadyDecoded, PdfDict? resources,
         bool inline, uint fillRgbForStencil = 0)
@@ -78,86 +28,34 @@ internal static class PdfImageDecoder
         int height = GetInt(file, dict, "Height", "H");
         if (width <= 0 || height <= 0 || (long)width * height > MaxPixels) return null;
         bool isMask = GetBool(file, dict, "ImageMask", "IM");
-        int bpc = isMask ? 1 : GetInt(file, dict, "BitsPerComponent", "BPC");
-        var decodeArr = file.ToNumbers(file.Resolve(dict["Decode"] ?? dict["D"]) as PdfArray);
+        var samples = new Samples
+        {
+            Width = width,
+            Height = height,
+            BitsPerComponent = isMask ? 1 : GetInt(file, dict, "BitsPerComponent", "BPC"),
+            Decode = file.ToNumbers(file.Resolve(dict["Decode"] ?? dict["D"]) as PdfArray),
+        };
 
-        byte[] data;
         string? imageFilter = null;
         PdfDict? imageParms = null;
-        if (alreadyDecoded) data = rawOrDecoded;
-        else if (dict is PdfStream s) data = file.DecodeStream(s, stopAtImageFilter: true, out imageFilter, out imageParms);
-        else data = InlineDecode(file, dict, rawOrDecoded, out imageFilter, out imageParms);
+        if (alreadyDecoded) samples.Data = rawOrDecoded;
+        else if (dict is PdfStream s) samples.Data = file.DecodeStream(s, stopAtImageFilter: true, out imageFilter, out imageParms);
+        else samples.Data = InlineDecode(file, dict, rawOrDecoded, out imageFilter, out imageParms);
 
-        ColorSpace? cs = null;
-        if (!isMask)
-        {
-            var csObj = dict["ColorSpace"] ?? dict["CS"];
-            cs = csObj != null ? ColorSpace.Parse(file, csObj, resources) : null;
-        }
+        if (!isMask && (dict["ColorSpace"] ?? dict["CS"]) is { } csObj) samples.ColorSpace = ColorSpace.Parse(file, csObj, resources);
 
-        int comps;
-        byte[]? jpxAlpha = null;
-        if (imageFilter == "DCTDecode")
+        bool decoded = imageFilter switch
         {
-            var jpg = JpegDecoder.Decode(data);
-            if (jpg == null) return null;
-            var (jd, jw, jh, jc) = jpg.Value;
-            data = jd;
-            if (jw != width || jh != height)
-            {
-                // Trust the JPEG's own dimensions.
-                width = jw;
-                height = jh;
-            }
-            comps = jc;
-            bpc = 8;
-            if (cs == null || cs.Components != comps) cs = comps switch { 1 => ColorSpace.Gray, 4 => ColorSpace.Cmyk, _ => ColorSpace.RgbSpace };
-        }
-        else if (imageFilter == "CCITTFaxDecode")
-        {
-            var fax = CcittFaxDecoder.Decode(data, imageParms, file, width, height);
-            if (fax == null) return null;
-            data = fax;
-            bpc = 1;
-            comps = 1;
-            cs ??= ColorSpace.Gray;
-        }
-        else if (imageFilter == "JPXDecode")
-        {
-            var jpx = JpxDecoder.Decode(data);
-            if (jpx == null) return null;
-            width = jpx.Width;
-            height = jpx.Height;
-            data = jpx.Data;
-            comps = jpx.Components;
-            bpc = 8;
-            decodeArr = null; // ignored for JPEG 2000 images
-            if (cs == null || cs.Components != comps)
-                cs = jpx.Color switch { JpxColor.Gray => ColorSpace.Gray, JpxColor.Cmyk => ColorSpace.Cmyk, _ => ColorSpace.RgbSpace };
-            if (cs.Components != comps) return null;
-            if (file.GetInt(dict, "SMaskInData", 0) != 0) jpxAlpha = jpx.Alpha;
-        }
-        else if (imageFilter == "JBIG2Decode")
-        {
-            var globals = file.GetStream(imageParms, "JBIG2Globals");
-            var bits = Jbig2Decoder.Decode(data, globals != null ? file.DecodeStream(globals) : null, width, height);
-            if (bits == null) return null;
-            data = bits;
-            bpc = 1;
-            comps = 1;
-            cs ??= isMask ? null : ColorSpace.Gray;
-        }
-        else if (imageFilter != null)
-        {
-            return null;
-        }
-        else
-        {
-            if (bpc is not (1 or 2 or 4 or 8 or 16)) bpc = 8;
-            cs ??= isMask ? null : ColorSpace.Gray;
-            comps = cs?.Components ?? 1;
-            if (comps <= 0) comps = 1;
-        }
+            null => UseRawSamples(ref samples, isMask),
+            "DCTDecode" => DecodeJpeg(ref samples),
+            "CCITTFaxDecode" => DecodeFax(ref samples, file, imageParms),
+            "JPXDecode" => DecodeJpx(ref samples, file, dict),
+            "JBIG2Decode" => DecodeJbig2(ref samples, file, imageParms, isMask),
+            _ => false,
+        };
+        if (!decoded) return null;
+        width = samples.Width;
+        height = samples.Height;
 
         var img = new DecodedImage
         {
@@ -169,60 +67,24 @@ internal static class PdfImageDecoder
         if (isMask)
         {
             // 0 paints unless the Decode array is [1 0].
-            bool invert = decodeArr is { Length: >= 2 } && decodeArr[0] > decodeArr[1];
-            img.Stencil = UnpackMask(data, width, height, invert);
+            bool invert = samples.Decode is { Length: >= 2 } d && d[0] > d[1];
+            img.Stencil = UnpackMask(samples.Data, width, height, invert);
             return img;
         }
 
         var pixels = new uint[width * height];
-        ConvertToRgb(data, width, height, bpc, comps, cs!, decodeArr, pixels);
+        ConvertToRgb(samples.Data, width, height, samples.BitsPerComponent, samples.Components, samples.ColorSpace!, samples.Decode, pixels);
         img.Pixels = pixels;
         img.Opaque = true;
-
         if (inline) return img;
 
-        if (jpxAlpha != null && file.Resolve(dict["SMask"]) is not PdfStream)
+        if (samples.JpxAlpha != null && file.Resolve(dict["SMask"]) is not PdfStream)
         {
-            ApplyAlpha(pixels, jpxAlpha);
+            ApplyAlpha(pixels, samples.JpxAlpha);
             img.Opaque = false;
             return img;
         }
-
-        // Soft mask (alpha), explicit stencil mask, or color-key mask.
-        if (dict is PdfStream)
-        {
-            var smask = file.Resolve(dict["SMask"]) as PdfStream;
-            if (smask != null)
-            {
-                var alpha = DecodeAlpha(file, smask, width, height, resources);
-                if (alpha != null)
-                {
-                    if (file.GetNumbers(smask, "Matte") is { } matte && matte.Length >= cs!.Components) UnblendMatte(pixels, alpha, cs, matte);
-                    ApplyAlpha(pixels, alpha);
-                }
-                img.Opaque = false;
-            }
-            else
-            {
-                var mask = file.Resolve(dict["Mask"]);
-                if (mask is PdfStream ms)
-                {
-                    var m = Decode(file, ms, Array.Empty<byte>(), false, resources, false);
-                    if (m?.Stencil != null)
-                    {
-                        // An explicit mask's samples mean what they mean in a stencil mask (ISO 32000-1, 8.9.6.3): where
-                        // the stencil would paint, the base image shows, so the stencil coverage is the image's alpha.
-                        ApplyAlpha(pixels, Resample(m.Stencil, m.Width, m.Height, width, height));
-                        img.Opaque = false;
-                    }
-                }
-                else if (mask is PdfArray keyArr && imageFilter == null)
-                {
-                    var key = file.ToNumbers(keyArr)!;
-                    if (ApplyColorKey(data, width, height, bpc, comps, key, pixels)) img.Opaque = false;
-                }
-            }
-        }
+        if (dict is PdfStream) ApplyMasks(file, dict, resources, img, samples, imageFilter == null);
         return img;
     }
 
@@ -230,286 +92,108 @@ internal static class PdfImageDecoder
 
     private static bool GetBool(PdfFile file, PdfDict d, string key, string abbr) => file.Resolve(d[key] ?? d[abbr]) is PdfBool { Value: true };
 
+    /// <summary>Unfiltered samples, laid out as the dictionary says; an unusable bit depth is read as 8.</summary>
+    private static bool UseRawSamples(ref Samples samples, bool isMask)
+    {
+        if (samples.BitsPerComponent is not (1 or 2 or 4 or 8 or 16)) samples.BitsPerComponent = 8;
+        samples.ColorSpace ??= isMask ? null : ColorSpace.Gray;
+        samples.Components = samples.ColorSpace?.Components ?? 1;
+        if (samples.Components <= 0) samples.Components = 1;
+        return true;
+    }
+
+    /// <summary>
+    /// A JPEG decides its own size and component count; its declared colour space is used when it has as many
+    /// components, else the device space that has.
+    /// </summary>
+    private static bool DecodeJpeg(ref Samples samples)
+    {
+        if (JpegDecoder.Decode(samples.Data) is not { } jpeg) return false;
+        var (data, width, height, components) = jpeg;
+        samples.Data = data;
+        samples.Width = width;
+        samples.Height = height;
+        samples.Components = components;
+        samples.BitsPerComponent = 8;
+        if (samples.ColorSpace == null || samples.ColorSpace.Components != components) samples.ColorSpace = DeviceSpace(components);
+        return true;
+    }
+
+    private static ColorSpace DeviceSpace(int components) => components switch { 1 => ColorSpace.Gray, 4 => ColorSpace.Cmyk, _ => ColorSpace.RgbSpace };
+
+    private static bool DecodeFax(ref Samples samples, PdfFile file, PdfDict? parms)
+    {
+        if (CcittFaxDecoder.Decode(samples.Data, parms, file, samples.Width, samples.Height) is not { } bits) return false;
+        SetBilevel(ref samples, bits);
+        samples.ColorSpace ??= ColorSpace.Gray;
+        return true;
+    }
+
+    private static bool DecodeJbig2(ref Samples samples, PdfFile file, PdfDict? parms, bool isMask)
+    {
+        var globals = file.GetStream(parms, "JBIG2Globals");
+        var bits = Jbig2Decoder.Decode(samples.Data, globals != null ? file.DecodeStream(globals) : null, samples.Width, samples.Height);
+        if (bits == null) return false;
+        SetBilevel(ref samples, bits);
+        samples.ColorSpace ??= isMask ? null : ColorSpace.Gray;
+        return true;
+    }
+
+    private static void SetBilevel(ref Samples samples, byte[] bits)
+    {
+        samples.Data = bits;
+        samples.BitsPerComponent = 1;
+        samples.Components = 1;
+    }
+
+    /// <summary>
+    /// A JPEG 2000 image decides its own size, components and colour space, and its Decode array is ignored
+    /// (ISO 32000-1, 8.9.5.3). Its alpha channel is kept when SMaskInData asks for it.
+    /// </summary>
+    private static bool DecodeJpx(ref Samples samples, PdfFile file, PdfDict dict)
+    {
+        var jpx = JpxDecoder.Decode(samples.Data);
+        if (jpx == null) return false;
+        samples.Width = jpx.Width;
+        samples.Height = jpx.Height;
+        samples.Data = jpx.Data;
+        samples.Components = jpx.Components;
+        samples.BitsPerComponent = 8;
+        samples.Decode = null;
+        if (samples.ColorSpace == null || samples.ColorSpace.Components != jpx.Components)
+            samples.ColorSpace = jpx.Color switch { JpxColor.Gray => ColorSpace.Gray, JpxColor.Cmyk => ColorSpace.Cmyk, _ => ColorSpace.RgbSpace };
+        if (samples.ColorSpace.Components != jpx.Components) return false;
+        if (file.GetInt(dict, "SMaskInData", 0) != 0) samples.JpxAlpha = jpx.Alpha;
+        return true;
+    }
+
+    /// <summary>Undoes the filters of an inline image up to its image filter, which is left for the caller.</summary>
     private static byte[] InlineDecode(PdfFile file, PdfDict dict, byte[] data, out string? imageFilter, out PdfDict? imageParms)
     {
         imageFilter = null;
         imageParms = null;
-        var f = file.Resolve(dict["Filter"] ?? dict["F"]);
-        var p = file.Resolve(dict["DecodeParms"] ?? dict["DP"]);
-        var filters = new List<string>();
-        var parms = new List<PdfDict?>();
-        if (f is PdfName n) { filters.Add(Filters.Canonical(n.Value)); parms.Add(p as PdfDict); }
-        else if (f is PdfArray fa)
-            for (int i = 0; i < fa.Count; i++)
-                if (file.Resolve(fa[i]) is PdfName fn)
-                {
-                    filters.Add(Filters.Canonical(fn.Value));
-                    parms.Add(p is PdfArray pa && i < pa.Count ? file.Resolve(pa[i]) as PdfDict : null);
-                }
-        for (int i = 0; i < filters.Count; i++)
+        var filter = file.Resolve(dict["Filter"] ?? dict["F"]);
+        var parms = file.Resolve(dict["DecodeParms"] ?? dict["DP"]);
+        var filters = new List<(string Name, PdfDict? Parms)>();
+        if (filter is PdfName name) filters.Add((Filters.Canonical(name.Value), parms as PdfDict));
+        else if (filter is PdfArray names)
         {
-            if (Filters.IsImageFilter(filters[i])) { imageFilter = filters[i]; imageParms = parms[i]; return data; }
-            data = Filters.Decode(filters[i], data, parms[i], file);
+            for (int i = 0; i < names.Count; i++)
+            {
+                if (file.Resolve(names[i]) is not PdfName n) continue;
+                filters.Add((Filters.Canonical(n.Value), parms is PdfArray parmsArray && i < parmsArray.Count ? file.Resolve(parmsArray[i]) as PdfDict : null));
+            }
+        }
+        foreach (var (n, p) in filters)
+        {
+            if (Filters.IsImageFilter(n))
+            {
+                imageFilter = n;
+                imageParms = p;
+                return data;
+            }
+            data = Filters.Decode(n, data, p, file);
         }
         return data;
-    }
-
-    private static byte[] UnpackMask(byte[] data, int w, int h, bool invert)
-    {
-        var m = new byte[w * h];
-        int rowBytes = (w + 7) / 8;
-        for (int y = 0; y < h; y++)
-        {
-            int row = y * rowBytes;
-            for (int x = 0; x < w; x++)
-            {
-                int idx = row + (x >> 3);
-                int bit = idx < data.Length ? data[idx] >> (7 - (x & 7)) & 1 : 1;
-                m[y * w + x] = (bit == 0) != invert ? (byte)255 : (byte)0;
-            }
-        }
-        return m;
-    }
-
-    /// <summary>Converts samples to opaque RGBA pixels.</summary>
-    private static void ConvertToRgb(byte[] data, int w, int h, int bpc, int comps, ColorSpace cs, double[]? decode, uint[] pixels)
-    {
-        int rowBytes = (w * comps * bpc + 7) / 8;
-        int maxV = (1 << bpc) - 1;
-        var dflt = cs.DefaultDecode(bpc);
-        bool defaultDecode = decode == null || decode.Length < 2 * comps || IsDefault(decode, dflt);
-        if (defaultDecode) decode = dflt;
-
-        // Fast paths for 8-bit device spaces with the default Decode.
-        if (bpc == 8 && defaultDecode && cs is DeviceRgb)
-        {
-            for (int y = 0; y < h; y++)
-            {
-                int s = y * rowBytes, o = y * w;
-                int n = Math.Min(w, Math.Max(0, (data.Length - s) / 3));
-                for (int x = 0; x < n; x++, s += 3) pixels[o + x] = (uint)(data[s] | data[s + 1] << 8 | data[s + 2] << 16) | 0xFF000000;
-                for (int x = n; x < w; x++) pixels[o + x] = 0xFF000000;
-            }
-            return;
-        }
-        if (bpc == 8 && defaultDecode && cs is DeviceGray)
-        {
-            for (int y = 0; y < h; y++)
-            {
-                int s = y * rowBytes, o = y * w;
-                for (int x = 0; x < w; x++)
-                {
-                    int g = s + x < data.Length ? data[s + x] : 0;
-                    pixels[o + x] = (uint)(g | g << 8 | g << 16) | 0xFF000000;
-                }
-            }
-            return;
-        }
-        if (bpc == 8 && cs is DeviceCmyk && comps == 4)
-        {
-            bool inv = decode![0] > decode[1];
-            for (int y = 0; y < h; y++)
-            {
-                int s = y * rowBytes, o = y * w;
-                for (int x = 0; x < w; x++, s += 4)
-                {
-                    if (s + 3 >= data.Length) { pixels[o + x] = 0xFF000000; continue; }
-                    float c = data[s] / 255f, m = data[s + 1] / 255f, yy = data[s + 2] / 255f, k = data[s + 3] / 255f;
-                    if (inv) { c = 1 - c; m = 1 - m; yy = 1 - yy; k = 1 - k; }
-                    var (r, g, b) = DeviceCmyk.Convert(c, m, yy, k);
-                    pixels[o + x] = (uint)(r | g << 8 | b << 16) | 0xFF000000;
-                }
-            }
-            return;
-        }
-
-        // CalRGB: gamma tables per component over all sample values, a matrix multiply and a table for the sRGB curve,
-        // so a large image costs no power functions per pixel.
-        if (cs is CalSpace cal && comps == 3 && bpc <= 8)
-        {
-            var lin = new double[3][];
-            for (int i = 0; i < 3; i++)
-            {
-                lin[i] = new double[maxV + 1];
-                for (int v = 0; v <= maxV; v++) lin[i][v] = cal.Linear(decode![2 * i] + v * (decode[2 * i + 1] - decode[2 * i]) / maxV, i);
-            }
-            var m = cal.ToLinearSrgb;
-            var enc = CalSpace.EncodeTable;
-            static int Index(double v) => v <= 0 ? 0 : v >= 1 ? 4095 : (int)(v * 4095 + 0.5);
-            for (int y = 0; y < h; y++)
-            {
-                long bitPos = (long)y * rowBytes * 8;
-                int o = y * w;
-                for (int x = 0; x < w; x++)
-                {
-                    double a = 0, b = 0, c = 0;
-                    for (int i = 0; i < 3; i++, bitPos += bpc)
-                    {
-                        long bi = bitPos >> 3;
-                        int v = bpc == 8 ? (bi < data.Length ? data[bi] : 0) : bi < data.Length ? (data[bi] >> (8 - bpc - (int)(bitPos & 7))) & maxV : 0;
-                        double l = lin[i][v];
-                        if (i == 0) a = l; else if (i == 1) b = l; else c = l;
-                    }
-                    int r = enc[Index(m[0] * a + m[1] * b + m[2] * c)];
-                    int g = enc[Index(m[3] * a + m[4] * b + m[5] * c)];
-                    int bl = enc[Index(m[6] * a + m[7] * b + m[8] * c)];
-                    pixels[o + x] = (uint)(r | g << 8 | bl << 16) | 0xFF000000;
-                }
-            }
-            return;
-        }
-
-        // Single-component spaces (gray, indexed, separation, ICC gray): a lookup table over all sample values.
-        if (comps == 1 && bpc <= 8)
-        {
-            var lut = new uint[maxV + 1];
-            Span<float> c1 = stackalloc float[1];
-            if (cs is SeparationSpace sep) sep.BuildLut();
-            for (int v = 0; v <= maxV; v++)
-            {
-                double dv = decode![0] + v * (decode[1] - decode[0]) / maxV;
-                c1[0] = (float)dv;
-                lut[v] = cs.ToRgb(c1) | 0xFF000000;
-            }
-            for (int y = 0; y < h; y++)
-            {
-                int bitPos = y * rowBytes * 8, o = y * w;
-                if (bpc == 8)
-                {
-                    int s = y * rowBytes;
-                    for (int x = 0; x < w; x++) pixels[o + x] = s + x < data.Length ? lut[data[s + x]] : lut[0];
-                    continue;
-                }
-                for (int x = 0; x < w; x++, bitPos += bpc)
-                {
-                    int byteIdx = bitPos >> 3;
-                    int v = byteIdx < data.Length ? (data[byteIdx] >> (8 - bpc - (bitPos & 7))) & maxV : 0;
-                    pixels[o + x] = lut[v];
-                }
-            }
-            return;
-        }
-
-        // General case.
-        Span<float> comp = stackalloc float[Math.Max(1, comps)];
-        var scale = new double[comps];
-        for (int i = 0; i < comps; i++) scale[i] = (decode![2 * i + 1] - decode[2 * i]) / (bpc == 16 ? 65535.0 : maxV);
-        for (int y = 0; y < h; y++)
-        {
-            long bitPos = (long)y * rowBytes * 8;
-            int o = y * w;
-            for (int x = 0; x < w; x++)
-            {
-                for (int i = 0; i < comps; i++, bitPos += bpc)
-                {
-                    long byteIdx = bitPos >> 3;
-                    int v;
-                    if (bpc == 8) v = byteIdx < data.Length ? data[byteIdx] : 0;
-                    else if (bpc == 16) v = byteIdx + 1 < data.Length ? data[byteIdx] << 8 | data[byteIdx + 1] : 0;
-                    else v = byteIdx < data.Length ? (data[byteIdx] >> (8 - bpc - (int)(bitPos & 7))) & maxV : 0;
-                    comp[i] = (float)(decode![2 * i] + v * scale[i]);
-                }
-                pixels[o + x] = cs.ToRgb(comp) | 0xFF000000;
-            }
-        }
-    }
-
-    private static bool IsDefault(double[] d, double[] dflt)
-    {
-        for (int i = 0; i < dflt.Length && i < d.Length; i++) if (Math.Abs(d[i] - dflt[i]) > 1e-6) return false;
-        return true;
-    }
-
-    private static bool ApplyColorKey(byte[] data, int w, int h, int bpc, int comps, double[] key, uint[] pixels)
-    {
-        if (key.Length < 2 * comps) return false;
-        int rowBytes = (w * comps * bpc + 7) / 8;
-        int maxV = (1 << bpc) - 1;
-        bool any = false;
-        for (int y = 0; y < h; y++)
-        {
-            long bitPos = (long)y * rowBytes * 8;
-            for (int x = 0; x < w; x++)
-            {
-                bool masked = true;
-                for (int i = 0; i < comps; i++, bitPos += bpc)
-                {
-                    long bi = bitPos >> 3;
-                    int v = bpc == 8 ? (bi < data.Length ? data[bi] : 0)
-                        : bpc == 16 ? (bi + 1 < data.Length ? data[bi] << 8 | data[bi + 1] : 0)
-                        : bi < data.Length ? (data[bi] >> (8 - bpc - (int)(bitPos & 7))) & maxV : 0;
-                    if (v < key[2 * i] || v > key[2 * i + 1]) masked = false;
-                }
-                if (masked) { pixels[y * w + x] = 0; any = true; }
-            }
-        }
-        return any;
-    }
-
-    /// <summary>Decodes a soft mask image to alpha values at the given size.</summary>
-    private static byte[]? DecodeAlpha(PdfFile file, PdfStream smask, int w, int h, PdfDict? resources)
-    {
-        int sw = file.GetInt(smask, "Width", 0), sh = file.GetInt(smask, "Height", 0);
-        if (sw <= 0 || sh <= 0 || (long)sw * sh > MaxPixels) return null;
-        var img = Decode(file, smask, Array.Empty<byte>(), false, resources, true);
-        if (img?.Pixels == null) return null;
-        var gray = new byte[img.Width * img.Height];
-        for (int i = 0; i < gray.Length; i++) gray[i] = (byte)(img.Pixels[i] & 0xFF); // gray images: R = G = B
-        return img.Width == w && img.Height == h ? gray : Resample(gray, img.Width, img.Height, w, h);
-    }
-
-    private static byte[] Resample(byte[] src, int sw, int sh, int w, int h)
-    {
-        if (sw == w && sh == h) return (byte[])src.Clone();
-        var dst = new byte[w * h];
-        for (int y = 0; y < h; y++)
-        {
-            int sy = Math.Min(sh - 1, (int)((y + 0.5) * sh / h));
-            for (int x = 0; x < w; x++)
-            {
-                int sx = Math.Min(sw - 1, (int)((x + 0.5) * sw / w));
-                dst[y * w + x] = src[sy * sw + sx];
-            }
-        }
-        return dst;
-    }
-
-    /// <summary>
-    /// Undoes the pre-blending a /Matte entry declares: the samples were stored as m + alpha * (c - m), so compositing
-    /// them as they are would mix in the matte colour twice (ISO 32000-1, 11.6.5.3). The matte is converted to RGB and
-    /// un-blended there, which is exact for the device spaces and close enough for the others.
-    /// </summary>
-    private static void UnblendMatte(uint[] pixels, byte[] alpha, ColorSpace cs, double[] matte)
-    {
-        Span<float> mc = stackalloc float[cs.Components];
-        for (int i = 0; i < mc.Length; i++) mc[i] = (float)matte[i];
-        uint m = cs.ToRgb(mc);
-        int mr = (int)(m & 0xFF), mg = (int)(m >> 8 & 0xFF), mb = (int)(m >> 16 & 0xFF);
-        int n = Math.Min(pixels.Length, alpha.Length);
-        for (int i = 0; i < n; i++)
-        {
-            int a = alpha[i];
-            // Fully transparent samples carry no colour to recover, and opaque ones are not blended at all.
-            if (a == 0 || a == 255) continue;
-            uint p = pixels[i];
-            int r = Unblend((int)(p & 0xFF), mr, a), g = Unblend((int)(p >> 8 & 0xFF), mg, a), b = Unblend((int)(p >> 16 & 0xFF), mb, a);
-            pixels[i] = (p & 0xFF000000) | (uint)(r | g << 8 | b << 16);
-        }
-    }
-
-    private static int Unblend(int c, int m, int a) => Math.Clamp(m + ((c - m) * 255 + (c >= m ? a / 2 : -a / 2)) / a, 0, 255);
-
-    private static void ApplyAlpha(uint[] pixels, byte[] alpha)
-    {
-        int n = Math.Min(pixels.Length, alpha.Length);
-        for (int i = 0; i < n; i++)
-        {
-            int a = alpha[i];
-            if (a == 255) continue;
-            uint p = pixels[i];
-            if (a == 0) { pixels[i] = 0; continue; }
-            uint s = Canvas.Scale(p & 0x00FFFFFF, (uint)(a + (a >> 7)));
-            pixels[i] = (s & 0x00FFFFFF) | (uint)a << 24;
-        }
     }
 }
