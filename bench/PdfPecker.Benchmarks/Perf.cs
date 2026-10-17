@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using PdfPecker;
+using PdfPecker.Css;
 using PdfPecker.Fonts;
 using PdfPecker.Fonts.Cff;
 using PdfPecker.Images;
@@ -118,6 +119,12 @@ static class Perf
         // cut with an ellipsis, a clamped paragraph, leaders and text beside floats, laid out and written as a PDF.
         results.Add(Measure("inline-text", TextPage(), htmlDir, runs: 30));
 
+        // The CSS parser: a stylesheet of some three thousand rules with every shorthand, nested rules, conditional
+        // blocks, layers, named pages with margin boxes, font faces, registered properties and counter styles, parsed
+        // into a fresh stylesheet.
+        var css = LargeStylesheet();
+        results.Add(Measure("parse-css", () => CssParser.ParseStylesheet(css, new Stylesheet()), runs: 50));
+
         // Throughput with every core busy; documents per second is the figure, so higher is better.
         var options = new PdfOptions { BaseDirectory = htmlDir };
         for (int i = 0; i < 20; i++) HtmlToPdf.Convert(invoice, options);
@@ -169,6 +176,37 @@ static class Perf
     // style; inline blocks, images, sub- and superscripts, padded inline boxes, links and footnote calls; decorations in
     // each style and sharp and blurred text shadows; Arabic, Hebrew and East Asian text; a nowrap line cut with an
     // ellipsis, a clamped paragraph, leaders, text beside floats and two columns.
+    // A stylesheet of about three thousand rules, the same on every run: selectors of each kind, every shorthand with
+    // !important, var() and calc() values, nested rules with & and nested @media, @media, @supports, @container and
+    // @layer blocks, named pages with margin boxes and a footnote area, a font face, a registered property, a counter
+    // style, an import (skipped, as the bench sets no loader), comments and escapes.
+    static string LargeStylesheet(int sections = 300)
+    {
+        var sb = new StringBuilder();
+        sb.Append("@charset \"utf-8\";\n@import url(theme.css) layer(theme) supports(display: grid) print;\n@layer reset, base, components, utilities;\n");
+        sb.Append("@font-face { font-family: Brand; src: url('brand.woff2') format('woff2'), url(brand.ttf); font-weight: 400 700; font-display: swap; unicode-range: U+0000-00FF; }\n");
+        sb.Append("@property --accent { syntax: '<color>'; inherits: true; initial-value: #0a7; }\n");
+        sb.Append("@counter-style thumbs { system: cyclic; symbols: '+' '-'; suffix: ' '; }\n");
+        sb.Append("@page { size: A4; margin: 2cm 1.5cm; @top-center { content: 'Report'; font: italic 9pt/1.2 Georgia, serif; } @bottom-right { content: counter(page) ' / ' counter(pages); } @footnote { border-top: 1pt solid #999; padding-top: 4pt; } }\n");
+        sb.Append("@page wide:first { margin-top: 4cm; } @page :left { margin-right: 3cm; } @page :blank { @top-center { content: none } }\n");
+        for (int i = 0; i < sections; i++)
+        {
+            sb.Append("/* section ").Append(i).Append(" */\n");
+            sb.Append($".s{i} {{ margin: {i % 7}px {i % 5}px; padding: {i % 3}em 1em 0; border: 1px solid #{i % 10}{i % 10}{i % 10}; border-radius: 4px / 2px 6px; background: url(\"img/{i}.png\") no-repeat center / cover, linear-gradient(to right, #fff, var(--accent)); color: rgb({i % 256}, 0, 0) !important; }}\n");
+            sb.Append($".s{i} h2, .s{i} h3 {{ font: bold {10 + i % 6}pt/1.4 Brand, 'Helvetica Neue', sans-serif; text-decoration: underline wavy #333 1px; letter-spacing: calc(0.1em - {i % 3}px); }}\n");
+            sb.Append($".s{i} > p:first-child::first-letter, .s{i} li:nth-child(2n+1) {{ font-variant: small-caps tabular-nums; list-style: square inside; }}\n");
+            sb.Append($"#id{i}[data-kind=\"{i}\"]:not(.hidden) {{ display: grid; grid-template: \"a b\" 1fr \"c d\" / 1fr 2fr; gap: {i % 4}px 8px; place-items: center start; grid-area: hd / 1 / 2 / 3; }}\n");
+            sb.Append($".f{i} {{ display: flex; flex: 1 1 {i % 10}%; flex-flow: row wrap; inset: 0 auto auto 0; outline: 2px dashed currentColor; columns: 2 12em; column-rule: thin dotted; container: card{i} / inline-size; }}\n");
+            sb.Append($".n{i} {{ color: #333; &:hover {{ color: var(--accent, #0a7); }} & .child {{ margin-inline: 1em; padding-block: {i % 5}px; }} @media print {{ display: none; }} > span {{ text-decoration: none; }} }}\n");
+            sb.Append($"@media screen and (min-width: {300 + i}px) {{ .s{i} {{ width: {50 + i % 50}%; }} @supports (display: grid) {{ .s{i} .grid {{ display: grid; }} }} }}\n");
+            sb.Append($"@container card{i} (min-width: 20em) {{ .s{i} .title {{ font-size: 1.{i % 10}em; }} }}\n");
+            sb.Append($"@layer components.cards {{ .card{i} {{ box-shadow: 0 {i % 4}px {i % 9}px rgba(0, 0, 0, .{i % 10}); page-break-inside: avoid; word-wrap: break-word; }} }}\n");
+            sb.Append($"@page section{i} {{ margin: {i % 3}cm; @top-left {{ content: \"Section {i}\"; }} }}\n");
+            sb.Append($".u{i}::before {{ content: \"\\201C\" attr(data-q) \"\\201D\"; quotes: '\"' '\"'; }} .u{i}\\:x {{ --gap-{i}: {i}px; gap: var(--gap-{i}); }}\n");
+        }
+        return sb.ToString();
+    }
+
     static string TextPage(int sections = 10)
     {
         const string Lorem = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.";
