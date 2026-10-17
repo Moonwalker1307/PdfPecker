@@ -721,6 +721,18 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Nested_svg_filters_do_not_double_their_resolution_at_each_level()
+    {
+        // Found by the fuzzer: targets svg and html, timeout-1ab0d4a5, four filtered groups inside each other. Each
+        // level rendered its content at twice the pixels per point of the level around it, so the innermost of four
+        // ran at 64 times the pixels of the outermost, up to the four-million-pixel cap.
+        var chain = Repeat("<g filter='url(#f)'>", 4) + "<rect x='10' y='10' width='200' height='150' fill='red'/>" + Repeat("</g>", 4);
+        var svg = "<svg width='800' height='600' viewBox='0 0 800 600'><defs><filter id='f'><feGaussianBlur stdDeviation='2'/></filter></defs>"
+            + Repeat(chain, 16) + "</svg>";
+        AssertStructurallyValid(Bounded("<p>before</p>" + svg + "<p>after</p>"));
+    }
+
+    [Fact]
     public void Rebuilding_the_object_table_late_without_finding_a_catalog_keeps_the_table_that_worked()
     {
         // Found by the fuzzer: targets pdf-merge and pdf-form, exception-d2faeb46. The catalog opens through the
