@@ -5,6 +5,9 @@ namespace PdfPecker.Pdf;
 
 internal enum GradientSpread : byte { Pad, Reflect, Repeat }
 
+/// <summary>The geometry of a gradient: along a line, between two circles, or around a centre.</summary>
+internal enum GradientKind : byte { Linear, Radial, Conic }
+
 /// <summary>What a shading paints: the colours flattened on their backdrop, the unblended colours, or the alphas.</summary>
 internal enum GradientChannel : byte { Flattened, Straight, Alpha }
 
@@ -14,17 +17,25 @@ internal enum GradientChannel : byte { Flattened, Straight, Alpha }
 /// </summary>
 internal sealed class Gradient
 {
-    public bool Radial;
+    // A repeating gradient is tiled over at most this many periods; past that it is painted once, padded.
+    private const int MaxTiledPeriods = 256;
+    // The domain of a conic gradient's calculator function, in gradient space; far larger than any page.
+    private const string ConicDomain = "-100000 100000 -100000 100000";
+    // Below this sum of |dx| and |dy| a point counts as the centre of a conic gradient, where atan is undefined.
+    private const string ConicCentreTolerance = "0.0001";
+
+    public GradientKind Kind;
+    public bool Radial => Kind == GradientKind.Radial;
+    public bool Conic => Kind == GradientKind.Conic;
     // Linear: from (X0, Y0) to (X1, Y1). Radial: from the focal circle (X0, Y0, R0) to the end circle (X1, Y1, R1).
     // Conic: centred on (X0, Y0).
     public float X0, Y0, R0, X1, Y1, R1;
     /// <summary>
-    /// A conic gradient: the colour depends on the angle around (X0, Y0), clockwise from <see cref="From"/> degrees
-    /// (0 is up). PDF has no such shading, so it is written as a function shading whose PostScript calculator function
+    /// The start angle of a conic gradient: the colour depends on the angle around (X0, Y0), clockwise from this many
+    /// degrees (0 is up). PDF has no such shading, so it is written as a function shading whose PostScript calculator function
     /// computes the angle, as Chrome does; the function is a stream object numbered <see cref="FunctionId"/> (and
     /// <see cref="AlphaFunctionId"/> for the alphas of translucent stops).
     /// </summary>
-    public bool Conic;
     public float From;
     // Repeating conic gradients: the stops cover [RepeatStart, RepeatStart + RepeatPeriod] of the turn, repeated.
     public float RepeatStart, RepeatPeriod;
@@ -106,6 +117,9 @@ internal sealed class Gradient
 
     // ------------------------------------------------------------------ PDF output
 
+    /// <summary>One piece of a colour function: linear from <see cref="C0"/> at <see cref="From"/> to <see cref="C1"/> at <see cref="To"/>.</summary>
+    private readonly record struct Segment(float From, float To, uint C0, uint C1);
+
     /// <summary>
     /// Writes a shading pattern dictionary. <paramref name="toPage"/> maps the painted shape's space to the page;
     /// the bounds, in that same space, decide how far a repeating gradient has to be tiled.
@@ -134,43 +148,44 @@ internal sealed class Gradient
             _ => Colors,
         };
         bool gray = channel == GradientChannel.Alpha && Alphas != null;
-        if (Conic)
-        {
-            // The domain is in gradient space: map the painted bounds back through the transform (a scaled slice of
-            // a border image).
-            var tm = Transform;
-            if (!(tm.A == 1 && tm.B == 0 && tm.C == 0 && tm.D == 1 && tm.E == 0 && tm.F == 0) && tm.TryInvert(out var inv))
-            {
-                float ax = minX, ay = minY, bx = maxX, by = maxY;
-                minX = minY = float.MaxValue;
-                maxX = maxY = float.MinValue;
-                Span<float> xs = stackalloc float[] { ax, bx, bx, ax };
-                Span<float> ys = stackalloc float[] { ay, ay, by, by };
-                for (int k = 0; k < 4; k++)
-                {
-                    float px = xs[k], py = ys[k];
-                    inv.Apply(ref px, ref py);
-                    minX = Math.Min(minX, px); maxX = Math.Max(maxX, px);
-                    minY = Math.Min(minY, py); maxY = Math.Max(maxY, py);
-                }
-            }
-            // A function shading over the painted bounds, a little padded; the function does the rest.
-            b.Ascii(gray ? "<< /ShadingType 1 /ColorSpace /DeviceGray /Domain [" : "<< /ShadingType 1 /ColorSpace /DeviceRGB /Domain [")
-                .Num(minX - 1).Sp().Num(maxX + 1).Sp().Num(minY - 1).Sp().Num(maxY + 1).Ascii("] /Function ")
-                .Int(gray ? AlphaFunctionId : FunctionId).Ascii(" 0 R >>");
-            return;
-        }
-        b.Ascii("<< /ShadingType ").Int(Radial ? 3 : 2).Ascii(gray ? " /ColorSpace /DeviceGray /Coords [" : " /ColorSpace /DeviceRGB /Coords [");
+        if (Conic) WriteConicShading(b, minX, minY, maxX, maxY, gray);
+        else WriteAxialShading(b, minX, minY, maxX, maxY, colors, gray);
+    }
 
-        // Tiling range: gradient parameter values t covered by the shape (repeat and reflect only).
-        float t0 = 0, t1 = 1;
-        if (Spread != GradientSpread.Pad && Range(minX, minY, maxX, maxY, out float lo, out float hi))
+    /// <summary>
+    /// A conic gradient: a function shading over the painted bounds, a little padded, whose calculator function
+    /// (<see cref="ConicFunction"/>, written as its own object) does the rest.
+    /// </summary>
+    private void WriteConicShading(Pdf.ByteBuffer b, float minX, float minY, float maxX, float maxY, bool gray)
+    {
+        // The domain is in gradient space: map the painted bounds back through the transform (a scaled slice of a
+        // border image).
+        var tm = Transform;
+        if (!(tm.A == 1 && tm.B == 0 && tm.C == 0 && tm.D == 1 && tm.E == 0 && tm.F == 0) && tm.TryInvert(out var inv))
         {
-            t0 = (float)Math.Floor(lo);
-            t1 = (float)Math.Ceiling(hi);
-            if (Radial) t0 = Math.Max(t0, 0);
-            if (t1 - t0 > 256 || t1 <= t0) { t0 = 0; t1 = 1; }
+            Span<(float X, float Y)> corners = stackalloc (float, float)[4];
+            MapCorners(inv, minX, minY, maxX, maxY, corners);
+            minX = minY = float.MaxValue;
+            maxX = maxY = float.MinValue;
+            foreach (var (x, y) in corners)
+            {
+                minX = Math.Min(minX, x); maxX = Math.Max(maxX, x);
+                minY = Math.Min(minY, y); maxY = Math.Max(maxY, y);
+            }
         }
+        b.Ascii(gray ? "<< /ShadingType 1 /ColorSpace /DeviceGray /Domain [" : "<< /ShadingType 1 /ColorSpace /DeviceRGB /Domain [")
+            .Num(minX - 1).Sp().Num(maxX + 1).Sp().Num(minY - 1).Sp().Num(maxY + 1).Ascii("] /Function ")
+            .Int(gray ? AlphaFunctionId : FunctionId).Ascii(" 0 R >>");
+    }
+
+    /// <summary>
+    /// A linear (axial, type 2) or radial (type 3) shading. Repeat and reflect are written as one copy of the colour
+    /// function per period the painted bounds cover, the geometry stretched to match.
+    /// </summary>
+    private void WriteAxialShading(Pdf.ByteBuffer b, float minX, float minY, float maxX, float maxY, uint[] colors, bool gray)
+    {
+        b.Ascii("<< /ShadingType ").Int(Radial ? 3 : 2).Ascii(gray ? " /ColorSpace /DeviceGray /Coords [" : " /ColorSpace /DeviceRGB /Coords [");
+        var (t0, t1) = TilingRange(minX, minY, maxX, maxY);
         float Lerp(float a, float c, float t) => a + (c - a) * t;
         if (Radial)
             b.Num(Lerp(X0, X1, t0)).Sp().Num(Lerp(Y0, Y1, t0)).Sp().Num(Math.Max(0, Lerp(R0, R1, t0))).Sp()
@@ -179,38 +194,62 @@ internal sealed class Gradient
             b.Num(Lerp(X0, X1, t0)).Sp().Num(Lerp(Y0, Y1, t0)).Sp().Num(Lerp(X0, X1, t1)).Sp().Num(Lerp(Y0, Y1, t1));
         b.Ascii("] /Domain [").Num(t0).Sp().Num(t1).Ascii("] /Extend [true true] /Function ");
         if (t0 == 0 && t1 == 1) WriteFunction(b, colors, gray);
-        else
-        {
-            // One copy of the stops per period, mirrored on odd periods when reflecting.
-            b.Ascii("<< /FunctionType 3 /Domain [").Num(t0).Sp().Num(t1).Ascii("] /Functions [");
-            for (float t = t0; t < t1; t++) WriteFunction(b, colors, gray);
-            b.Ascii("] /Bounds [");
-            for (float t = t0 + 1; t < t1; t++) b.Num(t).Sp();
-            b.Ascii("] /Encode [");
-            for (float t = t0; t < t1; t++)
-            {
-                bool mirrored = Spread == GradientSpread.Reflect && ((long)t & 1) != 0;
-                b.Ascii(mirrored ? "1 0 " : "0 1 ");
-            }
-            b.Ascii("] >>");
-        }
+        else WriteTiledFunction(b, t0, t1, colors, gray);
         b.Ascii(" >>");
     }
 
     /// <summary>
-    /// The colour function over [0, 1]: constant before the first stop and after the last, linear in between. Gray
-    /// colours are alphas (0-255), one component.
+    /// The whole periods [t0, t1] of the gradient parameter that the painted bounds cover: [0, 1] unless the gradient
+    /// repeats or reflects and the tiling stays within <see cref="MaxTiledPeriods"/>.
+    /// </summary>
+    private (float T0, float T1) TilingRange(float minX, float minY, float maxX, float maxY)
+    {
+        if (Spread == GradientSpread.Pad || ParameterRange(minX, minY, maxX, maxY) is not (var lo, var hi)) return (0, 1);
+        float t0 = (float)Math.Floor(lo);
+        float t1 = (float)Math.Ceiling(hi);
+        if (Radial) t0 = Math.Max(t0, 0);
+        if (t1 - t0 > MaxTiledPeriods || t1 <= t0) return (0, 1);
+        return (t0, t1);
+    }
+
+    /// <summary>A stitching function with one copy of the stops per period, mirrored on odd periods when reflecting.</summary>
+    private void WriteTiledFunction(Pdf.ByteBuffer b, float t0, float t1, uint[] colors, bool gray)
+    {
+        b.Ascii("<< /FunctionType 3 /Domain [").Num(t0).Sp().Num(t1).Ascii("] /Functions [");
+        for (float t = t0; t < t1; t++) WriteFunction(b, colors, gray);
+        b.Ascii("] /Bounds [");
+        for (float t = t0 + 1; t < t1; t++) b.Num(t).Sp();
+        b.Ascii("] /Encode [");
+        for (float t = t0; t < t1; t++)
+        {
+            bool mirrored = Spread == GradientSpread.Reflect && ((long)t & 1) != 0;
+            b.Ascii(mirrored ? "1 0 " : "0 1 ");
+        }
+        b.Ascii("] >>");
+    }
+
+    /// <summary>
+    /// The pieces of the colour function over [0, 1]: constant before the first stop and after the last, linear
+    /// between consecutive stops. Zero-length pieces (hard colour changes) are dropped, and there is always one.
+    /// </summary>
+    private List<Segment> Segments(uint[] colors)
+    {
+        var segs = new List<Segment>(Offsets.Length + 1);
+        if (Offsets[0] > 0) segs.Add(new(0, Offsets[0], colors[0], colors[0]));
+        for (int i = 0; i + 1 < Offsets.Length; i++)
+            if (Offsets[i + 1] > Offsets[i]) segs.Add(new(Offsets[i], Offsets[i + 1], colors[i], colors[i + 1]));
+        if (Offsets[^1] < 1) segs.Add(new(Offsets[^1], 1, colors[^1], colors[^1]));
+        if (segs.Count == 0) segs.Add(new(0, 1, colors[^1], colors[^1]));
+        return segs;
+    }
+
+    /// <summary>
+    /// The colour function over [0, 1], one exponential function per segment, stitched. Gray colours are alphas
+    /// (0-255), one component.
     /// </summary>
     private void WriteFunction(Pdf.ByteBuffer b, uint[] colors, bool gray)
     {
-        // Segments between consecutive stops; zero-length ones (hard colour changes) are dropped.
-        var segs = new List<(float From, float To, uint C0, uint C1)>(Offsets.Length + 1);
-        if (Offsets[0] > 0) segs.Add((0, Offsets[0], colors[0], colors[0]));
-        for (int i = 0; i + 1 < Offsets.Length; i++)
-            if (Offsets[i + 1] > Offsets[i]) segs.Add((Offsets[i], Offsets[i + 1], colors[i], colors[i + 1]));
-        if (Offsets[^1] < 1) segs.Add((Offsets[^1], 1, colors[^1], colors[^1]));
-        if (segs.Count == 0) segs.Add((0, 1, colors[^1], colors[^1]));
-
+        var segs = Segments(colors);
         if (segs.Count == 1)
         {
             Exponential(b, segs[0].C0, segs[0].C1, gray);
@@ -236,7 +275,7 @@ internal sealed class Gradient
 
     /// <summary>The dictionary entries of a conic gradient's function stream.</summary>
     public static string ConicFunctionDict(bool gray)
-        => "/FunctionType 4 /Domain [-100000 100000 -100000 100000] /Range [" + (gray ? "0 1" : "0 1 0 1 0 1") + "]";
+        => "/FunctionType 4 /Domain [" + ConicDomain + "] /Range [" + (gray ? "0 1" : "0 1 0 1 0 1") + "]";
 
     /// <summary>
     /// The PostScript calculator program of a conic gradient: (x, y) in gradient space, y down, to a colour (or, for
@@ -249,43 +288,17 @@ internal sealed class Gradient
         var b = new Pdf.ByteBuffer(256);
         // Stack: x y. The angle of (x - cx, y - cy) clockwise from up is atan(x - cx, cy - y) in degrees; the centre
         // itself (atan of 0, 0 is an error) takes angle 0.
-        b.Ascii("{ ").Num(Y0).Ascii(" exch sub exch ").Num(X0).Ascii(" sub exch 2 copy abs exch abs add 0.0001 lt { pop pop 0 } { atan } ifelse ")
-            .Num(From).Ascii(" sub dup 0 lt { 360 add } if 360 div ");
+        b.Ascii("{ ").Num(Y0).Ascii(" exch sub exch ").Num(X0).Ascii(" sub exch 2 copy abs exch abs add ").Ascii(ConicCentreTolerance)
+            .Ascii(" lt { pop pop 0 } { atan } ifelse ").Num(From).Ascii(" sub dup 0 lt { 360 add } if 360 div ");
         if (RepeatPeriod > 0) b.Num6(RepeatStart).Ascii(" sub ").Num6(RepeatPeriod).Ascii(" div dup floor sub ");
 
-        // Segments between consecutive stops, as for the other gradients; t is on the stack.
-        var segs = new List<(float From, float To, uint C0, uint C1)>(Offsets.Length + 1);
-        if (Offsets[0] > 0) segs.Add((0, Offsets[0], colors[0], colors[0]));
-        for (int i = 0; i + 1 < Offsets.Length; i++)
-            if (Offsets[i + 1] > Offsets[i]) segs.Add((Offsets[i], Offsets[i + 1], colors[i], colors[i + 1]));
-        if (Offsets[^1] < 1) segs.Add((Offsets[^1], 1, colors[^1], colors[^1]));
-        if (segs.Count == 0) segs.Add((0, 1, colors[^1], colors[^1]));
+        // The same segments as for the other gradients, as nested ifelse tests on t, which is on the stack.
+        var segs = Segments(colors);
         for (int i = 0; i < segs.Count; i++)
         {
-            var (from, to, c0, c1) = segs[i];
             bool last = i == segs.Count - 1;
-            if (!last) b.Ascii("dup ").Num6(to).Ascii(" le { ");
-            if (c0 == c1)
-            {
-                b.Ascii("pop ");
-                Channels(b, c0, gray);
-            }
-            else
-            {
-                // s = (t - from) / (to - from), then each channel c0 + s * (c1 - c0).
-                b.Num6(from).Ascii(" sub ").Num6(1 / (to - from)).Ascii(" mul ");
-                if (gray) b.Num6((c1 - (float)c0) / 255f).Ascii(" mul ").Num6(c0 / 255f).Ascii(" add ");
-                else
-                {
-                    for (int shift = 16; shift >= 0; shift -= 8)
-                    {
-                        float v0 = (c0 >> shift & 0xFF) / 255f, v1 = (c1 >> shift & 0xFF) / 255f;
-                        if (shift > 0) b.Ascii("dup ");
-                        b.Num6(v1 - v0).Ascii(" mul ").Num6(v0).Ascii(" add ");
-                        if (shift > 0) b.Ascii("exch ");
-                    }
-                }
-            }
+            if (!last) b.Ascii("dup ").Num6(segs[i].To).Ascii(" le { ");
+            ConicSegment(b, segs[i], gray);
             if (!last) b.Ascii("} { ");
         }
         for (int i = 0; i < segs.Count - 1; i++) b.Ascii("} ifelse ");
@@ -293,33 +306,72 @@ internal sealed class Gradient
         return b.Span.ToArray();
     }
 
+    /// <summary>The calculator code that replaces t on the stack by the colour of one segment at t.</summary>
+    private static void ConicSegment(Pdf.ByteBuffer b, Segment seg, bool gray)
+    {
+        var (from, to, c0, c1) = seg;
+        if (c0 == c1)
+        {
+            b.Ascii("pop ");
+            Channels(b, c0, gray);
+            return;
+        }
+        // s = (t - from) / (to - from), then each channel c0 + s * (c1 - c0).
+        b.Num6(from).Ascii(" sub ").Num6(1 / (to - from)).Ascii(" mul ");
+        if (gray)
+        {
+            b.Num6((c1 - (float)c0) / 255f).Ascii(" mul ").Num6(c0 / 255f).Ascii(" add ");
+            return;
+        }
+        for (int shift = 16; shift >= 0; shift -= 8)
+        {
+            float v0 = Channel(c0, shift), v1 = Channel(c1, shift);
+            if (shift > 0) b.Ascii("dup ");
+            b.Num6(v1 - v0).Ascii(" mul ").Num6(v0).Ascii(" add ");
+            if (shift > 0) b.Ascii("exch ");
+        }
+    }
+
+    /// <summary>One 8-bit channel of a packed colour, as a fraction of 255.</summary>
+    private static float Channel(uint c, int shift) => (c >> shift & 0xFF) / 255f;
+
     private static void Channels(Pdf.ByteBuffer b, uint c, bool gray)
     {
         if (gray) b.Num6(c / 255f).Sp();
-        else b.Num6((c >> 16 & 0xFF) / 255f).Sp().Num6((c >> 8 & 0xFF) / 255f).Sp().Num6((c & 0xFF) / 255f).Sp();
+        else b.Num6(Channel(c, 16)).Sp().Num6(Channel(c, 8)).Sp().Num6(Channel(c, 0)).Sp();
     }
 
     private static void Rgb(Pdf.ByteBuffer b, uint c)
-        => b.Num((c >> 16 & 0xFF) / 255f).Sp().Num((c >> 8 & 0xFF) / 255f).Sp().Num((c & 0xFF) / 255f);
+        => b.Num(Channel(c, 16)).Sp().Num(Channel(c, 8)).Sp().Num(Channel(c, 0));
 
-    /// <summary>The range of the gradient parameter over a box given in the painted shape's space.</summary>
-    private bool Range(float minX, float minY, float maxX, float maxY, out float lo, out float hi)
+    /// <summary>The four corners of a box, clockwise from its top-left, mapped through <paramref name="m"/>.</summary>
+    private static void MapCorners(Matrix m, float minX, float minY, float maxX, float maxY, Span<(float X, float Y)> corners)
     {
-        lo = float.MaxValue;
-        hi = float.MinValue;
-        if (!Transform.TryInvert(out var inv) || !(maxX >= minX) || !(maxY >= minY)) return false;
-        Span<float> xs = stackalloc float[] { minX, maxX, maxX, minX };
-        Span<float> ys = stackalloc float[] { minY, minY, maxY, maxY };
-        for (int i = 0; i < 4; i++)
+        corners[0] = (minX, minY);
+        corners[1] = (maxX, minY);
+        corners[2] = (maxX, maxY);
+        corners[3] = (minX, maxY);
+        foreach (ref var c in corners) m.Apply(ref c.X, ref c.Y);
+    }
+
+    /// <summary>
+    /// The range of the gradient parameter over a box given in the painted shape's space; null when the box is empty
+    /// or the geometry degenerate.
+    /// </summary>
+    private (float Lo, float Hi)? ParameterRange(float minX, float minY, float maxX, float maxY)
+    {
+        if (!Transform.TryInvert(out var inv) || !(maxX >= minX) || !(maxY >= minY)) return null;
+        Span<(float X, float Y)> corners = stackalloc (float, float)[4];
+        MapCorners(inv, minX, minY, maxX, maxY, corners);
+        float lo = float.MaxValue, hi = float.MinValue;
+        foreach (var (x, y) in corners)
         {
-            float x = xs[i], y = ys[i];
-            inv.Apply(ref x, ref y);
             float t;
             if (Radial)
             {
                 // Assumes the focal point at the centre, which is how repeating radial gradients are used.
                 float dr = R1 - R0;
-                if (dr <= 0) return false;
+                if (dr <= 0) return null;
                 float d = MathF.Sqrt((x - X1) * (x - X1) + (y - Y1) * (y - Y1));
                 lo = Math.Min(lo, 0);
                 t = (d - R0) / dr;
@@ -327,12 +379,12 @@ internal sealed class Gradient
             else
             {
                 float dx = X1 - X0, dy = Y1 - Y0, len2 = dx * dx + dy * dy;
-                if (len2 <= 0) return false;
+                if (len2 <= 0) return null;
                 t = ((x - X0) * dx + (y - Y0) * dy) / len2;
             }
             lo = Math.Min(lo, t);
             hi = Math.Max(hi, t);
         }
-        return true;
+        return (lo, hi);
     }
 }
