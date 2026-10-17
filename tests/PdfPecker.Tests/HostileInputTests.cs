@@ -703,6 +703,18 @@ public class HostileInputTests
 
         Assert.Empty(Bounded(() => PdfSignatureVerifier.Verify(pdf)));
     }
+
+    [Fact]
+    public void Object_number_too_large_for_an_int_in_a_damaged_pdf_is_invalid_data()
+    {
+        // Found by the fuzzer: targets pdf-text, pdf-verify and pdf-merge, exception-0d3075ba. Rebuilding the object
+        // table read a ten-digit object number with int.Parse.
+        var pdf = Encoding.ASCII.GetBytes("9999999999 0obj ");
+        Assert.Throws<InvalidDataException>(() => PdfText.Extract(pdf));
+        Assert.Throws<InvalidDataException>(() => PdfMerger.Merge(new[] { pdf }));
+        Assert.Throws<InvalidDataException>(() => PdfForm.GetFields(pdf));
+        Assert.Throws<InvalidDataException>(() => PdfSignatureVerifier.Verify(pdf));
+    }
 }
 
 /// <summary>Hostile CFF and CFF2 fonts whose subroutines fan out exponentially.</summary>

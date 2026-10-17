@@ -248,7 +248,8 @@ internal sealed class PdfFile
                     int numStart = p + 1;
                     if (p >= 0 && PdfLexer.IsRegular(d[p]) && d[p] != '%') continue;
                     if (numEnd - numStart > 9 || genEnd - genStart > 5) continue;
-                    int num = int.Parse(System.Text.Encoding.ASCII.GetString(d, numStart, numEnd - numStart + 1));
+                    // Ten digits can still be more than an int holds; such a header is damage, not an object.
+                    if (!int.TryParse(d.AsSpan(numStart, numEnd - numStart + 1), System.Globalization.NumberStyles.None, null, out int num)) continue;
                     int gen = int.Parse(System.Text.Encoding.ASCII.GetString(d, genStart, genEnd - genStart + 1));
                     table[num] = new XrefEntry { Type = 1, Offset = numStart, Index = gen };
                 }
