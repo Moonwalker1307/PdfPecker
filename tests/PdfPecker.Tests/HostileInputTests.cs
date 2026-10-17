@@ -386,6 +386,101 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Soft_mask_whose_group_sets_the_same_mask_cannot_double_the_work_per_level()
+    {
+        // The mask's group sets that same mask twice, so each level of nesting builds two full-page masks: millions of
+        // them before the content depth limit stops it.
+        var objects = SoftMaskPage();
+        objects.Add("<< /Type /ExtGState /SMask << /S /Luminosity /G 6 0 R >> >>");
+        objects.Add(SoftMaskGroup("<< /ExtGState << /GS0 5 0 R >> >>", "/GS0 gs /GS0 gs"));
+        AssertSoftMaskedPageIsRed(objects);
+    }
+
+    [Fact]
+    public void Chain_of_distinct_nested_soft_masks_cannot_double_the_work_per_level()
+    {
+        // Twenty-two different masks without a cycle, each one's group setting the next one twice: 2^22 masks.
+        var objects = SoftMaskPage();
+        for (int k = 0; k < 22; k++)
+        {
+            int group = objects.Count + 2;
+            objects.Add($"<< /Type /ExtGState /SMask << /S /Luminosity /G {group} 0 R >> >>");
+            objects.Add(k < 21
+                ? SoftMaskGroup($"<< /ExtGState << /GS0 {group + 1} 0 R >> >>", "/GS0 gs /GS0 gs")
+                : SoftMaskGroup("<< >>", ""));
+        }
+        AssertSoftMaskedPageIsRed(objects);
+    }
+
+    [Fact]
+    public void Many_soft_masks_on_one_page_are_charged_by_their_area()
+    {
+        // Each operator sets a soft mask, and each mask is a full-page canvas: a few hundred thousand of them are well
+        // within the operator budget but would fill and read billions of pixels.
+        var objects = SoftMaskPage(Repeat("/GS0 gs ", 300_000));
+        objects.Add("<< /Type /ExtGState /SMask << /S /Luminosity /G 6 0 R >> >>");
+        objects.Add(SoftMaskGroup("<< >>", ""));
+        var renderer = PdfRenderer.Open(SimplePdf(objects));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var ex = Bounded(() => Record.Exception(() => renderer.RenderPage(0, new ImageOptions { Dpi = 36 }, cts.Token)));
+        Assert.IsType<InvalidDataException>(ex);
+        Assert.Contains("too complex", ex.Message);
+    }
+
+    [Fact]
+    public void Cancellation_stops_a_page_of_soft_masks()
+    {
+        // Two hundred masks, with their groups, run fewer operators than the interval at which the content loop looks at
+        // the token, so only a check where each mask is built stops them. At print resolution that interval is a few
+        // hundred full-page masks, seconds of work.
+        var objects = SoftMaskPage(Repeat("/GS0 gs ", 200));
+        objects.Add("<< /Type /ExtGState /SMask << /S /Luminosity /G 6 0 R >> >>");
+        objects.Add(SoftMaskGroup("<< >>", ""));
+        var renderer = PdfRenderer.Open(SimplePdf(objects));
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var ex = Bounded(() => Record.Exception(() => renderer.RenderPage(0, new ImageOptions { Dpi = 72 }, cts.Token)));
+        Assert.IsAssignableFrom<OperationCanceledException>(ex);
+    }
+
+    /// <summary>
+    /// A page whose content sets the soft mask of object 5 (the first object added after these) and fills the page red,
+    /// after <paramref name="prefix"/>, if given, instead of a single <c>/GS0 gs</c>.
+    /// </summary>
+    private static List<string> SoftMaskPage(string prefix = "/GS0 gs ")
+    {
+        var content = prefix + "1 0 0 rg 0 0 612 792 re f";
+        return new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /ExtGState << /GS0 5 0 R >> >> >>",
+            $"<< /Length {content.Length} >>\nstream\n{content}\nendstream",
+        };
+    }
+
+    /// <summary>A soft mask group that runs <paramref name="content"/> and then fills the page white.</summary>
+    private static string SoftMaskGroup(string resources, string content)
+    {
+        var data = content + " 1 g 0 0 612 792 re f";
+        return $"<< /Type /XObject /Subtype /Form /BBox [0 0 612 792] /Group << /S /Transparency /CS /DeviceRGB >> /Resources {resources} /Length {data.Length} >>\nstream\n{data}\nendstream";
+    }
+
+    /// <summary>
+    /// Renders the page within the time bound. Every mask paints white, the innermost one whose nesting is cut off
+    /// included, so the red fill shows through them all; each level of masking rounds its coverage down a little, so
+    /// the red is not quite pure.
+    /// </summary>
+    private static void AssertSoftMaskedPageIsRed(List<string> objects)
+    {
+        var renderer = PdfRenderer.Open(SimplePdf(objects));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var image = Bounded(() => renderer.RenderPage(0, new ImageOptions { Dpi = 36 }, cts.Token));
+        var rgba = image.Rgba;
+        Assert.True(rgba[0] == 255 && rgba[1] < 16 && rgba[2] < 16 && rgba[3] == 255, $"pixel is {rgba[0]},{rgba[1]},{rgba[2]},{rgba[3]}");
+    }
+
+    [Fact]
     public void PostScript_function_with_many_rolls_does_not_overflow_the_stack()
     {
         // A tint transform that rolls 99 entries 33,000 times, within the calculator's step limit. The calculator used
