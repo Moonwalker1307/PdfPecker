@@ -8,10 +8,11 @@ using PdfPecker.Images;
 using PdfPecker.Rendering.Content;
 using PdfPecker.Rendering.Fonts;
 using PdfPecker.Rendering.Parsing;
+using PdfPecker.Text;
 
 // A short, machine-readable run for the performance regression check in .github/workflows/perf.yml: about 30 seconds,
-// ten cases, JSON output. Allocation per conversion is deterministic, so the workflow compares it tightly; time is
-// noisy on shared runners, so it is compared with a wide margin and corrected for the runner's overall speed.
+// thirteen cases, JSON output. Allocation per conversion is deterministic, so the workflow compares it tightly; time is
+// noisy on shared runners, so it is compared with a wide margin and only against runs on the same processor model.
 // Usage: dotnet run -c Release -- --perf results.json
 static class Perf
 {
@@ -51,6 +52,17 @@ static class Perf
         // CMap. A pass parses every program afresh and traces every glyph, so no outline is cached from the one before.
         var rendererFonts = new RendererFontWorkload(fonts);
         results.Add(Measure("parse-render-fonts", rendererFonts.Run, runs: 50));
+
+        // Font programs: every test font, WOFF, WOFF2 and collection files among them, is parsed afresh and the subset a
+        // document would embed is built for a mixed text, which covers the sfnt reader, the character map, the WOFF
+        // decoders and the sfnt builder. One run subsets every font once.
+        var fontFiles = new[] { "*.ttf", "*.otf", "*.ttc", "*.woff", "*.woff2" }.SelectMany(p => Fixtures(Path.Combine(fixtureDir, "fonts"), p)).ToArray();
+        results.Add(Measure("subset-fonts", () => { foreach (var f in fontFiles) SubsetFont(f); }, runs: 200));
+
+        // The bidi algorithm: the levels, the L1 reset and the visual order of generated paragraphs that mix Arabic,
+        // Hebrew and Latin letters, numbers, brackets, explicit embeddings and isolates. One run resolves them all once.
+        var paragraphs = BidiParagraphs();
+        results.Add(Measure("bidi-reorder", () => { foreach (var p in paragraphs) Reorder(p); }, runs: 300));
 
         // Opening PDFs and decoding every stream of them: the lexer, the filters and the decryptor, on the test fixtures
         // (RC4, AES-128 and an unencrypted file with an object stream) and on a generated 30-page report, plain and with
@@ -106,6 +118,59 @@ static class Perf
             var values = axes.ToDictionary(a => a.Tag, a => (a.Min + a.Max) / 2);
             FontVariations.Instance(font, FontVariations.Normalize(font, axes, values), values, axes);
         }
+    }
+
+    // The text of a document with Latin, accented, Arabic, Hebrew and CJK characters, numbers and punctuation.
+    const string SubsetText = "Hamburgefonstiv fi ffl AV To Wa 0123456789 .,;:!?()[]{} ÆØÅ éèêëàâäîïôöûü ñç ß €£¥ العربية שלום 日本語 कि";
+
+    static void SubsetFont(byte[] data)
+    {
+        foreach (var font in FontProgram.Load(data))
+        {
+            var subset = new GlyphSubset(font);
+            foreach (char c in SubsetText) subset.Cid(c);
+            FontSubsetter.Build(subset);
+        }
+    }
+
+    // Paragraphs of 1 to 60 characters drawn from runs of each script and class, the same ones on every run, with a
+    // paragraph direction of its own, left to right or right to left; a few nest embeddings past the depth limit.
+    static (BidiClass[] Types, int[] CodePoints, int Level)[] BidiParagraphs()
+    {
+        string[] pools =
+        {
+            "abcdefgXYZ", "\u0627\u0628\u062A\u0644\u0645\u0646\u0648\u064A", "\u05D0\u05D1\u05D2\u05D3\u05E9\u05DC\u05DD", "0123456789",
+            "\u0660\u0661\u0662\u0663", " ", ".,:/", "+-", "%$#\u20AC", "()[]{}\u00AB\u00BB", "\u202A\u202B\u202C\u202D\u202E", "\u2066\u2067\u2068\u2069",
+            "\t", "\u200B\u00AD", "\u0300\u064E\u05B0", "!?\"'*",
+        };
+        var rng = new Random(7);
+        var paragraphs = new (BidiClass[], int[], int)[600];
+        for (int i = 0; i < paragraphs.Length; i++)
+        {
+            var text = new StringBuilder();
+            if (i % 50 == 0)
+            {
+                for (int d = 0; d < 130; d++) text.Append(d % 2 == 0 ? '\u2067' : '\u202B');
+                text.Append("ab\u05D0\u05D1(1)");
+            }
+            else
+                for (int k = 0, length = 1 + rng.Next(60); k < length; k++)
+                {
+                    var pool = pools[rng.Next(pools.Length)];
+                    text.Append(pool[rng.Next(pool.Length)]);
+                }
+            var codePoints = text.ToString().Select(c => (int)c).ToArray();
+            paragraphs[i] = (codePoints.Select(UnicodeTables.Bidi).ToArray(), codePoints, rng.Next(3) - 1);
+        }
+        return paragraphs;
+    }
+
+    static void Reorder((BidiClass[] Types, int[] CodePoints, int Level) paragraph)
+    {
+        int level = paragraph.Level < 0 ? Bidi.FirstStrongLevel(paragraph.Types) : paragraph.Level;
+        var levels = Bidi.ResolveLevels(paragraph.Types, paragraph.CodePoints, paragraph.Level);
+        Bidi.ResetWhitespace(paragraph.Types, levels, level);
+        Bidi.VisualOrder(levels);
     }
 
     static (byte[] Data, string? Password)[] ParseInputs(string fixtureDir, string report)
