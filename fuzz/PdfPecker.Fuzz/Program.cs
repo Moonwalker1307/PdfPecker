@@ -118,7 +118,7 @@ internal static class Program
     {
         var target = Targets.Find(o.Target);
         if (target == null) return Exit.Usage;
-        var executor = new Executor(o.Timeout, o.MaxMemoryMb << 20);
+        var executor = new Executor(target.TimeoutFor(o.Timeout), o.MaxMemoryMb << 20);
         var verdict = executor.Run(target, File.ReadAllBytes(o.Repro!), o.Strict, out _);
         if (verdict != null) Console.WriteLine($"{verdict.Kind}: {verdict.Signature}\n{verdict.Detail}");
         return executor.AbandonedThreads > 0 ? Exit.Restart : verdict != null ? Exit.ReproFails : Exit.Done;
@@ -230,7 +230,7 @@ internal sealed class Worker
         if (seeds.Count == 0) { Console.Error.WriteLine($"[{target.Name}] no seed inputs found under {root}"); return Exit.Usage; }
 
         var store = new FindingStore(_o.Out, target.Name);
-        var executor = new Executor(_o.Timeout, _o.MaxMemoryMb << 20);
+        var executor = new Executor(target.TimeoutFor(_o.Timeout), _o.MaxMemoryMb << 20);
         long startRetained = executor.Retained;
         bool leakReported = false, shed = false;
         var rng = new Random(unchecked((int)_o.Seed));

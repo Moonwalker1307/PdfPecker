@@ -18,7 +18,7 @@ dotnet fuzz/PdfPecker.Fuzz/bin/Release/net10.0/PdfPecker.Fuzz.dll --target html 
 | `--duration 90s\|10m\|1h` | How long to run per target (default 1m). |
 | `--seed <n>` | Seed of the random generator (default 1). The same seed gives the same inputs; timeouts still depend on the machine. |
 | `--out <dir>` | Findings folder (default `fuzz-findings`); each target gets a sub-folder. |
-| `--timeout <s>` | Wall-clock limit per input (default 5). |
+| `--timeout <s>` | Wall-clock limit per input (default 5). The `svg` target raises it to at least 30, because large inputs of filtered shapes are slow but linear. |
 | `--max-memory-mb <n>` | Heap ceiling per input (default 1536). |
 | `--strict` | Also report the exceptions that `ImageLoader` swallows around the image decoders (see below). |
 | `--no-minimize` | Save inputs as found. |
