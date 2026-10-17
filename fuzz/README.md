@@ -43,7 +43,11 @@ rather than in loading.
 * **timeout**: an input that runs longer than `--timeout`. The token is cancelled first; a target without a token
   (`pdf-verify`, the image decoders) is waited for three more seconds, then its thread is abandoned and the process
   restarted.
-* **memory**: the heap grows past `--max-memory-mb`, or the runtime's hard heap limit raises `OutOfMemoryException`.
+* **memory**: the live heap grows by more than `--max-memory-mb` over what stays live between inputs, or the
+  runtime's hard heap limit raises `OutOfMemoryException`. The heap belongs to the whole process, so the baseline is
+  measured again before a memory finding is confirmed; heap that keeps growing between inputs is a leak in the library
+  and is printed as a `LEAK` line rather than blamed on the input that happened to cross the ceiling; once the leak
+  alone passes the ceiling, the worker is restarted.
   A timeout or memory finding is run a second time and only counts if it fails again, because a busy machine (or the
   state left by earlier inputs) can make an innocent input slow; the progress line counts those as "unconfirmed".
   Check a saved one with `--repro` before trusting it.

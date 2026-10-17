@@ -19,6 +19,11 @@ internal sealed class Executor
     private readonly TimeSpan _timeout;
     private readonly long _memoryCeiling;
 
+    // The heap that stays live between inputs: the seeds, the corpus and whatever the library keeps in static caches.
+    // The ceiling applies to what an input adds on top of it, because the heap is shared by the whole process and an
+    // input should not be blamed for what earlier ones left behind.
+    private long _retained;
+
     /// <summary>Threads that ignored cancellation and are still running; the caller should restart the process.</summary>
     public int AbandonedThreads { get; private set; }
 
@@ -26,7 +31,17 @@ internal sealed class Executor
     {
         _timeout = timeout;
         _memoryCeiling = memoryCeiling;
+        _retained = GC.GetTotalMemory(true);
     }
+
+    /// <summary>The live heap measured at the last <see cref="MeasureRetained"/>, or when the executor was made.</summary>
+    public long Retained => _retained;
+
+    /// <summary>
+    /// Collects garbage and records the live heap as the baseline for the next inputs. Call it between inputs, before
+    /// confirming a memory finding, so that heap kept by earlier inputs is not counted against the one under test.
+    /// </summary>
+    public long MeasureRetained() => _retained = GC.GetTotalMemory(true);
 
     /// <param name="tolerated">The type name of an exception the target tolerates, for the statistics.</param>
     public Verdict? Run(Target target, byte[] input, bool strict, out string? tolerated)
@@ -51,7 +66,7 @@ internal sealed class Executor
             if (abort == null)
             {
                 if (clock.Elapsed > _timeout) abort = "timeout";
-                else if (GC.GetTotalMemory(false) > _memoryCeiling && GC.GetTotalMemory(true) > _memoryCeiling) abort = "memory";
+                else if (GC.GetTotalMemory(false) - _retained > _memoryCeiling && GC.GetTotalMemory(true) - _retained > _memoryCeiling) abort = "memory";
                 if (abort == null) continue;
                 abortedAt = clock.Elapsed;
                 cts.Cancel();
@@ -61,7 +76,7 @@ internal sealed class Executor
                 AbandonedThreads++;
                 var what = abort == "timeout"
                     ? $"The input ran for more than {_timeout.TotalSeconds:0.#} s and the target did not react to cancellation."
-                    : $"The heap grew past {_memoryCeiling >> 20} MB and the target did not react to cancellation.";
+                    : $"The heap grew by more than {_memoryCeiling >> 20} MB and the target did not react to cancellation.";
                 return new Verdict(abort, abort + "|uncancellable", what);
             }
         }
@@ -72,7 +87,7 @@ internal sealed class Executor
             var stack = ex?.StackTrace;
             string detail = abort == "timeout"
                 ? $"The input ran for more than {_timeout.TotalSeconds:0.#} s; cancellation stopped it."
-                : $"The heap grew past {_memoryCeiling >> 20} MB; cancellation stopped it.";
+                : $"The heap grew by more than {_memoryCeiling >> 20} MB; cancellation stopped it.";
             if (ex != null && stack != null) detail += "\nStopped at (the cancellation point, not necessarily the slow loop):\n" + ex.GetType().FullName + "\n" + stack;
             return new Verdict(abort, abort + "|" + TopFrames(stack), detail);
         }
