@@ -24,19 +24,52 @@ internal sealed partial class SvgFilter
         Turbulence, Image, Tile, ConvolveMatrix, DisplacementMap, DiffuseLighting, SpecularLighting,
     }
 
+    /// <summary>feComposite's operators; one it does not know draws as over.</summary>
+    internal enum CompositeOperator : byte { Over, In, Out, Atop, Xor, Lighter, Arithmetic }
+
+    /// <summary>feBlend's separable blend modes; one it does not know draws as normal.</summary>
+    internal enum BlendMode : byte
+    {
+        Normal, Multiply, Screen, Darken, Lighten, Overlay, HardLight, ColorDodge, ColorBurn, SoftLight, Difference, Exclusion,
+    }
+
+    /// <summary>What feConvolveMatrix reads beyond the edge of the image: the edge pixel, the opposite side or nothing.</summary>
+    internal enum EdgeMode : byte { Duplicate, Wrap, None }
+
+    /// <summary>The channel a feDisplacementMap selector names; the value is the channel's offset in an RGBA pixel.</summary>
+    internal enum ColorChannel : byte { R, G, B, A }
+
+    /// <summary>The light source elements of the lighting primitives.</summary>
+    internal enum LightType : byte { Distant, Point, Spot }
+
+    /// <summary>The transfer function types of feComponentTransfer; one it does not know leaves the channel alone.</summary>
+    internal enum TransferType : byte { Identity, Table, Discrete, Linear, Gamma }
+
+    /// <summary>
+    /// One primitive of the filter. The fields that a kind does not use keep their defaults; Sx and Sy are the blur
+    /// deviation, the morphology radius or the displacement scale, depending on the kind.
+    /// </summary>
     internal sealed class Primitive
     {
         public Kind Kind;
         public string? In, In2, Result;
         public List<string?>? Inputs;     // feMerge
-        public float Sx, Sy;              // blur deviation or morphology radius, root units
+        public float Sx, Sy;              // blur deviation, morphology radius or displacement scale, root units
         public float Dx, Dy;              // offset, root units
-        public uint Color = CssColor.Black; // flood colour (straight sRGB, with alpha)
-        public string Operator = "";      // composite or morphology operator, blend mode, colour matrix type
-        public float K1, K2, K3, K4;
+        public uint Color = CssColor.Black; // flood or lighting colour (straight sRGB, with alpha)
+        public CompositeOperator CompositeOperator; // feComposite
+        public BlendMode BlendMode;       // feBlend
+        public bool Dilate;               // feMorphology: dilate rather than erode
+        public float K1, K2, K3, K4;      // feComposite's arithmetic coefficients
         public float[]? Matrix;           // 4 × 5 colour matrix
         public Transfer?[]? Functions;    // R, G, B, A
         public bool Linear = true;        // color-interpolation-filters: linearRGB
+
+        /// <summary>
+        /// Sets <see cref="CompositeOperator"/> from its SVG name, as the layout's filters for CSS effects and
+        /// text-shadows give it.
+        /// </summary>
+        public string Operator { set => CompositeOperator = ParseCompositeOperator(value); }
 
         // The primitive subregion: in root space when given, and in user space (for turbulence tiles) either way.
         public bool HasRegion;
@@ -56,9 +89,10 @@ internal sealed partial class SvgFilter
         public float[]? Kernel;
         public float Divisor, Bias;
         public bool PreserveAlpha;
+        public EdgeMode EdgeMode;
 
         // feDisplacementMap (Sx, Sy hold the scale in root units) and lighting.
-        public int XChannel = 3, YChannel = 3;
+        public ColorChannel XChannel = ColorChannel.A, YChannel = ColorChannel.A;
         public float SurfaceScale = 1, Constant = 1, SpecularExponent = 1;
         public Light? Light;
     }
@@ -66,7 +100,7 @@ internal sealed partial class SvgFilter
     /// <summary>A light source of feDiffuseLighting or feSpecularLighting; positions in root space, z in root units.</summary>
     internal sealed class Light
     {
-        public byte Type; // 0 distant, 1 point, 2 spot
+        public LightType Type;
         public float Azimuth, Elevation;
         public float X, Y, Z, PointsAtX, PointsAtY, PointsAtZ;
         public float SpotExponent = 1, ConeCos = float.NaN;
@@ -74,7 +108,7 @@ internal sealed partial class SvgFilter
 
     internal sealed class Transfer
     {
-        public string Type = "identity";
+        public TransferType Type;
         public float[] Table = Array.Empty<float>();
         public float Slope = 1, Intercept, Amplitude = 1, Exponent = 1, Offset;
 
@@ -82,7 +116,7 @@ internal sealed partial class SvgFilter
         {
             switch (Type)
             {
-                case "table" when Table.Length > 0:
+                case TransferType.Table when Table.Length > 0:
                 {
                     int n = Table.Length - 1;
                     if (n == 0) return Table[0];
@@ -90,17 +124,46 @@ internal sealed partial class SvgFilter
                     int k = Math.Min((int)pos, n - 1);
                     return Table[k] + (pos - k) * (Table[k + 1] - Table[k]);
                 }
-                case "discrete" when Table.Length > 0:
+                case TransferType.Discrete when Table.Length > 0:
                 {
                     int n = Table.Length;
                     return Table[Math.Min((int)(Math.Clamp(c, 0, 1) * n), n - 1)];
                 }
-                case "linear": return Slope * c + Intercept;
-                case "gamma": return Amplitude * MathF.Pow(Math.Max(c, 0), Exponent) + Offset;
+                case TransferType.Linear: return Slope * c + Intercept;
+                case TransferType.Gamma: return Amplitude * MathF.Pow(Math.Max(c, 0), Exponent) + Offset;
                 default: return c;
             }
         }
     }
+
+    // ------------------------------------------------------------------ limits and defaults
+
+    /// <summary>A blur deviation in pixels at or below which the blur leaves that axis alone.</summary>
+    private const float MinBlurDeviation = 0.01f;
+
+    /// <summary>The largest box of the three box blurs that approximate a Gaussian, in pixels.</summary>
+    private const int MaxBlurBox = 2000;
+
+    /// <summary>The largest feMorphology radius in pixels; a larger one is cut down to it.</summary>
+    private const int MaxMorphologyRadius = 200;
+
+    /// <summary>The most columns or rows of a feConvolveMatrix kernel; a larger order makes the kernel invalid.</summary>
+    private const int MaxKernelOrder = 64;
+
+    /// <summary>The most octaves of feTurbulence noise; a larger count is cut down to it.</summary>
+    private const int MaxOctaves = 24;
+
+    /// <summary>The range of specularExponent that the SVG specification allows for feSpecularLighting.</summary>
+    private const float MinSpecularExponent = 1, MaxSpecularExponent = 128;
+
+    /// <summary>The offset and the deviation of feDropShadow when it gives none.</summary>
+    private const float DropShadowDefault = 2;
+
+    /// <summary>
+    /// How far a subregion's edge may fall past a pixel boundary and still end there, so that rounding in the
+    /// transforms does not add a row or column of pixels.
+    /// </summary>
+    private const float PixelEdgeTolerance = 0.001f;
 
     // ------------------------------------------------------------------ parsing
 
@@ -131,7 +194,8 @@ internal sealed partial class SvgFilter
             Subregion(e, p, ctm, primitiveBox, box, region, viewport);
             void Offset()
             {
-                float dx = Number(e, "dx", p.Kind == Kind.DropShadow ? 2 : 0) * unitX, dy = Number(e, "dy", p.Kind == Kind.DropShadow ? 2 : 0) * unitY;
+                float fallback = p.Kind == Kind.DropShadow ? DropShadowDefault : 0;
+                float dx = Number(e, "dx", fallback) * unitX, dy = Number(e, "dy", fallback) * unitY;
                 p.Dx = ctm.A * dx + ctm.C * dy;
                 p.Dy = ctm.B * dx + ctm.D * dy;
             }
@@ -146,7 +210,7 @@ internal sealed partial class SvgFilter
             {
                 var s = e.Style;
                 uint c = s?.SvgFloodColor ?? CssColor.Black;
-                float alpha = (c >> 24) / 255f * (s?.SvgFloodOpacity ?? 1);
+                float alpha = Alpha(c) * (s?.SvgFloodOpacity ?? 1);
                 p.Color = ((uint)Math.Round(Math.Clamp(alpha, 0, 1) * 255) << 24) | (c & 0xFFFFFF);
             }
             switch (e.Name)
@@ -161,7 +225,7 @@ internal sealed partial class SvgFilter
                     break;
                 case "fedropshadow":
                     p.Kind = Kind.DropShadow;
-                    Pair("stddeviation", 2);
+                    Pair("stddeviation", DropShadowDefault);
                     Offset();
                     Flood();
                     break;
@@ -175,16 +239,16 @@ internal sealed partial class SvgFilter
                     break;
                 case "fecomposite":
                     p.Kind = Kind.Composite;
-                    p.Operator = (e.GetAttribute("operator") ?? "over").Trim().ToLowerInvariant();
+                    p.CompositeOperator = ParseCompositeOperator(Keyword(e, "operator", "over"));
                     p.K1 = Number(e, "k1", 0); p.K2 = Number(e, "k2", 0); p.K3 = Number(e, "k3", 0); p.K4 = Number(e, "k4", 0);
                     break;
                 case "feblend":
                     p.Kind = Kind.Blend;
-                    p.Operator = (e.GetAttribute("mode") ?? "normal").Trim().ToLowerInvariant();
+                    p.BlendMode = ParseBlendMode(Keyword(e, "mode", "normal"));
                     break;
                 case "fecolormatrix":
                     p.Kind = Kind.ColorMatrix;
-                    p.Matrix = ColorMatrix((e.GetAttribute("type") ?? "matrix").Trim().ToLowerInvariant(), e.GetAttribute("values"));
+                    p.Matrix = ColorMatrix(Keyword(e, "type", "matrix"), e.GetAttribute("values"));
                     break;
                 case "fecomponenttransfer":
                     p.Kind = Kind.ComponentTransfer;
@@ -195,7 +259,7 @@ internal sealed partial class SvgFilter
                         if (channel < 0) continue;
                         p.Functions[channel] = new Transfer
                         {
-                            Type = (fn.GetAttribute("type") ?? "identity").Trim().ToLowerInvariant(),
+                            Type = ParseTransferType(Keyword(fn, "type", "identity")),
                             Table = SvgImage.ParseNumbers(fn.GetAttribute("tablevalues")).ToArray(),
                             Slope = Number(fn, "slope", 1), Intercept = Number(fn, "intercept", 0),
                             Amplitude = Number(fn, "amplitude", 1), Exponent = Number(fn, "exponent", 1), Offset = Number(fn, "offset", 0),
@@ -204,7 +268,7 @@ internal sealed partial class SvgFilter
                     break;
                 case "femorphology":
                     p.Kind = Kind.Morphology;
-                    p.Operator = (e.GetAttribute("operator") ?? "erode").Trim().ToLowerInvariant();
+                    p.Dilate = Keyword(e, "operator", "erode") == "dilate";
                     Pair("radius", 0);
                     break;
                 case "feturbulence":
@@ -214,7 +278,7 @@ internal sealed partial class SvgFilter
                     p.FreqX = freq.Count > 0 ? freq[0] : 0;
                     p.FreqY = freq.Count > 1 ? freq[1] : p.FreqX;
                     if (p.FreqX < 0 || p.FreqY < 0) p.FreqX = p.FreqY = 0;
-                    p.Octaves = (int)Math.Clamp(Number(e, "numoctaves", 1), 0, 24);
+                    p.Octaves = (int)Math.Clamp(Number(e, "numoctaves", 1), 0, MaxOctaves);
                     p.Seed = (int)Math.Clamp(MathF.Round(Number(e, "seed", 0)), int.MinValue + 1, int.MaxValue);
                     p.Stitch = string.Equals(e.GetAttribute("stitchtiles")?.Trim(), "stitch", StringComparison.OrdinalIgnoreCase);
                     p.Fractal = string.Equals(e.GetAttribute("type")?.Trim(), "fractalNoise", StringComparison.OrdinalIgnoreCase);
@@ -237,8 +301,8 @@ internal sealed partial class SvgFilter
                     float scale = Number(e, "scale", 0);
                     p.Sx = scale * lx;
                     p.Sy = scale * ly;
-                    p.XChannel = Channel(e.GetAttribute("xchannelselector"));
-                    p.YChannel = Channel(e.GetAttribute("ychannelselector"));
+                    p.XChannel = ParseChannel(e.GetAttribute("xchannelselector"));
+                    p.YChannel = ParseChannel(e.GetAttribute("ychannelselector"));
                     break;
                 }
                 case "fediffuselighting":
@@ -260,6 +324,45 @@ internal sealed partial class SvgFilter
         var v = e.GetAttribute(name);
         return v != null && float.TryParse(v.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out float f) && float.IsFinite(f) ? f : fallback;
     }
+
+    /// <summary>A keyword attribute, trimmed and in lower case, or <paramref name="fallback"/> when it is missing.</summary>
+    private static string Keyword(Element e, string name, string fallback) => (e.GetAttribute(name) ?? fallback).Trim().ToLowerInvariant();
+
+    private static CompositeOperator ParseCompositeOperator(string name) => name switch
+    {
+        "in" => CompositeOperator.In,
+        "out" => CompositeOperator.Out,
+        "atop" => CompositeOperator.Atop,
+        "xor" => CompositeOperator.Xor,
+        "lighter" => CompositeOperator.Lighter,
+        "arithmetic" => CompositeOperator.Arithmetic,
+        _ => CompositeOperator.Over,
+    };
+
+    private static BlendMode ParseBlendMode(string name) => name switch
+    {
+        "multiply" => BlendMode.Multiply,
+        "screen" => BlendMode.Screen,
+        "darken" => BlendMode.Darken,
+        "lighten" => BlendMode.Lighten,
+        "overlay" => BlendMode.Overlay,
+        "hard-light" => BlendMode.HardLight,
+        "color-dodge" => BlendMode.ColorDodge,
+        "color-burn" => BlendMode.ColorBurn,
+        "soft-light" => BlendMode.SoftLight,
+        "difference" => BlendMode.Difference,
+        "exclusion" => BlendMode.Exclusion,
+        _ => BlendMode.Normal,
+    };
+
+    private static TransferType ParseTransferType(string name) => name switch
+    {
+        "table" => TransferType.Table,
+        "discrete" => TransferType.Discrete,
+        "linear" => TransferType.Linear,
+        "gamma" => TransferType.Gamma,
+        _ => TransferType.Identity,
+    };
 
     /// <summary>The 4 × 5 matrix of an feColorMatrix (rows R, G, B, A; columns R, G, B, A, offset).</summary>
     private static float[]? ColorMatrix(string type, string? values)
@@ -328,6 +431,12 @@ internal sealed partial class SvgFilter
     }
 
     private static float Lookup(float[] table, float c) => table[(int)(Math.Clamp(c, 0, 1) * TableSize + 0.5f)];
+
+    /// <summary>The colour channels of a straight sRGB colour 0xAARRGGBB, from 0 to 1.</summary>
+    private static (float R, float G, float B) Rgb(uint color) => (((color >> 16) & 255) / 255f, ((color >> 8) & 255) / 255f, (color & 255) / 255f);
+
+    /// <summary>The alpha of a colour 0xAARRGGBB, from 0 to 1.</summary>
+    private static float Alpha(uint color) => (color >> 24) / 255f;
 
     /// <summary>
     /// The most work one filter may take, in pixel operations, and the most primitives it may have. Every primitive is
@@ -415,29 +524,7 @@ internal sealed partial class SvgFilter
         foreach (var p in Primitives)
         {
             cancel.ThrowIfCancellationRequested();
-            // The subregion: given, else the union of the inputs' (all of the filter region without inputs).
-            int x0, y0, x1, y1;
-            if (p.HasRegion)
-            {
-                x0 = Math.Clamp((int)MathF.Floor((p.RX - X) * scaleX + 0.001f), 0, w);
-                y0 = Math.Clamp((int)MathF.Floor((p.RY - Y) * scaleY + 0.001f), 0, h);
-                x1 = Math.Clamp((int)MathF.Ceiling((p.RX + p.RW - X) * scaleX - 0.001f), x0, w);
-                y1 = Math.Clamp((int)MathF.Ceiling((p.RY + p.RH - Y) * scaleY - 0.001f), y0, h);
-            }
-            else if (p.Kind is Kind.Flood or Kind.Turbulence or Kind.Image or Kind.Tile) (x0, y0, x1, y1) = (0, 0, w, h); // feTile fills the filter region, as in browsers
-            else
-            {
-                var inputs = p.Kind == Kind.Merge ? (p.Inputs ?? new List<string?>()).Select(Input).ToList()
-                    : p.Kind is Kind.Composite or Kind.Blend or Kind.DisplacementMap ? new List<Image> { Input(p.In), Input(p.In2) }
-                    : new List<Image> { Input(p.In) };
-                if (inputs.Count == 0) (x0, y0, x1, y1) = (0, 0, w, h);
-                else
-                {
-                    (x0, y0, x1, y1) = (w, h, 0, 0);
-                    foreach (var i in inputs) { x0 = Math.Min(x0, i.X0); y0 = Math.Min(y0, i.Y0); x1 = Math.Max(x1, i.X1); y1 = Math.Max(y1, i.Y1); }
-                    if (x1 < x0 || y1 < y0) (x0, y0, x1, y1) = (0, 0, 0, 0);
-                }
-            }
+            var (x0, y0, x1, y1) = PixelSubregion(p, w, h, scaleX, scaleY, Input);
             Image result = p.Kind switch
             {
                 Kind.Blur => new Image(Blur(Convert(Input(p.In), p.Linear).P, w, h, p.Sx * scaleX, p.Sy * scaleY), p.Linear),
@@ -446,10 +533,10 @@ internal sealed partial class SvgFilter
                 Kind.Flood => new Image(Flood(w, h, p.Color, p.Linear), p.Linear),
                 Kind.Merge => Merge(p, Input, w, h),
                 Kind.Composite => new Image(Composite(Convert(Input(p.In), p.Linear).P, Convert(Input(p.In2), p.Linear).P, p), p.Linear),
-                Kind.Blend => new Image(Blend(Convert(Input(p.In), p.Linear).P, Convert(Input(p.In2), p.Linear).P, p.Operator), p.Linear),
+                Kind.Blend => new Image(Blend(Convert(Input(p.In), p.Linear).P, Convert(Input(p.In2), p.Linear).P, p.BlendMode), p.Linear),
                 Kind.ColorMatrix => new Image(ColorMatrix(Convert(Input(p.In), p.Linear).P, p.Matrix), p.Linear),
                 Kind.ComponentTransfer => new Image(ComponentTransfer(Convert(Input(p.In), p.Linear).P, p.Functions!), p.Linear),
-                Kind.Morphology => new Image(Morphology(Convert(Input(p.In), p.Linear).P, w, h, p.Sx * scaleX, p.Sy * scaleY, p.Operator == "dilate"), p.Linear),
+                Kind.Morphology => new Image(Morphology(Convert(Input(p.In), p.Linear).P, w, h, p.Sx * scaleX, p.Sy * scaleY, p.Dilate), p.Linear),
                 Kind.Turbulence => new Image(Turbulence(p, w, h, scaleX, scaleY, x0, y0, x1, y1), p.Linear),
                 Kind.Image => new Image(p.Shapes is { Count: > 0 } shapes && rasterize?.Invoke(shapes) is { } drawn ? drawn : new float[w * h * 4], false),
                 Kind.Tile => new Image(Tile(Convert(Input(p.In), p.Linear), w, x0, y0, x1, y1), p.Linear),
@@ -463,6 +550,35 @@ internal sealed partial class SvgFilter
             if (!string.IsNullOrEmpty(p.Result)) results[p.Result] = result;
         }
         return Convert(last, false).P;
+    }
+
+    /// <summary>
+    /// A primitive's subregion in pixels (ends excluded): the one it gives, else the union of its inputs' subregions,
+    /// else all of the filter region for a primitive without inputs.
+    /// </summary>
+    private (int X0, int Y0, int X1, int Y1) PixelSubregion(Primitive p, int w, int h, float scaleX, float scaleY, Func<string?, Image> input)
+    {
+        if (p.HasRegion)
+        {
+            int x0 = Math.Clamp((int)MathF.Floor((p.RX - X) * scaleX + PixelEdgeTolerance), 0, w);
+            int y0 = Math.Clamp((int)MathF.Floor((p.RY - Y) * scaleY + PixelEdgeTolerance), 0, h);
+            int x1 = Math.Clamp((int)MathF.Ceiling((p.RX + p.RW - X) * scaleX - PixelEdgeTolerance), x0, w);
+            int y1 = Math.Clamp((int)MathF.Ceiling((p.RY + p.RH - Y) * scaleY - PixelEdgeTolerance), y0, h);
+            return (x0, y0, x1, y1);
+        }
+        // feTile fills the filter region, as in browsers.
+        if (p.Kind is Kind.Flood or Kind.Turbulence or Kind.Image or Kind.Tile) return (0, 0, w, h);
+        if (p.Kind == Kind.Merge && p.Inputs is not { Count: > 0 }) return (0, 0, w, h);
+        var union = (X0: w, Y0: h, X1: 0, Y1: 0);
+        void Include(Image i) => union = (Math.Min(union.X0, i.X0), Math.Min(union.Y0, i.Y0), Math.Max(union.X1, i.X1), Math.Max(union.Y1, i.Y1));
+        if (p.Kind == Kind.Merge)
+            foreach (var name in p.Inputs!) Include(input(name));
+        else
+        {
+            Include(input(p.In));
+            if (p.Kind is Kind.Composite or Kind.Blend or Kind.DisplacementMap) Include(input(p.In2));
+        }
+        return union.X1 < union.X0 || union.Y1 < union.Y0 ? (0, 0, 0, 0) : union;
     }
 
     /// <summary>The image made transparent outside the subregion (a copy when that changes pixels), with that region.</summary>
@@ -480,8 +596,8 @@ internal sealed partial class SvgFilter
 
     private static float[] Flood(int w, int h, uint color, bool linear)
     {
-        float a = (color >> 24) / 255f;
-        float r = ((color >> 16) & 255) / 255f, g = ((color >> 8) & 255) / 255f, b = (color & 255) / 255f;
+        float a = Alpha(color);
+        var (r, g, b) = Rgb(color);
         if (linear) { r = Lookup(ToLinearTable, r); g = Lookup(ToLinearTable, g); b = Lookup(ToLinearTable, b); }
         var p = new float[w * h * 4];
         for (int i = 0; i < p.Length; i += 4) { p[i] = r * a; p[i + 1] = g * a; p[i + 2] = b * a; p[i + 3] = a; }
@@ -550,8 +666,8 @@ internal sealed partial class SvgFilter
     {
         var a = (float[])src.Clone();
         var tmp = new float[src.Length];
-        if (sx > 0.01f) BlurAxis(ref a, ref tmp, w, h, sx, horizontal: true);
-        if (sy > 0.01f) BlurAxis(ref a, ref tmp, w, h, sy, horizontal: false);
+        if (sx > MinBlurDeviation) BlurAxis(ref a, ref tmp, w, h, sx, horizontal: true);
+        if (sy > MinBlurDeviation) BlurAxis(ref a, ref tmp, w, h, sy, horizontal: false);
         return a;
     }
 
@@ -561,61 +677,91 @@ internal sealed partial class SvgFilter
     }
 
     /// <summary>
+    /// One box blur of RGBA pixels along every row or every column, the lines in parallel, each pixel the average of
+    /// those from <paramref name="before"/> before it to <paramref name="after"/> after it.
+    /// </summary>
+    private static void Box(float[] src, float[] dst, int w, int h, int before, int after, bool horizontal)
+    {
+        int lines = horizontal ? h : w, len = horizontal ? w : h;
+        int step = horizontal ? 4 : w * 4;
+        System.Threading.Tasks.Parallel.For(0, lines, line =>
+        {
+            Span<double> sums = stackalloc double[4];
+            BoxLine(src, dst, horizontal ? line * w * 4 : line * 4, step, len, before, after, sums);
+        });
+    }
+
+    /// <summary>
+    /// One box blur along a line of <paramref name="len"/> positions, <paramref name="step"/> values apart from
+    /// <paramref name="origin"/>, each a run of as many values as <paramref name="sums"/> holds, which are blurred
+    /// independently: the channels of a pixel, or the pixels of a row when every column of one channel is blurred at
+    /// once. A running sum per value makes every box the same work, whatever its size; it is a double so that adding
+    /// and taking away along the line leaves no drift.
+    /// </summary>
+    private static void BoxLine(float[] src, float[] dst, int origin, int step, int len, int before, int after, Span<double> sums)
+    {
+        int lanes = sums.Length;
+        float inv = 1f / (before + after + 1);
+        sums.Clear();
+        for (int k = 0; k <= Math.Min(after, len - 1); k++)
+        {
+            int at = origin + k * step;
+            for (int l = 0; l < lanes; l++) sums[l] += src[at + l];
+        }
+        for (int i = 0; i < len; i++)
+        {
+            int at = origin + i * step, add = i + after + 1, remove = i - before;
+            for (int l = 0; l < lanes; l++) dst[at + l] = (float)(sums[l] * inv);
+            if (add < len)
+            {
+                int from = origin + add * step;
+                for (int l = 0; l < lanes; l++) sums[l] += src[from + l];
+            }
+            if (remove >= 0)
+            {
+                int from = origin + remove * step;
+                for (int l = 0; l < lanes; l++) sums[l] -= src[from + l];
+            }
+        }
+    }
+
+    /// <summary>
     /// The three box blurs that approximate a Gaussian of deviation <paramref name="sigma"/> pixels, as the SVG
     /// specification gives them: how far each reaches before and after the pixel.
     /// </summary>
     private static (int Before, int After)[] BoxPasses(float sigma)
     {
         int d = (int)MathF.Floor(sigma * 3 * MathF.Sqrt(2 * MathF.PI) / 4 + 0.5f);
-        d = Math.Clamp(d, 1, 2000);
+        d = Math.Clamp(d, 1, MaxBlurBox);
         // An even size: two boxes of size d, off centre to either side, then one of size d + 1 centred on the pixel.
         return d % 2 == 1 ? new[] { (d / 2, d / 2), (d / 2, d / 2), (d / 2, d / 2) } : new[] { (d / 2, d / 2 - 1), (d / 2 - 1, d / 2), (d / 2, d / 2) };
     }
 
     /// <summary>
     /// Blurs one channel of w × h values, rows with running sums along them and columns with a running sum per column,
-    /// so that both passes read memory in order.
+    /// so that both passes read memory in order. The source is left alone.
     /// </summary>
     private static float[] BlurChannel(float[] src, int w, int h, float sx, float sy)
     {
         var a = src;
         var tmp = new float[src.Length];
-        if (sx > 0.01f)
+        void Swap() => (a, tmp) = (tmp, a == src ? new float[src.Length] : a);
+        if (sx > MinBlurDeviation)
+        {
+            Span<double> sum = stackalloc double[1];
             foreach (var (before, after) in BoxPasses(sx))
             {
-                float inv = 1f / (before + after + 1);
-                for (int y = 0; y < h; y++)
-                {
-                    int row = y * w;
-                    double sum = 0;
-                    for (int k = 0; k <= Math.Min(after, w - 1); k++) sum += a[row + k];
-                    for (int x = 0; x < w; x++)
-                    {
-                        tmp[row + x] = (float)(sum * inv);
-                        int add = x + after + 1, remove = x - before;
-                        if (add < w) sum += a[row + add];
-                        if (remove >= 0) sum -= a[row + remove];
-                    }
-                }
-                (a, tmp) = (tmp, a == src ? new float[src.Length] : a);
+                for (int y = 0; y < h; y++) BoxLine(a, tmp, y * w, 1, w, before, after, sum);
+                Swap();
             }
-        if (sy > 0.01f)
+        }
+        if (sy > MinBlurDeviation)
         {
             var sums = new double[w];
             foreach (var (before, after) in BoxPasses(sy))
             {
-                float inv = 1f / (before + after + 1);
-                Array.Clear(sums);
-                for (int k = 0; k <= Math.Min(after, h - 1); k++)
-                    for (int x = 0; x < w; x++) sums[x] += a[k * w + x];
-                for (int y = 0; y < h; y++)
-                {
-                    int row = y * w, add = (y + after + 1) * w, remove = (y - before) * w;
-                    for (int x = 0; x < w; x++) tmp[row + x] = (float)(sums[x] * inv);
-                    if (y + after + 1 < h) for (int x = 0; x < w; x++) sums[x] += a[add + x];
-                    if (y - before >= 0) for (int x = 0; x < w; x++) sums[x] -= a[remove + x];
-                }
-                (a, tmp) = (tmp, a == src ? new float[src.Length] : a);
+                BoxLine(a, tmp, 0, w, h, before, after, sums);
+                Swap();
             }
         }
         return a;
@@ -641,17 +787,17 @@ internal sealed partial class SvgFilter
             var a = BlurChannel(alpha, w, h, blur.Sx * scaleX, blur.Sy * scaleY);
             int ox = (int)MathF.Round(offset.Dx * scaleX), oy = (int)MathF.Round(offset.Dy * scaleY);
             uint c = flood.Color;
-            float ca = (c >> 24) / 255f;
+            float ca = Alpha(c);
             if (k == 0) first = c;
             else if ((c & 0xFFFFFF) != (first & 0xFFFFFF) && r == null)
             {
                 // Shadows of different colours: keep premultiplied colour, so far all of the first colour.
                 oneColor = false;
                 r = new float[n]; g = new float[n]; b = new float[n];
-                float fr = ((first >> 16) & 255) / 255f, fg = ((first >> 8) & 255) / 255f, fb = (first & 255) / 255f;
+                var (fr, fg, fb) = Rgb(first);
                 for (int i = 0; i < n; i++) { r[i] = fr * acc[i]; g[i] = fg * acc[i]; b[i] = fb * acc[i]; }
             }
-            float cr = ((c >> 16) & 255) / 255f, cg = ((c >> 8) & 255) / 255f, cb = (c & 255) / 255f;
+            var (cr, cg, cb) = Rgb(c);
             // This shadow over the ones before it, moved by whole pixels as feOffset moves them.
             for (int y = Math.Max(0, oy); y < Math.Min(h, h + oy); y++)
             {
@@ -703,33 +849,9 @@ internal sealed partial class SvgFilter
         return (rgb, alphaBytes);
     }
 
-    /// <summary>The average of the pixels from <paramref name="before"/> before to <paramref name="after"/> after each pixel.</summary>
-    private static void Box(float[] src, float[] dst, int w, int h, int before, int after, bool horizontal)
-    {
-        int lines = horizontal ? h : w, len = horizontal ? w : h;
-        int step = horizontal ? 4 : w * 4;
-        float inv = 1f / (before + after + 1);
-        System.Threading.Tasks.Parallel.For(0, lines, line =>
-        {
-            int origin = horizontal ? line * w * 4 : line * 4;
-            for (int c = 0; c < 4; c++)
-            {
-                double sum = 0;
-                for (int k = 0; k <= Math.Min(after, len - 1); k++) sum += src[origin + k * step + c];
-                for (int i = 0; i < len; i++)
-                {
-                    dst[origin + i * step + c] = (float)(sum * inv);
-                    int add = i + after + 1, remove = i - before;
-                    if (add < len) sum += src[origin + add * step + c];
-                    if (remove >= 0) sum -= src[origin + remove * step + c];
-                }
-            }
-        });
-    }
-
     private static float[] Morphology(float[] src, int w, int h, float rx, float ry, bool dilate)
     {
-        int ix = Math.Min((int)MathF.Round(rx), 200), iy = Math.Min((int)MathF.Round(ry), 200);
+        int ix = Math.Min((int)MathF.Round(rx), MaxMorphologyRadius), iy = Math.Min((int)MathF.Round(ry), MaxMorphologyRadius);
         if (ix <= 0 && iy <= 0) return src;
         var tmp = new float[src.Length];
         var dst = new float[src.Length];
@@ -788,20 +910,22 @@ internal sealed partial class SvgFilter
     private static float[] Composite(float[] a, float[] b, Primitive p)
     {
         var dst = new float[a.Length];
+        var op = p.CompositeOperator;
+        float k1 = p.K1, k2 = p.K2, k3 = p.K3, k4 = p.K4;
         for (int i = 0; i < a.Length; i += 4)
         {
             float aa = a[i + 3], ba = b[i + 3];
             for (int c = 0; c < 4; c++)
             {
                 float x = a[i + c], y = b[i + c];
-                dst[i + c] = p.Operator switch
+                dst[i + c] = op switch
                 {
-                    "in" => x * ba,
-                    "out" => x * (1 - ba),
-                    "atop" => x * ba + y * (1 - aa),
-                    "xor" => x * (1 - ba) + y * (1 - aa),
-                    "lighter" => Math.Min(1, x + y),
-                    "arithmetic" => Math.Clamp(p.K1 * x * y + p.K2 * x + p.K3 * y + p.K4, 0, 1),
+                    CompositeOperator.In => x * ba,
+                    CompositeOperator.Out => x * (1 - ba),
+                    CompositeOperator.Atop => x * ba + y * (1 - aa),
+                    CompositeOperator.Xor => x * (1 - ba) + y * (1 - aa),
+                    CompositeOperator.Lighter => Math.Min(1, x + y),
+                    CompositeOperator.Arithmetic => Math.Clamp(k1 * x * y + k2 * x + k3 * y + k4, 0, 1),
                     _ => x + y * (1 - aa),
                 };
             }
@@ -815,7 +939,7 @@ internal sealed partial class SvgFilter
     }
 
     /// <summary>Blends <paramref name="s"/> (in) over the backdrop <paramref name="b"/> (in2) with a separable blend mode.</summary>
-    private static float[] Blend(float[] s, float[] b, string mode)
+    private static float[] Blend(float[] s, float[] b, BlendMode mode)
     {
         var dst = new float[s.Length];
         for (int i = 0; i < s.Length; i += 4)
@@ -827,19 +951,19 @@ internal sealed partial class SvgFilter
                 float us = sa > 0 ? cs / sa : 0, ub = ba > 0 ? cb / ba : 0;
                 float mixed = mode switch
                 {
-                    "multiply" => us * ub,
-                    "screen" => us + ub - us * ub,
-                    "darken" => Math.Min(us, ub),
-                    "lighten" => Math.Max(us, ub),
-                    "overlay" => ub <= 0.5f ? 2 * us * ub : 1 - 2 * (1 - us) * (1 - ub),
-                    "hard-light" => us <= 0.5f ? 2 * us * ub : 1 - 2 * (1 - us) * (1 - ub),
-                    "color-dodge" => ub <= 0 ? 0 : us >= 1 ? 1 : Math.Min(1, ub / (1 - us)),
-                    "color-burn" => ub >= 1 ? 1 : us <= 0 ? 0 : 1 - Math.Min(1, (1 - ub) / us),
-                    "soft-light" => us <= 0.5f
+                    BlendMode.Multiply => us * ub,
+                    BlendMode.Screen => us + ub - us * ub,
+                    BlendMode.Darken => Math.Min(us, ub),
+                    BlendMode.Lighten => Math.Max(us, ub),
+                    BlendMode.Overlay => ub <= 0.5f ? 2 * us * ub : 1 - 2 * (1 - us) * (1 - ub),
+                    BlendMode.HardLight => us <= 0.5f ? 2 * us * ub : 1 - 2 * (1 - us) * (1 - ub),
+                    BlendMode.ColorDodge => ub <= 0 ? 0 : us >= 1 ? 1 : Math.Min(1, ub / (1 - us)),
+                    BlendMode.ColorBurn => ub >= 1 ? 1 : us <= 0 ? 0 : 1 - Math.Min(1, (1 - ub) / us),
+                    BlendMode.SoftLight => us <= 0.5f
                         ? ub - (1 - 2 * us) * ub * (1 - ub)
                         : ub + (2 * us - 1) * ((ub <= 0.25f ? ((16 * ub - 12) * ub + 4) * ub : MathF.Sqrt(ub)) - ub),
-                    "difference" => Math.Abs(us - ub),
-                    "exclusion" => us + ub - 2 * us * ub,
+                    BlendMode.Difference => Math.Abs(us - ub),
+                    BlendMode.Exclusion => us + ub - 2 * us * ub,
                     _ => us,
                 };
                 dst[i + c] = cs * (1 - ba) + cb * (1 - sa) + sa * ba * mixed;

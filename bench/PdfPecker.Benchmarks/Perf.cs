@@ -138,6 +138,12 @@ static class Perf
         var gradients = GradientValues();
         results.Add(Measure("resolve-gradients", () => { foreach (var g in gradients) WriteGradient(g); }, runs: 200));
 
+        // SVG filters: a page of filtered shapes whose chains run every primitive (blurs, offsets, drop shadows, floods,
+        // merges, each composite operator and blend mode, colour matrices, transfer functions, morphology, turbulence,
+        // convolution with each edge mode, displacement, tiling and both lightings with each light), plus paragraphs of
+        // blurred text-shadows in one and in several colours, laid out and written as a PDF.
+        results.Add(Measure("svg-filters", FilterPage(), null, runs: 20));
+
         // Throughput with every core busy; documents per second is the figure, so higher is better.
         var options = new PdfOptions { BaseDirectory = htmlDir };
         for (int i = 0; i < 20; i++) HtmlToPdf.Convert(invoice, options);
@@ -307,6 +313,50 @@ static class Perf
         }
         sb.Append("</body></html>");
         return sb.ToString();
+    }
+
+    // Twelve filtered drawings of 160 × 100 px, each with a chain of primitives, and text-shadow paragraphs.
+    static string FilterPage()
+    {
+        string[] composites = { "over", "in", "out", "atop", "xor", "lighter", "arithmetic" };
+        string[] blends = { "normal", "multiply", "screen", "darken", "lighten", "overlay", "hard-light", "color-dodge", "color-burn", "soft-light", "difference", "exclusion" };
+        string[] edges = { "duplicate", "wrap", "none" };
+        string[] lights =
+        {
+            "<feDistantLight azimuth='45' elevation='40'/>", "<fePointLight x='60' y='30' z='40'/>",
+            "<feSpotLight x='20' y='10' z='60' pointsAtX='80' pointsAtY='60' specularExponent='4' limitingConeAngle='35'/>",
+        };
+        string[] channels = { "R", "G", "B", "A" };
+        var sb = new StringBuilder("<html><head><style>body{margin:8px;font:10pt Arial} svg{display:inline-block;margin:2px} ");
+        sb.Append(".s1{text-shadow:1px 1px 3px rgba(0,0,0,0.6)} .s2{text-shadow:2px 2px 2px red, -1px -1px 4px blue, 0 0 6px green}</style></head><body>");
+        for (int i = 0; i < 12; i++)
+        {
+            string composite = composites[i % composites.Length], blend = blends[i % blends.Length], edge = edges[i % edges.Length], light = lights[i % lights.Length];
+            sb.Append("<svg width='160' height='100'><defs><filter id='f").Append(i).Append("' x='0' y='0' width='160' height='100' filterUnits='userSpaceOnUse'>");
+            sb.Append("<feTurbulence type='").Append(i % 2 == 0 ? "fractalNoise" : "turbulence").Append("' baseFrequency='0.04 0.07' numOctaves='3' seed='").Append(i).Append("' result='noise'/>");
+            sb.Append("<feGaussianBlur in='SourceGraphic' stdDeviation='").Append(1 + i % 3).Append("' result='blur'/>");
+            sb.Append("<feOffset in='blur' dx='3' dy='2' result='moved'/>");
+            sb.Append("<feComposite in='noise' in2='moved' operator='").Append(composite).Append("' k1='0.3' k2='0.6' k3='0.5' k4='0.05' result='mix'/>");
+            sb.Append("<feBlend in='mix' in2='SourceGraphic' mode='").Append(blend).Append("' result='blend'/>");
+            sb.Append("<feColorMatrix in='blend' type='").Append(i % 3 == 0 ? "saturate' values='0.4" : i % 3 == 1 ? "hueRotate' values='60" : "matrix' values='0.5 0.3 0.2 0 0 0.2 0.6 0.2 0 0 0.1 0.2 0.7 0 0 0 0 0 1 0").Append("' result='cm'/>");
+            sb.Append("<feComponentTransfer in='cm' result='ct'><feFuncR type='table' tableValues='0 0.5 1'/><feFuncG type='gamma' amplitude='1.2' exponent='0.8'/><feFuncB type='discrete' tableValues='0 0.3 0.6 1'/><feFuncA type='linear' slope='0.9'/></feComponentTransfer>");
+            sb.Append("<feMorphology in='ct' operator='").Append(i % 2 == 0 ? "dilate" : "erode").Append("' radius='2' result='morph'/>");
+            sb.Append("<feConvolveMatrix in='morph' order='3' kernelMatrix='0 -1 0 -1 5 -1 0 -1 0' edgeMode='").Append(edge).Append("' result='sharp'/>");
+            sb.Append("<feDisplacementMap in='sharp' in2='noise' scale='12' xChannelSelector='").Append(channels[i % 4]).Append("' yChannelSelector='").Append(channels[(i + 1) % 4]).Append("' result='disp'/>");
+            sb.Append(i % 2 == 0
+                ? "<feDiffuseLighting in='blur' surfaceScale='4' diffuseConstant='1.1' lighting-color='#ffe' result='light'>"
+                : "<feSpecularLighting in='blur' surfaceScale='4' specularConstant='1' specularExponent='12' lighting-color='#fff' result='light'>");
+            sb.Append(light).Append(i % 2 == 0 ? "</feDiffuseLighting>" : "</feSpecularLighting>");
+            sb.Append("<feComposite in='light' in2='disp' operator='arithmetic' k1='0.6' k2='0.2' k3='0.6' result='lit'/>");
+            sb.Append("<feFlood flood-color='#36c' flood-opacity='0.3' x='0' y='0' width='20' height='20' result='cell'/><feTile in='cell' result='tiles'/>");
+            sb.Append("<feDropShadow in='lit' dx='2' dy='2' stdDeviation='2' flood-color='black' flood-opacity='0.5' result='shadow'/>");
+            sb.Append("<feMerge><feMergeNode in='tiles'/><feMergeNode in='shadow'/></feMerge></filter></defs>");
+            sb.Append("<g filter='url(#f").Append(i).Append(")'><rect x='20' y='15' width='120' height='70' rx='10' fill='#c63'/><circle cx='80' cy='50' r='28' fill='#3a8'/>");
+            sb.Append("<text x='30' y='60' font-size='22' fill='white'>Filter ").Append(i).Append("</text></g></svg>");
+        }
+        for (int i = 0; i < 6; i++)
+            sb.Append("<p class='s").Append(1 + i % 2).Append("'>Shadowed text, a whole line of it, blurred once per shadow and drawn under the glyphs.</p>");
+        return sb.Append("</body></html>").ToString();
     }
 
     static string DrawingPage()
