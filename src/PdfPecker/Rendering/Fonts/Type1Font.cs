@@ -1,19 +1,40 @@
-using System.Globalization;
+using System.Text;
 using PdfPecker.Rendering.Graphics;
 using PdfPecker.Rendering.Parsing;
 
 namespace PdfPecker.Rendering.Fonts;
 
-/// <summary>Parser for embedded Type 1 fonts (FontFile): eexec decryption and the Type 1 charstring interpreter.</summary>
-internal sealed class Type1Font : IGlyphSource
+/// <summary>
+/// Parser for embedded Type 1 fonts (FontFile): the cleartext part for the encoding and matrix, eexec decryption of
+/// the private part, and the Type 1 charstring interpreter. Fonts in PDFs are often damaged or oddly wrapped, so the
+/// private part is scanned for its keywords rather than parsed as PostScript.
+/// </summary>
+internal sealed partial class Type1Font : IGlyphSource
 {
+    // The eexec and charstring ciphers.
+    private const int EexecKey = 55665, CharstringKey = 4330;
+    private const int CipherC1 = 52845, CipherC2 = 22719;
+    private const int EexecLeadingBytes = 4, DefaultLenIV = 4;
+
+    // PFB files wrap the font in segments: a marker byte, a type (1 text, 2 binary) and a little-endian length.
+    private const byte PfbMarker = 0x80, PfbTextSegment = 1, PfbBinarySegment = 2;
+    private const int PfbHeaderSize = 6;
+
+    private static ReadOnlySpan<byte> EexecKeyword => "eexec"u8;
+
+    /// <summary>A Length1 that puts the cleartext end further than this past the eexec keyword is not trusted.</summary>
+    private const int Length1Tolerance = 64;
+
+    private const int HexProbeLength = 4;
+    private const int MaxSubrs = 65536;
+
     private readonly List<byte[]> _charStrings = new();
     private readonly List<byte[]> _subrs = new();
     private readonly Dictionary<string, int> _names = new(StringComparer.Ordinal);
     private readonly List<string> _glyphNames = new();
     private PathData?[] _cache = Array.Empty<PathData?>();
     private double[] _widths = Array.Empty<double>();
-    private int _lenIV = 4;
+    private int _lenIV = DefaultLenIV;
 
     public Matrix FontMatrix { get; private set; } = Matrix.Scale(0.001, 0.001);
     public int GlyphCount => _charStrings.Count;
@@ -25,8 +46,8 @@ internal sealed class Type1Font : IGlyphSource
     {
         try
         {
-            var f = new Type1Font();
-            return f.Load(data, length1) ? f : null;
+            var font = new Type1Font();
+            return font.Load(data, length1) ? font : null;
         }
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or OverflowException or FormatException)
         {
@@ -34,7 +55,7 @@ internal sealed class Type1Font : IGlyphSource
         }
     }
 
-    public int GlyphByName(string name) => _names.TryGetValue(name, out int g) ? g : -1;
+    public int GlyphByName(string name) => _names.TryGetValue(name, out int gid) ? gid : -1;
 
     public string? GlyphName(int gid) => gid >= 0 && gid < _glyphNames.Count ? _glyphNames[gid] : null;
 
@@ -48,413 +69,268 @@ internal sealed class Type1Font : IGlyphSource
     private bool Load(byte[] data, int length1)
     {
         data = StripPfb(data, ref length1);
-        // Locate the end of the cleartext part.
-        int eexec = IndexOf(data, "eexec"u8, 0);
-        if (length1 <= 0 || length1 > data.Length || (eexec >= 0 && eexec + 5 > length1 + 64)) length1 = eexec >= 0 ? eexec + 5 : data.Length;
-        if (eexec >= 0 && eexec + 5 <= data.Length && length1 < eexec + 5) length1 = eexec + 5;
-        ParseCleartext(data, Math.Min(length1, data.Length));
+        int cleartextEnd = CleartextEnd(data, length1);
+        ParseCleartext(data, Math.Min(cleartextEnd, data.Length));
 
-        int start = length1;
-        while (start < data.Length && (data[start] == '\r' || data[start] == '\n' || data[start] == ' ' || data[start] == '\t')) start++;
+        int start = cleartextEnd;
+        while (start < data.Length && data[start] is (byte)'\r' or (byte)'\n' or (byte)' ' or (byte)'\t') start++;
         if (start >= data.Length) return false;
-        var enc = data.AsSpan(start).ToArray();
-        if (IsHex(enc)) enc = FromHex(enc);
-        var priv = Decrypt(enc, 55665, 4);
-        ParsePrivate(priv);
+        var encrypted = data.AsSpan(start).ToArray();
+        if (IsHex(encrypted)) encrypted = FromHex(encrypted);
+        ParsePrivate(Decrypt(encrypted, EexecKey, EexecLeadingBytes));
         _cache = new PathData?[_charStrings.Count];
         _widths = new double[_charStrings.Count];
         Array.Fill(_widths, double.NaN);
         return _charStrings.Count > 0;
     }
 
-    private static byte[] StripPfb(byte[] d, ref int length1)
+    // Where the encrypted part begins: Length1 when it agrees with the eexec keyword, else just after the keyword.
+    private static int CleartextEnd(byte[] data, int length1)
     {
-        if (d.Length < 6 || d[0] != 0x80 || d[1] != 1) return d;
-        var ms = new MemoryStream(d.Length);
-        int p = 0, seg = 0;
-        while (p + 6 <= d.Length && d[p] == 0x80 && (d[p + 1] == 1 || d[p + 1] == 2))
-        {
-            int len = d[p + 2] | d[p + 3] << 8 | d[p + 4] << 16 | d[p + 5] << 24;
-            p += 6;
-            len = Math.Min(len, d.Length - p);
-            ms.Write(d, p, len);
-            if (seg == 0) length1 = len;
-            p += len;
-            seg++;
-        }
-        return ms.ToArray();
+        int eexec = IndexOf(data, EexecKeyword, 0);
+        int afterKeyword = eexec + EexecKeyword.Length;
+        if (length1 <= 0 || length1 > data.Length || (eexec >= 0 && afterKeyword > length1 + Length1Tolerance))
+            length1 = eexec >= 0 ? afterKeyword : data.Length;
+        if (eexec >= 0 && afterKeyword <= data.Length && length1 < afterKeyword) length1 = afterKeyword;
+        return length1;
     }
 
-    private static int IndexOf(byte[] d, ReadOnlySpan<byte> s, int from)
+    // Joins the segments of a PFB file; the first (text) segment's length becomes Length1.
+    private static byte[] StripPfb(byte[] data, ref int length1)
     {
-        int i = d.AsSpan(from).IndexOf(s);
+        if (data.Length < PfbHeaderSize || data[0] != PfbMarker || data[1] != PfbTextSegment) return data;
+        var joined = new MemoryStream(data.Length);
+        int p = 0, segment = 0;
+        while (p + PfbHeaderSize <= data.Length && data[p] == PfbMarker && data[p + 1] is PfbTextSegment or PfbBinarySegment)
+        {
+            int length = data[p + 2] | data[p + 3] << 8 | data[p + 4] << 16 | data[p + 5] << 24;
+            p += PfbHeaderSize;
+            length = Math.Min(length, data.Length - p);
+            joined.Write(data, p, length);
+            if (segment == 0) length1 = length;
+            p += length;
+            segment++;
+        }
+        return joined.ToArray();
+    }
+
+    private static int IndexOf(byte[] data, ReadOnlySpan<byte> keyword, int from)
+    {
+        int i = data.AsSpan(from).IndexOf(keyword);
         return i < 0 ? -1 : i + from;
     }
 
-    private static bool IsHex(byte[] d)
+    // The encrypted part is binary or hexadecimal; the first few bytes tell which.
+    private static bool IsHex(byte[] data)
     {
-        int n = Math.Min(4, d.Length);
-        for (int i = 0; i < n; i++) if (PdfLexer.HexVal(d[i]) < 0) return false;
+        int probe = Math.Min(HexProbeLength, data.Length);
+        for (int i = 0; i < probe; i++)
+        {
+            if (PdfLexer.HexVal(data[i]) < 0) return false;
+        }
         return true;
     }
 
-    private static byte[] FromHex(byte[] d)
+    // Hex digits in pairs, ignoring everything else; a trailing unpaired digit is dropped.
+    private static byte[] FromHex(byte[] data)
     {
-        var o = new List<byte>(d.Length / 2);
-        int hi = -1;
-        foreach (byte b in d)
+        var bytes = new List<byte>(data.Length / 2);
+        int high = -1;
+        foreach (byte b in data)
         {
-            int v = PdfLexer.HexVal(b);
-            if (v < 0) continue;
-            if (hi < 0) hi = v;
-            else { o.Add((byte)(hi << 4 | v)); hi = -1; }
+            int value = PdfLexer.HexVal(b);
+            if (value < 0) continue;
+            if (high < 0)
+            {
+                high = value;
+            }
+            else
+            {
+                bytes.Add((byte)(high << 4 | value));
+                high = -1;
+            }
         }
-        return o.ToArray();
+        return bytes.ToArray();
     }
 
-    private static byte[] Decrypt(ReadOnlySpan<byte> d, int r, int skip)
+    /// <summary>The Type 1 cipher; the first <paramref name="skip"/> plaintext bytes are random padding and dropped.</summary>
+    private static byte[] Decrypt(ReadOnlySpan<byte> data, int key, int skip)
     {
-        const int c1 = 52845, c2 = 22719;
-        var o = new byte[Math.Max(0, d.Length - skip)];
-        for (int i = 0; i < d.Length; i++)
+        int r = key;
+        var plain = new byte[Math.Max(0, data.Length - skip)];
+        for (int i = 0; i < data.Length; i++)
         {
-            int c = d[i];
+            int c = data[i];
             int p = c ^ (r >> 8);
-            r = ((c + r) * c1 + c2) & 0xFFFF;
-            if (i >= skip) o[i - skip] = (byte)p;
+            r = ((c + r) * CipherC1 + CipherC2) & 0xFFFF;
+            if (i >= skip) plain[i - skip] = (byte)p;
         }
-        return o;
+        return plain;
     }
 
-    private void ParseCleartext(byte[] d, int end)
+    // ------------------------------------------------------------------ the cleartext part
+
+    private void ParseCleartext(byte[] data, int end)
     {
-        var lx = new PdfLexer(d, 0, end);
+        var lexer = new PdfLexer(data, 0, end);
         while (true)
         {
-            var k = lx.Next();
-            if (k == TokenKind.Eof) break;
-            if (k != TokenKind.Name) continue;
-            if (lx.NameValue == "FontMatrix")
-            {
-                if (lx.Next() is TokenKind.ArrayStart or TokenKind.BraceOpen)
-                {
-                    var m = new double[6];
-                    int n = 0;
-                    while (n < 6 && lx.Next() is TokenKind.Integer or TokenKind.Real) m[n++] = lx.Number;
-                    if (n == 6 && m[0] != 0) FontMatrix = new Matrix(m[0], m[1], m[2], m[3], m[4], m[5]);
-                }
-            }
-            else if (lx.NameValue == "Encoding")
-            {
-                int save = lx.Pos;
-                var k2 = lx.Next();
-                if (k2 == TokenKind.Keyword && lx.KeywordIs("StandardEncoding"))
-                {
-                    for (int c = 0; c < 256; c++) BuiltinEncoding[c] = Encodings.Standard[c];
-                    continue;
-                }
-                lx.Pos = save;
-                // "dup code /name put" entries until "readonly def" or "def".
-                while (true)
-                {
-                    var t = lx.Next();
-                    if (t == TokenKind.Eof) break;
-                    if (t == TokenKind.Keyword && (lx.KeywordIs("def") || lx.KeywordIs("readonly"))) break;
-                    if (t == TokenKind.Keyword && lx.KeywordIs("dup"))
-                    {
-                        if (lx.Next() != TokenKind.Integer) continue;
-                        int code = (int)lx.Integer;
-                        if (lx.Next() != TokenKind.Name) continue;
-                        if (code >= 0 && code < 256) BuiltinEncoding[code] = lx.NameValue;
-                    }
-                }
-            }
+            var kind = lexer.Next();
+            if (kind == TokenKind.Eof) break;
+            if (kind != TokenKind.Name) continue;
+            if (lexer.NameValue == "FontMatrix") ReadFontMatrix(lexer);
+            else if (lexer.NameValue == "Encoding") ReadEncoding(lexer);
         }
     }
 
-    private void ParsePrivate(byte[] d)
+    private void ReadFontMatrix(PdfLexer lexer)
     {
-        int lenIvPos = IndexOf(d, "/lenIV"u8, 0);
-        if (lenIvPos >= 0)
+        if (lexer.Next() is not (TokenKind.ArrayStart or TokenKind.BraceOpen)) return;
+        var m = new double[6];
+        int count = 0;
+        while (count < 6 && lexer.Next() is TokenKind.Integer or TokenKind.Real) m[count++] = lexer.Number;
+        if (count == 6 && m[0] != 0) FontMatrix = new Matrix(m[0], m[1], m[2], m[3], m[4], m[5]);
+    }
+
+    // "/Encoding StandardEncoding def", or an array filled with "dup <code> /<name> put" entries up to "readonly def".
+    private void ReadEncoding(PdfLexer lexer)
+    {
+        int save = lexer.Pos;
+        if (lexer.Next() == TokenKind.Keyword && lexer.KeywordIs("StandardEncoding"))
         {
-            var lx = new PdfLexer(d, lenIvPos + 6);
-            if (lx.Next() == TokenKind.Integer) _lenIV = (int)lx.Integer;
+            Array.Copy(Encodings.Standard, BuiltinEncoding, 256);
+            return;
         }
-        // Subrs: "dup <i> <len> RD <bytes> NP"
-        int subrsPos = IndexOf(d, "/Subrs"u8, 0);
-        int charsPos = IndexOf(d, "/CharStrings"u8, 0);
-        if (subrsPos >= 0 && (charsPos < 0 || subrsPos < charsPos))
+        lexer.Pos = save;
+        while (true)
         {
-            int p = subrsPos + 6;
-            int count = ReadInt(d, ref p);
-            var subrs = new byte[Math.Clamp(count, 0, 65536)][];
-            for (int i = 0; i < subrs.Length; i++)
-            {
-                int dup = IndexOf(d, "dup"u8, p);
-                if (dup < 0 || (charsPos >= 0 && dup > charsPos)) break;
-                p = dup + 3;
-                int idx = ReadInt(d, ref p);
-                int len = ReadInt(d, ref p);
-                if (!SkipToken(d, ref p) || len < 0 || p + 1 + len > d.Length) break;
-                p++; // single space after RD
-                var cs = Decrypt(d.AsSpan(p, len), 4330, Math.Max(0, _lenIV));
-                if (idx >= 0 && idx < subrs.Length) subrs[idx] = cs;
-                p += len;
-            }
-            foreach (var s in subrs) _subrs.Add(s ?? Array.Empty<byte>());
+            var kind = lexer.Next();
+            if (kind == TokenKind.Eof) break;
+            if (kind == TokenKind.Keyword && (lexer.KeywordIs("def") || lexer.KeywordIs("readonly"))) break;
+            if (kind != TokenKind.Keyword || !lexer.KeywordIs("dup")) continue;
+            if (lexer.Next() != TokenKind.Integer) continue;
+            int code = (int)lexer.Integer;
+            if (lexer.Next() != TokenKind.Name) continue;
+            if (code >= 0 && code < 256) BuiltinEncoding[code] = lexer.NameValue;
         }
-        if (charsPos < 0) return;
+    }
+
+    // ------------------------------------------------------------------ the private part
+
+    private static ReadOnlySpan<byte> LenIVKeyword => "/lenIV"u8;
+    private static ReadOnlySpan<byte> SubrsKeyword => "/Subrs"u8;
+    private static ReadOnlySpan<byte> CharStringsKeyword => "/CharStrings"u8;
+    private static ReadOnlySpan<byte> DupKeyword => "dup"u8;
+
+    private void ParsePrivate(byte[] text)
+    {
+        int lenIV = IndexOf(text, LenIVKeyword, 0);
+        if (lenIV >= 0)
         {
-            int p = charsPos + 12;
-            int count = ReadInt(d, ref p);
-            for (int i = 0; i < count && p < d.Length; i++)
-            {
-                int slash = Array.IndexOf(d, (byte)'/', p);
-                if (slash < 0) break;
-                int ns = slash + 1, ne = ns;
-                while (ne < d.Length && PdfLexer.IsRegular(d[ne])) ne++;
-                string name = System.Text.Encoding.Latin1.GetString(d, ns, ne - ns);
-                p = ne;
-                int len = ReadInt(d, ref p);
-                if (!SkipToken(d, ref p) || len < 0 || p + 1 + len > d.Length) break;
-                p++;
-                var cs = Decrypt(d.AsSpan(p, len), 4330, Math.Max(0, _lenIV));
-                p += len;
-                if (_names.ContainsKey(name)) continue;
-                _names[name] = _charStrings.Count;
-                _glyphNames.Add(name);
-                _charStrings.Add(cs);
-            }
+            var lexer = new PdfLexer(text, lenIV + LenIVKeyword.Length);
+            if (lexer.Next() == TokenKind.Integer) _lenIV = (int)lexer.Integer;
         }
+        int subrs = IndexOf(text, SubrsKeyword, 0);
+        int charStrings = IndexOf(text, CharStringsKeyword, 0);
+        if (subrs >= 0 && (charStrings < 0 || subrs < charStrings)) ReadSubrs(text, subrs + SubrsKeyword.Length, charStrings);
+        if (charStrings >= 0) ReadCharStrings(text, charStrings + CharStringsKeyword.Length);
     }
 
-    private static int ReadInt(byte[] d, ref int p)
+    // "/Subrs <count> array", then "dup <index> <length> RD <bytes> NP" entries, which must come before /CharStrings.
+    private void ReadSubrs(byte[] text, int position, int charStrings)
     {
-        while (p < d.Length && !(d[p] >= '0' && d[p] <= '9') && d[p] != '-') p++;
-        bool neg = p < d.Length && d[p] == '-';
-        if (neg) p++;
-        int v = 0;
-        while (p < d.Length && d[p] >= '0' && d[p] <= '9') v = v * 10 + (d[p++] - '0');
-        return neg ? -v : v;
-    }
-
-    /// <summary>Skips whitespace and one token (the RD or -| operator).</summary>
-    private static bool SkipToken(byte[] d, ref int p)
-    {
-        while (p < d.Length && PdfLexer.IsWhite(d[p])) p++;
-        int s = p;
-        while (p < d.Length && !PdfLexer.IsWhite(d[p])) p++;
-        return p > s && p < d.Length;
-    }
-
-    // ------------------------------------------------------------------ charstrings
-
-    public PathData? GetGlyph(int gid)
-    {
-        if (gid < 0 || gid >= _cache.Length) return null;
-        var cached = Volatile.Read(ref _cache[gid]);
-        if (cached != null) return cached;
-        var s = new T1State { Path = new PathData() };
-        try { Run(s, _charStrings[gid], 0); }
-        catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException) { }
-        if (s.Open) s.Path.ClosePath();
-        _widths[gid] = s.Width;
-        Volatile.Write(ref _cache[gid], s.Path);
-        return s.Path;
-    }
-
-    private sealed class T1State
-    {
-        public PathData Path = null!;
-        public int Budget = 200_000; // charstring bytes per glyph: guards against subroutine call explosions
-        public readonly double[] Stack = new double[64];
-        public int Sp;
-        public readonly Stack<double> Ps = new();
-        public double X, Y, Sbx, Width;
-        public bool Open, Ended, Flex;
-        public readonly List<(double X, double Y)> FlexPts = new();
-    }
-
-    private void Run(T1State s, byte[] cs, int depth)
-    {
-        if (depth > 10) return;
-        var st = s.Stack;
-        int p = 0;
-        while (p < cs.Length && !s.Ended && --s.Budget > 0)
+        var scanner = new PrivateScanner(text, position);
+        int count = scanner.ReadInteger();
+        var subrs = new byte[Math.Clamp(count, 0, MaxSubrs)][];
+        for (int i = 0; i < subrs.Length; i++)
         {
-            int b = cs[p++];
-            if (b >= 32)
-            {
-                double v;
-                if (b <= 246) v = b - 139;
-                else if (b <= 250) v = (b - 247) * 256 + cs[p++] + 108;
-                else if (b <= 254) v = -(b - 251) * 256 - cs[p++] - 108;
-                else { v = cs[p] << 24 | cs[p + 1] << 16 | cs[p + 2] << 8 | cs[p + 3]; p += 4; }
-                if (s.Sp < st.Length) st[s.Sp++] = v;
-                continue;
-            }
-            switch (b)
-            {
-                case 13: // hsbw
-                    if (s.Sp >= 2) { s.Sbx = st[0]; s.Width = st[1]; s.X = st[0]; s.Y = 0; }
-                    s.Sp = 0;
-                    break;
-                case 9: // closepath
-                    if (s.Open) { s.Path.ClosePath(); s.Open = false; }
-                    s.Sp = 0;
-                    break;
-                case 21: // rmoveto
-                    if (s.Sp >= 2) Move(s, s.X + st[s.Sp - 2], s.Y + st[s.Sp - 1]);
-                    s.Sp = 0;
-                    break;
-                case 22: // hmoveto
-                    if (s.Sp >= 1) Move(s, s.X + st[s.Sp - 1], s.Y);
-                    s.Sp = 0;
-                    break;
-                case 4: // vmoveto
-                    if (s.Sp >= 1) Move(s, s.X, s.Y + st[s.Sp - 1]);
-                    s.Sp = 0;
-                    break;
-                case 5: if (s.Sp >= 2) Line(s, s.X + st[0], s.Y + st[1]); s.Sp = 0; break;
-                case 6: if (s.Sp >= 1) Line(s, s.X + st[0], s.Y); s.Sp = 0; break;
-                case 7: if (s.Sp >= 1) Line(s, s.X, s.Y + st[0]); s.Sp = 0; break;
-                case 8: // rrcurveto
-                    if (s.Sp >= 6) Curve(s, st[0], st[1], st[2], st[3], st[4], st[5]);
-                    s.Sp = 0;
-                    break;
-                case 30: // vhcurveto
-                    if (s.Sp >= 4) Curve(s, 0, st[0], st[1], st[2], st[3], 0);
-                    s.Sp = 0;
-                    break;
-                case 31: // hvcurveto
-                    if (s.Sp >= 4) Curve(s, st[0], 0, st[1], st[2], 0, st[3]);
-                    s.Sp = 0;
-                    break;
-                case 10: // callsubr
-                {
-                    if (s.Sp < 1) break;
-                    int idx = (int)st[--s.Sp];
-                    if (idx >= 0 && idx < _subrs.Count) Run(s, _subrs[idx], depth + 1);
-                    break;
-                }
-                case 11: return;
-                case 14: // endchar
-                    if (s.Open) { s.Path.ClosePath(); s.Open = false; }
-                    s.Ended = true;
-                    return;
-                case 1: case 3: s.Sp = 0; break; // hstem vstem
-                case 12:
-                {
-                    int op = cs[p++];
-                    switch (op)
-                    {
-                        case 7: // sbw
-                            if (s.Sp >= 4) { s.Sbx = st[0]; s.X = st[0]; s.Y = st[1]; s.Width = st[2]; }
-                            s.Sp = 0;
-                            break;
-                        case 6: // seac
-                            if (s.Sp >= 5) Seac(s, st[0], st[1], st[2], (int)st[3], (int)st[4], depth);
-                            s.Ended = true;
-                            return;
-                        case 12: // div
-                            if (s.Sp >= 2) { st[s.Sp - 2] = st[s.Sp - 1] == 0 ? 0 : st[s.Sp - 2] / st[s.Sp - 1]; s.Sp--; }
-                            break;
-                        case 16: // callothersubr
-                        {
-                            if (s.Sp < 2) { s.Sp = 0; break; }
-                            int other = (int)st[--s.Sp];
-                            int n = (int)st[--s.Sp];
-                            n = Math.Clamp(n, 0, s.Sp);
-                            var args = new double[n];
-                            for (int i = 0; i < n; i++) args[i] = st[s.Sp - n + i];
-                            s.Sp -= n;
-                            switch (other)
-                            {
-                                case 1:
-                                    s.Flex = true;
-                                    s.FlexPts.Clear();
-                                    break;
-                                case 2:
-                                    break;
-                                case 0:
-                                    s.Flex = false;
-                                    if (s.FlexPts.Count >= 7)
-                                    {
-                                        var f = s.FlexPts;
-                                        CurveAbs(s, f[1], f[2], f[3]);
-                                        CurveAbs(s, f[4], f[5], f[6]);
-                                    }
-                                    s.Ps.Push(s.Y);
-                                    s.Ps.Push(s.X);
-                                    break;
-                                case 3:
-                                    s.Ps.Push(3);
-                                    break;
-                                default:
-                                    for (int i = 0; i < n; i++) s.Ps.Push(args[i]);
-                                    break;
-                            }
-                            break;
-                        }
-                        case 17: // pop
-                            if (s.Sp < st.Length) st[s.Sp++] = s.Ps.Count > 0 ? s.Ps.Pop() : 0;
-                            break;
-                        case 33: // setcurrentpoint
-                            if (s.Sp >= 2) { s.X = st[0]; s.Y = st[1]; }
-                            s.Sp = 0;
-                            break;
-                        default: // dotsection, vstem3, hstem3
-                            s.Sp = 0;
-                            break;
-                    }
-                    break;
-                }
-                default:
-                    s.Sp = 0;
-                    break;
-            }
+            int dup = IndexOf(text, DupKeyword, scanner.Position);
+            if (dup < 0 || (charStrings >= 0 && dup > charStrings)) break;
+            scanner.Position = dup + DupKeyword.Length;
+            int index = scanner.ReadInteger();
+            if (!scanner.TryReadCharstring(out var charstring)) break;
+            if (index >= 0 && index < subrs.Length) subrs[index] = DecryptCharstring(charstring);
+        }
+        foreach (var subr in subrs) _subrs.Add(subr ?? Array.Empty<byte>());
+    }
+
+    // "/CharStrings <count> dict dup begin", then "/<name> <length> RD <bytes> ND" entries; a repeated name keeps the first.
+    private void ReadCharStrings(byte[] text, int position)
+    {
+        var scanner = new PrivateScanner(text, position);
+        int count = scanner.ReadInteger();
+        for (int i = 0; i < count && scanner.Position < text.Length; i++)
+        {
+            if (!scanner.TryReadName(out var name)) break;
+            if (!scanner.TryReadCharstring(out var charstring)) break;
+            if (_names.ContainsKey(name)) continue;
+            _names[name] = _charStrings.Count;
+            _glyphNames.Add(name);
+            _charStrings.Add(DecryptCharstring(charstring));
         }
     }
 
-    private void Seac(T1State s, double asb, double adx, double ady, int bchar, int achar, int depth)
-    {
-        if (bchar is < 0 or > 255 || achar is < 0 or > 255) return;
-        int bg = Encodings.Standard[bchar] is string bn ? GlyphByName(bn) : -1;
-        int ag = Encodings.Standard[achar] is string an ? GlyphByName(an) : -1;
-        if (bg >= 0 && bg < _charStrings.Count && GetGlyph(bg) is PathData bp) bp.AppendTransformed(s.Path, Matrix.Identity);
-        if (ag >= 0 && ag < _charStrings.Count && GetGlyph(ag) is PathData ap)
-            ap.AppendTransformed(s.Path, Matrix.Translation(adx - asb, ady));
-    }
+    private byte[] DecryptCharstring(ReadOnlySpan<byte> encrypted) => Decrypt(encrypted, CharstringKey, Math.Max(0, _lenIV));
 
-    private static void Move(T1State s, double x, double y)
+    /// <summary>
+    /// Reads the numbers, names and binary entries of the decrypted private part. It is a scanner, not a lexer,
+    /// because the binary charstrings in between would derail a PostScript tokenizer.
+    /// </summary>
+    private ref struct PrivateScanner(byte[] text, int position)
     {
-        s.X = x;
-        s.Y = y;
-        if (s.Flex) { s.FlexPts.Add((x, y)); return; }
-        if (s.Open) s.Path.ClosePath();
-        s.Path.Move(x, y);
-        s.Open = true;
-    }
+        public int Position = position;
 
-    private static void Line(T1State s, double x, double y)
-    {
-        if (!s.Open) { s.Path.Move(s.X, s.Y); s.Open = true; }
-        s.X = x;
-        s.Y = y;
-        s.Path.Line(x, y);
-    }
+        /// <summary>The next integer, skipping anything before it; 0 when there are no digits.</summary>
+        public int ReadInteger()
+        {
+            while (Position < text.Length && !IsDigit(text[Position]) && text[Position] != '-') Position++;
+            bool negative = Position < text.Length && text[Position] == '-';
+            if (negative) Position++;
+            int value = 0;
+            while (Position < text.Length && IsDigit(text[Position])) value = value * 10 + (text[Position++] - '0');
+            return negative ? -value : value;
+        }
 
-    private static void Curve(T1State s, double dx1, double dy1, double dx2, double dy2, double dx3, double dy3)
-    {
-        double x1 = s.X + dx1, y1 = s.Y + dy1, x2 = x1 + dx2, y2 = y1 + dy2, x3 = x2 + dx3, y3 = y2 + dy3;
-        CurveAbs(s, (x1, y1), (x2, y2), (x3, y3));
-    }
+        /// <summary>The next "/name": its regular characters, up to the first delimiter or white space.</summary>
+        public bool TryReadName(out string name)
+        {
+            int slash = Array.IndexOf(text, (byte)'/', Position);
+            if (slash < 0)
+            {
+                name = "";
+                return false;
+            }
+            int start = slash + 1, end = start;
+            while (end < text.Length && PdfLexer.IsRegular(text[end])) end++;
+            name = Encoding.Latin1.GetString(text, start, end - start);
+            Position = end;
+            return true;
+        }
 
-    private static void CurveAbs(T1State s, (double X, double Y) a, (double X, double Y) b, (double X, double Y) c)
-    {
-        if (!s.Open) { s.Path.Move(s.X, s.Y); s.Open = true; }
-        s.Path.Cubic(a.X, a.Y, b.X, b.Y, c.X, c.Y);
-        s.X = c.X;
-        s.Y = c.Y;
+        /// <summary>A binary entry: its length, the RD (or -|) operator, one space, then the bytes.</summary>
+        public bool TryReadCharstring(out ReadOnlySpan<byte> bytes)
+        {
+            int length = ReadInteger();
+            if (!SkipToken() || length < 0 || Position + 1 + length > text.Length)
+            {
+                bytes = default;
+                return false;
+            }
+            Position++; // the single space after RD
+            bytes = text.AsSpan(Position, length);
+            Position += length;
+            return true;
+        }
+
+        // Skips white space and one token; false when there is no token or it runs to the end.
+        private bool SkipToken()
+        {
+            while (Position < text.Length && PdfLexer.IsWhite(text[Position])) Position++;
+            int start = Position;
+            while (Position < text.Length && !PdfLexer.IsWhite(text[Position])) Position++;
+            return Position > start && Position < text.Length;
+        }
+
+        private static bool IsDigit(byte b) => b is >= (byte)'0' and <= (byte)'9';
     }
 }

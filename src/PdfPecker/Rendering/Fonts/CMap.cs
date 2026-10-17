@@ -8,10 +8,24 @@ namespace PdfPecker.Rendering.Fonts;
 /// </summary>
 internal sealed class CMap
 {
-    private readonly List<(int Bytes, uint Lo, uint Hi)> _codespace = new();
+    /// <summary>A code has at most four bytes; longer strings in a CMap keep their first four.</summary>
+    private const int MaxCodeBytes = 4;
+
+    /// <summary>Without codespace ranges, codes are two bytes.</summary>
+    private const int DefaultCodeBytes = 2;
+
+    /// <summary>A bfrange longer than this is read as its first code only, so a damaged range cannot fill memory.</summary>
+    private const uint MaxBfRangeLength = 65535;
+
+    private readonly List<CodespaceRange> _codespace = new();
     private readonly Dictionary<uint, int> _single = new();
-    private readonly List<(uint Lo, uint Hi, int Start)> _ranges = new();
+    private readonly List<CidRange> _ranges = new();
     private readonly Dictionary<uint, string> _unicode = new();
+
+    private readonly record struct CodespaceRange(int Bytes, uint Low, uint High);
+
+    private readonly record struct CidRange(uint Low, uint High, int FirstCid);
+
     public bool IsIdentity { get; private set; }
     public bool Vertical { get; private set; }
 
@@ -22,43 +36,48 @@ internal sealed class CMap
     {
         if (_codespace.Count == 0)
         {
-            int n = 2;
-            if (pos + n > s.Length) n = s.Length - pos;
-            uint c = 0;
-            for (int i = 0; i < n; i++) c = c << 8 | s[pos + i];
-            pos += n;
-            length = n;
-            return c;
+            length = Math.Min(DefaultCodeBytes, s.Length - pos);
+            uint code = Code(s, pos, length);
+            pos += length;
+            return code;
         }
-        uint code = 0;
-        for (int n = 1; n <= 4 && pos + n <= s.Length; n++)
+        uint candidate = 0;
+        for (int n = 1; n <= MaxCodeBytes && pos + n <= s.Length; n++)
         {
-            code = code << 8 | s[pos + n - 1];
-            foreach (var (bytes, lo, hi) in _codespace)
+            candidate = candidate << 8 | s[pos + n - 1];
+            foreach (var range in _codespace)
             {
-                if (bytes == n && code >= lo && code <= hi)
+                if (range.Bytes == n && candidate >= range.Low && candidate <= range.High)
                 {
                     pos += n;
                     length = n;
-                    return code;
+                    return candidate;
                 }
             }
         }
-        // No codespace matched: consume the shortest code length.
-        int min = _codespace.Min(c => c.Bytes);
-        min = Math.Min(min, s.Length - pos);
-        code = 0;
-        for (int i = 0; i < min; i++) code = code << 8 | s[pos + i];
-        pos += Math.Max(1, min);
-        length = Math.Max(1, min);
+        // No codespace matched: consume the shortest code length (the ranges are sorted by it), or what is left.
+        int shortest = Math.Min(_codespace[0].Bytes, s.Length - pos);
+        uint partial = Code(s, pos, shortest);
+        length = Math.Max(1, shortest);
+        pos += length;
+        return partial;
+    }
+
+    // The count bytes at pos as a big-endian code; a count of zero or less gives 0.
+    private static uint Code(ReadOnlySpan<byte> s, int pos, int count)
+    {
+        uint code = 0;
+        for (int i = 0; i < count; i++) code = code << 8 | s[pos + i];
         return code;
     }
 
     public int ToCid(uint code)
     {
         if (_single.TryGetValue(code, out int cid)) return cid;
-        foreach (var (lo, hi, start) in _ranges)
-            if (code >= lo && code <= hi) return start + (int)(code - lo);
+        foreach (var range in _ranges)
+        {
+            if (code >= range.Low && code <= range.High) return range.FirstCid + (int)(code - range.Low);
+        }
         return IsIdentity ? (int)code : 0;
     }
 
@@ -69,185 +88,226 @@ internal sealed class CMap
         var map = new CMap();
         try
         {
-            map.ParseInto(data, file, depth);
+            map.ParseInto(data);
         }
         catch (Exception ex) when (ex is PdfFormatException or IndexOutOfRangeException or ArgumentException)
         {
+            // A damaged CMap keeps the mappings read so far.
         }
         return map;
     }
 
-    private void ParseInto(byte[] data, PdfFile? file, int depth)
+    // The operands before an operator; only the last two are ever looked at (for "/WMode 1 def" and "/Name usecmap").
+    private enum OperandKind : byte { None, Integer, Name, Other }
+
+    private struct OperandWindow
     {
-        var lx = new PdfLexer(data);
-        var operands = new List<object>();
+        public OperandKind LastKind, PreviousKind;
+        public long LastInteger;
+        public string? LastName, PreviousName;
+
+        public void Push(OperandKind kind, long integer = 0, string? name = null)
+        {
+            PreviousKind = LastKind;
+            PreviousName = LastName;
+            LastKind = kind;
+            LastInteger = integer;
+            LastName = name;
+        }
+
+        public void Clear() => this = default;
+    }
+
+    private void ParseInto(byte[] data)
+    {
+        var lexer = new PdfLexer(data);
+        var operands = new OperandWindow();
         while (true)
         {
-            var k = lx.Next();
-            if (k == TokenKind.Eof) break;
-            switch (k)
+            var kind = lexer.Next();
+            if (kind == TokenKind.Eof) break;
+            switch (kind)
             {
                 case TokenKind.Integer:
-                    operands.Add(lx.Integer);
+                    operands.Push(OperandKind.Integer, integer: lexer.Integer);
                     break;
                 case TokenKind.HexString:
                 case TokenKind.String:
-                    operands.Add(lx.StringValue!);
+                    operands.Push(OperandKind.Other);
                     break;
                 case TokenKind.Name:
-                    operands.Add(lx.NameValue!);
+                    operands.Push(OperandKind.Name, name: lexer.NameValue);
                     break;
                 case TokenKind.ArrayStart:
-                {
-                    var arr = new List<object>();
-                    while (true)
-                    {
-                        var ak = lx.Next();
-                        if (ak is TokenKind.ArrayEnd or TokenKind.Eof) break;
-                        if (ak is TokenKind.HexString or TokenKind.String) arr.Add(lx.StringValue!);
-                        else if (ak == TokenKind.Integer) arr.Add(lx.Integer);
-                    }
-                    operands.Add(arr);
+                    SkipArray(lexer);
+                    operands.Push(OperandKind.Other);
                     break;
-                }
                 case TokenKind.Keyword:
-                {
-                    if (lx.KeywordIs("begincodespacerange")) { ReadCodespace(lx); operands.Clear(); }
-                    else if (lx.KeywordIs("begincidrange")) { ReadCidRange(lx); operands.Clear(); }
-                    else if (lx.KeywordIs("begincidchar")) { ReadCidChar(lx); operands.Clear(); }
-                    else if (lx.KeywordIs("beginbfchar")) { ReadBfChar(lx); operands.Clear(); }
-                    else if (lx.KeywordIs("beginbfrange")) { ReadBfRange(lx); operands.Clear(); }
-                    else if (lx.KeywordIs("usecmap"))
-                    {
-                        if (operands.Count > 0 && operands[^1] is string parent)
-                        {
-                            if (parent.StartsWith("Identity", StringComparison.Ordinal)) { IsIdentity = true; Vertical = parent.EndsWith("-V", StringComparison.Ordinal); }
-                        }
-                        operands.Clear();
-                    }
-                    else if (lx.KeywordIs("def"))
-                    {
-                        if (operands.Count >= 2 && operands[^2] is string key && key == "WMode" && operands[^1] is long wm) Vertical = wm == 1;
-                        operands.Clear();
-                    }
-                    else operands.Clear();
-                    break;
-                }
-                default:
+                    Keyword(lexer, in operands);
+                    operands.Clear();
                     break;
             }
         }
     }
 
-    private static uint Code(byte[] b, out int len)
+    private static void SkipArray(PdfLexer lexer)
     {
-        len = Math.Clamp(b.Length, 1, 4);
-        uint c = 0;
-        for (int i = 0; i < Math.Min(4, b.Length); i++) c = c << 8 | b[i];
-        return c;
+        while (lexer.Next() is not (TokenKind.ArrayEnd or TokenKind.Eof))
+        {
+        }
     }
 
-    private void ReadCodespace(PdfLexer lx)
+    private void Keyword(PdfLexer lexer, in OperandWindow operands)
+    {
+        if (lexer.KeywordIs("begincodespacerange")) ReadCodespace(lexer);
+        else if (lexer.KeywordIs("begincidrange")) ReadCidRange(lexer);
+        else if (lexer.KeywordIs("begincidchar")) ReadCidChar(lexer);
+        else if (lexer.KeywordIs("beginbfchar")) ReadBfChar(lexer);
+        else if (lexer.KeywordIs("beginbfrange")) ReadBfRange(lexer);
+        else if (lexer.KeywordIs("usecmap"))
+        {
+            // Only the Identity parents are known; a CMap built on one maps unlisted codes to themselves.
+            if (operands.LastKind == OperandKind.Name && operands.LastName!.StartsWith("Identity", StringComparison.Ordinal))
+            {
+                IsIdentity = true;
+                Vertical = operands.LastName.EndsWith("-V", StringComparison.Ordinal);
+            }
+        }
+        else if (lexer.KeywordIs("def"))
+        {
+            if (operands.PreviousKind == OperandKind.Name && operands.PreviousName == "WMode" && operands.LastKind == OperandKind.Integer)
+                Vertical = operands.LastInteger == 1;
+        }
+    }
+
+    // The first four bytes of a string as a big-endian code.
+    private static uint Code(ReadOnlySpan<byte> bytes)
+    {
+        uint code = 0;
+        for (int i = 0; i < Math.Min(MaxCodeBytes, bytes.Length); i++) code = code << 8 | bytes[i];
+        return code;
+    }
+
+    private static bool IsString(TokenKind kind) => kind is TokenKind.HexString or TokenKind.String;
+
+    /// <summary>Reads a string operand; false at the end of the section (any keyword) or at a token of another kind.</summary>
+    private static bool NextIsString(PdfLexer lexer) => IsString(lexer.Next());
+
+    // Each section runs to its end keyword; an entry that does not start with a string is skipped, and one that is
+    // cut off ends the section.
+    private void ReadCodespace(PdfLexer lexer)
     {
         while (true)
         {
-            var k = lx.Next();
-            if (k == TokenKind.Eof || k == TokenKind.Keyword) break;
-            if (k is not (TokenKind.HexString or TokenKind.String)) continue;
-            var lo = lx.StringValue!;
-            if (lx.Next() is not (TokenKind.HexString or TokenKind.String)) break;
-            var hi = lx.StringValue!;
-            _codespace.Add((Math.Clamp(lo.Length, 1, 4), Code(lo, out _), Code(hi, out _)));
+            var kind = lexer.Next();
+            if (kind is TokenKind.Eof or TokenKind.Keyword) break;
+            if (!IsString(kind)) continue;
+            var low = lexer.StringValue!;
+            if (!NextIsString(lexer)) break;
+            var high = lexer.StringValue!;
+            _codespace.Add(new CodespaceRange(Math.Clamp(low.Length, 1, MaxCodeBytes), Code(low), Code(high)));
         }
+        // NextCode tries the shortest codes first.
         _codespace.Sort((a, b) => a.Bytes.CompareTo(b.Bytes));
     }
 
-    private void ReadCidRange(PdfLexer lx)
+    private void ReadCidRange(PdfLexer lexer)
     {
         while (true)
         {
-            var k = lx.Next();
-            if (k == TokenKind.Eof || k == TokenKind.Keyword) break;
-            if (k is not (TokenKind.HexString or TokenKind.String)) continue;
-            var lo = lx.StringValue!;
-            if (lx.Next() is not (TokenKind.HexString or TokenKind.String)) break;
-            var hi = lx.StringValue!;
-            if (lx.Next() != TokenKind.Integer) break;
-            uint l = Code(lo, out _), h = Code(hi, out _);
-            if (l == h) _single[l] = (int)lx.Integer;
-            else _ranges.Add((l, h, (int)lx.Integer));
+            var kind = lexer.Next();
+            if (kind is TokenKind.Eof or TokenKind.Keyword) break;
+            if (!IsString(kind)) continue;
+            var low = lexer.StringValue!;
+            if (!NextIsString(lexer)) break;
+            var high = lexer.StringValue!;
+            if (lexer.Next() != TokenKind.Integer) break;
+            uint l = Code(low), h = Code(high);
+            if (l == h) _single[l] = (int)lexer.Integer;
+            else _ranges.Add(new CidRange(l, h, (int)lexer.Integer));
         }
     }
 
-    private void ReadCidChar(PdfLexer lx)
+    private void ReadCidChar(PdfLexer lexer)
     {
         while (true)
         {
-            var k = lx.Next();
-            if (k == TokenKind.Eof || k == TokenKind.Keyword) break;
-            if (k is not (TokenKind.HexString or TokenKind.String)) continue;
-            var c = lx.StringValue!;
-            if (lx.Next() != TokenKind.Integer) break;
-            _single[Code(c, out _)] = (int)lx.Integer;
+            var kind = lexer.Next();
+            if (kind is TokenKind.Eof or TokenKind.Keyword) break;
+            if (!IsString(kind)) continue;
+            var code = lexer.StringValue!;
+            if (lexer.Next() != TokenKind.Integer) break;
+            _single[Code(code)] = (int)lexer.Integer;
         }
     }
 
-    private void ReadBfChar(PdfLexer lx)
+    // bfchar maps a code to a UTF-16BE string, or to a glyph name.
+    private void ReadBfChar(PdfLexer lexer)
     {
         while (true)
         {
-            var k = lx.Next();
-            if (k == TokenKind.Eof || k == TokenKind.Keyword) break;
-            if (k is not (TokenKind.HexString or TokenKind.String)) continue;
-            var src = lx.StringValue!;
-            var k2 = lx.Next();
-            if (k2 is TokenKind.HexString or TokenKind.String) _unicode[Code(src, out _)] = Utf16(lx.StringValue!);
-            else if (k2 == TokenKind.Name) { var u = Encodings.NameToUnicode(lx.NameValue); if (u >= 0) _unicode[Code(src, out _)] = char.ConvertFromUtf32(u); }
+            var kind = lexer.Next();
+            if (kind is TokenKind.Eof or TokenKind.Keyword) break;
+            if (!IsString(kind)) continue;
+            var source = lexer.StringValue!;
+            var destination = lexer.Next();
+            if (IsString(destination))
+            {
+                _unicode[Code(source)] = Utf16(lexer.StringValue!);
+            }
+            else if (destination == TokenKind.Name)
+            {
+                int u = Encodings.NameToUnicode(lexer.NameValue);
+                if (u >= 0) _unicode[Code(source)] = char.ConvertFromUtf32(u);
+            }
             else break;
         }
     }
 
-    private void ReadBfRange(PdfLexer lx)
+    // bfrange maps a range of codes to consecutive strings (the last byte counts up) or to an array of strings.
+    private void ReadBfRange(PdfLexer lexer)
     {
         while (true)
         {
-            var k = lx.Next();
-            if (k == TokenKind.Eof || k == TokenKind.Keyword) break;
-            if (k is not (TokenKind.HexString or TokenKind.String)) continue;
-            var lo = lx.StringValue!;
-            if (lx.Next() is not (TokenKind.HexString or TokenKind.String)) break;
-            var hi = lx.StringValue!;
-            uint l = Code(lo, out _), h = Code(hi, out _);
-            if (h < l || h - l > 65535) h = l;
-            var k3 = lx.Next();
-            if (k3 is TokenKind.HexString or TokenKind.String)
+            var kind = lexer.Next();
+            if (kind is TokenKind.Eof or TokenKind.Keyword) break;
+            if (!IsString(kind)) continue;
+            var low = lexer.StringValue!;
+            if (!NextIsString(lexer)) break;
+            var high = lexer.StringValue!;
+            uint l = Code(low), h = Code(high);
+            if (h < l || h - l > MaxBfRangeLength) h = l;
+            var destination = lexer.Next();
+            if (IsString(destination))
             {
-                var dst = lx.StringValue!;
-                for (uint c = l; c <= h; c++)
+                var text = (byte[])lexer.StringValue!.Clone();
+                for (uint code = l; code <= h; code++)
                 {
-                    var b = (byte[])dst.Clone();
-                    // Increment the last byte(s).
-                    uint add = c - l;
-                    for (int i = b.Length - 1; i >= 0 && add > 0; i--)
-                    {
-                        uint v = b[i] + add;
-                        b[i] = (byte)v;
-                        add = v >> 8;
-                    }
-                    _unicode[c] = Utf16(b);
+                    _unicode[code] = Utf16(text);
+                    Increment(text);
                 }
             }
-            else if (k3 == TokenKind.ArrayStart)
+            else if (destination == TokenKind.ArrayStart)
             {
-                uint c = l;
+                uint code = l;
                 while (true)
                 {
-                    var ak = lx.Next();
-                    if (ak is TokenKind.ArrayEnd or TokenKind.Eof) break;
-                    if (ak is TokenKind.HexString or TokenKind.String && c <= h) _unicode[c++] = Utf16(lx.StringValue!);
+                    var item = lexer.Next();
+                    if (item is TokenKind.ArrayEnd or TokenKind.Eof) break;
+                    if (IsString(item) && code <= h) _unicode[code++] = Utf16(lexer.StringValue!);
                 }
             }
             else break;
+        }
+    }
+
+    // Adds one to the string as a big-endian number, carrying into the earlier bytes; an overflow past the first
+    // byte is dropped.
+    private static void Increment(byte[] text)
+    {
+        for (int i = text.Length - 1; i >= 0; i--)
+        {
+            if (++text[i] != 0) return;
         }
     }
 
