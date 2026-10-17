@@ -10,8 +10,8 @@ using PdfPecker.Rendering.Fonts;
 using PdfPecker.Rendering.Parsing;
 
 // A short, machine-readable run for the performance regression check in .github/workflows/perf.yml: about 30 seconds,
-// nine cases, JSON output. Allocation per conversion is deterministic, so the workflow compares it tightly; time is
-// noisy on shared runners, so it is compared with a wide margin.
+// ten cases, JSON output. Allocation per conversion is deterministic, so the workflow compares it tightly; time is
+// noisy on shared runners, so it is compared with a wide margin and corrected for the runner's overall speed.
 // Usage: dotnet run -c Release -- --perf results.json
 static class Perf
 {
@@ -62,7 +62,9 @@ static class Perf
         sw.Stop();
         results.Add(("throughput-invoice", sw.Elapsed.TotalMilliseconds / total, 0, total / sw.Elapsed.TotalSeconds));
 
-        var json = new StringBuilder("{\n  \"cases\": [\n");
+        var cpu = CpuModel().Replace("\\", "", StringComparison.Ordinal).Replace("\"", "", StringComparison.Ordinal);
+        Console.WriteLine($"{cpu}, {Environment.ProcessorCount} cores");
+        var json = new StringBuilder($"{{\n  \"cpu\": \"{cpu}\",\n  \"cores\": {Environment.ProcessorCount},\n  \"cases\": [\n");
         for (int i = 0; i < results.Count; i++)
         {
             var r = results[i];
@@ -140,12 +142,41 @@ static class Perf
         var warm = Stopwatch.StartNew();
         while (warm.Elapsed.TotalSeconds < 2) run();
 
+        // The runs are timed in rounds and the median round is reported, so a burst from a noisy neighbour on a shared
+        // runner moves one round instead of the whole figure. Each round starts from a collected heap, so a case does not
+        // pay for garbage the one before it left behind.
+        int perRound = Math.Max(1, runs / Rounds);
+        var rounds = new double[Rounds];
         long allocBefore = GC.GetAllocatedBytesForCurrentThread();
-        long t0 = Stopwatch.GetTimestamp();
-        for (int i = 0; i < runs; i++) run();
-        double mean = Stopwatch.GetElapsedTime(t0).TotalMilliseconds / runs;
-        long alloc = (GC.GetAllocatedBytesForCurrentThread() - allocBefore) / runs;
-        return (name, mean, alloc, null);
+        for (int r = 0; r < Rounds; r++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            long t0 = Stopwatch.GetTimestamp();
+            for (int i = 0; i < perRound; i++) run();
+            rounds[r] = Stopwatch.GetElapsedTime(t0).TotalMilliseconds / perRound;
+        }
+        long alloc = (GC.GetAllocatedBytesForCurrentThread() - allocBefore) / (perRound * Rounds);
+        Array.Sort(rounds);
+        return (name, rounds[Rounds / 2], alloc, null);
+    }
+
+    const int Rounds = 5;
+
+    // The processor model, so the comparison can tell a slower runner from slower code. GitHub's hosted runners are
+    // drawn from several processor generations, which differ by a third or more in speed.
+    static string CpuModel()
+    {
+        try
+        {
+            foreach (var line in File.ReadLines("/proc/cpuinfo"))
+            {
+                if (line.StartsWith("model name", StringComparison.Ordinal)) return line[(line.IndexOf(':') + 1)..].Trim();
+            }
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        return System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString();
     }
 }
 
