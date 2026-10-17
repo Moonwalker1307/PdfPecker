@@ -107,6 +107,11 @@ static class Perf
         var markdown = MarkdownDocument(Path.Combine(htmlDir, "guide.md"));
         results.Add(Measure("parse-markdown", () => new BlockParser(gfm: true).Parse(markdown), runs: 100));
 
+        // Box painting: a generated page of boxes with every border style, rounded corners, outer and inset shadows with
+        // blur and spread, gradient and image backgrounds with each size and repeat, border images, outlines, text
+        // decorations and a few transformed, translucent and clipped boxes, laid out and written as a PDF.
+        results.Add(Measure("paint-boxes", DrawingPage(), htmlDir, runs: 30));
+
         // Throughput with every core busy; documents per second is the figure, so higher is better.
         var options = new PdfOptions { BaseDirectory = htmlDir };
         for (int i = 0; i < 20; i++) HtmlToPdf.Convert(invoice, options);
@@ -145,6 +150,66 @@ static class Perf
         var black = new byte[page.Width * page.Height];
         for (int i = 0; i < black.Length; i++) black[i] = rgba[i * 4] + rgba[i * 4 + 1] + rgba[i * 4 + 2] < 3 * 128 ? (byte)1 : (byte)0;
         return (PdfPecker.Rendering.CcittFaxEncoder.EncodeGroup4(black, page.Width, page.Height), page.Width, page.Height);
+    }
+
+    // A page of about 180 small boxes, the same on every run, that together use every path of the box painter: each
+    // border style at several widths, with and without rounded corners, uniform and differing sides, double and 3D
+    // styles; outer and inset box shadows, sharp and blurred, with spread; colour, gradient and image backgrounds with
+    // each background-size and background-repeat; border images from a gradient and from the logo; outlines; and text
+    // decorations, transforms, opacity, overflow clips and a clip-path on some boxes.
+    static string DrawingPage()
+    {
+        string[] styles = { "solid", "dashed", "dotted", "double", "groove", "ridge", "inset", "outset" };
+        string[] widths = { "1px", "2px", "3px", "6px" };
+        string[] colors = { "#c33", "#2a7", "#36c", "rgba(0,0,0,0.5)", "#363636", "gold" };
+        string[] radii = { "0", "6px", "50%", "12px 4px", "10px / 20px" };
+        string[] shadows =
+        {
+            "2px 2px 4px rgba(0,0,0,0.5)", "0 0 10px red", "5px 5px 0 3px blue", "inset 0 0 8px black", "inset 2px 2px 5px rgba(0,0,0,0.6), 1px 1px 3px rgba(0,0,0,0.3)",
+            "0 0 0 3px green", "-4px -4px 12px 2px rgba(0,128,0,0.7)", "inset -3px -3px 6px 2px rgba(255,0,0,0.5)",
+        };
+        string[] backgrounds =
+        {
+            "#eef", "linear-gradient(red, blue)", "linear-gradient(45deg, #000 25%, transparent 25%) 0 0 / 8px 8px", "radial-gradient(circle at 30% 30%, white, black)",
+            "conic-gradient(from 90deg, red, blue, red)", "repeating-linear-gradient(90deg, #ccc 0 5px, #fff 5px 10px)", "url(logo.png) center / contain no-repeat",
+            "url(logo.png) 0 0 / 20px round", "url(gradient.jpg) 0 0 / 30px space", "url(logo.png) 0 0 / cover", "url(logo.png) repeat-x", "#ddd url(logo.png) 50% 50% / 15px repeat",
+        };
+        string[] borderImages = { "linear-gradient(red, blue) 30% / 6px / 2px round", "url(logo.png) 10 fill / 8px / 1px repeat", "url(logo.png) 25% / 1 / 0 stretch" };
+        string[] outlines = { "1px solid red", "2px dashed blue", "3px dotted green", "4px double black", "3px groove gray" };
+        string[] extras = { "", "transform:rotate(3deg);", "opacity:0.6;", "overflow:hidden; border-radius:8px;", "clip-path:circle(45%);", "text-decoration:underline wavy red;", "text-decoration:line-through;", "text-shadow:1px 1px 2px black;" };
+
+        var sb = new StringBuilder();
+        sb.Append("<html><head><style>body{margin:8px;font:7pt Arial} .b{display:inline-block;width:34px;height:22px;margin:1px;padding:2px;vertical-align:top}</style></head><body>");
+        for (int i = 0; i < 180; i++)
+        {
+            var style = new StringBuilder();
+            string color = colors[i % colors.Length];
+            switch (i % 5)
+            {
+                case 0: style.Append("border:").Append(widths[i % widths.Length]).Append(' ').Append(styles[i % styles.Length]).Append(' ').Append(color).Append(';'); break;
+                case 1: style.Append("border:").Append(widths[(i / 5) % widths.Length]).Append(' ').Append(styles[(i / 5) % styles.Length]).Append(' ').Append(color)
+                    .Append("; border-top:").Append(widths[(i / 7) % widths.Length]).Append(' ').Append(styles[(i / 3) % styles.Length]).Append(" #000;"); break;
+                case 2: style.Append("border:").Append(widths[i % widths.Length]).Append(' ').Append(styles[(i / 2) % styles.Length]).Append(' ').Append(color)
+                    .Append("; border-radius:").Append(radii[(i / 5) % radii.Length]).Append(';'); break;
+                case 3: style.Append("border:2px solid ").Append(color).Append("; border-image:").Append(borderImages[(i / 5) % borderImages.Length]).Append(';'); break;
+                default: style.Append("border-width:1px 3px 2px 4px; border-style:").Append(styles[i % styles.Length]).Append(' ').Append(styles[(i + 3) % styles.Length])
+                    .Append("; border-color:").Append(color).Append(" #000; border-radius:").Append(radii[(i / 3) % radii.Length]).Append(';'); break;
+            }
+            if (i % 3 != 2) style.Append("box-shadow:").Append(shadows[(i / 3) % shadows.Length]).Append(';');
+            style.Append("background:").Append(backgrounds[(i / 2) % backgrounds.Length]).Append(';');
+            if (i % 4 == 1) style.Append("outline:").Append(outlines[(i / 4) % outlines.Length]).Append("; outline-offset:").Append(i % 3 - 1).Append("px;");
+            style.Append(extras[(i / 9) % extras.Length]);
+            sb.Append("<div class=b style='").Append(style).Append("'>box ").Append(i).Append("</div>");
+        }
+        sb.Append("<table style='border-collapse:collapse;margin-top:6px'>");
+        for (int r = 0; r < 6; r++)
+        {
+            sb.Append("<tr>");
+            for (int c = 0; c < 8; c++) sb.Append("<td style='border:").Append(widths[(r + c) % widths.Length]).Append(' ').Append(styles[(r * 8 + c) % styles.Length]).Append(' ').Append(colors[c % colors.Length]).Append("'>").Append(r).Append(',').Append(c).Append("</td>");
+            sb.Append("</tr>");
+        }
+        sb.Append("</table></body></html>");
+        return sb.ToString();
     }
 
     // About 200 KB of Markdown, the same on every run: sections that cycle through the block kinds, then the sample guide.
