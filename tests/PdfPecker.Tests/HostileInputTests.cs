@@ -380,6 +380,26 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void PostScript_function_with_many_rolls_does_not_overflow_the_stack()
+    {
+        // A tint transform that rolls 99 entries 33,000 times, within the calculator's step limit. The calculator used
+        // to take a fresh stack buffer for every roll, so this crashed the process with a stack overflow.
+        var program = "{ " + Repeat("0.5 ", 99) + Repeat("99 1 roll ", 33_000) + "}";
+        const string content = "/CS0 cs 0.5 scn 0 0 612 792 re f";
+        var renderer = PdfRenderer.Open(SimplePdf(new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /ColorSpace << /CS0 [/Separation /Spot /DeviceGray 5 0 R] >> >> >>",
+            $"<< /Length {content.Length} >>\nstream\n{content}\nendstream",
+            $"<< /FunctionType 4 /Domain [0 1] /Range [0 1] /Length {program.Length} >>\nstream\n{program}\nendstream",
+        }));
+        var image = Bounded(() => renderer.RenderPage(0, new ImageOptions { Dpi = 36 }));
+        // Every entry is 0.5, so the page is filled with mid grey.
+        Assert.Equal(128, image.Rgba[0]);
+    }
+
+    [Fact]
     public void Text_extraction_of_a_letter_with_a_million_combining_marks_stays_linear()
     {
         // Code 1 is a combining acute accent drawn with no width, so every mark sits on the letter before it. The
