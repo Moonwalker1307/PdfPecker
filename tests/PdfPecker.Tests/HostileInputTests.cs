@@ -475,6 +475,67 @@ public class HostileInputTests
         Assert.IsAssignableFrom<OperationCanceledException>(ex);
     }
 
+    [Fact]
+    public void Dashes_finer_than_a_pixel_are_stroked_solid()
+    {
+        // A dash period of a few millionths of a point used to be cut into every one of its dashes: tens of millions
+        // per line, a second and close to a gigabyte each, so a hundred lines ran for minutes.
+        var renderer = PdfRenderer.Open(StrokePage("0.001 0 0 0.001 0 0 cm 2000 w [0.011] 0 d " + Repeat("0 100000 m 100000 100000 l S ", 100)));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var image = Bounded(() => renderer.RenderPage(0, new ImageOptions { Dpi = 72 }, cts.Token));
+        AssertStrokedSolid(image);
+    }
+
+    [Theory]
+    // Visible dashes, but along lines that run far off the page: millions of dashes each, nearly all of them outside
+    // the page, and a second of work and close to a gigabyte for each line.
+    [InlineData("2 w [4] 0 d ", "0 100 m 30000000 100 l S ", 30)]
+    // Fewer dashes, but each with two round caps of about a hundred points: half a second and half a gigabyte a line.
+    [InlineData("1 J 3000 w [0.5] 0 d ", "0 100 m 99000 100 l S ", 100)]
+    public void Dashes_along_a_very_long_line_are_stroked_solid(string style, string line, int lines)
+    {
+        var renderer = PdfRenderer.Open(StrokePage(style + Repeat(line, lines)));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var image = Bounded(() => renderer.RenderPage(0, new ImageOptions { Dpi = 72 }, cts.Token));
+        AssertStrokedSolid(image);
+    }
+
+    [Fact]
+    public void Many_dashed_lines_on_one_page_are_charged_by_their_dashes()
+    {
+        // Each line has fewer dashes than one stroke may draw, but each is one operator: a thousand of them are well
+        // within the operator budget and draw ninety million dashes.
+        var renderer = PdfRenderer.Open(StrokePage("1 w [1] 0 d " + Repeat("0 100 m 180000 100 l S ", 1000)));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var ex = Bounded(() => Record.Exception(() => renderer.RenderPage(0, new ImageOptions { Dpi = 72 }, cts.Token)));
+        Assert.IsType<InvalidDataException>(ex);
+        Assert.Contains("too complex", ex.Message);
+
+        // A few such lines render, dashed.
+        var image = PdfRenderer.Open(StrokePage("2 w [4] 0 d 0 100 m 180000 100 l S")).RenderPage(0, new ImageOptions { Dpi = 72 });
+        Assert.True(image.Rgba[(99 * image.Width + 2) * 4] < 64, "the first dash is not painted");
+        Assert.True(image.Rgba[(99 * image.Width + 6) * 4] > 192, "the first gap is painted");
+    }
+
+    /// <summary>A 200 by 200 point page that runs <paramref name="content"/>.</summary>
+    private static byte[] StrokePage(string content) => SimplePdf(new List<string>
+    {
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R >>",
+        $"<< /Length {content.Length} >>\nstream\n{content}\nendstream",
+    });
+
+    /// <summary>
+    /// Asserts that a black line two points wide along y = 100 of a <see cref="StrokePage"/> at 72 dpi, from the left
+    /// edge to at least x = 100, is painted without gaps: the gaps of its dash pattern are too fine, or too many, to draw.
+    /// </summary>
+    private static void AssertStrokedSolid(RenderedImage image)
+    {
+        for (int x = 0; x < 100; x += 3)
+            Assert.True(image.Rgba[(99 * image.Width + x) * 4] < 64, $"pixel {x} of the line is {image.Rgba[(99 * image.Width + x) * 4]}");
+    }
+
     /// <summary>
     /// A page whose content sets the soft mask of object 5 (the first object added after these) and fills the page red,
     /// after <paramref name="prefix"/>, if given, instead of a single <c>/GS0 gs</c>.
