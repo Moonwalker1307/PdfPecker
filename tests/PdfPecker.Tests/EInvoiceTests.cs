@@ -116,4 +116,76 @@ public class EInvoiceTests
         var pdf = MarkdownToPdf.Convert("# Invoice", new PdfOptions { EInvoice = new PdfEInvoice(Invoice()) });
         Assert.Contains("<fx:DocumentType>INVOICE</fx:DocumentType>", Encoding.UTF8.GetString(pdf));
     }
+
+    [Fact]
+    public void Reads_the_embedded_invoice_back()
+    {
+        var xml = Invoice();
+        var pdf = HtmlToPdf.Convert("<h1>Invoice</h1>", new PdfOptions { EInvoice = new PdfEInvoice(xml) });
+        var invoice = PdfEInvoice.Read(pdf);
+        Assert.NotNull(invoice);
+        Assert.Equal(xml, invoice.Xml);
+        Assert.Equal(EInvoiceProfile.En16931, invoice.Profile);
+        Assert.Equal(EInvoiceRelationship.Alternative, invoice.Relationship);
+        Assert.Equal("factur-x.xml", invoice.FileName);
+    }
+
+    [Fact]
+    public void Reads_an_xrechnung_and_its_relationship()
+    {
+        var xml = WithGuideline("urn:cen.eu:en16931:2017#compliant#urn:xeinkauf.de:kosit:xrechnung_3.0");
+        var pdf = HtmlToPdf.Convert("<p>x</p>", new PdfOptions { EInvoice = new PdfEInvoice(xml) { Relationship = EInvoiceRelationship.Source } });
+        var invoice = PdfEInvoice.Read(pdf)!;
+        Assert.Equal(EInvoiceProfile.XRechnung, invoice.Profile);
+        Assert.Equal(EInvoiceRelationship.Source, invoice.Relationship);
+        Assert.Equal(xml, invoice.Xml);
+    }
+
+    [Fact]
+    public void Takes_the_profile_from_the_xmp_when_the_guideline_names_none()
+    {
+        var pdf = HtmlToPdf.Convert("<p>x</p>", new PdfOptions { EInvoice = new PdfEInvoice(WithGuideline("urn:example:unknown"), EInvoiceProfile.Extended) });
+        Assert.Equal(EInvoiceProfile.Extended, PdfEInvoice.Read(pdf)!.Profile);
+    }
+
+    [Fact]
+    public void Finds_a_zugferd_2_0_invoice_among_other_attachments()
+    {
+        var pdf = PdfAttachments.Add(HtmlToPdf.Convert("<p>x</p>"),
+            new PdfAttachment("notes.xml", "<notes/>"u8.ToArray()),
+            new PdfAttachment("zugferd-invoice.xml", Invoice()) { Relationship = PdfAttachmentRelationship.Data });
+        var invoice = PdfEInvoice.Read(pdf)!;
+        Assert.Equal(Invoice(), invoice.Xml);
+        Assert.Equal(EInvoiceRelationship.Data, invoice.Relationship);
+    }
+
+    [Fact]
+    public void Reads_an_invoice_attached_to_an_encrypted_pdf()
+    {
+        var original = HtmlToPdf.Convert("<p>x</p>", new PdfOptions { Security = new PdfSecurity { UserPassword = "pw" } });
+        var pdf = PdfAttachments.Add(original, [new PdfAttachment("factur-x.xml", Invoice())], "pw");
+        Assert.Throws<PdfPasswordException>(() => PdfEInvoice.Read(pdf));
+        Assert.Equal(Invoice(), PdfEInvoice.Read(pdf, "pw")!.Xml);
+    }
+
+    [Fact]
+    public void Returns_null_without_a_cross_industry_invoice()
+    {
+        Assert.Null(PdfEInvoice.Read(HtmlToPdf.Convert("<p>x</p>")));
+        // A UBL invoice, a ZUGFeRD 1.0-style document and broken XML under the usual names are not Factur-X invoices.
+        var pdf = PdfAttachments.Add(HtmlToPdf.Convert("<p>x</p>"),
+            new PdfAttachment("factur-x.xml", "<not xml"u8.ToArray()),
+            new PdfAttachment("xrechnung.xml", "<Invoice xmlns='urn:oasis:names:specification:ubl:schema:xsd:Invoice-2'/>"u8.ToArray()),
+            new PdfAttachment("ZUGFeRD-invoice.xml", "<rsm:CrossIndustryDocument xmlns:rsm='urn:ferd:CrossIndustryDocument:invoice:1p0'/>"u8.ToArray()));
+        Assert.Null(PdfEInvoice.Read(pdf));
+        Assert.Throws<InvalidDataException>(() => PdfEInvoice.Read("not a pdf"u8.ToArray()));
+    }
+
+    [Theory]
+    [InlineData("<fx:ConformanceLevel>BASIC WL</fx:ConformanceLevel>", "BASIC WL")]
+    [InlineData("<zf:ConformanceLevel> COMFORT </zf:ConformanceLevel>", "COMFORT")]
+    [InlineData("<rdf:Description fx:ConformanceLevel=\"EXTENDED\"/>", "EXTENDED")]
+    [InlineData("<fx:ConformanceLevel></fx:ConformanceLevel>", null)]
+    public void Reads_xmp_properties_in_any_prefix(string xmp, string? expected)
+        => Assert.Equal(expected, PdfPecker.Pdf.EmbeddedFiles.XmpProperty(xmp, "ConformanceLevel"));
 }

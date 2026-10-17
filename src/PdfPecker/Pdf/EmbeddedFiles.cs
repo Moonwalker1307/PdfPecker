@@ -203,22 +203,37 @@ internal static class EmbeddedFiles
     /// </summary>
     public static int PdfAPart(PdfFile file)
     {
-        if (file.GetStream(file.Catalog, "Metadata") is not { } meta) return 0;
-        string xmp;
-        try
-        {
-            xmp = Encoding.UTF8.GetString(Decode(file, meta));
-        }
-        catch (Exception ex) when (ex is PdfFormatException or InvalidDataException)
-        {
-            return 0;
-        }
+        if (Xmp(file) is not { } xmp) return 0;
         var m = Regex.Match(xmp, @"pdfaid:part\s*(?:>|=\s*[""'])\s*(\d)");
         if (!m.Success) return 0;
         int part = m.Groups[1].Value[0] - '0';
         // PDF/A-4f is the PDF/A-4 level that allows any attachment, as PDF/A-3 does; plain PDF/A-4 allows only PDF/A files.
         if (part == 4 && Regex.IsMatch(xmp, @"pdfaid:conformance\s*(?:>|=\s*[""'])\s*[Ff]")) return 3;
         return part;
+    }
+
+    /// <summary>The document's XMP metadata, or null when it has none or it cannot be decoded.</summary>
+    public static string? Xmp(PdfFile file)
+    {
+        if (file.GetStream(file.Catalog, "Metadata") is not { } meta) return null;
+        try
+        {
+            return Encoding.UTF8.GetString(Decode(file, meta));
+        }
+        catch (Exception ex) when (ex is PdfFormatException or InvalidDataException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The value of an XMP property in any namespace prefix, written as an element or as an attribute, or null. The
+    /// prefix varies: Factur-X writes fx, ZUGFeRD 2.0 often zf.
+    /// </summary>
+    public static string? XmpProperty(string xmp, string name)
+    {
+        var m = Regex.Match(xmp, @"\w+:" + Regex.Escape(name) + @"\s*(?:>|=\s*[""'])\s*([^<""']*?)\s*[<""']");
+        return m.Success && m.Groups[1].Length > 0 ? m.Groups[1].Value : null;
     }
 
     // ------------------------------------------------------------------ appending
