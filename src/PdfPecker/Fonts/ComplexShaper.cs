@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using PdfPecker.Text;
 
 namespace PdfPecker.Fonts;
@@ -75,15 +76,17 @@ internal static class ComplexShaper
         public bool HasForms, HasRlig, HasMarkPositioning, HasGposKern;
     }
 
-    private static readonly ConcurrentDictionary<(FontProgram, Script), Plan> s_plans = new();
+    // Keyed weakly by the font, so that a font registered for one conversion is not kept alive by its plans for the
+    // life of the process.
+    private static readonly ConditionalWeakTable<FontProgram, ConcurrentDictionary<Script, Plan>> s_plans = new();
 
     private static Plan GetPlan(FontProgram font, OpenTypeLayout? ot, Script script)
-        => s_plans.GetOrAdd((font, script), static (key, ot) =>
+        => s_plans.GetValue(font, static _ => new ConcurrentDictionary<Script, Plan>()).GetOrAdd(script, static (script, ot) =>
         {
             // OpenTypeLayout checks the lists a plan reads when it loads the font; should a damaged font still get
             // past that, its text is shaped without the layout tables rather than failing the document. The plan is
             // cached, so this runs once per font and script.
-            try { return BuildPlan(ot, key.Item2); }
+            try { return BuildPlan(ot, script); }
             catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException) { return new Plan(); }
         }, ot);
 

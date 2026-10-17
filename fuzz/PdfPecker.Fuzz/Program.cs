@@ -231,6 +231,8 @@ internal sealed class Worker
 
         var store = new FindingStore(_o.Out, target.Name);
         var executor = new Executor(_o.Timeout, _o.MaxMemoryMb << 20);
+        long startRetained = executor.Retained;
+        bool leakReported = false, shed = false;
         var rng = new Random(unchecked((int)_o.Seed));
         var mutator = new Mutator(rng, target.MaxSize, target.Dictionary, target.Nesters);
         var corpus = seeds.Select(s => s.Data).ToList();
@@ -255,7 +257,22 @@ internal sealed class Worker
             // it only counts when it fails again on its own.
             if (verdict.Kind is "timeout" or "memory" && executor.AbandonedThreads == 0)
             {
-                GC.Collect();
+                // The retry measures the input against the heap as it is now, so a cache that earlier inputs filled
+                // does not count; heap that keeps growing between inputs is a leak, reported on its own.
+                long now = executor.MeasureRetained();
+                if (now - startRetained > (_o.MaxMemoryMb << 20) / 4 && !leakReported)
+                {
+                    leakReported = true;
+                    Console.WriteLine($"[{target.Name}] LEAK: the heap kept between inputs grew from {startRetained >> 20} MB to {now >> 20} MB");
+                }
+                // Once the leak alone is past the ceiling, the hard heap limit is close and every input would fail;
+                // a fresh worker sheds it.
+                if (now - startRetained > _o.MaxMemoryMb << 20)
+                {
+                    flaky++;
+                    shed = true;
+                    return false;
+                }
                 if (executor.Run(target, input, _o.Strict, out _) is not { Kind: var repeatKind } || repeatKind != verdict.Kind)
                 {
                     flaky++;
@@ -283,7 +300,7 @@ internal sealed class Worker
         {
             if (clock.Elapsed > _o.Duration) break;
             Execute(data, name);
-            if (executor.AbandonedThreads > 0) return Exit.Restart;
+            if (executor.AbandonedThreads > 0 || shed) return Exit.Restart;
         }
         while (clock.Elapsed < _o.Duration)
         {
@@ -294,7 +311,7 @@ internal sealed class Worker
                 if (survivors.Count < 200) survivors.Add(input);
                 else survivors[rng.Next(survivors.Count)] = input;
             }
-            if (executor.AbandonedThreads > 0) return Exit.Restart;
+            if (executor.AbandonedThreads > 0 || shed) return Exit.Restart;
             if (clock.Elapsed > nextReport)
             {
                 nextReport += TimeSpan.FromSeconds(20);
