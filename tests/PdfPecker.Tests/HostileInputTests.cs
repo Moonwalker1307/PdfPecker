@@ -72,6 +72,17 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(html));
     }
 
+    [Theory]
+    [InlineData("<h2>text-shadow</h2>\n<di</span>\n")] // the fuzz finding: each malformed tag opens an inline element
+    [InlineData("<h2>Heading</h2><div>")]
+    public void Headings_kept_with_nested_boxes_do_not_lay_out_each_level_twice(string level)
+    {
+        // Each heading must stay with the box after it, whose first content is the next heading. Where a heading moves
+        // to the next page, every heading above it has to move too, and each level used to lay out everything below it
+        // once more for that: 30 levels took seconds, and 40 would take hours.
+        AssertStructurallyValid(Bounded(Repeat(level, 40)));
+    }
+
     [Fact]
     public void Long_sibling_selectors_do_not_backtrack_exponentially()
     {
