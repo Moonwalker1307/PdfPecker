@@ -15,7 +15,7 @@
 
   <ItemGroup>
     <None Include="../../samples/PdfPecker.Sample/html/**" LinkBase="html" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="../../tests/PdfPecker.Tests/Fixtures/images/*.bmp;../../tests/PdfPecker.Tests/Fixtures/images/*.webp;../../tests/PdfPecker.Tests/Fixtures/features.pdf" LinkBase="fixtures" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../tests/PdfPecker.Tests/Fixtures/images/*.bmp;../../tests/PdfPecker.Tests/Fixtures/images/*.webp;../../tests/PdfPecker.Tests/Fixtures/images/*.tif;../../tests/PdfPecker.Tests/Fixtures/features.pdf" LinkBase="fixtures" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
