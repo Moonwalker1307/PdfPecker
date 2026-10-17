@@ -213,6 +213,9 @@ internal sealed partial class LayoutEngine
         // geometry of the page they are on.
         var pages = _pageBox;
         _pageBox = null;
+        // The keep-with-next check of the flow around this box, which only needs to know where this flow's first content lands.
+        var probe = _flowProbe;
+        _flowProbe = null;
         float pendingMargin = 0;
         bool anyContent = false;
         // The parent has taken its first child's top margin as its own (they collapse): don't apply it again.
@@ -275,6 +278,7 @@ internal sealed partial class LayoutEngine
                         continue;
                     }
                     hasChain = hasPrev = prevAvoidAfter = false;
+                    if (probe != null && Probed(ref probe)) break;
                 }
                 else y = before;
             }
@@ -330,8 +334,26 @@ internal sealed partial class LayoutEngine
             if (FloatsBelow(top) && AvoidsFloats(e)) bottom = LayoutBesideFloats(e, bx, ref top, bw);
             else
             {
+                // A box that must start on the page of the chain before it is only laid out until it is clear where its
+                // first content lands, when that is a later page and the chain has to move anyway.
+                var childProbe = joins && chain.Index != forcedAt && !AtPageTop(chain.Top) && CanProbe(e)
+                    ? new KeepProbe(boxOps, chain.FirstPage)
+                    : null;
+                var markerBefore = _marker;
+                int listBefore = _currentListIndex;
                 _childPageBox = pages;
+                _childProbe = childProbe;
                 bottom = LayoutBlockBox(e, bx, top, bw, shrinkToFit: false);
+                _childProbe = null;
+                if (childProbe is { Stopped: true } && !KeepTogetherFails(chain, boxOps, top, forcedAt))
+                {
+                    // The chain stays after all, so the box needs all of its content: lay it out again in full.
+                    Truncate(boxOps);
+                    _marker = markerBefore;
+                    _currentListIndex = listBefore;
+                    _childPageBox = pages;
+                    bottom = LayoutBlockBox(e, bx, top, bw, shrinkToFit: false);
+                }
             }
             float trailing = _boxTrailing;
             if (joins && KeepTogetherFails(chain, boxOps, top, forcedAt))
@@ -363,6 +385,7 @@ internal sealed partial class LayoutEngine
             if (!prevAvoidAfter) hasChain = false;
             prev = mark;
             hasPrev = !s.PageBreakAfter;
+            if (probe != null && Probed(ref probe)) break;
         }
         _flowTrailing = pendingMargin;
         ReturnRun(run);
@@ -371,6 +394,7 @@ internal sealed partial class LayoutEngine
         void Rewind(in FlowMark m)
         {
             Truncate(m.OpsCount);
+            if (probe != null) probe.ScanFrom = Math.Min(probe.ScanFrom, m.OpsCount);
             i = m.Index - 1;
             y = m.Y;
             pendingMargin = m.PendingMargin;
@@ -380,6 +404,71 @@ internal sealed partial class LayoutEngine
             _marker = m.Marker;
             run?.Clear();
         }
+
+        // Whether the flow can stop because the probe has its answer: true when its first content is on a later page
+        // than the chain before it, which then moves to the next page and lays this flow out again. Once the first
+        // content is on that page or an earlier one, the probe is done and the flow carries on as usual.
+        bool Probed(ref KeepProbe? p)
+        {
+            if (FirstContent(p!) is not (var at, var fy)) return false;
+            // A chain of this flow that can still move to the next page may take the first content with it.
+            if (hasChain && chain.OpsCount <= at && chain.Index != forcedAt && !AtPageTop(chain.Top)) return false;
+            if (hasPrev && prev.OpsCount <= at && prev.Index != forcedAt && !AtPageTop(prev.Top)
+                && (prevAvoidAfter || NextBoxAvoidsBreakBefore(children, i + 1))) return false;
+            if (PageOf(fy) > p!.KeepPage) return p.Stopped = true;
+            p = null;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// A box laid out after a chain of boxes that must not be separated from it (break-after/before: avoid), whose
+    /// layout can stop once its first content is placed on a later page than the chain's: the chain then moves to the
+    /// next page and lays the box out again, so the rest of it would be thrown away. Without this, boxes nested in
+    /// such chains lay out each level twice, which takes time exponential in the depth.
+    /// </summary>
+    private sealed class KeepProbe(int opsStart, int keepPage)
+    {
+        public readonly int OpsStart = opsStart; // where the box's ops start
+        public readonly int KeepPage = keepPage; // the page of the chain's first content
+        public int ScanFrom = opsStart;          // the ops before it hold no content
+        public bool Stopped;                     // the box's layout stopped early
+    }
+
+    private KeepProbe? _childProbe; // for the box LayoutFlow lays out next, taken by LayoutBlockBoxCore
+    private KeepProbe? _flowProbe;  // for the flow of that box, taken by LayoutFlow
+
+    /// <summary>
+    /// Whether a box's first content is decided by its own flow alone, so that stopping its layout early leaves it
+    /// where it is: a plain block whose ops are not moved, wrapped or laid out again after its content.
+    /// </summary>
+    private static bool CanProbe(Element e)
+    {
+        var s = e.Style;
+        return s.Display is not (Display.Table or Display.ListItem) && !s.IsFlex && !s.IsGrid && !s.IsMultiColumn
+               && !s.AvoidBreakInside && !s.Layered && e.Control == null && e.Name is not ("img" or "svg" or "hr");
+    }
+
+    /// <summary>The first content op of a probed box: its index among the ops and where it starts.</summary>
+    private (int At, float Y)? FirstContent(KeepProbe p)
+    {
+        for (int i = p.ScanFrom; i < _ops.Count; i++)
+            if (FirstContentY(_ops[i]) is { } y) { p.ScanFrom = i; return (i, y); }
+        // Ops of boxes that are complete do not change, so the next search starts after them.
+        p.ScanFrom = _ops.Count;
+        return null;
+    }
+
+    /// <summary>Whether the next block-level box among the children from <paramref name="from"/> asks to stay with the box before it.</summary>
+    private static bool NextBoxAvoidsBreakBefore(List<Node> children, int from)
+    {
+        for (int i = from; i < children.Count; i++)
+        {
+            if (children[i] is not Element e || e.Style is not { } s || s.Display == Display.None || e.Detached
+                || s.Floated || s.OutOfFlow || IsInlineLevel(e)) continue;
+            return s.AvoidBreakBefore;
+        }
+        return false;
     }
 
     /// <summary>
@@ -502,6 +591,8 @@ internal sealed partial class LayoutEngine
     {
         var parentPages = _childPageBox;
         _childPageBox = null;
+        var probe = _childProbe;
+        _childProbe = null;
         var s = e.Style;
         if (e.Id != null) SetAnchor(e.Id, y);
         if (e.Name == "a" && e.GetAttribute("name") is { } aname) SetAnchor(aname, y);
@@ -631,6 +722,7 @@ internal sealed partial class LayoutEngine
             _absorbTop = joinsChildren && FirstBlockChild(e) != null;
             var outerFloats = formattingRoot ? EnterFormattingContext() : null;
             _pageBox = pages;
+            _flowProbe = probe;
             contentBottom = LayoutContent(e, cx, cy, contentW, definiteH, minH);
             _pageBox = null;
             if (outerFloats != null) contentBottom = LeaveFormattingContext(outerFloats, contentBottom);
@@ -697,7 +789,9 @@ internal sealed partial class LayoutEngine
         _lastBoxW = used;
         _lastBoxH = bottom - y;
         if (e.Name == "a" && e.GetAttribute("href") is { Length: > 0 } href) _ops.Add(new LinkOp(bx, y, used, bottom - y, href) { Link = Tags?.ElementOf(e) });
-        if (Headings != null && HeadingLevel(e.Name) is int level and > 0) RecordHeading(e, level, y, opsStart);
+        // A box whose layout stopped early is laid out again in full right away; recording it now would put it in the
+        // outline ahead of the headings inside it that were not reached yet.
+        if (Headings != null && HeadingLevel(e.Name) is int level and > 0 && probe is not { Stopped: true }) RecordHeading(e, level, y, opsStart);
         if (e.LayoutKey != null) SetAnchor(e.LayoutKey, ContentTop(y, opsStart));
         _boxTrailing = trailing;
         return bottom;
