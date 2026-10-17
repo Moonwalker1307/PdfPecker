@@ -131,6 +131,13 @@ static class Perf
         var variableFonts = VariableFontInstances(Path.Combine(fixtureDir, "fonts"));
         results.Add(Measure("instance-fonts", () => { foreach (var v in variableFonts) FontVariations.Instance(v.Font, v.Coords, v.Values, v.Axes); }, runs: 100));
 
+        // Gradients: some four hundred CSS gradient values of every kind (linear with angles and corners, radial with
+        // each size keyword and position, conic with start angles), plain and repeating, with translucent and
+        // positioned stops, parsed, resolved for two boxes and written as shading patterns (tiled for the repeating
+        // ones) and conic calculator functions.
+        var gradients = GradientValues();
+        results.Add(Measure("resolve-gradients", () => { foreach (var g in gradients) WriteGradient(g); }, runs: 200));
+
         // Throughput with every core busy; documents per second is the figure, so higher is better.
         var options = new PdfOptions { BaseDirectory = htmlDir };
         for (int i = 0; i < 20; i++) HtmlToPdf.Convert(invoice, options);
@@ -186,6 +193,49 @@ static class Perf
     // !important, var() and calc() values, nested rules with & and nested @media, @media, @supports, @container and
     // @layer blocks, named pages with margin boxes and a footnote area, a font face, a registered property, a counter
     // style, an import (skipped, as the bench sets no loader), comments and escapes.
+    static List<string> GradientValues()
+    {
+        string[] heads =
+        {
+            "", "45deg, ", "to right, ", "to bottom left, ", "0.3turn, ", "-1.2rad, ", "100grad, ",
+            "circle, ", "ellipse closest-side at 30% 70%, ", "circle farthest-corner at left top, ", "40px 20px at center, ", "closest-corner at 10px bottom, ",
+            "from 30deg, ", "from 0.25turn at 25% 75%, ", "at right 20px, ", "from -90deg at center in oklch, ",
+        };
+        string[] stops =
+        {
+            "red, blue", "red 10%, #0f08 30%, blue 60%, green", "rgba(0,0,0,0) 0, black 20px, 40px, white 80%",
+            "#123 0 10%, #456 10% 20%, #789 20% 30%", "transparent, red 25%, transparent 50%, blue 75%, transparent",
+            "hsl(120deg 50% 50% / 50%) 5%, yellow 2em, orange 15%",
+        };
+        string[] kinds = { "linear-gradient", "radial-gradient", "conic-gradient" };
+        var list = new List<string>();
+        for (int k = 0; k < kinds.Length; k++)
+            foreach (var repeating in new[] { "", "repeating-" })
+                foreach (var head in heads.Where((_, i) => i == 0 || (k == 0 ? i < 7 : k == 1 ? i is >= 7 and < 12 : i >= 12)))
+                    foreach (var stop in stops)
+                        foreach (var size in new[] { "", " " })
+                        {
+                            // Conic stops are angles or percentages, not lengths.
+                            var stopList = k == 2 ? stop.Replace("20px", "72deg").Replace("40px", "0.2turn").Replace("2em", "1rad") : stop;
+                            list.Add(repeating + kinds[k] + "(" + head + stopList + ")" + size);
+                        }
+        return list;
+    }
+
+    // One gradient as a painted background: parsed, resolved for two boxes and written as a pattern over a page-sized
+    // area, so that the repeating ones are tiled, with the calculator function of a conic one.
+    static void WriteGradient(string value)
+    {
+        var css = CssGradient.Parse(value, 0xFF000000, 16, 16, 8, 6)!;
+        var b = new PdfPecker.Pdf.ByteBuffer(1024);
+        foreach (var (w, h) in new[] { (200f, 120f), (37f, 300f) })
+        {
+            var g = css.Resolve(w, h, 0xFFFFFFFF);
+            g.WritePattern(b, PdfPecker.Svg.Matrix.Identity, -w, -h, 3 * w, 3 * h);
+            if (g.Conic) g.ConicFunction(gray: false);
+        }
+    }
+
     static string LargeStylesheet(int sections = 300)
     {
         var sb = new StringBuilder();
