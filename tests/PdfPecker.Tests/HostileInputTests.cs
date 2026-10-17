@@ -728,6 +728,17 @@ public class HostileInputTests
         Assert.Equal("", PdfText.Extract(pdf));
     }
 
+    [Fact]
+    public void Form_whose_catalog_disappears_when_the_object_table_is_rebuilt_is_invalid_data()
+    {
+        // Found by the fuzzer: target pdf-form, exception-1abf4c6e. Here the scan finds a trailer, in a comment, that
+        // names the catalog by a number the scan has no object for, so the catalog the form editor checked when it
+        // opened the file now reads as null, and casting it to a dictionary threw InvalidCastException.
+        var pdf = HiddenHeaderPdf("%trailer<</Root 1 0 R>>\n");
+        Assert.Throws<InvalidDataException>(() => PdfForm.GetFields(pdf));
+        Assert.Throws<InvalidDataException>(() => PdfForm.Flatten(pdf));
+    }
+
     /// <summary>
     /// A PDF whose catalog and cross-reference stream follow a regular character, so that a scan for "n g obj" headers
     /// misses them while the cross-reference stream still finds them, and whose page tree entry points nowhere.
