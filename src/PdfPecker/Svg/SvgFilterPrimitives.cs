@@ -56,7 +56,7 @@ internal sealed partial class SvgFilter
         p.OrderY = order.Count > 1 ? (int)order[1] : p.OrderX;
         var kernel = SvgImage.ParseNumbers(e.GetAttribute("kernelmatrix"));
         // An invalid matrix makes the result transparent black, as in browsers.
-        if (p.OrderX is < 1 or > 64 || p.OrderY is < 1 or > 64 || kernel.Count != p.OrderX * p.OrderY) return;
+        if (p.OrderX is < 1 or > MaxKernelOrder || p.OrderY is < 1 or > MaxKernelOrder || kernel.Count != p.OrderX * p.OrderY) return;
         p.Kernel = kernel.ToArray();
         float sum = kernel.Sum();
         p.Divisor = Number(e, "divisor", sum == 0 ? 1 : sum);
@@ -65,18 +65,24 @@ internal sealed partial class SvgFilter
         p.TargetX = (int)Number(e, "targetx", p.OrderX / 2);
         p.TargetY = (int)Number(e, "targety", p.OrderY / 2);
         if (p.TargetX < 0 || p.TargetX >= p.OrderX || p.TargetY < 0 || p.TargetY >= p.OrderY) { p.Kernel = null; return; }
-        p.Operator = (e.GetAttribute("edgemode") ?? "duplicate").Trim().ToLowerInvariant();
+        p.EdgeMode = Keyword(e, "edgemode", "duplicate") switch { "wrap" => EdgeMode.Wrap, "none" => EdgeMode.None, _ => EdgeMode.Duplicate };
         p.PreserveAlpha = string.Equals(e.GetAttribute("preservealpha")?.Trim(), "true", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static int Channel(string? selector) => selector?.Trim().ToUpperInvariant() switch { "R" => 0, "G" => 1, "B" => 2, _ => 3 };
+    private static ColorChannel ParseChannel(string? selector) => selector?.Trim().ToUpperInvariant() switch
+    {
+        "R" => ColorChannel.R,
+        "G" => ColorChannel.G,
+        "B" => ColorChannel.B,
+        _ => ColorChannel.A,
+    };
 
     private static void ParseLighting(Element e, Primitive p, Matrix ctm, bool primitiveBox, (float X, float Y, float W, float H) box)
     {
         p.SurfaceScale = Number(e, "surfacescale", 1);
         bool diffuse = p.Kind == Kind.DiffuseLighting;
         p.Constant = Math.Max(0, Number(e, diffuse ? "diffuseconstant" : "specularconstant", 1));
-        p.SpecularExponent = Math.Clamp(Number(e, "specularexponent", 1), 1, 128);
+        p.SpecularExponent = Math.Clamp(Number(e, "specularexponent", 1), MinSpecularExponent, MaxSpecularExponent);
         p.Color = e.Style?.SvgLightingColor ?? 0xFFFFFFFFu;
         var source = e.Children.OfType<Element>().FirstOrDefault(c => c.Name is "fedistantlight" or "fepointlight" or "fespotlight");
         if (source == null) return; // no light: the result is black (diffuse) or transparent (specular)
@@ -93,17 +99,17 @@ internal sealed partial class SvgFilter
         switch (source.Name)
         {
             case "fedistantlight":
-                light.Type = 0;
+                light.Type = LightType.Distant;
                 light.Azimuth = Number(source, "azimuth", 0) * MathF.PI / 180;
                 light.Elevation = Number(source, "elevation", 0) * MathF.PI / 180;
                 break;
             case "fepointlight":
-                light.Type = 1;
+                light.Type = LightType.Point;
                 (light.X, light.Y) = Point("x", "y");
                 light.Z = Depth("z");
                 break;
             default:
-                light.Type = 2;
+                light.Type = LightType.Spot;
                 (light.X, light.Y) = Point("x", "y");
                 light.Z = Depth("z");
                 (light.PointsAtX, light.PointsAtY) = Point("pointsatx", "pointsaty");
@@ -309,7 +315,7 @@ internal sealed partial class SvgFilter
         var dst = new float[src.Length];
         if (p.Kernel is not { } kernel) return dst;
         int ox = p.OrderX, oy = p.OrderY;
-        string edge = p.Operator;
+        var edge = p.EdgeMode;
         System.Threading.Tasks.Parallel.For(0, h, y =>
         {
             Span<float> sum = stackalloc float[4];
@@ -325,8 +331,8 @@ internal sealed partial class SvgFilter
                         int px = sx, py = sy;
                         if (px < 0 || px >= w || py < 0 || py >= h)
                         {
-                            if (edge == "none") continue; // transparent black outside
-                            if (edge == "wrap") { px = Mod(px, w); py = Mod(py, h); }
+                            if (edge == EdgeMode.None) continue; // transparent black outside
+                            if (edge == EdgeMode.Wrap) { px = Mod(px, w); py = Mod(py, h); }
                             else { px = Math.Clamp(px, 0, w - 1); py = Math.Clamp(py, 0, h - 1); }
                         }
                         // The kernel is applied rotated by 180 degrees, as the specification's formula says.
@@ -374,11 +380,11 @@ internal sealed partial class SvgFilter
         var src = input.P;
         var m = map.P;
         var dst = new float[src.Length];
-        float Value(int i, int channel)
+        float Value(int i, ColorChannel channel)
         {
             float a = m[i + 3];
-            if (channel == 3) return a;
-            return a > 0 ? Math.Clamp(m[i + channel] / a, 0, 1) : 0;
+            if (channel == ColorChannel.A) return a;
+            return a > 0 ? Math.Clamp(m[i + (int)channel] / a, 0, 1) : 0;
         }
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
@@ -402,7 +408,7 @@ internal sealed partial class SvgFilter
     {
         var dst = new float[src.Length];
         bool diffuse = p.Kind == Kind.DiffuseLighting;
-        float lr = ((p.Color >> 16) & 255) / 255f, lg = ((p.Color >> 8) & 255) / 255f, lb = (p.Color & 255) / 255f;
+        var (lr, lg, lb) = Rgb(p.Color);
         if (p.Linear) { lr = Lookup(ToLinearTable, lr); lg = Lookup(ToLinearTable, lg); lb = Lookup(ToLinearTable, lb); }
         var light = p.Light;
         if (light == null)
@@ -432,7 +438,7 @@ internal sealed partial class SvgFilter
                 nx /= nLen; ny /= nLen; nz /= nLen;
                 float surfaceZ = ss * A(x, y);
                 float vx, vy, vz;
-                if (light.Type == 0) (vx, vy, vz) = (dx, dy, dz);
+                if (light.Type == LightType.Distant) (vx, vy, vz) = (dx, dy, dz);
                 else
                 {
                     vx = lx - (x + 0.5f) / k;
@@ -442,7 +448,7 @@ internal sealed partial class SvgFilter
                     if (len > 0) { vx /= len; vy /= len; vz /= len; }
                 }
                 float cr = lr, cg = lg, cb = lb;
-                if (light.Type == 2)
+                if (light.Type == LightType.Spot)
                 {
                     float minusLDotS = -(vx * sx + vy * sy + vz * sz);
                     float spot = minusLDotS <= 0 || (!float.IsNaN(light.ConeCos) && minusLDotS < light.ConeCos) ? 0 : MathF.Pow(minusLDotS, light.SpotExponent);
