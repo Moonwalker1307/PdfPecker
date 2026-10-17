@@ -36,21 +36,38 @@ jobs:
 
       - run: dotnet build -c Release bench/PdfPecker.Benchmarks
 
+      # The GC sizes its youngest generation from the processor's cache, so without a fixed size the allocation-heavy
+      # cases collect more often on some runner models than on others and their times stop being comparable.
       - name: Run the benchmark
+        env:
+          DOTNET_GCgen0size: "0x4000000"
         run: dotnet bench/PdfPecker.Benchmarks/bin/Release/net10.0/PdfPecker.Benchmarks.dll --perf perf.json
 
       # Only successful runs count as a baseline, so a regression that failed this job does not become the new normal.
-      # A first run, or one whose artifact has expired, has no baseline and passes.
+      # Hosted runners come in several processor models whose times are not comparable, so the newest of the recent
+      # successful runs on the same model is the baseline; without one, the newest run is used for allocation only.
+      # A first run, or one whose artifacts have expired, has no baseline and passes.
       - name: Download the previous successful result
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          previous=$(gh run list --workflow perf.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty' || true)
-          if [ -n "$previous" ]; then
-            gh run download "$previous" --name perf-results --dir baseline || echo "No usable artifact in run $previous."
-          fi
-          if [ -f baseline/perf.json ]; then echo "Baseline: run $previous"; else echo "No baseline found."; fi
+          cpu=$(jq -r '.cpu // empty' perf.json)
+          runs=$(gh run list --workflow perf.yml --status success --limit 20 --json databaseId --jq '.[].databaseId' || true)
+          for id in $runs; do
+            rm -rf candidate
+            gh run download "$id" --name perf-results --dir candidate 2>/dev/null || continue
+            [ -f candidate/perf.json ] || continue
+            if [ ! -f baseline/perf.json ]; then
+              mkdir -p baseline && cp candidate/perf.json baseline/perf.json && chosen=$id
+            fi
+            if [ -n "$cpu" ] && [ "$(jq -r '.cpu // empty' candidate/perf.json)" = "$cpu" ]; then
+              cp candidate/perf.json baseline/perf.json && chosen=$id
+              break
+            fi
+          done
+          rm -rf candidate
+          if [ -f baseline/perf.json ]; then echo "Baseline: run $chosen"; else echo "No baseline found."; fi
 
       - name: Compare with the baseline
         run: |
