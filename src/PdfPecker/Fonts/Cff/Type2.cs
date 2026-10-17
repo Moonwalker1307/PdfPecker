@@ -13,28 +13,40 @@ internal static class Type2
     /// <summary>The Type 2 limit on subroutine nesting.</summary>
     public const int MaxSubrDepth = 10;
 
+    // The first byte of a number says how it is encoded; bytes below 32 are operators, except 28.
+    private const int ShortIntNumber = 28;
+    private const int FirstNumberByte = 32, LastSmallIntByte = 246, SmallIntBias = 139;
+    private const int LastPositiveByte = 250, FirstPositiveByte = 247, FirstNegativeByte = 251, LastNegativeByte = 254;
+    private const int TwoByteBias = 108;
+    private const double FixedPointOne = 65536.0;
+
+    // Subroutine numbers are biased by 107, 1131 or 32768, depending on how many subroutines there are.
+    private const int SmallSubrLimit = 1240, MediumSubrLimit = 33900;
+    private const int SmallSubrBias = 107, MediumSubrBias = 1131, LargeSubrBias = 32768;
+
     /// <summary>True when the byte starts a number rather than an operator.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool IsNumber(int b) => b >= 32 || b == 28;
+    public static bool IsNumber(int b) => b >= FirstNumberByte || b == ShortIntNumber;
 
     /// <summary>Decodes the number whose first byte <paramref name="b"/> was just read; pos is the byte after it.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static double ReadNumber(ReadOnlySpan<byte> cs, int b, ref int pos)
     {
-        if (b <= 246)
+        if (b <= LastSmallIntByte)
         {
-            if (b != 28) return b - 139;
+            if (b != ShortIntNumber) return b - SmallIntBias;
             pos += 2;
             return (short)(cs[pos - 2] << 8 | cs[pos - 1]);
         }
-        if (b <= 250) return (b - 247) * 256 + cs[pos++] + 108;
-        if (b <= 254) return -(b - 251) * 256 - cs[pos++] - 108;
+        if (b <= LastPositiveByte) return (b - FirstPositiveByte) * 256 + cs[pos++] + TwoByteBias;
+        if (b <= LastNegativeByte) return -(b - FirstNegativeByte) * 256 - cs[pos++] - TwoByteBias;
         pos += 4;
-        return (cs[pos - 4] << 24 | cs[pos - 3] << 16 | cs[pos - 2] << 8 | cs[pos - 1]) / 65536.0; // 16.16 fixed
+        return (cs[pos - 4] << 24 | cs[pos - 3] << 16 | cs[pos - 2] << 8 | cs[pos - 1]) / FixedPointOne; // 16.16 fixed
     }
 
     /// <summary>Subroutine numbers are stored minus a bias that depends on how many subroutines there are.</summary>
-    public static int SubrBias(int count) => count < 1240 ? 107 : count < 33900 ? 1131 : 32768;
+    public static int SubrBias(int count)
+        => count < SmallSubrLimit ? SmallSubrBias : count < MediumSubrLimit ? MediumSubrBias : LargeSubrBias;
 
     /// <summary>The bytes of a hintmask or cntrmask: one bit per stem hint declared so far.</summary>
     public static int MaskBytes(int stems) => (stems + 7) / 8;
@@ -55,9 +67,9 @@ internal sealed class Type2Stack
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool PushNumber(ReadOnlySpan<byte> cs, int b, ref int pos)
     {
-        double v = Type2.ReadNumber(cs, b, ref pos);
+        double value = Type2.ReadNumber(cs, b, ref pos);
         if (Count >= Items.Length) return false;
-        Items[Count++] = v;
+        Items[Count++] = value;
         return true;
     }
 
