@@ -121,7 +121,9 @@ internal sealed partial class PdfFormEditor
 
     private string? Str(PdfObject? o) => R(o) is PdfString s ? s.Text : null;
 
-    private PdfDict Catalog => (PdfDict)R(_rootRef)!;
+    // The constructor checked the catalog, but a damaged file can rebuild its object table on a later read, after
+    // which the same reference may lead nowhere.
+    private PdfDict Catalog => R(_rootRef) as PdfDict ?? throw new InvalidDataException("The PDF has no document catalog.");
 
     /// <summary>The object behind <paramref name="r"/>, copied into the overlay the first time, to be changed in place.</summary>
     private PdfDict Edit(PdfRef r)

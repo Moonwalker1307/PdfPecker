@@ -75,6 +75,10 @@ public class HostileInputTests
     [Theory]
     [InlineData("<h2>text-shadow</h2>\n<di</span>\n")] // the fuzz finding: each malformed tag opens an inline element
     [InlineData("<h2>Heading</h2><div>")]
+    // A later fuzz finding (html, timeout-d2edd0b0): the box after each heading starts with another box, here the
+    // anonymous block of a div inside a span, so the heading's box only contains the next heading one level down.
+    [InlineData("<h1>Heading</h1><span><div>")]
+    [InlineData("<h1>Heading</h1><div><div>")]
     public void Headings_kept_with_nested_boxes_do_not_lay_out_each_level_twice(string level)
     {
         // Each heading must stay with the box after it, whose first content is the next heading. Where a heading moves
@@ -702,6 +706,97 @@ public class HostileInputTests
         var pdf = ms.ToArray();
 
         Assert.Empty(Bounded(() => PdfSignatureVerifier.Verify(pdf)));
+    }
+
+    [Fact]
+    public void Object_number_too_large_for_an_int_in_a_damaged_pdf_is_invalid_data()
+    {
+        // Found by the fuzzer: targets pdf-text, pdf-verify and pdf-merge, exception-0d3075ba. Rebuilding the object
+        // table read a ten-digit object number with int.Parse.
+        var pdf = Encoding.ASCII.GetBytes("9999999999 0obj ");
+        Assert.Throws<InvalidDataException>(() => PdfText.Extract(pdf));
+        Assert.Throws<InvalidDataException>(() => PdfMerger.Merge(new[] { pdf }));
+        Assert.Throws<InvalidDataException>(() => PdfForm.GetFields(pdf));
+        Assert.Throws<InvalidDataException>(() => PdfSignatureVerifier.Verify(pdf));
+    }
+
+    [Fact]
+    public void Nested_svg_filters_do_not_double_their_resolution_at_each_level()
+    {
+        // Found by the fuzzer: targets svg and html, timeout-1ab0d4a5, four filtered groups inside each other. Each
+        // level rendered its content at twice the pixels per point of the level around it, so the innermost of four
+        // ran at 64 times the pixels of the outermost, up to the four-million-pixel cap.
+        var chain = Repeat("<g filter='url(#f)'>", 4) + "<rect x='10' y='10' width='200' height='150' fill='red'/>" + Repeat("</g>", 4);
+        var svg = "<svg width='800' height='600' viewBox='0 0 800 600'><defs><filter id='f'><feGaussianBlur stdDeviation='2'/></filter></defs>"
+            + Repeat(chain, 16) + "</svg>";
+        AssertStructurallyValid(Bounded("<p>before</p>" + svg + "<p>after</p>"));
+    }
+
+    [Fact]
+    public void Rebuilding_the_object_table_late_without_finding_a_catalog_keeps_the_table_that_worked()
+    {
+        // Found by the fuzzer: targets pdf-merge and pdf-form, exception-d2faeb46. The catalog opens through the
+        // cross-reference stream, but the page tree entry is wrong, so the table is rebuilt by scanning for object
+        // headers. That scan finds none and used to throw the reader's internal exception from deep inside the call.
+        var pdf = HiddenHeaderPdf("");
+        Assert.Empty(PdfForm.GetFields(pdf));
+        Assert.Throws<InvalidDataException>(() => PdfMerger.Merge(new[] { pdf }));
+        Assert.Equal("", PdfText.Extract(pdf));
+    }
+
+    [Fact]
+    public void A_registered_font_is_not_kept_alive_after_its_conversion()
+    {
+        // The fuzzer's font targets ran out of heap after a few thousand inputs, at whatever font method happened to
+        // be running (memory-2506a272, memory-ff834f82, memory-de8e202b), and no single input reproduced it: every
+        // font that shaped Arabic or Indic text stayed reachable from a static cache of shaping plans.
+        var weak = ConvertWithOwnFont(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "NotoSansArabic-Subset.ttf")));
+        for (int i = 0; i < 5 && weak.IsAlive; i++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
+        Assert.False(weak.IsAlive, "The font program is still reachable after the conversion and its font collection are gone.");
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static WeakReference ConvertWithOwnFont(byte[] font)
+    {
+        var fonts = new FontCollection();
+        fonts.Add(font, "Ar");
+        AssertStructurallyValid(Bounded("<p style='font-family:Ar'>العربية</p>", new PdfOptions { Fonts = fonts }));
+        var program = fonts.GetSnapshot().All[0].Program;
+        Assert.NotNull(program);
+        return new WeakReference(program);
+    }
+
+    [Fact]
+    public void Form_whose_catalog_disappears_when_the_object_table_is_rebuilt_is_invalid_data()
+    {
+        // Found by the fuzzer: target pdf-form, exception-1abf4c6e. Here the scan finds a trailer, in a comment, that
+        // names the catalog by a number the scan has no object for, so the catalog the form editor checked when it
+        // opened the file now reads as null, and casting it to a dictionary threw InvalidCastException.
+        var pdf = HiddenHeaderPdf("%trailer<</Root 1 0 R>>\n");
+        Assert.Throws<InvalidDataException>(() => PdfForm.GetFields(pdf));
+        Assert.Throws<InvalidDataException>(() => PdfForm.Flatten(pdf));
+    }
+
+    /// <summary>
+    /// A PDF whose catalog and cross-reference stream follow a regular character, so that a scan for "n g obj" headers
+    /// misses them while the cross-reference stream still finds them, and whose page tree entry points nowhere.
+    /// <paramref name="extra"/> is inserted after the catalog.
+    /// </summary>
+    private static byte[] HiddenHeaderPdf(string extra)
+    {
+        var b = new List<byte>(Encoding.ASCII.GetBytes("%PDF-1.5\nx"));
+        int catalog = b.Count;
+        b.AddRange(Encoding.ASCII.GetBytes("1 0 obj<</Type/Catalog/Pages 2 0 R/AcroForm<</Fields[]>>>>endobj\n" + extra + "x"));
+        int xref = b.Count;
+        byte[] rows = [0, 0, 0, 255, 1, (byte)(catalog >> 8), (byte)catalog, 0, 1, 0, 5, 0, 1, (byte)(xref >> 8), (byte)xref, 0];
+        b.AddRange(Encoding.ASCII.GetBytes($"3 0 obj<</Type/XRef/Size 4/W[1 2 1]/Root 1 0 R/Length {rows.Length}>>stream\n"));
+        b.AddRange(rows);
+        b.AddRange(Encoding.ASCII.GetBytes($"\nendstream\nendobj\nstartxref\n{xref}\n%%EOF\n"));
+        return b.ToArray();
     }
 }
 

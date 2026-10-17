@@ -232,6 +232,11 @@ internal sealed partial class PdfDocumentWriter
     private const float FilterPixelsPerPoint = 2;
     private const long MaxFilterPixels = 4_000_000;
 
+    // The pixels per point of this writer's SVG filter results. A writer that renders the content of a filter has pages
+    // measured in that filter's pixels already, so a filter inside it needs one pixel per point; with two, every level
+    // of nested filters doubled the resolution of the one around it, up to the pixel cap at each level.
+    private float _svgFilterDensity = FilterPixelsPerPoint;
+
     /// <summary>
     /// Draws filtered SVG content: the content is rendered to pixels over the filter region, the filter runs on them,
     /// and the result is drawn as an image with an alpha mask.
@@ -241,8 +246,8 @@ internal sealed partial class PdfDocumentWriter
         var f = shape.Filter!;
         if (!(f.W > 0 && f.H > 0)) return;
         // Pixels per root unit, from the size of a root unit in the stream's default space.
-        float kx = MathF.Sqrt(toPage.A * toPage.A + toPage.B * toPage.B) * FilterPixelsPerPoint;
-        float ky = MathF.Sqrt(toPage.C * toPage.C + toPage.D * toPage.D) * FilterPixelsPerPoint;
+        float kx = MathF.Sqrt(toPage.A * toPage.A + toPage.B * toPage.B) * _svgFilterDensity;
+        float ky = MathF.Sqrt(toPage.C * toPage.C + toPage.D * toPage.D) * _svgFilterDensity;
         double pw = Math.Ceiling(f.W * kx), ph = Math.Ceiling(f.H * ky);
         if (!(pw >= 1 && ph >= 1)) return;
         if (pw * ph > MaxFilterPixels)
@@ -316,7 +321,7 @@ internal sealed partial class PdfDocumentWriter
         byte[] pdf;
         try
         {
-            var writer = new PdfDocumentWriter(page, compress: false, CompressionLevel.NoCompression) { Cancellation = Cancellation };
+            var writer = new PdfDocumentWriter(page, compress: false, CompressionLevel.NoCompression) { Cancellation = Cancellation, _svgFilterDensity = 1 };
             pdf = writer.Write(new List<DrawOp> { new SvgOp(0, 0, pixelsW, pixelsH, drawing) }, pixelsH,
                 new Dictionary<string, float>(), 0, null, null, null, null, null);
         }
