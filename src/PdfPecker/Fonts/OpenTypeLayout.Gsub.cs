@@ -120,7 +120,7 @@ internal sealed partial class OpenTypeLayout
         int ligatures = SubstitutionSet(sub, c.Buf[i].Gid);
         if (ligatures < 0) return false;
         Span<int> positions = stackalloc int[MaxLigatureComponents];
-        for (int l = 0, count = _reader.U16(ligatures + ArrayCountField); l < count; l++)
+        for (int l = 0, count = _reader.U16(ligatures + ArrayCountField); l < count && Spend(c); l++)
         {
             int ligature = ligatures + _reader.U16(ligatures + ArrayEntriesField + l * 2);
             int components = _reader.U16(ligature + ComponentCountField);
