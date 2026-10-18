@@ -555,22 +555,22 @@ internal sealed partial class SvgFilter
             var (x0, y0, x1, y1) = PixelSubregion(p, w, h, scaleX, scaleY, Input);
             Image result = p.Kind switch
             {
-                Kind.Blur => new Image(Blur(Convert(Input(p.In), p.Linear).P, w, h, p.Sx * scaleX, p.Sy * scaleY), p.Linear),
+                Kind.Blur => new Image(Blur(Convert(Input(p.In), p.Linear).P, w, h, p.Sx * scaleX, p.Sy * scaleY, cancel), p.Linear),
                 Kind.Offset => new Image(Shift(Convert(Input(p.In), p.Linear).P, w, h, p.Dx * scaleX, p.Dy * scaleY), p.Linear),
-                Kind.DropShadow => DropShadow(Convert(Input(p.In), p.Linear), w, h, p, scaleX, scaleY),
+                Kind.DropShadow => DropShadow(Convert(Input(p.In), p.Linear), w, h, p, scaleX, scaleY, cancel),
                 Kind.Flood => new Image(Flood(w, h, p.Color, p.Linear), p.Linear),
                 Kind.Merge => Merge(p, Input, w, h),
                 Kind.Composite => new Image(Composite(Convert(Input(p.In), p.Linear).P, Convert(Input(p.In2), p.Linear).P, p), p.Linear),
                 Kind.Blend => new Image(Blend(Convert(Input(p.In), p.Linear).P, Convert(Input(p.In2), p.Linear).P, p.BlendMode), p.Linear),
                 Kind.ColorMatrix => new Image(ColorMatrix(Convert(Input(p.In), p.Linear).P, p.Matrix), p.Linear),
                 Kind.ComponentTransfer => new Image(ComponentTransfer(Convert(Input(p.In), p.Linear).P, p.Functions!), p.Linear),
-                Kind.Morphology => new Image(Morphology(Convert(Input(p.In), p.Linear).P, w, h, p.Sx * scaleX, p.Sy * scaleY, p.Dilate), p.Linear),
-                Kind.Turbulence => new Image(Turbulence(p, w, h, scaleX, scaleY, x0, y0, x1, y1), p.Linear),
+                Kind.Morphology => new Image(Morphology(Convert(Input(p.In), p.Linear).P, w, h, p.Sx * scaleX, p.Sy * scaleY, p.Dilate, cancel), p.Linear),
+                Kind.Turbulence => new Image(Turbulence(p, w, h, scaleX, scaleY, x0, y0, x1, y1, cancel), p.Linear),
                 Kind.Image => new Image(p.Shapes is { Count: > 0 } shapes && rasterize?.Invoke(shapes) is { } drawn ? drawn : new float[w * h * 4], false),
                 Kind.Tile => new Image(Tile(Convert(Input(p.In), p.Linear), w, x0, y0, x1, y1), p.Linear),
-                Kind.ConvolveMatrix => new Image(Convolve(Convert(Input(p.In), p.Linear).P, w, h, p), p.Linear),
+                Kind.ConvolveMatrix => new Image(Convolve(Convert(Input(p.In), p.Linear).P, w, h, p, cancel), p.Linear),
                 Kind.DisplacementMap => Displace(Input(p.In), Convert(Input(p.In2), p.Linear), w, h, p.Sx * scaleX, p.Sy * scaleY, p),
-                Kind.DiffuseLighting or Kind.SpecularLighting => new Image(Lighting(Convert(Input(p.In), p.Linear).P, w, h, scaleX, scaleY, p), p.Linear),
+                Kind.DiffuseLighting or Kind.SpecularLighting => new Image(Lighting(Convert(Input(p.In), p.Linear).P, w, h, scaleX, scaleY, p, cancel), p.Linear),
                 _ => Input(p.In),
             };
             result = Clip(result, w, h, x0, y0, x1, y1);
@@ -650,13 +650,13 @@ internal sealed partial class SvgFilter
         return new Image(dst, p.Linear);
     }
 
-    private static Image DropShadow(Image input, int w, int h, Primitive p, float scaleX, float scaleY)
+    private static Image DropShadow(Image input, int w, int h, Primitive p, float scaleX, float scaleY, CancellationToken cancel)
     {
         // The input's alpha, blurred and offset, filled with the flood colour, under the input.
         var src = input.P;
         var a = new float[src.Length];
         for (int i = 3; i < a.Length; i += 4) a[i] = src[i];
-        a = Shift(Blur(a, w, h, p.Sx * scaleX, p.Sy * scaleY), w, h, p.Dx * scaleX, p.Dy * scaleY);
+        a = Shift(Blur(a, w, h, p.Sx * scaleX, p.Sy * scaleY, cancel), w, h, p.Dx * scaleX, p.Dy * scaleY);
         var shadow = Flood(w, h, p.Color, p.Linear);
         var dst = new float[src.Length];
         for (int i = 0; i < dst.Length; i += 4)
@@ -690,19 +690,33 @@ internal sealed partial class SvgFilter
     /// A Gaussian blur, approximated by three box blurs per axis as the SVG specification describes. A deviation of
     /// zero on an axis leaves that axis alone.
     /// </summary>
-    private static float[] Blur(float[] src, int w, int h, float sx, float sy)
+    private static float[] Blur(float[] src, int w, int h, float sx, float sy, CancellationToken cancel)
     {
         var a = (float[])src.Clone();
         var tmp = new float[src.Length];
-        if (sx > MinBlurDeviation) BlurAxis(ref a, ref tmp, w, h, sx, horizontal: true);
-        if (sy > MinBlurDeviation) BlurAxis(ref a, ref tmp, w, h, sy, horizontal: false);
+        if (sx > MinBlurDeviation) BlurAxis(ref a, ref tmp, w, h, sx, horizontal: true, cancel);
+        if (sy > MinBlurDeviation) BlurAxis(ref a, ref tmp, w, h, sy, horizontal: false, cancel);
         return a;
     }
 
-    private static void BlurAxis(ref float[] a, ref float[] tmp, int w, int h, float sigma, bool horizontal)
+    private static void BlurAxis(ref float[] a, ref float[] tmp, int w, int h, float sigma, bool horizontal, CancellationToken cancel)
     {
-        foreach (var (before, after) in BoxPasses(sigma)) { Box(a, tmp, w, h, before, after, horizontal); (a, tmp) = (tmp, a); }
+        foreach (var (before, after) in BoxPasses(sigma)) { Box(a, tmp, w, h, before, after, horizontal, cancel); (a, tmp) = (tmp, a); }
     }
+
+    // Below this many pixels a filter step runs on the calling thread: handing out its lines would cost more than it
+    // saves, and a server converting many documents at once keeps its cores busy anyway.
+    private const int ParallelPixels = 64 * 1024;
+
+    /// <summary>
+    /// How a filter step over <paramref name="pixels"/> pixels runs its lines: in parallel only for a large image and
+    /// on no more threads than cores, and stopping when the conversion is cancelled.
+    /// </summary>
+    internal static System.Threading.Tasks.ParallelOptions Lines(long pixels, CancellationToken cancel) => new()
+    {
+        MaxDegreeOfParallelism = pixels >= ParallelPixels ? Environment.ProcessorCount : 1,
+        CancellationToken = cancel,
+    };
 
     private const int BoxStripValues = 64; // sixteen pixels, four cache lines of floats
 
@@ -710,11 +724,12 @@ internal sealed partial class SvgFilter
     /// One box blur of RGBA pixels along every row or every column, the lines in parallel, each pixel the average of
     /// those from <paramref name="before"/> before it to <paramref name="after"/> after it.
     /// </summary>
-    private static void Box(float[] src, float[] dst, int w, int h, int before, int after, bool horizontal)
+    private static void Box(float[] src, float[] dst, int w, int h, int before, int after, bool horizontal, CancellationToken cancel)
     {
+        var options = Lines((long)w * h, cancel);
         if (horizontal)
         {
-            System.Threading.Tasks.Parallel.For(0, h, line =>
+            System.Threading.Tasks.Parallel.For(0, h, options, line =>
             {
                 Span<double> sums = stackalloc double[4];
                 BoxLine(src, dst, line * w * 4, 4, w, before, after, sums);
@@ -724,7 +739,7 @@ internal sealed partial class SvgFilter
         // The columns go down in strips of several pixels, so that each step down reads a run of memory rather than one
         // pixel of a row, which made the vertical pass several times slower than the horizontal one on wide images.
         int values = w * 4, strips = (values + BoxStripValues - 1) / BoxStripValues;
-        System.Threading.Tasks.Parallel.For(0, strips, strip =>
+        System.Threading.Tasks.Parallel.For(0, strips, options, strip =>
         {
             int origin = strip * BoxStripValues;
             Span<double> sums = stackalloc double[BoxStripValues];
@@ -890,14 +905,14 @@ internal sealed partial class SvgFilter
         return (rgb, alphaBytes);
     }
 
-    private static float[] Morphology(float[] src, int w, int h, float rx, float ry, bool dilate)
+    private static float[] Morphology(float[] src, int w, int h, float rx, float ry, bool dilate, CancellationToken cancel)
     {
         int ix = Math.Min((int)MathF.Round(rx), MaxMorphologyRadius), iy = Math.Min((int)MathF.Round(ry), MaxMorphologyRadius);
         if (ix <= 0 && iy <= 0) return src;
         var tmp = new float[src.Length];
         var dst = new float[src.Length];
-        MorphAxis(src, tmp, w, h, Math.Max(ix, 0), dilate, horizontal: true);
-        MorphAxis(tmp, dst, w, h, Math.Max(iy, 0), dilate, horizontal: false);
+        MorphAxis(src, tmp, w, h, Math.Max(ix, 0), dilate, horizontal: true, cancel);
+        MorphAxis(tmp, dst, w, h, Math.Max(iy, 0), dilate, horizontal: false, cancel);
         return dst;
     }
 
@@ -907,11 +922,11 @@ internal sealed partial class SvgFilter
     /// of the next, so a running extreme from each block's start and from its end gives every window in three steps a
     /// pixel, whatever the radius. Minimum and maximum are exact, so this matches searching each window.
     /// </summary>
-    private static void MorphAxis(float[] src, float[] dst, int w, int h, int r, bool dilate, bool horizontal)
+    private static void MorphAxis(float[] src, float[] dst, int w, int h, int r, bool dilate, bool horizontal, CancellationToken cancel)
     {
         int lines = horizontal ? h : w, len = horizontal ? w : h, step = horizontal ? 4 : w * 4;
         int k = 2 * r + 1;
-        System.Threading.Tasks.Parallel.For(0, lines, () => (new float[len], new float[len]), (line, _, buffers) =>
+        System.Threading.Tasks.Parallel.For(0, lines, Lines((long)w * h, cancel), () => (new float[len], new float[len]), (line, _, buffers) =>
         {
             var (fromStart, fromEnd) = buffers;
             int origin = horizontal ? line * w * 4 : line * 4;
