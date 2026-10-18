@@ -16,6 +16,12 @@ internal static partial class CssParser
     /// <summary>A nested rule gets at most this many selectors from combining its own with its parents'.</summary>
     private const int MaxNestedSelectors = 256;
 
+    /// <summary>
+    /// The selectors a nested rule gets may together be at most this many characters. Each "&amp;" repeats the whole
+    /// parent selector, so a few of them per level would otherwise grow selectors exponentially with the nesting depth.
+    /// </summary>
+    private const int MaxNestedSelectorChars = 16 * 1024;
+
     public static void ParseStylesheet(string css, Stylesheet sheet, string? href = null)
     {
         string text = StripComments(css);
@@ -232,14 +238,19 @@ internal static partial class CssParser
     private static List<string> NestedSelectors(List<string> parents, string nested)
     {
         var result = new List<string>();
+        long chars = 0;
         foreach (var raw in SplitTopLevel(nested, ','))
         {
             var child = raw.Trim();
             if (child.Length == 0) continue;
+            int amps = child.AsSpan().Count('&');
             foreach (var parent in parents)
             {
                 if (result.Count >= MaxNestedSelectors) return result;
-                result.Add(child.IndexOf('&') >= 0 ? child.Replace("&", parent) : parent + " " + child);
+                long length = child.Length + (long)Math.Max(amps, 1) * parent.Length;
+                if (chars + length > MaxNestedSelectorChars) return result;
+                chars += length;
+                result.Add(amps > 0 ? child.Replace("&", parent) : parent + " " + child);
             }
         }
         return result;

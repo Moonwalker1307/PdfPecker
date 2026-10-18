@@ -83,6 +83,26 @@ jobs:
           dotnet fuzz/PdfPecker.Fuzz/bin/Release/net10.0/PdfPecker.Fuzz.dll
           --target "$TARGET" --duration "${MINUTES}m" --seed "$SEED" --out fuzz-findings
 
+      # Artifacts are not reachable from every place a finding gets triaged, and the inputs are small, so each finding's
+      # report and its input (base64) also go into the log and the job summary.
+      - name: Print findings
+        if: ${{ failure() }}
+        run: |
+          shopt -s nullglob
+          for txt in fuzz-findings/*/*.txt; do
+            input="$(dirname "$txt")/$(sed -n 's/^input: \([^ ]*\).*/\1/p' "$txt")"
+            {
+              echo "### $txt"
+              echo '```'
+              head -c 4000 "$txt"
+              echo
+              echo "base64 of $input:"
+              base64 -w0 "$input" | head -c 200000
+              echo
+              echo '```'
+            } | tee -a "$GITHUB_STEP_SUMMARY"
+          done
+
       - name: Upload findings
         if: ${{ failure() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
