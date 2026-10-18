@@ -220,6 +220,10 @@ public static class PdfForm
     /// The output file appears only once it is complete, and may be the input.
     /// </summary>
     /// <inheritdoc cref="Fill(byte[], IDictionary{string, string}, PdfFormFillOptions?, CancellationToken)"/>
+    /// <exception cref="IOException">
+    /// The input file cannot be read (it does not exist, for example) or the output file cannot be written.
+    /// </exception>
+    /// <exception cref="UnauthorizedAccessException">The process may not read the input file or write the output file.</exception>
     public static void FillFile(string inputPath, string outputPath, IDictionary<string, string> values, PdfFormFillOptions? options = null, CancellationToken cancellationToken = default)
     {
         if (inputPath == null) throw new ArgumentNullException(nameof(inputPath));

@@ -258,6 +258,7 @@ public sealed class PdfRenderer
     private PdfRenderer(RenderDocument doc) => _doc = doc;
 
     /// <summary>Opens a PDF from bytes.</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="pdf"/> is null.</exception>
     /// <exception cref="PdfPasswordException">The PDF is encrypted and <paramref name="password"/> does not open it.</exception>
     /// <exception cref="InvalidDataException">The data is not a readable PDF.</exception>
     /// <exception cref="NotSupportedException">The PDF uses an encryption handler other than the standard one.</exception>
@@ -275,6 +276,11 @@ public sealed class PdfRenderer
     }
 
     /// <summary>Opens a PDF from a stream (read to the end).</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="pdf"/> is null.</exception>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and <paramref name="password"/> does not open it.</exception>
+    /// <exception cref="InvalidDataException">The stream is not a readable PDF.</exception>
+    /// <exception cref="NotSupportedException">The PDF uses an encryption handler other than the standard one.</exception>
+    /// <exception cref="IOException">Reading the stream fails.</exception>
     public static PdfRenderer Open(Stream pdf, string? password = null)
     {
         if (pdf == null) throw new ArgumentNullException(nameof(pdf));
@@ -284,12 +290,19 @@ public sealed class PdfRenderer
     }
 
     /// <summary>Opens a PDF file.</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and <paramref name="password"/> does not open it.</exception>
+    /// <exception cref="InvalidDataException">The file is not a readable PDF.</exception>
+    /// <exception cref="NotSupportedException">The PDF uses an encryption handler other than the standard one.</exception>
+    /// <exception cref="IOException">The file cannot be read, for example because it does not exist.</exception>
+    /// <exception cref="UnauthorizedAccessException">The process may not read the file.</exception>
     public static PdfRenderer OpenFile(string path, string? password = null) => Open(File.ReadAllBytes(path), password);
 
     /// <summary>Number of pages.</summary>
     public int PageCount => _doc.Pages.Count;
 
     /// <summary>Displayed page size in points (after page rotation).</summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="pageIndex"/> is not a page of the document.</exception>
     public (double Width, double Height) GetPageSize(int pageIndex)
     {
         CheckIndex(pageIndex);
@@ -297,6 +310,9 @@ public sealed class PdfRenderer
     }
 
     /// <summary>Renders one page (0-based index).</summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="pageIndex"/> is not a page of the document, or <see cref="ImageOptions.Dpi"/> is not positive.</exception>
+    /// <exception cref="InvalidDataException">The page cannot be rendered, for example because it is too complex.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public RenderedImage RenderPage(int pageIndex, ImageOptions? options = null, CancellationToken cancellationToken = default)
     {
         CheckIndex(pageIndex);
@@ -344,18 +360,38 @@ public sealed class PdfRenderer
     }
 
     /// <summary>Renders one page and encodes it as PNG.</summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="pageIndex"/> is not a page of the document, or <see cref="ImageOptions.Dpi"/> is not positive.</exception>
+    /// <exception cref="InvalidDataException">The page cannot be rendered, for example because it is too complex.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public byte[] RenderPageToPng(int pageIndex, ImageOptions? options = null, CancellationToken cancellationToken = default)
         => RenderPage(pageIndex, options, cancellationToken).ToPng();
 
     /// <summary>Renders one page and encodes it in <see cref="ImageOptions.Format"/>.</summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="pageIndex"/> is not a page of the document, or <see cref="ImageOptions.Dpi"/> is not positive.</exception>
+    /// <exception cref="InvalidDataException">The page cannot be rendered, for example because it is too complex.</exception>
+    /// <exception cref="NotSupportedException">
+    /// <see cref="ImageOptions.Format"/> is JPEG or WebP and the image is larger than the format allows (65,535 pixels
+    /// per side for JPEG, 16,384 for WebP).
+    /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public byte[] RenderPageEncoded(int pageIndex, ImageOptions? options = null, CancellationToken cancellationToken = default)
         => RenderPage(pageIndex, options, cancellationToken).Encode();
 
     /// <summary>Renders all pages (in parallel) and encodes each as PNG, in page order.</summary>
+    /// <exception cref="ArgumentOutOfRangeException"><see cref="ImageOptions.Dpi"/> is not positive.</exception>
+    /// <exception cref="InvalidDataException">A page cannot be rendered, for example because it is too complex.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public byte[][] RenderAllToPng(ImageOptions? options = null, CancellationToken cancellationToken = default)
         => RenderAll(options, static img => img.ToPng(), cancellationToken);
 
     /// <summary>Renders all pages (in parallel) and encodes each in <see cref="ImageOptions.Format"/>, in page order.</summary>
+    /// <exception cref="ArgumentOutOfRangeException"><see cref="ImageOptions.Dpi"/> is not positive.</exception>
+    /// <exception cref="InvalidDataException">A page cannot be rendered, for example because it is too complex.</exception>
+    /// <exception cref="NotSupportedException">
+    /// <see cref="ImageOptions.Format"/> is JPEG or WebP and the image is larger than the format allows (65,535 pixels
+    /// per side for JPEG, 16,384 for WebP).
+    /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public byte[][] RenderAllEncoded(ImageOptions? options = null, CancellationToken cancellationToken = default)
         => RenderAll(options, static img => img.Encode(), cancellationToken);
 
@@ -365,6 +401,9 @@ public sealed class PdfRenderer
     /// <see cref="ImageOptions.TiffThreshold"/>. <see cref="ImageOptions.Format"/> is not used.
     /// </summary>
     /// <exception cref="NotSupportedException">The file would pass 4 GB, the limit of the TIFF format.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><see cref="ImageOptions.Dpi"/> is not positive.</exception>
+    /// <exception cref="InvalidDataException">A page cannot be rendered, for example because it is too complex.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public byte[] RenderAllToTiff(ImageOptions? options = null, CancellationToken cancellationToken = default)
         => TiffEncoder.Write(RenderAll(options, static img => img.EncodeTiffPage(), cancellationToken));
 
@@ -404,17 +443,46 @@ public sealed class PdfRenderer
 public static class PdfToImage
 {
     /// <summary>Returns the number of pages in a PDF.</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="pdf"/> is null.</exception>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and <paramref name="password"/> does not open it.</exception>
+    /// <exception cref="InvalidDataException">The data is not a readable PDF.</exception>
+    /// <exception cref="NotSupportedException">The PDF uses an encryption handler other than the standard one.</exception>
     public static int GetPageCount(byte[] pdf, string? password = null) => PdfRenderer.Open(pdf, password).PageCount;
 
     /// <summary>Renders one page (0-based index) to an image in <see cref="ImageOptions.Format"/> (PNG by default).</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="pdf"/> is null.</exception>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and <see cref="ImageOptions.Password"/> does not open it.</exception>
+    /// <exception cref="InvalidDataException">The data is not a readable PDF, or the page cannot be rendered.</exception>
+    /// <exception cref="NotSupportedException">
+    /// The PDF uses an encryption handler other than the standard one, or the image is larger than JPEG or WebP allows
+    /// (65,535 and 16,384 pixels per side).
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="pageIndex"/> is not a page of the document, or <see cref="ImageOptions.Dpi"/> is not positive.</exception>
     public static byte[] ConvertPage(byte[] pdf, int pageIndex = 0, ImageOptions? options = null)
         => PdfRenderer.Open(pdf, options?.Password).RenderPageEncoded(pageIndex, options);
 
     /// <summary>Renders every page to an image in <see cref="ImageOptions.Format"/>, in page order. Pages are rendered in parallel.</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="pdf"/> is null.</exception>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and <see cref="ImageOptions.Password"/> does not open it.</exception>
+    /// <exception cref="InvalidDataException">The data is not a readable PDF, or a page cannot be rendered.</exception>
+    /// <exception cref="NotSupportedException">
+    /// The PDF uses an encryption handler other than the standard one, or an image is larger than JPEG or WebP allows
+    /// (65,535 and 16,384 pixels per side).
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException"><see cref="ImageOptions.Dpi"/> is not positive.</exception>
     public static byte[][] Convert(byte[] pdf, ImageOptions? options = null)
         => PdfRenderer.Open(pdf, options?.Password).RenderAllEncoded(options);
 
     /// <summary>Renders every page asynchronously on the thread pool.</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="pdf"/> is null.</exception>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and <see cref="ImageOptions.Password"/> does not open it.</exception>
+    /// <exception cref="InvalidDataException">The data is not a readable PDF, or a page cannot be rendered.</exception>
+    /// <exception cref="NotSupportedException">
+    /// The PDF uses an encryption handler other than the standard one, or an image is larger than JPEG or WebP allows
+    /// (65,535 and 16,384 pixels per side).
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException"><see cref="ImageOptions.Dpi"/> is not positive.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public static Task<byte[][]> ConvertAsync(byte[] pdf, ImageOptions? options = null, CancellationToken cancellationToken = default)
         => Task.Run(() => PdfRenderer.Open(pdf, options?.Password).RenderAllEncoded(options, cancellationToken), cancellationToken);
 
@@ -423,15 +491,44 @@ public static class PdfToImage
     /// <see cref="ImageOptions.TiffColorMode"/>, compressed after <see cref="ImageOptions.TiffCompression"/>, at
     /// <see cref="ImageOptions.Dpi"/>. Pages are rendered in parallel.
     /// </summary>
-    /// <exception cref="NotSupportedException">The file would pass 4 GB, the limit of the TIFF format.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="pdf"/> is null.</exception>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and <see cref="ImageOptions.Password"/> does not open it.</exception>
+    /// <exception cref="InvalidDataException">The data is not a readable PDF, or a page cannot be rendered.</exception>
+    /// <exception cref="NotSupportedException">
+    /// The PDF uses an encryption handler other than the standard one, or the file would pass 4 GB, the limit of the
+    /// TIFF format.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException"><see cref="ImageOptions.Dpi"/> is not positive.</exception>
     public static byte[] ConvertToTiff(byte[] pdf, ImageOptions? options = null)
         => PdfRenderer.Open(pdf, options?.Password).RenderAllToTiff(options);
 
     /// <summary>Renders every page into one multi-page TIFF (see <see cref="ConvertToTiff"/>) on the thread pool.</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="pdf"/> is null.</exception>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and <see cref="ImageOptions.Password"/> does not open it.</exception>
+    /// <exception cref="InvalidDataException">The data is not a readable PDF, or a page cannot be rendered.</exception>
+    /// <exception cref="NotSupportedException">
+    /// The PDF uses an encryption handler other than the standard one, or the file would pass 4 GB, the limit of the
+    /// TIFF format.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException"><see cref="ImageOptions.Dpi"/> is not positive.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public static Task<byte[]> ConvertToTiffAsync(byte[] pdf, ImageOptions? options = null, CancellationToken cancellationToken = default)
         => Task.Run(() => PdfRenderer.Open(pdf, options?.Password).RenderAllToTiff(options, cancellationToken), cancellationToken);
 
     /// <summary>Renders a PDF file into one multi-page TIFF file (see <see cref="ConvertToTiff"/>).</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="pdfPath"/> or <paramref name="tiffPath"/> is null.</exception>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and <see cref="ImageOptions.Password"/> does not open it.</exception>
+    /// <exception cref="InvalidDataException">The file is not a readable PDF, or a page cannot be rendered.</exception>
+    /// <exception cref="NotSupportedException">
+    /// The PDF uses an encryption handler other than the standard one, or the file would pass 4 GB, the limit of the
+    /// TIFF format.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException"><see cref="ImageOptions.Dpi"/> is not positive.</exception>
+    /// <exception cref="IOException">
+    /// The PDF file cannot be read (it does not exist, for example) or the TIFF file cannot be written. The TIFF file is
+    /// written only once rendering has succeeded, so a failure leaves any earlier file at that path unchanged.
+    /// </exception>
+    /// <exception cref="UnauthorizedAccessException">The process may not read the PDF file or write the TIFF file.</exception>
     public static void ConvertFileToTiff(string pdfPath, string tiffPath, ImageOptions? options = null)
         => AtomicFile.WriteAllBytes(tiffPath, PdfRenderer.OpenFile(pdfPath, options?.Password).RenderAllToTiff(options));
 
@@ -440,6 +537,19 @@ public static class PdfToImage
     /// <c>{file name}-{page number}</c> plus <c>.png</c>, <c>.jpg</c>, <c>.webp</c> or <c>.tif</c> after <see cref="ImageOptions.Format"/>
     /// (page numbers start at 1). Returns the written paths.
     /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="pdfPath"/> or <paramref name="outputDirectory"/> is null.</exception>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and <see cref="ImageOptions.Password"/> does not open it.</exception>
+    /// <exception cref="InvalidDataException">The file is not a readable PDF, or a page cannot be rendered.</exception>
+    /// <exception cref="NotSupportedException">
+    /// The PDF uses an encryption handler other than the standard one, or an image is larger than JPEG or WebP allows
+    /// (65,535 and 16,384 pixels per side).
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException"><see cref="ImageOptions.Dpi"/> is not positive.</exception>
+    /// <exception cref="IOException">
+    /// The PDF file cannot be read (it does not exist, for example), or the folder or an image file cannot be written.
+    /// Every page is rendered before the first image is written, and each image is written whole or not at all.
+    /// </exception>
+    /// <exception cref="UnauthorizedAccessException">The process may not read the PDF file or write to the folder.</exception>
     public static IReadOnlyList<string> ConvertFile(string pdfPath, string outputDirectory, ImageOptions? options = null)
     {
         var renderer = PdfRenderer.OpenFile(pdfPath, options?.Password);

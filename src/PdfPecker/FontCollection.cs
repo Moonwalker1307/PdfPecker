@@ -47,6 +47,10 @@ public sealed class FontCollection
     }
 
     /// <summary>Registers the fonts in a font file (.ttf, .otf, .ttc, .woff or .woff2).</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
+    /// <exception cref="FormatException">The file is not a supported font.</exception>
+    /// <exception cref="IOException">The file cannot be read, for example because it does not exist.</exception>
+    /// <exception cref="UnauthorizedAccessException">The process may not read the file.</exception>
     public FontCollection AddFile(string path, string? familyName = null)
     {
         if (path == null) throw new ArgumentNullException(nameof(path));

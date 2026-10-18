@@ -123,6 +123,10 @@ public static class PdfPages
     /// file appears only once it is complete, and may be the input.
     /// </summary>
     /// <inheritdoc cref="Extract(byte[], string, PdfPagesOptions?, CancellationToken)"/>
+    /// <exception cref="IOException">
+    /// The input file cannot be read (it does not exist, for example) or the output file cannot be written.
+    /// </exception>
+    /// <exception cref="UnauthorizedAccessException">The process may not read the input file or write the output file.</exception>
     public static void ExtractFile(string inputPath, string outputPath, string pages, PdfPagesOptions? options = null, CancellationToken cancellationToken = default)
     {
         if (inputPath == null) throw new ArgumentNullException(nameof(inputPath));
@@ -219,6 +223,14 @@ public static class PdfPages
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="pagesPerFile"/> is below 1.</exception>
     /// <exception cref="PdfPasswordException">The PDF is encrypted and cannot be opened with the given password.</exception>
     /// <exception cref="InvalidDataException">The PDF is not readable or has no pages.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="inputPath"/> or <paramref name="outputPath"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="outputPath"/> returns null for a part.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    /// <exception cref="IOException">
+    /// The input file cannot be read (it does not exist, for example) or a part file cannot be written.
+    /// A part file is written only once it is complete, so a failure leaves any earlier file at that path unchanged.
+    /// </exception>
+    /// <exception cref="UnauthorizedAccessException">The process may not read the input file or write a part file.</exception>
     public static int SplitFile(string inputPath, int pagesPerFile, Func<int, string> outputPath, PdfPagesOptions? options = null, CancellationToken cancellationToken = default)
     {
         if (inputPath == null) throw new ArgumentNullException(nameof(inputPath));
