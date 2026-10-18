@@ -100,5 +100,5 @@ img { max-width: 100%; }
 
     /// <summary>Converts a Markdown file to a complete HTML document file.</summary>
     public static void ConvertFile(string markdownPath, string htmlPath, MarkdownOptions? options = null)
-        => File.WriteAllText(htmlPath, ConvertDocument(File.ReadAllText(markdownPath), options));
+        => AtomicFile.WriteAllText(htmlPath, ConvertDocument(File.ReadAllText(markdownPath), options));
 }

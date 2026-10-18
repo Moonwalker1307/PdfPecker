@@ -75,6 +75,7 @@ The conversion methods are static and thread-safe, so you can convert many docum
 - **E-invoices and attachments**: Factur-X and ZUGFeRD (embed the XML, or read it back from a received PDF), PDFs in Peppol and OIOUBL invoices, and any embedded file. [More](https://pdfpecker.net/docs/e-invoices/)
 - **Existing PDFs**: merge (also streamed), split, reorder, rotate, stamp and extract text with positions. [More](https://pdfpecker.net/docs/merging/)
 - **PDF to image**: renders any PDF page, including JPEG 2000, JBIG2 and CCITT images, to PNG, JPEG or WebP, or a whole PDF to one multi-page TIFF (colour, greyscale or black and white with CCITT Group 4). [More](https://pdfpecker.net/docs/pdf-to-image/)
+- **Safe failures**: the library's own errors share the base class `PdfPeckerException`, and the `*File` methods write through a temporary file, so a failure never leaves a half-written output.
 
 PdfPecker is built for HTML templates you control: it runs no JavaScript and never fetches anything from the network on
 its own. See the [limitations](https://pdfpecker.net/docs/limitations/) for what it does not do yet.
