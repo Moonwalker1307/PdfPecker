@@ -317,6 +317,7 @@ internal sealed class ComputedStyle
     public string? BlendMode;                   // mix-blend-mode, as a PDF blend mode name; null = normal
     public string?[]? BackgroundBlendModes;     // background-blend-mode per layer, as PDF names (null = normal); null = all normal
     public bool Isolate;                        // isolation: isolate
+    public bool BoxDecorationClone;             // box-decoration-break: clone (else slice)
     public FilterFunction[]? Filters;           // filter functions on HTML elements; null = none
     public Length MarginTop = Length.Zero, MarginRight = Length.Zero, MarginBottom = Length.Zero, MarginLeft = Length.Zero;
     public Length PaddingTop = Length.Zero, PaddingRight = Length.Zero, PaddingBottom = Length.Zero, PaddingLeft = Length.Zero;
@@ -496,6 +497,7 @@ internal sealed class ComputedStyle
         c.BlendMode = null;
         c.BackgroundBlendModes = null;
         c.Isolate = false;
+        c.BoxDecorationClone = false;
         c.Filters = null;
         c.MarginTop = c.MarginRight = c.MarginBottom = c.MarginLeft = Length.Zero;
         c.PaddingTop = c.PaddingRight = c.PaddingBottom = c.PaddingLeft = Length.Zero;

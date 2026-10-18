@@ -1645,13 +1645,21 @@ internal sealed partial class LayoutEngine
     /// Gives the background layers of a box with background-clip: text (in <paramref name="background"/>) copies of the
     /// text the box draws from op <paramref name="from"/> on, its descendants' included, which then clip the background.
     /// </summary>
-    private void ClipBackgroundToText(GroupOp background, int from)
+    private void ClipBackgroundToText(GroupOp background, int from) => ClipBackgroundToText(background, _ops, from, _ops.Count, float.NegativeInfinity, float.PositiveInfinity);
+
+    /// <summary>
+    /// Gives the text-clipped background layers in <paramref name="background"/> copies of the text drawn by ops
+    /// <paramref name="from"/> to <paramref name="to"/> of <paramref name="ops"/> that starts between
+    /// <paramref name="left"/> and <paramref name="right"/>: the text of one line fragment of an inline box.
+    /// </summary>
+    private static void ClipBackgroundToText(GroupOp background, List<DrawOp> ops, int from, int to, float left, float right)
     {
         List<DrawOp>? texts = null;
         void Collect(DrawOp op)
         {
             if (op is TextOp t)
             {
+                if (!(t.X >= left && t.X < right)) return;
                 var copy = (TextOp)t.Copy();
                 copy.Tag = null; // the copies only clip: the text itself is drawn and tagged on its own
                 copy.Color = CssColor.Black; // opaque, also when the text itself is transparent, as it usually is here
@@ -1660,7 +1668,7 @@ internal sealed partial class LayoutEngine
             else if (op is GroupOp g and not LayerOp { TextClip: true }) // a descendant's own clipping copies
                 foreach (var o in g.Ops) Collect(o);
         }
-        for (int i = from; i < _ops.Count; i++) Collect(_ops[i]);
+        for (int i = from; i < to; i++) Collect(ops[i]);
         void Fill(GroupOp g)
         {
             foreach (var op in g.Ops)

@@ -52,7 +52,7 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>Adds a text's words and spaces as items, following the style's white-space.</summary>
-    private void AddText(CollectState st, string text, ComputedStyle style, string? href, ComputedStyle? deco)
+    private void AddText(CollectState st, string text, ComputedStyle style, string? href, InlineDeco? deco)
     {
         var rules = WhiteSpaceRules.For(style.WhiteSpace);
         var font = style.Font;
@@ -105,7 +105,7 @@ internal sealed partial class LayoutEngine
 
     /// <summary>Adds a run of <paramref name="count"/> spaces (a slice of <paramref name="source"/>) of <paramref name="width"/>.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)] // once per space of the document
-    private void AddSpace(CollectState st, ComputedStyle style, string source, int count, float width, bool breakable, string? href, ComputedStyle? deco)
+    private void AddSpace(CollectState st, ComputedStyle style, string source, int count, float width, bool breakable, string? href, InlineDeco? deco)
     {
         var space = Rent(ItemKind.Space, style);
         space.Source = source;
@@ -117,7 +117,7 @@ internal sealed partial class LayoutEngine
         st.Items.Add(space);
     }
 
-    private void AddBreakableWord(CollectState st, string text, int start, int length, ComputedStyle style, string? href, ComputedStyle? deco, bool breakable)
+    private void AddBreakableWord(CollectState st, string text, int start, int length, ComputedStyle style, string? href, InlineDeco? deco, bool breakable)
     {
         var span = text.AsSpan(start, length);
         // hyphens: auto, except in words that have soft hyphens: those break only there, as CSS Text specifies.
@@ -136,7 +136,7 @@ internal sealed partial class LayoutEngine
     /// A word with Chinese, Japanese or Korean text, which breaks between its characters without spaces: each piece
     /// between two opportunities becomes a word of its own that may end a line, and nothing is drawn between them.
     /// </summary>
-    private void AddEastAsianWord(CollectState st, string text, int start, int length, ComputedStyle style, string? href, ComputedStyle? deco)
+    private void AddEastAsianWord(CollectState st, string text, int start, int length, ComputedStyle style, string? href, InlineDeco? deco)
     {
         bool keepAll = style.WordBreak == WordBreak.KeepAll;
         var strictness = LineBreakStrictness(style);
@@ -180,7 +180,7 @@ internal sealed partial class LayoutEngine
     /// after U+2010 and en dashes, around em dashes, after "?" before a letter, at zero-width spaces and at soft hyphens
     /// (which show a hyphen only when the line breaks there).
     /// </summary>
-    private void AddWordSegments(CollectState st, string text, int start, int length, ComputedStyle style, string? href, ComputedStyle? deco, bool hyphenate)
+    private void AddWordSegments(CollectState st, string text, int start, int length, ComputedStyle style, string? href, InlineDeco? deco, bool hyphenate)
     {
         int end = start + length, seg = start;
         for (int k = start; k < end; k++)
@@ -219,7 +219,7 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>Adds the segment from <paramref name="seg"/> up to <paramref name="end"/> with a break after it; returns the next segment's start.</summary>
-    private int EndSegment(CollectState st, string text, int seg, int end, ComputedStyle style, string? href, ComputedStyle? deco, bool hyphenate)
+    private int EndSegment(CollectState st, string text, int seg, int end, ComputedStyle style, string? href, InlineDeco? deco, bool hyphenate)
     {
         AddWord(st, text, seg, end - seg, style, href, deco, BreakAfter.Break, hyphenate);
         return end;
@@ -232,7 +232,7 @@ internal sealed partial class LayoutEngine
     /// removed and its text-transform applied, as small capitals when the style asks for them, and in pieces at its
     /// hyphenation points with hyphens: auto.
     /// </summary>
-    private void AddWord(CollectState st, string text, int start, int length, ComputedStyle style, string? href, ComputedStyle? deco, BreakAfter breakAfter, bool hyphenate = false)
+    private void AddWord(CollectState st, string text, int start, int length, ComputedStyle style, string? href, InlineDeco? deco, BreakAfter breakAfter, bool hyphenate = false)
     {
         string src = text;
         int wStart = start, wLen = length;
@@ -316,7 +316,7 @@ internal sealed partial class LayoutEngine
            && (l.Length == 2 || l[2] == '-' || l[2] == '_');
 
     /// <summary>Adds one text item: <paramref name="length"/> characters of <paramref name="src"/> from <paramref name="start"/>, measured.</summary>
-    private void AddTextItem(CollectState st, string src, int start, int length, ComputedStyle style, string? href, ComputedStyle? deco, BreakAfter breakAfter)
+    private void AddTextItem(CollectState st, string src, int start, int length, ComputedStyle style, string? href, InlineDeco? deco, BreakAfter breakAfter)
     {
         var word = Rent(ItemKind.Text, style);
         word.Source = src;
@@ -362,7 +362,7 @@ internal sealed partial class LayoutEngine
     /// font-variant-caps: small-caps (and all-small-caps) without a font that has them: lower-case letters (and, for
     /// all-small-caps, capitals too) become smaller capitals. The pieces of a word keep it unbreakable.
     /// </summary>
-    private void AddSmallCaps(CollectState st, string word, ComputedStyle style, string? href, ComputedStyle? deco, BreakAfter breakAfter)
+    private void AddSmallCaps(CollectState st, string word, ComputedStyle style, string? href, InlineDeco? deco, BreakAfter breakAfter)
     {
         var small = SmallCapsStyle(style);
         bool all = style.SmallCaps == 2;

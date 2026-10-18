@@ -230,6 +230,7 @@ internal sealed partial class StyleResolver
             case "mix-blend-mode": ApplyMixBlendMode(s, parent, in d); break;
             case "background-blend-mode": ApplyBackgroundBlendMode(s, parent, in d); break;
             case "isolation": s.Isolate = d.Lower == "isolate" || d.Inherit && parent.Isolate; break;
+            case "box-decoration-break": s.BoxDecorationClone = d.Lower == "clone" || d.Inherit && parent.BoxDecorationClone; break;
 
             // ---- SVG presentation properties (Properties.Svg.cs)
             case "fill": ApplyFill(s, parent, in d); break;
