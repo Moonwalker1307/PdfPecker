@@ -163,6 +163,12 @@ static class Perf
         var pathData = SvgPathData();
         results.Add(Measure("parse-svg-paths", () => { foreach (var d in pathData) PdfPecker.Svg.PathParser.Parse(d); }, runs: 100));
 
+        // CFF subsetting: the CFF tables of the Inter test font (name-keyed, with local and global subroutines) and of
+        // a CID-keyed instance of the CFF2 test font, each reduced to a word, to the printable ASCII glyphs and to every
+        // glyph, which walks the charstrings and their subroutine calls and writes the subset. The tables are read once.
+        var cffSubsets = CffSubsets(Path.Combine(fixtureDir, "fonts"));
+        results.Add(Measure("subset-cff", () => { foreach (var (cff, glyphs) in cffSubsets) CffSubsetter.Subset(cff, glyphs); }, runs: 300));
+
         // Throughput with every core busy; documents per second is the figure, so higher is better.
         var options = new PdfOptions { BaseDirectory = htmlDir };
         for (int i = 0; i < 20; i++) HtmlToPdf.Convert(invoice, options);
@@ -592,6 +598,25 @@ static class Perf
 
     // The text of a document with Latin, accented, Arabic, Hebrew and CJK characters, numbers and punctuation.
     const string SubsetText = "Hamburgefonstiv fi ffl AV To Wa 0123456789 .,;:!?()[]{} ÆØÅ éèêëàâäîïôöûü ñç ß €£¥ العربية שלום 日本語 कि";
+
+    static List<(byte[] Cff, int[] Glyphs)> CffSubsets(string dir)
+    {
+        var fonts = new List<FontProgram> { FontProgram.Load(File.ReadAllBytes(Path.Combine(dir, "Inter-Subr.otf")))[0] };
+        var variable = FontProgram.Load(File.ReadAllBytes(Path.Combine(dir, "VarTestCFF-Subset.otf")))[0];
+        var axes = FontVariations.ReadAxes(variable);
+        var values = axes.ToDictionary(a => a.Tag, a => a.Max);
+        fonts.Add(FontProgram.Load(FontVariations.Instance(variable, FontVariations.Normalize(variable, axes, values), values, axes))[0]);
+        var subsets = new List<(byte[], int[])>();
+        foreach (var font in fonts)
+        {
+            var table = font.Table("CFF ")!.Value;
+            var cff = font.Data.AsSpan(table.Offset, table.Length).ToArray();
+            subsets.Add((cff, "Hamburgefonstiv".Select(c => font.GlyphId(c)).ToArray()));
+            subsets.Add((cff, Enumerable.Range(32, 95).Select(font.GlyphId).ToArray()));
+            subsets.Add((cff, Enumerable.Range(0, font.NumGlyphs).ToArray()));
+        }
+        return subsets;
+    }
 
     static void SubsetFont(byte[] data)
     {
