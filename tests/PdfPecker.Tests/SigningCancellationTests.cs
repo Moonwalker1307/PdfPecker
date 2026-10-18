@@ -250,6 +250,9 @@ public class SigningCancellationTests
     /// Blanks the PDF dates (the VRI entries record when validation data was added), because two runs can fall on
     /// either side of a second boundary. The replacement keeps the length, so the rest of the bytes still line up.
     /// </summary>
+    // The VRI /TU time is written as a hex string, so a run that crosses a second boundary differs there too.
     private static string WithoutDates(byte[] pdf) =>
-        System.Text.RegularExpressions.Regex.Replace(System.Text.Encoding.Latin1.GetString(pdf), @"D:\d{14}", "D:00000000000000");
+        System.Text.RegularExpressions.Regex.Replace(
+            System.Text.RegularExpressions.Regex.Replace(System.Text.Encoding.Latin1.GetString(pdf), @"D:\d{14}", "D:00000000000000"),
+            "(?i)443A(?:3[0-9]){14}", "443A3030303030303030303030303030");
 }
