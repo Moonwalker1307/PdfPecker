@@ -44,6 +44,14 @@ internal static partial class BoxPainter
     private static void PaintBackground(GroupOp group, ComputedStyle s, float x, float y, float w, float h, ImageLoader? images, float basis, CornerRadii? radii)
     {
         var layers = s.BackgroundImages;
+        // background-clip: text paints the background only inside the glyphs of the box's text: the background goes in a
+        // layer that the layout gives copies of that text (see LayoutEngine.ClipBackgroundToText).
+        if (ClipsToText(s) && (layers != null || CssColor.IsVisible(s.BackgroundColor)))
+        {
+            var clip = new LayerOp { TextClip = true };
+            group.Ops.Add(clip);
+            group = clip;
+        }
         // With background-blend-mode, the background is a group of its own: its layers blend with each other and
         // with the background colour, not with what is behind the box.
         if (layers != null && s.BackgroundBlendModes != null)
@@ -129,13 +137,17 @@ internal static partial class BoxPainter
     public static CornerRadii? InnerRadii(CornerRadii? radii, float left, float top, float right, float bottom)
         => radii is { } r ? r.Inset(top, right, bottom, left) : null;
 
+    /// <summary>Whether any background layer is clipped to the text.</summary>
+    public static bool ClipsToText(ComputedStyle s) => s.BackgroundClips is { } clips && Array.IndexOf(clips, BackgroundBox.Text) >= 0;
+
     /// <summary>The value of background layer <paramref name="i"/> in a comma-separated list, which repeats when shorter than the layers.</summary>
     private static T LayerValue<T>(T[]? list, int i, T initial) => list is { Length: > 0 } ? list[i % list.Length] : initial;
 
     /// <summary>The border, padding or content box of a border box.</summary>
     private static (float X, float Y, float W, float H) BoxOf(ComputedStyle s, BackgroundBox box, float x, float y, float w, float h, float basis)
     {
-        if (box == BackgroundBox.BorderBox) return (x, y, w, h);
+        // Text clips the border box's background to the box's text, which the layout adds afterwards.
+        if (box is BackgroundBox.BorderBox or BackgroundBox.Text) return (x, y, w, h);
         float l = s.BorderLeft, t = s.BorderTop, r = s.BorderRight, b = s.BorderBottom;
         if (box == BackgroundBox.ContentBox)
         {

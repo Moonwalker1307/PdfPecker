@@ -2,7 +2,7 @@ namespace PdfPecker.Css;
 
 internal enum BackgroundRepeat : byte { Repeat, NoRepeat, Space, Round }
 
-internal enum BackgroundBox : byte { BorderBox, PaddingBox, ContentBox }
+internal enum BackgroundBox : byte { BorderBox, PaddingBox, ContentBox, Text }
 
 /// <summary>One background-image layer: a gradient or an image URL.</summary>
 internal sealed class BackgroundImage
@@ -63,7 +63,7 @@ internal static class CssBackground
         "border-box" => BackgroundBox.BorderBox,
         "padding-box" => BackgroundBox.PaddingBox,
         "content-box" => BackgroundBox.ContentBox,
-        "text" => BackgroundBox.BorderBox, // background-clip: text is not supported: paint the whole box
+        "text" => BackgroundBox.Text,
         _ => null,
     };
 

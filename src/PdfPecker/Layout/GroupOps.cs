@@ -121,9 +121,15 @@ internal sealed class LayerOp : GroupOp
     /// translucent instead of blended onto white.
     /// </summary>
     public uint? MaskFill;
+    /// <summary>
+    /// background-clip: text. The layer's text ops are copies of the box's text, which are not drawn but make the mask
+    /// its other ops, the background, are painted through.
+    /// </summary>
+    public bool TextClip;
 
-    /// <summary>Whether the layer is drawn as a block of its own: transformed, translucent, blended, clipped, filtered or a mask.</summary>
-    public bool NeedsBlock => Transform != null || Opacity < 1 || BlendMode != null || Isolated || ClipVerbs != null || Raster != null || MaskFill != null;
+    /// <summary>Whether the layer is drawn as a block of its own: transformed, translucent, blended, clipped, filtered, a mask or clipped to text.</summary>
+    public bool NeedsBlock => Transform != null || Opacity < 1 || BlendMode != null || Isolated || ClipVerbs != null || Raster != null || MaskFill != null
+                              || TextClip;
 
     /// <summary>Whether the layer is painted as one transparency group.</summary>
     public bool NeedsGroup => Opacity < 1 || BlendMode != null || Isolated;
