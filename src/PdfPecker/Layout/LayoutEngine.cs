@@ -21,6 +21,10 @@ internal sealed partial class LayoutEngine
     private float _lastBaseline = float.NaN;
     private float _lastBoxRight; // right border edge (plus nothing else) of the last block box laid out
     private float _lastBoxX, _lastBoxTop, _lastBoxW, _lastBoxH; // border box of the last block box laid out
+    // The content height, vertical padding and borders of the last block box laid out, and the containing block height
+    // it gave its children (null when that was not definite, or the box is replaced).
+    private float _lastBoxContentH, _lastBoxFrameV;
+    private CbHeights? _lastBoxChildCb;
     private readonly Dictionary<Element, (float Min, float Max)> _intrinsicCache = new();
 
     public readonly Dictionary<string, float> Anchors = new(StringComparer.Ordinal);
@@ -800,6 +804,7 @@ internal sealed partial class LayoutEngine
 
         float contentBottom;
         float trailing = 0;
+        CbHeights? childCb = null;
         if (isImage || isSvg)
         {
             if (_paginate)
@@ -852,6 +857,7 @@ internal sealed partial class LayoutEngine
             _cbHeight = hasHOverride && _indefiniteOverride is { Count: > 0 } indefinite && indefinite.Contains(e)
                 ? null
                 : ChildHeights(e, hasHOverride, definiteH, ratioMin != null ? minH : null, frameV);
+            childCb = _cbHeight;
             contentBottom = LayoutContent(e, cx, cy, contentW, definiteH, minH);
             _cbHeight = outerCb;
             _pageBox = null;
@@ -918,6 +924,9 @@ internal sealed partial class LayoutEngine
         _lastBoxTop = y;
         _lastBoxW = used;
         _lastBoxH = bottom - y;
+        _lastBoxContentH = contentH;
+        _lastBoxFrameV = frameV;
+        _lastBoxChildCb = childCb;
         if (e.Name == "a" && e.GetAttribute("href") is { Length: > 0 } href) _ops.Add(new LinkOp(bx, y, used, bottom - y, href) { Link = Tags?.ElementOf(e) });
         // A box whose layout stopped early is laid out again in full right away; recording it now would put it in the
         // outline ahead of the headings inside it that were not reached yet.
@@ -1477,6 +1486,8 @@ internal sealed partial class LayoutEngine
         public float Baseline = float.NaN;
         public bool ForcedBreaks;
         public float BoxX, BoxY, BoxW, BoxH; // border box of the outermost box laid out
+        public float ContentH, FrameV;        // content height and vertical padding and borders of that box
+        public CbHeights? ChildCb;            // the containing block height that box gave its children
         public List<(Element E, float X, float Y)>? Absolutes; // absolutely positioned boxes still waiting for their containing block
     }
 
@@ -1493,6 +1504,8 @@ internal sealed partial class LayoutEngine
         var boundary = _boundaryPool.TryPop(out var pooled) ? pooled : new CbFrame { Boundary = true };
         _frames.Add(boundary);
         _lastBoxX = _lastBoxTop = _lastBoxW = _lastBoxH = 0;
+        _lastBoxContentH = _lastBoxFrameV = 0;
+        _lastBoxChildCb = null;
         _ops = new List<DrawOp>();
         _paginate = false;
         _marker = null;
@@ -1511,6 +1524,7 @@ internal sealed partial class LayoutEngine
                 Ops = _ops, AnchorIds = _captureAnchors, Height = bottom, Width = _lastBoxRight, Baseline = _lastBaseline,
                 ForcedBreaks = _forcedBreaks != breaks,
                 BoxX = _lastBoxX, BoxY = _lastBoxTop, BoxW = _lastBoxW, BoxH = _lastBoxH,
+                ContentH = _lastBoxContentH, FrameV = _lastBoxFrameV, ChildCb = _lastBoxChildCb,
                 Absolutes = absolutes,
             };
         }
