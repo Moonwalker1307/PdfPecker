@@ -309,6 +309,88 @@ public class LayoutFeatureTests
         Near(0, a.X); Near(260, c.X); Near(0, c.Y); Near(30, d.Y);
     }
 
+    [Fact]
+    public void Balanced_columns_keep_a_break_inside_avoid_column_grid_whole_in_the_first_column()
+    {
+        // Chrome starts balancing at the height of the tallest box that must stay whole, so the only grid is not split
+        // into two 40pt columns: it fills the first column and the second stays empty (values measured in Chromium).
+        var ops = Layout("""
+            <div style="column-count:2; column-gap:20pt">
+              <div style="display:grid; break-inside:avoid-column">
+                <div style="height:20pt; background:#ff0000"></div><div style="height:20pt"></div>
+                <div style="height:20pt"></div><div style="height:20pt; background:#0000ff"></div>
+              </div>
+            </div>
+            <div style="height:5pt; background:#ffff00"></div>
+            """);
+        var last = Box(ops, "#0000ff");
+        Near(0, last.X); Near(60, last.Y);
+        Near(80, Box(ops, "#ffff00").Y);
+    }
+
+    [Fact]
+    public void Balanced_columns_are_as_tall_as_the_tallest_box_that_avoids_a_column_break()
+    {
+        // Three short grids fill the first column and the 70pt one goes whole to the second, as in Chrome; growing the
+        // columns from half the content by the shortages of its rows split it or made the columns taller than 70pt.
+        var ops = Layout("""
+            <style>.k { display: grid; break-inside: avoid-column }</style>
+            <div style="column-count:2; column-gap:20pt">
+              <div class="k"><div style="height:20pt; background:#ff0000"></div></div>
+              <div class="k"><div style="height:20pt"></div></div>
+              <div class="k"><div style="height:20pt"></div></div>
+              <div class="k"><div style="height:30pt; background:#00ff00"></div><div style="height:40pt; background:#0000ff"></div></div>
+            </div>
+            <div style="height:5pt; background:#ffff00"></div>
+            """);
+        var top = Box(ops, "#00ff00"); var bottom = Box(ops, "#0000ff");
+        Near(260, top.X); Near(0, top.Y);
+        Near(260, bottom.X); Near(30, bottom.Y);
+        Near(70, Box(ops, "#ffff00").Y);
+    }
+
+    [Fact]
+    public void Grid_that_avoids_a_column_break_moves_whole_though_its_first_row_fits_the_first_column()
+    {
+        // Split at the end of the first column, the grid measured the room it left there as well and looked taller
+        // than the second column, so it stayed split with its first row alone; Chrome moves it whole.
+        var ops = Layout("""
+            <style>.k { display: grid; break-inside: avoid-column }</style>
+            <div style="column-count:2; column-gap:20pt">
+              <div class="k"><div style="height:20pt"></div></div>
+              <div class="k"><div style="height:20pt"></div></div>
+              <div class="k"><div style="height:10pt"></div></div>
+              <div class="k"><div style="height:10pt; background:#00ff00"></div><div style="height:60pt; background:#0000ff"></div></div>
+            </div>
+            <div style="height:5pt; background:#ffff00"></div>
+            """);
+        var head = Box(ops, "#00ff00"); var rows = Box(ops, "#0000ff");
+        Near(260, head.X); Near(0, head.Y);
+        Near(260, rows.X); Near(10, rows.Y);
+        Near(70, Box(ops, "#ffff00").Y);
+    }
+
+    [Fact]
+    public void Balanced_columns_grow_by_what_a_box_moved_on_whole_was_short_of()
+    {
+        // The third grid misses the first column by 10pt and moves on whole: the columns grow by those 10pt to 90pt, as
+        // in Chrome, not by the 20pt the last grid's second row missed by.
+        var ops = Layout("""
+            <style>.k { display: grid; break-inside: avoid-column }</style>
+            <div style="column-count:2; column-gap:20pt">
+              <div class="k"><div style="height:30pt"></div></div>
+              <div class="k"><div style="height:30pt"></div></div>
+              <div class="k"><div style="height:30pt; background:#ff0000"></div></div>
+              <div class="k"><div style="height:35pt; background:#00ff00"></div><div style="height:35pt"></div></div>
+            </div>
+            <div style="height:5pt; background:#ffff00"></div>
+            """);
+        var third = Box(ops, "#ff0000"); var last = Box(ops, "#00ff00");
+        Near(0, third.X); Near(60, third.Y);
+        Near(260, last.X); Near(0, last.Y);
+        Near(90, Box(ops, "#ffff00").Y);
+    }
+
     // ---- SVG ----
 
     [Fact]

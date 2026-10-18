@@ -341,6 +341,9 @@ internal sealed partial class LayoutEngine
         }
         float h = 0;
         for (int r = 0; r < runs.Count; r++) h = Math.Max(h, runs[r] / (breaks[r] + 1));
+        // Chrome's first height is never less than the tallest box that break-inside keeps whole: growing from a lower
+        // one by the shortages of the breaks would either split that box or overshoot the height that holds it.
+        if (fill.Notes != null) h = Math.Max(h, fill.Notes.TallestUnbreakable(first, endK));
         return Math.Max(0.5f, h);
     }
 
@@ -470,6 +473,26 @@ internal sealed partial class LayoutEngine
         }
 
         public float? EndOf(int k) => _ends.TryGetValue(k, out float end) ? end : null;
+
+        private Dictionary<int, float>? _unbreakable;
+
+        /// <summary>A box of height h that break-inside: avoid or avoid-column keeps whole, starting in column k.</summary>
+        public void Unbreakable(int k, float h)
+        {
+            if (Paused || k < from) return;
+            _unbreakable ??= new Dictionary<int, float>();
+            if (!_unbreakable.TryGetValue(k, out float tallest) || h > tallest) _unbreakable[k] = h;
+        }
+
+        /// <summary>The tallest box that must stay whole among those starting in columns first to last.</summary>
+        public float TallestUnbreakable(int first, int last)
+        {
+            if (_unbreakable == null) return 0;
+            float tallest = 0;
+            foreach (var (k, h) in _unbreakable)
+                if (k >= first && k <= last) tallest = Math.Max(tallest, h);
+            return tallest;
+        }
     }
 
     /// <summary>
