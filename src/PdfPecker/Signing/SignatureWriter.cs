@@ -15,8 +15,12 @@ internal static class SignatureWriter
 {
     private const int ByteRangeWidth = 48;
 
-    public static byte[] Sign(byte[] pdf, PdfSignatureOptions o, string? password)
-        => SignAsync(pdf, o, password, async: false, CancellationToken.None).GetAwaiter().GetResult();
+    /// <summary>
+    /// Signs synchronously. The task is already complete (see <see cref="SignAsync"/>), so reading its result does not
+    /// block; the token still reaches the external signer and the timestamp request.
+    /// </summary>
+    public static byte[] Sign(byte[] pdf, PdfSignatureOptions o, string? password, CancellationToken cancellationToken)
+        => SignAsync(pdf, o, password, async: false, cancellationToken).GetAwaiter().GetResult();
 
     /// <summary>
     /// Signs the PDF. With <paramref name="async"/> false nothing is awaited that has not already completed, so the

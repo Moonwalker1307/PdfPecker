@@ -10,7 +10,10 @@ public static partial class HtmlToPdf
 {
     private sealed partial class Conversion
     {
-        /// <summary>Writes the laid-out sections as a PDF file, signed when the options ask for it.</summary>
+        /// <summary>
+        /// Writes the laid-out sections as a PDF file. Signing is left to the caller, so that the asynchronous API can
+        /// await the timestamp server instead of holding a thread pool thread while it answers.
+        /// </summary>
         private byte[] Write(List<PageSection> sections)
         {
             var title = DocumentTitle(_options, _doc, _structure, _settings.IsPdfUA);
@@ -18,11 +21,8 @@ public static partial class HtmlToPdf
             var writer = CreateWriter(marginFont, watermarkFont);
             var marginBoxes = CreateMarginBoxes();
             var pageBands = _header != null || _footer != null || marginBoxes != null ? PageBands(writer, marginBoxes) : null;
-            var pdf = writer.Write(sections, _page.Background, title, _options.Author, _options.Subject,
+            return writer.Write(sections, _page.Background, title, _options.Author, _options.Subject,
                 _options.FooterText, _options.HeaderText, pageBands, _headings);
-            if (_options.Signature != null)
-                pdf = PdfSigner.Sign(pdf, _options.Signature, _options.Security?.OwnerPassword ?? _options.Security?.UserPassword);
-            return pdf;
         }
 
         /// <summary>

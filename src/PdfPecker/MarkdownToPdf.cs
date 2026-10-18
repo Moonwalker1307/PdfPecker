@@ -32,9 +32,9 @@ public static class MarkdownToPdf
 
     /// <summary>
     /// Converts a Markdown string to a PDF asynchronously on the thread pool. Cancelling the token also stops a conversion
-    /// that has already started.
+    /// that has already started, and signing, as in <see cref="HtmlToPdf.ConvertAsync"/>.
     /// </summary>
     public static Task<byte[]> ConvertAsync(string markdown, PdfOptions? pdfOptions = null, MarkdownOptions? markdownOptions = null,
         CancellationToken cancellationToken = default)
-        => Task.Run(() => HtmlToPdf.Convert(MarkdownToHtml.ConvertDocument(markdown, markdownOptions), pdfOptions, cancellationToken), cancellationToken);
+        => HtmlToPdf.RenderAsync(() => MarkdownToHtml.ConvertDocument(markdown, markdownOptions), pdfOptions ?? new PdfOptions(), cancellationToken);
 }

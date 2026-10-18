@@ -1,4 +1,5 @@
 using PdfPecker.Pdf;
+using PdfPecker.Signing;
 
 namespace PdfPecker;
 
@@ -44,12 +45,35 @@ public static partial class HtmlToPdf
     }
 
     /// <summary>Converts an HTML string to a PDF asynchronously on the thread pool.</summary>
-    /// <remarks>Cancelling <paramref name="cancellationToken"/> stops a conversion that is already running.</remarks>
+    /// <remarks>
+    /// Cancelling <paramref name="cancellationToken"/> stops a conversion that is already running. With
+    /// <see cref="PdfOptions.Signature"/> the external signer and the timestamp server are awaited, as in
+    /// <see cref="PdfSigner.SignAsync"/>, and cancelling stops them too.
+    /// </remarks>
     public static Task<byte[]> ConvertAsync(string html, PdfOptions? options = null, CancellationToken cancellationToken = default)
-        => Task.Run(() => Convert(html, options, cancellationToken), cancellationToken);
+        => RenderAsync(() => html ?? throw new ArgumentNullException(nameof(html)), options ?? new PdfOptions(), cancellationToken);
 
     internal static byte[] Render(string html, PdfOptions options, string? baseDirectory, CancellationToken cancellationToken = default)
-        => new Conversion(html, options, ValidateOptions(options), baseDirectory, cancellationToken).Run();
+    {
+        var pdf = new Conversion(html, options, ValidateOptions(options), baseDirectory, cancellationToken).Run();
+        return options.Signature == null ? pdf : SignatureWriter.Sign(pdf, options.Signature, SigningPassword(options), cancellationToken);
+    }
+
+    /// <summary>
+    /// Converts on the thread pool, then signs without holding a thread: the external signer and the timestamp request
+    /// are awaited. <paramref name="html"/> is read on the pool too, so that producing it (Markdown) does not run on the
+    /// caller's thread and its failures end up in the task.
+    /// </summary>
+    internal static async Task<byte[]> RenderAsync(Func<string> html, PdfOptions options, CancellationToken cancellationToken)
+    {
+        var pdf = await Task.Run(() => new Conversion(html(), options, ValidateOptions(options), options.BaseDirectory, cancellationToken).Run(),
+            cancellationToken).ConfigureAwait(false);
+        if (options.Signature == null) return pdf;
+        return await SignatureWriter.SignAsync(pdf, options.Signature, SigningPassword(options), async: true, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>The password that opens the file just written, which signing needs when it is encrypted.</summary>
+    private static string? SigningPassword(PdfOptions options) => options.Security?.OwnerPassword ?? options.Security?.UserPassword;
 
     /// <summary>What the checked options settle for the output file, beyond the options themselves.</summary>
     /// <param name="Conformance">The PDF/A level: the options' own, or PDF/A-3b for an e-invoice that names none.</param>
