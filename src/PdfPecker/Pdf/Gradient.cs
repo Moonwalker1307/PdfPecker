@@ -17,8 +17,10 @@ internal enum GradientChannel : byte { Flattened, Straight, Alpha }
 /// </summary>
 internal sealed class Gradient
 {
-    // A repeating gradient is tiled over at most this many periods; past that it is painted once, padded.
+    // A repeating gradient is tiled over at most this many periods, and with at most this many pieces of its colour
+    // function in all (periods times the pieces of one period); past that it is painted once, padded.
     private const int MaxTiledPeriods = 256;
+    private const int MaxTiledPieces = 16_384;
     // The domain of a conic gradient's calculator function, in gradient space; far larger than any page.
     private const string ConicDomain = "-100000 100000 -100000 100000";
     // Below this sum of |dx| and |dy| a point counts as the centre of a conic gradient, where atan is undefined.
@@ -128,21 +130,22 @@ internal sealed class Gradient
     /// the bounds, in that same space, decide how far a repeating gradient has to be tiled.
     /// </summary>
     public void WritePattern(Pdf.ByteBuffer b, Matrix toPage, float minX, float minY, float maxX, float maxY,
-        GradientChannel channel = GradientChannel.Flattened)
+        GradientChannel channel = GradientChannel.Flattened, GradientTilingBudget? budget = null)
     {
         var m = Transform.Then(toPage);
         b.Ascii("<< /PatternType 2 /Matrix [").Num6(m.A).Sp().Num6(m.B).Sp().Num6(m.C).Sp().Num6(m.D).Sp().Num(m.E).Sp().Num(m.F)
             .Ascii("] /Shading ");
-        WriteShading(b, minX, minY, maxX, maxY, channel);
+        WriteShading(b, minX, minY, maxX, maxY, channel, budget);
         b.Ascii(" >>");
     }
 
     /// <summary>
     /// Writes the shading dictionary in gradient space (before <see cref="Transform"/>). The bounds are in the painted
-    /// shape's space, as for <see cref="WritePattern"/>.
+    /// shape's space, as for <see cref="WritePattern"/>. A repeating gradient is tiled only while
+    /// <paramref name="budget"/>, the document's, allows it.
     /// </summary>
     public void WriteShading(Pdf.ByteBuffer b, float minX, float minY, float maxX, float maxY,
-        GradientChannel channel = GradientChannel.Flattened)
+        GradientChannel channel = GradientChannel.Flattened, GradientTilingBudget? budget = null)
     {
         var colors = channel switch
         {
@@ -152,7 +155,7 @@ internal sealed class Gradient
         };
         bool gray = channel == GradientChannel.Alpha && Alphas != null;
         if (Conic) WriteConicShading(b, minX, minY, maxX, maxY, gray);
-        else WriteAxialShading(b, minX, minY, maxX, maxY, colors, gray);
+        else WriteAxialShading(b, minX, minY, maxX, maxY, colors, gray, budget);
     }
 
     /// <summary>
@@ -185,10 +188,11 @@ internal sealed class Gradient
     /// A linear (axial, type 2) or radial (type 3) shading. Repeat and reflect are written as one copy of the colour
     /// function per period the painted bounds cover, the geometry stretched to match.
     /// </summary>
-    private void WriteAxialShading(Pdf.ByteBuffer b, float minX, float minY, float maxX, float maxY, uint[] colors, bool gray)
+    private void WriteAxialShading(Pdf.ByteBuffer b, float minX, float minY, float maxX, float maxY, uint[] colors, bool gray,
+        GradientTilingBudget? budget)
     {
         b.Ascii("<< /ShadingType ").Int(Radial ? 3 : 2).Ascii(gray ? " /ColorSpace /DeviceGray /Coords [" : " /ColorSpace /DeviceRGB /Coords [");
-        var (t0, t1) = TilingRange(minX, minY, maxX, maxY);
+        var (t0, t1) = TilingRange(minX, minY, maxX, maxY, colors, budget);
         float Lerp(float a, float c, float t) => a + (c - a) * t;
         if (Radial)
             b.Num(Lerp(X0, X1, t0)).Sp().Num(Lerp(Y0, Y1, t0)).Sp().Num(Math.Max(0, Lerp(R0, R1, t0))).Sp()
@@ -203,15 +207,18 @@ internal sealed class Gradient
 
     /// <summary>
     /// The whole periods [t0, t1] of the gradient parameter that the painted bounds cover: [0, 1] unless the gradient
-    /// repeats or reflects and the tiling stays within <see cref="MaxTiledPeriods"/>.
+    /// repeats or reflects and the tiling stays within <see cref="MaxTiledPeriods"/>, <see cref="MaxTiledPieces"/> and
+    /// the document's <paramref name="budget"/>.
     /// </summary>
-    private (float T0, float T1) TilingRange(float minX, float minY, float maxX, float maxY)
+    private (float T0, float T1) TilingRange(float minX, float minY, float maxX, float maxY, uint[] colors, GradientTilingBudget? budget)
     {
         if (Spread == GradientSpread.Pad || ParameterRange(minX, minY, maxX, maxY) is not (var lo, var hi)) return (0, 1);
         float t0 = (float)Math.Floor(lo);
         float t1 = (float)Math.Ceiling(hi);
         if (Radial) t0 = Math.Max(t0, 0);
         if (t1 - t0 > MaxTiledPeriods || t1 <= t0) return (0, 1);
+        long pieces = (long)(t1 - t0) * Segments(colors).Count;
+        if (pieces > MaxTiledPieces || budget?.TrySpend(pieces) == false) return (0, 1);
         return (t0, t1);
     }
 
