@@ -1,0 +1,45 @@
+<!doctype html>
+<html><head><title>Percentage heights</title>
+<style>
+@page { size: A5; margin: 15mm }
+@page :first { margin: 0 }
+html, body { height: 100%; margin: 0 }
+body { font-family: sans-serif; font-size: 10pt }
+.cover { height: 100%; box-sizing: border-box; padding: 30mm 15mm; background: #1d3557; color: white; display: flex; flex-direction: column }
+.cover h1 { font-size: 28pt; margin: 0 0 6mm }
+.cover .band { flex: 1; display: flex; align-items: flex-end }
+.cover .band div { height: 40%; width: 100%; background: linear-gradient(#457b9d, #a8dadc) }
+.page { height: 100%; box-sizing: border-box; padding-top: 4mm; page-break-before: always }
+.cards { display: flex; gap: 4mm; height: 30% }
+.card { flex: 1; border: 1pt solid #999; padding: 3mm; box-sizing: border-box }
+.card .media { height: 50%; background: #e63946 }
+.card .meta { height: calc(50% - 3mm); margin-top: 3mm; background: #f1faee }
+.row { display: flex; height: 35%; margin-top: 4mm; border: 1pt solid #1d3557 }
+.side { width: 30mm; height: 100%; background: #a8dadc; position: relative }
+.side .bar { height: 60%; background: #457b9d }
+.main { flex: 1; padding: 3mm }
+.badge { position: absolute; right: 3mm; top: 3mm; bottom: 3mm; width: 8mm; background: #e9c46a }
+.badge i { display: block; height: 50%; background: #f4a261 }
+table { height: 20%; width: 100%; margin-top: 4mm; border-collapse: collapse }
+td { border: 1px solid #999; padding: 0 2mm }
+td.fixed { height: 10mm }
+td .fill { height: 100%; background: #2a9d8f }
+.auto { margin-top: 2mm; background: #eee }
+.auto .ignored { height: 50%; background: #e76f51 }
+</style></head>
+<body>
+<div class="cover"><h1>Percentage heights</h1><p>The cover fills the first page, whose margins are zero.</p>
+  <div class="band"><div></div></div></div>
+<div class="page">
+  <div class="cards">
+    <div class="card"><div class="media"></div><div class="meta">Half the card, less the gap.</div></div>
+    <div class="card"><div class="media"></div><div class="meta">Half the card, less the gap.</div></div>
+  </div>
+  <div class="row"><div class="side"><div class="bar"></div><div class="badge"><i></i></div></div>
+    <div class="main">A sidebar of height 100% in a flex row of height 35% of the page; the badge in it stretches between
+      top and bottom.</div></div>
+  <table><tr><td class="fixed"><div class="fill"></div></td><td>The table is 20% of the page; the first cell's child fills the row.</td></tr></table>
+  <div class="auto">The parent's height is auto, so a child of height 50% is as tall as its content.<div class="ignored">auto</div></div>
+</div>
+<div class="page"><div class="cards" style="height: 50%"><div class="card"><div class="media"></div><div class="meta">This page's own area.</div></div></div></div>
+</body></html>

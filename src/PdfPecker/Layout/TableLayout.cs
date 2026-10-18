@@ -39,11 +39,19 @@ internal sealed partial class LayoutEngine
         public float[] ColFixed = Array.Empty<float>(), ColPct = Array.Empty<float>();
         public float[] ColSpecFixed = Array.Empty<float>(), ColSpecPct = Array.Empty<float>(); // from <col> only
         public float[]? RowExtra; // per layout pass: height each row gets on top of its content, to fill the table's height
+        public bool DefiniteHeight; // per layout pass: the table's height is a length or a percentage that resolves
         public CellModel?[,] Grid = new CellModel?[0, 0]; // the cell covering each row and column
         public ComputedStyle TableStyle = null!;
     }
 
     private readonly Dictionary<Element, TableModel> _tables = new();
+
+    /// <summary>
+    /// How many layouts of table rows are in progress whose drawing is thrown away and only their heights are used:
+    /// the rows a table with a height measures before sharing that height out, and the first layout of a row whose
+    /// cells have percentage heights inside.
+    /// </summary>
+    private int _measuringRows;
 
     private TableModel GetTableModel(Element table)
     {
@@ -335,6 +343,11 @@ internal sealed partial class LayoutEngine
         bool collapse = s.BorderCollapse;
         float hs = collapse ? 0 : s.BorderSpacingH, vs = collapse ? 0 : s.BorderSpacingV;
         var (bx, boxW, frameT, frameB, frameH, colX, widths) = TableGeometry(table, m, x, availW);
+        // The table's own percentage height resolves against its containing block; what is inside it (captions, rows
+        // and cells) does not see that block.
+        float? cbH = HeightBasis(table);
+        var outerCb = _cbHeight;
+        _cbHeight = null;
         m.Rtl = s.Rtl;
 
         // On pages of different widths, as in Chrome, the table is sized again for each page and its rows take the
@@ -368,12 +381,18 @@ internal sealed partial class LayoutEngine
         float cy = y + frameT + (m.Rows.Count > 0 ? vs : 0);
 
         m.RowExtra = null;
-        float? tableH = TableHeight(s, boxW, frameH, frameT + frameB);
-        if (tableH is float th && m.Rows.Count > 0)
+        float? tableH = TableHeight(s, boxW, frameH, frameT + frameB, cbH);
+        m.DefiniteHeight = HeightOf(s.Height, cbH) != null;
+        // Inside rows that are only measured, a table is as tall without sharing out its height over its rows (it is
+        // at least that height either way), so it is not laid out twice for that: with tables nested in each other,
+        // each level would double the work.
+        if (tableH is float th && m.Rows.Count > 0 && _measuringRows == 0)
             m.RowExtra = RowExtras(m, th - frameT - frameB - vs, colX, widths, hs, vs, collapse);
         for (int r = 0; r < m.Rows.Count; r++)
             cy = LayoutRow(m, r, cy, colX, widths, hs, vs, collapse, allowMove: true, pageColumns) + vs;
         m.RowExtra = null;
+        m.DefiniteHeight = false;
+        _cbHeight = outerCb;
 
         float tableBottom = cy + frameB;
         if (tableH is float minBottom && tableBottom - tableTop < minBottom) tableBottom = tableTop + minBottom;
@@ -478,11 +497,11 @@ internal sealed partial class LayoutEngine
     /// The border-box height a table is at least as tall as: its height, or the one aspect-ratio gives its width, limited
     /// by min-height and max-height; null when nothing sets one. Rows taller than that still make the table grow.
     /// </summary>
-    private static float? TableHeight(ComputedStyle s, float boxW, float frameH, float frameV)
+    private static float? TableHeight(ComputedStyle s, float boxW, float frameH, float frameV, float? cbH)
     {
         float extra = s.BorderBox ? 0 : frameV;
         float? h = null;
-        if (!s.Height.IsAuto && !s.Height.IsPercent) h = s.Height.Value + extra;
+        if (HeightOf(s.Height, cbH) is float specified) h = specified + extra;
         else if (s.AspectRatio > 0)
         {
             // Chrome takes the table's content width for the width the ratio divides, whatever box-sizing says, and
@@ -490,8 +509,8 @@ internal sealed partial class LayoutEngine
             float c = Math.Max(0, boxW - frameH);
             h = RatioOnBorderBox(s) ? c / s.AspectRatio : Math.Max(0, c - frameH) / s.AspectRatio + frameV;
         }
-        if (h != null && !s.MaxHeight.IsAuto && !s.MaxHeight.IsPercent) h = Math.Min(h.Value, s.MaxHeight.Value + extra);
-        if (!s.MinHeight.IsAuto && !s.MinHeight.IsPercent && s.MinHeight.Value > 0) h = Math.Max(h ?? 0, s.MinHeight.Value + extra);
+        if (h != null && HeightOf(s.MaxHeight, cbH) is float max) h = Math.Min(h.Value, max + extra);
+        if (MinHeightOf(s, cbH) is float min && min > 0) h = Math.Max(h ?? 0, min + extra);
         return h;
     }
 
@@ -504,6 +523,7 @@ internal sealed partial class LayoutEngine
         var heights = new float[m.Rows.Count];
         var measured = Capture(() =>
         {
+            _measuringRows++;
             float top = 0;
             for (int r = 0; r < m.Rows.Count; r++)
             {
@@ -511,6 +531,7 @@ internal sealed partial class LayoutEngine
                 heights[r] = bottom - top;
                 top = bottom + vs;
             }
+            _measuringRows--;
             return top;
         });
         float extra = available - measured.Height;
@@ -537,14 +558,24 @@ internal sealed partial class LayoutEngine
             if (pageColumns != null) (colX, widths) = pageColumns[PageBox.Kind(PageOf(rowTop))];
             rowGroup = new GroupOp();
             _ops.Add(rowGroup);
+            // As in Chrome, percentage heights in a cell whose height is definite (it has a fixed height, or the table
+            // has one) resolve against the cell's final height, which is only known once the row is: the row is laid
+            // out once to find it, with those percentages as auto, and then again. The first layout only measures.
+            bool percent = _measuringRows == 0 && PercentCells(m, row);
+            if (percent) _measuringRows++;
             foreach (var cell in row.Cells) LayoutCell(cell, rowTop, colX, widths, hs, collapse, m.Rtl);
-
-            float rowH = 0;
-            foreach (var cell in row.Cells)
-                if (cell.RowSpan == 1) rowH = Math.Max(rowH, cell.NeededH);
-            var trs = row.Tr.Style;
-            if (!trs.Height.IsAuto && !trs.Height.IsPercent) rowH = Math.Max(rowH, trs.Height.Value);
-            if (m.RowExtra != null) rowH = Math.Max(rowH, rowH + m.RowExtra[r]);
+            if (percent) _measuringRows--;
+            float rowH = RowHeight(m, r, shareOfTable: true);
+            if (percent)
+            {
+                Truncate(rowStartOps);
+                rowGroup = new GroupOp();
+                _ops.Add(rowGroup);
+                foreach (var cell in row.Cells)
+                    LayoutCell(cell, rowTop, colX, widths, hs, collapse, m.Rtl, cell.RowSpan == 1 && IsDefiniteCell(m, cell) ? rowH : null);
+                // Content that the percentages made taller than the row (with margins, say) still makes it grow.
+                rowH = Math.Max(rowH, RowHeight(m, r, shareOfTable: false));
+            }
             rowBottom = rowTop + rowH;
             foreach (var cell in row.Ending)
                 rowBottom = Math.Max(rowBottom, cell.Top + cell.NeededH);
@@ -581,7 +612,40 @@ internal sealed partial class LayoutEngine
         return rowBottom;
     }
 
-    private void LayoutCell(CellModel cell, float rowTop, float[] colX, float[] widths, float hs, bool collapse, bool rtl)
+    /// <summary>
+    /// The height of row <paramref name="r"/> from its cells laid out last and its own height, and with
+    /// <paramref name="shareOfTable"/> the part of the table's height it gets on top.
+    /// </summary>
+    private static float RowHeight(TableModel m, int r, bool shareOfTable)
+    {
+        var row = m.Rows[r];
+        float rowH = 0;
+        foreach (var cell in row.Cells)
+            if (cell.RowSpan == 1) rowH = Math.Max(rowH, cell.NeededH);
+        var trs = row.Tr.Style;
+        if (!trs.Height.IsAuto && !trs.Height.IsPercent) rowH = Math.Max(rowH, trs.Height.Value);
+        if (shareOfTable && m.RowExtra != null) rowH = Math.Max(rowH, rowH + m.RowExtra[r]);
+        return rowH;
+    }
+
+    /// <summary>
+    /// Whether a cell of the row that spans only it is definite, its height fixed or the table's, and has children with
+    /// percentage heights, which then resolve against the cell's height (a row's height alone does not make it definite).
+    /// </summary>
+    private static bool PercentCells(TableModel m, RowModel row)
+    {
+        foreach (var cell in row.Cells)
+            if (cell.RowSpan == 1 && IsDefiniteCell(m, cell) && HasPercentHeightChild(cell.Td)) return true;
+        return false;
+    }
+
+    private static bool IsDefiniteCell(TableModel m, CellModel cell) => m.DefiniteHeight || HeightOf(cell.Td.Style.Height, null) != null;
+
+    /// <summary>
+    /// Lays out a cell's content at <paramref name="rowTop"/>. <paramref name="rowHeight"/>, the height of the row once
+    /// known, is given for a definite cell: the percentage heights of its content resolve against it.
+    /// </summary>
+    private void LayoutCell(CellModel cell, float rowTop, float[] colX, float[] widths, float hs, bool collapse, bool rtl, float? rowHeight = null)
     {
         var td = cell.Td;
         var cs = td.Style;
@@ -602,7 +666,10 @@ internal sealed partial class LayoutEngine
         cell.OpsStart = _ops.Count;
         float contentTop = rowTop + bt + pt;
         var outerFloats = EnterFormattingContext();
+        var outerCb = _cbHeight;
+        _cbHeight = rowHeight is float rh ? new CbHeights(Math.Max(0, rh - bt - pt - pb - bb)) : null;
         float contentBottom = LayoutFlow(td, cell.X + bl + pl, contentTop, Math.Max(0, w - bl - br - pl - pr));
+        _cbHeight = outerCb;
         contentBottom = LeaveFormattingContext(outerFloats, contentBottom);
         cell.OpsEnd = _ops.Count;
         cell.NeededH = cell.ContentH = bt + pt + (contentBottom - contentTop) + pb + bb;

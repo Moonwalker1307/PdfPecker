@@ -411,12 +411,16 @@ internal sealed partial class LayoutEngine
         _footnoteArea ??= new Element("::footnote-area") { Generated = true, Style = Footnotes!.Area };
         // The footnotes are out of the flow they came from; here they are the area's content.
         foreach (Element e in run) e.Detached = false;
+        // The footnote area's height is not definite: percentage heights in footnotes behave as auto.
+        var outerCb = _cbHeight;
+        _cbHeight = null;
         try
         {
             return CaptureRun(run, _footnoteArea, AreaContentWidth(parts[start].Page));
         }
         finally
         {
+            _cbHeight = outerCb;
             foreach (Element e in run) e.Detached = true;
         }
     }
@@ -426,7 +430,11 @@ internal sealed partial class LayoutEngine
     {
         float width = AreaContentWidth(basis);
         if (_footnoteMeasures.TryGetValue((k, width), out var m)) return m;
+        // Laid out as part of the footnote area, whose height is not definite, wherever its call is.
+        var outerCb = _cbHeight;
+        _cbHeight = null;
         var c = CaptureBox(Footnotes!.Bodies[k], width, shrinkToFit: false);
+        _cbHeight = outerCb;
         var tops = new SortedSet<float>();
         CollectLineTops(c.Ops, tops);
         var cuts = tops.Where(t => t > 0.5f && t < c.Height - 0.5f).ToArray();
