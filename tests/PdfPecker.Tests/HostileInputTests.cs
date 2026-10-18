@@ -121,6 +121,46 @@ public class HostileInputTests
         Assert.Equal(0xFF00FF00u, ById(doc, "n").Style.Color);
     }
 
+    // Fuzz finding (css, timeout-d0d017cf): a variable that names itself in its reference and again in each nested
+    // fallback was resolved twice per level down to the depth limit, about 2^32 substitutions.
+    [Fact]
+    public void Self_referencing_custom_property_with_nested_fallbacks_is_linear()
+    {
+        var value = new StringBuilder();
+        for (int i = 0; i < 40; i++) value.Append("var(--a, ");
+        value.Append("10px").Append(')', 40);
+        var doc = Bounded(() => Styled($"<style>:root{{--a:{value}}} p{{color:var(--a, lime)}}</style><p id=a>a</p>"));
+        Assert.Equal(0xFF00FF00u, ById(doc, "a").Style.Color);
+    }
+
+    // The same blow-up without a cycle: each variable names the next one twice, and every one ends up empty.
+    [Fact]
+    public void Custom_properties_that_resolve_to_nothing_are_resolved_once()
+    {
+        var sb = new StringBuilder("<style>:root{");
+        for (int i = 0; i < 40; i++) sb.Append($"--a{i}:var(--a{i + 1},)var(--a{i + 1},);");
+        sb.Append("--a40:var(--none,)} p{margin-left:var(--a0) 1pt}</style><p>text</p>");
+        AssertStructurallyValid(Bounded(sb.ToString()));
+    }
+
+    [Fact]
+    public void Custom_properties_on_a_reference_cycle_take_the_fallback()
+    {
+        var doc = Styled("<style>:root{--a:var(--b, red); --b:var(--a, red); --c:var(--a, blue)} #a{color:var(--a, lime)}"
+            + " #b{color:var(--b, lime)} #c{color:var(--c)}</style><p id=a>a</p><p id=b>b</p><p id=c>c</p>");
+        Assert.Equal(0xFF00FF00u, ById(doc, "a").Style.Color);
+        Assert.Equal(0xFF00FF00u, ById(doc, "b").Style.Color);
+        Assert.Equal(0xFF0000FFu, ById(doc, "c").Style.Color);
+    }
+
+    // Fuzz finding (html, memory-0aab5f6e): a huge negative padding made the line billions of points wide, and its
+    // leader built a string of a billion dots.
+    [Fact]
+    public void Leader_on_a_huge_line_is_capped()
+    {
+        AssertStructurallyValid(Bounded("<style>\"\"{}ul{padding:-1e38}:after{content:leader(dotted)target-counter(,)</style><ul"));
+    }
+
     [Fact]
     public void Long_descendant_selectors_do_not_backtrack_exponentially()
     {
