@@ -180,7 +180,9 @@ internal sealed partial class StyleResolver
             foreach (var n in tok.Trim('[', ']').Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries))
                 (names ??= new()).Add((n, line, current == after));
         }
-        foreach (var tok in CssParser.Tokens(lower))
+        var tokens = CssParser.Tokens(lower);
+        if (tokens.Count > 0 && tokens[0] == "subgrid") return ParseSubgrid(tokens);
+        foreach (var tok in tokens)
         {
             if (tok.StartsWith("[", StringComparison.Ordinal)) { Name(tok, current.Count); continue; }
             if (tok.StartsWith("repeat(", StringComparison.Ordinal) && tok.EndsWith(")", StringComparison.Ordinal))
@@ -222,6 +224,64 @@ internal sealed partial class StyleResolver
         list.After = after.ToArray();
         list.LineNames = names;
         return list.Before.Length + list.After.Length > 0 || list.AutoRepeat != null ? list : null;
+    }
+
+    /// <summary>
+    /// <c>subgrid</c> with its line-name lists, as in <c>subgrid [a] [b c] repeat(2, [d]) repeat(auto-fill, [e])</c>.
+    /// The tokenizer splits a bracket that holds several names at its spaces, so a list is read on to its closing bracket.
+    /// </summary>
+    private static TrackList? ParseSubgrid(List<string> tokens)
+    {
+        var list = new TrackList { Subgrid = true };
+        var target = list.SubgridNames;
+        for (int i = 1; i < tokens.Count; i++)
+        {
+            var tok = tokens[i];
+            if (tok.StartsWith("repeat(", StringComparison.Ordinal) && tok.EndsWith(")", StringComparison.Ordinal))
+            {
+                var inner = tok.Substring(7, tok.Length - 8);
+                int comma = inner.IndexOf(',');
+                if (comma < 0) return null;
+                var countText = inner.Substring(0, comma).Trim();
+                var repeated = new List<string[]>();
+                var inside = CssParser.Tokens(inner.Substring(comma + 1));
+                for (int k = 0; k < inside.Count; k++)
+                    if (!ReadLineNames(inside, ref k, repeated)) return null;
+                if (repeated.Count == 0) return null;
+                if (countText == "auto-fill")
+                {
+                    // Only one auto-fill per list; the lists after it fill the lines from the end.
+                    if (list.SubgridAutoFill != null) return null;
+                    list.SubgridAutoFill = repeated.ToArray();
+                    target = list.SubgridNamesAfter;
+                }
+                else if (int.TryParse(countText, out int count) && count > 0)
+                {
+                    for (int k = 0; k < Math.Min(count, 1000); k++) target.AddRange(repeated);
+                }
+                else return null;
+                continue;
+            }
+            if (!ReadLineNames(tokens, ref i, target)) return null;
+        }
+        return list;
+    }
+
+    /// <summary>Reads one bracketed name list that starts at <paramref name="i"/>, leaving <paramref name="i"/> on its last token.</summary>
+    private static bool ReadLineNames(List<string> tokens, ref int i, List<string[]> into)
+    {
+        if (!tokens[i].StartsWith("[", StringComparison.Ordinal)) return false;
+        var names = new List<string>();
+        for (; i < tokens.Count; i++)
+        {
+            var tok = tokens[i];
+            bool last = tok.EndsWith("]", StringComparison.Ordinal);
+            names.AddRange(tok.Trim('[', ']').Split(' ', StringSplitOptions.RemoveEmptyEntries));
+            if (!last) continue;
+            into.Add(names.ToArray());
+            return true;
+        }
+        return false;
     }
 
     private bool TryParseTrack(string tok, float em, out Track track)

@@ -189,6 +189,151 @@ public class Css3LayoutTests
         Near(150, Box(ops, "#00ff00").W);
     }
 
+    // ---- subgrid ----
+
+    [Fact]
+    public void Subgrid_columns_are_the_parent_tracks_it_spans()
+    {
+        var ops = Layout(@"<div style='display:grid; grid-template-columns: 100pt 1fr 50pt'>
+            <div style='grid-column: 1 / 4; display:grid; grid-template-columns: subgrid; grid-auto-rows: 10pt'>
+              <div style='background:#ff0000'></div><div style='background:#00ff00'></div><div style='background:#0000ff'></div>
+            </div></div>");
+        Near(0, Box(ops, "#ff0000").X); Near(100, Box(ops, "#ff0000").W);
+        Near(100, Box(ops, "#00ff00").X); Near(350, Box(ops, "#00ff00").W);
+        Near(450, Box(ops, "#0000ff").X); Near(50, Box(ops, "#0000ff").W);
+    }
+
+    [Fact]
+    public void Subgrid_padding_border_and_margin_shrink_its_edge_tracks()
+    {
+        var ops = Layout(@"<div style='display:grid; grid-template-columns: 100pt 100pt 100pt'>
+            <div style='grid-column: 1 / 4; display:grid; grid-template-columns: subgrid; grid-auto-rows: 10pt; padding: 0 20pt 0 5pt; border-left: 3pt solid #000; margin-left: 2pt'>
+              <div style='background:#ff0000'></div><div style='background:#00ff00'></div><div style='background:#0000ff'></div>
+            </div></div>");
+        Near(10, Box(ops, "#ff0000").X); Near(90, Box(ops, "#ff0000").W);
+        Near(100, Box(ops, "#00ff00").X); Near(100, Box(ops, "#00ff00").W);
+        Near(200, Box(ops, "#0000ff").X); Near(80, Box(ops, "#0000ff").W);
+    }
+
+    [Fact]
+    public void Subgrid_items_size_the_parent_tracks()
+    {
+        // The parent's auto column is as wide as the subgrid's first item plus the subgrid's left padding.
+        var ops = Layout(@"<div style='display:grid; grid-template-columns: auto 1fr; grid-auto-rows: 10pt'>
+            <div style='grid-column: 1 / 3; display:grid; grid-template-columns: subgrid; padding-left: 10pt'>
+              <div style='width: 120pt; background:#ff0000'></div><div style='background:#0000ff'></div>
+            </div>
+            <div style='grid-column: 1; background:#00ff00'></div></div>");
+        Near(130, Box(ops, "#00ff00").W);
+        Near(10, Box(ops, "#ff0000").X); Near(120, Box(ops, "#ff0000").W);
+        Near(130, Box(ops, "#0000ff").X); Near(370, Box(ops, "#0000ff").W);
+    }
+
+    [Fact]
+    public void Subgrid_gap_moves_the_inner_lines_by_half_the_difference()
+    {
+        var ops = Layout(@"<div style='display:grid; grid-template-columns: 100pt 100pt; column-gap: 10pt'>
+            <div style='grid-column: 1 / 3; display:grid; grid-template-columns: subgrid; column-gap: 2pt; grid-auto-rows: 10pt'>
+              <div style='background:#ff0000'></div><div style='background:#00ff00'></div>
+            </div></div>");
+        Near(0, Box(ops, "#ff0000").X); Near(104, Box(ops, "#ff0000").W);
+        Near(106, Box(ops, "#00ff00").X); Near(104, Box(ops, "#00ff00").W);
+    }
+
+    [Fact]
+    public void Subgrid_rows_line_the_cards_items_up()
+    {
+        var ops = Layout(@"<div style='display:grid; grid-template-columns: 1fr 1fr; column-gap: 10pt'>
+            <div style='grid-row: span 2; display:grid; grid-template-rows: subgrid'>
+              <div style='height:10pt; background:#ff0000'></div><div style='height:30pt; background:#00ff00'></div>
+            </div>
+            <div style='grid-row: span 2; display:grid; grid-template-rows: subgrid'>
+              <div style='height:25pt; background:#0000ff'></div><div style='height:5pt; background:#ffff00'></div>
+            </div>
+            <div style='background:#00ffff; height: 10pt'></div></div>");
+        // The parent's first row is 25pt (the tallest first item), its second 30pt, so the second items start together.
+        Near(0, Box(ops, "#ff0000").Y); Near(25, Box(ops, "#00ff00").Y);
+        Near(0, Box(ops, "#0000ff").Y); Near(25, Box(ops, "#ffff00").Y);
+        Near(55, Box(ops, "#00ffff").Y);
+    }
+
+    [Fact]
+    public void Subgrid_lines_carry_the_parents_names_and_its_own()
+    {
+        var ops = Layout(@"<div style='display:grid; grid-template-columns: [a] 100pt [b] 100pt [c] 100pt [d]'>
+            <div style='grid-column: b / d; display:grid; grid-template-columns: subgrid [x] [y] [z]; grid-auto-rows: 10pt'>
+              <div style='grid-column: c; background:#ff0000'></div>
+              <div style='grid-column: x / z; background:#00ff00'></div>
+            </div></div>");
+        Near(200, Box(ops, "#ff0000").X); Near(100, Box(ops, "#ff0000").W);
+        Near(100, Box(ops, "#00ff00").X); Near(200, Box(ops, "#00ff00").W);
+    }
+
+    [Fact]
+    public void Subgrid_spans_its_named_lines_and_clamps_items_to_its_tracks()
+    {
+        // Three name lists give an auto-placed subgrid a span of two; an item placed past its tracks lands in the last one.
+        var ops = Layout(@"<div style='display:grid; grid-template-columns: repeat(4, 50pt)'>
+            <div style='display:grid; grid-template-columns: subgrid [a] [b] [c]; grid-auto-rows: 10pt'>
+              <div style='background:#ff0000'></div><div style='grid-column: 5; background:#00ff00'></div>
+              <div style='grid-column: 2 / span 3; background:#0000ff'></div>
+            </div>
+            <div style='background:#ffff00; height: 10pt'></div></div>");
+        Near(0, Box(ops, "#ff0000").X);
+        Near(50, Box(ops, "#00ff00").X); Near(50, Box(ops, "#00ff00").W);
+        Near(50, Box(ops, "#0000ff").X); Near(50, Box(ops, "#0000ff").W);
+        Near(100, Box(ops, "#ffff00").X);
+    }
+
+    [Fact]
+    public void Nested_subgrids_share_the_outer_tracks()
+    {
+        var ops = Layout(@"<div style='display:grid; grid-template-columns: 100pt 100pt 100pt'>
+            <div style='grid-column: 1 / 4; display:grid; grid-template-columns: subgrid'>
+              <div style='grid-column: 2 / 4; display:grid; grid-template-columns: subgrid; grid-auto-rows: 10pt'>
+                <div style='grid-column: 2; background:#ff0000'></div>
+              </div>
+            </div></div>");
+        Near(200, Box(ops, "#ff0000").X); Near(100, Box(ops, "#ff0000").W);
+    }
+
+    [Fact]
+    public void Subgrid_outside_a_grid_falls_back_to_none()
+    {
+        var ops = Layout(@"<div><div style='display:grid; grid-template-columns: subgrid [a] [b]; grid-auto-rows: 10pt'>
+            <div style='background:#ff0000'></div><div style='background:#00ff00'></div></div></div>");
+        Near(500, Box(ops, "#ff0000").W);
+        Near(0, Box(ops, "#00ff00").X); Near(10, Box(ops, "#00ff00").Y); Near(500, Box(ops, "#00ff00").W);
+    }
+
+    [Fact]
+    public void Subgrid_rows_paginate_with_the_parents_rows()
+    {
+        // The second card's two rows do not fit under the first card's, so the parent moves them to the next page whole.
+        var ops = Layout(@"<div style='display:grid; grid-template-columns: 1fr'>
+            <div style='grid-row: span 2; display:grid; grid-template-rows: subgrid'>
+              <div style='height:300pt; background:#ff0000'></div><div style='height:300pt; background:#00ff00'></div>
+            </div>
+            <div style='grid-row: span 2; display:grid; grid-template-rows: subgrid'>
+              <div style='height:300pt; background:#0000ff'></div><div style='height:300pt; background:#ffff00'></div>
+            </div></div>");
+        Near(0, Box(ops, "#ff0000").Y); Near(300, Box(ops, "#00ff00").Y);
+        Near(800, Box(ops, "#0000ff").Y); Near(1100, Box(ops, "#ffff00").Y);
+    }
+
+    [Fact]
+    public void Subgrid_name_lists_fill_the_lines()
+    {
+        var doc = HtmlParser.Parse("<div style='grid-template-columns: subgrid [a b] repeat(auto-fill, [c]) [d]; grid-template-rows: subgrid repeat(2, [r] [s])'>x</div>");
+        new StyleResolver(new Stylesheet()).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
+        var s = doc.FindFirst("div")!.Style;
+        Assert.True(s.GridTemplateColumns!.Subgrid);
+        Assert.Equal(new[] { "a b", "c", "c", "c", "d" }, s.GridTemplateColumns.SubgridLineNames(5).Select(n => string.Join(' ', n!)));
+        Assert.Equal(new[] { "a b", "d" }, s.GridTemplateColumns.SubgridLineNames(2).Select(n => string.Join(' ', n!)));
+        Assert.Equal(new[] { "r", "s", "r", "s" }, s.GridTemplateRows!.SubgridLineNames(4).Select(n => string.Join(' ', n!)));
+        Assert.Equal(4, s.GridTemplateRows.SubgridNamedLines);
+    }
+
     // ---- transforms ----
 
     [Fact]

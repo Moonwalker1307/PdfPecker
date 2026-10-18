@@ -122,6 +122,23 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Deeply_nested_subgrids_with_huge_spans_stay_bounded()
+    {
+        // Two hundred subgrids inside each other, each spanning a thousand of its parent's columns on both axes, with
+        // items spanning them all and name lists repeated to the limit. A row subgrid is laid out twice (measured,
+        // then placed at the parent's rows); it must reuse the measured boxes or each level would double the work.
+        var sb = new StringBuilder("<div style='display:grid; grid-template-columns: repeat(1000, 1pt); grid-auto-rows: 1pt'>");
+        for (int i = 0; i < 200; i++)
+        {
+            sb.Append("<div style='display:grid; grid-column: span 1000; grid-row: span 20; gap: 1pt; padding: 1pt;")
+              .Append(" grid-template-columns: subgrid repeat(1000, [a] [b]) repeat(auto-fill, [c]); grid-template-rows: subgrid repeat(auto-fill, [r] [s])'>")
+              .Append("<div style='grid-column: a / span 1000 b; grid-row: 1 / 1000'>x</div>");
+        }
+        sb.Append(Repeat("</div>", 201));
+        AssertStructurallyValid(Bounded(sb.ToString()));
+    }
+
+    [Fact]
     public void Long_sibling_selectors_do_not_backtrack_exponentially()
     {
         var html = "<style>" + Repeat("b ~ ", 60) + "i{color:red}</style>" + Repeat("<b></b>", 3000) + "<i>x</i>";

@@ -46,6 +46,37 @@ internal sealed class TrackList
     public Track[] After = Array.Empty<Track>();
     // Line names: (name, index of the line within Before or After, whether it is in After).
     public List<(string Name, int Line, bool InAfter)>? LineNames;
+
+    /// <summary>
+    /// A <c>subgrid</c> value: the tracks are those of the parent grid that the item spans, and the list only names
+    /// the subgrid's lines. <see cref="SubgridNames"/> and <see cref="SubgridNamesAfter"/> are the name lists before
+    /// and after a <c>repeat(auto-fill, ...)</c> of <see cref="SubgridAutoFill"/>; without one, the second is empty.
+    /// </summary>
+    public bool Subgrid;
+    public List<string[]> SubgridNames = new(), SubgridNamesAfter = new();
+    public string[][]? SubgridAutoFill;
+
+    /// <summary>How many lines a subgrid names outright, which decides its span when its placement leaves it automatic.</summary>
+    public int SubgridNamedLines => SubgridNames.Count + SubgridNamesAfter.Count;
+
+    /// <summary>
+    /// The subgrid's own names for each of its <paramref name="lines"/> lines, in order: the auto-fill repetition is
+    /// repeated as often as fits between the fixed lists, and lists beyond the last line are dropped.
+    /// </summary>
+    public string[]?[] SubgridLineNames(int lines)
+    {
+        var result = new string[]?[lines];
+        int i = 0;
+        foreach (var names in SubgridNames) { if (i >= lines) break; result[i++] = names; }
+        if (SubgridAutoFill is { Length: > 0 } repeat)
+        {
+            int room = lines - SubgridNames.Count - SubgridNamesAfter.Count;
+            for (int k = room / repeat.Length; k > 0; k--)
+                foreach (var names in repeat) result[i++] = names;
+        }
+        foreach (var names in SubgridNamesAfter) { if (i >= lines) break; result[i++] = names; }
+        return result;
+    }
 }
 
 /// <summary>A grid-column-start/end or grid-row-start/end value: auto, a line number, a named line or a span.</summary>

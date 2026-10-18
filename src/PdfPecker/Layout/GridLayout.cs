@@ -6,7 +6,8 @@ namespace PdfPecker.Layout;
 /// <summary>
 /// CSS grid layout: line-based and automatic placement (row flow, sparse), track sizing with fixed, percentage, fr,
 /// auto, min-content, max-content and minmax() tracks, repeat() including auto-fill/auto-fit, gaps and box alignment.
-/// Named lines and grid-template-areas are resolved to line numbers. Rows are paginated as units.
+/// Named lines and grid-template-areas are resolved to line numbers. Rows are paginated as units. Subgrids, which
+/// share their parent's tracks, are in GridLayout.Subgrid.cs.
 /// </summary>
 internal sealed partial class LayoutEngine
 {
@@ -131,9 +132,12 @@ internal sealed partial class LayoutEngine
 
     /// <summary>
     /// 1-based line numbers by name on one axis: names from the track list, and name-start/name-end lines from
-    /// grid-template-areas. Null when there are none.
+    /// grid-template-areas. Null when there are none. On a subgridded axis (<paramref name="subgridCount"/> tracks from
+    /// the parent's line <paramref name="subgridStart"/>), the parent's names of the spanned lines come first,
+    /// renumbered from the subgrid's first line, then the subgrid's own name lists.
     /// </summary>
-    private static Dictionary<string, List<int>>? LineNames(TrackList? list, int repeatCount, GridAreas? areas, bool columns)
+    private static Dictionary<string, List<int>>? LineNames(TrackList? list, int repeatCount, GridAreas? areas, bool columns,
+        Dictionary<string, List<int>>? parentNames = null, int subgridStart = 0, int subgridCount = 0)
     {
         Dictionary<string, List<int>>? names = null;
         void Add(string name, int line)
@@ -142,7 +146,21 @@ internal sealed partial class LayoutEngine
             if (!names.TryGetValue(name, out var lines)) names[name] = lines = new List<int>(1);
             if (!lines.Contains(line)) lines.Add(line);
         }
-        if (list?.LineNames is { } ln)
+        if (subgridCount > 0)
+        {
+            if (parentNames != null)
+                foreach (var (name, lines) in parentNames)
+                    foreach (var line in lines)
+                        if (line > subgridStart && line <= subgridStart + subgridCount + 1) Add(name, line - subgridStart);
+            if (list != null)
+            {
+                var own = list.SubgridLineNames(subgridCount + 1);
+                for (int i = 0; i < own.Length; i++)
+                    if (own[i] is { } lineNames)
+                        foreach (var name in lineNames) Add(name, i + 1);
+            }
+        }
+        else if (list?.LineNames is { } ln)
             foreach (var (name, line, inAfter) in ln)
                 Add(name, line + 1 + (inAfter ? list.Before.Length + repeatCount : 0));
         if (areas != null)
@@ -168,10 +186,12 @@ internal sealed partial class LayoutEngine
 
     /// <summary>
     /// Places the items in the grid (grid-auto-flow: row or column, sparse or dense). Returns the number of columns and
-    /// rows. Column flow is row flow with the axes swapped.
+    /// rows. Column flow is row flow with the axes swapped. A subgridded axis has exactly <paramref name="colLimit"/>
+    /// (or <paramref name="rowLimit"/>) tracks and the items are clamped to them.
     /// </summary>
     private static void PlaceGridItems(List<BoxItem> items, ComputedStyle s, int explicitCols, int explicitRows,
-        Dictionary<string, List<int>>? colNames, Dictionary<string, List<int>>? rowNames, out int colCount, out int rowCount)
+        Dictionary<string, List<int>>? colNames, Dictionary<string, List<int>>? rowNames, out int colCount, out int rowCount,
+        int colLimit = 0, int rowLimit = 0)
     {
         bool columnFlow = s.GridAutoFlowColumn, dense = s.GridAutoFlowDense;
         foreach (var it in items)
@@ -179,8 +199,16 @@ internal sealed partial class LayoutEngine
             var st = it.Style;
             ResolveSpan(ResolveName(st.GridColumnStart, colNames, true), ResolveName(st.GridColumnEnd, colNames, false), explicitCols, colNames, out int c, out int cs);
             ResolveSpan(ResolveName(st.GridRowStart, rowNames, true), ResolveName(st.GridRowEnd, rowNames, false), explicitRows, rowNames, out int r, out int rs);
+            if (st.IsGrid && it.El != null)
+            {
+                // A subgrid whose placement leaves its span automatic spans the lines its own name lists name.
+                if (st.GridTemplateColumns is { Subgrid: true } sc && st.GridColumnStart.IsAuto && st.GridColumnEnd.IsAuto) cs = Math.Max(1, sc.SubgridNamedLines - 1);
+                if (st.GridTemplateRows is { Subgrid: true } sr && st.GridRowStart.IsAuto && st.GridRowEnd.IsAuto) rs = Math.Max(1, sr.SubgridNamedLines - 1);
+            }
             it.Col = c; it.ColSpan = Math.Min(cs, 1000); it.ColFixed = c >= 0;
             it.Row = r; it.RowSpan = Math.Min(rs, 1000); it.RowFixed = r >= 0;
+            if (colLimit > 0) ClampToSubgrid(it, columns: true, colLimit);
+            if (rowLimit > 0) ClampToSubgrid(it, columns: false, rowLimit);
             if (columnFlow) Transpose(it);
         }
         int across = PlaceRowMajor(items, columnFlow ? explicitRows : explicitCols, dense, out int along);
@@ -194,6 +222,17 @@ internal sealed partial class LayoutEngine
         {
             colCount = across;
             rowCount = Math.Max(explicitRows, along);
+        }
+        if (colLimit > 0 || rowLimit > 0)
+        {
+            // Automatic placement may have run past the subgrid's tracks; what did is clamped to the last one.
+            foreach (var it in items)
+            {
+                if (colLimit > 0) ClampToSubgrid(it, columns: true, colLimit);
+                if (rowLimit > 0) ClampToSubgrid(it, columns: false, rowLimit);
+            }
+            if (colLimit > 0) colCount = colLimit;
+            if (rowLimit > 0) rowCount = rowLimit;
         }
 
         static void Transpose(BoxItem it)
@@ -455,36 +494,56 @@ internal sealed partial class LayoutEngine
     {
         var s = e.Style;
         var items = CollectBoxItems(e, w);
-        float colGap = GapOf(s.ColumnGap, w);
-        float rowGap = GapOf(s.RowGap, definiteH ?? 0);
+        // A subgrid's tracks on a subgridded axis come from the parent grid that is laying it out (GridLayout.Subgrid.cs).
+        // Without a parent grid, subgrid falls back to none. The parent captures the subgrid at the origin of its grid
+        // area, so the content box's x and y are the insets of the first tracks, and the area's extent is the edges' end.
+        _subgrids.TryGetValue(e, out var ctx);
+        var colCtx = s.GridTemplateColumns?.Subgrid == true ? ctx?.Cols : null;
+        var rowCtx = s.GridTemplateRows?.Subgrid == true ? ctx?.Rows : null;
+        bool measuringRows = rowCtx is { Edges: null }, finalRows = rowCtx is { Edges: not null };
+        float colGap = colCtx != null && s.ColumnGap == null ? colCtx.Gap : GapOf(s.ColumnGap, w);
+        float rowGap = rowCtx != null && s.RowGap == null ? rowCtx.Gap : GapOf(s.RowGap, definiteH ?? 0);
 
         var colDefs = ExpandTracks(s.GridTemplateColumns, w, colGap, out int repStart, out int repCount);
         var rowDefs = ExpandTracks(s.GridTemplateRows, definiteH ?? 0, rowGap, out _, out int rowRepCount);
-        if (items.Count == 0) return y;
-        var areas = s.GridTemplateAreas;
-        PlaceGridItems(items, s, Math.Max(colDefs.Count, areas?.Columns ?? 0), Math.Max(rowDefs.Count, areas?.Rows ?? 0),
-            LineNames(s.GridTemplateColumns, repCount, areas, columns: true), LineNames(s.GridTemplateRows, rowRepCount, areas, columns: false),
-            out int colCount, out int rowCount);
-
-        var cols = MakeTracks(colDefs, s.GridAutoColumns, colCount);
-        if (s.GridTemplateColumns?.AutoFit == true)
+        if (items.Count == 0)
         {
-            for (int c = repStart; c < repStart + repCount && c < cols.Length; c++)
-                cols[c].Collapsed = !items.Any(it => it.Col <= c && c < it.Col + it.ColSpan);
+            if (measuringRows) rowCtx!.Contributions = new List<(int, int, float, float)>();
+            return y;
         }
-
-        // Column sizes from the items' intrinsic widths.
-        var contributions = new List<(int, int, float, float)>(items.Count);
+        var areas = s.GridTemplateAreas;
+        var colNames = colCtx?.Names ?? LineNames(s.GridTemplateColumns, repCount, areas, columns: true);
+        var rowNames = rowCtx?.Names ?? LineNames(s.GridTemplateRows, rowRepCount, areas, columns: false);
+        PlaceGridItems(items, s, colCtx?.Count ?? Math.Max(colDefs.Count, areas?.Columns ?? 0), rowCtx?.Count ?? Math.Max(rowDefs.Count, areas?.Rows ?? 0),
+            colNames, rowNames, out int colCount, out int rowCount, colCtx?.Count ?? 0, rowCtx?.Count ?? 0);
+        bool hasSubgrids = false;
         foreach (var it in items)
         {
-            var (mn, mx) = ItemIntrinsic(it);
-            contributions.Add((it.Col, it.ColSpan, mn + it.Ml + it.Mr, mx + it.Ml + it.Mr));
+            if (IsSubgrid(it, columns: true)) { ClampSubgridSpan(it, columns: true, colCount); hasSubgrids = true; }
+            if (IsSubgrid(it, columns: false)) { ClampSubgridSpan(it, columns: false, rowCount); hasSubgrids = true; }
         }
-        SizeTracks(cols, w, definite: true, colGap, contributions, s.JustifyContent is BoxAlign.Normal or BoxAlign.Stretch);
 
-        // Column positions, with justify-content.
         var colX = new float[colCount + 1];
+        GridTrack[] cols;
+        if (colCtx?.Edges != null)
         {
+            cols = SubgridTracks(colCtx.Edges, colCount, colGap, x, colCtx.Edges[^1] - x - w, colX);
+        }
+        else
+        {
+            cols = MakeTracks(colDefs, s.GridAutoColumns, colCount);
+            if (s.GridTemplateColumns?.AutoFit == true)
+            {
+                for (int c = repStart; c < repStart + repCount && c < cols.Length; c++)
+                    cols[c].Collapsed = !items.Any(it => it.Col <= c && c < it.Col + it.ColSpan);
+            }
+
+            // Column sizes from the items' intrinsic widths.
+            var contributions = new List<(int, int, float, float)>(items.Count);
+            ColumnContributions(items, w, colGap, colNames, rowNames, contributions, null, 0);
+            SizeTracks(cols, w, definite: true, colGap, contributions, s.JustifyContent is BoxAlign.Normal or BoxAlign.Stretch);
+
+            // Column positions, with justify-content.
             float used = 0;
             int visible = 0;
             foreach (var t in cols) if (!t.Collapsed) { used += t.Base; visible++; }
@@ -509,8 +568,11 @@ internal sealed partial class LayoutEngine
         }
         float ColRight(int c) => colX[c] + (cols[c].Collapsed ? 0 : cols[c].Base);
 
-        // Lay out every item at its area width to find the row heights.
+        // Lay out every item at its area width to find the row heights. A row subgrid's final pass reuses the boxes
+        // of its measuring pass, which were laid out at the same columns.
         var stretchX = new bool[items.Count];
+        var measured = finalRows && rowCtx!.Boxes is { } kept && kept.Length == items.Count && rowCtx.BoxesWidth == w ? kept : null;
+        if (finalRows) rowCtx!.Boxes = null;
         for (int i = 0; i < items.Count; i++)
         {
             var it = items[i];
@@ -518,59 +580,112 @@ internal sealed partial class LayoutEngine
             var js = it.Style.JustifySelf == BoxAlign.Auto ? s.JustifyItems : it.Style.JustifySelf;
             if (js is BoxAlign.Normal or BoxAlign.Auto) js = it.IsReplaced ? BoxAlign.Start : BoxAlign.Stretch;
             stretchX[i] = js == BoxAlign.Stretch && !it.AutoMl && !it.AutoMr;
-            it.Box = Measure(it, e, areaW, stretchX[i]);
-        }
-
-        var rows = MakeTracks(rowDefs, s.GridAutoRows, rowCount);
-        var rowContrib = new List<(int, int, float, float)>(items.Count);
-        foreach (var it in items) rowContrib.Add((it.Row, it.RowSpan, it.Box!.Height, it.Box.Height));
-        bool rowsDefinite = definiteH.HasValue;
-        foreach (var r in rows)
-        {
-            // fr rows only flex when the height is known; otherwise they size to their content.
-            if (!rowsDefinite && r.IsFlexible) r.Def = AutoTrack;
-        }
-        SizeTracks(rows, definiteH ?? 0, rowsDefinite, rowGap, rowContrib, stretchAuto: false);
-
-        float rowsTotal = rowGap * Math.Max(0, rowCount - 1);
-        foreach (var r in rows) rowsTotal += r.Base;
-        float targetH = definiteH ?? Math.Max(minH, rowsTotal);
-        float rowBefore = 0, rowBetween = 0;
-        if (targetH > rowsTotal + Eps)
-        {
-            float free = targetH - rowsTotal;
-            if (s.AlignContent is BoxAlign.Normal or BoxAlign.Stretch)
+            if (hasSubgrids)
             {
-                var autos = rows.Where(r => r.Def.Max.Kind == TrackSizeKind.Auto).ToList();
-                foreach (var r in autos) r.Base += free / autos.Count;
-            }
-            else Distribute(s.AlignContent, free, rowCount, out rowBefore, out rowBetween);
-        }
-
-        // Row positions, paginating whole rows.
-        var rowY = new float[rowCount + 1];
-        float ry = y + rowBefore;
-        for (int r = 0; r < rowCount; r++)
-        {
-            if (r > 0) ry += rowGap + rowBetween;
-            float h = rows[r].Base;
-            if (_paginate)
-            {
-                // Keep the row with any item that starts in it and spans further rows.
-                float extent = h;
-                foreach (var it in items)
+                // A subgrid is stretched over its area on a subgridded axis, whatever its alignment and margins say.
+                bool colSub = IsSubgrid(it, columns: true), rowSub = IsSubgrid(it, columns: false);
+                if (colSub) stretchX[i] = true;
+                if (colSub || rowSub)
                 {
-                    if (it.Row != r || it.RowSpan <= 1) continue;
-                    float span = rowGap * (it.RowSpan - 1);
-                    for (int k = r; k < Math.Min(rowCount, r + it.RowSpan); k++) span += rows[k].Base;
-                    extent = Math.Max(extent, span);
+                    // The final pass of a row subgrid keeps the contexts of its measuring pass, with the boxes they hold.
+                    SubgridContext? sub = null;
+                    if (finalRows) _subgrids.TryGetValue(it.El!, out sub);
+                    if (sub == null) _subgrids[it.El!] = sub = new SubgridContext();
+                    if (colSub)
+                    {
+                        sub.Cols ??= SubgridAxisOf(it, columns: true, colGap, colNames);
+                        var edges = new float[2 * it.ColSpan];
+                        for (int k = 0; k < it.ColSpan; k++)
+                        {
+                            edges[2 * k] = colX[it.Col + k] - colX[it.Col];
+                            edges[2 * k + 1] = ColRight(it.Col + k) - colX[it.Col];
+                        }
+                        sub.Cols.Edges = edges;
+                    }
+                    if (rowSub) sub.Rows ??= SubgridAxisOf(it, columns: false, rowGap, rowNames);
                 }
-                ry = FitOnPage(ry, extent);
             }
-            rowY[r] = ry;
-            ry += h;
+            it.Box = measured?[i] ?? Measure(it, e, areaW, stretchX[i]);
         }
-        rowY[rowCount] = ry;
+
+        GridTrack[] rows;
+        var rowY = new float[rowCount + 1];
+        float rowBefore = 0, rowBetween = 0;
+        if (finalRows)
+        {
+            float extent = rowCtx!.Edges![^1];
+            rows = SubgridTracks(rowCtx.Edges, rowCount, rowGap, y, definiteH is { } dh ? extent - y - dh : SubgridBottomInset(s, w), rowY);
+        }
+        else
+        {
+            // Rows from the items' heights; a row subgrid is measured with auto rows and reports the heights to its parent.
+            rows = measuringRows ? MakeTracks(new List<Track>(), null, rowCount) : MakeTracks(rowDefs, s.GridAutoRows, rowCount);
+            var rowContrib = new List<(int, int, float, float)>(items.Count);
+            foreach (var it in items)
+            {
+                if (hasSubgrids && IsSubgrid(it, columns: false) && _subgrids[it.El!].Rows is { Contributions: { } subRows } axis)
+                {
+                    float subGap = it.Style.RowGap == null ? rowGap : GapOf(it.Style.RowGap, 0);
+                    MapSubgridContributions(subRows, rowContrib, it.Row, axis.Count, SubgridInset(it, false, true, w), SubgridInset(it, false, false, w), (subGap - rowGap) / 2);
+                    continue;
+                }
+                rowContrib.Add((it.Row, it.RowSpan, it.Box!.Height, it.Box.Height));
+            }
+            bool rowsDefinite = definiteH.HasValue && !measuringRows;
+            foreach (var r in rows)
+            {
+                // fr rows only flex when the height is known; otherwise they size to their content.
+                if (!rowsDefinite && r.IsFlexible) r.Def = AutoTrack;
+            }
+            SizeTracks(rows, definiteH ?? 0, rowsDefinite, rowGap, rowContrib, stretchAuto: false);
+
+            float rowsTotal = rowGap * Math.Max(0, rowCount - 1);
+            foreach (var r in rows) rowsTotal += r.Base;
+            if (measuringRows)
+            {
+                // The parent sizes the rows and lays the subgrid out again at them; the boxes wait for that pass.
+                rowCtx!.Contributions = rowContrib;
+                rowCtx.Boxes = new Captured?[items.Count];
+                for (int i = 0; i < items.Count; i++) rowCtx.Boxes[i] = items[i].Box;
+                rowCtx.BoxesWidth = w;
+                return y + rowsTotal;
+            }
+            float targetH = definiteH ?? Math.Max(minH, rowsTotal);
+            if (targetH > rowsTotal + Eps)
+            {
+                float free = targetH - rowsTotal;
+                if (s.AlignContent is BoxAlign.Normal or BoxAlign.Stretch)
+                {
+                    var autos = rows.Where(r => r.Def.Max.Kind == TrackSizeKind.Auto).ToList();
+                    foreach (var r in autos) r.Base += free / autos.Count;
+                }
+                else Distribute(s.AlignContent, free, rowCount, out rowBefore, out rowBetween);
+            }
+
+            // Row positions, paginating whole rows.
+            float ry = y + rowBefore;
+            for (int r = 0; r < rowCount; r++)
+            {
+                if (r > 0) ry += rowGap + rowBetween;
+                float h = rows[r].Base;
+                if (_paginate)
+                {
+                    // Keep the row with any item that starts in it and spans further rows.
+                    float extent = h;
+                    foreach (var it in items)
+                    {
+                        if (it.Row != r || it.RowSpan <= 1) continue;
+                        float span = rowGap * (it.RowSpan - 1);
+                        for (int k = r; k < Math.Min(rowCount, r + it.RowSpan); k++) span += rows[k].Base;
+                        extent = Math.Max(extent, span);
+                    }
+                    ry = FitOnPage(ry, extent);
+                }
+                rowY[r] = ry;
+                ry += h;
+            }
+            rowY[rowCount] = ry;
+        }
 
         // Final placement with box alignment.
         float firstBaseline = float.NaN;
@@ -580,19 +695,33 @@ internal sealed partial class LayoutEngine
             var st = it.Style;
             int lastRow = Math.Min(rowCount, it.Row + it.RowSpan) - 1;
             float areaX = colX[it.Col], areaW = AreaWidth(it);
-            // Right to left, the columns run from the right edge of the grid container.
-            if (s.Rtl) areaX = x + x + w - areaX - areaW;
+            // Right to left, the columns run from the right edge of the grid container (of the grid area for a subgrid).
+            if (s.Rtl) areaX = colCtx?.Edges != null ? colCtx.Edges[^1] - areaX - areaW : x + x + w - areaX - areaW;
             float areaY = rowY[it.Row], areaH = rowY[lastRow] + rows[lastRow].Base - areaY;
             var box = it.Box!;
 
             var align = SelfAlign(it, s.AlignItems);
+            bool rowSub = false;
             if (it.El != null)
             {
                 float current = box.Height - it.Mt - it.Mb;
                 float? want = null;
-                if (st.Height.IsPercent) want = st.Height.Resolve(areaH) + (st.BorderBox ? 0 : VerticalFrame(st, areaW));
+                if (hasSubgrids && IsSubgrid(it, columns: false) && _subgrids[it.El].Rows is { } axis)
+                {
+                    // A row subgrid is laid out again at the parent's row edges, whatever its height and alignment say.
+                    rowSub = true;
+                    var edges = new float[2 * axis.Count];
+                    for (int k = 0; k < axis.Count; k++)
+                    {
+                        edges[2 * k] = rowY[it.Row + k] - areaY;
+                        edges[2 * k + 1] = rowY[it.Row + k] + rows[it.Row + k].Base - areaY;
+                    }
+                    axis.Edges = edges;
+                    want = Math.Max(0, areaH - it.Mt - it.Mb);
+                }
+                else if (st.Height.IsPercent) want = st.Height.Resolve(areaH) + (st.BorderBox ? 0 : VerticalFrame(st, areaW));
                 else if (align == BoxAlign.Stretch && st.Height.IsAuto && !it.AutoMt && !it.AutoMb) want = Math.Max(current, areaH - it.Mt - it.Mb);
-                if (want is { } hh && Math.Abs(hh - current) > Eps && (NeedsRelayoutWhenStretched(it) || st.Height.IsPercent))
+                if (want is { } hh && (rowSub || Math.Abs(hh - current) > Eps && (NeedsRelayoutWhenStretched(it) || st.Height.IsPercent)))
                 {
                     float? bw = stretchX[i] ? null : box.Width - it.Ml - it.Mr;
                     box = it.Box = CaptureBox(it.El, areaW, shrinkToFit: !stretchX[i], borderW: bw, borderH: hh);
@@ -608,17 +737,25 @@ internal sealed partial class LayoutEngine
                 var js = st.JustifySelf == BoxAlign.Auto ? s.JustifyItems : st.JustifySelf;
                 dx = js switch { BoxAlign.End => areaW - outerW, BoxAlign.Center => (areaW - outerW) / 2, _ => 0 };
             }
-            if (it.AutoMt && it.AutoMb) dy = (areaH - outerH) / 2;
+            if (rowSub) dy = 0;
+            else if (it.AutoMt && it.AutoMb) dy = (areaH - outerH) / 2;
             else if (it.AutoMt) dy = areaH - outerH;
             else dy = align switch { BoxAlign.End => areaH - outerH, BoxAlign.Center => (areaH - outerH) / 2, _ => 0 };
 
             Place(box, areaX + dx, areaY + dy);
             if (float.IsNaN(firstBaseline) && it.Row == 0 && !float.IsNaN(box.Baseline)) firstBaseline = areaY + dy + box.Baseline;
         }
+        if (hasSubgrids)
+            foreach (var it in items)
+                if (it.El != null && it.Style.IsGrid) _subgrids.Remove(it.El);
         _lastBoxRight = Math.Max(_lastBoxRight, colX[colCount]);
         if (!float.IsNaN(firstBaseline)) _lastBaseline = firstBaseline;
         return Math.Max(rowY[rowCount], y);
     }
+
+    /// <summary>A row subgrid's bottom inset when its height is not imposed: its margin, border and padding below the last track.</summary>
+    private static float SubgridBottomInset(ComputedStyle s, float basis)
+        => (s.MarginBottom.IsAuto ? 0 : s.MarginBottom.Resolve(basis)) + s.BorderBottom + s.PaddingBottom.Resolve(basis);
 
     /// <summary>Min-content and max-content widths of a grid container's content box.</summary>
     private (float Min, float Max) GridIntrinsic(Element e)
@@ -634,17 +771,14 @@ internal sealed partial class LayoutEngine
             return (fixedSum, fixedSum);
         }
         var areas = s.GridTemplateAreas;
-        PlaceGridItems(items, s, Math.Max(colDefs.Count, areas?.Columns ?? 0), areas?.Rows ?? 0,
-            LineNames(s.GridTemplateColumns, repCount, areas, columns: true), LineNames(s.GridTemplateRows, 0, areas, columns: false),
-            out int colCount, out _);
+        var colNames = LineNames(s.GridTemplateColumns, repCount, areas, columns: true);
+        var rowNames = LineNames(s.GridTemplateRows, 0, areas, columns: false);
+        PlaceGridItems(items, s, Math.Max(colDefs.Count, areas?.Columns ?? 0), areas?.Rows ?? 0, colNames, rowNames, out int colCount, out _);
+        foreach (var it in items)
+            if (IsSubgrid(it, columns: true)) ClampSubgridSpan(it, columns: true, colCount);
         var contributions = new List<(int, int, float, float)>(items.Count);
         var minContrib = new List<(int, int, float, float)>(items.Count);
-        foreach (var it in items)
-        {
-            var (mn, mx) = ItemIntrinsic(it);
-            contributions.Add((it.Col, it.ColSpan, mn + it.Ml + it.Mr, mx + it.Ml + it.Mr));
-            minContrib.Add((it.Col, it.ColSpan, mn + it.Ml + it.Mr, mn + it.Ml + it.Mr));
-        }
+        ColumnContributions(items, 0, gap, colNames, rowNames, contributions, minContrib, 0);
         float Sum(List<(int, int, float, float)> contrib)
         {
             var tracks = MakeTracks(colDefs, s.GridAutoColumns, colCount);
