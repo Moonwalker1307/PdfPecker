@@ -396,13 +396,4 @@ public class BackgroundImageTests
         Assert.Same(css, HtmlToPdf.RebaseUrls(css, "site.css"));
     }
 
-    [Fact]
-    public void Rebasing_hostile_stylesheets_stays_linear()
-    {
-        var sw = Stopwatch.StartNew();
-        HtmlToPdf.RebaseUrls(string.Concat(Enumerable.Repeat("url(", 200_000)) + ")", "css/a.css");
-        HtmlToPdf.RebaseUrls(string.Concat(Enumerable.Repeat("url('", 200_000)), "css/a.css");
-        HtmlToPdf.RebaseUrls(string.Concat(Enumerable.Repeat("url(\"a\" x", 100_000)) + ")", "css/a.css");
-        Assert.True(sw.ElapsedMilliseconds < 2000, $"took {sw.ElapsedMilliseconds} ms");
-    }
 }

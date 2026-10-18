@@ -26,9 +26,11 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels its older run; runs on main are never cancelled, so every merged commit gets a
+# result even when two pull requests merge close together.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   DOTNET_NOLOGO: true
@@ -75,6 +77,12 @@ jobs:
               next="1.0.0"
             fi
             version="$next-preview.$GITHUB_RUN_NUMBER"
+            # Package validation compares the API with this baseline, so it must move to each new release; otherwise a
+            # break against the latest release goes unnoticed.
+            baseline=$(sed -n 's:.*<PackageValidationBaselineVersion>\(.*\)</PackageValidationBaselineVersion>.*:\1:p' src/PdfPecker/PdfPecker.csproj)
+            if [ -n "$latest" ] && [ "$baseline" != "${latest#v}" ]; then
+              echo "::warning file=src/PdfPecker/PdfPecker.csproj::PackageValidationBaselineVersion is $baseline but the latest release is ${latest#v}; raise it."
+            fi
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Version: $version" >> "$GITHUB_STEP_SUMMARY"
@@ -86,7 +94,7 @@ jobs:
       # their run time (hostile input, damaged streams) many times slower, so they would fail for the wrong reason.
       - name: Coverage
         continue-on-error: true
-        run: dotnet test -c Release --no-build -f net10.0 --filter "FullyQualifiedName!~HostileInputTests" --collect:"XPlat Code Coverage" --results-directory coverage
+        run: dotnet test -c Release --no-build -f net10.0 --filter "FullyQualifiedName!~HostileInputTests&FullyQualifiedName!~TimeBoundTests&FullyQualifiedName!~FuzzFindingTests" --collect:"XPlat Code Coverage" --results-directory coverage
 
       - name: Coverage summary
         run: |
@@ -114,12 +122,9 @@ jobs:
             artifacts/*.nupkg
             artifacts/*.snupkg
 
-  # Build and tests on Windows, for net10.0 only. The tests have not been run on Windows yet, so a failure here must not
-  # block a pull request: continue-on-error keeps the check green until the job has passed reliably, then remove it
-  # and make the job a required check.
+  # Build and tests on Windows, for net10.0 only, because paths, fonts and line endings differ there.
   windows:
     runs-on: windows-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
