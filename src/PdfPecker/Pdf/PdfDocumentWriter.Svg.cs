@@ -242,6 +242,9 @@ internal sealed partial class PdfDocumentWriter
     // The work the document's filters have spent, shared with the writers that render filtered content for this one.
     private SvgFilterBudget _filterBudget = new();
 
+    // The pieces the document's tiled repeating gradients have written, shared in the same way.
+    private GradientTilingBudget _gradientBudget = new();
+
     /// <summary>
     /// Draws filtered SVG content: the content is rendered to pixels over the filter region, the filter runs on them,
     /// and the result is drawn as an image with an alpha mask.
@@ -326,7 +329,7 @@ internal sealed partial class PdfDocumentWriter
         byte[] pdf;
         try
         {
-            var writer = new PdfDocumentWriter(page, compress: false, CompressionLevel.NoCompression) { Cancellation = Cancellation, _svgFilterDensity = 1, _filterBudget = _filterBudget };
+            var writer = new PdfDocumentWriter(page, compress: false, CompressionLevel.NoCompression) { Cancellation = Cancellation, _svgFilterDensity = 1, _filterBudget = _filterBudget, _gradientBudget = _gradientBudget };
             pdf = writer.Write(new List<DrawOp> { new SvgOp(0, 0, pixelsW, pixelsH, drawing) }, pixelsH,
                 new Dictionary<string, float>(), 0, null, null, null, null, null);
         }
