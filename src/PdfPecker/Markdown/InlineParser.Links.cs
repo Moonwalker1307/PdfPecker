@@ -20,15 +20,22 @@ internal sealed partial class InlineParser
 
         public bool Image;
 
-        /// <summary>False once a link has closed after this bracket opened: links may not contain other links.</summary>
-        public bool Active = true;
-
         /// <summary>True when another bracket opened after this one; a label may not contain brackets, so the link text is then no label.</summary>
         public bool BracketAfter;
     }
 
     /// <summary>The top of the bracket stack.</summary>
     private Bracket? _brackets;
+
+    /// <summary>
+    /// A "[" that opened before this index can no longer open a link, because a link has closed after it: links may not
+    /// contain other links. Brackets open in the order of their index, so one bound marks every bracket that a closing
+    /// link deactivates, where marking each of them would walk the whole stack again for every link.
+    /// </summary>
+    private int _linksInactiveBefore;
+
+    /// <summary>Whether the bracket may still open a link or an image; images may contain links.</summary>
+    private bool IsActive(Bracket bracket) => bracket.Image || bracket.Index >= _linksInactiveBefore;
 
     private void ParseOpenBracket(MdNode block)
     {
@@ -62,7 +69,7 @@ internal sealed partial class InlineParser
             block.AppendChild(Text("]"));
             return;
         }
-        if (!opener.Active)
+        if (!IsActive(opener))
         {
             // The bracket can no longer open a link, so both brackets stay literal.
             block.AppendChild(Text("]"));
@@ -138,8 +145,6 @@ internal sealed partial class InlineParser
         opener.Node.Unlink();
 
         // Links may not contain other links, so the brackets before a link can no longer open one; images may.
-        if (opener.Image) return;
-        for (var b = _brackets; b != null; b = b.Previous)
-            if (!b.Image) b.Active = false;
+        if (!opener.Image) _linksInactiveBefore = _cursor.Position;
     }
 }
