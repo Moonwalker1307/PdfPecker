@@ -30,6 +30,11 @@ internal sealed class SeedContext
     public string GoldenDir => Path.Combine(Tests, "Golden");
     public string SamplesDir => Path.Combine(Root, "samples", "PdfPecker.Sample");
 
+    // Folders whose files are seeds when a target takes every file of a kind. Build output and findings folders are
+    // left out: a saved finding read back as a seed would hang every restarted worker on the same input.
+    private static readonly string[] SourceFolders = ["tests", "samples", "docs", "assets"];
+    private static readonly string[] SkippedFolders = ["bin", "obj", ".git", "node_modules", "TestResults"];
+
     /// <summary>Files under a repository-relative folder whose names match any of the extensions, skipping huge ones.</summary>
     public IEnumerable<(string Name, byte[] Data)> Files(string relativeDir, long maxBytes, params string[] extensions)
     {
@@ -38,6 +43,8 @@ internal sealed class SeedContext
         foreach (var path in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).OrderBy(p => p, StringComparer.Ordinal))
         {
             if (!extensions.Any(e => path.EndsWith(e, StringComparison.OrdinalIgnoreCase))) continue;
+            var folders = Path.GetRelativePath(Root, Path.GetDirectoryName(path)!).Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (folders.Any(f => SkippedFolders.Contains(f, StringComparer.OrdinalIgnoreCase) || f.StartsWith("fuzz-findings", StringComparison.OrdinalIgnoreCase))) continue;
             var info = new FileInfo(path);
             if (info.Length > maxBytes) continue;
             yield return (Path.GetRelativePath(Root, path), File.ReadAllBytes(path));
@@ -182,7 +189,8 @@ internal sealed class SeedContext
             foreach (Match m in StyleBlock.Matches(Encoding.UTF8.GetString(data)))
                 if (m.Groups[1].Length > 0) yield return ($"{name}#style{i++}", Encoding.UTF8.GetBytes(m.Groups[1].Value));
         }
-        foreach (var f in Files("", 100_000, ".css")) yield return f;
+        foreach (var folder in SourceFolders)
+            foreach (var f in Files(folder, 100_000, ".css")) yield return f;
         yield return ("builtin:features.css", Encoding.UTF8.GetBytes("""
             @page { size: A5 landscape; margin: 10mm 12mm; @top-center { content: "Header " counter(page) } }
             @font-face { font-family: X; src: local(Arial), url(data:font/woff2;base64,AAAA) format("woff2"); unicode-range: U+0-7F }
@@ -201,7 +209,8 @@ internal sealed class SeedContext
 
     public IEnumerable<(string Name, byte[] Data)> SvgSnippets()
     {
-        foreach (var f in Files("", 100_000, ".svg")) yield return f;
+        foreach (var folder in SourceFolders)
+            foreach (var f in Files(folder, 100_000, ".svg")) yield return f;
         foreach (var (name, data) in HtmlFiles())
         {
             int i = 0;

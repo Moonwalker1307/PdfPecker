@@ -26,6 +26,11 @@ dotnet fuzz/PdfPecker.Fuzz/bin/Release/net10.0/PdfPecker.Fuzz.dll --target html 
 
 The process exits with 1 when the findings folder has any finding, which is what fails the CI job.
 
+Each target runs in a worker process, which the supervisor restarts when an input hangs beyond cancellation or
+crashes the process. A restarted worker skips the seeds that were already run (`--skip-seeds`, passed by the
+supervisor), so a seed that hangs is reported once instead of on every restart. Seeds never come from `bin`, `obj` or a
+`fuzz-findings` folder: a saved finding read back as a seed would hang every worker on the same input.
+
 Targets: `pdf-render`, `pdf-text`, `pdf-merge`, `pdf-form`, `pdf-verify`, `html`, `css` (as a `<style>` in a page), `svg`
 (inline in a page and as a data-URI image), `markdown`, `png`, `jpeg`, `gif`, `webp`, `bmp`, `tiff`, `jpx`, `jbig2`,
 `font-ttf`, `font-otf`, `font-woff`, `font-woff2` and `font-variable` (variable TrueType and CFF2 fonts). The font
