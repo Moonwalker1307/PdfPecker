@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Variable fonts</title>
+<style>
+  @font-face { font-family: Inter; src: url('../../Fixtures/fonts/Inter-Variable-Subset.ttf'); font-weight: 100 900; }
+  @font-face { font-family: Flex; src: url('../../Fixtures/fonts/RobotoFlex-Subset.ttf'); font-weight: 100 1000; font-stretch: 25% 151%; }
+  @page { size: 148mm 105mm; margin: 10mm; }
+  p { margin: 4px 0; font-size: 22px; }
+  .inter { font-family: Inter; }
+  .flex { font-family: Flex; }
+</style>
+</head>
+<body>
+<p class="inter">Regular <b>Bold</b> <span style="font-weight: 200">Thin</span> <span style="font-weight: 900">Black</span></p>
+<p class="inter" style="font-variation-settings: 'wght' 650">Regular at wght 650</p>
+<p class="flex">Regular <b>Bold</b></p>
+<p class="flex" style="font-stretch: condensed">narrow</p>
+<p class="flex" style="font-stretch: expanded">wide</p>
+<p class="flex" style="font-weight: 300; font-stretch: 75%">narrow light</p>
+</body>
+</html>

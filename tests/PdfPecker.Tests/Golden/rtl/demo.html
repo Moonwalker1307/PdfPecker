@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<title>Right-to-left text</title>
+<style>
+  @font-face { font-family: Ar; src: url('../../Fixtures/fonts/NotoSansArabic-Subset.ttf'); }
+  @font-face { font-family: He; src: url('../../Fixtures/fonts/NotoSansHebrew-Subset.ttf'); }
+  @page { size: 148mm 105mm; margin: 10mm; }
+  body { font: 16px Ar, sans-serif; }
+  .he { font-family: He, sans-serif; }
+  .box { border: 1px solid #888; padding: 4px 8px; margin: 6px 0; }
+  table { border-collapse: collapse; }
+  td { border: 1px solid #aaa; padding: 2px 6px; }
+</style>
+</head>
+<body>
+<p style="font-size:24px">لا سلام</p>
+<p>بِسْمِ اللَّهِ ١٢٣ <span class="he">שָׁלוֹם</span> PDF</p>
+<p class="he" lang="he">זהו משפט</p>
+<div class="box" dir="ltr">The words <span class="he">זהו משפט</span> are Hebrew, in a left-to-right line.</div>
+<ul><li>لا سلام</li><li class="he">זהו משפט</li></ul>
+<table><tr><td>١٢٣</td><td>لا سلام</td><td class="he">שָׁלוֹם</td></tr></table>
+</body>
+</html>

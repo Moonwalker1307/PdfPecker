@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Footnotes and contents</title>
+<style>
+  @page { size: 148mm 105mm; margin: 12mm 12mm 14mm; @bottom-center { content: counter(page) " / " counter(pages); font-size: 8pt; }
+          @footnote { border-top: 0.5pt solid black; padding-top: 3pt; margin-top: 6pt; } }
+  body { font: 10pt/13pt serif; }
+  h1 { font-size: 16pt; margin: 0 0 6pt; }
+  h2 { font-size: 12pt; break-before: page; margin: 0 0 4pt; }
+  .toc { list-style: none; padding: 0; }
+  .toc a { color: inherit; text-decoration: none; }
+  .toc a::after { content: leader('.') target-counter(attr(href), page); }
+  .fn { float: footnote; font-size: 8pt; line-height: 10pt; }
+  p { margin: 0 0 5pt; text-align: justify; }
+</style>
+</head>
+<body>
+<h1>Contents</h1>
+<ul class="toc">
+  <li><a href="#one">Introduction</a></li>
+  <li><a href="#two">Method</a></li>
+  <li><a href="#three">Results and discussion</a></li>
+</ul>
+<h2 id="one">Introduction</h2>
+<p>Lorem ipsum dolor sit amet<span class="fn">The first footnote, at the bottom of this page.</span>, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</p>
+<p>Ut enim ad minim veniam<span class="fn">A second footnote on the same page.</span>, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.</p>
+<h2 id="two">Method</h2>
+<p>Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident<span class="fn">Footnote numbers continue across pages.</span>, sunt in culpa qui officia deserunt mollit anim id est laborum.</p>
+<h2 id="three">Results and discussion</h2>
+<p>Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam.</p>
+</body>
+</html>

@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Large table</title>
+<style>
+  @page { size: 148mm 105mm; margin: 10mm; }
+  body { font: 8pt sans-serif; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 0.5pt solid #999; padding: 1pt 4pt; }
+  thead th { background: #dde6f0; }
+  tfoot td { background: #f0f0f0; font-weight: bold; }
+  tbody tr:nth-child(even) { background: #f7f7f7; }
+  .r { text-align: right; }
+  caption { font-weight: bold; margin-bottom: 3pt; }
+</style>
+</head>
+<body>
+<table>
+<caption>One hundred and twenty rows over several pages</caption>
+<thead><tr><th>#</th><th>Item</th><th>Category</th><th class=r>Qty</th><th class=r>Price</th></tr></thead>
+<tfoot><tr><td colspan=4>Repeated footer</td><td class=r>Total</td></tr></tfoot>
+<tbody>
+<tr><td>1</td><td>Item 001</td><td>Category 1</td><td class=r>3</td><td class=r>13.37</td></tr>
+<tr><td>2</td><td>Item 002</td><td>Category 2</td><td class=r>6</td><td class=r>26.74</td></tr>
+<tr><td>3</td><td>Item 003</td><td>Category 3</td><td class=r>9</td><td class=r>40.11</td></tr>
+<tr><td>4</td><td>Item 004</td><td>Category 4</td><td class=r>12</td><td class=r>53.48</td></tr>
+<tr><td>5</td><td>Item 005</td><td>Category 5</td><td class=r>15</td><td class=r>66.85</td></tr>
+<tr><td>6</td><td>Item 006</td><td>Category 6</td><td class=r>1</td><td class=r>80.22</td></tr>
+<tr><td>7</td><td>Item 007</td><td>Category 0</td><td class=r>4</td><td class=r>93.59</td></tr>
+<tr><td>8</td><td>Item 008</td><td>Category 1</td><td class=r>7</td><td class=r>106.96</td></tr>
+<tr><td>9</td><td>Item 009</td><td>Category 2</td><td class=r>10</td><td class=r>120.33</td></tr>
+<tr><td>10</td><td>Item 010</td><td>Category 3</td><td class=r>13</td><td class=r>133.70</td></tr>
+<tr><td>11</td><td>Item 011</td><td>Category 4</td><td class=r>16</td><td class=r>147.07</td></tr>
+<tr><td>12</td><td>Item 012</td><td>Category 5</td><td class=r>2</td><td class=r>160.44</td></tr>
+<tr><td>13</td><td>Item 013</td><td>Category 6</td><td class=r>5</td><td class=r>173.81</td></tr>
+<tr><td>14</td><td>Item 014</td><td>Category 0</td><td class=r>8</td><td class=r>187.18</td></tr>
+<tr><td>15</td><td>Item 015</td><td>Category 1</td><td class=r>11</td><td class=r>200.55</td></tr>
+<tr><td>16</td><td>Item 016</td><td>Category 2</td><td class=r>14</td><td class=r>213.92</td></tr>
+<tr><td>17</td><td>Item 017</td><td>Category 3</td><td class=r>0</td><td class=r>227.29</td></tr>
+<tr><td>18</td><td>Item 018</td><td>Category 4</td><td class=r>3</td><td class=r>240.66</td></tr>
+<tr><td>19</td><td>Item 019</td><td>Category 5</td><td class=r>6</td><td class=r>254.03</td></tr>
+<tr><td>20</td><td>Item 020</td><td>Category 6</td><td class=r>9</td><td class=r>267.40</td></tr>
+<tr><td>21</td><td>Item 021</td><td>Category 0</td><td class=r>12</td><td class=r>280.77</td></tr>
+<tr><td>22</td><td>Item 022</td><td>Category 1</td><td class=r>15</td><td class=r>294.14</td></tr>
+<tr><td>23</td><td>Item 023</td><td>Category 2</td><td class=r>1</td><td class=r>307.51</td></tr>
+<tr><td>24</td><td>Item 024</td><td>Category 3</td><td class=r>4</td><td class=r>320.88</td></tr>
+<tr><td>25</td><td>Item 025</td><td>Category 4</td><td class=r>7</td><td class=r>334.25</td></tr>
+<tr><td>26</td><td>Item 026</td><td>Category 5</td><td class=r>10</td><td class=r>347.62</td></tr>
+<tr><td>27</td><td>Item 027</td><td>Category 6</td><td class=r>13</td><td class=r>360.99</td></tr>
+<tr><td>28</td><td>Item 028</td><td>Category 0</td><td class=r>16</td><td class=r>374.36</td></tr>
+<tr><td>29</td><td>Item 029</td><td>Category 1</td><td class=r>2</td><td class=r>387.73</td></tr>
+<tr><td>30</td><td>Item 030</td><td>Category 2</td><td class=r>5</td><td class=r>401.10</td></tr>
+<tr><td>31</td><td>Item 031</td><td>Category 3</td><td class=r>8</td><td class=r>414.47</td></tr>
+<tr><td>32</td><td>Item 032</td><td>Category 4</td><td class=r>11</td><td class=r>427.84</td></tr>
+<tr><td>33</td><td>Item 033</td><td>Category 5</td><td class=r>14</td><td class=r>441.21</td></tr>
+<tr><td>34</td><td>Item 034</td><td>Category 6</td><td class=r>0</td><td class=r>454.58</td></tr>
+<tr><td>35</td><td>Item 035</td><td>Category 0</td><td class=r>3</td><td class=r>467.95</td></tr>
+<tr><td>36</td><td>Item 036</td><td>Category 1</td><td class=r>6</td><td class=r>481.32</td></tr>
+<tr><td>37</td><td>Item 037</td><td>Category 2</td><td class=r>9</td><td class=r>494.69</td></tr>
+<tr><td>38</td><td>Item 038</td><td>Category 3</td><td class=r>12</td><td class=r>508.06</td></tr>
+<tr><td>39</td><td>Item 039</td><td>Category 4</td><td class=r>15</td><td class=r>521.43</td></tr>
+<tr><td>40</td><td>Item 040</td><td>Category 5</td><td class=r>1</td><td class=r>534.80</td></tr>
+<tr><td>41</td><td>Item 041</td><td>Category 6</td><td class=r>4</td><td class=r>548.17</td></tr>
+<tr><td>42</td><td>Item 042</td><td>Category 0</td><td class=r>7</td><td class=r>561.54</td></tr>
+<tr><td>43</td><td>Item 043</td><td>Category 1</td><td class=r>10</td><td class=r>574.91</td></tr>
+<tr><td>44</td><td>Item 044</td><td>Category 2</td><td class=r>13</td><td class=r>588.28</td></tr>
+<tr><td>45</td><td>Item 045</td><td>Category 3</td><td class=r>16</td><td class=r>601.65</td></tr>
+<tr><td>46</td><td>Item 046</td><td>Category 4</td><td class=r>2</td><td class=r>615.02</td></tr>
+<tr><td>47</td><td>Item 047</td><td>Category 5</td><td class=r>5</td><td class=r>628.39</td></tr>
+<tr><td>48</td><td>Item 048</td><td>Category 6</td><td class=r>8</td><td class=r>641.76</td></tr>
+<tr><td>49</td><td>Item 049</td><td>Category 0</td><td class=r>11</td><td class=r>655.13</td></tr>
+<tr><td>50</td><td>Item 050</td><td>Category 1</td><td class=r>14</td><td class=r>668.50</td></tr>
+<tr><td>51</td><td>Item 051</td><td>Category 2</td><td class=r>0</td><td class=r>681.87</td></tr>
+<tr><td>52</td><td>Item 052</td><td>Category 3</td><td class=r>3</td><td class=r>695.24</td></tr>
+<tr><td>53</td><td>Item 053</td><td>Category 4</td><td class=r>6</td><td class=r>708.61</td></tr>
+<tr><td>54</td><td>Item 054</td><td>Category 5</td><td class=r>9</td><td class=r>721.98</td></tr>
+<tr><td>55</td><td>Item 055</td><td>Category 6</td><td class=r>12</td><td class=r>735.35</td></tr>
+<tr><td>56</td><td>Item 056</td><td>Category 0</td><td class=r>15</td><td class=r>748.72</td></tr>
+<tr><td>57</td><td>Item 057</td><td>Category 1</td><td class=r>1</td><td class=r>762.09</td></tr>
+<tr><td>58</td><td>Item 058</td><td>Category 2</td><td class=r>4</td><td class=r>775.46</td></tr>
+<tr><td>59</td><td>Item 059</td><td>Category 3</td><td class=r>7</td><td class=r>788.83</td></tr>
+<tr><td>60</td><td>Item 060</td><td>Category 4</td><td class=r>10</td><td class=r>802.20</td></tr>
+<tr><td>61</td><td>Item 061</td><td>Category 5</td><td class=r>13</td><td class=r>815.57</td></tr>
+<tr><td>62</td><td>Item 062</td><td>Category 6</td><td class=r>16</td><td class=r>828.94</td></tr>
+<tr><td>63</td><td>Item 063</td><td>Category 0</td><td class=r>2</td><td class=r>842.31</td></tr>
+<tr><td>64</td><td>Item 064</td><td>Category 1</td><td class=r>5</td><td class=r>855.68</td></tr>
+<tr><td>65</td><td>Item 065</td><td>Category 2</td><td class=r>8</td><td class=r>869.05</td></tr>
+<tr><td>66</td><td>Item 066</td><td>Category 3</td><td class=r>11</td><td class=r>882.42</td></tr>
+<tr><td>67</td><td>Item 067</td><td>Category 4</td><td class=r>14</td><td class=r>895.79</td></tr>
+<tr><td>68</td><td>Item 068</td><td>Category 5</td><td class=r>0</td><td class=r>909.16</td></tr>
+<tr><td>69</td><td>Item 069</td><td>Category 6</td><td class=r>3</td><td class=r>922.53</td></tr>
+<tr><td>70</td><td>Item 070</td><td>Category 0</td><td class=r>6</td><td class=r>935.90</td></tr>
+<tr><td>71</td><td>Item 071</td><td>Category 1</td><td class=r>9</td><td class=r>949.27</td></tr>
+<tr><td>72</td><td>Item 072</td><td>Category 2</td><td class=r>12</td><td class=r>962.64</td></tr>
+<tr><td>73</td><td>Item 073</td><td>Category 3</td><td class=r>15</td><td class=r>976.01</td></tr>
+<tr><td>74</td><td>Item 074</td><td>Category 4</td><td class=r>1</td><td class=r>989.38</td></tr>
+<tr><td>75</td><td>Item 075</td><td>Category 5</td><td class=r>4</td><td class=r>1002.75</td></tr>
+<tr><td>76</td><td>Item 076</td><td>Category 6</td><td class=r>7</td><td class=r>1016.12</td></tr>
+<tr><td>77</td><td>Item 077</td><td>Category 0</td><td class=r>10</td><td class=r>1029.49</td></tr>
+<tr><td>78</td><td>Item 078</td><td>Category 1</td><td class=r>13</td><td class=r>1042.86</td></tr>
+<tr><td>79</td><td>Item 079</td><td>Category 2</td><td class=r>16</td><td class=r>1056.23</td></tr>
+<tr><td>80</td><td>Item 080</td><td>Category 3</td><td class=r>2</td><td class=r>1069.60</td></tr>
+<tr><td>81</td><td>Item 081</td><td>Category 4</td><td class=r>5</td><td class=r>1082.97</td></tr>
+<tr><td>82</td><td>Item 082</td><td>Category 5</td><td class=r>8</td><td class=r>1096.34</td></tr>
+<tr><td>83</td><td>Item 083</td><td>Category 6</td><td class=r>11</td><td class=r>1109.71</td></tr>
+<tr><td>84</td><td>Item 084</td><td>Category 0</td><td class=r>14</td><td class=r>1123.08</td></tr>
+<tr><td>85</td><td>Item 085</td><td>Category 1</td><td class=r>0</td><td class=r>1136.45</td></tr>
+<tr><td>86</td><td>Item 086</td><td>Category 2</td><td class=r>3</td><td class=r>1149.82</td></tr>
+<tr><td>87</td><td>Item 087</td><td>Category 3</td><td class=r>6</td><td class=r>1163.19</td></tr>
+<tr><td>88</td><td>Item 088</td><td>Category 4</td><td class=r>9</td><td class=r>1176.56</td></tr>
+<tr><td>89</td><td>Item 089</td><td>Category 5</td><td class=r>12</td><td class=r>1189.93</td></tr>
+<tr><td>90</td><td>Item 090</td><td>Category 6</td><td class=r>15</td><td class=r>1203.30</td></tr>
+<tr><td>91</td><td>Item 091</td><td>Category 0</td><td class=r>1</td><td class=r>1216.67</td></tr>
+<tr><td>92</td><td>Item 092</td><td>Category 1</td><td class=r>4</td><td class=r>1230.04</td></tr>
+<tr><td>93</td><td>Item 093</td><td>Category 2</td><td class=r>7</td><td class=r>1243.41</td></tr>
+<tr><td>94</td><td>Item 094</td><td>Category 3</td><td class=r>10</td><td class=r>1256.78</td></tr>
+<tr><td>95</td><td>Item 095</td><td>Category 4</td><td class=r>13</td><td class=r>1270.15</td></tr>
+<tr><td>96</td><td>Item 096</td><td>Category 5</td><td class=r>16</td><td class=r>1283.52</td></tr>
+<tr><td>97</td><td>Item 097</td><td>Category 6</td><td class=r>2</td><td class=r>1296.89</td></tr>
+<tr><td>98</td><td>Item 098</td><td>Category 0</td><td class=r>5</td><td class=r>1310.26</td></tr>
+<tr><td>99</td><td>Item 099</td><td>Category 1</td><td class=r>8</td><td class=r>1323.63</td></tr>
+<tr><td>100</td><td>Item 100</td><td>Category 2</td><td class=r>11</td><td class=r>1337.00</td></tr>
+<tr><td>101</td><td>Item 101</td><td>Category 3</td><td class=r>14</td><td class=r>1350.37</td></tr>
+<tr><td>102</td><td>Item 102</td><td>Category 4</td><td class=r>0</td><td class=r>1363.74</td></tr>
+<tr><td>103</td><td>Item 103</td><td>Category 5</td><td class=r>3</td><td class=r>1377.11</td></tr>
+<tr><td>104</td><td>Item 104</td><td>Category 6</td><td class=r>6</td><td class=r>1390.48</td></tr>
+<tr><td>105</td><td>Item 105</td><td>Category 0</td><td class=r>9</td><td class=r>1403.85</td></tr>
+<tr><td>106</td><td>Item 106</td><td>Category 1</td><td class=r>12</td><td class=r>1417.22</td></tr>
+<tr><td>107</td><td>Item 107</td><td>Category 2</td><td class=r>15</td><td class=r>1430.59</td></tr>
+<tr><td>108</td><td>Item 108</td><td>Category 3</td><td class=r>1</td><td class=r>1443.96</td></tr>
+<tr><td>109</td><td>Item 109</td><td>Category 4</td><td class=r>4</td><td class=r>1457.33</td></tr>
+<tr><td>110</td><td>Item 110</td><td>Category 5</td><td class=r>7</td><td class=r>1470.70</td></tr>
+<tr><td>111</td><td>Item 111</td><td>Category 6</td><td class=r>10</td><td class=r>1484.07</td></tr>
+<tr><td>112</td><td>Item 112</td><td>Category 0</td><td class=r>13</td><td class=r>1497.44</td></tr>
+<tr><td>113</td><td>Item 113</td><td>Category 1</td><td class=r>16</td><td class=r>1510.81</td></tr>
+<tr><td>114</td><td>Item 114</td><td>Category 2</td><td class=r>2</td><td class=r>1524.18</td></tr>
+<tr><td>115</td><td>Item 115</td><td>Category 3</td><td class=r>5</td><td class=r>1537.55</td></tr>
+<tr><td>116</td><td>Item 116</td><td>Category 4</td><td class=r>8</td><td class=r>1550.92</td></tr>
+<tr><td>117</td><td>Item 117</td><td>Category 5</td><td class=r>11</td><td class=r>1564.29</td></tr>
+<tr><td>118</td><td>Item 118</td><td>Category 6</td><td class=r>14</td><td class=r>1577.66</td></tr>
+<tr><td>119</td><td>Item 119</td><td>Category 0</td><td class=r>0</td><td class=r>1591.03</td></tr>
+<tr><td>120</td><td>Item 120</td><td>Category 1</td><td class=r>3</td><td class=r>1604.40</td></tr>
+</tbody>
+</table>
+</body>
+</html>
