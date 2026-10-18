@@ -23,6 +23,11 @@ internal sealed partial class LayoutEngine
     // this wide to be repeated at all.
     private const float LeaderGapRatio = 0.25f, MinLeaderPattern = 0.01f, LeaderSlack = 0.001f;
 
+    // A leader is never drawn longer than the largest PDF page (200 inches) nor with more copies than this: a line
+    // made billions of points wide by a huge negative padding would otherwise build a string of billions of dots.
+    private const float MaxLeaderLength = 14400;
+    private const int MaxLeaderCopies = 1 << 16;
+
     private readonly StringBuilder _runText = new(256);
     private float[] _xs = new float[64];
     private float[] _lineA = new float[32], _lineD = new float[32];
@@ -373,8 +378,9 @@ internal sealed partial class LayoutEngine
         // A visible gap between the text and the pattern on both sides, unless the pattern is blank.
         float gap = string.IsNullOrWhiteSpace(pattern) ? 0 : style.FontSize * LeaderGapRatio;
         float start = blockLeft + MathF.Ceiling((from + gap - blockLeft) / pw - LeaderSlack) * pw;
-        int count = (int)Math.Floor((to - gap - start) / pw + LeaderSlack);
-        if (count <= 0) return;
+        double copies = Math.Floor((to - gap - start) / pw + LeaderSlack);
+        if (!(copies >= 1)) return;
+        int count = (int)Math.Min(copies, Math.Min(MaxLeaderCopies, Math.Ceiling(MaxLeaderLength / pw)));
         var text = new StringBuilder(pattern.Length * count);
         for (int k = 0; k < count; k++) text.Append(pattern);
         _ops.Add(new TextOp(start, baseline, lineTop, style.Font, style.FontSize, CssColor.Fade(style.Color, style.InlineFade), text.ToString(),
