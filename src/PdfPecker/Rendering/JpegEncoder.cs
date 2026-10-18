@@ -1,3 +1,5 @@
+using System.Buffers;
+
 namespace PdfPecker.Rendering;
 
 /// <summary>
@@ -72,19 +74,40 @@ internal static partial class JpegEncoder
         var lumaQuantization = ScaleTable(StdLuminance, quality);
         var chromaQuantization = ScaleTable(StdChrominance, quality);
 
+        // The planes and coefficients are as large as the page, so they come from the shared pool: a server
+        // rendering page after page reuses them instead of allocating tens of megabytes per page.
         var planes = ToYCbCr(pixels, frame, matte);
-        if (frame.Subsample)
+        short[]? y = null, cb = null, cr = null;
+        try
         {
-            planes.Cb = Downsample(planes.Cb, frame.LumaWidth, frame.LumaHeight);
-            planes.Cr = Downsample(planes.Cr, frame.LumaWidth, frame.LumaHeight);
+            if (frame.Subsample)
+            {
+                planes.Subsample(frame.LumaWidth, frame.LumaHeight);
+            }
+            // Transform and quantise every block once; the coefficients feed both the statistics and the output pass.
+            y = Transform(planes.Y, frame.LumaWidth, frame.LumaHeight, lumaQuantization);
+            cb = Transform(planes.Cb, frame.ChromaWidth, frame.ChromaHeight, chromaQuantization);
+            cr = Transform(planes.Cr, frame.ChromaWidth, frame.ChromaHeight, chromaQuantization);
         }
+        finally
+        {
+            planes.Return();
+        }
+        try
+        {
+            return Write(new Scan(y, cb, cr, frame), width, height, frame, lumaQuantization, chromaQuantization);
+        }
+        finally
+        {
+            ArrayPool<short>.Shared.Return(y);
+            ArrayPool<short>.Shared.Return(cb);
+            ArrayPool<short>.Shared.Return(cr);
+        }
+    }
 
-        // Transform and quantise every block once; the coefficients feed both the statistics and the output pass.
-        var scan = new Scan(
-            Transform(planes.Y, frame.LumaWidth, frame.LumaHeight, lumaQuantization),
-            Transform(planes.Cb, frame.ChromaWidth, frame.ChromaHeight, chromaQuantization),
-            Transform(planes.Cr, frame.ChromaWidth, frame.ChromaHeight, chromaQuantization),
-            frame);
+    /// <summary>The JPEG file: its headers, the optimal Huffman tables for the scan, and the scan.</summary>
+    private static byte[] Write(Scan scan, int width, int height, Frame frame, byte[] lumaQuantization, byte[] chromaQuantization)
+    {
         var tables = scan.OptimalTables();
 
         var output = new JpegWriter(width * height / 4 + 1024);

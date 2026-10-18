@@ -1,3 +1,5 @@
+using System.Buffers;
+
 namespace PdfPecker.Rendering;
 
 internal static partial class JpegEncoder
@@ -9,12 +11,33 @@ internal static partial class JpegEncoder
     private const int FixedPointHalf = 1 << (FixedPointBits - 1);
     private const int ChromaOffset = 128 << FixedPointBits;
 
-    /// <summary>The Y, Cb and Cr samples, one plane each, padded to whole MCUs.</summary>
+    /// <summary>
+    /// The Y, Cb and Cr samples, one plane each, padded to whole MCUs. The arrays are rented from the shared pool and
+    /// may be longer than the planes.
+    /// </summary>
     private sealed class Planes(byte[] y, byte[] cb, byte[] cr)
     {
         public byte[] Y { get; } = y;
-        public byte[] Cb { get; set; } = cb;
-        public byte[] Cr { get; set; } = cr;
+        public byte[] Cb { get; private set; } = cb;
+        public byte[] Cr { get; private set; } = cr;
+
+        /// <summary>Halves the chroma planes of <paramref name="width"/> × <paramref name="height"/> samples.</summary>
+        public void Subsample(int width, int height)
+        {
+            var (cb, cr) = (Cb, Cr);
+            Cb = Downsample(cb, width, height);
+            ArrayPool<byte>.Shared.Return(cb);
+            Cr = Downsample(cr, width, height);
+            ArrayPool<byte>.Shared.Return(cr);
+        }
+
+        /// <summary>Gives the planes back to the pool.</summary>
+        public void Return()
+        {
+            ArrayPool<byte>.Shared.Return(Y);
+            ArrayPool<byte>.Shared.Return(Cb);
+            ArrayPool<byte>.Shared.Return(Cr);
+        }
     }
 
     /// <summary>The colour of one source pixel over the matte, in YCbCr.</summary>
@@ -27,7 +50,8 @@ internal static partial class JpegEncoder
     private static Planes ToYCbCr(uint[] pixels, Frame frame, uint matte)
     {
         int stride = frame.LumaWidth, paddedHeight = frame.LumaHeight;
-        var planes = new Planes(new byte[stride * paddedHeight], new byte[stride * paddedHeight], new byte[stride * paddedHeight]);
+        int size = stride * paddedHeight;
+        var planes = new Planes(ArrayPool<byte>.Shared.Rent(size), ArrayPool<byte>.Shared.Rent(size), ArrayPool<byte>.Shared.Rent(size));
         for (int row = 0; row < frame.Height; row++)
         {
             ConvertRow(pixels, row * frame.Width, frame.Width, matte,
@@ -98,7 +122,7 @@ internal static partial class JpegEncoder
     private static byte[] Downsample(byte[] plane, int width, int height)
     {
         int outWidth = width / 2, outHeight = height / 2;
-        var output = new byte[outWidth * outHeight];
+        var output = ArrayPool<byte>.Shared.Rent(outWidth * outHeight);
         for (int y = 0; y < outHeight; y++)
         {
             int top = 2 * y * width, bottom = top + width, destination = y * outWidth;

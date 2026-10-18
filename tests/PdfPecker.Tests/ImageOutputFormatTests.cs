@@ -215,4 +215,26 @@ public class ImageOutputFormatTests
         Assert.Equal((16384, 1), (d.Width, d.Height));
         Assert.All(d.Alpha!, a => Assert.Equal(0, a));
     }
+
+    [Fact]
+    public void Encoders_give_the_same_bytes_after_reusing_their_pooled_buffers()
+    {
+        // A flat image after a noisy one of the same size gets the noisy one's rented buffers back, where flat blocks
+        // write only their first coefficient; leftovers would change the file.
+        const int size = 96;
+        var flat = new uint[size * size];
+        Array.Fill(flat, 0xFF3366CCu);
+        var noisy = new uint[size * size];
+        var random = new Random(7);
+        for (int i = 0; i < noisy.Length; i++) noisy[i] = 0xFF000000u | (uint)random.Next(0x1000000);
+        foreach (int quality in new[] { 75, 95 })
+        {
+            var first = PdfPecker.Rendering.JpegEncoder.Encode(flat, size, size, quality, 0xFFFFFF);
+            PdfPecker.Rendering.JpegEncoder.Encode(noisy, size, size, quality, 0xFFFFFF);
+            Assert.Equal(first, PdfPecker.Rendering.JpegEncoder.Encode(flat, size, size, quality, 0xFFFFFF));
+        }
+        var webp = PdfPecker.Rendering.WebPEncoder.Encode(flat, size, size, 85);
+        PdfPecker.Rendering.WebPEncoder.Encode(noisy, size, size, 85);
+        Assert.Equal(webp, PdfPecker.Rendering.WebPEncoder.Encode(flat, size, size, 85));
+    }
 }

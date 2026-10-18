@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.CompilerServices;
 
 namespace PdfPecker.Rendering;
@@ -18,7 +19,8 @@ internal static partial class JpegEncoder
     {
         var divisors = Divisors(quantization);
         int blocksX = width / BlockSize, blocksY = height / BlockSize;
-        var coefficients = new short[blocksX * blocksY * BlockLength];
+        // Rented, so not cleared: every block writes all of its coefficients.
+        var coefficients = ArrayPool<short>.Shared.Rent(blocksX * blocksY * BlockLength);
         var options = new ParallelOptions { MaxDegreeOfParallelism = blocksY > ParallelBlockRows ? Environment.ProcessorCount : 1 };
         Parallel.For(0, blocksY, options, blockRow =>
         {
@@ -76,7 +78,10 @@ internal static partial class JpegEncoder
 
     /// <summary>A uniform block has only a DC term: 8 * (value - 128), scaled like the transform's output.</summary>
     private static void QuantizeFlatBlock(byte value, float[] divisors, Span<short> output)
-        => output[0] = (short)MathF.Round((value - LevelShift) * 64f * divisors[0]);
+    {
+        output[1..].Clear();
+        output[0] = (short)MathF.Round((value - LevelShift) * 64f * divisors[0]);
+    }
 
     /// <summary>The AAN forward DCT of the eight values at <paramref name="origin"/>, <paramref name="step"/> apart, in place.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

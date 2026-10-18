@@ -1,3 +1,5 @@
+using System.Buffers;
+
 namespace PdfPecker.Rendering;
 
 internal static partial class WebPEncoder
@@ -76,7 +78,23 @@ internal static partial class WebPEncoder
         }
         var head = new int[1 << HashBits]; // the latest position of each hash, or -1
         Array.Fill(head, -1);
-        var chain = new int[n]; // the position before each one with the same hash
+        // The position before each one with the same hash. As large as the page, so it is rented; only entries already
+        // written are read, as a chain only links positions already passed.
+        var chain = ArrayPool<int>.Shared.Rent(n);
+        try
+        {
+            Parse(pixels, width, settings, head, chain, references);
+        }
+        finally
+        {
+            ArrayPool<int>.Shared.Return(chain);
+        }
+        return references;
+    }
+
+    private static void Parse(uint[] pixels, int width, Settings settings, int[] head, int[] chain, References references)
+    {
+        int n = pixels.Length;
         int position = 0;
         while (position < n)
         {
@@ -100,7 +118,6 @@ internal static partial class WebPEncoder
                 head[hash] = position;
             }
         }
-        return references;
     }
 
     /// <summary>The longest match for the pixels at <paramref name="position"/> and its distance, or a length of 0.</summary>
