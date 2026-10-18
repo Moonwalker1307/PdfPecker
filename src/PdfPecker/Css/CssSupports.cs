@@ -39,7 +39,7 @@ internal static class CssSupports
         "border-top-color", "border-right-color", "border-bottom-color", "border-left-color", "border-top-left-radius",
         "border-top-right-radius", "border-bottom-right-radius", "border-bottom-left-radius", "border-image",
         "border-image-source", "border-image-slice", "border-image-width", "border-image-outset", "border-image-repeat", "tab-size",
-        "line-clamp", "-webkit-line-clamp", "hyphens", "hyphenate-character", "size", "string-set", "page", "direction", "unicode-bidi", "margin-inline",
+        "line-clamp", "-webkit-line-clamp", "hyphens", "hyphenate-character", "hyphenate-limit-chars", "size", "string-set", "page", "direction", "unicode-bidi", "margin-inline",
         "margin-inline-start", "margin-inline-end", "padding-inline", "padding-inline-start", "padding-inline-end", "margin-block",
         "margin-block-start", "margin-block-end", "padding-block", "padding-block-start", "padding-block-end",
         "mix-blend-mode", "background-blend-mode", "isolation", "container", "container-type", "container-name",
@@ -159,6 +159,8 @@ internal static class CssSupports
                 return lower is "block" or "inline" or "compact";
             case "footnote-policy":
                 return lower is "auto" or "line" or "block";
+            case "hyphenate-limit-chars":
+                return StyleResolver.ParseHyphenateLimitChars(lower) != null;
         }
         // Other values: functions this library does not know make the value unsupported.
         foreach (var fn in new[] { "attr(", "anchor(", "env(", "image-set(", "element(", "paint(", "cross-fade(" })
