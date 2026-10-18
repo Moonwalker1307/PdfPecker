@@ -2,6 +2,8 @@
 
   <PropertyGroup>
     <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <!-- The .NET preview workflow adds the next .NET as an extra target; the released package never has it. -->
+    <TargetFrameworks Condition="'$(PreviewTargetFramework)' != ''">$(TargetFrameworks);$(PreviewTargetFramework)</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <RootNamespace>PdfPecker</RootNamespace>

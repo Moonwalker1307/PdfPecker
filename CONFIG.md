@@ -31,6 +31,7 @@ nuget.org only accepts OSI- or FSF-approved licence IDs and some bundled font li
 | Workflow | When | What |
 | --- | --- | --- |
 | `nuget.yml` | Every PR, pushes to main, published releases | Builds and tests net8.0, net9.0 and net10.0 on Linux and net10.0 on Windows, publishes the sample with Native AOT, reports coverage and packs. On a release it attaches the package and publishes it to nuget.org. |
+| `dotnet-preview.yml` | Every PR, published releases, Mondays | Builds and tests on the latest .NET 11 preview SDK with an extra `net11.0` target. Never blocks: the job is `continue-on-error`, and it packs and publishes nothing. |
 | `conformance.yml` | PRs and pushes touching `src`, `tests` or the samples | veraPDF validation of the PDF/A and PDF/UA samples. |
 | `codeql.yml` | PRs, pushes and a schedule | CodeQL analysis. |
 | `perf.yml` | Nightly | Benchmark on main against the previous night's run. |
