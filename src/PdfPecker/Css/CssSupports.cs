@@ -29,7 +29,7 @@ internal static class CssSupports
         "grid-row-gap", "grid-column-gap", "grid", "grid-template", "grid-template-columns", "grid-template-rows",
         "grid-template-areas", "grid-auto-columns", "grid-auto-rows", "grid-auto-flow", "grid-area", "grid-row",
         "grid-column", "grid-column-start", "grid-column-end", "grid-row-start", "grid-row-end", "columns", "column-count",
-        "column-width", "column-rule", "column-rule-width", "column-rule-style", "column-rule-color", "column-span",
+        "column-width", "column-rule", "column-rule-width", "column-rule-style", "column-rule-color", "column-span", "column-fill",
         "fill", "stroke", "stroke-width", "fill-opacity", "stroke-opacity", "fill-rule", "stroke-linecap", "stroke-linejoin",
         "stroke-miterlimit", "clip-path", "clip-rule", "mask", "mask-type", "filter", "marker", "marker-start", "marker-mid",
         "marker-end", "flood-color", "flood-opacity", "lighting-color", "color-interpolation-filters", "text-anchor", "dominant-baseline",

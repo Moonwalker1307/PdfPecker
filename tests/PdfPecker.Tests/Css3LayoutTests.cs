@@ -156,6 +156,107 @@ public class Css3LayoutTests
         Near(250, Box(ops, "#0000fe").X);
     }
 
+    // Lines w0..w{n-1} of one paragraph, 10pt apart.
+    private static string Lines(int n, string style = "")
+        => $"<p style='margin: 0; font: 8pt/10pt sans-serif; {style}'>" + string.Join("<br>", Enumerable.Range(0, n).Select(i => $"w{i}x")) + "</p>";
+
+    // Blocks b0..b{n-1}, each 9pt (12px, so that layout units keep it exact) tall with its own background colour.
+    private static string Blocks(int n, int from = 0)
+        => string.Concat(Enumerable.Range(from, n).Select(i => $"<div style='height: 9pt; background: #0000{i:x2}'></div>"));
+
+    [Fact]
+    public void A_paragraph_continues_in_the_next_column()
+    {
+        var ops = Layout("<div style='columns: 2; column-gap: 0'>" + Lines(10) + "</div><p style='margin: 0'>after</p>");
+        // Balanced: five lines in each column, the second column starting level with the first.
+        Near(Text(ops, "w0x").LineTop, Text(ops, "w5x").LineTop);
+        Near(250, Text(ops, "w5x").X, 0.5f);
+        Near(0, Text(ops, "w4x").X, 0.5f);
+        Near(50, Text(ops, "after").LineTop, 0.5f);
+    }
+
+    [Fact]
+    public void Columns_across_pages_fill_every_column_on_each_page()
+    {
+        var ops = Layout("<div style='columns: 2; column-gap: 0'>" + Blocks(30) + "</div>", pageHeight: 90);
+        // Page 1 holds b0..b19 in two full columns; page 2 balances the last ten over both columns.
+        Near(0, Box(ops, "#000009").X); Near(81, Box(ops, "#000009").Y);
+        Near(250, Box(ops, "#00000a").X); Near(0, Box(ops, "#00000a").Y);
+        Near(250, Box(ops, "#000013").X); Near(81, Box(ops, "#000013").Y);
+        Near(0, Box(ops, "#000014").X); Near(90, Box(ops, "#000014").Y);
+        Near(250, Box(ops, "#000019").X); Near(90, Box(ops, "#000019").Y);
+    }
+
+    [Fact]
+    public void Break_before_column_starts_the_next_column()
+    {
+        var ops = Layout("<div style='columns: 3; column-gap: 0'>" + Blocks(2)
+                         + "<div style='break-before: column; height: 9pt; background: #000002'></div></div>");
+        // The forced break leaves two columns to the content before it, which balances over them.
+        Near(500 / 3f, Box(ops, "#000001").X, 0.5f);
+        Near(1000 / 3f, Box(ops, "#000002").X, 0.5f);
+        Near(0, Box(ops, "#000002").Y);
+    }
+
+    [Fact]
+    public void Break_inside_avoid_keeps_a_box_in_one_column()
+    {
+        var ops = Layout("<div style='columns: 2; column-gap: 0'><div style='height: 20pt; background: #ff0000'></div>"
+                         + "<div style='break-inside: avoid'><div style='height: 20pt; background: #00ff00'></div><div style='height: 20pt; background: #0000ff'></div></div></div>");
+        Near(250, Box(ops, "#00ff00").X); Near(0, Box(ops, "#00ff00").Y);
+        Near(250, Box(ops, "#0000ff").X); Near(20, Box(ops, "#0000ff").Y);
+    }
+
+    [Fact]
+    public void Orphans_make_the_balanced_columns_taller()
+    {
+        // Two lines a column would leave fewer than three at the first column's end.
+        var ops = Layout("<div style='columns: 2; column-gap: 0'>" + Lines(4, "orphans: 3; widows: 1") + "</div>");
+        Near(0, Text(ops, "w2x").X, 0.5f);
+        Near(250, Text(ops, "w3x").X, 0.5f);
+        Near(Text(ops, "w0x").LineTop, Text(ops, "w3x").LineTop);
+    }
+
+    [Fact]
+    public void Column_fill_auto_fills_the_columns_in_turn()
+    {
+        var ops = Layout("<div style='columns: 2; column-gap: 0; column-fill: auto; height: 18pt'>" + Blocks(3) + "</div>");
+        Near(0, Box(ops, "#000001").X); Near(9, Box(ops, "#000001").Y);
+        Near(250, Box(ops, "#000002").X); Near(0, Box(ops, "#000002").Y);
+    }
+
+    [Fact]
+    public void Right_to_left_columns_start_on_the_right()
+    {
+        var ops = Layout("<div style='columns: 2; column-gap: 0; direction: rtl'>" + Blocks(2) + "</div>");
+        Near(250, Box(ops, "#000000").X);
+        Near(0, Box(ops, "#000001").X); Near(0, Box(ops, "#000001").Y);
+    }
+
+    [Fact]
+    public void A_table_header_repeats_at_the_top_of_each_column()
+    {
+        string rows = string.Concat(Enumerable.Range(0, 12).Select(i => $"<tr><td>r{i}x</td></tr>"));
+        var ops = Layout("<div style='columns: 2; column-gap: 0; font: 8pt/10pt sans-serif'><table style='border-collapse: collapse'>"
+                         + "<thead><tr><th>headx</th></tr></thead>" + rows + "</table></div>");
+        var heads = ops.OfType<TextOp>().Where(t => t.Text.Contains("headx")).OrderBy(t => t.X).ToList();
+        Assert.Equal(2, heads.Count);
+        Near(heads[0].LineTop, heads[1].LineTop);
+        Assert.True(heads[1].X >= 250);
+    }
+
+    [Fact]
+    public void Nested_columns_split_inside_the_outer_columns()
+    {
+        var ops = Layout("<div style='columns: 2; column-gap: 0'><div style='columns: 2; column-gap: 0'>" + Blocks(4) + "</div></div>");
+        // The inner box's columns are 125pt wide, and the outer balancing splits the inner box between the outer
+        // columns: one block in each inner column.
+        Near(0, Box(ops, "#000000").X);
+        Near(125, Box(ops, "#000001").X); Near(0, Box(ops, "#000001").Y);
+        Near(250, Box(ops, "#000002").X); Near(0, Box(ops, "#000002").Y);
+        Near(375, Box(ops, "#000003").X); Near(0, Box(ops, "#000003").Y);
+    }
+
     // ---- grid ----
 
     [Fact]

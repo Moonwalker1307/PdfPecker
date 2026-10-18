@@ -129,6 +129,7 @@ internal sealed partial class LayoutEngine
         var (lineA, lineD) = LineExtents(lines, n, block);
         // Beside floats the lines' positions were fixed while breaking them.
         bool[]? breakBefore = _paginate && n > 1 && !besideFloats ? PlanBreaks(n, lineA, lineD, y, block.Orphans, block.Widows) : null;
+        var chunk = new LineChunk { Start = -1 };
 
         for (int li = 0; li < n; li++)
         {
@@ -143,8 +144,13 @@ internal sealed partial class LayoutEngine
             float lineH = lineA[li] + lineD[li];
             y = FitOnPage(y, lineH);
             CheckPageLimit(y);
-            if (breakBefore != null && breakBefore[li]) y = NextPage(y);
-            if (Footnotes != null && _paginate && !_measuring) y = PlaceFootnoteCalls(line.Items, y, lineH);
+            if (breakBefore != null && breakBefore[li])
+            {
+                if (_columnNotes != null) NotePlannedBreak(li, y, lineA, lineD, n);
+                y = NextPage(y);
+            }
+            if (_columnNotes != null) NoteOrphans(ref chunk, li, y, lineA, lineD, n, block.Orphans);
+            if (Footnotes != null && _paginate && !_measuring && _columnNotes == null) y = PlaceFootnoteCalls(line.Items, y, lineH);
             DrawLine(line, block, x, y, lineLeft, lineW, li == 0 ? indent : 0, lineA[li], lineH);
             y += lineH;
         }

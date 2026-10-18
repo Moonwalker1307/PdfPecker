@@ -7,12 +7,14 @@ namespace PdfPecker.Layout;
 /// <summary>A slot reserved before an element's content, filled with its background and borders once its size is known.</summary>
 internal class GroupOp : DrawOp
 {
-    public readonly List<DrawOp> Ops = new(2);
+    public List<DrawOp> Ops { get; private set; } = new(2);
 
     public override void Offset(float dx, float dy)
     {
         foreach (var op in Ops) op.Offset(dx, dy);
     }
+
+    protected override void OwnArrays() => Ops = new List<DrawOp>(2);
 }
 
 /// <summary>
@@ -125,6 +127,12 @@ internal sealed class LayerOp : GroupOp
 
     /// <summary>Whether the layer is painted as one transparency group.</summary>
     public bool NeedsGroup => Opacity < 1 || BlendMode != null || Isolated;
+
+    protected override void OwnArrays()
+    {
+        base.OwnArrays();
+        ClipPoints = (float[]?)ClipPoints?.Clone();
+    }
 
     public override void Offset(float dx, float dy)
     {

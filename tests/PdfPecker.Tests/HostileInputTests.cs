@@ -641,6 +641,37 @@ public class HostileInputTests
         Assert.True(image.Rgba[(99 * image.Width + 6) * 4] > 192, "the first gap is painted");
     }
 
+    // Balancing lays a multi-column box's content out again for each height it tries, and a multi-column box inside
+    // it each time again: nested deeply, that would multiply. Below two levels the columns keep their boxes whole.
+    [Fact]
+    public void Deeply_nested_multicolumn_boxes_are_bounded()
+    {
+        string text = Repeat("lorem ipsum dolor sit amet ", 40);
+        string html = Repeat("<div style='columns: 3; column-gap: 2pt'><p>" + text + "</p>", 60) + Repeat("</div>", 60);
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    // Columns one pixel wide in a wide page make hundreds of columns, and a box taller than many pages in them would
+    // be split between millions of columns; the split stops at a limit.
+    [Theory]
+    [InlineData("<div style='column-width: 1px; column-gap: 0'>{0}</div>")]
+    [InlineData("<div style='columns: 100; column-gap: 0'><div style='height: 10000000px; background: red'></div>{0}</div>")]
+    [InlineData("<div style='columns: 100; column-gap: 0; height: 100000px'>{0}</div>")]
+    [InlineData("<div style='columns: 2'>" + "<div style='columns: 2; column-span: all'><p style='column-span: all; break-before: column'>{0}</p></div>" + "</div>")]
+    public void Many_or_huge_columns_are_bounded(string template)
+    {
+        string text = Repeat("<p>lorem ipsum dolor sit amet consectetur</p>", 300);
+        AssertStructurallyValid(Bounded("<style>@page { size: 2000pt 800pt }</style>" + string.Format(template, text)));
+    }
+
+    // Each row of columns but the last is laid out once; only the last row is balanced.
+    [Fact]
+    public void Long_multicolumn_content_balances_only_its_last_row()
+    {
+        string html = "<div style='columns: 3'>" + Repeat("<h2>Section</h2><p>" + Repeat("lorem ipsum dolor sit amet ", 60) + "</p>", 400) + "</div>";
+        AssertStructurallyValid(Bounded(html));
+    }
+
     /// <summary>A 200 by 200 point page that runs <paramref name="content"/>.</summary>
     private static byte[] StrokePage(string content) => SimplePdf(new List<string>
     {
