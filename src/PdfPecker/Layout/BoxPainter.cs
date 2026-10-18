@@ -22,16 +22,17 @@ internal static partial class BoxPainter
     /// <summary>
     /// Paints background and borders of a border box into <paramref name="group"/>. <paramref name="images"/> loads
     /// url() backgrounds; <paramref name="basis"/> is the containing block width that percentage paddings refer to.
+    /// <paramref name="backgroundArea"/>, when given, is the only part of the box the background is painted in.
     /// </summary>
     public static void Paint(GroupOp group, ComputedStyle s, float x, float y, float w, float h, ImageLoader? images = null, float basis = 0,
-        int sides = AllSides, bool collapsedCell = false)
+        int sides = AllSides, bool collapsedCell = false, (float X, float Y, float W, float H)? backgroundArea = null)
     {
         if (!s.Visible) return;
         // Collapsed table borders have no rounded corners.
         var radii = sides == AllSides && !collapsedCell ? Radii(s, w, h) : null;
         bool hasArea = w > 0 && h > 0;
         if (s.BoxShadows != null && hasArea) PaintShadows(group, s, x, y, w, h, radii);
-        if (hasArea && !s.CanvasBackground) PaintBackground(group, s, x, y, w, h, images, basis, radii);
+        if (hasArea && !s.CanvasBackground) PaintBackground(group, s, x, y, w, h, images, basis, radii, backgroundArea);
         if (s.BoxShadows != null && hasArea && !s.CanvasBackground) PaintInsetShadows(group, s, x, y, w, h, radii);
         // A border image replaces the border styles; when its image cannot be shown, the styles are drawn instead.
         // It does not apply to collapsed table borders.
