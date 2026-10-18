@@ -182,70 +182,8 @@ internal sealed partial class PdfDocumentWriter
                 WriteMaskedFill(b, mb, maskFill, pageTop, imageIds);
                 break;
             case LayerBlock tb:
-            {
-                EndText(b);
-                b.Ascii("q ");
-                if (tb.Layer.Transform is { } m)
-                {
-                    // The layer's y-down transform about its origin, mapped into PDF space (y up).
-                    float px = PX(tb.Layer.OriginX), py = PY(tb.Layer.OriginY, pageTop);
-                    float e = px - m.A * px + m.C * py + m.E, f = py + m.B * px - m.D * py - m.F;
-                    b.Num6(m.A).Sp().Num6(-m.B).Sp().Num6(-m.C).Sp().Num6(m.D).Sp().Num(e).Sp().Num(f).Ascii(" cm\n");
-                }
-                if (tb.Layer.ClipVerbs is { } clipVerbs)
-                {
-                    // clip-path: the outline in the layer's own space, so that a transform turns it with the content.
-                    if (_mc != null) b.Ascii("/Artifact BMC ");
-                    WriteFlowPath(b, clipVerbs, tb.Layer.ClipPoints!, pageTop);
-                    b.Ascii(tb.Layer.ClipEvenOdd ? "W* n\n" : "W n\n");
-                    if (_mc != null) b.Ascii("EMC\n");
-                }
-                if (tb.Layer.NeedsGroup && !_invisibleText)
-                {
-                    // A translucent or blended layer is a transparency group, painted as a whole at its opacity and with
-                    // its blend mode, so that its own overlapping parts do not show through each other.
-                    var group = new ByteBuffer(4096);
-                    _fill = _stroke = 1;
-                    _lineWidth = -1;
-                    _textFont = null;
-                    _textSize = -1;
-                    _tw = _tc = float.NaN;
-                    _tr = -1;
-                    _fillAlpha = _strokeAlpha = -1; // a group starts at alpha 1, but not every viewer resets it
-                    _anyAlpha = true;
-                    // A transparency group is a stream of its own, with its own marked-content numbers.
-                    var pageMc = _mc;
-                    if (pageMc != null) _mc = new McStream(pageMc.Page);
-                    WriteLayerContent(group, tb, pageTop, imageIds);
-                    EndText(group);
-                    EndMarked(group);
-                    _forms.Add(group.Span.ToArray());
-                    _formIsolated.Add(tb.Layer.BlendMode != null || tb.Layer.Isolated);
-                    _formStreams.Add(_mc);
-                    _mc = pageMc;
-                    int alpha = (int)MathF.Round(Math.Clamp(tb.Layer.Opacity, 0, 1) * 255);
-                    if (tb.Layer.BlendMode is { } blend)
-                    {
-                        _blendStates.Add((alpha, blend));
-                        b.Ascii("/g").Int(alpha).Ascii(blend);
-                    }
-                    else
-                    {
-                        _groupAlphas.Add(alpha);
-                        b.Ascii("/g").Int(alpha);
-                    }
-                    b.Ascii(" gs /Fx").Int(_forms.Count).Ascii(" Do\n");
-                }
-                else
-                {
-                    WriteLayerContent(b, tb, pageTop, imageIds);
-                    EndText(b);
-                    EndMarked(b);
-                }
-                b.Ascii("Q\n");
-                InvalidateState();
+                WriteLayer(b, tb, pageTop, imageIds);
                 break;
-            }
             case FieldBlock fb:
                 // A widget is written on its own; a field that cannot be one is drawn, checked or not.
                 if (_fieldIds.ContainsKey(fb) || fb.Field.Kind is ControlKind.CheckBox or ControlKind.Radio && !fb.Field.Checked) break;
@@ -325,6 +263,79 @@ internal sealed partial class PdfDocumentWriter
                 break;
             }
         }
+    }
+
+    /// <summary>
+    /// Draws a layer's part on this page inside q/Q: with the layer's transform and clip-path, and, when it is
+    /// translucent or blended, as a transparency group.
+    /// </summary>
+    private void WriteLayer(ByteBuffer b, LayerBlock tb, float pageTop, Dictionary<PdfImage, int> imageIds)
+    {
+        EndText(b);
+        b.Ascii("q ");
+        if (tb.Layer.Transform is { } m)
+        {
+            // The layer's y-down transform about its origin, mapped into PDF space (y up).
+            float px = PX(tb.Layer.OriginX), py = PY(tb.Layer.OriginY, pageTop);
+            float e = px - m.A * px + m.C * py + m.E, f = py + m.B * px - m.D * py - m.F;
+            b.Num6(m.A).Sp().Num6(-m.B).Sp().Num6(-m.C).Sp().Num6(m.D).Sp().Num(e).Sp().Num(f).Ascii(" cm\n");
+        }
+        if (tb.Layer.ClipVerbs is { } clipVerbs)
+        {
+            // clip-path: the outline in the layer's own space, so that a transform turns it with the content.
+            if (_mc != null) b.Ascii("/Artifact BMC ");
+            WriteFlowPath(b, clipVerbs, tb.Layer.ClipPoints!, pageTop);
+            b.Ascii(tb.Layer.ClipEvenOdd ? "W* n\n" : "W n\n");
+            if (_mc != null) b.Ascii("EMC\n");
+        }
+        if (tb.Layer.NeedsGroup && !_invisibleText) WriteLayerGroup(b, tb, pageTop, imageIds);
+        else
+        {
+            WriteLayerContent(b, tb, pageTop, imageIds);
+            EndText(b);
+            EndMarked(b);
+        }
+        b.Ascii("Q\n");
+        InvalidateState();
+    }
+
+    /// <summary>
+    /// Writes a translucent or blended layer's content as a transparency group, painted as a whole at its opacity and
+    /// with its blend mode, so that its own overlapping parts do not show through each other.
+    /// </summary>
+    private void WriteLayerGroup(ByteBuffer b, LayerBlock tb, float pageTop, Dictionary<PdfImage, int> imageIds)
+    {
+        var group = new ByteBuffer(4096);
+        _fill = _stroke = 1;
+        _lineWidth = -1;
+        _textFont = null;
+        _textSize = -1;
+        _tw = _tc = float.NaN;
+        _tr = -1;
+        _fillAlpha = _strokeAlpha = -1; // a group starts at alpha 1, but not every viewer resets it
+        _anyAlpha = true;
+        // A transparency group is a stream of its own, with its own marked-content numbers.
+        var pageMc = _mc;
+        if (pageMc != null) _mc = new McStream(pageMc.Page);
+        WriteLayerContent(group, tb, pageTop, imageIds);
+        EndText(group);
+        EndMarked(group);
+        _forms.Add(group.Span.ToArray());
+        _formIsolated.Add(tb.Layer.BlendMode != null || tb.Layer.Isolated);
+        _formStreams.Add(_mc);
+        _mc = pageMc;
+        int alpha = (int)MathF.Round(Math.Clamp(tb.Layer.Opacity, 0, 1) * 255);
+        if (tb.Layer.BlendMode is { } blend)
+        {
+            _blendStates.Add((alpha, blend));
+            b.Ascii("/g").Int(alpha).Ascii(blend);
+        }
+        else
+        {
+            _groupAlphas.Add(alpha);
+            b.Ascii("/g").Int(alpha);
+        }
+        b.Ascii(" gs /Fx").Int(_forms.Count).Ascii(" Do\n");
     }
 
     /// <summary>Writes a path given in flow coordinates (SvgShape verbs) in the page's PDF space.</summary>

@@ -297,6 +297,27 @@ internal sealed partial class PdfDocumentWriter
     private static void Hex4(ByteBuffer b, int v)
         => b.Byte(HexDigits[(v >> 12) & 15]).Byte(HexDigits[(v >> 8) & 15]).Byte(HexDigits[(v >> 4) & 15]).Byte(HexDigits[v & 15]);
 
+    /// <summary>Writes the fonts the document uses: the standard fonts it does not embed, then the embedded subsets.</summary>
+    private void WriteFonts(WriteState doc)
+    {
+        for (int i = 0; i < doc.UsedFonts.Length; i++)
+        {
+            if (!doc.UsedFonts[i]) continue;
+            Begin(doc.FontIds[i]).Ascii("<< /Type /Font /Subtype /Type1 /BaseFont /").Ascii(StandardFont.All[i].BaseFont)
+                .Ascii(" /Encoding /WinAnsiEncoding >>");
+            End();
+        }
+        for (int i = 0; i < _subsetList.Count; i++) WriteEmbeddedFont(_subsetList[i], doc.FirstEmbeddedId + i * 5);
+    }
+
+    /// <summary>The entries of a /Font resource dictionary: /F1, /F2, ... for the standard fonts, /E1, /E2, ... for the subsets.</summary>
+    private void WriteFontEntries(ByteBuffer b, WriteState doc)
+    {
+        for (int i = 0; i < doc.UsedFonts.Length; i++)
+            if (doc.UsedFonts[i]) b.Ascii(" /F").Int(i + 1).Sp().Int(doc.FontIds[i]).Ascii(" 0 R");
+        for (int i = 0; i < _subsetList.Count; i++) b.Ascii(" /E").Int(i + 1).Sp().Int(doc.FirstEmbeddedId + i * 5).Ascii(" 0 R");
+    }
+
     /// <summary>Writes the five objects of an embedded font: Type0 font, CIDFont, descriptor, font file and ToUnicode CMap.</summary>
     private void WriteEmbeddedFont(GlyphSubset subset, int id)
     {
