@@ -670,7 +670,7 @@ internal sealed partial class PdfDocumentWriter
             cell.Ascii("1 0 0 -1 0 ").Num(th).Ascii(" cm ").Num6(m.A).Sp().Num6(m.B).Sp().Num6(m.C).Sp().Num6(m.D).Sp().Num(m.E).Sp().Num(m.F)
                 .Ascii(" cm /Sh1 sh\n");
             dict.Ascii("<< /Shading << /Sh1 ");
-            tg.WriteShading(dict, 0, 0, tw, th);
+            tg.WriteShading(dict, 0, 0, tw, th, budget: _gradientBudget);
             dict.Ascii(" >> >>");
         }
         else
@@ -710,7 +710,7 @@ internal sealed partial class PdfDocumentWriter
     {
         int n = ++_patternCount;
         _patterns.Ascii(" /P").Int(n).Sp();
-        g.WritePattern(_patterns, toPage, minX, minY, maxX, maxY, channel);
+        g.WritePattern(_patterns, toPage, minX, minY, maxX, maxY, channel, _gradientBudget);
         return n;
     }
 
@@ -725,7 +725,7 @@ internal sealed partial class PdfDocumentWriter
         var dict = new ByteBuffer(256);
         dict.Ascii("/Type /XObject /Subtype /Form /BBox [").Num(x).Sp().Num(y).Sp().Num(x + w).Sp().Num(y + h)
             .Ascii("] /Group << /S /Transparency /CS /DeviceGray >> /Resources << /Pattern << /M ");
-        g.WritePattern(dict, toPage, minX, minY, maxX, maxY, GradientChannel.Alpha);
+        g.WritePattern(dict, toPage, minX, minY, maxX, maxY, GradientChannel.Alpha, _gradientBudget);
         dict.Ascii(" >> >>");
         _masks.Add((content.Span.ToArray(), System.Text.Encoding.ASCII.GetString(dict.Span), false));
         return _masks.Count;
