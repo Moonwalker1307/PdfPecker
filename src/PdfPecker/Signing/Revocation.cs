@@ -213,16 +213,16 @@ internal static class Revocation
     }
 
     /// <summary>Asks the certificate's OCSP responders for its status; null when it names none or none answers.</summary>
-    public static OcspInfo? FetchOcsp(X509Certificate2 cert, X509Certificate2 issuer, RevocationFetcher fetcher, List<string> errors)
+    public static async ValueTask<OcspInfo?> FetchOcspAsync(X509Certificate2 cert, X509Certificate2 issuer, RevocationFetcher fetcher, List<string> errors)
     {
         foreach (var url in OcspUrls(cert))
         {
             try
             {
-                var body = fetcher.Send(url, () => new HttpRequestMessage(HttpMethod.Post, url)
+                var body = await fetcher.SendAsync(url, () => new HttpRequestMessage(HttpMethod.Post, url)
                 {
                     Content = new ByteArrayContent(OcspRequest(cert, issuer)) { Headers = { ContentType = new MediaTypeHeaderValue("application/ocsp-request") } },
-                }, MaxOcspSize, errors);
+                }, MaxOcspSize, errors).ConfigureAwait(false);
                 if (body == null) continue;
                 var info = ReadOcsp(body);
                 if (info != null && Covers(info, cert)) return info;
@@ -237,13 +237,13 @@ internal static class Revocation
     }
 
     /// <summary>Downloads the certificate's CRL; null when it names none or none can be fetched.</summary>
-    public static byte[]? FetchCrl(X509Certificate2 cert, RevocationFetcher fetcher, List<string> errors)
+    public static async ValueTask<byte[]?> FetchCrlAsync(X509Certificate2 cert, RevocationFetcher fetcher, List<string> errors)
     {
         foreach (var url in CrlUrls(cert))
         {
             try
             {
-                var body = fetcher.GetCrl(url, MaxCrlSize, errors);
+                var body = await fetcher.GetCrlAsync(url, MaxCrlSize, errors).ConfigureAwait(false);
                 if (body == null) continue;
                 if (CrlIssuer(body) is { } issuer && issuer.AsSpan().SequenceEqual(cert.IssuerName.RawData)) return body;
                 errors.Add($"The CRL at {url} is not a CRL from {cert.Issuer}.");
@@ -258,9 +258,10 @@ internal static class Revocation
 }
 
 /// <summary>
-/// Makes the OCSP and CRL requests of one <see cref="PdfSigner.AddValidationData"/> call. The URLs come from
-/// certificates in the PDF, which may be hostile, so the number of URLs and requests and the total time are capped,
-/// redirects are followed only a few times and within the same scheme, and the caller's filter sees every URL.
+/// Makes the OCSP and CRL requests of one <see cref="PdfSigner.AddValidationData(byte[], PdfLtvOptions?, string?)"/> call.
+/// The URLs come from certificates in the PDF, which may be hostile, so the number of URLs and requests and the total
+/// time are capped, redirects are followed only a few times and within the same scheme, and the caller's filter sees
+/// every URL. With <c>async</c> false every request is sent synchronously and the returned tasks are already complete.
 /// </summary>
 internal sealed class RevocationFetcher : IDisposable
 {
@@ -281,22 +282,26 @@ internal sealed class RevocationFetcher : IDisposable
     private readonly HashSet<string> _urls = new(StringComparer.Ordinal);
     private readonly Dictionary<string, byte[]> _crls = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource _deadline = new(Total);
+    private readonly bool _async;
+    private readonly CancellationToken _cancellation;
     private int _requests;
     private bool _limitReported;
 
-    public RevocationFetcher(HttpClient? client, Func<Uri, bool>? filter)
+    public RevocationFetcher(HttpClient? client, Func<Uri, bool>? filter, bool async, CancellationToken cancellationToken)
     {
         _client = client ?? Shared.Value;
         _filter = filter;
+        _async = async;
+        _cancellation = cancellationToken;
     }
 
     public void Dispose() => _deadline.Dispose();
 
     /// <summary>Downloads a CRL, reusing the answer when several certificates share a distribution point.</summary>
-    public byte[]? GetCrl(string url, int maxSize, List<string> errors)
+    public async ValueTask<byte[]?> GetCrlAsync(string url, int maxSize, List<string> errors)
     {
         if (_crls.TryGetValue(url, out var cached)) return cached;
-        var body = Send(url, () => new HttpRequestMessage(HttpMethod.Get, url), maxSize, errors);
+        var body = await SendAsync(url, () => new HttpRequestMessage(HttpMethod.Get, url), maxSize, errors).ConfigureAwait(false);
         if (body != null) _crls[url] = body;
         return body;
     }
@@ -304,9 +309,10 @@ internal sealed class RevocationFetcher : IDisposable
     /// <summary>
     /// Sends the request <paramref name="create"/> makes for <paramref name="url"/>. Returns null when the URL is not to
     /// be contacted (adding the reason to <paramref name="errors"/> when it is a limit), and throws
-    /// <see cref="PdfSignatureException"/> when the server fails.
+    /// <see cref="PdfSignatureException"/> when the server fails, or <see cref="OperationCanceledException"/> when the
+    /// caller cancels.
     /// </summary>
-    public byte[]? Send(string url, Func<HttpRequestMessage> create, int maxSize, List<string> errors)
+    public async ValueTask<byte[]?> SendAsync(string url, Func<HttpRequestMessage> create, int maxSize, List<string> errors)
     {
         var uri = new Uri(url);
         for (int hop = 0; ; hop++)
@@ -314,12 +320,15 @@ internal sealed class RevocationFetcher : IDisposable
             if (!Allowed(uri, errors)) return null;
             using var request = create();
             request.RequestUri = uri;
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_deadline.Token);
+            _cancellation.ThrowIfCancellationRequested();
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_deadline.Token, _cancellation);
             timeout.CancelAfter(PerRequest);
             var token = timeout.Token;
             try
             {
-                using var response = _client.Send(request, HttpCompletionOption.ResponseHeadersRead, token);
+                using var response = _async
+                    ? await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false)
+                    : _client.Send(request, HttpCompletionOption.ResponseHeadersRead, token);
                 int status = (int)response.StatusCode;
                 if (status is >= 300 and < 400 && response.Headers.Location is { } location)
                 {
@@ -335,17 +344,23 @@ internal sealed class RevocationFetcher : IDisposable
                 // HttpClient's own timeout ends once the headers are in, so a server that sends the body slowly is
                 // stopped by closing the response when the time is up.
                 using var stop = token.Register(static r => ((IDisposable)r!).Dispose(), response);
-                using var stream = response.Content.ReadAsStream(token);
+                using var stream = _async
+                    ? await response.Content.ReadAsStreamAsync(token).ConfigureAwait(false)
+                    : response.Content.ReadAsStream(token);
                 using var ms = new MemoryStream();
                 var buffer = new byte[16384];
                 int n;
-                while ((n = stream.Read(buffer, 0, buffer.Length)) > 0)
+                while ((n = _async ? await stream.ReadAsync(buffer, token).ConfigureAwait(false) : stream.Read(buffer, 0, buffer.Length)) > 0)
                 {
                     if (ms.Length + n > maxSize) throw new PdfSignatureException("The answer is too large.");
                     ms.Write(buffer, 0, n);
                 }
                 token.ThrowIfCancellationRequested();
                 return ms.ToArray();
+            }
+            catch (Exception ex) when (_cancellation.IsCancellationRequested && ex is OperationCanceledException or IOException or ObjectDisposedException or HttpRequestException)
+            {
+                throw new OperationCanceledException("Fetching revocation data was cancelled.", ex, _cancellation);
             }
             catch (Exception ex) when (ex is OperationCanceledException || (token.IsCancellationRequested && ex is IOException or ObjectDisposedException or HttpRequestException))
             {

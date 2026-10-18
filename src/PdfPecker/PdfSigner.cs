@@ -30,12 +30,13 @@ public static class PdfSigner
     {
         if (pdf == null) throw new ArgumentNullException(nameof(pdf));
         if (options == null) throw new ArgumentNullException(nameof(options));
-        return SignatureWriter.Sign(pdf, options, password);
+        return SignatureWriter.Sign(pdf, options, password, CancellationToken.None);
     }
 
     /// <summary>
-    /// Signs <paramref name="pdf"/> asynchronously: an asynchronous <see cref="PdfExternalSigner"/> (a cloud key vault)
-    /// and the timestamp server are awaited instead of blocking a thread. Otherwise the same as <see cref="Sign"/>.
+    /// Signs <paramref name="pdf"/> and returns the signed file, stopping with <see cref="OperationCanceledException"/>
+    /// when <paramref name="cancellationToken"/> is cancelled. Otherwise the same as
+    /// <see cref="Sign(byte[], PdfSignatureOptions, string?)"/>.
     /// </summary>
     /// <param name="pdf">The PDF to sign.</param>
     /// <param name="options">The certificate and signature settings.</param>
@@ -43,6 +44,26 @@ public static class PdfSigner
     /// <param name="cancellationToken">Cancels the external signer and the timestamp request.</param>
     /// <exception cref="PdfPasswordException">The PDF is encrypted and the password does not open it.</exception>
     /// <exception cref="PdfSignatureException">The timestamp server failed, or the external signer's signature does not verify.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    public static byte[] Sign(byte[] pdf, PdfSignatureOptions options, string? password, CancellationToken cancellationToken)
+    {
+        if (pdf == null) throw new ArgumentNullException(nameof(pdf));
+        if (options == null) throw new ArgumentNullException(nameof(options));
+        return SignatureWriter.Sign(pdf, options, password, cancellationToken);
+    }
+
+    /// <summary>
+    /// Signs <paramref name="pdf"/> asynchronously: an asynchronous <see cref="PdfExternalSigner"/> (a cloud key vault)
+    /// and the timestamp server are awaited instead of blocking a thread. Otherwise the same as
+    /// <see cref="Sign(byte[], PdfSignatureOptions, string?)"/>.
+    /// </summary>
+    /// <param name="pdf">The PDF to sign.</param>
+    /// <param name="options">The certificate and signature settings.</param>
+    /// <param name="password">The user or owner password, when the PDF is encrypted.</param>
+    /// <param name="cancellationToken">Cancels the external signer and the timestamp request.</param>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and the password does not open it.</exception>
+    /// <exception cref="PdfSignatureException">The timestamp server failed, or the external signer's signature does not verify.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public static Task<byte[]> SignAsync(byte[] pdf, PdfSignatureOptions options, string? password = null, CancellationToken cancellationToken = default)
     {
         if (pdf == null) throw new ArgumentNullException(nameof(pdf));
@@ -66,7 +87,44 @@ public static class PdfSigner
     public static byte[] AddValidationData(byte[] pdf, PdfLtvOptions? options = null, string? password = null)
     {
         if (pdf == null) throw new ArgumentNullException(nameof(pdf));
-        return LtvWriter.AddValidationData(pdf, options ?? new PdfLtvOptions(), password);
+        return LtvWriter.AddValidationData(pdf, options ?? new PdfLtvOptions(), password, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Adds the validation data like <see cref="AddValidationData(byte[], PdfLtvOptions?, string?)"/>, stopping with
+    /// <see cref="OperationCanceledException"/> when <paramref name="cancellationToken"/> is cancelled, also in the
+    /// middle of an OCSP, CRL or timestamp request.
+    /// </summary>
+    /// <param name="pdf">A signed PDF.</param>
+    /// <param name="options">Extra certificates, revocation data, and whether to fetch it. Default: store the chains only, offline.</param>
+    /// <param name="password">The user or owner password, when the PDF is encrypted.</param>
+    /// <param name="cancellationToken">Cancels the OCSP, CRL and timestamp requests.</param>
+    /// <exception cref="PdfSignatureException">The PDF has no signatures, or fetching revocation data or the timestamp failed.</exception>
+    /// <exception cref="InvalidDataException">The file is not a readable PDF.</exception>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and the password does not open it.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    public static byte[] AddValidationData(byte[] pdf, PdfLtvOptions? options, string? password, CancellationToken cancellationToken)
+    {
+        if (pdf == null) throw new ArgumentNullException(nameof(pdf));
+        return LtvWriter.AddValidationData(pdf, options ?? new PdfLtvOptions(), password, cancellationToken);
+    }
+
+    /// <summary>
+    /// Adds the validation data asynchronously: the OCSP, CRL and timestamp requests are awaited instead of blocking a
+    /// thread. Otherwise the same as <see cref="AddValidationData(byte[], PdfLtvOptions?, string?)"/>.
+    /// </summary>
+    /// <param name="pdf">A signed PDF.</param>
+    /// <param name="options">Extra certificates, revocation data, and whether to fetch it. Default: store the chains only, offline.</param>
+    /// <param name="password">The user or owner password, when the PDF is encrypted.</param>
+    /// <param name="cancellationToken">Cancels the OCSP, CRL and timestamp requests.</param>
+    /// <exception cref="PdfSignatureException">The PDF has no signatures, or fetching revocation data or the timestamp failed.</exception>
+    /// <exception cref="InvalidDataException">The file is not a readable PDF.</exception>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and the password does not open it.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    public static Task<byte[]> AddValidationDataAsync(byte[] pdf, PdfLtvOptions? options = null, string? password = null, CancellationToken cancellationToken = default)
+    {
+        if (pdf == null) throw new ArgumentNullException(nameof(pdf));
+        return LtvWriter.AddValidationDataAsync(pdf, options ?? new PdfLtvOptions(), password, async: true, cancellationToken).AsTask();
     }
 
     /// <summary>Signs a PDF file and writes the signed copy to <paramref name="outputPath"/> (which may be the same path).</summary>

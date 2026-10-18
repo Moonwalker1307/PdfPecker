@@ -4,8 +4,8 @@ using System.Security.Cryptography.X509Certificates;
 namespace PdfPecker;
 
 /// <summary>
-/// What <see cref="PdfSigner.AddValidationData"/> stores so that signatures can still be verified after their
-/// certificates expire or their CA goes offline (long-term validation, PAdES B-LT and B-LTA).
+/// What <see cref="PdfSigner.AddValidationData(byte[], PdfLtvOptions?, string?)"/> stores so that signatures can still be
+/// verified after their certificates expire or their CA goes offline (long-term validation, PAdES B-LT and B-LTA).
 /// </summary>
 /// <remarks>
 /// Nothing goes over the network unless <see cref="FetchRevocationData"/> is true or <see cref="TimestampUrl"/> is set.
@@ -49,7 +49,8 @@ public sealed class PdfLtvOptions
     /// <summary>
     /// URL of an RFC 3161 timestamp server. When set, a document timestamp is added after the validation data, which
     /// seals it and the signatures with a trusted time (PAdES B-LTA). To make that timestamp long-term verifiable as
-    /// well, call <see cref="PdfSigner.AddValidationData"/> again later without a timestamp URL.
+    /// well, call <see cref="PdfSigner.AddValidationData(byte[], PdfLtvOptions?, string?)"/> again later without a
+    /// timestamp URL.
     /// </summary>
     public string? TimestampUrl { get; set; }
 

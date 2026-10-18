@@ -41,8 +41,20 @@ internal static class LtvWriter
         public readonly SortedSet<int> Certs = new(), Ocsps = new(), Crls = new();
     }
 
-    public static byte[] AddValidationData(byte[] pdf, PdfLtvOptions o, string? password)
+    /// <summary>
+    /// Adds the validation data synchronously. The task is already complete (see <see cref="AddValidationDataAsync"/>),
+    /// so reading its result does not block.
+    /// </summary>
+    public static byte[] AddValidationData(byte[] pdf, PdfLtvOptions o, string? password, CancellationToken cancellationToken)
+        => AddValidationDataAsync(pdf, o, password, async: false, cancellationToken).GetAwaiter().GetResult();
+
+    /// <summary>
+    /// Adds the validation data. With <paramref name="async"/> false every request is sent synchronously, so the
+    /// synchronous API can run the same code and read the result without blocking on a pending task.
+    /// </summary>
+    public static async ValueTask<byte[]> AddValidationDataAsync(byte[] pdf, PdfLtvOptions o, string? password, bool async, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var file = Open(pdf, password);
         var signatures = SignatureScanner.Find(file);
         if (signatures.Count == 0) throw new PdfSignatureException("The PDF has no signatures to add validation data for.");
@@ -77,7 +89,7 @@ internal static class LtvWriter
         var errors = new List<string>();
         var vris = new SortedDictionary<string, Vri>(StringComparer.Ordinal);
         var fetched = new Dictionary<string, (int Ocsp, int Crl)>(StringComparer.Ordinal);
-        using var fetcher = new RevocationFetcher(o.HttpClient, o.UrlFilter);
+        using var fetcher = new RevocationFetcher(o.HttpClient, o.UrlFilter, async, cancellationToken);
         foreach (var sig in signatures)
         {
             if (sig.Contents == null) continue;
@@ -122,12 +134,13 @@ internal static class LtvWriter
                     {
                         got = (-1, -1);
                         var certErrors = new List<string>();
-                        if (issuer != null && Revocation.FetchOcsp(cert, issuer, fetcher, certErrors) is { } ocsp)
+                        var ocsp = issuer != null ? await Revocation.FetchOcspAsync(cert, issuer, fetcher, certErrors).ConfigureAwait(false) : null;
+                        if (ocsp != null)
                         {
                             got.Ocsp = ocsps.Add(ocsp.Encoded);
                             foreach (var c in ocsp.Certificates) vri.Certs.Add(certs.Add(c));
                         }
-                        else if (Revocation.FetchCrl(cert, fetcher, certErrors) is { } crl) got.Crl = crls.Add(crl);
+                        else if (await Revocation.FetchCrlAsync(cert, fetcher, certErrors).ConfigureAwait(false) is { } crl) got.Crl = crls.Add(crl);
                         else errors.AddRange(certErrors);
                         fetched[cert.Thumbprint] = got;
                     }
@@ -141,7 +154,8 @@ internal static class LtvWriter
             throw new PdfSignatureException("Revocation data could not be fetched: " + string.Join(" ", errors.Distinct()));
 
         byte[] result = WriteDss(file, pdf, existingDss, certs, ocsps, crls, vris);
-        if (!string.IsNullOrEmpty(o.TimestampUrl)) result = AddDocumentTimestamp(result, o, password);
+        if (!string.IsNullOrEmpty(o.TimestampUrl))
+            result = await AddDocumentTimestampAsync(result, o, password, async, cancellationToken).ConfigureAwait(false);
         return result;
     }
 
@@ -318,23 +332,44 @@ internal static class LtvWriter
     /// Appends an invisible signature field holding an RFC 3161 document timestamp (/SubFilter /ETSI.RFC3161) over the
     /// whole file as it is now.
     /// </summary>
-    private static byte[] AddDocumentTimestamp(byte[] pdf, PdfLtvOptions o, string? password)
+    private static async ValueTask<byte[]> AddDocumentTimestampAsync(byte[] pdf, PdfLtvOptions o, string? password, bool async, CancellationToken cancellationToken)
     {
         Cms.HashOid(o.TimestampHashAlgorithm); // validate early
         var file = Open(pdf, password);
         int reserve = 16384;
         for (int attempt = 0; ; attempt++)
         {
-            var result = BuildDocumentTimestamp(file, pdf, o, reserve, out int needed);
-            if (result != null) return result;
+            cancellationToken.ThrowIfCancellationRequested();
+            var prepared = BuildDocumentTimestamp(file, pdf, o, reserve);
+            byte[] token = await TimestampClient.GetTokenForImprintAsync(o.TimestampUrl!, o.TimestampHttpClient, prepared.Imprint,
+                o.TimestampHashAlgorithm, async, cancellationToken).ConfigureAwait(false);
+            if (token.Length <= reserve) return prepared.Fill(token);
             if (attempt > 0) throw new PdfSignatureException("The document timestamp does not fit its reserved space.");
-            reserve = needed + 2048;
+            reserve = token.Length + 2048;
         }
     }
 
-    private static byte[]? BuildDocumentTimestamp(PdfFile file, byte[] pdf, PdfLtvOptions o, int reserve, out int needed)
+    /// <summary>The file with an empty /Contents hole, and the hash of everything around the hole.</summary>
+    private sealed class PreparedTimestamp(ByteBuffer output, int contentsStart, byte[] imprint)
     {
-        needed = 0;
+        public byte[] Imprint { get; } = imprint;
+
+        /// <summary>Writes <paramref name="token"/> as hex into the hole and returns the finished file.</summary>
+        public byte[] Fill(byte[] token)
+        {
+            const string hex = "0123456789ABCDEF";
+            byte[] buf = output.RawBuffer;
+            for (int i = 0; i < token.Length; i++)
+            {
+                buf[contentsStart + 1 + 2 * i] = (byte)hex[token[i] >> 4];
+                buf[contentsStart + 2 + 2 * i] = (byte)hex[token[i] & 15];
+            }
+            return output.Span.ToArray();
+        }
+    }
+
+    private static PreparedTimestamp BuildDocumentTimestamp(PdfFile file, byte[] pdf, PdfLtvOptions o, int reserve)
+    {
         var trailer = file.Trailer;
         var rootRef = trailer["Root"] as PdfRef ?? throw new PdfSignatureException("The PDF has no document catalog reference.");
         var catalog = file.Catalog!;
@@ -422,20 +457,7 @@ internal static class LtvWriter
         using var hash = IncrementalHash.CreateHash(o.TimestampHashAlgorithm);
         hash.AppendData(buf, 0, contentsStart);
         hash.AppendData(buf, contentsEnd, total - contentsEnd);
-        byte[] token = TimestampClient.GetTokenForImprintAsync(o.TimestampUrl!, o.TimestampHttpClient, hash.GetHashAndReset(), o.TimestampHashAlgorithm,
-            async: false, CancellationToken.None).GetAwaiter().GetResult();
-        if (token.Length > reserve)
-        {
-            needed = token.Length;
-            return null;
-        }
-        const string hex = "0123456789ABCDEF";
-        for (int i = 0; i < token.Length; i++)
-        {
-            buf[contentsStart + 1 + 2 * i] = (byte)hex[token[i] >> 4];
-            buf[contentsStart + 2 + 2 * i] = (byte)hex[token[i] & 15];
-        }
-        return output.Span.ToArray();
+        return new PreparedTimestamp(output, contentsStart, hash.GetHashAndReset());
     }
 
     private static (PdfRef Ref, PdfDict Dict)? FirstPage(PdfFile file, PdfObject? node, int depth)
