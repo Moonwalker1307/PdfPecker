@@ -9,6 +9,14 @@ internal static class PdfTestHelpers
 {
     public static string Latin1(byte[] pdf) => Encoding.Latin1.GetString(pdf);
 
+    /// <summary>
+    /// The PDF as text with every date blanked, for comparing two runs that may fall in different seconds. Dates appear
+    /// as literal strings and, in the VRI /TU entry of long-term validation data, as hex strings.
+    /// </summary>
+    public static string WithoutDates(byte[] pdf) =>
+        Regex.Replace(Regex.Replace(Latin1(pdf), @"D:\d{14}", "D:00000000000000"),
+            "(?i)443A(?:3[0-9]){14}", "443A3030303030303030303030303030");
+
     public static byte[] ConvertUncompressed(string html, PdfOptions? options = null)
     {
         options ??= new PdfOptions();

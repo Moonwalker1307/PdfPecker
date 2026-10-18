@@ -196,10 +196,11 @@ public class OverloadTests
 
         var ltv = new MemoryStream();
         PdfSigner.AddValidationData(In(signed), ltv);
-        Assert.Equal(PdfSigner.AddValidationData(signed), ltv.ToArray());
+        // Validation data records the time it was added, so separate runs are compared without their dates.
+        Assert.Equal(PdfTestHelpers.WithoutDates(PdfSigner.AddValidationData(signed)), PdfTestHelpers.WithoutDates(ltv.ToArray()));
         var ltvAsync = new MemoryStream();
         await PdfSigner.AddValidationDataAsync(In(signed), ltvAsync);
-        Assert.Equal(ltv.ToArray(), ltvAsync.ToArray());
+        Assert.Equal(PdfTestHelpers.WithoutDates(ltv.ToArray()), PdfTestHelpers.WithoutDates(ltvAsync.ToArray()));
     }
 
     [Fact]

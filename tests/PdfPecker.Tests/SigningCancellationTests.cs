@@ -231,8 +231,8 @@ public class SigningCancellationTests
     {
         var pdf = SignedPdf();
         var options = new PdfLtvOptions { Certificates = new[] { Ca.Value.Root } };
-        Assert.Equal(WithoutDates(PdfSigner.AddValidationData(pdf, options)), WithoutDates(await PdfSigner.AddValidationDataAsync(pdf, options)));
-        Assert.Equal(WithoutDates(PdfSigner.AddValidationData(pdf, options)), WithoutDates(PdfSigner.AddValidationData(pdf, options, null, CancellationToken.None)));
+        Assert.Equal(PdfTestHelpers.WithoutDates(PdfSigner.AddValidationData(pdf, options)), PdfTestHelpers.WithoutDates(await PdfSigner.AddValidationDataAsync(pdf, options)));
+        Assert.Equal(PdfTestHelpers.WithoutDates(PdfSigner.AddValidationData(pdf, options)), PdfTestHelpers.WithoutDates(PdfSigner.AddValidationData(pdf, options, null, CancellationToken.None)));
 
         var withTimestamp = await PdfSigner.AddValidationDataAsync(pdf, new PdfLtvOptions
         {
@@ -245,14 +245,4 @@ public class SigningCancellationTests
         Assert.True(all[1].IsDocumentTimestamp);
         Assert.All(all, s => Assert.True(s.Valid, string.Join("\n", s.Problems)));
     }
-
-    /// <summary>
-    /// Blanks the PDF dates (the VRI entries record when validation data was added), because two runs can fall on
-    /// either side of a second boundary. The replacement keeps the length, so the rest of the bytes still line up.
-    /// </summary>
-    // The VRI /TU time is written as a hex string, so a run that crosses a second boundary differs there too.
-    private static string WithoutDates(byte[] pdf) =>
-        System.Text.RegularExpressions.Regex.Replace(
-            System.Text.RegularExpressions.Regex.Replace(System.Text.Encoding.Latin1.GetString(pdf), @"D:\d{14}", "D:00000000000000"),
-            "(?i)443A(?:3[0-9]){14}", "443A3030303030303030303030303030");
 }
