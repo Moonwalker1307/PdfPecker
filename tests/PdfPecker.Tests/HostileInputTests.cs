@@ -273,6 +273,24 @@ public class HostileInputTests
         Assert.Contains("1 0 0 rg", text);
     }
 
+    [Theory]
+    // html, timeout-1f7d8566: a thousand blurred circles, each filter well within its own budget.
+    [InlineData("<svg width='760' height='760'><filter id='blur'><feGaussianBlur stdDeviation='4'/></filter>",
+        "<circle cx='160' cy='160' r='160' fill='#cc3333' filter='url(#blur)'/>", "</svg>")]
+    [InlineData("<body style='margin:0'>", "<div style='width:400px;height:300px;background:#cc3333;filter:blur(4px)'></div>", "</body>")]
+    public void Many_small_filters_share_one_work_budget(string before, string element, string after)
+    {
+        // Every filter renders its content through a page of its own and compresses its result, and each one here is
+        // well within its own budget, so the filters of the page ran for minutes before they shared one budget.
+        var pdf = Bounded(() => Bounded(before + Repeat(element, 2000) + after, new PdfOptions { Compress = false }));
+        AssertStructurallyValid(pdf);
+        var text = Latin1(pdf);
+        // The first filters run, each an image with an alpha mask; the elements after the document's budget is spent
+        // are drawn without them.
+        Assert.InRange(CountOf(text, "/Subtype /Image") / 2, 1, 1999);
+        Assert.Contains("0.8 0.2 0.2 rg", text);
+    }
+
     [Fact]
     public void Svg_morphology_with_a_wide_radius_runs_in_linear_time()
     {
@@ -308,6 +326,27 @@ public class HostileInputTests
         Bounded(() => MarkdownToHtml.ConvertDocument(Repeat(">", 200000) + " x"));
         // Ordinary nesting is untouched.
         Assert.Equal(3, CountOf(MarkdownToHtml.ConvertDocument("- a\n  - b\n    - c\n"), "<ul>"));
+    }
+
+    [Fact]
+    public void Markdown_autolinks_after_many_email_addresses_are_found_in_linear_time()
+    {
+        // The search for the next URL used to run to the end of the text again after every e-mail address.
+        const int n = 60000;
+        var html = Bounded(() => MarkdownToHtml.Convert(Repeat("a.b-c_d+e@f.gh ", n) + "www.example.com and x@y.z"));
+        Assert.Equal(n + 1, CountOf(html, "href=\"mailto:"));
+        Assert.Contains("<a href=\"http://www.example.com\">www.example.com</a> and <a href=\"mailto:x@y.z\">x@y.z</a>", html);
+    }
+
+    [Fact]
+    public void Markdown_links_after_many_unclosed_brackets_close_in_linear_time()
+    {
+        // Every link used to deactivate all the brackets before it again, though a link before it had done so already.
+        const int n = 100000;
+        var html = Bounded(() => MarkdownToHtml.Convert(Repeat("![ [ ", n) + Repeat("[a](/u) ", n) + "[b]](/v) ![c](/i)"));
+        Assert.Equal(n, CountOf(html, "<a href=\"/u\">a</a>"));
+        // The last "]" closes an inactive bracket, which stays literal, and the image after it is still an image.
+        Assert.Contains("<a href=\"/u\">a</a> [b]](/v) <img src=\"/i\" alt=\"c\" />", html);
     }
 
     private static int CountOf(string s, string part)
@@ -1320,6 +1359,219 @@ public class ImageMaskRecursionTests
         Assert.True(task.Wait(TimeSpan.FromSeconds(20)), "rendering the image did not finish in time");
         FixturePdf.AssertAt(task.Result, 2, 2, r, g, b);
         FixturePdf.AssertAt(task.Result, 6, 2, r, g, b);
+    }
+}
+
+/// <summary>
+/// Hostile GSUB and GPOS tables whose contextual lookups fan out within the nesting limit: a rule that applies its own
+/// lookup again from each of several records, or a lookup whose many subtables all share one set of many rules.
+/// </summary>
+[Collection(HostileInputCollection.Name)]
+public class LayoutLookupFanOutTests
+{
+    // Arabic words, which the complex shaper shapes with the font's GSUB and GPOS.
+    private static readonly string Text = string.Concat(Enumerable.Repeat("كمثرى بطيخ تفاح موز برتقال عنب ", 20));
+
+    // A rule applies its lookup again from this many records, nested eight deep: 8^8 applications per glyph.
+    private const int SelfApplications = 8;
+
+    // A lookup has this many subtables, all pointing to one subtable whose rule set has this many rules: as many
+    // squared rules tried per glyph. Both arrays of 16-bit offsets must stay within 64 KB of what they are offsets from.
+    private const int SharedCount = 30000;
+
+    private static T Bounded<T>(Func<T> work)
+    {
+        var task = Task.Run(work);
+        Assert.True(task.Wait(TimeSpan.FromSeconds(20)), "Did not finish in time");
+        return task.Result;
+    }
+
+    [Theory]
+    [InlineData("GSUB", false)]
+    [InlineData("GPOS", false)]
+    [InlineData("GSUB", true)]
+    [InlineData("GPOS", true)]
+    public void Contextual_lookups_that_fan_out_do_not_hang_shaping(string tag, bool sharedRules)
+    {
+        bool gpos = tag == "GPOS";
+        var original = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "NotoSansArabic-Subset.ttf"));
+        var font = WithTable(original, tag, LayoutTable(gpos, sharedRules));
+        var program = Assert.Single(FontProgram.Load(font));
+        foreach (bool rtl in new[] { true, false })
+        {
+            var glyphs = Bounded(() => Shape(program, rtl));
+            // The lookups substitute nothing: without GSUB every character keeps its glyph, and the font's own GSUB
+            // substitutes as it does without the hostile GPOS.
+            if (gpos) Assert.Equal(Shape(Assert.Single(FontProgram.Load(original)), rtl), glyphs);
+            else Assert.Equal(Text.Length, glyphs.Count);
+        }
+
+        var html = $"<style>@font-face{{font-family:f;src:url(data:font/ttf;base64,{Convert.ToBase64String(font)})}}</style>"
+            + $"<p style='font-family:f'>{Text}</p>";
+        AssertStructurallyValid(Bounded(() => HtmlToPdf.Convert(html)));
+    }
+
+    private static List<int> Shape(FontProgram font, bool rtl)
+    {
+        var output = new List<ShapedGlyph>();
+        ComplexShaper.Shape(font, Text, 0, Text.Length, rtl, output);
+        return output.Select(g => g.Gid).ToList();
+    }
+
+    private static byte[] WithTable(byte[] font, string tag, byte[] table)
+    {
+        var p = Assert.Single(FontProgram.Load(font));
+        var tables = p.Tables.Select(t => (t.Tag, t.Tag == FontProgram.Tag(tag) ? table : p.Data.AsSpan(t.Offset, t.Length).ToArray())).ToList();
+        return SfntBuilder.Build(0x00010000, tables);
+    }
+
+    /// <summary>
+    /// A GSUB or GPOS table whose DFLT script (which Arabic falls back to) has one feature the shaper applies to Arabic
+    /// with one contextual lookup: GSUB lookup type 5 or GPOS lookup type 7.
+    /// </summary>
+    private static byte[] LayoutTable(bool gpos, bool sharedRules)
+    {
+        var t = new List<byte>();
+        void U16(int v) { t.Add((byte)(v >> 8)); t.Add((byte)v); }
+        void Tag(string s) => t.AddRange(Encoding.ASCII.GetBytes(s));
+
+        // Header: version 1.0 and the script, feature and lookup lists at 10, 30 and 44.
+        U16(1); U16(0); U16(10); U16(30); U16(44);
+        // Script list: DFLT, its script table (a default language system right after it) and that language system,
+        // whose only feature is feature 0.
+        U16(1); Tag("DFLT"); U16(8);
+        U16(4); U16(0);
+        U16(0); U16(0xFFFF); U16(1); U16(0);
+        // Feature list: feature 0 has lookup 0.
+        U16(1); Tag(gpos ? "mark" : "ccmp"); U16(8);
+        U16(0); U16(1); U16(0);
+        // Lookup list: lookup 0 right after it, with no lookup flags.
+        U16(1); U16(4);
+        U16(gpos ? 7 : 5); U16(0);
+        if (!sharedRules)
+        {
+            // One subtable of format 3: one input glyph, covered whatever it is, and records that apply lookup 0 at it.
+            U16(1); U16(8); // one subtable, right after the lookup
+            U16(3); U16(1); U16(SelfApplications); U16(8 + SelfApplications * 4);
+            for (int r = 0; r < SelfApplications; r++) { U16(0); U16(0); }
+            CoverAll();
+        }
+        else
+        {
+            // Many subtables of format 2 that are all the same one: every glyph is of class 0, whose rule set holds
+            // many offsets of one rule that wants a glyph of class 1 next, which no glyph is.
+            U16(SharedCount);
+            int subtable = 6 + SharedCount * 2;
+            for (int s = 0; s < SharedCount; s++) U16(subtable);
+            int sub = t.Count;
+            U16(2); U16(10); U16(20); U16(1); U16(24); // format, coverage, class definitions, one rule set
+            CoverAll();
+            U16(2); U16(0); // class definitions of format 2 with no ranges
+            int set = t.Count - sub;
+            U16(SharedCount);
+            for (int r = 0; r < SharedCount; r++) U16(2 + SharedCount * 2);
+            U16(2); U16(0); U16(1); // two input glyphs, no records, the second of class 1
+            if (set != 24) throw new InvalidOperationException("The rule set is not where the subtable says.");
+        }
+        return t.ToArray();
+
+        // A coverage table of format 2 with one range of every glyph id.
+        void CoverAll() { U16(2); U16(1); U16(0); U16(0xFFFF); U16(0); }
+    }
+}
+
+/// <summary>
+/// Hostile GSUB tables whose multiple substitutions grow the glyph run: lookups that each expand every glyph into a
+/// long sequence, so that the second multiplies what the first made, and a long expanded run that a deletion then
+/// shrinks one glyph at a time.
+/// </summary>
+[Collection(HostileInputCollection.Name)]
+public class GlyphRunGrowthTests
+{
+    private static T Bounded<T>(Func<T> work)
+    {
+        var task = Task.Run(work);
+        Assert.True(task.Wait(TimeSpan.FromSeconds(20)), "Did not finish in time");
+        return task.Result;
+    }
+
+    [Theory]
+    // Two lookups that turn every glyph into 30,000: some billions of glyphs for a few words.
+    [InlineData(1, 30000, 30000, -1)]
+    // The same with 1,000, which the run has room for a few times.
+    [InlineData(1, 1000, 1000, -1)]
+    // One lookup that turns every glyph of a long text into 64, and one that deletes every glyph again.
+    [InlineData(100, 64, 0, 0)]
+    public void Multiple_substitutions_do_not_grow_the_run_without_bound(int repeat, int first, int second, int expected)
+    {
+        var text = string.Concat(Enumerable.Repeat("كمثرى بطيخ تفاح موز برتقال عنب ", repeat));
+        var original = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "NotoSansArabic-Subset.ttf"));
+        var program = Assert.Single(FontProgram.Load(original));
+        int glyph = program.GlyphId('ب');
+        var font = WithGsub(original, program.NumGlyphs, Enumerable.Repeat(glyph, first).ToArray(), Enumerable.Repeat(glyph, second).ToArray());
+        var hostile = Assert.Single(FontProgram.Load(font));
+        foreach (bool rtl in new[] { true, false })
+        {
+            var glyphs = Bounded(() =>
+            {
+                var output = new List<ShapedGlyph>();
+                ComplexShaper.Shape(hostile, text, 0, text.Length, rtl, output);
+                return output;
+            });
+            if (expected >= 0) Assert.Equal(expected, glyphs.Count);
+            else Assert.InRange(glyphs.Count, text.Length, OpenTypeLayout.MaxRunLength(text.Length));
+        }
+
+        var html = $"<style>@font-face{{font-family:f;src:url(data:font/ttf;base64,{Convert.ToBase64String(font)})}}</style>"
+            + $"<p style='font-family:f'>{text}</p>";
+        AssertStructurallyValid(Bounded(() => HtmlToPdf.Convert(html)));
+    }
+
+    // The font with a GSUB table whose DFLT script (which Arabic falls back to) has a ccmp feature with one multiple
+    // substitution per sequence, each replacing every glyph of the font with that sequence; an empty one deletes it.
+    private static byte[] WithGsub(byte[] font, int glyphs, params int[][] sequences)
+    {
+        var t = new List<byte>();
+        void U16(int v) { t.Add((byte)(v >> 8)); t.Add((byte)v); }
+        void Tag(string s) => t.AddRange(Encoding.ASCII.GetBytes(s));
+
+        int lookups = sequences.Length, lookupList = 42 + lookups * 2;
+        // Header: version 1.0 and the script, feature and lookup lists.
+        U16(1); U16(0); U16(10); U16(30); U16(lookupList);
+        // Script list: DFLT, its script table (a default language system right after it) and that language system,
+        // whose only feature is feature 0.
+        U16(1); Tag("DFLT"); U16(8);
+        U16(4); U16(0);
+        U16(0); U16(0xFFFF); U16(1); U16(0);
+        // Feature list: feature 0 has every lookup, in order.
+        U16(1); Tag("ccmp"); U16(8);
+        U16(0); U16(lookups);
+        for (int l = 0; l < lookups; l++) U16(l);
+        // Lookup list: the offsets of the lookups, then each lookup with its one subtable right after it.
+        U16(lookups);
+        int offsets = t.Count;
+        for (int l = 0; l < lookups; l++) U16(0);
+        foreach (var sequence in sequences)
+        {
+            int lookup = t.Count - lookupList;
+            if (lookup > 0xFFFF) throw new InvalidOperationException("The lookup is past the reach of its 16-bit offset.");
+            t[offsets] = (byte)(lookup >> 8);
+            t[offsets + 1] = (byte)lookup;
+            offsets += 2;
+            U16(2); U16(0); U16(1); U16(8);
+            // Format 1, the coverage after the sequence offsets, and one offset per glyph, all of the one sequence.
+            int coverage = 6 + glyphs * 2;
+            U16(1); U16(coverage); U16(glyphs);
+            for (int g = 0; g < glyphs; g++) U16(coverage + 10);
+            // A coverage table of format 2 with one range of every glyph, so that a glyph's coverage index is its id.
+            U16(2); U16(1); U16(0); U16(glyphs - 1); U16(0);
+            U16(sequence.Length);
+            foreach (int g in sequence) U16(g);
+        }
+
+        var p = Assert.Single(FontProgram.Load(font));
+        var tables = p.Tables.Select(x => (x.Tag, x.Tag == FontProgram.Tag("GSUB") ? t.ToArray() : p.Data.AsSpan(x.Offset, x.Length).ToArray())).ToList();
+        return SfntBuilder.Build(0x00010000, tables);
     }
 }
 

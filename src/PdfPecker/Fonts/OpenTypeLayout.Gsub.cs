@@ -66,6 +66,7 @@ internal sealed partial class OpenTypeLayout
             buf.RemoveAt(i); // a deletion
             return true;
         }
+        if (buf.Count - 1 > c.MaxLength - count) return false; // the run would grow past its limit
         var g = buf[i];
         bool ligature = (g.Props & Ligature) != 0;
         // Each glyph is read as it is inserted, so a sequence cut off by the end of the font leaves the glyphs before.
@@ -120,7 +121,7 @@ internal sealed partial class OpenTypeLayout
         int ligatures = SubstitutionSet(sub, c.Buf[i].Gid);
         if (ligatures < 0) return false;
         Span<int> positions = stackalloc int[MaxLigatureComponents];
-        for (int l = 0, count = _reader.U16(ligatures + ArrayCountField); l < count; l++)
+        for (int l = 0, count = _reader.U16(ligatures + ArrayCountField); l < count && Spend(c); l++)
         {
             int ligature = ligatures + _reader.U16(ligatures + ArrayEntriesField + l * 2);
             int components = _reader.U16(ligature + ComponentCountField);

@@ -124,7 +124,7 @@ internal sealed partial class OpenTypeLayout
     // Applies the first rule of the set that matches at i.
     private bool ApplyRuleSet(LookupState c, int set, bool chained, SequenceValues backtrack, SequenceValues input, SequenceValues lookahead, ref int i)
     {
-        for (int r = 0, count = _reader.U16(set + ArrayCountField); r < count; r++)
+        for (int r = 0, count = _reader.U16(set + ArrayCountField); r < count && Spend(c); r++)
         {
             int rule = set + _reader.U16(set + ArrayEntriesField + r * 2);
             if (chained ? ChainRule(c, rule, backtrack, input, lookahead, ref i) : Rule(c, rule, input, ref i)) return true;
@@ -246,7 +246,7 @@ internal sealed partial class OpenTypeLayout
         if (c.Depth < MaxNestingDepth)
         {
             int table = c.Gpos ? _gpos : _gsub;
-            for (int r = 0; r < records.Count; r++)
+            for (int r = 0; r < records.Count && Spend(c); r++)
             {
                 int record = records.Start + r * LookupRecordLength;
                 int sequenceIndex = _reader.U16(record + RecordSequenceIndexField), lookupIndex = _reader.U16(record + RecordLookupIndexField);

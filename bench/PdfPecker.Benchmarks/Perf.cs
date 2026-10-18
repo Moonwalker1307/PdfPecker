@@ -108,6 +108,12 @@ static class Perf
         var markdown = MarkdownDocument(Path.Combine(htmlDir, "guide.md"));
         results.Add(Measure("parse-markdown", () => new BlockParser(gfm: true).Parse(markdown), runs: 100));
 
+        // The Markdown inline parser: paragraphs dense with emphasis, strikethrough, code spans, inline and reference
+        // links, images, autolinks, raw HTML, entities, escapes, hard breaks, GFM bare URLs and e-mail addresses, and
+        // delimiters and brackets that stay literal, so that inline parsing dominates.
+        var inlineMarkdown = InlineMarkdownDocument();
+        results.Add(Measure("parse-markdown-inlines", () => new BlockParser(gfm: true).Parse(inlineMarkdown), runs: 50));
+
         // Box painting: a generated page of boxes with every border style, rounded corners, outer and inset shadows with
         // blur and spread, gradient and image backgrounds with each size and repeat, border images, outlines, text
         // decorations and a few transformed, translucent and clipped boxes, laid out and written as a PDF.
@@ -156,6 +162,12 @@ static class Perf
         // ".5.5"), parsed into paths with the quadratics and arcs turned into cubics.
         var pathData = SvgPathData();
         results.Add(Measure("parse-svg-paths", () => { foreach (var d in pathData) PdfPecker.Svg.PathParser.Parse(d); }, runs: 100));
+
+        // Damaged files: the PDFs of parse-pdf without their "startxref" pointers, so the object table is rebuilt from a
+        // scan of the file for object headers and trailers, and without their "endstream" keywords, so the end of every
+        // stream is found through the keyword index instead of its /Length. One run opens each and decodes every stream.
+        var damagedInputs = DamagedInputs(parseInputs);
+        results.Add(Measure("recover-pdf", () => { foreach (var (data, password) in damagedInputs) OpenAndDecodeAll(data, password); }, runs: 60));
 
         // Throughput with every core busy; documents per second is the figure, so higher is better.
         var options = new PdfOptions { BaseDirectory = htmlDir };
@@ -509,6 +521,26 @@ static class Perf
         return sb.ToString();
     }
 
+    // About 300 KB of inline-heavy Markdown, the same on every run: four hundred paragraphs that each use every kind of inline.
+    static string InlineMarkdownDocument()
+    {
+        var sb = new StringBuilder();
+        sb.Append("[docs]: https://example.com/docs \"Documentation\"\n[api]: <https://example.com/api> 'API'\n[Ref Label]: /ref (Title)\n\n");
+        for (int s = 1; s <= 400; s++)
+        {
+            sb.Append("Lorem *ipsum* dolor **sit** amet, ***consectetur*** _adipiscing_ __elit__, sed *do **eiusmod** tempor* incididunt ")
+              .Append("~~ut~~ labore et `dolore` magna ``aliqua ` with`` a tick, see [the docs] and [the api][api] or [ref label][], ")
+              .Append("an [inline link](https://example.com/").Append(s).Append(" \"Title ").Append(s).Append("\") and ![an image](img/").Append(s)
+              .Append(".png 'alt').  \n")
+              .Append("A hard break above, <https://example.org/a?b=").Append(s).Append("> and <user").Append(s).Append("@example.com>, ")
+              .Append("raw <span class=\"x\">html</span> and <!-- a comment -->, entities &amp; &copy; &#169; &#x1F600; &nope; and escapes \\* \\_ \\[ \\`.\\\n")
+              .Append("Bare www.example.com/path?q=").Append(s).Append(", https://example.net/x_(y)). and mail ").Append("first.last+").Append(s)
+              .Append("@mail.example.org. Unmatched * and _ and ** and [ and ] and ![ and ` here, a*b*c, snake_case_name, 2*3*4.\n")
+              .Append("Nested [link *with **strong** text* and `code`](/u (t)) and [not a link] (x) and [x](<a b> \"q\").\n\n");
+        }
+        return sb.ToString();
+    }
+
     static void ParseFontTables(byte[] data)
     {
         foreach (var font in FontProgram.Load(data))
@@ -631,6 +663,18 @@ static class Perf
             (generated, null),
             (PdfProtector.Encrypt(generated, security), "user"),
         ];
+    }
+
+    // Each input twice: with its "startxref" pointers and with its "endstream" keywords overwritten by spaces.
+    static (byte[] Data, string? Password)[] DamagedInputs((byte[] Data, string? Password)[] inputs)
+        => inputs.SelectMany(input => new[] { (Blank(input.Data, "startxref"u8), input.Password), (Blank(input.Data, "endstream"u8), input.Password) }).ToArray();
+
+    static byte[] Blank(byte[] data, ReadOnlySpan<byte> keyword)
+    {
+        var copy = (byte[])data.Clone();
+        var rest = copy.AsSpan();
+        for (int at; (at = rest.IndexOf(keyword)) >= 0; rest = rest.Slice(at + keyword.Length)) rest.Slice(at, keyword.Length).Fill((byte)' ');
+        return copy;
     }
 
     // Image streams are left encoded, as the renderer does until it needs their pixels.

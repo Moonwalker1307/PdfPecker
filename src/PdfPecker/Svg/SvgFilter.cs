@@ -447,10 +447,37 @@ internal sealed partial class SvgFilter
     internal const long MaxWork = 500_000_000;
     internal const int MaxPrimitives = 256;
 
+    /// <summary>
+    /// The most work the filters of one document may start, in the same pixel operations, counting the rendering of
+    /// each one's content and the encoding of its result. Each filter stays within <see cref="MaxWork"/>, but a page of
+    /// a thousand small ones would still take many seconds; once the document's filters have spent this, about a
+    /// second's work, the rest are left out in the same way.
+    /// </summary>
+    internal const long MaxDocumentWork = 250_000_000;
+
+    // Rendering a filter's content to pixels and compressing its result cost more per pixel than most primitives, because
+    // the content is written as a page of its own, parsed and rendered, and the result is deflated twice. Each filter
+    // also has a fixed cost, whatever its size, of about a fifth of a millisecond.
+    private const long RenderWorkPerPixel = 32, WorkPerFilter = 65_536;
+
     /// <summary>Whether running the filter on w × h pixels stays within <see cref="MaxWork"/>.</summary>
-    public bool WithinBudget(int w, int h)
+    public bool WithinBudget(int w, int h) => Primitives.Count <= MaxPrimitives && PrimitiveWork(w, h) <= MaxWork;
+
+    /// <summary>
+    /// The work of the whole filter on w × h pixels, for the document's budget: its primitives, rendering its content
+    /// and the shapes of its feImage primitives, and encoding its result. Only for a filter within its own budget.
+    /// </summary>
+    public long DocumentWork(int w, int h)
     {
-        if (Primitives.Count > MaxPrimitives) return false;
+        long pixels = (long)w * h + 256, renders = 1;
+        foreach (var p in Primitives)
+            if (p.Kind == Kind.Image && p.Shapes is { Count: > 0 }) renders++;
+        return PrimitiveWork(w, h) + pixels * RenderWorkPerPixel * renders + WorkPerFilter;
+    }
+
+    /// <summary>The work of the primitives on w × h pixels, up to the first sum beyond <see cref="MaxWork"/>.</summary>
+    private long PrimitiveWork(int w, int h)
+    {
         // A fixed part per primitive covers the work that does not grow with the pixels.
         long pixels = (long)w * h + 256, work = 0;
         foreach (var p in Primitives)
@@ -465,9 +492,10 @@ internal sealed partial class SvgFilter
                 _ => 2,
             };
             work += pixels * perPixel;
-            if (work > MaxWork) return false;
+            // Stopping here keeps the sum from overflowing on a document's huge kernels or octaves.
+            if (work > MaxWork) break;
         }
-        return true;
+        return work;
     }
 
     /// <summary>The image in the wanted colour space (a copy when it changes).</summary>
@@ -676,18 +704,31 @@ internal sealed partial class SvgFilter
         foreach (var (before, after) in BoxPasses(sigma)) { Box(a, tmp, w, h, before, after, horizontal); (a, tmp) = (tmp, a); }
     }
 
+    private const int BoxStripValues = 64; // sixteen pixels, four cache lines of floats
+
     /// <summary>
     /// One box blur of RGBA pixels along every row or every column, the lines in parallel, each pixel the average of
     /// those from <paramref name="before"/> before it to <paramref name="after"/> after it.
     /// </summary>
     private static void Box(float[] src, float[] dst, int w, int h, int before, int after, bool horizontal)
     {
-        int lines = horizontal ? h : w, len = horizontal ? w : h;
-        int step = horizontal ? 4 : w * 4;
-        System.Threading.Tasks.Parallel.For(0, lines, line =>
+        if (horizontal)
         {
-            Span<double> sums = stackalloc double[4];
-            BoxLine(src, dst, horizontal ? line * w * 4 : line * 4, step, len, before, after, sums);
+            System.Threading.Tasks.Parallel.For(0, h, line =>
+            {
+                Span<double> sums = stackalloc double[4];
+                BoxLine(src, dst, line * w * 4, 4, w, before, after, sums);
+            });
+            return;
+        }
+        // The columns go down in strips of several pixels, so that each step down reads a run of memory rather than one
+        // pixel of a row, which made the vertical pass several times slower than the horizontal one on wide images.
+        int values = w * 4, strips = (values + BoxStripValues - 1) / BoxStripValues;
+        System.Threading.Tasks.Parallel.For(0, strips, strip =>
+        {
+            int origin = strip * BoxStripValues;
+            Span<double> sums = stackalloc double[BoxStripValues];
+            BoxLine(src, dst, origin, values, h, before, after, sums[..Math.Min(BoxStripValues, values - origin)]);
         });
     }
 
