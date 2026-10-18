@@ -286,5 +286,17 @@ internal sealed partial class Jbig2Decoder
                 Position++;
             }
         }
+
+        /// <summary>
+        /// Starts an arithmetic decoder on the next <paramref name="size"/> bytes and moves past them. A Huffman-coded
+        /// symbol dictionary or text region carries each refinement bitmap this way, after its size and a byte boundary.
+        /// </summary>
+        public MqDecoder TakeArithmeticData(int size)
+        {
+            size = Math.Max(0, size);
+            var mq = new MqDecoder(_data, Position, Math.Min(End, Position + size));
+            Position += size;
+            return mq;
+        }
     }
 }

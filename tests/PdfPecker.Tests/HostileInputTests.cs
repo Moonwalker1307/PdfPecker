@@ -7,6 +7,7 @@ using PdfPecker.Html;
 using PdfPecker.Images;
 using PdfPecker.Rendering.Fonts;
 using PdfPecker.Rendering.Graphics;
+using PdfPecker.Rendering.Images;
 using static PdfPecker.Tests.PdfTestHelpers;
 
 namespace PdfPecker.Tests;
@@ -1963,6 +1964,88 @@ public class ComplexScriptShapingHostileTests
             return glyphs.Count;
         }).WaitAsync(TimeSpan.FromSeconds(20));
         Assert.InRange(count, 1, OpenTypeLayout.MaxRunLength(text.Length));
+    }
+}
+
+[Collection(HostileInputCollection.Name)]
+public class Jbig2SymbolDictionaryTests
+{
+    // jbig2, found while rewriting the decoder (fuzzer framing: width, height, globals length, then the stream): a
+    // Huffman-coded symbol dictionary with refinement and aggregation whose aggregated symbol has a refined instance. The
+    // instance's refinement data was looked for without the segment data, which threw NullReferenceException.
+    private const string RefinedAggregateInstance =
+        "DAAAAEUAAAAAAAAAAAAAADAAAQAAABMAAAAMAAAARQAAAAAAAAAAAAAAAAAAAQAAAQAAACsAAAP//f8C/v7+AAAAAwAAAAM/ufCwlT++P9GDL6HHQuAFta053fvzn/+sAAAAAgAgAQEAAABTDAMA///+AAAAAgAAAAJL3SEep7kOo9ORLSZnpZEG+MJAfXdQ1M9H+txZHUbZ1MvZkE3+jv7/sg+W1gsNkQooo1AhYfO++wlR1qzdtYWMt1hajhQAAAADBCABAQAAACUAAAAVAAAAHf////0AAAAQA0dXe4D/AQABAAAAB7OzAvXkmuZc";
+
+    private static T Bounded<T>(Func<T> work)
+    {
+        var task = Task.Run(work);
+        Assert.True(task.Wait(TimeSpan.FromSeconds(20)), "Did not finish in time");
+        return task.Result;
+    }
+
+    [Fact]
+    public void Refined_instance_of_a_huffman_aggregate_with_damaged_data_fails_cleanly()
+    {
+        var input = Convert.FromBase64String(RefinedAggregateInstance);
+        int width = BitConverter.ToInt32(input, 0), height = BitConverter.ToInt32(input, 4);
+        Assert.Equal(0, BitConverter.ToInt32(input, 8));
+        var ex = Record.Exception(() => Bounded(() => Jbig2Decoder.Decode(input[12..], null, width, height)));
+        Assert.Null(ex);
+    }
+
+    [Fact]
+    public void Refined_instance_of_a_huffman_aggregate_renders_through_pdf_to_image()
+    {
+        var input = Convert.FromBase64String(RefinedAggregateInstance);
+        int width = BitConverter.ToInt32(input, 0), height = BitConverter.ToInt32(input, 4);
+        var damaged = JpxJbig2Tests.BuildPdf(width, height, $"<< /Type /XObject /Subtype /Image /Width {width} /Height {height} " +
+            "/ColorSpace /DeviceGray /BitsPerComponent 1 /Filter /JBIG2Decode", input[12..], null);
+        Assert.NotEmpty(Bounded(() => PdfToImage.ConvertPage(damaged, 0, new ImageOptions { Dpi = 72 })));
+
+        // The same kind of dictionary written as the standard says decodes to the symbol it describes.
+        var valid = JpxJbig2Tests.BuildPdf(16, 8, "<< /Type /XObject /Subtype /Image /Width 16 /Height 8 " +
+            "/ColorSpace /DeviceGray /BitsPerComponent 1 /Filter /JBIG2Decode", JpxJbig2Tests.HuffmanAggregateWithRefinedInstance(), null);
+        Assert.NotEmpty(PdfToImage.ConvertPage(valid, 0, new ImageOptions { Dpi = 72 }));
+        var img = PdfRenderer.Open(valid).RenderPage(0, new ImageOptions { Dpi = 72 });
+        Assert.Equal((16, 8), (img.Width, img.Height));
+        for (int y = 0; y < 8; y++)
+        for (int x = 0; x < 16; x++)
+            Assert.True(JpxJbig2Tests.HuffmanAggregatePixel(x, y) == img.Rgba[(y * 16 + x) * 4] < 128, $"Pixel {x},{y}");
+    }
+
+    [Fact]
+    public void Refined_symbols_do_not_copy_the_symbol_list()
+    {
+        // A dictionary of 65,536 empty symbols, then one with refinement and aggregation whose 16,384 new symbols each
+        // refine one of them. Every new symbol used to copy the list of all symbols before it, 26 GB in all, which the
+        // work budget did not count.
+        const int inputCount = 1 << 16, newCount = 1 << 14, codeLength = 17;
+        var input = new Jbig2TestStreams.Bits().Huffman(Jbig2TestStreams.B4, 1);
+        for (int i = 0; i < inputCount; i++) input.Huffman(Jbig2TestStreams.B2, 0);
+        input.Oob(Jbig2TestStreams.B2).Huffman(Jbig2TestStreams.B1, 0).Align()
+            .Huffman(Jbig2TestStreams.B1, 0).Huffman(Jbig2TestStreams.B1, inputCount);
+        var refined = new Jbig2TestStreams.Bits().Huffman(Jbig2TestStreams.B4, 1);
+        for (int i = 0; i < newCount; i++)
+        {
+            refined.Huffman(Jbig2TestStreams.B2, 0).Huffman(Jbig2TestStreams.B1, 1).Write(i, codeLength)
+                .Huffman(Jbig2TestStreams.B15, 0).Huffman(Jbig2TestStreams.B15, 0).Huffman(Jbig2TestStreams.B1, 0).Align();
+        }
+        refined.Oob(Jbig2TestStreams.B2).Huffman(Jbig2TestStreams.B1, inputCount + newCount);
+        var stream = Jbig2TestStreams.Segment(1, Jbig2TestStreams.SymbolDictionary, Array.Empty<int>(),
+                Jbig2TestStreams.U16(0x0001).Concat(Jbig2TestStreams.U32(inputCount)).Concat(Jbig2TestStreams.U32(inputCount))
+                    .Concat(input.ToArray()).ToArray())
+            .Concat(Jbig2TestStreams.Segment(2, Jbig2TestStreams.SymbolDictionary, new[] { 1 },
+                Jbig2TestStreams.U16(0x1003).Concat(Jbig2TestStreams.U32(0)).Concat(Jbig2TestStreams.U32(newCount))
+                    .Concat(refined.ToArray()).ToArray()))
+            .ToArray();
+
+        long allocated = Bounded(() =>
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            Jbig2Decoder.Decode(stream, null, 16, 16);
+            return GC.GetAllocatedBytesForCurrentThread() - before;
+        });
+        Assert.True(allocated < 32 << 20, $"Allocated {allocated:N0} bytes");
     }
 }
 
