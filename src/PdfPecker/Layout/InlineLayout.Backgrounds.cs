@@ -31,8 +31,26 @@ internal sealed partial class LayoutEngine
         public int Count, Seen;
     }
 
+    /// <summary>
+    /// How deep inline boxes may be nested and still paint their decorations. Each line paints a fragment for every
+    /// box open on it, so deep nesting multiplies the work by the depth; templates never come close.
+    /// </summary>
+    internal const int MaxInlineDecoDepth = 16;
+
+    /// <summary>How many inline box fragments one layout paints; inline boxes on later lines go unpainted.</summary>
+    internal const int MaxInlineFragments = 50_000;
+
+    /// <summary>
+    /// The work the backgrounds, shadows and outlines of one layout's inline fragments may spend: one unit for each
+    /// background layer and outline, four for each shadow (drawn in bands when blurred), and one for each draw op that
+    /// background-clip: text searches for the fragment's text. Past it, fragments paint only their background colour.
+    /// </summary>
+    internal const long MaxInlinePaintWork = 100_000;
+
     // The fragments of the paragraph being placed; null until a line has one.
     private List<InlineFragment>? _inlineFragments;
+    private int _inlineFragmentCount;
+    private long _inlinePaintWork;
     private readonly List<DecoRun> _decoRuns = new();
     private readonly List<(InlineDeco Deco, int Start)> _openDecos = new();
 
@@ -50,6 +68,8 @@ internal sealed partial class LayoutEngine
         int first = fragments.Count;
         foreach (var run in runs)
         {
+            if (run.Deco.Depth >= MaxInlineDecoDepth || _inlineFragmentCount >= MaxInlineFragments) continue;
+            _inlineFragmentCount++;
             var s = run.Deco.Style;
             var it = items[run.Start];
             s.Font.LineMetrics(s.FontSize, out float asc, out float desc);
@@ -64,7 +84,7 @@ internal sealed partial class LayoutEngine
                 Group = group, Ops = _ops,
             });
         }
-        return first;
+        return fragments.Count > first ? first : -1;
     }
 
     /// <summary>
@@ -88,8 +108,10 @@ internal sealed partial class LayoutEngine
                 runs.Add(new DecoRun(open[^1].Deco, open[^1].Start, k));
                 open.RemoveAt(open.Count - 1);
             }
+            // The boxes from the common one inward, outermost first: added innermost first, then turned round.
             int at = open.Count;
-            for (var d = it.Deco; d != null && !ReferenceEquals(d, common); d = d.Parent) open.Insert(at, (d, k));
+            for (var d = it.Deco; d != null && !ReferenceEquals(d, common); d = d.Parent) open.Add((d, k));
+            open.Reverse(at, open.Count - at);
             current = it.Deco;
         }
         for (int o = open.Count - 1; o >= 0; o--) runs.Add(new DecoRun(open[o].Deco, open[o].Start, items.Count));
@@ -161,11 +183,22 @@ internal sealed partial class LayoutEngine
             left = s.Rtl ? last : first;
             right = s.Rtl ? first : last;
         }
-        var radii = BoxPainter.FragmentRadii(s, boxW, f.H, f.W, f.H, left, right);
         var group = f.Group;
+        bool clipsToText = BoxPainter.ClipsToText(s);
+        long work = (s.BackgroundImages?.Length ?? 0) + 4 * (s.BoxShadows?.Length ?? 0)
+            + (s.OutlineStyle != BorderStyle.None ? 1 : 0) + (clipsToText ? f.TextTo - f.TextFrom : 0);
+        if (work > 0 && _inlinePaintWork >= MaxInlinePaintWork)
+        {
+            // Past the budget only the colour is painted, as a plain rectangle in the fragment.
+            if (!clipsToText && CssColor.IsVisible(s.BackgroundColor))
+                group.Ops.Add(new RectOp(f.X, f.Y, f.W, f.H, CssColor.Fade(s.BackgroundColor, s.InlineFade)));
+            return;
+        }
+        _inlinePaintWork += work;
+        var radii = BoxPainter.FragmentRadii(s, boxW, f.H, f.W, f.H, left, right);
         if (s.BoxShadows != null) BoxPainter.PaintShadows(group, s, f.X, f.Y, f.W, f.H, radii);
         BoxPainter.PaintFragment(group, s, boxX, f.Y, boxW, f.H, (f.X, f.Y, f.W, f.H), radii, _images, s.InlineFade);
-        if (BoxPainter.ClipsToText(s)) ClipBackgroundToText(group, f.Ops, f.TextFrom, f.TextTo, f.X, f.X + f.W);
+        if (clipsToText) ClipBackgroundToText(group, f.Ops, f.TextFrom, f.TextTo, f.X, f.X + f.W);
         if (s.OutlineStyle != BorderStyle.None) BoxPainter.PaintOutline(group, s, f.X, f.Y, f.W, f.H, radii);
     }
 }

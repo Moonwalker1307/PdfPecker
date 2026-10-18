@@ -416,6 +416,30 @@ public class HostileInputTests
             + "<div style=\"width:20px;height:20px;background:red;clip-path:path('M0 0 L10 0 L10 10 z,1')\"></div>"));
     }
 
+    [Theory]
+    // Every line paints a fragment for each decorated inline box open on it, so deep nesting multiplied the work by
+    // depth times lines: the first of these ran out of memory, and background-clip: text copied the line's text into
+    // every fragment.
+    [InlineData("background:linear-gradient(red,blue);border-radius:3px;box-shadow:0 0 2px #000;outline:1px solid red", 50_000)]
+    [InlineData("background:linear-gradient(red,blue);background-clip:text;color:transparent", 20_000)]
+    [InlineData("box-shadow:0 0 2px #000", 20_000)]
+    [InlineData("background:linear-gradient(red,blue)", 20_000)]
+    public void Deeply_nested_decorated_inline_boxes_stay_bounded(string style, int words)
+    {
+        string html = "<p>" + Repeat($"<span style=\"{style}\">", 250) + Repeat("word ", words) + Repeat("</span>", 250) + "</p>";
+        var pdf = Bounded(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.True(pdf.Length < 16 << 20, $"{pdf.Length} bytes");
+    }
+
+    [Fact]
+    public void Inline_boxes_inside_the_depth_limit_still_paint_their_backgrounds()
+    {
+        string html = "<p>" + Repeat("<span style=\"background:#00ff00\">", 15) + "word</span></p>";
+        var text = Latin1(Bounded(html, new PdfOptions { Compress = false }));
+        Assert.Contains("0 1 0 rg", text);
+    }
+
     [Fact]
     public void Svg_filter_work_is_bounded()
     {
