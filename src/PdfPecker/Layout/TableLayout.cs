@@ -37,6 +37,8 @@ internal sealed partial class LayoutEngine
         public int HeadCount; // leading rows that come from <thead>
         public int FootCount; // trailing rows that come from <tfoot>
         public float FootReserve; // per layout pass: room the footer repeated at the bottom of each page takes, or 0
+        public bool MayMoveTable; // per layout pass: the whole table may start on the next page instead of its first row
+        public float? TableMove;  // set when it should: how far the first row missed fitting on the page
         public bool Rtl;      // direction: rtl, so the first column is on the right
         public float[] ColMin = Array.Empty<float>(), ColMax = Array.Empty<float>();
         public float[] ColFixed = Array.Empty<float>(), ColPct = Array.Empty<float>();
@@ -384,36 +386,57 @@ internal sealed partial class LayoutEngine
             if (!tableBox.Varies) pageColumns = null;
         }
 
-        foreach (var caption in m.Captions)
+        int startOps = _ops.Count;
+        float startY = y;
+        float tableTop, cy;
+        float? tableH;
+        GroupOp tableGroup;
+        // As in Chrome, when the first row does not fit on the page, the table starts on the next page with its
+        // header, rather than leaving the header (and the footer) behind on their own.
+        m.MayMoveTable = _paginate && !AtPageTop(startY);
+        while (true)
         {
-            float cmt = caption.Style.MarginTop.Resolve(boxW);
-            y = LayoutBlockBox(caption, bx, y + cmt, boxW, shrinkToFit: false) + caption.Style.MarginBottom.Resolve(boxW);
-        }
+            foreach (var caption in m.Captions)
+            {
+                float cmt = caption.Style.MarginTop.Resolve(boxW);
+                y = LayoutBlockBox(caption, bx, y + cmt, boxW, shrinkToFit: false) + caption.Style.MarginBottom.Resolve(boxW);
+            }
 
-        float tableTop = y;
-        var tableGroup = new GroupOp();
-        _ops.Add(tableGroup);
-        float cy = y + frameT + (m.Rows.Count > 0 ? vs : 0);
+            tableTop = y;
+            tableGroup = new GroupOp();
+            _ops.Add(tableGroup);
+            cy = y + frameT + (m.Rows.Count > 0 ? vs : 0);
 
-        m.RowExtra = null;
-        float? tableH = TableHeight(s, boxW, frameH, frameT + frameB, cbH);
-        m.DefiniteHeight = HeightOf(s.Height, cbH) != null;
-        // Inside rows that are only measured, a table is as tall without sharing out its height over its rows (it is
-        // at least that height either way), so it is not laid out twice for that: with tables nested in each other,
-        // each level would double the work.
-        if (tableH is float th && m.Rows.Count > 0 && _measuringRows == 0)
-            m.RowExtra = RowExtras(m, th - frameT - frameB - vs, colX, widths, hs, vs, collapse);
-        // A caption comes before the rows, and the probe is not handed to it. In columns that are being balanced, the
-        // breaks of the rows that the probe would skip count for the balancing even when the layout is thrown away.
-        m.FootReserve = FootReserve(m, cy, colX, widths, hs, vs, collapse);
-        _rowProbe = m.Captions.Count == 0 && _columnNotes == null ? probe : null;
-        for (int r = 0; r < m.Rows.Count; r++)
-        {
-            cy = LayoutRow(m, r, cy, colX, widths, hs, vs, collapse, allowMove: true, pageColumns) + vs;
-            // The first content is past the chain's page: the chain moves and lays the table out again, so the rest of
-            // this layout would be thrown away.
-            if (probe is { Stopped: true }) break;
+            m.RowExtra = null;
+            tableH = TableHeight(s, boxW, frameH, frameT + frameB, cbH);
+            m.DefiniteHeight = HeightOf(s.Height, cbH) != null;
+            // Inside rows that are only measured, a table is as tall without sharing out its height over its rows (it
+            // is at least that height either way), so it is not laid out twice for that: with tables nested in each
+            // other, each level would double the work.
+            if (tableH is float th && m.Rows.Count > 0 && _measuringRows == 0)
+                m.RowExtra = RowExtras(m, th - frameT - frameB - vs, colX, widths, hs, vs, collapse);
+            // A caption comes before the rows, and the probe is not handed to it. In columns that are being balanced,
+            // the breaks of the rows that the probe would skip count for the balancing even when the layout is thrown
+            // away.
+            m.FootReserve = FootReserve(m, cy, colX, widths, hs, vs, collapse);
+            _rowProbe = m.Captions.Count == 0 && _columnNotes == null ? probe : null;
+            m.TableMove = null;
+            for (int r = 0; r < m.Rows.Count; r++)
+            {
+                cy = LayoutRow(m, r, cy, colX, widths, hs, vs, collapse, allowMove: true, pageColumns) + vs;
+                // The first content is past the chain's page: the chain moves and lays the table out again, so the rest
+                // of this layout would be thrown away.
+                if (probe is { Stopped: true } || m.TableMove != null) break;
+            }
+            if (m.TableMove is not float shortage) break;
+            Truncate(startOps);
+            m.MayMoveTable = false;
+            _columnNotes?.Break(PageOf(startY), startY, shortage);
+            y = NextPage(startY);
+            if (table.Id != null) SetAnchor(table.Id, y);
+            if (table.LayoutKey != null) SetAnchor(table.LayoutKey, y);
         }
+        m.MayMoveTable = false;
         _rowProbe = outerProbe;
         m.RowExtra = null;
         m.FootReserve = 0;
@@ -653,6 +676,12 @@ internal sealed partial class LayoutEngine
                 // so the table is laid out in full.
                 _rowProbe = null;
                 Truncate(rowStartOps);
+                if (move && r == m.HeadCount && m.MayMoveTable)
+                {
+                    // The first row does not fit: the whole table moves (see LayoutTable).
+                    m.TableMove = rowBottom + reserve - FlowEnd(PageOf(rowTop));
+                    return rowTop;
+                }
                 if (move)
                 {
                     _columnNotes?.Break(PageOf(rowTop), rowTop, rowBottom - FlowEnd(PageOf(rowTop)));
