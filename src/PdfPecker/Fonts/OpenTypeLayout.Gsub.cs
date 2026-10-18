@@ -66,6 +66,12 @@ internal sealed partial class OpenTypeLayout
             buf.RemoveAt(i); // a deletion
             return true;
         }
+        if (count == 1)
+        {
+            Replace(c, i, _reader.U16(sequence + ArrayEntriesField));
+            i++;
+            return true;
+        }
         if (buf.Count - 1 > c.MaxLength - count) return false; // the run would grow past its limit
         var g = buf[i];
         bool ligature = (g.Props & Ligature) != 0;
@@ -75,9 +81,12 @@ internal sealed partial class OpenTypeLayout
             var ng = g;
             ng.Gid = _reader.U16(sequence + ArrayEntriesField + k * 2);
             ng.Props = Props(ng.Gid, g.Props);
+            ng.Substitutions |= Substituted | Multiplied;
             if (k > 0) ng.Length = 0;
-            // The glyphs of a decomposed ligature become its components, as HarfBuzz numbers them.
-            if (ligature && count > 1) ng.LigComp = k + 1;
+            // The glyphs of a decomposed ligature become its components, and those of any other glyph not attached to
+            // a ligature are numbered too, so that marks attach to the first of them.
+            if (ligature) ng.LigComp = k + 1;
+            else if (g.LigId == 0) ng.LigComp = k;
             if (k == 0) buf[i] = ng;
             else buf.Insert(i + k, ng);
         }
@@ -109,6 +118,7 @@ internal sealed partial class OpenTypeLayout
         var g = buf[i];
         g.Gid = glyph;
         g.Props = Props(glyph, g.Props);
+        g.Substitutions |= Substituted;
         buf[i] = g;
     }
 
@@ -141,8 +151,9 @@ internal sealed partial class OpenTypeLayout
         positions[0] = i;
         for (int k = 1; k < positions.Length; k++)
         {
-            int j = NextMatch(c, positions[k - 1]);
-            if (j < 0 || (buf[j].Mask & c.LookupMask) == 0 || buf[j].Gid != _reader.U16(ligature + ComponentsField + (k - 1) * 2)) return false;
+            int component = _reader.U16(ligature + ComponentsField + (k - 1) * 2);
+            int j = NextMatch(c, positions[k - 1], component, SequenceValues.GlyphIds);
+            if (j < 0 || (buf[j].Mask & c.LookupMask) == 0 || buf[j].Gid != component) return false;
             positions[k] = j;
         }
         return true;
@@ -187,6 +198,7 @@ internal sealed partial class OpenTypeLayout
         lig.LigId = ligId;
         lig.LigComp = 0;
         lig.LigComps = compsBefore;
+        lig.Substitutions = (byte)((first.Substitutions | Substituted | Ligated) & ~Multiplied);
         int start = pos[0], stop = pos[^1];
         buf.RemoveRange(start, stop - start + 1);
         buf.Insert(start, lig);

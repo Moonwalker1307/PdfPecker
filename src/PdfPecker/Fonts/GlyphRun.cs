@@ -82,6 +82,16 @@ internal sealed class GlyphRun
         return range;
     }
 
+    /// <summary>
+    /// The glyphs as one span, for changes that keep their number, such as reordering them. Inserting or removing
+    /// glyphs makes the span stale.
+    /// </summary>
+    public Span<GlyphInfo> AsSpan()
+    {
+        MoveGap(Count, 0);
+        return _items.AsSpan(0, _gapStart);
+    }
+
     /// <summary>Removes the glyphs that match, keeping the order of the others, and returns how many it removed.</summary>
     public int RemoveAll(Predicate<GlyphInfo> match)
     {

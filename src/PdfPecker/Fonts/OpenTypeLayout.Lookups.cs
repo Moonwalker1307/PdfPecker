@@ -1,3 +1,5 @@
+using PdfPecker.Text;
+
 namespace PdfPecker.Fonts;
 
 // Running a lookup over the glyphs: its flags, which glyphs it skips, its subtables, and the coverage tables they share.
@@ -47,6 +49,14 @@ internal sealed partial class OpenTypeLayout
         public bool Rtl;
         public uint LookupMask;
         public int LookupFlag;
+        public bool PerSyllable;
+
+        /// <summary>Whether the lookup's features leave the joiners to the font's rules instead of skipping them.</summary>
+        public bool ManualJoiners;
+
+        /// <summary>The syllable of the glyph the lookup is applied at when it may not match across syllables, or 0.</summary>
+        public byte Syllable;
+
         public int Depth;
         public int NextLigId = 1;
 
@@ -85,9 +95,12 @@ internal sealed partial class OpenTypeLayout
     /// <summary>
     /// Applies one lookup over the whole run, to the glyphs that have one of the mask bits, taking its steps from
     /// <paramref name="operations"/>, which <see cref="OperationBudget"/> starts for the shaping call, and making the
-    /// run no longer than <paramref name="maxLength"/> (see <see cref="MaxRunLength"/>).
+    /// run no longer than <paramref name="maxLength"/> (see <see cref="MaxRunLength"/>). A lookup applied per syllable
+    /// matches only glyphs of the syllable of the glyph it starts at (see <see cref="GlyphInfo.Syllable"/>). With
+    /// <paramref name="manualJoiners"/>, GSUB rules match zero-width joiners in their input only where they name them.
     /// </summary>
-    public void ApplyLookup(GlyphRun buf, bool gpos, int lookupIndex, uint mask, bool rtl, ref int nextLigId, ref int operations, int maxLength)
+    public void ApplyLookup(GlyphRun buf, bool gpos, int lookupIndex, uint mask, bool rtl, ref int nextLigId, ref int operations, int maxLength,
+        bool perSyllable = false, bool manualJoiners = false)
     {
         int table = gpos ? _gpos : _gsub;
         if (table < 0 || operations <= 0) return;
@@ -98,6 +111,9 @@ internal sealed partial class OpenTypeLayout
         c.Gpos = gpos;
         c.Rtl = rtl;
         c.LookupMask = mask;
+        c.PerSyllable = perSyllable;
+        c.ManualJoiners = manualJoiners;
+        c.Syllable = 0;
         c.Depth = 0;
         c.NextLigId = nextLigId;
         c.Operations = operations;
@@ -123,7 +139,11 @@ internal sealed partial class OpenTypeLayout
     {
         var buf = c.Buf;
         for (int i = buf.Count - 1; i >= 0 && c.Operations > 0; i--)
-            if ((buf[i].Mask & c.LookupMask) != 0 && Matches(c, buf[i])) ApplySubtables(c, lookup, ref i, reverse: true);
+            if ((buf[i].Mask & c.LookupMask) != 0 && Matches(c, buf[i]))
+            {
+                c.Syllable = c.PerSyllable ? buf[i].Syllable : (byte)0;
+                ApplySubtables(c, lookup, ref i, reverse: true);
+            }
     }
 
     private void ApplyForwards(LookupState c, int lookup)
@@ -134,6 +154,7 @@ internal sealed partial class OpenTypeLayout
         {
             if ((buf[i].Mask & c.LookupMask) != 0 && Matches(c, buf[i]))
             {
+                c.Syllable = c.PerSyllable ? buf[i].Syllable : (byte)0;
                 int at = i, count = buf.Count;
                 // A deletion leaves i on the next glyph; everything else moves past what it consumed.
                 if (ApplySubtables(c, lookup, ref i, reverse: false))
@@ -199,23 +220,60 @@ internal sealed partial class OpenTypeLayout
         return CoverageIndex(coverage, gid) >= 0;
     }
 
-    // The next glyph after i that the lookup does not skip, or -1.
-    private int NextMatch(LookupState c, int i)
+    // The next glyph after i that the lookup does not skip, or -1. A glyph of another syllable ends a lookup applied
+    // per syllable, as HarfBuzz matches it. A joiner or other invisible control that may be skipped (see MaySkip) is
+    // skipped unless it is the value the rule expects next; context is true for backtrack and lookahead glyphs.
+    private int NextMatch(LookupState c, int i, int value = NoValue, SequenceValues values = default, bool context = false)
     {
         var buf = c.Buf;
         for (int j = i + 1; j < buf.Count && Spend(c); j++)
-            if (Matches(c, buf[j])) return j;
+            if (Matches(c, buf[j]))
+            {
+                if (!MaySkip(c, buf[j], context)) return InSyllable(c, buf[j]) ? j : -1;
+                if (ExpectedHere(c, buf[j], value, values, context)) return j;
+            }
         return -1;
     }
 
     // The glyph before i that the lookup does not skip, or -1.
-    private int PreviousMatch(LookupState c, int i)
+    private int PreviousMatch(LookupState c, int i, int value = NoValue, SequenceValues values = default, bool context = false)
     {
         var buf = c.Buf;
         for (int j = i - 1; j >= 0 && Spend(c); j--)
-            if (Matches(c, buf[j])) return j;
+            if (Matches(c, buf[j]))
+            {
+                if (!MaySkip(c, buf[j], context)) return InSyllable(c, buf[j]) ? j : -1;
+                if (ExpectedHere(c, buf[j], value, values, context)) return j;
+            }
         return -1;
     }
+
+    private const int NoValue = -1;
+
+    private static bool InSyllable(LookupState c, in GlyphInfo g) => c.Syllable == 0 || g.Syllable == c.Syllable;
+
+    /// <summary>
+    /// Whether an invisible control may be skipped, as HarfBuzz's skipping iterator decides it. A zero-width joiner is
+    /// skipped unless the lookup's features handle joiners themselves, except in the context around the input. A
+    /// non-joiner is skipped in GPOS, and in GSUB only in the context and when the features do not handle it. The
+    /// grapheme joiner, Mongolian variation selectors and tags are skipped only in GPOS.
+    /// </summary>
+    private static bool MaySkip(LookupState c, in GlyphInfo g, bool context)
+    {
+        int cp = g.CodePoint;
+        if (cp < 0xAD || !UnicodeTables.IsDefaultIgnorable(cp) || (g.Substitutions & Substituted) != 0) return false;
+        return cp switch
+        {
+            0x200C => c.Gpos || (context && !c.ManualJoiners),
+            0x200D => context || !c.ManualJoiners,
+            0x034F or (>= 0x180B and <= 0x180D) or 0x180F or (>= 0xE0020 and <= 0xE007F) => c.Gpos,
+            _ => true,
+        };
+    }
+
+    // Whether a glyph that may be skipped is the one the rule expects next, in which case it matches.
+    private bool ExpectedHere(LookupState c, in GlyphInfo g, int value, SequenceValues values, bool context)
+        => value != NoValue && InSyllable(c, g) && (context || (g.Mask & c.LookupMask) != 0) && ValueMatches(g.Gid, value, values);
 
     // The coverage index of a glyph in the coverage table a subtable's coverage field points to.
     private int CoverageOf(int subtable, int gid) => CoverageIndex(subtable + _reader.U16(subtable + CoverageField), gid);

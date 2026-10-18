@@ -161,11 +161,22 @@ internal static partial class UnicodeTables
         28, 29, 30, 31, 32, 33, 27, 34, 35, // 27-35 Arabic
     ];
 
-    /// <summary>The combining class that marks are ordered by before shaping.</summary>
+    /// <summary>
+    /// The combining class that marks are ordered by before shaping. Besides the Hebrew and Arabic classes, HarfBuzz
+    /// moves the Telugu length marks before the other marks, and Thai Sara U and Sara Uu before Phinthu, as Uniscribe
+    /// orders them.
+    /// </summary>
     public static int ModifiedCombiningClass(int cp)
     {
         int c = CombiningClass(cp);
-        return c is >= 10 and <= 35 ? ModifiedClasses[c - 10] : c;
+        return c switch
+        {
+            >= 10 and <= 35 => ModifiedClasses[c - 10],
+            84 => 4,   // Telugu length mark
+            91 => 5,   // Telugu ai length mark
+            103 => 3,  // Thai Sara U and Sara Uu
+            _ => c,
+        };
     }
 
     /// <summary>The canonical decomposition of a Hebrew or Arabic letter (second is 0 for one character), or false.</summary>

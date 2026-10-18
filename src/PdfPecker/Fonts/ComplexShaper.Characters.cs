@@ -16,14 +16,36 @@ internal static partial class ComplexShaper
     // front (see MoveModifierMarks).
     private const int CombiningClassBelow = 220, CombiningClassAbove = 230;
 
-    private static void AddText(FontProgram font, OpenTypeLayout? layout, GlyphRun run, string s, int start, int length, bool rtl)
+    // Adds the glyphs of the text. Indic text is decomposed wherever the font has the parts (decomposeFirst), as
+    // HarfBuzz normalizes it, so that split vowel signs and nukta letters reach the font in pieces; other text only
+    // where the font lacks the character.
+    private static void AddText(FontProgram font, OpenTypeLayout? layout, GlyphRun run, string s, int start, int length, bool rtl,
+        bool decomposeFirst)
     {
         for (int i = start, end = start + length; i < end;)
         {
             var (cp, units) = CodePointAt(s, i, end);
-            AddCharacter(font, layout, run, cp, i, units, rtl, depth: 0);
+            if (!decomposeFirst || !TryAddIndicDecomposition(font, layout, run, cp, i, units, depth: 0))
+                AddCharacter(font, layout, run, cp, i, units, rtl, depth: 0);
             i += units;
         }
+    }
+
+    /// <summary>
+    /// Adds the glyphs of an Indic character's decomposition when the font has its last part and its first part, or the
+    /// first part's own decomposition. The parts after the first take no characters of the text. Returns false, having
+    /// added nothing, otherwise.
+    /// </summary>
+    private static bool TryAddIndicDecomposition(FontProgram font, OpenTypeLayout? layout, GlyphRun run, int cp, int cluster, int length, int depth)
+    {
+        if (depth >= MaxDecompositionDepth || !DecomposeIndic(cp, out int first, out int second) || font.GlyphId(second) == 0) return false;
+        if (!TryAddIndicDecomposition(font, layout, run, first, cluster, length, depth + 1))
+        {
+            if (font.GlyphId(first) == 0) return false;
+            AddCharacter(font, layout, run, first, cluster, length, rtl: false, depth + 1);
+        }
+        AddCharacter(font, layout, run, second, cluster, 0, rtl: false, depth + 1);
+        return true;
     }
 
     // The character at an index and how many UTF-16 units it takes; an unpaired surrogate stands for itself.
@@ -79,6 +101,11 @@ internal static partial class ComplexShaper
         for (int i = 0; i + 1 < run.Count; i++)
         {
             var letter = run[i];
+            if (letter.CodePoint < ComposedFirst && UnicodeTables.CombiningClass(letter.CodePoint) == 0)
+            {
+                ComposeCanonically(font, layout, run, i);
+                continue;
+            }
             if (letter.CodePoint is < ComposedFirst or > ComposedLast || IsMark(letter.Props)) continue;
             while (i + 1 < run.Count && UnicodeTables.Compose(letter.CodePoint, run[i + 1].CodePoint) is var composed and not 0
                 && font.GlyphId(composed) is var gid and not 0)
@@ -92,6 +119,44 @@ internal static partial class ComplexShaper
                 run.RemoveAt(i + 1);
             }
         }
+    }
+
+    /// <summary>
+    /// Composes a letter before the Arabic block (Latin, Greek, Cyrillic, ...) with the combining marks after it, as
+    /// Unicode normalization composes them and HarfBuzz does when the font has the precomposed letter: each mark in
+    /// turn, unless a mark of the same or a higher class that stays separate comes between them.
+    /// </summary>
+    private static void ComposeCanonically(FontProgram font, OpenTypeLayout? layout, GlyphRun run, int i)
+    {
+        var letter = run[i];
+        int lastClass = 0;
+        for (int j = i + 1; j < run.Count;)
+        {
+            var mark = run[j];
+            int combiningClass = UnicodeTables.CombiningClass(mark.CodePoint);
+            if (combiningClass == 0) return;
+            if (lastClass < combiningClass && ComposePair(letter.CodePoint, mark.CodePoint) is var composed and not 0
+                && font.GlyphId(composed) is var gid and not 0)
+            {
+                letter.CodePoint = composed;
+                letter.Gid = gid;
+                letter.Props = layout is { HasGlyphClasses: true } ? layout.GlyphProps(gid) : OpenTypeLayout.Base;
+                letter.Length = Math.Max(letter.Cluster + letter.Length, mark.Cluster + mark.Length) - letter.Cluster;
+                run[i] = letter;
+                run.RemoveAt(j);
+                continue;
+            }
+            lastClass = combiningClass;
+            j++;
+        }
+    }
+
+    // The character a letter and a combining mark compose to under Unicode normalization, or 0.
+    private static int ComposePair(int letter, int mark)
+    {
+        string composed = string.Concat(char.ConvertFromUtf32(letter), char.ConvertFromUtf32(mark)).Normalize(System.Text.NormalizationForm.FormC);
+        return char.IsSurrogatePair(composed, 0) && composed.Length == 2 ? char.ConvertToUtf32(composed, 0)
+            : composed.Length == 1 ? composed[0] : 0;
     }
 
     private static int CombiningClass(GlyphRun run, int index) => UnicodeTables.ModifiedCombiningClass(run[index].CodePoint);
