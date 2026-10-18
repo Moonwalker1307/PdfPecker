@@ -30,7 +30,8 @@ dotnet test -c Release --no-build
 dotnet test -f net10.0 --filter "FullyQualifiedName~MarkdownTests"   # one class, one runtime
 ```
 
-If you only have one runtime installed, pass `-f net10.0` (or the one you have).
+If you only have one runtime installed, pass `-f net10.0` (or the one you have). [BUILD.md](BUILD.md) and
+[TESTING.md](TESTING.md) have the details, and [AGENTS.md](AGENTS.md) the full set of rules the project works by.
 
 Things that will fail the build or CI:
 
