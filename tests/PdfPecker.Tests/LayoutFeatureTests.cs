@@ -3,6 +3,7 @@ using PdfPecker.Css;
 using PdfPecker.Html;
 using PdfPecker.Images;
 using PdfPecker.Layout;
+using PdfPecker.Pdf;
 using PdfPecker.Svg;
 using static PdfPecker.Tests.PdfTestHelpers;
 
@@ -432,6 +433,263 @@ public class LayoutFeatureTests
             </div></body>
             """);
         Assert.Equal(1, PageCount(pdf));
+    }
+
+    // ---- Percentage heights (the expected boxes were measured in Chromium's PDF output of the same HTML) ----
+
+    private static RectOp Rect(string html, string color, float pageHeight = PageHeight)
+        => Box(Layout("<style>body { margin: 0 }</style>" + html, pageHeight: pageHeight), color);
+
+    private static void NearBox(RectOp r, float x, float y, float w, float h)
+    {
+        Near(x, r.X);
+        Near(y, r.Y);
+        Near(w, r.W);
+        Near(h, r.H);
+    }
+
+    [Fact]
+    public void Percentage_height_through_html_and_body_fills_the_page()
+    {
+        var ops = Layout("""
+            <style>html, body { height: 100%; margin: 0 } .cover { height: 100%; background: #ff0000 }
+            .after { height: 40pt; background: #0000ff }</style>
+            <div class="cover">Cover</div><div class="after"></div>
+            """);
+        NearBox(Box(ops, "#ff0000"), 0, 0, 500, 800);
+        NearBox(Box(ops, "#0000ff"), 0, 800, 500, 40); // the next box starts the second page
+    }
+
+    [Fact]
+    public void Percentage_chain_halves_at_every_level()
+    {
+        var ops = Layout("""
+            <style>html, body { height: 100%; margin: 0 } .w { height: 50%; background: #888888 }
+            .c { height: 50%; background: #ff0000 } .m { min-height: 10%; background: #0000ff }</style>
+            <div class="w"><div class="c"></div><div class="m"></div></div>
+            """);
+        NearBox(Box(ops, "#888888"), 0, 0, 500, 400);
+        NearBox(Box(ops, "#ff0000"), 0, 0, 500, 200);
+        NearBox(Box(ops, "#0000ff"), 0, 200, 500, 40);
+    }
+
+    [Fact]
+    public void Percentage_heights_in_a_fixed_height_card_resolve_against_its_content_box()
+    {
+        var html = """
+            <style>.card { height: 200pt; width: 200pt; border: 6pt solid #000000; padding: 10pt; background: #888888 }
+            .a { height: 50%; background: #ff0000 } .b { height: 25%; margin-top: 10pt; background: #0000ff }
+            .c { height: calc(25% - 20pt); background: #00ff00 }
+            .d { height: 50%; box-sizing: border-box; padding: 10pt; background: #ffff00 }</style>
+            <div class="card"><div class="a"></div><div class="b"></div><div class="c"></div></div>
+            <div class="card"><div class="d"></div></div>
+            """;
+        NearBox(Rect(html, "#ff0000"), 16, 16, 200, 100);
+        NearBox(Rect(html, "#0000ff"), 16, 126, 200, 50);
+        NearBox(Rect(html, "#00ff00"), 16, 176, 200, 30);
+        NearBox(Rect(html, "#ffff00"), 16, 248, 200, 100); // border-box: the padding is inside the 50%
+    }
+
+    [Fact]
+    public void Percentage_heights_against_an_auto_height_behave_as_auto()
+    {
+        var html = """
+            <style>.p { background: #888888 } .a { height: 50%; background: #ff0000 } .b { min-height: 50%; background: #0000ff }
+            .c { max-height: 10%; background: #00ff00 }</style>
+            <div class="p"><div class="a">a</div><div class="b">b</div><div class="c">c<br>c<br>c</div></div>
+            """;
+        float line = Rect(html, "#ff0000").H;
+        Assert.True(line is > 5 and < 20, $"one line: {line}");
+        Near(line, Rect(html, "#0000ff").H);
+        Near(3 * line, Rect(html, "#00ff00").H, 0.5f);
+    }
+
+    [Fact]
+    public void Sidebar_with_height_100_percent_in_a_fixed_height_flex_row()
+    {
+        var html = """
+            <style>.row { display: flex; height: 200pt; background: #888888 } .side { width: 80pt; height: 100%; background: #ff0000 }
+            .side .in { height: 50%; background: #0000ff } .main { flex: 1; background: #00ff00 }
+            .main .m { height: 40%; background: #ffff00 } .top { width: 60pt; height: 30%; align-self: flex-start; background: #ff00ff }</style>
+            <div class="row"><div class="side"><div class="in"></div></div><div class="main"><div class="m"></div></div><div class="top"></div></div>
+            """;
+        NearBox(Rect(html, "#ff0000"), 0, 0, 80, 200);
+        NearBox(Rect(html, "#0000ff"), 0, 0, 80, 100);
+        NearBox(Rect(html, "#ffff00"), 80, 0, 360, 80); // a stretched item's height is definite
+        NearBox(Rect(html, "#ff00ff"), 440, 0, 60, 60);
+    }
+
+    [Fact]
+    public void Stretched_flex_item_of_an_auto_height_row_is_definite()
+    {
+        var html = """
+            <style>.row { display: flex } .t { width: 50pt; height: 100pt; background: #ff0000 }
+            .q { width: 50pt; background: #00ff00 } .q .in { height: 50%; background: #ffff00 }</style>
+            <div class="row"><div class="t"></div><div class="q"><div class="in"></div></div></div>
+            """;
+        NearBox(Rect(html, "#ffff00"), 50, 0, 50, 50);
+    }
+
+    [Fact]
+    public void Grown_item_of_a_fixed_height_flex_column_is_definite()
+    {
+        var html = """
+            <style>.col { display: flex; flex-direction: column; height: 200pt; width: 200pt } .top { height: 25%; background: #ff0000 }
+            .grow { flex: 1; background: #0000ff } .grow .in { height: 50%; width: 50pt; background: #ffff00 }</style>
+            <div class="col"><div class="top"></div><div class="grow"><div class="in"></div></div></div>
+            """;
+        NearBox(Rect(html, "#ff0000"), 0, 0, 200, 50);
+        NearBox(Rect(html, "#ffff00"), 0, 50, 50, 75);
+        // With only a min-height the container's height is not definite, and neither is the grown item's.
+        var minOnly = html.Replace("height: 200pt; width", "min-height: 200pt; width", StringComparison.Ordinal).Replace("top { height: 25%", "top { height: 50pt", StringComparison.Ordinal);
+        var grown = Rect(minOnly, "#0000ff");
+        NearBox(grown, 0, 50, 200, 150);
+        Assert.True(CssColor.TryParse("#ffff00", 0, out var yellow));
+        Assert.DoesNotContain(Flatten(Layout("<style>body { margin: 0 }</style>" + minOnly)).OfType<RectOp>(), r => r.Color == yellow && r.H > 0.01f);
+    }
+
+    [Fact]
+    public void Image_with_a_percentage_height_in_a_fixed_height_flex_row_takes_its_width_from_that_height()
+    {
+        var ops = Layout("""
+            <style>body { margin: 0 } .row { display: flex; height: 150pt } .row div { width: 60pt; background: #00ff00 } svg { height: 100% }</style>
+            <div class="row"><div></div><svg viewBox="0 0 2 1"><rect width="2" height="1" fill="#f00"/></svg></div>
+            """);
+        var svg = Flatten(ops).OfType<SvgOp>().Single();
+        Near(60, svg.X);
+        Near(0, svg.Y);
+        Near(300, svg.W);
+        Near(150, svg.H);
+    }
+
+    [Fact]
+    public void App_shell_of_flex_columns_and_rows_fills_the_page()
+    {
+        var ops = Layout("""
+            <style>html, body { height: 100%; margin: 0 } .app { display: flex; flex-direction: column; height: 100% }
+            header { height: 40pt; background: #ff0000 } main { flex: 1; display: flex } nav { width: 80pt; background: #0000ff }
+            nav .in { height: 50%; background: #00ff00 } .content { flex: 1 } .content .in { height: 100%; width: 50pt; background: #ffff00 }</style>
+            <div class="app"><header></header><main><nav><div class="in"></div></nav><div class="content"><div class="in"></div></div></main></div>
+            """);
+        NearBox(Box(ops, "#0000ff"), 0, 40, 80, 760);
+        NearBox(Box(ops, "#00ff00"), 0, 40, 80, 380);
+        NearBox(Box(ops, "#ffff00"), 80, 40, 50, 760);
+    }
+
+    [Fact]
+    public void Stretched_grid_item_is_definite_and_one_aligned_to_the_start_is_not()
+    {
+        var html = """
+            <style>.g { display: grid; height: 200pt; grid-template-rows: 1fr 1fr; grid-template-columns: 100pt 100pt }
+            .i1 { background: #ff0000 } .i1 .in { height: 50%; background: #0000ff } .i2 { height: 50%; background: #00ff00 }
+            .i3 { align-self: start; background: #ff00ff } .i3 .in { height: 50%; background: #ffff00 }</style>
+            <div class="g"><div class="i1"><div class="in"></div></div><div class="i2"></div><div class="i3">t<div class="in"></div></div></div>
+            """;
+        NearBox(Rect(html, "#0000ff"), 0, 0, 100, 50);
+        NearBox(Rect(html, "#00ff00"), 100, 0, 100, 50); // the item's own percentage refers to its grid area
+        var ops = Layout("<style>body { margin: 0 }</style>" + html);
+        Assert.True(CssColor.TryParse("#ffff00", 0, out var yellow));
+        Assert.DoesNotContain(Flatten(ops).OfType<RectOp>(), r => r.Color == yellow && r.H > 0.01f);
+    }
+
+    [Fact]
+    public void Absolutely_positioned_boxes_resolve_against_the_padding_box()
+    {
+        var html = """
+            <style>.rel { position: relative; height: 200pt; width: 300pt; padding: 10pt }
+            .x { position: absolute; left: 0; top: 0; width: 50pt; height: 50%; background: #ff0000 }
+            .y { position: absolute; left: 100pt; top: 0; bottom: 0; width: 50pt; background: #0000ff } .y .in { height: 50%; background: #ffff00 }
+            .z { position: absolute; left: 200pt; top: 10pt; width: 50pt; min-height: 30%; max-height: 20%; background: #00ff00 }</style>
+            <div class="rel"><div class="x"></div><div class="y"><div class="in"></div></div><div class="z"></div></div>
+            """;
+        NearBox(Rect(html, "#ff0000"), 0, 0, 50, 110);
+        NearBox(Rect(html, "#0000ff"), 100, 0, 50, 220);
+        NearBox(Rect(html, "#ffff00"), 100, 0, 50, 110);
+        NearBox(Rect(html, "#00ff00"), 200, 10, 50, 66); // min-height wins over max-height
+    }
+
+    [Fact]
+    public void Aspect_ratio_with_a_percentage_height_and_as_the_source_of_a_definite_height()
+    {
+        var html = """
+            <style>.box { height: 200pt } .a { height: 50%; aspect-ratio: 2; background: #ff0000 }
+            .r { width: 200pt; aspect-ratio: 2; background: #0000ff } .r .in { height: 50%; width: 50pt; background: #ffff00 }</style>
+            <div class="box"><div class="a"></div></div><div class="r"><div class="in"></div></div>
+            """;
+        NearBox(Rect(html, "#ff0000"), 0, 0, 200, 100);
+        NearBox(Rect(html, "#ffff00"), 0, 200, 50, 50);
+    }
+
+    [Fact]
+    public void Images_inline_blocks_and_floats_resolve_against_their_containing_block()
+    {
+        var ops = Layout("""
+            <style>body { margin: 0 } .box { height: 150pt } svg { height: 100%; display: block }
+            .fl { float: right; width: 40pt; height: 30%; background: #00ff00 }
+            .w { height: 100pt } .ib { display: inline-block; width: 40pt; height: 50%; background: #0000ff }</style>
+            <div class="box"><div class="fl"></div><svg viewBox="0 0 2 1"><rect width="2" height="1" fill="#f00"/></svg></div>
+            <div class="w">x<span class="ib"></span></div>
+            """);
+        var svg = Flatten(ops).OfType<SvgOp>().Single();
+        Near(150, svg.H);
+        Near(300, svg.W);
+        NearBox(Box(ops, "#00ff00"), 460, 0, 40, 45);
+        Near(50, Box(ops, "#0000ff").H);
+    }
+
+    [Fact]
+    public void Table_cells_are_definite_only_with_a_fixed_height_or_a_table_height()
+    {
+        // The table is 50% of its 200pt container. The first cell's child fills the row (100pt), not just the cell's
+        // own 60pt; the second cell's child is half the row because the table's height is definite.
+        var html = """
+            <style>.w { height: 200pt } table { height: 50%; border-spacing: 0; background: #888888 } td { padding: 0; width: 100pt }
+            .in { height: 100%; width: 30pt; background: #0000ff } .in2 { height: 50%; width: 30pt; background: #ffff00 }</style>
+            <div class="w"><table><tr><td style="height: 60pt"><div class="in"></div></td><td><div class="in2">x</div></td></tr></table></div>
+            """;
+        NearBox(Rect(html, "#888888"), 0, 0, 200, 100);
+        NearBox(Rect(html, "#0000ff"), 0, 0, 30, 100);
+        NearBox(Rect(html, "#ffff00"), 100, 25, 30, 50); // vertically centred in the row
+        // A row's height alone does not make its cells definite.
+        var rowOnly = Layout("""
+            <style>body { margin: 0 } table { border-spacing: 0 } td { padding: 0; width: 60pt }</style>
+            <table><tr style="height: 80pt"><td><div style="height: 50%; background: #ff0000"></div></td><td>a</td></tr></table>
+            """);
+        Assert.True(CssColor.TryParse("#ff0000", 0, out var red));
+        Assert.DoesNotContain(Flatten(rowOnly).OfType<RectOp>(), r => r.Color == red && r.H > 0.01f);
+    }
+
+    [Fact]
+    public void Tall_percentage_box_breaks_across_pages_and_its_children_resolve_against_it()
+    {
+        var ops = Layout("""
+            <style>html, body { height: 100%; margin: 0 } .tall { height: 250%; width: 100pt; background: #ff0000 }
+            .q { height: 20%; width: 50pt; background: #0000ff } .after { height: 30pt; background: #00ff00 }</style>
+            <div class="tall"><div class="q"></div></div><div class="after"></div>
+            """, pageHeight: 260);
+        NearBox(Box(ops, "#ff0000"), 0, 0, 100, 650);
+        NearBox(Box(ops, "#0000ff"), 0, 0, 50, 130);
+        NearBox(Box(ops, "#00ff00"), 0, 650, 500, 30);
+    }
+
+    [Fact]
+    public void Percentages_of_the_page_area_resolve_against_the_page_each_box_starts_on()
+    {
+        // The first page's flow is 200pt tall, the others 260pt, as with @page :first { margin: 50pt }. A box resolves
+        // the chain up to the page area against the page it starts on, so a box that starts on page 2 gets its height.
+        var doc = HtmlParser.Parse("""
+            <style>html, body { height: 100%; margin: 0 } .a { height: 100%; background: #ff0000 } .b { height: 50%; background: #0000ff }</style>
+            <div class="a"></div><div class="b"></div>
+            """);
+        var sheet = new Stylesheet();
+        foreach (var style in Find(doc, "style")) CssParser.ParseStylesheet(style.InnerText(), sheet);
+        new StyleResolver(sheet, 300, 200).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
+        var first = new PageSetup { Width = 400, Height = 300, MarginTop = 50, MarginBottom = 50, MarginLeft = 50, MarginRight = 50 };
+        var other = new PageSetup { Width = 400, Height = 300, MarginTop = 20, MarginBottom = 20, MarginLeft = 50, MarginRight = 50 };
+        var engine = new LayoutEngine(new PageGrid(first, other, other), new ImageLoader(null, null, false));
+        engine.Layout(doc, 300);
+        NearBox(Box(engine.Ops, "#ff0000"), 0, 0, 300, 200);
+        NearBox(Box(engine.Ops, "#0000ff"), 0, 200, 300, 130);
     }
 
     private static int CountOf(string haystack, string needle)

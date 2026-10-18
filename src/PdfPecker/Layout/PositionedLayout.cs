@@ -127,7 +127,12 @@ internal sealed partial class LayoutEngine
         else if (s.Height.IsAuto && hasT && hasB && !replaced)
             borderH = Math.Max(frameV, cbH - t - b - mt - mb);
 
+        // Its min-height and max-height percentages, and its content's when its height is definite, resolve against
+        // the containing block's padding box too.
+        var outerCb = _cbHeight;
+        _cbHeight = new CbHeights(cbH);
         var c = CaptureBox(e, borderW.HasValue ? borderW.Value + ml + mr : Math.Max(0, room), shrinkToFit: !borderW.HasValue, borderW, borderH);
+        _cbHeight = outerCb;
         float boxW = c.BoxW, boxH = c.BoxH;
 
         // Auto margins centre the box between left and right (or top and bottom) when all three are set.

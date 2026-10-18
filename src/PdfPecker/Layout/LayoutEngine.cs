@@ -88,7 +88,13 @@ internal sealed partial class LayoutEngine
     {
         _pageBox = RootPageBox(width);
         _rootWidth = width;
+        // The initial containing block is the page area. When pages differ in height, a box resolves a percentage
+        // chain that leads up to it against the page it starts on, so html, body { height: 100% } and a section of
+        // height 100% fill whichever page the section starts on, as in Chrome.
+        _cbHeight = new CbHeights(_grid.Height(0), _grid.Height(1), _grid.Height(2));
+        _cbKind = 0;
         float bottom = LayoutFlow(document, 0, 0, width);
+        _cbHeight = null;
         _pageBox = null;
         if (_floats.Any && _floats.Bottom > bottom) bottom = _floats.Bottom; // the root contains its floats
         FinishFootnotes();
@@ -509,6 +515,64 @@ internal sealed partial class LayoutEngine
         }
     }
 
+    /// <summary>
+    /// The height of a containing block on each kind of page (the grid's first, odd and even pages). It is the same on
+    /// all of them unless it comes from the page area through percentage heights and the pages differ in height.
+    /// </summary>
+    private readonly struct CbHeights(float first, float odd, float even)
+    {
+        public readonly float First = first, Odd = odd, Even = even;
+
+        public CbHeights(float h) : this(h, h, h) { }
+
+        public bool Uniform => First == Odd && Odd == Even;
+
+        public float On(int kind) => kind == 0 ? First : kind == 1 ? Odd : Even;
+    }
+
+    /// <summary>
+    /// The height of the containing block of the boxes laid out next, which their percentage heights resolve against,
+    /// or null when it is not definite and percentage heights behave as auto (CSS 2.1 §10.5): the content height of a
+    /// box whose height is definite, the page area for the root element, or the padding box of the containing block of
+    /// an absolutely positioned box.
+    /// </summary>
+    private CbHeights? _cbHeight;
+
+    /// <summary>
+    /// The kind of page (see <see cref="PageBox.Kind"/>) the box or line being laid out starts on, which picks its
+    /// containing block's height from <see cref="_cbHeight"/>. Content laid out on its own, unpaginated, keeps the kind
+    /// of the page its container is on.
+    /// </summary>
+    private int _cbKind;
+
+    /// <summary>
+    /// The containing block height that the percentage heights of <paramref name="e"/> resolve against, or null. Intrinsic
+    /// widths are measured without one, so that they stay the same wherever the box is, and a grid resolves its items'
+    /// percentages against their grid areas itself.
+    /// </summary>
+    private float? HeightBasis(Element e, int kind)
+        => _cbHeight is { } cb && !_measuring && (e.Parent?.Style is not { IsGrid: true } || e.Style.OutOfFlow) ? cb.On(kind) : null;
+
+    private float? HeightBasis(Element e) => HeightBasis(e, _cbKind);
+
+    /// <summary>Notes the kind of page that content laid out at <paramref name="y"/> starts on.</summary>
+    private void NoteCbKind(float y)
+    {
+        if (_paginate && _cbHeight is { Uniform: false }) _cbKind = PageBox.Kind(PageOf(y));
+    }
+
+    /// <summary>
+    /// Whether a child of <paramref name="e"/> has a height, min-height or max-height that is a percentage, which then
+    /// depends on how tall <paramref name="e"/> is made. Only children count: a grandchild's percentage refers to its
+    /// own parent, which is definite only through a percentage or length of its own.
+    /// </summary>
+    private static bool HasPercentHeightChild(Element e)
+    {
+        foreach (var c in e.Children)
+            if (c is Element { Style: { } s } && (s.Height.IsPercent || s.MinHeight.IsPercent || s.MaxHeight.IsPercent)) return true;
+        return false;
+    }
+
     // Margin collapsing between a box and its children: set by LayoutBlockBoxCore and LayoutFlow for their callers.
     private bool _absorbTop;      // the box being laid out has taken its first child's top margin
     private float _flowTrailing;  // the bottom margin of the last child of the flow just laid out
@@ -610,6 +674,8 @@ internal sealed partial class LayoutEngine
         float pt = s.PaddingTop.Resolve(availW), pb = s.PaddingBottom.Resolve(availW);
         float frame = bl + br + pl + pr;
         float frameV = bt + bb + pt + pb;
+        NoteCbKind(y);
+        float? cbH = HeightBasis(e);
 
         // Sizes imposed by a flex or grid container (border-box).
         bool hasWOverride = _widthOverride.TryGetValue(e, out float overrideW);
@@ -627,7 +693,7 @@ internal sealed partial class LayoutEngine
             else svg = SvgSize(e, room, out imgW, out imgH);
             if (hasWOverride && imgW > 0 && Math.Abs(room - imgW) > Eps)
             {
-                if (s.Height.IsAuto) imgH *= Math.Max(0, room) / imgW;
+                if (s.Height.IsAuto || s.Height.IsPercent && cbH == null) imgH *= Math.Max(0, room) / imgW;
                 imgW = Math.Max(0, room);
             }
             contentW = imgW;
@@ -636,7 +702,7 @@ internal sealed partial class LayoutEngine
         {
             contentW = overrideW - frame;
         }
-        else contentW = FlowContentWidth(e, availW, ml, mr, frame, frameV, shrinkToFit);
+        else contentW = FlowContentWidth(e, availW, ml, mr, frame, frameV, shrinkToFit, cbH);
         if (contentW < 0) contentW = 0;
 
         float used = contentW + frame;
@@ -720,17 +786,22 @@ internal sealed partial class LayoutEngine
         {
             float? definiteH = null;
             if (hasHOverride) definiteH = Math.Max(0, overrideH - frameV);
-            else if (ClampedHeight(s) is float h) definiteH = Math.Max(0, h - (s.BorderBox ? frameV : 0));
-            float minH = !s.MinHeight.IsAuto && !s.MinHeight.IsPercent ? Math.Max(0, s.MinHeight.Value - (s.BorderBox ? frameV : 0)) : 0;
-            if (RatioHeight(s, contentW, frame, frameV, hasHOverride) is float rh)
-                minH = Math.Max(minH, Math.Min(rh, MaxContentHeight(s, frameV)));
+            else if (ClampedHeight(s, cbH) is float h) definiteH = Math.Max(0, h - (s.BorderBox ? frameV : 0));
+            float minH = MinHeightOf(s, cbH) is float mnh ? Math.Max(0, mnh - (s.BorderBox ? frameV : 0)) : 0;
+            float? ratioMin = RatioHeight(s, contentW, frame, frameV, hasHOverride, cbH);
+            if (ratioMin is float rh) minH = Math.Max(minH, Math.Min(rh, MaxContentHeight(s, frameV, cbH)));
             // A box that is not a formatting context root shares its top and bottom margins with its children's.
             bool joinsChildren = !shrinkToFit && !hasWOverride && !hasHOverride;
             _absorbTop = joinsChildren && FirstBlockChild(e) != null;
             var outerFloats = formattingRoot ? EnterFormattingContext() : null;
             _pageBox = pages;
             _flowProbe = probe;
+            var outerCb = _cbHeight;
+            _cbHeight = hasHOverride && _indefiniteOverride is { Count: > 0 } indefinite && indefinite.Contains(e)
+                ? null
+                : ChildHeights(e, hasHOverride, definiteH, ratioMin != null ? minH : null, frameV);
             contentBottom = LayoutContent(e, cx, cy, contentW, definiteH, minH);
+            _cbHeight = outerCb;
             _pageBox = null;
             if (outerFloats != null) contentBottom = LeaveFormattingContext(outerFloats, contentBottom);
             _absorbTop = false;
@@ -754,21 +825,21 @@ internal sealed partial class LayoutEngine
         {
             contentH = Math.Max(0, overrideH - frameV);
         }
-        else if (!s.Height.IsAuto && !s.Height.IsPercent)
+        else if (HeightOf(s.Height, cbH) is float specifiedH)
         {
-            float h = s.Height.Value - (s.BorderBox ? bt + bb + pt + pb : 0);
+            float h = specifiedH - (s.BorderBox ? bt + bb + pt + pb : 0);
             contentH = Math.Max(0, h);
         }
         // aspect-ratio with an auto height: at least the ratio's height; taller content still makes it grow, except in a
         // flex container, whose content overflows it as in Chrome.
-        if (!isImage && !isSvg && RatioHeight(s, contentW, frame, frameV, hasHOverride) is float ratioH && (contentH < ratioH || s.IsFlex))
+        if (!isImage && !isSvg && RatioHeight(s, contentW, frame, frameV, hasHOverride, cbH) is float ratioH && (contentH < ratioH || s.IsFlex))
             contentH = ratioH;
         // max-height limits the box, and content beyond it overflows; min-height wins over max-height. Flex and grid
         // containers that size the box have applied both already.
-        if (!isImage && !isSvg && !hasHOverride) contentH = Math.Min(contentH, MaxContentHeight(s, frameV));
-        if (!s.MinHeight.IsAuto && !s.MinHeight.IsPercent)
+        if (!isImage && !isSvg && !hasHOverride) contentH = Math.Min(contentH, MaxContentHeight(s, frameV, cbH));
+        if (MinHeightOf(s, cbH) is float minHeight)
         {
-            float mh = s.MinHeight.Value - (s.BorderBox ? bt + bb + pt + pb : 0);
+            float mh = minHeight - (s.BorderBox ? bt + bb + pt + pb : 0);
             if (contentH < mh) contentH = mh;
         }
         if (container && !_measuring)
@@ -806,9 +877,10 @@ internal sealed partial class LayoutEngine
 
     /// <summary>
     /// The content width of a block box that is not replaced and has no size imposed by a flex or grid container, from
-    /// its width, aspect-ratio and min- and max-width, in a containing block <paramref name="availW"/> wide.
+    /// its width, aspect-ratio and min- and max-width, in a containing block <paramref name="availW"/> wide and
+    /// <paramref name="cbH"/> tall (null when that height is not definite).
     /// </summary>
-    private float FlowContentWidth(Element e, float availW, float ml, float mr, float frame, float frameV, bool shrinkToFit)
+    private float FlowContentWidth(Element e, float availW, float ml, float mr, float frame, float frameV, bool shrinkToFit, float? cbH)
     {
         var s = e.Style;
         float contentW;
@@ -817,7 +889,7 @@ internal sealed partial class LayoutEngine
             contentW = s.Width.Resolve(availW);
             if (s.BorderBox) contentW -= frame;
         }
-        else if (s.AspectRatio > 0 && ClampedHeight(s) is float ratioFrom)
+        else if (s.AspectRatio > 0 && ClampedHeight(s, cbH) is float ratioFrom)
         {
             // aspect-ratio with a fixed height and an auto width: the width follows from the height. With min-width: auto
             // and visible overflow, content wider than that still widens the box (CSS Sizing 4 automatic minimum size).
@@ -835,7 +907,7 @@ internal sealed partial class LayoutEngine
             // min-height and max-height carry over to the width through the ratio.
             if (s.AspectRatio > 0)
             {
-                var (tmin, tmax) = TransferredWidthLimits(s, frame, frameV);
+                var (tmin, tmax) = TransferredWidthLimits(s, frame, frameV, cbH);
                 contentW = Math.Max(Math.Min(contentW, tmax), tmin);
             }
         }
@@ -882,6 +954,22 @@ internal sealed partial class LayoutEngine
         Truncate(start, keepFloats: true);
         _ops.Add(clip);
         _floats.Fold(start);
+    }
+
+    /// <summary>
+    /// The containing block height a box gives its children when its own height is definite: a height that is a length
+    /// or a percentage that resolves in turn, a size a flex or grid container gave it (<paramref name="definiteH"/>), or
+    /// the height aspect-ratio gives its width (<paramref name="ratioH"/>, CSS Sizing 4 §5.1). Otherwise null, and their
+    /// percentage heights behave as auto. A percentage of a containing block that differs between pages gives one that
+    /// differs too, for the children to resolve against the page they start on.
+    /// </summary>
+    private CbHeights? ChildHeights(Element e, bool hasHOverride, float? definiteH, float? ratioH, float frameV)
+    {
+        if (definiteH is not float h) return ratioH is float r ? new CbHeights(r) : null;
+        if (hasHOverride || _cbHeight is not { Uniform: false } cb || HeightBasis(e) == null) return new CbHeights(h);
+        var s = e.Style;
+        float ContentOn(int kind) => Math.Max(0, (ClampedHeight(s, cb.On(kind)) ?? 0) - (s.BorderBox ? frameV : 0));
+        return new CbHeights(ContentOn(0), ContentOn(1), ContentOn(2));
     }
 
     /// <summary>Lays out the content box of a block container according to its display type.</summary>
@@ -1034,6 +1122,15 @@ internal sealed partial class LayoutEngine
         return img;
     }
 
+    /// <summary>The used width of an img or svg element in a containing block <paramref name="availW"/> wide, in points.</summary>
+    private float ReplacedWidth(Element e, float availW)
+    {
+        float w;
+        if (e.Name == "img") ImageSize(e, availW, out w, out _);
+        else SvgSize(e, availW, out w, out _);
+        return w;
+    }
+
     /// <summary>Computes the used size of an inline &lt;svg&gt; in points and returns its parsed drawing.</summary>
     private SvgImage? SvgSize(Element e, float availW, out float w, out float h)
     {
@@ -1063,21 +1160,31 @@ internal sealed partial class LayoutEngine
     private static bool RatioOnBorderBox(ComputedStyle s) => s.BorderBox && !s.AspectRatioAuto;
 
     /// <summary>
-    /// The height property limited by min-height and max-height, in the terms of box-sizing, when it is a fixed length;
-    /// otherwise null. Percentages count as auto, as elsewhere in block layout.
+    /// The value of a height, min-height or max-height in points: a length, or a percentage of the containing block's
+    /// height <paramref name="cbH"/>. Null for auto and for a percentage when that height is not definite, which then
+    /// behaves as auto (none for max-height, 0 for min-height).
     /// </summary>
-    internal static float? ClampedHeight(ComputedStyle s)
+    private static float? HeightOf(Length l, float? cbH)
+        => l.IsAuto ? null : !l.IsPercent ? l.Value : cbH is float basis ? Math.Max(0, l.Resolve(basis)) : null;
+
+    /// <summary>The min-height in points, or null when it is auto or a percentage that does not resolve.</summary>
+    private static float? MinHeightOf(ComputedStyle s, float? cbH) => HeightOf(s.MinHeight, cbH);
+
+    /// <summary>
+    /// The height property limited by min-height and max-height, in the terms of box-sizing, when it is a length or a
+    /// percentage of the definite containing block height <paramref name="cbH"/>; otherwise null.
+    /// </summary>
+    internal static float? ClampedHeight(ComputedStyle s, float? cbH = null)
     {
-        if (s.Height.IsAuto || s.Height.IsPercent) return null;
-        float h = s.Height.Value;
-        if (!s.MaxHeight.IsAuto && !s.MaxHeight.IsPercent) h = Math.Min(h, s.MaxHeight.Value);
-        if (!s.MinHeight.IsAuto && !s.MinHeight.IsPercent) h = Math.Max(h, s.MinHeight.Value);
+        if (HeightOf(s.Height, cbH) is not float h) return null;
+        if (HeightOf(s.MaxHeight, cbH) is float max) h = Math.Min(h, max);
+        if (HeightOf(s.MinHeight, cbH) is float min) h = Math.Max(h, min);
         return h;
     }
 
     /// <summary>The largest content height max-height allows, or infinity.</summary>
-    private static float MaxContentHeight(ComputedStyle s, float frameV)
-        => s.MaxHeight.IsAuto || s.MaxHeight.IsPercent ? float.PositiveInfinity : Math.Max(0, s.MaxHeight.Value - (s.BorderBox ? frameV : 0));
+    private static float MaxContentHeight(ComputedStyle s, float frameV, float? cbH)
+        => HeightOf(s.MaxHeight, cbH) is float max ? Math.Max(0, max - (s.BorderBox ? frameV : 0)) : float.PositiveInfinity;
 
     /// <summary>The content width aspect-ratio pairs with a height given in the terms of box-sizing.</summary>
     internal static float RatioWidth(ComputedStyle s, float height, float frame, float frameV)
@@ -1090,21 +1197,23 @@ internal sealed partial class LayoutEngine
     /// The limits min-height and max-height put on the content width of a box with aspect-ratio and no fixed height,
     /// carried over through the ratio (CSS Sizing 4 §5.1, transferred min and max sizes).
     /// </summary>
-    internal static (float Min, float Max) TransferredWidthLimits(ComputedStyle s, float frame, float frameV)
+    internal static (float Min, float Max) TransferredWidthLimits(ComputedStyle s, float frame, float frameV, float? cbH = null)
     {
         float min = 0, max = float.PositiveInfinity;
-        if (s.AspectRatio <= 0 || !s.Height.IsAuto && !s.Height.IsPercent) return (min, max);
-        if (!s.MinHeight.IsAuto && !s.MinHeight.IsPercent && s.MinHeight.Value > 0) min = RatioWidth(s, s.MinHeight.Value, frame, frameV);
-        if (!s.MaxHeight.IsAuto && !s.MaxHeight.IsPercent) max = RatioWidth(s, s.MaxHeight.Value, frame, frameV);
+        if (s.AspectRatio <= 0 || HeightOf(s.Height, cbH) != null) return (min, max);
+        if (MinHeightOf(s, cbH) is float mn && mn > 0) min = RatioWidth(s, mn, frame, frameV);
+        if (HeightOf(s.MaxHeight, cbH) is float mx) max = RatioWidth(s, mx, frame, frameV);
         // A max-height below min-height loses, as max-width does to min-width.
         return (min, Math.Max(min, max));
     }
 
-    /// <summary>The content height aspect-ratio gives a box with an auto height and the given content width, or null.</summary>
-    private static float? RatioHeight(ComputedStyle s, float contentW, float frame, float frameV, bool hasHOverride)
+    /// <summary>
+    /// The content height aspect-ratio gives a box with an auto height (or a percentage height that does not resolve
+    /// against <paramref name="cbH"/>) and the given content width, or null.
+    /// </summary>
+    private static float? RatioHeight(ComputedStyle s, float contentW, float frame, float frameV, bool hasHOverride, float? cbH)
     {
-        // Percentage heights are treated as auto here, as elsewhere in block layout.
-        if (s.AspectRatio <= 0 || hasHOverride || !s.Height.IsAuto && !s.Height.IsPercent) return null;
+        if (s.AspectRatio <= 0 || hasHOverride || HeightOf(s.Height, cbH) != null) return null;
         float h = RatioOnBorderBox(s) ? (contentW + frame) / s.AspectRatio - frameV : contentW / s.AspectRatio;
         return Math.Max(0, h);
     }
@@ -1210,9 +1319,11 @@ internal sealed partial class LayoutEngine
     private void ReplacedSize(Element e, float iw, float ih, float availW, out float w, out float h)
     {
         var s = e.Style;
-        bool hasW = !s.Width.IsAuto && !(_measuring && s.Width.IsPercent), hasH = !s.Height.IsAuto && !s.Height.IsPercent;
+        float? cbH = HeightBasis(e);
+        float? specifiedH = HeightOf(s.Height, cbH), maxH = HeightOf(s.MaxHeight, cbH);
+        bool hasW = !s.Width.IsAuto && !(_measuring && s.Width.IsPercent), hasH = specifiedH != null;
         w = hasW ? s.Width.Resolve(Math.Max(availW, 0)) : 0;
-        h = hasH ? s.Height.Value : 0;
+        h = specifiedH ?? 0;
         if (s.BorderBox)
         {
             if (hasW) w -= s.PaddingLeft.Resolve(availW) + s.PaddingRight.Resolve(availW) + s.BorderLeft + s.BorderRight;
@@ -1230,10 +1341,10 @@ internal sealed partial class LayoutEngine
             float mw = s.MaxWidth.Resolve(availW);
             if (w > mw && w > 0) { h *= mw / w; w = mw; }
         }
-        if (!s.MaxHeight.IsAuto && !s.MaxHeight.IsPercent && h > s.MaxHeight.Value && h > 0)
+        if (maxH is float mh && h > mh && h > 0)
         {
-            w *= s.MaxHeight.Value / h;
-            h = s.MaxHeight.Value;
+            w *= mh / h;
+            h = mh;
         }
         // Never let an image run off the page.
         if (availW > 0 && w > availW) { h *= availW / w; w = availW; }
@@ -1249,6 +1360,7 @@ internal sealed partial class LayoutEngine
     private int _forcedBreaks; // forced page breaks seen; captured content without any can be reused when it fits on a page
     private readonly Dictionary<Element, float> _widthOverride = new();
     private readonly Dictionary<Element, float> _heightOverride = new();
+    private HashSet<Element>? _indefiniteOverride; // heights imposed that do not make percentages inside resolve
 
     /// <summary>Headings in document order for the PDF outline, or null when no outline is wanted. Each heading's
     /// position is kept in <see cref="Anchors"/> under its key, so it follows the heading when content is moved.</summary>

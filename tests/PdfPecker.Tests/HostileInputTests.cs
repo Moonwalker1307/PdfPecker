@@ -221,6 +221,23 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(html));
     }
 
+    [Theory]
+    // A table with a height measures its rows before sharing that height out over them, and a row whose cells have
+    // percentage heights inside is laid out once to find its height and again with the percentages resolved: with
+    // tables nested in each other, each level doubled the work of the levels inside it (25 levels took minutes).
+    [InlineData("<table style='height:400pt'><tr><td style='height:100pt'><div>", "</div></td></tr></table>", 50)]
+    [InlineData("<table style='height:400pt'><tr><td style='height:100pt'><div style='height:100%'>", "</div></td></tr></table>", 50)]
+    [InlineData("<table style='height:90%'><tr><td><div style='height:100%'>", "</div></td></tr></table>", 50)]
+    // Stretched flex and grid items with percentage heights inside are laid out again at their stretched size.
+    [InlineData("<div style='display:flex;height:90%'><div>", "</div></div>", 120)]
+    [InlineData("<div style='display:grid;height:90%'><div>", "</div></div>", 120)]
+    [InlineData("<div style='height:100%;aspect-ratio:1;max-height:90%'>", "</div>", 250)]
+    public void Nested_percentage_heights_lay_out_each_level_a_bounded_number_of_times(string open, string close, int levels)
+    {
+        var html = "<style>html, body { height: 100% }</style><div style='height:500pt'>" + Repeat(open, levels) + "x" + Repeat(close, levels) + "</div>";
+        AssertStructurallyValid(Bounded(html));
+    }
+
     [Fact]
     public void Broken_words_keep_every_character()
     {
