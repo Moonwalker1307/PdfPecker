@@ -201,6 +201,22 @@ internal static class Targets
                 Dictionary = MarkdownWords, Nesters = MarkdownNesters,
                 Run = (d, ct) => HtmlToPdf.Convert(MarkdownToHtml.ConvertDocument(Encoding.UTF8.GetString(d)), new PdfOptions { MaxPages = 100 }, ct),
             },
+            new()
+            {
+                // Barcode text often comes from data the caller does not control, such as an invoice reference.
+                Name = "barcode", Extension = ".txt", Text = true, MaxSize = 8 * 1024,
+                Seeds = _ => new[] { "HELLO WORLD", "https://pdfpecker.net/", "0123456789012", "Blåbær 🙂\t\u0000" }
+                    .Select((s, i) => ($"seed{i}", Encoding.UTF8.GetBytes(s))),
+                Run = (d, ct) =>
+                {
+                    var text = Encoding.UTF8.GetString(d);
+                    foreach (var level in Enum.GetValues<QrErrorCorrection>())
+                        RunExpectingArgument(() => Barcode.QrCode(text, new BarcodeOptions { ErrorCorrection = level }));
+                    RunExpectingArgument(() => Barcode.Code128(text));
+                    RunExpectingArgument(() => Barcode.Ean13(text));
+                    RunExpectingArgument(() => Barcode.EpcQrCode(new EpcPayment { Name = text, Iban = "DE89370400440532013000", Text = text }));
+                },
+            },
             Image("png", ".png", c => c.ImageFiles(".png").Concat(c.RenderedImages().Where(i => i.Ext == ".png").Select(i => (i.Name, i.Data))), d => PdfImage.FromBytes(d)),
             Image("jpeg", ".jpg", c => c.ImageFiles(".jpg", ".jpeg").Concat(c.RenderedImages().Where(i => i.Ext == ".jpg").Select(i => (i.Name, i.Data))), d =>
             {
@@ -252,6 +268,18 @@ internal static class Targets
         "<!doctype html><body style=\"font-family:Fz;font-size:18px\"><p>Hamburgefonstiv 0123456789 fi ffl AV To Wa العربية שלום 日本語 कि</p>"
         + "<p style=\"font-weight:700;font-style:italic;font-variation-settings:'wght' 700,'wdth' 75,'opsz' 14,'slnt' -10;font-feature-settings:'smcp','liga','onum','ss01','kern';font-size:30px\">Hamburgefonstiv fi ffl AV</p>"
         + "<p style=\"font-variant:small-caps;letter-spacing:2px;text-transform:uppercase;text-decoration:underline\">Ligatures and kerning: office waffle</p></body>";
+
+    /// <summary>Runs one barcode encoder; ArgumentException is its documented answer to text it cannot encode.</summary>
+    private static void RunExpectingArgument(Func<string> encode)
+    {
+        try
+        {
+            encode();
+        }
+        catch (ArgumentException)
+        {
+        }
+    }
 
     private static Target Font(string name, string ext, Func<SeedContext, IEnumerable<(string, byte[])>> seeds) => new()
     {
