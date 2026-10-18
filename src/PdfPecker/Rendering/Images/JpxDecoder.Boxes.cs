@@ -17,8 +17,9 @@ internal sealed partial class JpxDecoder
     private const int BoxHeaderLength = 8, ExtendedBoxHeaderLength = 16;
     private const long ExtendedLength = 1, LengthToEnd = 0;
 
-    // Damaged lengths can send the box reader back to boxes it has read, so the boxes of one parent are counted.
-    private const int MaxBoxes = 10000;
+    // The boxes of one parent are counted, and header boxes nested in header boxes are only followed a few levels
+    // deep: each level is a call, and a file of nothing but nested header boxes would otherwise overflow the stack.
+    private const int MaxBoxes = 10000, MaxHeaderDepth = 8;
 
     // colr: method, precedence and approximation, then an enumerated colour space or an ICC profile, whose header has
     // the profile's colour space at offset 16.
@@ -26,8 +27,8 @@ internal sealed partial class JpxDecoder
     private const int ColourFieldsLength = 3, EnumeratedLength = 7, IccSpaceOffset = 16, IccHeaderLength = 20;
     private const uint IccGray = 0x47524159, IccRgb = 0x52474220, IccCmyk = 0x434D594B; // 'GRAY', 'RGB ', 'CMYK'
 
-    // pclr: the number of entries and of columns, then each column's bit depth (as in SIZ).
-    private const int PaletteFieldsLength = 3, MaxPaletteEntries = 1024;
+    // pclr: the number of entries and of columns, then each column's bit depth (as in SIZ), which is at most 38 bits.
+    private const int PaletteFieldsLength = 3, MaxPaletteEntries = 1024, MaxPaletteDepth = 38;
     private const int ComponentMappingLength = 4, ChannelDefinitionLength = 6;
 
     /// <summary>What the boxes of a JP2 file say: where the codestream is and how its components map to colors.</summary>
@@ -46,7 +47,7 @@ internal sealed partial class JpxDecoder
     }
 
     /// <summary>A palette: each entry has one value per column, and each column its own bit depth.</summary>
-    private sealed record Jp2Palette(int[][] Entries, int[] ColumnBits);
+    private sealed record Jp2Palette(long[][] Entries, int[] ColumnBits);
 
     /// <summary>A channel of the image: a component as it is (<see cref="Type"/> 0), or through a palette column (1).</summary>
     private readonly record struct ComponentMapping(int Component, int Type, int PaletteColumn);
@@ -58,7 +59,7 @@ internal sealed partial class JpxDecoder
     /// Reads the boxes from <paramref name="pos"/> to <paramref name="end"/> into <paramref name="header"/>, going into the
     /// JP2 header box. Returns false when a box header is cut off.
     /// </summary>
-    private static bool ReadBoxes(byte[] data, int pos, int end, Jp2Header header)
+    private static bool ReadBoxes(byte[] data, int pos, int end, Jp2Header header, int depth = 0)
     {
         for (int boxes = 0; pos + BoxHeaderLength <= end && boxes < MaxBoxes; boxes++)
         {
@@ -73,20 +74,22 @@ internal sealed partial class JpxDecoder
                 headerLength = ExtendedBoxHeaderLength;
             }
             else if (length == LengthToEnd) length = end - pos;
-            if (length < headerLength || pos + length > end) length = end - pos; // a truncated last box keeps what is there
+            // A truncated last box keeps what is there. The length is compared with what is left, because pos + length
+            // wraps around for a 64-bit length near the maximum and would send the reader back to earlier boxes.
+            if (length < headerLength || length > end - pos) length = end - pos;
             int bodyStart = pos + headerLength, bodyEnd = (int)(pos + length);
-            ReadBox(data, type, bodyStart, bodyEnd, header);
+            ReadBox(data, type, bodyStart, bodyEnd, header, depth);
             pos = bodyEnd;
         }
         return true;
     }
 
-    private static void ReadBox(byte[] data, uint type, int start, int end, Jp2Header header)
+    private static void ReadBox(byte[] data, uint type, int start, int end, Jp2Header header, int depth)
     {
         switch (type)
         {
             case HeaderBox:
-                ReadBoxes(data, start, end, header);
+                if (depth < MaxHeaderDepth) ReadBoxes(data, start, end, header, depth + 1);
                 break;
             case CodestreamBox:
                 if (header.CodestreamStart < 0) (header.CodestreamStart, header.CodestreamEnd) = (start, end);
@@ -128,24 +131,29 @@ internal sealed partial class JpxDecoder
         }
     }
 
-    /// <summary>Reads a palette, or returns null when its entry or column count is out of range.</summary>
+    /// <summary>Reads a palette, or returns null when its entry count, column count or a column depth is out of range.</summary>
     private static Jp2Palette? ReadPalette(byte[] data, int start, int end)
     {
         var reader = new JpxReader(data, start);
         int entryCount = reader.U16(), columns = reader.U8();
         if (entryCount is < 1 or > MaxPaletteEntries || columns < 1 || start + PaletteFieldsLength + columns > end) return null;
         var bits = new int[columns];
-        for (int c = 0; c < columns; c++) bits[c] = (reader.U8() & DepthMask) + 1;
-        // Each value takes whole bytes; a palette cut short is padded with zeros.
-        var entries = new int[entryCount][];
+        for (int c = 0; c < columns; c++)
+        {
+            bits[c] = (reader.U8() & DepthMask) + 1;
+            if (bits[c] > MaxPaletteDepth) return null;
+        }
+        // Each value takes whole bytes, up to five for 38 bits; a palette cut short is padded with zeros.
+        var entries = new long[entryCount][];
         int pos = reader.Position;
         for (int e = 0; e < entryCount; e++)
         {
-            var entry = entries[e] = new int[columns];
+            var entry = entries[e] = new long[columns];
             for (int c = 0; c < columns; c++)
             {
-                int bytes = (bits[c] + 7) / 8, value = 0;
-                for (int k = 0; k < bytes; k++) value = value << 8 | (pos < end ? data[pos++] : 0);
+                int bytes = (bits[c] + 7) / 8;
+                long value = 0;
+                for (int k = 0; k < bytes; k++) value = value << 8 | (pos < end ? data[pos++] : (byte)0);
                 entry[c] = value;
             }
         }
