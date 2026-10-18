@@ -262,7 +262,8 @@ internal sealed partial class JpxDecoder
         {
             int length = BinaryPrimitives.ReadInt32BigEndian(all.AsSpan(pos));
             pos += 4;
-            if (length < 0 || pos + length > all.Length) length = all.Length - pos; // the last part takes what is left
+            // The last part takes what is left. The length is compared with what is left, as pos + length can overflow.
+            if (length < 0 || length > all.Length - pos) length = all.Length - pos;
             parts.Enqueue(new ArraySegment<byte>(all, pos, length).ToArray());
             pos += length;
         }
@@ -357,7 +358,8 @@ internal sealed partial class JpxDecoder
             case QuantizationComponent:
             {
                 // An empty segment takes its component index from the byte after it, which is usually the next
-                // marker's 0xFF and so names no component.
+                // marker's 0xFF and so names no component. At the very end of the data there is no such byte.
+                if (segment.Start + ComponentIndexLength > _data.Length) break;
                 var reader = new JpxReader(_data, segment.Start);
                 int component = ReadComponentIndex(ref reader);
                 if (component >= _components.Length) break;
