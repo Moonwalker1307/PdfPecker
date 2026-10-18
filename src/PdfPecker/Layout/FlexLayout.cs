@@ -299,64 +299,84 @@ internal sealed partial class LayoutEngine
             var line = lines[li];
             float cross = lineCross[li];
 
-            // Stretched items get the line's cross size.
-            foreach (var it in line)
+            // An item laid out again across a page boundary may make the line taller; the line is then placed once more
+            // with that height, so that the items stretched to it reach the new bottom.
+            int lineOps = _ops.Count;
+            var lineMarker = _marker;
+            int lineListIndex = _currentListIndex;
+            float lineRight = _lastBoxRight, lineFirstBaseline = firstBaseline;
+            float lineBottom;
+            for (bool regrown = false; ; regrown = true)
             {
-                if (it.El == null) continue;
-                var st = it.Style;
-                float current = it.Box!.Height - it.Mt - it.Mb;
-                float? want = null;
-                var align = SelfAlign(it, s.AlignItems);
-                if (st.Height.IsPercent && definiteH.HasValue)
-                    want = st.Height.Resolve(definiteH.Value) + (st.BorderBox ? 0 : VerticalFrame(st, w));
-                else if (align == BoxAlign.Stretch && st.Height.IsAuto && !it.AutoMt && !it.AutoMb)
-                    want = Math.Max(current, cross - it.Mt - it.Mb);
-                if (want is { } h && Math.Abs(h - current) > Eps && (NeedsRelayoutWhenStretched(it) || st.Height.IsPercent)
-                    && !ForcedHeightKeepsLayout(it, h))
-                    it.Box = CaptureBox(it.El, it.OuterMain, shrinkToFit: false, borderW: it.Main, borderH: h);
-            }
-
-            if (_paginate) lineTop = FitOnPage(lineTop, cross);
-
-            // Main axis: auto margins first, then justify-content.
-            float usedMain = colGap * (line.Count - 1);
-            int autoMargins = 0;
-            foreach (var it in line)
-            {
-                usedMain += it.OuterMain;
-                if (it.AutoMl) autoMargins++;
-                if (it.AutoMr) autoMargins++;
-            }
-            float freeMain = w - usedMain;
-            float before = 0, between = 0, autoShare = 0;
-            if (autoMargins > 0 && freeMain > 0) autoShare = freeMain / autoMargins;
-            else Distribute(justify, freeMain, line.Count, out before, out between);
-
-            float cx = x + before;
-            foreach (var it in line)
-            {
-                if (it.AutoMl) cx += autoShare;
-                var box = it.Box!;
-                float outerCross = box.Height;
-                float dy = 0;
-                if (it.AutoMt && it.AutoMb) dy = (cross - outerCross) / 2;
-                else if (it.AutoMt) dy = cross - outerCross;
-                else if (!it.AutoMb)
+                // Stretched items get the line's cross size.
+                foreach (var it in line)
                 {
-                    switch (SelfAlign(it, s.AlignItems))
-                    {
-                        case BoxAlign.End: dy = cross - outerCross; break;
-                        case BoxAlign.Center: dy = (cross - outerCross) / 2; break;
-                        case BoxAlign.Baseline: dy = lineBaseline[li] - BaselineOf(it); break;
-                    }
+                    if (it.El == null) continue;
+                    var st = it.Style;
+                    float current = it.Box!.Height - it.Mt - it.Mb;
+                    float? want = null;
+                    var align = SelfAlign(it, s.AlignItems);
+                    if (st.Height.IsPercent && definiteH.HasValue)
+                        want = st.Height.Resolve(definiteH.Value) + (st.BorderBox ? 0 : VerticalFrame(st, w));
+                    else if (align == BoxAlign.Stretch && st.Height.IsAuto && !it.AutoMt && !it.AutoMb)
+                        want = Math.Max(current, cross - it.Mt - it.Mb);
+                    if (want is { } h && Math.Abs(h - current) > Eps && (regrown || NeedsRelayoutWhenStretched(it) || st.Height.IsPercent)
+                        && !ForcedHeightKeepsLayout(it, h))
+                        it.Box = CaptureBox(it.El, it.OuterMain, shrinkToFit: false, borderW: it.Main, borderH: h);
                 }
-                Place(box, cx, lineTop + dy);
-                if (float.IsNaN(firstBaseline) && !float.IsNaN(box.Baseline)) firstBaseline = lineTop + dy + box.Baseline;
-                cx += it.Main + it.Ml + it.Mr + between + colGap;
-                if (it.AutoMr) cx += autoShare;
-                _lastBoxRight = Math.Max(_lastBoxRight, cx);
+
+                if (_paginate && !regrown) lineTop = FitOnPage(lineTop, cross);
+
+                // Main axis: auto margins first, then justify-content.
+                float usedMain = colGap * (line.Count - 1);
+                int autoMargins = 0;
+                foreach (var it in line)
+                {
+                    usedMain += it.OuterMain;
+                    if (it.AutoMl) autoMargins++;
+                    if (it.AutoMr) autoMargins++;
+                }
+                float freeMain = w - usedMain;
+                float before = 0, between = 0, autoShare = 0;
+                if (autoMargins > 0 && freeMain > 0) autoShare = freeMain / autoMargins;
+                else Distribute(justify, freeMain, line.Count, out before, out between);
+
+                float cx = x + before;
+                lineBottom = lineTop + cross;
+                foreach (var it in line)
+                {
+                    if (it.AutoMl) cx += autoShare;
+                    var box = it.Box!;
+                    float outerCross = box.Height;
+                    float dy = 0;
+                    if (it.AutoMt && it.AutoMb) dy = (cross - outerCross) / 2;
+                    else if (it.AutoMt) dy = cross - outerCross;
+                    else if (!it.AutoMb)
+                    {
+                        switch (SelfAlign(it, s.AlignItems))
+                        {
+                            case BoxAlign.End: dy = cross - outerCross; break;
+                            case BoxAlign.Center: dy = (cross - outerCross) / 2; break;
+                            case BoxAlign.Baseline: dy = lineBaseline[li] - BaselineOf(it); break;
+                        }
+                    }
+                    // An item that lands across a page boundary is laid out again there and may get taller, which
+                    // moves the next line down.
+                    lineBottom = Math.Max(lineBottom, PlaceOnPages(box, cx, lineTop + dy));
+                    if (float.IsNaN(firstBaseline) && !float.IsNaN(box.Baseline)) firstBaseline = lineTop + dy + box.Baseline;
+                    cx += it.Main + it.Ml + it.Mr + between + colGap;
+                    if (it.AutoMr) cx += autoShare;
+                    _lastBoxRight = Math.Max(_lastBoxRight, cx);
+                }
+                if (regrown || lineBottom - lineTop <= cross + Eps || _placingOnPages >= MaxRepeatedOnPages || !line.Exists(it => it.El != null && SelfAlign(it, s.AlignItems) == BoxAlign.Stretch)) break;
+                Truncate(lineOps);
+                _marker = lineMarker;
+                _currentListIndex = lineListIndex;
+                _lastBoxRight = lineRight;
+                firstBaseline = lineFirstBaseline;
+                cross = lineBottom - lineTop;
             }
-            lineTop += cross + rowGap + crossBetween;
+            lineTop = lineBottom + rowGap + crossBetween;
         }
         if (!float.IsNaN(firstBaseline)) _lastBaseline = firstBaseline;
         return lineTop - rowGap - crossBetween;
