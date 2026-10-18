@@ -17,7 +17,9 @@ internal static class CssVariables
     /// Replaces every <c>var(--name, fallback)</c> in <paramref name="value"/>. Returns null when a reference cannot be
     /// resolved and has no fallback, which makes the declaration invalid at computed-value time.
     /// </summary>
-    public static string? Substitute(string value, CssVarScope? vars, int depth = 0)
+    public static string? Substitute(string value, CssVarScope? vars, int depth = 0) => Substitute(value, vars, null, depth);
+
+    private static string? Substitute(string value, CssVarScope? vars, OwnValues? own, int depth)
     {
         if (depth > MaxDepth || value.Length > MaxLength) return null;
         int i = value.IndexOf("var(", StringComparison.OrdinalIgnoreCase);
@@ -42,10 +44,14 @@ internal static class CssVariables
             string? fallback = comma < 0 ? null : inner.Substring(comma + 1).Trim();
 
             string? replacement = null;
-            if (vars != null && vars.TryGetValue(name, out var v) && v.Length > 0)
-                replacement = Substitute(v, vars, depth + 1);
+            if (own != null && own.Declares(name))
+            {
+                if (vars!.TryGetValue(name, out var ov) && ov.Length > 0) replacement = own.Resolve(name, depth + 1);
+            }
+            else if (vars != null && vars.TryGetValue(name, out var v) && v.Length > 0)
+                replacement = Substitute(v, vars, own, depth + 1);
             if (replacement == null && fallback != null)
-                replacement = Substitute(fallback, vars, depth + 1);
+                replacement = Substitute(fallback, vars, own, depth + 1);
             if (replacement == null || sb.Length + replacement.Length > MaxLength) return null;
             sb.Append(replacement);
             last = close + 1;
@@ -73,13 +79,51 @@ internal static class CssVariables
             else raw.Set(name, v);
         }
         // Resolve the element's own values against the combined set; inherited values are already resolved.
+        var resolver = new OwnValues(raw, own);
         var result = new CssVarScope(inherited);
-        foreach (var (name, _) in own)
-        {
-            if (!raw.TryGetValue(name, out var v)) { result.Set(name, null); continue; }
-            result.Set(name, CssParser.HasVar(v) ? Substitute(v, raw) : v);
-        }
+        foreach (var (name, _) in own) result.Set(name, resolver.Resolve(name, 0));
         return result;
+    }
+
+    /// <summary>
+    /// Resolves each of an element's own custom properties once. Without the cache, a value that names a variable in
+    /// both its reference and its fallback was resolved twice per level, which is exponential in the nesting; and a
+    /// variable that refers back to itself ran to the depth limit before its fallback was tried.
+    /// </summary>
+    private sealed class OwnValues(CssVarScope raw, List<KeyValuePair<string, string>> own)
+    {
+        private readonly Dictionary<string, string?> _resolved = new(StringComparer.Ordinal);
+        private readonly List<string> _active = [];
+        private readonly HashSet<string> _cyclic = new(StringComparer.Ordinal);
+        private readonly HashSet<string> _names = NamesOf(own);
+
+        private static HashSet<string> NamesOf(List<KeyValuePair<string, string>> own)
+        {
+            var names = new HashSet<string>(own.Count, StringComparer.Ordinal);
+            foreach (var (name, _) in own) names.Add(name);
+            return names;
+        }
+
+        public bool Declares(string name) => _names.Contains(name);
+
+        public string? Resolve(string name, int depth)
+        {
+            if (_resolved.TryGetValue(name, out var done)) return done;
+            int at = _active.IndexOf(name);
+            if (at >= 0)
+            {
+                // Like browsers, every variable on a reference cycle is invalid, so a var() of one takes its fallback.
+                for (int k = at; k < _active.Count; k++) _cyclic.Add(_active[k]);
+                return null;
+            }
+            if (!raw.TryGetValue(name, out var v)) return _resolved[name] = null;
+            if (!CssParser.HasVar(v)) return _resolved[name] = v;
+            _active.Add(name);
+            var result = Substitute(v, raw, this, depth);
+            _active.RemoveAt(_active.Count - 1);
+            if (_cyclic.Contains(name)) result = null;
+            return _resolved[name] = result;
+        }
     }
 
     private static int MatchingParen(string s, int open)
