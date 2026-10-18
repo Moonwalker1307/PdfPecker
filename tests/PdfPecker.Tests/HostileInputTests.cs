@@ -1444,6 +1444,101 @@ public class LayoutLookupFanOutTests
     }
 }
 
+/// <summary>
+/// Hostile GSUB tables whose multiple substitutions grow the glyph run: lookups that each expand every glyph into a
+/// long sequence, so that the second multiplies what the first made, and a long expanded run that a deletion then
+/// shrinks one glyph at a time.
+/// </summary>
+[Collection(HostileInputCollection.Name)]
+public class GlyphRunGrowthTests
+{
+    private static T Bounded<T>(Func<T> work)
+    {
+        var task = Task.Run(work);
+        Assert.True(task.Wait(TimeSpan.FromSeconds(20)), "Did not finish in time");
+        return task.Result;
+    }
+
+    [Theory]
+    // Two lookups that turn every glyph into 30,000: some billions of glyphs for a few words.
+    [InlineData(1, 30000, 30000, -1)]
+    // The same with 1,000, which the run has room for a few times.
+    [InlineData(1, 1000, 1000, -1)]
+    // One lookup that turns every glyph of a long text into 64, and one that deletes every glyph again.
+    [InlineData(100, 64, 0, 0)]
+    public void Multiple_substitutions_do_not_grow_the_run_without_bound(int repeat, int first, int second, int expected)
+    {
+        var text = string.Concat(Enumerable.Repeat("كمثرى بطيخ تفاح موز برتقال عنب ", repeat));
+        var original = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "NotoSansArabic-Subset.ttf"));
+        var program = Assert.Single(FontProgram.Load(original));
+        int glyph = program.GlyphId('ب');
+        var font = WithGsub(original, program.NumGlyphs, Enumerable.Repeat(glyph, first).ToArray(), Enumerable.Repeat(glyph, second).ToArray());
+        var hostile = Assert.Single(FontProgram.Load(font));
+        foreach (bool rtl in new[] { true, false })
+        {
+            var glyphs = Bounded(() =>
+            {
+                var output = new List<ShapedGlyph>();
+                ComplexShaper.Shape(hostile, text, 0, text.Length, rtl, output);
+                return output;
+            });
+            if (expected >= 0) Assert.Equal(expected, glyphs.Count);
+            else Assert.InRange(glyphs.Count, text.Length, OpenTypeLayout.MaxRunLength(text.Length));
+        }
+
+        var html = $"<style>@font-face{{font-family:f;src:url(data:font/ttf;base64,{Convert.ToBase64String(font)})}}</style>"
+            + $"<p style='font-family:f'>{text}</p>";
+        AssertStructurallyValid(Bounded(() => HtmlToPdf.Convert(html)));
+    }
+
+    // The font with a GSUB table whose DFLT script (which Arabic falls back to) has a ccmp feature with one multiple
+    // substitution per sequence, each replacing every glyph of the font with that sequence; an empty one deletes it.
+    private static byte[] WithGsub(byte[] font, int glyphs, params int[][] sequences)
+    {
+        var t = new List<byte>();
+        void U16(int v) { t.Add((byte)(v >> 8)); t.Add((byte)v); }
+        void Tag(string s) => t.AddRange(Encoding.ASCII.GetBytes(s));
+
+        int lookups = sequences.Length, lookupList = 42 + lookups * 2;
+        // Header: version 1.0 and the script, feature and lookup lists.
+        U16(1); U16(0); U16(10); U16(30); U16(lookupList);
+        // Script list: DFLT, its script table (a default language system right after it) and that language system,
+        // whose only feature is feature 0.
+        U16(1); Tag("DFLT"); U16(8);
+        U16(4); U16(0);
+        U16(0); U16(0xFFFF); U16(1); U16(0);
+        // Feature list: feature 0 has every lookup, in order.
+        U16(1); Tag("ccmp"); U16(8);
+        U16(0); U16(lookups);
+        for (int l = 0; l < lookups; l++) U16(l);
+        // Lookup list: the offsets of the lookups, then each lookup with its one subtable right after it.
+        U16(lookups);
+        int offsets = t.Count;
+        for (int l = 0; l < lookups; l++) U16(0);
+        foreach (var sequence in sequences)
+        {
+            int lookup = t.Count - lookupList;
+            if (lookup > 0xFFFF) throw new InvalidOperationException("The lookup is past the reach of its 16-bit offset.");
+            t[offsets] = (byte)(lookup >> 8);
+            t[offsets + 1] = (byte)lookup;
+            offsets += 2;
+            U16(2); U16(0); U16(1); U16(8);
+            // Format 1, the coverage after the sequence offsets, and one offset per glyph, all of the one sequence.
+            int coverage = 6 + glyphs * 2;
+            U16(1); U16(coverage); U16(glyphs);
+            for (int g = 0; g < glyphs; g++) U16(coverage + 10);
+            // A coverage table of format 2 with one range of every glyph, so that a glyph's coverage index is its id.
+            U16(2); U16(1); U16(0); U16(glyphs - 1); U16(0);
+            U16(sequence.Length);
+            foreach (int g in sequence) U16(g);
+        }
+
+        var p = Assert.Single(FontProgram.Load(font));
+        var tables = p.Tables.Select(x => (x.Tag, x.Tag == FontProgram.Tag("GSUB") ? t.ToArray() : p.Data.AsSpan(x.Offset, x.Length).ToArray())).ToList();
+        return SfntBuilder.Build(0x00010000, tables);
+    }
+}
+
 [CollectionDefinition(Name, DisableParallelization = true)]
 public sealed class HostileInputCollection
 {

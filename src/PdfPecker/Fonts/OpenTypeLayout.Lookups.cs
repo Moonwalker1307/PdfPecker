@@ -33,10 +33,16 @@ internal sealed partial class OpenTypeLayout
     // per thousand glyphs instead of running for hours.
     private const int BaseOperations = 100_000, OperationsPerGlyph = 5_000;
 
+    // How long multiple substitutions may make the run: HarfBuzz allows its buffer 64 times the text and at least 16,384
+    // glyphs, and a glyph here takes about twice the memory of one there, hence half the factor. Real fonts stay far
+    // below: of the fixture and bundled fonts and the thirteen complex-script fonts measured, Noto Nastaliq Urdu grows
+    // the run the most, to just over twice its characters.
+    private const int MinRunLength = 16_384, RunLengthPerGlyph = 32;
+
     /// <summary>The run being shaped and the lookup being applied to it, kept per thread so applying one allocates nothing.</summary>
     private sealed class LookupState
     {
-        public List<GlyphInfo> Buf = null!;
+        public GlyphRun Buf = null!;
         public bool Gpos;
         public bool Rtl;
         public uint LookupMask;
@@ -46,6 +52,9 @@ internal sealed partial class OpenTypeLayout
 
         /// <summary>The steps the shaping call has left; see <see cref="OperationBudget"/>.</summary>
         public int Operations;
+
+        /// <summary>The most glyphs the run may grow to; see <see cref="MaxRunLength"/>.</summary>
+        public int MaxLength;
 
         /// <summary>The marks a ligature keeps after it, reused from ligature to ligature.</summary>
         public readonly List<GlyphInfo> KeptMarks = new();
@@ -65,11 +74,20 @@ internal sealed partial class OpenTypeLayout
     /// </remarks>
     public static int OperationBudget(int glyphs) => (int)Math.Min(int.MaxValue, BaseOperations + (long)OperationsPerGlyph * glyphs);
 
+    /// <summary>The most glyphs that GSUB may make of a run of <paramref name="glyphs"/> glyphs.</summary>
+    /// <remarks>
+    /// Each multiple substitution may replace a glyph with thousands, and the next lookup can expand each of those
+    /// again, so a small font could make billions of glyphs of a few words. A substitution that would make the run
+    /// longer than this is not applied; the ones that keep it as long or shorter still are.
+    /// </remarks>
+    public static int MaxRunLength(int glyphs) => (int)Math.Clamp((long)RunLengthPerGlyph * glyphs, MinRunLength, Array.MaxLength);
+
     /// <summary>
     /// Applies one lookup over the whole run, to the glyphs that have one of the mask bits, taking its steps from
-    /// <paramref name="operations"/>, which <see cref="OperationBudget"/> starts for the shaping call.
+    /// <paramref name="operations"/>, which <see cref="OperationBudget"/> starts for the shaping call, and making the
+    /// run no longer than <paramref name="maxLength"/> (see <see cref="MaxRunLength"/>).
     /// </summary>
-    public void ApplyLookup(List<GlyphInfo> buf, bool gpos, int lookupIndex, uint mask, bool rtl, ref int nextLigId, ref int operations)
+    public void ApplyLookup(GlyphRun buf, bool gpos, int lookupIndex, uint mask, bool rtl, ref int nextLigId, ref int operations, int maxLength)
     {
         int table = gpos ? _gpos : _gsub;
         if (table < 0 || operations <= 0) return;
@@ -83,6 +101,7 @@ internal sealed partial class OpenTypeLayout
         c.Depth = 0;
         c.NextLigId = nextLigId;
         c.Operations = operations;
+        c.MaxLength = maxLength;
         int type = _reader.U16(lookup + LookupTypeField);
         c.LookupFlag = LookupFlagOf(lookup);
         if (!gpos && SubtableType(lookup, type) == ReverseChainingSubstitution) ApplyBackwards(c, lookup);
