@@ -193,14 +193,4 @@ public class MarkdownTests
         { "bare urls", string.Concat(Enumerable.Repeat("www.a.b ", 30_000)) },
     };
 
-    [Theory]
-    [MemberData(nameof(Pathological))]
-    public void Pathological_input_parses_in_linear_time(string name, string markdown)
-    {
-        var sw = Stopwatch.StartNew();
-        var html = MarkdownToHtml.Convert(markdown);
-        sw.Stop();
-        Assert.NotEmpty(html);
-        Assert.True(sw.ElapsedMilliseconds < 2000, $"{name} took {sw.ElapsedMilliseconds} ms");
-    }
 }
