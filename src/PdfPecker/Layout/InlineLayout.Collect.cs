@@ -226,10 +226,34 @@ internal sealed partial class LayoutEngine
         st.LastWasSpace = false;
     }
 
+    /// <summary>
+    /// Each inline-block laid out while measuring intrinsic widths, by element and available width: its size, and the
+    /// anchors and positioned boxes it passes on to the content around it, without its drawing.
+    /// </summary>
+    private readonly Dictionary<(Element, float), Captured> _measuredInlineBlocks = new();
+
     /// <summary>An inline-block (or an image laid out as a box): laid out on its own and carried as one item.</summary>
     private Item LayoutInlineBlock(Element e, float availW, string? href)
     {
-        var c = CaptureBox(e, availW, shrinkToFit: true);
+        Captured c;
+        if (!_measuring) c = CaptureBox(e, availW, shrinkToFit: true);
+        else if (_measuredInlineBlocks.TryGetValue((e, MeasuredWidthKey(e, availW)), out var measured)) c = measured;
+        else
+        {
+            // Measuring an element's intrinsic widths lays out the inline-blocks in it, and laying out one of those
+            // measures the inline-blocks inside it first and then lays them out again, so an inline-block nested n deep
+            // was laid out once for every level above it, and its drawing was copied up through every level each time.
+            // Measurement is unpaginated and its drawing is thrown away, so the same element in the same width always
+            // gets the same size: it is laid out once, and later measurements reuse that without drawing anything.
+            var laid = CaptureBox(e, availW, shrinkToFit: true);
+            _measuredInlineBlocks[(e, MeasuredWidthKey(e, availW))] = new Captured
+            {
+                Ops = [], AnchorIds = laid.AnchorIds, Width = laid.Width, Height = laid.Height, Baseline = laid.Baseline,
+                ForcedBreaks = laid.ForcedBreaks, BoxX = laid.BoxX, BoxY = laid.BoxY, BoxW = laid.BoxW, BoxH = laid.BoxH,
+                Absolutes = laid.Absolutes,
+            };
+            c = laid;
+        }
         float baseline = float.IsNaN(c.Baseline) ? c.Height : c.Baseline;
         var item = new Item { Kind = ItemKind.Box, Style = e.Style, Width = c.Width, Height = c.Height, BoxBaseline = baseline, Capture = c, Href = href };
         if (_measuring)
@@ -239,6 +263,26 @@ internal sealed partial class LayoutEngine
             item.MinWidth = Math.Min(c.Width, Intrinsic(e).Min + FixedHorizontalMargins(e.Style));
         }
         return item;
+    }
+
+    /// <summary>
+    /// The available width a measured inline-block is kept under. The box shrinks to its max-content width wherever
+    /// that fits, so when its own width, margins and padding do not depend on the available width either, every width
+    /// with room for it gives the same layout, and they share one entry. Otherwise each level of nested inline-blocks
+    /// wider than the measuring width offers the boxes inside a slightly narrower width, and they would be laid out
+    /// again for every level. Only a box whose intrinsic widths are known is shared, so that measuring them still
+    /// happens where the layout does it.
+    /// </summary>
+    private float MeasuredWidthKey(Element e, float availW)
+    {
+        var s = e.Style;
+        if (e.Name is "img" or "svg" || !_intrinsicCache.TryGetValue(e, out var intrinsic)) return availW;
+        if (s.Width.IsPercent || s.MinWidth.IsPercent || s.MaxWidth.IsPercent
+            || s.MarginLeft.IsAuto || s.MarginLeft.IsPercent || s.MarginRight.IsAuto || s.MarginRight.IsPercent
+            || s.MarginTop.IsPercent || s.MarginBottom.IsPercent
+            || s.PaddingLeft.IsPercent || s.PaddingRight.IsPercent || s.PaddingTop.IsPercent || s.PaddingBottom.IsPercent)
+            return availW;
+        return availW - s.MarginLeft.Value - s.MarginRight.Value >= intrinsic.Max ? float.PositiveInfinity : availW;
     }
 
     // ------------------------------------------------------------------ leaders
