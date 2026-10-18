@@ -173,7 +173,11 @@ public sealed class PdfOptions
 
     /// <summary>
     /// Optional callback that returns the bytes for a resource URL (images and stylesheets), or null to fall back to the
-    /// default handling. Use it to serve http(s) resources, embedded resources or a cache: the converter never touches the network itself.
+    /// default handling. Use it to serve http(s) resources, embedded resources or a cache: the conversion itself never
+    /// touches the network, so http(s) URLs load only through this callback. Only signing goes online, and only when
+    /// asked to: <see cref="Signature"/> with a <see cref="PdfSignatureOptions.TimestampUrl"/> contacts that timestamp
+    /// server, and <see cref="PdfSigner.AddValidationData(byte[], PdfLtvOptions?, string?)"/> fetches OCSP and CRL data
+    /// when <see cref="PdfLtvOptions.FetchRevocationData"/> is on.
     /// </summary>
     public Func<string, byte[]?>? ResourceResolver { get; set; }
 

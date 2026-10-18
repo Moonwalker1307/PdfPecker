@@ -59,7 +59,7 @@ var renderer = PdfRenderer.Open(pdf);
 renderer.RenderPage(0, new ImageOptions { Dpi = 150 }).Save("page1.png");
 ```
 
-The conversion methods are static and thread-safe, so you can convert many documents in parallel. The few instance types are `FontCollection` and `PdfRenderer`, which can be shared by parallel work, and `StreamingPdfMerger`, which builds one output and is used from one thread at a time.
+The conversion methods are static and thread-safe, so you can convert many documents in parallel. The few instance types are `FontCollection` and `PdfRenderer`, which can be shared by parallel work, and `StreamingPdfMerger`, which is not thread-safe: it builds one output and is used from one thread at a time.
 
 ## Features
 
@@ -78,8 +78,11 @@ The conversion methods are static and thread-safe, so you can convert many docum
 - **PDF to image**: renders any PDF page, including JPEG 2000, JBIG2 and CCITT images, to PNG, JPEG or WebP, or a whole PDF to one multi-page TIFF (colour, greyscale or black and white with CCITT Group 4). [More](https://pdfpecker.net/docs/pdf-to-image/)
 - **Safe failures**: the library's own errors share the base class `PdfPeckerException`, and the `*File` methods write through a temporary file, so a failure never leaves a half-written output.
 
-PdfPecker is built for HTML templates you control: it runs no JavaScript and never fetches anything from the network on
-its own. See the [limitations](https://pdfpecker.net/docs/limitations/) for what it does not do yet.
+PdfPecker is built for HTML templates you control: it runs no JavaScript, and conversion never fetches anything from
+the network (remote images and stylesheets load only through a `ResourceResolver` you supply). Only signing goes online,
+and only when you ask: a timestamp from the server you name in `TimestampUrl`, OCSP and CRL data for long-term
+validation when you turn on `FetchRevocationData`, and online revocation checks when verification uses
+`X509RevocationMode.Online`. See the [limitations](https://pdfpecker.net/docs/limitations/) for what it does not do yet.
 
 ## How it compares
 
