@@ -90,11 +90,35 @@ jobs:
       - run: dotnet build -c Release -p:Version=${{ steps.version.outputs.version }}
       - run: dotnet test -c Release --no-build
 
-      # Coverage is a separate pass on net10.0 and never fails the build: instrumentation makes the tests that bound
-      # their run time (hostile input, damaged streams) many times slower, so they would fail for the wrong reason.
+      - run: dotnet pack src/PdfPecker -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: PdfPecker.${{ steps.version.outputs.version }}.nupkg
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
+
+  # Coverage runs the net10.0 tests a second time with instrumentation, so it has a job of its own that runs alongside
+  # the build job instead of adding two minutes after its tests.
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - run: dotnet build -c Release -f net10.0 tests/PdfPecker.Tests
+
+      # Coverage never fails the build: instrumentation makes the tests that bound their run time (hostile input,
+      # damaged streams) many times slower, so they are left out and the step may not fail the job.
       - name: Coverage
         continue-on-error: true
-        run: dotnet test -c Release --no-build -f net10.0 --filter "FullyQualifiedName!~HostileInputTests&FullyQualifiedName!~TimeBoundTests&FullyQualifiedName!~FuzzFindingTests" --collect:"XPlat Code Coverage" --results-directory coverage
+        run: dotnet test -c Release --no-build -f net10.0 tests/PdfPecker.Tests --filter "FullyQualifiedName!~HostileInputTests&FullyQualifiedName!~TimeBoundTests&FullyQualifiedName!~FuzzFindingTests" --collect:"XPlat Code Coverage" --results-directory coverage
 
       - name: Coverage summary
         run: |
@@ -112,15 +136,6 @@ jobs:
         with:
           name: coverage
           path: coverage/**/coverage.cobertura.xml
-
-      - run: dotnet pack src/PdfPecker -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: PdfPecker.${{ steps.version.outputs.version }}.nupkg
-          path: |
-            artifacts/*.nupkg
-            artifacts/*.snupkg
 
   # Build and tests on Windows, for net10.0 only, because paths, fonts and line endings differ there.
   windows:
