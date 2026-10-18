@@ -5,10 +5,16 @@ using PdfPecker;
 // A dependency-free benchmark harness: warm up, then time many conversions and report percentiles.
 // Usage: dotnet run -c Release [-- iterations]
 //        dotnet run -c Release -- --perf results.json   (short JSON run for the CI regression check, see Perf.cs)
+//        dotnet run -c Release -- --cold   (one conversion in a fresh process, which the --perf run starts several of)
 //        dotnet run -c Release -- --requirements [extra.html ...]   (memory and CPU per conversion, see Requirements.cs)
 if (args.Length > 1 && args[0] == "--perf")
 {
     Perf.Run(args[1]);
+    return;
+}
+if (args.Length > 0 && args[0] == "--cold")
+{
+    Perf.ColdRun();
     return;
 }
 if (args.Length > 0 && args[0].StartsWith("--requirements"))

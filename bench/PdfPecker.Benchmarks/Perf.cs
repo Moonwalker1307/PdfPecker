@@ -14,8 +14,8 @@ using PdfPecker.Rendering.Graphics;
 using PdfPecker.Rendering.Parsing;
 using PdfPecker.Text;
 
-// A short, machine-readable run for the performance regression check in .github/workflows/perf.yml: about 30 seconds,
-// eighteen cases, JSON output. Allocation per conversion is deterministic, so the workflow compares it tightly; time is
+// A short, machine-readable run for the performance regression check in .github/workflows/perf.yml: about two minutes,
+// thirty-eight cases, JSON output. Allocation per conversion is deterministic, so the workflow compares it tightly; time is
 // noisy on shared runners, so it is compared with a wide margin and only against runs on the same processor model.
 // Usage: dotnet run -c Release -- --perf results.json
 static class Perf
@@ -190,6 +190,32 @@ static class Perf
         // stream is found through the keyword index instead of its /Length. One run opens each and decodes every stream.
         var damagedInputs = DamagedInputs(parseInputs);
         results.Add(Measure("recover-pdf", () => { foreach (var (data, password) in damagedInputs) OpenAndDecodeAll(data, password); }, runs: 60));
+
+        // Hyphenation: narrow justified paragraphs in each of the eleven languages with patterns, so most lines end in a
+        // hyphenated word. The patterns are loaded on first use and kept, so this times the lookups, not the loading.
+        results.Add(Measure("hyphenate", HyphenationPage(), null, runs: 20));
+
+        // Nested layouts: blocks of flex in grid in table cells in inline-blocks in column flex, eight levels deep, the
+        // shapes whose layout used to grow with the nesting depth.
+        results.Add(Measure("nested-layouts", NestedPage(), null, runs: 20));
+
+        // Tagged PDF/UA-1: the 30-page report with its structure tree, marked content and role map written.
+        var ua = new PdfOptions { Accessibility = PdfAccessibility.PdfUA1, Title = "Report" };
+        results.Add(Measure("tag-pdfua", () => HtmlToPdf.Convert(report, ua), runs: 15));
+
+        // Working with existing PDFs: merging the report and the invoice, splitting the report into files of ten pages,
+        // stamping HTML onto every page of the report, and extracting the report's text.
+        var reportPdf = HtmlToPdf.Convert(report);
+        var invoicePdf = HtmlToPdf.Convert(invoice, new PdfOptions { BaseDirectory = htmlDir });
+        results.Add(Measure("merge-pdfs", () => PdfMerger.Merge(reportPdf, invoicePdf, reportPdf), runs: 30));
+        results.Add(Measure("split-pdf", () => PdfPages.Split(reportPdf, 10), runs: 30));
+        results.Add(Measure("stamp-html", () => PdfStamper.StampHtml(reportPdf, "<div style='text-align:right;color:#c00;font:bold 14pt Arial'>PAID</div>"), runs: 30));
+        results.Add(Measure("extract-text", () => PdfText.Extract(reportPdf), runs: 30));
+
+        // The first conversion in a fresh process, which pays for JIT compilation, the font and pattern resources and
+        // the caches; the median of several processes. Each child reports its own time and allocation, so process
+        // start-up is not counted.
+        results.Add(Cold("cold-invoice", runs: 5));
 
         // Throughput with every core busy; documents per second is the figure, so higher is better.
         var options = new PdfOptions { BaseDirectory = htmlDir };
@@ -749,6 +775,94 @@ static class Perf
         {
             if (file.GetObject(number) is PdfStream stream) file.DecodeStream(stream, stopAtImageFilter: true, out _, out _);
         }
+    }
+
+    /// <summary>
+    /// The invoice's first conversion in a fresh process (see <see cref="ColdRun"/>), run <paramref name="runs"/> times:
+    /// the median time, and the allocation of the last.
+    /// </summary>
+    static (string, double, long, double?) Cold(string name, int runs)
+    {
+        string self = typeof(Perf).Assembly.Location;
+        string host = Environment.ProcessPath ?? "dotnet";
+        bool viaDotnet = Path.GetFileNameWithoutExtension(host).Equals("dotnet", StringComparison.OrdinalIgnoreCase);
+        var times = new double[runs];
+        long alloc = 0;
+        for (int i = 0; i < runs; i++)
+        {
+            var start = new ProcessStartInfo(host) { RedirectStandardOutput = true, UseShellExecute = false };
+            if (viaDotnet) start.ArgumentList.Add(self);
+            start.ArgumentList.Add("--cold");
+            using var process = Process.Start(start)!;
+            var output = process.StandardOutput.ReadToEnd().Trim().Split(' ');
+            process.WaitForExit();
+            if (process.ExitCode != 0 || output.Length != 2) throw new InvalidOperationException($"The cold run failed: {string.Join(' ', output)}");
+            times[i] = double.Parse(output[0], CultureInfo.InvariantCulture);
+            alloc = long.Parse(output[1], CultureInfo.InvariantCulture);
+        }
+        Array.Sort(times);
+        return (name, times[runs / 2], alloc, null);
+    }
+
+    /// <summary>
+    /// Converts the invoice once and prints the time in milliseconds and the bytes allocated, for <see cref="Cold"/>.
+    /// Allocation is counted over all threads, since the first conversion also fills caches.
+    /// </summary>
+    public static void ColdRun()
+    {
+        var htmlDir = Path.Combine(AppContext.BaseDirectory, "html");
+        var invoice = File.ReadAllText(Path.Combine(htmlDir, "invoice.html"));
+        long alloc = GC.GetTotalAllocatedBytes(precise: true);
+        long t0 = Stopwatch.GetTimestamp();
+        HtmlToPdf.Convert(invoice, new PdfOptions { BaseDirectory = htmlDir });
+        double ms = Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
+        alloc = GC.GetTotalAllocatedBytes(precise: true) - alloc;
+        Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"{ms:F3} {alloc}"));
+    }
+
+    /// <summary>Narrow justified paragraphs with automatic hyphenation in every language that has patterns.</summary>
+    static string HyphenationPage()
+    {
+        var texts = new (string Lang, string Text)[]
+        {
+            ("en-US", "Extraordinarily knowledgeable internationalization specialists contemplate antidisestablishmentarianism, photosynthesis and characteristically uncharacteristic documentation."),
+            ("da", "Arbejdsmarkedsuddannelserne og sundhedsplejerskerne gennemgår forsikringsselskabernes erstatningsansvar for virksomhedsoverdragelser i kommunalbestyrelserne."),
+            ("de", "Die Donaudampfschifffahrtsgesellschaft verlangt Arbeitsunfähigkeitsbescheinigungen und Rechtsschutzversicherungen von den Mitarbeitervertretungen."),
+            ("no", "Arbeidsmiljøloven og sykehusavdelingene undersøker forsikringsselskapenes erstatningsansvar ved virksomhetsoverdragelser i kommunestyrene."),
+            ("nl", "Arbeidsongeschiktheidsverzekeringen en ziektekostenverzekeraars onderzoeken de gemeenteraadsverkiezingen en de verantwoordelijkheidsverdeling."),
+            ("es", "Los otorrinolaringólogos internacionalmente reconocidos estudian electroencefalografías y desoxirribonucleicos con extraordinaria responsabilidad."),
+            ("fr", "Anticonstitutionnellement, les internationalisations administratives deviennent incompréhensibles pour les responsabilités gouvernementales."),
+            ("it", "Precipitevolissimevolmente gli ingegneri internazionalizzano la documentazione amministrativa e le responsabilità organizzative."),
+            ("pt", "Os otorrinolaringologistas internacionais descrevem inconstitucionalmente procedimentos extraordinariamente complicados e responsabilidades."),
+            ("pl", "Dziewięćdziesięciosześcioletni przedsiębiorcy rozwiązywali nieprzewidywalne zobowiązania konstantynopolitańczykowianeczki z odpowiedzialnością."),
+            ("sv", "Nationalencyklopedin och sjukförsäkringsersättningarna utreds av försäkringskassornas handläggare och kommunfullmäktigeledamöterna."),
+        };
+        var sb = new StringBuilder("<html><head><style>body{font:10pt Arial;margin:12px} p{width:110px;display:inline-block;vertical-align:top;margin:0 8px 8px 0;text-align:justify;hyphens:auto}</style></head><body>");
+        for (int repeat = 0; repeat < 4; repeat++)
+            foreach (var (lang, text) in texts) sb.Append("<p lang='").Append(lang).Append("'>").Append(text).Append("</p>");
+        return sb.Append("</body></html>").ToString();
+    }
+
+    /// <summary>Blocks of layouts nested eight levels deep, each level a different kind of box.</summary>
+    static string NestedPage()
+    {
+        string[] open =
+        {
+            "<div style='display:flex;gap:4px'>", "<div style='display:grid;grid-template-columns:1fr auto;gap:4px'>",
+            "<table style='border-collapse:collapse'><tr><td style='border:1px solid #999;padding:2px'>",
+            "<div style='display:inline-block;border:1px solid #ccc;padding:2px'>", "<div style='display:flex;flex-direction:column'>",
+        };
+        string[] close = { "</div>", "</div>", "</td></tr></table>", "</div>", "</div>" };
+        var sb = new StringBuilder("<html><head><style>body{font:8pt Arial;margin:12px} .b{margin-bottom:6px}</style></head><body>");
+        for (int block = 0; block < 12; block++)
+        {
+            sb.Append("<div class='b'>");
+            for (int level = 0; level < 8; level++) sb.Append(open[(block + level) % open.Length]).Append("<span>Level ").Append(level).Append("</span>");
+            sb.Append("<span>Innermost text of block ").Append(block).Append(", long enough to wrap inside its boxes.</span>");
+            for (int level = 7; level >= 0; level--) sb.Append(close[(block + level) % open.Length]);
+            sb.Append("</div>");
+        }
+        return sb.Append("</body></html>").ToString();
     }
 
     static (string, double, long, double?) Measure(string name, string html, string? baseDir, int runs)
