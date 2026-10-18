@@ -283,11 +283,19 @@ internal sealed partial class LayoutEngine
         }
         else if (target >= sumMin)
         {
-            float range = sumMax - sumMin;
+            // As in Chrome, columns with a width grow from their minimum to that width first; only then do the other
+            // columns grow from their minimum towards their content's width.
+            float sumSpecified = 0;
+            for (int c = 0; c < n; c++)
+                if (m.ColPct[c] < 0) sumSpecified += m.ColFixed[c] >= 0 ? m.ColMax[c] : m.ColMin[c];
+            bool fixedReached = target >= sumSpecified;
+            float from = fixedReached ? sumSpecified : sumMin, range = (fixedReached ? sumMax : sumSpecified) - from;
             for (int c = 0; c < n; c++)
             {
                 if (m.ColPct[c] >= 0) continue;
-                w[c] = m.ColMin[c] + (range > 0 ? (m.ColMax[c] - m.ColMin[c]) * (target - sumMin) / range : 0);
+                bool grows = (m.ColFixed[c] >= 0) != fixedReached;
+                if (m.ColFixed[c] >= 0 && fixedReached) w[c] = m.ColMax[c];
+                else w[c] = m.ColMin[c] + (grows && range > 0 ? (m.ColMax[c] - m.ColMin[c]) * (target - from) / range : 0);
             }
         }
         else
