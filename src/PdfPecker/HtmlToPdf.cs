@@ -40,7 +40,7 @@ public static partial class HtmlToPdf
         var html = File.ReadAllText(htmlPath);
         options ??= new PdfOptions();
         var baseDir = options.BaseDirectory ?? Path.GetDirectoryName(Path.GetFullPath(htmlPath));
-        File.WriteAllBytes(pdfPath, Render(html, options, baseDir));
+        AtomicFile.WriteAllBytes(pdfPath, Render(html, options, baseDir));
     }
 
     /// <summary>Converts an HTML string to a PDF asynchronously on the thread pool.</summary>

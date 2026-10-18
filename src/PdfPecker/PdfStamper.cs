@@ -140,7 +140,7 @@ public static class PdfStamper
 
     /// <summary>Stamps a PDF file and writes the result to <paramref name="outputPath"/> (which may be the same path).</summary>
     public static void StampFile(string inputPath, string stampPath, string outputPath, PdfStampOptions? options = null)
-        => File.WriteAllBytes(outputPath, Stamp(File.ReadAllBytes(inputPath), File.ReadAllBytes(stampPath), options));
+        => AtomicFile.WriteAllBytes(outputPath, Stamp(File.ReadAllBytes(inputPath), File.ReadAllBytes(stampPath), options));
 
     /// <summary>
     /// Stamps the pages of <paramref name="pdf"/> with HTML, rendered at the size of each page (as displayed) with no

@@ -3,7 +3,7 @@ using PdfPecker.Signing;
 namespace PdfPecker;
 
 /// <summary>Thrown when a PDF cannot be signed, e.g. because the timestamp server or the external signer failed.</summary>
-public sealed class PdfSignatureException : Exception
+public sealed class PdfSignatureException : PdfPeckerException
 {
     /// <summary>Creates the exception with a message saying why signing failed.</summary>
     public PdfSignatureException(string message) : base(message) { }
@@ -71,5 +71,5 @@ public static class PdfSigner
 
     /// <summary>Signs a PDF file and writes the signed copy to <paramref name="outputPath"/> (which may be the same path).</summary>
     public static void SignFile(string inputPath, string outputPath, PdfSignatureOptions options, string? password = null)
-        => File.WriteAllBytes(outputPath, Sign(File.ReadAllBytes(inputPath), options, password));
+        => AtomicFile.WriteAllBytes(outputPath, Sign(File.ReadAllBytes(inputPath), options, password));
 }

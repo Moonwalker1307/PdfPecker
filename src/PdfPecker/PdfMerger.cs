@@ -206,26 +206,7 @@ public static class PdfMerger
     {
         if (outputPath == null) throw new ArgumentNullException(nameof(outputPath));
         if (inputPaths == null) throw new ArgumentNullException(nameof(inputPaths));
-        WriteFile(outputPath, output => Merge(OpenFiles(inputPaths), output, options, cancellationToken));
-    }
-
-    /// <summary>Writes a file through a temporary one that is moved into place once <paramref name="write"/> succeeds.</summary>
-    internal static void WriteFile(string outputPath, Action<Stream> write)
-    {
-        if (outputPath == null) throw new ArgumentNullException(nameof(outputPath));
-        var full = Path.GetFullPath(outputPath);
-        var temp = Path.Combine(Path.GetDirectoryName(full)!, "." + Path.GetFileName(full) + "." + Guid.NewGuid().ToString("N")[..8] + ".tmp");
-        try
-        {
-            using (var output = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1 << 16))
-                write(output);
-            File.Move(temp, full, overwrite: true);
-        }
-        catch
-        {
-            try { File.Delete(temp); } catch (IOException) { } catch (UnauthorizedAccessException) { }
-            throw;
-        }
+        AtomicFile.Write(outputPath, output => Merge(OpenFiles(inputPaths), output, options, cancellationToken));
     }
 
     private static IEnumerable<Stream> OpenFiles(IEnumerable<string> paths)

@@ -192,7 +192,7 @@ public sealed class RenderedImage
     public byte[] ToPng() => PngEncoder.Encode(_premultiplied, Width, Height, _compression);
 
     /// <summary>Writes the image as a PNG file.</summary>
-    public void SavePng(string path) => File.WriteAllBytes(path, ToPng());
+    public void SavePng(string path) => AtomicFile.WriteAllBytes(path, ToPng());
 
     /// <summary>
     /// Encodes the image as baseline JPEG. JPEG has no alpha: transparent and translucent pixels are flattened onto
@@ -234,7 +234,7 @@ public sealed class RenderedImage
     };
 
     /// <summary>Writes the image to a file in <see cref="Format"/> (the path is used as given, whatever its extension).</summary>
-    public void Save(string path) => File.WriteAllBytes(path, Encode());
+    public void Save(string path) => AtomicFile.WriteAllBytes(path, Encode());
 
     /// <summary>The usual file extension of a format, with the dot: ".png", ".jpg", ".webp" or ".tif".</summary>
     public static string GetFileExtension(PdfImageFormat format) => format switch
@@ -433,7 +433,7 @@ public static class PdfToImage
 
     /// <summary>Renders a PDF file into one multi-page TIFF file (see <see cref="ConvertToTiff"/>).</summary>
     public static void ConvertFileToTiff(string pdfPath, string tiffPath, ImageOptions? options = null)
-        => File.WriteAllBytes(tiffPath, PdfRenderer.OpenFile(pdfPath, options?.Password).RenderAllToTiff(options));
+        => AtomicFile.WriteAllBytes(tiffPath, PdfRenderer.OpenFile(pdfPath, options?.Password).RenderAllToTiff(options));
 
     /// <summary>
     /// Renders a PDF file's pages to image files in <paramref name="outputDirectory"/>, named
@@ -451,7 +451,7 @@ public static class PdfToImage
         for (int i = 0; i < images.Length; i++)
         {
             paths[i] = Path.Combine(outputDirectory, $"{name}-{i + 1}{extension}");
-            File.WriteAllBytes(paths[i], images[i]);
+            AtomicFile.WriteAllBytes(paths[i], images[i]);
         }
         return paths;
     }
