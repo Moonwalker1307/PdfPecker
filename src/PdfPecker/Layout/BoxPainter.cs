@@ -40,9 +40,35 @@ internal static partial class BoxPainter
         if (s.OutlineStyle != BorderStyle.None && !collapsedCell) PaintOutline(group, s, x, y, w, h, radii);
     }
 
-    /// <summary>The background colour, clipped like the bottom layer, under the background layers, the last layer first.</summary>
-    private static void PaintBackground(GroupOp group, ComputedStyle s, float x, float y, float w, float h, ImageLoader? images, float basis, CornerRadii? radii)
+    /// <summary>
+    /// Paints the background of one line fragment of an inline box, (fx, fy, fw, fh) in <paramref name="fragment"/>, whose
+    /// corners are <paramref name="radii"/>. The background is laid out on the border box (x, y, w, h): the fragment
+    /// itself, or with box-decoration-break: slice all the box's fragments put side by side, of which it shows this
+    /// fragment's part. <paramref name="fade"/> is the opacity the inline box and the inline boxes around it give it.
+    /// </summary>
+    public static void PaintFragment(GroupOp group, ComputedStyle s, float x, float y, float w, float h, (float X, float Y, float W, float H) fragment,
+        CornerRadii? radii, ImageLoader? images, float fade)
     {
+        if (!s.Visible || !(fragment.W > 0 && fragment.H > 0)) return;
+        // A translucent background colour is faded on its own; with layers, the whole background is one translucent group.
+        if (fade < 1 && s.BackgroundImages != null)
+        {
+            var layer = new LayerOp { Opacity = fade };
+            group.Ops.Add(layer);
+            group = layer;
+            fade = 1;
+        }
+        PaintBackground(group, s, x, y, w, h, images, 0, radii, fragment, fade);
+    }
+
+    /// <summary>
+    /// The background colour, clipped like the bottom layer, under the background layers, the last layer first; with a
+    /// <paramref name="fragment"/>, only the part in it, with its corners rounded by <paramref name="radii"/>.
+    /// </summary>
+    private static void PaintBackground(GroupOp group, ComputedStyle s, float x, float y, float w, float h, ImageLoader? images, float basis, CornerRadii? radii,
+        (float X, float Y, float W, float H)? fragment = null, float fade = 1)
+    {
+        var (fx, fy, fw, fh) = fragment ?? (x, y, w, h);
         var layers = s.BackgroundImages;
         // background-clip: text paints the background only inside the glyphs of the box's text: the background goes in a
         // layer that the layout gives copies of that text (see LayoutEngine.ClipBackgroundToText).
@@ -63,12 +89,13 @@ internal static partial class BoxPainter
         if (CssColor.IsVisible(s.BackgroundColor))
         {
             var clip = LayerValue(s.BackgroundClips, layers == null ? 0 : layers.Length - 1, BackgroundBox.BorderBox);
-            var (cx, cy, cw, ch) = BoxOf(s, clip, x, y, w, h, basis);
+            var (cx, cy, cw, ch) = Within(BoxOf(s, clip, x, y, w, h, basis), fragment);
             if (cw > 0 && ch > 0)
             {
-                if (InnerRadii(radii, cx - x, cy - y, x + w - cx - cw, y + h - cy - ch) is { } cr)
-                    group.Ops.Add(new RoundRectOp(cx, cy, cw, ch, cr, s.BackgroundColor));
-                else group.Ops.Add(new RectOp(cx, cy, cw, ch, s.BackgroundColor));
+                uint color = CssColor.Fade(s.BackgroundColor, fade);
+                if (InnerRadii(radii, cx - fx, cy - fy, fx + fw - cx - cw, fy + fh - cy - ch) is { } cr)
+                    group.Ops.Add(new RoundRectOp(cx, cy, cw, ch, cr, color));
+                else group.Ops.Add(new RectOp(cx, cy, cw, ch, color));
             }
         }
         if (layers == null) return;
@@ -77,7 +104,7 @@ internal static partial class BoxPainter
         {
             if (layers[i] is not { } layer) continue;
             int before = group.Ops.Count;
-            PaintLayer(group, s, layer, i, x, y, w, h, images, basis, backdrop, radii);
+            PaintLayer(group, s, layer, i, x, y, w, h, images, basis, backdrop, radii, fragment: fragment);
             if (s.BackgroundBlendModes is { Length: > 0 } modes && group.Ops.Count > before && group.Ops[^1] is BackgroundOp bg)
                 bg.BlendMode = modes[i % modes.Length];
         }
@@ -142,6 +169,25 @@ internal static partial class BoxPainter
 
     /// <summary>The value of background layer <paramref name="i"/> in a comma-separated list, which repeats when shorter than the layers.</summary>
     private static T LayerValue<T>(T[]? list, int i, T initial) => list is { Length: > 0 } ? list[i % list.Length] : initial;
+
+    /// <summary>The part of a rectangle inside a fragment of the box, or the whole rectangle when there is no fragment.</summary>
+    private static (float X, float Y, float W, float H) Within((float X, float Y, float W, float H) r, (float X, float Y, float W, float H)? fragment)
+    {
+        if (fragment is not { } f) return r;
+        float x0 = Math.Max(r.X, f.X), y0 = Math.Max(r.Y, f.Y);
+        return (x0, y0, Math.Min(r.X + r.W, f.X + f.W) - x0, Math.Min(r.Y + r.H, f.Y + f.H) - y0);
+    }
+
+    /// <summary>
+    /// The corners of a line fragment w × h of an inline box: the box's radii resolved on its border box (boxW × boxH),
+    /// on the fragment's left and right side only where the box has that edge, scaled to fit the fragment.
+    /// </summary>
+    public static CornerRadii? FragmentRadii(ComputedStyle s, float boxW, float boxH, float w, float h, bool left, bool right)
+    {
+        if (Radii(s, boxW, boxH) is not { } r) return null;
+        return CornerRadii.Fit(left ? r.TLx : 0, left ? r.TLy : 0, right ? r.TRx : 0, right ? r.TRy : 0,
+            right ? r.BRx : 0, right ? r.BRy : 0, left ? r.BLx : 0, left ? r.BLy : 0, w, h);
+    }
 
     /// <summary>The border, padding or content box of a border box.</summary>
     private static (float X, float Y, float W, float H) BoxOf(ComputedStyle s, BackgroundBox box, float x, float y, float w, float h, float basis)

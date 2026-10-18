@@ -21,7 +21,7 @@ internal sealed partial class LayoutEngine
         return st;
     }
 
-    private void CollectNode(CollectState st, Node node, string? href, ComputedStyle? deco)
+    private void CollectNode(CollectState st, Node node, string? href, InlineDeco? deco)
     {
         if (node is TextNode t)
         {
@@ -77,7 +77,7 @@ internal sealed partial class LayoutEngine
         CollectInlineElement(st, e, s, href, deco);
     }
 
-    private void CollectTextNode(CollectState st, TextNode t, string? href, ComputedStyle? deco)
+    private void CollectTextNode(CollectState st, TextNode t, string? href, InlineDeco? deco)
     {
         if (Tags != null) _textTag = Tags.Of(t);
         var parent = t.Parent!;
@@ -122,19 +122,43 @@ internal sealed partial class LayoutEngine
         && (s.Layered || e.Name == "img" && (s.BorderRadii != null || s.ObjectFit != ObjectFit.Fill || s.OutlineStyle != BorderStyle.None));
 
     /// <summary>An inline element: its padding and borders as spacers around its children, with its bidi controls.</summary>
-    private void CollectInlineElement(CollectState st, Element e, ComputedStyle s, string? href, ComputedStyle? deco)
+    private void CollectInlineElement(CollectState st, Element e, ComputedStyle s, string? href, InlineDeco? deco)
     {
-        if (CssColor.IsVisible(s.BackgroundColor) || s.BoxShadows != null || s.OutlineStyle != BorderStyle.None) deco = s;
-        float left = s.PaddingLeft.Resolve(0) + s.BorderLeft + AutoAsZero(s.MarginLeft);
-        float right = s.PaddingRight.Resolve(0) + s.BorderRight + AutoAsZero(s.MarginRight);
+        float boxLeft = s.PaddingLeft.Resolve(0) + s.BorderLeft, boxRight = s.PaddingRight.Resolve(0) + s.BorderRight;
+        var outer = deco;
+        if (PaintsInlineBox(s) || s.BoxDecorationClone && (boxLeft > 0 || boxRight > 0)) deco = new InlineDeco(s, outer, boxLeft, boxRight);
+        float marginLeft = AutoAsZero(s.MarginLeft), marginRight = AutoAsZero(s.MarginRight);
         int first = st.Items.Count;
         var (bidiOpen, bidiClose) = BidiControls(s);
         if (bidiOpen != null) AddBidiControl(st, s, bidiOpen);
-        if (left > 0) AddSpacer(st, s, left, href, deco);
+        AddInlineEdge(st, s, boxLeft, marginLeft, href, deco, outer, marginFirst: true);
         foreach (var c in e.Children) CollectNode(st, c, href, deco);
-        if (right > 0) AddSpacer(st, s, right, href, deco);
+        AddInlineEdge(st, s, boxRight, marginRight, href, deco, outer, marginFirst: false);
         if (bidiClose != null) AddBidiControl(st, s, bidiClose);
         if (s.Position == Position.Relative) ShiftRelative(st, first, s);
+    }
+
+    /// <summary>Whether an inline element paints anything of its own box: a background, shadows or an outline.</summary>
+    private static bool PaintsInlineBox(ComputedStyle s) =>
+        CssColor.IsVisible(s.BackgroundColor) || s.BackgroundImages != null || s.BoxShadows != null || s.OutlineStyle != BorderStyle.None;
+
+    /// <summary>
+    /// The spacer of one side of an inline element: its padding and border, and its margin outside them. A margin of an
+    /// element that paints its box is a spacer of its own that the element's background leaves out; a negative margin
+    /// stays one spacer with the padding, so that the element still takes the room it did.
+    /// </summary>
+    private void AddInlineEdge(CollectState st, ComputedStyle s, float box, float margin, string? href, InlineDeco? deco, InlineDeco? outer,
+        bool marginFirst)
+    {
+        if (!(box + margin > 0)) return;
+        if (margin <= 0 || ReferenceEquals(deco, outer))
+        {
+            AddSpacer(st, s, box + margin, href, deco);
+            return;
+        }
+        if (marginFirst) AddSpacer(st, s, margin, href, outer);
+        if (box > 0) AddSpacer(st, s, box, href, deco);
+        if (!marginFirst) AddSpacer(st, s, margin, href, outer);
     }
 
     /// <summary>
@@ -288,7 +312,7 @@ internal sealed partial class LayoutEngine
     // ------------------------------------------------------------------ leaders
 
     /// <summary>Generated text with leaders (leader() in content): the text around them, and a leader item for each.</summary>
-    private void AddWithLeaders(CollectState st, string text, ComputedStyle style, string? href, ComputedStyle? deco)
+    private void AddWithLeaders(CollectState st, string text, ComputedStyle style, string? href, InlineDeco? deco)
     {
         int i = 0;
         while (i < text.Length)

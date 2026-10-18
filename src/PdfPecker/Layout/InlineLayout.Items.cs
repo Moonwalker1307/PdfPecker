@@ -38,7 +38,7 @@ internal sealed partial class LayoutEngine
         public bool Breakable;
         public BreakAfter BreakAfter; // a line break opportunity right after this text (hyphen, soft hyphen, ...)
         public string? Href;
-        public ComputedStyle? Deco;   // nearest inline ancestor that paints a background
+        public InlineDeco? Deco;      // nearest inline ancestor that paints a background (or clones its edges)
         public PdfImage? Image;
         public float Height;          // image or inline-block height
         public float BoxBaseline;     // inline-block: distance from its top to its baseline
@@ -97,6 +97,39 @@ internal sealed partial class LayoutEngine
             c.Length = text.Length;
             c.Width = width;
             return c;
+        }
+    }
+
+    /// <summary>
+    /// An inline element that paints a background, shadows or an outline on its line fragments, or that gives each
+    /// fragment its own padding and borders (box-decoration-break: clone), with the nearest such element around it.
+    /// The two collections of a paragraph with a ::first-line style each make their own, so the fragments of one
+    /// element are matched by its style.
+    /// </summary>
+    private sealed class InlineDeco
+    {
+        public readonly ComputedStyle Style;
+        public readonly InlineDeco? Parent;
+        /// <summary>The padding and border widths of the left and right edge, which clone repeats where the element breaks.</summary>
+        public readonly float Left, Right;
+        /// <summary>How many such elements it is inside.</summary>
+        public readonly int Depth;
+        /// <summary>
+        /// The left and right edges that box-decoration-break: clone repeats for this element and those around it
+        /// together, so that a break inside deeply nested boxes is measured without walking them.
+        /// </summary>
+        public readonly float CloneLeft, CloneRight;
+
+        public InlineDeco(ComputedStyle style, InlineDeco? parent, float left, float right)
+        {
+            Style = style;
+            Parent = parent;
+            Left = left;
+            Right = right;
+            Depth = parent == null ? 0 : parent.Depth + 1;
+            bool clone = style.BoxDecorationClone;
+            CloneLeft = (clone ? left : 0) + (parent?.CloneLeft ?? 0);
+            CloneRight = (clone ? right : 0) + (parent?.CloneRight ?? 0);
         }
     }
 
@@ -210,7 +243,7 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>Adds a spacer of <paramref name="width"/>: the padding, border or margin of an inline element or image.</summary>
-    private void AddSpacer(CollectState st, ComputedStyle style, float width, string? href, ComputedStyle? deco = null)
+    private void AddSpacer(CollectState st, ComputedStyle style, float width, string? href, InlineDeco? deco = null)
     {
         var spacer = Rent(ItemKind.Spacer, style);
         spacer.Width = width;
@@ -228,7 +261,7 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>Adds a forced line break; the text after it starts a line, and its first column.</summary>
-    private void AddBreak(CollectState st, ComputedStyle style, string? href = null, ComputedStyle? deco = null)
+    private void AddBreak(CollectState st, ComputedStyle style, string? href = null, InlineDeco? deco = null)
     {
         var br = Rent(ItemKind.Break, style);
         br.Href = href;

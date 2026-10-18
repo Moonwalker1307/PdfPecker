@@ -17,7 +17,89 @@ internal sealed partial class LayoutEngine
     {
         var breaker = new LineBreaker(this, items, availW, firstIndent, fl, after);
         breaker.Run();
+        if (breaker.ClonesEdges) AddCloneEdges(breaker.Lines);
         return breaker.Lines;
+    }
+
+    /// <summary>Whether an inline box among the items gives each of its line fragments its own padding and borders (box-decoration-break: clone).</summary>
+    private static bool HasCloneEdges(List<Item> items)
+    {
+        foreach (var it in items)
+            if (it.Deco is { } d && (d.CloneLeft > 0 || d.CloneRight > 0)) return true;
+        return false;
+    }
+
+    /// <summary>The last item of a line that takes part in it, or -1.</summary>
+    private static int LastContent(List<Item> items)
+    {
+        int k = items.Count - 1;
+        while (k >= 0 && (items[k].IsMarker || items[k].Kind == ItemKind.Float)) k--;
+        return k;
+    }
+
+    /// <summary>The first item from <paramref name="k"/> on that takes part in a line, or with <paramref name="skipSpaces"/> the first that is not a space either; -1 when there is none.</summary>
+    private static int FirstContent(List<Item> items, int k, bool skipSpaces = false)
+    {
+        while (k < items.Count && (items[k].IsMarker || items[k].Kind == ItemKind.Float || skipSpaces && items[k].Kind == ItemKind.Space)) k++;
+        return k < items.Count ? k : -1;
+    }
+
+    /// <summary>
+    /// The padding and borders that box-decoration-break: clone adds where a line breaks between <paramref name="last"/>
+    /// and <paramref name="next"/>: on the right of the line, or on the left of the next line, of each cloned box that
+    /// holds both.
+    /// </summary>
+    private static float CloneEdges(Item last, Item next, bool right)
+    {
+        var d = right ? CommonDeco(last.Deco, next.Deco) : CommonDeco(next.Deco, last.Deco);
+        return d == null ? 0 : right ? d.CloneRight : d.CloneLeft;
+    }
+
+    /// <summary>
+    /// box-decoration-break: clone: where a line breaks inside an inline box, the line ends with the box's right
+    /// padding and border and the next line starts with its left ones, as spacers of the box. The line breaker has
+    /// already kept room for them.
+    /// </summary>
+    private void AddCloneEdges(List<Line> lines)
+    {
+        for (int li = 0; li + 1 < lines.Count; li++)
+        {
+            var a = lines[li].Items;
+            var b = lines[li + 1].Items;
+            int last = LastContent(a), next = FirstContent(b, 0);
+            if (last < 0 || next < 0) continue;
+            Item lastItem = a[last], nextItem = b[next];
+            // The end of the line: the inner box's edge first.
+            int at = last + 1;
+            for (var d = CommonDeco(lastItem.Deco, nextItem.Deco); d != null && d.CloneRight > 0; d = d.Parent)
+                if (d.Style.BoxDecorationClone && d.Right > 0)
+                {
+                    a.Insert(at++, CloneEdge(d, d.Right, lastItem));
+                    lines[li].Width += d.Right;
+                }
+            // The start of the next line: the outer box's edge first.
+            for (var d = CommonDeco(nextItem.Deco, lastItem.Deco); d != null && d.CloneLeft > 0; d = d.Parent)
+                if (d.Style.BoxDecorationClone && d.Left > 0)
+                {
+                    b.Insert(next, CloneEdge(d, d.Left, nextItem));
+                    lines[li + 1].Width += d.Left;
+                }
+        }
+    }
+
+    /// <summary>A spacer of <paramref name="width"/> for the edge of cloned box <paramref name="d"/>, placed like its neighbour on the line.</summary>
+    private Item CloneEdge(InlineDeco d, float width, Item neighbour)
+    {
+        var edge = Rent(ItemKind.Spacer, d.Style);
+        edge.Width = width;
+        edge.Deco = d;
+        edge.Tag = null;
+        edge.Href = neighbour.Href;
+        edge.RelX = neighbour.RelX;
+        edge.RelY = neighbour.RelY;
+        edge.Level = neighbour.Level;
+        edge.Para = neighbour.Para;
+        return edge;
     }
 
     /// <summary>Whether overflow-wrap, word-break or line-break lets a word break between any two characters.</summary>
@@ -51,6 +133,10 @@ internal sealed partial class LayoutEngine
         private Line _cur;
         private bool _hasContent;
         private float _curW, _avail;
+        // box-decoration-break: clone: whether any box clones its edges, and the last item of the line before, until the
+        // left edges it gives this line are counted.
+        public readonly bool ClonesEdges;
+        private Item? _edgeAfter;
 
         public LineBreaker(LayoutEngine engine, List<Item> items, float availW, float firstIndent, FloatLines? fl, List<Item>? after)
         {
@@ -61,6 +147,8 @@ internal sealed partial class LayoutEngine
             _fl = fl;
             _after = after;
             _count = items.Count;
+            ClonesEdges = HasCloneEdges(items) || after != null && HasCloneEdges(after);
+            _edgeAfter = null;
             Lines = engine.RentLineList();
             _cur = engine.RentLine();
             fl?.Begin(Lines);
@@ -72,6 +160,11 @@ internal sealed partial class LayoutEngine
 
         private void Add(Item it)
         {
+            if (_edgeAfter != null && !it.IsMarker && it.Kind != ItemKind.Float)
+            {
+                _curW += CloneEdges(_edgeAfter, it, right: false);
+                _edgeAfter = null;
+            }
             _cur.Items.Add(it);
             if (!it.IsMarker) _hasContent = true;
         }
@@ -91,6 +184,7 @@ internal sealed partial class LayoutEngine
             _cur.Width = width;
             _cur.Forced = forced;
             _fl?.End(_cur);
+            _edgeAfter = ClonesEdges && LastContent(li) is var last and >= 0 ? li[last] : null;
             Lines.Add(_cur);
             _cur = _engine.RentLine();
             _hasContent = false;
@@ -214,6 +308,8 @@ internal sealed partial class LayoutEngine
             // the next.
             bool breakAll = splittable && _items[i].IsText && BreaksAtLineEnd(_items[i].Style);
 
+            // A cloned box the line would break inside ends the line with its right edge.
+            if (ClonesEdges && _hasContent && FirstContent(_items, j, skipSpaces: true) is var next and >= 0) need += CloneEdges(_items[j - 1], _items[next], right: true);
             if (_hasContent && _curW + need > _avail + Eps && !breakAll)
             {
                 bool switching = _after != null;
@@ -268,7 +364,7 @@ internal sealed partial class LayoutEngine
                     return -1;
                 }
                 if (g.IsText && g.Length > 1 && BreaksAnywhere(g.Style))
-                    g = BreakWord(g, room);
+                    g = BreakWord(g, ClonesEdges ? room - CloneEdges(g, g, right: true) : room);
                 else if (!_hasContent)
                 {
                     Add(g); // overflows, nothing else we can do

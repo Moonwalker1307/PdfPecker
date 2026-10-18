@@ -130,6 +130,24 @@ internal sealed partial class LayoutEngine
 
     private float PlaceLines(List<Line> lines, ComputedStyle block, float x, float y, float w, float indent, bool besideFloats = false)
     {
+        // The backgrounds of inline boxes are painted once all their fragments are placed; a footnote laid out while
+        // placing the lines has fragments of its own.
+        var outerFragments = _inlineFragments;
+        _inlineFragments = null;
+        try
+        {
+            y = PlaceLinesCore(lines, block, x, y, w, indent, besideFloats);
+            if (_inlineFragments != null) PaintInlineFragments(_inlineFragments);
+            return y;
+        }
+        finally
+        {
+            _inlineFragments = outerFragments;
+        }
+    }
+
+    private float PlaceLinesCore(List<Line> lines, ComputedStyle block, float x, float y, float w, float indent, bool besideFloats)
+    {
         int n = ClampLines(lines, block, w, indent);
         var (lineA, lineD) = LineExtents(lines, n, block);
         // Beside floats the lines' positions were fixed while breaking them.
@@ -269,13 +287,15 @@ internal sealed partial class LayoutEngine
         var fit = AlignLine(line, block, x, lineLeft, lineW, lineIndent, rtl, spaces);
         float[] xs = ItemPositions(items, fit);
 
-        PaintInlineBackgrounds(items, xs, baseline);
+        int fragments = NoteInlineFragments(items, xs, baseline);
         EmitLinks(items, xs, y, lineH);
 
         // Footnote calls inside inline boxes are placed once the line is drawn, not while its buffers are in use.
         bool deferCalls = _deferFootnoteCalls;
         if (Footnotes != null) _deferFootnoteCalls = true;
+        int textFrom = _ops.Count;
         DrawItems(items, xs, block, x, y, baseline, fit.SpaceExtra);
+        if (fragments >= 0) NoteFragmentText(fragments, textFrom);
         _deferFootnoteCalls = deferCalls;
         if (_deferredFootnoteCalls is { Count: > 0 } && !deferCalls) PlaceDeferredFootnoteCalls();
         _lastBaseline = baseline;
@@ -385,37 +405,6 @@ internal sealed partial class LayoutEngine
         for (int k = 0; k < count; k++) text.Append(pattern);
         _ops.Add(new TextOp(start, baseline, lineTop, style.Font, style.FontSize, CssColor.Fade(style.Color, style.InlineFade), text.ToString(),
             style.WordSpacing, style.LetterSpacing) { Tag = it.Tag });
-    }
-
-    /// <summary>The background, shadows and outline of each inline box with a decoration style, behind its items.</summary>
-    private void PaintInlineBackgrounds(List<Item> items, float[] xs, float baseline)
-    {
-        int i = 0;
-        while (i < items.Count)
-        {
-            var deco = items[i].Deco;
-            if (deco == null) { i++; continue; }
-            int start = i;
-            while (i < items.Count && ReferenceEquals(items[i].Deco, deco)) i++;
-            deco.Font.LineMetrics(deco.FontSize, out float asc, out float desc);
-            float top = baseline + BaselineShift(deco) - asc - deco.PaddingTop.Resolve(0) + items[start].RelY;
-            float h = asc + desc + deco.PaddingTop.Resolve(0) + deco.PaddingBottom.Resolve(0);
-            float rx = xs[start] + items[start].RelX;
-            float width = xs[i] - xs[start];
-            if (deco.BoxShadows != null)
-            {
-                var shadows = new GroupOp();
-                BoxPainter.PaintShadows(shadows, deco, rx, top, width, h);
-                _ops.Add(shadows);
-            }
-            if (CssColor.IsVisible(deco.BackgroundColor)) _ops.Add(new RectOp(rx, top, width, h, CssColor.Fade(deco.BackgroundColor, deco.InlineFade)));
-            if (deco.OutlineStyle != BorderStyle.None && deco.Visible)
-            {
-                var outline = new GroupOp();
-                BoxPainter.PaintOutline(outline, deco, rx, top, width, h, null);
-                _ops.Add(outline);
-            }
-        }
     }
 
     /// <summary>One link op over each run of items with the same href.</summary>

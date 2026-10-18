@@ -71,11 +71,13 @@ internal static partial class BoxPainter
 
     private static void PaintLayer(GroupOp group, ComputedStyle s, BackgroundImage layer, int i, float x, float y, float w, float h,
         ImageLoader? images, float basis, uint backdrop, CornerRadii? radii,
-        ComputedStyle? box = null, (float X, float Y, float W, float H)? canvas = null)
+        ComputedStyle? box = null, (float X, float Y, float W, float H)? canvas = null, (float X, float Y, float W, float H)? fragment = null)
     {
         if (!LayerSource.TryLoad(layer, images, out var source)) return;
         var (ox, oy, ow, oh) = BoxOf(box ?? s, LayerValue(s.BackgroundOrigins, i, BackgroundBox.PaddingBox), x, y, w, h, basis);
-        var (cx, cy, cw, ch) = canvas ?? BoxOf(s, LayerValue(s.BackgroundClips, i, BackgroundBox.BorderBox), x, y, w, h, basis);
+        // A line fragment of an inline box paints only its own part of the box, inside its own corners.
+        var (cx, cy, cw, ch) = canvas ?? Within(BoxOf(s, LayerValue(s.BackgroundClips, i, BackgroundBox.BorderBox), x, y, w, h, basis), fragment);
+        var (fx, fy, fw, fh) = fragment ?? (x, y, w, h);
         if (cw <= 0 || ch <= 0) return;
         if (source.Svg != null && !source.SizeSvg(ow, oh)) return;
 
@@ -114,7 +116,7 @@ internal static partial class BoxPainter
             Image = source.Image,
             Svg = source.Svg,
             Gradient = layer.Gradient?.Resolve(tw, th, backdrop),
-            ClipRadii = canvas == null ? InnerRadii(radii, cx - x, cy - y, x + w - cx - cw, y + h - cy - ch) : null,
+            ClipRadii = canvas == null ? InnerRadii(radii, cx - fx, cy - fy, fx + fw - cx - cw, fy + fh - cy - ch) : null,
         };
         if (op.PaintsAnything()) group.Ops.Add(op);
     }
