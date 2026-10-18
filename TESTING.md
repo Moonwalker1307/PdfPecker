@@ -67,5 +67,5 @@ Cloud VMs differ too much to compare a run with the README table.
 
 ## Coverage
 
-CI collects line coverage on `net10.0` in a separate pass, without the time-bound tests (instrumentation slows them
-down), and never fails on it.
+CI collects line coverage on `net10.0` in a job of its own, alongside the build job, without the time-bound tests
+(instrumentation slows them down), and never fails on it.
