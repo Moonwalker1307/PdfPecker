@@ -128,7 +128,7 @@ internal sealed partial class SvgFilter
     /// Perlin turbulence as the SVG specification's reference code computes it, sampled at the pixel centres'
     /// coordinates in the filtered element's user space.
     /// </summary>
-    private float[] Turbulence(Primitive p, int w, int h, float scaleX, float scaleY, int x0, int y0, int x1, int y1)
+    private float[] Turbulence(Primitive p, int w, int h, float scaleX, float scaleY, int x0, int y0, int x1, int y1, CancellationToken cancel)
     {
         var dst = new float[w * h * 4];
         if (x1 <= x0 || y1 <= y0) return dst;
@@ -146,7 +146,7 @@ internal sealed partial class SvgFilter
         }
         var toUser = ToUser;
         float originX = X, originY = Y;
-        System.Threading.Tasks.Parallel.For(y0, y1, y =>
+        System.Threading.Tasks.Parallel.For(y0, y1, Lines((long)w * (y1 - y0), cancel), y =>
         {
             Span<float> point = stackalloc float[2];
             Span<float> c = stackalloc float[4];
@@ -310,13 +310,13 @@ internal sealed partial class SvgFilter
 
     // ------------------------------------------------------------------ feConvolveMatrix
 
-    private static float[] Convolve(float[] src, int w, int h, Primitive p)
+    private static float[] Convolve(float[] src, int w, int h, Primitive p, CancellationToken cancel)
     {
         var dst = new float[src.Length];
         if (p.Kernel is not { } kernel) return dst;
         int ox = p.OrderX, oy = p.OrderY;
         var edge = p.EdgeMode;
-        System.Threading.Tasks.Parallel.For(0, h, y =>
+        System.Threading.Tasks.Parallel.For(0, h, Lines((long)w * h, cancel), y =>
         {
             Span<float> sum = stackalloc float[4];
             for (int x = 0; x < w; x++)
@@ -404,7 +404,7 @@ internal sealed partial class SvgFilter
     /// feDiffuseLighting or feSpecularLighting on the input's alpha as a height map, computed in the filtered
     /// element's user units so that the result does not depend on the filter's resolution.
     /// </summary>
-    private float[] Lighting(float[] src, int w, int h, float scaleX, float scaleY, Primitive p)
+    private float[] Lighting(float[] src, int w, int h, float scaleX, float scaleY, Primitive p, CancellationToken cancel)
     {
         var dst = new float[src.Length];
         bool diffuse = p.Kind == Kind.DiffuseLighting;
@@ -426,7 +426,7 @@ internal sealed partial class SvgFilter
         if (sLen > 0) { sx /= sLen; sy /= sLen; sz /= sLen; }
         float dx = MathF.Cos(light.Azimuth) * MathF.Cos(light.Elevation), dy = MathF.Sin(light.Azimuth) * MathF.Cos(light.Elevation), dz = MathF.Sin(light.Elevation);
         float A(int x, int y) => src[(Math.Clamp(y, 0, h - 1) * w + Math.Clamp(x, 0, w - 1)) * 4 + 3];
-        System.Threading.Tasks.Parallel.For(0, h, y =>
+        System.Threading.Tasks.Parallel.For(0, h, Lines((long)w * h, cancel), y =>
         {
             for (int x = 0; x < w; x++)
             {
