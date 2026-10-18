@@ -199,7 +199,8 @@ internal static class LtvWriter
 
     private static bool IsSelfSigned(X509Certificate2 c) => c.SubjectName.RawData.AsSpan().SequenceEqual(c.IssuerName.RawData);
 
-    private static PdfFile Open(byte[] pdf, string? password)
+    /// <summary>Opens a PDF for an incremental update, turning a parse failure into the documented InvalidDataException.</summary>
+    internal static PdfFile Open(byte[] pdf, string? password)
     {
         try
         {
