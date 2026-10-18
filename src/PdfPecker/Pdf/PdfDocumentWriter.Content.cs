@@ -177,6 +177,10 @@ internal sealed partial class PdfDocumentWriter
                 EndText(b);
                 WriteRoundRect(b, rr, placed, pageTop);
                 break;
+            case LayerBlock { Layer.MaskFill: { } maskFill } mb:
+                EndText(b);
+                WriteMaskedFill(b, mb, maskFill, pageTop, imageIds);
+                break;
             case LayerBlock tb:
             {
                 EndText(b);
@@ -375,6 +379,56 @@ internal sealed partial class PdfDocumentWriter
             if (item.Op is not LinkOp) WriteOp(b, item, pageTop, imageIds);
     }
 
+    /// <summary>
+    /// Paints a colour through a luminosity soft mask made of a layer's part on this page (<see cref="LayerOp.MaskFill"/>):
+    /// the grey levels the layer's ops paint are how much of the colour covers what is below. One fill through one mask
+    /// is composited once per pixel, so a blurred shadow's many bands do not add up rounding errors in a viewer.
+    /// </summary>
+    private void WriteMaskedFill(ByteBuffer b, LayerBlock block, uint color, float pageTop, Dictionary<PdfImage, int> imageIds)
+    {
+        if (_invisibleText) return;
+        // What the mask covers on this page: the layer's ops, cut to their parts on it, a little grown for snapping.
+        float x0 = float.MaxValue, y0 = float.MaxValue, x1 = float.MinValue, y1 = float.MinValue;
+        float top = float.MaxValue, bottom = float.MinValue;
+        foreach (var item in block.Items)
+        {
+            Bounds(item.Op, ref x0, ref y0, ref x1, ref y1);
+            if (item.Y1 > item.Y0) { top = Math.Min(top, item.Y0); bottom = Math.Max(bottom, item.Y1); }
+        }
+        if (bottom > top) { y0 = Math.Max(y0, top); y1 = Math.Min(y1, bottom); }
+        if (!(x1 > x0 && y1 > y0)) return;
+        x0 -= 1; y0 -= 1; x1 += 1; y1 += 1;
+        float left = PX(x0), right = PX(x1), lower = PY(y1, pageTop), upper = PY(y0, pageTop);
+
+        // The mask is a stream of its own, with no marked content since it is not page content. It starts from the
+        // graphics state of whatever it masks, so nothing about its colours is known.
+        var content = new ByteBuffer(1024);
+        var saved = SaveState();
+        var pageMc = _mc;
+        var open = _mcOpen;
+        _mc = null;
+        _mcOpen = null;
+        (_fill, _stroke, _lineWidth, _fillAlpha, _strokeAlpha) = (1, 1, -1, -1, -1);
+        _anyAlpha = true;
+        foreach (var item in block.Items)
+            if (item.Op is not LinkOp) WriteOp(content, item, pageTop, imageIds);
+        EndText(content);
+        _mc = pageMc;
+        _mcOpen = open;
+        RestoreState(saved);
+        var dict = new ByteBuffer(256);
+        dict.Ascii("/Type /XObject /Subtype /Form /BBox [").Num(left).Sp().Num(lower).Sp().Num(right).Sp().Num(upper)
+            .Ascii("] /Group << /S /Transparency /CS /DeviceRGB >> /Resources ").Int(_resourcesId).Ascii(" 0 R");
+        _masks.Add((content.Span.ToArray(), System.Text.Encoding.ASCII.GetString(dict.Span), false));
+
+        Mark(b, null); // the shadow is decoration
+        var state = SaveState();
+        b.Ascii("q /s").Int(_masks.Count).Ascii(" gs\n");
+        SetFill(b, color);
+        b.Num(left).Sp().Num(lower).Sp().Num(right - left).Sp().Num(upper - lower).Ascii(" re f Q\n");
+        RestoreState(state);
+    }
+
     /// <summary>Appends the outline of a rounded rectangle given in flow coordinates, as a closed path.</summary>
     private void RoundRectPath(ByteBuffer b, float x, float y, float w, float h, in CornerRadii r, float pageTop)
     {
@@ -537,24 +591,33 @@ internal sealed partial class PdfDocumentWriter
         var dict = new ByteBuffer(256);
         dict.Ascii("/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 ").Num(tw).Sp().Num(th)
             .Ascii("] /XStep ").Num(Math.Max(bg.StepX, tw)).Ascii(" /YStep ").Num(Math.Max(bg.StepY, th))
-            .Ascii(" /Matrix [1 0 0 1 ").Num(tx).Sp().Num(PY(bg.TileY + th, pageTop)).Ascii("] /Resources << ");
-        if (bg.Gradient is { } tg)
+            .Ascii(" /Matrix [1 0 0 1 ").Num(tx).Sp().Num(PY(bg.TileY + th, pageTop)).Ascii("] /Resources ");
+        if (bg.Gradient is { Alphas: not null } ag)
+        {
+            // Translucent stops: each tile paints the unblended colours through a soft mask holding the alphas, both
+            // placed in the cell's space (y up), and taken from the shared resources since the mask is an object of its own.
+            var toCell = new Matrix(1, 0, 0, -1, 0, th);
+            int mask = AddSoftMask(ag, toCell, 0, 0, tw, th, 0, 0, tw, th);
+            int colors = AddPattern(ag, toCell, 0, 0, tw, th, GradientChannel.Straight);
+            cell.Ascii("/s").Int(mask).Ascii(" gs /Pattern cs /P").Int(colors).Ascii(" scn 0 0 ").Num(tw).Sp().Num(th).Ascii(" re f\n");
+            dict.Int(_resourcesId).Ascii(" 0 R");
+        }
+        else if (bg.Gradient is { } tg)
         {
             var m = tg.Transform;
             cell.Ascii("1 0 0 -1 0 ").Num(th).Ascii(" cm ").Num6(m.A).Sp().Num6(m.B).Sp().Num6(m.C).Sp().Num6(m.D).Sp().Num(m.E).Sp().Num(m.F)
                 .Ascii(" cm /Sh1 sh\n");
-            dict.Ascii("/Shading << /Sh1 ");
+            dict.Ascii("<< /Shading << /Sh1 ");
             tg.WriteShading(dict, 0, 0, tw, th);
-            dict.Ascii(" >>");
+            dict.Ascii(" >> >>");
         }
         else
         {
             // The written image: PDF/A may have replaced a CMYK image with an RGB copy.
             var image = _imageList[imageIds[bg.Image!] - 1];
             cell.Num(iw).Ascii(" 0 0 ").Num(ih).Sp().Num(ix).Sp().Num(th - iy - ih).Ascii(" cm /Im1 Do\n");
-            dict.Ascii("/XObject << /Im1 ").Int(image.ObjectNumber).Ascii(" 0 R >>");
+            dict.Ascii("<< /XObject << /Im1 ").Int(image.ObjectNumber).Ascii(" 0 R >> >>");
         }
-        dict.Ascii(" >>");
         int n = _tilings.Count + 1;
         _tilings.Add((n, cell.Span.ToArray(), System.Text.Encoding.ASCII.GetString(dict.Span)));
         b.Ascii("q /Pattern cs /T").Int(n).Ascii(" scn ");

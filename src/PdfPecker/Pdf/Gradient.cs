@@ -106,7 +106,10 @@ internal sealed class Gradient
         return g;
     }
 
-    /// <summary>Blends a translucent colour over an opaque backdrop: the writer does not emit transparency.</summary>
+    /// <summary>
+    /// Blends a translucent colour over an opaque backdrop. The writer paints translucent stops through a soft mask
+    /// (<see cref="KeepAlpha"/>); the flattened colours are what the gradient is painted with otherwise.
+    /// </summary>
     public static uint Flatten(uint c, uint backdrop)
     {
         uint a = c >> 24;

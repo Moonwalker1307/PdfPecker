@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Translucent effects</title><style>
+@page { size: A4; margin: 12mm; }
+body { font-family: Arial, sans-serif; font-size: 11px; color: #222; margin: 0; }
+h2 { font-size: 14px; margin: 10px 0 4px; }
+.bg { padding: 14px; margin-bottom: 6px; display: flex; flex-wrap: wrap; gap: 20px; }
+.col { background: #1e7a46; }
+.img { background: url(logo.png) center / 120px 120px; }
+.t { width: 100px; height: 64px; color: #fff; font-weight: bold; }
+.sh1 { background: #fff; color: #000; box-shadow: 0 8px 18px rgba(0,0,0,.6); }
+.sh2 { background: #fff; color: #000; border-radius: 14px; box-shadow: 0 0 20px 6px rgba(255,40,40,.9); }
+.sh3 { background: #fde68a; color: #000; box-shadow: 6px 6px 0 #1d4ed8, -4px -4px 12px 2px rgba(0,0,255,.5); }
+.g1 { background: repeating-linear-gradient(45deg, rgba(255,255,255,.7) 0 8px, transparent 8px 16px); }
+.g2 { background: repeating-radial-gradient(circle, rgba(255,0,0,.8) 0 6px, rgba(0,0,255,0) 6px 12px); }
+.g3 { background: repeating-conic-gradient(rgba(255,255,0,.8) 0 15deg, transparent 15deg 30deg); }
+.g4 { background: linear-gradient(45deg, rgba(255,128,0,.9) 25%, transparent 25%, transparent 75%, rgba(255,128,0,.9) 75%) 0 0 / 20px 20px; }
+.g5 { background: conic-gradient(rgba(255,255,255,.8) 25%, transparent 25% 50%, rgba(255,255,255,.8) 50% 75%, transparent 75%) 0 0 / 16px 16px; }
+</style></head><body>
+<h2>Blurred box shadows</h2>
+<div class="bg col"><div class="t sh1">black, 0.6</div><div class="t sh2">red glow</div><div class="t sh3">two shadows</div></div>
+<div class="bg img"><div class="t sh1">black, 0.6</div><div class="t sh2">red glow</div><div class="t sh3">two shadows</div></div>
+<h2>Repeating and tiled gradients with translucent stops</h2>
+<div class="bg col"><div class="t g1">linear</div><div class="t g2">radial</div><div class="t g3">conic</div><div class="t g4">tiled linear</div><div class="t g5">tiled conic</div></div>
+<div class="bg img"><div class="t g1">linear</div><div class="t g2">radial</div><div class="t g3">conic</div><div class="t g4">tiled linear</div><div class="t g5">tiled conic</div></div>
+<h2>SVG gradient stops with opacity</h2>
+<div class="bg col">
+<svg width="100" height="64" viewBox="0 0 110 70"><defs><linearGradient id="a"><stop offset="0" stop-color="#fff" stop-opacity="0.9"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><rect width="110" height="70" fill="url(#a)"/></svg>
+<svg width="100" height="64" viewBox="0 0 110 70"><defs><radialGradient id="b" r="0.25" spreadMethod="reflect"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue" stop-opacity="0.1"/></radialGradient></defs><rect width="110" height="70" fill="url(#b)"/></svg>
+<svg width="100" height="64" viewBox="0 0 110 70"><defs><linearGradient id="c" x2="0.2" spreadMethod="repeat" gradientTransform="rotate(30)"><stop offset="0" stop-color="yellow" stop-opacity="0.85"/><stop offset="1" stop-color="yellow" stop-opacity="0"/></linearGradient><linearGradient id="s"><stop offset="0" stop-color="#fff" stop-opacity="0.9"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><circle cx="55" cy="35" r="32" fill="url(#c)" stroke="url(#s)" stroke-width="4"/></svg>
+<svg width="100" height="64" viewBox="0 0 110 70"><defs><linearGradient id="t"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#ff0" stop-opacity="0.2"/></linearGradient></defs><text x="4" y="48" font-size="38" font-weight="bold" fill="url(#t)">Text</text></svg>
+</div>
+<div class="bg img">
+<svg width="100" height="64" viewBox="0 0 110 70"><defs><linearGradient id="a2"><stop offset="0" stop-color="#fff" stop-opacity="0.9"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><rect width="110" height="70" fill="url(#a2)"/></svg>
+<svg width="100" height="64" viewBox="0 0 110 70"><defs><radialGradient id="b2" r="0.25" spreadMethod="reflect"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue" stop-opacity="0.1"/></radialGradient></defs><rect width="110" height="70" fill="url(#b2)"/></svg>
+<svg width="100" height="64" viewBox="0 0 110 70"><defs><linearGradient id="c2" x2="0.2" spreadMethod="repeat" gradientTransform="rotate(30)"><stop offset="0" stop-color="yellow" stop-opacity="0.85"/><stop offset="1" stop-color="yellow" stop-opacity="0"/></linearGradient><linearGradient id="s2"><stop offset="0" stop-color="#fff" stop-opacity="0.9"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient></defs><circle cx="55" cy="35" r="32" fill="url(#c2)" stroke="url(#s2)" stroke-width="4"/></svg>
+<svg width="100" height="64" viewBox="0 0 110 70"><defs><linearGradient id="t2"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#ff0" stop-opacity="0.2"/></linearGradient></defs><text x="4" y="48" font-size="38" font-weight="bold" fill="url(#t2)">Text</text></svg>
+</div>
+<h2>Opaque content, unchanged</h2>
+<div class="bg col"><div class="t" style="background: repeating-linear-gradient(90deg, #fff 0 6px, #f80 6px 12px)">opaque stripes</div><div class="t" style="background: #fff; color: #000; box-shadow: 4px 4px 0 rgba(0,0,0,.5)">sharp shadow</div>
+<svg width="100" height="64"><defs><linearGradient id="o"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#00f"/></linearGradient></defs><rect width="100" height="64" fill="url(#o)"/></svg></div>
+</body></html>

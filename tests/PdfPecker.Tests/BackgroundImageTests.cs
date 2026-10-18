@@ -278,6 +278,34 @@ public class BackgroundImageTests
         Color(0, 255, 0, Pixel(pdf, 10, 10));
     }
 
+    [Theory]
+    [InlineData("linear-gradient(to right, #ff0000 50%, transparent 50%)")]
+    [InlineData("conic-gradient(from 180deg, #ff0000 50%, rgba(0,0,255,0) 50%)")]
+    public void Repeated_gradient_tiles_with_translucent_stops_show_what_is_below(string gradient)
+    {
+        // The tile is soft-masked by the stops' alphas, so the parent's blue shows through the transparent half of
+        // every tile, where it used to be flattened on the box's own (white) backdrop.
+        var html = $"<body style='margin:0'><div style='background:#0000ff'><div style='width:100pt; height:20pt; background: {gradient} 0 0 / 20pt 20pt'></div></div></body>";
+        var pdf = HtmlToPdf.Convert(html, NoMargins);
+        AssertStructurallyValid(pdf);
+        var text = Latin1(pdf);
+        Assert.Contains("/PatternType 1", text);
+        Assert.Contains("/SMask << /Type /Mask /S /Luminosity /G ", text);
+        Color(255, 0, 0, Pixel(pdf, 5, 10));
+        Color(0, 0, 255, Pixel(pdf, 15, 10));
+        Color(255, 0, 0, Pixel(pdf, 85, 10));
+        Color(0, 0, 255, Pixel(pdf, 95, 10));
+    }
+
+    [Fact]
+    public void Repeated_opaque_gradient_tiles_keep_their_own_resources()
+    {
+        var pdf = HtmlToPdf.Convert("<body style='margin:0'><div style='width:100pt; height:20pt; background: linear-gradient(red, blue) 0 0 / 20pt 20pt'></div></body>", NoMargins);
+        var text = Latin1(pdf);
+        Assert.Contains("/Resources << /Shading << /Sh1 ", text);
+        Assert.DoesNotContain("/SMask", text);
+    }
+
     [Fact]
     public void Repeated_gradient_tiles_render()
     {

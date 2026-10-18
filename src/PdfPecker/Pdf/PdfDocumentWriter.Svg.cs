@@ -92,10 +92,12 @@ internal sealed partial class PdfDocumentWriter
                     WriteSvgImage(b, shape, toPage);
                     continue;
                 case SvgShape.KindText:
+                    if (TranslucentGradient(shape)) { WriteSoftMaskedSvgShape(b, shape, toPage); continue; }
                     WriteSvgPaint(b, shape, toPage);
                     WriteSvgText(b, shape, shape.HasFill ? (shape.HasStroke ? 2 : 0) : 1);
                     continue;
             }
+            if (TranslucentGradient(shape)) { WriteSoftMaskedSvgShape(b, shape, toPage); continue; }
             WritePath(b, shape);
             WriteSvgPaint(b, shape, toPage);
             if (shape.HasFill && shape.HasStroke) b.Ascii(shape.EvenOdd ? "B*\n" : "B\n");
@@ -370,8 +372,71 @@ internal sealed partial class PdfDocumentWriter
         }
     }
 
+    /// <summary>Whether a shape is painted with a gradient that has translucent stops, which needs a soft mask.</summary>
+    private static bool TranslucentGradient(SvgShape shape)
+        => shape.FillGradient is { Alphas: not null } || shape.HasStroke && shape.StrokeGradient is { Alphas: not null };
+
+    /// <summary>
+    /// Paints a shape whose fill or stroke is a gradient with translucent stops: the fill and then the stroke, each in
+    /// a state of its own where a luminosity soft mask holds its gradient's alphas and the pattern its unblended colours.
+    /// The soft mask is set in user space, so its gradient is placed by the gradient's own transform.
+    /// </summary>
+    private void WriteSoftMaskedSvgShape(ByteBuffer b, SvgShape shape, Matrix toPage)
+    {
+        // The area the soft mask covers: the shape's bounds grown by how far a stroke (and, for text, the glyphs) can
+        // reach past them, since outside it the mask hides everything.
+        float grow = (shape.HasStroke ? shape.StrokeWidth * Math.Max(1, shape.MiterLimit) / 2 : 0) + 1;
+        if (shape.Kind == SvgShape.KindText) grow += (shape.MaxY - shape.MinY) / 2;
+        float minX = shape.MinX - grow, minY = shape.MinY - grow, maxX = shape.MaxX + grow, maxY = shape.MaxY + grow;
+        if (!(maxX > minX && maxY > minY)) return;
+        for (int part = 0; part < 2; part++)
+        {
+            bool fill = part == 0;
+            if (fill ? !shape.HasFill : !shape.HasStroke) continue;
+            var saved = SaveState();
+            b.Ascii("q ");
+            if ((fill ? shape.FillGradient : shape.StrokeGradient) is { Alphas: not null } g)
+            {
+                b.Ascii("/s").Int(AddSoftMask(g, Matrix.Identity, minX, minY, maxX, maxY, minX, minY, maxX - minX, maxY - minY)).Ascii(" gs\n");
+                int pattern = AddPattern(g, toPage, minX, minY, maxX, maxY, GradientChannel.Straight);
+                if (fill)
+                {
+                    SetFillAlpha(b, CssColor.Black);
+                    b.Ascii("/Pattern cs /P").Int(pattern).Ascii(" scn\n");
+                    _fill = 1;
+                }
+                else
+                {
+                    SetStrokeAlpha(b, CssColor.Black);
+                    b.Ascii("/Pattern CS /P").Int(pattern).Ascii(" SCN ");
+                    _stroke = 1;
+                }
+            }
+            else if (fill) WriteSvgFill(b, shape, toPage);
+            else WriteSvgStroke(b, shape, toPage);
+            if (!fill) WriteSvgLineStyle(b, shape);
+            if (shape.Kind == SvgShape.KindText) WriteSvgText(b, shape, fill ? 0 : 1);
+            else
+            {
+                WritePath(b, shape);
+                b.Ascii(fill ? (shape.EvenOdd ? "f*\n" : "f\n") : "S\n");
+            }
+            b.Ascii("Q\n");
+            RestoreState(saved);
+        }
+    }
+
     /// <summary>Sets the fill and stroke of an SVG shape: colours, or shading patterns for gradients.</summary>
     private void WriteSvgPaint(ByteBuffer b, SvgShape shape, Matrix toPage)
+    {
+        WriteSvgFill(b, shape, toPage);
+        if (!shape.HasStroke) return;
+        WriteSvgStroke(b, shape, toPage);
+        WriteSvgLineStyle(b, shape);
+    }
+
+    /// <summary>Sets the fill of an SVG shape: a colour, or a shading or tiling pattern.</summary>
+    private void WriteSvgFill(ByteBuffer b, SvgShape shape, Matrix toPage)
     {
         if (shape.FillGradient is { } fg)
         {
@@ -387,7 +452,11 @@ internal sealed partial class PdfDocumentWriter
             _fill = 1;
         }
         else if (shape.Fill is { } fill) SetFill(b, fill);
-        if (!shape.HasStroke) return;
+    }
+
+    /// <summary>Sets the stroke paint of an SVG shape: a colour, or a shading or tiling pattern.</summary>
+    private void WriteSvgStroke(ByteBuffer b, SvgShape shape, Matrix toPage)
+    {
         if (shape.StrokeGradient is { } sg)
         {
             SetStrokeAlpha(b, CssColor.Black);
@@ -402,6 +471,11 @@ internal sealed partial class PdfDocumentWriter
             _stroke = 1;
         }
         else SetStroke(b, shape.Stroke!.Value);
+    }
+
+    /// <summary>Sets the width, caps, joins and miter limit of an SVG shape's stroke.</summary>
+    private void WriteSvgLineStyle(ByteBuffer b, SvgShape shape)
+    {
         _lineWidth = -1;
         b.Num(shape.StrokeWidth).Ascii(" w ").Int((int)shape.LineCap).Ascii(" J ").Int((int)shape.LineJoin).Ascii(" j ")
             .Num(shape.MiterLimit).Ascii(" M\n");

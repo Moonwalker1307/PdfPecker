@@ -19,6 +19,7 @@ var inputs = new List<(string Name, string Path, bool Markdown)>
     ("golden-paged-media", Path.Combine(golden, "paged-media", "demo.html"), false),
     ("golden-svg-effects", Path.Combine(golden, "svg-effects", "demo.html"), false),
     ("golden-transparency", Path.Combine(golden, "transparency", "demo.html"), false),
+    ("golden-translucent-effects", Path.Combine(golden, "translucent-effects", "demo.html"), false),
     ("sample-invoice", Path.Combine(samples, "invoice.html"), false),
     ("sample-report", Path.Combine(samples, "report.html"), false),
     ("sample-graphics", Path.Combine(samples, "graphics.html"), false),

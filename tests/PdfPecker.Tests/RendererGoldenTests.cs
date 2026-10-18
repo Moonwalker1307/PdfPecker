@@ -33,6 +33,7 @@ public class RendererGoldenTests
         "svg-effects/demo",
         "transparency/demo",
         "image-formats/demo",
+        "translucent-effects/demo",
     };
 
     [Theory]
