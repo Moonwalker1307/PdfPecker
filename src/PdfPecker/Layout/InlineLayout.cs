@@ -32,6 +32,8 @@ internal sealed partial class LayoutEngine
 
     private float FlushInlineCore(List<Node> run, Element container, float x, float y, float w, bool firstInBlock, PageBox? pages, out bool produced)
     {
+        // Percentage heights of the images and inline-blocks of the lines resolve as on the page the lines start on.
+        NoteCbKind(y);
         var st = CollectInline(run, w);
         var items = st.Items;
         if (!HasRenderable(items))

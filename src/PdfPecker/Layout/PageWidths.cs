@@ -81,7 +81,7 @@ internal sealed partial class LayoutEngine
             float pl = s.PaddingLeft.Resolve(aw), pr = s.PaddingRight.Resolve(aw);
             float frame = s.BorderLeft + s.BorderRight + pl + pr;
             float frameV = s.BorderTop + s.BorderBottom + s.PaddingTop.Resolve(aw) + s.PaddingBottom.Resolve(aw);
-            float contentW = Math.Max(0, FlowContentWidth(e, aw, ml, mr, frame, frameV, shrinkToFit: false));
+            float contentW = Math.Max(0, FlowContentWidth(e, aw, ml, mr, frame, frameV, shrinkToFit: false, HeightBasis(e, k)));
             float used = contentW + frame;
             ml = UsedMarginLeft(e, aw, used, ml, mr, sized: false);
             box.AW[k] = aw;
