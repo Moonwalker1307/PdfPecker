@@ -35,9 +35,14 @@ nuget.org only accepts OSI- or FSF-approved licence IDs and some bundled font li
 | `codeql.yml` | PRs, pushes and a schedule | CodeQL analysis. |
 | `perf.yml` | Nightly | Benchmark on main against the previous night's run. |
 | `fuzz.yml` | Nightly | Fuzzes every target. |
+| `dependabot-auto-merge.yml` | Dependabot PRs | Turns on auto-merge (squash) for patch and minor updates, so GitHub merges them once the required checks pass. Major updates and veraPDF updates wait for a person. |
 
 Actions are pinned to commit SHAs, and jobs get read-only permissions unless they need more: the release job may
 attach files, and the publish job may request an OIDC token.
+
+Repository settings Dependabot auto-merge relies on: "Allow auto-merge" under Settings → General, and a branch
+ruleset (or branch protection) on `main` that requires the status checks `build`, `windows`, `native-aot` and
+`analyze` and no approving review. Without required checks, enabling auto-merge fails and the PR waits for a person.
 
 Repository settings the release relies on: the `nuget` environment, and the `NUGET_USER` variable naming the
 nuget.org account that owns the Trusted Publishing policy. No NuGet API key is stored. See `RELEASING.md`.
