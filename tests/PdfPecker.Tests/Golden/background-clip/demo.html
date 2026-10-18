@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>background-clip: text</title>
+<style>
+  @page { size: 148mm 105mm; margin: 10mm; }
+  body { font-family: sans-serif; }
+  .title { font: bold 44px sans-serif; background: linear-gradient(90deg, #e63946, #457b9d); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .stripes { font: bold 28px serif; background: repeating-linear-gradient(45deg, #2a9d8f 0 6px, #e9c46a 6px 12px); background-clip: text; color: transparent; }
+  .long { font-size: 22px; line-height: 1.4; background: linear-gradient(#264653, #f4a261); background-clip: text; color: transparent; }
+</style>
+</head>
+<body>
+<div class="title">Gradient headline</div>
+<p class="stripes">Striped serif text</p>
+<p class="long">A paragraph whose background shows only through its glyphs, long enough to run over several lines and onto the next page, so each page gets its own part of the mask and of the background. The gradient runs from the top of the paragraph to its bottom, across the page break. More words follow to fill the lines and reach the next page.</p>
+</body>
+</html>

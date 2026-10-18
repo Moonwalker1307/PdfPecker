@@ -181,6 +181,9 @@ internal sealed partial class PdfDocumentWriter
                 EndText(b);
                 WriteMaskedFill(b, mb, maskFill, pageTop, imageIds);
                 break;
+            case LayerBlock { Layer.TextClip: true } clip:
+                WriteTextClip(b, clip, pageTop, imageIds);
+                break;
             case LayerBlock tb:
                 WriteLayer(b, tb, pageTop, imageIds);
                 break;
@@ -388,6 +391,54 @@ internal sealed partial class PdfDocumentWriter
         }
         foreach (var item in tb.Items)
             if (item.Op is not LinkOp) WriteOp(b, item, pageTop, imageIds);
+    }
+
+    /// <summary>
+    /// background-clip: text. The copies of the box's text on this page make an alpha soft mask, and the background is
+    /// painted through it. A mask rather than a clip with text rendering mode 7, because the mask is not page content:
+    /// text extraction and copying see the text once, where it is drawn.
+    /// </summary>
+    private void WriteTextClip(ByteBuffer b, LayerBlock block, float pageTop, Dictionary<PdfImage, int> imageIds)
+    {
+        EndText(b);
+        if (_invisibleText) return;
+        float x0 = float.MaxValue, y0 = float.MaxValue, x1 = float.MinValue, y1 = float.MinValue;
+        foreach (var item in block.Items)
+            if (item.Op is TextOp) Bounds(item.Op, ref x0, ref y0, ref x1, ref y1);
+        if (!(x1 > x0 && y1 > y0)) return;
+        float left = PX(x0), right = PX(x1), lower = PY(y1, pageTop), upper = PY(y0, pageTop);
+
+        // The mask is a stream of its own, with no marked content, starting from an unknown graphics state.
+        var content = new ByteBuffer(1024);
+        var saved = SaveState();
+        var pageMc = _mc;
+        var open = _mcOpen;
+        _mc = null;
+        _mcOpen = null;
+        (_fill, _stroke, _lineWidth, _fillAlpha, _strokeAlpha) = (1, 1, -1, -1, -1);
+        _textFont = null;
+        _textSize = -1;
+        _tw = _tc = float.NaN;
+        _tr = -1;
+        _anyAlpha = true;
+        foreach (var item in block.Items)
+            if (item.Op is TextOp) WriteOp(content, item, pageTop, imageIds);
+        EndText(content);
+        _mc = pageMc;
+        _mcOpen = open;
+        RestoreState(saved);
+        var dict = new ByteBuffer(256);
+        dict.Ascii("/Type /XObject /Subtype /Form /BBox [").Num(left).Sp().Num(lower).Sp().Num(right).Sp().Num(upper)
+            .Ascii("] /Group << /S /Transparency /CS /DeviceRGB >> /Resources ").Int(_resourcesId).Ascii(" 0 R");
+        _masks.Add((content.Span.ToArray(), System.Text.Encoding.ASCII.GetString(dict.Span), true));
+
+        b.Ascii("q /s").Int(_masks.Count).Ascii(" gs\n");
+        foreach (var item in block.Items)
+            if (item.Op is not (TextOp or LinkOp)) WriteOp(b, item, pageTop, imageIds);
+        EndText(b);
+        EndMarked(b);
+        b.Ascii("Q\n");
+        InvalidateState();
     }
 
     /// <summary>
