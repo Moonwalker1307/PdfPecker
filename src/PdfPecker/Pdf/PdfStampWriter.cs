@@ -171,10 +171,14 @@ internal sealed class PdfStampWriter : PdfObjectWriter
                 long xref = _out.Length;
                 int count = _nextId;
                 _xref.WriteTable(_out, count);
-                // The document keeps its permanent identifier; the second part marks this version.
+                // The document keeps its permanent identifier; the second part marks this version. For a reproducible
+                // result it is a hash of the file, which still changes with each different version; an encrypted
+                // result has random keys anyway, so its identifier stays random too.
+                bool reproducible = _crypt == null && ReproducibleDate.Resolve(_options.CreationDate) != null;
+                var version = reproducible ? ReproducibleDate.FileId(_out.Span) : RandomNumberGenerator.GetBytes(16);
                 var first = file.Resolve(file.Trailer["ID"]) is PdfArray ids && ids.Count > 0 && file.Resolve(ids[0]) is PdfString s && s.Bytes.Length is > 0 and <= 64
-                    ? s.Bytes : RandomNumberGenerator.GetBytes(16);
-                PdfXref.WriteTrailer(_out, count, rootId, infoId, encryptId, first, RandomNumberGenerator.GetBytes(16), upperHexId: true, xref);
+                    ? s.Bytes : reproducible ? version : RandomNumberGenerator.GetBytes(16);
+                PdfXref.WriteTrailer(_out, count, rootId, infoId, encryptId, first, version, upperHexId: true, xref);
             }
             return _out.Span.ToArray();
         }

@@ -91,10 +91,10 @@ internal sealed partial class PdfFormEditor
             editor.FillValues(values, options);
             if (options.Flatten) editor.FlattenFields();
             if (editor._changed.Count == 0) return (byte[])pdf.Clone();
-            var updated = editor.WriteIncremental(pdf);
+            var updated = editor.WriteIncremental(pdf, options.CreationDate);
             if (signed || file.Decryptor != null) return updated;
             // An unsigned, unencrypted file is written out again so that earlier values do not stay in its old revision.
-            var rewritten = PdfRewriter.Write(Open(updated, null), null);
+            var rewritten = PdfRewriter.Write(Open(updated, null), null, options.CreationDate);
             return rewritten.Span.ToArray();
         }
     }
@@ -512,9 +512,9 @@ internal sealed partial class PdfFormEditor
 
     // ------------------------------------------------------------------ writing
 
-    private byte[] WriteIncremental(byte[] original)
+    private byte[] WriteIncremental(byte[] original, DateTimeOffset? creationDate)
     {
-        var update = new PdfUpdateWriter(_file, original, 65536);
+        var update = new PdfUpdateWriter(_file, original, 65536, creationDate);
         foreach (var (num, (gen, obj)) in _changed.OrderBy(kv => kv.Key))
         {
             _cancel.ThrowIfCancellationRequested();

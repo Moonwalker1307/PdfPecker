@@ -260,8 +260,8 @@ internal static class EmbeddedFiles
         int next = Math.Max(file.GetInt(trailer, "Size", 0), file.MaxObjectNumber + 1);
         var update = new PdfUpdateWriter(file, pdf, attachments.Sum(a => a.Data.Length) + 4096);
 
-        var now = DateTime.UtcNow;
-        now = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerSecond));
+        // An attachment without its own modification date gets the build's SOURCE_DATE_EPOCH, as a conversion does.
+        var now = ReproducibleDate.Resolve(null) ?? ReproducibleDate.TruncateToSeconds(DateTime.UtcNow);
         var entries = existing.Select(p => (Key: p.Key.Bytes, p.Value)).ToList();
         var newSpecs = new List<PdfObject>();
         foreach (var a in attachments)

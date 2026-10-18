@@ -612,6 +612,37 @@ public class HostileInputTests
         Assert.Equal(0, renderer.PageCount);
     }
 
+    // A PDF without pages used to reach the TIFF encoder and fail with an ArgumentException naming its internal
+    // parameter; it is malformed input, so every TIFF entry point reports it as InvalidDataException.
+    [Fact]
+    public async Task Pdf_without_pages_cannot_become_a_tiff()
+    {
+        var pdf = SimplePdf(new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [] /Count 0 >>",
+        });
+
+        Assert.Throws<InvalidDataException>(() => PdfToImage.ConvertToTiff(pdf));
+        Assert.Throws<InvalidDataException>(() => PdfToImage.ConvertToTiff(pdf, null, CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidDataException>(() => PdfToImage.ConvertToTiffAsync(pdf));
+        Assert.Throws<InvalidDataException>(() => PdfRenderer.Open(pdf).RenderAllToTiff());
+        var output = new MemoryStream();
+        Assert.Throws<InvalidDataException>(() => PdfToImage.ConvertToTiff(new MemoryStream(pdf), output));
+        Assert.Equal(0, output.Length);
+
+        var dir = Directory.CreateTempSubdirectory("pdfpecker-tiff-");
+        try
+        {
+            var pdfPath = Path.Combine(dir.FullName, "empty.pdf");
+            var tiffPath = Path.Combine(dir.FullName, "empty.tif");
+            File.WriteAllBytes(pdfPath, pdf);
+            Assert.Throws<InvalidDataException>(() => PdfToImage.ConvertFileToTiff(pdfPath, tiffPath));
+            Assert.False(File.Exists(tiffPath));
+        }
+        finally { dir.Delete(recursive: true); }
+    }
+
     [Theory]
     [InlineData("2147483647")]
     [InlineData("2147483500")]

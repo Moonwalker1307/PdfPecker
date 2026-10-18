@@ -65,7 +65,10 @@ public sealed class PdfAttachment
     /// <summary>When the file was created. Default: null, not written.</summary>
     public DateTimeOffset? CreationDate { get; set; }
 
-    /// <summary>When the file was last changed. Default: null, the time the PDF is written.</summary>
+    /// <summary>
+    /// When the file was last changed. Default: null, the time the PDF is written, or its fixed date for reproducible
+    /// output (<see cref="PdfOptions.CreationDate"/> or the <c>SOURCE_DATE_EPOCH</c> environment variable).
+    /// </summary>
     public DateTimeOffset? ModDate { get; set; }
 
     /// <summary>Leave out the MD5 /CheckSum, so the e-invoice attachment keeps its earlier output.</summary>
