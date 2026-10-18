@@ -199,7 +199,7 @@ internal sealed partial class Jbig2Decoder
 
     private static HuffTable ReadSymbolCodes(BitReader br, int numSyms)
     {
-        if (numSyms > MaxSymbols * 4) throw new InvalidDataException("Too many JBIG2 symbols.");
+        if (numSyms > MaxInputSymbols) throw new InvalidDataException("Too many JBIG2 symbols.");
         // The code lengths are themselves coded with a table of 35 run codes: lengths 0 to 31 and three repeats.
         var runLines = new HuffmanLine[RunCodeCount];
         for (int i = 0; i < RunCodeCount; i++) runLines[i] = Line(i, (int)br.ReadBits(RunCodePrefixBits), 0);
