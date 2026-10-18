@@ -7,8 +7,10 @@ using PdfPecker.Fonts;
 using PdfPecker.Fonts.Cff;
 using PdfPecker.Images;
 using PdfPecker.Markdown;
+using PdfPecker.Rendering;
 using PdfPecker.Rendering.Content;
 using PdfPecker.Rendering.Fonts;
+using PdfPecker.Rendering.Graphics;
 using PdfPecker.Rendering.Parsing;
 using PdfPecker.Text;
 
@@ -162,6 +164,12 @@ static class Perf
         // ".5.5"), parsed into paths with the quadratics and arcs turned into cubics.
         var pathData = SvgPathData();
         results.Add(Measure("parse-svg-paths", () => { foreach (var d in pathData) PdfPecker.Svg.PathParser.Parse(d); }, runs: 100));
+
+        // Mesh shadings: the free-form and Coons meshes of features.pdf and a lattice, a tensor-product mesh, a
+        // free-form mesh with a function and Coons patches that share edges, read from their streams and painted as
+        // Gouraud triangles into a 400 x 400 layer. One run paints each mesh once.
+        var meshes = new MeshWorkload(pdf);
+        results.Add(Measure("paint-meshes", meshes.Run, runs: 40));
 
         // CFF subsetting: the CFF tables of the Inter test font (name-keyed, with local and global subroutines) and of
         // a CID-keyed instance of the CFF2 test font, each reduced to a word, to the printable ASCII glyphs and to every
@@ -1037,7 +1045,7 @@ sealed class FunctionWorkload
         _checksum += sum;
     }
 
-    static byte[] BuildPdf(List<(string Dict, byte[]? Stream)> objects)
+    internal static byte[] BuildPdf(List<(string Dict, byte[]? Stream)> objects)
     {
         var pdf = new MemoryStream();
         void Write(string text) => pdf.Write(Encoding.ASCII.GetBytes(text));
@@ -1063,5 +1071,158 @@ sealed class FunctionWorkload
         foreach (var offset in offsets) Write($"{offset:D10} 00000 n \n");
         Write($"trailer\n<< /Size {offsets.Count + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n");
         return pdf.ToArray();
+    }
+}
+
+/// <summary>
+/// One run paints mesh shadings of all four types into a 400 x 400 layer, each mapped from its Decode range onto the
+/// whole layer: the free-form and Coons meshes of features.pdf, and, built here because the fixtures have none of them,
+/// a lattice with 16-bit coordinates, tensor-product patches with 32-bit coordinates and 16-bit CMYK colours, a
+/// free-form strip with 8-bit coordinates whose colours go through a function, and Coons patches that continue each
+/// other through edge flags.
+/// </summary>
+sealed class MeshWorkload
+{
+    const int Size = 400, LatticeSide = 16, StripVertices = 60, PatchColumns = 3;
+
+    readonly List<(PdfFile File, PdfDict Shading, int Type, ColorSpace Space, PdfFunction? Function, Matrix ToDevice)> _meshes = new();
+    readonly Canvas _layer = new(Size, Size, 0);
+    readonly ClipRegion _clip = new(0, 0, Size, Size);
+
+    public MeshWorkload(byte[] featuresPdf)
+    {
+        var features = PdfFile.Open(featuresPdf, null);
+        for (int number = 1; number <= features.MaxObjectNumber; number++)
+        {
+            if (features.GetObject(number) is PdfDict shading && features.GetInt(shading, "ShadingType", 0) is >= 4 and <= 7) AddMesh(features, shading);
+        }
+
+        var random = new Random(1);
+        var objects = new List<(string Dict, byte[]? Stream)>();
+        objects.Add(("/ShadingType 5 /ColorSpace /DeviceRGB /BitsPerCoordinate 16 /BitsPerComponent 8 /VerticesPerRow 16 /Decode [0 65535 0 65535 0 1 0 1 0 1]", Lattice(random)));
+        objects.Add(("/ShadingType 7 /ColorSpace /DeviceCMYK /BitsPerCoordinate 32 /BitsPerComponent 16 /BitsPerFlag 8 /Decode [0 1000 0 1000 0 1 0 1 0 1 0 1 0 1]", TensorPatches(random)));
+        objects.Add(("<< /FunctionType 2 /Domain [0 1] /C0 [1 0.8 0] /C1 [0 0.2 1] /N 1.5 >>", null));
+        objects.Add(("/ShadingType 4 /ColorSpace /DeviceRGB /BitsPerCoordinate 8 /BitsPerComponent 8 /BitsPerFlag 8 /Decode [0 255 0 255 0 1] /Function 4 0 R", Strip(random)));
+        objects.Add(("/ShadingType 6 /ColorSpace /DeviceRGB /BitsPerCoordinate 16 /BitsPerComponent 8 /BitsPerFlag 8 /Decode [0 60400 0 60400 0 1 0 1 0 1]", ContinuedCoonsPatches(random)));
+        var built = PdfFile.Open(FunctionWorkload.BuildPdf(objects), null);
+        foreach (int number in new[] { 2, 3, 5, 6 }) AddMesh(built, (PdfDict)built.GetObject(number)!);
+    }
+
+    void AddMesh(PdfFile file, PdfDict shading)
+    {
+        var space = ColorSpace.Parse(file, shading["ColorSpace"], null)!;
+        var function = PdfFunction.Create(file, file.Resolve(shading["Function"]));
+        var decode = file.GetNumbers(shading, "Decode")!;
+        double sx = Size / (decode[1] - decode[0]), sy = Size / (decode[3] - decode[2]);
+        var toDevice = new Matrix(sx, 0, 0, -sy, -decode[0] * sx, Size + decode[2] * sy);
+        _meshes.Add((file, shading, file.GetInt(shading, "ShadingType", 0), space, function, toDevice));
+    }
+
+    public void Run()
+    {
+        foreach (var (file, shading, type, space, function, toDevice) in _meshes) MeshShading.Paint(file, shading, type, space, function, toDevice, _layer, _clip);
+    }
+
+    // A grid of rows of vertices, moved a little off the square lattice so that no two triangles are alike.
+    static byte[] Lattice(Random random)
+    {
+        var bits = new BitWriter();
+        for (int row = 0; row < LatticeSide; row++)
+            for (int column = 0; column < LatticeSide; column++)
+            {
+                bits.Write((uint)(column * 4300 + random.Next(500)), 16);
+                bits.Write((uint)(row * 4300 + random.Next(500)), 16);
+                for (int c = 0; c < 3; c++) bits.Write((uint)random.Next(256), 8);
+            }
+        return bits.ToArray();
+    }
+
+    // Free-standing patches on a 3 x 3 grid, each with jittered boundary and inner control points.
+    static byte[] TensorPatches(Random random)
+    {
+        var bits = new BitWriter();
+        double cell = 960.0 / PatchColumns;
+        for (int py = 0; py < PatchColumns; py++)
+            for (int px = 0; px < PatchColumns; px++)
+            {
+                bits.Write(0, 8);
+                foreach (var (i, j) in PatchStreamOrder)
+                {
+                    double x = px * cell + i * cell / 3 + random.NextDouble() * 20, y = py * cell + j * cell / 3 + random.NextDouble() * 20;
+                    bits.Write((uint)(x / 1000 * uint.MaxValue), 32);
+                    bits.Write((uint)(y / 1000 * uint.MaxValue), 32);
+                }
+                for (int corner = 0; corner < 4; corner++)
+                    for (int c = 0; c < 4; c++) bits.Write((uint)random.Next(65536), 16);
+                bits.Align();
+            }
+        return bits.ToArray();
+    }
+
+    // A strip of triangles zigzagging down the square: three vertices with flag 0, then flags 1 and 2 by turns.
+    static byte[] Strip(Random random)
+    {
+        var bits = new BitWriter();
+        for (int v = 0; v < StripVertices; v++)
+        {
+            bits.Write(v < 3 ? 0u : (uint)(1 + v % 2), 8);
+            bits.Write((uint)(v % 2 * 200 + random.Next(55)), 8);
+            bits.Write((uint)(v * 4 + random.Next(10)), 8);
+            bits.Write((uint)random.Next(256), 8);
+            bits.Align();
+        }
+        return bits.ToArray();
+    }
+
+    // Columns of three Coons patches: the first stands alone, the second continues from its top edge (edge flag 1) and
+    // the third from the second's top edge (edge flag 2), so those two read only eight points and two colours. Each
+    // continued patch's grid is turned so that its p00..p03 edge lies on the shared edge: in the second, i runs up and
+    // j to the right, in the third i runs up and j to the left.
+    static byte[] ContinuedCoonsPatches(Random random)
+    {
+        var bits = new BitWriter();
+        const double Cell = 20000;
+        for (int column = 0; column < PatchColumns; column++)
+            for (int row = 0; row < PatchColumns; row++)
+            {
+                bits.Write((uint)row, 8);
+                foreach (var (i, j) in PatchStreamOrder.Take(12).Skip(row == 0 ? 0 : 4))
+                {
+                    var (u, v) = row switch { 0 => (i, j), 1 => (j, i), _ => (3 - j, i) };
+                    bits.Write((uint)(column * Cell + u * Cell / 3 + random.Next(400)), 16);
+                    bits.Write((uint)(row * Cell + v * Cell / 3 + random.Next(400)), 16);
+                }
+                for (int corner = row == 0 ? 0 : 2; corner < 4; corner++)
+                    for (int c = 0; c < 3; c++) bits.Write((uint)random.Next(256), 8);
+                bits.Align();
+            }
+        return bits.ToArray();
+    }
+
+    // The grid positions (i, j) of a patch's points in stream order: the boundary from p00 round to p10, then p11, p12,
+    // p22 and p21.
+    static readonly (int I, int J)[] PatchStreamOrder =
+    {
+        (0, 0), (0, 1), (0, 2), (0, 3), (1, 3), (2, 3), (3, 3), (3, 2), (3, 1), (3, 0), (2, 0), (1, 0), (1, 1), (1, 2), (2, 2), (2, 1),
+    };
+
+    sealed class BitWriter
+    {
+        readonly List<byte> _bytes = new();
+        int _bit;
+
+        public void Write(uint value, int bits)
+        {
+            for (int i = bits - 1; i >= 0; i--)
+            {
+                if (_bit % 8 == 0) _bytes.Add(0);
+                if ((value >> i & 1) != 0) _bytes[^1] |= (byte)(0x80 >> _bit % 8);
+                _bit++;
+            }
+        }
+
+        public void Align() => _bit = (_bit + 7) / 8 * 8;
+
+        public byte[] ToArray() => _bytes.ToArray();
     }
 }
