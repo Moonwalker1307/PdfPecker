@@ -71,6 +71,9 @@ dotnet test -f net10.0 --filter "FullyQualifiedName~MarkdownTests"   # one class
 
 - Nullable enabled, file-scoped namespaces, `internal` by default; tests can see internals.
 - Library must stay trimmable and AOT-compatible: no reflection-based code.
+- Output must not depend on the machine's culture: parse and format numbers with `CultureInfo.InvariantCulture`
+  (`Invariant.TryParseInt` for integers) and compare strings ordinally. `GoldenPdfTests` renders every golden under
+  ar-SA and fa-IR, whose minus and plus signs differ from ASCII.
 - Code comments and docs are plain, full sentences explaining why, not what.
 - Adding or changing a bundled font or data source: update `THIRD-PARTY-NOTICES.md`.
 - `README.md` is the short overview (also shown on nuget.org): pitch, install, quick start, a one-line feature list and

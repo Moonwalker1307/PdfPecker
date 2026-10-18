@@ -227,7 +227,7 @@ internal sealed partial class LayoutEngine
         }
     }
 
-    private static int ParseInt(string? s, int fallback) => int.TryParse(s, out int v) ? v : fallback;
+    private static int ParseInt(string? s, int fallback) => Invariant.TryParseInt(s, out int v) ? v : fallback;
 
     /// <summary>Distributes the available width over the columns, CSS auto table layout style.</summary>
     private static float[] AllocateColumns(TableModel m, float avail, bool widthSpecified)

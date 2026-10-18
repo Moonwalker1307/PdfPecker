@@ -129,7 +129,7 @@ internal sealed partial class StyleResolver
                     "bolder" => parent.FontWeight < 350 ? 400 : parent.FontWeight < 550 ? 700 : Math.Max(900, parent.FontWeight),
                     "lighter" => parent.FontWeight < 100 ? parent.FontWeight : parent.FontWeight < 550 ? 100 : parent.FontWeight < 750 ? 400 : 700,
                     "inherit" => parent.FontWeight,
-                    _ => int.TryParse(lower, out int w) && w >= 1 && w <= 1000 ? w : s.FontWeight,
+                    _ => Invariant.TryParseInt(lower, out int w) && w >= 1 && w <= 1000 ? w : s.FontWeight,
                 };
                 s.Bold = s.FontWeight >= 600;
                 break;
@@ -615,11 +615,11 @@ internal sealed partial class StyleResolver
                 break;
             case "orphans":
                 if (inherit) s.Orphans = parent.Orphans;
-                else if (int.TryParse(lower, out int orphans) && orphans > 0) s.Orphans = orphans;
+                else if (Invariant.TryParseInt(lower, out int orphans) && orphans > 0) s.Orphans = orphans;
                 break;
             case "widows":
                 if (inherit) s.Widows = parent.Widows;
-                else if (int.TryParse(lower, out int widows) && widows > 0) s.Widows = widows;
+                else if (Invariant.TryParseInt(lower, out int widows) && widows > 0) s.Widows = widows;
                 break;
             case "break-inside":
                 s.AvoidBreakInside = lower is "avoid" or "avoid-page";
@@ -757,7 +757,7 @@ internal sealed partial class StyleResolver
                 else SetLength(ref s.FlexBasis, lower, em, null);
                 break;
             case "order":
-                if (int.TryParse(lower, out int order)) s.Order = order;
+                if (Invariant.TryParseInt(lower, out int order)) s.Order = order;
                 break;
             case "justify-content": s.JustifyContent = ParseAlign(lower, s.JustifyContent); break;
             case "align-items": s.AlignItems = ParseAlign(lower, s.AlignItems); break;
@@ -802,7 +802,7 @@ internal sealed partial class StyleResolver
             case "grid-row-start": s.GridRowStart = ParseGridLine(lower); break;
             case "grid-row-end": s.GridRowEnd = ParseGridLine(lower); break;
             case "column-count":
-                s.ColumnCount = int.TryParse(lower, out int cc) && cc > 0 ? Math.Min(cc, 100) : 0;
+                s.ColumnCount = Invariant.TryParseInt(lower, out int cc) && cc > 0 ? Math.Min(cc, 100) : 0;
                 break;
             case "column-width":
                 SetLength(ref s.ColumnWidth, lower, em, null);

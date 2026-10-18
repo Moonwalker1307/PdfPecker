@@ -176,11 +176,11 @@ public sealed class PdfEInvoice
         if (string.IsNullOrWhiteSpace(id)) return null;
         id = id.Trim().ToLowerInvariant();
         if (id.Contains("xrechnung")) return EInvoiceProfile.XRechnung;
-        if (id.EndsWith(":extended") || id.Contains(":extended-")) return EInvoiceProfile.Extended;
-        if (id.EndsWith(":basicwl")) return EInvoiceProfile.BasicWL;
-        if (id.EndsWith(":basic")) return EInvoiceProfile.Basic;
-        if (id.EndsWith(":minimum")) return EInvoiceProfile.Minimum;
-        if (id.StartsWith("urn:cen.eu:en16931:2017")) return EInvoiceProfile.En16931;
+        if (id.EndsWith(":extended", StringComparison.Ordinal) || id.Contains(":extended-", StringComparison.Ordinal)) return EInvoiceProfile.Extended;
+        if (id.EndsWith(":basicwl", StringComparison.Ordinal)) return EInvoiceProfile.BasicWL;
+        if (id.EndsWith(":basic", StringComparison.Ordinal)) return EInvoiceProfile.Basic;
+        if (id.EndsWith(":minimum", StringComparison.Ordinal)) return EInvoiceProfile.Minimum;
+        if (id.StartsWith("urn:cen.eu:en16931:2017", StringComparison.Ordinal)) return EInvoiceProfile.En16931;
         return null;
     }
 

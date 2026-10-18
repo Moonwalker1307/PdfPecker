@@ -344,717 +344,180 @@ internal sealed partial class PdfDocumentWriter
         string? title, string? author, string? subject, string? footerTemplate, string? headerTemplate,
         Func<int, int, List<DrawOp>>? pageBands = null, IReadOnlyList<OutlineHeading>? outline = null)
     {
-        var firstSetup = _page = sections[0].Grid.SetupOf(0);
-        var grid = sections[0].Grid;
-        int pageOffset = 0; // pages of the sections before the one being distributed
-        int maxPages = Math.Max(1, MaxPages);
-        int PageOf(float y)
-        {
-            // Compare as doubles: content far down the flow (a huge height or margin) must hit the page limit, not
-            // overflow the page number.
-            double p = grid.PageOf(y + 0.01);
-            if (p + pageOffset >= maxPages || double.IsNaN(p)) throw TooManyPages(maxPages);
-            return Math.Max(0, (int)p);
-        }
+        var doc = new WriteState(sections, pageBackground, title, author, subject, footerTemplate, headerTemplate, outline);
+        _page = doc.FirstSetup;
+        DistributeOverPages(doc);
+        LayOutPageBands(doc, pageBands);
 
-        // 1. Distribute ops over pages.
-        var pages = new List<List<Placed>>();
-        Func<int, float>? footnoteCut = null; // the space footnote areas take at the bottom of the pages being distributed
-        List<Placed> PageList(int p)
-        {
-            // Sized like the page before: pages of a document tend to hold about as many ops each.
-            while (pages!.Count <= p) pages.Add(new List<Placed>(pages.Count > 0 ? Math.Max(16, pages[^1].Count) : 16));
-            return pages[p];
-        }
-        // The list of a page: the document's own, or, for a transformed layer, the layer's part on that page.
-        List<Placed> Target(SortedDictionary<int, List<Placed>>? into, int p)
-        {
-            if (into == null) return PageList(pageOffset + p);
-            if (!into.TryGetValue(p, out var list)) into[p] = list = new List<Placed>();
-            return list;
-        }
-        void AddSplit(DrawOp op, float top, float bottom, SortedDictionary<int, List<Placed>>? into)
-        {
-            if (bottom < top) (top, bottom) = (bottom, top);
-            int p0 = PageOf(top), p1 = Math.Max(p0, PageOf(bottom - 0.5f));
-            for (int p = p0; p <= p1; p++)
-            {
-                float y0 = Math.Max(top, grid.Start(p)), y1 = Math.Min(bottom, grid.Start(p + 1) - (footnoteCut?.Invoke(p) ?? 0));
-                if (y1 > y0 || top == bottom) Target(into, p).Add(new Placed(op, y0, y1));
-            }
-        }
-        void Distribute(DrawOp op, SortedDictionary<int, List<Placed>>? into)
-        {
-            switch (op)
-            {
-                case LayerOp { NeedsBlock: true } layer:
-                {
-                    // Each page gets the part of the layer that falls on it, drawn with the whole layer's transform.
-                    var parts = new SortedDictionary<int, List<Placed>>();
-                    foreach (var o in layer.Ops) Distribute(o, parts);
-                    foreach (var (p, items) in parts) Target(into, p).Add(new Placed(new LayerBlock(layer, items), 0, 0));
-                    break;
-                }
-                case ClipOp clip:
-                {
-                    // Content hidden beyond the clip's last page must not add pages of its own.
-                    var parts = new SortedDictionary<int, List<Placed>>();
-                    foreach (var o in clip.Ops) Distribute(o, parts);
-                    bool clipsY = clip.H < ClipOp.Far;
-                    int first = clipsY ? PageOf(clip.Y) : 0, last = clipsY ? Math.Max(first, PageOf(clip.Y + clip.H - 0.5f)) : int.MaxValue;
-                    foreach (var (p, items) in parts)
-                        if (p >= first && p <= last) Target(into, p).Add(new Placed(new ClipBlock(clip, items), 0, 0));
-                    break;
-                }
-                case FieldOp field:
-                {
-                    // A field stays whole, on the page where it starts.
-                    var items = new List<Placed>();
-                    foreach (var o in field.Ops) Flatten(o, items);
-                    Target(into, PageOf(field.Y)).Add(new Placed(new FieldBlock(field, items), field.Y, field.Y + field.H));
-                    break;
-                }
-                case GroupOp g:
-                    foreach (var o in g.Ops) Distribute(o, into);
-                    break;
-                case RectOp r:
-                    if (r.W > 0 && r.H > 0) AddSplit(r, r.Y, r.Y + r.H, into);
-                    break;
-                case RoundRectOp rr:
-                    if (rr.W > 0 && rr.H > 0) AddSplit(rr, rr.Y, rr.Y + rr.H, into); // only the outer shape is painted
-                    break;
-                case BorderRectOp br:
-                    if (PageOf(br.Y) == PageOf(br.Y + br.H - 0.5f)) Target(into, PageOf(br.Y)).Add(new Placed(br, br.Y, br.Y + br.H));
-                    else foreach (var side in br.Sides()) Distribute(side, into); // a box split by a page break is open at the break
-                    break;
-                case BackgroundOp bg:
-                {
-                    var (x0, y0, x1, y1) = bg.Painted();
-                    if (x1 > x0 && y1 > y0) AddSplit(bg, y0, y1, into);
-                    break;
-                }
-                case LineOp l:
-                    if (l.X1 == l.X2) AddSplit(l, l.Y1, l.Y2, into);
-                    else Target(into, PageOf(l.Y1)).Add(new Placed(l, l.Y1, l.Y2));
-                    break;
-                case TextOp t:
-                    Target(into, PageOf(t.LineTop)).Add(new Placed(t, 0, 0));
-                    break;
-                case ImageOp im:
-                    Target(into, PageOf(im.Y)).Add(new Placed(im, 0, 0));
-                    break;
-                case SvgOp sv:
-                    Target(into, PageOf(sv.Y)).Add(new Placed(sv, 0, 0));
-                    break;
-                case LinkOp lk:
-                    if (lk.W > 0 && lk.H > 0) AddSplit(lk, lk.Y, lk.Y + lk.H, into); // a link box split by a page break is clickable on both pages
-                    break;
-                case CircleOp c:
-                    Target(into, PageOf(c.Cy - c.R)).Add(new Placed(c, 0, 0));
-                    break;
-            }
-        }
-        // Each section's pages follow the last section's; the per-page arrays say which section a page is in and
-        // where in that section's flow it starts. Anchors go into one space: a section's flow y plus the flow length
-        // of the sections before it.
-        var pageSection = new List<int>();
-        var sectionFirst = new int[sections.Count];
-        var sectionBase = new float[sections.Count + 1];
-        for (int si = 0; si < sections.Count; si++)
-        {
-            var section = sections[si];
-            grid = section.Grid;
-            pageOffset = sectionFirst[si] = pageSection.Count;
-            footnoteCut = section.FootnoteReserve;
-            foreach (var op in section.Ops) Distribute(op, null);
-            footnoteCut = null;
-            if (section.FootnoteOps != null) foreach (var op in section.FootnoteOps) Distribute(op, null);
-            int sectionPages = Math.Max(pages.Count - pageOffset, Math.Max(1, PageOf(Math.Max(0, section.ContentHeight - 0.5f)) + 1));
-            while (pages.Count < pageOffset + sectionPages) pages.Add(new List<Placed>());
-            for (int k = 0; k < sectionPages; k++) pageSection.Add(si);
-            sectionBase[si + 1] = sectionBase[si] + grid.Start(sectionPages);
-        }
-        int pageCount = pages.Count;
-        _page = firstSetup;
-        _sections = sections;
-        _pageSection = pageSection.ToArray();
-        _sectionFirst = sectionFirst;
-        _sectionBase = sectionBase;
-        IReadOnlyDictionary<string, float> anchors = sections[0].Anchors;
-        if (sections.Count > 1)
-        {
-            var merged = new Dictionary<string, float>(StringComparer.Ordinal);
-            for (int si = 0; si < sections.Count; si++)
-                foreach (var (key, y) in sections[si].Anchors) merged.TryAdd(key, sectionBase[si] + y);
-            anchors = merged;
-        }
-
-        // Running headers and footers, laid out per page now that the page count is known. Their ops use y from the
-        // top of the content area.
-        // The canvas background of each page goes first, also in y from the top of the content area.
-        var bands = new List<Placed>[pageCount];
-        var canvas = new List<Placed>[pageCount];
-        for (int p = 0; p < pageCount; p++)
-        {
-            Cancellation.ThrowIfCancellationRequested();
-            var list = bands[p] = new List<Placed>();
-            canvas[p] = new List<Placed>();
-            var section = sections[_pageSection[p]];
-            var fixedOps = section.FixedOps;
-            if (pageBands == null && fixedOps == null && section.Canvas == null) continue;
-            if (section.Canvas != null) foreach (var op in section.Canvas(p - _sectionFirst[_pageSection[p]])) Flatten(op, canvas[p]);
-            if (pageBands != null) foreach (var op in pageBands(p, pageCount)) Flatten(op, list);
-            // position: fixed boxes repeat on every page, as in Chrome's print output.
-            if (fixedOps != null) foreach (var op in fixedOps) Flatten(op, list);
-        }
-
-        // 2. Collect resources.
-        var usedFonts = new bool[StandardFont.All.Length];
-        var images = new List<PdfImage>();
-        var imageIds = new Dictionary<PdfImage, int>();
-        void CollectResources(Placed p)
-        {
-            if (p.Op is BackgroundOp { Gradient: { Conic: true, FunctionId: 0 } conic })
-            {
-                conic.FunctionId = -1; // numbered with the other objects below
-                _conics.Add(conic);
-            }
-            if (p.Op is TextOp t) CollectFonts(t, usedFonts);
-            else if (p.Op is SvgOp sv) CollectSvgFonts(sv.Image, usedFonts);
-            else if (p.Op is BackgroundOp { Svg: { } bgSvg }) CollectSvgFonts(bgSvg, usedFonts);
-            else if (p.Op is ImageOp im && !imageIds.ContainsKey(im.Image))
-            {
-                imageIds[im.Image] = images.Count + 1;
-                images.Add(im.Image);
-            }
-            else if (p.Op is BackgroundOp { Image: { } bgImage } && !imageIds.ContainsKey(bgImage))
-            {
-                imageIds[bgImage] = images.Count + 1;
-                images.Add(bgImage);
-            }
-        }
-        Action<Placed> collectResources = CollectResources;
-        foreach (var page in pages) ForEachLeaf(page, collectResources);
-        foreach (var page in bands) ForEachLeaf(page, collectResources);
-        foreach (var page in canvas) ForEachLeaf(page, collectResources);
-        bool hasMargins = footerTemplate != null || headerTemplate != null;
-        var marginFont = MarginFont ?? StandardFont.Get(FontFamily.Helvetica, false, false);
-        if (hasMargins)
-        {
-            // Page numbers are only known per page: collect every digit.
-            foreach (var template in new[] { headerTemplate, footerTemplate })
-                if (template != null) CollectFonts(new TextOp(0, 0, 0, marginFont, MarginTextSize, 0, template + "0123456789", 0, 0), usedFonts);
-        }
-
-        var wm = Watermark;
-        (List<TextOp> Lines, float Cos, float Sin)? wmText = null;
-        PdfImage? wmImage = null;
-        SvgImage? wmSvg = null;
-        if (wm != null)
-        {
-            if (wm.Image != null && (wmImage = PdfImage.FromBytes(wm.Image)) == null)
-            {
-                wmSvg = WatermarkSvg ?? throw new ArgumentException("The watermark image is not a PNG, JPEG, GIF, WebP, BMP, TIFF or SVG image this library can read.");
-                CollectSvgFonts(wmSvg, usedFonts);
-            }
-            if (wmImage != null)
-            {
-                if (!imageIds.ContainsKey(wmImage))
-                {
-                    imageIds[wmImage] = images.Count + 1;
-                    images.Add(wmImage);
-                }
-            }
-            if (!string.IsNullOrEmpty(wm.Text))
-            {
-                wmText = LayoutWatermarkText(wm, WatermarkFont ?? StandardFont.Get(FontFamily.Helvetica, wm.Bold, false));
-                foreach (var line in wmText.Value.Lines) CollectFonts(line, usedFonts);
-            }
-            if (wmText == null && wmImage == null && wmSvg == null) wm = null;
-        }
-
-        bool pdfa = Conformance != PdfConformance.None;
-        if (pdfa)
-        {
-            // An sRGB output intent does not cover DeviceCMYK: convert CMYK images.
-            for (int i = 0; i < images.Count; i++)
-            {
-                var rgb = images[i].ToRgb();
-                if (rgb == null || ReferenceEquals(rgb, images[i])) continue;
-                foreach (var key in imageIds.Where(kv => ReferenceEquals(kv.Key, images[i])).Select(kv => kv.Key).ToList())
-                    imageIds[rgb] = imageIds[key];
-                images[i] = rgb;
-            }
-        }
+        CollectResources(doc);
+        PrepareWatermark(doc);
+        if (IsPdfA) ConvertCmykImages(doc);
         if (Security != null) _crypt = new PdfEncryptor(Security);
-        _imageList = images;
+        _imageList = doc.Images;
 
-        // 3. Object numbers.
-        int next = 1;
-        // PDF 2.0 deprecates the document information dictionary (PDF/A-4 allows only its ModDate): the XMP metadata
-        // carries the properties instead.
-        int catalogId = next++, pagesId = next++, resourcesId = next++, infoId = Pdf20 ? 0 : next++;
-        _resourcesId = resourcesId;
-        var fontIds = new int[usedFonts.Length];
-        for (int i = 0; i < usedFonts.Length; i++) if (usedFonts[i]) fontIds[i] = next++;
-        int firstEmbeddedId = next;
-        next += _subsetList.Count * 5; // Type0 font, CIDFont, descriptor, font file, ToUnicode CMap
-        foreach (var img in images)
-        {
-            img.ObjectNumber = next++;
-            if (img.SMask != null) img.SMask.ObjectNumber = next++;
-        }
-        var pageIds = new int[pageCount];
-        var contentIds = new int[pageCount];
-        for (int i = 0; i < pageCount; i++) { pageIds[i] = next++; contentIds[i] = next++; }
-        _pageIds = pageIds;
-        var outlineItems = BuildOutline(outline, anchors);
-        int outlinesId = 0;
-        if (outlineItems.Count > 0)
-        {
-            outlinesId = next++;
-            foreach (var item in outlineItems) item.Id = next++;
-        }
-        int watermarkId = wm != null ? next++ : 0;
-        int watermarkSvgId = wmSvg != null ? next++ : 0;
-        int metadataId = 0, outputIntentId = 0, iccId = 0, encryptId = 0;
-        if (pdfa) { metadataId = next++; outputIntentId = next++; iccId = next++; }
-        var fileSpecIds = new int[Attachments.Count];
-        for (int i = 0; i < fileSpecIds.Length; i++) { fileSpecIds[i] = next; next += 2; } // file specification, embedded file
-        if (_crypt != null) encryptId = next++;
-        bool tagged = Structure != null;
-        int structRootId = tagged ? next++ : 0;
-        if (PdfUA && metadataId == 0) metadataId = next++;
-        var pageFields = AllocateFields(pages, pageCount, ref next);
-        foreach (var conic in _conics)
-        {
-            conic.FunctionId = next++;
-            if (conic.Alphas != null) conic.AlphaFunctionId = next++;
-        }
+        // Every object gets its number before the first is written, except those that only writing the pages
+        // reveals (annotations, patterns, transparency groups, masks), which are numbered after them.
+        NumberObjects(doc);
 
-        // 4. Header.
-        _out.Ascii(Pdf20 ? "%PDF-2.0\n%" : pdfa || _crypt != null || tagged ? "%PDF-1.7\n%" : "%PDF-1.4\n%").Bytes(new byte[] { 0xE2, 0xE3, 0xCF, 0xD3 }).Nl();
-
-        // Catalog, pages tree.
-        Begin(catalogId).Ascii("<< /Type /Catalog /Pages ").Int(pagesId).Ascii(" 0 R");
-        if (outlinesId != 0) _out.Ascii(" /Outlines ").Int(outlinesId).Ascii(" 0 R");
-        if (metadataId != 0) _out.Ascii(" /Metadata ").Int(metadataId).Ascii(" 0 R");
-        if (pdfa) _out.Ascii(" /OutputIntents [").Int(outputIntentId).Ascii(" 0 R]");
-        if (tagged)
-        {
-            _out.Ascii(" /MarkInfo << /Marked true >> /StructTreeRoot ").Int(structRootId).Ascii(" 0 R");
-            if (!string.IsNullOrEmpty(Language)) { _out.Ascii(" /Lang "); WriteTextString(_out, Language!); }
-        }
-        // PDF/UA: viewers show the title, not the file name. A right-to-left document's pages progress from right to
-        // left, which a viewer showing two pages side by side needs to know to put them in the right order.
-        bool displayTitle = tagged && !string.IsNullOrEmpty(title);
-        if (displayTitle || RightToLeft)
-            _out.Ascii(" /ViewerPreferences <<").Ascii(displayTitle ? " /DisplayDocTitle true" : "").Ascii(RightToLeft ? " /Direction /R2L" : "").Ascii(" >>");
-        if (fileSpecIds.Length > 0)
-        {
-            // Attachments are listed in the name tree viewers show and are associated files (/AF), as PDF/A-3 needs.
-            _out.Ascii(" /Names << /EmbeddedFiles << /Names [");
-            for (int i = 0; i < fileSpecIds.Length; i++)
-            {
-                if (i > 0) _out.Sp();
-                WriteTextString(_out, Attachments[i].FileName);
-                _out.Sp().Int(fileSpecIds[i]).Ascii(" 0 R");
-            }
-            _out.Ascii("] >> >> /AF [");
-            for (int i = 0; i < fileSpecIds.Length; i++) _out.Ascii(i > 0 ? " " : "").Int(fileSpecIds[i]).Ascii(" 0 R");
-            _out.Ascii("]");
-        }
-        WriteAcroForm();
-        // AES-256 (revision 6) is the Adobe extension level 8 to PDF 1.7, standardised in PDF 2.0.
-        if (_crypt != null && !Pdf20) _out.Ascii(" /Extensions << /ADBE << /BaseVersion /1.7 /ExtensionLevel 8 >> >>");
-        _out.Ascii(" >>");
-        End();
-        Begin(pagesId).Ascii("<< /Type /Pages /Count ").Int(pageCount).Ascii(" /Kids [");
-        for (int i = 0; i < pageCount; i++) _out.Int(pageIds[i]).Ascii(" 0 R ");
-        _out.Ascii("] >>");
-        End();
-
-        // Info.
+        // The objects are written in the order of the file, which with their numbers makes its bytes: keep it.
+        WriteHeader();
+        WriteCatalog(doc);
+        WritePageTree(doc);
         var now = DateTime.UtcNow;
-        now = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerSecond));
-        var props = Properties.WithStandard(title, author, subject);
-        if (metadataId != 0) props = props.Cleaned(); // Info and XMP must agree, and XML cannot carry control characters.
-        if (infoId != 0)
-        {
-            Begin(infoId);
-            props.WriteInfo(_out, now, modDate: metadataId != 0, WriteTextString);
-            End();
-        }
+        doc.Now = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerSecond));
+        WriteInfoAndMetadata(doc);
+        if (IsPdfA) WriteOutputIntent(doc);
+        for (int i = 0; i < doc.FileSpecIds.Length; i++) WriteAttachment(Attachments[i], doc.FileSpecIds[i], doc.Now);
+        WriteFonts(doc);
+        WriteImages(doc);
+        if (doc.Watermark != null) WriteWatermark(doc);
 
-        if (metadataId != 0)
-        {
-            var (part, level, rev) = PdfA.Identification(Conformance);
-            var xmp = PdfA.Xmp(part, level, props, now, EInvoice, PdfUAPart, rev);
-            WriteStream(metadataId, xmp, compress: false, "/Type /Metadata /Subtype /XML");
-        }
-        if (pdfa)
-        {
-            Begin(outputIntentId).Ascii("<< /Type /OutputIntent /S /GTS_PDFA1 /OutputConditionIdentifier ");
-            WriteTextString(_out, PdfA.OutputCondition);
-            _out.Ascii(" /Info ");
-            WriteTextString(_out, PdfA.OutputCondition);
-            _out.Ascii(" /DestOutputProfile ").Int(iccId).Ascii(" 0 R >>");
-            End();
-            WriteStream(iccId, PdfA.SrgbProfile, _compress, "/N 3");
-        }
-        for (int i = 0; i < fileSpecIds.Length; i++) WriteAttachment(Attachments[i], fileSpecIds[i], now);
-
-        // Fonts.
-        for (int i = 0; i < usedFonts.Length; i++)
-        {
-            if (!usedFonts[i]) continue;
-            Begin(fontIds[i]).Ascii("<< /Type /Font /Subtype /Type1 /BaseFont /").Ascii(StandardFont.All[i].BaseFont)
-                .Ascii(" /Encoding /WinAnsiEncoding >>");
-            End();
-        }
-        for (int i = 0; i < _subsetList.Count; i++) WriteEmbeddedFont(_subsetList[i], firstEmbeddedId + i * 5);
-
-        // Images.
-        foreach (var img in images)
-        {
-            WriteImage(img);
-            if (img.SMask != null) WriteImage(img.SMask);
-        }
-
-        if (wm != null)
-        {
-            var fontDict = new ByteBuffer(128);
-            for (int i = 0; i < usedFonts.Length; i++)
-                if (usedFonts[i]) fontDict.Ascii(" /F").Int(i + 1).Sp().Int(fontIds[i]).Ascii(" 0 R");
-            for (int i = 0; i < _subsetList.Count; i++) fontDict.Ascii(" /E").Int(i + 1).Sp().Int(firstEmbeddedId + i * 5).Ascii(" 0 R");
-            WriteWatermark(watermarkId, wm, wmText, fontDict, wmImage, wmSvg, watermarkSvgId);
-        }
-
-        // Pages, contents, annotations. A scaled page is written at the size Chrome gives the paper (see PaperSize).
-        var content = new ByteBuffer(32 * 1024);
-        var annotations = new List<(int Id, Placed Link, float Origin, float PageTop, int Page)>();
-        var pageStreams = new McStream[pageCount];
-        int parentKey = pageCount; // keys 0 to pageCount - 1 of the parent tree are the pages'
-        var annotKeys = new Dictionary<int, int>();
-        for (int p = 0; p < pageCount; p++)
-        {
-            Cancellation.ThrowIfCancellationRequested();
-            content.Clear();
-            ResetState();
-            float paperW = SetPage(p, out float paperH), paperDy = _paperDy, pageTop = PageTop(p);
-            if (tagged) { _mc = pageStreams[p] = new McStream(p); _mcOpen = null; }
-            if (_page.Scale != 1)
-            {
-                // Num keeps 3 decimals, too few for a scale such as 0.99916. The content keeps to the top of the page.
-                string k = _page.Scale.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
-                content.Ascii("q ").Ascii(k).Ascii(" 0 0 ").Ascii(k).Ascii(" 0 ").Num(paperDy).Ascii(" cm\n");
-            }
-            // A named page's own @page background, or the document's.
-            uint background = _sections.Count > 1 || _sections[0].Grid.Varies ? _page.Background : pageBackground;
-            if (CssColor.IsVisible(background))
-            {
-                Mark(content, null);
-                SetFill(content, background);
-                content.Ascii("0 0 ").Num(_page.Width).Sp().Num(_page.Height).Ascii(" re f\n");
-            }
-            _yOrigin = _page.MarginTop;
-            _forceArtifact = true;
-            foreach (var placed in canvas[p]) WriteOp(content, placed, 0, imageIds);
-            _forceArtifact = false;
-            if (wm is { Behind: true }) { Mark(content, null); content.Ascii(WatermarkDo(firstSetup)); }
-            var pageLinks = new List<(Placed Link, float Origin, float PageTop)>();
-            _yOrigin = _page.MarginTop + _page.BandTop;
-            (_flowTop, _flowBottom) = (pageTop, pageTop + _page.FlowHeight);
-            foreach (var placed in pages[p])
-            {
-                if (placed.Op is LinkOp) { pageLinks.Add((placed, _yOrigin, pageTop)); continue; }
-                AddUntransformedLinks(placed, pageLinks, _yOrigin, pageTop);
-                WriteOp(content, placed, pageTop, imageIds);
-            }
-            _flowTop = _flowBottom = float.NaN;
-            _yOrigin = _page.MarginTop;
-            _forceArtifact = true;
-            foreach (var placed in bands[p])
-            {
-                if (placed.Op is LinkOp) { pageLinks.Add((placed, _yOrigin, 0)); continue; }
-                AddUntransformedLinks(placed, pageLinks, _yOrigin, 0);
-                WriteOp(content, placed, 0, imageIds);
-            }
-            _forceArtifact = false;
-            if (hasMargins)
-            {
-                Mark(content, null);
-                EndText(content);
-                if (headerTemplate != null) WriteMarginText(content, marginFont, headerTemplate, p + 1, pageCount, top: true);
-                if (footerTemplate != null) WriteMarginText(content, marginFont, footerTemplate, p + 1, pageCount, top: false);
-            }
-            EndText(content);
-            if (wm is { Behind: false }) { Mark(content, null); content.Ascii(WatermarkDo(firstSetup)); }
-            EndMarked(content);
-            if (_page.Scale != 1) content.Ascii("Q\n");
-
-            var annotIds = new List<int>();
-            foreach (var (lk, origin, linkTop) in pageLinks)
-            {
-                int id = next++;
-                annotIds.Add(id);
-                annotations.Add((id, lk, origin, linkTop, p));
-                if (tagged)
-                {
-                    // A link annotation belongs to its Link element; one outside the structure (in a running header,
-                    // say) gets a Link element of its own at the end.
-                    var linkOp = (LinkOp)lk.Op;
-                    var link = linkOp.Link ?? new StructElem("Link", Structure!.Root) { Text = linkOp.Target };
-                    link.Kids.Add(new AnnotRef(id, p));
-                    _mc!.Annotations.Add((id, link));
-                    annotKeys[id] = parentKey++;
-                }
-            }
-            foreach (var field in pageFields[p])
-            {
-                int id = _fieldIds[field];
-                annotIds.Add(id);
-                if (tagged)
-                {
-                    // A widget belongs to its Form element; one outside the structure gets a Form element of its own.
-                    var f = field.Field;
-                    var form = f.Form ?? new StructElem("Form", Structure!.Root) { Alt = f.Field.Tooltip ?? f.Field.Name };
-                    form.Kids.Add(new AnnotRef(id, p));
-                    _mc!.Annotations.Add((id, form));
-                    annotKeys[id] = parentKey++;
-                }
-            }
-
-            Begin(pageIds[p]).Ascii("<< /Type /Page /Parent ").Int(pagesId).Ascii(" 0 R /MediaBox [0 0 ")
-                .Num(paperW).Sp().Num(paperH).Ascii("] /Resources ").Int(resourcesId).Ascii(" 0 R /Contents ")
-                .Int(contentIds[p]).Ascii(" 0 R");
-            if (annotIds.Count > 0)
-            {
-                _out.Ascii(" /Annots [");
-                foreach (var id in annotIds) _out.Int(id).Ascii(" 0 R ");
-                _out.Ascii("]");
-            }
-            if (tagged)
-            {
-                if (_mc!.Elements.Count > 0) _out.Ascii(" /StructParents ").Int(p);
-                _out.Ascii(" /Tabs /S"); // PDF/UA: annotations in structure order
-            }
-            _out.Ascii(" >>");
-            End();
-
-            WriteStream(contentIds[p], content.Span, _compress, extraDict: null);
-        }
-
+        WritePages(doc);
         // The structure elements get their object numbers now: PDF 2.0 links and bookmarks refer to them.
-        var structElements = tagged ? NumberStructure(ref next) : null;
-
-        foreach (var (id, placed, origin, linkPageTop, linkPage) in annotations)
-        {
-            SetPage(linkPage, out _);
-            float paperDy = _paperDy;
-            var link = (LinkOp)placed.Op;
-            float x1 = _page.MarginLeft + link.X, x2 = x1 + link.W;
-            float yTop = _page.Height - origin - (placed.Y0 - linkPageTop);
-            float yBottom = yTop - (placed.Y1 - placed.Y0);
-            float k = _page.Scale;
-            x1 *= k; x2 *= k; yTop = yTop * k + paperDy; yBottom = yBottom * k + paperDy;
-            Begin(id).Ascii("<< /Type /Annot /Subtype /Link /Rect [").Num(x1).Sp().Num(yBottom).Sp().Num(x2).Sp().Num(yTop)
-                .Ascii("] /F 4 /Border [0 0 0] ");
-            if (annotKeys.TryGetValue(id, out int key))
-            {
-                // PDF/UA: a link's description, for assistive technology.
-                var text = (link.Link?.Text is { Length: > 0 } t ? t : null) ?? link.Target;
-                _out.Ascii("/StructParent ").Int(key).Ascii(" /Contents ");
-                WriteTextString(_out, text);
-                _out.Sp();
-            }
-            if (link.Target.StartsWith("#", StringComparison.Ordinal))
-            {
-                string anchor = Uri.UnescapeDataString(link.Target.Substring(1));
-                if (!anchors.TryGetValue(anchor, out float ay) && anchors.TryGetValue(link.Target.Substring(1), out ay))
-                    anchor = link.Target.Substring(1);
-                if (anchors.ContainsKey(anchor)) WriteGoTo(ay, Structure?.TargetOf(anchor));
-            }
-            else
-            {
-                _out.Ascii("/A << /S /URI /URI ");
-                WriteAsciiString(_out, link.Target);
-                _out.Ascii(" >>");
-            }
-            _out.Ascii(" >>");
-            End();
-        }
-
-        WriteFields(pageFields, pageIds, imageIds, annotKeys, ref next);
+        if (Tagged) doc.StructElements = NumberStructure(ref doc.Next);
+        WriteLinkAnnotations(doc);
+        WriteFields(doc.PageFields, doc.PageIds, doc.ImageIds, doc.AnnotKeys, ref doc.Next);
         SetPage(0, out _);
+        if (doc.OutlinesId != 0) WriteOutline(doc);
+        if (_crypt != null) WriteEncryption(doc);
 
-        // Bookmarks.
-        if (outlinesId != 0)
-        {
-            var top = outlineItems.Where(o => o.Parent == null).ToList();
-            Begin(outlinesId).Ascii("<< /Type /Outlines /First ").Int(top[0].Id).Ascii(" 0 R /Last ").Int(top[^1].Id)
-                .Ascii(" 0 R /Count ").Int(outlineItems.Count).Ascii(" >>");
-            End();
-            foreach (var item in outlineItems)
-            {
-                Begin(item.Id).Ascii("<< /Title ");
-                WriteTextString(_out, item.Title);
-                _out.Ascii(" /Parent ").Int(item.Parent?.Id ?? outlinesId).Ascii(" 0 R");
-                if (item.Prev != null) _out.Ascii(" /Prev ").Int(item.Prev.Id).Ascii(" 0 R");
-                if (item.Next != null) _out.Ascii(" /Next ").Int(item.Next.Id).Ascii(" 0 R");
-                if (item.Children.Count > 0)
-                    _out.Ascii(" /First ").Int(item.Children[0].Id).Ascii(" 0 R /Last ").Int(item.Children[^1].Id)
-                        .Ascii(" 0 R /Count ").Int(item.Descendants);
-                _out.Sp();
-                WriteGoTo(item.Y, item.Heading is { } h ? Structure?.ElementOf(h) : null);
-                _out.Ascii(" >>");
-                End();
-            }
-        }
-
-        if (_crypt != null)
-        {
-            Begin(encryptId);
-            _crypt.WriteDictionary(_out);
-            End();
-        }
-
-        foreach (var conic in _conics)
-        {
-            WriteStream(conic.FunctionId, conic.ConicFunction(gray: false), _compress, Gradient.ConicFunctionDict(gray: false));
-            if (conic.AlphaFunctionId != 0) WriteStream(conic.AlphaFunctionId, conic.ConicFunction(gray: true), _compress, Gradient.ConicFunctionDict(gray: true));
-        }
-
-        // Tiling patterns of repeated backgrounds, collected while writing the pages.
-        foreach (var (n, tileContent, tileDict) in _tilings)
-        {
-            int id = next++;
-            WriteStream(id, tileContent, _compress, tileDict);
-            _patterns.Ascii(" /T").Int(n).Sp().Int(id).Ascii(" 0 R");
-        }
-
-        // Transparency groups of translucent layers. They share the page resources.
-        var formIds = new int[_forms.Count];
-        for (int i = 0; i < _forms.Count; i++)
-        {
-            formIds[i] = next++;
-            string structParents = "";
-            if (_formStreams.Count > i && _formStreams[i] is { Elements.Count: > 0 } fs)
-            {
-                fs.Key = parentKey++;
-                fs.FormId = formIds[i];
-                structParents = " /StructParents " + fs.Key.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            }
-            WriteStream(formIds[i], _forms[i], _compress, "/Type /XObject /Subtype /Form /BBox [-32767 -32767 32767 32767] "
-                + (_formIsolated[i] ? "/Group << /S /Transparency /I true >> /Resources " : "/Group << /S /Transparency >> /Resources ")
-                + resourcesId.ToString(System.Globalization.CultureInfo.InvariantCulture) + " 0 R"
-                + structParents);
-        }
-        if (tagged)
+        WriteConicFunctions();
+        WriteTilingPatterns(doc);
+        WriteTransparencyGroups(doc);
+        if (Tagged)
         {
             _mc = null;
-            next = WriteStructure(next, structElements!, structRootId, parentKey, pageIds, pageStreams, annotKeys);
+            doc.Next = WriteStructure(doc.Next, doc.StructElements!, doc.StructRootId, doc.ParentKey, doc.PageIds, doc.PageStreams, doc.AnnotKeys);
         }
-
-        var maskIds = new int[_masks.Count];
-        for (int i = 0; i < _masks.Count; i++)
-        {
-            maskIds[i] = next++;
-            WriteStream(maskIds[i], _masks[i].Content, _compress, _masks[i].Dict);
-        }
-
-        // Images of SVG filter results.
-        foreach (var raster in _rasters)
-        {
-            raster.ObjectNumber = next++;
-            if (raster.SMask != null) raster.SMask.ObjectNumber = next++;
-            WriteImage(raster);
-            if (raster.SMask != null) WriteImage(raster.SMask);
-        }
-
-        // Shared resources, written last: shading patterns are collected while writing the pages.
-        Begin(resourcesId).Ascii("<< /ProcSet [/PDF /Text /ImageB /ImageC /ImageI] /Font <<");
-        for (int i = 0; i < usedFonts.Length; i++)
-            if (usedFonts[i]) _out.Ascii(" /F").Int(i + 1).Sp().Int(fontIds[i]).Ascii(" 0 R");
-        for (int i = 0; i < _subsetList.Count; i++) _out.Ascii(" /E").Int(i + 1).Sp().Int(firstEmbeddedId + i * 5).Ascii(" 0 R");
-        _out.Ascii(" >>");
-        if (images.Count > 0 || wm != null || _forms.Count > 0 || _rasters.Count > 0)
-        {
-            _out.Ascii(" /XObject <<");
-            for (int i = 0; i < images.Count; i++) _out.Ascii(" /Im").Int(i + 1).Sp().Int(images[i].ObjectNumber).Ascii(" 0 R");
-            if (wm != null) _out.Ascii(" /Wm ").Int(watermarkId).Ascii(" 0 R");
-            for (int i = 0; i < _forms.Count; i++) _out.Ascii(" /Fx").Int(i + 1).Sp().Int(formIds[i]).Ascii(" 0 R");
-            for (int i = 0; i < _rasters.Count; i++) _out.Ascii(" /Xr").Int(i + 1).Sp().Int(_rasters[i].ObjectNumber).Ascii(" 0 R");
-            _out.Ascii(" >>");
-        }
-        if (_fillAlphas.Count + _strokeAlphas.Count + _groupAlphas.Count + _blendStates.Count + _layerBlends.Count + _masks.Count > 0)
-        {
-            _out.Ascii(" /ExtGState <<");
-            foreach (int a in _fillAlphas) _out.Ascii(" /a").Int(a).Ascii(" << /ca ").Num(a / 255f).Ascii(" >>");
-            foreach (int a in _strokeAlphas) _out.Ascii(" /A").Int(a).Ascii(" << /CA ").Num(a / 255f).Ascii(" >>");
-            foreach (int a in _groupAlphas) _out.Ascii(" /g").Int(a).Ascii(" << /ca ").Num(a / 255f).Ascii(" /CA ").Num(a / 255f).Ascii(" >>");
-            foreach (var blend in _layerBlends) _out.Ascii(" /b").Ascii(blend).Ascii(" << /BM /").Ascii(blend).Ascii(" >>");
-            foreach (var (a, blend) in _blendStates)
-                _out.Ascii(" /g").Int(a).Ascii(blend).Ascii(" << /ca ").Num(a / 255f).Ascii(" /CA ").Num(a / 255f).Ascii(" /BM /").Ascii(blend).Ascii(" >>");
-            for (int i = 0; i < _masks.Count; i++)
-                _out.Ascii(" /s").Int(i + 1).Ascii(_masks[i].Alpha ? " << /SMask << /Type /Mask /S /Alpha /G " : " << /SMask << /Type /Mask /S /Luminosity /G ")
-                    .Int(maskIds[i]).Ascii(" 0 R >> >>");
-            _out.Ascii(" >>");
-        }
-        if (_patterns.Length > 0) _out.Ascii(" /Pattern <<").Bytes(_patterns.Span).Ascii(" >>");
-        _out.Ascii(" >>");
-        End();
-
-        // Cross-reference table and trailer.
-        long xref = _out.Length;
-        int count = _xref.Count;
-        // This writer numbers its objects up front and must write every one of them.
-        System.Diagnostics.Debug.Assert(_xref.FirstMissing(count) < 0, "An object id was handed out but never written.");
-        _xref.WriteTable(_out, count);
-        var fileId = System.Security.Cryptography.RandomNumberGenerator.GetBytes(16);
-        PdfXref.WriteTrailer(_out, count, catalogId, infoId, encryptId, fileId, fileId, upperHexId: true, xref);
+        WriteSoftMasks(doc);
+        WriteFilterImages(doc);
+        WriteSharedResources(doc);
+        WriteTrailer(doc);
 
         _crypt?.Dispose();
         return _out.Span.ToArray();
     }
 
-    // ------------------------------------------------------------------ objects
+    /// <summary>A PDF/A file of any part and level.</summary>
+    private bool IsPdfA => Conformance != PdfConformance.None;
+
+    /// <summary>A tagged PDF, with a logical structure.</summary>
+    private bool Tagged => Structure != null;
 
     /// <summary>
-    /// Writes an attachment's file specification (with the /Desc PDF/UA asks for and PDF/A-3's /AFRelationship) at
-    /// <paramref name="specId"/> and its embedded file stream at the next number.
+    /// What the steps of writing one document share: its input, the ops on each page, the resources they use and the
+    /// object numbers handed out.
     /// </summary>
-    private void WriteAttachment(PdfAttachment a, int specId, DateTime now)
+    private sealed class WriteState
     {
-        int fileId = specId + 1;
-        Begin(specId).Ascii("<< /Type /Filespec /F ");
-        WriteTextString(_out, a.FileName);
-        _out.Ascii(" /UF ");
-        WriteTextString(_out, a.FileName);
-        _out.Ascii(" /Desc ");
-        WriteTextString(_out, string.IsNullOrEmpty(a.Description) ? a.FileName : a.Description);
-        _out.Ascii(" /AFRelationship /").Ascii(a.Relationship.ToString())
-            .Ascii(" /EF << /F ").Int(fileId).Ascii(" 0 R /UF ").Int(fileId).Ascii(" 0 R >> >>");
-        End();
-        var dict = new ByteBuffer(160);
-        dict.Ascii("/Type /EmbeddedFile /Subtype ");
-        PdfSyntax.Name(dict, a.MimeTypeOrGuess);
-        dict.Ascii(" /Params << /Size ").Int(a.Data.Length);
-        if (a.CreationDate is { } created)
+        public WriteState(IReadOnlyList<PageSection> sections, uint pageBackground, string? title, string? author, string? subject,
+            string? footerTemplate, string? headerTemplate, IReadOnlyList<OutlineHeading>? outline)
         {
-            dict.Ascii(" /CreationDate ");
-            WriteTextString(dict, EmbeddedFiles.PdfDate(created));
+            Sections = sections;
+            FirstSetup = sections[0].Grid.SetupOf(0);
+            PageBackground = pageBackground;
+            Title = title;
+            Author = author;
+            Subject = subject;
+            FooterTemplate = footerTemplate;
+            HeaderTemplate = headerTemplate;
+            Outline = outline;
         }
-        dict.Ascii(" /ModDate ");
-        WriteTextString(dict, a.ModDate is { } mod ? EmbeddedFiles.PdfDate(mod) : EmbeddedFiles.PdfDate(now));
-        if (!a.OmitChecksum)
+
+        public readonly IReadOnlyList<PageSection> Sections;
+        /// <summary>The setup of the document's first page, which the watermark is made for.</summary>
+        public readonly PageSetup FirstSetup;
+        public readonly uint PageBackground;
+        public readonly string? Title, Author, Subject, FooterTemplate, HeaderTemplate;
+        public readonly IReadOnlyList<OutlineHeading>? Outline;
+        public bool HasMargins => FooterTemplate != null || HeaderTemplate != null;
+
+        // The ops of each page: its flowing content, its running headers, footers and fixed boxes, and its canvas.
+        public List<List<Placed>> Pages = null!;
+        public List<Placed>[] Bands = null!, Canvas = null!;
+        public int PageCount;
+        /// <summary>The anchors of all sections, at their y in the document's one flow (see <see cref="_sectionBase"/>).</summary>
+        public IReadOnlyDictionary<string, float> Anchors = null!;
+
+        // The resources the pages use: standard fonts by StandardFont.All index, and images by /Im number - 1.
+        public readonly bool[] UsedFonts = new bool[StandardFont.All.Length];
+        public readonly List<PdfImage> Images = new();
+        public readonly Dictionary<PdfImage, int> ImageIds = new();
+        public TextFont MarginFont = null!;
+
+        // The watermark, null when it has nothing to draw, as laid-out text lines, a raster image or an SVG drawing.
+        public PdfWatermark? Watermark;
+        public (List<TextOp> Lines, float Cos, float Sin)? WatermarkText;
+        public PdfImage? WatermarkImage;
+        public SvgImage? WatermarkSvg;
+
+        // Object numbers: the next free one, then those handed out (0 for an object the file does not have).
+        public int Next = 1;
+        public int CatalogId, PagesId, ResourcesId, InfoId, FirstEmbeddedId, OutlinesId, WatermarkId, WatermarkSvgId;
+        public int MetadataId, OutputIntentId, IccId, EncryptId, StructRootId;
+        public int[] FontIds = null!, PageIds = null!, ContentIds = null!, FileSpecIds = null!, FormIds = null!, MaskIds = null!;
+        public List<OutlineItem> OutlineItems = null!;
+        public List<FieldBlock>[] PageFields = null!;
+
+        // What writing the pages leaves for the objects after them: the link annotations, each page's marked content,
+        // the next free key of the parent tree and the key of each annotation in it.
+        public readonly List<(int Id, Placed Link, float Origin, float PageTop, int Page)> Annotations = new();
+        public McStream[] PageStreams = null!;
+        public int ParentKey;
+        public readonly Dictionary<int, int> AnnotKeys = new();
+        public List<StructElem>? StructElements;
+
+        /// <summary>The time of writing, to the second, for the info dictionary, the XMP metadata and attachments.</summary>
+        public DateTime Now;
+    }
+
+    /// <summary>
+    /// Hands out the object numbers known before the pages are written, in the order the file has always used: the
+    /// numbers are part of the output, so the order must not change.
+    /// </summary>
+    private void NumberObjects(WriteState doc)
+    {
+        // PDF 2.0 deprecates the document information dictionary (PDF/A-4 allows only its ModDate): the XMP metadata
+        // carries the properties instead.
+        doc.CatalogId = doc.Next++;
+        doc.PagesId = doc.Next++;
+        doc.ResourcesId = doc.Next++;
+        doc.InfoId = Pdf20 ? 0 : doc.Next++;
+        _resourcesId = doc.ResourcesId;
+        var usedFonts = doc.UsedFonts;
+        doc.FontIds = new int[usedFonts.Length];
+        for (int i = 0; i < usedFonts.Length; i++) if (usedFonts[i]) doc.FontIds[i] = doc.Next++;
+        doc.FirstEmbeddedId = doc.Next;
+        doc.Next += _subsetList.Count * 5; // Type0 font, CIDFont, descriptor, font file, ToUnicode CMap
+        foreach (var img in doc.Images)
         {
-            dict.Ascii(" /CheckSum ");
-            var md5 = System.Security.Cryptography.MD5.HashData(a.Data);
-            PdfSyntax.Hex(dict, _crypt != null ? _crypt.Encrypt(md5) : md5, upper: true);
+            img.ObjectNumber = doc.Next++;
+            if (img.SMask != null) img.SMask.ObjectNumber = doc.Next++;
         }
-        dict.Ascii(" >>");
-        WriteStream(fileId, a.Data, _compress, System.Text.Encoding.ASCII.GetString(dict.Span));
+        doc.PageIds = new int[doc.PageCount];
+        doc.ContentIds = new int[doc.PageCount];
+        for (int i = 0; i < doc.PageCount; i++) { doc.PageIds[i] = doc.Next++; doc.ContentIds[i] = doc.Next++; }
+        _pageIds = doc.PageIds;
+        doc.OutlineItems = BuildOutline(doc.Outline, doc.Anchors);
+        if (doc.OutlineItems.Count > 0)
+        {
+            doc.OutlinesId = doc.Next++;
+            foreach (var item in doc.OutlineItems) item.Id = doc.Next++;
+        }
+        if (doc.Watermark != null) doc.WatermarkId = doc.Next++;
+        if (doc.WatermarkSvg != null) doc.WatermarkSvgId = doc.Next++;
+        if (IsPdfA) { doc.MetadataId = doc.Next++; doc.OutputIntentId = doc.Next++; doc.IccId = doc.Next++; }
+        doc.FileSpecIds = new int[Attachments.Count];
+        for (int i = 0; i < doc.FileSpecIds.Length; i++) { doc.FileSpecIds[i] = doc.Next; doc.Next += 2; } // file specification, embedded file
+        if (_crypt != null) doc.EncryptId = doc.Next++;
+        if (Tagged) doc.StructRootId = doc.Next++;
+        if (PdfUA && doc.MetadataId == 0) doc.MetadataId = doc.Next++;
+        doc.PageFields = AllocateFields(doc.Pages, doc.PageCount, ref doc.Next);
+        foreach (var conic in _conics)
+        {
+            conic.FunctionId = doc.Next++;
+            if (conic.Alphas != null) conic.AlphaFunctionId = doc.Next++;
+        }
     }
 
     private ByteBuffer Begin(int id) => _xref.Begin(_out, id);

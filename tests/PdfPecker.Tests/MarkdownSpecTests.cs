@@ -38,6 +38,9 @@ public class MarkdownSpecTests
         var examples = LoadSpec();
         if (examples == null)
         {
+            // Offline runs skip the check, but in CI a failed download would hide every regression behind a green test.
+            Assert.False(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true",
+                "The CommonMark spec could not be downloaded, so the spec examples could not be checked.");
             _output.WriteLine("The CommonMark spec could not be downloaded, so the spec examples were skipped.");
             return;
         }
@@ -134,7 +137,19 @@ public class MarkdownSpecTests
         var cache = Path.Combine(Path.GetTempPath(), "pdfpecker-tests", "commonmark-0.31.2-spec.json");
         if (File.Exists(cache)) return File.ReadAllText(cache);
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
-        var json = client.GetStringAsync(SpecUrl).GetAwaiter().GetResult();
+        string json;
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                json = client.GetStringAsync(SpecUrl).GetAwaiter().GetResult();
+                break;
+            }
+            catch (Exception ex) when (attempt < 3 && ex is HttpRequestException or TaskCanceledException)
+            {
+                Thread.Sleep(TimeSpan.FromSeconds(2 * attempt));
+            }
+        }
         Directory.CreateDirectory(Path.GetDirectoryName(cache)!);
         // Written to a temporary name first so a parallel run never reads half a file.
         var temporary = cache + "." + Guid.NewGuid().ToString("N");
