@@ -11,6 +11,8 @@ third-party material below, each under its own license, which is reproduced in t
   format in `src/PdfPecker/Rendering/Fonts/StandardFonts.bin` (built by `tools/FontPackBuilder`), to draw the 14
   standard PDF fonts and fonts that a PDF does not embed. This data is not installed or exposed as a font, it is not
   distributed under the names below, and it remains under the fonts' own licenses.
+- The pair kerning of the standard fonts in `src/PdfPecker/Fonts/StandardFontKerning.Data.cs` was taken from the GPOS
+  `kern` feature of the bundled Liberation fonts, so it is covered by their license.
 - The advance widths of the 14 standard PDF fonts in `src/PdfPecker/Fonts/StandardFontMetrics.Data.cs` were generated
   from Adobe's Core 14 AFM files.
 - The lossy WebP decoder (`src/PdfPecker/Images/Vp8Decoder.cs`) follows libwebp's decoder closely (its work buffer
