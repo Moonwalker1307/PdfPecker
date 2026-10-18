@@ -138,7 +138,10 @@ internal sealed partial class PdfDocumentWriter
         End();
     }
 
-    /// <summary>Writes the cross-reference table and the trailer, with a new random file identifier.</summary>
+    /// <summary>
+    /// Writes the cross-reference table and the trailer, with a new random file identifier, or with one hashed from the
+    /// file's bytes when the date is fixed, so that the same input gives the same file.
+    /// </summary>
     private void WriteTrailer(WriteState doc)
     {
         long xref = _out.Length;
@@ -146,7 +149,7 @@ internal sealed partial class PdfDocumentWriter
         // This writer numbers its objects up front and must write every one of them.
         System.Diagnostics.Debug.Assert(_xref.FirstMissing(count) < 0, "An object id was handed out but never written.");
         _xref.WriteTable(_out, count);
-        var fileId = System.Security.Cryptography.RandomNumberGenerator.GetBytes(16);
+        var fileId = FixedDate != null ? ReproducibleDate.FileId(_out.Span) : System.Security.Cryptography.RandomNumberGenerator.GetBytes(16);
         PdfXref.WriteTrailer(_out, count, doc.CatalogId, doc.InfoId, doc.EncryptId, fileId, fileId, upperHexId: true, xref);
     }
 }

@@ -152,6 +152,12 @@ internal sealed partial class PdfDocumentWriter
     /// <summary>Called once with each character no font can draw; see <see cref="PdfOptions.MissingCharacter"/>.</summary>
     public Action<string>? MissingCharacter { get; init; }
 
+    /// <summary>
+    /// The fixed date for the document's dates, which also makes the file identifier a hash of the content; null to use
+    /// the current time and a random identifier.
+    /// </summary>
+    public DateTime? FixedDate { get; init; }
+
     private HashSet<int>? _missingReported;
 
     private bool EmbedStandard => EmbedStandardFonts || Conformance != PdfConformance.None || PdfUA;
@@ -363,8 +369,7 @@ internal sealed partial class PdfDocumentWriter
         WriteHeader();
         WriteCatalog(doc);
         WritePageTree(doc);
-        var now = DateTime.UtcNow;
-        doc.Now = now.AddTicks(-(now.Ticks % TimeSpan.TicksPerSecond));
+        doc.Now = FixedDate ?? ReproducibleDate.TruncateToSeconds(DateTime.UtcNow);
         WriteInfoAndMetadata(doc);
         if (IsPdfA) WriteOutputIntent(doc);
         for (int i = 0; i < doc.FileSpecIds.Length; i++) WriteAttachment(Attachments[i], doc.FileSpecIds[i], doc.Now);
