@@ -186,4 +186,18 @@ public class SvgFilterPrimitiveTests
             """);
         Assert.NotEmpty(pdf);
     }
+
+    [Fact]
+    public void Filter_steps_go_parallel_only_on_large_images_and_follow_cancellation()
+    {
+        using var cts = new CancellationTokenSource();
+        // A small image runs on the calling thread; a large one on at most one thread per core.
+        Assert.Equal(1, PdfPecker.Svg.SvgFilter.Lines(200 * 200, cts.Token).MaxDegreeOfParallelism);
+        var large = PdfPecker.Svg.SvgFilter.Lines(2000 * 2000, cts.Token);
+        Assert.Equal(Environment.ProcessorCount, large.MaxDegreeOfParallelism);
+        cts.Cancel();
+        int lines = 0;
+        Assert.Throws<OperationCanceledException>(() => Parallel.For(0, 1000, large, _ => Interlocked.Increment(ref lines)));
+        Assert.Equal(0, lines);
+    }
 }
