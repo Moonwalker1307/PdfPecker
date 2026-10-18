@@ -25,9 +25,16 @@ internal sealed partial class OpenTypeLayout
     /// <summary>The scripts a requested script falls back to, in order, as HarfBuzz does.</summary>
     private static readonly uint[] FallbackScripts = [FontProgram.Tag("DFLT"), FontProgram.Tag("dflt"), FontProgram.Tag("latn")];
 
+    // A language system may name one feature many times and a feature may name one lookup many times, and the arrays
+    // of both may share bytes, so a few kilobytes of font could otherwise ask for billions of lookup indexes. Each
+    // feature and each lookup counts once, as in HarfBuzz, and reading stops at this many lookup indexes, which is as
+    // many as a lookup list can hold and far more than any real font's feature names.
+    internal const int MaxLookupIndexReads = 0x10000;
+
     /// <summary>
-    /// The lookups of a feature for a script (its default language system), in lookup order; empty when the font does
-    /// not have the feature. The script falls back to DFLT, dflt and latn, as HarfBuzz does.
+    /// The distinct lookups of a feature for a script (its default language system), in the order the font first names
+    /// them; empty when the font does not have the feature. The script falls back to DFLT, dflt and latn, as HarfBuzz
+    /// does.
     /// </summary>
     public List<int> FeatureLookups(bool gpos, uint script, uint feature)
     {
@@ -37,24 +44,44 @@ internal sealed partial class OpenTypeLayout
         int languageSystem = LanguageSystem(table, script);
         if (languageSystem < 0) return result;
         int features = table + _reader.U16(table + FeatureListField);
-        AddFeatureLookups(result, features, _reader.U16(languageSystem + RequiredFeatureField), feature);
-        for (int i = 0, count = _reader.U16(languageSystem + FeatureIndexCountField); i < count; i++)
-            AddFeatureLookups(result, features, _reader.U16(languageSystem + FeatureIndexesField + i * 2), feature);
+        var collector = new LookupCollector(result);
+        AddFeatureLookups(ref collector, features, _reader.U16(languageSystem + RequiredFeatureField), feature);
+        for (int i = 0, count = _reader.U16(languageSystem + FeatureIndexCountField); i < count && !collector.Full; i++)
+            AddFeatureLookups(ref collector, features, _reader.U16(languageSystem + FeatureIndexesField + i * 2), feature);
         return result;
     }
 
     /// <summary>True when the font's script has the feature.</summary>
     public bool HasFeature(bool gpos, uint script, uint feature) => FeatureLookups(gpos, script, feature).Count > 0;
 
-    // Adds the lookups of the feature at an index of the feature list, when it is there and has the tag.
-    private void AddFeatureLookups(List<int> lookups, int features, int featureIndex, uint tag)
+    // Adds the lookups of the feature at an index of the feature list, when it is there, has the tag and was not added
+    // before.
+    private void AddFeatureLookups(ref LookupCollector collector, int features, int featureIndex, uint tag)
     {
         if (featureIndex == NoRequiredFeature || featureIndex >= _reader.U16(features)) return;
         int record = features + ListRecordsField + featureIndex * ListRecordLength;
-        if (_reader.U32(record) != tag) return;
+        if (_reader.U32(record) != tag || !collector.FirstVisit(featureIndex)) return;
         int feature = features + _reader.U16(record + ListRecordOffsetField);
-        for (int j = 0, count = _reader.U16(feature + LookupIndexCountField); j < count; j++)
-            lookups.Add(_reader.U16(feature + LookupIndexesField + j * 2));
+        for (int j = 0, count = _reader.U16(feature + LookupIndexCountField); j < count && !collector.Full; j++)
+            collector.Add(_reader.U16(feature + LookupIndexesField + j * 2));
+    }
+
+    // The features already visited and the lookups already collected, both 16-bit indexes, and the lookup index budget.
+    private struct LookupCollector(List<int> lookups)
+    {
+        private HashSet<int>? _features;
+        private HashSet<int>? _lookups;
+        private int _reads;
+
+        public readonly bool Full => _reads >= MaxLookupIndexReads;
+
+        public bool FirstVisit(int featureIndex) => (_features ??= []).Add(featureIndex);
+
+        public void Add(int lookupIndex)
+        {
+            _reads++;
+            if ((_lookups ??= []).Add(lookupIndex)) lookups.Add(lookupIndex);
+        }
     }
 
     // The default language system of the script, or of the first fallback script the font has. A script the font
