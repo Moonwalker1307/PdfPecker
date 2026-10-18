@@ -81,13 +81,30 @@ public sealed class PdfEInvoice
     /// The invoice is the attachment the XMP metadata names (DocumentFileName), else one named factur-x.xml,
     /// zugferd-invoice.xml or xrechnung.xml, else any other attached Cross Industry Invoice. The profile comes from the
     /// XML's guideline, else from the XMP conformance level, else EN 16931. ZUGFeRD 1.0 invoices use an older schema
-    /// and are not found; <see cref="PdfAttachments.List"/> still returns them.
+    /// and are not found; <see cref="PdfAttachments.List(byte[], string?)"/> still returns them.
     /// </remarks>
     /// <param name="pdf">The PDF.</param>
     /// <param name="password">The user or owner password of an encrypted PDF.</param>
     /// <exception cref="InvalidDataException">The PDF cannot be read.</exception>
     /// <exception cref="PdfPasswordException">The PDF is encrypted and the password is missing or wrong.</exception>
     public static PdfEInvoice? Read(byte[] pdf, string? password = null)
+        => ReadCore(pdf, password);
+
+    /// <summary>
+    /// The e-invoice attached to a PDF read from <paramref name="pdf"/> (from its current position to its end), or null when
+    /// it has none. The stream is not disposed. See <see cref="Read(byte[], string?)"/>.
+    /// </summary>
+    /// <param name="pdf">The PDF.</param>
+    /// <param name="password">The user or owner password of an encrypted PDF.</param>
+    /// <exception cref="InvalidDataException">The PDF cannot be read.</exception>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and the password is missing or wrong.</exception>
+    public static PdfEInvoice? Read(Stream pdf, string? password = null)
+    {
+        ArgumentNullException.ThrowIfNull(pdf);
+        return ReadCore(PdfMerger.ReadAll(pdf), password);
+    }
+
+    private static PdfEInvoice? ReadCore(byte[] pdf, string? password)
     {
         var file = PdfAttachments.Open(pdf, password);
         // One decode budget for the metadata and every candidate, so many candidates that share a stream which inflates

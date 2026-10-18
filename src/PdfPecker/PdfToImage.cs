@@ -21,7 +21,7 @@ public enum PdfImageFormat
     WebP,
 
     /// <summary>
-    /// TIFF, one page per file here; <see cref="PdfToImage.ConvertToTiff"/> writes every page into one multi-page file.
+    /// TIFF, one page per file here; <see cref="PdfToImage.ConvertToTiff(byte[], ImageOptions?)"/> writes every page into one multi-page file.
     /// Colour, greyscale or black and white after <see cref="ImageOptions.TiffColorMode"/>, compressed as
     /// <see cref="ImageOptions.TiffCompression"/> says.
     /// </summary>
@@ -301,7 +301,7 @@ public sealed class PdfRenderer
     /// <summary>Number of pages.</summary>
     public int PageCount => _doc.Pages.Count;
 
-    /// <summary>Displayed page size in points (after page rotation).</summary>
+    /// <summary>Displayed page size in points (after page rotation) of the page at <paramref name="pageIndex"/>, 0-based (the first page is 0).</summary>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="pageIndex"/> is not a page of the document.</exception>
     public (double Width, double Height) GetPageSize(int pageIndex)
     {
@@ -309,7 +309,10 @@ public sealed class PdfRenderer
         return _doc.PageSize(pageIndex);
     }
 
-    /// <summary>Renders one page (0-based index).</summary>
+    /// <summary>
+    /// Renders one page. <paramref name="pageIndex"/> is 0-based (the first page is 0), unlike <see cref="PdfPageRange"/>
+    /// and <see cref="PdfText"/>, which number pages from 1.
+    /// </summary>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="pageIndex"/> is not a page of the document, or <see cref="ImageOptions.Dpi"/> is not positive.</exception>
     /// <exception cref="InvalidDataException">The page cannot be rendered, for example because it is too complex.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
@@ -359,14 +362,14 @@ public sealed class PdfRenderer
         return new RenderedImage(w, h, canvas.Pixels, options, dpi ?? sx * 72, dpi ?? sy * 72);
     }
 
-    /// <summary>Renders one page and encodes it as PNG.</summary>
+    /// <summary>Renders one page and encodes it as PNG. <paramref name="pageIndex"/> is 0-based (the first page is 0).</summary>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="pageIndex"/> is not a page of the document, or <see cref="ImageOptions.Dpi"/> is not positive.</exception>
     /// <exception cref="InvalidDataException">The page cannot be rendered, for example because it is too complex.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public byte[] RenderPageToPng(int pageIndex, ImageOptions? options = null, CancellationToken cancellationToken = default)
         => RenderPage(pageIndex, options, cancellationToken).ToPng();
 
-    /// <summary>Renders one page and encodes it in <see cref="ImageOptions.Format"/>.</summary>
+    /// <summary>Renders one page and encodes it in <see cref="ImageOptions.Format"/>. <paramref name="pageIndex"/> is 0-based (the first page is 0).</summary>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="pageIndex"/> is not a page of the document, or <see cref="ImageOptions.Dpi"/> is not positive.</exception>
     /// <exception cref="InvalidDataException">The page cannot be rendered, for example because it is too complex.</exception>
     /// <exception cref="NotSupportedException">
@@ -436,7 +439,7 @@ public sealed class PdfRenderer
 
 /// <summary>
 /// Converts PDF pages to PNG, JPEG, WebP or TIFF images (<see cref="ImageOptions.Format"/>), or a whole PDF to one
-/// multi-page TIFF (<see cref="ConvertToTiff"/>). Everything is implemented in
+/// multi-page TIFF (<see cref="ConvertToTiff(byte[], ImageOptions?)"/>). Everything is implemented in
 /// this library, with no dependencies beyond the .NET base class library.
 /// </summary>
 /// <remarks>All methods are static and thread-safe. For rendering several pages of one document, <see cref="PdfRenderer"/> avoids re-parsing.</remarks>
@@ -449,7 +452,13 @@ public static class PdfToImage
     /// <exception cref="NotSupportedException">The PDF uses an encryption handler other than the standard one.</exception>
     public static int GetPageCount(byte[] pdf, string? password = null) => PdfRenderer.Open(pdf, password).PageCount;
 
-    /// <summary>Renders one page (0-based index) to an image in <see cref="ImageOptions.Format"/> (PNG by default).</summary>
+    /// <summary>Returns the number of pages in a PDF read from <paramref name="pdf"/> (from its current position to its end). The stream is not disposed.</summary>
+    public static int GetPageCount(Stream pdf, string? password = null) => PdfRenderer.Open(pdf, password).PageCount;
+
+    /// <summary>
+    /// Renders one page to an image in <see cref="ImageOptions.Format"/> (PNG by default). <paramref name="pageIndex"/> is
+    /// 0-based (the first page is 0), unlike <see cref="PdfPageRange"/> and <see cref="PdfText"/>, which number pages from 1.
+    /// </summary>
     /// <exception cref="ArgumentNullException"><paramref name="pdf"/> is null.</exception>
     /// <exception cref="PdfPasswordException">The PDF is encrypted and <see cref="ImageOptions.Password"/> does not open it.</exception>
     /// <exception cref="InvalidDataException">The data is not a readable PDF, or the page cannot be rendered.</exception>
@@ -460,6 +469,34 @@ public static class PdfToImage
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="pageIndex"/> is not a page of the document, or <see cref="ImageOptions.Dpi"/> is not positive.</exception>
     public static byte[] ConvertPage(byte[] pdf, int pageIndex = 0, ImageOptions? options = null)
         => PdfRenderer.Open(pdf, options?.Password).RenderPageEncoded(pageIndex, options);
+
+    /// <summary>
+    /// Renders one page to an image in <see cref="ImageOptions.Format"/>, stopping with
+    /// <see cref="OperationCanceledException"/> when <paramref name="cancellationToken"/> is cancelled.
+    /// </summary>
+    /// <param name="pdf">The PDF.</param>
+    /// <param name="pageIndex">The page, 0-based: the first page is 0.</param>
+    /// <param name="options">Size, format and password; null for the defaults.</param>
+    /// <param name="cancellationToken">Stops the rendering.</param>
+    public static byte[] ConvertPage(byte[] pdf, int pageIndex, ImageOptions? options, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return PdfRenderer.Open(pdf, options?.Password).RenderPageEncoded(pageIndex, options, cancellationToken);
+    }
+
+    /// <summary>
+    /// Renders one page of a PDF read from <paramref name="pdf"/> (from its current position to its end) to an image in
+    /// <see cref="ImageOptions.Format"/>. The stream is not disposed.
+    /// </summary>
+    /// <param name="pdf">The PDF.</param>
+    /// <param name="pageIndex">The page, 0-based: the first page is 0.</param>
+    /// <param name="options">Size, format and password; null for the defaults.</param>
+    /// <param name="cancellationToken">Stops the rendering.</param>
+    public static byte[] ConvertPage(Stream pdf, int pageIndex = 0, ImageOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return PdfRenderer.Open(pdf, options?.Password).RenderPageEncoded(pageIndex, options, cancellationToken);
+    }
 
     /// <summary>Renders every page to an image in <see cref="ImageOptions.Format"/>, in page order. Pages are rendered in parallel.</summary>
     /// <exception cref="ArgumentNullException"><paramref name="pdf"/> is null.</exception>
@@ -472,6 +509,33 @@ public static class PdfToImage
     /// <exception cref="ArgumentOutOfRangeException"><see cref="ImageOptions.Dpi"/> is not positive.</exception>
     public static byte[][] Convert(byte[] pdf, ImageOptions? options = null)
         => PdfRenderer.Open(pdf, options?.Password).RenderAllEncoded(options);
+
+    /// <summary>
+    /// Renders every page to an image in <see cref="ImageOptions.Format"/>, in page order, stopping with
+    /// <see cref="OperationCanceledException"/> when <paramref name="cancellationToken"/> is cancelled. Pages are rendered
+    /// in parallel.
+    /// </summary>
+    /// <param name="pdf">The PDF.</param>
+    /// <param name="options">Size, format and password; null for the defaults.</param>
+    /// <param name="cancellationToken">Stops the rendering; no further page is started once it is cancelled.</param>
+    public static byte[][] Convert(byte[] pdf, ImageOptions? options, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return PdfRenderer.Open(pdf, options?.Password).RenderAllEncoded(options, cancellationToken);
+    }
+
+    /// <summary>
+    /// Renders every page of a PDF read from <paramref name="pdf"/> (from its current position to its end) to an image in
+    /// <see cref="ImageOptions.Format"/>, in page order. The stream is not disposed.
+    /// </summary>
+    /// <param name="pdf">The PDF.</param>
+    /// <param name="options">Size, format and password; null for the defaults.</param>
+    /// <param name="cancellationToken">Stops the rendering; no further page is started once it is cancelled.</param>
+    public static byte[][] Convert(Stream pdf, ImageOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return PdfRenderer.Open(pdf, options?.Password).RenderAllEncoded(options, cancellationToken);
+    }
 
     /// <summary>Renders every page asynchronously on the thread pool.</summary>
     /// <exception cref="ArgumentNullException"><paramref name="pdf"/> is null.</exception>
@@ -502,7 +566,41 @@ public static class PdfToImage
     public static byte[] ConvertToTiff(byte[] pdf, ImageOptions? options = null)
         => PdfRenderer.Open(pdf, options?.Password).RenderAllToTiff(options);
 
-    /// <summary>Renders every page into one multi-page TIFF (see <see cref="ConvertToTiff"/>) on the thread pool.</summary>
+    /// <summary>
+    /// Renders every page into one multi-page TIFF (see <see cref="ConvertToTiff(byte[], ImageOptions?)"/>), stopping with
+    /// <see cref="OperationCanceledException"/> when <paramref name="cancellationToken"/> is cancelled.
+    /// </summary>
+    /// <param name="pdf">The PDF.</param>
+    /// <param name="options">Size, TIFF settings and password; null for the defaults.</param>
+    /// <param name="cancellationToken">Stops the rendering; no further page is started once it is cancelled.</param>
+    /// <exception cref="NotSupportedException">The file would pass 4 GB, the limit of the TIFF format.</exception>
+    public static byte[] ConvertToTiff(byte[] pdf, ImageOptions? options, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return PdfRenderer.Open(pdf, options?.Password).RenderAllToTiff(options, cancellationToken);
+    }
+
+    /// <summary>
+    /// Renders every page of a PDF read from <paramref name="input"/> (from its current position to its end) into one
+    /// multi-page TIFF (see <see cref="ConvertToTiff(byte[], ImageOptions?)"/>) and writes it to <paramref name="output"/>.
+    /// The streams are not disposed, and nothing is written unless the rendering completes.
+    /// </summary>
+    /// <param name="input">The PDF.</param>
+    /// <param name="output">Where the TIFF is written.</param>
+    /// <param name="options">Size, TIFF settings and password; null for the defaults.</param>
+    /// <param name="cancellationToken">Stops the rendering; no further page is started once it is cancelled.</param>
+    /// <exception cref="NotSupportedException">The file would pass 4 GB, the limit of the TIFF format.</exception>
+    public static void ConvertToTiff(Stream input, Stream output, ImageOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        if (input == null) throw new ArgumentNullException(nameof(input));
+        if (output == null) throw new ArgumentNullException(nameof(output));
+        if (!output.CanWrite) throw new ArgumentException("The output stream is not writable.", nameof(output));
+        cancellationToken.ThrowIfCancellationRequested();
+        var tiff = PdfRenderer.Open(input, options?.Password).RenderAllToTiff(options, cancellationToken);
+        output.Write(tiff, 0, tiff.Length);
+    }
+
+    /// <summary>Renders every page into one multi-page TIFF (see <see cref="ConvertToTiff(byte[], ImageOptions?)"/>) on the thread pool.</summary>
     /// <exception cref="ArgumentNullException"><paramref name="pdf"/> is null.</exception>
     /// <exception cref="PdfPasswordException">The PDF is encrypted and <see cref="ImageOptions.Password"/> does not open it.</exception>
     /// <exception cref="InvalidDataException">The data is not a readable PDF, or a page cannot be rendered.</exception>
@@ -515,7 +613,7 @@ public static class PdfToImage
     public static Task<byte[]> ConvertToTiffAsync(byte[] pdf, ImageOptions? options = null, CancellationToken cancellationToken = default)
         => Task.Run(() => PdfRenderer.Open(pdf, options?.Password).RenderAllToTiff(options, cancellationToken), cancellationToken);
 
-    /// <summary>Renders a PDF file into one multi-page TIFF file (see <see cref="ConvertToTiff"/>).</summary>
+    /// <summary>Renders a PDF file into one multi-page TIFF file (see <see cref="ConvertToTiff(byte[], ImageOptions?)"/>).</summary>
     /// <exception cref="ArgumentNullException"><paramref name="pdfPath"/> or <paramref name="tiffPath"/> is null.</exception>
     /// <exception cref="PdfPasswordException">The PDF is encrypted and <see cref="ImageOptions.Password"/> does not open it.</exception>
     /// <exception cref="InvalidDataException">The file is not a readable PDF, or a page cannot be rendered.</exception>
@@ -530,7 +628,22 @@ public static class PdfToImage
     /// </exception>
     /// <exception cref="UnauthorizedAccessException">The process may not read the PDF file or write the TIFF file.</exception>
     public static void ConvertFileToTiff(string pdfPath, string tiffPath, ImageOptions? options = null)
-        => AtomicFile.WriteAllBytes(tiffPath, PdfRenderer.OpenFile(pdfPath, options?.Password).RenderAllToTiff(options));
+        => ConvertFileToTiff(pdfPath, tiffPath, options, CancellationToken.None);
+
+    /// <summary>
+    /// Renders a PDF file into one multi-page TIFF file (see <see cref="ConvertToTiff(byte[], ImageOptions?)"/>), stopping with
+    /// <see cref="OperationCanceledException"/> when <paramref name="cancellationToken"/> is cancelled; the TIFF file is
+    /// then left as it was.
+    /// </summary>
+    /// <param name="pdfPath">The PDF file.</param>
+    /// <param name="tiffPath">The TIFF file to write; it appears only once it is complete.</param>
+    /// <param name="options">Size, TIFF settings and password; null for the defaults.</param>
+    /// <param name="cancellationToken">Stops the rendering; no further page is started once it is cancelled.</param>
+    public static void ConvertFileToTiff(string pdfPath, string tiffPath, ImageOptions? options, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        AtomicFile.WriteAllBytes(tiffPath, PdfRenderer.OpenFile(pdfPath, options?.Password).RenderAllToTiff(options, cancellationToken));
+    }
 
     /// <summary>
     /// Renders a PDF file's pages to image files in <paramref name="outputDirectory"/>, named
@@ -551,15 +664,32 @@ public static class PdfToImage
     /// </exception>
     /// <exception cref="UnauthorizedAccessException">The process may not read the PDF file or write to the folder.</exception>
     public static IReadOnlyList<string> ConvertFile(string pdfPath, string outputDirectory, ImageOptions? options = null)
+        => ConvertFile(pdfPath, outputDirectory, options, CancellationToken.None);
+
+    /// <summary>
+    /// Renders a PDF file's pages to image files in <paramref name="outputDirectory"/>, named
+    /// <c>{file name}-{page number}</c> plus <c>.png</c>, <c>.jpg</c>, <c>.webp</c> or <c>.tif</c> after <see cref="ImageOptions.Format"/>
+    /// (page numbers in file names start at 1), stopping with <see cref="OperationCanceledException"/> when
+    /// <paramref name="cancellationToken"/> is cancelled. Every page is rendered before the first file is written, and
+    /// cancelling while the files are written stops before the next one.
+    /// </summary>
+    /// <param name="pdfPath">The PDF file.</param>
+    /// <param name="outputDirectory">The folder for the images; it is created when missing.</param>
+    /// <param name="options">Size, format and password; null for the defaults.</param>
+    /// <param name="cancellationToken">Stops the rendering and the writing.</param>
+    /// <returns>The written paths, in page order.</returns>
+    public static IReadOnlyList<string> ConvertFile(string pdfPath, string outputDirectory, ImageOptions? options, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var renderer = PdfRenderer.OpenFile(pdfPath, options?.Password);
         Directory.CreateDirectory(outputDirectory);
         var name = Path.GetFileNameWithoutExtension(pdfPath);
-        var images = renderer.RenderAllEncoded(options);
+        var images = renderer.RenderAllEncoded(options, cancellationToken);
         var extension = RenderedImage.GetFileExtension(options?.Format ?? PdfImageFormat.Png);
         var paths = new string[images.Length];
         for (int i = 0; i < images.Length; i++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             paths[i] = Path.Combine(outputDirectory, $"{name}-{i + 1}{extension}");
             AtomicFile.WriteAllBytes(paths[i], images[i]);
         }

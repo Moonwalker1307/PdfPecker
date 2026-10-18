@@ -35,7 +35,10 @@ public sealed class PdfStampOptions
     /// </summary>
     public bool Underlay { get; set; }
 
-    /// <summary>The page of the stamp PDF to use, 0-based. Ignored when <see cref="MatchPages"/> is set. Default: 0.</summary>
+    /// <summary>
+    /// The page of the stamp PDF to use, 0-based: the first page is 0, unlike <see cref="PdfPageRange"/>, which numbers
+    /// pages from 1. Ignored when <see cref="MatchPages"/> is set. Default: 0.
+    /// </summary>
     public int StampPage { get; set; }
 
     /// <summary>
@@ -45,8 +48,8 @@ public sealed class PdfStampOptions
     public bool MatchPages { get; set; }
 
     /// <summary>
-    /// Which pages to stamp, by 0-based page index, for example <c>i =&gt; i == 0</c> for the first page only. Default:
-    /// null, every page.
+    /// Which pages to stamp, by 0-based page index (the first page is 0, unlike <see cref="PdfPageRange"/>, which numbers
+    /// pages from 1), for example <c>i =&gt; i == 0</c> for the first page only. Default: null, every page.
     /// </summary>
     public Func<int, bool>? Pages { get; set; }
 
@@ -152,6 +155,19 @@ public static class PdfStamper
     /// <exception cref="UnauthorizedAccessException">The process may not read an input file or write the output file.</exception>
     public static void StampFile(string inputPath, string stampPath, string outputPath, PdfStampOptions? options = null)
         => AtomicFile.WriteAllBytes(outputPath, Stamp(File.ReadAllBytes(inputPath), File.ReadAllBytes(stampPath), options));
+
+    /// <summary>
+    /// Stamps a PDF file and writes the result to <paramref name="outputPath"/> (which may be the same path), stopping with
+    /// <see cref="OperationCanceledException"/> when <paramref name="cancellationToken"/> is cancelled; the output file is
+    /// then left as it was.
+    /// </summary>
+    /// <param name="inputPath">The PDF file to stamp.</param>
+    /// <param name="stampPath">The PDF file holding the stamp.</param>
+    /// <param name="outputPath">The stamped file; it appears only once stamping has succeeded.</param>
+    /// <param name="options">Placement, page selection and passwords; null for the defaults.</param>
+    /// <param name="cancellationToken">Stops the work.</param>
+    public static void StampFile(string inputPath, string stampPath, string outputPath, PdfStampOptions? options, CancellationToken cancellationToken)
+        => AtomicFile.WriteAllBytes(outputPath, Stamp(File.ReadAllBytes(inputPath), File.ReadAllBytes(stampPath), options, cancellationToken));
 
     /// <summary>
     /// Stamps the pages of <paramref name="pdf"/> with HTML, rendered at the size of each page (as displayed) with no
