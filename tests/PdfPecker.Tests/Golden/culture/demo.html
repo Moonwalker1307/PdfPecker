@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Signed integers in CSS and HTML</title>
+<!-- GoldenPdfTests also renders every sample under cultures whose minus and plus signs carry a direction mark, where
+     parsing "-1" with the current culture fails. This page puts signed integers in every place that parses them. -->
+<style>
+  body { font: 11pt sans-serif; margin: 20pt; }
+  h2 { font-size: 13pt; margin: 14pt 0 6pt; }
+  table { border-collapse: collapse; width: 100%; }
+  td { border: 0.5pt solid #999; padding: 3pt 6pt; }
+  tr:nth-child(2n+1) td { background: #e8f0ff; }
+  tr:nth-child(-n+2) td { font-weight: bold; }
+  tr:nth-last-child(+1) td { color: #a00; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4pt; }
+  .grid div { background: #eee; padding: 4pt; }
+  .grid .wide { grid-column: 1 / -1; background: #cde; }
+  .grid .back { grid-row: -2; }
+  .flex { display: flex; gap: 6pt; }
+  .flex div { border: 0.5pt solid #888; padding: 4pt; }
+  .first { order: -1; background: #ffd; }
+  .layers { position: relative; height: 30pt; }
+  .layers div { position: absolute; top: 0; width: 80pt; height: 24pt; }
+  .under { left: 20pt; background: #fcc; z-index: -1; }
+  .over { left: 0; background: #ccf; z-index: +2; }
+  .count { counter-reset: n -3; }
+  .count p::before { counter-increment: n +2; content: counter(n) ". "; }
+  .cols { column-count: +2; column-gap: 12pt; }
+</style>
+</head>
+<body>
+<h2>nth-child</h2>
+<table>
+  <tr><td>Row 1</td><td>bold, striped</td></tr>
+  <tr><td>Row 2</td><td>bold</td></tr>
+  <tr><td>Row 3</td><td>striped</td></tr>
+  <tr><td>Row 4</td><td>plain</td></tr>
+  <tr><td>Row 5</td><td colspan="+1">striped, red</td></tr>
+</table>
+
+<h2>Grid lines</h2>
+<div class="grid">
+  <div>a</div><div>b</div><div>c</div>
+  <div class="wide">spans 1 / -1</div>
+  <div class="back">row -2</div>
+</div>
+
+<h2>Flex order</h2>
+<div class="flex"><div>second</div><div>third</div><div class="first">first (order -1)</div></div>
+
+<h2>z-index</h2>
+<div class="layers"><div class="under">z-index -1</div><div class="over">z-index +2</div></div>
+
+<h2>Lists</h2>
+<ol start="-3"><li>minus three</li><li>minus two</li><li value="-10">minus ten</li><li>minus nine</li></ol>
+
+<h2>Counters</h2>
+<div class="count"><p>minus one</p><p>one</p></div>
+
+<h2>font size</h2>
+<p><font size="-1">smaller</font> normal <font size="+2">larger</font></p>
+
+<h2>Columns</h2>
+<div class="cols"><p>Two columns from column-count: +2. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.</p></div>
+</body>
+</html>
