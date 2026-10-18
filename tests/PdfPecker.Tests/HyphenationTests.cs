@@ -213,6 +213,89 @@ public class HyphenationTests
         Assert.Equal(new[] { 2 }, breaks);
     }
 
+    [Theory]
+    [InlineData("auto", 0, 0, 0)]
+    [InlineData("6", 6, 0, 0)]             // one value: the word length, the others auto
+    [InlineData("6 3", 6, 3, 3)]           // two values: after is the same as before
+    [InlineData("auto 3 4", 0, 3, 4)]
+    [InlineData("8 auto 4", 8, 0, 4)]
+    [InlineData("auto auto", 0, 0, 0)]
+    [InlineData("  +7   2  3 ", 7, 2, 3)]
+    [InlineData("99999999999 2", 1000, 2, 2)] // huge integers are clamped, not rejected
+    public void Hyphenate_limit_chars_parses(string value, int word, int before, int after)
+        => Assert.Equal(new HyphenateLimits(word, before, after), StyleResolver.ParseHyphenateLimitChars(value));
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("none")]
+    [InlineData("0")]
+    [InlineData("-1")]
+    [InlineData("5 0")]
+    [InlineData("2.5")]
+    [InlineData("1e2")]
+    [InlineData("5 2 2 2")]
+    [InlineData("5, 2, 2")]
+    [InlineData("5px")]
+    [InlineData("+")]
+    [InlineData("auto auto auto auto")]
+    public void Hyphenate_limit_chars_rejects_invalid_values(string value)
+        => Assert.Null(StyleResolver.ParseHyphenateLimitChars(value));
+
+    private static string Hyphenate(string lang, string word, int minWord, int minBefore, int minAfter)
+    {
+        var breaks = new List<int>();
+        Hyphenator.For(lang, null)!.Hyphenate(word, breaks, skipCapitalized: true, minWord, minBefore, minAfter);
+        for (int k = breaks.Count - 1; k >= 0; k--) word = word.Insert(breaks[k], "-");
+        return word;
+    }
+
+    [Theory]
+    [InlineData(0, 0, 0, "hy-phen-ation")]
+    [InlineData(11, 0, 0, "hy-phen-ation")] // eleven letters
+    [InlineData(12, 0, 0, "hyphenation")]
+    [InlineData(0, 3, 0, "hyphen-ation")]
+    [InlineData(0, 0, 5, "hy-phen-ation")]
+    [InlineData(0, 0, 6, "hy-phenation")]
+    [InlineData(0, 7, 0, "hyphenation")]   // no break has seven letters before it
+    [InlineData(0, 6, 6, "hyphenation")]   // more letters needed than the word has
+    [InlineData(0, 1, 1, "hy-phen-ation")] // never fewer than the patterns' own two before and three after
+    public void Hyphenate_limit_chars_limits_the_breaks(int word, int before, int after, string expected)
+        => Assert.Equal(expected, Hyphenate("en", "hyphenation", word, before, after));
+
+    [Fact]
+    public void Hyphenate_limit_chars_applies_to_exceptions_and_short_words()
+    {
+        Assert.Equal("asso-ciate", Hyphenate("en", "associate", 0, 3, 0)); // from the exception list "as-so-ciate"
+        Assert.Equal("ta-ble", Hyphenate("en", "table", 0, 0, 0));
+        Assert.Equal("table", Hyphenate("en", "table", 6, 0, 0));
+        Assert.Equal("table", Hyphenate("en", "table", 0, 3, 0));
+    }
+
+    [Fact]
+    public void Hyphenate_limit_chars_is_inherited_and_overridden_per_element()
+    {
+        bool Hyphenated(string html) => Lines(Layout(html)).Any(l => l.EndsWith('-'));
+        Assert.True(Hyphenated($"<div lang='en' style='{Narrow}; hyphens: auto; hyphenate-limit-chars: auto'>{Text}</div>"));
+        Assert.False(Hyphenated($"<div lang='en' style='{Narrow}; hyphens: auto; hyphenate-limit-chars: 20'>{Text}</div>"));
+        // Inherited by a child, and a child's own value wins.
+        Assert.False(Hyphenated($"<div lang='en' style='{Narrow}; hyphens: auto; hyphenate-limit-chars: 20'><span>{Text}</span></div>"));
+        Assert.True(Hyphenated($"<div lang='en' style='{Narrow}; hyphens: auto; hyphenate-limit-chars: 20'><span style='hyphenate-limit-chars: initial'>{Text}</span></div>"));
+        Assert.True(Hyphenated($"<div lang='en' style='{Narrow}; hyphens: auto; hyphenate-limit-chars: 20'><span style='hyphenate-limit-chars: auto'><b style='hyphenate-limit-chars: inherit'>{Text}</b></span></div>"));
+        Assert.False(Hyphenated($"<div lang='en' style='{Narrow}; hyphens: auto'><p style='margin: 0; hyphenate-limit-chars: 20'>{Text}</p></div>"));
+        // An invalid value is ignored: the element keeps the value it would have had without it.
+        Assert.False(Hyphenated($"<div lang='en' style='{Narrow}; hyphens: auto; hyphenate-limit-chars: 20'><span style='hyphenate-limit-chars: 0'>{Text}</span></div>"));
+        Assert.False(Hyphenated($"<div lang='en' style='{Narrow}; hyphens: auto; hyphenate-limit-chars: 20; hyphenate-limit-chars: 5 2 2 2'>{Text}</div>"));
+    }
+
+    [Fact]
+    public void Hyphenate_limit_chars_shows_in_supports()
+    {
+        Assert.True(CssSupports.Evaluate("(hyphenate-limit-chars: 6 3 2)"));
+        Assert.True(CssSupports.Evaluate("(hyphenate-limit-chars: auto)"));
+        Assert.False(CssSupports.Evaluate("(hyphenate-limit-chars: 0)"));
+        Assert.False(CssSupports.Evaluate("(hyphenate-limit-chars: 1 2 3 4)"));
+    }
+
     [Fact]
     public void A_hyphenated_document_converts_to_a_valid_pdf()
     {

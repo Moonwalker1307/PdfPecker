@@ -256,7 +256,8 @@ internal sealed partial class LayoutEngine
             return;
         }
         if (hyphenate && HyphenatorFor(style) is { } hyphenator
-            && hyphenator.Hyphenate(src.AsSpan(wStart, wLen), _hyphenBreaks, skipCapitalized: IsEnglish(style.Lang!)) > 0)
+            && hyphenator.Hyphenate(src.AsSpan(wStart, wLen), _hyphenBreaks, skipCapitalized: IsEnglish(style.Lang!),
+                style.HyphenateLimitChars.Word, style.HyphenateLimitChars.Before, style.HyphenateLimitChars.After) > 0)
         {
             // The pieces between the break points are words of their own that break like soft hyphens: only where the
             // word does not fit, showing a hyphen there.
