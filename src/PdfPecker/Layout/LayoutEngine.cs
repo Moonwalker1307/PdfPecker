@@ -382,7 +382,14 @@ internal sealed partial class LayoutEngine
             // A forced break before anything has been drawn (the first box of the document or of a named page's run)
             // would only leave an empty page: Chrome ignores it.
             if (forcedAt == i) top = NextPage(top);
-            else if (breakBefore && (PageOf(top) > 0 || !NothingDrawn(_ops))) top = ForcedBreak(top);
+            else if (breakBefore && !AtPageTop(y) && (PageOf(top) > 0 || !NothingDrawn(_ops)))
+            {
+                // Margins before a forced break are cut off, but the box's own top margin after it stays, as it does
+                // after a break-after on the box before (CSS Fragmentation 3 §5.2). Content that already ends at the top
+                // of a page, after a break-after on the box before, needs no second break.
+                float next = ForcedBreak(top);
+                if (next != top) top = next + mt;
+            }
 
             int boxOps = _ops.Count;
             float bottom;
@@ -1492,6 +1499,7 @@ internal sealed partial class LayoutEngine
         public float Width, Height; // margin box
         public float Baseline = float.NaN;
         public bool ForcedBreaks;
+        public BoxSource? Source; // how CaptureBox laid the box out, so that it can be laid out again on the pages
         public float BoxX, BoxY, BoxW, BoxH; // border box of the outermost box laid out
         public float ContentH, FrameV;        // content height and vertical padding and borders of that box
         public CbHeights? ChildCb;            // the containing block height that box gave its children
@@ -1551,6 +1559,9 @@ internal sealed partial class LayoutEngine
         }
     }
 
+    /// <summary>The arguments a box was captured with.</summary>
+    private sealed record BoxSource(Element El, float OuterW, bool ShrinkToFit, float? BorderW, float? BorderH);
+
     /// <summary>Lays out a block-level box in a box of <paramref name="outerW"/> (its margin box), optionally with a forced border-box size.</summary>
     private Captured CaptureBox(Element e, float outerW, bool shrinkToFit, float? borderW = null, float? borderH = null)
     {
@@ -1563,6 +1574,7 @@ internal sealed partial class LayoutEngine
             float mr = s.MarginRight.IsAuto ? 0 : s.MarginRight.Resolve(outerW);
             var c = Capture(() => LayoutBlockBox(e, 0, mt, outerW, shrinkToFit) + mb);
             c.Width += mr;
+            c.Source = new BoxSource(e, outerW, shrinkToFit, borderW, borderH);
             return c;
         }
         finally
@@ -1585,6 +1597,63 @@ internal sealed partial class LayoutEngine
     /// a layout when something crosses a page boundary or forces a break.
     /// </summary>
     private bool Reusable(Captured c, float top) => !_paginate || !c.ForcedBreaks && !CrossesPage(top, top + c.Height);
+
+    /// <summary>
+    /// Places a box captured with <see cref="CaptureBox"/> at (<paramref name="dx"/>, <paramref name="dy"/>) and returns
+    /// its bottom margin edge. Captured content is not paginated, so a box that lands across a page boundary is laid out
+    /// again where it lands: its lines and table rows then move to the next page, where a table repeats its header,
+    /// instead of being cut in half, and the box may get taller.
+    /// </summary>
+    private float PlaceOnPages(Captured c, float dx, float dy)
+    {
+        // Each nested box laid out again lays out its own boxes again, so only the outer two levels may do that twice,
+        // to give a stretched box its height back; deeper ones keep the height of their content.
+        if (c.Source is not { } src || Reusable(c, dy))
+        {
+            Place(c, dx, dy);
+            return dy + c.Height;
+        }
+        var e = src.El;
+        var s = e.Style;
+        float mt = s.MarginTop.IsAuto ? 0 : s.MarginTop.Resolve(src.OuterW), mb = s.MarginBottom.IsAuto ? 0 : s.MarginBottom.Resolve(src.OuterW);
+        if (src.BorderW is float bw) _widthOverride[e] = bw;
+        int start = _ops.Count;
+        var marker = _marker;
+        int listIndex = _currentListIndex;
+        _placingOnPages++;
+        try
+        {
+            float bottom = LayoutBlockBox(e, dx, dy + mt, src.OuterW, src.ShrinkToFit) + mb;
+            if (src.BorderH is float bh && bottom - dy < c.Height - Eps && _placingOnPages <= MaxRepeatedOnPages)
+            {
+                // A stretched box keeps the height it was given when its content still fits in it on the pages.
+                Truncate(start);
+                _marker = marker;
+                _currentListIndex = listIndex;
+                _heightOverride[e] = bh;
+                try
+                {
+                    bottom = LayoutBlockBox(e, dx, dy + mt, src.OuterW, src.ShrinkToFit) + mb;
+                }
+                finally
+                {
+                    _heightOverride.Remove(e);
+                }
+            }
+            return bottom;
+        }
+        finally
+        {
+            _placingOnPages--;
+            if (src.BorderW.HasValue) _widthOverride.Remove(e);
+        }
+    }
+
+    /// <summary>How many boxes are being laid out again by <see cref="PlaceOnPages"/>, one inside the other.</summary>
+    private int _placingOnPages;
+
+    /// <summary>The depth up to which a box laid out again on the pages may be laid out a second time.</summary>
+    private const int MaxRepeatedOnPages = 2;
 
     /// <summary>Moves captured content to its final position and appends it to the output.</summary>
     private void Place(Captured c, float dx, float dy)

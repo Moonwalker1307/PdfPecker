@@ -264,6 +264,9 @@ internal static class CmsReader
 #if NET9_0_OR_GREATER
             return X509CertificateLoader.LoadCertificate(der);
 #else
+            // The constructor also accepts PKCS#12 and other containers, which have no place in a signature and would
+            // let a PDF make the platform import keys; only a plain certificate is loaded.
+            if (X509Certificate2.GetCertContentType(der) != X509ContentType.Cert) return null;
             return new X509Certificate2(der);
 #endif
         }

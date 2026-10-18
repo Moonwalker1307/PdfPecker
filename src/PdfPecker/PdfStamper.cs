@@ -152,7 +152,9 @@ public static class PdfStamper
     /// <param name="options">Placement, page selection and passwords; null for the defaults.</param>
     /// <param name="htmlOptions">
     /// Options for rendering the HTML, such as fonts; null for the defaults with no margins. Its page size is replaced by
-    /// each page's size, and CSS <c>@page</c> size rules are ignored.
+    /// each page's size, and CSS <c>@page</c> size rules are ignored. Its footer, header, watermark, attachments,
+    /// bookmarks, tagging, signature, security, conformance and e-invoice are not used, so the options of the main
+    /// conversion can be passed as they are.
     /// </param>
     /// <param name="cancellationToken">Stops the work.</param>
     /// <inheritdoc cref="Stamp(byte[], byte[], PdfStampOptions?, CancellationToken)"/>
@@ -177,6 +179,15 @@ public static class PdfStamper
                 o.Security = null;
                 o.Conformance = PdfConformance.None;
                 o.EInvoice = null;
+                // Options shared with the main conversion would otherwise put a second footer, header and watermark on
+                // every page; the stamp's attachments, bookmarks and tags would be dropped anyway, as it is drawn as an
+                // artifact.
+                o.FooterText = null;
+                o.HeaderText = null;
+                o.Watermark = null;
+                o.Attachments = new List<PdfAttachment>();
+                o.Bookmarks = false;
+                o.Accessibility = PdfAccessibility.None;
                 if (writer.NeedsEmbeddedFonts) o.EmbedStandardFonts = true;
                 rendered[key] = file = PdfStampWriter.OpenStamp(HtmlToPdf.Convert(html, o, cancellationToken), null, cancellationToken);
             }

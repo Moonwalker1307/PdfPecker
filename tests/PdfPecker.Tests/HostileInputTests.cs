@@ -8,6 +8,7 @@ using PdfPecker.Images;
 using PdfPecker.Rendering.Fonts;
 using PdfPecker.Rendering.Graphics;
 using PdfPecker.Rendering.Images;
+using PdfPecker.Rendering.Parsing;
 using static PdfPecker.Tests.PdfTestHelpers;
 
 namespace PdfPecker.Tests;
@@ -932,6 +933,92 @@ public class HostileInputTests
         });
     }
 
+    [Theory]
+    [InlineData("<div style='display: flex'><aside style='width: 2px'>x</aside><div>", "</div></div>")]
+    [InlineData("<div style='display: grid; grid-template-columns: 2px 1fr'><aside>x</aside><div>", "</div></div>")]
+    public void Nested_flex_and_grid_items_across_pages_are_laid_out_again_a_bounded_number_of_times(string open, string close)
+    {
+        // An item that lands across a page boundary is laid out again there, and a flex line that grows lays out its
+        // stretched items once more; at every level of nesting that doubled the work below it.
+        var table = "<table>" + Repeat("<tr><td style='height: 40pt'>row</td></tr>", 200) + "</table>";
+        AssertStructurallyValid(Bounded(Repeat(open, 30) + table + Repeat(close, 30)));
+    }
+
+    /// <summary>A one-page form whose AcroForm lists object 4 as its only field and asks for every appearance.</summary>
+    private static byte[] FormPdf(string field, IEnumerable<string>? more = null)
+    {
+        var objects = new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] /NeedAppearances true /DR << /Font << /Helv 5 0 R >> >> >> >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 14400 14400] >>",
+            field,
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+        };
+        if (more != null) objects.AddRange(more);
+        return SimplePdf(objects);
+    }
+
+    [Fact]
+    public void Long_values_in_a_wide_multiline_field_wrap_in_linear_time()
+    {
+        // Wrapping measured the whole line again for every word, up to 17 times while finding the automatic size, so a
+        // box as wide as a page that holds thousands of words per line took minutes.
+        var pdf = FormPdf("<< /FT /Tx /Subtype /Widget /T (t) /Ff 4096 /DA (/Helv 0 Tf 0 g) /Rect [0 0 14400 100] /V (" + Repeat("a ", 400_000) + ") >>");
+        Assert.NotEmpty(Bounded(() => PdfForm.Fill(pdf, new Dictionary<string, string>())));
+    }
+
+    [Fact]
+    public void A_list_box_with_a_tiny_font_draws_a_bounded_number_of_rows()
+    {
+        // A font size of a hundredth of a point drew every one of the options in every widget, and each option was
+        // looked up in the list of selected values one by one.
+        var options = string.Concat(Enumerable.Range(0, 20_000).Select(i => "(o" + i + ") "));
+        var widgets = Enumerable.Range(0, 50).Select(_ => "<< /Type /Annot /Subtype /Widget /Parent 4 0 R /Rect [0 0 100 14000] >>").ToList();
+        var kids = string.Concat(Enumerable.Range(6, widgets.Count).Select(i => i + " 0 R "));
+        var pdf = FormPdf($"<< /FT /Ch /T (l) /DA (/Helv 0.01 Tf 0 g) /Opt [{options}] /V [{options}] /Kids [{kids}] >>", widgets);
+
+        var filled = Bounded(() => PdfForm.Fill(pdf, new Dictionary<string, string>()));
+        var file = PdfFile.Open(filled, null);
+        var widget = file.Resolve(file.GetArray(file.Resolve(file.GetArray(file.GetDict(file.Catalog, "AcroForm"), "Fields")![0]) as PdfDict, "Kids")![0]) as PdfDict;
+        var appearance = Encoding.Latin1.GetString(file.DecodeStream(file.GetStream(file.GetDict(widget, "AP"), "N")!));
+        Assert.InRange(System.Text.RegularExpressions.Regex.Count(appearance, " Tj"), 1, 1_000);
+    }
+
+    [Fact]
+    public void Long_field_names_repeated_over_many_kids_stay_bounded()
+    {
+        // Each kid's fully qualified name repeats its parent's, so a two-megabyte name over a thousand kids made two
+        // gigabytes of names when listing the fields or looking for signatures.
+        var kids = Enumerable.Range(0, 1_000).Select(i => "<< /T (k" + i + ") /FT /Tx /Parent 4 0 R >>").ToList();
+        var refs = string.Concat(Enumerable.Range(6, kids.Count).Select(i => i + " 0 R "));
+        var pdf = FormPdf("<< /T (" + Repeat("n", 2 * 1024 * 1024) + ") /Kids [" + refs + "] >>", kids);
+
+        Assert.InRange(Bounded(() => PdfForm.GetFields(pdf)).Count, 1, 10);
+        Assert.Empty(Bounded(() => PdfSignatureVerifier.Verify(pdf)));
+    }
+
+    [Fact]
+    public void Signature_fields_that_share_one_signature_are_verified_once()
+    {
+        // A thousand fields pointing at one signature dictionary each hashed the file and built a chain again.
+        // Object 6 is the shared signature, and the fields follow it.
+        var more = new List<string> { "<< /Type /Sig /ByteRange [0 10 20 5] /Contents <00> >>" };
+        more.AddRange(Enumerable.Range(0, 1_000).Select(i => "<< /FT /Sig /T (s" + i + ") /V 6 0 R >>"));
+        var refs = string.Concat(Enumerable.Range(7, 1_000).Select(i => i + " 0 R "));
+        var pdf = FormPdf("<< /T (p) /Kids [" + refs + "] >>", more);
+
+        Assert.Single(Bounded(() => PdfSignatureVerifier.Verify(pdf)));
+    }
+
+    [Fact]
+    public void Long_names_in_a_pdf_are_not_kept_for_the_process()
+    {
+        var name = Repeat("n", 1_000);
+        Assert.NotSame(PdfName.Get(name), PdfName.Get(name));
+        Assert.Same(PdfName.Get("Type"), PdfName.Get("Type"));
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private static byte[] SimplePdf(List<string> objects)
@@ -1175,6 +1262,84 @@ public class HostileInputTests
         var pdf = ms.ToArray();
 
         Assert.Empty(Bounded(() => PdfSignatureVerifier.Verify(pdf)));
+    }
+
+    /// <summary>A PDF whose embedded-files list has many entries, all pointing at one stream of 200 MB of zeros.</summary>
+    private static byte[] SharedAttachmentBomb(int entries, string extension)
+    {
+        var bomb = new MemoryStream();
+        using (var z = new ZLibStream(bomb, CompressionLevel.SmallestSize, leaveOpen: true))
+            for (int i = 0; i < 200; i++) z.Write(new byte[1 << 20]);
+        static byte[] L(string t) => Encoding.Latin1.GetBytes(t);
+        var names = new StringBuilder();
+        for (int i = 0; i < entries; i++) names.Append($"(f{i:D5}{extension}) {6 + i} 0 R ");
+        var objects = new List<byte[]>
+        {
+            L("1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Names << /EmbeddedFiles 5 0 R >> >>\nendobj\n"),
+            L("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"),
+            L("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] >>\nendobj\n"),
+            L("4 0 obj\n<< /Type /EmbeddedFile /Length " + bomb.Length + " /Filter /FlateDecode >>\nstream\n").Concat(bomb.ToArray()).Concat(L("\nendstream\nendobj\n")).ToArray(),
+            L("5 0 obj\n<< /Names [" + names + "] >>\nendobj\n"),
+        };
+        // Each entry has a file specification of its own, so de-duplicating specifications does not help.
+        for (int i = 0; i < entries; i++)
+            objects.Add(L($"{6 + i} 0 obj\n<< /Type /Filespec /F (f{i:D5}{extension}) /EF << /F 4 0 R >> >>\nendobj\n"));
+        var ms = new MemoryStream();
+        ms.Write(L("%PDF-1.7\n"));
+        var offsets = new List<long>();
+        foreach (var o in objects) { offsets.Add(ms.Position); ms.Write(o); }
+        long xref = ms.Position;
+        var sb = new StringBuilder("xref\n0 " + (offsets.Count + 1) + "\n0000000000 65535 f \n");
+        foreach (var o in offsets) sb.Append(o.ToString("D10")).Append(" 00000 n \n");
+        sb.Append("trailer\n<< /Size " + (offsets.Count + 1) + " /Root 1 0 R >>\nstartxref\n" + xref + "\n%%EOF\n");
+        ms.Write(L(sb.ToString()));
+        return ms.ToArray();
+    }
+
+    [Fact]
+    public void Many_attachments_sharing_one_compression_bomb_share_one_decode_budget()
+    {
+        // Each entry would decode the 200 MB stream again: 80 GB in all.
+        var pdf = SharedAttachmentBomb(400, ".bin");
+        var task = Task.Run(() => PdfAttachments.List(pdf));
+        Assert.True(((IAsyncResult)task).AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(20)), "Did not finish in time");
+        Assert.IsType<InvalidDataException>(task.Exception?.InnerException);
+    }
+
+    [Fact]
+    public void Many_einvoice_candidates_sharing_one_compression_bomb_are_cheap()
+    {
+        var pdf = SharedAttachmentBomb(400, ".xml");
+        Assert.Null(Bounded(() => PdfEInvoice.Read(pdf)));
+    }
+
+    [Fact]
+    public void Xmp_properties_that_never_close_are_matched_in_linear_time()
+    {
+        var xmp = Repeat("<x:DocumentFileName>", 1) + Repeat("y:DocumentFileName>abc ", 100_000);
+        Assert.Null(Bounded(() => PdfPecker.Pdf.EmbeddedFiles.XmpProperty(xmp, "DocumentFileName")));
+        Assert.Equal("factur-x.xml", PdfPecker.Pdf.EmbeddedFiles.XmpProperty(
+            "<rdf:Description fx:DocumentFileName=\"factur-x.xml\"/>", "DocumentFileName"));
+        Assert.Equal("EN 16931", PdfPecker.Pdf.EmbeddedFiles.XmpProperty(
+            "<fx:ConformanceLevel> EN 16931 </fx:ConformanceLevel>", "ConformanceLevel"));
+    }
+
+    [Fact]
+    public void Narrow_column_width_on_a_huge_box_is_capped_at_a_hundred_columns()
+    {
+        var html = "<div style='width:1e9px;column-width:1px'>"
+            + Repeat("<p style='break-before:column'>x</p>", 400) + "</div>";
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
+    public void Failed_imports_count_towards_the_import_limit()
+    {
+        int calls = 0;
+        var options = new PdfOptions { ResourceResolver = _ => { Interlocked.Increment(ref calls); return null; } };
+        var css = string.Concat(Enumerable.Range(0, 1000).Select(i => $"@import url(https://example.invalid/{i}.css);"));
+        AssertStructurallyValid(Bounded($"<style>{css}</style><p>x</p>", options));
+        Assert.InRange(calls, 1, 128); // at most 64 per stylesheet read; the styles are read again once the page size is known
     }
 
     [Fact]

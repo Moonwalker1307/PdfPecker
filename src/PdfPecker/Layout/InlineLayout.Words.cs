@@ -283,14 +283,37 @@ internal sealed partial class LayoutEngine
         string word = span.ToString().Replace("­", "").Replace("​", "");
         switch (style.TextTransform)
         {
-            case TextTransform.Uppercase: return word.ToUpperInvariant();
-            case TextTransform.Lowercase: return word.ToLowerInvariant();
+            case TextTransform.Uppercase: return Upper(word, style.Lang);
+            case TextTransform.Lowercase: return Lower(word, style.Lang);
             case TextTransform.Capitalize:
-                if (word.Length > 0 && afterSpace && char.IsLower(word[0])) word = char.ToUpperInvariant(word[0]) + word.Substring(1);
+                if (word.Length > 0 && afterSpace && char.IsLower(word[0])) word = Upper(word.Substring(0, 1), style.Lang) + word.Substring(1);
                 return word;
             default: return word;
         }
     }
+
+    /// <summary>
+    /// Upper case as CSS defines it, by Unicode's full case mapping: ß becomes SS, which the simple mapping of
+    /// <see cref="string.ToUpperInvariant"/> leaves alone, and in Turkish and Azerbaijani i becomes İ. Done by hand so
+    /// that it does not depend on the server's culture data.
+    /// </summary>
+    private static string Upper(string word, string? lang)
+    {
+        if (IsTurkic(lang)) word = word.Replace('i', '\u0130');
+        word = word.ToUpperInvariant();
+        return word.Contains('ß') ? word.Replace("ß", "SS") : word;
+    }
+
+    /// <summary>Lower case, with the Turkish and Azerbaijani dotless ı for I and i for İ.</summary>
+    private static string Lower(string word, string? lang)
+    {
+        if (IsTurkic(lang)) word = word.Replace('I', '\u0131').Replace('\u0130', 'i');
+        return word.ToLowerInvariant();
+    }
+
+    private static bool IsTurkic(string? lang)
+        => lang is { Length: >= 2 } l && (l.StartsWith("tr", StringComparison.OrdinalIgnoreCase) || l.StartsWith("az", StringComparison.OrdinalIgnoreCase))
+           && (l.Length == 2 || l[2] == '-' || l[2] == '_');
 
     /// <summary>Adds one text item: <paramref name="length"/> characters of <paramref name="src"/> from <paramref name="start"/>, measured.</summary>
     private void AddTextItem(CollectState st, string src, int start, int length, ComputedStyle style, string? href, ComputedStyle? deco, BreakAfter breakAfter)
