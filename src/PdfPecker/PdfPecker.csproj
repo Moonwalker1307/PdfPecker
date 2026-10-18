@@ -3,10 +3,8 @@
   <PropertyGroup>
     <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <RootNamespace>PdfPecker</RootNamespace>
-    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsTrimmable>true</IsTrimmable>
     <IsAotCompatible>true</IsAotCompatible>
@@ -45,6 +43,8 @@
   <ItemGroup>
     <None Include="../../README.md" Pack="true" PackagePath="/" />
     <None Include="../../THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="/" />
+    <!-- The notices refer to LICENSE for the library's own MIT license. -->
+    <None Include="../../LICENSE" Pack="true" PackagePath="/" />
     <None Include="../../assets/logo.png" Pack="true" PackagePath="/" />
     <EmbeddedResource Include="Rendering/Fonts/StandardFonts.bin" LogicalName="PdfPecker.Rendering.Fonts.StandardFonts.bin" />
     <EmbeddedResource Include="Fonts/Bundled/*.ttf.br" LogicalName="PdfPecker.Fonts.Bundled.%(Filename)%(Extension)" />

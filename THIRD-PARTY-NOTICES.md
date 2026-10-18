@@ -62,7 +62,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## Liberation Fonts 2.x (Sans, Serif and Mono)
+## Liberation Fonts 2.1.5 (Sans, Serif and Mono)
 
 Digitized data copyright (c) 2010 Google Corporation with Reserved Font Arimo, Tinos and Cousine.
 Copyright (c) 2012 Red Hat, Inc. with Reserved Font Name Liberation.
@@ -170,7 +170,7 @@ DEALINGS IN THE FONT SOFTWARE.
 
 ## DejaVu Sans (used for the Symbol and ZapfDingbats glyphs)
 
-Source: https://github.com/dejavu-fonts/dejavu-fonts
+Source: https://github.com/dejavu-fonts/dejavu-fonts (version 2.37)
 
 ```
 Fonts are (c) Bitstream (see below). DejaVu changes are in public domain.
@@ -420,7 +420,8 @@ authorization of the copyright holder.
 
 ## Hyphenation patterns (hyph-utf8)
 
-Source: https://github.com/hyphenation/tex-hyphen, `hyph-utf8/tex/generic/hyph-utf8/patterns/tex/`. Each file's
+Source: https://github.com/hyphenation/tex-hyphen, `hyph-utf8/tex/generic/hyph-utf8/patterns/tex/` at commit
+5684c0f51c0b81133db2efbe60a408b4155a3ff5. Each file's
 license, as stated in its header:
 
 ### American English (hyph-en-us.tex, FSFAP)

@@ -114,12 +114,12 @@ bench/compare-versions.sh v1.11.0                              # this checkout a
 dotnet pack src/PdfPecker -c Release -o ./nupkg                # also checks the public API against the last release
 ```
 
-How to fuzz the parsers is in [fuzz/README.md](fuzz/README.md).
+How to fuzz the parsers is in [fuzz/README.md](https://github.com/Moonwalker1307/PdfPecker/blob/main/fuzz/README.md).
 
-To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md). Report security problems privately as described in
-[SECURITY.md](SECURITY.md).
+To contribute, see [CONTRIBUTING.md](https://github.com/Moonwalker1307/PdfPecker/blob/main/CONTRIBUTING.md). Report security problems privately as described in
+[SECURITY.md](https://github.com/Moonwalker1307/PdfPecker/blob/main/SECURITY.md).
 
 ## License
 
 MIT. The third-party fonts, font data and code built into the library are listed, with their licenses, in
-[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+[THIRD-PARTY-NOTICES.md](https://github.com/Moonwalker1307/PdfPecker/blob/main/THIRD-PARTY-NOTICES.md).
