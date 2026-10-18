@@ -20,6 +20,20 @@ internal abstract class DrawOp
 
     /// <summary>Moves the op by (dx, dy) in flow coordinates.</summary>
     public abstract void Offset(float dx, float dy);
+
+    /// <summary>
+    /// A copy that can be moved on its own: a group's copy starts without ops. A multi-column box draws one copy of a
+    /// box split between columns in each of them.
+    /// </summary>
+    public DrawOp Copy()
+    {
+        var copy = (DrawOp)MemberwiseClone();
+        copy.OwnArrays();
+        return copy;
+    }
+
+    /// <summary>Gives a copy its own instances of what <see cref="Offset"/> changes in place.</summary>
+    protected virtual void OwnArrays() { }
 }
 
 /// <summary>A filled rectangle.</summary>

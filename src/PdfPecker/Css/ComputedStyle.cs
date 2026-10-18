@@ -337,6 +337,8 @@ internal sealed class ComputedStyle
     public VerticalAlign VerticalAlign;
     public bool PageBreakBefore, PageBreakAfter, AvoidBreakInside;
     public bool AvoidBreakBefore, AvoidBreakAfter; // break-before/after: avoid (keep with the next or previous box)
+    public bool ColumnBreakBefore, ColumnBreakAfter; // break-before/after: column, which only breaks inside a multicol
+    public bool AvoidColumnBreakBefore, AvoidColumnBreakAfter, AvoidColumnBreakInside; // avoid-column: only inside a multicol
     public bool Floated;
     public FloatSide Float;
     /// <summary>float: footnote: the box leaves the flow for the footnote area of the page its call lands on.</summary>
@@ -385,6 +387,7 @@ internal sealed class ComputedStyle
     public float ColumnRuleWidth = 1.5f; // medium
     public uint? ColumnRuleColor;        // null = currentColor
     public bool ColumnSpanAll;           // column-span: all
+    public bool ColumnFillAuto;          // column-fill: auto (fill each column in turn) rather than balance
     public int LineClamp;                // -webkit-line-clamp / line-clamp: lines shown, then an ellipsis; 0 = none
 
     private TextFont? _font;
@@ -510,6 +513,8 @@ internal sealed class ComputedStyle
         c.VerticalAlign = VerticalAlign.Baseline;
         c.PageBreakBefore = c.PageBreakAfter = c.AvoidBreakInside = false;
         c.AvoidBreakBefore = c.AvoidBreakAfter = false;
+        c.ColumnBreakBefore = c.ColumnBreakAfter = false;
+        c.AvoidColumnBreakBefore = c.AvoidColumnBreakAfter = c.AvoidColumnBreakInside = false;
         c.Floated = false;
         c.Float = FloatSide.None;
         c.Footnote = false;
@@ -548,6 +553,7 @@ internal sealed class ComputedStyle
         c.ColumnRuleWidth = 1.5f;
         c.ColumnRuleColor = null;
         c.ColumnSpanAll = false;
+        c.ColumnFillAuto = false;
         c.LineClamp = 0;
         c.StringSet = null;
         c.TableLayoutFixed = false;

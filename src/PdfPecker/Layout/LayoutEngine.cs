@@ -12,7 +12,7 @@ namespace PdfPecker.Layout;
 /// </summary>
 internal sealed partial class LayoutEngine
 {
-    private readonly PageGrid _grid;
+    private PageGrid _grid; // the pages, or while a multi-column box lays out its content, its columns
     private readonly ImageLoader _images;
     private List<DrawOp> _ops = new(256);
     private bool _paginate = true;
@@ -66,7 +66,15 @@ internal sealed partial class LayoutEngine
 
     private void CheckPageLimit(float y)
     {
-        if (y >= (_grid.Uniform ? (double)MaxPages * _grid.Height(0) : _grid.Start(MaxPages))) throw new PdfLimitException($"The document would have more than {MaxPages:N0} pages (PdfOptions.MaxPages).");
+        // In a column the limit applies to the page the column is on.
+        var grid = _grid;
+        double py = y;
+        while (grid is ColumnGrid columns)
+        {
+            py = columns.ToOuter(py);
+            grid = columns.Outer;
+        }
+        if (py >= (grid.Uniform ? (double)MaxPages * grid.Height(0) : grid.Start(MaxPages))) throw new PdfLimitException($"The document would have more than {MaxPages:N0} pages (PdfOptions.MaxPages).");
     }
 
     private sealed class ListMarker
@@ -130,17 +138,29 @@ internal sealed partial class LayoutEngine
     {
         if (!_paginate) return y;
         int p = PageOf(y);
-        if (h > _grid.Height(p + 1)) return y;
-        float pageEnd = _grid.Start(p + 1);
-        // The page's footnote area takes the bottom of its flow.
-        float flowEnd = _footnoteReserve.Count > 0 ? pageEnd - FootnoteReserve(p) : pageEnd;
-        return y + h > flowEnd + Eps ? pageEnd : y;
+        _columnNotes?.Exact(p, y, h, _grid);
+        // A page grid moves content at most once, to the next page. The columns of a multi-column box can be shorter
+        // than later ones, so there content moves on until a column holds it.
+        while (h <= _grid.Height(p + 1))
+        {
+            float pageEnd = _grid.Start(p + 1);
+            // The page's footnote area takes the bottom of its flow.
+            float flowEnd = _footnoteReserve.Count > 0 ? pageEnd - FootnoteReserve(p) : pageEnd;
+            if (y + h <= flowEnd + Eps) return y;
+            _columnNotes?.Break(p, y, y + h - flowEnd);
+            y = pageEnd;
+            if (_grid is not ColumnGrid) break;
+            p++;
+        }
+        return y;
     }
 
     private float NextPage(float y)
     {
         if (!_paginate || AtPageTop(y)) return y;
-        return _grid.Start(PageOf(y) + 1);
+        int p = PageOf(y);
+        _columnNotes?.Break(p, y, 0);
+        return _grid.Start(p + 1);
     }
 
     /// <summary>True when the ops draw nothing: only the empty groups that boxes reserve for their backgrounds.</summary>
@@ -222,6 +242,14 @@ internal sealed partial class LayoutEngine
         // The keep-with-next check of the flow around this box, which only needs to know where this flow's first content lands.
         var probe = _flowProbe;
         _flowProbe = null;
+        // A multi-column box lays out the children between two column-span: all boxes as one flow.
+        var range = _flowRange;
+        _flowRange = null;
+        var resume = _flowResume;
+        _flowResume = null;
+        var marks = _flowMarks;
+        _flowMarks = null;
+        bool inColumns = _grid is ColumnGrid;
         float pendingMargin = 0;
         bool anyContent = false;
         // The parent has taken its first child's top margin as its own (they collapse): don't apply it again.
@@ -239,11 +267,23 @@ internal sealed partial class LayoutEngine
         bool hasPrev = false, hasChain = false, prevAvoidAfter = false;
         int forcedAt = -1; // the box that was moved to a new page to keep its chain together
 
-        int i;
-        for (i = 0; i <= children.Count; i++)
+        if (resume is { } at)
+        {
+            // A balancing pass goes on from where an earlier pass recorded this point, with the content before it.
+            y = at.Mark.Y;
+            pendingMargin = at.Mark.PendingMargin;
+            anyContent = at.Mark.AnyContent;
+            listIndex = at.Mark.ListIndex;
+            _currentListIndex = at.Mark.CurrentListIndex;
+            _marker = at.Mark.Marker;
+            absorbFirst = firstBlock = false;
+        }
+
+        int i, end = range?.To ?? children.Count;
+        for (i = resume?.Mark.Index ?? range?.From ?? 0; i <= end; i++)
         {
             Element? e = null;
-            if (i < children.Count)
+            if (i < end)
             {
                 var child = children[i];
                 if (child is TextNode)
@@ -311,9 +351,13 @@ internal sealed partial class LayoutEngine
                 Y = y, PendingMargin = pendingMargin, AnyContent = anyContent, Marker = _marker,
             };
             // A forced break wins over avoid.
-            bool joins = _paginate && hasPrev && (prevAvoidAfter || s.AvoidBreakBefore) && !s.PageBreakBefore;
+            // In columns a box breaks to the next column; Chrome ignores page breaks there.
+            bool breakBefore = inColumns ? s.ColumnBreakBefore : s.PageBreakBefore;
+            bool breakAfter = inColumns ? s.ColumnBreakAfter : s.PageBreakAfter;
+            bool joins = _paginate && hasPrev && (prevAvoidAfter || s.AvoidBreakBefore || inColumns && s.AvoidColumnBreakBefore) && !breakBefore;
             if (!joins) hasChain = false;
             if (joins && !hasChain) { chain = prev; hasChain = true; }
+            if (marks != null && !joins && forcedAt != i && CanResumeAt(y)) marks.Add(new FlowResume(mark, _captureAnchors?.Count ?? 0));
 
             if (s.PageBreakBefore || s.PageBreakAfter) _forcedBreaks++;
             if (s.Display == Display.ListItem)
@@ -329,10 +373,12 @@ internal sealed partial class LayoutEngine
                 : CollapseMargins(s.MarginTop.Resolve(w), LeadingMargin(e, w));
             firstBlock = false;
             float top = y + CollapseMargins(pendingMargin, mt);
+            if (inColumns) top = TruncatedMargin(y, top);
             if (s.ClearLeft || s.ClearRight) top = Cleared(s, top);
             // A forced break before anything has been drawn (the first box of the document or of a named page's run)
             // would only leave an empty page: Chrome ignores it.
-            if (forcedAt == i || s.PageBreakBefore && (PageOf(top) > 0 || !NothingDrawn(_ops))) top = NextPage(top);
+            if (forcedAt == i) top = NextPage(top);
+            else if (breakBefore && (PageOf(top) > 0 || !NothingDrawn(_ops))) top = ForcedBreak(top);
 
             int boxOps = _ops.Count;
             float bottom;
@@ -375,7 +421,7 @@ internal sealed partial class LayoutEngine
                 continue;
             }
             float mb = CollapseMargins(s.MarginBottom.Resolve(w), trailing);
-            if (bottom - top < Eps && CollapsesThrough(e) && !s.PageBreakBefore && !s.PageBreakAfter)
+            if (bottom - top < Eps && CollapsesThrough(e) && !breakBefore && !breakAfter)
             {
                 // An empty box: its margins collapse with each other and with those around it.
                 pendingMargin = CollapseMargins(CollapseMargins(pendingMargin, mt), mb);
@@ -384,18 +430,18 @@ internal sealed partial class LayoutEngine
             anyContent = true;
             pendingMargin = mb;
             y = bottom;
-            if (s.PageBreakAfter)
+            if (breakAfter)
             {
-                y = NextPage(y + pendingMargin);
+                y = ForcedBreak(y + pendingMargin);
                 pendingMargin = 0;
             }
 
             mark.Top = top;
             if (_paginate) mark.FirstPage = FirstContentPage(boxOps, top);
-            prevAvoidAfter = _paginate && s.AvoidBreakAfter && !s.PageBreakAfter;
+            prevAvoidAfter = _paginate && (s.AvoidBreakAfter || inColumns && s.AvoidColumnBreakAfter) && !breakAfter;
             if (!prevAvoidAfter) hasChain = false;
             prev = mark;
-            hasPrev = !s.PageBreakAfter;
+            hasPrev = !breakAfter;
             // The box stopped with the probe this flow handed it: its first content is past the chain's page, which
             // nothing after it can change, and laying out its siblings would only record their headings too early.
             if (passed is { Stopped: true } || probe != null && Probed(ref probe)) break;
@@ -407,6 +453,7 @@ internal sealed partial class LayoutEngine
         void Rewind(in FlowMark m)
         {
             Truncate(m.OpsCount);
+            while (marks is { Count: > 0 } && marks[^1].Mark.Index >= m.Index) marks.RemoveAt(marks.Count - 1);
             if (probe != null) probe.ScanFrom = Math.Min(probe.ScanFrom, m.OpsCount);
             i = m.Index - 1;
             y = m.Y;
@@ -641,7 +688,7 @@ internal sealed partial class LayoutEngine
         _childPageBox = null;
         if (!table) _childPageBox = pages;
         float bottom = table ? LayoutTable(e, x, y, availW, pages) : LayoutBlockBoxCore(e, x, y, availW, shrinkToFit);
-        if (s.AvoidBreakInside && CrossesPage(y, bottom) && bottom - y <= _grid.Height(PageOf(y) + 1) && !AtPageTop(y))
+        if ((s.AvoidBreakInside || s.AvoidColumnBreakInside && _grid is ColumnGrid) && CrossesPage(y, bottom) && bottom - y <= _grid.Height(PageOf(y) + 1) && !AtPageTop(y))
         {
             Truncate(opsStart);
             _marker = savedMarker;
@@ -978,7 +1025,7 @@ internal sealed partial class LayoutEngine
         var s = e.Style;
         if (s.IsFlex) return LayoutFlex(e, x, y, w, definiteH, minH);
         if (s.IsGrid) return LayoutGrid(e, x, y, w, definiteH, minH);
-        if (s.IsMultiColumn) return LayoutColumns(e, x, y, w);
+        if (s.IsMultiColumn) return LayoutColumns(e, x, y, w, definiteH);
         return LayoutFlow(e, x, y, w);
     }
 
@@ -1413,7 +1460,7 @@ internal sealed partial class LayoutEngine
         // Inside captured content, the anchors move with it when it is placed (and footnote calls are placed then).
         if (_capturing) (_captureAnchors ??= new List<string>()).Add(id);
         // A footnote call in content that was laid out on its own and has now been moved into place.
-        if (Footnotes != null && _paginate && id.Length > 2 && id[0] == '\u0001' && id[1] == 'c') PlaceFootnoteCallAt(id, y);
+        if (Footnotes != null && _paginate && _columnNotes == null && id.Length > 2 && id[0] == '\u0001' && id[1] == 'c') PlaceFootnoteCallAt(id, y);
     }
 
     /// <summary>Content laid out on its own (unpaginated, at the origin) so that it can be measured and then moved into place.</summary>

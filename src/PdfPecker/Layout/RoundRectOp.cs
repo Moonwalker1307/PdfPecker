@@ -37,6 +37,8 @@ internal sealed class RoundRectOp : DrawOp
         return this;
     }
 
+    protected override void OwnArrays() => Clip = (float[]?)Clip?.Clone();
+
     public override void Offset(float dx, float dy)
     {
         X += dx; Y += dy;

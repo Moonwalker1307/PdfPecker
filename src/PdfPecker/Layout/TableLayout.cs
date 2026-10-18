@@ -580,10 +580,19 @@ internal sealed partial class LayoutEngine
             foreach (var cell in row.Ending)
                 rowBottom = Math.Max(rowBottom, cell.Top + cell.NeededH);
 
-            if (allowMove && attempt == 0 && CrossesPage(rowTop, rowBottom) && rowBottom - rowTop <= _grid.Height(PageOf(rowTop) + 1) && !AtPageTop(rowTop))
+            bool move = allowMove && attempt == 0 && CrossesPage(rowTop, rowBottom) && rowBottom - rowTop <= _grid.Height(PageOf(rowTop) + 1) && !AtPageTop(rowTop);
+            // A row that starts a column because the row before it ended right at the break gets the header too.
+            bool atBreak = !move && allowMove && attempt == 0 && _grid is ColumnGrid && r > m.HeadCount && m.HeadCount > 0
+                           && PageOf(rowTop) > 0 && AtPageTop(rowTop);
+            if (move || atBreak)
             {
                 Truncate(rowStartOps);
-                rowTop = NextPage(rowTop);
+                if (move)
+                {
+                    _columnNotes?.Break(PageOf(rowTop), rowTop, rowBottom - FlowEnd(PageOf(rowTop)));
+                    rowTop = NextPage(rowTop);
+                }
+                else _columnNotes?.Exact(PageOf(rowTop), rowTop, rowBottom - rowTop, _grid);
                 if (r >= m.HeadCount)
                 {
                     float headStart = rowTop;
