@@ -26,6 +26,15 @@ internal sealed class FindingStore
 
     public string CurrentInputPath => Path.Combine(Directory, ".current");
 
+    /// <summary>How many seeds the workers of this run have started, so a restarted worker can skip them.</summary>
+    public int SeedsDone
+    {
+        get => File.Exists(SeedsPath) && int.TryParse(File.ReadAllText(SeedsPath), out var n) ? n : 0;
+        set { if (value > 0) File.WriteAllText(SeedsPath, value.ToString()); else File.Delete(SeedsPath); }
+    }
+
+    private string SeedsPath => Path.Combine(Directory, ".seeds-done");
+
     public int Count => System.IO.Directory.EnumerateFiles(Directory, "*.txt").Count();
 
     /// <summary>Counts a repeat of a known signature; false when the signature is new.</summary>

@@ -18,6 +18,7 @@ internal sealed class Options
     public bool Worker;
     public string? Repro;
     public bool List;
+    public int SkipSeeds;
 
     public static Options Parse(string[] args)
     {
@@ -39,6 +40,7 @@ internal sealed class Options
                 case "--worker": o.Worker = true; break;
                 case "--repro": o.Repro = Value(); break;
                 case "--list": o.List = true; break;
+                case "--skip-seeds": o.SkipSeeds = int.Parse(Value()); break;
                 default: throw new ArgumentException("Unknown option " + args[i]);
             }
         }
@@ -54,7 +56,7 @@ internal sealed class Options
         return m.Groups[2].Value switch { "m" => TimeSpan.FromMinutes(n), "h" => TimeSpan.FromHours(n), _ => TimeSpan.FromSeconds(n) };
     }
 
-    public string[] ToWorkerArgs(string target, TimeSpan duration, long seed, bool worker)
+    public string[] ToWorkerArgs(string target, TimeSpan duration, long seed, bool worker, int skipSeeds = 0)
     {
         var a = new List<string>
         {
@@ -65,6 +67,7 @@ internal sealed class Options
         if (Strict) a.Add("--strict");
         if (NoMinimize) a.Add("--no-minimize");
         if (worker) a.Add("--worker");
+        if (skipSeeds > 0) { a.Add("--skip-seeds"); a.Add(skipSeeds.ToString()); }
         return a.ToArray();
     }
 }
@@ -138,10 +141,12 @@ internal static class Program
             var store = new FindingStore(o.Out, target.Name);
             var end = DateTime.UtcNow + o.Duration;
             int restarts = 0;
+            store.SeedsDone = 0;
             while (DateTime.UtcNow < end)
             {
                 var remaining = end - DateTime.UtcNow;
-                var (code, stderr) = RunChild(o.ToWorkerArgs(target.Name, remaining, o.Seed + restarts * 1_000_003L, worker: true));
+                // A restarted worker skips the seeds it already ran, so a seed that hangs is not run again on every restart.
+                var (code, stderr) = RunChild(o.ToWorkerArgs(target.Name, remaining, o.Seed + restarts * 1_000_003L, worker: true, store.SeedsDone));
                 if (code == Exit.Done) break;
                 restarts++;
                 if (code == Exit.Restart) continue;
@@ -149,6 +154,7 @@ internal static class Program
                 CrashFound(o, target, store, code, stderr);
             }
             if (File.Exists(store.CurrentInputPath)) File.Delete(store.CurrentInputPath);
+            store.SeedsDone = 0;
             int count = store.Count;
             Console.WriteLine($"[{target.Name}] done: {count} finding(s) in {store.Directory}");
             total += count;
@@ -296,12 +302,14 @@ internal sealed class Worker
             return false;
         }
 
-        foreach (var (name, data) in seeds)
+        for (int s = _o.SkipSeeds; s < seeds.Count; s++)
         {
             if (clock.Elapsed > _o.Duration) break;
-            Execute(data, name);
+            store.SeedsDone = s + 1; // written first: a seed that takes the process down is skipped as well
+            Execute(seeds[s].Data, seeds[s].Name);
             if (executor.AbandonedThreads > 0 || shed) return Exit.Restart;
         }
+        store.SeedsDone = seeds.Count;
         while (clock.Elapsed < _o.Duration)
         {
             var basis = survivors.Count > 0 && rng.Next(5) == 0 ? survivors[rng.Next(survivors.Count)] : corpus[rng.Next(corpus.Count)];

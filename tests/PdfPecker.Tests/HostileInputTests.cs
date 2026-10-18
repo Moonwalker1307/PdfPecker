@@ -122,6 +122,18 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Nested_rules_that_repeat_the_parent_selector_stay_small()
+    {
+        // Four "&" per level would make selectors 4^16 characters long at the deepest nesting level.
+        var css = ".a { " + Repeat("& & & & { color: red; ", 15) + Repeat("} ", 16);
+        AssertStructurallyValid(Bounded($"<style>{css} p {{ color: blue }}</style><p class=a>x</p>"));
+        var doc = Styled("<style>.a { & .b { color: lime } & + & { color: blue } }</style>"
+            + "<div class=a><p id=x class=b>x</p></div><p id=y class=a>y</p><p id=z class=a>z</p>");
+        Assert.Equal(0xFF00FF00u, ById(doc, "x").Style.Color);
+        Assert.Equal(0xFF0000FFu, ById(doc, "z").Style.Color);
+    }
+
+    [Fact]
     public void Long_descendant_selectors_do_not_backtrack_exponentially()
     {
         var html = "<style>" + Repeat("div ", 300) + "p{color:red}</style>" + Repeat("<div>", 250) + Repeat("<p>x</p>", 500);
