@@ -475,6 +475,29 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Repeating_gradients_share_one_tiling_budget()
+    {
+        // Each box tiles twenty repeating gradients over 250 periods, about 33 KB of PDF each: four kilobytes of HTML
+        // wrote 440 MB and took 2.3 GB of memory before the document's gradients shared one budget.
+        var gradient = "repeating-linear-gradient(red 0 0.06px,blue 0.06px 0.12px)";
+        var html = "<style>i{display:block;height:30px;background:" + string.Join(",", Enumerable.Repeat(gradient, 20)) + "}</style>"
+                   + Repeat("<i></i>", 400);
+        var (pdf, allocated) = Allocating(() => Bounded(html, new PdfOptions { Compress = false }));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(pdf.Length, 1, 64 << 20);
+        Assert.InRange(allocated, 0, 512L << 20);
+        // The first boxes are tiled; once the budget is spent, the rest are painted once, padded.
+        var text = Latin1(pdf);
+        Assert.Contains("/FunctionType 3 /Domain [0 250]", text);
+        Assert.Contains("/Domain [0 1] /Extend [true true]", text);
+
+        // A gradient with thousands of stops is not tiled at all: each period would copy all of them.
+        var stops = string.Join(",", Enumerable.Range(0, 2000).Select(i => $"#{i % 256:x2}0000 {i * 0.001:0.###}px"));
+        pdf = Bounded($"<div style='height:30px;background:repeating-linear-gradient({stops})'></div>", new PdfOptions { Compress = false });
+        Assert.DoesNotContain("/Domain [0 15]", Latin1(pdf));
+    }
+
+    [Fact]
     public void Svg_morphology_with_a_wide_radius_runs_in_linear_time()
     {
         var sb = new StringBuilder("<body style='margin:0'><svg width=1000 height=1000><filter id=f x=0 y=0 width=1000 height=1000 filterUnits=userSpaceOnUse>");
