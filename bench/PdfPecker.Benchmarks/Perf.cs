@@ -163,6 +163,12 @@ static class Perf
         var pathData = SvgPathData();
         results.Add(Measure("parse-svg-paths", () => { foreach (var d in pathData) PdfPecker.Svg.PathParser.Parse(d); }, runs: 100));
 
+        // Damaged files: the PDFs of parse-pdf without their "startxref" pointers, so the object table is rebuilt from a
+        // scan of the file for object headers and trailers, and without their "endstream" keywords, so the end of every
+        // stream is found through the keyword index instead of its /Length. One run opens each and decodes every stream.
+        var damagedInputs = DamagedInputs(parseInputs);
+        results.Add(Measure("recover-pdf", () => { foreach (var (data, password) in damagedInputs) OpenAndDecodeAll(data, password); }, runs: 60));
+
         // Throughput with every core busy; documents per second is the figure, so higher is better.
         var options = new PdfOptions { BaseDirectory = htmlDir };
         for (int i = 0; i < 20; i++) HtmlToPdf.Convert(invoice, options);
@@ -657,6 +663,18 @@ static class Perf
             (generated, null),
             (PdfProtector.Encrypt(generated, security), "user"),
         ];
+    }
+
+    // Each input twice: with its "startxref" pointers and with its "endstream" keywords overwritten by spaces.
+    static (byte[] Data, string? Password)[] DamagedInputs((byte[] Data, string? Password)[] inputs)
+        => inputs.SelectMany(input => new[] { (Blank(input.Data, "startxref"u8), input.Password), (Blank(input.Data, "endstream"u8), input.Password) }).ToArray();
+
+    static byte[] Blank(byte[] data, ReadOnlySpan<byte> keyword)
+    {
+        var copy = (byte[])data.Clone();
+        var rest = copy.AsSpan();
+        for (int at; (at = rest.IndexOf(keyword)) >= 0; rest = rest.Slice(at + keyword.Length)) rest.Slice(at, keyword.Length).Fill((byte)' ');
+        return copy;
     }
 
     // Image streams are left encoded, as the renderer does until it needs their pixels.
