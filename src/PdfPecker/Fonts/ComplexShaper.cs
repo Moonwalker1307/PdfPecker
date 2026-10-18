@@ -17,34 +17,42 @@ namespace PdfPecker.Fonts;
 internal static partial class ComplexShaper
 {
     // The blocks of the scripts this shaper handles: Hebrew to Arabic Extended-A, the alphabetic presentation forms from
-    // Hebrew on with Arabic Presentation Forms-A, and Arabic Presentation Forms-B.
+    // Hebrew on with Arabic Presentation Forms-A, Arabic Presentation Forms-B, and Arabic Extended-C past the BMP.
     private const char ComplexBlocksFirst = '֐', ComplexBlocksLast = 'ࣿ';
     private const char PresentationFormsAFirst = 'יִ', PresentationFormsALast = '﷿';
     private const char PresentationFormsBFirst = 'ﹰ', PresentationFormsBLast = '﻿';
+    private const int ArabicExtendedCFirst = 0x10EC0, ArabicExtendedCLast = 0x10EFF;
 
     /// <summary>True when the text has characters of a script this shaper handles.</summary>
     public static bool Handles(string s, int start, int length)
     {
-        for (int i = start, end = start + length; i < end; i++)
-            if (IsComplex(s[i])) return true;
+        for (int i = start, end = start + length; i < end;)
+        {
+            var (cp, units) = CodePointAt(s, i, end);
+            if (IsComplex(cp)) return true;
+            i += units;
+        }
         return false;
     }
 
-    private static bool IsComplex(char c)
-        => c is (>= ComplexBlocksFirst and <= ComplexBlocksLast)
+    private static bool IsComplex(int cp)
+        => cp is (>= ComplexBlocksFirst and <= ComplexBlocksLast)
             or (>= PresentationFormsAFirst and <= PresentationFormsALast)
-            or (>= PresentationFormsBFirst and <= PresentationFormsBLast);
+            or (>= PresentationFormsBFirst and <= PresentationFormsBLast)
+            or (>= ArabicExtendedCFirst and <= ArabicExtendedCLast);
 
     /// <summary>The direction complex text is shaped for when the caller does not know it: its first strong character's.</summary>
     public static bool GuessRtl(string s, int start, int length)
     {
-        for (int i = start, end = start + length; i < end; i++)
+        for (int i = start, end = start + length; i < end;)
         {
-            switch (UnicodeTables.Bidi(s[i]))
+            var (cp, units) = CodePointAt(s, i, end);
+            switch (UnicodeTables.Bidi(cp))
             {
                 case BidiClass.L: return false;
                 case BidiClass.R or BidiClass.AL: return true;
             }
+            i += units;
         }
         return false;
     }
@@ -65,8 +73,12 @@ internal static partial class ComplexShaper
     /// <summary>The script of the text: that of its first character that belongs to one.</summary>
     private static Script ScriptOfText(string s, int start, int length)
     {
-        for (int i = start, end = start + length; i < end; i++)
-            if (ScriptOf(s[i]) is var script and not Script.Other) return script;
+        for (int i = start, end = start + length; i < end;)
+        {
+            var (cp, units) = CodePointAt(s, i, end);
+            if (ScriptOf(cp) is var script and not Script.Other) return script;
+            i += units;
+        }
         return Script.Other;
     }
 

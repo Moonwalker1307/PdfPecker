@@ -185,4 +185,35 @@ public class BidiAndShapingTests
         Assert.Equal(new[] { (0, 6), (6, 1), (7, 3) }, runs.Select(r => (r.Start, r.Length)));
         Assert.Same(arabic, runs[1].Font);
     }
+
+    [Fact]
+    public void Arabic_extended_c_letters_outside_the_bmp_join()
+    {
+        // U+10EC3 is a dual-joining Arabic letter in the supplementary planes, written in UTF-16 as a surrogate pair.
+        // Drawn with beh's glyph, three of them take beh's initial, medial and final forms, each with its dot, as three
+        // behs do (in visual order: final 10, medial 11 and initial 13).
+        const string Supplementary = "\U00010EC3\U00010EC3\U00010EC3";
+        var font = WithCodePointAs(Arabic, 0x10EC3, 'ب');
+        const string Joined = "124@387,-23+0 10@0,0+1093 124@94,-3+0 11@0,0+343 124@31,-3+0 13@0,0+269";
+        Assert.Equal(Joined, ShapeVisual(font, "ببب"));
+        Assert.Equal(Joined, ShapeVisual(font, Supplementary));
+        Assert.True(ComplexShaper.GuessRtl(Supplementary, 0, Supplementary.Length));
+    }
+
+    // The font with a Unicode cmap of format 12 that maps a supplementary code point to the glyph of a BMP character,
+    // and every BMP character to its own glyph as before.
+    private static byte[] WithCodePointAs(byte[] fontData, int codePoint, char like)
+    {
+        var program = Assert.Single(FontProgram.Load(fontData));
+        var groups = Enumerable.Range(0, 0x10000).Select(c => (Code: c, Gid: program.GlyphId(c))).Where(m => m.Gid != 0)
+            .Append((Code: codePoint, Gid: program.GlyphId(like))).ToList();
+        var cmap = new List<byte>();
+        void U16(int v) { cmap.Add((byte)(v >> 8)); cmap.Add((byte)v); }
+        void U32(int v) { U16(v >> 16); U16(v & 0xFFFF); }
+        U16(0); U16(1); U16(3); U16(10); U32(12); // one encoding record: Windows, full Unicode, at 12
+        U16(12); U16(0); U32(16 + groups.Count * 12); U32(0); U32(groups.Count);
+        foreach (var (code, gid) in groups) { U32(code); U32(code); U32(gid); }
+        var tables = program.Tables.Select(t => (t.Tag, t.Tag == FontProgram.Tag("cmap") ? cmap.ToArray() : program.Data.AsSpan(t.Offset, t.Length).ToArray())).ToList();
+        return SfntBuilder.Build(0x00010000, tables);
+    }
 }
