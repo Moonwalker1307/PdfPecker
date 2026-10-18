@@ -139,6 +139,17 @@ public static class PdfStamper
     }
 
     /// <summary>Stamps a PDF file and writes the result to <paramref name="outputPath"/> (which may be the same path).</summary>
+    /// <exception cref="ArgumentNullException">A path is null.</exception>
+    /// <exception cref="PdfPasswordException">A PDF is encrypted and the password does not open it.</exception>
+    /// <exception cref="InvalidDataException">A PDF is not readable, has no pages, or decodes to more data than allowed.</exception>
+    /// <exception cref="InvalidOperationException">The PDF is digitally signed and <see cref="PdfStampOptions.InvalidateSignatures"/> is not set.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">An option is out of range, such as a <see cref="PdfStampOptions.StampPage"/> the stamp PDF does not have.</exception>
+    /// <exception cref="NotSupportedException">A PDF uses an encryption handler other than the standard one.</exception>
+    /// <exception cref="IOException">
+    /// An input file cannot be read (it does not exist, for example) or the output file cannot be written.
+    /// The output file is written only once it is complete, so a failure leaves any earlier file at that path unchanged.
+    /// </exception>
+    /// <exception cref="UnauthorizedAccessException">The process may not read an input file or write the output file.</exception>
     public static void StampFile(string inputPath, string stampPath, string outputPath, PdfStampOptions? options = null)
         => AtomicFile.WriteAllBytes(outputPath, Stamp(File.ReadAllBytes(inputPath), File.ReadAllBytes(stampPath), options));
 

@@ -128,6 +128,16 @@ public static class PdfSigner
     }
 
     /// <summary>Signs a PDF file and writes the signed copy to <paramref name="outputPath"/> (which may be the same path).</summary>
+    /// <exception cref="ArgumentNullException">A path or <paramref name="options"/> is null.</exception>
+    /// <exception cref="ArgumentException">The signing certificate has no private key, or its key does not suit the external signer.</exception>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and the password does not open it.</exception>
+    /// <exception cref="PdfSignatureException">The timestamp server failed, or the external signer's signature does not verify.</exception>
+    /// <exception cref="NotSupportedException"><see cref="PdfSignatureOptions.HashAlgorithm"/> is not SHA-256, SHA-384 or SHA-512.</exception>
+    /// <exception cref="IOException">
+    /// The input file cannot be read (it does not exist, for example) or the output file cannot be written.
+    /// The output file is written only once it is complete, so a failure leaves any earlier file at that path unchanged.
+    /// </exception>
+    /// <exception cref="UnauthorizedAccessException">The process may not read the input file or write the output file.</exception>
     public static void SignFile(string inputPath, string outputPath, PdfSignatureOptions options, string? password = null)
         => AtomicFile.WriteAllBytes(outputPath, Sign(File.ReadAllBytes(inputPath), options, password));
 }

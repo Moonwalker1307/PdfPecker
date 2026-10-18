@@ -202,6 +202,17 @@ public static class PdfMerger
     /// The files are read one at a time and the result is written as it is made, so memory use follows the largest
     /// input. The output file appears only once the merge has succeeded, and may be one of the inputs.
     /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="outputPath"/> or <paramref name="inputPaths"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="inputPaths"/> is empty or has a null path.</exception>
+    /// <exception cref="PdfPasswordException">An input is encrypted and cannot be opened with the given password.</exception>
+    /// <exception cref="InvalidDataException">An input is not a readable PDF or decodes to more data than allowed, or none of them has any pages.</exception>
+    /// <exception cref="PdfLimitException">The merged document has more than <see cref="PdfMergeOptions.MaxPages"/> pages.</exception>
+    /// <exception cref="NotSupportedException">An input uses an encryption handler other than the standard one.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    /// <exception cref="IOException">
+    /// An input file cannot be read (it does not exist, for example) or the output file cannot be written.
+    /// </exception>
+    /// <exception cref="UnauthorizedAccessException">The process may not read an input file or write the output file.</exception>
     public static void MergeFiles(string outputPath, IEnumerable<string> inputPaths, PdfMergeOptions? options = null, CancellationToken cancellationToken = default)
     {
         if (outputPath == null) throw new ArgumentNullException(nameof(outputPath));
@@ -267,7 +278,11 @@ public static class PdfMerger
 /// valid PDF. If adding or completing throws, what was written cannot be used, and every later call throws
 /// <see cref="InvalidOperationException"/>. The output only needs to be writable, not seekable, and is never flushed or
 /// closed. <see cref="PdfMergeOptions.Passwords"/> is indexed by the order PDFs are added, and
-/// <see cref="PdfMergeOptions.MaxPages"/> counts every input. Not thread-safe.
+/// <see cref="PdfMergeOptions.MaxPages"/> counts every input.
+/// <para>
+/// Unlike the static classes, an instance is not thread-safe: it holds the state of one output, so call its methods
+/// from one thread at a time, awaiting each asynchronous call before the next. Separate instances can run in parallel.
+/// </para>
 /// </remarks>
 public sealed class StreamingPdfMerger
 {
