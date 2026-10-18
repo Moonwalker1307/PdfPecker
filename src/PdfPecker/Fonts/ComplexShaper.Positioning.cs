@@ -1,16 +1,19 @@
+using PdfPecker.Text;
+
 namespace PdfPecker.Fonts;
 
 // Positions: the font's advances, kerning from the kern table when GPOS has none, the marks' place, and the shaped
 // glyphs in 1/1000 em.
 internal static partial class ComplexShaper
 {
-    // Every glyph starts with the font's advance, which GPOS then adjusts.
+    // Every glyph starts with the font's advance, which GPOS then adjusts. Joiners and other invisible controls that
+    // are still there take no room, whatever glyph the font has for them.
     private static void SetAdvances(FontProgram font, GlyphRun run)
     {
         for (int i = 0; i < run.Count; i++)
         {
             var glyph = run[i];
-            glyph.XAdvance = font.Advance(glyph.Gid);
+            glyph.XAdvance = UnicodeTables.IsDefaultIgnorable(glyph.CodePoint) ? 0 : font.Advance(glyph.Gid);
             run[i] = glyph;
         }
     }

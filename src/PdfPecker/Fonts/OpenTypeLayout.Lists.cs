@@ -51,6 +51,13 @@ internal sealed partial class OpenTypeLayout
         return result;
     }
 
+    /// <summary>True when GSUB or GPOS lists the script itself, not only a script it would fall back to.</summary>
+    public bool HasScript(bool gpos, uint script)
+    {
+        int table = gpos ? _gpos : _gsub;
+        return table >= 0 && FindScript(table + _reader.U16(table + ScriptListField), script) >= 0;
+    }
+
     /// <summary>True when the font's script has the feature.</summary>
     public bool HasFeature(bool gpos, uint script, uint feature) => FeatureLookups(gpos, script, feature).Count > 0;
 

@@ -15,6 +15,9 @@ internal struct GlyphInfo
     public int XAdvance, YAdvance, XOffset, YOffset;
     public int AttachChain;       // relative index of the glyph this one is attached to (0: none)
     public byte AttachType;       // OpenTypeLayout.AttachMark or AttachCursive
+    public byte Substitutions;    // OpenTypeLayout.Substituted, Ligated and Multiplied: what GSUB made of it
+    public byte Syllable;         // Indic shaping: the syllable's serial number (high nibble) and type (low nibble)
+    public byte IndicCategory, IndicPosition; // Indic shaping: the character's syllabic category and position
 }
 
 /// <summary>
@@ -35,6 +38,10 @@ internal sealed partial class OpenTypeLayout
 {
     public const int Base = 2, Ligature = 4, Mark = 8; // glyph props, as LookupFlag's ignore bits
     public const byte AttachMark = 1, AttachCursive = 2;
+
+    // What GSUB made of a glyph, as HarfBuzz tracks it for the Indic shaper: any substitution, a ligature, or one of
+    // the glyphs of a multiple substitution. A ligature forgets that its glyph was multiplied before.
+    public const byte Substituted = 1, Ligated = 2, Multiplied = 4;
 
     // GSUB and GPOS start with a version and the offsets of the script, feature and lookup lists.
     private const int SupportedMajorVersion = 1;

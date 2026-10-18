@@ -47,6 +47,12 @@ internal static partial class ComplexShaper
         /// <summary>The GPOS lookups, in the order of the lookup list.</summary>
         public (int Lookup, uint Mask)[] Gpos { get; init; } = [];
 
+        /// <summary>
+        /// The GPOS lookups of the mark and mkmk features, sorted, which do not attach a mark across a zero-width
+        /// joiner (HarfBuzz enables them with manual joiners).
+        /// </summary>
+        public int[] MarkLookups { get; init; } = [];
+
         /// <summary>Whether the font has any of the joining forms, without which the presentation forms stand in.</summary>
         public bool HasForms { get; init; }
 
@@ -58,6 +64,12 @@ internal static partial class ComplexShaper
 
         /// <summary>Whether GPOS kerns, without which the kern table applies.</summary>
         public bool HasGposKern { get; init; }
+
+        /// <summary>Whether GSUB has the script itself rather than a script it falls back to.</summary>
+        public bool HasScriptGsub { get; init; }
+
+        /// <summary>How the font shapes an Indic script, or null for the other scripts and fonts made for the default script.</summary>
+        public IndicPlan? Indic { get; init; }
     }
 
     // Keyed weakly by the font, so that a font registered for one conversion is not kept alive by its plans for the
@@ -65,18 +77,52 @@ internal static partial class ComplexShaper
     private static readonly ConditionalWeakTable<FontProgram, ConcurrentDictionary<Script, Plan>> s_plans = new();
 
     private static Plan GetPlan(FontProgram font, OpenTypeLayout? layout, Script script)
-        => s_plans.GetValue(font, static _ => new ConcurrentDictionary<Script, Plan>()).GetOrAdd(script, static (script, layout) =>
+        => s_plans.GetValue(font, static _ => new ConcurrentDictionary<Script, Plan>()).GetOrAdd(script, static (script, state) =>
         {
             // OpenTypeLayout checks the lists a plan reads when it loads the font; should a damaged font still get
             // past that, its text is shaped without the layout tables rather than failing the document. The plan is
             // cached, so this runs once per font and script.
-            try { return layout == null ? Plan.Empty : BuildPlan(layout, script); }
+            var (font, layout) = state;
+            try
+            {
+                if (IsIndic(script)) return BuildIndicScriptPlan(font, layout, script);
+                return layout == null ? Plan.Empty : BuildPlan(layout, script, ScriptTag(script));
+            }
             catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException) { return Plan.Empty; }
-        }, layout);
+        }, (font, layout));
 
-    private static Plan BuildPlan(OpenTypeLayout layout, Script script)
+    // An Indic script's plan: the Indic stages for GSUB, and the positioning features of the script's tag in GPOS, which
+    // a font may list under the new tag, the old one, or both.
+    private static Plan BuildIndicScriptPlan(FontProgram font, OpenTypeLayout? layout, Script script)
     {
-        uint tag = ScriptTag(script);
+        var indic = BuildIndicPlan(font, layout, script, out uint gsubTag);
+        if (layout == null) return indic == null ? Plan.Empty : new Plan { Indic = indic };
+        if (indic == null) return BuildPlan(layout, script, gsubTag);
+        var config = indic.Config;
+        uint gposTag = FontProgram.Tag(config.NewTag);
+        if (!layout.HasScript(true, gposTag) && layout.HasScript(true, FontProgram.Tag(config.OldTag))) gposTag = FontProgram.Tag(config.OldTag);
+        var gpos = new List<(int Lookup, uint Mask)>();
+        AddStage(gpos, layout, gpos: true, gposTag, PositioningFeatures);
+        return new Plan
+        {
+            Gpos = [.. gpos],
+            MarkLookups = MarkLookupsOf(layout, gposTag),
+            HasMarkPositioning = layout.HasFeature(true, gposTag, FontProgram.Tag("mark")),
+            HasGposKern = layout.HasFeature(true, gposTag, FontProgram.Tag("kern")),
+            HasScriptGsub = true,
+            Indic = indic,
+        };
+    }
+
+    private static int[] MarkLookupsOf(OpenTypeLayout layout, uint tag)
+    {
+        int[] lookups = [.. layout.FeatureLookups(gpos: true, tag, FontProgram.Tag("mark")), .. layout.FeatureLookups(gpos: true, tag, FontProgram.Tag("mkmk"))];
+        Array.Sort(lookups);
+        return lookups;
+    }
+
+    private static Plan BuildPlan(OpenTypeLayout layout, Script script, uint tag)
+    {
         var gsub = new List<(int Lookup, uint Mask)>();
         AddStage(gsub, layout, gpos: false, tag, [("rvrn", AllGlyphs)]);
         bool hasForms = false, hasRlig;
@@ -99,10 +145,12 @@ internal static partial class ComplexShaper
         {
             Gsub = [.. gsub],
             Gpos = [.. gpos],
+            MarkLookups = MarkLookupsOf(layout, tag),
             HasForms = hasForms,
             HasRlig = hasRlig,
             HasMarkPositioning = layout.HasFeature(true, tag, FontProgram.Tag("mark")),
             HasGposKern = layout.HasFeature(true, tag, FontProgram.Tag("kern")),
+            HasScriptGsub = layout.HasScript(false, tag),
         };
     }
 
