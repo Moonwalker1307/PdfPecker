@@ -88,6 +88,19 @@ public sealed class PdfStampOptions
     /// change. Default: false, a signed PDF is refused with <see cref="InvalidOperationException"/>.
     /// </summary>
     public bool InvalidateSignatures { get; set; }
+
+    /// <summary>
+    /// A fixed date, for reproducible output. Stamping keeps the document's own dates, so the date itself is not
+    /// written; when one is given, the file identifier (<c>/ID</c>) that marks the stamped version is a hash of the
+    /// result instead of random bytes, so the same inputs and options give a byte-identical file. When null, the
+    /// <c>SOURCE_DATE_EPOCH</c> environment variable (seconds since 1970-01-01 UTC, as reproducible builds set it) is
+    /// used the same way; when that is not set or not a valid number, the identifier is random. This property takes
+    /// precedence over the environment variable, as <see cref="PdfOptions.CreationDate"/> does. Default: null.
+    /// </summary>
+    /// <remarks>
+    /// Output with <see cref="Security"/> still differs each time, because the encryption keys and identifier are random.
+    /// </remarks>
+    public DateTimeOffset? CreationDate { get; set; }
 }
 
 /// <summary>

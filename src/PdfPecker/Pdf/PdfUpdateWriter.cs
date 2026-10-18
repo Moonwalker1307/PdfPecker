@@ -11,6 +11,7 @@ namespace PdfPecker.Pdf;
 internal sealed class PdfUpdateWriter
 {
     private readonly PdfFile _file;
+    private readonly bool _reproducible;
     private readonly SortedDictionary<int, (long Offset, int Gen)> _offsets = new();
 
     /// <summary>The file so far; signers patch their placeholders in its buffer.</summary>
@@ -19,10 +20,15 @@ internal sealed class PdfUpdateWriter
     /// <summary>Writes objects with the file's numbering, encrypting their strings with the file's encryption.</summary>
     public PdfObjectWriter Objects { get; }
 
-    /// <summary>Starts the update of <paramref name="file"/>, parsed from <paramref name="pdf"/>, with room for <paramref name="extra"/> more bytes.</summary>
-    public PdfUpdateWriter(PdfFile file, byte[] pdf, int extra)
+    /// <summary>
+    /// Starts the update of <paramref name="file"/>, parsed from <paramref name="pdf"/>, with room for <paramref name="extra"/>
+    /// more bytes. With a <paramref name="creationDate"/> or <c>SOURCE_DATE_EPOCH</c>, a file identifier the update has
+    /// to add is a hash of the file instead of random bytes.
+    /// </summary>
+    public PdfUpdateWriter(PdfFile file, byte[] pdf, int extra, DateTimeOffset? creationDate = null)
     {
         _file = file;
+        _reproducible = ReproducibleDate.Resolve(creationDate) != null;
         Objects = new PdfObjectWriter(PdfObjectSyntax.Update, file.Decryptor);
         Output = new ByteBuffer(pdf.Length + extra);
         Output.Bytes(pdf);
@@ -79,7 +85,9 @@ internal sealed class PdfUpdateWriter
         if (_file.Resolve(trailer["ID"]) is PdfArray { Count: 2 } id) t.Entries["ID"] = id;
         else
         {
-            var fresh = new PdfString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16), hex: true);
+            // A file without one gets an identifier, hashed from everything before this cross-reference section for a
+            // reproducible result.
+            var fresh = new PdfString(_reproducible ? ReproducibleDate.FileId(output.Span) : System.Security.Cryptography.RandomNumberGenerator.GetBytes(16), hex: true);
             t.Entries["ID"] = new PdfArray(new List<PdfObject> { fresh, fresh });
         }
         if (prev >= 0) t.Entries["Prev"] = PdfNumber.Int(prev);
