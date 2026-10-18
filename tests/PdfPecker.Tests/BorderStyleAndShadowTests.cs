@@ -322,6 +322,15 @@ public class BorderStyleAndShadowTests
         Assert.DoesNotContain(TextOps("<p>... ok</p>", "p::first-letter { color: red }"), t => t.Color == 0xFFFF0000u);
     }
 
+    [Theory]
+    [InlineData("<p style='text-transform: uppercase'>Straße</p>", "STRASSE")]
+    [InlineData("<p lang='tr' style='text-transform: uppercase'>istanbul</p>", "\u0130STANBUL")]
+    [InlineData("<p lang='az-Latn' style='text-transform: capitalize'>istanbul</p>", "\u0130stanbul")]
+    [InlineData("<p lang='tr' style='text-transform: lowercase'>ISPARTA</p>", "\u0131sparta")]
+    [InlineData("<p lang='de' style='text-transform: uppercase'>istanbul</p>", "ISTANBUL")]
+    public void Text_transform_uses_the_full_case_mapping_and_the_language(string html, string expected)
+        => Assert.Equal(expected, string.Concat(TextOps(html).Select(t => t.Text)).Trim());
+
     // ---- ::first-line ----
 
     private const string Long = "The first line of this paragraph is styled while the rest of the text keeps the normal style it had.";
