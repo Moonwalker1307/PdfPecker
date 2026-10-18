@@ -208,9 +208,10 @@ internal sealed partial class OpenTypeLayout
         var buf = c.Buf;
         for (int k = 1; k < input.Count; k++)
         {
-            int j = NextMatch(c, positions[k - 1]);
+            int value = _reader.U16(input.Start + (k - 1) * 2);
+            int j = NextMatch(c, positions[k - 1], value, values);
             if (j < 0 || (buf[j].Mask & c.LookupMask) == 0) return false;
-            if (!ValueMatches(buf[j].Gid, _reader.U16(input.Start + (k - 1) * 2), values)) return false;
+            if (!ValueMatches(buf[j].Gid, value, values)) return false;
             positions[k] = j;
         }
         last = positions[input.Count - 1];
@@ -222,8 +223,9 @@ internal sealed partial class OpenTypeLayout
     {
         for (int k = 0, j = i; k < backtrack.Count; k++)
         {
-            j = PreviousMatch(c, j);
-            if (j < 0 || !ValueMatches(c.Buf[j].Gid, _reader.U16(backtrack.Start + k * 2), values)) return false;
+            int value = _reader.U16(backtrack.Start + k * 2);
+            j = PreviousMatch(c, j, value, values, context: true);
+            if (j < 0 || !ValueMatches(c.Buf[j].Gid, value, values)) return false;
         }
         return true;
     }
@@ -233,35 +235,59 @@ internal sealed partial class OpenTypeLayout
     {
         for (int k = 0, j = last; k < lookahead.Count; k++)
         {
-            j = NextMatch(c, j);
-            if (j < 0 || !ValueMatches(c.Buf[j].Gid, _reader.U16(lookahead.Start + k * 2), values)) return false;
+            int value = _reader.U16(lookahead.Start + k * 2);
+            j = NextMatch(c, j, value, values, context: true);
+            if (j < 0 || !ValueMatches(c.Buf[j].Gid, value, values)) return false;
         }
         return true;
     }
 
-    // Applies the lookup records of a matched rule at their input positions, then moves past the input.
-    private void ApplyRecords(LookupState c, Span<int> positions, CountedArray records, ref int i)
+    // Applies the lookup records of a matched rule at their input positions, then moves past the input. A nested
+    // lookup that changes the number of glyphs changes the positions as HarfBuzz's apply_lookup does: glyphs it adds
+    // right after its position become positions of their own, which later records count in their sequence indexes,
+    // and glyphs it removes take the positions after it.
+    private void ApplyRecords(LookupState c, Span<int> matched, CountedArray records, ref int i)
     {
-        int end = positions[^1] + 1;
+        int end = matched[^1] + 1;
         if (c.Depth < MaxNestingDepth)
         {
+            Span<int> positions = stackalloc int[MaxInputGlyphs];
+            matched.CopyTo(positions);
+            int count = matched.Length;
             int table = c.Gpos ? _gpos : _gsub;
             for (int r = 0; r < records.Count && Spend(c); r++)
             {
                 int record = records.Start + r * LookupRecordLength;
                 int sequenceIndex = _reader.U16(record + RecordSequenceIndexField), lookupIndex = _reader.U16(record + RecordLookupIndexField);
-                if (sequenceIndex >= positions.Length) continue;
+                if (sequenceIndex >= count) continue;
                 int lookup = LookupOffset(table, lookupIndex);
                 if (lookup < 0) continue;
                 int at = positions[sequenceIndex];
                 if (at >= c.Buf.Count) continue;
                 int delta = ApplyNestedLookup(c, lookup, at);
-                if (delta != 0)
+                if (delta == 0) continue;
+                end += delta;
+                if (end < at)
                 {
-                    // A nested ligature or decomposition moved the glyphs after it.
-                    for (int q = sequenceIndex + 1; q < positions.Length; q++) positions[q] = Math.Max(at + 1, positions[q] + delta);
-                    end += delta;
+                    // The nested lookup removed more glyphs than there were after it in the input.
+                    delta += at - end;
+                    end = at;
                 }
+                int next = sequenceIndex + 1;
+                if (delta > 0)
+                {
+                    if (count + delta > MaxInputGlyphs) break;
+                }
+                else
+                {
+                    delta = Math.Max(delta, next - count);
+                    next -= delta;
+                }
+                positions[next..count].CopyTo(positions[(next + delta)..]);
+                next += delta;
+                count += delta;
+                for (int j = sequenceIndex + 1; j < next; j++) positions[j] = positions[j - 1] + 1;
+                for (; next < count; next++) positions[next] += delta;
             }
         }
         i = Math.Max(end, i + 1);

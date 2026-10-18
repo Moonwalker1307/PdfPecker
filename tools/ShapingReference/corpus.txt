@@ -1,0 +1,100 @@
+# Text shaped by tests/PdfPecker.Tests/IndicShapingTests against HarfBuzz's output: font, then the text. A text in
+# <U+XXXX ...> form spells out code points (joiners, broken syllables). generate.py adds HarfBuzz's glyphs.
+NotoSansDevanagari-Subset	नमस्ते
+NotoSansDevanagari-Subset	हिन्दी
+NotoSansDevanagari-Subset	क्षत्रिय
+NotoSansDevanagari-Subset	श्री
+NotoSansDevanagari-Subset	अर्थ
+NotoSansDevanagari-Subset	कार्य
+NotoSansDevanagari-Subset	धर्म
+NotoSansDevanagari-Subset	प्रेम
+NotoSansDevanagari-Subset	द्वार
+NotoSansDevanagari-Subset	ट्रक
+NotoSansDevanagari-Subset	क्रिकेट
+NotoSansDevanagari-Subset	विद्यालय
+NotoSansDevanagari-Subset	संस्कृत
+NotoSansDevanagari-Subset	उन्होंने
+NotoSansDevanagari-Subset	कृपया
+NotoSansDevanagari-Subset	ज्ञान
+NotoSansDevanagari-Subset	र्क्षि
+NotoSansDevanagari-Subset	र्त्स्न्य
+NotoSansDevanagari-Subset	पढ़ाई
+NotoSansDevanagari-Subset	क़लम
+NotoSansDevanagari-Subset	मैं हिंदी बोलता हूँ।
+NotoSansDevanagari-Subset	भारत का संविधान, १९५०
+NotoSansDevanagari-Subset	ॐ अंतर्राष्ट्रीय
+NotoSansDevanagari-Subset	स्त्रियाँ
+NotoSansDevanagari-Subset	ह्म ह्य द्ध द्द श्व
+NotoSansDevanagari-Subset	<U+0915 U+094D U+200D U+0937>
+NotoSansDevanagari-Subset	<U+0915 U+094D U+200C U+0937>
+NotoSansDevanagari-Subset	<U+0930 U+094D U+200D U+0915>
+NotoSansDevanagari-Subset	<U+093F U+0915>
+NotoSansDevanagari-Subset	<U+0930 U+094D>
+NotoSansDevanagari-Subset	<U+091F U+094D U+200C U+092F U+093F>
+NotoSansDevanagari-Subset	<U+091F U+094D U+200D U+092F U+093F>
+NotoSansDevanagari-Subset	<U+0930 U+094D U+0915 U+094B U+094D>
+NotoSansDevanagari-Subset	<U+0915 U+0930 U+094D U+0930 U+094D>
+NotoSansDevanagari-Subset	<U+0905 U+0901 U+0951 U+0952>
+NotoSansBengali-Subset	বাংলা
+NotoSansBengali-Subset	আমার সোনার বাংলা
+NotoSansBengali-Subset	ক্ষমা
+NotoSansBengali-Subset	কোলকাতা
+NotoSansBengali-Subset	সৌরভ
+NotoSansBengali-Subset	প্রশ্ন স্ত্রী
+NotoSansBengali-Subset	র্যাব
+NotoSansBengali-Subset	<U+09B0 U+200D U+09CD U+09AF U+09BE U+09AC>
+NotoSansBengali-Subset	ড়য়ঢ়
+NotoSansBengali-Subset	<U+09AF U+09BC>
+NotoSansBengali-Subset	কর্ম ধর্ম
+NotoSansBengali-Subset	বিদ্যালয়।
+NotoSansGurmukhi-Subset	ਪੰਜਾਬੀ
+NotoSansGurmukhi-Subset	ਗੁਰਮੁਖੀ
+NotoSansGurmukhi-Subset	ਕ੍ਰਿਪਾ ਪ੍ਰੇਮ
+NotoSansGurmukhi-Subset	ਖ਼ੁਸ਼ੀ
+NotoSansGurmukhi-Subset	ਸ੍ਵ ਦ੍ਹ
+NotoSansGujarati-Subset	ગુજરાતી
+NotoSansGujarati-Subset	ક્ષમા શ્રી
+NotoSansGujarati-Subset	કાર્ય પ્રેમ
+NotoSansGujarati-Subset	વિદ્યાર્થી
+NotoSansOriya-Subset	ଓଡ଼ିଆ
+NotoSansOriya-Subset	କ୍ଷମା ଶ୍ରୀ
+NotoSansOriya-Subset	କାର୍ଯ୍ୟ
+NotoSansOriya-Subset	କୌ କୈ କୋ
+NotoSansOriya-Subset	ସ୍ତ୍ରୀ
+NotoSansTamil-Subset	தமிழ்
+NotoSansTamil-Subset	வணக்கம் உலகம்
+NotoSansTamil-Subset	கொ கோ கௌ
+NotoSansTamil-Subset	ஸ்ரீ க்ஷ
+NotoSansTamil-Subset	நன்றி
+NotoSansTamil-Subset	<U+0B92 U+0BD7>
+NotoSansTelugu-Subset	తెలుగు
+NotoSansTelugu-Subset	నమస్కారం
+NotoSansTelugu-Subset	క్ష శ్రీ
+NotoSansTelugu-Subset	కార్యం
+NotoSansTelugu-Subset	కై కృ
+NotoSansTelugu-Subset	స్త్రీ
+NotoSansTelugu-Subset	<U+0C30 U+0C4D U+200D U+0C15>
+NotoSansKannada-Subset	ಕನ್ನಡ
+NotoSansKannada-Subset	ಕೊ ಕೋ ಕೀ ಕೈ
+NotoSansKannada-Subset	ಕಾರ್ಯ ಶ್ರೀ
+NotoSansKannada-Subset	ಕ್ಷ ಸ್ತ್ರೀ
+NotoSansKannada-Subset	<U+0CB0 U+0CCD U+200D U+0C95>
+NotoSansMalayalam-Subset	മലയാളം
+NotoSansMalayalam-Subset	നമസ്കാരം
+NotoSansMalayalam-Subset	കൊ കോ കൗ
+NotoSansMalayalam-Subset	ന്റ ക്ഷ
+NotoSansMalayalam-Subset	<U+0D4E U+0D15>
+NotoSansMalayalam-Subset	<U+0D30 U+0D4D U+200D>
+NotoSansMalayalam-Subset	ൽ ൾ ൺ
+NotoSansMalayalam-Subset	സ്ത്രീ കാര്യം
+NotoSansMalayalam-Subset	പ്രേമം ക്രിയ
+NotoSansThai-Subset	สวัสดี
+NotoSansThai-Subset	ภาษาไทย
+NotoSansThai-Subset	น้ำ ดำ กำ
+NotoSansThai-Subset	ผู้ใหญ่
+NotoSansThai-Subset	ปู่ ญู ฐู ป่ ปั่ ฟ้า
+NotoSansThai-Subset	ประเทศไทย
+NotoSansThai-Subset	<U+0E14 U+0E4B U+0E33>
+NotoSansThai-Subset	<U+0E1B U+0E39 U+0E3A>
+NotoSansLao-Subset	ລາວ
+NotoSansLao-Subset	ນ້ຳ ສະບາຍດີ

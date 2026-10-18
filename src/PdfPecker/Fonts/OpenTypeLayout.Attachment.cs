@@ -128,9 +128,15 @@ internal sealed partial class OpenTypeLayout
         int markAnchor = markArray + _reader.U16(markRecord + MarkAnchorField);
         if (markClass >= classCount) return false;
 
-        int j = type == MarkToMarkPositioning ? PreviousMarkToAttachTo(c, i) : PreviousBase(buf, i);
+        int baseCoverage = sub + _reader.U16(sub + BaseCoverageField);
+        int j = type switch
+        {
+            MarkToMarkPositioning => PreviousMarkToAttachTo(c, i),
+            MarkToLigaturePositioning => PreviousBase(c, i, -1),
+            _ => PreviousBase(c, i, baseCoverage),
+        };
         if (j < 0) return false;
-        int baseIndex = CoverageIndex(sub + _reader.U16(sub + BaseCoverageField), buf[j].Gid);
+        int baseIndex = CoverageIndex(baseCoverage, buf[j].Gid);
         if (baseIndex < 0 || baseIndex >= _reader.U16(baseArray)) return false;
         int baseAnchor = type == MarkToLigaturePositioning
             ? LigatureAnchor(baseArray, baseIndex, classCount, markClass, buf[i], buf[j])
@@ -150,11 +156,25 @@ internal sealed partial class OpenTypeLayout
     }
 
     // The base (or ligature) a mark attaches to for mark-to-base and mark-to-ligature positioning: the glyph before it
-    // that is not a mark, whatever the lookup's flags.
-    private static int PreviousBase(GlyphRun buf, int i)
+    // that is not a mark or an invisible control, whatever the lookup's flags. Of the glyphs a multiple substitution
+    // made, a mark attaches to the first, unless the subtable covers a later one (HarfBuzz's MarkBasePos accept); with
+    // no base coverage, as for mark-to-ligature positioning, to the nearest.
+    private int PreviousBase(LookupState c, int i, int baseCoverage)
     {
+        var buf = c.Buf;
         for (int k = i - 1; k >= 0; k--)
-            if ((buf[k].Props & Mark) == 0) return k;
+        {
+            var g = buf[k];
+            if ((g.Props & Mark) != 0 || MaySkip(c, g, context: false)) continue;
+            if (baseCoverage >= 0 && k > 0 && (g.Substitutions & Multiplied) != 0 && g.LigComp != 0)
+            {
+                var before = buf[k - 1];
+                bool laterComponent = (before.Props & Mark) == 0 && (before.Substitutions & Multiplied) != 0
+                    && before.LigId == g.LigId && g.LigComp == before.LigComp + 1;
+                if (laterComponent && CoverageIndex(baseCoverage, g.Gid) < 0) continue;
+            }
+            return k;
+        }
         return -1;
     }
 

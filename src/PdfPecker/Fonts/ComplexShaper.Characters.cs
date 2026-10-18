@@ -16,14 +16,36 @@ internal static partial class ComplexShaper
     // front (see MoveModifierMarks).
     private const int CombiningClassBelow = 220, CombiningClassAbove = 230;
 
-    private static void AddText(FontProgram font, OpenTypeLayout? layout, GlyphRun run, string s, int start, int length, bool rtl)
+    // Adds the glyphs of the text. Indic text is decomposed wherever the font has the parts (decomposeFirst), as
+    // HarfBuzz normalizes it, so that split vowel signs and nukta letters reach the font in pieces; other text only
+    // where the font lacks the character.
+    private static void AddText(FontProgram font, OpenTypeLayout? layout, GlyphRun run, string s, int start, int length, bool rtl,
+        bool decomposeFirst)
     {
         for (int i = start, end = start + length; i < end;)
         {
             var (cp, units) = CodePointAt(s, i, end);
-            AddCharacter(font, layout, run, cp, i, units, rtl, depth: 0);
+            if (!decomposeFirst || !TryAddIndicDecomposition(font, layout, run, cp, i, units, depth: 0))
+                AddCharacter(font, layout, run, cp, i, units, rtl, depth: 0);
             i += units;
         }
+    }
+
+    /// <summary>
+    /// Adds the glyphs of an Indic character's decomposition when the font has its last part and its first part, or the
+    /// first part's own decomposition. The parts after the first take no characters of the text. Returns false, having
+    /// added nothing, otherwise.
+    /// </summary>
+    private static bool TryAddIndicDecomposition(FontProgram font, OpenTypeLayout? layout, GlyphRun run, int cp, int cluster, int length, int depth)
+    {
+        if (depth >= MaxDecompositionDepth || !DecomposeIndic(cp, out int first, out int second) || font.GlyphId(second) == 0) return false;
+        if (!TryAddIndicDecomposition(font, layout, run, first, cluster, length, depth + 1))
+        {
+            if (font.GlyphId(first) == 0) return false;
+            AddCharacter(font, layout, run, first, cluster, length, rtl: false, depth + 1);
+        }
+        AddCharacter(font, layout, run, second, cluster, 0, rtl: false, depth + 1);
+        return true;
     }
 
     // The character at an index and how many UTF-16 units it takes; an unpaired surrogate stands for itself.

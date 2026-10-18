@@ -1875,6 +1875,45 @@ public class MeshShadingLimitTests
     }
 }
 
+/// <summary>
+/// Indic, Thai and Lao text built to be as hard to shape as possible: endless syllables, floods of signs with nothing to
+/// sit on (each of which gets a dotted circle), joiners and split vowels. Shaping stays linear in the text.
+/// </summary>
+[Collection(HostileInputCollection.Name)]
+public class ComplexScriptShapingHostileTests
+{
+    private const int Repeats = 50_000;
+
+    public static TheoryData<string, string> Floods() => new()
+    {
+        { "NotoSansDevanagari-Subset", "क्" },          // one consonant cluster that never ends
+        { "NotoSansDevanagari-Subset", "्" },            // viramas with no consonant: a dotted circle each
+        { "NotoSansDevanagari-Subset", "र्\u200Dक्\u200C" }, // reph, joiners and half forms
+        { "NotoSansDevanagari-Subset", "ि" },            // pre-base vowel signs, each moved before a dotted circle
+        { "NotoSansBengali-Subset", "ক্ষোৗ" },          // split vowels around a conjunct
+        { "NotoSansMalayalam-Subset", "ര്" },            // a reph that reorders to the end of each syllable
+        { "NotoSansTamil-Subset", "ொ" },
+        { "NotoSansThai-Subset", "ำ" },                  // SARA AM decomposed with nothing before it
+        { "NotoSansThai-Subset", "ป\u0E34\u0E48\u0E39" }, // marks that move to avoid a tall consonant
+        { "NotoSansLao-Subset", "\u0EB3\u200D" },
+    };
+
+    [Theory]
+    [MemberData(nameof(Floods))]
+    public async Task Floods_of_hard_syllables_shape_in_time(string font, string unit)
+    {
+        var program = Assert.Single(FontProgram.Load(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", font + ".woff2"))));
+        string text = string.Concat(Enumerable.Repeat(System.Text.RegularExpressions.Regex.Unescape(unit), Repeats));
+        int count = await Task.Run(() =>
+        {
+            var glyphs = new List<ShapedGlyph>();
+            ComplexShaper.Shape(program, text, 0, text.Length, rtl: false, glyphs);
+            return glyphs.Count;
+        }).WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.InRange(count, 1, OpenTypeLayout.MaxRunLength(text.Length));
+    }
+}
+
 [CollectionDefinition(Name, DisableParallelization = true)]
 public sealed class HostileInputCollection
 {
