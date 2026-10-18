@@ -150,7 +150,11 @@ internal sealed partial class Jbig2Decoder
         int NewCount,
         List<Bitmap> Input,
         SymbolDictionaryTables? Tables,
-        int CodeLength);
+        int CodeLength)
+    {
+        /// <summary>How many new symbols <paramref name="symbols"/>, the input symbols followed by the new ones, holds.</summary>
+        public int DecodedCount(List<Bitmap> symbols) => symbols.Count - Input.Count;
+    }
 
     private Bitmap[] DecodeSymbolDictionary(Segment seg)
     {
@@ -183,36 +187,40 @@ internal sealed partial class Jbig2Decoder
         if (!flags.Huffman || flags.RefinementAggregation) coder.Contexts.Gr = new byte[RefinementContextSize(flags.RefinementTemplate)];
 
         var dict = new SymbolDictionary(seg, flags, at, refinementAt, (int)newCount, input, tables, codeLength);
-        var newSymbols = DecodeNewSymbols(dict, coder);
-        var all = new List<Bitmap>(input);
-        all.AddRange(newSymbols);
-        return ReadExportedSymbols(coder, all);
+        return ReadExportedSymbols(coder, DecodeNewSymbols(dict, coder));
     }
 
-    /// <summary>Decodes the new symbols, height class by height class (6.5.5).</summary>
+    /// <summary>
+    /// Decodes the new symbols, height class by height class (6.5.5), and returns them after the input symbols.
+    /// </summary>
+    /// <remarks>
+    /// A refined or aggregated symbol is built from the input symbols and the new symbols before it, so all of them are
+    /// kept in one list that grows as the symbols are decoded. Copying them for every new symbol would take time and
+    /// memory in the square of the symbol count, which the work budget does not see.
+    /// </remarks>
     private List<Bitmap> DecodeNewSymbols(SymbolDictionary dict, SymbolCoder coder)
     {
-        var newSymbols = new List<Bitmap>();
+        var symbols = new List<Bitmap>(dict.Input);
         int height = 0;
-        while (newSymbols.Count < dict.NewCount)
+        while (dict.DecodedCount(symbols) < dict.NewCount)
         {
             if (!coder.TryDecodeInt(coder.Contexts.Iadh, dict.Tables?.Height, out int deltaHeight))
                 throw new InvalidDataException("Bad JBIG2 height class.");
             height += deltaHeight;
             if (height < 0 || height > MaxSymbolSize) throw new InvalidDataException("Bad JBIG2 symbol height.");
-            DecodeHeightClass(dict, coder, newSymbols, height);
+            DecodeHeightClass(dict, coder, symbols, height);
         }
-        return newSymbols;
+        return symbols;
     }
 
     /// <summary>Decodes the symbols of one height, each width coded as a difference from the previous one, until OOB.</summary>
-    private void DecodeHeightClass(SymbolDictionary dict, SymbolCoder coder, List<Bitmap> newSymbols, int height)
+    private void DecodeHeightClass(SymbolDictionary dict, SymbolCoder coder, List<Bitmap> symbols, int height)
     {
-        int width = 0, totalWidth = 0, first = newSymbols.Count;
+        int width = 0, totalWidth = 0, first = symbols.Count;
         var collectiveWidths = new List<int>();
         while (coder.TryDecodeInt(coder.Contexts.Iadw, dict.Tables?.Width, out int deltaWidth))
         {
-            if (newSymbols.Count >= dict.NewCount) throw new InvalidDataException("Too many JBIG2 symbols in a height class.");
+            if (dict.DecodedCount(symbols) >= dict.NewCount) throw new InvalidDataException("Too many JBIG2 symbols in a height class.");
             coder.CheckData();
             width += deltaWidth;
             if (width < 0 || width > MaxSymbolSize) throw new InvalidDataException("Bad JBIG2 symbol width.");
@@ -220,30 +228,30 @@ internal sealed partial class Jbig2Decoder
             if (dict.Flags.CollectiveBitmaps)
             {
                 collectiveWidths.Add(width);
-                newSymbols.Add(null!); // filled from the collective bitmap below
+                symbols.Add(null!); // filled from the collective bitmap below
             }
-            else newSymbols.Add(DecodeSymbolBitmap(dict, coder, newSymbols, width, height));
+            else symbols.Add(DecodeSymbolBitmap(dict, coder, symbols, width, height));
         }
         if (!dict.Flags.CollectiveBitmaps) return;
         var collective = DecodeCollectiveBitmap(dict, coder.Bits!, totalWidth, height);
         int x0 = 0;
         for (int i = 0; i < collectiveWidths.Count; i++)
         {
-            newSymbols[first + i] = Crop(collective, x0, 0, collectiveWidths[i], height);
+            symbols[first + i] = Crop(collective, x0, 0, collectiveWidths[i], height);
             x0 += collectiveWidths[i];
         }
     }
 
-    /// <summary>Decodes one symbol's bitmap: a generic region, or with refinement and aggregation a refined symbol or a text region.</summary>
-    private Bitmap DecodeSymbolBitmap(SymbolDictionary dict, SymbolCoder coder, List<Bitmap> newSymbols, int width, int height)
+    /// <summary>
+    /// Decodes one symbol's bitmap: a generic region, or with refinement and aggregation a refined symbol or a text region
+    /// built from the <paramref name="available"/> symbols, those of the referred dictionaries and this one's so far.
+    /// </summary>
+    private Bitmap DecodeSymbolBitmap(SymbolDictionary dict, SymbolCoder coder, List<Bitmap> available, int width, int height)
     {
         if (!dict.Flags.RefinementAggregation)
             return DecodeGenericArith(coder.Mq!, coder.Contexts.Gb, width, height, dict.Flags.Template, false, dict.At);
         if (!coder.TryDecodeInt(coder.Contexts.Iaai, dict.Tables?.Aggregate, out int instances))
             throw new InvalidDataException("Bad JBIG2 aggregate.");
-        // The symbols so far, from the referred dictionaries and this one, are what the new symbol is built from.
-        var available = new List<Bitmap>(dict.Input);
-        available.AddRange(newSymbols);
         return instances > 1
             ? DecodeAggregateSymbol(dict, coder, available, instances, width, height)
             : DecodeRefinedSymbol(dict, coder, available, width, height);
@@ -283,11 +291,8 @@ internal sealed partial class Jbig2Decoder
             br.Align();
             if ((uint)id >= (uint)available.Count) throw new InvalidDataException("Bad JBIG2 symbol id.");
             // The refinement is an arithmetic-coded bitmap of the given byte size inside the Huffman-coded data.
-            var seg = dict.Segment;
-            var rmq = new MqDecoder(seg.Data, br.Position, Math.Min(seg.End, br.Position + Math.Max(0, bmSize)));
-            var bmp = DecodeRefinement(rmq, coder.Contexts.Gr, width, height, rtemplate, available[id], dx, dy, false, dict.RefinementAt);
-            br.Position += Math.Max(0, bmSize);
-            return bmp;
+            return DecodeRefinement(br.TakeArithmeticData(bmSize), coder.Contexts.Gr, width, height, rtemplate, available[id], dx, dy,
+                false, dict.RefinementAt);
         }
         else
         {

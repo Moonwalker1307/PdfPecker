@@ -78,11 +78,6 @@ internal sealed partial class Jbig2Decoder
 
         /// <summary>The symbol ID codes of a Huffman-coded text region segment.</summary>
         public HuffTable? SymbolCodes { get; init; }
-
-        /// <summary>The segment data and its end, which hold the refinement bitmaps of a Huffman-coded region.</summary>
-        public byte[]? Data { get; init; }
-
-        public int End { get; init; }
     }
 
     private Region? DecodeTextRegionSegment(Segment seg)
@@ -143,8 +138,6 @@ internal sealed partial class Jbig2Decoder
             CodeLength = codeLength,
             Tables = tables,
             SymbolCodes = symbolCodes,
-            Data = seg.Data,
-            End = seg.End,
         });
         return new Region(bitmap, info);
     }
@@ -214,13 +207,11 @@ internal sealed partial class Jbig2Decoder
         if (w < 0 || h < 0) throw new InvalidDataException("Bad JBIG2 refinement size.");
         int dx = (rdw >> 1) + rdx, dy = (rdh >> 1) + rdy;
         if (coder.Bits is not { } br) return DecodeRefinement(coder.Mq!, cx.Gr, w, h, t.RefinementTemplate, symbol, dx, dy, false, t.RefinementAt);
-        // A Huffman-coded region carries each refinement as an arithmetic-coded bitmap of a given byte size.
+        // A Huffman-coded region, or the aggregated symbol of a Huffman-coded dictionary, carries each refinement as an
+        // arithmetic-coded bitmap of a given byte size in the same segment data.
         t.Tables!.RefinementSize.Decode(br, out int bmSize);
         br.Align();
-        var rmq = new MqDecoder(t.Data!, br.Position, Math.Min(t.End, br.Position + Math.Max(0, bmSize)));
-        var bmp = DecodeRefinement(rmq, cx.Gr, w, h, t.RefinementTemplate, symbol, dx, dy, false, t.RefinementAt);
-        br.Position += Math.Max(0, bmSize);
-        return bmp;
+        return DecodeRefinement(br.TakeArithmeticData(bmSize), cx.Gr, w, h, t.RefinementTemplate, symbol, dx, dy, false, t.RefinementAt);
     }
 
     /// <summary>Draws a symbol instance with its reference corner at (<paramref name="s"/>, <paramref name="tt"/>); returns the S after it.</summary>

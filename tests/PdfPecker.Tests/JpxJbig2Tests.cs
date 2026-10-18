@@ -95,6 +95,81 @@ public class JpxJbig2Tests
         }
     }
 
+    // Two 3 x 3 symbols, and the 4 x 4 bitmap that the second one is refined to.
+    private static readonly int[,] Cross = { { 1, 0, 1 }, { 0, 1, 0 }, { 1, 0, 1 } };
+    private static readonly int[,] Ring = { { 1, 1, 1 }, { 1, 0, 1 }, { 1, 1, 1 } };
+    private static readonly int[,] RefinedRing = { { 1, 1, 1, 0 }, { 1, 0, 1, 1 }, { 1, 1, 1, 0 }, { 0, 1, 0, 1 } };
+
+    /// <summary>
+    /// A 16 x 8 page holding one 8 x 4 symbol at (2, 1), which a Huffman-coded dictionary with refinement and aggregation
+    /// builds from the cross at its left and the ring, refined, at its right (6.5.8.2.1).
+    /// </summary>
+    internal static byte[] HuffmanAggregateWithRefinedInstance()
+    {
+        // The input symbols: one height class of height 3, two symbols of width 3 in a collective bitmap, both exported.
+        var input = new Jbig2TestStreams.Bits()
+            .Huffman(Jbig2TestStreams.B4, 3)
+            .Huffman(Jbig2TestStreams.B2, 3).Huffman(Jbig2TestStreams.B2, 0).Oob(Jbig2TestStreams.B2)
+            .Huffman(Jbig2TestStreams.B1, 0) // an uncompressed collective bitmap
+            .Bytes(new byte[] { 0b10111100, 0b01010100, 0b10111100 })
+            .Huffman(Jbig2TestStreams.B1, 0).Huffman(Jbig2TestStreams.B1, 2)
+            .ToArray();
+        // The aggregate: a text region of two instances in one strip with the tables of 6.5.8.2.1, the second refined to
+        // one pixel wider and taller. Its refinement data follows the refinement size in the same segment data.
+        var refinement = Jbig2TestStreams.Refinement(RefinedRing, Ring, 0, 0);
+        var aggregate = new Jbig2TestStreams.Bits()
+            .Huffman(Jbig2TestStreams.B4, 4).Huffman(Jbig2TestStreams.B2, 8)
+            .Huffman(Jbig2TestStreams.B1, 2) // instances
+            .Huffman(Jbig2TestStreams.B11, 1).Huffman(Jbig2TestStreams.B11, 1).Huffman(Jbig2TestStreams.B6, 0) // strip T and first S
+            .Write(0, 2).Write(0, 1) // the cross, not refined
+            .Huffman(Jbig2TestStreams.B8, 2) // the S step to x = 4
+            .Write(1, 2).Write(1, 1) // the ring, refined
+            .Huffman(Jbig2TestStreams.B15, 1).Huffman(Jbig2TestStreams.B15, 1).Huffman(Jbig2TestStreams.B15, 0).Huffman(Jbig2TestStreams.B15, 0)
+            .Huffman(Jbig2TestStreams.B1, refinement.Length)
+            .Bytes(refinement)
+            .Oob(Jbig2TestStreams.B8).Oob(Jbig2TestStreams.B2)
+            .Huffman(Jbig2TestStreams.B1, 2).Huffman(Jbig2TestStreams.B1, 1) // only the new symbol is exported
+            .ToArray();
+        // A Huffman-coded text region that places the aggregate once, with a symbol code table of one 1-bit code.
+        var placement = new Jbig2TestStreams.Bits();
+        for (int i = 0; i < 35; i++) placement.Write(i == 1 ? 1 : 0, 4);
+        placement.Write(0, 1).Align()
+            .Huffman(Jbig2TestStreams.B11, 1).Huffman(Jbig2TestStreams.B11, 1).Huffman(Jbig2TestStreams.B6, 0)
+            .Write(0, 1).Oob(Jbig2TestStreams.B8);
+        var region = Jbig2TestStreams.U32(8).Concat(Jbig2TestStreams.U32(4)).Concat(Jbig2TestStreams.U32(2)).Concat(Jbig2TestStreams.U32(1))
+            .Append((byte)0).Concat(Jbig2TestStreams.U16(0x0011)).Concat(Jbig2TestStreams.U16(0)).Concat(Jbig2TestStreams.U32(1))
+            .Concat(placement.ToArray()).ToArray();
+
+        return Jbig2TestStreams.Segment(0, Jbig2TestStreams.PageInformation, Array.Empty<int>(), Jbig2TestStreams.PageInfo(16, 8))
+            .Concat(Jbig2TestStreams.Segment(1, Jbig2TestStreams.SymbolDictionary, Array.Empty<int>(),
+                Jbig2TestStreams.U16(0x0001).Concat(Jbig2TestStreams.U32(2)).Concat(Jbig2TestStreams.U32(2)).Concat(input).ToArray()))
+            .Concat(Jbig2TestStreams.Segment(2, Jbig2TestStreams.SymbolDictionary, new[] { 1 },
+                Jbig2TestStreams.U16(0x1003).Concat(Jbig2TestStreams.U32(1)).Concat(Jbig2TestStreams.U32(1)).Concat(aggregate).ToArray()))
+            .Concat(Jbig2TestStreams.Segment(3, Jbig2TestStreams.ImmediateTextRegion, new[] { 2 }, region))
+            .ToArray();
+    }
+
+    /// <summary>Whether pixel (x, y) of the page of <see cref="HuffmanAggregateWithRefinedInstance"/> is black.</summary>
+    internal static bool HuffmanAggregatePixel(int x, int y)
+    {
+        int ax = x - 2, ay = y - 1;
+        if (ay is < 0 or >= 4) return false;
+        if (ax is >= 0 and < 3 && ay < 3) return Cross[ay, ax] != 0;
+        return ax is >= 4 and < 8 && RefinedRing[ay, ax - 4] != 0;
+    }
+
+    [Fact]
+    public void Huffman_aggregate_symbol_with_a_refined_instance_decodes()
+    {
+        var rows = Jbig2Decoder.Decode(HuffmanAggregateWithRefinedInstance(), null, 16, 8)!;
+        for (int y = 0; y < 8; y++)
+        for (int x = 0; x < 16; x++)
+        {
+            bool white = (rows[y * 2 + x / 8] >> (7 - x % 8) & 1) != 0;
+            Assert.True(HuffmanAggregatePixel(x, y) != white, $"Pixel {x},{y}");
+        }
+    }
+
     [Fact]
     public void Renders_jbig2_images_with_globals_in_a_pdf()
     {
@@ -167,7 +242,7 @@ public class JpxJbig2Tests
     private static byte[] ImagePdf(string filter, byte[] data) =>
         BuildPdf(W, H, $"<< /Type /XObject /Subtype /Image /Width {W} /Height {H} {filter}", data, null);
 
-    private static byte[] BuildPdf(int w, int h, string imageDict, byte[] image, byte[]? globals)
+    internal static byte[] BuildPdf(int w, int h, string imageDict, byte[] image, byte[]? globals)
     {
         var content = $"q {w} 0 0 {h} 0 0 cm /Im0 Do Q";
         var objects = new List<string>
