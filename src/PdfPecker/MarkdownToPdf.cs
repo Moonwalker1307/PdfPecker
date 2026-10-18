@@ -27,7 +27,7 @@ public static class MarkdownToPdf
         var html = MarkdownToHtml.ConvertDocument(File.ReadAllText(markdownPath), markdownOptions);
         pdfOptions ??= new PdfOptions();
         var baseDir = pdfOptions.BaseDirectory ?? Path.GetDirectoryName(Path.GetFullPath(markdownPath));
-        File.WriteAllBytes(pdfPath, HtmlToPdf.Render(html, pdfOptions, baseDir));
+        AtomicFile.WriteAllBytes(pdfPath, HtmlToPdf.Render(html, pdfOptions, baseDir));
     }
 
     /// <summary>

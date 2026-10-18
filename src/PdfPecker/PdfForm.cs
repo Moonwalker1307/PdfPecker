@@ -224,7 +224,7 @@ public static class PdfForm
     {
         if (inputPath == null) throw new ArgumentNullException(nameof(inputPath));
         var result = Fill(File.ReadAllBytes(inputPath), values, options, cancellationToken);
-        PdfMerger.WriteFile(outputPath, output => output.Write(result));
+        AtomicFile.Write(outputPath, output => output.Write(result));
     }
 
     /// <summary>
