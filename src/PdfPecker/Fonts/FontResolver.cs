@@ -158,9 +158,9 @@ internal sealed class FontResolver
         foreach (var tok in CssParser.Tokens(item))
         {
             var lower = tok.ToLowerInvariant();
-            if (lower.StartsWith("url(", StringComparison.Ordinal) && tok.EndsWith(")", StringComparison.Ordinal)) url = Unquote(tok.Substring(4, tok.Length - 5));
-            else if (lower.StartsWith("format(", StringComparison.Ordinal) && tok.EndsWith(")", StringComparison.Ordinal)) format = Unquote(tok.Substring(7, tok.Length - 8)).ToLowerInvariant();
-            else if (lower.StartsWith("local(", StringComparison.Ordinal) && tok.EndsWith(")", StringComparison.Ordinal)) local = Unquote(tok.Substring(6, tok.Length - 7));
+            if (lower.StartsWith("url(", StringComparison.Ordinal) && tok.EndsWith(')')) url = Unquote(tok.Substring(4, tok.Length - 5));
+            else if (lower.StartsWith("format(", StringComparison.Ordinal) && tok.EndsWith(')')) format = Unquote(tok.Substring(7, tok.Length - 8)).ToLowerInvariant();
+            else if (lower.StartsWith("local(", StringComparison.Ordinal) && tok.EndsWith(')')) local = Unquote(tok.Substring(6, tok.Length - 7));
         }
         if (local != null)
         {

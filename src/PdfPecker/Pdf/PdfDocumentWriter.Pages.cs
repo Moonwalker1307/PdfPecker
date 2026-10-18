@@ -182,12 +182,13 @@ internal sealed partial class PdfDocumentWriter
             WriteTextString(_out, text);
             _out.Sp();
         }
-        if (link.Target.StartsWith("#", StringComparison.Ordinal))
+        if (link.Target.StartsWith('#'))
         {
             var anchors = doc.Anchors;
-            string anchor = Uri.UnescapeDataString(link.Target.Substring(1));
-            if (!anchors.TryGetValue(anchor, out float ay) && anchors.TryGetValue(link.Target.Substring(1), out ay))
-                anchor = link.Target.Substring(1);
+            string fragment = link.Target.Substring(1);
+            string anchor = Uri.UnescapeDataString(fragment);
+            if (!anchors.TryGetValue(anchor, out float ay) && anchors.TryGetValue(fragment, out ay))
+                anchor = fragment;
             if (anchors.ContainsKey(anchor)) WriteGoTo(ay, Structure?.TargetOf(anchor));
         }
         else

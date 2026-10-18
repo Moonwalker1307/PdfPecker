@@ -110,7 +110,7 @@ internal sealed partial class SvgImage
     private static (string Align, bool Slice) AspectRatio(string? value)
     {
         if (value == null) return ("xmidymid", false);
-        var parts = value.Trim().ToLowerInvariant().Split(new[] { ' ', '\t', '\n', '\r', ',' }, StringSplitOptions.RemoveEmptyEntries);
+        var parts = value.Trim().ToLowerInvariant().Split(ImageAspectRatioSeparators, StringSplitOptions.RemoveEmptyEntries);
         int i = parts.Length > 0 && parts[0] == "defer" ? 1 : 0;
         string align = parts.Length > i ? parts[i] : "xmidymid";
         return (align, parts.Length > i + 1 && parts[i + 1] == "slice");

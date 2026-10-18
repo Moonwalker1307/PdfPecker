@@ -1,3 +1,4 @@
+using System.Buffers;
 using PdfPecker.Html;
 
 namespace PdfPecker.Css;
@@ -9,6 +10,9 @@ namespace PdfPecker.Css;
 /// </summary>
 internal sealed class ContainerQuery
 {
+    // The characters that make a feature a range comparison such as (width > 400px) rather than (width: 400px).
+    private static readonly SearchValues<char> RangeOperators = SearchValues.Create("<>=");
+
     private const int MaxDepth = 16;
 
     /// <summary>The container name the query asks for, or null for the nearest container of a fitting type.</summary>
@@ -163,7 +167,7 @@ internal sealed class ContainerQuery
             if (op != "=" && feature == Feature.Orientation) return null;
             return Comparison.Create(feature, op, value);
         }
-        if (inner.IndexOfAny(new[] { '<', '>', '=' }) >= 0) return ParseRange(inner);
+        if (inner.AsSpan().IndexOfAny(RangeOperators) >= 0) return ParseRange(inner);
         var boolean = FeatureOf(inner);
         return boolean == Feature.None ? null : new BooleanFeature(boolean);
     }
@@ -176,7 +180,7 @@ internal sealed class ContainerQuery
     }
 
     /// <summary>"--name: value" or "--name". Chrome queries custom properties only; other properties make the query invalid.</summary>
-    private static Node? ParseStyleFeature(string s)
+    private static StyleFeature? ParseStyleFeature(string s)
     {
         int colon = s.IndexOf(':');
         var name = (colon < 0 ? s : s.Substring(0, colon)).Trim();

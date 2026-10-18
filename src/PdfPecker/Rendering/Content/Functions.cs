@@ -56,7 +56,7 @@ internal abstract class PdfFunction
         };
     }
 
-    private static PdfFunction? CreateCombined(PdfFile file, PdfArray array, int depth)
+    private static CombinedFunction? CreateCombined(PdfFile file, PdfArray array, int depth)
     {
         var parts = new List<PdfFunction>();
         foreach (var item in array.Items)

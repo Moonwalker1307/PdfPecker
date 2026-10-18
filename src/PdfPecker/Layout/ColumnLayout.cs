@@ -48,7 +48,7 @@ internal sealed partial class LayoutEngine
     // balancing would spread the content over a hundred million columns.
     private const int MaxColumns = 100;
 
-    private int ColumnCountFor(ComputedStyle s, float w, float gap)
+    private static int ColumnCountFor(ComputedStyle s, float w, float gap)
     {
         int n = s.ColumnCount;
         if (!s.ColumnWidth.IsAuto)

@@ -161,7 +161,7 @@ internal sealed partial class PageRenderer
         }
     }
 
-    private double N(ContentParser p, int i) => i < p.Operands.Count && p.Operands[i].Kind == OperandKind.Number ? p.Operands[i].Num : 0;
+    private static double N(ContentParser p, int i) => i < p.Operands.Count && p.Operands[i].Kind == OperandKind.Number ? p.Operands[i].Num : 0;
 
     private void Execute(ContentParser p, PdfDict? res, int stackBase)
     {

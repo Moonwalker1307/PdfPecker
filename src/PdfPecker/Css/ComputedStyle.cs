@@ -418,7 +418,7 @@ internal sealed class ComputedStyle
         }
     }
 
-    private TextFont StandardFor()
+    private StandardFont StandardFor()
     {
         MissingFonts?.CheckStandardOnly(FontFamilyName);
         return StandardFont.Get(FontFamily, Bold, Italic);

@@ -521,7 +521,7 @@ internal sealed class PdfMergeWriter : PdfObjectWriter
     private static bool IsDropped(Input input, int num) => input.Map.TryGetValue(num, out int id) && id == 0;
 
     /// <summary>The page a bookmark or link goes to (the first item of its destination), or null.</summary>
-    private PdfObject? DestPage(Input input, PdfDict d)
+    private static PdfObject? DestPage(Input input, PdfDict d)
     {
         var file = input.File;
         var dest = d["Dest"];
@@ -536,7 +536,7 @@ internal sealed class PdfMergeWriter : PdfObjectWriter
     /// With pages left out: drops their annotations, and links on the pages kept that go to them, and notes the
     /// structure keys of what is dropped so their parent-tree entries go too.
     /// </summary>
-    private void FilterAnnotations(Input input)
+    private static void FilterAnnotations(Input input)
     {
         var file = input.File;
         var kept = input.KeptAnnots = new HashSet<int>();
@@ -593,7 +593,7 @@ internal sealed class PdfMergeWriter : PdfObjectWriter
     /// with a kept bookmark below them (which lose their destination when it is a page left out). The kept ones are
     /// linked to each other, and <paramref name="visible"/> is how many lines they show, counting open children.
     /// </summary>
-    private List<int> FilterOutlineLevel(Input input, PdfObject? first, HashSet<int> seen, int depth, out int visible)
+    private static List<int> FilterOutlineLevel(Input input, PdfObject? first, HashSet<int> seen, int depth, out int visible)
     {
         var file = input.File;
         var kept = new List<int>();
@@ -1118,7 +1118,7 @@ internal sealed class PdfMergeWriter : PdfObjectWriter
     /// Writes a /StructParent or /StructParents entry with the input's key offset, or leaves it out for an untagged input;
     /// false for any other key.
     /// </summary>
-    private bool WriteStructKey(ByteBuffer b, Input input, string key, PdfObject value)
+    private static bool WriteStructKey(ByteBuffer b, Input input, string key, PdfObject value)
     {
         if (key is not ("StructParent" or "StructParents")) return false;
         if (input.StructOffset >= 0 && input.File.Resolve(value) is PdfNumber { IsInteger: true } n && n.Value >= 0 && n.Value < int.MaxValue / 2)
@@ -1292,7 +1292,7 @@ internal sealed class PdfMergeWriter : PdfObjectWriter
     /// A hash of a stream that refers to no other object, as it will be written, so identical copies are written once;
     /// null for a stream with references or too small to be worth it.
     /// </summary>
-    private string? LeafStreamHash(PdfFile file, PdfStream s)
+    private static string? LeafStreamHash(PdfFile file, PdfStream s)
     {
         // A key into the structure tree is shifted per input, so such a stream is never shared.
         if (s.RawData.Length < 256 || s.Entries.Values.Any(HasRef) || s.Entries.ContainsKey("StructParents")) return null;
@@ -1347,7 +1347,7 @@ internal sealed class PdfMergeWriter : PdfObjectWriter
     // ------------------------------------------------------------------ named destinations
 
     /// <summary>The explicit destination array a destination name stands for, or null.</summary>
-    private PdfObject? NamedDest(Input input, PdfObject name)
+    private static PdfObject? NamedDest(Input input, PdfObject name)
     {
         var file = input.File;
         if (input.NamedDests == null)

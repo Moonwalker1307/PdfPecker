@@ -1,3 +1,4 @@
+using System.Buffers;
 namespace PdfPecker.Images;
 
 /// <summary>
@@ -6,6 +7,9 @@ namespace PdfPecker.Images;
 /// </summary>
 internal sealed class ImageLoader
 {
+    // A query or fragment ends the file part of an image path.
+    private static readonly SearchValues<char> QueryOrFragment = SearchValues.Create("?#");
+
     private readonly string? _baseDirectory;
     private readonly Func<string, byte[]?>? _resolver;
     private readonly bool _allowFiles; // files outside the base directory too
@@ -109,7 +113,7 @@ internal sealed class ImageLoader
             path = uri.LocalPath;
         else
         {
-            int q = path.IndexOfAny(new[] { '?', '#' });
+            int q = path.AsSpan().IndexOfAny(QueryOrFragment);
             if (q >= 0) path = path.Substring(0, q);
             path = Uri.UnescapeDataString(path);
         }
