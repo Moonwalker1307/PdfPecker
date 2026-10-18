@@ -2212,6 +2212,95 @@ public class Jbig2SymbolDictionaryTests
         });
         Assert.True(allocated < 32 << 20, $"Allocated {allocated:N0} bytes");
     }
+
+    [Fact]
+    public void Repeated_references_to_a_symbol_dictionary_are_bounded()
+    {
+        // A text region that refers 65,535 times to a dictionary of 16,384 symbols, 76 KB in all. The referred
+        // dictionaries are concatenated, so this asks for a billion input symbols: the list of them took 17 GB and let
+        // OutOfMemoryException escape after 39 s.
+        var stream = RepeatedReferences(1 << 14, ushort.MaxValue, regions: 1);
+        Assert.InRange(stream.Length, 70_000, 80_000);
+        var (rows, allocated) = Bounded(() =>
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            var decoded = Jbig2Decoder.Decode(stream, null, 16, 16);
+            return (decoded, GC.GetAllocatedBytesForCurrentThread() - before);
+        });
+        Assert.True(allocated < 32 << 20, $"Allocated {allocated:N0} bytes");
+        Assert.Equal(Enumerable.Repeat((byte)0xFF, 2 * 16).ToArray(), rows); // the page as far as it was decoded: white
+
+        var pdf = JpxJbig2Tests.BuildPdf(16, 16, "<< /Type /XObject /Subtype /Image /Width 16 /Height 16 " +
+            "/ColorSpace /DeviceGray /BitsPerComponent 1 /Filter /JBIG2Decode", stream, null);
+        Assert.NotEmpty(Bounded(() => PdfToImage.ConvertPage(pdf, 0, new ImageOptions { Dpi = 72 })));
+    }
+
+    [Fact]
+    public void Referred_symbols_are_charged_to_the_work_budget()
+    {
+        // Two thousand text regions that each refer 64 times to a dictionary of 65,536 symbols: each one's input symbols,
+        // four million, stay within the bound, but gathering them all used to copy 64 GB of references.
+        var stream = RepeatedReferences(1 << 16, 64, regions: 2000);
+        long allocated = Bounded(() =>
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            Assert.NotNull(Jbig2Decoder.Decode(stream, null, 16, 16));
+            return GC.GetAllocatedBytesForCurrentThread() - before;
+        });
+        Assert.True(allocated < 1L << 30, $"Allocated {allocated:N0} bytes");
+    }
+
+    [Fact]
+    public void Repeated_references_to_a_symbol_dictionary_each_add_its_symbols()
+    {
+        // The referred dictionaries are concatenated in order (7.4.3.2), so a text region that refers twice to a dictionary
+        // of two symbols has four, and symbol ID 3 is the second symbol of the second copy.
+        var dict = Jbig2TestStreams.U16(0x0001).Concat(Jbig2TestStreams.U32(2)).Concat(Jbig2TestStreams.U32(2))
+            .Concat(new Jbig2TestStreams.Bits()
+                .Huffman(Jbig2TestStreams.B4, 1) // height 1
+                .Huffman(Jbig2TestStreams.B2, 1).Huffman(Jbig2TestStreams.B2, 1).Oob(Jbig2TestStreams.B2) // widths 1 and 2
+                .Huffman(Jbig2TestStreams.B1, 0).Align().Bytes(new byte[] { 0b01100000 }) // the first white, the second black
+                .Huffman(Jbig2TestStreams.B1, 0).Huffman(Jbig2TestStreams.B1, 2)
+                .ToArray())
+            .ToArray();
+        // A Huffman-coded text region of one instance of symbol 3, with a code table that gives each of the four symbols
+        // a two-bit code.
+        var placement = new Jbig2TestStreams.Bits();
+        for (int i = 0; i < 35; i++) placement.Write(i == 2 ? 1 : 0, 4);
+        placement.Write(0, 1).Write(0, 1).Write(0, 1).Write(0, 1).Align()
+            .Huffman(Jbig2TestStreams.B11, 1).Huffman(Jbig2TestStreams.B11, 1).Huffman(Jbig2TestStreams.B6, 0)
+            .Write(3, 2).Oob(Jbig2TestStreams.B8);
+        var region = Jbig2TestStreams.U32(4).Concat(Jbig2TestStreams.U32(1)).Concat(Jbig2TestStreams.U32(0)).Concat(Jbig2TestStreams.U32(0))
+            .Append((byte)0).Concat(Jbig2TestStreams.U16(0x0011)).Concat(Jbig2TestStreams.U16(0)).Concat(Jbig2TestStreams.U32(1))
+            .Concat(placement.ToArray()).ToArray();
+        var stream = Jbig2TestStreams.Segment(0, Jbig2TestStreams.PageInformation, Array.Empty<int>(), Jbig2TestStreams.PageInfo(8, 1))
+            .Concat(Jbig2TestStreams.Segment(1, Jbig2TestStreams.SymbolDictionary, Array.Empty<int>(), dict))
+            .Concat(Jbig2TestStreams.Segment(2, Jbig2TestStreams.ImmediateTextRegion, new[] { 1, 1 }, region))
+            .ToArray();
+        Assert.Equal(new byte[] { 0b00111111 }, Jbig2Decoder.Decode(stream, null, 8, 1));
+    }
+
+    /// <summary>
+    /// A page, a Huffman-coded dictionary of <paramref name="symbols"/> empty symbols, then <paramref name="regions"/>
+    /// text regions of no width that each refer to it <paramref name="references"/> times. A region of no width is skipped
+    /// once its input symbols are gathered.
+    /// </summary>
+    private static byte[] RepeatedReferences(int symbols, int references, int regions)
+    {
+        var input = new Jbig2TestStreams.Bits().Huffman(Jbig2TestStreams.B4, 1);
+        for (int i = 0; i < symbols; i++) input.Huffman(Jbig2TestStreams.B2, 0);
+        input.Oob(Jbig2TestStreams.B2).Huffman(Jbig2TestStreams.B1, 0).Align()
+            .Huffman(Jbig2TestStreams.B1, 0).Huffman(Jbig2TestStreams.B1, symbols);
+        var stream = new List<byte>();
+        stream.AddRange(Jbig2TestStreams.Segment(0, Jbig2TestStreams.PageInformation, Array.Empty<int>(), Jbig2TestStreams.PageInfo(16, 16)));
+        stream.AddRange(Jbig2TestStreams.Segment(1, Jbig2TestStreams.SymbolDictionary, Array.Empty<int>(),
+            Jbig2TestStreams.U16(0x0001).Concat(Jbig2TestStreams.U32(symbols)).Concat(Jbig2TestStreams.U32(symbols))
+                .Concat(input.ToArray()).ToArray()));
+        var region = new byte[17 + 2 + 4]; // a region of no size, arithmetic-coded, with no instances
+        var refs = Enumerable.Repeat(1, references).ToArray();
+        for (int i = 0; i < regions; i++) stream.AddRange(Jbig2TestStreams.Segment(2 + i, Jbig2TestStreams.ImmediateTextRegion, refs, region));
+        return stream.ToArray();
+    }
 }
 
 /// <summary>

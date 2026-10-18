@@ -19,6 +19,8 @@ internal sealed partial class Jbig2Decoder
     // ------------------------------------------------------------------ limits
 
     private const int MaxSymbols = 1 << 20;
+    private const int MaxInputSymbols = 4 * MaxSymbols; // the symbols of all dictionaries a segment refers to
+    private const int SymbolReferenceSize = 8; // the bytes a symbol takes in a list of input symbols, for the work budget
     private const long MaxWork = 1L << 28; // pixels allocated, decoded and drawn, against hostile input
     private const int MaxFill = 256; // arithmetic decoding far past the end of the data means the data is damaged
 

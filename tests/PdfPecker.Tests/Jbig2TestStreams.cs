@@ -9,14 +9,27 @@ internal static class Jbig2TestStreams
 {
     public const int SymbolDictionary = 0, ImmediateTextRegion = 6, PageInformation = 48;
 
-    /// <summary>A segment with a short header: one byte per referred segment and a one-byte page association.</summary>
+    /// <summary>
+    /// A segment with a one-byte page association. Up to four referred segments fit in the short form of the count, more
+    /// take the long form with its retention bits (7.2.4); each referred number takes the bytes the segment's number needs.
+    /// </summary>
     public static byte[] Segment(int number, int type, int[] refs, byte[] data)
     {
         var s = new List<byte>();
         s.AddRange(U32(number));
         s.Add((byte)type);
-        s.Add((byte)(refs.Length << 5));
-        foreach (int r in refs) s.Add((byte)r);
+        if (refs.Length <= 4) s.Add((byte)(refs.Length << 5));
+        else
+        {
+            s.AddRange(U32(7 << 29 | refs.Length));
+            s.AddRange(new byte[(refs.Length + 8) / 8]);
+        }
+        foreach (int r in refs)
+        {
+            if (number > 65536) s.AddRange(U32(r));
+            else if (number > 256) s.AddRange(U16(r));
+            else s.Add((byte)r);
+        }
         s.Add(1);
         s.AddRange(U32(data.Length));
         s.AddRange(data);

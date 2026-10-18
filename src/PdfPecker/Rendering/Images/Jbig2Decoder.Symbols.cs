@@ -101,9 +101,20 @@ internal sealed partial class Jbig2Decoder
     }
 
     /// <summary>The symbol dictionaries and table segments that <paramref name="seg"/> refers to, in order.</summary>
+    /// <remarks>
+    /// The input symbols are the referred dictionaries one after another (7.4.2.2, 7.4.3.2), so a dictionary referred to
+    /// twice adds its symbols twice, as other readers do. A segment can refer to one dictionary thousands of times at a
+    /// few bytes each, so the total is counted before the list is built: past <see cref="MaxInputSymbols"/> the segment
+    /// is damaged, and every list is charged to the work budget, which bounds them over all segments.
+    /// </remarks>
     private (List<Bitmap> Symbols, CustomTables Tables) ReferredSymbolsAndTables(Segment seg)
     {
-        var symbols = new List<Bitmap>();
+        long count = 0;
+        foreach (int r in seg.Refs)
+            if (_symbols.TryGetValue(r, out var s)) count += s.Length;
+        if (count > MaxInputSymbols) throw new InvalidDataException("Too many JBIG2 symbols.");
+        Work(count * SymbolReferenceSize);
+        var symbols = new List<Bitmap>((int)count);
         var tables = new List<HuffTable>();
         foreach (int r in seg.Refs)
         {
