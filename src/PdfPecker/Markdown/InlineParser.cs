@@ -26,6 +26,7 @@ internal sealed partial class InlineParser
         block.Content = null;
         _delimiters = null;
         _brackets = null;
+        _linksInactiveBefore = 0;
         ResetCodeSpanCache();
         while (!_cursor.AtEnd) ParseInline(block);
         ProcessEmphasis(null);

@@ -868,6 +868,10 @@ internal sealed partial class LayoutEngine
         void FlushRun()
         {
             if (run == null || run.Count == 0) return;
+            // The items come from the pool, which a paragraph laid out inside (an inline-block's) hands out again from
+            // the start when it is done unless this run counts as open, and the words after the box then took the
+            // place of the words before it.
+            _inlineDepth++;
             var st = CollectInline(run, 100000);
             var items = st.Items;
             run.Clear();
@@ -900,6 +904,7 @@ internal sealed partial class LayoutEngine
             min = Math.Max(min, group);
             max = Math.Max(max, line);
             ReturnState(st);
+            if (--_inlineDepth == 0) _itemPoolUsed = 0;
         }
 
         foreach (var child in e.Children)

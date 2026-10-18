@@ -23,14 +23,19 @@ internal sealed partial class InlineParser
     {
         var s = node.Literal!;
         int searchFrom = 0, textStart = 0;
-        // The next e-mail address is looked for again only once the search has passed the one found last; when there is
-        // none, later searches would find none either.
-        bool emailSearched = false;
-        int emailStart = -1, emailEnd = 0;
+        // The next URL and the next e-mail address are each looked for again only once the search has passed the one
+        // found last; when there is none, later searches would find none either. Searching again after every link
+        // would scan the rest of the text once per link.
+        bool urlSearched = false, emailSearched = false, www = false;
+        int urlStart = -1, emailStart = -1, emailEnd = 0;
         var insertAfter = node;
         while (searchFrom < s.Length)
         {
-            int urlStart = FindUrlStart(s, searchFrom, out bool www);
+            if (!urlSearched || (urlStart >= 0 && urlStart < searchFrom))
+            {
+                urlStart = FindUrlStart(s, searchFrom, out www);
+                urlSearched = true;
+            }
             if (!emailSearched || (emailStart >= 0 && emailStart < searchFrom))
             {
                 emailStart = FindEmail(s, searchFrom, out emailEnd);

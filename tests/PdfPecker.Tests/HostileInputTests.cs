@@ -189,6 +189,21 @@ public class HostileInputTests
         Assert.Equal(2, PageCount(pdf));
     }
 
+    [Theory]
+    // The boxes fit in the measuring width, so every level measures the ones inside it at the same width.
+    [InlineData("", 50000)]
+    // The innermost boxes together are wider than the measuring width, so each level offers them a narrower width.
+    [InlineData("margin: 0 3pt; padding: 0 3pt", 20000)]
+    public void Nested_inline_blocks_are_measured_once_per_level(string box, int siblings)
+    {
+        // Found by the fuzzer: target html, timeout-b4187992. Measuring an inline-block's intrinsic widths lays out the
+        // inline-blocks in it, and laying out each of those measures the ones inside it again, so the boxes of the
+        // innermost level were measured once for every level above them and their drawing was copied up through every
+        // level each time. The parser stops nesting at 256 levels, so the rest of the boxes are siblings in the innermost.
+        var html = $"<style>span {{ display: inline-block; {box} }}</style>" + Repeat("<span>", 300) + Repeat("<span></span>", siblings);
+        AssertStructurallyValid(Bounded(html));
+    }
+
     [Fact]
     public void Broken_words_keep_every_character()
     {
@@ -313,6 +328,27 @@ public class HostileInputTests
         Assert.Equal(3, CountOf(MarkdownToHtml.ConvertDocument("- a\n  - b\n    - c\n"), "<ul>"));
     }
 
+    [Fact]
+    public void Markdown_autolinks_after_many_email_addresses_are_found_in_linear_time()
+    {
+        // The search for the next URL used to run to the end of the text again after every e-mail address.
+        const int n = 60000;
+        var html = Bounded(() => MarkdownToHtml.Convert(Repeat("a.b-c_d+e@f.gh ", n) + "www.example.com and x@y.z"));
+        Assert.Equal(n + 1, CountOf(html, "href=\"mailto:"));
+        Assert.Contains("<a href=\"http://www.example.com\">www.example.com</a> and <a href=\"mailto:x@y.z\">x@y.z</a>", html);
+    }
+
+    [Fact]
+    public void Markdown_links_after_many_unclosed_brackets_close_in_linear_time()
+    {
+        // Every link used to deactivate all the brackets before it again, though a link before it had done so already.
+        const int n = 100000;
+        var html = Bounded(() => MarkdownToHtml.Convert(Repeat("![ [ ", n) + Repeat("[a](/u) ", n) + "[b]](/v) ![c](/i)"));
+        Assert.Equal(n, CountOf(html, "<a href=\"/u\">a</a>"));
+        // The last "]" closes an inactive bracket, which stays literal, and the image after it is still an image.
+        Assert.Contains("<a href=\"/u\">a</a> [b]](/v) <img src=\"/i\" alt=\"c\" />", html);
+    }
+
     private static int CountOf(string s, string part)
     {
         int n = 0;
@@ -415,6 +451,30 @@ public class HostileInputTests
         var bytes = Encoding.Latin1.GetBytes(sb.ToString());
         var renderer = Bounded(() => PdfRenderer.Open(bytes));
         Assert.Equal(0, renderer.PageCount);
+    }
+
+    [Theory]
+    [InlineData("2147483647")]
+    [InlineData("2147483500")]
+    [InlineData("99999999999")]
+    public void Stream_whose_length_overflows_the_file_offset_is_still_read(string length)
+    {
+        // The /Length added to the stream's offset no longer fits in an int; the stream must be found by its
+        // "endstream" like any other wrong /Length instead of being dropped.
+        const string content = "BT /F1 24 Tf 20 20 Td (Hello) Tj ET 0 0 1 rg 50 50 100 100 re f";
+        var pdf = SimplePdf(new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+            $"<< /Length {length} >>\nstream\n{content}\nendstream",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        });
+
+        var image = Bounded(() => PdfRenderer.Open(pdf).RenderPage(0, new ImageOptions { Dpi = 72 }));
+        int center = (100 * image.Width + 100) * 4;
+        Assert.True(image.Rgba[center] < 64 && image.Rgba[center + 2] > 192, "the blue square is not painted");
+        Assert.Contains("Hello", Bounded(() => PdfText.Extract(pdf)));
     }
 
     [Fact]
