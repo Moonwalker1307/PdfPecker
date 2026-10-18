@@ -53,6 +53,12 @@ internal sealed partial class LayoutEngine
     /// </summary>
     private int _measuringRows;
 
+    /// <summary>
+    /// The keep-with-next probe of the table whose rows are being laid out, until its first content is placed (see
+    /// <see cref="CanProbe"/>); null otherwise, and inside the cells, whose tables take a probe of their own.
+    /// </summary>
+    private KeepProbe? _rowProbe;
+
     private TableModel GetTableModel(Element table)
     {
         if (_tables.TryGetValue(table, out var m)) return m;
@@ -337,6 +343,10 @@ internal sealed partial class LayoutEngine
     private float LayoutTable(Element table, float x, float y, float availW, PageBox? pages = null)
     {
         var s = table.Style;
+        var probe = _childProbe;
+        _childProbe = null;
+        var outerProbe = _rowProbe;
+        _rowProbe = null;
         if (table.Id != null) SetAnchor(table.Id, y);
         if (table.LayoutKey != null) SetAnchor(table.LayoutKey, y);
         var m = GetTableModel(table);
@@ -388,8 +398,17 @@ internal sealed partial class LayoutEngine
         // each level would double the work.
         if (tableH is float th && m.Rows.Count > 0 && _measuringRows == 0)
             m.RowExtra = RowExtras(m, th - frameT - frameB - vs, colX, widths, hs, vs, collapse);
+        // A caption comes before the rows, and the probe is not handed to it. In columns that are being balanced, the
+        // breaks of the rows that the probe would skip count for the balancing even when the layout is thrown away.
+        _rowProbe = m.Captions.Count == 0 && _columnNotes == null ? probe : null;
         for (int r = 0; r < m.Rows.Count; r++)
+        {
             cy = LayoutRow(m, r, cy, colX, widths, hs, vs, collapse, allowMove: true, pageColumns) + vs;
+            // The first content is past the chain's page: the chain moves and lays the table out again, so the rest of
+            // this layout would be thrown away.
+            if (probe is { Stopped: true }) break;
+        }
+        _rowProbe = outerProbe;
         m.RowExtra = null;
         m.DefiniteHeight = false;
         _cbHeight = outerCb;
@@ -562,8 +581,24 @@ internal sealed partial class LayoutEngine
             // has one) resolve against the cell's final height, which is only known once the row is: the row is laid
             // out once to find it, with those percentages as auto, and then again. The first layout only measures.
             bool percent = _measuringRows == 0 && PercentCells(m, row);
+            // The first layout of such a row is thrown away, so the probe stops here and the table is laid out in full.
+            if (percent) _rowProbe = null;
             if (percent) _measuringRows++;
-            foreach (var cell in row.Cells) LayoutCell(cell, rowTop, colX, widths, hs, collapse, m.Rtl);
+            foreach (var cell in row.Cells)
+            {
+                var probe = _rowProbe;
+                LayoutCell(cell, rowTop, colX, widths, hs, collapse, m.Rtl, probe: probe);
+                if (probe == null) continue;
+                // Once the first content is placed, the probe has its answer. The cell's flow may have kept looking
+                // while a chain in it could still move, but the cell is complete now. Past the chain's page, the table
+                // stops, and so does the row, whose cells are not finished.
+                if (!probe.Stopped && FirstContent(probe) is (_, var fy))
+                {
+                    probe.Stopped = PageOf(fy) > probe.KeepPage;
+                    _rowProbe = null;
+                }
+                if (probe.Stopped) return rowTop;
+            }
             if (percent) _measuringRows--;
             float rowH = RowHeight(m, r, shareOfTable: true);
             if (percent)
@@ -586,6 +621,9 @@ internal sealed partial class LayoutEngine
                            && PageOf(rowTop) > 0 && AtPageTop(rowTop);
             if (move || atBreak)
             {
+                // A row without content moved: the headers repeated before it are content that may be dropped again,
+                // so the table is laid out in full.
+                _rowProbe = null;
                 Truncate(rowStartOps);
                 if (move)
                 {
@@ -654,7 +692,8 @@ internal sealed partial class LayoutEngine
     /// Lays out a cell's content at <paramref name="rowTop"/>. <paramref name="rowHeight"/>, the height of the row once
     /// known, is given for a definite cell: the percentage heights of its content resolve against it.
     /// </summary>
-    private void LayoutCell(CellModel cell, float rowTop, float[] colX, float[] widths, float hs, bool collapse, bool rtl, float? rowHeight = null)
+    private void LayoutCell(CellModel cell, float rowTop, float[] colX, float[] widths, float hs, bool collapse, bool rtl, float? rowHeight = null,
+        KeepProbe? probe = null)
     {
         var td = cell.Td;
         var cs = td.Style;
@@ -677,6 +716,7 @@ internal sealed partial class LayoutEngine
         var outerFloats = EnterFormattingContext();
         var outerCb = _cbHeight;
         _cbHeight = rowHeight is float rh ? new CbHeights(Math.Max(0, rh - bt - pt - pb - bb)) : null;
+        _flowProbe = probe;
         float contentBottom = LayoutFlow(td, cell.X + bl + pl, contentTop, Math.Max(0, w - bl - br - pl - pr));
         _cbHeight = outerCb;
         contentBottom = LeaveFormattingContext(outerFloats, contentBottom);
