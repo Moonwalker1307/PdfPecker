@@ -119,6 +119,7 @@ internal static partial class CssParser
             case "text-decoration": ExpandTextDecoration(value, longhands); break;
             case "border-spacing": ExpandPair(value, "border-spacing-h", "border-spacing-v", longhands); break;
             case "word-wrap": longhands.Add("overflow-wrap", value); break;
+            case "-webkit-background-clip": longhands.Add("background-clip", value); break;
             case "flex": ExpandFlex(value, longhands); break;
             case "flex-flow": ExpandFlexFlow(value, longhands); break;
             case "gap":

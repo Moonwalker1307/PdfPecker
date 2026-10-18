@@ -63,7 +63,7 @@ The conversion methods are static and thread-safe, so you can convert many docum
 
 ## Features
 
-- **HTML and CSS**: flexbox, grid and subgrid, multi-column layout, floats, positioning, transforms, gradients, filters, media and container queries, inline SVG, and PNG, JPEG, GIF, WebP, BMP and TIFF images. [More](https://pdfpecker.net/docs/html-and-css/)
+- **HTML and CSS**: flexbox, grid and subgrid, multi-column layout, floats, positioning, transforms, gradients (also clipped to text), filters, media and container queries, inline SVG, and PNG, JPEG, GIF, WebP, BMP and TIFF images. [More](https://pdfpecker.net/docs/html-and-css/)
 - **Paged media**: `@page` sizes and margin boxes, running headers, footnotes, tables of contents with page numbers, break control, and table headers and footers repeated on every page. [More](https://pdfpecker.net/docs/paged-media/)
 - **Markdown**: CommonMark 0.31 and GitHub Flavored Markdown to PDF or HTML. [More](https://pdfpecker.net/docs/markdown/)
 - **Fonts**: TrueType, OpenType, WOFF and WOFF2, subset and embedded, with kerning, ligatures, variable fonts and OpenType features. [More](https://pdfpecker.net/docs/fonts/)

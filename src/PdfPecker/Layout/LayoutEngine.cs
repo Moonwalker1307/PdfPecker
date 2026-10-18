@@ -924,6 +924,7 @@ internal sealed partial class LayoutEngine
         float bottom = cy + contentH + pb + bb;
         if (pages != null && !SameOnPages(pages, y, bottom)) PaintOnPages(group, s, pages, y, bottom);
         else BoxPainter.Paint(group, s, bx, y, used, bottom - y, _images, availW);
+        if (BoxPainter.ClipsToText(s)) ClipBackgroundToText(group, opsStart + 1);
         if (e.Control is { } control) FinishControl(e, control, opsStart + 1, bx, y, used, bottom - y, contentBottom - cy, contentH);
         if (e == CanvasRoot) CanvasRootBox = (bx, y, used, bottom - y);
         if (cbFrame != null)
@@ -1557,6 +1558,42 @@ internal sealed partial class LayoutEngine
             _capturing = savedCapturing;
             _lastBoxRight = savedRight;
         }
+    }
+
+    /// <summary>
+    /// Gives the background layers of a box with background-clip: text (in <paramref name="background"/>) copies of the
+    /// text the box draws from op <paramref name="from"/> on, its descendants' included, which then clip the background.
+    /// </summary>
+    private void ClipBackgroundToText(GroupOp background, int from)
+    {
+        List<DrawOp>? texts = null;
+        void Collect(DrawOp op)
+        {
+            if (op is TextOp t)
+            {
+                var copy = (TextOp)t.Copy();
+                copy.Tag = null; // the copies only clip: the text itself is drawn and tagged on its own
+                copy.Color = CssColor.Black; // opaque, also when the text itself is transparent, as it usually is here
+                (texts ??= new List<DrawOp>()).Add(copy);
+            }
+            else if (op is GroupOp g and not LayerOp { TextClip: true }) // a descendant's own clipping copies
+                foreach (var o in g.Ops) Collect(o);
+        }
+        for (int i = from; i < _ops.Count; i++) Collect(_ops[i]);
+        void Fill(GroupOp g)
+        {
+            foreach (var op in g.Ops)
+            {
+                if (op is LayerOp { TextClip: true } layer)
+                {
+                    // Without text there is nothing to paint the background into.
+                    if (texts == null) layer.Ops.Clear();
+                    else layer.Ops.InsertRange(0, texts.Select(t => t.Copy()));
+                }
+                else if (op is GroupOp inner) Fill(inner);
+            }
+        }
+        Fill(background);
     }
 
     /// <summary>The arguments a box was captured with.</summary>
