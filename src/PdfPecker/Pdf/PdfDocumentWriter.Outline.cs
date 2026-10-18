@@ -20,10 +20,10 @@ internal sealed partial class PdfDocumentWriter
         public readonly List<OutlineItem> Children = new();
     }
 
-    /// <summary>Nests the headings by level: a heading becomes a child of the nearest earlier heading of a higher level.</summary>
     private static PdfLimitException TooManyPages(int max)
         => new($"The document would have more than {max:N0} pages (PdfOptions.MaxPages).");
 
+    /// <summary>Nests the headings by level: a heading becomes a child of the nearest earlier heading of a higher level.</summary>
     private static List<OutlineItem> BuildOutline(IReadOnlyList<OutlineHeading>? headings, IReadOnlyDictionary<string, float> anchors)
     {
         var all = new List<OutlineItem>();
@@ -52,5 +52,30 @@ internal sealed partial class PdfDocumentWriter
             all.Add(item);
         }
         return all;
+    }
+
+    /// <summary>Writes the outline dictionary and its items, each going to its heading.</summary>
+    private void WriteOutline(WriteState doc)
+    {
+        var items = doc.OutlineItems;
+        var top = items.Where(o => o.Parent == null).ToList();
+        Begin(doc.OutlinesId).Ascii("<< /Type /Outlines /First ").Int(top[0].Id).Ascii(" 0 R /Last ").Int(top[^1].Id)
+            .Ascii(" 0 R /Count ").Int(items.Count).Ascii(" >>");
+        End();
+        foreach (var item in items)
+        {
+            Begin(item.Id).Ascii("<< /Title ");
+            WriteTextString(_out, item.Title);
+            _out.Ascii(" /Parent ").Int(item.Parent?.Id ?? doc.OutlinesId).Ascii(" 0 R");
+            if (item.Prev != null) _out.Ascii(" /Prev ").Int(item.Prev.Id).Ascii(" 0 R");
+            if (item.Next != null) _out.Ascii(" /Next ").Int(item.Next.Id).Ascii(" 0 R");
+            if (item.Children.Count > 0)
+                _out.Ascii(" /First ").Int(item.Children[0].Id).Ascii(" 0 R /Last ").Int(item.Children[^1].Id)
+                    .Ascii(" 0 R /Count ").Int(item.Descendants);
+            _out.Sp();
+            WriteGoTo(item.Y, item.Heading is { } h ? Structure?.ElementOf(h) : null);
+            _out.Ascii(" >>");
+            End();
+        }
     }
 }

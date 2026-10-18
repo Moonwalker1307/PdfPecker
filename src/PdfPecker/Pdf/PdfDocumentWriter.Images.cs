@@ -61,6 +61,49 @@ internal sealed partial class PdfDocumentWriter
         End();
     }
 
+    /// <summary>Writes the images the pages draw, each followed by its soft mask.</summary>
+    private void WriteImages(WriteState doc)
+    {
+        foreach (var img in doc.Images)
+        {
+            WriteImage(img);
+            if (img.SMask != null) WriteImage(img.SMask);
+        }
+    }
+
+    /// <summary>
+    /// Numbers and writes the images of SVG and HTML filter results and of SVG image elements, which only writing the
+    /// pages makes.
+    /// </summary>
+    private void WriteFilterImages(WriteState doc)
+    {
+        foreach (var raster in _rasters)
+        {
+            raster.ObjectNumber = doc.Next++;
+            if (raster.SMask != null) raster.SMask.ObjectNumber = doc.Next++;
+            WriteImage(raster);
+            if (raster.SMask != null) WriteImage(raster.SMask);
+        }
+    }
+
+    /// <summary>
+    /// Converts the CMYK images to RGB for PDF/A: an sRGB output intent does not cover DeviceCMYK. A converted image
+    /// keeps the /Im number of the image it replaces.
+    /// </summary>
+    private static void ConvertCmykImages(WriteState doc)
+    {
+        var images = doc.Images;
+        var imageIds = doc.ImageIds;
+        for (int i = 0; i < images.Count; i++)
+        {
+            var rgb = images[i].ToRgb();
+            if (rgb == null || ReferenceEquals(rgb, images[i])) continue;
+            foreach (var key in imageIds.Where(kv => ReferenceEquals(kv.Key, images[i])).Select(kv => kv.Key).ToList())
+                imageIds[rgb] = imageIds[key];
+            images[i] = rgb;
+        }
+    }
+
     /// <summary>
     /// The watermark text as one TextOp per line, centred on the origin of a rotated coordinate system whose
     /// cosine and sine are returned; the form XObject moves that origin to the page centre.
@@ -100,6 +143,36 @@ internal sealed partial class PdfDocumentWriter
             ops.Add(new TextOp(xl, yl, 0, font, size, color, lines[i], 0, ls));
         }
         return (ops, c, sn);
+    }
+
+    /// <summary>
+    /// Makes the watermark ready to draw: decodes its image, or takes its SVG drawing, and lays out its text, collecting
+    /// the fonts and the image they use. A watermark with nothing to draw is left out.
+    /// </summary>
+    private void PrepareWatermark(WriteState doc)
+    {
+        var wm = Watermark;
+        if (wm == null) return;
+        if (wm.Image != null && (doc.WatermarkImage = PdfImage.FromBytes(wm.Image)) == null)
+        {
+            doc.WatermarkSvg = WatermarkSvg ?? throw new ArgumentException("The watermark image is not a PNG, JPEG, GIF, WebP, BMP, TIFF or SVG image this library can read.");
+            CollectSvgFonts(doc.WatermarkSvg, doc.UsedFonts);
+        }
+        if (doc.WatermarkImage != null) AddImage(doc, doc.WatermarkImage);
+        if (!string.IsNullOrEmpty(wm.Text))
+        {
+            doc.WatermarkText = LayoutWatermarkText(wm, WatermarkFont ?? StandardFont.Get(FontFamily.Helvetica, wm.Bold, false));
+            foreach (var line in doc.WatermarkText.Value.Lines) CollectFonts(line, doc.UsedFonts);
+        }
+        if (doc.WatermarkText != null || doc.WatermarkImage != null || doc.WatermarkSvg != null) doc.Watermark = wm;
+    }
+
+    /// <summary>Writes the watermark's form XObject, with the fonts of the shared resources.</summary>
+    private void WriteWatermark(WriteState doc)
+    {
+        var fontDict = new ByteBuffer(128);
+        WriteFontEntries(fontDict, doc);
+        WriteWatermark(doc.WatermarkId, doc.Watermark!, doc.WatermarkText, fontDict, doc.WatermarkImage, doc.WatermarkSvg, doc.WatermarkSvgId);
     }
 
     /// <summary>The watermark as a form XObject covering the page, drawn by every page's content stream.</summary>
