@@ -277,6 +277,23 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(html));
     }
 
+    [Theory]
+    // The fuzz finding (html, timeout-1abcdf31 of a later run): unclosed cards nest flex rows of 50% and pages of 100%
+    // with padding, on a first page whose margins leave no room, so every percentage height comes to zero.
+    [InlineData("<div style='display:flex;height:50%'><div style='box-sizing:border-box;height:100%;padding-top:4mm'>", 100)]
+    [InlineData("<div style='display:flex;height:100%'><div style='box-sizing:border-box;height:100%;border-top:1pt solid'>", 100)]
+    [InlineData("<div style='display:flex;height:100%'><div style='box-sizing:border-box;height:100%;padding-top:5%'>", 100)]
+    public void Nested_flex_items_whose_percentage_height_is_below_their_frame_are_laid_out_once(string open, int levels)
+    {
+        // A flex item with a percentage height is laid out again at that height when it came out a different height,
+        // but a box cannot be shorter than its padding and borders, so one whose percentage comes to less than those
+        // came out the same and was laid out again for nothing, and so was every level of flex rows inside it, once
+        // per level above it: 25 levels took 38 s.
+        var html = "<style>html, body { height: 100%; margin: 0 }</style><div style='height:0'>" + Repeat(open, levels) + "x"
+                   + Repeat("</div></div>", levels) + "</div>";
+        AssertStructurallyValid(Bounded(html));
+    }
+
     [Fact]
     public void Broken_words_keep_every_character()
     {

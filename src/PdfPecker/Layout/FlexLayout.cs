@@ -111,6 +111,23 @@ internal sealed partial class LayoutEngine
                || HasPercentHeightChild(it.El);
     }
 
+    /// <summary>
+    /// Whether laying an item out again with border-box height <paramref name="borderH"/> would give the layout it
+    /// already has. A box cannot be shorter than its padding and borders, so a percentage height that resolves to less
+    /// than those leaves the box as it was, and so does a forced height that only differs from the box's by its min- or
+    /// max-height but gives its content the same height. Laying such an item out again changes nothing, but each level
+    /// of flex rows nested in it did the same for the levels inside it, which doubled the work per level.
+    /// </summary>
+    private static bool ForcedHeightKeepsLayout(BoxItem it, float borderH)
+    {
+        // A forced height gives the content box, and the children's containing block, this height, with min-height
+        // applied after it; anything that sizes the box another way (a table, an image, an aspect ratio) is laid out again.
+        var box = it.Box!;
+        if (it.IsReplaced || it.Style.Display == Display.Table || it.Style.AspectRatio > 0) return false;
+        float content = Math.Max(0, borderH - box.FrameV);
+        return box.ContentH == content && box.ChildCb is { Uniform: true } cb && cb.First == content;
+    }
+
     private static BoxAlign SelfAlign(BoxItem it, BoxAlign containerValue)
     {
         var a = it.Style.AlignSelf == BoxAlign.Auto ? containerValue : it.Style.AlignSelf;
@@ -294,7 +311,8 @@ internal sealed partial class LayoutEngine
                     want = st.Height.Resolve(definiteH.Value) + (st.BorderBox ? 0 : VerticalFrame(st, w));
                 else if (align == BoxAlign.Stretch && st.Height.IsAuto && !it.AutoMt && !it.AutoMb)
                     want = Math.Max(current, cross - it.Mt - it.Mb);
-                if (want is { } h && Math.Abs(h - current) > Eps && (NeedsRelayoutWhenStretched(it) || st.Height.IsPercent))
+                if (want is { } h && Math.Abs(h - current) > Eps && (NeedsRelayoutWhenStretched(it) || st.Height.IsPercent)
+                    && !ForcedHeightKeepsLayout(it, h))
                     it.Box = CaptureBox(it.El, it.OuterMain, shrinkToFit: false, borderW: it.Main, borderH: h);
             }
 
