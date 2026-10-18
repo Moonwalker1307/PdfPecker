@@ -56,6 +56,8 @@ internal static class TimestampClient
                 : http.Send(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             if (!response.IsSuccessStatusCode)
                 throw new PdfSignatureException($"The timestamp server returned HTTP {(int)response.StatusCode}.");
+            // A synchronous read takes no token, so cancelling closes the response to stop a server that sends slowly.
+            using var stop = async ? default : cancellationToken.Register(static r => ((IDisposable)r!).Dispose(), response);
             using var stream = async
                 ? await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false)
                 : response.Content.ReadAsStream(cancellationToken);
@@ -70,7 +72,12 @@ internal static class TimestampClient
                 if (ms.Length + n > MaxResponseSize) throw new PdfSignatureException("The timestamp server's answer is too large.");
                 ms.Write(buffer, 0, n);
             }
+            cancellationToken.ThrowIfCancellationRequested();
             body = ms.ToArray();
+        }
+        catch (Exception ex) when (cancellationToken.IsCancellationRequested && ex is HttpRequestException or IOException or ObjectDisposedException)
+        {
+            throw new OperationCanceledException("The timestamp request was cancelled.", ex, cancellationToken);
         }
         catch (HttpRequestException ex)
         {
