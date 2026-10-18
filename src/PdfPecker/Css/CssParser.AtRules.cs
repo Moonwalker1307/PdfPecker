@@ -66,9 +66,11 @@ internal static partial class CssParser
         if (!ImportSupported(ref clauses)) return;
         if (clauses.Length > 0 && !MediaQuery.Matches(clauses, sheet.Media)) return;
 
+        // Every attempt counts, not only the imports that load: each one asks the caller's resource resolver, which may
+        // fetch it over the network.
+        sheet.ImportCount++;
         var loaded = sheet.ImportLoader(target, plainString ? sheet.CurrentHref : null);
         if (loaded is not { } imported || sheet.ImportChain.Contains(imported.Href)) return;
-        sheet.ImportCount++;
         sheet.ImportChain.Add(imported.Href);
         var saved = sheet.CurrentHref;
         sheet.CurrentHref = imported.Href;
