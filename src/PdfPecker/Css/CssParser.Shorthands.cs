@@ -313,7 +313,7 @@ internal static partial class CssParser
     {
         foreach (var token in Tokens(value.ToLowerInvariant()))
         {
-            if (int.TryParse(token, out _)) longhands.Add("column-count", token);
+            if (Invariant.TryParseInt(token, out _)) longhands.Add("column-count", token);
             else if (token != "auto") longhands.Add("column-width", token);
         }
     }

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO.Compression;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -51,6 +52,39 @@ public class GoldenPdfTests
         var outPath = Path.Combine(outDir, sample.Replace('/', '_').Replace(".html", ".pdf", StringComparison.Ordinal));
         File.WriteAllBytes(outPath, actual);
         Assert.Fail($"{sample} differs from its baseline: {difference}\nNew output: {outPath}");
+    }
+
+    // In these cultures the minus and plus signs carry a direction mark, so parsing "-1" with the current culture fails
+    // and selectors, grid lines, order and list numbers come out differently.
+    public static TheoryData<string, string> SamplesInOtherCultures()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var sample in Samples())
+            foreach (var culture in new[] { "ar-SA", "fa-IR" })
+                data.Add(sample, culture);
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(SamplesInOtherCultures))]
+    public void Output_does_not_depend_on_the_current_culture(string sample, string culture)
+    {
+        var htmlPath = Path.Combine(Root, sample);
+        var expectedPath = Path.ChangeExtension(htmlPath, ".expected.pdf");
+        if (!File.Exists(expectedPath)) return; // Output_matches_the_baseline reports a missing baseline
+        var saved = (CultureInfo.CurrentCulture, CultureInfo.CurrentUICulture);
+        byte[] actual;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo(culture);
+            actual = Render(htmlPath);
+        }
+        finally
+        {
+            (CultureInfo.CurrentCulture, CultureInfo.CurrentUICulture) = saved;
+        }
+        var difference = FirstDifference(Normalize(File.ReadAllBytes(expectedPath)), Normalize(actual));
+        Assert.True(difference == null, $"{sample} under {culture} differs from its baseline: {difference}");
     }
 
     private static byte[] Render(string htmlPath)

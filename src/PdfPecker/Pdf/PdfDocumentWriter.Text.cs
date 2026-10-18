@@ -417,7 +417,7 @@ internal sealed partial class PdfDocumentWriter
             if (rune.Value > 126 || rune.Value < 32)
             {
                 int n = rune.EncodeToUtf8(utf8);
-                for (int k = 0; k < n; k++) raw.Byte((byte)'%').Ascii(utf8[k].ToString("X2"));
+                for (int k = 0; k < n; k++) raw.Byte((byte)'%').Ascii(utf8[k].ToString("X2", System.Globalization.CultureInfo.InvariantCulture));
                 continue;
             }
             raw.Byte((byte)rune.Value);

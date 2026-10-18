@@ -742,13 +742,13 @@ internal sealed class Selector
         if (s == "odd") { a = 2; b = 1; return true; }
         if (s == "even") { a = 2; b = 0; return true; }
         int n = s.IndexOf('n');
-        if (n < 0) return int.TryParse(s, out b);
+        if (n < 0) return Invariant.TryParseInt(s, out b);
         var aPart = s.Substring(0, n);
-        a = aPart switch { "" or "+" => 1, "-" => -1, _ => int.TryParse(aPart, out int v) ? v : int.MinValue };
+        a = aPart switch { "" or "+" => 1, "-" => -1, _ => Invariant.TryParseInt(aPart, out int v) ? v : int.MinValue };
         if (a == int.MinValue) return false;
         var bPart = s.Substring(n + 1);
         if (bPart.Length == 0) return true;
-        return int.TryParse(bPart, out b);
+        return Invariant.TryParseInt(bPart, out b);
     }
 
     private static AttrCondition? ParseAttr(string body)

@@ -147,7 +147,7 @@ internal sealed partial class StyleResolver
         foreach (var tok in t)
         {
             if (tok == "span") span = true;
-            else if (int.TryParse(tok, out int n)) number = n;
+            else if (Invariant.TryParseInt(tok, out int n)) number = n;
             else if (IsIdent(tok)) name = tok;
             else return default;
         }
@@ -209,7 +209,7 @@ internal sealed partial class StyleResolver
                     current = after;
                     continue;
                 }
-                if (!int.TryParse(countText, out int count) || count <= 0) return null;
+                if (!Invariant.TryParseInt(countText, out int count) || count <= 0) return null;
                 for (int k = 0; k < Math.Min(count, 1000); k++)
                 {
                     foreach (var (nameTok, index) in repeatNames) Name(nameTok, current.Count + index);
@@ -255,7 +255,7 @@ internal sealed partial class StyleResolver
                     list.SubgridAutoFill = repeated.ToArray();
                     target = list.SubgridNamesAfter;
                 }
-                else if (int.TryParse(countText, out int count) && count > 0)
+                else if (Invariant.TryParseInt(countText, out int count) && count > 0)
                 {
                     for (int k = 0; k < Math.Min(count, 1000); k++) target.AddRange(repeated);
                 }

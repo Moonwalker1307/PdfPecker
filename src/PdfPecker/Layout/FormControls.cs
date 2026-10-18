@@ -167,7 +167,7 @@ internal static class FormControls
                             var f = control.Field = NewField("text");
                             f.Password = type == "password";
                             if (!f.Password) f.Value = value; // a password is not stored in the file
-                            if (int.TryParse(e.GetAttribute("maxlength"), out int max) && max > 0) f.MaxLength = max;
+                            if (Invariant.TryParseInt(e.GetAttribute("maxlength"), out int max) && max > 0) f.MaxLength = max;
                             break;
                         }
                     }
@@ -189,7 +189,7 @@ internal static class FormControls
                     var f = control.Field = NewField("textarea");
                     f.Multiline = true;
                     f.Value = value;
-                    if (int.TryParse(e.GetAttribute("maxlength"), out int max) && max > 0) f.MaxLength = max;
+                    if (Invariant.TryParseInt(e.GetAttribute("maxlength"), out int max) && max > 0) f.MaxLength = max;
                     break;
                 }
                 case "select":
@@ -197,7 +197,7 @@ internal static class FormControls
                     var options = new List<(string Export, string Text, bool Selected)>();
                     CollectOptions(e, options);
                     bool multiple = e.HasAttribute("multiple");
-                    int.TryParse(e.GetAttribute("size"), out int size);
+                    Invariant.TryParseInt(e.GetAttribute("size"), out int size);
                     bool list = multiple || size > 1;
                     control.Kind = list ? ControlKind.List : ControlKind.Combo;
                     var selected = new List<int>();
