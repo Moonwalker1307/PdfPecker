@@ -264,7 +264,7 @@ internal sealed partial class LayoutEngine
         var children = parent.Children;
 
         int listIndex = 0;
-        if (parent.Name == "ol" && int.TryParse(parent.GetAttribute("start"), out int start)) listIndex = start - 1;
+        if (parent.Name == "ol" && Invariant.TryParseInt(parent.GetAttribute("start"), out int start)) listIndex = start - 1;
 
         // Keep-with-next: the first box of a run of boxes that must not be separated from what follows them.
         FlowMark prev = default, chain = default;
@@ -367,7 +367,7 @@ internal sealed partial class LayoutEngine
             if (s.Display == Display.ListItem)
             {
                 listIndex++;
-                if (int.TryParse(e.GetAttribute("value"), out int v)) listIndex = v;
+                if (Invariant.TryParseInt(e.GetAttribute("value"), out int v)) listIndex = v;
                 _currentListIndex = listIndex;
             }
 

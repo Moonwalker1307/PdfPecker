@@ -154,7 +154,7 @@ internal sealed partial class StyleResolver
             var p = part.Trim();
             if (p.Length < 6 || (p[0] != '"' && p[0] != '\'') || p[5] != p[0] || p.Substring(1, 4) != "liga") continue;
             var arg = p.Substring(6).Trim();
-            result = arg is "" or "on" || (int.TryParse(arg, out int n) && n != 0);
+            result = arg is "" or "on" || (Invariant.TryParseInt(arg, out int n) && n != 0);
         }
         return result;
     }
@@ -281,9 +281,9 @@ internal sealed partial class StyleResolver
     {
         v = v.Trim();
         int size;
-        if (v.StartsWith("+", StringComparison.Ordinal) && int.TryParse(v.Substring(1), out int plus)) size = 3 + plus;
-        else if (v.StartsWith("-", StringComparison.Ordinal) && int.TryParse(v.Substring(1), out int minus)) size = 3 - minus;
-        else if (!int.TryParse(v, out size)) size = 3;
+        if (v.StartsWith("+", StringComparison.Ordinal) && Invariant.TryParseInt(v.Substring(1), out int plus)) size = 3 + plus;
+        else if (v.StartsWith("-", StringComparison.Ordinal) && Invariant.TryParseInt(v.Substring(1), out int minus)) size = 3 - minus;
+        else if (!Invariant.TryParseInt(v, out size)) size = 3;
         return Math.Clamp(size, 1, 7) switch { 1 => "x-small", 2 => "small", 3 => "medium", 4 => "large", 5 => "x-large", 6 => "xx-large", _ => "48px" };
     }
 }

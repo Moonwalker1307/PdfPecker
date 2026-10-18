@@ -1,0 +1,6 @@
+is_global = true
+
+# Output must not depend on the culture of the machine a conversion runs on. These rules catch formatting and string
+# comparisons that use the current culture; int.TryParse(string, out int) is not covered, so use Invariant.TryParseInt.
+dotnet_diagnostic.CA1305.severity = warning
+dotnet_diagnostic.CA1310.severity = warning
