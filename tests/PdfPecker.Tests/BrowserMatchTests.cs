@@ -225,6 +225,21 @@ public class BrowserMatchTests
     }
 
     [Fact]
+    public void A_column_with_a_width_keeps_it_next_to_a_column_of_long_text()
+    {
+        // The long text makes the table narrower than its content's width. Chrome first gives the column with a width
+        // its 100px and only then shares out what is left, so that column does not shrink to "Item 1".
+        var ops = Layout("""
+            <table style="width: 400px; border-spacing: 0; font: 12px Arial"><tr>
+              <td style="width: 100px; padding: 0; background: #f00">Item 1</td>
+              <td style="padding: 0; background: #0f0">Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua</td>
+              <td style="padding: 0; background: #00f">3</td></tr></table>
+            """);
+        Near(75, Box(ops, "#f00").W);
+        Near(300, Box(ops, "#f00").W + Box(ops, "#0f0").W + Box(ops, "#00f").W);
+    }
+
+    [Fact]
     public void Superscripts_and_subscripts_shift_by_whole_pixels_of_the_parent_font()
     {
         // 12px parent: super is raised 12/3 + 1 = 5px, sub is lowered 12/5 + 1 = 3px.
