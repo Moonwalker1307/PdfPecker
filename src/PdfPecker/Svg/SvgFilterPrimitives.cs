@@ -19,7 +19,7 @@ internal sealed partial class SvgFilter
         {
             var text = e.GetAttribute(name)?.Trim();
             if (string.IsNullOrEmpty(text)) return float.NaN;
-            bool percent = text.EndsWith("%", StringComparison.Ordinal);
+            bool percent = text.EndsWith('%');
             if (percent) text = text[..^1];
             else if (text.EndsWith("px", StringComparison.OrdinalIgnoreCase)) text = text[..^2];
             if (!float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out float v) || !float.IsFinite(v)) return float.NaN;

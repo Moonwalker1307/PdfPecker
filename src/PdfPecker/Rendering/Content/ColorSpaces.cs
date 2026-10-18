@@ -113,14 +113,14 @@ internal abstract class ColorSpace
         return components switch { 1 => Gray, 4 => Cmyk, _ => RgbSpace };
     }
 
-    private static ColorSpace ParseLab(PdfFile file, PdfArray array)
+    private static LabSpace ParseLab(PdfFile file, PdfArray array)
     {
         var dict = Parameters(file, array);
         return new LabSpace(file.GetNumbers(dict, "WhitePoint"), file.GetNumbers(dict, "Range"));
     }
 
     /// <summary>[/Indexed base hival lookup], where the lookup table is a string or a stream.</summary>
-    private static ColorSpace? ParseIndexed(PdfFile file, PdfArray array, PdfDict? resources, int depth)
+    private static IndexedSpace? ParseIndexed(PdfFile file, PdfArray array, PdfDict? resources, int depth)
     {
         if (array.Count < 4) return null;
         var baseSpace = Parse(file, array[1], resources, depth + 1);
@@ -136,7 +136,7 @@ internal abstract class ColorSpace
     }
 
     /// <summary>[/Separation name alternate tintTransform]; an alternate that does not parse is read as DeviceGray.</summary>
-    private static ColorSpace? ParseSeparation(PdfFile file, PdfArray array, PdfDict? resources, int depth)
+    private static SeparationSpace? ParseSeparation(PdfFile file, PdfArray array, PdfDict? resources, int depth)
     {
         if (array.Count < 4) return null;
         var colorant = (file.Resolve(array[1]) as PdfName)?.Value ?? "";
@@ -146,7 +146,7 @@ internal abstract class ColorSpace
     }
 
     /// <summary>[/DeviceN names alternate tintTransform ...]; it paints nothing when every colorant is None.</summary>
-    private static ColorSpace? ParseDeviceN(PdfFile file, PdfArray array, PdfDict? resources, int depth)
+    private static SeparationSpace? ParseDeviceN(PdfFile file, PdfArray array, PdfDict? resources, int depth)
     {
         if (array.Count < 4) return null;
         var colorants = file.Resolve(array[1]) as PdfArray;

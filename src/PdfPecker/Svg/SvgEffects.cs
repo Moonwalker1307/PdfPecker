@@ -31,7 +31,7 @@ internal sealed partial class SvgImage
     private static float UnitLength(string? text, string fallback, bool bbox, float viewport)
     {
         var v = (text ?? fallback).Trim();
-        bool percent = v.EndsWith("%", StringComparison.Ordinal);
+        bool percent = v.EndsWith('%');
         if (percent) v = v[..^1];
         else if (v.EndsWith("px", StringComparison.OrdinalIgnoreCase)) v = v[..^2];
         if (!float.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out float f))
@@ -84,14 +84,14 @@ internal sealed partial class SvgImage
     /// <summary>
     /// The transform from a viewBox (x, y, w, h) to a viewport of the given size at the origin, by preserveAspectRatio.
     /// </summary>
-    private static Matrix ViewBoxTransform(IReadOnlyList<float> vb, float width, float height, string? preserveAspectRatio)
+    private static Matrix ViewBoxTransform(List<float> vb, float width, float height, string? preserveAspectRatio)
     {
         float sx = width / vb[2], sy = height / vb[3];
         string align = "xmidymid";
         bool slice = false;
         if (preserveAspectRatio != null)
         {
-            var parts = preserveAspectRatio.Trim().ToLowerInvariant().Split(new[] { ' ', '\t', '\n', ',' }, StringSplitOptions.RemoveEmptyEntries);
+            var parts = preserveAspectRatio.Trim().ToLowerInvariant().Split(AspectRatioSeparators, StringSplitOptions.RemoveEmptyEntries);
             int k = parts.Length > 0 && parts[0] == "defer" ? 1 : 0;
             if (parts.Length > k) align = parts[k];
             if (parts.Length > k + 1) slice = parts[k + 1] == "slice";
@@ -423,7 +423,7 @@ internal sealed partial class SvgImage
             {
                 p.Shapes = Capture(() =>
                 {
-                    if (href != null && href.StartsWith("#", StringComparison.Ordinal))
+                    if (href != null && href.StartsWith('#'))
                     {
                         if (Reference(href) is { } target) Render(target, ctm, 1, 1);
                     }

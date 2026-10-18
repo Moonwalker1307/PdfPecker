@@ -30,6 +30,9 @@ Before non-trivial work, read:
 - **No breaking API changes before 2.0.** `dotnet pack` checks the public API against the last release; a change it
   rejects needs a new overload or type instead, not a suppression.
 - **Trimmable and AOT-compatible.** No reflection-based code.
+- **Sealed, static and span-based.** Classes are `sealed` (or `static`) unless something derives from them, and
+  methods that use no instance data are `static`. `src/PdfPecker/.globalconfig` turns the .NET performance analyzers
+  (CA18xx) into build errors, so these and span-based string handling are checked on every build.
 - **Culture-independent output.** Parse and format numbers with `CultureInfo.InvariantCulture`
   (`Invariant.TryParseInt` for integers) and compare strings ordinally.
 - **Malformed input fails only with documented exceptions**, within bounded time and memory.

@@ -357,7 +357,7 @@ internal static class Woff2Decoder
             if (y > box.YMax) box.YMax = y;
             points.Dx[p] = dx;
             points.Dy[p] = dy;
-            points.Flags[p] = (byte)(flag >> 7 ^ 1); // the high bit of the flag means off-curve
+            points.Flags[p] = (byte)(flag >> 7 ^ OnCurve); // the high bit of the flag means off-curve
         }
         bytesUsed = at;
         return box;

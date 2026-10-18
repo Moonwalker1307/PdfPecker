@@ -10,7 +10,7 @@ internal static partial class BoxPainter
 {
     // Indexes of the nine parts of a border image: the corners, the edges and the middle.
     private const int TopLeftPart = 0, TopRightPart = 1, BottomRightPart = 2, BottomLeftPart = 3,
-        TopPart = 4, BottomPart = 5, LeftPart = 6, RightPart = 7, MiddlePart = 8, PartCount = 9;
+        TopPart = 4, BottomPart = 5, LeftPart = 6, RightPart = 7, MiddlePart = 8;
 
     /// <summary>An outset beyond this is cut, like a shadow's spread, so that a huge one cannot paint, and add, pages far away.</summary>
     private const float MaxOutset = 1000;

@@ -102,6 +102,11 @@ internal sealed class SvgBudget
 /// </summary>
 internal sealed partial class SvgImage
 {
+    // The separators of a preserveAspectRatio value, kept in arrays so a split allocates no separator array of its own.
+    // The image element's parser also splits at a carriage return.
+    private static readonly char[] AspectRatioSeparators = { ' ', '\t', '\n', ',' };
+    private static readonly char[] ImageAspectRatioSeparators = { ' ', '\t', '\n', '\r', ',' };
+
     public float? Width, Height; // intrinsic size in points, when given
     public bool HasViewBox;
     public float ViewBoxX, ViewBoxY, ViewBoxWidth, ViewBoxHeight;
@@ -135,7 +140,7 @@ internal sealed partial class SvgImage
         var par = svg.GetAttribute("preserveaspectratio");
         if (par != null)
         {
-            var parts = par.Trim().ToLowerInvariant().Split(new[] { ' ', '\t', '\n', ',' }, StringSplitOptions.RemoveEmptyEntries);
+            var parts = par.Trim().ToLowerInvariant().Split(AspectRatioSeparators, StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length > 0 && parts[0] == "defer") parts = parts.Skip(1).ToArray();
             if (parts.Length > 0) img.Align = parts[0];
             if (parts.Length > 1) img.Slice = parts[1] == "slice";
@@ -221,7 +226,7 @@ internal sealed partial class SvgImage
     {
         if (string.IsNullOrWhiteSpace(v)) return null;
         v = v.Trim().ToLowerInvariant();
-        if (v.EndsWith("%", StringComparison.Ordinal)) return null;
+        if (v.EndsWith('%')) return null;
         if (float.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out float px)) return px > 0 ? px * 0.75f : null;
         return StyleResolver.TryParseLength(v, 12, 12, out var len) && !len.IsAuto && !len.IsPercent && len.Value > 0 ? len.Value : null;
     }
@@ -238,7 +243,7 @@ internal sealed partial class SvgImage
     }
 
     private Element? Reference(string? url)
-        => url != null && url.StartsWith("#", StringComparison.Ordinal) && _ids.TryGetValue(url.Substring(1), out var el) ? el : null;
+        => url != null && url.StartsWith('#') && _ids.TryGetValue(url.Substring(1), out var el) ? el : null;
 
     // ------------------------------------------------------------------ tree walk
 
@@ -509,7 +514,7 @@ internal sealed partial class SvgImage
                 if (offsetText != null)
                 {
                     offsetText = offsetText.Trim();
-                    bool percent = offsetText.EndsWith("%", StringComparison.Ordinal);
+                    bool percent = offsetText.EndsWith('%');
                     if (float.TryParse(percent ? offsetText[..^1] : offsetText, NumberStyles.Float, CultureInfo.InvariantCulture, out float f))
                         offset = percent ? f / 100 : f;
                 }
@@ -550,7 +555,7 @@ internal sealed partial class SvgImage
         float Coord(string name, string fallback, float viewport)
         {
             var v = (GradientAttr(g, name) ?? fallback).Trim();
-            bool percent = v.EndsWith("%", StringComparison.Ordinal);
+            bool percent = v.EndsWith('%');
             if (percent) v = v[..^1];
             if (!bbox && v.EndsWith("px", StringComparison.OrdinalIgnoreCase)) v = v[..^2];
             if (!float.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out float f)) return 0;
@@ -720,7 +725,7 @@ internal sealed partial class SvgImage
         if (runs.Count == 0) return;
         // Trailing white space of the element is dropped.
         var last = runs[^1];
-        if (last.Text.EndsWith(" ", StringComparison.Ordinal))
+        if (last.Text.EndsWith(' '))
         {
             var trimmed = last.Text.TrimEnd(' ');
             float size = last.Style.FontSize / 0.75f;

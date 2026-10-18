@@ -46,7 +46,7 @@ internal static class CssBackground
     public static string? Url(string token)
     {
         var t = token.Trim();
-        if (!t.StartsWith("url(", StringComparison.OrdinalIgnoreCase) || !t.EndsWith(")", StringComparison.Ordinal)) return null;
+        if (!t.StartsWith("url(", StringComparison.OrdinalIgnoreCase) || !t.EndsWith(')')) return null;
         var inner = t.Substring(4, t.Length - 5).Trim();
         if (inner.Length >= 2 && (inner[0] == '"' || inner[0] == '\'') && inner[^1] == inner[0]) inner = inner.Substring(1, inner.Length - 2);
         return inner.Length > 0 ? inner : null;

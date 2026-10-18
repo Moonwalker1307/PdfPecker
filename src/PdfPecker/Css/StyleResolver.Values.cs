@@ -28,7 +28,7 @@ internal sealed partial class StyleResolver
 
     private static bool TryParseNumberOrPercent(string lower, out float value)
     {
-        if (lower.EndsWith("%", StringComparison.Ordinal))
+        if (lower.EndsWith('%'))
         {
             bool ok = float.TryParse(lower.AsSpan(0, lower.Length - 1), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
             value /= 100f;
@@ -177,15 +177,15 @@ internal sealed partial class StyleResolver
         List<(string, int, bool)>? names = null;
         void Name(string tok, int line)
         {
-            foreach (var n in tok.Trim('[', ']').Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries))
+            foreach (var n in tok.Trim('[', ']').Split(WhitespaceSeparators, StringSplitOptions.RemoveEmptyEntries))
                 (names ??= new()).Add((n, line, current == after));
         }
         var tokens = CssParser.Tokens(lower);
         if (tokens.Count > 0 && tokens[0] == "subgrid") return ParseSubgrid(tokens);
         foreach (var tok in tokens)
         {
-            if (tok.StartsWith("[", StringComparison.Ordinal)) { Name(tok, current.Count); continue; }
-            if (tok.StartsWith("repeat(", StringComparison.Ordinal) && tok.EndsWith(")", StringComparison.Ordinal))
+            if (tok.StartsWith('[')) { Name(tok, current.Count); continue; }
+            if (tok.StartsWith("repeat(", StringComparison.Ordinal) && tok.EndsWith(')'))
             {
                 var inner = tok.Substring(7, tok.Length - 8);
                 int comma = inner.IndexOf(',');
@@ -195,7 +195,7 @@ internal sealed partial class StyleResolver
                 var repeatNames = new List<(string Tok, int Index)>();
                 foreach (var rt in CssParser.Tokens(inner.Substring(comma + 1).Trim()))
                 {
-                    if (rt.StartsWith("[", StringComparison.Ordinal)) { repeatNames.Add((rt, tracks.Count)); continue; }
+                    if (rt.StartsWith('[')) { repeatNames.Add((rt, tracks.Count)); continue; }
                     if (!TryParseTrack(rt, em, out var tr)) return null;
                     tracks.Add(tr);
                 }
@@ -237,7 +237,7 @@ internal sealed partial class StyleResolver
         for (int i = 1; i < tokens.Count; i++)
         {
             var tok = tokens[i];
-            if (tok.StartsWith("repeat(", StringComparison.Ordinal) && tok.EndsWith(")", StringComparison.Ordinal))
+            if (tok.StartsWith("repeat(", StringComparison.Ordinal) && tok.EndsWith(')'))
             {
                 var inner = tok.Substring(7, tok.Length - 8);
                 int comma = inner.IndexOf(',');
@@ -270,12 +270,12 @@ internal sealed partial class StyleResolver
     /// <summary>Reads one bracketed name list that starts at <paramref name="i"/>, leaving <paramref name="i"/> on its last token.</summary>
     private static bool ReadLineNames(List<string> tokens, ref int i, List<string[]> into)
     {
-        if (!tokens[i].StartsWith("[", StringComparison.Ordinal)) return false;
+        if (!tokens[i].StartsWith('[')) return false;
         var names = new List<string>();
         for (; i < tokens.Count; i++)
         {
             var tok = tokens[i];
-            bool last = tok.EndsWith("]", StringComparison.Ordinal);
+            bool last = tok.EndsWith(']');
             names.AddRange(tok.Trim('[', ']').Split(' ', StringSplitOptions.RemoveEmptyEntries));
             if (!last) continue;
             into.Add(names.ToArray());
@@ -287,7 +287,7 @@ internal sealed partial class StyleResolver
     private bool TryParseTrack(string tok, float em, out Track track)
     {
         track = default;
-        if (tok.StartsWith("minmax(", StringComparison.Ordinal) && tok.EndsWith(")", StringComparison.Ordinal))
+        if (tok.StartsWith("minmax(", StringComparison.Ordinal) && tok.EndsWith(')'))
         {
             var parts = CssParser.SplitTopLevel(tok.Substring(7, tok.Length - 8), ',');
             if (parts.Count != 2 || !TryParseTrackSize(parts[0].Trim(), em, out var min) || !TryParseTrackSize(parts[1].Trim(), em, out var max)) return false;
@@ -295,7 +295,7 @@ internal sealed partial class StyleResolver
             track = new Track(min, max);
             return true;
         }
-        if (tok.StartsWith("fit-content(", StringComparison.Ordinal) && tok.EndsWith(")", StringComparison.Ordinal))
+        if (tok.StartsWith("fit-content(", StringComparison.Ordinal) && tok.EndsWith(')'))
         {
             // Approximated as minmax(auto, max-content) capped later by the track's available space.
             track = new Track(new TrackSize(TrackSizeKind.Auto), new TrackSize(TrackSizeKind.MaxContent));
@@ -358,7 +358,7 @@ internal sealed partial class StyleResolver
     /// <summary>Parses a counter-reset, counter-set or counter-increment list: names, each optionally followed by an integer.</summary>
     private static CounterOp[]? ParseCounters(string v, int defaultValue)
     {
-        var t = v.Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+        var t = v.Split(WhitespaceSeparators, StringSplitOptions.RemoveEmptyEntries);
         if (t.Length == 0 || t.Length == 1 && t[0].Equals("none", StringComparison.OrdinalIgnoreCase)) return null;
         var list = new List<CounterOp>();
         for (int i = 0; i < t.Length; i++)

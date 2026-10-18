@@ -1,3 +1,4 @@
+using System.Buffers;
 using PdfPecker.Css;
 using PdfPecker.Html;
 
@@ -5,6 +6,9 @@ namespace PdfPecker;
 
 public static partial class HtmlToPdf
 {
+    // Either slash ends the directory part of a style sheet's path, so relative imports work with Windows paths too.
+    private static readonly SearchValues<char> PathSeparators = SearchValues.Create("/\\");
+
     private static Stylesheet ReadStyles(Element doc, MediaContext media, PdfOptions options, string? baseDirectory, Func<string, byte[]?>? resolver)
     {
         var sheet = new Stylesheet { Media = media };
@@ -15,8 +19,8 @@ public static partial class HtmlToPdf
             var href = url.Trim();
             if (importer != null && !IsAbsoluteReference(href))
             {
-                int slash = importer.LastIndexOfAny(new[] { '/', '\\' });
-                if (slash >= 0 && !IsAbsoluteReference(importer)) href = importer.Substring(0, slash + 1) + href;
+                int slash = importer.AsSpan().LastIndexOfAny(PathSeparators);
+                if (slash >= 0 && !IsAbsoluteReference(importer)) href = string.Concat(importer.AsSpan(0, slash + 1), href);
             }
             var css = LoadText(href, baseDirectory, resolver, allowFiles);
             return css == null ? null : (RebaseUrls(css, href), href);
@@ -55,7 +59,7 @@ public static partial class HtmlToPdf
     /// </summary>
     internal static string RebaseUrls(string css, string href)
     {
-        int slash = href.LastIndexOfAny(new[] { '/', '\\' });
+        int slash = href.AsSpan().LastIndexOfAny(PathSeparators);
         if (slash < 0 || css.IndexOf("url(", StringComparison.OrdinalIgnoreCase) < 0) return css;
         if (IsAbsoluteReference(href)) return css; // remote sheets only load through the resolver, which sees the URLs as written
         var folder = href.Substring(0, slash + 1);

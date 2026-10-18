@@ -512,7 +512,7 @@ internal static partial class CssParser
         else
         {
             size = sizeToken;
-            if (i < tokens.Count && tokens[i].StartsWith("/", StringComparison.Ordinal))
+            if (i < tokens.Count && tokens[i].StartsWith('/'))
             {
                 lineHeight = tokens[i].Length > 1 ? tokens[i].Substring(1) : (i + 1 < tokens.Count ? tokens[++i] : "normal");
                 i++;
