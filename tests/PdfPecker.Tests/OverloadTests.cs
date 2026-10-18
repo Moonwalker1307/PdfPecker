@@ -22,9 +22,12 @@ public class OverloadTests
 
     private static MemoryStream In(byte[] data) => new(data, writable: false);
 
-    /// <summary>The PDF as text with the file identifiers zeroed: rewritten files get a random second identifier.</summary>
+    /// <summary>
+    /// The PDF as text with the file identifiers and dates zeroed: rewritten files get a random second identifier and
+    /// the time of the rewrite as their modification date.
+    /// </summary>
     private static string WithoutId(byte[] pdf)
-        => Regex.Replace(PdfTestHelpers.Latin1(pdf), @"/ID ?\[<([0-9A-Fa-f]*)> ?<([0-9A-Fa-f]*)>\]", m => new string('0', m.Length));
+        => Regex.Replace(PdfTestHelpers.WithoutDates(pdf), @"/ID ?\[<([0-9A-Fa-f]*)> ?<([0-9A-Fa-f]*)>\]", m => new string('0', m.Length));
 
     private static void AssertSamePdf(byte[] expected, byte[] actual) => Assert.Equal(WithoutId(expected), WithoutId(actual));
 
