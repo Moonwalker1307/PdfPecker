@@ -44,16 +44,20 @@ internal sealed partial class LayoutEngine
     /// <summary>Whether a later pass could go on from y between two children of the flow being laid out.</summary>
     private bool CanResumeAt(float y) => !FloatsBelow(y) && _frames[^1].Pending.Count == 0;
 
+    // column-count is capped at this many when parsed; a narrow column-width on a very wide box must not give more, or
+    // balancing would spread the content over a hundred million columns.
+    private const int MaxColumns = 100;
+
     private int ColumnCountFor(ComputedStyle s, float w, float gap)
     {
         int n = s.ColumnCount;
         if (!s.ColumnWidth.IsAuto)
         {
             float cw = Math.Max(1, s.ColumnWidth.Value);
-            int fit = Math.Max(1, (int)Math.Floor((w + gap) / (cw + gap)));
+            int fit = (int)Math.Clamp(Math.Floor((w + gap) / (cw + gap)), 1, MaxColumns);
             n = n > 0 ? Math.Min(n, fit) : fit;
         }
-        return Math.Max(1, n);
+        return Math.Clamp(n, 1, MaxColumns);
     }
 
     private float LayoutColumns(Element e, float x, float y, float w, float? definiteH)

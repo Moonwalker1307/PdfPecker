@@ -140,10 +140,12 @@ internal static class EmbeddedFiles
 
     /// <summary>
     /// An embedded file's content, decoded within the same 512 MB budget a rendered page gets, so a small hostile file
-    /// cannot inflate without bound.
+    /// cannot inflate without bound. Inside a scope the caller opened, the budget is the whole call's: thousands of file
+    /// specifications can point at one small stream that inflates to hundreds of megabytes.
     /// </summary>
     public static byte[] Decode(PdfFile file, PdfStream stream)
     {
+        if (PdfFile.InRenderScope) return file.DecodeStream(stream);
         using (PdfFile.BeginRender(default)) return file.DecodeStream(stream);
     }
 
@@ -204,11 +206,11 @@ internal static class EmbeddedFiles
     public static int PdfAPart(PdfFile file)
     {
         if (Xmp(file) is not { } xmp) return 0;
-        var m = Regex.Match(xmp, @"pdfaid:part\s*(?:>|=\s*[""'])\s*(\d)");
+        var m = Regex.Match(xmp, @"pdfaid:part\s*(?:>|=\s*[""'])\s*(\d)", RegexOptions.NonBacktracking);
         if (!m.Success) return 0;
         int part = m.Groups[1].Value[0] - '0';
         // PDF/A-4f is the PDF/A-4 level that allows any attachment, as PDF/A-3 does; plain PDF/A-4 allows only PDF/A files.
-        if (part == 4 && Regex.IsMatch(xmp, @"pdfaid:conformance\s*(?:>|=\s*[""'])\s*[Ff]")) return 3;
+        if (part == 4 && Regex.IsMatch(xmp, @"pdfaid:conformance\s*(?:>|=\s*[""'])\s*[Ff]", RegexOptions.NonBacktracking)) return 3;
         return part;
     }
 
@@ -232,7 +234,9 @@ internal static class EmbeddedFiles
     /// </summary>
     public static string? XmpProperty(string xmp, string name)
     {
-        var m = Regex.Match(xmp, @"\w+:" + Regex.Escape(name) + @"\s*(?:>|=\s*[""'])\s*([^<""']*?)\s*[<""']");
+        // The XMP comes from the file, so the match must stay linear: a backtracking engine retries the lazy value at every
+        // repeated property name that never closes, which is quadratic in the length of the metadata.
+        var m = Regex.Match(xmp, @"\w+:" + Regex.Escape(name) + @"\s*(?:>|=\s*[""'])\s*([^<""']*?)\s*[<""']", RegexOptions.NonBacktracking);
         return m.Success && m.Groups[1].Length > 0 ? m.Groups[1].Value : null;
     }
 

@@ -90,6 +90,9 @@ public sealed class PdfEInvoice
     public static PdfEInvoice? Read(byte[] pdf, string? password = null)
     {
         var file = PdfAttachments.Open(pdf, password);
+        // One decode budget for the metadata and every candidate, so many candidates that share a stream which inflates
+        // to hundreds of megabytes are not each inflated again.
+        using var scope = PdfFile.BeginRender(default);
         try
         {
             var xmp = EmbeddedFiles.Xmp(file);
