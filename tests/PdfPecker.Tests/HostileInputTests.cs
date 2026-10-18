@@ -7,6 +7,7 @@ using PdfPecker.Html;
 using PdfPecker.Images;
 using PdfPecker.Rendering.Fonts;
 using PdfPecker.Rendering.Graphics;
+using PdfPecker.Rendering.Parsing;
 using static PdfPecker.Tests.PdfTestHelpers;
 
 namespace PdfPecker.Tests;
@@ -929,6 +930,81 @@ public class HostileInputTests
             $"<< /Length {cmap.Length} >>\nstream\n{cmap}\nendstream",
             $"<< /Length {data.Length} /Filter /FlateDecode >>\nstream\n{data}\nendstream",
         });
+    }
+
+    /// <summary>A one-page form whose AcroForm lists object 4 as its only field and asks for every appearance.</summary>
+    private static byte[] FormPdf(string field, IEnumerable<string>? more = null)
+    {
+        var objects = new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] /NeedAppearances true /DR << /Font << /Helv 5 0 R >> >> >> >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 14400 14400] >>",
+            field,
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+        };
+        if (more != null) objects.AddRange(more);
+        return SimplePdf(objects);
+    }
+
+    [Fact]
+    public void Long_values_in_a_wide_multiline_field_wrap_in_linear_time()
+    {
+        // Wrapping measured the whole line again for every word, up to 17 times while finding the automatic size, so a
+        // box as wide as a page that holds thousands of words per line took minutes.
+        var pdf = FormPdf("<< /FT /Tx /Subtype /Widget /T (t) /Ff 4096 /DA (/Helv 0 Tf 0 g) /Rect [0 0 14400 100] /V (" + Repeat("a ", 400_000) + ") >>");
+        Assert.NotEmpty(Bounded(() => PdfForm.Fill(pdf, new Dictionary<string, string>())));
+    }
+
+    [Fact]
+    public void A_list_box_with_a_tiny_font_draws_a_bounded_number_of_rows()
+    {
+        // A font size of a hundredth of a point drew every one of the options in every widget, and each option was
+        // looked up in the list of selected values one by one.
+        var options = string.Concat(Enumerable.Range(0, 20_000).Select(i => "(o" + i + ") "));
+        var widgets = Enumerable.Range(0, 50).Select(_ => "<< /Type /Annot /Subtype /Widget /Parent 4 0 R /Rect [0 0 100 14000] >>").ToList();
+        var kids = string.Concat(Enumerable.Range(6, widgets.Count).Select(i => i + " 0 R "));
+        var pdf = FormPdf($"<< /FT /Ch /T (l) /DA (/Helv 0.01 Tf 0 g) /Opt [{options}] /V [{options}] /Kids [{kids}] >>", widgets);
+
+        var filled = Bounded(() => PdfForm.Fill(pdf, new Dictionary<string, string>()));
+        var file = PdfFile.Open(filled, null);
+        var widget = file.Resolve(file.GetArray(file.Resolve(file.GetArray(file.GetDict(file.Catalog, "AcroForm"), "Fields")![0]) as PdfDict, "Kids")![0]) as PdfDict;
+        var appearance = Encoding.Latin1.GetString(file.DecodeStream(file.GetStream(file.GetDict(widget, "AP"), "N")!));
+        Assert.InRange(System.Text.RegularExpressions.Regex.Count(appearance, " Tj"), 1, 1_000);
+    }
+
+    [Fact]
+    public void Long_field_names_repeated_over_many_kids_stay_bounded()
+    {
+        // Each kid's fully qualified name repeats its parent's, so a two-megabyte name over a thousand kids made two
+        // gigabytes of names when listing the fields or looking for signatures.
+        var kids = Enumerable.Range(0, 1_000).Select(i => "<< /T (k" + i + ") /FT /Tx /Parent 4 0 R >>").ToList();
+        var refs = string.Concat(Enumerable.Range(6, kids.Count).Select(i => i + " 0 R "));
+        var pdf = FormPdf("<< /T (" + Repeat("n", 2 * 1024 * 1024) + ") /Kids [" + refs + "] >>", kids);
+
+        Assert.InRange(Bounded(() => PdfForm.GetFields(pdf)).Count, 1, 10);
+        Assert.Empty(Bounded(() => PdfSignatureVerifier.Verify(pdf)));
+    }
+
+    [Fact]
+    public void Signature_fields_that_share_one_signature_are_verified_once()
+    {
+        // A thousand fields pointing at one signature dictionary each hashed the file and built a chain again.
+        // Object 6 is the shared signature, and the fields follow it.
+        var more = new List<string> { "<< /Type /Sig /ByteRange [0 10 20 5] /Contents <00> >>" };
+        more.AddRange(Enumerable.Range(0, 1_000).Select(i => "<< /FT /Sig /T (s" + i + ") /V 6 0 R >>"));
+        var refs = string.Concat(Enumerable.Range(7, 1_000).Select(i => i + " 0 R "));
+        var pdf = FormPdf("<< /T (p) /Kids [" + refs + "] >>", more);
+
+        Assert.Single(Bounded(() => PdfSignatureVerifier.Verify(pdf)));
+    }
+
+    [Fact]
+    public void Long_names_in_a_pdf_are_not_kept_for_the_process()
+    {
+        var name = Repeat("n", 1_000);
+        Assert.NotSame(PdfName.Get(name), PdfName.Get(name));
+        Assert.Same(PdfName.Get("Type"), PdfName.Get("Type"));
     }
 
     // ------------------------------------------------------------------ helpers
