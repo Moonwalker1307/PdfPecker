@@ -35,6 +35,17 @@ public sealed class PdfPagesOptions
     /// <summary>The application that produced the PDF. Default: "PdfPecker".</summary>
     public string? Producer { get; set; }
 
+    /// <summary>
+    /// A fixed date, for reproducible output. When set, it is written as the creation and modification date of the
+    /// result (in the information dictionary and, for a PDF/UA result, the XMP metadata), and the file identifier
+    /// (<c>/ID</c>) is a hash of the document instead of random bytes, so the same input and options give a
+    /// byte-identical file. When null, the <c>SOURCE_DATE_EPOCH</c> environment variable (seconds since 1970-01-01 UTC,
+    /// as reproducible builds set it) is used the same way; when that is not set or not a valid number, the current time
+    /// and a random identifier are used. This property takes precedence over the environment variable, as
+    /// <see cref="PdfOptions.CreationDate"/> does. Dates are written in UTC to the second. Default: null.
+    /// </summary>
+    public DateTimeOffset? CreationDate { get; set; }
+
     internal PdfMergeOptions ToMergeOptions() => new()
     {
         Passwords = new[] { Password },
@@ -46,6 +57,7 @@ public sealed class PdfPagesOptions
         Keywords = Keywords,
         Creator = Creator,
         Producer = Producer,
+        CreationDate = CreationDate,
     };
 }
 

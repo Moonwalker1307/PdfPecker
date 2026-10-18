@@ -20,18 +20,25 @@ internal sealed class PdfRewriter : PdfObjectWriter
     private int _nextId = 1;
     private int _rootNum = -1;
 
-    private PdfRewriter(PdfFile file, PdfEncryptor? crypt) : base(PdfObjectSyntax.Rewrite)
+    private readonly bool _reproducible;
+
+    private PdfRewriter(PdfFile file, PdfEncryptor? crypt, bool reproducible) : base(PdfObjectSyntax.Rewrite)
     {
         _file = file;
         _crypt = crypt;
+        _reproducible = reproducible;
         Encryption = crypt;
         _out = new ByteBuffer(Math.Max(4096, file.Data.Length + file.Data.Length / 8));
     }
 
-    /// <summary>Rewrites <paramref name="file"/>, encrypted with <paramref name="crypt"/> or unencrypted when it is null.</summary>
-    public static ByteBuffer Write(PdfFile file, PdfEncryptor? crypt)
+    /// <summary>
+    /// Rewrites <paramref name="file"/>, encrypted with <paramref name="crypt"/> or unencrypted when it is null. With a
+    /// <paramref name="creationDate"/> or <c>SOURCE_DATE_EPOCH</c> and no encryption, the new identifier is a hash of the
+    /// result, so the same input gives the same file; an encrypted result has random keys, so it stays random.
+    /// </summary>
+    public static ByteBuffer Write(PdfFile file, PdfEncryptor? crypt, DateTimeOffset? creationDate = null)
     {
-        var w = new PdfRewriter(file, crypt);
+        var w = new PdfRewriter(file, crypt, crypt == null && ReproducibleDate.Resolve(creationDate) != null);
         w.Run();
         return w._out;
     }
@@ -68,11 +75,13 @@ internal sealed class PdfRewriter : PdfObjectWriter
         long xref = _out.Length;
         int count = _nextId;
         _xref.WriteTable(_out, count);
-        // The first identifier stays the document's permanent one; the second marks this new version.
+        // The first identifier stays the document's permanent one; the second marks this new version, hashed from the
+        // file when the result is to be reproducible.
+        var id1 = _reproducible ? ReproducibleDate.FileId(_out.Span) : null;
         var id0 = _file.Resolve(trailer["ID"]) is PdfArray ids && ids.Count > 0 && _file.Resolve(ids[0]) is PdfString { Bytes.Length: > 0 } s
             ? s.Bytes
-            : RandomNumberGenerator.GetBytes(16);
-        PdfXref.WriteTrailer(_out, count, rootId, infoId, encryptId, id0, RandomNumberGenerator.GetBytes(16), upperHexId: false, xref);
+            : id1 ?? RandomNumberGenerator.GetBytes(16);
+        PdfXref.WriteTrailer(_out, count, rootId, infoId, encryptId, id0, id1 ?? RandomNumberGenerator.GetBytes(16), upperHexId: false, xref);
     }
 
     private int TopLevel(PdfObject? o, bool isRoot)
