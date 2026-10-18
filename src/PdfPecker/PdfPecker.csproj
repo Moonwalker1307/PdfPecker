@@ -48,7 +48,7 @@
     <None Include="../../assets/logo.png" Pack="true" PackagePath="/" />
     <EmbeddedResource Include="Rendering/Fonts/StandardFonts.bin" LogicalName="PdfPecker.Rendering.Fonts.StandardFonts.bin" />
     <EmbeddedResource Include="Fonts/Bundled/*.ttf.br" LogicalName="PdfPecker.Fonts.Bundled.%(Filename)%(Extension)" />
-    <EmbeddedResource Include="Text/Hyphenation/*.hyph.br" LogicalName="PdfPecker.Text.Hyphenation.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Text/Hyphenation/*.hyph.br;Text/Hyphenation/*.tex.br" LogicalName="PdfPecker.Text.Hyphenation.%(Filename)%(Extension)" />
     <InternalsVisibleTo Include="PdfPecker.Tests" />
     <InternalsVisibleTo Include="FontPackBuilder" />
     <InternalsVisibleTo Include="PdfPecker.Fuzz" />

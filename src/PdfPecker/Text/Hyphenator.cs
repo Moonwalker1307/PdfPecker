@@ -47,7 +47,7 @@ internal sealed class Hyphenator
         string? key = primary switch
         {
             "en" => "en-us",
-            "da" or "de" or "nl" or "no" or "nb" or "nn" => primary,
+            "da" or "de" or "es" or "nl" or "no" or "nb" or "nn" or "sv" => primary,
             _ => null,
         };
         return key == null ? null : Bundled.GetOrAdd(key, Load);
@@ -55,12 +55,24 @@ internal sealed class Hyphenator
 
     private static Hyphenator? Load(string key)
     {
+        // The Swedish patterns are under the LPPL, which allows an unmodified copy, so their TeX file is bundled as it is.
+        if (key == "sv") return ReadResource("sv.tex.br", reader => FromTeX(reader.ReadToEnd(), null, 2, 2));
         // Bokmål and nynorsk share the Norwegian patterns and differ in two exceptions (from hyph-nb.tex and hyph-nn.tex).
         string resource = key is "nb" or "nn" ? "no" : key;
-        using var stream = typeof(Hyphenator).Assembly.GetManifestResourceStream("PdfPecker.Text.Hyphenation." + resource + ".hyph.br");
+        return ReadResource(resource + ".hyph.br", reader => Parse(reader, key));
+    }
+
+    private static Hyphenator? ReadResource(string name, Func<StreamReader, Hyphenator> read)
+    {
+        using var stream = typeof(Hyphenator).Assembly.GetManifestResourceStream("PdfPecker.Text.Hyphenation." + name);
         if (stream == null) return null;
         using var brotli = new BrotliStream(stream, CompressionMode.Decompress);
         using var reader = new StreamReader(brotli, Encoding.UTF8);
+        return read(reader);
+    }
+
+    private static Hyphenator Parse(StreamReader reader, string key)
+    {
         var head = reader.ReadLine()!.Split(' ');
         var h = new Hyphenator(int.Parse(head[0], CultureInfo.InvariantCulture), int.Parse(head[1], CultureInfo.InvariantCulture));
         bool exceptions = false;
