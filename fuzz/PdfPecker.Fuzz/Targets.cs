@@ -99,13 +99,13 @@ internal static class Targets
 
     private static readonly string[] MarkdownWords =
     {
-        "# ", "## ", "> ", "- ", "* ", "1. ", "```", "~~~", "    ", "\t", "| a | b |", "|---|---|", "[a](b)", "![a](b)", "[a][b]", "[b]: c", "[^1]", "[^1]: x", "<div>", "</div>", "<!--",
+        "# ", "## ", "> ", "- ", "* ", "1. ", "```", "~~~", "    ", "\t", "| a | b |", "|---|---|", "[a](b)", "![a](b)", "[a][b]", "[b]: c", "[^1]", "[^1]: x", "[^a]: ", "\n    ", ": ", "\n: x\n", "---\ntitle: x\n---\n", "<div>", "</div>", "<!--",
         "**", "__", "*", "_", "`", "``", "~~", "<http://a.b>", "&amp;", "&#0;", "- [ ] ", "---", "***", "===", "\\", "  \n", "<script>", "www.a.b", "<a href=\"", "<br>",
     };
 
     private static readonly (string, string)[] MarkdownNesters =
     {
-        ("> ", ""), ("- ", ""), ("  - ", ""), ("1. ", ""), ("*", "*"), ("**", "**"), ("[", "](x)"), ("[", "]"), ("(", ")"), ("`", "`"), ("<div>", "</div>"), ("![", "](x)"), ("~~", "~~"), ("| ", " |"),
+        ("> ", ""), ("- ", ""), ("  - ", ""), ("1. ", ""), ("*", "*"), ("**", "**"), ("[", "](x)"), ("[", "]"), ("(", ")"), ("`", "`"), ("<div>", "</div>"), ("![", "](x)"), ("~~", "~~"), ("| ", " |"), ("[^a]: ", ""), (": ", ""),
     };
 
     public static IReadOnlyList<Target> All { get; } = Build();
@@ -199,7 +199,13 @@ internal static class Targets
             {
                 Name = "markdown", Extension = ".md", Text = true, MaxSize = 128 * 1024, Seeds = c => c.MarkdownFiles(),
                 Dictionary = MarkdownWords, Nesters = MarkdownNesters,
-                Run = (d, ct) => HtmlToPdf.Convert(MarkdownToHtml.ConvertDocument(Encoding.UTF8.GetString(d)), new PdfOptions { MaxPages = 100 }, ct),
+                Run = (d, ct) =>
+                {
+                    // The HTML lists footnotes at the end, as GitHub does; the PDF floats them to the bottom of their pages.
+                    var markdown = Encoding.UTF8.GetString(d);
+                    MarkdownToHtml.ConvertDocument(markdown);
+                    MarkdownToPdf.Convert(markdown, new PdfOptions { MaxPages = 100 }, null, ct);
+                },
             },
             new()
             {

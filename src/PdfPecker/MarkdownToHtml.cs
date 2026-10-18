@@ -5,7 +5,8 @@ namespace PdfPecker;
 
 /// <summary>
 /// Converts Markdown to HTML with PdfPecker's own parser: CommonMark plus the GitHub extensions (tables, strikethrough,
-/// task lists, autolinks). No dependencies beyond the .NET base class library.
+/// task lists, autolinks, footnotes), definition lists and YAML front matter. No dependencies beyond the .NET base class
+/// library.
 /// </summary>
 /// <remarks>All methods are static and thread-safe.</remarks>
 public static class MarkdownToHtml
@@ -42,6 +43,18 @@ th, td { border: 1px solid #d1d9e0; padding: 4px 10px; }
 th { font-weight: bold; background-color: #f6f8fa; }
 tr:nth-child(even) td { background-color: #f6f8fa; }
 img { max-width: 100%; }
+dt { font-weight: bold; margin-top: 0.75em; }
+dt:first-child { margin-top: 0; }
+dd { margin: 0 0 0 1.5em; }
+dd > p { margin: 0.5em 0; }
+sup.footnote-ref { font-size: 0.75em; }
+a.footnote-ref { color: inherit; }
+a.footnote-ref > sup { font-size: 0.67em; }
+section.footnotes { font-size: 0.875em; color: #59636e; border-top: 1px solid #d1d9e0; margin-top: 2em; padding-top: 0.75em; }
+section.footnotes li > p { margin: 0.25em 0; }
+.footnote { font-size: 8.5pt; line-height: 1.4; font-weight: normal; font-style: normal; color: #1f2328; text-align: left; }
+.footnote p, .footnote ul, .footnote ol, .footnote pre, .footnote blockquote, .footnote table { margin: 0 0 0.4em; }
+@page { @footnote { border-top: 0.5pt solid #d1d9e0; padding-top: 4pt; margin-top: 8pt; } }
 @media screen { body { max-width: 860px; margin: 0 auto; padding: 32px 24px; } }
 """;
 
@@ -50,22 +63,33 @@ img { max-width: 100%; }
     {
         if (markdown == null) throw new ArgumentNullException(nameof(markdown));
         options ??= new MarkdownOptions();
-        var doc = new BlockParser(options.GitHubExtensions).Parse(markdown);
+        var parser = new BlockParser(options.GitHubExtensions);
+        var doc = parser.Parse(markdown);
         var sb = new StringBuilder(markdown.Length + markdown.Length / 4 + 64);
-        new HtmlRenderer(sb, options.HeadingIds, options.AllowRawHtml).Render(doc);
+        new HtmlRenderer(sb, options.HeadingIds, options.AllowRawHtml, parser.Footnotes).Render(doc);
         return sb.ToString();
     }
 
     /// <summary>
     /// Converts Markdown to a complete HTML document with a stylesheet, ready to open in a browser or to pass to <see cref="HtmlToPdf"/>.
+    /// Footnotes are listed at the end, as on GitHub; <see cref="MarkdownToPdf"/> puts them at the bottom of their pages instead.
     /// </summary>
     public static string ConvertDocument(string markdown, MarkdownOptions? options = null)
+        => RenderDocument(markdown, options, pagedFootnotes: false);
+
+    /// <summary>
+    /// Converts Markdown to a complete HTML document. With <paramref name="pagedFootnotes"/>, as <see cref="MarkdownToPdf"/>
+    /// converts, footnotes float to the bottom of their pages (CSS <c>float: footnote</c>); without it they are listed at
+    /// the end as on GitHub, because browsers do not support footnote floats.
+    /// </summary>
+    internal static string RenderDocument(string markdown, MarkdownOptions? options, bool pagedFootnotes)
     {
         if (markdown == null) throw new ArgumentNullException(nameof(markdown));
         options ??= new MarkdownOptions();
-        var doc = new BlockParser(options.GitHubExtensions).Parse(markdown);
+        var parser = new BlockParser(options.GitHubExtensions);
+        var doc = parser.Parse(markdown);
 
-        var title = options.Title;
+        var title = options.Title ?? parser.FrontMatterTitle;
         if (title == null)
         {
             foreach (var (node, entering) in doc.Walk())
@@ -93,7 +117,7 @@ img { max-width: 100%; }
             sb.Append("<style>\n").Append(css.Replace("</", "<\\/")).Append("\n</style>\n");
         }
         sb.Append("</head>\n<body class=\"markdown-body\">\n");
-        new HtmlRenderer(sb, options.HeadingIds, options.AllowRawHtml).Render(doc);
+        new HtmlRenderer(sb, options.HeadingIds, options.AllowRawHtml, parser.Footnotes, pagedFootnotes).Render(doc);
         sb.Append("</body>\n</html>\n");
         return sb.ToString();
     }

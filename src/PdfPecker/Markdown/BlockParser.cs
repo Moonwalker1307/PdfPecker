@@ -5,7 +5,7 @@ namespace PdfPecker.Markdown;
 /// <summary>
 /// Block structure phase of the Markdown parser. Follows the CommonMark reference algorithm: each line is matched against
 /// the open container blocks, then against block starts, and what is left is added to the innermost open block.
-/// GFM tables and task list items are layered on top.
+/// GFM tables and task list items are layered on top, and with them footnotes, definition lists and front matter.
 /// </summary>
 internal sealed partial class BlockParser
 {
@@ -38,17 +38,18 @@ internal sealed partial class BlockParser
         _tip = _doc;
         _previousTip = _doc;
         _lastMatchedContainer = _doc;
-        _inlines = new InlineParser(_refmap, gfm);
+        _inlines = new InlineParser(_refmap, gfm ? Footnotes : null, gfm);
     }
 
     public MdNode Parse(string input)
     {
-        int position = 0;
+        int position = _gfm ? SkipFrontMatter(input) : 0;
         while (TryReadLine(input, ref position, out string line)) IncorporateLine(line);
 
         while (_tip != _doc) Finalize(_tip, _lineNumber);
         Finalize(_doc, _lineNumber);
         ProcessInlines(_doc);
+        foreach (var definition in _footnoteDefinitions) ProcessInlines(definition);
         return _doc;
     }
 
@@ -150,6 +151,7 @@ internal sealed partial class BlockParser
         if (IsLazyContinuation)
         {
             AddLine();
+            _lazyLine = _lineNumber;
             return;
         }
 
@@ -182,8 +184,8 @@ internal sealed partial class BlockParser
     /// </summary>
     private bool IsLazyContinuation => !_allClosed && !_cursor.IsBlank && _tip.Type == MdNodeType.Paragraph;
 
-    private static bool MaybeSpecial(char c)
-        => c is '#' or '`' or '~' or '*' or '+' or '_' or '=' or '<' or '>' or '-' or '|' or ':' or (>= '0' and <= '9');
+    private bool MaybeSpecial(char c)
+        => c is '#' or '`' or '~' or '*' or '+' or '_' or '=' or '<' or '>' or '-' or '|' or ':' or (>= '0' and <= '9') || (c == '[' && _gfm);
 
     private void AddLine() => _cursor.AppendRemainderTo(_tip.Content ??= new StringBuilder());
 
@@ -198,8 +200,10 @@ internal sealed partial class BlockParser
 
     private static bool CanContain(MdNodeType parent, MdNodeType child) => parent switch
     {
-        MdNodeType.Document or MdNodeType.BlockQuote or MdNodeType.Item => child != MdNodeType.Item,
+        MdNodeType.Document or MdNodeType.BlockQuote or MdNodeType.Item or MdNodeType.DefinitionDetails or MdNodeType.FootnoteDefinition
+            => child is not (MdNodeType.Item or MdNodeType.DefinitionTerm or MdNodeType.DefinitionDetails),
         MdNodeType.List => child == MdNodeType.Item,
+        MdNodeType.DefinitionList => child is MdNodeType.DefinitionTerm or MdNodeType.DefinitionDetails,
         _ => false,
     };
 
