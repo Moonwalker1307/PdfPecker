@@ -146,8 +146,22 @@ public static class PdfSignatureVerifier
     /// <exception cref="InvalidDataException">The file is not a readable PDF.</exception>
     /// <exception cref="PdfPasswordException">The PDF is encrypted and the password does not open it.</exception>
     public static IReadOnlyList<PdfSignatureVerification> Verify(byte[] pdf, PdfSignatureVerificationOptions? options = null, string? password = null)
+        => Verify(pdf, options, password, CancellationToken.None);
+
+    /// <summary>
+    /// Verifies every signed signature field in <paramref name="pdf"/>, oldest first, stopping with
+    /// <see cref="OperationCanceledException"/> when <paramref name="cancellationToken"/> is cancelled. Otherwise the same
+    /// as <see cref="Verify(byte[], PdfSignatureVerificationOptions?, string?)"/>.
+    /// </summary>
+    /// <param name="pdf">The PDF; it is treated as untrusted input.</param>
+    /// <param name="options">Trusted roots and revocation settings. Default: the system's roots, no revocation checks.</param>
+    /// <param name="password">The user or owner password, when the PDF is encrypted.</param>
+    /// <param name="cancellationToken">Stops the verification before each signature.</param>
+    public static IReadOnlyList<PdfSignatureVerification> Verify(byte[] pdf, PdfSignatureVerificationOptions? options, string? password,
+        CancellationToken cancellationToken)
     {
         if (pdf == null) throw new ArgumentNullException(nameof(pdf));
+        cancellationToken.ThrowIfCancellationRequested();
         options ??= new PdfSignatureVerificationOptions();
         PdfFile file;
         List<FoundSignature> found;
@@ -165,7 +179,13 @@ public static class PdfSignatureVerifier
         try
         {
             var hashes = new RangeHashes(file.Data);
-            return found.Select(f => VerifyOne(file, f, options, dssCerts, hashes)).ToList();
+            var results = new List<PdfSignatureVerification>(found.Count);
+            foreach (var f in found)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                results.Add(VerifyOne(file, f, options, dssCerts, hashes));
+            }
+            return results;
         }
         finally
         {
@@ -177,6 +197,35 @@ public static class PdfSignatureVerifier
     /// <summary>Verifies a PDF file. See <see cref="Verify(byte[], PdfSignatureVerificationOptions?, string?)"/>.</summary>
     public static IReadOnlyList<PdfSignatureVerification> VerifyFile(string path, PdfSignatureVerificationOptions? options = null, string? password = null)
         => Verify(File.ReadAllBytes(path), options, password);
+
+    /// <summary>
+    /// Verifies a PDF file, stopping with <see cref="OperationCanceledException"/> when <paramref name="cancellationToken"/>
+    /// is cancelled. See <see cref="Verify(byte[], PdfSignatureVerificationOptions?, string?, CancellationToken)"/>.
+    /// </summary>
+    /// <param name="path">The PDF file.</param>
+    /// <param name="options">Trusted roots and revocation settings. Default: the system's roots, no revocation checks.</param>
+    /// <param name="password">The user or owner password, when the PDF is encrypted.</param>
+    /// <param name="cancellationToken">Stops the verification before each signature.</param>
+    public static IReadOnlyList<PdfSignatureVerification> VerifyFile(string path, PdfSignatureVerificationOptions? options, string? password,
+        CancellationToken cancellationToken)
+        => Verify(File.ReadAllBytes(path), options, password, cancellationToken);
+
+    /// <summary>
+    /// Verifies a PDF read from <paramref name="pdf"/> (from its current position to its end). The stream is not disposed.
+    /// See <see cref="Verify(byte[], PdfSignatureVerificationOptions?, string?, CancellationToken)"/>.
+    /// </summary>
+    /// <param name="pdf">The PDF; it is treated as untrusted input.</param>
+    /// <param name="options">Trusted roots and revocation settings. Default: the system's roots, no revocation checks.</param>
+    /// <param name="password">The user or owner password, when the PDF is encrypted.</param>
+    /// <param name="cancellationToken">Stops the verification before each signature.</param>
+    /// <exception cref="InvalidDataException">The data is not a readable PDF.</exception>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and the password does not open it.</exception>
+    public static IReadOnlyList<PdfSignatureVerification> Verify(Stream pdf, PdfSignatureVerificationOptions? options = null, string? password = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (pdf == null) throw new ArgumentNullException(nameof(pdf));
+        return Verify(PdfMerger.ReadAll(pdf), options, password, cancellationToken);
+    }
 
     private static PdfSignatureVerification VerifyOne(PdfFile file, FoundSignature f, PdfSignatureVerificationOptions options, List<X509Certificate2> dssCerts,
         RangeHashes hashes)

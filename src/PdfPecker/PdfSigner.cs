@@ -130,4 +130,102 @@ public static class PdfSigner
     /// <summary>Signs a PDF file and writes the signed copy to <paramref name="outputPath"/> (which may be the same path).</summary>
     public static void SignFile(string inputPath, string outputPath, PdfSignatureOptions options, string? password = null)
         => AtomicFile.WriteAllBytes(outputPath, Sign(File.ReadAllBytes(inputPath), options, password));
+
+    /// <summary>
+    /// Signs a PDF file and writes the signed copy to <paramref name="outputPath"/> (which may be the same path), stopping
+    /// with <see cref="OperationCanceledException"/> when <paramref name="cancellationToken"/> is cancelled; the output file
+    /// is then left as it was.
+    /// </summary>
+    /// <param name="inputPath">The PDF file to sign.</param>
+    /// <param name="outputPath">The signed file; it appears only once signing has succeeded.</param>
+    /// <param name="options">The certificate and signature settings.</param>
+    /// <param name="password">The user or owner password, when the PDF is encrypted.</param>
+    /// <param name="cancellationToken">Cancels the external signer and the timestamp request.</param>
+    public static void SignFile(string inputPath, string outputPath, PdfSignatureOptions options, string? password, CancellationToken cancellationToken)
+        => AtomicFile.WriteAllBytes(outputPath, Sign(File.ReadAllBytes(inputPath), options, password, cancellationToken));
+
+    /// <summary>
+    /// Signs the PDF read from <paramref name="input"/> (from its current position to its end) and writes the signed file
+    /// to <paramref name="output"/>. Otherwise the same as
+    /// <see cref="Sign(byte[], PdfSignatureOptions, string?, CancellationToken)"/>.
+    /// </summary>
+    /// <remarks>The streams are not disposed. Nothing is written unless signing succeeds.</remarks>
+    /// <param name="input">The PDF to sign.</param>
+    /// <param name="output">Where the signed PDF is written.</param>
+    /// <param name="options">The certificate and signature settings.</param>
+    /// <param name="password">The user or owner password, when the PDF is encrypted.</param>
+    /// <param name="cancellationToken">Cancels the external signer and the timestamp request.</param>
+    public static void Sign(Stream input, Stream output, PdfSignatureOptions options, string? password = null, CancellationToken cancellationToken = default)
+    {
+        CheckStreams(input, output);
+        var signed = Sign(PdfMerger.ReadAll(input), options, password, cancellationToken);
+        output.Write(signed, 0, signed.Length);
+    }
+
+    /// <summary>
+    /// Signs the PDF read from <paramref name="input"/> (from its current position to its end) and writes the signed file
+    /// to <paramref name="output"/>, reading, signing and writing asynchronously. Otherwise the same as
+    /// <see cref="SignAsync(byte[], PdfSignatureOptions, string?, CancellationToken)"/>.
+    /// </summary>
+    /// <remarks>The streams are not disposed. Nothing is written unless signing succeeds.</remarks>
+    /// <param name="input">The PDF to sign.</param>
+    /// <param name="output">Where the signed PDF is written.</param>
+    /// <param name="options">The certificate and signature settings.</param>
+    /// <param name="password">The user or owner password, when the PDF is encrypted.</param>
+    /// <param name="cancellationToken">Cancels the reads, the external signer, the timestamp request and the write.</param>
+    public static async Task SignAsync(Stream input, Stream output, PdfSignatureOptions options, string? password = null,
+        CancellationToken cancellationToken = default)
+    {
+        CheckStreams(input, output);
+        if (options == null) throw new ArgumentNullException(nameof(options));
+        var pdf = await PdfMerger.ReadAllAsync(input, cancellationToken).ConfigureAwait(false);
+        var signed = await SignAsync(pdf, options, password, cancellationToken).ConfigureAwait(false);
+        await output.WriteAsync(signed, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Adds validation data to the PDF read from <paramref name="input"/> (from its current position to its end) and writes
+    /// the result to <paramref name="output"/>. Otherwise the same as
+    /// <see cref="AddValidationData(byte[], PdfLtvOptions?, string?, CancellationToken)"/>.
+    /// </summary>
+    /// <remarks>The streams are not disposed. Nothing is written unless the validation data is added.</remarks>
+    /// <param name="input">A signed PDF.</param>
+    /// <param name="output">Where the result is written.</param>
+    /// <param name="options">Extra certificates, revocation data, and whether to fetch it. Default: store the chains only, offline.</param>
+    /// <param name="password">The user or owner password, when the PDF is encrypted.</param>
+    /// <param name="cancellationToken">Cancels the OCSP, CRL and timestamp requests.</param>
+    public static void AddValidationData(Stream input, Stream output, PdfLtvOptions? options = null, string? password = null,
+        CancellationToken cancellationToken = default)
+    {
+        CheckStreams(input, output);
+        var result = AddValidationData(PdfMerger.ReadAll(input), options, password, cancellationToken);
+        output.Write(result, 0, result.Length);
+    }
+
+    /// <summary>
+    /// Adds validation data to the PDF read from <paramref name="input"/> (from its current position to its end) and writes
+    /// the result to <paramref name="output"/>, reading, fetching and writing asynchronously. Otherwise the same as
+    /// <see cref="AddValidationDataAsync(byte[], PdfLtvOptions?, string?, CancellationToken)"/>.
+    /// </summary>
+    /// <remarks>The streams are not disposed. Nothing is written unless the validation data is added.</remarks>
+    /// <param name="input">A signed PDF.</param>
+    /// <param name="output">Where the result is written.</param>
+    /// <param name="options">Extra certificates, revocation data, and whether to fetch it. Default: store the chains only, offline.</param>
+    /// <param name="password">The user or owner password, when the PDF is encrypted.</param>
+    /// <param name="cancellationToken">Cancels the reads, the OCSP, CRL and timestamp requests and the write.</param>
+    public static async Task AddValidationDataAsync(Stream input, Stream output, PdfLtvOptions? options = null, string? password = null,
+        CancellationToken cancellationToken = default)
+    {
+        CheckStreams(input, output);
+        var pdf = await PdfMerger.ReadAllAsync(input, cancellationToken).ConfigureAwait(false);
+        var result = await AddValidationDataAsync(pdf, options, password, cancellationToken).ConfigureAwait(false);
+        await output.WriteAsync(result, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static void CheckStreams(Stream input, Stream output)
+    {
+        if (input == null) throw new ArgumentNullException(nameof(input));
+        if (output == null) throw new ArgumentNullException(nameof(output));
+        if (!output.CanWrite) throw new ArgumentException("The output stream is not writable.", nameof(output));
+    }
 }

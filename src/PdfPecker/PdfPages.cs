@@ -75,6 +75,10 @@ public static class PdfPages
     /// <exception cref="PdfPasswordException">The PDF is encrypted and the password does not open it.</exception>
     public static int Count(byte[] pdf, string? password = null) => PdfToImage.GetPageCount(pdf, password);
 
+    /// <summary>The number of pages of a PDF read from <paramref name="pdf"/> (from its current position to its end). The stream is not disposed.</summary>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and the password does not open it.</exception>
+    public static int Count(Stream pdf, string? password = null) => PdfToImage.GetPageCount(pdf, password);
+
     /// <summary>A new PDF with the given pages, in the given order, such as <c>"1-3,5"</c> or <c>"3,1,2"</c>.</summary>
     /// <param name="pdf">The PDF.</param>
     /// <param name="pages">The pages to take, numbered from 1 (see <see cref="PdfPageRange.Parse"/>).</param>
@@ -107,15 +111,8 @@ public static class PdfPages
     /// <inheritdoc cref="Extract(byte[], string, PdfPagesOptions?, CancellationToken)"/>
     public static void Extract(Stream input, Stream output, PdfPageRange pages, PdfPagesOptions? options = null, CancellationToken cancellationToken = default)
     {
-        if (input == null) throw new ArgumentNullException(nameof(input));
-        if (output == null) throw new ArgumentNullException(nameof(output));
         if (pages == null) throw new ArgumentNullException(nameof(pages));
-        if (!output.CanWrite) throw new ArgumentException("The output stream is not writable.", nameof(output));
-        var writer = Writer(options, cancellationToken, output);
-        writer.Add(PdfMerger.ReadAll(input), new PdfMergeWriter.PageSpec { Pages = pages });
-        writer.Finish();
-        writer.Flush(output);
-        output.Flush();
+        RunStream(input, output, new PdfMergeWriter.PageSpec { Pages = pages }, options, cancellationToken);
     }
 
     /// <summary>
@@ -152,20 +149,53 @@ public static class PdfPages
         return Run(pdf, new PdfMergeWriter.PageSpec { Pages = pages, Invert = true }, options, cancellationToken);
     }
 
+    /// <summary>
+    /// Reads a PDF from <paramref name="input"/> (from its current position) and writes it without the given pages
+    /// (numbered from 1) to <paramref name="output"/>. The streams are not disposed.
+    /// </summary>
+    /// <param name="input">The PDF.</param>
+    /// <param name="output">Where the result is written.</param>
+    /// <param name="pages">The pages to leave out, numbered from 1.</param>
+    /// <param name="options">Password, limits and document properties; null for the defaults.</param>
+    /// <param name="cancellationToken">Stops the work.</param>
+    /// <exception cref="ArgumentException">Every page would be left out.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A page is past the last page.</exception>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and cannot be opened with the given password.</exception>
+    /// <exception cref="InvalidDataException">The PDF is not readable.</exception>
+    public static void Remove(Stream input, Stream output, PdfPageRange pages, PdfPagesOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        if (pages == null) throw new ArgumentNullException(nameof(pages));
+        RunStream(input, output, new PdfMergeWriter.PageSpec { Pages = pages, Invert = true }, options, cancellationToken);
+    }
+
     /// <summary>A new PDF with pages turned clockwise by <paramref name="degrees"/> (on top of any rotation they have).</summary>
     /// <param name="pdf">The PDF.</param>
     /// <param name="degrees">A multiple of 90; negative turns counter-clockwise.</param>
-    /// <param name="pages">The pages to turn, such as <c>"2,4"</c> (see <see cref="PdfPageRange.Parse"/>); null for every page.</param>
+    /// <param name="pages">The pages to turn, numbered from 1, such as <c>"2,4"</c> (see <see cref="PdfPageRange.Parse"/>); null for every page.</param>
     /// <param name="options">Password, limits and document properties; null for the defaults.</param>
     /// <param name="cancellationToken">Stops the work.</param>
     /// <exception cref="ArgumentException"><paramref name="degrees"/> is not a multiple of 90.</exception>
     /// <exception cref="FormatException"><paramref name="pages"/> is not a page range.</exception>
     /// <exception cref="ArgumentOutOfRangeException">A page is past the last page.</exception>
     public static byte[] Rotate(byte[] pdf, int degrees, string? pages = null, PdfPagesOptions? options = null, CancellationToken cancellationToken = default)
-    {
-        if (degrees % 90 != 0) throw new ArgumentException($"Pages turn by multiples of 90 degrees, not {degrees}.", nameof(degrees));
-        return Run(pdf, new PdfMergeWriter.PageSpec { Rotate = degrees % 360, RotatePages = pages == null ? null : PdfPageRange.Parse(pages) }, options, cancellationToken);
-    }
+        => Run(pdf, RotateSpec(degrees, pages), options, cancellationToken);
+
+    /// <summary>
+    /// Reads a PDF from <paramref name="input"/> (from its current position) and writes it with pages turned clockwise by
+    /// <paramref name="degrees"/> to <paramref name="output"/>. The streams are not disposed.
+    /// </summary>
+    /// <param name="input">The PDF.</param>
+    /// <param name="output">Where the result is written.</param>
+    /// <param name="degrees">A multiple of 90; negative turns counter-clockwise.</param>
+    /// <param name="pages">The pages to turn, numbered from 1, such as <c>"2,4"</c> (see <see cref="PdfPageRange.Parse"/>); null for every page.</param>
+    /// <param name="options">Password, limits and document properties; null for the defaults.</param>
+    /// <param name="cancellationToken">Stops the work.</param>
+    /// <exception cref="ArgumentException"><paramref name="degrees"/> is not a multiple of 90.</exception>
+    /// <exception cref="FormatException"><paramref name="pages"/> is not a page range.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A page is past the last page.</exception>
+    public static void Rotate(Stream input, Stream output, int degrees, string? pages = null, PdfPagesOptions? options = null,
+        CancellationToken cancellationToken = default)
+        => RunStream(input, output, RotateSpec(degrees, pages), options, cancellationToken);
 
     /// <summary>Splits a PDF into parts of <paramref name="pagesPerFile"/> pages each (the last may have fewer).</summary>
     /// <param name="pdf">The PDF.</param>
@@ -183,6 +213,14 @@ public static class PdfPages
         var file = Open(pdf, options, cancellationToken);
         return SplitOpened(file, Chunks(file, pagesPerFile), options, cancellationToken);
     }
+
+    /// <summary>
+    /// Splits a PDF read from <paramref name="pdf"/> (from its current position to its end) into parts of
+    /// <paramref name="pagesPerFile"/> pages each (the last may have fewer). The stream is not disposed.
+    /// </summary>
+    /// <inheritdoc cref="Split(byte[], int, PdfPagesOptions?, CancellationToken)"/>
+    public static byte[][] Split(Stream pdf, int pagesPerFile, PdfPagesOptions? options = null, CancellationToken cancellationToken = default)
+        => Split(ReadInput(pdf), pagesPerFile, options, cancellationToken);
 
     /// <summary>Splits a PDF into one part per range, such as <c>Split(pdf, "1-3", "4-")</c>. Ranges may overlap.</summary>
     /// <exception cref="ArgumentException">No ranges are given.</exception>
@@ -210,6 +248,14 @@ public static class PdfPages
         if (list.Any(r => r == null)) throw new ArgumentException("A range is null.", nameof(ranges));
         return SplitOpened(Open(pdf, options, cancellationToken), list, options, cancellationToken);
     }
+
+    /// <summary>
+    /// Splits a PDF read from <paramref name="pdf"/> (from its current position to its end) into one part per range.
+    /// Ranges may overlap. The stream is not disposed.
+    /// </summary>
+    /// <inheritdoc cref="Split(byte[], IEnumerable{PdfPageRange}, PdfPagesOptions?, CancellationToken)"/>
+    public static byte[][] Split(Stream pdf, IEnumerable<PdfPageRange> ranges, PdfPagesOptions? options = null, CancellationToken cancellationToken = default)
+        => Split(ReadInput(pdf), ranges, options, cancellationToken);
 
     /// <summary>
     /// Splits the PDF file <paramref name="inputPath"/> into parts of <paramref name="pagesPerFile"/> pages and writes part
@@ -242,6 +288,27 @@ public static class PdfPages
 
     private static PdfMergeWriter Writer(PdfPagesOptions? options, CancellationToken cancellationToken, Stream? sink = null)
         => new((options ?? new PdfPagesOptions()).ToMergeOptions(), cancellationToken, sink, single: true);
+
+    private static PdfMergeWriter.PageSpec RotateSpec(int degrees, string? pages)
+    {
+        if (degrees % 90 != 0) throw new ArgumentException($"Pages turn by multiples of 90 degrees, not {degrees}.", nameof(degrees));
+        return new PdfMergeWriter.PageSpec { Rotate = degrees % 360, RotatePages = pages == null ? null : PdfPageRange.Parse(pages) };
+    }
+
+    private static byte[] ReadInput(Stream pdf) => PdfMerger.ReadAll(pdf ?? throw new ArgumentNullException(nameof(pdf)));
+
+    /// <summary>Reads the whole input, then writes the chosen pages to <paramref name="output"/> as they are made.</summary>
+    private static void RunStream(Stream input, Stream output, PdfMergeWriter.PageSpec spec, PdfPagesOptions? options, CancellationToken cancellationToken)
+    {
+        if (input == null) throw new ArgumentNullException(nameof(input));
+        if (output == null) throw new ArgumentNullException(nameof(output));
+        if (!output.CanWrite) throw new ArgumentException("The output stream is not writable.", nameof(output));
+        var writer = Writer(options, cancellationToken, output);
+        writer.Add(PdfMerger.ReadAll(input), spec);
+        writer.Finish();
+        writer.Flush(output);
+        output.Flush();
+    }
 
     private static byte[] Run(byte[] pdf, PdfMergeWriter.PageSpec spec, PdfPagesOptions? options, CancellationToken cancellationToken)
     {

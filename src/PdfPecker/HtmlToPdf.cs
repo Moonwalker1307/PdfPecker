@@ -29,29 +29,68 @@ public static partial class HtmlToPdf
 
     /// <summary>Converts an HTML string and writes the PDF to <paramref name="output"/>.</summary>
     public static void Convert(string html, Stream output, PdfOptions? options = null)
+        => Convert(html, output, options, CancellationToken.None);
+
+    /// <summary>
+    /// Converts an HTML string and writes the PDF to <paramref name="output"/>, stopping with
+    /// <see cref="OperationCanceledException"/> when <paramref name="cancellationToken"/> is cancelled. Nothing is written
+    /// to <paramref name="output"/> unless the conversion completes.
+    /// </summary>
+    /// <param name="html">The HTML document.</param>
+    /// <param name="output">Where the PDF is written; it is not flushed or closed.</param>
+    /// <param name="options">Page, font and output settings; null for the defaults.</param>
+    /// <param name="cancellationToken">Stops the conversion.</param>
+    public static void Convert(string html, Stream output, PdfOptions? options, CancellationToken cancellationToken)
     {
         if (output == null) throw new ArgumentNullException(nameof(output));
-        var bytes = Convert(html, options);
+        var bytes = Convert(html, options, cancellationToken);
         output.Write(bytes, 0, bytes.Length);
     }
 
     /// <summary>Converts an HTML file to a PDF file. Relative image and stylesheet paths resolve against the HTML file's folder.</summary>
     public static void ConvertFile(string htmlPath, string pdfPath, PdfOptions? options = null)
+        => ConvertFile(htmlPath, pdfPath, options, CancellationToken.None);
+
+    /// <summary>
+    /// Converts an HTML file to a PDF file, stopping with <see cref="OperationCanceledException"/> when
+    /// <paramref name="cancellationToken"/> is cancelled; the output file is then left as it was. Relative image and
+    /// stylesheet paths resolve against the HTML file's folder.
+    /// </summary>
+    /// <param name="htmlPath">The HTML file.</param>
+    /// <param name="pdfPath">The PDF file to write; it appears only once the conversion has succeeded.</param>
+    /// <param name="options">Page, font and output settings; null for the defaults.</param>
+    /// <param name="cancellationToken">Stops the conversion.</param>
+    public static void ConvertFile(string htmlPath, string pdfPath, PdfOptions? options, CancellationToken cancellationToken)
     {
         var html = File.ReadAllText(htmlPath);
         options ??= new PdfOptions();
         var baseDir = options.BaseDirectory ?? Path.GetDirectoryName(Path.GetFullPath(htmlPath));
-        AtomicFile.WriteAllBytes(pdfPath, Render(html, options, baseDir));
+        AtomicFile.WriteAllBytes(pdfPath, Render(html, options, baseDir, cancellationToken));
     }
 
     /// <summary>Converts an HTML string to a PDF asynchronously on the thread pool.</summary>
     /// <remarks>
     /// Cancelling <paramref name="cancellationToken"/> stops a conversion that is already running. With
     /// <see cref="PdfOptions.Signature"/> the external signer and the timestamp server are awaited, as in
-    /// <see cref="PdfSigner.SignAsync"/>, and cancelling stops them too.
+    /// <see cref="PdfSigner.SignAsync(byte[], PdfSignatureOptions, string?, CancellationToken)"/>, and cancelling stops them too.
     /// </remarks>
     public static Task<byte[]> ConvertAsync(string html, PdfOptions? options = null, CancellationToken cancellationToken = default)
         => RenderAsync(() => html ?? throw new ArgumentNullException(nameof(html)), options ?? new PdfOptions(), cancellationToken);
+
+    /// <summary>
+    /// Converts an HTML string on the thread pool and writes the PDF to <paramref name="output"/> asynchronously, as
+    /// ASP.NET Core requires of a response body. Nothing is written unless the conversion completes.
+    /// </summary>
+    /// <param name="html">The HTML document.</param>
+    /// <param name="output">Where the PDF is written; it is not flushed or closed.</param>
+    /// <param name="options">Page, font and output settings; null for the defaults.</param>
+    /// <param name="cancellationToken">Stops the conversion, signing and the write.</param>
+    public static async Task ConvertAsync(string html, Stream output, PdfOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        if (output == null) throw new ArgumentNullException(nameof(output));
+        var bytes = await ConvertAsync(html, options, cancellationToken).ConfigureAwait(false);
+        await output.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
+    }
 
     internal static byte[] Render(string html, PdfOptions options, string? baseDirectory, CancellationToken cancellationToken = default)
     {

@@ -238,7 +238,7 @@ public static class PdfMerger
         return copy.ToArray();
     }
 
-    private static async Task<byte[]> ReadAllAsync(Stream input, CancellationToken cancellationToken)
+    internal static async Task<byte[]> ReadAllAsync(Stream input, CancellationToken cancellationToken)
     {
         if (input.CanSeek)
         {
