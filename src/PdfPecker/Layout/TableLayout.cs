@@ -34,6 +34,8 @@ internal sealed partial class LayoutEngine
         public readonly List<RowModel> Rows = new();
         public int ColCount;
         public int HeadCount; // leading rows that come from <thead>
+        public int FootCount; // trailing rows that come from <tfoot>
+        public float FootReserve; // per layout pass: room the footer repeated at the bottom of each page takes, or 0
         public bool Rtl;      // direction: rtl, so the first column is on the right
         public float[] ColMin = Array.Empty<float>(), ColMax = Array.Empty<float>();
         public float[] ColFixed = Array.Empty<float>(), ColPct = Array.Empty<float>();
@@ -69,6 +71,7 @@ internal sealed partial class LayoutEngine
         var cols = new List<Element>();
         CollectTableParts(table, m, head, body, foot, cols);
         m.HeadCount = head.Count;
+        m.FootCount = foot.Count;
         var trs = new List<Element>(head.Count + body.Count + foot.Count);
         trs.AddRange(head);
         trs.AddRange(body);
@@ -400,6 +403,7 @@ internal sealed partial class LayoutEngine
             m.RowExtra = RowExtras(m, th - frameT - frameB - vs, colX, widths, hs, vs, collapse);
         // A caption comes before the rows, and the probe is not handed to it. In columns that are being balanced, the
         // breaks of the rows that the probe would skip count for the balancing even when the layout is thrown away.
+        m.FootReserve = FootReserve(m, cy, colX, widths, hs, vs, collapse);
         _rowProbe = m.Captions.Count == 0 && _columnNotes == null ? probe : null;
         for (int r = 0; r < m.Rows.Count; r++)
         {
@@ -410,6 +414,7 @@ internal sealed partial class LayoutEngine
         }
         _rowProbe = outerProbe;
         m.RowExtra = null;
+        m.FootReserve = 0;
         m.DefiniteHeight = false;
         _cbHeight = outerCb;
 
@@ -562,6 +567,25 @@ internal sealed partial class LayoutEngine
         return extras;
     }
 
+    /// <summary>
+    /// The height of the footer rows that are repeated at the bottom of every page a table breaks across, as Chrome
+    /// repeats them, or 0 when nothing is paginated or the footer is too tall to repeat usefully.
+    /// </summary>
+    private float FootReserve(TableModel m, float top, float[] colX, float[] widths, float hs, float vs, bool collapse)
+    {
+        if (!_paginate || _measuringRows > 0 || m.FootCount == 0 || m.Rows.Count <= m.HeadCount + m.FootCount) return 0;
+        var foot = Capture(() =>
+        {
+            _measuringRows++;
+            float y = 0;
+            for (int r = m.Rows.Count - m.FootCount; r < m.Rows.Count; r++)
+                y = LayoutRow(m, r, y, colX, widths, hs, vs, collapse, allowMove: false) + vs;
+            _measuringRows--;
+            return y;
+        });
+        return foot.Height <= _grid.Height(PageOf(top)) / 2 ? foot.Height : 0;
+    }
+
     /// <summary>Lays out one table row at <paramref name="rowTop"/> and returns its bottom. A row that would straddle a
     /// page boundary moves to the next page, where the table's header rows are repeated first.</summary>
     private float LayoutRow(TableModel m, int r, float rowTop, float[] colX, float[] widths, float hs, float vs, bool collapse, bool allowMove,
@@ -615,9 +639,11 @@ internal sealed partial class LayoutEngine
             foreach (var cell in row.Ending)
                 rowBottom = Math.Max(rowBottom, cell.Top + cell.NeededH);
 
-            bool move = allowMove && attempt == 0 && CrossesPage(rowTop, rowBottom) && rowBottom - rowTop <= _grid.Height(PageOf(rowTop) + 1) && !AtPageTop(rowTop);
-            // A row that starts a column because the row before it ended right at the break gets the header too.
-            bool atBreak = !move && allowMove && attempt == 0 && _grid is ColumnGrid && r > m.HeadCount && m.HeadCount > 0
+            // A body row leaves room on its page for the footer repeated under it.
+            float reserve = r >= m.HeadCount && r < m.Rows.Count - m.FootCount ? m.FootReserve : 0;
+            bool move = allowMove && attempt == 0 && CrossesPage(rowTop, rowBottom + reserve) && rowBottom - rowTop <= _grid.Height(PageOf(rowTop) + 1) && !AtPageTop(rowTop);
+            // A row that starts a page or column because the row before it ended right at the break gets the header too.
+            bool atBreak = !move && allowMove && attempt == 0 && r > m.HeadCount && m.HeadCount > 0
                            && PageOf(rowTop) > 0 && AtPageTop(rowTop);
             if (move || atBreak)
             {
@@ -628,6 +654,16 @@ internal sealed partial class LayoutEngine
                 if (move)
                 {
                     _columnNotes?.Break(PageOf(rowTop), rowTop, rowBottom - FlowEnd(PageOf(rowTop)));
+                    if (reserve > 0)
+                    {
+                        // The footer closes the table on this page, where the row would have started.
+                        float footTop = rowTop;
+                        int footOps = _ops.Count;
+                        for (int f = m.Rows.Count - m.FootCount; f < m.Rows.Count; f++)
+                            footTop = LayoutRow(m, f, footTop, colX, widths, hs, vs, collapse, allowMove: false, pageColumns) + vs;
+                        // The structure has the footer once: its repeats are artifacts.
+                        if (Tags != null) Untag(_ops, footOps);
+                    }
                     rowTop = NextPage(rowTop);
                 }
                 else _columnNotes?.Exact(PageOf(rowTop), rowTop, rowBottom - rowTop, _grid);

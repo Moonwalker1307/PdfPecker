@@ -687,8 +687,11 @@ internal sealed partial class LayoutEngine
             rowY[rowCount] = ry;
         }
 
-        // Final placement with box alignment.
+        // Final placement with box alignment. An item laid out again across a page boundary may get taller; the rows
+        // below it move down by as much. Items are placed in their order, which for auto-placed items is row by row, so
+        // an item placed earlier in a later row does not move.
         float firstBaseline = float.NaN;
+        float[]? rowShift = null;
         for (int i = 0; i < items.Count; i++)
         {
             var it = items[i];
@@ -697,7 +700,8 @@ internal sealed partial class LayoutEngine
             float areaX = colX[it.Col], areaW = AreaWidth(it);
             // Right to left, the columns run from the right edge of the grid container (of the grid area for a subgrid).
             if (s.Rtl) areaX = colCtx?.Edges != null ? colCtx.Edges[^1] - areaX - areaW : x + x + w - areaX - areaW;
-            float areaY = rowY[it.Row], areaH = rowY[lastRow] + rows[lastRow].Base - areaY;
+            float shiftTop = rowShift?[it.Row] ?? 0, shiftBottom = rowShift?[lastRow] ?? 0;
+            float areaY = rowY[it.Row] + shiftTop, areaH = rowY[lastRow] + shiftBottom + rows[lastRow].Base - areaY;
             var box = it.Box!;
 
             var align = SelfAlign(it, s.AlignItems);
@@ -742,7 +746,17 @@ internal sealed partial class LayoutEngine
             else if (it.AutoMt) dy = areaH - outerH;
             else dy = align switch { BoxAlign.End => areaH - outerH, BoxAlign.Center => (areaH - outerH) / 2, _ => 0 };
 
-            Place(box, areaX + dx, areaY + dy);
+            bool subgrid = it.El != null && it.Style.IsGrid && _subgrids.ContainsKey(it.El);
+            if (subgrid || rowSub) Place(box, areaX + dx, areaY + dy);
+            else
+            {
+                float grown = PlaceOnPages(box, areaX + dx, areaY + dy) - (areaY + areaH);
+                if (grown > Eps)
+                {
+                    rowShift ??= new float[rowCount + 1];
+                    for (int k = lastRow + 1; k <= rowCount; k++) rowShift[k] = Math.Max(rowShift[k], shiftBottom + grown);
+                }
+            }
             if (float.IsNaN(firstBaseline) && it.Row == 0 && !float.IsNaN(box.Baseline)) firstBaseline = areaY + dy + box.Baseline;
         }
         if (hasSubgrids)
@@ -750,7 +764,7 @@ internal sealed partial class LayoutEngine
                 if (it.El != null && it.Style.IsGrid) _subgrids.Remove(it.El);
         _lastBoxRight = Math.Max(_lastBoxRight, colX[colCount]);
         if (!float.IsNaN(firstBaseline)) _lastBaseline = firstBaseline;
-        return Math.Max(rowY[rowCount], y);
+        return Math.Max(rowY[rowCount] + (rowShift?[rowCount] ?? 0), y);
     }
 
     /// <summary>A row subgrid's bottom inset when its height is not imposed: its margin, border and padding below the last track.</summary>
