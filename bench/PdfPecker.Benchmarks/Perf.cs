@@ -144,6 +144,14 @@ static class Perf
         var shaped = new List<ShapedGlyph>();
         results.Add(Measure("shape-complex", () => { foreach (var (font, text, rtl) in shapingRuns) ComplexShaper.Shape(font, text, 0, text.Length, rtl, shaped); }, runs: 500));
 
+        // Complex text that leans on the shaper's own steps more than on the font's lookups: Arabic typed with combining
+        // hamza and madda (which compose), marks out of canonical order with modifier marks among them, joiners,
+        // tatweel, bidi controls and mirrored brackets; pointed Hebrew with presentation forms the font lacks (which
+        // decompose); and Arabic in Liberation Sans, which has no Arabic forms, mark positioning or GPOS kerning for it,
+        // so the presentation form fallback, kern table and mark placement run. Words, and whole paragraphs, both ways.
+        var fallbackRuns = FallbackShapingRuns(Path.Combine(fixtureDir, "fonts"));
+        results.Add(Measure("shape-complex-fallback", () => { foreach (var (font, text, rtl) in fallbackRuns) ComplexShaper.Shape(font, text, 0, text.Length, rtl, shaped); }, runs: 300));
+
         // Gradients: some four hundred CSS gradient values of every kind (linear with angles and corners, radial with
         // each size keyword and position, conic with start angles), plain and repeating, with translucent and
         // positioned stops, parsed, resolved for two boxes and written as shading patterns (tiled for the repeating
@@ -569,6 +577,28 @@ static class Perf
             }
         }
         return instances;
+    }
+
+    static List<(FontProgram Font, string Text, bool Rtl)> FallbackShapingRuns(string dir)
+    {
+        const string arabic = "ا\u0654كل ا\u0653ن و\u0654لد ي\u0654س ب\u0650\u0651ت ك\u0651\u064Eت\u0627ب\u064C م\u0655\u0650ن ق\u064E\u0654ل\u0651 "
+            + "ل\u200Dا ب\u200Cب ســـلام ك\u0640\u0640ت \u200F(نص) [مثال] {قوس} «اقتباس» <علامة> ٱلل\u0651\u064E\u0670ه\u0650 لأ لإ لآ لا ";
+        const string hebrew = "\uFB2Aלום \uFB2Bבת \uFB31ית \uFB4Bרה \uFB1Dהודה בּ\u05B0רֵא\u05C1\u05B4ית ש\u05B8\u05C1\u05BCם "
+            + "\uFB35עד (עולם) [א] {ב} \u05D0\u05B8\u0591\u05B4\u05BC יִשְׂרָאֵל ";
+        var arabicFont = FontProgram.Load(File.ReadAllBytes(Path.Combine(dir, "NotoSansArabic-Subset.ttf")))[0];
+        var hebrewFont = FontProgram.Load(File.ReadAllBytes(Path.Combine(dir, "NotoSansHebrew-Subset.ttf")))[0];
+        var liberation = BundledFonts.Get(StandardFont.Get(FontFamily.Helvetica, bold: false, italic: false))!.Program;
+        var runs = new List<(FontProgram, string, bool)>();
+        foreach (var (font, text) in new[] { (arabicFont, arabic), (hebrewFont, hebrew), (liberation, arabic) })
+        {
+            string paragraph = string.Concat(Enumerable.Repeat(text, 8));
+            foreach (bool rtl in new[] { true, false })
+            {
+                runs.Add((font, paragraph, rtl));
+                foreach (var word in text.Split(' ', StringSplitOptions.RemoveEmptyEntries)) runs.Add((font, word, rtl));
+            }
+        }
+        return runs;
     }
 
     static List<(FontProgram Font, string Text, bool Rtl)> ShapingRuns(string dir)
