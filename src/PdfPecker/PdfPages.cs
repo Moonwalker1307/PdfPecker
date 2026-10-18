@@ -128,7 +128,7 @@ public static class PdfPages
         if (inputPath == null) throw new ArgumentNullException(nameof(inputPath));
         var range = PdfPageRange.Parse(pages ?? throw new ArgumentNullException(nameof(pages)));
         var pdf = File.ReadAllBytes(inputPath);
-        PdfMerger.WriteFile(outputPath, output => Extract(new MemoryStream(pdf, writable: false), output, range, options, cancellationToken));
+        AtomicFile.Write(outputPath, output => Extract(new MemoryStream(pdf, writable: false), output, range, options, cancellationToken));
     }
 
     /// <summary>A new PDF without the given pages, such as <c>"2,5-"</c>.</summary>
@@ -229,7 +229,7 @@ public static class PdfPages
         for (int i = 0; i < parts.Count; i++)
         {
             var path = outputPath(i + 1) ?? throw new ArgumentException($"No output path for part {i + 1}.", nameof(outputPath));
-            PdfMerger.WriteFile(path, output =>
+            AtomicFile.Write(path, output =>
             {
                 var writer = Writer(options, cancellationToken, output);
                 writer.Add(file, new PdfMergeWriter.PageSpec { Pages = parts[i] });
