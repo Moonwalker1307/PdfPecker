@@ -121,6 +121,23 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(Repeat(level, 40)));
     }
 
+    [Theory]
+    // The fuzz finding (html, timeout-b4187992): each unterminated href swallows the next line, so two lines make one
+    // level of nav, heading, list and item. Sixty lines took 13 s.
+    [InlineData("<nav><h3>Contents</h3><ul>\n<li><a href=\"</div>\n", 80)]
+    [InlineData("<nav><h3>Contents</h3><ul><li>", 40)]
+    [InlineData("<h3>Contents</h3><ul><li>", 40)]
+    [InlineData("<h3>Contents</h3><ol><li style=\"list-style-position: inside\">", 40)]
+    [InlineData("<h3>Contents</h3><ul style=\"list-style-image: url('data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%226%22 height=%226%22/>')\"><li>", 40)]
+    [InlineData("<h3>Contents</h3><ul><li>", 200)]
+    public void Headings_kept_with_nested_list_items_do_not_lay_out_each_level_twice(string level, int count)
+    {
+        // As above, but the box after each heading is a list whose first item holds the next heading. The item's layout
+        // could not stop early once its first content was placed, so each level laid out the levels below it twice:
+        // 28 levels took two seconds, and each further level doubled that.
+        AssertStructurallyValid(Bounded(Repeat(level, count) + "<p>end</p>"));
+    }
+
     [Fact]
     public void Deeply_nested_subgrids_with_huge_spans_stay_bounded()
     {

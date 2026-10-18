@@ -502,10 +502,15 @@ internal sealed partial class LayoutEngine
     /// Whether a box's first content is decided by its own flow alone, so that stopping its layout early leaves it
     /// where it is: a plain block whose ops are not moved, wrapped or laid out again after its content.
     /// </summary>
+    /// <remarks>
+    /// A list item qualifies: its marker is drawn with its first line, or at its top after its content when it has no
+    /// line, which the scan for the first content reaches no earlier than the content itself. Without that, a list
+    /// whose first item holds the next heading was laid out twice per level.
+    /// </remarks>
     private static bool CanProbe(Element e)
     {
         var s = e.Style;
-        return s.Display is not (Display.Table or Display.ListItem) && !s.IsFlex && !s.IsGrid && !s.IsMultiColumn
+        return s.Display != Display.Table && !s.IsFlex && !s.IsGrid && !s.IsMultiColumn
                && !s.AvoidBreakInside && !s.Layered && e.Control == null && e.Name is not ("img" or "svg" or "hr");
     }
 
