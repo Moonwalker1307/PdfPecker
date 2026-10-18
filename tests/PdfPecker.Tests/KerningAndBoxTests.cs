@@ -198,10 +198,71 @@ public class KerningAndBoxTests
     [Fact]
     public void A_blurred_shadow_fades_out()
     {
-        var ops = Layout("<div style='width:100px;height:40px;box-shadow:0 0 8px black'></div>");
-        var greys = ops.OfType<RectOp>().Select(r => r.Color & 0xFF).Distinct().OrderBy(v => v).ToList();
+        var mask = Assert.Single(ShadowMasks("<div style='width:100px;height:40px;box-shadow:0 0 8px black'></div>"));
+        // The bands are grey levels of a soft mask through which the black is painted, so that what is under the shadow
+        // shows through, where they used to be greys flattened on white.
+        Assert.Equal(0xFF000000u, mask.MaskFill);
+        var greys = Flatten(mask.Ops).OfType<RectOp>().Select(r => r.Color & 0xFF).Distinct().ToList();
         Assert.True(greys.Count > 4);
-        Assert.True(greys[^1] > 240); // the outer band is nearly white
+        Assert.True(greys.Min() < 16); // the outer band lets nearly all of the backdrop through
+    }
+
+    [Theory]
+    [InlineData("0 0 8px black", 1f, 0xFF000000u)]
+    [InlineData("0 0 20px 4px rgba(255,0,0,.5)", 0.5f, 0xFFFF0000u)]
+    public void Shadow_mask_bands_follow_a_gaussian_edge(string shadow, float alpha, uint fill)
+    {
+        // Along a line out of the left edge of the box, the innermost band under each point (the last painted) gives
+        // the mask the shadow's alpha times the coverage of a Gaussian-blurred edge.
+        var mask = Assert.Single(ShadowMasks($"<div style='width:200px;height:100px;box-shadow:{shadow}'></div>"));
+        Assert.Equal(fill, mask.MaskFill);
+        var bands = Flatten(mask.Ops).OfType<RectOp>().ToList();
+        var parsed = BoxShadow.Parse(shadow, 12, 12, 5, 8)![0];
+        float sigma = parsed.Blur / 2, y = 37.5f;
+        for (float x = -parsed.Blur - parsed.Spread; x < 0; x += 0.5f)
+        {
+            float level = 0;
+            foreach (var r in bands)
+                if (x >= r.X && x < r.X + r.W && y >= r.Y && y < r.Y + r.H) level = (r.Color & 0xFF) / 255f;
+            float distance = -x - parsed.Spread;
+            float expected = alpha * 0.5f * Erfc(distance / (sigma * MathF.Sqrt(2)));
+            Assert.True(Math.Abs(level - expected) < 0.06f, $"at x = {x}: mask {level}, expected {expected}");
+        }
+    }
+
+    [Fact]
+    public void A_sharp_shadow_needs_no_mask()
+    {
+        var html = "<div style='width:100px;height:40px;box-shadow:2px 2px 0 rgba(0,0,0,.5)'></div>";
+        Assert.Empty(ShadowMasks(html));
+        Assert.Contains(Layout(html).OfType<RectOp>(), r => r.Color == 0xFF7F7F7Fu); // flattened on white, as before
+    }
+
+    /// <summary>The soft-mask layers of the blurred box shadows in a document.</summary>
+    private static List<LayerOp> ShadowMasks(string html)
+    {
+        var doc = HtmlParser.Parse(html);
+        new StyleResolver(new Stylesheet(), Width, PageHeight).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
+        var engine = new LayoutEngine(PageHeight, new ImageLoader(null, null, false));
+        engine.Layout(doc, Width);
+        var found = new List<LayerOp>();
+        void Walk(IEnumerable<DrawOp> ops)
+        {
+            foreach (var o in ops)
+            {
+                if (o is LayerOp { MaskFill: not null } l) found.Add(l);
+                else if (o is GroupOp g) Walk(g.Ops);
+            }
+        }
+        Walk(engine.Ops);
+        return found;
+    }
+
+    private static float Erfc(float z)
+    {
+        float t = 1 / (1 + 0.3275911f * MathF.Abs(z));
+        float v = t * (0.254829592f + t * (-0.284496736f + t * (1.421413741f + t * (-1.453152027f + t * 1.061405429f)))) * MathF.Exp(-z * z);
+        return z >= 0 ? v : 2 - v;
     }
 
     [Fact]

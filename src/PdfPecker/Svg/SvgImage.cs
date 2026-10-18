@@ -558,6 +558,8 @@ internal sealed partial class SvgImage
         }
         var grad = new Gradient();
         (grad.Offsets, grad.Colors) = Gradient.NormalizeStops(stops, 0xFFFFFFFF);
+        // Translucent stops (stop-opacity, fill-opacity, opacity) are painted through a soft mask holding their alphas.
+        grad.KeepAlpha(stops);
         if (g.Name == "lineargradient")
         {
             grad.X0 = Coord("x1", "0%", vw);

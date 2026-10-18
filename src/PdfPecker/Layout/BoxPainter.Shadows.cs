@@ -25,9 +25,11 @@ internal static partial class BoxPainter
     private static uint CoveredAlpha(uint alpha, float cover) => (uint)Math.Clamp(MathF.Round(alpha * cover), 0, 255);
 
     /// <summary>
-    /// Paints outer box shadows under the box, the first shadow on top. A shadow is opaque, blended over white by its
-    /// alpha, and only drawn outside the border box, as browsers clip it there. A blur becomes bands that fade out like a
-    /// Gaussian edge. Inset shadows are painted by <see cref="PaintInsetShadows"/>.
+    /// Paints outer box shadows under the box, the first shadow on top, only outside the border box, as browsers clip
+    /// them there. A sharp shadow is opaque, blended over white by its alpha. A blur becomes bands that fade out like a
+    /// Gaussian edge, each painted over the one before; they are grey levels in a layer that is a soft mask
+    /// (<see cref="LayerOp.MaskFill"/>), through which the shadow's colour is painted, so that what lies under the
+    /// shadow shows through it. Inset shadows are painted by <see cref="PaintInsetShadows"/>.
     /// </summary>
     public static void PaintShadows(GroupOp group, ComputedStyle s, float x, float y, float w, float h, CornerRadii? radii = null)
     {
@@ -44,6 +46,12 @@ internal static partial class BoxPainter
             // Bands from the outside in, each painted over the one before, so the middle of the edge is half covered.
             int bands = Math.Max(1, BlurBands(blur));
             float sigma = blur / 2;
+            var into = group;
+            if (bands > 1)
+            {
+                into = new LayerOp { MaskFill = 0xFF000000 | color };
+                group.Ops.Add(into);
+            }
             for (int k = 0; k < bands; k++)
             {
                 float grow, cover;
@@ -60,11 +68,13 @@ internal static partial class BoxPainter
                 if (sw <= 0 || shh <= 0) continue;
                 uint a = CoveredAlpha(alpha, cover);
                 if (a == 0) continue;
-                uint c = CssColor.FlattenOnWhite(a << 24 | (color & 0xFFFFFF));
+                // In the mask, the band's alpha is a grey level.
+                uint c = bands == 1 ? CssColor.FlattenOnWhite(a << 24 | (color & 0xFFFFFF)) : 0xFF000000 | a << 16 | a << 8 | a;
                 if (radii is { } r)
-                    group.Ops.Add(new RoundRectOp(sx, sy, sw, shh, r.Outset(grow), c).WithHole(x, y, w, h, r));
-                else PaintOutside(group, sx, sy, sw, shh, x, y, w, h, c);
+                    into.Ops.Add(new RoundRectOp(sx, sy, sw, shh, r.Outset(grow), c).WithHole(x, y, w, h, r));
+                else PaintOutside(into, sx, sy, sw, shh, x, y, w, h, c);
             }
+            if (into != group && into.Ops.Count == 0) group.Ops.RemoveAt(group.Ops.Count - 1);
         }
     }
 

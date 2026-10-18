@@ -224,6 +224,10 @@ internal sealed partial class LayoutEngine
                 if (bg.Svg != null) bg.Svg = bg.Svg.Recolored(f.Apply);
                 if (bg.Gradient != null) bg.Gradient = bg.Gradient.Recolored(f.Apply);
                 break;
+            case LayerOp { MaskFill: { } fill } mask:
+                // The ops are grey levels of a soft mask, not colours: only the colour painted through it changes.
+                mask.MaskFill = f.Apply(fill);
+                break;
             case LayerOp layer:
                 // The shadows and floods of an inner filter take this filter's colours too.
                 if (layer.Raster != null)

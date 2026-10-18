@@ -142,6 +142,65 @@ public class BorderStyleAndShadowTests
         Near(128, 128, 0, Pixel(html, 5, 30), 20);
     }
 
+    // ---- blurred outer box-shadow ----
+
+    [Fact]
+    public void A_blurred_shadow_lets_the_background_show_through()
+    {
+        // Black at half alpha over blue darkens the blue; flattened on white it would be grey.
+        var html = Body + "<div style='background:#0000ff;padding:40px'><div style='width:100px;height:60px;background:#fff;box-shadow:0 0 16px 8px rgba(0,0,0,.5)'></div></div>";
+        var near = Pixel(html, 36, 70); // 4px outside the box, inside the spread
+        Assert.True(near.R < 30 && near.G < 30 && near.B > 90 && near.B < 210, $"{near}");
+        var far = Pixel(html, 8, 70); // past the blur: only the background
+        Near(0, 0, 255, far, 16);
+    }
+
+    [Fact]
+    public void A_blurred_shadow_over_an_image_keeps_the_image_visible()
+    {
+        string png = PdfTestHelpers.DataUri(PdfTestHelpers.SolidPng(10, 10, 255, 255, 0));
+        var html = Body + $"<div style='background:url({png}) 0 0 / 10px 10px;padding:40px'><div style='width:100px;height:60px;background:#fff;box-shadow:0 0 12px rgba(255,0,0,.6)'></div></div>";
+        var p = Pixel(html, 39, 70);
+        Assert.True(p.R > 230 && p.G > 60 && p.G < 210 && p.B < 30, $"red over yellow, got {p}");
+    }
+
+    [Fact]
+    public void A_colour_filter_changes_a_blurred_shadows_colour_but_not_its_mask()
+    {
+        // invert(1) turns the black shadow white; the mask's grey levels stay, so the background around the shadow
+        // stays blue instead of being painted over.
+        var html = Body + "<div style='background:#0000ff;padding:40px'><div style='width:100px;height:60px;background:#fff;box-shadow:0 0 16px 8px #000;filter:invert(1)'></div></div>";
+        var near = Pixel(html, 37, 70);
+        Assert.True(near.R > 150 && near.G > 150 && near.B > 240, $"a white shadow, got {near}");
+        Near(0, 0, 255, Pixel(html, 6, 70), 16);
+        Near(0, 0, 255, Pixel(html, 90, 8), 16);
+    }
+
+    [Fact]
+    public void A_blurred_shadow_split_by_a_page_break_is_masked_on_both_pages()
+    {
+        var html = "<style>@page { size: 300px 200px; margin: 0 }</style><body style='margin:0;background:#0000ff'><div style='height:150px'></div>"
+            + "<div style='margin-left:40px;width:150px;height:100px;background:#fff;box-shadow:0 0 16px rgba(0,0,0,.8)'></div></body>";
+        var pdf = HtmlToPdf.Convert(html, new PdfOptions { Compress = false, Accessibility = PdfAccessibility.Tagged });
+        PdfTestHelpers.AssertStructurallyValid(pdf);
+        Assert.Equal(2, PdfTestHelpers.PageCount(pdf));
+        var renderer = PdfRenderer.Open(pdf);
+        foreach (var (page, y) in new[] { (0, 170), (1, 20) })
+        {
+            var img = renderer.RenderPage(page, new ImageOptions { Dpi = 96 });
+            int i = (y * img.Width + 38) * 4; // just left of the box: the shadow over blue
+            Assert.True(img.Rgba[i] < 20 && img.Rgba[i + 2] > 100 && img.Rgba[i + 2] < 215, $"page {page}: {img.Rgba[i]}, {img.Rgba[i + 1]}, {img.Rgba[i + 2]}");
+        }
+    }
+
+    [Fact]
+    public void A_sharp_shadow_is_written_as_before()
+    {
+        // Without a blur there is one band, still flattened on white: no alpha state is added for it.
+        var pdf = HtmlToPdf.Convert(Body + "<div style='width:100px;height:60px;box-shadow:4px 4px 0 rgba(0,0,0,.5)'></div>", new PdfOptions { Compress = false });
+        Assert.DoesNotContain("/ca ", PdfTestHelpers.Latin1(pdf));
+    }
+
     // ---- text-overflow ----
 
     private static List<TextOp> TextOps(string html, string css = "")
