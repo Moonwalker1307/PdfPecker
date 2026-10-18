@@ -19,6 +19,9 @@ internal sealed class Hyphenator
     private readonly List<byte> _values = new();
     private readonly Dictionary<string, byte[]> _exceptions = new(StringComparer.Ordinal);
     private readonly int _left, _right;
+    // French and Italian patterns cover elisions such as l'ordinateur, so words with an apostrophe are hyphenated only
+    // for languages whose patterns mention it; elsewhere the patterns would put breaks next to it.
+    private bool _apostrophes;
 
     private Hyphenator(int left, int right)
     {
@@ -47,7 +50,7 @@ internal sealed class Hyphenator
         string? key = primary switch
         {
             "en" => "en-us",
-            "da" or "de" or "es" or "nl" or "no" or "nb" or "nn" or "sv" => primary,
+            "da" or "de" or "es" or "fr" or "it" or "nl" or "no" or "nb" or "nn" or "pl" or "pt" or "sv" => primary,
             _ => null,
         };
         return key == null ? null : Bundled.GetOrAdd(key, Load);
@@ -136,6 +139,7 @@ internal sealed class Hyphenator
             else { letters.Append(char.ToLowerInvariant(c)); digits.Add(0); }
         }
         if (letters.Length == 0) return;
+        if (pattern.Contains('\'')) _apostrophes = true;
         int node = 0;
         for (int k = 0; k < letters.Length; k++)
         {
@@ -166,6 +170,8 @@ internal sealed class Hyphenator
 
     // ---------------------------------------------------------------- hyphenating
 
+    private static bool IsApostrophe(char c) => c is '\'' or '\u2019';
+
     /// <summary>
     /// The break points of a word that hyphens: auto may use: offsets k (0 &lt; k &lt; length) at which the word may
     /// break with a hyphen, in increasing order, written into <paramref name="breaks"/>. Leading and trailing
@@ -181,12 +187,17 @@ internal sealed class Hyphenator
         int n = end - start;
         if (n < MinWordLength || n < _left + _right) return 0;
         for (int k = start; k < end; k++)
-            if (!char.IsLetter(word[k])) return 0; // digits, URLs, apostrophes, surrogate pairs...
+            if (!char.IsLetter(word[k]) && !(_apostrophes && IsApostrophe(word[k])))
+                return 0; // digits, URLs, apostrophes, surrogate pairs...
         if (skipCapitalized && char.IsUpper(word[start])) return 0;
 
         Span<char> lower = n <= 128 ? stackalloc char[n + 2] : new char[n + 2];
         lower[0] = '.';
-        for (int k = 0; k < n; k++) lower[k + 1] = char.ToLowerInvariant(word[start + k]);
+        for (int k = 0; k < n; k++)
+        {
+            char c = word[start + k];
+            lower[k + 1] = IsApostrophe(c) ? '\'' : char.ToLowerInvariant(c); // the patterns use the ASCII apostrophe
+        }
         lower[n + 1] = '.';
 
         if (_exceptions.Count > 0 && _exceptions.TryGetValue(lower.Slice(1, n).ToString(), out var exc))

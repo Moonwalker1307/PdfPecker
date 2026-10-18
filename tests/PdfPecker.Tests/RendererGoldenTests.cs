@@ -34,6 +34,7 @@ public class RendererGoldenTests
         "transparency/demo",
         "image-formats/demo",
         "translucent-effects/demo",
+        "hyphenation/demo",
     };
 
     [Theory]
