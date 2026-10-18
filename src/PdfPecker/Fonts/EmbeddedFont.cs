@@ -64,6 +64,7 @@ internal sealed class EmbeddedFont : TextFont
         var program = Program.WithFeatures(features);
         if (ReferenceEquals(program, Program)) return this;
         var variants = LazyInitializer.EnsureInitialized(ref _variants, () => new());
+        // Bounded by the program's own cap: past it the program comes back unchanged and this font is returned above.
         return variants.GetOrAdd(features, _ => new EmbeddedFont(this, program));
     }
 
@@ -247,11 +248,17 @@ internal sealed class FontChain : TextFont
     public override TextFont WithoutLigatures()
         => _withoutLigatures ??= new FontChain(_primary.WithoutLigatures(), cp => _fallback(cp)?.WithoutLigatures());
 
+    private const int MaxVariants = 64;
     private System.Collections.Concurrent.ConcurrentDictionary<string, FontChain>? _variants;
 
     public override TextFont WithFeatures(string features)
-        => LazyInitializer.EnsureInitialized(ref _variants, () => new())
-            .GetOrAdd(features, k => new FontChain(_primary.WithFeatures(k), cp => _fallback(cp)?.WithFeatures(k)));
+    {
+        var variants = LazyInitializer.EnsureInitialized(ref _variants, () => new());
+        if (variants.TryGetValue(features, out var cached)) return cached;
+        // Bundled font chains live as long as the process, so ever new feature settings must not grow this forever.
+        if (variants.Count >= MaxVariants) return this;
+        return variants.GetOrAdd(features, k => new FontChain(_primary.WithFeatures(k), cp => _fallback(cp)?.WithFeatures(k)));
+    }
 
     public override int KernUnits(int left, int right)
     {

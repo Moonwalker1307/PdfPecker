@@ -68,6 +68,16 @@ public class FontFeatureTests
     }
 
     [Fact]
+    public void Feature_variants_of_one_font_are_capped()
+    {
+        // Bundled fonts live as long as the process, so every new feature setting a server saw used to keep a copy of
+        // the font's character map forever.
+        var font = FontProgram.Load(Inter)[0];
+        var variants = Enumerable.Range(0, 200).Select(i => font.WithFeatures("tnum,ss01=" + (i + 2))).Distinct(ReferenceEqualityComparer.Instance).Count();
+        Assert.InRange(variants, 2, 65);
+    }
+
+    [Fact]
     public void Contextual_features_and_missing_features_change_nothing()
     {
         var font = FontProgram.Load(Inter)[0];

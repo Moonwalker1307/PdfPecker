@@ -200,6 +200,7 @@ internal sealed partial class LayoutEngine
 
     // Filtered copies of images, by the filter: the same image under the same filter is filtered once.
     private static readonly ConditionalWeakTable<PdfImage, Dictionary<string, PdfImage>> FilteredImages = new();
+    private const int MaxFiltersPerImage = 16;
 
     /// <summary>Changes the colours of the ops by the colour functions of a filter.</summary>
     internal static void Recolor(List<DrawOp> ops, ColorFilter filter)
@@ -276,7 +277,9 @@ internal sealed partial class LayoutEngine
                 Data = PdfImage.Deflate(rgb), SMask = image.SMask?.Copy(),
             };
         }
-        lock (FilteredImages) byFilter[key] = result;
+        // An image lives as long as the image cache keeps it, so only a few filters of it are kept; more are rare.
+        lock (FilteredImages)
+            if (byFilter.Count < MaxFiltersPerImage) byFilter[key] = result;
         return result;
     }
 }

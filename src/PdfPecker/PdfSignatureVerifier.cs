@@ -162,14 +162,24 @@ public static class PdfSignatureVerifier
             throw new InvalidDataException("The PDF is not readable: " + ex.Message, ex);
         }
         var dssCerts = DssCertificates(file);
-        return found.Select(f => VerifyOne(file, f, options, dssCerts)).ToList();
+        try
+        {
+            var hashes = new RangeHashes(file.Data);
+            return found.Select(f => VerifyOne(file, f, options, dssCerts, hashes)).ToList();
+        }
+        finally
+        {
+            // The validation data's certificates only help build chains; the results keep none of them.
+            foreach (var cert in dssCerts) cert.Dispose();
+        }
     }
 
     /// <summary>Verifies a PDF file. See <see cref="Verify(byte[], PdfSignatureVerificationOptions?, string?)"/>.</summary>
     public static IReadOnlyList<PdfSignatureVerification> VerifyFile(string path, PdfSignatureVerificationOptions? options = null, string? password = null)
         => Verify(File.ReadAllBytes(path), options, password);
 
-    private static PdfSignatureVerification VerifyOne(PdfFile file, FoundSignature f, PdfSignatureVerificationOptions options, List<X509Certificate2> dssCerts)
+    private static PdfSignatureVerification VerifyOne(PdfFile file, FoundSignature f, PdfSignatureVerificationOptions options, List<X509Certificate2> dssCerts,
+        RangeHashes hashes)
     {
         var data = file.Data;
         var problems = new List<string>();
@@ -214,9 +224,7 @@ public static class PdfSignatureVerifier
             }
             var hash = CmsReader.HashFromOid(cms.Signer.DigestOid) ?? throw new CryptographicException("Unsupported digest algorithm " + cms.Signer.DigestOid + ".");
             v.HashAlgorithm = hash.Name;
-            byte[] rangeDigest = f.ByteRange.Length == 4 && f.ByteRange[2] + f.ByteRange[3] <= data.Length && f.ByteRange[0] + f.ByteRange[1] <= f.ByteRange[2]
-                ? SignatureScanner.HashRanges(data, f.ByteRange, hash)
-                : Array.Empty<byte>();
+            byte[] rangeDigest = hashes.Hash(f.ByteRange, hash);
 
             if (f.IsDocumentTimestamp)
             {
@@ -226,7 +234,7 @@ public static class PdfSignatureVerifier
                 v.HasTimestamp = true;
                 v.TimestampTime = time;
                 v.SigningTime ??= time;
-                byte[] digest = tsHash == hash ? rangeDigest : SignatureScanner.HashRanges(data, f.ByteRange, tsHash);
+                byte[] digest = tsHash == hash ? rangeDigest : hashes.Hash(f.ByteRange, tsHash);
                 var (contentOk, sigOk) = CmsReader.Verify(cms.Signer, CmsReader.Hash(hash, cms.Content), signer);
                 v.DigestMatches = imprint.AsSpan().SequenceEqual(digest) && contentOk;
                 v.SignatureValid = sigOk;
@@ -239,7 +247,7 @@ public static class PdfSignatureVerifier
                 if (f.SubFilter == "adbe.pkcs7.sha1")
                 {
                     // The old SHA-1 format signs an encapsulated SHA-1 of the byte ranges instead of the ranges themselves.
-                    var sha1 = SignatureScanner.HashRanges(data, f.ByteRange, HashAlgorithmName.SHA1);
+                    var sha1 = hashes.Hash(f.ByteRange, HashAlgorithmName.SHA1);
                     sha1Ok = cms.Content != null && cms.Content.AsSpan().SequenceEqual(sha1);
                     contentDigest = CmsReader.Hash(hash, cms.Content ?? Array.Empty<byte>());
                 }
@@ -396,6 +404,30 @@ public static class PdfSignatureVerifier
     private const long MaxStoreDecoded = 64L * 1024 * 1024;
 
     /// <summary>Certificates in the document security store, which help build chains for signatures made LTV-ready.</summary>
+    /// <summary>
+    /// The hashes of the signed byte ranges, each computed once. A file may hold a thousand signatures that each cover
+    /// nearly all of it, so hashing stops once the signatures together cover more bytes than any real file would.
+    /// </summary>
+    private sealed class RangeHashes(byte[] data)
+    {
+        private const long MaxHashedBytes = 4L * 1024 * 1024 * 1024;
+        private readonly Dictionary<(long, long, long, long, string), byte[]> _done = new();
+        private long _hashed;
+
+        public byte[] Hash(long[] range, HashAlgorithmName algorithm)
+        {
+            // A range that does not fit the file hashes to nothing, which matches no signature.
+            if (range.Length != 4 || range[0] + range[1] > range[2] || range[2] + range[3] > data.Length) return Array.Empty<byte>();
+            var key = (range[0], range[1], range[2], range[3], algorithm.Name ?? "");
+            if (_done.TryGetValue(key, out var digest)) return digest;
+            _hashed += range[1] + range[3];
+            if (_hashed > MaxHashedBytes) throw new CryptographicException("The signatures together cover more than 4 GB, so the rest are not checked.");
+            digest = SignatureScanner.HashRanges(data, range, algorithm);
+            _done[key] = digest;
+            return digest;
+        }
+    }
+
     private static List<X509Certificate2> DssCertificates(PdfFile file)
     {
         var list = new List<X509Certificate2>();
