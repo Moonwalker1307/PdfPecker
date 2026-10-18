@@ -45,6 +45,9 @@ internal static class MdUtil
         return true;
     }
 
+    /// <summary>Normalizes a footnote label, which has no whitespace or brackets, for case-insensitive matching as link labels match.</summary>
+    public static string NormalizeFootnoteLabel(ReadOnlySpan<char> label) => NormalizeReference(string.Concat("[", label, "]"));
+
     /// <summary>Normalizes a link label for case-insensitive matching: trims, collapses whitespace and case-folds.</summary>
     public static string NormalizeReference(string label)
     {

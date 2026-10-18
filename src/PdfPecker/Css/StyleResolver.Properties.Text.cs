@@ -308,6 +308,46 @@ internal sealed partial class StyleResolver
         else if (GeneratedContent.UnquoteString(d.Value) is { } hyphen) s.HyphenateCharacter = hyphen;
     }
 
+    private static void ApplyHyphenateLimitChars(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit || d.Lower == "unset") s.HyphenateLimitChars = parent.HyphenateLimitChars;
+        else if (d.Lower == "initial") s.HyphenateLimitChars = default;
+        else if (ParseHyphenateLimitChars(d.Lower) is { } limits) s.HyphenateLimitChars = limits;
+    }
+
+    /// <summary>
+    /// Parses hyphenate-limit-chars: up to three values, each auto or a positive integer, for the shortest word that is
+    /// hyphenated and the fewest characters before and after a hyphen. A missing after value is the same as the before
+    /// value, and a missing before value is auto. Anything else is an invalid declaration (null).
+    /// </summary>
+    internal static HyphenateLimits? ParseHyphenateLimitChars(string lower)
+    {
+        Span<int> values = stackalloc int[3];
+        int count = 0;
+        foreach (var token in lower.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (count == 3) return null;
+            if (token == "auto") values[count++] = 0;
+            else if (HyphenateLimit(token) is { } n) values[count++] = n;
+            else return null;
+        }
+        if (count == 0) return null;
+        if (count == 1) values[1] = 0;
+        if (count < 3) values[2] = values[1];
+        return new HyphenateLimits(values[0], values[1], values[2]);
+    }
+
+    // A positive CSS integer. Huge values are clamped rather than rejected, as Chrome does; no word is that long anyway.
+    private static int? HyphenateLimit(string token)
+    {
+        var digits = token.AsSpan(token.StartsWith('+') ? 1 : 0);
+        if (digits.IsEmpty) return null;
+        foreach (char c in digits)
+            if (c is < '0' or > '9') return null;
+        int n = Invariant.TryParseInt(digits, out int v) ? Math.Min(v, HyphenateLimits.Max) : HyphenateLimits.Max;
+        return n >= 1 ? n : null;
+    }
+
     private static void ApplyLineClamp(ComputedStyle s, in DeclaredValue d)
         => s.LineClamp = int.TryParse(d.Lower, NumberStyles.Integer, CultureInfo.InvariantCulture, out int clamp) && clamp > 0 ? Math.Min(clamp, 10000) : 0;
 

@@ -25,10 +25,17 @@ internal sealed partial class BlockParser
                 FinalizeHtmlBlock(block);
                 break;
             case MdNodeType.Item:
+            case MdNodeType.DefinitionDetails:
                 block.EndLine = block.LastChild?.EndLine ?? block.StartLine;
                 break;
             case MdNodeType.List:
                 FinalizeList(block);
+                break;
+            case MdNodeType.DefinitionList:
+                FinalizeDefinitionList(block);
+                break;
+            case MdNodeType.FootnoteDefinition:
+                FinalizeFootnoteDefinition(block);
                 break;
         }
         _tip = parent!;
@@ -126,7 +133,8 @@ internal sealed partial class BlockParser
         }
     }
 
-    private static bool HoldsInlines(MdNodeType type) => type is MdNodeType.Paragraph or MdNodeType.Heading or MdNodeType.TableCell;
+    private static bool HoldsInlines(MdNodeType type)
+        => type is MdNodeType.Paragraph or MdNodeType.Heading or MdNodeType.TableCell or MdNodeType.DefinitionTerm;
 
     private bool IsFirstChildOfItem(MdNode paragraph)
         => _gfm && paragraph.Parent?.Type == MdNodeType.Item && paragraph.Parent.FirstChild == paragraph;

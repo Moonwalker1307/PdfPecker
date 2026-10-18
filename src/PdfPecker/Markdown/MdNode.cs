@@ -17,6 +17,10 @@ internal enum MdNodeType : byte
     Table,
     TableRow,
     TableCell,
+    DefinitionList,
+    DefinitionTerm,
+    DefinitionDetails,
+    FootnoteDefinition,
 
     // Inlines
     Text,
@@ -29,6 +33,7 @@ internal enum MdNodeType : byte
     Strikethrough,
     Link,
     Image,
+    FootnoteReference,
 }
 
 internal enum TableAlign : byte { None, Left, Center, Right }
@@ -59,8 +64,11 @@ internal sealed class MdNode
     // HTML blocks
     public int HtmlBlockType;
 
-    // Lists
+    // Lists, and the details of definition lists, which continue like list items
     public ListData? ListData;
+
+    /// <summary>Footnote definitions and references: the normalized label.</summary>
+    public string? Label;
 
     /// <summary>GFM task list item state: null when the item has no checkbox.</summary>
     public bool? Checked;
@@ -77,7 +85,8 @@ internal sealed class MdNode
 
     public bool IsContainer => Type is MdNodeType.Document or MdNodeType.BlockQuote or MdNodeType.List or MdNodeType.Item
         or MdNodeType.Paragraph or MdNodeType.Heading or MdNodeType.Emph or MdNodeType.Strong or MdNodeType.Strikethrough
-        or MdNodeType.Link or MdNodeType.Image or MdNodeType.Table or MdNodeType.TableRow or MdNodeType.TableCell;
+        or MdNodeType.Link or MdNodeType.Image or MdNodeType.Table or MdNodeType.TableRow or MdNodeType.TableCell
+        or MdNodeType.DefinitionList or MdNodeType.DefinitionTerm or MdNodeType.DefinitionDetails or MdNodeType.FootnoteDefinition;
 
     /// <summary>
     /// Visits the subtree in document order without recursion (deeply nested input cannot overflow the stack).
@@ -179,4 +188,7 @@ internal sealed class ListData
     public char Delimiter;
     public int Padding;
     public int MarkerOffset;
+
+    /// <summary>For a definition list: the last entry whose blank lines were checked when the list was last closed.</summary>
+    public MdNode? CheckedUntil;
 }

@@ -218,6 +218,16 @@ internal readonly struct Length
     };
 }
 
+/// <summary>
+/// hyphenate-limit-chars: the shortest word that is hyphenated and the fewest characters before and after a hyphen.
+/// Each value is 0 for auto, which leaves it to the hyphenator's defaults.
+/// </summary>
+internal readonly record struct HyphenateLimits(int Word, int Before, int After)
+{
+    /// <summary>The largest value kept; a larger one is clamped to it, which no real word reaches either.</summary>
+    public const int Max = 1000;
+}
+
 /// <summary>The computed values of the supported CSS properties for one element. All lengths are in points.</summary>
 internal sealed class ComputedStyle
 {
@@ -241,6 +251,7 @@ internal sealed class ComputedStyle
     public bool NoHyphens;                   // hyphens: none (soft hyphens are no break opportunity)
     public bool HyphensAuto;                 // hyphens: auto (words also break where the language's patterns allow)
     public string? HyphenateCharacter;       // hyphenate-character: "string"; null = auto (a hyphen-minus)
+    public HyphenateLimits HyphenateLimitChars; // hyphenate-limit-chars; each value 0 = auto
     public string? Lang;                     // the content language: the nearest lang attribute, else PdfOptions.Language
     public IReadOnlyDictionary<string, HyphenationPatterns>? Hyphenation; // PdfOptions.Hyphenation, keys in lower case
     public byte SmallCaps;                   // font-variant-caps: 1 small-caps, 2 all-small-caps (synthesized)
