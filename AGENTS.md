@@ -134,8 +134,10 @@ must be unchanged unless the output change is intended. If only one runtime is i
 - Branch from the latest `origin/main`, one branch per piece of work.
 - Name the branch after the work it carries, in lowercase words joined by hyphens, with a `claude/` prefix when an
   agent creates it (e.g. `claude/barcode-qr-codes`). Never use a generic or generated name such as
-  `claude/project-thread-xxxx`, even when a tool suggests one, and never reuse a name, even one whose pull request is
-  merged. Don't rename a branch that already has an open pull request.
+  `claude/project-thread-xxxx`, even when a tool suggests one. Don't rename a branch that already has an open pull
+  request.
+- Never reuse a branch name. Once a pull request is merged or closed, its branch is finished: follow-up work goes on a
+  new branch with a new name, even when it continues the same feature.
 - Commit subjects are short imperative or descriptive sentences without prefixes, e.g. "Right-to-left text in SVG and
   RTL ellipsis".
 - The body explains why, and names any golden baselines that changed and the reason.
