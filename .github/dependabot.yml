@@ -1,10 +1,16 @@
-# Weekly pull requests when a pinned GitHub Action or a test package gets a new version. The library has no package
-# references, and bench/PdfPecker.Comparison is left out on purpose: its competitor versions are the ones the published
-# benchmark table was measured with.
+# Weekly pull requests when a pinned GitHub Action, a test package or the veraPDF validator gets a new version. The
+# library has no package references, and bench/PdfPecker.Comparison is left out on purpose: its competitor versions
+# are the ones the published benchmark table was measured with.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
+    schedule:
+      interval: weekly
+
+  # The veraPDF validator the conformance workflow runs.
+  - package-ecosystem: maven
+    directory: /tools/ConformanceSamples/verapdf
     schedule:
       interval: weekly
 

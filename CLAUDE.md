@@ -21,7 +21,8 @@ dotnet test -f net10.0 --filter "FullyQualifiedName~MarkdownTests"   # one class
 
 - Library and tests target `net8.0`, `net9.0` and `net10.0`; CI runs all three. If only one SDK/runtime is installed
   locally, pass `-f net10.0` (or whichever is installed).
-- `TreatWarningsAsErrors` is on in the library, so a warning breaks the build.
+- `Directory.Build.props` turns on `TreatWarningsAsErrors` and nullable for every project (except
+  `bench/PdfPecker.Comparison`), so a warning breaks the build.
 - Every public member needs an XML doc comment (CS1591 is an error).
 - `dotnet pack` validates the public API against the last release (`PackageValidationBaselineVersion` in
   `src/PdfPecker/PdfPecker.csproj`). Raise it to the new version after each release; a breaking change belongs only in a
@@ -66,6 +67,10 @@ dotnet test -f net10.0 --filter "FullyQualifiedName~MarkdownTests"   # one class
 - `tools/` – generators for checked-in data; don't hand-edit their output:
   - `tools/UnicodeTables` → `src/PdfPecker/Text/UnicodeTables.g.cs`
   - `tools/FontPackBuilder` → `Rendering/Fonts/StandardFonts.bin` and `Fonts/Bundled/*.ttf.br`
+  - `tools/Hyphenation/build.cs` → `src/PdfPecker/Text/Hyphenation/*.br`
+  - `tools/IndicTables/build.cs` → `src/PdfPecker/Fonts/IndicTables.g.cs`
+  - FontPackBuilder and Hyphenation check their inputs against pinned SHA-256 hashes; a deliberate update changes the
+    hashes, the versions named in the tool and `THIRD-PARTY-NOTICES.md` together.
 
 ## Conventions
 
