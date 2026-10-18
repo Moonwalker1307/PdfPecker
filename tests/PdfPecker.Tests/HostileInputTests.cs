@@ -1599,6 +1599,82 @@ public class GlyphRunGrowthTests
     }
 }
 
+/// <summary>
+/// Mesh shadings (types 4 to 7) with bit widths the PDF specification does not allow, or with far more vertices and
+/// patches than a page can show: zero widths read nothing, so the walk never advanced, a width sum that overflowed
+/// read billions of bits past the data, and a huge VerticesPerRow allocated rows of that size.
+/// </summary>
+[Collection(HostileInputCollection.Name)]
+public class MeshShadingLimitTests
+{
+    private const string Rgb = "/ColorSpace /DeviceRGB /Decode [0 40 0 40 0 1 0 1 0 1]";
+
+    // The page paints the shading the given number of times, so that a walk that takes seconds each time adds up to
+    // more than the time bound.
+    private static RenderedImage RenderShading(string entries, byte[] data, int size = 40, int repeat = 1)
+    {
+        var pdf = new FixturePdf();
+        int sh = pdf.AddStream(entries, data);
+        var bytes = pdf.Build(size, size, string.Join(" ", Enumerable.Repeat("/Sh sh", repeat)), $"/Shading << /Sh {sh} 0 R >>");
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var task = Task.Run(() => PdfRenderer.Open(bytes).RenderPage(0, new ImageOptions { Dpi = 72 }, cts.Token));
+        Assert.True(task.Wait(TimeSpan.FromSeconds(20)), "rendering the mesh did not finish in time");
+        return task.Result;
+    }
+
+    [Theory]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    public void Zero_bit_widths_paint_nothing(int type)
+    {
+        var img = RenderShading($"/ShadingType {type} /VerticesPerRow 2 /BitsPerCoordinate 0 /BitsPerComponent 0 /BitsPerFlag 0 {Rgb}", new byte[] { 1, 2, 3 });
+        FixturePdf.AssertAt(img, 20, 20, 255, 255, 255);
+    }
+
+    [Theory]
+    [InlineData("/BitsPerCoordinate 64 /BitsPerComponent 16 /BitsPerFlag 2147483647")]
+    [InlineData("/BitsPerCoordinate 1073741824 /BitsPerComponent 8 /BitsPerFlag 8")]
+    [InlineData("/BitsPerCoordinate 8 /BitsPerComponent -8 /BitsPerFlag 8")]
+    [InlineData("/BitsPerCoordinate 8 /BitsPerComponent 8 /BitsPerFlag 3")]
+    public void Bit_widths_outside_the_specification_paint_nothing(string widths)
+    {
+        var data = new byte[164];
+        new Random(1158).NextBytes(data);
+        foreach (int type in new[] { 4, 6, 7 })
+        {
+            var img = RenderShading($"/ShadingType {type} {widths} {Rgb}", data, repeat: 20);
+            FixturePdf.AssertAt(img, 20, 20, 255, 255, 255);
+        }
+    }
+
+    [Fact]
+    public void Huge_vertices_per_row_paints_nothing()
+    {
+        byte[] data = { 4, 4, 255, 0, 0, 36, 4, 255, 0, 0, 4, 36, 255, 0, 0, 36, 36, 255, 0, 0 };
+        var img = RenderShading($"/ShadingType 5 /VerticesPerRow 2000000000 /BitsPerCoordinate 8 /BitsPerComponent 8 {Rgb}", data);
+        FixturePdf.AssertAt(img, 20, 20, 255, 255, 255);
+    }
+
+    [Fact]
+    public void Many_page_sized_patches_stop_at_the_work_budget()
+    {
+        // Twenty thousand Coons patches that each cover the whole page are split into thousands of triangles each; the
+        // budget stops the walk long before the end, after the first patches have painted the page.
+        const int size = 400, patches = 20000;
+        int[] boundary = { 0, 0, 0, 85, 0, 170, 0, 255, 85, 255, 170, 255, 255, 255, 255, 170, 255, 85, 255, 0, 170, 0, 85, 0 };
+        var patch = new List<byte> { 0 };
+        foreach (int v in boundary) patch.Add((byte)v);
+        for (int i = 0; i < 4; i++) patch.AddRange(new byte[] { 255, 0, 0 });
+        var data = new byte[patch.Count * patches];
+        for (int i = 0; i < patches; i++) patch.CopyTo(data, i * patch.Count);
+        var img = RenderShading($"/ShadingType 6 /BitsPerCoordinate 8 /BitsPerComponent 8 /BitsPerFlag 8 /ColorSpace /DeviceRGB /Decode [0 {size} 0 {size} 0 1 0 1 0 1]",
+            data, size);
+        FixturePdf.AssertAt(img, size / 2, size / 2, 255, 0, 0);
+    }
+}
+
 [CollectionDefinition(Name, DisableParallelization = true)]
 public sealed class HostileInputCollection
 {

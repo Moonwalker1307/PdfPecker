@@ -10,6 +10,10 @@ internal static partial class MeshShading
     private const int FreeFormType = 4, LatticeType = 5, CoonsType = 6, TensorType = 7;
     private const int DefaultBitsPerCoordinate = 16, DefaultBitsPerComponent = 8, DefaultBitsPerFlag = 8;
     private const int DefaultVerticesPerRow = 2, MinVerticesPerRow = 2;
+
+    // A lattice row is held in memory twice, so its length is capped well above any real mesh but far below what
+    // would exhaust memory.
+    private const int MaxVerticesPerRow = 1 << 16;
     private const int TriangleCorners = 3, PatchCorners = 4;
     private const int CoonsPoints = 12, TensorPoints = 16;
 
@@ -32,22 +36,33 @@ internal static partial class MeshShading
     private readonly record struct Vertex(double X, double Y, VertexColor Color);
 
     /// <summary>
-    /// The bit widths of the values in a mesh stream. The sums are plain <see cref="int"/> arithmetic, so absurd widths
-    /// wrap around exactly as the stream walks have always computed them.
+    /// The bit widths of the values in a mesh stream. The sums are <see cref="long"/> so that no colour space, however
+    /// many components it has, can make them wrap around.
     /// </summary>
     private readonly record struct MeshFormat(int BitsPerCoordinate, int BitsPerComponent, int BitsPerFlag, int ColorComponents)
     {
-        public int PointBits => 2 * BitsPerCoordinate;
+        public long PointBits => 2L * BitsPerCoordinate;
 
-        public int ColorBits => ColorComponents * BitsPerComponent;
+        public long ColorBits => (long)ColorComponents * BitsPerComponent;
 
         /// <summary>The size of a lattice vertex, which has no flag.</summary>
-        public int VertexBits => PointBits + ColorBits;
+        public long VertexBits => PointBits + ColorBits;
 
         /// <summary>The size of a free-form vertex, which starts with its flag.</summary>
-        public int FlaggedVertexBits => BitsPerFlag + VertexBits;
+        public long FlaggedVertexBits => BitsPerFlag + VertexBits;
 
-        public int PatchBits(int points, int colors) => points * PointBits + colors * ColorBits;
+        public long PatchBits(int points, int colors) => points * PointBits + colors * ColorBits;
+
+        /// <summary>
+        /// Whether the widths are ones the specification allows (PDF 32000-1, tables 84 to 86). Any other width is
+        /// rejected, as other viewers do: a width of zero reads nothing, so a walk would never advance through the
+        /// data, and a huge one asks for more bits than the stream could hold. Lattice meshes have no flags.
+        /// </summary>
+        public bool IsValid(bool flagged) =>
+            BitsPerCoordinate is 1 or 2 or 4 or 8 or 12 or 16 or 24 or 32
+            && BitsPerComponent is 1 or 2 or 4 or 8 or 12 or 16
+            && (!flagged || BitsPerFlag is 2 or 4 or 8)
+            && ColorComponents >= 0;
     }
 
     public static void Paint(PdfFile file, PdfDict shading, int type, ColorSpace cs, PdfFunction? fn, Matrix toDevice, Canvas layer, ClipRegion clip)
@@ -58,9 +73,11 @@ internal static partial class MeshShading
             file.GetInt(shading, "BitsPerFlag", DefaultBitsPerFlag),
             fn != null ? 1 : cs.Components);
         var decode = file.GetNumbers(shading, "Decode");
-        if (decode == null || decode.Length < MeshReader.ColorDecodeStart + 2 * format.ColorComponents) return;
-        var painter = fn == null ? new MeshPainter(layer, clip) : MeshPainter.WithFunction(layer, clip, cs, fn, decode);
+        if (!format.IsValid(flagged: type != LatticeType)) return;
+        if (decode == null || decode.Length < MeshReader.ColorDecodeStart + 2L * format.ColorComponents) return;
         byte[] data = shading is PdfStream stream ? file.DecodeStream(stream) : Array.Empty<byte>();
+        long budget = MeshPainter.WorkBudget(layer, data.Length);
+        var painter = fn == null ? new MeshPainter(layer, clip, budget) : MeshPainter.WithFunction(layer, clip, budget, cs, fn, decode);
         var reader = new MeshReader(data, format, decode, toDevice, cs, parametric: fn != null);
         switch (type)
         {
@@ -83,10 +100,10 @@ internal static partial class MeshShading
     /// </summary>
     private static void PaintFreeForm(ref MeshReader reader, MeshPainter painter)
     {
-        int vertexBits = reader.Format.FlaggedVertexBits;
+        long vertexBits = reader.Format.FlaggedVertexBits;
         Vertex a = default, b = default, c = default;
         int count = 0;
-        while (reader.HasMore(vertexBits))
+        while (reader.HasMore(vertexBits) && painter.HasBudget)
         {
             int flag = reader.ReadFlag();
             var vertex = reader.ReadVertex();
@@ -115,10 +132,10 @@ internal static partial class MeshShading
     /// <summary>Type 5: rows of vertices without flags, each pair of neighbouring rows split into triangles.</summary>
     private static void PaintLattice(ref MeshReader reader, MeshPainter painter, int verticesPerRow)
     {
-        if (verticesPerRow < MinVerticesPerRow) return;
+        if (verticesPerRow is < MinVerticesPerRow or > MaxVerticesPerRow) return;
         var previous = new Vertex[verticesPerRow];
         var current = new Vertex[verticesPerRow];
-        for (int row = 0; TryReadRow(ref reader, current); row++)
+        for (int row = 0; painter.HasBudget && TryReadRow(ref reader, current); row++)
         {
             if (row > 0)
             {
@@ -135,7 +152,7 @@ internal static partial class MeshShading
     /// <summary>Reads a whole lattice row, or returns false at the first vertex that no longer fits in the data.</summary>
     private static bool TryReadRow(ref MeshReader reader, Span<Vertex> row)
     {
-        int vertexBits = reader.Format.VertexBits;
+        long vertexBits = reader.Format.VertexBits;
         for (int i = 0; i < row.Length; i++)
         {
             if (!reader.HasMore(vertexBits)) return false;
@@ -146,8 +163,8 @@ internal static partial class MeshShading
 
     /// <summary>
     /// Types 6 and 7: Coons patches of twelve boundary points and tensor-product patches that add four inner points,
-    /// each with four corner colours. The walk stops at a flagged patch with no previous one or at one that does not
-    /// fit in the data.
+    /// each with four corner colours. The walk stops at a flagged patch with no previous one, at one that does not fit
+    /// in the data or when the painter's work budget is spent.
     /// </summary>
     private static void PaintPatches(ref MeshReader reader, MeshPainter painter, bool tensor)
     {
@@ -157,7 +174,7 @@ internal static partial class MeshShading
         var previousPoints = new (double X, double Y)[TensorPoints];
         var previousColors = new VertexColor[PatchCorners];
         bool havePrevious = false;
-        while (reader.HasMore(reader.Format.BitsPerFlag))
+        while (reader.HasMore(reader.Format.BitsPerFlag) && painter.HasBudget)
         {
             int flag = reader.ReadFlag();
             int firstPoint = 0, firstColor = 0;
