@@ -138,6 +138,16 @@ public sealed class PdfFormFillOptions
     /// Default: false.
     /// </summary>
     public bool IgnoreUnknownFields { get; set; }
+
+    /// <summary>
+    /// A fixed date, for reproducible output. Filling keeps the document's own dates, so the date itself is not
+    /// written; when one is given, a file identifier (<c>/ID</c>) the filled file needs is a hash of the result
+    /// instead of random bytes, so the same input, values and options give a byte-identical file. When null, the
+    /// <c>SOURCE_DATE_EPOCH</c> environment variable (seconds since 1970-01-01 UTC, as reproducible builds set it) is
+    /// used the same way; when that is not set or not a valid number, such an identifier is random. This property takes
+    /// precedence over the environment variable, as <see cref="PdfOptions.CreationDate"/> does. Default: null.
+    /// </summary>
+    public DateTimeOffset? CreationDate { get; set; }
 }
 
 /// <summary>

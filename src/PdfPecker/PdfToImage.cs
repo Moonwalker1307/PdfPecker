@@ -405,10 +405,17 @@ public sealed class PdfRenderer
     /// </summary>
     /// <exception cref="NotSupportedException">The file would pass 4 GB, the limit of the TIFF format.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><see cref="ImageOptions.Dpi"/> is not positive.</exception>
-    /// <exception cref="InvalidDataException">A page cannot be rendered, for example because it is too complex.</exception>
+    /// <exception cref="InvalidDataException">
+    /// The PDF has no pages, which a TIFF file cannot hold, or a page cannot be rendered, for example because it is too
+    /// complex.
+    /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public byte[] RenderAllToTiff(ImageOptions? options = null, CancellationToken cancellationToken = default)
-        => TiffEncoder.Write(RenderAll(options, static img => img.EncodeTiffPage(), cancellationToken));
+    {
+        // A TIFF file needs at least one page, and a PDF without pages is malformed rather than a caller's mistake.
+        if (PageCount == 0) throw new InvalidDataException("The PDF has no pages, and a TIFF file needs at least one.");
+        return TiffEncoder.Write(RenderAll(options, static img => img.EncodeTiffPage(), cancellationToken));
+    }
 
     private T[] RenderAll<T>(ImageOptions? options, Func<RenderedImage, T> encode, CancellationToken cancellationToken)
     {
@@ -557,7 +564,7 @@ public static class PdfToImage
     /// </summary>
     /// <exception cref="ArgumentNullException"><paramref name="pdf"/> is null.</exception>
     /// <exception cref="PdfPasswordException">The PDF is encrypted and <see cref="ImageOptions.Password"/> does not open it.</exception>
-    /// <exception cref="InvalidDataException">The data is not a readable PDF, or a page cannot be rendered.</exception>
+    /// <exception cref="InvalidDataException">The data is not a readable PDF, has no pages, or a page cannot be rendered.</exception>
     /// <exception cref="NotSupportedException">
     /// The PDF uses an encryption handler other than the standard one, or the file would pass 4 GB, the limit of the
     /// TIFF format.
@@ -574,6 +581,7 @@ public static class PdfToImage
     /// <param name="options">Size, TIFF settings and password; null for the defaults.</param>
     /// <param name="cancellationToken">Stops the rendering; no further page is started once it is cancelled.</param>
     /// <exception cref="NotSupportedException">The file would pass 4 GB, the limit of the TIFF format.</exception>
+    /// <exception cref="InvalidDataException">The data is not a readable PDF, has no pages, or a page cannot be rendered.</exception>
     public static byte[] ConvertToTiff(byte[] pdf, ImageOptions? options, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -590,6 +598,7 @@ public static class PdfToImage
     /// <param name="options">Size, TIFF settings and password; null for the defaults.</param>
     /// <param name="cancellationToken">Stops the rendering; no further page is started once it is cancelled.</param>
     /// <exception cref="NotSupportedException">The file would pass 4 GB, the limit of the TIFF format.</exception>
+    /// <exception cref="InvalidDataException">The data is not a readable PDF, has no pages, or a page cannot be rendered.</exception>
     public static void ConvertToTiff(Stream input, Stream output, ImageOptions? options = null, CancellationToken cancellationToken = default)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
@@ -603,7 +612,7 @@ public static class PdfToImage
     /// <summary>Renders every page into one multi-page TIFF (see <see cref="ConvertToTiff(byte[], ImageOptions?)"/>) on the thread pool.</summary>
     /// <exception cref="ArgumentNullException"><paramref name="pdf"/> is null.</exception>
     /// <exception cref="PdfPasswordException">The PDF is encrypted and <see cref="ImageOptions.Password"/> does not open it.</exception>
-    /// <exception cref="InvalidDataException">The data is not a readable PDF, or a page cannot be rendered.</exception>
+    /// <exception cref="InvalidDataException">The data is not a readable PDF, has no pages, or a page cannot be rendered.</exception>
     /// <exception cref="NotSupportedException">
     /// The PDF uses an encryption handler other than the standard one, or the file would pass 4 GB, the limit of the
     /// TIFF format.
@@ -616,7 +625,7 @@ public static class PdfToImage
     /// <summary>Renders a PDF file into one multi-page TIFF file (see <see cref="ConvertToTiff(byte[], ImageOptions?)"/>).</summary>
     /// <exception cref="ArgumentNullException"><paramref name="pdfPath"/> or <paramref name="tiffPath"/> is null.</exception>
     /// <exception cref="PdfPasswordException">The PDF is encrypted and <see cref="ImageOptions.Password"/> does not open it.</exception>
-    /// <exception cref="InvalidDataException">The file is not a readable PDF, or a page cannot be rendered.</exception>
+    /// <exception cref="InvalidDataException">The file is not a readable PDF, has no pages, or a page cannot be rendered.</exception>
     /// <exception cref="NotSupportedException">
     /// The PDF uses an encryption handler other than the standard one, or the file would pass 4 GB, the limit of the
     /// TIFF format.
@@ -639,6 +648,7 @@ public static class PdfToImage
     /// <param name="tiffPath">The TIFF file to write; it appears only once it is complete.</param>
     /// <param name="options">Size, TIFF settings and password; null for the defaults.</param>
     /// <param name="cancellationToken">Stops the rendering; no further page is started once it is cancelled.</param>
+    /// <exception cref="InvalidDataException">The file is not a readable PDF, has no pages, or a page cannot be rendered.</exception>
     public static void ConvertFileToTiff(string pdfPath, string tiffPath, ImageOptions? options, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();

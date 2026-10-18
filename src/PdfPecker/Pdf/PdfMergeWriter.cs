@@ -55,6 +55,10 @@ internal sealed class PdfMergeWriter : PdfObjectWriter
     }
 
     private readonly PdfMergeOptions _options;
+    private readonly DateTime? _fixedDate; // the date of a reproducible result, or null for the current time
+    // With a fixed date, a running hash of every byte written, flushed or not, from which the file identifier is made
+    // without holding a streamed result in memory.
+    private IncrementalHash? _hash;
     private CancellationToken _cancel;
     private readonly Stream? _sink; // written to as the buffer fills, when merging to a stream synchronously
     private readonly ByteBuffer _main = new(1 << 16);
@@ -111,6 +115,8 @@ internal sealed class PdfMergeWriter : PdfObjectWriter
         _single = single;
         _out = _main;
         _nextId = InfoId + 1;
+        _fixedDate = ReproducibleDate.Resolve(options.CreationDate);
+        if (_fixedDate != null) _hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
     }
 
     private int NewId() => _nextId++;
@@ -310,9 +316,9 @@ internal sealed class PdfMergeWriter : PdfObjectWriter
         foreach (var id in _pageIds) _out.Int(id).Ascii(" 0 R ");
         _out.Ascii("] >>");
         End();
-        var now = DateTime.UtcNow;
+        var now = _fixedDate ?? ReproducibleDate.TruncateToSeconds(DateTime.UtcNow);
         Begin(InfoId);
-        _props!.WriteInfo(_out, now.AddTicks(-(now.Ticks % TimeSpan.TicksPerSecond)), modDate: true, PdfSyntax.TextString);
+        _props!.WriteInfo(_out, now, modDate: true, PdfSyntax.TextString);
         End();
         if (_outlinesId != 0)
         {
@@ -338,7 +344,7 @@ internal sealed class PdfMergeWriter : PdfObjectWriter
         int metadataId = 0;
         if (_allPdfUa && _structRootId != 0)
         {
-            var xmp = PdfA.Xmp(0, null, _props!, now.AddTicks(-(now.Ticks % TimeSpan.TicksPerSecond)), uaPart: 1);
+            var xmp = PdfA.Xmp(0, null, _props!, now, uaPart: 1);
             metadataId = NewId();
             Begin(metadataId).Ascii("<< /Type /Metadata /Subtype /XML /Length ").Int(xmp.Length).Ascii(" >>\nstream\n").Bytes(xmp).Ascii("\nendstream");
             End();
@@ -387,7 +393,16 @@ internal sealed class PdfMergeWriter : PdfObjectWriter
         long xref = Position;
         int count = _nextId;
         _xref.WriteTable(_out, count);
-        var id0 = RandomNumberGenerator.GetBytes(16);
+        byte[] id0;
+        if (_hash != null)
+        {
+            // The same identifier ReproducibleDate.FileId gives for the whole file before its trailer.
+            _hash.AppendData(_main.Span);
+            id0 = _hash.GetHashAndReset()[..16];
+            _hash.Dispose();
+            _hash = null;
+        }
+        else id0 = RandomNumberGenerator.GetBytes(16);
         PdfXref.WriteTrailer(_out, count, CatalogId, InfoId, 0, id0, id0, upperHexId: false, xref);
     }
 
@@ -397,6 +412,7 @@ internal sealed class PdfMergeWriter : PdfObjectWriter
     /// <summary>Hands what has been written so far to <paramref name="output"/>.</summary>
     public void Flush(Stream output)
     {
+        _hash?.AppendData(_main.Span);
         output.Write(_main.Span);
         _flushed += _main.Length;
         _main.Clear();
@@ -405,6 +421,7 @@ internal sealed class PdfMergeWriter : PdfObjectWriter
     /// <inheritdoc cref="Flush"/>
     public async Task FlushAsync(Stream output, CancellationToken cancellationToken)
     {
+        _hash?.AppendData(_main.Span);
         await output.WriteAsync(_main.RawBuffer.AsMemory(0, _main.Length), cancellationToken).ConfigureAwait(false);
         _flushed += _main.Length;
         _main.Clear();
