@@ -4,9 +4,10 @@ namespace PdfPecker.Pdf;
 /// Where the pages of one section's flow start and end. All pages have the same setup unless <c>@page :first</c>,
 /// <c>:left</c> or <c>:right</c> rules change the margins or size of some of them: then the section's first page can
 /// differ, and the pages after it alternate between two setups, as left and right pages do. Positions are y in the
-/// section's flow.
+/// section's flow. The layout engine also lays out the content of a multi-column box in a grid of its own, whose
+/// fragments are the columns (Layout/ColumnLayout.cs).
 /// </summary>
-internal sealed class PageGrid
+internal class PageGrid
 {
     private readonly PageSetup _first, _odd, _even; // page 0, pages 1, 3, 5 and so on, pages 2, 4, 6 and so on
     private readonly float _h0, _h1, _h2;
@@ -31,16 +32,22 @@ internal sealed class PageGrid
         Varies = !ReferenceEquals(first, odd) || !ReferenceEquals(odd, even);
     }
 
+    /// <summary>A grid of fragments that are not pages, which computes their positions itself.</summary>
+    protected PageGrid(PageSetup setup, bool uniform) : this(setup, setup, setup)
+    {
+        Uniform = uniform;
+    }
+
     public PageSetup SetupOf(int page) => page <= 0 ? _first : (page & 1) == 1 ? _odd : _even;
 
-    public float Height(int page) => page <= 0 ? _h0 : (page & 1) == 1 ? _h1 : _h2;
+    public virtual float Height(int page) => page <= 0 ? _h0 : (page & 1) == 1 ? _h1 : _h2;
 
-    public float MaxHeight => Math.Max(_h0, Math.Max(_h1, _h2));
+    public virtual float MaxHeight => Math.Max(_h0, Math.Max(_h1, _h2));
 
-    public float MinHeight => Math.Min(_h0, Math.Min(_h1, _h2));
+    public virtual float MinHeight => Math.Min(_h0, Math.Min(_h1, _h2));
 
     /// <summary>Where a page starts. With one height this is exactly page times height, as the layout always computed it.</summary>
-    public float Start(int page)
+    public virtual float Start(int page)
     {
         if (Uniform || page <= 0) return page * _h0;
         int k = page - 1;
@@ -48,7 +55,7 @@ internal sealed class PageGrid
     }
 
     /// <summary>The page a y falls on, in float arithmetic, as the layout engine computes it.</summary>
-    public int PageOf(float y)
+    public virtual int PageOf(float y)
     {
         if (Uniform || y < _h0) return (int)Math.Floor(y / _h0);
         float r = y - _h0, pair = _h1 + _h2;
@@ -57,7 +64,7 @@ internal sealed class PageGrid
     }
 
     /// <summary>The page a y falls on, in double arithmetic so a huge y gives a huge page rather than an overflow.</summary>
-    public double PageOf(double y)
+    public virtual double PageOf(double y)
     {
         if (Uniform || y < _h0) return Math.Floor(y / _h0);
         double r = y - _h0, pair = (double)_h1 + _h2;

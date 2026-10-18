@@ -107,8 +107,11 @@ internal sealed partial class LayoutEngine
     private float _rootWidth;
     private Element? _footnoteArea;
 
-    /// <summary>The height the footnote area takes at the bottom of a page (0 without footnotes).</summary>
-    public float FootnoteReserve(int page) => _footnoteReserve.Count > 0 && _footnoteReserve.TryGetValue(page, out float h) ? h : 0;
+    /// <summary>
+    /// The height the footnote area takes at the bottom of a page (0 without footnotes). The columns of a multi-column
+    /// box are not pages: the box takes the room on its page before it lays out its columns.
+    /// </summary>
+    public float FootnoteReserve(int page) => _footnoteReserve.Count > 0 && _columnNotes == null && _footnoteReserve.TryGetValue(page, out float h) ? h : 0;
 
     /// <summary>The page (0-based, in this layout's flow) of each footnote's call.</summary>
     public IEnumerable<(int Index, int Page)> FootnoteCallPages => _footnoteCalls.Select(c => (c.Index, c.Page));

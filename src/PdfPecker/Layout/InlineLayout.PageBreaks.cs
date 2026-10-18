@@ -24,9 +24,20 @@ internal sealed partial class LayoutEngine
         if (visibleCount < 2 || !CrossesPage(top, top + total)) return null;
 
         bool[]? forced = null;
-        for (int attempt = 0; attempt < MaxBreakPlans; attempt++)
+        // The plan only tries breaks: a multi-column box balancing its columns must not take them for real ones.
+        var notes = _columnNotes;
+        bool paused = notes is { Paused: true };
+        if (notes != null) notes.Paused = true;
+        try
         {
-            if (!ForceOneBreak(n, lineA, lineD, top, orphans, widows, visibleCount, ref forced)) break;
+            for (int attempt = 0; attempt < MaxBreakPlans; attempt++)
+            {
+                if (!ForceOneBreak(n, lineA, lineD, top, orphans, widows, visibleCount, ref forced)) break;
+            }
+        }
+        finally
+        {
+            if (notes != null) notes.Paused = paused;
         }
         return forced;
     }

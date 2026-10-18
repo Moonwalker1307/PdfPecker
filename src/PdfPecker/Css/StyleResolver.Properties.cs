@@ -604,10 +604,14 @@ internal sealed partial class StyleResolver
             case "break-before":
                 s.PageBreakBefore = lower is "always" or "page" or "left" or "right" or "recto" or "verso";
                 s.AvoidBreakBefore = lower is "avoid" or "avoid-page";
+                s.ColumnBreakBefore = lower == "column";
+                s.AvoidColumnBreakBefore = lower == "avoid-column";
                 break;
             case "break-after":
                 s.PageBreakAfter = lower is "always" or "page" or "left" or "right" or "recto" or "verso";
                 s.AvoidBreakAfter = lower is "avoid" or "avoid-page";
+                s.ColumnBreakAfter = lower == "column";
+                s.AvoidColumnBreakAfter = lower == "avoid-column";
                 break;
             case "orphans":
                 if (inherit) s.Orphans = parent.Orphans;
@@ -619,6 +623,7 @@ internal sealed partial class StyleResolver
                 break;
             case "break-inside":
                 s.AvoidBreakInside = lower is "avoid" or "avoid-page";
+                s.AvoidColumnBreakInside = lower == "avoid-column";
                 break;
 
             case "margin-top": SetLength(ref s.MarginTop, lower, em, inherit ? parent.MarginTop : (Length?)null); break;
@@ -807,6 +812,7 @@ internal sealed partial class StyleResolver
             case "column-rule-width": s.ColumnRuleWidth = BorderWidth(lower, em, s.ColumnRuleWidth); break;
             case "column-rule-color": s.ColumnRuleColor = BorderColor(v, s); break;
             case "column-span": s.ColumnSpanAll = lower == "all"; break;
+            case "column-fill": s.ColumnFillAuto = lower == "auto"; break;
 
             // ---- SVG presentation properties
             case "fill":
