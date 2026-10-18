@@ -72,6 +72,16 @@ public class HyphenationTests
     [InlineData("sv", "avstavning", "av-stav-ning")]
     [InlineData("sv-FI", "sjukhuset", "sjuk-hu-set")]
     [InlineData("sv", "järnvägsstation", "järn-vägs-sta-tion")]
+    // French, Italian, Portuguese and Polish; French and Italian elisions keep their apostrophe, typographic or not.
+    [InlineData("fr", "ordinateur", "or-di-na-teur")]
+    [InlineData("fr-CA", "l'ordinateur", "l'or-di-na-teur")]
+    [InlineData("fr", "l’ordinateur", "l’or-di-na-teur")]
+    [InlineData("it", "organizzazione", "or-ga-niz-za-zio-ne")]
+    [InlineData("it", "dell'organizzazione", "del-l'or-ga-niz-za-zio-ne")]
+    [InlineData("pt-BR", "computador", "com-pu-ta-dor")]
+    [InlineData("pt", "desenvolvimento", "de-sen-vol-vi-mento")]
+    [InlineData("pl", "przedsiębiorstwo", "przed-się-bior-stwo")]
+    [InlineData("pl", "rzeczywistość", "rze-czy-wi-stość")]
     public void Words_break_where_the_patterns_allow(string lang, string word, string expected)
         => Assert.Equal(expected, Hyphenate(lang, word));
 
@@ -81,6 +91,7 @@ public class HyphenationTests
     [InlineData("en", "abc123defgh")]  // digits
     [InlineData("en", "ward")]          // shorter than five letters
     [InlineData("da", "abc.defghijk")] // other characters inside
+    [InlineData("en", "everybody's")]  // apostrophes only where the patterns cover them, as in French
     public void Some_words_are_never_hyphenated(string lang, string word) => Assert.Equal(word, Hyphenate(lang, word));
 
     [Fact]
@@ -93,7 +104,7 @@ public class HyphenationTests
     [Fact]
     public void Languages_without_patterns_have_no_hyphenator()
     {
-        Assert.Null(Hyphenator.For("fr", null));
+        Assert.Null(Hyphenator.For("fi", null));
         Assert.Null(Hyphenator.For("", null));
         Assert.Null(Hyphenator.For("und", null));
     }
