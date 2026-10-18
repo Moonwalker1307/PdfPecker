@@ -11,6 +11,7 @@ internal sealed partial class LayoutEngine
         public Element Td = null!;
         public int Row, Col, ColSpan = 1, RowSpan = 1;
         public float Min, Max;          // border-box intrinsic widths
+        public float CollapsedT, CollapsedB; // resolved collapsed borders above and below
         public float FixedWidth = -1;   // specified absolute border-box width
         public float PercentWidth = -1;
 
@@ -114,6 +115,7 @@ internal sealed partial class LayoutEngine
             foreach (var cell in row.Cells)
                 for (int rr = cell.Row; rr < cell.Row + cell.RowSpan && rr < m.Rows.Count; rr++)
                     for (int cc = cell.Col; cc < cell.Col + cell.ColSpan && cc < m.ColCount; cc++) m.Grid[rr, cc] = cell;
+        if (table.Style.BorderCollapse) ResolveCollapsedBorders(m);
 
         int n = m.ColCount;
         m.ColMin = new float[n];
@@ -742,7 +744,7 @@ internal sealed partial class LayoutEngine
         cell.Top = rowTop;
 
         float bl = collapse ? cs.BorderLeft / 2 : cs.BorderLeft, br = collapse ? cs.BorderRight / 2 : cs.BorderRight;
-        float bt = collapse ? cs.BorderTop / 2 : cs.BorderTop, bb = collapse ? cs.BorderBottom / 2 : cs.BorderBottom;
+        float bt = collapse ? cell.CollapsedT / 2 : cs.BorderTop, bb = collapse ? cell.CollapsedB / 2 : cs.BorderBottom;
         float pl = cs.PaddingLeft.Resolve(w), pr = cs.PaddingRight.Resolve(w), pt = cs.PaddingTop.Resolve(w), pb = cs.PaddingBottom.Resolve(w);
 
         cell.Group = new GroupOp();
@@ -783,6 +785,32 @@ internal sealed partial class LayoutEngine
         if (c1 >= cols - 1 ? s.BorderRight >= t.BorderRight : s.BorderRight >= (m.Grid[r0, c1 + 1]?.Td.Style.BorderLeft ?? 0))
             sides |= BoxPainter.Right;
         return sides;
+    }
+
+    /// <summary>
+    /// The width of the collapsed borders above and below each cell: the widest of the cell's own border, the facing
+    /// borders of the cells next to it and, at the table's edge, the table's border (CSS 2.1 §17.6.2). A cell lays its
+    /// content out inside half of these, so a border set only on the cell above still takes room in the cell below,
+    /// as in Chrome. Column widths still use each cell's own left and right borders.
+    /// </summary>
+    private static void ResolveCollapsedBorders(TableModel m)
+    {
+        var t = m.TableStyle;
+        int rows = m.Rows.Count, cols = m.ColCount;
+        foreach (var row in m.Rows)
+            foreach (var cell in row.Cells)
+            {
+                var s = cell.Td.Style;
+                int r0 = cell.Row, r1 = Math.Min(rows, cell.Row + cell.RowSpan) - 1;
+                float top = s.BorderTop, bottom = s.BorderBottom;
+                for (int c = cell.Col; c < Math.Min(cols, cell.Col + cell.ColSpan); c++)
+                {
+                    top = Math.Max(top, r0 == 0 ? t.BorderTop : m.Grid[r0 - 1, c]?.Td.Style.BorderBottom ?? 0);
+                    bottom = Math.Max(bottom, r1 >= rows - 1 ? t.BorderBottom : m.Grid[r1 + 1, c]?.Td.Style.BorderTop ?? 0);
+                }
+                cell.CollapsedT = top;
+                cell.CollapsedB = bottom;
+            }
     }
 
     /// <summary>The sides of a collapsed table's own border that are wider than the cells' borders along them.</summary>
@@ -851,7 +879,7 @@ internal sealed partial class LayoutEngine
     {
         var cs = cell.Td.Style;
         float bl = collapse ? cs.BorderLeft / 2 : cs.BorderLeft, br = collapse ? cs.BorderRight / 2 : cs.BorderRight;
-        float bt = collapse ? cs.BorderTop / 2 : cs.BorderTop, bb = collapse ? cs.BorderBottom / 2 : cs.BorderBottom;
+        float bt = collapse ? cell.CollapsedT / 2 : cs.BorderTop, bb = collapse ? cell.CollapsedB / 2 : cs.BorderBottom;
         float px = cell.X + bl, py = cell.Top + bt, pw = Math.Max(0, cell.W - bl - br), ph = Math.Max(0, h - bt - bb);
         var radii = cs.ClipsX && cs.ClipsY && !collapse ? BoxPainter.InnerRadii(BoxPainter.Radii(cs, cell.W, h), bl, bt, br, bb) : null;
         if (!cs.ClipsX) { px -= ClipOp.Far; pw += 2 * ClipOp.Far; }
