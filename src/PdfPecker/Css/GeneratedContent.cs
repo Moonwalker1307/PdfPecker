@@ -199,9 +199,9 @@ internal static class GeneratedContent
     {
         var a = arg.Trim();
         string? url;
-        if (a.StartsWith("attr(", StringComparison.OrdinalIgnoreCase) && a.EndsWith(")", StringComparison.Ordinal))
+        if (a.StartsWith("attr(", StringComparison.OrdinalIgnoreCase) && a.EndsWith(')'))
             url = host.GetAttribute(a.Substring(5, a.Length - 6).Trim().Split(' ')[0].ToLowerInvariant());
-        else if (a.StartsWith("url(", StringComparison.OrdinalIgnoreCase) && a.EndsWith(")", StringComparison.Ordinal))
+        else if (a.StartsWith("url(", StringComparison.OrdinalIgnoreCase) && a.EndsWith(')'))
         {
             var inner = a.Substring(4, a.Length - 5).Trim();
             url = UnquoteString(inner) ?? inner;
@@ -209,7 +209,7 @@ internal static class GeneratedContent
         else url = UnquoteString(a);
         if (url == null) return null;
         url = url.Trim();
-        if (!url.StartsWith("#", StringComparison.Ordinal) || url.Length < 2) return null;
+        if (!url.StartsWith('#') || url.Length < 2) return null;
         var id = url.Substring(1);
         try { return Uri.UnescapeDataString(id); }
         catch (UriFormatException) { return id; }

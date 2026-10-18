@@ -225,7 +225,7 @@ internal sealed class PdfStampWriter : PdfObjectWriter
         return false;
     }
 
-    private void CollectPages(Source source, PdfObject? root)
+    private static void CollectPages(Source source, PdfObject? root)
     {
         var file = source.File;
         var seen = new HashSet<PdfDict>(ReferenceEqualityComparer.Instance);
@@ -424,7 +424,7 @@ internal sealed class PdfStampWriter : PdfObjectWriter
     /// at its end above that lowest level: wrapped in 1 + Under q and 1 + Open Q, it is balanced. Content that cannot be
     /// read counts as balanced.
     /// </summary>
-    private (int Under, int Open) SaveDepth(PdfFile file, List<PdfObject> contents)
+    private static (int Under, int Open) SaveDepth(PdfFile file, List<PdfObject> contents)
     {
         int depth = 0, low = 0;
         try

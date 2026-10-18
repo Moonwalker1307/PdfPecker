@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Globalization;
 
 namespace PdfPecker.Css;
@@ -21,6 +22,9 @@ internal sealed class MediaContext
 /// </summary>
 internal static class MediaQuery
 {
+    // The characters that make a feature a range comparison such as (width > 400px) rather than (width: 400px).
+    private static readonly SearchValues<char> RangeOperators = SearchValues.Create("<>=");
+
     private const int MaxDepth = 16;
 
     /// <summary>Whether a comma-separated media query list matches; an empty list matches.</summary>
@@ -105,7 +109,7 @@ internal static class MediaQuery
             if (name.StartsWith("max-", StringComparison.Ordinal)) return Compare(name.Substring(4), "<=", value, context);
             return Compare(name, "=", value, context);
         }
-        if (inner.IndexOfAny(new[] { '<', '>', '=' }) >= 0) return Range(inner, context);
+        if (inner.AsSpan().IndexOfAny(RangeOperators) >= 0) return Range(inner, context);
         return Boolean(inner.Trim(), context);
     }
 

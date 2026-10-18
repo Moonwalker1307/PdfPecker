@@ -171,7 +171,7 @@ internal class PdfObjectWriter
         else PdfSyntax.Hex(b, bytes, Syntax.UpperHexStrings);
     }
 
-    public void WriteName(ByteBuffer b, string name)
+    public static void WriteName(ByteBuffer b, string name)
     {
         // The parser keeps one char per byte, so a parsed name (all chars up to U+00FF) is written back as the same bytes,
         // while a name made in code with other characters is UTF-8 rather than cut to one byte per character.

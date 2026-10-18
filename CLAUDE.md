@@ -75,6 +75,9 @@ dotnet test -f net10.0 --filter "FullyQualifiedName~MarkdownTests"   # one class
 ## Conventions
 
 - Nullable enabled, file-scoped namespaces, `internal` by default; tests can see internals.
+- Classes are `sealed` (or `static`) unless something derives from them, and methods that use no instance data are
+  `static`. `src/PdfPecker/.globalconfig` turns the .NET performance analyzers (CA18xx) into build errors, so these and
+  span-based string handling are checked on every build.
 - Library must stay trimmable and AOT-compatible: no reflection-based code.
 - Output must not depend on the machine's culture: parse and format numbers with `CultureInfo.InvariantCulture`
   (`Invariant.TryParseInt` for integers) and compare strings ordinally. `GoldenPdfTests` renders every golden under

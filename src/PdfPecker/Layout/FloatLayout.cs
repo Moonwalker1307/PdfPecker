@@ -331,7 +331,7 @@ internal sealed partial class LayoutEngine
             if (lines.Count > 0)
             {
                 var last = lines[^1];
-                Y = last.Top + Engine.LineBoxHeight(last, Block);
+                Y = last.Top + LayoutEngine.LineBoxHeight(last, Block);
             }
             _index = lines.Count;
             if (ForcedBefore != null && _index < ForcedBefore.Length && ForcedBefore[_index]) Y = Engine.NextPage(Y);
@@ -372,7 +372,7 @@ internal sealed partial class LayoutEngine
         /// <summary>Fixes the position of a finished line.</summary>
         public void End(Line line)
         {
-            float h = Engine.LineBoxHeight(line, Block);
+            float h = LayoutEngine.LineBoxHeight(line, Block);
             line.Top = h > 0 ? Engine.FitOnPage(Y, h) : Y;
             line.Left = Left;
             line.Avail = Avail;
@@ -387,7 +387,7 @@ internal sealed partial class LayoutEngine
         public void Flush(List<Line> lines)
         {
             if (Waiting.Count == 0) return;
-            if (lines.Count > 0) Y = lines[^1].Top + Engine.LineBoxHeight(lines[^1], Block);
+            if (lines.Count > 0) Y = lines[^1].Top + LayoutEngine.LineBoxHeight(lines[^1], Block);
             _index = lines.Count;
             if (Pages != null) Measure();
             var (bx, bw) = Box;
@@ -397,7 +397,7 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>The height of a line box: its tallest ascent plus its deepest descent, 0 for a line of anchors only.</summary>
-    private float LineBoxHeight(Line line, ComputedStyle block)
+    private static float LineBoxHeight(Line line, ComputedStyle block)
     {
         LineExtent(line, block, out float a, out float d);
         return float.IsNaN(a) ? 0 : a + d;

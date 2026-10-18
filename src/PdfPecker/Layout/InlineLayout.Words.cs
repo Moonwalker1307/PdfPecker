@@ -286,7 +286,7 @@ internal sealed partial class LayoutEngine
             case TextTransform.Uppercase: return Upper(word, style.Lang);
             case TextTransform.Lowercase: return Lower(word, style.Lang);
             case TextTransform.Capitalize:
-                if (word.Length > 0 && afterSpace && char.IsLower(word[0])) word = Upper(word.Substring(0, 1), style.Lang) + word.Substring(1);
+                if (word.Length > 0 && afterSpace && char.IsLower(word[0])) word = string.Concat(Upper(word.Substring(0, 1), style.Lang), word.AsSpan(1));
                 return word;
             default: return word;
         }

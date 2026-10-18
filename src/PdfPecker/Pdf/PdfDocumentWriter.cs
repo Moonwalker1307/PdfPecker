@@ -597,7 +597,7 @@ internal sealed partial class PdfDocumentWriter
         return paperW;
     }
 
-    private float PaperDy(PageSetup page)
+    private static float PaperDy(PageSetup page)
         => page.Scale == 1 ? 0 : PaperSize(page.Height * page.Scale) - page.Height * page.Scale;
 
     /// <summary>Where page <paramref name="p"/> starts in its section's flow.</summary>

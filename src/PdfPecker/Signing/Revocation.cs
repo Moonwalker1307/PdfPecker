@@ -33,8 +33,6 @@ internal static class Revocation
     // CRLs of large public CAs reach tens of megabytes; beyond this a CRL is unusable in a PDF anyway.
     private const int MaxCrlSize = 32 * 1024 * 1024;
 
-    private static readonly Lazy<HttpClient> Shared = new(() => new HttpClient { Timeout = TimeSpan.FromSeconds(30) });
-
     /// <summary>
     /// Parses an OCSP response. A bare BasicOCSPResponse (what some tools save) is wrapped into a full OCSPResponse, so the
     /// store always holds the same structure. Returns null for anything that is not a successful response.

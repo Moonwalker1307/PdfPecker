@@ -271,18 +271,18 @@ internal sealed partial class StyleResolver
     private static string PxOrPercent(string v)
     {
         v = v.Trim();
-        if (v.EndsWith("%", StringComparison.Ordinal)) return v;
+        if (v.EndsWith('%')) return v;
         int n = 0;
         while (n < v.Length && (char.IsDigit(v[n]) || v[n] == '.')) n++;
-        return n == 0 ? "0px" : v.Substring(0, n) + "px";
+        return n == 0 ? "0px" : string.Concat(v.AsSpan(0, n), "px");
     }
 
     private static string FontSizeAttr(string v)
     {
         v = v.Trim();
         int size;
-        if (v.StartsWith("+", StringComparison.Ordinal) && Invariant.TryParseInt(v.Substring(1), out int plus)) size = 3 + plus;
-        else if (v.StartsWith("-", StringComparison.Ordinal) && Invariant.TryParseInt(v.Substring(1), out int minus)) size = 3 - minus;
+        if (v.StartsWith('+') && Invariant.TryParseInt(v.AsSpan(1), out int plus)) size = 3 + plus;
+        else if (v.StartsWith('-') && Invariant.TryParseInt(v.AsSpan(1), out int minus)) size = 3 - minus;
         else if (!Invariant.TryParseInt(v, out size)) size = 3;
         return Math.Clamp(size, 1, 7) switch { 1 => "x-small", 2 => "small", 3 => "medium", 4 => "large", 5 => "x-large", 6 => "xx-large", _ => "48px" };
     }

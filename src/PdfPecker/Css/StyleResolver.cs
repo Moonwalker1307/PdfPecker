@@ -40,6 +40,10 @@ internal sealed class RuleIndex
 /// <summary>Computes the style of every element: user-agent rules, presentational attributes, author rules and inline styles.</summary>
 internal sealed partial class StyleResolver
 {
+    // The whitespace that separates the words of an attribute or a list value, kept in one array so a split allocates no
+    // separator array of its own.
+    private static readonly char[] WhitespaceSeparators = { ' ', '\t', '\n', '\r' };
+
     private static readonly Lazy<RuleIndex> UaIndex = new(() =>
     {
         var sheet = new Stylesheet();
@@ -333,7 +337,7 @@ internal sealed partial class StyleResolver
             e.FirstLine = null;
             var cls = e.GetAttribute("class");
             if (!string.IsNullOrWhiteSpace(cls))
-                e.Classes = cls!.Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+                e.Classes = cls!.Split(WhitespaceSeparators, StringSplitOptions.RemoveEmptyEntries);
             Prepare(e);
         }
         foreach (var c in parent.Children)

@@ -391,7 +391,7 @@ internal sealed class CounterStyles
     {
         style = null!;
         var v = value.Trim();
-        if (v.StartsWith("symbols(", StringComparison.OrdinalIgnoreCase) && v.EndsWith(")", StringComparison.Ordinal))
+        if (v.StartsWith("symbols(", StringComparison.OrdinalIgnoreCase) && v.EndsWith(')'))
         {
             // Built on each use, not cached: the predefined set is shared by every conversion, on any thread.
             if (Anonymous(v.Substring(8, v.Length - 9)) is not { } anon) return false;

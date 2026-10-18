@@ -69,7 +69,7 @@ internal static class CssBorderImage
             {
                 if (slice != null) return;
                 var parts = new List<string>();
-                while (i < tokens.Count && (tokens[i].ToLowerInvariant() == "fill" || IsNumberOrPercent(tokens[i].ToLowerInvariant())))
+                while (i < tokens.Count && (string.Equals(tokens[i], "fill", StringComparison.OrdinalIgnoreCase) || IsNumberOrPercent(tokens[i].ToLowerInvariant())))
                     parts.Add(tokens[i++].ToLowerInvariant());
                 slice = string.Join(" ", parts);
                 if (i < tokens.Count && tokens[i] == "/")
@@ -131,7 +131,7 @@ internal static class CssBorderImage
                 continue;
             }
             if (closed || values.Count == 4) return null;
-            if (tok.EndsWith("%", StringComparison.Ordinal))
+            if (tok.EndsWith('%'))
             {
                 if (!float.TryParse(tok.AsSpan(0, tok.Length - 1), NumberStyles.Float, CultureInfo.InvariantCulture, out float p) || p < 0 || !float.IsFinite(p)) return null;
                 values.Add(BorderImageValue.Of(new Length(p, LengthUnit.Percent)));

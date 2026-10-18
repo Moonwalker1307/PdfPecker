@@ -42,7 +42,7 @@ internal sealed class CssGradient
     {
         var v = value.Trim();
         int paren = v.IndexOf('(');
-        if (paren < 0 || !v.EndsWith(")", StringComparison.Ordinal)) return null;
+        if (paren < 0 || !v.EndsWith(')')) return null;
         var name = v.Substring(0, paren).Trim().ToLowerInvariant();
         (GradientKind Kind, bool Repeating)? function = name switch
         {

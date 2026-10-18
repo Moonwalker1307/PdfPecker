@@ -48,7 +48,7 @@ internal sealed partial class InlineParser
             {
                 start = emailStart;
                 end = emailEnd;
-                destination = "mailto:" + s.Substring(start, end - start);
+                destination = string.Concat("mailto:", s.AsSpan(start, end - start));
             }
             else if (urlStart < 0) break;
             else
@@ -61,7 +61,7 @@ internal sealed partial class InlineParser
                     searchFrom = start + 1;
                     continue;
                 }
-                destination = www ? "http://" + s.Substring(start, end - start) : s.Substring(start, end - start);
+                destination = www ? string.Concat("http://", s.AsSpan(start, end - start)) : s.Substring(start, end - start);
             }
 
             if (start > textStart) insertAfter = InsertTextAfter(insertAfter, s.Substring(textStart, start - textStart));
