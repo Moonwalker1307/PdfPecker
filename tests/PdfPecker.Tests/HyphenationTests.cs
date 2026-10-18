@@ -65,6 +65,13 @@ public class HyphenationTests
     [InlineData("de", "Silbentrennung", "Sil-ben-tren-nung")]
     [InlineData("nl", "woordenboek", "woor-den-boek")]
     [InlineData("nb", "orddeling", "ord-de-ling")]
+    // Spanish and Swedish.
+    [InlineData("es", "separación", "se-pa-ra-ción")]
+    [InlineData("es-MX", "biblioteca", "bi-blio-te-ca")]
+    [InlineData("es", "extraordinariamente", "ex-tra-or-di-na-ria-men-te")]
+    [InlineData("sv", "avstavning", "av-stav-ning")]
+    [InlineData("sv-FI", "sjukhuset", "sjuk-hu-set")]
+    [InlineData("sv", "järnvägsstation", "järn-vägs-sta-tion")]
     public void Words_break_where_the_patterns_allow(string lang, string word, string expected)
         => Assert.Equal(expected, Hyphenate(lang, word));
 
@@ -87,7 +94,6 @@ public class HyphenationTests
     public void Languages_without_patterns_have_no_hyphenator()
     {
         Assert.Null(Hyphenator.For("fr", null));
-        Assert.Null(Hyphenator.For("sv", null)); // only available under the LPPL, so not bundled
         Assert.Null(Hyphenator.For("", null));
         Assert.Null(Hyphenator.For("und", null));
     }

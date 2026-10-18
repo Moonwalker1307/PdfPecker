@@ -4,10 +4,11 @@
 //   dotnet run tools/Hyphenation/build.cs -- <folder with the .tex files> src/PdfPecker/Text/Hyphenation
 //
 // The folder needs these files from https://github.com/hyphenation/tex-hyphen (hyph-utf8/tex/generic/hyph-utf8/patterns/tex):
-//   hyph-en-us.tex, hyph-da.tex, hyph-de-1996.tex, hyph-no.tex, hyph-nl.tex
+//   hyph-en-us.tex, hyph-da.tex, hyph-de-1996.tex, hyph-no.tex, hyph-nl.tex, hyph-es.tex, hyph-sv.tex
 // Each output file is Brotli-compressed UTF-8 text: a line "<lefthyphenmin> <righthyphenmin>", the patterns one per
 // line, a line "--", then the exceptions one per line (lower case, with hyphens at their break points).
-// Languages whose patterns are only available under the LPPL (such as Swedish) are deliberately not included.
+// Swedish is only available under the LaTeX Project Public License, which allows distributing an unmodified copy but
+// attaches conditions to modified ones, so hyph-sv.tex is kept byte for byte as "sv.tex.br" (Brotli only).
 using System.IO.Compression;
 using System.Text;
 
@@ -18,9 +19,11 @@ var sets = new (string Name, string Tex, int Left, int Right)[]
     ("de", "hyph-de-1996.tex", 2, 2),
     ("no", "hyph-no.tex", 2, 2),
     ("nl", "hyph-nl.tex", 2, 2),
+    ("es", "hyph-es.tex", 2, 2),
 };
 string src = args[0], dst = args[1];
 Directory.CreateDirectory(dst);
+Compress(File.ReadAllBytes(Path.Combine(src, "hyph-sv.tex")), Path.Combine(dst, "sv.tex.br"), "sv");
 foreach (var (name, tex, left, right) in sets)
 {
     var text = new StringBuilder();
@@ -34,8 +37,11 @@ foreach (var (name, tex, left, right) in sets)
     foreach (var p in Block(all, "\\patterns{")) outText.Append(p).Append('\n');
     outText.Append("--\n");
     foreach (var h in Block(all, "\\hyphenation{")) outText.Append(h.ToLowerInvariant()).Append('\n');
-    var bytes = Encoding.UTF8.GetBytes(outText.ToString());
-    var path = Path.Combine(dst, name + ".hyph.br");
+    Compress(Encoding.UTF8.GetBytes(outText.ToString()), Path.Combine(dst, name + ".hyph.br"), name);
+}
+
+static void Compress(byte[] bytes, string path, string name)
+{
     using (var fs = File.Create(path))
     using (var br = new BrotliStream(fs, CompressionLevel.SmallestSize))
         br.Write(bytes);

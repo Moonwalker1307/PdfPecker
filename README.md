@@ -67,7 +67,7 @@ The conversion methods are static and thread-safe, so you can convert many docum
 - **Paged media**: `@page` sizes and margin boxes, running headers, footnotes, tables of contents with page numbers, and break control. [More](https://pdfpecker.net/docs/paged-media/)
 - **Markdown**: CommonMark 0.31 and GitHub Flavored Markdown to PDF or HTML. [More](https://pdfpecker.net/docs/markdown/)
 - **Fonts**: TrueType, OpenType, WOFF and WOFF2, subset and embedded, with kerning, ligatures, variable fonts and OpenType features. [More](https://pdfpecker.net/docs/fonts/)
-- **Languages**: Arabic and Hebrew with bidi and shaping, CJK line breaking, and hyphenation. [More](https://pdfpecker.net/docs/languages/)
+- **Languages**: Arabic and Hebrew with bidi and shaping, CJK line breaking, and hyphenation in English, Danish, German, Dutch, Norwegian, Spanish and Swedish. [More](https://pdfpecker.net/docs/languages/)
 - **PDF/A, passwords and watermarks**: PDF/A-2, 3 and 4, AES-256 encryption, and text, image and SVG watermarks. [More](https://pdfpecker.net/docs/pdfa-and-passwords/)
 - **Accessibility**: tagged PDF, PDF/UA-1 and PDF/UA-2 built from your HTML. [More](https://pdfpecker.net/docs/accessibility/)
 - **Forms**: HTML inputs become fillable PDF fields; read, fill and flatten the fields of existing PDFs. [More](https://pdfpecker.net/docs/forms/)
