@@ -9,7 +9,9 @@ namespace PdfPecker.Fonts;
 /// Hebrew and the joining scripts get mark positioning (GPOS mark, mkmk), cursive attachment and kerning. Fonts
 /// without OpenType forms fall back to the Unicode Arabic presentation forms. The Indic scripts get their syllables
 /// reordered and their conjuncts, half forms, reph and matras formed; Thai and Lao get Sara Am decomposed and, in fonts
-/// without Thai lookups, their marks moved by the fonts' private-use glyphs. Glyphs come out in logical order, with
+/// without Thai lookups, their marks moved by the fonts' private-use glyphs. Text with combining marks in the other
+/// scripts, such as Latin, Greek and Cyrillic, is composed where the font has the letter and gets its marks placed by
+/// GPOS. Glyphs come out in logical order, with
 /// positions for the direction the run is drawn in.
 /// </summary>
 /// <remarks>
@@ -49,7 +51,13 @@ internal static partial class ComplexShaper
             or (>= PresentationFormsBFirst and <= PresentationFormsBLast)
             or (>= ArabicExtendedCFirst and <= ArabicExtendedCLast)
             or (>= IndicFirst and <= IndicLast) or (>= ThaiFirst and <= LaoLast)
-            or (>= DevanagariExtendedFirst and <= DevanagariExtendedLast);
+            or (>= DevanagariExtendedFirst and <= DevanagariExtendedLast)
+            || IsCombiningMark(cp);
+
+    // Combining marks, which the font's GPOS places on letters that have no precomposed form, such as q̃ or ą́.
+    private static bool IsCombiningMark(int cp)
+        => cp is (>= 0x0300 and <= 0x036F) or (>= 0x1AB0 and <= 0x1AFF) or (>= 0x1DC0 and <= 0x1DFF) or (>= 0x20D0 and <= 0x20FF)
+            or (>= 0xFE20 and <= 0xFE2F);
 
     /// <summary>The direction complex text is shaped for when the caller does not know it: its first strong character's.</summary>
     public static bool GuessRtl(string s, int start, int length)
@@ -69,7 +77,7 @@ internal static partial class ComplexShaper
 
     private enum Script : byte
     {
-        Hebrew, Arabic, Syriac, Nko, Mandaic, Other,
+        Hebrew, Arabic, Syriac, Nko, Mandaic, Thaana, Samaritan, Latin, Greek, Cyrillic, Other,
         Devanagari, Bengali, Gurmukhi, Gujarati, Oriya, Tamil, Telugu, Kannada, Malayalam, Thai, Lao,
     }
 
@@ -81,6 +89,8 @@ internal static partial class ComplexShaper
         >= 0x0700 and <= 0x074F or >= 0x0860 and <= 0x086F => Script.Syriac,
         >= 0x07C0 and <= 0x07FF => Script.Nko,
         >= 0x0840 and <= 0x085F => Script.Mandaic,
+        >= 0x0780 and <= 0x07BF => Script.Thaana,
+        >= 0x0800 and <= 0x083F => Script.Samaritan,
         >= 0x0900 and <= 0x097F or >= 0xA8E0 and <= 0xA8FF => Script.Devanagari,
         >= 0x0980 and <= 0x09FF => Script.Bengali,
         >= 0x0A00 and <= 0x0A7F => Script.Gurmukhi,
@@ -98,17 +108,31 @@ internal static partial class ComplexShaper
     // The scripts shaped in runs of their own, as HarfBuzz is given one script at a time.
     private static bool ShapedApart(Script script) => script >= Script.Devanagari;
 
-    /// <summary>The script of the text: that of its first character that belongs to one.</summary>
+    /// <summary>
+    /// The script of the text: that of its first character that belongs to one of the complex scripts, or else of its
+    /// first Latin, Greek or Cyrillic letter, whose fonts may list their mark positioning under that script only.
+    /// </summary>
     private static Script ScriptOfText(string s, int start, int length)
     {
+        var letters = Script.Other;
         for (int i = start, end = start + length; i < end;)
         {
             var (cp, units) = CodePointAt(s, i, end);
             if (ScriptOf(cp) is var script and not Script.Other) return script;
+            if (letters == Script.Other) letters = LetterScript(cp);
             i += units;
         }
-        return Script.Other;
+        return letters;
     }
+
+    private static Script LetterScript(int cp) => cp switch
+    {
+        >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= 0x00C0 and <= 0x024F and not (0xD7 or 0xF7) or >= 0x1E00 and <= 0x1EFF
+            or >= 0x2C60 and <= 0x2C7F or >= 0xA720 and <= 0xA7FF => Script.Latin,
+        >= 0x0370 and <= 0x03FF or >= 0x1F00 and <= 0x1FFF => Script.Greek,
+        >= 0x0400 and <= 0x052F or >= 0x1C80 and <= 0x1C8F or >= 0x2DE0 and <= 0x2DFF or >= 0xA640 and <= 0xA69F => Script.Cyrillic,
+        _ => Script.Other,
+    };
 
     private static uint ScriptTag(Script script) => FontProgram.Tag(script switch
     {
@@ -120,6 +144,11 @@ internal static partial class ComplexShaper
         Script.Syriac => "syrc",
         Script.Nko => "nko ",
         Script.Mandaic => "mand",
+        Script.Thaana => "thaa",
+        Script.Samaritan => "samr",
+        Script.Latin => "latn",
+        Script.Greek => "grek",
+        Script.Cyrillic => "cyrl",
         _ => "DFLT",
     });
 

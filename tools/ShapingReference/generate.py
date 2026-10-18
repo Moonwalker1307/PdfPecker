@@ -1,5 +1,5 @@
 # Regenerates tests/PdfPecker.Tests/Fixtures/shaping/harfbuzz.txt: HarfBuzz's glyphs for the texts in corpus.txt,
-# which IndicShapingTests compares PdfPecker's Indic, Thai and Lao shaping with.
+# which HarfBuzzShapingTests compares PdfPecker's shaping with.
 #
 # Usage (from the repository root): pip install uharfbuzz fonttools brotli, then
 #   python3 tools/ShapingReference/generate.py

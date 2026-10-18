@@ -1,4 +1,4 @@
-# Text shaped by tests/PdfPecker.Tests/IndicShapingTests against HarfBuzz's output: font, then the text. A text in
+# Text shaped by tests/PdfPecker.Tests/HarfBuzzShapingTests against HarfBuzz's output: font, then the text. A text in
 # <U+XXXX ...> form spells out code points (joiners, broken syllables). generate.py adds HarfBuzz's glyphs.
 NotoSansDevanagari-Subset	नमस्ते
 NotoSansDevanagari-Subset	हिन्दी
@@ -98,3 +98,28 @@ NotoSansThai-Subset	<U+0E14 U+0E4B U+0E33>
 NotoSansThai-Subset	<U+0E1B U+0E39 U+0E3A>
 NotoSansLao-Subset	ລາວ
 NotoSansLao-Subset	ນ້ຳ ສະບາຍດີ
+
+# Latin, Greek and Cyrillic: precomposed letters, combining marks and decomposed (NFD) text.
+NotoSans-Subset	Voix ambiguë d'un cœur qui, au zéphyr, préfère les jattes de kiwis. L'Haÿ-les-Roses
+NotoSans-Subset	Falsches Üben von Xylophonmusik quält jeden größeren Zwerg. Straße
+NotoSans-Subset	Pchnąć w tę łódź jeża lub ośm skrzyń fig. Źdźbło
+NotoSans-Subset	Příliš žluťoučký kůň úpěl ďábelské ódy.
+NotoSans-Subset	Pijamalı hasta yağız şoföre çabucak güvendi. İstanbul
+NotoSans-Subset	Tiếng Việt có dấu: Những người ở đây rất tốt bụng. Thưởng thức phở.
+NotoSans-Subset	Tiếng Việt có dấu
+NotoSans-Subset	ä̧ q̃ ŋ̊ x̌ ǭ ḁ́
+NotoSans-Subset	Díí kwe’é łą́ą́ʼ bééhózin
+NotoSans-Subset	Ξεσκεπάζω την ψυχοφθόρα βδελυγμία. Ἀρχὴ ἥμισυ παντός.
+NotoSans-Subset	Съешь же ещё этих мягких французских булок, да выпей чаю.
+NotoSans-Subset	Љубазни фењерџија чађавог лица хоће да ми покаже штос.
+NotoSans-Subset	Ọ̀rọ̀ Yorùbá jẹ́ èdè tí ó dùn. Ẹ̀kọ́
+NotoSans-Subset	Москва́ вели́кий го́род
+NotoSans-Subset	Ἀρχὴ ἥμισυ παντός
+NotoSans-Subset	Įlinkęs ąžuolas. ė̃ į̃
+NotoSans-Subset	a͡b x⃝ e̋ ŭ̈
+NotoSans-Subset	Voix ambiguë d'un cœur qui, au zéphyr, préfère les jattes de kiwis. L'Haÿ-les-Roses
+NotoSans-Subset	Pchnąć w tę łódź jeża lub ośm skrzyń fig. Źdźbło
+NotoSans-Subset	Tiếng Việt có dấu: Những người ở đây rất tốt bụng. Thưởng thức phở.
+NotoSans-Subset	Ξεσκεπάζω την ψυχοφθόρα βδελυγμία. Ἀρχὴ ἥμισυ παντός.
+# Thaana (Dhivehi), right to left, with its vowel marks.
+NotoSansThaana-Subset	ދިވެހި ބަސް އަކީ ދިވެހިރާއްޖޭގެ ބަހެވެ

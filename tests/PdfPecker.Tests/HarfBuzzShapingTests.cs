@@ -4,11 +4,12 @@ using PdfPecker.Fonts;
 namespace PdfPecker.Tests;
 
 /// <summary>
-/// Indic, Thai and Lao shaping, compared glyph for glyph with HarfBuzz on subsets of the Noto fonts of each script
-/// (SIL Open Font License 1.1, see Fixtures/fonts). The texts are in tools/ShapingReference/corpus.txt and HarfBuzz's
-/// glyphs in Fixtures/shaping/harfbuzz.txt, which tools/ShapingReference/generate.py writes.
+/// Shaping compared glyph for glyph with HarfBuzz on subsets of the Noto fonts of each script (SIL Open Font License
+/// 1.1, see Fixtures/fonts): Indic, Thai, Lao and Thaana, and Latin, Greek and Cyrillic with combining marks. The texts
+/// are in tools/ShapingReference/corpus.txt and HarfBuzz's glyphs in Fixtures/shaping/harfbuzz.txt, which
+/// tools/ShapingReference/generate.py writes.
 /// </summary>
-public class IndicShapingTests
+public class HarfBuzzShapingTests
 {
     private static readonly Dictionary<string, FontProgram> Fonts = new();
 
@@ -41,13 +42,19 @@ public class IndicShapingTests
         return data;
     }
 
-    // Glyphs as "gid@advance,dx,dy" in font units, as HarfBuzz gives them.
+    // Glyphs as "gid@advance,dx,dy" in font units and in visual order, as HarfBuzz gives them. Text that needs no
+    // complex shaping is drawn with the font's advances and kerning.
     private static string Shape(FontProgram font, string text)
     {
         var glyphs = new List<ShapedGlyph>();
-        ComplexShaper.Shape(font, text, 0, text.Length, rtl: false, glyphs);
+        bool rtl = ComplexShaper.GuessRtl(text, 0, text.Length);
+        bool shaped = new EmbeddedFont(font, false, false).Shape(text, 0, text.Length, glyphs, rtl);
         float units = font.UnitsPerEm / 1000f;
-        return string.Join(" ", glyphs.Select(g => $"{g.Gid}@{MathF.Round(g.Advance * units)},{MathF.Round(g.Dx * units)},{MathF.Round(g.Dy * units)}"));
+        var positioned = glyphs.Select((g, k) => shaped
+            ? (g.Gid, Advance: MathF.Round(g.Advance * units), Dx: MathF.Round(g.Dx * units), Dy: MathF.Round(g.Dy * units))
+            : (g.Gid, Advance: (float)font.Advance(g.Gid) + (k + 1 < glyphs.Count ? MathF.Round(font.Kern1000(g.Gid, glyphs[k + 1].Gid) * units) : 0), Dx: 0f, Dy: 0f)).ToList();
+        if (rtl) positioned.Reverse();
+        return string.Join(" ", positioned.Select(g => $"{g.Gid}@{g.Advance},{g.Dx},{g.Dy}"));
     }
 
     [Theory]
