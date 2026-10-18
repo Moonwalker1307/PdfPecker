@@ -5,7 +5,9 @@ public sealed class MarkdownOptions
 {
     /// <summary>
     /// Enable the GitHub Flavored Markdown extensions: tables, strikethrough (<c>~~text~~</c>), task list items
-    /// (<c>- [x] done</c>) and bare URL autolinks. Default: true. When false, the parser follows CommonMark strictly.
+    /// (<c>- [x] done</c>), bare URL autolinks and footnotes (<c>[^1]</c> and <c>[^1]: text</c>), and with them
+    /// definition lists (a term line followed by <c>: definition</c>) and YAML front matter (a leading block between
+    /// <c>---</c> lines, which is not rendered). Default: true. When false, the parser follows CommonMark strictly.
     /// </summary>
     public bool GitHubExtensions { get; set; } = true;
 
@@ -24,6 +26,6 @@ public sealed class MarkdownOptions
     /// </summary>
     public string? StyleSheet { get; set; }
 
-    /// <summary>Document title. Defaults to the text of the first heading.</summary>
+    /// <summary>Document title. Defaults to the <c>title</c> of the YAML front matter, or else the text of the first heading.</summary>
     public string? Title { get; set; }
 }

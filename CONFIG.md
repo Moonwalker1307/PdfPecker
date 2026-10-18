@@ -31,13 +31,19 @@ nuget.org only accepts OSI- or FSF-approved licence IDs and some bundled font li
 | Workflow | When | What |
 | --- | --- | --- |
 | `nuget.yml` | Every PR, pushes to main, published releases | Builds and tests net8.0, net9.0 and net10.0 on Linux and net10.0 on Windows, publishes the sample with Native AOT, reports coverage and packs. On a release it attaches the package and publishes it to nuget.org. |
+| `dotnet-preview.yml` | Every PR, published releases, Mondays | Builds and tests on the latest .NET 11 preview SDK with an extra `net11.0` target. Never blocks: the job is `continue-on-error`, and it packs and publishes nothing. |
 | `conformance.yml` | PRs and pushes touching `src`, `tests` or the samples | veraPDF validation of the PDF/A and PDF/UA samples. |
 | `codeql.yml` | PRs, pushes and a schedule | CodeQL analysis. |
 | `perf.yml` | Nightly | Benchmark on main against the previous night's run. |
 | `fuzz.yml` | Nightly | Fuzzes every target. |
+| `dependabot-auto-merge.yml` | Dependabot PRs | Turns on auto-merge (squash) for patch and minor updates, so GitHub merges them once the required checks pass. Major updates and veraPDF updates wait for a person. |
 
 Actions are pinned to commit SHAs, and jobs get read-only permissions unless they need more: the release job may
 attach files, and the publish job may request an OIDC token.
+
+Repository settings Dependabot auto-merge relies on: "Allow auto-merge" under Settings → General, and a branch
+ruleset (or branch protection) on `main` that requires the status checks `build`, `windows`, `native-aot` and
+`analyze` and no approving review. Without required checks, enabling auto-merge fails and the PR waits for a person.
 
 Repository settings the release relies on: the `nuget` environment, and the `NUGET_USER` variable naming the
 nuget.org account that owns the Trusted Publishing policy. No NuGet API key is stored. See `RELEASING.md`.

@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Text.RegularExpressions;
 using static PdfPecker.Tests.PdfTestHelpers;
 
 namespace PdfPecker.Tests;
@@ -177,6 +179,140 @@ public class MarkdownTests
         }
     }
 
+    [Fact]
+    public void Footnotes_render_as_on_github()
+    {
+        Assert.Equal(
+            "<p>Text<sup class=\"footnote-ref\"><a href=\"#fn-1\" id=\"fnref-1\">1</a></sup> and more<sup class=\"footnote-ref\"><a href=\"#fn-2\" id=\"fnref-2\">2</a></sup>.</p>\n" +
+            "<section class=\"footnotes\">\n<ol>\n" +
+            "<li id=\"fn-1\">\n<p>First. <a href=\"#fnref-1\" class=\"footnote-backref\" aria-label=\"Back to reference 1\">↩</a></p>\n</li>\n" +
+            "<li id=\"fn-2\">\n<p>Second. <a href=\"#fnref-2\" class=\"footnote-backref\" aria-label=\"Back to reference 2\">↩</a></p>\n</li>\n" +
+            "</ol>\n</section>\n",
+            Html("Text[^a] and more[^B].\n\n[^b]: Second.\n[^a]: First."));
+    }
+
+    [Fact]
+    public void Footnotes_have_blocks_repeated_references_and_numbers_in_order_of_use()
+    {
+        var html = Html("x[^n] y[^n] z[^m]\n\n[^m]: M, which cites[^deep].\n[^n]: One.\n\n    Two,\ncontinued lazily.\n\n    - item\n\n[^deep]: Deep.\n[^unused]: Unused.");
+        // References number the footnotes in the order of first use; a second reference gets its own id and link back.
+        Assert.Contains("x<sup class=\"footnote-ref\"><a href=\"#fn-1\" id=\"fnref-1\">1</a></sup> y<sup class=\"footnote-ref\"><a href=\"#fn-1\" id=\"fnref-1-2\">1</a></sup>", html);
+        Assert.Contains("<li id=\"fn-1\">\n<p>One.</p>\n<p>Two,\ncontinued lazily.</p>\n<ul>\n<li>item</li>\n</ul>\n"
+                        + "<p><a href=\"#fnref-1\" class=\"footnote-backref\" aria-label=\"Back to reference 1\">↩</a> "
+                        + "<a href=\"#fnref-1-2\" class=\"footnote-backref\" aria-label=\"Back to reference 1-2\">↩<sup class=\"footnote-ref\">2</sup></a></p>\n</li>", html);
+        // A footnote that only another footnote references comes after those of the text; unused ones are left out.
+        Assert.Contains("<li id=\"fn-2\">\n<p>M, which cites<sup class=\"footnote-ref\"><a href=\"#fn-3\" id=\"fnref-3\">3</a></sup>.", html);
+        Assert.Contains("<li id=\"fn-3\">\n<p>Deep.", html);
+        Assert.DoesNotContain("Unused", html);
+    }
+
+    [Fact]
+    public void Footnote_syntax_without_a_definition_stays_text()
+    {
+        Assert.Equal("<p>a [^none] [^ b] [^]</p>\n", Html("a [^none] [^ b] [^]"));
+        // A code span and an inline link keep their meaning; the first definition of a label wins.
+        Assert.Equal("<p><code>[^1]</code> <a href=\"/u\">x</a><sup class=\"footnote-ref\"><a href=\"#fn-1\" id=\"fnref-1\">1</a></sup></p>\n"
+                     + "<section class=\"footnotes\">\n<ol>\n<li id=\"fn-1\">\n<p>A <a href=\"#fnref-1\" class=\"footnote-backref\" aria-label=\"Back to reference 1\">↩</a></p>\n</li>\n</ol>\n</section>\n",
+            Html("`[^1]` [x](/u)[^1]\n\n[^1]: A\n[^1]: B"));
+    }
+
+    [Fact]
+    public void Footnote_ids_are_kept_from_headings()
+    {
+        var html = MarkdownToHtml.Convert("# fn 1\n\nText[^x]\n\n[^x]: Note");
+        Assert.Contains("<h1 id=\"fn-1-1\">", html);
+        Assert.Contains("<li id=\"fn-1\">", html);
+    }
+
+    [Fact]
+    public void Definition_lists()
+    {
+        Assert.Equal("<dl>\n<dt>Term</dt>\n<dd>First <em>one</em></dd>\n<dd>Second</dd>\n<dt>Other</dt>\n<dd>Third</dd>\n</dl>\n",
+            Html("Term\n: First *one*\n: Second\n\nOther\n: Third"));
+        // A term line right after a definition, which would otherwise continue its paragraph, starts the next entry.
+        Assert.Equal("<dl>\n<dt>A</dt>\n<dd>a</dd>\n<dt>B</dt>\n<dd>b</dd>\n</dl>\n", Html("A\n: a\nB\n: b"));
+        // Only the line before the marker is the term; the lines before it stay a paragraph.
+        Assert.Equal("<p>Intro line</p>\n<dl>\n<dt>Term</dt>\n<dd>def</dd>\n</dl>\n", Html("Intro line\nTerm\n: def"));
+    }
+
+    [Fact]
+    public void Loose_definition_lists_and_indented_continuation()
+    {
+        Assert.Equal("<dl>\n<dt>Term</dt>\n<dd>\n<p>One.</p>\n<p>Two.</p>\n<pre><code>code\n</code></pre>\n</dd>\n</dl>\n",
+            Html("Term\n\n:   One.\n\n    Two.\n\n        code"));
+        Assert.Equal("<dl>\n<dt>Term</dt>\n<dd>\n<ul>\n<li>a</li>\n<li>b</li>\n</ul>\n</dd>\n</dl>\n<p>After</p>\n",
+            Html("Term\n: - a\n  - b\n\nAfter"));
+    }
+
+    [Fact]
+    public void Definition_markers_need_a_term_and_a_space()
+    {
+        Assert.Equal("<p>: no term</p>\n", Html(": no term"));
+        Assert.Equal("<p>Term\n:no space</p>\n", Html("Term\n:no space"));
+        Assert.Equal("<p>Term\n:</p>\n", Html("Term\n:"));
+        Assert.Equal("<h1>Head</h1>\n<p>: def</p>\n", Html("# Head\n: def"));
+        // Two blank lines are too many between a term and its definition.
+        Assert.Equal("<p>Term</p>\n<p>: def</p>\n", Html("Term\n\n\n: def"));
+    }
+
+    [Fact]
+    public void Front_matter_is_not_rendered_and_gives_the_title()
+    {
+        const string md = "---\ntitle: \"Annual: report\" \nauthor: Me\n---\nBody\n";
+        Assert.Equal("<p>Body</p>\n", Html(md));
+        var doc = MarkdownToHtml.ConvertDocument("---\ntitle: Plain title # comment\n...\n# Heading\n");
+        Assert.Contains("<title>Plain title</title>", doc);
+        Assert.Contains("<title>Annual: report</title>", MarkdownToHtml.ConvertDocument(md));
+        Assert.Contains("<title>Given</title>", MarkdownToHtml.ConvertDocument(md, new MarkdownOptions { Title = "Given" }));
+        Assert.Contains("<title>Heading</title>", MarkdownToHtml.ConvertDocument("---\nauthor: x\n---\n# Heading\n"));
+        Assert.Contains("/Title (Annual: report)", Latin1(MarkdownToPdf.Convert(md, new PdfOptions { Compress = false })));
+    }
+
+    [Fact]
+    public void Front_matter_needs_its_closing_line_at_the_start()
+    {
+        Assert.Equal("<hr />\n<p>title: x</p>\n", Html("---\ntitle: x\n"));
+        Assert.Equal("<p>Text</p>\n<hr />\n<h2>title: x</h2>\n", Html("Text\n\n---\ntitle: x\n---\n"));
+    }
+
+    [Fact]
+    public void Strict_commonmark_mode_has_no_footnotes_definition_lists_or_front_matter()
+    {
+        var strict = new MarkdownOptions { GitHubExtensions = false, HeadingIds = false };
+        Assert.Equal("<p>a<a href=\"b\">^1</a></p>\n", Html("a[^1]\n\n[^1]: b", strict));
+        Assert.Equal("<p>Term\n: def</p>\n", Html("Term\n: def", strict));
+        Assert.Equal("<hr />\n<h2>a: b</h2>\n", Html("---\na: b\n---", strict));
+    }
+
+    [Fact]
+    public void Markdown_to_pdf_puts_footnotes_at_the_page_bottom()
+    {
+        var md = "Body text[^a] and more[^b], again[^a].\n\n[^a]: Note A cites[^c].\n[^b]: Note B.\n\n    Second paragraph of B.\n[^c]: Note C.";
+        var html = MarkdownToHtml.RenderDocument(md, null, pagedFootnotes: true);
+        Assert.Contains("Body text<small class=\"footnote\" id=\"fn-1\" style=\"float: footnote\">Note A cites<a class=\"footnote-ref\" href=\"#fn-3\"><sup>3</sup></a>.</small>", html);
+        Assert.Contains("<small class=\"footnote\" id=\"fn-2\" style=\"float: footnote\">\n<p>Note B.</p>\n<p>Second paragraph of B.</p>\n</small>", html);
+        Assert.Contains("again<a class=\"footnote-ref\" href=\"#fn-1\"><sup>1</sup></a>.", html);
+        // Only a footnote that other footnotes alone reference goes to a list at the end, numbered on.
+        Assert.Contains("<section class=\"footnotes\">\n<ol start=\"3\">\n<li id=\"fn-3\">\n<p>Note C.</p>\n</li>", html);
+        Assert.DoesNotContain("footnote-backref", html);
+
+        var pdf = MarkdownToPdf.Convert(md, new PdfOptions { Compress = false });
+        AssertStructurallyValid(pdf);
+        var content = AllContent(pdf);
+        float Y(string text) => float.Parse(Regex.Match(content, @"1 0 0 1 [\d.]+ ([\d.]+) Tm \(" + Regex.Escape(text)).Groups[1].Value, CultureInfo.InvariantCulture);
+        Assert.True(Y("1. ") < 100 && Y("Note B.") < Y("1. ") && Y("Second paragraph of B.") < Y("Note B."), "The footnotes are at the bottom of the page, in order");
+        Assert.True(Y("Body text") > 700 && Y("Note C.") > 700, "The listed footnote follows the text");
+    }
+
+    [Fact]
+    public void Markdown_to_pdf_floats_footnotes_with_any_style_sheet()
+    {
+        var pdf = MarkdownToPdf.Convert("Text[^1]\n\n[^1]: The note.", new PdfOptions { Compress = false }, new MarkdownOptions { StyleSheet = "" });
+        var content = AllContent(pdf);
+        var y = float.Parse(Regex.Match(content, @"1 0 0 1 [\d.]+ ([\d.]+) Tm \(The note").Groups[1].Value, CultureInfo.InvariantCulture);
+        Assert.True(y < 100, "The footnote is at the bottom of the page");
+    }
+
     public static TheoryData<string, string> Pathological => new()
     {
         { "nested quotes", new string('>', 50_000) + " a" },
@@ -191,6 +327,15 @@ public class MarkdownTests
         { "reference definitions", string.Concat(Enumerable.Range(0, 10_000).Select(i => $"[r{i}]: /u{i}\n")) + "[r1]" },
         { "wide table", "|" + string.Concat(Enumerable.Repeat("a|", 200)) + "\n|" + string.Concat(Enumerable.Repeat("-|", 200)) + "\n" + string.Concat(Enumerable.Repeat("|b\n", 5000)) },
         { "bare urls", string.Concat(Enumerable.Repeat("www.a.b ", 30_000)) },
+        { "footnote references", string.Concat(Enumerable.Repeat("a[^1] ", 30_000)) + "\n\n[^1]: note" },
+        { "footnotes", string.Concat(Enumerable.Range(0, 10_000).Select(i => $"x[^{i}]\n")) + string.Concat(Enumerable.Range(0, 10_000).Select(i => $"[^{i}]: n{i} [^{i + 1}]\n")) },
+        { "unclosed footnote labels", string.Concat(Enumerable.Repeat("[^" + new string('a', 990), 200)) + "\n\n[^a]: x" },
+        { "footnote openers", string.Concat(Enumerable.Repeat("[^a", 30_000)) + "\n\n[^a]: x" },
+        { "nested footnote definitions", string.Concat(Enumerable.Repeat("[^a]: ", 30_000)) + "x [^a]\n\nText [^a]" },
+        { "definition markers", "Term\n" + string.Concat(Enumerable.Repeat(": d\n", 30_000)) },
+        { "definition entries", string.Concat(Enumerable.Repeat("t\n: d\n", 20_000)) },
+        { "nested definitions", string.Concat(Enumerable.Range(0, 300).Select(i => new string(' ', 2 * i) + "t\n" + new string(' ', 2 * i) + ": d\n")) },
+        { "unclosed front matter", "---\n" + string.Concat(Enumerable.Repeat("title: a\n", 50_000)) },
     };
 
 }

@@ -61,7 +61,8 @@ Before non-trivial work, read:
 - `fuzz/PdfPecker.Fuzz` – the dependency-free mutation fuzzer.
 - `tools/` – generators for checked-in data (see "Change-specific guidance"), the veraPDF conformance samples and the
   HarfBuzz shaping reference.
-- `.github/workflows/` – `nuget.yml`, `conformance.yml`, `codeql.yml`, `perf.yml`, `fuzz.yml`; see `CONFIG.md`.
+- `.github/workflows/` – `nuget.yml`, `dotnet-preview.yml`, `conformance.yml`, `codeql.yml`, `perf.yml`, `fuzz.yml`,
+  `dependabot-auto-merge.yml`; see `CONFIG.md`.
 - The user manual at pdfpecker.net/docs is not here: it is generated from `docs/*.md` in the PdfPecker.Web repository.
 
 ## Build and verify
@@ -131,8 +132,13 @@ must be unchanged unless the output change is intended. If only one runtime is i
 
 ## Commit guidance
 
-- Branch from the latest `origin/main`, one branch per piece of work, named after it in lowercase words joined by
-  hyphens (e.g. `rtl-svg-text`). Never reuse a branch name, even one whose pull request is merged.
+- Branch from the latest `origin/main`, one branch per piece of work.
+- Name the branch after the work it carries, in lowercase words joined by hyphens, with a `claude/` prefix when an
+  agent creates it (e.g. `claude/barcode-qr-codes`). Never use a generic or generated name such as
+  `claude/project-thread-xxxx`, even when a tool suggests one. Don't rename a branch that already has an open pull
+  request.
+- Never reuse a branch name. Once a pull request is merged or closed, its branch is finished: follow-up work goes on a
+  new branch with a new name, even when it continues the same feature.
 - Commit subjects are short imperative or descriptive sentences without prefixes, e.g. "Right-to-left text in SVG and
   RTL ellipsis".
 - The body explains why, and names any golden baselines that changed and the reason.

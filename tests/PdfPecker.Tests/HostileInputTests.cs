@@ -451,6 +451,29 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Repeating_gradients_share_one_tiling_budget()
+    {
+        // Each box tiles twenty repeating gradients over 250 periods, about 33 KB of PDF each: four kilobytes of HTML
+        // wrote 440 MB and took 2.3 GB of memory before the document's gradients shared one budget.
+        var gradient = "repeating-linear-gradient(red 0 0.06px,blue 0.06px 0.12px)";
+        var html = "<style>i{display:block;height:30px;background:" + string.Join(",", Enumerable.Repeat(gradient, 20)) + "}</style>"
+                   + Repeat("<i></i>", 400);
+        var (pdf, allocated) = Allocating(() => Bounded(html, new PdfOptions { Compress = false }));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(pdf.Length, 1, 64 << 20);
+        Assert.InRange(allocated, 0, 512L << 20);
+        // The first boxes are tiled; once the budget is spent, the rest are painted once, padded.
+        var text = Latin1(pdf);
+        Assert.Contains("/FunctionType 3 /Domain [0 250]", text);
+        Assert.Contains("/Domain [0 1] /Extend [true true]", text);
+
+        // A gradient with thousands of stops is not tiled at all: each period would copy all of them.
+        var stops = string.Join(",", Enumerable.Range(0, 2000).Select(i => $"#{i % 256:x2}0000 {i * 0.001:0.###}px"));
+        pdf = Bounded($"<div style='height:30px;background:repeating-linear-gradient({stops})'></div>", new PdfOptions { Compress = false });
+        Assert.DoesNotContain("/Domain [0 15]", Latin1(pdf));
+    }
+
+    [Fact]
     public void Svg_morphology_with_a_wide_radius_runs_in_linear_time()
     {
         var sb = new StringBuilder("<body style='margin:0'><svg width=1000 height=1000><filter id=f x=0 y=0 width=1000 height=1000 filterUnits=userSpaceOnUse>");
@@ -506,6 +529,37 @@ public class HostileInputTests
         Assert.Equal(n, CountOf(html, "<a href=\"/u\">a</a>"));
         // The last "]" closes an inactive bracket, which stays literal, and the image after it is still an image.
         Assert.Contains("<a href=\"/u\">a</a> [b]](/v) <img src=\"/i\" alt=\"c\" />", html);
+    }
+
+    [Fact]
+    public void Markdown_footnotes_by_the_thousand_stay_linear()
+    {
+        // Each footnote cites the next, around in a circle, and one footnote has thousands of references, each with a
+        // link back: every footnote's text is still rendered once.
+        const int n = 5000;
+        var md = Repeat("a[^1] ", n) + "\n\n" + string.Concat(Enumerable.Range(0, n).Select(i => $"b[^n{i}]\n"))
+                 + "\n[^1]: one\n" + string.Concat(Enumerable.Range(0, n).Select(i => $"[^n{i}]: Note {i} [^n{(i + 1) % n}]\n"));
+        var html = Bounded(() => MarkdownToHtml.Convert(md));
+        Assert.Equal(n + 1, CountOf(html, "<li id=\"fn-"));
+        Assert.Equal(n - 1, CountOf(html, "href=\"#fnref-1-"));
+
+        // In a PDF every footnote floats to the bottom of a page.
+        const int m = 1000;
+        var notes = string.Concat(Enumerable.Range(0, m).Select(i => $"b[^n{i}]\n")) + "\n"
+                    + string.Concat(Enumerable.Range(0, m).Select(i => $"[^n{i}]: Note {i} [^n{(i + 1) % m}]\n"));
+        AssertStructurallyValid(Bounded(() => MarkdownToPdf.Convert(notes)));
+    }
+
+    [Fact]
+    public void Markdown_definition_and_footnote_nesting_is_capped()
+    {
+        var nestedTerms = string.Concat(Enumerable.Range(0, 1000).Select(i => new string(' ', 2 * i) + "t\n" + new string(' ', 2 * i) + ": d\n"));
+        var html = Bounded(() => MarkdownToHtml.Convert(nestedTerms));
+        // A list and its definition are two levels of nesting.
+        Assert.Equal(Markdown.BlockParser.MaxNesting / 2, CountOf(html, "<dl>"));
+        html = Bounded(() => MarkdownToHtml.Convert(Repeat("[^a]: ", 200000) + "x [^a]\n\nText [^a]"));
+        Assert.Equal(1, CountOf(html, "<li id=\"fn-"));
+        AssertStructurallyValid(Bounded(() => MarkdownToPdf.Convert(nestedTerms + Repeat("[^a]: ", 20000) + "x [^a]\n\nText [^a]")));
     }
 
     private static int CountOf(string s, string part)

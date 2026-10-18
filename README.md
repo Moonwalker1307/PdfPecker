@@ -65,18 +65,19 @@ The conversion methods are static and thread-safe, so you can convert many docum
 
 - **HTML and CSS**: flexbox, grid and subgrid, multi-column layout, floats, positioning, transforms, gradients (also clipped to text), filters, media and container queries, inline SVG, and PNG, JPEG, GIF, WebP, BMP and TIFF images. [More](https://pdfpecker.net/docs/html-and-css/)
 - **Paged media**: `@page` sizes and margin boxes, running headers, footnotes, tables of contents with page numbers, break control, and table headers and footers repeated on every page. [More](https://pdfpecker.net/docs/paged-media/)
-- **Markdown**: CommonMark 0.31 and GitHub Flavored Markdown to PDF or HTML. [More](https://pdfpecker.net/docs/markdown/)
+- **Markdown**: CommonMark 0.31 and GitHub Flavored Markdown to PDF or HTML, with footnotes (at the bottom of the page in a PDF), definition lists and YAML front matter. [More](https://pdfpecker.net/docs/markdown/)
 - **Fonts**: TrueType, OpenType, WOFF and WOFF2, subset and embedded, with kerning, ligatures, variable fonts and OpenType features. [More](https://pdfpecker.net/docs/fonts/)
 - **Languages**: Arabic and Hebrew with bidi and shaping, Indic scripts (Devanagari, Bengali, Gurmukhi, Gujarati, Oriya, Tamil, Telugu, Kannada, Malayalam), Thai and Lao shaped as HarfBuzz shapes them, CJK line breaking, and hyphenation in English, Danish, German, Dutch, Norwegian, Swedish, Spanish, French, Italian, Portuguese and Polish. [More](https://pdfpecker.net/docs/languages/)
 - **PDF/A, passwords and watermarks**: PDF/A-2, 3 and 4, AES-256 encryption, and text, image and SVG watermarks. [More](https://pdfpecker.net/docs/pdfa-and-passwords/)
 - **Accessibility**: tagged PDF, PDF/UA-1 and PDF/UA-2 built from your HTML. [More](https://pdfpecker.net/docs/accessibility/)
 - **Reproducible output**: a fixed `CreationDate` or `SOURCE_DATE_EPOCH` gives byte-identical PDFs for the same input, also when merging, splitting or stamping, for build pipelines and output caches.
+- **Images to PDF**: `ImageToPdf` puts PNG, JPEG, GIF, WebP, BMP or TIFF images on pages of their own size, or scaled to fit a page size, for scans and receipts.
 - **Barcodes**: QR codes, EPC payment QR codes (GiroCode), Code 128 and EAN-13 as vector SVG for your template, e.g. `Barcode.QrCode("https://example.com")` or `<img src="@Barcode.ToDataUri(Barcode.Ean13("590123412345"))">`.
 - **Forms**: HTML inputs become fillable PDF fields; read, fill and flatten the fields of existing PDFs. [More](https://pdfpecker.net/docs/forms/)
 - **Digital signatures**: PAdES signing, timestamps, external signers, verification and long-term validation. [More](https://pdfpecker.net/docs/signatures/)
 - **E-invoices and attachments**: Factur-X and ZUGFeRD (embed the XML, or read it back from a received PDF), PDFs in Peppol and OIOUBL invoices, and any embedded file. [More](https://pdfpecker.net/docs/e-invoices/)
 - **Existing PDFs**: merge (also streamed), split, reorder, rotate, stamp and extract text with positions. [More](https://pdfpecker.net/docs/merging/)
-- **PDF to image**: renders any PDF page, including JPEG 2000, JBIG2 and CCITT images, to PNG, JPEG or WebP, or a whole PDF to one multi-page TIFF (colour, greyscale or black and white with CCITT Group 4). [More](https://pdfpecker.net/docs/pdf-to-image/)
+- **PDF to image**: renders any PDF page, including JPEG 2000, JBIG2 and CCITT images, to PNG, JPEG or WebP, or a whole PDF to one multi-page TIFF (colour, greyscale or black and white with CCITT Group 4). `HtmlToImage` goes from HTML to images in one call. [More](https://pdfpecker.net/docs/pdf-to-image/)
 - **Safe failures**: the library's own errors share the base class `PdfPeckerException`, and the `*File` methods write through a temporary file, so a failure never leaves a half-written output.
 
 PdfPecker is built for HTML templates you control: it runs no JavaScript, and conversion never fetches anything from
@@ -116,7 +117,7 @@ dotnet test
 dotnet run --project samples/PdfPecker.Sample -c Release      # converts samples/PdfPecker.Sample/html/*.html and *.md into ./output
 dotnet run --project bench/PdfPecker.Benchmarks -c Release
 dotnet run --project bench/PdfPecker.Benchmarks -c Release -- --requirements    # memory and CPU per conversion
-bench/compare-versions.sh v1.12.0                              # this checkout against a release, in turns on this machine
+bench/compare-versions.sh v1.13.0                              # this checkout against a release, in turns on this machine
 dotnet pack src/PdfPecker -c Release -o ./nupkg                # also checks the public API against the last release
 ```
 

@@ -236,101 +236,68 @@ internal sealed partial class LayoutEngine
         public int FirstPage; // page of the box's first painted content
     }
 
+    /// <summary>
+    /// The state of one <see cref="LayoutFlow"/> call, which its phases share by reference so that splitting the flow
+    /// into methods costs no allocation: the position reached, the margin waiting to collapse with the next box, the
+    /// list numbering and the keep-with-next chain that a box may have to rewind to.
+    /// </summary>
+    private struct FlowState
+    {
+        public Element Parent;
+        public List<Node> Children;
+        public float X, Y, W;
+        public PageBox? Pages;          // the flow's content box on each kind of page, when pages differ in width
+        public KeepProbe? Probe;        // the keep-with-next check of the flow around this box
+        public List<FlowResume>? Marks; // where a later balancing pass could go on from
+        public List<Node>? Run;         // the inline content collected since the last block box
+        public bool InColumns;
+        public float PendingMargin;
+        public bool AnyContent;
+        public bool AbsorbFirst;        // the parent has taken its first child's top margin as its own
+        public bool FirstBlock;
+        public int ListIndex;
+        public int Index;               // the child being laid out, which a rewind moves back
+        // Keep-with-next: the first box of a run of boxes that must not be separated from what follows them.
+        public FlowMark Prev, Chain;
+        public bool HasPrev, HasChain, PrevAvoidAfter;
+        public int ForcedAt;            // the box that was moved to a new page to keep its chain together
+    }
+
+    /// <summary>What the flow does after a phase: go on with the current child, go on with the next one, or stop.</summary>
+    private enum FlowStep : byte { Proceed, Next, Stop }
+
     /// <summary>Lays out the children of a block container. Returns the bottom of the content (including the last child's bottom margin).</summary>
     private float LayoutFlow(Element parent, float x, float y, float w)
     {
-        // The flow's content box on each kind of page, when pages differ in width: its boxes and lines take the
-        // geometry of the page they are on.
-        var pages = _pageBox;
-        _pageBox = null;
-        // The keep-with-next check of the flow around this box, which only needs to know where this flow's first content lands.
-        var probe = _flowProbe;
-        _flowProbe = null;
-        // A multi-column box lays out the children between two column-span: all boxes as one flow.
-        var range = _flowRange;
-        _flowRange = null;
-        var resume = _flowResume;
-        _flowResume = null;
-        var marks = _flowMarks;
-        _flowMarks = null;
-        bool inColumns = _grid is ColumnGrid;
-        float pendingMargin = 0;
-        bool anyContent = false;
-        // The parent has taken its first child's top margin as its own (they collapse): don't apply it again.
-        bool absorbFirst = _absorbTop;
-        _absorbTop = false;
-        bool firstBlock = true;
-        List<Node>? run = null;
-        var children = parent.Children;
-
-        int listIndex = 0;
-        if (parent.Name == "ol" && Invariant.TryParseInt(parent.GetAttribute("start"), out int start)) listIndex = start - 1;
-
-        // Keep-with-next: the first box of a run of boxes that must not be separated from what follows them.
-        FlowMark prev = default, chain = default;
-        bool hasPrev = false, hasChain = false, prevAvoidAfter = false;
-        int forcedAt = -1; // the box that was moved to a new page to keep its chain together
-
-        if (resume is { } at)
-        {
-            // A balancing pass goes on from where an earlier pass recorded this point, with the content before it.
-            y = at.Mark.Y;
-            pendingMargin = at.Mark.PendingMargin;
-            anyContent = at.Mark.AnyContent;
-            listIndex = at.Mark.ListIndex;
-            _currentListIndex = at.Mark.CurrentListIndex;
-            _marker = at.Mark.Marker;
-            absorbFirst = firstBlock = false;
-        }
-
-        int i, end = range?.To ?? children.Count;
-        for (i = resume?.Mark.Index ?? range?.From ?? 0; i <= end; i++)
+        var f = BeginFlow(parent, x, y, w, out int end);
+        var children = f.Children;
+        for (; f.Index <= end; f.Index++)
         {
             Element? e = null;
-            if (i < end)
+            if (f.Index < end)
             {
-                var child = children[i];
+                var child = children[f.Index];
                 if (child is TextNode)
                 {
-                    (run ??= RentRun()).Add(child);
+                    (f.Run ??= RentRun()).Add(child);
                     continue;
                 }
                 e = (Element)child;
                 var es = e.Style;
                 if (es == null || es.Display == Display.None || e.Detached) continue;
-                if (IsInlineLevel(e) || (es.Floated || es.OutOfFlow) && run is { Count: > 0 })
+                if (IsInlineLevel(e) || (es.Floated || es.OutOfFlow) && f.Run is { Count: > 0 })
                 {
                     // Floats and absolutely positioned boxes among inline content are placed as the lines reach them.
-                    (run ??= RentRun()).Add(child);
+                    (f.Run ??= RentRun()).Add(child);
                     continue;
                 }
             }
 
-            if (run is { Count: > 0 })
+            if (f.Run is { Count: > 0 })
             {
-                float before = y;
-                int runOps = _ops.Count;
-                // The lines' content (inline blocks, percentages) is sized for the page the paragraph starts on; each
-                // line then takes the width of its own page.
-                var (ix, iw) = pages != null ? OnPage(pages, y + pendingMargin) : (x, w);
-                _inlinePageBox = pages;
-                y = FlushInline(run, parent, ix, y + pendingMargin, iw, !anyContent, out bool produced);
-                run.Clear();
-                if (produced)
-                {
-                    pendingMargin = 0;
-                    anyContent = true;
-                    if (hasChain && prevAvoidAfter && KeepTogetherFails(chain, runOps, before, forcedAt))
-                    {
-                        Rewind(chain);
-                        forcedAt = chain.Index;
-                        hasChain = hasPrev = prevAvoidAfter = false;
-                        continue;
-                    }
-                    hasChain = hasPrev = prevAvoidAfter = false;
-                    if (probe != null && Probed(ref probe)) break;
-                }
-                else y = before;
+                var step = FlushFlowRun(ref f);
+                if (step == FlowStep.Next) continue;
+                if (step == FlowStep.Stop) break;
             }
             if (e == null) break;
 
@@ -338,158 +305,272 @@ internal sealed partial class LayoutEngine
             if (s.OutOfFlow)
             {
                 // Its static position: where its top margin edge would be in the flow.
-                float smt = s.MarginTop.Resolve(w);
-                float sy = y + CollapseMargins(pendingMargin, smt) - smt;
-                QueueAbsolute(e, pages != null ? OnPage(pages, sy).X : x, sy);
+                float smt = s.MarginTop.Resolve(f.W);
+                float sy = f.Y + CollapseMargins(f.PendingMargin, smt) - smt;
+                QueueAbsolute(e, f.Pages != null ? OnPage(f.Pages, sy).X : f.X, sy);
                 continue;
             }
             if (s.Floated)
             {
-                var (fx, fw) = pages != null ? OnPage(pages, y + pendingMargin) : (x, w);
-                PlaceFloat(MeasureFloat(e, fw), y + pendingMargin, fx, fw);
+                var (fx, fw) = f.Pages != null ? OnPage(f.Pages, f.Y + f.PendingMargin) : (f.X, f.W);
+                PlaceFloat(MeasureFloat(e, fw), f.Y + f.PendingMargin, fx, fw);
                 continue;
             }
-            var mark = new FlowMark
-            {
-                Index = i, OpsCount = _ops.Count, ListIndex = listIndex, CurrentListIndex = _currentListIndex,
-                Y = y, PendingMargin = pendingMargin, AnyContent = anyContent, Marker = _marker,
-            };
-            // A forced break wins over avoid.
-            // In columns a box breaks to the next column; Chrome ignores page breaks there.
-            bool breakBefore = inColumns ? s.ColumnBreakBefore : s.PageBreakBefore;
-            bool breakAfter = inColumns ? s.ColumnBreakAfter : s.PageBreakAfter;
-            bool joins = _paginate && hasPrev && (prevAvoidAfter || s.AvoidBreakBefore || inColumns && s.AvoidColumnBreakBefore) && !breakBefore;
-            if (!joins) hasChain = false;
-            if (joins && !hasChain) { chain = prev; hasChain = true; }
-            if (marks != null && !joins && forcedAt != i && CanResumeAt(y)) marks.Add(new FlowResume(mark, _captureAnchors?.Count ?? 0));
-
-            if (s.PageBreakBefore || s.PageBreakAfter) _forcedBreaks++;
-            if (s.Display == Display.ListItem)
-            {
-                listIndex++;
-                if (Invariant.TryParseInt(e.GetAttribute("value"), out int v)) listIndex = v;
-                _currentListIndex = listIndex;
-            }
-
-            // A box's top margin collapses with those of its first children (CSS 2.1 §8.3.1).
-            float mt = absorbFirst && firstBlock && !anyContent
-                ? 0
-                : CollapseMargins(s.MarginTop.Resolve(w), LeadingMargin(e, w));
-            firstBlock = false;
-            float top = y + CollapseMargins(pendingMargin, mt);
-            if (inColumns) top = TruncatedMargin(y, top);
-            if (s.ClearLeft || s.ClearRight) top = Cleared(s, top);
-            // A forced break before anything has been drawn (the first box of the document or of a named page's run)
-            // would only leave an empty page: Chrome ignores it.
-            if (forcedAt == i) top = NextPage(top);
-            else if (breakBefore && !AtPageTop(y) && (PageOf(top) > 0 || !NothingDrawn(_ops)))
-            {
-                // Margins before a forced break are cut off, but the box's own top margin after it stays, as it does
-                // after a break-after on the box before (CSS Fragmentation 3 §5.2). Content that already ends at the top
-                // of a page, after a break-after on the box before, needs no second break.
-                float next = ForcedBreak(top);
-                if (next != top) top = next + mt;
-            }
-
-            int boxOps = _ops.Count;
-            float bottom;
-            var (bx, bw) = pages != null ? OnPage(pages, top) : (x, w);
-            KeepProbe? passed = null;
-            if (FloatsBelow(top) && AvoidsFloats(e)) bottom = LayoutBesideFloats(e, bx, ref top, bw);
-            else
-            {
-                // A box that must start on the page of the chain before it is only laid out until it is clear where its
-                // first content lands, when that is a later page and the chain has to move anyway.
-                var childProbe = joins && chain.Index != forcedAt && !AtPageTop(chain.Top) && CanProbe(e)
-                    ? new KeepProbe(boxOps, chain.FirstPage)
-                    : null;
-                // A flow that is probed itself hands its probe to its first box, whose first content is this flow's.
-                // Otherwise a box that only wraps the next level, such as a div around the next heading, is laid out in
-                // full before the probe can stop, and each level again lays out everything below it twice.
-                passed = childProbe == null && probe != null && !hasPrev && CanProbe(e) && FirstContent(probe) == null ? probe : null;
-                var markerBefore = _marker;
-                int listBefore = _currentListIndex;
-                _childPageBox = pages;
-                _childProbe = childProbe ?? passed;
-                bottom = LayoutBlockBox(e, bx, top, bw, shrinkToFit: false);
-                _childProbe = null;
-                if (childProbe is { Stopped: true } && !KeepTogetherFails(chain, boxOps, top, forcedAt))
-                {
-                    // The chain stays after all, so the box needs all of its content: lay it out again in full.
-                    Truncate(boxOps);
-                    _marker = markerBefore;
-                    _currentListIndex = listBefore;
-                    _childPageBox = pages;
-                    bottom = LayoutBlockBox(e, bx, top, bw, shrinkToFit: false);
-                }
-            }
-            float trailing = _boxTrailing;
-            if (joins && KeepTogetherFails(chain, boxOps, top, forcedAt))
-            {
-                Rewind(chain);
-                forcedAt = chain.Index;
-                hasChain = hasPrev = prevAvoidAfter = false;
-                continue;
-            }
-            float mb = CollapseMargins(s.MarginBottom.Resolve(w), trailing);
-            if (bottom - top < Eps && CollapsesThrough(e) && !breakBefore && !breakAfter)
-            {
-                // An empty box: its margins collapse with each other and with those around it.
-                pendingMargin = CollapseMargins(CollapseMargins(pendingMargin, mt), mb);
-                continue;
-            }
-            anyContent = true;
-            pendingMargin = mb;
-            y = bottom;
-            if (breakAfter)
-            {
-                y = ForcedBreak(y + pendingMargin);
-                pendingMargin = 0;
-            }
-
-            mark.Top = top;
-            if (_paginate) mark.FirstPage = FirstContentPage(boxOps, top);
-            prevAvoidAfter = _paginate && (s.AvoidBreakAfter || inColumns && s.AvoidColumnBreakAfter) && !breakAfter;
-            if (!prevAvoidAfter) hasChain = false;
-            prev = mark;
-            hasPrev = !breakAfter;
-            // The box stopped with the probe this flow handed it: its first content is past the chain's page, which
-            // nothing after it can change, and laying out its siblings would only record their headings too early.
-            if (passed is { Stopped: true } || probe != null && Probed(ref probe)) break;
+            if (LayoutFlowBox(ref f, e) == FlowStep.Stop) break;
         }
-        _flowTrailing = pendingMargin;
-        ReturnRun(run);
-        return y + pendingMargin;
+        _flowTrailing = f.PendingMargin;
+        ReturnRun(f.Run);
+        return f.Y + f.PendingMargin;
+    }
 
-        void Rewind(in FlowMark m)
+    /// <summary>
+    /// Starts a flow: takes what the caller handed it for this flow alone (the page geometry, the keep probe, the
+    /// children range of a multi-column box and a balancing pass's resume point), and the list numbering.
+    /// </summary>
+    private FlowState BeginFlow(Element parent, float x, float y, float w, out int end)
+    {
+        var f = new FlowState { Parent = parent, Children = parent.Children, X = x, Y = y, W = w, ForcedAt = -1 };
+        // The flow's content box on each kind of page, when pages differ in width: its boxes and lines take the
+        // geometry of the page they are on.
+        f.Pages = _pageBox;
+        _pageBox = null;
+        // The keep-with-next check of the flow around this box, which only needs to know where this flow's first content lands.
+        f.Probe = _flowProbe;
+        _flowProbe = null;
+        // A multi-column box lays out the children between two column-span: all boxes as one flow.
+        var range = _flowRange;
+        _flowRange = null;
+        var resume = _flowResume;
+        _flowResume = null;
+        f.Marks = _flowMarks;
+        _flowMarks = null;
+        f.InColumns = _grid is ColumnGrid;
+        // The parent has taken its first child's top margin as its own (they collapse): don't apply it again.
+        f.AbsorbFirst = _absorbTop;
+        _absorbTop = false;
+        f.FirstBlock = true;
+
+        if (parent.Name == "ol" && Invariant.TryParseInt(parent.GetAttribute("start"), out int start)) f.ListIndex = start - 1;
+
+        if (resume is { } at)
         {
-            Truncate(m.OpsCount);
-            while (marks is { Count: > 0 } && marks[^1].Mark.Index >= m.Index) marks.RemoveAt(marks.Count - 1);
-            if (probe != null) probe.ScanFrom = Math.Min(probe.ScanFrom, m.OpsCount);
-            i = m.Index - 1;
-            y = m.Y;
-            pendingMargin = m.PendingMargin;
-            anyContent = m.AnyContent;
-            listIndex = m.ListIndex;
-            _currentListIndex = m.CurrentListIndex;
-            _marker = m.Marker;
-            run?.Clear();
+            // A balancing pass goes on from where an earlier pass recorded this point, with the content before it.
+            f.Y = at.Mark.Y;
+            f.PendingMargin = at.Mark.PendingMargin;
+            f.AnyContent = at.Mark.AnyContent;
+            f.ListIndex = at.Mark.ListIndex;
+            _currentListIndex = at.Mark.CurrentListIndex;
+            _marker = at.Mark.Marker;
+            f.AbsorbFirst = f.FirstBlock = false;
         }
 
-        // Whether the flow can stop because the probe has its answer: true when its first content is on a later page
-        // than the chain before it, which then moves to the next page and lays this flow out again. Once the first
-        // content is on that page or an earlier one, the probe is done and the flow carries on as usual.
-        bool Probed(ref KeepProbe? p)
+        end = range?.To ?? f.Children.Count;
+        f.Index = resume?.Mark.Index ?? range?.From ?? 0;
+        return f;
+    }
+
+    /// <summary>
+    /// Lays out the inline content collected before the current child as lines. Returns <see cref="FlowStep.Next"/>
+    /// when the lines broke a keep-with-next chain and the flow rewound to it.
+    /// </summary>
+    private FlowStep FlushFlowRun(ref FlowState f)
+    {
+        var run = f.Run!;
+        float before = f.Y;
+        int runOps = _ops.Count;
+        // The lines' content (inline blocks, percentages) is sized for the page the paragraph starts on; each
+        // line then takes the width of its own page.
+        var (ix, iw) = f.Pages != null ? OnPage(f.Pages, f.Y + f.PendingMargin) : (f.X, f.W);
+        _inlinePageBox = f.Pages;
+        f.Y = FlushInline(run, f.Parent, ix, f.Y + f.PendingMargin, iw, !f.AnyContent, out bool produced);
+        run.Clear();
+        if (produced)
         {
-            if (FirstContent(p!) is not (var at, var fy)) return false;
-            // A chain of this flow that can still move to the next page may take the first content with it.
-            if (hasChain && chain.OpsCount <= at && chain.Index != forcedAt && !AtPageTop(chain.Top)) return false;
-            if (hasPrev && prev.OpsCount <= at && prev.Index != forcedAt && !AtPageTop(prev.Top)
-                && (prevAvoidAfter || NextBoxAvoidsBreakBefore(children, i + 1))) return false;
-            if (PageOf(fy) > p!.KeepPage) return p.Stopped = true;
-            p = null;
-            return false;
+            f.PendingMargin = 0;
+            f.AnyContent = true;
+            if (f.HasChain && f.PrevAvoidAfter && KeepTogetherFails(f.Chain, runOps, before, f.ForcedAt))
+            {
+                RewindToChain(ref f);
+                return FlowStep.Next;
+            }
+            f.HasChain = f.HasPrev = f.PrevAvoidAfter = false;
+            if (f.Probe != null && FlowProbed(ref f)) return FlowStep.Stop;
         }
+        else f.Y = before;
+        return FlowStep.Proceed;
+    }
+
+    /// <summary>
+    /// Lays out one block box of the flow, keeping it with the chain of boxes before it when breaks between them are
+    /// avoided. Returns <see cref="FlowStep.Stop"/> when the flow's keep probe has its answer.
+    /// </summary>
+    private FlowStep LayoutFlowBox(ref FlowState f, Element e)
+    {
+        var s = e.Style;
+        var mark = new FlowMark
+        {
+            Index = f.Index, OpsCount = _ops.Count, ListIndex = f.ListIndex, CurrentListIndex = _currentListIndex,
+            Y = f.Y, PendingMargin = f.PendingMargin, AnyContent = f.AnyContent, Marker = _marker,
+        };
+        // A forced break wins over avoid.
+        // In columns a box breaks to the next column; Chrome ignores page breaks there.
+        bool breakBefore = f.InColumns ? s.ColumnBreakBefore : s.PageBreakBefore;
+        bool breakAfter = f.InColumns ? s.ColumnBreakAfter : s.PageBreakAfter;
+        bool joins = _paginate && f.HasPrev && (f.PrevAvoidAfter || s.AvoidBreakBefore || f.InColumns && s.AvoidColumnBreakBefore) && !breakBefore;
+        if (!joins) f.HasChain = false;
+        if (joins && !f.HasChain) { f.Chain = f.Prev; f.HasChain = true; }
+        if (f.Marks != null && !joins && f.ForcedAt != f.Index && CanResumeAt(f.Y)) f.Marks.Add(new FlowResume(mark, _captureAnchors?.Count ?? 0));
+
+        if (s.PageBreakBefore || s.PageBreakAfter) _forcedBreaks++;
+        if (s.Display == Display.ListItem)
+        {
+            f.ListIndex++;
+            if (Invariant.TryParseInt(e.GetAttribute("value"), out int v)) f.ListIndex = v;
+            _currentListIndex = f.ListIndex;
+        }
+
+        float top = FlowBoxTop(ref f, e, breakBefore, out float mt);
+        int boxOps = _ops.Count;
+        float bottom = LayoutFlowBoxContent(ref f, e, ref top, joins, boxOps, out var passed);
+        float trailing = _boxTrailing;
+        if (joins && KeepTogetherFails(f.Chain, boxOps, top, f.ForcedAt))
+        {
+            RewindToChain(ref f);
+            return FlowStep.Next;
+        }
+        float mb = CollapseMargins(s.MarginBottom.Resolve(f.W), trailing);
+        if (bottom - top < Eps && CollapsesThrough(e) && !breakBefore && !breakAfter)
+        {
+            // An empty box: its margins collapse with each other and with those around it.
+            f.PendingMargin = CollapseMargins(CollapseMargins(f.PendingMargin, mt), mb);
+            return FlowStep.Next;
+        }
+        f.AnyContent = true;
+        f.PendingMargin = mb;
+        f.Y = bottom;
+        if (breakAfter)
+        {
+            f.Y = ForcedBreak(f.Y + f.PendingMargin);
+            f.PendingMargin = 0;
+        }
+
+        mark.Top = top;
+        if (_paginate) mark.FirstPage = FirstContentPage(boxOps, top);
+        f.PrevAvoidAfter = _paginate && (s.AvoidBreakAfter || f.InColumns && s.AvoidColumnBreakAfter) && !breakAfter;
+        if (!f.PrevAvoidAfter) f.HasChain = false;
+        f.Prev = mark;
+        f.HasPrev = !breakAfter;
+        // The box stopped with the probe this flow handed it: its first content is past the chain's page, which
+        // nothing after it can change, and laying out its siblings would only record their headings too early.
+        if (passed is { Stopped: true } || f.Probe != null && FlowProbed(ref f)) return FlowStep.Stop;
+        return FlowStep.Next;
+    }
+
+    /// <summary>
+    /// The top of a block box's border edge in the flow: after its top margin, collapsed with the pending one, below
+    /// the floats it clears and on a new page when a break is forced before it.
+    /// </summary>
+    private float FlowBoxTop(ref FlowState f, Element e, bool breakBefore, out float mt)
+    {
+        var s = e.Style;
+        // A box's top margin collapses with those of its first children (CSS 2.1 §8.3.1).
+        mt = f.AbsorbFirst && f.FirstBlock && !f.AnyContent
+            ? 0
+            : CollapseMargins(s.MarginTop.Resolve(f.W), LeadingMargin(e, f.W));
+        f.FirstBlock = false;
+        float top = f.Y + CollapseMargins(f.PendingMargin, mt);
+        if (f.InColumns) top = TruncatedMargin(f.Y, top);
+        if (s.ClearLeft || s.ClearRight) top = Cleared(s, top);
+        // A forced break before anything has been drawn (the first box of the document or of a named page's run)
+        // would only leave an empty page: Chrome ignores it.
+        if (f.ForcedAt == f.Index) top = NextPage(top);
+        else if (breakBefore && !AtPageTop(f.Y) && (PageOf(top) > 0 || !NothingDrawn(_ops)))
+        {
+            // Margins before a forced break are cut off, but the box's own top margin after it stays, as it does
+            // after a break-after on the box before (CSS Fragmentation 3 §5.2). Content that already ends at the top
+            // of a page, after a break-after on the box before, needs no second break.
+            float next = ForcedBreak(top);
+            if (next != top) top = next + mt;
+        }
+        return top;
+    }
+
+    /// <summary>
+    /// Lays out a block box of the flow at <paramref name="top"/>, beside the floats it avoids or with the keep probe
+    /// that lets it stop early. <paramref name="passed"/> is this flow's own probe when the box took it over.
+    /// </summary>
+    private float LayoutFlowBoxContent(ref FlowState f, Element e, ref float top, bool joins, int boxOps, out KeepProbe? passed)
+    {
+        var (bx, bw) = f.Pages != null ? OnPage(f.Pages, top) : (f.X, f.W);
+        passed = null;
+        if (FloatsBelow(top) && AvoidsFloats(e)) return LayoutBesideFloats(e, bx, ref top, bw);
+
+        // A box that must start on the page of the chain before it is only laid out until it is clear where its
+        // first content lands, when that is a later page and the chain has to move anyway.
+        var childProbe = joins && f.Chain.Index != f.ForcedAt && !AtPageTop(f.Chain.Top) && CanProbe(e)
+            ? new KeepProbe(boxOps, f.Chain.FirstPage)
+            : null;
+        // A flow that is probed itself hands its probe to its first box, whose first content is this flow's.
+        // Otherwise a box that only wraps the next level, such as a div around the next heading, is laid out in
+        // full before the probe can stop, and each level again lays out everything below it twice.
+        passed = childProbe == null && f.Probe != null && !f.HasPrev && CanProbe(e) && FirstContent(f.Probe) == null ? f.Probe : null;
+        var markerBefore = _marker;
+        int listBefore = _currentListIndex;
+        _childPageBox = f.Pages;
+        _childProbe = childProbe ?? passed;
+        float bottom = LayoutBlockBox(e, bx, top, bw, shrinkToFit: false);
+        _childProbe = null;
+        if (childProbe is { Stopped: true } && !KeepTogetherFails(f.Chain, boxOps, top, f.ForcedAt))
+        {
+            // The chain stays after all, so the box needs all of its content: lay it out again in full.
+            Truncate(boxOps);
+            _marker = markerBefore;
+            _currentListIndex = listBefore;
+            _childPageBox = f.Pages;
+            bottom = LayoutBlockBox(e, bx, top, bw, shrinkToFit: false);
+        }
+        return bottom;
+    }
+
+    /// <summary>Moves the flow back to the start of its keep-with-next chain, which then goes to the next page.</summary>
+    private void RewindToChain(ref FlowState f)
+    {
+        RewindFlow(ref f, f.Chain);
+        f.ForcedAt = f.Chain.Index;
+        f.HasChain = f.HasPrev = f.PrevAvoidAfter = false;
+    }
+
+    /// <summary>Restores the flow to where a box started, dropping what was drawn and recorded after that point.</summary>
+    private void RewindFlow(ref FlowState f, in FlowMark m)
+    {
+        Truncate(m.OpsCount);
+        var marks = f.Marks;
+        while (marks is { Count: > 0 } && marks[^1].Mark.Index >= m.Index) marks.RemoveAt(marks.Count - 1);
+        if (f.Probe != null) f.Probe.ScanFrom = Math.Min(f.Probe.ScanFrom, m.OpsCount);
+        f.Index = m.Index - 1;
+        f.Y = m.Y;
+        f.PendingMargin = m.PendingMargin;
+        f.AnyContent = m.AnyContent;
+        f.ListIndex = m.ListIndex;
+        _currentListIndex = m.CurrentListIndex;
+        _marker = m.Marker;
+        f.Run?.Clear();
+    }
+
+    // Whether the flow can stop because the probe has its answer: true when its first content is on a later page
+    // than the chain before it, which then moves to the next page and lays this flow out again. Once the first
+    // content is on that page or an earlier one, the probe is done and the flow carries on as usual.
+    private bool FlowProbed(ref FlowState f)
+    {
+        var p = f.Probe!;
+        if (FirstContent(p) is not (var at, var fy)) return false;
+        // A chain of this flow that can still move to the next page may take the first content with it.
+        if (f.HasChain && f.Chain.OpsCount <= at && f.Chain.Index != f.ForcedAt && !AtPageTop(f.Chain.Top)) return false;
+        if (f.HasPrev && f.Prev.OpsCount <= at && f.Prev.Index != f.ForcedAt && !AtPageTop(f.Prev.Top)
+            && (f.PrevAvoidAfter || NextBoxAvoidsBreakBefore(f.Children, f.Index + 1))) return false;
+        if (PageOf(fy) > p.KeepPage) return p.Stopped = true;
+        f.Probe = null;
+        return false;
     }
 
     /// <summary>
@@ -711,18 +792,44 @@ internal sealed partial class LayoutEngine
         _childPageBox = null;
         if (!table) _childPageBox = pages;
         float bottom = table ? LayoutTable(e, x, y, availW, pages) : LayoutBlockBoxCore(e, x, y, availW, shrinkToFit);
-        if ((s.AvoidBreakInside || s.AvoidColumnBreakInside && _grid is ColumnGrid) && CrossesPage(y, bottom) && bottom - y <= _grid.Height(PageOf(y) + 1) && !AtPageTop(y))
+        bool avoidInside = s.AvoidBreakInside || s.AvoidColumnBreakInside && _grid is ColumnGrid;
+        if (avoidInside && CrossesPage(y, bottom) && !AtPageTop(y))
         {
-            Truncate(opsStart);
-            _marker = savedMarker;
-            float ny = NextPage(y);
-            if (pages != null)
+            // A box split at the end of a column also measures the room it left there, so in columns one that is no
+            // taller than the next column can look taller: it is tried there and kept only if it then fits whole.
+            bool fitsNext = bottom - y <= _grid.Height(PageOf(y) + 1);
+            if (fitsNext || _grid is ColumnGrid)
             {
-                (x, availW) = OnPage(pages, ny);
-                if (!table) _childPageBox = pages;
+                float oy = y, ox = x, oavailW = availW;
+                int page = PageOf(y);
+                Truncate(opsStart);
+                _marker = savedMarker;
+                float ny = NextPage(y);
+                if (pages != null)
+                {
+                    (x, availW) = OnPage(pages, ny);
+                    if (!table) _childPageBox = pages;
+                }
+                y = ny;
+                bottom = table ? LayoutTable(e, x, ny, availW, pages) : LayoutBlockBoxCore(e, x, ny, availW, shrinkToFit);
+                if (!CrossesPage(ny, bottom))
+                {
+                    // Columns taller by this much would have kept the whole box where it started.
+                    _columnNotes?.Break(page, oy, oy + (bottom - ny) - FlowEnd(page));
+                }
+                else if (!fitsNext)
+                {
+                    Truncate(opsStart);
+                    _marker = savedMarker;
+                    (y, x, availW) = (oy, ox, oavailW);
+                    _childPageBox = table ? null : pages;
+                    bottom = table ? LayoutTable(e, x, y, availW, pages) : LayoutBlockBoxCore(e, x, y, availW, shrinkToFit);
+                }
             }
-            bottom = table ? LayoutTable(e, x, ny, availW, pages) : LayoutBlockBoxCore(e, x, ny, availW, shrinkToFit);
         }
+        // Columns being balanced start at least as tall as the tallest box that must stay whole, as in Chrome, so
+        // such a box is never split only because the first height tried was short.
+        if (avoidInside && !CrossesPage(y, bottom)) _columnNotes?.Unbreakable(PageOf(y), bottom - y);
         if (table) _boxTrailing = 0;
         if (s.Layered) FinishLayered(e, opsStart, availW);
         return bottom;

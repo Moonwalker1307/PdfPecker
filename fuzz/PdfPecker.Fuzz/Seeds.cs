@@ -280,8 +280,29 @@ internal sealed class SeedContext
             [ref]: http://example.com "Title"
             [link][ref], [inline](<url with spaces> 'title'), ![img](data:image/png;base64,iVBORw0KGgo=), <http://auto.link>, www.bare.com, https://x.y/z
 
-            Footnote[^1] and ***strong emph***, __a__ *b* _c_ **d**.
-            [^1]: The note.
+            Footnote[^1] and ***strong emph***, __a__ *b* _c_ **d**, again[^1], [^long] and [^none].
+            [^1]: The note, which cites[^2].
+            [^2]: A note cited only by a note.
+            [^long]: A note with blocks.
+
+                - a list
+                - in it
+
+                ```
+                code
+                ```
+
+            Term
+            : Definition *one*
+            : Definition two
+            Next term
+            :   Indented definition.
+
+                Its second paragraph.
+
+            Loose term
+
+            : Loose definition
 
             <div class="html">raw *html*</div>
             <!-- comment -->
@@ -294,6 +315,18 @@ internal sealed class SeedContext
             Hard
             break\
             end &amp; &#35; &copy;
+            """));
+        // Front matter counts only at the very start, so it has a seed of its own.
+        yield return ("builtin:front-matter.md", Encoding.UTF8.GetBytes("""
+            ---
+            title: "A \"quoted\" title"
+            tags: [a, b]
+            ---
+            # Heading
+
+            Text[^n].
+
+            [^n]: Note.
             """));
     }
 

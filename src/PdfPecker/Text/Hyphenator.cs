@@ -177,17 +177,25 @@ internal sealed class Hyphenator
     /// break with a hyphen, in increasing order, written into <paramref name="breaks"/>. Leading and trailing
     /// punctuation is ignored; words with digits or other non-letters inside, short words and, with
     /// <paramref name="skipCapitalized"/> (Chrome's rule for English), capitalized words get none.
+    /// <paramref name="minWord"/>, <paramref name="minBefore"/> and <paramref name="minAfter"/> are the values of
+    /// hyphenate-limit-chars, 0 for auto.
     /// </summary>
-    public int Hyphenate(ReadOnlySpan<char> word, List<int> breaks, bool skipCapitalized)
+    public int Hyphenate(ReadOnlySpan<char> word, List<int> breaks, bool skipCapitalized, int minWord = 0, int minBefore = 0, int minAfter = 0)
     {
         breaks.Clear();
         foreach (char c in word)
-            if (CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.NonSpacingMark) return HyphenateComposed(word, breaks, skipCapitalized);
+            if (CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.NonSpacingMark)
+                return HyphenateComposed(word, breaks, skipCapitalized, minWord, minBefore, minAfter);
         int start = 0, end = word.Length;
         while (start < end && !char.IsLetter(word[start])) start++;
         while (end > start && !char.IsLetter(word[end - 1])) end--;
         int n = end - start;
-        if (n < MinWordLength || n < _left + _right) return 0;
+        // hyphenate-limit-chars can ask for more letters around a hyphen than the patterns do, but not fewer: Chrome keeps
+        // its own minimums of two letters before and three after a hyphen whatever the property says, and patterns are
+        // not made for breaks nearer the ends of a word than their \lefthyphenmin and \righthyphenmin. As in Chrome, a
+        // word with fewer letters than both sides need is never hyphenated.
+        int left = Math.Max(_left, minBefore), right = Math.Max(_right, minAfter);
+        if (n < (minWord > 0 ? minWord : MinWordLength) || n < left + right) return 0;
         for (int k = start; k < end; k++)
             if (!char.IsLetter(word[k]) && !(_apostrophes && IsApostrophe(word[k])))
                 return 0; // digits, URLs, apostrophes, surrogate pairs...
@@ -204,7 +212,7 @@ internal sealed class Hyphenator
 
         if (_exceptions.Count > 0 && _exceptions.TryGetValue(lower.Slice(1, n).ToString(), out var exc))
         {
-            for (int k = _left; k <= n - _right; k++)
+            for (int k = left; k <= n - right; k++)
                 if (exc[k] != 0) breaks.Add(start + k);
             return breaks.Count;
         }
@@ -225,7 +233,7 @@ internal sealed class Hyphenator
             }
         }
         // points[p + 1] is the value between letters p - 1 and p of the word (lower[0] is the leading dot).
-        for (int k = _left; k <= n - _right; k++)
+        for (int k = left; k <= n - right; k++)
             if ((points[k + 1] & 1) != 0) breaks.Add(start + k);
         return breaks.Count;
     }
@@ -235,7 +243,7 @@ internal sealed class Hyphenator
     /// which the patterns do not know: each letter is composed with its marks for the patterns, and the breaks are mapped
     /// back to the word. A letter that has no composed form gives no breaks, as before.
     /// </summary>
-    private int HyphenateComposed(ReadOnlySpan<char> word, List<int> breaks, bool skipCapitalized)
+    private int HyphenateComposed(ReadOnlySpan<char> word, List<int> breaks, bool skipCapitalized, int minWord, int minBefore, int minAfter)
     {
         var composed = new StringBuilder(word.Length);
         var starts = new List<int>(word.Length);
@@ -257,7 +265,7 @@ internal sealed class Hyphenator
             composed.Append(letter);
             i = j;
         }
-        int count = Hyphenate(composed.ToString(), breaks, skipCapitalized);
+        int count = Hyphenate(composed.ToString(), breaks, skipCapitalized, minWord, minBefore, minAfter);
         for (int b = 0; b < count; b++) breaks[b] = starts[breaks[b]];
         return count;
     }
