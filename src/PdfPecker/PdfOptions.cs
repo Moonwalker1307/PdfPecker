@@ -325,8 +325,8 @@ public sealed class PdfOptions
     /// <summary>
     /// Hyphenation patterns for <c>hyphens: auto</c>, by language tag (such as "fr" or "en-GB"; a tag also matches
     /// longer tags of its language, so "fr" covers "fr-CA"). They take precedence over the patterns built into the
-    /// library, which cover English, Danish, German, Dutch, Norwegian,
-    /// Spanish and Swedish. Default: null.
+    /// library, which cover English, Danish, German, Dutch, Norwegian, Spanish,
+    /// Swedish, French, Italian, Portuguese and Polish. Default: null.
     /// </summary>
     public IDictionary<string, HyphenationPatterns>? Hyphenation { get; set; }
 
