@@ -1,0 +1,9 @@
+<Project>
+  <!-- Settings every project in the repository shares, so the tests, fuzzer, benchmarks, sample and generators are held
+       to the library's standard: nullable reference types on, and a warning breaks the build. The comparison benchmark
+       is left out because it builds against third-party packages whose warnings are not ours to fix. -->
+  <PropertyGroup Condition="'$(MSBuildProjectName)' != 'PdfPecker.Comparison'">
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+</Project>

@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Security.Cryptography;
 using PdfPecker.Rendering.Fonts;
 
 // Builds the compact built-in font pack (StandardFonts.bin) used to render the standard 14 PDF fonts and
@@ -8,6 +9,34 @@ using PdfPecker.Rendering.Fonts;
 // With --bundle it instead writes the Liberation TTFs, byte for byte, Brotli-compressed to src/PdfPecker/Fonts/Bundled,
 // where they are embedded for PDF/A and PdfOptions.EmbedStandardFonts:
 // dotnet run --project tools/FontPackBuilder -- --bundle /usr/share/fonts/truetype/liberation [outDir]
+//
+// The checked-in files were built from Liberation 2.1.5 and DejaVu Sans 2.37, as Ubuntu 24.04's fonts-liberation and
+// fonts-dejavu-core packages install them. Every input is checked against the hashes below, so other versions of the
+// fonts cannot change the output unnoticed; when updating the fonts on purpose, update the hashes, these versions and
+// THIRD-PARTY-NOTICES.md in the same change.
+var pinned = new Dictionary<string, string>
+{
+    ["LiberationMono-Bold.ttf"] = "626655e94dd82f3f42549daf995c921b0915fa8ab1f4b839559e8892ea41d240",
+    ["LiberationMono-BoldItalic.ttf"] = "15eb161953e3ecc7fc05a3fec8a59e0f4e0a54a4e375736adf8e98d65981f813",
+    ["LiberationMono-Italic.ttf"] = "a71b2c25c89da05cf0e7c4dbba8d473fdead0b181ae56165217747d2c1f39215",
+    ["LiberationMono-Regular.ttf"] = "395fa5ab8d40c8eba390ced528744ea75a7f69aabf3e68b6f925ca0e39a27370",
+    ["LiberationSans-Bold.ttf"] = "3973aa5054fb467dd5627245d3dc82e37bf16fe075756156a570455871351582",
+    ["LiberationSans-BoldItalic.ttf"] = "c80fa7f2ffa0e01d4d8dcd6a6d1e43eda665222d1b4db597dde1174c456006cf",
+    ["LiberationSans-Italic.ttf"] = "830c5fa600505fb4c1a271b4271c53c44bae43f492b2a240d0e98a3a7a380121",
+    ["LiberationSans-Regular.ttf"] = "4659bc0c58c5028dd488ec928d41d9265db43d9b669fc14ca8b0832daca7b144",
+    ["LiberationSerif-Bold.ttf"] = "9e66c25e20868756bf12eb24a520a4552727c9cd108f577f7ae33e3c0110e39c",
+    ["LiberationSerif-BoldItalic.ttf"] = "379010e87421a883f7bbfa7936d23dfe0257a54ce850819b74556e9f2c615a8a",
+    ["LiberationSerif-Italic.ttf"] = "eaeaf7f2b12544ecde64290c1fa7ec403ff70fd58b313637b265400b20249242",
+    ["LiberationSerif-Regular.ttf"] = "705903ae1382f0150f115d6f10a30f5b2f3d6ade649c474afe6366c39174fb65",
+    ["DejaVuSans.ttf"] = "ae7b7855e115a5966d8b1b3f80f254ccc117ec86f9965e202ee2940453837280",
+};
+void CheckPinned(string path)
+{
+    string actual = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
+    if (!pinned.TryGetValue(Path.GetFileName(path), out var expected) || actual != expected)
+        throw new InvalidOperationException($"{path} is not the pinned version (SHA-256 {actual}); see the comment at the top of Program.cs.");
+}
+
 if (args.Length > 0 && args[0] == "--bundle")
 {
     string from = args.Length > 1 ? args[1] : "/usr/share/fonts/truetype/liberation";
@@ -17,6 +46,7 @@ if (args.Length > 0 && args[0] == "--bundle")
     foreach (var style in new[] { "Regular", "Bold", "Italic", "BoldItalic" })
     {
         string name = $"Liberation{family}-{style}.ttf";
+        CheckPinned(Path.Combine(from, name));
         var data = File.ReadAllBytes(Path.Combine(from, name));
         var packed = new byte[BrotliEncoder.GetMaxCompressedLength(data.Length)];
         if (!BrotliEncoder.TryCompress(data, packed, out int written, quality: 11, window: 22)) throw new Exception("Brotli failed for " + name);
@@ -49,6 +79,8 @@ foreach (var (family, file) in new[] { ("Sans", "LiberationSans"), ("Serif", "Li
         faces.Add((family + style, Path.Combine(libDir, file + "-" + suffix + ".ttf"), chars));
     }
 }
+foreach (var face in faces) CheckPinned(face.File);
+CheckPinned(dejavu);
 faces.Add(("Symbol", dejavu, new HashSet<int>(Encodings.SymbolUnicode.Where(u => u > 0))));
 faces.Add(("Dingbats", dejavu, new HashSet<int>(Encodings.DingbatsUnicode.Where(u => u > 0))));
 
