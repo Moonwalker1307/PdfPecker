@@ -1,9 +1,10 @@
 name: .NET preview
 
-# Builds and tests PdfPecker on the latest .NET 11 preview SDK and packs a preview package with an extra net11.0
-# target, so a break in the next .NET shows up long before it ships. The released package keeps net8.0, net9.0 and
-# net10.0 only until .NET 11 is generally available. The job never blocks a pull request or a release: preview SDKs
-# change between drops, and a failure here is a heads-up, not a reason to hold back a stable release.
+# Builds and tests PdfPecker on the latest .NET 11 preview SDK with an extra net11.0 target, so a break in the next
+# .NET shows up long before it ships. Nothing is packed: a package built against preview reference assemblies should
+# not ship, and .NET 11 already runs the net10.0 build, so net11.0 joins the released package once .NET 11 is
+# generally available. The job never blocks a pull request or a release: preview SDKs change between drops, and a
+# failure here is a heads-up, not a reason to hold back a stable release.
 on:
   pull_request:
   release:
@@ -49,30 +50,6 @@ jobs:
           esac
           echo "SDK: $sdk" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Compute version
-        id: version
-        env:
-          TAG: ${{ github.event.release.tag_name }}
-        run: |
-          # The package keeps its name and gets a pre-release label, so the stable release always sorts above it.
-          if [ "$GITHUB_EVENT_NAME" = "release" ]; then
-            version="${TAG#v}-net11-preview"
-          else
-            base=$(sed -n 's:.*<Version>\([0-9]*\.[0-9]*\.[0-9]*\).*</Version>.*:\1:p' src/PdfPecker/PdfPecker.csproj)
-            version="$base-net11-preview.$GITHUB_RUN_NUMBER"
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "Version: $version" >> "$GITHUB_STEP_SUMMARY"
-
       - run: dotnet build -c Release -f $PREVIEW_TFM -p:PreviewTargetFramework=$PREVIEW_TFM tests/PdfPecker.Tests
       - run: dotnet test -c Release -f $PREVIEW_TFM --no-build -p:PreviewTargetFramework=$PREVIEW_TFM tests/PdfPecker.Tests
 
-      - name: Pack with the preview target
-        run: dotnet pack src/PdfPecker -c Release -p:PreviewTargetFramework=$PREVIEW_TFM -p:Version=${{ steps.version.outputs.version }} -o artifacts
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: PdfPecker.${{ steps.version.outputs.version }}.nupkg
-          path: |
-            artifacts/*.nupkg
-            artifacts/*.snupkg
