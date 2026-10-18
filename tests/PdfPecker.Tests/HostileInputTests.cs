@@ -189,6 +189,21 @@ public class HostileInputTests
         Assert.Equal(2, PageCount(pdf));
     }
 
+    [Theory]
+    // The boxes fit in the measuring width, so every level measures the ones inside it at the same width.
+    [InlineData("", 50000)]
+    // The innermost boxes together are wider than the measuring width, so each level offers them a narrower width.
+    [InlineData("margin: 0 3pt; padding: 0 3pt", 20000)]
+    public void Nested_inline_blocks_are_measured_once_per_level(string box, int siblings)
+    {
+        // Found by the fuzzer: target html, timeout-b4187992. Measuring an inline-block's intrinsic widths lays out the
+        // inline-blocks in it, and laying out each of those measures the ones inside it again, so the boxes of the
+        // innermost level were measured once for every level above them and their drawing was copied up through every
+        // level each time. The parser stops nesting at 256 levels, so the rest of the boxes are siblings in the innermost.
+        var html = $"<style>span {{ display: inline-block; {box} }}</style>" + Repeat("<span>", 300) + Repeat("<span></span>", siblings);
+        AssertStructurallyValid(Bounded(html));
+    }
+
     [Fact]
     public void Broken_words_keep_every_character()
     {
