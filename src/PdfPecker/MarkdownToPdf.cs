@@ -2,6 +2,7 @@ namespace PdfPecker;
 
 /// <summary>
 /// Converts Markdown to PDF: <see cref="MarkdownToHtml"/> followed by <see cref="HtmlToPdf"/>, all in this library.
+/// Footnotes go to the bottom of the page where they are referenced, rather than to a list at the end as in the HTML.
 /// </summary>
 /// <remarks>All methods are static and thread-safe.</remarks>
 public static class MarkdownToPdf
@@ -32,7 +33,7 @@ public static class MarkdownToPdf
     public static byte[] Convert(string markdown, PdfOptions? pdfOptions, MarkdownOptions? markdownOptions, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var html = MarkdownToHtml.ConvertDocument(markdown, markdownOptions);
+        var html = MarkdownToHtml.RenderDocument(markdown, markdownOptions, pagedFootnotes: true);
         return HtmlToPdf.Convert(html, pdfOptions, cancellationToken);
     }
 
@@ -104,7 +105,7 @@ public static class MarkdownToPdf
     {
         var markdown = File.ReadAllText(markdownPath);
         cancellationToken.ThrowIfCancellationRequested();
-        var html = MarkdownToHtml.ConvertDocument(markdown, markdownOptions);
+        var html = MarkdownToHtml.RenderDocument(markdown, markdownOptions, pagedFootnotes: true);
         pdfOptions ??= new PdfOptions();
         var baseDir = pdfOptions.BaseDirectory ?? Path.GetDirectoryName(Path.GetFullPath(markdownPath));
         AtomicFile.WriteAllBytes(pdfPath, HtmlToPdf.Render(html, pdfOptions, baseDir, cancellationToken));
@@ -128,7 +129,7 @@ public static class MarkdownToPdf
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public static Task<byte[]> ConvertAsync(string markdown, PdfOptions? pdfOptions = null, MarkdownOptions? markdownOptions = null,
         CancellationToken cancellationToken = default)
-        => HtmlToPdf.RenderAsync(() => MarkdownToHtml.ConvertDocument(markdown, markdownOptions), pdfOptions ?? new PdfOptions(), cancellationToken);
+        => HtmlToPdf.RenderAsync(() => MarkdownToHtml.RenderDocument(markdown, markdownOptions, pagedFootnotes: true), pdfOptions ?? new PdfOptions(), cancellationToken);
 
     /// <summary>
     /// Converts a Markdown string on the thread pool and writes the PDF to <paramref name="output"/> asynchronously, as

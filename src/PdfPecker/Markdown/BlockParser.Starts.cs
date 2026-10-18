@@ -43,6 +43,8 @@ internal sealed partial class BlockParser
         if (start == BlockStart.None && _gfm) start = TableStart(container);
         if (start == BlockStart.None) start = SetextHeadingStart(container);
         if (start == BlockStart.None) start = ThematicBreakStart();
+        if (start == BlockStart.None && _gfm) start = FootnoteDefinitionStart();
+        if (start == BlockStart.None && _gfm) start = DefinitionStart(container);
         if (start == BlockStart.None) start = ListItemStart(container);
         if (start == BlockStart.None) start = IndentedCodeStart();
         return start;

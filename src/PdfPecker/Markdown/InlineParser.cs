@@ -10,12 +10,17 @@ namespace PdfPecker.Markdown;
 internal sealed partial class InlineParser
 {
     private readonly Dictionary<string, LinkReference> _refmap;
+    private readonly Dictionary<string, MdNode>? _footnotes;
     private readonly bool _gfm;
     private SubjectCursor _cursor;
 
-    public InlineParser(Dictionary<string, LinkReference> refmap, bool gfm)
+    /// <param name="refmap">The link reference definitions.</param>
+    /// <param name="footnotes">The footnote definitions by label, or null when footnotes are off.</param>
+    /// <param name="gfm">Whether the GitHub extensions are on.</param>
+    public InlineParser(Dictionary<string, LinkReference> refmap, Dictionary<string, MdNode>? footnotes, bool gfm)
     {
         _refmap = refmap;
+        _footnotes = footnotes;
         _gfm = gfm;
     }
 

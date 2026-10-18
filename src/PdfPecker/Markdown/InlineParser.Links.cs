@@ -40,6 +40,7 @@ internal sealed partial class InlineParser
     private void ParseOpenBracket(MdNode block)
     {
         int index = _cursor.Position;
+        if (TryParseFootnoteReference(block)) return;
         _cursor.Advance();
         OpenBracket(block, "[", index, image: false);
     }
@@ -86,6 +87,22 @@ internal sealed partial class InlineParser
             return;
         }
         CloseLink(block, opener, destination, title);
+    }
+
+    /// <summary>
+    /// A footnote reference, "[^label]" for a label that has a definition. As in markdown-it it comes before links, so it
+    /// opens no bracket; an undefined label stays text.
+    /// </summary>
+    private bool TryParseFootnoteReference(MdNode block)
+    {
+        if (_footnotes == null || _footnotes.Count == 0) return false;
+        int length = BlockParser.FootnoteLabelLength(_cursor.Rest, 0);
+        if (length == 0) return false;
+        var label = MdUtil.NormalizeFootnoteLabel(_cursor.Rest.Slice(2, length));
+        if (!_footnotes.ContainsKey(label)) return false;
+        _cursor.Advance(length + 3);
+        block.AppendChild(new MdNode(MdNodeType.FootnoteReference) { Label = label });
+        return true;
     }
 
     /// <summary>The destination and optional title of an inline link: <c>[text](destination "title")</c>.</summary>
