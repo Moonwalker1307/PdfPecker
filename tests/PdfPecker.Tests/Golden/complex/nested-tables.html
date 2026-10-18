@@ -1,0 +1,61 @@
+<!doctype html>
+<html><head><title>Nested tables</title>
+<style>
+@page { size: 120mm 170mm; margin: 12mm 10mm 14mm;
+  @bottom-center { content: "Page " counter(page) " of " counter(pages); font-size: 7pt; color: #666 } }
+body { font-family: sans-serif; font-size: 8pt; margin: 0 }
+h1 { font-size: 13pt; margin: 0 0 6pt }
+h2 { font-size: 10pt; margin: 12pt 0 4pt }
+table { border-collapse: collapse; width: 100% }
+th, td { border: 0.5pt solid #777; padding: 2pt 3pt; vertical-align: top }
+thead th { background: #e3ebf3 }
+tfoot td { background: #f2f2f2; font-weight: bold }
+caption { caption-side: top; text-align: left; font-weight: bold; padding-bottom: 3pt }
+.n { text-align: right }
+table.sub { margin-top: 3pt; font-size: 7pt; width: 90% }
+table.sub th { background: #f6eedc }
+table.sep { border-collapse: separate; border-spacing: 3pt; border: 1pt solid #2a6f97 }
+table.sep td { border: 0.5pt solid #9cc; background: #f4fafa }
+.grid td { text-align: center }
+.cell-table td { border-color: #c44 }
+</style></head>
+<body>
+<h1>Nested tables</h1>
+<h2>Row and column spans</h2>
+<table class="grid">
+<caption>Quarterly figures by region</caption>
+<thead><tr><th rowspan=2>Region</th><th colspan=3>First half</th><th colspan=3>Second half</th></tr>
+<tr><th>Q1</th><th>Q2</th><th>Sum</th><th>Q3</th><th>Q4</th><th>Sum</th></tr></thead>
+<tbody>
+<tr><td rowspan=2>North</td><td>12</td><td>15</td><td>27</td><td>18</td><td>21</td><td>39</td></tr>
+<tr><td colspan=3>Restated, see note</td><td>19</td><td>20</td><td>39</td></tr>
+<tr><td>South</td><td>8</td><td rowspan=2>Merged</td><td>17</td><td>11</td><td>14</td><td>25</td></tr>
+<tr><td>East</td><td>5</td><td>13</td><td colspan=3>No data</td></tr>
+</tbody>
+<tfoot><tr><td>Total</td><td>25</td><td>-</td><td>57</td><td>48</td><td>55</td><td>103</td></tr></tfoot>
+</table>
+
+<h2>A table in a table cell</h2>
+<table>
+<tr><th style="width:25%">Customer</th><td>
+  <table class="cell-table"><tr><td>Name</td><td>Example Trading Ltd.</td></tr>
+  <tr><td>Address</td><td>1 Harbour Street<br>Port Town</td></tr>
+  <tr><td>Contacts</td><td><table><tr><td>Sales</td><td>sales@example.com</td></tr><tr><td>Support</td><td>help@example.com</td></tr></table></td></tr></table>
+</td></tr>
+<tr><th>Terms</th><td>Net 30 days. Late payment carries interest at the statutory rate.</td></tr>
+</table>
+
+<h2>Separated borders</h2>
+<table class="sep"><tr><td>One</td><td rowspan=2>Two, spanning two rows with more text to wrap</td><td>Three</td></tr>
+<tr><td>Four</td><td>Five</td></tr></table>
+
+<h2>Sub-tables in a table across pages</h2>
+<table>
+<thead><tr><th style="width:15%">No.</th><th>Description</th><th class=n style="width:20%">Amount</th></tr></thead>
+<tbody>
+<tr><td>1001</td><td>Work package 1</td><td class=n>137.00</td></tr><tr><td>1002</td><td>Work package 2</td><td class=n>174.00</td></tr><tr><td>1003</td><td>Work package 3</td><td class=n>211.00</td></tr><tr><td>1004</td><td>Work package 4<table class="sub"><thead><tr><th>Part</th><th class=n>Hours</th><th class=n>Rate</th></tr></thead><tbody><tr><td>Step 4.1</td><td class=n>5</td><td class=n>95.00</td></tr><tr><td>Step 4.2</td><td class=n>2</td><td class=n>100.00</td></tr><tr><td>Step 4.3</td><td class=n>6</td><td class=n>105.00</td></tr><tr><td>Step 4.4</td><td class=n>3</td><td class=n>110.00</td></tr></tbody></table></td><td class=n>248.00</td></tr><tr><td>1005</td><td>Work package 5</td><td class=n>285.00</td></tr><tr><td>1006</td><td>Work package 6</td><td class=n>322.00</td></tr><tr><td>1007</td><td>Work package 7</td><td class=n>359.00</td></tr><tr><td>1008</td><td>Work package 8<table class="sub"><thead><tr><th>Part</th><th class=n>Hours</th><th class=n>Rate</th></tr></thead><tbody><tr><td>Step 8.1</td><td class=n>2</td><td class=n>95.00</td></tr><tr><td>Step 8.2</td><td class=n>3</td><td class=n>100.00</td></tr><tr><td>Step 8.3</td><td class=n>4</td><td class=n>105.00</td></tr><tr><td>Step 8.4</td><td class=n>5</td><td class=n>110.00</td></tr><tr><td>Step 8.5</td><td class=n>6</td><td class=n>115.00</td></tr></tbody></table></td><td class=n>396.00</td></tr><tr><td>1009</td><td>Work package 9</td><td class=n>433.00</td></tr><tr><td>1010</td><td>Work package 10</td><td class=n>470.00</td></tr><tr><td>1011</td><td>Work package 11</td><td class=n>507.00</td></tr><tr><td>1012</td><td>Work package 12<table class="sub"><thead><tr><th>Part</th><th class=n>Hours</th><th class=n>Rate</th></tr></thead><tbody><tr><td>Step 12.1</td><td class=n>6</td><td class=n>95.00</td></tr><tr><td>Step 12.2</td><td class=n>4</td><td class=n>100.00</td></tr><tr><td>Step 12.3</td><td class=n>2</td><td class=n>105.00</td></tr></tbody></table></td><td class=n>544.00</td></tr><tr><td>1013</td><td>Work package 13</td><td class=n>581.00</td></tr><tr><td>1014</td><td>Work package 14</td><td class=n>118.00</td></tr><tr><td>1015</td><td>Work package 15</td><td class=n>155.00</td></tr><tr><td>1016</td><td>Work package 16<table class="sub"><thead><tr><th>Part</th><th class=n>Hours</th><th class=n>Rate</th></tr></thead><tbody><tr><td>Step 16.1</td><td class=n>3</td><td class=n>95.00</td></tr><tr><td>Step 16.2</td><td class=n>5</td><td class=n>100.00</td></tr><tr><td>Step 16.3</td><td class=n>7</td><td class=n>105.00</td></tr><tr><td>Step 16.4</td><td class=n>2</td><td class=n>110.00</td></tr></tbody></table></td><td class=n>192.00</td></tr><tr><td>1017</td><td>Work package 17</td><td class=n>229.00</td></tr><tr><td>1018</td><td>Work package 18</td><td class=n>266.00</td></tr>
+</tbody>
+<tfoot><tr><td colspan=2>Total</td><td class=n>5,812.00</td></tr></tfoot>
+</table>
+<p>Text after the long table.</p>
+</body></html>

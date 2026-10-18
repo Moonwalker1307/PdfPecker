@@ -1,0 +1,48 @@
+<!doctype html>
+<html><head><title>Page breaks</title>
+<style>
+@page { size: 105mm 148mm; margin: 12mm 10mm;
+  @top-center { content: string(chapter, first); font-size: 7pt; color: #777 }
+  @bottom-center { content: counter(page); font-size: 7pt } }
+@page :left { margin-right: 14mm }
+@page :right { margin-left: 14mm }
+@page :blank { @top-center { content: "Intentionally left blank" } }
+body { font-family: sans-serif; font-size: 8pt; margin: 0; orphans: 3; widows: 3 }
+h1 { font-size: 13pt; string-set: chapter content(); margin: 0 0 5pt }
+.chapter { break-before: right }
+.chapter.left { break-before: left }
+h2 { font-size: 10pt; margin: 8pt 0 3pt }
+.keep { break-inside: avoid; border: 0.5pt solid #555; padding: 4pt; margin: 4pt 0; background: #f7f7f7 }
+.after { break-after: page }
+.spacer { height: 78mm; background: repeating-linear-gradient(45deg, #eee 0 4pt, #fff 4pt 8pt) }
+.flex { display: flex; gap: 4pt }
+.flex > div { flex: 1; border: 0.5pt solid #9ab; padding: 3pt }
+table { border-collapse: collapse; width: 100% }
+td, th { border: 0.5pt solid #999; padding: 2pt }
+tr { break-inside: avoid }
+.legacy { page-break-before: always }
+</style></head>
+<body>
+<section><h1>Chapter one</h1>
+<p>1. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum praesent mauris.</p><p>2. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum praesent mauris.</p>
+<div class="spacer"></div>
+<h2>A heading that would be left at the bottom</h2>
+<p>1. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum praesent mauris.</p><p>2. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum praesent mauris.</p>
+<div class="keep"><b>Unbreakable box.</b> Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum praesent mauris. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum praesent mauris.</div>
+<p class="after">This paragraph forces a page break after it.</p>
+<p>Starts on a new page.</p>
+<div class="flex"><div><p>1. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum praesent mauris.</p><p>2. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum praesent mauris.</p><p>3. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum praesent mauris.</p></div><div><p>1. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum praesent mauris.</p><p>2. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum praesent mauris.</p><p>3. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum praesent mauris.</p><p>4. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum praesent mauris.</p><p>5. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum praesent mauris.</p></div></div>
+</section>
+<section class="chapter"><h1>Chapter two starts on a right page</h1>
+<p>Orphans and widows keep at least three lines together at each break.</p>
+<div style="height:88mm"></div>
+<p>1. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum praesent mauris.</p><p>2. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum praesent mauris.</p><p>3. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum praesent mauris.</p>
+<table><thead><tr><th>Row</th><th>Text</th></tr></thead>
+<tr><td>1</td><td>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec od</td></tr><tr><td>2</td><td>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus a</td></tr><tr><td>3</td><td>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi null</td></tr><tr><td>4</td><td>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nulla quis sem at nibh elementum im</td></tr><tr><td>5</td><td>Lorem ipsum dolor sit amet, consectetur adipiscing elit</td></tr><tr><td>6</td><td>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent lib</td></tr><tr><td>7</td><td>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus dia</td></tr><tr><td>8</td><td>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nulla quis sem at n</td></tr><tr><td>9</td><td>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nulla quis sem at nibh elementum imperdiet. Duis s</td></tr><tr><td>10</td><td>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec o</td></tr><tr><td>11</td><td>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus </td></tr><tr><td>12</td><td>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nul</td></tr><tr><td>13</td><td>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nulla quis sem at nibh elementum i</td></tr><tr><td>14</td><td>Lorem ipsum dolor sit amet, consectetur adipiscing eli</td></tr><tr><td>15</td><td>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent li</td></tr></table>
+<h2 class="legacy">The legacy page-break-before property</h2>
+<p>1. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum praesent mauris.</p><p>2. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum praesent mauris.</p>
+</section>
+<section class="chapter left"><h1>Chapter three with break-before: left</h1>
+<p>1. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum praesent mauris.</p><p>2. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam. Sed nisi nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum praesent mauris.</p>
+</section>
+</body></html>
