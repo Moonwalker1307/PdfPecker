@@ -792,18 +792,44 @@ internal sealed partial class LayoutEngine
         _childPageBox = null;
         if (!table) _childPageBox = pages;
         float bottom = table ? LayoutTable(e, x, y, availW, pages) : LayoutBlockBoxCore(e, x, y, availW, shrinkToFit);
-        if ((s.AvoidBreakInside || s.AvoidColumnBreakInside && _grid is ColumnGrid) && CrossesPage(y, bottom) && bottom - y <= _grid.Height(PageOf(y) + 1) && !AtPageTop(y))
+        bool avoidInside = s.AvoidBreakInside || s.AvoidColumnBreakInside && _grid is ColumnGrid;
+        if (avoidInside && CrossesPage(y, bottom) && !AtPageTop(y))
         {
-            Truncate(opsStart);
-            _marker = savedMarker;
-            float ny = NextPage(y);
-            if (pages != null)
+            // A box split at the end of a column also measures the room it left there, so in columns one that is no
+            // taller than the next column can look taller: it is tried there and kept only if it then fits whole.
+            bool fitsNext = bottom - y <= _grid.Height(PageOf(y) + 1);
+            if (fitsNext || _grid is ColumnGrid)
             {
-                (x, availW) = OnPage(pages, ny);
-                if (!table) _childPageBox = pages;
+                float oy = y, ox = x, oavailW = availW;
+                int page = PageOf(y);
+                Truncate(opsStart);
+                _marker = savedMarker;
+                float ny = NextPage(y);
+                if (pages != null)
+                {
+                    (x, availW) = OnPage(pages, ny);
+                    if (!table) _childPageBox = pages;
+                }
+                y = ny;
+                bottom = table ? LayoutTable(e, x, ny, availW, pages) : LayoutBlockBoxCore(e, x, ny, availW, shrinkToFit);
+                if (!CrossesPage(ny, bottom))
+                {
+                    // Columns taller by this much would have kept the whole box where it started.
+                    _columnNotes?.Break(page, oy, oy + (bottom - ny) - FlowEnd(page));
+                }
+                else if (!fitsNext)
+                {
+                    Truncate(opsStart);
+                    _marker = savedMarker;
+                    (y, x, availW) = (oy, ox, oavailW);
+                    _childPageBox = table ? null : pages;
+                    bottom = table ? LayoutTable(e, x, y, availW, pages) : LayoutBlockBoxCore(e, x, y, availW, shrinkToFit);
+                }
             }
-            bottom = table ? LayoutTable(e, x, ny, availW, pages) : LayoutBlockBoxCore(e, x, ny, availW, shrinkToFit);
         }
+        // Columns being balanced start at least as tall as the tallest box that must stay whole, as in Chrome, so
+        // such a box is never split only because the first height tried was short.
+        if (avoidInside && !CrossesPage(y, bottom)) _columnNotes?.Unbreakable(PageOf(y), bottom - y);
         if (table) _boxTrailing = 0;
         if (s.Layered) FinishLayered(e, opsStart, availW);
         return bottom;
