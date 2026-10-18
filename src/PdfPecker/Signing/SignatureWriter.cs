@@ -34,7 +34,7 @@ internal static class SignatureWriter
             throw new ArgumentException("The signing certificate has no private key. Load it from a .pfx file or a certificate store entry that includes the key, or sign with a PdfExternalSigner.", nameof(o));
         Cms.HashOid(o.HashAlgorithm); // validate early
 
-        var file = PdfFile.Open(pdf, password);
+        var file = LtvWriter.Open(pdf, password);
         var certs = Cms.CertificateChain(o.Certificate, o.ExtraCertificates);
         var time = o.SigningTime ?? DateTimeOffset.Now;
         time = time.AddTicks(-(time.Ticks % TimeSpan.TicksPerSecond));
