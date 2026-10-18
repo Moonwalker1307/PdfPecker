@@ -24,8 +24,10 @@ internal sealed partial class PdfFile
         // A /Length that refers to the stream's own object cannot be resolved; it is read as missing.
         var lengthObject = dict["Length"] is PdfRef lengthRef ? (lengthRef.Num == num ? null : GetObject(lengthRef.Num)) : dict["Length"];
         int length = GetIntValue(lengthObject);
+        // The length is compared with the data left rather than added to the start, since a damaged /Length near
+        // int.MaxValue would overflow the sum and lose the stream instead of falling back to the search.
+        bool valid = length >= 0 && length <= Data.Length - start && EndstreamFollows(start + length);
         int end = start + length;
-        bool valid = length >= 0 && end <= Data.Length && EndstreamFollows(end);
         if (!valid)
         {
             end = FindEndstream(start);
