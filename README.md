@@ -119,7 +119,9 @@ bench/compare-versions.sh v1.11.0                              # this checkout a
 dotnet pack src/PdfPecker -c Release -o ./nupkg                # also checks the public API against the last release
 ```
 
-How to fuzz the parsers is in [fuzz/README.md](https://github.com/Moonwalker1307/PdfPecker/blob/main/fuzz/README.md).
+Requirements and details are in [BUILD.md](https://github.com/Moonwalker1307/PdfPecker/blob/main/BUILD.md) and
+[TESTING.md](https://github.com/Moonwalker1307/PdfPecker/blob/main/TESTING.md); how to fuzz the parsers is in
+[fuzz/README.md](https://github.com/Moonwalker1307/PdfPecker/blob/main/fuzz/README.md).
 
 To contribute, see [CONTRIBUTING.md](https://github.com/Moonwalker1307/PdfPecker/blob/main/CONTRIBUTING.md). Report security problems privately as described in
 [SECURITY.md](https://github.com/Moonwalker1307/PdfPecker/blob/main/SECURITY.md).
