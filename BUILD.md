@@ -36,6 +36,10 @@ dotnet publish samples/PdfPecker.Sample -c Release -p:PublishAot=true -o aot   #
 The library and tests target `net8.0`, `net9.0` and `net10.0`. APIs that .NET 8 lacks, such as `Dictionary`
 alternate lookups and span `Split`, go behind `#if NET9_0_OR_GREATER` with a .NET 8 path next to them.
 
+The next .NET is tried before it ships: `-p:PreviewTargetFramework=net11.0` adds it as an extra target to the library
+and tests, and `.github/workflows/dotnet-preview.yml` builds, tests and packs that on the latest .NET 11 preview SDK.
+The released package gets the new target only once that .NET is generally available.
+
 ## Line endings
 
 `.gitattributes` checks text out with LF on every platform and marks fonts, images, PDFs and compressed data as
