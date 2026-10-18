@@ -44,6 +44,19 @@ public class TablePaginationTests
         Assert.Equal("Row 10", pages[1].Lines[1].Text);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void A_table_whose_first_row_does_not_fit_starts_on_the_next_page(bool foot)
+    {
+        // 260 points of the 300-point page are used, so the header fits but the first 30-point row does not: as in
+        // Chrome, the header and footer move with it instead of staying behind on their own.
+        var pages = Pages($"<div style='height: 260pt'>Before</div>{Table(3, foot)}");
+        Assert.Equal(new[] { "Before" }, pages[0].Lines.Select(l => l.Text));
+        Assert.Equal("Head", pages[1].Lines[0].Text);
+        Assert.Equal("Row 1", pages[1].Lines[1].Text);
+    }
+
     [Fact]
     public void A_box_keeps_its_top_margin_after_a_forced_break_before_it()
     {
