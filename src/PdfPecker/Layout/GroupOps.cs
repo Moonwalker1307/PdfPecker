@@ -113,9 +113,15 @@ internal sealed class LayerOp : GroupOp
     /// not the text.
     /// </summary>
     public bool TextShadow;
+    /// <summary>
+    /// With a colour (0xFFRRGGBB), the layer's ops are not painted but make a luminosity soft mask: their grey levels
+    /// say how much of this colour covers what is below. The bands of a blurred box shadow, which are then truly
+    /// translucent instead of blended onto white.
+    /// </summary>
+    public uint? MaskFill;
 
-    /// <summary>Whether the layer is drawn as a block of its own: transformed, translucent, blended, clipped or filtered.</summary>
-    public bool NeedsBlock => Transform != null || Opacity < 1 || BlendMode != null || Isolated || ClipVerbs != null || Raster != null;
+    /// <summary>Whether the layer is drawn as a block of its own: transformed, translucent, blended, clipped, filtered or a mask.</summary>
+    public bool NeedsBlock => Transform != null || Opacity < 1 || BlendMode != null || Isolated || ClipVerbs != null || Raster != null || MaskFill != null;
 
     /// <summary>Whether the layer is painted as one transparency group.</summary>
     public bool NeedsGroup => Opacity < 1 || BlendMode != null || Isolated;

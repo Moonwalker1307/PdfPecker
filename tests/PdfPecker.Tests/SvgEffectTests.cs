@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using PdfPecker.Css;
 using PdfPecker.Html;
 using PdfPecker.Svg;
@@ -347,6 +348,65 @@ public class SvgEffectTests
         Assert.Contains("/a128 gs", Latin1(pdf));
         var over = At(pdf, 150, 100);
         Assert.True(over.Item1 > 100 && over.Item1 < 160 && over.Item3 > 100 && over.Item3 < 160, $"red over blue {over}");
+    }
+
+    [Fact]
+    public void Gradient_stops_with_opacity_are_transparent_over_other_content()
+    {
+        // Red fading out over blue: at the transparent end the blue shows through, where it used to be blended onto white.
+        var pdf = Svg("""
+            <linearGradient id="g"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="red" stop-opacity="0"/></linearGradient>
+            <rect width="400" height="200" fill="#0000ff"/>
+            <rect width="400" height="200" fill="url(#g)"/>
+            """);
+        AssertStructurallyValid(pdf);
+        Assert.Contains("/S /Luminosity", Latin1(pdf));
+        Assert.True(IsRed(At(pdf, 4, 100)), $"{At(pdf, 4, 100)}");
+        Assert.True(IsBlue(At(pdf, 396, 100)), $"{At(pdf, 396, 100)}");
+        var middle = At(pdf, 200, 100);
+        Assert.True(middle.Item1 > 100 && middle.Item1 < 160 && middle.Item2 < 30 && middle.Item3 > 100 && middle.Item3 < 160, $"half red over blue {middle}");
+    }
+
+    [Fact]
+    public void Translucent_gradient_stops_keep_spread_method_and_gradient_transform()
+    {
+        // A vertical repeating gradient (rotated by 90 degrees), opaque red to transparent in each 40-unit period.
+        var pdf = Svg("""
+            <linearGradient id="g" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="40" y2="0" spreadMethod="repeat" gradientTransform="rotate(90)">
+              <stop offset="0" stop-color="red"/><stop offset="0.5" stop-color="red"/><stop offset="0.5" stop-color="red" stop-opacity="0"/><stop offset="1" stop-color="red" stop-opacity="0"/>
+            </linearGradient>
+            <rect width="400" height="400" fill="#0000ff"/>
+            <rect width="400" height="400" fill="url(#g)" stroke="url(#g)" stroke-width="10"/>
+            """);
+        AssertStructurallyValid(pdf);
+        Assert.True(IsRed(At(pdf, 200, 10)), $"{At(pdf, 200, 10)}");
+        Assert.True(IsBlue(At(pdf, 200, 30)), $"{At(pdf, 200, 30)}");
+        Assert.True(IsRed(At(pdf, 200, 330)), $"{At(pdf, 200, 330)}");
+        Assert.True(IsBlue(At(pdf, 200, 350)), $"{At(pdf, 200, 350)}");
+        // The stroke, painted through a soft mask of its own.
+        Assert.True(IsRed(At(pdf, 2, 10)), $"{At(pdf, 2, 10)}");
+        Assert.True(IsBlue(At(pdf, 2, 30)), $"{At(pdf, 2, 30)}");
+    }
+
+    [Fact]
+    public void Fill_opacity_on_a_gradient_is_transparent()
+    {
+        var pdf = Svg("""
+            <linearGradient id="g"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="red"/></linearGradient>
+            <rect width="400" height="200" fill="#0000ff"/>
+            <rect width="400" height="200" fill="url(#g)" fill-opacity="0.5"/>
+            <text x="10" y="300" font-size="60" fill="url(#g)" fill-opacity="0.5">Text</text>
+            """);
+        var p = At(pdf, 200, 100);
+        Assert.True(p.Item1 > 100 && p.Item1 < 160 && p.Item3 > 100 && p.Item3 < 160, $"half red over blue {p}");
+        Assert.Single(Regex.Matches(AllContent(pdf), @"/s\d+ gs\n[^Q]*0 Tr 0 Tw"));
+    }
+
+    [Fact]
+    public void Opaque_svg_gradients_need_no_soft_mask()
+    {
+        var pdf = Svg("""<linearGradient id="g"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient><rect width="400" height="200" fill="url(#g)"/>""");
+        Assert.DoesNotContain("/SMask", Latin1(pdf));
     }
 
     [Fact]
