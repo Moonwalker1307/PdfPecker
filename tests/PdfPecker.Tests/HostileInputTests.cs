@@ -2214,6 +2214,189 @@ public class Jbig2SymbolDictionaryTests
     }
 }
 
+/// <summary>
+/// JPEG 2000 files whose box and segment lengths overflow when added to a position, or whose palette depths overflow a
+/// shift: a wrapped box length sent the box reader back into the header box, which recursed until the stack overflowed
+/// and ended the process, and the others threw exceptions that the decoder's callers do not expect.
+/// </summary>
+[Collection(HostileInputCollection.Name)]
+public class JpxLengthTests
+{
+    private static byte[] Fixture(string name) => File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "codecs", name));
+
+    // The signature box, then a header box running to the end that holds a free box whose 64-bit length is
+    // 0x7FFFFFFFFFFFFFF8: added to its position, it wraps around to the header box.
+    private const string WrappedHeaderBox = "0000000c6a5020200d0a870a000000006a70326800000001667265657ffffffffffffff800000000000000000000000000000000";
+
+    private static readonly byte[] Signature = Convert.FromHexString("0000000c6a5020200d0a870a");
+
+    [Fact]
+    public void Wrapped_box_length_does_not_recurse()
+    {
+        Assert.Null(Decode(Convert.FromHexString(WrappedHeaderBox)));
+    }
+
+    [Fact]
+    public void Deeply_nested_header_boxes_do_not_overflow_the_stack()
+    {
+        // 200,000 header boxes, each running to the end of the one around it.
+        var data = Cat(Signature, Repeat(Cat(Be32(0), Ascii("jp2h")), 200_000));
+        Assert.Null(Decode(data));
+    }
+
+    [Theory]
+    [InlineData(WrappedHeaderBox)]
+    [InlineData(null)]
+    public async Task Pdf_with_a_recursive_jpx_image_renders(string? hex)
+    {
+        var jpx = hex != null ? Convert.FromHexString(hex) : Cat(Signature, Repeat(Cat(Be32(0), Ascii("jp2h")), 200_000));
+        var pdf = new FixturePdf();
+        int image = pdf.AddStream("/Type /XObject /Subtype /Image /Width 1 /Height 1 /Filter /JPXDecode", jpx);
+        var bytes = pdf.Build(4, 4, "q 4 0 0 4 0 0 cm /Im Do Q", $"/XObject << /Im {image} 0 R >>");
+        var png = await Task.Run(() => PdfToImage.ConvertPage(bytes)).WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.NotEmpty(png);
+    }
+
+    [Fact]
+    public void Wrapped_component_mapping_box_length_fails_cleanly()
+    {
+        // A cmap box at offset 12 whose 64-bit length makes its end, once wrapped, fall before its start.
+        const int pos = 12;
+        ulong length = 0x8000000000000000UL - pos + 4;
+        var data = Cat(Signature, Be32(1), Ascii("cmap"), Be64(length), new byte[8], Box("jp2c", Codestream()));
+        Assert.Null(Decode(data));
+    }
+
+    [Theory]
+    [InlineData(64)]
+    [InlineData(96)]
+    [InlineData(128)]
+    public void Palette_deeper_than_38_bits_is_ignored(int bits)
+    {
+        // Such a column used to make the scale (1 << bits) - 1 wrap to 0 and divide by zero. Without the palette the
+        // component itself is the image.
+        var img = Decode(PalettedJp2(bits, 2, i => i));
+        Assert.NotNull(img);
+        Assert.Equal(1, img!.Components);
+        Assert.Equal((61, 47), (img.Width, img.Height));
+    }
+
+    [Theory]
+    [InlineData(12)]
+    [InlineData(24)]
+    [InlineData(25)]
+    [InlineData(31)]
+    [InlineData(32)]
+    [InlineData(38)]
+    public void Deep_palette_columns_scale_to_8_bits(int bits)
+    {
+        // Entry i holds the smallest value of its depth that scales to i, so the image is the first component, whose
+        // samples are the palette indexes. A 32-bit column used to divide by zero, and from 24 bits on the scaling
+        // overflowed.
+        long max = (1L << bits) - 1;
+        var img = Decode(PalettedJp2(bits, 256, i => (i * max + 254) / 255));
+        Assert.NotNull(img);
+        Assert.Equal((61, 47, 1), (img!.Width, img.Height, img.Components));
+        var reference = Decode(Fixture("jpx-lossless.jp2"))!;
+        for (int i = 0; i < img.Data.Length; i++) Assert.Equal(reference.Data[i * 3], img.Data[i]);
+    }
+
+    [Fact]
+    public void Palette_index_of_a_deep_component_does_not_overflow()
+    {
+        // The palette index of a 28-bit component used to be recovered in int arithmetic, which overflowed to a
+        // negative index. Such an index is past the palette's 256 entries, so it maps to 0 like any other.
+        var jp2 = PalettedJp2(8, 256, i => i);
+        int ssiz = IndexOf(jp2, 0xFF, 0x51) + 40;
+        jp2[ssiz] = 27;
+        Assert.NotNull(Decode(jp2));
+    }
+
+    [Theory]
+    [InlineData(0x7FFFFFFCu)]
+    [InlineData(0x7FFFFFFFu)]
+    public void Packed_header_length_near_the_maximum_fails_cleanly(uint nppm)
+    {
+        // A PPM segment whose first tile-part length, added to its position, overflows: the part takes what is left.
+        var cs = Codestream();
+        int sot = IndexOf(cs, 0xFF, 0x90);
+        var ppm = Segment(0xFF60, Cat(new byte[] { 0 }, Be32(nppm), new byte[] { 0x80, 0, 0, 0 }));
+        Assert.NotNull(Decode(Cat(cs[..sot], ppm, cs[sot..])));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void Empty_component_quantization_at_the_end_of_the_data_fails_cleanly(int index)
+    {
+        // An empty QCC segment takes its component index from the byte after it, which here does not exist: after the
+        // tile-parts in place of the end marker, or right after the main header.
+        var cs = Codestream();
+        int end = index == 0 ? cs.Length - 2 : IndexOf(cs, 0xFF, 0x90);
+        Assert.NotNull(Decode(Cat(cs[..end], Segment(0xFF5D, Array.Empty<byte>()))));
+    }
+
+    private static PdfPecker.Rendering.Images.JpxImage? Decode(byte[] data)
+    {
+        var task = Task.Run(() => PdfPecker.Rendering.Images.JpxDecoder.Decode(data));
+        Assert.True(task.Wait(TimeSpan.FromSeconds(20)), "decoding did not finish in time");
+        return task.Result;
+    }
+
+    /// <summary>The codestream of the lossless fixture: a 61x47 RGB image in one tile-part.</summary>
+    private static byte[] Codestream()
+    {
+        var jp2 = Fixture("jpx-lossless.jp2");
+        int at = IndexOf(jp2, (byte)'j', (byte)'p', (byte)'2', (byte)'c');
+        int length = BinaryPrimitives.ReadInt32BigEndian(jp2.AsSpan(at - 4));
+        return length == 0 ? jp2[(at + 4)..] : jp2[(at + 4)..(at - 4 + length)];
+    }
+
+    /// <summary>A JP2 file whose grey image is the first component mapped through a one-column palette.</summary>
+    private static byte[] PalettedJp2(int bits, int entries, Func<long, long> value)
+    {
+        int bytes = (bits + 7) / 8;
+        var values = new byte[entries * bytes];
+        for (int i = 0; i < entries; i++)
+        {
+            long v = value(i);
+            for (int k = 0; k < bytes; k++) values[i * bytes + k] = (byte)(v >> (8 * (bytes - 1 - k)));
+        }
+        var pclr = Box("pclr", Cat(Be16(entries), new byte[] { 1, (byte)(bits - 1) }, values));
+        var cmap = Box("cmap", Cat(Be16(0), new byte[] { 1, 0 }));
+        var colr = Box("colr", Cat(new byte[] { 1, 0, 0 }, Be32(17)));
+        return Cat(Signature, Box("jp2h", Cat(Box("ihdr", new byte[14]), colr, pclr, cmap)), Box("jp2c", Codestream()));
+    }
+
+    private static int IndexOf(byte[] data, params byte[] what)
+    {
+        int at = data.AsSpan().IndexOf(what);
+        Assert.True(at > 0);
+        return at;
+    }
+
+    private static byte[] Box(string type, byte[] body) => Cat(Be32((uint)body.Length + 8), Ascii(type), body);
+    private static byte[] Segment(int marker, byte[] body) => Cat(Be16(marker), Be16(body.Length + 2), body);
+    private static byte[] Ascii(string s) => Encoding.ASCII.GetBytes(s);
+    private static byte[] Repeat(byte[] part, int count) => Enumerable.Repeat(part, count).SelectMany(p => p).ToArray();
+    private static byte[] Cat(params byte[][] parts) => parts.SelectMany(p => p).ToArray();
+    private static byte[] Be16(int v) => new[] { (byte)(v >> 8), (byte)v };
+
+    private static byte[] Be32(uint v)
+    {
+        var b = new byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(b, v);
+        return b;
+    }
+
+    private static byte[] Be64(ulong v)
+    {
+        var b = new byte[8];
+        BinaryPrimitives.WriteUInt64BigEndian(b, v);
+        return b;
+    }
+}
+
 [CollectionDefinition(Name, DisableParallelization = true)]
 public sealed class HostileInputCollection
 {

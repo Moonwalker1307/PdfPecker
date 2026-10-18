@@ -70,10 +70,12 @@ internal sealed partial class JpxDecoder
         var mapped = new byte[indexes.Length];
         for (int i = 0; i < indexes.Length; i++)
         {
-            // Planes hold 8-bit values; recover the index at its original precision.
-            int index = precision == 8 ? indexes[i] : (int)Math.Round(indexes[i] * ((1 << precision) - 1) / 255.0);
-            int v = index < entries.Length ? entries[index][column] : 0;
-            mapped[i] = bits == 8 ? (byte)v : (byte)(v * 255 / ((1 << bits) - 1));
+            // Planes hold 8-bit values; recover the index at its original precision, in floating point because the
+            // product overflows an int from 24 bits on.
+            int index = precision == 8 ? indexes[i] : (int)Math.Round(indexes[i] * (double)((1 << precision) - 1) / 255.0);
+            long v = index < entries.Length ? entries[index][column] : 0;
+            // In 64 bits, because a column may be up to 38 bits deep.
+            mapped[i] = bits == 8 ? (byte)v : (byte)(v * 255 / ((1L << bits) - 1));
         }
         return mapped;
     }
