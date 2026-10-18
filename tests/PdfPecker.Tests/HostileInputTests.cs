@@ -160,6 +160,21 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(Repeat(level, count) + "<p>end</p>"));
     }
 
+    [Theory]
+    [InlineData("<h3>Contents</h3><table><tr><td>", "<p>end</p>")]
+    [InlineData("<h3>Contents</h3><table><tr><td>", "<p style='margin-top:900pt'>end</p>")]
+    // Vertical alignment, borders and backgrounds are applied to a cell after its content, and can only move the first
+    // content down.
+    [InlineData("<h3>Contents</h3><table style='border-collapse:collapse;background:#eee'><tr><td style='vertical-align:middle;border:1pt solid'>", "<p>end</p>")]
+    [InlineData("<h3>Contents</h3><table><tr><td style='overflow:hidden'></td><td>", "<p style='margin-top:900pt'>end</p>")]
+    public void Headings_kept_with_nested_tables_do_not_lay_out_each_level_twice(string level, string end)
+    {
+        // As above, but the box after each heading is a table whose first cell holds the next heading. A table was laid
+        // out in full before it was clear that its heading has to move to the next page, and then again after the move,
+        // so each level laid out the levels below it twice: 16 levels took 70 ms, and each further level nearly doubled it.
+        AssertStructurallyValid(Bounded(Repeat(level, 50) + end));
+    }
+
     [Fact]
     public void Deeply_nested_subgrids_with_huge_spans_stay_bounded()
     {

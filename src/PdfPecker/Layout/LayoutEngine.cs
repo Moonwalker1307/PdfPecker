@@ -506,11 +506,18 @@ internal sealed partial class LayoutEngine
     /// A list item qualifies: its marker is drawn with its first line, or at its top after its content when it has no
     /// line, which the scan for the first content reaches no earlier than the content itself. Without that, a list
     /// whose first item holds the next heading was laid out twice per level.
+    /// <para>
+    /// So does a table: it hands the probe to the flow of each cell until its first content is placed (see
+    /// <see cref="LayoutRow"/>). What a table does to its cells afterwards only moves their content down, by
+    /// vertical-align or by moving a row to the next page, or wraps it in a clip, which the scan still looks into; its
+    /// own, its rows' and its cells' backgrounds and borders are not content. So once the first content is on a later
+    /// page than the chain's, it stays there.
+    /// </para>
     /// </remarks>
     private static bool CanProbe(Element e)
     {
         var s = e.Style;
-        return s.Display != Display.Table && !s.IsFlex && !s.IsGrid && !s.IsMultiColumn
+        return !s.IsFlex && !s.IsGrid && !s.IsMultiColumn
                && !s.AvoidBreakInside && !s.Layered && e.Control == null && e.Name is not ("img" or "svg" or "hr");
     }
 
