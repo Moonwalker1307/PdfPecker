@@ -92,8 +92,8 @@ public sealed class PdfExternalSigner
     }
 
     /// <summary>
-    /// A signer with an asynchronous callback, e.g. a cloud key vault. Use it with <see cref="PdfSigner.SignAsync"/> or
-    /// <see cref="HtmlToPdf.ConvertAsync"/>, which await it; the synchronous
+    /// A signer with an asynchronous callback, e.g. a cloud key vault. Use it with <see cref="PdfSigner.SignAsync(byte[], PdfSignatureOptions, string?, CancellationToken)"/> or
+    /// <see cref="HtmlToPdf.ConvertAsync(string, PdfOptions?, CancellationToken)"/>, which await it; the synchronous
     /// <see cref="PdfSigner.Sign(byte[], PdfSignatureOptions, string?)"/> (and signing during
     /// <see cref="HtmlToPdf.Convert(string, PdfOptions?)"/>) blocks on it.
     /// </summary>

@@ -34,20 +34,46 @@ public static class PdfProtector
     /// <exception cref="InvalidDataException"><paramref name="pdf"/> is not a readable PDF.</exception>
     /// <exception cref="NotSupportedException"><paramref name="pdf"/> uses an encryption handler other than the standard one.</exception>
     public static byte[] Encrypt(byte[] pdf, PdfSecurity security, string? password = null)
+        => Encrypt(pdf, security, password, CancellationToken.None);
+
+    /// <summary>
+    /// Encrypts <paramref name="pdf"/> like <see cref="Encrypt(byte[], PdfSecurity, string?)"/>, stopping with
+    /// <see cref="OperationCanceledException"/> when <paramref name="cancellationToken"/> is cancelled.
+    /// </summary>
+    /// <param name="pdf">The PDF to protect.</param>
+    /// <param name="security">The new passwords and permissions.</param>
+    /// <param name="password">The user or owner password of <paramref name="pdf"/>, when it is already encrypted.</param>
+    /// <param name="cancellationToken">Stops the work between objects.</param>
+    /// <returns>The encrypted PDF.</returns>
+    public static byte[] Encrypt(byte[] pdf, PdfSecurity security, string? password, CancellationToken cancellationToken)
     {
         if (pdf == null) throw new ArgumentNullException(nameof(pdf));
         if (security == null) throw new ArgumentNullException(nameof(security));
-        return EncryptCore(pdf, security, password).Span.ToArray();
+        return EncryptCore(pdf, security, password, cancellationToken).Span.ToArray();
     }
 
     /// <summary>Encrypts the PDF read from <paramref name="input"/> (from its current position) and writes the result to <paramref name="output"/>.</summary>
     /// <remarks>The streams are not closed. Nothing is written when the input cannot be encrypted.</remarks>
     /// <inheritdoc cref="Encrypt(byte[], PdfSecurity, string?)"/>
     public static void Encrypt(Stream input, Stream output, PdfSecurity security, string? password = null)
+        => Encrypt(input, output, security, password, CancellationToken.None);
+
+    /// <summary>
+    /// Encrypts the PDF read from <paramref name="input"/> (from its current position) and writes the result to
+    /// <paramref name="output"/>, stopping with <see cref="OperationCanceledException"/> when
+    /// <paramref name="cancellationToken"/> is cancelled.
+    /// </summary>
+    /// <remarks>The streams are not closed. Nothing is written when the input cannot be encrypted or the work is cancelled.</remarks>
+    /// <param name="input">The PDF to protect.</param>
+    /// <param name="output">Where the encrypted PDF is written.</param>
+    /// <param name="security">The new passwords and permissions.</param>
+    /// <param name="password">The user or owner password of the input, when it is already encrypted.</param>
+    /// <param name="cancellationToken">Stops the work between objects.</param>
+    public static void Encrypt(Stream input, Stream output, PdfSecurity security, string? password, CancellationToken cancellationToken)
     {
         CheckStreams(input, output);
         if (security == null) throw new ArgumentNullException(nameof(security));
-        var result = EncryptCore(PdfMerger.ReadAll(input), security, password);
+        var result = EncryptCore(PdfMerger.ReadAll(input), security, password, cancellationToken);
         output.Write(result.RawBuffer, 0, result.Length);
     }
 
@@ -62,21 +88,43 @@ public static class PdfProtector
     /// <exception cref="ArgumentException"><paramref name="pdf"/> is digitally signed.</exception>
     /// <exception cref="InvalidDataException"><paramref name="pdf"/> is not a readable PDF.</exception>
     /// <exception cref="NotSupportedException"><paramref name="pdf"/> uses an encryption handler other than the standard one.</exception>
-    public static byte[] Decrypt(byte[] pdf, string? password)
+    public static byte[] Decrypt(byte[] pdf, string? password) => Decrypt(pdf, password, CancellationToken.None);
+
+    /// <summary>
+    /// Removes the encryption from <paramref name="pdf"/> like <see cref="Decrypt(byte[], string?)"/>, stopping with
+    /// <see cref="OperationCanceledException"/> when <paramref name="cancellationToken"/> is cancelled.
+    /// </summary>
+    /// <param name="pdf">The encrypted PDF.</param>
+    /// <param name="password">Its user or owner password; null or empty when it opens without one (only restricts permissions).</param>
+    /// <param name="cancellationToken">Stops the work between objects.</param>
+    /// <returns>The unencrypted PDF.</returns>
+    public static byte[] Decrypt(byte[] pdf, string? password, CancellationToken cancellationToken)
     {
         if (pdf == null) throw new ArgumentNullException(nameof(pdf));
-        var result = DecryptCore(pdf, password);
+        var result = DecryptCore(pdf, password, cancellationToken);
         return result == null ? (byte[])pdf.Clone() : result.Span.ToArray();
     }
 
     /// <summary>Decrypts the PDF read from <paramref name="input"/> (from its current position) and writes the result to <paramref name="output"/>.</summary>
     /// <remarks>The streams are not closed. Nothing is written when the input cannot be decrypted.</remarks>
     /// <inheritdoc cref="Decrypt(byte[], string?)"/>
-    public static void Decrypt(Stream input, Stream output, string? password)
+    public static void Decrypt(Stream input, Stream output, string? password) => Decrypt(input, output, password, CancellationToken.None);
+
+    /// <summary>
+    /// Decrypts the PDF read from <paramref name="input"/> (from its current position) and writes the result to
+    /// <paramref name="output"/>, stopping with <see cref="OperationCanceledException"/> when
+    /// <paramref name="cancellationToken"/> is cancelled.
+    /// </summary>
+    /// <remarks>The streams are not closed. Nothing is written when the input cannot be decrypted or the work is cancelled.</remarks>
+    /// <param name="input">The encrypted PDF.</param>
+    /// <param name="output">Where the unencrypted PDF is written.</param>
+    /// <param name="password">Its user or owner password; null or empty when it opens without one (only restricts permissions).</param>
+    /// <param name="cancellationToken">Stops the work between objects.</param>
+    public static void Decrypt(Stream input, Stream output, string? password, CancellationToken cancellationToken)
     {
         CheckStreams(input, output);
         var pdf = PdfMerger.ReadAll(input);
-        var result = DecryptCore(pdf, password);
+        var result = DecryptCore(pdf, password, cancellationToken);
         if (result == null) output.Write(pdf);
         else output.Write(result.RawBuffer, 0, result.Length);
     }
@@ -96,9 +144,10 @@ public static class PdfProtector
         }
     }
 
-    private static ByteBuffer EncryptCore(byte[] pdf, PdfSecurity security, string? password)
+    private static ByteBuffer EncryptCore(byte[] pdf, PdfSecurity security, string? password, CancellationToken cancellationToken)
     {
-        using (PdfFile.BeginRender(CancellationToken.None))
+        cancellationToken.ThrowIfCancellationRequested();
+        using (PdfFile.BeginRender(cancellationToken))
         {
             var file = Open(pdf, password);
             CheckNotSigned(file);
@@ -113,9 +162,10 @@ public static class PdfProtector
         }
     }
 
-    private static ByteBuffer? DecryptCore(byte[] pdf, string? password)
+    private static ByteBuffer? DecryptCore(byte[] pdf, string? password, CancellationToken cancellationToken)
     {
-        using (PdfFile.BeginRender(CancellationToken.None))
+        cancellationToken.ThrowIfCancellationRequested();
+        using (PdfFile.BeginRender(cancellationToken))
         {
             var file = Open(pdf, password);
             if (file.Decryptor == null) return null;

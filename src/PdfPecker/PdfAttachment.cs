@@ -21,7 +21,7 @@ public enum PdfAttachmentRelationship
 /// <summary>
 /// A file embedded in a PDF (an attachment), listed in the viewer's attachments panel. Add them with
 /// <see cref="PdfOptions.Attachments"/> when converting, or with <see cref="PdfAttachments.Add(byte[], PdfAttachment[])"/>
-/// to an existing PDF; <see cref="PdfAttachments.List"/> reads them back.
+/// to an existing PDF; <see cref="PdfAttachments.List(byte[], string?)"/> reads them back.
 /// </summary>
 public sealed class PdfAttachment
 {
@@ -89,23 +89,89 @@ public static class PdfAttachments
     /// <param name="password">The user or owner password of an encrypted PDF.</param>
     /// <exception cref="InvalidDataException">The PDF cannot be read.</exception>
     /// <exception cref="PdfPasswordException">The PDF is encrypted and the password is missing or wrong.</exception>
-    public static IReadOnlyList<PdfAttachment> List(byte[] pdf, string? password = null)
+    public static IReadOnlyList<PdfAttachment> List(byte[] pdf, string? password = null) => List(pdf, password, CancellationToken.None);
+
+    /// <summary>
+    /// The files attached to a PDF, as <see cref="List(byte[], string?)"/>, stopping with
+    /// <see cref="OperationCanceledException"/> when <paramref name="cancellationToken"/> is cancelled.
+    /// </summary>
+    /// <param name="pdf">The PDF.</param>
+    /// <param name="password">The user or owner password of an encrypted PDF.</param>
+    /// <param name="cancellationToken">Stops the work before each attachment and while one is decoded.</param>
+    public static IReadOnlyList<PdfAttachment> List(byte[] pdf, string? password, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var file = Open(pdf, password);
         // One decode budget for all attachments, which are all held in memory at once.
-        using (PdfFile.BeginRender(default)) return EmbeddedFiles.Read(file).Select(f => f.ToAttachment(file)).ToList();
+        using (PdfFile.BeginRender(cancellationToken))
+        {
+            var result = new List<PdfAttachment>();
+            foreach (var found in EmbeddedFiles.Read(file))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                result.Add(found.ToAttachment(file));
+            }
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// The files attached to a PDF read from <paramref name="pdf"/> (from its current position to its end). The stream is
+    /// not disposed. See <see cref="List(byte[], string?)"/>.
+    /// </summary>
+    /// <param name="pdf">The PDF.</param>
+    /// <param name="password">The user or owner password of an encrypted PDF.</param>
+    /// <param name="cancellationToken">Stops the work before each attachment and while one is decoded.</param>
+    /// <exception cref="InvalidDataException">The PDF cannot be read.</exception>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and the password is missing or wrong.</exception>
+    public static IReadOnlyList<PdfAttachment> List(Stream pdf, string? password = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(pdf);
+        return List(PdfMerger.ReadAll(pdf), password, cancellationToken);
     }
 
     /// <summary>The content of the attached file with the given name (compared exactly), or null when there is none.</summary>
     /// <exception cref="InvalidDataException">The PDF cannot be read.</exception>
     /// <exception cref="PdfPasswordException">The PDF is encrypted and the password is missing or wrong.</exception>
-    public static byte[]? Extract(byte[] pdf, string fileName, string? password = null)
+    public static byte[]? Extract(byte[] pdf, string fileName, string? password = null) => Extract(pdf, fileName, password, CancellationToken.None);
+
+    /// <summary>
+    /// The content of the attached file with the given name, as <see cref="Extract(byte[], string, string?)"/>, stopping
+    /// with <see cref="OperationCanceledException"/> when <paramref name="cancellationToken"/> is cancelled.
+    /// </summary>
+    /// <param name="pdf">The PDF.</param>
+    /// <param name="fileName">The attachment's file name, compared exactly.</param>
+    /// <param name="password">The user or owner password of an encrypted PDF.</param>
+    /// <param name="cancellationToken">Stops the work, also while the attachment is decoded.</param>
+    public static byte[]? Extract(byte[] pdf, string fileName, string? password, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(fileName);
+        cancellationToken.ThrowIfCancellationRequested();
         var file = Open(pdf, password);
         foreach (var f in EmbeddedFiles.Read(file))
-            if (f.FileName == fileName) return EmbeddedFiles.Decode(file, f.Stream);
+            if (f.FileName == fileName)
+            {
+                // Only the one attachment is decoded, so its budget is the same as Decode's own.
+                using (PdfFile.BeginRender(cancellationToken)) return EmbeddedFiles.Decode(file, f.Stream);
+            }
         return null;
+    }
+
+    /// <summary>
+    /// The content of the attached file with the given name in a PDF read from <paramref name="pdf"/> (from its current
+    /// position to its end), or null when there is none. The stream is not disposed.
+    /// </summary>
+    /// <param name="pdf">The PDF.</param>
+    /// <param name="fileName">The attachment's file name, compared exactly.</param>
+    /// <param name="password">The user or owner password of an encrypted PDF.</param>
+    /// <param name="cancellationToken">Stops the work, also while the attachment is decoded.</param>
+    /// <exception cref="InvalidDataException">The PDF cannot be read.</exception>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and the password is missing or wrong.</exception>
+    public static byte[]? Extract(Stream pdf, string fileName, string? password = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(pdf);
+        ArgumentNullException.ThrowIfNull(fileName);
+        return Extract(PdfMerger.ReadAll(pdf), fileName, password, cancellationToken);
     }
 
     /// <summary>
@@ -132,12 +198,54 @@ public static class PdfAttachments
     /// <exception cref="InvalidDataException">The PDF cannot be read.</exception>
     /// <exception cref="PdfPasswordException">The PDF is encrypted and the password is missing or wrong.</exception>
     public static byte[] Add(byte[] pdf, IEnumerable<PdfAttachment> attachments, string? password)
+        => Add(pdf, attachments, password, CancellationToken.None);
+
+    /// <summary>
+    /// Attaches files to an existing, possibly encrypted PDF as an incremental update, as
+    /// <see cref="Add(byte[], IEnumerable{PdfAttachment}, string?)"/>, stopping with
+    /// <see cref="OperationCanceledException"/> when <paramref name="cancellationToken"/> is cancelled.
+    /// </summary>
+    /// <param name="pdf">The PDF.</param>
+    /// <param name="attachments">The files to attach.</param>
+    /// <param name="password">The user or owner password of an encrypted PDF; null for an unencrypted one.</param>
+    /// <param name="cancellationToken">Stops the work before the PDF is read and before the update is written.</param>
+    public static byte[] Add(byte[] pdf, IEnumerable<PdfAttachment> attachments, string? password, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(pdf);
         ArgumentNullException.ThrowIfNull(attachments);
+        cancellationToken.ThrowIfCancellationRequested();
         var list = EmbeddedFiles.Prepare(attachments, null);
         if (list.Count == 0) return pdf;
-        return EmbeddedFiles.Append(Open(pdf, password), pdf, list);
+        var file = Open(pdf, password);
+        cancellationToken.ThrowIfCancellationRequested();
+        return EmbeddedFiles.Append(file, pdf, list);
+    }
+
+    /// <summary>
+    /// Attaches files to the PDF read from <paramref name="input"/> (from its current position to its end) as an
+    /// incremental update and writes the result to <paramref name="output"/>. See
+    /// <see cref="Add(byte[], IEnumerable{PdfAttachment}, string?, CancellationToken)"/>.
+    /// </summary>
+    /// <remarks>The streams are not disposed. Nothing is written when the files cannot be attached or the work is cancelled.</remarks>
+    /// <param name="input">The PDF.</param>
+    /// <param name="output">Where the PDF with the attachments is written.</param>
+    /// <param name="attachments">The files to attach.</param>
+    /// <param name="password">The user or owner password of an encrypted PDF; null for an unencrypted one.</param>
+    /// <param name="cancellationToken">Stops the work before the PDF is read and before the update is written.</param>
+    /// <exception cref="ArgumentException">
+    /// A file name is used twice, or is already attached; or the PDF is PDF/A-1 or PDF/A-2, which do not allow attaching
+    /// arbitrary files.
+    /// </exception>
+    /// <exception cref="InvalidDataException">The PDF cannot be read.</exception>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and the password is missing or wrong.</exception>
+    public static void Add(Stream input, Stream output, IEnumerable<PdfAttachment> attachments, string? password = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(output);
+        if (!output.CanWrite) throw new ArgumentException("The output stream is not writable.", nameof(output));
+        var result = Add(PdfMerger.ReadAll(input), attachments, password, cancellationToken);
+        output.Write(result, 0, result.Length);
     }
 
     internal static PdfFile Open(byte[] pdf, string? password)
