@@ -135,7 +135,7 @@ internal static class ComplexShaper
         return plan;
     }
 
-    [ThreadStatic] private static List<GlyphInfo>? t_buf;
+    [ThreadStatic] private static GlyphRun? t_buf;
 
     /// <summary>
     /// Shapes the text into glyphs in logical order, with advances and offsets in 1/1000 em for drawing it in the
@@ -144,7 +144,7 @@ internal static class ComplexShaper
     public static void Shape(FontProgram font, string s, int start, int length, bool rtl, List<ShapedGlyph> output)
     {
         output.Clear();
-        var buf = t_buf ??= new List<GlyphInfo>();
+        var buf = t_buf ??= new GlyphRun();
         buf.Clear();
         var ot = font.Layout;
 
@@ -168,15 +168,16 @@ internal static class ComplexShaper
         buf.RemoveAll(g => UnicodeTables.IsDefaultIgnorable(g.CodePoint));
         if (Joins(script) && !plan.HasForms) PresentationForms(font, buf, ligate: !plan.HasRlig);
 
-        // GSUB and GPOS share one work budget for the run, so a font cannot spend it twice over.
-        int nextLigId = 1, operations = OpenTypeLayout.OperationBudget(buf.Count);
+        // GSUB and GPOS share one work budget for the run, so a font cannot spend it twice over, and GSUB may make the
+        // run only so much longer than the text.
+        int nextLigId = 1, operations = OpenTypeLayout.OperationBudget(buf.Count), maxLength = OpenTypeLayout.MaxRunLength(buf.Count);
         if (ot != null)
         {
             try
             {
                 foreach (var stage in plan.Gsub)
                     foreach (var (lookup, mask) in stage)
-                        ot.ApplyLookup(buf, false, lookup, mask, rtl, ref nextLigId, ref operations);
+                        ot.ApplyLookup(buf, false, lookup, mask, rtl, ref nextLigId, ref operations, maxLength);
             }
             catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException)
             {
@@ -195,7 +196,7 @@ internal static class ComplexShaper
         {
             try
             {
-                foreach (var (lookup, mask) in plan.Gpos) ot.ApplyLookup(buf, true, lookup, mask, rtl, ref nextLigId, ref operations);
+                foreach (var (lookup, mask) in plan.Gpos) ot.ApplyLookup(buf, true, lookup, mask, rtl, ref nextLigId, ref operations, maxLength);
             }
             catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException)
             {
@@ -235,12 +236,15 @@ internal static class ComplexShaper
         OpenTypeLayout.PropagateAttachments(buf, rtl);
 
         float scale = 1000f / font.UnitsPerEm;
-        foreach (var g in buf)
+        for (int i = 0; i < buf.Count; i++)
+        {
+            var g = buf[i];
             output.Add(new ShapedGlyph(g.Gid, g.Cluster, g.Length, g.XAdvance * scale, g.XOffset * scale, g.YOffset * scale));
+        }
     }
 
     // Adds the glyph of a character, or of its decomposition when the font lacks the character but has its parts.
-    private static void AddChar(FontProgram font, OpenTypeLayout? ot, List<GlyphInfo> buf, int cp, int cluster, int length, bool rtl, int depth)
+    private static void AddChar(FontProgram font, OpenTypeLayout? ot, GlyphRun buf, int cp, int cluster, int length, bool rtl, int depth)
     {
         int gid = font.GlyphId(cp);
         if (gid == 0 && depth < 4 && UnicodeTables.Decompose(cp, out int first, out int second) && (second == 0 || font.GlyphId(second) != 0))
@@ -268,7 +272,7 @@ internal static class ComplexShaper
 
     // A letter and the mark right after it become the precomposed letter when the font has it, as HarfBuzz composes
     // them (waw and hamza above, alef and madda, ...).
-    private static void Compose(FontProgram font, OpenTypeLayout? ot, List<GlyphInfo> buf)
+    private static void Compose(FontProgram font, OpenTypeLayout? ot, GlyphRun buf)
     {
         for (int i = 0; i + 1 < buf.Count; i++)
         {
@@ -291,7 +295,7 @@ internal static class ComplexShaper
 
     // Sorts each run of combining marks by (modified) combining class, as normalization does; in Arabic, modifier
     // combining marks such as hamza above then move to the front of their run, as HarfBuzz orders them.
-    private static void ReorderMarks(List<GlyphInfo> buf, Script script)
+    private static void ReorderMarks(GlyphRun buf, Script script)
     {
         int i = 0;
         while (i < buf.Count)
@@ -318,7 +322,7 @@ internal static class ComplexShaper
 
     // The modifier combining marks at the start of the marks of class 220, and then of class 230, move to the front of
     // the run (HarfBuzz's reorder_marks_arabic).
-    private static void MoveModifierMarks(List<GlyphInfo> buf, int start, int end)
+    private static void MoveModifierMarks(GlyphRun buf, int start, int end)
     {
         int i = start;
         for (int cc = 220; cc <= 230; cc += 10)
@@ -359,7 +363,7 @@ internal static class ComplexShaper
         { (Form.None, Form.None, 0), (Form.None, Form.Isol, 2), (Form.None, Form.Isol, 1), (Form.None, Form.Isol, 2), (Form.None, Form.Fin3, 5), (Form.None, Form.Isol, 6) },
     };
 
-    private static void ArabicJoining(List<GlyphInfo> buf, Script script)
+    private static void ArabicJoining(GlyphRun buf, Script script)
     {
         var forms = new Form[buf.Count];
         int prev = -1, state = 0;
@@ -394,7 +398,7 @@ internal static class ComplexShaper
 
     // For fonts without OpenType Arabic forms: the presentation form characters, as HarfBuzz's fallback shaping uses
     // them, and lam-alef ligatures.
-    private static void PresentationForms(FontProgram font, List<GlyphInfo> buf, bool ligate)
+    private static void PresentationForms(FontProgram font, GlyphRun buf, bool ligate)
     {
         for (int i = 0; i < buf.Count; i++)
         {
