@@ -932,6 +932,17 @@ public class HostileInputTests
         });
     }
 
+    [Theory]
+    [InlineData("<div style='display: flex'><aside style='width: 2px'>x</aside><div>", "</div></div>")]
+    [InlineData("<div style='display: grid; grid-template-columns: 2px 1fr'><aside>x</aside><div>", "</div></div>")]
+    public void Nested_flex_and_grid_items_across_pages_are_laid_out_again_a_bounded_number_of_times(string open, string close)
+    {
+        // An item that lands across a page boundary is laid out again there, and a flex line that grows lays out its
+        // stretched items once more; at every level of nesting that doubled the work below it.
+        var table = "<table>" + Repeat("<tr><td style='height: 40pt'>row</td></tr>", 200) + "</table>";
+        AssertStructurallyValid(Bounded(Repeat(open, 30) + table + Repeat(close, 30)));
+    }
+
     /// <summary>A one-page form whose AcroForm lists object 4 as its only field and asks for every appearance.</summary>
     private static byte[] FormPdf(string field, IEnumerable<string>? more = null)
     {
