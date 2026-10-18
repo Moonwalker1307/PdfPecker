@@ -261,6 +261,10 @@ internal sealed partial class FontProgram
     public FontProgram WithFeatures(string features)
     {
         var variants = LazyInitializer.EnsureInitialized(ref _featureVariants, () => new());
+        if (variants.TryGetValue(features, out var cached)) return cached;
+        // Each variant copies the character map, and the bundled fonts live as long as the process, so a server that
+        // sees ever new feature settings would keep every copy; past the cap, as for instances, the font is used as is.
+        if (variants.Count >= MaxInstances) return this;
         return variants.GetOrAdd(features, MakeVariant);
     }
 

@@ -24,6 +24,7 @@ internal static class SignatureScanner
 {
     private const int MaxSignatures = 1000;
     private const int MaxFields = 100_000;
+    private const int MaxFieldNameChars = 8 * 1024 * 1024;
 
     // A PDF signature is a few kilobytes, with a timestamp and a long chain perhaps a hundred; anything far larger is
     // either not a signature or an attempt to make the verifier allocate.
@@ -35,6 +36,9 @@ internal static class SignatureScanner
         var fields = file.GetArray(file.GetDict(file.Catalog, "AcroForm"), "Fields");
         if (fields == null) return result;
         var seen = new HashSet<PdfDict>(ReferenceEqualityComparer.Instance);
+        // Fields that share one signature dictionary are one signature: verifying it again would only repeat the work.
+        var signatures = new HashSet<PdfDict>(ReferenceEqualityComparer.Instance);
+        long nameChars = 0;
         var stack = new Stack<(PdfObject Field, string Prefix, string? InheritedType, int Depth)>();
         for (int i = fields.Count - 1; i >= 0; i--) stack.Push((fields[i], "", null, 0));
         while (stack.Count > 0 && seen.Count < MaxFields && result.Count < MaxSignatures)
@@ -42,11 +46,17 @@ internal static class SignatureScanner
             var (o, prefix, inherited, depth) = stack.Pop();
             if (depth > 32 || file.Resolve(o) is not PdfDict field || !seen.Add(field)) continue;
             string name = prefix;
-            if (file.Resolve(field["T"]) is PdfString t) name = prefix.Length == 0 ? t.Text : prefix + "." + t.Text;
+            if (file.Resolve(field["T"]) is PdfString t)
+            {
+                // Names repeat their parents' names, so a long one over many kids would grow with depth times breadth.
+                nameChars += prefix.Length + 1 + t.Text.Length;
+                if (nameChars > MaxFieldNameChars) break;
+                name = prefix.Length == 0 ? t.Text : prefix + "." + t.Text;
+            }
             var type = file.GetName(field, "FT") ?? inherited;
             if (type == "Sig" && file.Resolve(field["V"]) is PdfDict sig && file.GetArray(sig, "ByteRange") != null)
             {
-                result.Add(Locate(file, sig, name));
+                if (signatures.Add(sig)) result.Add(Locate(file, sig, name));
                 continue;
             }
             if (file.GetArray(field, "Kids") is { } kids)

@@ -25,6 +25,10 @@ internal sealed partial class PdfFormEditor
     private const int MaxFields = 100_000;
     private const int MaxDepth = 32;
 
+    // Each field's name repeats its parents' names, so a long name over many kids grows with depth times breadth; past
+    // this many characters in all, the rest of the fields are left out.
+    private const int MaxFieldNameChars = 8 * 1024 * 1024;
+
     private sealed class Field
     {
         public string Name = "";
@@ -188,10 +192,13 @@ internal sealed partial class PdfFormEditor
         if (A(AcroForm, "Fields") is not PdfArray top) return;
         var seen = new HashSet<int>();
         int count = 0;
+        long nameChars = 0;
         void Walk(PdfObject item, string prefix, int depth)
         {
             if (depth > MaxDepth || ++count > MaxFields || item is not PdfRef r || !seen.Add(r.Num) || R(r) is not PdfDict d) return;
             string? t = Str(d["T"]);
+            nameChars += prefix.Length + 1 + (t?.Length ?? 0);
+            if (nameChars > MaxFieldNameChars) return;
             string name = t == null ? prefix : prefix.Length == 0 ? t : prefix + "." + t;
             var field = new Field { Name = name, Ref = r };
             bool hasFieldKids = false;

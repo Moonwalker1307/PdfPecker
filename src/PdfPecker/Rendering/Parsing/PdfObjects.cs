@@ -72,8 +72,13 @@ internal sealed class PdfName : PdfObject
     public readonly string Value;
     private PdfName(string v) => Value = v;
 
+    // PDF names are at most 127 bytes in practice; longer ones come from damaged or hostile files and would only fill
+    // the process-wide table, so they are not interned.
+    private const int MaxInternedLength = 127;
+
     public static PdfName Get(string v)
     {
+        if (v.Length > MaxInternedLength) return new PdfName(v);
         lock (Interned)
         {
             if (!Interned.TryGetValue(v, out var n))

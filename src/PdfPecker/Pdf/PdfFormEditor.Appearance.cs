@@ -320,7 +320,7 @@ internal sealed partial class PdfFormEditor
             if (selected.Count == 0)
             {
                 var v = Inherited(f.Ref, "V");
-                var values = v is PdfArray va ? va.Items.Select(Str).OfType<string>().ToList() : Str(v) is string sv ? new List<string> { sv } : new List<string>();
+                var values = v is PdfArray va ? va.Items.Select(Str).OfType<string>().ToHashSet(StringComparer.Ordinal) : Str(v) is string sv ? new HashSet<string>(StringComparer.Ordinal) { sv } : new HashSet<string>();
                 for (int i = 0; i < options.Count; i++) if (values.Contains(options[i].Value)) selected.Add(i);
             }
             topIndex = Math.Max(0, I(R(f.Ref) as PdfDict, "TI"));
@@ -414,10 +414,11 @@ internal sealed partial class PdfFormEditor
 
         if (kind == PdfFormFieldType.ListBox)
         {
-            double size = daSize > 0 ? daSize : 12;
+            // A tiny font size would otherwise draw every option, however many, in every widget of the list.
+            double size = daSize > 0 ? Math.Max(daSize, 1) : 12;
             double lineH = size * lineFactor;
             double top = y0 + bh - pad;
-            for (int i = topIndex, row = 0; i < lines.Count; i++, row++)
+            for (int i = topIndex, row = 0; i < lines.Count && row < MaxListRows; i++, row++)
             {
                 double lineTop = top - row * lineH;
                 if (lineTop < y0) break;
@@ -505,33 +506,56 @@ internal sealed partial class PdfFormEditor
         sb.Append(" Tj ET\n");
     }
 
-    /// <summary>Breaks text into lines that fit <paramref name="width"/>: at its line feeds, between words, and inside words too long for a line.</summary>
+    // More rows than a list box can usefully show; the rest of its options are scrolled out of view anyway.
+    private const int MaxListRows = 1_000;
+
+    // More lines than any field can show; a longer value is cut off rather than wrapped to the end.
+    private const int MaxWrappedLines = 10_000;
+
+    /// <summary>
+    /// Breaks text into lines that fit <paramref name="width"/>: at its line feeds, between words, and inside words too
+    /// long for a line. Widths add up glyph by glyph, so the line's width is kept as a running sum instead of measuring
+    /// the whole line again for every word, which made long values quadratic.
+    /// </summary>
     private static List<string> Wrap(AppearanceFont font, string text, double size, double width)
     {
         var result = new List<string>();
+        double space = font.Width(" ") * size;
         foreach (var paragraph in text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n'))
         {
             var line = new StringBuilder();
+            double lineWidth = 0;
             foreach (var word in paragraph.Split(' '))
             {
-                string candidate = line.Length == 0 ? word : line + " " + word;
-                if (font.Width(candidate) * size <= width || line.Length == 0 && font.Width(word) * size <= width)
+                double wordWidth = font.Width(word) * size;
+                double candidate = line.Length == 0 ? wordWidth : lineWidth + space + wordWidth;
+                if (candidate <= width || line.Length == 0 && wordWidth <= width)
                 {
-                    line.Clear().Append(candidate);
+                    if (line.Length > 0) line.Append(' ');
+                    line.Append(word);
+                    lineWidth = candidate;
                     continue;
                 }
-                if (line.Length > 0) { result.Add(line.ToString()); line.Clear(); }
-                // A word wider than the line is split between characters.
-                var piece = new StringBuilder();
-                foreach (char c in word)
+                if (line.Length > 0) { result.Add(line.ToString()); line.Clear(); lineWidth = 0; }
+                // A word wider than the line is split between characters, never inside a surrogate pair.
+                foreach (var rune in word.EnumerateRunes())
                 {
-                    if (piece.Length > 0 && font.Width(piece.ToString() + c) * size > width) { result.Add(piece.ToString()); piece.Clear(); }
-                    piece.Append(c);
+                    string r = rune.ToString();
+                    double w = font.Width(r) * size;
+                    if (line.Length > 0 && lineWidth + w > width)
+                    {
+                        result.Add(line.ToString());
+                        if (result.Count >= MaxWrappedLines) return result;
+                        line.Clear();
+                        lineWidth = 0;
+                    }
+                    line.Append(r);
+                    lineWidth += w;
                 }
-                line.Append(piece);
+                if (result.Count >= MaxWrappedLines) return result;
             }
             result.Add(line.ToString());
-            if (result.Count > 10_000) break;
+            if (result.Count >= MaxWrappedLines) break;
         }
         return result;
     }
