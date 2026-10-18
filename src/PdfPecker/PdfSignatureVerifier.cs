@@ -130,6 +130,12 @@ public sealed class PdfSignatureVerification
     /// signature or validation data is added), so check <see cref="CoversWholeDocument"/> too when the last signature
     /// must cover everything.
     /// </summary>
+    /// <remarks>
+    /// Revocation is not checked by default: with <see cref="PdfSignatureVerificationOptions.RevocationMode"/> at its
+    /// default, <see cref="X509RevocationMode.NoCheck"/>, a signature made with a revoked certificate still reports
+    /// valid. Set it to <see cref="X509RevocationMode.Online"/>, or to <see cref="X509RevocationMode.Offline"/> with the
+    /// revocation data cached on the machine, when that matters.
+    /// </remarks>
     public bool Valid => IsIntact && ChainTrusted;
 }
 
@@ -195,6 +201,11 @@ public static class PdfSignatureVerifier
     }
 
     /// <summary>Verifies a PDF file. See <see cref="Verify(byte[], PdfSignatureVerificationOptions?, string?)"/>.</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
+    /// <exception cref="InvalidDataException">The file is not a readable PDF.</exception>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and the password does not open it.</exception>
+    /// <exception cref="IOException">The file cannot be read, for example because it does not exist.</exception>
+    /// <exception cref="UnauthorizedAccessException">The process may not read the file.</exception>
     public static IReadOnlyList<PdfSignatureVerification> VerifyFile(string path, PdfSignatureVerificationOptions? options = null, string? password = null)
         => Verify(File.ReadAllBytes(path), options, password);
 

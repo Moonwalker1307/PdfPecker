@@ -38,6 +38,9 @@ public sealed class PdfAttachment
     }
 
     /// <summary>An attachment from a file on disk: its name, content and last-write time.</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
+    /// <exception cref="IOException">The file cannot be read, for example because it does not exist.</exception>
+    /// <exception cref="UnauthorizedAccessException">The process may not read the file.</exception>
     public static PdfAttachment FromFile(string path)
         => new(Path.GetFileName(path), File.ReadAllBytes(path)) { ModDate = new DateTimeOffset(File.GetLastWriteTimeUtc(path)) };
 

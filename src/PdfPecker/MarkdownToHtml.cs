@@ -99,6 +99,12 @@ img { max-width: 100%; }
     }
 
     /// <summary>Converts a Markdown file to a complete HTML document file.</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="markdownPath"/> or <paramref name="htmlPath"/> is null.</exception>
+    /// <exception cref="IOException">
+    /// The Markdown file cannot be read (it does not exist, for example) or the HTML file cannot be written.
+    /// The HTML file is written only once it is complete, so a failure leaves any earlier file at that path unchanged.
+    /// </exception>
+    /// <exception cref="UnauthorizedAccessException">The process may not read the Markdown file or write the HTML file.</exception>
     public static void ConvertFile(string markdownPath, string htmlPath, MarkdownOptions? options = null)
         => AtomicFile.WriteAllText(htmlPath, ConvertDocument(File.ReadAllText(markdownPath), options));
 }

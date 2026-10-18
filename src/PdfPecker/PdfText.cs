@@ -187,6 +187,8 @@ public static class PdfText
 
     /// <summary>The text of the PDF file at <paramref name="path"/>.</summary>
     /// <inheritdoc cref="Extract(byte[], PdfTextOptions?, CancellationToken)"/>
+    /// <exception cref="IOException">The file cannot be read, for example because it does not exist.</exception>
+    /// <exception cref="UnauthorizedAccessException">The process may not read the file.</exception>
     public static string ExtractFile(string path, PdfTextOptions? options = null, CancellationToken cancellationToken = default)
         => Extract(File.ReadAllBytes(path ?? throw new ArgumentNullException(nameof(path))), options, cancellationToken);
 
@@ -228,6 +230,8 @@ public static class PdfText
 
     /// <summary>The text of each page of the PDF file at <paramref name="path"/>.</summary>
     /// <inheritdoc cref="Extract(byte[], PdfTextOptions?, CancellationToken)"/>
+    /// <exception cref="IOException">The file cannot be read, for example because it does not exist.</exception>
+    /// <exception cref="UnauthorizedAccessException">The process may not read the file.</exception>
     public static IReadOnlyList<PdfTextPage> ExtractPagesFromFile(string path, PdfTextOptions? options = null, CancellationToken cancellationToken = default)
         => ExtractPages(File.ReadAllBytes(path ?? throw new ArgumentNullException(nameof(path))), options, cancellationToken);
 

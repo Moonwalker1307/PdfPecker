@@ -11,6 +11,17 @@ namespace PdfPecker;
 public static partial class HtmlToPdf
 {
     /// <summary>Converts an HTML string to a PDF document.</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="html"/> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="options"/> holds a value out of range or a combination that is not allowed, such as PDF/A with
+    /// encryption, margins that leave no room for content, or a signing certificate without a private key.
+    /// </exception>
+    /// <exception cref="PdfLimitException">The document would have more than <see cref="PdfOptions.MaxPages"/> pages.</exception>
+    /// <exception cref="PdfSignatureException">
+    /// <see cref="PdfOptions.Signature"/> is set and signing fails, for example because the timestamp server cannot be
+    /// reached or the external signer's signature does not verify.
+    /// </exception>
+    /// <exception cref="NotSupportedException">The signature's <see cref="PdfSignatureOptions.HashAlgorithm"/> is not SHA-256, SHA-384 or SHA-512.</exception>
     public static byte[] Convert(string html, PdfOptions? options = null)
     {
         if (html == null) throw new ArgumentNullException(nameof(html));
@@ -21,6 +32,18 @@ public static partial class HtmlToPdf
     /// Converts an HTML string to a PDF document, stopping with <see cref="OperationCanceledException"/> when
     /// <paramref name="cancellationToken"/> is cancelled. Use it with a timeout when the HTML comes from untrusted users.
     /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="html"/> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="options"/> holds a value out of range or a combination that is not allowed, such as PDF/A with
+    /// encryption, margins that leave no room for content, or a signing certificate without a private key.
+    /// </exception>
+    /// <exception cref="PdfLimitException">The document would have more than <see cref="PdfOptions.MaxPages"/> pages.</exception>
+    /// <exception cref="PdfSignatureException">
+    /// <see cref="PdfOptions.Signature"/> is set and signing fails, for example because the timestamp server cannot be
+    /// reached or the external signer's signature does not verify.
+    /// </exception>
+    /// <exception cref="NotSupportedException">The signature's <see cref="PdfSignatureOptions.HashAlgorithm"/> is not SHA-256, SHA-384 or SHA-512.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public static byte[] Convert(string html, PdfOptions? options, CancellationToken cancellationToken)
     {
         if (html == null) throw new ArgumentNullException(nameof(html));
@@ -28,6 +51,18 @@ public static partial class HtmlToPdf
     }
 
     /// <summary>Converts an HTML string and writes the PDF to <paramref name="output"/>.</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="html"/> or <paramref name="output"/> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="options"/> holds a value out of range or a combination that is not allowed, such as PDF/A with
+    /// encryption, margins that leave no room for content, or a signing certificate without a private key.
+    /// </exception>
+    /// <exception cref="PdfLimitException">The document would have more than <see cref="PdfOptions.MaxPages"/> pages.</exception>
+    /// <exception cref="PdfSignatureException">
+    /// <see cref="PdfOptions.Signature"/> is set and signing fails, for example because the timestamp server cannot be
+    /// reached or the external signer's signature does not verify.
+    /// </exception>
+    /// <exception cref="NotSupportedException">The signature's <see cref="PdfSignatureOptions.HashAlgorithm"/> is not SHA-256, SHA-384 or SHA-512.</exception>
+    /// <exception cref="IOException">Writing to <paramref name="output"/> fails.</exception>
     public static void Convert(string html, Stream output, PdfOptions? options = null)
         => Convert(html, output, options, CancellationToken.None);
 
@@ -48,6 +83,22 @@ public static partial class HtmlToPdf
     }
 
     /// <summary>Converts an HTML file to a PDF file. Relative image and stylesheet paths resolve against the HTML file's folder.</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="htmlPath"/> or <paramref name="pdfPath"/> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="options"/> holds a value out of range or a combination that is not allowed, such as PDF/A with
+    /// encryption, margins that leave no room for content, or a signing certificate without a private key.
+    /// </exception>
+    /// <exception cref="PdfLimitException">The document would have more than <see cref="PdfOptions.MaxPages"/> pages.</exception>
+    /// <exception cref="PdfSignatureException">
+    /// <see cref="PdfOptions.Signature"/> is set and signing fails, for example because the timestamp server cannot be
+    /// reached or the external signer's signature does not verify.
+    /// </exception>
+    /// <exception cref="NotSupportedException">The signature's <see cref="PdfSignatureOptions.HashAlgorithm"/> is not SHA-256, SHA-384 or SHA-512.</exception>
+    /// <exception cref="IOException">
+    /// The HTML file cannot be read (it does not exist, for example) or the PDF file cannot be written. The PDF file is
+    /// written only once the conversion has succeeded, so a failure leaves any earlier file at that path unchanged.
+    /// </exception>
+    /// <exception cref="UnauthorizedAccessException">The process may not read the HTML file or write the PDF file.</exception>
     public static void ConvertFile(string htmlPath, string pdfPath, PdfOptions? options = null)
         => ConvertFile(htmlPath, pdfPath, options, CancellationToken.None);
 
@@ -74,6 +125,18 @@ public static partial class HtmlToPdf
     /// <see cref="PdfOptions.Signature"/> the external signer and the timestamp server are awaited, as in
     /// <see cref="PdfSigner.SignAsync(byte[], PdfSignatureOptions, string?, CancellationToken)"/>, and cancelling stops them too.
     /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="html"/> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="options"/> holds a value out of range or a combination that is not allowed, such as PDF/A with
+    /// encryption, margins that leave no room for content, or a signing certificate without a private key.
+    /// </exception>
+    /// <exception cref="PdfLimitException">The document would have more than <see cref="PdfOptions.MaxPages"/> pages.</exception>
+    /// <exception cref="PdfSignatureException">
+    /// <see cref="PdfOptions.Signature"/> is set and signing fails, for example because the timestamp server cannot be
+    /// reached or the external signer's signature does not verify.
+    /// </exception>
+    /// <exception cref="NotSupportedException">The signature's <see cref="PdfSignatureOptions.HashAlgorithm"/> is not SHA-256, SHA-384 or SHA-512.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public static Task<byte[]> ConvertAsync(string html, PdfOptions? options = null, CancellationToken cancellationToken = default)
         => RenderAsync(() => html ?? throw new ArgumentNullException(nameof(html)), options ?? new PdfOptions(), cancellationToken);
 
