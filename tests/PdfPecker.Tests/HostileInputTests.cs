@@ -438,6 +438,30 @@ public class HostileInputTests
         Assert.Equal(0, renderer.PageCount);
     }
 
+    [Theory]
+    [InlineData("2147483647")]
+    [InlineData("2147483500")]
+    [InlineData("99999999999")]
+    public void Stream_whose_length_overflows_the_file_offset_is_still_read(string length)
+    {
+        // The /Length added to the stream's offset no longer fits in an int; the stream must be found by its
+        // "endstream" like any other wrong /Length instead of being dropped.
+        const string content = "BT /F1 24 Tf 20 20 Td (Hello) Tj ET 0 0 1 rg 50 50 100 100 re f";
+        var pdf = SimplePdf(new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+            $"<< /Length {length} >>\nstream\n{content}\nendstream",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        });
+
+        var image = Bounded(() => PdfRenderer.Open(pdf).RenderPage(0, new ImageOptions { Dpi = 72 }));
+        int center = (100 * image.Width + 100) * 4;
+        Assert.True(image.Rgba[center] < 64 && image.Rgba[center + 2] > 192, "the blue square is not painted");
+        Assert.Contains("Hello", Bounded(() => PdfText.Extract(pdf)));
+    }
+
     [Fact]
     public void Nested_form_xobjects_cannot_multiply_drawing_work()
     {
