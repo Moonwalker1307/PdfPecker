@@ -110,6 +110,12 @@ static class Perf
         var markdown = MarkdownDocument(Path.Combine(htmlDir, "guide.md"));
         results.Add(Measure("parse-markdown", () => new BlockParser(gfm: true).Parse(markdown), runs: 100));
 
+        // The Markdown inline parser: paragraphs dense with emphasis, strikethrough, code spans, inline and reference
+        // links, images, autolinks, raw HTML, entities, escapes, hard breaks, GFM bare URLs and e-mail addresses, and
+        // delimiters and brackets that stay literal, so that inline parsing dominates.
+        var inlineMarkdown = InlineMarkdownDocument();
+        results.Add(Measure("parse-markdown-inlines", () => new BlockParser(gfm: true).Parse(inlineMarkdown), runs: 50));
+
         // Box painting: a generated page of boxes with every border style, rounded corners, outer and inset shadows with
         // blur and spread, gradient and image backgrounds with each size and repeat, border images, outlines, text
         // decorations and a few transformed, translucent and clipped boxes, laid out and written as a PDF.
@@ -164,6 +170,18 @@ static class Perf
         // Gouraud triangles into a 400 x 400 layer. One run paints each mesh once.
         var meshes = new MeshWorkload(pdf);
         results.Add(Measure("paint-meshes", meshes.Run, runs: 40));
+
+        // CFF subsetting: the CFF tables of the Inter test font (name-keyed, with local and global subroutines) and of
+        // a CID-keyed instance of the CFF2 test font, each reduced to a word, to the printable ASCII glyphs and to every
+        // glyph, which walks the charstrings and their subroutine calls and writes the subset. The tables are read once.
+        var cffSubsets = CffSubsets(Path.Combine(fixtureDir, "fonts"));
+        results.Add(Measure("subset-cff", () => { foreach (var (cff, glyphs) in cffSubsets) CffSubsetter.Subset(cff, glyphs); }, runs: 300));
+
+        // Damaged files: the PDFs of parse-pdf without their "startxref" pointers, so the object table is rebuilt from a
+        // scan of the file for object headers and trailers, and without their "endstream" keywords, so the end of every
+        // stream is found through the keyword index instead of its /Length. One run opens each and decodes every stream.
+        var damagedInputs = DamagedInputs(parseInputs);
+        results.Add(Measure("recover-pdf", () => { foreach (var (data, password) in damagedInputs) OpenAndDecodeAll(data, password); }, runs: 60));
 
         // Throughput with every core busy; documents per second is the figure, so higher is better.
         var options = new PdfOptions { BaseDirectory = htmlDir };
@@ -517,6 +535,26 @@ static class Perf
         return sb.ToString();
     }
 
+    // About 300 KB of inline-heavy Markdown, the same on every run: four hundred paragraphs that each use every kind of inline.
+    static string InlineMarkdownDocument()
+    {
+        var sb = new StringBuilder();
+        sb.Append("[docs]: https://example.com/docs \"Documentation\"\n[api]: <https://example.com/api> 'API'\n[Ref Label]: /ref (Title)\n\n");
+        for (int s = 1; s <= 400; s++)
+        {
+            sb.Append("Lorem *ipsum* dolor **sit** amet, ***consectetur*** _adipiscing_ __elit__, sed *do **eiusmod** tempor* incididunt ")
+              .Append("~~ut~~ labore et `dolore` magna ``aliqua ` with`` a tick, see [the docs] and [the api][api] or [ref label][], ")
+              .Append("an [inline link](https://example.com/").Append(s).Append(" \"Title ").Append(s).Append("\") and ![an image](img/").Append(s)
+              .Append(".png 'alt').  \n")
+              .Append("A hard break above, <https://example.org/a?b=").Append(s).Append("> and <user").Append(s).Append("@example.com>, ")
+              .Append("raw <span class=\"x\">html</span> and <!-- a comment -->, entities &amp; &copy; &#169; &#x1F600; &nope; and escapes \\* \\_ \\[ \\`.\\\n")
+              .Append("Bare www.example.com/path?q=").Append(s).Append(", https://example.net/x_(y)). and mail ").Append("first.last+").Append(s)
+              .Append("@mail.example.org. Unmatched * and _ and ** and [ and ] and ![ and ` here, a*b*c, snake_case_name, 2*3*4.\n")
+              .Append("Nested [link *with **strong** text* and `code`](/u (t)) and [not a link] (x) and [x](<a b> \"q\").\n\n");
+        }
+        return sb.ToString();
+    }
+
     static void ParseFontTables(byte[] data)
     {
         foreach (var font in FontProgram.Load(data))
@@ -574,6 +612,25 @@ static class Perf
 
     // The text of a document with Latin, accented, Arabic, Hebrew and CJK characters, numbers and punctuation.
     const string SubsetText = "Hamburgefonstiv fi ffl AV To Wa 0123456789 .,;:!?()[]{} ÆØÅ éèêëàâäîïôöûü ñç ß €£¥ العربية שלום 日本語 कि";
+
+    static List<(byte[] Cff, int[] Glyphs)> CffSubsets(string dir)
+    {
+        var fonts = new List<FontProgram> { FontProgram.Load(File.ReadAllBytes(Path.Combine(dir, "Inter-Subr.otf")))[0] };
+        var variable = FontProgram.Load(File.ReadAllBytes(Path.Combine(dir, "VarTestCFF-Subset.otf")))[0];
+        var axes = FontVariations.ReadAxes(variable);
+        var values = axes.ToDictionary(a => a.Tag, a => a.Max);
+        fonts.Add(FontProgram.Load(FontVariations.Instance(variable, FontVariations.Normalize(variable, axes, values), values, axes))[0]);
+        var subsets = new List<(byte[], int[])>();
+        foreach (var font in fonts)
+        {
+            var table = font.Table("CFF ")!.Value;
+            var cff = font.Data.AsSpan(table.Offset, table.Length).ToArray();
+            subsets.Add((cff, "Hamburgefonstiv".Select(c => font.GlyphId(c)).ToArray()));
+            subsets.Add((cff, Enumerable.Range(32, 95).Select(font.GlyphId).ToArray()));
+            subsets.Add((cff, Enumerable.Range(0, font.NumGlyphs).ToArray()));
+        }
+        return subsets;
+    }
 
     static void SubsetFont(byte[] data)
     {
@@ -639,6 +696,18 @@ static class Perf
             (generated, null),
             (PdfProtector.Encrypt(generated, security), "user"),
         ];
+    }
+
+    // Each input twice: with its "startxref" pointers and with its "endstream" keywords overwritten by spaces.
+    static (byte[] Data, string? Password)[] DamagedInputs((byte[] Data, string? Password)[] inputs)
+        => inputs.SelectMany(input => new[] { (Blank(input.Data, "startxref"u8), input.Password), (Blank(input.Data, "endstream"u8), input.Password) }).ToArray();
+
+    static byte[] Blank(byte[] data, ReadOnlySpan<byte> keyword)
+    {
+        var copy = (byte[])data.Clone();
+        var rest = copy.AsSpan();
+        for (int at; (at = rest.IndexOf(keyword)) >= 0; rest = rest.Slice(at + keyword.Length)) rest.Slice(at, keyword.Length).Fill((byte)' ');
+        return copy;
     }
 
     // Image streams are left encoded, as the renderer does until it needs their pixels.

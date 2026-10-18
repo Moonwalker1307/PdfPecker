@@ -96,7 +96,7 @@ internal sealed partial class OpenTypeLayout
     }
 
     // Turns the cursive chain the glyph heads round, so that the new parent can become its parent.
-    private static void ReverseCursiveMinorOffset(List<GlyphInfo> buf, int i, int newParent)
+    private static void ReverseCursiveMinorOffset(GlyphRun buf, int i, int newParent)
     {
         var g = buf[i];
         int chain = g.AttachChain;
@@ -151,7 +151,7 @@ internal sealed partial class OpenTypeLayout
 
     // The base (or ligature) a mark attaches to for mark-to-base and mark-to-ligature positioning: the glyph before it
     // that is not a mark, whatever the lookup's flags.
-    private static int PreviousBase(List<GlyphInfo> buf, int i)
+    private static int PreviousBase(GlyphRun buf, int i)
     {
         for (int k = i - 1; k >= 0; k--)
             if ((buf[k].Props & Mark) == 0) return k;
@@ -202,12 +202,12 @@ internal sealed partial class OpenTypeLayout
     /// Adds the offsets of the glyphs that marks and cursive glyphs are attached to, as HarfBuzz finishes positioning;
     /// positions stay in logical order.
     /// </summary>
-    public static void PropagateAttachments(List<GlyphInfo> buf, bool rtl)
+    public static void PropagateAttachments(GlyphRun buf, bool rtl)
     {
         for (int i = 0; i < buf.Count; i++) Propagate(buf, i, rtl, MaxAttachmentNesting);
     }
 
-    private static void Propagate(List<GlyphInfo> buf, int i, bool rtl, int nesting)
+    private static void Propagate(GlyphRun buf, int i, bool rtl, int nesting)
     {
         var g = buf[i];
         int chain = g.AttachChain;
@@ -231,7 +231,7 @@ internal sealed partial class OpenTypeLayout
 
     // A mark attached to an earlier glyph is drawn after the advances between them, so it moves back over them (left to
     // right) or forward (right to left).
-    private static GlyphInfo MoveAfterAdvances(List<GlyphInfo> buf, GlyphInfo g, int parent, int i, bool rtl)
+    private static GlyphInfo MoveAfterAdvances(GlyphRun buf, GlyphInfo g, int parent, int i, bool rtl)
     {
         if (!rtl)
             for (int k = parent; k < i; k++) { g.XOffset -= buf[k].XAdvance; g.YOffset -= buf[k].YAdvance; }

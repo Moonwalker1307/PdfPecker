@@ -207,6 +207,24 @@ public class LayoutFeatureTests
         Near(0, d.X); Near(35, d.Y); // auto-placed on row 2 after the gap
     }
 
+    [Theory]
+    [InlineData("a <span style='display:inline-block'>b</span> cccccccccccccccccccc")]
+    [InlineData("a <span style='display:inline-block'>b <span style='display:inline-block'>c</span></span> dddd")]
+    public void Words_around_an_inline_block_keep_their_intrinsic_widths(string content)
+    {
+        // Laying out the inline-block while measuring its paragraph handed that paragraph's pooled words out again, so
+        // the words after the box were counted in place of the words before it: here "a" as wide as the long word.
+        static (float Min, float Max) Measure(string html)
+        {
+            var div = Find(Styled($"<div>{html}</div>"), "div").First();
+            return new LayoutEngine(PageHeight, new ImageLoader(null, null, false)).MeasureIntrinsic(div);
+        }
+        var block = Measure(content);
+        var inline = Measure(content.Replace("display:inline-block", "display:inline"));
+        Near(inline.Min, block.Min);
+        Near(inline.Max, block.Max);
+    }
+
     [Fact]
     public void Inline_block_in_a_fr_column_contributes_its_min_content_width()
     {
