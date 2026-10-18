@@ -313,6 +313,27 @@ public class HostileInputTests
         Assert.Equal(3, CountOf(MarkdownToHtml.ConvertDocument("- a\n  - b\n    - c\n"), "<ul>"));
     }
 
+    [Fact]
+    public void Markdown_autolinks_after_many_email_addresses_are_found_in_linear_time()
+    {
+        // The search for the next URL used to run to the end of the text again after every e-mail address.
+        const int n = 60000;
+        var html = Bounded(() => MarkdownToHtml.Convert(Repeat("a.b-c_d+e@f.gh ", n) + "www.example.com and x@y.z"));
+        Assert.Equal(n + 1, CountOf(html, "href=\"mailto:"));
+        Assert.Contains("<a href=\"http://www.example.com\">www.example.com</a> and <a href=\"mailto:x@y.z\">x@y.z</a>", html);
+    }
+
+    [Fact]
+    public void Markdown_links_after_many_unclosed_brackets_close_in_linear_time()
+    {
+        // Every link used to deactivate all the brackets before it again, though a link before it had done so already.
+        const int n = 100000;
+        var html = Bounded(() => MarkdownToHtml.Convert(Repeat("![ [ ", n) + Repeat("[a](/u) ", n) + "[b]](/v) ![c](/i)"));
+        Assert.Equal(n, CountOf(html, "<a href=\"/u\">a</a>"));
+        // The last "]" closes an inactive bracket, which stays literal, and the image after it is still an image.
+        Assert.Contains("<a href=\"/u\">a</a> [b]](/v) <img src=\"/i\" alt=\"c\" />", html);
+    }
+
     private static int CountOf(string s, string part)
     {
         int n = 0;
