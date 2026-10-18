@@ -855,9 +855,12 @@ internal sealed partial class LayoutEngine
 
         float x = cell.X, y = cell.Top, w = cell.W;
         int sides = BoxPainter.AllSides;
+        (float X, float Y, float W, float H)? backgroundArea = null;
         if (collapse)
         {
             sides = CollapsedSides(m, cell, AtPageTop(y));
+            if (sides != BoxPainter.AllSides && (CssColor.IsVisible(cs.BackgroundColor) || cs.BackgroundImages != null))
+                backgroundArea = CollapsedBackground(m, cell, h, sides);
             x -= cs.BorderLeft / 2;
             w += (cs.BorderLeft + cs.BorderRight) / 2;
             h += cs.BorderBottom / 2;
@@ -868,7 +871,31 @@ internal sealed partial class LayoutEngine
                 h += cs.BorderTop / 2;
             }
         }
-        BoxPainter.Paint(cell.Group!, cs, x, y, w, h, _images, w, sides, collapsedCell: collapse);
+        BoxPainter.Paint(cell.Group!, cs, x, y, w, h, _images, w, sides, collapsedCell: collapse, backgroundArea);
+    }
+
+    /// <summary>
+    /// With collapsed borders, the part of a cell that its background may cover: it stops at the inner edge of each
+    /// border that a neighbouring cell or the table draws. Those borders can be drawn before the cell, which would
+    /// otherwise paint over them; in Chrome every background is under every collapsed border.
+    /// </summary>
+    private static (float X, float Y, float W, float H) CollapsedBackground(TableModel m, CellModel cell, float h, int sides)
+    {
+        var s = cell.Td.Style;
+        var t = m.TableStyle;
+        int rows = m.Rows.Count, cols = m.ColCount;
+        int r0 = cell.Row, r1 = Math.Min(rows, cell.Row + cell.RowSpan) - 1, c0 = cell.Col, c1 = Math.Min(cols, cell.Col + cell.ColSpan) - 1;
+        float left = s.BorderLeft, right = s.BorderRight;
+        for (int r = r0; r <= r1; r++)
+        {
+            left = Math.Max(left, c0 == 0 ? t.BorderLeft : m.Grid[r, c0 - 1]?.Td.Style.BorderRight ?? 0);
+            right = Math.Max(right, c1 >= cols - 1 ? t.BorderRight : m.Grid[r, c1 + 1]?.Td.Style.BorderLeft ?? 0);
+        }
+        float x0 = (sides & BoxPainter.Left) != 0 ? cell.X - s.BorderLeft / 2 : cell.X + left / 2;
+        float x1 = (sides & BoxPainter.Right) != 0 ? cell.X + cell.W + s.BorderRight / 2 : cell.X + cell.W - right / 2;
+        float y0 = (sides & BoxPainter.Top) != 0 ? cell.Top - s.BorderTop / 2 : cell.Top + cell.CollapsedT / 2;
+        float y1 = (sides & BoxPainter.Bottom) != 0 ? cell.Top + h + s.BorderBottom / 2 : cell.Top + h - cell.CollapsedB / 2;
+        return (x0, y0, x1 - x0, y1 - y0);
     }
 
     /// <summary>
