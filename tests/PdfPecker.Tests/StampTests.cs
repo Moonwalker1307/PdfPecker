@@ -257,6 +257,19 @@ public class StampTests
     }
 
     [Fact]
+    public void Html_stamps_ignore_the_footer_header_and_watermark_of_shared_options()
+    {
+        // The main conversion's options are the natural ones to pass for fonts and base directory; their footer, header
+        // and watermark were drawn a second time by the stamp.
+        var shared = new PdfOptions { FooterText = "Footer {page}", HeaderText = "Header", Watermark = new PdfWatermark { Text = "DRAFT" } };
+        var text = PdfText.Extract(PdfStamper.StampHtml(HtmlToPdf.Convert("<p>a</p>"), "<p style='margin: 0'>PAID</p>", null, shared));
+        Assert.Contains("PAID", text);
+        Assert.DoesNotContain("Footer", text);
+        Assert.DoesNotContain("Header", text);
+        Assert.DoesNotContain("DRAFT", text);
+    }
+
+    [Fact]
     public void The_stream_overload_writes_the_same_document()
     {
         using var input = new MemoryStream(Background("green"));

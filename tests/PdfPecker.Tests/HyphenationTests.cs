@@ -101,6 +101,21 @@ public class HyphenationTests
         Assert.Equal("Kø-ben-havn", Hyphenate("da", "København"));
     }
 
+    [Theory]
+    [InlineData("da", "håndværkerne")]
+    [InlineData("fr", "élémentaire")]
+    [InlineData("de", "Übermäßigkeit")]
+    public void Decomposed_words_break_where_their_composed_form_does(string lang, string word)
+    {
+        // Text pasted from macOS is often decomposed: a letter, then its accent as a combining mark, which the patterns
+        // do not know. Such words were never hyphenated.
+        string decomposed = word.Normalize(System.Text.NormalizationForm.FormD);
+        Assert.NotEqual(word.Length, decomposed.Length);
+        string expected = Hyphenate(lang, word);
+        Assert.Contains("-", expected);
+        Assert.Equal(expected, Hyphenate(lang, decomposed).Normalize(System.Text.NormalizationForm.FormC));
+    }
+
     [Fact]
     public void Languages_without_patterns_have_no_hyphenator()
     {

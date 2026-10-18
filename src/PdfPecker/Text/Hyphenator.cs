@@ -181,6 +181,8 @@ internal sealed class Hyphenator
     public int Hyphenate(ReadOnlySpan<char> word, List<int> breaks, bool skipCapitalized)
     {
         breaks.Clear();
+        foreach (char c in word)
+            if (CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.NonSpacingMark) return HyphenateComposed(word, breaks, skipCapitalized);
         int start = 0, end = word.Length;
         while (start < end && !char.IsLetter(word[start])) start++;
         while (end > start && !char.IsLetter(word[end - 1])) end--;
@@ -226,5 +228,37 @@ internal sealed class Hyphenator
         for (int k = _left; k <= n - _right; k++)
             if ((points[k + 1] & 1) != 0) breaks.Add(start + k);
         return breaks.Count;
+    }
+
+    /// <summary>
+    /// Hyphenates a word written with combining marks after its letters (decomposed, as text pasted from macOS often is),
+    /// which the patterns do not know: each letter is composed with its marks for the patterns, and the breaks are mapped
+    /// back to the word. A letter that has no composed form gives no breaks, as before.
+    /// </summary>
+    private int HyphenateComposed(ReadOnlySpan<char> word, List<int> breaks, bool skipCapitalized)
+    {
+        var composed = new StringBuilder(word.Length);
+        var starts = new List<int>(word.Length);
+        for (int i = 0; i < word.Length;)
+        {
+            int j = i + 1;
+            while (j < word.Length && CharUnicodeInfo.GetUnicodeCategory(word[j]) == UnicodeCategory.NonSpacingMark) j++;
+            string letter;
+            try
+            {
+                letter = word.Slice(i, j - i).ToString().Normalize(NormalizationForm.FormC);
+            }
+            catch (PlatformNotSupportedException)
+            {
+                return 0; // invariant globalization mode without normalization data
+            }
+            if (letter.Length != 1) return 0;
+            starts.Add(i);
+            composed.Append(letter);
+            i = j;
+        }
+        int count = Hyphenate(composed.ToString(), breaks, skipCapitalized);
+        for (int b = 0; b < count; b++) breaks[b] = starts[breaks[b]];
+        return count;
     }
 }
