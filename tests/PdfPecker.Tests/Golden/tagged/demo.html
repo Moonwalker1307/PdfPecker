@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Tagged PDF/UA sample</title>
+<style>
+  @page { size: 148mm 105mm; margin: 10mm; }
+  body { font: 10pt sans-serif; }
+  table { border-collapse: collapse; }
+  th, td { border: 0.5pt solid #999; padding: 2pt 5pt; }
+  .badge { display: inline-block; width: 12px; height: 12px; background: #2a9d8f; }
+</style>
+</head>
+<body>
+<h1>Annual report</h1>
+<p>A paragraph with a <a href="https://example.com">link</a> and <em>emphasis</em>.</p>
+<h2>Figures</h2>
+<ul><li>First point</li><li>Second point</li></ul>
+<table>
+  <caption>Results</caption>
+  <thead><tr><th scope="col">Quarter</th><th scope="col">Revenue</th></tr></thead>
+  <tbody><tr><th scope="row">Q1</th><td>100</td></tr><tr><th scope="row">Q2</th><td>120</td></tr></tbody>
+</table>
+<figure>
+  <svg width="40" height="20" role="img" aria-label="A green bar"><rect width="40" height="20" fill="#2a9d8f"/></svg>
+  <figcaption>A figure with alternative text.</figcaption>
+</figure>
+<p>Decoration that is not read out: <span class="badge" aria-hidden="true"></span></p>
+</body>
+</html>

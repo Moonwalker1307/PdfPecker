@@ -7,8 +7,9 @@ using System.Text.RegularExpressions;
 namespace PdfPecker.Tests;
 
 /// <summary>
-/// Renders every sample document under Golden/ and compares the PDF with its saved baseline (*.expected.pdf next to the
-/// HTML), so any change to existing output shows up as a failing test.
+/// Renders every sample document under Golden/ (HTML, and Markdown in *.md files) and compares the PDF with its saved
+/// baseline (*.expected.pdf next to the sample), so any change to existing output shows up as a failing test. A few
+/// operations on finished PDFs (merging and stamping) have baselines of their own under Golden/operations/.
 /// </summary>
 /// <remarks>
 /// The comparison is object by object, with compressed streams inflated, so it does not depend on the zlib build, and
@@ -25,8 +26,10 @@ public class GoldenPdfTests
     public static TheoryData<string> Samples()
     {
         var data = new TheoryData<string>();
-        foreach (var html in Directory.GetFiles(Root, "*.html", SearchOption.AllDirectories).OrderBy(p => p, StringComparer.Ordinal))
-            data.Add(Path.GetRelativePath(Root, html).Replace('\\', '/'));
+        var files = Directory.GetFiles(Root, "*.html", SearchOption.AllDirectories)
+            .Concat(Directory.GetFiles(Root, "*.md", SearchOption.AllDirectories));
+        foreach (var file in files.OrderBy(p => p, StringComparer.Ordinal))
+            data.Add(Path.GetRelativePath(Root, file).Replace('\\', '/'));
         return data;
     }
 
@@ -49,7 +52,7 @@ public class GoldenPdfTests
         if (difference == null) return;
         var outDir = Path.Combine(AppContext.BaseDirectory, "golden-actual");
         Directory.CreateDirectory(outDir);
-        var outPath = Path.Combine(outDir, sample.Replace('/', '_').Replace(".html", ".pdf", StringComparison.Ordinal));
+        var outPath = Path.Combine(outDir, Path.ChangeExtension(sample.Replace('/', '_'), ".pdf"));
         File.WriteAllBytes(outPath, actual);
         Assert.Fail($"{sample} differs from its baseline: {difference}\nNew output: {outPath}");
     }
@@ -87,15 +90,59 @@ public class GoldenPdfTests
         Assert.True(difference == null, $"{sample} under {culture} differs from its baseline: {difference}");
     }
 
-    private static byte[] Render(string htmlPath)
+    // Samples that need options of their own, by path under Golden/.
+    private static readonly Dictionary<string, Action<PdfOptions>> SampleOptions = new(StringComparer.Ordinal)
+    {
+        ["tagged/demo.html"] = o => o.Accessibility = PdfAccessibility.PdfUA1,
+    };
+
+    private static byte[] Render(string path)
     {
         var options = new PdfOptions
         {
             EmbedStandardFonts = true, // bundled fonts, so the output does not depend on the machine
             AllowFileAccess = true,
-            BaseDirectory = Path.GetDirectoryName(htmlPath),
+            BaseDirectory = Path.GetDirectoryName(path),
         };
-        return HtmlToPdf.Convert(File.ReadAllText(htmlPath), options);
+        if (SampleOptions.TryGetValue(Path.GetRelativePath(Root, path).Replace('\\', '/'), out var configure)) configure(options);
+        var text = File.ReadAllText(path);
+        return path.EndsWith(".md", StringComparison.Ordinal) ? MarkdownToPdf.Convert(text, options) : HtmlToPdf.Convert(text, options);
+    }
+
+    // ---- operations on finished PDFs ----
+
+    public static TheoryData<string> Operations() => new() { "merge", "stamp" };
+
+    [Theory]
+    [MemberData(nameof(Operations))]
+    public void Operation_output_matches_the_baseline(string operation)
+    {
+        var expectedPath = Path.Combine(Root, "operations", operation + ".expected.pdf");
+        var actual = Operate(operation);
+        if (Environment.GetEnvironmentVariable("PDFPECKER_UPDATE_GOLDEN") == "1")
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(expectedPath)!);
+            File.WriteAllBytes(expectedPath, actual);
+            return;
+        }
+        Assert.True(File.Exists(expectedPath), $"No baseline for {operation}. Create it with PDFPECKER_UPDATE_GOLDEN=1.");
+        var difference = FirstDifference(Normalize(File.ReadAllBytes(expectedPath)), Normalize(actual));
+        Assert.True(difference == null, $"operations/{operation} differs from its baseline: {difference}");
+    }
+
+    /// <summary>Runs an operation on samples rendered fresh, so its baseline follows only that operation's output.</summary>
+    private static byte[] Operate(string operation)
+    {
+        var tagged = Render(Path.Combine(Root, "tagged", "demo.html"));
+        var table = Render(Path.Combine(Root, "large-table", "demo.html"));
+        return operation switch
+        {
+            "merge" => PdfMerger.Merge(table, tagged),
+            "stamp" => PdfStamper.StampHtml(table,
+                "<div style='text-align:right;font:bold 14pt sans-serif;color:#c00'>COPY</div>",
+                htmlOptions: new PdfOptions { EmbedStandardFonts = true }),
+            _ => throw new ArgumentOutOfRangeException(nameof(operation)),
+        };
     }
 
     [Fact]
@@ -119,7 +166,8 @@ public class GoldenPdfTests
     private sealed record PdfObject(int Number, string Dictionary, string Stream);
 
     private static readonly Regex ObjectPattern = new(@"(\d+) 0 obj\n", RegexOptions.Compiled);
-    private static readonly Regex Dates = new(@"\(D:[^)]*\)|<xmp:(?:Create|Modify|Metadata)Date>[^<]*", RegexOptions.Compiled);
+    // Dates as literal strings, as hex strings (which the stamper writes) and in XMP metadata.
+    private static readonly Regex Dates = new(@"\(D:[^)]*\)|(?<=/(?:CreationDate|ModDate) )<[0-9A-Fa-f]*>|<xmp:(?:Create|Modify|Metadata)Date>[^<]*", RegexOptions.Compiled);
 
     /// <summary>The file's objects in order, streams inflated, with dates blanked. The trailer (random /ID) is left out.</summary>
     private static List<PdfObject> Normalize(byte[] pdf)
