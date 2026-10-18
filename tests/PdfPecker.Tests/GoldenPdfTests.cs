@@ -94,6 +94,7 @@ public class GoldenPdfTests
     private static readonly Dictionary<string, Action<PdfOptions>> SampleOptions = new(StringComparer.Ordinal)
     {
         ["tagged/demo.html"] = o => o.Accessibility = PdfAccessibility.PdfUA1,
+        ["complex/pdfa.html"] = o => o.Conformance = PdfConformance.PdfA2u,
     };
 
     private static byte[] Render(string path)

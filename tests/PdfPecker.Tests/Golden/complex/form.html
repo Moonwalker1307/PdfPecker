@@ -1,0 +1,53 @@
+<!doctype html>
+<html><head><title>Application form</title>
+<style>
+@page { size: A4; margin: 15mm; @bottom-center { content: "Page " counter(page) " of " counter(pages); font-size: 7pt } }
+body { font: 9pt sans-serif; margin: 0 }
+h1 { font-size: 15pt; margin: 0 0 4pt; color: #1d3557 }
+fieldset { border: 0.75pt solid #9ab; border-radius: 3pt; margin: 0 0 6mm; padding: 4mm; break-inside: avoid }
+legend { font-weight: bold; color: #1d3557; padding: 0 3pt }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm 6mm }
+.grid .full { grid-column: span 2 }
+label { display: block; font-size: 8pt; color: #444 }
+input[type=text], input[type=email], input[type=date], input[type=number], select, textarea { width: 100%; box-sizing: border-box; font: 9pt sans-serif; border: 0.5pt solid #888; padding: 2pt }
+.choices { display: flex; gap: 6mm }
+table { border-collapse: collapse; width: 100% }
+th, td { border: 0.5pt solid #aaa; padding: 2pt; text-align: left }
+th { background: #eef2f7 }
+td input { width: 100%; box-sizing: border-box; border: none }
+.sign { display: flex; gap: 10mm; margin-top: 8mm }
+.sign > div { flex: 1; border-top: 0.75pt solid #333; padding-top: 2pt; font-size: 8pt }
+</style></head>
+<body>
+<h1>Application form</h1>
+<p>Fill in every section. Fields marked with an asterisk are required.</p>
+<form>
+<fieldset><legend>Applicant</legend><div class="grid">
+<div><label>First name *<input type="text" name="first" value="Jane" required></label></div>
+<div><label>Last name *<input type="text" name="last" value="Doe" required></label></div>
+<div class="full"><label>Email *<input type="email" name="email" placeholder="you@example.com" required></label></div>
+<div><label>Date of birth<input type="date" name="dob" value="1990-05-17"></label></div>
+<div><label>Country<select name="country"><option>Denmark</option><option selected>Sweden</option><option>Norway</option></select></label></div>
+</div></fieldset>
+<fieldset><legend>Preferences</legend>
+<p>Contact by:</p><div class="choices">
+<label><input type="radio" name="contact" value="email" checked> Email</label>
+<label><input type="radio" name="contact" value="phone"> Phone</label>
+<label><input type="radio" name="contact" value="post"> Post</label></div>
+<p><label><input type="checkbox" name="news" checked> Send me the newsletter</label>
+<label><input type="checkbox" name="terms"> I accept the terms</label></p>
+</fieldset>
+<fieldset><legend>Previous employment</legend>
+<table><thead><tr><th>Employer</th><th>From</th><th>To</th><th>Role</th></tr></thead><tbody>
+<tr><td><input type="text" name="emp1" value="Example Ltd."></td><td><input type="text" name="from1" value="2015"></td><td><input type="text" name="to1" value="2019"></td><td><input type="text" name="role1" value="Developer"></td></tr>
+<tr><td><input type="text" name="emp2"></td><td><input type="text" name="from2"></td><td><input type="text" name="to2"></td><td><input type="text" name="role2"></td></tr>
+<tr><td><input type="text" name="emp3"></td><td><input type="text" name="from3"></td><td><input type="text" name="to3"></td><td><input type="text" name="role3"></td></tr>
+</tbody></table></fieldset>
+<fieldset><legend>Motivation</legend>
+<label>Why do you apply?<textarea name="why" rows="6">I would like to work on document tools.
+Second line.</textarea></label>
+<label>Expected salary<input type="number" name="salary" value="50000"></label>
+</fieldset>
+</form>
+<div class="sign"><div>Place and date</div><div>Signature</div></div>
+</body></html>
