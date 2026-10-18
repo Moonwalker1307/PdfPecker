@@ -36,7 +36,7 @@ internal static partial class MeshShading
 
         public MeshFormat Format { get; }
 
-        public readonly bool HasMore(int bits) => _bits.HasMore(bits);
+        public readonly bool HasMore(long bits) => _bits.HasMore(bits);
 
         public void AlignToByte() => _bits.AlignToByte();
 
@@ -79,10 +79,9 @@ internal static partial class MeshShading
     }
 
     /// <summary>
-    /// Reads values of any bit width, most significant bit first. The mesh walks check <see cref="HasMore"/> before
-    /// they read, so a read only runs past the end when the bit widths are zero, negative or so large that the sum
-    /// overflowed. Such a read stops at the end: it advances one bit past it and returns the bits read so far shifted
-    /// one place less than a zero-padded value would be. A width of zero or less reads nothing.
+    /// Reads values of up to 32 bits, most significant bit first. The mesh walks only accept the widths the
+    /// specification allows and check <see cref="HasMore"/> before they read, so a read never runs past the end; if one
+    /// did, it would stop one bit past the end rather than read outside the data.
     /// </summary>
     private ref struct BitReader
     {
@@ -91,7 +90,7 @@ internal static partial class MeshShading
 
         public BitReader(ReadOnlySpan<byte> data) => _data = data;
 
-        public readonly bool HasMore(int bits) => _position + bits <= (long)_data.Length * 8;
+        public readonly bool HasMore(long bits) => _position + bits <= (long)_data.Length * 8;
 
         public void AlignToByte() => _position = (_position + 7) & ~7L;
 

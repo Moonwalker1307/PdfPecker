@@ -1,5 +1,6 @@
 using PdfPecker.Rendering.Content;
 using PdfPecker.Rendering.Graphics;
+using PdfPecker.Rendering.Parsing;
 
 namespace PdfPecker.Rendering;
 
@@ -24,6 +25,14 @@ internal static partial class MeshShading
 
         private const uint OpaqueAlpha = 0xFF000000;
 
+        // The work a mesh may cost, in triangles set up plus pixels tested: enough to cover the layer many times over
+        // and to give each patch or vertex of the data hundreds of triangles beyond that, but bounded, so that a small
+        // stream of huge overlapping patches or a vast stream of vertices cannot run for minutes. Cancellation is
+        // checked each time CancelCheckInterval more of it is done.
+        private const long BaseBudget = 1L << 20;
+        private const long BudgetPerPixel = 64, BudgetPerDataByte = 16;
+        private const long CancelCheckInterval = 1L << 16;
+
         // Stream order of the patch points as positions row * 4 + column of the 4 x 4 control grid:
         // p00 p01 p02 p03 p13 p23 p33 p32 p31 p30 p20 p10, then the inner p11 p12 p22 p21 of a tensor patch.
         private static ReadOnlySpan<byte> PatchPointGridPositions => new byte[] { 0, 1, 2, 3, 7, 11, 15, 14, 13, 12, 8, 4, 5, 6, 10, 9 };
@@ -33,15 +42,19 @@ internal static partial class MeshShading
         private readonly int _clipX0, _clipY0, _clipX1, _clipY1;
         private readonly uint[]? _lut;
         private readonly double _t0, _tRange;
+        private long _budget;
+        private long _nextCancelCheck;
 
-        public MeshPainter(Canvas layer, ClipRegion clip)
+        public MeshPainter(Canvas layer, ClipRegion clip, long budget)
         {
             _pixels = layer.Pixels;
             _width = layer.Width;
             (_clipX0, _clipY0, _clipX1, _clipY1) = (clip.X0, clip.Y0, clip.X1, clip.Y1);
+            _budget = budget;
+            _nextCancelCheck = budget - CancelCheckInterval;
         }
 
-        private MeshPainter(Canvas layer, ClipRegion clip, uint[] lut, double t0, double t1) : this(layer, clip)
+        private MeshPainter(Canvas layer, ClipRegion clip, long budget, uint[] lut, double t0, double t1) : this(layer, clip, budget)
         {
             _lut = lut;
             _t0 = t0;
@@ -49,14 +62,32 @@ internal static partial class MeshShading
         }
 
         /// <summary>A painter whose vertex colours are parameters of <paramref name="fn"/> over the colour Decode range.</summary>
-        public static MeshPainter WithFunction(Canvas layer, ClipRegion clip, ColorSpace cs, PdfFunction fn, ReadOnlySpan<double> decode)
+        public static MeshPainter WithFunction(Canvas layer, ClipRegion clip, long budget, ColorSpace cs, PdfFunction fn, ReadOnlySpan<double> decode)
         {
             double t0 = decode[MeshReader.ColorDecodeStart], t1 = decode[MeshReader.ColorDecodeStart + 1];
-            return new MeshPainter(layer, clip, ShadingColor.BuildLut(cs, fn, t0, t1, LutSize), t0, t1);
+            return new MeshPainter(layer, clip, budget, ShadingColor.BuildLut(cs, fn, t0, t1, LutSize), t0, t1);
+        }
+
+        /// <summary>The work budget for a mesh of <paramref name="dataLength"/> bytes painted into <paramref name="layer"/>.</summary>
+        public static long WorkBudget(Canvas layer, int dataLength) =>
+            BaseBudget + BudgetPerPixel * layer.Width * (long)layer.Height + BudgetPerDataByte * dataLength;
+
+        /// <summary>Whether work is left in the budget; once it is spent, nothing more is painted.</summary>
+        public bool HasBudget => _budget > 0;
+
+        /// <summary>Spends work from the budget, and checks for cancellation each time another interval of it is done.</summary>
+        private void Spend(long work)
+        {
+            _budget -= work;
+            if (_budget > _nextCancelCheck) return;
+            PdfFile.CheckCancel();
+            _nextCancelCheck = _budget - CancelCheckInterval;
         }
 
         public void FillTriangle(in Vertex a, in Vertex b, in Vertex c)
         {
+            Spend(1);
+            if (!HasBudget) return;
             double area = (b.X - a.X) * (c.Y - a.Y) - (b.Y - a.Y) * (c.X - a.X);
             if (Math.Abs(area) < MinArea) return;
             int x0 = Math.Max(_clipX0, (int)Math.Floor(Math.Min(a.X, Math.Min(b.X, c.X))));
@@ -64,6 +95,7 @@ internal static partial class MeshShading
             int y0 = Math.Max(_clipY0, (int)Math.Floor(Math.Min(a.Y, Math.Min(b.Y, c.Y))));
             int y1 = Math.Min(_clipY1 - 1, (int)Math.Ceiling(Math.Max(a.Y, Math.Max(b.Y, c.Y))));
             if (x1 < x0 || y1 < y0) return;
+            Spend((long)(x1 - x0 + 1) * (y1 - y0 + 1));
             double inverseArea = 1 / area;
             for (int y = y0; y <= y1; y++)
             {
@@ -102,6 +134,8 @@ internal static partial class MeshShading
         /// </summary>
         public void FillPatch(ReadOnlySpan<(double X, double Y)> points, ReadOnlySpan<VertexColor> corners, bool tensor)
         {
+            Spend(1);
+            if (!HasBudget) return;
             Span<(double X, double Y)> grid = stackalloc (double X, double Y)[16];
             int streamPoints = tensor ? TensorPoints : CoonsPoints;
             for (int i = 0; i < streamPoints; i++) grid[PatchPointGridPositions[i]] = points[i];
@@ -125,7 +159,7 @@ internal static partial class MeshShading
             lower = lower[..(steps + 1)];
             upper = upper[..(steps + 1)];
             EvaluatePatchRow(grid, corners, 0, steps, lower);
-            for (int iu = 0; iu < steps; iu++)
+            for (int iu = 0; iu < steps && HasBudget; iu++)
             {
                 EvaluatePatchRow(grid, corners, iu + 1, steps, upper);
                 for (int iv = 0; iv < steps; iv++)
