@@ -1252,6 +1252,84 @@ public class HostileInputTests
         Assert.Empty(Bounded(() => PdfSignatureVerifier.Verify(pdf)));
     }
 
+    /// <summary>A PDF whose embedded-files list has many entries, all pointing at one stream of 200 MB of zeros.</summary>
+    private static byte[] SharedAttachmentBomb(int entries, string extension)
+    {
+        var bomb = new MemoryStream();
+        using (var z = new ZLibStream(bomb, CompressionLevel.SmallestSize, leaveOpen: true))
+            for (int i = 0; i < 200; i++) z.Write(new byte[1 << 20]);
+        static byte[] L(string t) => Encoding.Latin1.GetBytes(t);
+        var names = new StringBuilder();
+        for (int i = 0; i < entries; i++) names.Append($"(f{i:D5}{extension}) {6 + i} 0 R ");
+        var objects = new List<byte[]>
+        {
+            L("1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Names << /EmbeddedFiles 5 0 R >> >>\nendobj\n"),
+            L("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"),
+            L("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] >>\nendobj\n"),
+            L("4 0 obj\n<< /Type /EmbeddedFile /Length " + bomb.Length + " /Filter /FlateDecode >>\nstream\n").Concat(bomb.ToArray()).Concat(L("\nendstream\nendobj\n")).ToArray(),
+            L("5 0 obj\n<< /Names [" + names + "] >>\nendobj\n"),
+        };
+        // Each entry has a file specification of its own, so de-duplicating specifications does not help.
+        for (int i = 0; i < entries; i++)
+            objects.Add(L($"{6 + i} 0 obj\n<< /Type /Filespec /F (f{i:D5}{extension}) /EF << /F 4 0 R >> >>\nendobj\n"));
+        var ms = new MemoryStream();
+        ms.Write(L("%PDF-1.7\n"));
+        var offsets = new List<long>();
+        foreach (var o in objects) { offsets.Add(ms.Position); ms.Write(o); }
+        long xref = ms.Position;
+        var sb = new StringBuilder("xref\n0 " + (offsets.Count + 1) + "\n0000000000 65535 f \n");
+        foreach (var o in offsets) sb.Append(o.ToString("D10")).Append(" 00000 n \n");
+        sb.Append("trailer\n<< /Size " + (offsets.Count + 1) + " /Root 1 0 R >>\nstartxref\n" + xref + "\n%%EOF\n");
+        ms.Write(L(sb.ToString()));
+        return ms.ToArray();
+    }
+
+    [Fact]
+    public void Many_attachments_sharing_one_compression_bomb_share_one_decode_budget()
+    {
+        // Each entry would decode the 200 MB stream again: 80 GB in all.
+        var pdf = SharedAttachmentBomb(400, ".bin");
+        var task = Task.Run(() => PdfAttachments.List(pdf));
+        Assert.True(((IAsyncResult)task).AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(20)), "Did not finish in time");
+        Assert.IsType<InvalidDataException>(task.Exception?.InnerException);
+    }
+
+    [Fact]
+    public void Many_einvoice_candidates_sharing_one_compression_bomb_are_cheap()
+    {
+        var pdf = SharedAttachmentBomb(400, ".xml");
+        Assert.Null(Bounded(() => PdfEInvoice.Read(pdf)));
+    }
+
+    [Fact]
+    public void Xmp_properties_that_never_close_are_matched_in_linear_time()
+    {
+        var xmp = Repeat("<x:DocumentFileName>", 1) + Repeat("y:DocumentFileName>abc ", 100_000);
+        Assert.Null(Bounded(() => PdfPecker.Pdf.EmbeddedFiles.XmpProperty(xmp, "DocumentFileName")));
+        Assert.Equal("factur-x.xml", PdfPecker.Pdf.EmbeddedFiles.XmpProperty(
+            "<rdf:Description fx:DocumentFileName=\"factur-x.xml\"/>", "DocumentFileName"));
+        Assert.Equal("EN 16931", PdfPecker.Pdf.EmbeddedFiles.XmpProperty(
+            "<fx:ConformanceLevel> EN 16931 </fx:ConformanceLevel>", "ConformanceLevel"));
+    }
+
+    [Fact]
+    public void Narrow_column_width_on_a_huge_box_is_capped_at_a_hundred_columns()
+    {
+        var html = "<div style='width:1e9px;column-width:1px'>"
+            + Repeat("<p style='break-before:column'>x</p>", 400) + "</div>";
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
+    public void Failed_imports_count_towards_the_import_limit()
+    {
+        int calls = 0;
+        var options = new PdfOptions { ResourceResolver = _ => { Interlocked.Increment(ref calls); return null; } };
+        var css = string.Concat(Enumerable.Range(0, 1000).Select(i => $"@import url(https://example.invalid/{i}.css);"));
+        AssertStructurallyValid(Bounded($"<style>{css}</style><p>x</p>", options));
+        Assert.InRange(calls, 1, 128); // at most 64 per stylesheet read; the styles are read again once the page size is known
+    }
+
     [Fact]
     public void Object_number_too_large_for_an_int_in_a_damaged_pdf_is_invalid_data()
     {
