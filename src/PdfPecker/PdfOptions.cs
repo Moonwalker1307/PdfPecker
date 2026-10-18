@@ -285,6 +285,22 @@ public sealed class PdfOptions
     /// </summary>
     public IDictionary<string, string> CustomProperties { get; set; } = new Dictionary<string, string>();
 
+    /// <summary>
+    /// A fixed creation date, for reproducible output. When set, it is written for every date the document has (the
+    /// creation and modification dates in the information dictionary and the XMP metadata, and the modification date
+    /// of attachments that have none), and the file identifier (<c>/ID</c>) is a hash of the document instead of random
+    /// bytes, so the same input and options give a byte-identical file. When null, the <c>SOURCE_DATE_EPOCH</c>
+    /// environment variable (seconds since 1970-01-01 UTC, as reproducible builds set it) is used the same way; when
+    /// that is not set or not a valid number, the current time and a random identifier are used. This property takes
+    /// precedence over the environment variable. Dates are written in UTC to the second. Default: null.
+    /// </summary>
+    /// <remarks>
+    /// Output with <see cref="Security"/> still differs each time, because the encryption keys are random. A
+    /// <see cref="Signature"/> records its own <see cref="PdfSignatureOptions.SigningTime"/>, the current time unless
+    /// that is set too.
+    /// </remarks>
+    public DateTimeOffset? CreationDate { get; set; }
+
     /// <summary>Text centred in the bottom margin of every page. <c>{page}</c> and <c>{pages}</c> are replaced, e.g. "Page {page} of {pages}".</summary>
     public string? FooterText { get; set; }
 

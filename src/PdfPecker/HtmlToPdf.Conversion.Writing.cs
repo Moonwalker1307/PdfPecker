@@ -81,6 +81,7 @@ public static partial class HtmlToPdf
             MarginFont = marginFont,
             EmbedStandardFonts = _options.EmbedStandardFonts,
             MissingCharacter = _options.MissingCharacter,
+            FixedDate = ReproducibleDate.Resolve(_options.CreationDate),
             MaxPages = _options.MaxPages,
             Cancellation = _cancellation,
             Structure = _structure,
