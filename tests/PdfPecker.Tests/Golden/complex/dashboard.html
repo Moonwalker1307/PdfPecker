@@ -1,0 +1,43 @@
+<!doctype html>
+<html><head><title>Dashboard</title>
+<style>
+@page { size: A4 landscape; margin: 10mm }
+body { font-family: sans-serif; font-size: 8pt; margin: 0; background: #f4f6f8 }
+header { display: flex; align-items: center; gap: 6mm; background: #1d3557; color: white; padding: 4mm 6mm; border-radius: 3mm }
+header h1 { font-size: 15pt; margin: 0; flex: 1 }
+header .badge { background: #e63946; border-radius: 10pt; padding: 2pt 8pt }
+.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4mm; margin: 4mm 0 }
+.kpi { background: white; border-radius: 2mm; padding: 3mm; position: relative; box-shadow: 0 1pt 3pt rgba(0,0,0,.2) }
+.kpi .v { font-size: 18pt; font-weight: bold; color: #1d3557 }
+.kpi .d { position: absolute; top: 3mm; right: 3mm; font-size: 7pt; padding: 1pt 4pt; border-radius: 2pt }
+.up { background: #d8f3dc; color: #1b4332 }
+.down { background: #ffd6d6; color: #7a1c1c }
+.main { display: grid; grid-template-columns: 2fr 1fr; grid-template-areas: "chart side" "table side"; gap: 4mm }
+.chart { grid-area: chart; background: white; border-radius: 2mm; padding: 3mm; height: 50mm; display: flex; align-items: flex-end; gap: 2mm }
+.bar { flex: 1; background: linear-gradient(#457b9d, #a8dadc); border-radius: 1mm 1mm 0 0 }
+.side { grid-area: side; background: white; border-radius: 2mm; padding: 3mm }
+.side ol { padding-left: 12pt }
+.side .ring { width: 30mm; height: 30mm; border-radius: 50%; margin: 0 auto 3mm; background: conic-gradient(#2a9d8f 0 62%, #e9ecef 0) }
+.tbl { grid-area: table; background: white; border-radius: 2mm; padding: 3mm }
+table { border-collapse: collapse; width: 100% }
+th { text-align: left; border-bottom: 1pt solid #1d3557 }
+td { border-bottom: 0.5pt solid #ddd; padding: 1.5pt 2pt }
+td.n { text-align: right }
+.stamp { position: absolute; right: 12mm; bottom: 12mm; transform: rotate(-12deg); border: 1.5pt solid #e63946; color: #e63946; padding: 2pt 6pt; font-weight: bold; opacity: .7 }
+</style></head>
+<body>
+<header><h1>Sales dashboard</h1><span>Week 42</span><span class="badge">Draft</span></header>
+<div class="kpis">
+<div class="kpi">Orders<div class="v">1,284</div><span class="d up">+8%</span></div>
+<div class="kpi">Revenue<div class="v">93.4k</div><span class="d up">+3%</span></div>
+<div class="kpi">Returns<div class="v">2.1%</div><span class="d down">+0.4</span></div>
+<div class="kpi">Rating<div class="v">4.6</div><span class="d up">+0.1</span></div>
+</div>
+<div class="main">
+<div class="chart"><div class="bar" style="height:52%"></div><div class="bar" style="height:89%"></div><div class="bar" style="height:46%"></div><div class="bar" style="height:83%"></div><div class="bar" style="height:40%"></div><div class="bar" style="height:77%"></div><div class="bar" style="height:34%"></div><div class="bar" style="height:71%"></div><div class="bar" style="height:28%"></div><div class="bar" style="height:65%"></div><div class="bar" style="height:22%"></div><div class="bar" style="height:59%"></div><div class="bar" style="height:16%"></div><div class="bar" style="height:53%"></div></div>
+<div class="side"><div class="ring"></div><b>Top products</b><ol><li>Product A</li><li>Product B</li><li>Product C</li><li>Product D</li><li>Product E</li><li>Product F</li><li>Product G</li><li>Product H</li></ol></div>
+<div class="tbl"><table><tr><th>Region</th><th>Orders</th><th>Revenue</th><th>Share</th></tr>
+<tr><td>Region 1</td><td class=n>147</td><td class=n>2931</td><td class=n>12%</td></tr><tr><td>Region 2</td><td class=n>244</td><td class=n>4862</td><td class=n>19%</td></tr><tr><td>Region 3</td><td class=n>341</td><td class=n>6793</td><td class=n>26%</td></tr><tr><td>Region 4</td><td class=n>438</td><td class=n>8724</td><td class=n>33%</td></tr><tr><td>Region 5</td><td class=n>135</td><td class=n>1655</td><td class=n>10%</td></tr><tr><td>Region 6</td><td class=n>232</td><td class=n>3586</td><td class=n>17%</td></tr><tr><td>Region 7</td><td class=n>329</td><td class=n>5517</td><td class=n>24%</td></tr><tr><td>Region 8</td><td class=n>426</td><td class=n>7448</td><td class=n>31%</td></tr></table></div>
+</div>
+<div class="stamp">CONFIDENTIAL</div>
+</body></html>
