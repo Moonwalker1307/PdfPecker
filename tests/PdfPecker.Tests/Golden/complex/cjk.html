@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh"><head><title>CJK text</title>
+<style>
+@font-face { font-family: CJK; src: url('../../Fixtures/fonts/NotoSansSC-Subset.woff2') }
+@page { size: 120mm 160mm; margin: 12mm;
+  @bottom-center { content: "第 " counter(page) " 页，共 " counter(pages) " 页"; font: 7pt CJK, sans-serif } }
+body { font: 9pt/1.6 CJK, sans-serif; margin: 0 }
+h1 { font-size: 15pt; margin: 0 0 6pt; border-bottom: 1pt solid #c0392b }
+h2 { font-size: 11pt; margin: 10pt 0 4pt; color: #c0392b }
+.narrow { width: 38mm; border: 0.5pt solid #999; padding: 3pt; float: right; margin: 0 0 4pt 6pt; background: #fdf2e9 }
+.justify { text-align: justify }
+.cols { column-count: 2; column-gap: 6mm; column-rule: 0.5pt solid #ddd }
+table { border-collapse: collapse; width: 100%; margin-top: 6pt }
+th, td { border: 0.5pt solid #888; padding: 2pt 4pt; vertical-align: top }
+th { background: #f5e6e8 }
+td.w { width: 22mm }
+.anywhere { line-break: anywhere; width: 30mm; border: 0.5pt dashed #999 }
+.keep { word-break: keep-all; width: 40mm; border: 0.5pt dashed #999 }
+ruby rt { font-size: 50% }
+</style></head>
+<body>
+<h1>中文与日文排版测试</h1>
+<div class="narrow">窄栏中的文字：PdfPecker 是一个不依赖任何第三方组件的 .NET 库，可以把 HTML 和 Markdown 转换成 PDF。</div>
+<p class="justify">PdfPecker 是一个不依赖任何第三方组件的 .NET 库，可以把 HTML 和 Markdown 转换成 PDF。它有自己的解析器、样式引擎和排版引擎，因此在服务器上运行时既快又稳定。中文文本在任意两个汉字之间都可以换行，但句号、逗号和右括号不能出现在行首（避头尾规则）。例如：「这是一个引号里的句子。」以及《书名号》和（括号）都要正确处理。</p>
+<p class="justify">PdfPecker 是一个不依赖任何第三方组件的 .NET 库，可以把 HTML 和 Markdown 转换成 PDF。它有自己的解析器、样式引擎和排版引擎，因此在服务器上运行时既快又稳定。中文文本在任意两个汉字之间都可以换行，但句号、逗号和右括号不能出现在行首（避头尾规则）。例如：「这是一个引号里的句子。」以及《书名号》和（括号）都要正确处理。</p>
+<h2>日本語</h2>
+<p lang="ja">日本語の文章では、ひらがな・カタカナ・漢字が混在します。句読点「、」や「。」は行頭に来てはいけません。ソフトウェアの名前は PdfPecker で、バージョンは 1.13.0 です。</p>
+<h2>两栏排版</h2>
+<div class="cols"><p>1. PdfPecker 是一个不依赖任何第三方组件的 .NET 库，可以把 HTML 和 Markdown 转换成 PDF。它有自己的解析器、样式引擎和排版引擎，因此在服务器上运行时既快又稳定。中文文本在任意两个汉字之间都可以换行，但句号、逗号和右括号不能出现在行首（避头尾规则）。例如：「这是一个引号里的句子。」以及《书名号》和（括号）都要正确处理。</p><p>2. PdfPecker 是一个不依赖任何第三方组件的 .NET 库，可以把 HTML 和 Markdown 转换成 PDF。它有自己的解析器、样式引擎和排版引擎，因此在服务器上运行时既快又稳定。中文文本在任意两个汉字之间都可以换行，但句号、逗号和右括号不能出现在行首（避头尾规则）。例如：「这是一个引号里的句子。」以及《书名号》和（括号）都要正确处理。</p><p>3. PdfPecker 是一个不依赖任何第三方组件的 .NET 库，可以把 HTML 和 Markdown 转换成 PDF。它有自己的解析器、样式引擎和排版引擎，因此在服务器上运行时既快又稳定。中文文本在任意两个汉字之间都可以换行，但句号、逗号和右括号不能出现在行首（避头尾规则）。例如：「这是一个引号里的句子。」以及《书名号》和（括号）都要正确处理。</p><p>4. PdfPecker 是一个不依赖任何第三方组件的 .NET 库，可以把 HTML 和 Markdown 转换成 PDF。它有自己的解析器、样式引擎和排版引擎，因此在服务器上运行时既快又稳定。中文文本在任意两个汉字之间都可以换行，但句号、逗号和右括号不能出现在行首（避头尾规则）。例如：「这是一个引号里的句子。」以及《书名号》和（括号）都要正确处理。</p></div>
+<h2>表格中的中文</h2>
+<table><thead><tr><th>项目</th><th>说明</th><th>数量</th></tr></thead><tbody>
+<tr><td class="w">第1项</td><td>不依赖任何第三方组件的 .NET 库，可以把 HTML 和 Mark</td><td>3</td></tr><tr><td class="w">第2项</td><td>NET 库，可以把 HTML 和 Markdown 转换成 PDF。它有自己</td><td>6</td></tr><tr><td class="w">第3项</td><td>L 和 Markdown 转换成 PDF。它有自己的解析器、样式引擎和排版引擎，因此</td><td>9</td></tr><tr><td class="w">第4项</td><td>转换成 PDF。它有自己的解析器、样式引擎和排版引擎，因此在服务器上运行时既快又稳定。中文文</td><td>12</td></tr><tr><td class="w">第5项</td><td>cker 是一个不依赖任何第三方组件的 .NET 库，可以把 HTML 和 Markdown 转换成</td><td>15</td></tr><tr><td class="w">第6项</td><td>第三方组件的 .NET 库，可以把 HTML 和 Markdown 转换成 PDF。它有自己的解析器、样式引</td><td>18</td></tr><tr><td class="w">第7项</td><td>，可以把 HTML 和 Markdown 转换成 PDF。它有自己的解析器、样式引擎和排版引擎，因此在服务器上运行时</td><td>21</td></tr><tr><td class="w">第8项</td><td>arkdown 转换成 PDF。它有自己的解析器、样式引擎和排版引擎，因此在服务器上运行时既快又稳定。中文文本在任意两个汉字</td><td>24</td></tr><tr><td class="w">第9项</td><td>DF。它有自己的解析器、样式引擎和排版引擎，因此在服务器上运行时既快又稳定。中文文本在任意两个汉字之间都可以换行，但句号、逗号和右括</td><td>27</td></tr><tr><td class="w">第10项</td><td>是一个不依赖任何第三方组件的 .NET 库，可以把 HTML 和 Markdown 转换成 PDF。它有自己的解析器、样式引擎和排版引擎，因</td><td>30</td></tr><tr><td class="w">第11项</td><td>的 .NET 库，可以把 HTML 和 Markdown 转换成 PDF。它有自己的解析器、样式引擎和排版引擎，因此在服务器上运行时既快又稳定。中文</td><td>33</td></tr><tr><td class="w">第12项</td><td>HTML 和 Markdown 转换成 PDF。它有自己的解析器、样式引擎和排版引擎，因此在服务器上运行时既快又稳定。中文文本在任意两个汉字之间都可以换行，</td><td>36</td></tr><tr><td class="w">第13项</td><td>wn 转换成 PDF。它有自己的解析器、样式引擎和排版引擎，因此在服务器上运行时既快又稳定。中文文本在任意两个汉字之间都可以换行，但句号、逗号和右括号不能出现在行首</td><td>39</td></tr><tr><td class="w">第14项</td><td>fPecker 是一个不依赖任何第三方组件的 .NET 库，可以把 HTML 和 Markdown 转换成 PDF。它有自己的解析器、样式引擎和排版引擎，因此在服务器上运行</td><td>42</td></tr><tr><td class="w">第15项</td><td>赖任何第三方组件的 .NET 库，可以把 HTML 和 Markdown 转换成 PDF。它有自己的解析器、样式引擎和排版引擎，因此在服务器上运行时既快又稳定。中文文本在任意两个汉</td><td>45</td></tr>
+</tbody></table>
+<h2>换行规则</h2>
+<p class="anywhere">任意位置换行：「你好，世界。」这是一个测试。</p>
+<p class="keep">保持不断开：中文 English text 混排。</p>
+</body></html>

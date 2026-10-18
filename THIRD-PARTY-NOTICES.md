@@ -1107,6 +1107,7 @@ Roboto Flex Project Authors), Source Sans 3 (Copyright 2010-2024 Adobe, with Res
 variable subset is renamed VarTestCFF), Noto Sans Arabic (Copyright 2022 The Noto Project Authors), Noto Sans
 Hebrew (Copyright 2024 The Noto Project Authors) and Noto Sans, Noto Sans Devanagari, Bengali, Gurmukhi, Gujarati,
 Oriya, Tamil, Telugu, Kannada, Malayalam, Thai, Lao and Thaana (Copyright 2015-2019 Google Inc. and Google LLC),
-licensed under the SIL Open Font License 1.1, and of Roboto
+Noto Sans SC (Copyright 2014-2021 Adobe, with Reserved Font Name 'Source'), licensed under the SIL Open Font
+License 1.1, and of Roboto
 (Copyright 2011 Google Inc.), licensed under the Apache License 2.0. They are used only by the tests, and their
 license texts are next to the fonts.

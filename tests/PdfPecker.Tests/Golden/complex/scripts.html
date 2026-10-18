@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en"><head><title>Scripts</title>
+<style>
+@font-face { font-family: Ar; src: url('../../Fixtures/fonts/NotoSansArabic-Subset.ttf') }
+@font-face { font-family: He; src: url('../../Fixtures/fonts/NotoSansHebrew-Subset.ttf') }
+@font-face { font-family: Hi; src: url('../../Fixtures/fonts/NotoSansDevanagari-Subset.woff2') }
+@font-face { font-family: Th; src: url('../../Fixtures/fonts/NotoSansThai-Subset.woff2') }
+@page { size: A5; margin: 14mm }
+body { font: 10pt/1.5 sans-serif; margin: 0 }
+h1 { font-size: 14pt; margin: 0 0 6pt }
+h2 { font-size: 11pt; margin: 10pt 0 3pt; border-bottom: 0.5pt solid #bbb }
+.ar { font-family: Ar, sans-serif }
+.he { font-family: He, sans-serif }
+.hi { font-family: Hi, sans-serif }
+.th { font-family: Th, sans-serif }
+.card { border: 0.5pt solid #999; border-radius: 3pt; padding: 4pt 6pt; margin: 4pt 0 }
+.card[dir=rtl] { border-right: 3pt solid #2a9d8f }
+.card[dir=ltr] { border-left: 3pt solid #e76f51 }
+table { border-collapse: collapse; width: 100% }
+td, th { border: 0.5pt solid #aaa; padding: 2pt 4pt }
+th { background: #eef }
+ol.ar-list { list-style: arabic-indic }
+ul { margin: 2pt 0 }
+.row { display: flex; gap: 6pt }
+.row > div { flex: 1; border: 0.5pt solid #ccc; padding: 3pt }
+</style></head>
+<body>
+<h1>Mixed scripts in one document</h1>
+<h2>Right to left with embedded left to right</h2>
+<div class="card ar" dir="rtl" lang="ar"><p>بِسْمِ اللَّهِ لا سلام PDF 2026 ١٢٣ سلام</p></div>
+<div class="card he" dir="rtl" lang="he"><p>זהו משפט עם PDF ו־2026 שָׁלוֹם</p></div>
+<div class="card" dir="ltr"><p>An English sentence that quotes <span class="ar">لا سلام</span> and <span class="he">זהו משפט</span> inline, then continues in English.</p></div>
+<h2>Indic and Thai</h2>
+<div class="row">
+<div class="hi" lang="hi"><p>नमस्ते हिन्दी क्षत्रिय श्री</p><p>मैं हिंदी बोलता हूँ।</p><p>भारत का संविधान, १९५०</p></div>
+<div class="th" lang="th"><p>สวัสดี ภาษาไทย</p><p>น้ำ ดำ กำ ผู้ใหญ่</p><p>ประเทศไทย</p></div>
+</div>
+<h2>A table with every script</h2>
+<table><thead><tr><th>Language</th><th>Sample</th><th>Direction</th></tr></thead><tbody>
+<tr><td>Arabic</td><td class="ar" dir="rtl">لا سلام ١٢٣</td><td>rtl</td></tr>
+<tr><td>Hebrew</td><td class="he" dir="rtl">שָׁלוֹם זהו משפט</td><td>rtl</td></tr>
+<tr><td>Hindi</td><td class="hi">संस्कृत विद्यालय कृपया</td><td>ltr</td></tr>
+<tr><td>Thai</td><td class="th">ภาษาไทย ประเทศไทย</td><td>ltr</td></tr>
+<tr><td>English</td><td>The quick brown fox</td><td>ltr</td></tr>
+</tbody></table>
+<h2>Lists</h2>
+<div dir="rtl" class="ar"><ol class="ar-list"><li>سلام</li><li>لا سلام</li><li>بِسْمِ اللَّهِ</li></ol></div>
+<ul><li class="hi">ज्ञान</li><li class="th">สวัสดี</li><li class="he" dir="rtl">שָׁלוֹם</li></ul>
+<h2>A right-to-left table</h2>
+<table dir="rtl" class="ar"><tr><th>١</th><th>٢</th><th>٣</th></tr><tr><td>سلام</td><td colspan="2">لا سلام PDF</td></tr></table>
+</body></html>
