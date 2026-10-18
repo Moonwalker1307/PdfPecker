@@ -1452,6 +1452,70 @@ public class LayoutLookupFanOutTests
         AssertStructurallyValid(Bounded(() => HtmlToPdf.Convert(html)));
     }
 
+    // A language system that names one feature thousands of times, whose lookup indexes are those same thousands of
+    // words, or thousands of features whose lookup arrays overlap: either asked for tens of millions of lookup indexes
+    // (8,192 squared, half a gigabyte, and at 65,535 more than a list can hold) where the font has one distinct lookup.
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Feature_lookups_that_fan_out_stay_bounded(bool overlappingFeatures)
+    {
+        var original = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "NotoSansArabic-Subset.ttf"));
+        var (gsub, lookup) = overlappingFeatures ? OverlappingFeatures(4096, 8192) : SharedFeatureIndexes(8192);
+        var font = WithTable(original, "GSUB", gsub);
+        var program = Assert.Single(FontProgram.Load(font));
+        var lookups = Bounded(() =>
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            var result = program.Layout!.FeatureLookups(false, FontProgram.Tag("arab"), FontProgram.Tag("ccmp"));
+            return (result, Allocated: GC.GetAllocatedBytesForCurrentThread() - before);
+        });
+        Assert.InRange(lookups.Allocated, 0, 1 << 20);
+        Assert.Equal([lookup], lookups.result);
+
+        Bounded(() => Shape(program, true));
+        var html = $"<style>@font-face{{font-family:f;src:url(data:font/ttf;base64,{Convert.ToBase64String(font)})}}</style>"
+            + $"<p style='font-family:f'>{Text}</p>";
+        AssertStructurallyValid(Bounded(() => HtmlToPdf.Convert(html)));
+    }
+
+    // A GSUB table whose DFLT language system names feature 0 (ccmp) n times, and whose ccmp names lookup 0 n times, in
+    // the same n zero words: the feature table starts at the language system's feature index count.
+    private static (byte[] Table, int Lookup) SharedFeatureIndexes(int n)
+    {
+        var t = new List<byte>();
+        void U16(int v) { t.Add((byte)(v >> 8)); t.Add((byte)v); }
+        void Tag(string s) => t.AddRange(Encoding.ASCII.GetBytes(s));
+        U16(1); U16(0); U16(10); U16(22); U16(30); // script list at 10, feature list at 22, lookup list at 30
+        U16(1); Tag("DFLT"); U16(8); // the DFLT script at 18
+        U16(22); U16(0); // its default language system at 40
+        U16(1); Tag("ccmp"); U16(20); // ccmp at 42, which reads the language system's 0xFFFF and n
+        U16(1); U16(4); // one lookup at 34
+        U16(1); U16(0); U16(0); // single substitution with no subtables
+        U16(0); U16(0xFFFF); U16(n); // the language system: no required feature and n feature indexes
+        for (int i = 0; i < n; i++) U16(0);
+        return (t.ToArray(), 0);
+    }
+
+    // A GSUB table whose DFLT language system names features 0 to n - 1, all ccmp, each starting one word further
+    // into one run of words that all hold v: every feature names lookup v, v times.
+    private static (byte[] Table, int Lookup) OverlappingFeatures(int n, int v)
+    {
+        var t = new List<byte>();
+        void U16(int x) { t.Add((byte)(x >> 8)); t.Add((byte)x); }
+        void Tag(string s) => t.AddRange(Encoding.ASCII.GetBytes(s));
+        int features = 28 + n * 2, run = 2 + n * 6;
+        U16(1); U16(0); U16(10); U16(features); U16(16); // script list at 10, lookup list at 16
+        U16(1); Tag("DFLT"); U16(8); // the DFLT script at 18; the lookup list at 16 reads 8 lookups, none of them v
+        U16(4); U16(0); // its default language system at 22
+        U16(0); U16(0xFFFF); U16(n); // the language system: no required feature and n feature indexes
+        for (int i = 0; i < n; i++) U16(i);
+        U16(n);
+        for (int i = 0; i < n; i++) { Tag("ccmp"); U16(run + i * 2); }
+        for (int i = 0; i < n + v + 1; i++) U16(v);
+        return (t.ToArray(), v);
+    }
+
     private static List<int> Shape(FontProgram font, bool rtl)
     {
         var output = new List<ShapedGlyph>();
