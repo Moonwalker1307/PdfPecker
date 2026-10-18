@@ -508,6 +508,37 @@ public class HostileInputTests
         Assert.Contains("<a href=\"/u\">a</a> [b]](/v) <img src=\"/i\" alt=\"c\" />", html);
     }
 
+    [Fact]
+    public void Markdown_footnotes_by_the_thousand_stay_linear()
+    {
+        // Each footnote cites the next, around in a circle, and one footnote has thousands of references, each with a
+        // link back: every footnote's text is still rendered once.
+        const int n = 5000;
+        var md = Repeat("a[^1] ", n) + "\n\n" + string.Concat(Enumerable.Range(0, n).Select(i => $"b[^n{i}]\n"))
+                 + "\n[^1]: one\n" + string.Concat(Enumerable.Range(0, n).Select(i => $"[^n{i}]: Note {i} [^n{(i + 1) % n}]\n"));
+        var html = Bounded(() => MarkdownToHtml.Convert(md));
+        Assert.Equal(n + 1, CountOf(html, "<li id=\"fn-"));
+        Assert.Equal(n - 1, CountOf(html, "href=\"#fnref-1-"));
+
+        // In a PDF every footnote floats to the bottom of a page.
+        const int m = 1000;
+        var notes = string.Concat(Enumerable.Range(0, m).Select(i => $"b[^n{i}]\n")) + "\n"
+                    + string.Concat(Enumerable.Range(0, m).Select(i => $"[^n{i}]: Note {i} [^n{(i + 1) % m}]\n"));
+        AssertStructurallyValid(Bounded(() => MarkdownToPdf.Convert(notes)));
+    }
+
+    [Fact]
+    public void Markdown_definition_and_footnote_nesting_is_capped()
+    {
+        var nestedTerms = string.Concat(Enumerable.Range(0, 1000).Select(i => new string(' ', 2 * i) + "t\n" + new string(' ', 2 * i) + ": d\n"));
+        var html = Bounded(() => MarkdownToHtml.Convert(nestedTerms));
+        // A list and its definition are two levels of nesting.
+        Assert.Equal(Markdown.BlockParser.MaxNesting / 2, CountOf(html, "<dl>"));
+        html = Bounded(() => MarkdownToHtml.Convert(Repeat("[^a]: ", 200000) + "x [^a]\n\nText [^a]"));
+        Assert.Equal(1, CountOf(html, "<li id=\"fn-"));
+        AssertStructurallyValid(Bounded(() => MarkdownToPdf.Convert(nestedTerms + Repeat("[^a]: ", 20000) + "x [^a]\n\nText [^a]")));
+    }
+
     private static int CountOf(string s, string part)
     {
         int n = 0;

@@ -65,7 +65,7 @@ The conversion methods are static and thread-safe, so you can convert many docum
 
 - **HTML and CSS**: flexbox, grid and subgrid, multi-column layout, floats, positioning, transforms, gradients (also clipped to text), filters, media and container queries, inline SVG, and PNG, JPEG, GIF, WebP, BMP and TIFF images. [More](https://pdfpecker.net/docs/html-and-css/)
 - **Paged media**: `@page` sizes and margin boxes, running headers, footnotes, tables of contents with page numbers, break control, and table headers and footers repeated on every page. [More](https://pdfpecker.net/docs/paged-media/)
-- **Markdown**: CommonMark 0.31 and GitHub Flavored Markdown to PDF or HTML. [More](https://pdfpecker.net/docs/markdown/)
+- **Markdown**: CommonMark 0.31 and GitHub Flavored Markdown to PDF or HTML, with footnotes (at the bottom of the page in a PDF), definition lists and YAML front matter. [More](https://pdfpecker.net/docs/markdown/)
 - **Fonts**: TrueType, OpenType, WOFF and WOFF2, subset and embedded, with kerning, ligatures, variable fonts and OpenType features. [More](https://pdfpecker.net/docs/fonts/)
 - **Languages**: Arabic and Hebrew with bidi and shaping, Indic scripts (Devanagari, Bengali, Gurmukhi, Gujarati, Oriya, Tamil, Telugu, Kannada, Malayalam), Thai and Lao shaped as HarfBuzz shapes them, CJK line breaking, and hyphenation in English, Danish, German, Dutch, Norwegian, Swedish, Spanish, French, Italian, Portuguese and Polish. [More](https://pdfpecker.net/docs/languages/)
 - **PDF/A, passwords and watermarks**: PDF/A-2, 3 and 4, AES-256 encryption, and text, image and SVG watermarks. [More](https://pdfpecker.net/docs/pdfa-and-passwords/)

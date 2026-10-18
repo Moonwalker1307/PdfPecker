@@ -13,7 +13,10 @@ internal sealed partial class BlockParser
             case MdNodeType.BlockQuote:
                 return ContinueBlockQuote();
             case MdNodeType.Item:
+            case MdNodeType.DefinitionDetails:
                 return ContinueItem(container);
+            case MdNodeType.FootnoteDefinition:
+                return ContinueFootnoteDefinition();
             case MdNodeType.Heading:
             case MdNodeType.ThematicBreak:
                 return Continuation.NotMatched;
