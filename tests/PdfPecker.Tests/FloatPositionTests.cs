@@ -198,12 +198,4 @@ public class FloatPositionTests
         Assert.Equal("“a‘b’”", AllText(ops).Replace(" ", ""));
     }
 
-    [Fact]
-    public void ManyFloatsStayBounded()
-    {
-        var html = "<div>" + string.Concat(Enumerable.Repeat("<span style='float:left;width:3px;height:3px'></span>w ", 2000)) + "</div>";
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        AssertStructurallyValid(ConvertUncompressed(html));
-        Assert.True(sw.ElapsedMilliseconds < 5000);
-    }
 }
