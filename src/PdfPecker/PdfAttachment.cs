@@ -89,7 +89,8 @@ public static class PdfAttachments
     public static IReadOnlyList<PdfAttachment> List(byte[] pdf, string? password = null)
     {
         var file = Open(pdf, password);
-        return EmbeddedFiles.Read(file).Select(f => f.ToAttachment(file)).ToList();
+        // One decode budget for all attachments, which are all held in memory at once.
+        using (PdfFile.BeginRender(default)) return EmbeddedFiles.Read(file).Select(f => f.ToAttachment(file)).ToList();
     }
 
     /// <summary>The content of the attached file with the given name (compared exactly), or null when there is none.</summary>

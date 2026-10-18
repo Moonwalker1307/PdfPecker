@@ -135,6 +135,9 @@ internal sealed partial class PdfFile
         if (t_budgeted && (t_decodeBudget -= bytes) < 0) throw BudgetExceeded();
     }
 
+    /// <summary>True while a <see cref="BeginRender"/> scope is open on this thread.</summary>
+    internal static bool InRenderScope => t_budgeted;
+
     /// <summary>The cancellation token of the render running on this thread.</summary>
     internal static CancellationToken CurrentCancellation => t_cancel;
 
