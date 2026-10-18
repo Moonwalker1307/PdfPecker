@@ -165,15 +165,28 @@ internal readonly struct Length
 
     private sealed record CalcParts(float Pct, Func<float, float>? Fn);
 
-    public Length(float value, LengthUnit unit) { Value = value; Unit = unit; }
+    /// <summary>
+    /// The largest magnitude, in points or percent, that a length keeps, and that a percentage resolves to. Like
+    /// browsers, which clamp lengths to the range their layout units hold, larger values are clamped: a length near the
+    /// float range overflows to infinity once layout adds or scales it (nested percentages multiply), and the NaN that
+    /// follows from infinity minus infinity breaks every box built on it. About 380 km is still far more than the page
+    /// limit holds, so absurd lengths keep ending in <see cref="PdfLimitException"/>, while sums and products of a few
+    /// such lengths stay well inside the float range.
+    /// </summary>
+    public const float MaxMagnitude = 1 << 30;
 
-    private Length(float value, CalcParts calc) { Value = value; Unit = LengthUnit.Calc; _calc = calc; }
+    public Length(float value, LengthUnit unit) { Value = Clamp(value); Unit = unit; }
+
+    private Length(float value, CalcParts calc) { Value = Clamp(value); Unit = LengthUnit.Calc; _calc = calc; }
+
+    /// <summary>Clamps <paramref name="v"/> to <see cref="MaxMagnitude"/>, and NaN, which has no meaningful size, to zero.</summary>
+    public static float Clamp(float v) => float.IsNaN(v) ? 0 : Math.Clamp(v, -MaxMagnitude, MaxMagnitude);
 
     public static readonly Length Auto = new(0, LengthUnit.Auto);
     public static readonly Length Zero = new(0, LengthUnit.Pt);
     public static Length Pt(float v) => new(v, LengthUnit.Pt);
     /// <summary>A sum of points and a percentage, such as <c>calc(100% - 20pt)</c>.</summary>
-    public static Length Calc(float pt, float pct) => new(pt, new CalcParts(pct, null));
+    public static Length Calc(float pt, float pct) => new(pt, new CalcParts(Clamp(pct), null));
     /// <summary>Any other value that depends on a percentage, such as <c>min(100%, 600pt)</c>: points as a function of the reference length.</summary>
     public static Length Calc(Func<float, float> fn) => new(0, new CalcParts(0, fn));
 
@@ -189,12 +202,12 @@ internal readonly struct Length
         => Unit switch
         {
             LengthUnit.Pt => Value,
-            LengthUnit.Percent => Value * basis / 100f,
-            LengthUnit.Calc => _calc!.Fn == null ? Value + _calc.Pct * basis / 100f : Finite(_calc.Fn(basis)),
+            LengthUnit.Percent => Clamp(Value * basis / 100f),
+            LengthUnit.Calc => _calc!.Fn == null ? Clamp(Value + _calc.Pct * basis / 100f) : Finite(_calc.Fn(basis)),
             _ => autoValue,
         };
 
-    private static float Finite(float v) => float.IsFinite(v) ? v : 0;
+    private static float Finite(float v) => float.IsFinite(v) ? Clamp(v) : 0;
 
     public override string ToString() => Unit switch
     {

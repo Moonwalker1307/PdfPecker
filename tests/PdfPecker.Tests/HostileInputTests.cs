@@ -48,6 +48,28 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(sb.ToString()));
     }
 
+    // Lengths near the float range overflowed to infinity once added or scaled in layout, and the box geometry built from
+    // them reached the painters as NaN, where rounding it threw ArithmeticException.
+    [Theory]
+    [InlineData("h2{margin:x -1e38;border-bottom-style:dotted;border-radius:4px}")]
+    [InlineData("h2{margin:0 -1e38px;border:3px solid;border-bottom:5px double red;border-radius:4px}")]
+    [InlineData("h2{margin:0 -3e38px;border:9px groove;border-left-style:dashed;border-radius:1e38px}")]
+    [InlineData("h2{margin:0 -1e38em;border:2px solid;border-top-color:red;border-radius:4px}")]
+    [InlineData("h2{width:1e38em;padding:1e38px;outline:3px dotted;outline-offset:1e38px;border-radius:4px}")]
+    [InlineData("h2{margin-left:-1e38px;box-shadow:1e38px 1e38px 1e38px 1e38px red, inset 0 0 4px 1e38px blue;border-radius:4px}")]
+    [InlineData("h2{font-size:1e38px;border:1em dotted;border-radius:1em;text-indent:-1e38em}")]
+    [InlineData("h2{margin:0 calc(-1e38px * 4);border:1px solid;border-bottom-style:dotted;border-radius:4px}")]
+    [InlineData("div{width:1e30%;margin-left:-1e30%;border:1px solid;border-left-style:dotted;border-radius:4px}",
+        "<div><div><div><div><div><div><div><div><div><div>x</div></div></div></div></div></div></div></div></div></div>")]
+    public void Huge_lengths_give_finite_box_geometry(string css, string body = "<h2>title</h2><p>text</p>")
+    {
+        // A font millions of points tall can make the document longer than the page limit, which is a documented outcome.
+        byte[]? pdf = null;
+        var ex = Record.Exception(() => pdf = Bounded($"<style>{css}</style>{body}"));
+        if (ex != null) Assert.IsType<PdfLimitException>(ex);
+        else AssertStructurallyValid(pdf!);
+    }
+
     // Lower-case words, which small capitals keep whole; the test texts add words that bidi and small capitals each cut
     // in two, in different places (aB|א and A|Bא).
     private const string Lower = "lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor";
