@@ -58,6 +58,9 @@ internal sealed partial class LayoutEngine
     /// </summary>
     private int _measuringRows;
 
+    /// <summary>How many tables are being laid out around the current point.</summary>
+    private int _tableDepth;
+
     /// <summary>
     /// The keep-with-next probe of the table whose rows are being laid out, until its first content is placed (see
     /// <see cref="CanProbe"/>); null otherwise, and inside the cells, whose tables take a probe of their own.
@@ -405,7 +408,12 @@ internal sealed partial class LayoutEngine
         GroupOp tableGroup;
         // As in Chrome, when the first row does not fit on the page, the table starts on the next page with its
         // header, rather than leaving the header (and the footer) behind on their own.
-        m.MayMoveTable = _paginate && !AtPageTop(startY);
+        // In columns, a table nested deeper than a box kept whole may be (see MaxKeptWholeNesting) moves neither whole
+        // nor by row to the next column: each level laid the levels inside it out again for every column it tried, and
+        // balancing repeated that for each height, so the work grew with the cube of the depth.
+        bool mayMove = _tableDepth < MaxKeptWholeNesting || _grid is not ColumnGrid;
+        m.MayMoveTable = mayMove && _paginate && !AtPageTop(startY);
+        _tableDepth++;
         while (true)
         {
             foreach (var caption in m.Captions)
@@ -435,7 +443,7 @@ internal sealed partial class LayoutEngine
             m.TableMove = null;
             for (int r = 0; r < m.Rows.Count; r++)
             {
-                cy = LayoutRow(m, r, cy, colX, widths, hs, vs, collapse, allowMove: true, pageColumns) + vs;
+                cy = LayoutRow(m, r, cy, colX, widths, hs, vs, collapse, allowMove: mayMove, pageColumns) + vs;
                 // The first content is past the chain's page: the chain moves and lays the table out again, so the rest
                 // of this layout would be thrown away.
                 if (probe is { Done: true } || m.TableMove != null) break;
@@ -448,6 +456,7 @@ internal sealed partial class LayoutEngine
             if (table.Id != null) SetAnchor(table.Id, y);
             if (table.LayoutKey != null) SetAnchor(table.LayoutKey, y);
         }
+        _tableDepth--;
         m.MayMoveTable = false;
         _rowProbe = outerProbe;
         m.RowExtra = null;
