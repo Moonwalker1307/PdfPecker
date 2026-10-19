@@ -54,6 +54,10 @@ byte[] merged = PdfMerger.Merge(invoicePdf, termsPdf);
 byte[][] pngs = PdfToImage.Convert(pdf, new ImageOptions { Dpi = 150 });
 byte[] tiff = PdfToImage.ConvertToTiff(pdf, new ImageOptions { Dpi = 200, TiffColorMode = TiffColorMode.BlackAndWhite });
 
+// Make any existing PDF smaller: losslessly, or with images downsampled to 150 dpi and recompressed as JPEG
+byte[] smaller = PdfCompactor.Compact(File.ReadAllBytes("scan.pdf"));
+byte[] smallest = PdfCompactor.Compact(pdf, new PdfCompactOptions { MaxImageDpi = 150, ImageQuality = 75 });
+
 // Open a PDF once and render its pages one at a time, or in parallel
 var renderer = PdfRenderer.Open(pdf);
 renderer.RenderPage(0, new ImageOptions { Dpi = 150 }).Save("page1.png");
@@ -70,13 +74,14 @@ The conversion methods are static and thread-safe, so you can convert many docum
 - **Languages**: Arabic and Hebrew with bidi and shaping, Indic scripts (Devanagari, Bengali, Gurmukhi, Gujarati, Oriya, Tamil, Telugu, Kannada, Malayalam), Thai and Lao shaped as HarfBuzz shapes them, CJK line breaking, and hyphenation in English, Danish, German, Dutch, Norwegian, Swedish, Spanish, French, Italian, Portuguese and Polish. [More](https://pdfpecker.net/docs/languages/)
 - **PDF/A, passwords and watermarks**: PDF/A-2, 3 and 4, AES-256 encryption, and text, image and SVG watermarks. [More](https://pdfpecker.net/docs/pdfa-and-passwords/)
 - **Accessibility**: tagged PDF, PDF/UA-1 and PDF/UA-2 built from your HTML. [More](https://pdfpecker.net/docs/accessibility/)
-- **Reproducible output**: a fixed `CreationDate` or `SOURCE_DATE_EPOCH` gives byte-identical PDFs for the same input, also when merging, splitting or stamping, for build pipelines and output caches.
+- **Reproducible output**: a fixed `CreationDate` or `SOURCE_DATE_EPOCH` gives byte-identical PDFs for the same input, also when merging, splitting, stamping or compacting, for build pipelines and output caches.
 - **Images to PDF**: `ImageToPdf` puts PNG, JPEG, GIF, WebP, BMP or TIFF images on pages of their own size, or scaled to fit a page size, for scans and receipts.
 - **Barcodes**: QR codes, EPC payment QR codes (GiroCode), Code 128 and EAN-13 as vector SVG for your template, e.g. `Barcode.QrCode("https://example.com")` or `<img src="@Barcode.ToDataUri(Barcode.Ean13("590123412345"))">`.
 - **Forms**: HTML inputs become fillable PDF fields; read, fill and flatten the fields of existing PDFs. [More](https://pdfpecker.net/docs/forms/)
 - **Digital signatures**: PAdES signing, timestamps, external signers, verification and long-term validation. [More](https://pdfpecker.net/docs/signatures/)
 - **E-invoices and attachments**: Factur-X and ZUGFeRD (embed the XML, or read it back from a received PDF), PDFs in Peppol and OIOUBL invoices, and any embedded file. [More](https://pdfpecker.net/docs/e-invoices/)
 - **Existing PDFs**: merge (also streamed), split, reorder, rotate, stamp and extract text with positions. [More](https://pdfpecker.net/docs/merging/)
+- **Compacting**: `PdfCompactor` makes any PDF smaller without changing how it looks: unused objects and old revisions go, identical fonts and images are stored once, streams are recompressed and objects packed into compressed object streams, keeping bookmarks, forms, tags and PDF/A. Optional settings also downsample images and recompress them as JPEG. Signed and encrypted PDFs are refused, since rewriting would break or drop the signature or protection.
 - **PDF to image**: renders any PDF page, including JPEG 2000, JBIG2 and CCITT images, to PNG, JPEG or WebP, or a whole PDF to one multi-page TIFF (colour, greyscale or black and white with CCITT Group 4). `HtmlToImage` goes from HTML to images in one call. [More](https://pdfpecker.net/docs/pdf-to-image/)
 - **Safe failures**: the library's own errors share the base class `PdfPeckerException`, and the `*File` methods write through a temporary file, so a failure never leaves a half-written output.
 

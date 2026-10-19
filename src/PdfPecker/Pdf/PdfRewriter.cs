@@ -99,7 +99,7 @@ internal sealed class PdfRewriter : PdfObjectWriter
         return direct;
     }
 
-    private static (int Major, int Minor) HeaderVersion(byte[] d)
+    internal static (int Major, int Minor) HeaderVersion(byte[] d)
     {
         int lim = Math.Min(d.Length - 8, 1024);
         for (int i = 0; i < lim; i++)

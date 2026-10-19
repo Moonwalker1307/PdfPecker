@@ -162,6 +162,17 @@ internal static class Targets
             },
             new()
             {
+                Name = "pdf-compact", Extension = ".pdf", Seeds = pdfSeeds, MaxSize = 1 << 20,
+                // A mutated input can turn out signed or encrypted, which compacting refuses as documented.
+                ExtraExpected = ex => ex is ArgumentException { ParamName: "pdf" },
+                Run = (d, ct) =>
+                {
+                    PdfCompactor.Compact(d, null, ct);
+                    PdfCompactor.Compact(d, new PdfCompactOptions { ImageQuality = 50, MaxImageDpi = 72, RemoveMetadata = true }, ct);
+                },
+            },
+            new()
+            {
                 Name = "pdf-verify", Extension = ".pdf", Seeds = pdfSeeds, MaxSize = 1 << 20,
                 Run = (d, ct) => PdfSignatureVerifier.Verify(d, new PdfSignatureVerificationOptions { TrustedRoots = SeedContext.TrustedRoots() }),
             },

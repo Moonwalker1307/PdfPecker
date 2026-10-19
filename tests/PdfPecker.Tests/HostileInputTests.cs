@@ -1128,6 +1128,57 @@ public class HostileInputTests
         Assert.Same(PdfName.Get("Type"), PdfName.Get("Type"));
     }
 
+    [Fact]
+    public void Compacting_keeps_a_stream_that_decodes_past_the_limit_as_it_is()
+    {
+        // 300 MB of zeros deflate to a few hundred kilobytes; the decoder stops at its 256 MB limit, and the cut data
+        // must not replace the stream.
+        var zeros = new MemoryStream();
+        using (var z = new System.IO.Compression.ZLibStream(zeros, System.IO.Compression.CompressionLevel.Fastest, leaveOpen: true))
+        {
+            var block = new byte[1 << 20];
+            for (int i = 0; i < 300; i++) z.Write(block);
+        }
+        var bomb = zeros.ToArray();
+        var head = Encoding.Latin1.GetBytes("%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+            + "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] /Contents 4 0 R >>\nendobj\n4 0 obj\n<< /Length " + bomb.Length
+            + " /Filter /FlateDecode >>\nstream\n");
+        var pdf = head.Concat(bomb).Concat(Encoding.Latin1.GetBytes("\nendstream\nendobj\ntrailer << /Root 1 0 R >>\n%%EOF")).ToArray();
+        var compact = Bounded(() => PdfCompactor.Compact(pdf));
+        var file = PdfFile.Open(compact, null);
+        var page = (PdfDict)file.Resolve(file.GetArray(file.GetDict(file.Catalog, "Pages"), "Kids")![0])!;
+        Assert.Equal(bomb, file.GetStream(page, "Contents")!.RawData);
+    }
+
+    [Fact]
+    public void Compacting_gives_up_finding_image_sizes_in_forms_that_fan_out()
+    {
+        // Twelve levels of forms, each drawing the next ten times, would be drawn 10^12 times. The walk that finds how
+        // large images are drawn stops at its limit, and then no image is downsampled on what it saw so far.
+        const int Levels = 12;
+        var objects = new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /XObject << /F 5 0 R >> >> /Contents 4 0 R >>",
+            Stream("q 100 0 0 100 0 0 cm /F Do Q"),
+        };
+        for (int level = 0; level < Levels; level++)
+        {
+            int next = objects.Count + 2;
+            string draw = level == Levels - 1 ? "/I Do" : Repeat("/F Do ", 10);
+            string resources = level == Levels - 1 ? $"/XObject << /I {next} 0 R >>" : $"/XObject << /F {next} 0 R >>";
+            objects.Add(Stream(draw, $"/Type /XObject /Subtype /Form /BBox [0 0 1 1] /Resources << {resources} >>"));
+        }
+        objects.Add(Stream(Repeat("A", 600 * 600), "/Type /XObject /Subtype /Image /Width 600 /Height 600 /ColorSpace /DeviceGray /BitsPerComponent 8"));
+        var compact = Bounded(() => PdfCompactor.Compact(SimplePdf(objects), new PdfCompactOptions { MaxImageDpi = 10 }));
+        var file = PdfFile.Open(compact, null);
+        var image = Enumerable.Range(1, file.MaxObjectNumber).Select(file.GetObject).OfType<PdfStream>().Single(s => file.GetName(s, "Subtype") == "Image");
+        Assert.Equal(600, file.GetInt(image, "Width", 0));
+
+        static string Stream(string data, string entries = "") => $"<< {entries} /Length {data.Length} >>\nstream\n{data}\nendstream";
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private static byte[] SimplePdf(List<string> objects)

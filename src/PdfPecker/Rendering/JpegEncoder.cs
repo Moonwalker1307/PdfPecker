@@ -105,21 +105,61 @@ internal static partial class JpegEncoder
         }
     }
 
-    /// <summary>The JPEG file: its headers, the optimal Huffman tables for the scan, and the scan.</summary>
-    private static byte[] Write(Scan scan, int width, int height, Frame frame, byte[] lumaQuantization, byte[] chromaQuantization)
+    /// <summary>
+    /// Encodes the grey level of opaque premultiplied 0xAABBGGRR pixels (their red channel when they are not grey) as a
+    /// one-component JPEG, for images whose colour space has one component.
+    /// </summary>
+    public static byte[] EncodeGray(uint[] pixels, int width, int height, int quality)
+    {
+        if (quality is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(quality), "Quality must be between 1 and 100.");
+        if (width > MaxDimension || height > MaxDimension)
+            throw new NotSupportedException($"JPEG images are limited to {MaxDimension} pixels in each dimension.");
+
+        var frame = new Frame(width, height, subsample: false);
+        var lumaQuantization = ScaleTable(StdLuminance, quality);
+        var planes = ToYCbCr(pixels, frame, 0xFFFFFF);
+        short[] y;
+        try
+        {
+            y = Transform(planes.Y, frame.LumaWidth, frame.LumaHeight, lumaQuantization);
+        }
+        finally
+        {
+            planes.Return();
+        }
+        try
+        {
+            return Write(new Scan(y, null, null, frame), width, height, frame, lumaQuantization, null);
+        }
+        finally
+        {
+            ArrayPool<short>.Shared.Return(y);
+        }
+    }
+
+    /// <summary>
+    /// The JPEG file: its headers, the optimal Huffman tables for the scan, and the scan. Without chroma tables it has
+    /// one component, Y.
+    /// </summary>
+    private static byte[] Write(Scan scan, int width, int height, Frame frame, byte[] lumaQuantization, byte[]? chromaQuantization)
     {
         var tables = scan.OptimalTables();
 
         var output = new JpegWriter(width * height / 4 + 1024);
         output.WriteMarker(Marker.StartOfImage);
         WriteJfifHeader(output);
-        WriteQuantizationTables(output, lumaQuantization, chromaQuantization);
-        WriteFrameHeader(output, width, height, frame.Subsample);
+        int components = chromaQuantization == null ? 1 : 3;
+        if (chromaQuantization == null) WriteQuantizationTable(output, lumaQuantization);
+        else WriteQuantizationTables(output, lumaQuantization, chromaQuantization);
+        WriteFrameHeader(output, width, height, frame.Subsample, components);
         WriteHuffmanTable(output, DcClass | LumaTable, tables.LumaDc);
         WriteHuffmanTable(output, AcClass | LumaTable, tables.LumaAc);
-        WriteHuffmanTable(output, DcClass | ChromaTable, tables.ChromaDc);
-        WriteHuffmanTable(output, AcClass | ChromaTable, tables.ChromaAc);
-        WriteScanHeader(output);
+        if (components == 3)
+        {
+            WriteHuffmanTable(output, DcClass | ChromaTable, tables.ChromaDc!);
+            WriteHuffmanTable(output, AcClass | ChromaTable, tables.ChromaAc!);
+        }
+        WriteScanHeader(output, components);
         scan.Write(output, tables);
         output.WriteMarker(Marker.EndOfImage);
         return output.ToArray();
@@ -192,22 +232,31 @@ internal static partial class JpegEncoder
         WriteQuantizationTable(output, ChromaTable, chroma);
     }
 
+    /// <summary>DQT: the luma table alone, for a one-component image.</summary>
+    private static void WriteQuantizationTable(JpegWriter output, byte[] luma)
+    {
+        output.WriteMarker(Marker.DefineQuantizationTable);
+        output.WriteUInt16(2 + 1 + BlockLength);
+        WriteQuantizationTable(output, LumaTable, luma);
+    }
+
     private static void WriteQuantizationTable(JpegWriter output, int destination, byte[] table)
     {
         output.WriteByte((byte)destination); // precision 0 (8-bit values) in the high nibble
         for (int k = 0; k < BlockLength; k++) output.WriteByte(table[ZigZag[k]]);
     }
 
-    /// <summary>SOF0: 8-bit samples, three components, Y subsampled against chroma or not.</summary>
-    private static void WriteFrameHeader(JpegWriter output, int width, int height, bool subsample)
+    /// <summary>SOF0: 8-bit samples, three components (Y subsampled against chroma or not) or Y alone.</summary>
+    private static void WriteFrameHeader(JpegWriter output, int width, int height, bool subsample, int components)
     {
         output.WriteMarker(Marker.StartOfFrameBaseline);
-        output.WriteUInt16(8 + 3 * 3);
+        output.WriteUInt16(8 + 3 * components);
         output.WriteByte(8); // sample precision
         output.WriteUInt16(height);
         output.WriteUInt16(width);
-        output.WriteByte(3);
+        output.WriteByte((byte)components);
         WriteFrameComponent(output, 1, subsample ? HalfChromaSampling : FullSampling, LumaTable);
+        if (components == 1) return;
         WriteFrameComponent(output, 2, FullSampling, ChromaTable);
         WriteFrameComponent(output, 3, FullSampling, ChromaTable);
     }
@@ -228,15 +277,18 @@ internal static partial class JpegEncoder
         output.Write(table.Values);
     }
 
-    /// <summary>SOS: all three components in one sequential scan of the full spectrum.</summary>
-    private static void WriteScanHeader(JpegWriter output)
+    /// <summary>SOS: all components in one sequential scan of the full spectrum.</summary>
+    private static void WriteScanHeader(JpegWriter output, int components)
     {
         output.WriteMarker(Marker.StartOfScan);
-        output.WriteUInt16(6 + 2 * 3);
-        output.WriteByte(3);
+        output.WriteUInt16(6 + 2 * components);
+        output.WriteByte((byte)components);
         WriteScanComponent(output, 1, LumaTable);
-        WriteScanComponent(output, 2, ChromaTable);
-        WriteScanComponent(output, 3, ChromaTable);
+        if (components == 3)
+        {
+            WriteScanComponent(output, 2, ChromaTable);
+            WriteScanComponent(output, 3, ChromaTable);
+        }
         output.WriteByte(0); // spectral selection start
         output.WriteByte(BlockLength - 1); // spectral selection end
         output.WriteByte(0); // successive approximation
