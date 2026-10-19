@@ -14,10 +14,20 @@ The tests are xUnit in `tests/PdfPecker.Tests`, one file per feature area. Input
 `*.expected.pdf`. `RendererGoldenTests` render those PDFs and compare the PNGs. Every golden is also converted under
 the ar-SA and fa-IR cultures, whose minus and plus signs differ from ASCII, to catch culture-dependent output.
 
+`GoldenPdfTests` also keeps baselines for merging, stamping and encrypting under `Golden/operations/`. Encrypted output
+changes on every run (random keys), so it is compared after decryption, and its encryption dictionary and object
+layout with strings and stream data left out.
+
+`ThirdPartyPdfTests` cover PDFs that other tools wrote: Chromium, LibreOffice Writer, ReportLab and Ghostscript, and
+qpdf copies with object streams, RC4-128 and AES-256. It renders every page against PNGs, compares extracted text, and
+keeps baselines for merging, compacting, stamping, form filling and decryption, all under `Golden/third-party/`. The
+inputs in `Fixtures/third-party/` come from `tools/ThirdPartyPdfs/generate.sh`; regenerating them changes their
+baselines too.
+
 When a change is meant to alter output, regenerate them and say in the commit and PR which baselines changed and why:
 
 ```
-PDFPECKER_UPDATE_GOLDEN=1 dotnet test --filter "FullyQualifiedName~GoldenPdfTests|FullyQualifiedName~RendererGoldenTests" -f net10.0
+PDFPECKER_UPDATE_GOLDEN=1 dotnet test --filter "FullyQualifiedName~GoldenPdfTests|FullyQualifiedName~RendererGoldenTests|FullyQualifiedName~ThirdPartyPdfTests" -f net10.0
 ```
 
 Never regenerate just to make a failing test pass. A refactor must leave every golden unchanged.

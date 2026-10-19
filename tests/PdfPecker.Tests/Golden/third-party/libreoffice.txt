@@ -1,0 +1,24 @@
+Membership form
+
+This fixture is written by LibreOffice Writer, which stands in for word processors such as Word: TrueType
+subsets, tagged structure, bookmarks from headings and AcroForm fields. Danish letters: æøå ÆØÅ,
+and the euro sign €.
+
+Your details
+
+Name:
+
+Email:
+
+Send me the newsletter
+
+Plan:
+
+Prices
+
+Plan Per month
+Basic € 5,00
+Standard € 9,50
+Premium € 15,00
+• Cancel at any time.
+• Prices include VAT.
