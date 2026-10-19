@@ -278,8 +278,10 @@ public class LayoutFeatureTests
     }
 
     [Fact]
-    public void Grid_rows_move_to_the_next_page_as_a_unit()
+    public void Grid_rows_break_across_pages_with_their_items()
     {
+        // As in Chrome, a row that fits on a page but not in the room left on this one is not moved whole: its items
+        // break at the page boundary.
         var ops = Layout("""
             <div style="height:770pt"></div>
             <div style="display:grid; grid-template-columns:1fr 1fr">
@@ -287,8 +289,40 @@ public class LayoutFeatureTests
               <div style="height:20pt; background:#00ff00"></div>
             </div>
             """);
+        Near(770, Box(ops, "#ff0000").Y);
+        Near(770, Box(ops, "#00ff00").Y);
+    }
+
+    [Fact]
+    public void Grid_rows_with_an_item_that_avoids_breaks_move_to_the_next_page_as_a_unit()
+    {
+        var ops = Layout("""
+            <div style="height:770pt"></div>
+            <div style="display:grid; grid-template-columns:1fr 1fr">
+              <div style="height:40pt; background:#ff0000; break-inside:avoid"></div>
+              <div style="height:20pt; background:#00ff00"></div>
+            </div>
+            """);
         Near(PageHeight, Box(ops, "#ff0000").Y);
         Near(PageHeight, Box(ops, "#00ff00").Y);
+    }
+
+    [Theory]
+    [InlineData(750, false)] // room for two lines: both items start on the first page
+    [InlineData(770, true)]  // room for one line: the paragraph's orphans would leave nothing of it there
+    public void Grid_rows_move_whole_when_an_item_would_leave_no_content_on_the_page(float spacer, bool moves)
+    {
+        var ops = Layout($"""
+            <div style="height:{spacer}pt"></div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; font-size:10pt; line-height:20pt">
+              <div><p style="margin:0">Alone</p><p style="margin:0">More</p></div>
+              <div>First<br>Second<br>Third<br>Fourth</div>
+            </div>
+            """);
+        var texts = Flatten(ops).OfType<TextOp>().ToList();
+        float alone = texts.First(t => t.Text.Contains("Alone")).LineTop, first = texts.First(t => t.Text.Contains("First")).LineTop;
+        Near(moves ? PageHeight : spacer, alone);
+        Near(moves ? PageHeight : spacer, first);
     }
 
     // ---- Multi-column ----

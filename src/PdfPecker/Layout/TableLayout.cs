@@ -438,7 +438,7 @@ internal sealed partial class LayoutEngine
                 cy = LayoutRow(m, r, cy, colX, widths, hs, vs, collapse, allowMove: true, pageColumns) + vs;
                 // The first content is past the chain's page: the chain moves and lays the table out again, so the rest
                 // of this layout would be thrown away.
-                if (probe is { Stopped: true } || m.TableMove != null) break;
+                if (probe is { Done: true } || m.TableMove != null) break;
             }
             if (m.TableMove is not float shortage) break;
             Truncate(startOps);
@@ -656,9 +656,10 @@ internal sealed partial class LayoutEngine
                 if (!probe.Stopped && FirstContent(probe) is (_, var fy))
                 {
                     probe.Stopped = PageOf(fy) > probe.KeepPage;
+                    probe.Answered = !probe.Stopped && probe.StopsOnceAnswered;
                     _rowProbe = null;
                 }
-                if (probe.Stopped) return rowTop;
+                if (probe.Done) return rowTop;
             }
             if (percent) _measuringRows--;
             float rowH = RowHeight(m, r, shareOfTable: true);

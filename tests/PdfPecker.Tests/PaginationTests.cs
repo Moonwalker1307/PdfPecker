@@ -119,6 +119,21 @@ public class PaginationTests
     }
 
     [Fact]
+    public void Bookmarks_keep_document_order_when_a_grid_row_breaks_across_pages()
+    {
+        // The second row is laid out on the pages to see where its content starts before the first row is placed.
+        string paras = string.Concat(Enumerable.Range(1, 6).Select(i => $"<p>Paragraph {i}</p>"));
+        var pdf = ConvertUncompressed("<div style='display:grid'><div><h2>First</h2><div style='height:640pt'></div></div>" +
+                                      "<div><h2>Second</h2>" + paras + "</div></div>");
+        var text = Latin1(pdf);
+        Assert.Matches(@"/Title \(First\) /Parent \d+ 0 R /Next \d+ 0 R", text);
+        // The row starts on the first page and breaks there, so its heading does too.
+        var pages = Regex.Matches(text, @"(\d+) 0 obj\n<< /Type /Page ").Select(m => m.Groups[1].Value).ToList();
+        Assert.True(pages.Count > 1);
+        Assert.Matches($@"/Title \(Second\) /Parent \d+ 0 R /Prev \d+ 0 R /Dest \[{pages[0]} 0 R", text);
+    }
+
+    [Fact]
     public void Bookmarks_follow_the_heading_levels()
     {
         var pdf = ConvertUncompressed("<h1>Intro</h1><h2>Part A</h2><h3>Detail</h3><h2>Part B</h2>" +
