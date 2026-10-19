@@ -303,12 +303,21 @@ internal sealed partial class LayoutEngine
             c = laid;
         }
         float baseline = float.IsNaN(c.Baseline) ? c.Height : c.Baseline;
+        // Chrome puts a check box's or radio button's baseline at the bottom of its border box, so its bottom margin
+        // hangs below the baseline instead of raising the box and making the line taller.
+        if (e.Control is { Kind: ControlKind.CheckBox or ControlKind.Radio } && float.IsNaN(c.Baseline))
+            baseline -= AutoAsZero(e.Style.MarginBottom);
         var item = new Item { Kind = ItemKind.Box, Style = e.Style, Width = c.Width, Height = c.Height, BoxBaseline = baseline, Capture = c, Href = href };
         if (_measuring)
         {
             // An inline-block can wrap its own content, so its min-content contribution is its min-content width,
             // not the width it takes when laid out at the (very wide) measuring width.
-            item.MinWidth = Math.Min(c.Width, Intrinsic(e).Min + FixedHorizontalMargins(e.Style));
+            var (min, max) = Intrinsic(e);
+            float margins = FixedHorizontalMargins(e.Style);
+            // A percentage width has nothing to resolve against here, so the box counts with the width it would have
+            // with an auto width, as in Chrome, not with a share of the very wide measuring width.
+            if (e.Style.Width.IsPercent) item.Width = max + margins;
+            item.MinWidth = Math.Min(item.Width, min + margins);
         }
         return item;
     }

@@ -82,11 +82,10 @@ internal sealed partial class StyleResolver
                 break;
             case "input" when e.Control is { Kind: Layout.ControlKind.Text }:
                 // Chrome sizes a text field from its size attribute: 0.6em a character, and a little more.
-                if (PositiveInt(e.GetAttribute("size")) is int chars) Hint("width", Em(chars * 0.6f + 1.275f));
+                if (Layout.FormControls.FieldChars(e) is int chars) Hint("width", Em(Layout.FormControls.FieldWidthEm(chars)));
                 break;
             case "textarea":
-                if (PositiveInt(e.GetAttribute("cols")) is int cols) Hint("width", Em(cols * 0.6f + 1.275f));
-                if (PositiveInt(e.GetAttribute("rows")) is int rows) Hint("height", Em(rows * 1.13f));
+                if (Layout.FormControls.FieldChars(e) is int cols) Hint("width", Em(Layout.FormControls.FieldWidthEm(cols)));
                 break;
             case "select" when e.Control is { Kind: Layout.ControlKind.List }:
             {
@@ -262,9 +261,6 @@ internal sealed partial class StyleResolver
             if (p.Name == "table") return p;
         return null;
     }
-
-    private static int? PositiveInt(string? v)
-        => int.TryParse(v, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int n) && n > 0 ? Math.Min(n, 10000) : null;
 
     private static string Em(float n) => n.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + "em";
 
