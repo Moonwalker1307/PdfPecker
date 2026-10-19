@@ -462,7 +462,7 @@ internal sealed partial class LayoutEngine
         f.HasPrev = !breakAfter;
         // The box stopped with the probe this flow handed it: its first content is past the chain's page, which
         // nothing after it can change, and laying out its siblings would only record their headings too early.
-        if (passed is { Stopped: true } || f.Probe != null && FlowProbed(ref f)) return FlowStep.Stop;
+        if (passed is { Done: true } || f.Probe != null && FlowProbed(ref f)) return FlowStep.Stop;
         return FlowStep.Next;
     }
 
@@ -569,6 +569,7 @@ internal sealed partial class LayoutEngine
         if (f.HasPrev && f.Prev.OpsCount <= at && f.Prev.Index != f.ForcedAt && !AtPageTop(f.Prev.Top)
             && (f.PrevAvoidAfter || NextBoxAvoidsBreakBefore(f.Children, f.Index + 1))) return false;
         if (PageOf(fy) > p.KeepPage) return p.Stopped = true;
+        if (p.StopsOnceAnswered) return p.Answered = true;
         f.Probe = null;
         return false;
     }
@@ -585,6 +586,9 @@ internal sealed partial class LayoutEngine
         public readonly int KeepPage = keepPage; // the page of the chain's first content
         public int ScanFrom = opsStart;          // the ops before it hold no content
         public bool Stopped;                     // the box's layout stopped early
+        public bool StopsOnceAnswered;           // also stop once the first content is on the keep page
+        public bool Answered;                    // the layout stopped there, with the first content on the keep page
+        public bool Done => Stopped || Answered;
     }
 
     private KeepProbe? _childProbe; // for the box LayoutFlow lays out next, taken by LayoutBlockBoxCore
@@ -1083,8 +1087,10 @@ internal sealed partial class LayoutEngine
         _lastBoxChildCb = childCb;
         if (e.Name == "a" && e.GetAttribute("href") is { Length: > 0 } href) _ops.Add(new LinkOp(bx, y, used, bottom - y, href) { Link = Tags?.ElementOf(e) });
         // A box whose layout stopped early is laid out again in full right away; recording it now would put it in the
-        // outline ahead of the headings inside it that were not reached yet.
-        if (Headings != null && HeadingLevel(e.Name) is int level and > 0 && probe is not { Stopped: true }) RecordHeading(e, level, y, opsStart);
+        // outline ahead of the headings inside it that were not reached yet. A grid row is laid out to see where its
+        // content starts before the rows above it are placed, so headings found then would come out of order.
+        if (Headings != null && HeadingLevel(e.Name) is int level and > 0 && probe is not { Done: true } && !_probingGridRow)
+            RecordHeading(e, level, y, opsStart);
         if (e.LayoutKey != null) SetAnchor(e.LayoutKey, ContentTop(y, opsStart));
         _boxTrailing = trailing;
         return bottom;
