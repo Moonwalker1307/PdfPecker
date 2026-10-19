@@ -738,7 +738,7 @@ internal sealed partial class LayoutEngine
     {
         var s = e.Style;
         return s.Display is Display.Block or Display.ListItem && !s.IsMultiColumn && !s.Floated && !s.OutOfFlow && !s.FormattingRoot
-               && e.Name is not ("img" or "svg" or "hr");
+               && e.Name is not ("img" or "svg" or "hr" or "fieldset");
     }
 
     // The root element's margins do not collapse with its children's (CSS 2.1 §8.3.1).
@@ -934,6 +934,7 @@ internal sealed partial class LayoutEngine
         // Boxes that start a block formatting context keep their floats inside (CSS 2.1 §9.4.1).
         bool formattingRoot = shrinkToFit || hasWOverride || hasHOverride || s.Floated || s.OutOfFlow || s.FormattingRoot
                               || s.IsFlex || s.IsGrid || s.IsMultiColumn || s.Display is Display.TableCell or Display.TableCaption
+                              || e.Name == "fieldset"
                               || e.Parent?.Style is { IsFlex: true } or { IsGrid: true };
         // On pages of different widths a box in normal flow is as wide on each page as that page makes it.
         var pages = parentPages != null && FollowsPages(e, shrinkToFit, hasWOverride || hasHOverride || isImage || isSvg, formattingRoot)
@@ -943,6 +944,22 @@ internal sealed partial class LayoutEngine
 
         float cx = bx + bl + pl;
         float cy = y + bt + pt;
+
+        // A fieldset's legend sits on its top border instead of in its content, which starts below both.
+        var legend = e.Name == "fieldset" && !isImage && !isSvg ? RenderedLegend(e) : null;
+        (float X, float Y, float W, float H)? borderGap = null;
+        float borderOutset = 0, legendExtra = 0;
+        if (legend != null)
+        {
+            float band = LayoutLegend(legend, cx, y, contentW, bt, out var gap, out borderOutset);
+            borderGap = gap;
+            cy = y + band + pt;
+            legendExtra = band - bt;
+            frameV += legendExtra;
+        }
+        // What a height leaves out of the content box: the frame for border-box sizing; otherwise, as in Chrome, the
+        // part of a legend below the top border, which only a fieldset has.
+        float sizing = s.BorderBox ? frameV : legendExtra;
 
         if (s.Display == Display.ListItem && (s.ListStyleType != ListStyleType.None || e.MarkerContent != null || s.ListStyleImage != null))
         {
@@ -1000,10 +1017,10 @@ internal sealed partial class LayoutEngine
         {
             float? definiteH = null;
             if (hasHOverride) definiteH = Math.Max(0, overrideH - frameV);
-            else if (ClampedHeight(s, cbH) is float h) definiteH = Math.Max(0, h - (s.BorderBox ? frameV : 0));
-            float minH = MinHeightOf(s, cbH) is float mnh ? Math.Max(0, mnh - (s.BorderBox ? frameV : 0)) : 0;
+            else if (ClampedHeight(s, cbH) is float h) definiteH = Math.Max(0, h - sizing);
+            float minH = MinHeightOf(s, cbH) is float mnh ? Math.Max(0, mnh - sizing) : 0;
             float? ratioMin = RatioHeight(s, contentW, frame, frameV, hasHOverride, cbH);
-            if (ratioMin is float rh) minH = Math.Max(minH, Math.Min(rh, MaxContentHeight(s, frameV, cbH)));
+            if (ratioMin is float rh) minH = Math.Max(minH, Math.Min(rh, MaxContentHeight(s, sizing, cbH)));
             // A box that is not a formatting context root shares its top and bottom margins with its children's.
             bool joinsChildren = !shrinkToFit && !hasWOverride && !hasHOverride;
             _absorbTop = joinsChildren && FirstBlockChild(e) != null;
@@ -1015,7 +1032,10 @@ internal sealed partial class LayoutEngine
                 ? null
                 : ChildHeights(e, hasHOverride, definiteH, ratioMin != null ? minH : null, frameV);
             childCb = _cbHeight;
-            contentBottom = LayoutContent(e, cx, cy, contentW, definiteH, minH);
+            // The legend was laid out already: the content leaves it out.
+            if (legend != null) legend.Detached = true;
+            try { contentBottom = LayoutContent(e, cx, cy, contentW, definiteH, minH); }
+            finally { if (legend != null) legend.Detached = false; }
             _cbHeight = outerCb;
             _pageBox = null;
             if (outerFloats != null) contentBottom = LeaveFormattingContext(outerFloats, contentBottom);
@@ -1042,7 +1062,7 @@ internal sealed partial class LayoutEngine
         }
         else if (HeightOf(s.Height, cbH) is float specifiedH)
         {
-            float h = specifiedH - (s.BorderBox ? bt + bb + pt + pb : 0);
+            float h = specifiedH - sizing;
             contentH = Math.Max(0, h);
         }
         // aspect-ratio with an auto height: at least the ratio's height; taller content still makes it grow, except in a
@@ -1051,10 +1071,10 @@ internal sealed partial class LayoutEngine
             contentH = ratioH;
         // max-height limits the box, and content beyond it overflows; min-height wins over max-height. Flex and grid
         // containers that size the box have applied both already.
-        if (!isImage && !isSvg && !hasHOverride) contentH = Math.Min(contentH, MaxContentHeight(s, frameV, cbH));
+        if (!isImage && !isSvg && !hasHOverride) contentH = Math.Min(contentH, MaxContentHeight(s, sizing, cbH));
         if (MinHeightOf(s, cbH) is float minHeight)
         {
-            float mh = minHeight - (s.BorderBox ? bt + bb + pt + pb : 0);
+            float mh = minHeight - sizing;
             if (contentH < mh) contentH = mh;
         }
         if (container && !_measuring)
@@ -1065,8 +1085,10 @@ internal sealed partial class LayoutEngine
         }
 
         float bottom = cy + contentH + pb + bb;
-        if (pages != null && !SameOnPages(pages, y, bottom)) PaintOnPages(group, s, pages, y, bottom);
-        else BoxPainter.Paint(group, s, bx, y, used, bottom - y, _images, availW);
+        // A legend taller than the top border moves the border down to its middle, and the background with it.
+        float paintTop = y + borderOutset;
+        if (pages != null && !SameOnPages(pages, y, bottom)) PaintOnPages(group, s, pages, paintTop, bottom, borderGap: borderGap);
+        else BoxPainter.Paint(group, s, bx, paintTop, used, bottom - paintTop, _images, availW, borderGap: borderGap);
         if (BoxPainter.ClipsToText(s)) ClipBackgroundToText(group, opsStart + 1);
         if (e.Control is { } control) FinishControl(e, control, opsStart + 1, bx, y, used, bottom - y, contentBottom - cy, contentH);
         if (e == CanvasRoot) CanvasRootBox = (bx, y, used, bottom - y);
@@ -1094,6 +1116,52 @@ internal sealed partial class LayoutEngine
         if (e.LayoutKey != null) SetAnchor(e.LayoutKey, ContentTop(y, opsStart));
         _boxTrailing = trailing;
         return bottom;
+    }
+
+    /// <summary>
+    /// The legend a fieldset renders on its top border: its first legend child that is shown and neither floated nor
+    /// absolutely positioned, as in Chrome; any other legend is an ordinary box of its content.
+    /// </summary>
+    private static Element? RenderedLegend(Element fieldset)
+    {
+        foreach (var c in fieldset.Children)
+            if (c is Element { Name: "legend", Detached: false, Style: { Display: not Display.None, Floated: false, OutOfFlow: false } } legend)
+                return legend;
+        return null;
+    }
+
+    /// <summary>
+    /// Lays out a fieldset's legend over its top border, <paramref name="bt"/> thick, at the top <paramref name="y"/> of
+    /// the fieldset's border box, as wide as its content and placed along the content box (x, w) by its auto margins
+    /// or text-align, as Chrome does. A legend thinner than the border is centred in it. Returns how far below
+    /// <paramref name="y"/> the padding box starts: below the border or the legend's bottom margin, whichever is lower.
+    /// <paramref name="gap"/> is the legend's border box down to that border's bottom, where the border is not painted,
+    /// and <paramref name="outset"/> how far a taller legend moves the border down, to its middle.
+    /// </summary>
+    private float LayoutLegend(Element legend, float x, float y, float w, float bt, out (float X, float Y, float W, float H) gap, out float outset)
+    {
+        var ls = legend.Style;
+        int start = _ops.Count;
+        float bottom = LayoutBlockBox(legend, x, y, w, shrinkToFit: true);
+        float lx = _lastBoxX, lw = _lastBoxW, lh = bottom - y;
+        float to = lx;
+        // Auto margins have placed it already; otherwise the legend's own text-align does (the align attribute maps to it).
+        if (!ls.MarginLeft.IsAuto && !ls.MarginRight.IsAuto)
+        {
+            to = ComputedStyle.Resolve(ls.TextAlign, ls.Rtl) switch
+            {
+                TextAlign.Center => x + (w - lw) / 2,
+                TextAlign.Right => x + w - lw - ls.MarginRight.Resolve(w),
+                _ => x + ls.MarginLeft.Resolve(w),
+            };
+        }
+        float dy = Math.Max(0, (bt - lh) / 2);
+        if (to != lx || dy > 0)
+            for (int i = start; i < _ops.Count; i++) _ops[i].Offset(to - lx, dy);
+        gap = (to, y, lw, Math.Max(lh, bt));
+        outset = Math.Max(0, (lh - bt) / 2);
+        // The legend's top margin does not move it; its bottom margin keeps the content away from it.
+        return Math.Max(bt, dy + lh + ls.MarginBottom.Resolve(w));
     }
 
     /// <summary>
@@ -1403,9 +1471,9 @@ internal sealed partial class LayoutEngine
         return h;
     }
 
-    /// <summary>The largest content height max-height allows, or infinity.</summary>
-    private static float MaxContentHeight(ComputedStyle s, float frameV, float? cbH)
-        => HeightOf(s.MaxHeight, cbH) is float max ? Math.Max(0, max - (s.BorderBox ? frameV : 0)) : float.PositiveInfinity;
+    /// <summary>The largest content height max-height allows, less <paramref name="sizing"/>, or infinity.</summary>
+    private static float MaxContentHeight(ComputedStyle s, float sizing, float? cbH)
+        => HeightOf(s.MaxHeight, cbH) is float max ? Math.Max(0, max - sizing) : float.PositiveInfinity;
 
     /// <summary>The content width aspect-ratio pairs with a height given in the terms of box-sizing.</summary>
     internal static float RatioWidth(ComputedStyle s, float height, float frame, float frameV)
