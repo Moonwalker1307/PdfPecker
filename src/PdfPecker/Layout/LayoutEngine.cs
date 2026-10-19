@@ -437,10 +437,12 @@ internal sealed partial class LayoutEngine
 
         float top = FlowBoxTop(ref f, e, breakBefore, out float mt);
         int boxOps = _ops.Count;
+        _lastProbeStopped = false;
         float bottom = LayoutFlowBoxContent(ref f, e, ref top, joins, boxOps, out var passed);
         float trailing = _boxTrailing;
         if (joins && KeepTogetherFails(f.Chain, boxOps, top, f.ForcedAt))
         {
+            if (passed is { Stopped: true } || _lastProbeStopped) DebugT.RewindStopped++; else DebugT.RewindFull[Math.Min(_tableDepth,63)]++;
             RewindToChain(ref f);
             return FlowStep.Next;
         }
@@ -527,11 +529,15 @@ internal sealed partial class LayoutEngine
         int listBefore = _currentListIndex;
         _childPageBox = f.Pages;
         _childProbe = childProbe ?? passed;
+        if (joins) _joinDepth++;
         float bottom = LayoutBlockBox(e, bx, top, bw, shrinkToFit: false);
+        if (joins) _joinDepth--;
         _childProbe = null;
+        _lastProbeStopped = childProbe is { Stopped: true };
         if (childProbe is { Stopped: true } && !KeepTogetherFails(f.Chain, boxOps, top, f.ForcedAt))
         {
             // The chain stays after all, so the box needs all of its content: lay it out again in full.
+            DebugT.Relayout++;
             Truncate(boxOps);
             _marker = markerBefore;
             _currentListIndex = listBefore;
@@ -544,6 +550,7 @@ internal sealed partial class LayoutEngine
     /// <summary>Moves the flow back to the start of its keep-with-next chain, which then goes to the next page.</summary>
     private void RewindToChain(ref FlowState f)
     {
+        DebugT.Rewind++; DebugT.RewindAt[Math.Min(_tableDepth,63)]++;
         RewindFlow(ref f, f.Chain);
         f.ForcedAt = f.Chain.Index;
         f.HasChain = f.HasPrev = f.PrevAvoidAfter = false;
@@ -600,6 +607,7 @@ internal sealed partial class LayoutEngine
         public bool Done => Stopped || Answered;
     }
 
+    internal bool _lastProbeStopped;
     private KeepProbe? _childProbe; // for the box LayoutFlow lays out next, taken by LayoutBlockBoxCore
     private KeepProbe? _flowProbe;  // for the flow of that box, taken by LayoutFlow
 
@@ -652,9 +660,17 @@ internal sealed partial class LayoutEngine
     /// Whether the content laid out from <paramref name="opsStart"/> begins on a later page than the chain that must stay
     /// with it, and moving the chain to a new page would help.
     /// </summary>
+    /// <remarks>
+    /// Chains nested in more boxes that are themselves kept with a chain than <see cref="MaxKeptWholeNesting"/> stay
+    /// where they are: moving a chain lays out everything in it again, at every level of such nesting, so the work
+    /// doubled with each level.
+    /// </remarks>
     private bool KeepTogetherFails(in FlowMark chain, int opsStart, float fallbackY, int forcedAt)
-        => chain.Index != forcedAt && !AtPageTop(chain.Top)
+        => chain.Index != forcedAt && !AtPageTop(chain.Top) && _joinDepth < MaxKeptWholeNesting
            && FirstContentPage(opsStart, fallbackY) > chain.FirstPage;
+
+    /// <summary>How many boxes that keep-with-next chains may move to the next page are being laid out around this point.</summary>
+    private int _joinDepth;
 
     /// <summary>The page of the first text, image or drawing among the ops from <paramref name="from"/>.</summary>
     private int FirstContentPage(int from, float fallbackY) => FirstContentPage(from, _ops.Count, fallbackY);

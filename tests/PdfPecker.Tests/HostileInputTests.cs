@@ -1721,6 +1721,19 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(html));
     }
 
+    [Theory]
+    [InlineData("<h3>Named grid areas</h3><div style=\"display:grid; grid-template-areas:'head head' 'side main'; grid-template-columns:100px 1fr\"><div style=\"grid-area:main\">main</div><div style=\"grid-area:head\">head", 30)]
+    [InlineData("<h2>WebP and GIF</h2><div style=\"display:flex; flex-wrap:wrap; gap:10px\"><figurev>", 40)]
+    public void Headings_nested_in_boxes_kept_with_headings_move_to_a_bounded_depth(string level, int depth)
+    {
+        // Found by the nightly fuzz run: target html, timeout-1b5a0815, timeout-14fbab57 and timeout-b4187992. Each
+        // level is a heading kept with a box that holds the next level, and where its first text fell on a later page
+        // the heading moved to the next page and everything in the box was laid out again, at every level, so the work
+        // doubled with each one: 31 levels took 15 s. Headings nested deeper than eight such boxes stay where they are.
+        var html = "<p style='height: 600pt'>Before</p>" + Repeat(level, depth) + "end";
+        AssertStructurallyValid(Bounded(html));
+    }
+
     [Fact]
     public void Deeply_nested_tables_in_columns_move_to_the_next_column_to_a_bounded_depth()
     {
