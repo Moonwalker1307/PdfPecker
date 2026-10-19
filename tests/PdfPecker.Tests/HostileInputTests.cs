@@ -1540,6 +1540,28 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(html));
     }
 
+    [Fact]
+    public void Nested_flex_rows_across_pages_are_not_measured_again_at_every_level()
+    {
+        // Found by the fuzzer: target html, timeout-1abcdf31 and timeout-79c23971. A flex item that crosses a page is
+        // laid out again there, and a stretched one again at its new height; each time, every flex item nested in it
+        // was measured once more, so the work grew with the square of the depth: this took 22 s.
+        var html = Repeat("<div style=\"display:flex\"><div>side</div><div style=\"display:flex\">", 120)
+            + Repeat("<h3>Title</h3><p>" + Repeat("Lorem ipsum dolor sit amet, consectetur adipiscing elit. ", 20) + "</p>", 40);
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
+    public void Nested_grids_across_pages_are_not_measured_again_at_every_level()
+    {
+        // Found by the fuzzer: target html, timeout-d2edd0b0, 40 KB. The same as for flex rows, with grids nested in
+        // a grid area.
+        var html = Repeat("<h3>Named grid areas</h3><div style=\"display:grid;grid-template-areas:'head head' 'side main' 'foot foot';"
+            + "grid-template-columns:100px 1fr;gap:4px\"><div style=\"grid-area:main\">main</div><div style=\"grid-area:head\">head</div>"
+            + "<div style=\"grid-area:foot\">foot", 127);
+        AssertStructurallyValid(Bounded(html));
+    }
+
     [Theory]
     [InlineData("<style>td{border:solid</style><table ><tr><td rowspan=2><tfoot><tr")]
     [InlineData("<style>td{border:1px solid}</style><table><thead><tr><td rowspan=3>h</td></tr></thead><tr><td>a</td></tr><tr><td>b</td></tr></table>")]
