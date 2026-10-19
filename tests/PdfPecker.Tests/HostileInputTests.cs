@@ -383,6 +383,30 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Svg_text_paths_are_bounded()
+    {
+        // A path of more commands than text is laid along is not measured, and long text along a long curved path is
+        // placed glyph by glyph within the drawing's budget.
+        var huge = "<path id='h' d='M0 0 " + Repeat("L400 400 L0 0 ", 15_000) + "'/>";
+        var curvy = "<path id='c' d='M0 200 " + Repeat("q 2 -50 4 0 t 4 0 ", 2_000) + "'/>";
+        var text = Repeat("text on a path ", 20_000);
+        var pdf = Bounded($"<svg width='600' height='400'>{huge}{curvy}{Repeat("<text><textPath href='#h'>x</textPath></text>", 1_000)}"
+            + Repeat($"<text font-size='4'><textPath href='#c'>{text}</textPath></text>", 20) + "</svg>", new PdfOptions { Compress = false });
+        AssertStructurallyValid(pdf);
+        Bounded(() => PdfRenderer.Open(pdf).RenderPage(0, new ImageOptions { Dpi = 72 }));
+    }
+
+    [Theory]
+    [InlineData("<text id='t'><textPath id='tp' href='#tp'>self</textPath></text>")]
+    [InlineData("<text id='t'><textPath href='#t'>its own text</textPath></text>")]
+    [InlineData("<text><textPath href='#nothing'>missing</textPath></text>")]
+    [InlineData("<path id='p' d='M0 0'/><text><textPath href='#p'>no length</textPath></text>")]
+    [InlineData("<path id='p' d='M0 0 L1e38 1e38 L-1e38 -1e38'/><text><textPath href='#p' startOffset='1e38'>far</textPath></text>")]
+    [InlineData("<path id='p' d='M0 0 L100 100'/><text><textPath href='#p'><textPath href='#p'><textPath href='#p'>nested</textPath></textPath></textPath></text>")]
+    public void Svg_text_paths_with_broken_references_draw_nothing_or_little(string content)
+        => AssertStructurallyValid(Bounded($"<svg width='200' height='200'>{content}</svg>"));
+
+    [Fact]
     public void Tiny_svg_dashes_on_a_long_stroke_render_within_bounds()
     {
         // Dashes far below a pixel would make the renderer stroke hundreds of millions of segments.
