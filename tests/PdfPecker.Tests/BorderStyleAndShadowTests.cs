@@ -84,6 +84,42 @@ public class BorderStyleAndShadowTests
     }
 
     [Fact]
+    public void A_two_pixel_groove_has_both_shades_as_in_Chrome()
+    {
+        // Chrome splits a groove from two pixels up: the default fieldset border is a dark and a light line, not one dark one.
+        string Box(string style) => Body + $"<div style='width:40px;height:40px;border:2px {style} #c00'></div>";
+        Near(0x78, 0, 0, Pixel(Box("groove"), 20, 0));
+        Near(0xCC, 0, 0, Pixel(Box("groove"), 20, 1));
+        Near(0x78, 0, 0, Pixel(Box("groove"), 20, 42));
+        Near(0xCC, 0, 0, Pixel(Box("groove"), 20, 43));
+        Near(0xCC, 0, 0, Pixel(Box("ridge"), 0, 20));
+        Near(0x78, 0, 0, Pixel(Box("ridge"), 1, 20));
+    }
+
+    [Theory]
+    [InlineData("groove")]
+    [InlineData("ridge")]
+    public void A_one_pixel_groove_or_ridge_is_drawn_unshaded(string style)
+    {
+        // Too thin for two shades, Chrome draws it in its own colour on every side.
+        var html = Body + $"<div style='width:40px;height:40px;border:1px {style} #c00'></div>";
+        Near(0xCC, 0, 0, Pixel(html, 20, 0));
+        Near(0xCC, 0, 0, Pixel(html, 0, 20));
+        Near(0xCC, 0, 0, Pixel(html, 20, 41));
+        Near(0xCC, 0, 0, Pixel(html, 41, 20));
+    }
+
+    [Fact]
+    public void A_collapsed_one_pixel_groove_is_drawn_unshaded()
+    {
+        var html = Body + "<table style='border-collapse:collapse'><tr><td style='width:40px;height:40px;padding:0;border:1px groove #c00'></td></tr></table>";
+        // Sampled inside each side, wherever the collapsed border's half-pixel edges land.
+        Near(0xCC, 0, 0, Pixel(html, 20, 1));
+        Near(0xCC, 0, 0, Pixel(html, 0, 20));
+        Near(0xCC, 0, 0, Pixel(html, 41, 20));
+    }
+
+    [Fact]
     public void Three_d_borders_with_rounded_corners_are_shaded()
     {
         var html = Body + "<div style='width:60px;height:40px;border:12px outset #c00;border-radius:16px'></div>";
