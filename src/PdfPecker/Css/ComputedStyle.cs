@@ -100,6 +100,21 @@ internal sealed class GridAreas
 internal enum SvgLineCap : byte { Butt, Round, Square }
 internal enum SvgLineJoin : byte { Miter, Round, Bevel }
 
+/// <summary>
+/// A stroke-dasharray: dash and gap lengths in user units, or percentages of the viewport's normalised diagonal where
+/// <see cref="Percent"/> says so. An odd-length list is kept as written; it repeats when the dashes are drawn.
+/// </summary>
+internal sealed class SvgDashArray
+{
+    /// <summary>The most values a dash array keeps; a longer list is ignored, so one property cannot blow up every stroke it reaches.</summary>
+    public const int MaxValues = 256;
+
+    public readonly float[] Values;
+    public readonly bool[]? Percent; // null when no value is a percentage
+
+    public SvgDashArray(float[] values, bool[]? percent) { Values = values; Percent = percent; }
+}
+
 internal enum TextAlign : byte { Left, Right, Center, Justify, Start, End } // Start and End follow the direction
 internal enum UnicodeBidi : byte { Normal, Embed, Isolate, BidiOverride, IsolateOverride, Plaintext }
 internal enum WhiteSpace : byte { Normal, NoWrap, Pre, PreWrap, PreLine }
@@ -301,6 +316,9 @@ internal sealed class ComputedStyle
     public SvgLineCap SvgLineCap;
     public SvgLineJoin SvgLineJoin;
     public float SvgMiterLimit = 4;
+    public SvgDashArray? SvgDashArray;       // stroke-dasharray; null = none
+    public float SvgDashOffset;              // stroke-dashoffset, in user units or a percentage
+    public bool SvgDashOffsetPercent;
     public bool SvgClipEvenOdd;              // clip-rule
     public byte SvgTextAnchor;               // 0 start, 1 middle, 2 end
     public byte SvgBaseline;                 // dominant-baseline: 0 alphabetic, 1 middle/central, 2 hanging, 3 text-after-edge

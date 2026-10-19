@@ -28,6 +28,8 @@ internal sealed class SvgShape
     public SvgLineCap LineCap;
     public SvgLineJoin LineJoin;
     public float MiterLimit = 4;
+    public float[]? Dash;                         // stroke dash and gap lengths, an even count; null for a solid stroke
+    public float DashPhase;
     public float MinX, MinY, MaxX, MaxY;          // bounds, for tiling repeating gradients
 
     // Text runs.
@@ -117,6 +119,7 @@ internal sealed partial class SvgImage
     private readonly Dictionary<string, Element> _ids = new(StringComparer.Ordinal);
     private int _clipDepth, _maskDepth, _filterDepth, _patternDepth;
     private SvgBudget _budget = null!;
+    private float _diagonal; // the root viewport's normalised diagonal, which percentage dash lengths refer to
     private Func<string, object?>? _load; // the PdfImage or SvgImage at an image element's href, or null
 
     /// <summary>
@@ -137,6 +140,10 @@ internal sealed partial class SvgImage
             img.ViewBoxWidth = vb[2];
             img.ViewBoxHeight = vb[3];
         }
+        // Without a viewBox, the viewport is the given size, else the default size of a replaced element (300 × 150).
+        float vpw = img.HasViewBox ? img.ViewBoxWidth : img.Width / 0.75f ?? 300;
+        float vph = img.HasViewBox ? img.ViewBoxHeight : img.Height / 0.75f ?? 150;
+        img._diagonal = MathF.Sqrt((vpw * vpw + vph * vph) / 2);
         var par = svg.GetAttribute("preserveaspectratio");
         if (par != null)
         {
@@ -336,7 +343,7 @@ internal sealed partial class SvgImage
             case "line":
             {
                 var line = ShapePath(e);
-                Emit(s, ctm, op, line, fillable: false);
+                Emit(s, ctm, op, line, fillable: false, Num(e, "pathlength", float.NaN));
                 if (line != null) RenderMarkers(s, ctm, op, line, depth);
                 return;
             }
@@ -344,7 +351,7 @@ internal sealed partial class SvgImage
                 // Not drawn: defs, symbol (only through use), gradients, clipPath, mask, pattern, marker, filter, style...
                 if (ShapePath(e) is { } path)
                 {
-                    Emit(s, ctm, op, path);
+                    Emit(s, ctm, op, path, pathLength: Num(e, "pathlength", float.NaN));
                     if (e.Name is "path" or "polyline" or "polygon") RenderMarkers(s, ctm, op, path, depth);
                 }
                 return;
@@ -400,7 +407,7 @@ internal sealed partial class SvgImage
     private void RenderReferenced(Element target, Element use, Matrix m, float opacity, int depth)
         => Render(target, m, opacity * (use.Style?.Opacity ?? 1), depth);
 
-    private void Emit(ComputedStyle s, Matrix ctm, float opacity, PathBuilder? path, bool fillable = true)
+    private void Emit(ComputedStyle s, Matrix ctm, float opacity, PathBuilder? path, bool fillable = true, float pathLength = float.NaN)
     {
         if (path == null || path.Verbs.Count == 0 || !s.Visible) return;
         if ((_budget.Remaining -= path.Points.Count / 2) < 0) return;
@@ -416,6 +423,12 @@ internal sealed partial class SvgImage
             LineJoin = s.SvgLineJoin,
             MiterLimit = s.SvgMiterLimit,
         };
+        if (s.SvgDashArray != null && s.SvgStrokeWidth > 0)
+        {
+            // pathLength rescales distances along the path: dash lengths are given in its units, not user units.
+            float along = pathLength > 0 && float.IsFinite(pathLength) ? PathLength(path) / pathLength : 1;
+            shape.Dash = Dashes(s, ctm.ScaleFactor * along, out shape.DashPhase);
+        }
         if (fillable) shape.Fill = Paint(s.SvgFill, s.SvgFillUrl, s.SvgFillOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.FillGradient, out shape.FillPattern);
         if (s.SvgStrokeWidth > 0)
             shape.Stroke = Paint(s.SvgStroke, s.SvgStrokeUrl, s.SvgStrokeOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.StrokeGradient, out shape.StrokePattern);
@@ -423,6 +436,85 @@ internal sealed partial class SvgImage
         for (int i = 0; i + 1 < pts.Length; i += 2) ctm.Apply(ref pts[i], ref pts[i + 1]);
         Bounds(pts, out shape.MinX, out shape.MinY, out shape.MaxX, out shape.MaxY);
         Shapes.Add(shape);
+    }
+
+    /// <summary>
+    /// The stroke-dasharray and stroke-dashoffset of a style as a PDF dash pattern, with lengths multiplied by
+    /// <paramref name="scale"/>: an odd-length list is repeated to make it even, and a pattern whose lengths add up to
+    /// zero (or to nothing measurable) is a solid stroke, so it is null. The phase is brought into the range the PDF
+    /// dash operator expects, from zero to the pattern's length.
+    /// </summary>
+    private float[]? Dashes(ComputedStyle s, float scale, out float phase)
+    {
+        phase = 0;
+        var dash = s.SvgDashArray!;
+        int n = dash.Values.Length;
+        var result = new float[n % 2 == 0 ? n : 2 * n];
+        double sum = 0;
+        for (int i = 0; i < result.Length; i++)
+        {
+            int k = i % n;
+            float v = dash.Values[k];
+            if (dash.Percent != null && dash.Percent[k]) v = v / 100 * _diagonal;
+            result[i] = v * scale;
+            sum += result[i];
+        }
+        if (!(sum > 1e-4 && sum < Length.MaxMagnitude)) return null;
+        float offset = (s.SvgDashOffsetPercent ? s.SvgDashOffset / 100 * _diagonal : s.SvgDashOffset) * scale;
+        double p = offset % sum;
+        phase = (float)(p < 0 ? p + sum : p);
+        return result;
+    }
+
+    /// <summary>The length of a path in its own user space, with each curve measured along a few chords.</summary>
+    private static float PathLength(PathBuilder path)
+    {
+        const int Chords = 16;
+        double length = 0;
+        float x = 0, y = 0, startX = 0, startY = 0;
+        int pi = 0;
+        var pts = path.Points;
+        foreach (var verb in path.Verbs)
+        {
+            switch (verb)
+            {
+                case SvgShape.MoveTo:
+                    x = startX = pts[pi++];
+                    y = startY = pts[pi++];
+                    break;
+                case SvgShape.LineTo:
+                    length += Distance(x, y, pts[pi], pts[pi + 1]);
+                    x = pts[pi++];
+                    y = pts[pi++];
+                    break;
+                case SvgShape.CurveTo:
+                {
+                    float px = x, py = y;
+                    for (int i = 1; i <= Chords; i++)
+                    {
+                        float t = i / (float)Chords, u = 1 - t;
+                        float a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t;
+                        float qx = a * x + b * pts[pi] + c * pts[pi + 2] + d * pts[pi + 4];
+                        float qy = a * y + b * pts[pi + 1] + c * pts[pi + 3] + d * pts[pi + 5];
+                        length += Distance(px, py, qx, qy);
+                        px = qx;
+                        py = qy;
+                    }
+                    x = pts[pi + 4];
+                    y = pts[pi + 5];
+                    pi += 6;
+                    break;
+                }
+                case SvgShape.Close:
+                    length += Distance(x, y, startX, startY);
+                    x = startX;
+                    y = startY;
+                    break;
+            }
+        }
+        return (float)length;
+
+        static double Distance(float x0, float y0, float x1, float y1) => Math.Sqrt((double)(x1 - x0) * (x1 - x0) + (double)(y1 - y0) * (y1 - y0));
     }
 
     private static void Bounds(float[] pts, out float minX, out float minY, out float maxX, out float maxY)
@@ -868,6 +960,7 @@ internal sealed partial class SvgImage
             LineCap = s.SvgLineCap,
             MiterLimit = s.SvgMiterLimit,
         };
+        if (s.SvgDashArray != null && s.SvgStrokeWidth > 0) shape.Dash = Dashes(s, ctm.ScaleFactor, out shape.DashPhase);
         shape.Fill = Paint(s.SvgFill, s.SvgFillUrl, s.SvgFillOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.FillGradient, out shape.FillPattern);
         if (s.SvgStrokeWidth > 0)
             shape.Stroke = Paint(s.SvgStroke, s.SvgStrokeUrl, s.SvgStrokeOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.StrokeGradient, out shape.StrokePattern);

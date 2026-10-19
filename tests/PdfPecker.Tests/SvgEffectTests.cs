@@ -421,6 +421,90 @@ public class SvgEffectTests
         Assert.True(IsRed(At(pdf, 200, 250)));
     }
 
+    // ---- stroke dashes ----
+
+    private static float[]? DashOf(string content, string id = "a", string svg = "width='200' height='100'")
+    {
+        var doc = Styled($"<svg id='s' {svg}>{content}</svg>");
+        return SvgImage.Build(ById(doc, "s")).Shapes.Single(s => s.Stroke == ById(doc, id).Style!.SvgStroke).Dash;
+    }
+
+    [Theory]
+    [InlineData("10 5", new[] { 10f, 5f })]
+    [InlineData("10,5", new[] { 10f, 5f })]
+    [InlineData(" 4 , 2 1 ", new[] { 4f, 2f, 1f, 4f, 2f, 1f })] // an odd-length list repeats
+    [InlineData("3", new[] { 3f, 3f })]
+    [InlineData("0.75pt 0.5in", new[] { 1f, 48f })]
+    [InlineData("10%", new[] { 10f, 10f })] // of the viewport's normalised diagonal, sqrt((100² + 100²) / 2) = 100
+    public void Stroke_dasharray_becomes_the_dash_pattern(string value, float[] expected)
+    {
+        var dash = DashOf($"<line id='a' x2='100' stroke='red' stroke-dasharray='{value}'/>", svg: "width='200' height='100' viewBox='0 0 100 100'");
+        Assert.NotNull(dash);
+        Assert.Equal(expected, dash!.Select(v => MathF.Round(v, 3)));
+    }
+
+    [Theory]
+    [InlineData("none")]
+    [InlineData("10 -5")]   // a negative value makes the list invalid
+    [InlineData("0 0")]     // a pattern of length zero
+    [InlineData("10,,5")]
+    [InlineData("10 x")]
+    public void Invalid_or_empty_dash_arrays_give_a_solid_stroke(string value)
+        => Assert.Null(DashOf($"<line id='a' x2='100' stroke='red' stroke-dasharray='{value}'/>"));
+
+    [Fact]
+    public void Dash_arrays_inherit_and_come_from_css()
+    {
+        Assert.Equal(new[] { 2f, 6f }, DashOf("<g stroke-dasharray='2 6'><line id='a' x2='100' stroke='red'/></g>"));
+        Assert.Null(DashOf("<g stroke-dasharray='2 6'><line id='a' x2='100' stroke='red' stroke-dasharray='none'/></g>"));
+        Assert.Equal(new[] { 6f, 2f }, DashOf("<line id='a' style='stroke-dasharray:6px,2;stroke-dashoffset:-1' x2='100' stroke='red'/>"));
+        // The user units of a transformed shape are scaled into the root's.
+        Assert.Equal(new[] { 4f, 2f }, DashOf("<g transform='scale(2)'><line id='a' x2='100' stroke='red' stroke-dasharray='2 1'/></g>"));
+    }
+
+    [Fact]
+    public void Dash_offset_becomes_the_phase_within_the_pattern()
+    {
+        static float Phase(string content)
+        {
+            var doc = Styled($"<svg id='s' width='200' height='100'>{content}</svg>");
+            return SvgImage.Build(ById(doc, "s")).Shapes.Single().DashPhase;
+        }
+        Assert.Equal(3, Phase("<line x2='100' stroke='red' stroke-dasharray='8 4' stroke-dashoffset='3'/>"));
+        Assert.Equal(7, Phase("<line style='stroke-dasharray:6px,2;stroke-dashoffset:-1' x2='100' stroke='red'/>")); // -1 within a pattern of 8
+        Assert.Equal(1, Phase("<line x2='100' stroke='red' stroke-dasharray='8 4' stroke-dashoffset='25'/>"));
+    }
+
+    [Fact]
+    public void Path_length_rescales_dashes()
+    {
+        // A line 200 units long measured as 100: each dash unit is two user units.
+        Assert.Equal(new[] { 60f, 140f }, DashOf("<line id='a' x2='200' stroke='red' pathLength='100' stroke-dasharray='30 70'/>"));
+        var donut = DashOf("<circle id='a' cx='50' cy='50' r='40' fill='none' stroke='red' pathLength='100' stroke-dasharray='25 75'/>")!;
+        Assert.Equal(2 * MathF.PI * 40 / 4, donut[0], 0.2f);
+    }
+
+    [Fact]
+    public void Dashed_svg_strokes_are_drawn_dashed()
+    {
+        var pdf = Svg("""
+            <line x1="0" y1="50" x2="400" y2="50" stroke="red" stroke-width="20" stroke-dasharray="40 40"/>
+            <line x1="0" y1="150" x2="400" y2="150" stroke="red" stroke-width="20"/>
+            """);
+        var content = AllContent(pdf);
+        Assert.Contains("[40 40] 0 d", content);
+        // The dash is put back to solid for the next stroke.
+        Assert.Matches(@"\[40 40\] 0 d\n[^\[]*S\n\[\] 0 d\n", content);
+        Assert.True(IsRed(At(pdf, 20, 50)), $"{At(pdf, 20, 50)}");
+        Assert.True(IsWhite(At(pdf, 60, 50)), $"{At(pdf, 60, 50)}");
+        Assert.True(IsRed(At(pdf, 100, 50)), $"{At(pdf, 100, 50)}");
+        Assert.True(IsRed(At(pdf, 60, 150)), $"{At(pdf, 60, 150)}");
+    }
+
+    [Fact]
+    public void Solid_svg_strokes_write_no_dash_pattern()
+        => Assert.DoesNotContain(" d\n", AllContent(Svg("<rect x='10' y='10' width='100' height='100' fill='none' stroke='red'/>")));
+
     // ---- table cells and borders ----
 
     [Fact]

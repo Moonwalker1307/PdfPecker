@@ -372,6 +372,26 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Huge_svg_dash_arrays_are_ignored()
+    {
+        // A million dash lengths on each of many strokes would be written out again for every one of them.
+        var dashes = Repeat("1 ", 1_000_000);
+        var pdf = Bounded($"<svg width='400' height='400'><g stroke-dasharray='{dashes}'>{Repeat("<line x2='400' y2='400' stroke='red'/>", 200)}</g></svg>",
+            new PdfOptions { Compress = false });
+        AssertStructurallyValid(pdf);
+        Assert.DoesNotContain("[1 1 ", Latin1(pdf));
+    }
+
+    [Fact]
+    public void Tiny_svg_dashes_on_a_long_stroke_render_within_bounds()
+    {
+        // Dashes far below a pixel would make the renderer stroke hundreds of millions of segments.
+        var pdf = Bounded("<svg width='600' height='600'><path d='M0 0 " + Repeat("L600 600 L0 0 ", 500) + "' stroke='red' stroke-width='2' stroke-dasharray='0.001 0.001'/></svg>");
+        AssertStructurallyValid(pdf);
+        Bounded(() => PdfRenderer.Open(pdf).RenderPage(0, new ImageOptions { Dpi = 300 }));
+    }
+
+    [Fact]
     public void Page_count_is_limited()
     {
         Assert.Throws<PdfLimitException>(() => Bounded("<div style='height:100000000px'>x</div>", new PdfOptions { MaxPages = 1000 }));

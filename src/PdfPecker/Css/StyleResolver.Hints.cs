@@ -128,7 +128,7 @@ internal sealed partial class StyleResolver
         "stroke-miterlimit", "opacity", "display", "visibility", "color", "clip-path", "clip-rule", "text-anchor",
         "dominant-baseline", "alignment-baseline", "font-size", "font-family", "font-weight", "font-style", "letter-spacing",
         "mask", "mask-type", "filter", "marker", "marker-start", "marker-mid", "marker-end", "flood-color", "flood-opacity",
-        "lighting-color", "color-interpolation-filters", "direction", "unicode-bidi",
+        "lighting-color", "color-interpolation-filters", "direction", "unicode-bidi", "stroke-dasharray", "stroke-dashoffset",
     };
 
     /// <summary>The fragment of a url(#id) reference, as "#id"; null for none or anything else.</summary>

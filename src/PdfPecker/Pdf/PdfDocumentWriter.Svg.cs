@@ -95,6 +95,7 @@ internal sealed partial class PdfDocumentWriter
                     if (TranslucentGradient(shape)) { WriteSoftMaskedSvgShape(b, shape, toPage); continue; }
                     WriteSvgPaint(b, shape, toPage);
                     WriteSvgText(b, shape, shape.HasFill ? (shape.HasStroke ? 2 : 0) : 1);
+                    EndSvgDash(b, shape);
                     continue;
             }
             if (TranslucentGradient(shape)) { WriteSoftMaskedSvgShape(b, shape, toPage); continue; }
@@ -103,6 +104,7 @@ internal sealed partial class PdfDocumentWriter
             if (shape.HasFill && shape.HasStroke) b.Ascii(shape.EvenOdd ? "B*\n" : "B\n");
             else if (shape.HasFill) b.Ascii(shape.EvenOdd ? "f*\n" : "f\n");
             else b.Ascii("S\n");
+            EndSvgDash(b, shape);
         }
         // Unbalanced groups (none are made, but a cut-off drawing must not leave the stream's state saved).
         while (states.Count > 0)
@@ -476,11 +478,28 @@ internal sealed partial class PdfDocumentWriter
         else SetStroke(b, shape.Stroke!.Value);
     }
 
-    /// <summary>Sets the width, caps, joins and miter limit of an SVG shape's stroke.</summary>
+    /// <summary>Sets the width, caps, joins, miter limit and dash pattern of an SVG shape's stroke.</summary>
     private void WriteSvgLineStyle(ByteBuffer b, SvgShape shape)
     {
         _lineWidth = -1;
         b.Num(shape.StrokeWidth).Ascii(" w ").Int((int)shape.LineCap).Ascii(" J ").Int((int)shape.LineJoin).Ascii(" j ")
             .Num(shape.MiterLimit).Ascii(" M\n");
+        if (shape.Dash is not { } dash) return;
+        b.Ascii("[");
+        for (int i = 0; i < dash.Length; i++)
+        {
+            if (i > 0) b.Sp();
+            b.Num(dash[i]);
+        }
+        b.Ascii("] ").Num(shape.DashPhase).Ascii(" d\n");
+    }
+
+    /// <summary>
+    /// Puts back the solid line after a dashed SVG stroke. The dash pattern is set only for the shapes that have one, so
+    /// the content of solid strokes stays as it was before dashes were supported.
+    /// </summary>
+    private static void EndSvgDash(ByteBuffer b, SvgShape shape)
+    {
+        if (shape.Dash != null && shape.HasStroke) b.Ascii("[] 0 d\n");
     }
 }

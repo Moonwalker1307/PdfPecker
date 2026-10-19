@@ -33,6 +33,7 @@ internal static class CssSupports
         "fill", "stroke", "stroke-width", "fill-opacity", "stroke-opacity", "fill-rule", "stroke-linecap", "stroke-linejoin",
         "stroke-miterlimit", "clip-path", "clip-rule", "mask", "mask-type", "filter", "marker", "marker-start", "marker-mid",
         "marker-end", "flood-color", "flood-opacity", "lighting-color", "color-interpolation-filters", "text-anchor", "dominant-baseline",
+        "stroke-dasharray", "stroke-dashoffset",
         "alignment-baseline", "border", "border-top", "border-right", "border-bottom", "border-left", "border-width",
         "border-style", "border-color", "border-radius", "border-top-width", "border-right-width", "border-bottom-width",
         "border-left-width", "border-top-style", "border-right-style", "border-bottom-style", "border-left-style",
