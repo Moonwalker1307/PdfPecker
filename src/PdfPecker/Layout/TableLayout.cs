@@ -892,7 +892,9 @@ internal sealed partial class LayoutEngine
     {
         var cs = cell.Td.Style;
         float h = rowBottom - cell.Top;
-        float shift = cs.VerticalAlign switch
+        // As in Chrome, a cell that is split across pages or columns keeps its content at the top: aligned within the
+        // whole cell, the content would start pages later, away from the heading that must stay with the table.
+        float shift = CrossesPage(cell.Top, rowBottom) ? 0 : cs.VerticalAlign switch
         {
             // The content is aligned within the whole cell, also when the cell's height made it taller than the content.
             VerticalAlign.Middle => (h - cell.ContentH) / 2,
