@@ -99,8 +99,12 @@ internal sealed partial class LayoutEngine
                 if (child is not Element td || td.Style == null || td.Style.Display != Display.TableCell) continue;
                 while (IsOccupied(r, col)) col++;
                 int colspan = Math.Clamp(ParseInt(td.GetAttribute("colspan"), 1), 1, 1000);
+                // As in HTML, a cell spans rows only within its own header, body or footer: those rows are laid out
+                // on their own (the header and footer repeat on every page), so a cell reaching into another part
+                // would be finished in rows that never laid it out.
+                int groupEnd = r < head.Count ? head.Count : r < head.Count + body.Count ? head.Count + body.Count : trs.Count;
                 int rowspan = ParseInt(td.GetAttribute("rowspan"), 1);
-                if (rowspan <= 0 || r + rowspan > trs.Count) rowspan = trs.Count - r;
+                if (rowspan <= 0 || r + rowspan > groupEnd) rowspan = groupEnd - r;
                 var cell = new CellModel { Td = td, Row = r, Col = col, ColSpan = colspan, RowSpan = Math.Max(1, rowspan) };
                 for (int rr = r; rr < r + cell.RowSpan; rr++)
                     for (int cc = col; cc < col + colspan; cc++) Occupy(rr, cc);

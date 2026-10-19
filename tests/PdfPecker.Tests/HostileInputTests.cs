@@ -1475,6 +1475,18 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded("<p>before</p>" + svg + "<p>after</p>"));
     }
 
+    [Theory]
+    [InlineData("<style>td{border:solid</style><table ><tr><td rowspan=2><tfoot><tr")]
+    [InlineData("<style>td{border:1px solid}</style><table><thead><tr><td rowspan=3>h</td></tr></thead><tr><td>a</td></tr><tr><td>b</td></tr></table>")]
+    [InlineData("<style>td{border:1px solid}</style><table><tr><td rowspan=0>a</td></tr><tr><td>b</td></tr><tfoot><tr><td>f</td></tr></tfoot></table>")]
+    public void Cells_spanning_rows_into_another_table_part_do_not_throw(string html)
+    {
+        // Found by the fuzzer: target html, exception-0ed0ecfb. A body cell's rowspan reached into the footer, whose
+        // rows are laid out on their own to repeat on every page, so the cell was finished there without having been
+        // laid out and painting its borders threw NullReferenceException.
+        AssertStructurallyValid(Bounded(html));
+    }
+
     [Fact]
     public void Rebuilding_the_object_table_late_without_finding_a_catalog_keeps_the_table_that_worked()
     {
