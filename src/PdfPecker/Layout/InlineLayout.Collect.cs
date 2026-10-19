@@ -126,7 +126,7 @@ internal sealed partial class LayoutEngine
     {
         float boxLeft = s.PaddingLeft.Resolve(0) + s.BorderLeft, boxRight = s.PaddingRight.Resolve(0) + s.BorderRight;
         var outer = deco;
-        if (PaintsInlineBox(s) || s.BoxDecorationClone && (boxLeft > 0 || boxRight > 0)) deco = new InlineDeco(s, outer, boxLeft, boxRight);
+        if (PaintsInlineBox(s) || s.BoxDecorationClone && (boxLeft > 0 || boxRight > 0)) deco = new InlineDeco(e, s, outer, boxLeft, boxRight);
         float marginLeft = AutoAsZero(s.MarginLeft), marginRight = AutoAsZero(s.MarginRight);
         int first = st.Items.Count;
         var (bidiOpen, bidiClose) = BidiControls(s);
@@ -138,9 +138,10 @@ internal sealed partial class LayoutEngine
         if (s.Position == Position.Relative) ShiftRelative(st, first, s);
     }
 
-    /// <summary>Whether an inline element paints anything of its own box: a background, shadows or an outline.</summary>
+    /// <summary>Whether an inline element paints anything of its own box: a background, shadows, borders or an outline.</summary>
     private static bool PaintsInlineBox(ComputedStyle s) =>
-        CssColor.IsVisible(s.BackgroundColor) || s.BackgroundImages != null || s.BoxShadows != null || s.OutlineStyle != BorderStyle.None;
+        CssColor.IsVisible(s.BackgroundColor) || s.BackgroundImages != null || s.BoxShadows != null || s.HasBorder
+        || s.OutlineStyle != BorderStyle.None;
 
     /// <summary>
     /// The spacer of one side of an inline element: its padding and border, and its margin outside them. A margin of an

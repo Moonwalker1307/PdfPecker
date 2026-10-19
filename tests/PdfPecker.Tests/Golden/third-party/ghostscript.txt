@@ -1,0 +1,6 @@
+Ghostscript pdfwrite fixture
+
+Text in the URW base 35 fonts, embedded as CFF subsets.
+Accented: æøå ÆØÅ café naïve.
+
+Mono: 0123456789

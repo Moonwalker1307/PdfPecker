@@ -47,15 +47,24 @@ public class RendererGoldenTests
         var pdf = File.ReadAllBytes(Path.Combine(Root, sample + ".expected.pdf"));
         var options = new ImageOptions { Dpi = Dpi, PngCompression = CompressionLevel.SmallestSize };
         var actual = PdfRenderer.Open(pdf).RenderPage(0, options);
-        var pngPath = Path.Combine(Root, "render", sample.Replace('/', '-') + ".png");
+        AssertMatchesPng(actual, Path.Combine(Root, "render", sample.Replace('/', '-') + ".png"), sample);
+    }
 
+    /// <summary>
+    /// Compares a rendering with a PNG baseline within the tolerances above, or writes the baseline when
+    /// PDFPECKER_UPDATE_GOLDEN=1. With <paramref name="owner"/> false the baseline belongs to another test, which may be
+    /// rewriting it in the same run, so nothing is written or compared in that mode.
+    /// </summary>
+    internal static void AssertMatchesPng(RenderedImage actual, string pngPath, string label, bool owner = true)
+    {
         if (Environment.GetEnvironmentVariable("PDFPECKER_UPDATE_GOLDEN") == "1")
         {
+            if (!owner) return;
             Directory.CreateDirectory(Path.GetDirectoryName(pngPath)!);
             File.WriteAllBytes(pngPath, actual.ToPng());
             return;
         }
-        Assert.True(File.Exists(pngPath), $"No baseline for {sample}. Create it with PDFPECKER_UPDATE_GOLDEN=1.");
+        Assert.True(File.Exists(pngPath), $"No baseline for {label}. Create it with PDFPECKER_UPDATE_GOLDEN=1.");
 
         var (width, height, expected) = DecodePng(File.ReadAllBytes(pngPath));
         string? failure = null;
@@ -77,9 +86,9 @@ public class RendererGoldenTests
         if (failure == null) return;
         var outDir = Path.Combine(AppContext.BaseDirectory, "golden-actual");
         Directory.CreateDirectory(outDir);
-        var outPath = Path.Combine(outDir, "render-" + sample.Replace('/', '-') + ".png");
+        var outPath = Path.Combine(outDir, "render-" + label.Replace('/', '-') + ".png");
         File.WriteAllBytes(outPath, actual.ToPng());
-        Assert.Fail($"{sample} renders differently from its baseline: {failure}\nNew rendering: {outPath}");
+        Assert.Fail($"{label} renders differently from its baseline: {failure}\nNew rendering: {outPath}");
     }
 
     /// <summary>Decodes the 8-bit RGB or RGBA PNGs the renderer writes into straight RGBA.</summary>
