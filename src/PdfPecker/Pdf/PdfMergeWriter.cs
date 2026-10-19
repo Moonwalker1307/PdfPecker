@@ -52,6 +52,8 @@ internal sealed class PdfMergeWriter : PdfObjectWriter
         public bool NeedAppearances;
         public int StructOffset = -1; // added to the input's parent-tree keys; -1 = untagged, its keys are dropped
         public SortedDictionary<int, PdfObject>? ParentNums;
+        // Kept from when the structure was collected: a damaged file rebuilt in between can have another catalog.
+        public PdfDict? StructRoot;
     }
 
     private readonly PdfMergeOptions _options;
@@ -745,6 +747,7 @@ internal sealed class PdfMergeWriter : PdfObjectWriter
         if ((long)_parentTreeNext + nextKey > int.MaxValue / 2) return; // keys out of any sane range: leave this input untagged
         input.StructOffset = _parentTreeNext;
         input.ParentNums = nums;
+        input.StructRoot = root;
         _parentTreeNext += nextKey;
         if (otherLang)
             foreach (var k in KidsOf(file, root["K"]))
@@ -1064,7 +1067,7 @@ internal sealed class PdfMergeWriter : PdfObjectWriter
     private void WriteStructure(Input input)
     {
         var file = input.File;
-        var root = file.GetDict(file.Catalog, "StructTreeRoot")!;
+        var root = input.StructRoot!;
         var saved = _out;
         try
         {

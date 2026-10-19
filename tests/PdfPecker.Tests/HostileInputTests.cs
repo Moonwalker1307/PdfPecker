@@ -1,6 +1,8 @@
 using System.Buffers.Binary;
+using System.Globalization;
 using System.IO.Compression;
 using System.Text;
+using System.Text.RegularExpressions;
 using PdfPecker.Css;
 using PdfPecker.Fonts;
 using PdfPecker.Html;
@@ -1563,6 +1565,24 @@ public class HostileInputTests
         {
             // A line taller than the page limit is a documented failure.
         }
+    }
+
+    [Fact]
+    public void Merging_a_tagged_pdf_whose_catalog_changes_when_the_damaged_file_is_rebuilt_works()
+    {
+        // Found by the fuzzer: target pdf-merge, exception-13f9fba8. A wrong offset found while copying the pages made
+        // the file rebuild its object table, which took a later copy of the catalog without a structure tree, and
+        // writing the structure looked the catalog up again and got null.
+        var text = Encoding.Latin1.GetString(HtmlToPdf.Convert("<h1>Title</h1><p>Text</p>", new PdfOptions { Accessibility = PdfAccessibility.Tagged }));
+        int root = int.Parse(Regex.Match(text, @"/Root (\d+) 0 R").Groups[1].Value, CultureInfo.InvariantCulture);
+        string pages = Regex.Match(text, @"/Pages (\d+) 0 R").Groups[1].Value;
+        int contents = int.Parse(Regex.Match(text, @"/Contents (\d+) 0 R").Groups[1].Value, CultureInfo.InvariantCulture);
+        // The content stream's xref entry points at the header, and a second catalog with the same number follows the end.
+        int xref = text.LastIndexOf("\nxref\n", StringComparison.Ordinal) + 6;
+        int entry = text.IndexOf('\n', xref) + 1 + contents * 20;
+        text = text[..entry] + "0000000001" + text[(entry + 10)..] + $"\n{root} 0 obj\n<< /Type /Catalog /Pages {pages} 0 R >>\nendobj\n";
+        var merged = PdfMerger.Merge(new[] { Encoding.Latin1.GetBytes(text), HtmlToPdf.Convert("<p>Second</p>") });
+        Assert.Equal(2, PdfRenderer.Open(merged).PageCount);
     }
 
     [Fact]
