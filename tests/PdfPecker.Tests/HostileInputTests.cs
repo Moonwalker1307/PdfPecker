@@ -106,6 +106,18 @@ public class HostileInputTests
             }
     }
 
+    [Theory]
+    [InlineData("\u05A7\uFFFD")]
+    [InlineData("\u0301hyphenation")]
+    [InlineData("\u0301\u0302\u0303")]
+    public void Hyphenating_a_word_that_starts_with_a_combining_mark_does_not_recurse(string word)
+    {
+        // Found by the fuzzer: target html, crash-fc14afb8. A word with combining marks is composed letter by letter
+        // for the patterns, but a mark with no letter before it stays a mark, so the composed word was composed again
+        // until the stack overflowed and the process died.
+        AssertStructurallyValid(Bounded($"<p lang=en style='hyphens: auto'>{word}</p>"));
+    }
+
     [Fact]
     public void Many_custom_properties_on_many_elements_stay_linear()
     {
