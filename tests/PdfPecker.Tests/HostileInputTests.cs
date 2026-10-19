@@ -1526,6 +1526,20 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded("<p>before</p>" + svg + "<p>after</p>"));
     }
 
+    [Fact]
+    public void Nested_boxes_kept_whole_in_columns_are_not_tried_again_at_every_level()
+    {
+        // Found by the fuzzer: target html, timeout-14fbab57, 1.4 KB. A box with break-inside: avoid that crosses a
+        // column is tried at the top of the next one and, if it does not fit there either, laid out again where it
+        // was, and so is every such box inside it. Each level of nesting doubled the work: 18 levels took 8 s and 30
+        // did not finish.
+        var html = "<style>@page{size:148mm 190mm;margin:12mm}.c2{column-count:2}"
+            + ".card{break-inside:avoid;border:0.5pt solid #888;padding:4pt;margin-bottom:4pt}</style>"
+            + "<h1>Columns</h1><div class=\"c2\"><p>Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p>"
+            + Repeat("<div class=\"card\"><b>Card</b>Lorem ipsum", 30);
+        AssertStructurallyValid(Bounded(html));
+    }
+
     [Theory]
     [InlineData("<style>td{border:solid</style><table ><tr><td rowspan=2><tfoot><tr")]
     [InlineData("<style>td{border:1px solid}</style><table><thead><tr><td rowspan=3>h</td></tr></thead><tr><td>a</td></tr><tr><td>b</td></tr></table>")]
