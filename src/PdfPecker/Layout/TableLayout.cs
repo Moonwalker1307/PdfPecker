@@ -1149,6 +1149,12 @@ internal sealed partial class LayoutEngine
                 }
                 group += it.MinWidth >= 0 ? it.MinWidth : it.Width;
                 line += it.Width;
+                // A break opportunity without a space (after a hyphen, around an inline-block) ends the group too.
+                if (it.BreakAfter != BreakAfter.None)
+                {
+                    min = Math.Max(min, group + (it.BreakAfter == BreakAfter.SoftHyphen ? HyphenWidth(it.Style) : 0));
+                    group = 0;
+                }
             }
             min = Math.Max(min, group);
             max = Math.Max(max, line);

@@ -1,0 +1,46 @@
+%!PS-Adobe-3.0
+%%Title: Ghostscript fixture
+%%Pages: 1
+%%BoundingBox: 0 0 595 842
+%%EndComments
+% Ghostscript's pdfwrite embeds the URW base 35 fonts as CFF (FontFile3), turns the shading into a Type 2 function and
+% writes an image as a DCT or Flate stream, which covers parts of the renderer that PDFs from browsers rarely use.
+%%Page: 1 1
+<< /PageSize [595 842] >> setpagedevice
+% The fonts use StandardEncoding, which has no accented letters, so they are re-encoded as ISO Latin-1.
+/latin1 { % /new /base latin1 -
+  findfont dup length dict begin
+    { 1 index /FID ne { def } { pop pop } ifelse } forall
+    /Encoding ISOLatin1Encoding def
+    currentdict
+  end definefont pop
+} bind def
+/Roman-Latin1 /NimbusRoman-Regular latin1
+/NimbusSans-Bold findfont 22 scalefont setfont
+50 770 moveto (Ghostscript pdfwrite fixture) show
+/Roman-Latin1 findfont 12 scalefont setfont
+50 740 moveto (Text in the URW base 35 fonts, embedded as CFF subsets.) show
+50 724 moveto (Accented: \346\370\345 \306\330\305 caf\351 na\357ve.) show
+/NimbusMonoPS-Regular findfont 11 scalefont setfont
+50 704 moveto (Mono: 0123456789) show
+gsave
+  << /ShadingType 2 /ColorSpace /DeviceRGB /Coords [50 0 300 0] /Extend [false false]
+     /Function << /FunctionType 2 /Domain [0 1] /C0 [0.1 0.3 0.55] /C1 [0.31 0.7 0.85] /N 1 >> >>
+  50 560 250 100 rectclip shfill
+grestore
+gsave
+  0.75 0.19 0.19 setrgbcolor 4 setlinewidth [10 5] 0 setdash
+  50 500 moveto 120 560 200 420 300 520 curveto stroke
+grestore
+gsave
+  0.85 0.55 0.1 setrgbcolor
+  420 560 50 0 360 arc closepath fill
+grestore
+gsave
+  50 380 translate 100 100 scale
+  8 8 8 [8 0 0 -8 0 8]
+  { <00ff00ff00ff00ffff00ff00ff00ff0000ff00ff00ff00ffff00ff00ff00ff0000ff00ff00ff00ffff00ff00ff00ff0000ff00ff00ff00ffff00ff00ff00ff00> }
+  image
+grestore
+showpage
+%%EOF

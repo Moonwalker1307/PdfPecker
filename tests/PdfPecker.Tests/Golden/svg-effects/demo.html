@@ -57,6 +57,23 @@
   <rect x="200" y="130" width="200" height="50" fill="url(#fadeh)" filter="url(#post)"/>
   <linearGradient id="fadeh"><stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#fff"/></linearGradient>
 </svg>
+<svg width="760" height="110" viewBox="0 0 760 110" style="display:block">
+  <line x1="20" y1="15" x2="300" y2="15" stroke="#333" stroke-width="3" stroke-dasharray="10 5"/>
+  <line x1="20" y1="35" x2="300" y2="35" stroke="#080" stroke-width="4" stroke-dasharray="15,5,5"/>
+  <line x1="20" y1="55" x2="300" y2="55" stroke="#c60" stroke-width="4" stroke-linecap="round" stroke-dasharray="0 8"/>
+  <line x1="20" y1="75" x2="300" y2="75" stroke="#06c" stroke-width="4" stroke-dasharray="2%" stroke-dashoffset="-5"/>
+  <line x1="20" y1="95" x2="300" y2="95" stroke="#999" stroke-width="4" stroke-dasharray="10 -5"/>
+  <rect x="330" y="10" width="120" height="90" rx="12" fill="#eef" stroke="#c00" stroke-width="2" stroke-dasharray="6 3"/>
+  <circle cx="520" cy="55" r="40" fill="none" stroke="#eee" stroke-width="14"/>
+  <circle cx="520" cy="55" r="40" fill="none" stroke="#c33" stroke-width="14" pathLength="100" stroke-dasharray="30 70"/>
+  <path d="M590,90 C630,0 690,110 740,20" fill="none" stroke="navy" stroke-width="3" style="stroke-dasharray:12px 4px;stroke-dashoffset:6"/>
+</svg>
+<svg width="760" height="110" viewBox="0 0 760 110" style="display:block" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <path id="arc" d="M20,100 Q190,-10 360,100" fill="none" stroke="#ccc"/>
+  <text font-size="16" fill="#036"><textPath href="#arc" startOffset="50%" text-anchor="middle">Text along a <tspan fill="#c33" font-weight="bold" dy="-4">curved</tspan> path</textPath></text>
+  <path id="wave" d="M400,30 C470,130 580,-30 740,80" fill="none" stroke="#ccc" stroke-dasharray="4 3" transform="translate(0 5)"/>
+  <text font-size="15" letter-spacing="1.5" fill="#efe" stroke="#080" stroke-width="0.6"><textPath xlink:href="#wave" startOffset="8">Spaced, outlined and cut off at the end of the path</textPath></text>
+</svg>
 <div style="height:20px"></div>
 <table style="border-collapse:separate;table-layout:fixed;width:400px" border="1">
 <tr><td style="width:100px;overflow:hidden;white-space:nowrap">This cell text is far too long to fit</td><td style="overflow:hidden;width:100px;border-radius:12px;padding:0"><div style="width:200px;height:60px;background:orange"></div></td><td style="width:100px">visible overflow: Averyveryverylongunbreakableword</td></tr>

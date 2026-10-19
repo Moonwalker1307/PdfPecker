@@ -99,6 +99,8 @@ internal sealed partial class LayoutEngine
     /// </summary>
     private void PaintOnPages(GroupOp group, ComputedStyle s, PageBox box, float y, float bottom, int sides = BoxPainter.AllSides, bool collapsedCell = false)
     {
+        // A box can be far taller than its first line was when that was checked, and is painted page by page.
+        CheckPageLimit(bottom - 0.5f);
         int first = PageOf(y), last = Math.Max(first, PageOf(bottom - 0.5f));
         for (int p = first; p <= last; p++)
         {
@@ -114,6 +116,7 @@ internal sealed partial class LayoutEngine
     private bool SameOnPages(PageBox box, float y, float bottom)
     {
         if (!CrossesPage(y, bottom)) return true;
+        CheckPageLimit(bottom - 0.5f);
         int first = PageOf(y), last = Math.Max(first, PageOf(bottom - 0.5f));
         for (int p = first + 1; p <= last; p++)
             if (!box.Same(first, p)) return false;

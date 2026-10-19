@@ -1,0 +1,12 @@
+ReportLab canvas fixture
+
+Standard 14 fonts are referenced by name and not embedded, so the
+renderer has to supply metrics and glyphs itself: Helvetica, Times,
+Courier, Symbol and ZapfDingbats. WinAnsi characters: æøå ÆØÅ € é.
+
+Courier: 0123456789 {}[]()
+αβγδπ ∑∞ ✓✔✕✖ ☛
+
+Go to page twoSecond page
+
+Rotated text

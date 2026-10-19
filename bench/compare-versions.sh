@@ -18,5 +18,9 @@ cp "$repo/bench/PdfPecker.Benchmarks/Documents.cs" "$other/bench/PdfPecker.Bench
 
 dotnet build -c Release "$other/bench/PdfPecker.Comparison" -v q -nologo >&2
 dotnet build -c Release "$repo/bench/PdfPecker.Comparison" -v q -nologo >&2
+# The ref is escaped before it goes into the sed replacements, because a branch such as origin/main or claude/foo
+# carries a slash that would otherwise end the s command.
+label=$(printf '%s' "$ref" | sed 's/[\\/|&]/\\&/g')
 dotnet "$repo/bench/PdfPecker.Comparison/bin/Release/net10.0/PdfPecker.Comparison.dll" versions \
-  "$other/bench/PdfPecker.Comparison/bin/Release/net10.0/PdfPecker.Comparison.dll" "$rounds" | sed "s|other = .*|other = $ref|; s/Other build/$ref/; s/This build/working tree/"
+  "$other/bench/PdfPecker.Comparison/bin/Release/net10.0/PdfPecker.Comparison.dll" "$rounds" |
+  sed "s|other = .*|other = $label|; s/Other build/$label/; s/This build/working tree/"

@@ -795,6 +795,17 @@ internal sealed partial class LayoutEngine
     /// </summary>
     private HashSet<AvoidTrial>? _failedAvoidTrials;
 
+    /// <summary>How many boxes kept whole by break-inside: avoid are being laid out, one inside the other.</summary>
+    private int _avoidDepth;
+
+    /// <summary>
+    /// The most boxes kept whole that a box in columns can be nested in and still be tried in the next column. Each
+    /// level tries the levels inside it again at a new position, and balancing repeats that for each height it tries,
+    /// so the work grew with the cube of the depth; deeper boxes break where they fall. On pages a box is only moved
+    /// when it fits on the next one, which costs one more layout per level.
+    /// </summary>
+    private const int MaxKeptWholeNesting = 8;
+
     /// <summary>Lays out a block-level box whose top border edge is at <paramref name="y"/>. Returns its bottom border edge.</summary>
     private float LayoutBlockBox(Element e, float x, float y, float availW, bool shrinkToFit)
     {
@@ -808,9 +819,11 @@ internal sealed partial class LayoutEngine
         var pages = _childPageBox;
         _childPageBox = null;
         if (!table) _childPageBox = pages;
-        float bottom = table ? LayoutTable(e, x, y, availW, pages) : LayoutBlockBoxCore(e, x, y, availW, shrinkToFit);
         bool avoidInside = s.AvoidBreakInside || s.AvoidColumnBreakInside && _grid is ColumnGrid;
-        if (avoidInside && CrossesPage(y, bottom) && !AtPageTop(y))
+        bool movable = _avoidDepth < MaxKeptWholeNesting || _grid is not ColumnGrid;
+        if (avoidInside) _avoidDepth++;
+        float bottom = table ? LayoutTable(e, x, y, availW, pages) : LayoutBlockBoxCore(e, x, y, availW, shrinkToFit);
+        if (avoidInside && movable && CrossesPage(y, bottom) && !AtPageTop(y))
         {
             // A box split at the end of a column also measures the room it left there, so in columns one that is no
             // taller than the next column can look taller: it is tried there and kept only if it then fits whole.
@@ -854,6 +867,7 @@ internal sealed partial class LayoutEngine
         if (avoidInside && !CrossesPage(y, bottom)) _columnNotes?.Unbreakable(PageOf(y), bottom - y);
         if (table) _boxTrailing = 0;
         if (s.Layered) FinishLayered(e, opsStart, availW);
+        if (avoidInside) _avoidDepth--;
         return bottom;
     }
 

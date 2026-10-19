@@ -421,6 +421,231 @@ public class SvgEffectTests
         Assert.True(IsRed(At(pdf, 200, 250)));
     }
 
+    // ---- stroke dashes ----
+
+    private static float[]? DashOf(string content, string id = "a", string svg = "width='200' height='100'")
+    {
+        var doc = Styled($"<svg id='s' {svg}>{content}</svg>");
+        return SvgImage.Build(ById(doc, "s")).Shapes.Single(s => s.Stroke == ById(doc, id).Style!.SvgStroke).Dash;
+    }
+
+    [Theory]
+    [InlineData("10 5", new[] { 10f, 5f })]
+    [InlineData("10,5", new[] { 10f, 5f })]
+    [InlineData(" 4 , 2 1 ", new[] { 4f, 2f, 1f, 4f, 2f, 1f })] // an odd-length list repeats
+    [InlineData("3", new[] { 3f, 3f })]
+    [InlineData("0.75pt 0.5in", new[] { 1f, 48f })]
+    [InlineData("10%", new[] { 10f, 10f })] // of the viewport's normalised diagonal, sqrt((100² + 100²) / 2) = 100
+    public void Stroke_dasharray_becomes_the_dash_pattern(string value, float[] expected)
+    {
+        var dash = DashOf($"<line id='a' x2='100' stroke='red' stroke-dasharray='{value}'/>", svg: "width='200' height='100' viewBox='0 0 100 100'");
+        Assert.NotNull(dash);
+        Assert.Equal(expected, dash!.Select(v => MathF.Round(v, 3)));
+    }
+
+    [Theory]
+    [InlineData("none")]
+    [InlineData("10 -5")]   // a negative value makes the list invalid
+    [InlineData("0 0")]     // a pattern of length zero
+    [InlineData("10,,5")]
+    [InlineData("10 x")]
+    public void Invalid_or_empty_dash_arrays_give_a_solid_stroke(string value)
+        => Assert.Null(DashOf($"<line id='a' x2='100' stroke='red' stroke-dasharray='{value}'/>"));
+
+    [Fact]
+    public void Dash_arrays_inherit_and_come_from_css()
+    {
+        Assert.Equal(new[] { 2f, 6f }, DashOf("<g stroke-dasharray='2 6'><line id='a' x2='100' stroke='red'/></g>"));
+        Assert.Null(DashOf("<g stroke-dasharray='2 6'><line id='a' x2='100' stroke='red' stroke-dasharray='none'/></g>"));
+        Assert.Equal(new[] { 6f, 2f }, DashOf("<line id='a' style='stroke-dasharray:6px,2;stroke-dashoffset:-1' x2='100' stroke='red'/>"));
+        // The user units of a transformed shape are scaled into the root's.
+        Assert.Equal(new[] { 4f, 2f }, DashOf("<g transform='scale(2)'><line id='a' x2='100' stroke='red' stroke-dasharray='2 1'/></g>"));
+    }
+
+    [Fact]
+    public void Dash_offset_becomes_the_phase_within_the_pattern()
+    {
+        static float Phase(string content)
+        {
+            var doc = Styled($"<svg id='s' width='200' height='100'>{content}</svg>");
+            return SvgImage.Build(ById(doc, "s")).Shapes.Single().DashPhase;
+        }
+        Assert.Equal(3, Phase("<line x2='100' stroke='red' stroke-dasharray='8 4' stroke-dashoffset='3'/>"));
+        Assert.Equal(7, Phase("<line style='stroke-dasharray:6px,2;stroke-dashoffset:-1' x2='100' stroke='red'/>")); // -1 within a pattern of 8
+        Assert.Equal(1, Phase("<line x2='100' stroke='red' stroke-dasharray='8 4' stroke-dashoffset='25'/>"));
+    }
+
+    [Fact]
+    public void Path_length_rescales_dashes()
+    {
+        // A line 200 units long measured as 100: each dash unit is two user units.
+        Assert.Equal(new[] { 60f, 140f }, DashOf("<line id='a' x2='200' stroke='red' pathLength='100' stroke-dasharray='30 70'/>"));
+        var donut = DashOf("<circle id='a' cx='50' cy='50' r='40' fill='none' stroke='red' pathLength='100' stroke-dasharray='25 75'/>")!;
+        Assert.Equal(2 * MathF.PI * 40 / 4, donut[0], 0.2f);
+    }
+
+    [Fact]
+    public void Dashed_svg_strokes_are_drawn_dashed()
+    {
+        var pdf = Svg("""
+            <line x1="0" y1="50" x2="400" y2="50" stroke="red" stroke-width="20" stroke-dasharray="40 40"/>
+            <line x1="0" y1="150" x2="400" y2="150" stroke="red" stroke-width="20"/>
+            """);
+        var content = AllContent(pdf);
+        Assert.Contains("[40 40] 0 d", content);
+        // The dash is put back to solid for the next stroke.
+        Assert.Matches(@"\[40 40\] 0 d\n[^\[]*S\n\[\] 0 d\n", content);
+        Assert.True(IsRed(At(pdf, 20, 50)), $"{At(pdf, 20, 50)}");
+        Assert.True(IsWhite(At(pdf, 60, 50)), $"{At(pdf, 60, 50)}");
+        Assert.True(IsRed(At(pdf, 100, 50)), $"{At(pdf, 100, 50)}");
+        Assert.True(IsRed(At(pdf, 60, 150)), $"{At(pdf, 60, 150)}");
+    }
+
+    [Fact]
+    public void Solid_svg_strokes_write_no_dash_pattern()
+        => Assert.DoesNotContain(" d\n", AllContent(Svg("<rect x='10' y='10' width='100' height='100' fill='none' stroke='red'/>")));
+
+    // ---- text on a path ----
+
+    // The text matrices of the glyphs drawn, in the drawing's user space (y down), and how many glyphs were shown.
+    private static List<float[]> GlyphMatrices(byte[] pdf)
+        => Regex.Matches(AllContent(pdf), @"(-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) Tm (?:<[0-9A-F]+>|\(.*?\)) Tj")
+            .Select(m => Enumerable.Range(1, 6).Select(i => float.Parse(m.Groups[i].Value, System.Globalization.CultureInfo.InvariantCulture)).ToArray())
+            .ToList();
+
+    private static float Width(string text, float size) => PdfPecker.Fonts.StandardFont.All[0].Measure(text, size);
+
+    [Fact]
+    public void Text_on_a_path_puts_each_glyph_on_it_turned_with_the_path()
+    {
+        // A path straight down: each glyph is turned a quarter turn clockwise and the next one sits below it.
+        var pdf = Svg("""<path id="p" d="M100 20 L100 380"/><text font-family="Helvetica" font-size="20"><textPath href="#p">AB</textPath></text>""");
+        var tm = GlyphMatrices(pdf);
+        Assert.Equal(2, tm.Count);
+        Assert.Equal(new[] { 0f, 1f, 1f, 0f, 100f, 20f }, tm[0].Select(v => MathF.Round(v, 3)));
+        Assert.Equal(20 + Width("A", 20), tm[1][5], 0.01f);
+        Assert.Equal(100, tm[1][4], 0.01f);
+    }
+
+    [Fact]
+    public void Text_on_a_path_follows_curves()
+    {
+        // Around the top of a circle of radius 100, drawn as an arc: each glyph is turned with the tangent at its middle.
+        var pdf = Svg("""<path id="p" d="M100 200 A100 100 0 0 1 300 200"/><text font-family="Helvetica" font-size="20"><textPath href="#p" startOffset="50%" text-anchor="middle">MMM</textPath></text>""");
+        var tm = GlyphMatrices(pdf);
+        Assert.Equal(3, tm.Count);
+        // The middle glyph is at the top of the arc, upright; the first leans left and the last right, by the same angle.
+        Assert.Equal(1, tm[1][0], 0.01f);
+        Assert.Equal(200 - Width("M", 20) / 2, tm[1][4], 0.3f);
+        Assert.Equal(100, tm[1][5], 0.3f);
+        Assert.True(tm[0][1] < -0.1f && tm[2][1] > 0.1f, $"{tm[0][1]} {tm[2][1]}");
+        Assert.Equal(-tm[0][1], tm[2][1], 0.01f);
+    }
+
+    [Fact]
+    public void Glyphs_off_either_end_of_the_path_are_not_drawn()
+    {
+        // A glyph is drawn when its middle is on the path: of six M (16.7 wide) on a path 30 long, two.
+        var pdf = Svg("""<path id="p" d="M10 50 L40 50"/><text font-family="Helvetica" font-size="20"><textPath href="#p">MMMMMM</textPath></text>""");
+        Assert.Equal(2, GlyphMatrices(pdf).Count);
+        // Starting before the path, the first glyphs are left out.
+        pdf = Svg("""<path id="p" d="M10 50 L390 50"/><text font-family="Helvetica" font-size="20"><textPath href="#p" startOffset="-20">MMM</textPath></text>""");
+        var tm = GlyphMatrices(pdf);
+        Assert.Equal(2, tm.Count);
+        Assert.Equal(10 - 20 + Width("M", 20), tm[0][4], 0.01f);
+    }
+
+    [Fact]
+    public void Start_offset_takes_percentages_lengths_and_path_length_units()
+    {
+        static float FirstX(string offset, string pathLength = "")
+            => GlyphMatrices(Svg($"""<path id="p" d="M0 50 L400 50" {pathLength}/><text font-family="Helvetica" font-size="20"><textPath href="#p" startOffset="{offset}">A</textPath></text>"""))[0][4];
+        Assert.Equal(100, FirstX("25%"), 0.01f);
+        Assert.Equal(30, FirstX("30"), 0.01f);
+        Assert.Equal(40, FirstX("30pt"), 0.01f);
+        Assert.Equal(200, FirstX("5", "pathLength='10'"), 0.01f);
+    }
+
+    [Fact]
+    public void Text_on_a_path_takes_dy_styling_letter_spacing_and_the_paths_transform()
+    {
+        var doc = Styled("""
+            <svg id="s" width="400" height="200" font-family="Helvetica">
+              <path id="p" d="M10 0 L390 0" transform="translate(0 100)"/>
+              <text font-size="20" letter-spacing="5"><textPath href="#p">A<tspan dy="-10" fill="#ff0000">B</tspan>C</textPath></text>
+            </svg>
+            """);
+        var texts = SvgImage.Build(ById(doc, "s")).Shapes.Where(s => s.Kind == SvgShape.KindText).ToList();
+        Assert.Equal(new[] { "A", "B", "C" }, texts.Select(t => t.Text));
+        Assert.All(texts, t => Assert.NotNull(t.TextPath));
+        Assert.Equal(100, texts[0].TextPath!.MinY);
+        Assert.Equal(0xFFFF0000u, texts[1].Fill);
+        // dy shifts the text off the path, and the shift stays for the text after it.
+        Assert.Equal(new[] { 0f, -10f, -10f }, texts.Select(t => t.PathShift));
+        Assert.Equal(Width("A", 20) + 5, texts[1].PathStart, 0.01f);
+        Assert.Equal(Width("AB", 20) + 10, texts[2].PathStart, 0.01f);
+    }
+
+    [Fact]
+    public void Text_on_a_path_is_written_as_selectable_text()
+    {
+        var content = AllContent(Svg("""<path id="p" d="M10 100 Q200 0 390 100"/><text font-family="Helvetica" font-size="20"><textPath href="#p">Hi there</textPath></text>"""));
+        // One text object with a text matrix and a shown glyph for each character, filled (not drawn as paths).
+        Assert.Single(Regex.Matches(content, "BT "));
+        Assert.Contains(" 0 Tr ", content);
+        Assert.Equal("Hi there", string.Concat(Regex.Matches(content, @"Tm \((.)\) Tj").Select(m => m.Groups[1].Value)));
+    }
+
+    [Theory]
+    [InlineData("#missing")]
+    [InlineData("#c")]   // Chromium lays text only along path elements
+    [InlineData("#t")]   // the text element itself
+    [InlineData("#tp")]  // the textPath itself
+    [InlineData("")]
+    public void Text_on_a_path_that_is_not_there_is_not_drawn(string href)
+    {
+        var doc = Styled($"""
+            <svg id="s" width="400" height="200" font-family="Helvetica">
+              <circle id="c" cx="100" cy="100" r="50"/>
+              <text id="t" x="10" y="50" font-size="20">Before <textPath id="tp" href="{href}">on</textPath></text>
+            </svg>
+            """);
+        var texts = SvgImage.Build(ById(doc, "s")).Shapes.Where(s => s.Kind == SvgShape.KindText).ToList();
+        Assert.Equal("Before", Assert.Single(texts).Text);
+    }
+
+    [Fact]
+    public void Text_after_a_text_path_continues_from_the_paths_end()
+    {
+        var doc = Styled("""
+            <svg id="s" width="400" height="200" font-family="Helvetica">
+              <path id="p" d="M10 100 Q100 20 220 60"/>
+              <text x="5" y="15" font-size="14">Before <textPath href="#p">on the path</textPath> after</text>
+            </svg>
+            """);
+        var texts = SvgImage.Build(ById(doc, "s")).Shapes.Where(s => s.Kind == SvgShape.KindText).ToList();
+        var after = texts.Single(t => t.Text == " after");
+        Assert.Null(after.TextPath);
+        Assert.Equal(220, after.TextMatrix.E, 0.01f);
+        Assert.Equal(60, after.TextMatrix.F, 0.01f);
+    }
+
+    [Fact]
+    public void Shaped_text_on_a_path_keeps_its_joined_glyphs()
+    {
+        // Arabic is shaped as a whole and its glyphs placed one by one: the same glyphs as the straight text, joined forms
+        // included, each with its own text matrix.
+        var arabic = Convert.ToBase64String(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "NotoSansArabic-Subset.ttf")));
+        string Glyphs(string text) => string.Join(" ", Regex.Matches(AllContent(HtmlToPdf.Convert(
+            "<style>@font-face{font-family:Ar;src:url(data:font/ttf;base64," + arabic + ")}</style><body style='margin:0'>"
+            + "<svg width='400' height='200' font-family='Ar' font-size='20' direction='rtl'><path id='p' d='M10 150 Q200 0 390 150'/>"
+            + text + "</svg></body>", NoMargins)), @"<([0-9A-F]+)>")
+            .SelectMany(m => m.Groups[1].Value.Chunk(4).Select(c => new string(c))).Order(StringComparer.Ordinal));
+        string straight = Glyphs("<text x='300' y='100'>مرحبا</text>");
+        Assert.Equal(straight, Glyphs("<text><textPath href='#p' startOffset='90%'>مرحبا</textPath></text>"));
+        Assert.True(straight.Split(' ').Length >= 4, straight);
+    }
+
     // ---- table cells and borders ----
 
     [Fact]

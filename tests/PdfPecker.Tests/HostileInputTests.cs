@@ -372,6 +372,50 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Huge_svg_dash_arrays_are_ignored()
+    {
+        // A million dash lengths on each of many strokes would be written out again for every one of them.
+        var dashes = Repeat("1 ", 1_000_000);
+        var pdf = Bounded($"<svg width='400' height='400'><g stroke-dasharray='{dashes}'>{Repeat("<line x2='400' y2='400' stroke='red'/>", 200)}</g></svg>",
+            new PdfOptions { Compress = false });
+        AssertStructurallyValid(pdf);
+        Assert.DoesNotContain("[1 1 ", Latin1(pdf));
+    }
+
+    [Fact]
+    public void Svg_text_paths_are_bounded()
+    {
+        // A path of more commands than text is laid along is not measured, and long text along a long curved path is
+        // placed glyph by glyph within the drawing's budget.
+        var huge = "<path id='h' d='M0 0 " + Repeat("L400 400 L0 0 ", 15_000) + "'/>";
+        var curvy = "<path id='c' d='M0 200 " + Repeat("q 2 -50 4 0 t 4 0 ", 2_000) + "'/>";
+        var text = Repeat("text on a path ", 20_000);
+        var pdf = Bounded($"<svg width='600' height='400'>{huge}{curvy}{Repeat("<text><textPath href='#h'>x</textPath></text>", 1_000)}"
+            + Repeat($"<text font-size='4'><textPath href='#c'>{text}</textPath></text>", 20) + "</svg>", new PdfOptions { Compress = false });
+        AssertStructurallyValid(pdf);
+        Bounded(() => PdfRenderer.Open(pdf).RenderPage(0, new ImageOptions { Dpi = 72 }));
+    }
+
+    [Theory]
+    [InlineData("<text id='t'><textPath id='tp' href='#tp'>self</textPath></text>")]
+    [InlineData("<text id='t'><textPath href='#t'>its own text</textPath></text>")]
+    [InlineData("<text><textPath href='#nothing'>missing</textPath></text>")]
+    [InlineData("<path id='p' d='M0 0'/><text><textPath href='#p'>no length</textPath></text>")]
+    [InlineData("<path id='p' d='M0 0 L1e38 1e38 L-1e38 -1e38'/><text><textPath href='#p' startOffset='1e38'>far</textPath></text>")]
+    [InlineData("<path id='p' d='M0 0 L100 100'/><text><textPath href='#p'><textPath href='#p'><textPath href='#p'>nested</textPath></textPath></textPath></text>")]
+    public void Svg_text_paths_with_broken_references_draw_nothing_or_little(string content)
+        => AssertStructurallyValid(Bounded($"<svg width='200' height='200'>{content}</svg>"));
+
+    [Fact]
+    public void Tiny_svg_dashes_on_a_long_stroke_render_within_bounds()
+    {
+        // Dashes far below a pixel would make the renderer stroke hundreds of millions of segments.
+        var pdf = Bounded("<svg width='600' height='600'><path d='M0 0 " + Repeat("L600 600 L0 0 ", 500) + "' stroke='red' stroke-width='2' stroke-dasharray='0.001 0.001'/></svg>");
+        AssertStructurallyValid(pdf);
+        Bounded(() => PdfRenderer.Open(pdf).RenderPage(0, new ImageOptions { Dpi = 300 }));
+    }
+
+    [Fact]
     public void Page_count_is_limited()
     {
         Assert.Throws<PdfLimitException>(() => Bounded("<div style='height:100000000px'>x</div>", new PdfOptions { MaxPages = 1000 }));
@@ -1541,6 +1585,19 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void A_box_taller_than_the_page_limit_on_pages_of_different_widths_is_rejected()
+    {
+        // Found by the nightly fuzz run: target css, timeout-d0d017cf. A line 99,999,999,999 times the font size made
+        // its paragraph billions of pages tall, and on pages of different widths its background was painted page by
+        // page, which ran for minutes without checking for cancellation. Only the line's top was checked against the
+        // page limit.
+        var html = "<!doctype html><html><head><style>@page :right { margin-left: 14mm } body { font: 10.5pt/99999999999 serif }"
+            + "</style></head><body><div><h1>Heading</h1><p>Text <span>span</span> <a href=\"#c\">link</a></p><ul><li>One<li>Two</ul>"
+            + "<table><thead><tr><th>A<th>B<tbody><tr><td>cell<td>cell</table><img alt=x><input type=text value=v></div><p>After</p></body></html>";
+        Assert.Throws<PdfLimitException>(() => Bounded(html));
+    }
+
+    [Fact]
     public void Nested_flex_rows_across_pages_are_not_measured_again_at_every_level()
     {
         // Found by the fuzzer: target html, timeout-1abcdf31 and timeout-79c23971. A flex item that crosses a page is
@@ -1559,6 +1616,20 @@ public class HostileInputTests
         var html = Repeat("<h3>Named grid areas</h3><div style=\"display:grid;grid-template-areas:'head head' 'side main' 'foot foot';"
             + "grid-template-columns:100px 1fr;gap:4px\"><div style=\"grid-area:main\">main</div><div style=\"grid-area:head\">head</div>"
             + "<div style=\"grid-area:foot\">foot", 127);
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
+    public void Deeply_nested_boxes_kept_whole_in_balanced_columns_are_bounded()
+    {
+        // Found by the nightly fuzz run: target html, timeout-14fbab57, 3.2 KB. With three columns to balance, each
+        // nested box kept whole was tried in the next column once for every box around it, at every height balancing
+        // tried: 80 levels took 7 s and 130 more than 30 s. Boxes nested in more than eight such boxes now break where
+        // they fall.
+        var html = "<style>@page{size:148mm 190mm;margin:12mm}.c3{columns:3 30mm;column-gap:4mm}"
+            + ".card{break-inside:avoid;border:0.5pt solid #888;border-radius:3pt;padding:4pt;margin-bottom:4pt}</style>"
+            + "<h1>Columns</h1><div class=\"c3\"><p>Lorem ipsum dolor sit amet.</p>"
+            + Repeat("<div class=\"card\"><b>Card</b>Lorem ipsum dolor sit amet, consectetur ", 130);
         AssertStructurallyValid(Bounded(html));
     }
 

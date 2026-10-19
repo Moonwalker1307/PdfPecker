@@ -95,6 +95,7 @@ internal sealed partial class PdfDocumentWriter
                     if (TranslucentGradient(shape)) { WriteSoftMaskedSvgShape(b, shape, toPage); continue; }
                     WriteSvgPaint(b, shape, toPage);
                     WriteSvgText(b, shape, shape.HasFill ? (shape.HasStroke ? 2 : 0) : 1);
+                    EndSvgDash(b, shape);
                     continue;
             }
             if (TranslucentGradient(shape)) { WriteSoftMaskedSvgShape(b, shape, toPage); continue; }
@@ -103,6 +104,7 @@ internal sealed partial class PdfDocumentWriter
             if (shape.HasFill && shape.HasStroke) b.Ascii(shape.EvenOdd ? "B*\n" : "B\n");
             else if (shape.HasFill) b.Ascii(shape.EvenOdd ? "f*\n" : "f\n");
             else b.Ascii("S\n");
+            EndSvgDash(b, shape);
         }
         // Unbalanced groups (none are made, but a cut-off drawing must not leave the stream's state saved).
         while (states.Count > 0)
@@ -115,6 +117,11 @@ internal sealed partial class PdfDocumentWriter
     /// <summary>Writes an SVG text run with the text rendering mode given (3 draws nothing but keeps the text selectable).</summary>
     private void WriteSvgText(ByteBuffer b, SvgShape shape, int mode)
     {
+        if (shape.TextPath != null)
+        {
+            WriteSvgPathText(b, shape, mode);
+            return;
+        }
         var m = shape.TextMatrix;
         var svgFont = Leaf(shape.Font!);
         if (svgFont is EmbeddedFont svgEmbedded) b.Ascii("BT /E").Int(_subsetList.IndexOf(_subsets[svgEmbedded.Program]) + 1);
@@ -125,6 +132,87 @@ internal sealed partial class PdfDocumentWriter
         if (svgFont is EmbeddedFont svgFontEmbedded) WriteGlyphHex(b, svgFontEmbedded, _subsets[svgFontEmbedded.Program], shape.Text!, shape.FontSize, shape.Rtl, shape.CharSpacing);
         else WriteStandardText(b, shape.Font!, shape.Rtl ? Text.Bidi.VisualText(shape.Text!) : shape.Text!);
         b.Ascii(" ET\n");
+    }
+
+    /// <summary>
+    /// Writes an SVG text run along a path, each glyph with its own text matrix, so the text stays selectable. As the SVG
+    /// specification says, a glyph's midpoint is put on the path at its distance along it and the glyph turned with the
+    /// path's direction there; a glyph whose midpoint is off either end of the path is not drawn. Shaped text keeps its
+    /// shaping: the run is shaped as a whole and its glyphs placed one by one.
+    /// </summary>
+    private void WriteSvgPathText(ByteBuffer b, SvgShape shape, int mode)
+    {
+        var path = shape.TextPath!;
+        var font = Leaf(shape.Font!);
+        float size = shape.FontSize, pen = shape.PathStart;
+        if (font is EmbeddedFont embedded) b.Ascii("BT /E").Int(_subsetList.IndexOf(_subsets[embedded.Program]) + 1);
+        else b.Ascii("BT /F").Int(((StandardFont)font).Index + 1);
+        b.Sp().Num(size).Ascii(" Tf ").Int(mode).Ascii(" Tr 0 Tw 0 Tc\n");
+        if (font is EmbeddedFont ef)
+        {
+            var subset = _subsets[ef.Program];
+            bool positioned = ef.Shape(shape.Text!, 0, shape.Text!.Length, _glyphs, shape.Rtl);
+            if (shape.Rtl) _glyphs.Reverse();
+            bool skipNotdef = NoNotdef;
+            int prev = -1;
+            for (int i = 0; i < _glyphs.Count; i++)
+            {
+                var g = _glyphs[i];
+                float advance, dx = 0, dy = 0;
+                if (positioned)
+                {
+                    advance = g.Advance;
+                    dx = g.Dx;
+                    dy = g.Dy;
+                }
+                else
+                {
+                    if (ef.HasKerning && prev >= 0) pen += (shape.Rtl ? ef.Program.Kern1000(g.Gid, prev) : ef.Program.Kern1000(prev, g.Gid)) * size / 1000f;
+                    prev = g.Gid;
+                    advance = ef.Program.Advance1000(g.Gid);
+                }
+                int cid = subset.Cid(_glyphs, i, shape.Text!);
+                if (!(cid == 0 && skipNotdef) && PlaceOnPath(b, shape, pen, advance * size / 1000f, dx * size / 1000f, dy * size / 1000f))
+                {
+                    b.Byte((byte)'<');
+                    Hex4(b, cid);
+                    b.Ascii("> Tj\n");
+                }
+                pen += advance * size / 1000f + shape.CharSpacing;
+            }
+        }
+        else
+        {
+            var text = shape.Rtl ? Text.Bidi.VisualText(shape.Text!) : shape.Text!;
+            for (int i = 0; i < text.Length; i++)
+            {
+                if (i > 0) pen += font.KernUnits(text[i - 1], text[i]) * size / 1000f;
+                float advance = font.MeasureUnits(text, i, 1) * size / 1000f;
+                if (PlaceOnPath(b, shape, pen, advance, 0, 0))
+                {
+                    WriteTextBytes(b, text.Substring(i, 1));
+                    b.Ascii(" Tj\n");
+                }
+                pen += advance + shape.CharSpacing;
+            }
+        }
+        b.Ascii("ET\n");
+    }
+
+    /// <summary>
+    /// Sets the text matrix of a glyph on an SVG text path: its midpoint at <paramref name="pen"/> plus half its advance
+    /// along the path, turned with the path, shifted off it by the shape's shift and moved by the glyph's own offset.
+    /// False, writing nothing, when the midpoint is off the path.
+    /// </summary>
+    private static bool PlaceOnPath(ByteBuffer b, SvgShape shape, float pen, float advance, float dx, float dy)
+    {
+        if (!shape.TextPath!.At(pen + advance / 2, out float x, out float y, out float cos, out float sin)) return false;
+        // Along the tangent (cos, sin) and the normal (-sin, cos), which points down from text drawn left to right.
+        float along = dx - advance / 2, off = shape.PathShift - dy;
+        float ox = x + along * cos - off * sin, oy = y + along * sin + off * cos;
+        var m = new Matrix(cos, sin, sin, -cos, ox, oy).Then(shape.TextMatrix);
+        b.Num6(m.A).Sp().Num6(m.B).Sp().Num6(m.C).Sp().Num6(m.D).Sp().Num(m.E).Sp().Num(m.F).Ascii(" Tm ");
+        return true;
     }
 
     /// <summary>The text runs drawn by filtered content, written as invisible text over the filter's image.</summary>
@@ -476,11 +564,28 @@ internal sealed partial class PdfDocumentWriter
         else SetStroke(b, shape.Stroke!.Value);
     }
 
-    /// <summary>Sets the width, caps, joins and miter limit of an SVG shape's stroke.</summary>
+    /// <summary>Sets the width, caps, joins, miter limit and dash pattern of an SVG shape's stroke.</summary>
     private void WriteSvgLineStyle(ByteBuffer b, SvgShape shape)
     {
         _lineWidth = -1;
         b.Num(shape.StrokeWidth).Ascii(" w ").Int((int)shape.LineCap).Ascii(" J ").Int((int)shape.LineJoin).Ascii(" j ")
             .Num(shape.MiterLimit).Ascii(" M\n");
+        if (shape.Dash is not { } dash) return;
+        b.Ascii("[");
+        for (int i = 0; i < dash.Length; i++)
+        {
+            if (i > 0) b.Sp();
+            b.Num(dash[i]);
+        }
+        b.Ascii("] ").Num(shape.DashPhase).Ascii(" d\n");
+    }
+
+    /// <summary>
+    /// Puts back the solid line after a dashed SVG stroke. The dash pattern is set only for the shapes that have one, so
+    /// the content of solid strokes stays as it was before dashes were supported.
+    /// </summary>
+    private static void EndSvgDash(ByteBuffer b, SvgShape shape)
+    {
+        if (shape.Dash != null && shape.HasStroke) b.Ascii("[] 0 d\n");
     }
 }
