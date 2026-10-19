@@ -1,10 +1,11 @@
 using System.Runtime.InteropServices;
 using PdfPecker.Css;
+using PdfPecker.Html;
 
 namespace PdfPecker.Layout;
 
 /// <summary>
-/// The backgrounds, shadows and outlines of inline boxes. Each line notes the fragments of the boxes on it, each with a
+/// The backgrounds, shadows, borders and outlines of inline boxes. Each line notes the fragments of the boxes on it, each with a
 /// group in the draw ops behind the line's text; once all the lines of the paragraph are placed, the groups are painted
 /// as Chrome paints them: with box-decoration-break: slice a background runs on from one fragment to the next as if the
 /// fragments were one box, and with clone each fragment is a box of its own.
@@ -41,8 +42,8 @@ internal sealed partial class LayoutEngine
     internal const int MaxInlineFragments = 50_000;
 
     /// <summary>
-    /// The work the backgrounds, shadows and outlines of one layout's inline fragments may spend: one unit for each
-    /// background layer and outline, four for each shadow (drawn in bands when blurred), and one for each draw op that
+    /// The work the backgrounds, shadows, borders and outlines of one layout's inline fragments may spend: one unit for
+    /// each background layer, border and outline, four for each shadow (drawn in bands when blurred), and one for each draw op that
     /// background-clip: text searches for the fragment's text. Past it, fragments paint only their background colour.
     /// </summary>
     internal const long MaxInlinePaintWork = 100_000;
@@ -121,12 +122,12 @@ internal sealed partial class LayoutEngine
 
     /// <summary>
     /// The innermost inline box that both <paramref name="a"/> and <paramref name="b"/> are in, from the chain of
-    /// <paramref name="a"/>, or null. Boxes are matched by their style, since the items of a ::first-line paragraph's
+    /// <paramref name="a"/>, or null. Boxes are matched by their element, since the items of a ::first-line paragraph's
     /// first line come from a collection of their own.
     /// </summary>
     private static InlineDeco? CommonDeco(InlineDeco? a, InlineDeco? b)
     {
-        while (a != null && b != null && !ReferenceEquals(a.Style, b.Style))
+        while (a != null && b != null && !ReferenceEquals(a.Element, b.Element))
         {
             if (a.Depth >= b.Depth) a = a.Parent;
             else b = b.Parent;
@@ -148,16 +149,16 @@ internal sealed partial class LayoutEngine
     /// <summary>Paints the fragments of a paragraph's inline boxes into their groups.</summary>
     private void PaintInlineFragments(List<InlineFragment> fragments)
     {
-        var progress = new Dictionary<ComputedStyle, FragmentProgress>(ReferenceEqualityComparer.Instance);
+        var progress = new Dictionary<Element, FragmentProgress>(ReferenceEqualityComparer.Instance);
         foreach (var f in fragments)
         {
-            ref var p = ref CollectionsMarshal.GetValueRefOrAddDefault(progress, f.Deco.Style, out _);
+            ref var p = ref CollectionsMarshal.GetValueRefOrAddDefault(progress, f.Deco.Element, out _);
             p.Total += f.W;
             p.Count++;
         }
         foreach (var f in fragments)
         {
-            ref var p = ref CollectionsMarshal.GetValueRefOrNullRef(progress, f.Deco.Style);
+            ref var p = ref CollectionsMarshal.GetValueRefOrNullRef(progress, f.Deco.Element);
             PaintInlineFragment(f, p);
             p.Before += f.W;
             p.Seen++;
@@ -165,7 +166,7 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>
-    /// Paints one fragment: its shadows, background and outline. With box-decoration-break: slice its background is
+    /// Paints one fragment: its shadows, background, borders and outline. With box-decoration-break: slice its background is
     /// its part of the fragments put side by side in line order (from the right in a right-to-left box), and only the
     /// first and last fragment have the box's rounded corners on their outer side.
     /// </summary>
@@ -186,7 +187,7 @@ internal sealed partial class LayoutEngine
         var group = f.Group;
         bool clipsToText = BoxPainter.ClipsToText(s);
         long work = (s.BackgroundImages?.Length ?? 0) + 4 * (s.BoxShadows?.Length ?? 0)
-            + (s.OutlineStyle != BorderStyle.None ? 1 : 0) + (clipsToText ? f.TextTo - f.TextFrom : 0);
+            + (s.OutlineStyle != BorderStyle.None ? 1 : 0) + (s.HasBorder ? 1 : 0) + (clipsToText ? f.TextTo - f.TextFrom : 0);
         if (work > 0 && _inlinePaintWork >= MaxInlinePaintWork)
         {
             // Past the budget only the colour is painted, as a plain rectangle in the fragment.
@@ -199,6 +200,7 @@ internal sealed partial class LayoutEngine
         if (s.BoxShadows != null) BoxPainter.PaintShadows(group, s, f.X, f.Y, f.W, f.H, radii);
         BoxPainter.PaintFragment(group, s, boxX, f.Y, boxW, f.H, (f.X, f.Y, f.W, f.H), radii, _images, s.InlineFade);
         if (clipsToText) ClipBackgroundToText(group, f.Ops, f.TextFrom, f.TextTo, f.X, f.X + f.W);
+        if (s.HasBorder) BoxPainter.PaintFragmentBorders(group, s, boxX, f.Y, boxW, f.H, (f.X, f.Y, f.W, f.H), !(left && right), s.InlineFade);
         if (s.OutlineStyle != BorderStyle.None) BoxPainter.PaintOutline(group, s, f.X, f.Y, f.W, f.H, radii);
     }
 }
