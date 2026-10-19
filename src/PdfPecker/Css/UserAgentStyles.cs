@@ -74,7 +74,7 @@ input[type=radio] { margin: 3px 3px 0 5px; border-radius: 50%; }
 input[type=submit], input[type=reset], input[type=button], button {
   width: auto; padding: 2px 7px; border: 1px solid #767676; border-radius: 3px; background-color: #efefef; text-align: center; box-sizing: border-box;
 }
-textarea { font-family: monospace; padding: 2px; width: 13.275em; height: 2.26em; border-radius: 2px; }
+textarea { font-family: monospace; padding: 2px; width: 13.275em; border-radius: 2px; }
 select { padding: 1px 20px 1px 4px; border-radius: 2px; box-sizing: border-box; }
 input[disabled], textarea[disabled], select[disabled], button[disabled] { color: #6d6d6d; border-color: #c3c3c3; }
 pdf-field-value { display: block; white-space: pre; }

@@ -16,6 +16,7 @@ public class BrowserMatchTests
     private static List<DrawOp> Layout(string html)
     {
         var doc = HtmlParser.Parse(html);
+        FormControls.Prepare(doc, interactive: false);
         new StyleResolver(new Stylesheet(), Width, PageHeight).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
         var engine = new LayoutEngine(PageHeight, new ImageLoader(null, null, false));
         engine.Layout(doc, Width);
@@ -300,6 +301,50 @@ public class BrowserMatchTests
             """);
         Near(75, Box(ops, "#f00").W);
         Near(300, Box(ops, "#f00").W + Box(ops, "#0f0").W + Box(ops, "#00f").W);
+    }
+
+    [Fact]
+    public void Text_fields_with_a_percentage_width_count_with_their_own_width_in_table_columns()
+    {
+        // Chrome sizes the columns as if each field were as wide as its size attribute makes it, whatever its value, so
+        // the three columns come out equal; the value "Example Ltd." no longer widens the first one.
+        const string field = "style='width: 100%; box-sizing: border-box; font: 12px Arial'";
+        var ops = Layout($"""
+            <table style="width: 500px; border-collapse: collapse; font: 12px Arial">
+              <tr><td style="padding: 0; background: #f00">Employer</td><td style="padding: 0; background: #0f0">From</td>
+                  <td style="padding: 0; background: #00f">To</td></tr>
+              <tr><td style="padding: 0"><input value="Example Ltd." {field}></td><td style="padding: 0"><input value="2015" {field}></td>
+                  <td style="padding: 0"><input {field}></td></tr>
+            </table>
+            """);
+        Near(125, Box(ops, "#f00").W, 0.5f);
+        Near(125, Box(ops, "#0f0").W, 0.5f);
+        Near(125, Box(ops, "#00f").W, 0.5f);
+    }
+
+    [Fact]
+    public void A_text_field_with_a_percentage_width_lets_its_column_shrink()
+    {
+        // A field with a percentage width is compressible: next to long text Chrome narrows its column to 56px, below
+        // the field's own width, instead of keeping the field whole.
+        var ops = Layout("""
+            <table style="width: 300px; border-spacing: 0; font: 12px Arial"><tr>
+              <td style="padding: 0; background: #f00"><input value="Example Ltd." style="width: 100%; box-sizing: border-box; font: 12px Arial"></td>
+              <td style="padding: 0; background: #0f0">Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua</td>
+            </tr></table>
+            """);
+        Near(55.95f * 0.75f, Box(ops, "#f00").W, 1.5f);
+        Near(225, Box(ops, "#f00").W + Box(ops, "#0f0").W);
+    }
+
+    [Fact]
+    public void A_textarea_shows_its_rows_inside_its_padding_and_borders_whatever_its_box_sizing()
+    {
+        // Three rows of 14px plus 2px of padding and a 1px border on each side: 48px, as in Chrome, also with border-box.
+        var ops = Layout("""
+            <textarea rows="3" style="box-sizing: border-box; padding: 2px; border: 1px solid; font: 12px Arial; border-radius: 0; background: #ff0"></textarea>
+            """);
+        Near(36, Box(ops, "#ff0").H);
     }
 
     [Fact]

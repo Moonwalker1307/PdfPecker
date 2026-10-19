@@ -308,7 +308,12 @@ internal sealed partial class LayoutEngine
         {
             // An inline-block can wrap its own content, so its min-content contribution is its min-content width,
             // not the width it takes when laid out at the (very wide) measuring width.
-            item.MinWidth = Math.Min(c.Width, Intrinsic(e).Min + FixedHorizontalMargins(e.Style));
+            var (min, max) = Intrinsic(e);
+            float margins = FixedHorizontalMargins(e.Style);
+            // A percentage width has nothing to resolve against here, so the box counts with the width it would have
+            // with an auto width, as in Chrome, not with a share of the very wide measuring width.
+            if (e.Style.Width.IsPercent) item.Width = max + margins;
+            item.MinWidth = Math.Min(item.Width, min + margins);
         }
         return item;
     }

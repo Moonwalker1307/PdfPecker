@@ -1,3 +1,4 @@
+using System.Globalization;
 using PdfPecker.Html;
 
 namespace PdfPecker.Layout;
@@ -15,7 +16,7 @@ internal sealed class FormControl
     public bool Checked;
     public bool Multiline;
     public bool Disabled;
-    public int Rows;            // list boxes: the rows shown
+    public int Rows;            // list boxes and textareas: the rows shown
     public PdfFormField? Field; // null: drawn only (a button, a disabled control, or form fields turned off)
 }
 
@@ -46,6 +47,17 @@ internal sealed class RadioGroup
 internal static class FormControls
 {
     public const string ValueElement = "pdf-field-value";
+
+    /// <summary>The characters a text field is wide by its size attribute (a textarea's cols), or null without one.</summary>
+    public static int? FieldChars(Element e)
+        => int.TryParse(e.GetAttribute(e.Name == "textarea" ? "cols" : "size"), NumberStyles.Integer, CultureInfo.InvariantCulture, out int n)
+           && n > 0 ? Math.Min(n, 10000) : null;
+
+    /// <summary>
+    /// The content width, in em, Chrome gives a text field <paramref name="chars"/> characters wide: 0.6em a character,
+    /// and a little more. Fields are 20 characters wide by default.
+    /// </summary>
+    public static float FieldWidthEm(int chars) => chars * 0.6f + 1.275f;
 
     private static readonly HashSet<string> TextTypes = new(StringComparer.Ordinal)
     {
@@ -177,6 +189,7 @@ internal static class FormControls
                 {
                     control.Kind = ControlKind.Text;
                     control.Multiline = true;
+                    control.Rows = Invariant.TryParseInt(e.GetAttribute("rows"), out int rows) && rows > 0 ? Math.Min(rows, 10000) : 2;
                     string value = e.InnerText();
                     // A line break right after the start tag is not part of the value (HTML §13.2.6.4.7).
                     if (value.StartsWith("\r\n", StringComparison.Ordinal)) value = value.Substring(2);

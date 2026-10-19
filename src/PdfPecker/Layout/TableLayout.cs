@@ -994,6 +994,12 @@ internal sealed partial class LayoutEngine
             }
             result = (mn, mx);
         }
+        else if (e.Control is { Kind: ControlKind.Text })
+        {
+            // A text field is as wide as its size attribute (a textarea's cols) says, whatever its value, as in Chrome.
+            float w = FormControls.FieldWidthEm(FormControls.FieldChars(e) ?? 20) * s.FontSize;
+            result = (w + frame, w + frame);
+        }
         else if (HasSizeContainment(s))
         {
             // Inline-size containment: the content does not count towards the box's min- and max-content widths.
@@ -1034,6 +1040,12 @@ internal sealed partial class LayoutEngine
         {
             float mw = s.MaxWidth.Value + (s.BorderBox ? 0 : frame);
             result = (Math.Min(result.Item1, mw), Math.Min(result.Item2, mw));
+        }
+        if (e.Control is { Kind: ControlKind.Text or ControlKind.Combo or ControlKind.List } && s.Width.IsPercent)
+        {
+            // Text fields and selects with a percentage width are compressible (CSS Sizing 3 §5.2.2): as in Chrome, they
+            // can shrink to their padding and borders, so they do not hold a table column or a shrink-to-fit box open.
+            result = (Math.Min(result.Item1, frame), result.Item2);
         }
         _intrinsicCache[e] = result;
         return result;
