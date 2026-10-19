@@ -278,8 +278,10 @@ public class LayoutFeatureTests
     }
 
     [Fact]
-    public void Grid_rows_move_to_the_next_page_as_a_unit()
+    public void Grid_rows_break_across_pages_with_their_items()
     {
+        // As in Chrome, a row that fits on a page but not in the room left on this one is not moved whole: its items
+        // break at the page boundary.
         var ops = Layout("""
             <div style="height:770pt"></div>
             <div style="display:grid; grid-template-columns:1fr 1fr">
@@ -287,8 +289,40 @@ public class LayoutFeatureTests
               <div style="height:20pt; background:#00ff00"></div>
             </div>
             """);
+        Near(770, Box(ops, "#ff0000").Y);
+        Near(770, Box(ops, "#00ff00").Y);
+    }
+
+    [Fact]
+    public void Grid_rows_with_an_item_that_avoids_breaks_move_to_the_next_page_as_a_unit()
+    {
+        var ops = Layout("""
+            <div style="height:770pt"></div>
+            <div style="display:grid; grid-template-columns:1fr 1fr">
+              <div style="height:40pt; background:#ff0000; break-inside:avoid"></div>
+              <div style="height:20pt; background:#00ff00"></div>
+            </div>
+            """);
         Near(PageHeight, Box(ops, "#ff0000").Y);
         Near(PageHeight, Box(ops, "#00ff00").Y);
+    }
+
+    [Theory]
+    [InlineData(750, false)] // room for two lines: both items start on the first page
+    [InlineData(770, true)]  // room for one line: the paragraph's orphans would leave nothing of it there
+    public void Grid_rows_move_whole_when_an_item_would_leave_no_content_on_the_page(float spacer, bool moves)
+    {
+        var ops = Layout($"""
+            <div style="height:{spacer}pt"></div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; font-size:10pt; line-height:20pt">
+              <div><p style="margin:0">Alone</p><p style="margin:0">More</p></div>
+              <div>First<br>Second<br>Third<br>Fourth</div>
+            </div>
+            """);
+        var texts = Flatten(ops).OfType<TextOp>().ToList();
+        float alone = texts.First(t => t.Text.Contains("Alone")).LineTop, first = texts.First(t => t.Text.Contains("First")).LineTop;
+        Near(moves ? PageHeight : spacer, alone);
+        Near(moves ? PageHeight : spacer, first);
     }
 
     // ---- Multi-column ----
@@ -772,6 +806,93 @@ public class LayoutFeatureTests
         engine.Layout(doc, 300);
         NearBox(Box(engine.Ops, "#ff0000"), 0, 0, 300, 200);
         NearBox(Box(engine.Ops, "#0000ff"), 0, 200, 300, 130);
+    }
+
+    // ---- Fieldset and legend (as Chromium lays them out) ----
+
+    private const string FieldsetCss = """
+        <style>body { margin: 0 } fieldset { margin: 0; border: 3pt solid #0000ff; background: #ff0000; padding: 3pt 10pt 5pt }
+        legend { height: 20pt; width: 60pt; padding: 0; background: #00ff00 } .c { height: 10pt; background: #ffff00 }</style>
+        """;
+
+    /// <summary>The clip that cuts the legend's gap out of the fieldset's border.</summary>
+    private static ClipOp BorderGap(IEnumerable<DrawOp> ops)
+    {
+        static IEnumerable<ClipOp> Clips(IEnumerable<DrawOp> ops)
+        {
+            foreach (var o in ops.OfType<GroupOp>())
+            {
+                if (o is ClipOp { Hole: not null } c) yield return c;
+                foreach (var inner in Clips(o.Ops)) yield return inner;
+            }
+        }
+        return Clips(ops).Single();
+    }
+
+    private static void NearGap(ClipOp clip, float x, float y, float w, float h)
+    {
+        var (gx, gy, gw, gh) = clip.Hole!.Value;
+        Near(x, gx);
+        Near(y, gy);
+        Near(w, gw);
+        Near(h, gh);
+    }
+
+    [Fact]
+    public void Legend_sits_on_the_top_border_which_is_cut_behind_it()
+    {
+        var ops = Layout(FieldsetCss + "<fieldset><legend></legend><div class=c></div></fieldset>");
+        var legend = Box(ops, "#00ff00");
+        var fieldset = Box(ops, "#ff0000");
+        var content = Box(ops, "#ffff00");
+        NearBox(legend, 13, 0, 60, 20); // after the border and the padding
+        // The border moves down to the legend's middle, and the background with it.
+        NearBox(fieldset, 0, 8.5f, 500, 20 + 3 + 10 + 5 + 3 - 8.5f);
+        Near(23, content.Y); // below the legend and the top padding
+        var clip = BorderGap(ops);
+        NearGap(clip, 13, 0, 60, 20);
+        Assert.Contains(Flatten(clip.Ops), o => o is BorderRectOp);
+    }
+
+    [Fact]
+    public void Legend_thinner_than_the_border_is_centred_in_it()
+    {
+        var ops = Layout(FieldsetCss + "<fieldset style='border-width:30pt'><legend></legend><div class=c></div></fieldset>");
+        NearBox(Box(ops, "#ff0000"), 0, 0, 500, 30 + 3 + 10 + 5 + 30);
+        Near(5, Box(ops, "#00ff00").Y);
+        Near(33, Box(ops, "#ffff00").Y);
+        NearGap(BorderGap(ops), 40, 0, 60, 30);
+    }
+
+    [Theory]
+    [InlineData("<fieldset><legend style='text-align:right'></legend></fieldset>", 500 - 13 - 60)]
+    [InlineData("<fieldset><legend align=center></legend></fieldset>", 13 + (474 - 60) / 2f)]
+    [InlineData("<fieldset dir=rtl><legend></legend></fieldset>", 500 - 13 - 60)]
+    [InlineData("<fieldset><legend style='margin-left:auto'></legend></fieldset>", 500 - 13 - 60)]
+    [InlineData("<fieldset><legend style='margin:0 7pt'></legend></fieldset>", 20)]
+    public void Legend_is_placed_by_its_auto_margins_or_text_align(string html, float x)
+        => Near(x, Box(Layout(FieldsetCss + html), "#00ff00").X);
+
+    [Fact]
+    public void Floated_legend_is_an_ordinary_box_and_the_next_legend_is_rendered()
+    {
+        var ops = Layout(FieldsetCss + """
+            <fieldset><legend style="float:left;background:#00ffff"></legend><legend></legend><div class=c></div></fieldset>
+            """);
+        Near(0, Box(ops, "#00ff00").Y);
+        Near(23, Box(ops, "#00ffff").Y); // in the content, beside the yellow box
+        Near(23, Box(ops, "#ffff00").Y);
+    }
+
+    [Fact]
+    public void Height_of_a_fieldset_includes_its_legend_below_the_border()
+    {
+        // Chromium makes a fieldset with height: 100pt as tall as without a legend, from its legend's top: the legend
+        // takes room from the content box.
+        var ops = Layout(FieldsetCss + "<fieldset style='height:100pt'><legend></legend></fieldset>");
+        NearBox(Box(ops, "#ff0000"), 0, 8.5f, 500, 3 + 3 + 100 + 5 + 3 - 8.5f);
+        ops = Layout(FieldsetCss + "<fieldset style='height:100pt;box-sizing:border-box'><legend></legend></fieldset>");
+        NearBox(Box(ops, "#ff0000"), 0, 8.5f, 500, 100 - 8.5f);
     }
 
     private static int CountOf(string haystack, string needle)

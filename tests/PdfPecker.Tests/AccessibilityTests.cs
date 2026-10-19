@@ -52,6 +52,17 @@ public class AccessibilityTests
     }
 
     [Fact]
+    public void Fieldset_legend_on_the_border_stays_marked()
+    {
+        // The border behind the legend is cut out with a clip, which must stay outside the tagged content.
+        var pdf = Tagged("<title>Form</title><fieldset><legend>Customer</legend><p>Name: Jane</p></fieldset>", PdfAccessibility.PdfUA1);
+        var content = Content(pdf);
+        Assert.Contains(" re W* n", content);
+        AssertAllContentMarked(content);
+        Assert.Equal("Document P P", Types(pdf)); // the legend is a paragraph, as before
+    }
+
+    [Fact]
     public void Untagged_by_default()
     {
         var pdf = PdfTestHelpers.Latin1(PdfTestHelpers.ConvertUncompressed("<h1>Title</h1><p>Text</p>"));

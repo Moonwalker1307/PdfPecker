@@ -739,7 +739,11 @@ internal sealed partial class LayoutEngine
         }
     }
 
-    /// <summary>Positions the rows, paginating whole rows.</summary>
+    /// <summary>
+    /// Positions the rows. A row that crosses a page boundary stays where it is and its items break across it, as in
+    /// Chrome, unless one of them cannot: it does not break inside, or it would leave nothing of its content on this
+    /// page. The row then moves to the next page whole.
+    /// </summary>
     private void PositionGridRows(ref GridPass g, float rowBefore, float rowBetween)
     {
         var rows = g.Rows;
@@ -755,20 +759,87 @@ internal sealed partial class LayoutEngine
             {
                 // Keep the row with any item that starts in it and spans further rows.
                 float extent = h;
+                bool whole = false;
                 foreach (var it in g.Items)
                 {
-                    if (it.Row != r || it.RowSpan <= 1) continue;
+                    if (it.Row != r) continue;
+                    whole |= !BreaksInside(it);
+                    if (it.RowSpan <= 1) continue;
                     float span = rowGap * (it.RowSpan - 1);
                     for (int k = r; k < Math.Min(rowCount, r + it.RowSpan); k++) span += rows[k].Base;
                     extent = Math.Max(extent, span);
                 }
-                ry = FitOnPage(ry, extent);
+                // A row taller than a page breaks wherever it starts.
+                if (whole || CrossesPage(ry, ry + extent) && !AtPageTop(ry) && extent <= _grid.Height(PageOf(ry) + 1) && !RowStartsOnPage(ref g, r, ry))
+                    ry = FitOnPage(ry, extent);
             }
             rowY[r] = ry;
             ry += h;
         }
         rowY[rowCount] = ry;
     }
+
+    /// <summary>
+    /// Whether a grid item can break across pages: it is laid out again where it lands (see <see cref="PlaceOnPages"/>).
+    /// Text runs, images, subgrids and boxes that avoid breaks inside them move with their row instead.
+    /// </summary>
+    private bool BreaksInside(BoxItem it)
+    {
+        if (it.El == null || it.IsReplaced || it.Box?.Source == null || IsSubgrid(it, columns: true) || IsSubgrid(it, columns: false)) return false;
+        var s = it.Style;
+        return !s.AvoidBreakInside && !(s.AvoidColumnBreakInside && _grid is ColumnGrid);
+    }
+
+    /// <summary>
+    /// Whether every item that starts in row <paramref name="r"/>, at <paramref name="y"/>, puts some of its content on
+    /// this page. Chrome moves the row to the next page when one would leave only an empty piece of itself here, such
+    /// as a paragraph whose orphans do not fit. Each item is laid out on the pages to find out, and thrown away again;
+    /// only the outer levels of nested boxes do that, so that the work stays linear in the depth.
+    /// </summary>
+    private bool RowStartsOnPage(ref GridPass g, int r, float y)
+    {
+        if (_probingGridRow || _placingOnPages >= MaxRepeatedOnPages || _columnNotes != null) return true;
+        int page = PageOf(y);
+        foreach (var it in g.Items)
+        {
+            if (it.Row != r) continue;
+            var c = it.Box!;
+            var src = c.Source!;
+            var e = src.El;
+            float mt = e.Style.MarginTop.IsAuto ? 0 : e.Style.MarginTop.Resolve(src.OuterW);
+            int start = _ops.Count, list = _currentListIndex, breaks = _forcedBreaks;
+            var marker = _marker;
+            var pool = _knownBoxes;
+            if (src.BorderW is float bw) _widthOverride[e] = bw;
+            // A plain block stops as soon as its first content is placed.
+            var probe = CanProbe(e) ? new KeepProbe(start, page) { StopsOnceAnswered = true } : null;
+            _childProbe = probe;
+            _knownBoxes = src.BorderH == null ? c.Known : null;
+            _probingGridRow = true;
+            _placingOnPages++;
+            bool starts;
+            try
+            {
+                LayoutBlockBox(e, g.ColX[it.Col], y + mt, src.OuterW, src.ShrinkToFit);
+                starts = probe is not { Stopped: true } && FirstContentPage(start, y) <= page;
+            }
+            finally
+            {
+                _placingOnPages--;
+                _probingGridRow = false;
+                _knownBoxes = pool;
+                _childProbe = null;
+                if (src.BorderW.HasValue) _widthOverride.Remove(e);
+                Truncate(start);
+                (_currentListIndex, _forcedBreaks, _marker) = (list, breaks, marker);
+            }
+            if (!starts) return false;
+        }
+        return true;
+    }
+
+    /// <summary>Whether the items of a grid row are being laid out on the pages only to see where their content starts.</summary>
+    private bool _probingGridRow;
 
     /// <summary>
     /// Places each item in its grid area with box alignment. An item laid out again across a page boundary may get
