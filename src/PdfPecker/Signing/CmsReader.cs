@@ -214,7 +214,7 @@ internal static class CmsReader
             case "1.2.840.113549.1.1.13":
             case "1.2.840.113549.1.1.10":
                 {
-                    using var rsa = signer.GetRSAPublicKey();
+                    using var rsa = PublicKey(signer.GetRSAPublicKey);
                     if (rsa == null) return false;
                     var padding = s.SignatureOid == "1.2.840.113549.1.1.10" ? RSASignaturePadding.Pss : RSASignaturePadding.Pkcs1;
                     return rsa.VerifyHash(hash, s.Signature, hashName, padding);
@@ -225,11 +225,26 @@ internal static class CmsReader
             case "1.2.840.10045.4.3.3":
             case "1.2.840.10045.4.3.4":
                 {
-                    using var ec = signer.GetECDsaPublicKey();
+                    using var ec = PublicKey(signer.GetECDsaPublicKey);
                     return ec != null && ec.VerifyHash(hash, s.Signature, DSASignatureFormat.Rfc3279DerSequence);
                 }
             default:
                 throw new CryptographicException("Unsupported signature algorithm " + s.SignatureOid + ".");
+        }
+    }
+
+    // A certificate from the PDF can hold a key the platform cannot decode. On Windows, .NET 8 and 9 throw
+    // OverflowException for a negative RSA modulus instead of CryptographicException, so every failure to read the key
+    // becomes the exception the verifier reports as a problem.
+    internal static T? PublicKey<T>(Func<T?> read) where T : class
+    {
+        try
+        {
+            return read();
+        }
+        catch (Exception ex) when (ex is OverflowException or ArgumentException or FormatException)
+        {
+            throw new CryptographicException("The signer's public key could not be read.", ex);
         }
     }
 

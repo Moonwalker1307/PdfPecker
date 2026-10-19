@@ -89,6 +89,39 @@ public class SignatureVerificationTests
         Assert.False(v.Valid);
     }
 
+    [Fact]
+    public void A_signer_certificate_with_a_negative_modulus_is_reported_not_thrown()
+    {
+        // On Windows, .NET 8 and 9 throw OverflowException when they read an RSA key whose modulus is a negative
+        // INTEGER. Turning the modulus's leading zero byte into 0x80 in the embedded certificate makes it negative while
+        // keeping its length, so the rest of the signature still parses. Other platforms load the key and the signature
+        // simply fails to verify; either way the verifier must report a problem rather than throw.
+        var pdf = Signed();
+        var v0 = PdfSignatureVerifier.Verify(pdf)[0];
+        using (var rsa = Cert.Value.GetRSAPublicKey()!)
+        {
+            string modulus = "0282010100" + Convert.ToHexString(rsa.ExportParameters(false).Modulus!);
+            int contentsStart = (int)v0.ByteRange[1] + 1;
+            var hex = Encoding.Latin1.GetString(pdf, contentsStart, (int)(v0.ByteRange[2] - v0.ByteRange[1] - 2));
+            int at = hex.IndexOf(modulus, StringComparison.OrdinalIgnoreCase);
+            Assert.True(at >= 0, "The certificate's modulus was not found in the signature.");
+            pdf[contentsStart + at + 8] = (byte)'8';
+        }
+
+        var v = Assert.Single(PdfSignatureVerifier.Verify(pdf, Trusting(Cert.Value)));
+        Assert.False(v.Valid);
+        Assert.NotEmpty(v.Problems);
+    }
+
+    [Fact]
+    public void A_public_key_the_platform_cannot_decode_becomes_a_cryptographic_exception()
+    {
+        // The test above only reaches the OverflowException on Windows with .NET 8 or 9, so the conversion is also
+        // checked directly.
+        var ex = Assert.Throws<CryptographicException>(() => PdfPecker.Signing.CmsReader.PublicKey<RSA>(() => throw new OverflowException()));
+        Assert.IsType<OverflowException>(ex.InnerException);
+    }
+
     private static int SignedCmsLength(byte[] pdf, PdfSignatureVerification v)
     {
         var hex = Encoding.Latin1.GetString(pdf, (int)v.ByteRange[1] + 1, (int)(v.ByteRange[2] - v.ByteRange[1] - 2));
@@ -238,7 +271,9 @@ public class SignatureVerificationTests
             Assert.Equal(r.Valid, r.Problems.Count == 0);
         }
 
-        // Random corruption anywhere must never throw anything but the documented exceptions.
+        // Random corruption anywhere must never throw anything but the documented exceptions. Which bytes the rounds
+        // above hit depends on the freshly generated certificate, so the case they once found on Windows has its own
+        // test below.
         for (int round = 0; round < 40; round++)
         {
             var copy = (byte[])pdf.Clone();

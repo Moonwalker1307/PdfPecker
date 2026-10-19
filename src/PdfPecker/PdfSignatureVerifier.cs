@@ -363,7 +363,7 @@ public static class PdfSignatureVerifier
                 if (!trusted) problems.Add("The signer's certificate is not trusted: " + string.Join("; ", v.ChainErrors));
             }
         }
-        catch (Exception ex) when (ex is CryptographicException or AsnContentException or ArgumentException or NotSupportedException)
+        catch (Exception ex) when (ex is CryptographicException or AsnContentException or ArgumentException or NotSupportedException or OverflowException)
         {
             problems.Add("The signature could not be checked: " + ex.Message);
         }
@@ -404,7 +404,7 @@ public static class PdfSignatureVerifier
             if (!digestOk || !sigOk) problem = "The timestamp token's own signature does not verify.";
             return digestOk && sigOk;
         }
-        catch (Exception ex) when (ex is CryptographicException or AsnContentException or ArgumentException)
+        catch (Exception ex) when (ex is CryptographicException or AsnContentException or ArgumentException or NotSupportedException or OverflowException)
         {
             problem = "The timestamp token could not be read: " + ex.Message;
             return false;
