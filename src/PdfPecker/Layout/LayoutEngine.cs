@@ -233,7 +233,8 @@ internal sealed partial class LayoutEngine
         public float Y, PendingMargin, Top;
         public bool AnyContent;
         public ListMarker? Marker;
-        public int FirstPage; // page of the box's first painted content
+        public int FirstPage; // page of the box's first painted content, found when the box starts a keep chain
+        public int BoxOps, BoxEnd; // the box's own ops, among which that content is looked for
     }
 
     /// <summary>
@@ -418,7 +419,12 @@ internal sealed partial class LayoutEngine
         bool breakAfter = f.InColumns ? s.ColumnBreakAfter : s.PageBreakAfter;
         bool joins = _paginate && f.HasPrev && (f.PrevAvoidAfter || s.AvoidBreakBefore || f.InColumns && s.AvoidColumnBreakBefore) && !breakBefore;
         if (!joins) f.HasChain = false;
-        if (joins && !f.HasChain) { f.Chain = f.Prev; f.HasChain = true; }
+        if (joins && !f.HasChain)
+        {
+            f.Chain = f.Prev;
+            f.Chain.FirstPage = FirstContentPage(f.Chain.BoxOps, f.Chain.BoxEnd, f.Chain.Top);
+            f.HasChain = true;
+        }
         if (f.Marks != null && !joins && f.ForcedAt != f.Index && CanResumeAt(f.Y)) f.Marks.Add(new FlowResume(mark, _captureAnchors?.Count ?? 0));
 
         if (s.PageBreakBefore || s.PageBreakAfter) _forcedBreaks++;
@@ -455,7 +461,10 @@ internal sealed partial class LayoutEngine
         }
 
         mark.Top = top;
-        if (_paginate) mark.FirstPage = FirstContentPage(boxOps, top);
+        // The page of its first content is only looked up when the next box joins it: finding it here scanned all the
+        // ops below every box, which for deeply nested boxes is quadratic.
+        mark.BoxOps = boxOps;
+        mark.BoxEnd = _ops.Count;
         f.PrevAvoidAfter = _paginate && (s.AvoidBreakAfter || f.InColumns && s.AvoidColumnBreakAfter) && !breakAfter;
         if (!f.PrevAvoidAfter) f.HasChain = false;
         f.Prev = mark;
@@ -648,9 +657,11 @@ internal sealed partial class LayoutEngine
            && FirstContentPage(opsStart, fallbackY) > chain.FirstPage;
 
     /// <summary>The page of the first text, image or drawing among the ops from <paramref name="from"/>.</summary>
-    private int FirstContentPage(int from, float fallbackY)
+    private int FirstContentPage(int from, float fallbackY) => FirstContentPage(from, _ops.Count, fallbackY);
+
+    private int FirstContentPage(int from, int end, float fallbackY)
     {
-        for (int i = from; i < _ops.Count; i++)
+        for (int i = from; i < end; i++)
             if (FirstContentY(_ops[i]) is { } fy) return PageOf(fy);
         return PageOf(fallbackY);
     }
@@ -1882,7 +1893,7 @@ internal sealed partial class LayoutEngine
         var src = new BoxSource(e, outerW, shrinkToFit, borderW, borderH);
         if (!reuse) return CaptureBoxCore(src);
         Captured c;
-        if (_knownBoxes != null && _knownBoxes.TryGetValue(src, out var known) && known.ListIndexBefore == _currentListIndex
+        if (_knownBoxes != null && FindKnown(_knownBoxes, src) is { } known && known.ListIndexBefore == _currentListIndex
             && !_measuring && Tags == null && Footnotes == null && _columnNotes == null && SameContext(e, known))
         {
             // Measured already where the box around it was captured: only its content may still be needed.
@@ -1910,6 +1921,21 @@ internal sealed partial class LayoutEngine
         else c = CaptureBoxCore(src, inner);
         if (_logItems && !_measuring) (_captureLog ??= new Dictionary<BoxSource, Captured>()).TryAdd(src, Measured(c));
         return c;
+    }
+
+    /// <summary>
+    /// The box measured for <paramref name="src"/>, or for a width that differs only by rounding: grid areas are measured
+    /// as the difference of track positions, which come out a few units in the last place apart when the grid is laid
+    /// out again at another position. Without the match, every nested grid on the pages was measured again in full.
+    /// </summary>
+    private static Captured? FindKnown(Dictionary<BoxSource, Captured> known, BoxSource src)
+    {
+        if (known.TryGetValue(src, out var exact)) return exact;
+        foreach (var (k, c) in known)
+            if (k.El == src.El && k.ShrinkToFit == src.ShrinkToFit && k.BorderW == src.BorderW && k.BorderH == src.BorderH
+                && Math.Abs(k.OuterW - src.OuterW) <= 1e-5f * Math.Max(1, Math.Abs(src.OuterW)))
+                return c;
+        return null;
     }
 
     /// <summary>
@@ -2004,7 +2030,9 @@ internal sealed partial class LayoutEngine
     {
         // Each nested box laid out again lays out its own boxes again, so only the outer two levels may do that twice,
         // to give a stretched box its height back; deeper ones keep the height of their content.
-        if (c.Source is not { } src || Reusable(c, dy))
+        // In columns the boxes measured inside cannot be reused (their breaks are noted for balancing), so each level laid
+        // out again lays out everything below it again, in every balancing pass. Deeper levels keep their measured layout.
+        if (c.Source is not { } src || Reusable(c, dy) || _columnNotes != null && _placingOnPages >= MaxPlacedOnPagesInColumns)
         {
             Place(c, dx, dy);
             return dy + c.Height;
@@ -2055,6 +2083,9 @@ internal sealed partial class LayoutEngine
 
     /// <summary>The depth up to which a box laid out again on the pages may be laid out a second time.</summary>
     private const int MaxRepeatedOnPages = 2;
+
+    /// <summary>How many boxes, one inside the other, are laid out again where they land in columns.</summary>
+    private const int MaxPlacedOnPagesInColumns = 8;
 
     /// <summary>Moves captured content to its final position and appends it to the output.</summary>
     private void Place(Captured c, float dx, float dy)
