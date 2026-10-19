@@ -1672,6 +1672,43 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(html));
     }
 
+    [Fact]
+    public void Deeply_nested_boxes_in_columns_find_their_first_page_once()
+    {
+        // Found by the fuzzer: target html, timeout-14fbab57. Every box in a flow looked up the page of its first content
+        // among all the ops below it, in case the next box had to stay with it, so 2,800 nested boxes in balanced
+        // columns took 4.5 s. The page is now only looked up when a box does start such a chain.
+        var html = "<style>@page{size:148mm 190mm;margin:12mm}.c3{columns:3 30mm;column-gap:4mm}"
+            + ".card{break-inside:avoid;border:0.5pt solid #888;border-radius:3pt;padding:4pt;margin-bottom:4pt}</style>"
+            + "<h1>Columns</h1><div class=\"c3\"><p>Lorem ipsum dolor sit amet.</p>" + Repeat("<div class=\"card\">", 3000);
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
+    public void Nested_grids_on_the_pages_reuse_their_measured_items()
+    {
+        // Found by the fuzzer: target html, timeout-1b5a0815. A grid area's width is the difference of two track
+        // positions, which rounds differently when the grid is laid out again lower on the page, so the items measured
+        // before were not found and every nested grid was measured again in full: 1,500 nested grids took 6 s.
+        var html = "<style>.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:4mm;margin:4mm 0}</style>"
+            + Repeat("<div class=\"kpis\"><span>Week 42</span><span>Draft</span>", 1500);
+        AssertStructurallyValid(Bounded(html, new PdfOptions { MaxPages = 1000 }));
+    }
+
+    [Fact]
+    public void Nested_flex_boxes_across_columns_are_laid_out_again_to_a_bounded_depth()
+    {
+        // Found by the nightly fuzz run: target html, timeout-1b5a0815. In columns the boxes measured inside a flex
+        // item cannot be reused, so each nested item laid out again where it crossed a column laid out everything below
+        // it again, in every balancing pass: 150 levels took 3 s. Items nested deeper than eight keep their measured
+        // layout.
+        const string lorem = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante. ";
+        var html = "<style>@page{size:148mm 190mm;margin:12mm}body{font-size:8pt}.c2{column-count:2;column-gap:6mm}</style>"
+            + "<div class=\"c2\"><p>" + Repeat(lorem, 2) + Repeat("<div style=\"display:flex\">", 200) + Repeat(lorem, 4)
+            + "</p><p>" + Repeat(lorem, 3);
+        AssertStructurallyValid(Bounded(html));
+    }
+
     [Theory]
     [InlineData("<style>td{border:solid</style><table ><tr><td rowspan=2><tfoot><tr")]
     [InlineData("<style>td{border:1px solid}</style><table><thead><tr><td rowspan=3>h</td></tr></thead><tr><td>a</td></tr><tr><td>b</td></tr></table>")]
