@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Quarterly report</title>
+<style>
+  @page { size: A4; margin: 18mm; }
+  body { font: 11pt "Liberation Sans", sans-serif; color: #222; }
+  h1 { font: bold 22pt "Liberation Serif", serif; color: #1a4c8b; margin: 0 0 6mm; }
+  .banner { height: 18mm; border-radius: 4mm; background: linear-gradient(90deg, #1a4c8b, #4fb3d9); color: white;
+            display: flex; align-items: center; padding: 0 6mm; font-weight: bold; }
+  table { border-collapse: collapse; width: 100%; margin: 6mm 0; }
+  th, td { border: 0.5pt solid #999; padding: 2mm 3mm; text-align: left; }
+  th { background: #e8eef7; }
+  tr:nth-child(even) td { background: #f6f6f6; }
+  td.num { text-align: right; font-family: "DejaVu Sans Mono", monospace; }
+  .note { border-left: 3pt solid #e0a020; padding-left: 4mm; font-style: italic; opacity: 0.8; }
+  svg { display: block; margin: 4mm 0; }
+  .page2 { break-before: page; }
+</style>
+</head>
+<body>
+<h1>Quarterly report</h1>
+<div class="banner">Printed by Chromium for the PdfPecker test suite</div>
+<p>This document is a fixture made with headless Chromium, so the renderer, text extraction, merging, stamping and
+compacting are tested on a PDF that PdfPecker did not write. Characters outside Latin-1: æøå, ÆØÅ, € 1.234,56, “quotes”,
+naïve café, Ελληνικά, Кириллица.</p>
+<table>
+  <tr><th>Region</th><th>Q1</th><th>Q2</th><th>Change</th></tr>
+  <tr><td>North</td><td class="num">1,204</td><td class="num">1,388</td><td class="num">+15.3%</td></tr>
+  <tr><td>South</td><td class="num">982</td><td class="num">1,010</td><td class="num">+2.9%</td></tr>
+  <tr><td>East</td><td class="num">1,530</td><td class="num">1,402</td><td class="num">−8.4%</td></tr>
+  <tr><td>West</td><td class="num">744</td><td class="num">901</td><td class="num">+21.1%</td></tr>
+</table>
+<svg width="300" height="120" viewBox="0 0 300 120">
+  <rect x="10" y="60" width="50" height="50" fill="#1a4c8b"/>
+  <rect x="80" y="40" width="50" height="70" fill="#4fb3d9"/>
+  <rect x="150" y="20" width="50" height="90" fill="#e0a020" fill-opacity="0.7"/>
+  <path d="M10 100 C 80 10, 150 120, 290 15" stroke="#c03030" stroke-width="3" fill="none" stroke-dasharray="8 4"/>
+  <circle cx="250" cy="70" r="30" fill="none" stroke="#444" stroke-width="2"/>
+</svg>
+<p class="note">Figures are invented. <a href="https://example.com/report">A link to example.com</a>.</p>
+<div class="page2">
+  <h1>Second page</h1>
+  <ol><li>One item</li><li>Another item with <b>bold</b> and <i>italic</i> text</li><li>A third item</li></ol>
+</div>
+</body>
+</html>

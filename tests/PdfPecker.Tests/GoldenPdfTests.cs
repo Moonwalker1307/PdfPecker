@@ -9,7 +9,7 @@ namespace PdfPecker.Tests;
 /// <summary>
 /// Renders every sample document under Golden/ (HTML, and Markdown in *.md files) and compares the PDF with its saved
 /// baseline (*.expected.pdf next to the sample), so any change to existing output shows up as a failing test. A few
-/// operations on finished PDFs (merging and stamping) have baselines of their own under Golden/operations/.
+/// operations on finished PDFs (merging, stamping and encrypting) have baselines of their own under Golden/operations/.
 /// </summary>
 /// <remarks>
 /// The comparison is object by object, with compressed streams inflated, so it does not depend on the zlib build, and
@@ -112,7 +112,15 @@ public class GoldenPdfTests
 
     // ---- operations on finished PDFs ----
 
-    public static TheoryData<string> Operations() => new() { "merge", "stamp" };
+    public static TheoryData<string> Operations() => new() { "merge", "stamp", "encrypt", "protect" };
+
+    // Encrypted output differs on every run (random keys and IVs), so it is compared twice: decrypted, which covers the
+    // content, and with strings and stream data left out, which covers the encryption dictionary and the object layout.
+    private static readonly Dictionary<string, string> EncryptedOperations = new(StringComparer.Ordinal)
+    {
+        ["encrypt"] = "owner",
+        ["protect"] = "owner",
+    };
 
     [Theory]
     [MemberData(nameof(Operations))]
@@ -127,7 +135,11 @@ public class GoldenPdfTests
             return;
         }
         Assert.True(File.Exists(expectedPath), $"No baseline for {operation}. Create it with PDFPECKER_UPDATE_GOLDEN=1.");
-        var difference = FirstDifference(Normalize(File.ReadAllBytes(expectedPath)), Normalize(actual));
+        var expected = File.ReadAllBytes(expectedPath);
+        var difference = EncryptedOperations.TryGetValue(operation, out var password)
+            ? FirstDifference(Normalize(PdfProtector.Decrypt(expected, password)), Normalize(PdfProtector.Decrypt(actual, password)))
+                ?? FirstDifference(Skeleton(expected), Skeleton(actual))
+            : FirstDifference(Normalize(expected), Normalize(actual));
         Assert.True(difference == null, $"operations/{operation} differs from its baseline: {difference}");
     }
 
@@ -142,6 +154,14 @@ public class GoldenPdfTests
             "stamp" => PdfStamper.StampHtml(table,
                 "<div style='text-align:right;font:bold 14pt sans-serif;color:#c00'>COPY</div>",
                 htmlOptions: new PdfOptions { EmbedStandardFonts = true }),
+            "encrypt" => HtmlToPdf.Convert(File.ReadAllText(Path.Combine(Root, "large-table", "demo.html")), new PdfOptions
+            {
+                EmbedStandardFonts = true,
+                Security = new PdfSecurity { UserPassword = "user", OwnerPassword = "owner", Permissions = PdfPermissions.Print },
+            }),
+            // A PDF from another tool, with forms and tags, so the protector's rewrite of objects it did not write is covered.
+            "protect" => PdfProtector.Encrypt(File.ReadAllBytes(Path.Combine(SourceDirectory(), "Fixtures", "third-party", "libreoffice.pdf")),
+                new PdfSecurity { UserPassword = "user", OwnerPassword = "owner", Permissions = PdfPermissions.Print | PdfPermissions.FillForms | PdfPermissions.ExtractForAccessibility }),
             _ => throw new ArgumentOutOfRangeException(nameof(operation)),
         };
     }
@@ -164,14 +184,19 @@ public class GoldenPdfTests
 
     // ---- comparison ----
 
-    private sealed record PdfObject(int Number, string Dictionary, string Stream);
+    internal sealed record PdfObject(int Number, string Dictionary, string Stream);
 
     private static readonly Regex ObjectPattern = new(@"(\d+) 0 obj\n", RegexOptions.Compiled);
+    // A cross-reference stream carries the trailer, and with it the file ID, which the compactor derives from a hash of
+    // the compressed output and so from the zlib build. Its data, the byte offsets, depends on that build too, and is
+    // left out like a classic cross-reference table.
+    private static readonly Regex FileIds = new(@"/ID\s*\[\s*<[0-9A-Fa-f]*>\s*<[0-9A-Fa-f]*>\s*\]", RegexOptions.Compiled);
+    private static readonly Regex XRefType = new(@"/Type\s*/XRef\b", RegexOptions.Compiled);
     // Dates as literal strings, as hex strings (which the stamper writes) and in XMP metadata.
     private static readonly Regex Dates = new(@"\(D:[^)]*\)|(?<=/(?:CreationDate|ModDate) )<[0-9A-Fa-f]*>|<xmp:(?:Create|Modify|Metadata)Date>[^<]*", RegexOptions.Compiled);
 
     /// <summary>The file's objects in order, streams inflated, with dates blanked. The trailer (random /ID) is left out.</summary>
-    private static List<PdfObject> Normalize(byte[] pdf)
+    internal static List<PdfObject> Normalize(byte[] pdf)
     {
         var text = Encoding.Latin1.GetString(pdf);
         var objects = new List<PdfObject>();
@@ -195,9 +220,9 @@ public class GoldenPdfTests
                     // The compressed length depends on the zlib build; the inflated data is compared instead.
                     dict = dict.Remove(length.Index, length.Length);
                 }
-                stream = Dates.Replace(Encoding.Latin1.GetString(data), "");
+                stream = XRefType.IsMatch(dict) ? "" : Dates.Replace(Encoding.Latin1.GetString(data), "");
                 end = text.IndexOf("endobj", dataAt + len, StringComparison.Ordinal);
-                objects.Add(new PdfObject(int.Parse(m.Groups[1].Value), Dates.Replace(dict, ""), stream));
+                objects.Add(new PdfObject(int.Parse(m.Groups[1].Value), FileIds.Replace(Dates.Replace(dict, ""), ""), stream));
             }
             else objects.Add(new PdfObject(int.Parse(m.Groups[1].Value), Dates.Replace(text.Substring(start, end - start), ""), ""));
         }
@@ -219,8 +244,15 @@ public class GoldenPdfTests
         }
     }
 
+    private static readonly Regex Strings = new(@"\((?:\\.|[^\\()])*\)|(?<!<)<(?!<)[0-9A-Fa-f\s]*>", RegexOptions.Compiled);
+    private static readonly Regex Lengths = new(@"/Length \d+", RegexOptions.Compiled);
+
+    /// <summary>The objects of an encrypted file without the parts that change with the random key: strings, stream data and lengths.</summary>
+    private static List<PdfObject> Skeleton(byte[] pdf) =>
+        Normalize(pdf).Select(o => new PdfObject(o.Number, Lengths.Replace(Strings.Replace(o.Dictionary, "()"), ""), "")).ToList();
+
     /// <summary>A description of the first difference, or null when the files match.</summary>
-    private static string? FirstDifference(List<PdfObject> expected, List<PdfObject> actual)
+    internal static string? FirstDifference(List<PdfObject> expected, List<PdfObject> actual)
     {
         for (int i = 0; i < Math.Min(expected.Count, actual.Count); i++)
         {
