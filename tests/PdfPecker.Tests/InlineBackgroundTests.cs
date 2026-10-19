@@ -7,8 +7,8 @@ using static PdfPecker.Tests.PdfTestHelpers;
 namespace PdfPecker.Tests;
 
 /// <summary>
-/// Backgrounds of inline boxes: images and gradients, their clip and origin, rounded corners, opacity, text clipping,
-/// and box-decoration-break across line fragments.
+/// Backgrounds and borders of inline boxes: images and gradients, their clip and origin, rounded corners, opacity, text
+/// clipping, and box-decoration-break across line fragments.
 /// </summary>
 public class InlineBackgroundTests
 {
@@ -176,6 +176,90 @@ public class InlineBackgroundTests
         var bgs = All<BackgroundOp>(
             "<p style='margin:0'><span style='background:linear-gradient(red, blue)'>outer <span style='background:yellow'>inner</span> outer</span></p>");
         Assert.Single(bgs);
+    }
+
+    [Fact]
+    public void BorderOfASpanIsPaintedAroundItAndTakesRoom()
+    {
+        var ops = Flatten(Layout("<p style='margin:0'>a<span style='border:2px solid red; padding:0 4px'>x</span>b</p>"));
+        var border = Assert.Single(ops.OfType<BorderRectOp>());
+        Assert.Equal(0xFFFF0000, border.Color);
+        Near(1.5f, border.Width); // 2px
+        Assert.DoesNotContain(ops, o => o is ClipOp);
+        var a = ops.OfType<TextOp>().First(t => t.Text.StartsWith('a'));
+        var x = ops.OfType<TextOp>().First(t => t.Text == "x");
+        var b = ops.OfType<TextOp>().First(t => t.Text == "b");
+        Near(border.X, x.X - 4.5f); // 2px of border and 4px of padding before the text
+        Assert.True(border.X >= a.X, "The border starts after the text before it");
+        Near(border.X + border.W, b.X); // and as much after it, up to the next text
+        Assert.True(ops.IndexOf(border) < ops.IndexOf(x), "The border is painted before the text");
+    }
+
+    [Fact]
+    public void SingleSidedAndRoundedBordersArePainted()
+    {
+        var line = Assert.Single(All<LineOp>("<p style='margin:0'><a href='#x' style='border-bottom:1px dotted blue'>link</a></p>"));
+        Assert.True(line.Dotted);
+        Assert.Equal(line.Y1, line.Y2);
+
+        var ring = Assert.Single(All<RoundRectOp>("<p style='margin:0'><kbd style='border:1px solid #888; border-radius:3px'>Ctrl</kbd></p>"));
+        Assert.True(ring.HasHole && ring.R.TLx > 0);
+    }
+
+    [Fact]
+    public void SliceShowsTheStartAndEndBordersOnlyOnTheFirstAndLastFragment()
+    {
+        var ops = Flatten(Layout(
+            "<p style='margin:0; width:150px'>Some text <span style='border:2px solid red'>with a bordered run that wraps</span></p>", 200));
+        var clips = ops.OfType<ClipOp>().ToList();
+        Assert.True(clips.Count >= 2, $"Expected a fragment on each line, got {clips.Count}");
+        float total = clips.Sum(c => c.W);
+        float before = 0;
+        foreach (var clip in clips)
+        {
+            // One border box as wide as all fragments, cut to each: only the first shows the left border, only the last the right.
+            var border = Assert.Single(clip.Ops.OfType<BorderRectOp>());
+            Near(total, border.W, 0.1f);
+            Near(clip.X - before, border.X, 0.1f);
+            Near(clip.Y, border.Y);
+            before += clip.W;
+        }
+    }
+
+    [Fact]
+    public void CloneGivesEachFragmentAllFourBorders()
+    {
+        var ops = Flatten(Layout(
+            "<p style='margin:0; width:150px'>Some text <span style='border:2px solid red; box-decoration-break:clone'>with a bordered run that wraps</span></p>", 200));
+        Assert.DoesNotContain(ops, o => o is ClipOp);
+        var borders = ops.OfType<BorderRectOp>().ToList();
+        Assert.True(borders.Count >= 2, $"Expected a border on each line, got {borders.Count}");
+        var texts = ops.OfType<TextOp>().ToList();
+        var second = texts.Where(t => t.LineTop > texts[0].LineTop).OrderBy(t => t.X).First();
+        Near(0, borders[1].X);
+        Near(1.5f, second.X); // the second line starts with the box's left border
+        Assert.True(borders[0].X + borders[0].W <= 150 + 0.05f, "The first line keeps room for the right border");
+    }
+
+    [Fact]
+    public void SiblingsStyledAlikeAreBoxesOfTheirOwn()
+    {
+        // The two elements share one computed style, yet each is a whole box with all its corners and sides.
+        var ops = Flatten(Layout("<p style='margin:0'><kbd style='border:1px solid #888; border-radius:3px; background:#eee'>Ctrl</kbd> + "
+            + "<kbd style='border:1px solid #888; border-radius:3px; background:#eee'>C</kbd></p>"));
+        Assert.DoesNotContain(ops, o => o is ClipOp);
+        var rounded = ops.OfType<RoundRectOp>().ToList();
+        Assert.Equal(4, rounded.Count); // a background and a border ring for each
+        Assert.All(rounded, r => Assert.True(r.R.TLx > 0 && r.R.TRx > 0, "Every corner is rounded"));
+    }
+
+    [Fact]
+    public void OpacityFadesTheBorder()
+    {
+        var ops = Flatten(Layout("<p style='margin:0'><span style='opacity:.5; border:1px solid black'>x</span></p>"));
+        var layer = Assert.Single(ops.OfType<LayerOp>(), l => l.Opacity < 1);
+        Near(0.5f, layer.Opacity);
+        Assert.Contains(layer.Ops, o => o is BorderRectOp);
     }
 
     [Fact]
