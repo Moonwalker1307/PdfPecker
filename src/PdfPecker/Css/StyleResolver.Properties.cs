@@ -244,6 +244,8 @@ internal sealed partial class StyleResolver
             case "stroke-linecap": ApplyStrokeLineCap(s, in d); break;
             case "stroke-linejoin": ApplyStrokeLineJoin(s, in d); break;
             case "stroke-miterlimit": ApplyStrokeMiterLimit(s, in d); break;
+            case "stroke-dasharray": ApplyStrokeDashArray(s, parent, in d); break;
+            case "stroke-dashoffset": ApplyStrokeDashOffset(s, parent, in d); break;
             case "mask": s.SvgMask = SvgUrl(d.Value, d.Lower); break;
             case "mask-type": s.SvgMaskAlpha = d.Lower == "alpha"; break;
             case "marker": s.SvgMarkerStart = s.SvgMarkerMid = s.SvgMarkerEnd = d.Inherit ? parent.SvgMarkerStart : SvgUrl(d.Value, d.Lower); break;

@@ -28,6 +28,8 @@ internal sealed class SvgShape
     public SvgLineCap LineCap;
     public SvgLineJoin LineJoin;
     public float MiterLimit = 4;
+    public float[]? Dash;                         // stroke dash and gap lengths, an even count; null for a solid stroke
+    public float DashPhase;
     public float MinX, MinY, MaxX, MaxY;          // bounds, for tiling repeating gradients
 
     // Text runs.
@@ -36,6 +38,10 @@ internal sealed class SvgShape
     public bool Rtl;                              // drawn right to left (shaped and shown last glyph first)
     public float FontSize, CharSpacing;
     public Matrix TextMatrix;
+    // Text on a path: TextMatrix maps user space to the root, and each glyph is placed along the path, from PathStart
+    // and PathShift off it (downwards on a path drawn left to right), turned with the path's direction.
+    public SvgPathMeasure? TextPath;
+    public float PathStart, PathShift;
 
     // Tiled fills and strokes (pattern elements).
     public SvgPattern? FillPattern, StrokePattern;
@@ -117,7 +123,9 @@ internal sealed partial class SvgImage
     private readonly Dictionary<string, Element> _ids = new(StringComparer.Ordinal);
     private int _clipDepth, _maskDepth, _filterDepth, _patternDepth;
     private SvgBudget _budget = null!;
+    private float _diagonal; // the root viewport's normalised diagonal, which percentage dash lengths refer to
     private Func<string, object?>? _load; // the PdfImage or SvgImage at an image element's href, or null
+    private Dictionary<Element, (SvgPathMeasure?, float)>? _textPaths; // the paths text is laid along, measured
 
     /// <summary>
     /// Builds the drawing of an svg element. <paramref name="load"/> resolves the href of image elements to a PdfImage
@@ -137,6 +145,10 @@ internal sealed partial class SvgImage
             img.ViewBoxWidth = vb[2];
             img.ViewBoxHeight = vb[3];
         }
+        // Without a viewBox, the viewport is the given size, else the default size of a replaced element (300 × 150).
+        float vpw = img.HasViewBox ? img.ViewBoxWidth : img.Width / 0.75f ?? 300;
+        float vph = img.HasViewBox ? img.ViewBoxHeight : img.Height / 0.75f ?? 150;
+        img._diagonal = MathF.Sqrt((vpw * vpw + vph * vph) / 2);
         var par = svg.GetAttribute("preserveaspectratio");
         if (par != null)
         {
@@ -336,7 +348,7 @@ internal sealed partial class SvgImage
             case "line":
             {
                 var line = ShapePath(e);
-                Emit(s, ctm, op, line, fillable: false);
+                Emit(s, ctm, op, line, fillable: false, Num(e, "pathlength", float.NaN));
                 if (line != null) RenderMarkers(s, ctm, op, line, depth);
                 return;
             }
@@ -344,7 +356,7 @@ internal sealed partial class SvgImage
                 // Not drawn: defs, symbol (only through use), gradients, clipPath, mask, pattern, marker, filter, style...
                 if (ShapePath(e) is { } path)
                 {
-                    Emit(s, ctm, op, path);
+                    Emit(s, ctm, op, path, pathLength: Num(e, "pathlength", float.NaN));
                     if (e.Name is "path" or "polyline" or "polygon") RenderMarkers(s, ctm, op, path, depth);
                 }
                 return;
@@ -400,7 +412,7 @@ internal sealed partial class SvgImage
     private void RenderReferenced(Element target, Element use, Matrix m, float opacity, int depth)
         => Render(target, m, opacity * (use.Style?.Opacity ?? 1), depth);
 
-    private void Emit(ComputedStyle s, Matrix ctm, float opacity, PathBuilder? path, bool fillable = true)
+    private void Emit(ComputedStyle s, Matrix ctm, float opacity, PathBuilder? path, bool fillable = true, float pathLength = float.NaN)
     {
         if (path == null || path.Verbs.Count == 0 || !s.Visible) return;
         if ((_budget.Remaining -= path.Points.Count / 2) < 0) return;
@@ -416,6 +428,12 @@ internal sealed partial class SvgImage
             LineJoin = s.SvgLineJoin,
             MiterLimit = s.SvgMiterLimit,
         };
+        if (s.SvgDashArray != null && s.SvgStrokeWidth > 0)
+        {
+            // pathLength rescales distances along the path: dash lengths are given in its units, not user units.
+            float along = pathLength > 0 && float.IsFinite(pathLength) ? SvgPathMeasure.LengthOf(path) / pathLength : 1;
+            shape.Dash = Dashes(s, ctm.ScaleFactor * along, out shape.DashPhase);
+        }
         if (fillable) shape.Fill = Paint(s.SvgFill, s.SvgFillUrl, s.SvgFillOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.FillGradient, out shape.FillPattern);
         if (s.SvgStrokeWidth > 0)
             shape.Stroke = Paint(s.SvgStroke, s.SvgStrokeUrl, s.SvgStrokeOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.StrokeGradient, out shape.StrokePattern);
@@ -423,6 +441,34 @@ internal sealed partial class SvgImage
         for (int i = 0; i + 1 < pts.Length; i += 2) ctm.Apply(ref pts[i], ref pts[i + 1]);
         Bounds(pts, out shape.MinX, out shape.MinY, out shape.MaxX, out shape.MaxY);
         Shapes.Add(shape);
+    }
+
+    /// <summary>
+    /// The stroke-dasharray and stroke-dashoffset of a style as a PDF dash pattern, with lengths multiplied by
+    /// <paramref name="scale"/>: an odd-length list is repeated to make it even, and a pattern whose lengths add up to
+    /// zero (or to nothing measurable) is a solid stroke, so it is null. The phase is brought into the range the PDF
+    /// dash operator expects, from zero to the pattern's length.
+    /// </summary>
+    private float[]? Dashes(ComputedStyle s, float scale, out float phase)
+    {
+        phase = 0;
+        var dash = s.SvgDashArray!;
+        int n = dash.Values.Length;
+        var result = new float[n % 2 == 0 ? n : 2 * n];
+        double sum = 0;
+        for (int i = 0; i < result.Length; i++)
+        {
+            int k = i % n;
+            float v = dash.Values[k];
+            if (dash.Percent != null && dash.Percent[k]) v = v / 100 * _diagonal;
+            result[i] = v * scale;
+            sum += result[i];
+        }
+        if (!(sum > 1e-4 && sum < Length.MaxMagnitude)) return null;
+        float offset = (s.SvgDashOffsetPercent ? s.SvgDashOffset / 100 * _diagonal : s.SvgDashOffset) * scale;
+        double p = offset % sum;
+        phase = (float)(p < 0 ? p + sum : p);
+        return result;
     }
 
     private static void Bounds(float[] pts, out float minX, out float minY, out float maxX, out float maxY)
@@ -669,12 +715,22 @@ internal sealed partial class SvgImage
         public readonly string Text;
         public readonly ComputedStyle Style;
         public readonly float X, Y, Width;
-        public TextRun(string text, ComputedStyle style, float x, float y, float width) { Text = text; Style = style; X = x; Y = y; Width = width; }
+        public readonly SvgPathMeasure? Path; // on a textPath: X is the distance along it and Y the shift off it
+        public TextRun(string text, ComputedStyle style, float x, float y, float width, SvgPathMeasure? path = null)
+        {
+            Text = text;
+            Style = style;
+            X = x;
+            Y = y;
+            Width = width;
+            Path = path;
+        }
     }
 
     /// <summary>
     /// Lays out a &lt;text&gt; element and its tspans: x/y start a new text chunk (aligned by text-anchor), dx/dy shift
     /// the pen, white space collapses as with xml:space="default". Only the first value of each position list is used.
+    /// Inside a textPath, the pen's x is the distance along the path and its y the shift off it, as in Chromium.
     /// </summary>
     private void RenderText(Element text, Matrix ctm, float opacity)
     {
@@ -682,12 +738,19 @@ internal sealed partial class SvgImage
         var chunkStarts = new List<int>();
         float penX = 0, penY = 0;
         bool lastSpace = true;
+        SvgPathMeasure? onPath = null;
 
         void Walk(Element el, int depth)
         {
             if (depth > 16 || el.Style == null || el.Style.Display == Display.None) return;
+            if (el.Name == "textpath" && depth > 0 && onPath == null)
+            {
+                WalkTextPath(el, depth);
+                return;
+            }
             var xs = ParseNumbers(el.GetAttribute("x"));
-            var ys = ParseNumbers(el.GetAttribute("y"));
+            // Along a path, y has no meaning: only dy shifts the text off it.
+            var ys = onPath == null ? ParseNumbers(el.GetAttribute("y")) : new List<float>();
             if (xs.Count > 0 || ys.Count > 0 || depth == 0) chunkStarts.Add(runs.Count);
             if (xs.Count > 0) penX = xs[0];
             if (ys.Count > 0) penY = ys[0];
@@ -695,6 +758,32 @@ internal sealed partial class SvgImage
             var dys = ParseNumbers(el.GetAttribute("dy"));
             if (dxs.Count > 0) penX += dxs[0];
             if (dys.Count > 0) penY += dys[0];
+            WalkChildren(el, depth);
+        }
+
+        // A textPath starts a chunk at its startOffset along the referenced path. Text after it continues from the path's
+        // end point; Chromium draws nothing for a reference to anything but a path element, and puts the text after it
+        // at the origin.
+        void WalkTextPath(Element el, int depth)
+        {
+            var path = TextPathMeasure(Reference(el.GetAttribute("href") ?? el.GetAttribute("xlink:href")), out float units);
+            if (path != null)
+            {
+                chunkStarts.Add(runs.Count);
+                penX = StartOffset(el.GetAttribute("startoffset"), path.Length, units);
+                penY = 0;
+                onPath = path;
+                WalkChildren(el, depth);
+                onPath = null;
+                penX = path.EndX;
+                penY = path.EndY;
+            }
+            else penX = penY = 0;
+            chunkStarts.Add(runs.Count);
+        }
+
+        void WalkChildren(Element el, int depth)
+        {
             foreach (var child in el.Children)
             {
                 if (child is Element ce)
@@ -717,7 +806,7 @@ internal sealed partial class SvgImage
                 var st = el.Style;
                 float size = st.FontSize / 0.75f;
                 float w = st.Font.Measure(str, size) + st.LetterSpacing / 0.75f * str.Length;
-                runs.Add(new TextRun(str, st, penX, penY, w));
+                runs.Add(new TextRun(str, st, penX, penY, w, onPath));
                 penX += w;
             }
         }
@@ -730,7 +819,7 @@ internal sealed partial class SvgImage
             var trimmed = last.Text.TrimEnd(' ');
             float size = last.Style.FontSize / 0.75f;
             runs[^1] = new TextRun(trimmed, last.Style, last.X, last.Y,
-                last.Style.Font.Measure(trimmed, size) + last.Style.LetterSpacing / 0.75f * trimmed.Length);
+                last.Style.Font.Measure(trimmed, size) + last.Style.LetterSpacing / 0.75f * trimmed.Length, last.Path);
         }
 
         chunkStarts.Add(runs.Count);
@@ -749,6 +838,62 @@ internal sealed partial class SvgImage
             float shift = anchor == 1 ? -(right - left) / 2 : anchor == 2 ? -(right - left) : 0;
             for (int i = from; i < to; i++) EmitText(runs[i], shift, ctm, opacity, rtl: false);
         }
+    }
+
+    /// <summary>
+    /// The measure of the path a textPath refers to, in the text's user space (the path's own transform applies), and the
+    /// user units per unit of its pathLength. Chromium lays text only along path elements; anything else, a path too
+    /// long to measure or one past the drawing's budget gives null.
+    /// </summary>
+    private SvgPathMeasure? TextPathMeasure(Element? target, out float units)
+    {
+        units = 1;
+        if (target?.Name != "path") return null;
+        // A path that many textPaths refer to is measured once.
+        _textPaths ??= new Dictionary<Element, (SvgPathMeasure?, float)>();
+        if (_textPaths.TryGetValue(target, out var known))
+        {
+            units = known.Item2;
+            return known.Item1;
+        }
+        var measure = MeasureTextPath(target, out units);
+        _textPaths[target] = (measure, units);
+        return measure;
+    }
+
+    private SvgPathMeasure? MeasureTextPath(Element target, out float units)
+    {
+        units = 1;
+        if (ShapePath(target) is not { } path || path.Verbs.Count > SvgPathMeasure.MaxVerbs) return null;
+        if ((_budget.Remaining -= path.Points.Count / 2) < 0) return null;
+        if (target.GetAttribute("transform") is { } tf)
+        {
+            var m = ParseTransform(tf);
+            var pts = path.Points;
+            for (int i = 0; i + 1 < pts.Count; i += 2)
+            {
+                float x = pts[i], y = pts[i + 1];
+                m.Apply(ref x, ref y);
+                pts[i] = x;
+                pts[i + 1] = y;
+            }
+        }
+        var measure = new SvgPathMeasure(path);
+        if (!(measure.Length > 0 && float.IsFinite(measure.Length))) return null;
+        float pathLength = Num(target, "pathlength", float.NaN);
+        if (pathLength > 0 && float.IsFinite(pathLength)) units = measure.Length / pathLength;
+        return measure;
+    }
+
+    /// <summary>A textPath's startOffset: a percentage of the path's length, or a length in pathLength units.</summary>
+    private static float StartOffset(string? value, float length, float units)
+    {
+        if (value == null) return 0;
+        value = value.Trim();
+        if (value.EndsWith('%'))
+            return float.TryParse(value.AsSpan(0, value.Length - 1), NumberStyles.Float, CultureInfo.InvariantCulture, out float pct) && float.IsFinite(pct) ? pct / 100 * length : 0;
+        if (float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float n) && float.IsFinite(n)) return n * units;
+        return StyleResolver.TryParseLength(value, 12, 12, out var len) && !len.IsAuto && !len.IsPercent && float.IsFinite(len.Value) ? len.Value / 0.75f * units : 0;
     }
 
     private static bool NeedsBidi(List<TextRun> runs, int from, int to)
@@ -813,7 +958,7 @@ internal sealed partial class SvgImage
         {
             var p = pieces[k];
             var run = runs[p.Run];
-            var piece = new TextRun(run.Text.Substring(p.Start, p.Length), run.Style, x, run.Y, p.Width);
+            var piece = new TextRun(run.Text.Substring(p.Start, p.Length), run.Style, x, run.Y, p.Width, run.Path);
             EmitText(piece, 0, ctm, opacity, (pieceLevels[k] & 1) != 0);
             x += p.Width;
         }
@@ -836,7 +981,7 @@ internal sealed partial class SvgImage
         {
             var fr = fontRuns[rtl ? fontRuns.Count - 1 - r : r];
             float w = fr.Font.MeasureUnits(run.Text, fr.Start, fr.Length) * size / 1000f + s.LetterSpacing / 0.75f * fr.Length;
-            EmitTextShape(new TextRun(run.Text.Substring(fr.Start, fr.Length), s, x, run.Y, w), fr.Font, shift, ctm, opacity, rtl);
+            EmitTextShape(new TextRun(run.Text.Substring(fr.Start, fr.Length), s, x, run.Y, w, run.Path), fr.Font, shift, ctm, opacity, rtl);
             x += w;
         }
     }
@@ -854,6 +999,13 @@ internal sealed partial class SvgImage
             _ => 0,
         };
         float minX = x, minY = y - 0.8f * size, maxX = x + run.Width, maxY = y + 0.2f * size;
+        if (run.Path is { } path)
+        {
+            // Every glyph is placed on its own, so the drawing's budget pays for each.
+            if ((_budget.Remaining -= run.Text.Length) < 0) return;
+            float reach = size + Math.Abs(y);
+            (minX, minY, maxX, maxY) = (path.MinX - reach, path.MinY - reach, path.MaxX + reach, path.MaxY + reach);
+        }
         var shape = new SvgShape
         {
             Kind = SvgShape.KindText,
@@ -862,12 +1014,16 @@ internal sealed partial class SvgImage
             Rtl = rtl,
             FontSize = size,
             CharSpacing = s.LetterSpacing / 0.75f,
-            TextMatrix = new Matrix(1, 0, 0, -1, x, y).Then(ctm),
+            TextMatrix = run.Path == null ? new Matrix(1, 0, 0, -1, x, y).Then(ctm) : ctm,
+            TextPath = run.Path,
+            PathStart = x,
+            PathShift = y,
             StrokeWidth = s.SvgStrokeWidth * ctm.ScaleFactor,
             LineJoin = s.SvgLineJoin,
             LineCap = s.SvgLineCap,
             MiterLimit = s.SvgMiterLimit,
         };
+        if (s.SvgDashArray != null && s.SvgStrokeWidth > 0) shape.Dash = Dashes(s, ctm.ScaleFactor, out shape.DashPhase);
         shape.Fill = Paint(s.SvgFill, s.SvgFillUrl, s.SvgFillOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.FillGradient, out shape.FillPattern);
         if (s.SvgStrokeWidth > 0)
             shape.Stroke = Paint(s.SvgStroke, s.SvgStrokeUrl, s.SvgStrokeOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.StrokeGradient, out shape.StrokePattern);

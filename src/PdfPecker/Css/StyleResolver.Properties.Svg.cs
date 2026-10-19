@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Globalization;
 
 namespace PdfPecker.Css;
@@ -5,6 +6,8 @@ namespace PdfPecker.Css;
 /// <summary>SVG presentation properties: fill and stroke, markers, filter primitives and text alignment.</summary>
 internal sealed partial class StyleResolver
 {
+    private static readonly SearchValues<char> DashSeparators = SearchValues.Create(" \t\r\n\f,");
+
     private static void ApplyFill(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
         => ParsePaint(d.Value, s, d.Inherit ? parent.SvgFill : null, d.Inherit ? parent.SvgFillUrl : null, d.Inherit,
             out s.SvgFill, out s.SvgFillUrl, s.SvgFill, s.SvgFillUrl);
@@ -39,6 +42,64 @@ internal sealed partial class StyleResolver
     private static void ApplyStrokeMiterLimit(ComputedStyle s, in DeclaredValue d)
     {
         if (float.TryParse(d.Lower, NumberStyles.Float, CultureInfo.InvariantCulture, out float ml) && ml >= 1) s.SvgMiterLimit = ml;
+    }
+
+    /// <summary>
+    /// stroke-dasharray: none, or dash and gap lengths separated by commas or spaces. A negative or unreadable value
+    /// makes the whole declaration invalid, so it is ignored, as is a list longer than <see cref="SvgDashArray.MaxValues"/>.
+    /// </summary>
+    private void ApplyStrokeDashArray(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit) { s.SvgDashArray = parent.SvgDashArray; return; }
+        if (d.Lower == "none") { s.SvgDashArray = null; return; }
+        var values = new List<float>();
+        List<bool>? percent = null;
+        var rest = d.Lower.AsSpan();
+        while (true)
+        {
+            rest = rest.TrimStart(" \t\r\n\f");
+            if (rest.IsEmpty) break;
+            int end = rest.IndexOfAny(DashSeparators);
+            if (end < 0) end = rest.Length;
+            if (values.Count == SvgDashArray.MaxValues || !TryParseSvgLength(rest.Slice(0, end).ToString(), d.Em, out float v, out bool pct) || v < 0) return;
+            if (pct) percent ??= new List<bool>(new bool[values.Count]);
+            values.Add(v);
+            percent?.Add(pct);
+            rest = rest.Slice(end).TrimStart(" \t\r\n\f");
+            // A comma separates two values; one at the start or end of the list, or two in a row, is an error.
+            if (!rest.IsEmpty && rest[0] == ',')
+            {
+                rest = rest.Slice(1).TrimStart(" \t\r\n\f");
+                if (rest.IsEmpty || rest[0] == ',') return;
+            }
+        }
+        if (values.Count == 0) return;
+        s.SvgDashArray = new SvgDashArray(values.ToArray(), percent?.ToArray());
+    }
+
+    /// <summary>stroke-dashoffset: a length, percentage or plain number of user units; it may be negative.</summary>
+    private void ApplyStrokeDashOffset(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit) { s.SvgDashOffset = parent.SvgDashOffset; s.SvgDashOffsetPercent = parent.SvgDashOffsetPercent; }
+        else if (TryParseSvgLength(d.Lower, d.Em, out float v, out bool pct)) { s.SvgDashOffset = v; s.SvgDashOffsetPercent = pct; }
+    }
+
+    /// <summary>
+    /// An SVG length: a plain number of user units (CSS pixels), a CSS length converted to them, or a percentage, which
+    /// is returned as written with <paramref name="percent"/> set.
+    /// </summary>
+    private bool TryParseSvgLength(string lower, float em, out float value, out bool percent)
+    {
+        percent = lower.EndsWith('%');
+        if (percent ? float.TryParse(lower.AsSpan(0, lower.Length - 1), NumberStyles.Float, CultureInfo.InvariantCulture, out value)
+            : float.TryParse(lower, NumberStyles.Float, CultureInfo.InvariantCulture, out value))
+            return float.IsFinite(value) && Math.Abs(value) <= Length.MaxMagnitude;
+        if (TryParseLength(lower, em, _rootFontSize, out var len, _vw, _vh) && !len.IsAuto && !len.IsPercent)
+        {
+            value = len.Value / 0.75f;
+            return true;
+        }
+        return false;
     }
 
     private static void ApplyFloodColor(ComputedStyle s, in DeclaredValue d)
