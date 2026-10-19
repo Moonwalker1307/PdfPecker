@@ -205,7 +205,13 @@ internal sealed partial class PdfDocumentWriter
                 if (_mc != null) b.Ascii("/Artifact BMC ");
                 if (c.Radii is { } r && !r.IsZero) RoundRectPath(b, x0, y0, Math.Max(0, x1 - x0), Math.Max(0, y1 - y0), r, pageTop);
                 else b.Num(PX(x0)).Sp().Num(PY(y1, pageTop)).Sp().Num(Math.Max(0, x1 - x0)).Sp().Num(Math.Max(0, y1 - y0)).Ascii(" re ");
-                b.Ascii("W n\n");
+                if (c.Hole is { } hole)
+                {
+                    // The even-odd rule leaves the hole out of the clip.
+                    float hx0 = SnapPx(hole.X), hx1 = SnapPx(hole.X + hole.W), hy0 = SnapPx(hole.Y), hy1 = SnapPx(hole.Y + hole.H);
+                    b.Num(PX(hx0)).Sp().Num(PY(hy1, pageTop)).Sp().Num(Math.Max(0, hx1 - hx0)).Sp().Num(Math.Max(0, hy1 - hy0)).Ascii(" re W* n\n");
+                }
+                else b.Ascii("W n\n");
                 if (_mc != null) b.Ascii("EMC\n");
                 foreach (var item in cb.Items)
                     if (item.Op is not LinkOp) WriteOp(b, item, pageTop, imageIds);
