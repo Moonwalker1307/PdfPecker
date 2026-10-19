@@ -139,6 +139,74 @@ public class BorderStyleAndShadowTests
         Assert.Equal(BorderStyle.Outset, s.BorderLeftStyle);
     }
 
+    // ---- form controls styled by the page ----
+
+    private static ComputedStyle Control(string html)
+    {
+        var doc = HtmlParser.Parse(html);
+        new StyleResolver(new Stylesheet(), 500, 800).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
+        return Descendants(doc).First(e => e.Name is "input" or "textarea" or "select" or "button").Style;
+    }
+
+    private static bool Square(ComputedStyle s) => s.BorderRadii == null || s.BorderRadii.All(r => r.Value == 0);
+
+    [Fact]
+    public void An_unstyled_text_field_keeps_its_rounded_native_look()
+    {
+        var s = Control("<input value='x'>");
+        Assert.False(Square(s));
+        Assert.Equal(BorderStyle.Solid, s.BorderTopStyle);
+        Assert.Equal(0.75f, s.BorderTop);
+    }
+
+    [Fact]
+    public void A_text_field_with_a_border_from_the_page_is_square_with_Chromes_padding()
+    {
+        var s = Control("<input style='border:1px solid #888' value='x'>");
+        Assert.True(Square(s));
+        Assert.Equal(0.75f, s.BorderTop);
+        Assert.Equal(0.75f, s.PaddingTop.Value);   // 1px 2px, as in Chrome's user-agent sheet
+        Assert.Equal(1.5f, s.PaddingLeft.Value);
+    }
+
+    [Fact]
+    public void A_text_field_with_a_background_gets_Chromes_inset_border()
+    {
+        var s = Control("<input style='background:yellow' value='x'>");
+        Assert.True(Square(s));
+        Assert.Equal(BorderStyle.Inset, s.BorderTopStyle);
+        Assert.Equal(1.5f, s.BorderTop);
+        Assert.Equal(0xFF767676u, s.BorderTopColor);
+    }
+
+    [Fact]
+    public void A_styled_button_gets_Chromes_outset_black_border()
+    {
+        var s = Control("<button style='background:yellow'>Send</button>");
+        Assert.True(Square(s));
+        Assert.Equal(BorderStyle.Outset, s.BorderLeftStyle);
+        Assert.Equal(1.5f, s.BorderLeft);
+        Assert.Equal(0xFF000000u, s.BorderLeftColor);
+    }
+
+    [Theory]
+    [InlineData("<textarea style='border-color:red'>x</textarea>")]
+    [InlineData("<select style='border:2px solid red'><option>x</option></select>")]
+    public void Styled_text_areas_and_drop_downs_are_square(string html) => Assert.True(Square(Control(html)));
+
+    [Fact]
+    public void The_pages_own_radius_and_border_still_win()
+    {
+        var s = Control("<input style='border:3px dashed red;border-radius:6px' value='x'>");
+        Assert.False(Square(s));
+        Assert.Equal(BorderStyle.Dashed, s.BorderTopStyle);
+        Assert.Equal(2.25f, s.BorderTop);
+    }
+
+    [Fact]
+    public void A_styled_check_box_keeps_its_rounded_corners()
+        => Assert.False(Square(Control("<input type='checkbox' style='background:yellow'>")));
+
     // ---- inset box-shadow ----
 
     [Fact]

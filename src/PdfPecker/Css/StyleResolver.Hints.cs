@@ -245,6 +245,57 @@ internal sealed partial class StyleResolver
         else if (a is "middle" or "top" or "bottom") Hint("vertical-align", a);
     }
 
+    // Chrome draws text fields, text areas, drop-downs and buttons natively (rounded, with a thin grey border) until the
+    // page styles their border or background. Then it falls back to its user-agent sheet: square corners, a 2px inset
+    // grey border and 1px 2px padding on a text field, a 2px outset black border and 1px 6px padding on a button. The
+    // native look's border and padding add up to the same size, so only a page that also sets a border width sees the
+    // padding change.
+    private static readonly Declaration[] FieldFallback = Fallback("border-width: 2px; border-style: inset; padding: 1px 2px; border-radius: 0");
+    private static readonly Declaration[] ButtonFallback = Fallback("border-width: 2px; border-style: outset; padding: 1px 6px; border-radius: 0");
+    private static readonly Declaration[] ButtonFallbackColor = Fallback("border-color: black");
+    private static readonly Declaration[] SquareFallback = Fallback("border-radius: 0");
+
+    private static Declaration[] Fallback(string css)
+    {
+        var list = new List<Declaration>();
+        CssParser.ParseDeclarations(css, list);
+        return list.ToArray();
+    }
+
+    /// <summary>
+    /// Adds Chrome's fallback look for a form control whose border or background the page styles, as user-agent
+    /// declarations that the page's own still override. <paramref name="authorStart"/> is where the page's
+    /// declarations begin in the working buffer.
+    /// </summary>
+    private void StyledControlFallback(Element e, int authorStart)
+    {
+        if (e.Name is not ("input" or "textarea" or "select" or "button")) return;
+        bool styled = false;
+        for (int i = authorStart; i < _count && !styled; i++)
+        {
+            var p = _decls[i].Property;
+            styled = p.StartsWith("background", StringComparison.Ordinal)
+                     || p.StartsWith("border", StringComparison.Ordinal) && p is not ("border-collapse" or "border-spacing");
+        }
+        if (!styled) return;
+        string? type = e.Name == "input" ? e.GetAttribute("type")?.Trim().ToLowerInvariant() : null;
+        Declaration[] fallback;
+        bool button = e.Name == "button" || type is "submit" or "reset" or "button";
+        if (button) fallback = ButtonFallback;
+        else if (e.Name == "input")
+        {
+            // Check boxes and radio buttons keep their native look in Chrome; the rest have no box of their own.
+            if (type is "checkbox" or "radio" or "hidden" or "image" or "file" or "range" or "color") return;
+            fallback = FieldFallback;
+        }
+        else fallback = SquareFallback;
+        // After every user-agent rule, before the presentational hints and the page's rules.
+        const int Last = 0xFFFFF;
+        for (int i = 0; i < fallback.Length; i++) Push(TierUa, Last, Last, i, fallback[i], UnlayeredRank);
+        if (button && !e.HasAttribute("disabled"))
+            for (int i = 0; i < ButtonFallbackColor.Length; i++) Push(TierUa, Last, Last, fallback.Length + i, ButtonFallbackColor[i], UnlayeredRank);
+    }
+
     // The internal property that carries the lang attribute into the computed style.
     private const string LangProperty = "-pdfpecker-lang";
 
