@@ -107,6 +107,69 @@ public class BrowserMatchTests
         Assert.Equal(new[] { "ab c", "def" }, Lines(Layout("<div style='width: 30px; font: 12px Courier New; word-break: break-all'>ab cdef</div>")));
     }
 
+    [Theory]
+    [InlineData("P*")]
+    [InlineData("P(")]
+    [InlineData("P&nbsp;")]
+    [InlineData("P<span>*</span>")]
+    public void A_line_breaks_before_an_inline_block_that_does_not_fit(string before)
+    {
+        // Chrome breaks before the box, even after an opening bracket or a no-break space, rather than carrying the
+        // last word down with it.
+        var ops = Layout($"<div style='width: 120px; font: 14px Arial'>AA {before}<span style='display: inline-block; width: 100px'>IB</span></div>");
+        var text = ops.OfType<TextOp>().ToList();
+        Assert.Equal("IB", text[^1].Text);
+        Assert.All(text.Take(text.Count - 1), t => Near(text[0].Baseline, t.Baseline));
+        Assert.True(text[^1].Baseline > text[0].Baseline);
+    }
+
+    [Theory]
+    [InlineData(".")]
+    [InlineData(")")]
+    [InlineData("&nbsp;q")]
+    public void A_line_breaks_after_an_inline_block_even_before_punctuation(string after)
+    {
+        var ops = Layout($"<div style='width: 120px; font: 14px Arial'><span style='display: inline-block; width: 117px'>IB</span>{after} ZZ</div>");
+        var text = ops.OfType<TextOp>().ToList();
+        Assert.Equal("IB", text[0].Text);
+        Assert.All(text.Skip(1), t => Assert.True(t.Baseline > text[0].Baseline));
+    }
+
+    [Fact]
+    public void Text_before_an_empty_inline_block_or_image_stays_on_its_line()
+    {
+        var png = PdfTestHelpers.DataUri(PdfTestHelpers.SolidPng(4, 4, 0, 0, 255));
+        var ops = Layout($"""
+            <div style='width: 120px; font: 14px Arial'>AA P*<span style='display: inline-block; width: 100px; height: 8px; background: #ff0000'></span></div>
+            <div style='width: 120px; font: 14px Arial'>AA P*<img src='{png}' style='width: 100px; height: 10px'></div>
+            """);
+        Assert.Equal(new[] { "AA P*", "AA P*" }, Lines(ops));
+        var text = ops.OfType<TextOp>().ToList();
+        Assert.True(Box(ops, "#ff0000").Y > text[0].Baseline);
+        Assert.True(ops.OfType<ImageOp>().Single().Y > text[1].Baseline);
+    }
+
+    [Fact]
+    public void No_line_breaks_around_an_inline_block_in_nowrap_text()
+    {
+        var ops = Layout("<div style='width: 120px; font: 14px Arial; white-space: nowrap'>AA P*<span style='display: inline-block; width: 100px'>IB</span>.</div>");
+        var text = ops.OfType<TextOp>().ToList();
+        Assert.All(text, t => Near(text[0].Baseline, t.Baseline));
+    }
+
+    [Fact]
+    public void A_min_content_column_narrows_to_its_widest_inline_block_not_to_the_text_beside_it()
+    {
+        // The break before the inline-block makes the cell's min-content width the inline-block's 100px (75pt), as in
+        // Chrome, instead of the text and the inline-block together.
+        var ops = Layout("""
+            <div style="display: grid; grid-template-columns: min-content 1fr; font: 14px Arial">
+              <div style="background: #00ff00">AA*<span style="display: inline-block; width: 100px; height: 10px"></span></div><div></div>
+            </div>
+            """);
+        Near(75f, Box(ops, "#00ff00").W);
+    }
+
     [Fact]
     public void A_table_height_is_shared_out_over_its_rows()
     {
