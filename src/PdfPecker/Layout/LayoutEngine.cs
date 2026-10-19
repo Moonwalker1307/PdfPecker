@@ -778,6 +778,19 @@ internal sealed partial class LayoutEngine
         return c == null ? 0 : CollapseMargins(c.Style.MarginTop.Resolve(w), LeadingMargin(c, w));
     }
 
+    /// <summary>
+    /// A box kept whole by break-inside: avoid, tried at the top of the next column from (x, y) at a width, in a grid
+    /// whose next column has a height.
+    /// </summary>
+    private readonly record struct AvoidTrial(Element El, PageGrid Grid, float X, float Y, float W, float NextHeight);
+
+    /// <summary>
+    /// The trials of <see cref="AvoidTrial"/> that did not fit, after which the box was laid out again where it was. A
+    /// box around it that goes back too lays it out there once more, and without this every level of such boxes in
+    /// columns would repeat the trials of all the levels inside it, doubling the work per level.
+    /// </summary>
+    private HashSet<AvoidTrial>? _failedAvoidTrials;
+
     /// <summary>Lays out a block-level box whose top border edge is at <paramref name="y"/>. Returns its bottom border edge.</summary>
     private float LayoutBlockBox(Element e, float x, float y, float availW, bool shrinkToFit)
     {
@@ -797,8 +810,12 @@ internal sealed partial class LayoutEngine
         {
             // A box split at the end of a column also measures the room it left there, so in columns one that is no
             // taller than the next column can look taller: it is tried there and kept only if it then fits whole.
-            bool fitsNext = bottom - y <= _grid.Height(PageOf(y) + 1);
-            if (fitsNext || _grid is ColumnGrid)
+            float nextHeight = _grid.Height(PageOf(y) + 1);
+            bool fitsNext = bottom - y <= nextHeight;
+            // A trial that failed here before would end with the box laid out where it is, which it just was.
+            var trial = new AvoidTrial(e, _grid, x, y, availW, nextHeight);
+            bool failedBefore = !fitsNext && _failedAvoidTrials?.Contains(trial) == true;
+            if (!failedBefore && (fitsNext || _grid is ColumnGrid))
             {
                 float oy = y, ox = x, oavailW = availW;
                 int page = PageOf(y);
@@ -819,6 +836,7 @@ internal sealed partial class LayoutEngine
                 }
                 else if (!fitsNext)
                 {
+                    (_failedAvoidTrials ??= new HashSet<AvoidTrial>()).Add(trial);
                     Truncate(opsStart);
                     _marker = savedMarker;
                     (y, x, availW) = (oy, ox, oavailW);
