@@ -1575,6 +1575,20 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(html));
     }
 
+    [Fact]
+    public void Deeply_nested_boxes_kept_whole_in_balanced_columns_are_bounded()
+    {
+        // Found by the nightly fuzz run: target html, timeout-14fbab57, 3.2 KB. With three columns to balance, each
+        // nested box kept whole was tried in the next column once for every box around it, at every height balancing
+        // tried: 80 levels took 7 s and 130 more than 30 s. Boxes nested in more than eight such boxes now break where
+        // they fall.
+        var html = "<style>@page{size:148mm 190mm;margin:12mm}.c3{columns:3 30mm;column-gap:4mm}"
+            + ".card{break-inside:avoid;border:0.5pt solid #888;border-radius:3pt;padding:4pt;margin-bottom:4pt}</style>"
+            + "<h1>Columns</h1><div class=\"c3\"><p>Lorem ipsum dolor sit amet.</p>"
+            + Repeat("<div class=\"card\"><b>Card</b>Lorem ipsum dolor sit amet, consectetur ", 130);
+        AssertStructurallyValid(Bounded(html));
+    }
+
     [Theory]
     [InlineData("<style>td{border:solid</style><table ><tr><td rowspan=2><tfoot><tr")]
     [InlineData("<style>td{border:1px solid}</style><table><thead><tr><td rowspan=3>h</td></tr></thead><tr><td>a</td></tr><tr><td>b</td></tr></table>")]
