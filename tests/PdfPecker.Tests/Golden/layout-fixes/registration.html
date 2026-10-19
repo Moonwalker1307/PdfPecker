@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Conference registration</title>
+<style>
+  @page { size: A5; margin: 12mm; }
+  body { margin: 0; font-family: Arial, sans-serif; font-size: 12px; line-height: 1.4; color: #222; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .intro { margin: 0 0 10px; width: 330px; }
+  fieldset { margin: 0 0 10px; }
+  .field { width: 300px; margin: 0 0 6px; }
+  input { font: 12px Arial, sans-serif; height: 20px; padding: 1px 4px; border: 1px solid #888; box-sizing: border-box; }
+  .full { width: 100%; }
+  .badge { display: inline-block; padding: 0 5px; border-radius: 8px; background: #2a6; color: #fff; font-size: 10px; line-height: 16px; }
+  .badge.warn { background: #c60; }
+  .chip { display: inline-block; width: 60px; height: 12px; background: #9cf; vertical-align: middle; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 5px; background: #c33; }
+  .styled { border: 2px solid #369; border-radius: 8px; padding: 8px 12px; }
+  .styled > legend { padding: 0 6px; font-weight: bold; color: #369; }
+  .tall > legend { font-size: 20px; border: 1px solid #369; background: #eef4fa; padding: 2px 8px; }
+  .float-legend > legend { float: right; background: #ffd; border: 1px dashed #aa0; padding: 0 4px; margin: 0 0 4px 6px; }
+  h2 { break-before: page; font-size: 15px; margin: 0 0 4px; }
+  .nowrap { white-space: nowrap; }
+</style>
+</head>
+<body>
+<h1>Conference registration</h1>
+<p class="intro">Fill in every field marked with an asterisk. Early-bird tickets <span class="badge">Open</span>
+are available until the end of the month; workshop places <span class="badge warn">Few left</span> are limited.</p>
+
+<fieldset>
+  <legend>Personal details</legend>
+  <div class="field">First name *<input class="full" value="Jane"></div>
+  <div class="field">Family name (as on your passport) *<input class="full" value="Doe"></div>
+  <div class="field">Email address, used for the receipt:<input style="width:160px" value="jane@example.com"></div>
+</fieldset>
+
+<fieldset class="styled">
+  <legend>Ticket</legend>
+  <div class="field">Conference pass for all three days with dinner (€ 450)<span class="chip"></span> selected.</div>
+  <div class="field">Workshop on accessible documents and forms, Tue&nbsp;<span class="dot"></span>&nbsp;full</div>
+  <div class="field nowrap">Seat, row and table number<span class="chip"></span> stay on one line, even past the edge.</div>
+</fieldset>
+
+<fieldset class="styled" style="text-align:center">
+  <legend align="center">Dietary needs</legend>
+  Vegetarian, vegan or gluten-free meals can be ordered at no extra cost.
+</fieldset>
+
+<fieldset class="styled">
+  <legend align="right">Invoice</legend>
+  <div class="field">Company (optional) <input style="width:140px" value="MyApp Ltd"> and VAT number (<input style="width:90px" value="DK12345678">).</div>
+</fieldset>
+
+<fieldset class="styled" dir="rtl">
+  <legend>Right to left</legend>
+  The legend sits at the right edge of a right-to-left fieldset.
+</fieldset>
+
+<fieldset class="styled tall">
+  <legend>Accommodation</legend>
+  The legend is taller than the border, so the border runs through its middle.
+</fieldset>
+
+<h2>Terms and signature</h2>
+<p class="intro">By signing you accept the cancellation terms (<span class="badge warn">Read first</span>), the code
+of conduct and the photo policy.&nbsp;<span class="dot"></span> Required items are marked with a red dot.</p>
+
+<fieldset class="styled">
+  <legend>Signature</legend>
+  <div class="field">Place and date:<input style="width:120px" value="Aarhus"><input style="width:90px" value="2026-10-19"></div>
+  <div class="field">Signed on behalf of the company by «<span class="chip"></span>», as named on the invoice.</div>
+</fieldset>
+
+<fieldset class="float-legend">
+  <legend>Note</legend>
+  A floated legend is not the fieldset's rendered legend: it floats inside the content, and the border runs above it.
+</fieldset>
+</body>
+</html>
