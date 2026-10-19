@@ -1735,6 +1735,18 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Headings_before_tables_nested_in_split_header_cells_are_laid_out_once()
+    {
+        // Found by the fuzzer: target html, timeout-c201378d. Each level is a heading kept with a table whose header row
+        // holds the next level. The header cells were centred in their rows, which span pages, so each table's first
+        // text ended on a later page than its heading after the table was laid out in full; the heading then moved to
+        // the next page and the table was laid out again, at every level: 17 levels took 7 s.
+        var html = Repeat("<h2>A table</h2><table><thead><tr><th>Language</th><th>Sample</th><th>", 22)
+            + "<table><tr><td>end</td></tr></table>" + Repeat("<p>Lorem ipsum dolor sit amet.</p>", 80);
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
     public void Deeply_nested_tables_in_columns_move_to_the_next_column_to_a_bounded_depth()
     {
         // Found by the nightly fuzz run: target html, timeout-14fbab57. In columns each nested table that did not fit
