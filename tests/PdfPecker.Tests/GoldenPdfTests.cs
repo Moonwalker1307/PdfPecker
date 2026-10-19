@@ -187,10 +187,12 @@ public class GoldenPdfTests
     internal sealed record PdfObject(int Number, string Dictionary, string Stream);
 
     private static readonly Regex ObjectPattern = new(@"(\d+) 0 obj\n", RegexOptions.Compiled);
-    // Dates as literal strings, as hex strings (which the stamper writes) and in XMP metadata.
     // A cross-reference stream carries the trailer, and with it the file ID, which the compactor derives from a hash of
-    // the compressed output and so from the zlib build.
+    // the compressed output and so from the zlib build. Its data, the byte offsets, depends on that build too, and is
+    // left out like a classic cross-reference table.
     private static readonly Regex FileIds = new(@"/ID\s*\[\s*<[0-9A-Fa-f]*>\s*<[0-9A-Fa-f]*>\s*\]", RegexOptions.Compiled);
+    private static readonly Regex XRefType = new(@"/Type\s*/XRef\b", RegexOptions.Compiled);
+    // Dates as literal strings, as hex strings (which the stamper writes) and in XMP metadata.
     private static readonly Regex Dates = new(@"\(D:[^)]*\)|(?<=/(?:CreationDate|ModDate) )<[0-9A-Fa-f]*>|<xmp:(?:Create|Modify|Metadata)Date>[^<]*", RegexOptions.Compiled);
 
     /// <summary>The file's objects in order, streams inflated, with dates blanked. The trailer (random /ID) is left out.</summary>
@@ -218,7 +220,7 @@ public class GoldenPdfTests
                     // The compressed length depends on the zlib build; the inflated data is compared instead.
                     dict = dict.Remove(length.Index, length.Length);
                 }
-                stream = Dates.Replace(Encoding.Latin1.GetString(data), "");
+                stream = XRefType.IsMatch(dict) ? "" : Dates.Replace(Encoding.Latin1.GetString(data), "");
                 end = text.IndexOf("endobj", dataAt + len, StringComparison.Ordinal);
                 objects.Add(new PdfObject(int.Parse(m.Groups[1].Value), FileIds.Replace(Dates.Replace(dict, ""), ""), stream));
             }
