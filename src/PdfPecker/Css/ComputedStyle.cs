@@ -459,13 +459,19 @@ internal sealed class ComputedStyle
 
     public void InvalidateFont() => _font = null;
 
+    /// <summary>
+    /// The used line height. A huge value is capped (as Chrome caps its layout units) so that sums of line heights stay
+    /// finite; an infinite height makes the box geometry NaN.
+    /// </summary>
     public float LineHeight
-        => LineHeightKind switch
+        => Math.Min(MaxLineHeight, LineHeightKind switch
         {
             LineHeightKind.Factor => LineHeightValue * FontSize,
             LineHeightKind.Absolute => LineHeightValue,
             _ => Font.NormalLineHeight(FontSize),
-        };
+        });
+
+    private const float MaxLineHeight = 1e7f;
 
     // Effective border widths: zero when the style is none.
     public float BorderTop => BorderTopStyle == BorderStyle.None ? 0 : BorderTopWidth;
