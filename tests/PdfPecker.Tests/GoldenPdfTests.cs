@@ -188,6 +188,9 @@ public class GoldenPdfTests
 
     private static readonly Regex ObjectPattern = new(@"(\d+) 0 obj\n", RegexOptions.Compiled);
     // Dates as literal strings, as hex strings (which the stamper writes) and in XMP metadata.
+    // A cross-reference stream carries the trailer, and with it the file ID, which the compactor derives from a hash of
+    // the compressed output and so from the zlib build.
+    private static readonly Regex FileIds = new(@"/ID\s*\[\s*<[0-9A-Fa-f]*>\s*<[0-9A-Fa-f]*>\s*\]", RegexOptions.Compiled);
     private static readonly Regex Dates = new(@"\(D:[^)]*\)|(?<=/(?:CreationDate|ModDate) )<[0-9A-Fa-f]*>|<xmp:(?:Create|Modify|Metadata)Date>[^<]*", RegexOptions.Compiled);
 
     /// <summary>The file's objects in order, streams inflated, with dates blanked. The trailer (random /ID) is left out.</summary>
@@ -217,7 +220,7 @@ public class GoldenPdfTests
                 }
                 stream = Dates.Replace(Encoding.Latin1.GetString(data), "");
                 end = text.IndexOf("endobj", dataAt + len, StringComparison.Ordinal);
-                objects.Add(new PdfObject(int.Parse(m.Groups[1].Value), Dates.Replace(dict, ""), stream));
+                objects.Add(new PdfObject(int.Parse(m.Groups[1].Value), FileIds.Replace(Dates.Replace(dict, ""), ""), stream));
             }
             else objects.Add(new PdfObject(int.Parse(m.Groups[1].Value), Dates.Replace(text.Substring(start, end - start), ""), ""));
         }
