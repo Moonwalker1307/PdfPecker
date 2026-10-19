@@ -97,15 +97,16 @@ public class PaginationTests
     [Fact]
     public void Widows_carry_two_lines_to_the_next_page()
     {
-        // 10 lines of 20pt on a 200pt page after 20pt of filler: 9 fit, so 1 would be left alone on page 2.
+        // 10 lines of 20pt on a 200pt page after 15pt of filler: 9 fit, so 1 would be left alone on page 2. (With 20pt of
+        // filler the nine lines would fill the page exactly, and 20pt is 1707/64px in layout units, a hair more.)
         string text = string.Join("<br>", Enumerable.Range(1, 10).Select(i => "line" + i));
-        var ops = Layout("<style>" + Body + "</style><div style='height:20pt'></div><p>" + text + "</p>");
+        var ops = Layout("<style>" + Body + "</style><div style='height:15pt'></div><p>" + text + "</p>");
         var lines = Lines(ops, "line");
         Assert.Equal(10, lines.Count);
         Assert.Equal(2, lines.Count(l => Page(l.LineTop) == 1));
         Assert.Equal(8, lines.Count(l => Page(l.LineTop) == 0));
 
-        var none = Layout("<style>" + Body + " p{widows:1}</style><div style='height:20pt'></div><p>" + text + "</p>");
+        var none = Layout("<style>" + Body + " p{widows:1}</style><div style='height:15pt'></div><p>" + text + "</p>");
         Assert.Equal(1, Lines(none, "line").Count(l => Page(l.LineTop) == 1));
     }
 

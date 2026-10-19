@@ -255,8 +255,8 @@ internal sealed partial class LayoutEngine
                 if (it.Kind == ItemKind.Space && it.Breakable)
                 {
                     if (!_hasContent && IsCollapsible(it.Style)) { i++; continue; }
+                    _curW += it.Width + KernWithLast(it);
                     Add(it);
-                    _curW += it.Width;
                     i++;
                     continue;
                 }
@@ -291,6 +291,18 @@ internal sealed partial class LayoutEngine
             return j;
         }
 
+        /// <summary>The kerning between the items of the chunk from <paramref name="i"/> to <paramref name="j"/>.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private readonly float KernWithin(int i, int j)
+        {
+            float kern = 0;
+            for (int k = i + 1; k < j; k++) kern += PairKern(_items[k - 1], _items[k]);
+            return kern;
+        }
+
+        /// <summary>The kerning between the current line's last item and <paramref name="it"/>, if it joins the line.</summary>
+        private readonly float KernWithLast(Item it) => _cur.Items.Count > 0 ? PairKern(_cur.Items[^1], it) : 0;
+
         /// <summary>The room a chunk needs: its width, plus the hyphen a soft hyphen shows if the line breaks after it.</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private float Needed(int i, int j, float width)
@@ -303,7 +315,10 @@ internal sealed partial class LayoutEngine
         private int PlaceChunk(int i)
         {
             int j = ChunkEnd(i, out float gw, out bool splittable);
-            float need = Needed(i, j, gw);
+            // The line is as wide as it is drawn: with the kerning between the chunk's items and between the line's last
+            // item and the chunk, as browsers shape the whole run (a space before "A" or "T" kerns in many fonts).
+            gw += KernWithin(i, j);
+            float need = Needed(i, j, gw) + KernWithLast(_items[i]);
             // word-break: break-all and line-break: anywhere break the chunk at the end of the line instead of moving it to
             // the next.
             bool breakAll = splittable && _items[i].IsText && BreaksAtLineEnd(_items[i].Style);
@@ -320,6 +335,7 @@ internal sealed partial class LayoutEngine
                     i = Resume(i);
                     j = ChunkEnd(i, out gw, out splittable);
                     if (j == i) return i;
+                    gw += KernWithin(i, j);
                     need = Needed(i, j, gw);
                 }
             }
@@ -339,8 +355,8 @@ internal sealed partial class LayoutEngine
             else
             {
                 // Fits, or may not break: a word too wide for the line overflows it, as in browsers.
+                _curW += gw + KernWithLast(_items[i]);
                 for (int k = i; k < j; k++) Add(_items[k]);
-                _curW += gw;
             }
             return j;
         }

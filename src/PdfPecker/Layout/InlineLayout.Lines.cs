@@ -96,17 +96,24 @@ internal sealed partial class LayoutEngine
         float total = 0;
         for (int k = 0; k < lastText; k++)
         {
-            Item a = items[k], b = items[k + 1];
-            if (!IsTextOrSpace(a) || !IsTextOrSpace(b)) continue;
-            if (!ReferenceEquals(a.Style, b.Style) || a.Length == 0 || b.Length == 0 || a.Level != 0 || b.Level != 0) continue;
-            var font = a.Style.Font;
-            if (!font.HasKerning) continue;
-            int units = font.KernUnits(a.Source[a.Start + a.Length - 1], b.Source[b.Start]);
-            if (units == 0) continue;
-            kern[k] = units * a.Style.FontSize / 1000f;
+            kern[k] = PairKern(items[k], items[k + 1]);
             total += kern[k];
         }
         return total;
+    }
+
+    /// <summary>
+    /// The kerning between two neighbouring items when they are drawn as one run of text (same style, left to right),
+    /// which neither item's own width holds.
+    /// </summary>
+    private static float PairKern(Item a, Item b)
+    {
+        if (!IsTextOrSpace(a) || !IsTextOrSpace(b)) return 0;
+        if (!ReferenceEquals(a.Style, b.Style) || a.Length == 0 || b.Length == 0 || a.Level != 0 || b.Level != 0) return 0;
+        var font = a.Style.Font;
+        if (!font.HasKerning) return 0;
+        int units = font.KernUnits(a.Source[a.Start + a.Length - 1], b.Source[b.Start]);
+        return units == 0 ? 0 : units * a.Style.FontSize / 1000f;
     }
 
     private static bool IsTextOrSpace(Item it) => it.Kind is ItemKind.Text or ItemKind.Space;

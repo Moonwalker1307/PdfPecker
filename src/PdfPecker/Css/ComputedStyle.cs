@@ -463,13 +463,32 @@ internal sealed class ComputedStyle
     /// The used line height. A huge value is capped (as Chrome caps its layout units) so that sums of line heights stay
     /// finite; an infinite height makes the box geometry NaN.
     /// </summary>
+    /// <remarks>
+    /// Chrome keeps a line height in layout units of 1/64 pixel, and lines like 11px at 1.45 drift a pixel from it over
+    /// a page when the exact value is used. A length is rounded to the nearest unit. A number is kept as a percentage,
+    /// which takes the font size rounded to a unit and rounds the product down.
+    /// </remarks>
     public float LineHeight
         => Math.Min(MaxLineHeight, LineHeightKind switch
         {
-            LineHeightKind.Factor => LineHeightValue * FontSize,
-            LineHeightKind.Absolute => LineHeightValue,
+            LineHeightKind.Factor => FactorLineHeight(LineHeightValue, FontSize),
+            LineHeightKind.Absolute => MathF.Round(LineHeightValue * LayoutUnitsPerPoint, MidpointRounding.AwayFromZero) / LayoutUnitsPerPoint,
             _ => Font.NormalLineHeight(FontSize),
         });
+
+    // Chrome's layout unit is 1/64 of a CSS pixel, which is 3/4 of a point.
+    private const float LayoutUnitsPerPoint = 64 / 0.75f, PointsPerPixel = 0.75f;
+
+    /// <summary>
+    /// A number line height in points, computed in single precision in the order Chrome uses, so that 1.15 times 20px
+    /// stays 23px.
+    /// </summary>
+    private static float FactorLineHeight(float factor, float fontSize)
+    {
+        float percent = (float)(factor * 100.0);
+        float fontPx = MathF.Round(fontSize * LayoutUnitsPerPoint, MidpointRounding.AwayFromZero) / 64;
+        return MathF.Floor(fontPx * percent / 100f * 64) / 64 * PointsPerPixel;
+    }
 
     private const float MaxLineHeight = 1e7f;
 
