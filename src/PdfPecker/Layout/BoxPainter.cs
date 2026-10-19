@@ -23,9 +23,11 @@ internal static partial class BoxPainter
     /// Paints background and borders of a border box into <paramref name="group"/>. <paramref name="images"/> loads
     /// url() backgrounds; <paramref name="basis"/> is the containing block width that percentage paddings refer to.
     /// <paramref name="backgroundArea"/>, when given, is the only part of the box the background is painted in.
+    /// <paramref name="borderGap"/>, when given, is cut out of the borders: where a fieldset's legend interrupts them.
     /// </summary>
     public static void Paint(GroupOp group, ComputedStyle s, float x, float y, float w, float h, ImageLoader? images = null, float basis = 0,
-        int sides = AllSides, bool collapsedCell = false, (float X, float Y, float W, float H)? backgroundArea = null)
+        int sides = AllSides, bool collapsedCell = false, (float X, float Y, float W, float H)? backgroundArea = null,
+        (float X, float Y, float W, float H)? borderGap = null)
     {
         if (!s.Visible) return;
         // Collapsed table borders have no rounded corners.
@@ -36,8 +38,15 @@ internal static partial class BoxPainter
         if (s.BoxShadows != null && hasArea && !s.CanvasBackground) PaintInsetShadows(group, s, x, y, w, h, radii);
         // A border image replaces the border styles; when its image cannot be shown, the styles are drawn instead.
         // It does not apply to collapsed table borders.
-        bool borderImage = s.BorderImageSource != null && !collapsedCell && PaintBorderImage(group, s, x, y, w, h, images);
-        if (s.HasBorder && !borderImage) PaintBorders(group, s, x, y, w, h, sides, collapsedCell, radii);
+        var borders = group;
+        if (borderGap != null && (s.HasBorder || s.BorderImageSource != null))
+        {
+            borders = new ClipOp(-ClipOp.Far, -ClipOp.Far, 2 * ClipOp.Far, 2 * ClipOp.Far, null) { Hole = borderGap };
+            group.Ops.Add(borders);
+        }
+        bool borderImage = s.BorderImageSource != null && !collapsedCell && PaintBorderImage(borders, s, x, y, w, h, images);
+        if (s.HasBorder && !borderImage) PaintBorders(borders, s, x, y, w, h, sides, collapsedCell, radii);
+        if (borders != group && borders.Ops.Count == 0) group.Ops.Remove(borders);
         if (s.OutlineStyle != BorderStyle.None && !collapsedCell) PaintOutline(group, s, x, y, w, h, radii);
     }
 

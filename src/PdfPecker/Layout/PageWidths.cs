@@ -97,7 +97,8 @@ internal sealed partial class LayoutEngine
     /// Paints the background and borders of a box that spans pages on which it has different geometry: each page gets
     /// the box as wide as it is there, cut at the page's edges, so a break leaves it open as a single box would be.
     /// </summary>
-    private void PaintOnPages(GroupOp group, ComputedStyle s, PageBox box, float y, float bottom, int sides = BoxPainter.AllSides, bool collapsedCell = false)
+    private void PaintOnPages(GroupOp group, ComputedStyle s, PageBox box, float y, float bottom, int sides = BoxPainter.AllSides, bool collapsedCell = false,
+        (float X, float Y, float W, float H)? borderGap = null)
     {
         // A box can be far taller than its first line was when that was checked, and is painted page by page.
         CheckPageLimit(bottom - 0.5f);
@@ -107,7 +108,7 @@ internal sealed partial class LayoutEngine
             int k = PageBox.Kind(p);
             float top = _grid.Start(p);
             var part = new ClipOp(-ClipOp.Far, top, 2 * ClipOp.Far, _grid.Start(p + 1) - top, null);
-            BoxPainter.Paint(part, s, box.BX[k], y, box.BW[k], bottom - y, _images, box.AW[k], sides, collapsedCell);
+            BoxPainter.Paint(part, s, box.BX[k], y, box.BW[k], bottom - y, _images, box.AW[k], sides, collapsedCell, borderGap: borderGap);
             if (part.Ops.Count > 0) group.Ops.Add(part);
         }
     }

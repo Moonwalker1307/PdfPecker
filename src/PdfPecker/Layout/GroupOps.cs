@@ -28,6 +28,8 @@ internal sealed class ClipOp : GroupOp
 
     public float X, Y, W, H;
     public CornerRadii? Radii;
+    /// <summary>A rectangle cut out of the clip, in which nothing is painted: the gap a fieldset's legend makes in its border.</summary>
+    public (float X, float Y, float W, float H)? Hole;
 
     public ClipOp(float x, float y, float w, float h, CornerRadii? radii)
     {
@@ -40,6 +42,7 @@ internal sealed class ClipOp : GroupOp
         base.Offset(dx, dy);
         X += dx;
         Y += dy;
+        if (Hole is { } h) Hole = (h.X + dx, h.Y + dy, h.W, h.H);
     }
 }
 
