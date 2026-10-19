@@ -149,7 +149,7 @@ internal sealed partial class LayoutEngine
         {
             float pageEnd = _grid.Start(p + 1);
             // The page's footnote area takes the bottom of its flow.
-            float flowEnd = _footnoteReserve.Count > 0 ? pageEnd - FootnoteReserve(p) : pageEnd;
+            float flowEnd = _footnoteReserve.Count > 0 || _edgeReserve.Count > 0 ? FlowEnd(p) : pageEnd;
             if (y + h <= flowEnd + Eps) return y;
             _columnNotes?.Break(p, y, y + h - flowEnd);
             y = pageEnd;
@@ -176,7 +176,7 @@ internal sealed partial class LayoutEngine
     }
 
     private bool CrossesPage(float top, float bottom) => _paginate && bottom - top > Eps
-        && (PageOf(top) != PageOf(bottom - 0.5f) || _footnoteReserve.Count > 0 && bottom > FlowEnd(PageOf(top)) + Eps);
+        && (PageOf(top) != PageOf(bottom - 0.5f) || (_footnoteReserve.Count > 0 || _edgeReserve.Count > 0) && bottom > FlowEnd(PageOf(top)) + Eps);
 
     private void Truncate(int count, bool keepFloats = false)
     {
@@ -597,6 +597,8 @@ internal sealed partial class LayoutEngine
         public bool Stopped;                     // the box's layout stopped early
         public bool StopsOnceAnswered;           // also stop once the first content is on the keep page
         public bool Answered;                    // the layout stopped there, with the first content on the keep page
+        public bool Edge;                        // the box moves to the next page when its first content is there
+        public HashSet<DrawOp>? Chained;         // the backgrounds of the first children an edge probe was handed to
         public bool Done => Stopped || Answered;
     }
 
@@ -826,6 +828,11 @@ internal sealed partial class LayoutEngine
         bool table = s.Display == Display.Table;
         int opsStart = _ops.Count;
         var savedMarker = _marker;
+        int savedListIndex = _currentListIndex;
+        var probe = _childProbe;
+        // The last content of the flow around the box stays its last unless the box has content of its own.
+        float lastContent = _lastContentBottom;
+        _lastContentBottom = float.NaN;
         // The containing block on each kind of page, when pages differ in width, which the box takes on.
         var pages = _childPageBox;
         _childPageBox = null;
@@ -833,7 +840,15 @@ internal sealed partial class LayoutEngine
         bool avoidInside = s.AvoidBreakInside || s.AvoidColumnBreakInside && _grid is ColumnGrid;
         bool movable = _avoidDepth < MaxKeptWholeNesting || _grid is not ColumnGrid;
         if (avoidInside) _avoidDepth++;
+        bool edges = !table && _paginate && _grid is not ColumnGrid && KeepsEdgesWithContent(e);
+        // The box's layout stops at its first content when that lands on a later page: the box then goes there whole.
+        var edgeProbe = edges && probe == null && _edgeProbesOff == 0 && !avoidInside && !AtPageTop(y) && ProbesTopEdge(e)
+            ? new KeepProbe(opsStart, PageOf(y)) { Edge = true }
+            : null;
+        if (edgeProbe != null) _childProbe = edgeProbe;
         float bottom = table ? LayoutTable(e, x, y, availW, pages) : LayoutBlockBoxCore(e, x, y, availW, shrinkToFit);
+        // A first child laid out with its parent's probe goes along with the parent: its own top edge is not content.
+        if (probe is { Edge: true } && opsStart < _ops.Count && _ops[opsStart] is GroupOp chained) (probe.Chained ??= new()).Add(chained);
         if (avoidInside && movable && CrossesPage(y, bottom) && !AtPageTop(y))
         {
             // A box split at the end of a column also measures the room it left there, so in columns one that is no
@@ -873,9 +888,13 @@ internal sealed partial class LayoutEngine
                 }
             }
         }
+        if (edges && probe is not { Done: true })
+            bottom = KeepEdgesWithContent(e, ref x, ref y, ref availW, shrinkToFit, pages, opsStart, savedMarker, savedListIndex, edgeProbe, bottom);
         // Columns being balanced start at least as tall as the tallest box that must stay whole, as in Chrome, so
         // such a box is never split only because the first height tried was short.
         if (avoidInside && !CrossesPage(y, bottom)) _columnNotes?.Unbreakable(PageOf(y), bottom - y);
+        // A box without content of its own, such as an empty one with a height, ends the content around it itself.
+        if (float.IsNaN(_lastContentBottom)) _lastContentBottom = bottom - y > Eps ? bottom : lastContent;
         if (table) _boxTrailing = 0;
         if (s.Layered) FinishLayered(e, opsStart, availW);
         if (avoidInside) _avoidDepth--;
@@ -1019,6 +1038,7 @@ internal sealed partial class LayoutEngine
                 else _ops.Add(new SvgOp(cx, cy, imgW, imgH, svg) { Tag = Tags?.Of(e) });
             }
             contentBottom = cy + imgH;
+            if (_paginate) _lastContentBottom = contentBottom;
         }
         else if (e.Name == "hr")
         {
@@ -2095,6 +2115,8 @@ internal sealed partial class LayoutEngine
             op.Offset(dx, dy);
             _ops.Add(op);
         }
+        // Its content ends with it, as far as the bottom edges of the boxes around it are concerned.
+        if (_paginate) _lastContentBottom = dy + c.Height;
         if (c.AnchorIds != null)
             foreach (var id in c.AnchorIds)
                 if (Anchors.TryGetValue(id, out float ay)) SetAnchor(id, ay + dy);

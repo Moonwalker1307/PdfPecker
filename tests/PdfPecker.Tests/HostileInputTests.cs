@@ -1710,6 +1710,21 @@ public class HostileInputTests
     }
 
     [Theory]
+    [InlineData("<div style='height:690px'></div>", "<div class=\"c\">", "text")]
+    [InlineData("<div style='height:300px'></div>", "<div class=\"c\">", "text<br>text<br>text<br>text<br>text")]
+    [InlineData("", "<div style='height:37px'></div><div class=\"c\">text<br>text", "")]
+    [InlineData("<div style='height:470px'></div>", "<div style='border-bottom:1px solid'>", "text")]
+    public void Nested_boxes_at_page_ends_are_moved_without_laying_out_each_level_again(string before, string level, string after)
+    {
+        // A box whose first content moves to the next page moves with it, and a bottom border that does not fit takes
+        // the last lines along. Each move lays the box out again; deciding it only after the boxes inside were laid out
+        // in full made every level lay out all the levels inside it again, which took exponential time.
+        var html = "<style>@page{size:A5;margin:12mm}.c{border:1px solid #888;padding:0 2px}</style>" + before
+            + Repeat(level, 3000) + after;
+        AssertStructurallyValid(Bounded(html, new PdfOptions { MaxPages = 1000 }));
+    }
+
+    [Theory]
     [InlineData("<style>td{border:solid</style><table ><tr><td rowspan=2><tfoot><tr")]
     [InlineData("<style>td{border:1px solid}</style><table><thead><tr><td rowspan=3>h</td></tr></thead><tr><td>a</td></tr><tr><td>b</td></tr></table>")]
     [InlineData("<style>td{border:1px solid}</style><table><tr><td rowspan=0>a</td></tr><tr><td>b</td></tr><tfoot><tr><td>f</td></tr></tfoot></table>")]
