@@ -1709,6 +1709,19 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(html));
     }
 
+    [Fact]
+    public void Deeply_nested_tables_in_columns_move_to_the_next_column_to_a_bounded_depth()
+    {
+        // Found by the nightly fuzz run: target html, timeout-14fbab57. In columns each nested table that did not fit
+        // moved whole to the next column and laid out every table inside it again, in every balancing pass, so the work
+        // grew with the cube of the depth: 60 levels took 10 s. Tables nested deeper than eight break where they fall.
+        var nest = Repeat("<table><tr><td>", 60) + "quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo"
+            + Repeat("</td></tr></table>", 60);
+        var html = "<style>.cols{columns:3;column-gap:14pt;font-size:9pt}</style>"
+            + Repeat("<div class=\"cols\"><p>Column rules sit in the gaps between columns.</p>" + nest + "</div>", 6);
+        AssertStructurallyValid(Bounded(html));
+    }
+
     [Theory]
     [InlineData("<style>td{border:solid</style><table ><tr><td rowspan=2><tfoot><tr")]
     [InlineData("<style>td{border:1px solid}</style><table><thead><tr><td rowspan=3>h</td></tr></thead><tr><td>a</td></tr><tr><td>b</td></tr></table>")]
