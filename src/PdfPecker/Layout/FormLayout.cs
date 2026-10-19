@@ -42,8 +42,9 @@ internal sealed partial class LayoutEngine
         RoundRectOp? arrow = null;
         if (control.Kind == ControlKind.Combo && pw > 12)
         {
-            // The drop-down arrow, in the right padding, part of the page like the box.
-            float size = Math.Min(s.FontSize * 0.5f, 6), ax = px + pw - Math.Max(s.PaddingRight.Resolve(0), size + 4) / 2 - size / 2;
+            // The drop-down arrow, part of the page like the box, in the 20px (15pt) Chrome keeps for it at the end
+            // whatever the page's padding.
+            float size = Math.Min(s.FontSize * 0.5f, 6), ax = px + pw - Math.Max(15, size + 4) / 2 - size / 2;
             float ay = py + ph / 2 - size / 4;
             arrow = new RoundRectOp(ax, ay, size, size / 2, default, s.Color) { Clip = new[] { ax, ay, ax + size, ay, ax + size / 2, ay + size / 2 } };
         }
