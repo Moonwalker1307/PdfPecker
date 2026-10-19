@@ -243,7 +243,7 @@ internal sealed partial class LayoutEngine
         // Lay out each item at its main size to find its cross size.
         foreach (var it in items)
         {
-            if (it.El != null) it.Box = CaptureBox(it.El, it.OuterMain, shrinkToFit: false, borderW: it.Main);
+            if (it.El != null) it.Box = CaptureBox(it.El, it.OuterMain, shrinkToFit: false, borderW: it.Main, reuse: true);
             else it.Box = CaptureRun(it.Run!, e, it.Main);
         }
 
@@ -322,7 +322,7 @@ internal sealed partial class LayoutEngine
                         want = Math.Max(current, cross - it.Mt - it.Mb);
                     if (want is { } h && Math.Abs(h - current) > Eps && (regrown || NeedsRelayoutWhenStretched(it) || st.Height.IsPercent)
                         && !ForcedHeightKeepsLayout(it, h))
-                        it.Box = CaptureBox(it.El, it.OuterMain, shrinkToFit: false, borderW: it.Main, borderH: h);
+                        it.Box = CaptureBox(it.El, it.OuterMain, shrinkToFit: false, borderW: it.Main, borderH: h, reuse: true, inner: it.Box.Known);
                 }
 
                 if (_paginate && !regrown) lineTop = FitOnPage(lineTop, cross);
@@ -633,7 +633,7 @@ internal sealed partial class LayoutEngine
 
     /// <summary>Measures an item laid out at the given outer width (unpaginated).</summary>
     private Captured Measure(BoxItem it, Element container, float outerW, bool stretch)
-        => it.El != null ? CaptureBox(it.El, outerW, shrinkToFit: !stretch) : CaptureRun(it.Run!, container, outerW);
+        => it.El != null ? CaptureBox(it.El, outerW, shrinkToFit: !stretch, reuse: true) : CaptureRun(it.Run!, container, outerW);
 
     /// <summary>Min-content and max-content widths of a flex container's content box.</summary>
     private (float Min, float Max) FlexIntrinsic(Element e)

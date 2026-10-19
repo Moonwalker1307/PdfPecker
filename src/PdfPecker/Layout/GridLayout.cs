@@ -858,7 +858,7 @@ internal sealed partial class LayoutEngine
         if (want is { } hh && (rowSub || Math.Abs(hh - current) > Eps && (NeedsRelayoutWhenStretched(it) || st.Height.IsPercent)))
         {
             float? bw = g.StretchX[i] ? null : box.Width - it.Ml - it.Mr;
-            box = it.Box = CaptureBox(it.El, areaW, shrinkToFit: !g.StretchX[i], borderW: bw, borderH: hh);
+            box = it.Box = CaptureBox(it.El, areaW, shrinkToFit: !g.StretchX[i], borderW: bw, borderH: hh, reuse: true);
         }
         return box;
     }
