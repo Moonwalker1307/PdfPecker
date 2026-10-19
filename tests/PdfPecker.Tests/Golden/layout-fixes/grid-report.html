@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Project status report</title>
+<style>
+  @page { size: A5; margin: 12mm; }
+  body { margin: 0; font-family: Arial, sans-serif; font-size: 11px; line-height: 16px; color: #222; }
+  h1 { font-size: 18px; line-height: 24px; margin: 0 0 6px; }
+  h2 { font-size: 14px; line-height: 20px; margin: 14px 0 6px; }
+  p { margin: 0 0 6px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; border: 1px solid #999; padding: 6px; }
+  .card { border-left: 3px solid #369; background: #f3f6fa; padding: 4px 8px; }
+  .card h3 { font-size: 12px; margin: 0 0 3px; color: #369; }
+  .card p { margin: 0 0 4px; }
+  .keep { break-inside: avoid; border-left-color: #c60; }
+  .orphans { orphans: 4; border-left-color: #2a6; }
+  .facts { display: grid; grid-template-columns: 90px 1fr; column-gap: 10px; row-gap: 2px; }
+  .facts dt { font-weight: bold; }
+  .facts dd { margin: 0; }
+</style>
+</head>
+<body>
+<h1>Project status report</h1>
+<p>This report sums up the work of the last quarter for each team. Every team writes a short card; the cards sit in a
+two-column grid, and a row of cards that does not fit in the room left on a page breaks at the page end, the way a
+browser prints it.</p>
+<p>Rows are only moved to the next page whole when one of their cards asks for it, with break-inside: avoid,
+or when a card's paragraph cannot leave enough lines behind for its orphans setting.</p>
+
+<h2>Teams</h2>
+<div class="grid">
+  <div class="card"><h3>Layout</h3><p>The layout team finished the work on line breaking next to inline blocks, images
+    and form controls, and reworked how fieldset legends are placed on the border.</p></div>
+  <div class="card"><h3>Fonts</h3><p>Variable fonts are now instanced before subsetting, and the bundled fonts gained
+    the missing currency signs.</p></div>
+  <div class="card"><h3>Rendering</h3><p>The renderer draws dashed strokes and text on a path. Shading patterns are
+    faster, and the anti-aliasing of thin lines matches other viewers more closely.</p><p>Next quarter the team looks
+    at blend modes in knockout groups and at soft masks with transfer functions.</p></div>
+  <div class="card"><h3>Signing</h3><p>Long-term validation data is now embedded for every certificate in the chain,
+    and timestamps from a second authority can be added later.</p></div>
+  <div class="card"><h3>Accessibility</h3><p>Tagged output covers tables with row headers, lists nested in tables and
+    figures with captions. The PDF/UA check runs on every sample document in CI.</p><p>Remaining work: alternative
+    text for SVG and the reading order of floated boxes.</p><p>The team also reviewed the structure of form fields
+    and how their labels are announced by screen readers.</p></div>
+  <div class="card"><h3>Markdown</h3><p>Tables with alignment, footnotes and task lists follow the CommonMark and GFM
+    rules.</p></div>
+  <div class="card"><h3>Performance</h3><p>Conversions of long tables are a fifth faster, mostly from caching text
+    measurements per font and size and from reusing line boxes between passes.</p><p>Memory use stays flat with the
+    number of pages.</p></div>
+  <div class="card"><h3>Hostile input</h3><p>The fuzzer ran for two weeks without new findings. Limits on nesting depth,
+    image size and font tables are counted before allocating.</p></div>
+</div>
+
+<h2>Milestones</h2>
+<p>The milestones of the quarter, one card a month. Each release went through two release candidates, and every
+candidate was tested against the golden documents and the conformance samples before it was published. Two of the
+candidates were held back for a week, both for fixes to the line breaking of right-to-left text. The release card asks
+to be kept in one piece, and its row is not broken at the end of a page but moved to the next one.</p>
+<div class="grid">
+  <div class="card"><h3>July</h3><p>Version 1.9 shipped with the new hyphenation dictionaries and the first part of
+    the work on grid layout across pages.</p></div>
+  <div class="card"><h3>August</h3><p>Version 1.10 added signing with long-term validation and the PDF/A-3 output
+    for electronic invoices.</p></div>
+  <div class="card"><h3>September</h3><p>Version 1.11 brought variable fonts, text on a path in SVG and many fixes to
+    the line breaking of mixed scripts.</p></div>
+  <div class="card"><h3>October</h3><p>The work on fieldsets, inline borders and grid rows was merged.</p></div>
+  <div class="card"><h3>November (planned)</h3><p>Version 1.12 with the October layout work, and a first look at
+    running elements in page margins.</p></div>
+  <div class="card"><h3>December (planned)</h3><p>A quiet month: fixes only, and the yearly review of the third-party
+    notices and bundled data.</p></div>
+  <div class="card"><h3>January (planned)</h3><p>Work starts on tables that repeat their footers on every page.</p></div>
+  <div class="card"><h3>February (planned)</h3><p>Version 1.13, if the table work is ready in time.</p></div>
+  <div class="card"><h3>March (planned)</h3><p>Conformance checks for PDF/A-4.</p></div>
+  <div class="card"><h3>April (planned)</h3><p>Planning for the next year.</p></div>
+  <div class="card keep"><h3>Release (kept whole)</h3><p>This card has break-inside: avoid, so its row moves
+    to the next page whole instead of breaking at the page end.</p><p>Release candidates go out every second week, and
+    the final release follows when no regressions are open.</p><p>The changelog lists every visible change.</p></div>
+  <div class="card"><h3>Documentation</h3><p>The manual gained pages on page breaks, running headers and form
+    fields.</p></div>
+</div>
+
+<h2>Risks</h2>
+<div class="grid">
+  <div class="card"><h3>Fonts on servers</h3><p>Servers often have few fonts installed. The bundled fonts cover Latin,
+    Greek and Cyrillic; other scripts need fonts supplied by the caller.</p><p>A missing glyph is taken from the
+    fallback list, and a warning names the character.</p></div>
+  <div class="card"><h3>Browser differences</h3><p>Chrome is the reference for layout. Differences found in reports
+    are fixed one at a time, with a test page for each.</p></div>
+</div>
+
+<h2>Key figures</h2>
+<dl class="facts">
+  <dt>Releases</dt><dd>Three minor releases and five patch releases.</dd>
+  <dt>Issues</dt><dd>142 opened and 151 closed, of which 38 were layout differences from browsers.</dd>
+  <dt>Contributors</dt><dd>Eleven people sent at least one change.</dd>
+  <dt>Test documents</dt><dd>Twelve new golden documents and four new hostile inputs.</dd>
+  <dt>Support</dt><dd>212 questions answered, most within a day.</dd>
+  <dt>Fuzzing</dt><dd>Two weeks of mutation fuzzing on every parser without a new finding.</dd>
+</dl>
+
+<h2>Support</h2>
+<p>The support card asks for at least four lines of its first paragraph on a page (orphans: 4). When fewer
+fit at the end of a page, its row moves to the next page whole, although the card next to it would
+fit. Without that setting the row would break between two lines of the paragraph, as the rows of the team grid do.
+The card on the right is short and would fit on this page by itself, but a row is kept together: its cards start on
+the same page.</p>
+<div class="grid">
+  <div class="card orphans"><p><b>Support (orphans: 4).</b> Questions from users are answered within two working days.
+    Most of them are about fonts that are not installed on the server, page sizes and how to load images from a web
+    address through a resource resolver.</p><p>Frequent answers become pages in the manual.</p></div>
+  <div class="card"><h3>Website</h3><p>The online converter shows the settings as code that can be copied into a
+    project.</p></div>
+</div>
+
+<h2>Outlook</h2>
+<p>The coming quarter is about tables and page margins. Long tables already repeat their headers on every page; they
+will also repeat their footers, and a row that is too tall for a page will break between its lines instead of being
+cut. Running elements in the page margins will let a document put its own title and chapter name at the top of every
+page without a separate header template.</p>
+<p>The second theme is speed. Most documents convert in a few milliseconds, but documents with thousands of table rows
+spend most of their time measuring the same text again. A cache of measured runs per font and size should halve that
+time without changing a single byte of the output.</p>
+<p>The third theme is the comparison with browsers. Every difference reported by users is reduced to a small test page,
+compared with Chrome word by word, and kept as a golden document once it is fixed, so it cannot come back unnoticed.
+This report is one of those documents: its grids break across pages the way Chrome prints them.</p>
+<p>None of this changes the public interface. New settings get new properties with defaults that keep today's
+output, and every change to the output of an existing document is listed in the release notes together with the
+golden documents it changed and the reason. Callers that cache converted documents and compare them byte for byte can
+rely on that: a document converted with the same version and the same settings comes out the same, on every machine
+and in every culture, and a new version changes it only where the release notes say so.</p>
+<p>Finally, the documentation will gain a page on page breaks that explains break-before, break-after and
+break-inside, orphans and widows, and how rows of tables and grids are split.</p>
+
+<h2>Next steps</h2>
+<div class="grid">
+  <div class="card"><h3>Tables</h3><p>Repeat table footers on every page, break tall rows between their lines, and
+    keep a caption with the first rows of its table.</p><p>Owner: the layout team. Review in the second week of the
+    quarter, release with version 1.13.</p></div>
+  <div class="card"><h3>Page margins</h3><p>Running elements for titles and chapter names, page counters in any
+    margin box, and leaders in a table of contents.</p><p>Owner: the layout team, with help from the documentation
+    team for the examples.</p></div>
+  <div class="card"><h3>Speed</h3><p>A cache of measured text runs per font and size.</p></div>
+  <div class="card"><h3>Documentation</h3><p>A page on page breaks, orphans and widows.</p></div>
+</div>
+</body>
+</html>
