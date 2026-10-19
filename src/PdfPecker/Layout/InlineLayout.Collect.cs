@@ -303,6 +303,10 @@ internal sealed partial class LayoutEngine
             c = laid;
         }
         float baseline = float.IsNaN(c.Baseline) ? c.Height : c.Baseline;
+        // Chrome puts a check box's or radio button's baseline at the bottom of its border box, so its bottom margin
+        // hangs below the baseline instead of raising the box and making the line taller.
+        if (e.Control is { Kind: ControlKind.CheckBox or ControlKind.Radio } && float.IsNaN(c.Baseline))
+            baseline -= AutoAsZero(e.Style.MarginBottom);
         var item = new Item { Kind = ItemKind.Box, Style = e.Style, Width = c.Width, Height = c.Height, BoxBaseline = baseline, Capture = c, Href = href };
         if (_measuring)
         {

@@ -348,6 +348,38 @@ public class BrowserMatchTests
     }
 
     [Fact]
+    public void A_check_box_hangs_its_bottom_margin_below_the_baseline()
+    {
+        // Chrome puts the 13px box with its 3px margins on the baseline by its border box, so an 8px line is 19px tall
+        // (3 + 13 + 3), not 21px (3 + 13 + 3 above the baseline and the font's descent below it).
+        var ops = Layout("<div style='font: 8px Arial; background: #f00'><input type='checkbox'> Text</div>");
+        Near(19 * 0.75f, Box(ops, "#f00").H);
+    }
+
+    [Fact]
+    public void A_drop_down_keeps_its_own_room_around_the_page_padding()
+    {
+        // Chrome keeps 4px before the text and 1px above and below it inside a drop-down even with no padding, so a
+        // 12px Arial select with no padding or border is 16px tall and its text starts 4px in.
+        var ops = Layout("""
+            <select style="padding: 0; border: 0; border-radius: 0; font: 12px Arial; background: #f00"><option>Sweden</option></select>
+            """);
+        var box = Box(ops, "#f00");
+        Near(16 * 0.75f, box.H);
+        Near(box.X + 3, ops.OfType<TextOp>().Single(t => t.Text == "Sweden").X);
+    }
+
+    [Fact]
+    public void A_date_field_keeps_a_pixel_above_and_below_its_value()
+    {
+        // Chrome's date fields are 2px taller than a text field of the same font: 16px for 12px Arial.
+        var ops = Layout("""
+            <input type="date" value="1990-05-17" style="padding: 0; border: 0; border-radius: 0; font: 12px Arial; background: #f00">
+            """);
+        Near(16 * 0.75f, Box(ops, "#f00").H);
+    }
+
+    [Fact]
     public void Superscripts_and_subscripts_shift_by_whole_pixels_of_the_parent_font()
     {
         // 12px parent: super is raised 12/3 + 1 = 5px, sub is lowered 12/5 + 1 = 3px.

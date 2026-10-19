@@ -239,6 +239,8 @@ internal static class FormControls
                         children.Add(Line(selected.Count > 0 && options[selected[0]].Text.Length > 0 ? options[selected[0]].Text : " "));
                         // A drop-down is as wide as its widest option: the others take width, but no height or ink.
                         foreach (var o in options) children.Add(Line(o.Text, "sizer"));
+                        // The lines carry the room Chrome keeps inside a drop-down, around the page's own padding.
+                        foreach (var line in children) line.AddAttribute("combo", "");
                     }
                     SetValueChildren(e, children.ToArray());
                     if (!fieldable) break;

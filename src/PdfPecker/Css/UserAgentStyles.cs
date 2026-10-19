@@ -75,13 +75,19 @@ input[type=submit], input[type=reset], input[type=button], button {
   width: auto; padding: 2px 7px; border: 1px solid #767676; border-radius: 3px; background-color: #efefef; text-align: center; box-sizing: border-box;
 }
 textarea { font-family: monospace; padding: 2px; width: 13.275em; border-radius: 2px; }
-select { padding: 1px 20px 1px 4px; border-radius: 2px; box-sizing: border-box; }
+select { padding: 0; border-radius: 2px; box-sizing: border-box; }
 input[disabled], textarea[disabled], select[disabled], button[disabled] { color: #6d6d6d; border-color: #c3c3c3; }
 pdf-field-value { display: block; white-space: pre; }
 pdf-field-value[placeholder] { color: #757575; }
 pdf-field-value[sizer] { visibility: hidden; height: 0; }
 pdf-field-value[option] { padding: 1px 2px; }
 pdf-field-value[selected] { background-color: #cecece; }
+/* Chrome keeps room inside a drop-down (4px before the text, 20px after it for the arrow and 1px above and below) and
+   inside a date field (1px above and below) in addition to the padding a page gives the control. */
+pdf-field-value[combo] { padding: 0 20px 0 4px; }
+pdf-field-value[combo]:not([sizer]) { padding-top: 1px; padding-bottom: 1px; }
+input[type=date] pdf-field-value, input[type=month] pdf-field-value, input[type=week] pdf-field-value,
+input[type=datetime-local] pdf-field-value { padding: 1px 0; }
 textarea pdf-field-value { white-space: pre-wrap; overflow-wrap: break-word; }
 option, optgroup { display: none; }
 q::before { content: open-quote; }
