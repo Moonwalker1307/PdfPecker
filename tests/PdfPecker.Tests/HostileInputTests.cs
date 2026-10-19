@@ -1541,6 +1541,19 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void A_box_taller_than_the_page_limit_on_pages_of_different_widths_is_rejected()
+    {
+        // Found by the nightly fuzz run: target css, timeout-d0d017cf. A line 99,999,999,999 times the font size made
+        // its paragraph billions of pages tall, and on pages of different widths its background was painted page by
+        // page, which ran for minutes without checking for cancellation. Only the line's top was checked against the
+        // page limit.
+        var html = "<!doctype html><html><head><style>@page :right { margin-left: 14mm } body { font: 10.5pt/99999999999 serif }"
+            + "</style></head><body><div><h1>Heading</h1><p>Text <span>span</span> <a href=\"#c\">link</a></p><ul><li>One<li>Two</ul>"
+            + "<table><thead><tr><th>A<th>B<tbody><tr><td>cell<td>cell</table><img alt=x><input type=text value=v></div><p>After</p></body></html>";
+        Assert.Throws<PdfLimitException>(() => Bounded(html));
+    }
+
+    [Fact]
     public void Nested_flex_rows_across_pages_are_not_measured_again_at_every_level()
     {
         // Found by the fuzzer: target html, timeout-1abcdf31 and timeout-79c23971. A flex item that crosses a page is
