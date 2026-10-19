@@ -152,6 +152,22 @@ internal static class PdfSyntax
         HexString(b, raw);
     }
 
+    /// <summary>
+    /// Writes a string object as a literal: the bytes as they are, with parentheses and backslashes escaped, and carriage
+    /// returns too, which a reader would otherwise turn into line feeds. It is never longer than the hex form.
+    /// </summary>
+    public static void LiteralString(ByteBuffer b, ReadOnlySpan<byte> bytes)
+    {
+        b.Byte((byte)'(');
+        foreach (var c in bytes)
+        {
+            if (c == (byte)'\r') b.Ascii("\\r");
+            else if (c is (byte)'(' or (byte)')' or (byte)'\\') b.Byte((byte)'\\').Byte(c);
+            else b.Byte(c);
+        }
+        b.Byte((byte)')');
+    }
+
     /// <summary>Writes a string object as hex, in lower case.</summary>
     public static void HexString(ByteBuffer b, ReadOnlySpan<byte> bytes) => Hex(b, bytes, upper: false);
 
