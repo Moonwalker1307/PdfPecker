@@ -5,7 +5,7 @@ renderer has to supply metrics and glyphs itself: Helvetica, Times,
 Courier, Symbol and ZapfDingbats. WinAnsi characters: æøå ÆØÅ € é.
 
 Courier: 0123456789 {}[]()
-abgdp ∑¥ 3456 *
+αβγδπ ∑∞ ✓✔✕✖ ☛
 
 Go to page twoSecond page
 
