@@ -35,6 +35,12 @@ internal sealed class PdfObjectSyntax
     /// <summary>A stream met as a direct object is an error rather than written as null.</summary>
     public bool ThrowOnDirectStream { get; init; }
 
+    /// <summary>
+    /// The fewest bytes: no whitespace except between two tokens that would otherwise run together, unencrypted strings
+    /// as literals, and reals without a leading zero.
+    /// </summary>
+    public bool Minimal { get; init; }
+
     /// <summary>Deeper nesting is written as null, so a pathological object cannot exhaust the stack.</summary>
     public int MaxDepth { get; init; } = int.MaxValue;
 
@@ -46,6 +52,9 @@ internal sealed class PdfObjectSyntax
     /// own hex writer.
     /// </summary>
     public static readonly PdfObjectSyntax Stamp = new() { MaxDepth = 256, UpperHexEncryptedStrings = true };
+
+    /// <summary>The compactor, which writes every object in as few bytes as it can.</summary>
+    public static readonly PdfObjectSyntax Compact = new() { MaxDepth = 256, Minimal = true };
 
     /// <summary>The incremental updates (signatures, validation data, attachments, form filling).</summary>
     public static readonly PdfObjectSyntax Update = new()
@@ -83,6 +92,7 @@ internal class PdfObjectWriter
     /// <summary>Writes any object; <paramref name="depth"/> is its nesting within the indirect object.</summary>
     public void WriteObject(ByteBuffer b, PdfObject? o, int depth = 0)
     {
+        if (Syntax.Minimal && o is not (PdfString or PdfName or PdfArray or PdfDict)) Separate(b);
         if (depth > Syntax.MaxDepth) { b.Ascii("null"); return; }
         switch (o)
         {
@@ -105,7 +115,7 @@ internal class PdfObjectWriter
                 b.Byte((byte)'[');
                 for (int i = 0; i < a.Count; i++)
                 {
-                    if (i > 0) b.Sp();
+                    if (i > 0 && !Syntax.Minimal) b.Sp();
                     WriteObject(b, a[i], depth + 1);
                 }
                 b.Byte((byte)']');
@@ -128,8 +138,22 @@ internal class PdfObjectWriter
     {
         b.Ascii("<<");
         foreach (var (key, value) in d.Entries) WriteEntry(b, d, key, value, depth);
-        b.Ascii(Syntax.CompactDictionaries ? ">>" : " >>");
+        b.Ascii(Syntax.CompactDictionaries || Syntax.Minimal ? ">>" : " >>");
     }
+
+    /// <summary>
+    /// Writes a space when the last byte written is a regular character, which the token that follows (a number, a
+    /// keyword or a reference) would otherwise run into.
+    /// </summary>
+    protected static void Separate(ByteBuffer b)
+    {
+        if (b.Length > 0 && IsRegular(b.Span[b.Length - 1])) b.Sp();
+    }
+
+    /// <summary>Whether a byte is neither whitespace nor a delimiter, so that it continues the token before it.</summary>
+    private static bool IsRegular(byte c)
+        => c is not ((byte)' ' or (byte)'\n' or (byte)'\r' or (byte)'\t' or (byte)'\f' or 0 or (byte)'(' or (byte)')' or (byte)'<' or (byte)'>'
+            or (byte)'[' or (byte)']' or (byte)'{' or (byte)'}' or (byte)'/' or (byte)'%');
 
     /// <summary>
     /// Writes one entry of a dictionary at <paramref name="depth"/>; <paramref name="owner"/> is the dictionary, or null for
@@ -137,7 +161,12 @@ internal class PdfObjectWriter
     /// </summary>
     protected virtual void WriteEntry(ByteBuffer b, PdfDict? owner, string key, PdfObject value, int depth)
     {
-        if (Syntax.CompactDictionaries)
+        if (Syntax.Minimal)
+        {
+            WriteName(b, key);
+            WriteObject(b, value, depth + 1);
+        }
+        else if (Syntax.CompactDictionaries)
         {
             WriteName(b, key);
             b.Sp();
@@ -161,13 +190,27 @@ internal class PdfObjectWriter
         double v = n.Value;
         if (n.IsInteger || (Syntax.IntegralRealsAsIntegers && v == Math.Floor(v) && Math.Abs(v) < 1e15)) b.Int((long)v);
         else if (!double.IsFinite(v)) b.Byte((byte)'0');
+        else if (Syntax.Minimal) b.Ascii(MinimalReal(v));
         else b.Ascii(v.ToString("0.##########", CultureInfo.InvariantCulture));
     }
 
-    /// <summary>Writes a string as hex, encrypted for the current object when there is an encryption.</summary>
+    /// <summary>A real as the shortest spelling a reader accepts: 0.5 as .5 and -0.25 as -.25.</summary>
+    private static string MinimalReal(double v)
+    {
+        var s = v.ToString("0.##########", CultureInfo.InvariantCulture);
+        if (s.StartsWith("0.", StringComparison.Ordinal)) return s.Substring(1);
+        if (s.StartsWith("-0.", StringComparison.Ordinal)) return string.Concat("-", s.AsSpan(2));
+        return s;
+    }
+
+    /// <summary>
+    /// Writes a string as hex (as a literal with <see cref="PdfObjectSyntax.Minimal"/>), encrypted for the current object
+    /// when there is an encryption.
+    /// </summary>
     public void WriteString(ByteBuffer b, byte[] bytes)
     {
         if (Encryption != null) PdfSyntax.Hex(b, Encryption.EncryptString(bytes, ObjectNumber, Generation), Syntax.UpperHexEncryptedStrings);
+        else if (Syntax.Minimal) PdfSyntax.LiteralString(b, bytes);
         else PdfSyntax.Hex(b, bytes, Syntax.UpperHexStrings);
     }
 

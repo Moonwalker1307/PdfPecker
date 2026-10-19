@@ -11,7 +11,7 @@ internal static partial class JpegEncoder
     private const int MaxRun = 15;
 
     /// <summary>The four Huffman tables of the scan.</summary>
-    private sealed record EntropyTables(HuffmanTable LumaDc, HuffmanTable LumaAc, HuffmanTable ChromaDc, HuffmanTable ChromaAc);
+    private sealed record EntropyTables(HuffmanTable LumaDc, HuffmanTable LumaAc, HuffmanTable? ChromaDc, HuffmanTable? ChromaAc);
 
     /// <summary>
     /// The quantised blocks in scan order (MCU by MCU, the Y blocks row by row, then Cb, then Cr), coded twice: once to
@@ -21,13 +21,16 @@ internal static partial class JpegEncoder
     {
         private const int Y = 0, Cb = 1, Cr = 2;
 
-        private readonly short[][] coefficients;
+        private readonly short[]?[] coefficients;
         private readonly int lumaBlocksX, chromaBlocksX;
         private readonly Frame frame;
+        private readonly bool gray;
 
-        public Scan(short[] y, short[] cb, short[] cr, Frame frame)
+        /// <summary>A scan of Y, Cb and Cr, or of Y alone when <paramref name="cb"/> and <paramref name="cr"/> are null.</summary>
+        public Scan(short[] y, short[]? cb, short[]? cr, Frame frame)
         {
             coefficients = new[] { y, cb, cr };
+            gray = cb == null;
             this.frame = frame;
             lumaBlocksX = frame.LumaWidth / BlockSize;
             chromaBlocksX = frame.ChromaWidth / BlockSize;
@@ -38,6 +41,7 @@ internal static partial class JpegEncoder
         {
             var counter = new SymbolCounter();
             Code(ref counter);
+            if (gray) return new EntropyTables(HuffmanTable.FromFrequencies(counter.LumaDc), HuffmanTable.FromFrequencies(counter.LumaAc), null, null);
             return new EntropyTables(
                 HuffmanTable.FromFrequencies(counter.LumaDc), HuffmanTable.FromFrequencies(counter.LumaAc),
                 HuffmanTable.FromFrequencies(counter.ChromaDc), HuffmanTable.FromFrequencies(counter.ChromaAc));
@@ -65,6 +69,7 @@ internal static partial class JpegEncoder
                             int block = (mcuY * lumaSide + v) * lumaBlocksX + mcuX * lumaSide + h;
                             CodeBlock(ref sink, Y, block, ref predictions[Y]);
                         }
+                    if (gray) continue;
                     int chromaBlock = mcuY * chromaBlocksX + mcuX;
                     CodeBlock(ref sink, Cb, chromaBlock, ref predictions[Cb]);
                     CodeBlock(ref sink, Cr, chromaBlock, ref predictions[Cr]);
@@ -74,7 +79,7 @@ internal static partial class JpegEncoder
         /// <summary>The DC difference from the block before, then the AC coefficients as runs of zeros and values.</summary>
         private void CodeBlock<TSink>(ref TSink sink, int component, int block, ref int prediction) where TSink : struct, ISymbolSink
         {
-            var coefficients = this.coefficients[component].AsSpan(block * BlockLength, BlockLength);
+            var coefficients = this.coefficients[component]!.AsSpan(block * BlockLength, BlockLength);
             bool luma = component == Y;
             int difference = coefficients[0] - prediction;
             prediction = coefficients[0];
@@ -131,14 +136,14 @@ internal static partial class JpegEncoder
 
         public void Dc(bool luma, int size, int difference)
         {
-            var table = luma ? tables.LumaDc : tables.ChromaDc;
+            var table = luma ? tables.LumaDc : tables.ChromaDc!;
             Bits.Write(table.Code[size], table.Size[size]);
             if (size > 0) Bits.Write(Magnitude(difference, size), size);
         }
 
         public void Ac(bool luma, int symbol, int size, int value)
         {
-            var table = luma ? tables.LumaAc : tables.ChromaAc;
+            var table = luma ? tables.LumaAc : tables.ChromaAc!;
             Bits.Write(table.Code[symbol], table.Size[symbol]);
             if (size > 0) Bits.Write(Magnitude(value, size), size);
         }

@@ -189,7 +189,7 @@ public static class PdfProtector
     }
 
     /// <summary>Refuses a PDF with a signed signature field or a certification (DocMDP) or usage rights signature.</summary>
-    private static void CheckNotSigned(PdfFile file)
+    internal static void CheckNotSigned(PdfFile file)
     {
         var catalog = file.Catalog;
         if (file.GetDict(catalog, "Perms") is { Entries.Count: > 0 } || HasSignedField(file, file.GetArray(file.GetDict(catalog, "AcroForm"), "Fields")))
