@@ -59,8 +59,8 @@ Before non-trivial work, read:
 - `bench/PdfPecker.Benchmarks` (in the solution), `bench/PdfPecker.Comparison` (not in the solution) and
   `bench/compare-versions.sh`.
 - `fuzz/PdfPecker.Fuzz` – the dependency-free mutation fuzzer.
-- `tools/` – generators for checked-in data (see "Change-specific guidance"), the veraPDF conformance samples and the
-  HarfBuzz shaping reference.
+- `tools/` – generators for checked-in data (see "Change-specific guidance"), the veraPDF conformance samples, the
+  HarfBuzz shaping reference and the third-party PDF fixtures.
 - `.github/workflows/` – `nuget.yml`, `dotnet-preview.yml`, `conformance.yml`, `codeql.yml`, `perf.yml`, `fuzz.yml`,
   `dependabot-auto-merge.yml`; see `CONFIG.md`.
 - The user manual at pdfpecker.net/docs is not here: it is generated from `docs/*.md` in the PdfPecker.Web repository.
@@ -97,6 +97,7 @@ must be unchanged unless the output change is intended. If only one runtime is i
   - `tools/Hyphenation/build.cs` → `src/PdfPecker/Text/Hyphenation/*.br`
   - `tools/IndicTables/build.cs` → `src/PdfPecker/Fonts/IndicTables.g.cs`
   - `tools/ShapingReference/generate.py` → `tests/PdfPecker.Tests/Fixtures/shaping/harfbuzz.txt`
+  - `tools/ThirdPartyPdfs/generate.sh` → `tests/PdfPecker.Tests/Fixtures/third-party/*.pdf`
   - FontPackBuilder and Hyphenation pin their inputs by SHA-256; a deliberate update changes the hashes, the versions
     named in the tool and `THIRD-PARTY-NOTICES.md` together.
 - **Bundled fonts or data sources**: update `THIRD-PARTY-NOTICES.md`.
