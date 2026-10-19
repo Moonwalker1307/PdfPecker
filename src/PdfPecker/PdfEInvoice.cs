@@ -34,7 +34,8 @@ public enum EInvoiceRelationship
 
 /// <summary>
 /// A Factur-X / ZUGFeRD e-invoice: the invoice as UN/CEFACT Cross Industry Invoice (CII) XML, embedded in a PDF/A-3
-/// file next to the human-readable pages. PdfPecker does not build the XML; pass the one your invoicing system makes.
+/// file next to the human-readable pages. Pass the XML your invoicing system makes, or build it from invoice data with
+/// <see cref="InvoiceData.ToEInvoice"/>.
 /// </summary>
 public sealed class PdfEInvoice
 {

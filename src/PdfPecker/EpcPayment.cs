@@ -90,7 +90,7 @@ public sealed class EpcPayment
     }
 
     /// <summary>Checks the length, the characters and the mod-97 check digits of ISO 13616.</summary>
-    private static bool IsValidIban(string iban)
+    internal static bool IsValidIban(string iban)
     {
         if (iban.Length is < 15 or > 34 || !char.IsAsciiLetterUpper(iban[0]) || !char.IsAsciiLetterUpper(iban[1])
             || !char.IsAsciiDigit(iban[2]) || !char.IsAsciiDigit(iban[3]) || !iban.All(char.IsAsciiLetterOrDigit))
