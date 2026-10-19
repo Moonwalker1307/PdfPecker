@@ -40,12 +40,22 @@ internal sealed partial class PdfFont
                 }
             }
         }
-        // A symbolic font, or a TrueType font without an Encoding, uses its built-in encoding rather than the standard one.
-        bool builtinEncoding = symbolic || subtype == "TrueType" && encodingObject == null;
+        // A symbolic font, a TrueType font without an Encoding, or the standard Symbol and ZapfDingbats fonts (which usually
+        // come without a descriptor to say they are symbolic) use their built-in encoding rather than the standard one.
+        bool builtinEncoding = symbolic || subtype == "TrueType" && encodingObject == null || IsStandardSymbolFont(BaseFont);
         for (int c = 0; c < 256; c++) _encNames[c] = differences[c] ?? baseEncoding?[c] ?? (builtinEncoding ? null : Encodings.Standard[c]);
 
         if (LoadSimpleProgram(file, descriptor, baseEncoding, differences, symbolic, flags, encodingObject != null, haveWidths)) return;
         Substitute(file, dict, baseEncoding, hasDifferences ? differences : null);
+    }
+
+    private static bool IsStandardSymbolFont(string baseFont)
+    {
+        var name = baseFont.AsSpan();
+        if (name.Length > 7 && name[6] == '+') name = name[7..]; // a subset tag such as ABCDEF+
+        int comma = name.IndexOf(',');
+        if (comma >= 0) name = name[..comma]; // a style suffix such as ,Bold
+        return name is "Symbol" or "ZapfDingbats";
     }
 
     // The Widths array, with MissingWidth for the codes outside it; false when the font has no widths at all.

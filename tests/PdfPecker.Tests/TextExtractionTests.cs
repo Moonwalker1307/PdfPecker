@@ -199,6 +199,26 @@ public class TextExtractionTests
     }
 
     [Fact]
+    public void Standard_symbol_fonts_without_a_descriptor_use_their_built_in_encodings()
+    {
+        // As ReportLab writes them: no FontDescriptor, so no flag says the font is symbolic, and no Encoding.
+        const string content =
+            "BT /F1 12 Tf 72 700 Td (abgdp \\345\\245) Tj ET\n" +
+            "BT /F2 12 Tf 72 680 Td (3456 *) Tj ET\n" +
+            "BT /F3 12 Tf 72 660 Td (W) Tj ET\n";
+        var pdf = BuildPdf(
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R /F2 5 0 R /F3 6 0 R >> >> /Contents 7 0 R >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Symbol >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /ZapfDingbats >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Symbol,Bold >>",
+            $"<< /Length {content.Length} >>\nstream\n{content}endstream");
+        var lines = PdfText.ExtractPage(pdf, 1).Lines.Select(l => l.Text);
+        Assert.Equal(new[] { "\u03b1\u03b2\u03b3\u03b4\u03c0 \u2211\u221e", "\u2713\u2714\u2715\u2716 \u261b", "\u03a9" }, lines);
+    }
+
+    [Fact]
     public void Pages_overloads_and_limits()
     {
         var pdf = HtmlToPdf.Convert("<p>One</p><p style='page-break-before:always'>Two</p><p style='page-break-before:always'>Three</p>");
