@@ -262,6 +262,7 @@ internal sealed partial class LayoutEngine
         public FlowMark Prev, Chain;
         public bool HasPrev, HasChain, PrevAvoidAfter;
         public int ForcedAt;            // the box that was moved to a new page to keep its chain together
+        public bool AfterForcedBreak;   // the content so far ends with a forced page break
     }
 
     /// <summary>What the flow does after a phase: go on with the current child, go on with the next one, or stop.</summary>
@@ -381,14 +382,16 @@ internal sealed partial class LayoutEngine
         int runOps = _ops.Count;
         // The lines' content (inline blocks, percentages) is sized for the page the paragraph starts on; each
         // line then takes the width of its own page.
-        var (ix, iw) = f.Pages != null ? OnPage(f.Pages, f.Y + f.PendingMargin) : (f.X, f.W);
+        float top = f.InColumns ? f.Y + f.PendingMargin : TruncatedPageMargin(ref f, f.Y + f.PendingMargin);
+        var (ix, iw) = f.Pages != null ? OnPage(f.Pages, top) : (f.X, f.W);
         _inlinePageBox = f.Pages;
-        f.Y = FlushInline(run, f.Parent, ix, f.Y + f.PendingMargin, iw, !f.AnyContent, out bool produced);
+        f.Y = FlushInline(run, f.Parent, ix, top, iw, !f.AnyContent, out bool produced);
         run.Clear();
         if (produced)
         {
             f.PendingMargin = 0;
             f.AnyContent = true;
+            f.AfterForcedBreak = false;
             if (f.HasChain && f.PrevAvoidAfter && KeepTogetherFails(f.Chain, runOps, before, f.ForcedAt))
             {
                 RewindToChain(ref f);
@@ -454,6 +457,7 @@ internal sealed partial class LayoutEngine
         f.AnyContent = true;
         f.PendingMargin = mb;
         f.Y = bottom;
+        f.AfterForcedBreak = breakAfter;
         if (breakAfter)
         {
             f.Y = ForcedBreak(f.Y + f.PendingMargin);
@@ -489,6 +493,7 @@ internal sealed partial class LayoutEngine
         f.FirstBlock = false;
         float top = f.Y + CollapseMargins(f.PendingMargin, mt);
         if (f.InColumns) top = TruncatedMargin(f.Y, top);
+        else if (!breakBefore) top = TruncatedPageMargin(ref f, top);
         if (s.ClearLeft || s.ClearRight) top = Cleared(s, top);
         // A forced break before anything has been drawn (the first box of the document or of a named page's run)
         // would only leave an empty page: Chrome ignores it.
@@ -502,6 +507,21 @@ internal sealed partial class LayoutEngine
             if (next != top) top = next + mt;
         }
         return top;
+    }
+
+    /// <summary>
+    /// Where a box or line goes on the pages after the content of its flow ended at f.Y, given its top margin edge: a
+    /// margin that reaches past the end of a page, or follows content that ended there, is cut off at the break, as
+    /// Chrome cuts it (CSS Fragmentation 3 §5.2). After a forced break, and at the top of the box the flow is in, the
+    /// margin stays.
+    /// </summary>
+    private float TruncatedPageMargin(ref FlowState f, float top)
+    {
+        float y = f.Y;
+        if (!_paginate || top <= y) return top;
+        int k = PageOf(y);
+        if (PageOf(top) > k) return _grid.Start(k + 1);
+        return k > 0 && f.AnyContent && !f.AfterForcedBreak && AtPageTop(y) ? y : top;
     }
 
     /// <summary>
