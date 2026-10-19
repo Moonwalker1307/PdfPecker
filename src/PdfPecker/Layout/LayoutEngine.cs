@@ -1620,8 +1620,44 @@ internal sealed partial class LayoutEngine
     /// <summary>Content laid out on its own (unpaginated, at the origin) so that it can be measured and then moved into place.</summary>
     private sealed class Captured
     {
-        public List<DrawOp> Ops = null!;
+        private List<DrawOp>? _ops;
+
+        /// <summary>The content, laid out again on first use for a box that was only measured (see <see cref="Known"/>).</summary>
+        public List<DrawOp> Ops
+        {
+            get
+            {
+                if (Lay != null)
+                {
+                    var fresh = Lay();
+                    Lay = null;
+                    (_ops, AnchorIds, Absolutes) = (fresh.Ops, fresh.AnchorIds, fresh.Absolutes);
+                }
+                return _ops!;
+            }
+            set => _ops = value;
+        }
+
+        /// <summary>Lays out the content of a box whose measurements were known already, when it is needed after all.</summary>
+        public Func<Captured>? Lay;
+
+        /// <summary>
+        /// The boxes captured while this one was laid out, outside further captures, with what they measured: when the
+        /// box is laid out again on the pages, those boxes measure the same and need not be laid out to be measured.
+        /// </summary>
+        public Dictionary<BoxSource, Captured>? Known;
+
+        /// <summary>The list item numbering before and after the box, which the box may have advanced.</summary>
+        public int ListIndexBefore, ListIndexAfter;
+
+        /// <summary>The containing block height the box's percentage heights resolved against, and the kind of page.</summary>
+        public CbHeights? Cb;
+        public int CbKind;
+
+        /// <summary>Whether the flex lines in the box could still be laid out again when it was captured.</summary>
+        public bool RepeatsOnPages;
         public List<string>? AnchorIds;
+        public List<float>? AnchorYs; // where the anchors were in the box when it was captured
         public float Width, Height; // margin box
         public float Baseline = float.NaN;
         public bool ForcedBreaks;
@@ -1632,8 +1668,18 @@ internal sealed partial class LayoutEngine
         public List<(Element E, float X, float Y)>? Absolutes; // absolutely positioned boxes still waiting for their containing block
     }
 
-    private Captured Capture(Func<float> layout)
+    /// <summary>
+    /// Lays content out on its own. With <paramref name="logItems"/> the result keeps what the flex and grid items in it
+    /// measured (see <see cref="Captured.Known"/>); <paramref name="known"/> are those of an earlier layout of the same box.
+    /// </summary>
+    private Captured Capture(Func<float> layout, bool logItems = false, Dictionary<BoxSource, Captured>? known = null)
     {
+        var savedLog = _captureLog;
+        bool savedLogging = _logItems;
+        var savedKnown = _knownBoxes;
+        _captureLog = null;
+        _logItems = logItems;
+        _knownBoxes = known;
         var savedOps = _ops;
         bool savedPaginate = _paginate;
         var savedMarker = _marker;
@@ -1666,7 +1712,7 @@ internal sealed partial class LayoutEngine
                 ForcedBreaks = _forcedBreaks != breaks,
                 BoxX = _lastBoxX, BoxY = _lastBoxTop, BoxW = _lastBoxW, BoxH = _lastBoxH,
                 ContentH = _lastBoxContentH, FrameV = _lastBoxFrameV, ChildCb = _lastBoxChildCb,
-                Absolutes = absolutes,
+                Absolutes = absolutes, Known = _captureLog,
             };
         }
         finally
@@ -1682,6 +1728,9 @@ internal sealed partial class LayoutEngine
             _captureAnchors = savedAnchors;
             _capturing = savedCapturing;
             _lastBoxRight = savedRight;
+            _captureLog = savedLog;
+            _logItems = savedLogging;
+            _knownBoxes = savedKnown;
         }
     }
 
@@ -1733,18 +1782,101 @@ internal sealed partial class LayoutEngine
     private sealed record BoxSource(Element El, float OuterW, bool ShrinkToFit, float? BorderW, float? BorderH);
 
     /// <summary>Lays out a block-level box in a box of <paramref name="outerW"/> (its margin box), optionally with a forced border-box size.</summary>
-    private Captured CaptureBox(Element e, float outerW, bool shrinkToFit, float? borderW = null, float? borderH = null)
+    private Captured CaptureBox(Element e, float outerW, bool shrinkToFit, float? borderW = null, float? borderH = null, bool reuse = false,
+        Dictionary<BoxSource, Captured>? inner = null)
     {
+        var src = new BoxSource(e, outerW, shrinkToFit, borderW, borderH);
+        if (!reuse) return CaptureBoxCore(src);
+        Captured c;
+        if (_knownBoxes != null && _knownBoxes.TryGetValue(src, out var known) && known.ListIndexBefore == _currentListIndex
+            && !_measuring && Tags == null && Footnotes == null && _columnNotes == null && SameContext(e, known))
+        {
+            // Measured already where the box around it was captured: only its content may still be needed.
+            c = Measured(known);
+            c.Lay = () =>
+            {
+                int list = _currentListIndex, breaks = _forcedBreaks;
+                _currentListIndex = known.ListIndexBefore;
+                try
+                {
+                    return CaptureBoxCore(src);
+                }
+                finally
+                {
+                    _currentListIndex = list;
+                    _forcedBreaks = breaks;
+                }
+            };
+            _currentListIndex = known.ListIndexAfter;
+            if (known.ForcedBreaks) _forcedBreaks++;
+            // Laying it out would have left its anchors where they were in it, until it is placed.
+            if (known.AnchorIds != null)
+                for (int i = 0; i < known.AnchorIds.Count; i++) Anchors[known.AnchorIds[i]] = known.AnchorYs![i];
+        }
+        else c = CaptureBoxCore(src, inner);
+        if (_logItems && !_measuring) (_captureLog ??= new Dictionary<BoxSource, Captured>()).TryAdd(src, Measured(c));
+        return c;
+    }
+
+    /// <summary>
+    /// The flex and grid items captured so far in the box that <see cref="CaptureBox"/> is laying out, outside further
+    /// captures, when <see cref="_logItems"/> is set.
+    /// </summary>
+    private Dictionary<BoxSource, Captured>? _captureLog;
+    private bool _logItems;
+
+    /// <summary>
+    /// While a captured box is laid out again on the pages, the flex and grid items captured when it was captured, which
+    /// measure the same now (see <see cref="Captured.Known"/>).
+    /// </summary>
+    private Dictionary<BoxSource, Captured>? _knownBoxes;
+
+    /// <summary>What a captured box measured, without its content.</summary>
+    private static Captured Measured(Captured c) => new()
+    {
+        Ops = [], Width = c.Width, Height = c.Height, Baseline = c.Baseline, ForcedBreaks = c.ForcedBreaks, Source = c.Source,
+        BoxX = c.BoxX, BoxY = c.BoxY, BoxW = c.BoxW, BoxH = c.BoxH,
+        ContentH = c.ContentH, FrameV = c.FrameV, ChildCb = c.ChildCb, Known = c.Known,
+        ListIndexBefore = c.ListIndexBefore, ListIndexAfter = c.ListIndexAfter, Cb = c.Cb, CbKind = c.CbKind, RepeatsOnPages = c.RepeatsOnPages,
+        AnchorIds = c.AnchorIds, AnchorYs = c.AnchorYs,
+    };
+
+    /// <summary>
+    /// Whether <paramref name="e"/> lays out now as it did when <paramref name="known"/> was captured: flex lines may
+    /// grow as deep as they could then, and the box's own percentage heights resolve the same. Only the box's own can
+    /// differ: its children's containing block is its own height, auto here.
+    /// </summary>
+    private bool SameContext(Element e, Captured known)
+    {
+        if (known.RepeatsOnPages != _placingOnPages < MaxRepeatedOnPages) return false;
+        var s = e.Style;
+        if (!s.Height.IsPercent && !s.MinHeight.IsPercent && !s.MaxHeight.IsPercent) return true;
+        return known.CbKind == _cbKind && (known.Cb, _cbHeight) switch
+        {
+            (null, null) => true,
+            ({ } a, { } b) => a.First == b.First && a.Odd == b.Odd && a.Even == b.Even,
+            _ => false,
+        };
+    }
+
+    private Captured CaptureBoxCore(BoxSource src, Dictionary<BoxSource, Captured>? inner = null)
+    {
+        var (e, outerW, shrinkToFit, borderW, borderH) = src;
         var s = e.Style;
         if (borderW.HasValue) _widthOverride[e] = borderW.Value;
         if (borderH.HasValue) _heightOverride[e] = borderH.Value;
+        int listBefore = _currentListIndex;
         try
         {
             float mt = s.MarginTop.IsAuto ? 0 : s.MarginTop.Resolve(outerW), mb = s.MarginBottom.IsAuto ? 0 : s.MarginBottom.Resolve(outerW);
             float mr = s.MarginRight.IsAuto ? 0 : s.MarginRight.Resolve(outerW);
-            var c = Capture(() => LayoutBlockBox(e, 0, mt, outerW, shrinkToFit) + mb);
+            var c = Capture(() => LayoutBlockBox(e, 0, mt, outerW, shrinkToFit) + mb, logItems: true, inner);
             c.Width += mr;
-            c.Source = new BoxSource(e, outerW, shrinkToFit, borderW, borderH);
+            c.Source = src;
+            c.ListIndexBefore = listBefore;
+            c.ListIndexAfter = _currentListIndex;
+            if (c.AnchorIds != null) c.AnchorYs = c.AnchorIds.ConvertAll(id => Anchors[id]);
+            (c.Cb, c.CbKind, c.RepeatsOnPages) = (_cbHeight, _cbKind, _placingOnPages < MaxRepeatedOnPages);
             return c;
         }
         finally
@@ -1791,6 +1923,9 @@ internal sealed partial class LayoutEngine
         var marker = _marker;
         int listIndex = _currentListIndex;
         _placingOnPages++;
+        // The boxes inside measure as they did when this one was captured, unless it was given a height then.
+        var pool = _knownBoxes;
+        _knownBoxes = src.BorderH == null ? c.Known : null;
         try
         {
             float bottom = LayoutBlockBox(e, dx, dy + mt, src.OuterW, src.ShrinkToFit) + mb;
@@ -1801,6 +1936,7 @@ internal sealed partial class LayoutEngine
                 _marker = marker;
                 _currentListIndex = listIndex;
                 _heightOverride[e] = bh;
+                _knownBoxes = null;
                 try
                 {
                     bottom = LayoutBlockBox(e, dx, dy + mt, src.OuterW, src.ShrinkToFit) + mb;
@@ -1814,6 +1950,7 @@ internal sealed partial class LayoutEngine
         }
         finally
         {
+            _knownBoxes = pool;
             _placingOnPages--;
             if (src.BorderW.HasValue) _widthOverride.Remove(e);
         }
