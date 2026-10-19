@@ -101,13 +101,14 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>
-    /// An inline element that paints a background, shadows or an outline on its line fragments, or that gives each
-    /// fragment its own padding and borders (box-decoration-break: clone), with the nearest such element around it.
+    /// An inline element that paints a background, shadows, borders or an outline on its line fragments, or that gives
+    /// each fragment its own padding and borders (box-decoration-break: clone), with the nearest such element around it.
     /// The two collections of a paragraph with a ::first-line style each make their own, so the fragments of one
-    /// element are matched by its style.
+    /// element are matched by the element, not by the deco; nor by the style, which siblings styled alike share.
     /// </summary>
     private sealed class InlineDeco
     {
+        public readonly Element Element;
         public readonly ComputedStyle Style;
         public readonly InlineDeco? Parent;
         /// <summary>The padding and border widths of the left and right edge, which clone repeats where the element breaks.</summary>
@@ -120,8 +121,9 @@ internal sealed partial class LayoutEngine
         /// </summary>
         public readonly float CloneLeft, CloneRight;
 
-        public InlineDeco(ComputedStyle style, InlineDeco? parent, float left, float right)
+        public InlineDeco(Element element, ComputedStyle style, InlineDeco? parent, float left, float right)
         {
+            Element = element;
             Style = style;
             Parent = parent;
             Left = left;

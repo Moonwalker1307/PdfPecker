@@ -38,6 +38,7 @@ internal sealed partial class LayoutEngine
             return;
         }
 
+        int before = st.Items.Count;
         AddAnchors(st, e, s, ref href);
 
         if (IsImageLaidOutAsBox(e, s))
@@ -46,6 +47,7 @@ internal sealed partial class LayoutEngine
             // own, which carries the layer or fits and clips the image.
             st.Items.Add(LayoutInlineBlock(e, st.AvailWidth, href ?? LinkOf(e)));
             st.LastWasSpace = false;
+            AddAtomicBreaks(st, e, before, st.Items.Count - 1);
             return;
         }
 
@@ -57,12 +59,18 @@ internal sealed partial class LayoutEngine
             case "svg":
             {
                 var svg = SvgSize(e, st.AvailWidth, out float sw, out float sh);
+                int at = st.Items.Count;
                 AddInlineSvg(st, e, s, svg, sw, sh, href);
+                AddAtomicBreaks(st, e, before, at);
                 return;
             }
             case "img":
+            {
+                int at = st.Items.Count;
                 AddInlineImage(st, e, s, href);
+                AddAtomicBreaks(st, e, before, at);
                 return;
+            }
         }
 
         if (e.Name == "a" && e.GetAttribute("href") is { } link && link.Length > 0) href = link;
@@ -71,10 +79,25 @@ internal sealed partial class LayoutEngine
         {
             st.Items.Add(LayoutInlineBlock(e, st.AvailWidth, href));
             st.LastWasSpace = false;
+            AddAtomicBreaks(st, e, before, st.Items.Count - 1);
             return;
         }
 
         CollectInlineElement(st, e, s, href, deco);
+    }
+
+    /// <summary>
+    /// The line break opportunities around an atomic inline (an image, an inline svg or an inline-block) whose items
+    /// start at <paramref name="at"/>, after the element's anchors from <paramref name="before"/>. As CSS Text asks and
+    /// Chrome does, a line may break before and after one even next to punctuation or a no-break space, so text that
+    /// runs into it stays on its line when the box moves down. The anchors go with the box.
+    /// </summary>
+    private static void AddAtomicBreaks(CollectState st, Element e, int before, int at)
+    {
+        if (st.Items.Count <= at || e.Parent?.Style is not { } parent || !IsBreakable(parent)) return;
+        if (before > 0 && st.Items[before - 1] is { Kind: not (ItemKind.Space or ItemKind.Break), BreakAfter: BreakAfter.None } prev)
+            prev.BreakAfter = BreakAfter.Break;
+        st.Items[^1].BreakAfter = BreakAfter.Break;
     }
 
     private void CollectTextNode(CollectState st, TextNode t, string? href, InlineDeco? deco)
@@ -126,7 +149,7 @@ internal sealed partial class LayoutEngine
     {
         float boxLeft = s.PaddingLeft.Resolve(0) + s.BorderLeft, boxRight = s.PaddingRight.Resolve(0) + s.BorderRight;
         var outer = deco;
-        if (PaintsInlineBox(s) || s.BoxDecorationClone && (boxLeft > 0 || boxRight > 0)) deco = new InlineDeco(s, outer, boxLeft, boxRight);
+        if (PaintsInlineBox(s) || s.BoxDecorationClone && (boxLeft > 0 || boxRight > 0)) deco = new InlineDeco(e, s, outer, boxLeft, boxRight);
         float marginLeft = AutoAsZero(s.MarginLeft), marginRight = AutoAsZero(s.MarginRight);
         int first = st.Items.Count;
         var (bidiOpen, bidiClose) = BidiControls(s);
@@ -138,9 +161,10 @@ internal sealed partial class LayoutEngine
         if (s.Position == Position.Relative) ShiftRelative(st, first, s);
     }
 
-    /// <summary>Whether an inline element paints anything of its own box: a background, shadows or an outline.</summary>
+    /// <summary>Whether an inline element paints anything of its own box: a background, shadows, borders or an outline.</summary>
     private static bool PaintsInlineBox(ComputedStyle s) =>
-        CssColor.IsVisible(s.BackgroundColor) || s.BackgroundImages != null || s.BoxShadows != null || s.OutlineStyle != BorderStyle.None;
+        CssColor.IsVisible(s.BackgroundColor) || s.BackgroundImages != null || s.BoxShadows != null || s.HasBorder
+        || s.OutlineStyle != BorderStyle.None;
 
     /// <summary>
     /// The spacer of one side of an inline element: its padding and border, and its margin outside them. A margin of an

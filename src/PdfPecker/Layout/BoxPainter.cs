@@ -72,6 +72,31 @@ internal static partial class BoxPainter
     }
 
     /// <summary>
+    /// Paints the borders of one line fragment of an inline box, laid out on the border box (x, y, w, h) like
+    /// <see cref="PaintFragment"/>. With box-decoration-break: slice that box is all the fragments side by side, and
+    /// <paramref name="clip"/> cuts it to the fragment, so that only the first fragment shows the box's starting border
+    /// and only the last its ending one, each with its rounded corners, as Chrome slices them.
+    /// </summary>
+    public static void PaintFragmentBorders(GroupOp group, ComputedStyle s, float x, float y, float w, float h, (float X, float Y, float W, float H) fragment,
+        bool clip, float fade)
+    {
+        if (!s.Visible || !s.HasBorder || !(w > 0 && h > 0 && fragment.W > 0)) return;
+        if (fade < 1)
+        {
+            var layer = new LayerOp { Opacity = fade };
+            group.Ops.Add(layer);
+            group = layer;
+        }
+        if (clip)
+        {
+            var part = new ClipOp(fragment.X, fragment.Y, fragment.W, fragment.H, null);
+            group.Ops.Add(part);
+            group = part;
+        }
+        PaintBorders(group, s, x, y, w, h, AllSides, collapsedCell: false, Radii(s, w, h));
+    }
+
+    /// <summary>
     /// The background colour, clipped like the bottom layer, under the background layers, the last layer first; with a
     /// <paramref name="fragment"/>, only the part in it, with its corners rounded by <paramref name="radii"/>.
     /// </summary>

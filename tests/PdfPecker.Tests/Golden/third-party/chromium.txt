@@ -1,0 +1,23 @@
+Quarterly report
+
+Printed by Chromium for the PdfPecker test suite
+
+This document is a fixture made with headless Chromium, so the renderer, text extraction,
+merging, stamping and compacting are tested on a PDF that PdfPecker did not write. Characters
+outside Latin-1: æøå, ÆØÅ, € 1.234,56, “quotes”, naïve café, Ελληνικά, Кириллица.
+
+Region Q1 Q2 Change
+
+North 1,204 1,388 +15.3%
+
+South 982 1,010 +2.9%
+
+East 1,530 1,402 −8.4%
+
+West 744 901 +21.1%
+
+Figures are invented. A link to example.com.Second page
+
+1. One item
+2. Another item with bold and italic text
+3. A third item
