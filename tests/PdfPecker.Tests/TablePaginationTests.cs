@@ -57,6 +57,21 @@ public class TablePaginationTests
         Assert.Equal("Row 1", pages[1].Lines[1].Text);
     }
 
+    [Theory]
+    [InlineData("middle")]
+    [InlineData("bottom")]
+    public void A_cell_split_across_pages_keeps_its_content_at_the_top(string align)
+    {
+        // As in Chrome, vertical-align does not apply to a cell split across pages: centred in the whole cell, the short
+        // cell started on the second page and the heading that stays with the table moved there too, leaving the
+        // first page empty.
+        var lines = string.Concat(Enumerable.Range(1, 40).Select(i => $"<div>Line {i}</div>"));
+        var pages = Pages($"<h2>Heading</h2><table><tr><td style='vertical-align: {align}'>Short</td><td>{lines}</td></tr></table>");
+        var first = pages[0].Lines.Select(l => l.Text).ToList();
+        Assert.Equal("Heading", first[0]);
+        Assert.Contains(first, l => l.StartsWith("Short", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void A_box_keeps_its_top_margin_after_a_forced_break_before_it()
     {
