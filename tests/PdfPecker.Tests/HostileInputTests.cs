@@ -1546,6 +1546,25 @@ public class HostileInputTests
         Assert.InRange(calls, 1, 128); // at most 64 per stylesheet read; the styles are read again once the page size is known
     }
 
+    [Theory]
+    [InlineData("line-height:Infinity")]
+    [InlineData("line-height:1e38")]
+    [InlineData("font-size:1e38px")]
+    public void Infinite_or_huge_line_heights_do_not_make_border_corners_NaN(string css)
+    {
+        // Found by the fuzzer: target html, exception-b889eeb4. "Infinity" parsed as a line-height factor, and a huge
+        // finite one overflowed, so an inline box's height became NaN and splitting its rounded border threw.
+        var html = $"<style>p{{{css}}}.ring{{border:solid #c00;border-right-color:2;border-radius:4px}}</style><p><span class=ring>x</span>";
+        try
+        {
+            AssertStructurallyValid(Bounded(html));
+        }
+        catch (PdfLimitException)
+        {
+            // A line taller than the page limit is a documented failure.
+        }
+    }
+
     [Fact]
     public void Object_number_too_large_for_an_int_in_a_damaged_pdf_is_invalid_data()
     {

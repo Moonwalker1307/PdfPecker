@@ -108,8 +108,10 @@ internal sealed partial class StyleResolver
     {
         if (d.Inherit) { s.LineHeightKind = parent.LineHeightKind; s.LineHeightValue = parent.LineHeightValue; return; }
         if (d.Lower == "normal") { s.LineHeightKind = LineHeightKind.Normal; return; }
+        // "Infinity" and "NaN" parse as floats but are not CSS numbers; kept, they make every line's height NaN.
         if (float.TryParse(d.Lower, NumberStyles.Float, CultureInfo.InvariantCulture, out float factor))
         {
+            if (!float.IsFinite(factor)) return;
             s.LineHeightKind = LineHeightKind.Factor;
             s.LineHeightValue = factor;
         }
