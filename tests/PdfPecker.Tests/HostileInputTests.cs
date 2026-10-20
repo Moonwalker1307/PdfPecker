@@ -1842,6 +1842,21 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Nested_boxes_kept_whole_around_a_long_table_stay_within_the_layout_budget()
+    {
+        // Found by the fuzzer: target html, timeout-d2edd0b0. Boxes kept whole around a table on a named page are laid
+        // out again many times, and the work budget counted only block boxes, not the table's cells or the lines of
+        // text, so it was spent long after the time was: 110 boxes around a 720-row table took 26 s.
+        var rows = new StringBuilder();
+        for (int i = 0; i < 720; i++) rows.Append("<tr><td>Measure ").Append(i).Append("</td><td>1.").Append(i).Append("</td><td>2.").Append(i).Append("</td></tr>");
+        var html = "<style>@page { size: A5 } @page landscape { size: A5 landscape } .wide { page: landscape }"
+            + " .box { break-inside: avoid; border: 1px solid #2a9d8f; background: #eef8f6; padding: 5pt; margin: 6pt 0 }</style>"
+            + Repeat("<div class=box><h4>Kept together</h4><p>Lorem ipsum dolor sit amet</p>", 110)
+            + "<div class=wide><h2>Key figures</h2><table>" + rows + "</table></div>";
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
     public void Headings_before_tables_nested_in_split_header_cells_are_laid_out_once()
     {
         // Found by the fuzzer: target html, timeout-c201378d. Each level is a heading kept with a table whose header row
