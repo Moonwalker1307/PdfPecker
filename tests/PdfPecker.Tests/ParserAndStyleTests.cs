@@ -72,6 +72,42 @@ public class HtmlParserTests
     }
 
     [Fact]
+    public void Content_written_between_table_rows_moves_in_front_of_the_table()
+    {
+        // Browsers foster-parent what a table cannot hold; left in the table, the table layout would drop it.
+        var doc = Body("<div><table>Note<input value=\"a\"><tr><span>b</span><td>1</td></tr><input type=hidden name=h></table></div>");
+        var div = doc.FindFirst("div")!;
+        Assert.Equal(new[] { "#text", "input", "span", "table" }, div.Children.Select(c => c is Element e ? e.Name : "#text"));
+        Assert.Equal("1", doc.FindFirst("td")!.InnerText());
+        Assert.Equal("tr", doc.FindFirst("td")!.Parent!.Name);
+        Assert.Equal("tbody", Elements(doc, "input").Last().Parent!.Name); // a hidden field stays where it was written
+    }
+
+    [Fact]
+    public void A_form_inside_a_row_keeps_its_cells_in_the_row()
+    {
+        var doc = Body("<table><tr><form><td>a</td><td><input name=x></td></form></tr></table>");
+        var tr = doc.FindFirst("tr")!;
+        Assert.Equal(2, tr.Children.OfType<Element>().Count(e => e.Name == "td"));
+        Assert.NotNull(doc.FindFirst("form"));
+    }
+
+    [Fact]
+    public void A_form_inside_a_form_is_ignored()
+    {
+        var doc = Body("<form><p><form><input name=x></form><input name=y></form>");
+        Assert.Single(Elements(doc, "form"));
+        Assert.Equal("form", doc.FindFirst("p")!.Parent!.Name);
+    }
+
+    [Fact]
+    public void A_field_closes_an_open_select()
+    {
+        var doc = Body("<p><select><option>a<input value=x></p>");
+        Assert.Equal("p", doc.FindFirst("input")!.Parent!.Name);
+    }
+
+    [Fact]
     public void Comments_and_doctype_are_ignored()
     {
         var doc = Body("<!DOCTYPE html><!-- <p>no</p> --><p>yes</p>");

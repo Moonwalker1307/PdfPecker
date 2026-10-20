@@ -66,15 +66,15 @@ input, select, button, textarea {
   text-indent: 0; text-align: left; text-shadow: none; white-space: normal;
 }
 input, select, textarea { background-color: white; border: 1px solid #767676; }
-input { padding: 2px 3px; border-radius: 2px; width: 13.275em; }
+input { padding: 2px 3px; border-radius: 2px; -pdfpecker-control-width: 13.275em; }
 input[type=hidden], input[type=image], input[type=file], input[type=range], input[type=color] { display: none; }
 input[type=checkbox], input[type=radio] { width: 13px; height: 13px; padding: 0; box-sizing: border-box; }
 input[type=checkbox] { margin: 3px 3px 3px 4px; border-radius: 2px; }
 input[type=radio] { margin: 3px 3px 0 5px; border-radius: 50%; }
 input[type=submit], input[type=reset], input[type=button], button {
-  width: auto; padding: 2px 7px; border: 1px solid #767676; border-radius: 3px; background-color: #efefef; text-align: center; box-sizing: border-box;
+  -pdfpecker-control-width: auto; padding: 2px 7px; border: 1px solid #767676; border-radius: 3px; background-color: #efefef; text-align: center; box-sizing: border-box;
 }
-textarea { font-family: monospace; padding: 2px; width: 13.275em; border-radius: 2px; }
+textarea { font-family: monospace; padding: 2px; -pdfpecker-control-width: 13.275em; border-radius: 2px; }
 select { padding: 0; border-radius: 2px; box-sizing: border-box; }
 input[disabled], textarea[disabled], select[disabled], button[disabled] { color: #6d6d6d; border-color: #c3c3c3; }
 pdf-field-value { display: block; white-space: pre; }
