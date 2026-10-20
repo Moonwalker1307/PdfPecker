@@ -139,18 +139,35 @@ internal sealed class LayerOp : GroupOp
     /// its other ops, the background, are painted through.
     /// </summary>
     public bool TextClip;
+    /// <summary>
+    /// mask-image: the layers of the layer's mask, topmost first. The layer is painted as one group whose alpha the
+    /// mask multiplies; where no mask layer paints, nothing of it shows.
+    /// </summary>
+    public MaskLayerOps[]? Mask;
+    /// <summary>
+    /// backdrop-filter: the filter run on the pixels of what is painted behind the layer inside its border box
+    /// (<see cref="BackdropX"/>, <see cref="BackdropY"/>, <see cref="BackdropW"/>, <see cref="BackdropH"/>, with its rounded
+    /// corners), drawn under the layer's content.
+    /// </summary>
+    public SvgFilter? Backdrop;
+    public float BackdropX, BackdropY, BackdropW, BackdropH;
+    public CornerRadii? BackdropRadii;
 
-    /// <summary>Whether the layer is drawn as a block of its own: transformed, translucent, blended, clipped, filtered, a mask or clipped to text.</summary>
+    /// <summary>
+    /// Whether the layer is drawn as a block of its own: transformed, translucent, blended, clipped, masked, filtered, a
+    /// mask, clipped to text or over a filtered backdrop.
+    /// </summary>
     public bool NeedsBlock => Transform != null || Opacity < 1 || BlendMode != null || Isolated || ClipVerbs != null || Raster != null || MaskFill != null
-                              || TextClip;
+                              || TextClip || Mask != null || Backdrop != null;
 
     /// <summary>Whether the layer is painted as one transparency group.</summary>
-    public bool NeedsGroup => Opacity < 1 || BlendMode != null || Isolated;
+    public bool NeedsGroup => Opacity < 1 || BlendMode != null || Isolated || Mask != null;
 
     protected override void OwnArrays()
     {
         base.OwnArrays();
         ClipPoints = (float[]?)ClipPoints?.Clone();
+        if (Mask != null) Mask = Array.ConvertAll(Mask, m => m.Copy());
     }
 
     public override void Offset(float dx, float dy)
@@ -158,6 +175,11 @@ internal sealed class LayerOp : GroupOp
         base.Offset(dx, dy);
         OriginX += dx;
         OriginY += dy;
+        BackdropX += dx;
+        BackdropY += dy;
+        if (Mask != null)
+            foreach (var m in Mask)
+                foreach (var op in m.Ops) op.Offset(dx, dy);
         if (ClipPoints == null) return;
         for (int i = 0; i + 1 < ClipPoints.Length; i += 2)
         {
@@ -201,4 +223,18 @@ internal sealed class LayerOp : GroupOp
             return byOrder != 0 ? byOrder : Index.CompareTo(other.Index);
         }
     }
+}
+
+/// <summary>One mask-image layer of a <see cref="LayerOp.Mask"/>: what it paints, and how that becomes mask values.</summary>
+internal sealed class MaskLayerOps
+{
+    /// <summary>The layer's image, gradient or SVG mask, painted as a background layer is.</summary>
+    public List<DrawOp> Ops = new(1);
+    /// <summary>The mask values are the painted colours' luminance times their alpha; otherwise their alpha.</summary>
+    public bool Luminance;
+    /// <summary>How the layer combines with the mask made by the layers below it.</summary>
+    public Css.MaskComposite Composite;
+
+    /// <summary>A copy whose ops can be moved on their own.</summary>
+    public MaskLayerOps Copy() => new() { Ops = Ops.ConvertAll(op => op.Copy()), Luminance = Luminance, Composite = Composite };
 }

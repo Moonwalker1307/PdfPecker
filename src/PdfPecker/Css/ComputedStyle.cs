@@ -370,6 +370,15 @@ internal sealed class ComputedStyle
     public bool Isolate;                        // isolation: isolate
     public bool BoxDecorationClone;             // box-decoration-break: clone (else slice)
     public FilterFunction[]? Filters;           // filter functions on HTML elements; null = none
+    public FilterFunction[]? BackdropFilters;   // backdrop-filter functions; null = none
+    // Mask layers on HTML elements, topmost first, repeated like the background lists; null MaskImages is mask-image: none.
+    public BackgroundImage?[]? MaskImages;      // null entries are "none" layers
+    public (BackgroundRepeat X, BackgroundRepeat Y)[]? MaskRepeats;
+    public BackgroundOffset[]? MaskPositionsX, MaskPositionsY;
+    public BackgroundSize[]? MaskSizes;
+    public BackgroundBox[]? MaskOrigins, MaskClips; // null = border-box
+    public MaskMode[]? MaskModes;
+    public MaskComposite[]? MaskComposites;
     public Length MarginTop = Length.Zero, MarginRight = Length.Zero, MarginBottom = Length.Zero, MarginLeft = Length.Zero;
     public Length PaddingTop = Length.Zero, PaddingRight = Length.Zero, PaddingBottom = Length.Zero, PaddingLeft = Length.Zero;
     public float BorderTopWidth = 1.5f, BorderRightWidth = 1.5f, BorderBottomWidth = 1.5f, BorderLeftWidth = 1.5f; // medium = 3px
@@ -574,8 +583,9 @@ internal sealed class ComputedStyle
     /// <summary>Painted in the positioned layer: positioned, transformed or translucent.</summary>
     public bool Layered => Position != Position.Static || Transform != null || Perspective != null || Opacity < 1 || HasEffects;
 
-    /// <summary>Clipped, blended, isolated or filtered: painted as a layer of its own, which is a stacking context.</summary>
-    public bool HasEffects => ClipShape != null || SvgClipPath != null || BlendMode != null || Isolate || Filters != null;
+    /// <summary>Clipped, masked, blended, isolated or filtered: painted as a layer of its own, which is a stacking context.</summary>
+    public bool HasEffects => ClipShape != null || SvgClipPath != null || BlendMode != null || Isolate || Filters != null || MaskImages != null
+                              || BackdropFilters != null;
 
     /// <summary>
     /// The quarter turn, in degrees clockwise, that turns horizontal layout into this box's writing mode: 90 for the
@@ -614,6 +624,14 @@ internal sealed class ComputedStyle
         c.Isolate = false;
         c.BoxDecorationClone = false;
         c.Filters = null;
+        c.BackdropFilters = null;
+        c.MaskImages = null;
+        c.MaskRepeats = null;
+        c.MaskPositionsX = c.MaskPositionsY = null;
+        c.MaskSizes = null;
+        c.MaskOrigins = c.MaskClips = null;
+        c.MaskModes = null;
+        c.MaskComposites = null;
         c.MarginTop = c.MarginRight = c.MarginBottom = c.MarginLeft = Length.Zero;
         c.PaddingTop = c.PaddingRight = c.PaddingBottom = c.PaddingLeft = Length.Zero;
         c.BorderTopWidth = c.BorderRightWidth = c.BorderBottomWidth = c.BorderLeftWidth = 1.5f;

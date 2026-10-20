@@ -163,6 +163,8 @@ internal sealed partial class LayoutEngine
     private void FinishLayered(Element e, int opsStart, float cbW)
     {
         var s = e.Style;
+        // A box with a backdrop filter changes what is behind it even when it paints nothing itself.
+        if (_ops.Count == opsStart && s.BackdropFilters != null && _lastBoxW > 0 && _lastBoxH > 0) _ops.Add(new GroupOp());
         if (_ops.Count == opsStart) return;
         if (s.Position == Position.Relative)
         {
