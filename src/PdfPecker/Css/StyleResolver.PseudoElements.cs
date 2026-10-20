@@ -34,7 +34,7 @@ internal sealed partial class StyleResolver
         if (_author.PseudoElements is { } author) Collect(author, host, TierAuthor, TierAuthorImportant, which);
         if (_count == 0) return null;
         for (int i = 0; i < _registeredEach.Count; i++) Push(TierUa, 0, 0, i, _registeredEach[i]);
-        if (_count > 1) Array.Sort(_keys, _decls, 0, _count);
+        SortDeclarations();
         return Compute(name, host.Style);
     }
 
@@ -65,7 +65,7 @@ internal sealed partial class StyleResolver
         if (_author.PseudoElements is { } author) Collect(author, host, TierAuthor, TierAuthorImportant, which);
         if (_count == 0) return;
         for (int i = 0; i < _registeredEach.Count; i++) Push(TierUa, 0, 0, i, _registeredEach[i]);
-        if (_count > 1) Array.Sort(_keys, _decls, 0, _count);
+        SortDeclarations();
         var s = Compute(host.Name, host.Style);
         if (s.Content == null || s.Display == Display.None) return;
         if (s.CounterReset != null || s.CounterSet != null || s.CounterIncrement != null) { _countersUsed = true; ApplyCounters(s, ref scope); }
@@ -97,7 +97,7 @@ internal sealed partial class StyleResolver
         }
         var (owner, index, start, length) = found;
         var node = (TextNode)owner.Children[index];
-        if (_count > 1) Array.Sort(_keys, _decls, 0, _count);
+        SortDeclarations();
         // The first letter is inside the first line, so it inherits the ::first-line style.
         var parentStyle = owner.Style;
         for (var a = owner; a != null; a = a == host ? null : a.Parent)
@@ -167,7 +167,7 @@ internal sealed partial class StyleResolver
         if (UaIndex.Value.PseudoElements is { } ua) Collect(ua, host, TierUa, TierUaImportant, PseudoElement.FirstLine);
         if (_author.PseudoElements is { } author) Collect(author, host, TierAuthor, TierAuthorImportant, PseudoElement.FirstLine);
         if (_count == 0) return;
-        if (_count > 1) Array.Sort(_keys, _decls, 0, _count);
+        SortDeclarations();
         var line = Compute("::first-line", host.Style);
         var target = host;
         while (FirstBlockChild(target) is { } inner) target = inner;
@@ -204,7 +204,7 @@ internal sealed partial class StyleResolver
         if (UaIndex.Value.PseudoElements is { } ua) Collect(ua, e, TierUa, TierUaImportant, PseudoElement.Marker);
         if (_author.PseudoElements is { } author) Collect(author, e, TierAuthor, TierAuthorImportant, PseudoElement.Marker);
         if (_count == 0) { e.MarkerStyle = null; e.MarkerContent = null; return; }
-        if (_count > 1) Array.Sort(_keys, _decls, 0, _count);
+        SortDeclarations();
         var s = Compute("::marker", e.Style);
         e.MarkerStyle = s;
         e.MarkerContent = s.Content != null ? GeneratedContent.Evaluate(s.Content, e, this) : null;

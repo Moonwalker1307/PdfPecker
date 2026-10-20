@@ -40,7 +40,7 @@ internal sealed partial class StyleResolver
         }
         StyledControlFallback(e, authorStart);
 
-        if (_count > 1) Array.Sort(_keys, _decls, 0, _count);
+        SortDeclarations();
         e.Style = Compute(e.Name, parent);
         if (e.Style.Contents) e.Style = ContentsStyle(e.Name, e.Style, parent);
         if (e.AltText != null && e.Style.Display == Display.Inline) e.Style = AltTextBox(e.Style);
@@ -259,6 +259,21 @@ internal sealed partial class StyleResolver
     }
 
     private const int UnlayeredRank = Stylesheet.MaxLayerRank + 1;
+
+    /// <summary>
+    /// Puts the declarations in the working buffer into cascade order. They are usually collected in that order already,
+    /// and sorting them anyway cost a style sheet of many rules that all match an element most of the conversion. A
+    /// buffer whose keys already rise strictly is the order a sort would give, so it is left as it is.
+    /// </summary>
+    private void SortDeclarations()
+    {
+        for (int i = 1; i < _count; i++)
+            if (_keys[i - 1] >= _keys[i])
+            {
+                Array.Sort(_keys, _decls, 0, _count);
+                return;
+            }
+    }
 
     private void Push(long tier, int specificity, int order, int declIndex, Declaration d, int layer = 0)
     {
