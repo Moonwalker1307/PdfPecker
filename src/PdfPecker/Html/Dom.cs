@@ -75,6 +75,18 @@ internal sealed class Element : Node
     public Layout.FormControl? Control;
 
     /// <summary>
+    /// For an img element whose picture is missing or cannot be decoded and that has alt text: that text, which is also
+    /// its only child. Such an img is laid out as an ordinary box around the text, as browsers do, not as a replaced one.
+    /// </summary>
+    public string? AltText;
+
+    /// <summary>An img element that shows a picture (not its alt text).</summary>
+    public bool IsPicture => AltText == null && Name == "img";
+
+    /// <summary>An element drawn as a picture or drawing that CSS sizes from its intrinsic size: a picture or an inline svg.</summary>
+    public bool IsReplaced => AltText == null && Name is "img" or "svg";
+
+    /// <summary>
     /// For a query container: the size of its content box at its last layout, in points, or NaN before it was laid
     /// out. Container queries and cq units of the next style pass read it.
     /// </summary>

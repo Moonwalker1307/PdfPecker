@@ -120,6 +120,7 @@ public static partial class HtmlToPdf
                 embedStandard: _options.EmbedStandardFonts || _settings.Conformance != PdfConformance.None || _settings.IsPdfUA,
                 systemFonts: _options.UseSystemFonts, report: _missingFonts);
             _images.Fonts = _fonts;
+            if (_html.Contains("<img", StringComparison.OrdinalIgnoreCase)) MissingImageText.Prepare(_doc, _images);
             _paged = new PagedContent();
             if (!_options.IgnoreCssPageRules) _paged.FootnotePageReset = FootnotePageReset(_sheet.PageRules);
             // hyphens: auto: the language of the text is its nearest lang attribute, else PdfOptions.Language.

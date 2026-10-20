@@ -1132,12 +1132,12 @@ internal sealed partial class LayoutEngine
             _intrinsicCache[e] = result;
             return result;
         }
-        if (e.Name is "img" or "svg")
+        if (e.IsReplaced)
         {
             bool saved = _measuring;
             _measuring = true;
             float w;
-            if (e.Name == "img") ImageSize(e, 100000, out w, out _);
+            if (e.IsPicture) ImageSize(e, 100000, out w, out _);
             else SvgSize(e, 100000, out w, out _);
             _measuring = saved;
             result = s.Width.IsPercent ? (0, w + frame) : (w + frame, w + frame);
@@ -1170,18 +1170,18 @@ internal sealed partial class LayoutEngine
             var (mn, mx) = ContentIntrinsic(e);
             result = (mn + frame, mx + frame);
         }
-        if (!s.Width.IsAuto && !s.Width.IsPercent && e.Name is not ("img" or "svg"))
+        if (!s.Width.IsAuto && !s.Width.IsPercent && !e.IsReplaced)
         {
             float w = s.Width.Value + (s.BorderBox ? 0 : frame);
             result = (Math.Max(w, s.Display == Display.Table ? result.Item1 : 0), Math.Max(w, s.Display == Display.Table ? result.Item1 : 0));
         }
-        else if (s.WidthKeyword is SizeKeyword.MinContent or SizeKeyword.MaxContent && e.Name is not ("img" or "svg"))
+        else if (s.WidthKeyword is SizeKeyword.MinContent or SizeKeyword.MaxContent && !e.IsReplaced)
         {
             // A box as wide as its min-content (or max-content) width contributes that width for both.
             float w = s.WidthKeyword == SizeKeyword.MinContent ? result.Item1 : result.Item2;
             result = (w, w);
         }
-        else if (s.Width.IsAuto && s.AspectRatio > 0 && e.Name is not ("img" or "svg"))
+        else if (s.Width.IsAuto && s.AspectRatio > 0 && !e.IsReplaced)
         {
             float frameV = s.PaddingTop.Resolve(0) + s.PaddingBottom.Resolve(0) + s.BorderTop + s.BorderBottom;
             bool table = s.Display == Display.Table;

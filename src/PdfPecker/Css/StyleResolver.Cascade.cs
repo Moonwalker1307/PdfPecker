@@ -43,7 +43,21 @@ internal sealed partial class StyleResolver
         if (_count > 1) Array.Sort(_keys, _decls, 0, _count);
         e.Style = Compute(e.Name, parent);
         if (e.Style.Contents) e.Style = ContentsStyle(e.Name, e.Style, parent);
+        if (e.AltText != null && e.Style.Display == Display.Inline) e.Style = AltTextBox(e.Style);
         if (e.Style.CounterReset != null || e.Style.CounterSet != null || e.Style.CounterIncrement != null) _countersUsed = true;
+    }
+
+    /// <summary>
+    /// The style of an img that shows its alt text and is inline: as in Chrome, its alt text is one box that takes the room
+    /// its text needs, whatever width and height the image was given. A block or inline-block img keeps its size.
+    /// </summary>
+    private static ComputedStyle AltTextBox(ComputedStyle s)
+    {
+        var c = s.Clone();
+        c.Display = Display.InlineBlock;
+        c.Width = c.Height = Length.Auto;
+        c.WidthKeyword = SizeKeyword.None;
+        return c;
     }
 
     private void PushRegistered(Element e)

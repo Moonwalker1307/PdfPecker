@@ -23,7 +23,7 @@ internal sealed partial class LayoutEngine
         public bool RowFixed, ColFixed;
 
         public float OuterMain => Main + Ml + Mr;
-        public bool IsReplaced => El != null && El.Name is "img" or "svg";
+        public bool IsReplaced => El != null && El.IsReplaced;
     }
 
     private readonly Dictionary<ComputedStyle, ComputedStyle> _anonStyles = new();
