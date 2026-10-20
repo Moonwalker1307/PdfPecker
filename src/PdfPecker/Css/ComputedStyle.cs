@@ -122,7 +122,7 @@ internal enum UnicodeBidi : byte { Normal, Embed, Isolate, BidiOverride, Isolate
 /// <summary>Values of writing-mode. The vertical modes are laid out as horizontal text turned a quarter turn.</summary>
 internal enum WritingMode : byte { HorizontalTb, VerticalRl, VerticalLr, SidewaysRl, SidewaysLr }
 internal enum WhiteSpace : byte { Normal, NoWrap, Pre, PreWrap, PreLine }
-internal enum VerticalAlign : byte { Baseline, Sub, Super, Top, Middle, Bottom, TextTop, TextBottom }
+internal enum VerticalAlign : byte { Baseline, Sub, Super, Top, Middle, Bottom, TextTop, TextBottom, Length }
 internal enum OverflowWrap : byte { Normal, BreakWord, Anywhere }
 internal enum Overflow : byte { Visible, Clip, Hidden } // Hidden also stands for auto and scroll, which clip alike on paper
 internal enum WordBreak : byte { Normal, BreakAll, KeepAll }
@@ -389,6 +389,7 @@ internal sealed class ComputedStyle
     public Length MinWidth = Length.Auto, MaxWidth = Length.Auto, MinHeight = Length.Zero, MaxHeight = Length.Auto;
     public bool BorderBox;
     public VerticalAlign VerticalAlign;
+    public Length VerticalAlignLength = Length.Zero; // the raise of vertical-align: <length-percentage>
     public bool PageBreakBefore, PageBreakAfter, AvoidBreakInside;
     public bool AvoidBreakBefore, AvoidBreakAfter; // break-before/after: avoid (keep with the next or previous box)
     public bool ColumnBreakBefore, ColumnBreakAfter; // break-before/after: column, which only breaks inside a multicol
