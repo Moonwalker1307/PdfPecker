@@ -434,6 +434,34 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Stretched_grid_items_reuse_the_measurements_inside_them()
+    {
+        // Found by the fuzzer: target html, timeout-d2edd0b0. A grid item stretched to a taller row is laid out again at
+        // that height, and the grids inside it measured all their items again instead of taking what they measured
+        // the first time, so each level of nested grids multiplied the work: 16 levels allocated 1.7 GB.
+        var html = new StringBuilder("<style>.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2pt }</style><div style='height:700pt'></div>");
+        for (int i = 0; i < 16; i++) html.Append("<div class=grid><div style='height:").Append(280 - 5 * i).Append("pt'></div>");
+        var (pdf, allocated) = Allocating(() => Bounded(html.ToString()));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 200L << 20);
+    }
+
+    [Fact]
+    public void Grids_far_above_the_first_page_are_not_stretched_by_rounding()
+    {
+        // Found by the fuzzer: target html, timeout-d2edd0b0. A heading with a margin of -1e6pt puts what follows a
+        // million points above the page, where a float keeps only an eighth of a point. The grid areas' heights came
+        // out a little apart from their items', so every item of 400 nested grids was stretched and laid out again:
+        // 24 GB and 45 s.
+        var html = "<style>h1 { margin: -1e6pt 0 6pt } .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6mm }"
+                   + " figure { margin: 0; border: 0.5pt solid #ccc; padding: 4pt }</style><h1>T</h1>"
+                   + Repeat("<div class=grid><figure><figcaption>terns</h1>", 3) + Repeat("<div class=grid>", 400);
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 200L << 20);
+    }
+
+    [Fact]
     public void Nested_inline_blocks_wider_than_the_measuring_width_are_measured_once()
     {
         // Found by the fuzzer: target html, timeout-b4187992. Text in 250 nested inline-blocks is wider than the
