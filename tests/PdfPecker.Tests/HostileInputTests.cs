@@ -404,6 +404,20 @@ public class HostileInputTests
         AssertStructurallyValid(pdf);
     }
 
+    [Fact]
+    public void Nested_display_contents_stays_bounded()
+    {
+        // Each display: contents element is looked through to its children, and inline-only ones are checked to the
+        // bottom: nesting them as deep as the parser allows, in flex, grid, tables and text, with thousands of
+        // children, must stay cheap.
+        var html = "<div style='display:flex'>" + Repeat("<div style='display:contents'><b>x</b>", 300) + "</div>"
+                   + "<div style='display:grid'>" + Repeat("<span style='display:contents'>", 300) + Repeat("<i>i</i>", 5000) + "</div>"
+                   + "<div style='display:table'>" + Repeat("<div style='display:contents'><div style='display:table-row'>r</div>", 300) + "</div>"
+                   + "<p>" + Repeat("<a href='#x' style='display:contents'>a", 300) + "<div>block</div></p>";
+        var pdf = Bounded(html);
+        AssertStructurallyValid(pdf);
+    }
+
     [Theory]
     // The boxes fit in the measuring width, so every level measures the ones inside it at the same width.
     [InlineData("", 50000)]

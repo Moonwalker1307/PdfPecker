@@ -48,6 +48,15 @@ internal sealed class Element : Node
     /// </summary>
     public bool Anonymous;
 
+    /// <summary>
+    /// The children of this element as the parser made them, while the style resolver has put the children of its
+    /// display: contents children in their place. The next style pass restores them.
+    /// </summary>
+    public List<Node>? DomChildren;
+
+    /// <summary>The link of the display: contents <c>a</c> element this element was taken out of, which it still links to.</summary>
+    public string? ContentsHref;
+
     /// <summary>The style of this list item's ::marker, when a rule styles it; its content replaces the marker text.</summary>
     public Css.ComputedStyle? MarkerStyle;
     public string? MarkerContent;

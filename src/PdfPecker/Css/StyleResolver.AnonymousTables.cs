@@ -29,7 +29,8 @@ internal sealed partial class StyleResolver
     private static void WrapTableParts(Element parent)
     {
         var s = parent.Style;
-        if (s == null || s.Display == Display.None || s.IsFlex || s.IsGrid || parent.Children.Count == 0) return;
+        // The table parts in a display: contents element are wrapped where they end up, in the box of its parent.
+        if (s == null || s.Display == Display.None || s.Contents || s.IsFlex || s.IsGrid || parent.Children.Count == 0) return;
         switch (s.Display)
         {
             case Display.Table:
@@ -137,7 +138,8 @@ internal sealed partial class StyleResolver
         for (int k = start; k <= end; k++)
         {
             var c = parent.Children[k];
-            c.Parent = box;
+            // Text from a display: contents element keeps it as its parent, whose style it is drawn in.
+            if (c is not TextNode { Parent.Style.Contents: true }) c.Parent = box;
             box.Children.Add(c);
         }
         parent.Children.RemoveRange(start, end - start + 1);
