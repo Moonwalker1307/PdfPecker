@@ -73,7 +73,7 @@ internal sealed partial class LayoutEngine
             _inlineFragmentCount++;
             var s = run.Deco.Style;
             var it = items[run.Start];
-            s.Font.LineMetrics(s.FontSize, out float asc, out float desc);
+            s.Font.LineMetrics(s.TextSize, out float asc, out float desc);
             float above = asc + s.PaddingTop.Resolve(0) + s.BorderTop, below = desc + s.PaddingBottom.Resolve(0) + s.BorderBottom;
             var group = new GroupOp();
             _ops.Add(group);

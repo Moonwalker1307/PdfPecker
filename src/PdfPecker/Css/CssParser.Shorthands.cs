@@ -385,7 +385,7 @@ internal static partial class CssParser
         longhands.Add("justify-" + suffix, tokens.Count > 1 ? tokens[tokens.Count - 1] : tokens[0]);
     }
 
-    /// <summary>The caps, ligature and numeric parts of font-variant; east-asian and the rest are not supported.</summary>
+    /// <summary>The caps, ligature, numeric, east-asian and position parts of font-variant; alternates are not supported.</summary>
     private static void ExpandFontVariant(string value, LonghandWriter longhands)
     {
         var lower = value.Trim().ToLowerInvariant();
@@ -394,20 +394,27 @@ internal static partial class CssParser
             longhands.Add("font-variant-caps", lower == "none" ? "normal" : lower);
             longhands.Add("font-variant-ligatures", lower);
             longhands.Add("font-variant-numeric", lower == "none" ? "normal" : lower);
+            longhands.Add("font-variant-east-asian", lower == "none" ? "normal" : lower);
+            longhands.Add("font-variant-position", lower == "none" ? "normal" : lower);
             return;
         }
-        string caps = "normal";
+        string caps = "normal", position = "normal";
         var ligatures = new List<string>();
         var numeric = new List<string>();
+        var eastAsian = new List<string>();
         foreach (var token in Tokens(lower))
         {
             if (token is "small-caps" or "all-small-caps" or "petite-caps" or "all-petite-caps" or "unicase" or "titling-caps") caps = token;
             else if (token.EndsWith("ligatures", StringComparison.Ordinal) || token.EndsWith("contextual", StringComparison.Ordinal)) ligatures.Add(token);
             else if (token.EndsWith("-nums", StringComparison.Ordinal) || token.EndsWith("-fractions", StringComparison.Ordinal) || token is "ordinal" or "slashed-zero") numeric.Add(token);
+            else if (token is "sub" or "super") position = token;
+            else if (token is "jis78" or "jis83" or "jis90" or "jis04" or "simplified" or "traditional" or "full-width" or "proportional-width" or "ruby") eastAsian.Add(token);
         }
         longhands.Add("font-variant-caps", caps);
         longhands.Add("font-variant-ligatures", ligatures.Count == 0 ? "normal" : string.Join(" ", ligatures));
         longhands.Add("font-variant-numeric", numeric.Count == 0 ? "normal" : string.Join(" ", numeric));
+        longhands.Add("font-variant-east-asian", eastAsian.Count == 0 ? "normal" : string.Join(" ", eastAsian));
+        longhands.Add("font-variant-position", position);
     }
 
     /// <summary>grid-template: none, "rows / columns", or area strings each optionally followed by a row size, then "/ columns".</summary>
@@ -545,6 +552,10 @@ internal static partial class CssParser
         longhands.Add("font-variant-caps", caps);
         longhands.Add("font-stretch", stretch);
         longhands.Add("font-variant-numeric", "normal");
+        longhands.Add("font-variant-east-asian", "normal");
+        longhands.Add("font-variant-position", "normal");
+        longhands.Add("font-kerning", "auto");
+        longhands.Add("font-size-adjust", "none");
         if (family.Length > 0 || IsCssWideKeyword(value)) longhands.Add("font-family", family);
     }
 }

@@ -27,7 +27,7 @@ internal sealed partial class LayoutEngine
     /// <summary>The decorations of a run, in their own colour or in <paramref name="shadow"/>, the colour of a text-shadow.</summary>
     private void Decorate(ComputedStyle s, float x, float w, float baseline, uint? shadow = null)
     {
-        float size = s.FontSize;
+        float size = s.TextSize;
         float thickness = s.DecorationThickness is { } dt ? Math.Max(dt.Resolve(size), MinSetThickness) : Math.Max(size * DecorationThicknessRatio, MinDecorationThickness);
         uint color = shadow ?? CssColor.Fade(s.DecorationColor ?? s.Color, s.InlineFade);
         if ((s.TextDecoration & TextDecoration.Underline) != 0)
@@ -104,7 +104,7 @@ internal sealed partial class LayoutEngine
             }
             if (blurred != null) { BlurredTextShadows(style, x, w, baseline, lineTop, text, wordSpacing, rtl, blurred); blurred = null; }
             float sx = x + sh.X, sy = baseline + sh.Y;
-            _ops.Add(new TextOp(sx, sy, lineTop, style.Font, style.FontSize, color, text, wordSpacing, style.LetterSpacing) { Rtl = rtl });
+            _ops.Add(new TextOp(sx, sy, lineTop, style.Font, style.TextSize, color, text, wordSpacing, style.LetterSpacing) { Rtl = rtl });
             if (style.TextDecoration != TextDecoration.None) Decorate(style, sx, w, sy, color);
         }
         if (blurred != null) BlurredTextShadows(style, x, w, baseline, lineTop, text, wordSpacing, rtl, blurred);
@@ -119,7 +119,7 @@ internal sealed partial class LayoutEngine
     {
         // The shadow takes its colour from the shadow alone: the text's own colour, even transparent, only gives the shape.
         var layer = new LayerOp { RasterReplaces = true, TextShadow = true };
-        layer.Ops.Add(new TextOp(x, baseline, lineTop, style.Font, style.FontSize, CssColor.Black, text, wordSpacing, style.LetterSpacing) { Rtl = rtl });
+        layer.Ops.Add(new TextOp(x, baseline, lineTop, style.Font, style.TextSize, CssColor.Black, text, wordSpacing, style.LetterSpacing) { Rtl = rtl });
         if (style.TextDecoration != TextDecoration.None)
         {
             // The decorations are drawn into the main list and moved into the layer.

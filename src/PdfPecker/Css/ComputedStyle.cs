@@ -304,6 +304,11 @@ internal sealed class ComputedStyle
     public float TextIndent;
     public float LetterSpacing;
     public bool NoLigatures; // font-variant-ligatures: none or no-common-ligatures, or font-feature-settings: "liga" 0
+    public bool NoKerning;               // font-kerning: none, or font-feature-settings: "kern" 0
+    public FontSynthesis Synthesis = FontSynthesis.All; // font-synthesis: the faces the browser may make up
+    public FontSizeAdjust SizeAdjust;    // font-size-adjust; none by default
+    public string? FontVariantEastAsian; // font-variant-east-asian keywords; null = normal
+    public string? FontVariantPosition;  // font-variant-position: sub or super; null = normal
     public string? FontVariantNumeric;   // font-variant-numeric keywords; null = normal
     public string? FontFeatureSettings;  // font-feature-settings as written; null = normal
     public float WordSpacing;
@@ -462,13 +467,27 @@ internal sealed class ComputedStyle
     {
         get
         {
-            var f = _font ??= Fonts == null ? StandardFor() : Fonts.Resolve(FontFamilyName, FontFamily, FontWeight, Italic,
-                new FontVariation(FontStretch, FontOpticalSizingNone ? 0 : FontSize / 0.75f, FontVariationSettings));
-            if ((FontVariantNumeric != null || FontFeatureSettings != null) && FontFeatures.Key(FontVariantNumeric, FontFeatureSettings) is { } features)
+            var f = BaseFont;
+            if ((FontVariantNumeric != null || FontFeatureSettings != null || FontVariantEastAsian != null || FontVariantPosition != null || SmallCaps != 0)
+                && FontFeatures.Key(FontVariantNumeric, FontFeatureSettings, FontVariantEastAsian, FontVariantPosition, SmallCaps) is { } features)
                 f = f.WithFeatures(features);
+            if (NoKerning) f = f.WithoutKerning();
             return NoLigatures || LetterSpacing != 0 ? f.WithoutLigatures() : f;
         }
     }
+
+    // The font before OpenType features, ligatures and kerning are applied.
+    private TextFont BaseFont => _font ??= Fonts == null ? StandardFor() : Fonts.Resolve(FontFamilyName, FontFamily, FontWeight, Italic,
+        new FontVariation(FontStretch, FontOpticalSizingNone ? 0 : FontSize / 0.75f, FontVariationSettings, Synthesis & (FontSynthesis.Weight | FontSynthesis.Style)));
+
+    /// <summary>
+    /// Whether font-variant-caps takes the font's own small capitals (smcp, and c2sc for all-small-caps), as browsers do
+    /// when the font has them.
+    /// </summary>
+    public bool HasRealSmallCaps => SmallCaps != 0 && BaseFont.Supports("smcp") && (SmallCaps != 2 || BaseFont.Supports("c2sc"));
+
+    /// <summary>Whether font-variant-caps makes small capitals from smaller capitals: the font has none and font-synthesis allows it.</summary>
+    public bool SynthesizesSmallCaps => SmallCaps != 0 && (Synthesis & FontSynthesis.SmallCaps) != 0 && !HasRealSmallCaps;
 
     private StandardFont StandardFor()
     {
@@ -480,6 +499,9 @@ internal sealed class ComputedStyle
     public StandardFont StandardFont => StandardFont.Get(FontFamily, Bold, Italic);
 
     public void InvalidateFont() => _font = null;
+
+    /// <summary>The size glyphs are drawn and measured at: the font size, changed by font-size-adjust when it is set.</summary>
+    public float TextSize => SizeAdjust.IsNone ? FontSize : SizeAdjust.Apply(FontSize, Font);
 
     /// <summary>
     /// The used line height. A huge value is capped (as Chrome caps its layout units) so that sums of line heights stay
@@ -495,7 +517,7 @@ internal sealed class ComputedStyle
         {
             LineHeightKind.Factor => FactorLineHeight(LineHeightValue, FontSize),
             LineHeightKind.Absolute => MathF.Round(LineHeightValue * LayoutUnitsPerPoint, MidpointRounding.AwayFromZero) / LayoutUnitsPerPoint,
-            _ => Font.NormalLineHeight(FontSize),
+            _ => Font.NormalLineHeight(TextSize),
         });
 
     // Chrome's layout unit is 1/64 of a CSS pixel, which is 3/4 of a point.

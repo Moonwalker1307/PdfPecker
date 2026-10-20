@@ -10,6 +10,19 @@ internal sealed class StandardFont : TextFont
     private readonly short[] _widths;
     private readonly Dictionary<int, short>? _kerning; // left << 8 | right (WinAnsi codes) -> 1/1000 em
 
+    private StandardFont? _withoutKerning;
+
+    // The same font with its kerning pairs dropped. It keeps the index, so the writer shows it as the same PDF font.
+    private StandardFont(StandardFont font)
+    {
+        BaseFont = font.BaseFont;
+        Index = font.Index;
+        _widths = font._widths;
+        Ascent = font.Ascent;
+        Descent = font.Descent;
+        LineGap = font.LineGap;
+    }
+
     private StandardFont(string baseFont, int index, short[] widths)
     {
         BaseFont = baseFont;
@@ -71,6 +84,23 @@ internal sealed class StandardFont : TextFont
     }
 
     public override bool HasKerning => _kerning != null;
+
+    public override TextFont WithoutKerning() => _kerning == null ? this : _withoutKerning ??= new StandardFont(this);
+
+    // The AFM x-height and cap height of the family, which are close to the Liberation fonts browsers draw them with.
+    public override float Metric(FontMetric metric) => (Index / 4, metric) switch
+    {
+        (0, FontMetric.XHeight) => 0.523f,
+        (0, FontMetric.CapHeight) => 0.718f,
+        (1, FontMetric.XHeight) => 0.450f,
+        (1, FontMetric.CapHeight) => 0.662f,
+        (_, FontMetric.XHeight) => 0.426f,
+        (_, FontMetric.CapHeight) => 0.562f,
+        (0, FontMetric.ZeroWidth) => 0.556f,
+        (1, FontMetric.ZeroWidth) => 0.5f,
+        (_, FontMetric.ZeroWidth) => 0.6f,
+        _ => 0,
+    };
 
     // Kerned like the Liberation font that browsers use in its place.
     public override int KernUnits(int left, int right)
