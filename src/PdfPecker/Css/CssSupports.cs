@@ -23,7 +23,7 @@ internal static class CssSupports
         "break-before", "break-after", "break-inside", "page-break-before", "page-break-after", "page-break-inside",
         "orphans", "widows", "margin", "margin-top", "margin-right", "margin-bottom", "margin-left", "padding", "padding-top",
         "padding-right", "padding-bottom", "padding-left", "width", "height", "min-width", "min-height", "max-width",
-        "max-height", "opacity", "outline", "outline-style", "outline-width", "outline-color", "outline-offset", "text-shadow", "-webkit-text-stroke", "-webkit-text-stroke-width", "-webkit-text-stroke-color", "paint-order",
+        "max-height", "opacity", "outline", "outline-style", "outline-width", "outline-color", "outline-offset", "text-shadow", "-webkit-text-stroke", "-webkit-text-fill-color", "-webkit-text-stroke-width", "-webkit-text-stroke-color", "paint-order",
         "text-overflow", "object-fit", "object-position", "aspect-ratio", "flex", "flex-flow", "flex-direction", "flex-wrap",
         "flex-grow", "flex-shrink", "flex-basis", "order", "justify-content", "align-items", "align-content", "justify-items",
         "align-self", "justify-self", "place-content", "place-items", "place-self", "gap", "row-gap", "column-gap", "grid-gap",

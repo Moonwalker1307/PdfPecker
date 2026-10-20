@@ -75,13 +75,22 @@ internal sealed partial class PdfDocumentWriter
     /// </summary>
     private void WriteTextLine(ByteBuffer b, TextOp t, float x, float y)
     {
+        if (!(t.StrokeWidth > 0))
+        {
+            WriteTextRuns(b, t, x, y, FillAndStroke);
+            return;
+        }
+        // Chrome bevels the sharp corners of an outline beyond a miter limit of 4 (PDF's default is 10), which keeps
+        // acute glyph corners from growing spikes; the default is put back for the lines drawn after the text.
+        b.Ascii("4 M\n");
         // paint-order: stroke draws the outline first and the fill over it.
-        if (t.StrokeWidth > 0 && t.StrokeFirst)
+        if (t.StrokeFirst)
         {
             WriteTextRuns(b, t, x, y, StrokeOnly);
             WriteTextRuns(b, t, x, y, FillOnly);
         }
         else WriteTextRuns(b, t, x, y, FillAndStroke);
+        b.Ascii("10 M\n");
     }
 
     private const int FillAndStroke = 0, StrokeOnly = 1, FillOnly = 2;

@@ -413,7 +413,7 @@ internal sealed partial class LayoutEngine
             string text = sb.ToString();
             float wordSpacing = style.WordSpacing + spaceExtra;
             if (style.TextShadows != null) TextShadows(style, runX, runEnd - runX, bl, lineTop, text, wordSpacing, rtlRun);
-            _ops.Add(new TextOp(runX, bl, lineTop, style.Font, style.TextSize, CssColor.Fade(style.Color, style.InlineFade), text,
+            _ops.Add(new TextOp(runX, bl, lineTop, style.Font, style.TextSize, CssColor.Fade(style.TextFillColor ?? style.Color, style.InlineFade), text,
                 wordSpacing, style.LetterSpacing) { Tag = first.Tag, Rtl = rtlRun }.WithStroke(style));
             if (style.TextDecoration != TextDecoration.None) Decorate(style, runX, runEnd - runX, bl);
         }
@@ -438,7 +438,7 @@ internal sealed partial class LayoutEngine
         int count = (int)Math.Min(copies, Math.Min(MaxLeaderCopies, Math.Ceiling(MaxLeaderLength / pw)));
         var text = new StringBuilder(pattern.Length * count);
         for (int k = 0; k < count; k++) text.Append(pattern);
-        _ops.Add(new TextOp(start, baseline, lineTop, style.Font, style.TextSize, CssColor.Fade(style.Color, style.InlineFade), text.ToString(),
+        _ops.Add(new TextOp(start, baseline, lineTop, style.Font, style.TextSize, CssColor.Fade(style.TextFillColor ?? style.Color, style.InlineFade), text.ToString(),
             style.WordSpacing, style.LetterSpacing) { Tag = it.Tag }.WithStroke(style));
     }
 

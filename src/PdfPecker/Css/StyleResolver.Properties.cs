@@ -248,6 +248,7 @@ internal sealed partial class StyleResolver
             case "outline-offset": ApplyOutlineOffset(s, in d); break;
             case "box-shadow": ApplyBoxShadow(s, parent, in d); break;
             case "text-shadow": ApplyTextShadow(s, parent, in d); break;
+            case "-webkit-text-fill-color": ApplyTextFillColor(s, parent, in d); break;
             case "-webkit-text-stroke-width": ApplyTextStrokeWidth(s, parent, in d); break;
             case "-webkit-text-stroke-color": ApplyTextStrokeColor(s, parent, in d); break;
             case "paint-order": ApplyPaintOrder(s, parent, in d); break;

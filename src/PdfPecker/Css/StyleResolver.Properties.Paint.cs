@@ -117,6 +117,13 @@ internal sealed partial class StyleResolver
         else if (TryParseLength(d.Lower, d.Em, _rootFontSize, out var w, _vw, _vh) && !w.IsAuto && !w.IsPercent && w.Value >= 0) s.TextStrokeWidth = w.Value;
     }
 
+    private static void ApplyTextFillColor(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit) s.TextFillColor = parent.TextFillColor;
+        else if (d.Lower is "currentcolor" or "initial") s.TextFillColor = null;
+        else if (CssColor.TryParse(d.Value, s.Color, out var c)) s.TextFillColor = c;
+    }
+
     private static void ApplyTextStrokeColor(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
         if (d.Inherit) s.TextStrokeColor = parent.TextStrokeColor;

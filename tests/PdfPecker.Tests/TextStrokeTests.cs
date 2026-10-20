@@ -62,4 +62,13 @@ public class TextStrokeTests
         var under = Count(Render("red", stroke + "paint-order:stroke;"), Red);
         Assert.True(under > over + 1_000, $"Fill pixels with paint-order stroke {under}, default {over}");
     }
+
+    [Fact]
+    public void Text_fill_color_replaces_the_fill_and_leaves_the_stroke_on_a_transparent_glyph()
+    {
+        var hollow = Render("red", "-webkit-text-fill-color:transparent;-webkit-text-stroke:2px blue;");
+        Assert.Equal(0, Count(hollow, Red));
+        Assert.True(Count(hollow, Blue) > 500);
+        Assert.True(Count(Render("black", "-webkit-text-fill-color:red;"), Red) > 3_000);
+    }
 }
