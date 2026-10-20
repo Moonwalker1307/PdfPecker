@@ -158,6 +158,7 @@ internal sealed partial class StyleResolver
             case "line-height": s.LineHeightKind = from.LineHeightKind; s.LineHeightValue = from.LineHeightValue; break;
             case "text-align": s.TextAlign = from.TextAlign; s.BlockAlign = from.BlockAlign; break;
             case "text-indent": s.TextIndent = from.TextIndent; break;
+            case "text-justify": s.TextJustify = from.TextJustify; break;
             case "text-transform": s.TextTransform = from.TextTransform; break;
             case "letter-spacing": s.LetterSpacing = from.LetterSpacing; break;
             case "word-spacing": s.WordSpacing = from.WordSpacing; break;

@@ -106,6 +106,16 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Justifying_long_lines_between_characters_stays_fast()
+    {
+        // Letters with combining marks cannot be spaced out with letter spacing: each becomes a piece of its own.
+        string word = Repeat("e\u0301", 20_000);
+        var pdf = Bounded("<style>p { text-align: justify; text-justify: inter-character; width: 300pt }</style>"
+            + "<p>" + word + " " + word + " x</p><p>" + Repeat("漢字 ", 20_000) + "</p>");
+        Assert.NotEmpty(pdf);
+    }
+
+    [Fact]
     public void Custom_property_expansion_is_capped()
     {
         // Each variable uses the previous one four times: 4^40 characters if expanded.

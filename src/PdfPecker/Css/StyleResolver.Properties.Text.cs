@@ -165,6 +165,17 @@ internal sealed partial class StyleResolver
             _ => s.TextAlignLast,
         };
 
+    private static void ApplyTextJustify(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+        => s.TextJustify = d.Lower switch
+        {
+            "auto" => TextJustify.Auto,
+            "none" => TextJustify.None,
+            "inter-word" => TextJustify.InterWord,
+            "inter-character" or "distribute" => TextJustify.InterCharacter,
+            "inherit" => parent.TextJustify,
+            _ => s.TextJustify,
+        };
+
     private void ApplyTextIndent(ComputedStyle s, in DeclaredValue d)
     {
         if (TryParseLength(d.Lower, d.Em, _rootFontSize, out var ti, _vw, _vh)) s.TextIndent = ti.IsPercent ? 0 : ti.Resolve(0);
