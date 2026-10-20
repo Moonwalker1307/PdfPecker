@@ -238,7 +238,9 @@ public class GoldenPdfTests
             z.CopyTo(ms);
             return ms.ToArray();
         }
-        catch (InvalidDataException)
+        // Encrypted stream data is random, and zlib reports some random headers as an IOException rather than as
+        // invalid data; either way the bytes are compared as they are.
+        catch (Exception e) when (e is InvalidDataException or IOException)
         {
             return data;
         }
