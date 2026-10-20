@@ -199,7 +199,7 @@ internal sealed partial class StyleResolver
 
     // True when the first strong character of the element's text is right to left; descendants with their own dir
     // attribute, and script and style elements, are skipped.
-    private static bool FirstStrongDirection(Element e)
+    internal static bool FirstStrongDirection(Element e)
     {
         foreach (var c in e.Children)
         {

@@ -10,9 +10,12 @@ public class Css3Tests
 {
     private const float Width = 500, PageHeight = 800;
 
-    private static Element Styled(string html, float width = Width)
+    private static void FormPrep(Element doc) => FormControls.Prepare(doc, interactive: false);
+
+    private static Element Styled(string html, float width = Width, Action<Element>? prepare = null)
     {
         var doc = HtmlParser.Parse(html);
+        prepare?.Invoke(doc);
         var sheet = new Stylesheet();
         foreach (var style in Find(doc, "style")) CssParser.ParseStylesheet(style.InnerText(), sheet);
         new StyleResolver(sheet, width, PageHeight).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
@@ -448,5 +451,59 @@ public class Css3Tests
         Assert.NotEqual(Blue, ColorOf(doc, "leg"));
         Assert.Equal(Red, ColorOf(doc, "opt"));
         Assert.Equal(Red, ColorOf(doc, "ci"));
+    }
+
+    [Fact]
+    public void Dir_pseudo_class_follows_the_dir_attribute()
+    {
+        var doc = Styled(@"<style>
+            :dir(rtl) { color: red }
+            :dir(ltr) { color: blue }
+            :dir(up) { color: green }
+          </style>
+          <div id=a dir=rtl><p id=b>x</p><p id=c dir=ltr>y</p></div>
+          <p id=d>z</p><p id=e dir=auto>אב</p><p id=f dir=auto>abc</p><bdi id=g>א</bdi>");
+        Assert.Equal(Red, ColorOf(doc, "a"));
+        Assert.Equal(Red, ColorOf(doc, "b"));
+        Assert.Equal(Blue, ColorOf(doc, "c"));
+        Assert.Equal(Blue, ColorOf(doc, "d"));
+        Assert.Equal(Red, ColorOf(doc, "e"));
+        Assert.Equal(Blue, ColorOf(doc, "f"));
+        Assert.Equal(Red, ColorOf(doc, "g"));
+    }
+
+    [Fact]
+    public void Placeholder_pseudo_element_styles_the_placeholder_text()
+    {
+        var doc = Styled(@"<style>
+            input::placeholder, textarea::-webkit-input-placeholder { color: red; font-style: italic }
+            #plain::placeholder { color: blue }
+          </style>
+          <input id=a placeholder=type><textarea id=b placeholder=more></textarea>
+          <input id=plain placeholder=x><input id=c value=typed placeholder=none>", prepare: FormPrep);
+        Assert.Equal(Red, Line("a").Style.Color);
+        Assert.True(Line("a").Style.Italic);
+        Assert.Equal(Red, Line("b").Style.Color);
+        Assert.Equal(Blue, Line("plain").Style.Color);
+        Assert.Equal(Black, ById(doc, "c").Style.Color);
+        Assert.Null(ById(doc, "c").Children.OfType<Element>().FirstOrDefault(c => c.HasAttribute("placeholder")));
+
+        Element Line(string id) => ById(doc, id).Children.OfType<Element>().First(c => c.HasAttribute("placeholder"));
+    }
+
+    [Fact]
+    public void Quotes_property_sets_the_quote_marks_by_nesting_level()
+    {
+        static string Text(string html) => PdfText.Extract(HtmlToPdf.Convert(html)).Replace("\n", " ").Trim();
+        Assert.Equal("“a ‘b’ c”", Text("<q>a <q>b</q> c</q>"));
+        Assert.Equal("„a ‚b‘ c“", Text("<q lang=de>a <q>b</q> c</q>"));
+        Assert.Equal("«a ‹b› c»", Text("<q lang=fr-CH>a <q>b</q> c</q>"));
+        Assert.Equal("[a (b) c]", Text("<style>q { quotes: '[' ']' '(' ')' }</style><q>a <q>b</q> c</q>"));
+        Assert.Equal("[a [b] c]", Text("<style>q { quotes: '[' ']' }</style><q>a <q>b</q> c</q>"));
+        Assert.Equal("a b c", Text("<style>q { quotes: none }</style><q>a <q>b</q> c</q>"));
+        // A runaway list is dropped rather than kept.
+        Assert.Equal("“a”", Text("<style>q { quotes: " + string.Concat(Enumerable.Repeat("'x' 'y' ", 100)) + " }</style><q>a</q>"));
+        // An odd number of strings is invalid, so the declaration is dropped.
+        Assert.Equal("“a”", Text("<style>q { quotes: '[' ']' '(' }</style><q>a</q>"));
     }
 }

@@ -310,6 +310,23 @@ internal sealed partial class StyleResolver
         else if (GeneratedContent.UnquoteString(d.Value) is { } hyphen) s.HyphenateCharacter = hyphen;
     }
 
+    // quotes: none, auto, or pairs of strings for the nesting levels. A list with an odd number of strings is invalid.
+    private static void ApplyQuotes(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit || d.Lower == "unset") { s.Quotes = parent.Quotes; return; }
+        if (d.Lower is "auto" or "initial") { s.Quotes = null; return; }
+        if (d.Lower == "none") { s.Quotes = Array.Empty<string>(); return; }
+        var tokens = CssParser.Tokens(d.Value);
+        if (tokens.Count == 0 || tokens.Count % 2 != 0 || tokens.Count > MaxQuoteStrings) return;
+        var strings = new string[tokens.Count];
+        for (int i = 0; i < strings.Length; i++)
+            if (GeneratedContent.UnquoteString(tokens[i]) is { } str) strings[i] = str;
+            else return;
+        s.Quotes = strings;
+    }
+
+    private const int MaxQuoteStrings = 64;
+
     private static void ApplyHyphenateLimitChars(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
         if (d.Inherit || d.Lower == "unset") s.HyphenateLimitChars = parent.HyphenateLimitChars;

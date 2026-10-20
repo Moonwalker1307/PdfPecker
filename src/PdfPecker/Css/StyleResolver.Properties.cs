@@ -135,6 +135,7 @@ internal sealed partial class StyleResolver
             case "-webkit-hyphenate-character":
                 ApplyHyphenateCharacter(s, parent, in d);
                 break;
+            case "quotes": ApplyQuotes(s, parent, in d); break;
             case "hyphenate-limit-chars": ApplyHyphenateLimitChars(s, parent, in d); break;
             case "-webkit-line-clamp":
             case "line-clamp":
