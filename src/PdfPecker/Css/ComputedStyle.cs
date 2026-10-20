@@ -307,6 +307,8 @@ internal sealed class ComputedStyle
     public bool CanvasBackground; // the background is painted on every page's canvas instead of on this box (html/body propagation)
     public bool BorderCollapse;
     public bool TableLayoutFixed; // table-layout: fixed
+    public bool CaptionBottom;    // caption-side: bottom (inherited)
+    public bool EmptyCellsHide;   // empty-cells: hide (inherited): with separated borders, empty cells paint nothing
     public BoxShadow[]? BoxShadows;
     public BoxShadow[]? TextShadows; // text-shadow (inherited); spread and inset are not used
     public float BorderSpacingH, BorderSpacingV; // initially 0; the user agent style gives <table> 2px
