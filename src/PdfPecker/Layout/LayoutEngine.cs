@@ -906,7 +906,9 @@ internal sealed partial class LayoutEngine
         if (avoidInside) _avoidDepth++;
         bool edges = !table && _paginate && _grid is not ColumnGrid && KeepsEdgesWithContent(e);
         // The box's layout stops at its first content when that lands on a later page: the box then goes there whole.
-        var edgeProbe = edges && probe == null && _edgeProbesOff == 0 && !avoidInside && !AtPageTop(y) && ProbesTopEdge(e)
+        // Stopping means laying the box out again, so past the budget its edges are looked at once it is laid out.
+        var edgeProbe = edges && probe == null && _edgeProbesOff == 0 && !avoidInside && MayLayOutAgain && !AtPageTop(y)
+                        && ProbesTopEdge(e)
             ? new KeepProbe(opsStart, PageOf(y)) { Edge = true }
             : null;
         if (edgeProbe != null) _childProbe = edgeProbe;
