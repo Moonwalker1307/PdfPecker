@@ -19,6 +19,12 @@ internal sealed partial class StyleResolver
         AddHints(e);
         int authorStart = _count;
         Collect(_author, e, TierAuthor, TierAuthorImportant);
+        // ::placeholder rules match the text field, and style the line that shows its placeholder.
+        if (e.Name == "pdf-field-value" && e.Parent != null && e.HasAttribute("placeholder"))
+        {
+            if (UaIndex.Value.PseudoElements is { } uaPh) Collect(uaPh, e.Parent, TierUa, TierUaImportant, PseudoElement.Placeholder);
+            if (_author.PseudoElements is { } authorPh) Collect(authorPh, e.Parent, TierAuthor, TierAuthorImportant, PseudoElement.Placeholder);
+        }
         var inline = e.GetAttribute("style");
         if (!string.IsNullOrEmpty(inline))
         {

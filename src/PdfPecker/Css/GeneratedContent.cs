@@ -11,15 +11,78 @@ namespace PdfPecker.Css;
 /// </summary>
 internal static class GeneratedContent
 {
-    // Chrome's quotes for English: curly double quotes outside, curly single quotes inside.
-    private static readonly string[] Open = { "“", "‘" }, Close = { "”", "’" };
+    // The quotes quotes: auto uses for a language, as Chrome does (from CLDR): outer open and close, then inner open and close.
+    private static readonly string[] English = { "“", "”", "‘", "’" };
+    private static readonly Dictionary<string, string[]> LanguageQuotes = new(StringComparer.Ordinal)
+    {
+        ["de"] = new[] { "„", "“", "‚", "‘" },
+        ["cs"] = new[] { "„", "“", "‚", "‘" },
+        ["sk"] = new[] { "„", "“", "‚", "‘" },
+        ["sl"] = new[] { "„", "“", "‚", "‘" },
+        ["hr"] = new[] { "„", "“", "‚", "‘" },
+        ["et"] = new[] { "„", "“", "‚", "‘" },
+        ["sr"] = new[] { "„", "“", "‘", "‘" },
+        ["bg"] = new[] { "„", "“", "„", "“" },
+        ["lt"] = new[] { "„", "“", "„", "“" },
+        ["fr"] = new[] { "«", "»", "«", "»" },
+        ["fr-ch"] = new[] { "«", "»", "‹", "›" },
+        ["fr-ca"] = new[] { "«", "»", "”", "“" },
+        ["it"] = new[] { "«", "»", "“", "”" },
+        ["el"] = new[] { "«", "»", "“", "”" },
+        ["ca"] = new[] { "«", "»", "“", "”" },
+        ["nb"] = new[] { "«", "»", "‘", "’" },
+        ["nn"] = new[] { "«", "»", "‘", "’" },
+        ["no"] = new[] { "«", "»", "‘", "’" },
+        ["ru"] = new[] { "«", "»", "„", "“" },
+        ["uk"] = new[] { "«", "»", "„", "“" },
+        ["nl"] = new[] { "‘", "’", "‘", "’" },
+        ["sv"] = new[] { "”", "”", "’", "’" },
+        ["fi"] = new[] { "”", "”", "’", "’" },
+        ["he"] = new[] { "”", "”", "’", "’" },
+        ["pl"] = new[] { "„", "”", "«", "»" },
+        ["hu"] = new[] { "„", "”", "»", "«" },
+        ["ro"] = new[] { "„", "”", "«", "»" },
+        ["ja"] = new[] { "「", "」", "『", "』" },
+        ["zh-hant"] = new[] { "「", "」", "『", "』" },
+        ["ar"] = new[] { "”", "“", "’", "‘" },
+    };
+
+    /// <summary>The quotes of a language tag: the longest prefix of the tag that has its own, else English.</summary>
+    private static string[] QuotesFor(string? lang)
+    {
+        if (string.IsNullOrEmpty(lang)) return English;
+        var tag = lang.Trim().ToLowerInvariant().Replace('_', '-');
+        while (tag.Length > 0)
+        {
+            if (LanguageQuotes.TryGetValue(tag, out var found)) return found;
+            int dash = tag.LastIndexOf('-');
+            if (dash < 0) break;
+            tag = tag.Substring(0, dash);
+        }
+        return English;
+    }
+
+    // The string of an open-quote or close-quote at a nesting depth; the last pair serves the deeper levels.
+    private static string Quote(ComputedStyle? style, int depth, bool open)
+    {
+        var quotes = style?.Quotes;
+        if (quotes == null)
+        {
+            var auto = QuotesFor(style?.Lang);
+            return auto[(Math.Min(depth, 1) << 1) + (open ? 0 : 1)];
+        }
+        if (quotes.Length == 0) return "";
+        int pair = Math.Min(depth, quotes.Length / 2 - 1);
+        return quotes[(pair << 1) + (open ? 0 : 1)];
+    }
 
     // Generated text far beyond any real use (a counters() over runaway nesting) is cut here.
     private const int MaxLength = 10_000;
 
     /// <summary>The text to show, or null when the value is invalid or generates no box.</summary>
-    public static string? Evaluate(string value, Element host, StyleResolver resolver)
+    public static string? Evaluate(string value, Element host, StyleResolver resolver, ComputedStyle? style = null)
     {
+        style ??= host.Style;
         var sb = new StringBuilder();
         int i = 0, n = value.Length;
         while (i < n)
@@ -47,12 +110,12 @@ internal static class GeneratedContent
             switch (name)
             {
                 case "open-quote":
-                    sb.Append(Open[Math.Min(resolver.QuoteDepth, 1)]);
+                    sb.Append(Quote(style, resolver.QuoteDepth, open: true));
                     resolver.QuoteDepth++;
                     break;
                 case "close-quote":
                     if (resolver.QuoteDepth > 0) resolver.QuoteDepth--;
-                    sb.Append(Close[Math.Min(resolver.QuoteDepth, 1)]);
+                    sb.Append(Quote(style, resolver.QuoteDepth, open: false));
                     break;
                 case "no-open-quote": resolver.QuoteDepth++; break;
                 case "no-close-quote": if (resolver.QuoteDepth > 0) resolver.QuoteDepth--; break;
