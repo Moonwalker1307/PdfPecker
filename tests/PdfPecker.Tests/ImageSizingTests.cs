@@ -63,4 +63,25 @@ public class ImageSizingTests
     [InlineData("max-height:50%", 64, 40)]
     public void A_percentage_height_limits_an_image_in_a_flex_box_of_fixed_height(string style, float w, float h)
         => AssertSize(w, h, Image($"<div style='display:flex;width:300px;height:80px'><img src='{Src(400, 250)}' style='{style}'></div>"));
+
+    /// <summary>A PNG of the given size in pixels, all one opaque colour.</summary>
+    private static string Png(int w, int h)
+        => "data:image/png;base64," + Convert.ToBase64String(PdfPecker.Rendering.PngEncoder.Encode(Enumerable.Repeat(0xFF2050A0u, w * h).ToArray(), w, h));
+
+    [Theory]
+    [InlineData("png")]
+    [InlineData("svg")]
+    public void An_image_larger_than_its_box_is_drawn_on_a_later_page(string format)
+    {
+        // object-fit: none centres the 400 x 250 image in a 100 x 100 box 20px down page 2, so the image starts 55px above
+        // the box, on page 1.
+        var src = format == "png" ? Png(400, 250) : Src(400, 250);
+        var pdf = HtmlToPdf.Convert($"<style>@page {{ size: 600px 600px; margin: 0 }}</style><body style='margin:0'><div style='height:620px'></div><img src='{src}' style='width:100px;height:100px;object-fit:none'></body>");
+        var rgba = PdfRenderer.Open(pdf).RenderPage(1, new ImageOptions { Dpi = 72 }).Rgba;
+        int ink = 0;
+        for (int i = 0; i < rgba.Length; i += 4)
+            if (rgba[i] + rgba[i + 1] + rgba[i + 2] < 600) ink++;
+        // 100 x 100 CSS px is 75 x 75 points, which are pixels at 72 dpi.
+        Assert.InRange(ink, 75 * 75 - 300, 75 * 75 + 300);
+    }
 }
