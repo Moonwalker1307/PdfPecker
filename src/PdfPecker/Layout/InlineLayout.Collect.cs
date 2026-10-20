@@ -364,8 +364,18 @@ internal sealed partial class LayoutEngine
             || s.MarginTop.IsPercent || s.MarginBottom.IsPercent
             || s.PaddingLeft.IsPercent || s.PaddingRight.IsPercent || s.PaddingTop.IsPercent || s.PaddingBottom.IsPercent)
             return availW;
-        return availW - s.MarginLeft.Value - s.MarginRight.Value >= intrinsic.Max ? float.PositiveInfinity : availW;
+        return availW - s.MarginLeft.Value - s.MarginRight.Value >= intrinsic.Max || availW >= UnboundedMeasure
+            ? float.PositiveInfinity : availW;
     }
+
+    /// <summary>
+    /// The available width from which a measured inline-block counts as unbounded. Intrinsic widths are measured at
+    /// 100,000 points, and each level of nested inline-blocks offers the boxes inside a little less, so a box whose
+    /// content is wider still wraps at a width that differs only by the frames around it. No page is that wide, so the
+    /// difference never reaches the layout, but measuring it at each width laid out every box once for each level above
+    /// it, and each of those layouts did the same inside, which grew with the cube of the depth.
+    /// </summary>
+    private const float UnboundedMeasure = 50_000;
 
     // ------------------------------------------------------------------ leaders
 
