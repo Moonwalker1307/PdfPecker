@@ -1818,6 +1818,18 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(html));
     }
 
+    [Theory]
+    [InlineData("grid-column: 99999999999 / -1")]
+    [InlineData("grid-column: 5000 / span 3; grid-row: span 2")]
+    public void Grid_items_placed_past_the_column_limit_are_placed(string placement)
+    {
+        // Found by the fuzzer: target html, timeout-d0d017cf. A grid keeps at most 1,000 columns, and an item placed
+        // after them never found a free cell, so placement looped for good and cancellation could not stop it.
+        var html = "<div style='display:grid; grid-template-columns: 2fr repeat(16777216, 1fr)'><div style='" + placement
+            + "'>x</div><div>y</div></div>";
+        AssertStructurallyValid(Bounded(html));
+    }
+
     [Fact]
     public void Headings_before_tables_nested_in_split_header_cells_are_laid_out_once()
     {
