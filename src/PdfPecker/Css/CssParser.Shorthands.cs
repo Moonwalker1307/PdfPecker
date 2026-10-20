@@ -96,6 +96,8 @@ internal static partial class CssParser
             case "padding-inline":
             case "margin-block":
             case "padding-block":
+            case "inset-inline":
+            case "inset-block":
                 ExpandStartEnd(name, value, longhands);
                 break;
             case "border-radius": ExpandBorderRadius(value, longhands); break;

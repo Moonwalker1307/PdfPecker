@@ -60,7 +60,7 @@ internal sealed partial class StyleResolver
         if (cacheable) _probe.Set(parent, _decls, _count);
         if (cacheable && _styleCache.TryGetValue(_probe, out var shared))
         {
-            if (name == "html") _rootFontSize = shared.FontSize;
+            if (name == "html") { _rootFontSize = shared.FontSize; _htmlStyle = shared; }
             Array.Clear(_decls, 0, _count);
             return shared;
         }
@@ -90,6 +90,7 @@ internal sealed partial class StyleResolver
             if (_decls[i].Property == "font-size" && !ResetByAll(i, allDecl))
             {
                 var fs = Substituted(_decls[i].Value, s);
+                if (fs != null && CssUnits.HasMetricUnit(fs)) fs = RewriteMetricUnits(fs, parent, parent);
                 if (fs != null) ApplyFontSize(s, parent, fs);
                 break;
             }
@@ -101,14 +102,18 @@ internal sealed partial class StyleResolver
         for (int i = 0; i < _count; i++)
             if (_decls[i].Property == "color" && !ResetByAll(i, allDecl) && Substituted(_decls[i].Value, s) is { } color) Apply(s, parent, "color", color);
 
+        bool fontFirst = HasMetricUnit();
+        if (fontFirst) ApplyFontPropertiesFirst(s, parent, allDecl);
+
         for (int i = 0; i < _count; i++)
         {
             var d = _decls[i];
             if (!UsedViewportHeight && HasViewportHeightUnit(d.Value)) UsedViewportHeight = true;
             if (d.Property is "font-size" or "color" or "all" || d.Property.StartsWith("--", StringComparison.Ordinal) || ResetByAll(i, allDecl)) continue;
+            if (fontFirst && _applied[i]) continue;
             if (!CssParser.HasVar(d.Value))
             {
-                Apply(s, parent, d.Property, d.Value);
+                Apply(s, parent, d.Property, d.MetricUnits ? RewriteMetricUnits(d.Value, s, d.Property == "line-height" ? parent : s) : d.Value);
                 continue;
             }
             // var(): substitute, then expand shorthands now that the value is known.
@@ -118,10 +123,12 @@ internal sealed partial class StyleResolver
             CssParser.Expand(d.Property, value, d.Important, _expanded);
             foreach (var x in _expanded)
             {
-                if (x.Property == "font-size") ApplyFontSize(s, parent, x.Value);
-                else Apply(s, parent, x.Property, x.Value);
+                var xv = CssUnits.HasMetricUnit(x.Value) ? RewriteMetricUnits(x.Value, x.Property == "font-size" ? parent : s, x.Property is "font-size" or "line-height" ? parent : s) : x.Value;
+                if (x.Property == "font-size") ApplyFontSize(s, parent, xv);
+                else Apply(s, parent, x.Property, xv);
             }
         }
+        if (fontFirst) Array.Clear(_applied, 0, _count);
 
         // A box that sets its text decoration fixes the decoration's colour to its own colour (currentColor here), so
         // descendants with another colour keep it.
@@ -168,6 +175,7 @@ internal sealed partial class StyleResolver
         bool inlineBox = s.Display == Display.Inline && !parent.IsFlex && !parent.IsGrid;
         s.InlineFade = inlineBox ? s.Opacity * (parent.Display == Display.Inline ? parent.InlineFade : 1) : 1;
         s.InvalidateFont();
+        if (name == "html") _htmlStyle = s;
         if (cacheable) _styleCache[_probe.Freeze()] = s;
         Array.Clear(_decls, 0, _count);
         return s;
@@ -202,7 +210,7 @@ internal sealed partial class StyleResolver
     }
 
     private static bool HasViewportHeightUnit(string v)
-        => v.IndexOf("vh", StringComparison.OrdinalIgnoreCase) >= 0 || v.IndexOf("vmin", StringComparison.OrdinalIgnoreCase) >= 0
+        => v.IndexOf("vh", StringComparison.OrdinalIgnoreCase) >= 0 || v.IndexOf("vb", StringComparison.OrdinalIgnoreCase) >= 0 || v.IndexOf("vmin", StringComparison.OrdinalIgnoreCase) >= 0
            || v.IndexOf("vmax", StringComparison.OrdinalIgnoreCase) >= 0 || v.IndexOf("var(", StringComparison.OrdinalIgnoreCase) >= 0;
 
     private static string? Substituted(string value, ComputedStyle s)

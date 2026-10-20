@@ -6,12 +6,15 @@ internal sealed class Declaration
     public readonly string Property;
     public readonly string Value;
     public readonly bool Important;
+    /// <summary>Whether the value has a unit that takes the font's metrics (ex, ch, lh, ...), checked once per declaration.</summary>
+    public readonly bool MetricUnits;
 
     public Declaration(string property, string value, bool important)
     {
         Property = property;
         Value = value;
         Important = important;
+        MetricUnits = !property.StartsWith("--", StringComparison.Ordinal) && CssUnits.HasMetricUnit(value);
     }
 
     public override string ToString() => Property + ": " + Value + (Important ? " !important" : "");

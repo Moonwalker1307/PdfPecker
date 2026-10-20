@@ -87,15 +87,15 @@ internal sealed class StandardFont : TextFont
 
     public override TextFont WithoutKerning() => _kerning == null ? this : _withoutKerning ??= new StandardFont(this);
 
-    // The AFM x-height and cap height of the family, which are close to the Liberation fonts browsers draw them with.
+    // The OS/2 x-height and cap height of the Liberation font that browsers draw the family with, like the line metrics.
     public override float Metric(FontMetric metric) => (Index / 4, metric) switch
     {
-        (0, FontMetric.XHeight) => 0.523f,
-        (0, FontMetric.CapHeight) => 0.718f,
-        (1, FontMetric.XHeight) => 0.450f,
-        (1, FontMetric.CapHeight) => 0.662f,
-        (_, FontMetric.XHeight) => 0.426f,
-        (_, FontMetric.CapHeight) => 0.562f,
+        (0, FontMetric.XHeight) => 1082 / 2048f,
+        (0, FontMetric.CapHeight) => 1409 / 2048f,
+        (1, FontMetric.XHeight) => 940 / 2048f,
+        (1, FontMetric.CapHeight) => 1341 / 2048f,
+        (_, FontMetric.XHeight) => 1082 / 2048f,
+        (_, FontMetric.CapHeight) => 1349 / 2048f,
         (0, FontMetric.ZeroWidth) => 0.556f,
         (1, FontMetric.ZeroWidth) => 0.5f,
         (_, FontMetric.ZeroWidth) => 0.6f,

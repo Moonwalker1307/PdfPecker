@@ -512,6 +512,14 @@ internal sealed class ComputedStyle
     /// <summary>The size glyphs are drawn and measured at: the font size, changed by font-size-adjust when it is set.</summary>
     public float TextSize => SizeAdjust.IsNone ? FontSize : SizeAdjust.Apply(FontSize, Font);
 
+    /// <summary>The font the ex, ch and cap units measure. The style may still change, so the font is not kept.</summary>
+    public TextFont UnitFont()
+    {
+        var font = Font;
+        _font = null;
+        return font;
+    }
+
     /// <summary>
     /// The used line height. A huge value is capped (as Chrome caps its layout units) so that sums of line heights stay
     /// finite; an infinite height makes the box geometry NaN.
