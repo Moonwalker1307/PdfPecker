@@ -33,6 +33,8 @@ internal sealed class FirstLineStyle
         if (s.WordSpacing == b.WordSpacing) c.WordSpacing = l.WordSpacing;
         if (s.TextTransform == b.TextTransform) c.TextTransform = l.TextTransform;
         if (s.TextShadows == b.TextShadows) c.TextShadows = l.TextShadows;
+        if (s.TextFillColor == b.TextFillColor) c.TextFillColor = l.TextFillColor;
+        if (s.TextStrokeWidth == b.TextStrokeWidth && s.TextStrokeColor == b.TextStrokeColor) { c.TextStrokeWidth = l.TextStrokeWidth; c.TextStrokeColor = l.TextStrokeColor; }
         if (s.LineHeightKind == b.LineHeightKind && s.LineHeightValue == b.LineHeightValue) { c.LineHeightKind = l.LineHeightKind; c.LineHeightValue = l.LineHeightValue; }
         if (s.TextDecoration == b.TextDecoration && s.DecorationColor == b.DecorationColor && s.DecorationStyle == b.DecorationStyle)
         {

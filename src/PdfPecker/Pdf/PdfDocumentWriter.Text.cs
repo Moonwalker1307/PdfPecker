@@ -75,9 +75,51 @@ internal sealed partial class PdfDocumentWriter
     /// </summary>
     private void WriteTextLine(ByteBuffer b, TextOp t, float x, float y)
     {
+        if (!(t.StrokeWidth > 0))
+        {
+            WriteTextRuns(b, t, x, y, FillAndStroke);
+            return;
+        }
+        // Chrome bevels the sharp corners of an outline beyond a miter limit of 4 (PDF's default is 10), which keeps
+        // acute glyph corners from growing spikes; the default is put back for the lines drawn after the text.
+        b.Ascii("4 M\n");
+        // paint-order: stroke draws the outline first and the fill over it.
+        if (t.StrokeFirst)
+        {
+            WriteTextRuns(b, t, x, y, StrokeOnly);
+            WriteTextRuns(b, t, x, y, FillOnly);
+        }
+        else WriteTextRuns(b, t, x, y, FillAndStroke);
+        b.Ascii("10 M\n");
+    }
+
+    private const int FillAndStroke = 0, StrokeOnly = 1, FillOnly = 2;
+
+    /// <summary>Sets the text rendering mode: an outline (-webkit-text-stroke) in <paramref name="pass"/>, else fill only, or fill and stroke for synthetic bold.</summary>
+    private void SetTextPaint(ByteBuffer b, TextOp t, int pass, float syntheticBoldWidth)
+    {
+        float width = 0;
+        if (t.StrokeWidth > 0 && pass != FillOnly)
+        {
+            width = t.StrokeWidth;
+            SetRenderMode(b, pass == StrokeOnly ? 1 : 2);
+            SetStroke(b, t.StrokeColor);
+        }
+        else if (syntheticBoldWidth > 0)
+        {
+            width = syntheticBoldWidth;
+            SetRenderMode(b, 2);
+            SetStroke(b, t.Color);
+        }
+        else SetRenderMode(b, 0);
+        if (width > 0 && _lineWidth != width) { _lineWidth = width; b.Num(width).Ascii(" w\n"); }
+    }
+
+    private void WriteTextRuns(ByteBuffer b, TextOp t, float x, float y, int pass)
+    {
         if (t.Font is StandardFont sf && !EmbedStandard)
         {
-            WriteStandardRun(b, sf, t, 0, t.Text.Length, x, y);
+            WriteStandardRun(b, sf, t, 0, t.Text.Length, x, y, pass);
             return;
         }
         _runs.Clear();
@@ -85,8 +127,8 @@ internal sealed partial class PdfDocumentWriter
         for (int r = 0; r < _runs.Count; r++)
         {
             var run = _runs[t.Rtl ? _runs.Count - 1 - r : r];
-            if (Leaf(run.Font) is EmbeddedFont ef) WriteEmbeddedRun(b, ef, t, run.Start, run.Length, x, y);
-            else WriteStandardRun(b, (StandardFont)run.Font, t, run.Start, run.Length, x, y);
+            if (Leaf(run.Font) is EmbeddedFont ef) WriteEmbeddedRun(b, ef, t, run.Start, run.Length, x, y, pass);
+            else WriteStandardRun(b, (StandardFont)run.Font, t, run.Start, run.Length, x, y, pass);
             x += RunAdvance(run.Font, t, run.Start, run.Length);
         }
     }
@@ -158,11 +200,11 @@ internal sealed partial class PdfDocumentWriter
         b.Int(mode).Ascii(" Tr\n");
     }
 
-    private void WriteStandardRun(ByteBuffer b, StandardFont font, TextOp t, int start, int length, float x, float y)
+    private void WriteStandardRun(ByteBuffer b, StandardFont font, TextOp t, int start, int length, float x, float y, int pass)
     {
         // Font objects are keyed by the leaf font in SetFont, so an embedded font of the same size is switched back.
         SetFont(b, font, "/F", font.Index + 1, t.Size);
-        SetRenderMode(b, 0);
+        SetTextPaint(b, t, pass, 0);
         b.Ascii("1 0 0 1 ").Num(x).Sp().Num(y).Ascii(" Tm ");
         string text = start == 0 && length == t.Text.Length ? t.Text : t.Text.Substring(start, length);
         WriteStandardText(b, font, t.Rtl ? Text.Bidi.VisualText(text) : text);
@@ -196,20 +238,18 @@ internal sealed partial class PdfDocumentWriter
         b.Ascii("] TJ");
     }
 
-    private void WriteEmbeddedRun(ByteBuffer b, EmbeddedFont font, TextOp t, int start, int length, float x, float y)
+    private void WriteEmbeddedRun(ByteBuffer b, EmbeddedFont font, TextOp t, int start, int length, float x, float y, int pass)
     {
         var subset = _subsets[font.Program];
         SetFont(b, font, "/E", _subsetList.IndexOf(subset) + 1, t.Size);
+        float boldWidth = 0;
         if (font.SyntheticBold)
         {
             // Stroke the outlines in the fill colour, as browsers widen glyphs for a missing bold face.
             float k = Math.Clamp((t.Size - 9f) / 27f, 0f, 1f);
-            float width = t.Size * (1f / 24f + (1f / 32f - 1f / 24f) * k);
-            SetRenderMode(b, 2);
-            SetStroke(b, t.Color);
-            if (_lineWidth != width) { _lineWidth = width; b.Num(width).Ascii(" w\n"); }
+            boldWidth = t.Size * (1f / 24f + (1f / 32f - 1f / 24f) * k);
         }
-        else SetRenderMode(b, 0);
+        SetTextPaint(b, t, pass, boldWidth);
         b.Ascii(font.SyntheticItalic ? "1 0 0.2 1 " : "1 0 0 1 ").Num(x).Sp().Num(y).Ascii(" Tm ");
 
         // Word spacing (Tw) only applies to the single-byte code 32, so justified text moves spaces explicitly.

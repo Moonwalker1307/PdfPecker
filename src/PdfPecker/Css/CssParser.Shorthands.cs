@@ -128,6 +128,7 @@ internal static partial class CssParser
                 longhands.Add(name.Substring("page-".Length), value.ToLowerInvariant());
                 break;
             case "text-decoration": ExpandTextDecoration(value, longhands); break;
+            case "-webkit-text-stroke": ExpandTextStroke(value, longhands); break;
             case "border-spacing": ExpandPair(value, "border-spacing-h", "border-spacing-v", longhands); break;
             case "word-wrap": longhands.Add("overflow-wrap", value); break;
             case "-webkit-background-clip": longhands.Add("background-clip", value); break;
@@ -315,6 +316,20 @@ internal static partial class CssParser
         longhands.Add("text-decoration-style", style);
         longhands.Add("text-decoration-thickness", thickness);
         longhands.Add("text-decoration-color", color);
+    }
+
+    /// <summary>-webkit-text-stroke: a width and a colour in either order, each with its initial value when left out.</summary>
+    private static void ExpandTextStroke(string value, LonghandWriter longhands)
+    {
+        string width = "0", color = "currentcolor";
+        foreach (var token in Tokens(value))
+        {
+            var lower = token.ToLowerInvariant();
+            if (IsLineWidth(lower) || CssMath.IsMathFunction(lower)) width = lower;
+            else color = token;
+        }
+        longhands.Add("-webkit-text-stroke-width", width);
+        longhands.Add("-webkit-text-stroke-color", color);
     }
 
     /// <summary>A pair of longhands (gap, border-spacing): the second repeats the first when there is only one value.</summary>

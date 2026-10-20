@@ -109,6 +109,37 @@ internal sealed partial class StyleResolver
         else if (BoxShadow.Parse(d.Value, d.Em, _rootFontSize, _vw, _vh) is { } shadows) s.BoxShadows = shadows.Length > 0 ? shadows : null;
     }
 
+    private void ApplyTextStrokeWidth(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit) s.TextStrokeWidth = parent.TextStrokeWidth;
+        else if (d.Lower == "initial") s.TextStrokeWidth = 0;
+        else if (d.Lower is "thin" or "medium" or "thick") s.TextStrokeWidth = d.Lower == "thin" ? 0.75f : d.Lower == "medium" ? 2.25f : 3.75f;
+        else if (TryParseLength(d.Lower, d.Em, _rootFontSize, out var w, _vw, _vh) && !w.IsAuto && !w.IsPercent && w.Value >= 0) s.TextStrokeWidth = w.Value;
+    }
+
+    private static void ApplyTextFillColor(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit) s.TextFillColor = parent.TextFillColor;
+        else if (d.Lower is "currentcolor" or "initial") s.TextFillColor = null;
+        else if (CssColor.TryParse(d.Value, s.Color, out var c)) s.TextFillColor = c;
+    }
+
+    private static void ApplyTextStrokeColor(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit) s.TextStrokeColor = parent.TextStrokeColor;
+        else if (d.Lower is "currentcolor" or "initial") s.TextStrokeColor = null;
+        else if (CssColor.TryParse(d.Value, s.Color, out var c)) s.TextStrokeColor = c;
+    }
+
+    /// <summary>paint-order on HTML text: only whether the stroke comes before the fill matters, as for the other orders the stroke is on top.</summary>
+    private static void ApplyPaintOrder(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit) { s.PaintStrokeFirst = parent.PaintStrokeFirst; return; }
+        var words = d.Lower.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length == 0) return;
+        s.PaintStrokeFirst = words[0] == "stroke" || words[0] == "markers" && words.Length > 1 && words[1] == "stroke";
+    }
+
     /// <summary>text-shadow takes the box-shadow syntax without inset and spread, which make the whole value invalid.</summary>
     private void ApplyTextShadow(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
