@@ -414,7 +414,7 @@ internal sealed partial class LayoutEngine
             float wordSpacing = style.WordSpacing + spaceExtra;
             if (style.TextShadows != null) TextShadows(style, runX, runEnd - runX, bl, lineTop, text, wordSpacing, rtlRun);
             _ops.Add(new TextOp(runX, bl, lineTop, style.Font, style.TextSize, CssColor.Fade(style.Color, style.InlineFade), text,
-                wordSpacing, style.LetterSpacing) { Tag = first.Tag, Rtl = rtlRun });
+                wordSpacing, style.LetterSpacing) { Tag = first.Tag, Rtl = rtlRun }.WithStroke(style));
             if (style.TextDecoration != TextDecoration.None) Decorate(style, runX, runEnd - runX, bl);
         }
         return end;
@@ -439,7 +439,7 @@ internal sealed partial class LayoutEngine
         var text = new StringBuilder(pattern.Length * count);
         for (int k = 0; k < count; k++) text.Append(pattern);
         _ops.Add(new TextOp(start, baseline, lineTop, style.Font, style.TextSize, CssColor.Fade(style.Color, style.InlineFade), text.ToString(),
-            style.WordSpacing, style.LetterSpacing) { Tag = it.Tag });
+            style.WordSpacing, style.LetterSpacing) { Tag = it.Tag }.WithStroke(style));
     }
 
     /// <summary>One link op over each run of items with the same href.</summary>

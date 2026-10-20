@@ -320,6 +320,9 @@ internal sealed class ComputedStyle
     public bool EmptyCellsHide;   // empty-cells: hide (inherited): with separated borders, empty cells paint nothing
     public BoxShadow[]? BoxShadows;
     public BoxShadow[]? TextShadows; // text-shadow (inherited); spread and inset are not used
+    public float TextStrokeWidth;    // -webkit-text-stroke-width (inherited): the outline drawn on the glyphs, centred on their edge
+    public uint? TextStrokeColor;    // -webkit-text-stroke-color (inherited); null = currentcolor
+    public bool PaintStrokeFirst;    // paint-order: stroke (inherited): the fill covers the inner half of the stroke
     public float BorderSpacingH, BorderSpacingV; // initially 0; the user agent style gives <table> 2px
     public string? FontFamilyName;
     public FontResolver? Fonts; // the document's fonts; null when only the standard fonts exist
