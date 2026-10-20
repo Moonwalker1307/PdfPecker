@@ -1804,6 +1804,18 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Nested_flex_columns_across_pages_are_measured_once()
+    {
+        // Found by the fuzzer: target html, timeout-d2edd0b0. Each flex column that spread its items measured them and,
+        // where they crossed a page, laid them out again with everything inside measured afresh, at every level, so the
+        // work grew with the square of the depth: grids of flex columns nested to the parser's depth limit took 6 s.
+        var html = "<style>body{font:8pt sans-serif}.nest{display:grid;grid-template-columns:repeat(auto-fill,minmax(28mm,1fr))}"
+            + ".nest>div{display:flex;flex-direction:column;justify-content:space-between;min-height:14mm}</style><p>Lorem "
+            + Repeat("<div class=nest><div>Cell<b>7</b></div> consectetur adipiscing elit. Integer nec odio praesent libero. ", 300);
+        AssertStructurallyValid(Bounded(html, new PdfOptions { MaxPages = 1000 }));
+    }
+
+    [Fact]
     public void Anchors_in_nested_flex_boxes_are_noted_once_per_level()
     {
         // Found by the fuzzer: target html, memory-c058a39b. Content placed twice in a capture noted its anchors twice,

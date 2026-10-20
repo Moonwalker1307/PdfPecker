@@ -602,12 +602,18 @@ internal sealed partial class LayoutEngine
                 float savedBaseline = _lastBaseline;
                 _lastBaseline = float.NaN;
                 float bottom;
+                // The boxes inside measure as they did when the item was measured, as in a box laid out again by
+                // PlaceOnPages, unless the item was given a height: else each nested column laid out again on the pages
+                // measured everything inside it again, and the work grew with the square of the depth.
+                var pool = _knownBoxes;
+                if (measured[i] is { } known && forcedH[i] == null) _knownBoxes = known.Known;
                 try
                 {
                     bottom = LayoutBlockBox(it.El, x + offsetX[i], top, outerW[i], shrinkToFit: !stretch[i]);
                 }
                 finally
                 {
+                    _knownBoxes = pool;
                     if (forcedH[i].HasValue)
                     {
                         _heightOverride.Remove(it.El);
