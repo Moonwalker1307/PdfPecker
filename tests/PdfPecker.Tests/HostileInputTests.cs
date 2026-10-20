@@ -433,7 +433,9 @@ public class HostileInputTests
     public void Page_count_is_limited()
     {
         Assert.Throws<PdfLimitException>(() => Bounded("<div style='height:100000000px'>x</div>", new PdfOptions { MaxPages = 1000 }));
-        Assert.Throws<PdfLimitException>(() => Bounded("<p style='margin-top:1e30px'>x</p>"));
+        // A top margin that reaches past the end of a page is cut off at the break, as in Chrome: the paragraph starts
+        // the second page instead of one far down the document.
+        Assert.Equal(2, PageCount(Bounded("<p style='margin-top:1e30px'>x</p>")));
         Assert.Throws<PdfLimitException>(() => Bounded("<div style='border-radius:1e30px;border:1e30px solid red'>x</div>"));
         Assert.Throws<PdfLimitException>(() => Bounded(Repeat("<div style='page-break-before:always'>x</div>", 50), new PdfOptions { MaxPages = 20 }));
         Assert.Equal(20, PageCount(Bounded(Repeat("<div style='page-break-before:always'>x</div>", 20), new PdfOptions { MaxPages = 20 })));

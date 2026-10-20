@@ -109,6 +109,28 @@ public class PaginationTests
         Assert.Equal(1, Lines(none, "line").Count(l => Page(l.LineTop) == 1));
     }
 
+    [Theory]
+    [InlineData(190, "")]                   // the margin reaches past the end of the page
+    [InlineData(200, "")]                   // the content before ends with the page
+    [InlineData(150, "break-after:page;")]  // a forced break keeps the margin after it
+    public void A_top_margin_at_an_unforced_page_break_is_cut_off(int filler, string breakAfter)
+    {
+        var ops = Layout("<style>" + Body + " h2{margin:14pt 0 0; font: bold 12pt/20pt Helvetica}</style>" +
+                         $"<div style='height:{filler}pt;{breakAfter}'></div><h2>Heading</h2>");
+        var heading = Lines(ops, "Heading").Single();
+        Assert.Equal(1, Page(heading.LineTop));
+        Assert.Equal(breakAfter.Length == 0 ? PageHeight : PageHeight + 14, heading.LineTop, 0.05f);
+    }
+
+    [Fact]
+    public void A_top_margin_inside_a_box_at_the_top_of_a_page_stays()
+    {
+        // The margin of the first box inside one that starts a page is not at a break: Chrome keeps it.
+        var ops = Layout("<style>" + Body + " h2{margin:14pt 0 0; font: bold 12pt/20pt Helvetica}</style>" +
+                         "<div style='height:200pt'></div><div style='overflow:hidden'><h2>Heading</h2></div>");
+        Assert.Equal(PageHeight + 14, Lines(ops, "Heading").Single().LineTop, 0.05f);
+    }
+
     [Fact]
     public void Break_inside_avoid_moves_a_whole_table()
     {
