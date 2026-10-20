@@ -21,7 +21,10 @@ internal sealed partial class LayoutEngine
         float total = 0;
         for (int li = 0; li < n; li++)
             if (!float.IsNaN(lineA[li])) { visibleCount++; total += lineA[li] + lineD[li]; }
-        if (visibleCount < 2 || !CrossesPage(top, top + total)) return null;
+        // CrossesPage allows half a point past the page end, but the lines themselves break as soon as one does not fit:
+        // a paragraph a hair too tall would then leave its last line alone on the next page. Only lines that end well
+        // inside the page skip the plan.
+        if (visibleCount < 2 || !CrossesPage(top, top + total + 0.5f)) return null;
 
         bool[]? forced = null;
         // The plan only tries breaks: a multi-column box balancing its columns must not take them for real ones.

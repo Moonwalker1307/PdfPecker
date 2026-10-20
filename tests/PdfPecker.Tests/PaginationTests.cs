@@ -109,6 +109,18 @@ public class PaginationTests
         Assert.Equal(1, Lines(none, "line").Count(l => Page(l.LineTop) == 1));
     }
 
+    [Fact]
+    public void Widows_hold_when_the_last_line_ends_a_hair_past_the_page()
+    {
+        // Seven 20pt lines after 60.02pt of filler end 0.02pt past the page: the last line breaks to the next page, so
+        // the line before it must go along.
+        string text = string.Join("<br>", Enumerable.Range(1, 7).Select(i => "line" + i));
+        var ops = Layout("<style>" + Body + "</style><div style='height:60.02pt'></div><p>" + text + "</p>");
+        var lines = Lines(ops, "line");
+        Assert.Equal(5, lines.Count(l => Page(l.LineTop) == 0));
+        Assert.Equal(2, lines.Count(l => Page(l.LineTop) == 1));
+    }
+
     // The top of what a border, background or line of text draws.
     private static float? DrawnTop(DrawOp op) => op switch
     {
