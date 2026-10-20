@@ -160,13 +160,13 @@ internal sealed partial class LayoutEngine
     private static bool AvoidsFloats(Element e)
     {
         var s = e.Style;
-        return s.FormattingRoot || s.Display == Display.Table || s.IsFlex || s.IsGrid || s.IsMultiColumn || e.Name is "img" or "svg" or "hr";
+        return s.FormattingRoot || s.Display == Display.Table || s.IsFlex || s.IsGrid || s.IsMultiColumn || e.IsReplaced || e.Name == "hr";
     }
 
     private float LayoutBesideFloats(Element e, float x, ref float top, float w)
     {
         var s = e.Style;
-        bool fixedWidth = !s.Width.IsAuto || e.Name is "img" or "svg";
+        bool fixedWidth = !s.Width.IsAuto || e.IsReplaced;
         float l = x, r = x + w;
         for (int guard = 0; guard < 10_000; guard++)
         {
@@ -175,7 +175,7 @@ internal sealed partial class LayoutEngine
             if (fixedWidth)
             {
                 float ml = s.MarginLeft.IsAuto ? 0 : s.MarginLeft.Resolve(w), mr = s.MarginRight.IsAuto ? 0 : s.MarginRight.Resolve(w);
-                float need = ml + mr + (e.Name is "img" or "svg" ? Intrinsic(e).Max
+                float need = ml + mr + (e.IsReplaced ? Intrinsic(e).Max
                     : s.Width.Resolve(w) + (s.BorderBox ? 0 : s.PaddingLeft.Resolve(w) + s.PaddingRight.Resolve(w) + s.BorderLeft + s.BorderRight));
                 if (r - l >= need - Eps) break;
             }

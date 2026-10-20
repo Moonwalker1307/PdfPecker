@@ -99,7 +99,7 @@ internal sealed partial class LayoutEngine
         float l = s.Left.Resolve(cbW), r = s.Right.Resolve(cbW), t = s.Top.Resolve(cbH), b = s.Bottom.Resolve(cbH);
         float frameH = s.PaddingLeft.Resolve(cbW) + s.PaddingRight.Resolve(cbW) + s.BorderLeft + s.BorderRight;
         float frameV = s.PaddingTop.Resolve(cbW) + s.PaddingBottom.Resolve(cbW) + s.BorderTop + s.BorderBottom;
-        bool replaced = e.Name is "img" or "svg";
+        bool replaced = e.IsReplaced;
 
         // Width: given, stretched between left and right, or shrink-to-fit.
         float? borderW = null;

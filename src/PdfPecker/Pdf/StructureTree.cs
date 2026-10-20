@@ -175,6 +175,9 @@ internal sealed class StructureTree
         if (e.Name == "a" && e.GetAttribute("name") is { Length: > 0 } name) _targets[name] = parent;
         switch (e.Name)
         {
+            // An image that shows its alt text as text is no figure: the text is content of its parent.
+            case "img" when e.AltText != null:
+                break;
             case "img":
             case "svg":
             {
