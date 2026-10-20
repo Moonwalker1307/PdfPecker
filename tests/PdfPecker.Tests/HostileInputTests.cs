@@ -1724,6 +1724,21 @@ public class HostileInputTests
     }
 
     [Theory]
+    [InlineData("<div style='height:690px'></div>", "<div class=\"c\">", "text")]
+    [InlineData("<div style='height:300px'></div>", "<div class=\"c\">", "text<br>text<br>text<br>text<br>text")]
+    [InlineData("", "<div style='height:37px'></div><div class=\"c\">text<br>text", "")]
+    [InlineData("<div style='height:470px'></div>", "<div style='border-bottom:1px solid'>", "text")]
+    public void Nested_boxes_at_page_ends_are_moved_without_laying_out_each_level_again(string before, string level, string after)
+    {
+        // A box whose first content moves to the next page moves with it, and a bottom border that does not fit takes
+        // the last lines along. Each move lays the box out again; deciding it only after the boxes inside were laid out
+        // in full made every level lay out all the levels inside it again, which took exponential time.
+        var html = "<style>@page{size:A5;margin:12mm}.c{border:1px solid #888;padding:0 2px}</style>" + before
+            + Repeat(level, 3000) + after;
+        AssertStructurallyValid(Bounded(html, new PdfOptions { MaxPages = 1000 }));
+    }
+
+    [Theory]
     [InlineData("<h3>Named grid areas</h3><div style=\"display:grid; grid-template-areas:'head head' 'side main'; grid-template-columns:100px 1fr\"><div style=\"grid-area:main\">main</div><div style=\"grid-area:head\">head", 30)]
     [InlineData("<h2>WebP and GIF</h2><div style=\"display:flex; flex-wrap:wrap; gap:10px\"><figurev>", 40)]
     public void Headings_nested_in_boxes_kept_with_headings_move_to_a_bounded_depth(string level, int depth)
