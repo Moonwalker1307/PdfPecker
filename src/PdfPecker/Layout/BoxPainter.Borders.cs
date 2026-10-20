@@ -11,8 +11,11 @@ internal static partial class BoxPainter
     /// <summary>A double border thinner than this (three bands of three quarters of a pixel) is drawn solid.</summary>
     private const float MinDoubleWidth = 2.25f;
 
-    /// <summary>A groove or ridge thinner than this has no room for its two shades and is drawn in one.</summary>
-    private const float MinGrooveWidth = 2;
+    /// <summary>
+    /// A groove or ridge thinner than this (two pixels) has no room for its two shades; Chrome then draws it solid in its
+    /// colour, unshaded, on every side.
+    /// </summary>
+    private const float MinGrooveWidth = 1.5f;
 
     /// <summary>One side of a border: its width, style and colour, with the border's colour already resolved.</summary>
     private readonly record struct BorderSide(float Width, BorderStyle Style, uint Color)
@@ -202,7 +205,7 @@ internal static partial class BoxPainter
                     .WithHole(ix, iy, iw, ih, inner));
                 continue;
             }
-            if (Is3D(side.Style))
+            if (side.Style is BorderStyle.Inset or BorderStyle.Outset)
             {
                 group.Ops.Add(new RoundRectOp(x, y, w, h, r, Shade3D(side.Style, i, side.Color)) { Clip = corners.SidePolygon(i) }.WithHole(ix, iy, iw, ih, inner));
                 continue;
@@ -253,7 +256,7 @@ internal static partial class BoxPainter
 
     /// <summary>
     /// Paints one side of a border as the rectangle (x, y, w, h). <paramref name="which"/> (0 top, 1 right, 2 bottom,
-    /// 3 left) shades the 3D styles; without it they are drawn solid.
+    /// 3 left) shades the 3D styles; without it they are drawn solid, as is a groove or ridge too thin for two shades.
     /// </summary>
     public static void Side(GroupOp group, BorderStyle style, float width, uint color, float x, float y, float w, float h, bool horizontal, int which = -1)
     {
@@ -263,7 +266,7 @@ internal static partial class BoxPainter
             case BorderStyle.Groove or BorderStyle.Ridge when which >= 0 && width >= MinGrooveWidth:
                 PaintGroove(group, style, which, color, x, y, w, h, horizontal);
                 break;
-            case BorderStyle.Groove or BorderStyle.Ridge or BorderStyle.Inset or BorderStyle.Outset when which >= 0:
+            case BorderStyle.Inset or BorderStyle.Outset when which >= 0:
                 group.Ops.Add(new RectOp(x, y, w, h, Shade3D(style, which, color)));
                 break;
             case BorderStyle.Dashed:

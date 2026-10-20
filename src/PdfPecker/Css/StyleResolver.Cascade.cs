@@ -17,6 +17,7 @@ internal sealed partial class StyleResolver
         if (_registeredEach.Count > 0 || _registeredRoot.Count > 0) PushRegistered(e);
         Collect(UaIndex.Value, e, TierUa, TierUaImportant);
         AddHints(e);
+        int authorStart = _count;
         Collect(_author, e, TierAuthor, TierAuthorImportant);
         var inline = e.GetAttribute("style");
         if (!string.IsNullOrEmpty(inline))
@@ -31,6 +32,7 @@ internal sealed partial class StyleResolver
             for (int i = 0; i < parsed.Count; i++)
                 Push(parsed[i].Important ? TierInlineImportant : TierInline, 0, 0, i, parsed[i]);
         }
+        StyledControlFallback(e, authorStart);
 
         if (_count > 1) Array.Sort(_keys, _decls, 0, _count);
         e.Style = Compute(e.Name, parent);

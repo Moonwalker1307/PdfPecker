@@ -440,10 +440,12 @@ internal sealed partial class LayoutEngine
 
         float top = FlowBoxTop(ref f, e, breakBefore, out float mt);
         int boxOps = _ops.Count;
+        _lastProbeStopped = false;
         float bottom = LayoutFlowBoxContent(ref f, e, ref top, joins, boxOps, out var passed);
         float trailing = _boxTrailing;
         if (joins && KeepTogetherFails(f.Chain, boxOps, top, f.ForcedAt))
         {
+            if (passed is { Stopped: true } || _lastProbeStopped) DebugT.RewindStopped++; else DebugT.RewindFull[Math.Min(_tableDepth,63)]++;
             RewindToChain(ref f);
             return FlowStep.Next;
         }
@@ -547,11 +549,15 @@ internal sealed partial class LayoutEngine
         int listBefore = _currentListIndex;
         _childPageBox = f.Pages;
         _childProbe = childProbe ?? passed;
+        if (joins) _joinDepth++;
         float bottom = LayoutBlockBox(e, bx, top, bw, shrinkToFit: false);
+        if (joins) _joinDepth--;
         _childProbe = null;
+        _lastProbeStopped = childProbe is { Stopped: true };
         if (childProbe is { Stopped: true } && !KeepTogetherFails(f.Chain, boxOps, top, f.ForcedAt))
         {
             // The chain stays after all, so the box needs all of its content: lay it out again in full.
+            DebugT.Relayout++;
             Truncate(boxOps);
             _marker = markerBefore;
             _currentListIndex = listBefore;
@@ -564,6 +570,7 @@ internal sealed partial class LayoutEngine
     /// <summary>Moves the flow back to the start of its keep-with-next chain, which then goes to the next page.</summary>
     private void RewindToChain(ref FlowState f)
     {
+        DebugT.Rewind++; DebugT.RewindAt[Math.Min(_tableDepth,63)]++;
         RewindFlow(ref f, f.Chain);
         f.ForcedAt = f.Chain.Index;
         f.HasChain = f.HasPrev = f.PrevAvoidAfter = false;
@@ -620,6 +627,7 @@ internal sealed partial class LayoutEngine
         public bool Done => Stopped || Answered;
     }
 
+    internal bool _lastProbeStopped;
     private KeepProbe? _childProbe; // for the box LayoutFlow lays out next, taken by LayoutBlockBoxCore
     private KeepProbe? _flowProbe;  // for the flow of that box, taken by LayoutFlow
 
@@ -672,9 +680,17 @@ internal sealed partial class LayoutEngine
     /// Whether the content laid out from <paramref name="opsStart"/> begins on a later page than the chain that must stay
     /// with it, and moving the chain to a new page would help.
     /// </summary>
+    /// <remarks>
+    /// Chains nested in more boxes that are themselves kept with a chain than <see cref="MaxKeptWholeNesting"/> stay
+    /// where they are: moving a chain lays out everything in it again, at every level of such nesting, so the work
+    /// doubled with each level.
+    /// </remarks>
     private bool KeepTogetherFails(in FlowMark chain, int opsStart, float fallbackY, int forcedAt)
-        => chain.Index != forcedAt && !AtPageTop(chain.Top)
+        => chain.Index != forcedAt && !AtPageTop(chain.Top) && _joinDepth < MaxKeptWholeNesting
            && FirstContentPage(opsStart, fallbackY) > chain.FirstPage;
+
+    /// <summary>How many boxes that keep-with-next chains may move to the next page are being laid out around this point.</summary>
+    private int _joinDepth;
 
     /// <summary>The page of the first text, image or drawing among the ops from <paramref name="from"/>.</summary>
     private int FirstContentPage(int from, float fallbackY) => FirstContentPage(from, _ops.Count, fallbackY);
@@ -837,6 +853,12 @@ internal sealed partial class LayoutEngine
     /// </summary>
     private const int MaxKeptWholeNesting = 8;
 
+    /// <summary>
+    /// How many boxes kept whole, counting the box itself, a box in columns that looks taller than the next column can
+    /// be nested in and still be tried there.
+    /// </summary>
+    private const int MaxTriedInColumnsNesting = 6;
+
     /// <summary>Lays out a block-level box whose top border edge is at <paramref name="y"/>. Returns its bottom border edge.</summary>
     private float LayoutBlockBox(Element e, float x, float y, float availW, bool shrinkToFit)
     {
@@ -863,7 +885,9 @@ internal sealed partial class LayoutEngine
             // A trial that failed here before would end with the box laid out where it is, which it just was.
             var trial = new AvoidTrial(e, _grid, x, y, availW, nextHeight);
             bool failedBefore = !fitsNext && _failedAvoidTrials?.Contains(trial) == true;
-            if (!failedBefore && (fitsNext || _grid is ColumnGrid))
+            // A box nested in more than six boxes kept whole in columns is tried there only when it fits: each box around
+            // it is tried there too, and with each level trying the levels inside it again, the work doubled per level.
+            if (!failedBefore && (fitsNext || _grid is ColumnGrid && _avoidDepth <= MaxTriedInColumnsNesting))
             {
                 float oy = y, ox = x, oavailW = availW;
                 int page = PageOf(y);
@@ -1702,12 +1726,18 @@ internal sealed partial class LayoutEngine
         if (!_headingKeys.TryGetValue(e, out var key))
         {
             var title = CollapseWhitespace(e.InnerText());
-            if (title.Length == 0) return;
+            // A heading without text gets no bookmark, which is remembered too: a heading's text is that of everything
+            // in it, and headings nested in each other were read again in full every time they were laid out.
+            if (title.Length == 0)
+            {
+                _headingKeys[e] = "";
+                return;
+            }
             key = "\u0001h" + Headings!.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
             _headingKeys[e] = key;
             Headings.Add(new OutlineHeading(title, level, key, e));
         }
-        SetAnchor(key, ContentTop(top, opsStart));
+        if (key.Length > 0) SetAnchor(key, ContentTop(top, opsStart));
     }
 
     /// <summary>Where a box starts for anchors: its top, or its first line of text when that moved to the next page.</summary>
@@ -1826,6 +1856,7 @@ internal sealed partial class LayoutEngine
         _capturing = true;
         _lastBoxRight = 0;
         int breaks = _forcedBreaks;
+        _captureDepth++;
         try
         {
             float bottom = layout();
@@ -1842,6 +1873,7 @@ internal sealed partial class LayoutEngine
         }
         finally
         {
+            _captureDepth--;
             _frames.Remove(boundary);
             boundary.TakePending();
             _boundaryPool.Push(boundary);
@@ -1914,7 +1946,8 @@ internal sealed partial class LayoutEngine
         if (!reuse) return CaptureBoxCore(src);
         Captured c;
         if (_knownBoxes != null && FindKnown(_knownBoxes, src) is { } known && known.ListIndexBefore == _currentListIndex
-            && !_measuring && Tags == null && Footnotes == null && _columnNotes == null && SameContext(e, known))
+            && !_measuring && Tags == null && Footnotes == null && (_columnNotes == null || _captureDepth >= MaxPlacedOnPagesInColumns)
+            && SameContext(e, known))
         {
             // Measured already where the box around it was captured: only its content may still be needed.
             c = Measured(known);
@@ -2104,8 +2137,15 @@ internal sealed partial class LayoutEngine
     /// <summary>The depth up to which a box laid out again on the pages may be laid out a second time.</summary>
     private const int MaxRepeatedOnPages = 2;
 
-    /// <summary>How many boxes, one inside the other, are laid out again where they land in columns.</summary>
+    /// <summary>
+    /// How many boxes, one inside the other, are laid out again where they land in columns. Boxes captured deeper than
+    /// that in columns also reuse what they measured, as they do on pages: without it, each level laid out everything
+    /// below it again, so the work grew with the square of the depth.
+    /// </summary>
     private const int MaxPlacedOnPagesInColumns = 8;
+
+    /// <summary>How many layouts of content on its own (see <see cref="Capture"/>) are in progress, one inside the other.</summary>
+    private int _captureDepth;
 
     /// <summary>Moves captured content to its final position and appends it to the output.</summary>
     private void Place(Captured c, float dx, float dy)
