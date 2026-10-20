@@ -251,6 +251,21 @@ public class TransparencyAndRadiusTests
     }
 
     [Fact]
+    public void Inline_image_draws_its_border_padding_and_background()
+    {
+        // Chrome draws the box of an image that stays inline: the picture sits inside the padding, inside the border.
+        string png = "data:image/png;base64," + Convert.ToBase64String(SolidPng(10, 10, 0, 0, 255));
+        var ops = Ops($"<p>a <img src='{png}' style='width:40pt; height:40pt; padding:4pt; background:#ff0; border:3pt solid red'> b</p>");
+        var img = ops.OfType<ImageOp>().Single();
+        var yellow = ops.OfType<RectOp>().Single(r => r.Color == 0xFFFFFF00);
+        Assert.Equal(40, img.W, 0.05f);
+        Assert.Equal(yellow.X + 7, img.X, 0.05f);
+        Assert.Equal(yellow.Y + 7, img.Y, 0.05f);
+        Assert.Equal(54, yellow.W, 0.05f);
+        Assert.Equal(3, ops.OfType<BorderRectOp>().Single().Width, 0.05f);
+    }
+
+    [Fact]
     public void Box_shadow_follows_the_radius()
     {
         var ops = Ops("<div style='height:50pt; border-radius:10pt; box-shadow: 0 4px 8px rgba(0,0,0,.3)'></div>");
