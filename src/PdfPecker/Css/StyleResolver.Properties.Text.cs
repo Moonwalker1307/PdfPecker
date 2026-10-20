@@ -136,6 +136,17 @@ internal sealed partial class StyleResolver
             _ => s.TextAlign,
         };
         if (d.Lower == "justify-all") s.TextAlignLast = TextAlign.Justify;
+        // The legacy values that align attributes and the center element map to also move child blocks narrower than
+        // their container, as in Chrome; every other value aligns only the lines.
+        s.BlockAlign = d.Lower switch
+        {
+            "-webkit-left" => TextAlign.Left,
+            "-webkit-right" => TextAlign.Right,
+            "-webkit-center" => TextAlign.Center,
+            "inherit" => parent.BlockAlign,
+            "start" or "end" or "left" or "right" or "center" or "middle" or "justify" or "justify-all" => null,
+            _ => s.BlockAlign,
+        };
     }
 
     private static void ApplyTextAlignLast(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)

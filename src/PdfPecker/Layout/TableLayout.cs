@@ -554,6 +554,7 @@ internal sealed partial class LayoutEngine
         if (s.MarginLeft.IsAuto && s.MarginRight.IsAuto) ml = Math.Max(0, (availW - boxW) / 2);
         else if (s.MarginLeft.IsAuto) ml = Math.Max(0, availW - boxW - mr);
         else if (table.Parent?.Style is { Rtl: true } && !s.Floated && !s.OutOfFlow) ml = Math.Max(0, availW - boxW - mr);
+        else if (!s.Floated && !s.OutOfFlow) ml += LegacyBlockShift(table, availW - boxW - ml - mr);
         float bx = x + ml;
 
         var colX = new float[n + 1];

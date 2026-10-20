@@ -26,8 +26,16 @@ internal sealed partial class StyleResolver
             case "img":
                 if ((v = e.GetAttribute("width")) != null) Hint("width", PxOrPercent(v));
                 if ((v = e.GetAttribute("height")) != null) Hint("height", PxOrPercent(v));
+                if ((v = e.GetAttribute("hspace")) != null) { Hint("margin-left", PxOrPercent(v)); Hint("margin-right", PxOrPercent(v)); }
+                if ((v = e.GetAttribute("vspace")) != null) { Hint("margin-top", PxOrPercent(v)); Hint("margin-bottom", PxOrPercent(v)); }
+                FloatHint(e.GetAttribute("align"));
                 AlignHint(e.GetAttribute("align"), block: true);
                 break;
+            case "ol":
+            case "ul":
+            case "li":
+                if (e.GetAttribute("type") is { } type && ListTypeAttr(type.Trim(), e.Name) is { } listType) Hint("list-style-type", listType);
+                goto default;
             case "table":
                 if ((v = e.GetAttribute("width")) != null) Hint("width", PxOrPercent(v));
                 if ((v = e.GetAttribute("height")) != null) Hint("height", PxOrPercent(v));
@@ -38,14 +46,19 @@ internal sealed partial class StyleResolver
                     var bw = v.Length == 0 ? "1px" : PxOrPercent(v);
                     if (bw != "0px")
                     {
+                        // With a bordercolor, Chrome draws the borders solid in that colour instead of grey and outset.
+                        var color = BorderColorAttr(e);
                         foreach (var side in new[] { "top", "right", "bottom", "left" })
                         {
                             Hint("border-" + side + "-width", bw);
-                            Hint("border-" + side + "-style", "outset");
-                            Hint("border-" + side + "-color", "gray");
+                            Hint("border-" + side + "-style", color != null ? "solid" : "outset");
+                            Hint("border-" + side + "-color", color ?? "gray");
                         }
                     }
                 }
+                // rules draws lines between the cells only, and collapses the borders to do so.
+                if (RulesAttr(e) != null) Hint("border-collapse", "collapse");
+                FloatHint(e.GetAttribute("align"));
                 AlignHint(e.GetAttribute("align"), block: true);
                 break;
             case "td":
@@ -54,7 +67,7 @@ internal sealed partial class StyleResolver
                 if ((v = e.GetAttribute("width")) != null) Hint("width", PxOrPercent(v));
                 if ((v = e.GetAttribute("height")) != null) Hint("height", PxOrPercent(v));
                 if ((v = e.GetAttribute("bgcolor")) != null) Hint("background-color", v);
-                if ((v = e.GetAttribute("align")) != null) Hint("text-align", v.ToLowerInvariant());
+                if ((v = e.GetAttribute("align")) != null) Hint("text-align", LegacyTextAlign(v));
                 if ((v = e.GetAttribute("valign")) != null) Hint("vertical-align", v.ToLowerInvariant());
                 if (e.HasAttribute("nowrap")) Hint("white-space", "nowrap");
                 var table = FindTable(e);
@@ -63,12 +76,29 @@ internal sealed partial class StyleResolver
                     if ((v = table.GetAttribute("cellpadding")) != null)
                         foreach (var side in new[] { "top", "right", "bottom", "left" }) Hint("padding-" + side, PxOrPercent(v));
                     if ((v = table.GetAttribute("border")) != null && (v.Length == 0 || PxOrPercent(v) != "0px"))
+                    {
+                        var color = BorderColorAttr(table);
                         foreach (var side in new[] { "top", "right", "bottom", "left" })
                         {
                             Hint("border-" + side + "-width", "1px");
-                            Hint("border-" + side + "-style", "inset");
-                            Hint("border-" + side + "-color", "gray");
+                            Hint("border-" + side + "-style", color != null ? "solid" : "inset");
+                            Hint("border-" + side + "-color", color ?? "gray");
                         }
+                    }
+                    if (RulesAttr(table) is { } rules)
+                    {
+                        // rules=cols draws the cells' left and right borders, rows their top and bottom, all both, and
+                        // none (or groups, which needs row groups) none, after the border attribute's cell borders.
+                        bool colRules = rules is "cols" or "all", rowRules = rules is "rows" or "all";
+                        var color = BorderColorAttr(table) ?? "gray";
+                        foreach (var side in new[] { "top", "right", "bottom", "left" })
+                        {
+                            bool on = side is "left" or "right" ? colRules : rowRules;
+                            Hint("border-" + side + "-width", on ? "1px" : "0px");
+                            Hint("border-" + side + "-style", on ? "solid" : "none");
+                            Hint("border-" + side + "-color", color);
+                        }
+                    }
                 }
                 break;
             }
@@ -77,7 +107,7 @@ internal sealed partial class StyleResolver
             case "tbody":
             case "tfoot":
                 if ((v = e.GetAttribute("bgcolor")) != null) Hint("background-color", v);
-                if ((v = e.GetAttribute("align")) != null) Hint("text-align", v.ToLowerInvariant());
+                if ((v = e.GetAttribute("align")) != null) Hint("text-align", LegacyTextAlign(v));
                 if ((v = e.GetAttribute("valign")) != null) Hint("vertical-align", v.ToLowerInvariant());
                 break;
             case "input" when e.Control is { Kind: Layout.ControlKind.Text }:
@@ -107,14 +137,19 @@ internal sealed partial class StyleResolver
                 if ((v = e.GetAttribute("size")) != null) { Hint("border-top-width", PxOrPercent(v)); Hint("border-bottom-width", "0"); }
                 if ((v = e.GetAttribute("color")) != null) { Hint("border-top-color", v); Hint("border-bottom-color", v); Hint("background-color", v); }
                 if (e.HasAttribute("noshade")) { Hint("border-top-style", "solid"); Hint("border-bottom-style", "solid"); }
-                AlignHint(e.GetAttribute("align"), block: true);
+                // A rule narrower than its box is centred unless align puts it at one side.
+                switch (e.GetAttribute("align")?.Trim().ToLowerInvariant())
+                {
+                    case "left": Hint("margin-left", "0px"); Hint("margin-right", "auto"); break;
+                    case "right": Hint("margin-left", "auto"); Hint("margin-right", "0px"); break;
+                }
                 break;
             case "body":
                 if ((v = e.GetAttribute("bgcolor")) != null) Hint("background-color", v);
                 if ((v = e.GetAttribute("text")) != null) Hint("color", v);
                 break;
             default:
-                if ((v = e.GetAttribute("align")) != null) Hint("text-align", v.ToLowerInvariant());
+                if ((v = e.GetAttribute("align")) != null) Hint("text-align", LegacyTextAlign(v));
                 if ((v = e.GetAttribute("bgcolor")) != null) Hint("background-color", v);
                 break;
         }
@@ -236,6 +271,55 @@ internal sealed partial class StyleResolver
             return false;
         }
     }
+
+    /// <summary>align=left or right on an img or table floats it to that side, as in Chrome.</summary>
+    private void FloatHint(string? align)
+    {
+        var side = align?.Trim().ToLowerInvariant();
+        if (side is "left" or "right") Hint("float", side);
+    }
+
+    /// <summary>
+    /// The list-style-type of a list's or list item's type attribute: on ol and li the case-sensitive 1, a, A, i and I,
+    /// and on ul and li disc, circle and square in any case; null for anything else.
+    /// </summary>
+    private static string? ListTypeAttr(string type, string element)
+    {
+        if (element != "ul")
+        {
+            switch (type)
+            {
+                case "1": return "decimal";
+                case "a": return "lower-alpha";
+                case "A": return "upper-alpha";
+                case "i": return "lower-roman";
+                case "I": return "upper-roman";
+            }
+        }
+        if (element == "ol") return null;
+        var bullet = type.ToLowerInvariant();
+        return bullet is "disc" or "circle" or "square" ? bullet : null;
+    }
+
+    /// <summary>
+    /// The text-align of an align attribute. Chrome maps left, center and right to the legacy -webkit- values, which
+    /// also move child blocks such as a nested table.
+    /// </summary>
+    private static string LegacyTextAlign(string align)
+    {
+        var a = align.Trim().ToLowerInvariant();
+        return a switch { "left" => "-webkit-left", "right" => "-webkit-right", "center" or "middle" => "-webkit-center", _ => a };
+    }
+
+    /// <summary>A table's rules attribute (none, groups, rows, cols or all), lower case; null when it has none or another value.</summary>
+    private static string? RulesAttr(Element table)
+    {
+        var rules = table.GetAttribute("rules")?.Trim().ToLowerInvariant();
+        return rules is "none" or "groups" or "rows" or "cols" or "all" ? rules : null;
+    }
+
+    /// <summary>A table's bordercolor attribute, or null when it has none.</summary>
+    private static string? BorderColorAttr(Element table) => table.GetAttribute("bordercolor")?.Trim() is { Length: > 0 } c ? c : null;
 
     private void AlignHint(string? align, bool block)
     {

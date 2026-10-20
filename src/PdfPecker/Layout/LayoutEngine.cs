@@ -258,6 +258,7 @@ internal sealed partial class LayoutEngine
         public bool AbsorbFirst;        // the parent has taken its first child's top margin as its own
         public bool FirstBlock;
         public int ListIndex;
+        public bool ListReversed;       // an ol reversed counts down
         public int Index;               // the child being laid out, which a rewind moves back
         // Keep-with-next: the first box of a run of boxes that must not be separated from what follows them.
         public FlowMark Prev, Chain;
@@ -353,7 +354,13 @@ internal sealed partial class LayoutEngine
         _absorbTop = false;
         f.FirstBlock = true;
 
-        if (parent.Name == "ol" && Invariant.TryParseInt(parent.GetAttribute("start"), out int start)) f.ListIndex = start - 1;
+        if (parent.Name == "ol")
+        {
+            // A reversed list counts down, from its start or else from its number of items.
+            f.ListReversed = parent.HasAttribute("reversed");
+            if (Invariant.TryParseInt(parent.GetAttribute("start"), out int start)) f.ListIndex = f.ListReversed ? start + 1 : start - 1;
+            else if (f.ListReversed) f.ListIndex = CountListItems(parent) + 1;
+        }
 
         if (resume is { } at)
         {
@@ -370,6 +377,14 @@ internal sealed partial class LayoutEngine
         end = range?.To ?? f.Children.Count;
         f.Index = resume?.Mark.Index ?? range?.From ?? 0;
         return f;
+    }
+
+    private static int CountListItems(Element list)
+    {
+        int n = 0;
+        foreach (var c in list.Children)
+            if (c is Element { Style.Display: Display.ListItem }) n++;
+        return n;
     }
 
     /// <summary>
@@ -434,7 +449,7 @@ internal sealed partial class LayoutEngine
         if (s.PageBreakBefore || s.PageBreakAfter) _forcedBreaks++;
         if (s.Display == Display.ListItem)
         {
-            f.ListIndex++;
+            f.ListIndex += f.ListReversed ? -1 : 1;
             if (Invariant.TryParseInt(e.GetAttribute("value"), out int v)) f.ListIndex = v;
             _currentListIndex = f.ListIndex;
         }
@@ -1344,7 +1359,18 @@ internal sealed partial class LayoutEngine
         if (s.MarginLeft.IsAuto && s.MarginRight.IsAuto) return Math.Max(0, (availW - used) / 2);
         if (s.MarginLeft.IsAuto) return Math.Max(0, availW - used - mr);
         if (!sized && !s.Floated && !s.OutOfFlow && e.Parent?.Style is { Rtl: true }) return Math.Max(0, availW - used - mr);
+        if (!s.Floated && !s.OutOfFlow) ml += LegacyBlockShift(e, availW - used - ml - mr);
         return ml;
+    }
+
+    /// <summary>
+    /// How far a block box with fixed margins moves into the <paramref name="free"/> space beside it in a container
+    /// aligned with -webkit-center or -webkit-right (an align attribute or the center element), as Chrome moves it.
+    /// </summary>
+    private static float LegacyBlockShift(Element e, float free)
+    {
+        if (!(free > 0) || e.Parent?.Style?.BlockAlign is not { } align) return 0;
+        return align switch { TextAlign.Center => free / 2, TextAlign.Right => free, _ => 0 };
     }
 
     /// <summary>
