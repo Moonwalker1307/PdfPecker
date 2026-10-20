@@ -536,7 +536,10 @@ internal sealed partial class LayoutEngine
 
         // A box that must start on the page of the chain before it is only laid out until it is clear where its
         // first content lands, when that is a later page and the chain has to move anyway.
-        var childProbe = joins && f.Chain.Index != f.ForcedAt && !AtPageTop(f.Chain.Top) && CanProbe(e)
+        // Nested deeper than chains move (see KeepTogetherFails), the chain stays whatever the probe finds, and the box
+        // stopped early was laid out again in full: at every level, so the work doubled with each page.
+        var childProbe = joins && f.Chain.Index != f.ForcedAt && !AtPageTop(f.Chain.Top) && _joinDepth < MaxKeptWholeNesting
+                         && CanProbe(e)
             ? new KeepProbe(boxOps, f.Chain.FirstPage)
             : null;
         // A flow that is probed itself hands its probe to its first box, whose first content is this flow's.

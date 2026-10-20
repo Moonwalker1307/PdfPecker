@@ -1752,6 +1752,17 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Headings_nested_deeper_than_chains_move_are_laid_out_once()
+    {
+        // Found by the nightly fuzz run: target html, timeout-b4187992. Each level is a box holding an empty bordered box
+        // and a heading kept with the next level. Deeper than chains move to the next page, each box was still laid out
+        // until its first text was placed, then again in full, so the work doubled with each page: 147 levels took 4 s.
+        var html = "<style>h2{margin:14px 0 6px}.b{height:90px;border:1px solid}</style><div style='margin-top:16px'>x"
+            + Repeat("<div><div class=b></div><h2>WebP and GIF</h2>", 250);
+        AssertStructurallyValid(Bounded(html, new PdfOptions { MaxPages = 1000 }));
+    }
+
+    [Fact]
     public void Headings_before_tables_nested_in_split_header_cells_are_laid_out_once()
     {
         // Found by the fuzzer: target html, timeout-c201378d. Each level is a heading kept with a table whose header row
