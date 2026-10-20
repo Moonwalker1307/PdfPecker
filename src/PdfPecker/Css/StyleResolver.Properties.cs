@@ -39,6 +39,7 @@ internal sealed partial class StyleResolver
     private void Apply(ComputedStyle s, ComputedStyle parent, string prop, string raw)
     {
         var d = new DeclaredValue(raw, s.FontSize);
+        if (d.Lower is "inherit" or "initial" or "unset" && ApplyCssWideKeyword(s, parent, prop, d.Lower)) return;
 
         // A string switch compiles to a hash jump, so one flat switch is the cheapest way to find the property, and this
         // runs for every declaration of every element. Single calls of a shared helper stay inline.
