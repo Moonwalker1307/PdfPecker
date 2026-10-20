@@ -279,6 +279,27 @@ public class GraphicsFeatureTests
         Assert.Equal(Count(Fills("")) + bars, Count(Fills(decoration)));
     }
 
+    [Fact]
+    public void Svg_use_draws_a_symbol_defined_in_another_svg_fitted_to_its_viewbox()
+    {
+        var html = "<svg width='0' height='0'><symbol id='s' viewBox='0 0 10 10'><rect width='10' height='10' fill='red'/></symbol></svg>"
+            + "<svg width='100' height='100'><use href='#s' width='50' height='50'/></svg>";
+        var ops = Layout(html);
+        var content = AllContent(ConvertUncompressed(html));
+        // The 10 × 10 viewBox is scaled by five onto the use's 50 × 50 box: a 50-unit square in the stream.
+        Assert.Matches(@"(?m)^0 0 50 50 re|^[\d.]+ [\d.]+ m\n(?:[\d.]+ [\d.]+ l\n){3}", content + "\n");
+        Assert.Contains(" rg", content);
+    }
+
+    [Fact]
+    public void Svg_group_opacity_composites_the_group_as_one()
+    {
+        var content = AllContent(ConvertUncompressed(
+            "<svg width='100' height='60'><g opacity='0.5'><rect width='60' height='40' fill='blue'/><rect x='30' y='10' width='60' height='40' fill='red'/></g></svg>"));
+        Assert.Contains("/Fx", content); // one transparency group form, painted at half opacity
+        Assert.Contains("/g128 gs", content);
+    }
+
     // ---- Named grid lines and areas ----
 
     [Fact]
