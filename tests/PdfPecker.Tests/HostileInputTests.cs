@@ -1763,6 +1763,28 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Nested_painted_boxes_across_a_page_keep_their_edges_in_bounded_time()
+    {
+        // Found by the nightly fuzz run: target html, timeout-d2edd0b0. Nested boxes with a background and padding end
+        // their content at two places in turn, so room kept at the page end for their bottom edges, found not to move
+        // that content, was tried again at every other level: once they crossed a page, 116 levels did not finish.
+        var html = "<style>.op{background:#111;padding:8px;border-radius:6px;width:200px}</style><h2>border-radius</h2>"
+            + Repeat("<div class=op style='opacity:1'>", 150);
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
+    public void Nested_boxes_kept_whole_across_pages_move_to_the_next_page_to_a_bounded_depth()
+    {
+        // Found by the nightly fuzz run: target html, timeout-b4187992. Empty nested boxes kept whole and taller than
+        // a page leave only their top edges at each page end; each moved to the next page, the boxes around it followed
+        // one by one, and boxes inside moved again from the next page, four levels deep: 53 levels did not finish.
+        var html = "<style>@page{size:A5;margin:18mm 14mm}.box{break-inside:avoid;border:0.75pt solid;background:#eef8f6;"
+            + "padding:5pt;margin:6pt 0}</style>" + Repeat("<div class=box>", 120);
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
     public void Headings_before_tables_nested_in_split_header_cells_are_laid_out_once()
     {
         // Found by the fuzzer: target html, timeout-c201378d. Each level is a heading kept with a table whose header row
