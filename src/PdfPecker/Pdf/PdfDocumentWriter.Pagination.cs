@@ -158,8 +158,25 @@ internal sealed partial class PdfDocumentWriter
                     foreach (var o in clip.Ops) Distribute(o, parts);
                     bool clipsY = clip.H < ClipOp.Far;
                     int first = clipsY ? PageOf(clip.Y) : 0, last = clipsY ? Math.Max(first, PageOf(clip.Y + clip.H - 0.5f)) : int.MaxValue;
+                    // Content starting above the clip's first page, such as an image that object-fit: none centres in a
+                    // smaller box, shows only through the clip, so it is drawn with the clip on that page.
+                    List<Placed>? above = null;
                     foreach (var (p, items) in parts)
-                        if (p >= first && p <= last) Target(into, p).Add(new Placed(new ClipBlock(clip, items), 0, 0));
+                    {
+                        if (p < first)
+                        {
+                            (above ??= new List<Placed>()).AddRange(items);
+                            continue;
+                        }
+                        if (p > last) continue;
+                        if (p == first && above != null)
+                        {
+                            items.InsertRange(0, above);
+                            above = null;
+                        }
+                        Target(into, p).Add(new Placed(new ClipBlock(clip, items), 0, 0));
+                    }
+                    if (above != null && first <= last) Target(into, first).Add(new Placed(new ClipBlock(clip, above), 0, 0));
                     break;
                 }
                 case FieldOp field:
