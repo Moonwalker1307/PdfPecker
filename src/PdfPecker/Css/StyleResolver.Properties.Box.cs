@@ -39,6 +39,27 @@ internal sealed partial class StyleResolver
         if (d.Lower == "flow-root") s.FormattingRoot = true;
     }
 
+    /// <summary>width: a length, or an intrinsic size keyword, which leaves the length auto for layout to size.</summary>
+    private void ApplyWidth(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        var keyword = d.Lower switch
+        {
+            "min-content" or "-webkit-min-content" => SizeKeyword.MinContent,
+            "max-content" or "-webkit-max-content" => SizeKeyword.MaxContent,
+            "fit-content" or "-webkit-fit-content" or "-moz-fit-content" => SizeKeyword.FitContent,
+            _ => SizeKeyword.None,
+        };
+        if (keyword != SizeKeyword.None)
+        {
+            s.Width = Length.Auto;
+            s.WidthKeyword = keyword;
+            return;
+        }
+        SetLength(ref s.Width, d.Lower, d.Em, d.Inherit ? parent.Width : null);
+        if (d.Inherit) s.WidthKeyword = parent.WidthKeyword;
+        else if (d.Lower == "auto" || !s.Width.IsAuto) s.WidthKeyword = SizeKeyword.None;
+    }
+
     private static void ApplyFloat(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
         string lower = d.Lower;

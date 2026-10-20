@@ -254,6 +254,16 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Nested_wrapping_column_flex_boxes_stay_bounded()
+    {
+        // A wrapping column flex box lays its items out to break them into lines and again in their lines, so each
+        // level of them inside each other doubled the work below it: 12 levels took 110 ms, and 40 would take hours.
+        const string level = "<div style='display:flex; flex-direction:column; flex-wrap:wrap; height:500px'>"
+            + "<div style='height:300px'>a</div><div style='height:300px'>b</div>";
+        AssertStructurallyValid(Bounded(Repeat(level, 200) + "x"));
+    }
+
+    [Fact]
     public void Deeply_nested_subgrids_with_huge_spans_stay_bounded()
     {
         // Two hundred subgrids inside each other, each spanning a thousand of its parent's columns on both axes, with

@@ -209,7 +209,7 @@ internal sealed partial class LayoutEngine
             // min-width: auto means "not smaller than the content" for flex items: the min-content width of what is inside
             // the item, not of the item with its own width, or a fixed width could never shrink.
             if (specified.HasValue && it.El != null && st.Display != Display.Table) mn = ContentIntrinsic(it.El).Min + frame;
-            float min = !st.MinWidth.IsAuto && st.MinWidth.Value > 0 ? st.MinWidth.Resolve(w) + (st.BorderBox ? 0 : frame) : Math.Min(mn, specified ?? mn);
+            float min = !st.MinWidth.IsAuto ? st.MinWidth.Resolve(w) + (st.BorderBox ? 0 : frame) : Math.Min(mn, specified ?? mn);
             float max = !st.MaxWidth.IsAuto ? st.MaxWidth.Resolve(w) + (st.BorderBox ? 0 : frame) : float.PositiveInfinity;
             it.MinMain = min;
             it.MaxMain = Math.Max(min, max);
@@ -457,6 +457,110 @@ internal sealed partial class LayoutEngine
     private float LayoutFlexColumn(Element e, List<BoxItem> items, float x, float y, float w, float? definiteH, float minH)
     {
         var s = e.Style;
+        if (s.FlexWrap == FlexWrap.NoWrap || definiteH is not { } height || items.Count < 2 || _wrappedColumnDepth >= MaxWrappedColumnDepth)
+            return LayoutFlexColumnLine(e, items, x, y, w, definiteH, minH);
+        _wrappedColumnDepth++;
+        try
+        {
+            return FlexColumnLines(e, items, w, height) is { } lines
+                ? LayoutFlexColumnLines(e, lines, x, y, w, definiteH, minH)
+                : LayoutFlexColumnLine(e, items, x, y, w, definiteH, minH);
+        }
+        finally
+        {
+            _wrappedColumnDepth--;
+        }
+    }
+
+    /// <summary>
+    /// How many wrapping column flex boxes inside each other break into lines. Each one lays its items out twice, once
+    /// to measure them for the line breaks and once in their lines, so nested ones multiply the work; deeper ones are
+    /// laid out in a single line, which keeps the work bounded.
+    /// </summary>
+    private const int MaxWrappedColumnDepth = 4;
+
+    private int _wrappedColumnDepth;
+
+    /// <summary>Lays out the lines of a wrapping column flex box side by side, each as wide as its widest item.</summary>
+    private float LayoutFlexColumnLines(Element e, List<List<BoxItem>> lines, float x, float y, float w, float? definiteH, float minH)
+    {
+        var s = e.Style;
+        // Several columns side by side: each is laid out as a single-line column box as wide as its line.
+        float colGap = GapOf(s.ColumnGap, w);
+        var lineW = new float[lines.Count];
+        float used = colGap * (lines.Count - 1);
+        for (int li = 0; li < lines.Count; li++)
+        {
+            foreach (var it in lines[li]) lineW[li] = Math.Max(lineW[li], it.Hypo);
+            used += lineW[li];
+        }
+        float before = 0, between = 0;
+        if (w > used + Eps)
+        {
+            float free = w - used;
+            if (s.AlignContent is BoxAlign.Normal or BoxAlign.Stretch)
+                for (int li = 0; li < lines.Count; li++) lineW[li] += free / lines.Count;
+            else Distribute(s.AlignContent, free, lines.Count, out before, out between);
+        }
+        // Lines run from the cross start, the right in a right-to-left box, and from the other side for wrap-reverse.
+        bool fromRight = (s.FlexWrap == FlexWrap.WrapReverse) != s.Rtl;
+        float lx = before, bottom = y;
+        float firstBaseline = float.NaN;
+        for (int li = 0; li < lines.Count; li++)
+        {
+            float left = fromRight ? x + w - lx - lineW[li] : x + lx;
+            bottom = Math.Max(bottom, LayoutFlexColumnLine(e, lines[li], left, y, lineW[li], definiteH, minH));
+            if (float.IsNaN(firstBaseline)) firstBaseline = _lastBaseline;
+            lx += lineW[li] + colGap + between;
+        }
+        if (!float.IsNaN(firstBaseline)) _lastBaseline = firstBaseline;
+        return bottom;
+    }
+
+
+    /// <summary>
+    /// Breaks the items of a wrapping column flex box <paramref name="height"/> tall into lines, with each item's
+    /// hypothetical cross size (its fit-content border-box width plus margins) in <see cref="BoxItem.Hypo"/>. Returns
+    /// null when everything fits in one line, which the single-line layout handles as before.
+    /// </summary>
+    private List<List<BoxItem>>? FlexColumnLines(Element e, List<BoxItem> items, float w, float height)
+    {
+        var s = e.Style;
+        float gap = GapOf(s.RowGap, w);
+        var lines = new List<List<BoxItem>>();
+        var cur = new List<BoxItem>();
+        float usedH = 0;
+        foreach (var it in items)
+        {
+            var st = it.Style;
+            float borderW;
+            if (it.El != null && !st.Width.IsAuto && !it.IsReplaced) borderW = st.Width.Resolve(w) + (st.BorderBox ? 0 : HorizontalFrame(st, w));
+            else
+            {
+                var (mn, mx) = ItemIntrinsic(it);
+                borderW = st.WidthKeyword == SizeKeyword.MaxContent ? mx : Math.Min(mx, Math.Max(mn, w - it.Ml - it.Mr));
+            }
+            it.Hypo = borderW + it.Ml + it.Mr;
+            float h = Measure(it, e, it.Hypo, stretch: false).Height;
+            if (it.El != null && !st.FlexBasis.IsAuto)
+                h = Math.Max(h, st.FlexBasis.Resolve(height) + (st.BorderBox ? 0 : VerticalFrame(st, w)) + it.Mt + it.Mb);
+            if (cur.Count > 0 && usedH + gap + h > height + Eps)
+            {
+                lines.Add(cur);
+                cur = new List<BoxItem>();
+                usedH = 0;
+            }
+            usedH += (cur.Count > 0 ? gap : 0) + h;
+            cur.Add(it);
+        }
+        lines.Add(cur);
+        return lines.Count > 1 ? lines : null;
+    }
+
+    /// <summary>Lays out one line of a column flex box, <paramref name="w"/> wide, from top to bottom.</summary>
+    private float LayoutFlexColumnLine(Element e, List<BoxItem> items, float x, float y, float w, float? definiteH, float minH)
+    {
+        var s = e.Style;
         bool reverse = s.FlexDirection == FlexDirection.ColumnReverse;
         var justify = s.JustifyContent;
         if (reverse)
@@ -476,7 +580,7 @@ internal sealed partial class LayoutEngine
             var st = it.Style;
             var align = SelfAlign(it, s.AlignItems);
             bool autoH = it.AutoMl || it.AutoMr;
-            if (align == BoxAlign.Stretch && !autoH && (it.El == null || st.Width.IsAuto))
+            if (align == BoxAlign.Stretch && !autoH && (it.El == null || st.Width.IsAuto && st.WidthKeyword == SizeKeyword.None))
             {
                 stretch[i] = true;
                 outerW[i] = w;
@@ -484,7 +588,8 @@ internal sealed partial class LayoutEngine
             }
             float borderW;
             if (it.El != null && !st.Width.IsAuto && !it.IsReplaced) borderW = st.Width.Resolve(w) + (st.BorderBox ? 0 : HorizontalFrame(st, w));
-            else borderW = Math.Min(ItemIntrinsic(it).Max, w - it.Ml - it.Mr);
+            else if (st.WidthKeyword == SizeKeyword.MaxContent) borderW = ItemIntrinsic(it).Max;
+            else borderW = Math.Min(ItemIntrinsic(it).Max, Math.Max(ItemIntrinsic(it).Min, w - it.Ml - it.Mr));
             float outer = borderW + it.Ml + it.Mr;
             outerW[i] = outer;
             float free = w - outer;
