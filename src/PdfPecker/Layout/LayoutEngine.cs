@@ -1744,8 +1744,10 @@ internal sealed partial class LayoutEngine
             w *= mh / h;
             h = mh;
         }
-        // Never let an image run off the page.
-        if (availW > 0 && w > availW) { h *= availW / w; w = availW; }
+        // An image wider than its box overflows it, as in Chrome, but is never let run off the page. Headers, footers and
+        // margin boxes have no page width here and keep their images inside the box.
+        float limit = _grid.SetupOf(_cbKind).ContentWidth is > 0 and var pageW ? pageW : availW;
+        if (limit > 0 && w > limit) { h *= limit / w; w = limit; }
         if (_paginate && h > _grid.MinHeight) { w *= _grid.MinHeight / h; h = _grid.MinHeight; }
         if (w < 0) w = 0;
         if (h < 0) h = 0;
