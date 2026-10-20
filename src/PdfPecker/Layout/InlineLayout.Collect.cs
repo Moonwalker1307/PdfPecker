@@ -139,10 +139,17 @@ internal sealed partial class LayoutEngine
         }
     }
 
-    /// <summary>Whether an image or inline SVG needs a box of its own: a layer, or for an image a radius, object-fit or outline.</summary>
+    /// <summary>
+    /// Whether an image or inline SVG needs a box of its own: a layer, or for an image a radius, object-fit, outline, or
+    /// a box it paints or pads (borders, padding, a background or shadows), which a plain image item has no room for.
+    /// </summary>
     private static bool IsImageLaidOutAsBox(Element e, ComputedStyle s) =>
         e.Name is "img" or "svg"
-        && (s.Layered || e.Name == "img" && (s.BorderRadii != null || s.ObjectFit != ObjectFit.Fill || s.OutlineStyle != BorderStyle.None));
+        && (s.Layered || e.Name == "img" && (s.BorderRadii != null || s.ObjectFit != ObjectFit.Fill || s.OutlineStyle != BorderStyle.None
+            || PaintsInlineBox(s) || HasPadding(s.PaddingTop) || HasPadding(s.PaddingRight) || HasPadding(s.PaddingBottom)
+            || HasPadding(s.PaddingLeft)));
+
+    private static bool HasPadding(Length padding) => padding.IsPercent || padding.Resolve(0) > 0;
 
     /// <summary>An inline element: its padding and borders as spacers around its children, with its bidi controls.</summary>
     private void CollectInlineElement(CollectState st, Element e, ComputedStyle s, string? href, InlineDeco? deco)
