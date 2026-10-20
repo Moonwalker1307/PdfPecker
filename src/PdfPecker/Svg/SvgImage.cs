@@ -122,6 +122,7 @@ internal sealed partial class SvgImage
 
     private readonly Dictionary<string, Element> _ids = new(StringComparer.Ordinal);
     private int _clipDepth, _maskDepth, _filterDepth, _patternDepth;
+    private readonly HashSet<Element> _markersDrawing = new(ReferenceEqualityComparer.Instance);
     private SvgBudget _budget = null!;
     private float _diagonal; // the root viewport's normalised diagonal, which percentage dash lengths refer to
     private Func<string, object?>? _load; // the PdfImage or SvgImage at an image element's href, or null
