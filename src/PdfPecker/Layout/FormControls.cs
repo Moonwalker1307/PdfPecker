@@ -47,6 +47,7 @@ internal sealed class RadioGroup
 internal static class FormControls
 {
     public const string ValueElement = "pdf-field-value";
+    public const string GaugeElement = "pdf-gauge", GaugeValueElement = "pdf-gauge-value";
 
     /// <summary>The characters a text field is wide by its size attribute (a textarea's cols), or null without one.</summary>
     public static int? FieldChars(Element e)
@@ -83,6 +84,7 @@ internal static class FormControls
                 if (e.Children[i] is Element c)
                 {
                     if (c.Name is "input" or "textarea" or "select" or "button") PrepareControl(c);
+                    else if (c.Name is "progress" or "meter") PrepareGauge(c);
                     else if (c.Name != "svg") Walk(c);
                 }
         }
@@ -258,6 +260,51 @@ internal static class FormControls
             }
             e.Control = control;
         }
+    }
+
+    /// <summary>
+    /// A progress bar or meter: a track holding a bar as long as its value, drawn as Chrome prints them (see the user
+    /// agent styles). A meter's bar is green when the value is in the optimum range, yellow just outside it and red
+    /// further away. The fallback content inside the element is not shown, as in a browser.
+    /// </summary>
+    private static void PrepareGauge(Element e)
+    {
+        var bar = new Element(GaugeValueElement);
+        double fraction;
+        if (e.Name == "progress")
+        {
+            // Without a value the progress is indeterminate, which a printout shows as an empty track.
+            double max = Number(e, "max", 1);
+            if (max <= 0) max = 1;
+            fraction = e.HasAttribute("value") ? Math.Clamp(Number(e, "value", 0), 0, max) / max : 0;
+            // The bar covers the track's left border, so it is a pixel wider than its share of the content.
+            bar.AddAttribute("style", "width: calc(" + Percent(fraction) + " + 1px)");
+        }
+        else
+        {
+            double min = Number(e, "min", 0), max = Number(e, "max", 1);
+            if (max < min) max = min;
+            double value = Math.Clamp(Number(e, "value", 0), min, max);
+            double low = Math.Clamp(Number(e, "low", min), min, max);
+            double high = Math.Clamp(Number(e, "high", max), low, max);
+            double optimum = Math.Clamp(Number(e, "optimum", (min + max) / 2), min, max);
+            fraction = max > min ? (value - min) / (max - min) : 0;
+            // HTML §4.10.14: the region the optimum is in is good, the one next to it less so, the far one worst.
+            int region = optimum < low ? (value < low ? 0 : value <= high ? 1 : 2)
+                : optimum > high ? (value > high ? 0 : value >= low ? 1 : 2)
+                : value >= low && value <= high ? 0 : 1;
+            if (region == 1) bar.AddAttribute("suboptimal", "");
+            else if (region == 2) bar.AddAttribute("even-less-good", "");
+            bar.AddAttribute("style", "width: " + Percent(fraction));
+        }
+        var track = new Element(GaugeElement);
+        track.AppendChild(bar);
+        SetValueChildren(e, track);
+
+        static double Number(Element e, string name, double fallback)
+            => double.TryParse(e.GetAttribute(name), NumberStyles.Float, CultureInfo.InvariantCulture, out double v) && double.IsFinite(v) ? v : fallback;
+
+        static string Percent(double f) => (Math.Round(f * 100, 4)).ToString(CultureInfo.InvariantCulture) + "%";
     }
 
     private static void CollectOptions(Element e, List<(string Export, string Text, bool Selected)> options)

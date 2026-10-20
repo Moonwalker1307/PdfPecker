@@ -152,13 +152,13 @@ internal sealed partial class StyleResolver
             case "font-weight": s.FontWeight = from.FontWeight; s.Bold = from.Bold; break;
             case "font-style": s.Italic = from.Italic; break;
             case "line-height": s.LineHeightKind = from.LineHeightKind; s.LineHeightValue = from.LineHeightValue; break;
-            case "text-align": s.TextAlign = from.TextAlign; break;
+            case "text-align": s.TextAlign = from.TextAlign; s.BlockAlign = from.BlockAlign; break;
             case "text-indent": s.TextIndent = from.TextIndent; break;
             case "text-transform": s.TextTransform = from.TextTransform; break;
             case "letter-spacing": s.LetterSpacing = from.LetterSpacing; break;
             case "word-spacing": s.WordSpacing = from.WordSpacing; break;
             case "white-space": s.WhiteSpace = from.WhiteSpace; break;
-            case "vertical-align": s.VerticalAlign = from.VerticalAlign; break;
+            case "vertical-align": s.VerticalAlign = from.VerticalAlign; s.VerticalAlignLength = from.VerticalAlignLength; break;
             case "list-style-position": s.ListStylePositionInside = from.ListStylePositionInside; break;
             case "flex-grow": s.FlexGrow = from.FlexGrow; break;
             case "flex-shrink": s.FlexShrink = from.FlexShrink; break;

@@ -92,6 +92,8 @@ internal sealed partial class StyleResolver
             case "container-name": ApplyContainerName(s, parent, in d); break;
             case "table-layout": s.TableLayoutFixed = d.Lower == "fixed"; break;
             case "border-collapse": s.BorderCollapse = d.Lower == "collapse"; break;
+            case "caption-side": s.CaptionBottom = d.Lower == "bottom"; break;
+            case "empty-cells": s.EmptyCellsHide = d.Lower == "hide"; break;
             case "border-spacing-h": ApplyBorderSpacing(ref s.BorderSpacingH, in d); break;
             case "border-spacing-v": ApplyBorderSpacing(ref s.BorderSpacingV, in d); break;
 
@@ -135,6 +137,7 @@ internal sealed partial class StyleResolver
             case "-webkit-hyphenate-character":
                 ApplyHyphenateCharacter(s, parent, in d);
                 break;
+            case "quotes": ApplyQuotes(s, parent, in d); break;
             case "hyphenate-limit-chars": ApplyHyphenateLimitChars(s, parent, in d); break;
             case "-webkit-line-clamp":
             case "line-clamp":
@@ -143,6 +146,10 @@ internal sealed partial class StyleResolver
             case "vertical-align": ApplyVerticalAlign(s, parent, in d); break;
             case "direction": ApplyDirection(s, parent, in d); break;
             case "unicode-bidi": ApplyUnicodeBidi(s, parent, in d); break;
+            case "writing-mode":
+            case "-webkit-writing-mode":
+                ApplyWritingMode(s, parent, in d);
+                break;
             case LangProperty: s.Lang = d.Value; break;
             case ControlWidthProperty: SetLength(ref s.ControlWidth, d.Lower, d.Em, null); break;
 

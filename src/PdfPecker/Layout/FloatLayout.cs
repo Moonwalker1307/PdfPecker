@@ -406,7 +406,7 @@ internal sealed partial class LayoutEngine
     private static void LineExtent(Line line, ComputedStyle block, out float maxA, out float maxD)
     {
         TextMetrics(block, out maxA, out maxD);
-        bool visible = false;
+        bool visible = false, lineAligned = false;
         foreach (var it in line.Items)
         {
             float a, d;
@@ -418,11 +418,14 @@ internal sealed partial class LayoutEngine
                 case ItemKind.Bidi:
                     continue;
                 case ItemKind.Image:
-                    ImageMetrics(it, block, out a, out d);
-                    break;
                 case ItemKind.Box:
-                    a = it.BoxBaseline;
-                    d = it.Height - it.BoxBaseline;
+                    if (IsLineAligned(it))
+                    {
+                        // Placed against the line's top or bottom once the rest of the line is measured.
+                        lineAligned = visible = true;
+                        continue;
+                    }
+                    AtomicMetrics(it, block, out a, out d);
                     break;
                 default:
                     TextMetrics(it.Style, out a, out d);
@@ -431,6 +434,18 @@ internal sealed partial class LayoutEngine
             visible = true;
             if (a > maxA) maxA = a;
             if (d > maxD) maxD = d;
+        }
+        if (lineAligned)
+        {
+            // A box aligned to the top hangs down from the line's top and one aligned to the bottom stands on its
+            // bottom; a box taller than the line makes it deeper or higher, as in Chrome.
+            foreach (var it in line.Items)
+            {
+                if (!IsLineAligned(it)) continue;
+                if (it.Height <= maxA + maxD) continue;
+                if (it.Style.VerticalAlign == VerticalAlign.Top) maxD = it.Height - maxA;
+                else maxA = it.Height - maxD;
+            }
         }
         if (!visible) maxA = float.NaN;
     }

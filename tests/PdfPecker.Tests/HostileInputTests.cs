@@ -76,6 +76,15 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Deeply_nested_writing_modes_stay_bounded()
+    {
+        // Each turned box is laid out to measure it and again to place it; alternating writing modes nest that work.
+        var sb = new StringBuilder();
+        for (int i = 0; i < 5000; i++) sb.Append(i % 2 == 0 ? "<div style='writing-mode:vertical-rl'>x " : "<div style='writing-mode:horizontal-tb'>y ");
+        AssertStructurallyValid(Bounded(sb.Append(Repeat("</div>", 5000)).ToString()));
+    }
+
+    [Fact]
     public void Custom_property_expansion_is_capped()
     {
         // Each variable uses the previous one four times: 4^40 characters if expanded.
@@ -371,6 +380,18 @@ public class HostileInputTests
         Assert.Equal(2, PageCount(pdf));
     }
 
+    [Fact]
+    public void Nested_lone_table_parts_get_bounded_anonymous_tables()
+    {
+        // Each lone cell, row or text in a display: table box gets anonymous table boxes around it, so nesting them as
+        // deep as the parser allows, with thousands of siblings, must stay as cheap as nesting real tables.
+        var html = Repeat("<div style='display:table-cell'>x", 300) + Repeat("<div style='display:table'>t", 300)
+                   + "<div style='display:table-row'>" + Repeat("<span>s</span><div style='display:table-cell'>c</div>", 5000) + "</div>"
+                   + Repeat("<details>", 300) + "d";
+        var pdf = Bounded(html);
+        AssertStructurallyValid(pdf);
+    }
+
     [Theory]
     // The boxes fit in the measuring width, so every level measures the ones inside it at the same width.
     [InlineData("", 50000)]
@@ -505,6 +526,33 @@ public class HostileInputTests
         }
         sb.Append("</defs><use href='#g29'/></svg>");
         AssertStructurallyValid(Bounded(sb.ToString()));
+    }
+
+    [Fact]
+    public void Svg_marker_that_uses_itself_is_left_out_inside_itself()
+    {
+        // Found by the fuzzer (target html, timeout-522fb4dc): a marker whose own path uses it at both ends drew copies of
+        // itself 24 levels deep, until the drawing budget ran out after 15 s and 18 MB of PDF.
+        const string path = "<path d='M20 40 L120 40 L150 100' fill='none' stroke='#333' marker-start='url(#arrow)' marker-end='url(#arrow)'/>";
+        var pdf = Bounded("<svg width='760' height='230'><marker id='arrow' viewBox='0 0 10 10' refX='10' refY='5' markerWidth='6' markerHeight='6' "
+            + "orient='auto-start-reverse'>" + path + "</marker>" + Repeat(path, 4) + "</svg>");
+        AssertStructurallyValid(pdf);
+        Assert.True(pdf.Length < 100_000, $"{pdf.Length} bytes");
+    }
+
+    [Fact]
+    public void Svg_markers_that_use_other_markers_stay_within_the_drawing_budget()
+    {
+        // Thirty markers, each drawing the next one at both ends of its path, double at every level. Every copy counts
+        // against the drawing budget, so the copies stop long before the budget's worth of clips and states is written.
+        var sb = new StringBuilder("<svg width='760' height='230'>");
+        for (int i = 0; i < 30; i++)
+            sb.Append($"<marker id='m{i}' markerWidth='6' markerHeight='6'><path d='M1 1' stroke='#333'")
+                .Append(i < 29 ? $" marker-start='url(#m{i + 1})' marker-end='url(#m{i + 1})'" : "").Append("/></marker>");
+        sb.Append("<path d='M1 1' stroke='#333' marker-start='url(#m0)' marker-end='url(#m0)'/></svg>");
+        var pdf = Bounded(sb.ToString());
+        AssertStructurallyValid(pdf);
+        Assert.True(pdf.Length < 1_000_000, $"{pdf.Length} bytes");
     }
 
     [Fact]

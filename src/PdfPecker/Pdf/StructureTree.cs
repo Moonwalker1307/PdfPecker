@@ -112,7 +112,7 @@ internal sealed class StructureTree
         or "TD" or "TH" or "Caption" or "Link" or "Code" or "Quote" or "Span" or "Note";
 
     private static bool IsInline(ComputedStyle s)
-        => !s.Floated && !s.OutOfFlow && s.Display is Display.Inline or Display.InlineBlock or Display.InlineFlex or Display.InlineGrid;
+        => !s.Floated && !s.OutOfFlow && (s.Display == Display.Inline || s.IsAtomicInline);
 
     private void VisitChildren(Element e, StructElem container)
     {

@@ -47,6 +47,15 @@ internal sealed partial class LayoutEngine
         var cs = container.Style;
         ResolveBidi(items, cs);
         float indent = firstInBlock ? cs.TextIndent : 0;
+        if (_marker is { Inside: true } inside)
+        {
+            // An inside marker starts the first line: the line moves over by the marker's width, and the marker is drawn
+            // just before where its content now begins.
+            float mw = InsideMarkerWidth(inside);
+            inside.ContentX = x + indent + mw;
+            inside.ContentRight = x + w - indent - mw;
+            indent += mw;
+        }
         bool besideFloats = FloatsBelow(y) || items.Exists(it => it.Kind == ItemKind.Float);
         // On pages of different widths each line is measured for the page it goes on, as lines beside floats are.
         if (_measuring || !_paginate) pages = null;

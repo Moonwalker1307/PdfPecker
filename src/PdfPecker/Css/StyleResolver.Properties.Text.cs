@@ -136,6 +136,17 @@ internal sealed partial class StyleResolver
             _ => s.TextAlign,
         };
         if (d.Lower == "justify-all") s.TextAlignLast = TextAlign.Justify;
+        // The legacy values that align attributes and the center element map to also move child blocks narrower than
+        // their container, as in Chrome; every other value aligns only the lines.
+        s.BlockAlign = d.Lower switch
+        {
+            "-webkit-left" => TextAlign.Left,
+            "-webkit-right" => TextAlign.Right,
+            "-webkit-center" => TextAlign.Center,
+            "inherit" => parent.BlockAlign,
+            "start" or "end" or "left" or "right" or "center" or "middle" or "justify" or "justify-all" => null,
+            _ => s.BlockAlign,
+        };
     }
 
     private static void ApplyTextAlignLast(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
@@ -310,6 +321,23 @@ internal sealed partial class StyleResolver
         else if (GeneratedContent.UnquoteString(d.Value) is { } hyphen) s.HyphenateCharacter = hyphen;
     }
 
+    // quotes: none, auto, or pairs of strings for the nesting levels. A list with an odd number of strings is invalid.
+    private static void ApplyQuotes(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit || d.Lower == "unset") { s.Quotes = parent.Quotes; return; }
+        if (d.Lower is "auto" or "initial") { s.Quotes = null; return; }
+        if (d.Lower == "none") { s.Quotes = Array.Empty<string>(); return; }
+        var tokens = CssParser.Tokens(d.Value);
+        if (tokens.Count == 0 || tokens.Count % 2 != 0 || tokens.Count > MaxQuoteStrings) return;
+        var strings = new string[tokens.Count];
+        for (int i = 0; i < strings.Length; i++)
+            if (GeneratedContent.UnquoteString(tokens[i]) is { } str) strings[i] = str;
+            else return;
+        s.Quotes = strings;
+    }
+
+    private const int MaxQuoteStrings = 64;
+
     private static void ApplyHyphenateLimitChars(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
         if (d.Inherit || d.Lower == "unset") s.HyphenateLimitChars = parent.HyphenateLimitChars;
@@ -353,8 +381,17 @@ internal sealed partial class StyleResolver
     private static void ApplyLineClamp(ComputedStyle s, in DeclaredValue d)
         => s.LineClamp = int.TryParse(d.Lower, NumberStyles.Integer, CultureInfo.InvariantCulture, out int clamp) && clamp > 0 ? Math.Min(clamp, 10000) : 0;
 
-    private static void ApplyVerticalAlign(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
-        => s.VerticalAlign = d.Lower switch
+    private void ApplyVerticalAlign(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        // A length raises the box by that much (a negative one lowers it); a percentage is of the box's line height.
+        if (TryParseLength(d.Lower, d.Em, _rootFontSize, out var shift, _vw, _vh) && !shift.IsAuto)
+        {
+            s.VerticalAlign = VerticalAlign.Length;
+            s.VerticalAlignLength = shift;
+            return;
+        }
+        if (d.Lower == "inherit") s.VerticalAlignLength = parent.VerticalAlignLength;
+        s.VerticalAlign = d.Lower switch
         {
             "baseline" => VerticalAlign.Baseline,
             "sub" => VerticalAlign.Sub,
@@ -367,9 +404,22 @@ internal sealed partial class StyleResolver
             "inherit" => parent.VerticalAlign,
             _ => s.VerticalAlign,
         };
+    }
 
     private static void ApplyDirection(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
         => s.Rtl = d.Lower switch { "rtl" => true, "ltr" => false, "inherit" => parent.Rtl, "initial" => false, _ => s.Rtl };
+
+    private static void ApplyWritingMode(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+        => s.WritingMode = d.Lower switch
+        {
+            "horizontal-tb" or "lr" or "lr-tb" or "rl" or "rl-tb" or "initial" => WritingMode.HorizontalTb,
+            "vertical-rl" or "tb" or "tb-rl" => WritingMode.VerticalRl,
+            "vertical-lr" => WritingMode.VerticalLr,
+            "sideways-rl" => WritingMode.SidewaysRl,
+            "sideways-lr" => WritingMode.SidewaysLr,
+            "inherit" or "unset" => parent.WritingMode,
+            _ => s.WritingMode,
+        };
 
     private static void ApplyUnicodeBidi(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
         => s.UnicodeBidi = d.Lower switch

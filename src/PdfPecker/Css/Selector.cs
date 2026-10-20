@@ -10,11 +10,11 @@ internal enum PseudoKind : byte
 {
     FirstChild, LastChild, OnlyChild, NthChild, NthLastChild, FirstOfType, LastOfType, OnlyOfType, NthOfType, NthLastOfType,
     Root, Link, Empty, Never, Not, Is, Where, Has, HasAnchor, Lang, Checked, Disabled, Enabled, Required, Optional, ReadOnly,
-    ReadWrite, PlaceholderShown, Default, Always,
+    ReadWrite, PlaceholderShown, Default, Always, Dir,
 }
 
 /// <summary>The pseudo-element a selector's subject names, if any.</summary>
-internal enum PseudoElement : byte { None, Before, After, Marker, FirstLetter, FirstLine, FootnoteCall, FootnoteMarker }
+internal enum PseudoElement : byte { None, Before, After, Marker, FirstLetter, FirstLine, FootnoteCall, FootnoteMarker, Placeholder }
 
 internal sealed class AttrCondition
 {
@@ -27,7 +27,7 @@ internal sealed class AttrCondition
 internal sealed class PseudoCondition
 {
     public PseudoKind Kind;
-    public int A, B; // an+b for nth-child and nth-of-type
+    public int A, B; // an+b for nth-child and nth-of-type; A is 1 for :dir(rtl)
     public Selector[]? List; // the selector list of :not(), :is(), :where(), :has() (relative) and :nth-child(... of S)
     public string[]? Langs; // the ranges of :lang()
 
@@ -131,6 +131,7 @@ internal sealed class Compound
             case PseudoKind.Has: return Remembered(p, e) ?? Remember(p, e, MatchHas(e, p.List!));
             case PseudoKind.HasAnchor: return ReferenceEquals(e, _hasAnchor);
             case PseudoKind.Lang: return MatchLang(e, p.Langs!);
+            case PseudoKind.Dir: return MatchDir(e) == (p.A == 1);
             case PseudoKind.Always: return true;
             case PseudoKind.Checked:
                 return e.Name == "input" && IsCheckable(e) && e.HasAttribute("checked") || e.Name == "option" && e.HasAttribute("selected");
@@ -186,6 +187,23 @@ internal sealed class Compound
             var ce = x.GetAttribute("contenteditable");
             if (ce == null) continue;
             return ce.Length == 0 || ce.Equals("true", StringComparison.OrdinalIgnoreCase) || ce.Equals("plaintext-only", StringComparison.OrdinalIgnoreCase);
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Whether the element's directionality is right to left. The dir attribute decides, inherited from the nearest
+    /// ancestor that has one; auto takes the first strong character of the content, and the default is left to right.
+    /// The direction property does not count, as in browsers.
+    /// </summary>
+    private static bool MatchDir(Element e)
+    {
+        for (var x = e; x != null; x = x.Parent)
+        {
+            var dir = x.GetAttribute("dir")?.Trim();
+            if (dir != null && dir.Equals("rtl", StringComparison.OrdinalIgnoreCase)) return true;
+            if (dir != null && dir.Equals("ltr", StringComparison.OrdinalIgnoreCase)) return false;
+            if (x.Name == "bdi" || dir != null && dir.Equals("auto", StringComparison.OrdinalIgnoreCase)) return StyleResolver.FirstStrongDirection(x);
         }
         return false;
     }
@@ -511,12 +529,13 @@ internal sealed class Selector
                 bool doubleColon = i < s.Length && s[i] == ':';
                 if (doubleColon) i++;
                 var name = ReadIdent(s, ref i).ToLowerInvariant();
+                if (name == "-webkit-input-placeholder") name = "placeholder";
                 if (doubleColon || name is "before" or "after" or "first-letter" or "first-line")
                 {
                     // ::before, ::after, ::first-letter, ::first-line (also with the old single colon) and ::marker;
                     // other pseudo-elements drop the rule.
                     if (nesting > 0 || name is not ("before" or "after" or "marker" or "first-letter" or "first-line" or "footnote-call"
-                            or "footnote-marker")) return null;
+                            or "footnote-marker" or "placeholder")) return null;
                     pseudoElement = name switch
                     {
                         "before" => PseudoElement.Before,
@@ -525,6 +544,7 @@ internal sealed class Selector
                         "first-line" => PseudoElement.FirstLine,
                         "footnote-call" => PseudoElement.FootnoteCall,
                         "footnote-marker" => PseudoElement.FootnoteMarker,
+                        "placeholder" => PseudoElement.Placeholder,
                         _ => PseudoElement.Marker,
                     };
                     any = true;
@@ -628,6 +648,13 @@ internal sealed class Selector
                 var langs = CssParser.SplitTopLevel(arg, ',').Select(l => l.Trim().Trim('"', '\'')).Where(l => l.Length > 0).ToArray();
                 return langs.Length == 0 ? null : new PseudoCondition { Kind = PseudoKind.Lang, Langs = langs };
             }
+            case "dir":
+                return arg?.Trim().ToLowerInvariant() switch
+                {
+                    "ltr" => new PseudoCondition { Kind = PseudoKind.Dir },
+                    "rtl" => new PseudoCondition { Kind = PseudoKind.Dir, A = 1 },
+                    _ => null,
+                };
             case "checked": return new PseudoCondition { Kind = PseudoKind.Checked };
             case "default": return new PseudoCondition { Kind = PseudoKind.Default };
             case "disabled": return new PseudoCondition { Kind = PseudoKind.Disabled };

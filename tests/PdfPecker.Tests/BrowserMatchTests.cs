@@ -414,6 +414,69 @@ public class BrowserMatchTests
     }
 
     [Fact]
+    public void Img_align_right_floats_with_hspace()
+    {
+        var png = PdfTestHelpers.DataUri(PdfTestHelpers.SolidPng(4, 4, 0, 0, 255));
+        var img = Layout($"<p style='margin: 0'><img src='{png}' align='right' hspace='10' width='40' height='40'>Text</p>").OfType<ImageOp>().Single();
+        Near(Width - 7.5f - 30, img.X); // 10px of hspace and 40px of image, in points
+    }
+
+    [Fact]
+    public void List_type_and_reversed_attributes_number_the_items()
+    {
+        var lines = Lines(Layout("<ol type='I' reversed><li>a</li><li>b</li><li>c</li></ol><ol type='a' start='3'><li>d</li></ol>"));
+        Assert.Contains("III.", lines);
+        Assert.Contains("II.", lines);
+        Assert.Contains("I.", lines);
+        Assert.Contains("c.", lines);
+    }
+
+    [Fact]
+    public void Align_center_centres_a_nested_table_but_not_its_text()
+    {
+        var ops = Layout("""
+            <div align="center"><table cellspacing="0" style="width: 200px; background: #f00"><tr><td style="padding: 0">left</td></tr></table></div>
+            """);
+        var table = Box(ops, "#f00");
+        Near(175, table.X);
+        Near(175, ops.OfType<TextOp>().Single(t => t.Text == "left").X);
+    }
+
+    [Fact]
+    public void Bordercolor_draws_solid_table_and_cell_borders_in_that_colour()
+    {
+        var ops = Layout("<table border='2' bordercolor='red'><tr><td>a</td></tr></table>");
+        Assert.True(CssColor.TryParse("red", 0xFF000000, out var red));
+        Assert.Equal(2, ops.OfType<BorderRectOp>().Count(b => b.Color == red));
+    }
+
+    [Fact]
+    public void Vertical_align_lengths_and_percentages_shift_the_baseline()
+    {
+        // 5px raises by 5px; -30% lowers by 30% of the span's 20px line height, 6px.
+        var ops = Layout("""
+            <p style="font: 12px Arial; line-height: 20px; margin: 0">x<span style="vertical-align: 5px">a</span><span style="vertical-align: -30%">b</span></p>
+            """).OfType<TextOp>().ToList();
+        var x = ops.Single(t => t.Text.StartsWith('x'));
+        Near(x.Baseline - 3.75f, ops.Single(t => t.Text == "a").Baseline);
+        Near(x.Baseline + 4.5f, ops.Single(t => t.Text == "b").Baseline);
+    }
+
+    [Fact]
+    public void Images_aligned_to_top_and_bottom_share_one_line_box()
+    {
+        // Chrome hangs the top image from the line's top and stands the bottom one on its bottom: on a line made 30px
+        // tall by them, both span the whole line.
+        var png = PdfTestHelpers.DataUri(PdfTestHelpers.SolidPng(4, 4, 0, 0, 255));
+        var images = Layout($"""
+            <p style="font: 12px Arial; margin: 0">a <img src="{png}" style="width: 30px; height: 30px; vertical-align: top"> b <img src="{png}" style="width: 30px; height: 30px; vertical-align: bottom"></p>
+            """).OfType<ImageOp>().ToList();
+        Assert.Equal(2, images.Count);
+        Near(0, images[0].Y);
+        Near(0, images[1].Y);
+    }
+
+    [Fact]
     public void Box_edges_are_painted_on_whole_pixels()
     {
         // A background starting 10.4px down and 20.6px tall is painted from 10px to 31px, as Chrome does.

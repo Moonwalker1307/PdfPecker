@@ -118,8 +118,11 @@ internal sealed class SvgDashArray
 
 internal enum TextAlign : byte { Left, Right, Center, Justify, Start, End } // Start and End follow the direction
 internal enum UnicodeBidi : byte { Normal, Embed, Isolate, BidiOverride, IsolateOverride, Plaintext }
+
+/// <summary>Values of writing-mode. The vertical modes are laid out as horizontal text turned a quarter turn.</summary>
+internal enum WritingMode : byte { HorizontalTb, VerticalRl, VerticalLr, SidewaysRl, SidewaysLr }
 internal enum WhiteSpace : byte { Normal, NoWrap, Pre, PreWrap, PreLine }
-internal enum VerticalAlign : byte { Baseline, Sub, Super, Top, Middle, Bottom, TextTop, TextBottom }
+internal enum VerticalAlign : byte { Baseline, Sub, Super, Top, Middle, Bottom, TextTop, TextBottom, Length }
 internal enum OverflowWrap : byte { Normal, BreakWord, Anywhere }
 internal enum Overflow : byte { Visible, Clip, Hidden } // Hidden also stands for auto and scroll, which clip alike on paper
 internal enum WordBreak : byte { Normal, BreakAll, KeepAll }
@@ -269,10 +272,13 @@ internal sealed class ComputedStyle
     public float LineHeightValue;
     public TextAlign TextAlign = TextAlign.Start;
     public bool Rtl;                         // direction: rtl
+    public WritingMode WritingMode;          // writing-mode
     public TextAlign? TextAlignLast;         // null = auto
+    public TextAlign? BlockAlign;            // -webkit-left, -webkit-center or -webkit-right: also aligns child blocks
     public int TabSize = 8;                  // in spaces
     public bool NoHyphens;                   // hyphens: none (soft hyphens are no break opportunity)
     public bool HyphensAuto;                 // hyphens: auto (words also break where the language's patterns allow)
+    public string[]? Quotes;                 // quotes: open and close strings of each nesting level; null = auto (by language), empty = none
     public string? HyphenateCharacter;       // hyphenate-character: "string"; null = auto (a hyphen-minus)
     public HyphenateLimits HyphenateLimitChars; // hyphenate-limit-chars; each value 0 = auto
     public string? Lang;                     // the content language: the nearest lang attribute, else PdfOptions.Language
@@ -305,9 +311,11 @@ internal sealed class ComputedStyle
     public bool CanvasBackground; // the background is painted on every page's canvas instead of on this box (html/body propagation)
     public bool BorderCollapse;
     public bool TableLayoutFixed; // table-layout: fixed
+    public bool CaptionBottom;    // caption-side: bottom (inherited)
+    public bool EmptyCellsHide;   // empty-cells: hide (inherited): with separated borders, empty cells paint nothing
     public BoxShadow[]? BoxShadows;
     public BoxShadow[]? TextShadows; // text-shadow (inherited); spread and inset are not used
-    public float BorderSpacingH = 1.5f, BorderSpacingV = 1.5f; // 2px
+    public float BorderSpacingH, BorderSpacingV; // initially 0; the user agent style gives <table> 2px
     public string? FontFamilyName;
     public FontResolver? Fonts; // the document's fonts; null when only the standard fonts exist
     public MissingFontReport? MissingFonts; // set when PdfOptions.MissingFont is
@@ -336,6 +344,7 @@ internal sealed class ComputedStyle
 
     // ---- Not inherited ----
     public Display Display = Display.Inline;
+    public bool InlineTable;                    // display: inline-table, a table that sits on a line like an inline-block
     public UnicodeBidi UnicodeBidi;
     public uint BackgroundColor;
     // Background layers, topmost first. Each list repeats when it is shorter than BackgroundImages; null is the initial value.
@@ -388,6 +397,7 @@ internal sealed class ComputedStyle
     public Length MinWidth = Length.Auto, MaxWidth = Length.Auto, MinHeight = Length.Zero, MaxHeight = Length.Auto;
     public bool BorderBox;
     public VerticalAlign VerticalAlign;
+    public Length VerticalAlignLength = Length.Zero; // the raise of vertical-align: <length-percentage>
     public bool PageBreakBefore, PageBreakAfter, AvoidBreakInside;
     public bool AvoidBreakBefore, AvoidBreakAfter; // break-before/after: avoid (keep with the next or previous box)
     public bool ColumnBreakBefore, ColumnBreakAfter; // break-before/after: column, which only breaks inside a multicol
@@ -513,7 +523,12 @@ internal sealed class ComputedStyle
     public bool HasBorder => BorderTopStyle != BorderStyle.None || BorderRightStyle != BorderStyle.None
                              || BorderBottomStyle != BorderStyle.None || BorderLeftStyle != BorderStyle.None;
 
-    public bool IsBlockLevel => Display is not (Display.Inline or Display.InlineBlock or Display.InlineFlex or Display.InlineGrid);
+    public bool IsBlockLevel => Display is not (Display.Inline or Display.InlineBlock or Display.InlineFlex or Display.InlineGrid) && !IsInlineTable;
+
+    /// <summary>An inline-level box laid out as a whole on its line: inline-block, inline-flex, inline-grid or inline-table.</summary>
+    public bool IsAtomicInline => Display is Display.InlineBlock or Display.InlineFlex or Display.InlineGrid || IsInlineTable;
+
+    public bool IsInlineTable => InlineTable && Display == Display.Table;
 
     public bool IsFlex => Display is Display.Flex or Display.InlineFlex;
     public bool IsGrid => Display is Display.Grid or Display.InlineGrid;
@@ -540,12 +555,24 @@ internal sealed class ComputedStyle
     /// <summary>Clipped, blended, isolated or filtered: painted as a layer of its own, which is a stacking context.</summary>
     public bool HasEffects => ClipShape != null || SvgClipPath != null || BlendMode != null || Isolate || Filters != null;
 
+    /// <summary>
+    /// The quarter turn, in degrees clockwise, that turns horizontal layout into this box's writing mode: 90 for the
+    /// vertical modes and sideways-rl, whose text runs down, and -90 for sideways-lr, whose text runs up.
+    /// </summary>
+    public int WritingModeTurn => WritingMode switch
+    {
+        WritingMode.HorizontalTb => 0,
+        WritingMode.SidewaysLr => -90,
+        _ => 90,
+    };
+
     /// <summary>Creates the starting style for a child: inherited properties copied, the rest reset.</summary>
     public ComputedStyle CreateChild()
     {
         var c = (ComputedStyle)MemberwiseClone();
         c.ParentFontSize = FontSize;
         c.Display = Display.Inline;
+        c.InlineTable = false;
         c.BackgroundColor = 0;
         c.BackgroundImages = null;
         c.CanvasBackground = false;

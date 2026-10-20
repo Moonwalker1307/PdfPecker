@@ -19,6 +19,12 @@ internal sealed partial class StyleResolver
         AddHints(e);
         int authorStart = _count;
         Collect(_author, e, TierAuthor, TierAuthorImportant);
+        // ::placeholder rules match the text field, and style the line that shows its placeholder.
+        if (e.Name == "pdf-field-value" && e.Parent != null && e.HasAttribute("placeholder"))
+        {
+            if (UaIndex.Value.PseudoElements is { } uaPh) Collect(uaPh, e.Parent, TierUa, TierUaImportant, PseudoElement.Placeholder);
+            if (_author.PseudoElements is { } authorPh) Collect(authorPh, e.Parent, TierAuthor, TierAuthorImportant, PseudoElement.Placeholder);
+        }
         var inline = e.GetAttribute("style");
         if (!string.IsNullOrEmpty(inline))
         {
@@ -137,6 +143,7 @@ internal sealed partial class StyleResolver
             if (s.Display is Display.Inline or Display.InlineBlock) s.Display = Display.Block;
             else if (s.Display == Display.InlineFlex) s.Display = Display.Flex;
             else if (s.Display == Display.InlineGrid) s.Display = Display.Grid;
+            s.InlineTable = false;
             if (s.OutOfFlow) { s.Floated = false; s.Float = FloatSide.None; }
         }
         if (s.Footnote)
@@ -148,6 +155,9 @@ internal sealed partial class StyleResolver
             else if (s.Display == Display.InlineFlex) s.Display = Display.Flex;
             else if (s.Display == Display.InlineGrid) s.Display = Display.Grid;
         }
+        // A table never inherits the legacy -webkit- alignments of an align attribute around it: Chrome starts its
+        // text at the start again.
+        if (s.Display == Display.Table && s.BlockAlign != null) { s.TextAlign = TextAlign.Start; s.BlockAlign = null; }
         if (!s.ControlWidth.IsAuto && s.Width.IsAuto && s.WidthKeyword == SizeKeyword.None && !StretchedAcross(s, parent)) s.Width = s.ControlWidth;
         // Flex and grid items are laid out as blocks, which carry their own opacity layer.
         bool inlineBox = s.Display == Display.Inline && !parent.IsFlex && !parent.IsGrid;

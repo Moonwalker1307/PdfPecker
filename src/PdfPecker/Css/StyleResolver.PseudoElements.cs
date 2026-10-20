@@ -69,7 +69,7 @@ internal sealed partial class StyleResolver
         var s = Compute(host.Name, host.Style);
         if (s.Content == null || s.Display == Display.None) return;
         if (s.CounterReset != null || s.CounterSet != null || s.CounterIncrement != null) { _countersUsed = true; ApplyCounters(s, ref scope); }
-        var text = GeneratedContent.Evaluate(s.Content, host, this);
+        var text = GeneratedContent.Evaluate(s.Content, host, this, s);
         if (text == null) return;
         var box = new Element(which == PseudoElement.Before ? "::before" : "::after") { Generated = true, Style = s, Parent = host };
         if (text.Length > 0) box.AppendChild(new TextNode(text));

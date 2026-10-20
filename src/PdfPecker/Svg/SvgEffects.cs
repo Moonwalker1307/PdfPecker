@@ -278,6 +278,8 @@ internal sealed partial class SvgImage
         }
     }
 
+    private const int MarkerCost = 64;
+
     /// <summary>Draws one marker at a vertex (SVG 1.1 §11.6).</summary>
     private void RenderMarker(Element marker, Vertex v, bool isStart, float strokeWidth, Matrix ctm, float opacity, int depth)
     {
@@ -306,8 +308,19 @@ internal sealed partial class SvgImage
         content.Apply(ref rx, ref ry);
         var viewport = Matrix.Translate(-rx, -ry).Then(Matrix.Scale(scale, scale)).Then(Matrix.Rotate(angle))
             .Then(Matrix.Translate(v.X, v.Y)).Then(ctm);
+        // Markers whose content uses other markers multiply, and every copy brings its own clip and graphics state, which
+        // cost far more to build and write than its few points suggest; so a copy counts against the drawing budget
+        // like a path of MarkerCost points. That still leaves room for tens of thousands of markers in a document.
+        if ((_budget.Remaining -= MarkerCost) < 0) return;
+        // A marker whose content uses the same marker again would draw itself without end; as in browsers, the inner
+        // use of a marker that is already being drawn is left out.
+        if (!_markersDrawing.Add(marker)) return;
         int start = Shapes.Count;
-        foreach (var c in marker.Children) if (c is Element ce) Render(ce, content.Then(viewport), opacity, depth + 1);
+        try
+        {
+            foreach (var c in marker.Children) if (c is Element ce) Render(ce, content.Then(viewport), opacity, depth + 1);
+        }
+        finally { _markersDrawing.Remove(marker); }
         if (Shapes.Count == start) return;
         if (marker.GetAttribute("overflow")?.Trim().ToLowerInvariant() is "visible" or "auto") return;
         // The marker's viewport clips its content.
