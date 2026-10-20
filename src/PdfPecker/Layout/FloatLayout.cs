@@ -12,6 +12,7 @@ internal sealed partial class LayoutEngine
         public float X0, Y0, X1, Y1;
         public bool Right;
         public int OpsIndex; // where its ops start in the op list, to forget it when layout rewinds past it
+        public FloatShape? Shape; // shape-outside: what lines beside it wrap around; null for the margin box
     }
 
     /// <summary>The floats of one block formatting context.</summary>
@@ -86,6 +87,49 @@ internal sealed partial class LayoutEngine
                 else if (b.X1 > left) left = b.X1;
             }
             return (left, Math.Max(left, right));
+        }
+
+        /// <summary>
+        /// The room a line from <paramref name="y"/> to <paramref name="y"/> + <paramref name="h"/> has between
+        /// <paramref name="left"/> and <paramref name="right"/>: as <see cref="Band"/>, but a float with shape-outside
+        /// takes only what its shape covers in the band, kept within its margin box, or nothing when the shape is not
+        /// beside the line. Floats themselves are placed beside margin boxes, as in Chrome.
+        /// </summary>
+        public (float Left, float Right) LineBand(float y, float h, float left, float right)
+        {
+            float bottom = y + Math.Max(h, Eps);
+            foreach (var b in Boxes)
+            {
+                if (b.Y0 >= bottom - Tiny || b.Y1 <= y + Tiny || b.X1 <= b.X0) continue;
+                float x0 = b.X0, x1 = b.X1;
+                if (b.Shape is { } shape)
+                {
+                    if (!shape.Excluded(y, y + h, out float sl, out float sr)) continue;
+                    x0 = Math.Clamp(sl, b.X0, b.X1);
+                    x1 = Math.Clamp(sr, b.X0, b.X1);
+                }
+                if (b.Right) { if (x0 < right) right = x0; }
+                else if (x1 > left) left = x1;
+            }
+            return (left, Math.Max(left, right));
+        }
+
+        /// <summary>Whether a float with shape-outside is beside the band, so that the room changes as a line moves down.</summary>
+        public bool ShapeBeside(float y, float h)
+        {
+            float bottom = y + Math.Max(h, Eps);
+            foreach (var b in Boxes)
+                if (b.Shape != null && b.Y0 < bottom - Tiny && b.Y1 > y + Tiny) return true;
+            return false;
+        }
+
+        /// <summary>Whether a float with shape-outside reaches into the band from <paramref name="top"/> to <paramref name="bottom"/>.</summary>
+        public bool ShapeIn(float top, float bottom)
+        {
+            if (_boxes == null) return false;
+            foreach (var b in _boxes)
+                if (b.Shape != null && b.Y0 < bottom && b.Y1 > top) return true;
+            return false;
         }
 
         /// <summary>The nearest float bottom below <paramref name="y"/> among the floats beside the band, or NaN.</summary>
@@ -266,7 +310,31 @@ internal sealed partial class LayoutEngine
             }
         }
         WrapLayer(start, LayerOp.FloatOrder, stackingContext: false);
-        _floats.Add(new FloatBox { X0 = x, X1 = x + fw, Y0 = top, Y1 = Math.Max(top, bottom), Right = right, OpsIndex = start });
+        bottom = Math.Max(top, bottom);
+        var shape = s.ShapeOutside != null ? FloatShapeOf(e, x, top, fw, bottom - top, f.CbW) : null;
+        _floats.Add(new FloatBox { X0 = x, X1 = x + fw, Y0 = top, Y1 = bottom, Right = right, OpsIndex = start, Shape = shape });
+    }
+
+    /// <summary>
+    /// Paints the lines laid out from op <paramref name="start"/> above the floats, as CSS paints inline content: lines
+    /// beside a float with shape-outside may overlap the float's box where its shape leaves room. Floats and positioned
+    /// boxes among them keep their own order. Only such paragraphs are lifted, so other pages paint as they did.
+    /// </summary>
+    private void LiftInlineContent(int start)
+    {
+        var lifted = new LayerOp { Order = LayerOp.InlineOverFloatsOrder };
+        int keep = start;
+        for (int i = start; i < _ops.Count; i++)
+        {
+            var op = _ops[i];
+            if (op is LayerOp { Order: > 0 }) _ops[keep++] = op;
+            else lifted.Ops.Add(op);
+        }
+        if (lifted.Ops.Count == 0) return;
+        _ops.RemoveRange(keep, _ops.Count - keep);
+        _ops.Add(lifted);
+        _floats.Fold(start);
+        _hasLayers = true;
     }
 
     /// <summary>Moves the ops from <paramref name="start"/> into one layer op.</summary>
@@ -320,7 +388,7 @@ internal sealed partial class LayoutEngine
                 _measuredPage = Engine.PageOf(Engine.FitOnPage(Y, h));
             }
             var (bx, bw) = Box;
-            var (l, r) = Engine._floats.Band(Y, StrutH, bx, bx + bw);
+            var (l, r) = Engine._floats.LineBand(Y, StrutH, bx, bx + bw);
             Left = l - X;
             Avail = r - l;
         }
@@ -334,6 +402,7 @@ internal sealed partial class LayoutEngine
                 Y = last.Top + LayoutEngine.LineBoxHeight(last, Block);
             }
             _index = lines.Count;
+            _shapeSteps = 0;
             if (ForcedBefore != null && _index < ForcedBefore.Length && ForcedBefore[_index]) Y = Engine.NextPage(Y);
             if (Waiting.Count > 0)
             {
@@ -359,15 +428,29 @@ internal sealed partial class LayoutEngine
             Measure();
         }
 
-        /// <summary>Nothing fits beside the floats here: moves the line down past the next float. False when no float is in the way.</summary>
+        /// <summary>
+        /// Nothing fits beside the floats here: moves the line down past the next float, or beside a float with
+        /// shape-outside, one CSS pixel at a time as Chrome does, as the shape may leave more room a little lower. False
+        /// when no float is in the way.
+        /// </summary>
         public bool Lower()
         {
             float next = Engine._floats.NextBottom(Y, StrutH);
             if (float.IsNaN(next) || next <= Y) return false;
+            if (_shapeSteps < MaxShapeSteps && next > Y + ShapeStep && Engine._floats.ShapeBeside(Y, StrutH))
+            {
+                _shapeSteps++;
+                next = Y + ShapeStep;
+            }
             Y = next;
             Measure();
             return true;
         }
+
+        // Moving down beside shapes a pixel at a time is bounded per line; past that the line goes below the floats.
+        private const float ShapeStep = 0.75f;
+        private const int MaxShapeSteps = 4000;
+        private int _shapeSteps;
 
         /// <summary>Fixes the position of a finished line.</summary>
         public void End(Line line)

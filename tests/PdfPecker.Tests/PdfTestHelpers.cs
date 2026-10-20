@@ -129,6 +129,18 @@ internal static class PdfTestHelpers
         return Png(w, h, 2, raw.ToArray());
     }
 
+    /// <summary>A black RGBA PNG whose alpha <paramref name="alpha"/> gives, from x and y.</summary>
+    public static byte[] AlphaPng(int w, int h, Func<int, int, byte> alpha)
+    {
+        var raw = new MemoryStream();
+        for (int y = 0; y < h; y++)
+        {
+            raw.WriteByte(0);
+            for (int x = 0; x < w; x++) { raw.WriteByte(0); raw.WriteByte(0); raw.WriteByte(0); raw.WriteByte(alpha(x, y)); }
+        }
+        return Png(w, h, 6, raw.ToArray());
+    }
+
     public static string DataUri(byte[] png) => "data:image/png;base64," + Convert.ToBase64String(png);
 
     private static byte[] Png(int w, int h, byte colorType, byte[] raw)

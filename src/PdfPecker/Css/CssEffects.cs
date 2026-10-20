@@ -27,8 +27,11 @@ internal sealed class ClipShape
     private Length[]? _round;                         // inset(... round ...): 8 radii as border-radius stores them
     private PathBuilder? _path;                       // path(): CSS pixels from the reference box's top-left corner
 
-    /// <summary>Parses a clip-path value other than none and url(); null when it is not a shape this library knows.</summary>
-    public static ClipShape? Parse(string value, float em, float rem, float vw, float vh)
+    /// <summary>
+    /// Parses a clip-path value other than none and url(), or a shape-outside shape, whose reference box defaults to the
+    /// margin box and may not be an SVG box; null when it is not a shape this library knows.
+    /// </summary>
+    public static ClipShape? Parse(string value, float em, float rem, float vw, float vh, bool shapeOutside = false)
     {
         ClipShape? shape = null;
         ShapeBox? box = null;
@@ -37,7 +40,7 @@ internal sealed class ClipShape
             var lower = token.ToLowerInvariant();
             if (BoxKeyword(lower) is { } b)
             {
-                if (box != null) return null;
+                if (box != null || shapeOutside && lower is "stroke-box" or "view-box" or "fill-box") return null;
                 box = b;
                 continue;
             }
@@ -58,7 +61,7 @@ internal sealed class ClipShape
         }
         if (shape == null && box == null) return null;
         shape ??= new ClipShape { Kind = ShapeKind.Box };
-        shape.Box = box ?? ShapeBox.BorderBox;
+        shape.Box = box ?? (shapeOutside ? ShapeBox.MarginBox : ShapeBox.BorderBox);
         return shape;
     }
 
@@ -246,44 +249,14 @@ internal sealed class ClipShape
                 break;
             case ShapeKind.Inset:
             {
-                float t = _args[0].Resolve(h), r = _args[1].Resolve(w), b = _args[2].Resolve(h), l = _args[3].Resolve(w);
-                // Insets that add up to more than the box are scaled down together.
-                if (l + r > w && l + r > 0) { float k = w / (l + r); l *= k; r *= k; }
-                if (t + b > h && t + b > 0) { float k = h / (t + b); t *= k; b *= k; }
-                float iw = Math.Max(0, w - l - r), ih = Math.Max(0, h - t - b);
-                Layout.CornerRadii? cr = null;
-                if (_round is { } rr)
-                    cr = Layout.CornerRadii.Fit(rr[0].Resolve(iw), rr[1].Resolve(ih), rr[2].Resolve(iw), rr[3].Resolve(ih),
-                        rr[4].Resolve(iw), rr[5].Resolve(ih), rr[6].Resolve(iw), rr[7].Resolve(ih), iw, ih);
-                RoundedRect(p, x + l, y + t, iw, ih, cr);
+                var (ix, iy, iw, ih, cr) = ResolveInset(w, h);
+                RoundedRect(p, x + ix, y + iy, iw, ih, cr);
                 break;
             }
             case ShapeKind.Circle:
             case ShapeKind.Ellipse:
             {
-                bool circle = Kind == ShapeKind.Circle;
-                int c = circle ? 1 : 2;
-                float cx = _args[c].Resolve(w), cy = _args[c + 1].Resolve(h);
-                float Radius(int i, float extent, float centre)
-                {
-                    if (_keywords[i] == ClosestSide) return Math.Max(0, Math.Min(centre, extent - centre));
-                    if (_keywords[i] == FarthestSide) return Math.Max(centre, extent - centre);
-                    return _args[i].Resolve(extent);
-                }
-                float rx, ry;
-                if (circle)
-                {
-                    if (_keywords[0] == ClosestSide) rx = Math.Max(0, Math.Min(Math.Min(cx, w - cx), Math.Min(cy, h - cy)));
-                    else if (_keywords[0] == FarthestSide) rx = Math.Max(Math.Max(cx, w - cx), Math.Max(cy, h - cy));
-                    // A percentage is of the box's diagonal divided by the square root of two.
-                    else rx = _args[0].Resolve(MathF.Sqrt((w * w + h * h) / 2));
-                    ry = rx;
-                }
-                else
-                {
-                    rx = Radius(0, w, cx);
-                    ry = Radius(1, h, cy);
-                }
+                var (cx, cy, rx, ry) = ResolveEllipse(w, h);
                 Ellipse(p, x + cx, y + cy, rx, ry);
                 break;
             }
@@ -311,6 +284,65 @@ internal sealed class ClipShape
         }
         return (p.Verbs.ToArray(), p.Points.ToArray());
     }
+
+    /// <summary>An inset() shape in a w × h reference box: its rectangle from the box's top-left corner and its radii.</summary>
+    public (float X, float Y, float W, float H, Layout.CornerRadii? Radii) ResolveInset(float w, float h)
+    {
+        float t = _args[0].Resolve(h), r = _args[1].Resolve(w), b = _args[2].Resolve(h), l = _args[3].Resolve(w);
+        // Insets that add up to more than the box are scaled down together.
+        if (l + r > w && l + r > 0) { float k = w / (l + r); l *= k; r *= k; }
+        if (t + b > h && t + b > 0) { float k = h / (t + b); t *= k; b *= k; }
+        float iw = Math.Max(0, w - l - r), ih = Math.Max(0, h - t - b);
+        Layout.CornerRadii? cr = null;
+        if (_round is { } rr)
+            cr = Layout.CornerRadii.Fit(rr[0].Resolve(iw), rr[1].Resolve(ih), rr[2].Resolve(iw), rr[3].Resolve(ih),
+                rr[4].Resolve(iw), rr[5].Resolve(ih), rr[6].Resolve(iw), rr[7].Resolve(ih), iw, ih);
+        return (l, t, iw, ih, cr);
+    }
+
+    /// <summary>A circle() or ellipse() in a w × h reference box: its centre from the box's top-left corner and its radii.</summary>
+    public (float Cx, float Cy, float Rx, float Ry) ResolveEllipse(float w, float h)
+    {
+        bool circle = Kind == ShapeKind.Circle;
+        int c = circle ? 1 : 2;
+        float cx = _args[c].Resolve(w), cy = _args[c + 1].Resolve(h);
+        float Radius(int i, float extent, float centre)
+        {
+            if (_keywords[i] == ClosestSide) return Math.Max(0, Math.Min(centre, extent - centre));
+            if (_keywords[i] == FarthestSide) return Math.Max(centre, extent - centre);
+            return _args[i].Resolve(extent);
+        }
+        float rx, ry;
+        if (circle)
+        {
+            if (_keywords[0] == ClosestSide) rx = Math.Max(0, Math.Min(Math.Min(cx, w - cx), Math.Min(cy, h - cy)));
+            else if (_keywords[0] == FarthestSide) rx = Math.Max(Math.Max(cx, w - cx), Math.Max(cy, h - cy));
+            // A percentage is of the box's diagonal divided by the square root of two.
+            else rx = _args[0].Resolve(MathF.Sqrt((w * w + h * h) / 2));
+            ry = rx;
+        }
+        else
+        {
+            rx = Radius(0, w, cx);
+            ry = Radius(1, h, cy);
+        }
+        return (cx, cy, rx, ry);
+    }
+
+    /// <summary>The corners of a polygon() in a w × h reference box, as x, y pairs from the box's top-left corner.</summary>
+    public float[] ResolvePolygon(float w, float h)
+    {
+        var points = new float[_args.Length & ~1];
+        for (int i = 0; i + 1 < _args.Length; i += 2)
+        {
+            points[i] = _args[i].Resolve(w);
+            points[i + 1] = _args[i + 1].Resolve(h);
+        }
+        return points;
+    }
+
+    /// <summary>The data of a path() shape, in CSS pixels from the reference box's top-left corner.</summary>
+    public PathBuilder? PathData => _path;
 
     // The control point distance of a quarter circle as a cubic Bézier curve.
     private const float Kappa = 0.5523f;

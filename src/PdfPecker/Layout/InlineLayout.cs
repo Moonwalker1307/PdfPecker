@@ -93,6 +93,7 @@ internal sealed partial class LayoutEngine
         }
         produced = true;
         float bottom = PlaceLines(lines, cs, x, y, w, indent, besideFloats);
+        if (besideFloats && _floats.ShapeIn(y, bottom)) LiftInlineContent(opsMark);
         ReturnLines(lines);
         if (paragraph.First != null) ReturnState(paragraph.First);
         ReturnState(st);
