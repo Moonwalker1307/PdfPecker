@@ -21,7 +21,7 @@ internal sealed partial class StyleResolver
             case "xxx-large": px = 48; break;
             case "smaller": s.FontSize = parent.FontSize / 1.2f; return;
             case "larger": s.FontSize = parent.FontSize * 1.2f; return;
-            case "inherit": s.FontSize = parent.FontSize; return;
+            case "inherit" or "unset": s.FontSize = parent.FontSize; return;
             case "initial": s.FontSize = 12; return;
             default:
                 if (TryParseLength(v, parent.FontSize, _rootFontSize, out var len, _vw, _vh) && !len.IsAuto)

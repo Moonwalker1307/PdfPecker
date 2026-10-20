@@ -281,4 +281,45 @@ public class StyleTests
         Assert.True(CssColor.TryParse(css, CssColor.Black, out var c));
         Assert.Equal(expected, c);
     }
+
+    [Fact]
+    public void Border_inherit_copies_the_parents_border()
+    {
+        var doc = Styled(@"<style>div { border: 2px solid green } span { border: inherit } i { border: 1px solid red; border: initial }</style>
+          <div><span id=s>x</span><i id=i>y</i></div>");
+        var s = ById(doc, "s").Style;
+        Assert.Equal(BorderStyle.Solid, s.BorderTopStyle);
+        Assert.Equal(BorderStyle.Solid, s.BorderLeftStyle);
+        Assert.Equal(1.5f, s.BorderTopWidth);
+        Assert.Equal(0xFF008000u, s.BorderBottomColor);
+        Assert.Equal(BorderStyle.None, ById(doc, "i").Style.BorderTopStyle);
+    }
+
+    [Fact]
+    public void All_unset_drops_earlier_declarations_but_keeps_later_ones()
+    {
+        var doc = Styled(@"<style>.b { display: block; padding: 3px; border: 1px solid; color: red }
+            .u { all: unset } .later { all: unset; margin-left: 4px }</style>
+          <div style='color: blue'><div id=u class='b u'>x</div><div id=l class='b later'>y</div></div>");
+        var u = ById(doc, "u").Style;
+        Assert.Equal(Display.Inline, u.Display);
+        Assert.Equal(BorderStyle.None, u.BorderTopStyle);
+        Assert.Equal(0f, u.PaddingTop.Value);
+        Assert.Equal(0xFF0000FFu, u.Color); // color is inherited, so unset takes the parent's
+        Assert.Equal(3f, ById(doc, "l").Style.MarginLeft.Value);
+    }
+
+    [Fact]
+    public void All_initial_resets_inherited_properties_and_revert_keeps_the_user_agents()
+    {
+        var doc = Styled(@"<style>.c { color: red; font-weight: bold } .i { all: initial } .r { padding: 5px; all: revert }</style>
+          <div class=c><p id=i class=i>x</p><p id=r class=r>y</p></div>");
+        var i = ById(doc, "i").Style;
+        Assert.Equal(Display.Inline, i.Display);
+        Assert.Equal(0xFF000000u, i.Color);
+        Assert.False(i.Bold);
+        var r = ById(doc, "r").Style;
+        Assert.Equal(Display.Block, r.Display); // the user agent's p { display: block } stays
+        Assert.Equal(0f, r.PaddingTop.Value);
+    }
 }

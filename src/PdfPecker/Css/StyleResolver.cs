@@ -194,6 +194,8 @@ internal sealed partial class StyleResolver
     public void ResolveTree(Element document, ComputedStyle rootStyle)
     {
         document.Style = rootStyle;
+        _rootStyle = rootStyle;
+        _initialStyle = null;
         Strings.Clear();
         Footnotes.Clear();
         _footnoteDepth = 0;
