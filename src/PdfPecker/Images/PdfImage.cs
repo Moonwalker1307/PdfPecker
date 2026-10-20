@@ -104,6 +104,26 @@ internal sealed partial class PdfImage
         return part;
     }
 
+    /// <summary>
+    /// The image's alpha, one byte per pixel, as shape-outside reads it; null in <paramref name="alpha"/> when the image
+    /// has no soft mask and is opaque. False when the soft mask cannot be decoded here.
+    /// </summary>
+    public bool TryAlpha(out byte[]? alpha)
+    {
+        alpha = null;
+        if (SMask == null) return true;
+        try
+        {
+            if (SMask.Width != Width || SMask.Height != Height || SMask.Samples() is not { Colors: 1 } mask) return false;
+            alpha = mask.Data;
+            return alpha.Length >= (long)Width * Height;
+        }
+        catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or InvalidDataException or FormatException or EndOfStreamException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>The image's samples, 8 bits each and one to three per pixel, without row filters; null when not supported.</summary>
     private (byte[] Data, int Colors)? Samples()
     {

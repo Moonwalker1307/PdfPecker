@@ -423,6 +423,9 @@ internal sealed class ComputedStyle
     public bool AvoidColumnBreakBefore, AvoidColumnBreakAfter, AvoidColumnBreakInside; // avoid-column: only inside a multicol
     public bool Floated;
     public FloatSide Float;
+    public ShapeOutside? ShapeOutside;          // shape-outside on a float; null = none
+    public Length ShapeMargin = Length.Zero;    // shape-margin; a percentage is of the containing block's width
+    public float ShapeImageThreshold;           // shape-image-threshold, from 0 to 1
     /// <summary>float: footnote: the box leaves the flow for the footnote area of the page its call lands on.</summary>
     public bool Footnote;
     public FootnoteDisplay FootnoteDisplay;
@@ -680,6 +683,9 @@ internal sealed class ComputedStyle
         c.AvoidColumnBreakBefore = c.AvoidColumnBreakAfter = c.AvoidColumnBreakInside = false;
         c.Floated = false;
         c.Float = FloatSide.None;
+        c.ShapeOutside = null;
+        c.ShapeMargin = Length.Zero;
+        c.ShapeImageThreshold = 0;
         c.Footnote = false;
         c.FootnoteDisplay = FootnoteDisplay.Block;
         c.FootnotePolicy = FootnotePolicy.Auto;

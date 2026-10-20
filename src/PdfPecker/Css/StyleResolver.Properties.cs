@@ -49,6 +49,9 @@ internal sealed partial class StyleResolver
             case "display": ApplyDisplay(s, parent, in d); break;
             case "float": ApplyFloat(s, parent, in d); break;
             case "clear": ApplyClear(s, parent, in d); break;
+            case "shape-outside": ApplyShapeOutside(s, parent, in d); break;
+            case "shape-margin": ApplyShapeMargin(s, parent, in d); break;
+            case "shape-image-threshold": ApplyShapeImageThreshold(s, parent, in d); break;
             case "position": ApplyPosition(s, parent, in d); break;
             case "top": SetLength(ref s.Top, d.Lower, d.Em, d.Inherit ? parent.Top : null); break;
             case "right": SetLength(ref s.Right, d.Lower, d.Em, d.Inherit ? parent.Right : null); break;
