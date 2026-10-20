@@ -85,6 +85,18 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Font_relative_units_stay_linear()
+    {
+        // A value with thousands of ex, ch and lh lengths is rewritten only up to a limit, and every element with such a
+        // length measures its font.
+        var sb = new StringBuilder("<style>p{font-family:Courier;margin:0 0 0 1ch} .w{width:calc(");
+        for (int i = 0; i < 5000; i++) sb.Append("1ex + 2ch + ");
+        sb.Append("1lh)}</style>");
+        for (int i = 0; i < 2000; i++) sb.Append("<p class=w style='line-height:").Append(i % 7).Append("lh;font-size:").Append(10 + i % 20).Append("ex'>x</p>");
+        AssertStructurallyValid(Bounded(sb.ToString()));
+    }
+
+    [Fact]
     public void Custom_property_expansion_is_capped()
     {
         // Each variable uses the previous one four times: 4^40 characters if expanded.

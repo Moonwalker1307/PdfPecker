@@ -221,6 +221,8 @@ internal sealed class FontChain : TextFont
 
     public TextFont Primary => _primary;
 
+    public override float Metric(FontMetric metric) => _primary.Metric(metric);
+
     private static bool Covers(TextFont f, int cp)
         => f is EmbeddedFont e ? e.Covers(cp) : cp < 0x10000 && StandardFont.CanEncode((char)cp);
 
