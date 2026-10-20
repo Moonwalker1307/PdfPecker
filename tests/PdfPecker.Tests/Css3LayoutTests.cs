@@ -504,4 +504,16 @@ public class Css3LayoutTests
         Near(80, Box(ops, "#ff0000").W);
         Near(80, Box(ops, "#00ff00").X);
     }
+
+    [Fact]
+    public void A_stretched_flex_item_taller_than_a_fixed_height_row_keeps_its_place()
+    {
+        // A Bootstrap progress bar: a 14px flex row whose bar has a 15.75px text line. The bar used to be moved down by
+        // its own offset when the line was placed a second time, below the row and out of its clip.
+        var ops = Layout("<div style='height:60pt'></div><div style='display:flex;height:10.5pt;overflow:hidden;border-radius:4pt;background:#e9ecef'>"
+                         + "<div style='width:72%;background:#0d6efd;font-size:15pt'>72%</div></div>");
+        var bar = Box(ops, "#0d6efd");
+        Near(60, bar.Y);
+        Near(10.5f, bar.H);
+    }
 }

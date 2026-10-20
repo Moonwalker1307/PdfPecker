@@ -1933,6 +1933,12 @@ internal sealed partial class LayoutEngine
         public Func<Captured>? Lay;
 
         /// <summary>
+        /// Where the box was last placed. Placing moves the drawing operations themselves, so placing the box again (a
+        /// flex line placed a second time) moves them by the difference only.
+        /// </summary>
+        public float PlacedX, PlacedY;
+
+        /// <summary>
         /// The boxes captured while this one was laid out, outside further captures, with what they measured: when the
         /// box is laid out again on the pages, those boxes measure the same and need not be laid out to be measured.
         /// </summary>
@@ -2315,16 +2321,18 @@ internal sealed partial class LayoutEngine
     /// <summary>Moves captured content to its final position and appends it to the output.</summary>
     private void Place(Captured c, float dx, float dy)
     {
+        float moveX = dx - c.PlacedX, moveY = dy - c.PlacedY;
+        (c.PlacedX, c.PlacedY) = (dx, dy);
         foreach (var op in c.Ops)
         {
-            op.Offset(dx, dy);
+            op.Offset(moveX, moveY);
             _ops.Add(op);
         }
         // Its content ends with it, as far as the bottom edges of the boxes around it are concerned.
         if (_paginate) _lastContentBottom = dy + c.Height;
         if (c.AnchorIds != null)
             foreach (var id in c.AnchorIds)
-                if (Anchors.TryGetValue(id, out float ay)) SetAnchor(id, ay + dy);
+                if (Anchors.TryGetValue(id, out float ay)) SetAnchor(id, ay + moveY);
         if (c.Absolutes != null)
             foreach (var (e, ax, ay) in c.Absolutes) QueueAbsolute(e, ax + dx, ay + dy);
     }
