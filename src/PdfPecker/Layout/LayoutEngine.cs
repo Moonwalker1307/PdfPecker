@@ -2338,6 +2338,13 @@ internal sealed partial class LayoutEngine
     /// <summary>How many layouts of content on its own (see <see cref="Capture"/>) are in progress, one inside the other.</summary>
     private int _captureDepth;
 
+    /// <summary>
+    /// The depth of captures from which placed groups move their ops only when those are next looked at (see
+    /// <see cref="GroupOp.OffsetLater"/>). Adding the offsets up first can round a coordinate in its last bit, so
+    /// shallower content, which is all a real document has, is moved as it always was.
+    /// </summary>
+    private const int LazyOffsetDepth = 32;
+
     /// <summary>Moves captured content to its final position and appends it to the output.</summary>
     private void Place(Captured c, float dx, float dy)
     {
@@ -2345,7 +2352,8 @@ internal sealed partial class LayoutEngine
         (c.PlacedX, c.PlacedY) = (dx, dy);
         foreach (var op in c.Ops)
         {
-            op.Offset(moveX, moveY);
+            if (op is GroupOp g && _captureDepth >= LazyOffsetDepth) g.OffsetLater(moveX, moveY);
+            else op.Offset(moveX, moveY);
             _ops.Add(op);
         }
         // Its content ends with it, as far as the bottom edges of the boxes around it are concerned.
