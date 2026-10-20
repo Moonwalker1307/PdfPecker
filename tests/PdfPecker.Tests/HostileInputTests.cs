@@ -1819,6 +1819,17 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Deeply_nested_flex_rows_find_their_measured_items_in_linear_time()
+    {
+        // Found by the fuzzer: target html, timeout-d2edd0b0. A flex row laid out on the pages looks up the items it
+        // measured, and a miss scanned every box measured inside it, so 12,000 nested rows took 26 s.
+        var html = "<!doctype html><html><head><style>\nbody { font-family: Helvetica, Arial, sans-serif; margin: 0; padding: 20px; }\n"
+            + ".row { display: flex; gap: 12px; margin-bottom: 12px; }\n</style></head><body>\n"
+            + Repeat("<div class=\"row\">", 12000) + "<di\"glow\">Soft glow</div>\n<h2>aspect-ratio</h2>\n<div class=\"ratio\">16 / 9</div>\n</body>";
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
     public void Headings_before_tables_nested_in_split_header_cells_are_laid_out_once()
     {
         // Found by the fuzzer: target html, timeout-c201378d. Each level is a heading kept with a table whose header row
