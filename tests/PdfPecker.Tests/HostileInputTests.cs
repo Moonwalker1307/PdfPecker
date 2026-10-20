@@ -52,6 +52,29 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded("<table>" + Repeat("<div>a<table>b<tr>", 200) + "<td>c</table>"));
     }
 
+    // 3D transform lists multiply 4x4 matrices: huge, tiny, NaN-making and behind-the-viewer values must end in a drawn
+    // or hidden box, never an exception, and a long list stays capped.
+    [Theory]
+    [InlineData("transform:perspective(1px) translateZ(1e38px) rotateX(1e30deg)")]
+    [InlineData("transform:perspective(0.0001px) rotate3d(1e38,1e38,1e38,720deg) scale3d(1e38,1e-38,1e38)")]
+    [InlineData("transform:matrix3d(1e38,1e38,1e38,1e38,1e38,1e38,1e38,1e38,1e38,1e38,1e38,1e38,1e38,1e38,1e38,1e38)")]
+    [InlineData("transform:matrix3d(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)")]
+    [InlineData("transform:perspective(100px) translateZ(150px)")]
+    [InlineData("transform:rotate3d(0,0,0,45deg) rotateY(90deg) rotateX(90deg)")]
+    [InlineData("perspective:1e38px;perspective-origin:-1e38px 1e38px")]
+    [InlineData("perspective:0;transform:rotateY(45deg)")]
+    public void Transforms_in_3D_with_extreme_values_stay_finite(string declarations)
+    {
+        AssertStructurallyValid(Bounded($"<div style='perspective:50px'><div style='width:100px;height:50px;background:red;{declarations}'>text</div></div>"));
+        AssertStructurallyValid(Bounded($"<div style='{declarations}'><div style='width:100px;height:50px;background:red;transform:rotateY(80deg)'>text</div></div>"));
+    }
+
+    [Fact]
+    public void Long_3D_transform_lists_are_capped()
+    {
+        AssertStructurallyValid(Bounded("<div style='width:10px;height:10px;background:red;transform:" + Repeat("rotate3d(1,2,3,10deg) ", 100_000) + "'>x</div>"));
+    }
+
     [Fact]
     public void Deeply_nested_writing_modes_stay_bounded()
     {

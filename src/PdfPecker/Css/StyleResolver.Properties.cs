@@ -235,6 +235,12 @@ internal sealed partial class StyleResolver
             case "rotate": ApplyRotate(s, parent, in d); break;
             case "scale": ApplyScale(s, parent, in d); break;
             case "transform-origin": ApplyTransformOrigin(s, parent, in d); break;
+            case "perspective": ApplyPerspective(s, parent, in d); break;
+            case "perspective-origin": ApplyPerspectiveOrigin(s, parent, in d); break;
+            // Chrome prints a flattened 3D scene whatever these say, so they are accepted and have no effect.
+            case "transform-style":
+            case "backface-visibility":
+                break;
             case "clip-path": ApplyClipPath(s, parent, in d); break;
             case "filter": ApplyFilter(s, parent, in d); break;
             case "mix-blend-mode": ApplyMixBlendMode(s, parent, in d); break;
