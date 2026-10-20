@@ -11,6 +11,7 @@ internal sealed partial class LayoutEngine
     {
         public float X0, Y0, X1, Y1;
         public bool Right;
+        public bool InitialLetter;
         public int OpsIndex; // where its ops start in the op list, to forget it when layout rewinds past it
         public FloatShape? Shape; // shape-outside: what lines beside it wrap around; null for the margin box
     }
@@ -144,6 +145,15 @@ internal sealed partial class LayoutEngine
             return next;
         }
 
+        /// <summary>The bottom of the lowest initial letter, or negative infinity: a paragraph with one of its own starts below it.</summary>
+        public float InitialLetterBottom()
+        {
+            float y = float.NegativeInfinity;
+            foreach (var b in Boxes)
+                if (b.InitialLetter && b.Y1 > y) y = b.Y1;
+            return y;
+        }
+
         /// <summary>The bottom of the lowest left and/or right float, or negative infinity.</summary>
         public float ClearY(bool left, bool right)
         {
@@ -238,6 +248,7 @@ internal sealed partial class LayoutEngine
         public Captured Box = null!;
         public float CbW;
         public bool SizeOnly; // Box holds the size of an earlier measurement but no ops: it is laid out when placed
+        public InitialLetterPlace? Letter; // an initial letter, placed against the first line instead
         public float Width => Box.Width;
     }
 
@@ -246,6 +257,7 @@ internal sealed partial class LayoutEngine
 
     private PendingFloat MeasureFloat(Element e, float cbW)
     {
+        if (IsInitialLetter(e) && MeasureInitialLetter(e, cbW) is { } letter) return letter;
         // A float that is laid out again on the page, because it crosses a page boundary or forces a break, measures
         // the floats inside it again. Measuring them in full each time would lay out a float nested n deep n times,
         // once for each float around it, so a size measured before is reused and the float is only laid out when it
@@ -269,6 +281,11 @@ internal sealed partial class LayoutEngine
     /// </summary>
     private void PlaceFloat(PendingFloat f, float y, float cbX, float cbW)
     {
+        if (f.Letter != null)
+        {
+            PlaceInitialLetter(f, y, cbX, cbW, 0);
+            return;
+        }
         var e = f.Element;
         var s = e.Style;
         var c = f.Box;
@@ -363,6 +380,7 @@ internal sealed partial class LayoutEngine
         public float Y;         // top of the current line
         public float Left, Avail; // the current line's room, relative to X
         public float StrutH;
+        public float LetterIndent; // the text-indent an initial letter takes from the first line
         public readonly List<PendingFloat> Waiting = new(); // floats that did not fit beside the current line
 
         // Pages of different widths: the block's content box on each kind of page, and the page the current line was
@@ -419,6 +437,15 @@ internal sealed partial class LayoutEngine
         {
             var (bx, bw) = Box;
             var f = Engine.MeasureFloat(it.Element!, bw);
+            if (f.Letter != null)
+            {
+                // The first line starts below an earlier paragraph's initial letter, and a raised letter moves its text down.
+                Y = Math.Max(Y, Engine._floats.InitialLetterBottom());
+                Engine.PlaceInitialLetter(f, Y, bx, bw, LetterIndent);
+                Y += f.Letter.Shift;
+                Measure();
+                return;
+            }
             if (hasContent && (Waiting.Count > 0 || f.Width > Avail - used + Eps))
             {
                 Waiting.Add(f);
