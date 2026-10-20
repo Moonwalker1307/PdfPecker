@@ -79,6 +79,11 @@ internal static partial class CssParser
             return;
         }
 
+        // A CSS-wide keyword (border: inherit) gives every longhand of the shorthand that keyword. The shorthand's own
+        // expansion of the word says which longhands those are, whatever it made of the word itself.
+        int first = output.Count;
+        bool wide = IsCssWideKeyword(value);
+
         switch (name)
         {
             case "container": ExpandContainer(value, longhands); break;
@@ -145,7 +150,20 @@ internal static partial class CssParser
             case "columns": ExpandColumns(value, longhands); break;
             default: longhands.Add(name, value); break;
         }
+
+        if (wide)
+        {
+            var keyword = value.Trim();
+            for (int i = first; i < output.Count; i++) output[i] = new Declaration(output[i].Property, keyword, important);
+        }
     }
+
+    /// <summary>Whether a value is inherit, initial, unset, revert or revert-layer, which every property takes.</summary>
+    internal static bool IsCssWideKeyword(string value)
+        => value.AsSpan().Trim() is var v
+           && (v.Equals("inherit", StringComparison.OrdinalIgnoreCase) || v.Equals("initial", StringComparison.OrdinalIgnoreCase)
+               || v.Equals("unset", StringComparison.OrdinalIgnoreCase) || v.Equals("revert", StringComparison.OrdinalIgnoreCase)
+               || v.Equals("revert-layer", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>container: &lt;name&gt; [ / &lt;type&gt; ]; the type is normal when left out.</summary>
     private static void ExpandContainer(string value, LonghandWriter longhands)
@@ -527,6 +545,6 @@ internal static partial class CssParser
         longhands.Add("font-variant-caps", caps);
         longhands.Add("font-stretch", stretch);
         longhands.Add("font-variant-numeric", "normal");
-        if (family.Length > 0) longhands.Add("font-family", family);
+        if (family.Length > 0 || IsCssWideKeyword(value)) longhands.Add("font-family", family);
     }
 }

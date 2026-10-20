@@ -59,7 +59,8 @@ internal sealed partial class StyleResolver
             return shared;
         }
 
-        var s = parent.CreateChild();
+        var allDecl = FindAll();
+        var s = StartingStyle(parent, allDecl.Keyword);
 
         // Custom properties first: any other declaration may reference them.
         _custom.Clear();
@@ -80,7 +81,7 @@ internal sealed partial class StyleResolver
         // font-size next: em-based lengths in every other property depend on it.
         for (int i = _count - 1; i >= 0; i--)
         {
-            if (_decls[i].Property == "font-size")
+            if (_decls[i].Property == "font-size" && !ResetByAll(i, allDecl))
             {
                 var fs = Substituted(_decls[i].Value, s);
                 if (fs != null) ApplyFontSize(s, parent, fs);
@@ -93,7 +94,7 @@ internal sealed partial class StyleResolver
         {
             var d = _decls[i];
             if (!UsedViewportHeight && HasViewportHeightUnit(d.Value)) UsedViewportHeight = true;
-            if (d.Property == "font-size" || d.Property.StartsWith("--", StringComparison.Ordinal)) continue;
+            if (d.Property is "font-size" or "all" || d.Property.StartsWith("--", StringComparison.Ordinal) || ResetByAll(i, allDecl)) continue;
             if (!CssParser.HasVar(d.Value))
             {
                 Apply(s, parent, d.Property, d.Value);
