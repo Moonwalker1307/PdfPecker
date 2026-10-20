@@ -880,7 +880,12 @@ internal sealed partial class LayoutEngine
             // Right to left, the columns run from the right edge of the grid container (of the grid area for a subgrid).
             if (s.Rtl) areaX = g.ColCtx?.Edges != null ? g.ColCtx.Edges[^1] - areaX - areaW : g.X + g.X + g.W - areaX - areaW;
             float shiftTop = rowShift?[it.Row] ?? 0, shiftBottom = rowShift?[lastRow] ?? 0;
-            float areaY = g.RowY[it.Row] + shiftTop, areaH = g.RowY[lastRow] + shiftBottom + g.Rows[lastRow].Base - areaY;
+            // The height is taken as a difference of row offsets, not of the area's edges: far from the top of the
+            // document a float holds few fractional digits, and the edges came out a little apart from the items'
+            // heights, so every stretched item was laid out again and the boxes inside could not reuse what they had
+            // measured.
+            float areaY = g.RowY[it.Row] + shiftTop;
+            float areaH = g.RowY[lastRow] - g.RowY[it.Row] + (shiftBottom - shiftTop) + g.Rows[lastRow].Base;
 
             var align = SelfAlign(it, s.AlignItems);
             var box = FitGridItemHeight(ref g, it, i, align, areaY, areaW, areaH, out bool rowSub);
@@ -947,7 +952,7 @@ internal sealed partial class LayoutEngine
         if (want is { } hh && (rowSub || Math.Abs(hh - current) > Eps && (NeedsRelayoutWhenStretched(it) || st.Height.IsPercent)))
         {
             float? bw = g.StretchX[i] ? null : box.Width - it.Ml - it.Mr;
-            box = it.Box = CaptureBox(it.El, areaW, shrinkToFit: !g.StretchX[i], borderW: bw, borderH: hh, reuse: true);
+            box = it.Box = CaptureBox(it.El, areaW, shrinkToFit: !g.StretchX[i], borderW: bw, borderH: hh, reuse: true, inner: box.Known);
         }
         return box;
     }
