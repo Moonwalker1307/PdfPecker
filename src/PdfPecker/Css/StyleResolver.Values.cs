@@ -297,8 +297,10 @@ internal sealed partial class StyleResolver
         }
         if (tok.StartsWith("fit-content(", StringComparison.Ordinal) && tok.EndsWith(')'))
         {
-            // Approximated as minmax(auto, max-content) capped later by the track's available space.
-            track = new Track(new TrackSize(TrackSizeKind.Auto), new TrackSize(TrackSizeKind.MaxContent));
+            // minmax(auto, max-content) with the max-content size capped at the length; a percentage cap is
+            // approximated by the track's available space.
+            float cap = TryParseTrackSize(tok.Substring(12, tok.Length - 13).Trim(), em, out var limit) && limit.Kind == TrackSizeKind.Fixed ? limit.Value : 0;
+            track = new Track(new TrackSize(TrackSizeKind.Auto), new TrackSize(TrackSizeKind.MaxContent, cap));
             return true;
         }
         if (!TryParseTrackSize(tok, em, out var size)) return false;

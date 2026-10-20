@@ -1028,6 +1028,12 @@ internal sealed partial class LayoutEngine
             float w = s.Width.Value + (s.BorderBox ? 0 : frame);
             result = (Math.Max(w, s.Display == Display.Table ? result.Item1 : 0), Math.Max(w, s.Display == Display.Table ? result.Item1 : 0));
         }
+        else if (s.WidthKeyword is SizeKeyword.MinContent or SizeKeyword.MaxContent && e.Name is not ("img" or "svg"))
+        {
+            // A box as wide as its min-content (or max-content) width contributes that width for both.
+            float w = s.WidthKeyword == SizeKeyword.MinContent ? result.Item1 : result.Item2;
+            result = (w, w);
+        }
         else if (s.Width.IsAuto && s.AspectRatio > 0 && e.Name is not ("img" or "svg"))
         {
             float frameV = s.PaddingTop.Resolve(0) + s.PaddingBottom.Resolve(0) + s.BorderTop + s.BorderBottom;

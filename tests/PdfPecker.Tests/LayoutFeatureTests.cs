@@ -160,6 +160,69 @@ public class LayoutFeatureTests
     }
 
     [Fact]
+    public void Flex_items_with_min_width_zero_shrink_below_their_content()
+    {
+        // min-width: 0 lets an item shrink below its longest word; min-width: auto keeps the word whole.
+        var ops = Layout("""
+            <div style="display:flex; width:300pt">
+              <div style="flex:1; background:#ff0000"><span style="display:inline-block; width:200pt; height:10pt"></span></div>
+              <div style="flex:1; min-width:0; background:#00ff00"><span style="display:inline-block; width:200pt; height:10pt"></span></div>
+            </div>
+            """);
+        Near(200, Box(ops, "#ff0000").W);
+        Near(100, Box(ops, "#00ff00").W);
+    }
+
+    [Fact]
+    public void Wrapping_column_flex_box_starts_a_new_column_when_full()
+    {
+        // Three 25pt items fit in neither one 60pt column: the third starts a second column, and the columns share the
+        // width (align-content: normal stretches the lines).
+        var ops = Layout("""
+            <div style="display:flex; flex-direction:column; flex-wrap:wrap; height:60pt; width:200pt">
+              <div style="height:25pt; background:#ff0000"></div>
+              <div style="height:25pt; background:#00ff00"></div>
+              <div style="height:25pt; background:#0000ff"></div>
+            </div>
+            """);
+        var a = Box(ops, "#ff0000"); var b = Box(ops, "#00ff00"); var c = Box(ops, "#0000ff");
+        Near(0, a.X); Near(0, b.X); Near(25, b.Y);
+        Near(100, c.X); Near(a.Y, c.Y);
+        Near(100, a.W); Near(100, c.W);
+    }
+
+    [Fact]
+    public void Intrinsic_width_keywords_size_the_box_by_its_content()
+    {
+        const string words = "<span style='display:inline-block; width:80pt; height:10pt'></span> <span style='display:inline-block; width:80pt; height:10pt'></span>";
+        var ops = Layout($"""
+            <div style="width:120pt">
+              <div style="width:fit-content; background:#ff0000">{words}</div>
+              <div style="width:min-content; background:#00ff00">{words}</div>
+              <div style="width:max-content; background:#0000ff">{words}</div>
+              <div style="width:fit-content; padding:0 5pt; background:#ffff00"><span style="display:inline-block; width:30pt; height:10pt"></span></div>
+            </div>
+            """);
+        Near(120, Box(ops, "#ff0000").W);   // fit-content: the available width, which is less than the max-content width
+        Near(80, Box(ops, "#00ff00").W);    // min-content: the widest word
+        Assert.True(Box(ops, "#0000ff").W > 160); // max-content: both words on one line, wider than the container
+        Near(40, Box(ops, "#ffff00").W);    // fit-content: the content when it is narrower, plus padding
+    }
+
+    [Fact]
+    public void Grid_fit_content_track_is_capped_at_its_length()
+    {
+        var ops = Layout("""
+            <div style="display:grid; grid-template-columns:fit-content(100pt) 1fr; width:400pt">
+              <div style="background:#ff0000"><span style="display:inline-block; width:60pt; height:10pt"></span> <span style="display:inline-block; width:60pt; height:10pt"></span></div>
+              <div style="background:#00ff00">x</div>
+            </div>
+            """);
+        Near(100, Box(ops, "#ff0000").W);
+        Near(100, Box(ops, "#00ff00").X);
+    }
+
+    [Fact]
     public void Flex_column_grows_inside_a_definite_height_and_respects_order()
     {
         var ops = Layout("""
