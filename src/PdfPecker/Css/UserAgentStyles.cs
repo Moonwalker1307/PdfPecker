@@ -25,7 +25,7 @@ p, dl { margin: 1em 0; }
 blockquote, figure { margin: 1em 40px; }
 dd { margin-inline-start: 40px; }
 address { font-style: italic; }
-center { text-align: center; }
+center { text-align: -webkit-center; }
 h1 { font-size: 2em; margin: 0.67em 0; font-weight: bold; }
 h2 { font-size: 1.5em; margin: 0.83em 0; font-weight: bold; }
 h3 { font-size: 1.17em; margin: 1em 0; font-weight: bold; }
@@ -42,7 +42,7 @@ ul ul ul, ol ul ul, ul ol ul, ol ol ul { list-style-type: square; }
 pre, listing, xmp, plaintext { font-family: monospace; white-space: pre; margin: 1em 0; }
 code, kbd, samp, tt, var { font-family: monospace; }
 var { font-style: italic; }
-hr { border: 1px inset gray; margin: 0.5em 0; color: gray; }
+hr { border: 1px inset gray; margin: 0.5em auto; color: gray; }
 b, strong { font-weight: bold; }
 i, em, cite, dfn { font-style: italic; }
 u, ins { text-decoration: underline; }
