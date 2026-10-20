@@ -255,6 +255,12 @@ internal sealed partial class LayoutEngine
 
         var occupied = new List<bool[]>();
         int cols = colCount;
+        // An item placed past the column limit would never find a free cell, so it moves back into the last columns.
+        foreach (var it in items)
+        {
+            it.ColSpan = Math.Min(it.ColSpan, cols);
+            if (it.ColFixed) it.Col = Math.Min(it.Col, cols - it.ColSpan);
+        }
         bool Free(int row, int col, int rspan, int cspan)
         {
             if (col + cspan > cols) return false;
