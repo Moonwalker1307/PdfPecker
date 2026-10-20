@@ -100,6 +100,7 @@ internal sealed partial class LayoutEngine
             foreach (var child in trs[r].Children)
             {
                 if (child is not Element td || td.Style == null || td.Style.Display != Display.TableCell) continue;
+                if (td.Style.WritingModeTurn != trs[r].Style.WritingModeTurn) WrapOrthogonalCell(td, trs[r].Style);
                 while (IsOccupied(r, col)) col++;
                 int colspan = Math.Clamp(ParseInt(td.GetAttribute("colspan"), 1), 1, 1000);
                 // As in HTML, a cell spans rows only within its own header, body or footer: those rows are laid out
@@ -985,6 +986,12 @@ internal sealed partial class LayoutEngine
         var s = e.Style;
         float frame = s.PaddingLeft.Resolve(0) + s.PaddingRight.Resolve(0) + s.BorderLeft + s.BorderRight;
         (float, float) result;
+        if (OrthogonalTurn(e) is int turn and not 0)
+        {
+            result = OrthogonalIntrinsic(e, turn);
+            _intrinsicCache[e] = result;
+            return result;
+        }
         if (e.Name is "img" or "svg")
         {
             bool saved = _measuring;

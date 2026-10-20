@@ -118,6 +118,9 @@ internal sealed class SvgDashArray
 
 internal enum TextAlign : byte { Left, Right, Center, Justify, Start, End } // Start and End follow the direction
 internal enum UnicodeBidi : byte { Normal, Embed, Isolate, BidiOverride, IsolateOverride, Plaintext }
+
+/// <summary>Values of writing-mode. The vertical modes are laid out as horizontal text turned a quarter turn.</summary>
+internal enum WritingMode : byte { HorizontalTb, VerticalRl, VerticalLr, SidewaysRl, SidewaysLr }
 internal enum WhiteSpace : byte { Normal, NoWrap, Pre, PreWrap, PreLine }
 internal enum VerticalAlign : byte { Baseline, Sub, Super, Top, Middle, Bottom, TextTop, TextBottom }
 internal enum OverflowWrap : byte { Normal, BreakWord, Anywhere }
@@ -265,6 +268,7 @@ internal sealed class ComputedStyle
     public float LineHeightValue;
     public TextAlign TextAlign = TextAlign.Start;
     public bool Rtl;                         // direction: rtl
+    public WritingMode WritingMode;          // writing-mode
     public TextAlign? TextAlignLast;         // null = auto
     public int TabSize = 8;                  // in spaces
     public bool NoHyphens;                   // hyphens: none (soft hyphens are no break opportunity)
@@ -533,6 +537,17 @@ internal sealed class ComputedStyle
 
     /// <summary>Clipped, blended, isolated or filtered: painted as a layer of its own, which is a stacking context.</summary>
     public bool HasEffects => ClipShape != null || SvgClipPath != null || BlendMode != null || Isolate || Filters != null;
+
+    /// <summary>
+    /// The quarter turn, in degrees clockwise, that turns horizontal layout into this box's writing mode: 90 for the
+    /// vertical modes and sideways-rl, whose text runs down, and -90 for sideways-lr, whose text runs up.
+    /// </summary>
+    public int WritingModeTurn => WritingMode switch
+    {
+        WritingMode.HorizontalTb => 0,
+        WritingMode.SidewaysLr => -90,
+        _ => 90,
+    };
 
     /// <summary>Creates the starting style for a child: inherited properties copied, the rest reset.</summary>
     public ComputedStyle CreateChild()

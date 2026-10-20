@@ -143,6 +143,10 @@ internal sealed partial class StyleResolver
             case "vertical-align": ApplyVerticalAlign(s, parent, in d); break;
             case "direction": ApplyDirection(s, parent, in d); break;
             case "unicode-bidi": ApplyUnicodeBidi(s, parent, in d); break;
+            case "writing-mode":
+            case "-webkit-writing-mode":
+                ApplyWritingMode(s, parent, in d);
+                break;
             case LangProperty: s.Lang = d.Value; break;
             case ControlWidthProperty: SetLength(ref s.ControlWidth, d.Lower, d.Em, null); break;
 

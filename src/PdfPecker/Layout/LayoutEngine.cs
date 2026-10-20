@@ -891,6 +891,7 @@ internal sealed partial class LayoutEngine
     {
         Cancellation.ThrowIfCancellationRequested();
         CheckPageLimit(y);
+        if (OrthogonalTurn(e) is int turn and not 0) return LayoutOrthogonal(e, x, y, availW, turn);
         var s = e.Style;
         bool table = s.Display == Display.Table;
         int opsStart = _ops.Count;

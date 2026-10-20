@@ -371,6 +371,18 @@ internal sealed partial class StyleResolver
     private static void ApplyDirection(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
         => s.Rtl = d.Lower switch { "rtl" => true, "ltr" => false, "inherit" => parent.Rtl, "initial" => false, _ => s.Rtl };
 
+    private static void ApplyWritingMode(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+        => s.WritingMode = d.Lower switch
+        {
+            "horizontal-tb" or "lr" or "lr-tb" or "rl" or "rl-tb" or "initial" => WritingMode.HorizontalTb,
+            "vertical-rl" or "tb" or "tb-rl" => WritingMode.VerticalRl,
+            "vertical-lr" => WritingMode.VerticalLr,
+            "sideways-rl" => WritingMode.SidewaysRl,
+            "sideways-lr" => WritingMode.SidewaysLr,
+            "inherit" or "unset" => parent.WritingMode,
+            _ => s.WritingMode,
+        };
+
     private static void ApplyUnicodeBidi(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
         => s.UnicodeBidi = d.Lower switch
         {
