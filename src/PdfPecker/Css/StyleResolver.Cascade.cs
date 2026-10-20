@@ -143,6 +143,7 @@ internal sealed partial class StyleResolver
             if (s.Display is Display.Inline or Display.InlineBlock) s.Display = Display.Block;
             else if (s.Display == Display.InlineFlex) s.Display = Display.Flex;
             else if (s.Display == Display.InlineGrid) s.Display = Display.Grid;
+            s.InlineTable = false;
             if (s.OutOfFlow) { s.Floated = false; s.Float = FloatSide.None; }
         }
         if (s.Footnote)

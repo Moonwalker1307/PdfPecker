@@ -293,6 +293,9 @@ internal sealed partial class StyleResolver
 
     private static void Prepare(Element parent)
     {
+        // Anonymous table boxes of an earlier pass give their children back; they are made again after the children's
+        // styles are known.
+        UnwrapAnonymous(parent);
         // ::before, ::after and ::first-letter boxes from an earlier pass are generated again; a first letter goes back
         // into the text it was taken from.
         for (int i = parent.Children.Count - 1; i >= 0; i--)
@@ -400,6 +403,8 @@ internal sealed partial class StyleResolver
             if (container) PopContainer();
         }
         if (pseudos) Generate(parent, PseudoElement.After, ref scope);
+        if (parent.Name == "details" && !parent.HasAttribute("open")) HideClosedDetails(parent);
+        WrapTableParts(parent);
         if (scope != null)
             foreach (var name in scope)
             {
