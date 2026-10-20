@@ -375,6 +375,7 @@ internal sealed class ComputedStyle
     public ContainerType ContainerType;
     public string[]? ContainerNames; // container-name; null for none
     public Length Width = Length.Auto, Height = Length.Auto;
+    public Length ControlWidth = Length.Auto;   // a text field's own width, used while width is auto and not stretched
     public Length MinWidth = Length.Auto, MaxWidth = Length.Auto, MinHeight = Length.Zero, MaxHeight = Length.Auto;
     public bool BorderBox;
     public VerticalAlign VerticalAlign;
@@ -574,7 +575,7 @@ internal sealed class ComputedStyle
         c.AspectRatioAuto = false;
         c.ContainerType = ContainerType.Normal;
         c.ContainerNames = null;
-        c.Width = c.Height = Length.Auto;
+        c.Width = c.Height = c.ControlWidth = Length.Auto;
         c.MinWidth = Length.Auto; // min-width: auto, which differs from 0 for boxes with aspect-ratio
         c.MinHeight = Length.Zero;
         c.MaxWidth = c.MaxHeight = Length.Auto;

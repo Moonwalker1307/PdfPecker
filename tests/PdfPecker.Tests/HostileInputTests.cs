@@ -43,6 +43,16 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Content_moved_out_of_tables_stays_linear()
+    {
+        // Each stray node between rows goes in front of its table; inserting at the table's place must not search or
+        // shift its parent's children for every node. Tables nested in the moved content repeat it at every level.
+        var parse = Bounded(() => Html.HtmlParser.Parse("<table>" + Repeat("<b>x</b>y<input>", 100_000) + "<tr><td>1</table>"));
+        Assert.Equal("table", ((Html.Element)parse.Children[^1]).Name);
+        AssertStructurallyValid(Bounded("<table>" + Repeat("<div>a<table>b<tr>", 200) + "<td>c</table>"));
+    }
+
+    [Fact]
     public void Custom_property_expansion_is_capped()
     {
         // Each variable uses the previous one four times: 4^40 characters if expanded.

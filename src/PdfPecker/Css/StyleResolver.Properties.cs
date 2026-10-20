@@ -143,6 +143,7 @@ internal sealed partial class StyleResolver
             case "direction": ApplyDirection(s, parent, in d); break;
             case "unicode-bidi": ApplyUnicodeBidi(s, parent, in d); break;
             case LangProperty: s.Lang = d.Value; break;
+            case ControlWidthProperty: SetLength(ref s.ControlWidth, d.Lower, d.Em, null); break;
 
             // ---- flexbox, grid and multi-column layout (Properties.Layout.cs)
             case "flex-direction": ApplyFlexDirection(s, in d); break;
