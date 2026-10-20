@@ -1867,6 +1867,17 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Nested_grids_far_from_the_page_origin_reuse_their_measured_items()
+    {
+        // Found by the fuzzer: target html, timeout-d2edd0b0. A margin of 2,147,483,647 px puts the grids where a float
+        // steps in 128 px, so their column positions, and the area widths taken from them, never matched the widths
+        // the items were measured at, and every level measured all of its content again: 14,000 grids took more than 20 s.
+        var html = "<style>body { margin: 0 2147483647px } .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm 6mm }</style><body>"
+            + Repeat("<div class=grid>", 14000);
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
     public void Headings_before_tables_nested_in_split_header_cells_are_laid_out_once()
     {
         // Found by the fuzzer: target html, timeout-c201378d. Each level is a heading kept with a table whose header row
