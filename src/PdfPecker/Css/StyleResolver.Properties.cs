@@ -150,6 +150,9 @@ internal sealed partial class StyleResolver
                 ApplyTabSize(s, parent, in d);
                 break;
             case "white-space": ApplyWhiteSpace(s, parent, in d); break;
+            case "text-wrap": ApplyTextWrap(s, parent, in d); break;
+            case "text-wrap-mode": ApplyTextWrapMode(s, parent, in d); break;
+            case "text-wrap-style": ApplyTextWrapStyle(s, parent, in d); break;
             case "overflow-wrap": ApplyOverflowWrap(s, parent, in d); break;
             case "word-break": ApplyWordBreak(s, parent, in d); break;
             case "line-break": ApplyLineBreak(s, parent, in d); break;

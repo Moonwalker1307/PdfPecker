@@ -286,6 +286,73 @@ internal sealed partial class StyleResolver
             _ => s.WhiteSpace,
         };
 
+    /// <summary>
+    /// text-wrap, the shorthand for text-wrap-mode and text-wrap-style: either may be left out, and is then reset to
+    /// wrap or auto, so text-wrap: balance also makes nowrap text wrap again.
+    /// </summary>
+    private static void ApplyTextWrap(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit)
+        {
+            s.WhiteSpace = parent.WhiteSpace;
+            s.TextWrap = parent.TextWrap;
+            return;
+        }
+        bool? wrap = null;
+        TextWrapStyle? style = null;
+        foreach (var t in CssParser.Tokens(d.Lower))
+        {
+            if (wrap == null && WrapMode(t) is { } w) wrap = w;
+            else if (style == null && WrapStyle(t) is { } ws) style = ws;
+            else return; // invalid: the declaration is ignored
+        }
+        if (wrap == null && style == null) return;
+        s.WhiteSpace = WithWrapMode(s.WhiteSpace, wrap ?? true);
+        s.TextWrap = style ?? TextWrapStyle.Auto;
+    }
+
+    private static void ApplyTextWrapMode(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit) s.WhiteSpace = WithWrapMode(s.WhiteSpace, Wraps(parent.WhiteSpace));
+        else if (WrapMode(d.Lower) is { } wrap) s.WhiteSpace = WithWrapMode(s.WhiteSpace, wrap);
+    }
+
+    private static void ApplyTextWrapStyle(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit) s.TextWrap = parent.TextWrap;
+        else if (WrapStyle(d.Lower) is { } style) s.TextWrap = style;
+    }
+
+    /// <summary>A text-wrap-mode keyword: true for wrap, false for nowrap, null for anything else.</summary>
+    private static bool? WrapMode(string t) => t switch
+    {
+        "wrap" => true,
+        "nowrap" => false,
+        _ => null,
+    };
+
+    private static TextWrapStyle? WrapStyle(string t) => t switch
+    {
+        "auto" or "stable" => TextWrapStyle.Auto,
+        "balance" => TextWrapStyle.Balance,
+        "pretty" => TextWrapStyle.Pretty,
+        _ => null,
+    };
+
+    /// <summary>Whether lines may wrap with this white-space: the text-wrap-mode part of it.</summary>
+    private static bool Wraps(WhiteSpace ws) => ws is WhiteSpace.Normal or WhiteSpace.PreWrap or WhiteSpace.PreLine;
+
+    /// <summary>
+    /// white-space with its text-wrap-mode part set: white-space is a shorthand for how white space collapses and for
+    /// text-wrap-mode, so the collapsing stays as it was.
+    /// </summary>
+    private static WhiteSpace WithWrapMode(WhiteSpace ws, bool wrap) => ws switch
+    {
+        WhiteSpace.Normal or WhiteSpace.NoWrap => wrap ? WhiteSpace.Normal : WhiteSpace.NoWrap,
+        WhiteSpace.Pre or WhiteSpace.PreWrap => wrap ? WhiteSpace.PreWrap : WhiteSpace.Pre,
+        _ => wrap ? WhiteSpace.PreLine : WhiteSpace.PreLineNoWrap,
+    };
+
     private static void ApplyOverflowWrap(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
         => s.OverflowWrap = d.Lower switch
         {

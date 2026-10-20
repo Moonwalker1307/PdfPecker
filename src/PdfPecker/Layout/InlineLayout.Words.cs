@@ -25,12 +25,12 @@ internal sealed partial class LayoutEngine
     private readonly record struct WhiteSpaceRules(bool Collapse, bool KeepNewlines, bool Breakable)
     {
         public static WhiteSpaceRules For(WhiteSpace ws) => new(
-            Collapse: ws is WhiteSpace.Normal or WhiteSpace.NoWrap or WhiteSpace.PreLine,
-            KeepNewlines: ws is WhiteSpace.Pre or WhiteSpace.PreWrap or WhiteSpace.PreLine,
+            Collapse: ws is WhiteSpace.Normal or WhiteSpace.NoWrap or WhiteSpace.PreLine or WhiteSpace.PreLineNoWrap,
+            KeepNewlines: ws is WhiteSpace.Pre or WhiteSpace.PreWrap or WhiteSpace.PreLine or WhiteSpace.PreLineNoWrap,
             Breakable: ws is WhiteSpace.Normal or WhiteSpace.PreWrap or WhiteSpace.PreLine);
     }
 
-    private static bool IsCollapsible(ComputedStyle s) => s.WhiteSpace is WhiteSpace.Normal or WhiteSpace.NoWrap or WhiteSpace.PreLine;
+    private static bool IsCollapsible(ComputedStyle s) => s.WhiteSpace is WhiteSpace.Normal or WhiteSpace.NoWrap or WhiteSpace.PreLine or WhiteSpace.PreLineNoWrap;
 
     private static bool IsBreakable(ComputedStyle s) => s.WhiteSpace is WhiteSpace.Normal or WhiteSpace.PreWrap or WhiteSpace.PreLine;
 
