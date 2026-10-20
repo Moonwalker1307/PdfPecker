@@ -1808,6 +1808,17 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Nested_translucent_boxes_before_text_on_a_later_page_are_probed_within_the_budget()
+    {
+        // Found by the fuzzer: target html, timeout-d2edd0b0. Each painted box whose first text lands on a later page
+        // stops its layout there and is laid out again, once the budget for such layouts was spent too: 132 levels took
+        // 6 s, 200 levels more than a minute.
+        var html = "<style>.op{background:#111;color:white;padding:8px;border-radius:6px;width:200px}</style>"
+            + Repeat("<div class=op style='opacity:0.6'>", 200) + "the right edge.";
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
     public void Headings_before_tables_nested_in_split_header_cells_are_laid_out_once()
     {
         // Found by the fuzzer: target html, timeout-c201378d. Each level is a heading kept with a table whose header row
