@@ -485,6 +485,33 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Svg_marker_that_uses_itself_is_left_out_inside_itself()
+    {
+        // Found by the fuzzer (target html, timeout-522fb4dc): a marker whose own path uses it at both ends drew copies of
+        // itself 24 levels deep, until the drawing budget ran out after 15 s and 18 MB of PDF.
+        const string path = "<path d='M20 40 L120 40 L150 100' fill='none' stroke='#333' marker-start='url(#arrow)' marker-end='url(#arrow)'/>";
+        var pdf = Bounded("<svg width='760' height='230'><marker id='arrow' viewBox='0 0 10 10' refX='10' refY='5' markerWidth='6' markerHeight='6' "
+            + "orient='auto-start-reverse'>" + path + "</marker>" + Repeat(path, 4) + "</svg>");
+        AssertStructurallyValid(pdf);
+        Assert.True(pdf.Length < 100_000, $"{pdf.Length} bytes");
+    }
+
+    [Fact]
+    public void Svg_markers_that_use_other_markers_stay_within_the_drawing_budget()
+    {
+        // Thirty markers, each drawing the next one at both ends of its path, double at every level. Every copy counts
+        // against the drawing budget, so the copies stop long before the budget's worth of clips and states is written.
+        var sb = new StringBuilder("<svg width='760' height='230'>");
+        for (int i = 0; i < 30; i++)
+            sb.Append($"<marker id='m{i}' markerWidth='6' markerHeight='6'><path d='M1 1' stroke='#333'")
+                .Append(i < 29 ? $" marker-start='url(#m{i + 1})' marker-end='url(#m{i + 1})'" : "").Append("/></marker>");
+        sb.Append("<path d='M1 1' stroke='#333' marker-start='url(#m0)' marker-end='url(#m0)'/></svg>");
+        var pdf = Bounded(sb.ToString());
+        AssertStructurallyValid(pdf);
+        Assert.True(pdf.Length < 1_000_000, $"{pdf.Length} bytes");
+    }
+
+    [Fact]
     public void Svg_path_numbers_after_a_closepath_end_the_path()
     {
         // A closepath reads no numbers, so numbers after it were taken as one more closepath that never moved past
