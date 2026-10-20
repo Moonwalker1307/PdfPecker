@@ -73,7 +73,8 @@ jobs:
         run: dotnet build -c Release fuzz/PdfPecker.Fuzz
 
       # The seed is the run id, so every night explores different inputs; a finding names its seed in its .txt file, and
-      # --repro on the saved input reproduces it without the seed.
+      # --repro on the saved input reproduces it without the seed. --jobs runs one worker per core, each with its own
+      # seed, because a single worker leaves the other cores of the runner idle.
       - name: Fuzz ${{ matrix.target }}
         env:
           MINUTES: ${{ inputs.minutes || '10' }}
@@ -81,7 +82,7 @@ jobs:
           SEED: ${{ github.run_id }}
         run: >
           dotnet fuzz/PdfPecker.Fuzz/bin/Release/net10.0/PdfPecker.Fuzz.dll
-          --target "$TARGET" --duration "${MINUTES}m" --seed "$SEED" --out fuzz-findings
+          --target "$TARGET" --duration "${MINUTES}m" --seed "$SEED" --jobs "$(nproc)" --out fuzz-findings
 
       # Artifacts are not reachable from every place a finding gets triaged, and the inputs are small, so each finding's
       # report and its input (base64) also go into the log and the job summary.
