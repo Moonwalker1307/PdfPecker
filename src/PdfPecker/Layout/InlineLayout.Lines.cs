@@ -50,34 +50,61 @@ internal sealed partial class LayoutEngine
 
     /// <summary>
     /// Downward baseline shift for sub/superscripts, as Chrome computes it from the parent's font size in whole pixels:
-    /// up by a third plus one pixel, down by a fifth plus one pixel.
+    /// up by a third plus one pixel, down by a fifth plus one pixel. A length raises by that much, and a percentage by
+    /// that share of the element's own line height.
     /// </summary>
     private static float BaselineShift(ComputedStyle s)
     {
+        if (s.VerticalAlign == VerticalAlign.Length) return -s.VerticalAlignLength.Resolve(s.LineHeight);
         if (s.VerticalAlign is not (VerticalAlign.Super or VerticalAlign.Sub)) return 0;
         int px = (int)MathF.Round(s.ParentFontSize / CssPixel);
         return s.VerticalAlign == VerticalAlign.Super ? -(px / 3 + 1) * CssPixel : (px / 5 + 1) * CssPixel;
     }
 
-    private static void ImageMetrics(Item it, ComputedStyle block, out float a, out float d)
+    /// <summary>
+    /// The ascent and descent of an image or inline-block on its line's baseline. One aligned to the line's top or
+    /// bottom has none of its own (see <see cref="IsLineAligned"/>); text-top hangs it from the top of the block's strut.
+    /// </summary>
+    private static void AtomicMetrics(Item it, ComputedStyle block, out float a, out float d)
     {
+        float baseline = it.Kind == ItemKind.Box ? it.BoxBaseline : it.Height;
         switch (it.Style.VerticalAlign)
         {
             case VerticalAlign.Middle:
                 a = it.Height / 2 + block.FontSize * MiddleRaiseRatio;
                 d = it.Height - a;
                 break;
-            case VerticalAlign.Top:
             case VerticalAlign.TextTop:
                 TextMetrics(block, out a, out _);
                 d = it.Height - a;
                 if (d < 0) { a = it.Height; d = 0; }
                 break;
             default:
-                a = it.Height;
-                d = 0;
+                float shift = BaselineShift(it.Style);
+                a = baseline - shift;
+                d = it.Height - baseline + shift;
                 break;
         }
+    }
+
+    /// <summary>Whether an image or inline-block is aligned to its line's top or bottom edge rather than to the baseline.</summary>
+    private static bool IsLineAligned(Item it) => it.Kind is ItemKind.Image or ItemKind.Box && it.Style.VerticalAlign is VerticalAlign.Top or VerticalAlign.Bottom;
+
+    /// <summary>
+    /// How far above the baseline the top of an image or inline-block is drawn on a line whose box reaches
+    /// <paramref name="lineA"/> above and <paramref name="lineD"/> below its baseline.
+    /// </summary>
+    private static float AtomicAscent(Item it, ComputedStyle block, float lineA, float lineD) => it.Style.VerticalAlign switch
+    {
+        VerticalAlign.Top => lineA,
+        VerticalAlign.Bottom => it.Height - lineD,
+        _ => AtomicAscentOnBaseline(it, block),
+    };
+
+    private static float AtomicAscentOnBaseline(Item it, ComputedStyle block)
+    {
+        AtomicMetrics(it, block, out float a, out _);
+        return a;
     }
 
     /// <summary>
@@ -302,7 +329,7 @@ internal sealed partial class LayoutEngine
         bool deferCalls = _deferFootnoteCalls;
         if (Footnotes != null) _deferFootnoteCalls = true;
         int textFrom = _ops.Count;
-        DrawItems(items, xs, block, x, y, baseline, fit.SpaceExtra);
+        DrawItems(items, xs, block, x, y, baseline, y + lineH - baseline, fit.SpaceExtra);
         if (fragments >= 0) NoteFragmentText(fragments, textFrom);
         _deferFootnoteCalls = deferCalls;
         if (_deferredFootnoteCalls is { Count: > 0 } && !deferCalls) PlaceDeferredFootnoteCalls();
@@ -310,7 +337,7 @@ internal sealed partial class LayoutEngine
         if (_marker != null) EmitMarker(baseline, y);
     }
 
-    private void DrawItems(List<Item> items, float[] xs, ComputedStyle block, float x, float y, float baseline, float spaceExtra)
+    private void DrawItems(List<Item> items, float[] xs, ComputedStyle block, float x, float y, float baseline, float descent, float spaceExtra)
     {
         int i = 0;
         while (i < items.Count)
@@ -325,13 +352,13 @@ internal sealed partial class LayoutEngine
                 case ItemKind.Image:
                     if (it.Image != null)
                     {
-                        ImageMetrics(it, block, out float ia, out _);
+                        float ia = AtomicAscent(it, block, baseline - y, descent);
                         _ops.Add(new ImageOp(xs[i] + it.RelX, baseline - ia + it.RelY, it.Width, it.Height, it.Image) { Tag = it.Tag });
                     }
                     break;
                 case ItemKind.Box:
                 {
-                    float dx = xs[i] + it.RelX, dy = baseline - it.BoxBaseline + it.RelY;
+                    float dx = xs[i] + it.RelX, dy = baseline - AtomicAscent(it, block, baseline - y, descent) + it.RelY;
                     if (it.Capture != null) Place(it.Capture, dx, dy);
                     else
                         foreach (var op in it.BoxOps!)
