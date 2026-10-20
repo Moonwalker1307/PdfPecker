@@ -1925,6 +1925,21 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Nested_flex_boxes_reuse_their_measurements_in_a_document_with_footnotes()
+    {
+        // Found by the fuzzer: target html, timeout-d2edd0b0. A box laid out again where it lands on the pages takes the
+        // measurements of the flex items inside it, but not in a document with footnotes, so each of 250 nested flex
+        // boxes measured everything inside it again: eight such nests allocated 1.1 GB. Only boxes that hold footnote
+        // calls need laying out again, because their calls are placed then.
+        var nest = Repeat("<div style='display:flex'>", 250) + Repeat("lorem ipsum ", 300) + Repeat("</div>", 250);
+        var html = "<style>@page { size: 148mm 105mm } .fn { float: footnote }</style><p>Text<span class='fn'>A footnote.</span></p>"
+                   + Repeat(nest, 8);
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 200L << 20);
+    }
+
+    [Fact]
     public void Nested_boxes_kept_whole_around_a_long_table_stay_within_the_layout_budget()
     {
         // Found by the fuzzer: target html, timeout-d2edd0b0. Boxes kept whole around a table on a named page are laid
