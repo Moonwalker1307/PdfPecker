@@ -9,14 +9,55 @@ namespace PdfPecker.Layout;
 /// <summary>A slot reserved before an element's content, filled with its background and borders once its size is known.</summary>
 internal class GroupOp : DrawOp
 {
-    public List<DrawOp> Ops { get; private set; } = new(2);
+    private List<DrawOp> _ops = new(2);
+    private float _laterX, _laterY;
+    private bool _later;
+
+    /// <summary>The group's ops, moved by any offset that <see cref="OffsetLater"/> put off.</summary>
+    public List<DrawOp> Ops
+    {
+        get
+        {
+            if (_later)
+            {
+                _later = false;
+                foreach (var op in _ops)
+                {
+                    if (op is GroupOp g) g.OffsetLater(_laterX, _laterY);
+                    else op.Offset(_laterX, _laterY);
+                }
+            }
+            return _ops;
+        }
+        private set => _ops = value;
+    }
 
     public override void Offset(float dx, float dy)
     {
         foreach (var op in Ops) op.Offset(dx, dy);
+        OffsetOwn(dx, dy);
     }
 
-    protected override void OwnArrays() => Ops = new List<DrawOp>(2);
+    /// <summary>
+    /// Moves the group by (dx, dy) but its ops only when they are next looked at, adding up the offsets until then.
+    /// Captured content nested deep is moved once for every level it is placed in, and each of those moves walked
+    /// everything inside, so the work grew with the square of the depth.
+    /// </summary>
+    public void OffsetLater(float dx, float dy)
+    {
+        if (_later) (_laterX, _laterY) = (_laterX + dx, _laterY + dy);
+        else (_laterX, _laterY, _later) = (dx, dy, true);
+        OffsetOwn(dx, dy);
+    }
+
+    /// <summary>Moves what the group itself holds besides its ops.</summary>
+    protected virtual void OffsetOwn(float dx, float dy) { }
+
+    protected override void OwnArrays()
+    {
+        Ops = new List<DrawOp>(2);
+        _later = false;
+    }
 }
 
 /// <summary>
@@ -39,9 +80,8 @@ internal sealed class ClipOp : GroupOp
         Radii = radii;
     }
 
-    public override void Offset(float dx, float dy)
+    protected override void OffsetOwn(float dx, float dy)
     {
-        base.Offset(dx, dy);
         X += dx;
         Y += dy;
         if (Hole is { } h) Hole = (h.X + dx, h.Y + dy, h.W, h.H);
@@ -74,9 +114,8 @@ internal sealed class FieldOp : GroupOp
         Font = null!;
     }
 
-    public override void Offset(float dx, float dy)
+    protected override void OffsetOwn(float dx, float dy)
     {
-        base.Offset(dx, dy);
         X += dx;
         Y += dy;
     }
@@ -170,9 +209,8 @@ internal sealed class LayerOp : GroupOp
         if (Mask != null) Mask = Array.ConvertAll(Mask, m => m.Copy());
     }
 
-    public override void Offset(float dx, float dy)
+    protected override void OffsetOwn(float dx, float dy)
     {
-        base.Offset(dx, dy);
         OriginX += dx;
         OriginY += dy;
         BackdropX += dx;
