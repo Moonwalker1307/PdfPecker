@@ -784,6 +784,7 @@ internal sealed partial class LayoutEngine
     private void LayoutCell(CellModel cell, float rowTop, float[] colX, float[] widths, float hs, bool collapse, bool rtl, float? rowHeight = null,
         KeepProbe? probe = null)
     {
+        _boxLayouts++;
         var td = cell.Td;
         var cs = td.Style;
         if (td.Id != null) SetAnchor(td.Id, rowTop);

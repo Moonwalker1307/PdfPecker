@@ -842,7 +842,10 @@ internal sealed partial class LayoutEngine
     /// </summary>
     private HashSet<AvoidTrial>? _failedAvoidTrials;
 
-    /// <summary>How many times a block-level box has been laid out, counting each time it was laid out again.</summary>
+    /// <summary>
+    /// How many times a block-level box, a table cell or a run of inline content has been laid out, counting each time it
+    /// was laid out again. Cells and inline runs count because they hold most of the work in a box of tables or text.
+    /// </summary>
     private long _boxLayouts;
 
     /// <summary>
