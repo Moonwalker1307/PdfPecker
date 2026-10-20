@@ -108,7 +108,7 @@ internal sealed partial class LayoutEngine
         }
         bottom = KeepBottomEdge(e, x, y, availW, shrinkToFit, pages, opsStart, marker, listIndex, bottom, out bool kept);
         // The probe found the first content on the box's first page; room kept for the bottom edge can move it on.
-        if (probe != null && !kept || AtPageTop(y) || _edgeDepth >= MaxTopMoveNesting || !LeavesOnlyTop(e, y, availW, bottom, opsStart))
+        if (probe != null && !kept || AtPageTop(y) || _edgeDepth >= MaxTopMoveNesting || !MayLayOutAgain || !LeavesOnlyTop(e, y, availW, bottom, opsStart))
             return bottom;
         MoveToNextPage(ref x, ref y, ref availW, pages);
         _edgeDepth++;
@@ -211,7 +211,7 @@ internal sealed partial class LayoutEngine
         float last = _lastContentBottom;
         // A grid moves whole instead (see LeavesOnlyTop), and the items of a column flex container are cut at the page
         // end rather than moved, so room at its end would only move the content inside its last item.
-        if (_edgeDepth >= MaxEdgeNesting || s.IsGrid || s.IsFlex && !s.IsRow || !s.Height.IsAuto || float.IsNaN(last) || last <= y
+        if (_edgeDepth >= MaxEdgeNesting || !MayLayOutAgain || s.IsGrid || s.IsFlex && !s.IsRow || !s.Height.IsAuto || float.IsNaN(last) || last <= y
             || s.BorderBottom + s.PaddingBottom.Resolve(availW) <= Eps) return bottom;
         int page = PageOf(last - 0.5f);
         // Bottom edges taller than what is left of a page take the content nowhere it fits better.
