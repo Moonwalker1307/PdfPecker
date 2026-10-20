@@ -17,6 +17,7 @@ dotnet fuzz/PdfPecker.Fuzz/bin/Release/net10.0/PdfPecker.Fuzz.dll --target html 
 | `--target <name\|all>` | What to fuzz; `--list` prints the names. `all` runs them one after another, `--duration` each. |
 | `--duration 90s\|10m\|1h` | How long to run per target (default 1m). |
 | `--seed <n>` | Seed of the random generator (default 1). The same seed gives the same inputs; timeouts still depend on the machine. |
+| `--jobs <n>` | Workers to run side by side per target (default 1); use the number of cores. Each worker gets its own seed and a share of the seed inputs, and they share the findings folder. `fuzz.yml` passes `$(nproc)`. |
 | `--out <dir>` | Findings folder (default `fuzz-findings`); each target gets a sub-folder. |
 | `--timeout <s>` | Wall-clock limit per input (default 5). The `svg` target raises it to at least 30, because large inputs of filtered shapes are slow but linear. |
 | `--max-memory-mb <n>` | Heap ceiling per input (default 1536). |

@@ -13,8 +13,12 @@ internal sealed class FindingStore
 
     public string Directory { get; }
 
-    public FindingStore(string outRoot, string targetName)
+    private readonly string _laneSuffix;
+
+    /// <summary>Opens the folder for one lane; lanes share the findings but each keeps its own crash and restart state.</summary>
+    public FindingStore(string outRoot, string targetName, int lane = 0)
     {
+        _laneSuffix = lane > 0 ? "-" + lane : "";
         Directory = Path.Combine(outRoot, targetName);
         System.IO.Directory.CreateDirectory(Directory);
         foreach (var txt in System.IO.Directory.EnumerateFiles(Directory, "*.txt"))
@@ -24,7 +28,7 @@ internal sealed class FindingStore
         }
     }
 
-    public string CurrentInputPath => Path.Combine(Directory, ".current");
+    public string CurrentInputPath => Path.Combine(Directory, ".current" + _laneSuffix);
 
     /// <summary>How many seeds the workers of this run have started, so a restarted worker can skip them.</summary>
     public int SeedsDone
@@ -33,7 +37,7 @@ internal sealed class FindingStore
         set { if (value > 0) File.WriteAllText(SeedsPath, value.ToString()); else File.Delete(SeedsPath); }
     }
 
-    private string SeedsPath => Path.Combine(Directory, ".seeds-done");
+    private string SeedsPath => Path.Combine(Directory, ".seeds-done" + _laneSuffix);
 
     public int Count => System.IO.Directory.EnumerateFiles(Directory, "*.txt").Count();
 
@@ -50,7 +54,7 @@ internal sealed class FindingStore
         _seen[verdict.Signature] = 1;
         var id = verdict.Kind + "-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(verdict.Signature)))[..8].ToLowerInvariant();
         var inputName = id + target.Extension;
-        File.WriteAllBytes(Path.Combine(Directory, inputName), input);
+        WriteAtomically(inputName, input);
         var sb = new StringBuilder();
         sb.Append("signature: ").Append(verdict.Signature).Append('\n');
         sb.Append("target: ").Append(target.Name).Append('\n');
@@ -60,7 +64,17 @@ internal sealed class FindingStore
         sb.Append(")\n");
         sb.Append("seed: ").Append(seed).Append(", found after ").Append(executions).Append(" executions\n\n");
         sb.Append(verdict.Detail).Append('\n');
-        File.WriteAllText(Path.Combine(Directory, id + ".txt"), sb.ToString());
+        WriteAtomically(id + ".txt", Encoding.UTF8.GetBytes(sb.ToString()));
         return inputName;
+    }
+
+    // Two lanes can find the same signature at once; each writes a private file and renames it into place, so the
+    // folder always holds one whole finding rather than a mix of both.
+    private void WriteAtomically(string name, byte[] data)
+    {
+        var temp = Path.Combine(Directory, "." + Guid.NewGuid().ToString("N") + ".tmp");
+        File.WriteAllBytes(temp, data);
+        try { File.Move(temp, Path.Combine(Directory, name), overwrite: true); }
+        catch (IOException) { File.Delete(temp); } // the other lane's copy of the same finding stays
     }
 }

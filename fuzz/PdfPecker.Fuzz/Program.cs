@@ -19,6 +19,8 @@ internal sealed class Options
     public string? Repro;
     public bool List;
     public int SkipSeeds;
+    public int Jobs = 1;
+    public int Lane;
 
     public static Options Parse(string[] args)
     {
@@ -41,6 +43,8 @@ internal sealed class Options
                 case "--repro": o.Repro = Value(); break;
                 case "--list": o.List = true; break;
                 case "--skip-seeds": o.SkipSeeds = int.Parse(Value()); break;
+                case "--jobs": o.Jobs = Math.Max(1, int.Parse(Value())); break;
+                case "--lane": o.Lane = int.Parse(Value()); break;
                 default: throw new ArgumentException("Unknown option " + args[i]);
             }
         }
@@ -56,7 +60,7 @@ internal sealed class Options
         return m.Groups[2].Value switch { "m" => TimeSpan.FromMinutes(n), "h" => TimeSpan.FromHours(n), _ => TimeSpan.FromSeconds(n) };
     }
 
-    public string[] ToWorkerArgs(string target, TimeSpan duration, long seed, bool worker, int skipSeeds = 0)
+    public string[] ToWorkerArgs(string target, TimeSpan duration, long seed, bool worker, int skipSeeds = 0, int lane = 0)
     {
         var a = new List<string>
         {
@@ -68,6 +72,7 @@ internal sealed class Options
         if (NoMinimize) a.Add("--no-minimize");
         if (worker) a.Add("--worker");
         if (skipSeeds > 0) { a.Add("--skip-seeds"); a.Add(skipSeeds.ToString()); }
+        if (Jobs > 1) { a.Add("--jobs"); a.Add(Jobs.ToString()); a.Add("--lane"); a.Add(lane.ToString()); }
         return a.ToArray();
     }
 }
@@ -91,7 +96,7 @@ internal static class Program
         catch (Exception ex) when (ex is ArgumentException or FormatException)
         {
             Console.Error.WriteLine(ex.Message);
-            Console.Error.WriteLine("Usage: PdfPecker.Fuzz --target <name|all> [--duration 2m] [--out dir] [--seed 1] [--timeout 5] [--max-memory-mb 1536] [--strict] [--no-minimize] [--repo path] | --list | --repro <file> --target <name>");
+            Console.Error.WriteLine("Usage: PdfPecker.Fuzz --target <name|all> [--duration 2m] [--out dir] [--seed 1] [--timeout 5] [--max-memory-mb 1536] [--strict] [--no-minimize] [--repo path] [--jobs n] | --list | --repro <file> --target <name>");
             return Exit.Usage;
         }
         if (o.List)
@@ -130,6 +135,8 @@ internal static class Program
     /// <summary>
     /// Runs each target in a child process. A crash the process cannot survive (stack overflow, fatal error) kills only
     /// the child; the supervisor saves the input the child had written down and starts a new child for the rest of the time.
+    /// With --jobs, each target runs that many children side by side, each with its own random seed and its own share of
+    /// the seed inputs, so a machine with several cores tries several times as many inputs in the same time.
     /// </summary>
     private static int Supervise(Options o)
     {
@@ -138,28 +145,41 @@ internal static class Program
         int total = 0;
         foreach (var target in targets)
         {
-            var store = new FindingStore(o.Out, target.Name);
             var end = DateTime.UtcNow + o.Duration;
-            int restarts = 0;
-            store.SeedsDone = 0;
-            while (DateTime.UtcNow < end)
-            {
-                var remaining = end - DateTime.UtcNow;
-                // A restarted worker skips the seeds it already ran, so a seed that hangs is not run again on every restart.
-                var (code, stderr) = RunChild(o.ToWorkerArgs(target.Name, remaining, o.Seed + restarts * 1_000_003L, worker: true, store.SeedsDone));
-                if (code == Exit.Done) break;
-                restarts++;
-                if (code == Exit.Restart) continue;
-                if (code == Exit.Usage) return Exit.Usage;
-                CrashFound(o, target, store, code, stderr);
-            }
-            if (File.Exists(store.CurrentInputPath)) File.Delete(store.CurrentInputPath);
-            store.SeedsDone = 0;
+            var codes = new int[o.Jobs];
+            var lanes = Enumerable.Range(0, o.Jobs).Select(lane => new Thread(() => codes[lane] = RunLane(o, target, lane, end))).ToArray();
+            foreach (var t in lanes) t.Start();
+            foreach (var t in lanes) t.Join();
+            if (codes.Contains(Exit.Usage)) return Exit.Usage;
+            var store = new FindingStore(o.Out, target.Name);
             int count = store.Count;
             Console.WriteLine($"[{target.Name}] done: {count} finding(s) in {store.Directory}");
             total += count;
         }
         return total > 0 ? Exit.Findings : Exit.Done;
+    }
+
+    /// <summary>Runs and restarts the children of one lane until the time is up.</summary>
+    private static int RunLane(Options o, Target target, int lane, DateTime end)
+    {
+        var store = new FindingStore(o.Out, target.Name, lane);
+        int restarts = 0;
+        store.SeedsDone = 0;
+        while (DateTime.UtcNow < end)
+        {
+            var remaining = end - DateTime.UtcNow;
+            // A restarted worker skips the seeds it already ran, so a seed that hangs is not run again on every restart.
+            var seed = o.Seed + lane * 7_919L + restarts * 1_000_003L;
+            var (code, stderr) = RunChild(o.ToWorkerArgs(target.Name, remaining, seed, worker: true, store.SeedsDone, lane));
+            if (code == Exit.Done) break;
+            restarts++;
+            if (code == Exit.Restart) continue;
+            if (code == Exit.Usage) return Exit.Usage;
+            CrashFound(o, target, store, code, stderr);
+        }
+        if (File.Exists(store.CurrentInputPath)) File.Delete(store.CurrentInputPath);
+        store.SeedsDone = 0;
+        return Exit.Done;
     }
 
     private static (int Code, string Stderr) RunChild(string[] args)
@@ -235,7 +255,7 @@ internal sealed class Worker
         var seeds = target.Seeds(new SeedContext(root)).Where(s => s.Data.Length <= target.MaxSize).ToList();
         if (seeds.Count == 0) { Console.Error.WriteLine($"[{target.Name}] no seed inputs found under {root}"); return Exit.Usage; }
 
-        var store = new FindingStore(_o.Out, target.Name);
+        var store = new FindingStore(_o.Out, target.Name, _o.Lane);
         var executor = new Executor(target.TimeoutFor(_o.Timeout), _o.MaxMemoryMb << 20);
         long startRetained = executor.Retained;
         bool leakReported = false, shed = false;
@@ -246,8 +266,9 @@ internal sealed class Worker
         var tolerated = new SortedDictionary<string, long>();
         long executions = 0, duplicates = 0, flaky = 0;
         var clock = Stopwatch.StartNew();
+        var tag = _o.Jobs > 1 ? target.Name + "#" + (_o.Lane + 1) : target.Name;
         var nextReport = TimeSpan.FromSeconds(20);
-        Console.WriteLine($"[{target.Name}] {seeds.Count} seeds, seed {_o.Seed}, {_o.Duration.TotalSeconds:0}s");
+        Console.WriteLine($"[{tag}] {seeds.Count} seeds, seed {_o.Seed}, {_o.Duration.TotalSeconds:0}s");
 
         // Returns true when the input ran without any exception, which makes the mutant worth mutating further.
         bool Execute(byte[] input, string? label)
@@ -269,7 +290,7 @@ internal sealed class Worker
                 if (now - startRetained > (_o.MaxMemoryMb << 20) / 4 && !leakReported)
                 {
                     leakReported = true;
-                    Console.WriteLine($"[{target.Name}] LEAK: the heap kept between inputs grew from {startRetained >> 20} MB to {now >> 20} MB");
+                    Console.WriteLine($"[{tag}] LEAK: the heap kept between inputs grew from {startRetained >> 20} MB to {now >> 20} MB");
                 }
                 // Once the leak alone is past the ceiling, the hard heap limit is close and every input would fail;
                 // a fresh worker sheds it.
@@ -298,13 +319,14 @@ internal sealed class Worker
             if (minimised.Length != input.Length && executor.AbandonedThreads == 0 && executor.Run(target, minimised, _o.Strict, out _) is { } again && again.Kind == verdict.Kind)
                 final = again with { Signature = verdict.Signature };
             var name = store.Save(target, final, minimised, input.Length, _o.Seed, executions);
-            Console.WriteLine($"[{target.Name}] FINDING {verdict.Kind}: {name} ({minimised.Length} bytes{(label != null ? ", from seed " + label : "")}) {verdict.Signature}");
+            Console.WriteLine($"[{tag}] FINDING {verdict.Kind}: {name} ({minimised.Length} bytes{(label != null ? ", from seed " + label : "")}) {verdict.Signature}");
             return false;
         }
 
         for (int s = _o.SkipSeeds; s < seeds.Count; s++)
         {
             if (clock.Elapsed > _o.Duration) break;
+            if (s % _o.Jobs != _o.Lane) continue; // the other lanes run the other seeds
             store.SeedsDone = s + 1; // written first: a seed that takes the process down is skipped as well
             Execute(seeds[s].Data, seeds[s].Name);
             if (executor.AbandonedThreads > 0 || shed) return Exit.Restart;
@@ -323,11 +345,11 @@ internal sealed class Worker
             if (clock.Elapsed > nextReport)
             {
                 nextReport += TimeSpan.FromSeconds(20);
-                Console.WriteLine($"[{target.Name}] {executions} executions ({executions / clock.Elapsed.TotalSeconds:0.#}/s), {store.Count} finding(s), {duplicates} duplicate(s), {flaky} unconfirmed, "
+                Console.WriteLine($"[{tag}] {executions} executions ({executions / clock.Elapsed.TotalSeconds:0.#}/s), {store.Count} finding(s), {duplicates} duplicate(s), {flaky} unconfirmed, "
                     + $"tolerated: {(tolerated.Count == 0 ? "none" : string.Join(", ", tolerated.Select(kv => kv.Key + "=" + kv.Value)))}");
             }
         }
-        Console.WriteLine($"[{target.Name}] finished: {executions} executions, {store.Count} finding(s), {duplicates} duplicate(s), {flaky} unconfirmed slow or large input(s)");
+        Console.WriteLine($"[{tag}] finished: {executions} executions, {store.Count} finding(s), {duplicates} duplicate(s), {flaky} unconfirmed slow or large input(s)");
         File.Delete(store.CurrentInputPath);
         return Exit.Done;
     }
