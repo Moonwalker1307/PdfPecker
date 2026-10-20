@@ -270,6 +270,7 @@ internal sealed class ComputedStyle
     public bool Rtl;                         // direction: rtl
     public WritingMode WritingMode;          // writing-mode
     public TextAlign? TextAlignLast;         // null = auto
+    public TextAlign? BlockAlign;            // -webkit-left, -webkit-center or -webkit-right: also aligns child blocks
     public int TabSize = 8;                  // in spaces
     public bool NoHyphens;                   // hyphens: none (soft hyphens are no break opportunity)
     public bool HyphensAuto;                 // hyphens: auto (words also break where the language's patterns allow)

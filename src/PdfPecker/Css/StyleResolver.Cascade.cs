@@ -148,6 +148,9 @@ internal sealed partial class StyleResolver
             else if (s.Display == Display.InlineFlex) s.Display = Display.Flex;
             else if (s.Display == Display.InlineGrid) s.Display = Display.Grid;
         }
+        // A table never inherits the legacy -webkit- alignments of an align attribute around it: Chrome starts its
+        // text at the start again.
+        if (s.Display == Display.Table && s.BlockAlign != null) { s.TextAlign = TextAlign.Start; s.BlockAlign = null; }
         if (!s.ControlWidth.IsAuto && s.Width.IsAuto && s.WidthKeyword == SizeKeyword.None && !StretchedAcross(s, parent)) s.Width = s.ControlWidth;
         // Flex and grid items are laid out as blocks, which carry their own opacity layer.
         bool inlineBox = s.Display == Display.Inline && !parent.IsFlex && !parent.IsGrid;
