@@ -665,7 +665,7 @@ internal sealed partial class LayoutEngine
     {
         var s = e.Style;
         return !s.IsFlex && !s.IsGrid && !s.IsMultiColumn
-               && !s.AvoidBreakInside && !s.Layered && e.Control == null && e.Name is not ("img" or "svg" or "hr");
+               && !s.AvoidBreakInside && !s.Layered && e.Control == null && !e.IsReplaced && e.Name != "hr";
     }
 
     /// <summary>The first content op of a probed box: its index among the ops and where it starts.</summary>
@@ -799,7 +799,7 @@ internal sealed partial class LayoutEngine
     {
         var s = e.Style;
         return s.Display is Display.Block or Display.ListItem && !s.IsMultiColumn && !s.Floated && !s.OutOfFlow && !s.FormattingRoot
-               && e.Name is not ("img" or "svg" or "hr" or "fieldset");
+               && !e.IsReplaced && e.Name is not ("hr" or "fieldset");
     }
 
     // The root element's margins do not collapse with its children's (CSS 2.1 §8.3.1).
@@ -1051,7 +1051,7 @@ internal sealed partial class LayoutEngine
         bool hasWOverride = _widthOverride.TryGetValue(e, out float overrideW);
         bool hasHOverride = _heightOverride.TryGetValue(e, out float overrideH);
 
-        bool isImage = e.Name == "img", isSvg = e.Name == "svg";
+        bool isImage = e.IsPicture, isSvg = e.Name == "svg";
         float imgW = 0, imgH = 0;
         PdfImage? image = null;
         SvgImage? svg = null;
@@ -1610,7 +1610,7 @@ internal sealed partial class LayoutEngine
     private float ReplacedWidth(Element e, float availW)
     {
         float w;
-        if (e.Name == "img") ImageSize(e, availW, out w, out _);
+        if (e.IsPicture) ImageSize(e, availW, out w, out _);
         else SvgSize(e, availW, out w, out _);
         return w;
     }

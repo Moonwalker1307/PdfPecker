@@ -53,7 +53,7 @@ internal sealed partial class LayoutEngine
         var s = e.Style;
         return s.Display is Display.Block or Display.ListItem or Display.Flex or Display.Grid
                && !s.Floated && !s.OutOfFlow && !s.IsMultiColumn && e.Control == null
-               && e.Name is not ("img" or "svg" or "hr")
+               && !e.IsReplaced && e.Name != "hr"
                && e.Parent?.Style is not ({ IsFlex: true } or { IsGrid: true })
                && !_widthOverride.ContainsKey(e) && !_heightOverride.ContainsKey(e);
     }

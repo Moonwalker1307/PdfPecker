@@ -67,7 +67,7 @@ internal sealed partial class LayoutEngine
                 AddAtomicBreaks(st, e, before, at);
                 return;
             }
-            case "img":
+            case "img" when e.AltText == null:
             {
                 int at = st.Items.Count;
                 AddInlineImage(st, e, s, href);
@@ -147,8 +147,8 @@ internal sealed partial class LayoutEngine
     /// a box it paints or pads (borders, padding, a background or shadows), which a plain image item has no room for.
     /// </summary>
     private static bool IsImageLaidOutAsBox(Element e, ComputedStyle s) =>
-        e.Name is "img" or "svg"
-        && (s.Layered || e.Name == "img" && (s.BorderRadii != null || s.ObjectFit != ObjectFit.Fill || s.OutlineStyle != BorderStyle.None
+        e.IsReplaced
+        && (s.Layered || e.IsPicture && (s.BorderRadii != null || s.ObjectFit != ObjectFit.Fill || s.OutlineStyle != BorderStyle.None
             || PaintsInlineBox(s) || HasPadding(s.PaddingTop) || HasPadding(s.PaddingRight) || HasPadding(s.PaddingBottom)
             || HasPadding(s.PaddingLeft)));
 
@@ -358,7 +358,7 @@ internal sealed partial class LayoutEngine
     private float MeasuredWidthKey(Element e, float availW)
     {
         var s = e.Style;
-        if (e.Name is "img" or "svg" || !_intrinsicCache.TryGetValue(e, out var intrinsic)) return availW;
+        if (e.IsReplaced || !_intrinsicCache.TryGetValue(e, out var intrinsic)) return availW;
         if (s.Width.IsPercent || s.MinWidth.IsPercent || s.MaxWidth.IsPercent
             || s.MarginLeft.IsAuto || s.MarginLeft.IsPercent || s.MarginRight.IsAuto || s.MarginRight.IsPercent
             || s.MarginTop.IsPercent || s.MarginBottom.IsPercent
