@@ -88,6 +88,32 @@ internal sealed partial class StyleResolver
         s.ClearRight = d.Lower is "right" or "both" or "inline-end";
     }
 
+    /// <summary>shape-outside: none, a basic shape and/or a reference box, or an image or gradient.</summary>
+    private void ApplyShapeOutside(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit) s.ShapeOutside = parent.ShapeOutside;
+        else if (d.Lower is "none" or "initial" or "unset") s.ShapeOutside = null;
+        else if (CssParser.Tokens(d.Lower).Count == 1 && ParseBackgroundImage(d.Value, s) is [{ } image]) s.ShapeOutside = new ShapeOutside { Image = image };
+        else if (ClipShape.Parse(d.Value, d.Em, _rootFontSize, _vw, _vh, shapeOutside: true) is { } shape) s.ShapeOutside = new ShapeOutside { Shape = shape };
+    }
+
+    /// <summary>shape-margin: a length or percentage that is not negative.</summary>
+    private void ApplyShapeMargin(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit) s.ShapeMargin = parent.ShapeMargin;
+        else if (d.Lower is "initial" or "unset") s.ShapeMargin = Length.Zero;
+        else if (TryParseLength(d.Lower, d.Em, _rootFontSize, out var len, _vw, _vh) && !len.IsAuto && !(len.Unit != LengthUnit.Calc && len.Value < 0))
+            s.ShapeMargin = len;
+    }
+
+    /// <summary>shape-image-threshold: the alpha above which an image's pixels are in the shape, clamped to 0 to 1.</summary>
+    private static void ApplyShapeImageThreshold(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit) s.ShapeImageThreshold = parent.ShapeImageThreshold;
+        else if (d.Lower is "initial" or "unset") s.ShapeImageThreshold = 0;
+        else if (TryParseNumberOrPercent(d.Lower, out float t)) s.ShapeImageThreshold = Math.Clamp(t, 0, 1);
+    }
+
     private static void ApplyPosition(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
         => s.Position = d.Lower switch
         {
