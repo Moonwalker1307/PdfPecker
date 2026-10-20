@@ -93,6 +93,7 @@ internal sealed partial class LayoutEngine
         public float ContentX;
         public float ContentRight; // right to left, the marker goes after the content's right edge
         public bool Rtl;
+        public bool Inside; // list-style-position: inside, so the marker starts the first line instead of hanging before it
         public ContentSlot? Tag;
     }
 
@@ -189,8 +190,6 @@ internal sealed partial class LayoutEngine
 
     // ------------------------------------------------------------------ block formatting
 
-    private static bool IsAtomicInline(Display d) => d is Display.InlineBlock or Display.InlineFlex or Display.InlineGrid;
-
     /// <summary>
     /// A container-type other than normal gives the box size containment on one or both axes. Containment does not
     /// apply to inline boxes and the inner boxes of tables, which are not query containers either.
@@ -202,7 +201,7 @@ internal sealed partial class LayoutEngine
     private static bool IsInlineLevel(Element e)
     {
         var d = e.Style.Display;
-        if (IsAtomicInline(d)) return true;
+        if (e.Style.IsAtomicInline) return true;
         if (d != Display.Inline) return false;
         return !ContainsBlock(e);
     }
@@ -213,7 +212,7 @@ internal sealed partial class LayoutEngine
         {
             if (c is not Element ce || ce.Style == null || ce.Detached || ce.Style.Floated || ce.Style.OutOfFlow) continue;
             var d = ce.Style.Display;
-            if (d == Display.None || IsAtomicInline(d)) continue;
+            if (d == Display.None || ce.Style.IsAtomicInline) continue;
             if (d != Display.Inline) return true;
             if (ContainsBlock(ce)) return true;
         }
@@ -1087,6 +1086,7 @@ internal sealed partial class LayoutEngine
             {
                 Custom = custom != null, Type = s.ListStyleType,
                 Style = e.MarkerStyle ?? s, ContentX = cx, ContentRight = cx + contentW, Rtl = s.Rtl, Tag = Tags?.MarkerOf(e),
+                Inside = s.ListStylePositionInside,
             };
             // list-style-image wins over the type unless ::marker has content; an image that does not load falls back to the type.
             if (e.MarkerContent != null || s.ListStyleImage is not { } imageSrc || !LoadMarkerImage(marker, imageSrc))
@@ -1464,7 +1464,8 @@ internal sealed partial class LayoutEngine
             // baseline in a marker box that ends 1 + 7px (the marker padding) before the content.
             int px = (int)(size / 0.75f * 0.66f + 0.001f);
             float triangle = px * 0.75f;
-            float left = m.Rtl ? m.ContentRight + 8 * 0.75f : m.ContentX - (px + 8) * 0.75f;
+            float left = m.Inside ? (m.Rtl ? m.ContentRight + InsideMarkerWidth(m) - triangle : m.ContentX - InsideMarkerWidth(m))
+                : m.Rtl ? m.ContentRight + 8 * 0.75f : m.ContentX - (px + 8) * 0.75f;
             _ops.Add(new SvgOp(left, baseline - triangle, triangle, triangle, DisclosureTriangle(m.Type == ListStyleType.DisclosureOpen, m.Rtl, s.Color)));
             return;
         }
@@ -1505,7 +1506,8 @@ internal sealed partial class LayoutEngine
         s.Font.LineMetrics(size, out float ascentPt, out _);
         int ascent = (int)MathF.Round(ascentPt / 0.75f), offset = ascent * 2 / 3, side = (offset + 1) / 2;
         float r = side * 0.75f / 2;
-        float cxm = m.Rtl ? m.ContentRight + (offset + 8 - 1) * 0.75f - r : m.ContentX - (offset + 8 - 1) * 0.75f + r;
+        float cxm = m.Inside ? (m.Rtl ? m.ContentRight + InsideMarkerWidth(m) - r : m.ContentX - InsideMarkerWidth(m) + r)
+            : m.Rtl ? m.ContentRight + (offset + 8 - 1) * 0.75f - r : m.ContentX - (offset + 8 - 1) * 0.75f + r;
         float cym = baseline - (ascent - 3 * (ascent - offset) / 2) * 0.75f + r;
         switch (m.Type)
         {
@@ -1519,6 +1521,38 @@ internal sealed partial class LayoutEngine
                 _ops.Add(new RectOp(cxm - r, cym - r, 2 * r, 2 * r, s.Color));
                 break;
         }
+    }
+
+    /// <summary>
+    /// The width an inside marker takes at the start of its line: what <see cref="EmitMarker"/> draws before the content,
+    /// with the gap after it.
+    /// </summary>
+    private static float InsideMarkerWidth(ListMarker m)
+    {
+        var s = m.Style;
+        float size = s.FontSize;
+        // Chrome's inside disclosure triangle and symbols start the line; the triangle takes 0.78125em and a space,
+        // a symbol its side, 1px and a font size.
+        if (m.Type is ListStyleType.DisclosureOpen or ListStyleType.DisclosureClosed && m.Text == null && m.Image == null && m.Svg == null)
+            return size * 0.78125f + s.Font.CharWidth(' ', size);
+        if (m.Image != null || m.Svg != null) return m.ImageW + 5.25f;
+        if (m.Text != null)
+        {
+            var text = m.Text;
+            float gap = 0;
+            if (!m.Custom)
+            {
+                int end = text.Length;
+                while (end > 0 && text[end - 1] == ' ') end--;
+                gap = (text.Length - end) * s.Font.CharWidth(' ', size);
+                text = text.Substring(0, end);
+            }
+            return text.Length == 0 ? 0 : s.Font.Measure(text, size) + s.LetterSpacing * text.Length + gap;
+        }
+        if (m.Type is not (ListStyleType.Disc or ListStyleType.Circle or ListStyleType.Square)) return 0;
+        s.Font.LineMetrics(size, out float ascentPt, out _);
+        int ascent = (int)MathF.Round(ascentPt / 0.75f);
+        return ((ascent * 2 / 3 + 1) / 2 + 1) * 0.75f + size;
     }
 
     /// <summary>

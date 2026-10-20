@@ -309,7 +309,7 @@ internal sealed class ComputedStyle
     public bool TableLayoutFixed; // table-layout: fixed
     public BoxShadow[]? BoxShadows;
     public BoxShadow[]? TextShadows; // text-shadow (inherited); spread and inset are not used
-    public float BorderSpacingH = 1.5f, BorderSpacingV = 1.5f; // 2px
+    public float BorderSpacingH, BorderSpacingV; // initially 0; the user agent style gives <table> 2px
     public string? FontFamilyName;
     public FontResolver? Fonts; // the document's fonts; null when only the standard fonts exist
     public MissingFontReport? MissingFonts; // set when PdfOptions.MissingFont is
@@ -338,6 +338,7 @@ internal sealed class ComputedStyle
 
     // ---- Not inherited ----
     public Display Display = Display.Inline;
+    public bool InlineTable;                    // display: inline-table, a table that sits on a line like an inline-block
     public UnicodeBidi UnicodeBidi;
     public uint BackgroundColor;
     // Background layers, topmost first. Each list repeats when it is shorter than BackgroundImages; null is the initial value.
@@ -514,7 +515,12 @@ internal sealed class ComputedStyle
     public bool HasBorder => BorderTopStyle != BorderStyle.None || BorderRightStyle != BorderStyle.None
                              || BorderBottomStyle != BorderStyle.None || BorderLeftStyle != BorderStyle.None;
 
-    public bool IsBlockLevel => Display is not (Display.Inline or Display.InlineBlock or Display.InlineFlex or Display.InlineGrid);
+    public bool IsBlockLevel => Display is not (Display.Inline or Display.InlineBlock or Display.InlineFlex or Display.InlineGrid) && !IsInlineTable;
+
+    /// <summary>An inline-level box laid out as a whole on its line: inline-block, inline-flex, inline-grid or inline-table.</summary>
+    public bool IsAtomicInline => Display is Display.InlineBlock or Display.InlineFlex or Display.InlineGrid || IsInlineTable;
+
+    public bool IsInlineTable => InlineTable && Display == Display.Table;
 
     public bool IsFlex => Display is Display.Flex or Display.InlineFlex;
     public bool IsGrid => Display is Display.Grid or Display.InlineGrid;
@@ -558,6 +564,7 @@ internal sealed class ComputedStyle
         var c = (ComputedStyle)MemberwiseClone();
         c.ParentFontSize = FontSize;
         c.Display = Display.Inline;
+        c.InlineTable = false;
         c.BackgroundColor = 0;
         c.BackgroundImages = null;
         c.CanvasBackground = false;

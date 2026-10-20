@@ -204,6 +204,7 @@ public static partial class HtmlToPdf
         /// <summary>Whether the source can hold form controls: most documents have none, which spares a walk of the tree.</summary>
         private static bool MayHaveControls(string html)
             => html.Contains("<input", StringComparison.OrdinalIgnoreCase) || html.Contains("<select", StringComparison.OrdinalIgnoreCase)
-               || html.Contains("<textarea", StringComparison.OrdinalIgnoreCase) || html.Contains("<button", StringComparison.OrdinalIgnoreCase);
+               || html.Contains("<textarea", StringComparison.OrdinalIgnoreCase) || html.Contains("<button", StringComparison.OrdinalIgnoreCase)
+               || html.Contains("<progress", StringComparison.OrdinalIgnoreCase) || html.Contains("<meter", StringComparison.OrdinalIgnoreCase);
     }
 }
