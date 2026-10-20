@@ -2099,7 +2099,7 @@ internal sealed partial class LayoutEngine
         if (!reuse) return CaptureBoxCore(src);
         Captured c;
         if (_knownBoxes != null && FindKnown(_knownBoxes, src) is { } known && known.ListIndexBefore == _currentListIndex
-            && !_measuring && Tags == null && Footnotes == null && (_columnNotes == null || _captureDepth >= MaxPlacedOnPagesInColumns)
+            && !_measuring && Tags == null && (Footnotes == null || !HasFootnoteCalls(known)) && (_columnNotes == null || _captureDepth >= MaxPlacedOnPagesInColumns)
             && SameContext(e, known))
         {
             // Measured already where the box around it was captured: only its content may still be needed.
@@ -2185,6 +2185,13 @@ internal sealed partial class LayoutEngine
     /// measure the same now (see <see cref="Captured.Known"/>).
     /// </summary>
     private Dictionary<BoxSource, Captured>? _knownBoxes;
+
+    /// <summary>
+    /// Whether a captured box holds footnote calls. Those are placed, and their footnotes registered, as the box is laid
+    /// out on the pages, so a box with calls is laid out again instead of taking its measurements; a box without them
+    /// measures the same in a document with footnotes as in one without.
+    /// </summary>
+    private static bool HasFootnoteCalls(Captured c) => c.AnchorIds?.Exists(id => FootnoteSetup.TryParseCallKey(id, out _)) == true;
 
     /// <summary>What a captured box measured, without its content.</summary>
     private static Captured Measured(Captured c) => new()
