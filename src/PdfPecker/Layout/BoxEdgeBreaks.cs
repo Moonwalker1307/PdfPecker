@@ -21,6 +21,12 @@ internal sealed partial class LayoutEngine
     private int _edgeDepth;
     private const int MaxEdgeNesting = 4;
 
+    // How deep a box can be nested in boxes laid out again for their edges and still move to the next page with its
+    // content. When a box goes there, the boxes around it whose only content it was follow it one by one, each laying
+    // it out again on the next page, where boxes inside it can move once more: with each level allowed to move, the
+    // work grew with the depth to the power of this limit.
+    private const int MaxTopMoveNesting = 2;
+
     // Above 0 while a box whose first content is on a later page, but that draws something on its first page, is laid
     // out again: the boxes inside it do not probe for their first content.
     private int _edgeProbesOff;
@@ -28,8 +34,10 @@ internal sealed partial class LayoutEngine
     // The bottom of the last line or image laid out, which a box's bottom edges and the margins between them follow.
     private float _lastContentBottom = float.NaN;
 
-    // The last content that room for bottom edges did not move: the boxes around it, which end with it, need not try.
-    private float _stuckContentBottom = float.NaN;
+    // Where the content ended that room for bottom edges did not move: the boxes around it, which end with it, need not
+    // try. Nested boxes can end their content at two places in turn, so remembering only the latest let each level try
+    // again what the one inside it had found stuck, and the work doubled with each level.
+    private readonly HashSet<float> _stuckContentBottoms = new();
 
     /// <summary>The room at the end of a page kept for the bottom edges of the box around the content being laid out.</summary>
     private float EdgeReserve(int page)
@@ -100,7 +108,7 @@ internal sealed partial class LayoutEngine
         }
         bottom = KeepBottomEdge(e, x, y, availW, shrinkToFit, pages, opsStart, marker, listIndex, bottom, out bool kept);
         // The probe found the first content on the box's first page; room kept for the bottom edge can move it on.
-        if (probe != null && !kept || AtPageTop(y) || _edgeDepth >= MaxEdgeNesting || !LeavesOnlyTop(e, y, availW, bottom, opsStart))
+        if (probe != null && !kept || AtPageTop(y) || _edgeDepth >= MaxTopMoveNesting || !LeavesOnlyTop(e, y, availW, bottom, opsStart))
             return bottom;
         MoveToNextPage(ref x, ref y, ref availW, pages);
         _edgeDepth++;
@@ -208,7 +216,7 @@ internal sealed partial class LayoutEngine
         int page = PageOf(last - 0.5f);
         // Bottom edges taller than what is left of a page take the content nowhere it fits better.
         if (bottom <= FlowEnd(page) + Eps || PageOf(bottom - 0.5f) > page + 1 || _edgeReserve.ContainsKey(page)
-            || Math.Abs(last - _stuckContentBottom) < Eps) return bottom;
+            || _stuckContentBottoms.Contains(last)) return bottom;
 
         // The room covers the bottom edges of this box and of the boxes inside it that end with it, and the margins
         // between them, which Chrome keeps on the page with the content too.
@@ -226,7 +234,7 @@ internal sealed partial class LayoutEngine
             kept = true;
             return moved;
         }
-        _stuckContentBottom = last;
+        _stuckContentBottoms.Add(last);
         return LayOutAgain(e, x, y, availW, shrinkToFit, pages, opsStart, marker, listIndex);
     }
 
