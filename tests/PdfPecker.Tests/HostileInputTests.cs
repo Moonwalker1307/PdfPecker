@@ -419,6 +419,19 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(html));
     }
 
+    [Fact]
+    public void Nested_inline_blocks_wider_than_the_measuring_width_are_measured_once()
+    {
+        // Found by the fuzzer: target html, timeout-b4187992. Text in 250 nested inline-blocks is wider than the
+        // 100,000 points intrinsic widths are measured at, so each box wraps, and each level measured the boxes inside
+        // it again at its own slightly narrower width: 533 MB and 3.5 s. Widths that large reach no page, so they share
+        // one measurement.
+        var html = "<style>span { display: inline-block; padding: 0 4pt }</style>" + Repeat("<span>" + Repeat("lorem ipsum ", 30), 250);
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 150L << 20);
+    }
+
     [Theory]
     // A table with a height measures its rows before sharing that height out over them, and a row whose cells have
     // percentage heights inside is laid out once to find its height and again with the percentages resolved: with
