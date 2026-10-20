@@ -434,6 +434,20 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Deeply_nested_tables_with_percentage_heights_are_measured_a_bounded_number_of_levels_deep()
+    {
+        // Found by the fuzzer: target html, timeout-d2edd0b0. A table with a percentage height measures its rows before
+        // sharing that height out, and a row whose cells have percentage heights inside is laid out once to measure it,
+        // so each of 300 nested tables measured all the tables inside it again: 359 MB.
+        var html = "<style>html, body { height: 100% } .page { height: 100% } table { height: 20%; width: 100% }"
+                   + " td.fixed { height: 10mm } .fill { height: 100% }</style><div class=page>"
+                   + Repeat("<table><tr><td class=fixed><div class=fill></div></td><td>The table is 20% of the page", 300);
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 160L << 20);
+    }
+
+    [Fact]
     public void Stretched_grid_items_reuse_the_measurements_inside_them()
     {
         // Found by the fuzzer: target html, timeout-d2edd0b0. A grid item stretched to a taller row is laid out again at
