@@ -364,8 +364,17 @@ internal sealed partial class StyleResolver
     private static void ApplyLineClamp(ComputedStyle s, in DeclaredValue d)
         => s.LineClamp = int.TryParse(d.Lower, NumberStyles.Integer, CultureInfo.InvariantCulture, out int clamp) && clamp > 0 ? Math.Min(clamp, 10000) : 0;
 
-    private static void ApplyVerticalAlign(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
-        => s.VerticalAlign = d.Lower switch
+    private void ApplyVerticalAlign(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        // A length raises the box by that much (a negative one lowers it); a percentage is of the box's line height.
+        if (TryParseLength(d.Lower, d.Em, _rootFontSize, out var shift, _vw, _vh) && !shift.IsAuto)
+        {
+            s.VerticalAlign = VerticalAlign.Length;
+            s.VerticalAlignLength = shift;
+            return;
+        }
+        if (d.Lower == "inherit") s.VerticalAlignLength = parent.VerticalAlignLength;
+        s.VerticalAlign = d.Lower switch
         {
             "baseline" => VerticalAlign.Baseline,
             "sub" => VerticalAlign.Sub,
@@ -378,6 +387,7 @@ internal sealed partial class StyleResolver
             "inherit" => parent.VerticalAlign,
             _ => s.VerticalAlign,
         };
+    }
 
     private static void ApplyDirection(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
         => s.Rtl = d.Lower switch { "rtl" => true, "ltr" => false, "inherit" => parent.Rtl, "initial" => false, _ => s.Rtl };

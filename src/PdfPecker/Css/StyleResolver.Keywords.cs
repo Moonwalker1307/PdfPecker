@@ -158,7 +158,7 @@ internal sealed partial class StyleResolver
             case "letter-spacing": s.LetterSpacing = from.LetterSpacing; break;
             case "word-spacing": s.WordSpacing = from.WordSpacing; break;
             case "white-space": s.WhiteSpace = from.WhiteSpace; break;
-            case "vertical-align": s.VerticalAlign = from.VerticalAlign; break;
+            case "vertical-align": s.VerticalAlign = from.VerticalAlign; s.VerticalAlignLength = from.VerticalAlignLength; break;
             case "list-style-position": s.ListStylePositionInside = from.ListStylePositionInside; break;
             case "flex-grow": s.FlexGrow = from.FlexGrow; break;
             case "flex-shrink": s.FlexShrink = from.FlexShrink; break;
