@@ -1244,6 +1244,8 @@ internal sealed partial class LayoutEngine
         _lastBoxFrameV = frameV;
         _lastBoxChildCb = childCb;
         if (e.Name == "a" && e.GetAttribute("href") is { Length: > 0 } href) _ops.Add(new LinkOp(bx, y, used, bottom - y, href) { Link = Tags?.ElementOf(e) });
+        // A box taken out of a display: contents link links on its own.
+        else if (e.ContentsHref != null) _ops.Add(new LinkOp(bx, y, used, bottom - y, e.ContentsHref));
         // A box whose layout stopped early is laid out again in full right away; recording it now would put it in the
         // outline ahead of the headings inside it that were not reached yet. A grid row is laid out to see where its
         // content starts before the rows above it are placed, so headings found then would come out of order.

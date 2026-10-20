@@ -350,6 +350,7 @@ internal sealed class ComputedStyle
     // ---- Not inherited ----
     public Display Display = Display.Inline;
     public bool InlineTable;                    // display: inline-table, a table that sits on a line like an inline-block
+    public bool Contents;                       // display: contents, an element without a box whose children take its place
     public UnicodeBidi UnicodeBidi;
     public uint BackgroundColor;
     // Background layers, topmost first. Each list repeats when it is shorter than BackgroundImages; null is the initial value.
@@ -613,6 +614,7 @@ internal sealed class ComputedStyle
         c.ParentFontSize = FontSize;
         c.Display = Display.Inline;
         c.InlineTable = false;
+        c.Contents = false;
         c.BackgroundColor = 0;
         c.BackgroundImages = null;
         c.CanvasBackground = false;

@@ -7,7 +7,7 @@ internal sealed partial class StyleResolver
 {
     private static void ApplyDisplay(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
-        s.Display = d.Lower switch
+        Display? display = d.Lower switch
         {
             "block" => Display.Block,
             "flow-root" => Display.Block,
@@ -34,10 +34,13 @@ internal sealed partial class StyleResolver
             // display is not inherited, so unset is its initial value, inline.
             "initial" or "unset" => Display.Inline,
             "inherit" => parent.Display,
-            _ => s.Display,
+            _ => null,
         };
+        if (display == null) return; // an invalid value is ignored
+        s.Display = display.Value;
         if (d.Lower == "flow-root") s.FormattingRoot = true;
         s.InlineTable = s.Display == Display.Table && (d.Lower == "inline-table" || d.Lower == "inherit" && parent.InlineTable);
+        s.Contents = d.Lower == "contents" || d.Lower == "inherit" && parent.Contents;
     }
 
     /// <summary>width: a length, or an intrinsic size keyword, which leaves the length auto for layout to size.</summary>
