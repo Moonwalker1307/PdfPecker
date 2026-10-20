@@ -124,6 +124,8 @@ internal sealed partial class SvgImage
     private int _clipDepth, _maskDepth, _filterDepth, _patternDepth;
     private readonly HashSet<Element> _markersDrawing = new(ReferenceEqualityComparer.Instance);
     private SvgBudget _budget = null!;
+    private float ViewportWidth = 300, ViewportHeight = 150; // the root viewport in user units
+    private Element? _documentRoot; // read for ids this svg lacks, until it has been
     private float _diagonal; // the root viewport's normalised diagonal, which percentage dash lengths refer to
     private Func<string, object?>? _load; // the PdfImage or SvgImage at an image element's href, or null
     private Dictionary<Element, (SvgPathMeasure?, float)>? _textPaths; // the paths text is laid along, measured
@@ -149,6 +151,8 @@ internal sealed partial class SvgImage
         // Without a viewBox, the viewport is the given size, else the default size of a replaced element (300 × 150).
         float vpw = img.HasViewBox ? img.ViewBoxWidth : img.Width / 0.75f ?? 300;
         float vph = img.HasViewBox ? img.ViewBoxHeight : img.Height / 0.75f ?? 150;
+        img.ViewportWidth = vpw;
+        img.ViewportHeight = vph;
         img._diagonal = MathF.Sqrt((vpw * vpw + vph * vph) / 2);
         var par = svg.GetAttribute("preserveaspectratio");
         if (par != null)
@@ -159,6 +163,9 @@ internal sealed partial class SvgImage
             if (parts.Length > 1) img.Slice = parts[1] == "slice";
         }
         img.CollectIds(svg);
+        var top = svg;
+        while (top.Parent is { } parent) top = parent;
+        if (top != svg) img._documentRoot = top;
         foreach (var child in svg.Children)
             if (child is Element e) img.Render(e, Matrix.Identity, 1, 0);
         return img;
@@ -256,7 +263,17 @@ internal sealed partial class SvgImage
     }
 
     private Element? Reference(string? url)
-        => url != null && url.StartsWith('#') && _ids.TryGetValue(url.Substring(1), out var el) ? el : null;
+    {
+        if (url == null || !url.StartsWith('#')) return null;
+        if (_ids.TryGetValue(url.Substring(1), out var el)) return el;
+        // Ids are document-wide in HTML: an inline svg may use a symbol or gradient defined in another one. The rest of
+        // the document is read only when a reference is not found here, once, so a page of many svgs stays linear.
+        if (_documentRoot == null) return null;
+        var root = _documentRoot;
+        _documentRoot = null;
+        CollectIds(root);
+        return _ids.TryGetValue(url.Substring(1), out el) ? el : null;
+    }
 
     // ------------------------------------------------------------------ tree walk
 
@@ -266,7 +283,9 @@ internal sealed partial class SvgImage
         var s = e.Style;
         if (s == null || s.Display == Display.None) return;
         if (e.GetAttribute("transform") is { } tf) ctm = ParseTransform(tf).Then(ctm);
-        float op = opacity * s.Opacity;
+        // A translucent container is composited as one group, so its children do not show through each other.
+        bool group = s.Opacity < 1 && e.Name is "g" or "a" or "switch" or "use" or "svg";
+        float op = group ? opacity : opacity * s.Opacity;
 
         // Effects nest in the order SVG applies them: the filter first, then the clip path, then the mask. Each is
         // applied to what the element drew. Nesting is bounded so that the PDF's save/restore depth stays small.
@@ -285,6 +304,7 @@ internal sealed partial class SvgImage
             if (mask != null) _maskDepth--;
         }
         if (Shapes.Count == start) return;
+        if (group) WrapInGroup(start, s.Opacity);
         if (filter != null && !ApplyFilter(filter, ctm, start)) return;
         if (clip != null)
         {
@@ -303,6 +323,28 @@ internal sealed partial class SvgImage
             Shapes.Add(new SvgShape { Kind = SvgShape.KindEndClip });
         }
         if (mask != null) ApplyMask(mask, ctm, start, depth);
+    }
+
+    /// <summary>Replaces the shapes from <paramref name="start"/> on with one translucent group holding them.</summary>
+    private void WrapInGroup(int start, float opacity)
+    {
+        var shape = new SvgShape
+        {
+            Kind = SvgShape.KindImage,
+            ImageAlpha = (byte)MathF.Round(Math.Clamp(opacity, 0, 1) * 255),
+            ImageMatrix = Matrix.Identity,
+            Children = Shapes.GetRange(start, Shapes.Count - start),
+            MinX = float.MaxValue, MinY = float.MaxValue, MaxX = float.MinValue, MaxY = float.MinValue,
+        };
+        foreach (var sh in shape.Children)
+        {
+            if (sh.Kind is not (SvgShape.KindPath or SvgShape.KindText or SvgShape.KindFilter or SvgShape.KindImage)) continue;
+            shape.MinX = Math.Min(shape.MinX, sh.MinX); shape.MinY = Math.Min(shape.MinY, sh.MinY);
+            shape.MaxX = Math.Max(shape.MaxX, sh.MaxX); shape.MaxY = Math.Max(shape.MaxY, sh.MaxY);
+        }
+        Shapes.RemoveRange(start, Shapes.Count - start);
+        if (shape.ImageAlpha == 0 || !(shape.MaxX >= shape.MinX)) return;
+        Shapes.Add(shape);
     }
 
     private void RenderElement(Element e, ComputedStyle s, Matrix ctm, float op, int depth)
@@ -335,6 +377,18 @@ internal sealed partial class SvgImage
                 var m = Matrix.Translate(Num(e, "x"), Num(e, "y")).Then(ctm);
                 if (target.Name == "symbol")
                 {
+                    // The symbol's viewBox is fitted into the use element's width and height (100% of the viewport when
+                    // absent, which is taken as the root's viewBox size).
+                    var vb = ParseNumbers(target.GetAttribute("viewbox"));
+                    if (vb.Count == 4 && vb[2] > 0 && vb[3] > 0)
+                    {
+                        float w = Num(e, "width", float.NaN), h = Num(e, "height", float.NaN);
+                        if (float.IsNaN(w)) w = Num(target, "width", ViewportWidth);
+                        if (float.IsNaN(h)) h = Num(target, "height", ViewportHeight);
+                        float sc = Math.Min(w / vb[2], h / vb[3]);
+                        m = Matrix.Translate(-vb[0], -vb[1]).Then(Matrix.Scale(sc, sc))
+                            .Then(Matrix.Translate((w - vb[2] * sc) / 2, (h - vb[3] * sc) / 2)).Then(m);
+                    }
                     foreach (var c in target.Children) if (c is Element ce) Render(ce, m, op, depth + 1);
                 }
                 else RenderReferenced(target, e, m, op, depth + 1);
