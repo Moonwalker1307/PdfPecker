@@ -79,6 +79,17 @@ internal sealed partial class StyleResolver
             case "margin-block-end": Apply(s, parent, "margin-bottom", raw); break;
             case "padding-block-start": Apply(s, parent, "padding-top", raw); break;
             case "padding-block-end": Apply(s, parent, "padding-bottom", raw); break;
+            case "inset-inline-start": Apply(s, parent, s.Rtl ? "right" : "left", raw); break;
+            case "inset-inline-end": Apply(s, parent, s.Rtl ? "left" : "right", raw); break;
+            case "inset-block-start": Apply(s, parent, "top", raw); break;
+            case "inset-block-end": Apply(s, parent, "bottom", raw); break;
+            // Every box is horizontal, so the inline axis is the width and the block axis the height.
+            case "inline-size": Apply(s, parent, "width", raw); break;
+            case "block-size": Apply(s, parent, "height", raw); break;
+            case "min-inline-size": Apply(s, parent, "min-width", raw); break;
+            case "min-block-size": Apply(s, parent, "min-height", raw); break;
+            case "max-inline-size": Apply(s, parent, "max-width", raw); break;
+            case "max-block-size": Apply(s, parent, "max-height", raw); break;
             case "width": ApplyWidth(s, parent, in d); break;
             case "height": SetLength(ref s.Height, d.Lower, d.Em, d.Inherit ? parent.Height : null); break;
             case "min-width": SetLength(ref s.MinWidth, d.Lower, d.Em, null); break;

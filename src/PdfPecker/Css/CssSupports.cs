@@ -44,6 +44,8 @@ internal static class CssSupports
         "line-clamp", "-webkit-line-clamp", "hyphens", "hyphenate-character", "hyphenate-limit-chars", "quotes", "size", "string-set", "page", "direction", "unicode-bidi", "margin-inline",
         "margin-inline-start", "margin-inline-end", "padding-inline", "padding-inline-start", "padding-inline-end", "margin-block",
         "margin-block-start", "margin-block-end", "padding-block", "padding-block-start", "padding-block-end",
+        "inset-inline", "inset-inline-start", "inset-inline-end", "inset-block", "inset-block-start", "inset-block-end",
+        "inline-size", "block-size", "min-inline-size", "min-block-size", "max-inline-size", "max-block-size",
         "mix-blend-mode", "background-blend-mode", "isolation", "box-decoration-break", "-webkit-box-decoration-break", "container", "container-type", "container-name",
         "footnote-display", "footnote-policy", "backdrop-filter", "-webkit-backdrop-filter", "mask-image", "mask-position",
         "mask-position-x", "mask-position-y", "mask-size", "mask-repeat", "mask-origin", "mask-clip", "mask-composite",

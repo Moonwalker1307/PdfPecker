@@ -267,7 +267,7 @@ internal static class MediaQuery
             "px" => 1,
             "" => n == 0 ? 1 : double.NaN,
             "em" or "rem" => 16, // relative to the initial font size
-            "ex" => 8,
+            "ex" => 7.344, // the x-height of the initial font (Times) at 16px
             "ch" => 8,
             "pt" => 96.0 / 72,
             "pc" => 16,

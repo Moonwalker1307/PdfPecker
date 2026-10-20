@@ -514,16 +514,43 @@ internal sealed partial class StyleResolver
             case "mm": pt = n * 72f / 25.4f; break;
             case "q": pt = n * 72f / 101.6f; break;
             case "pc": pt = n * 12f; break;
-            case "vw": pt = n * vw; break; // 1% of the page's content width
-            case "vh": pt = n * vh; break; // 1% of the page's content height
+            case "vw" or "vi": pt = n * vw; break; // 1% of the page's content width
+            case "vh" or "vb": pt = n * vh; break; // 1% of the page's content height
             case "vmin": pt = n * Math.Min(vw, vh); break;
             case "vmax": pt = n * Math.Max(vw, vh); break;
+            // Without the font's metrics: the style resolver rewrites these in a declaration to points beforehand.
+            case "cap": pt = n * em * 0.7f; break;
+            case "ic": pt = n * em; break;
+            case "lh": pt = n * em * 1.15f; break;
+            case "rex" or "rch": pt = n * rem * 0.5f; break;
+            case "rcap": pt = n * rem * 0.7f; break;
+            case "ric": pt = n * rem; break;
+            case "rlh": pt = n * rem * 1.15f; break;
             default:
+                if (ViewportUnit(unit.ToString(), vw, vh) is float vp) { pt = n * vp; break; }
                 if (ContainerQuery.UnitValue(unit.ToString(), vw, vh) is not float cq) return false;
                 pt = n * cq;
                 break;
         }
         len = Length.Pt(pt);
         return true;
+    }
+
+    /// <summary>
+    /// The points one viewport unit is worth. The page has no browser chrome to show or hide, so the small, large and
+    /// dynamic viewports (svh, lvh, dvh and the like) are all the page. vi and vb are the inline and block axis, which are
+    /// the width and the height in the horizontal writing mode every box has here.
+    /// </summary>
+    private static float? ViewportUnit(string unit, float vw, float vh)
+    {
+        if (unit.Length is >= 3 and <= 5 && unit[0] is 's' or 'l' or 'd') unit = unit.Substring(1);
+        return unit switch
+        {
+            "vw" or "vi" => vw, // 1% of the page's content width
+            "vh" or "vb" => vh, // 1% of the page's content height
+            "vmin" => Math.Min(vw, vh),
+            "vmax" => Math.Max(vw, vh),
+            _ => null,
+        };
     }
 }
