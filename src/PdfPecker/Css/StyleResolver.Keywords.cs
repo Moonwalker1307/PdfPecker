@@ -148,6 +148,10 @@ internal sealed partial class StyleResolver
             case "opacity": s.Opacity = from.Opacity; break;
             case "box-shadow": s.BoxShadows = from.BoxShadows; break;
             case "text-shadow": s.TextShadows = from.TextShadows; break;
+            case "-webkit-text-fill-color": s.TextFillColor = from.TextFillColor; break;
+            case "-webkit-text-stroke-width": s.TextStrokeWidth = from.TextStrokeWidth; break;
+            case "-webkit-text-stroke-color": s.TextStrokeColor = from.TextStrokeColor; break;
+            case "paint-order": s.PaintStrokeFirst = from.PaintStrokeFirst; break;
             case "font-family": s.FontFamily = from.FontFamily; s.FontFamilyName = from.FontFamilyName; break;
             case "font-weight": s.FontWeight = from.FontWeight; s.Bold = from.Bold; break;
             case "font-style": s.Italic = from.Italic; break;

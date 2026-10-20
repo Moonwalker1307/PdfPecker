@@ -1,3 +1,4 @@
+using PdfPecker.Css;
 using PdfPecker.Fonts;
 using PdfPecker.Images;
 using PdfPecker.Pdf;
@@ -116,12 +117,27 @@ internal sealed class TextOp : DrawOp
     public float WordSpacing, CharSpacing;
     /// <summary>The text is in logical order and drawn right to left (its glyphs reversed).</summary>
     public bool Rtl;
+    /// <summary>The outline (-webkit-text-stroke) in points and 0xAARRGGBB; none when the width is 0.</summary>
+    public float StrokeWidth;
+    public uint StrokeColor;
+    /// <summary>paint-order: stroke, the fill is drawn over the stroke.</summary>
+    public bool StrokeFirst;
 
     public TextOp(float x, float baseline, float lineTop, TextFont font, float size, uint color, string text, float wordSpacing, float charSpacing)
     {
         X = x; Baseline = baseline; LineTop = lineTop;
         Font = font; Size = size; Color = color; Text = text;
         WordSpacing = wordSpacing; CharSpacing = charSpacing;
+    }
+
+    /// <summary>Takes the text outline from <paramref name="style"/>.</summary>
+    public TextOp WithStroke(ComputedStyle style)
+    {
+        if (!(style.TextStrokeWidth > 0)) return this;
+        StrokeWidth = style.TextStrokeWidth;
+        StrokeColor = CssColor.Fade(style.TextStrokeColor ?? style.Color, style.InlineFade);
+        StrokeFirst = style.PaintStrokeFirst;
+        return this;
     }
 
     public override void Offset(float dx, float dy) { X += dx; Baseline += dy; LineTop += dy; }
