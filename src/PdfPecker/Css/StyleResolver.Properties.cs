@@ -78,7 +78,7 @@ internal sealed partial class StyleResolver
             case "margin-block-end": Apply(s, parent, "margin-bottom", raw); break;
             case "padding-block-start": Apply(s, parent, "padding-top", raw); break;
             case "padding-block-end": Apply(s, parent, "padding-bottom", raw); break;
-            case "width": SetLength(ref s.Width, d.Lower, d.Em, d.Inherit ? parent.Width : null); break;
+            case "width": ApplyWidth(s, parent, in d); break;
             case "height": SetLength(ref s.Height, d.Lower, d.Em, d.Inherit ? parent.Height : null); break;
             case "min-width": SetLength(ref s.MinWidth, d.Lower, d.Em, null); break;
             case "min-height": SetLength(ref s.MinHeight, d.Lower, d.Em, null); break;

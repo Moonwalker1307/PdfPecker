@@ -386,7 +386,9 @@ internal sealed partial class LayoutEngine
             {
                 case TrackSizeKind.Auto:
                 case TrackSizeKind.MaxContent:
-                    t.Limit = hasLimit[start] ? Math.Max(t.Limit, max) : max;
+                    // fit-content(cap) grows no further than the cap, unless the min-content size needs more.
+                    float grow = t.Def.Max.Value > 0 ? Math.Min(max, t.Def.Max.Value) : max;
+                    t.Limit = hasLimit[start] ? Math.Max(t.Limit, grow) : grow;
                     hasLimit[start] = true;
                     break;
                 case TrackSizeKind.MinContent:

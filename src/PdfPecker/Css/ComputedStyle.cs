@@ -20,6 +20,7 @@ internal enum TrackSizeKind : byte { Fixed, Percent, Fr, Auto, MinContent, MaxCo
 internal readonly struct TrackSize
 {
     public readonly TrackSizeKind Kind;
+    /// <summary>The length, percentage or fraction; for a MaxContent maximum from fit-content(), the cap (0: none).</summary>
     public readonly float Value;
     /// <summary>For a Percent track given as a math function (<c>calc(50% - 10px)</c>), the length to resolve.</summary>
     private readonly Length _calc;
@@ -149,6 +150,9 @@ internal enum LengthUnit : byte { Pt, Percent, Auto, Calc }
 internal enum Position : byte { Static, Relative, Absolute, Fixed }
 
 internal enum FloatSide : byte { None, Left, Right }
+
+/// <summary>An intrinsic size keyword given for width (CSS Sizing 3): the box is as wide as its content says.</summary>
+internal enum SizeKeyword : byte { None, MinContent, MaxContent, FitContent }
 
 /// <summary>How a footnote sits in the footnote area (footnote-display); compact is laid out as inline.</summary>
 internal enum FootnoteDisplay : byte { Block, Inline, Compact }
@@ -376,6 +380,7 @@ internal sealed class ComputedStyle
     public string[]? ContainerNames; // container-name; null for none
     public Length Width = Length.Auto, Height = Length.Auto;
     public Length ControlWidth = Length.Auto;   // a text field's own width, used while width is auto and not stretched
+    public SizeKeyword WidthKeyword;            // width: min-content, max-content or fit-content; Width is then auto
     public Length MinWidth = Length.Auto, MaxWidth = Length.Auto, MinHeight = Length.Zero, MaxHeight = Length.Auto;
     public bool BorderBox;
     public VerticalAlign VerticalAlign;
@@ -576,6 +581,7 @@ internal sealed class ComputedStyle
         c.ContainerType = ContainerType.Normal;
         c.ContainerNames = null;
         c.Width = c.Height = c.ControlWidth = Length.Auto;
+        c.WidthKeyword = SizeKeyword.None;
         c.MinWidth = Length.Auto; // min-width: auto, which differs from 0 for boxes with aspect-ratio
         c.MinHeight = Length.Zero;
         c.MaxWidth = c.MaxHeight = Length.Auto;

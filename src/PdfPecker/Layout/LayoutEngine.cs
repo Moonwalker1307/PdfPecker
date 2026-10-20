@@ -1021,7 +1021,7 @@ internal sealed partial class LayoutEngine
         if (contentW < 0) contentW = 0;
 
         float used = contentW + frame;
-        ml = UsedMarginLeft(e, availW, used, ml, mr, shrinkToFit || hasWOverride);
+        ml = UsedMarginLeft(e, availW, used, ml, mr, shrinkToFit || hasWOverride || s.WidthKeyword != SizeKeyword.None);
         float bx = x + ml;
 
         int opsStart = _ops.Count;
@@ -1286,6 +1286,18 @@ internal sealed partial class LayoutEngine
         {
             contentW = s.Width.Resolve(availW);
             if (s.BorderBox) contentW -= frame;
+        }
+        else if (s.WidthKeyword != SizeKeyword.None)
+        {
+            // min-content, max-content and fit-content size the box by its content, as a shrink-to-fit box is sized,
+            // except that max-content may overflow the containing block and min-content wraps at every chance.
+            var (min, max) = Intrinsic(e);
+            contentW = s.WidthKeyword switch
+            {
+                SizeKeyword.MinContent => min,
+                SizeKeyword.MaxContent => max,
+                _ => Math.Max(min, Math.Min(max, availW - ml - mr)),
+            } - frame;
         }
         else if (s.AspectRatio > 0 && ClampedHeight(s, cbH) is float ratioFrom)
         {

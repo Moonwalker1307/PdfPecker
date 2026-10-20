@@ -147,7 +147,7 @@ internal sealed partial class StyleResolver
             else if (s.Display == Display.InlineFlex) s.Display = Display.Flex;
             else if (s.Display == Display.InlineGrid) s.Display = Display.Grid;
         }
-        if (!s.ControlWidth.IsAuto && s.Width.IsAuto && !StretchedAcross(s, parent)) s.Width = s.ControlWidth;
+        if (!s.ControlWidth.IsAuto && s.Width.IsAuto && s.WidthKeyword == SizeKeyword.None && !StretchedAcross(s, parent)) s.Width = s.ControlWidth;
         // Flex and grid items are laid out as blocks, which carry their own opacity layer.
         bool inlineBox = s.Display == Display.Inline && !parent.IsFlex && !parent.IsGrid;
         s.InlineFade = inlineBox ? s.Opacity * (parent.Display == Display.Inline ? parent.InlineFade : 1) : 1;
