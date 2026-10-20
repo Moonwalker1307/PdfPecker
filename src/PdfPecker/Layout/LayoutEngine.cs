@@ -105,6 +105,7 @@ internal sealed partial class LayoutEngine
         // height 100% fill whichever page the section starts on, as in Chrome.
         _cbHeight = new CbHeights(_grid.Height(0), _grid.Height(1), _grid.Height(2));
         _cbKind = 0;
+        _relayoutBudget = BaseRelayouts + RelayoutsPerElement * CountElements(document);
         float bottom = LayoutFlow(document, 0, 0, width);
         _cbHeight = null;
         _pageBox = null;
@@ -841,6 +842,30 @@ internal sealed partial class LayoutEngine
     /// </summary>
     private HashSet<AvoidTrial>? _failedAvoidTrials;
 
+    /// <summary>How many times a block-level box has been laid out, counting each time it was laid out again.</summary>
+    private long _boxLayouts;
+
+    /// <summary>
+    /// The box layouts after which a box is no longer laid out again only to place a page break better: moved to the next
+    /// page to keep it whole or to keep its edges with its content. Each such layout lays out everything inside the box
+    /// again, and nested boxes that each try it multiply the work. Every limit on the depth of that still left nesting
+    /// to the power of the limit, which a page of nested boxes reached; real documents stay far below the budget.
+    /// </summary>
+    private long _relayoutBudget = long.MaxValue;
+    private const long BaseRelayouts = 250_000;
+    private const int RelayoutsPerElement = 64;
+
+    /// <summary>Whether a box may still be laid out again to place a page break better (see <see cref="_relayoutBudget"/>).</summary>
+    private bool MayLayOutAgain => _boxLayouts < _relayoutBudget;
+
+    private static long CountElements(Element e)
+    {
+        long n = 1;
+        foreach (var c in e.Children)
+            if (c is Element child) n += CountElements(child);
+        return n;
+    }
+
     /// <summary>How many boxes kept whole by break-inside: avoid are being laid out, one inside the other.</summary>
     private int _avoidDepth;
 
@@ -899,7 +924,7 @@ internal sealed partial class LayoutEngine
             bool failedBefore = !fitsNext && _failedAvoidTrials?.Contains(trial) == true;
             // A box nested in more than six boxes kept whole in columns is tried there only when it fits: each box around
             // it is tried there too, and with each level trying the levels inside it again, the work doubled per level.
-            if (!failedBefore && (fitsNext || _grid is ColumnGrid && _avoidDepth <= MaxTriedInColumnsNesting))
+            if (!failedBefore && MayLayOutAgain && (fitsNext || _grid is ColumnGrid && _avoidDepth <= MaxTriedInColumnsNesting))
             {
                 float oy = y, ox = x, oavailW = availW;
                 int page = PageOf(y);
@@ -944,6 +969,7 @@ internal sealed partial class LayoutEngine
 
     private float LayoutBlockBoxCore(Element e, float x, float y, float availW, bool shrinkToFit)
     {
+        _boxLayouts++;
         var parentPages = _childPageBox;
         _childPageBox = null;
         var probe = _childProbe;

@@ -1785,6 +1785,29 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Nested_figures_kept_whole_across_pages_are_laid_out_again_within_a_budget()
+    {
+        // Found by the nightly fuzz run: target html, timeout-c201378d. Each figure kept whole that crossed a page and fit
+        // on the next moved there, and so did each figure around it, every one laying out all the figures inside again,
+        // which top and bottom edges kept with their content repeated: 200 levels took 6 s, three stacks of 300 32 s.
+        var html = "<style>@page{size:A6}figure{margin:0;border:0.5pt solid #ccc;padding:4pt;break-inside:avoid}</style>"
+            + Repeat("<h1>SVG charts</h1><div>" + Repeat("<figure>", 300) + Repeat("</figure>", 300) + "</div>", 3);
+        AssertStructurallyValid(Bounded(html, new PdfOptions { MaxPages = 1000 }));
+    }
+
+    [Fact]
+    public void Nested_cards_kept_whole_in_a_wrapping_flex_row_are_laid_out_again_within_a_budget()
+    {
+        // Found by the nightly fuzz run: target html, timeout-d2edd0b0. The same nesting as above, inside a card of a
+        // wrapping flex row: 200 levels took 10 s, 800 levels 27 s.
+        var html = "<style>@page{size:140mm 180mm;margin:10mm}.wrap{display:flex;flex-wrap:wrap;gap:4pt}.card{flex:1 1 35mm;"
+            + "border:0.5pt solid;border-radius:3pt;padding:4pt;background:#f7fbfc;break-inside:avoid}</style>"
+            + "<h1>Flex and grid</h1><h2>Wrapping flex cards</h2><div class=wrap><div class=card><h3>Card 1</h3>"
+            + "<p>Lorem ipsum dolor sit amet.</p></div>" + Repeat("<div class=card>", 800);
+        AssertStructurallyValid(Bounded(html, new PdfOptions { MaxPages = 1000 }));
+    }
+
+    [Fact]
     public void Headings_before_tables_nested_in_split_header_cells_are_laid_out_once()
     {
         // Found by the fuzzer: target html, timeout-c201378d. Each level is a heading kept with a table whose header row
