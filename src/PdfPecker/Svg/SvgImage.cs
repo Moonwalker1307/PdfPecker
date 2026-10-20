@@ -1033,6 +1033,41 @@ internal sealed partial class SvgImage
         for (int i = 0; i < 8; i += 2) ctm.Apply(ref corners[i], ref corners[i + 1]);
         Bounds(corners, out shape.MinX, out shape.MinY, out shape.MaxX, out shape.MaxY);
         Shapes.Add(shape);
+        // Text laid along a path has no straight baseline to draw lines on.
+        if (s.TextDecoration != TextDecoration.None && run.Path == null) EmitTextDecoration(run, font, x, y, ctm, opacity);
+    }
+
+    /// <summary>
+    /// Draws the underline, overline and line-through of a run as filled bars in the text's fill, as browsers do for SVG
+    /// text; the offsets and thickness are those of HTML text.
+    /// </summary>
+    private void EmitTextDecoration(TextRun run, TextFont font, float x, float baseline, Matrix ctm, float opacity)
+    {
+        var s = run.Style;
+        float size = s.FontSize / 0.75f;
+        float thickness = Math.Max(size * 0.055f, 0.5f);
+        float w = run.Width;
+        if (!(w > 0) || !float.IsFinite(w)) return;
+        void Bar(float top)
+        {
+            var bar = new PathBuilder();
+            bar.MoveTo(x, top);
+            bar.LineTo(x + w, top);
+            bar.LineTo(x + w, top + thickness);
+            bar.LineTo(x, top + thickness);
+            bar.Close();
+            if ((_budget.Remaining -= 4) < 0) return;
+            var pts = bar.Points.ToArray();
+            var shape = new SvgShape { Verbs = bar.Verbs.ToArray(), Points = pts };
+            shape.Fill = Paint(s.SvgFill, s.SvgFillUrl, s.SvgFillOpacity * opacity, x, top, x + w, top + thickness, ctm, out shape.FillGradient, out shape.FillPattern);
+            if (!shape.HasFill) return;
+            for (int i = 0; i + 1 < pts.Length; i += 2) ctm.Apply(ref pts[i], ref pts[i + 1]);
+            Bounds(pts, out shape.MinX, out shape.MinY, out shape.MaxX, out shape.MaxY);
+            Shapes.Add(shape);
+        }
+        if ((s.TextDecoration & TextDecoration.Underline) != 0) Bar(baseline + size * 0.1f);
+        if ((s.TextDecoration & TextDecoration.LineThrough) != 0) Bar(baseline - size * 0.3f);
+        if ((s.TextDecoration & TextDecoration.Overline) != 0) Bar(baseline - font.Ascent * size);
     }
 
     // ------------------------------------------------------------------ basic shapes
