@@ -53,6 +53,15 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Deeply_nested_writing_modes_stay_bounded()
+    {
+        // Each turned box is laid out to measure it and again to place it; alternating writing modes nest that work.
+        var sb = new StringBuilder();
+        for (int i = 0; i < 5000; i++) sb.Append(i % 2 == 0 ? "<div style='writing-mode:vertical-rl'>x " : "<div style='writing-mode:horizontal-tb'>y ");
+        AssertStructurallyValid(Bounded(sb.Append(Repeat("</div>", 5000)).ToString()));
+    }
+
+    [Fact]
     public void Custom_property_expansion_is_capped()
     {
         // Each variable uses the previous one four times: 4^40 characters if expanded.
