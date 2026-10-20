@@ -108,6 +108,15 @@ internal sealed partial class StyleResolver
             case "font-variant-ligatures": ApplyFontVariantLigatures(s, parent, in d); break;
             case "font-variant-numeric": ApplyFontVariantNumeric(s, parent, in d); break;
             case "font-feature-settings": ApplyFontFeatureSettings(s, parent, in d); break;
+            case "font-kerning": ApplyFontKerning(s, parent, in d); break;
+            case "font-synthesis": ApplyFontSynthesis(s, parent, in d); break;
+            case "font-synthesis-weight": ApplyFontSynthesisPart(s, parent, FontSynthesis.Weight, in d); break;
+            case "font-synthesis-style": ApplyFontSynthesisPart(s, parent, FontSynthesis.Style, in d); break;
+            case "font-synthesis-small-caps": ApplyFontSynthesisPart(s, parent, FontSynthesis.SmallCaps, in d); break;
+            case "font-synthesis-position": ApplyFontSynthesisPart(s, parent, FontSynthesis.Position, in d); break;
+            case "font-size-adjust": ApplyFontSizeAdjust(s, parent, in d); break;
+            case "font-variant-east-asian": ApplyFontVariantEastAsian(s, parent, in d); break;
+            case "font-variant-position": ApplyFontVariantPosition(s, parent, in d); break;
             case "line-height": ApplyLineHeight(s, parent, in d); break;
             case "text-align": ApplyTextAlign(s, parent, in d); break;
             case "text-align-last": ApplyTextAlignLast(s, parent, in d); break;

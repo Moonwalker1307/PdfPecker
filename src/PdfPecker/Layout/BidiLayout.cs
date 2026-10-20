@@ -150,7 +150,7 @@ internal sealed partial class LayoutEngine
                 continue;
             }
             var font = it.Style.Font;
-            float size = it.Style.FontSize, ls = it.Style.LetterSpacing;
+            float size = it.Style.TextSize, ls = it.Style.LetterSpacing;
             int from = u0;
             while (from < u1)
             {

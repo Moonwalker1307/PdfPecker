@@ -11,7 +11,8 @@ internal sealed class EmbeddedFont : TextFont
     private readonly short[] _widths;
     private readonly UnicodeRange? _range;
     private readonly Ligatures? _ligatures; // null when the font has none or they are turned off
-    private EmbeddedFont? _withoutLigatures;
+    private EmbeddedFont? _withoutLigatures, _withoutKerning;
+    private bool _noKerning;
 
     // metrics: line metrics to use instead of the font's own, for a bundled font standing in for a standard font.
     public EmbeddedFont(FontProgram program, bool syntheticBold, bool syntheticItalic, UnicodeRange? range = null, TextFont? metrics = null)
@@ -42,20 +43,39 @@ internal sealed class EmbeddedFont : TextFont
     public int CharUnits(int codePoint)
         => (uint)codePoint < 0x10000 ? _widths[codePoint] : Program.Advance1000(Program.GlyphId(codePoint));
 
-    public override bool HasKerning => Program.Kerning != null;
+    public override bool HasKerning => !_noKerning && Program.Kerning != null;
 
-    public override int KernUnits(int left, int right) => Program.Kern1000(Program.GlyphId(left), Program.GlyphId(right));
+    public override int KernUnits(int left, int right) => _noKerning ? 0 : Program.Kern1000(Program.GlyphId(left), Program.GlyphId(right));
 
-    private EmbeddedFont(EmbeddedFont font) : this(font.Program, font.SyntheticBold, font.SyntheticItalic, font._range)
+    private EmbeddedFont(EmbeddedFont font, bool ligatures, bool kerning) : this(font.Program, font.SyntheticBold, font.SyntheticItalic, font._range)
     {
         Ascent = font.Ascent;
         Descent = font.Descent;
         LineGap = font.LineGap;
-        _ligatures = null;
+        if (!ligatures) _ligatures = null;
+        _noKerning = !kerning;
     }
 
     public override TextFont WithoutLigatures()
-        => _ligatures == null ? this : _withoutLigatures ??= new EmbeddedFont(this);
+        => _ligatures == null ? this : _withoutLigatures ??= new EmbeddedFont(this, ligatures: false, kerning: !_noKerning);
+
+    public override TextFont WithoutKerning()
+        => _noKerning || Program.Kerning == null ? this : _withoutKerning ??= new EmbeddedFont(this, ligatures: _ligatures != null, kerning: false);
+
+    public override float Metric(FontMetric metric)
+    {
+        float upm = Program.UnitsPerEm;
+        return metric switch
+        {
+            FontMetric.XHeight => Program.XHeight / upm,
+            FontMetric.CapHeight => Program.CapHeight / upm,
+            FontMetric.ZeroWidth => Program.GlyphId('0') is > 0 and var zero ? Program.Advance(zero) / upm : 0,
+            FontMetric.IdeographWidth => Program.GlyphId(0x6C34) is > 0 and var water ? Program.Advance(water) / upm : 0,
+            _ => 0,
+        };
+    }
+
+    public override bool Supports(string features) => !ReferenceEquals(Program.WithFeatures(features), Program);
 
     private System.Collections.Concurrent.ConcurrentDictionary<string, TextFont>? _variants;
 
@@ -74,6 +94,7 @@ internal sealed class EmbeddedFont : TextFont
         Descent = font.Descent;
         LineGap = font.LineGap;
         if (font._ligatures == null) _ligatures = null;
+        _noKerning = font._noKerning;
     }
 
     /// <summary>True when the text may form a ligature, so it has to be shaped glyph by glyph.</summary>
@@ -243,10 +264,18 @@ internal sealed class FontChain : TextFont
 
     public override bool HasKerning => _primary.HasKerning;
 
-    private FontChain? _withoutLigatures;
+    private FontChain? _withoutLigatures, _withoutKerning;
 
     public override TextFont WithoutLigatures()
         => _withoutLigatures ??= new FontChain(_primary.WithoutLigatures(), cp => _fallback(cp)?.WithoutLigatures());
+
+    public override TextFont WithoutKerning()
+        => _withoutKerning ??= new FontChain(_primary.WithoutKerning(), cp => _fallback(cp)?.WithoutKerning());
+
+    // The first font of the list is the one font-size-adjust holds constant.
+    public override float Metric(FontMetric metric) => _primary.Metric(metric);
+
+    public override bool Supports(string features) => _primary.Supports(features);
 
     private const int MaxVariants = 64;
     private System.Collections.Concurrent.ConcurrentDictionary<string, FontChain>? _variants;

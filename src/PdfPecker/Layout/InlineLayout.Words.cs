@@ -56,7 +56,7 @@ internal sealed partial class LayoutEngine
     {
         var rules = WhiteSpaceRules.For(style.WhiteSpace);
         var font = style.Font;
-        float size = style.FontSize;
+        float size = style.TextSize;
         float spaceW = font.CharWidth(' ', size) + style.LetterSpacing + style.WordSpacing;
 
         int i = 0, n = text.Length;
@@ -250,7 +250,7 @@ internal sealed partial class LayoutEngine
             if (breakAfter != BreakAfter.None && st.Last is { Kind: ItemKind.Text, BreakAfter: BreakAfter.None } prev) prev.BreakAfter = breakAfter;
             return;
         }
-        if (style.SmallCaps != 0 && NeedsSmallCaps(src, wStart, wLen, style.SmallCaps == 2))
+        if (style.SynthesizesSmallCaps && NeedsSmallCaps(src, wStart, wLen, style.SmallCaps == 2))
         {
             AddSmallCaps(st, src.Substring(wStart, wLen), style, href, deco, breakAfter);
             return;
@@ -323,7 +323,7 @@ internal sealed partial class LayoutEngine
         word.Source = src;
         word.Start = start;
         word.Length = length;
-        word.Width = TextWidth(style.Font, src, start, length, style.FontSize, style.LetterSpacing);
+        word.Width = TextWidth(style.Font, src, start, length, style.TextSize, style.LetterSpacing);
         word.Href = href;
         word.Deco = deco;
         word.BreakAfter = breakAfter;
@@ -388,8 +388,8 @@ internal sealed partial class LayoutEngine
         small = style.Clone();
         small.FontSize = style.FontSize * SmallCapsScale;
         // Decorations keep the full size's thickness and position, so a line under mixed capitals stays straight.
-        small.DecorationThickness ??= Length.Pt(Math.Max(style.FontSize * DecorationThicknessRatio, MinDecorationThickness));
-        small.UnderlineOffset ??= Length.Pt(style.FontSize * UnderlineOffsetRatio);
+        small.DecorationThickness ??= Length.Pt(Math.Max(style.TextSize * DecorationThicknessRatio, MinDecorationThickness));
+        small.UnderlineOffset ??= Length.Pt(style.TextSize * UnderlineOffsetRatio);
         small.InvalidateFont();
         _smallCapsStyles[style] = small;
         return small;

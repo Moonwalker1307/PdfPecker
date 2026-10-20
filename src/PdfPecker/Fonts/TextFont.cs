@@ -8,6 +8,9 @@ internal readonly struct FontRun
     public FontRun(TextFont font, int start, int length) { Font = font; Start = start; Length = length; }
 }
 
+/// <summary>The font metrics font-size-adjust can hold constant (font-size-adjust: ex-height 0.5).</summary>
+internal enum FontMetric : byte { XHeight, CapHeight, ZeroWidth, IdeographWidth }
+
 /// <summary>A font as seen by layout: metrics and widths in 1/1000 em units.</summary>
 internal abstract class TextFont
 {
@@ -33,6 +36,15 @@ internal abstract class TextFont
     /// The same font with ligatures turned off, as browsers draw text with letter-spacing or font-variant-ligatures: none.
     /// </summary>
     public virtual TextFont WithoutLigatures() => this;
+
+    /// <summary>The same font without pair kerning, as browsers draw text with font-kerning: none.</summary>
+    public virtual TextFont WithoutKerning() => this;
+
+    /// <summary>A metric of the font as a fraction of the em; 0 when the font does not have it.</summary>
+    public virtual float Metric(FontMetric metric) => 0;
+
+    /// <summary>Whether the font substitutes glyphs for these OpenType features (a key from <see cref="FontFeatures.Key"/>).</summary>
+    public virtual bool Supports(string features) => false;
 
     /// <summary>The same font with OpenType features applied (a key from <see cref="FontFeatures.Key"/>).</summary>
     public virtual TextFont WithFeatures(string features) => this;

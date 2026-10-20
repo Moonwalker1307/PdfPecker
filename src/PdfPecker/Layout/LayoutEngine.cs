@@ -1180,7 +1180,7 @@ internal sealed partial class LayoutEngine
         if (_marker != null && _marker.Style == s)
         {
             // List item without any line of text (e.g. it only holds a nested list): put the marker at the top.
-            EmitMarker(cy + s.Font.Ascent * s.FontSize, cy);
+            EmitMarker(cy + s.Font.Ascent * s.TextSize, cy);
         }
 
         // Size containment (container-type: size): the box is as tall as it would be without content.
@@ -1449,7 +1449,7 @@ internal sealed partial class LayoutEngine
             m.ImageH = image.Height * 0.75f;
             return true;
         }
-        m.Style.Font.LineMetrics(m.Style.FontSize, out float ascentPt, out _);
+        m.Style.Font.LineMetrics(m.Style.TextSize, out float ascentPt, out _);
         float side = MathF.Round(ascentPt / 0.75f) / 2 * 0.75f;
         float? ratio = svg!.HasViewBox && svg.ViewBoxWidth > 0 && svg.ViewBoxHeight > 0 ? svg.ViewBoxHeight / svg.ViewBoxWidth : null;
         if (svg.Width is { } w && svg.Height is { } h) (m.ImageW, m.ImageH) = (w, h);
@@ -1468,7 +1468,7 @@ internal sealed partial class LayoutEngine
         _marker = null;
         var s = m.Style;
         if (!s.Visible) return;
-        float size = s.FontSize;
+        float size = s.TextSize;
         if (m.Type is ListStyleType.DisclosureOpen or ListStyleType.DisclosureClosed && m.Text == null && m.Image == null && m.Svg == null)
         {
             // Chrome's disclosure triangles fill a square of 0.66 times the font size in whole pixels, standing on the

@@ -37,7 +37,7 @@ internal sealed partial class LayoutEngine
 
     private static void TextMetrics(ComputedStyle s, out float a, out float d)
     {
-        s.Font.LineMetrics(s.FontSize, out float asc, out float desc);
+        s.Font.LineMetrics(s.TextSize, out float asc, out float desc);
         float lineH = s.LineHeight;
         // Chrome gives the top half of the leading whole CSS pixels and the rest to the bottom.
         float half = MathF.Floor((lineH - (asc + desc)) / 2 / CssPixel + HalfLeadingSlack) * CssPixel;
@@ -140,7 +140,7 @@ internal sealed partial class LayoutEngine
         var font = a.Style.Font;
         if (!font.HasKerning) return 0;
         int units = font.KernUnits(a.Source[a.Start + a.Length - 1], b.Source[b.Start]);
-        return units == 0 ? 0 : units * a.Style.FontSize / 1000f;
+        return units == 0 ? 0 : units * a.Style.TextSize / 1000f;
     }
 
     private static bool IsTextOrSpace(Item it) => it.Kind is ItemKind.Text or ItemKind.Space;
@@ -413,7 +413,7 @@ internal sealed partial class LayoutEngine
             string text = sb.ToString();
             float wordSpacing = style.WordSpacing + spaceExtra;
             if (style.TextShadows != null) TextShadows(style, runX, runEnd - runX, bl, lineTop, text, wordSpacing, rtlRun);
-            _ops.Add(new TextOp(runX, bl, lineTop, style.Font, style.FontSize, CssColor.Fade(style.Color, style.InlineFade), text,
+            _ops.Add(new TextOp(runX, bl, lineTop, style.Font, style.TextSize, CssColor.Fade(style.Color, style.InlineFade), text,
                 wordSpacing, style.LetterSpacing) { Tag = first.Tag, Rtl = rtlRun });
             if (style.TextDecoration != TextDecoration.None) Decorate(style, runX, runEnd - runX, bl);
         }
@@ -428,17 +428,17 @@ internal sealed partial class LayoutEngine
     {
         var style = it.Style;
         var pattern = it.Source;
-        float pw = style.Font.Measure(pattern, style.FontSize) + style.LetterSpacing * pattern.Length;
+        float pw = style.Font.Measure(pattern, style.TextSize) + style.LetterSpacing * pattern.Length;
         if (!(pw > MinLeaderPattern)) return;
         // A visible gap between the text and the pattern on both sides, unless the pattern is blank.
-        float gap = string.IsNullOrWhiteSpace(pattern) ? 0 : style.FontSize * LeaderGapRatio;
+        float gap = string.IsNullOrWhiteSpace(pattern) ? 0 : style.TextSize * LeaderGapRatio;
         float start = blockLeft + MathF.Ceiling((from + gap - blockLeft) / pw - LeaderSlack) * pw;
         double copies = Math.Floor((to - gap - start) / pw + LeaderSlack);
         if (!(copies >= 1)) return;
         int count = (int)Math.Min(copies, Math.Min(MaxLeaderCopies, Math.Ceiling(MaxLeaderLength / pw)));
         var text = new StringBuilder(pattern.Length * count);
         for (int k = 0; k < count; k++) text.Append(pattern);
-        _ops.Add(new TextOp(start, baseline, lineTop, style.Font, style.FontSize, CssColor.Fade(style.Color, style.InlineFade), text.ToString(),
+        _ops.Add(new TextOp(start, baseline, lineTop, style.Font, style.TextSize, CssColor.Fade(style.Color, style.InlineFade), text.ToString(),
             style.WordSpacing, style.LetterSpacing) { Tag = it.Tag });
     }
 

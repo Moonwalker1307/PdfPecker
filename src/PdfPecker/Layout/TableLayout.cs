@@ -1263,7 +1263,7 @@ internal sealed partial class LayoutEngine
                     min = Math.Max(min, group);
                     group = 0;
                     var f = it.Style.Font;
-                    for (int k = 0; k < it.Length; k++) min = Math.Max(min, f.CharWidth(it.Source[it.Start + k], it.Style.FontSize) + it.Style.LetterSpacing);
+                    for (int k = 0; k < it.Length; k++) min = Math.Max(min, f.CharWidth(it.Source[it.Start + k], it.Style.TextSize) + it.Style.LetterSpacing);
                     continue;
                 }
                 group += (it.MinWidth >= 0 ? it.MinWidth : it.Width) + (group > 0 ? kern : 0);

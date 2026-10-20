@@ -16,9 +16,15 @@ internal static class FontFeatures
     /// then font-feature-settings, which wins for a tag both name. Features turned off and ligature features (handled
     /// by <see cref="Ligatures"/>) are left out. Null when there are none.
     /// </summary>
-    public static string? Key(string? numeric, string? settings)
+    public static string? Key(string? numeric, string? settings, string? eastAsian = null, string? position = null, int smallCaps = 0)
     {
         var features = new Dictionary<string, int>(StringComparer.Ordinal);
+        if (smallCaps != 0) features["smcp"] = 1;
+        if (smallCaps == 2) features["c2sc"] = 1;
+        if (position != null) features[position == "sub" ? "subs" : "sups"] = 1;
+        if (eastAsian != null)
+            foreach (var word in eastAsian.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                if (EastAsianTag(word) is { } eastAsianTag) features[eastAsianTag] = 1;
         if (numeric != null)
             foreach (var word in numeric.Split(' ', StringSplitOptions.RemoveEmptyEntries))
             {
@@ -47,6 +53,48 @@ internal static class FontFeatures
             if (value != 1) key.Append('=').Append(value.ToString(CultureInfo.InvariantCulture));
         }
         return key.Length == 0 ? null : key.ToString();
+    }
+
+    private static string? EastAsianTag(string keyword) => keyword switch
+    {
+        "jis78" => "jp78",
+        "jis83" => "jp83",
+        "jis90" => "jp90",
+        "jis04" => "jp04",
+        "simplified" => "smpl",
+        "traditional" => "trad",
+        "full-width" => "fwid",
+        "proportional-width" => "pwid",
+        "ruby" => "ruby",
+        _ => null,
+    };
+
+    private static bool IsEastAsianTag(uint tag)
+        => tag == FontProgram.Tag("jp78") || tag == FontProgram.Tag("jp83") || tag == FontProgram.Tag("jp90") || tag == FontProgram.Tag("jp04")
+           || tag == FontProgram.Tag("smpl") || tag == FontProgram.Tag("trad") || tag == FontProgram.Tag("fwid") || tag == FontProgram.Tag("pwid")
+           || tag == FontProgram.Tag("hwid") || tag == FontProgram.Tag("qwid") || tag == FontProgram.Tag("twid") || tag == FontProgram.Tag("ruby")
+           || tag == FontProgram.Tag("hojo") || tag == FontProgram.Tag("nlck") || tag == FontProgram.Tag("expt");
+
+    /// <summary>
+    /// Whether a font-variant-east-asian value is valid: at most one each of the jis, simplified and traditional forms, of
+    /// full-width and proportional-width, and of ruby, in any order.
+    /// </summary>
+    public static bool ValidEastAsian(string lower)
+    {
+        bool form = false, width = false, ruby = false;
+        int count = 0;
+        foreach (var word in lower.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            count++;
+            switch (word)
+            {
+                case "jis78" or "jis83" or "jis90" or "jis04" or "simplified" or "traditional": if (form) return false; form = true; break;
+                case "full-width" or "proportional-width": if (width) return false; width = true; break;
+                case "ruby": if (ruby) return false; ruby = true; break;
+                default: return false;
+            }
+        }
+        return count > 0;
     }
 
     /// <summary>The (tag, value) pairs of a font-feature-settings value: "tnum", "ss01" 2, "liga" off.</summary>
@@ -90,7 +138,9 @@ internal static class FontFeatures
         }
 
         int scripts = gsub + U16(gsub + 4), features = gsub + U16(gsub + 6), lookups = gsub + U16(gsub + 8);
-        int langSys = -1, fallback = -1;
+        // Latin features come from the Latin script (or the default one); east asian forms live under the script of the
+        // Han and kana characters they replace.
+        int langSys = -1, fallback = -1, han = -1, kana = -1;
         for (int i = 0, n = U16(scripts); i < n; i++)
         {
             uint tag = U32(scripts + 2 + i * 6);
@@ -98,7 +148,9 @@ internal static class FontFeatures
             int def = U16(script);
             if (def == 0) continue;
             if (tag == FontProgram.Tag("latn")) langSys = script + def;
-            else if (tag == FontProgram.Tag("DFLT") || fallback < 0) fallback = script + def;
+            else if (tag == FontProgram.Tag("hani")) han = script + def;
+            else if (tag == FontProgram.Tag("kana")) kana = script + def;
+            if (tag == FontProgram.Tag("DFLT") || fallback < 0) fallback = script + def;
         }
         if (langSys < 0) langSys = fallback;
         if (langSys < 0) return null;
@@ -116,15 +168,21 @@ internal static class FontFeatures
         }
         var lookupValues = new SortedDictionary<int, int>(); // lookup index -> the value of its feature
         int featureCount = U16(features);
-        for (int i = 0, n = U16(langSys + 4); i < n; i++)
+        foreach (int system in new[] { langSys, han, kana })
         {
-            int fi = U16(langSys + 6 + i * 2);
-            if (fi >= featureCount || !wanted.TryGetValue(U32(features + 2 + fi * 6), out int value)) continue;
-            int feature = features + U16(features + 2 + fi * 6 + 4);
-            var indices = new List<int>();
-            for (int j = 0, m = U16(feature + 2); j < m; j++) indices.Add(U16(feature + 4 + j * 2));
-            if (indices.Exists(li => li >= lookupCount || TypeOf(li) is not (1 or 3))) continue;
-            foreach (int li in indices) lookupValues[li] = value;
+            if (system < 0) continue;
+            for (int i = 0, n = U16(system + 4); i < n; i++)
+            {
+                int fi = U16(system + 6 + i * 2);
+                if (fi >= featureCount) continue;
+                uint featureTag = U32(features + 2 + fi * 6);
+                if (!wanted.TryGetValue(featureTag, out int value) || system != langSys && !IsEastAsianTag(featureTag)) continue;
+                int feature = features + U16(features + 2 + fi * 6 + 4);
+                var indices = new List<int>();
+                for (int j = 0, m = U16(feature + 2); j < m; j++) indices.Add(U16(feature + 4 + j * 2));
+                if (indices.Exists(li => li >= lookupCount || TypeOf(li) is not (1 or 3))) continue;
+                foreach (int li in indices) lookupValues[li] = value;
+            }
         }
         if (lookupValues.Count == 0) return null;
 

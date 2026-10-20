@@ -49,7 +49,7 @@ internal sealed partial class FontProgram
     // version 2 the cap height.
     private const int Os2MinimumLength = 78, Os2VersionField = 0, Os2CapHeightVersion = 2, Os2CapHeightMinimumLength = 90;
     private const int WeightClassField = 4, SelectionField = 62, TypoAscenderField = 68, TypoDescenderField = 70, TypoLineGapField = 72;
-    private const int CapHeightField = 88;
+    private const int CapHeightField = 88, XHeightField = 86;
     private const int SelectionItalicOrOblique = 0x201, SelectionUseTypoMetrics = 0x80;
     private const int DefaultWeightClass = 400, MinWeightClass = 1, MaxWeightClass = 1000;
     // Without a cap height of its own the font is given this share of its ascender, which is typical of Latin designs.
@@ -72,6 +72,7 @@ internal sealed partial class FontProgram
     public readonly int Ascender, Descender, LineGap; // hhea, in font units
     public readonly int LineAscender, LineDescender, LineGapUnits; // what browsers space lines with: hhea, or OS/2 typo metrics
     public readonly int CapHeight;
+    private readonly int _os2XHeight; // sxHeight of OS/2 version 2 and later; 0 when the font does not say
     public readonly float ItalicAngle;
     public readonly bool FixedPitch;
     public readonly int WeightClass;
@@ -131,6 +132,7 @@ internal sealed partial class FontProgram
         WeightClass = style.WeightClass;
         IsItalic = style.Italic || (macStyle & MacStyleItalic) != 0;
         CapHeight = style.CapHeight ?? (int)(Ascender * CapHeightShareOfAscender);
+        _os2XHeight = style.XHeight ?? 0;
         LineAscender = style.TypoAscender ?? Ascender;
         LineDescender = style.TypoDescender ?? Descender;
         LineGapUnits = style.TypoLineGap ?? LineGap;
@@ -165,12 +167,12 @@ internal sealed partial class FontProgram
     private int RequireTable(string tag, int minimumLength, string missingMessage)
         => Table(tag) is { } table && table.Length >= minimumLength ? table.Offset : throw new FormatException(missingMessage);
 
-    private readonly record struct StyleFields(int WeightClass, bool Italic, int? CapHeight, int? TypoAscender, int? TypoDescender, int? TypoLineGap);
+    private readonly record struct StyleFields(int WeightClass, bool Italic, int? CapHeight, int? XHeight, int? TypoAscender, int? TypoDescender, int? TypoLineGap);
 
     // What the OS/2 table says about the style, with the defaults of a font that has none.
     private StyleFields ReadStyle()
     {
-        var style = new StyleFields(DefaultWeightClass, false, null, null, null, null);
+        var style = new StyleFields(DefaultWeightClass, false, null, null, null, null, null);
         if (Table("OS/2") is not { Length: >= Os2MinimumLength } os2) return style;
         int weightClass = Reader.U16(os2.Offset + WeightClassField);
         if (weightClass < MinWeightClass || weightClass > MaxWeightClass) weightClass = DefaultWeightClass;
@@ -185,7 +187,7 @@ internal sealed partial class FontProgram
                 TypoLineGap = Reader.S16(os2.Offset + TypoLineGapField),
             };
         if (Reader.U16(os2.Offset + Os2VersionField) >= Os2CapHeightVersion && os2.Length >= Os2CapHeightMinimumLength)
-            style = style with { CapHeight = Reader.S16(os2.Offset + CapHeightField) };
+            style = style with { CapHeight = Reader.S16(os2.Offset + CapHeightField), XHeight = Reader.S16(os2.Offset + XHeightField) };
         return style;
     }
 
@@ -245,6 +247,38 @@ internal sealed partial class FontProgram
     public IEnumerable<(uint Tag, int Offset, int Length)> Tables => _tables.Select(kv => (kv.Key, kv.Value.Offset, kv.Value.Length));
 
     public static uint Tag(string s) => (uint)(s[0] << 24 | s[1] << 16 | s[2] << 8 | s[3]);
+
+    private int _xHeight = -1;
+
+    /// <summary>
+    /// The height of a lowercase x in font units, which font-size-adjust and the ex unit read: the OS/2 table's value, else
+    /// the top of the glyph for x in a TrueType font, else half an em.
+    /// </summary>
+    public int XHeight
+    {
+        get
+        {
+            if (_xHeight >= 0) return _xHeight;
+            int top = _os2XHeight > 0 ? _os2XHeight : GlyphTop(GlyphId('x'));
+            return _xHeight = top > 0 ? top : UnitsPerEm / 2;
+        }
+    }
+
+    // loca and glyf: a glyph's header holds its bounding box, whose last field is the top.
+    private const int LocaFormatField = 50, GlyphHeaderLength = 10, GlyphTopField = 8;
+
+    /// <summary>The top of a TrueType glyph's bounding box in font units; 0 for an empty glyph, a missing one or a CFF font.</summary>
+    private int GlyphTop(int gid)
+    {
+        if (IsCff || gid <= 0 || gid >= NumGlyphs || Table("loca") is not { } loca || Table("glyf") is not { } glyf || Table("head") is not { } head) return 0;
+        bool wide = Reader.U16(head.Offset + LocaFormatField) != 0;
+        int step = wide ? 4 : 2;
+        if ((gid + 2L) * step > loca.Length) return 0;
+        long start = wide ? Reader.U32(loca.Offset + gid * 4) : Reader.U16(loca.Offset + gid * 2) * 2L;
+        long end = wide ? Reader.U32(loca.Offset + gid * 4 + 4) : Reader.U16(loca.Offset + gid * 2 + 2) * 2L;
+        if (end - start < GlyphHeaderLength || end > glyf.Length) return 0;
+        return Reader.S16(glyf.Offset + (int)start + GlyphTopField);
+    }
 
     /// <summary>The glyph for a Unicode code point, or 0 (.notdef) when the font has none.</summary>
     public int GlyphId(int codePoint)

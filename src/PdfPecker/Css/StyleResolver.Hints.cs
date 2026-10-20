@@ -179,14 +179,14 @@ internal sealed partial class StyleResolver
             System.Globalization.CultureInfo.InvariantCulture, out float p) && p >= 0 ? p : null,
     };
 
-    /// <summary>Whether font-feature-settings turns standard ligatures on or off ("liga" 0), or null when it leaves them.</summary>
-    private static bool? LigaSetting(string value)
+    /// <summary>Whether font-feature-settings turns a feature on or off ("liga" 0), or null when it leaves it.</summary>
+    private static bool? FeatureSetting(string value, string tag)
     {
         bool? result = null;
         foreach (var part in value.Split(','))
         {
             var p = part.Trim();
-            if (p.Length < 6 || (p[0] != '"' && p[0] != '\'') || p[5] != p[0] || p.Substring(1, 4) != "liga") continue;
+            if (p.Length < 6 || (p[0] != '"' && p[0] != '\'') || p[5] != p[0] || p.Substring(1, 4) != tag) continue;
             var arg = p.Substring(6).Trim();
             result = arg is "" or "on" || (Invariant.TryParseInt(arg, out int n) && n != 0);
         }
