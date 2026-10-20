@@ -154,7 +154,8 @@ public class FloatPositionTests
     [Fact]
     public void InvalidTransformIsIgnored()
     {
-        Assert.False(CssTransform.TryParse("rotate3d(1,1,1,45deg)", 16, 16, 5, 5, out _));
+        Assert.False(CssTransform.TryParse("rotate3d(1,1,45deg)", 16, 16, 5, 5, out _));
+        Assert.False(CssTransform.TryParse("translate3d(1px,2px,10%)", 16, 16, 5, 5, out _));
         Assert.False(CssTransform.TryParse(string.Concat(Enumerable.Repeat("scale(1) ", 40)), 16, 16, 5, 5, out _));
         Assert.True(CssTransform.TryParse("translatex(10%) skew(10deg, 5deg) matrix(1,0,0,1,4,4)", 16, 16, 5, 5, out var fns));
         Assert.Equal(3, fns.Length);

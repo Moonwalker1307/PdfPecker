@@ -1,3 +1,5 @@
+using PdfPecker.Css;
+using PdfPecker.Html;
 using PdfPecker.Fonts;
 using PdfPecker.Pdf;
 using PdfPecker.Svg;
@@ -80,6 +82,9 @@ internal sealed class FieldOp : GroupOp
     }
 }
 
+/// <summary>A 3D transform of an element's layer: the functions, the border box and the transform origin inside it.</summary>
+internal sealed record Transform3D(Element Owner, TransformFn[] Functions, float W, float H, float OriginX, float OriginY);
+
 /// <summary>
 /// The ops of a float, a positioned, transformed, clipped, blended or filtered box: painted in its own layer (CSS 2.1
 /// Appendix E), and drawn with <see cref="Transform"/> about (<see cref="OriginX"/>, <see cref="OriginY"/>) when it has one.
@@ -98,6 +103,11 @@ internal sealed class LayerOp : GroupOp
     /// <summary>The CSS transform, y-down, about the origin.</summary>
     public Matrix? Transform;
     public float OriginX, OriginY;
+    /// <summary>
+    /// What a parent's perspective needs to draw this layer's 3D transform again: set only when the transform has a depth
+    /// to it, since a flat one looks the same from every distance.
+    /// </summary>
+    public Transform3D? Transform3D;
     /// <summary>mix-blend-mode as a PDF name: painted as a group blended with what is below.</summary>
     public string? BlendMode;
     /// <summary>isolation: isolate, or a box whose background layers blend only with each other.</summary>

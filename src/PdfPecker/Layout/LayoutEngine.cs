@@ -1030,8 +1030,8 @@ internal sealed partial class LayoutEngine
 
         // Positioned and transformed boxes are the containing block of their absolutely positioned descendants.
         CbFrame? cbFrame = null;
-        // A filter makes the box their containing block too, even for fixed ones, as a transform does.
-        bool contains = s.Transform != null || s.Filters != null;
+        // A filter or a perspective makes the box their containing block too, even for fixed ones, as a transform does.
+        bool contains = s.Transform != null || s.Perspective != null || s.Filters != null;
         if (s.Positioned || contains) _frames.Add(cbFrame = new CbFrame { Transformed = contains });
         // Boxes that start a block formatting context keep their floats inside (CSS 2.1 §9.4.1).
         bool formattingRoot = shrinkToFit || hasWOverride || hasHOverride || s.Floated || s.OutOfFlow || s.FormattingRoot
