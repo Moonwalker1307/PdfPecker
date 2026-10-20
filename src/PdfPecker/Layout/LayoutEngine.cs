@@ -1752,6 +1752,19 @@ internal sealed partial class LayoutEngine
         if (Footnotes != null && _paginate && _columnNotes == null && id.Length > 2 && id[0] == '\u0001' && id[1] == 'c') PlaceFootnoteCallAt(id, y);
     }
 
+    /// <summary>
+    /// The anchor ids noted in captured content, each once. Content placed twice in it (measured, then laid out) notes its
+    /// anchors twice, and placing the capture then moved each copy, so an anchor moved twice as far, and the list doubled
+    /// with each level of nesting: 25 levels of nested flex boxes noted one heading's anchor 30 million times.
+    /// </summary>
+    private static List<string>? Once(List<string>? ids)
+    {
+        if (ids is not { Count: > 1 }) return ids;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var once = ids.FindAll(seen.Add);
+        return once.Count == ids.Count ? ids : once;
+    }
+
     /// <summary>Content laid out on its own (unpaginated, at the origin) so that it can be measured and then moved into place.</summary>
     private sealed class Captured
     {
@@ -1844,7 +1857,7 @@ internal sealed partial class LayoutEngine
             var absolutes = boundary.Pending.Count > 0 ? boundary.TakePending() : null;
             return new Captured
             {
-                Ops = _ops, AnchorIds = _captureAnchors, Height = bottom, Width = _lastBoxRight, Baseline = _lastBaseline,
+                Ops = _ops, AnchorIds = Once(_captureAnchors), Height = bottom, Width = _lastBoxRight, Baseline = _lastBaseline,
                 ForcedBreaks = _forcedBreaks != breaks,
                 BoxX = _lastBoxX, BoxY = _lastBoxTop, BoxW = _lastBoxW, BoxH = _lastBoxH,
                 ContentH = _lastBoxContentH, FrameV = _lastBoxFrameV, ChildCb = _lastBoxChildCb,

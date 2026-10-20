@@ -1786,6 +1786,17 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(html));
     }
 
+    [Fact]
+    public void Anchors_in_nested_flex_boxes_are_noted_once_per_level()
+    {
+        // Found by the fuzzer: target html, memory-c058a39b. Content placed twice in a capture noted its anchors twice,
+        // so a heading's anchor was noted 2^n times n boxes up: 25 levels of positioned flex boxes in a grid ran out of
+        // memory.
+        var html = "<style>.g{display:grid}.g div{padding:4pt}.l div{position:absolute;width:80pt;height:24pt}</style>"
+            + "<div class=g><div class=l>" + Repeat("<div style='display:flex'>", 40) + "<h2>Heading";
+        AssertStructurallyValid(Bounded(html));
+    }
+
     [Theory]
     [InlineData("<style>td{border:solid</style><table ><tr><td rowspan=2><tfoot><tr")]
     [InlineData("<style>td{border:1px solid}</style><table><thead><tr><td rowspan=3>h</td></tr></thead><tr><td>a</td></tr><tr><td>b</td></tr></table>")]
