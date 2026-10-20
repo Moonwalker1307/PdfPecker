@@ -198,6 +198,7 @@ internal sealed class SeedContext
             @media print and (min-width: 100px), screen and (orientation: landscape) { p:not(.x):is(.a, #b)::first-line { color: rgb(1 2 3 / 50%) } }
             @supports (display: grid) and (not (display: foo)) { .a { display: grid; grid-template: "a a" 1fr "b c" auto / 1fr minmax(10px, 2fr) } }
             @container (min-width: 10px) { .b { transform: rotate(45deg) translate(calc(1px + 2%), 3px) scale(.5) skewX(5deg) } }
+            .p3 { perspective: 300px; perspective-origin: 10% 20px; transform-style: preserve-3d; backface-visibility: hidden; transform: perspective(100px) rotate3d(1, 1, 0, 45deg) translate3d(1px, 2px, 3px) scale3d(1, 2, 3) matrix3d(1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1); rotate: x 30deg; scale: 1 2 3; translate: 1px 2px 3px }
             @counter-style thumbs { system: cyclic; symbols: "A" "B"; suffix: " " }
             @keyframes k { from { opacity: 0 } 50% { opacity: .5 } to { opacity: 1 } }
             body { counter-reset: c 2 d; font: italic small-caps bold 12px/1.5 "Times New Roman", serif }

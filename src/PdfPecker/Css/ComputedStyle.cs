@@ -163,11 +163,15 @@ internal enum FootnoteDisplay : byte { Block, Inline, Compact }
 /// <summary>What happens when a footnote does not fit on the page of its call (footnote-policy).</summary>
 internal enum FootnotePolicy : byte { Auto, Line, Block }
 
-/// <summary>One function of a CSS transform list. Translations are in points, or percentages of the border box when flagged.</summary>
+/// <summary>
+/// One function of a CSS transform list. Translations are in points, or percentages of the border box when flagged; a
+/// translation's C is its z offset. The 3D functions keep what they need in A to D (a scale's z, a rotation's axis and
+/// angle, a perspective's distance) or, for matrix3d, in the sixteen values of M in CSS (column-major) order.
+/// </summary>
 internal readonly record struct TransformFn(TransformKind Kind, float A, float B = 0, float C = 0, float D = 0, float E = 0, float F = 0,
-    bool PercentX = false, bool PercentY = false);
+    bool PercentX = false, bool PercentY = false, float[]? M = null);
 
-internal enum TransformKind : byte { Translate, Scale, Rotate, Skew, Matrix }
+internal enum TransformKind : byte { Translate, Scale, Rotate, Skew, Matrix, Scale3d, Rotate3d, Perspective, Matrix3d }
 
 /// <summary>A counter name with the value of a counter-reset, counter-set or counter-increment.</summary>
 internal readonly record struct CounterOp(string Name, int Value);
@@ -421,6 +425,8 @@ internal sealed class ComputedStyle
     public TransformFn[]? Transform;            // null = none; includes translate, rotate and scale once computed
     public TransformFn[]? Translate, Rotate, Scale; // the individual transform properties; null = none
     public Length TransformOriginX = new(50, LengthUnit.Percent), TransformOriginY = new(50, LengthUnit.Percent);
+    public float? Perspective;                  // points; null = none. Applies to the 3D transforms of the children
+    public Length PerspectiveOriginX = new(50, LengthUnit.Percent), PerspectiveOriginY = new(50, LengthUnit.Percent);
     public string? Content;                     // the content property as written; null = normal
     public string? StringSet;                   // string-set as written (named strings for running headers); null = none
     public string? PageName;                    // page: the named page this box goes on (inherited; null = auto)
@@ -544,7 +550,7 @@ internal sealed class ComputedStyle
     public bool Positioned => Position != Position.Static;
 
     /// <summary>Painted in the positioned layer: positioned, transformed or translucent.</summary>
-    public bool Layered => Position != Position.Static || Transform != null || Opacity < 1 || HasEffects;
+    public bool Layered => Position != Position.Static || Transform != null || Perspective != null || Opacity < 1 || HasEffects;
 
     /// <summary>Clipped, blended, isolated or filtered: painted as a layer of its own, which is a stacking context.</summary>
     public bool HasEffects => ClipShape != null || SvgClipPath != null || BlendMode != null || Isolate || Filters != null;
@@ -633,6 +639,8 @@ internal sealed class ComputedStyle
         c.Transform = null;
         c.Translate = c.Rotate = c.Scale = null;
         c.TransformOriginX = c.TransformOriginY = new Length(50, LengthUnit.Percent);
+        c.Perspective = null;
+        c.PerspectiveOriginX = c.PerspectiveOriginY = new Length(50, LengthUnit.Percent);
         c.Content = null;
         c.CounterReset = c.CounterSet = c.CounterIncrement = null;
         c.FlexDirection = FlexDirection.Row;

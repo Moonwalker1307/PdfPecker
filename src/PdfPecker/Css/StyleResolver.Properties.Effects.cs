@@ -12,28 +12,40 @@ internal sealed partial class StyleResolver
         else if (CssTransform.TryParse(d.Lower, d.Em, _rootFontSize, _vw, _vh, out var tf)) s.Transform = tf;
     }
 
-    /// <summary>translate: x [y [z]]; a z offset is ignored (no 3D).</summary>
+    /// <summary>translate: x [y [z]].</summary>
     private void ApplyTranslate(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
         var t = CssParser.Tokens(d.Lower);
         if (d.Lower is "none" or "initial" or "unset") s.Translate = null;
         else if (d.Inherit) s.Translate = parent.Translate;
-        else if (t.Count is >= 1 and <= 3 && CssTransform.TryParse("translate(" + t[0] + ", " + (t.Count > 1 ? t[1] : "0") + ")",
+        else if (t.Count == 3 && CssTransform.TryParse("translate3d(" + t[0] + ", " + t[1] + ", " + t[2] + ")",
+                     d.Em, _rootFontSize, _vw, _vh, out var tr3)) s.Translate = tr3;
+        else if (t.Count is 1 or 2 && CssTransform.TryParse("translate(" + t[0] + ", " + (t.Count > 1 ? t[1] : "0") + ")",
                      d.Em, _rootFontSize, _vw, _vh, out var tr)) s.Translate = tr;
     }
 
-    /// <summary>rotate: an angle, or "z angle"; rotations about x, y or a vector are 3D and ignored.</summary>
+    /// <summary>rotate: an angle, "x", "y" or "z" and an angle, or an axis vector and an angle, in either order.</summary>
     private void ApplyRotate(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
         var t = CssParser.Tokens(d.Lower);
-        if (d.Lower is "none" or "initial" or "unset") s.Rotate = null;
-        else if (d.Inherit) s.Rotate = parent.Rotate;
-        else if (t.Count == 2 && t[0] == "z" || t.Count == 1)
+        if (d.Lower is "none" or "initial" or "unset") { s.Rotate = null; return; }
+        if (d.Inherit) { s.Rotate = parent.Rotate; return; }
+        string? fn = null;
+        if (t.Count == 1) fn = "rotate(" + t[0] + ")";
+        else if (t.Count == 2)
         {
-            if (CssTransform.TryParse("rotate(" + t[^1] + ")", d.Em, _rootFontSize, _vw, _vh, out var ro)) s.Rotate = ro;
+            bool axisFirst = t[0] is "x" or "y" or "z";
+            string axis = axisFirst ? t[0] : t[1], angle = axisFirst ? t[1] : t[0];
+            if (axis is "x" or "y" or "z") fn = "rotate" + axis + "(" + angle + ")";
         }
-        else if (t.Count == 4 && t[0] == "0" && t[1] == "0" && float.TryParse(t[2], NumberStyles.Float, CultureInfo.InvariantCulture, out float z) && z > 0
-                 && CssTransform.TryParse("rotate(" + t[3] + ")", d.Em, _rootFontSize, _vw, _vh, out var rz)) s.Rotate = rz;
+        else if (t.Count == 4)
+        {
+            // The angle is the one token that is not a number.
+            bool angleLast = !char.IsDigit(t[3][^1]);
+            fn = angleLast ? "rotate3d(" + t[0] + ", " + t[1] + ", " + t[2] + ", " + t[3] + ")"
+                : "rotate3d(" + t[1] + ", " + t[2] + ", " + t[3] + ", " + t[0] + ")";
+        }
+        if (fn != null && CssTransform.TryParse(fn, d.Em, _rootFontSize, _vw, _vh, out var ro)) s.Rotate = ro;
     }
 
     private void ApplyScale(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
@@ -41,7 +53,9 @@ internal sealed partial class StyleResolver
         var t = CssParser.Tokens(d.Lower);
         if (d.Lower is "none" or "initial" or "unset") s.Scale = null;
         else if (d.Inherit) s.Scale = parent.Scale;
-        else if (t.Count is >= 1 and <= 3 && CssTransform.TryParse("scale(" + t[0] + ", " + (t.Count > 1 ? t[1] : t[0]) + ")",
+        else if (t.Count == 3 && CssTransform.TryParse("scale3d(" + t[0] + ", " + t[1] + ", " + t[2] + ")",
+                     d.Em, _rootFontSize, _vw, _vh, out var sc3)) s.Scale = sc3;
+        else if (t.Count is 1 or 2 && CssTransform.TryParse("scale(" + t[0] + ", " + (t.Count > 1 ? t[1] : t[0]) + ")",
                      d.Em, _rootFontSize, _vw, _vh, out var sc)) s.Scale = sc;
     }
 
@@ -49,6 +63,20 @@ internal sealed partial class StyleResolver
     {
         if (d.Inherit) { s.TransformOriginX = parent.TransformOriginX; s.TransformOriginY = parent.TransformOriginY; }
         else if (CssTransform.TryParseOrigin(d.Lower, d.Em, _rootFontSize, _vw, _vh, out var ox, out var oy)) { s.TransformOriginX = ox; s.TransformOriginY = oy; }
+    }
+
+    /// <summary>perspective: none or a distance; the children's 3D transforms are drawn as seen from that far away.</summary>
+    private void ApplyPerspective(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Lower is "none" or "initial" or "unset") s.Perspective = null;
+        else if (d.Inherit) s.Perspective = parent.Perspective;
+        else if (CssTransform.TryParse("perspective(" + d.Lower + ")", d.Em, _rootFontSize, _vw, _vh, out var p)) s.Perspective = p[0].A;
+    }
+
+    private void ApplyPerspectiveOrigin(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit) { s.PerspectiveOriginX = parent.PerspectiveOriginX; s.PerspectiveOriginY = parent.PerspectiveOriginY; }
+        else if (CssTransform.TryParseOrigin(d.Lower, d.Em, _rootFontSize, _vw, _vh, out var ox, out var oy)) { s.PerspectiveOriginX = ox; s.PerspectiveOriginY = oy; }
     }
 
     /// <summary>clip-path: a reference to an SVG clipPath, or a basic shape; setting one clears the other.</summary>

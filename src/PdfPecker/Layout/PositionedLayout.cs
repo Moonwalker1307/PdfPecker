@@ -174,15 +174,35 @@ internal sealed partial class LayoutEngine
             _lastBoxTop += dy;
         }
         float order = s.ZIndex is { } z && z != 0 ? z : LayerOp.PositionedOrder;
-        var layer = WrapLayer(opsStart, order, stackingContext: s.ZIndex != null || s.Transform != null || s.Opacity < 1 || s.HasEffects);
+        var layer = WrapLayer(opsStart, order, stackingContext: s.ZIndex != null || s.Transform != null || s.Perspective != null || s.Opacity < 1 || s.HasEffects);
         layer.Opacity = s.Opacity;
         if (s.HasEffects) ApplyEffects(e, layer, cbW);
         if (s.Transform is { } fns)
         {
             float w = _lastBoxW, h = _lastBoxH;
-            layer.Transform = CssTransform.ToMatrix(fns, w, h);
-            layer.OriginX = _lastBoxX + s.TransformOriginX.Resolve(w);
-            layer.OriginY = _lastBoxTop + s.TransformOriginY.Resolve(h);
+            float ox = s.TransformOriginX.Resolve(w), oy = s.TransformOriginY.Resolve(h);
+            layer.Transform = CssTransform.ToMatrix(fns, w, h, ox, oy, null) ?? Matrix.Scale(0, 0);
+            layer.OriginX = _lastBoxX + ox;
+            layer.OriginY = _lastBoxTop + oy;
+            if (CssTransform.Has3D(fns)) layer.Transform3D = new Transform3D(e, fns, w, h, ox, oy);
+        }
+        if (s.Perspective is { } distance)
+        {
+            // The viewer looks at the children from the perspective origin; their 3D transforms are drawn as seen from there.
+            float px = _lastBoxX + s.PerspectiveOriginX.Resolve(_lastBoxW), py = _lastBoxTop + s.PerspectiveOriginY.Resolve(_lastBoxH);
+            ApplyPerspective(e, layer.Ops, distance, px, py);
+        }
+    }
+
+    private static void ApplyPerspective(Element parent, List<DrawOp> ops, float distance, float px, float py)
+    {
+        foreach (var op in ops)
+        {
+            if (op is not GroupOp g) continue;
+            if (g is LayerOp { Transform3D: { } t } layer && t.Owner.Parent == parent)
+                layer.Transform = CssTransform.ToMatrix(t.Functions, t.W, t.H, t.OriginX, t.OriginY, (distance, px - layer.OriginX, py - layer.OriginY)) ?? Matrix.Scale(0, 0);
+            // The child's layer sits inside the parent's ops, maybe within the plain groups of boxes between them.
+            ApplyPerspective(parent, g.Ops, distance, px, py);
         }
     }
 
