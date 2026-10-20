@@ -1221,6 +1221,21 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Compacting_leaves_out_an_information_dictionary_behind_a_reference_to_a_reference()
+    {
+        // Found by the fuzzer: target pdf-compact, exception-e70c3742. The trailer's /Info is object 4, which holds only a
+        // reference to the dictionary in object 7, so it resolved to a dictionary but was not collected as one, and
+        // writing the trailer threw KeyNotFoundException.
+        var pdf = Encoding.Latin1.GetBytes("%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n"
+            + "4 0 obj\n7 0 R\nendobj\n7 0 obj\n<< /Title (T) >>\nendobj\ntrailer << /Root 1 0 R /Info 4 0 R >>\n%%EOF");
+        var file = PdfFile.Open(Bounded(() => PdfCompactor.Compact(pdf)), null);
+        Assert.NotNull(file.Catalog);
+        var fuzzed = Convert.FromBase64String("CjEgMCBvYmo8PDQgMCBvYmogNyAwIFIgNyAwIG9iajw8dHJhaWxlcjw8L1Jvb3QgMSAwIFIvSW5mbyA0IDAgUg==");
+        try { Bounded(() => PdfCompactor.Compact(fuzzed)); }
+        catch (InvalidDataException) { }
+    }
+
+    [Fact]
     public void Compacting_gives_up_finding_image_sizes_in_forms_that_fan_out()
     {
         // Twelve levels of forms, each drawing the next ten times, would be drawn 10^12 times. The walk that finds how
