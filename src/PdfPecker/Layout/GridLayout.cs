@@ -515,12 +515,19 @@ internal sealed partial class LayoutEngine
         public int ColCount, RowCount;
         public GridTrack[] Cols, Rows;
         public float[] ColX, RowY;            // the start of each track, and the end of the last one
+        public float[]? ColOffset;            // ColX from the grid's left edge, when the grid sized its own columns
         public bool[] StretchX;               // whether each item is stretched over its area's width
 
+        /// <summary>
+        /// The width of an item's grid area. It is taken from the column offsets rather than the positions, which far
+        /// from the page origin a float rounds to steps of many pixels, so an item is measured and laid out at the same
+        /// width wherever the grid is.
+        /// </summary>
         public readonly float AreaWidth(BoxItem it)
         {
             int end = Math.Min(ColCount, it.Col + it.ColSpan);
-            return Math.Max(0, ColRight(end - 1) - ColX[it.Col]);
+            var x = ColOffset ?? ColX;
+            return Math.Max(0, x[end - 1] + (Cols[end - 1].Collapsed ? 0 : Cols[end - 1].Base) - x[it.Col]);
         }
 
         public readonly float ColRight(int c) => ColX[c] + (Cols[c].Collapsed ? 0 : Cols[c].Base);
@@ -612,6 +619,7 @@ internal sealed partial class LayoutEngine
         var colX = g.ColX = new float[colCount + 1];
         if (g.ColCtx?.Edges != null)
         {
+            g.ColOffset = null;
             g.Cols = SubgridTracks(g.ColCtx.Edges, colCount, colGap, g.X, g.ColCtx.Edges[^1] - g.X - g.W, colX);
             return;
         }
@@ -633,17 +641,19 @@ internal sealed partial class LayoutEngine
         foreach (var t in cols) if (!t.Collapsed) { used += t.Base; visible++; }
         used += colGap * Math.Max(0, visible - 1);
         Distribute(s.JustifyContent, g.W - used, visible, out float before, out float between);
-        float cx = g.X + before;
+        var offset = g.ColOffset = new float[colCount + 1];
+        float cx = before;
         bool first = true;
         for (int c = 0; c < colCount; c++)
         {
-            if (cols[c].Collapsed) { colX[c] = cx; continue; }
+            if (cols[c].Collapsed) { offset[c] = cx; continue; }
             if (!first) cx += colGap + between;
             first = false;
-            colX[c] = cx;
+            offset[c] = cx;
             cx += cols[c].Base;
         }
-        colX[colCount] = cx;
+        offset[colCount] = cx;
+        for (int c = 0; c <= colCount; c++) colX[c] = g.X + offset[c];
     }
 
     /// <summary>
