@@ -1078,8 +1078,12 @@ internal sealed partial class LayoutEngine
             var st = CollectInline(nodes, 100000);
             var items = st.Items;
             float min = 0, max = 0, group = 0, line = 0;
+            Item? prev = null;
             foreach (var it in items)
             {
+                // The kerning between neighbouring words and spaces counts, as it does when the lines are broken.
+                float kern = prev != null ? PairKern(prev, it) : 0;
+                prev = it;
                 if (it.Kind == ItemKind.Break)
                 {
                     min = Math.Max(min, group);
@@ -1091,7 +1095,7 @@ internal sealed partial class LayoutEngine
                 {
                     min = Math.Max(min, group);
                     group = 0;
-                    line += it.Width;
+                    line += it.Width + kern;
                     continue;
                 }
                 if (it.Kind == ItemKind.Float)
@@ -1100,7 +1104,7 @@ internal sealed partial class LayoutEngine
                     line += it.Width;
                     continue;
                 }
-                line += it.Width;
+                line += it.Width + kern;
                 if (it.Kind == ItemKind.Text && (it.Style.WordBreak == WordBreak.BreakAll || it.Style.OverflowWrap == OverflowWrap.Anywhere
                     || it.Style.LineBreak == LineBreak.Anywhere))
                 {
@@ -1112,7 +1116,7 @@ internal sealed partial class LayoutEngine
                     for (int k = 0; k < it.Length; k++) min = Math.Max(min, f.CharWidth(it.Source[it.Start + k], it.Style.FontSize) + it.Style.LetterSpacing);
                     continue;
                 }
-                group += it.MinWidth >= 0 ? it.MinWidth : it.Width;
+                group += (it.MinWidth >= 0 ? it.MinWidth : it.Width) + (group > 0 ? kern : 0);
                 if (it.BreakAfter != BreakAfter.None)
                 {
                     min = Math.Max(min, group + (it.BreakAfter == BreakAfter.SoftHyphen ? HyphenWidth(it.Style) : 0));
@@ -1152,8 +1156,12 @@ internal sealed partial class LayoutEngine
             var items = st.Items;
             run.Clear();
             float group = 0, line = 0;
+            Item? prev = null;
             foreach (var it in items)
             {
+                // The kerning between neighbouring words and spaces counts, as it does when the lines are broken.
+                float kern = prev != null ? PairKern(prev, it) : 0;
+                prev = it;
                 if (it.Kind == ItemKind.Break)
                 {
                     min = Math.Max(min, group);
@@ -1165,7 +1173,7 @@ internal sealed partial class LayoutEngine
                 {
                     min = Math.Max(min, group);
                     group = 0;
-                    line += it.Width;
+                    line += it.Width + kern;
                     continue;
                 }
                 if (it.Kind == ItemKind.Float)
@@ -1174,8 +1182,8 @@ internal sealed partial class LayoutEngine
                     line += it.Width;
                     continue;
                 }
-                group += it.MinWidth >= 0 ? it.MinWidth : it.Width;
-                line += it.Width;
+                group += (it.MinWidth >= 0 ? it.MinWidth : it.Width) + (group > 0 ? kern : 0);
+                line += it.Width + kern;
                 // A break opportunity without a space (after a hyphen, around an inline-block) ends the group too.
                 if (it.BreakAfter != BreakAfter.None)
                 {

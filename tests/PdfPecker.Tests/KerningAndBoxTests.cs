@@ -73,6 +73,25 @@ public class KerningAndBoxTests
     }
 
     [Fact]
+    public void Lines_are_broken_with_the_kerning_between_words_and_spaces()
+    {
+        // Chrome keeps this text on one line down to 225.78px wide: " A", "A " and " Y" kern, which the words' own
+        // widths leave out.
+        const string text = "Yes A Year A Tower A You";
+        Assert.Single(Layout($"<div style='width:226px;font:20px Arial'>{text}</div>").OfType<TextOp>());
+        Assert.Equal(2, Layout($"<div style='width:225px;font:20px Arial'>{text}</div>").OfType<TextOp>().Count());
+    }
+
+    [Fact]
+    public void Shrink_to_fit_widths_count_the_kerning_between_words()
+    {
+        // A float as wide as its text keeps it on one line, as wide as Chrome draws it (225.78px).
+        var ops = Layout("<div style='float:left;font:20px Arial;background:#f00'>Yes A Year A Tower A You</div>");
+        Assert.Single(ops.OfType<TextOp>());
+        Near(225.78f * 0.75f, ops.OfType<RectOp>().Single(r => r.Color == Color("#f00")).W, 0.1f);
+    }
+
+    [Fact]
     public void Kerned_pairs_move_glyphs_in_the_content_stream()
     {
         var standard = AllContent(ConvertUncompressed("<p style='font-family:Arial'>AVATAR</p>"));
