@@ -194,9 +194,10 @@ internal sealed partial class LayoutEngine
             var st = it.Style;
             var (mn, mx) = ItemIntrinsic(it);
             float frame = it.El != null ? HorizontalFrame(st, w) : 0;
-            // An image whose percentage height resolves against the container is as wide as that height makes it,
-            // which its intrinsic widths, measured without the container, do not know.
-            if (it.IsReplaced && st.Height.IsPercent && HeightBasis(it.El!) != null) mn = mx = ReplacedWidth(it.El!, w) + frame;
+            // An image whose percentage height or max-height resolves against the container is as wide as that height
+            // makes it, which its intrinsic widths, measured without the container, do not know.
+            if (it.IsReplaced && (st.Height.IsPercent || st.MaxHeight.IsPercent) && HeightBasis(it.El!) != null)
+                mn = mx = ReplacedWidth(it.El!, w) + frame;
             float basis;
             float? specified = null;
             if (it.El != null && !it.IsReplaced && !st.Width.IsAuto)
