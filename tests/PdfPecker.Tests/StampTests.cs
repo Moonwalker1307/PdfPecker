@@ -96,7 +96,7 @@ public class StampTests
     [Fact]
     public void Position_scale_offset_and_opacity_are_applied()
     {
-        var stamp = HtmlToPdf.Convert("<div style=\"width:100pt;height:50pt;background:red\"></div>",
+        var stamp = HtmlToPdf.Convert("<body style=\"margin:0\"><div style=\"width:100pt;height:50pt;background:red\"></div></body>",
             new PdfOptions { PageSize = new PageSize(100, 50), Margins = new PageMargins(0) });
         var result = PdfStamper.Stamp(Background("white"), stamp, new PdfStampOptions
         {
@@ -118,7 +118,7 @@ public class StampTests
     [Fact]
     public void A_rotated_page_with_an_offset_box_gets_the_stamp_upright_where_it_is_displayed()
     {
-        var stamp = HtmlToPdf.Convert("<div style=\"width:100pt;height:50pt;background:red\"></div>",
+        var stamp = HtmlToPdf.Convert("<body style=\"margin:0\"><div style=\"width:100pt;height:50pt;background:red\"></div></body>",
             new PdfOptions { PageSize = new PageSize(100, 50), Margins = new PageMargins(0) });
         foreach (int rotate in new[] { 0, 90, 180, 270 })
         {
@@ -151,7 +151,7 @@ public class StampTests
     [Fact]
     public void Page_content_that_leaves_its_graphics_state_changed_does_not_move_the_stamp()
     {
-        var stamp = HtmlToPdf.Convert("<div style=\"width:100pt;height:50pt;background:red\"></div>",
+        var stamp = HtmlToPdf.Convert("<body style=\"margin:0\"><div style=\"width:100pt;height:50pt;background:red\"></div></body>",
             new PdfOptions { PageSize = new PageSize(100, 50), Margins = new PageMargins(0) });
         foreach (var content in new[] { "q 0.1 0 0 0.1 0 0 cm q 0 0 1 rg", "Q Q 0.1 0 0 0.1 0 0 cm 0 0 1 rg", "q Q Q q 3 0 0 3 0 0 cm" })
         {

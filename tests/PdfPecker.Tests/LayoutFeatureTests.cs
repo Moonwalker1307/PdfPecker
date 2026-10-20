@@ -16,7 +16,7 @@ public class LayoutFeatureTests
 
     private static List<DrawOp> Layout(string html, float width = Width, float pageHeight = PageHeight)
     {
-        var doc = HtmlParser.Parse(html);
+        var doc = HtmlParser.Parse(html, impliedStructure: false);
         var sheet = new Stylesheet();
         foreach (var style in Find(doc, "style")) CssParser.ParseStylesheet(style.InnerText(), sheet);
         new StyleResolver(sheet, width, pageHeight).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
@@ -27,7 +27,7 @@ public class LayoutFeatureTests
 
     private static Element Styled(string html, float width = Width, float height = PageHeight)
     {
-        var doc = HtmlParser.Parse(html);
+        var doc = HtmlParser.Parse(html, impliedStructure: false);
         var sheet = new Stylesheet();
         foreach (var style in Find(doc, "style")) CssParser.ParseStylesheet(style.InnerText(), sheet);
         new StyleResolver(sheet, width, height).ResolveTree(doc, new ComputedStyle { Display = Display.Block });

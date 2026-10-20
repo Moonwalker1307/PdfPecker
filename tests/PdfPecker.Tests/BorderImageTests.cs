@@ -31,7 +31,7 @@ public class BorderImageTests
 
     private static ComputedStyle StyleOf(string style)
     {
-        var doc = HtmlParser.Parse($"<div style='{style}'></div>");
+        var doc = HtmlParser.Parse($"<div style='{style}'></div>", impliedStructure: false);
         new StyleResolver(new Stylesheet(), Width, PageHeight).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
         return doc.FindFirst("div")!.Style!;
     }
@@ -50,7 +50,7 @@ public class BorderImageTests
     /// <summary>The ops of a div at the top left of the flow styled with <paramref name="style"/>.</summary>
     private static List<DrawOp> Ops(string style)
     {
-        var doc = HtmlParser.Parse($"<div style='margin:0; {style}'></div>");
+        var doc = HtmlParser.Parse($"<div style='margin:0; {style}'></div>", impliedStructure: false);
         new StyleResolver(new Stylesheet(), Width, PageHeight).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
         var engine = new LayoutEngine(PageHeight, new ImageLoader(null, null, false));
         engine.Layout(doc, Width);
@@ -181,7 +181,7 @@ public class BorderImageTests
     [Fact]
     public void Border_image_is_not_inherited()
     {
-        var doc = HtmlParser.Parse($"<div style='border-image: url({Grid}) 10'><p>x</p></div>");
+        var doc = HtmlParser.Parse($"<div style='border-image: url({Grid}) 10'><p>x</p></div>", impliedStructure: false);
         new StyleResolver(new Stylesheet(), Width, PageHeight).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
         Assert.NotNull(doc.FindFirst("div")!.Style!.BorderImageSource);
         Assert.Null(doc.FindFirst("p")!.Style!.BorderImageSource);

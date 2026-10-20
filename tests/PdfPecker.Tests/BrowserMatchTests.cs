@@ -15,7 +15,7 @@ public class BrowserMatchTests
 
     private static List<DrawOp> Layout(string html)
     {
-        var doc = HtmlParser.Parse(html);
+        var doc = HtmlParser.Parse(html, impliedStructure: false);
         FormControls.Prepare(doc, interactive: false);
         new StyleResolver(new Stylesheet(), Width, PageHeight).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
         var engine = new LayoutEngine(PageHeight, new ImageLoader(null, null, false));
@@ -303,7 +303,7 @@ public class BrowserMatchTests
         // Chrome keeps 50.6px + 1px of half borders as the column width; only the painted line is rounded,
         // so the borders between the columns land on 52px and 113px, as in Chrome (the ShSavingsCard head box).
         var content = PdfTestHelpers.AllContent(PdfTestHelpers.ConvertUncompressed("""
-            <table style="border-collapse: collapse; width: 300px; table-layout: fixed">
+            <body style="margin: 0"><table style="border-collapse: collapse; width: 300px; table-layout: fixed">
               <tr><td style="width: 50.6px; padding: 0; border: 1px solid #000">a</td>
                   <td style="width: 60.6px; padding: 0; border: 1px solid #000">b</td><td style="padding: 0; border: 1px solid #000">c</td></tr>
             </table>

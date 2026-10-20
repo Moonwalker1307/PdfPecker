@@ -13,7 +13,7 @@ public class CjkLineBreakTests
 
     private static List<string> LayoutLines(string html, float width)
     {
-        var doc = HtmlParser.Parse(html);
+        var doc = HtmlParser.Parse(html, impliedStructure: false);
         var root = new ComputedStyle { Display = Display.Block };
         new StyleResolver(new Stylesheet(), width, PageHeight).ResolveTree(doc, root);
         var engine = new LayoutEngine(PageHeight, new ImageLoader(null, null, false));

@@ -19,7 +19,7 @@ public class InlineBackgroundTests
     /// <summary>The draw ops of <paramref name="html"/> laid out in a <paramref name="width"/> wide page, groups kept.</summary>
     private static List<DrawOp> Layout(string html, float width = Width)
     {
-        var doc = HtmlParser.Parse(html);
+        var doc = HtmlParser.Parse(html, impliedStructure: false);
         new StyleResolver(new Stylesheet(), width, PageHeight).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
         var engine = new LayoutEngine(PageHeight, new ImageLoader(null, null, false));
         engine.Layout(doc, width);

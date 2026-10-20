@@ -14,7 +14,7 @@ public class SelectorAndBoxEffectTests
 
     private static Element Styled(string html)
     {
-        var doc = HtmlParser.Parse(html);
+        var doc = HtmlParser.Parse(html, impliedStructure: false);
         var sheet = new Stylesheet();
         foreach (var style in Find(doc, "style")) CssParser.ParseStylesheet(style.InnerText(), sheet);
         new StyleResolver(sheet, Width, PageHeight).ResolveTree(doc, new ComputedStyle { Display = Display.Block });

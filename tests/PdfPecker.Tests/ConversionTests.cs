@@ -410,7 +410,7 @@ public class RobustnessTests
     {
         // At 0.5 a 210pt-wide content area is laid out 420pt wide, then drawn at half size on the same paper.
         var pdf = ConvertUncompressed("""
-            <div style="height: 10px; background: #ff0000"></div><a href="https://example.com/">link</a>
+            <body style="margin: 0"><div style="height: 10px; background: #ff0000"></div><a href="https://example.com/">link</a>
             """, new PdfOptions { PageSize = new PageSize(300, 450), Margins = new PageMargins(45), Scale = 0.5f });
         AssertStructurallyValid(pdf);
         var text = Latin1(pdf);
