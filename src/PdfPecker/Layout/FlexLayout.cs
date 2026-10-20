@@ -320,7 +320,9 @@ internal sealed partial class LayoutEngine
                     if (st.Height.IsPercent && definiteH.HasValue)
                         want = st.Height.Resolve(definiteH.Value) + (st.BorderBox ? 0 : VerticalFrame(st, w));
                     else if (align == BoxAlign.Stretch && st.Height.IsAuto && !it.AutoMt && !it.AutoMb)
-                        want = Math.Max(current, cross - it.Mt - it.Mb);
+                        // The line's cross size, also when the content is taller: a single line of a container with a
+                        // definite height is that height, and the content overflows the stretched item (as in Chrome).
+                        want = Math.Max(cross - it.Mt - it.Mb, VerticalFrame(st, w));
                     if (want is { } h && Math.Abs(h - current) > Eps && (regrown || NeedsRelayoutWhenStretched(it) || st.Height.IsPercent)
                         && !ForcedHeightKeepsLayout(it, h))
                         it.Box = CaptureBox(it.El, it.OuterMain, shrinkToFit: false, borderW: it.Main, borderH: h, reuse: true, inner: it.Box.Known);

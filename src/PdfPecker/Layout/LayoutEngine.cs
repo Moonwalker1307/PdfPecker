@@ -987,6 +987,46 @@ internal sealed partial class LayoutEngine
         return bottom;
     }
 
+    /// <summary>Starts the marker of a list item whose content box starts at <paramref name="cx"/>.</summary>
+    // Kept out of LayoutBlockBoxCore, as is DrawReplaced, so that its stack frame stays small: nested boxes call it once
+    // per level, and 256 levels of flex rows must fit in the 1.5 MB stack of a thread-pool thread on Windows.
+    private void StartMarker(Element e, float cx, float contentW)
+    {
+        var s = e.Style;
+        // ::marker { content } and list-style-type: "string" give the marker's own text, drawn as written.
+        var custom = e.MarkerContent ?? s.ListStyleString;
+        var marker = new ListMarker
+        {
+            Custom = custom != null, Type = s.ListStyleType,
+            Style = e.MarkerStyle ?? s, ContentX = cx, ContentRight = cx + contentW, Rtl = s.Rtl, Tag = Tags?.MarkerOf(e),
+            Inside = s.ListStylePositionInside,
+        };
+        // list-style-image wins over the type unless ::marker has content; an image that does not load falls back to the type.
+        if (e.MarkerContent != null || s.ListStyleImage is not { } imageSrc || !LoadMarkerImage(marker, imageSrc))
+            marker.Text = custom ?? s.ListCounterStyle?.MarkerText(_currentListIndex);
+        if (marker.Text != null || marker.Image != null || marker.Svg != null || s.ListStyleType != ListStyleType.None) _marker = marker;
+    }
+
+    /// <summary>
+    /// Draws an image or SVG element's picture in its content box at (<paramref name="cx"/>, <paramref name="cy"/>), with
+    /// border and padding of <paramref name="left"/>, <paramref name="top"/>, <paramref name="right"/> and
+    /// <paramref name="bottom"/> around it.
+    /// </summary>
+    private void DrawReplaced(Element e, PdfImage? image, SvgImage? svg, float cx, float cy, float imgW, float imgH,
+        float left, float top, float right, float bottom)
+    {
+        var s = e.Style;
+        if (image == null && e.Name == "svg")
+        {
+            _ops.Add(new SvgOp(cx, cy, imgW, imgH, svg!) { Tag = Tags?.Of(e) });
+            return;
+        }
+        // Rounded corners clip the image to the content box's curve.
+        var radii = BoxPainter.InnerRadii(BoxPainter.Radii(s, imgW + left + right, imgH + top + bottom), left, top, right, bottom);
+        if (image != null) AddImage(s, image, cx, cy, imgW, imgH, radii, Tags?.Of(e));
+        if (svg != null) AddSvgImage(_ops, s, svg, cx, cy, imgW, imgH, radii, Tags?.Of(e));
+    }
+
     private float LayoutBlockBoxCore(Element e, float x, float y, float availW, bool shrinkToFit)
     {
         _boxLayouts++;
@@ -1079,20 +1119,7 @@ internal sealed partial class LayoutEngine
         float sizing = s.BorderBox ? frameV : legendExtra;
 
         if (s.Display == Display.ListItem && (s.ListStyleType != ListStyleType.None || e.MarkerContent != null || s.ListStyleImage != null))
-        {
-            // ::marker { content } and list-style-type: "string" give the marker's own text, drawn as written.
-            var custom = e.MarkerContent ?? s.ListStyleString;
-            var marker = new ListMarker
-            {
-                Custom = custom != null, Type = s.ListStyleType,
-                Style = e.MarkerStyle ?? s, ContentX = cx, ContentRight = cx + contentW, Rtl = s.Rtl, Tag = Tags?.MarkerOf(e),
-                Inside = s.ListStylePositionInside,
-            };
-            // list-style-image wins over the type unless ::marker has content; an image that does not load falls back to the type.
-            if (e.MarkerContent != null || s.ListStyleImage is not { } imageSrc || !LoadMarkerImage(marker, imageSrc))
-                marker.Text = custom ?? s.ListCounterStyle?.MarkerText(_currentListIndex);
-            if (marker.Text != null || marker.Image != null || marker.Svg != null || s.ListStyleType != ListStyleType.None) _marker = marker;
-        }
+            StartMarker(e, cx, contentW);
 
         float contentBottom;
         float trailing = 0;
@@ -1108,23 +1135,7 @@ internal sealed partial class LayoutEngine
                     cy = y + bt + pt;
                 }
             }
-            if (image != null && s.Visible)
-            {
-                // Rounded corners clip the image to the content box's curve.
-                var radii = BoxPainter.InnerRadii(BoxPainter.Radii(s, imgW + bl + br + pl + pr, imgH + bt + bb + pt + pb),
-                    bl + pl, bt + pt, br + pr, bb + pb);
-                AddImage(s, image, cx, cy, imgW, imgH, radii, Tags?.Of(e));
-            }
-            if (svg != null && s.Visible)
-            {
-                if (isImage)
-                {
-                    var radii = BoxPainter.InnerRadii(BoxPainter.Radii(s, imgW + bl + br + pl + pr, imgH + bt + bb + pt + pb),
-                        bl + pl, bt + pt, br + pr, bb + pb);
-                    AddSvgImage(_ops, s, svg, cx, cy, imgW, imgH, radii, Tags?.Of(e));
-                }
-                else _ops.Add(new SvgOp(cx, cy, imgW, imgH, svg) { Tag = Tags?.Of(e) });
-            }
+            if (s.Visible && (image != null || svg != null)) DrawReplaced(e, image, svg, cx, cy, imgW, imgH, bl + pl, bt + pt, br + pr, bb + pb);
             contentBottom = cy + imgH;
             if (_paginate) _lastContentBottom = contentBottom;
         }
@@ -1933,6 +1944,12 @@ internal sealed partial class LayoutEngine
         public Func<Captured>? Lay;
 
         /// <summary>
+        /// Where the box was last placed. Placing moves the drawing operations themselves, so placing the box again (a
+        /// flex line placed a second time) moves them by the difference only.
+        /// </summary>
+        public float PlacedX, PlacedY;
+
+        /// <summary>
         /// The boxes captured while this one was laid out, outside further captures, with what they measured: when the
         /// box is laid out again on the pages, those boxes measure the same and need not be laid out to be measured.
         /// </summary>
@@ -2315,16 +2332,18 @@ internal sealed partial class LayoutEngine
     /// <summary>Moves captured content to its final position and appends it to the output.</summary>
     private void Place(Captured c, float dx, float dy)
     {
+        float moveX = dx - c.PlacedX, moveY = dy - c.PlacedY;
+        (c.PlacedX, c.PlacedY) = (dx, dy);
         foreach (var op in c.Ops)
         {
-            op.Offset(dx, dy);
+            op.Offset(moveX, moveY);
             _ops.Add(op);
         }
         // Its content ends with it, as far as the bottom edges of the boxes around it are concerned.
         if (_paginate) _lastContentBottom = dy + c.Height;
         if (c.AnchorIds != null)
             foreach (var id in c.AnchorIds)
-                if (Anchors.TryGetValue(id, out float ay)) SetAnchor(id, ay + dy);
+                if (Anchors.TryGetValue(id, out float ay)) SetAnchor(id, ay + moveY);
         if (c.Absolutes != null)
             foreach (var (e, ax, ay) in c.Absolutes) QueueAbsolute(e, ax + dx, ay + dy);
     }
