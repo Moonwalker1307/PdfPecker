@@ -15,7 +15,7 @@ internal sealed partial class LayoutEngine
     private void Ellipsize(Line line, ComputedStyle block, float room, bool visual = false, bool rtl = false, string? mark = null)
     {
         string ellipsis = mark ?? block.TextOverflow ?? Ellipsis;
-        float ew = TextWidth(block.Font, ellipsis, 0, ellipsis.Length, block.FontSize, block.LetterSpacing);
+        float ew = TextWidth(block.Font, ellipsis, 0, ellipsis.Length, block.TextSize, block.LetterSpacing);
         float limit = room - ew, used = 0;
         var items = line.Items;
         byte para = items.Count > 0 ? items[0].Para : (byte)0;
@@ -65,7 +65,7 @@ internal sealed partial class LayoutEngine
     private static int FittingCharacters(Item it, float used, float limit, bool keepEnd, out float width)
     {
         var f = it.Style.Font;
-        float size = it.Style.FontSize, ls = it.Style.LetterSpacing;
+        float size = it.Style.TextSize, ls = it.Style.LetterSpacing;
         int fit = 0;
         width = 0;
         if (it.Level == 0 && !keepEnd)

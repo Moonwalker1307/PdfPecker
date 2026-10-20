@@ -8,15 +8,21 @@ internal sealed class FontFace
     public readonly string Family;
     private readonly int _weightMin, _weightMax;
     private readonly bool _weightAuto; // no font-weight descriptor: a variable font covers its whole weight axis
+    private readonly float _stretchMin, _stretchMax;
+    private readonly bool _stretchAuto; // no font-stretch descriptor: a variable font covers its whole width axis
     public readonly bool Italic;
     public readonly UnicodeRange? Range;
     public readonly string? FullName, PostScriptName; // for CSS local()
     private readonly Lazy<FontProgram?> _program;
 
     public FontFace(string family, int weightMin, int weightMax, bool italic, UnicodeRange? range, Lazy<FontProgram?> program,
-        string? fullName = null, string? postScriptName = null, bool weightAuto = false)
+        string? fullName = null, string? postScriptName = null, bool weightAuto = false, float stretchMin = 100, float stretchMax = 100,
+        bool stretchAuto = true)
     {
         Family = family;
+        _stretchMin = stretchMin;
+        _stretchMax = stretchMax;
+        _stretchAuto = stretchAuto;
         _weightMin = weightMin;
         _weightMax = weightMax;
         _weightAuto = weightAuto;
@@ -34,13 +40,22 @@ internal sealed class FontFace
     public int WeightMin => _weightAuto && Program?.Axis(FontVariations.Wght) is { } a ? (int)Math.Ceiling(a.Min) : _weightMin;
 
     public int WeightMax => _weightAuto && Program?.Axis(FontVariations.Wght) is { } a ? (int)Math.Floor(a.Max) : _weightMax;
+
+    /// <summary>The widths (font-stretch percentages) the face covers: as declared, or for a variable font without a declaration, its width axis.</summary>
+    /// <summary>True when the face has no font-stretch of its own, so it covers normal width without its program being read.</summary>
+    public bool StretchAuto => _stretchAuto;
+
+    public float StretchMin => _stretchAuto && Program?.Axis(FontVariations.Wdth) is { } a ? a.Min : _stretchMin;
+
+    public float StretchMax => _stretchAuto && Program?.Axis(FontVariations.Wdth) is { } a ? a.Max : _stretchMax;
 }
 
 /// <summary>
 /// What picks the instance of a variable font besides weight and style: font-stretch (a percentage), the font size in
 /// CSS pixels for the optical size axis (0 with font-optical-sizing: none), and font-variation-settings as written.
+/// Synthesis says which faces may be made up when the family has none (font-synthesis).
 /// </summary>
-internal readonly record struct FontVariation(float Stretch, float OpticalSize, string? Settings)
+internal readonly record struct FontVariation(float Stretch, float OpticalSize, string? Settings, FontSynthesis Synthesis = FontSynthesis.All)
 {
     public static readonly FontVariation Normal = new(100, 0, null);
 }
@@ -104,7 +119,8 @@ internal sealed class FontResolver
     {
         string? family = null, src = null;
         int wMin = 400, wMax = 400;
-        bool weightGiven = false;
+        bool weightGiven = false, stretchGiven = false;
+        float sMin = 100, sMax = 100;
         bool italic = false;
         UnicodeRange? range = null;
         foreach (var d in decls)
@@ -123,6 +139,18 @@ internal sealed class FontResolver
                         weightGiven = true;
                         wMin = wMax = a;
                         if (parts.Length >= 2 && ParseWeight(parts[1]) is int b) { wMin = Math.Min(a, b); wMax = Math.Max(a, b); }
+                    }
+                    break;
+                }
+                case "font-stretch":
+                {
+                    // One width or a range of two; keywords and percentages.
+                    var parts = v.ToLowerInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length is 1 or 2 && StyleResolver.FontStretchPercent(parts[0]) is float a && a > 0)
+                    {
+                        stretchGiven = true;
+                        sMin = sMax = a;
+                        if (parts.Length == 2 && StyleResolver.FontStretchPercent(parts[1]) is float b && b > 0) { sMin = Math.Min(a, b); sMax = Math.Max(a, b); }
                     }
                     break;
                 }
@@ -148,7 +176,7 @@ internal sealed class FontResolver
             }
             return null;
         });
-        return new FontFace(family!, wMin, wMax, italic, range, program, weightAuto: !weightGiven);
+        return new FontFace(family!, wMin, wMax, italic, range, program, weightAuto: !weightGiven, stretchMin: sMin, stretchMax: sMax, stretchAuto: !stretchGiven);
     }
 
     private static FontProgram? LoadSource(string item, Func<string, byte[]?> fetch, FontCollection.Snapshot? collection,
@@ -289,7 +317,7 @@ internal sealed class FontResolver
             return result;
         }
 
-        var ordered = faces.Select(f => (Face: f, Score: Score(f, weight, italic))).OrderBy(x => x.Score).ToList();
+        var ordered = faces.Select(f => (Face: f, Score: Score(f, weight, italic, variation.Stretch))).OrderBy(x => x.Score).ToList();
         long bestScore = -1;
         foreach (var (face, score) in ordered)
         {
@@ -297,8 +325,8 @@ internal sealed class FontResolver
             var program = face.Program;
             if (program == null) continue;
             bestScore = score;
-            bool synthBold = weight >= 600 && face.WeightMax < 600;
-            bool synthItalic = italic && !face.Italic;
+            bool synthBold = weight >= 600 && face.WeightMax < 600 && variation.Synthesis.HasFlag(FontSynthesis.Weight);
+            bool synthItalic = italic && !face.Italic && variation.Synthesis.HasFlag(FontSynthesis.Style);
             if (program.Axes.Length > 0) program = Instance(program, face, weight, italic, variation, ref synthItalic);
             var fk = (program, synthBold, synthItalic, face.Range);
             if (!_fonts.TryGetValue(fk, out var font)) _fonts[fk] = font = new EmbeddedFont(program, synthBold, synthItalic, face.Range);
@@ -317,7 +345,7 @@ internal sealed class FontResolver
     {
         var values = new Dictionary<uint, float>();
         if (program.Axis(FontVariations.Wght) != null) values[FontVariations.Wght] = Math.Clamp(weight, face.WeightMin, Math.Max(face.WeightMin, face.WeightMax));
-        if (program.Axis(FontVariations.Wdth) != null) values[FontVariations.Wdth] = variation.Stretch;
+        if (program.Axis(FontVariations.Wdth) != null) values[FontVariations.Wdth] = Math.Clamp(variation.Stretch, face.StretchMin, Math.Max(face.StretchMin, face.StretchMax));
         if (italic && !face.Italic)
         {
             if (program.Axis(FontVariations.Ital) != null) { values[FontVariations.Ital] = 1; synthItalic = false; }
@@ -343,17 +371,31 @@ internal sealed class FontResolver
         }
     }
 
-    /// <summary>Lower is better: style first, then weight in the order CSS Fonts level 4 prescribes.</summary>
-    private static long Score(FontFace f, int desired, bool italic)
+    /// <summary>Lower is better: width first, then style, then weight, each in the order CSS Fonts level 4 prescribes.</summary>
+    private static long Score(FontFace f, int desired, bool italic, float stretch)
     {
+        long width = StretchDistance(f, stretch) * 10_000_000L;
         long style = f.Italic == italic ? 0 : 100000;
-        if (desired >= f.WeightMin && desired <= f.WeightMax) return style;
+        if (desired >= f.WeightMin && desired <= f.WeightMax) return width + style;
         int w = desired < f.WeightMin ? f.WeightMin : f.WeightMax;
         long weight;
         if (desired > 500) weight = w >= desired ? w - desired : 1000 + (desired - w);
         else if (desired < 400) weight = w <= desired ? desired - w : 1000 + (w - desired);
         else weight = w >= desired && w <= 500 ? w - desired : w < desired ? 1000 + (desired - w) : 2000 + (w - desired);
-        return style + weight;
+        return width + style + weight;
+    }
+
+    /// <summary>How far a face's widths are from the desired one, in tenths of a percent: narrower faces first for a width up to normal, wider ones first above it.</summary>
+    private static long StretchDistance(FontFace f, float desired)
+    {
+        if (f.StretchAuto && desired == 100) return 0;
+        float min = f.StretchMin, max = f.StretchMax;
+        if (desired >= min && desired <= max) return 0;
+        float w = desired < min ? min : max;
+        float distance = desired <= 100
+            ? w <= desired ? desired - w : 1000 + (w - desired)
+            : w >= desired ? w - desired : 1000 + (desired - w);
+        return (long)(Math.Min(distance, 3000) * 10);
     }
 
     /// <summary>The first standard family named in a CSS font-family list, if any.</summary>

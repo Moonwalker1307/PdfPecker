@@ -96,10 +96,12 @@ internal sealed partial class StyleResolver
         if (d.Inherit)
         {
             s.NoLigatures = parent.NoLigatures;
+            s.NoKerning = parent.NoKerning;
             s.FontFeatureSettings = parent.FontFeatureSettings;
             return;
         }
-        if (LigaSetting(d.Lower) is bool liga) s.NoLigatures = !liga;
+        if (FeatureSetting(d.Lower, "liga") is bool liga) s.NoLigatures = !liga;
+        if (FeatureSetting(d.Lower, "kern") is bool kern) s.NoKerning = !kern;
         // Tags are case-sensitive, so the value is kept as written.
         s.FontFeatureSettings = d.Lower is "normal" or "initial" or "unset" ? null : d.Value;
     }

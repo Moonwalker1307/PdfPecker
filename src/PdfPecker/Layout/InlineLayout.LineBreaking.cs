@@ -113,8 +113,8 @@ internal sealed partial class LayoutEngine
     private static string HyphenText(ComputedStyle s) => s.HyphenateCharacter ?? "-";
 
     private static float HyphenWidth(ComputedStyle s) => s.HyphenateCharacter is { } h
-        ? TextWidth(s.Font, h, 0, h.Length, s.FontSize, s.LetterSpacing)
-        : CharAdvance(s.Font, '-', s.FontSize, s.LetterSpacing);
+        ? TextWidth(s.Font, h, 0, h.Length, s.TextSize, s.LetterSpacing)
+        : CharAdvance(s.Font, '-', s.TextSize, s.LetterSpacing);
 
     /// <summary>
     /// The state of breaking one paragraph: the line being filled, its room (which floats beside it reduce) and the
@@ -217,7 +217,7 @@ internal sealed partial class LayoutEngine
                 {
                     int cut = target - at, length = it.Length - cut;
                     var s = it.Style;
-                    var rest = it.Slice(cut, length, TextWidth(s.Font, it.Source, it.Start + cut, length, s.FontSize, s.LetterSpacing));
+                    var rest = it.Slice(cut, length, TextWidth(s.Font, it.Source, it.Start + cut, length, s.TextSize, s.LetterSpacing));
                     var items = new List<Item>(after.Count - m) { rest };
                     for (int r = m + 1; r < after.Count; r++) items.Add(after[r]);
                     _items = items;
@@ -402,7 +402,7 @@ internal sealed partial class LayoutEngine
             // Work on the item's slice of its source text: copying the rest of a long word for every line would make
             // breaking it quadratic.
             var font = g.Style.Font;
-            float size = g.Style.FontSize, ls = g.Style.LetterSpacing;
+            float size = g.Style.TextSize, ls = g.Style.LetterSpacing;
             string src = g.Source;
             int start = g.Start, len = g.Length;
             int fit = 0;
