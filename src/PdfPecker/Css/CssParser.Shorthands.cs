@@ -112,6 +112,10 @@ internal static partial class CssParser
                 ExpandBorderSide(name, value, longhands);
                 break;
             case "background": CssBackground.ExpandShorthand(value, longhands.Add); break;
+            case "mask":
+            case "-webkit-mask":
+                CssMask.ExpandShorthand(value, longhands.Add);
+                break;
             case "border-image": CssBorderImage.ExpandShorthand(value, longhands.Add); break;
             case "outline": ExpandOutline(value, longhands); break;
             case "font": ExpandFont(value, longhands); break;
@@ -148,7 +152,7 @@ internal static partial class CssParser
             case "font-variant": ExpandFontVariant(value, longhands); break;
             case "column-rule": ExpandColumnRule(value, longhands); break;
             case "columns": ExpandColumns(value, longhands); break;
-            default: longhands.Add(name, value); break;
+            default: longhands.Add(CssMask.Unprefixed(name) ?? name, value); break;
         }
 
         if (wide)

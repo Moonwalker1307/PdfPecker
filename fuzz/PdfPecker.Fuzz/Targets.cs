@@ -56,6 +56,7 @@ internal static class Targets
         "<h1>", "<pre>", "<center>", "<font>", "<details>", "<template>", "<!doctype html>", "&#0;", "&#x110000;", "&amp", "&notin;", "style=\"", "class=\"a\"", "id=\"a\"",
         "display:table-cell", "display:flex", "display:grid", "position:absolute", "float:left", "width:50%", "height:1e9px", "margin:-1e9px", "column-count:99",
         "page-break-before:always", "overflow:hidden", "transform:scale(1e9)", "content:\"x\"", "counter-increment:a 999999999", "font-size:0", "line-height:0", "<![CDATA[",
+        "backdrop-filter:blur(99px)", "mask:linear-gradient(red,#0000) exclude", "-webkit-mask-image:url(#a)", "<mask id=\"a\">",
     };
 
     private static readonly (string, string)[] HtmlNesters =
@@ -63,6 +64,7 @@ internal static class Targets
         ("<div>", "</div>"), ("<span>", "</span>"), ("<b>", "</b>"), ("<table><tr><td>", "</td></tr></table>"), ("<ul><li>", "</li></ul>"), ("<p>", "</p>"),
         ("<div style=\"display:flex\">", "</div>"), ("<div style=\"float:left\">", "</div>"), ("<a href=\"#\">", "</a>"), ("<svg><g>", "</g></svg>"),
         ("<div style=\"position:relative;overflow:hidden\">", "</div>"), ("<blockquote>", "</blockquote>"), ("<details>", "</details>"), ("<i>", "</i>"),
+        ("<div style=\"backdrop-filter:invert(1);mask:radial-gradient(#000,#0000)\">", "</div>"),
     };
 
     private static readonly string[] CssWords =
@@ -72,6 +74,7 @@ internal static class Targets
         "*", ">", "~", "+", "|", "[a=b i]", "url(data:,)", "linear-gradient(", "radial-gradient(", "conic-gradient(", "repeating-linear-gradient(", "rotate(", "matrix(",
         "attr(a)", "counter(a)", "counters(a, \".\")", "content:", "display:grid", "grid-template-columns: repeat(999999, 1fr)", "grid-column: 1 / span 99999", "flex: 1e9",
         "1e9px", "-1e9px", "100000%", "calc(1/0)", "calc(0/0)", "inherit", "initial", "unset", "revert", "all:unset", "--a:", "var(--a, var(--b, var(--a)))",
+        "mask-image:", "-webkit-mask:", "mask-composite: exclude", "mask-mode: luminance", "mask-size: 1e9px", "url(#m)", "backdrop-filter: blur(1e9px)", "-webkit-backdrop-filter:",
     };
 
     private static readonly (string, string)[] CssNesters =

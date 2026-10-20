@@ -7,6 +7,10 @@ namespace PdfPecker.Svg;
 internal sealed class SvgFilterBudget
 {
     private long _spent;
+    private int _backdrops;
+
+    /// <summary>Whether one more box may filter its backdrop: fewer than <see cref="Pdf.PdfDocumentWriter.MaxBackdrops"/> have.</summary>
+    public bool TryBackdrop() => _backdrops++ < Pdf.PdfDocumentWriter.MaxBackdrops;
 
     /// <summary>
     /// Whether a filter may run: while the document's filters have spent less than <see cref="SvgFilter.MaxDocumentWork"/>.

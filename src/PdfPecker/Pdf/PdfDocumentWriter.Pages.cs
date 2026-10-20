@@ -62,6 +62,7 @@ internal sealed partial class PdfDocumentWriter
         var pageLinks = new List<(Placed Link, float Origin, float PageTop)>();
         _yOrigin = _page.MarginTop + _page.BandTop;
         (_flowTop, _flowBottom) = (pageTop, pageTop + _page.FlowHeight);
+        _pageCanvas = (background, doc.Canvas[p], pageTop);
         foreach (var placed in doc.Pages[p])
         {
             if (placed.Op is LinkOp) { pageLinks.Add((placed, _yOrigin, pageTop)); continue; }

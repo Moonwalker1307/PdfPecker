@@ -626,6 +626,48 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Mask_layers_are_capped()
+    {
+        // Each mask layer nests a soft mask in the one below it, so the declaration is dropped beyond sixteen layers.
+        string Layers(int n) => string.Join(",", Enumerable.Repeat("linear-gradient(#000, transparent)", n));
+        var capped = Latin1(Bounded($"<div style='height:10px;background:red;mask-image:{Layers(5000)}'></div>", new PdfOptions { Compress = false }));
+        Assert.DoesNotContain("/SMask <<", capped);
+        var kept = Latin1(Bounded($"<div style='height:10px;background:red;mask-image:{Layers(16)};mask-composite:intersect'></div>", new PdfOptions { Compress = false }));
+        Assert.Contains("/SMask <<", kept);
+    }
+
+    [Fact]
+    public void Tiny_mask_tiles_are_bounded()
+    {
+        var pdf = Bounded(() => Bounded(Repeat("<div style='width:2000px;height:2000px;background:red;mask:radial-gradient(#000,#0000) 0 0 / 0.01px 0.01px'></div>", 20)));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(pdf.Length, 1, 64 << 20);
+    }
+
+    [Theory]
+    [InlineData("backdrop-filter:blur(4px)", 1)]
+    [InlineData("-webkit-backdrop-filter:invert(1) blur(99999px)", 0)] // each beyond the pixel cap on its own
+    public void Many_backdrop_filters_share_one_budget(string filter, int least)
+    {
+        // Each backdrop renders everything painted before it, so a page of them would grow with the square of their count.
+        var html = "<body style='margin:0;background:linear-gradient(red, blue)'>" + Repeat($"<div style='height:20px;{filter}'>x</div>", 3000) + "</body>";
+        var (pdf, allocated) = Allocating(() => Bounded(html, new PdfOptions { Compress = false }));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 1024L << 20);
+        Assert.InRange(CountOf(Latin1(pdf), "/Subtype /Image"), least, 2 * PdfPecker.Pdf.PdfDocumentWriter.MaxBackdrops);
+    }
+
+    [Fact]
+    public void Nested_and_huge_backdrop_filters_are_bounded()
+    {
+        var nested = Repeat("<div style='padding:1px;backdrop-filter:invert(1)'>", 400) + "x" + Repeat("</div>", 400);
+        AssertStructurallyValid(Bounded(() => Bounded(nested)));
+        var huge = "<div style='position:absolute;width:1e7px;height:3000px;background:red'></div>"
+                   + "<div style='position:absolute;width:1e7px;height:3000px;backdrop-filter:blur(500px) drop-shadow(0 0 500px red)'></div>";
+        AssertStructurallyValid(Bounded(() => Bounded(huge)));
+    }
+
+    [Fact]
     public void Repeating_gradients_share_one_tiling_budget()
     {
         // Each box tiles twenty repeating gradients over 250 periods, about 33 KB of PDF each: four kilobytes of HTML
