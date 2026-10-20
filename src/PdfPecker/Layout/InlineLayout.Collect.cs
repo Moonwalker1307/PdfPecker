@@ -25,6 +25,8 @@ internal sealed partial class LayoutEngine
     {
         if (node is TextNode t)
         {
+            // Text from a display: contents link still links: the link is its parent, or a parent of that.
+            if (href == null && t.Parent is { Style.Contents: true } owner) href = ContentsLink(owner);
             CollectTextNode(st, t, href, deco);
             return;
         }
@@ -39,6 +41,7 @@ internal sealed partial class LayoutEngine
         }
 
         int before = st.Items.Count;
+        href ??= e.ContentsHref;
         AddAnchors(st, e, s, ref href);
 
         if (IsImageLaidOutAsBox(e, s))
@@ -220,8 +223,23 @@ internal sealed partial class LayoutEngine
 
     private static string? LinkOf(Element e)
     {
+        if (e.ContentsHref != null) return e.ContentsHref;
         for (var p = e.Parent; p != null; p = p.Parent)
+        {
             if (p.Name == "a" && p.GetAttribute("href") is { Length: > 0 } h) return h;
+            if (p.ContentsHref != null) return p.ContentsHref;
+        }
+        return null;
+    }
+
+    /// <summary>The link around text in a display: contents element: the nearest such element that is a link.</summary>
+    private static string? ContentsLink(Element owner)
+    {
+        for (Element? p = owner; p is { Style.Contents: true }; p = p.Parent)
+        {
+            if (p.Name == "a" && p.GetAttribute("href") is { Length: > 0 } h) return h;
+            if (p.ContentsHref != null) return p.ContentsHref;
+        }
         return null;
     }
 

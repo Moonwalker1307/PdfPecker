@@ -42,6 +42,7 @@ internal sealed partial class StyleResolver
 
         if (_count > 1) Array.Sort(_keys, _decls, 0, _count);
         e.Style = Compute(e.Name, parent);
+        if (e.Style.Contents) e.Style = ContentsStyle(e.Name, e.Style, parent);
         if (e.Style.CounterReset != null || e.Style.CounterSet != null || e.Style.CounterIncrement != null) _countersUsed = true;
     }
 

@@ -305,6 +305,8 @@ internal sealed partial class StyleResolver
             if (i + 1 < parent.Children.Count && parent.Children[i + 1] is TextNode rest) rest.Text = text + rest.Text;
             else parent.Children.Insert(i + 1, new TextNode(text) { Parent = parent });
         }
+        // The children of display: contents elements go back into them.
+        RestoreContents(parent);
         parent.Children.RemoveAll(c => c is Element { Generated: true });
         int count = 0;
         foreach (var c in parent.Children) if (c is Element) count++;
@@ -314,7 +316,9 @@ internal sealed partial class StyleResolver
         List<Element>? lastOfName = count > 1 ? new List<Element>(4) : null;
         foreach (var c in parent.Children)
         {
+            c.Parent = parent; // display: contents gave it another parent in the last pass
             if (c is not Element e) continue;
+            e.ContentsHref = null;
             e.ElementIndex = ++index;
             e.ElementSiblingCount = count;
             e.PreviousElementSibling = prev;
@@ -403,6 +407,7 @@ internal sealed partial class StyleResolver
             if (container) PopContainer();
         }
         if (pseudos) Generate(parent, PseudoElement.After, ref scope);
+        if (_contentsUsed && !parent.Style.Contents) SpliceContents(parent);
         if (parent.Name == "details" && !parent.HasAttribute("open")) HideClosedDetails(parent);
         WrapTableParts(parent);
         if (scope != null)
