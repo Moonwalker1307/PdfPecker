@@ -25,6 +25,7 @@ internal sealed partial class LayoutEngine
     private sealed class RowModel
     {
         public Element Tr = null!;
+        public Element? Group; // the thead, tbody or tfoot the row is in
         public readonly List<CellModel> Cells = new();     // cells starting in this row
         public readonly List<CellModel> Ending = new();    // cells (any start row) ending in this row
     }
@@ -43,6 +44,8 @@ internal sealed partial class LayoutEngine
         public float[] ColMin = Array.Empty<float>(), ColMax = Array.Empty<float>();
         public float[] ColFixed = Array.Empty<float>(), ColPct = Array.Empty<float>();
         public float[] ColSpecFixed = Array.Empty<float>(), ColSpecPct = Array.Empty<float>(); // from <col> only
+        public float[]? ColMaxWeight; // with max-width on cells: each column's max-content width as those cap it, else null
+        public uint[]? ColBackground, ColGroupBackground; // the background colours of <col> and <colgroup>, else null
         public float[]? RowExtra; // per layout pass: height each row gets on top of its content, to fill the table's height
         public bool DefiniteHeight; // per layout pass: the table's height is a length or a percentage that resolves
         public CellModel?[,] Grid = new CellModel?[0, 0]; // the cell covering each row and column
@@ -93,7 +96,12 @@ internal sealed partial class LayoutEngine
             row[c] = true;
         }
 
-        for (int r = 0; r < trs.Count; r++) m.Rows.Add(new RowModel { Tr = trs[r] });
+        for (int r = 0; r < trs.Count; r++)
+            m.Rows.Add(new RowModel
+            {
+                Tr = trs[r],
+                Group = trs[r].Parent is { Style.Display: Display.TableRowGroup or Display.TableHeaderGroup or Display.TableFooterGroup } g ? g : null,
+            });
         for (int r = 0; r < trs.Count; r++)
         {
             int col = 0;
@@ -140,8 +148,11 @@ internal sealed partial class LayoutEngine
         {
             int span = Math.Max(1, ParseInt(col.GetAttribute("span"), 1));
             var cs = col.Style;
+            uint groupBg = col.Parent is { Style.Display: Display.TableColumnGroup } cg && cg != col ? cg.Style.BackgroundColor : 0;
             for (int k = 0; k < span && colIndex < n; k++, colIndex++)
             {
+                if (CssColor.IsVisible(cs.BackgroundColor)) (m.ColBackground ??= new uint[n])[colIndex] = cs.BackgroundColor;
+                if (CssColor.IsVisible(groupBg)) (m.ColGroupBackground ??= new uint[n])[colIndex] = groupBg;
                 if (cs.Width.Unit == LengthUnit.Percent) m.ColPct[colIndex] = cs.Width.Value;
                 else if (!cs.Width.IsAuto && cs.Width.Unit != LengthUnit.Calc) m.ColFixed[colIndex] = cs.Width.Value;
             }
@@ -152,6 +163,8 @@ internal sealed partial class LayoutEngine
 
         float hs = table.Style.BorderCollapse ? 0 : table.Style.BorderSpacingH;
         var spanning = new List<CellModel>();
+        var weights = new float[n];
+        bool anyCap = false;
         foreach (var row in m.Rows)
         {
             foreach (var cell in row.Cells)
@@ -162,6 +175,9 @@ internal sealed partial class LayoutEngine
                 float borders = (cs.BorderLeft + cs.BorderRight) * (table.Style.BorderCollapse ? 0.5f : 1f);
                 float frame = cs.PaddingLeft.Resolve(0) + cs.PaddingRight.Resolve(0) + borders;
                 cell.Min = mn + frame;
+                // A min-width wider than the content widens the cell's column, as in Chrome.
+                if (!cs.MinWidth.IsAuto && !cs.MinWidth.IsPercent && cs.MinWidth.Unit != LengthUnit.Calc)
+                    cell.Min = Math.Max(cell.Min, cs.MinWidth.Value + (cs.BorderBox ? 0 : frame));
                 cell.Max = Math.Max(mx + frame, cell.Min);
                 // A width mixing a percentage with other units, such as calc(50% - 10px), is auto, as in Chrome.
                 if (cs.Width.Unit == LengthUnit.Percent) cell.PercentWidth = cs.Width.Value;
@@ -172,6 +188,15 @@ internal sealed partial class LayoutEngine
                 }
                 if (cell.ColSpan == 1)
                 {
+                    // As in Chrome, max-width on a cell caps its share of the room the columns grow into, not its
+                    // min-content width.
+                    float weight = cell.Max;
+                    if (!cs.MaxWidth.IsAuto && !cs.MaxWidth.IsPercent && cs.MaxWidth.Unit != LengthUnit.Calc)
+                    {
+                        weight = Math.Min(weight, cs.MaxWidth.Value + (cs.BorderBox ? 0 : frame));
+                        anyCap = true;
+                    }
+                    weights[cell.Col] = Math.Max(weights[cell.Col], weight);
                     int c = cell.Col;
                     m.ColMin[c] = Math.Max(m.ColMin[c], cell.Min);
                     m.ColMax[c] = Math.Max(m.ColMax[c], cell.Max);
@@ -201,6 +226,7 @@ internal sealed partial class LayoutEngine
             if (m.ColFixed[c] >= 0) m.ColMax[c] = Math.Max(m.ColMin[c], m.ColFixed[c]);
             if (m.ColMax[c] < m.ColMin[c]) m.ColMax[c] = m.ColMin[c];
         }
+        if (anyCap) m.ColMaxWeight = MaxWeights(m, weights);
 
         _tables[table] = m;
         return m;
@@ -242,6 +268,21 @@ internal sealed partial class LayoutEngine
         }
     }
 
+    /// <summary>
+    /// The columns' max-content widths as the cells' max-width caps them, or null when no cap makes a column narrower.
+    /// Columns with a width keep theirs.
+    /// </summary>
+    private static float[]? MaxWeights(TableModel m, float[] weights)
+    {
+        bool any = false;
+        for (int c = 0; c < m.ColCount; c++)
+        {
+            if (m.ColFixed[c] >= 0 || weights[c] >= m.ColMax[c]) weights[c] = m.ColMax[c];
+            else any = true;
+        }
+        return any ? weights : null;
+    }
+
     private static int ParseInt(string? s, int fallback) => Invariant.TryParseInt(s, out int v) ? v : fallback;
 
     /// <summary>Distributes the available width over the columns, CSS auto table layout style.</summary>
@@ -270,6 +311,11 @@ internal sealed partial class LayoutEngine
         if (autoCount == 0) return w;
 
         float target = widthSpecified || sumMax > remaining ? remaining : sumMax;
+        if (target > sumMax && flexible > 0 && m.ColMaxWeight is { } weights)
+        {
+            GrowByWeight(m, w, weights, target);
+            return w;
+        }
         if (target >= sumMax)
         {
             float extra = target - sumMax;
@@ -313,6 +359,44 @@ internal sealed partial class LayoutEngine
                 if (m.ColPct[c] < 0) w[c] = m.ColMin[c] * scale;
         }
         return w;
+    }
+
+    /// <summary>
+    /// Shares <paramref name="target"/> out over the auto columns in proportion to their max-content widths as max-width
+    /// caps them, never below a column's min-content width; columns with a width get their width.
+    /// </summary>
+    private static void GrowByWeight(TableModel m, float[] w, float[] weights, float target)
+    {
+        int n = m.ColCount;
+        var done = new bool[n];
+        float room = target;
+        for (int c = 0; c < n; c++)
+        {
+            if (m.ColPct[c] >= 0) done[c] = true;
+            else if (m.ColFixed[c] >= 0) { w[c] = m.ColMax[c]; room -= w[c]; done[c] = true; }
+        }
+        // A column its share would make narrower than its content takes its min-content width, and the others share
+        // the rest; each round settles at least one column.
+        for (int round = 0; round < n; round++)
+        {
+            float sum = 0;
+            for (int c = 0; c < n; c++) if (!done[c]) sum += weights[c];
+            bool settled = false;
+            for (int c = 0; c < n; c++)
+            {
+                if (done[c]) continue;
+                float share = sum > 0 ? room * weights[c] / sum : 0;
+                if (share >= m.ColMin[c]) continue;
+                w[c] = m.ColMin[c];
+                room -= w[c];
+                done[c] = true;
+                settled = true;
+            }
+            if (settled) continue;
+            for (int c = 0; c < n; c++)
+                if (!done[c]) w[c] = sum > 0 ? room * weights[c] / sum : 0;
+            return;
+        }
     }
 
     /// <summary>
@@ -418,10 +502,7 @@ internal sealed partial class LayoutEngine
         while (true)
         {
             foreach (var caption in m.Captions)
-            {
-                float cmt = caption.Style.MarginTop.Resolve(boxW);
-                y = LayoutBlockBox(caption, bx, y + cmt, boxW, shrinkToFit: false) + caption.Style.MarginBottom.Resolve(boxW);
-            }
+                if (!caption.Style.CaptionBottom) y = LayoutCaption(caption, bx, y, boxW);
 
             tableTop = y;
             tableGroup = new GroupOp();
@@ -467,6 +548,10 @@ internal sealed partial class LayoutEngine
 
         float tableBottom = cy + frameB;
         if (tableH is float minBottom && tableBottom - tableTop < minBottom) tableBottom = tableTop + minBottom;
+        // caption-side: bottom puts a caption under the table's border box.
+        float bottom = tableBottom;
+        foreach (var caption in m.Captions)
+            if (caption.Style.CaptionBottom) bottom = LayoutCaption(caption, bx, bottom, boxW);
         int sides = collapse && m.Rows.Count > 0 ? TableSides(m) : BoxPainter.AllSides;
         if (pageColumns != null && !SameOnPages(tableBox!, tableTop, tableBottom))
             PaintOnPages(tableGroup, s, tableBox!, tableTop, tableBottom, sides, collapse);
@@ -476,7 +561,14 @@ internal sealed partial class LayoutEngine
         _lastBoxTop = tableTop;
         _lastBoxW = boxW;
         _lastBoxH = tableBottom - tableTop;
-        return tableBottom;
+        return bottom;
+    }
+
+    /// <summary>Lays out a table caption at <paramref name="y"/>, as wide as the table; returns the bottom of its margin.</summary>
+    private float LayoutCaption(Element caption, float x, float y, float boxW)
+    {
+        var cs = caption.Style;
+        return LayoutBlockBox(caption, x, y + cs.MarginTop.Resolve(boxW), boxW, shrinkToFit: false) + cs.MarginBottom.Resolve(boxW);
     }
 
     /// <summary>
@@ -551,6 +643,19 @@ internal sealed partial class LayoutEngine
         var widths = specified && s.TableLayoutFixed ? FixedColumns(m, avail) : AllocateColumns(m, avail, specified);
         float contentW = gridSpace;
         foreach (var cw in widths) contentW += cw;
+        // As in Chrome, a table is at least as wide as its captions' min-content widths: the columns share the rest.
+        if (m.Captions.Count > 0 && !(specified && s.TableLayoutFixed))
+        {
+            float captionMin = 0;
+            foreach (var caption in m.Captions)
+                captionMin = Math.Max(captionMin, Intrinsic(caption).Min + FixedHorizontalMargins(caption.Style));
+            if (captionMin > contentW + frameH + 0.01f && n > 0)
+            {
+                widths = AllocateColumns(m, captionMin - frameH - gridSpace, widthSpecified: true);
+                contentW = gridSpace;
+                foreach (var cw in widths) contentW += cw;
+            }
+        }
         float boxW = contentW + frameL + frameR;
         if (s.MarginLeft.IsAuto && s.MarginRight.IsAuto) ml = Math.Max(0, (availW - boxW) / 2);
         else if (s.MarginLeft.IsAuto) ml = Math.Max(0, availW - boxW - mr);
@@ -744,10 +849,30 @@ internal sealed partial class LayoutEngine
 
         foreach (var cell in row.Ending) FinishCell(m, cell, rowBottom, collapse);
 
-        var rs = row.Tr.Style;
-        if (CssColor.IsVisible(rs.BackgroundColor) && row.Cells.Count + row.Ending.Count > 0)
-            rowGroup.Ops.Add(new RectOp(colX[0], rowTop, colX[n] - hs - colX[0], rowBottom - rowTop, rs.BackgroundColor));
+        // Under the cells, from the bottom up (CSS 2.1 §17.5.1): column groups, columns, the row group and the row.
+        if (row.Cells.Count + row.Ending.Count > 0)
+        {
+            if (m.ColGroupBackground != null) PaintColumns(m, m.ColGroupBackground, r, rowGroup, rowTop, rowBottom, colX, widths, hs);
+            if (m.ColBackground != null) PaintColumns(m, m.ColBackground, r, rowGroup, rowTop, rowBottom, colX, widths, hs);
+            if (row.Group?.Style is { } gs && CssColor.IsVisible(gs.BackgroundColor))
+                rowGroup.Ops.Add(new RectOp(colX[0], rowTop, colX[n] - hs - colX[0], rowBottom - rowTop, gs.BackgroundColor));
+            var rs = row.Tr.Style;
+            if (CssColor.IsVisible(rs.BackgroundColor))
+                rowGroup.Ops.Add(new RectOp(colX[0], rowTop, colX[n] - hs - colX[0], rowBottom - rowTop, rs.BackgroundColor));
+        }
         return rowBottom;
+    }
+
+    /// <summary>The background of each column that has one, in row <paramref name="r"/> where a cell covers it.</summary>
+    private static void PaintColumns(TableModel m, uint[] colors, int r, GroupOp into, float top, float bottom, float[] colX, float[] widths, float hs)
+    {
+        for (int c = 0; c < m.ColCount; c++)
+        {
+            if (!CssColor.IsVisible(colors[c]) || m.Grid[r, c] == null) continue;
+            // Right to left, the columns run from the right, as the cells do (see LayoutCell).
+            float x = m.Rtl ? colX[0] + colX[^1] - hs - colX[c] - widths[c] : colX[c];
+            into.Ops.Add(new RectOp(x, top, widths[c], bottom - top, colors[c]));
+        }
     }
 
     /// <summary>
@@ -927,7 +1052,21 @@ internal sealed partial class LayoutEngine
                 h += cs.BorderTop / 2;
             }
         }
+        // empty-cells: hide leaves a cell without content bare, with separated borders only.
+        if (cs.EmptyCellsHide && !collapse && IsEmptyCell(cell.Td)) return;
         BoxPainter.Paint(cell.Group!, cs, x, y, w, h, _images, w, sides, collapsedCell: collapse, backgroundArea);
+    }
+
+    /// <summary>A cell with nothing in it but white space, which empty-cells: hide does not paint.</summary>
+    private static bool IsEmptyCell(Element td)
+    {
+        foreach (var c in td.Children)
+        {
+            if (c is TextNode t && string.IsNullOrWhiteSpace(t.Text)) continue;
+            if (c is Element { Style.Display: Display.None }) continue;
+            return false;
+        }
+        return true;
     }
 
     /// <summary>

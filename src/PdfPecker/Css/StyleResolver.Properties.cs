@@ -92,6 +92,8 @@ internal sealed partial class StyleResolver
             case "container-name": ApplyContainerName(s, parent, in d); break;
             case "table-layout": s.TableLayoutFixed = d.Lower == "fixed"; break;
             case "border-collapse": s.BorderCollapse = d.Lower == "collapse"; break;
+            case "caption-side": s.CaptionBottom = d.Lower == "bottom"; break;
+            case "empty-cells": s.EmptyCellsHide = d.Lower == "hide"; break;
             case "border-spacing-h": ApplyBorderSpacing(ref s.BorderSpacingH, in d); break;
             case "border-spacing-v": ApplyBorderSpacing(ref s.BorderSpacingV, in d); break;
 
