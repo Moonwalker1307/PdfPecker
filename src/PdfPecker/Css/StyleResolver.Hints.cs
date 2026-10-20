@@ -82,10 +82,10 @@ internal sealed partial class StyleResolver
                 break;
             case "input" when e.Control is { Kind: Layout.ControlKind.Text }:
                 // Chrome sizes a text field from its size attribute: 0.6em a character, and a little more.
-                if (Layout.FormControls.FieldChars(e) is int chars) Hint("width", Em(Layout.FormControls.FieldWidthEm(chars)));
+                if (Layout.FormControls.FieldChars(e) is int chars) Hint(ControlWidthProperty, Em(Layout.FormControls.FieldWidthEm(chars)));
                 break;
             case "textarea":
-                if (Layout.FormControls.FieldChars(e) is int cols) Hint("width", Em(Layout.FormControls.FieldWidthEm(cols)));
+                if (Layout.FormControls.FieldChars(e) is int cols) Hint(ControlWidthProperty, Em(Layout.FormControls.FieldWidthEm(cols)));
                 break;
             case "select" when e.Control is { Kind: Layout.ControlKind.List }:
             {
@@ -298,6 +298,9 @@ internal sealed partial class StyleResolver
 
     // The internal property that carries the lang attribute into the computed style.
     private const string LangProperty = "-pdfpecker-lang";
+
+    // The internal property that carries a text field's own width, which Chrome uses while the page leaves width auto.
+    private const string ControlWidthProperty = "-pdfpecker-control-width";
 
     private void Hint(string property, string value)
     {

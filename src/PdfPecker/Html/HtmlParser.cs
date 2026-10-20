@@ -112,7 +112,9 @@ internal sealed class HtmlParser
         string text = HtmlEntities.Decode(raw);
         // Merge with a preceding text node (happens around comments and ignored end tags). The pieces are collected in
         // a builder: appending to the node's string each time would be quadratic for many pieces.
-        if (cur.Children.Count > 0 && cur.Children[cur.Children.Count - 1] is TextNode prev)
+        if (IsTableContext(cur.Name) && !string.IsNullOrWhiteSpace(text))
+            Foster(new TextNode(text));
+        else if (cur.Children.Count > 0 && cur.Children[cur.Children.Count - 1] is TextNode prev)
         {
             if (_merging != prev)
             {
@@ -182,6 +184,9 @@ internal sealed class HtmlParser
             bool selfClosing = ParseAttributes(el, ref p);
             _pos = p;
 
+            if (IsTableStructure(name) && name != "table") CloseFostered();
+            else if (name == "form" && HasOpen("form")) return; // browsers ignore a form inside a form
+            else if (name is "input" or "textarea") CloseSelect();
             ImplicitlyClose(name);
             if (name == "tr" && Current.Name == "table")
             {
@@ -190,7 +195,15 @@ internal sealed class HtmlParser
                 Current.AppendChild(tbody);
                 _stack.Add(tbody);
             }
-            Current.AppendChild(el);
+            bool inTable = IsTableContext(Current.Name) && !IsTableStructure(name);
+            if (inTable && name == "form")
+            {
+                // A form directly in a table or row stays there without holding the cells that follow, as in browsers.
+                Current.AppendChild(el);
+                return;
+            }
+            if (inTable && !StaysInTable(el)) Foster(el);
+            else Current.AppendChild(el);
 
             if (VoidElements.Contains(name) || selfClosing && name != "script")
                 return;
@@ -330,6 +343,66 @@ internal sealed class HtmlParser
 
     private static bool IsTableStructure(string name)
         => name is "table" or "tr" or "td" or "th" or "tbody" or "thead" or "tfoot" or "caption";
+
+    // Where only rows, cells and sections belong: anything else written there is moved in front of the table.
+    private static bool IsTableContext(string name) => name is "table" or "tbody" or "thead" or "tfoot" or "tr";
+
+    private static bool StaysInTable(Element el)
+        => el.Name is "col" or "colgroup" or "script" or "style" or "template"
+           || el.Name == "input" && string.Equals(el.GetAttribute("type")?.Trim(), "hidden", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Puts a node that a table cannot hold in front of the table, as browsers' foster parenting does; otherwise the
+    /// table layout, which only looks at rows and cells, would drop it.
+    /// </summary>
+    private void Foster(Node node)
+    {
+        for (int i = _stack.Count - 1; i > 0; i--)
+        {
+            var table = _stack[i];
+            if (table.Name != "table") continue;
+            if (table.Parent is not { } parent) break;
+            // The open table is its parent's last child, so the search from the end stops at once.
+            parent.Children.Insert(parent.Children.LastIndexOf(table), node);
+            node.Parent = parent;
+            return;
+        }
+        Current.AppendChild(node);
+    }
+
+    /// <summary>
+    /// Closes the elements that were moved in front of a table when the table's own structure continues, so that the
+    /// next row or cell goes back into the table.
+    /// </summary>
+    private void CloseFostered()
+    {
+        for (int i = _stack.Count - 1; i > 0; i--)
+        {
+            string n = _stack[i].Name;
+            if (n is "td" or "th" or "caption") return;
+            if (!IsTableContext(n)) continue;
+            if (i + 1 < _stack.Count && _stack[i + 1].Parent != _stack[i]) _stack.RemoveRange(i + 1, _stack.Count - i - 1);
+            return;
+        }
+    }
+
+    private bool HasOpen(string name)
+    {
+        for (int i = _stack.Count - 1; i > 0; i--)
+            if (_stack[i].Name == name) return true;
+        return false;
+    }
+
+    /// <summary>A field cannot sit inside a drop-down: browsers close the select (and its open options) first.</summary>
+    private void CloseSelect()
+    {
+        for (int i = _stack.Count - 1; i > 0; i--)
+        {
+            string n = _stack[i].Name;
+            if (n == "select") { _stack.RemoveRange(i, _stack.Count - i); return; }
+            if (n is not ("option" or "optgroup")) return;
+        }
+    }
 
     private void CloseElement(string name)
     {

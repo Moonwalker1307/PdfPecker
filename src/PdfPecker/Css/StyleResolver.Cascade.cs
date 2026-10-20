@@ -147,6 +147,7 @@ internal sealed partial class StyleResolver
             else if (s.Display == Display.InlineFlex) s.Display = Display.Flex;
             else if (s.Display == Display.InlineGrid) s.Display = Display.Grid;
         }
+        if (!s.ControlWidth.IsAuto && s.Width.IsAuto && !StretchedAcross(s, parent)) s.Width = s.ControlWidth;
         // Flex and grid items are laid out as blocks, which carry their own opacity layer.
         bool inlineBox = s.Display == Display.Inline && !parent.IsFlex && !parent.IsGrid;
         s.InlineFade = inlineBox ? s.Opacity * (parent.Display == Display.Inline ? parent.InlineFade : 1) : 1;
@@ -154,6 +155,26 @@ internal sealed partial class StyleResolver
         if (cacheable) _styleCache[_probe.Freeze()] = s;
         Array.Clear(_decls, 0, _count);
         return s;
+    }
+
+    /// <summary>
+    /// Whether a flex column or a grid stretches the box over its width. Chrome sizes a text field with width auto to
+    /// its size attribute, except where stretching gives it the width of its line or grid area.
+    /// </summary>
+    private static bool StretchedAcross(ComputedStyle s, ComputedStyle parent)
+    {
+        if (s.OutOfFlow || s.MarginLeft.IsAuto || s.MarginRight.IsAuto) return false;
+        if (parent.IsFlex && !parent.IsRow)
+        {
+            var align = s.AlignSelf == BoxAlign.Auto ? parent.AlignItems : s.AlignSelf;
+            return align is BoxAlign.Stretch or BoxAlign.Normal;
+        }
+        if (parent.IsGrid)
+        {
+            var justify = s.JustifySelf == BoxAlign.Auto ? parent.JustifyItems : s.JustifySelf;
+            return justify is BoxAlign.Stretch or BoxAlign.Normal or BoxAlign.Auto;
+        }
+        return false;
     }
 
     /// <summary>Whether a declaration in the working buffer uses cq units, or may through var().</summary>

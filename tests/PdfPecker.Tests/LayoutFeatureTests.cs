@@ -901,4 +901,24 @@ public class LayoutFeatureTests
         while ((i = haystack.IndexOf(needle, i, StringComparison.Ordinal)) >= 0) { n++; i += needle.Length; }
         return n;
     }
+
+    [Fact]
+    public void Text_fields_stretch_in_flex_columns_and_grids_but_keep_their_width_elsewhere()
+    {
+        var doc = Styled("""
+            <style>.col { display: flex; flex-direction: column } .grid { display: grid } .start { align-items: start }</style>
+            <p><input id="inline"></p>
+            <div class="col"><input id="col"><input id="sized" size="5"><input id="set" style="width: 50px"></div>
+            <div class="col start"><input id="start"></div>
+            <div class="grid"><input id="grid"><textarea id="area"></textarea></div>
+            """);
+        Element El(string id) => Find(doc, "input").Concat(Find(doc, "textarea")).First(e => e.Id == id);
+        Assert.False(El("inline").Style.Width.IsAuto);
+        Assert.True(El("col").Style.Width.IsAuto);
+        Assert.True(El("sized").Style.Width.IsAuto);
+        Assert.False(El("set").Style.Width.IsAuto);
+        Assert.False(El("start").Style.Width.IsAuto);
+        Assert.True(El("grid").Style.Width.IsAuto);
+        Assert.True(El("area").Style.Width.IsAuto);
+    }
 }
