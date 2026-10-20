@@ -1759,6 +1759,33 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(html));
     }
 
+    [Fact]
+    public void Deeply_nested_flex_boxes_in_columns_are_measured_to_a_bounded_depth()
+    {
+        // Found by the fuzzer: target html, timeout-1b5a0815. Each flex box in columns measures its content by laying it
+        // out, and every level measured the levels inside it afresh, so the work grew with the square of the depth:
+        // flex boxes nested to the parser's depth limit, twice over, took 6.5 s.
+        const string text = "Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt. ";
+        var html = "<style>body{font-size:9pt}h4{break-after:avoid}</style><div style='columns:3'><p>" + Repeat(text, 12)
+            + "<h4>Heading</h4><p>" + text + Repeat("<div style='display:flex'>", 500) + Repeat("</div>", 250)
+            + Repeat("<div style='display:flex'>", 200) + "end</div>";
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
+    public void Nested_boxes_kept_whole_in_columns_are_tried_in_the_next_column_to_a_bounded_depth()
+    {
+        // Found by the fuzzer: target html, timeout-14fbab57. Each break-inside: avoid box in columns that did not fit
+        // was laid out again in the next column, together with every box inside it, so the work doubled with each
+        // level: 33 levels of boxes holding empty headings took 6 s.
+        const string text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero. ";
+        var html = "<style>@page{size:A5;margin:18mm 14mm 16mm}.cols{column-count:2;column-gap:8mm}"
+            + ".box{break-inside:avoid;border:0.75pt solid;padding:5pt;margin:6pt 0}h4{margin:0 0 3pt}td{padding:2pt 3pt}</style>"
+            + "<li><a href='#x'>Contents<div class=cols>" + Repeat("<p>" + text + text + "</p>", 5)
+            + Repeat("<div class=box><h4></p>", 40) + Repeat("<table><tr><td>", 20) + "end</div>";
+        AssertStructurallyValid(Bounded(html));
+    }
+
     [Theory]
     [InlineData("<style>td{border:solid</style><table ><tr><td rowspan=2><tfoot><tr")]
     [InlineData("<style>td{border:1px solid}</style><table><thead><tr><td rowspan=3>h</td></tr></thead><tr><td>a</td></tr><tr><td>b</td></tr></table>")]
