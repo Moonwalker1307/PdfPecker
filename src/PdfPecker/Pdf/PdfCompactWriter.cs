@@ -84,6 +84,8 @@ internal sealed partial class PdfCompactWriter : PdfObjectWriter
         if (!_removeMetadata && _file.Resolve(trailer["Info"]) is PdfDict) infoKey = trailer["Info"] is PdfRef info ? info.Num : DirectInfoKey;
         Collect(rootKey, infoKey);
         if (!_objects.ContainsKey(rootKey)) throw new InvalidDataException("The PDF is not readable: it has no catalog.");
+        // An information dictionary reached only through a reference to a reference is not collected, and is left out.
+        if (!_objects.ContainsKey(infoKey)) infoKey = 0;
 
         var placements = _options.MaxImageDpi != null ? ScanImagePlacements() : null;
         // A stream repeated with the same dictionary (the same font in every merged document) is recompressed once.
