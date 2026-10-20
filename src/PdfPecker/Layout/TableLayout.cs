@@ -58,6 +58,9 @@ internal sealed partial class LayoutEngine
     /// </summary>
     private int _measuringRows;
 
+    /// <summary>How many tables are being laid out around the current point.</summary>
+    private int _tableDepth;
+
     /// <summary>
     /// The keep-with-next probe of the table whose rows are being laid out, until its first content is placed (see
     /// <see cref="CanProbe"/>); null otherwise, and inside the cells, whose tables take a probe of their own.
@@ -369,6 +372,7 @@ internal sealed partial class LayoutEngine
         if (table.Id != null) SetAnchor(table.Id, y);
         if (table.LayoutKey != null) SetAnchor(table.LayoutKey, y);
         var m = GetTableModel(table);
+        DebugT.Tables[Math.Min(_tableDepth,63)]++; if (probe != null) DebugT.Probed++;
         bool collapse = s.BorderCollapse;
         float hs = collapse ? 0 : s.BorderSpacingH, vs = collapse ? 0 : s.BorderSpacingV;
         var (bx, boxW, frameT, frameB, frameH, colX, widths) = TableGeometry(table, m, x, availW);
@@ -405,7 +409,12 @@ internal sealed partial class LayoutEngine
         GroupOp tableGroup;
         // As in Chrome, when the first row does not fit on the page, the table starts on the next page with its
         // header, rather than leaving the header (and the footer) behind on their own.
-        m.MayMoveTable = _paginate && !AtPageTop(startY);
+        // In columns, a table nested deeper than a box kept whole may be (see MaxKeptWholeNesting) moves neither whole
+        // nor by row to the next column: each level laid the levels inside it out again for every column it tried, and
+        // balancing repeated that for each height, so the work grew with the cube of the depth.
+        bool mayMove = _tableDepth < MaxKeptWholeNesting || _grid is not ColumnGrid;
+        m.MayMoveTable = mayMove && _paginate && !AtPageTop(startY);
+        _tableDepth++;
         while (true)
         {
             foreach (var caption in m.Captions)
@@ -435,19 +444,21 @@ internal sealed partial class LayoutEngine
             m.TableMove = null;
             for (int r = 0; r < m.Rows.Count; r++)
             {
-                cy = LayoutRow(m, r, cy, colX, widths, hs, vs, collapse, allowMove: true, pageColumns) + vs;
+                cy = LayoutRow(m, r, cy, colX, widths, hs, vs, collapse, allowMove: mayMove, pageColumns) + vs;
                 // The first content is past the chain's page: the chain moves and lays the table out again, so the rest
                 // of this layout would be thrown away.
                 if (probe is { Done: true } || m.TableMove != null) break;
             }
             if (m.TableMove is not float shortage) break;
             Truncate(startOps);
+            DebugT.TableMoves[Math.Min(_tableDepth,63)]++;
             m.MayMoveTable = false;
             _columnNotes?.Break(PageOf(startY), startY, shortage);
             y = NextPage(startY);
             if (table.Id != null) SetAnchor(table.Id, y);
             if (table.LayoutKey != null) SetAnchor(table.LayoutKey, y);
         }
+        _tableDepth--;
         m.MayMoveTable = false;
         _rowProbe = outerProbe;
         m.RowExtra = null;
@@ -695,6 +706,7 @@ internal sealed partial class LayoutEngine
                     m.TableMove = rowBottom + reserve - FlowEnd(PageOf(rowTop));
                     return rowTop;
                 }
+                if (move) DebugT.RowMoves[Math.Min(_tableDepth,63)]++; else DebugT.AtBreaks[Math.Min(_tableDepth,63)]++;
                 if (move)
                 {
                     _columnNotes?.Break(PageOf(rowTop), rowTop, rowBottom - FlowEnd(PageOf(rowTop)));
@@ -719,6 +731,7 @@ internal sealed partial class LayoutEngine
                         rowTop = LayoutRow(m, h, rowTop, colX, widths, hs, vs, collapse, allowMove: false, pageColumns) + vs;
                     // The structure has the header once: its repeats are artifacts.
                     if (Tags != null) Untag(_ops, headOps);
+                    DebugT.HeadRepeats[Math.Min(_tableDepth,63)]++;
                     if (rowTop - headStart > _grid.Height(PageOf(headStart)) / 2)
                     {
                         // Headers too tall to repeat usefully: drop them again.
@@ -883,7 +896,9 @@ internal sealed partial class LayoutEngine
     {
         var cs = cell.Td.Style;
         float h = rowBottom - cell.Top;
-        float shift = cs.VerticalAlign switch
+        // As in Chrome, a cell that is split across pages or columns keeps its content at the top: aligned within the
+        // whole cell, the content would start pages later, away from the heading that must stay with the table.
+        float shift = CrossesPage(cell.Top, rowBottom) ? 0 : cs.VerticalAlign switch
         {
             // The content is aligned within the whole cell, also when the cell's height made it taller than the content.
             VerticalAlign.Middle => (h - cell.ContentH) / 2,
@@ -1201,5 +1216,18 @@ internal sealed partial class LayoutEngine
         ReturnRun(run);
         _measuring = saved;
         return (min, max);
+    }
+}
+
+#pragma warning disable CS1591
+public static class DebugT
+{
+    public static long Relayout, Rewind, Probed, RewindStopped; public static long[] RewindAt = new long[64], RewindFull = new long[64];
+    public static long[] Tables = new long[64], TableMoves = new long[64], RowMoves = new long[64], AtBreaks = new long[64], HeadRepeats = new long[64];
+    public static string Summary()
+    {
+        var sb = new System.Text.StringBuilder(System.FormattableString.Invariant($"relayout {Relayout} rewind {Rewind} probed {Probed} rewindStopped {RewindStopped}\n"));
+        for (int i = 0; i < 64; i++) if (Tables[i] > 0) sb.Append(System.FormattableString.Invariant($"d{i}: rewind {RewindAt[i]} full {RewindFull[i]} tables {Tables[i]} tmove {TableMoves[i]} rmove {RowMoves[i]} atbreak {AtBreaks[i]} heads {HeadRepeats[i]}\n"));
+        return sb.ToString();
     }
 }

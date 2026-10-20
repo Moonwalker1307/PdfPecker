@@ -106,6 +106,18 @@ public class HostileInputTests
             }
     }
 
+    [Theory]
+    [InlineData("\u05A7\uFFFD")]
+    [InlineData("\u0301hyphenation")]
+    [InlineData("\u0301\u0302\u0303")]
+    public void Hyphenating_a_word_that_starts_with_a_combining_mark_does_not_recurse(string word)
+    {
+        // Found by the fuzzer: target html, crash-fc14afb8. A word with combining marks is composed letter by letter
+        // for the patterns, but a mark with no letter before it stays a mark, so the composed word was composed again
+        // until the stack overflowed and the process died.
+        AssertStructurallyValid(Bounded($"<p lang=en style='hyphens: auto'>{word}</p>"));
+    }
+
     [Fact]
     public void Many_custom_properties_on_many_elements_stay_linear()
     {
@@ -421,7 +433,9 @@ public class HostileInputTests
     public void Page_count_is_limited()
     {
         Assert.Throws<PdfLimitException>(() => Bounded("<div style='height:100000000px'>x</div>", new PdfOptions { MaxPages = 1000 }));
-        Assert.Throws<PdfLimitException>(() => Bounded("<p style='margin-top:1e30px'>x</p>"));
+        // A top margin that reaches past the end of a page is cut off at the break, as in Chrome: the paragraph starts
+        // the second page instead of one far down the document.
+        Assert.Equal(2, PageCount(Bounded("<p style='margin-top:1e30px'>x</p>")));
         Assert.Throws<PdfLimitException>(() => Bounded("<div style='border-radius:1e30px;border:1e30px solid red'>x</div>"));
         Assert.Throws<PdfLimitException>(() => Bounded(Repeat("<div style='page-break-before:always'>x</div>", 50), new PdfOptions { MaxPages = 20 }));
         Assert.Equal(20, PageCount(Bounded(Repeat("<div style='page-break-before:always'>x</div>", 20), new PdfOptions { MaxPages = 20 })));
@@ -1706,6 +1720,97 @@ public class HostileInputTests
         var html = "<style>@page{size:148mm 190mm;margin:12mm}body{font-size:8pt}.c2{column-count:2;column-gap:6mm}</style>"
             + "<div class=\"c2\"><p>" + Repeat(lorem, 2) + Repeat("<div style=\"display:flex\">", 200) + Repeat(lorem, 4)
             + "</p><p>" + Repeat(lorem, 3);
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Theory]
+    [InlineData("<div style='height:690px'></div>", "<div class=\"c\">", "text")]
+    [InlineData("<div style='height:300px'></div>", "<div class=\"c\">", "text<br>text<br>text<br>text<br>text")]
+    [InlineData("", "<div style='height:37px'></div><div class=\"c\">text<br>text", "")]
+    [InlineData("<div style='height:470px'></div>", "<div style='border-bottom:1px solid'>", "text")]
+    public void Nested_boxes_at_page_ends_are_moved_without_laying_out_each_level_again(string before, string level, string after)
+    {
+        // A box whose first content moves to the next page moves with it, and a bottom border that does not fit takes
+        // the last lines along. Each move lays the box out again; deciding it only after the boxes inside were laid out
+        // in full made every level lay out all the levels inside it again, which took exponential time.
+        var html = "<style>@page{size:A5;margin:12mm}.c{border:1px solid #888;padding:0 2px}</style>" + before
+            + Repeat(level, 3000) + after;
+        AssertStructurallyValid(Bounded(html, new PdfOptions { MaxPages = 1000 }));
+    }
+
+    [Theory]
+    [InlineData("<h3>Named grid areas</h3><div style=\"display:grid; grid-template-areas:'head head' 'side main'; grid-template-columns:100px 1fr\"><div style=\"grid-area:main\">main</div><div style=\"grid-area:head\">head", 30)]
+    [InlineData("<h2>WebP and GIF</h2><div style=\"display:flex; flex-wrap:wrap; gap:10px\"><figurev>", 40)]
+    public void Headings_nested_in_boxes_kept_with_headings_move_to_a_bounded_depth(string level, int depth)
+    {
+        // Found by the nightly fuzz run: target html, timeout-1b5a0815, timeout-14fbab57 and timeout-b4187992. Each
+        // level is a heading kept with a box that holds the next level, and where its first text fell on a later page
+        // the heading moved to the next page and everything in the box was laid out again, at every level, so the work
+        // doubled with each one: 31 levels took 15 s. Headings nested deeper than eight such boxes stay where they are.
+        var html = "<p style='height: 600pt'>Before</p>" + Repeat(level, depth) + "end";
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
+    public void Headings_before_tables_nested_in_split_header_cells_are_laid_out_once()
+    {
+        // Found by the fuzzer: target html, timeout-c201378d. Each level is a heading kept with a table whose header row
+        // holds the next level. The header cells were centred in their rows, which span pages, so each table's first
+        // text ended on a later page than its heading after the table was laid out in full; the heading then moved to
+        // the next page and the table was laid out again, at every level: 17 levels took 7 s.
+        var html = Repeat("<h2>A table</h2><table><thead><tr><th>Language</th><th>Sample</th><th>", 22)
+            + "<table><tr><td>end</td></tr></table>" + Repeat("<p>Lorem ipsum dolor sit amet.</p>", 80);
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
+    public void Deeply_nested_tables_in_columns_move_to_the_next_column_to_a_bounded_depth()
+    {
+        // Found by the nightly fuzz run: target html, timeout-14fbab57. In columns each nested table that did not fit
+        // moved whole to the next column and laid out every table inside it again, in every balancing pass, so the work
+        // grew with the cube of the depth: 60 levels took 10 s. Tables nested deeper than eight break where they fall.
+        var nest = Repeat("<table><tr><td>", 60) + "quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo"
+            + Repeat("</td></tr></table>", 60);
+        var html = "<style>.cols{columns:3;column-gap:14pt;font-size:9pt}</style>"
+            + Repeat("<div class=\"cols\"><p>Column rules sit in the gaps between columns.</p>" + nest + "</div>", 6);
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
+    public void Deeply_nested_flex_boxes_in_columns_are_measured_to_a_bounded_depth()
+    {
+        // Found by the fuzzer: target html, timeout-1b5a0815. Each flex box in columns measures its content by laying it
+        // out, and every level measured the levels inside it afresh, so the work grew with the square of the depth:
+        // flex boxes nested to the parser's depth limit, twice over, took 6.5 s.
+        const string text = "Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt. ";
+        var html = "<style>body{font-size:9pt}h4{break-after:avoid}</style><div style='columns:3'><p>" + Repeat(text, 12)
+            + "<h4>Heading</h4><p>" + text + Repeat("<div style='display:flex'>", 500) + Repeat("</div>", 250)
+            + Repeat("<div style='display:flex'>", 200) + "end</div>";
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
+    public void Nested_boxes_kept_whole_in_columns_are_tried_in_the_next_column_to_a_bounded_depth()
+    {
+        // Found by the fuzzer: target html, timeout-14fbab57. Each break-inside: avoid box in columns that did not fit
+        // was laid out again in the next column, together with every box inside it, so the work doubled with each
+        // level: 33 levels of boxes holding empty headings took 6 s.
+        const string text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero. ";
+        var html = "<style>@page{size:A5;margin:18mm 14mm 16mm}.cols{column-count:2;column-gap:8mm}"
+            + ".box{break-inside:avoid;border:0.75pt solid;padding:5pt;margin:6pt 0}h4{margin:0 0 3pt}td{padding:2pt 3pt}</style>"
+            + "<li><a href='#x'>Contents<div class=cols>" + Repeat("<p>" + text + text + "</p>", 5)
+            + Repeat("<div class=box><h4></p>", 40) + Repeat("<table><tr><td>", 20) + "end</div>";
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
+    public void Anchors_in_nested_flex_boxes_are_noted_once_per_level()
+    {
+        // Found by the fuzzer: target html, memory-c058a39b. Content placed twice in a capture noted its anchors twice,
+        // so a heading's anchor was noted 2^n times n boxes up: 25 levels of positioned flex boxes in a grid ran out of
+        // memory.
+        var html = "<style>.g{display:grid}.g div{padding:4pt}.l div{position:absolute;width:80pt;height:24pt}</style>"
+            + "<div class=g><div class=l>" + Repeat("<div style='display:flex'>", 40) + "<h2>Heading";
         AssertStructurallyValid(Bounded(html));
     }
 

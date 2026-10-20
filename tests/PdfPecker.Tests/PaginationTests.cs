@@ -110,6 +110,98 @@ public class PaginationTests
         Assert.Equal(1, Lines(none, "line").Count(l => Page(l.LineTop) == 1));
     }
 
+    // The top of what a border, background or line of text draws.
+    private static float? DrawnTop(DrawOp op) => op switch
+    {
+        TextOp t => t.LineTop,
+        RectOp r => r.Y,
+        BorderRectOp b => b.Y,
+        LineOp l => Math.Min(l.Y1, l.Y2),
+        _ => null,
+    };
+
+    private const string Box = ".box{border:2pt solid #888; padding:6pt 8pt} .f{float:right; border:1pt dashed #aa0}";
+
+    [Theory]
+    [InlineData("<div class='box'>Boxed text</div>")]
+    [InlineData("<div class='box'><span class='f'>Note</span>Boxed text</div>")]
+    [InlineData("<fieldset class='box'><legend class='f'>Note</legend>Boxed text</fieldset>")]
+    [InlineData("<div class='box'><div class='box'>Boxed text</div></div>")]
+    public void A_box_whose_top_edge_alone_fits_moves_to_the_next_page(string box)
+    {
+        // 180pt of filler leaves 20pt: room for the top border and padding, not for the first line. Chrome moves the
+        // whole box rather than leave an empty piece of it, and of the float in it, at the end of the page.
+        var ops = Layout("<style>" + Body + " body{font: 10pt/20pt Helvetica}" + Box + "</style><div style='height:180pt'></div>" + box);
+        Assert.Equal(1, Page(Lines(ops, "Boxed").Single().LineTop));
+        Assert.DoesNotContain(ops, o => DrawnTop(o) is float top && Page(top) == 0);
+    }
+
+    [Fact]
+    public void A_box_that_draws_before_its_first_line_keeps_its_place()
+    {
+        // The rule fits at the end of the page, so the box breaks between it and the paragraph after it, as in Chrome.
+        var ops = Layout("<style>" + Body + Box + " hr{margin:2pt 0}</style><div style='height:184pt'></div>" +
+                         "<div class='box'><hr><p>Boxed text</p></div>");
+        Assert.Equal(1, Page(Lines(ops, "Boxed").Single().LineTop));
+        Assert.Contains(ops, o => DrawnTop(o) is float top && Page(top) == 0);
+    }
+
+    [Theory]
+    [InlineData("div")]
+    [InlineData("fieldset")]
+    public void A_bottom_edge_that_does_not_fit_takes_the_last_line_along(string tag)
+    {
+        // The line ends at 196pt, but the bottom padding and border would end at 204pt: Chrome moves the box.
+        var ops = Layout("<style>" + Body + Box + "</style><div style='height:168pt'></div>" +
+                         $"<{tag} class='box'><p>Boxed text</p></{tag}>");
+        Assert.Equal(1, Page(Lines(ops, "Boxed").Single().LineTop));
+        Assert.DoesNotContain(ops, o => DrawnTop(o) is float top && Page(top) == 0);
+    }
+
+    [Fact]
+    public void A_bottom_edge_that_does_not_fit_takes_the_last_lines_of_a_tall_box_along()
+    {
+        // Seven lines end at 200pt, the border after them does not fit: the break goes before the last two lines
+        // (widows), which move with the border, and the box is not moved whole.
+        string text = string.Join("<br>", Enumerable.Range(1, 7).Select(i => "line" + i));
+        var ops = Layout("<style>" + Body + "</style><div style='height:60pt'></div>" +
+                         "<div style='border-bottom:6pt solid'><p>" + text + "</p></div>");
+        var lines = Lines(ops, "line");
+        Assert.Equal(5, lines.Count(l => Page(l.LineTop) == 0));
+        Assert.Equal(2, lines.Count(l => Page(l.LineTop) == 1));
+    }
+
+    [Fact]
+    public void A_grid_whose_bottom_edge_does_not_fit_moves_whole()
+    {
+        // Chrome moves a grid that fits on the next page rather than break between its rows for its bottom edge.
+        var ops = Layout("<style>" + Body + " .g{display:grid; grid-template-columns:1fr 1fr; border:2pt solid; padding:6pt}</style>" +
+                         "<div style='height:150pt'></div><div class='g'><p>cell1</p><p>cell2</p><p>cell3</p><p>cell4</p></div>");
+        Assert.All(Lines(ops, "cell"), l => Assert.Equal(1, Page(l.LineTop)));
+    }
+
+    [Theory]
+    [InlineData(190, "")]                   // the margin reaches past the end of the page
+    [InlineData(200, "")]                   // the content before ends with the page
+    [InlineData(150, "break-after:page;")]  // a forced break keeps the margin after it
+    public void A_top_margin_at_an_unforced_page_break_is_cut_off(int filler, string breakAfter)
+    {
+        var ops = Layout("<style>" + Body + " h2{margin:14pt 0 0; font: bold 12pt/20pt Helvetica}</style>" +
+                         $"<div style='height:{filler}pt;{breakAfter}'></div><h2>Heading</h2>");
+        var heading = Lines(ops, "Heading").Single();
+        Assert.Equal(1, Page(heading.LineTop));
+        Assert.Equal(breakAfter.Length == 0 ? PageHeight : PageHeight + 14, heading.LineTop, 0.05f);
+    }
+
+    [Fact]
+    public void A_top_margin_inside_a_box_at_the_top_of_a_page_stays()
+    {
+        // The margin of the first box inside one that starts a page is not at a break: Chrome keeps it.
+        var ops = Layout("<style>" + Body + " h2{margin:14pt 0 0; font: bold 12pt/20pt Helvetica}</style>" +
+                         "<div style='height:200pt'></div><div style='overflow:hidden'><h2>Heading</h2></div>");
+        Assert.Equal(PageHeight + 14, Lines(ops, "Heading").Single().LineTop, 0.05f);
+    }
+
     [Fact]
     public void Break_inside_avoid_moves_a_whole_table()
     {

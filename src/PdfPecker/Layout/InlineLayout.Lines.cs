@@ -183,6 +183,7 @@ internal sealed partial class LayoutEngine
             if (Footnotes != null && _paginate && !_measuring && _columnNotes == null) y = PlaceFootnoteCalls(line.Items, y, lineH);
             DrawLine(line, block, x, y, lineLeft, lineW, li == 0 ? indent : 0, lineA[li], lineH);
             y += lineH;
+            if (_paginate) _lastContentBottom = y;
         }
         return y;
     }

@@ -116,8 +116,11 @@ internal sealed partial class LayoutEngine
     /// <summary>The page (0-based, in this layout's flow) of each footnote's call.</summary>
     public IEnumerable<(int Index, int Page)> FootnoteCallPages => _footnoteCalls.Select(c => (c.Index, c.Page));
 
-    /// <summary>The page's last flow position content may reach: its end, less the space of its footnote area.</summary>
-    private float FlowEnd(int page) => _grid.Start(page + 1) - FootnoteReserve(page);
+    /// <summary>
+    /// The page's last flow position content may reach: its end, less the space of its footnote area and the room kept
+    /// for the bottom edges of the boxes around the content.
+    /// </summary>
+    private float FlowEnd(int page) => _grid.Start(page + 1) - FootnoteReserve(page) - EdgeReserve(page);
 
     /// <summary>The bottom of the last page a footnote area is on, for the page count; 0 without footnotes.</summary>
     private float FootnotesBottom()

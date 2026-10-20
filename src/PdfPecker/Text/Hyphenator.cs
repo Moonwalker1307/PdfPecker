@@ -260,7 +260,9 @@ internal sealed class Hyphenator
             {
                 return 0; // invariant globalization mode without normalization data
             }
-            if (letter.Length != 1) return 0;
+            // A mark with no letter before it (at the start of the word) stays a mark when composed, and hyphenating the
+            // composed word would come back here for ever.
+            if (letter.Length != 1 || CharUnicodeInfo.GetUnicodeCategory(letter[0]) == UnicodeCategory.NonSpacingMark) return 0;
             starts.Add(i);
             composed.Append(letter);
             i = j;

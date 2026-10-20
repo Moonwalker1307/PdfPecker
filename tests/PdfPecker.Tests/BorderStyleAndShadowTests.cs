@@ -84,6 +84,42 @@ public class BorderStyleAndShadowTests
     }
 
     [Fact]
+    public void A_two_pixel_groove_has_both_shades_as_in_Chrome()
+    {
+        // Chrome splits a groove from two pixels up: the default fieldset border is a dark and a light line, not one dark one.
+        string Box(string style) => Body + $"<div style='width:40px;height:40px;border:2px {style} #c00'></div>";
+        Near(0x78, 0, 0, Pixel(Box("groove"), 20, 0));
+        Near(0xCC, 0, 0, Pixel(Box("groove"), 20, 1));
+        Near(0x78, 0, 0, Pixel(Box("groove"), 20, 42));
+        Near(0xCC, 0, 0, Pixel(Box("groove"), 20, 43));
+        Near(0xCC, 0, 0, Pixel(Box("ridge"), 0, 20));
+        Near(0x78, 0, 0, Pixel(Box("ridge"), 1, 20));
+    }
+
+    [Theory]
+    [InlineData("groove")]
+    [InlineData("ridge")]
+    public void A_one_pixel_groove_or_ridge_is_drawn_unshaded(string style)
+    {
+        // Too thin for two shades, Chrome draws it in its own colour on every side.
+        var html = Body + $"<div style='width:40px;height:40px;border:1px {style} #c00'></div>";
+        Near(0xCC, 0, 0, Pixel(html, 20, 0));
+        Near(0xCC, 0, 0, Pixel(html, 0, 20));
+        Near(0xCC, 0, 0, Pixel(html, 20, 41));
+        Near(0xCC, 0, 0, Pixel(html, 41, 20));
+    }
+
+    [Fact]
+    public void A_collapsed_one_pixel_groove_is_drawn_unshaded()
+    {
+        var html = Body + "<table style='border-collapse:collapse'><tr><td style='width:40px;height:40px;padding:0;border:1px groove #c00'></td></tr></table>";
+        // Sampled inside each side, wherever the collapsed border's half-pixel edges land.
+        Near(0xCC, 0, 0, Pixel(html, 20, 1));
+        Near(0xCC, 0, 0, Pixel(html, 0, 20));
+        Near(0xCC, 0, 0, Pixel(html, 41, 20));
+    }
+
+    [Fact]
     public void Three_d_borders_with_rounded_corners_are_shaded()
     {
         var html = Body + "<div style='width:60px;height:40px;border:12px outset #c00;border-radius:16px'></div>";
@@ -102,6 +138,74 @@ public class BorderStyleAndShadowTests
         Assert.Equal(BorderStyle.Inset, s.BorderBottomStyle);
         Assert.Equal(BorderStyle.Outset, s.BorderLeftStyle);
     }
+
+    // ---- form controls styled by the page ----
+
+    private static ComputedStyle Control(string html)
+    {
+        var doc = HtmlParser.Parse(html);
+        new StyleResolver(new Stylesheet(), 500, 800).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
+        return Descendants(doc).First(e => e.Name is "input" or "textarea" or "select" or "button").Style;
+    }
+
+    private static bool Square(ComputedStyle s) => s.BorderRadii == null || s.BorderRadii.All(r => r.Value == 0);
+
+    [Fact]
+    public void An_unstyled_text_field_keeps_its_rounded_native_look()
+    {
+        var s = Control("<input value='x'>");
+        Assert.False(Square(s));
+        Assert.Equal(BorderStyle.Solid, s.BorderTopStyle);
+        Assert.Equal(0.75f, s.BorderTop);
+    }
+
+    [Fact]
+    public void A_text_field_with_a_border_from_the_page_is_square_with_Chromes_padding()
+    {
+        var s = Control("<input style='border:1px solid #888' value='x'>");
+        Assert.True(Square(s));
+        Assert.Equal(0.75f, s.BorderTop);
+        Assert.Equal(0.75f, s.PaddingTop.Value);   // 1px 2px, as in Chrome's user-agent sheet
+        Assert.Equal(1.5f, s.PaddingLeft.Value);
+    }
+
+    [Fact]
+    public void A_text_field_with_a_background_gets_Chromes_inset_border()
+    {
+        var s = Control("<input style='background:yellow' value='x'>");
+        Assert.True(Square(s));
+        Assert.Equal(BorderStyle.Inset, s.BorderTopStyle);
+        Assert.Equal(1.5f, s.BorderTop);
+        Assert.Equal(0xFF767676u, s.BorderTopColor);
+    }
+
+    [Fact]
+    public void A_styled_button_gets_Chromes_outset_black_border()
+    {
+        var s = Control("<button style='background:yellow'>Send</button>");
+        Assert.True(Square(s));
+        Assert.Equal(BorderStyle.Outset, s.BorderLeftStyle);
+        Assert.Equal(1.5f, s.BorderLeft);
+        Assert.Equal(0xFF000000u, s.BorderLeftColor);
+    }
+
+    [Theory]
+    [InlineData("<textarea style='border-color:red'>x</textarea>")]
+    [InlineData("<select style='border:2px solid red'><option>x</option></select>")]
+    public void Styled_text_areas_and_drop_downs_are_square(string html) => Assert.True(Square(Control(html)));
+
+    [Fact]
+    public void The_pages_own_radius_and_border_still_win()
+    {
+        var s = Control("<input style='border:3px dashed red;border-radius:6px' value='x'>");
+        Assert.False(Square(s));
+        Assert.Equal(BorderStyle.Dashed, s.BorderTopStyle);
+        Assert.Equal(2.25f, s.BorderTop);
+    }
+
+    [Fact]
+    public void A_styled_check_box_keeps_its_rounded_corners()
+        => Assert.False(Square(Control("<input type='checkbox' style='background:yellow'>")));
 
     // ---- inset box-shadow ----
 
