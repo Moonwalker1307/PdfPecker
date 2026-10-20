@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Boxes at page ends</title>
+<style>
+  @page { size: A5; margin: 12mm; }
+  body { margin: 0; font-family: Arial, sans-serif; font-size: 12px; line-height: 16px; color: #222; }
+  h1 { font-size: 18px; line-height: 24px; margin: 0 0 6px; }
+  h2 { break-before: page; font-size: 15px; line-height: 20px; margin: 0 0 6px; }
+  p { margin: 0 0 6px; }
+  .figure { background: #eef1f4; border: 1px solid #d5dbe1; margin: 0 0 10px; }
+  .note { border: 2px solid #888; padding: 6px 10px; margin: 0 0 10px; }
+  .note .tag { float: right; background: #ffd; border: 1px dashed #aa0; padding: 0 4px; margin: 0 0 4px 6px; }
+  fieldset.note > legend { float: right; background: #ffd; border: 1px dashed #aa0; padding: 0 4px; margin: 0 0 4px 6px; }
+  .card { border: 2px solid #369; background: #f3f6fa; padding: 8px 10px; margin: 0 0 10px; }
+  .card p:last-child { margin-bottom: 0; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; border: 1px solid #999; padding: 6px; margin: 0 0 10px; }
+  .grid > div { background: #eef; padding: 4px 6px; height: 32px; }
+  .rule { border: 2px solid #888; padding: 6px 10px; }
+  .rule hr { margin: 2px 0; }
+</style>
+</head>
+<body>
+<h1>Boxes at page ends</h1>
+<p>Each section puts a box near the end of a page. A page never ends between a box's top border and its first line,
+nor between its last line and its bottom border: the box moves to the next page, or takes its last lines along.</p>
+<div class="figure" style="height:600px"></div>
+<div class="note"><span class="tag">Note</span>A floated tag inside a plain box. Only the top border and padding fit at
+the end of the page, so the box and the tag move to the next page together.</div>
+
+<h2>A fieldset</h2>
+<div class="figure" style="height:650px"></div>
+<fieldset class="note"><legend>Legend</legend>A floated legend inside a fieldset whose first line does not fit.</fieldset>
+
+<h2>A bottom border</h2>
+<div class="figure" style="height:634px"></div>
+<div class="card"><p>One line of text in a card whose bottom padding and border do not fit.</p></div>
+
+<h2>A tall card</h2>
+<div class="figure" style="height:325px"></div>
+<div class="card"><p>The last line of this card fits on the page, but its bottom padding and border do not. The card is
+too tall to move, so it breaks before its last paragraph instead, which goes to the next page with the border.</p>
+<p>Planning starts with the content: which documents are generated, how often, and by whom. Templates are written in
+HTML and CSS, so the people who design them need no other tool, and the same template serves every customer.</p>
+<p>Page breaks follow the rules a browser uses when it prints: headings stay with the paragraph after them, and lines
+are not left alone at the top or the bottom of a page.</p>
+<p>Tables repeat their header rows on every page, and rows are not split unless they are taller than a page. Images keep
+their aspect ratio and move to the next page whole when they do not fit at the end of one.</p>
+<p>Fonts are embedded in the document, subset to the characters it uses, so that it looks the same everywhere and stays
+small. Right-to-left scripts are shaped and ordered as a browser would show them.</p>
+<p>Each release is compared with the one before on a set of documents, and a difference in output is either an
+intended change or a bug. The documents in this test are some of them.</p>
+<p>The last paragraph of the card ends here and moves.</p></div>
+
+<h2>A grid</h2>
+<div class="figure" style="height:568px"></div>
+<div class="grid"><div>Row one A</div><div>Row one B</div><div>Row two A</div><div>Row two B</div></div>
+
+<h2>A rule first</h2>
+<div class="figure" style="height:650px"></div>
+<div class="rule"><hr><p>A box that draws a rule before its first line keeps its place: the page breaks between the
+rule and the paragraph.</p></div>
+</body>
+</html>

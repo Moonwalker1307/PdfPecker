@@ -78,12 +78,15 @@ internal sealed partial class LayoutEngine
     /// <summary>Lays out the absolutely positioned boxes of a frame against the padding box given.</summary>
     private void LayoutAbsolutes(CbFrame frame, float cbX, float cbY, float cbW, float cbH)
     {
+        // Positioned boxes are not the last content of the flow they are laid out after.
+        float lastContent = _lastContentBottom;
         // Laying one out can queue more (nested ones without a positioned box in between): take them in rounds.
         for (int round = 0; round < 64 && frame.Pending.Count > 0; round++)
         {
             var list = frame.TakePending()!;
             foreach (var (e, sx, sy) in list) LayoutAbsolute(e, sx, sy, cbX, cbY, cbW, cbH);
         }
+        _lastContentBottom = lastContent;
     }
 
     private void LayoutAbsolute(Element e, float staticX, float staticY, float cbX, float cbY, float cbW, float cbH)
