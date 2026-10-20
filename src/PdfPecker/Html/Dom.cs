@@ -42,6 +42,12 @@ internal sealed class Element : Node
     /// <summary>A ::before or ::after box made by the style resolver, not by the parser.</summary>
     public bool Generated;
 
+    /// <summary>
+    /// An anonymous table, row or cell box the style resolver wrapped around table parts that miss one (CSS 2.1 §17.2.1),
+    /// such as a lone display: table-cell. Selectors never see it: it is taken out again before the next style pass.
+    /// </summary>
+    public bool Anonymous;
+
     /// <summary>The style of this list item's ::marker, when a rule styles it; its content replaces the marker text.</summary>
     public Css.ComputedStyle? MarkerStyle;
     public string? MarkerContent;

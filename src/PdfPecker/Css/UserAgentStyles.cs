@@ -18,6 +18,8 @@ tr { display: table-row; vertical-align: inherit; }
 td, th { display: table-cell; padding: 1px; vertical-align: inherit; }
 th { font-weight: bold; text-align: center; }
 col { display: table-column; }
+/* A form the parser left empty in a table or row (HTML rendering §15.3.8) takes no cell. */
+table > form, thead > form, tbody > form, tfoot > form, tr > form { display: none; }
 colgroup { display: table-column-group; }
 
 body { margin: 8px; }
@@ -78,6 +80,19 @@ textarea { font-family: monospace; padding: 2px; -pdfpecker-control-width: 13.27
 select { padding: 0; border-radius: 2px; box-sizing: border-box; }
 input[disabled], textarea[disabled], select[disabled], button[disabled] { color: #6d6d6d; border-color: #c3c3c3; }
 pdf-field-value { display: block; white-space: pre; }
+/* Progress bars and meters: a rounded track and a bar in it, as Chrome prints them. */
+progress, meter { display: inline-block; box-sizing: border-box; height: 1em; padding: 0.25em 0; vertical-align: -0.2em; }
+progress { width: 10em; }
+meter { width: 5em; }
+pdf-gauge { display: block; box-sizing: border-box; height: 100%; border: 1px solid #b2b2b2; border-radius: 0.25em; background-color: #efefef; }
+meter > pdf-gauge { border-color: #cacaca; }
+pdf-gauge-value { display: block; box-sizing: border-box; height: 100%; background-color: #107c10; border-radius: calc(0.25em - 1px) 0 0 calc(0.25em - 1px); }
+progress pdf-gauge-value { height: calc(100% + 2px); margin: -1px 0 0 -1px; border: 1px solid #3b75ba; border-right: 0; border-radius: 0.25em 0 0 0.25em; background-color: #0075ff; }
+pdf-gauge-value[suboptimal] { background-color: #ffb900; }
+pdf-gauge-value[even-less-good] { background-color: #d83b01; }
+/* The first summary of a details element is its label, with a disclosure triangle; a closed details shows only that. */
+details > summary:first-of-type { display: list-item; counter-increment: list-item 0; list-style: disclosure-closed inside; }
+details[open] > summary:first-of-type { list-style-type: disclosure-open; }
 pdf-field-value[placeholder] { color: #757575; }
 pdf-field-value[sizer] { visibility: hidden; height: 0; }
 pdf-field-value[option] { padding: 1px 2px; }

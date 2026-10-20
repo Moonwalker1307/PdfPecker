@@ -357,6 +357,18 @@ public class HostileInputTests
         Assert.Equal(2, PageCount(pdf));
     }
 
+    [Fact]
+    public void Nested_lone_table_parts_get_bounded_anonymous_tables()
+    {
+        // Each lone cell, row or text in a display: table box gets anonymous table boxes around it, so nesting them as
+        // deep as the parser allows, with thousands of siblings, must stay as cheap as nesting real tables.
+        var html = Repeat("<div style='display:table-cell'>x", 300) + Repeat("<div style='display:table'>t", 300)
+                   + "<div style='display:table-row'>" + Repeat("<span>s</span><div style='display:table-cell'>c</div>", 5000) + "</div>"
+                   + Repeat("<details>", 300) + "d";
+        var pdf = Bounded(html);
+        AssertStructurallyValid(pdf);
+    }
+
     [Theory]
     // The boxes fit in the measuring width, so every level measures the ones inside it at the same width.
     [InlineData("", 50000)]

@@ -37,6 +37,7 @@ internal sealed partial class StyleResolver
             _ => s.Display,
         };
         if (d.Lower == "flow-root") s.FormattingRoot = true;
+        s.InlineTable = s.Display == Display.Table && (d.Lower == "inline-table" || d.Lower == "inherit" && parent.InlineTable);
     }
 
     /// <summary>width: a length, or an intrinsic size keyword, which leaves the length auto for layout to size.</summary>

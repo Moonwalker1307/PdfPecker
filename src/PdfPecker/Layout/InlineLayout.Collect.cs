@@ -75,7 +75,7 @@ internal sealed partial class LayoutEngine
 
         if (e.Name == "a" && e.GetAttribute("href") is { } link && link.Length > 0) href = link;
 
-        if (IsAtomicInline(s.Display))
+        if (s.IsAtomicInline)
         {
             st.Items.Add(LayoutInlineBlock(e, st.AvailWidth, href));
             st.LastWasSpace = false;
