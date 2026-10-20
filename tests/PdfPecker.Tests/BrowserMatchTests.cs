@@ -74,6 +74,30 @@ public class BrowserMatchTests
         Near(15f, ops[1].Baseline - ops[0].Baseline);
     }
 
+    /// <summary>The distance from the first baseline to the 41st of a paragraph in <paramref name="style"/>.</summary>
+    private static float FortyLines(string style)
+    {
+        var text = Layout($"<p style='{style}; margin: 0'>{string.Join("<br>", Enumerable.Repeat("line", 41))}</p>").OfType<TextOp>().ToList();
+        Assert.Equal(41, text.Count);
+        return text[^1].Baseline - text[0].Baseline;
+    }
+
+    [Theory]
+    // 11px × 1.45 = 15.95px is kept as 1020/64px; 20px × 1.15 stays 23px despite float error.
+    [InlineData("font: 11px Arial; line-height: 1.45", 1020)]
+    [InlineData("font: 20px Arial; line-height: 1.15", 1472)]
+    // 8pt is 10.67px, which Chrome rounds to 683/64px before multiplying: 14.40625px, not 14.4px rounded down.
+    [InlineData("font: 8pt Arial; line-height: 1.35", 922)]
+    [InlineData("font: 10pt Arial; line-height: 1.2", 1023)]
+    // Lengths are rounded to the nearest unit: 17.4px is 1113.6/64px.
+    [InlineData("font: 12px Arial; line-height: 17.4px", 1114)]
+    [InlineData("font: 11px Arial; line-height: 1.45em", 1021)]
+    public void Line_heights_are_kept_in_chrome_layout_units(string style, int sixtyFourths)
+    {
+        // Chrome lays lines out in 1/64px; over a page the exact value drifts by a pixel from where Chrome puts them.
+        Near(40 * sixtyFourths / 64f * 0.75f, FortyLines(style), 0.001f);
+    }
+
     [Fact]
     public void Words_wider_than_the_line_overflow_instead_of_breaking()
     {
