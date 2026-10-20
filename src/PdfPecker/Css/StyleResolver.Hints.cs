@@ -207,6 +207,8 @@ internal sealed partial class StyleResolver
         foreach (var (name, value) in e.Attributes)
         {
             if (SvgPresentationAttributes.Contains(name)) Hint(name, value);
+            // Hints are not expanded, so the shorthand attribute sets its line longhand.
+            else if (name == "text-decoration") Hint("text-decoration-line", value);
             else if (e.Name == "svg" && name is "width" or "height" && e.Parent?.Name != "svg") Hint(name, SvgLength(value));
         }
     }

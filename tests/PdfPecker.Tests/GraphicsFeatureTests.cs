@@ -268,6 +268,17 @@ public class GraphicsFeatureTests
         Assert.Contains("/BaseFont /Courier", Latin1(pdf));
     }
 
+    [Theory]
+    [InlineData("text-decoration='underline'", 1)]
+    [InlineData("style='text-decoration:underline overline line-through'", 3)]
+    [InlineData("text-decoration='none'", 0)]
+    public void Svg_text_decoration_is_drawn_as_bars(string decoration, int bars)
+    {
+        string Fills(string attr) => AllContent(ConvertUncompressed($"<svg width='200' height='40'><text x='0' y='30' fill='blue' {attr}>Label</text></svg>"));
+        int Count(string c) => c.Split('\n').Count(l => l.TrimEnd() is "f" or "f*");
+        Assert.Equal(Count(Fills("")) + bars, Count(Fills(decoration)));
+    }
+
     // ---- Named grid lines and areas ----
 
     [Fact]
