@@ -440,12 +440,10 @@ internal sealed partial class LayoutEngine
 
         float top = FlowBoxTop(ref f, e, breakBefore, out float mt);
         int boxOps = _ops.Count;
-        _lastProbeStopped = false;
         float bottom = LayoutFlowBoxContent(ref f, e, ref top, joins, boxOps, out var passed);
         float trailing = _boxTrailing;
         if (joins && KeepTogetherFails(f.Chain, boxOps, top, f.ForcedAt))
         {
-            if (passed is { Stopped: true } || _lastProbeStopped) DebugT.RewindStopped++; else DebugT.RewindFull[Math.Min(_tableDepth,63)]++;
             RewindToChain(ref f);
             return FlowStep.Next;
         }
@@ -553,11 +551,9 @@ internal sealed partial class LayoutEngine
         float bottom = LayoutBlockBox(e, bx, top, bw, shrinkToFit: false);
         if (joins) _joinDepth--;
         _childProbe = null;
-        _lastProbeStopped = childProbe is { Stopped: true };
         if (childProbe is { Stopped: true } && !KeepTogetherFails(f.Chain, boxOps, top, f.ForcedAt))
         {
             // The chain stays after all, so the box needs all of its content: lay it out again in full.
-            DebugT.Relayout++;
             Truncate(boxOps);
             _marker = markerBefore;
             _currentListIndex = listBefore;
@@ -570,7 +566,6 @@ internal sealed partial class LayoutEngine
     /// <summary>Moves the flow back to the start of its keep-with-next chain, which then goes to the next page.</summary>
     private void RewindToChain(ref FlowState f)
     {
-        DebugT.Rewind++; DebugT.RewindAt[Math.Min(_tableDepth,63)]++;
         RewindFlow(ref f, f.Chain);
         f.ForcedAt = f.Chain.Index;
         f.HasChain = f.HasPrev = f.PrevAvoidAfter = false;
@@ -629,7 +624,6 @@ internal sealed partial class LayoutEngine
         public bool Done => Stopped || Answered;
     }
 
-    internal bool _lastProbeStopped;
     private KeepProbe? _childProbe; // for the box LayoutFlow lays out next, taken by LayoutBlockBoxCore
     private KeepProbe? _flowProbe;  // for the flow of that box, taken by LayoutFlow
 

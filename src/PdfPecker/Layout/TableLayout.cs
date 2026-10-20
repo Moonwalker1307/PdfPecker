@@ -372,7 +372,6 @@ internal sealed partial class LayoutEngine
         if (table.Id != null) SetAnchor(table.Id, y);
         if (table.LayoutKey != null) SetAnchor(table.LayoutKey, y);
         var m = GetTableModel(table);
-        DebugT.Tables[Math.Min(_tableDepth,63)]++; if (probe != null) DebugT.Probed++;
         bool collapse = s.BorderCollapse;
         float hs = collapse ? 0 : s.BorderSpacingH, vs = collapse ? 0 : s.BorderSpacingV;
         var (bx, boxW, frameT, frameB, frameH, colX, widths) = TableGeometry(table, m, x, availW);
@@ -451,7 +450,6 @@ internal sealed partial class LayoutEngine
             }
             if (m.TableMove is not float shortage) break;
             Truncate(startOps);
-            DebugT.TableMoves[Math.Min(_tableDepth,63)]++;
             m.MayMoveTable = false;
             _columnNotes?.Break(PageOf(startY), startY, shortage);
             y = NextPage(startY);
@@ -706,7 +704,6 @@ internal sealed partial class LayoutEngine
                     m.TableMove = rowBottom + reserve - FlowEnd(PageOf(rowTop));
                     return rowTop;
                 }
-                if (move) DebugT.RowMoves[Math.Min(_tableDepth,63)]++; else DebugT.AtBreaks[Math.Min(_tableDepth,63)]++;
                 if (move)
                 {
                     _columnNotes?.Break(PageOf(rowTop), rowTop, rowBottom - FlowEnd(PageOf(rowTop)));
@@ -731,7 +728,6 @@ internal sealed partial class LayoutEngine
                         rowTop = LayoutRow(m, h, rowTop, colX, widths, hs, vs, collapse, allowMove: false, pageColumns) + vs;
                     // The structure has the header once: its repeats are artifacts.
                     if (Tags != null) Untag(_ops, headOps);
-                    DebugT.HeadRepeats[Math.Min(_tableDepth,63)]++;
                     if (rowTop - headStart > _grid.Height(PageOf(headStart)) / 2)
                     {
                         // Headers too tall to repeat usefully: drop them again.
@@ -1216,18 +1212,5 @@ internal sealed partial class LayoutEngine
         ReturnRun(run);
         _measuring = saved;
         return (min, max);
-    }
-}
-
-#pragma warning disable CS1591
-public static class DebugT
-{
-    public static long Relayout, Rewind, Probed, RewindStopped; public static long[] RewindAt = new long[64], RewindFull = new long[64];
-    public static long[] Tables = new long[64], TableMoves = new long[64], RowMoves = new long[64], AtBreaks = new long[64], HeadRepeats = new long[64];
-    public static string Summary()
-    {
-        var sb = new System.Text.StringBuilder(System.FormattableString.Invariant($"relayout {Relayout} rewind {Rewind} probed {Probed} rewindStopped {RewindStopped}\n"));
-        for (int i = 0; i < 64; i++) if (Tables[i] > 0) sb.Append(System.FormattableString.Invariant($"d{i}: rewind {RewindAt[i]} full {RewindFull[i]} tables {Tables[i]} tmove {TableMoves[i]} rmove {RowMoves[i]} atbreak {AtBreaks[i]} heads {HeadRepeats[i]}\n"));
-        return sb.ToString();
     }
 }
