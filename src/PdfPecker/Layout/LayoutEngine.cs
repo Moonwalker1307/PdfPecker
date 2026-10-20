@@ -2039,14 +2039,43 @@ internal sealed partial class LayoutEngine
     /// as the difference of track positions, which come out a few units in the last place apart when the grid is laid
     /// out again at another position. Without the match, every nested grid on the pages was measured again in full.
     /// </summary>
-    private static Captured? FindKnown(Dictionary<BoxSource, Captured> known, BoxSource src)
+    private Captured? FindKnown(Dictionary<BoxSource, Captured> known, BoxSource src)
     {
         if (known.TryGetValue(src, out var exact)) return exact;
-        foreach (var (k, c) in known)
-            if (k.El == src.El && k.ShrinkToFit == src.ShrinkToFit && k.BorderW == src.BorderW && k.BorderH == src.BorderH
-                && Math.Abs(k.OuterW - src.OuterW) <= 1e-5f * Math.Max(1, Math.Abs(src.OuterW)))
-                return c;
-        return null;
+        if (known.Count <= KnownScanLimit) return NearMatch(known, src);
+        // A large set is searched by element, in the same order, so deeply nested items do not scan it once per item.
+        if (!_knownByElement.TryGetValue(known, out var byElement) || byElement.Count != known.Count)
+            _knownByElement[known] = byElement = new KnownByElement(known);
+        return byElement.Lists.TryGetValue(src.El, out var sameElement) ? NearMatch(sameElement, src) : null;
+
+        static Captured? NearMatch(IEnumerable<KeyValuePair<BoxSource, Captured>> candidates, BoxSource src)
+        {
+            foreach (var (k, c) in candidates)
+                if (k.El == src.El && k.ShrinkToFit == src.ShrinkToFit && k.BorderW == src.BorderW && k.BorderH == src.BorderH
+                    && Math.Abs(k.OuterW - src.OuterW) <= 1e-5f * Math.Max(1, Math.Abs(src.OuterW)))
+                    return c;
+            return null;
+        }
+    }
+
+    private const int KnownScanLimit = 16;
+    private readonly Dictionary<Dictionary<BoxSource, Captured>, KnownByElement> _knownByElement = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>The boxes of a set of known boxes grouped by element, each group in the set's order.</summary>
+    private sealed class KnownByElement
+    {
+        public readonly Dictionary<Element, List<KeyValuePair<BoxSource, Captured>>> Lists = new();
+        public readonly int Count;
+
+        public KnownByElement(Dictionary<BoxSource, Captured> known)
+        {
+            Count = known.Count;
+            foreach (var entry in known)
+            {
+                if (!Lists.TryGetValue(entry.Key.El, out var list)) Lists[entry.Key.El] = list = new List<KeyValuePair<BoxSource, Captured>>();
+                list.Add(entry);
+            }
+        }
     }
 
     /// <summary>
