@@ -84,9 +84,11 @@ internal sealed partial class PdfDocumentWriter
         _tw = _tc = float.NaN;
         _tr = -1;
         _anyAlpha = true;
+        var streamSpace = StartStreamSpace();
         foreach (var item in ops)
             if (item.Op is not LinkOp) WriteOp(content, item, pageTop, imageIds);
         EndText(content);
+        _streamSpace = streamSpace;
         _mc = pageMc;
         _mcOpen = open;
         RestoreState(saved);

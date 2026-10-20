@@ -1,6 +1,7 @@
 using System.Globalization;
 using PdfPecker.Css;
 using PdfPecker.Layout;
+using PdfPecker.Svg;
 
 namespace PdfPecker.Pdf;
 
@@ -44,6 +45,7 @@ internal sealed partial class PdfDocumentWriter
             // Num keeps 3 decimals, too few for a scale such as 0.99916. The content keeps to the top of the page.
             string k = _page.Scale.ToString("0.######", CultureInfo.InvariantCulture);
             content.Ascii("q ").Ascii(k).Ascii(" 0 0 ").Ascii(k).Ascii(" 0 ").Num(paperDy).Ascii(" cm\n");
+            _streamSpace = new Matrix(_page.Scale, 0, 0, _page.Scale, 0, paperDy);
         }
         // A named page's own @page background, or the document's.
         uint background = _sections.Count > 1 || _sections[0].Grid.Varies ? _page.Background : doc.PageBackground;
@@ -90,6 +92,7 @@ internal sealed partial class PdfDocumentWriter
         if (wm is { Behind: false }) { Mark(content, null); content.Ascii(WatermarkDo(doc.FirstSetup)); }
         EndMarked(content);
         if (_page.Scale != 1) content.Ascii("Q\n");
+        _streamSpace = null;
         return pageLinks;
     }
 
