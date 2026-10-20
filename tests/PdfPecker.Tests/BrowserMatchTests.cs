@@ -448,6 +448,9 @@ public class BrowserMatchTests
         var ops = Layout("<table border='2' bordercolor='red'><tr><td>a</td></tr></table>");
         Assert.True(CssColor.TryParse("red", 0xFF000000, out var red));
         Assert.Equal(2, ops.OfType<BorderRectOp>().Count(b => b.Color == red));
+    }
+
+    [Fact]
     public void Vertical_align_lengths_and_percentages_shift_the_baseline()
     {
         // 5px raises by 5px; -30% lowers by 30% of the span's 20px line height, 6px.
