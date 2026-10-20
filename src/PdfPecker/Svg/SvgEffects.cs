@@ -401,6 +401,35 @@ internal sealed partial class SvgImage
         Shapes.Add(new SvgShape { Kind = SvgShape.KindEndMask });
     }
 
+    /// <summary>
+    /// A mask element referenced by mask-image on an HTML box of w × h points, as a drawing of that size: the box is the
+    /// mask's bounding box, and its user space has its origin at the box's top-left corner and CSS pixels as units.
+    /// Null when the mask draws nothing, which hides the box.
+    /// </summary>
+    public static SvgImage? HtmlMask(Element mask, float w, float h)
+    {
+        float bw = w / 0.75f, bh = h / 0.75f;
+        if (!(bw > 0 && bh > 0)) return null;
+        var img = new SvgImage { _budget = new SvgBudget(), HasViewBox = true, ViewBoxWidth = bw, ViewBoxHeight = bh, Align = "none", Width = w, Height = h };
+        var root = mask;
+        while (root.Parent is { } parent && parent.Name != "#document") root = parent;
+        img.CollectIds(root);
+        bool bbox = !IsUserSpace(mask.GetAttribute("maskunits"));
+        var contentCtm = IsBoundingBox(mask.GetAttribute("maskcontentunits")) ? Matrix.Scale(bw, bh) : Matrix.Identity;
+        float x = UnitLength(mask.GetAttribute("x"), "-10%", bbox, bw), y = UnitLength(mask.GetAttribute("y"), "-10%", bbox, bh);
+        float rw = UnitLength(mask.GetAttribute("width"), "120%", bbox, bw), rh = UnitLength(mask.GetAttribute("height"), "120%", bbox, bh);
+        if (bbox) { x *= bw; y *= bh; rw *= bw; rh *= bh; }
+        if (!(rw > 0 && rh > 0)) return null;
+        img._maskDepth++;
+        foreach (var c in mask.Children) if (c is Element ce) img.Render(ce, contentCtm, 1, 1);
+        if (img.Shapes.Count == 0) return null;
+        // Nothing of the mask shows outside its region.
+        var (verbs, points) = RectOutline(x, y, rw, rh, Matrix.Identity);
+        img.Shapes.Insert(0, new SvgShape { Kind = SvgShape.KindClip, Verbs = verbs, Points = points });
+        img.Shapes.Add(new SvgShape { Kind = SvgShape.KindEndClip });
+        return img;
+    }
+
     // ------------------------------------------------------------------ filters
 
     /// <summary>

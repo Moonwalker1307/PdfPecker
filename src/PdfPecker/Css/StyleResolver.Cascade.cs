@@ -96,11 +96,16 @@ internal sealed partial class StyleResolver
         }
         if (name == "html") _rootFontSize = s.FontSize;
 
+        // color next: currentColor in any other property (background-color: currentColor under an icon's mask) is the
+        // element's own colour, whichever of the rules setting them comes first.
+        for (int i = 0; i < _count; i++)
+            if (_decls[i].Property == "color" && !ResetByAll(i, allDecl) && Substituted(_decls[i].Value, s) is { } color) Apply(s, parent, "color", color);
+
         for (int i = 0; i < _count; i++)
         {
             var d = _decls[i];
             if (!UsedViewportHeight && HasViewportHeightUnit(d.Value)) UsedViewportHeight = true;
-            if (d.Property is "font-size" or "all" || d.Property.StartsWith("--", StringComparison.Ordinal) || ResetByAll(i, allDecl)) continue;
+            if (d.Property is "font-size" or "color" or "all" || d.Property.StartsWith("--", StringComparison.Ordinal) || ResetByAll(i, allDecl)) continue;
             if (!CssParser.HasVar(d.Value))
             {
                 Apply(s, parent, d.Property, d.Value);

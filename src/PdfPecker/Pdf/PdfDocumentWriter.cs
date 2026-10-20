@@ -328,7 +328,13 @@ internal sealed partial class PdfDocumentWriter
     {
         foreach (var p in list)
         {
-            if (p.Op is LayerBlock tb) ForEachLeaf(tb.Items, visit);
+            if (p.Op is LayerBlock tb)
+            {
+                ForEachLeaf(tb.Items, visit);
+                if (tb.Layer.Mask is { } mask)
+                    foreach (var layer in mask)
+                        foreach (var op in layer.Ops) visit(new Placed(op, 0, 0));
+            }
             else if (p.Op is ClipBlock cb) ForEachLeaf(cb.Items, visit);
             else if (p.Op is FieldBlock fb) ForEachLeaf(fb.Items, visit);
             else visit(p);

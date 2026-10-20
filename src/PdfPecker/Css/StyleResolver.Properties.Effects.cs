@@ -97,6 +97,66 @@ internal sealed partial class StyleResolver
         else if (FilterFunction.Parse(d.Value, d.Em, _rootFontSize, _vw, _vh) is { } filters) { s.Filters = filters.Length > 0 ? filters : null; s.SvgFilter = null; }
     }
 
+    /// <summary>backdrop-filter: a list of filter functions, run on what is painted behind the element.</summary>
+    private void ApplyBackdropFilter(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit) s.BackdropFilters = parent.BackdropFilters;
+        else if (d.Lower is "none" or "initial" or "unset") s.BackdropFilters = null;
+        else if (FilterFunction.Parse(d.Value, d.Em, _rootFontSize, _vw, _vh) is { } filters) s.BackdropFilters = filters.Length > 0 ? filters : null;
+    }
+
+    /// <summary>
+    /// mask-image: layers of images, gradients and references to SVG mask elements. A lone url(#id) is also the mask
+    /// reference of an SVG element, as the mask property was before it became a shorthand.
+    /// </summary>
+    private void ApplyMaskImage(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit) { s.MaskImages = parent.MaskImages; s.SvgMask = parent.SvgMask; return; }
+        if (d.Lower is "none" or "initial" or "unset") { s.MaskImages = null; s.SvgMask = null; return; }
+        var layers = ParseBackgroundImage(d.Value, s);
+        if (layers != null && layers.Length > MaxMaskLayers) return;
+        s.MaskImages = layers;
+        s.SvgMask = layers is [{ Url: ['#', ..] url }] ? url : null;
+    }
+
+    // More mask layers than this make the declaration invalid: each layer is a soft mask nested in the ones below it.
+    private const int MaxMaskLayers = 16;
+
+    /// <summary>A comma-separated mask longhand: one entry per layer, null for its initial value, or as it was when invalid.</summary>
+    private static T[]? MaskList<T>(T[]? current, T[]? inherited, in DeclaredValue d, Func<string, T?> parse) where T : struct
+    {
+        if (d.Inherit) return inherited;
+        if (d.Lower is "initial" or "unset") return null;
+        return BackgroundList(d.Lower, parse) ?? current;
+    }
+
+    private void ApplyMaskSize(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        float em = d.Em;
+        s.MaskSizes = MaskList(s.MaskSizes, parent.MaskSizes, in d, l => CssBackground.Size(l, em, _rootFontSize, _vw, _vh));
+    }
+
+    private void ApplyMaskPosition(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit) { s.MaskPositionsX = parent.MaskPositionsX; s.MaskPositionsY = parent.MaskPositionsY; return; }
+        if (d.Lower is "initial" or "unset") { s.MaskPositionsX = s.MaskPositionsY = null; return; }
+        float em = d.Em;
+        if (BackgroundList(d.Value, l => CssBackground.Position(l, em, _rootFontSize, _vw, _vh)) is { } positions)
+        {
+            s.MaskPositionsX = positions.Select(p => p.X).ToArray();
+            s.MaskPositionsY = positions.Select(p => p.Y).ToArray();
+        }
+    }
+
+    private void ApplyMaskPositionAxis(ComputedStyle s, ComputedStyle parent, in DeclaredValue d, bool horizontal)
+    {
+        float em = d.Em;
+        if (horizontal)
+            s.MaskPositionsX = MaskList(s.MaskPositionsX, parent.MaskPositionsX, in d, l => CssBackground.Axis(l, true, em, _rootFontSize, _vw, _vh));
+        else
+            s.MaskPositionsY = MaskList(s.MaskPositionsY, parent.MaskPositionsY, in d, l => CssBackground.Axis(l, false, em, _rootFontSize, _vw, _vh));
+    }
+
     private static void ApplyMixBlendMode(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
         if (d.Inherit) s.BlendMode = parent.BlendMode;

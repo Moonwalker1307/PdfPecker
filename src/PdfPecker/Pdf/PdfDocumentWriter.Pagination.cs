@@ -148,6 +148,10 @@ internal sealed partial class PdfDocumentWriter
                     // Each page gets the part of the layer that falls on it, drawn with the whole layer's transform.
                     var parts = new SortedDictionary<int, List<Placed>>();
                     foreach (var o in layer.Ops) Distribute(o, parts);
+                    // A backdrop filter draws on every page its box reaches, also where the box itself paints nothing.
+                    if (layer.Backdrop != null)
+                        for (int p = PageOf(layer.BackdropY), last = Math.Max(p, PageOf(layer.BackdropY + layer.BackdropH - 0.5f)); p <= last; p++)
+                            parts.TryAdd(p, new List<Placed>());
                     foreach (var (p, items) in parts) Target(into, p).Add(new Placed(new LayerBlock(layer, items), 0, 0));
                     break;
                 }

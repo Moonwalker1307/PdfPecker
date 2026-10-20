@@ -36,6 +36,20 @@ internal sealed partial class LayoutEngine
             layer.ClipEvenOdd = evenOdd;
         }
         if (s.Filters is { } filters) ApplyFilter(layer, filters, s.Color);
+        if (s.MaskImages != null)
+        {
+            // The mask element of a url(#id) layer; an inline SVG draws its own mask, as it draws its own clip path.
+            Func<string, (SvgImage, bool)?>? svgMask = e.Name == "svg" ? null
+                : url => FindById(e, url) is { Name: "mask" } mask && SvgImage.HtmlMask(mask, w, h) is { } image
+                    ? (image, mask.Style?.SvgMaskAlpha == true) : null;
+            layer.Mask = BoxPainter.PaintMask(s, x, y, w, h, _images, cbW, svgMask);
+        }
+        if (s.BackdropFilters is { } backdrop)
+        {
+            layer.Backdrop = BackdropFilter(backdrop, s.Color);
+            (layer.BackdropX, layer.BackdropY, layer.BackdropW, layer.BackdropH) = (x, y, w, h);
+            layer.BackdropRadii = BoxPainter.Radii(s, w, h);
+        }
     }
 
     /// <summary>The reference box of a clip-path shape, with its rounded corners.</summary>
@@ -114,8 +128,14 @@ internal sealed partial class LayoutEngine
     // The extent of a Gaussian blur that is visible: three deviations.
     private const float BlurReach = 3;
 
+    /// <summary>
+    /// A backdrop-filter as SVG filter primitives on the pixels behind the box. Unlike filter, its opacity() makes only
+    /// the filtered backdrop translucent, so it is a colour matrix like the colour functions.
+    /// </summary>
+    private static SvgFilter BackdropFilter(FilterFunction[] functions, uint currentColor) => PixelFilter(functions, currentColor, opacityOnPixels: true);
+
     /// <summary>The whole filter as SVG filter primitives on the content's pixels (sRGB, as browsers run filter functions).</summary>
-    private static SvgFilter PixelFilter(FilterFunction[] functions, uint currentColor)
+    private static SvgFilter PixelFilter(FilterFunction[] functions, uint currentColor, bool opacityOnPixels = false)
     {
         var f = new SvgFilter();
         float reachX = 0, reachY = 0;
@@ -123,7 +143,7 @@ internal sealed partial class LayoutEngine
         {
             switch (fn.Kind)
             {
-                case FilterFunction.FilterKind.Opacity:
+                case FilterFunction.FilterKind.Opacity when !opacityOnPixels:
                     break; // the layer's opacity
                 case FilterFunction.FilterKind.Blur:
                     f.Primitives.Add(new SvgFilter.Primitive { Kind = SvgFilter.Kind.Blur, Sx = fn.Amount, Sy = fn.Amount, Linear = false });

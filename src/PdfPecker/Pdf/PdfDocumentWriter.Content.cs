@@ -297,6 +297,8 @@ internal sealed partial class PdfDocumentWriter
             b.Ascii(tb.Layer.ClipEvenOdd ? "W* n\n" : "W n\n");
             if (_mc != null) b.Ascii("EMC\n");
         }
+        // mask-image: the group below is painted through the mask, which moves with the layer's transform like the clip.
+        if (tb.Layer.Mask is { } mask && !_invisibleText) b.Ascii("/s").Int(AddLayerMask(mask, pageTop, imageIds)).Ascii(" gs\n");
         if (tb.Layer.NeedsGroup && !_invisibleText) WriteLayerGroup(b, tb, pageTop, imageIds);
         else
         {
@@ -373,6 +375,7 @@ internal sealed partial class PdfDocumentWriter
     private void WriteLayerContent(ByteBuffer b, LayerBlock tb, float pageTop, Dictionary<PdfImage, int> imageIds)
     {
         var layer = tb.Layer;
+        if (layer.Backdrop != null && !_invisibleText) WriteBackdrop(b, layer, pageTop);
         if (layer.Raster != null && !_invisibleText)
         {
             EndText(b);

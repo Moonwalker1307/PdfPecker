@@ -243,6 +243,17 @@ internal sealed partial class StyleResolver
                 break;
             case "clip-path": ApplyClipPath(s, parent, in d); break;
             case "filter": ApplyFilter(s, parent, in d); break;
+            case "backdrop-filter": ApplyBackdropFilter(s, parent, in d); break;
+            case "mask-image": ApplyMaskImage(s, parent, in d); break;
+            case "mask-repeat": s.MaskRepeats = MaskList(s.MaskRepeats, parent.MaskRepeats, in d, CssBackground.Repeat); break;
+            case "mask-size": ApplyMaskSize(s, parent, in d); break;
+            case "mask-position": ApplyMaskPosition(s, parent, in d); break;
+            case "mask-position-x": ApplyMaskPositionAxis(s, parent, in d, horizontal: true); break;
+            case "mask-position-y": ApplyMaskPositionAxis(s, parent, in d, horizontal: false); break;
+            case "mask-origin": s.MaskOrigins = MaskList(s.MaskOrigins, parent.MaskOrigins, in d, CssMask.Box); break;
+            case "mask-clip": s.MaskClips = MaskList(s.MaskClips, parent.MaskClips, in d, CssMask.Box); break;
+            case "mask-mode": s.MaskModes = MaskList(s.MaskModes, parent.MaskModes, in d, CssMask.Mode); break;
+            case "mask-composite": s.MaskComposites = MaskList(s.MaskComposites, parent.MaskComposites, in d, CssMask.Composite); break;
             case "mix-blend-mode": ApplyMixBlendMode(s, parent, in d); break;
             case "background-blend-mode": ApplyBackgroundBlendMode(s, parent, in d); break;
             case "isolation": s.Isolate = d.Lower == "isolate" || d.Inherit && parent.Isolate; break;

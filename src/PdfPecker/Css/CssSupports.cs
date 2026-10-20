@@ -44,7 +44,11 @@ internal static class CssSupports
         "margin-inline-start", "margin-inline-end", "padding-inline", "padding-inline-start", "padding-inline-end", "margin-block",
         "margin-block-start", "margin-block-end", "padding-block", "padding-block-start", "padding-block-end",
         "mix-blend-mode", "background-blend-mode", "isolation", "box-decoration-break", "-webkit-box-decoration-break", "container", "container-type", "container-name",
-        "footnote-display", "footnote-policy",
+        "footnote-display", "footnote-policy", "backdrop-filter", "-webkit-backdrop-filter", "mask-image", "mask-position",
+        "mask-position-x", "mask-position-y", "mask-size", "mask-repeat", "mask-origin", "mask-clip", "mask-composite",
+        "mask-mode", "-webkit-mask", "-webkit-mask-image", "-webkit-mask-position", "-webkit-mask-position-x",
+        "-webkit-mask-position-y", "-webkit-mask-size", "-webkit-mask-repeat", "-webkit-mask-origin", "-webkit-mask-clip",
+        "-webkit-mask-composite",
     };
 
     /// <summary>Whether this library applies the property.</summary>
