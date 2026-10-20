@@ -76,11 +76,29 @@ internal sealed partial class TrueTypeFont : IGlyphSource
         }
     }
 
-    private static TrueTypeFont? ParseCore(byte[] data)
+    /// <summary>
+    /// Reads a font whose table records were found elsewhere, such as one face of a collection that is not its first.
+    /// </summary>
+    public static TrueTypeFont? Parse(byte[] data, IEnumerable<(string Tag, int Offset, int Length)> tables)
+    {
+        try
+        {
+            return ParseCore(data, tables);
+        }
+        catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or OverflowException)
+        {
+            return null;
+        }
+    }
+
+    private static TrueTypeFont? ParseCore(byte[] data, IEnumerable<(string Tag, int Offset, int Length)>? tables = null)
     {
         if (data.Length < MinimumFileLength) return null;
         var font = new TrueTypeFont(data);
-        font.ReadTableDirectory();
+        if (tables == null) font.ReadTableDirectory();
+        else
+            foreach (var (tag, offset, length) in tables)
+                if (offset >= 0 && offset <= data.Length && length >= 0) font._tables[tag] = new TableRecord(offset, Math.Min(length, data.Length - offset));
         if (font.Table("maxp") is { Length: >= MaxpMinLength } maxp) font.GlyphCount = font._font.U16(maxp.Offset + MaxpNumGlyphsField);
         if (font.Table("head") is { Length: >= HeadMinLength } head)
         {

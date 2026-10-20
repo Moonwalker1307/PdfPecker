@@ -24,22 +24,72 @@ internal sealed partial class LayoutEngine
     // A blur several pixels wide loses nothing at a lower resolution: about three pixels per deviation is enough.
     private const float PixelsPerSigma = 3, MinRasterDensity = 1, MaxRasterDensity = 2;
 
-    /// <summary>The decorations of a run, in their own colour or in <paramref name="shadow"/>, the colour of a text-shadow.</summary>
-    private void Decorate(ComputedStyle s, float x, float w, float baseline, uint? shadow = null)
+    /// <summary>
+    /// The decorations of a run, in their own colour or in <paramref name="shadow"/>, the colour of a text-shadow. The
+    /// underline and overline leave gaps for the glyphs of <paramref name="text"/>, the run as drawn, they cross.
+    /// </summary>
+    private void Decorate(ComputedStyle s, float x, float w, float baseline, uint? shadow = null, TextOp? text = null)
     {
         float size = s.TextSize;
         float thickness = s.DecorationThickness is { } dt ? Math.Max(dt.Resolve(size), MinSetThickness) : Math.Max(size * DecorationThicknessRatio, MinDecorationThickness);
         uint color = shadow ?? CssColor.Fade(s.DecorationColor ?? s.Color, s.InlineFade);
         if ((s.TextDecoration & TextDecoration.Underline) != 0)
-            DecorationLine(s.DecorationStyle, x, baseline + (s.UnderlineOffset is { } uo ? uo.Resolve(size) : size * UnderlineOffsetRatio), w, thickness, color, below: true);
+        {
+            float y = baseline + (s.UnderlineOffset is { } uo ? uo.Resolve(size) : size * UnderlineOffsetRatio);
+            var (top, bottom) = DecorationBand(s.DecorationStyle, y, thickness, below: true);
+            DecorationLine(s.DecorationStyle, x, y, w, thickness, color, below: true, InkGaps(s, text, top, bottom, thickness));
+        }
         if ((s.TextDecoration & TextDecoration.LineThrough) != 0)
             DecorationLine(s.DecorationStyle, x, baseline - size * LineThroughRaiseRatio, w, thickness, color, below: true);
         if ((s.TextDecoration & TextDecoration.Overline) != 0)
-            DecorationLine(s.DecorationStyle, x, baseline - s.Font.Ascent * size, w, thickness, color, below: false);
+        {
+            float y = baseline - s.Font.Ascent * size;
+            var (top, bottom) = DecorationBand(s.DecorationStyle, y, thickness, below: false);
+            DecorationLine(s.DecorationStyle, x, y, w, thickness, color, below: false, InkGaps(s, text, top, bottom, thickness));
+        }
     }
 
-    /// <summary>One decoration line with its top edge at <paramref name="y"/>, in the given text-decoration-style.</summary>
-    private void DecorationLine(DecorationStyle style, float x, float y, float w, float t, uint color, bool below)
+    /// <summary>The top and bottom of a decoration line with its top edge at <paramref name="y"/>, as it is drawn.</summary>
+    private static (float Top, float Bottom) DecorationBand(DecorationStyle style, float y, float t, bool below)
+    {
+        switch (style)
+        {
+            case DecorationStyle.Double:
+                return below ? (y, y + 3 * t) : (y - 2 * t, y + t);
+            case DecorationStyle.Wavy:
+            {
+                float amplitude = Math.Max(t * WavyAmplitudeRatio, MinWavyAmplitude);
+                float mid = y + (below ? amplitude : -amplitude) + t / 2;
+                return (mid - amplitude - t / 2, mid + amplitude + t / 2);
+            }
+            default:
+                return (y, y + t);
+        }
+    }
+
+    /// <summary>
+    /// One decoration line with its top edge at <paramref name="y"/>, in the given text-decoration-style, drawn between
+    /// the <paramref name="gaps"/> it leaves for glyphs.
+    /// </summary>
+    private void DecorationLine(DecorationStyle style, float x, float y, float w, float t, uint color, bool below, List<(float Left, float Right)>? gaps = null)
+    {
+        if (gaps == null)
+        {
+            DecorationPiece(style, x, x, y, w, t, color, below);
+            return;
+        }
+        float from = x, end = x + w;
+        foreach (var (left, right) in gaps)
+        {
+            if (left > from) DecorationPiece(style, x, from, y, Math.Min(left, end) - from, t, color, below);
+            from = Math.Max(from, right);
+            if (from >= end) return;
+        }
+        DecorationPiece(style, x, from, y, end - from, t, color, below);
+    }
+
+    /// <summary>The part of a decoration line from <paramref name="x"/>; a wave keeps the phase of the whole line, which starts at <paramref name="origin"/>.</summary>
+    private void DecorationPiece(DecorationStyle style, float origin, float x, float y, float w, float t, uint color, bool below)
     {
         if (w <= 0) return;
         switch (style)
@@ -57,7 +107,7 @@ internal sealed partial class LayoutEngine
                 _ops.Add(new LineOp(x, y + t / 2, x + w, y + t / 2, t, color, dotted: style == DecorationStyle.Dotted));
                 break;
             case DecorationStyle.Wavy:
-                WavyLine(x, y, w, t, color, below);
+                WavyLine(origin, x, y, w, t, color, below);
                 break;
             default:
                 _ops.Add(new RectOp(x, y, w, t, color) { IsDecoration = true });
@@ -65,17 +115,20 @@ internal sealed partial class LayoutEngine
         }
     }
 
-    /// <summary>A wave of short straight segments with round joins, about three thicknesses high.</summary>
-    private void WavyLine(float x, float y, float w, float t, uint color, bool below)
+    /// <summary>
+    /// A wave of short straight segments with round joins, about three thicknesses high, from <paramref name="x"/>; its
+    /// phase starts at <paramref name="origin"/>.
+    /// </summary>
+    private void WavyLine(float origin, float x, float y, float w, float t, uint color, bool below)
     {
         float amplitude = Math.Max(t * WavyAmplitudeRatio, MinWavyAmplitude), wavelength = Math.Max(t * WavyLengthRatio, MinWavyLength);
         float mid = y + (below ? amplitude : -amplitude) + t / 2;
         int segments = Math.Clamp((int)MathF.Ceiling(w / wavelength * SegmentsPerWave), 1, MaxWavySegments);
-        float px = x, py = mid;
+        float px = x, py = mid - amplitude * MathF.Sin((x - origin) / wavelength * 2 * MathF.PI);
         for (int k = 1; k <= segments; k++)
         {
             float nx = x + w * k / segments;
-            float ny = mid - amplitude * MathF.Sin((nx - x) / wavelength * 2 * MathF.PI);
+            float ny = mid - amplitude * MathF.Sin((nx - origin) / wavelength * 2 * MathF.PI);
             _ops.Add(new LineOp(px, py, nx, ny, t, color, dotted: false) { Solid = true });
             px = nx; py = ny;
         }
@@ -104,8 +157,9 @@ internal sealed partial class LayoutEngine
             }
             if (blurred != null) { BlurredTextShadows(style, x, w, baseline, lineTop, text, wordSpacing, letterSpacing, rtl, blurred); blurred = null; }
             float sx = x + sh.X, sy = baseline + sh.Y;
-            _ops.Add(new TextOp(sx, sy, lineTop, style.Font, style.TextSize, color, text, wordSpacing, letterSpacing) { Rtl = rtl });
-            if (style.TextDecoration != TextDecoration.None) Decorate(style, sx, w, sy, color);
+            var copy = new TextOp(sx, sy, lineTop, style.Font, style.TextSize, color, text, wordSpacing, letterSpacing) { Rtl = rtl };
+            _ops.Add(copy);
+            if (style.TextDecoration != TextDecoration.None) Decorate(style, sx, w, sy, color, copy);
         }
         if (blurred != null) BlurredTextShadows(style, x, w, baseline, lineTop, text, wordSpacing, letterSpacing, rtl, blurred);
     }
@@ -119,12 +173,13 @@ internal sealed partial class LayoutEngine
     {
         // The shadow takes its colour from the shadow alone: the text's own colour, even transparent, only gives the shape.
         var layer = new LayerOp { RasterReplaces = true, TextShadow = true };
-        layer.Ops.Add(new TextOp(x, baseline, lineTop, style.Font, style.TextSize, CssColor.Black, text, wordSpacing, letterSpacing) { Rtl = rtl });
+        var shape = new TextOp(x, baseline, lineTop, style.Font, style.TextSize, CssColor.Black, text, wordSpacing, letterSpacing) { Rtl = rtl };
+        layer.Ops.Add(shape);
         if (style.TextDecoration != TextDecoration.None)
         {
             // The decorations are drawn into the main list and moved into the layer.
             int before = _ops.Count;
-            Decorate(style, x, w, baseline, CssColor.Black);
+            Decorate(style, x, w, baseline, CssColor.Black, shape);
             for (int k = before; k < _ops.Count; k++) layer.Ops.Add(_ops[k]);
             _ops.RemoveRange(before, _ops.Count - before);
         }

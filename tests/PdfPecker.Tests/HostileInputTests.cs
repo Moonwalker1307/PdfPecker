@@ -126,6 +126,16 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Skipping_ink_under_long_underlined_text_stays_fast()
+    {
+        // Every glyph is measured against the line; the gaps are sorted and merged once per run of text.
+        string text = Repeat("gyp jq ", 30_000);
+        var pdf = Bounded("<style>p { text-decoration: underline double; text-decoration-skip-ink: all; font-size: 6pt }"
+            + " p.o { text-decoration: overline wavy }</style><p>" + text + "</p><p class=o>" + Repeat("ÅÉÎ ", 30_000) + "</p>");
+        Assert.NotEmpty(pdf);
+    }
+
+    [Fact]
     public void Custom_property_expansion_is_capped()
     {
         // Each variable uses the previous one four times: 4^40 characters if expanded.
