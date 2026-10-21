@@ -33,6 +33,12 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.x
+          # Keeps ~/.nuget/packages between runs. Every restore of src/PdfPecker fetches the API baseline release for
+          # package validation, so without the cache each job downloaded it from nuget.org again.
+          cache: true
+          cache-dependency-path: |
+            **/*.csproj
+            Directory.Build.props
 
       - run: dotnet build -c Release bench/PdfPecker.Benchmarks
 
