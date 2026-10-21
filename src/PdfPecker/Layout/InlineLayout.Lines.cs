@@ -14,9 +14,6 @@ internal sealed partial class LayoutEngine
     /// <summary>Points per CSS pixel, the unit Chrome rounds half-leading and baseline shifts to.</summary>
     private const float CssPixel = 0.75f;
 
-    // The half-leading is rounded down to whole pixels, with a little slack against rounding error.
-    private const float HalfLeadingSlack = 0.001f;
-
     // vertical-align: middle centres an image on the baseline plus a quarter of the block's font size (about half the x-height).
     private const float MiddleRaiseRatio = 0.25f;
 
@@ -48,15 +45,22 @@ internal sealed partial class LayoutEngine
     /// The ascent and descent of a block's strut: its font and line height on the line's own baseline. The block's own
     /// vertical-align moves the block on the line it sits on, not the lines inside it.
     /// </summary>
-    private static void StrutMetrics(ComputedStyle s, out float a, out float d)
+    private static void StrutMetrics(ComputedStyle s, out float a, out float d) => s.Strut(out a, out d);
+
+    /// <summary>
+    /// How far below the line's baseline text in style <paramref name="s"/> sits, on a line whose box reaches
+    /// <paramref name="lineA"/> above and <paramref name="lineD"/> below its baseline: an inline box aligned to the
+    /// line's top hangs its line height from the top, and one aligned to the bottom stands on the bottom.
+    /// </summary>
+    private static float TextShift(ComputedStyle s, float lineA, float lineD)
     {
-        s.Font.LineMetrics(s.TextSize, out float asc, out float desc);
-        float lineH = s.LineHeight;
-        // Chrome gives the top half of the leading whole CSS pixels and the rest to the bottom.
-        float half = MathF.Floor((lineH - (asc + desc)) / 2 / CssPixel + HalfLeadingSlack) * CssPixel;
-        a = asc + half;
-        d = lineH - a;
+        if (!IsLineAlignedText(s)) return s.BaselineShift;
+        StrutMetrics(s, out float a, out float d);
+        return s.VerticalAlign == VerticalAlign.Top ? a - lineA : lineD - d;
     }
+
+    /// <summary>Whether text in an inline box is aligned to its line's top or bottom edge rather than to a baseline.</summary>
+    private static bool IsLineAlignedText(ComputedStyle s) => s.Display == Display.Inline && s.VerticalAlign is VerticalAlign.Top or VerticalAlign.Bottom;
 
     /// <summary>
     /// The ascent and descent of an image or inline-block on its line's baseline. One aligned to the line's top or
@@ -77,15 +81,28 @@ internal sealed partial class LayoutEngine
                 if (d < 0) { a = it.Height; d = 0; }
                 break;
             default:
-                float shift = it.Style.BaselineShift;
+                float shift = it.Style.AtomicBaselineShift;
                 a = baseline - shift;
                 d = it.Height - baseline + shift;
                 break;
         }
     }
 
-    /// <summary>Whether an image or inline-block is aligned to its line's top or bottom edge rather than to the baseline.</summary>
-    private static bool IsLineAligned(Item it) => it.Kind is ItemKind.Image or ItemKind.Box && it.Style.VerticalAlign is VerticalAlign.Top or VerticalAlign.Bottom;
+    /// <summary>Whether an item is aligned to its line's top or bottom edge rather than to the baseline.</summary>
+    private static bool IsLineAligned(Item it) => it.Kind switch
+    {
+        ItemKind.Image or ItemKind.Box => it.Style.VerticalAlign is VerticalAlign.Top or VerticalAlign.Bottom,
+        ItemKind.Text or ItemKind.Space => IsLineAlignedText(it.Style),
+        _ => false,
+    };
+
+    /// <summary>The height a line-aligned item takes on its line: its own, or for text its line height.</summary>
+    private static float LineAlignedHeight(Item it)
+    {
+        if (it.Kind is ItemKind.Image or ItemKind.Box) return it.Height;
+        StrutMetrics(it.Style, out float a, out float d);
+        return a + d;
+    }
 
     /// <summary>
     /// How far above the baseline the top of an image or inline-block is drawn on a line whose box reaches
@@ -361,7 +378,7 @@ internal sealed partial class LayoutEngine
         float[] xs = ItemPositions(items, fit);
         NoteLineReach(items, xs, x + lineLeft + lineW);
 
-        int fragments = NoteInlineFragments(items, xs, baseline);
+        int fragments = NoteInlineFragments(items, xs, baseline, ascent, lineH - ascent);
         EmitLinks(items, xs, y, lineH);
 
         // Footnote calls inside inline boxes are placed once the line is drawn, not while its buffers are in use.
@@ -398,7 +415,7 @@ internal sealed partial class LayoutEngine
             {
                 case ItemKind.Text:
                 case ItemKind.Space:
-                    i = DrawTextRun(items, i, xs, y, baseline, spaceExtra, charExtra);
+                    i = DrawTextRun(items, i, xs, y, baseline, descent, spaceExtra, charExtra);
                     continue;
                 case ItemKind.Image:
                     if (it.Image != null)
@@ -440,7 +457,7 @@ internal sealed partial class LayoutEngine
     /// (<paramref name="charExtra"/>), a run of words spaced out letter by letter draws with that extra letter spacing,
     /// and the run ends where the line puts the next item somewhere else than the text would.
     /// </summary>
-    private int DrawTextRun(List<Item> items, int start, float[] xs, float lineTop, float baseline, float spaceExtra, float charExtra)
+    private int DrawTextRun(List<Item> items, int start, float[] xs, float lineTop, float baseline, float descent, float spaceExtra, float charExtra)
     {
         var first = items[start];
         var style = first.Style;
@@ -469,7 +486,7 @@ internal sealed partial class LayoutEngine
         float textX = runX - (rtlRun ? 0 : first.TrimStart);
         if (style.Visible)
         {
-            float bl = baseline + style.BaselineShift + first.RelY;
+            float bl = baseline + TextShift(style, baseline - lineTop, descent) + first.RelY;
             string text = sb.ToString();
             float wordSpacing = style.WordSpacing + spaceExtra - letterExtra, letterSpacing = style.LetterSpacing + letterExtra;
             if (style.TextShadows != null) TextShadows(style, textX, runEnd - textX, bl, lineTop, text, wordSpacing, letterSpacing, rtlRun);
