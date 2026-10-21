@@ -2327,6 +2327,50 @@ public class HostileInputTests
         b.AddRange(Encoding.ASCII.GetBytes($"\nendstream\nendobj\nstartxref\n{xref}\n%%EOF\n"));
         return b.ToArray();
     }
+
+    // A string in one rule is copied onto every element the rule matches: 240 KB of HTML made 200 million characters of
+    // ::before text, which took 10 GB and minutes and ignored cancellation. Generated content now has a budget per
+    // document, and the strings drawn once per element or line (markers, quotes, ellipses, hyphens) are cut short.
+    [Theory]
+    [InlineData("i::before{content:\"$\"}", "<p>", "<i></i>", "</p>")]
+    [InlineData("p{quotes:\"$\" \"y\"}", "<p>", "<q>a</q>", "</p>")]
+    [InlineData("li{list-style-type:\"$\"}", "<ul>", "<li>", "</ul>")]
+    [InlineData("@counter-style z{system:cyclic;symbols:\"$\"}li{list-style:z}", "<ul>", "<li>", "</ul>")]
+    [InlineData("@counter-style z{system:cyclic;symbols:a;prefix:\"$\"}li{list-style:z}", "<ul>", "<li>", "</ul>")]
+    [InlineData("p{text-overflow:\"$\";overflow:hidden;white-space:nowrap;width:10px}", "", "<p>abcdefghijk</p>", "")]
+    public void Long_strings_repeated_on_many_elements_stay_bounded(string css, string open, string item, string close)
+    {
+        var html = "<style>" + css.Replace("$", Repeat("ab ", 33_000)) + "</style>" + open + Repeat(item, 20_000) + close;
+        var before = GC.GetTotalAllocatedBytes();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        AssertStructurallyValid(Bounded(html, new PdfOptions { MaxPages = 1000 }));
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10), $"took {sw.Elapsed}");
+        Assert.True(GC.GetTotalAllocatedBytes() - before < 4L << 30, "allocated more than 4 GB");
+    }
+
+    // Each counter a box resets was looked up in a list of the counters already scoped to its parent, so one rule
+    // resetting 20,000 counters on 300 nested boxes took 52 s, most of it after cancellation.
+    [Fact]
+    public void Many_counters_reset_on_nested_boxes_stay_linear()
+    {
+        var names = string.Join(" ", Enumerable.Range(0, 20_000).Select(i => "c" + i));
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        AssertStructurallyValid(Bounded("<style>div{counter-reset:" + names + "}</style>" + Repeat("<div>", 300) + "x" + Repeat("</div>", 300)));
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10), $"took {sw.Elapsed}");
+    }
+
+    [Fact]
+    public void Generated_content_keeps_its_text_within_the_budget()
+    {
+        var text = PdfText.Extract(HtmlToPdf.Convert("<style>p::before{content:\"Note: \" attr(data-n) \". \"}</style>"
+            + "<p data-n=1>one</p><p data-n=2>two</p>"));
+        Assert.Contains("Note: 1. one", text);
+        Assert.Contains("Note: 2. two", text);
+
+        // A mark is cut to 64 characters, never inside a surrogate pair.
+        Assert.Equal(new string('x', 64), Css.GeneratedContent.UnquoteMark("\"" + new string('x', 100) + "\""));
+        Assert.Equal(new string('x', 63), Css.GeneratedContent.Cut(new string('x', 63) + "\U0001F600", 64));
+    }
 }
 
 /// <summary>Hostile CFF and CFF2 fonts whose subroutines fan out exponentially.</summary>

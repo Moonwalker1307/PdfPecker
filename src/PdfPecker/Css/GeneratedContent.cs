@@ -79,8 +79,33 @@ internal static class GeneratedContent
     // Generated text far beyond any real use (a counters() over runaway nesting) is cut here.
     private const int MaxLength = 10_000;
 
+    /// <summary>
+    /// How many characters of content values one document may evaluate and generate in all. Each value is evaluated for
+    /// every element it applies to, so a long string in one rule would otherwise be copied onto thousands of elements:
+    /// 240 KB of HTML generated 200 million characters, which took gigabytes and minutes and ignored cancellation while
+    /// it was laid out. Real documents stay far below this; past it, generated content is left empty.
+    /// </summary>
+    internal const int MaxDocumentLength = 4_000_000;
+
+    /// <summary>
+    /// The longest string a list marker, quote, text-overflow or hyphenate-character may be. Each is drawn for every
+    /// element or line it applies to, so it is cut here rather than copied in full onto each of them.
+    /// </summary>
+    internal const int MaxMarkLength = 64;
+
     /// <summary>The text to show, or null when the value is invalid or generates no box.</summary>
     public static string? Evaluate(string value, Element host, StyleResolver resolver, ComputedStyle? style = null)
+    {
+        if (resolver.GeneratedBudget <= 0) return "";
+        resolver.GeneratedBudget -= value.Length;
+        var text = EvaluateCore(value, host, resolver, style);
+        if (text == null) return null;
+        if (text.Length > resolver.GeneratedBudget) text = Cut(text, Math.Max(0, resolver.GeneratedBudget));
+        resolver.GeneratedBudget -= text.Length;
+        return text;
+    }
+
+    private static string? EvaluateCore(string value, Element host, StyleResolver resolver, ComputedStyle? style)
     {
         style ??= host.Style;
         var sb = new StringBuilder();
@@ -337,6 +362,17 @@ internal static class GeneratedContent
         int i = 0;
         var sb = new StringBuilder();
         return v.Length >= 2 && v[0] is '"' or '\'' && ReadString(v, ref i, sb) && i == v.Length ? sb.ToString() : null;
+    }
+
+    /// <summary><see cref="UnquoteString"/> cut to <see cref="MaxMarkLength"/>, for strings drawn once per element or line.</summary>
+    internal static string? UnquoteMark(string v) => UnquoteString(v) is { } s ? Cut(s, MaxMarkLength) : null;
+
+    /// <summary><paramref name="s"/> cut to at most <paramref name="length"/> characters without splitting a surrogate pair.</summary>
+    internal static string Cut(string s, int length)
+    {
+        if (s.Length <= length) return s;
+        if (length > 0 && char.IsHighSurrogate(s[length - 1])) length--;
+        return s.Substring(0, length);
     }
 
     /// <summary>Reads a quoted string with CSS escapes (\" \\ \A \201C) at <paramref name="i"/>.</summary>
