@@ -258,4 +258,66 @@ public class PagedMediaTests
         Assert.Contains("(Header 2 of 3)", AllContent(plain));
         Assert.Equal(new[] { "595x842", "842x595", "595x842" }, PageSizes(plain));
     }
+
+    // ---- first-page header and footer ----
+
+    /// <summary>The text of each page, with the page breaks of a long document of numbered paragraphs.</summary>
+    private static string[] TextOfPages(string bands, PdfOptions? options = null)
+    {
+        var body = string.Concat(Enumerable.Range(1, 80).Select(i => $"<p>Line {i}</p>"));
+        return PdfText.ExtractPages(HtmlToPdf.Convert($"<html><body>{bands}{body}</body></html>", options ?? new PdfOptions()))
+            .Select(p => p.Text).ToArray();
+    }
+
+    [Fact]
+    public void First_page_header_replaces_the_running_header_on_page_one_only()
+    {
+        var pages = TextOfPages("<div data-sticky-pdf-header>Running {page}</div><div data-sticky-pdf-first-header><h1>Letterhead</h1></div>");
+        Assert.True(pages.Length >= 2);
+        Assert.Contains("Letterhead", pages[0]);
+        Assert.DoesNotContain("Running", pages[0]);
+        for (int p = 1; p < pages.Length; p++)
+        {
+            Assert.Contains($"Running {p + 1}", pages[p]);
+            Assert.DoesNotContain("Letterhead", pages[p]);
+        }
+    }
+
+    [Fact]
+    public void Empty_first_page_bands_leave_page_one_without_header_and_footer()
+    {
+        var pages = TextOfPages("<div data-sticky-pdf-header>Head</div><div data-sticky-pdf-footer>Foot {page}</div>"
+                                + "<div data-sticky-pdf-first-header></div><div data-sticky-pdf-first-footer></div>");
+        Assert.DoesNotContain("Head", pages[0]);
+        Assert.DoesNotContain("Foot", pages[0]);
+        Assert.Contains("Head", pages[1]);
+        Assert.Contains("Foot 2", pages[1]);
+    }
+
+    [Fact]
+    public void First_page_band_alone_shows_only_on_page_one_and_the_flow_uses_the_space_after()
+    {
+        var pages = TextOfPages("<div data-sticky-pdf-first-footer style='height: 200pt'>Only first</div>");
+        var plain = TextOfPages("");
+        Assert.Contains("Only first", pages[0]);
+        Assert.DoesNotContain("Only first", string.Concat(pages.Skip(1)));
+        // Page one holds fewer lines than without the footer; the second page holds as many as a plain page.
+        int Lines(string page) => Regex.Matches(page, @"Line \d+").Count;
+        Assert.True(Lines(pages[0]) < Lines(plain[0]));
+        Assert.Equal(Lines(plain[1]), Lines(pages[1]));
+    }
+
+    [Fact]
+    public void First_page_bands_work_with_first_page_rules_and_named_pages()
+    {
+        const string html = @"<html><head><style>@page :first { margin-top: 30mm } @page wide { size: A4 landscape }</style></head><body>
+            <div data-sticky-pdf-header>Running {page} of {total-pages}</div><div data-sticky-pdf-first-header>First</div>
+            <p>One</p><section style='page: wide'><p>Wide</p></section></body></html>";
+        var pdf = HtmlToPdf.Convert(html);
+        var pages = PdfText.ExtractPages(pdf).Select(p => p.Text).ToArray();
+        Assert.Equal(2, pages.Length);
+        Assert.Contains("First", pages[0]);
+        Assert.Contains("Running 2 of 2", pages[1]);
+        Assert.Equal(new[] { "595x842", "842x595" }, PageSizes(ConvertUncompressed(html)));
+    }
 }
