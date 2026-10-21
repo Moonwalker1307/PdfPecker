@@ -71,7 +71,7 @@ internal sealed partial class LayoutEngine
                     }
                     break;
                 }
-                case StandardFont font when BundledFonts.Get(font) is { } bundled:
+                case StandardFont font:
                 {
                     // A standard font has the outlines of its bundled replacement, which has the same widths.
                     string visual = text.Rtl ? Bidi.VisualText(str.Substring(run.Start, run.Length)) : str.Substring(run.Start, run.Length);
@@ -80,7 +80,7 @@ internal sealed partial class LayoutEngine
                         char c = visual[i];
                         if (i > 0 && font.HasKerning) pen += font.KernUnits(visual[i - 1], c) * scale;
                         if (SkipsInk(s, visual, i)
-                            && GlyphInk.Intercept(bundled.Program, bundled.Program.GlyphId(c), bandLow, bandHigh, 0, out float left, out float right))
+                            && GlyphInk.Intercept(font, c, bandLow, bandHigh, 0, out float left, out float right))
                             gaps.Add((pen + left * size - dilation, pen + right * size + dilation));
                         pen += font.CharWidth(c, size) + text.CharSpacing + (c == ' ' ? text.WordSpacing : 0);
                     }

@@ -59,6 +59,7 @@ internal sealed class HtmlParser
         var key = written.ToString();
         name = key.ToLowerInvariant();
         _names[key] = name;
+        NoteName(name);
         return name;
     }
 #else
@@ -79,15 +80,32 @@ internal sealed class HtmlParser
         var key = written.ToString();
         var name = key.ToLowerInvariant();
         _names[hash] = (key, name);
+        NoteName(name);
         return name;
     }
 #endif
+
+    // Which of the names the conversion asks about the document has used, as a tag or attribute name. Each new name
+    // is checked once, when it is first seen.
+    private NamesUsed _used;
+
+    private void NoteName(string name)
+    {
+        if (name is "input" or "select" or "textarea" or "button" or "progress" or "meter") _used |= NamesUsed.FormControls;
+        else if (name == "img") _used |= NamesUsed.Img;
+    }
 
     /// <summary>
     /// Parses a document. With <paramref name="impliedStructure"/>, the html, head and body elements that it leaves
     /// out are created, so that rules for <c>body</c> and <c>html</c> reach a fragment too; SVG files are parsed without.
     /// </summary>
-    public static Element Parse(string html, bool impliedStructure = true)
+    public static Element Parse(string html, bool impliedStructure = true) => Parse(html, out _, impliedStructure);
+
+    /// <summary>
+    /// Parses a document, and tells which of the names in <see cref="NamesUsed"/> it uses: a document without one has
+    /// no element of that name, which spares a walk of the tree to look for them.
+    /// </summary>
+    public static Element Parse(string html, out NamesUsed used, bool impliedStructure = true)
     {
         var p = new HtmlParser(html, impliedStructure);
         var doc = new Element("#document");
@@ -96,6 +114,7 @@ internal sealed class HtmlParser
         // A document with markup but no content still has a body.
         if (p._html != null && p._body == null) p.StartBody();
         p.FlushMerge();
+        used = p._used;
         return doc;
     }
 
@@ -552,4 +571,15 @@ internal sealed class HtmlParser
                 return;
         }
     }
+}
+
+/// <summary>Names a document may use, which the conversion looks for before walking the tree for their elements.</summary>
+[Flags]
+internal enum NamesUsed : byte
+{
+    None = 0,
+    /// <summary>input, select, textarea, button, progress or meter.</summary>
+    FormControls = 1,
+    /// <summary>img.</summary>
+    Img = 2,
 }
