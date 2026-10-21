@@ -1918,7 +1918,12 @@ internal sealed partial class LayoutEngine
         return y;
     }
 
-    private static string CollapseWhitespace(string text)
+    /// <summary>
+    /// The text with each run of white space made one space and none at either end, as a regular expression
+    /// replacing \s+ and a trim would give, without the cost of starting the regular expression engine on the first
+    /// conversion.
+    /// </summary>
+    internal static string CollapseWhitespace(string text)
     {
         var sb = new System.Text.StringBuilder(text.Length);
         bool space = false;

@@ -21,6 +21,7 @@ internal sealed partial class LayoutEngine
         public ComputedStyle? Style;
         public int Side, Origin;
         public bool Self, Hidden;
+        private float _width; // the width of the winning border, kept rather than looked up again for every offer
 
         public void Offer(ComputedStyle? s, int side, int origin, bool self = false)
         {
@@ -32,20 +33,21 @@ internal sealed partial class LayoutEngine
                 Self = false;
                 return;
             }
-            if (Style != null && !Beats(s, side, origin, Style, Side, Origin)) return;
+            float width = BorderWidth(s, side);
+            if (Style != null && !Beats(s, side, width, origin, Style, Side, _width, Origin)) return;
             Style = s;
             Side = side;
             Origin = origin;
             Self = self;
+            _width = width;
         }
 
         /// <summary>The width of the resolved border: none when hidden.</summary>
-        public readonly float Width => Style == null ? 0 : BorderWidth(Style, Side);
+        public readonly float Width => Style == null ? 0 : _width;
     }
 
-    private static bool Beats(ComputedStyle a, int aSide, int aOrigin, ComputedStyle b, int bSide, int bOrigin)
+    private static bool Beats(ComputedStyle a, int aSide, float aw, int aOrigin, ComputedStyle b, int bSide, float bw, int bOrigin)
     {
-        float aw = BorderWidth(a, aSide), bw = BorderWidth(b, bSide);
         if (aw != bw) return aw > bw;
         int ar = StyleRank(BorderStyleOf(a, aSide)), br = StyleRank(BorderStyleOf(b, bSide));
         return ar != br ? ar > br : aOrigin > bOrigin;
@@ -170,21 +172,38 @@ internal sealed partial class LayoutEngine
             {
                 int r1 = Math.Min(rows, cell.Row + cell.RowSpan) - 1, c1 = Math.Min(cols, cell.Col + cell.ColSpan) - 1;
                 float top = 0, bottom = 0, left = 0, right = 0;
+                cell.SelfSides = cell.ForeignSides = 0;
                 for (int c = cell.Col; c <= c1; c++)
                 {
-                    top = Math.Max(top, ResolveEdge(m, cell, BoxPainter.Top, c).Width);
-                    bottom = Math.Max(bottom, ResolveEdge(m, cell, BoxPainter.Bottom, c).Width);
+                    top = Math.Max(top, Resolved(m, cell, BoxPainter.Top, c));
+                    bottom = Math.Max(bottom, Resolved(m, cell, BoxPainter.Bottom, c));
                 }
                 for (int r = cell.Row; r <= r1; r++)
                 {
-                    left = Math.Max(left, ResolveEdge(m, cell, BoxPainter.Left, r).Width);
-                    right = Math.Max(right, ResolveEdge(m, cell, BoxPainter.Right, r).Width);
+                    left = Math.Max(left, Resolved(m, cell, BoxPainter.Left, r));
+                    right = Math.Max(right, Resolved(m, cell, BoxPainter.Right, r));
                 }
                 cell.CollapsedT = top;
                 cell.CollapsedB = bottom;
                 cell.CollapsedL = left;
                 cell.CollapsedR = right;
             }
+    }
+
+    /// <summary>
+    /// The width of the border that wins side <paramref name="side"/> of a cell at <paramref name="k"/>. At the cell's
+    /// first column or row it also notes on the cell who owns that border, for <see cref="CollapsedSides"/> and
+    /// <see cref="PaintForeignEdges"/>.
+    /// </summary>
+    private static float Resolved(TableModel m, CellModel cell, int side, int k)
+    {
+        var edge = ResolveEdge(m, cell, side, k);
+        if (k == (side is BoxPainter.Top or BoxPainter.Bottom ? cell.Col : cell.Row))
+        {
+            if (edge.Self) cell.SelfSides |= side;
+            if (edge.Style != null && edge.Origin != CellOrigin) cell.ForeignSides |= side;
+        }
+        return edge.Width;
     }
 
     /// <summary>
@@ -222,15 +241,7 @@ internal sealed partial class LayoutEngine
     /// With collapsed borders, the sides of a cell that it draws: each shared border is drawn once, by the cell whose
     /// border wins (on a tie the cell above or to the left). A row at the top of a page draws its top border again.
     /// </summary>
-    private static int CollapsedSides(TableModel m, CellModel cell, bool atPageTop)
-    {
-        int sides = 0;
-        if (atPageTop || ResolveEdge(m, cell, BoxPainter.Top, cell.Col).Self) sides |= BoxPainter.Top;
-        if (ResolveEdge(m, cell, BoxPainter.Bottom, cell.Col).Self) sides |= BoxPainter.Bottom;
-        if (ResolveEdge(m, cell, BoxPainter.Left, cell.Row).Self) sides |= BoxPainter.Left;
-        if (ResolveEdge(m, cell, BoxPainter.Right, cell.Row).Self) sides |= BoxPainter.Right;
-        return sides;
-    }
+    private static int CollapsedSides(CellModel cell, bool atPageTop) => cell.SelfSides | (atPageTop ? BoxPainter.Top : 0);
 
     /// <summary>
     /// Draws the borders of rows, row groups and the table that win along a cell's edges, centred on the grid lines as
@@ -253,6 +264,7 @@ internal sealed partial class LayoutEngine
             bool edgeOfTable = side switch { BoxPainter.Top => first, BoxPainter.Bottom => last, BoxPainter.Left => leftEdge, _ => rightEdge };
             if (side != BoxPainter.Top && !edgeOfTable) continue;
             if (edgeOfTable && (m.WholeTableSides & side) != 0) continue;
+            if ((cell.ForeignSides & side) == 0) continue;
             var edge = ResolveEdge(m, cell, side, side is BoxPainter.Top or BoxPainter.Bottom ? cell.Col : cell.Row);
             if (edge.Style is not { } s || edge.Origin == CellOrigin) continue;
             float w = edge.Width;

@@ -8,7 +8,9 @@ internal sealed class ByteBuffer
     private byte[] _buf;
     private int _len;
 
-    public ByteBuffer(int capacity = 4096) => _buf = new byte[capacity];
+    // Only the bytes up to the length are ever read, so the buffer is not cleared first: clearing the 64 KB a document
+    // starts with took longer than writing a small document into it.
+    public ByteBuffer(int capacity = 4096) => _buf = GC.AllocateUninitializedArray<byte>(capacity);
 
     public int Length => _len;
     public byte[] RawBuffer => _buf;
@@ -24,7 +26,9 @@ internal sealed class ByteBuffer
     private void Grow(int extra)
     {
         int size = Math.Max(_buf.Length * 2, _len + extra);
-        Array.Resize(ref _buf, size);
+        var grown = GC.AllocateUninitializedArray<byte>(size);
+        _buf.AsSpan(0, _len).CopyTo(grown);
+        _buf = grown;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

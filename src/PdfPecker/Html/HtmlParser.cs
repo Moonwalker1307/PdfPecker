@@ -93,6 +93,7 @@ internal sealed class HtmlParser
     {
         if (name is "input" or "select" or "textarea" or "button" or "progress" or "meter") _used |= NamesUsed.FormControls;
         else if (name == "img") _used |= NamesUsed.Img;
+        else if (name == "title") _used |= NamesUsed.Title;
     }
 
     /// <summary>
@@ -582,4 +583,6 @@ internal enum NamesUsed : byte
     FormControls = 1,
     /// <summary>img.</summary>
     Img = 2,
+    /// <summary>title.</summary>
+    Title = 4,
 }
