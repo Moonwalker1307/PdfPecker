@@ -23,6 +23,7 @@ public static partial class HtmlToPdf
         private readonly CancellationToken _cancellation;
 
         private Element _doc = null!;
+        private NamesUsed _namesUsed;
         private Stylesheet _sheet = null!;
         /// <summary>The document's page: the options' size and margins with the @page rules applied, scaled and fitted.</summary>
         private PageSetup _page = null!;
@@ -70,8 +71,9 @@ public static partial class HtmlToPdf
 
         private void Parse()
         {
-            _doc = HtmlParser.Parse(_html);
-            if (MayHaveControls(_html)) FormControls.Prepare(_doc, _options.FormFields);
+            _doc = HtmlParser.Parse(_html, out _namesUsed);
+            // Most documents have no form controls and no images, and the parser tells which, sparing walks of the tree.
+            if ((_namesUsed & NamesUsed.FormControls) != 0) FormControls.Prepare(_doc, _options.FormFields);
         }
 
         /// <summary>
@@ -120,7 +122,7 @@ public static partial class HtmlToPdf
                 embedStandard: _options.EmbedStandardFonts || _settings.Conformance != PdfConformance.None || _settings.IsPdfUA,
                 systemFonts: _options.UseSystemFonts, report: _missingFonts);
             _images.Fonts = _fonts;
-            if (_html.Contains("<img", StringComparison.OrdinalIgnoreCase)) MissingImageText.Prepare(_doc, _images);
+            if ((_namesUsed & NamesUsed.Img) != 0) MissingImageText.Prepare(_doc, _images);
             _paged = new PagedContent();
             if (!_options.IgnoreCssPageRules) _paged.FootnotePageReset = FootnotePageReset(_sheet.PageRules);
             // hyphens: auto: the language of the text is its nearest lang attribute, else PdfOptions.Language.
@@ -201,11 +203,5 @@ public static partial class HtmlToPdf
                 return null;
             }
         };
-
-        /// <summary>Whether the source can hold form controls: most documents have none, which spares a walk of the tree.</summary>
-        private static bool MayHaveControls(string html)
-            => html.Contains("<input", StringComparison.OrdinalIgnoreCase) || html.Contains("<select", StringComparison.OrdinalIgnoreCase)
-               || html.Contains("<textarea", StringComparison.OrdinalIgnoreCase) || html.Contains("<button", StringComparison.OrdinalIgnoreCase)
-               || html.Contains("<progress", StringComparison.OrdinalIgnoreCase) || html.Contains("<meter", StringComparison.OrdinalIgnoreCase);
     }
 }

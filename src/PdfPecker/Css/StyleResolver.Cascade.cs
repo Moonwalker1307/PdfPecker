@@ -123,10 +123,10 @@ internal sealed partial class StyleResolver
         for (int i = 0; i < _count; i++)
         {
             var d = _decls[i];
-            if (!UsedViewportHeight && HasViewportHeightUnit(d.Value)) UsedViewportHeight = true;
+            if (!UsedViewportHeight && d.HasViewportHeightUnit) UsedViewportHeight = true;
             if (d.Property is "font-size" or "color" or "all" || d.Property.StartsWith("--", StringComparison.Ordinal) || ResetByAll(i, allDecl)) continue;
             if (fontFirst && _applied[i]) continue;
-            if (!CssParser.HasVar(d.Value))
+            if (!d.HasVar)
             {
                 Apply(s, parent, d.Property, d.MetricUnits ? RewriteMetricUnits(d.Value, s, d.Property == "line-height" ? parent : s) : d.Value);
                 continue;
@@ -220,13 +220,9 @@ internal sealed partial class StyleResolver
     private bool UsesContainerUnits()
     {
         for (int i = 0; i < _count; i++)
-            if (ContainerQuery.HasContainerUnit(_decls[i].Value) || CssParser.HasVar(_decls[i].Value)) return true;
+            if (ContainerQuery.HasContainerUnit(_decls[i].Value) || _decls[i].HasVar) return true;
         return false;
     }
-
-    private static bool HasViewportHeightUnit(string v)
-        => v.IndexOf("vh", StringComparison.OrdinalIgnoreCase) >= 0 || v.IndexOf("vb", StringComparison.OrdinalIgnoreCase) >= 0 || v.IndexOf("vmin", StringComparison.OrdinalIgnoreCase) >= 0
-           || v.IndexOf("vmax", StringComparison.OrdinalIgnoreCase) >= 0 || v.IndexOf("var(", StringComparison.OrdinalIgnoreCase) >= 0;
 
     private static string? Substituted(string value, ComputedStyle s)
         => CssParser.HasVar(value) ? CssVariables.Substitute(value, s.CustomProperties) : value;

@@ -23,6 +23,7 @@ internal sealed partial class LayoutEngine
     private int[] _clusterStart = new int[16];
     private byte[] _clusterJustify = new byte[16];
     private readonly List<Item> _justifyPieces = new();
+    private bool _justifySplit; // whether JustifyText has split a word into pieces since AlignLine cleared it
 
     /// <summary>
     /// Finds the justification opportunities of a justified line and marks its items with them. Returns how many there
@@ -159,6 +160,7 @@ internal sealed partial class LayoutEngine
         pieces[^1].Width = it.Width - used;
         items.RemoveAt(k);
         items.InsertRange(k, pieces);
+        _justifySplit = true;
         return pieces.Count;
     }
 

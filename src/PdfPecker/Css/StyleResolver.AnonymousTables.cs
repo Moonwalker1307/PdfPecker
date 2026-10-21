@@ -48,6 +48,8 @@ internal sealed partial class StyleResolver
                 break;
             default:
                 // Cells and rows outside a table: a run of them becomes one anonymous table, inline in inline content.
+                // Most blocks have none, which one look at the children tells.
+                if (!HasTablePart(parent)) break;
                 WrapRuns(parent, c => IsTablePart(c.Style.Display), Display.Table, AnonymousTableName, inline: s.Display == Display.Inline, elementsOnly: true);
                 break;
         }
@@ -71,6 +73,13 @@ internal sealed partial class StyleResolver
 
     private static bool IsTablePart(Display d)
         => d is Display.TableRow or Display.TableCell or Display.TableRowGroup or Display.TableHeaderGroup or Display.TableFooterGroup;
+
+    private static bool HasTablePart(Element parent)
+    {
+        foreach (var c in parent.Children)
+            if (c is Element { Style: { } cs } && IsTablePart(cs.Display)) return true;
+        return false;
+    }
 
     /// <summary>Whether a table finds rows inside <paramref name="e"/>, which it looks into as it does into a form.</summary>
     private static bool HasRows(Element e)

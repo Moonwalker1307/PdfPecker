@@ -1,12 +1,10 @@
-using System.Security.Cryptography;
-
 namespace PdfPecker.Images;
 
 /// <summary>
-/// Decoded images shared between conversions, found by the SHA-256 of their file bytes: a template's logo is decoded
-/// once, not for every document made from it. Each document gets its own copy of the image object (the writer numbers
-/// it), sharing the read-only pixel data. Small and least-recently-used, so a stream of different images costs no more
-/// than the cap.
+/// Decoded images shared between conversions, found by their file bytes: a template's logo is decoded once, not for
+/// every document made from it. Each entry keeps a copy of the file, because comparing the bytes costs less than
+/// hashing them. Each document gets its own copy of the image object (the writer numbers it), sharing the read-only
+/// pixel data. Small and least-recently-used, so a stream of different images costs no more than the cap.
 /// </summary>
 internal static class DecodedImageCache
 {
@@ -15,7 +13,7 @@ internal static class DecodedImageCache
 
     private sealed class Entry
     {
-        public required byte[] Hash;
+        public required byte[] File;
         public required PdfImage Image;
         public required long Size;
     }
@@ -26,12 +24,11 @@ internal static class DecodedImageCache
     /// <summary>Decodes JPEG, PNG, GIF, WebP, BMP or TIFF data, or returns a copy of the same image decoded earlier.</summary>
     public static PdfImage? Decode(byte[] data)
     {
-        var hash = SHA256.HashData(data);
         lock (Entries)
         {
             for (var node = Entries.First; node != null; node = node.Next)
             {
-                if (!node.Value.Hash.AsSpan().SequenceEqual(hash)) continue;
+                if (!node.Value.File.AsSpan().SequenceEqual(data)) continue;
                 Entries.Remove(node);
                 Entries.AddFirst(node);
                 return node.Value.Image.Copy();
@@ -39,11 +36,12 @@ internal static class DecodedImageCache
         }
         var image = PdfImage.FromBytes(data);
         if (image == null) return null;
-        long size = image.Data.Length + (image.SMask?.Data.Length ?? 0);
+        long size = data.Length + image.Data.Length + (image.SMask?.Data.Length ?? 0);
         if (size > MaxBytes / 4) return image;
         lock (Entries)
         {
-            Entries.AddFirst(new Entry { Hash = hash, Image = image.Copy(), Size = size });
+            // A copy, because the caller's array may change after the conversion.
+            Entries.AddFirst(new Entry { File = data.ToArray(), Image = image.Copy(), Size = size });
             _bytes += size;
             while (Entries.Count > MaxEntries || _bytes > MaxBytes)
             {

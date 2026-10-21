@@ -400,6 +400,20 @@ public class FontTests
     }
 
     [Fact]
+    public void SkipInkFindsTheSameGlyphsAsTheEmbeddedBundledFonts()
+    {
+        // Underlines of standard-font text skip the ink of the bundled fonts' outlines, looked up in their own character
+        // maps rather than through the full embeddable font, so the two must agree on every character.
+        foreach (var sf in StandardFont.All)
+        {
+            var program = BundledFonts.Get(sf)!.Program;
+            var trueType = TrueTypeFont.Parse(BundledFonts.Data(sf)!)!;
+            for (int c = 0; c <= char.MaxValue; c++)
+                if (program.GlyphId(c) != trueType.Lookup(3, 1, c)) Assert.Fail($"Font {sf.Index}, U+{c:X4}");
+        }
+    }
+
+    [Fact]
     public void PdfAEmbedsTheWatermarkAndFooterFonts()
     {
         var options = new PdfOptions

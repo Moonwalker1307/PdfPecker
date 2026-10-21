@@ -83,9 +83,10 @@ internal static class JustificationCharacters
         or (>= 0xFE70 and <= 0xFEFF) or (>= 0x10D00 and <= 0x10D3F) or (>= 0x11660 and <= 0x1167F) or (>= 0x1EC70 and <= 0x1ECBF);
 
     /// <summary>Whether a character is default ignorable (format controls, variation selectors, ...): it is never justified.</summary>
-    public static bool IsDefaultIgnorable(int cp) => cp is 0x034F or 0x115F or 0x1160 or 0x17B4 or 0x17B5 or 0x3164 or 0xFFA0
-        or (>= 0x180B and <= 0x180F) or (>= 0xFE00 and <= 0xFE0F) or (>= 0xE0000 and <= 0xE0FFF)
-        || CharUnicodeInfo.GetUnicodeCategory(cp) == UnicodeCategory.Format;
+    public static bool IsDefaultIgnorable(int cp) => cp >= 0x80 // no ASCII character is one
+        && (cp is 0x034F or 0x115F or 0x1160 or 0x17B4 or 0x17B5 or 0x3164 or 0xFFA0
+            or (>= 0x180B and <= 0x180F) or (>= 0xFE00 and <= 0xFE0F) or (>= 0xE0000 and <= 0xE0FFF)
+            || CharUnicodeInfo.GetUnicodeCategory(cp) == UnicodeCategory.Format);
 
     /// <summary>
     /// Whether a character continues the grapheme cluster before it (a combining mark, a joiner, an emoji modifier, a
@@ -94,6 +95,8 @@ internal static class JustificationCharacters
     public static bool ExtendsCluster(int cp, int previous)
     {
         if (previous == 0x200D) return true;
+        // No mark comes before the combining diacritics, so most Latin text needs no category lookup.
+        if (cp < 0x0300) return false;
         if (cp is 0x200C or 0x200D or (>= 0xFE00 and <= 0xFE0F) or (>= 0x1F3FB and <= 0x1F3FF) or (>= 0xE0020 and <= 0xE007F)) return true;
         var category = CharUnicodeInfo.GetUnicodeCategory(cp);
         return category is UnicodeCategory.NonSpacingMark or UnicodeCategory.SpacingCombiningMark or UnicodeCategory.EnclosingMark;
