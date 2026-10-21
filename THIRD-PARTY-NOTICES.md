@@ -5,12 +5,17 @@ third-party material below, each under its own license, which is reproduced in t
 
 - The twelve Liberation Sans, Serif and Mono font files are shipped unmodified in the library
   (`src/PdfPecker/Fonts/Bundled`, Brotli-compressed with `tools/FontPackBuilder --bundle` and restored byte for byte
-  when loaded). Subsets of them are embedded in PDFs created with `PdfOptions.EmbedStandardFonts` or PDF/A, as the
-  Open Font License permits for documents.
+  when loaded). Subsets of them are embedded in PDFs created with `PdfOptions.EmbedStandardFonts` or PDF/A, and in
+  other PDFs for letters the standard fonts lack, as the Open Font License permits for documents.
 - The PDF renderer uses font data derived from the Liberation fonts and DejaVu Sans, stored in a compact outline
   format in `src/PdfPecker/Rendering/Fonts/StandardFonts.bin` (built by `tools/FontPackBuilder`), to draw the 14
   standard PDF fonts and fonts that a PDF does not embed. This data is not installed or exposed as a font, it is not
   distributed under the names below, and it remains under the fonts' own licenses.
+- The symbol fallback font (`src/PdfPecker/Fonts/Bundled/PdfPeckerSymbols.ttf.br`, built by
+  `tools/FontPackBuilder --symbols`) is a subset of DejaVu Sans with its arrows, check marks, stars, dingbats, math
+  and box drawing characters, Brotli-compressed. As the Bitstream Vera and Arev licenses below require of a modified
+  font, it is renamed "PdfPecker Symbols", and its copyright and license records are kept. Subsets of it are embedded
+  in PDFs whose text needs a character no other font has.
 - The pair kerning of the standard fonts in `src/PdfPecker/Fonts/StandardFontKerning.Data.cs` was taken from the GPOS
   `kern` feature of the bundled Liberation fonts, so it is covered by their license.
 - The advance widths of the 14 standard PDF fonts in `src/PdfPecker/Fonts/StandardFontMetrics.Data.cs` were generated
@@ -170,7 +175,7 @@ FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM OTHER
 DEALINGS IN THE FONT SOFTWARE.
 ```
 
-## DejaVu Sans (used for the Symbol and ZapfDingbats glyphs)
+## DejaVu Sans (used for the Symbol and ZapfDingbats glyphs and the symbol fallback font)
 
 Source: https://github.com/dejavu-fonts/dejavu-fonts (version 2.37)
 
