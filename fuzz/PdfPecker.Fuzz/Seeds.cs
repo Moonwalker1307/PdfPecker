@@ -178,7 +178,8 @@ internal sealed class SeedContext
             + "<div style='display:grid;grid-template-columns:1fr 2fr;grid-template-areas:\"a b\"'><p style='grid-area:a'>x</p></div>"
             + "<ul><li>one<ol><li>two<li>three</ol></ul><p style='columns:2;column-gap:10px'>" + string.Concat(Enumerable.Repeat("word ", 80)) + "</p>"
             + "<form><input type=text name=a value=v><select name=s><option>1<option>2</select><textarea name=t>t</textarea><input type=checkbox checked><input type=radio name=r></form>"
-            + "<p style='float:left;width:30%'>float</p><p style='position:absolute;top:10px;left:5px'>abs</p><h2 style='page-break-before:always'>next</h2>"));
+            + "<p style='float:left;width:30%'>float</p><p style='position:absolute;top:10px;left:5px'>abs</p><h2 style='page-break-before:always'>next</h2>"
+            + "<style>.il::first-letter{initial-letter:3}</style><p class=il>Drop cap " + string.Concat(Enumerable.Repeat("word ", 40)) + "</p>"));
     }
 
     public IEnumerable<(string Name, byte[] Data)> CssFiles()

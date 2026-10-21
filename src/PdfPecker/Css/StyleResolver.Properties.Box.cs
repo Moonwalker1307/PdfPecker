@@ -64,6 +64,32 @@ internal sealed partial class StyleResolver
         else if (d.Lower == "auto" || !s.Width.IsAuto) s.WidthKeyword = SizeKeyword.None;
     }
 
+    private static void ApplyInitialLetter(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Lower == "inherit") (s.InitialLetterSize, s.InitialLetterSink) = (parent.InitialLetterSize, parent.InitialLetterSink);
+        else if (d.Lower is "normal" or "initial" or "unset") (s.InitialLetterSize, s.InitialLetterSink) = (0, 0);
+        else if (ParseInitialLetter(d.Lower) is { } letter) (s.InitialLetterSize, s.InitialLetterSink) = letter;
+    }
+
+    /// <summary>
+    /// Parses initial-letter: a size of at least 1 followed by a whole sink of at least 1, or by drop or raise (raise
+    /// sinks by one line, drop and nothing by the size rounded up, given as 0). Null when the value is not valid.
+    /// </summary>
+    internal static (float Size, int Sink)? ParseInitialLetter(string lower)
+    {
+        var parts = lower.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length is 0 or > 2) return null;
+        int sizeAt = parts.Length == 2 && parts[0] is "drop" or "raise" ? 1 : 0;
+        if (!float.TryParse(parts[sizeAt], NumberStyles.Float, CultureInfo.InvariantCulture, out float size) || !float.IsFinite(size) || size < 1)
+            return null;
+        if (parts.Length == 1) return (size, 0);
+        string sink = parts[1 - sizeAt];
+        if (sink == "drop") return (size, 0);
+        if (sink == "raise") return (size, 1);
+        if (sizeAt == 1 || !Invariant.TryParseInt(sink, out int n) || n < 1) return null;
+        return (size, n);
+    }
+
     private static void ApplyFloat(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
         string lower = d.Lower;

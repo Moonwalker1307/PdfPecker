@@ -33,12 +33,44 @@ internal sealed partial class LayoutEngine
         if (high < low) low = high = (top + bottom) / 2;
         var gaps = _inkGaps;
         gaps.Clear();
-        float dilation = Math.Min(thickness, MaxInkDilation);
-        float size = text.Size, scale = size / 1000f;
         // Heights above the baseline, in ems.
-        float bandLow = (text.Baseline - high) / size, bandHigh = (text.Baseline - low) / size;
-        string str = text.Text;
+        var cut = new GapCutter
+        {
+            Style = s, Gaps = gaps, Size = text.Size, Dilation = Math.Min(thickness, MaxInkDilation),
+            BandLow = (text.Baseline - high) / text.Size, BandHigh = (text.Baseline - low) / text.Size,
+        };
+        VisitGlyphs(text, ref cut);
+        if (gaps.Count == 0) return null;
+        gaps.Sort((a, b) => a.Left.CompareTo(b.Left));
+        int merged = 0;
+        for (int k = 1; k < gaps.Count; k++)
+        {
+            if (gaps[k].Left <= gaps[merged].Right) gaps[merged] = (gaps[merged].Left, Math.Max(gaps[merged].Right, gaps[k].Right));
+            else gaps[++merged] = gaps[k];
+        }
+        gaps.RemoveRange(merged + 1, gaps.Count - merged - 1);
+        return gaps;
+    }
 
+    /// <summary>
+    /// What is done with each glyph of a text op: the glyph of a font program, from the character at start in text, drawn
+    /// with its origin at x, raised by dy points and slanted by skew (a synthetic italic); or the character at start, which
+    /// is c, in a standard font.
+    /// </summary>
+    private interface IGlyphVisitor
+    {
+        void Glyph(FontProgram program, int gid, string text, int start, float x, float dy, float skew);
+        void Glyph(StandardFont font, char c, string text, int start, float x);
+    }
+
+    /// <summary>
+    /// Walks the glyphs of a text op as the writer draws them: shaped, kerned and spaced, each at its pen position, with
+    /// the outlines of a standard font's bundled replacement.
+    /// </summary>
+    private void VisitGlyphs<T>(TextOp text, ref T visitor) where T : struct, IGlyphVisitor
+    {
+        float scale = text.Size / 1000f;
+        string str = text.Text;
         _inkRuns.Clear();
         text.Font.Split(str, _inkRuns);
         float runX = text.X;
@@ -59,13 +91,7 @@ internal sealed partial class LayoutEngine
                     {
                         if (kern && previous >= 0) pen += (text.Rtl ? font.Program.Kern1000(g.Gid, previous) : font.Program.Kern1000(previous, g.Gid)) * scale;
                         previous = g.Gid;
-                        float dy = positioned ? g.Dy * scale : 0;
-                        if (SkipsInk(s, str, g.Start)
-                            && GlyphInk.Intercept(font.Program, g.Gid, bandLow - dy / size, bandHigh - dy / size, skew, out float left, out float right))
-                        {
-                            float origin = pen + (positioned ? g.Dx * scale : 0);
-                            gaps.Add((origin + left * size - dilation, origin + right * size + dilation));
-                        }
+                        visitor.Glyph(font.Program, g.Gid, str, g.Start, pen + (positioned ? g.Dx * scale : 0), positioned ? g.Dy * scale : 0, skew);
                         pen += (positioned ? g.Advance : font.Program.Advance1000(g.Gid)) * scale + text.CharSpacing
                             + (g.Length > 0 && str[g.Start] == ' ' ? text.WordSpacing : 0);
                     }
@@ -79,26 +105,35 @@ internal sealed partial class LayoutEngine
                     {
                         char c = visual[i];
                         if (i > 0 && font.HasKerning) pen += font.KernUnits(visual[i - 1], c) * scale;
-                        if (SkipsInk(s, visual, i)
-                            && GlyphInk.Intercept(font, c, bandLow, bandHigh, 0, out float left, out float right))
-                            gaps.Add((pen + left * size - dilation, pen + right * size + dilation));
-                        pen += font.CharWidth(c, size) + text.CharSpacing + (c == ' ' ? text.WordSpacing : 0);
+                        visitor.Glyph(font, c, visual, i, pen);
+                        pen += font.CharWidth(c, text.Size) + text.CharSpacing + (c == ' ' ? text.WordSpacing : 0);
                     }
                     break;
                 }
             }
             runX += RunWidth(run.Font, text, run.Start, run.Length);
         }
-        if (gaps.Count == 0) return null;
-        gaps.Sort((a, b) => a.Left.CompareTo(b.Left));
-        int merged = 0;
-        for (int k = 1; k < gaps.Count; k++)
+    }
+
+    /// <summary>Cuts a gap for each glyph whose ink reaches into a decoration line's band.</summary>
+    private struct GapCutter : IGlyphVisitor
+    {
+        public ComputedStyle Style;
+        public List<(float Left, float Right)> Gaps;
+        public float Size, Dilation, BandLow, BandHigh;
+
+        public readonly void Glyph(FontProgram program, int gid, string text, int start, float x, float dy, float skew)
         {
-            if (gaps[k].Left <= gaps[merged].Right) gaps[merged] = (gaps[merged].Left, Math.Max(gaps[merged].Right, gaps[k].Right));
-            else gaps[++merged] = gaps[k];
+            if (SkipsInk(Style, text, start)
+                && GlyphInk.Intercept(program, gid, BandLow - dy / Size, BandHigh - dy / Size, skew, out float left, out float right))
+                Gaps.Add((x + left * Size - Dilation, x + right * Size + Dilation));
         }
-        gaps.RemoveRange(merged + 1, gaps.Count - merged - 1);
-        return gaps;
+
+        public readonly void Glyph(StandardFont font, char c, string text, int start, float x)
+        {
+            if (SkipsInk(Style, text, start) && GlyphInk.Intercept(font, c, BandLow, BandHigh, 0, out float left, out float right))
+                Gaps.Add((x + left * Size - Dilation, x + right * Size + Dilation));
+        }
     }
 
     /// <summary>Whether the glyph of the character at <paramref name="i"/> cuts a gap: not a CJK one, unless all ink is skipped.</summary>

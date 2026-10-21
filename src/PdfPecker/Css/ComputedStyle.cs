@@ -444,6 +444,14 @@ internal sealed class ComputedStyle
     public ShapeOutside? ShapeOutside;          // shape-outside on a float; null = none
     public Length ShapeMargin = Length.Zero;    // shape-margin; a percentage is of the containing block's width
     public float ShapeImageThreshold;           // shape-image-threshold, from 0 to 1
+    /// <summary>
+    /// initial-letter on a ::first-letter: how many lines the letter is tall, or 0 for normal, and how many lines it sinks
+    /// (0 for drop, which sinks it by its size rounded up; raise is 1). InitialLetterSunk is false for a letter its author
+    /// floats, which keeps its float instead of sinking into the lines.
+    /// </summary>
+    public float InitialLetterSize;
+    public int InitialLetterSink;
+    public bool InitialLetterSunk;
     /// <summary>float: footnote: the box leaves the flow for the footnote area of the page its call lands on.</summary>
     public bool Footnote;
     public FootnoteDisplay FootnoteDisplay;
@@ -735,6 +743,9 @@ internal sealed class ComputedStyle
         c.ShapeOutside = null;
         c.ShapeMargin = Length.Zero;
         c.ShapeImageThreshold = 0;
+        c.InitialLetterSize = 0;
+        c.InitialLetterSink = 0;
+        c.InitialLetterSunk = false;
         c.Footnote = false;
         c.FootnoteDisplay = FootnoteDisplay.Block;
         c.FootnotePolicy = FootnotePolicy.Auto;
