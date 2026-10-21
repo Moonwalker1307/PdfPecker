@@ -117,6 +117,8 @@ internal sealed class SvgDashArray
 }
 
 internal enum TextAlign : byte { Left, Right, Center, Justify, Start, End } // Start and End follow the direction
+// text-justify; distribute is inter-character's old name.
+internal enum TextJustify : byte { Auto, None, InterWord, InterCharacter }
 internal enum UnicodeBidi : byte { Normal, Embed, Isolate, BidiOverride, IsolateOverride, Plaintext }
 
 /// <summary>Values of writing-mode. The vertical modes are laid out as horizontal text turned a quarter turn.</summary>
@@ -274,6 +276,7 @@ internal sealed class ComputedStyle
     public bool Rtl;                         // direction: rtl
     public WritingMode WritingMode;          // writing-mode
     public TextAlign? TextAlignLast;         // null = auto
+    public TextJustify TextJustify;
     public TextAlign? BlockAlign;            // -webkit-left, -webkit-center or -webkit-right: also aligns child blocks
     public int TabSize = 8;                  // in spaces
     public bool NoHyphens;                   // hyphens: none (soft hyphens are no break opportunity)
