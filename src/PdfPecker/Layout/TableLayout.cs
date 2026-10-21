@@ -501,9 +501,10 @@ internal sealed partial class LayoutEngine
         }
         else
         {
-            float scale = sumMin > 0 ? Math.Max(target, 0) / sumMin : 0;
+            // As in Chrome, a table is never narrower than its columns' min-content widths: a long word or URL widens it
+            // past its width or its container instead of overflowing its cell.
             for (int c = 0; c < n; c++)
-                if (m.ColPct[c] < 0) w[c] = m.ColMin[c] * scale;
+                if (m.ColPct[c] < 0) w[c] = m.ColMin[c];
         }
         return w;
     }
