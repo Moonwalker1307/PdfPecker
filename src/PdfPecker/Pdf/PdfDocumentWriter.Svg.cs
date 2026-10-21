@@ -240,10 +240,12 @@ internal sealed partial class PdfDocumentWriter
         // The group starts from the graphics state of the masked content: nothing about its colours is known.
         (_fill, _stroke, _lineWidth, _fillAlpha, _strokeAlpha) = (1, 1, -1, -1, -1);
         _anyAlpha = true;
+        var streamSpace = StartStreamSpace();
         WriteMatrix(content, toPage).Ascii(" cm\n");
         WritePath(content, mask);
         content.Ascii("W n\n");
         WriteSvgShapes(content, mask.Children!, toPage);
+        _streamSpace = streamSpace;
         RestoreState(saved);
         string dict = "/Type /XObject /Subtype /Form /BBox [-32767 -32767 32767 32767] /Group << /S /Transparency /CS /DeviceRGB >> /Resources "
             + _resourcesId.ToString(System.Globalization.CultureInfo.InvariantCulture) + " 0 R";
@@ -258,9 +260,11 @@ internal sealed partial class PdfDocumentWriter
         var saved = SaveState();
         // A pattern cell starts from the default graphics state and uses the shared resources.
         (_fill, _stroke, _lineWidth, _fillAlpha, _strokeAlpha) = (CssColor.Black, CssColor.Black, 1, 255, 255);
+        var streamSpace = StartStreamSpace();
         WriteSvgShapes(cell, pattern.Shapes, Matrix.Identity);
+        _streamSpace = streamSpace;
         RestoreState(saved);
-        var m = pattern.ToRoot.Then(toPage);
+        var m = InStream(pattern.ToRoot.Then(toPage));
         var dict = new ByteBuffer(256);
         dict.Ascii("/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 ").Num(pattern.Width).Sp().Num(pattern.Height)
             .Ascii("] /XStep ").Num(pattern.Width).Ascii(" /YStep ").Num(pattern.Height).Ascii(" /Matrix [");
@@ -308,8 +312,12 @@ internal sealed partial class PdfDocumentWriter
         var group = new ByteBuffer(1024);
         (_fill, _stroke, _lineWidth, _fillAlpha, _strokeAlpha) = (1, 1, -1, -1, -1); // a group starts from unknown colours
         _anyAlpha = true;
+        // The group's default space is the drawing's user space, where it is drawn: toPage leads back out of it.
+        var streamSpace = _streamSpace;
+        _streamSpace = toPage.TryInvert(out var back) ? back : null;
         WriteMatrix(group, shape.ImageMatrix).Ascii(" cm\n");
         WriteSvgShapes(group, children, inner);
+        _streamSpace = streamSpace;
         RestoreState(saved);
         _forms.Add(group.Span.ToArray());
         _formIsolated.Add(false);

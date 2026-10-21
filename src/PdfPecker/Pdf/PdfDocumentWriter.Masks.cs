@@ -84,9 +84,11 @@ internal sealed partial class PdfDocumentWriter
         _tw = _tc = float.NaN;
         _tr = -1;
         _anyAlpha = true;
+        var streamSpace = StartStreamSpace();
         foreach (var item in ops)
             if (item.Op is not LinkOp) WriteOp(content, item, pageTop, imageIds);
         EndText(content);
+        _streamSpace = streamSpace;
         _mc = pageMc;
         _mcOpen = open;
         RestoreState(saved);
@@ -197,7 +199,7 @@ internal sealed partial class PdfDocumentWriter
             ph = Math.Max(1, Math.Floor(ph * k));
         }
         int w = (int)pw, h = (int)ph;
-        if (!f.WithinBudget(w, h) || !_filterBudget.TrySpend(f.DocumentWork(w, h))) return default;
+        if (!WithinRenderBudget(f, behind, w, h)) return default;
         var pdf = RenderFlow(behind, rx, ry, rw, rh);
         if (pdf == null) return default;
         var source = RenderPremultiplied(pdf, w, h);

@@ -25,9 +25,20 @@ internal sealed class HtmlParser
         "menu", "nav", "ol", "p", "pre", "section", "summary", "table", "ul",
     };
 
+    // Elements that belong in the head: the first one of anything else starts the body.
+    private static readonly HashSet<string> HeadContent = new(StringComparer.Ordinal)
+    {
+        "base", "basefont", "bgsound", "link", "meta", "noframes", "noscript", "script", "style", "template", "title",
+    };
+
     private readonly string _src;
     private int _pos;
     private readonly List<Element> _stack = new();
+
+    // Whether the parser makes the html, head and body elements a document leaves out, as browsers do. The first one
+    // of each is kept here; a second html or body tag only adds the attributes the first one lacks.
+    private readonly bool _implied;
+    private Element? _html, _head, _body;
 
     // Tag and attribute names as written, mapped to their lower-case strings: a document repeats the same few names, so
     // each gets one string instead of one per tag.
@@ -35,9 +46,10 @@ internal sealed class HtmlParser
     private readonly Dictionary<string, string> _names = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string>.AlternateLookup<ReadOnlySpan<char>> _nameLookup;
 
-    private HtmlParser(string src)
+    private HtmlParser(string src, bool implied)
     {
         _src = src;
+        _implied = implied;
         _nameLookup = _names.GetAlternateLookup<ReadOnlySpan<char>>();
     }
 
@@ -54,7 +66,11 @@ internal sealed class HtmlParser
     // a hash collision just replaces the entry.
     private readonly Dictionary<int, (string Key, string Name)> _names = new();
 
-    private HtmlParser(string src) => _src = src;
+    private HtmlParser(string src, bool implied)
+    {
+        _src = src;
+        _implied = implied;
+    }
 
     private string Name(ReadOnlySpan<char> written)
     {
@@ -67,14 +83,112 @@ internal sealed class HtmlParser
     }
 #endif
 
-    public static Element Parse(string html)
+    /// <summary>
+    /// Parses a document. With <paramref name="impliedStructure"/>, the html, head and body elements that it leaves
+    /// out are created, so that rules for <c>body</c> and <c>html</c> reach a fragment too; SVG files are parsed without.
+    /// </summary>
+    public static Element Parse(string html, bool impliedStructure = true)
     {
-        var p = new HtmlParser(html);
+        var p = new HtmlParser(html, impliedStructure);
         var doc = new Element("#document");
         p._stack.Add(doc);
         p.Run();
+        // A document with markup but no content still has a body.
+        if (p._html != null && p._body == null) p.StartBody();
         p.FlushMerge();
         return doc;
+    }
+
+    private void EnsureHtml()
+    {
+        if (_html != null) return;
+        _html = new Element("html");
+        _stack[0].AppendChild(_html);
+        _stack.Add(_html);
+    }
+
+    private void PopHead()
+    {
+        int i = _head == null ? -1 : _stack.LastIndexOf(_head);
+        if (i > 0) _stack.RemoveRange(i, _stack.Count - i);
+    }
+
+    private void StartBody(Element? written = null)
+    {
+        EnsureHtml();
+        PopHead();
+        if (_head == null)
+        {
+            _head = new Element("head");
+            _html!.AppendChild(_head);
+        }
+        _body = written ?? new Element("body") { ImpliedBody = true };
+        _html!.AppendChild(_body);
+        _stack.Add(_body);
+    }
+
+    // Each merged attribute is looked up among the target's, so a document of thousands of body tags with attributes of
+    // their own must not make the target grow without bound.
+    private const int MaxMergedAttributes = 1000;
+
+    private static void MergeAttributes(Element target, Element written)
+    {
+        foreach (var a in written.Attributes)
+        {
+            if (target.Attributes.Count >= MaxMergedAttributes) return;
+            if (target.GetAttribute(a.Key) == null) target.AddAttribute(a.Key, a.Value);
+        }
+    }
+
+    /// <summary>
+    /// Creates the html, head and body elements that a start tag implies, as browsers do. Returns true when the tag
+    /// is html, head or body itself and has been handled here.
+    /// </summary>
+    private bool ImpliedStructure(string name, Element el)
+    {
+        switch (name)
+        {
+            case "html":
+                if (_html != null) MergeAttributes(_html, el);
+                else
+                {
+                    _html = el;
+                    _stack[0].AppendChild(el);
+                    _stack.Add(el);
+                }
+                return true;
+            case "head":
+                if (_head != null || _body != null) return true;
+                EnsureHtml();
+                _head = el;
+                _html!.AppendChild(el);
+                _stack.Add(el);
+                return true;
+            case "body":
+                if (_body != null)
+                {
+                    // A body tag after the first content is the document's body, with its default margin.
+                    _body.ImpliedBody = false;
+                    MergeAttributes(_body, el);
+                }
+                else StartBody(el);
+                return true;
+        }
+        if (_body != null) return false;
+        EnsureHtml();
+        if (!HeadContent.Contains(name))
+        {
+            StartBody();
+            return false;
+        }
+        // Head content after an explicit </head> goes back into the head.
+        if (_head == null)
+        {
+            _head = new Element("head");
+            _html!.AppendChild(_head);
+        }
+        if (!_stack.Contains(_head)) _stack.Add(_head);
+        return false;
     }
 
     private Element Current => _stack[_stack.Count - 1];
@@ -108,6 +222,15 @@ internal sealed class HtmlParser
 
     private void AddText(string raw)
     {
+        if (_implied && _body == null)
+        {
+            // Before the body, white space between the document's parts is dropped and other text starts the body.
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                if (Current != _head) return;
+            }
+            else StartBody();
+        }
         var cur = Current;
         string text = HtmlEntities.Decode(raw);
         // Merge with a preceding text node (happens around comments and ignored end tags). The pieces are collected in
@@ -183,6 +306,8 @@ internal sealed class HtmlParser
             var el = new Element(name);
             bool selfClosing = ParseAttributes(el, ref p);
             _pos = p;
+
+            if (_implied && (_body == null || name is "html" or "head" or "body") && ImpliedStructure(name, el)) return;
 
             if (IsTableStructure(name) && name != "table") CloseFostered();
             else if (name == "form" && HasOpen("form")) return; // browsers ignore a form inside a form
@@ -406,6 +531,8 @@ internal sealed class HtmlParser
 
     private void CloseElement(string name)
     {
+        // Browsers keep adding to the body after </body> and </html>.
+        if (_implied && name is "body" or "html") return;
         if (name == "br")
         {
             // </br> is treated as <br> by browsers.

@@ -361,7 +361,7 @@ internal sealed partial class StyleResolver
     private void ResolveChildren(Element parent)
     {
         // Counters created by these children (and the parent's ::before) are in scope until the parent ends.
-        List<string>? scope = null;
+        HashSet<string>? scope = null;
         bool pseudos = HasPseudoRules && CanHaveGenerated(parent);
         if (pseudos) Generate(parent, PseudoElement.Before, ref scope);
         var children = parent.Children;

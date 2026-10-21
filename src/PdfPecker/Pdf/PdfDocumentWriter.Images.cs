@@ -211,7 +211,9 @@ internal sealed partial class PdfDocumentWriter
             _noAlpha = false;
             (_fill, _stroke, _lineWidth, _fillAlpha, _strokeAlpha) = (1, 1, -1, -1, -1);
             _anyAlpha = true;
+            var streamSpace = StartStreamSpace();
             WriteSvg(drawing, svg, 0, ih, iw, ih);
+            _streamSpace = streamSpace;
             RestoreState(saved);
             _noAlpha = true;
             WriteStream(svgId, drawing.Span, _compress, "/Type /XObject /Subtype /Form /BBox [0 0 " + Fmt(iw) + " " + Fmt(ih)

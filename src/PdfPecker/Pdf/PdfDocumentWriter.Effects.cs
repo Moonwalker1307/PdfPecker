@@ -67,7 +67,7 @@ internal sealed partial class PdfDocumentWriter
             ph = Math.Max(1, Math.Floor(ph * k));
         }
         int w = (int)pw, h = (int)ph;
-        if (!f.WithinBudget(w, h) || !_filterBudget.TrySpend(f.DocumentWork(w, h))) return (-1, 0, 0, 0, 0, 0, 0); // drawn without the filter
+        if (!WithinRenderBudget(f, layer.Ops, w, h)) return (-1, 0, 0, 0, 0, 0, 0); // drawn without the filter
         // A page of w × h points shows the flow rectangle (rx, ry, rw, rh) scaled to fill it, one point per pixel: the
         // margins move the flow's origin off the page (and keep all of it on the first page), and a layer scales it.
         var page = new PageSetup { Width = w, Height = h, MarginLeft = -rx, MarginTop = -ry, MarginBottom = -1e6f };
@@ -105,6 +105,34 @@ internal sealed partial class PdfDocumentWriter
         if (image == null) return default;
         _rasters.Add(image);
         return (_rasters.Count, rx, ry, rw, rh, y0, y1);
+    }
+
+    // A canvas pixel is cleared, drawn, composited and for a mask turned into mask values: about twice the work of a
+    // pixel of a filter primitive.
+    private const long CanvasWorkPerPixel = 2;
+
+    /// <summary>
+    /// Whether a filter may run on w × h pixels of ops rendered through a page of their own, counting its work against the
+    /// document's budget when it may. Besides the filter's own work, the renderer paints every transparency group and
+    /// soft mask in the ops on a canvas of its own the size of the whole image, so hundreds of masked boxes nested in
+    /// each other cost hundreds of full images. A filter whose canvases alone are beyond the document's budget never runs.
+    /// </summary>
+    private bool WithinRenderBudget(SvgFilter f, List<DrawOp> ops, int w, int h)
+    {
+        long canvasWork = OffscreenCanvases(ops) * w * h * CanvasWorkPerPixel;
+        return canvasWork <= SvgFilter.MaxDocumentWork && f.WithinBudget(w, h) && _filterBudget.TrySpend(f.DocumentWork(w, h) + canvasWork);
+    }
+
+    /// <summary>How many offscreen canvases the renderer paints for the ops: one per transparency group and soft mask.</summary>
+    private static long OffscreenCanvases(List<DrawOp> ops)
+    {
+        long n = 0;
+        foreach (var op in ops)
+        {
+            if (op is LayerOp l) n += (l.NeedsGroup ? 1 : 0) + (l.Mask?.Length ?? 0) + (l.MaskFill != null ? 1 : 0);
+            if (op is GroupOp g) n += OffscreenCanvases(g.Ops);
+        }
+        return n;
     }
 
     /// <summary>

@@ -47,9 +47,18 @@ public class HostileInputTests
     {
         // Each stray node between rows goes in front of its table; inserting at the table's place must not search or
         // shift its parent's children for every node. Tables nested in the moved content repeat it at every level.
-        var parse = Bounded(() => Html.HtmlParser.Parse("<table>" + Repeat("<b>x</b>y<input>", 100_000) + "<tr><td>1</table>"));
+        var parse = Bounded(() => Html.HtmlParser.Parse("<table>" + Repeat("<b>x</b>y<input>", 100_000) + "<tr><td>1</table>", impliedStructure: false));
         Assert.Equal("table", ((Html.Element)parse.Children[^1]).Name);
         AssertStructurallyValid(Bounded("<table>" + Repeat("<div>a<table>b<tr>", 200) + "<td>c</table>"));
+    }
+
+    [Fact]
+    public void Repeated_body_and_html_tags_merge_a_bounded_number_of_attributes()
+    {
+        var doc = Bounded(() => Html.HtmlParser.Parse(
+            string.Concat(Enumerable.Range(0, 50_000).Select(i => $"<body k{i}=1><html m{i}=1>"))));
+        Assert.True(doc.FindFirst("body")!.Attributes.Count <= 1000);
+        Assert.Single(doc.Children.OfType<Html.Element>());
     }
 
     // 3D transform lists multiply 4x4 matrices: huge, tiny, NaN-making and behind-the-viewer values must end in a drawn
@@ -749,6 +758,33 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Backdrop_filters_over_many_masked_boxes_are_drawn_without_rendering_each_mask()
+    {
+        // The renderer paints every mask behind the backdrop on a canvas the size of the whole backdrop: 200 small masked
+        // boxes under one tall backdrop took 7.7 s and 4 GB.
+        var html = Repeat("<div style='mask:radial-gradient(#000,#0000);height:4px'>x</div>", 200)
+                   + "<div style='backdrop-filter:invert(1);height:900px'></div>";
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 512L << 20);
+    }
+
+    [Fact]
+    public void Nested_masked_backdrop_filters_over_many_pages_are_written_once_per_page_they_paint()
+    {
+        // Each box with a backdrop-filter is drawn on every page it reaches; 300 of them nested in two columns wrote a
+        // masked group for each on each of the pages, 338 MB, in 10 s and 3.5 GB.
+        var text = "<p>" + Repeat("lorem ipsum dolor sit amet ", 40) + "</p>";
+        var html = "<div style='column-count:2'>" + Repeat(text, 3)
+                   + Repeat("<div style='backdrop-filter:invert(1);mask:radial-gradient(#000,#0000)'>", 300) + Repeat(text, 80)
+                   + Repeat("</div>", 301);
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(pdf.Length, 1, 64 << 20);
+        Assert.InRange(allocated, 0, 1024L << 20);
+    }
+
+    [Fact]
     public void Tables_with_one_wide_row_among_many_rows_store_only_the_cells_they_have()
     {
         // A grid of every row and column of this table is 18 million places, 144 MB, almost all of them empty; a fuzzed
@@ -797,7 +833,7 @@ public class HostileInputTests
     public void Text_split_by_many_ignored_tags_is_merged_in_linear_time()
     {
         AssertStructurallyValid(Bounded("<p>" + Repeat("a</em>", 200000) + "</p>"));
-        var doc = HtmlParser.Parse("a<!--x-->b</i>c");
+        var doc = HtmlParser.Parse("a<!--x-->b</i>c", impliedStructure: false);
         Assert.Equal("abc", Assert.IsType<TextNode>(Assert.Single(doc.Children)).Text);
     }
 
@@ -1953,14 +1989,41 @@ public class HostileInputTests
     public void Nested_flex_boxes_across_columns_are_laid_out_again_to_a_bounded_depth()
     {
         // Found by the nightly fuzz run: target html, timeout-1b5a0815. In columns the boxes measured inside a flex
-        // item cannot be reused, so each nested item laid out again where it crossed a column laid out everything below
-        // it again, in every balancing pass: 150 levels took 3 s. Items nested deeper than eight keep their measured
-        // layout.
+        // item could not be reused, so each nested item laid out again where it crossed a column laid out everything
+        // below it again, in every balancing pass: 150 levels took 3 s. Items nested deeper than eight keep their
+        // measured layout.
         const string lorem = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante. ";
         var html = "<style>@page{size:148mm 190mm;margin:12mm}body{font-size:8pt}.c2{column-count:2;column-gap:6mm}</style>"
             + "<div class=\"c2\"><p>" + Repeat(lorem, 2) + Repeat("<div style=\"display:flex\">", 200) + Repeat(lorem, 4)
             + "</p><p>" + Repeat(lorem, 3);
         AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
+    public void Nested_flex_items_across_columns_reuse_what_they_measured_in_the_same_pass()
+    {
+        // Found by the fuzzer: target html, timeout-d2edd0b0. A flex item laid out again where it crossed a column
+        // measured everything inside it afresh, though it had been measured in the same balancing pass, so the eight
+        // nested flex rows that are laid out again each laid out the wide row below them again, in every pass: 1,350
+        // empty flex boxes beside a paragraph took 5 s, and 24,000 took about 30 s.
+        var html = "<style>@page{size:A5}</style><div style='column-count:2'>" + Repeat("<div style='display:flex'>", 9)
+                   + Repeat("<div style='display:flex'></div>", 24_000) + "</div><p>"
+                   + Repeat("Lorem ipsum dolor sit amet, consectetur adipiscing elit. ", 30) + "</p>";
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
+    public void Content_too_tall_for_the_later_columns_of_nested_columns_stops_moving_on()
+    {
+        // Found by the fuzzer: target html. The inner columns overflow into the short overflow columns of a
+        // fixed-height box, which they took to be as tall as its first, so a heading taller than them moved on from
+        // column to column until the flow position lost its precision. The next column then started where the last
+        // one did, and the columns kept whole looped there without end, past cancellation too.
+        var html = "<style>@page { size: 300px }</style><div style='column-count:3;column-fill:auto;height:300px'>"
+                   + "<p style='break-before:column'>" + Repeat("Lorem ipsum ", 8) + "</p><div style='column-count:2'>"
+                   + "<div style='display:flex'><div style='column-count:2'><h3>Dolor sit <pre>amet <p>consectetur</p></pre></h3>"
+                   + "</div></div></div></div>";
+        AssertStructurallyValid(Bounded(() => HtmlToPdf.Convert(html)));
     }
 
     [Theory]
@@ -2274,6 +2337,50 @@ public class HostileInputTests
         b.AddRange(rows);
         b.AddRange(Encoding.ASCII.GetBytes($"\nendstream\nendobj\nstartxref\n{xref}\n%%EOF\n"));
         return b.ToArray();
+    }
+
+    // A string in one rule is copied onto every element the rule matches: 240 KB of HTML made 200 million characters of
+    // ::before text, which took 10 GB and minutes and ignored cancellation. Generated content now has a budget per
+    // document, and the strings drawn once per element or line (markers, quotes, ellipses, hyphens) are cut short.
+    [Theory]
+    [InlineData("i::before{content:\"$\"}", "<p>", "<i></i>", "</p>")]
+    [InlineData("p{quotes:\"$\" \"y\"}", "<p>", "<q>a</q>", "</p>")]
+    [InlineData("li{list-style-type:\"$\"}", "<ul>", "<li>", "</ul>")]
+    [InlineData("@counter-style z{system:cyclic;symbols:\"$\"}li{list-style:z}", "<ul>", "<li>", "</ul>")]
+    [InlineData("@counter-style z{system:cyclic;symbols:a;prefix:\"$\"}li{list-style:z}", "<ul>", "<li>", "</ul>")]
+    [InlineData("p{text-overflow:\"$\";overflow:hidden;white-space:nowrap;width:10px}", "", "<p>abcdefghijk</p>", "")]
+    public void Long_strings_repeated_on_many_elements_stay_bounded(string css, string open, string item, string close)
+    {
+        var html = "<style>" + css.Replace("$", Repeat("ab ", 33_000)) + "</style>" + open + Repeat(item, 20_000) + close;
+        var before = GC.GetTotalAllocatedBytes();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        AssertStructurallyValid(Bounded(html, new PdfOptions { MaxPages = 1000 }));
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10), $"took {sw.Elapsed}");
+        Assert.True(GC.GetTotalAllocatedBytes() - before < 4L << 30, "allocated more than 4 GB");
+    }
+
+    // Each counter a box resets was looked up in a list of the counters already scoped to its parent, so one rule
+    // resetting 20,000 counters on 300 nested boxes took 52 s, most of it after cancellation.
+    [Fact]
+    public void Many_counters_reset_on_nested_boxes_stay_linear()
+    {
+        var names = string.Join(" ", Enumerable.Range(0, 20_000).Select(i => "c" + i));
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        AssertStructurallyValid(Bounded("<style>div{counter-reset:" + names + "}</style>" + Repeat("<div>", 300) + "x" + Repeat("</div>", 300)));
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10), $"took {sw.Elapsed}");
+    }
+
+    [Fact]
+    public void Generated_content_keeps_its_text_within_the_budget()
+    {
+        var text = PdfText.Extract(HtmlToPdf.Convert("<style>p::before{content:\"Note: \" attr(data-n) \". \"}</style>"
+            + "<p data-n=1>one</p><p data-n=2>two</p>"));
+        Assert.Contains("Note: 1. one", text);
+        Assert.Contains("Note: 2. two", text);
+
+        // A mark is cut to 64 characters, never inside a surrogate pair.
+        Assert.Equal(new string('x', 64), Css.GeneratedContent.UnquoteMark("\"" + new string('x', 100) + "\""));
+        Assert.Equal(new string('x', 63), Css.GeneratedContent.Cut(new string('x', 63) + "\U0001F600", 64));
     }
 }
 
