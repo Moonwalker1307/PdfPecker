@@ -4,7 +4,8 @@
 
 [![NuGet](https://img.shields.io/nuget/v/PdfPecker.svg)](https://www.nuget.org/packages/PdfPecker)
 
-Fast HTML and Markdown to PDF conversion, and PDF to PNG, JPEG, WebP and TIFF rendering, for .NET, with no dependencies.
+Fast HTML and Markdown to PDF conversion, PDF to PNG, JPEG, WebP and TIFF rendering, and PDF to HTML, for .NET, with no
+dependencies.
 
 PdfPecker has its own HTML parser, Markdown parser, CSS engine, layout engine and PDF writer, and its own PDF renderer.
 It does not start a browser, ship native binaries or pull in third-party packages; the NuGet package depends only on
@@ -58,6 +59,9 @@ byte[] tiff = PdfToImage.ConvertToTiff(pdf, new ImageOptions { Dpi = 200, TiffCo
 byte[] smaller = PdfCompactor.Compact(File.ReadAllBytes("scan.pdf"));
 byte[] smallest = PdfCompactor.Compact(pdf, new PdfCompactOptions { MaxImageDpi = 150, ImageQuality = 75 });
 
+// Any PDF as one self-contained HTML page: page images with selectable, searchable text and working links
+string html = PdfToHtml.Convert(File.ReadAllBytes("statement.pdf"));
+
 // Open a PDF once and render its pages one at a time, or in parallel
 var renderer = PdfRenderer.Open(pdf);
 renderer.RenderPage(0, new ImageOptions { Dpi = 150 }).Save("page1.png");
@@ -83,6 +87,7 @@ The conversion methods are static and thread-safe, so you can convert many docum
 - **Existing PDFs**: merge (also streamed), split, reorder, rotate, stamp and extract text with positions. [More](https://pdfpecker.net/docs/merging/)
 - **Compacting**: `PdfCompactor` makes any PDF smaller without changing how it looks: unused objects and old revisions go, identical fonts and images are stored once, streams are recompressed and objects packed into compressed object streams, keeping bookmarks, forms, tags and PDF/A. Optional settings also downsample images and recompress them as JPEG. Signed and encrypted PDFs are refused, since rewriting would break or drop the signature or protection.
 - **PDF to image**: renders any PDF page, including JPEG 2000, JBIG2 and CCITT images, to PNG, JPEG or WebP, or a whole PDF to one multi-page TIFF (colour, greyscale or black and white with CCITT Group 4). `HtmlToImage` goes from HTML to images in one call. [More](https://pdfpecker.net/docs/pdf-to-image/)
+- **PDF to HTML**: `PdfToHtml` turns any PDF into one HTML file with no scripts that looks like the PDF: each page is an image (WebP, PNG or JPEG) with the page's text laid invisibly over it, word by word, so it can be selected, copied, searched and read by screen readers, plus the PDF's web links and links between pages. Pages scale down to a phone screen and print on paper of their own size. The HTML keeps the PDF's layout rather than reflowing into paragraphs, and text zooms as an image does.
 - **Safe failures**: the library's own errors share the base class `PdfPeckerException`, and the `*File` methods write through a temporary file, so a failure never leaves a half-written output.
 
 PdfPecker is built for HTML templates you control: it runs no JavaScript, and conversion never fetches anything from

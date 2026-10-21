@@ -46,7 +46,7 @@ internal sealed class PdfMergeWriter : PdfObjectWriter
         public readonly Dictionary<int, Dictionary<string, PdfObject>> IdOverrides = new(); // by new id, for copies of annotations
         public readonly Dictionary<int, int> Map = new(); // source object number -> new id; 0 = write null
         public readonly List<int> TopOutline = new(); // source numbers of the top-level bookmarks
-        public Dictionary<string, PdfObject>? NamedDests;
+        public NamedDestinations? NamedDests;
         public readonly List<int> Fields = new(); // source numbers of the top-level form fields kept
         public readonly Dictionary<int, Dictionary<string, PdfObject>> Overrides = new(); // entries to replace when copying an object; null removes
         public bool NeedAppearances;
@@ -1351,42 +1351,5 @@ internal sealed class PdfMergeWriter : PdfObjectWriter
 
     /// <summary>The explicit destination array a destination name stands for, or null.</summary>
     private static PdfObject? NamedDest(Input input, PdfObject name)
-    {
-        var file = input.File;
-        if (input.NamedDests == null)
-        {
-            input.NamedDests = new Dictionary<string, PdfObject>(StringComparer.Ordinal);
-            var catalog = file.Catalog;
-            // PDF 1.1: a dictionary of names.
-            if (file.GetDict(catalog, "Dests") is { } dests)
-                foreach (var (k, v) in dests.Entries) input.NamedDests.TryAdd("/" + k, v);
-            // PDF 1.2 and later: a name tree of strings.
-            if (file.GetDict(file.GetDict(catalog, "Names"), "Dests") is { } tree)
-                WalkNameTree(file, tree, input.NamedDests, new HashSet<PdfDict>(ReferenceEqualityComparer.Instance), 0);
-        }
-        string key = name switch
-        {
-            PdfName n => "/" + n.Value,
-            PdfString s => Encoding.Latin1.GetString(s.Bytes),
-            _ => "",
-        };
-        if (!input.NamedDests.TryGetValue(key, out var dest) && name is PdfName nn)
-            input.NamedDests.TryGetValue(nn.Value, out dest); // some writers use names for name-tree keys
-        dest = file.Resolve(dest);
-        if (dest is PdfDict dd) dest = file.Resolve(dd["D"]);
-        return dest as PdfArray;
-    }
-
-    private static void WalkNameTree(PdfFile file, PdfDict node, Dictionary<string, PdfObject> into, HashSet<PdfDict> seen, int depth)
-    {
-        if (depth > 32 || !seen.Add(node) || into.Count > 100_000) return;
-        if (file.GetArray(node, "Names") is { } names)
-        {
-            for (int i = 0; i + 1 < names.Count; i += 2)
-                if (file.Resolve(names[i]) is PdfString k) into.TryAdd(Encoding.Latin1.GetString(k.Bytes), names[i + 1]);
-        }
-        if (file.GetArray(node, "Kids") is { } kids)
-            foreach (var kid in kids.Items)
-                if (file.Resolve(kid) is PdfDict kd) WalkNameTree(file, kd, into, seen, depth + 1);
-    }
+        => (input.NamedDests ??= new NamedDestinations(input.File)).Find(name);
 }

@@ -32,7 +32,7 @@ crashes the process. A restarted worker skips the seeds that were already run (`
 supervisor), so a seed that hangs is reported once instead of on every restart. Seeds never come from `bin`, `obj` or a
 `fuzz-findings` folder: a saved finding read back as a seed would hang every worker on the same input.
 
-Targets: `pdf-render`, `pdf-text`, `pdf-merge`, `pdf-form`, `pdf-compact`, `pdf-verify`, `html`, `css` (as a `<style>` in a page), `svg`
+Targets: `pdf-render`, `pdf-text`, `pdf-html`, `pdf-merge`, `pdf-form`, `pdf-compact`, `pdf-verify`, `html`, `css` (as a `<style>` in a page), `svg`
 (inline in a page and as a data-URI image), `markdown`, `barcode` (QR, EPC, Code 128 and EAN-13 encoders), `png`, `jpeg`, `gif`, `webp`, `bmp`, `tiff`, `jpx`, `jbig2`,
 `font-ttf`, `font-otf`, `font-woff`, `font-woff2` and `font-variable` (variable TrueType and CFF2 fonts). The font
 targets register the font and then lay out and embed text in it, because most font bugs are in shaping and subsetting
