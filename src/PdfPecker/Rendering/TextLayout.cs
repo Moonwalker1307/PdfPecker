@@ -335,7 +335,12 @@ internal static class TextLayout
         {
             if (word.Length == 0) return;
             var (x, y, w, h) = Box(wu0, wu1, wv, wsize, cx, cy);
-            words.Add(new PdfTextWord(word.ToString(), x, y, w, h, wsize, font));
+            words.Add(new PdfTextWord(word.ToString(), x, y, w, h, wsize, font)
+            {
+                OriginX = wu0 * cx - wv * cy,
+                OriginY = wu0 * cy + wv * cx,
+                Advance = wu1 - wu0,
+            });
             if (lineText.Length > 0) lineText.Append(' ');
             lineText.Append(word);
             word.Clear();
