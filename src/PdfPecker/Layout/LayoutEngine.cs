@@ -1966,6 +1966,9 @@ internal sealed partial class LayoutEngine
 
         /// <summary>Whether the flex lines in the box could still be laid out again when it was captured.</summary>
         public bool RepeatsOnPages;
+
+        /// <summary>The breaks of the column layout pass the box was captured in, which hold the breaks it noted.</summary>
+        public ColumnNotes? NotedIn;
         public List<string>? AnchorIds;
         public List<float>? AnchorYs; // where the anchors were in the box when it was captured
         public float Width, Height; // margin box
@@ -2023,7 +2026,7 @@ internal sealed partial class LayoutEngine
                 ForcedBreaks = _forcedBreaks != breaks,
                 BoxX = _lastBoxX, BoxY = _lastBoxTop, BoxW = _lastBoxW, BoxH = _lastBoxH,
                 ContentH = _lastBoxContentH, FrameV = _lastBoxFrameV, ChildCb = _lastBoxChildCb,
-                Absolutes = absolutes, Known = _captureLog,
+                Absolutes = absolutes, Known = _captureLog, NotedIn = _columnNotes is { Paused: false } notes ? notes : null,
             };
         }
         finally
@@ -2100,8 +2103,12 @@ internal sealed partial class LayoutEngine
         var src = new BoxSource(e, outerW, shrinkToFit, borderW, borderH);
         if (!reuse) return CaptureBoxCore(src);
         Captured c;
+        // In columns a box laid out again notes its breaks for balancing again. A box measured in the same column pass
+        // has noted them already, and noting the same breaks twice changes nothing, so it is reused like any other;
+        // without that, each nested flex level laid out everything inside it again, in every balancing pass.
         if (_knownBoxes != null && FindKnown(_knownBoxes, src) is { } known && known.ListIndexBefore == _currentListIndex
-            && !_measuring && Tags == null && (Footnotes == null || !HasFootnoteCalls(known)) && (_columnNotes == null || _captureDepth >= MaxPlacedOnPagesInColumns)
+            && !_measuring && Tags == null && (Footnotes == null || !HasFootnoteCalls(known))
+            && (_columnNotes == null || known.NotedIn == _columnNotes || _captureDepth >= MaxPlacedOnPagesInColumns)
             && SameContext(e, known))
         {
             // Measured already where the box around it was captured: only its content may still be needed.
@@ -2202,7 +2209,7 @@ internal sealed partial class LayoutEngine
         BoxX = c.BoxX, BoxY = c.BoxY, BoxW = c.BoxW, BoxH = c.BoxH,
         ContentH = c.ContentH, FrameV = c.FrameV, ChildCb = c.ChildCb, Known = c.Known,
         ListIndexBefore = c.ListIndexBefore, ListIndexAfter = c.ListIndexAfter, Cb = c.Cb, CbKind = c.CbKind, RepeatsOnPages = c.RepeatsOnPages,
-        AnchorIds = c.AnchorIds, AnchorYs = c.AnchorYs,
+        AnchorIds = c.AnchorIds, AnchorYs = c.AnchorYs, NotedIn = c.NotedIn,
     };
 
     /// <summary>
@@ -2274,8 +2281,9 @@ internal sealed partial class LayoutEngine
     {
         // Each nested box laid out again lays out its own boxes again, so only the outer two levels may do that twice,
         // to give a stretched box its height back; deeper ones keep the height of their content.
-        // In columns the boxes measured inside cannot be reused (their breaks are noted for balancing), so each level laid
-        // out again lays out everything below it again, in every balancing pass. Deeper levels keep their measured layout.
+        // In columns only the boxes measured in the same balancing pass can be reused inside (their breaks are noted for
+        // balancing), so a level laid out again may lay out everything below it again. Deeper levels keep their measured
+        // layout.
         if (c.Source is not { } src || Reusable(c, dy) || _columnNotes != null && _placingOnPages >= MaxPlacedOnPagesInColumns)
         {
             Place(c, dx, dy);
@@ -2330,8 +2338,8 @@ internal sealed partial class LayoutEngine
 
     /// <summary>
     /// How many boxes, one inside the other, are laid out again where they land in columns. Boxes captured deeper than
-    /// that in columns also reuse what they measured, as they do on pages: without it, each level laid out everything
-    /// below it again, so the work grew with the square of the depth.
+    /// that in columns also reuse what they measured in another balancing pass, as they do on pages: without it, each
+    /// level laid out everything below it again, so the work grew with the square of the depth.
     /// </summary>
     private const int MaxPlacedOnPagesInColumns = 8;
 

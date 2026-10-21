@@ -1942,13 +1942,26 @@ public class HostileInputTests
     public void Nested_flex_boxes_across_columns_are_laid_out_again_to_a_bounded_depth()
     {
         // Found by the nightly fuzz run: target html, timeout-1b5a0815. In columns the boxes measured inside a flex
-        // item cannot be reused, so each nested item laid out again where it crossed a column laid out everything below
-        // it again, in every balancing pass: 150 levels took 3 s. Items nested deeper than eight keep their measured
-        // layout.
+        // item could not be reused, so each nested item laid out again where it crossed a column laid out everything
+        // below it again, in every balancing pass: 150 levels took 3 s. Items nested deeper than eight keep their
+        // measured layout.
         const string lorem = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante. ";
         var html = "<style>@page{size:148mm 190mm;margin:12mm}body{font-size:8pt}.c2{column-count:2;column-gap:6mm}</style>"
             + "<div class=\"c2\"><p>" + Repeat(lorem, 2) + Repeat("<div style=\"display:flex\">", 200) + Repeat(lorem, 4)
             + "</p><p>" + Repeat(lorem, 3);
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
+    public void Nested_flex_items_across_columns_reuse_what_they_measured_in_the_same_pass()
+    {
+        // Found by the fuzzer: target html, timeout-d2edd0b0. A flex item laid out again where it crossed a column
+        // measured everything inside it afresh, though it had been measured in the same balancing pass, so the eight
+        // nested flex rows that are laid out again each laid out the wide row below them again, in every pass: 1,350
+        // empty flex boxes beside a paragraph took 5 s, and 24,000 took about 30 s.
+        var html = "<style>@page{size:A5}</style><div style='column-count:2'>" + Repeat("<div style='display:flex'>", 9)
+                   + Repeat("<div style='display:flex'></div>", 24_000) + "</div><p>"
+                   + Repeat("Lorem ipsum dolor sit amet, consectetur adipiscing elit. ", 30) + "</p>";
         AssertStructurallyValid(Bounded(html));
     }
 
