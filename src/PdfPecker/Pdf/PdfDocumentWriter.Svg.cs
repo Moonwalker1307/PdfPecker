@@ -436,8 +436,7 @@ internal sealed partial class PdfDocumentWriter
     /// <summary>The first page of a PDF rendered at pixelsW × pixelsH on transparency, as premultiplied sRGB floats (RGBA).</summary>
     private float[]? RenderPremultiplied(byte[] pdf, int pixelsW, int pixelsH)
     {
-        var rendered = PdfRenderer.Open(pdf).RenderPage(0, new ImageOptions { Width = pixelsW, Height = pixelsH, Transparent = true }, Cancellation);
-        if (rendered.Width != pixelsW || rendered.Height != pixelsH) return null;
+        var rendered = PdfRenderer.Open(pdf).RenderPageExact(0, pixelsW, pixelsH, new ImageOptions { Transparent = true }, Cancellation);
         var px = rendered.Premultiplied;
         var result = new float[px.Length * 4];
         for (int i = 0; i < px.Length; i++)

@@ -83,8 +83,7 @@ internal sealed partial class PdfDocumentWriter
         if (f.TextShadows)
         {
             // Only the shape of the text matters to its shadows.
-            var rendered = PdfRenderer.Open(pdf).RenderPage(0, new ImageOptions { Width = w, Height = h, Transparent = true }, Cancellation);
-            if (rendered.Width != w || rendered.Height != h) return default;
+            var rendered = PdfRenderer.Open(pdf).RenderPageExact(0, w, h, new ImageOptions { Transparent = true }, Cancellation);
             var px = rendered.Premultiplied;
             var alpha = new float[px.Length];
             for (int i = 0; i < px.Length; i++) alpha[i] = (px[i] >> 24) / 255f;
