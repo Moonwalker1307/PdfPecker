@@ -73,4 +73,17 @@ public class TableWidthTests
         Assert.Equal(200, two.W, 1);
         Assert.Equal(Width, two.X + two.W, 1);
     }
+
+    [Fact]
+    public void ALongWordWidensATableWithAWidth()
+    {
+        // Chrome widens a 250px table to the URL's min-content width rather than letting the URL overflow its cell.
+        var ops = Layout("<style>body{margin:0} td{padding:0}</style><table style='width:250px;border-spacing:0;background:#f00'><tr>" +
+                         "<td>https://example.com/a/very/long/unbreakable/url/in/a/narrow/table/cell</td><td style='background:#00f'>b</td></tr></table>");
+        var table = Rect(ops, 0xFFFF0000);
+        var b = Rect(ops, 0xFF0000FF);
+        Assert.True(table.W > 250 * 0.75f + 50, $"table {table.W}pt wide");
+        Assert.Equal(table.X + table.W, b.X + b.W, 1);
+        Assert.True(b.X > 250 * 0.75f, $"second cell at {b.X}pt");
+    }
 }
