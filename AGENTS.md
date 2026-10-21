@@ -44,10 +44,10 @@ Before non-trivial work, read:
 ## Repo map
 
 - `src/PdfPecker/` – the library. The public API sits at the top level (`HtmlToPdf`, `MarkdownToPdf`, `PdfToImage`,
-  `PdfMerger`, `PdfSigner`, `PdfOptions`, ...). The pipeline in `HtmlToPdf.cs` is `Html/` parse → `Css/`
+  `PdfToHtml`, `PdfMerger`, `PdfSigner`, `PdfOptions`, ...). The pipeline in `HtmlToPdf.cs` is `Html/` parse → `Css/`
   `StyleResolver` → `Layout/` `LayoutEngine` → `Pdf/` `PdfDocumentWriter`. `Rendering/` is the separate PDF-to-image
-  renderer; `Markdown/`, `Fonts/`, `Text/` (bidi, line breaking, hyphenation), `Images/`, `Svg/` and `Signing/`
-  hold the rest.
+  renderer, which `Rendering/Html/` also turns into PDF-to-HTML pages; `Markdown/`, `Fonts/`, `Text/` (bidi, line
+  breaking, hyphenation), `Images/`, `Svg/` and `Signing/` hold the rest.
 - Large classes are split into partial-class files by concern (`PdfDocumentWriter.Text.cs`,
   `StyleResolver.Cascade.cs`, ...). Shared low-level code that new code must reuse instead of copying:
   - `Pdf/PdfObjectWriter.cs`, `PdfXref.cs` and `PdfUpdateWriter.cs` write PDF objects, xref sections and incremental

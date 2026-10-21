@@ -81,6 +81,13 @@ internal sealed class RenderDocument
         _ => new Matrix(sx, 0, 0, -sy, -p.X0 * sx, p.Y1 * sy),
     };
 
+    /// <summary>The transform from a page's user space to points on the displayed page (after /Rotate and /UserUnit), origin top left.</summary>
+    public Matrix DisplayMatrix(int index)
+    {
+        var p = Pages[index];
+        return PageMatrix(p, p.UserUnit, p.UserUnit);
+    }
+
     /// <summary>
     /// Runs a page for its text: the glyphs it shows, in content order, positioned in points on the displayed page (after
     /// /Rotate and /UserUnit), origin top left.

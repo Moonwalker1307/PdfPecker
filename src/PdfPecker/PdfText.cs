@@ -144,6 +144,15 @@ public sealed class PdfTextWord
     /// <summary>The PostScript name of the font of the word's first letter, without a subset tag, such as "Helvetica-Bold".</summary>
     public string FontName { get; }
 
+    /// <summary>Where the word's baseline starts on the left of its glyphs, in points on the page as displayed.</summary>
+    internal double OriginX { get; init; }
+
+    /// <summary>See <see cref="OriginX"/>.</summary>
+    internal double OriginY { get; init; }
+
+    /// <summary>The length of the word along its baseline, in points.</summary>
+    internal double Advance { get; init; }
+
     /// <summary>The word.</summary>
     public override string ToString() => Text;
 }

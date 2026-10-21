@@ -144,6 +144,20 @@ internal static class Targets
             },
             new()
             {
+                Name = "pdf-html", Extension = ".pdf", Seeds = pdfSeeds, MaxSize = 1 << 20,
+                Run = (d, ct) =>
+                {
+                    int pages = Math.Min(PdfToImage.GetPageCount(d), 3);
+                    if (pages == 0) return;
+                    PdfToHtml.Convert(d, new PdfHtmlOptions
+                    {
+                        Pages = PdfPageRange.Parse("1-" + pages.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                        Dpi = 36, ImageFormat = PdfImageFormat.Png, MaxDegreeOfParallelism = 1,
+                    }, ct);
+                },
+            },
+            new()
+            {
                 Name = "pdf-merge", Extension = ".pdf", Seeds = pdfSeeds, MaxSize = 1 << 20,
                 Run = (d, ct) => PdfMerger.Merge(new[] { d, SeedContext.Small.Value }, new PdfMergeOptions { MaxPages = 500 }, ct),
             },

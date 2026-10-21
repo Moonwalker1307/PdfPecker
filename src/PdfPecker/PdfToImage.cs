@@ -257,6 +257,9 @@ public sealed class PdfRenderer
 
     private PdfRenderer(RenderDocument doc) => _doc = doc;
 
+    /// <summary>The parsed document, for the converters that also read its text and links.</summary>
+    internal RenderDocument Document => _doc;
+
     /// <summary>Opens a PDF from bytes.</summary>
     /// <exception cref="ArgumentNullException"><paramref name="pdf"/> is null.</exception>
     /// <exception cref="PdfPasswordException">The PDF is encrypted and <paramref name="password"/> does not open it.</exception>
