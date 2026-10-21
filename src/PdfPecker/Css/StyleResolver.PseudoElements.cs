@@ -103,6 +103,12 @@ internal sealed partial class StyleResolver
         for (var a = owner; a != null; a = a == host ? null : a.Parent)
             if (a.FirstLine is { } fl) { parentStyle = fl.Map(owner.Style); break; }
         var s = Compute(FirstLetterName, parentStyle);
+        if (s.InitialLetterSize > 0 && s.Position is not (Position.Absolute or Position.Fixed))
+        {
+            // Computed styles are shared between elements that match the same rules, so the letter gets its own.
+            s = s.Clone();
+            MakeInitialLetter(s, ParagraphStyle(owner, host, firstLine: false));
+        }
         // A first letter that floats or is absolutely positioned becomes a block box; otherwise it stays inline.
         if (s.Float != FloatSide.None || s.Position is Position.Absolute or Position.Fixed) s.Display = Display.Block;
         else if (s.Display != Display.Inline) s.Display = Display.Inline;
@@ -112,6 +118,70 @@ internal sealed partial class StyleResolver
         node.Text = node.Text.Substring(0, start);
         owner.Children.Insert(index + 1, letter);
         if (rest.Length > 0) owner.Children.Insert(index + 2, new TextNode(rest) { Parent = owner });
+    }
+
+    // Chrome makes an initial letter smaller a pixel at a time while its cap height is too tall; rounding only ever
+    // takes it a step or two.
+    private const float InitialLetterStep = 0.75f;
+    private const int MaxInitialLetterSteps = 4;
+
+    // Taller initial letters than this many lines are made this tall: no page holds more lines.
+    private const float MaxInitialLetterLines = 1000;
+
+    /// <summary>
+    /// Turns a ::first-letter with initial-letter into the box beside the lines it sinks into (CSS Inline 3 §7), as Chrome
+    /// does: it floats to the paragraph's start, and its font size makes the letter's cap height span its size in lines,
+    /// from the cap height of the paragraph's text to the baseline of the last line. Like Chrome, it measures the
+    /// paragraph without its ::first-line style. Layout sizes the box to the letter's ink and drops it to its lines. A
+    /// letter the author floats is sized the same way, but floats as usual.
+    /// </summary>
+    private static void MakeInitialLetter(ComputedStyle s, ComputedStyle paragraph)
+    {
+        float lines = s.InitialLetterSize = Math.Min(s.InitialLetterSize, MaxInitialLetterLines);
+        if (s.Float == FloatSide.None)
+        {
+            s.Float = paragraph.Rtl ? FloatSide.Right : FloatSide.Left;
+            s.Floated = s.InitialLetterSunk = true;
+        }
+        float paragraphCap = CapHeight(paragraph) * paragraph.TextSize;
+        float desired = paragraph.LineHeight * (lines - 1) + paragraphCap;
+        float cap = CapHeight(s);
+        if (cap <= 0 || desired <= 0) return;
+        float size = desired / cap * s.FontSize / s.TextSize;
+        for (int i = 0; i < MaxInitialLetterSteps && size > InitialLetterStep; i++)
+        {
+            s.FontSize = size;
+            s.InvalidateFont();
+            if (CapHeight(s) * s.TextSize <= desired) break;
+            size -= InitialLetterStep;
+        }
+        s.FontSize = size;
+        s.InvalidateFont();
+        s.VerticalAlign = VerticalAlign.Baseline;
+        s.LineHeightKind = LineHeightKind.Normal;
+    }
+
+    /// <summary>A font's cap height in ems, or its ascent when it does not say.</summary>
+    private static float CapHeight(ComputedStyle s)
+    {
+        var font = s.UnitFont();
+        float cap = font.Metric(FontMetric.CapHeight);
+        return cap > 0 ? cap : font.Ascent;
+    }
+
+    /// <summary>
+    /// The style of the paragraph a first letter in <paramref name="owner"/> starts: of the block around it, which is no
+    /// further out than <paramref name="host"/> when that is given, and with <paramref name="firstLine"/> as its
+    /// ::first-line style makes it.
+    /// </summary>
+    internal static ComputedStyle ParagraphStyle(Element owner, Element? host, bool firstLine)
+    {
+        var block = owner;
+        while (block != host && block.Parent is { Style: not null } && (block.Style.Display == Display.Inline || block.Style.Contents)) block = block.Parent;
+        if (firstLine)
+            for (var a = block; a != null; a = a == host ? null : a.Parent)
+                if (a.FirstLine is { } fl) return fl.Map(block.Style);
+        return block.Style;
     }
 
     /// <summary>

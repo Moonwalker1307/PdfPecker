@@ -57,10 +57,14 @@ internal sealed partial class LayoutEngine
             indent += mw;
         }
         bool besideFloats = FloatsBelow(y) || items.Exists(it => it.Kind == ItemKind.Float);
+        // An initial letter starts the first line after its text-indent, and the lines beside it start where it ends.
+        float letterIndent = 0;
+        if (firstInBlock && indent != 0 && items.Exists(it => it.Kind == ItemKind.Float && IsInitialLetter(it.Element!)))
+            (letterIndent, indent) = (indent, 0);
         // On pages of different widths each line is measured for the page it goes on, as lines beside floats are.
         if (_measuring || !_paginate) pages = null;
         StrutMetrics(cs, out float strutA, out float strutD);
-        var paragraph = new Paragraph(this, items, cs, x, y, w, indent, strutA + strutD, pages);
+        var paragraph = new Paragraph(this, items, cs, x, y, w, indent, strutA + strutD, pages) { LetterIndent = letterIndent };
         FloatLines? fl = besideFloats || pages != null ? paragraph.NewLines() : null;
         paragraph.First = FirstLineItems(run, container, firstInBlock, w, items, cs);
         int opsMark = _ops.Count;
@@ -149,6 +153,7 @@ internal sealed partial class LayoutEngine
         private readonly float _x, _y, _w, _indent, _strutH;
         private readonly PageBox? _pages;
         public CollectState? First;
+        public float LetterIndent;
 
         public Paragraph(LayoutEngine engine, List<Item> items, ComputedStyle block, float x, float y, float w, float indent, float strutH, PageBox? pages)
         {
@@ -163,7 +168,7 @@ internal sealed partial class LayoutEngine
             _pages = pages;
         }
 
-        public FloatLines NewLines() => new() { Engine = _engine, Block = _block, X = _x, W = _w, Y = _y, StrutH = _strutH, Pages = _pages };
+        public readonly FloatLines NewLines() => new() { Engine = _engine, Block = _block, X = _x, W = _w, Y = _y, StrutH = _strutH, Pages = _pages, LetterIndent = LetterIndent };
 
         /// <summary>Breaks the paragraph into lines, from the ::first-line items when there are any, and flushes the floats.</summary>
         public List<Line> Break(FloatLines? fl)

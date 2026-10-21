@@ -143,6 +143,42 @@ internal static class GlyphInk
     public static bool Extent(FontProgram program, int gid, out float left, out float right)
         => Intercept(program, gid, float.NegativeInfinity, float.PositiveInfinity, 0, out left, out right);
 
+    /// <summary>
+    /// The box round a glyph's ink, in ems from its origin with y up, with the glyph slanted by <paramref name="skew"/>;
+    /// false when the glyph has no ink.
+    /// </summary>
+    public static bool Bounds(FontProgram program, int gid, float skew, out float left, out float bottom, out float right, out float top)
+        => Bounds(Fonts.GetValue(program, p => new Outlines(p)).Glyph(gid), skew, out left, out bottom, out right, out top);
+
+    /// <summary>
+    /// <see cref="Bounds(FontProgram, int, float, out float, out float, out float, out float)"/> for a character in a
+    /// standard font, with the outlines of the font's bundled replacement.
+    /// </summary>
+    public static bool Bounds(StandardFont font, char c, out float left, out float bottom, out float right, out float top)
+    {
+        var outlines = StandardFonts[font.Index].Value;
+        return Bounds(outlines.Glyph(outlines.GlyphId(c)), 0, out left, out bottom, out right, out top);
+    }
+
+    private static bool Bounds(Contours? contours, float skew, out float left, out float bottom, out float right, out float top)
+    {
+        left = bottom = float.MaxValue;
+        right = top = float.MinValue;
+        if (contours == null) return false;
+        var points = contours.Points;
+        for (int i = 0; i + 1 < points.Length; i += 2)
+        {
+            float y = points[i + 1];
+            if (float.IsNaN(y)) continue;
+            float x = points[i] + skew * y;
+            if (x < left) left = x;
+            if (x > right) right = x;
+            if (y < bottom) bottom = y;
+            if (y > top) top = y;
+        }
+        return left <= right;
+    }
+
     /// <summary>Widens [left, right] by the part of the edge from (x0, y0) to (x1, y1) that lies between the heights.</summary>
     private static void Clip(float x0, float y0, float x1, float y1, float low, float high, float skew, ref float left, ref float right)
     {

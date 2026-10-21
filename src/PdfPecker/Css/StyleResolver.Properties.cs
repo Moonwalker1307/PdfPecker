@@ -48,6 +48,7 @@ internal sealed partial class StyleResolver
             // ---- box generation, positioning and sizing (Properties.Box.cs)
             case "display": ApplyDisplay(s, parent, in d); break;
             case "float": ApplyFloat(s, parent, in d); break;
+            case "initial-letter": ApplyInitialLetter(s, parent, in d); break;
             case "clear": ApplyClear(s, parent, in d); break;
             case "shape-outside": ApplyShapeOutside(s, parent, in d); break;
             case "shape-margin": ApplyShapeMargin(s, parent, in d); break;
