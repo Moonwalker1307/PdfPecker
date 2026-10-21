@@ -1267,18 +1267,19 @@ internal sealed partial class LayoutEngine
         {
             var st = CollectInline(nodes, 100000);
             var items = st.Items;
-            float min = 0, max = 0, group = 0, line = 0;
+            float min = 0, max = 0, group = 0, line = 0, trailing = 0;
             Item? prev = null;
             foreach (var it in items)
             {
                 // The kerning between neighbouring words and spaces counts, as it does when the lines are broken.
                 float kern = prev != null ? PairKern(prev, it) : 0;
                 prev = it;
+                TrailingSpace(it, kern, ref trailing);
                 if (it.Kind == ItemKind.Break)
                 {
                     min = Math.Max(min, group);
-                    max = Math.Max(max, line);
-                    group = line = 0;
+                    max = Math.Max(max, line - trailing);
+                    group = line = trailing = 0;
                     continue;
                 }
                 if (it.Kind == ItemKind.Space && it.Breakable)
@@ -1314,12 +1315,37 @@ internal sealed partial class LayoutEngine
                 }
             }
             ReturnState(st);
-            return (Math.Max(min, group), Math.Max(max, line));
+            return (Math.Max(min, group), Math.Max(max, line - trailing));
         }
         finally
         {
             if (--_inlineDepth == 0) _itemPoolUsed = 0;
             _measuring = saved;
+        }
+    }
+
+    /// <summary>
+    /// Keeps <paramref name="trailing"/> at the width of the collapsible spaces that end the line so far, which hang at
+    /// the end of a line and so are left out of its max-content width, as in Chrome: "word " in a shrink-to-fit box is
+    /// as wide as "word". Preserved spaces (pre-wrap) still count. An inline element's closing edge, even one with padding,
+    /// and an anchor leave the spaces before them trailing.
+    /// </summary>
+    private static void TrailingSpace(Item it, float kern, ref float trailing)
+    {
+        switch (it.Kind)
+        {
+            case ItemKind.Space:
+                trailing = IsCollapsible(it.Style) ? trailing + it.Width + kern : 0;
+                break;
+            case ItemKind.Spacer:
+            case ItemKind.Anchor:
+            case ItemKind.Absolute:
+            case ItemKind.Bidi:
+            case ItemKind.Break:
+                break;
+            default:
+                trailing = 0;
+                break;
         }
     }
 
@@ -1345,18 +1371,19 @@ internal sealed partial class LayoutEngine
             var st = CollectInline(run, 100000);
             var items = st.Items;
             run.Clear();
-            float group = 0, line = 0;
+            float group = 0, line = 0, trailing = 0;
             Item? prev = null;
             foreach (var it in items)
             {
                 // The kerning between neighbouring words and spaces counts, as it does when the lines are broken.
                 float kern = prev != null ? PairKern(prev, it) : 0;
                 prev = it;
+                TrailingSpace(it, kern, ref trailing);
                 if (it.Kind == ItemKind.Break)
                 {
                     min = Math.Max(min, group);
-                    max = Math.Max(max, line);
-                    group = line = 0;
+                    max = Math.Max(max, line - trailing);
+                    group = line = trailing = 0;
                     continue;
                 }
                 if (it.Kind == ItemKind.Space && it.Breakable)
@@ -1382,7 +1409,7 @@ internal sealed partial class LayoutEngine
                 }
             }
             min = Math.Max(min, group);
-            max = Math.Max(max, line);
+            max = Math.Max(max, line - trailing);
             ReturnState(st);
             if (--_inlineDepth == 0) _itemPoolUsed = 0;
         }
