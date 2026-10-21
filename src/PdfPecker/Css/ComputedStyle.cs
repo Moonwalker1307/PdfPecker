@@ -150,6 +150,8 @@ internal enum ListStyleType : byte
 internal enum TextDecoration : byte { None = 0, Underline = 1, LineThrough = 2, Overline = 4 }
 
 internal enum DecorationStyle : byte { Solid, Double, Dotted, Dashed, Wavy }
+// text-decoration-skip-ink: auto leaves gaps where underlines and overlines cross glyphs (not CJK ones); all also at CJK.
+internal enum SkipInk : byte { Auto, None, All }
 
 /// <summary>Pt and Percent are plain values; Calc is a math function that depends on a percentage (see <see cref="CssMath"/>).</summary>
 internal enum LengthUnit : byte { Pt, Percent, Auto, Calc }
@@ -307,6 +309,7 @@ internal sealed class ComputedStyle
     public DecorationStyle DecorationStyle;
     public Length? DecorationThickness;    // null = auto; percentages of 1em
     public Length? UnderlineOffset;        // null = auto; from the alphabetic baseline
+    public SkipInk SkipInk;                // text-decoration-skip-ink, inherited
     public float TextIndent;
     public float LetterSpacing;
     public bool NoLigatures; // font-variant-ligatures: none or no-common-ligatures, or font-feature-settings: "liga" 0
