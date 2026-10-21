@@ -222,7 +222,7 @@ internal sealed partial class SvgImage
     public static SvgImage? FromFile(byte[] data, FontResolver? fonts, SvgBudget budget, Func<string, object?>? load = null)
     {
         if (data.Length > MaxFileLength || !IsSvg(data)) return null;
-        var doc = HtmlParser.Parse(System.Text.Encoding.UTF8.GetString(data));
+        var doc = HtmlParser.Parse(System.Text.Encoding.UTF8.GetString(data), impliedStructure: false);
         var svg = doc.FindFirst("svg");
         if (svg == null) return null;
         var sheet = new Stylesheet();
