@@ -488,7 +488,7 @@ internal sealed partial class LayoutEngine
 
     private static void LineExtent(Line line, ComputedStyle block, out float maxA, out float maxD)
     {
-        TextMetrics(block, out maxA, out maxD);
+        StrutMetrics(block, out maxA, out maxD);
         bool visible = false, lineAligned = false;
         // The words of a line mostly share a style, whose metrics are found once.
         var measured = block;

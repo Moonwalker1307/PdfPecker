@@ -405,13 +405,39 @@ public class BrowserMatchTests
     }
 
     [Fact]
-    public void Superscripts_and_subscripts_shift_by_whole_pixels_of_the_parent_font()
+    public void Superscripts_and_subscripts_shift_by_a_share_of_the_parent_font_in_layout_units()
     {
-        // 12px parent: super is raised 12/3 + 1 = 5px, sub is lowered 12/5 + 1 = 3px.
+        // 12px parent: super is raised 12/3 + 1 = 5px, sub is lowered 12/5 + 1 = 3.4px, kept as 217/64px.
         var ops = Layout("<p style='font: 12px Arial; margin: 0'>x<sup>2</sup>y<sub>3</sub></p>").OfType<TextOp>().ToList();
         var x = ops.Single(t => t.Text.StartsWith('x'));
         Near(x.Baseline - 3.75f, ops.Single(t => t.Text == "2").Baseline);
-        Near(x.Baseline + 2.25f, ops.Single(t => t.Text == "3").Baseline);
+        Near(x.Baseline + 217 / 64f * 0.75f, ops.Single(t => t.Text == "3").Baseline);
+    }
+
+    [Fact]
+    public void A_superscript_inside_a_superscript_is_raised_again()
+    {
+        // 16px text: the outer sup rises 16/3 + 1 px, the inner one a further 13.33/3 + 1 px from the outer's baseline,
+        // and so does text in an inline element inside a superscript.
+        var ops = Layout("<p style='font: 16px Arial; margin: 0'>x<sup>y<sup>z</sup><b>w</b></sup></p>").OfType<TextOp>().ToList();
+        float x = ops.Single(t => t.Text == "x").Baseline, y = ops.Single(t => t.Text == "y").Baseline;
+        Near(x - 405 / 64f * 0.75f, y);
+        Near(y - 348 / 64f * 0.75f, ops.Single(t => t.Text == "z").Baseline);
+        Near(y, ops.Single(t => t.Text == "w").Baseline);
+    }
+
+    [Fact]
+    public void Lines_with_superscripts_and_subscripts_are_as_tall_as_in_Chrome()
+    {
+        // Chrome: 18px for the plain 16px line (14px above the baseline, 4px below), 22.33px with a superscript and
+        // 25.52px with both a superscript and a subscript, whose 13.33px text reaches 12px up and 3px down from shifts
+        // kept in 1/64 pixels.
+        string Para(string inner) => $"<p style='font: 16px Arial; margin: 0'>{inner}</p>";
+        var ops = Layout(Para("a") + Para("E=mc<sup>2</sup>") + Para("a<sup>2</sup>b<sub>3</sub>") + Para("end")).OfType<TextOp>().ToList();
+        float a = ops.First(t => t.Text == "a").Baseline, e = ops.Single(t => t.Text.StartsWith("E=mc")).Baseline;
+        float end = ops.Single(t => t.Text == "end").Baseline;
+        Near(a + (4 + 12 + 405 / 64f) * 0.75f, e);
+        Near(e + (4 + 12 + 405 / 64f + 268 / 64f + 3 + 14) * 0.75f, end);
     }
 
     [Theory]

@@ -278,6 +278,7 @@ internal sealed class ComputedStyle
     public bool FontOpticalSizingNone;       // font-optical-sizing: none
     public float FontSize = 12f; // 16px
     public float ParentFontSize = 12f; // the parent's font size, which sub and super shift by
+    public float ParentBaselineShift;  // how far below the line's baseline the parent inline box's baseline sits
     public LineHeightKind LineHeightKind = LineHeightKind.Normal;
     public float LineHeightValue;
     public TextAlign TextAlign = TextAlign.Start;
@@ -578,6 +579,35 @@ internal sealed class ComputedStyle
 
     private const float MaxLineHeight = 1e7f;
 
+    /// <summary>
+    /// How far below the line's baseline this box's baseline sits, in points: its own sub, super or length shift added
+    /// to the shift of the inline box it is in, so that a superscript inside a superscript is raised again.
+    /// </summary>
+    public float BaselineShift => ParentBaselineShift + OwnBaselineShift;
+
+    /// <summary>
+    /// The shift vertical-align gives this box against its parent's baseline. Chrome raises a superscript by a third of
+    /// the parent's font size plus one pixel and lowers a subscript by a fifth plus one pixel, kept in layout units of
+    /// 1/64 pixel; a length raises by that much, and a percentage by that share of the element's own line height.
+    /// </summary>
+    private float OwnBaselineShift
+    {
+        get
+        {
+            if (VerticalAlign == VerticalAlign.Length) return -VerticalAlignLength.Resolve(LineHeight);
+            if (VerticalAlign is not (VerticalAlign.Super or VerticalAlign.Sub)) return 0;
+            float px = ParentFontSize / PointsPerPixel;
+            float shift = VerticalAlign == VerticalAlign.Super ? -(px / 3 + 1) : px / 5 + 1;
+            return MathF.Truncate(shift * 64) / 64 * PointsPerPixel;
+        }
+    }
+
+    /// <summary>
+    /// The baseline shift this box hands to its children. Only an inline box passes its shift on: an inline-block,
+    /// table cell or block lays its content out on lines of its own.
+    /// </summary>
+    public float ChildBaselineShift => Display == Display.Inline ? BaselineShift : 0;
+
     // Effective border widths: zero when the style is none.
     public float BorderTop => BorderTopStyle == BorderStyle.None ? 0 : BorderTopWidth;
     public float BorderRight => BorderRightStyle == BorderStyle.None ? 0 : BorderRightWidth;
@@ -636,6 +666,7 @@ internal sealed class ComputedStyle
     {
         var c = (ComputedStyle)MemberwiseClone();
         c.ParentFontSize = FontSize;
+        c.ParentBaselineShift = ChildBaselineShift;
         c.Display = Display.Inline;
         c.InlineTable = false;
         c.Contents = false;
