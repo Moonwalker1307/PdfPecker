@@ -59,7 +59,7 @@ internal sealed partial class LayoutEngine
     /// Notes the fragments of the inline boxes on a line, the boxes around others first, each with an empty group in
     /// the draw ops; returns the index of the first, or -1 when the line has none.
     /// </summary>
-    private int NoteInlineFragments(List<Item> items, float[] xs, float baseline)
+    private int NoteInlineFragments(List<Item> items, float[] xs, float baseline, float lineA, float lineD)
     {
         if (!FindDecoRuns(items)) return -1;
         var runs = _decoRuns;
@@ -81,7 +81,7 @@ internal sealed partial class LayoutEngine
             {
                 Deco = run.Deco,
                 X = xs[run.Start] + it.RelX, W = xs[run.End] - xs[run.Start],
-                Y = baseline + s.BaselineShift - above + it.RelY, H = above + below,
+                Y = baseline + TextShift(s, lineA, lineD) - above + it.RelY, H = above + below,
                 Group = group, Ops = _ops,
             });
         }

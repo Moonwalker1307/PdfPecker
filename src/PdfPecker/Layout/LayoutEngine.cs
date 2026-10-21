@@ -1379,6 +1379,8 @@ internal sealed partial class LayoutEngine
     private static float UsedMarginLeft(Element e, float availW, float used, float ml, float mr, bool sized)
     {
         var s = e.Style;
+        // An inline-block's auto margins are zero: text-align places it on its line. Flex and grid items keep theirs.
+        if (s.IsAtomicInline && !s.Floated && !s.OutOfFlow && e.Parent?.Style is not { IsFlex: true } and not { IsGrid: true }) return ml;
         if (s.MarginLeft.IsAuto && s.MarginRight.IsAuto) return Math.Max(0, (availW - used) / 2);
         if (s.MarginLeft.IsAuto) return Math.Max(0, availW - used - mr);
         if (!sized && !s.Floated && !s.OutOfFlow && e.Parent?.Style is { Rtl: true }) return Math.Max(0, availW - used - mr);

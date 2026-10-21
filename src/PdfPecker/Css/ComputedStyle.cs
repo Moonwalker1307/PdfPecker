@@ -279,6 +279,7 @@ internal sealed class ComputedStyle
     public float FontSize = 12f; // 16px
     public float ParentFontSize = 12f; // the parent's font size, which sub and super shift by
     public float ParentBaselineShift;  // how far below the line's baseline the parent inline box's baseline sits
+    public ComputedStyle? ParentStyle; // the parent's style, whose font text-top, text-bottom and middle align to
     public LineHeightKind LineHeightKind = LineHeightKind.Normal;
     public float LineHeightValue;
     public TextAlign TextAlign = TextAlign.Start;
@@ -591,7 +592,13 @@ internal sealed class ComputedStyle
     /// How far below the line's baseline this box's baseline sits, in points: its own sub, super or length shift added
     /// to the shift of the inline box it is in, so that a superscript inside a superscript is raised again.
     /// </summary>
-    public float BaselineShift => ParentBaselineShift + OwnBaselineShift;
+    public float BaselineShift => ParentBaselineShift + OwnBaselineShift + TextEdgeShift;
+
+    /// <summary>
+    /// <see cref="BaselineShift"/> for an image or inline-block: middle, text-top and text-bottom place those by their
+    /// own height on the line, not by the font.
+    /// </summary>
+    public float AtomicBaselineShift => ParentBaselineShift + OwnBaselineShift;
 
     /// <summary>
     /// The shift vertical-align gives this box against its parent's baseline. Chrome raises a superscript by a third of
@@ -609,6 +616,47 @@ internal sealed class ComputedStyle
             return MathF.Truncate(shift * 64) / 64 * PointsPerPixel;
         }
     }
+
+    /// <summary>
+    /// The shift that vertical-align: middle, text-top or text-bottom gives an inline box against its parent's baseline,
+    /// measured on the box's line height as Chrome does: middle centres it on the parent's baseline raised by half the
+    /// parent's x-height, and text-top and text-bottom line it up with the top or bottom of the parent's font.
+    /// </summary>
+    private float TextEdgeShift
+    {
+        get
+        {
+            if (Display != Display.Inline || VerticalAlign is not (VerticalAlign.Middle or VerticalAlign.TextTop or VerticalAlign.TextBottom)
+                || ParentStyle is not { } parent)
+                return 0;
+            Strut(out float a, out float d);
+            var font = parent.Font;
+            float size = parent.TextSize;
+            if (VerticalAlign == VerticalAlign.Middle)
+            {
+                float xHeight = font.Metric(FontMetric.XHeight) is > 0 and var x ? x * size : size / 2;
+                return (a - d - xHeight) / 2;
+            }
+            font.LineMetrics(size, out float ascent, out float descent);
+            return VerticalAlign == VerticalAlign.TextTop ? a - ascent : descent - d;
+        }
+    }
+
+    /// <summary>
+    /// The ascent and descent of this style's strut: its font and line height on its own baseline. Chrome gives the top
+    /// half of the leading whole CSS pixels and the rest to the bottom.
+    /// </summary>
+    public void Strut(out float ascent, out float descent)
+    {
+        Font.LineMetrics(TextSize, out float asc, out float desc);
+        float lineH = LineHeight;
+        float half = MathF.Floor((lineH - (asc + desc)) / 2 / PointsPerPixel + HalfLeadingSlack) * PointsPerPixel;
+        ascent = asc + half;
+        descent = lineH - ascent;
+    }
+
+    // The half-leading is rounded down to whole pixels, with a little slack against rounding error.
+    private const float HalfLeadingSlack = 0.001f;
 
     /// <summary>
     /// The baseline shift this box hands to its children. Only an inline box passes its shift on: an inline-block,
@@ -675,6 +723,7 @@ internal sealed class ComputedStyle
         var c = (ComputedStyle)MemberwiseClone();
         c.ParentFontSize = FontSize;
         c.ParentBaselineShift = ChildBaselineShift;
+        c.ParentStyle = this;
         c.Display = Display.Inline;
         c.InlineTable = false;
         c.Contents = false;

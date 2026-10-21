@@ -551,6 +551,11 @@ internal sealed partial class LayoutEngine
                     AtomicMetrics(it, block, out a, out d);
                     break;
                 default:
+                    if (IsLineAlignedText(it.Style))
+                    {
+                        lineAligned = visible = true;
+                        continue;
+                    }
                     if (!ReferenceEquals(it.Style, measured))
                     {
                         measured = it.Style;
@@ -571,9 +576,10 @@ internal sealed partial class LayoutEngine
             foreach (var it in line.Items)
             {
                 if (!IsLineAligned(it)) continue;
-                if (it.Height <= maxA + maxD) continue;
-                if (it.Style.VerticalAlign == VerticalAlign.Top) maxD = it.Height - maxA;
-                else maxA = it.Height - maxD;
+                float h = LineAlignedHeight(it);
+                if (h <= maxA + maxD) continue;
+                if (it.Style.VerticalAlign == VerticalAlign.Top) maxD = h - maxA;
+                else maxA = h - maxD;
             }
         }
         if (!visible) maxA = float.NaN;
