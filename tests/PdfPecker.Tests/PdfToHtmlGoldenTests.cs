@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -25,6 +26,11 @@ public class PdfToHtmlGoldenTests
 
     private static readonly Regex Images = new(@"data:image/[a-z]+;base64,[A-Za-z0-9+/=]*", RegexOptions.Compiled);
 
+    // Positions and scales are printed with four decimals, and the last one can differ between runtimes (another
+    // runtime may fuse a multiply and an add), so numbers with a fraction match within two units of the last place.
+    private static readonly Regex Decimals = new(@"-?\d+\.\d+", RegexOptions.Compiled);
+    private const double Tolerance = 0.0002;
+
     // The baseline's name and the PDF, by path under the test project: internal links and footnotes, external links
     // and images, and a PDF from LibreOffice with form fields.
     public static TheoryData<string, string> Samples() => new()
@@ -51,14 +57,36 @@ public class PdfToHtmlGoldenTests
         Assert.True(File.Exists(expectedPath), $"No baseline for {sample}. Create it with PDFPECKER_UPDATE_GOLDEN=1.");
 
         var expected = File.ReadAllText(expectedPath).ReplaceLineEndings("\n");
-        if (expected == actual) return;
-        int at = 0;
-        while (at < expected.Length && at < actual.Length && expected[at] == actual[at]) at++;
+        int? at = FirstDifference(expected, actual);
+        if (at == null) return;
         var outDir = Path.Combine(AppContext.BaseDirectory, "golden-actual");
         Directory.CreateDirectory(outDir);
         var outPath = Path.Combine(outDir, name + ".html");
         File.WriteAllText(outPath, actual, new UTF8Encoding(false));
-        Assert.Fail($"{sample} differs from its baseline at character {at}: expected \"{Excerpt(expected, at)}\", got \"{Excerpt(actual, at)}\"\nNew output: {outPath}");
+        Assert.Fail($"{sample} differs from its baseline at character {at}: expected \"{Excerpt(expected, at.Value)}\", got \"{Excerpt(actual, at.Value)}\"\nNew output: {outPath}");
+    }
+
+    /// <summary>Where the expected HTML first differs from the actual, with decimals within <see cref="Tolerance"/>; null when they match.</summary>
+    private static int? FirstDifference(string expected, string actual)
+    {
+        var e = Decimals.Matches(expected);
+        var a = Decimals.Matches(actual);
+        int ei = 0, ai = 0;
+        for (int k = 0; k <= Math.Min(e.Count, a.Count); k++)
+        {
+            // The text up to the next decimal must be equal, then the decimals must be close.
+            int eEnd = k < e.Count ? e[k].Index : expected.Length, aEnd = k < a.Count ? a[k].Index : actual.Length;
+            var eText = expected.AsSpan(ei, eEnd - ei);
+            var aText = actual.AsSpan(ai, aEnd - ai);
+            int same = eText.CommonPrefixLength(aText);
+            if (same < eText.Length || same < aText.Length) return ei + same;
+            if (k == e.Count || k == a.Count) return k == e.Count && k == a.Count ? null : eEnd;
+            double x = double.Parse(e[k].Value, CultureInfo.InvariantCulture), y = double.Parse(a[k].Value, CultureInfo.InvariantCulture);
+            if (Math.Abs(x - y) > Tolerance) return eEnd;
+            ei = eEnd + e[k].Length;
+            ai = aEnd + a[k].Length;
+        }
+        return null;
     }
 
     private static string Excerpt(string s, int at) => s.Substring(Math.Max(0, at - 40), Math.Min(s.Length, at + 40) - Math.Max(0, at - 40));
