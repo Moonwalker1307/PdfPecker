@@ -48,8 +48,9 @@ internal sealed partial class LayoutEngine
         {
             if (run == null || run.Count == 0) return;
             bool content = false;
+            // A line break alone still makes an item one line tall, as in Chrome.
             foreach (var n in run)
-                if (n is TextNode t && !string.IsNullOrWhiteSpace(t.Text)) { content = true; break; }
+                if (n is TextNode t && !string.IsNullOrWhiteSpace(t.Text) || n is Element) { content = true; break; }
             if (content) items.Add(new BoxItem { Run = new List<Node>(run), Style = AnonymousStyle(container.Style) });
             run.Clear();
         }
@@ -58,6 +59,13 @@ internal sealed partial class LayoutEngine
             if (c is TextNode) { (run ??= new List<Node>()).Add(c); continue; }
             var e = (Element)c;
             if (e.Style == null || e.Style.Display == Display.None || e.Detached) continue;
+            // A line break between text stays in the text's anonymous item, as in Chrome: "a<br>b" is one item of two
+            // lines, not three items.
+            if (e.Name == "br" && !e.Style.OutOfFlow && !e.Style.Floated)
+            {
+                (run ??= new List<Node>()).Add(c);
+                continue;
+            }
             FlushRun();
             // Absolutely positioned children are not items (css-flexbox §4.1, css-grid §9): they take no room.
             if (e.Style.OutOfFlow) continue;
