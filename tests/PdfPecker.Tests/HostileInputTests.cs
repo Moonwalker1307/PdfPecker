@@ -520,9 +520,10 @@ public class HostileInputTests
         // Found by the fuzzer: target html, timeout-b4187992. Text in 250 nested inline-blocks is wider than the
         // 100,000 points intrinsic widths are measured at, so each box wraps, and each level measured the boxes inside
         // it again at its own slightly narrower width: 533 MB and 3.5 s. Widths that large reach no page, so they share
-        // one measurement.
+        // one measurement. The boxes reach past the page, which shrinking to fit lays out a second time; the bound is
+        // for one layout.
         var html = "<style>span { display: inline-block; padding: 0 4pt }</style>" + Repeat("<span>" + Repeat("lorem ipsum ", 30), 250);
-        var (pdf, allocated) = Allocating(() => Bounded(html));
+        var (pdf, allocated) = Allocating(() => Bounded(html, new PdfOptions { ShrinkToFit = false }));
         AssertStructurallyValid(pdf);
         Assert.InRange(allocated, 0, 150L << 20);
     }

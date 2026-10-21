@@ -18,6 +18,11 @@ internal sealed class PageSetup
     /// out at its paper size divided by the scale and drawn scaled.
     /// </summary>
     public float Scale = 1;
+    /// <summary>
+    /// Whether the page is written at the paper size Chrome gives a scaled page (see <see cref="PdfDocumentWriter.PaperSize"/>): set for
+    /// PdfOptions.Scale, but not for a page only shrunk to fit its content, whose paper keeps the size asked for.
+    /// </summary>
+    public bool ChromePaper;
     public float ContentWidth => Width - MarginLeft - MarginRight;
     public float ContentHeight => Height - MarginTop - MarginBottom;
     /// <summary>Height available to the flowing content on each page.</summary>
@@ -598,13 +603,13 @@ internal sealed partial class PdfDocumentWriter
         _page = _sections[_pageSection[p]].Grid.SetupOf(p - _sectionFirst[_pageSection[p]]);
         float paperW = _page.Width * _page.Scale;
         paperH = _page.Height * _page.Scale;
-        if (_page.Scale != 1) { paperW = PaperSize(paperW); paperH = PaperSize(paperH); }
+        if (_page.ChromePaper) { paperW = PaperSize(paperW); paperH = PaperSize(paperH); }
         _paperDy = paperH - _page.Height * _page.Scale;
         return paperW;
     }
 
     private static float PaperDy(PageSetup page)
-        => page.Scale == 1 ? 0 : PaperSize(page.Height * page.Scale) - page.Height * page.Scale;
+        => !page.ChromePaper ? 0 : PaperSize(page.Height * page.Scale) - page.Height * page.Scale;
 
     /// <summary>Where page <paramref name="p"/> starts in its section's flow.</summary>
     private float PageTop(int p)
