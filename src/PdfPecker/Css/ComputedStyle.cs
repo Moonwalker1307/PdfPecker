@@ -123,7 +123,9 @@ internal enum UnicodeBidi : byte { Normal, Embed, Isolate, BidiOverride, Isolate
 
 /// <summary>Values of writing-mode. The vertical modes are laid out as horizontal text turned a quarter turn.</summary>
 internal enum WritingMode : byte { HorizontalTb, VerticalRl, VerticalLr, SidewaysRl, SidewaysLr }
-internal enum WhiteSpace : byte { Normal, NoWrap, Pre, PreWrap, PreLine }
+// PreLineNoWrap is pre-line's handling of white space with text-wrap-mode: nowrap, which no white-space keyword gives.
+internal enum WhiteSpace : byte { Normal, NoWrap, Pre, PreWrap, PreLine, PreLineNoWrap }
+internal enum TextWrapStyle : byte { Auto, Balance, Pretty } // text-wrap-style; stable lays out as auto on paper
 internal enum VerticalAlign : byte { Baseline, Sub, Super, Top, Middle, Bottom, TextTop, TextBottom, Length }
 internal enum OverflowWrap : byte { Normal, BreakWord, Anywhere }
 internal enum Overflow : byte { Visible, Clip, Hidden } // Hidden also stands for auto and scroll, which clip alike on paper
@@ -287,7 +289,8 @@ internal sealed class ComputedStyle
     public string? Lang;                     // the content language: the nearest lang attribute, else PdfOptions.Language
     public IReadOnlyDictionary<string, HyphenationPatterns>? Hyphenation; // PdfOptions.Hyphenation, keys in lower case
     public byte SmallCaps;                   // font-variant-caps: 1 small-caps, 2 all-small-caps (synthesized)
-    public WhiteSpace WhiteSpace;
+    public WhiteSpace WhiteSpace;            // with text-wrap-mode, which it is a shorthand for
+    public TextWrapStyle TextWrap;
     public OverflowWrap OverflowWrap;
     public WordBreak WordBreak;
     public LineBreak LineBreak;              // line-break: how strictly Chinese and Japanese text breaks

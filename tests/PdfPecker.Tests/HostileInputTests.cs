@@ -112,6 +112,16 @@ public class HostileInputTests
         string word = Repeat("e\u0301", 20_000);
         var pdf = Bounded("<style>p { text-align: justify; text-justify: inter-character; width: 300pt }</style>"
             + "<p>" + word + " " + word + " x</p><p>" + Repeat("漢字 ", 20_000) + "</p>");
+    }
+
+    [Fact]
+    public void Balancing_lines_of_thousands_of_tiny_words_stays_fast()
+    {
+        // Choosing breaks again costs the square of a line's break opportunities: tiny words on wide lines keep their
+        // greedy breaks, and balance falls back to a few more greedy passes.
+        string paragraph = "<p>" + Repeat("a ", 5000) + "</p>";
+        var pdf = Bounded("<style>@page { size: 1000pt 1000pt } body { font-size: 1pt } p { text-wrap: balance } div p { text-wrap: pretty }</style>"
+            + Repeat(paragraph, 20) + "<div>" + Repeat(paragraph, 20) + "</div>");
         Assert.NotEmpty(pdf);
     }
 
