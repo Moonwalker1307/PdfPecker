@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en"><head><title>Selectors, quotes and the cascade</title>
+<style>
+@font-face { font-family: Arabic; src: url('../../Fixtures/fonts/NotoSansArabic-Subset.ttf') }
+@page { size: 148mm 210mm; margin: 12mm }
+body { font: 10pt/1.4 sans-serif; margin: 0; color: #222 }
+h1 { font-size: 15pt; margin: 0 0 6pt; border-bottom: 1pt solid #c0392b }
+h2 { font-size: 10pt; margin: 8pt 0 3pt; color: #c0392b }
+p { margin: 2pt 0 }
+:dir(rtl) { color: #8e44ad; font-family: Arabic, sans-serif }
+p:dir(ltr) .tag { border-bottom: 1pt solid #2c6e9b }
+input { font: inherit; width: 50mm; padding: 2pt 3pt; border: 0.5pt solid #999 }
+input::placeholder { color: #c0392b; font-style: italic }
+.de { quotes: "„" "“" "‚" "‘" }
+.fr { quotes: "« " " »" }
+.custom q { quotes: "[" "]" "<" ">" }
+.contents { display: contents; border: 2pt solid red; background: yellow }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2mm }
+.grid > *, .grid .contents > * { background: #fadbd8; padding: 2pt 4pt }
+.parent { color: #2c6e9b; border: 1pt solid #2c6e9b; padding: 2pt; margin: 2pt 0 }
+.parent .inherit { border: inherit; margin-top: 2pt }
+.parent .initial { color: initial }
+.parent .unset { all: unset }
+.parent .revert { font-weight: bold }
+.parent .revert b { font-weight: revert }
+.vert { display: inline-block; writing-mode: vertical-rl; border: 0.5pt solid #999; padding: 2pt; height: 30mm; margin-left: 3mm; vertical-align: top }
+.up { writing-mode: sideways-lr }
+table.v th { writing-mode: vertical-lr; transform: rotate(180deg); padding: 3pt 1pt; font-size: 8pt; background: #fadbd8 }
+table.v td { border: 0.5pt solid #ccc; padding: 2pt 4pt; text-align: center }
+</style></head>
+<body>
+<h1>Selectors, quotes and the cascade</h1>
+
+<h2>:dir() and ::placeholder</h2>
+<p><span class="tag">left to right</span> and <span dir="rtl">مرحبا بالعالم</span> in one line</p>
+<p dir="rtl">فقرة كاملة من اليمين إلى اليسار</p>
+<p><input placeholder="Your name"> <input value="A value"></p>
+
+<h2>quotes</h2>
+<p>English: <q>She said <q>hello</q> to me</q></p>
+<p lang="de" class="de">Deutsch: <q>Er sagte <q>Hallo</q> zu mir</q></p>
+<p class="fr" lang="fr">Français : <q>Il a dit bonjour</q></p>
+<p class="custom">Custom: <q>outer <q>inner</q></q></p>
+
+<h2>display: contents</h2>
+<div class="grid"><div>one</div><div class="contents"><div>two</div><div>three</div></div><div>four</div></div>
+
+<h2>CSS-wide keywords and all</h2>
+<div class="parent">parent text
+  <div class="inherit">border: inherit</div>
+  <div class="initial">color: initial</div>
+  <div><span class="unset">all: unset on a span</span></div>
+  <div class="revert">bold, <b>b with font-weight: revert</b></div>
+</div>
+
+<h2>Vertical writing modes</h2>
+<div class="vert">vertical-rl text runs down</div><div class="vert up">sideways-lr runs up</div>
+<table class="v" style="display:inline-table; border-collapse: collapse">
+  <tr><th>January</th><th>February</th><th>March</th></tr>
+  <tr><td>12</td><td>15</td><td>9</td></tr>
+</table>
+</body></html>

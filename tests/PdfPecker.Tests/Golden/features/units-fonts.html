@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en"><head><title>Units and font properties</title>
+<style>
+@font-face { font-family: Inter; src: url('../../Fixtures/fonts/Inter-Features.ttf') }
+@font-face { font-family: Work; src: url('../../Fixtures/fonts/WorkSans-Regular.ttf') }
+@font-face { font-family: Arabic; src: url('../../Fixtures/fonts/NotoSansArabic-Subset.ttf') }
+@page { size: 148mm 210mm; margin: 12mm }
+body { font: 10pt/1.4 sans-serif; margin: 0; color: #222 }
+h1 { font-size: 15pt; margin: 0 0 6pt; border-bottom: 1pt solid #27ae60 }
+h2 { font-size: 10pt; margin: 8pt 0 3pt; color: #27ae60 }
+.bar { height: 6pt; background: #27ae60; margin: 2pt 0 }
+.bar span { display: inline-block; width: 60mm; font-size: 8pt; position: relative; left: calc(100% + 4pt); top: -3pt; white-space: nowrap }
+.box { border: 0.5pt solid #999; padding: 2pt; margin: 2pt 0; background: #eafaf1 }
+.logical { margin-inline-start: 12mm; padding-inline: 4mm 1mm; inline-size: 60mm; block-size: 10mm }
+.rtl { direction: rtl; font-family: Arabic, sans-serif }
+.inter { font-family: Inter; font-size: 11pt }
+.nums td { padding: 0 6pt; text-align: right }
+.nums td.n { font-family: Inter }
+</style></head>
+<body>
+<h1>Units and font properties</h1>
+
+<h2>Font-relative units</h2>
+<div class="bar" style="width: 20ex"><span>20ex</span></div>
+<div class="bar" style="width: 20ch"><span>20ch</span></div>
+<div class="bar" style="width: 20cap"><span>20cap</span></div>
+<div class="bar" style="width: 10ic"><span>10ic</span></div>
+<div class="bar" style="width: 5lh"><span>5lh</span></div>
+<div class="bar" style="width: 5rlh"><span>5rlh</span></div>
+<div class="bar" style="width: 20vmin"><span>20vmin</span></div>
+<div class="bar" style="width: calc(50vw - 20mm)"><span>calc(50vw - 20mm)</span></div>
+<p style="font-family: monospace; width: 30ch; border: 0.5pt solid #999">30ch of monospace: 123456789012345678901234567890</p>
+
+<h2>Logical properties</h2>
+<div class="box logical">margin-inline-start, padding-inline, inline-size</div>
+<div class="rtl"><div class="box logical">في الاتجاه من اليمين إلى اليسار</div></div>
+
+<h2>font-variant and font-feature-settings</h2>
+<p>Proportional <span class="inter">0123456789 1,111.11</span> · tabular <span class="inter" style="font-variant-numeric: tabular-nums">0123456789 1,111.11</span></p>
+<p><span style="font-variant-caps: small-caps">Small Caps Text</span> · <span style="font-variant-caps: all-small-caps">ALL Small</span> · <span style="font-feature-settings: 'tnum'">feature settings <span class="inter">1,111.11</span></span></p>
+<table class="nums">
+  <tr><td>proportional</td><td class="n">1,111.11</td><td class="n">8,888.88</td></tr>
+  <tr><td>tabular</td><td class="n" style="font-variant-numeric: tabular-nums">1,111.11</td><td class="n" style="font-variant-numeric: tabular-nums">8,888.88</td></tr>
+</table>
+
+<h2>font-kerning, font-synthesis and font-size-adjust</h2>
+<p style="font-family: Work; font-size: 16pt">AVATAR WAVE To · <span style="font-kerning: none">AVATAR WAVE To</span></p>
+<p style="font-family: Work"><b>synthesised bold</b> · <i>synthesised italic</i> · <span style="font-synthesis: none"><b>no bold</b> <i>no italic</i></span></p>
+<p>serif <span style="font-family: serif">xheight</span> · adjusted <span style="font-family: serif; font-size-adjust: 0.6">xheight</span> · mono <span style="font-family: monospace; font-size-adjust: 0.6">xheight</span></p>
+<p><span style="font-variant-position: super">super</span> and <span style="font-variant-position: sub">sub</span> positions, <span style="font-stretch: condensed">condensed</span></p>
+</body></html>

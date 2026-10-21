@@ -24,10 +24,19 @@ keeps baselines for merging, compacting, stamping, form filling and decryption, 
 inputs in `Fixtures/third-party/` come from `tools/ThirdPartyPdfs/generate.sh`; regenerating them changes their
 baselines too.
 
+`PdfToHtmlGoldenTests` convert a few of those PDFs to HTML and compare it with `Golden/pdf-to-html/*.expected.html`:
+the page structure, the text layer, its web font and the links. The page images are blanked before the comparison,
+because `RendererGoldenTests` already cover the renderer and its pixels can move by a rounding step between runtimes.
+A change to `footnotes-toc/demo` or `features/images` changes these baselines too.
+
+`Golden/features/` holds one page per group of features that came with the Chrome comparison work (text wrapping,
+decorations, drop caps and float shapes, masks and filters, units and fonts, selectors, tables, CSS tables, images,
+and documents without `html` or `body`). Each was compared with Chromium's print to PDF before it was checked in.
+
 When a change is meant to alter output, regenerate them and say in the commit and PR which baselines changed and why:
 
 ```
-PDFPECKER_UPDATE_GOLDEN=1 dotnet test --filter "FullyQualifiedName~GoldenPdfTests|FullyQualifiedName~RendererGoldenTests|FullyQualifiedName~ThirdPartyPdfTests" -f net10.0
+PDFPECKER_UPDATE_GOLDEN=1 dotnet test --filter "FullyQualifiedName~GoldenPdfTests|FullyQualifiedName~RendererGoldenTests|FullyQualifiedName~ThirdPartyPdfTests|FullyQualifiedName~PdfToHtmlGoldenTests" -f net10.0
 ```
 
 Never regenerate just to make a failing test pass. A refactor must leave every golden unchanged.
