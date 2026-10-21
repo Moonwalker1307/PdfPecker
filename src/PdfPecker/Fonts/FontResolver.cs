@@ -90,9 +90,11 @@ internal sealed class FontResolver
     /// Creates a resolver, or returns null when the document has no fonts beyond the standard ones and they need not be
     /// embedded. With <paramref name="embedStandard"/>, the standard fonts are replaced by the bundled Liberation fonts.
     /// With <paramref name="systemFonts"/>, families found nowhere else are looked up in the system font folders.
+    /// <paramref name="needsFallback"/> tells, when nothing else asks for a resolver, whether the document has
+    /// characters only the bundled fallback fonts can draw.
     /// </summary>
     public static FontResolver? Create(List<List<Declaration>> fontFaceRules, FontCollection? collection, Func<string, byte[]?> fetch,
-        bool embedStandard = false, bool systemFonts = false, MissingFontReport? report = null)
+        bool embedStandard = false, bool systemFonts = false, MissingFontReport? report = null, Func<bool>? needsFallback = null)
     {
         var snapshot = collection?.GetSnapshot();
         if (snapshot is { All.Count: 0 }) snapshot = null;
@@ -109,7 +111,7 @@ internal sealed class FontResolver
             }
             list.Add(face);
         }
-        return r._docFamilies.Count == 0 && snapshot == null && !embedStandard && !systemFonts ? null : r;
+        return r._docFamilies.Count == 0 && snapshot == null && !embedStandard && !systemFonts && needsFallback?.Invoke() != true ? null : r;
     }
 
     // ------------------------------------------------------------------ @font-face
@@ -280,10 +282,20 @@ internal sealed class FontResolver
                 foreach (var f in MatchFamily(family, weight, italic, variation))
                     if (f.Covers(cp)) return f;
             }
-            return null;
+            return Bundled(generic, bold, italic, cp);
         });
         _resolved[key] = result;
         return result;
+    }
+
+    /// <summary>
+    /// The last fallback, as browsers fall back to the system's fonts: the Liberation font in place of a standard one,
+    /// which has the Central European, Greek and Cyrillic letters WinAnsi lacks, and then the symbol font.
+    /// </summary>
+    private EmbeddedFont? Bundled(FontFamily generic, bool bold, bool italic, int cp)
+    {
+        if (!_embedStandard && BundledFonts.Get(StandardFont.Get(generic, bold, italic)) is { } liberation && liberation.Covers(cp)) return liberation;
+        return BundledFonts.Symbols(bold, italic) is { } symbols && symbols.Covers(cp) ? symbols : null;
     }
 
     /// <summary>A standard font, or its bundled embeddable replacement when every font must be embedded.</summary>

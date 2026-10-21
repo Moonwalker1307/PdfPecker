@@ -202,9 +202,68 @@ public class FontTests
     [Fact]
     public void WithoutRegisteredFontsTheOutputUsesOnlyStandardFonts()
     {
-        var text = Latin1(ConvertUncompressed("<p style='font-family: \"Work Sans\"'>Ærø Ł</p>"));
+        var text = Latin1(ConvertUncompressed("<p style='font-family: \"Work Sans\"'>Ærø – “quoted” €</p>"));
         Assert.DoesNotContain("/Type0", text);
         Assert.Contains("/BaseFont /Helvetica", text);
+    }
+
+    [Fact]
+    public void LettersTheStandardFontsLackComeFromTheBundledLiberationFont()
+    {
+        var text = Latin1(ConvertUncompressed("<p style='font-family: Arial'>Łódź Ωμέγα Москва</p><p style='font: bold 12px serif'>Ł</p>"));
+        Assert.Contains("/BaseFont /Helvetica", text);
+        Assert.Matches(@"/BaseFont /[A-Z]{6}\+LiberationSans /", text);
+        Assert.Matches(@"/BaseFont /[A-Z]{6}\+LiberationSerif-Bold /", text);
+        Assert.DoesNotContain("PdfPeckerSymbols", text);
+    }
+
+    [Theory]
+    [InlineData("<p>Done ✓ ★ ✈</p>")]
+    [InlineData("<p>Done &#x2713; &starf;</p>")]
+    [InlineData("<style>li::before { content: '\\2713  ' }</style><ul><li>Done</li></ul>")]
+    [InlineData("<p title='✓'>Done</p><style>p::after { content: attr(title) }</style>")]
+    public void SymbolsNoOtherFontHasComeFromTheBundledSymbolFont(string html)
+    {
+        var pdf = ConvertUncompressed(html);
+        AssertStructurallyValid(pdf);
+        Assert.Matches(@"/BaseFont /[A-Z]{6}\+PdfPeckerSymbols-Regular /", Latin1(pdf));
+        Assert.Contains("<2713>", AllContent(pdf)); // ToUnicode maps the glyph back to the check mark
+    }
+
+    [Fact]
+    public void SymbolFontIsTheLastFallbackAfterTheDocumentsFonts()
+    {
+        // Work Sans has no check mark, so it falls through to the symbol font, made bold like the text.
+        var pdf = HtmlToPdf.Convert("<p style='font: bold 12px \"Work Sans\"'>Done ✓</p>", WithFonts(Regular, Bold));
+        var text = Latin1(pdf);
+        Assert.Contains("WorkSans-Bold", text);
+        Assert.Matches(@"/BaseFont /[A-Z]{6}\+PdfPeckerSymbols-Regular /", text);
+    }
+
+    [Fact]
+    public void SymbolsInHeadersAndFootersUseTheSymbolFont()
+    {
+        var pdf = ConvertUncompressed("<p>Body</p>", new PdfOptions { FooterText = "✓ Approved", Compress = false });
+        Assert.Matches(@"/BaseFont /[A-Z]{6}\+PdfPeckerSymbols-Regular /", Latin1(pdf));
+    }
+
+    [Fact]
+    public void BundledSymbolFontIsRenamedAndKeepsItsLicense()
+    {
+        var font = BundledFonts.Symbols(false, false)!.Program;
+        Assert.Equal("PdfPecker Symbols", font.FamilyName);
+        Assert.Equal("PdfPeckerSymbols-Regular", font.PostScriptName);
+        foreach (var name in new[] { font.FamilyName, font.FullName, font.PostScriptName })
+        {
+            Assert.DoesNotContain("Vera", name);
+            Assert.DoesNotContain("Bitstream", name);
+            Assert.DoesNotContain("DejaVu", name);
+        }
+        // The copyright and license records stay, as the Bitstream Vera license asks.
+        Assert.True(font.Data.AsSpan().IndexOf(System.Text.Encoding.BigEndianUnicode.GetBytes("Copyright (c) 2003 by Bitstream, Inc.")) >= 0);
+        Assert.True(font.Data.AsSpan().IndexOf(System.Text.Encoding.BigEndianUnicode.GetBytes("Bitstream Vera Fonts Copyright")) >= 0);
+        foreach (int cp in new[] { 0x2713, 0x2605, 0x25B8, 0x2708, 0x2139, 0x26A0, 0x2192, 0x2212 })
+            Assert.NotEqual(0, font.GlyphId(cp));
     }
 
     [Fact]

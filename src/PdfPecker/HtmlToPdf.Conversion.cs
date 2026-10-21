@@ -134,7 +134,7 @@ public static partial class HtmlToPdf
             _missingFonts = _options.MissingFont is { } onMissing ? new MissingFontReport(onMissing) : null;
             _fonts = FontResolver.Create(_sheet.FontFaces, _options.Fonts, FetchFont(_images),
                 embedStandard: _options.EmbedStandardFonts || _settings.Conformance != PdfConformance.None || _settings.IsPdfUA,
-                systemFonts: _options.UseSystemFonts, report: _missingFonts);
+                systemFonts: _options.UseSystemFonts, report: _missingFonts, needsFallback: NeedsFallbackFonts);
             _images.Fonts = _fonts;
             if ((_namesUsed & NamesUsed.Img) != 0) MissingImageText.Prepare(_doc, _images);
             _paged = new PagedContent();
@@ -143,6 +143,53 @@ public static partial class HtmlToPdf
             _hyphenation = HyphenationTable(_options.Hyphenation);
             _htmlLang = _doc.Children.OfType<Element>().FirstOrDefault(c => c.Name == "html") is { } htmlElement
                 ? htmlElement.GetAttribute("lang") ?? htmlElement.GetAttribute("xml:lang") : null;
+        }
+
+        /// <summary>
+        /// Whether some text needs the bundled fallback fonts: the document's text and attributes, generated content in
+        /// the style sheets, and the header, footer and watermark text. Other documents keep the standard fonts alone.
+        /// </summary>
+        private bool NeedsFallbackFonts()
+        {
+            if (BundledFonts.BeyondStandard(_options.HeaderText) || BundledFonts.BeyondStandard(_options.FooterText)
+                || BundledFonts.BeyondStandard(_options.Watermark?.Text))
+                return true;
+            var stack = new Stack<Node>();
+            stack.Push(_doc);
+            while (stack.Count > 0)
+            {
+                switch (stack.Pop())
+                {
+                    case TextNode t when BundledFonts.BeyondStandard(t.Text):
+                        return true;
+                    case Element e:
+                        foreach (var a in e.Attributes)
+                            if (BundledFonts.BeyondStandard(a.Value) || (a.Key == "style" && CssEscapesBeyondStandard(a.Value))) return true;
+                        foreach (var child in e.Children) stack.Push(child);
+                        break;
+                }
+            }
+            foreach (var rule in _sheet.Rules)
+                foreach (var d in rule.Declarations)
+                    if (BundledFonts.BeyondStandard(d.Value) || CssEscapesBeyondStandard(d.Value)) return true;
+            foreach (var page in _sheet.PageRules)
+                foreach (var box in page.MarginBoxes.Values)
+                    foreach (var d in box)
+                        if (BundledFonts.BeyondStandard(d.Value) || CssEscapesBeyondStandard(d.Value)) return true;
+            return false;
+        }
+
+        // A CSS escape such as \2713 in a string, which the text of the style sheet does not show as the character.
+        private static bool CssEscapesBeyondStandard(string css)
+        {
+            for (int i = css.IndexOf('\\'); i >= 0 && i + 1 < css.Length; i = css.IndexOf('\\', i + 1))
+            {
+                int end = i + 1, code = 0;
+                for (; end < css.Length && end - i <= 6 && char.IsAsciiHexDigit(css[end]); end++)
+                    code = code * 16 + (css[end] <= '9' ? css[end] - '0' : (css[end] | 0x20) - 'a' + 10);
+                if (end > i + 1 && code is > 0x7F and <= 0xFFFF && BundledFonts.BeyondStandard((char)code)) return true;
+            }
+            return false;
         }
 
         /// <summary>A style pass over the whole document, at the current page width and viewport.</summary>
