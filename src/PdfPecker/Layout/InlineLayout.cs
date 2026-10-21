@@ -97,6 +97,8 @@ internal sealed partial class LayoutEngine
         }
         produced = true;
         float bottom = PlaceLines(lines, cs, x, y, w, indent, besideFloats);
+        // A br that clears floats at the end of the last line moves what follows the lines below the floats too.
+        if (besideFloats && lines.Count > 0 && ClearingBreak(lines[^1]) is { } br) bottom = Cleared(br, bottom);
         if (besideFloats && _floats.ShapeIn(y, bottom)) LiftInlineContent(opsMark);
         ReturnLines(lines);
         if (paragraph.First != null) ReturnState(paragraph.First);
