@@ -13,11 +13,15 @@ internal sealed partial class LayoutEngine
     /// Breaks items into lines. With <paramref name="after"/>, a list matching <paramref name="items"/> item for item,
     /// the lines after the first are made from that list instead (::first-line).
     /// </summary>
-    private List<Line> BreakLines(List<Item> items, float availW, float firstIndent, FloatLines? fl = null, List<Item>? after = null)
+    private List<Line> BreakLines(List<Item> items, float availW, float firstIndent, FloatLines? fl = null, List<Item>? after = null, ComputedStyle? block = null)
     {
         var breaker = new LineBreaker(this, items, availW, firstIndent, fl, after);
         breaker.Run();
         if (breaker.ClonesEdges) AddCloneEdges(breaker.Lines);
+        // text-wrap: balance and pretty choose the breaks again once the greedy ones are known; beside floats, on pages
+        // of different widths and with a ::first-line style the lines keep their greedy breaks.
+        if (block is { TextWrap: not TextWrapStyle.Auto } && fl == null && after == null && !breaker.ClonesEdges)
+            return WrapLines(items, breaker.Lines, block, availW, firstIndent);
         return breaker.Lines;
     }
 
@@ -126,6 +130,8 @@ internal sealed partial class LayoutEngine
         private readonly LayoutEngine _engine;
         private readonly float _availW, _firstIndent;
         private readonly FloatLines? _fl;
+        // text-wrap: where each line must start, or null for greedy breaks throughout.
+        private readonly byte[]? _plan;
         private int _count;
         private List<Item> _items;
         private List<Item>? _after;
@@ -138,9 +144,10 @@ internal sealed partial class LayoutEngine
         public readonly bool ClonesEdges;
         private Item? _edgeAfter;
 
-        public LineBreaker(LayoutEngine engine, List<Item> items, float availW, float firstIndent, FloatLines? fl, List<Item>? after)
+        public LineBreaker(LayoutEngine engine, List<Item> items, float availW, float firstIndent, FloatLines? fl, List<Item>? after, byte[]? plan = null)
         {
             _engine = engine;
+            _plan = plan;
             _items = items;
             _availW = availW;
             _firstIndent = firstIndent;
@@ -325,7 +332,9 @@ internal sealed partial class LayoutEngine
 
             // A cloned box the line would break inside ends the line with its right edge.
             if (ClonesEdges && _hasContent && FirstContent(_items, j, skipSpaces: true) is var next and >= 0) need += CloneEdges(_items[j - 1], _items[next], right: true);
-            if (_hasContent && _curW + need > _avail + Eps && !breakAll)
+            // A planned paragraph breaks where the plan says, and greedily where it has no say.
+            bool full = _plan is { } plan && plan[i] != PlanGreedy ? plan[i] == PlanBreak : _curW + need > _avail + Eps && !breakAll;
+            if (_hasContent && full)
             {
                 bool switching = _after != null;
                 Finish(forced: false);

@@ -15,6 +15,7 @@ internal static class CssSupports
         "font-synthesis-weight", "font-synthesis-style", "font-synthesis-small-caps", "font-synthesis-position", "font-size-adjust", "font-feature-settings", "font-stretch", "font-variation-settings", "font-optical-sizing", "line-height", "text-align", "text-align-last", "text-justify",
         "text-decoration", "text-decoration-line", "text-decoration-color", "text-decoration-style", "text-decoration-thickness",
         "text-underline-offset", "text-transform", "text-indent", "letter-spacing", "word-spacing", "white-space",
+        "text-wrap", "text-wrap-mode", "text-wrap-style",
         "overflow-wrap", "word-wrap", "word-break", "line-break", "vertical-align", "list-style", "list-style-type", "list-style-position",
         "list-style-image",
         "visibility", "box-shadow", "table-layout", "border-collapse", "border-spacing", "caption-side", "empty-cells", "box-sizing", "float", "clear", "shape-outside", "shape-margin", "shape-image-threshold",

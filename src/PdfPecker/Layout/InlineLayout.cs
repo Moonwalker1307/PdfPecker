@@ -168,7 +168,7 @@ internal sealed partial class LayoutEngine
         /// <summary>Breaks the paragraph into lines, from the ::first-line items when there are any, and flushes the floats.</summary>
         public List<Line> Break(FloatLines? fl)
         {
-            var broken = First != null ? _engine.BreakLines(First.Items, _w, _indent, fl, after: _items) : _engine.BreakLines(_items, _w, _indent, fl);
+            var broken = First != null ? _engine.BreakLines(First.Items, _w, _indent, fl, after: _items) : _engine.BreakLines(_items, _w, _indent, fl, block: _block);
             fl?.Flush(broken);
             return broken;
         }
