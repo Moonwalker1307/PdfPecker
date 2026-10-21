@@ -37,28 +37,24 @@ internal sealed partial class LayoutEngine
 
     private static void TextMetrics(ComputedStyle s, out float a, out float d)
     {
+        StrutMetrics(s, out a, out d);
+        float shift = s.BaselineShift;
+        a -= shift;
+        d += shift;
+    }
+
+    /// <summary>
+    /// The ascent and descent of a block's strut: its font and line height on the line's own baseline. The block's own
+    /// vertical-align moves the block on the line it sits on, not the lines inside it.
+    /// </summary>
+    private static void StrutMetrics(ComputedStyle s, out float a, out float d)
+    {
         s.Font.LineMetrics(s.TextSize, out float asc, out float desc);
         float lineH = s.LineHeight;
         // Chrome gives the top half of the leading whole CSS pixels and the rest to the bottom.
         float half = MathF.Floor((lineH - (asc + desc)) / 2 / CssPixel + HalfLeadingSlack) * CssPixel;
         a = asc + half;
         d = lineH - a;
-        float shift = BaselineShift(s);
-        a -= shift;
-        d += shift;
-    }
-
-    /// <summary>
-    /// Downward baseline shift for sub/superscripts, as Chrome computes it from the parent's font size in whole pixels:
-    /// up by a third plus one pixel, down by a fifth plus one pixel. A length raises by that much, and a percentage by
-    /// that share of the element's own line height.
-    /// </summary>
-    private static float BaselineShift(ComputedStyle s)
-    {
-        if (s.VerticalAlign == VerticalAlign.Length) return -s.VerticalAlignLength.Resolve(s.LineHeight);
-        if (s.VerticalAlign is not (VerticalAlign.Super or VerticalAlign.Sub)) return 0;
-        int px = (int)MathF.Round(s.ParentFontSize / CssPixel);
-        return s.VerticalAlign == VerticalAlign.Super ? -(px / 3 + 1) * CssPixel : (px / 5 + 1) * CssPixel;
     }
 
     /// <summary>
@@ -75,12 +71,12 @@ internal sealed partial class LayoutEngine
                 d = it.Height - a;
                 break;
             case VerticalAlign.TextTop:
-                TextMetrics(block, out a, out _);
+                StrutMetrics(block, out a, out _);
                 d = it.Height - a;
                 if (d < 0) { a = it.Height; d = 0; }
                 break;
             default:
-                float shift = BaselineShift(it.Style);
+                float shift = it.Style.BaselineShift;
                 a = baseline - shift;
                 d = it.Height - baseline + shift;
                 break;
@@ -397,7 +393,7 @@ internal sealed partial class LayoutEngine
                     SetAnchor(it.AnchorId!, y);
                     break;
                 case ItemKind.Leader:
-                    if (it.Style.Visible) DrawLeader(it, x, xs[i] + it.RelX, xs[i + 1] + it.RelX, baseline + BaselineShift(it.Style) + it.RelY, y);
+                    if (it.Style.Visible) DrawLeader(it, x, xs[i] + it.RelX, xs[i + 1] + it.RelX, baseline + it.Style.BaselineShift + it.RelY, y);
                     break;
             }
             i++;
@@ -435,7 +431,7 @@ internal sealed partial class LayoutEngine
         float runX = xs[start] + rx, runEnd = xs[end] + rx;
         if (style.Visible)
         {
-            float bl = baseline + BaselineShift(style) + first.RelY;
+            float bl = baseline + style.BaselineShift + first.RelY;
             string text = sb.ToString();
             float wordSpacing = style.WordSpacing + spaceExtra - letterExtra, letterSpacing = style.LetterSpacing + letterExtra;
             if (style.TextShadows != null) TextShadows(style, runX, runEnd - runX, bl, lineTop, text, wordSpacing, letterSpacing, rtlRun);

@@ -59,7 +59,7 @@ internal sealed partial class LayoutEngine
         bool besideFloats = FloatsBelow(y) || items.Exists(it => it.Kind == ItemKind.Float);
         // On pages of different widths each line is measured for the page it goes on, as lines beside floats are.
         if (_measuring || !_paginate) pages = null;
-        TextMetrics(cs, out float strutA, out float strutD);
+        StrutMetrics(cs, out float strutA, out float strutD);
         var paragraph = new Paragraph(this, items, cs, x, y, w, indent, strutA + strutD, pages);
         FloatLines? fl = besideFloats || pages != null ? paragraph.NewLines() : null;
         paragraph.First = FirstLineItems(run, container, firstInBlock, w, items, cs);

@@ -81,7 +81,7 @@ internal sealed partial class LayoutEngine
             {
                 Deco = run.Deco,
                 X = xs[run.Start] + it.RelX, W = xs[run.End] - xs[run.Start],
-                Y = baseline + BaselineShift(s) - above + it.RelY, H = above + below,
+                Y = baseline + s.BaselineShift - above + it.RelY, H = above + below,
                 Group = group, Ops = _ops,
             });
         }

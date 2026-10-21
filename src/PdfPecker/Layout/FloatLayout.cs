@@ -488,7 +488,7 @@ internal sealed partial class LayoutEngine
 
     private static void LineExtent(Line line, ComputedStyle block, out float maxA, out float maxD)
     {
-        TextMetrics(block, out maxA, out maxD);
+        StrutMetrics(block, out maxA, out maxD);
         bool visible = false, lineAligned = false;
         foreach (var it in line.Items)
         {
