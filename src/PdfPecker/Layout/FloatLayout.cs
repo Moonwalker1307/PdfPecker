@@ -488,8 +488,11 @@ internal sealed partial class LayoutEngine
 
     private static void LineExtent(Line line, ComputedStyle block, out float maxA, out float maxD)
     {
-        TextMetrics(block, out maxA, out maxD);
+        StrutMetrics(block, out maxA, out maxD);
         bool visible = false, lineAligned = false;
+        // The words of a line mostly share a style, whose metrics are found once.
+        var measured = block;
+        float measuredA = maxA, measuredD = maxD;
         foreach (var it in line.Items)
         {
             float a, d;
@@ -511,7 +514,13 @@ internal sealed partial class LayoutEngine
                     AtomicMetrics(it, block, out a, out d);
                     break;
                 default:
-                    TextMetrics(it.Style, out a, out d);
+                    if (!ReferenceEquals(it.Style, measured))
+                    {
+                        measured = it.Style;
+                        TextMetrics(measured, out measuredA, out measuredD);
+                    }
+                    a = measuredA;
+                    d = measuredD;
                     break;
             }
             visible = true;

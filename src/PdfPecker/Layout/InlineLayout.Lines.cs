@@ -1,5 +1,6 @@
 using System.Text;
 using PdfPecker.Css;
+using PdfPecker.Fonts;
 using PdfPecker.Pdf;
 
 namespace PdfPecker.Layout;
@@ -37,28 +38,24 @@ internal sealed partial class LayoutEngine
 
     private static void TextMetrics(ComputedStyle s, out float a, out float d)
     {
+        StrutMetrics(s, out a, out d);
+        float shift = s.BaselineShift;
+        a -= shift;
+        d += shift;
+    }
+
+    /// <summary>
+    /// The ascent and descent of a block's strut: its font and line height on the line's own baseline. The block's own
+    /// vertical-align moves the block on the line it sits on, not the lines inside it.
+    /// </summary>
+    private static void StrutMetrics(ComputedStyle s, out float a, out float d)
+    {
         s.Font.LineMetrics(s.TextSize, out float asc, out float desc);
         float lineH = s.LineHeight;
         // Chrome gives the top half of the leading whole CSS pixels and the rest to the bottom.
         float half = MathF.Floor((lineH - (asc + desc)) / 2 / CssPixel + HalfLeadingSlack) * CssPixel;
         a = asc + half;
         d = lineH - a;
-        float shift = BaselineShift(s);
-        a -= shift;
-        d += shift;
-    }
-
-    /// <summary>
-    /// Downward baseline shift for sub/superscripts, as Chrome computes it from the parent's font size in whole pixels:
-    /// up by a third plus one pixel, down by a fifth plus one pixel. A length raises by that much, and a percentage by
-    /// that share of the element's own line height.
-    /// </summary>
-    private static float BaselineShift(ComputedStyle s)
-    {
-        if (s.VerticalAlign == VerticalAlign.Length) return -s.VerticalAlignLength.Resolve(s.LineHeight);
-        if (s.VerticalAlign is not (VerticalAlign.Super or VerticalAlign.Sub)) return 0;
-        int px = (int)MathF.Round(s.ParentFontSize / CssPixel);
-        return s.VerticalAlign == VerticalAlign.Super ? -(px / 3 + 1) * CssPixel : (px / 5 + 1) * CssPixel;
     }
 
     /// <summary>
@@ -75,12 +72,12 @@ internal sealed partial class LayoutEngine
                 d = it.Height - a;
                 break;
             case VerticalAlign.TextTop:
-                TextMetrics(block, out a, out _);
+                StrutMetrics(block, out a, out _);
                 d = it.Height - a;
                 if (d < 0) { a = it.Height; d = 0; }
                 break;
             default:
-                float shift = BaselineShift(it.Style);
+                float shift = it.Style.BaselineShift;
                 a = baseline - shift;
                 d = it.Height - baseline + shift;
                 break;
@@ -121,9 +118,12 @@ internal sealed partial class LayoutEngine
             if (items[k].IsText) lastText = k;
         }
         float total = 0;
+        // The words of a line mostly share a style, whose font is found once.
+        ComputedStyle? style = null;
+        TextFont? font = null;
         for (int k = 0; k < lastText; k++)
         {
-            kern[k] = PairKern(items[k], items[k + 1]);
+            kern[k] = PairKern(items[k], items[k + 1], ref style, ref font);
             total += kern[k];
         }
         return total;
@@ -135,10 +135,25 @@ internal sealed partial class LayoutEngine
     /// </summary>
     private static float PairKern(Item a, Item b)
     {
+        ComputedStyle? style = null;
+        TextFont? font = null;
+        return PairKern(a, b, ref style, ref font);
+    }
+
+    /// <summary>
+    /// <see cref="PairKern(Item, Item)"/>, with the font of the last style asked about, which the caller keeps for the
+    /// next pair.
+    /// </summary>
+    private static float PairKern(Item a, Item b, ref ComputedStyle? style, ref TextFont? font)
+    {
         if (!IsTextOrSpace(a) || !IsTextOrSpace(b)) return 0;
         if (!ReferenceEquals(a.Style, b.Style) || a.Length == 0 || b.Length == 0 || a.Level != 0 || b.Level != 0) return 0;
-        var font = a.Style.Font;
-        if (!font.HasKerning) return 0;
+        if (!ReferenceEquals(a.Style, style))
+        {
+            style = a.Style;
+            font = style.Font;
+        }
+        if (!font!.HasKerning) return 0;
         int units = font.KernUnits(a.Source[a.Start + a.Length - 1], b.Source[b.Start]);
         return units == 0 ? 0 : units * a.Style.TextSize / 1000f;
     }
@@ -277,9 +292,10 @@ internal sealed partial class LayoutEngine
         if (justify && free > 0)
         {
             // Finding the opportunities may split words into pieces. Together with the kerning between them they are
-            // as wide as the words, so only the kerning of each item is found again.
+            // as wide as the words, so only the kerning of each item is found again, when there are pieces.
+            _justifySplit = false;
             opportunities = JustificationOpportunities(line, block.TextJustify, rtl);
-            LineKerning(items);
+            if (_justifySplit) LineKerning(items);
         }
         float lx = x + lineLeft + (rtl ? 0 : lineIndent);
         float extra = 0, charExtra = 0, leaderW = 0;
@@ -397,7 +413,7 @@ internal sealed partial class LayoutEngine
                     SetAnchor(it.AnchorId!, y);
                     break;
                 case ItemKind.Leader:
-                    if (it.Style.Visible) DrawLeader(it, x, xs[i] + it.RelX, xs[i + 1] + it.RelX, baseline + BaselineShift(it.Style) + it.RelY, y);
+                    if (it.Style.Visible) DrawLeader(it, x, xs[i] + it.RelX, xs[i + 1] + it.RelX, baseline + it.Style.BaselineShift + it.RelY, y);
                     break;
             }
             i++;
@@ -439,7 +455,7 @@ internal sealed partial class LayoutEngine
         float textX = runX - (rtlRun ? 0 : first.TrimStart);
         if (style.Visible)
         {
-            float bl = baseline + BaselineShift(style) + first.RelY;
+            float bl = baseline + style.BaselineShift + first.RelY;
             string text = sb.ToString();
             float wordSpacing = style.WordSpacing + spaceExtra - letterExtra, letterSpacing = style.LetterSpacing + letterExtra;
             if (style.TextShadows != null) TextShadows(style, textX, runEnd - textX, bl, lineTop, text, wordSpacing, letterSpacing, rtlRun);

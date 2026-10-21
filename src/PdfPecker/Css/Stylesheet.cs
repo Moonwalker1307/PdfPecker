@@ -17,6 +17,27 @@ internal sealed class Declaration
         MetricUnits = !property.StartsWith("--", StringComparison.Ordinal) && CssUnits.HasMetricUnit(value);
     }
 
+    // Whether the value has var() and a viewport-height unit: 0 until checked, then 1 for no and 2 for yes. The style
+    // resolver asks for every element a declaration applies to, and the answer is kept here so that each declaration of
+    // a style sheet is searched once. Conversions running in parallel may both search, and store the same answer.
+    private byte _var, _viewportHeight;
+
+    /// <summary>Whether the value uses var().</summary>
+    public bool HasVar => _var != 0 ? _var == 2 : Remember(ref _var, CssParser.HasVar(Value));
+
+    /// <summary>Whether the value may depend on the viewport's height: vh, vb, vmin, vmax, or var().</summary>
+    public bool HasViewportHeightUnit => _viewportHeight != 0 ? _viewportHeight == 2 : Remember(ref _viewportHeight, ViewportHeightUnit(Value));
+
+    private static bool Remember(ref byte answer, bool value)
+    {
+        answer = value ? (byte)2 : (byte)1;
+        return value;
+    }
+
+    private static bool ViewportHeightUnit(string v)
+        => v.IndexOf("vh", StringComparison.OrdinalIgnoreCase) >= 0 || v.IndexOf("vb", StringComparison.OrdinalIgnoreCase) >= 0 || v.IndexOf("vmin", StringComparison.OrdinalIgnoreCase) >= 0
+           || v.IndexOf("vmax", StringComparison.OrdinalIgnoreCase) >= 0 || v.IndexOf("var(", StringComparison.OrdinalIgnoreCase) >= 0;
+
     public override string ToString() => Property + ": " + Value + (Important ? " !important" : "");
 }
 

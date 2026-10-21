@@ -60,6 +60,7 @@ internal sealed partial class StyleResolver
             {
                 var s = InitialStyle.Clone();
                 s.ParentFontSize = parent.FontSize;
+                s.ParentBaselineShift = parent.ChildBaselineShift;
                 // all leaves direction alone, and the language and the document's fonts are not properties.
                 s.Rtl = parent.Rtl;
                 s.Lang = parent.Lang;
@@ -74,6 +75,7 @@ internal sealed partial class StyleResolver
             {
                 var s = parent.Clone();
                 s.ParentFontSize = parent.FontSize;
+                s.ParentBaselineShift = parent.ChildBaselineShift;
                 s.UnicodeBidi = UnicodeBidi.Normal;
                 s.CanvasBackground = false;
                 return s;
