@@ -38,6 +38,12 @@ jobs:
         with:
           dotnet-version: 11.0.x
           dotnet-quality: preview
+          # Keeps ~/.nuget/packages between runs. Every restore of src/PdfPecker fetches the API baseline release for
+          # package validation, so without the cache each job downloaded it from nuget.org again.
+          cache: true
+          cache-dependency-path: |
+            **/*.csproj
+            Directory.Build.props
 
       # global.json pins the .NET 10 SDK; this run replaces it so the newest installed SDK, the preview, is used.
       - name: Use the preview SDK
