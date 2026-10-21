@@ -152,7 +152,7 @@ public class GoldenPdfTests
         {
             "merge" => PdfMerger.Merge(table, tagged),
             "stamp" => PdfStamper.StampHtml(table,
-                "<body style='margin:0'><div style='text-align:right;font:bold 14pt sans-serif;color:#c00'>COPY</div></body>",
+                "<div style='text-align:right;font:bold 14pt sans-serif;color:#c00'>COPY</div>",
                 htmlOptions: new PdfOptions { EmbedStandardFonts = true }),
             "encrypt" => HtmlToPdf.Convert(File.ReadAllText(Path.Combine(Root, "large-table", "demo.html")), new PdfOptions
             {

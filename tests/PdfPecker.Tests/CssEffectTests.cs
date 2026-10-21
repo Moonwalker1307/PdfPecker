@@ -390,7 +390,7 @@ public class CssEffectTests
     public void Drop_shadow_of_a_box_over_two_pages_shows_on_both()
     {
         var options = new PdfOptions { Margins = new PageMargins(20), Compress = false };
-        var pdf = HtmlToPdf.Convert("<body style='margin:0'><div style='height:1500px;width:200px;background:white;border:1px solid black;filter:drop-shadow(10px 0 0 red)'></div></body>", options);
+        var pdf = HtmlToPdf.Convert("<div style='height:1500px;width:200px;background:white;border:1px solid black;filter:drop-shadow(10px 0 0 red)'></div>", options);
         Assert.Equal(2, PageCount(pdf));
         foreach (int page in new[] { 0, 1 })
         {

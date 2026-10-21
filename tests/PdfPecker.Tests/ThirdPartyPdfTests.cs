@@ -126,7 +126,7 @@ public class ThirdPartyPdfTests
         {
             "merge" => PdfMerger.Merge(Input("chromium"), Input("ghostscript"), Input("libreoffice"), Input("reportlab")),
             "stamp-chromium" => PdfStamper.StampHtml(Input("chromium"),
-                "<body style='margin:0'><div style='text-align:right;font:bold 14pt sans-serif;color:#c00'>COPY</div></body>",
+                "<div style='text-align:right;font:bold 14pt sans-serif;color:#c00'>COPY</div>",
                 htmlOptions: new PdfOptions { EmbedStandardFonts = true }),
             "fill-libreoffice" => PdfForm.Fill(Input("libreoffice"), new Dictionary<string, string>
             {

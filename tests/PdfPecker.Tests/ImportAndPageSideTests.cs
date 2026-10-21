@@ -149,7 +149,7 @@ public class ImportAndPageSideTests
     {
         var lines = string.Concat(Enumerable.Range(1, 120).Select(i => $"<p style='margin:0;line-height:20pt'>line{i}</p>"));
         var pdf = ConvertUncompressed(@"<style>@page { size: A4; margin: 50pt }
-            @page :left { margin-left: 90pt; margin-right: 50pt } @page :right { margin-left: 50pt; margin-right: 90pt } body { margin: 0 }</style>" + lines);
+            @page :left { margin-left: 90pt; margin-right: 50pt } @page :right { margin-left: 50pt; margin-right: 90pt }</style>" + lines);
         var pages = TextPositions(pdf);
         Assert.True(pages.Count >= 3);
         Assert.Equal(50, pages[0][0].X, 0.5f); // page 1 is a right page
@@ -176,7 +176,7 @@ public class ImportAndPageSideTests
     [Fact]
     public void Percentage_widths_are_resolved_on_each_page()
     {
-        var pdf = ConvertUncompressed(@"<style>@page { size: 400pt 400pt; margin: 20pt } @page :first { margin-right: 120pt } body { margin: 0 }</style>
+        var pdf = ConvertUncompressed(@"<style>@page { size: 400pt 400pt; margin: 20pt } @page :first { margin-right: 120pt }</style>
             <div style='width:100%;background:#ff0000;height:900pt'></div>");
         // As in Chrome, the box is as wide as each page's area: 260pt on the first page, 360pt on the others.
         Assert.Equal(new[] { 260f, 360f, 360f }, RedWidths(pdf).Select(w => MathF.Round(w)));

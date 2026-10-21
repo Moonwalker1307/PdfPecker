@@ -122,7 +122,7 @@ internal sealed class HtmlParser
             _head = new Element("head");
             _html!.AppendChild(_head);
         }
-        _body = written ?? new Element("body");
+        _body = written ?? new Element("body") { ImpliedBody = true };
         _html!.AppendChild(_body);
         _stack.Add(_body);
     }
@@ -165,7 +165,12 @@ internal sealed class HtmlParser
                 _stack.Add(el);
                 return true;
             case "body":
-                if (_body != null) MergeAttributes(_body, el);
+                if (_body != null)
+                {
+                    // A body tag after the first content is the document's body, with its default margin.
+                    _body.ImpliedBody = false;
+                    MergeAttributes(_body, el);
+                }
                 else StartBody(el);
                 return true;
         }

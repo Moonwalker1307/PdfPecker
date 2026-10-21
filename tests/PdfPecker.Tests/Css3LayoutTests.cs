@@ -13,7 +13,7 @@ public class Css3LayoutTests
 
     private static List<DrawOp> Layout(string html, float width = Width, float pageHeight = PageHeight)
     {
-        var doc = HtmlParser.Parse(html, impliedStructure: false);
+        var doc = HtmlParser.Parse(html);
         var sheet = new Stylesheet();
         foreach (var style in Find(doc, "style")) CssParser.ParseStylesheet(style.InnerText(), sheet);
         new StyleResolver(sheet, width, pageHeight).ResolveTree(doc, new ComputedStyle { Display = Display.Block });

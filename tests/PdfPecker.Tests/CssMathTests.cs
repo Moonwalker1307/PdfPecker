@@ -13,7 +13,7 @@ public class CssMathTests
 
     private static List<DrawOp> Layout(string html, float width = Width)
     {
-        var doc = HtmlParser.Parse(html, impliedStructure: false);
+        var doc = HtmlParser.Parse(html);
         var sheet = new Stylesheet();
         foreach (var style in Find(doc, "style")) CssParser.ParseStylesheet(style.InnerText(), sheet);
         new StyleResolver(sheet, width, PageHeight).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
@@ -24,7 +24,7 @@ public class CssMathTests
 
     private static Element Styled(string html)
     {
-        var doc = HtmlParser.Parse(html, impliedStructure: false);
+        var doc = HtmlParser.Parse(html);
         var sheet = new Stylesheet();
         foreach (var style in Find(doc, "style")) CssParser.ParseStylesheet(style.InnerText(), sheet);
         new StyleResolver(sheet, Width, PageHeight).ResolveTree(doc, new ComputedStyle { Display = Display.Block });

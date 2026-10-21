@@ -19,7 +19,7 @@ public class KerningAndBoxTests
 
     private static List<DrawOp> Layout(string html)
     {
-        var doc = HtmlParser.Parse(html, impliedStructure: false);
+        var doc = HtmlParser.Parse(html);
         var sheet = new Stylesheet();
         new StyleResolver(sheet, Width, PageHeight).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
         var engine = new LayoutEngine(PageHeight, new ImageLoader(null, null, false));
@@ -260,7 +260,7 @@ public class KerningAndBoxTests
     /// <summary>The soft-mask layers of the blurred box shadows in a document.</summary>
     private static List<LayerOp> ShadowMasks(string html)
     {
-        var doc = HtmlParser.Parse(html, impliedStructure: false);
+        var doc = HtmlParser.Parse(html);
         new StyleResolver(new Stylesheet(), Width, PageHeight).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
         var engine = new LayoutEngine(PageHeight, new ImageLoader(null, null, false));
         engine.Layout(doc, Width);

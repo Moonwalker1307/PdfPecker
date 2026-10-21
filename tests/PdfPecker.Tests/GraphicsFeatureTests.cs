@@ -23,7 +23,7 @@ public class GraphicsFeatureTests
 
     private static Element Styled(string html, float width = Width)
     {
-        var doc = HtmlParser.Parse(html, impliedStructure: false);
+        var doc = HtmlParser.Parse(html);
         new StyleResolver(new Stylesheet(), width, PageHeight).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
         return doc;
     }

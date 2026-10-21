@@ -87,23 +87,32 @@ public class ImpliedStructureTests
     [Fact]
     public void Body_rules_apply_to_a_fragment()
     {
-        var plain = Text("<p style='margin:0'>word</p>", "word");
         var padded = Text("<style>body { margin: 40px; padding-left: 10px }</style><p style='margin:0'>word</p>", "word");
-        Assert.Equal(8 * 0.75f, plain.X, 0.01f);
         Assert.Equal(50 * 0.75f, padded.X, 0.01f);
+    }
+
+    [Fact]
+    public void A_body_the_document_leaves_out_has_no_default_margin()
+    {
+        // Fragments keep the layout they had before the parser made the body; a body tag brings the browser's 8px.
+        Assert.Equal(0f, Text("<p style='margin:0'>word</p>", "word").X, 0.01f);
+        Assert.Equal(0f, Text("<html><head></head><p style='margin:0'>word</p>", "word").X, 0.01f);
+        Assert.Equal(8 * 0.75f, Text("<body><p style='margin:0'>word</p>", "word").X, 0.01f);
+        Assert.Equal(8 * 0.75f, Text("<p style='margin:0'>word</p><body>", "word").X, 0.01f);
+        Assert.Equal(20 * 0.75f, Text("<style>body { margin: 20px }</style><p style='margin:0'>word</p>", "word").X, 0.01f);
     }
 
     [Fact]
     public void Html_rules_apply_to_a_fragment()
     {
-        var text = Text("<style>html { font-size: 40px } body { margin: 0 }</style><p style='margin:0'>word</p>", "word");
+        var text = Text("<style>html { font-size: 40px }</style><p style='margin:0'>word</p>", "word");
         Assert.Equal(30f, text.Size, 0.01f);
     }
 
     [Fact]
     public void A_body_selector_with_a_child_combinator_matches_a_fragment()
     {
-        var text = Text("<style>body > p { margin-left: 100px } body { margin: 0 }</style><p>word</p>", "word");
+        var text = Text("<style>body > p { margin-left: 100px }</style><p>word</p>", "word");
         Assert.Equal(75f, text.X, 0.01f);
     }
 }
