@@ -180,8 +180,8 @@ public class ConformanceLevelTests
     [Fact]
     public void Svg_text_in_PdfA_never_shows_notdef()
     {
-        // ★ is in no bundled font: the glyph is skipped, not shown as .notdef (CID 0).
-        var pdf = PdfTestHelpers.ConvertUncompressed("<svg width='200' height='40'><text x='5' y='20'>A ★ B</text></svg>",
+        // ⏰ is in no bundled font: the glyph is skipped, not shown as .notdef (CID 0).
+        var pdf = PdfTestHelpers.ConvertUncompressed("<svg width='200' height='40'><text x='5' y='20'>A ⏰ B</text></svg>",
             new PdfOptions { Conformance = PdfConformance.PdfA2u });
         var content = PdfTestHelpers.AllContent(pdf);
         var shown = Regex.Match(content, @"Tm \[(.*)\] TJ ET");

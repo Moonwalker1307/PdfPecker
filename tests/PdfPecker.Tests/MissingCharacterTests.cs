@@ -14,8 +14,8 @@ public class MissingCharacterTests
     [Fact]
     public void Reports_each_character_the_standard_fonts_lack_once()
     {
-        var missing = Missing("<p>Hello æøå € 漢字 ★</p><p>漢 again ★</p>");
-        Assert.Equal(new[] { "漢", "字", "★" }, missing);
+        var missing = Missing("<p>Hello æøå € 漢字 ⏰ ★ Ł</p><p>漢 again ⏰</p>");
+        Assert.Equal(new[] { "漢", "字", "⏰" }, missing); // the bundled fallback fonts have ★ and Ł
     }
 
     [Fact]
@@ -39,17 +39,18 @@ public class MissingCharacterTests
     public void Covers_headers_watermarks_and_svg_text()
     {
         var options = new PdfOptions { Watermark = new PdfWatermark { Text = "草稿" } };
-        var missing = Missing("<p>Body</p><svg width='100' height='20'><text x='0' y='15'>✔</text></svg>", options);
+        var missing = Missing("<p>Body</p><svg width='100' height='20'><text x='0' y='15'>⏰ ✔</text></svg>", options);
         Assert.Contains("草", missing);
-        Assert.Contains("✔", missing);
+        Assert.Contains("⏰", missing);
+        Assert.DoesNotContain("✔", missing);
     }
 
     [Fact]
     public void Throwing_fails_the_conversion()
     {
         var options = new PdfOptions { MissingCharacter = ch => throw new InvalidOperationException("missing " + ch) };
-        var ex = Assert.Throws<InvalidOperationException>(() => HtmlToPdf.Convert("<p>OK ★</p>", options));
-        Assert.Equal("missing ★", ex.Message);
+        var ex = Assert.Throws<InvalidOperationException>(() => HtmlToPdf.Convert("<p>OK ⏰</p>", options));
+        Assert.Equal("missing ⏰", ex.Message);
         HtmlToPdf.Convert("<p>OK</p>", options); // nothing missing, nothing thrown
     }
 }

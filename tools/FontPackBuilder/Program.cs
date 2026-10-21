@@ -10,6 +10,8 @@ using PdfPecker.Rendering.Fonts;
 // where they are embedded for PDF/A and PdfOptions.EmbedStandardFonts:
 // dotnet run --project tools/FontPackBuilder -- --bundle /usr/share/fonts/truetype/liberation [outDir]
 //
+// With --symbols it writes the symbol fallback font, a renamed DejaVu Sans subset, to the same folder (see below).
+//
 // The checked-in files were built from Liberation 2.1.5 and DejaVu Sans 2.37, as Ubuntu 24.04's fonts-liberation and
 // fonts-dejavu-core packages install them. Every input is checked against the hashes below, so other versions of the
 // fonts cannot change the output unnoticed; when updating the fonts on purpose, update the hashes, these versions and
@@ -53,6 +55,40 @@ if (args.Length > 0 && args[0] == "--bundle")
         File.WriteAllBytes(Path.Combine(to, name + ".br"), packed.AsSpan(0, written).ToArray());
         Console.WriteLine($"{name}: {data.Length} -> {written} bytes");
     }
+    return;
+}
+
+if (args.Length > 0 && args[0] == "--symbols")
+{
+    // The symbol fallback font: the characters of BundledFonts.SymbolRanges that DejaVu Sans has (arrows, check marks,
+    // stars, dingbats, math and box drawing), as a TrueType subset. The Bitstream Vera license lets a modified font
+    // ship only under a name without "Bitstream" or "Vera" (and the Arev glyphs' license, without "Arev"), so the
+    // subset is renamed; its copyright and license records are kept as they are.
+    // dotnet run --project tools/FontPackBuilder -- --symbols /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf [outDir]
+    string from = args.Length > 1 ? args[1] : "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
+    string to = args.Length > 2 ? args[2] : Path.Combine("src", "PdfPecker", "Fonts", "Bundled");
+    CheckPinned(from);
+    var source = PdfPecker.Fonts.FontProgram.Load(File.ReadAllBytes(from))[0];
+    var subset = new PdfPecker.Fonts.GlyphSubset(source);
+    var cmap = new SortedDictionary<int, int>();
+    foreach (var (first, last) in PdfPecker.Fonts.BundledFonts.SymbolRanges)
+        for (int c = first; c <= last; c++)
+            if (source.GlyphId(c) != 0) cmap[c] = subset.Cid(c);
+    var built = PdfPecker.Fonts.FontProgram.Load(PdfPecker.Fonts.FontSubsetter.Build(subset))[0];
+    var tables = built.Tables.Select(t => (t.Tag, built.Data.AsSpan(t.Offset, t.Length).ToArray())).ToList();
+    tables.Add((PdfPecker.Fonts.FontProgram.Tag("cmap"), SegmentedCoverage(cmap)));
+    var kept = SourceNames(source).Where(n => n.Id is 0 or 13 or 14);
+    tables.Add((PdfPecker.Fonts.FontProgram.Tag("name"), NameTable(kept.Concat(new (int, string)[]
+    {
+        (1, "PdfPecker Symbols"), (2, "Regular"), (3, "PdfPecker Symbols Regular 2.37"), (4, "PdfPecker Symbols"),
+        (5, "Version 2.37"), (6, "PdfPeckerSymbols-Regular"),
+        (10, "Symbols of DejaVu Sans 2.37, the last fallback font of PdfPecker."),
+    }))));
+    var font = PdfPecker.Fonts.SfntBuilder.Build(0x00010000, tables);
+    var packed = new byte[BrotliEncoder.GetMaxCompressedLength(font.Length)];
+    if (!BrotliEncoder.TryCompress(font, packed, out int written, quality: 11, window: 22)) throw new Exception("Brotli failed");
+    File.WriteAllBytes(Path.Combine(to, "PdfPeckerSymbols.ttf.br"), packed.AsSpan(0, written).ToArray());
+    Console.WriteLine($"PdfPeckerSymbols.ttf: {cmap.Count} characters, {subset.Glyphs.Count} glyphs, {font.Length} -> {written} bytes");
     return;
 }
 
@@ -232,5 +268,63 @@ sealed class Writer
         var b = System.Text.Encoding.Latin1.GetBytes(s);
         _s.WriteByte((byte)b.Length);
         _s.Write(b);
+    }
+}
+
+partial class Program
+{
+    // A cmap with one format 12 subtable (Windows, full Unicode): a group for each run of consecutive characters with
+    // consecutive glyph ids.
+    static byte[] SegmentedCoverage(SortedDictionary<int, int> map)
+    {
+        var groups = new List<(int First, int Last, int Glyph)>();
+        foreach (var (c, g) in map)
+        {
+            if (groups.Count > 0 && groups[^1].Last == c - 1 && groups[^1].Glyph + (c - groups[^1].First) == g) groups[^1] = (groups[^1].First, c, groups[^1].Glyph);
+            else groups.Add((c, c, g));
+        }
+        var ms = new MemoryStream();
+        void U16(int v) { ms.WriteByte((byte)(v >> 8)); ms.WriteByte((byte)v); }
+        void U32(long v) { U16((int)(v >> 16)); U16((int)v); }
+        U16(0); U16(1);          // version, one encoding record
+        U16(3); U16(10); U32(12); // Windows, UCS-4, subtable offset
+        U16(12); U16(0); U32(16 + groups.Count * 12); U32(0); U32(groups.Count);
+        foreach (var (first, last, glyph) in groups) { U32(first); U32(last); U32(glyph); }
+        return ms.ToArray();
+    }
+
+    // The Windows Unicode records of a font's name table, as id and text.
+    static List<(int Id, string Text)> SourceNames(PdfPecker.Fonts.FontProgram font)
+    {
+        var t = font.Table("name") ?? throw new Exception("No name table");
+        var d = font.Data;
+        int U16(int at) => d[at] << 8 | d[at + 1];
+        int count = U16(t.Offset + 2), strings = t.Offset + U16(t.Offset + 4);
+        var result = new List<(int, string)>();
+        for (int i = 0; i < count; i++)
+        {
+            int r = t.Offset + 6 + i * 12;
+            if (U16(r) != 3 || U16(r + 2) != 1 || U16(r + 4) != 0x409) continue;
+            result.Add((U16(r + 6), System.Text.Encoding.BigEndianUnicode.GetString(d, strings + U16(r + 10), U16(r + 8))));
+        }
+        return result;
+    }
+
+    // A format 0 name table with Windows, Unicode BMP, US English records.
+    static byte[] NameTable(IEnumerable<(int Id, string Text)> names)
+    {
+        var records = names.OrderBy(n => n.Id).ToList();
+        var ms = new MemoryStream();
+        var text = new MemoryStream();
+        void U16(int v) { ms.WriteByte((byte)(v >> 8)); ms.WriteByte((byte)v); }
+        U16(0); U16(records.Count); U16(6 + records.Count * 12);
+        foreach (var (id, s) in records)
+        {
+            var bytes = System.Text.Encoding.BigEndianUnicode.GetBytes(s);
+            U16(3); U16(1); U16(0x409); U16(id); U16(bytes.Length); U16((int)text.Length);
+            text.Write(bytes);
+        }
+        text.WriteTo(ms);
+        return ms.ToArray();
     }
 }
