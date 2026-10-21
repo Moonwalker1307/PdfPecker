@@ -551,7 +551,7 @@ internal sealed partial class LayoutEngine
                     AtomicMetrics(it, block, out a, out d);
                     break;
                 default:
-                    if (IsLineAlignedText(it.Style))
+                    if (IsLineAligned(it))
                     {
                         lineAligned = visible = true;
                         continue;
@@ -575,13 +575,21 @@ internal sealed partial class LayoutEngine
             // bottom; a box taller than the line makes it deeper or higher, as in Chrome.
             foreach (var it in line.Items)
             {
-                if (!IsLineAligned(it)) continue;
-                float h = LineAlignedHeight(it);
-                if (h <= maxA + maxD) continue;
-                if (it.Style.VerticalAlign == VerticalAlign.Top) maxD = h - maxA;
-                else maxA = h - maxD;
+                if (it.Kind is not (ItemKind.Image or ItemKind.Box) || it.Style.VerticalAlign is not (VerticalAlign.Top or VerticalAlign.Bottom)) continue;
+                Grow(it.Height, it.Style.VerticalAlign == VerticalAlign.Top, ref maxA, ref maxD);
             }
+            // The inline boxes aligned that way, with all that is inside them.
+            if (AlignedSubtrees(line.Items, block) is { } subtrees)
+                foreach (var (root, (a, d)) in subtrees)
+                    Grow(a + d, root.VerticalAlign == VerticalAlign.Top, ref maxA, ref maxD);
         }
         if (!visible) maxA = float.NaN;
+
+        static void Grow(float h, bool top, ref float maxA, ref float maxD)
+        {
+            if (h <= maxA + maxD) return;
+            if (top) maxD = h - maxA;
+            else maxA = h - maxD;
+        }
     }
 }

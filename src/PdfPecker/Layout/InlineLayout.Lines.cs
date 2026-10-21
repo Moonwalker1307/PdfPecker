@@ -30,6 +30,8 @@ internal sealed partial class LayoutEngine
     private float[] _xs = new float[64];
     private float[] _lineA = new float[32], _lineD = new float[32];
     private float[] _kern = new float[16];
+    // The extents of the inline boxes aligned to the top or bottom of the line being drawn (see AlignedSubtrees).
+    private Dictionary<ComputedStyle, (float A, float D)>? _alignedSubtrees;
 
     // ------------------------------------------------------------------ metrics
 
@@ -49,18 +51,88 @@ internal sealed partial class LayoutEngine
 
     /// <summary>
     /// How far below the line's baseline text in style <paramref name="s"/> sits, on a line whose box reaches
-    /// <paramref name="lineA"/> above and <paramref name="lineD"/> below its baseline: an inline box aligned to the
-    /// line's top hangs its line height from the top, and one aligned to the bottom stands on the bottom.
+    /// <paramref name="lineA"/> above and <paramref name="lineD"/> below its baseline: text in an inline box aligned to
+    /// the line's top or bottom moves with that box (see <see cref="AlignedShift"/>).
     /// </summary>
-    private static float TextShift(ComputedStyle s, float lineA, float lineD)
+    private float TextShift(ComputedStyle s, float lineA, float lineD)
+        => AlignedRootOf(s) is { } root ? s.BaselineShift + AlignedShift(root, lineA, lineD) : s.BaselineShift;
+
+    /// <summary>
+    /// How much further down than on the baseline the content of an inline box aligned to its line's top or bottom
+    /// goes: the box and everything inside it (its aligned subtree, CSS 2.1 §10.8.1) hang from the line's top or stand
+    /// on its bottom as one.
+    /// </summary>
+    private float AlignedShift(ComputedStyle root, float lineA, float lineD)
     {
-        if (!IsLineAlignedText(s)) return s.BaselineShift;
-        StrutMetrics(s, out float a, out float d);
-        return s.VerticalAlign == VerticalAlign.Top ? a - lineA : lineD - d;
+        var (a, d) = _alignedSubtrees != null && _alignedSubtrees.TryGetValue(root, out var extent) ? extent : StrutOf(root);
+        return (root.VerticalAlign == VerticalAlign.Top ? a - lineA : lineD - d) - root.BaselineShift;
     }
 
-    /// <summary>Whether text in an inline box is aligned to its line's top or bottom edge rather than to a baseline.</summary>
-    private static bool IsLineAlignedText(ComputedStyle s) => s.Display == Display.Inline && s.VerticalAlign is VerticalAlign.Top or VerticalAlign.Bottom;
+    private static (float A, float D) StrutOf(ComputedStyle s)
+    {
+        StrutMetrics(s, out float a, out float d);
+        return (a, d);
+    }
+
+    /// <summary>
+    /// The inline box whose vertical-align: top or bottom places content in style <paramref name="s"/>: the nearest
+    /// inline box from it outward that is aligned that way, or null when the content sits on the baseline.
+    /// </summary>
+    private static ComputedStyle? AlignedRootOf(ComputedStyle? s)
+    {
+        // Deeply nested inline boxes are rare; the walk stops after a few dozen, as their content would be unreadable anyway.
+        for (int depth = 0; s is { Display: Display.Inline } && depth < MaxAlignedDepth; s = s.ParentStyle, depth++)
+            if (s.VerticalAlign is VerticalAlign.Top or VerticalAlign.Bottom) return s;
+        return null;
+    }
+
+    private const int MaxAlignedDepth = 32;
+
+    /// <summary>
+    /// The inline box aligned to the line's top or bottom that an item is in, or null. An image or inline-block aligned
+    /// that way itself is placed on its own (see <see cref="IsLineAligned"/>).
+    /// </summary>
+    private static ComputedStyle? AlignedRoot(Item it) => it.Kind switch
+    {
+        ItemKind.Text or ItemKind.Space => AlignedRootOf(it.Style),
+        ItemKind.Image or ItemKind.Box when it.Style.VerticalAlign is not (VerticalAlign.Top or VerticalAlign.Bottom) => AlignedRootOf(it.Style.ParentStyle),
+        _ => null,
+    };
+
+    /// <summary>
+    /// The extent of each inline box on a line that is aligned to the line's top or bottom, above and below its own
+    /// baseline: its strut and the content inside it, which may be taller (an inline-block, larger text). Null when
+    /// the line has none.
+    /// </summary>
+    private static Dictionary<ComputedStyle, (float A, float D)>? AlignedSubtrees(List<Item> items, ComputedStyle block)
+    {
+        Dictionary<ComputedStyle, (float A, float D)>? extents = null;
+        ComputedStyle? lastStyle = null, lastRoot = null;
+        foreach (var it in items)
+        {
+            ComputedStyle? root;
+            if (it.Kind is ItemKind.Text or ItemKind.Space && ReferenceEquals(it.Style, lastStyle)) root = lastRoot;
+            else
+            {
+                root = AlignedRoot(it);
+                if (it.Kind is ItemKind.Text or ItemKind.Space)
+                {
+                    lastStyle = it.Style;
+                    lastRoot = root;
+                }
+            }
+            if (root == null) continue;
+            extents ??= new Dictionary<ComputedStyle, (float, float)>(ReferenceEqualityComparer.Instance);
+            if (!extents.TryGetValue(root, out var extent)) extent = StrutOf(root);
+            float a, d;
+            if (it.Kind is ItemKind.Image or ItemKind.Box) AtomicMetrics(it, block, out a, out d);
+            else TextMetrics(it.Style, out a, out d);
+            // Measured on the line's baseline, where the root's baseline is its shift below it.
+            float shift = root.BaselineShift;
+            extents[root] = (Math.Max(extent.A, a + shift), Math.Max(extent.D, d - shift));
+        }
+        return extents;
+    }
 
     /// <summary>
     /// The ascent and descent of an image or inline-block on its line's baseline. One aligned to the line's top or
@@ -91,28 +163,20 @@ internal sealed partial class LayoutEngine
     /// <summary>Whether an item is aligned to its line's top or bottom edge rather than to the baseline.</summary>
     private static bool IsLineAligned(Item it) => it.Kind switch
     {
-        ItemKind.Image or ItemKind.Box => it.Style.VerticalAlign is VerticalAlign.Top or VerticalAlign.Bottom,
-        ItemKind.Text or ItemKind.Space => IsLineAlignedText(it.Style),
+        ItemKind.Image or ItemKind.Box when it.Style.VerticalAlign is VerticalAlign.Top or VerticalAlign.Bottom => true,
+        ItemKind.Image or ItemKind.Box or ItemKind.Text or ItemKind.Space => AlignedRoot(it) != null,
         _ => false,
     };
-
-    /// <summary>The height a line-aligned item takes on its line: its own, or for text its line height.</summary>
-    private static float LineAlignedHeight(Item it)
-    {
-        if (it.Kind is ItemKind.Image or ItemKind.Box) return it.Height;
-        StrutMetrics(it.Style, out float a, out float d);
-        return a + d;
-    }
 
     /// <summary>
     /// How far above the baseline the top of an image or inline-block is drawn on a line whose box reaches
     /// <paramref name="lineA"/> above and <paramref name="lineD"/> below its baseline.
     /// </summary>
-    private static float AtomicAscent(Item it, ComputedStyle block, float lineA, float lineD) => it.Style.VerticalAlign switch
+    private float AtomicAscent(Item it, ComputedStyle block, float lineA, float lineD) => it.Style.VerticalAlign switch
     {
         VerticalAlign.Top => lineA,
         VerticalAlign.Bottom => it.Height - lineD,
-        _ => AtomicAscentOnBaseline(it, block),
+        _ => AtomicAscentOnBaseline(it, block) - (AlignedRoot(it) is { } root ? AlignedShift(root, lineA, lineD) : 0),
     };
 
     private static float AtomicAscentOnBaseline(Item it, ComputedStyle block)
@@ -378,6 +442,7 @@ internal sealed partial class LayoutEngine
         float[] xs = ItemPositions(items, fit);
         NoteLineReach(items, xs, x + lineLeft + lineW);
 
+        _alignedSubtrees = AlignedSubtrees(items, block);
         int fragments = NoteInlineFragments(items, xs, baseline, ascent, lineH - ascent);
         EmitLinks(items, xs, y, lineH);
 
