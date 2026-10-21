@@ -282,12 +282,14 @@ internal sealed partial class PdfDocumentWriter
     {
         EndText(b);
         b.Ascii("q ");
+        var streamSpace = _streamSpace;
         if (tb.Layer.Transform is { } m)
         {
             // The layer's y-down transform about its origin, mapped into PDF space (y up).
             float px = PX(tb.Layer.OriginX), py = PY(tb.Layer.OriginY, pageTop);
             float e = px - m.A * px + m.C * py + m.E, f = py + m.B * px - m.D * py - m.F;
             b.Num6(m.A).Sp().Num6(-m.B).Sp().Num6(-m.C).Sp().Num6(m.D).Sp().Num(e).Sp().Num(f).Ascii(" cm\n");
+            _streamSpace = InStream(new Matrix(m.A, -m.B, -m.C, m.D, e, f));
         }
         if (tb.Layer.ClipVerbs is { } clipVerbs)
         {
@@ -306,6 +308,7 @@ internal sealed partial class PdfDocumentWriter
             EndText(b);
             EndMarked(b);
         }
+        _streamSpace = streamSpace;
         b.Ascii("Q\n");
         InvalidateState();
     }
@@ -328,9 +331,11 @@ internal sealed partial class PdfDocumentWriter
         // A transparency group is a stream of its own, with its own marked-content numbers.
         var pageMc = _mc;
         if (pageMc != null) _mc = new McStream(pageMc.Page);
+        var streamSpace = StartStreamSpace();
         WriteLayerContent(group, tb, pageTop, imageIds);
         EndText(group);
         EndMarked(group);
+        _streamSpace = streamSpace;
         _forms.Add(group.Span.ToArray());
         _formIsolated.Add(tb.Layer.BlendMode != null || tb.Layer.Isolated);
         _formStreams.Add(_mc);
@@ -430,9 +435,11 @@ internal sealed partial class PdfDocumentWriter
         _tw = _tc = float.NaN;
         _tr = -1;
         _anyAlpha = true;
+        var streamSpace = StartStreamSpace();
         foreach (var item in block.Items)
             if (item.Op is TextOp) WriteOp(content, item, pageTop, imageIds);
         EndText(content);
+        _streamSpace = streamSpace;
         _mc = pageMc;
         _mcOpen = open;
         RestoreState(saved);
@@ -481,9 +488,11 @@ internal sealed partial class PdfDocumentWriter
         _mcOpen = null;
         (_fill, _stroke, _lineWidth, _fillAlpha, _strokeAlpha) = (1, 1, -1, -1, -1);
         _anyAlpha = true;
+        var streamSpace = StartStreamSpace();
         foreach (var item in block.Items)
             if (item.Op is not LinkOp) WriteOp(content, item, pageTop, imageIds);
         EndText(content);
+        _streamSpace = streamSpace;
         _mc = pageMc;
         _mcOpen = open;
         RestoreState(saved);
@@ -637,12 +646,15 @@ internal sealed partial class PdfDocumentWriter
             var svgCell = new ByteBuffer(256);
             var saved = SaveState();
             (_fill, _stroke, _lineWidth, _fillAlpha, _strokeAlpha) = (CssColor.Black, CssColor.Black, 1, 255, 255);
+            var streamSpace = StartStreamSpace();
             WriteSlicedSvg(svgCell, svg, ix, th - iy, iw, ih, bg.Inner != null);
+            _streamSpace = streamSpace;
             RestoreState(saved);
             var svgDict = new ByteBuffer(256);
             svgDict.Ascii("/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 ").Num(tw).Sp().Num(th)
-                .Ascii("] /XStep ").Num(Math.Max(bg.StepX, tw)).Ascii(" /YStep ").Num(Math.Max(bg.StepY, th))
-                .Ascii(" /Matrix [1 0 0 1 ").Num(tx).Sp().Num(PY(bg.TileY + th, pageTop)).Ascii("] /Resources ").Int(_resourcesId).Ascii(" 0 R");
+                .Ascii("] /XStep ").Num(Math.Max(bg.StepX, tw)).Ascii(" /YStep ").Num(Math.Max(bg.StepY, th));
+            WriteTileMatrix(svgDict, tx, PY(bg.TileY + th, pageTop));
+            svgDict.Ascii(" /Resources ").Int(_resourcesId).Ascii(" 0 R");
             int svgTile = _tilings.Count + 1;
             _tilings.Add((svgTile, svgCell.Span.ToArray(), System.Text.Encoding.ASCII.GetString(svgDict.Span)));
             b.Ascii("q /Pattern cs /T").Int(svgTile).Ascii(" scn ");
@@ -661,15 +673,18 @@ internal sealed partial class PdfDocumentWriter
         var cell = new ByteBuffer(64);
         var dict = new ByteBuffer(256);
         dict.Ascii("/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 ").Num(tw).Sp().Num(th)
-            .Ascii("] /XStep ").Num(Math.Max(bg.StepX, tw)).Ascii(" /YStep ").Num(Math.Max(bg.StepY, th))
-            .Ascii(" /Matrix [1 0 0 1 ").Num(tx).Sp().Num(PY(bg.TileY + th, pageTop)).Ascii("] /Resources ");
+            .Ascii("] /XStep ").Num(Math.Max(bg.StepX, tw)).Ascii(" /YStep ").Num(Math.Max(bg.StepY, th));
+        WriteTileMatrix(dict, tx, PY(bg.TileY + th, pageTop));
+        dict.Ascii(" /Resources ");
         if (bg.Gradient is { Alphas: not null } ag)
         {
             // Translucent stops: each tile paints the unblended colours through a soft mask holding the alphas, both
             // placed in the cell's space (y up), and taken from the shared resources since the mask is an object of its own.
             var toCell = new Matrix(1, 0, 0, -1, 0, th);
             int mask = AddSoftMask(ag, toCell, 0, 0, tw, th, 0, 0, tw, th);
+            var streamSpace = StartStreamSpace();
             int colors = AddPattern(ag, toCell, 0, 0, tw, th, GradientChannel.Straight);
+            _streamSpace = streamSpace;
             cell.Ascii("/s").Int(mask).Ascii(" gs /Pattern cs /P").Int(colors).Ascii(" scn 0 0 ").Num(tw).Sp().Num(th).Ascii(" re f\n");
             dict.Int(_resourcesId).Ascii(" 0 R");
         }
@@ -705,12 +720,47 @@ internal sealed partial class PdfDocumentWriter
         if (sliced && !svg.HasViewBox && svg.Width is { } nw && svg.Height is { } nh && nw > 0 && nh > 0 && (w != nw || h != nh))
         {
             b.Ascii("q ").Num6(w / nw).Ascii(" 0 0 ").Num6(h / nh).Sp().Num(left).Sp().Num(top).Ascii(" cm\n");
+            var streamSpace = ConcatStreamSpace(new Matrix(w / nw, 0, 0, h / nh, left, top));
             WriteSvg(b, svg, 0, 0, nw, nh);
+            _streamSpace = streamSpace;
             b.Ascii("Q\n");
             InvalidateState();
             return;
         }
         WriteSvg(b, svg, left, top, w, h);
+    }
+
+    // Maps user space (PDF space, y up, as the ops are written) to the default space of the stream being written, or null
+    // while the two are the same. A pattern's matrix is placed in that default space whatever the CTM is where the
+    // pattern is used, so the page scale and the transforms of layers would otherwise leave gradients and tiled images
+    // where the untransformed box would be. A form, soft mask or pattern cell is a stream of its own, whose default space
+    // is the CTM where it is drawn, so its content starts again from null.
+    private Matrix? _streamSpace;
+
+    /// <summary>A matrix into user space, continued into the stream's default space, where pattern matrices are placed.</summary>
+    private Matrix InStream(Matrix m) => _streamSpace is { } s ? m.Then(s) : m;
+
+    /// <summary>Follows a cm of <paramref name="m"/> written into the current stream; returns the space to restore at its Q.</summary>
+    private Matrix? ConcatStreamSpace(Matrix m)
+    {
+        var saved = _streamSpace;
+        _streamSpace = InStream(m);
+        return saved;
+    }
+
+    /// <summary>Starts the content of a stream of its own; returns the space to restore when it is done.</summary>
+    private Matrix? StartStreamSpace()
+    {
+        var saved = _streamSpace;
+        _streamSpace = null;
+        return saved;
+    }
+
+    /// <summary>Writes a tiling pattern's /Matrix entry for a cell whose origin is at (x, y) of user space.</summary>
+    private void WriteTileMatrix(ByteBuffer dict, float x, float y)
+    {
+        if (_streamSpace == null) dict.Ascii(" /Matrix [1 0 0 1 ").Num(x).Sp().Num(y).Ascii("]");
+        else WriteMatrix(dict.Ascii(" /Matrix ["), InStream(Matrix.Translate(x, y))).Ascii("]");
     }
 
     /// <summary>Adds a shading pattern to the shared resources and returns its number.</summary>
@@ -719,7 +769,7 @@ internal sealed partial class PdfDocumentWriter
     {
         int n = ++_patternCount;
         _patterns.Ascii(" /P").Int(n).Sp();
-        g.WritePattern(_patterns, toPage, minX, minY, maxX, maxY, channel, _gradientBudget);
+        g.WritePattern(_patterns, InStream(toPage), minX, minY, maxX, maxY, channel, _gradientBudget);
         return n;
     }
 
