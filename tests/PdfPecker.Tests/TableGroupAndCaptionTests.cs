@@ -98,6 +98,29 @@ public class TableGroupAndCaptionTests
     }
 
     [Fact]
+    public void MaxWidthOnANowrapCellNarrowsItsColumn()
+    {
+        // As in Chrome, max-width caps the cell's min-content width too: the nowrap text overflows the 60px cell.
+        var ops = Layout("<style>body{margin:0} td{padding:0}</style><table style='border-spacing:0'><tr>" +
+                         "<td style='max-width:60px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:#f00'>" +
+                         "A caption much too long for its cell</td><td style='background:#00f'>next</td></tr></table>");
+        var a = Assert.Single(Rects(ops, 0xFFFF0000));
+        var b = Assert.Single(Rects(ops, 0xFF0000FF));
+        Assert.Equal(45, a.W, 1); // 60px
+        Assert.Equal(a.X + a.W, b.X, 1);
+    }
+
+    [Fact]
+    public void MinWidthWinsOverMaxWidthAndWidthOnACell()
+    {
+        var ops = Layout("<style>body{margin:0} td{padding:0}</style><table style='border-spacing:0'><tr>" +
+                         "<td style='width:200px;max-width:50px;background:#f00'>x</td>" +
+                         "<td style='width:200px;max-width:50px;min-width:80px;background:#00f'>y</td></tr></table>");
+        Assert.Equal(37.5, Assert.Single(Rects(ops, 0xFFFF0000)).W, 1); // 50px
+        Assert.Equal(60, Assert.Single(Rects(ops, 0xFF0000FF)).W, 1); // 80px
+    }
+
+    [Fact]
     public void HiddenEmptyCellsPaintNothing()
     {
         var ops = Layout("<style>body{margin:0} td{background:#f00}</style><table style='empty-cells:hide'><tr><td>full</td><td> </td></tr></table>");
