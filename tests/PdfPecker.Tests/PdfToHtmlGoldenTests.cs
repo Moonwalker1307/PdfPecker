@@ -7,9 +7,10 @@ namespace PdfPecker.Tests;
 
 /// <summary>
 /// Converts a few of the HTML golden baselines (the PDFs PdfPecker writes) and a PDF from another tool to HTML, and
-/// compares the result with checked-in HTML: the page structure, the invisible text layer, its web font and the links.
-/// The page images are left out of the comparison, because their pixels can move by a rounding step between runtimes;
-/// <see cref="RendererGoldenTests"/> covers the renderer that draws them.
+/// compares the result with checked-in HTML: the page structure, the invisible text layer and the links. The page images
+/// and the text layer's web font are left out of the comparison: pixels can move by a rounding step between runtimes
+/// (<see cref="RendererGoldenTests"/> covers the renderer that draws them), and the font covers the characters the
+/// runtime's Unicode tables know, which grow with each .NET version.
 /// </summary>
 /// <remarks>
 /// When a change in the output is intended, regenerate the baselines with
@@ -24,7 +25,7 @@ public class PdfToHtmlGoldenTests
     // A small resolution keeps the baselines small; the images are replaced by a placeholder anyway.
     private static readonly PdfHtmlOptions Options = new() { Dpi = 18, ImageFormat = PdfImageFormat.Png };
 
-    private static readonly Regex Images = new(@"data:image/[a-z]+;base64,[A-Za-z0-9+/=]*", RegexOptions.Compiled);
+    private static readonly Regex Embedded = new(@"data:(image|font)/[a-z0-9]+;base64,[A-Za-z0-9+/=]*", RegexOptions.Compiled);
 
     // Positions and scales are printed with four decimals, and the last one can differ between runtimes (another
     // runtime may fuse a multiply and an add), so numbers with a fraction match within two units of the last place.
@@ -45,7 +46,7 @@ public class PdfToHtmlGoldenTests
     public void Html_matches_the_baseline(string name, string sample)
     {
         var pdf = File.ReadAllBytes(Path.Combine(SourceDirectory(), sample));
-        var actual = Images.Replace(PdfToHtml.Convert(pdf, Options), "data:image/png;base64,");
+        var actual = Embedded.Replace(PdfToHtml.Convert(pdf, Options), "data:$1/blank;base64,");
         var expectedPath = Path.Combine(SourceDirectory(), "Golden", "pdf-to-html", name + ".expected.html");
 
         if (Environment.GetEnvironmentVariable("PDFPECKER_UPDATE_GOLDEN") == "1")

@@ -25,8 +25,9 @@ inputs in `Fixtures/third-party/` come from `tools/ThirdPartyPdfs/generate.sh`; 
 baselines too.
 
 `PdfToHtmlGoldenTests` convert a few of those PDFs to HTML and compare it with `Golden/pdf-to-html/*.expected.html`:
-the page structure, the text layer, its web font and the links. The page images are blanked before the comparison,
-because `RendererGoldenTests` already cover the renderer and its pixels can move by a rounding step between runtimes.
+the page structure, the text layer and the links. The page images and the text layer's web font are blanked first:
+`RendererGoldenTests` cover the renderer, whose pixels can move by a rounding step between runtimes, and the font holds
+the characters the runtime's Unicode tables know, which grow with each .NET version.
 A change to `footnotes-toc/demo` or `features/images` changes these baselines too.
 
 `Golden/features/` holds one page per group of features that came with the Chrome comparison work (text wrapping,
