@@ -51,6 +51,7 @@ internal sealed partial class LayoutEngine
         public float RelX, RelY;      // offset of position: relative inline ancestors
         public ContentSlot? Tag;      // tagged PDF: the structure slot of the text or image
         public byte Level, Para;      // bidi embedding level, and the level of its paragraph
+        public byte Justify;          // where a justified line puts space around it (JustifyBefore, JustifyAfter, JustifyLetters)
 
         public void Reset()
         {
@@ -68,7 +69,7 @@ internal sealed partial class LayoutEngine
             Element = null;
             FloatMin = RelX = RelY = 0;
             MinWidth = -1;
-            Level = Para = 0;
+            Level = Para = Justify = 0;
         }
 
         public string Text => Start == 0 && Length == Source.Length ? Source : Source.Substring(Start, Length);

@@ -88,7 +88,7 @@ internal sealed partial class LayoutEngine
     /// decorations. A shadow without blur is a copy of the text in the shadow's colour; blurred shadows are the text's
     /// pixels through a Gaussian blur, as browsers draw them, with consecutive blurred shadows made in one image.
     /// </summary>
-    private void TextShadows(ComputedStyle style, float x, float w, float baseline, float lineTop, string text, float wordSpacing, bool rtl)
+    private void TextShadows(ComputedStyle style, float x, float w, float baseline, float lineTop, string text, float wordSpacing, float letterSpacing, bool rtl)
     {
         var shadows = style.TextShadows!;
         List<(BoxShadow Shadow, uint Color)>? blurred = null;
@@ -102,24 +102,24 @@ internal sealed partial class LayoutEngine
                 (blurred ??= new()).Add((sh, color));
                 continue;
             }
-            if (blurred != null) { BlurredTextShadows(style, x, w, baseline, lineTop, text, wordSpacing, rtl, blurred); blurred = null; }
+            if (blurred != null) { BlurredTextShadows(style, x, w, baseline, lineTop, text, wordSpacing, letterSpacing, rtl, blurred); blurred = null; }
             float sx = x + sh.X, sy = baseline + sh.Y;
-            _ops.Add(new TextOp(sx, sy, lineTop, style.Font, style.TextSize, color, text, wordSpacing, style.LetterSpacing) { Rtl = rtl });
+            _ops.Add(new TextOp(sx, sy, lineTop, style.Font, style.TextSize, color, text, wordSpacing, letterSpacing) { Rtl = rtl });
             if (style.TextDecoration != TextDecoration.None) Decorate(style, sx, w, sy, color);
         }
-        if (blurred != null) BlurredTextShadows(style, x, w, baseline, lineTop, text, wordSpacing, rtl, blurred);
+        if (blurred != null) BlurredTextShadows(style, x, w, baseline, lineTop, text, wordSpacing, letterSpacing, rtl, blurred);
     }
 
     /// <summary>
     /// Blurred text-shadows, bottom one first: a layer holding the run and its decorations, whose filter makes the
     /// shadows from the shape of what it holds and draws them in place of it.
     /// </summary>
-    private void BlurredTextShadows(ComputedStyle style, float x, float w, float baseline, float lineTop, string text, float wordSpacing, bool rtl,
+    private void BlurredTextShadows(ComputedStyle style, float x, float w, float baseline, float lineTop, string text, float wordSpacing, float letterSpacing, bool rtl,
         List<(BoxShadow Shadow, uint Color)> shadows)
     {
         // The shadow takes its colour from the shadow alone: the text's own colour, even transparent, only gives the shape.
         var layer = new LayerOp { RasterReplaces = true, TextShadow = true };
-        layer.Ops.Add(new TextOp(x, baseline, lineTop, style.Font, style.TextSize, CssColor.Black, text, wordSpacing, style.LetterSpacing) { Rtl = rtl });
+        layer.Ops.Add(new TextOp(x, baseline, lineTop, style.Font, style.TextSize, CssColor.Black, text, wordSpacing, letterSpacing) { Rtl = rtl });
         if (style.TextDecoration != TextDecoration.None)
         {
             // The decorations are drawn into the main list and moved into the layer.

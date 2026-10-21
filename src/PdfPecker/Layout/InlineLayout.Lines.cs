@@ -253,8 +253,11 @@ internal sealed partial class LayoutEngine
         }
     }
 
-    /// <summary>Where a line's items start and how its free space is spread: over its spaces (justify) or its leaders.</summary>
-    private readonly record struct LineFit(float Start, float SpaceExtra, float LeaderWidth);
+    /// <summary>
+    /// Where a line's items start and how its free space is spread: over its spaces (justify), its leaders, or its
+    /// justification opportunities (CharExtra each, set when they are not just its spaces; the items say where).
+    /// </summary>
+    private readonly record struct LineFit(float Start, float SpaceExtra, float LeaderWidth, float CharExtra = 0);
 
     /// <summary>
     /// Aligns a line in its room: its start, the extra each space gets when it is justified and the width of its leaders.
@@ -263,14 +266,23 @@ internal sealed partial class LayoutEngine
     private LineFit AlignLine(Line line, ComputedStyle block, float x, float lineLeft, float lineW, float lineIndent, bool rtl, int spaces)
     {
         var items = line.Items;
-        float lineKern = LineKerning(items);
-        float free = lineW - lineIndent - line.Width - lineKern;
-        float lx = x + lineLeft + (rtl ? 0 : lineIndent);
-        float extra = 0, leaderW = 0;
         int leaders = CountOf(items, ItemKind.Leader);
         // text-align-last aligns the last line and lines before a forced break; a justified block's last line
         // otherwise starts at the start.
         var align = ComputedStyle.Resolve(line.Forced && block.TextAlignLast is { } lastAlign ? lastAlign : block.TextAlign, rtl);
+        bool justify = align == TextAlign.Justify && leaders == 0 && (!line.Forced || block.TextAlignLast == TextAlign.Justify);
+        float lineKern = LineKerning(items);
+        float free = lineW - lineIndent - line.Width - lineKern;
+        int opportunities = -1;
+        if (justify && free > 0)
+        {
+            // Finding the opportunities may split words into pieces. Together with the kerning between them they are
+            // as wide as the words, so only the kerning of each item is found again.
+            opportunities = JustificationOpportunities(line, block.TextJustify, rtl);
+            LineKerning(items);
+        }
+        float lx = x + lineLeft + (rtl ? 0 : lineIndent);
+        float extra = 0, charExtra = 0, leaderW = 0;
         // Leaders take the line's free space, so the text after them ends at the line's end.
         if (leaders > 0) { leaderW = Math.Max(0, free) / leaders; align = TextAlign.Left; }
         switch (align)
@@ -278,7 +290,8 @@ internal sealed partial class LayoutEngine
             case TextAlign.Right: if (free > 0) lx += free; break;
             case TextAlign.Center: if (free > 0) lx += free / 2; break;
             case TextAlign.Justify:
-                if ((!line.Forced || block.TextAlignLast == TextAlign.Justify) && spaces > 0 && free > 0) extra = free / spaces;
+                if (justify && opportunities > 0 && free > 0) extra = charExtra = free / opportunities;
+                else if (justify && opportunities < 0 && spaces > 0 && free > 0) extra = free / spaces;
                 else if (rtl && free > 0) lx += free;
                 break;
         }
@@ -290,9 +303,9 @@ internal sealed partial class LayoutEngine
             free = lineW - lineIndent - line.Width - lineKern;
             // The cut line fills the box from its start, so alignment no longer moves it.
             lx = x + lineLeft + (rtl ? Math.Max(0, free) : lineIndent);
-            extra = 0;
+            extra = charExtra = 0;
         }
-        return new LineFit(lx, extra, leaderW);
+        return new LineFit(lx, extra, leaderW, charExtra);
     }
 
     /// <summary>The x of each item of the line, and after the last one, in the shared buffer.</summary>
@@ -300,9 +313,18 @@ internal sealed partial class LayoutEngine
     {
         if (_xs.Length < items.Count + 1) _xs = new float[items.Count * 2];
         float[] xs = _xs;
-        float cx = fit.Start;
+        float cx = fit.Start, e = fit.CharExtra;
         for (int k = 0; k < items.Count; k++)
         {
+            if (e != 0)
+            {
+                var it = items[k];
+                byte j = it.Justify;
+                if ((j & JustifyBefore) != 0) cx += e;
+                xs[k] = cx;
+                cx += it.Width + _kern[k] + e * (((j & JustifyLetters) != 0 ? it.Length - 1 : 0) + ((j & JustifyAfter) != 0 ? 1 : 0));
+                continue;
+            }
             xs[k] = cx;
             cx += items[k].Width + _kern[k] + items[k].Kind switch { ItemKind.Space => fit.SpaceExtra, ItemKind.Leader => fit.LeaderWidth, _ => 0 };
         }
@@ -329,7 +351,7 @@ internal sealed partial class LayoutEngine
         bool deferCalls = _deferFootnoteCalls;
         if (Footnotes != null) _deferFootnoteCalls = true;
         int textFrom = _ops.Count;
-        DrawItems(items, xs, block, x, y, baseline, y + lineH - baseline, fit.SpaceExtra);
+        DrawItems(items, xs, block, x, y, baseline, y + lineH - baseline, fit.SpaceExtra, fit.CharExtra);
         if (fragments >= 0) NoteFragmentText(fragments, textFrom);
         _deferFootnoteCalls = deferCalls;
         if (_deferredFootnoteCalls is { Count: > 0 } && !deferCalls) PlaceDeferredFootnoteCalls();
@@ -337,7 +359,7 @@ internal sealed partial class LayoutEngine
         if (_marker != null) EmitMarker(baseline, y);
     }
 
-    private void DrawItems(List<Item> items, float[] xs, ComputedStyle block, float x, float y, float baseline, float descent, float spaceExtra)
+    private void DrawItems(List<Item> items, float[] xs, ComputedStyle block, float x, float y, float baseline, float descent, float spaceExtra, float charExtra)
     {
         int i = 0;
         while (i < items.Count)
@@ -347,7 +369,7 @@ internal sealed partial class LayoutEngine
             {
                 case ItemKind.Text:
                 case ItemKind.Space:
-                    i = DrawTextRun(items, i, xs, y, baseline, spaceExtra);
+                    i = DrawTextRun(items, i, xs, y, baseline, spaceExtra, charExtra);
                     continue;
                 case ItemKind.Image:
                     if (it.Image != null)
@@ -384,17 +406,21 @@ internal sealed partial class LayoutEngine
 
     /// <summary>
     /// Draws the words and spaces from <paramref name="start"/> that share a style, tag and bidi level as one run of
-    /// text, with its shadows and decorations; returns the index after the run.
+    /// text, with its shadows and decorations; returns the index after the run. On a line justified between characters
+    /// (<paramref name="charExtra"/>), a run of words spaced out letter by letter draws with that extra letter spacing,
+    /// and the run ends where the line puts the next item somewhere else than the text would.
     /// </summary>
-    private int DrawTextRun(List<Item> items, int start, float[] xs, float lineTop, float baseline, float spaceExtra)
+    private int DrawTextRun(List<Item> items, int start, float[] xs, float lineTop, float baseline, float spaceExtra, float charExtra)
     {
         var first = items[start];
         var style = first.Style;
+        float letterExtra = charExtra != 0 && (first.Justify & JustifyLetters) != 0 ? charExtra : 0;
         int end = start;
         while (end < items.Count)
         {
             var r = items[end];
             if (!IsTextOrSpace(r) || !ReferenceEquals(r.Style, style) || r.Tag != first.Tag || r.Level != first.Level) break;
+            if (charExtra != 0 && end > start && !JoinsRun(items, end - 1, xs, spaceExtra, letterExtra)) break;
             end++;
         }
         // Right-to-left words are drawn as one run in logical order, which the writer lays out from the right; the
@@ -411,10 +437,10 @@ internal sealed partial class LayoutEngine
         {
             float bl = baseline + BaselineShift(style) + first.RelY;
             string text = sb.ToString();
-            float wordSpacing = style.WordSpacing + spaceExtra;
-            if (style.TextShadows != null) TextShadows(style, runX, runEnd - runX, bl, lineTop, text, wordSpacing, rtlRun);
+            float wordSpacing = style.WordSpacing + spaceExtra - letterExtra, letterSpacing = style.LetterSpacing + letterExtra;
+            if (style.TextShadows != null) TextShadows(style, runX, runEnd - runX, bl, lineTop, text, wordSpacing, letterSpacing, rtlRun);
             _ops.Add(new TextOp(runX, bl, lineTop, style.Font, style.TextSize, CssColor.Fade(style.TextFillColor ?? style.Color, style.InlineFade), text,
-                wordSpacing, style.LetterSpacing) { Tag = first.Tag, Rtl = rtlRun }.WithStroke(style));
+                wordSpacing, letterSpacing) { Tag = first.Tag, Rtl = rtlRun }.WithStroke(style));
             if (style.TextDecoration != TextDecoration.None) Decorate(style, runX, runEnd - runX, bl);
         }
         return end;
