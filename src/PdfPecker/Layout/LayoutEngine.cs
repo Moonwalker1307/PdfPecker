@@ -454,7 +454,7 @@ internal sealed partial class LayoutEngine
             _currentListIndex = f.ListIndex;
         }
 
-        float top = FlowBoxTop(ref f, e, breakBefore, out float mt);
+        float top = FlowBoxTop(ref f, e, breakBefore, out float mt, out bool cleared);
         int boxOps = _ops.Count;
         float bottom = LayoutFlowBoxContent(ref f, e, ref top, joins, boxOps, out var passed);
         float trailing = _boxTrailing;
@@ -464,9 +464,10 @@ internal sealed partial class LayoutEngine
             return FlowStep.Next;
         }
         float mb = CollapseMargins(s.MarginBottom.Resolve(f.W), trailing);
-        if (bottom - top < Eps && CollapsesThrough(e) && !breakBefore && !breakAfter)
+        if (bottom - top < Eps && CollapsesThrough(e) && !breakBefore && !breakAfter && !cleared)
         {
-            // An empty box: its margins collapse with each other and with those around it.
+            // An empty box: its margins collapse with each other and with those around it. One that clears floats
+            // stays below them, so what follows does too: that is how an empty clearfix div ends a row of floats.
             f.PendingMargin = CollapseMargins(CollapseMargins(f.PendingMargin, mt), mb);
             return FlowStep.Next;
         }
@@ -497,9 +498,10 @@ internal sealed partial class LayoutEngine
 
     /// <summary>
     /// The top of a block box's border edge in the flow: after its top margin, collapsed with the pending one, below
-    /// the floats it clears and on a new page when a break is forced before it.
+    /// the floats it clears and on a new page when a break is forced before it. <paramref name="cleared"/> tells
+    /// whether clearing floats moved it down.
     /// </summary>
-    private float FlowBoxTop(ref FlowState f, Element e, bool breakBefore, out float mt)
+    private float FlowBoxTop(ref FlowState f, Element e, bool breakBefore, out float mt, out bool cleared)
     {
         var s = e.Style;
         // A box's top margin collapses with those of its first children (CSS 2.1 §8.3.1).
@@ -510,7 +512,9 @@ internal sealed partial class LayoutEngine
         float top = f.Y + CollapseMargins(f.PendingMargin, mt);
         if (f.InColumns) top = TruncatedMargin(f.Y, top);
         else if (!breakBefore) top = TruncatedPageMargin(ref f, top);
+        float uncleared = top;
         if (s.ClearLeft || s.ClearRight) top = Cleared(s, top);
+        cleared = top > uncleared;
         // A forced break before anything has been drawn (the first box of the document or of a named page's run)
         // would only leave an empty page: Chrome ignores it.
         if (f.ForcedAt == f.Index) top = NextPage(top);
