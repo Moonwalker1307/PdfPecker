@@ -79,6 +79,7 @@ internal sealed partial class PdfDocumentWriter
         private PageGrid _grid = null!;  // the pages of the section being distributed
         private int _pageOffset;         // pages of the sections before the one being distributed
         private Func<int, float>? _footnoteCut; // the space footnote areas take at the bottom of the pages being distributed
+        private int _backdrops;          // boxes with a backdrop-filter given a part on every page they reach
 
         public PageDistributor(int maxPages) => _maxPages = maxPages;
 
@@ -149,7 +150,9 @@ internal sealed partial class PdfDocumentWriter
                     var parts = new SortedDictionary<int, List<Placed>>();
                     foreach (var o in layer.Ops) Distribute(o, parts);
                     // A backdrop filter draws on every page its box reaches, also where the box itself paints nothing.
-                    if (layer.Backdrop != null)
+                    // Only the first boxes, as many as are filtered at all, need those parts: hundreds of tall boxes
+                    // nested in each other would otherwise each write a masked group on every page.
+                    if (layer.Backdrop != null && _backdrops++ < MaxBackdrops)
                         for (int p = PageOf(layer.BackdropY), last = Math.Max(p, PageOf(layer.BackdropY + layer.BackdropH - 0.5f)); p <= last; p++)
                             parts.TryAdd(p, new List<Placed>());
                     foreach (var (p, items) in parts) Target(into, p).Add(new Placed(new LayerBlock(layer, items), 0, 0));
