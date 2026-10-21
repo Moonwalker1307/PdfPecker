@@ -1060,8 +1060,10 @@ internal sealed partial class LayoutEngine
         if (isImage || isSvg)
         {
             float room = hasWOverride ? overrideW - frame : availW - ml - mr - frame;
-            if (isImage) image = ImageSize(e, room, out imgW, out imgH, out svg);
-            else svg = SvgSize(e, room, out imgW, out imgH);
+            // Percentages are of the containing block, not of what its frame and margins leave, so that a width of 100%
+            // with a border or margin overflows the box, as in Chrome.
+            if (isImage) image = ImageSize(e, room, out imgW, out imgH, out svg, availW);
+            else svg = SvgSize(e, room, out imgW, out imgH, availW);
             if (hasWOverride && imgW > 0 && Math.Abs(room - imgW) > Eps)
             {
                 if (s.Height.IsAuto || s.Height.IsPercent && cbH == null) imgH *= Math.Max(0, room) / imgW;
@@ -1596,14 +1598,14 @@ internal sealed partial class LayoutEngine
     /// Computes the used size of an image in points. Returns the decoded raster image, or null with the drawing in
     /// <paramref name="svg"/> when the source is an SVG file, or null for both when it could not be loaded.
     /// </summary>
-    private PdfImage? ImageSize(Element e, float availW, out float w, out float h, out SvgImage? svg)
+    private PdfImage? ImageSize(Element e, float availW, out float w, out float h, out SvgImage? svg, float percentW = float.NaN)
     {
         var src = e.GetAttribute("src");
         var img = _images.Load(src);
         svg = img == null ? _images.LoadSvg(src) : null;
         float iw = img != null ? img.Width * 0.75f : 0, ih = img != null ? img.Height * 0.75f : 0;
         if (svg != null) (iw, ih) = SvgNaturalSize(svg, availW); // as for an inline svg element, as in Chrome
-        ReplacedSize(e, iw, ih, availW, out w, out h);
+        ReplacedSize(e, iw, ih, availW, out w, out h, percentW);
         return img;
     }
 
@@ -1617,11 +1619,11 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>Computes the used size of an inline &lt;svg&gt; in points and returns its parsed drawing.</summary>
-    private SvgImage? SvgSize(Element e, float availW, out float w, out float h)
+    private SvgImage? SvgSize(Element e, float availW, out float w, out float h, float percentW = float.NaN)
     {
         if (!_images.Svgs.TryGetValue(e, out var svg)) _images.Svgs[e] = svg = SvgImage.Build(e, _images.SvgBudget, _images.LoadAny);
         var (iw, ih) = SvgNaturalSize(svg, availW);
-        ReplacedSize(e, iw, ih, availW, out w, out h);
+        ReplacedSize(e, iw, ih, availW, out w, out h, percentW);
         return svg;
     }
 
@@ -1801,18 +1803,19 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>Used size of a replaced element from its intrinsic size and its CSS width, height and limits.</summary>
-    private void ReplacedSize(Element e, float iw, float ih, float availW, out float w, out float h)
+    private void ReplacedSize(Element e, float iw, float ih, float availW, out float w, out float h, float percentW = float.NaN)
     {
         var s = e.Style;
+        float basisW = float.IsNaN(percentW) ? availW : percentW; // what percentages of the width are of
         float? cbH = HeightBasis(e);
         float? specifiedH = HeightOf(s.Height, cbH), maxH = HeightOf(s.MaxHeight, cbH);
         bool hasW = !s.Width.IsAuto && !(_measuring && s.Width.IsPercent), hasH = specifiedH != null;
-        w = hasW ? s.Width.Resolve(Math.Max(availW, 0)) : 0;
+        w = hasW ? s.Width.Resolve(Math.Max(basisW, 0)) : 0;
         h = specifiedH ?? 0;
         if (s.BorderBox)
         {
-            if (hasW) w -= s.PaddingLeft.Resolve(availW) + s.PaddingRight.Resolve(availW) + s.BorderLeft + s.BorderRight;
-            if (hasH) h -= s.PaddingTop.Resolve(availW) + s.PaddingBottom.Resolve(availW) + s.BorderTop + s.BorderBottom;
+            if (hasW) w -= s.PaddingLeft.Resolve(basisW) + s.PaddingRight.Resolve(basisW) + s.BorderLeft + s.BorderRight;
+            if (hasH) h -= s.PaddingTop.Resolve(basisW) + s.PaddingBottom.Resolve(basisW) + s.BorderTop + s.BorderBottom;
         }
         // aspect-ratio replaces the natural ratio, unless it says "auto" and the element has one.
         bool ratioOverride = s.AspectRatio > 0 && !(s.AspectRatioAuto && iw > 0 && ih > 0);
@@ -1823,7 +1826,7 @@ internal sealed partial class LayoutEngine
 
         if (!s.MaxWidth.IsAuto)
         {
-            float mw = s.MaxWidth.Resolve(availW);
+            float mw = s.MaxWidth.Resolve(basisW);
             if (w > mw && w > 0) { h *= mw / w; w = mw; }
         }
         if (maxH is float mh && h > mh && h > 0)
