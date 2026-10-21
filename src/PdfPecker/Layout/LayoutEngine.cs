@@ -146,8 +146,8 @@ internal sealed partial class LayoutEngine
         int p = PageOf(y);
         _columnNotes?.Exact(p, y, h, _grid);
         // A page grid moves content at most once, to the next page. The columns of a multi-column box can be shorter
-        // than later ones, so there content moves on until a column holds it.
-        while (h <= _grid.Height(p + 1))
+        // than later ones, so there content moves on until a column holds it, while a later one can.
+        while (h <= (_grid is ColumnGrid c ? c.TallestFrom(p + 1) : _grid.Height(p + 1)))
         {
             float pageEnd = _grid.Start(p + 1);
             // The page's footnote area takes the bottom of its flow.
@@ -156,6 +156,7 @@ internal sealed partial class LayoutEngine
             _columnNotes?.Break(p, y, y + h - flowEnd);
             y = pageEnd;
             if (_grid is not ColumnGrid) break;
+            Cancellation.ThrowIfCancellationRequested();
             p++;
         }
         return y;
