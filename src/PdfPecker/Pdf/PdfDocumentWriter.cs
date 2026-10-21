@@ -222,7 +222,18 @@ internal sealed partial class PdfDocumentWriter
     {
         public readonly DrawOp Op;
         public readonly float Y0, Y1; // clipped vertical extent for split rectangles and lines (flow coordinates)
-        public Placed(DrawOp op, float y0, float y1) { Op = op; Y0 = y0; Y1 = y1; }
+        public readonly bool Ink;     // only ink overflow, such as a box shadow, which never keeps a page of its own
+        public Placed(DrawOp op, float y0, float y1, bool ink = false) { Op = op; Y0 = y0; Y1 = y1; Ink = ink; }
+
+        /// <summary>The same placement, marked as ink overflow.</summary>
+        public Placed AsInk() => new(Op, Y0, Y1, ink: true);
+
+        /// <summary>True when the items hold something and all of it is ink overflow.</summary>
+        public static bool AllInk(List<Placed> items)
+        {
+            foreach (var item in items) if (!item.Ink) return false;
+            return items.Count > 0;
+        }
     }
 
     /// <summary>The part of a transformed or translucent layer that falls on one page, drawn with the layer's transform and opacity.</summary>
