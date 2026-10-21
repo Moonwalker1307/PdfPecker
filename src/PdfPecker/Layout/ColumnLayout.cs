@@ -21,6 +21,11 @@ internal sealed partial class LayoutEngine
     // The most layouts that balancing a row of columns tries before it settles for the best one found.
     private const int MaxBalancePasses = 24;
 
+    // The most box layouts that balancing one row of columns spends on its passes. Each pass lays the row's content out
+    // again, so content that is expensive to lay out gets fewer passes: a column of nested tables around a flex row of
+    // two thousand items took 17 passes of 23,000 layouts each. A row of ordinary text costs a few hundred per pass.
+    private const long MaxBalanceLayouts = 200_000;
+
     // A box split between more columns than this is drawn in the first ones only (a huge height in tiny columns).
     private const int MaxSplitFragments = 4096;
 
@@ -290,15 +295,20 @@ internal sealed partial class LayoutEngine
             }
         }
         float hi = fillHeight;
+        long start = _boxLayouts, passCost = 0;
         for (int pass = 0; pass < MaxBalancePasses && h < hi - 0.01f; pass++)
         {
             Cancellation.ThrowIfCancellationRequested();
+            // Another pass costs about what the last one did.
+            if (_boxLayouts - start + passCost > MaxBalanceLayouts) break;
+            long before = _boxLayouts;
             rows[row] = h;
             var grid = new ColumnGrid(fillGrid.Outer, fillGrid.FirstPage, fillGrid.Top, n, (float[])rows.Clone(), overflows);
             // The content before the row asks how tall the columns after it are, so it lays out as before only while
             // the tallest of them is the same.
             bool same = Math.Abs(grid.Height(first) - fillGrid.Height(first)) < Eps;
             var p = RunColumnPass(e, from, to, x, colW, grid, first, earlier: fillPass, resume: same ? resume : null);
+            passCost = _boxLayouts - before;
             if (EndFragment(p, grid) < first + n && !p.Notes!.Violated) return (p, grid, h);
             float shortage = p.Notes!.MinShortage;
             h = float.IsPositiveInfinity(shortage) ? (h + hi) / 2 : h + Math.Max(shortage, 0.05f);

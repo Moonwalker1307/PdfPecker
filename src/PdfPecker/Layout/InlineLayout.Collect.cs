@@ -18,6 +18,7 @@ internal sealed partial class LayoutEngine
         st.FirstLine = firstLine;
         foreach (var node in run) CollectNode(st, node, null, null);
         st.FirstLine = null;
+        TrimAdjacentPunctuation(st.Items);
         return st;
     }
 
@@ -143,16 +144,21 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>
-    /// Whether an image or inline SVG needs a box of its own: a layer, or for an image a radius, object-fit, outline, or
+    /// Whether an image or inline SVG needs a box of its own: a layer or a vertical margin, or for an image a radius, object-fit, outline, or
     /// a box it paints or pads (borders, padding, a background or shadows), which a plain image item has no room for.
     /// </summary>
     private static bool IsImageLaidOutAsBox(Element e, ComputedStyle s) =>
         e.IsReplaced
-        && (s.Layered || e.IsPicture && (s.BorderRadii != null || s.ObjectFit != ObjectFit.Fill || s.OutlineStyle != BorderStyle.None
+        && (s.Layered || HasVerticalMargin(s) || e.IsPicture && (s.BorderRadii != null || s.ObjectFit != ObjectFit.Fill || s.OutlineStyle != BorderStyle.None
             || PaintsInlineBox(s) || HasPadding(s.PaddingTop) || HasPadding(s.PaddingRight) || HasPadding(s.PaddingBottom)
             || HasPadding(s.PaddingLeft)));
 
     private static bool HasPadding(Length padding) => padding.IsPercent || padding.Resolve(0) > 0;
+
+    /// <summary>Whether a vertical margin is set, which a plain image or svg item has no room for.</summary>
+    private static bool HasVerticalMargin(ComputedStyle s) => HasMargin(s.MarginTop) || HasMargin(s.MarginBottom);
+
+    private static bool HasMargin(Length margin) => !margin.IsAuto && (margin.IsPercent || margin.Resolve(0) != 0);
 
     /// <summary>An inline element: its padding and borders as spacers around its children, with its bidi controls.</summary>
     private void CollectInlineElement(CollectState st, Element e, ComputedStyle s, string? href, InlineDeco? deco)

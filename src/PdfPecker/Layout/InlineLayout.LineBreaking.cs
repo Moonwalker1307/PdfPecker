@@ -172,6 +172,13 @@ internal sealed partial class LayoutEngine
                 _curW += CloneEdges(_edgeAfter, it, right: false);
                 _edgeAfter = null;
             }
+            if (!_hasContent && it.Kind == ItemKind.Text && it.Length > 0)
+            {
+                // text-spacing-trim at the start of a line: the punctuation that starts it has no neighbour before it.
+                var started = TrimLineStart(it, wrapped: Lines.Count > 0 && !Lines[^1].Forced);
+                _curW += started.Width - it.Width;
+                it = started;
+            }
             _cur.Items.Add(it);
             if (!it.IsMarker) _hasContent = true;
         }
@@ -185,7 +192,7 @@ internal sealed partial class LayoutEngine
                 li.RemoveAt(li.Count - 1);
             // A line broken at a soft hyphen shows a hyphen.
             if (!forced && li.Count > 0 && li[^1] is { Kind: ItemKind.Text, BreakAfter: BreakAfter.SoftHyphen } shy)
-                li[^1] = shy.CloneWithText(shy.Text + HyphenText(shy.Style), shy.Width + HyphenWidth(shy.Style));
+                li[^1] = shy.CloneWithText(shy.Text + HyphenText(shy.Style), shy.Width + shy.TrimEnd + HyphenWidth(shy.Style));
             float width = 0;
             foreach (var it in li) width += it.Width;
             _cur.Width = width;
@@ -333,7 +340,16 @@ internal sealed partial class LayoutEngine
             // A cloned box the line would break inside ends the line with its right edge.
             if (ClonesEdges && _hasContent && FirstContent(_items, j, skipSpaces: true) is var next and >= 0) need += CloneEdges(_items[j - 1], _items[next], right: true);
             // A planned paragraph breaks where the plan says, and greedily where it has no say.
-            bool full = _plan is { } plan && plan[i] != PlanGreedy ? plan[i] == PlanBreak : _curW + need > _avail + Eps && !breakAll;
+            bool planned = _plan is { } plan && plan[i] != PlanGreedy;
+            bool full = planned ? _plan![i] == PlanBreak : _curW + need > _avail + Eps && !breakAll;
+            // text-spacing-trim: a chunk that ends with closing punctuation fits when the punctuation's blank half goes.
+            if (full && !planned && !breakAll && TrimLineEnd(j) is { } trimmed && _curW + need - (_items[j - 1].Width - trimmed.Width) <= _avail + Eps)
+            {
+                _curW += gw - (_items[j - 1].Width - trimmed.Width) + KernWithLast(_items[i]);
+                for (int k = i; k < j - 1; k++) Add(_items[k]);
+                Add(trimmed);
+                return j;
+            }
             if (_hasContent && full)
             {
                 bool switching = _after != null;
@@ -368,6 +384,23 @@ internal sealed partial class LayoutEngine
                 for (int k = i; k < j; k++) Add(_items[k]);
             }
             return j;
+        }
+
+        /// <summary>
+        /// The last item of the chunk that ends before <paramref name="j"/> with its closing punctuation trimmed, as it
+        /// may be at the end of a line, or null when it ends otherwise or a line may not break after it.
+        /// </summary>
+        private readonly Item? TrimLineEnd(int j)
+        {
+            var last = _items[j - 1];
+            // A chunk ends where a line may break, so only its last character matters. As in Chrome, that is a closing
+            // bracket or quote: dots and colons, closing only by where the font draws them, keep their space.
+            if (last.Kind != ItemKind.Text || last.Length == 0 || last.TrimEnd > 0 || last.BreakAfter == BreakAfter.SoftHyphen) return null;
+            int cp = LastCodePoint(last.Source, last.Start + last.Length);
+            if (Text.TextSpacingCharacters.Classify(cp) is not (Text.TextSpacingClass.Close or Text.TextSpacingClass.CloseQuote)
+                || HanKerning.Classify(last.Style.Font, cp) != Text.TextSpacingClass.Close) return null;
+            float trim = TrimOf(last, last.Length - (cp > 0xFFFF ? 2 : 1));
+            return trim > 0 ? last.Trimmed(last.TrimStart, trim) : null;
         }
 
         /// <summary>
@@ -430,7 +463,7 @@ internal sealed partial class LayoutEngine
             Add(head);
             // The rest is measured exactly once it fits on a line; until then its width only needs to exceed the room,
             // so subtracting is enough.
-            float restW = g.Width - fw;
+            float restW = g.Width + g.TrimStart + g.TrimEnd - fw;
             int restLen = len - fit;
             if (restW <= _availW + Eps) restW = TextWidth(font, src, start + fit, restLen, size, ls);
             return g.Slice(fit, restLen, restW);

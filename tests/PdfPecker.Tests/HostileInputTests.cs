@@ -840,6 +840,18 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Balancing_columns_of_expensive_content_tries_fewer_heights()
+    {
+        // Each height that balancing tries lays the columns' content out again. Here that is five nested tables around
+        // 250 nested flex boxes, the last with 2,270 items (the parser stops nesting at 256 levels), tens of thousands of
+        // box layouts per try: 17 tries allocated 3.3 GB, and the fuzzed page they came from took 4 seconds.
+        var html = "<p style='columns:2'><td>" + Repeat("<table><tr><td>", 5) + Repeat("<div style='display:flex'>", 2521) + "x";
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 1L << 30);
+    }
+
+    [Fact]
     public void Repeating_gradients_share_one_tiling_budget()
     {
         // Each box tiles twenty repeating gradients over 250 periods, about 33 KB of PDF each: four kilobytes of HTML

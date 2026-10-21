@@ -416,6 +416,8 @@ internal sealed partial class LayoutEngine
         {
             var r = items[end];
             if (!IsTextOrSpace(r) || !ReferenceEquals(r.Style, style) || r.Tag != first.Tag || r.Level != first.Level) break;
+            // Trimmed punctuation is drawn closer to its neighbour than the font would put it, so the run ends there.
+            if (end > start && (items[end - 1].TrimEnd != 0 || r.TrimStart != 0)) break;
             if (charExtra != 0 && end > start && !JoinsRun(items, end - 1, xs, spaceExtra, letterExtra)) break;
             end++;
         }
@@ -429,13 +431,15 @@ internal sealed partial class LayoutEngine
             for (int k = start; k < end; k++) sb.Append(items[k].Source, items[k].Start, items[k].Length);
         float rx = first.RelX;
         float runX = xs[start] + rx, runEnd = xs[end] + rx;
+        // An opening bracket trimmed on its left is drawn that much further left, into the space it gave up.
+        float textX = runX - (rtlRun ? 0 : first.TrimStart);
         if (style.Visible)
         {
             float bl = baseline + style.BaselineShift + first.RelY;
             string text = sb.ToString();
             float wordSpacing = style.WordSpacing + spaceExtra - letterExtra, letterSpacing = style.LetterSpacing + letterExtra;
-            if (style.TextShadows != null) TextShadows(style, runX, runEnd - runX, bl, lineTop, text, wordSpacing, letterSpacing, rtlRun);
-            var op = new TextOp(runX, bl, lineTop, style.Font, style.TextSize, CssColor.Fade(style.TextFillColor ?? style.Color, style.InlineFade), text,
+            if (style.TextShadows != null) TextShadows(style, textX, runEnd - textX, bl, lineTop, text, wordSpacing, letterSpacing, rtlRun);
+            var op = new TextOp(textX, bl, lineTop, style.Font, style.TextSize, CssColor.Fade(style.TextFillColor ?? style.Color, style.InlineFade), text,
                 wordSpacing, letterSpacing) { Tag = first.Tag, Rtl = rtlRun }.WithStroke(style);
             _ops.Add(op);
             if (style.TextDecoration != TextDecoration.None) Decorate(style, runX, runEnd - runX, bl, text: op);

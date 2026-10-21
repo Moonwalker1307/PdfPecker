@@ -135,6 +135,7 @@ internal sealed partial class StyleResolver
             case "text-align": ApplyTextAlign(s, parent, in d); break;
             case "text-align-last": ApplyTextAlignLast(s, parent, in d); break;
             case "text-justify": ApplyTextJustify(s, parent, in d); break;
+            case "text-spacing-trim": ApplyTextSpacingTrim(s, parent, in d); break;
             case "text-indent": ApplyTextIndent(s, in d); break;
             case "text-transform": ApplyTextTransform(s, parent, in d); break;
             case "text-decoration-line": ApplyTextDecorationLine(s, parent, in d); break;

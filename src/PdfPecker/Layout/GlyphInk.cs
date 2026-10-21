@@ -100,6 +100,13 @@ internal static class GlyphInk
         return left <= right;
     }
 
+    /// <summary>
+    /// The horizontal extent of a glyph's whole ink, in ems from its origin, as a glyph's bounding box gives it to
+    /// Chrome; false when the glyph has no outline.
+    /// </summary>
+    public static bool Extent(FontProgram program, int gid, out float left, out float right)
+        => Intercept(program, gid, float.NegativeInfinity, float.PositiveInfinity, 0, out left, out right);
+
     /// <summary>Widens [left, right] by the part of the edge from (x0, y0) to (x1, y1) that lies between the heights.</summary>
     private static void Clip(float x0, float y0, float x1, float y1, float low, float high, float skew, ref float left, ref float right)
     {
