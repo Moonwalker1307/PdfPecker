@@ -225,6 +225,16 @@ internal sealed partial class StyleResolver
             _ => s.DecorationStyle,
         };
 
+    private static void ApplySkipInk(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+        => s.SkipInk = d.Lower switch
+        {
+            "auto" => SkipInk.Auto,
+            "none" => SkipInk.None,
+            "all" => SkipInk.All,
+            "inherit" => parent.SkipInk,
+            _ => s.SkipInk,
+        };
+
     private void ApplyTextDecorationThickness(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
         if (d.Inherit) s.DecorationThickness = parent.DecorationThickness;
