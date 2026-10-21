@@ -42,7 +42,7 @@ internal sealed partial class LayoutEngine
     private float LayoutOrthogonal(Element e, float x, float y, float availW, int turn)
     {
         var s = e.Style;
-        float ml = s.MarginLeft.IsAuto ? 0 : s.MarginLeft.Resolve(availW), mr = s.MarginRight.IsAuto ? 0 : s.MarginRight.Resolve(availW);
+        float ml = s.MarginLeft.IsAuto ? 0 : s.MarginLeft.Resolve(availW);
         float mt = s.MarginTop.IsAuto ? 0 : s.MarginTop.Resolve(availW), mb = s.MarginBottom.IsAuto ? 0 : s.MarginBottom.Resolve(availW);
         var c = CaptureOrthogonal(e, turn, availW, _grid.Height(PageOf(y)));
         float lineLength = c.Width, depth = c.Height;
@@ -61,7 +61,7 @@ internal sealed partial class LayoutEngine
         layer.OriginY = py + half;
 
         (_lastBoxX, _lastBoxTop, _lastBoxW, _lastBoxH) = (px, py, depth, lineLength);
-        _lastBoxRight = Math.Max(_lastBoxRight, px + depth + mr);
+        _lastBoxRight = Math.Max(_lastBoxRight, px + depth);
         _lastBaseline = float.NaN;
         _lastContentBottom = py + lineLength;
         return py + lineLength + mb;

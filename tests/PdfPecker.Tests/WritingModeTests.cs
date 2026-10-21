@@ -66,6 +66,20 @@ public class WritingModeTests
     }
 
     [Fact]
+    public void A_right_margin_on_a_vertical_inline_block_is_counted_once()
+    {
+        var ops = Layout("<style>body{margin:0;font:12pt Helvetica}.v{display:inline-block;writing-mode:vertical-rl;height:40pt;vertical-align:top}</style>"
+                         + "<div class='v' style='margin-right:30pt;background:#ff0000'>A</div><div class='v' style='background:#00ff00'>B</div>");
+        var layers = All(ops).OfType<LayerOp>().Where(l => l.Transform != null).ToList();
+        Assert.Equal(2, layers.Count);
+        // Each layer turns about the middle of the box, whose depth is the height of the red or green fill inside it.
+        float Left(LayerOp l, uint color) => l.OriginX - Fill(l.Ops, color).H / 2;
+        float redLeft = Left(layers[0], 0xFFFF0000), redDepth = Fill(layers[0].Ops, 0xFFFF0000).H;
+        // The green box starts where the red one ends plus its margin, not twice that.
+        Assert.Equal(redLeft + redDepth + 30, Left(layers[1], 0xFF00FF00), 0.5f);
+    }
+
+    [Fact]
     public void A_vertical_table_header_is_as_narrow_as_its_line()
     {
         var ops = Layout("<style>body{margin:0;font:12pt Helvetica} th{padding:0}</style><table style='border-spacing:0'><tr>"

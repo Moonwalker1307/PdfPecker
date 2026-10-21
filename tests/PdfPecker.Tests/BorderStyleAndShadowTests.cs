@@ -34,6 +34,44 @@ public class BorderStyleAndShadowTests
         }
     }
 
+    // ---- hr ----
+
+    [Fact]
+    public void The_default_hr_is_an_inset_rule_on_a_light_base_as_in_Chrome()
+    {
+        // Chrome shades the rule from #eee, not from its gray text colour: a mid-gray top edge over a light bottom edge,
+        // whatever color the page gives hr.
+        foreach (var style in new[] { "margin:0", "margin:0;color:red" })
+        {
+            var html = $"{Body}<hr style='{style}'>";
+            Near(154, 154, 154, Pixel(html, 20, 0), 3);
+            Near(238, 238, 238, Pixel(html, 20, 1), 3);
+            Near(255, 255, 255, Pixel(html, 20, 2), 3);
+        }
+    }
+
+    [Fact]
+    public void An_hr_border_color_or_color_attribute_replaces_the_light_base()
+    {
+        Near(171, 0, 0, Pixel($"{Body}<hr style='margin:0;border-color:red'>", 20, 0), 3);
+        Near(255, 0, 0, Pixel($"{Body}<hr style='margin:0;border-color:red'>", 20, 1), 3);
+        // The color attribute and noshade make a flat bar: red, or gray without a color.
+        Near(255, 0, 0, Pixel($"{Body}<hr color='red' style='margin:0'>", 20, 0), 3);
+        Near(255, 0, 0, Pixel($"{Body}<hr color='red' style='margin:0'>", 20, 1), 3);
+        Near(128, 128, 128, Pixel($"{Body}<hr noshade style='margin:0'>", 20, 0), 3);
+        Near(128, 128, 128, Pixel($"{Body}<hr noshade style='margin:0'>", 20, 1), 3);
+    }
+
+    [Fact]
+    public void The_hr_size_attribute_is_the_height_of_the_rule_with_its_borders()
+    {
+        var html = $"{Body}<hr size='6' style='margin:0'>";
+        Near(154, 154, 154, Pixel(html, 20, 0), 3);
+        Near(255, 255, 255, Pixel(html, 20, 3), 3);
+        Near(238, 238, 238, Pixel(html, 20, 5), 3);
+        Near(255, 255, 255, Pixel(html, 20, 6), 3);
+    }
+
     // ---- 3D border colours ----
 
     [Theory]

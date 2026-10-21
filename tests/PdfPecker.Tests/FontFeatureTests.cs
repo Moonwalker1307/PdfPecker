@@ -68,6 +68,25 @@ public class FontFeatureTests
     }
 
     [Fact]
+    public void Diagonal_fractions_are_formed_from_the_digits_around_a_slash()
+    {
+        string[] styles =
+        [
+            "", "font-variant-numeric: diagonal-fractions", "font-feature-settings: 'frac'",
+            "font-variant-numeric: diagonal-fractions tabular-nums",
+        ];
+        var w = styles.Select(style => SpanWidths(ConvertUncompressed(Face + Span(style, "1/2 3/4")))[0]).ToList();
+        // The fractions are smaller figures on either side of a slash, so narrower than the plain text.
+        Assert.True(w[1] < w[0] * 0.8f, $"{w[1]} vs {w[0]}");
+        Assert.Equal(w[1], w[2], 0.01f);
+        // Tabular figures do not widen the fractions' digits: the shaper runs fractions and tnum in the font's order.
+        Assert.Equal(w[1], w[3], 0.01f);
+        // Text that is not a fraction is left alone.
+        var letters = SpanWidths(ConvertUncompressed(Face + Span("", "a/b")))[0];
+        Assert.Equal(letters, SpanWidths(ConvertUncompressed(Face + Span("font-variant-numeric: diagonal-fractions", "a/b")))[0], 0.01f);
+    }
+
+    [Fact]
     public void Feature_variants_of_one_font_are_capped()
     {
         // Bundled fonts live as long as the process, so every new feature setting a server saw used to keep a copy of
@@ -78,11 +97,16 @@ public class FontFeatureTests
     }
 
     [Fact]
-    public void Contextual_features_and_missing_features_change_nothing()
+    public void Missing_features_change_nothing_and_contextual_ones_leave_the_character_map_alone()
     {
         var font = FontProgram.Load(Inter)[0];
-        Assert.Same(font, font.WithFeatures("frac")); // fractions need context, which is not applied
         Assert.Same(font, font.WithFeatures("onum")); // the font has no old-style figures
+        // Fractions substitute in context: the variant keeps the font's character map and has the shaper apply them.
+        var frac = font.WithFeatures("frac");
+        Assert.NotSame(font, frac);
+        Assert.Equal(["frac"], frac.ShapedFeatures!);
+        Assert.Equal(font.GlyphId('1'), frac.GlyphId('1'));
+        Assert.Null(font.ShapedFeatures);
         var tnum = font.WithFeatures("tnum");
         Assert.NotSame(font, tnum);
         Assert.Same(tnum, font.WithFeatures("tnum"));
