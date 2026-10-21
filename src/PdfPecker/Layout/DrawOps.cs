@@ -92,6 +92,8 @@ internal sealed class LineOp : DrawOp
     public bool Dotted;
     /// <summary>A solid line with round caps (wavy text decorations); otherwise dashed or dotted.</summary>
     public bool Solid;
+    /// <summary>A dash pattern of its own, with butt caps (text decorations); 0 for the pattern of the dotted flag.</summary>
+    public float DashLength, DashGap;
 
     public LineOp(float x1, float y1, float x2, float y2, float width, uint color, bool dotted)
     {
