@@ -64,6 +64,30 @@ public class ImageSizingTests
     public void A_percentage_height_limits_an_image_in_a_flex_box_of_fixed_height(string style, float w, float h)
         => AssertSize(w, h, Image($"<div style='display:flex;width:300px;height:80px'><img src='{Src(400, 250)}' style='{style}'></div>"));
 
+    [Theory]
+    [InlineData("width:100%;border:5px solid;margin:8px")]
+    [InlineData("width:100%;padding:6px")]
+    [InlineData("max-width:100%;border:5px solid;margin:0 20px")]
+    public void A_percentage_width_is_of_the_box_so_the_frame_and_margins_overflow_it(string style)
+        => AssertSize(200, 125, Image($"<div style='width:200px'><img src='{Src(400, 250)}' style='{style}'></div>"));
+
+    [Fact]
+    public void A_border_box_image_of_full_width_keeps_its_border_inside_the_box()
+        => AssertSize(190, 118.75f, Image($"<div style='width:200px'><img src='{Src(400, 250)}' style='width:100%;border:5px solid;box-sizing:border-box'></div>"));
+
+    [Theory]
+    [InlineData("img")]
+    [InlineData("svg")]
+    public void Vertical_margins_of_an_inline_image_or_svg_move_it_down_and_the_line_after_it(string element)
+    {
+        // The line starts 50px down, so the 20px margin puts the image at 70px, whatever else is on the line.
+        var drawn = element == "img"
+            ? $"<img src='{Src(100, 40)}' style='margin:20px 0'>"
+            : "<svg width='100' height='40' style='margin:20px 0'><rect width='100' height='40'/></svg>";
+        var image = Image($"<div style='height:50px'></div>{drawn}");
+        Assert.Equal(70 * 0.75f, image.Y, 0.1f);
+    }
+
     /// <summary>A PNG of the given size in pixels, all one opaque colour.</summary>
     private static string Png(int w, int h)
         => "data:image/png;base64," + Convert.ToBase64String(PdfPecker.Rendering.PngEncoder.Encode(Enumerable.Repeat(0xFF2050A0u, w * h).ToArray(), w, h));
