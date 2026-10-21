@@ -289,6 +289,12 @@ internal sealed partial class FontProgram
     }
 
     /// <summary>
+    /// The features of this variant that the shaper applies to the glyphs of a run instead of the character map: those
+    /// that substitute in context, such as fractions, and the plain ones turned on with them; null for a font without any.
+    /// </summary>
+    public string[]? ShapedFeatures { get; private set; }
+
+    /// <summary>
     /// This font with OpenType features such as tabular figures applied to its character map (a key from
     /// <see cref="FontFeatures.Key"/>). Returns this font when the features change nothing. Variants are cached.
     /// </summary>
@@ -305,19 +311,22 @@ internal sealed partial class FontProgram
     private FontProgram MakeVariant(string features)
     {
         int[]? map;
-        try { map = FontFeatures.Substitutions(this, features); }
-        catch (Exception ex) when (IsFormatError(ex)) { map = null; }
-        if (map == null) return this;
-        var bmp = _bmp ?? BuildCharMap();
+        string[]? contextual;
+        try { map = FontFeatures.Substitutions(this, features, out contextual); }
+        catch (Exception ex) when (IsFormatError(ex)) { map = null; contextual = null; }
+        if (map == null && contextual == null) return this;
         // The variant shares the font data and every table reader; only the character map and widths differ. Features
         // are applied after a variable font is instanced, so a variant never makes instances of its own.
         var variant = (FontProgram)MemberwiseClone();
+        variant._featureVariants = null;
+        variant.ShapedFeatures = contextual;
+        if (map == null) return variant;
+        var bmp = _bmp ?? BuildCharMap();
         var mapped = new ushort[bmp.Length];
         for (int c = 0; c < bmp.Length; c++) mapped[c] = bmp[c] < map.Length ? (ushort)map[bmp[c]] : bmp[c];
         variant._astral = _astral?.ToDictionary(kv => kv.Key, kv => kv.Value < map.Length ? (ushort)map[kv.Value] : kv.Value);
         variant._bmp = mapped;
         variant._charWidths = null;
-        variant._featureVariants = null;
         return variant;
     }
 

@@ -143,9 +143,23 @@ internal sealed partial class StyleResolver
                 break;
             case "hr":
                 if ((v = e.GetAttribute("width")) != null) Hint("width", PxOrPercent(v));
-                if ((v = e.GetAttribute("size")) != null) { Hint("border-top-width", PxOrPercent(v)); Hint("border-bottom-width", "0"); }
-                if ((v = e.GetAttribute("color")) != null) { Hint("border-top-color", v); Hint("border-bottom-color", v); Hint("background-color", v); }
-                if (e.HasAttribute("noshade")) { Hint("border-top-style", "solid"); Hint("border-bottom-style", "solid"); }
+                // A size of 1 leaves a single line; a larger one is the height of the rule's box, borders included.
+                if ((v = e.GetAttribute("size")) != null && Invariant.TryParseInt(v, out int ruleSize))
+                {
+                    if (ruleSize <= 1) Hint("border-bottom-width", "0");
+                    else Hint("height", (ruleSize - 2).ToString(CultureInfo.InvariantCulture) + "px");
+                }
+                // A colour or noshade turns the groove into a flat bar, gray unless the colour says otherwise.
+                var ruleColor = e.GetAttribute("color");
+                if (ruleColor != null || e.HasAttribute("noshade"))
+                {
+                    foreach (var side in new[] { "top", "right", "bottom", "left" })
+                    {
+                        Hint("border-" + side + "-style", "solid");
+                        Hint("border-" + side + "-color", ruleColor ?? "gray");
+                    }
+                    Hint("background-color", ruleColor ?? "gray");
+                }
                 // A rule narrower than its box is centred unless align puts it at one side.
                 switch (e.GetAttribute("align")?.Trim().ToLowerInvariant())
                 {

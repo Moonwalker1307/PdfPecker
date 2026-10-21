@@ -177,7 +177,7 @@ internal sealed partial class LayoutEngine
         switch (font)
         {
             case EmbeddedFont embedded:
-                return !embedded.MayLigate(s, start, length);
+                return !embedded.UsesShaper(s, start, length) && !embedded.MayLigate(s, start, length);
             case FontChain:
                 // A chain picks a font per character; CJK ideographs and symbols are not ligated.
                 for (int i = start; i < start + length; i++)
