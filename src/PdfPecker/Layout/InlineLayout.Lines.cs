@@ -1,5 +1,6 @@
 using System.Text;
 using PdfPecker.Css;
+using PdfPecker.Fonts;
 using PdfPecker.Pdf;
 
 namespace PdfPecker.Layout;
@@ -121,9 +122,12 @@ internal sealed partial class LayoutEngine
             if (items[k].IsText) lastText = k;
         }
         float total = 0;
+        // The words of a line mostly share a style, whose font is found once.
+        ComputedStyle? style = null;
+        TextFont? font = null;
         for (int k = 0; k < lastText; k++)
         {
-            kern[k] = PairKern(items[k], items[k + 1]);
+            kern[k] = PairKern(items[k], items[k + 1], ref style, ref font);
             total += kern[k];
         }
         return total;
@@ -135,10 +139,25 @@ internal sealed partial class LayoutEngine
     /// </summary>
     private static float PairKern(Item a, Item b)
     {
+        ComputedStyle? style = null;
+        TextFont? font = null;
+        return PairKern(a, b, ref style, ref font);
+    }
+
+    /// <summary>
+    /// <see cref="PairKern(Item, Item)"/>, with the font of the last style asked about, which the caller keeps for the
+    /// next pair.
+    /// </summary>
+    private static float PairKern(Item a, Item b, ref ComputedStyle? style, ref TextFont? font)
+    {
         if (!IsTextOrSpace(a) || !IsTextOrSpace(b)) return 0;
         if (!ReferenceEquals(a.Style, b.Style) || a.Length == 0 || b.Length == 0 || a.Level != 0 || b.Level != 0) return 0;
-        var font = a.Style.Font;
-        if (!font.HasKerning) return 0;
+        if (!ReferenceEquals(a.Style, style))
+        {
+            style = a.Style;
+            font = style.Font;
+        }
+        if (!font!.HasKerning) return 0;
         int units = font.KernUnits(a.Source[a.Start + a.Length - 1], b.Source[b.Start]);
         return units == 0 ? 0 : units * a.Style.TextSize / 1000f;
     }
@@ -277,9 +296,10 @@ internal sealed partial class LayoutEngine
         if (justify && free > 0)
         {
             // Finding the opportunities may split words into pieces. Together with the kerning between them they are
-            // as wide as the words, so only the kerning of each item is found again.
+            // as wide as the words, so only the kerning of each item is found again, when there are pieces.
+            _justifySplit = false;
             opportunities = JustificationOpportunities(line, block.TextJustify, rtl);
-            LineKerning(items);
+            if (_justifySplit) LineKerning(items);
         }
         float lx = x + lineLeft + (rtl ? 0 : lineIndent);
         float extra = 0, charExtra = 0, leaderW = 0;

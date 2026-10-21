@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Globalization;
 using System.Text;
 
@@ -13,6 +14,9 @@ internal static class CssUnits
     // A value is rewritten at most this many times, so a long list of lengths cannot make the scan quadratic.
     private const int MaxRewrites = 1000;
 
+    // The letters the metric units start with.
+    private static readonly SearchValues<char> UnitInitials = SearchValues.Create("cCeEiIlLrR");
+
     /// <summary>Whether the unit takes the font's metrics to resolve.</summary>
     public static bool IsMetricUnit(ReadOnlySpan<char> unit)
     {
@@ -26,6 +30,11 @@ internal static class CssUnits
     /// <summary>Whether a value has a number with a metric unit outside strings and url().</summary>
     public static bool HasMetricUnit(string value)
     {
+        // A metric unit follows a digit and starts with one of a few letters. Every declaration is checked, and most
+        // values fail this test, which spares them the scan for numbers.
+        var span = value.AsSpan();
+        int digit = span.IndexOfAnyInRange('0', '9');
+        if (digit < 0 || span.Slice(digit).IndexOfAny(UnitInitials) < 0) return false;
         int i = 0;
         while (NextNumber(value, ref i, out _, out _, out int unitStart, out int unitEnd))
             if (IsMetricUnit(value.AsSpan(unitStart, unitEnd - unitStart))) return true;

@@ -29,7 +29,7 @@ internal sealed partial class StyleResolver
             {
                 var d = _decls[i];
                 bool lineHeight = d.Property == "line-height";
-                if (lineHeight != (pass == 1) || !IsFontProperty(d.Property) || CssParser.HasVar(d.Value) || ResetByAll(i, all)) continue;
+                if (lineHeight != (pass == 1) || !IsFontProperty(d.Property) || d.HasVar || ResetByAll(i, all)) continue;
                 _applied[i] = true;
                 Apply(s, parent, d.Property, d.MetricUnits ? RewriteMetricUnits(d.Value, s, lineHeight ? parent : s) : d.Value);
             }

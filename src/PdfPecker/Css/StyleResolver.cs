@@ -293,21 +293,28 @@ internal sealed partial class StyleResolver
 
     private static void Prepare(Element parent)
     {
-        // Anonymous table boxes of an earlier pass give their children back; they are made again after the children's
-        // styles are known.
-        UnwrapAnonymous(parent);
-        // ::before, ::after and ::first-letter boxes from an earlier pass are generated again; a first letter goes back
-        // into the text it was taken from.
-        for (int i = parent.Children.Count - 1; i >= 0; i--)
+        // Only an earlier pass leaves boxes to undo, and one look at the children spares the first pass the passes below.
+        bool earlier = parent.DomChildren != null;
+        for (int i = 0; i < parent.Children.Count && !earlier; i++)
+            earlier = parent.Children[i] is Element { Anonymous: true } or Element { Generated: true };
+        if (earlier)
         {
-            if (parent.Children[i] is not Element { Generated: true, Name: FirstLetterName } letter) continue;
-            var text = letter.Children.Count == 1 && letter.Children[0] is TextNode t ? t.Text : "";
-            if (i + 1 < parent.Children.Count && parent.Children[i + 1] is TextNode rest) rest.Text = text + rest.Text;
-            else parent.Children.Insert(i + 1, new TextNode(text) { Parent = parent });
+            // Anonymous table boxes of an earlier pass give their children back; they are made again after the
+            // children's styles are known.
+            UnwrapAnonymous(parent);
+            // ::before, ::after and ::first-letter boxes from an earlier pass are generated again; a first letter goes
+            // back into the text it was taken from.
+            for (int i = parent.Children.Count - 1; i >= 0; i--)
+            {
+                if (parent.Children[i] is not Element { Generated: true, Name: FirstLetterName } letter) continue;
+                var text = letter.Children.Count == 1 && letter.Children[0] is TextNode t ? t.Text : "";
+                if (i + 1 < parent.Children.Count && parent.Children[i + 1] is TextNode rest) rest.Text = text + rest.Text;
+                else parent.Children.Insert(i + 1, new TextNode(text) { Parent = parent });
+            }
+            // The children of display: contents elements go back into them.
+            RestoreContents(parent);
+            parent.Children.RemoveAll(c => c is Element { Generated: true });
         }
-        // The children of display: contents elements go back into them.
-        RestoreContents(parent);
-        parent.Children.RemoveAll(c => c is Element { Generated: true });
         int count = 0;
         foreach (var c in parent.Children) if (c is Element) count++;
         int index = 0;
