@@ -47,6 +47,19 @@ internal static partial class BoxPainter
         public int ShownCount => (Top.Shows ? 1 : 0) + (Right.Shows ? 1 : 0) + (Bottom.Shows ? 1 : 0) + (Left.Shows ? 1 : 0);
     }
 
+    /// <summary>
+    /// Paints side <paramref name="from"/> (<see cref="Top"/>, <see cref="Right"/>, <see cref="Bottom"/> or
+    /// <see cref="Left"/>) of a box's border as the band (x, y, w, h) on side <paramref name="at"/> of a table cell: a
+    /// row's, row group's or the table's border that wins a collapsed-border conflict there.
+    /// </summary>
+    public static void PaintCollapsedBand(GroupOp group, ComputedStyle s, int from, int at, float x, float y, float w, float h)
+    {
+        var side = new BorderSides(s)[SideIndex(from)];
+        Side(group, Collapsed(side.Style, collapsed: true), side.Width, side.Color, x, y, w, h, horizontal: at is Top or Bottom, SideIndex(at));
+    }
+
+    private static int SideIndex(int side) => side switch { Top => SideTop, Right => SideRight, Bottom => SideBottom, _ => SideLeft };
+
     private static void PaintBorders(GroupOp group, ComputedStyle s, float x, float y, float w, float h, int sides, bool collapsedCell, CornerRadii? radii)
     {
         bool hasArea = w > 0 && h > 0;
