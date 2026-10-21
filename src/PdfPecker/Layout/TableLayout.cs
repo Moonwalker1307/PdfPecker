@@ -76,7 +76,6 @@ internal sealed partial class LayoutEngine
         public float[] ColMin = Array.Empty<float>(), ColMax = Array.Empty<float>();
         public float[] ColFixed = Array.Empty<float>(), ColPct = Array.Empty<float>();
         public float[] ColSpecFixed = Array.Empty<float>(), ColSpecPct = Array.Empty<float>(); // from <col> only
-        public float[]? ColMaxWeight; // with max-width on cells: each column's max-content width as those cap it, else null
         public uint[]? ColBackground, ColGroupBackground; // the background colours of <col> and <colgroup>, else null
         public float[]? RowExtra; // per layout pass: height each row gets on top of its content, to fill the table's height
         public bool DefiniteHeight; // per layout pass: the table's height is a length or a percentage that resolves
@@ -209,8 +208,6 @@ internal sealed partial class LayoutEngine
 
         float hs = table.Style.BorderCollapse ? 0 : table.Style.BorderSpacingH;
         var spanning = new List<CellModel>();
-        var weights = new float[n];
-        bool anyCap = false;
         foreach (var row in m.Rows)
         {
             foreach (var cell in row.Cells)
@@ -220,29 +217,25 @@ internal sealed partial class LayoutEngine
                 // With collapsed borders a cell owns half of each border it shares, as wide as the widest of them.
                 float borders = table.Style.BorderCollapse ? (cell.CollapsedL + cell.CollapsedR) / 2 : cs.BorderLeft + cs.BorderRight;
                 float frame = cs.PaddingLeft.Resolve(0) + cs.PaddingRight.Resolve(0) + borders;
-                cell.Min = mn + frame;
-                // A min-width wider than the content widens the cell's column, as in Chrome.
+                // As in Chrome, a max-width on a cell caps its min-content width as well as its max-content width and
+                // its width, so a nowrap cell narrows and its text overflows or ends in an ellipsis; a min-width wider
+                // than the content widens the cell's column, and wins over the max-width.
+                float maxWidth = float.PositiveInfinity, minWidth = 0;
+                if (!cs.MaxWidth.IsAuto && !cs.MaxWidth.IsPercent && cs.MaxWidth.Unit != LengthUnit.Calc)
+                    maxWidth = cs.MaxWidth.Value + (cs.BorderBox ? 0 : frame);
                 if (!cs.MinWidth.IsAuto && !cs.MinWidth.IsPercent && cs.MinWidth.Unit != LengthUnit.Calc)
-                    cell.Min = Math.Max(cell.Min, cs.MinWidth.Value + (cs.BorderBox ? 0 : frame));
-                cell.Max = Math.Max(mx + frame, cell.Min);
+                    minWidth = cs.MinWidth.Value + (cs.BorderBox ? 0 : frame);
+                cell.Min = Math.Max(Math.Min(mn + frame, maxWidth), minWidth);
+                cell.Max = Math.Max(Math.Min(mx + frame, maxWidth), cell.Min);
                 // A width mixing a percentage with other units, such as calc(50% - 10px), is auto, as in Chrome.
                 if (cs.Width.Unit == LengthUnit.Percent) cell.PercentWidth = cs.Width.Value;
                 else if (!cs.Width.IsAuto && cs.Width.Unit != LengthUnit.Calc)
                 {
-                    cell.FixedWidth = cs.Width.Value + (cs.BorderBox ? 0 : frame);
+                    cell.FixedWidth = Math.Max(Math.Min(cs.Width.Value + (cs.BorderBox ? 0 : frame), maxWidth), minWidth);
                     cell.Max = Math.Max(cell.Min, cell.FixedWidth);
                 }
                 if (cell.ColSpan == 1)
                 {
-                    // As in Chrome, max-width on a cell caps its share of the room the columns grow into, not its
-                    // min-content width.
-                    float weight = cell.Max;
-                    if (!cs.MaxWidth.IsAuto && !cs.MaxWidth.IsPercent && cs.MaxWidth.Unit != LengthUnit.Calc)
-                    {
-                        weight = Math.Min(weight, cs.MaxWidth.Value + (cs.BorderBox ? 0 : frame));
-                        anyCap = true;
-                    }
-                    weights[cell.Col] = Math.Max(weights[cell.Col], weight);
                     int c = cell.Col;
                     m.ColMin[c] = Math.Max(m.ColMin[c], cell.Min);
                     m.ColMax[c] = Math.Max(m.ColMax[c], cell.Max);
@@ -269,7 +262,6 @@ internal sealed partial class LayoutEngine
             m.ColPct[c] = Math.Min(m.ColPct[c], pctLeft);
             pctLeft -= m.ColPct[c];
         }
-        if (anyCap) m.ColMaxWeight = MaxWeights(m, weights);
 
         _tables[table] = m;
         return m;
@@ -309,21 +301,6 @@ internal sealed partial class LayoutEngine
             foreach (var c in group.Children)
                 if (c is Element tr && tr.Style?.Display == Display.TableRow) rows.Add(tr);
         }
-    }
-
-    /// <summary>
-    /// The columns' max-content widths as the cells' max-width caps them, or null when no cap makes a column narrower.
-    /// Columns with a width keep theirs.
-    /// </summary>
-    private static float[]? MaxWeights(TableModel m, float[] weights)
-    {
-        bool any = false;
-        for (int c = 0; c < m.ColCount; c++)
-        {
-            if (m.ColFixed[c] >= 0 || weights[c] >= m.ColMax[c]) weights[c] = m.ColMax[c];
-            else any = true;
-        }
-        return any ? weights : null;
     }
 
     /// <summary>
@@ -461,14 +438,14 @@ internal sealed partial class LayoutEngine
             sumMax += m.ColMax[c];
             if (m.ColFixed[c] < 0) { sumMaxFlexible += m.ColMax[c]; flexible++; }
         }
+        if (pctTotal > 0 && remaining < sumMin)
+        {
+            ShrinkPercentColumns(m, w, avail);
+            return w;
+        }
         if (autoCount == 0) return w;
 
         float target = widthSpecified || sumMax > remaining ? remaining : sumMax;
-        if (target > sumMax && flexible > 0 && m.ColMaxWeight is { } weights)
-        {
-            GrowByWeight(m, w, weights, target);
-            return w;
-        }
         if (target >= sumMax)
         {
             float extra = target - sumMax;
@@ -516,41 +493,23 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>
-    /// Shares <paramref name="target"/> out over the auto columns in proportion to their max-content widths as max-width
-    /// caps them, never below a column's min-content width; columns with a width get their width.
+    /// Fits percentage columns that leave the other columns less than their min-content widths, as Chrome does
+    /// (css-tables-3 §3.9.3): the other columns keep their min-content widths, and the percentage columns share what is
+    /// left above their own min-content widths in proportion to how far their percentage takes them past it.
+    /// <paramref name="w"/> holds the percentage columns' widths on entry.
     /// </summary>
-    private static void GrowByWeight(TableModel m, float[] w, float[] weights, float target)
+    private static void ShrinkPercentColumns(TableModel m, float[] w, float avail)
     {
         int n = m.ColCount;
-        var done = new bool[n];
-        float room = target;
+        float minTotal = 0, grow = 0;
         for (int c = 0; c < n; c++)
         {
-            if (m.ColPct[c] >= 0) done[c] = true;
-            else if (m.ColFixed[c] >= 0) { w[c] = m.ColMax[c]; room -= w[c]; done[c] = true; }
+            minTotal += m.ColMin[c];
+            if (m.ColPct[c] >= 0) grow += w[c] - m.ColMin[c];
         }
-        // A column its share would make narrower than its content takes its min-content width, and the others share
-        // the rest; each round settles at least one column.
-        for (int round = 0; round < n; round++)
-        {
-            float sum = 0;
-            for (int c = 0; c < n; c++) if (!done[c]) sum += weights[c];
-            bool settled = false;
-            for (int c = 0; c < n; c++)
-            {
-                if (done[c]) continue;
-                float share = sum > 0 ? room * weights[c] / sum : 0;
-                if (share >= m.ColMin[c]) continue;
-                w[c] = m.ColMin[c];
-                room -= w[c];
-                done[c] = true;
-                settled = true;
-            }
-            if (settled) continue;
-            for (int c = 0; c < n; c++)
-                if (!done[c]) w[c] = sum > 0 ? room * weights[c] / sum : 0;
-            return;
-        }
+        float room = Math.Max(0, avail - minTotal);
+        for (int c = 0; c < n; c++)
+            w[c] = m.ColMin[c] + (m.ColPct[c] >= 0 && grow > 0 ? room * (w[c] - m.ColMin[c]) / grow : 0);
     }
 
     /// <summary>

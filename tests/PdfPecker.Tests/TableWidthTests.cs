@@ -75,6 +75,22 @@ public class TableWidthTests
     }
 
     [Fact]
+    public void PercentageColumnsMakeRoomForTheOthersContent()
+    {
+        // As in Chrome, 60% + 40% + 20% with text in the last column: the percentage columns shrink, in proportion, to
+        // leave the last one its min-content width inside the table.
+        var ops = Layout("<style>body{margin:0} td{padding:0}</style><table style='width:100%;border-spacing:0'><tr>" +
+                         "<td style='width:60%;background:#f00'></td><td style='width:40%;background:#0f0'></td>" +
+                         "<td style='width:20%;background:#00f'>Supercalifragilistic</td></tr></table>");
+        var one = Rect(ops, 0xFFFF0000);
+        var two = Rect(ops, 0xFF00FF00);
+        var three = Rect(ops, 0xFF0000FF);
+        Assert.Equal(Width, three.X + three.W, 1);
+        Assert.InRange(three.W, 60, 120);
+        Assert.Equal(1.5, one.W / two.W, 2);
+    }
+
+    [Fact]
     public void ALongWordWidensATableWithAWidth()
     {
         // Chrome widens a 250px table to the URL's min-content width rather than letting the URL overflow its cell.
