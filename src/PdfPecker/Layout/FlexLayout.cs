@@ -59,6 +59,8 @@ internal sealed partial class LayoutEngine
             var e = (Element)c;
             if (e.Style == null || e.Style.Display == Display.None || e.Detached) continue;
             FlushRun();
+            // Absolutely positioned children are not items (css-flexbox §4.1, css-grid §9): they take no room.
+            if (e.Style.OutOfFlow) continue;
             items.Add(new BoxItem { El = e, Style = e.Style });
         }
         FlushRun();
@@ -85,6 +87,17 @@ internal sealed partial class LayoutEngine
             it.Mb = it.AutoMb ? 0 : s.MarginBottom.Resolve(basisW);
         }
         return items;
+    }
+
+    /// <summary>
+    /// Queues the absolutely positioned children of a flex or grid container. Their static position is the start of the
+    /// container's content box, where a box placed in it on its own would start.
+    /// </summary>
+    private void QueueAbsoluteChildren(Element container, float x, float y)
+    {
+        foreach (var c in container.Children)
+            if (c is Element { Style: { OutOfFlow: true, Display: not Display.None } } e && !e.Detached)
+                QueueAbsolute(e, x, y);
     }
 
     /// <summary>Border-box min-content and max-content widths of an item.</summary>
@@ -171,6 +184,7 @@ internal sealed partial class LayoutEngine
     {
         var s = e.Style;
         var items = CollectBoxItems(e, w);
+        QueueAbsoluteChildren(e, x, y);
         if (items.Count == 0) return y;
         return s.IsRow ? LayoutFlexRow(e, items, x, y, w, definiteH, minH) : LayoutFlexColumn(e, items, x, y, w, definiteH, minH);
     }
