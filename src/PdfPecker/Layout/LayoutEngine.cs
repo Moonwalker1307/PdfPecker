@@ -1257,6 +1257,7 @@ internal sealed partial class LayoutEngine
         if (BoxPainter.ClipsToText(s)) ClipBackgroundToText(group, opsStart + 1);
         if (e.Control is { } control) FinishControl(e, control, opsStart + 1, bx, y, used, bottom - y, contentBottom - cy, contentH);
         if (e == CanvasRoot) CanvasRootBox = (bx, y, used, bottom - y);
+        if (s.IsFlex) NoteFlexStaticArea(e, contentW, contentH);
         if (cbFrame != null)
         {
             _frames.Remove(cbFrame);
