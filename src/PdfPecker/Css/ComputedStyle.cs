@@ -119,6 +119,10 @@ internal sealed class SvgDashArray
 internal enum TextAlign : byte { Left, Right, Center, Justify, Start, End } // Start and End follow the direction
 // text-justify; distribute is inter-character's old name.
 internal enum TextJustify : byte { Auto, None, InterWord, InterCharacter }
+// text-spacing-trim: how fullwidth CJK punctuation sheds its blank half. normal trims it next to other punctuation and
+// at the end of a line when that makes it fit; space-first also at the start of every line but a paragraph's first,
+// trim-start at the start of every line, and space-all never.
+internal enum TextSpacingTrim : byte { Normal, SpaceAll, SpaceFirst, TrimStart }
 internal enum UnicodeBidi : byte { Normal, Embed, Isolate, BidiOverride, IsolateOverride, Plaintext }
 
 /// <summary>Values of writing-mode. The vertical modes are laid out as horizontal text turned a quarter turn.</summary>
@@ -281,6 +285,7 @@ internal sealed class ComputedStyle
     public WritingMode WritingMode;          // writing-mode
     public TextAlign? TextAlignLast;         // null = auto
     public TextJustify TextJustify;
+    public TextSpacingTrim TextSpacingTrim;
     public TextAlign? BlockAlign;            // -webkit-left, -webkit-center or -webkit-right: also aligns child blocks
     public int TabSize = 8;                  // in spaces
     public bool NoHyphens;                   // hyphens: none (soft hyphens are no break opportunity)
@@ -397,6 +402,9 @@ internal sealed class ComputedStyle
     public Length PaddingTop = Length.Zero, PaddingRight = Length.Zero, PaddingBottom = Length.Zero, PaddingLeft = Length.Zero;
     public float BorderTopWidth = 1.5f, BorderRightWidth = 1.5f, BorderBottomWidth = 1.5f, BorderLeftWidth = 1.5f; // medium = 3px
     public BorderStyle BorderTopStyle, BorderRightStyle, BorderBottomStyle, BorderLeftStyle;
+    // The sides whose border-style is hidden (top 1, right 2, bottom 4, left 8): drawn as none, but in a table with
+    // collapsed borders a hidden side also hides the borders it meets (CSS 2.1 §17.6.2.1).
+    public byte BorderHiddenSides;
     public uint? BorderTopColor, BorderRightColor, BorderBottomColor, BorderLeftColor; // null = currentColor
     // border-radius: horizontal and vertical radius of the top-left, top-right, bottom-right and bottom-left corner
     // (percentages of the border box's width and height); null when every corner is square.
@@ -662,6 +670,7 @@ internal sealed class ComputedStyle
         c.PaddingTop = c.PaddingRight = c.PaddingBottom = c.PaddingLeft = Length.Zero;
         c.BorderTopWidth = c.BorderRightWidth = c.BorderBottomWidth = c.BorderLeftWidth = 1.5f;
         c.BorderTopStyle = c.BorderRightStyle = c.BorderBottomStyle = c.BorderLeftStyle = BorderStyle.None;
+        c.BorderHiddenSides = 0;
         c.BorderTopColor = c.BorderRightColor = c.BorderBottomColor = c.BorderLeftColor = null;
         c.BorderRadii = null;
         c.BorderImageSource = null;

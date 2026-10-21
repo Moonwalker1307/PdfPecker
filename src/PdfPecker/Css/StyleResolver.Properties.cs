@@ -135,6 +135,7 @@ internal sealed partial class StyleResolver
             case "text-align": ApplyTextAlign(s, parent, in d); break;
             case "text-align-last": ApplyTextAlignLast(s, parent, in d); break;
             case "text-justify": ApplyTextJustify(s, parent, in d); break;
+            case "text-spacing-trim": ApplyTextSpacingTrim(s, parent, in d); break;
             case "text-indent": ApplyTextIndent(s, in d); break;
             case "text-transform": ApplyTextTransform(s, parent, in d); break;
             case "text-decoration-line": ApplyTextDecorationLine(s, parent, in d); break;
@@ -232,10 +233,10 @@ internal sealed partial class StyleResolver
             case "border-right-width": s.BorderRightWidth = BorderWidth(d.Lower, d.Em, s.BorderRightWidth); break;
             case "border-bottom-width": s.BorderBottomWidth = BorderWidth(d.Lower, d.Em, s.BorderBottomWidth); break;
             case "border-left-width": s.BorderLeftWidth = BorderWidth(d.Lower, d.Em, s.BorderLeftWidth); break;
-            case "border-top-style": s.BorderTopStyle = ParseBorderStyle(d.Lower, s.BorderTopStyle); break;
-            case "border-right-style": s.BorderRightStyle = ParseBorderStyle(d.Lower, s.BorderRightStyle); break;
-            case "border-bottom-style": s.BorderBottomStyle = ParseBorderStyle(d.Lower, s.BorderBottomStyle); break;
-            case "border-left-style": s.BorderLeftStyle = ParseBorderStyle(d.Lower, s.BorderLeftStyle); break;
+            case "border-top-style": s.BorderTopStyle = ParseBorderStyle(d.Lower, s.BorderTopStyle); SetHidden(s, 1, d.Lower); break;
+            case "border-right-style": s.BorderRightStyle = ParseBorderStyle(d.Lower, s.BorderRightStyle); SetHidden(s, 2, d.Lower); break;
+            case "border-bottom-style": s.BorderBottomStyle = ParseBorderStyle(d.Lower, s.BorderBottomStyle); SetHidden(s, 4, d.Lower); break;
+            case "border-left-style": s.BorderLeftStyle = ParseBorderStyle(d.Lower, s.BorderLeftStyle); SetHidden(s, 8, d.Lower); break;
             case "border-top-color": s.BorderTopColor = BorderColor(d.Value, s); break;
             case "border-right-color": s.BorderRightColor = BorderColor(d.Value, s); break;
             case "border-bottom-color": s.BorderBottomColor = BorderColor(d.Value, s); break;
