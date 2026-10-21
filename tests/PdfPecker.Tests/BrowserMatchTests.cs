@@ -504,6 +504,51 @@ public class BrowserMatchTests
         Near(x.Baseline + 4.5f, ops.Single(t => t.Text == "b").Baseline);
     }
 
+    [Theory]
+    // Arial 24px reaches 22px above and 5px below the baseline, and its 1px line gap makes the line reach 6px below;
+    // Arial 12px reaches 11px and 3px. top hangs the small text from the line's top and text-top from the top of the
+    // parent's font, while bottom stands it on the line's bottom and text-bottom on the bottom of the parent's font.
+    [InlineData("top", -8.25f)]
+    [InlineData("text-top", -8.25f)]
+    [InlineData("bottom", 2.25f)]
+    [InlineData("text-bottom", 1.5f)]
+    // middle centres the 14px box on the baseline raised by half the parent's x-height (12.68px): 2.34px up. Chrome
+    // puts it about a third of a pixel higher.
+    [InlineData("middle", -1.755f)]
+    public void Vertical_align_keywords_place_smaller_inline_text_as_chrome_does(string align, float shift)
+    {
+        var ops = Layout($"""
+            <p style="font: 24px Arial; margin: 0">x<span style="font-size: 12px; vertical-align: {align}">a</span></p>
+            """).OfType<TextOp>().ToList();
+        var x = ops.Single(t => t.Text == "x");
+        Near(16.5f, x.Baseline);
+        Near(x.Baseline + shift, ops.Single(t => t.Text == "a").Baseline);
+    }
+
+    [Fact]
+    public void Text_aligned_to_the_line_top_follows_a_taller_line()
+    {
+        // A 40px image makes the line 40px tall; the text aligned to its top still starts at the top.
+        var png = PdfTestHelpers.DataUri(PdfTestHelpers.SolidPng(4, 4, 0, 0, 255));
+        var ops = Layout($"""
+            <p style="font: 12px Arial; margin: 0"><img src="{png}" style="width: 40px; height: 40px"><span style="vertical-align: top">a</span></p>
+            """).OfType<TextOp>().ToList();
+        Near(8.25f, ops.Single(t => t.Text == "a").Baseline);
+    }
+
+    [Theory]
+    [InlineData("text-align: center", "0 auto", 150)]
+    [InlineData("text-align: center", "0", 150)]
+    [InlineData("text-align: left", "0 0 0 auto", 0)]
+    public void Auto_margins_on_inline_blocks_are_zero(string align, string margin, float x)
+    {
+        // text-align places an inline-block on its line; auto margins neither centre it nor push it to the right.
+        var ops = Layout($"""
+            <div style="width: 400pt; {align}"><div style="display: inline-block; width: 100pt; height: 10pt; margin: {margin}; background: #ff0000"></div></div>
+            """);
+        Near(x, Box(ops, "#ff0000").X);
+    }
+
     [Fact]
     public void Images_aligned_to_top_and_bottom_share_one_line_box()
     {

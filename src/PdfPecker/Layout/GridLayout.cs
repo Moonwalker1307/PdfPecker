@@ -539,6 +539,7 @@ internal sealed partial class LayoutEngine
     {
         var s = e.Style;
         var items = CollectBoxItems(e, w);
+        QueueAbsoluteChildren(e, x, y);
         // A subgrid's tracks on a subgridded axis come from the parent grid that is laying it out (GridLayout.Subgrid.cs).
         // Without a parent grid, subgrid falls back to none. The parent captures the subgrid at the origin of its grid
         // area, so the content box's x and y are the insets of the first tracks, and the area's extent is the edges' end.

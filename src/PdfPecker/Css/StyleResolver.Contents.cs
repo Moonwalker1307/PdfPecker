@@ -28,6 +28,7 @@ internal sealed partial class StyleResolver
         c.Contents = true;
         c.ParentFontSize = s.ParentFontSize;
         c.ParentBaselineShift = s.ParentBaselineShift;
+        c.ParentStyle = s.ParentStyle;
         c.CounterReset = s.CounterReset;
         c.CounterSet = s.CounterSet;
         c.CounterIncrement = s.CounterIncrement;
