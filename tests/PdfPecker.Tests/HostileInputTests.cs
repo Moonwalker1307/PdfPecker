@@ -749,6 +749,33 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Backdrop_filters_over_many_masked_boxes_are_drawn_without_rendering_each_mask()
+    {
+        // The renderer paints every mask behind the backdrop on a canvas the size of the whole backdrop: 200 small masked
+        // boxes under one tall backdrop took 7.7 s and 4 GB.
+        var html = Repeat("<div style='mask:radial-gradient(#000,#0000);height:4px'>x</div>", 200)
+                   + "<div style='backdrop-filter:invert(1);height:900px'></div>";
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 512L << 20);
+    }
+
+    [Fact]
+    public void Nested_masked_backdrop_filters_over_many_pages_are_written_once_per_page_they_paint()
+    {
+        // Each box with a backdrop-filter is drawn on every page it reaches; 300 of them nested in two columns wrote a
+        // masked group for each on each of the pages, 338 MB, in 10 s and 3.5 GB.
+        var text = "<p>" + Repeat("lorem ipsum dolor sit amet ", 40) + "</p>";
+        var html = "<div style='column-count:2'>" + Repeat(text, 3)
+                   + Repeat("<div style='backdrop-filter:invert(1);mask:radial-gradient(#000,#0000)'>", 300) + Repeat(text, 80)
+                   + Repeat("</div>", 301);
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(pdf.Length, 1, 64 << 20);
+        Assert.InRange(allocated, 0, 1024L << 20);
+    }
+
+    [Fact]
     public void Repeating_gradients_share_one_tiling_budget()
     {
         // Each box tiles twenty repeating gradients over 250 periods, about 33 KB of PDF each: four kilobytes of HTML
