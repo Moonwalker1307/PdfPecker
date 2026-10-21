@@ -176,6 +176,17 @@ internal sealed partial class StyleResolver
             _ => s.TextJustify,
         };
 
+    private static void ApplyTextSpacingTrim(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+        => s.TextSpacingTrim = d.Lower switch
+        {
+            "normal" => TextSpacingTrim.Normal,
+            "space-all" => TextSpacingTrim.SpaceAll,
+            "space-first" => TextSpacingTrim.SpaceFirst,
+            "trim-start" => TextSpacingTrim.TrimStart,
+            "inherit" => parent.TextSpacingTrim,
+            _ => s.TextSpacingTrim,
+        };
+
     private void ApplyTextIndent(ComputedStyle s, in DeclaredValue d)
     {
         if (TryParseLength(d.Lower, d.Em, _rootFontSize, out var ti, _vw, _vh)) s.TextIndent = ti.IsPercent ? 0 : ti.Resolve(0);

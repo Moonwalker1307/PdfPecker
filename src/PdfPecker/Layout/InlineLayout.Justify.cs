@@ -147,6 +147,7 @@ internal sealed partial class LayoutEngine
             int offset = _clusterStart[from], length = _clusterStart[c] - offset;
             float width = c == m ? 0 : TextWidth(style.Font, s, start + offset, length, style.TextSize, style.LetterSpacing);
             var piece = it.Slice(offset, length, width);
+            if (c < m) width = piece.Width; // without the trim of its first character
             byte before = from == 0 ? lead : (byte)(_clusterJustify[from] & JustifyBefore);
             byte after = (byte)(_clusterJustify[c - 1] & JustifyAfter);
             piece.Justify = (byte)(before | after | (length == 1 && after != 0 ? JustifyLetters : 0));

@@ -52,6 +52,9 @@ internal sealed partial class LayoutEngine
         public ContentSlot? Tag;      // tagged PDF: the structure slot of the text or image
         public byte Level, Para;      // bidi embedding level, and the level of its paragraph
         public byte Justify;          // where a justified line puts space around it (JustifyBefore, JustifyAfter, JustifyLetters)
+        // text-spacing-trim: the blank half of fullwidth punctuation that the text's first character loses on its left
+        // (the text is drawn that much further left) and its last on its right. Width leaves both out.
+        public float TrimStart, TrimEnd;
 
         public void Reset()
         {
@@ -67,7 +70,7 @@ internal sealed partial class LayoutEngine
             Capture = null;
             AnchorId = null;
             Element = null;
-            FloatMin = RelX = RelY = 0;
+            FloatMin = RelX = RelY = TrimStart = TrimEnd = 0;
             MinWidth = -1;
             Level = Para = Justify = 0;
         }
@@ -80,16 +83,22 @@ internal sealed partial class LayoutEngine
         /// <summary>Whether this item is only a marker (an anchor, a positioned box or bidi controls) that takes no room on the line.</summary>
         public bool IsMarker => Kind is ItemKind.Anchor or ItemKind.Absolute or ItemKind.Bidi;
 
-        /// <summary>A copy showing <paramref name="length"/> characters of this item's text from <paramref name="offset"/>.</summary>
+        /// <summary>
+        /// A copy showing <paramref name="length"/> characters of this item's text from <paramref name="offset"/>, which
+        /// are <paramref name="width"/> wide untrimmed; it keeps the trims of the characters it still has.
+        /// </summary>
         public Item Slice(int offset, int length, float width)
         {
             var c = (Item)MemberwiseClone();
             c.Start = Start + offset;
             c.Length = length;
-            c.Width = width;
+            if (offset != 0) c.TrimStart = 0;
+            if (offset + length != Length) c.TrimEnd = 0;
+            c.Width = width - c.TrimStart - c.TrimEnd;
             return c;
         }
 
+        /// <summary>A copy with other text, <paramref name="width"/> wide; the trim of its last character goes, as the character may.</summary>
         public Item CloneWithText(string text, float width)
         {
             var c = (Item)MemberwiseClone();
@@ -97,6 +106,17 @@ internal sealed partial class LayoutEngine
             c.Start = 0;
             c.Length = text.Length;
             c.Width = width;
+            c.TrimEnd = 0;
+            return c;
+        }
+
+        /// <summary>A copy whose first and last characters are trimmed by <paramref name="start"/> and <paramref name="end"/> instead.</summary>
+        public Item Trimmed(float start, float end)
+        {
+            var c = (Item)MemberwiseClone();
+            c.Width = Width + TrimStart + TrimEnd - start - end;
+            c.TrimStart = start;
+            c.TrimEnd = end;
             return c;
         }
     }
