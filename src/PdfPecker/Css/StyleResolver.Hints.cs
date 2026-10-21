@@ -415,6 +415,9 @@ internal sealed partial class StyleResolver
     // The internal property that carries a text field's own width, which Chrome uses while the page leaves width auto.
     private const string ControlWidthProperty = "-pdfpecker-control-width";
 
+    // PdfPecker's own property that draws a box's content smaller until it fits the box's height (no CSS equivalent).
+    internal const string ScaleToFitProperty = "-pdfpecker-scale-to-fit";
+
     private void Hint(string property, string value)
     {
         // Interned so that elements with identical attributes produce identical declaration lists (see the style cache).

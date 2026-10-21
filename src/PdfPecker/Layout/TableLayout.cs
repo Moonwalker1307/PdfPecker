@@ -1062,7 +1062,14 @@ internal sealed partial class LayoutEngine
         // A positioned cell is the containing block of its absolutely positioned descendants, as any positioned box is.
         cell.Frame = cs.Positioned || cs.Transform != null ? new CbFrame { Transformed = cs.Transform != null } : null;
         if (cell.Frame != null) _frames.Add(cell.Frame);
-        float contentBottom = LayoutFlow(td, cell.X + bl + pl, contentTop, Math.Max(0, w - bl - br - pl - pr));
+        float contentX = cell.X + bl + pl, contentW = Math.Max(0, w - bl - br - pl - pr), frameV = bt + pt + pb + bb;
+        float? fitH = cs.ScaleToFit
+            ? FitHeight(td, rowHeight is float rowH ? Math.Max(0, rowH - frameV) : null,
+                HeightOf(cs.Height, null) is float cellH ? Math.Max(0, cellH - (cs.BorderBox ? frameV : 0)) : float.PositiveInfinity)
+            : null;
+        float contentBottom = fitH is float fit
+            ? LayoutScaledToFit(td, contentX, contentTop, contentW, null, 0, fit)
+            : LayoutFlow(td, contentX, contentTop, contentW);
         if (cell.Frame != null) _frames.Remove(cell.Frame);
         _cbHeight = outerCb;
         contentBottom = LeaveFormattingContext(outerFloats, contentBottom);

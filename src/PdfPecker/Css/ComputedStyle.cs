@@ -390,6 +390,7 @@ internal sealed class ComputedStyle
     public string?[]? BackgroundBlendModes;     // background-blend-mode per layer, as PDF names (null = normal); null = all normal
     public bool Isolate;                        // isolation: isolate
     public bool BoxDecorationClone;             // box-decoration-break: clone (else slice)
+    public bool ScaleToFit;                     // -pdfpecker-scale-to-fit: shrink
     public FilterFunction[]? Filters;           // filter functions on HTML elements; null = none
     public FilterFunction[]? BackdropFilters;   // backdrop-filter functions; null = none
     // Mask layers on HTML elements, topmost first, repeated like the background lists; null MaskImages is mask-image: none.
@@ -745,6 +746,7 @@ internal sealed class ComputedStyle
         c.BackgroundBlendModes = null;
         c.Isolate = false;
         c.BoxDecorationClone = false;
+        c.ScaleToFit = false;
         c.Filters = null;
         c.BackdropFilters = null;
         c.MaskImages = null;
