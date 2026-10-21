@@ -13,6 +13,13 @@ internal class GroupOp : DrawOp
     private float _laterX, _laterY;
     private bool _later;
 
+    /// <summary>
+    /// The right edge of the box this group holds, or of a line wider than its box; NaN for none. It counts toward how
+    /// far the content reaches to the right, which decides whether a page is shrunk to fit, whether or not the box
+    /// paints anything.
+    /// </summary>
+    public float Reach = float.NaN;
+
     /// <summary>The group's ops, moved by any offset that <see cref="OffsetLater"/> put off.</summary>
     public List<DrawOp> Ops
     {
@@ -35,6 +42,7 @@ internal class GroupOp : DrawOp
     public override void Offset(float dx, float dy)
     {
         foreach (var op in Ops) op.Offset(dx, dy);
+        Reach += dx;
         OffsetOwn(dx, dy);
     }
 
@@ -47,6 +55,7 @@ internal class GroupOp : DrawOp
     {
         if (_later) (_laterX, _laterY) = (_laterX + dx, _laterY + dy);
         else (_laterX, _laterY, _later) = (dx, dy, true);
+        Reach += dx;
         OffsetOwn(dx, dy);
     }
 
@@ -71,6 +80,11 @@ internal sealed class ClipOp : GroupOp
 
     public float X, Y, W, H;
     public CornerRadii? Radii;
+    /// <summary>
+    /// The clip of the root element's or the body's overflow, which belongs to the viewport: Chrome's printing ignores
+    /// it when it measures how far the content reaches.
+    /// </summary>
+    public bool OfViewport;
     /// <summary>A rectangle cut out of the clip, in which nothing is painted: the gap a fieldset's legend makes in its border.</summary>
     public (float X, float Y, float W, float H)? Hole;
 

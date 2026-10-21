@@ -15,6 +15,11 @@ public static partial class HtmlToPdf
         /// </summary>
         private const int MaxContainerPasses = 6;
 
+        /// <summary>How many times wider than the page content may be laid out to shrink it to fit, as in Chrome.</summary>
+        private const float MaxShrink = 1.5f;
+
+        private const float PointsPerPixel = 0.75f;
+
         private Element? _htmlElement, _body;
         private List<OutlineHeading>? _headings;
         /// <summary>Whether @page :first, :left or :right rules can give pages a setup of their own.</summary>
@@ -54,7 +59,7 @@ public static partial class HtmlToPdf
             ApplyPageRules(_sheet.PageDeclarations, setup);
             foreach (var rule in _sheet.PageRules)
                 if (rule.Name == name && rule.Selector.Length == 0) ApplyPageRules(rule.Declarations, setup);
-            ScaleAndFit(setup, _options.Scale);
+            ScaleAndFit(setup, _scale, _options.Scale != 1);
             ReserveBands(setup);
             return _namedSetups[name] = setup;
         }
@@ -83,7 +88,7 @@ public static partial class HtmlToPdf
                 && setup.MarginBottom == plain.MarginBottom * plain.Scale && setup.MarginLeft == plain.MarginLeft * plain.Scale
                 && setup.Background == plain.Background)
                 return _variants[(name, first, right)] = plain;
-            ScaleAndFit(setup, _options.Scale);
+            ScaleAndFit(setup, _scale, _options.Scale != 1);
             ReserveBands(setup);
             return _variants[(name, first, right)] = setup;
         }
@@ -168,6 +173,37 @@ public static partial class HtmlToPdf
                 restore?.Invoke();
             }
             return run.Grid.PagesFor(run.Height);
+        }
+
+        /// <summary>
+        /// Shrinks the pages to fit content that reaches past the right edge of their content area, as Chrome's printing
+        /// does: the document is laid out again as much wider as the content reaches, at most 1.5 times the width, and
+        /// drawn smaller by as much, margins keeping their size on paper. Like Chrome, it measures the width as a whole
+        /// number of CSS pixels and does not measure again after the second layout.
+        /// </summary>
+        private void ShrinkToFit()
+        {
+            if (!_options.ShrinkToFit) return;
+            float shrink = 1;
+            foreach (var run in _runs)
+            {
+                // Pages of other widths lay their content out at their own width: the widest of them is the room.
+                float width = Math.Max(run.Width, Math.Max(run.Grid.SetupOf(1).ContentWidth, run.Grid.SetupOf(2).ContentWidth));
+                float room = MathF.Ceiling(width / PointsPerPixel - 0.001f) * PointsPerPixel;
+                float reach = ContentReach.Of(run.Engine.Ops);
+                if (reach > room + 0.01f) shrink = Math.Min(shrink, room / Math.Min(reach, room * MaxShrink));
+            }
+            if (shrink == 1) return;
+
+            _scale *= shrink;
+            _page = PageOfDocument();
+            _namedSetups.Clear();
+            _variants.Clear();
+            _footnoteAreas.Clear();
+            SetUpPage();
+            ResolveStyles();
+            PrepareBands();
+            LayOut();
         }
 
         /// <summary>Records the pages of the elements that target-counter() refers to; true when they moved.</summary>

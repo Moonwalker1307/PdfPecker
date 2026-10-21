@@ -41,6 +41,7 @@ internal sealed partial class LayoutEngine
         public InlineDeco? Deco;      // nearest inline ancestor that paints a background (or clones its edges)
         public PdfImage? Image;
         public float Height;          // image or inline-block height
+        public float PageExcess;      // how much wider than the page an image would be (see _replacedExcess)
         public float BoxBaseline;     // inline-block: distance from its top to its baseline
         public List<DrawOp>? BoxOps;
         public Captured? Capture;     // an inline-block laid out on its own, placed with its anchors and positioned boxes
@@ -60,7 +61,7 @@ internal sealed partial class LayoutEngine
         {
             Source = "";
             Start = Length = 0;
-            Width = Height = BoxBaseline = 0;
+            Width = Height = BoxBaseline = PageExcess = 0;
             Breakable = false;
             BreakAfter = BreakAfter.None;
             Href = null;

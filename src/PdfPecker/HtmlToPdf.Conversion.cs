@@ -29,6 +29,8 @@ public static partial class HtmlToPdf
         private PageSetup _page = null!;
         /// <summary>The viewport height that vh units refer to: the space left for the flowing content.</summary>
         private float _viewport;
+        /// <summary>The scale the pages are laid out at: the options' scale, times the shrink of a page that is too wide.</summary>
+        private float _scale;
 
         private ImageLoader _images = null!;
         private MissingFontReport? _missingFonts;
@@ -54,6 +56,7 @@ public static partial class HtmlToPdf
             _baseDirectory = baseDirectory;
             _resolver = options.ResourceResolver;
             _cancellation = cancellation;
+            _scale = options.Scale;
         }
 
         public byte[] Run()
@@ -66,6 +69,7 @@ public static partial class HtmlToPdf
             PrepareBands();
             PreparePageSetups();
             LayOut();
+            ShrinkToFit();
             return Write(BuildSections());
         }
 
@@ -90,10 +94,17 @@ public static partial class HtmlToPdf
             };
             _sheet = ReadStyles(_doc, media, _options, _baseDirectory, _resolver);
 
-            _page = PageOfOptions(_options);
-            if (!_options.IgnoreCssPageRules) ApplyPageRules(_sheet.PageDeclarations, _page);
+            _page = PageOfDocument();
             if (media.UsedSize && (Math.Abs(media.Width - _page.ContentWidth) > 0.01f || Math.Abs(media.Height - _page.ContentHeight) > 0.01f))
                 _sheet = ReadStyles(_doc, new MediaContext { Width = _page.ContentWidth, Height = _page.ContentHeight }, _options, _baseDirectory, _resolver);
+        }
+
+        /// <summary>The page of the options with the document's @page rules applied, before it is scaled.</summary>
+        private PageSetup PageOfDocument()
+        {
+            var page = PageOfOptions(_options);
+            if (!_options.IgnoreCssPageRules) ApplyPageRules(_sheet.PageDeclarations, page);
+            return page;
         }
 
         /// <summary>
@@ -102,7 +113,7 @@ public static partial class HtmlToPdf
         /// </summary>
         private void SetUpPage()
         {
-            ScaleAndFit(_page, _options.Scale);
+            ScaleAndFit(_page, _scale, _options.Scale != 1);
 
             // Most documents have no bands: one search of the source spares walking the whole tree four times.
             bool mayHaveBands = _html.Contains("data-sticky-pdf-", StringComparison.OrdinalIgnoreCase);

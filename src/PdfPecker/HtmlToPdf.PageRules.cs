@@ -15,10 +15,11 @@ public static partial class HtmlToPdf
     /// <summary>
     /// Scales a page set up on paper to layout points and fits its margins. The page is laid out at its paper size
     /// divided by the scale, as Chrome's print scale does; the writer then draws it scaled, so the margins come out at
-    /// their paper size again.
+    /// their paper size again. A page scaled by PdfOptions.Scale is written at the paper size Chrome would give it.
     /// </summary>
-    private static void ScaleAndFit(PageSetup page, float scale)
+    private static void ScaleAndFit(PageSetup page, float scale, bool chromePaper)
     {
+        page.ChromePaper = chromePaper;
         if (scale != 1)
         {
             page.Scale = scale;
