@@ -20,6 +20,12 @@ internal class GroupOp : DrawOp
     /// </summary>
     public float Reach = float.NaN;
 
+    /// <summary>
+    /// True when the group holds only ink overflow, such as a box shadow: it paints on the pages the rest of the content
+    /// reaches but never adds a page of its own, as Chrome does not paginate ink overflow.
+    /// </summary>
+    public bool Ink;
+
     /// <summary>The group's ops, moved by any offset that <see cref="OffsetLater"/> put off.</summary>
     public List<DrawOp> Ops
     {

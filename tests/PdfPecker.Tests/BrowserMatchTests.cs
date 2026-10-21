@@ -572,4 +572,81 @@ public class BrowserMatchTests
             """));
         Assert.Contains(" 75 15.75 re f", content);
     }
+    [Theory]
+    [InlineData("width: 100%")]
+    [InlineData("width: 50%")]
+    [InlineData("max-width: 100%")]
+    public void A_percentage_sized_image_does_not_widen_a_fixed_width_table(string imageStyle)
+    {
+        // A 400px image with a percentage width has no min-content width, as in Chrome: the 200px table keeps its width
+        // instead of growing to the image's natural size.
+        var png = PdfTestHelpers.DataUri(PdfTestHelpers.SolidPng(400, 250, 0, 0, 255));
+        var ops = Layout($"""
+            <table style="width: 200px; border-collapse: collapse; background: #00ff00"><tr><td style="padding: 0"><img src="{png}" style="{imageStyle}"></td><td style="padding: 0">text</td></tr></table>
+            """);
+        Near(150, Box(ops, "#00ff00").W);
+    }
+
+    [Fact]
+    public void A_percentage_sized_svg_image_does_not_widen_a_fixed_width_table()
+    {
+        var svg = "data:image/svg+xml;base64," + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(
+            "<svg xmlns='http://www.w3.org/2000/svg' width='400' height='250'><rect width='400' height='250' fill='red'/></svg>"));
+        var ops = Layout($"""
+            <table style="width: 200px; border-collapse: collapse; background: #00ff00"><tr><td style="padding: 0"><img src="{svg}" style="width: 100%"></td><td style="padding: 0">text</td></tr></table>
+            """);
+        Near(150, Box(ops, "#00ff00").W);
+    }
+
+    [Theory]
+    [InlineData("display: flex; flex-direction: column")]
+    [InlineData("display: flex; align-items: flex-start")]
+    [InlineData("display: grid")]
+    public void Margins_of_the_first_and_last_child_stay_inside_a_flex_or_grid_item(string container)
+    {
+        // A flex or grid item is a formatting context of its own, so its child's 16px margins do not collapse through
+        // it: the item is 16 + 20 + 16px tall, as in Chrome (a Bootstrap card body ending in a table).
+        var ops = Layout($"""
+            <div style="{container}"><div style="background: #00ff00"><div style="width: 50px; height: 20px; margin: 16px 0"></div></div></div>
+            """);
+        Near(39, Box(ops, "#00ff00").H);
+    }
+
+    [Fact]
+    public void Margins_still_collapse_through_a_plain_block()
+    {
+        var ops = Layout("""
+            <div style="background: #00ff00"><div style="height: 20px; margin: 16px 0"></div></div>
+            """);
+        Near(15, Box(ops, "#00ff00").H);
+    }
+
+    [Theory]
+    [InlineData("box-shadow: 0 0 0 1px #888")]
+    [InlineData("box-shadow: 0 0 0 1px #888; border-radius: 10px")]
+    [InlineData("box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3)")]
+    [InlineData("box-shadow: 0 0 0 1px #888; opacity: 0.9")]
+    [InlineData("box-shadow: 0 200mm 0 0 #888")]
+    public void A_box_shadow_below_a_box_as_tall_as_the_page_adds_no_page(string style)
+    {
+        // The shadow is ink overflow, which Chrome does not paginate: a shadow around a box exactly as tall as the page
+        // area, or even one offset pages down, leaves the document one page long (a boarding pass with a 1px shadow
+        // used as its border).
+        var pdf = HtmlToPdf.Convert($$"""
+            <style>@page { size: 210mm 90mm; margin: 5mm }</style>
+            <body style="margin: 0"><div style="height: 80mm; {{style}}"></div></body>
+            """);
+        Assert.Equal(1, PdfPages.Count(pdf));
+    }
+
+    [Fact]
+    public void A_box_continuing_onto_the_next_page_keeps_that_page()
+    {
+        // The second page holds the rest of the box as well as its shadow, so it stays.
+        var pdf = HtmlToPdf.Convert("""
+            <style>@page { size: 210mm 90mm; margin: 5mm }</style>
+            <body style="margin: 0"><div style="height: 120mm; box-shadow: 0 0 6px 2px #ff0000"></div></body>
+            """);
+        Assert.Equal(2, PdfPages.Count(pdf));
+    }
 }

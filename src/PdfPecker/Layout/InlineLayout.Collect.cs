@@ -267,6 +267,9 @@ internal sealed partial class LayoutEngine
         image.Image = s.Visible ? img : null;
         image.Width = w;
         image.Height = h;
+        // A percentage width or max-width makes the image compressible (CSS Sizing 3 §5.2.2): as in Chrome, it has no
+        // min-content width, so it does not hold a table column or a shrink-to-fit box open at its natural width.
+        if (_measuring && IsCompressible(s)) image.MinWidth = 0;
         image.PageExcess = _replacedExcess;
         image.Href = href ?? LinkOf(e);
         image.Tag = Tags?.Of(e);
@@ -274,6 +277,9 @@ internal sealed partial class LayoutEngine
         if (mr > 0) AddSpacer(st, s, mr, href);
         st.LastWasSpace = false;
     }
+
+    /// <summary>Whether a replaced element's width depends on its containing block, which leaves it no min-content width.</summary>
+    private static bool IsCompressible(ComputedStyle s) => s.Width.IsPercent || s.MaxWidth.IsPercent;
 
     /// <summary>
     /// Adds an SVG drawing (an inline svg element, or an SVG file in an img element) as a small inline box, so padding
@@ -301,7 +307,11 @@ internal sealed partial class LayoutEngine
             else ops.Add(new SvgOp(pl, ptop, sw, sh, svg) { Tag = Tags?.Of(e) });
         }
         if (ml > 0) AddSpacer(st, s, ml, href);
-        st.Items.Add(new Item { Kind = ItemKind.Box, Style = s, Width = boxW, Height = boxH, BoxBaseline = boxH, BoxOps = ops, Href = href ?? LinkOf(e) });
+        st.Items.Add(new Item
+        {
+            Kind = ItemKind.Box, Style = s, Width = boxW, Height = boxH, BoxBaseline = boxH, BoxOps = ops, Href = href ?? LinkOf(e),
+            MinWidth = _measuring && IsCompressible(s) ? pl + pr : -1,
+        });
         if (mr > 0) AddSpacer(st, s, mr, href);
         st.LastWasSpace = false;
     }
