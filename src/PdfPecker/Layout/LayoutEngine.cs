@@ -938,7 +938,8 @@ internal sealed partial class LayoutEngine
         var pages = _childPageBox;
         _childPageBox = null;
         if (!table) _childPageBox = pages;
-        bool avoidInside = s.AvoidBreakInside || s.AvoidColumnBreakInside && _grid is ColumnGrid;
+        // A box scaled to fit is drawn whole, so like a box kept whole it goes to the next page rather than across.
+        bool avoidInside = s.AvoidBreakInside || s.ScaleToFit || s.AvoidColumnBreakInside && _grid is ColumnGrid;
         bool movable = _avoidDepth < MaxKeptWholeNesting || _grid is not ColumnGrid;
         if (avoidInside) _avoidDepth++;
         bool edges = !table && _paginate && _grid is not ColumnGrid && KeepsEdgesWithContent(e);
@@ -1187,7 +1188,12 @@ internal sealed partial class LayoutEngine
             childCb = _cbHeight;
             // The legend was laid out already: the content leaves it out.
             if (legend != null) legend.Detached = true;
-            try { contentBottom = LayoutContent(e, cx, cy, contentW, definiteH, minH); }
+            try
+            {
+                contentBottom = s.ScaleToFit && FitHeight(e, definiteH, MaxContentHeight(s, sizing, cbH)) is float fitH
+                    ? LayoutScaledToFit(e, cx, cy, contentW, definiteH, minH, fitH)
+                    : LayoutContent(e, cx, cy, contentW, definiteH, minH);
+            }
             finally { if (legend != null) legend.Detached = false; }
             _cbHeight = outerCb;
             _pageBox = null;
