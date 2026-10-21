@@ -432,6 +432,36 @@ internal sealed partial class StyleResolver
             _ => current,
         };
 
+    /// <summary>
+    /// The physical side a logical one is on, for the element's own writing mode and direction: the block axis runs down
+    /// in horizontal-tb and across the page in the vertical modes (right to left in vertical-rl and sideways-rl), and the
+    /// inline axis runs along it, reversed by direction: rtl and, in sideways-lr, by the upward lines.
+    /// </summary>
+    private static string PhysicalSide(ComputedStyle s, bool block, bool end)
+    {
+        var mode = s.WritingMode;
+        if (mode == WritingMode.HorizontalTb)
+        {
+            if (block) return end ? "bottom" : "top";
+            return end != s.Rtl ? "right" : "left";
+        }
+        if (block)
+        {
+            bool rightToLeft = mode is WritingMode.VerticalRl or WritingMode.SidewaysRl;
+            return end == rightToLeft ? "left" : "right";
+        }
+        bool upwards = mode == WritingMode.SidewaysLr;
+        return end != s.Rtl != upwards ? "bottom" : "top";
+    }
+
+    /// <summary>The border-radius longhand of the corner where a logical block side meets a logical inline side.</summary>
+    private static string PhysicalCorner(ComputedStyle s, bool blockEnd, bool inlineEnd)
+    {
+        string block = PhysicalSide(s, true, blockEnd), inline = PhysicalSide(s, false, inlineEnd);
+        // One of the two sides is horizontal and the other vertical, whichever axis is which.
+        return block is "top" or "bottom" ? "border-" + block + "-" + inline + "-radius" : "border-" + inline + "-" + block + "-radius";
+    }
+
     /// <summary>Sets one corner's border radius: one length for both axes, or horizontal then vertical.</summary>
     private void SetRadius(ComputedStyle s, int corner, string lower, float em, ComputedStyle? inherited)
     {
