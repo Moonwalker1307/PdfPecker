@@ -144,9 +144,10 @@ internal sealed record Transform3D(Element Owner, TransformFn[] Functions, float
 /// </summary>
 internal sealed class LayerOp : GroupOp
 {
-    // Painting order among siblings: negative z-index, then the normal flow (0), floats, the lines beside a float with
+    // Painting order among siblings: negative z-index, then the normal flow (0), the outlines of collapsed table cells
+    // (which the cells after them would otherwise cover), floats, the lines beside a float with
     // shape-outside (which may overlap its box), positioned boxes with z-index auto or 0, and positive z-index.
-    public const float FloatOrder = 0.25f, InlineOverFloatsOrder = 0.375f, PositionedOrder = 0.5f;
+    public const float OutlineOrder = 0.125f, FloatOrder = 0.25f, InlineOverFloatsOrder = 0.375f, PositionedOrder = 0.5f;
 
     public float Order;
     /// <summary>Below 1: painted as one transparency group at this opacity.</summary>
