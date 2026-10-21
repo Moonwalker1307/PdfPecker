@@ -91,6 +91,25 @@ public class KerningAndBoxTests
         Near(225.78f * 0.75f, ops.OfType<RectOp>().Single(r => r.Color == Color("#f00")).W, 0.1f);
     }
 
+    [Theory]
+    [InlineData("float:left")]
+    [InlineData("display:inline-block")]
+    [InlineData("width:max-content")]
+    public void Words_that_may_break_stay_whole_in_a_box_as_wide_as_them(string sizing)
+    {
+        // " A" kerns, so the box is a little narrower than the words' own widths; overflow-wrap: break-word must not
+        // take that as a reason to break "AOT" (it used to put the "T" on a line of its own).
+        var ops = Layout($"<div style='{sizing};font:16px Arial;overflow-wrap:break-word'>native AOT</div>");
+        Assert.Single(ops.OfType<TextOp>());
+    }
+
+    [Fact]
+    public void Words_that_may_break_stay_whole_in_a_flex_item_as_wide_as_them()
+    {
+        var ops = Layout("<div style='display:flex;font:16px Arial;overflow-wrap:break-word'><div>native AOT</div><div style='flex:1'>x</div></div>");
+        Assert.Equal(2, ops.OfType<TextOp>().Count());
+    }
+
     [Fact]
     public void Kerned_pairs_move_glyphs_in_the_content_stream()
     {
