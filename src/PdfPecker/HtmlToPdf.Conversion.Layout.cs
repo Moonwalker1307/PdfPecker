@@ -68,13 +68,15 @@ public static partial class HtmlToPdf
         /// The setup of a document page: @page :first, :left and :right rules that change the size, margins or
         /// background give those pages their own. The first page of the document is a right page, as in left-to-right
         /// books, and a left page when the root element is right to left, as in Chrome: the pages then progress from
-        /// right to left (CSS Paged Media 3, 4.2).
+        /// right to left (CSS Paged Media 3, 4.2). A first page with a header or footer of its own also gets its own
+        /// setup, since the bands it reserves differ.
         /// </summary>
         private PageSetup VariantFor(string? name, int documentPage)
         {
             var plain = SetupFor(name);
-            if (!_pageVariants) return plain;
-            bool first = documentPage == 0, right = documentPage % 2 == (_rtlPages ? 1 : 0);
+            bool first = documentPage == 0, firstBands = first && FirstPageBands;
+            if (!_pageVariants && !firstBands) return plain;
+            bool right = documentPage % 2 == (_rtlPages ? 1 : 0);
             if (_variants.TryGetValue((name, first, right), out var cached)) return cached;
             var setup = PageOfOptions(_options);
             // The rules that match the page, of lower specificity first and in source order otherwise.
@@ -83,13 +85,13 @@ public static partial class HtmlToPdf
                          .Where(r => (r.Name.Length == 0 || r.Name == name) && (r.Selector.Length == 0 || r.Selector == side || first && r.Selector == ":first"))
                          .OrderBy(r => r.Specificity))
                 ApplyPageRules(rule.Declarations, setup);
-            if (setup.Width == plain.Width * plain.Scale && setup.Height == plain.Height * plain.Scale
+            if (!firstBands && setup.Width == plain.Width * plain.Scale && setup.Height == plain.Height * plain.Scale
                 && setup.MarginTop == plain.MarginTop * plain.Scale && setup.MarginRight == plain.MarginRight * plain.Scale
                 && setup.MarginBottom == plain.MarginBottom * plain.Scale && setup.MarginLeft == plain.MarginLeft * plain.Scale
                 && setup.Background == plain.Background)
                 return _variants[(name, first, right)] = plain;
             ScaleAndFit(setup, _scale, _options.Scale != 1);
-            ReserveBands(setup);
+            ReserveBands(setup, first);
             return _variants[(name, first, right)] = setup;
         }
 
