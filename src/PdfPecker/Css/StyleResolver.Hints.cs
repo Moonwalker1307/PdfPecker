@@ -9,7 +9,7 @@ internal sealed partial class StyleResolver
 {
     private void AddHints(Element e)
     {
-        if (e.Attributes.Count == 0 && e.Name != "td" && e.Name != "th" && e.Name != "bdi") return;
+        if (e.Attributes.Count == 0 && e.Name != "td" && e.Name != "th" && e.Name != "bdi" && !e.ImpliedBody) return;
         _scratch.Clear();
         string? v;
         if (e.HasAttribute("dir") || e.Name == "bdi") DirHints(e);
@@ -145,6 +145,10 @@ internal sealed partial class StyleResolver
                 }
                 break;
             case "body":
+                if (e.ImpliedBody)
+                {
+                    Hint("margin-top", "0px"); Hint("margin-right", "0px"); Hint("margin-bottom", "0px"); Hint("margin-left", "0px");
+                }
                 if ((v = e.GetAttribute("bgcolor")) != null) Hint("background-color", v);
                 if ((v = e.GetAttribute("text")) != null) Hint("color", v);
                 break;

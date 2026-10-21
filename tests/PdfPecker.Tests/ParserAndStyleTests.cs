@@ -32,7 +32,7 @@ public class HtmlParserTests
         Assert.Equal(2, ps.Count);
         Assert.Equal("one", ps[0].InnerText());
         Assert.Equal("two", ps[1].InnerText());
-        Assert.Equal("#document", doc.FindFirst("div")!.Parent!.Name);
+        Assert.Equal("body", doc.FindFirst("div")!.Parent!.Name);
     }
 
     [Fact]

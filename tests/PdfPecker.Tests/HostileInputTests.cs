@@ -47,9 +47,18 @@ public class HostileInputTests
     {
         // Each stray node between rows goes in front of its table; inserting at the table's place must not search or
         // shift its parent's children for every node. Tables nested in the moved content repeat it at every level.
-        var parse = Bounded(() => Html.HtmlParser.Parse("<table>" + Repeat("<b>x</b>y<input>", 100_000) + "<tr><td>1</table>"));
+        var parse = Bounded(() => Html.HtmlParser.Parse("<table>" + Repeat("<b>x</b>y<input>", 100_000) + "<tr><td>1</table>", impliedStructure: false));
         Assert.Equal("table", ((Html.Element)parse.Children[^1]).Name);
         AssertStructurallyValid(Bounded("<table>" + Repeat("<div>a<table>b<tr>", 200) + "<td>c</table>"));
+    }
+
+    [Fact]
+    public void Repeated_body_and_html_tags_merge_a_bounded_number_of_attributes()
+    {
+        var doc = Bounded(() => Html.HtmlParser.Parse(
+            string.Concat(Enumerable.Range(0, 50_000).Select(i => $"<body k{i}=1><html m{i}=1>"))));
+        Assert.True(doc.FindFirst("body")!.Attributes.Count <= 1000);
+        Assert.Single(doc.Children.OfType<Html.Element>());
     }
 
     // 3D transform lists multiply 4x4 matrices: huge, tiny, NaN-making and behind-the-viewer values must end in a drawn
@@ -813,7 +822,7 @@ public class HostileInputTests
     public void Text_split_by_many_ignored_tags_is_merged_in_linear_time()
     {
         AssertStructurallyValid(Bounded("<p>" + Repeat("a</em>", 200000) + "</p>"));
-        var doc = HtmlParser.Parse("a<!--x-->b</i>c");
+        var doc = HtmlParser.Parse("a<!--x-->b</i>c", impliedStructure: false);
         Assert.Equal("abc", Assert.IsType<TextNode>(Assert.Single(doc.Children)).Text);
     }
 

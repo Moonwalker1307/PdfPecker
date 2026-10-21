@@ -39,6 +39,12 @@ internal sealed class Element : Node
     /// <summary>Taken out of the normal flow, e.g. a running page header or footer that is drawn on every page.</summary>
     public bool Detached;
 
+    /// <summary>
+    /// A body the parser made because the document has no body tag. It has no default margin, so that a fragment keeps
+    /// the layout it had before the parser made the element (browsers would add 8px).
+    /// </summary>
+    public bool ImpliedBody;
+
     /// <summary>A ::before or ::after box made by the style resolver, not by the parser.</summary>
     public bool Generated;
 
