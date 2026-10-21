@@ -156,6 +156,11 @@ internal sealed class LayerOp : GroupOp
     public const float OutlineOrder = 0.125f, FloatOrder = 0.25f, InlineOverFloatsOrder = 0.375f, PositionedOrder = 0.5f;
 
     public float Order;
+    /// <summary>
+    /// For the layer of a positioned (or otherwise layered) box, its element's place in tree order, which orders it among
+    /// layers of the same <see cref="Order"/>; -1 for other layers, which keep the order their ops were made in.
+    /// </summary>
+    public int TreeOrder = -1;
     /// <summary>Below 1: painted as one transparency group at this opacity.</summary>
     public float Opacity = 1;
     /// <summary>Its first op, the box's own background, stays below its negative z-index children.</summary>
@@ -268,18 +273,22 @@ internal sealed class LayerOp : GroupOp
         for (int i = 0; i < keyed.Length; i++)
         {
             var op = ops[pinned + i];
-            keyed[i] = new SortedOp(op, op is LayerOp l ? l.Order : 0, i);
+            keyed[i] = op is LayerOp l ? new SortedOp(op, l.Order, l.TreeOrder, i) : new SortedOp(op, 0, -1, i);
         }
         Array.Sort(keyed);
         for (int i = 0; i < keyed.Length; i++) ops[pinned + i] = keyed[i].Op;
     }
 
-    private readonly record struct SortedOp(DrawOp Op, float Order, int Index) : IComparable<SortedOp>
+    // Only the layers of positioned and layered boxes have a tree order, and they alone take the orders positioned boxes
+    // paint at, so ops that tie on order either all have one or all keep the order they were made in.
+    private readonly record struct SortedOp(DrawOp Op, float Order, int TreeOrder, int Index) : IComparable<SortedOp>
     {
         public int CompareTo(SortedOp other)
         {
             int byOrder = Order.CompareTo(other.Order);
-            return byOrder != 0 ? byOrder : Index.CompareTo(other.Index);
+            if (byOrder != 0) return byOrder;
+            if (TreeOrder >= 0 && other.TreeOrder >= 0 && TreeOrder != other.TreeOrder) return TreeOrder.CompareTo(other.TreeOrder);
+            return Index.CompareTo(other.Index);
         }
     }
 }
