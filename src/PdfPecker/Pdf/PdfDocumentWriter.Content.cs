@@ -90,7 +90,30 @@ internal sealed partial class PdfDocumentWriter
 
     private static void WriteColor(ByteBuffer b, uint color)
     {
-        b.Num(((color >> 16) & 0xFF) / 255f).Sp().Num(((color >> 8) & 0xFF) / 255f).Sp().Num((color & 0xFF) / 255f);
+        var components = ColorComponents.Bytes;
+        b.Bytes(components[(color >> 16) & 0xFF]).Sp().Bytes(components[(color >> 8) & 0xFF]).Sp().Bytes(components[color & 0xFF]);
+    }
+
+    /// <summary>
+    /// Each colour component 0 to 255 as written in a content stream, from 0 to 1 in steps of 1/255. Colours are set
+    /// for every box and run of text, and formatting the same 256 numbers over and over was a noticeable part of
+    /// writing a page.
+    /// </summary>
+    private static class ColorComponents
+    {
+        public static readonly byte[][] Bytes = Build();
+
+        private static byte[][] Build()
+        {
+            var table = new byte[256][];
+            var b = new ByteBuffer(8);
+            for (int i = 0; i < table.Length; i++)
+            {
+                b.Clear();
+                table[i] = b.Num(i / 255f).Span.ToArray();
+            }
+            return table;
+        }
     }
 
     private void EndText(ByteBuffer b)

@@ -8,7 +8,9 @@ internal sealed class StandardFont : TextFont
     public readonly string BaseFont;
     public readonly int Index;          // 0..11, used as resource name /F{Index+1}
     private readonly short[] _widths;
-    private readonly Dictionary<int, short>? _kerning; // left << 8 | right (WinAnsi codes) -> 1/1000 em
+    // Pair kerning in 1/1000 em by left and then right WinAnsi code; a left character without pairs has no row. Most
+    // characters start no pair, and text is measured pair by pair, so a row lookup beats hashing every pair.
+    private readonly short[]?[]? _kerning;
 
     private StandardFont? _withoutKerning;
 
@@ -38,8 +40,8 @@ internal sealed class StandardFont : TextFont
         var pairs = StandardFontMetrics.Kerning[index];
         if (pairs.Length > 0)
         {
-            _kerning = new Dictionary<int, short>(pairs.Length);
-            foreach (uint p in pairs) _kerning[(int)(p >> 16)] = (short)(p & 0xFFFF);
+            _kerning = new short[]?[256];
+            foreach (uint p in pairs) (_kerning[(p >> 24) & 0xFF] ??= new short[256])[(p >> 16) & 0xFF] = (short)(p & 0xFFFF);
         }
     }
 
@@ -76,7 +78,7 @@ internal sealed class StandardFont : TextFont
             total += w[c];
             if (_kerning != null)
             {
-                if (prev >= 0 && _kerning.TryGetValue(prev << 8 | c, out short k)) total += k;
+                if (prev >= 0 && _kerning[prev] is { } row) total += row[c];
                 prev = c;
             }
         }
@@ -105,7 +107,7 @@ internal sealed class StandardFont : TextFont
     // Kerned like the Liberation font that browsers use in its place.
     public override int KernUnits(int left, int right)
         => _kerning != null && (uint)left < 0x10000 && (uint)right < 0x10000
-           && _kerning.TryGetValue(WinAnsi.Encode((char)left) << 8 | WinAnsi.Encode((char)right), out short k) ? k : 0;
+           && _kerning[WinAnsi.Encode((char)left)] is { } row ? row[WinAnsi.Encode((char)right)] : 0;
 
     public int CharUnits(char c) => _widths[WinAnsi.Encode(c)];
 

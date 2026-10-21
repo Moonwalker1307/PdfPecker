@@ -215,11 +215,11 @@ internal sealed class StructureTree
         _elements[e] = se;
         if (e.Id != null) _targets[e.Id] = se;
         if (e.Name == "a" && e.GetAttribute("name") is { Length: > 0 } anchorName) _targets[anchorName] = se;
-        if (type == "Link") se.Text = System.Text.RegularExpressions.Regex.Replace(e.InnerText(), @"\s+", " ").Trim();
+        if (type == "Link") se.Text = Layout.LayoutEngine.CollapseWhitespace(e.InnerText());
         if (e.FootnoteBody != null) se.Text = ("Footnote " + se.Text).Trim();
         if (type[0] == 'H' && type.Length == 2 && FirstHeading == null)
         {
-            var text = System.Text.RegularExpressions.Regex.Replace(e.InnerText(), @"\s+", " ").Trim();
+            var text = Layout.LayoutEngine.CollapseWhitespace(e.InnerText());
             if (text.Length > 0) FirstHeading = text;
         }
         switch (type)

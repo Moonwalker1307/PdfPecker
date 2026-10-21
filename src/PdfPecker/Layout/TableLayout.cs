@@ -12,6 +12,9 @@ internal sealed partial class LayoutEngine
         public int Row, Col, ColSpan = 1, RowSpan = 1;
         public float Min, Max;          // border-box intrinsic widths
         public float CollapsedT, CollapsedB, CollapsedL, CollapsedR; // resolved collapsed borders on each side
+        // With collapsed borders, the sides whose winning border at the cell's first row and column is its own, and
+        // those where it is a row's, a row group's or the table's: resolved once, as drawing each cell asked again.
+        public int SelfSides, ForeignSides;
         public float FixedWidth = -1;   // specified absolute border-box width
         public float PercentWidth = -1;
 
@@ -1087,7 +1090,7 @@ internal sealed partial class LayoutEngine
         (float X, float Y, float W, float H)? backgroundArea = null;
         if (collapse)
         {
-            sides = CollapsedSides(m, cell, AtPageTop(y));
+            sides = CollapsedSides(cell, AtPageTop(y));
             if (sides != BoxPainter.AllSides && (CssColor.IsVisible(cs.BackgroundColor) || cs.BackgroundImages != null))
                 backgroundArea = CollapsedBackground(cell, h, sides);
             x -= cs.BorderLeft / 2;
