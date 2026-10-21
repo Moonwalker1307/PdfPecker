@@ -120,9 +120,12 @@ internal static class FontFeatures
     /// <summary>
     /// The glyph substitutions the features make, as a glyph map (null when they change nothing). Lookups apply in the
     /// font's order, each to the result of the ones before, as in a shaper; a value above 1 picks that alternate.
+    /// <paramref name="contextual"/> gets the features the map cannot hold because they substitute in context, such as
+    /// fractions (null when there are none): the shaper applies those to the glyphs of a run.
     /// </summary>
-    public static int[]? Substitutions(FontProgram font, string key)
+    public static int[]? Substitutions(FontProgram font, string key, out string[]? contextual)
     {
+        contextual = null;
         if (font.Table("GSUB") is not { Length: >= 10 } gsubTable) return null;
         var d = font.Data;
         int gsub = gsubTable.Offset;
@@ -131,10 +134,13 @@ internal static class FontFeatures
         if (U16(gsub) != 1) return null;
 
         var wanted = new Dictionary<uint, int>();
+        var names = new Dictionary<uint, string>();
         foreach (var part in key.Split(','))
         {
             int eq = part.IndexOf('=');
-            wanted[FontProgram.Tag(eq < 0 ? part : part[..eq])] = eq < 0 ? 1 : int.Parse(part[(eq + 1)..], CultureInfo.InvariantCulture);
+            var name = eq < 0 ? part : part[..eq];
+            wanted[FontProgram.Tag(name)] = eq < 0 ? 1 : int.Parse(part[(eq + 1)..], CultureInfo.InvariantCulture);
+            names[FontProgram.Tag(name)] = name;
         }
 
         int scripts = gsub + U16(gsub + 4), features = gsub + U16(gsub + 6), lookups = gsub + U16(gsub + 8);
@@ -156,8 +162,8 @@ internal static class FontFeatures
         if (langSys < 0) return null;
 
         // A feature whose lookups are all single or alternate substitutions applies everywhere. One with contextual
-        // lookups (fractions and ordinals usually are) only substitutes in context, which this does not do, so it is
-        // left out rather than applied to every glyph.
+        // lookups (fractions and ordinals usually are) only substitutes in context, which a glyph map cannot do, so it
+        // is handed to the shaper rather than applied to every glyph.
         int lookupCount = U16(lookups);
         int TypeOf(int li)
         {
@@ -167,6 +173,8 @@ internal static class FontFeatures
             return type;
         }
         var lookupValues = new SortedDictionary<int, int>(); // lookup index -> the value of its feature
+        var simple = new List<(string Name, int Value, List<int> Lookups)>();
+        List<string>? inContext = null;
         int featureCount = U16(features);
         foreach (int system in new[] { langSys, han, kana })
         {
@@ -180,10 +188,28 @@ internal static class FontFeatures
                 int feature = features + U16(features + 2 + fi * 6 + 4);
                 var indices = new List<int>();
                 for (int j = 0, m = U16(feature + 2); j < m; j++) indices.Add(U16(feature + 4 + j * 2));
-                if (indices.Exists(li => li >= lookupCount || TypeOf(li) is not (1 or 3))) continue;
+                if (indices.Exists(li => li >= lookupCount)) continue;
+                if (indices.Exists(li => TypeOf(li) is not (1 or 3)))
+                {
+                    if (!(inContext ??= new()).Contains(names[featureTag])) inContext.Add(names[featureTag]);
+                    continue;
+                }
                 foreach (int li in indices) lookupValues[li] = value;
+                simple.Add((names[featureTag], value, indices));
             }
         }
+        // The shaper applies the features that substitute in context to the glyphs of a run, in the order of the lookup
+        // list, so the plain ones that come with them go there too: a fraction's digits must still be the font's
+        // default digits when its lookups run, not the tabular ones a map would have made of them. An alternate other
+        // than the first needs its value, which only the map has.
+        if (inContext != null)
+            foreach (var (name, value, lookupIndices) in simple)
+            {
+                if (value != 1) continue;
+                if (!inContext.Contains(name)) inContext.Add(name);
+                foreach (int li in lookupIndices) lookupValues.Remove(li);
+            }
+        contextual = inContext?.ToArray();
         if (lookupValues.Count == 0) return null;
 
         int glyphs = font.NumGlyphs;

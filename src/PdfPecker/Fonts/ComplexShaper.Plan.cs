@@ -86,7 +86,7 @@ internal static partial class ComplexShaper
             try
             {
                 if (IsIndic(script)) return BuildIndicScriptPlan(font, layout, script);
-                return layout == null ? Plan.Empty : BuildPlan(layout, script, ScriptTag(script));
+                return layout == null ? Plan.Empty : BuildPlan(layout, script, ScriptTag(script), font.ShapedFeatures);
             }
             catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException) { return Plan.Empty; }
         }, (font, layout));
@@ -121,8 +121,11 @@ internal static partial class ComplexShaper
         return lookups;
     }
 
-    private static Plan BuildPlan(OpenTypeLayout layout, Script script, uint tag)
+    private static Plan BuildPlan(OpenTypeLayout layout, Script script, uint tag, string[]? shaped = null)
     {
+        // The features the author turned on that substitute in context join the ones every run gets, in the one stage
+        // of the lookup list, as HarfBuzz merges the features of a run.
+        var extra = shaped == null ? [] : Array.ConvertAll(shaped, static f => (f, AllGlyphs));
         var gsub = new List<(int Lookup, uint Mask)>();
         AddStage(gsub, layout, gpos: false, tag, [("rvrn", AllGlyphs)]);
         bool hasForms = false, hasRlig;
@@ -131,12 +134,12 @@ internal static partial class ComplexShaper
             AddStage(gsub, layout, gpos: false, tag, JoiningPreForms);
             foreach (var form in JoiningForms) hasForms |= AddStage(gsub, layout, gpos: false, tag, [form]);
             hasRlig = AddStage(gsub, layout, gpos: false, tag, [("rlig", AllGlyphs)]);
-            AddStage(gsub, layout, gpos: false, tag, JoiningLigatures);
+            AddStage(gsub, layout, gpos: false, tag, [.. JoiningLigatures, .. extra]);
         }
         else
         {
             hasRlig = layout.HasFeature(false, tag, FontProgram.Tag("rlig"));
-            AddStage(gsub, layout, gpos: false, tag, OtherSubstitutions);
+            AddStage(gsub, layout, gpos: false, tag, [.. OtherSubstitutions, .. extra]);
         }
 
         var gpos = new List<(int Lookup, uint Mask)>();

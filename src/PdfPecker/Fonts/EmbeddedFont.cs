@@ -97,6 +97,12 @@ internal sealed class EmbeddedFont : TextFont
         _noKerning = font._noKerning;
     }
 
+    /// <summary>
+    /// True when the text goes through the OpenType shaper: it has characters of a complex script, or the font has
+    /// features on that substitute in context, such as fractions.
+    /// </summary>
+    public bool UsesShaper(string s, int start, int length) => Program.ShapedFeatures != null || ComplexShaper.Handles(s, start, length);
+
     /// <summary>True when the text may form a ligature, so it has to be shaped glyph by glyph.</summary>
     public bool MayLigate(string s, int start, int length)
     {
@@ -122,7 +128,7 @@ internal sealed class EmbeddedFont : TextFont
     /// </summary>
     public bool Shape(string s, int start, int length, List<ShapedGlyph> glyphs, bool rtl)
     {
-        if (ComplexShaper.Handles(s, start, length))
+        if (UsesShaper(s, start, length))
         {
             ComplexShaper.Shape(Program, s, start, length, rtl, glyphs);
             return true;
@@ -150,7 +156,7 @@ internal sealed class EmbeddedFont : TextFont
 
     public override int MeasureUnits(string s, int start, int length)
     {
-        if (ComplexShaper.Handles(s, start, length)) return MeasureComplex(s, start, length);
+        if (UsesShaper(s, start, length)) return MeasureComplex(s, start, length);
         if (MayLigate(s, start, length)) return MeasureShaped(s, start, length);
         var w = _widths;
         bool kern = HasKerning;
