@@ -308,6 +308,11 @@ internal sealed partial class StyleResolver
             case "background-blend-mode": ApplyBackgroundBlendMode(s, parent, in d); break;
             case "isolation": s.Isolate = d.Lower == "isolate" || d.Inherit && parent.Isolate; break;
             case "box-decoration-break": s.BoxDecorationClone = d.Lower == "clone" || d.Inherit && parent.BoxDecorationClone; break;
+            case ScaleToFitProperty:
+                // The box contains its scaled content, so its margins no longer collapse with its children's.
+                s.ScaleToFit = d.Lower == "shrink" || d.Inherit && parent.ScaleToFit;
+                if (s.ScaleToFit) s.FormattingRoot = true;
+                break;
 
             // ---- SVG presentation properties (Properties.Svg.cs)
             case "fill": ApplyFill(s, parent, in d); break;

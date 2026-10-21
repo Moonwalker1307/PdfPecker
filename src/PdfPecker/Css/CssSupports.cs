@@ -58,7 +58,7 @@ internal static class CssSupports
         "mask-position-x", "mask-position-y", "mask-size", "mask-repeat", "mask-origin", "mask-clip", "mask-composite",
         "mask-mode", "-webkit-mask", "-webkit-mask-image", "-webkit-mask-position", "-webkit-mask-position-x",
         "-webkit-mask-position-y", "-webkit-mask-size", "-webkit-mask-repeat", "-webkit-mask-origin", "-webkit-mask-clip",
-        "-webkit-mask-composite",
+        "-webkit-mask-composite", "-pdfpecker-scale-to-fit",
     };
 
     /// <summary>Whether this library applies the property.</summary>
