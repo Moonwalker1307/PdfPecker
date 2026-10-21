@@ -18,6 +18,7 @@ internal sealed partial class LayoutEngine
         st.FirstLine = firstLine;
         foreach (var node in run) CollectNode(st, node, null, null);
         st.FirstLine = null;
+        TrimAdjacentPunctuation(st.Items);
         return st;
     }
 

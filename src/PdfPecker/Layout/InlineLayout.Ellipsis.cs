@@ -34,7 +34,7 @@ internal sealed partial class LayoutEngine
                 // running against the line keeps its logical end.
                 bool keepEnd = visual && ((it.Level & 1) != 0) != rtl;
                 int fit = FittingCharacters(it, used, limit, keepEnd, out float fw);
-                if (fit > 0) { kept.Add(it.Slice(keepEnd ? it.Length - fit : 0, fit, fw)); used += fw; }
+                if (fit > 0) { kept.Add(it.Slice(keepEnd ? it.Length - fit : 0, fit, fw)); used += kept[^1].Width; }
             }
             break;
         }
