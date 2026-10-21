@@ -285,9 +285,58 @@ internal sealed partial class StyleResolver
         for (int i = 1; i < _count; i++)
             if (_keys[i - 1] >= _keys[i])
             {
-                Array.Sort(_keys, _decls, 0, _count);
+                if (_count <= SmallSortLimit) SmallSort(_keys, _decls, i, _count);
+                else Array.Sort(_keys, _decls, 0, _count);
                 return;
             }
+    }
+
+    /// <summary>
+    /// Up to this many declarations, <see cref="Array.Sort{TKey, TValue}(TKey[], TValue[], int, int)"/> sorts with a
+    /// fixed exchange of two or three, or by insertion. <see cref="SmallSort"/> does the same, and so gives the same
+    /// order (also of equal keys) without the cost of the generic sort's set-up, which was most of the sorting.
+    /// </summary>
+    private const int SmallSortLimit = 16;
+
+    /// <summary>
+    /// Sorts the first <paramref name="count"/> keys and their declarations as <see cref="Array.Sort{TKey, TValue}(TKey[], TValue[], int, int)"/>
+    /// sorts so few; the keys before <paramref name="from"/> already rise.
+    /// </summary>
+    private static void SmallSort(long[] keys, Declaration[] decls, int from, int count)
+    {
+        if (count == 2)
+        {
+            SwapIfGreater(keys, decls, 0, 1);
+            return;
+        }
+        if (count == 3)
+        {
+            SwapIfGreater(keys, decls, 0, 1);
+            SwapIfGreater(keys, decls, 0, 2);
+            SwapIfGreater(keys, decls, 1, 2);
+            return;
+        }
+        for (int i = from; i < count; i++)
+        {
+            long key = keys[i];
+            var decl = decls[i];
+            int j = i - 1;
+            while (j >= 0 && key < keys[j])
+            {
+                keys[j + 1] = keys[j];
+                decls[j + 1] = decls[j];
+                j--;
+            }
+            keys[j + 1] = key;
+            decls[j + 1] = decl;
+        }
+    }
+
+    private static void SwapIfGreater(long[] keys, Declaration[] decls, int i, int j)
+    {
+        if (keys[i] <= keys[j]) return;
+        (keys[i], keys[j]) = (keys[j], keys[i]);
+        (decls[i], decls[j]) = (decls[j], decls[i]);
     }
 
     private void Push(long tier, int specificity, int order, int declIndex, Declaration d, int layer = 0)

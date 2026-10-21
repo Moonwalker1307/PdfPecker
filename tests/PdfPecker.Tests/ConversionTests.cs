@@ -70,6 +70,16 @@ public class ConversionTests
         Assert.Contains("/Title (My Report)", Latin1(pdf));
     }
 
+    [Theory]
+    [InlineData("My  Report")]
+    [InlineData("  \t Leading and trailing \r\n ")]
+    [InlineData("No\u00A0break\u2003em\u3000ideographic\u0085next\u2028line")]
+    [InlineData("\u200Bzero width is no white space\u200B")]
+    [InlineData(" \n\t ")]
+    [InlineData("")]
+    public void Collapsed_whitespace_matches_the_regular_expression_it_replaced(string text)
+        => Assert.Equal(System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim(), PdfPecker.Layout.LayoutEngine.CollapseWhitespace(text));
+
     [Fact]
     public void Text_strings_escape_tabs_and_line_breaks()
     {

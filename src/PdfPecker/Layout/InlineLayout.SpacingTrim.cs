@@ -91,9 +91,14 @@ internal sealed partial class LayoutEngine
         foreach (var it in items)
         {
             if (it.Kind != ItemKind.Text) continue;
+            // Most text has no character from U+2018 up, which a vectorised search rules out quickly.
             var span = it.Source.AsSpan(it.Start, it.Length);
-            foreach (char c in span)
-                if (c >= 0x2018 && TextSpacingCharacters.MayBeOpenOrClose(c)) return true;
+            int i;
+            while ((i = span.IndexOfAnyInRange('\u2018', '\uffff')) >= 0)
+            {
+                if (TextSpacingCharacters.MayBeOpenOrClose(span[i])) return true;
+                span = span.Slice(i + 1);
+            }
         }
         return false;
     }

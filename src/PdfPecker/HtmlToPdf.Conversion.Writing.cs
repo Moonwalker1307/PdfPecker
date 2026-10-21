@@ -16,7 +16,7 @@ public static partial class HtmlToPdf
         /// </summary>
         private byte[] Write(List<PageSection> sections)
         {
-            var title = DocumentTitle(_options, _doc, _structure, _settings.IsPdfUA);
+            var title = DocumentTitle(_options, _doc, (_namesUsed & NamesUsed.Title) != 0, _structure, _settings.IsPdfUA);
             var (marginFont, watermarkFont) = ChooseTextFonts();
             var writer = CreateWriter(marginFont, watermarkFont);
             var marginBoxes = CreateMarginBoxes();
@@ -29,13 +29,13 @@ public static partial class HtmlToPdf
         /// The document title: PdfOptions.Title, else the HTML title with its whitespace collapsed. PDF/UA needs one, and
         /// takes the first heading when neither gives it.
         /// </summary>
-        private static string? DocumentTitle(PdfOptions options, Element doc, StructureTree? structure, bool pdfua)
+        private static string? DocumentTitle(PdfOptions options, Element doc, bool mayHaveTitle, StructureTree? structure, bool pdfua)
         {
             string? title = options.Title;
-            if (title == null)
+            if (title == null && mayHaveTitle)
             {
                 var t = doc.FindFirst("title");
-                if (t != null) title = System.Text.RegularExpressions.Regex.Replace(t.InnerText(), @"\s+", " ").Trim();
+                if (t != null) title = LayoutEngine.CollapseWhitespace(t.InnerText());
             }
             if (pdfua && string.IsNullOrEmpty(title))
             {

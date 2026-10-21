@@ -108,7 +108,24 @@ public static partial class HtmlToPdf
 
     // A scheme (data:, http:, file:, C:), a rooted path or a fragment.
     private static bool IsAbsoluteReference(string url)
-        => url.Length == 0 || url[0] is '/' or '\\' or '#' || System.Text.RegularExpressions.Regex.IsMatch(url, "^[A-Za-z][A-Za-z0-9+.-]*:");
+        => url.Length == 0 || url[0] is '/' or '\\' or '#' || HasScheme(url);
+
+    /// <summary>
+    /// Whether the reference starts with a URL scheme and its colon: a letter, then letters, digits, '+', '.' or '-'.
+    /// Checked by hand rather than with a regular expression, whose engine takes milliseconds to start on the first
+    /// conversion.
+    /// </summary>
+    private static bool HasScheme(string url)
+    {
+        if (url.Length == 0 || !char.IsAsciiLetter(url[0])) return false;
+        for (int i = 1; i < url.Length; i++)
+        {
+            char c = url[i];
+            if (c == ':') return true;
+            if (!char.IsAsciiLetterOrDigit(c) && c is not ('+' or '.' or '-')) return false;
+        }
+        return false;
+    }
 
     private static string? LoadText(string? href, string? baseDirectory, Func<string, byte[]?>? resolver, bool allowFiles)
     {

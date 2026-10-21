@@ -48,6 +48,9 @@ public static partial class HtmlToPdf
         /// <summary>The running header and footer (data-sticky-pdf-header / data-sticky-pdf-footer), out of the flow.</summary>
         private Element? _header, _footer;
 
+        /// <summary>Whether the source mentions a band attribute at all; when it does not, the tree is not searched for one.</summary>
+        private bool _mayHaveBands;
+
         public Conversion(string html, PdfOptions options, ConversionSettings settings, string? baseDirectory, CancellationToken cancellation)
         {
             _html = html;
@@ -116,9 +119,9 @@ public static partial class HtmlToPdf
             ScaleAndFit(_page, _scale, _options.Scale != 1);
 
             // Most documents have no bands: one search of the source spares walking the whole tree four times.
-            bool mayHaveBands = _html.Contains("data-sticky-pdf-", StringComparison.OrdinalIgnoreCase);
-            var headerCandidate = mayHaveBands ? FindByAttribute(_doc, "data-sticky-pdf-header") : null;
-            var footerCandidate = mayHaveBands ? FindByAttribute(_doc, "data-sticky-pdf-footer") : null;
+            _mayHaveBands = _html.Contains("data-sticky-pdf-", StringComparison.OrdinalIgnoreCase);
+            var headerCandidate = _mayHaveBands ? FindByAttribute(_doc, "data-sticky-pdf-header") : null;
+            var footerCandidate = _mayHaveBands ? FindByAttribute(_doc, "data-sticky-pdf-footer") : null;
             bool truncateBands = _options.TruncateBandsToWholePoints;
             float declaredTop = DeclaredHeight(headerCandidate, _page, truncateBands), declaredBottom = DeclaredHeight(footerCandidate, _page, truncateBands);
             _viewport = Math.Max(10, _page.ContentHeight - declaredTop - declaredBottom);
@@ -162,8 +165,8 @@ public static partial class HtmlToPdf
         /// </summary>
         private void PrepareBands()
         {
-            _header = FindBand(_doc, "data-sticky-pdf-header");
-            _footer = FindBand(_doc, "data-sticky-pdf-footer");
+            _header = _mayHaveBands ? FindBand(_doc, "data-sticky-pdf-header") : null;
+            _footer = _mayHaveBands ? FindBand(_doc, "data-sticky-pdf-footer") : null;
             if (_footer == _header) _footer = null;
             if (_header != null) _header.Detached = true;
             if (_footer != null) _footer.Detached = true;
