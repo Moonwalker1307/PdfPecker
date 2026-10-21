@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en"><head><title>Text wrapping and justification</title>
+<style>
+@page { size: 148mm 210mm; margin: 12mm }
+body { font: 10pt/1.4 sans-serif; margin: 0; color: #222 }
+h1 { font-size: 15pt; margin: 0 0 6pt; border-bottom: 1pt solid #2c6e9b }
+h2 { font-size: 10pt; margin: 8pt 0 3pt; color: #2c6e9b }
+.pair { display: flex; gap: 6mm }
+.pair > div { flex: 1; border: 0.5pt solid #aaa; padding: 3pt 4pt; background: #f7f9fb }
+.label { font-size: 7pt; color: #777; text-transform: uppercase; letter-spacing: 0.5pt }
+.head { font-size: 13pt; font-weight: bold; line-height: 1.25; margin: 2pt 0 }
+.balance { text-wrap: balance }
+.pretty { text-wrap: pretty }
+.nowrap { text-wrap-mode: nowrap; overflow: hidden; text-overflow: ellipsis; width: 60mm; border: 0.5pt dashed #999 }
+.just { text-align: justify; width: 58mm; border-left: 0.5pt solid #ccc; border-right: 0.5pt solid #ccc; padding: 0 2pt }
+.last { text-align: justify; text-align-last: center }
+</style></head>
+<body>
+<h1>Text wrapping and justification</h1>
+
+<h2>text-wrap: balance</h2>
+<div class="pair">
+  <div><div class="label">wrap</div><p class="head">Quarterly results for the northern region and its partners</p></div>
+  <div><div class="label">balance</div><p class="head balance">Quarterly results for the northern region and its partners</p></div>
+</div>
+
+<h2>text-wrap: pretty</h2>
+<div class="pair">
+  <div><div class="label">wrap</div><p>Payment is due within thirty days of the date shown above. Late payment adds interest at the rate agreed in the signed contract. Thanks.</p></div>
+  <div><div class="label">pretty</div><p class="pretty">Payment is due within thirty days of the date shown above. Late payment adds interest at the rate agreed in the signed contract. Thanks.</p></div>
+</div>
+
+<h2>text-wrap-mode: nowrap</h2>
+<p class="nowrap">This line never wraps, however narrow its box is, and is cut with an ellipsis.</p>
+
+<h2>text-justify</h2>
+<div class="pair">
+  <div style="background:none;border:0;padding:0"><div class="label">auto</div><p class="just">Justified text spreads the space between the words of every line but the last, so both edges of the column line up.</p></div>
+  <div style="background:none;border:0;padding:0"><div class="label">inter-word</div><p class="just" style="text-justify: inter-word">Justified text spreads the space between the words of every line but the last, so both edges of the column line up.</p></div>
+</div>
+<div class="pair">
+  <div style="background:none;border:0;padding:0"><div class="label">none</div><p class="just" style="text-justify: none">Justified text spreads the space between the words of every line but the last, so both edges of the column line up.</p></div>
+  <div style="background:none;border:0;padding:0"><div class="label">text-align-last: center</div><p class="just last">Justified text spreads the space between the words of every line but the last, so both edges of the column line up.</p></div>
+</div>
+</body></html>

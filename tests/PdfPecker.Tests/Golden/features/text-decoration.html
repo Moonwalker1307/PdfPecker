@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en"><head><title>Text decoration and outlines</title>
+<style>
+@page { size: 148mm 210mm; margin: 12mm }
+body { font: 11pt/1.5 sans-serif; margin: 0; color: #222 }
+h1 { font-size: 15pt; margin: 0 0 6pt; border-bottom: 1pt solid #8e44ad }
+h2 { font-size: 10pt; margin: 9pt 0 3pt; color: #8e44ad }
+p { margin: 2pt 0 }
+.u { text-decoration: underline }
+.none { text-decoration-skip-ink: none }
+.big { font-size: 18pt }
+.solid { text-decoration: underline solid #c0392b }
+.double { text-decoration: underline double #c0392b }
+.dotted { text-decoration: underline dotted #c0392b }
+.dashed { text-decoration: underline dashed #c0392b }
+.wavy { text-decoration: underline wavy #c0392b }
+.thick { text-decoration: underline 2pt #2c6e9b; text-underline-offset: 3pt }
+.over { text-decoration: overline line-through #555 }
+.stroke { font: bold 24pt sans-serif; -webkit-text-stroke: 1pt #2c6e9b; color: #d6eaf8 }
+.hollow { font: bold 24pt sans-serif; -webkit-text-stroke: 0.75pt #333; color: transparent }
+.order { font: bold 24pt sans-serif; -webkit-text-stroke: 3pt #e67e22; color: #fff; paint-order: stroke fill }
+.math { font-size: 12pt }
+</style></head>
+<body>
+<h1>Text decoration and outlines</h1>
+
+<h2>Underlines skip descenders (text-decoration-skip-ink)</h2>
+<p class="big u">Typography, jumping quickly, gypsy</p>
+<p class="big u none">Typography, jumping quickly, gypsy (none)</p>
+
+<h2>Line styles</h2>
+<p><span class="solid">solid line</span> · <span class="double">double line</span> · <span class="dotted">dotted line</span></p>
+<p><span class="dashed">dashed line</span> · <span class="wavy">wavy line with g and y</span></p>
+<p><span class="thick">thick underline with an offset</span> · <span class="over">overline and line-through</span></p>
+
+<h2>-webkit-text-stroke and paint-order</h2>
+<p class="stroke">Outlined text</p>
+<p class="hollow">Hollow letters</p>
+<p class="order">Stroke under fill</p>
+
+<h2>Superscripts and subscripts</h2>
+<p class="math">E = mc<sup>2</sup>, e<sup>x<sup>2</sup></sup>, a<sub>i<sub>j</sub></sub>, H<sub>2</sub>O and x<sup>n</sup><sub>k</sub>.</p>
+<p>Footnote marks sit above the line<sup>1</sup> without opening it up<sup>[2]</sup>, as in Chrome.</p>
+
+<h2>Decorations on SVG text</h2>
+<svg width="300" height="60" viewBox="0 0 300 60">
+  <text x="4" y="24" font-family="sans-serif" font-size="18" text-decoration="underline" fill="#2c6e9b">Underlined SVG text</text>
+  <text x="4" y="52" font-family="sans-serif" font-size="18" style="text-decoration: line-through" fill="#c0392b">Struck through</text>
+</svg>
+</body></html>

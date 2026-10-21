@@ -26,7 +26,9 @@ public class GoldenPdfTests
     public static TheoryData<string> Samples()
     {
         var data = new TheoryData<string>();
+        // HTML that PdfToHtmlGoldenTests expects (*.expected.html) is a baseline, not a sample.
         var files = Directory.GetFiles(Root, "*.html", SearchOption.AllDirectories)
+            .Where(p => !p.EndsWith(".expected.html", StringComparison.Ordinal))
             .Concat(Directory.GetFiles(Root, "*.md", SearchOption.AllDirectories));
         foreach (var file in files.OrderBy(p => p, StringComparer.Ordinal))
             data.Add(Path.GetRelativePath(Root, file).Replace('\\', '/'));
