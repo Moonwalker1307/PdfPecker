@@ -74,19 +74,35 @@ internal sealed partial class StyleResolver
             case "padding-right": SetLength(ref s.PaddingRight, d.Lower, d.Em, d.Inherit ? parent.PaddingRight : null, noAuto: true); break;
             case "padding-bottom": SetLength(ref s.PaddingBottom, d.Lower, d.Em, d.Inherit ? parent.PaddingBottom : null, noAuto: true); break;
             case "padding-left": SetLength(ref s.PaddingLeft, d.Lower, d.Em, d.Inherit ? parent.PaddingLeft : null, noAuto: true); break;
-            // Logical properties map to the physical side the direction gives.
-            case "margin-inline-start": Apply(s, parent, s.Rtl ? "margin-right" : "margin-left", raw); break;
-            case "margin-inline-end": Apply(s, parent, s.Rtl ? "margin-left" : "margin-right", raw); break;
-            case "padding-inline-start": Apply(s, parent, s.Rtl ? "padding-right" : "padding-left", raw); break;
-            case "padding-inline-end": Apply(s, parent, s.Rtl ? "padding-left" : "padding-right", raw); break;
-            case "margin-block-start": Apply(s, parent, "margin-top", raw); break;
-            case "margin-block-end": Apply(s, parent, "margin-bottom", raw); break;
-            case "padding-block-start": Apply(s, parent, "padding-top", raw); break;
-            case "padding-block-end": Apply(s, parent, "padding-bottom", raw); break;
-            case "inset-inline-start": Apply(s, parent, s.Rtl ? "right" : "left", raw); break;
-            case "inset-inline-end": Apply(s, parent, s.Rtl ? "left" : "right", raw); break;
-            case "inset-block-start": Apply(s, parent, "top", raw); break;
-            case "inset-block-end": Apply(s, parent, "bottom", raw); break;
+            // Logical properties map to the physical side the writing mode and direction give.
+            case "margin-inline-start": Apply(s, parent, "margin-" + PhysicalSide(s, false, false), raw); break;
+            case "margin-inline-end": Apply(s, parent, "margin-" + PhysicalSide(s, false, true), raw); break;
+            case "padding-inline-start": Apply(s, parent, "padding-" + PhysicalSide(s, false, false), raw); break;
+            case "padding-inline-end": Apply(s, parent, "padding-" + PhysicalSide(s, false, true), raw); break;
+            case "margin-block-start": Apply(s, parent, "margin-" + PhysicalSide(s, true, false), raw); break;
+            case "margin-block-end": Apply(s, parent, "margin-" + PhysicalSide(s, true, true), raw); break;
+            case "padding-block-start": Apply(s, parent, "padding-" + PhysicalSide(s, true, false), raw); break;
+            case "padding-block-end": Apply(s, parent, "padding-" + PhysicalSide(s, true, true), raw); break;
+            case "inset-inline-start": Apply(s, parent, PhysicalSide(s, false, false), raw); break;
+            case "inset-inline-end": Apply(s, parent, PhysicalSide(s, false, true), raw); break;
+            case "inset-block-start": Apply(s, parent, PhysicalSide(s, true, false), raw); break;
+            case "inset-block-end": Apply(s, parent, PhysicalSide(s, true, true), raw); break;
+            case "border-inline-start-width": Apply(s, parent, "border-" + PhysicalSide(s, false, false) + "-width", raw); break;
+            case "border-inline-end-width": Apply(s, parent, "border-" + PhysicalSide(s, false, true) + "-width", raw); break;
+            case "border-block-start-width": Apply(s, parent, "border-" + PhysicalSide(s, true, false) + "-width", raw); break;
+            case "border-block-end-width": Apply(s, parent, "border-" + PhysicalSide(s, true, true) + "-width", raw); break;
+            case "border-inline-start-style": Apply(s, parent, "border-" + PhysicalSide(s, false, false) + "-style", raw); break;
+            case "border-inline-end-style": Apply(s, parent, "border-" + PhysicalSide(s, false, true) + "-style", raw); break;
+            case "border-block-start-style": Apply(s, parent, "border-" + PhysicalSide(s, true, false) + "-style", raw); break;
+            case "border-block-end-style": Apply(s, parent, "border-" + PhysicalSide(s, true, true) + "-style", raw); break;
+            case "border-inline-start-color": Apply(s, parent, "border-" + PhysicalSide(s, false, false) + "-color", raw); break;
+            case "border-inline-end-color": Apply(s, parent, "border-" + PhysicalSide(s, false, true) + "-color", raw); break;
+            case "border-block-start-color": Apply(s, parent, "border-" + PhysicalSide(s, true, false) + "-color", raw); break;
+            case "border-block-end-color": Apply(s, parent, "border-" + PhysicalSide(s, true, true) + "-color", raw); break;
+            case "border-start-start-radius": Apply(s, parent, PhysicalCorner(s, false, false), raw); break;
+            case "border-start-end-radius": Apply(s, parent, PhysicalCorner(s, false, true), raw); break;
+            case "border-end-start-radius": Apply(s, parent, PhysicalCorner(s, true, false), raw); break;
+            case "border-end-end-radius": Apply(s, parent, PhysicalCorner(s, true, true), raw); break;
             // Every box is horizontal, so the inline axis is the width and the block axis the height.
             case "inline-size": Apply(s, parent, "width", raw); break;
             case "block-size": Apply(s, parent, "height", raw); break;
