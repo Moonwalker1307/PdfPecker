@@ -222,6 +222,23 @@ public class CssMaskTests
         Assert.InRange(gray.R, 40, 80);
     }
 
+    [Theory]
+    [InlineData("25mm", "18mm")]
+    [InlineData("34mm", "18mm")]
+    [InlineData("30mm", "18mm")]
+    [InlineData("13.3mm", "7.7mm")]
+    [InlineData("0.7in", "1.3in")]
+    [InlineData("37.3px", "91.7px")]
+    [InlineData("101.3px", "33.3px")]
+    public void Backdrop_filter_covers_boxes_of_any_size(string width, string height)
+    {
+        // The backdrop is rendered to a whole number of pixels, which must not depend on how the page size rounds.
+        var img = Render(Pdf(Behind + $"<div style='position:absolute;left:10px;top:5px;width:{width};height:{height};backdrop-filter:grayscale(1)'></div>"));
+        var gray = At(img, 20, 15);
+        Assert.InRange(gray.G - gray.R, -3, 3);
+        Assert.InRange(gray.R, 40, 80);
+    }
+
     [Fact]
     public void Backdrop_filter_includes_the_white_page()
     {

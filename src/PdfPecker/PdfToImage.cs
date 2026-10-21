@@ -345,9 +345,25 @@ public sealed class PdfRenderer
         if (limit < 1) { sx *= limit; sy *= limit; }
         w = Math.Max(1, (int)Math.Round(pw * sx));
         h = Math.Max(1, (int)Math.Round(ph * sy));
+        return RenderSized(pageIndex, w, h, options, dpi, cancellationToken);
+    }
+
+    /// <summary>
+    /// Renders one page onto exactly <paramref name="width"/> × <paramref name="height"/> pixels, stretching it a little
+    /// where its shape differs from them. <see cref="RenderPage"/> keeps the page's shape, so a size it was given can come
+    /// out a pixel short on one side; rasters that are drawn over a known rectangle need the size they asked for.
+    /// </summary>
+    internal RenderedImage RenderPageExact(int pageIndex, int width, int height, ImageOptions options, CancellationToken cancellationToken = default)
+    {
+        CheckIndex(pageIndex);
+        return RenderSized(pageIndex, width, height, options, null, cancellationToken);
+    }
+
+    private RenderedImage RenderSized(int pageIndex, int w, int h, ImageOptions options, double? dpi, CancellationToken cancellationToken)
+    {
+        var (pw, ph) = _doc.PageSize(pageIndex);
         // Stretch slightly so the page fills the rounded pixel size exactly.
-        sx = w / pw;
-        sy = h / ph;
+        double sx = w / pw, sy = h / ph;
 
         uint bg = options.Transparent ? 0 : options.BackgroundColor;
         uint a = bg >> 24;
