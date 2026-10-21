@@ -785,6 +785,17 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Tables_with_one_wide_row_among_many_rows_store_only_the_cells_they_have()
+    {
+        // A grid of every row and column of this table is 18 million places, 144 MB, almost all of them empty; a fuzzed
+        // page of 8,938 rows and one row of 13,002 cells took 930 MB.
+        var html = "<table style='border-collapse:collapse'><tr>" + Repeat("<td>c", 6000) + Repeat("<tr><td>r<td>b", 3000) + "</table>";
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 64L << 20);
+    }
+
+    [Fact]
     public void Repeating_gradients_share_one_tiling_budget()
     {
         // Each box tiles twenty repeating gradients over 250 periods, about 33 KB of PDF each: four kilobytes of HTML

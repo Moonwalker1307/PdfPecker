@@ -30,6 +30,38 @@ internal sealed partial class LayoutEngine
         public readonly List<CellModel> Ending = new();    // cells (any start row) ending in this row
     }
 
+    /// <summary>
+    /// The cell covering each row and column of a table. A table whose rows times columns are many is stored by the
+    /// places its cells cover: one row of thousands of cells in a table of thousands of rows would otherwise take a
+    /// gigabyte of empty places.
+    /// </summary>
+    private sealed class CellGrid
+    {
+        private const int MaxDenseCells = 1 << 20;
+
+        private readonly int _cols;
+        private readonly CellModel?[]? _dense;
+        private readonly Dictionary<long, CellModel>? _sparse;
+
+        public CellGrid(int rows, int cols)
+        {
+            _cols = cols;
+            if ((long)rows * cols <= MaxDenseCells) _dense = new CellModel?[rows * cols];
+            else _sparse = new Dictionary<long, CellModel>();
+        }
+
+        public CellModel? this[int r, int c]
+        {
+            get => _dense != null ? _dense[r * _cols + c] : _sparse!.GetValueOrDefault((long)r * _cols + c);
+            set
+            {
+                if (_dense != null) _dense[r * _cols + c] = value;
+                else if (value != null) _sparse![(long)r * _cols + c] = value;
+                else _sparse!.Remove((long)r * _cols + c);
+            }
+        }
+    }
+
     private sealed class TableModel
     {
         public readonly List<Element> Captions = new();
@@ -48,7 +80,7 @@ internal sealed partial class LayoutEngine
         public uint[]? ColBackground, ColGroupBackground; // the background colours of <col> and <colgroup>, else null
         public float[]? RowExtra; // per layout pass: height each row gets on top of its content, to fill the table's height
         public bool DefiniteHeight; // per layout pass: the table's height is a length or a percentage that resolves
-        public CellModel?[,] Grid = new CellModel?[0, 0]; // the cell covering each row and column
+        public CellGrid Grid = new(0, 0); // the cell covering each row and column
         public ComputedStyle TableStyle = null!;
     }
 
@@ -136,7 +168,7 @@ internal sealed partial class LayoutEngine
         }
 
         m.TableStyle = table.Style;
-        m.Grid = new CellModel?[m.Rows.Count, m.ColCount];
+        m.Grid = new CellGrid(m.Rows.Count, m.ColCount);
         foreach (var row in m.Rows)
             foreach (var cell in row.Cells)
                 for (int rr = cell.Row; rr < cell.Row + cell.RowSpan && rr < m.Rows.Count; rr++)
