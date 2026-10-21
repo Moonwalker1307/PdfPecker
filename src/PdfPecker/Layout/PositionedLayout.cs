@@ -53,6 +53,7 @@ internal sealed partial class LayoutEngine
     private readonly CbFrame _fixedFrame = new();
     private readonly Stack<CbFrame> _boundaryPool = new();
     private bool _hasLayers;
+    private Dictionary<Element, int>? _treeOrder;
 
     /// <summary>Ops of position: fixed boxes, in coordinates from the top-left of the page area, drawn on every page.</summary>
     public List<DrawOp> FixedOps { get; } = new();
@@ -157,6 +158,34 @@ internal sealed partial class LayoutEngine
         int start = _ops.Count;
         Place(c, x - c.BoxX, y - c.BoxY);
         if (_ops.Count > start && !(_ops.Count == start + 1 && _ops[start] is LayerOp)) WrapLayer(start, LayerOp.PositionedOrder, stackingContext: false);
+        if (_ops.Count > start && _ops[^1] is LayerOp { TreeOrder: < 0 } own) own.TreeOrder = TreeOrder(e);
+    }
+
+    /// <summary>
+    /// The element's position in the document, counted in tree order. Absolutely positioned boxes are laid out when
+    /// their containing block ends, after the boxes that follow them, so positioned boxes that paint at the same level
+    /// are put back in document order by this number rather than by when their ops were made.
+    /// </summary>
+    private int TreeOrder(Element e)
+    {
+        if (_treeOrder == null)
+        {
+            var root = e;
+            while (root.Parent != null) root = root.Parent;
+            _treeOrder = new Dictionary<Element, int>(ReferenceEqualityComparer.Instance);
+            var stack = new Stack<Element>();
+            stack.Push(root);
+            while (stack.Count > 0)
+            {
+                var next = stack.Pop();
+                _treeOrder[next] = _treeOrder.Count;
+                for (int i = next.Children.Count - 1; i >= 0; i--)
+                    if (next.Children[i] is Element child) stack.Push(child);
+            }
+        }
+        // An element outside the tree that was numbered (a box made during layout) goes after it.
+        if (!_treeOrder.TryGetValue(e, out int order)) _treeOrder[e] = order = _treeOrder.Count;
+        return order;
     }
 
     /// <summary>Places relative offsets, z-index layering and transforms on a laid-out box's ops.</summary>
@@ -177,6 +206,7 @@ internal sealed partial class LayoutEngine
         }
         float order = s.ZIndex is { } z && z != 0 ? z : LayerOp.PositionedOrder;
         var layer = WrapLayer(opsStart, order, stackingContext: s.ZIndex != null || s.Transform != null || s.Perspective != null || s.Opacity < 1 || s.HasEffects);
+        layer.TreeOrder = TreeOrder(e);
         layer.Opacity = s.Opacity;
         if (s.HasEffects) ApplyEffects(e, layer, cbW);
         if (s.Transform is { } fns)

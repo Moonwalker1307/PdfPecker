@@ -192,6 +192,21 @@ public class FloatPositionTests
         Assert.True(rects.FindIndex(r => r.Color == 0xFF0000FF) < rects.FindIndex(r => r.Color == 0xFFFF0000));
     }
 
+    [Theory]
+    // An absolutely positioned box is laid out when its containing block ends, after the relative box that follows
+    // it, but paints in document order with it, as in Chrome: the relative box on top.
+    [InlineData("<div class=a style='background:#f00'></div><div class=r style='background:#00f'></div>")]
+    [InlineData("<div class=a style='background:#f00;z-index:1'></div><div class=r style='background:#00f;z-index:1'></div>")]
+    [InlineData("<div class=a style='background:#f00'></div><div style='opacity:.5'><div style='height:10px;background:#00f'></div></div>")]
+    [InlineData("<div class=r style='background:#f00'></div><div class=a style='background:#00f'></div>")]
+    public void PositionedBoxesPaintInDocumentOrder(string boxes)
+    {
+        var (ops, _) = Layout("<style>body{margin:0} .a{position:absolute;top:0;width:10px;height:10px} .r{position:relative;height:10px}</style>" +
+                              "<div style='position:relative'>" + boxes + "</div>");
+        var rects = Flatten(ops).OfType<RectOp>().ToList();
+        Assert.True(rects.FindIndex(r => r.Color == 0xFFFF0000) < rects.FindIndex(r => (r.Color & 0xFFFFFF) == 0x0000FF));
+    }
+
     [Fact]
     public void FixedBoxGoesToEveryPage()
     {
