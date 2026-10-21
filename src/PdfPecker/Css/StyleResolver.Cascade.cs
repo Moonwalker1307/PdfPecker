@@ -67,6 +67,8 @@ internal sealed partial class StyleResolver
             for (int i = 0; i < _registeredRoot.Count; i++) Push(TierUa, 0, 0, _registeredEach.Count + i, _registeredRoot[i]);
     }
 
+    private const uint RuleBase = 0xFFEEEEEE;
+
     /// <summary>Computes a style from the sorted declarations in the working buffer, sharing it when it was computed before.</summary>
     private ComputedStyle Compute(string name, ComputedStyle parent)
     {
@@ -193,6 +195,15 @@ internal sealed partial class StyleResolver
         // A table never inherits the legacy -webkit- alignments of an align attribute around it: Chrome starts its
         // text at the start again.
         if (s.Display == Display.Table && s.BlockAlign != null) { s.TextAlign = TextAlign.Start; s.BlockAlign = null; }
+        // Chrome shades an inset or outset hr from #eee rather than from its gray text colour; any other style, or a
+        // border colour the page sets, draws in that colour as on any other box.
+        if (name == "hr")
+        {
+            if (s.BorderTopColor == null && s.BorderTopStyle is BorderStyle.Inset or BorderStyle.Outset) s.BorderTopColor = RuleBase;
+            if (s.BorderRightColor == null && s.BorderRightStyle is BorderStyle.Inset or BorderStyle.Outset) s.BorderRightColor = RuleBase;
+            if (s.BorderBottomColor == null && s.BorderBottomStyle is BorderStyle.Inset or BorderStyle.Outset) s.BorderBottomColor = RuleBase;
+            if (s.BorderLeftColor == null && s.BorderLeftStyle is BorderStyle.Inset or BorderStyle.Outset) s.BorderLeftColor = RuleBase;
+        }
         if (!s.ControlWidth.IsAuto && s.Width.IsAuto && s.WidthKeyword == SizeKeyword.None && !StretchedAcross(s, parent)) s.Width = s.ControlWidth;
         // Flex and grid items are laid out as blocks, which carry their own opacity layer.
         bool inlineBox = s.Display == Display.Inline && !parent.IsFlex && !parent.IsGrid;
