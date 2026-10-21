@@ -89,12 +89,20 @@ internal sealed partial class StyleResolver
             if (_decls[i].Property.StartsWith("--", StringComparison.Ordinal)) _custom.Add(new(_decls[i].Property, _decls[i].Value));
         if (_custom.Count > 0) s.CustomProperties = CssVariables.Compute(parent.CustomProperties, _custom);
 
-        // direction before the logical properties (padding-inline-start, ...) that depend on it.
+        // direction and writing-mode before the logical properties (padding-inline-start, ...) that depend on them.
         for (int i = _count - 1; i >= 0; i--)
         {
             if (_decls[i].Property == "direction")
             {
                 if (Substituted(_decls[i].Value, s) is { } dir) Apply(s, parent, "direction", dir);
+                break;
+            }
+        }
+        for (int i = _count - 1; i >= 0; i--)
+        {
+            if (_decls[i].Property is "writing-mode" or "-webkit-writing-mode" && !ResetByAll(i, allDecl))
+            {
+                if (Substituted(_decls[i].Value, s) is { } mode) Apply(s, parent, "writing-mode", mode);
                 break;
             }
         }

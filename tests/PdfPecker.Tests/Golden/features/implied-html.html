@@ -1,0 +1,16 @@
+<!doctype html>
+<title>A document without html, head or body tags</title>
+<meta charset="utf-8">
+<style>
+@page { size: 148mm 105mm; margin: 10mm }
+html { background: #fef9e7 }
+body { font: 10pt/1.4 sans-serif; margin: 0; color: #222 }
+body > p:first-of-type { font-weight: bold }
+h1 { font-size: 14pt; margin: 0 0 4pt; color: #b9770e }
+</style>
+Loose text before any element starts the body, as in a browser.
+<h1>Implied html and body</h1>
+<p>The parser creates the html, head and body elements that this document leaves out, so the style on html paints the page and body selectors match.
+<p>Paragraphs close each other without end tags,
+<ul><li>list items do too<li>like this</ul>
+<table><tr><td>and a table gets its tbody</td><td>and its cells</table>

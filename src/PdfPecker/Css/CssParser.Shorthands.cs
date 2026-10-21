@@ -98,7 +98,19 @@ internal static partial class CssParser
             case "padding-block":
             case "inset-inline":
             case "inset-block":
-                ExpandStartEnd(name, value, longhands);
+                ExpandStartEnd(name, "", value, longhands);
+                break;
+            case "border-inline-width":
+            case "border-inline-style":
+            case "border-inline-color":
+            case "border-block-width":
+            case "border-block-style":
+            case "border-block-color":
+                ExpandStartEnd(name.Substring(0, name.LastIndexOf('-')), name.Substring(name.LastIndexOf('-')), value, longhands);
+                break;
+            case "border-inline":
+            case "border-block":
+                ExpandLogicalBorderAxis(name, value, longhands);
                 break;
             case "border-radius": ExpandBorderRadius(value, longhands); break;
             case "border-width":
@@ -111,6 +123,10 @@ internal static partial class CssParser
             case "border-right":
             case "border-bottom":
             case "border-left":
+            case "border-inline-start":
+            case "border-inline-end":
+            case "border-block-start":
+            case "border-block-end":
                 ExpandBorderSide(name, value, longhands);
                 break;
             case "background": CssBackground.ExpandShorthand(value, longhands.Add); break;
@@ -201,12 +217,19 @@ internal static partial class CssParser
     }
 
     /// <summary>A logical pair (margin-inline and the like): one value for both sides, or start and end.</summary>
-    private static void ExpandStartEnd(string name, string value, LonghandWriter longhands)
+    private static void ExpandStartEnd(string name, string suffix, string value, LonghandWriter longhands)
     {
         var tokens = Tokens(value);
         if (tokens.Count is 0 or > 2) return;
-        longhands.Add(name + "-start", tokens[0]);
-        longhands.Add(name + "-end", tokens[^1]);
+        longhands.Add(name + "-start" + suffix, tokens[0]);
+        longhands.Add(name + "-end" + suffix, tokens[^1]);
+    }
+
+    /// <summary>border-inline and border-block: one width, style and colour for both sides of the axis.</summary>
+    private static void ExpandLogicalBorderAxis(string name, string value, LonghandWriter longhands)
+    {
+        ExpandBorderSide(name + "-start", value, longhands);
+        ExpandBorderSide(name + "-end", value, longhands);
     }
 
     /// <summary>Horizontal radii, then optionally "/" and vertical radii, each one to four values like margin.</summary>

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en"><head><title>Drop caps and float shapes</title>
+<style>
+@page { size: 148mm 210mm; margin: 12mm }
+body { font: 9.5pt/1.45 serif; margin: 0; color: #222 }
+h1 { font: bold 15pt sans-serif; margin: 0 0 6pt; border-bottom: 1pt solid #16a085 }
+h2 { font: bold 10pt sans-serif; margin: 8pt 0 3pt; color: #16a085 }
+p { margin: 0 0 4pt; text-align: justify }
+.drop::first-letter { initial-letter: 3; color: #16a085; font-weight: bold; margin-right: 3pt }
+.raise::first-letter { initial-letter: 3 2; color: #c0392b; margin-right: 3pt }
+.circle { float: left; width: 26mm; height: 26mm; border-radius: 50%; background: #a3e4d7; shape-outside: circle(50%); shape-margin: 2mm }
+.ellipse { float: right; width: 34mm; height: 22mm; background: #f9e79f; border-radius: 50%; shape-outside: ellipse(50% 50%) }
+.poly { float: left; width: 28mm; height: 30mm; background: #f5b7b1; clip-path: polygon(0 0, 100% 0, 0 100%); shape-outside: polygon(0 0, 100% 0, 0 100%) }
+.inset { float: right; width: 30mm; height: 24mm; background: #d6eaf8; border-radius: 4mm; shape-outside: inset(0 round 4mm); shape-margin: 1.5mm }
+.sec { display: flow-root; margin-bottom: 3pt }
+.grad { float: left; width: 30mm; height: 24mm; background: linear-gradient(to right, #8e44ad, transparent); shape-outside: linear-gradient(to right, #000, transparent); shape-image-threshold: 0.5 }
+</style></head>
+<body>
+<h1>Drop caps and float shapes</h1>
+
+<h2>initial-letter</h2>
+<p class="drop">Once upon a time, in a town by the sea, a printer set every page by hand. The first letter of each chapter was cut large, three lines deep, so the eye found the start of the story at once and the text ran round it neatly.</p>
+<p class="raise">Raised and sunk letters span three lines of size but sink only two, so the top of the letter rises above the first line of the paragraph while the rest of the text wraps beside it.</p>
+
+<h2>shape-outside</h2>
+<div class="sec">
+<div class="circle"></div>
+<p>Text flows round the circle rather than round its square box. Every line is as long as the curve allows, with a small margin set by shape-margin, so the words follow the edge of the shape down the side of the float until it ends.</p>
+<div class="ellipse"></div>
+<p>An ellipse on the right pushes the lines in from the other side, and they come back out as it narrows towards its bottom edge. This is how magazines set text round pictures.</p>
+</div>
+<div class="sec">
+<div class="poly"></div>
+<p>A triangle given by a polygon lets each line start further to the left as it goes down, so the paragraph takes the shape of a slope rather than a step. The lines below the triangle use the full width again.</p>
+</div>
+<div class="sec">
+<div class="inset"></div>
+<p>An inset rectangle with rounded corners keeps the text away from its corners by the radius and the shape margin, which matters for the lines next to the top and bottom.</p>
+</div>
+<div class="sec">
+<div class="grad"></div>
+<p>A gradient as the shape, with shape-image-threshold at one half, lets the text come in to the point where the gradient becomes more transparent than the threshold.</p>
+</div>
+</body></html>

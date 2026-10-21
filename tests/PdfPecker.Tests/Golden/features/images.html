@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en"><head><title>Images and SVG</title>
+<style>
+@page { size: 148mm 210mm; margin: 12mm }
+body { font: 10pt/1.4 sans-serif; margin: 0; color: #222 }
+h1 { font-size: 15pt; margin: 0 0 6pt; border-bottom: 1pt solid #2980b9 }
+h2 { font-size: 10pt; margin: 8pt 0 3pt; color: #2980b9 }
+p { margin: 3pt 0 }
+.framed { border: 2pt solid #2980b9; padding: 3pt; background: #d6eaf8; box-shadow: 2pt 2pt 3pt rgba(0,0,0,0.3); border-radius: 0 }
+.va img { width: 16pt; height: 16pt }
+.line { border: 0.5pt dotted #aaa; margin: 2pt 0 }
+.wrap { width: 60mm; border: 0.5pt solid #aaa; padding: 2pt; overflow: auto }
+img.missing { width: 40mm; height: 12mm; border: 0.5pt solid #c0392b }
+.margins img { margin: 6pt 0; vertical-align: middle }
+</style></head>
+<body>
+<svg width="0" height="0" style="position:absolute"><defs>
+  <symbol id="star" viewBox="0 0 24 24"><path d="M12 2l3 7h7l-5.5 4.5 2 7.5-6.5-4.5-6.5 4.5 2-7.5L2 9h7z" fill="#f1c40f" stroke="#b7950b"/></symbol>
+  <symbol id="check" viewBox="0 0 10 10"><path d="M1 5l3 3 5-6" fill="none" stroke="#27ae60" stroke-width="1.5"/></symbol>
+</defs></svg>
+<h1>Images and SVG</h1>
+
+<h2>Alt text for missing images</h2>
+<p>Inline: <img src="does-not-exist.png" alt="Company logo"> in a line of text.</p>
+<p><img class="missing" src="missing.jpg" alt="A sized picture that is missing"></p>
+
+<h2>Borders, padding and shadow on inline images</h2>
+<p>Text <img class="framed" width="40" height="24" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='24'%3E%3Crect width='40' height='24' fill='%23e74c3c'/%3E%3C/svg%3E" alt=""> sits on the baseline of the bordered image.</p>
+
+<h2>vertical-align</h2>
+<div class="va">
+<p class="line">base <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Crect width='16' height='16' fill='%2327ae60'/%3E%3C/svg%3E" alt=""> top <img style="vertical-align: top" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Crect width='16' height='16' fill='%23e67e22'/%3E%3C/svg%3E" alt=""> bottom <img style="vertical-align: bottom; height: 28pt" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Crect width='16' height='16' fill='%238e44ad'/%3E%3C/svg%3E" alt=""> text</p>
+<p class="line">middle <img style="vertical-align: middle" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Crect width='16' height='16' fill='%232980b9'/%3E%3C/svg%3E" alt=""> raised 6pt <img style="vertical-align: 6pt" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Crect width='16' height='16' fill='%23c0392b'/%3E%3C/svg%3E" alt=""> lowered 50% <img style="vertical-align: -50%" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Crect width='16' height='16' fill='%2316a085'/%3E%3C/svg%3E" alt=""> text-top <span style="display:inline-block; vertical-align: text-top; width: 10pt; height: 20pt; background: #f1c40f"></span> end</p>
+</div>
+<p class="margins">Vertical margins on an inline image <img width="20" height="20" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Ccircle cx='10' cy='10' r='10' fill='%232980b9'/%3E%3C/svg%3E" alt=""> open up the line.</p>
+
+<h2>img align and hspace</h2>
+<div class="wrap"><img align="right" hspace="6" width="50" height="34" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='50' height='34'%3E%3Crect width='50' height='34' fill='%23f39c12'/%3E%3C/svg%3E" alt="">An image with align=right floats to the right, and hspace keeps the text away from its sides by six pixels on each.</div>
+
+<h2>SVG symbols, used from another SVG, and group opacity</h2>
+<p><svg width="24" height="24"><use href="#star"/></svg>
+<svg width="40" height="40"><use href="#star"/></svg>
+<svg width="60" height="30"><use href="#star" width="60" height="30"/></svg>
+<svg width="20" height="20"><use href="#check"/></svg> done</p>
+<svg width="200" height="60">
+  <g opacity="0.5"><rect x="5" y="5" width="60" height="50" fill="#c0392b"/><rect x="35" y="5" width="60" height="50" fill="#2980b9"/></g>
+  <rect x="110" y="5" width="60" height="50" fill="#c0392b" opacity="0.5"/><rect x="140" y="5" width="60" height="50" fill="#2980b9" opacity="0.5"/>
+</svg>
+</body></html>
