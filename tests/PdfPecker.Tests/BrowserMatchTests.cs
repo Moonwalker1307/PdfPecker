@@ -537,6 +537,23 @@ public class BrowserMatchTests
     }
 
     [Theory]
+    [InlineData("top")]
+    [InlineData("bottom")]
+    public void Boxes_inside_an_inline_box_aligned_to_the_line_edge_move_with_it(string align)
+    {
+        // As in Chrome, an inline-block on the baseline of a span aligned to the line's top or bottom moves with the
+        // span: the span and all inside it hang from the line's top, or stand on its bottom, as one.
+        var ops = Layout($"""
+            <div style="font: 12px Arial; line-height: 60px">Base <span style="vertical-align: {align}; line-height: normal"><span style="display: inline-block; width: 20px; height: 20px; background: #ff0000"></span>edge</span></div>
+            """);
+        var box = Box(ops, "#ff0000");
+        float baseline = ops.OfType<TextOp>().Single(t => t.Text == "edge").Baseline;
+        Near(box.Y + box.H, baseline);
+        if (align == "top") Near(0, box.Y);
+        else Assert.True(baseline > 30, $"the span's baseline {baseline} is not near the line's bottom");
+    }
+
+    [Theory]
     [InlineData("text-align: center", "0 auto", 150)]
     [InlineData("text-align: center", "0", 150)]
     [InlineData("text-align: left", "0 0 0 auto", 0)]
