@@ -83,6 +83,39 @@ public class FloatPositionTests
     }
 
     [Fact]
+    public void EmptyClearingDivMovesNextBlockBelowFloat()
+    {
+        var (ops, _) = Layout("<style>body{margin:0} .f{float:left;width:100px;height:60px}</style>" +
+                              "<div class=f></div><div style='clear:both'></div><div style='height:10px;background:#0f0'></div>");
+        Assert.Equal(45, Rect(ops, 0xFF00FF00).Y, 1);
+    }
+
+    [Fact]
+    public void EmptyClearingDivContainsFloats()
+    {
+        var (ops, _) = Layout("<style>body{margin:0} .w{background:#00f} .f{float:left;width:50px;height:80px}</style>" +
+                              "<div class=w><div class=f></div><div style='clear:left'></div></div><div style='height:5px;background:#0f0'></div>");
+        Assert.Equal(60, Rect(ops, 0xFF0000FF).H, 1);
+        Assert.Equal(60, Rect(ops, 0xFF00FF00).Y, 1);
+    }
+
+    [Fact]
+    public void BrClearAllMovesWhatFollowsBelowFloat()
+    {
+        var (ops, _) = Layout("<style>body{margin:0} .f{float:left;width:100px;height:60px}</style>" +
+                              "<div><div class=f></div>a<br clear=all></div><div style='height:10px;background:#0f0'></div>");
+        Assert.Equal(45, Rect(ops, 0xFF00FF00).Y, 1);
+    }
+
+    [Fact]
+    public void BrClearClearsOnlyItsSide()
+    {
+        var (ops, _) = Layout("<style>body{margin:0} .f{float:right;width:100px;height:60px}</style>" +
+                              "<div><div class=f></div>a<br clear=left></div><div style='height:10px;background:#0f0'></div>");
+        Assert.True(Rect(ops, 0xFF00FF00).Y < 30);
+    }
+
+    [Fact]
     public void FlowRootContainsFloats()
     {
         var (ops, _) = Layout("<style>body{margin:0} .w{display:flow-root;background:#00f} .f{float:left;width:50px;height:40px}</style>" +

@@ -207,6 +207,14 @@ internal sealed partial class LayoutEngine
         return y > top ? y : top;
     }
 
+    /// <summary>The style of the br that ends <paramref name="line"/> when it clears floats (HTML's br clear), else null.</summary>
+    private static ComputedStyle? ClearingBreak(Line line)
+    {
+        foreach (var it in line.Items)
+            if (it.Kind == ItemKind.Break && (it.Style.ClearLeft || it.Style.ClearRight)) return it.Style;
+        return null;
+    }
+
     /// <summary>
     /// Block-level boxes whose border box may not overlap floats (CSS 2.1 §9.5): tables, replaced elements and boxes that
     /// start a block formatting context. They are placed beside the floats, or below them when too wide.
@@ -429,6 +437,8 @@ internal sealed partial class LayoutEngine
                 foreach (var f in Waiting) Engine.PlaceFloat(f, Y, bx, bw);
                 Waiting.Clear();
             }
+            // The line after a br that clears floats starts below them.
+            if (lines.Count > 0 && ClearingBreak(lines[^1]) is { } br) Y = Engine.Cleared(br, Y);
             Measure();
         }
 

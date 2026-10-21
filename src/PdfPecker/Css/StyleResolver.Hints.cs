@@ -127,6 +127,15 @@ internal sealed partial class StyleResolver
                 Hint("padding-right", "16px");
                 break;
             }
+            case "br":
+                // The HTML rendering rules map clear=left, right, all and both to the clear property.
+                switch (e.GetAttribute("clear")?.Trim().ToLowerInvariant())
+                {
+                    case "left": Hint("clear", "left"); break;
+                    case "right": Hint("clear", "right"); break;
+                    case "all" or "both": Hint("clear", "both"); break;
+                }
+                break;
             case "font":
                 if ((v = e.GetAttribute("color")) != null) Hint("color", v);
                 if ((v = e.GetAttribute("face")) != null) Hint("font-family", v);
