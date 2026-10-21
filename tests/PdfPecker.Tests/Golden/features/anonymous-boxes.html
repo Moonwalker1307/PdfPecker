@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en"><head><title>Div tables, details and lists</title>
+<style>
+@page { size: 148mm 210mm; margin: 12mm }
+body { font: 9.5pt/1.35 sans-serif; margin: 0; color: #222 }
+h1 { font-size: 15pt; margin: 0 0 6pt; border-bottom: 1pt solid #7d3c98 }
+h2 { font-size: 10pt; margin: 7pt 0 3pt; color: #7d3c98 }
+.table { display: table; border: 1pt solid #7d3c98 }
+.row { display: table-row }
+.cell { display: table-cell; border: 0.5pt solid #bbb; padding: 2pt 4pt }
+.only-cells .cell { background: #f4ecf7 }
+.text-table { display: table; border: 1pt dashed #999; padding: 3pt }
+.inline-table { display: inline-table; border: 1pt solid #7d3c98; vertical-align: middle }
+details { border: 0.5pt solid #bbb; padding: 2pt 4pt; margin: 2pt 0 }
+summary { font-weight: bold }
+progress, meter { width: 40mm; vertical-align: middle }
+ul.inside, ol.inside { list-style-position: inside; width: 55mm; border: 0.5pt solid #ddd; padding: 2pt }
+.lists { display: flex; gap: 4mm }
+.lists > * { margin: 0 }
+hr.narrow { width: 50%; border-style: solid }
+.centred, .centred td { border-style: solid }
+</style></head>
+<body>
+<h1>Div tables, details and lists</h1>
+
+<h2>display: table without rows</h2>
+<div class="table"><div class="row"><div class="cell">rows and cells</div><div class="cell">as divs</div></div></div>
+<div class="table only-cells" style="margin-top:2pt"><div class="cell">cells straight inside</div><div class="cell">a table box</div><div class="cell">get a row</div></div>
+<div class="text-table" style="margin-top:2pt">Only text inside a display: table box</div>
+<p>Text before <span class="inline-table"><span class="cell">an</span><span class="cell">inline table</span></span> and after.</p>
+
+<h2>details, progress and meter</h2>
+<details><summary>Closed details</summary>This text is hidden.</details>
+<details open><summary>Open details</summary>This text shows because the details element is open.</details>
+<p>Progress <progress value="70" max="100"></progress> 70%</p>
+<p>Meter <meter value="0.4"></meter> low <meter value="0.9" low="0.3" high="0.8" optimum="0.2"></meter> high</p>
+
+<h2>List attributes and list-style-position: inside</h2>
+<div class="lists">
+  <ol type="A"><li>type A</li><li>second</li></ol>
+  <ol type="i" start="3"><li>roman from three</li><li>four</li></ol>
+  <ol reversed><li>three</li><li>two</li><li>one</li></ol>
+  <ul type="square"><li>square</li><li>bullets</li></ul>
+</div>
+<ul class="inside"><li>An inside marker sits in the line, and the second line of the item wraps back to the left edge.</li><li>Short</li></ul>
+
+<h2>Old HTML attributes</h2>
+<hr class="narrow">
+<hr width="30%" align="left" size="3" color="#7d3c98" noshade>
+<table border="1" bordercolor="#7d3c98" rules="cols" cellpadding="4" style="margin-top: 3pt"><tr><td>rules</td><td>cols</td><td>only</td></tr><tr><td>1</td><td>2</td><td>3</td></tr></table>
+<div align="center" style="margin-top: 3pt"><table class="centred" border="1" cellspacing="0" width="200"><tr><td>centred by the div's align</td></tr></table></div>
+</body></html>
