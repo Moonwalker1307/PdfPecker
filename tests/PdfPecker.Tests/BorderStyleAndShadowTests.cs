@@ -63,6 +63,15 @@ public class BorderStyleAndShadowTests
     }
 
     [Fact]
+    public void An_hr_with_another_border_style_draws_in_its_text_colour()
+    {
+        // Only the inset and outset shades start from #eee; a solid or dashed rule is currentColor, gray by default.
+        Near(128, 128, 128, Pixel($"{Body}<hr style='margin:0;border-style:solid'>", 20, 0), 3);
+        Near(128, 128, 128, Pixel($"{Body}<hr style='margin:0;border-style:solid'>", 20, 1), 3);
+        Near(255, 0, 0, Pixel($"{Body}<hr style='margin:0;border-style:solid;color:red'>", 20, 0), 3);
+    }
+
+    [Fact]
     public void The_hr_size_attribute_is_the_height_of_the_rule_with_its_borders()
     {
         var html = $"{Body}<hr size='6' style='margin:0'>";

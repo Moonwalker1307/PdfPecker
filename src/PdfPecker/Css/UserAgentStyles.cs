@@ -44,7 +44,7 @@ ul ul ul, ol ul ul, ul ol ul, ol ol ul { list-style-type: square; }
 pre, listing, xmp, plaintext { font-family: monospace; white-space: pre; margin: 1em 0; }
 code, kbd, samp, tt, var { font-family: monospace; }
 var { font-style: italic; }
-hr { border: 1px inset #eee; margin: 0.5em auto; color: gray; }
+hr { border: 1px inset; margin: 0.5em auto; color: gray; }
 b, strong { font-weight: bold; }
 i, em, cite, dfn { font-style: italic; }
 u, ins { text-decoration: underline; }
