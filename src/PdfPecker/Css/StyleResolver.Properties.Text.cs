@@ -234,7 +234,7 @@ internal sealed partial class StyleResolver
         var tov = CssParser.Tokens(d.Value.Trim());
         if (d.Inherit || tov.Count is not (1 or 2)) return;
         var end = tov[^1];
-        if (GeneratedContent.UnquoteString(end) is { } str) s.TextOverflow = str;
+        if (GeneratedContent.UnquoteMark(end) is { } str) s.TextOverflow = str;
         else if (end.Equals("ellipsis", StringComparison.OrdinalIgnoreCase)) s.TextOverflow = "…";
         else if (end.Equals("clip", StringComparison.OrdinalIgnoreCase) || end.Equals("initial", StringComparison.OrdinalIgnoreCase)) s.TextOverflow = null;
     }
@@ -320,7 +320,7 @@ internal sealed partial class StyleResolver
     {
         if (d.Inherit) s.HyphenateCharacter = parent.HyphenateCharacter;
         else if (d.Lower == "auto" || d.Lower == "initial" || d.Lower == "unset") s.HyphenateCharacter = null;
-        else if (GeneratedContent.UnquoteString(d.Value) is { } hyphen) s.HyphenateCharacter = hyphen;
+        else if (GeneratedContent.UnquoteMark(d.Value) is { } hyphen) s.HyphenateCharacter = hyphen;
     }
 
     // quotes: none, auto, or pairs of strings for the nesting levels. A list with an odd number of strings is invalid.
@@ -333,7 +333,7 @@ internal sealed partial class StyleResolver
         if (tokens.Count == 0 || tokens.Count % 2 != 0 || tokens.Count > MaxQuoteStrings) return;
         var strings = new string[tokens.Count];
         for (int i = 0; i < strings.Length; i++)
-            if (GeneratedContent.UnquoteString(tokens[i]) is { } str) strings[i] = str;
+            if (GeneratedContent.UnquoteMark(tokens[i]) is { } str) strings[i] = str;
             else return;
         s.Quotes = strings;
     }
