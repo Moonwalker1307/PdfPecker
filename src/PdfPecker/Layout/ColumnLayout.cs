@@ -229,6 +229,10 @@ internal sealed partial class LayoutEngine
         rows.Add(h);
         left -= h;
         lastOverflows = !paginated || left <= Eps;
+        // Columns inside outer columns that have no height from here on (a box shorter than its own borders) would
+        // follow them through as many rows as the arithmetic allows, and content never fits in any of them: they
+        // overflow beside the first row instead.
+        if (!lastOverflows && outer is ColumnGrid around && around.TallestFrom(page + 1) <= Eps) lastOverflows = true;
         // A height of many pages ends in columns that overflow beside the last of those given; that is far enough.
         if (!lastOverflows && !float.IsPositiveInfinity(limit))
         {
@@ -1139,9 +1143,31 @@ internal sealed class ColumnGrid : PageGrid
         {
             double oy = Outer.Start(FirstPage + m) + (y - _rowStart[m]) / Columns;
             double p = Math.Min(Outer.PageOf(oy) - FirstPage, MaxRow);
-            row = (int)Math.Max(m, p);
-            while (row > m && RowStart(row) > y) row--;
-            while (row < MaxRow && RowStart(row + 1) <= y) row++;
+            // The last row that starts at or before y. Row starts only grow, but rows of no height (in outer columns
+            // of no height) start where the next does, and there can be as many as MaxRow of them: a search finds the
+            // row in steps that double, where stepping one row at a time took seconds.
+            int lo = m, hi = (int)Math.Max(m, p);
+            if (RowStart(hi) <= y)
+            {
+                lo = hi;
+                for (long step = 1; ; step *= 2)
+                {
+                    int next = (int)Math.Min(lo + step, MaxRow);
+                    if (next == lo || RowStart(next) > y)
+                    {
+                        hi = next;
+                        break;
+                    }
+                    lo = next;
+                }
+            }
+            while (lo < hi)
+            {
+                int mid = lo + (hi - lo + 1) / 2;
+                if (RowStart(mid) <= y) lo = mid;
+                else hi = mid - 1;
+            }
+            row = lo;
         }
         float h = RowHeight(row);
         // Content above the first row (a negative margin) is in the first column.
