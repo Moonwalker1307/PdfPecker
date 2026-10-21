@@ -1992,6 +1992,20 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(html));
     }
 
+    [Fact]
+    public void Content_too_tall_for_the_later_columns_of_nested_columns_stops_moving_on()
+    {
+        // Found by the fuzzer: target html. The inner columns overflow into the short overflow columns of a
+        // fixed-height box, which they took to be as tall as its first, so a heading taller than them moved on from
+        // column to column until the flow position lost its precision. The next column then started where the last
+        // one did, and the columns kept whole looped there without end, past cancellation too.
+        var html = "<style>@page { size: 300px }</style><div style='column-count:3;column-fill:auto;height:300px'>"
+                   + "<p style='break-before:column'>" + Repeat("Lorem ipsum ", 8) + "</p><div style='column-count:2'>"
+                   + "<div style='display:flex'><div style='column-count:2'><h3>Dolor sit <pre>amet <p>consectetur</p></pre></h3>"
+                   + "</div></div></div></div>";
+        AssertStructurallyValid(Bounded(() => HtmlToPdf.Convert(html)));
+    }
+
     [Theory]
     [InlineData("<div style='height:690px'></div>", "<div class=\"c\">", "text")]
     [InlineData("<div style='height:300px'></div>", "<div class=\"c\">", "text<br>text<br>text<br>text<br>text")]

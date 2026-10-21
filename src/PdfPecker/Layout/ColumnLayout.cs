@@ -868,6 +868,8 @@ internal sealed partial class LayoutEngine
         float bottom = y;
         while (next < pieces.Count)
         {
+            Cancellation.ThrowIfCancellationRequested();
+            CheckPageLimit(top);
             float balanced = BalancePieces(pieces, next, n);
             float room = _paginate ? FlowEnd(PageOf(top)) - top : float.PositiveInfinity;
             if (balanced <= room + Eps)
@@ -877,8 +879,14 @@ internal sealed partial class LayoutEngine
             }
             if (!AtPageTop(top) && pieces[next].Height > room + Eps)
             {
-                top = NextPage(top);
-                continue;
+                // Far down a flow the next page can start where this one does, as floats lose precision; the pieces
+                // then go here, so that each pass places some.
+                float below = NextPage(top);
+                if (below > top)
+                {
+                    top = below;
+                    continue;
+                }
             }
             // Fill the columns to the bottom of this page, then carry on on the next one.
             PlacePieces(pieces, ref next, n, room, x, top, colW, gap, fillAll: false, s);
@@ -1077,6 +1085,17 @@ internal sealed class ColumnGrid : PageGrid
     {
         int row = RowOf(page);
         return row < _rowH.Length ? _tallestFrom[row] : _tallestFrom[_rowH.Length];
+    }
+
+    /// <summary>
+    /// The tallest column from fragment k on, as tall as content can still find. Past the rows given each column is
+    /// as tall as the outer fragment it is in, and the later fragments of outer columns can be shorter than their
+    /// first, which <see cref="Height"/> counts.
+    /// </summary>
+    public float TallestFrom(int page)
+    {
+        int row = RowOf(page);
+        return row < _rowH.Length || Outer is not ColumnGrid outer ? Height(page) : outer.TallestFrom(FirstPage + row);
     }
 
     public override float MaxHeight => _tallestFrom[0];
