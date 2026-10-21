@@ -54,6 +54,12 @@ internal sealed partial class LayoutEngine
     private readonly Stack<CbFrame> _boundaryPool = new();
     private bool _hasLayers;
     private Dictionary<Element, int>? _treeOrder;
+    // The content boxes of the flex containers whose absolutely positioned children have a static position, as width,
+    // height and where in them a box goes on each axis (0 start, 0.5 centre, 1 end), from that static position.
+    private Dictionary<Element, (float W, float H, float Fx, float Fy)>? _staticAreas;
+    // The grid areas absolutely positioned children of a grid container are placed in, as left, right, top and bottom
+    // edges, NaN where the grid container's padding edge is the edge.
+    private Dictionary<Element, (float X0, float X1, float Y0, float Y1)>? _gridAreas;
 
     /// <summary>Ops of position: fixed boxes, in coordinates from the top-left of the page area, drawn on every page.</summary>
     public List<DrawOp> FixedOps { get; } = new();
@@ -93,6 +99,16 @@ internal sealed partial class LayoutEngine
     private void LayoutAbsolute(Element e, float staticX, float staticY, float cbX, float cbY, float cbW, float cbH)
     {
         Cancellation.ThrowIfCancellationRequested();
+        // A box placed in the grid of the grid container that is its containing block is positioned in its grid area.
+        if (_gridAreas != null && _gridAreas.TryGetValue(e, out var gridArea) && e.Parent?.Style is { } ps
+            && (ps.Positioned || ps.Transform != null || ps.Perspective != null || ps.Filters != null))
+        {
+            float x1 = float.IsNaN(gridArea.X1) ? cbX + cbW : gridArea.X1, y1 = float.IsNaN(gridArea.Y1) ? cbY + cbH : gridArea.Y1;
+            if (!float.IsNaN(gridArea.X0)) cbX = gridArea.X0;
+            if (!float.IsNaN(gridArea.Y0)) cbY = gridArea.Y0;
+            cbW = Math.Max(0, x1 - cbX);
+            cbH = Math.Max(0, y1 - cbY);
+        }
         var s = e.Style;
         float ml = s.MarginLeft.IsAuto ? 0 : s.MarginLeft.Resolve(cbW), mr = s.MarginRight.IsAuto ? 0 : s.MarginRight.Resolve(cbW);
         float mt = s.MarginTop.IsAuto ? 0 : s.MarginTop.Resolve(cbW), mb = s.MarginBottom.IsAuto ? 0 : s.MarginBottom.Resolve(cbW);
@@ -155,6 +171,13 @@ internal sealed partial class LayoutEngine
 
         float x = hasL ? cbX + l + ml : hasR ? cbX + cbW - r - mr - boxW : staticX + ml;
         float y = hasT ? cbY + t + mt : hasB ? cbY + cbH - b - mb - boxH : staticY + mt;
+        // In a flex container the static position is where the box would go as its only item, aligned by
+        // justify-content and align-self (css-flexbox §4.1).
+        if (_staticAreas != null && _staticAreas.TryGetValue(e, out var area))
+        {
+            if (!hasL && !hasR) x += area.Fx * (area.W - boxW - ml - mr);
+            if (!hasT && !hasB) y += area.Fy * (area.H - boxH - mt - mb);
+        }
         int start = _ops.Count;
         Place(c, x - c.BoxX, y - c.BoxY);
         if (_ops.Count > start && !(_ops.Count == start + 1 && _ops[start] is LayerOp)) WrapLayer(start, LayerOp.PositionedOrder, stackingContext: false);
@@ -187,6 +210,41 @@ internal sealed partial class LayoutEngine
         if (!_treeOrder.TryGetValue(e, out int order)) _treeOrder[e] = order = _treeOrder.Count;
         return order;
     }
+
+    /// <summary>
+    /// Notes the content box of a flex container, <paramref name="w"/> by <paramref name="h"/>, for the static positions
+    /// of its absolutely positioned children, which were queued at its top-left before its height was known.
+    /// </summary>
+    private void NoteFlexStaticArea(Element container, float w, float h)
+    {
+        var s = container.Style;
+        foreach (var c in container.Children)
+        {
+            if (c is not Element { Style: { OutOfFlow: true, Display: not Display.None } } e || e.Detached) continue;
+            var align = e.Style.AlignSelf == BoxAlign.Auto ? s.AlignItems : e.Style.AlignSelf;
+            float main = AlignFactor(s.JustifyContent), cross = AlignFactor(align);
+            if (s.FlexDirection is FlexDirection.RowReverse or FlexDirection.ColumnReverse) main = 1 - main;
+            if (s.FlexWrap == FlexWrap.WrapReverse) cross = 1 - cross;
+            float fx = s.IsRow ? main : cross, fy = s.IsRow ? cross : main;
+            // Right to left, the start of a row (and the cross start of a column) is on the right.
+            if (s.Rtl) fx = 1 - fx;
+            if (fx == 0 && fy == 0)
+            {
+                _staticAreas?.Remove(e);
+                continue;
+            }
+            _staticAreas ??= new Dictionary<Element, (float, float, float, float)>(ReferenceEqualityComparer.Instance);
+            _staticAreas[e] = (w, h, fx, fy);
+        }
+    }
+
+    /// <summary>Where on an axis a box alone in its container goes for an alignment value: 0 start, 0.5 centre, 1 end.</summary>
+    private static float AlignFactor(BoxAlign a) => a switch
+    {
+        BoxAlign.Center or BoxAlign.SpaceAround or BoxAlign.SpaceEvenly => 0.5f,
+        BoxAlign.End => 1,
+        _ => 0,
+    };
 
     /// <summary>Places relative offsets, z-index layering and transforms on a laid-out box's ops.</summary>
     private void FinishLayered(Element e, int opsStart, float cbW)

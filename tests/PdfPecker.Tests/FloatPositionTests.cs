@@ -207,6 +207,46 @@ public class FloatPositionTests
         Assert.True(rects.FindIndex(r => r.Color == 0xFFFF0000) < rects.FindIndex(r => (r.Color & 0xFFFFFF) == 0x0000FF));
     }
 
+    [Theory]
+    // Without offsets, an absolutely positioned child of a flex container goes where it would as the container's only
+    // item (css-flexbox §4.1), as in Chrome: here in a 200px by 100px content box, the box is 20px square.
+    [InlineData("justify-content:center;align-items:center", 67.5f, 30)]
+    [InlineData("justify-content:flex-end;align-items:flex-end", 135, 60)]
+    [InlineData("flex-direction:column;justify-content:flex-end;align-items:center", 67.5f, 60)]
+    [InlineData("flex-direction:row-reverse", 135, 0)]
+    [InlineData("justify-content:center;align-items:center;direction:rtl", 67.5f, 30)]
+    [InlineData("justify-content:flex-start", 0, 0)]
+    public void AbsoluteFlexChildWithoutOffsetsIsAligned(string container, float x, float y)
+    {
+        var (ops, _) = Layout("<style>body{margin:0}</style><div style='position:relative;display:flex;width:200px;height:100px;" + container + "'>" +
+                              "<div style='position:absolute;width:20px;height:20px;background:#f00'></div></div>");
+        var r = Rect(ops, 0xFFFF0000);
+        Assert.Equal(x, r.X, 1);
+        Assert.Equal(y, r.Y, 1);
+    }
+
+    [Fact]
+    public void AbsoluteGridChildIsPositionedInItsGridArea()
+    {
+        // With the grid container as its containing block, grid-column and grid-row give the box its grid area, whose
+        // edges its offsets are measured from (CSS Grid §9.1); an auto line is the container's padding edge.
+        var (ops, _) = Layout("<style>body{margin:0} i{display:block}</style>" +
+                              "<div style='position:relative;display:grid;grid-template-columns:100px 100px 100px;grid-template-rows:30px 30px;width:400px'>" +
+                              "<i></i><i></i><i></i>" +
+                              "<div style='position:absolute;grid-column:2/4;grid-row:2;right:0;bottom:0;width:20px;height:10px;background:#f00'></div>" +
+                              "<div style='position:absolute;grid-column:2;grid-row:1;left:10px;top:5px;width:20px;height:10px;background:#00f'></div>" +
+                              "<div style='position:absolute;grid-row:2;left:0;right:0;top:0;height:10px;background:#0f0'></div></div>");
+        var red = Rect(ops, 0xFFFF0000);
+        Assert.Equal(280 * 0.75f, red.X, 1);
+        Assert.Equal(50 * 0.75f, red.Y, 1);
+        var blue = Rect(ops, 0xFF0000FF);
+        Assert.Equal(110 * 0.75f, blue.X, 1);
+        Assert.Equal(5 * 0.75f, blue.Y, 1);
+        var green = Rect(ops, 0xFF00FF00);
+        Assert.Equal(400 * 0.75f, green.W, 1);
+        Assert.Equal(30 * 0.75f, green.Y, 1);
+    }
+
     [Fact]
     public void FixedBoxGoesToEveryPage()
     {

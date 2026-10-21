@@ -586,11 +586,52 @@ internal sealed partial class LayoutEngine
         }
 
         var rowShift = PlaceGridItemsInAreas(ref g);
+        NoteAbsoluteGridAreas(ref g, rowShift, g.ColCtx?.Count ?? Math.Max(colDefs.Count, s.GridTemplateAreas?.Columns ?? 0),
+            g.RowCtx?.Count ?? Math.Max(rowDefs.Count, s.GridTemplateAreas?.Rows ?? 0));
         if (g.HasSubgrids)
             foreach (var it in items)
                 if (it.El != null && it.Style.IsGrid) _subgrids.Remove(it.El);
         _lastBoxRight = Math.Max(_lastBoxRight, g.ColX[g.ColCount]);
         return Math.Max(g.RowY[g.RowCount] + (rowShift?[g.RowCount] ?? 0), y);
+    }
+
+    /// <summary>
+    /// Notes the grid areas of the absolutely positioned children that are placed in the grid, which are their containing
+    /// blocks when the grid is (CSS Grid §9.1). An edge whose line is auto, or not in the grid, is the padding edge, NaN.
+    /// </summary>
+    private void NoteAbsoluteGridAreas(ref GridPass g, float[]? rowShift, int explicitCols, int explicitRows)
+    {
+        foreach (var c in g.E.Children)
+        {
+            if (c is not Element { Style: { Position: Position.Absolute, Display: not Display.None } st } e || e.Detached) continue;
+            if (st.GridColumnStart.IsAuto && st.GridColumnEnd.IsAuto && st.GridRowStart.IsAuto && st.GridRowEnd.IsAuto)
+            {
+                _gridAreas?.Remove(e);
+                continue;
+            }
+            var (c0, c1) = AreaLines(ResolveName(st.GridColumnStart, g.ColNames, true), ResolveName(st.GridColumnEnd, g.ColNames, false), explicitCols, g.ColCount);
+            var (r0, r1) = AreaLines(ResolveName(st.GridRowStart, g.RowNames, true), ResolveName(st.GridRowEnd, g.RowNames, false), explicitRows, g.RowCount);
+            _gridAreas ??= new Dictionary<Element, (float, float, float, float)>(ReferenceEqualityComparer.Instance);
+            _gridAreas[e] = (c0 < 0 ? float.NaN : g.ColX[c0],
+                             c1 < 0 ? float.NaN : g.ColRight(c1 - 1),
+                             r0 < 0 ? float.NaN : g.RowY[r0] + (rowShift?[r0] ?? 0),
+                             r1 < 0 ? float.NaN : g.RowY[r1 - 1] + (rowShift?[r1 - 1] ?? 0) + g.Rows[r1 - 1].Base);
+        }
+    }
+
+    /// <summary>
+    /// The 0-based start and end lines of an absolutely positioned box's area on one axis, or -1 for an edge that is the
+    /// padding edge: an auto line, or a line outside the grid's <paramref name="count"/> tracks.
+    /// </summary>
+    private static (int Start, int End) AreaLines(GridLine start, GridLine end, int explicitCount, int count)
+    {
+        int s = start.Line != 0 ? LineToIndex(start.Line, explicitCount) : -1;
+        int e = end.Line != 0 ? LineToIndex(end.Line, explicitCount) : -1;
+        if (s >= 0 && e < 0 && end.Span > 0) e = s + end.Span;
+        else if (e >= 0 && s < 0 && start.Span > 0) s = e - start.Span;
+        if (s >= 0 && e >= 0 && e < s) (s, e) = (e, s);
+        if (s >= 0 && e == s) e = s + 1;
+        return (s >= 0 && s < count ? s : -1, e >= 1 && e <= count ? e : -1);
     }
 
     /// <summary>Resolves the line names and places the items in the grid, which sets the number of tracks on each axis.</summary>
