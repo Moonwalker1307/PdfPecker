@@ -1,3 +1,4 @@
+using System.Globalization;
 using PdfPecker.Css;
 using PdfPecker.Html;
 using PdfPecker.Images;
@@ -411,6 +412,21 @@ public class BrowserMatchTests
         var x = ops.Single(t => t.Text.StartsWith('x'));
         Near(x.Baseline - 3.75f, ops.Single(t => t.Text == "2").Baseline);
         Near(x.Baseline + 2.25f, ops.Single(t => t.Text == "3").Baseline);
+    }
+
+    [Theory]
+    [InlineData("<div style='display: inline-flex'>word{0}</div>|after")]
+    [InlineData("<div style='display: inline-flex'><b>word{0}</b></div>|after")]
+    [InlineData("<div style='display: flex'><span>word{0}</span>|after</div>")]
+    [InlineData("<div style='float: left'>word{0}</div>|after")]
+    [InlineData("<span style='display: inline-block'>word <b>x{0}</b></span>|after")]
+    [InlineData("<table style='border-collapse: collapse'><tr><td style='padding: 0'>word{0}</td><td style='padding: 0'>|after</td></tr></table>")]
+    public void A_trailing_space_is_not_part_of_a_shrink_to_fit_width(string html)
+    {
+        // The space at the end of the line hangs, so Chrome sizes the box as if it were not there.
+        float After(string space) => Layout($"<div style='font: 16px Arial'>{string.Format(CultureInfo.InvariantCulture, html, space)}</div>")
+            .OfType<TextOp>().Single(t => t.Text.StartsWith('|')).X;
+        Near(After(""), After(" "));
     }
 
     [Fact]
