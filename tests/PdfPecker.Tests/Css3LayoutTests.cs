@@ -506,6 +506,29 @@ public class Css3LayoutTests
     }
 
     [Fact]
+    public void A_line_break_in_flex_text_keeps_one_anonymous_item()
+    {
+        // As in Chrome, "one<br>two" directly in a flex row is one item of two lines, and the span after it starts to
+        // its right at the top, not a third item between them.
+        var ops = Layout("<div style='display:flex;font:12pt Helvetica'>one<br>two<span style='background:#ff0000'>span</span></div>");
+        var text = ops.OfType<TextOp>().ToList();
+        var one = text.Single(t => t.Text.Trim() == "one");
+        var two = text.Single(t => t.Text.Trim() == "two");
+        Near(one.X, two.X);
+        Assert.True(two.Baseline > one.Baseline);
+        var span = Box(ops, "#ff0000");
+        Assert.True(span.X > one.X + 10);
+        Assert.True(span.Y < two.Baseline - 12);
+    }
+
+    [Fact]
+    public void A_line_break_alone_in_a_flex_box_is_a_line_tall()
+    {
+        var ops = Layout("<div style='display:flex;font:12pt Helvetica;line-height:20pt;background:#ff0000'><br></div>");
+        Near(20, Box(ops, "#ff0000").H);
+    }
+
+    [Fact]
     public void A_stretched_flex_item_taller_than_a_fixed_height_row_keeps_its_place()
     {
         // A Bootstrap progress bar: a 14px flex row whose bar has a 15.75px text line. The bar used to be moved down by
