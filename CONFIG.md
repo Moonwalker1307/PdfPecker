@@ -41,6 +41,10 @@ nuget.org only accepts OSI- or FSF-approved licence IDs and some bundled font li
 Actions are pinned to commit SHAs, and jobs get read-only permissions unless they need more: the release job may
 attach files, and the publish job may request an OIDC token.
 
+Every job that restores packages caches `~/.nuget/packages` through `setup-dotnet`, keyed on the project files and
+`Directory.Build.props`. Package validation makes each restore of `src/PdfPecker` fetch the API baseline release, so
+without the cache every job counted as a download of that release on nuget.org.
+
 Repository settings Dependabot auto-merge relies on: "Allow auto-merge" under Settings → General, and a branch
 ruleset (or branch protection) on `main` that requires the status checks `build`, `windows`, `native-aot` and
 `analyze` and no approving review. Without required checks, enabling auto-merge fails and the PR waits for a person.
