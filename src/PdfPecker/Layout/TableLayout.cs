@@ -11,7 +11,7 @@ internal sealed partial class LayoutEngine
         public Element Td = null!;
         public int Row, Col, ColSpan = 1, RowSpan = 1;
         public float Min, Max;          // border-box intrinsic widths
-        public float CollapsedT, CollapsedB; // resolved collapsed borders above and below
+        public float CollapsedT, CollapsedB, CollapsedL, CollapsedR; // resolved collapsed borders on each side
         public float FixedWidth = -1;   // specified absolute border-box width
         public float PercentWidth = -1;
 
@@ -82,6 +82,7 @@ internal sealed partial class LayoutEngine
         public bool DefiniteHeight; // per layout pass: the table's height is a length or a percentage that resolves
         public CellGrid Grid = new(0, 0); // the cell covering each row and column
         public ComputedStyle TableStyle = null!;
+        public int WholeTableSides; // with collapsed borders, the sides of its own border the table draws whole
     }
 
     private readonly Dictionary<Element, TableModel> _tables = new();
@@ -173,7 +174,12 @@ internal sealed partial class LayoutEngine
             foreach (var cell in row.Cells)
                 for (int rr = cell.Row; rr < cell.Row + cell.RowSpan && rr < m.Rows.Count; rr++)
                     for (int cc = cell.Col; cc < cell.Col + cell.ColSpan && cc < m.ColCount; cc++) m.Grid[rr, cc] = cell;
-        if (table.Style.BorderCollapse) ResolveCollapsedBorders(m);
+        m.Rtl = table.Style.Rtl;
+        if (table.Style.BorderCollapse)
+        {
+            ResolveCollapsedBorders(m);
+            m.WholeTableSides = TableSides(m);
+        }
 
         int n = m.ColCount;
         m.ColMin = new float[n];
@@ -211,8 +217,8 @@ internal sealed partial class LayoutEngine
             {
                 var cs = cell.Td.Style;
                 var (mn, mx) = ContentIntrinsic(cell.Td);
-                // With collapsed borders a cell owns half of each border.
-                float borders = (cs.BorderLeft + cs.BorderRight) * (table.Style.BorderCollapse ? 0.5f : 1f);
+                // With collapsed borders a cell owns half of each border it shares, as wide as the widest of them.
+                float borders = table.Style.BorderCollapse ? (cell.CollapsedL + cell.CollapsedR) / 2 : cs.BorderLeft + cs.BorderRight;
                 float frame = cs.PaddingLeft.Resolve(0) + cs.PaddingRight.Resolve(0) + borders;
                 cell.Min = mn + frame;
                 // A min-width wider than the content widens the cell's column, as in Chrome.
@@ -700,7 +706,7 @@ internal sealed partial class LayoutEngine
         float bottom = tableBottom;
         foreach (var caption in m.Captions)
             if (caption.Style.CaptionBottom) bottom = LayoutCaption(caption, bx, bottom, boxW);
-        int sides = collapse && m.Rows.Count > 0 ? TableSides(m) : BoxPainter.AllSides;
+        int sides = collapse && m.Rows.Count > 0 ? m.WholeTableSides : BoxPainter.AllSides;
         if (pageColumns != null && !SameOnPages(tableBox!, tableTop, tableBottom))
             PaintOnPages(tableGroup, s, tableBox!, tableTop, tableBottom, sides, collapse);
         else BoxPainter.Paint(tableGroup, s, bx, tableTop, boxW, tableBottom - tableTop, _images, availW, sides, collapsedCell: collapse);
@@ -732,19 +738,7 @@ internal sealed partial class LayoutEngine
         float frameL, frameR, frameT, frameB;
         if (collapse)
         {
-            // The table's half borders are those of the collapsed outer borders: the widest of the table's own border
-            // and the borders of the cells along that edge (CSS 2.1 §17.6.2), as Chrome lays them out.
-            float t = s.BorderTop, b = s.BorderBottom, l = s.BorderLeft, r = s.BorderRight;
-            if (m.Rows.Count > 0)
-            {
-                foreach (var c in m.Rows[0].Cells) t = Math.Max(t, c.Td.Style.BorderTop);
-                foreach (var c in m.Rows[^1].Ending) b = Math.Max(b, c.Td.Style.BorderBottom);
-                foreach (var c in m.Rows[0].Cells)
-                {
-                    if (c.Col == 0) l = Math.Max(l, c.Td.Style.BorderLeft);
-                    if (c.Col + c.ColSpan == m.ColCount) r = Math.Max(r, c.Td.Style.BorderRight);
-                }
-            }
+            var (t, b, l, r) = CollapsedOuterBorders(m, s);
             frameL = l / 2; frameR = r / 2; frameT = t / 2; frameB = b / 2;
         }
         else
@@ -816,6 +810,26 @@ internal sealed partial class LayoutEngine
         for (int c = 0; c < n; c++) { colX[c] = cxp; cxp += widths[c] + hs; }
         colX[n] = cxp;
         return (bx, boxW, frameT, frameB, frameH, colX, widths);
+    }
+
+    /// <summary>
+    /// The collapsed outer borders of a table, whose halves are its frame: the widest resolved border along each edge, in
+    /// the first row for the top, left and right and the last for the bottom, as Chrome lays them out (CSS 2.1 §17.6.2).
+    /// </summary>
+    private static (float Top, float Bottom, float Left, float Right) CollapsedOuterBorders(TableModel m, ComputedStyle s)
+    {
+        if (m.Rows.Count == 0) return (s.BorderTop, s.BorderBottom, s.BorderLeft, s.BorderRight);
+        float t = 0, b = 0, l = 0, r = 0;
+        foreach (var c in m.Rows[0].Cells)
+        {
+            t = Math.Max(t, c.CollapsedT);
+            bool first = c.Col == 0, last = c.Col + c.ColSpan >= m.ColCount;
+            // Right to left, the first column is on the right.
+            if (m.Rtl ? last : first) l = Math.Max(l, c.CollapsedL);
+            if (m.Rtl ? first : last) r = Math.Max(r, c.CollapsedR);
+        }
+        foreach (var c in m.Rows[^1].Ending) b = Math.Max(b, c.CollapsedB);
+        return (t, b, l, r);
     }
 
     /// <summary>
@@ -1070,7 +1084,7 @@ internal sealed partial class LayoutEngine
         cell.W = w;
         cell.Top = rowTop;
 
-        float bl = collapse ? cs.BorderLeft / 2 : cs.BorderLeft, br = collapse ? cs.BorderRight / 2 : cs.BorderRight;
+        float bl = collapse ? cell.CollapsedL / 2 : cs.BorderLeft, br = collapse ? cell.CollapsedR / 2 : cs.BorderRight;
         float bt = collapse ? cell.CollapsedT / 2 : cs.BorderTop, bb = collapse ? cell.CollapsedB / 2 : cs.BorderBottom;
         float pl = cs.PaddingLeft.Resolve(w), pr = cs.PaddingRight.Resolve(w), pt = cs.PaddingTop.Resolve(w), pb = cs.PaddingBottom.Resolve(w);
 
@@ -1089,79 +1103,6 @@ internal sealed partial class LayoutEngine
         cell.NeededH = cell.ContentH = bt + pt + (contentBottom - contentTop) + pb + bb;
         if (!cs.Height.IsAuto && !cs.Height.IsPercent)
             cell.NeededH = Math.Max(cell.NeededH, cs.Height.Value + (cs.BorderBox ? 0 : bt + pt + pb + bb));
-    }
-
-    /// <summary>
-    /// With collapsed borders, the sides of a cell that it draws: each shared border is drawn once, by the cell whose
-    /// border wins (the wider one; on a tie the cell above or to the left), and an outer border by the cell unless the
-    /// table's own border is wider. A row at the top of a page draws its top border again.
-    /// </summary>
-    private static int CollapsedSides(TableModel m, CellModel cell, bool atPageTop)
-    {
-        var s = cell.Td.Style;
-        var t = m.TableStyle;
-        int rows = m.Rows.Count, cols = m.ColCount;
-        int r0 = cell.Row, r1 = cell.Row + cell.RowSpan - 1, c0 = cell.Col, c1 = cell.Col + cell.ColSpan - 1;
-        int sides = 0;
-        if (atPageTop || (r0 == 0 ? s.BorderTop >= t.BorderTop : s.BorderTop > (m.Grid[r0 - 1, c0]?.Td.Style.BorderBottom ?? 0)))
-            sides |= BoxPainter.Top;
-        if (r1 >= rows - 1 ? s.BorderBottom >= t.BorderBottom : s.BorderBottom >= (m.Grid[r1 + 1, c0]?.Td.Style.BorderTop ?? 0))
-            sides |= BoxPainter.Bottom;
-        if (c0 == 0 ? s.BorderLeft >= t.BorderLeft : s.BorderLeft > (m.Grid[r0, c0 - 1]?.Td.Style.BorderRight ?? 0))
-            sides |= BoxPainter.Left;
-        if (c1 >= cols - 1 ? s.BorderRight >= t.BorderRight : s.BorderRight >= (m.Grid[r0, c1 + 1]?.Td.Style.BorderLeft ?? 0))
-            sides |= BoxPainter.Right;
-        return sides;
-    }
-
-    /// <summary>
-    /// The width of the collapsed borders above and below each cell: the widest of the cell's own border, the facing
-    /// borders of the cells next to it and, at the table's edge, the table's border (CSS 2.1 §17.6.2). A cell lays its
-    /// content out inside half of these, so a border set only on the cell above still takes room in the cell below,
-    /// as in Chrome. Column widths still use each cell's own left and right borders.
-    /// </summary>
-    private static void ResolveCollapsedBorders(TableModel m)
-    {
-        var t = m.TableStyle;
-        int rows = m.Rows.Count, cols = m.ColCount;
-        foreach (var row in m.Rows)
-            foreach (var cell in row.Cells)
-            {
-                var s = cell.Td.Style;
-                int r0 = cell.Row, r1 = Math.Min(rows, cell.Row + cell.RowSpan) - 1;
-                float top = s.BorderTop, bottom = s.BorderBottom;
-                for (int c = cell.Col; c < Math.Min(cols, cell.Col + cell.ColSpan); c++)
-                {
-                    top = Math.Max(top, r0 == 0 ? t.BorderTop : m.Grid[r0 - 1, c]?.Td.Style.BorderBottom ?? 0);
-                    bottom = Math.Max(bottom, r1 >= rows - 1 ? t.BorderBottom : m.Grid[r1 + 1, c]?.Td.Style.BorderTop ?? 0);
-                }
-                cell.CollapsedT = top;
-                cell.CollapsedB = bottom;
-            }
-    }
-
-    /// <summary>The sides of a collapsed table's own border that are wider than the cells' borders along them.</summary>
-    private static int TableSides(TableModel m)
-    {
-        var t = m.TableStyle;
-        float top = 0, bottom = 0, left = 0, right = 0;
-        int rows = m.Rows.Count, cols = m.ColCount;
-        for (int c = 0; c < cols && rows > 0; c++)
-        {
-            top = Math.Max(top, m.Grid[0, c]?.Td.Style.BorderTop ?? 0);
-            bottom = Math.Max(bottom, m.Grid[rows - 1, c]?.Td.Style.BorderBottom ?? 0);
-        }
-        for (int r = 0; r < rows && cols > 0; r++)
-        {
-            left = Math.Max(left, m.Grid[r, 0]?.Td.Style.BorderLeft ?? 0);
-            right = Math.Max(right, m.Grid[r, cols - 1]?.Td.Style.BorderRight ?? 0);
-        }
-        int sides = 0;
-        if (t.BorderTop > top) sides |= BoxPainter.Top;
-        if (t.BorderBottom > bottom) sides |= BoxPainter.Bottom;
-        if (t.BorderLeft > left) sides |= BoxPainter.Left;
-        if (t.BorderRight > right) sides |= BoxPainter.Right;
-        return sides;
     }
 
     private void FinishCell(TableModel m, CellModel cell, float rowBottom, bool collapse)
@@ -1189,7 +1130,7 @@ internal sealed partial class LayoutEngine
         {
             sides = CollapsedSides(m, cell, AtPageTop(y));
             if (sides != BoxPainter.AllSides && (CssColor.IsVisible(cs.BackgroundColor) || cs.BackgroundImages != null))
-                backgroundArea = CollapsedBackground(m, cell, h, sides);
+                backgroundArea = CollapsedBackground(cell, h, sides);
             x -= cs.BorderLeft / 2;
             w += (cs.BorderLeft + cs.BorderRight) / 2;
             h += cs.BorderBottom / 2;
@@ -1203,6 +1144,7 @@ internal sealed partial class LayoutEngine
         // empty-cells: hide leaves a cell without content bare, with separated borders only.
         if (cs.EmptyCellsHide && !collapse && IsEmptyCell(cell.Td)) return;
         BoxPainter.Paint(cell.Group!, cs, x, y, w, h, _images, w, sides, collapsedCell: collapse, backgroundArea);
+        if (collapse) PaintForeignEdges(m, cell, rowBottom);
     }
 
     /// <summary>A cell with nothing in it but white space, which empty-cells: hide does not paint.</summary>
@@ -1222,20 +1164,11 @@ internal sealed partial class LayoutEngine
     /// border that a neighbouring cell or the table draws. Those borders can be drawn before the cell, which would
     /// otherwise paint over them; in Chrome every background is under every collapsed border.
     /// </summary>
-    private static (float X, float Y, float W, float H) CollapsedBackground(TableModel m, CellModel cell, float h, int sides)
+    private static (float X, float Y, float W, float H) CollapsedBackground(CellModel cell, float h, int sides)
     {
         var s = cell.Td.Style;
-        var t = m.TableStyle;
-        int rows = m.Rows.Count, cols = m.ColCount;
-        int r0 = cell.Row, r1 = Math.Min(rows, cell.Row + cell.RowSpan) - 1, c0 = cell.Col, c1 = Math.Min(cols, cell.Col + cell.ColSpan) - 1;
-        float left = s.BorderLeft, right = s.BorderRight;
-        for (int r = r0; r <= r1; r++)
-        {
-            left = Math.Max(left, c0 == 0 ? t.BorderLeft : m.Grid[r, c0 - 1]?.Td.Style.BorderRight ?? 0);
-            right = Math.Max(right, c1 >= cols - 1 ? t.BorderRight : m.Grid[r, c1 + 1]?.Td.Style.BorderLeft ?? 0);
-        }
-        float x0 = (sides & BoxPainter.Left) != 0 ? cell.X - s.BorderLeft / 2 : cell.X + left / 2;
-        float x1 = (sides & BoxPainter.Right) != 0 ? cell.X + cell.W + s.BorderRight / 2 : cell.X + cell.W - right / 2;
+        float x0 = (sides & BoxPainter.Left) != 0 ? cell.X - s.BorderLeft / 2 : cell.X + cell.CollapsedL / 2;
+        float x1 = (sides & BoxPainter.Right) != 0 ? cell.X + cell.W + s.BorderRight / 2 : cell.X + cell.W - cell.CollapsedR / 2;
         float y0 = (sides & BoxPainter.Top) != 0 ? cell.Top - s.BorderTop / 2 : cell.Top + cell.CollapsedT / 2;
         float y1 = (sides & BoxPainter.Bottom) != 0 ? cell.Top + h + s.BorderBottom / 2 : cell.Top + h - cell.CollapsedB / 2;
         return (x0, y0, x1 - x0, y1 - y0);
@@ -1248,7 +1181,7 @@ internal sealed partial class LayoutEngine
     private void ClipCell(CellModel cell, float h, bool collapse)
     {
         var cs = cell.Td.Style;
-        float bl = collapse ? cs.BorderLeft / 2 : cs.BorderLeft, br = collapse ? cs.BorderRight / 2 : cs.BorderRight;
+        float bl = collapse ? cell.CollapsedL / 2 : cs.BorderLeft, br = collapse ? cell.CollapsedR / 2 : cs.BorderRight;
         float bt = collapse ? cell.CollapsedT / 2 : cs.BorderTop, bb = collapse ? cell.CollapsedB / 2 : cs.BorderBottom;
         float px = cell.X + bl, py = cell.Top + bt, pw = Math.Max(0, cell.W - bl - br), ph = Math.Max(0, h - bt - bb);
         var radii = cs.ClipsX && cs.ClipsY && !collapse ? BoxPainter.InnerRadii(BoxPainter.Radii(cs, cell.W, h), bl, bt, br, bb) : null;

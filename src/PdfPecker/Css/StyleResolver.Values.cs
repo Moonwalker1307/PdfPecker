@@ -410,6 +410,13 @@ internal sealed partial class StyleResolver
         return (px < 1 ? 1 : MathF.Floor(px + 0.001f)) * 0.75f;
     }
 
+    /// <summary>Notes whether a border-style value makes the side hidden; a value that is not a style leaves it as it is.</summary>
+    private static void SetHidden(ComputedStyle s, byte side, string lower)
+    {
+        if (lower == "hidden") s.BorderHiddenSides |= side;
+        else if (CssParser.IsBorderStyle(lower)) s.BorderHiddenSides &= (byte)~side;
+    }
+
     private static BorderStyle ParseBorderStyle(string lower, BorderStyle current)
         => lower switch
         {
