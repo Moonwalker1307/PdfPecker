@@ -371,7 +371,9 @@ internal sealed partial class LayoutEngine
                     TakeFloatRoom();
                     if (need <= _avail + Eps) break;
                 }
-            if (splittable && _curW + gw > _avail + Eps)
+            // The kerning with the line's last item counts here too: a space before "A" narrows the word just enough that
+            // a box as wide as its content (measured with that kerning) holds it, so it must not break inside it.
+            if (splittable && _curW + gw + KernWithLast(_items[i]) > _avail + Eps)
             {
                 // A chunk wider than the line that overflow-wrap or word-break lets break between characters.
                 for (int k = i; k < j; k++)
