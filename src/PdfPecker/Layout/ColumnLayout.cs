@@ -63,6 +63,7 @@ internal sealed partial class LayoutEngine
     private float LayoutColumns(Element e, float x, float y, float w, float? definiteH)
     {
         var s = e.Style;
+        _depthDependentLayouts++;
         float gap = s.ColumnGap is { } g ? Math.Max(0, g.Resolve(w)) : s.FontSize; // normal = 1em
         int n = ColumnCountFor(s, w, gap);
         if (n <= 1) return LayoutFlow(e, x, y, w);
@@ -456,6 +457,9 @@ internal sealed partial class LayoutEngine
 
         /// <summary>Whether a forced break ended column k.</summary>
         public bool ForcedAt(int k) => _forced != null && _forced.Contains(k);
+
+        /// <summary>How many columns a forced break ended so far; layout reads those breaks (see TruncatedMargin).</summary>
+        public int ForcedCount => _forced?.Count ?? 0;
 
         /// <summary>Whether a break from column <c>from</c> on left fewer lines than orphans asks for, which taller columns could fix.</summary>
         public bool Violated;
