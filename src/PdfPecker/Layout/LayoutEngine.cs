@@ -2128,13 +2128,16 @@ internal sealed partial class LayoutEngine
             if (known.DependsOnDepth || _columnNotes != null && !SamePass(known)) _depthDependentLayouts++;
             // Measured already where the box around it was captured: only its content may still be needed.
             c = Measured(known);
+            // Its content is laid out as it was measured, so the items inside it take what they measured then too.
+            // Without them, a stretched item laid out again inside each level of nested flex boxes laid out everything
+            // inside it again when it was placed, which doubled the work per level.
             c.Lay = () =>
             {
                 int list = _currentListIndex, breaks = _forcedBreaks;
                 _currentListIndex = known.ListIndexBefore;
                 try
                 {
-                    return CaptureBoxCore(src);
+                    return CaptureBoxCore(src, known.Known);
                 }
                 finally
                 {
