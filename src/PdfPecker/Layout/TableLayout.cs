@@ -246,25 +246,22 @@ internal sealed partial class LayoutEngine
                 else spanning.Add(cell);
             }
         }
-        foreach (var cell in spanning)
-        {
-            float sumMin = (cell.ColSpan - 1) * hs, sumMax = sumMin;
-            for (int c = cell.Col; c < cell.Col + cell.ColSpan; c++) { sumMin += m.ColMin[c]; sumMax += m.ColMax[c]; }
-            if (cell.Min > sumMin)
-            {
-                float add = (cell.Min - sumMin) / cell.ColSpan;
-                for (int c = cell.Col; c < cell.Col + cell.ColSpan; c++) m.ColMin[c] += add;
-            }
-            if (cell.Max > sumMax)
-            {
-                float add = (cell.Max - sumMax) / cell.ColSpan;
-                for (int c = cell.Col; c < cell.Col + cell.ColSpan; c++) m.ColMax[c] += add;
-            }
-        }
         for (int c = 0; c < n; c++)
         {
             if (m.ColFixed[c] >= 0) m.ColMax[c] = Math.Max(m.ColMin[c], m.ColFixed[c]);
             if (m.ColMax[c] < m.ColMin[c]) m.ColMax[c] = m.ColMin[c];
+        }
+        // As in Chrome, cells that span fewer columns are shared out first, so a wider span sees what they asked for.
+        spanning.Sort(static (a, b) => a.ColSpan.CompareTo(b.ColSpan));
+        foreach (var cell in spanning) SpreadSpanningCell(m, cell, hs);
+        // As in Chrome, percentages adding up to more than 100% are cut down from the last column that has one: the
+        // first columns keep theirs and the rest get what is left of the 100%.
+        float pctLeft = 100;
+        for (int c = 0; c < n; c++)
+        {
+            if (m.ColPct[c] < 0) continue;
+            m.ColPct[c] = Math.Min(m.ColPct[c], pctLeft);
+            pctLeft -= m.ColPct[c];
         }
         if (anyCap) m.ColMaxWeight = MaxWeights(m, weights);
 
@@ -322,6 +319,116 @@ internal sealed partial class LayoutEngine
         }
         return any ? weights : null;
     }
+
+    /// <summary>
+    /// Shares a cell spanning several columns out over them as Chrome does: a percentage width it has beyond the columns'
+    /// own goes to the columns without one, in proportion to their max-content widths; its min-content and max-content
+    /// widths widen the columns as a table that wide would size them (see <see cref="SpreadWidth"/>), so the columns
+    /// with more content get more of it.
+    /// </summary>
+    private static void SpreadSpanningCell(TableModel m, CellModel cell, float hs)
+    {
+        int first = cell.Col, end = Math.Min(m.ColCount, cell.Col + cell.ColSpan);
+        if (end <= first) return;
+        float spacing = (end - first - 1) * hs;
+        if (cell.PercentWidth >= 0)
+        {
+            float pct = 0, otherMax = 0;
+            int others = 0;
+            for (int c = first; c < end; c++)
+            {
+                if (m.ColPct[c] >= 0) pct += m.ColPct[c];
+                else { otherMax += m.ColMax[c]; others++; }
+            }
+            float surplus = cell.PercentWidth - pct;
+            if (surplus > 0 && others > 0)
+                for (int c = first; c < end; c++)
+                    if (m.ColPct[c] < 0) m.ColPct[c] = otherMax > 0 ? surplus * m.ColMax[c] / otherMax : surplus / others;
+        }
+        var min = SpreadWidth(m, first, end, Math.Max(0, cell.Min - spacing), constrained: true);
+        for (int c = first; c < end; c++) m.ColMin[c] = Math.Max(m.ColMin[c], min[c - first]);
+        var max = SpreadWidth(m, first, end, Math.Max(0, cell.Max - spacing), constrained: cell.FixedWidth >= 0);
+        for (int c = first; c < end; c++) m.ColMax[c] = Math.Max(Math.Max(m.ColMin[c], m.ColMax[c]), max[c - first]);
+    }
+
+    /// <summary>
+    /// The widths columns <paramref name="first"/> to <paramref name="end"/> take to fill <paramref name="target"/>,
+    /// by Chrome's width distribution (css-tables-3 §3.9.3): from their min-content widths, percentage columns grow to
+    /// their percentage first, then columns with a width to that width, then auto columns towards their max-content
+    /// widths, each in proportion to how far it has to grow; past every max-content width the auto columns grow in
+    /// proportion to it, or else the columns with a width (unless <paramref name="constrained"/>), or else the
+    /// percentage columns in proportion to their percentage. Percentages resolve against the target.
+    /// </summary>
+    private static float[] SpreadWidth(TableModel m, int first, int end, float target, bool constrained)
+    {
+        int count = end - first;
+        var w = new float[count];
+        float minGuess = 0, pctGuess = 0, specGuess = 0, maxGuess = 0, pctGrow = 0, specGrow = 0, autoGrow = 0;
+        float totalPct = 0, autoMax = 0, fixedMax = 0;
+        int pctCols = 0, fixedCols = 0, autoCols = 0;
+        for (int c = first; c < end; c++)
+        {
+            float mn = m.ColMin[c], mx = m.ColMax[c];
+            minGuess += mn;
+            if (m.ColPct[c] >= 0)
+            {
+                float p = PercentWidth(m, c, target);
+                pctCols++;
+                totalPct += m.ColPct[c];
+                pctGuess += p; specGuess += p; maxGuess += p;
+                pctGrow += p - mn;
+            }
+            else if (m.ColFixed[c] >= 0)
+            {
+                fixedCols++;
+                fixedMax += mx;
+                pctGuess += mn; specGuess += mx; maxGuess += mx;
+                specGrow += mx - mn;
+            }
+            else
+            {
+                autoCols++;
+                autoMax += mx;
+                pctGuess += mn; specGuess += mn; maxGuess += mx;
+                autoGrow += mx - mn;
+            }
+        }
+        target = Math.Max(target, minGuess);
+        for (int c = first; c < end; c++)
+        {
+            int i = c - first;
+            float mn = m.ColMin[c], mx = m.ColMax[c];
+            bool pct = m.ColPct[c] >= 0, isFixed = !pct && m.ColFixed[c] >= 0;
+            if (target <= minGuess) w[i] = mn;
+            else if (target <= pctGuess)
+                w[i] = pct ? mn + (pctGrow > 0 ? (target - minGuess) * (PercentWidth(m, c, target) - mn) / pctGrow : (target - minGuess) / pctCols) : mn;
+            else if (target <= specGuess)
+                w[i] = pct ? PercentWidth(m, c, target)
+                    : isFixed ? mn + (specGrow > 0 ? (target - pctGuess) * (mx - mn) / specGrow : (target - pctGuess) / fixedCols) : mn;
+            else if (target <= maxGuess)
+                w[i] = pct ? PercentWidth(m, c, target)
+                    : isFixed || target == maxGuess ? mx
+                    : mn + (autoGrow > 0 ? (target - specGuess) * (mx - mn) / autoGrow : (target - specGuess) / autoCols);
+            else
+            {
+                float extra = target - maxGuess;
+                w[i] = pct ? PercentWidth(m, c, target) : mx;
+                if (autoCols > 0)
+                {
+                    if (!pct && !isFixed) w[i] += autoMax > 0 ? extra * mx / autoMax : extra / autoCols;
+                }
+                else if (fixedCols > 0 && !constrained)
+                {
+                    if (isFixed) w[i] += fixedMax > 0 ? extra * mx / fixedMax : extra / fixedCols;
+                }
+                else if (pct) w[i] += totalPct > 0 ? extra * m.ColPct[c] / totalPct : extra / pctCols;
+            }
+        }
+        return w;
+    }
+
+    /// <summary>A percentage column's width in <paramref name="basis"/>, never below its min-content width.</summary>
+    private static float PercentWidth(TableModel m, int c, float basis) => Math.Max(m.ColMin[c], m.ColPct[c] * basis / 100f);
 
     private static int ParseInt(string? s, int fallback) => Invariant.TryParseInt(s, out int v) ? v : fallback;
 
