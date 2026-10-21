@@ -229,6 +229,7 @@ internal sealed partial class PdfDocumentWriter
                 SetStroke(b, l.Color);
                 b.Num(l.Width).Ascii(" w ");
                 if (l.Solid) b.Ascii("1 J ");
+                else if (l.DashLength > 0) b.Ascii("0 J [").Num(l.DashLength).Sp().Num(l.DashGap).Ascii("] 0 d ");
                 else if (l.Dotted) b.Ascii("1 J [0 ").Num(l.Width * 2).Ascii("] 0 d ");
                 else b.Ascii("[").Num(l.Width * 3).Sp().Num(l.Width * 3).Ascii("] 0 d ");
                 float y1 = l.X1 == l.X2 ? placed.Y0 : l.Y1, y2 = l.X1 == l.X2 ? placed.Y1 : l.Y2;
