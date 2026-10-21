@@ -826,6 +826,20 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Measured_flex_items_placed_in_stretched_items_reuse_what_they_measured()
+    {
+        // Each flex box holds a fixed-size box that overflows into the next flex box, so the items in between are
+        // stretched and laid out again. Placing a measured item there laid all of its content out again, twice as much
+        // at each level: 40 levels allocated 9.7 GB, and a fuzzed page of 20 levels took 15 seconds.
+        const string flex = "<div style='display:flex;gap:20px'>", box = "<div style='width:120px;height:80px;border:9px solid'>";
+        var html = Repeat(flex + box + "</div><div style='width:120px;height:80px;border:12px solid'></div>" + flex + box + box
+                          + "</div><div style='width:120px;height:80px;border:12px solid'></div>", 20);
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 64L << 20);
+    }
+
+    [Fact]
     public void Repeating_gradients_share_one_tiling_budget()
     {
         // Each box tiles twenty repeating gradients over 250 periods, about 33 KB of PDF each: four kilobytes of HTML
