@@ -155,6 +155,16 @@ public sealed class PdfOptions
     public float Scale { get; set; } = 1f;
 
     /// <summary>
+    /// Shrink the pages when content sticks out past the right edge of the page area, as Chrome does when it prints: the
+    /// document is laid out as much wider as its content reaches, at most 1.5 times the page width, and drawn smaller to
+    /// fit, on top of <see cref="Scale"/>. Content beyond the left edge, inside a box with <c>overflow: hidden</c> or
+    /// with <c>position: fixed</c> does not count, as in Chrome. The paper keeps its size. When false, the page is laid
+    /// out at its width, what sticks out runs into the right margin and off the paper, and images wider than the page
+    /// are made smaller to fit it. Default: true.
+    /// </summary>
+    public bool ShrinkToFit { get; set; } = true;
+
+    /// <summary>
     /// Round the height that a running header or footer reserves with its <c>height</c> attribute down to whole points on
     /// paper, as Chrome does with page margins: IronPDF turned <c>height="17mm"</c> (48.19 pt) into a 48 pt margin, so the
     /// flowing content started 0.19 pt higher than the attribute says. A band whose content is taller than its attribute

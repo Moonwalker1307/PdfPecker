@@ -359,6 +359,7 @@ internal sealed partial class LayoutEngine
         bool rtl = ReorderLine(items, ref _lineLevels);
         var fit = AlignLine(line, block, x, lineLeft, lineW, lineIndent, rtl, spaces);
         float[] xs = ItemPositions(items, fit);
+        NoteLineReach(items, xs, x + lineLeft + lineW);
 
         int fragments = NoteInlineFragments(items, xs, baseline);
         EmitLinks(items, xs, y, lineH);
@@ -373,6 +374,18 @@ internal sealed partial class LayoutEngine
         if (_deferredFootnoteCalls is { Count: > 0 } && !deferCalls) PlaceDeferredFootnoteCalls();
         _lastBaseline = baseline;
         if (_marker != null) EmitMarker(baseline, y);
+    }
+
+    /// <summary>
+    /// A line whose content is wider than its room, such as a long word or text that may not wrap, marks how far it
+    /// reaches with an empty group: that counts toward shrinking the page to fit, as Chrome does. A trailing space hangs
+    /// and does not count.
+    /// </summary>
+    private void NoteLineReach(List<Item> items, float[] xs, float roomRight)
+    {
+        int last = items.Count - 1;
+        while (last >= 0 && items[last].Kind == ItemKind.Space) last--;
+        if (last >= 0 && xs[last + 1] > roomRight + 0.01f) _ops.Add(new GroupOp { Reach = xs[last + 1] });
     }
 
     private void DrawItems(List<Item> items, float[] xs, ComputedStyle block, float x, float y, float baseline, float descent, float spaceExtra, float charExtra)
@@ -393,6 +406,7 @@ internal sealed partial class LayoutEngine
                         float ia = AtomicAscent(it, block, baseline - y, descent);
                         _ops.Add(new ImageOp(xs[i] + it.RelX, baseline - ia + it.RelY, it.Width, it.Height, it.Image) { Tag = it.Tag });
                     }
+                    if (it.PageExcess > 0) _ops.Add(new GroupOp { Reach = xs[i] + it.RelX + it.Width + it.PageExcess });
                     break;
                 case ItemKind.Box:
                 {

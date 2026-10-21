@@ -267,6 +267,7 @@ internal sealed partial class LayoutEngine
         image.Image = s.Visible ? img : null;
         image.Width = w;
         image.Height = h;
+        image.PageExcess = _replacedExcess;
         image.Href = href ?? LinkOf(e);
         image.Tag = Tags?.Of(e);
         st.Items.Add(image);
@@ -286,7 +287,7 @@ internal sealed partial class LayoutEngine
         float ptop = s.PaddingTop.Resolve(0) + s.BorderTop, pbot = s.PaddingBottom.Resolve(0) + s.BorderBottom;
         float boxW = sw + pl + pr, boxH = sh + ptop + pbot;
         var ops = new List<DrawOp>();
-        var group = new GroupOp();
+        var group = new GroupOp { Reach = boxW + _replacedExcess };
         ops.Add(group);
         BoxPainter.Paint(group, s, 0, 0, boxW, boxH, _images);
         if (s.Visible && svg != null)

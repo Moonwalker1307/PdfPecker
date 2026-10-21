@@ -659,7 +659,7 @@ internal sealed partial class LayoutEngine
                 if (!caption.Style.CaptionBottom) y = LayoutCaption(caption, bx, y, boxW);
 
             tableTop = y;
-            tableGroup = new GroupOp();
+            tableGroup = new GroupOp { Reach = bx + boxW };
             _ops.Add(tableGroup);
             cy = y + frameT + (m.Rows.Count > 0 ? vs : 0);
 

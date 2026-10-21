@@ -1056,7 +1056,7 @@ internal sealed partial class LayoutEngine
         float imgW = 0, imgH = 0;
         PdfImage? image = null;
         SvgImage? svg = null;
-        float contentW;
+        float contentW, replacedExcess = 0;
         if (isImage || isSvg)
         {
             float room = hasWOverride ? overrideW - frame : availW - ml - mr - frame;
@@ -1064,6 +1064,8 @@ internal sealed partial class LayoutEngine
             // with a border or margin overflows the box, as in Chrome.
             if (isImage) image = ImageSize(e, room, out imgW, out imgH, out svg, availW);
             else svg = SvgSize(e, room, out imgW, out imgH, availW);
+            // A flex or grid container that sized the box decides how far it reaches.
+            replacedExcess = hasWOverride ? 0 : _replacedExcess;
             if (hasWOverride && imgW > 0 && Math.Abs(room - imgW) > Eps)
             {
                 if (s.Height.IsAuto || s.Height.IsPercent && cbH == null) imgH *= Math.Max(0, room) / imgW;
@@ -1083,7 +1085,7 @@ internal sealed partial class LayoutEngine
         float bx = x + ml;
 
         int opsStart = _ops.Count;
-        var group = new GroupOp();
+        var group = new GroupOp { Reach = bx + used + replacedExcess };
         _ops.Add(group);
 
         // Positioned and transformed boxes are the containing block of their absolutely positioned descendants.
@@ -1402,12 +1404,20 @@ internal sealed partial class LayoutEngine
         var radii = s.ClipsX && s.ClipsY ? BoxPainter.InnerRadii(BoxPainter.Radii(s, w, h), bl, bt, br, bb) : null;
         if (!s.ClipsX) { px -= ClipOp.Far; pw += 2 * ClipOp.Far; }
         if (!s.ClipsY) { py -= ClipOp.Far; ph += 2 * ClipOp.Far; }
-        var clip = new ClipOp(px, py, pw, ph, radii);
+        var clip = new ClipOp(px, py, pw, ph, radii) { OfViewport = IsViewportOverflow(s) };
         for (int i = start; i < _ops.Count; i++) clip.Ops.Add(_ops[i]);
         Truncate(start, keepFloats: true);
         _ops.Add(clip);
         _floats.Fold(start);
     }
+
+    /// <summary>
+    /// Whether a box's overflow is the one CSS gives the viewport: the root element's, or the body's when the root's is
+    /// visible (CSS Overflow 3, 3.3).
+    /// </summary>
+    private bool IsViewportOverflow(ComputedStyle s)
+        => CanvasRoot is { } root && (s == root.Style
+            || !root.Style.ClipsX && !root.Style.ClipsY && root.Children.OfType<Element>().FirstOrDefault(c => c.Name == "body")?.Style == s);
 
     /// <summary>
     /// The containing block height a box gives its children when its own height is definite: a height that is a length
@@ -1803,6 +1813,13 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>Used size of a replaced element from its intrinsic size and its CSS width, height and limits.</summary>
+    /// <summary>
+    /// How much wider than the page the replaced element <see cref="ReplacedSize"/> sized last would be, had it not been
+    /// shrunk to the page: it still counts toward how far the content reaches, so that the page is shrunk to fit it
+    /// instead, as in Chrome.
+    /// </summary>
+    private float _replacedExcess;
+
     private void ReplacedSize(Element e, float iw, float ih, float availW, out float w, out float h, float percentW = float.NaN)
     {
         var s = e.Style;
@@ -1834,10 +1851,17 @@ internal sealed partial class LayoutEngine
             w *= mh / h;
             h = mh;
         }
-        // An image wider than its box overflows it, as in Chrome, but is never let run off the page. Headers, footers and
-        // margin boxes have no page width here and keep their images inside the box.
+        // An image wider than its box overflows it, as in Chrome, but is never let run off the page: it shrinks the page
+        // to fit instead, and only beyond that is it made smaller. Headers, footers and margin boxes have no page width
+        // here and keep their images inside the box.
         float limit = _grid.SetupOf(_cbKind).ContentWidth is > 0 and var pageW ? pageW : availW;
-        if (limit > 0 && w > limit) { h *= limit / w; w = limit; }
+        _replacedExcess = 0;
+        if (limit > 0 && w > limit)
+        {
+            _replacedExcess = w - limit;
+            h *= limit / w;
+            w = limit;
+        }
         if (_paginate && h > _grid.MinHeight) { w *= _grid.MinHeight / h; h = _grid.MinHeight; }
         if (w < 0) w = 0;
         if (h < 0) h = 0;

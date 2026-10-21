@@ -422,6 +422,52 @@ public class RobustnessTests
         Assert.Matches(@"/Subtype /Link /Rect \[45 ", text);
     }
 
+    [Theory]
+    // The page area is 210pt, 280px, wide: content that reaches to 350px is laid out at 350px and drawn at 0.8.
+    [InlineData("<div style='width: 350px; height: 5px'></div>", "0.8")]
+    [InlineData("<div style='margin-right: -70px; height: 5px'></div>", "0.8")]
+    [InlineData("<p style='margin: 0; font: 15px Arial'>WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW</p>", "0.666667")]
+    [InlineData("<div style='position: relative; left: 70px; height: 5px'></div>", "0.8")]
+    [InlineData("<div style='transform: translateX(70px); height: 5px'></div>", "0.8")]
+    [InlineData("<div style='position: absolute; left: 300px; width: 50px; height: 5px'></div>", "0.8")]
+    [InlineData("<table cellspacing='0' style='width: 350px'><tr><td style='padding: 0'>x</td></tr></table>", "0.8")]
+    // A drawing wider than the page is not made smaller on its own: the page shrinks to fit it.
+    [InlineData("<svg width='350' height='5'></svg>", "0.8")]
+    [InlineData("<svg width='350' height='5' style='display: block'></svg>", "0.8")]
+    [InlineData("<style>body { overflow: hidden }</style><div style='width: 350px; height: 5px'></div>", "0.8")]
+    // At most 1.5 times wider.
+    [InlineData("<div style='width: 1000px; height: 5px'></div>", "0.666667")]
+    // What Chrome does not count: overflow to the left, inside a box that clips it, or of a fixed box.
+    [InlineData("<div style='margin-left: -100px; width: 50px; height: 5px'></div>", "")]
+    [InlineData("<div style='overflow: hidden'><div style='width: 350px; height: 5px'></div></div>", "")]
+    [InlineData("<div style='position: fixed; width: 350px; height: 5px'></div>", "")]
+    [InlineData("<div style='width: 280px; height: 5px'></div>", "")]
+    [InlineData("<p style='margin: 0'>Words that wrap at the edge of the page as they always do, over several lines.</p>", "")]
+    public void A_page_whose_content_is_too_wide_is_shrunk_to_fit_as_in_chrome(string body, string scale)
+    {
+        body = "<style>body { margin: 0 }</style>" + body;
+        var options = new PdfOptions { PageSize = new PageSize(300, 450), Margins = new PageMargins(45) };
+        var pdf = ConvertUncompressed(body, options);
+        AssertStructurallyValid(pdf);
+        // The paper keeps its size, unlike with PdfOptions.Scale.
+        Assert.Contains("/MediaBox [0 0 300 450]", Latin1(pdf));
+        var content = AllContent(pdf);
+        if (scale.Length > 0) Assert.StartsWith($"q {scale} 0 0 {scale} 0 0 cm\n", content);
+        else Assert.DoesNotMatch(@"^q [\d.]+ 0 0 [\d.]+ 0 0 cm\n", content);
+
+        options.ShrinkToFit = false;
+        Assert.DoesNotMatch(@"^q [\d.]+ 0 0 [\d.]+ 0 0 cm\n", AllContent(ConvertUncompressed(body, options)));
+    }
+
+    [Fact]
+    public void Shrinking_to_fit_multiplies_the_scale()
+    {
+        // At 0.5 the page area is 560px wide; content 700px wide shrinks it by 0.8 more.
+        var pdf = ConvertUncompressed("<body style='margin: 0'><div style='width: 700px; height: 5px'></div>",
+            new PdfOptions { PageSize = new PageSize(300, 450), Margins = new PageMargins(45), Scale = 0.5f });
+        Assert.StartsWith("q 0.4 0 0 0.4 0 0 cm\n", AllContent(pdf));
+    }
+
     [Fact]
     public void Scale_must_be_between_one_tenth_and_two()
     {
