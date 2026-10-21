@@ -134,6 +134,46 @@ public class FloatPositionTests
         Assert.Equal(30 + 75 - 7.5f - 15, a.Y, 1);
     }
 
+    [Theory]
+    [InlineData("flex;flex-direction:column")]
+    [InlineData("flex")]
+    [InlineData("grid")]
+    public void AbsoluteChildOfFlexOrGridTakesNoRoom(string display)
+    {
+        // Out of flow, the badge is no item: it neither moves the content nor stretches, and its offsets apply.
+        var (ops, _) = Layout("<style>body{margin:0} .c{display:" + display + ";position:relative;width:200px;height:100px}" +
+                              ".a{position:absolute;top:10px;right:10px;height:20px;padding:0 5px;background:#f00}" +
+                              ".b{height:10px;width:40px;background:#00f}</style>" +
+                              "<div class=c><span class=a><i style='display:inline-block;width:30px'></i></span><div class=b></div></div>");
+        var b = Rect(ops, 0xFF0000FF);
+        Assert.Equal(0, b.X, 1);
+        Assert.Equal(0, b.Y, 1);
+        var a = Rect(ops, 0xFFFF0000);
+        Assert.Equal(30, a.W, 1); // shrink-to-fit: 30px of content and 10px of padding
+        Assert.Equal(150 - 7.5f - 30, a.X, 1);
+        Assert.Equal(7.5f, a.Y, 1);
+    }
+
+    [Fact]
+    public void RelativeTableCellContainsAbsoluteChildren()
+    {
+        var (ops, _) = Layout("<style>body{margin:0} table{border-collapse:collapse;width:200px} td{padding:0;height:100px}" +
+                              ".r{position:relative} .a{position:absolute;right:0;bottom:0;width:20px;height:20px;background:#f00}</style>" +
+                              "<table><tr><td>x</td><td class=r>y<div class=a></div></td></tr></table><div style='height:500px'></div>");
+        var a = Rect(ops, 0xFFFF0000);
+        Assert.Equal(150 - 15, a.X, 1);
+        Assert.Equal(75 - 15, a.Y, 1);
+    }
+
+    [Fact]
+    public void OutlineOnCollapsedTableCellIsDrawn()
+    {
+        var (ops, _) = Layout("<style>body{margin:0} table{border-collapse:collapse} td{border:1px solid #999;width:50px;height:20px}</style>" +
+                              "<table><tr><td style='outline:2px solid #f00'>a</td><td>b</td></tr></table>");
+        var layer = Flatten(ops).OfType<LayerOp>().Single(l => l.Order == LayerOp.OutlineOrder);
+        Assert.Contains(Flatten(layer.Ops).OfType<BorderRectOp>(), r => r.Color == 0xFFFF0000);
+    }
+
     [Fact]
     public void RelativeOffsetsShiftBox()
     {

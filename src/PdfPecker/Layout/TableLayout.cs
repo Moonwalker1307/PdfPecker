@@ -23,6 +23,7 @@ internal sealed partial class LayoutEngine
         public int OpsStart, OpsEnd;
         public GroupOp? Group;
         public float X, W;
+        public CbFrame? Frame; // a positioned cell's absolutely positioned boxes, laid out once the row's height is known
     }
 
     private sealed class RowModel
@@ -1058,7 +1059,11 @@ internal sealed partial class LayoutEngine
         var outerCb = _cbHeight;
         _cbHeight = rowHeight is float rh ? new CbHeights(Math.Max(0, rh - bt - pt - pb - bb)) : null;
         _flowProbe = probe;
+        // A positioned cell is the containing block of its absolutely positioned descendants, as any positioned box is.
+        cell.Frame = cs.Positioned || cs.Transform != null ? new CbFrame { Transformed = cs.Transform != null } : null;
+        if (cell.Frame != null) _frames.Add(cell.Frame);
         float contentBottom = LayoutFlow(td, cell.X + bl + pl, contentTop, Math.Max(0, w - bl - br - pl - pr));
+        if (cell.Frame != null) _frames.Remove(cell.Frame);
         _cbHeight = outerCb;
         contentBottom = LeaveFormattingContext(outerFloats, contentBottom);
         cell.OpsEnd = _ops.Count;
@@ -1084,6 +1089,7 @@ internal sealed partial class LayoutEngine
             for (int i = cell.OpsStart; i < cell.OpsEnd && i < _ops.Count; i++) _ops[i].Offset(0, shift);
 
         if ((cs.ClipsX || cs.ClipsY) && cell.OpsEnd > cell.OpsStart && cell.OpsEnd <= _ops.Count) ClipCell(cell, h, collapse);
+        if (cell.Frame is { Pending.Count: > 0 } frame) LayoutCellAbsolutes(cell, frame, h, shift, collapse);
 
         float x = cell.X, y = cell.Top, w = cell.W;
         int sides = BoxPainter.AllSides;
@@ -1107,6 +1113,45 @@ internal sealed partial class LayoutEngine
         if (cs.EmptyCellsHide && !collapse && IsEmptyCell(cell.Td)) return;
         BoxPainter.Paint(cell.Group!, cs, x, y, w, h, _images, w, sides, collapsedCell: collapse, backgroundArea);
         if (collapse) PaintForeignEdges(m, cell, rowBottom);
+        if (collapse && cs.OutlineStyle != BorderStyle.None && cs.Visible)
+        {
+            // Collapsed borders are painted cell by cell, so the cells after this one would cover its outline. As in
+            // Chrome, the outline goes over the table's content instead.
+            int start = _ops.Count;
+            var outline = new GroupOp();
+            _ops.Add(outline);
+            BoxPainter.PaintOutline(outline, cs, x, y, w, h, null);
+            WrapLayer(start, LayerOp.OutlineOrder, stackingContext: false);
+        }
+    }
+
+    /// <summary>
+    /// Lays out the absolutely positioned boxes of a positioned cell against its padding box, after the content, and
+    /// clips them as the cell clips its content.
+    /// </summary>
+    private void LayoutCellAbsolutes(CellModel cell, CbFrame frame, float h, float shift, bool collapse)
+    {
+        var cs = cell.Td.Style;
+        float bl = collapse ? cell.CollapsedL / 2 : cs.BorderLeft, br = collapse ? cell.CollapsedR / 2 : cs.BorderRight;
+        float bt = collapse ? cell.CollapsedT / 2 : cs.BorderTop, bb = collapse ? cell.CollapsedB / 2 : cs.BorderBottom;
+        // Static positions move with the content that vertical-align moved.
+        if (shift > 0.01f)
+        {
+            var pending = frame.TakePending()!;
+            foreach (var (e, sx, sy) in pending) frame.Add(e, sx, sy + shift);
+        }
+        int start = _ops.Count;
+        LayoutAbsolutes(frame, cell.X + bl, cell.Top + bt, Math.Max(0, cell.W - bl - br), Math.Max(0, h - bt - bb));
+        if ((cs.ClipsX || cs.ClipsY) && _ops.Count > start)
+        {
+            float px = cell.X + bl, py = cell.Top + bt, pw = Math.Max(0, cell.W - bl - br), ph = Math.Max(0, h - bt - bb);
+            if (!cs.ClipsX) { px -= ClipOp.Far; pw += 2 * ClipOp.Far; }
+            if (!cs.ClipsY) { py -= ClipOp.Far; ph += 2 * ClipOp.Far; }
+            var clip = new ClipOp(px, py, pw, ph, null);
+            for (int i = start; i < _ops.Count; i++) clip.Ops.Add(_ops[i]);
+            Truncate(start, keepFloats: true);
+            _ops.Add(clip);
+        }
     }
 
     /// <summary>A cell with nothing in it but white space, which empty-cells: hide does not paint.</summary>
