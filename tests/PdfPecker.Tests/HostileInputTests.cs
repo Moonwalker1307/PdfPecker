@@ -1276,6 +1276,20 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded("<style>@page { size: 2000pt 800pt }</style>" + string.Format(template, text)));
     }
 
+    // A box with a height smaller than its own borders has columns of no height, and columns nested in them went on
+    // through as many rows of no height as the arithmetic allows: seconds of searching for the row a position is in,
+    // and a note for each row that ran out of memory. Those columns now overflow beside their first row.
+    [Theory]
+    [InlineData("<div style='column-count:2'><div></div></div>")]
+    [InlineData("<div style='column-count:2'><p>Some text in nested columns</p></div>")]
+    [InlineData("<div style='column-count:2'><div style='position:relative;border:100pt solid'><div style='height:60pt;break-before:page'></div></div></div>")]
+    public void Columns_inside_columns_of_no_height_are_bounded(string inner)
+    {
+        string html = "<div style='height:8pt;border-bottom:93pt solid;box-sizing:border-box;column-count:4'>" + inner + "</div>";
+        AssertStructurallyValid(Bounded(html));
+        AssertStructurallyValid(Bounded("<header data-sticky-pdf-header>" + html + "</header><main>x</main>"));
+    }
+
     // Each row of columns but the last is laid out once; only the last row is balanced.
     [Fact]
     public void Long_multicolumn_content_balances_only_its_last_row()
