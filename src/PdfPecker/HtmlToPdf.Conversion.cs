@@ -48,6 +48,15 @@ public static partial class HtmlToPdf
         /// <summary>The running header and footer (data-sticky-pdf-header / data-sticky-pdf-footer), out of the flow.</summary>
         private Element? _header, _footer;
 
+        /// <summary>
+        /// The header and footer of the first page (data-sticky-pdf-first-header / data-sticky-pdf-first-footer), which
+        /// take the place of the running ones there; an empty one leaves the first page without that band.
+        /// </summary>
+        private Element? _firstHeader, _firstFooter;
+
+        /// <summary>Whether the first page has a band of its own, and so a page setup of its own.</summary>
+        private bool FirstPageBands => _firstHeader != null || _firstFooter != null;
+
         /// <summary>Whether the source mentions a band attribute at all; when it does not, the tree is not searched for one.</summary>
         private bool _mayHaveBands;
 
@@ -215,8 +224,13 @@ public static partial class HtmlToPdf
             _header = _mayHaveBands ? FindBand(_doc, "data-sticky-pdf-header") : null;
             _footer = _mayHaveBands ? FindBand(_doc, "data-sticky-pdf-footer") : null;
             if (_footer == _header) _footer = null;
+            _firstHeader = _mayHaveBands ? FindBand(_doc, "data-sticky-pdf-first-header") : null;
+            _firstFooter = _mayHaveBands ? FindBand(_doc, "data-sticky-pdf-first-footer") : null;
+            if (_firstFooter == _firstHeader) _firstFooter = null;
             if (_header != null) _header.Detached = true;
             if (_footer != null) _footer.Detached = true;
+            if (_firstHeader != null) _firstHeader.Detached = true;
+            if (_firstFooter != null) _firstFooter.Detached = true;
             ReserveBands(_page);
 
             if (_styles.UsedViewportHeight && Math.Abs(_page.FlowHeight - _viewport) > 0.01f)
@@ -226,13 +240,17 @@ public static partial class HtmlToPdf
             }
         }
 
-        /// <summary>Reserves the heights of the running header and footer on a page, together at most 60% of its content area.</summary>
-        private void ReserveBands(PageSetup setup)
+        /// <summary>
+        /// Reserves the heights of the header and footer on a page, together at most 60% of its content area: the first
+        /// page's own bands on the document's first page, the running ones elsewhere.
+        /// </summary>
+        private void ReserveBands(PageSetup setup, bool firstPage = false)
         {
-            if (_header == null && _footer == null) return;
+            var (header, footer) = BandsOf(firstPage);
+            if (header == null && footer == null) return;
             bool truncate = _options.TruncateBandsToWholePoints;
-            if (_header != null) setup.BandTop = Math.Max(DeclaredHeight(_header, setup, truncate), BandHeight(_header, setup, _images, _cancellation));
-            if (_footer != null) setup.BandBottom = Math.Max(DeclaredHeight(_footer, setup, truncate), BandHeight(_footer, setup, _images, _cancellation));
+            if (header != null) setup.BandTop = Math.Max(DeclaredHeight(header, setup, truncate), BandHeight(header, setup, _images, _cancellation));
+            if (footer != null) setup.BandBottom = Math.Max(DeclaredHeight(footer, setup, truncate), BandHeight(footer, setup, _images, _cancellation));
             float limit = setup.ContentHeight * 0.6f;
             float bands = setup.BandTop + setup.BandBottom;
             if (bands > limit)
@@ -241,6 +259,10 @@ public static partial class HtmlToPdf
                 setup.BandBottom *= limit / bands;
             }
         }
+
+        /// <summary>The header and footer of a page: on the first page, its own bands take the place of the running ones.</summary>
+        private (Element? Header, Element? Footer) BandsOf(bool firstPage)
+            => firstPage && FirstPageBands ? (_firstHeader ?? _header, _firstFooter ?? _footer) : (_header, _footer);
 
         /// <summary>PdfOptions.Hyphenation with its language tags in lower case with hyphens, as the layout looks them up.</summary>
         private static Dictionary<string, HyphenationPatterns>? HyphenationTable(IDictionary<string, HyphenationPatterns>? patterns)
