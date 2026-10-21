@@ -98,7 +98,10 @@ internal sealed partial class PdfDocumentWriter
             foreach (var op in section.Ops) Distribute(op, null);
             _footnoteCut = null;
             if (section.FootnoteOps != null) foreach (var op in section.FootnoteOps) Distribute(op, null);
-            int sectionPages = Math.Max(Pages.Count - firstPage, Math.Max(1, PageOf(Math.Max(0, section.ContentHeight - 0.5f)) + 1));
+            int contentPages = Math.Max(1, PageOf(Math.Max(0, section.ContentHeight - 0.5f)) + 1);
+            // Ink overflow, such as the shadow of a box as tall as the page, is cut at the last page the content needs.
+            while (Pages.Count > firstPage + contentPages && (Pages[^1].Count == 0 || Placed.AllInk(Pages[^1]))) Pages.RemoveAt(Pages.Count - 1);
+            int sectionPages = Math.Max(Pages.Count - firstPage, contentPages);
             while (Pages.Count < firstPage + sectionPages) Pages.Add(new List<Placed>());
             return sectionPages;
         }
@@ -155,7 +158,7 @@ internal sealed partial class PdfDocumentWriter
                     if (layer.Backdrop != null && _backdrops++ < MaxBackdrops)
                         for (int p = PageOf(layer.BackdropY), last = Math.Max(p, PageOf(layer.BackdropY + layer.BackdropH - 0.5f)); p <= last; p++)
                             parts.TryAdd(p, new List<Placed>());
-                    foreach (var (p, items) in parts) Target(into, p).Add(new Placed(new LayerBlock(layer, items), 0, 0));
+                    foreach (var (p, items) in parts) Target(into, p).Add(new Placed(new LayerBlock(layer, items), 0, 0, Placed.AllInk(items)));
                     break;
                 }
                 case ClipOp clip:
@@ -181,9 +184,9 @@ internal sealed partial class PdfDocumentWriter
                             items.InsertRange(0, above);
                             above = null;
                         }
-                        Target(into, p).Add(new Placed(new ClipBlock(clip, items), 0, 0));
+                        Target(into, p).Add(new Placed(new ClipBlock(clip, items), 0, 0, Placed.AllInk(items)));
                     }
-                    if (above != null && first <= last) Target(into, first).Add(new Placed(new ClipBlock(clip, above), 0, 0));
+                    if (above != null && first <= last) Target(into, first).Add(new Placed(new ClipBlock(clip, above), 0, 0, Placed.AllInk(above)));
                     break;
                 }
                 case FieldOp field:
@@ -192,6 +195,18 @@ internal sealed partial class PdfDocumentWriter
                     var items = new List<Placed>();
                     foreach (var o in field.Ops) Flatten(o, items);
                     Target(into, PageOf(field.Y)).Add(new Placed(new FieldBlock(field, items), field.Y, field.Y + field.H));
+                    break;
+                }
+                case GroupOp { Ink: true } ink:
+                {
+                    // Placed in paint order like any group's ops, but marked so that a page holding nothing else is cut.
+                    var parts = new SortedDictionary<int, List<Placed>>();
+                    foreach (var o in ink.Ops) Distribute(o, parts);
+                    foreach (var (p, items) in parts)
+                    {
+                        var list = Target(into, p);
+                        foreach (var item in items) list.Add(item.AsInk());
+                    }
                     break;
                 }
                 case GroupOp g:

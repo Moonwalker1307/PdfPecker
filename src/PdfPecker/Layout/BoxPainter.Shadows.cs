@@ -29,12 +29,16 @@ internal static partial class BoxPainter
     /// them there. A sharp shadow is opaque, blended over white by its alpha. A blur becomes bands that fade out like a
     /// Gaussian edge, each painted over the one before; they are grey levels in a layer that is a soft mask
     /// (<see cref="LayerOp.MaskFill"/>), through which the shadow's colour is painted, so that what lies under the
-    /// shadow shows through it. Inset shadows are painted by <see cref="PaintInsetShadows"/>.
+    /// shadow shows through it. The shadows go in a group marked as ink overflow (<see cref="GroupOp.Ink"/>), so a
+    /// shadow below the last line of content adds no page. Inset shadows are painted by <see cref="PaintInsetShadows"/>.
     /// </summary>
     public static void PaintShadows(GroupOp group, ComputedStyle s, float x, float y, float w, float h, CornerRadii? radii = null)
     {
         var shadows = s.BoxShadows;
         if (shadows == null || w <= 0 || h <= 0) return;
+        var box = group;
+        group = new GroupOp { Ink = true };
+        box.Ops.Add(group);
         for (int i = shadows.Length - 1; i >= 0; i--)
         {
             var sh = shadows[i];
@@ -76,6 +80,7 @@ internal static partial class BoxPainter
             }
             if (into != group && into.Ops.Count == 0) group.Ops.RemoveAt(group.Ops.Count - 1);
         }
+        if (group.Ops.Count == 0) box.Ops.RemoveAt(box.Ops.Count - 1);
     }
 
     /// <summary>

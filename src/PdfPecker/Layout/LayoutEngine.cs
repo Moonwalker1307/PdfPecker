@@ -799,12 +799,26 @@ internal sealed partial class LayoutEngine
     private float _flowTrailing;  // the bottom margin of the last child of the flow just laid out
     private float _boxTrailing;   // the bottom margin of its last child that the box just laid out passes on
 
-    /// <summary>A box in normal flow whose margins can collapse with its children's (not a flex, grid, table or column box).</summary>
+    /// <summary>
+    /// A box in normal flow whose margins can collapse with its children's (not a flex, grid, table or column box, nor a
+    /// flex or grid item).
+    /// </summary>
     private static bool IsPlainFlow(Element e)
     {
         var s = e.Style;
         return s.Display is Display.Block or Display.ListItem && !s.IsMultiColumn && !s.Floated && !s.OutOfFlow && !s.FormattingRoot
-               && !e.IsReplaced && e.Name is not ("hr" or "fieldset");
+               && !e.IsReplaced && e.Name is not ("hr" or "fieldset") && !IsFlexOrGridItem(e);
+    }
+
+    /// <summary>
+    /// True for a child of a flex or grid container, seen through display: contents. Such an item is a formatting
+    /// context of its own, so its first and last children's margins stay inside it, as in Chrome.
+    /// </summary>
+    private static bool IsFlexOrGridItem(Element e)
+    {
+        var p = e.Parent;
+        while (p is { Style.Contents: true }) p = p.Parent;
+        return p?.Style is { } ps && (ps.IsFlex || ps.IsGrid);
     }
 
     // The root element's margins do not collapse with its children's (CSS 2.1 §8.3.1).
