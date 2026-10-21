@@ -425,7 +425,7 @@ internal sealed class CounterStyles
         var symbols = new List<string>();
         for (; i < tokens.Count; i++)
         {
-            if (GeneratedContent.UnquoteString(tokens[i]) is not { } s) return null;
+            if (GeneratedContent.UnquoteMark(tokens[i]) is not { } s) return null;
             symbols.Add(s);
         }
         if (symbols.Count == 0 || system is CounterSystem.Numeric or CounterSystem.Alphabetic && symbols.Count < 2) return null;
@@ -787,8 +787,8 @@ internal sealed class CounterStyleRule
     {
         var t = token.Trim();
         if (t.Length == 0) return null;
-        if (t[0] is '"' or '\'') return GeneratedContent.UnquoteString(t);
+        if (t[0] is '"' or '\'') return GeneratedContent.UnquoteMark(t);
         if (t.Contains('(') || t.Contains('"') || t.Contains('\'')) return null;
-        return t.Contains('\\') ? GeneratedContent.UnquoteString("\"" + t + "\"") : t;
+        return t.Contains('\\') ? GeneratedContent.UnquoteMark("\"" + t + "\"") : GeneratedContent.Cut(t, GeneratedContent.MaxMarkLength);
     }
 }

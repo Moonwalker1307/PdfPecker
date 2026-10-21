@@ -5,7 +5,7 @@ internal sealed partial class StyleResolver
 {
     private void ApplyListStyleType(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
-        if (GeneratedContent.UnquoteString(d.Value) is { } markerText)
+        if (GeneratedContent.UnquoteMark(d.Value) is { } markerText)
         {
             // A string is the marker text itself.
             s.ListStyleString = markerText;

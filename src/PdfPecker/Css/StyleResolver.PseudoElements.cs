@@ -58,7 +58,7 @@ internal sealed partial class StyleResolver
     }
 
     /// <summary>Adds the ::before or ::after box of <paramref name="host"/> when a rule gives it content.</summary>
-    private void Generate(Element host, PseudoElement which, ref List<string>? scope)
+    private void Generate(Element host, PseudoElement which, ref HashSet<string>? scope)
     {
         _count = 0;
         if (UaIndex.Value.PseudoElements is { } ua) Collect(ua, host, TierUa, TierUaImportant, which);
@@ -216,8 +216,11 @@ internal sealed partial class StyleResolver
     private readonly bool _firstLetterRules, _firstLineRules;
     internal int QuoteDepth;
 
+    /// <summary>Characters of content values this document may still evaluate; see <see cref="GeneratedContent.MaxDocumentLength"/>.</summary>
+    internal int GeneratedBudget = GeneratedContent.MaxDocumentLength;
+
     /// <summary>Applies counter-reset, counter-increment and counter-set, in that order (CSS Lists 3).</summary>
-    private void ApplyCounters(ComputedStyle s, ref List<string>? scope)
+    private void ApplyCounters(ComputedStyle s, ref HashSet<string>? scope)
     {
         if (s.CounterReset != null)
             foreach (var c in s.CounterReset)
@@ -228,7 +231,7 @@ internal sealed partial class StyleResolver
                     if (!_counters.TryGetValue(c.Name, out var stack)) _counters[c.Name] = stack = new List<int>();
                     if (stack.Count >= 64) continue; // runaway nesting
                     stack.Add(c.Value);
-                    (scope ??= new List<string>()).Add(c.Name);
+                    (scope ??= new HashSet<string>(StringComparer.Ordinal)).Add(c.Name);
                 }
             }
         if (s.CounterIncrement != null)
@@ -243,13 +246,13 @@ internal sealed partial class StyleResolver
     }
 
     /// <summary>The counter's instances, creating one (at 0, scoped to the current parent) when none is in scope.</summary>
-    private List<int> Instance(string name, ref List<string>? scope)
+    private List<int> Instance(string name, ref HashSet<string>? scope)
     {
         if (!_counters.TryGetValue(name, out var stack)) _counters[name] = stack = new List<int>();
         if (stack.Count == 0)
         {
             stack.Add(0);
-            (scope ??= new List<string>()).Add(name);
+            (scope ??= new HashSet<string>(StringComparer.Ordinal)).Add(name);
         }
         return stack;
     }
