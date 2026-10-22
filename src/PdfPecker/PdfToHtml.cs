@@ -30,15 +30,16 @@ public sealed class PdfHtmlOptions
     /// </summary>
     public PdfImageFormat ImageFormat { get; set; } = PdfImageFormat.WebP;
 
-    private int _quality = 85;
+    private int? _quality;
 
     /// <summary>
-    /// The JPEG quality, or the WebP compression effort, from 1 to 100, as <see cref="ImageOptions.Quality"/>. Default 85.
+    /// The JPEG quality, or the WebP compression effort, from 1 to 100, as <see cref="ImageOptions.Quality"/>. Default
+    /// 85 for JPEG and 29 for WebP; until it is set, it reads as the default of <see cref="ImageFormat"/>.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">The value is not between 1 and 100.</exception>
     public int Quality
     {
-        get => _quality;
+        get => _quality ?? (ImageFormat == PdfImageFormat.WebP ? ImageOptions.DefaultWebPEffort : ImageOptions.DefaultJpegQuality);
         set => _quality = value is >= 1 and <= 100 ? value : throw new ArgumentOutOfRangeException(nameof(value), value, "Quality must be between 1 and 100.");
     }
 
