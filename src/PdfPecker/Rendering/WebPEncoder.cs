@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Numerics;
 
 namespace PdfPecker.Rendering;
 
@@ -75,7 +76,22 @@ internal static partial class WebPEncoder
     {
         var argb = new uint[pixels.Length];
         hasAlpha = false;
-        for (int i = 0; i < pixels.Length; i++)
+        int i = 0;
+        // Rendered pages are mostly opaque, where only red and blue swap places; that runs a vector at a time.
+        if (Vector.IsHardwareAccelerated)
+        {
+            var opaque = new Vector<uint>(0xFF000000);
+            var greenAlpha = new Vector<uint>(0xFF00FF00);
+            var low = new Vector<uint>(0xFF);
+            for (; i <= pixels.Length - Vector<uint>.Count; i += Vector<uint>.Count)
+            {
+                var c = new Vector<uint>(pixels, i);
+                if (!Vector.EqualsAll(c & opaque, opaque)) break;
+                var swapped = (c & greenAlpha) | Vector.ShiftLeft(c & low, 16) | (Vector.ShiftRightLogical(c, 16) & low);
+                swapped.CopyTo(argb, i);
+            }
+        }
+        for (; i < pixels.Length; i++)
         {
             uint c = pixels[i], a = c >> 24;
             uint r = c & 255, g = (c >> 8) & 255, b = (c >> 16) & 255;
