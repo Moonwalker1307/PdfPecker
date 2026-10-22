@@ -15,9 +15,12 @@ internal static partial class PdfImageDecoder
         var pixels = img.Pixels!;
         if (file.Resolve(dict["SMask"]) is PdfStream smask)
         {
-            var alpha = DecodeAlpha(file, smask, img.Width, img.Height, resources);
+            // A mask finer than its image keeps its resolution, as the outline it draws is usually the point of it.
+            var (w, h) = MaskedSize(img, file.GetInt(smask, "Width", 0), file.GetInt(smask, "Height", 0));
+            var alpha = DecodeAlpha(file, smask, w, h, resources);
             if (alpha != null)
             {
+                pixels = Enlarge(img, w, h);
                 var cs = samples.ColorSpace!;
                 if (file.GetNumbers(smask, "Matte") is { } matte && matte.Length >= cs.Components) UnblendMatte(pixels, alpha, cs, matte);
                 ApplyAlpha(pixels, alpha);
@@ -35,7 +38,9 @@ internal static partial class PdfImageDecoder
             {
                 // An explicit mask's samples mean what they mean in a stencil mask (ISO 32000-1, 8.9.6.3): where
                 // the stencil would paint, the base image shows, so the stencil coverage is the image's alpha.
-                ApplyAlpha(pixels, Resample(stencil.Stencil, stencil.Width, stencil.Height, img.Width, img.Height));
+                var (w, h) = MaskedSize(img, stencil.Width, stencil.Height);
+                pixels = Enlarge(img, w, h);
+                ApplyAlpha(pixels, Resample(stencil.Stencil, stencil.Width, stencil.Height, w, h));
                 img.Opaque = false;
             }
         }
@@ -44,6 +49,34 @@ internal static partial class PdfImageDecoder
             var key = file.ToNumbers(keyRanges)!;
             if (ApplyColorKey(samples.Data, img.Width, img.Height, samples.BitsPerComponent, samples.Components, key, pixels)) img.Opaque = false;
         }
+    }
+
+    /// <summary>
+    /// The size a masked image is drawn at: the mask's when it is finer in both directions (such as a 1000x800 outline
+    /// over a 50x40 gradient), so its edges are not cut to the image's pixels; otherwise the image's.
+    /// </summary>
+    private static (int Width, int Height) MaskedSize(DecodedImage img, int maskWidth, int maskHeight)
+        => maskWidth >= img.Width && maskHeight >= img.Height && (maskWidth > img.Width || maskHeight > img.Height)
+            && (long)maskWidth * maskHeight <= MaxPixels
+            ? (maskWidth, maskHeight)
+            : (img.Width, img.Height);
+
+    /// <summary>Scales the image's pixels up to the given size by nearest sample, when it is larger, and returns them.</summary>
+    private static uint[] Enlarge(DecodedImage img, int w, int h)
+    {
+        if (w == img.Width && h == img.Height) return img.Pixels!;
+        var src = img.Pixels!;
+        int sw = img.Width, sh = img.Height;
+        var dst = new uint[w * h];
+        for (int y = 0; y < h; y++)
+        {
+            int row = Math.Min(sh - 1, (int)((y + 0.5) * sh / h)) * sw;
+            for (int x = 0; x < w; x++) dst[y * w + x] = src[row + Math.Min(sw - 1, (int)((x + 0.5) * sw / w))];
+        }
+        img.Pixels = dst;
+        img.Width = w;
+        img.Height = h;
+        return dst;
     }
 
     /// <summary>Decodes a soft mask image to alpha values at the given size.</summary>
