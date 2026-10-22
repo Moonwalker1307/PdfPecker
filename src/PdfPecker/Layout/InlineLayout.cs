@@ -37,6 +37,10 @@ internal sealed partial class LayoutEngine
         NoteCbKind(y);
         var st = CollectInline(run, w);
         var items = st.Items;
+        long chars = 0;
+        foreach (var it in items)
+            if (it.IsText) chars += it.Length;
+        _boxLayouts += chars / CharactersPerLayout;
         if (!HasRenderable(items))
         {
             PlaceEmptyRun(items, x, y, w);
