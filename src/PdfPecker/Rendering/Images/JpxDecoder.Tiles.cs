@@ -102,10 +102,14 @@ internal sealed partial class JpxDecoder
         return any || _tileOrder.Count == 0;
     }
 
-    /// <summary>The errors of damaged tile data. Running out of the page's decode budget is not one: it ends the page.</summary>
+    /// <summary>
+    /// The errors of damaged tile data. Running out of the page's decode budget is not one: it ends the page. Nor is
+    /// running out of the image's own budget, which ends the image, because every later tile would need more.
+    /// </summary>
     private static bool IsTileDamage(Exception ex) =>
         ex is IndexOutOfRangeException or ArgumentException or OverflowException
-        || ex is InvalidDataException && !ex.Message.StartsWith("The page", StringComparison.Ordinal);
+        || ex is InvalidDataException && !ex.Message.StartsWith("The page", StringComparison.Ordinal)
+            && !string.Equals(ex.Message, OverBudget, StringComparison.Ordinal);
 
     private void DecodeTile(TileData tile)
     {
@@ -136,12 +140,14 @@ internal sealed partial class JpxDecoder
             (int)Math.Min(_tileX0 + (long)(column + 1) * _tileWidth, _imageX1), (int)Math.Min(_tileY0 + (long)(row + 1) * _tileHeight, _imageY1));
     }
 
-    /// <summary>Lays out each component of a tile with its own coding parameters, and charges the budget for them.</summary>
+    /// <summary>
+    /// Lays out each component of a tile with its own coding parameters, and charges the budget for its coefficients and
+    /// structure before they are allocated.
+    /// </summary>
     private TileComponent[] LayOutComponents(TileData tile, int x0, int y0, int x1, int y1)
     {
         var own = tile.Parameters;
         var components = new TileComponent[_components.Length];
-        long work = 0;
         for (int c = 0; c < components.Length; c++)
         {
             // A tile's own segments take precedence over the main header's, and those for one component over defaults.
@@ -156,10 +162,12 @@ internal sealed partial class JpxDecoder
                 Style = style,
                 RoiShift = own.RoiShifts.TryGetValue(c, out int shift) ? shift : _main.RoiShifts.GetValueOrDefault(c),
             };
-            work += BuildResolutions(tc, component, quantization) + CoefficientCost * tc.Width * tc.Height;
+            // A few header fields can describe a tile-component of millions of code-blocks, so the budget is charged
+            // before its structure is built, not after.
+            Charge(CoefficientCost * tc.Width * tc.Height);
+            BuildResolutions(tc, component, quantization);
             components[c] = tc;
         }
-        PdfFile.ChargeDecoded(work);
         return components;
     }
 
@@ -196,20 +204,18 @@ internal sealed partial class JpxDecoder
 
     // ------------------------------------------------------------------ structure
 
-    /// <summary>Lays out resolutions, sub-bands, precincts and code-blocks. Returns an estimate of the memory used.</summary>
-    private static long BuildResolutions(TileComponent tc, ImageComponent component, Quantization quantization)
+    /// <summary>Lays out resolutions, sub-bands, precincts and code-blocks.</summary>
+    private void BuildResolutions(TileComponent tc, ImageComponent component, Quantization quantization)
     {
         int levels = tc.Style.Levels;
         tc.Resolutions = new Resolution[levels + 1];
-        long work = 0;
         for (int r = 0; r <= levels; r++)
         {
             var res = MakeResolution(tc, r);
             res.Bands = MakeBands(res, r, levels, component, quantization);
-            work += MakePrecincts(res, r);
+            MakePrecincts(res, r);
             tc.Resolutions[r] = res;
         }
-        return work;
     }
 
     private static Resolution MakeResolution(TileComponent tc, int r)
@@ -289,33 +295,29 @@ internal sealed partial class JpxDecoder
 
     private static int FirstOrZero(int[] values) => values.Length > 0 ? values[0] : 0;
 
-    /// <summary>Lays out a resolution's precincts and their code-blocks. Returns an estimate of the memory used.</summary>
-    private static long MakePrecincts(Resolution res, int r)
+    /// <summary>
+    /// Lays out a resolution's precincts and their code-blocks, charging the budget for each before it is allocated.
+    /// </summary>
+    private void MakePrecincts(Resolution res, int r)
     {
         long count = (long)res.PrecinctsAcross * res.PrecinctsDown;
         if (count > MaxPrecincts) throw new InvalidDataException("Too many precincts.");
+        Charge(count * PrecinctCost);
         res.Precincts = new BandPrecinct[count][];
         res.NextLayer = new int[count];
-        long work = 0;
         for (int py = 0; py < res.PrecinctsDown; py++)
         {
             for (int px = 0; px < res.PrecinctsAcross; px++)
             {
                 var precinct = new BandPrecinct[res.Bands.Length];
-                for (int b = 0; b < precinct.Length; b++)
-                {
-                    precinct[b] = MakeBandPrecinct(res, r, b, px, py);
-                    work += precinct[b].Blocks.Length * CodeBlockCost;
-                }
+                for (int b = 0; b < precinct.Length; b++) precinct[b] = MakeBandPrecinct(res, r, b, px, py);
                 res.Precincts[py * res.PrecinctsAcross + px] = precinct;
-                work += PrecinctCost;
             }
         }
-        return work;
     }
 
     /// <summary>The part of sub-band <paramref name="b"/> in a precinct, split into code-blocks.</summary>
-    private static BandPrecinct MakeBandPrecinct(Resolution res, int r, int b, int px, int py)
+    private BandPrecinct MakeBandPrecinct(Resolution res, int r, int b, int px, int py)
     {
         var band = res.Bands[b];
         // A precinct covers half as many samples in the sub-bands of a resolution above the lowest.
@@ -328,6 +330,7 @@ internal sealed partial class JpxDecoder
         int firstX = (int)(x0 >> blockWidthLog2), firstY = (int)(y0 >> blockHeightLog2);
         part.BlocksAcross = CeilDivPow2((int)x1, blockWidthLog2) - firstX;
         part.BlocksDown = CeilDivPow2((int)y1, blockHeightLog2) - firstY;
+        Charge((long)part.BlocksAcross * part.BlocksDown * CodeBlockCost);
         var blocks = new CodeBlock[part.BlocksAcross * part.BlocksDown];
         for (int j = 0; j < part.BlocksDown; j++)
         {

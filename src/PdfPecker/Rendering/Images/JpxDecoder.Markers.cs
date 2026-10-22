@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using PdfPecker.Rendering.Parsing;
 
 namespace PdfPecker.Rendering.Images;
 
@@ -324,7 +323,7 @@ internal sealed partial class JpxDecoder
             total += (long)plane.Width * plane.Height;
         }
         if (total > int.MaxValue / 2) return false;
-        PdfFile.ChargeDecoded(total);
+        Charge(total);
         foreach (var plane in _planes) plane.Samples = new byte[plane.Width * plane.Height];
         return true;
     }

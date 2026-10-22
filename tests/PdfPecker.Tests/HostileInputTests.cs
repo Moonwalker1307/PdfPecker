@@ -3708,6 +3708,28 @@ public class JpxLengthTests
         Assert.NotNull(Decode(Cat(cs[..end], Segment(0xFF5D, Array.Empty<byte>()))));
     }
 
+    [Fact]
+    public async Task Image_that_outgrows_its_decode_budget_fails_cleanly()
+    {
+        // One tile 61 samples wide and 1,638,447 tall: within the pixel limit, but its three components need 300 MB of
+        // planes, 1.2 GB of coefficients and millions of code-blocks. The code-blocks were charged to the budget only
+        // once they were built, and without a render's budget nothing stopped them: the decoder allocated 3.4 GB over
+        // 30 s. The image's own budget, charged before each allocation, now stops it at the coefficients.
+        var cs = Codestream();
+        int siz = IndexOf(cs, 0xFF, 0x51);
+        BinaryPrimitives.WriteInt32BigEndian(cs.AsSpan(siz + 10), 1_638_447); // Ysiz
+        BinaryPrimitives.WriteInt32BigEndian(cs.AsSpan(siz + 22), 64); // XTsiz
+        BinaryPrimitives.WriteInt32BigEndian(cs.AsSpan(siz + 26), 1_638_447); // YTsiz
+        var (error, allocated) = await Task.Run(() =>
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            var error = Record.Exception(() => PdfPecker.Rendering.Images.JpxDecoder.Decode(cs));
+            return (error, Allocated: GC.GetAllocatedBytesForCurrentThread() - before);
+        }).WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.IsType<InvalidDataException>(error);
+        Assert.True(allocated < 400L << 20, $"Allocated {allocated:N0} bytes");
+    }
+
     private static PdfPecker.Rendering.Images.JpxImage? Decode(byte[] data)
     {
         var task = Task.Run(() => PdfPecker.Rendering.Images.JpxDecoder.Decode(data));
