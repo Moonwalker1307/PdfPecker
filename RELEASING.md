@@ -3,6 +3,9 @@
 Only the repository owner publishes a release. Agents and contributors prepare the pull requests around it, but never
 create tags or GitHub releases.
 
+A release publishes two packages from this repository, PdfPecker and PdfPecker.Fluent, always with the same version.
+PdfPecker.Fluent depends on the PdfPecker package of its own version, as a minimum.
+
 ## Versions
 
 - Semantic versioning. New features are minor versions, fixes are patches, and a breaking change to the public API
@@ -10,7 +13,7 @@ create tags or GitHub releases.
 - Package validation enforces this: `dotnet pack` compares the public API with `PackageValidationBaselineVersion` in
   `src/PdfPecker/PdfPecker.csproj` and fails on a break. A deliberate break, in a major version only, needs a
   `CompatibilitySuppressions.xml` entry.
-- Local builds pack as `<next patch>-dev` (the `Version` in the project file). CI builds of main and pull requests
+- Local builds pack as `<next patch>-dev` (the `Version` in `Directory.Build.props`, which both packages share). CI builds of main and pull requests
   are `<next patch>-preview.<run number>`, computed from the latest `v*` tag, so they sort between two releases.
 
 ## Before a release
@@ -22,16 +25,20 @@ create tags or GitHub releases.
 ## Publishing
 
 1. The owner creates a GitHub release with a tag `vX.Y.Z` (or `vX.Y.Z-suffix` for a pre-release) and the notes.
-2. `nuget.yml` builds and tests with that version, attaches the `.nupkg` to the release, and pushes it to nuget.org
-   with Trusted Publishing: `NuGet/login` swaps the workflow's OIDC token for a short-lived key, in the `nuget`
-   environment with the `NUGET_USER` repository variable. There is no stored API key.
+2. `nuget.yml` builds and tests with that version, attaches both `.nupkg` files to the release, and pushes them to
+   nuget.org with Trusted Publishing: `NuGet/login` swaps the workflow's OIDC token for a short-lived key, in the
+   `nuget` environment with the `NUGET_USER` repository variable. There is no stored API key. The Trusted Publishing
+   policy covers every package its owner owns, so PdfPecker.Fluent needs no policy of its own; its first push creates
+   the package on nuget.org under that account.
 
 ## After a release
 
 Open one pull request on the library that:
 
-- raises `PackageValidationBaselineVersion` to the new version and `Version` to the next patch's `-dev`
-  (CI warns while the baseline lags behind the latest tag);
+- raises `PackageValidationBaselineVersion` to the new version in both `src/PdfPecker/PdfPecker.csproj` and
+  `src/PdfPecker.Fluent/PdfPecker.Fluent.csproj` (after PdfPecker.Fluent's first release, add the property there), and
+  `Version` in `Directory.Build.props` to the next patch's `-dev` (CI warns while the library's baseline lags behind
+  the latest tag);
 - updates the version placeholder in `.github/ISSUE_TEMPLATE/bug_report.yml`;
 - updates `README.md`: the DLL size in the comparison table and the release in the `bench/compare-versions.sh`
   example.

@@ -5,6 +5,8 @@ and has no package references. There is no coverage feedback (the .NET runtime o
 tool), so it relies on a seed corpus taken from the repository and on broad mutations. It is good at finding hangs,
 huge allocations, deep recursion and unexpected exception types; it will not find deep logic bugs.
 
+The fluent package has a fuzzer of its own, described at the end: [PdfPecker.Fluent fuzzer](#pdfpeckerfluent-fuzzer).
+
 ## Run it
 
 ```
@@ -100,3 +102,41 @@ supervisor and the abandoned-thread handling.
    For a byte input use the matching API with a token, or `Bounded(() => ...)`, and assert either the documented
    exception (`Assert.Throws<InvalidDataException>`) or a valid result. It must fail, or time out, before the fix.
 4. Fix the library, confirm the test passes and run the full suite. Do not commit the findings folder.
+
+## PdfPecker.Fluent fuzzer
+
+`fuzz/PdfPecker.Fluent.Fuzz` is a separate, dependency-free generative fuzzer for the fluent package. Each case is a
+random document built from random fluent calls (pages, bands, decorators and transforms, text, columns, rows, tables
+with spans and explicit placement, layers, inlined and multi-column content, images, SVG, barcodes, lines, page breaks)
+with hostile strings and edge values: markup, braces, page tokens, control characters, lone surrogates, right-to-left
+text, NaN, infinity, negative and huge lengths, invalid colours, units and indices. Invalid values are rare on
+purpose, so most cases get past the argument checks and reach the writer and PdfPecker.
+
+A case fails when:
+
+- an exception other than `ArgumentException`, `InvalidOperationException` or `PdfPeckerException` comes out;
+- caller text turns into markup (`<x-evil` or `<script` in the HTML), or the document's `<style>`, `<body>` or
+  `<main>` structure breaks;
+- a NUL character reaches the HTML;
+- generating takes longer than 20 seconds.
+
+Cases that use `Html()` or `Css()`, which insert trusted markup on purpose, are checked only for exceptions and time.
+
+### Run it
+
+```
+dotnet build -c Release fuzz/PdfPecker.Fluent.Fuzz
+dotnet fuzz/PdfPecker.Fluent.Fuzz/bin/Release/net10.0/PdfPecker.Fluent.Fuzz.dll --seconds 600 --seed 7
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--seconds <n>` | How long to run (default 60). |
+| `--seed <n>` | Seed of the run (default 1). Case `n` of seed `s` is always the same document. |
+| `--pdf-every <n>` | Also render every n-th case to PDF (default 8); the HTML is checked for every case. |
+| `--case <n>` | Run one case, render it to PDF, and write its HTML to `fuzz-case.html` when it fails. |
+
+The process exits with 1 when any case fails, which is what fails the CI job. `fuzz.yml` runs it nightly as the
+`fluent` target, with the run id (folded into 32 bits) as its seed, so a failure prints the seed and case number that
+reproduce it with `--seed` and `--case`. A fix gets a regression test in
+`HostileInputTests` built from the failing case's calls.

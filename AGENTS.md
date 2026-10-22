@@ -7,6 +7,12 @@ PdfPecker is a dependency-free .NET library: HTML/Markdown to PDF, and PDF to PN
 HTML parser, Markdown parser, CSS engine, layout engine, PDF writer and PDF renderer, and the NuGet package depends only
 on the .NET base class library.
 
+The repository also holds PdfPecker.Fluent (`src/PdfPecker.Fluent`), a fluent C# API in the style of QuestPDF that
+writes HTML and CSS and renders it with PdfPecker. It is a second NuGet package, released with every PdfPecker release
+under the same version, and its only dependency is the PdfPecker package of that version. It has no layout engine of
+its own: anything about how a page looks is PdfPecker's job, and the fluent package's job is to write the smallest
+HTML that says what the caller built.
+
 ## Read first
 
 Before non-trivial work, read:
@@ -17,18 +23,25 @@ Before non-trivial work, read:
 - `CONFIG.md` – the repository's build settings, environment variables and CI settings.
 - `RELEASING.md` – versioning, the API baseline and how a release reaches nuget.org.
 
-`CONTRIBUTING.md` is the short version for outside contributors, and `fuzz/README.md` covers the fuzzer.
+`CONTRIBUTING.md` is the short version for outside contributors, `fuzz/README.md` covers both fuzzers, and
+`src/PdfPecker.Fluent/README.md` is the fluent package's README and nuget.org page.
 
 ## Core rules
 
 - **No dependencies.** Never add a `PackageReference` to `src/PdfPecker`. Everything the library does is its own code
-  on top of the base class library; third-party packages may appear only in `bench/PdfPecker.Comparison`, which is
-  deliberately outside the solution.
+  on top of the base class library; third-party packages may appear only in `bench/PdfPecker.Comparison` and
+  `bench/PdfPecker.Fluent.Comparison`, which are deliberately outside the solution. `src/PdfPecker.Fluent` references
+  `src/PdfPecker` as a project and nothing else.
 - **No JavaScript and no network.** PdfPecker is for HTML templates the caller controls. It runs no scripts, and
   conversion never fetches anything itself: remote resources load only through a `ResourceResolver` the caller
   supplies. Only signing goes online, and only when the caller asks for it.
-- **No breaking API changes before 2.0.** `dotnet pack` checks the public API against the last release; a change it
-  rejects needs a new overload or type instead, not a suppression.
+- **No breaking API changes before 2.0**, in either package. `dotnet pack` checks the public API against the last
+  release; a change it rejects needs a new overload or type instead, not a suppression. The fluent package keeps
+  QuestPDF's names and signatures where they fit, so QuestPDF code ports by changing `using` lines.
+- **Caller data never becomes markup in the fluent package.** Text, links, colours, names and image data are encoded
+  or validated; only `Html()` and `Css()` insert trusted markup, and their docs say so. It throws only
+  `ArgumentException` (and subclasses) for bad arguments, `InvalidOperationException` for an invalid document structure
+  and `PdfPeckerException` from the library.
 - **Trimmable and AOT-compatible.** No reflection-based code.
 - **Sealed, static and span-based.** Classes are `sealed` (or `static`) unless something derives from them, and
   methods that use no instance data are `static`. `src/PdfPecker/.globalconfig` turns the .NET performance analyzers
@@ -37,7 +50,8 @@ Before non-trivial work, read:
   (`Invariant.TryParseInt` for integers) and compare strings ordinally.
 - **Malformed input fails only with documented exceptions**, within bounded time and memory.
 - **Every library PR checks `README.md`** (features, limitations, examples, benchmark table) and updates it in the same
-  PR when the change is visible to users.
+  PR when the change is visible to users; a fluent package change checks `src/PdfPecker.Fluent/README.md` (features,
+  the QuestPDF porting notes, the benchmark table) the same way.
 - **Never name a user's private application or employer** in code, tests, commits, the README or PR descriptions. Use
   neutral names such as "MyApp" or "a production app".
 
@@ -54,11 +68,26 @@ Before non-trivial work, read:
     updates for every writer (merge, stamp, sign, LTV, forms, attachments). `PdfObjectSyntax` presets keep each
     writer's exact bytes.
   - `Fonts/Cff/` reads CFF and CFF2 for the subsetter, the CFF2 instancer and the renderer.
+- `src/PdfPecker.Fluent/` – the fluent package. The public API sits at the top level: `Document`, `PageDescriptor`,
+  `ContainerExtensions` (decorators; transforms, placement and shadows in `ContainerExtensions.Layout.cs`, semantic
+  calls in `ContainerExtensions.Semantics.cs`), `ContentExtensions` (text, column, row, table, layers, lists, images,
+  barcodes, lines), `Descriptors.cs`, `TextDescriptors.cs`, `TextStyle`, `Color`, `Colors`, `PageSizes`, `Unit`,
+  `FontManager`, `Placeholders` and `GenerateExtensions`. `Model/Elements.cs` is the tree the calls build;
+  `Html/HtmlWriter.cs` turns it into HTML, merging decorator chains into as few elements as the CSS box model allows
+  (see the comments on `Box`), with one class per distinct set of declarations; `Html/TableLayout.cs` places table
+  cells, `Html/ImageTable.cs` hands images to PdfPecker through a resource resolver, and `Html/CssValue.cs` formats and
+  escapes CSS values.
 - `tests/PdfPecker.Tests/` – xUnit. `Fixtures/` holds inputs, `Golden/` the baseline PDFs.
+- `tests/PdfPecker.Fluent.Tests/` – xUnit for the fluent package. `Golden/` holds the baseline HTML and PDFs of the
+  examples.
 - `samples/PdfPecker.Sample` – converts the sample documents; CI also publishes it with Native AOT.
-- `bench/PdfPecker.Benchmarks` (in the solution), `bench/PdfPecker.Comparison` (not in the solution) and
-  `bench/compare-versions.sh`.
-- `fuzz/PdfPecker.Fuzz` – the dependency-free mutation fuzzer.
+- `samples/PdfPecker.Fluent.Sample` – writes the fluent examples as PDF and HTML; CI also publishes it with Native AOT.
+  Its `Examples.cs` and `assets/` (invoice, report, catalogue, layout and text examples) are shared with the fluent
+  tests and benchmarks.
+- `bench/PdfPecker.Benchmarks` and `bench/PdfPecker.Fluent.Benchmarks` (in the solution), `bench/PdfPecker.Comparison`
+  and `bench/PdfPecker.Fluent.Comparison` (QuestPDF; not in the solution) and `bench/compare-versions.sh`.
+- `fuzz/PdfPecker.Fuzz` – the dependency-free mutation fuzzer; `fuzz/PdfPecker.Fluent.Fuzz` – the generative fuzzer of
+  the fluent package.
 - `tools/` – generators for checked-in data (see "Change-specific guidance"), the veraPDF conformance samples, the
   HarfBuzz shaping reference and the third-party PDF fixtures.
 - `.github/workflows/` – `nuget.yml`, `dotnet-preview.yml`, `conformance.yml`, `codeql.yml`, `perf.yml`, `fuzz.yml`,
@@ -76,14 +105,21 @@ dotnet test -f net10.0 --filter "FullyQualifiedName~MarkdownTests"   # one class
 Before pushing, the build must be warning-free (warnings are errors), the tests must pass, and the golden baselines
 must be unchanged unless the output change is intended. If only one runtime is installed, pass `-f net10.0`; CI runs
 `net8.0`, `net9.0` and `net10.0` on Linux and `net10.0` on Windows. A change to the public API also needs
-`dotnet pack src/PdfPecker -c Release -o ./nupkg`, which runs package validation. Details are in `BUILD.md` and
-`TESTING.md`.
+`dotnet pack src/PdfPecker -c Release -o ./nupkg` (or `src/PdfPecker.Fluent`), which runs package validation. Details
+are in `BUILD.md` and `TESTING.md`.
 
 ## Change-specific guidance
 
 - **Output changes** (layout, CSS, fonts, PDF bytes): regenerate the goldens with `PDFPECKER_UPDATE_GOLDEN=1` (command
   in `TESTING.md`) and list in the commit and PR which baselines changed and why. A refactor must leave every golden
-  unchanged.
+  unchanged. The fluent goldens render through the library too, so a library output change can change their PDFs.
+- **A new fluent call**: XML doc comment, a `LayoutTests` test of the HTML it writes, a line in its README, and a
+  place in the fluent fuzzer's generator. Prefer QuestPDF's name and signature when QuestPDF has the call. Look at the
+  PDFs, and compare with Chrome printing the `GenerateHtml` output when layout is involved.
+- **Something PdfPecker cannot render for the fluent package**: don't work around it in the writer with fragile
+  markup; fix the library in the same repository, in its own PR first.
+- **New `PdfOptions` properties**: `DocumentGenerator.Copy` in the fluent package must copy them (`ApiTests` fails
+  until it does).
 - **Public API**: code is `internal` unless it is meant for callers (tests can see internals). Every public member
   needs an XML doc comment (CS1591 is an error). Add overloads rather than changing signatures, add a README line for
   a new feature, and remember the manual in PdfPecker.Web gets a docs change that goes live with the next release.
@@ -105,7 +141,7 @@ must be unchanged unless the output change is intended. If only one runtime is i
   `tools/ConformanceSamples/known-failures.txt` fails CI.
 - **Performance-sensitive code**: compare with `bench/compare-versions.sh <base-ref>` on one machine, not with the
   README table.
-- **Releases**: follow `RELEASING.md`; only the repository owner publishes a release.
+- **Releases**: follow `RELEASING.md`; only the repository owner publishes a release, and it publishes both packages.
 
 ## Avoid
 
@@ -158,3 +194,14 @@ must be unchanged unless the output change is intended. If only one runtime is i
   callers' output caches possible; signed and encrypted output stay unique on purpose.
 - The website (PdfPecker.Web) uses the NuGet package, so a library feature reaches pdfpecker.net only after a release
   and a `PackageReference` bump there.
+- In the fluent package, a percentage height inside a table cell does not stretch, so a cell's background only fills
+  the cell when `Background` comes before `Padding` in the chain; the writer can't fix that alone.
+- Fluent page numbers are PdfPecker's `{page}` and `{total-pages}` tokens, which work only in the sticky header and
+  footer. Caller text with braces in those bands is written so the library leaves it alone.
+- Several fluent `Page` calls are converted separately and merged with `PdfMerger`, which is why page numbers restart
+  and why PDF/A, PDF/UA and signatures need a single page set.
+- The fluent golden PDFs are compared after inflating streams, because .NET 9's zlib compresses differently from .NET 8
+  and 10.
+- The QR and Code 128 encoders dominate the fluent layer's own time in documents that have barcodes.
+- Fluent `Unconstrained` is a box of no size rather than `position: absolute`, because a positioned box paints over
+  the in-flow content after it, and QuestPDF draws that content on top.

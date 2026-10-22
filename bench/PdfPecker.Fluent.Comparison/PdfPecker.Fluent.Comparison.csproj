@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Deliberately outside the solution, like bench/PdfPecker.Comparison: it is the only Fluent project with a third-party
+       package. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <TieredPGO>true</TieredPGO>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/PdfPecker.Fluent/PdfPecker.Fluent.csproj" />
+    <PackageReference Include="QuestPDF" Version="2026.9.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../../samples/PdfPecker.Fluent.Sample/Examples.cs" Link="Examples.cs" />
+    <None Include="../../samples/PdfPecker.Fluent.Sample/assets/**" Link="assets/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

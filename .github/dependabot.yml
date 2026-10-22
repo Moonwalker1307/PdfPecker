@@ -1,6 +1,6 @@
 # Weekly pull requests when a pinned GitHub Action, a test package or the veraPDF validator gets a new version. The
-# library has no package references, and bench/PdfPecker.Comparison is left out on purpose: its competitor versions
-# are the ones the published benchmark table was measured with.
+# library has no package references, and the two comparison benchmarks are left out on purpose: their competitor
+# versions are the ones the published benchmark tables were measured with.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -16,6 +16,14 @@ updates:
 
   - package-ecosystem: nuget
     directory: /tests/PdfPecker.Tests
+    schedule:
+      interval: weekly
+    groups:
+      nuget-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: nuget
+    directory: /tests/PdfPecker.Fluent.Tests
     schedule:
       interval: weekly
     groups:
