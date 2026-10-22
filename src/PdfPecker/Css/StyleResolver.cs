@@ -110,7 +110,7 @@ internal sealed partial class StyleResolver
     private readonly List<Declaration> _scratch = new();
     private readonly bool _hasCustomProperties;
     private int _resolved;
-    private readonly Dictionary<string, List<Declaration>> _inlineCache = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Declaration[]> _inlineCache = new(StringComparer.Ordinal);
     private readonly Dictionary<(string, string), Declaration> _hintCache = new();
     private readonly Dictionary<StyleKey, ComputedStyle> _styleCache = new();
     private readonly StyleKey _probe = new();
