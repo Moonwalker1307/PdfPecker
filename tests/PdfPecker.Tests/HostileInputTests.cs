@@ -115,6 +115,15 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Thousands_of_nested_multi_column_boxes_stay_fast()
+    {
+        // Found by the fuzzer: target html, timeout-36981e1b. Each multi-column box divides the width again, and each
+        // level copied all the content inside it into its columns; columns narrower than a pixel are now one column.
+        string level = "<h2>Multi-column</h2><div class=cols><h3>column-span: all heading</h3><p>Column rules sit in the gaps between columns.";
+        AssertStructurallyValid(Bounded("<style>.cols { columns: 3; column-gap: 14pt } .cols h3 { column-span: all }</style>" + Repeat(level, 2400)));
+    }
+
+    [Fact]
     public void Balancing_lines_of_thousands_of_tiny_words_stays_fast()
     {
         // Choosing breaks again costs the square of a line's break opportunities: tiny words on wide lines keep their
