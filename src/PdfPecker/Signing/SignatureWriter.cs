@@ -35,6 +35,7 @@ internal static class SignatureWriter
         Cms.HashOid(o.HashAlgorithm); // validate early
 
         var file = LtvWriter.Open(pdf, password);
+        DocMdp.CheckCanSign(file, o.Certification);
         var certs = Cms.CertificateChain(o.Certificate, o.ExtraCertificates);
         var time = o.SigningTime ?? DateTimeOffset.Now;
         time = time.AddTicks(-(time.Ticks % TimeSpan.TicksPerSecond));
@@ -133,6 +134,11 @@ internal static class SignatureWriter
                 throw new PdfSignatureException($"The signature field \"{o.FieldName}\" is already signed.");
         }
 
+        // A certified document takes new signatures only invisibly or in the fields it had when it was certified: a new
+        // visible field changes how a page looks, which validators such as pyHanko count against the certification.
+        if (target == null && ap != null && DocMdp.Certification(file) != null)
+            throw new PdfSignatureException("The PDF is certified, so a new visible signature box would break the certification. Sign invisibly, or into an empty signature field the document had when it was certified.");
+
         int next = Math.Max(file.GetInt(trailer, "Size", 0), file.MaxObjectNumber + 1);
         var widgetRef = target?.WidgetRef ?? new PdfRef(next++, 0);
         int apNum = next++, sigNum = next++;
@@ -153,12 +159,19 @@ internal static class SignatureWriter
         var update = new PdfUpdateWriter(file, pdf, reserve * 2 + 8192);
         var output = update.Output;
 
-        // Catalog (or the AcroForm object it points to).
+        // Catalog (or the AcroForm object it points to). A certification is named in the catalog's /Perms.
+        bool certify = o.Certification != PdfCertificationLevel.None;
         if (acroEntry is PdfRef acroRef) update.WriteObject(acroRef.Num, acroRef.Gen, acro);
-        else
+        if (acroEntry is not PdfRef || certify)
         {
             var cat = Copy(catalog);
-            cat.Entries["AcroForm"] = acro;
+            if (acroEntry is not PdfRef) cat.Entries["AcroForm"] = acro;
+            if (certify)
+            {
+                var perms = Copy(file.GetDict(catalog, "Perms"));
+                perms.Entries["DocMDP"] = new PdfRef(sigNum, 0);
+                cat.Entries["Perms"] = perms;
+            }
             update.WriteObject(rootRef.Num, rootRef.Gen, cat);
         }
 
@@ -257,6 +270,12 @@ internal static class SignatureWriter
         if (!string.IsNullOrEmpty(o.Reason)) { output.Ascii(" /Reason "); strings.WriteString(output, Text(o.Reason!).Bytes); }
         if (!string.IsNullOrEmpty(o.Location)) { output.Ascii(" /Location "); strings.WriteString(output, Text(o.Location!).Bytes); }
         if (!string.IsNullOrEmpty(o.ContactInfo)) { output.Ascii(" /ContactInfo "); strings.WriteString(output, Text(o.ContactInfo!).Bytes); }
+        if (certify)
+        {
+            // The DocMDP transform without the digest entries, which ISO 32000-2 and PAdES leave out.
+            output.Ascii(" /Reference [<< /Type /SigRef /TransformMethod /DocMDP /TransformParams << /Type /TransformParams /P ")
+                .Int((int)o.Certification).Ascii(" /V /1.2 >> >>]");
+        }
         output.Ascii(" /Prop_Build << /App << /Name /PdfPecker >> >> >>\nendobj\n");
 
         update.Finish(rootRef, next);

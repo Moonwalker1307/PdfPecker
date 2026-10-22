@@ -99,6 +99,9 @@ internal sealed class SeedContext
         yield return ("generated:signed-rsa.pdf", signed);
         yield return ("generated:signed-ec.pdf", HtmlToPdf.Convert(SmallHtml, new PdfOptions { Signature = new PdfSignatureOptions(ec) }));
         yield return ("generated:signed-twice.pdf", PdfSigner.Sign(signed, new PdfSignatureOptions(ec) { Reason = "Countersigned" }));
+        // A certification with a countersignature after it, so mutations reach the check of changes after certifying.
+        var certified = HtmlToPdf.Convert(SmallHtml, new PdfOptions { Signature = new PdfSignatureOptions(rsa) { Certification = PdfCertificationLevel.FormFilling } });
+        yield return ("generated:certified-countersigned.pdf", PdfSigner.Sign(certified, new PdfSignatureOptions(ec)));
 
         // Image filters the golden PDFs do not use, wrapped in a one-page PDF each.
         var fixtures = FixtureDir;

@@ -114,6 +114,26 @@ public sealed class PdfSignatureVerification
     public IReadOnlyList<string> ChainErrors { get; internal set; } = Array.Empty<string>();
 
     /// <summary>
+    /// The certification level when this is a certification signature: one with a DocMDP transform that the document
+    /// catalog names in /Perms. <see cref="PdfCertificationLevel.None"/> for an approval signature or a document timestamp.
+    /// </summary>
+    public PdfCertificationLevel CertificationLevel { get; internal set; }
+
+    /// <summary>
+    /// For a certification signature, the changes appended after it that its level does not allow, in plain words; they
+    /// are listed in <see cref="Problems"/> too and make the signature not <see cref="Valid"/>. Empty when every change
+    /// is allowed, and always for an approval signature.
+    /// </summary>
+    /// <remarks>
+    /// The check compares each object the later updates wrote with its certified version: validation data, document
+    /// timestamps and document metadata may change at every level, filled-in fields and new or filled signature fields
+    /// at <see cref="PdfCertificationLevel.FormFilling"/> and above, and annotations at
+    /// <see cref="PdfCertificationLevel.FormFillingAndAnnotations"/>. Anything else, such as changed page content, is
+    /// reported.
+    /// </remarks>
+    public IReadOnlyList<string> DisallowedChanges { get; internal set; } = Array.Empty<string>();
+
+    /// <summary>
     /// Everything found wrong, in plain words; empty for a valid signature, except that an untrusted timestamp is listed
     /// even when the signature is valid without it.
     /// </summary>
@@ -126,9 +146,9 @@ public sealed class PdfSignatureVerification
     public bool IsIntact => ByteRangeValid && DigestMatches && SignatureValid && TimestampValid != false;
 
     /// <summary>
-    /// Intact and trusted. Changes appended after signing do not make a signature invalid (that is how a second
-    /// signature or validation data is added), so check <see cref="CoversWholeDocument"/> too when the last signature
-    /// must cover everything.
+    /// Intact, trusted, and for a certification signature without <see cref="DisallowedChanges"/>. Other changes
+    /// appended after signing do not make a signature invalid (that is how a second signature or validation data is
+    /// added), so check <see cref="CoversWholeDocument"/> too when the last signature must cover everything.
     /// </summary>
     /// <remarks>
     /// Revocation is not checked by default: with <see cref="PdfSignatureVerificationOptions.RevocationMode"/> at its
@@ -136,7 +156,7 @@ public sealed class PdfSignatureVerification
     /// valid. Set it to <see cref="X509RevocationMode.Online"/>, or to <see cref="X509RevocationMode.Offline"/> with the
     /// revocation data cached on the machine, when that matters.
     /// </remarks>
-    public bool Valid => IsIntact && ChainTrusted;
+    public bool Valid => IsIntact && ChainTrusted && DisallowedChanges.Count == 0;
 }
 
 /// <summary>Checks the digital signatures and document timestamps in an existing PDF.</summary>
@@ -189,7 +209,7 @@ public static class PdfSignatureVerifier
             foreach (var f in found)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                results.Add(VerifyOne(file, f, options, dssCerts, hashes));
+                results.Add(VerifyOne(file, f, options, dssCerts, hashes, password));
             }
             return results;
         }
@@ -239,7 +259,7 @@ public static class PdfSignatureVerifier
     }
 
     private static PdfSignatureVerification VerifyOne(PdfFile file, FoundSignature f, PdfSignatureVerificationOptions options, List<X509Certificate2> dssCerts,
-        RangeHashes hashes)
+        RangeHashes hashes, string? password)
     {
         var data = file.Data;
         var problems = new List<string>();
@@ -262,6 +282,16 @@ public static class PdfSignatureVerifier
             v.CoversWholeDocument = end <= data.Length && OnlyWhiteSpaceAfter(data, end);
         }
         if (!f.ByteRangeValid) problems.Add("The byte range is malformed or does not leave out exactly the signature's /Contents.");
+        if (!f.IsDocumentTimestamp && DocMdp.Level(file, f.Dict) is var level and > 0 && ReferenceEquals(DocMdp.Certification(file), f.Dict))
+        {
+            v.CertificationLevel = (PdfCertificationLevel)level;
+            // Only a well-formed byte range marks where the certified revision ends.
+            if (f.ByteRangeValid && !v.CoversWholeDocument)
+            {
+                v.DisallowedChanges = DocMdpChanges.Find(file, f.ByteRange[2] + f.ByteRange[3], level, password);
+                problems.AddRange(v.DisallowedChanges);
+            }
+        }
         if (f.Contents == null)
         {
             problems.Add("The signature value could not be read.");
