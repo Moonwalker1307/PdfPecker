@@ -163,7 +163,7 @@ dotnet run --project samples/PdfPecker.Sample -c Release      # converts samples
 dotnet run --project samples/PdfPecker.Fluent.Sample -c Release   # writes the PdfPecker.Fluent examples into ./output
 dotnet run --project bench/PdfPecker.Benchmarks -c Release
 dotnet run --project bench/PdfPecker.Benchmarks -c Release -- --requirements    # memory and CPU per conversion
-bench/compare-versions.sh v1.18.0                              # this checkout against a release, in turns on this machine
+bench/compare-versions.sh v1.19.0                              # this checkout against a release, in turns on this machine
 dotnet pack src/PdfPecker -c Release -o ./nupkg                # also checks the public API against the last release
 dotnet pack src/PdfPecker.Fluent -c Release -o ./nupkg         # the fluent package, with the same version
 ```
