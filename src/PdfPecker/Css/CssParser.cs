@@ -219,15 +219,20 @@ internal static partial class CssParser
     private static void AddRule(string body, List<string> selectors, in RuleScope scope)
     {
         if (string.IsNullOrWhiteSpace(body)) return;
-        var declarations = new List<Declaration>();
-        ParseDeclarations(body, declarations);
-        if (declarations.Count == 0) return;
-        var array = declarations.ToArray();
+        var array = scope.Sheet.ShareDeclarations ? SharedDeclarations.Get(body) : Parse(body);
+        if (array.Length == 0) return;
         foreach (var text in selectors)
         {
             if (Selector.Parse(text) is { } selector)
                 scope.Sheet.Rules.Add(new StyleRule(selector, array, scope.Sheet.NextOrder++, scope.Layer, scope.Containers));
         }
+    }
+
+    private static Declaration[] Parse(string body)
+    {
+        var declarations = new List<Declaration>();
+        ParseDeclarations(body, declarations);
+        return declarations.ToArray();
     }
 
     /// <summary>

@@ -118,6 +118,12 @@ internal sealed class Stylesheet
     public MediaContext Media = new();
     public int NextOrder;
 
+    /// <summary>
+    /// Takes the declarations of the sheet's rules from <see cref="SharedDeclarations"/>: true for a document's own
+    /// style sheets, false for the user agent's, whose declarations must stay apart from the author's.
+    /// </summary>
+    public bool ShareDeclarations;
+
     /// <summary>Some rule is inside an @container block.</summary>
     public bool HasContainerRules;
 
