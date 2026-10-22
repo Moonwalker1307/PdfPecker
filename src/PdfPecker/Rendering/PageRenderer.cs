@@ -442,7 +442,12 @@ internal sealed partial class PageRenderer
 
     private void Fill(bool evenOdd)
     {
-        if (_path.IsEmpty || !SetupPaint(false)) return;
+        if (_path.IsEmpty) return;
+        // A mesh shading is painted only where the fill can reach, not over the whole page.
+        _fillArea = _gs.FillSpace is PatternSpace ? DeviceBounds(_path, _gs.Ctm) : null;
+        bool paint = SetupPaint(false);
+        _fillArea = null;
+        if (!paint) return;
         var ctm = _gs.Ctm;
         if (_path.IsSingleRect && ctm.IsAxisAligned)
         {
@@ -892,8 +897,35 @@ internal sealed class OptionalContent
 internal sealed class CanvasShader : IShader
 {
     private readonly Canvas _src;
+    private readonly int _x, _y;
+    private readonly uint _outside;
+
     public CanvasShader(Canvas src) => _src = src;
 
+    /// <summary>
+    /// A shader of a canvas whose top left pixel is device pixel (<paramref name="x"/>, <paramref name="y"/>); pixels
+    /// outside it are <paramref name="outside"/>.
+    /// </summary>
+    public CanvasShader(Canvas src, int x, int y, uint outside)
+    {
+        _src = src;
+        _x = x;
+        _y = y;
+        _outside = outside;
+    }
+
     public void Shade(int y, int x0, Span<uint> colors)
-        => _src.Pixels.AsSpan(y * _src.Width + x0, colors.Length).CopyTo(colors);
+    {
+        int row = y - _y, start = x0 - _x;
+        if (row >= 0 && row < _src.Height && start >= 0 && start + colors.Length <= _src.Width)
+        {
+            _src.Pixels.AsSpan(row * _src.Width + start, colors.Length).CopyTo(colors);
+            return;
+        }
+        for (int i = 0; i < colors.Length; i++)
+        {
+            int x = start + i;
+            colors[i] = row >= 0 && row < _src.Height && x >= 0 && x < _src.Width ? _src.Pixels[row * _src.Width + x] : _outside;
+        }
+    }
 }

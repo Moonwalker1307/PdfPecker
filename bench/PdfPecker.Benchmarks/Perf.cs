@@ -1264,7 +1264,7 @@ sealed class MeshWorkload
 
     public void Run()
     {
-        foreach (var (file, shading, type, space, function, toDevice) in _meshes) MeshShading.Paint(file, shading, type, space, function, toDevice, _layer, _clip);
+        foreach (var (file, shading, type, space, function, toDevice) in _meshes) MeshShading.Paint(file, shading, type, space, function, toDevice, _layer, 0, 0, _clip, _layer.Width, _layer.Height);
     }
 
     // A grid of rows of vertices, moved a little off the square lattice so that no two triangles are alike.
