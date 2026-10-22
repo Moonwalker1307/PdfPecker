@@ -95,8 +95,14 @@ internal sealed partial class FontProgram
     private OpenTypeLayout? _layout;
     private bool _layoutLoaded;
     private VariationAxis[]? _axes;
-    private readonly ConcurrentDictionary<string, FontProgram> _instances = new(StringComparer.Ordinal);
+    private ConcurrentDictionary<string, FontProgram> _instances = new(StringComparer.Ordinal);
     private ConcurrentDictionary<string, FontProgram>? _featureVariants;
+
+    /// <summary>
+    /// The latest subsets of this font as the PDF writer embeds them (see <see cref="EmbeddedFontFiles"/>). The feature
+    /// variants share the list, since they share the font data and so embed the same glyphs as the same bytes.
+    /// </summary>
+    internal readonly LinkedList<EmbeddedFontFiles.Entry> EmbeddedFiles = new();
 
     private FontProgram(byte[] data, int offsetTable)
     {
@@ -328,6 +334,29 @@ internal sealed partial class FontProgram
         variant._bmp = mapped;
         variant._charWidths = null;
         return variant;
+    }
+
+    /// <summary>
+    /// A copy for one more document that shares what was read from the font file (the data, the tables, the character
+    /// map and widths, kerning, ligatures and layout tables, the embedded subsets) but starts without instances or
+    /// feature variants, so each document makes its own and its output does not depend on what other documents asked
+    /// of the font. Build the shared tables first (<see cref="BuildSharedTables"/>), or each copy builds its own.
+    /// </summary>
+    internal FontProgram Copy()
+    {
+        var copy = (FontProgram)MemberwiseClone();
+        copy._instances = new(StringComparer.Ordinal);
+        copy._featureVariants = null;
+        return copy;
+    }
+
+    /// <summary>Builds the tables that copies share and every document reads, so that they are built only once.</summary>
+    internal void BuildSharedTables()
+    {
+        _ = CharWidths;
+        _ = Kerning;
+        _ = Ligatures;
+        _ = Layout;
     }
 
     /// <summary>Advance width of a glyph in font units.</summary>
