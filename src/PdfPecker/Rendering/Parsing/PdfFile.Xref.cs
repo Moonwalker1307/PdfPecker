@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace PdfPecker.Rendering.Parsing;
 
 /// <summary>The file header, the startxref pointer, and the chain of cross-reference tables and streams.</summary>
@@ -36,6 +38,44 @@ internal sealed partial class PdfFile
     {
         int searchLength = Math.Clamp(data.Length - 1, 0, HeaderSearchLength + HeaderMarker.Length - 1);
         return Math.Max(0, data.AsSpan(0, searchLength).IndexOf(HeaderMarker));
+    }
+
+    /// <summary>The version the header states, such as "1.7", or null when the file has no readable header.</summary>
+    public string? HeaderVersion
+    {
+        get
+        {
+            var rest = Data.AsSpan(_headerOffset);
+            if (!rest.StartsWith(HeaderMarker)) return null;
+            rest = rest[HeaderMarker.Length..];
+            // A major digit, a dot and a minor digit; anything else is a damaged header.
+            if (rest.Length < 3 || !char.IsAsciiDigit((char)rest[0]) || rest[1] != (byte)'.' || !char.IsAsciiDigit((char)rest[2])) return null;
+            return Encoding.ASCII.GetString(rest[..3]);
+        }
+    }
+
+    /// <summary>
+    /// Whether the file is linearized ("Fast Web View"): its first object, within the first kilobyte, is a linearization
+    /// dictionary whose length is the file's. A file changed by an incremental update after linearizing is longer than
+    /// the dictionary says, and readers no longer treat it as linearized.
+    /// </summary>
+    public bool IsLinearized
+    {
+        get
+        {
+            try
+            {
+                var lexer = new PdfLexer(Data, _headerOffset, Math.Min(Data.Length, _headerOffset + HeaderSearchLength));
+                if (lexer.Next() != TokenKind.Integer || lexer.Next() != TokenKind.Integer || lexer.Next() != TokenKind.Keyword || !lexer.KeywordIs("obj"))
+                    return false;
+                return lexer.ReadObject() is PdfDict dict && dict["Linearized"] is PdfNumber && dict["L"] is PdfNumber length
+                    && length.Value == Data.Length;
+            }
+            catch (Exception ex) when (IsDamagedObjectError(ex))
+            {
+                return false;
+            }
+        }
     }
 
     /// <summary>The offset after the last "startxref" keyword near the end of the file, or -1.</summary>

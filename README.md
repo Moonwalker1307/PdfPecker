@@ -59,6 +59,10 @@ byte[] tiff = PdfToImage.ConvertToTiff(pdf, new ImageOptions { Dpi = 200, TiffCo
 byte[] smaller = PdfCompactor.Compact(File.ReadAllBytes("scan.pdf"));
 byte[] smallest = PdfCompactor.Compact(pdf, new PdfCompactOptions { MaxImageDpi = 150, ImageQuality = 75 });
 
+// Title, author, PDF version, page sizes, encryption and PDF/A claim of any PDF
+var properties = PdfDocumentProperties.Read(File.ReadAllBytes("received.pdf"));
+Console.WriteLine($"{properties.Title} by {properties.Author}: PDF {properties.Version}, {properties.PageCount} pages, {properties.PdfAConformance}");
+
 // Any PDF as one self-contained HTML page: page images with selectable, searchable text and working links
 string html = PdfToHtml.Convert(File.ReadAllBytes("statement.pdf"));
 
@@ -118,7 +122,7 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
 - **Forms**: HTML inputs become fillable PDF fields; read, fill and flatten the fields of existing PDFs. [More](https://pdfpecker.net/docs/forms/)
 - **Digital signatures**: PAdES signing, timestamps, external signers, verification and long-term validation. [More](https://pdfpecker.net/docs/signatures/)
 - **E-invoices and attachments**: Factur-X, ZUGFeRD, XRechnung and Peppol BIS 3.0 XML built from invoice data, with the totals and VAT calculated and checked against the EN 16931 rules (`InvoiceData.ToCii()` and `ToUbl()`); a ready-made invoice layout with your logo in English, German or Danish (`InvoiceTemplate.ToPdf(invoice)`); Factur-X embedded in the PDF or read back from a received one, PDFs attached to Peppol and OIOUBL invoices, and any embedded file. [More](https://pdfpecker.net/docs/e-invoices/)
-- **Existing PDFs**: merge (also streamed), split, reorder, rotate, stamp and extract text with positions. [More](https://pdfpecker.net/docs/merging/)
+- **Existing PDFs**: merge (also streamed), split, reorder, rotate, stamp and extract text with positions, and read their document properties (`PdfDocumentProperties.Read`: title, author, dates and custom properties from the information dictionary or XMP metadata, PDF version, page sizes, encryption and permissions, PDF/A and PDF/UA claims, tagging and Fast Web View). [More](https://pdfpecker.net/docs/merging/)
 - **Compacting**: `PdfCompactor` makes any PDF smaller without changing how it looks: unused objects and old revisions go, identical fonts and images are stored once, streams are recompressed and objects packed into compressed object streams, keeping bookmarks, forms, tags and PDF/A. Optional settings also downsample images and recompress them as JPEG. Signed and encrypted PDFs are refused, since rewriting would break or drop the signature or protection.
 - **PDF to image**: renders any PDF page, including JPEG 2000, JBIG2 and CCITT images, to PNG, JPEG or WebP, or a whole PDF to one multi-page TIFF (colour, greyscale or black and white with CCITT Group 4). `HtmlToImage` goes from HTML to images in one call. [More](https://pdfpecker.net/docs/pdf-to-image/)
 - **PDF to HTML**: `PdfToHtml` turns any PDF into one HTML file with no scripts that looks like the PDF: each page is an image (WebP, PNG or JPEG) with the page's text laid invisibly over it, word by word, so it can be selected, copied, searched and read by screen readers, plus the PDF's web links and links between pages. Pages scale down to a phone screen and print on paper of their own size. The HTML keeps the PDF's layout rather than reflowing into paragraphs, and text zooms as an image does.
