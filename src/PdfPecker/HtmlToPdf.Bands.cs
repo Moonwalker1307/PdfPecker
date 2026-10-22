@@ -74,9 +74,15 @@ public static partial class HtmlToPdf
     private static string ReplacePlaceholders(string text, string page, string pages)
         => text.Replace("{page}", page).Replace("{total-pages}", pages).Replace("{pages}", pages);
 
-    /// <summary>Lays out a band for one page, with {page}, {pages} and {total-pages} replaced in its text.</summary>
-    private static List<DrawOp> LayoutBandForPage(Element band, PageSetup page, ImageLoader images, int pageIndex, int pageCount, bool alignBottom, CancellationToken cancellationToken)
+    /// <summary>
+    /// Lays out a band for one page, with {page}, {pages} and {total-pages} replaced in its text. A band without them
+    /// looks the same on every page, so it is laid out once per page setup and its ops are drawn on each page, as fixed
+    /// boxes are.
+    /// </summary>
+    private static List<DrawOp> LayoutBandForPage(Element band, PageSetup page, ImageLoader images, int pageIndex, int pageCount, bool alignBottom,
+        Dictionary<(Element, PageSetup), List<DrawOp>> unnumbered, CancellationToken cancellationToken)
     {
+        if (unnumbered.TryGetValue((band, page), out var same)) return same;
         var texts = new List<(TextNode Node, string Original)>();
         CollectPlaceholders(band, texts);
         string number = (pageIndex + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -92,12 +98,34 @@ public static partial class HtmlToPdf
                 float dy = page.ContentHeight - h;
                 foreach (var op in engine.Ops) op.Offset(0, dy);
             }
+            // A band taller than the page shows only the part on the paper; the rest would be written on every page.
+            OffPaper(engine.Ops, -page.MarginTop, page.Height - page.MarginTop);
+            if (texts.Count == 0) unnumbered[(band, page)] = engine.Ops;
             return engine.Ops;
         }
         finally
         {
             foreach (var (node, original) in texts) node.Text = original;
         }
+    }
+
+    /// <summary>
+    /// Removes the text, boxes, images and links that lie wholly above <paramref name="top"/> or below
+    /// <paramref name="bottom"/>, going into groups and clips but not into layers, whose transforms can move them back.
+    /// Text keeps two font sizes either side of its baseline, more than any glyph reaches.
+    /// </summary>
+    private static void OffPaper(List<DrawOp> ops, float top, float bottom)
+    {
+        ops.RemoveAll(op => op switch
+        {
+            TextOp t => t.Baseline - 2 * t.Size > bottom || t.Baseline + 2 * t.Size < top,
+            RectOp r => r.Y > bottom || r.Y + r.H < top,
+            ImageOp i => i.Y > bottom || i.Y + i.H < top,
+            LinkOp l => l.Y > bottom || l.Y + l.H < top,
+            _ => false,
+        });
+        foreach (var op in ops)
+            if (op is GroupOp g and not LayerOp) OffPaper(g.Ops, top, bottom);
     }
 
     private static void CollectPlaceholders(Element e, List<(TextNode, string)> texts)
