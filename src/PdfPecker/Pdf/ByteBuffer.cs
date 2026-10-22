@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.CompilerServices;
 
 namespace PdfPecker.Pdf;
@@ -7,10 +8,37 @@ internal sealed class ByteBuffer
 {
     private byte[] _buf;
     private int _len;
+    private bool _pooled;
 
     // Only the bytes up to the length are ever read, so the buffer is not cleared first: clearing the 64 KB a document
     // starts with took longer than writing a small document into it.
     public ByteBuffer(int capacity = 4096) => _buf = GC.AllocateUninitializedArray<byte>(capacity);
+
+    private ByteBuffer(byte[] pooled)
+    {
+        _buf = pooled;
+        _pooled = true;
+    }
+
+    /// <summary>
+    /// A buffer whose arrays come from the shared array pool, for the large buffers every conversion fills once and
+    /// copies out: the next conversion reuses them instead of allocating them again, and a buffer that grows past 85 KB
+    /// no longer puts new arrays on the large object heap, whose collections are full ones. Only the bytes up to the
+    /// length are ever read, so what an earlier conversion left in a pooled array never reaches the output.
+    /// <see cref="Return"/> gives the array back once its bytes have been copied out.
+    /// </summary>
+    public static ByteBuffer Rent(int capacity) => new(ArrayPool<byte>.Shared.Rent(capacity));
+
+    /// <summary>Gives a rented buffer's array back to the pool; the buffer is empty afterwards.</summary>
+    public void Return()
+    {
+        if (!_pooled) return;
+        var buf = _buf;
+        _buf = [];
+        _len = 0;
+        _pooled = false;
+        ArrayPool<byte>.Shared.Return(buf);
+    }
 
     public int Length => _len;
     public byte[] RawBuffer => _buf;
@@ -26,8 +54,9 @@ internal sealed class ByteBuffer
     private void Grow(int extra)
     {
         int size = Math.Max(_buf.Length * 2, _len + extra);
-        var grown = GC.AllocateUninitializedArray<byte>(size);
+        var grown = _pooled ? ArrayPool<byte>.Shared.Rent(size) : GC.AllocateUninitializedArray<byte>(size);
         _buf.AsSpan(0, _len).CopyTo(grown);
+        if (_pooled) ArrayPool<byte>.Shared.Return(_buf);
         _buf = grown;
     }
 

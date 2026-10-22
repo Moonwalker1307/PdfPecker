@@ -45,6 +45,18 @@ public class ReproducibleOutputTests
     });
 
     [Fact]
+    public void Output_stays_the_same_after_a_larger_document_used_the_pooled_buffers() => WithEpoch(null, () =>
+    {
+        // The writer's buffers come from the shared array pool, so a small document after a large one writes into
+        // arrays that still hold the large one's bytes; only what the small one writes may reach its output.
+        var options = new PdfOptions { CreationDate = Fixed, Compress = false };
+        var first = HtmlToPdf.Convert(Html, options);
+        var large = string.Concat(Enumerable.Repeat("<p>A paragraph long enough to fill a few lines of the page with text.</p>", 2000));
+        Assert.True(HtmlToPdf.Convert(large, options).Length > 128 * 1024);
+        Assert.Equal(first, HtmlToPdf.Convert(Html, options));
+    });
+
+    [Fact]
     public void Fixed_date_reaches_xmp_metadata_and_attachments() => WithEpoch(null, () =>
     {
         PdfOptions Options() => new()

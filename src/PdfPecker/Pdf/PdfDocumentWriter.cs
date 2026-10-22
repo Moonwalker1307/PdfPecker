@@ -66,7 +66,7 @@ internal sealed partial class PdfDocumentWriter
     private PageSetup _page; // the setup of the page being written
     private readonly bool _compress;
     private readonly CompressionLevel _level;
-    private readonly ByteBuffer _out = new(64 * 1024);
+    private readonly ByteBuffer _out = ByteBuffer.Rent(64 * 1024);
     private readonly PdfXref _xref = new();
 
     // Content-stream graphics state while writing one page.
@@ -422,7 +422,9 @@ internal sealed partial class PdfDocumentWriter
         WriteTrailer(doc);
 
         _crypt?.Dispose();
-        return _out.Span.ToArray();
+        var pdf = _out.Span.ToArray();
+        _out.Return();
+        return pdf;
     }
 
     /// <summary>A PDF/A file of any part and level.</summary>
