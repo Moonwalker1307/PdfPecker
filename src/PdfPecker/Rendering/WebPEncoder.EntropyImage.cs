@@ -165,9 +165,20 @@ internal static partial class WebPEncoder
                 {
                     Green[NumLiteralCodes + PrefixEncode(reference.Length).Symbol]++;
                     Distance[PrefixEncode(reference.DistanceCode).Symbol]++;
-                    // The decoder adds every copied pixel to the cache.
+                    // The decoder adds every copied pixel to the cache. A pixel equal to the one before it is already
+                    // there, which skips most of a run.
                     if (useCache)
-                        foreach (uint copied in pixels.AsSpan(position, reference.Length)) cache.Insert(cache.Key(copied), copied);
+                    {
+                        var copied = pixels.AsSpan(position, reference.Length);
+                        uint last = copied[0];
+                        cache.Insert(cache.Key(last), last);
+                        foreach (uint c in copied)
+                            if (c != last)
+                            {
+                                last = c;
+                                cache.Insert(cache.Key(c), c);
+                            }
+                    }
                     position += reference.Length;
                 }
             }

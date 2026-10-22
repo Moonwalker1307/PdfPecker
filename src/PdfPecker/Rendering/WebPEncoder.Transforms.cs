@@ -154,10 +154,11 @@ internal static partial class WebPEncoder
         return writer.ToArray();
     }
 
-    /// <summary>Red and blue minus green, each modulo 256.</summary>
-    private static uint[] SubtractGreen(uint[] argb)
+    /// <summary>
+    /// Red and blue minus green, each modulo 256, in place: the predictor path is the last to read the pixels.
+    /// </summary>
+    private static uint[] SubtractGreen(uint[] pixels)
     {
-        var pixels = (uint[])argb.Clone();
         for (int i = 0; i < pixels.Length; i++)
         {
             uint p = pixels[i], green = (p >> 8) & 0xFF;
@@ -186,12 +187,48 @@ internal static partial class WebPEncoder
 
     private static void Residuals(uint[] pixels, int width, Tile tile, PredictorMode mode, uint[] residuals)
     {
-        for (int y = tile.Y0; y < tile.Y1; y++)
-            for (int x = tile.X0; x < tile.X1; x++)
+        // The first row and column use fixed predictors; the rest of the tile uses the mode.
+        if (tile.Y0 == 0)
+            for (int x = tile.X0; x < tile.X1; x++) residuals[x] = SubtractPixels(pixels[x], PredictAt(pixels, x, x, 0, width, mode));
+        if (tile.X0 == 0)
+            for (int y = Math.Max(tile.Y0, 1); y < tile.Y1; y++)
             {
-                int i = y * width + x;
-                residuals[i] = SubtractPixels(pixels[i], PredictAt(pixels, i, x, y, width, mode));
+                int i = y * width;
+                residuals[i] = SubtractPixels(pixels[i], PredictAt(pixels, i, 0, y, width, mode));
             }
+        int startX = Math.Max(tile.X0, 1), startY = Math.Max(tile.Y0, 1);
+        if (startX >= tile.X1 || startY >= tile.Y1) return;
+        switch (mode)
+        {
+            case PredictorMode.Left: Residuals<LeftPredictor>(pixels, width, startX, startY, tile.X1, tile.Y1, residuals); break;
+            case PredictorMode.Top: Residuals<TopPredictor>(pixels, width, startX, startY, tile.X1, tile.Y1, residuals); break;
+            case PredictorMode.TopRight: Residuals<TopRightPredictor>(pixels, width, startX, startY, tile.X1, tile.Y1, residuals); break;
+            case PredictorMode.TopLeft: Residuals<TopLeftPredictor>(pixels, width, startX, startY, tile.X1, tile.Y1, residuals); break;
+            case PredictorMode.AverageLeftTopRightTop: Residuals<AverageLeftTopRightTopPredictor>(pixels, width, startX, startY, tile.X1, tile.Y1, residuals); break;
+            case PredictorMode.AverageLeftTopLeft: Residuals<AverageLeftTopLeftPredictor>(pixels, width, startX, startY, tile.X1, tile.Y1, residuals); break;
+            case PredictorMode.AverageLeftTop: Residuals<AverageLeftTopPredictor>(pixels, width, startX, startY, tile.X1, tile.Y1, residuals); break;
+            case PredictorMode.AverageTopLeftTop: Residuals<AverageTopLeftTopPredictor>(pixels, width, startX, startY, tile.X1, tile.Y1, residuals); break;
+            case PredictorMode.AverageTopTopRight: Residuals<AverageTopTopRightPredictor>(pixels, width, startX, startY, tile.X1, tile.Y1, residuals); break;
+            case PredictorMode.AverageOfAverages: Residuals<AverageOfAveragesPredictor>(pixels, width, startX, startY, tile.X1, tile.Y1, residuals); break;
+            case PredictorMode.Select: Residuals<SelectPredictor>(pixels, width, startX, startY, tile.X1, tile.Y1, residuals); break;
+            case PredictorMode.ClampedAddSubtractFull: Residuals<ClampedAddSubtractFullPredictor>(pixels, width, startX, startY, tile.X1, tile.Y1, residuals); break;
+            case PredictorMode.ClampedAddSubtractHalf: Residuals<ClampedAddSubtractHalfPredictor>(pixels, width, startX, startY, tile.X1, tile.Y1, residuals); break;
+            default: Residuals<BlackPredictor>(pixels, width, startX, startY, tile.X1, tile.Y1, residuals); break;
+        }
+    }
+
+    private static void Residuals<TPredictor>(uint[] pixels, int width, int startX, int startY, int endX, int endY, uint[] residuals)
+        where TPredictor : struct, IPredictor
+    {
+        for (int y = startY; y < endY; y++)
+        {
+            int row = y * width;
+            for (int x = startX; x < endX; x++)
+            {
+                int i = row + x;
+                residuals[i] = SubtractPixels(pixels[i], TPredictor.Predict(pixels[i - 1], pixels[i - width], pixels[i - width - 1], pixels[i - width + 1]));
+            }
+        }
     }
 
     // The estimated cost in 1/16 bits of each residual byte value, from the magnitude of its signed value.
@@ -214,23 +251,11 @@ internal static partial class WebPEncoder
         // The first row and column use fixed predictors; score the rest of the tile.
         int startX = Math.Max(tile.X0, 1), startY = Math.Max(tile.Y0, 1);
         if (startX >= tile.X1 || startY >= tile.Y1) return PredictorMode.Left;
-        var cost = ResidualCost;
         var best = modes[0];
         long bestCost = long.MaxValue;
         foreach (var mode in modes)
         {
-            long total = 0;
-            // A mode is dropped as soon as it costs more than the best so far.
-            for (int y = startY; y < tile.Y1 && total < bestCost; y++)
-            {
-                int row = y * width;
-                for (int x = startX; x < tile.X1; x++)
-                {
-                    int i = row + x;
-                    uint r = SubtractPixels(pixels[i], Predict(mode, pixels[i - 1], pixels[i - width], pixels[i - width - 1], pixels[i - width + 1]));
-                    if (r != 0) total += cost[r & 255] + cost[(r >> 8) & 255] + cost[(r >> 16) & 255] + cost[r >> 24];
-                }
-            }
+            long total = TileCost(mode, pixels, width, startX, startY, tile.X1, tile.Y1, bestCost);
             if (total < bestCost)
             {
                 bestCost = total;
@@ -239,6 +264,123 @@ internal static partial class WebPEncoder
             }
         }
         return best;
+    }
+
+    /// <summary>
+    /// The estimated cost of a tile's residuals under one mode. The mode is chosen once here rather than per pixel, so
+    /// each loop is compiled with its predictor inlined.
+    /// </summary>
+    private static long TileCost(PredictorMode mode, uint[] pixels, int width, int startX, int startY, int endX, int endY, long limit) => mode switch
+    {
+        PredictorMode.Left => TileCost<LeftPredictor>(pixels, width, startX, startY, endX, endY, limit),
+        PredictorMode.Top => TileCost<TopPredictor>(pixels, width, startX, startY, endX, endY, limit),
+        PredictorMode.TopRight => TileCost<TopRightPredictor>(pixels, width, startX, startY, endX, endY, limit),
+        PredictorMode.TopLeft => TileCost<TopLeftPredictor>(pixels, width, startX, startY, endX, endY, limit),
+        PredictorMode.AverageLeftTopRightTop => TileCost<AverageLeftTopRightTopPredictor>(pixels, width, startX, startY, endX, endY, limit),
+        PredictorMode.AverageLeftTopLeft => TileCost<AverageLeftTopLeftPredictor>(pixels, width, startX, startY, endX, endY, limit),
+        PredictorMode.AverageLeftTop => TileCost<AverageLeftTopPredictor>(pixels, width, startX, startY, endX, endY, limit),
+        PredictorMode.AverageTopLeftTop => TileCost<AverageTopLeftTopPredictor>(pixels, width, startX, startY, endX, endY, limit),
+        PredictorMode.AverageTopTopRight => TileCost<AverageTopTopRightPredictor>(pixels, width, startX, startY, endX, endY, limit),
+        PredictorMode.AverageOfAverages => TileCost<AverageOfAveragesPredictor>(pixels, width, startX, startY, endX, endY, limit),
+        PredictorMode.Select => TileCost<SelectPredictor>(pixels, width, startX, startY, endX, endY, limit),
+        PredictorMode.ClampedAddSubtractFull => TileCost<ClampedAddSubtractFullPredictor>(pixels, width, startX, startY, endX, endY, limit),
+        PredictorMode.ClampedAddSubtractHalf => TileCost<ClampedAddSubtractHalfPredictor>(pixels, width, startX, startY, endX, endY, limit),
+        _ => TileCost<BlackPredictor>(pixels, width, startX, startY, endX, endY, limit),
+    };
+
+    private static long TileCost<TPredictor>(uint[] pixels, int width, int startX, int startY, int endX, int endY, long limit)
+        where TPredictor : struct, IPredictor
+    {
+        var cost = ResidualCost;
+        long total = 0;
+        // A mode is dropped as soon as it costs more than the best so far.
+        for (int y = startY; y < endY && total < limit; y++)
+        {
+            int row = y * width;
+            for (int x = startX; x < endX; x++)
+            {
+                int i = row + x;
+                uint r = SubtractPixels(pixels[i], TPredictor.Predict(pixels[i - 1], pixels[i - width], pixels[i - width - 1], pixels[i - width + 1]));
+                if (r != 0) total += cost[r & 255] + cost[(r >> 8) & 255] + cost[(r >> 16) & 255] + cost[r >> 24];
+            }
+        }
+        return total;
+    }
+
+    /// <summary>One predictor of VP8L, from the left, top, top-left and top-right pixels.</summary>
+    private interface IPredictor
+    {
+        static abstract uint Predict(uint left, uint top, uint topLeft, uint topRight);
+    }
+
+    private struct BlackPredictor : IPredictor
+    {
+        public static uint Predict(uint left, uint top, uint topLeft, uint topRight) => OpaqueBlack;
+    }
+
+    private struct LeftPredictor : IPredictor
+    {
+        public static uint Predict(uint left, uint top, uint topLeft, uint topRight) => left;
+    }
+
+    private struct TopPredictor : IPredictor
+    {
+        public static uint Predict(uint left, uint top, uint topLeft, uint topRight) => top;
+    }
+
+    private struct TopRightPredictor : IPredictor
+    {
+        public static uint Predict(uint left, uint top, uint topLeft, uint topRight) => topRight;
+    }
+
+    private struct TopLeftPredictor : IPredictor
+    {
+        public static uint Predict(uint left, uint top, uint topLeft, uint topRight) => topLeft;
+    }
+
+    private struct AverageLeftTopRightTopPredictor : IPredictor
+    {
+        public static uint Predict(uint left, uint top, uint topLeft, uint topRight) => Average2(Average2(left, topRight), top);
+    }
+
+    private struct AverageLeftTopLeftPredictor : IPredictor
+    {
+        public static uint Predict(uint left, uint top, uint topLeft, uint topRight) => Average2(left, topLeft);
+    }
+
+    private struct AverageLeftTopPredictor : IPredictor
+    {
+        public static uint Predict(uint left, uint top, uint topLeft, uint topRight) => Average2(left, top);
+    }
+
+    private struct AverageTopLeftTopPredictor : IPredictor
+    {
+        public static uint Predict(uint left, uint top, uint topLeft, uint topRight) => Average2(topLeft, top);
+    }
+
+    private struct AverageTopTopRightPredictor : IPredictor
+    {
+        public static uint Predict(uint left, uint top, uint topLeft, uint topRight) => Average2(top, topRight);
+    }
+
+    private struct AverageOfAveragesPredictor : IPredictor
+    {
+        public static uint Predict(uint left, uint top, uint topLeft, uint topRight) => Average2(Average2(left, topLeft), Average2(top, topRight));
+    }
+
+    private struct SelectPredictor : IPredictor
+    {
+        public static uint Predict(uint left, uint top, uint topLeft, uint topRight) => Select(top, left, topLeft);
+    }
+
+    private struct ClampedAddSubtractFullPredictor : IPredictor
+    {
+        public static uint Predict(uint left, uint top, uint topLeft, uint topRight) => ClampedAddSubtractFull(left, top, topLeft);
+    }
+
+    private struct ClampedAddSubtractHalfPredictor : IPredictor
+    {
+        public static uint Predict(uint left, uint top, uint topLeft, uint topRight) => ClampedAddSubtractHalf(Average2(left, top), topLeft);
     }
 
     private static uint PredictAt(uint[] pixels, int i, int x, int y, int width, PredictorMode mode)
