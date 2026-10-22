@@ -9,14 +9,14 @@ public static partial class ContainerExtensions
 
     /// <summary>Makes the slot as narrow as its content, instead of as wide as the space it is given.</summary>
     public static IContainer ShrinkHorizontal(this IContainer container)
-        => Style(container, Rank.Size, ("width", "fit-content"), HtmlWriter.ContentSized);
+        => Style(container, Rank.Size, ("width", "fit-content"));
 
     /// <summary>Makes the slot as short as its content, instead of as tall as a row or a <c>Height</c> makes it.</summary>
     public static IContainer ShrinkVertical(this IContainer container) => Style(container, Rank.Size, ("height", "auto"));
 
     /// <summary>Makes the slot as small as its content in both directions.</summary>
     public static IContainer Shrink(this IContainer container)
-        => Style(container, Rank.Size, ("width", "fit-content"), ("height", "auto"), HtmlWriter.ContentSized);
+        => Style(container, Rank.Size, ("width", "fit-content"), ("height", "auto"));
 
     // Semantics. PdfPecker tags a PDF/UA document from its HTML elements, so each call writes the matching element.
 

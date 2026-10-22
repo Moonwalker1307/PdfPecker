@@ -45,7 +45,7 @@ public sealed class ExtrasTests
         => Assert.Throws<ArgumentOutOfRangeException>(() => Html.Of(c => c.Scale(factor).Text("x")));
 
     [Fact]
-    public void Layers_stack_with_explicit_z_indexes()
+    public void Layers_stack_in_document_order()
     {
         var document = Html.Page(c => c.Layers(l =>
         {
@@ -55,9 +55,12 @@ public sealed class ExtrasTests
         }));
         string css = Html.Css(document);
         Assert.Contains("{position:relative;z-index:0}", css);
-        Assert.Contains("{position:absolute;top:0;right:0;bottom:0;left:0;z-index:0}", css);
-        Assert.Contains("{position:relative;z-index:1}", css);
-        Assert.Contains("{position:absolute;top:0;right:0;bottom:0;left:0;z-index:2}", css);
+        Assert.Contains("{position:absolute;top:0;right:0;bottom:0;left:0}", css);
+        Assert.Contains("{position:relative}", css);
+        Assert.DoesNotContain("z-index:1", css);
+        string html = document.GenerateHtml();
+        Assert.True(html.IndexOf(">under<", StringComparison.Ordinal) < html.IndexOf(">main<", StringComparison.Ordinal));
+        Assert.True(html.IndexOf(">main<", StringComparison.Ordinal) < html.IndexOf(">over<", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -83,7 +86,7 @@ public sealed class ExtrasTests
             i.Item().Text("a");
         })));
         Assert.Contains("{display:flex;flex-wrap:wrap;row-gap:3pt;column-gap:6pt;justify-content:center;align-items:flex-end}", css);
-        Assert.Contains("{flex:0 0 auto;max-width:100%;overflow-wrap:normal}", css);
+        Assert.Contains("{flex:0 0 auto;max-width:100%}", css);
     }
 
     [Fact]
@@ -131,7 +134,7 @@ public sealed class ExtrasTests
         Assert.Equal("<div class=\"c1\"><p class=\"c2\">x</p></div>", Html.Item(c => c.Unconstrained().Text("x")));
         string css = Css(c => c.Unconstrained().Text("x"));
         Assert.Contains("{width:0;height:0;min-height:0}", css);
-        Assert.Contains("{width:max-content;overflow-wrap:normal}", css);
+        Assert.Contains("{width:max-content}", css);
     }
 
     [Fact]

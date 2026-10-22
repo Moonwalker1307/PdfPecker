@@ -126,9 +126,11 @@ public static partial class ContainerExtensions
     /// <see cref="ZIndex"/>. Combine it with <see cref="TranslateX"/> and <see cref="TranslateY"/> to
     /// place a stamp or a badge.
     /// </summary>
+    // A box of no size rather than position: absolute, because a positioned box would paint over the in-flow content
+    // after it, and QuestPDF draws that content on top.
     public static IContainer Unconstrained(this IContainer container)
         => Style(container, Rank.Size, ("width", "0"), ("height", "0"), ("min-height", "0"))
-            .Element(inner => Style(inner, Rank.Size, ("width", "max-content"), HtmlWriter.ContentSized));
+            .Element(inner => Style(inner, Rank.Size, ("width", "max-content")));
 
     /// <summary>Draws the content above (higher values) or below (lower values) overlapping content around it.</summary>
     public static IContainer ZIndex(this IContainer container, int index)

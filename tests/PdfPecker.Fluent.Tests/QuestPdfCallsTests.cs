@@ -110,7 +110,7 @@ public sealed class QuestPdfCallsTests
     [Fact]
     public void Shrink_sizes_the_slot_to_its_content()
     {
-        Assert.Contains(".c1{width:fit-content;height:auto;overflow-wrap:normal;background-color:#f44336}",
+        Assert.Contains(".c1{width:fit-content;height:auto;background-color:#f44336}",
             Css(c => c.Shrink().Background(Colors.Red.Medium).Text("x")));
         Assert.Contains("{height:auto}", Css(c => c.ShrinkVertical().Text("x")));
     }

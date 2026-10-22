@@ -21,8 +21,7 @@ internal sealed class HtmlWriter
 
     // Every element starts from these rules, so the fluent calls alone decide spacing, as in QuestPDF: no default
     // margins, text keeps its spaces and line breaks, tables have fixed column widths and no cell spacing. Long words
-    // break where they would overflow, which is inherited, so boxes sized by their content can turn it off (see
-    // ContentSized).
+    // break where they would overflow.
     private const string BaseCss =
         "*{box-sizing:border-box}" +
         "html,body{margin:0;padding:0}" +
@@ -32,12 +31,6 @@ internal sealed class HtmlWriter
         "table{width:100%;table-layout:fixed;border-collapse:separate;border-spacing:0}" +
         "th,td{padding:0;vertical-align:top;text-align:inherit;font-weight:inherit}" +
         "img{display:block}";
-
-    /// <summary>
-    /// For boxes as wide as their content (auto row items, inlined items): PdfPecker 1.17.0 measures such a box one
-    /// glyph too narrow when its text may break inside words, and then breaks the last word, so they keep words whole.
-    /// </summary>
-    internal static readonly (string, string) ContentSized = ("overflow-wrap", "normal");
 
     private readonly StringBuilder _html = new();
     private readonly Dictionary<string, string> _classes = new(StringComparer.Ordinal);
@@ -232,30 +225,22 @@ internal sealed class HtmlWriter
 
     private void RenderLayers(LayersElement layers, Box box)
     {
-        // Explicit stacking order: every layer is positioned, and PdfPecker, like the CSS specification, paints
-        // positioned boxes with the same z-index in document order only when they have one.
+        // Every layer is positioned, so they paint in document order above the in-flow content around them, and the
+        // stack's own z-index keeps them together in one stacking context.
         box = Fresh(box, "position", "z-index");
         box.Declarations.Add(("position", "relative"));
         box.Declarations.Add(("z-index", "0"));
         Open(box);
-        int index = 0;
         foreach (var (primary, slot) in layers.Layers)
         {
             var layer = Box.Slot("div");
-            string z = index++.ToString(CultureInfo.InvariantCulture);
-            if (primary)
+            layer.Declarations.Add(("position", primary ? "relative" : "absolute"));
+            if (!primary)
             {
-                layer.Declarations.Add(("position", "relative"));
-                layer.Declarations.Add(("z-index", z));
-            }
-            else
-            {
-                layer.Declarations.Add(("position", "absolute"));
                 layer.Declarations.Add(("top", "0"));
                 layer.Declarations.Add(("right", "0"));
                 layer.Declarations.Add(("bottom", "0"));
                 layer.Declarations.Add(("left", "0"));
-                layer.Declarations.Add(("z-index", z));
             }
             RenderContainer(slot, layer);
         }
@@ -276,7 +261,6 @@ internal sealed class HtmlWriter
             var item = Box.Slot("div");
             item.Declarations.Add(("flex", "0 0 auto"));
             item.Declarations.Add(("max-width", "100%"));
-            item.Declarations.Add(ContentSized);
             RenderContainer(slot, item);
         }
     }
@@ -397,7 +381,6 @@ internal sealed class HtmlWriter
                 default:
                     item.Declarations.Add(("flex-grow", "0"));
                     item.Declarations.Add(("flex-shrink", "0"));
-                    item.Declarations.Add(ContentSized);
                     break;
             }
             RenderContainer(slot, item);
@@ -557,7 +540,6 @@ internal sealed class HtmlWriter
                     inline.Declarations.Add(("vertical-align", run.VerticalAlign));
                     inline.Declarations.Add(("max-width", "100%"));
                     inline.Declarations.Add(("text-indent", "0"));
-                    inline.Declarations.Add(ContentSized);
                     RenderContainer(run.Slot!, inline);
                     break;
                 }
