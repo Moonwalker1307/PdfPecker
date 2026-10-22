@@ -336,6 +336,16 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(Repeat(level, 50) + end));
     }
 
+    [Theory]
+    [InlineData("<style>table{border-collapse:collapse</style><table><tr")]
+    [InlineData("<table style='border-collapse:collapse; border:1pt solid'><tr></tr><tr></tr></table><p>end</p>")]
+    public void Collapsed_table_whose_rows_hold_no_cells_converts(string html)
+    {
+        // Rows without cells give a table no columns. Its left and right sides then looked for the cell beside them
+        // in column -1, which threw IndexOutOfRangeException.
+        AssertStructurallyValid(Bounded(html));
+    }
+
     [Fact]
     public void Nested_wrapping_column_flex_boxes_stay_bounded()
     {
