@@ -140,8 +140,9 @@ helper processes are included once and shared pages are not double-counted; .NET
 budget, as .NET would otherwise size it from the CPU cache.
 
 PdfPecker is 50 to 200 times faster than the Chromium-based converters on the small documents and uses an eighth or less
-of their memory. How to read the table, how it was measured and how to run it yourself is in
-[Performance](https://pdfpecker.net/docs/performance/).
+of their memory. How to read the table and how it was measured is in
+[Performance](https://pdfpecker.net/docs/performance/); the benchmark itself, to run on your own machine, is in
+[PdfPecker.Benchmarks](https://github.com/Moonwalker1307/PdfPecker.Benchmarks).
 
 | Converter | Engine | To deploy | First PDF | Invoice, 1 page | Feature tour, 5 pages | Report, 30 pages | Parallel | Peak memory |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |

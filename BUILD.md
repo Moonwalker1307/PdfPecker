@@ -23,7 +23,7 @@ dotnet run --project samples/PdfPecker.Fluent.Sample -c Release -- output   # wr
 ## What breaks the build
 
 - **Warnings are errors.** `Directory.Build.props` turns on `TreatWarningsAsErrors` and nullable reference types for
-  every project except `bench/PdfPecker.Comparison`, whose warnings come from third-party packages.
+  every project.
 - **Missing XML doc comments.** The library generates documentation, so a public member without a comment is CS1591,
   an error.
 - **Trimming and AOT analyzers.** `IsTrimmable` and `IsAotCompatible` are on, so reflection-based code shows up as a

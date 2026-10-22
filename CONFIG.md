@@ -9,7 +9,7 @@ configure the library itself (`PdfOptions`, `ImageOptions`, fonts, resource reso
 | File | What it sets |
 | --- | --- |
 | `global.json` | .NET SDK 10.0.100, rolling forward to the latest feature band. |
-| `Directory.Build.props` | Nullable and `TreatWarningsAsErrors` for every project except `bench/PdfPecker.Comparison`. |
+| `Directory.Build.props` | Nullable and `TreatWarningsAsErrors` for every project. |
 | `src/PdfPecker/PdfPecker.csproj` | Target frameworks, trimming and AOT analyzers, XML docs, package metadata, the local `-dev` version, package validation and `PackageValidationBaselineVersion`, embedded font and hyphenation data, and `InternalsVisibleTo` for the tests, fuzzer, benchmarks and FontPackBuilder. On GitHub Actions it also sets `ContinuousIntegrationBuild` for reproducible PDBs. |
 | `.editorconfig` | UTF-8, four-space indents (two for YAML and JSON), file-scoped namespaces, `System` usings first. |
 | `.gitattributes` | LF line endings everywhere and binary handling for fonts, images, PDFs and compressed data. |
@@ -24,6 +24,7 @@ nuget.org only accepts OSI- or FSF-approved licence IDs and some bundled font li
 | `PDFPECKER_UPDATE_GOLDEN=1` | `GoldenPdfTests`, `RendererGoldenTests` | Rewrites the golden baselines instead of comparing. |
 | `PDFPECKER_UPDATE_COMMONMARK=1` | `MarkdownSpecTests` | Records newly passing CommonMark examples in `Fixtures/commonmark-passing.txt`. |
 | `PDFPECKER_COMMONMARK_SPEC` | `MarkdownSpecTests` | Path to a local `spec.txt`, for running the spec tests offline. |
+| `PDFPECKER_BENCH_WARMUP` | `bench/compare-versions.sh` | Seconds of warm-up before timing (3 by default); 12 to 15 lets JIT tiering finish. |
 | `SOURCE_DATE_EPOCH` | The library at run time | When no `CreationDate` is set, fixes the dates and file identifier, so the same input gives a byte-identical PDF. |
 
 ## CI

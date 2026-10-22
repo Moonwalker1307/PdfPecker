@@ -130,7 +130,8 @@ takes about 0.8 ms, against about 1.2 ms for PdfPecker to render that HTML. Meas
 | Invoices per second, 4 cores | 947 | 249 |
 | Package size | 0.2 MB + PdfPecker 11.8 MB | QuestPDF with native Skia binaries |
 
-Both invoices come from the same code, call for call: `bench/PdfPecker.Fluent.Comparison`. Run
+Both invoices come from the same code, call for call, in the
+[PdfPecker.Benchmarks](https://github.com/Moonwalker1307/PdfPecker.Benchmarks) repository. Run
 `bench/PdfPecker.Fluent.Benchmarks` to see the fluent layer's own cost.
 
 ## Source
