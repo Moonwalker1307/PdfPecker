@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Runtime.CompilerServices;
 
 namespace PdfPecker.Rendering;
 
@@ -18,6 +19,7 @@ internal static partial class WebPEncoder
 
         public BitWriter(int capacity) => buffer = new byte[Math.Max(capacity, MinCapacity)];
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Write(uint value, int bits)
         {
             if (bits == 0) return;

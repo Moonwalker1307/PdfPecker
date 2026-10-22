@@ -128,12 +128,13 @@ internal static partial class WebPEncoder
         int maxLength = Math.Min(MaxCopyLength, n - position);
         if (maxLength < MinCopyLength) return (0, 0);
         // Runs (the pixel to the left) and the row above first: they are the common long matches.
-        if (position >= 1)
+        uint first = pixels[position];
+        if (position >= 1 && pixels[position - 1] == first)
         {
             int length = MatchLength(pixels, position - 1, position, maxLength);
             if (length > bestLength) (bestLength, bestDistance) = (length, 1);
         }
-        if (position >= width && width > 1 && bestLength < maxLength)
+        if (position >= width && width > 1 && bestLength < maxLength && pixels[position - width] == first)
         {
             int length = MatchLength(pixels, position - width, position, maxLength);
             if (length > bestLength) (bestLength, bestDistance) = (length, width);
@@ -145,8 +146,9 @@ internal static partial class WebPEncoder
             {
                 int distance = position - candidate;
                 if (distance > MaxCopyDistance) break;
-                // A candidate that differs at the best length so far cannot beat it.
-                if (bestLength > 0 && pixels[candidate + bestLength] != pixels[position + bestLength]) continue;
+                // A candidate that differs at the best length so far, or at its first pixel (a hash collision), cannot
+                // beat it.
+                if (pixels[candidate + bestLength] != pixels[position + bestLength] || pixels[candidate] != first) continue;
                 int length = MatchLength(pixels, candidate, position, maxLength);
                 if (length > bestLength)
                 {
