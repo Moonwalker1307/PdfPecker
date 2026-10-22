@@ -816,6 +816,21 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Nested_tables_of_percentage_height_measure_their_rows_within_the_relayout_budget()
+    {
+        // Each table of percentage height measures its rows before it lays them out, and a row across the page break
+        // moves to the next page: at every level, both laid out everything inside again. A fuzzed page of nested tables
+        // around a row of 7,000 cells laid that row out 790 times; this one allocated 1 GB.
+        const string css = "@page{size:A5;margin:15mm}html,body{height:100%;margin:0}.page{height:100%;page-break-before:always}"
+                           + ".top{height:65%}table{height:20%;width:100%;margin-top:4mm;border-collapse:collapse}td{border:1px solid #999}";
+        var html = "<style>" + css + "</style><p>cover<div class=page><div class=top></div>" + Repeat("<table><td>", 16)
+                   + Repeat("<td>", 7000) + "<table><td>x";
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 512L << 20);
+    }
+
+    [Fact]
     public void Tables_with_one_wide_row_among_many_rows_store_only_the_cells_they_have()
     {
         // A grid of every row and column of this table is 18 million places, 144 MB, almost all of them empty; a fuzzed
