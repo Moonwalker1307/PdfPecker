@@ -610,4 +610,79 @@ public class FontTests
         Assert.Contains("/BaseFont /Helvetica", text);
         Assert.DoesNotContain("/FontFile", text);
     }
+
+    // ------------------------------------------------------------------ fonts shared between documents
+
+    [Fact]
+    public void A_web_font_is_loaded_once_and_each_document_gets_its_own_copy()
+    {
+        var bytes = Regular.ToArray();
+        var first = Assert.Single(LoadedFontCache.Load(bytes));
+        bytes[200] ^= 0xFF; // the caller may reuse its array; the shared font reads a copy of its own
+        var second = Assert.Single(LoadedFontCache.Load(Regular));
+        Assert.NotSame(first, second);
+        Assert.Same(first.Data, second.Data);
+        Assert.Same(first.CharWidths, second.CharWidths);
+        Assert.Equal(Regular, second.Data);
+        Assert.NotSame(first.Data, Assert.Single(LoadedFontCache.Load(Bold)).Data);
+    }
+
+    [Fact]
+    public void Copies_of_a_shared_font_make_their_own_feature_variants()
+    {
+        // A document's variants and instances must not depend on what earlier documents asked of the font, as when
+        // each document loaded the font itself.
+        var font = Assert.Single(FontProgram.Load(Font("Inter-Features.ttf")));
+        font.BuildSharedTables();
+        var a = font.Copy();
+        var b = font.Copy();
+        var tnum = a.WithFeatures("tnum");
+        Assert.NotSame(a, tnum);
+        Assert.Same(tnum, a.WithFeatures("tnum"));
+        Assert.NotSame(tnum, b.WithFeatures("tnum"));
+        Assert.Equal(tnum.GlyphId('1'), b.WithFeatures("tnum").GlyphId('1'));
+        Assert.Same(font.CharWidths, a.CharWidths);
+    }
+
+    [Fact]
+    public void A_subset_is_built_and_compressed_once_for_the_same_glyphs()
+    {
+        var font = Assert.Single(FontProgram.Load(Regular));
+        GlyphSubset Subset(string text)
+        {
+            var subset = new GlyphSubset(font);
+            foreach (char c in text) subset.Cid(c);
+            return subset;
+        }
+        var first = EmbeddedFontFiles.Get(Subset("Hello"), System.IO.Compression.CompressionLevel.Optimal);
+        Assert.True(first.Deflated);
+        Assert.Same(first.Body, EmbeddedFontFiles.Get(Subset("Hello"), System.IO.Compression.CompressionLevel.Optimal).Body);
+        Assert.NotSame(first.Body, EmbeddedFontFiles.Get(Subset("Hello"), System.IO.Compression.CompressionLevel.SmallestSize).Body);
+        // The glyph ids follow the order of first use, so the same letters in another order are another file.
+        Assert.NotSame(first.Body, EmbeddedFontFiles.Get(Subset("olleH"), System.IO.Compression.CompressionLevel.Optimal).Body);
+        var file = FontSubsetter.Build(Subset("Hello"));
+        Assert.Equal(file.Length, first.Length);
+        using var inflated = new MemoryStream();
+        using (var z = new System.IO.Compression.ZLibStream(new MemoryStream(first.Body), System.IO.Compression.CompressionMode.Decompress)) z.CopyTo(inflated);
+        Assert.Equal(file, inflated.ToArray());
+    }
+
+    [Fact]
+    public void Documents_with_the_same_web_font_convert_alike_in_parallel()
+    {
+        string Html(string text) => "<style>@font-face { font-family: W; src: url(w.ttf) } p { font-family: W }</style><p>" + text + "</p>";
+        var options = new PdfOptions { Compress = false, CreationDate = new DateTime(2026, 1, 1), ResourceResolver = url => url == "w.ttf" ? Regular : null };
+        var expected = new[] { HtmlToPdf.Convert(Html("Quick zephyrs"), options), HtmlToPdf.Convert(Html("Ångström 1/2"), options) };
+        Parallel.For(0, 64, i => Assert.Equal(expected[i % 2], HtmlToPdf.Convert(Html(i % 2 == 0 ? "Quick zephyrs" : "Ångström 1/2"), options)));
+    }
+
+    [Fact]
+    public void A_web_font_url_that_gives_other_bytes_gives_the_other_font()
+    {
+        const string html = "<style>@font-face { font-family: W; src: url(w.ttf) } p { font-family: W }</style><p>Hello</p>";
+        byte[] Convert(byte[] font) => HtmlToPdf.Convert(html, new PdfOptions { Compress = false, ResourceResolver = url => url == "w.ttf" ? font : null });
+        Assert.Matches(@"/BaseFont /[A-Z]{6}\+WorkSans-Regular", Latin1(Convert(Regular)));
+        Assert.Matches(@"/BaseFont /[A-Z]{6}\+WorkSans-Bold", Latin1(Convert(Bold)));
+        Assert.Matches(@"/BaseFont /[A-Z]{6}\+WorkSans-Regular", Latin1(Convert(Regular)));
+    }
 }

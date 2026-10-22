@@ -14,7 +14,7 @@ internal sealed partial class PdfDocumentWriter
     /// </summary>
     private void WritePages(WriteState doc)
     {
-        var content = new ByteBuffer(32 * 1024);
+        var content = ByteBuffer.Rent(32 * 1024);
         doc.PageStreams = new McStream[doc.PageCount];
         doc.ParentKey = doc.PageCount; // keys 0 to pageCount - 1 of the parent tree are the pages'
         for (int p = 0; p < doc.PageCount; p++)
@@ -29,6 +29,7 @@ internal sealed partial class PdfDocumentWriter
             WritePageObject(doc, p, paperW, paperH, annotIds);
             WriteStream(doc.ContentIds[p], content.Span, _compress, extraDict: null);
         }
+        content.Return();
     }
 
     /// <summary>
