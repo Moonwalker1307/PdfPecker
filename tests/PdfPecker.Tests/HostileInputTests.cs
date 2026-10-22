@@ -914,6 +914,34 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Long_text_in_nested_boxes_counts_toward_the_relayout_budget()
+    {
+        // Each box laid the boxes inside it out again to keep its bottom edge with the content, and with them the word of
+        // 80,000 characters at their centre, which the budget let through because it counted the word as one layout:
+        // a fuzzed page of 46 boxes laid it out 2,300 times. These 60 boxes took 6.9 s and 1.2 GB.
+        var html = "<style>@page{size:148mm 190mm;margin:12mm}body{font:8pt sans-serif;margin:0;line-height:1.3}"
+                   + ".card{break-inside:avoid;border:0.5pt solid #888;padding:4pt;margin-bottom:4pt}</style>"
+                   + Repeat("<div class=card>", 60) + "<p>Lorem " + Repeat("Integer", 11_500) + " nec odio</p>";
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 128L << 20);
+    }
+
+    [Fact]
+    public void Content_in_overflow_columns_beside_every_page_is_not_split_between_them()
+    {
+        // The inner box starts half a point above the end of the outer box's column, so its overflow columns are half a
+        // point tall: each 40 mm box in them was split into 150 copies, 450,000 in all, a 3.5 MB page in 4.5 s. All but
+        // the first few columns are further beside the page than any page is wide.
+        var fill = "<div style='column-count:2;column-fill:auto;height:40mm;border:0.5pt solid #ccc'>";
+        var html = Repeat(fill, 2) + Repeat(fill + "</div>", 3000) + "x</div></div>";
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(pdf.Length, 1, 256 << 10);
+        Assert.InRange(allocated, 0, 256L << 20);
+    }
+
+    [Fact]
     public void Tables_with_one_wide_row_among_many_rows_store_only_the_cells_they_have()
     {
         // A grid of every row and column of this table is 18 million places, 144 MB, almost all of them empty; a fuzzed
