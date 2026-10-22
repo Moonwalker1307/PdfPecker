@@ -3496,6 +3496,29 @@ public class Jbig2SymbolDictionaryTests
         Assert.Equal(new byte[] { 0b00111111 }, Jbig2Decoder.Decode(stream, null, 8, 1));
     }
 
+    // jbig2, nightly fuzz run 70 (fuzzer framing): a text region whose refined symbol instance makes a symbol 15 pixels
+    // wide by -15 pixels and 1.7 billion pixels high. The refined bitmap of no width held no pixels and was charged
+    // nothing, but the refinement still looped over each of its rows, which took seconds for each such region.
+    private const string RefinedInstanceOfNoWidth =
+        "oAAAAGQAAABUAAAAAAAAAQAAAAAAAEkEAAP/AAAABwAAAAc/ujOXOp1/yECVwTSzWpzd/aLfvX5cln5BQxJHnOmfHn+8wB2bxSk4UrRnB9FOoHKCQ5u1QMklsJhwRP+sAAAAAjAAAQAAABMAAACgAAAAZAAAAAAAAAAAAAAAAAAAAwYgAQEAAAA/AAAAoAAAAGQAAAAAAAAAAAAAEv////8AAAAJnlk3+oCuWuzYpSZDaAAAAA==";
+
+    [Fact]
+    public void Rows_of_a_refined_instance_of_no_width_are_charged_to_the_work_budget()
+    {
+        var input = Convert.FromBase64String(RefinedInstanceOfNoWidth);
+        int width = BitConverter.ToInt32(input, 0), height = BitConverter.ToInt32(input, 4), globals = BitConverter.ToInt32(input, 8);
+        var dictionary = input[12..(12 + globals)];
+        Assert.Null(Record.Exception(() => Bounded(() => Jbig2Decoder.Decode(input[(12 + globals)..], dictionary, width, height))));
+
+        // The stream is the page information segment (30 bytes) and the text region segment, whose data runs to the end of
+        // the input. Repeated with its true length, the region takes far longer than the time bound when its rows are free.
+        int page = 12 + globals + 30;
+        var region = input[page..];
+        BinaryPrimitives.WriteUInt32BigEndian(region.AsSpan(8), (uint)(region.Length - 12));
+        var stream = input[(12 + globals)..page].Concat(Enumerable.Repeat(region, 16).SelectMany(r => r)).ToArray();
+        Assert.Null(Record.Exception(() => Bounded(() => Jbig2Decoder.Decode(stream, dictionary, width, height))));
+    }
+
     /// <summary>
     /// A page, a Huffman-coded dictionary of <paramref name="symbols"/> empty symbols, then <paramref name="regions"/>
     /// text regions of no width that each refer to it <paramref name="references"/> times. A region of no width is skipped
