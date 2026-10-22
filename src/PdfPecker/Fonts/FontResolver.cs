@@ -212,7 +212,7 @@ internal sealed class FontResolver
             return null;
         var bytes = fetch(url);
         if (bytes == null) return null;
-        var programs = FontProgram.Load(bytes);
+        var programs = LoadedFontCache.Load(bytes);
         if (programs.Count == 0) return null;
         int hash = url.IndexOf('#');
         if (hash >= 0 && programs.Count > 1)

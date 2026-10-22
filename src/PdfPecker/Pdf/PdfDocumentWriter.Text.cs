@@ -398,8 +398,8 @@ internal sealed partial class PdfDocumentWriter
             .Ascii(" /StemV ").Int(stemV).Ascii(font.IsCff ? " /FontFile3 " : " /FontFile2 ").Int(id + 3).Ascii(" 0 R >>");
         End();
 
-        var file = FontSubsetter.Build(subset);
-        WriteStream(id + 3, file, compress: true, extraDict: font.IsCff ? "/Subtype /OpenType" : "/Length1 " + file.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        var file = EmbeddedFontFiles.Get(subset, _level);
+        WriteStreamObject(id + 3, file.Body, file.Deflated, font.IsCff ? "/Subtype /OpenType" : "/Length1 " + file.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
         var cmap = new ByteBuffer(256 + used.Count * 16);
         cmap.Ascii("/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n")

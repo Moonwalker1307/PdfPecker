@@ -25,6 +25,12 @@ internal sealed partial class PdfDocumentWriter
             body = ms.GetBuffer().AsSpan(0, (int)ms.Length);
             filtered = true;
         }
+        WriteStreamObject(id, body, filtered, extraDict);
+    }
+
+    /// <summary>Writes a stream object whose data is already compressed (filtered) or meant to stay as it is.</summary>
+    private void WriteStreamObject(int id, ReadOnlySpan<byte> body, bool filtered, string? extraDict)
+    {
         byte[]? encrypted = _crypt?.Encrypt(body);
         if (encrypted != null) body = encrypted;
         Begin(id).Ascii("<< /Length ").Int(body.Length);
