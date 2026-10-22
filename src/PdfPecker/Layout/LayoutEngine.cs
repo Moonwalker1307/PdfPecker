@@ -2451,6 +2451,14 @@ internal sealed partial class LayoutEngine
     {
         float moveX = dx - c.PlacedX, moveY = dy - c.PlacedY;
         (c.PlacedX, c.PlacedY) = (dx, dy);
+        // Deep down, the content goes into one group the first time it is placed: each level around it then adds that
+        // one op to its own content instead of all of them, which grew with the depth times the content.
+        if (_captureDepth >= LazyOffsetDepth && c.Ops.Count > 1)
+        {
+            var group = new GroupOp();
+            group.Ops.AddRange(c.Ops);
+            c.Ops = [group];
+        }
         foreach (var op in c.Ops)
         {
             if (op is GroupOp g && _captureDepth >= LazyOffsetDepth) g.OffsetLater(moveX, moveY);
