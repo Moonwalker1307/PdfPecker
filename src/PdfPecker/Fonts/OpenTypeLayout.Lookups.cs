@@ -68,6 +68,12 @@ internal sealed partial class OpenTypeLayout
 
         /// <summary>The marks a ligature keeps after it, reused from ligature to ligature.</summary>
         public readonly List<GlyphInfo> KeptMarks = new();
+
+        /// <summary>
+        /// The last base found for a mark: the base coverage it was looked up with, the mark's index (the search covered
+        /// every glyph before it) and the base, or -1. Valid for one lookup, during which the glyphs do not change.
+        /// </summary>
+        public int BaseCoverage = int.MinValue, BaseSearchedBelow, LastBase;
     }
 
     [ThreadStatic] private static LookupState? t_state;
@@ -118,6 +124,7 @@ internal sealed partial class OpenTypeLayout
         c.NextLigId = nextLigId;
         c.Operations = operations;
         c.MaxLength = maxLength;
+        c.BaseCoverage = int.MinValue;
         int type = _reader.U16(lookup + LookupTypeField);
         c.LookupFlag = LookupFlagOf(lookup);
         if (!gpos && SubtableType(lookup, type) == ReverseChainingSubstitution) ApplyBackwards(c, lookup);
