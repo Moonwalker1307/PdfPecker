@@ -815,6 +815,21 @@ public class HostileInputTests
         Assert.InRange(allocated, 0, 1024L << 20);
     }
 
+    [Theory]
+    [InlineData("isolation:isolate")]
+    [InlineData("opacity:.99")]
+    [InlineData("mask:linear-gradient(#000,#000)")]
+    [InlineData("backdrop-filter:invert(1)")]
+    public void Nested_boxes_with_effects_break_across_pages_as_plain_boxes_do(string effect)
+    {
+        // A box with an effect did not hand the probe for its first content to the box inside it, so each level probed
+        // and was laid out again on its own: 140 levels used up the relayout budget, ended on 3 pages instead of 38
+        // and took over a second.
+        static string Nested(string style) => Repeat($"<div style='padding:4pt;background:#eee;{style}'>", 140) + "end" + Repeat("</div>", 140);
+        int plain = PdfToImage.GetPageCount(Bounded(Nested("")));
+        Assert.Equal(plain, PdfToImage.GetPageCount(Bounded(Nested(effect))));
+    }
+
     [Fact]
     public void Tables_with_one_wide_row_among_many_rows_store_only_the_cells_they_have()
     {

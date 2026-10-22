@@ -670,8 +670,16 @@ internal sealed partial class LayoutEngine
     {
         var s = e.Style;
         return !s.IsFlex && !s.IsGrid && !s.IsMultiColumn
-               && !s.AvoidBreakInside && !s.Layered && e.Control == null && !e.IsReplaced && e.Name != "hr";
+               && !s.AvoidBreakInside && !MovesContent(s) && e.Control == null && !e.IsReplaced && e.Name != "hr";
     }
+
+    /// <summary>
+    /// Whether a box moves its content once laid out: relative offsets and transforms do. Opacity, clips, masks, blend
+    /// modes and filters only wrap the content in a layer where it is, which the scan for the first content still looks
+    /// into. Without them, nested boxes with such effects each probed for their first content themselves, and each
+    /// level laid out everything inside it once more.
+    /// </summary>
+    private static bool MovesContent(ComputedStyle s) => s.Position != Position.Static || s.Transform != null || s.Perspective != null;
 
     /// <summary>The first content op of a probed box: its index among the ops and where it starts.</summary>
     private (int At, float Y)? FirstContent(KeepProbe p)
@@ -1002,7 +1010,12 @@ internal sealed partial class LayoutEngine
         // A box without content of its own, such as an empty one with a height, ends the content around it itself.
         if (float.IsNaN(_lastContentBottom)) _lastContentBottom = bottom - y > Eps ? bottom : lastContent;
         if (table) _boxTrailing = 0;
-        if (s.Layered) FinishLayered(e, opsStart, availW);
+        if (s.Layered)
+        {
+            FinishLayered(e, opsStart, availW);
+            // The box's ops are now one layer at opsStart: a probe it took scans that layer, not past where its ops ended.
+            if (probe != null) probe.ScanFrom = Math.Min(probe.ScanFrom, opsStart);
+        }
         if (avoidInside) _avoidDepth--;
         return bottom;
     }
