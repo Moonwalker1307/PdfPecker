@@ -43,6 +43,9 @@ Open one pull request on the library that:
 - updates `README.md`: the DLL size in the comparison table and the release in the `bench/compare-versions.sh`
   example.
 
+Once nuget.org serves the new version, raise `PdfPeckerVersion` in `Directory.Build.props` of
+[PdfPecker.Benchmarks](https://github.com/Moonwalker1307/PdfPecker.Benchmarks), which measures the released package.
+
 Then update the website repository, PdfPecker.Web, which uses the NuGet package: bump its `PackageReference`, add the
 version's docs and changelog entry, and refresh any feature cards, the compare page or converter settings the release
 affects. The site gets library changes only this way.

@@ -82,6 +82,7 @@ own, run both versions in turns on one machine:
 
 ```
 bench/compare-versions.sh v1.11.0     # the working tree against a release tag, branch or commit
+PDFPECKER_BENCH_WARMUP=15 bench/compare-versions.sh v1.11.0   # a 15-second warm-up, so JIT tiering has finished
 ```
 
 Cloud VMs differ too much to compare a run with the README table.
@@ -112,11 +113,11 @@ The benchmarks:
 
 ```
 dotnet run --project bench/PdfPecker.Fluent.Benchmarks -c Release                 # the fluent layer's own cost
-dotnet run --project bench/PdfPecker.Fluent.Comparison -c Release -- 200 12 out   # against QuestPDF, PDFs in ./out
 ```
 
-The first times composing and writing HTML, `GeneratePdf`, and `HtmlToPdf` on the same HTML; the second builds the
-same invoice with PdfPecker.Fluent and QuestPDF. Both warm up for 12 seconds by default.
+It times composing and writing HTML, `GeneratePdf`, and `HtmlToPdf` on the same HTML, after a 12-second warm-up. The
+comparison with QuestPDF, the same invoice built with both, is in the
+[PdfPecker.Benchmarks](https://github.com/Moonwalker1307/PdfPecker.Benchmarks) repository.
 
 ## Coverage
 

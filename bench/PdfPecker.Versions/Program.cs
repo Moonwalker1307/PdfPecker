@@ -2,50 +2,20 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 
-// Compares PdfPecker with other .NET HTML-to-PDF converters on the same documents and machine.
-// Usage: dotnet run -c Release                      run every engine, each in a fresh process, and print a Markdown table
-//        dotnet run -c Release -- <engine>          run one engine in this process and print its result as JSON
-//        dotnet run -c Release -- versions <other>  run PdfPecker from this build and from another build of this
-//                                                   program (its PdfPecker.Comparison.dll) in turns and compare them;
-//                                                   bench/compare-versions.sh builds the other version from a git ref
-// Chromium-based engines use CHROMIUM_PATH (default /opt/pw-browsers/chromium); wkhtmltopdf must be on PATH.
+// Compares two versions of PdfPecker on this machine; bench/compare-versions.sh builds the other version from a git ref
+// and runs it. The comparison with other converters is in the PdfPecker.Benchmarks repository.
+// Usage: dotnet run -c Release -- versions <other> [rounds]  run PdfPecker from this build and from another build of
+//                                                            this program (its PdfPecker.Versions.dll) in turns
+//        dotnet run -c Release -- pdfpecker                  run once in this process and print the result as JSON
 CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
 
 if (args.Length > 1 && args[0] == "versions")
 {
-    Versions.Compare(Path.GetFullPath(args[1]), args.Length > 2 ? int.Parse(args[2]) : 3);
+    Versions.Compare(Path.GetFullPath(args[1]), args.Length > 2 ? int.Parse(args[2], CultureInfo.InvariantCulture) : 3);
     return;
 }
 
-if (args.Length > 0 && args[0] != "all")
-{
-    var result = await Bench.Run(args[0]);
-    Console.WriteLine(JsonSerializer.Serialize(result));
-    return;
-}
-
-var engines = new[] { "pdfpecker", "htmlrenderer", "itext", "wkhtmltopdf", "puppeteer", "playwright", "syncfusion" };
-var results = new List<Result>();
-foreach (var engine in engines)
-{
-    Console.Error.WriteLine($"Running {engine}...");
-    var result = Bench.RunInChild(typeof(Bench).Assembly.Location, engine);
-    if (result == null) { Console.Error.WriteLine($"  {engine} failed"); continue; }
-    results.Add(result);
-}
-
-Console.WriteLine(Bench.MachineLine());
-Console.WriteLine();
-Console.WriteLine("| Engine | First PDF (cold) | Invoice, 1 page | Feature tour, 5 pages | Report, 30 pages | Parallel docs/s | Peak memory |");
-Console.WriteLine("| --- | --- | --- | --- | --- | --- | --- |");
-foreach (var r in results)
-    Console.WriteLine($"| {r.Engine} | {Ms(r.ColdMs)} | {Ms(r.Medians[0])} | {Ms(r.Medians[1])} | {Ms(r.Medians[2])} | {r.ParallelDocsPerSecond:F0} | {r.PeakMemoryMb:F0} MB |");
-Console.WriteLine();
-Console.WriteLine("Pages and size per document:");
-foreach (var r in results)
-    Console.WriteLine($"  {r.Engine,-13} {string.Join("  ", r.Pages.Zip(r.SizesKb, (p, s) => $"{p,3} p {s,6:F0} KB"))}");
-
-static string Ms(double ms) => ms >= 100 ? $"{ms:F0} ms" : ms >= 10 ? $"{ms:F1} ms" : $"{ms:F2} ms";
+Console.WriteLine(JsonSerializer.Serialize(Bench.Run()));
 
 record Result(string Engine, double ColdMs, double[] Medians, int[] Pages, double[] SizesKb, double ParallelDocsPerSecond, double PeakMemoryMb);
 
@@ -53,16 +23,15 @@ static class Bench
 {
     static readonly string HtmlDir = Path.Combine(AppContext.BaseDirectory, "html");
 
-    public static async Task<Result> Run(string name)
+    public static Result Run()
     {
-        // The generated 30-page report is written next to the samples so every engine can load it from a file.
+        // The generated 30-page report is written next to the samples and loaded from a file like them.
         var reportPath = Path.Combine(HtmlDir, "large-report.html");
         File.WriteAllText(reportPath, Documents.LargeReport());
         var docs = new[] { "invoice.html", "report.html", "large-report.html" }.Select(f => Path.Combine(HtmlDir, f)).ToArray();
 
         long t0 = Stopwatch.GetTimestamp();
-        await using IEngine engine = await Engines.Create(name);
-        await engine.Convert(docs[0]);
+        Convert(docs[0]);
         double coldMs = Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
 
         var outDir = Path.Combine(AppContext.BaseDirectory, "out");
@@ -70,35 +39,38 @@ static class Bench
         var medians = new double[docs.Length];
         var pages = new int[docs.Length];
         var sizes = new double[docs.Length];
-        // Warm up on every document for 3 seconds (JIT tiering, caches, browser processes) before anything is timed.
+        // Warm up on every document (JIT tiering, caches) before anything is timed: 3 seconds, or the number of seconds
+        // in PDFPECKER_BENCH_WARMUP, since full JIT tiering can take longer than 3 seconds.
+        double warmSeconds = double.TryParse(Environment.GetEnvironmentVariable("PDFPECKER_BENCH_WARMUP"), NumberStyles.Float,
+            CultureInfo.InvariantCulture, out var w) ? w : 3;
         var warm = Stopwatch.StartNew();
-        while (warm.Elapsed.TotalSeconds < 3) foreach (var doc in docs) await engine.Convert(doc);
+        while (warm.Elapsed.TotalSeconds < warmSeconds) foreach (var doc in docs) Convert(doc);
 
         for (int d = 0; d < docs.Length; d++)
         {
             // Time runs for up to 5 seconds (at least 5, at most 200).
-            var pdf = await engine.Convert(docs[d]);
+            var pdf = Convert(docs[d]);
             var times = new List<double>();
             var budget = Stopwatch.StartNew();
             while (times.Count < 5 || (times.Count < 200 && budget.Elapsed.TotalSeconds < 5))
             {
                 long s = Stopwatch.GetTimestamp();
-                await engine.Convert(docs[d]);
+                Convert(docs[d]);
                 times.Add(Stopwatch.GetElapsedTime(s).TotalMilliseconds);
             }
             times.Sort();
             medians[d] = times[times.Count / 2];
             pages[d] = PdfPecker.PdfToImage.GetPageCount(pdf);
             sizes[d] = pdf.Length / 1024.0;
-            File.WriteAllBytes(Path.Combine(outDir, $"{name}-{Path.GetFileNameWithoutExtension(docs[d])}.pdf"), pdf);
+            File.WriteAllBytes(Path.Combine(outDir, $"pdfpecker-{Path.GetFileNameWithoutExtension(docs[d])}.pdf"), pdf);
         }
 
         // Throughput with one conversion per core running at once, on the 5-page feature tour.
         int workers = Environment.ProcessorCount, done = 0;
         var sw = Stopwatch.StartNew();
-        await Task.WhenAll(Enumerable.Range(0, workers).Select(_ => Task.Run(async () =>
+        Task.WaitAll(Enumerable.Range(0, workers).Select(_ => Task.Run(() =>
         {
-            while (sw.Elapsed.TotalSeconds < 5) { await engine.Convert(docs[1]); Interlocked.Increment(ref done); }
+            while (sw.Elapsed.TotalSeconds < 5) { Convert(docs[1]); Interlocked.Increment(ref done); }
         })));
         double perSecond = done / sw.Elapsed.TotalSeconds;
 
@@ -107,30 +79,33 @@ static class Bench
         double peakMb;
         using (var memory = new MemorySampler())
         {
-            foreach (var doc in docs) await engine.Convert(doc);
+            foreach (var doc in docs) Convert(doc);
             sw.Restart();
-            await Task.WhenAll(Enumerable.Range(0, workers).Select(_ => Task.Run(async () =>
+            Task.WaitAll(Enumerable.Range(0, workers).Select(_ => Task.Run(() =>
             {
-                foreach (var doc in docs) await engine.Convert(doc);
-                while (sw.Elapsed.TotalSeconds < 2) await engine.Convert(docs[1]);
+                foreach (var doc in docs) Convert(doc);
+                while (sw.Elapsed.TotalSeconds < 2) Convert(docs[1]);
             })));
             peakMb = memory.PeakMb;
         }
 
-        return new Result(name, coldMs, medians, pages, sizes, perSecond, peakMb);
+        return new Result("pdfpecker", coldMs, medians, pages, sizes, perSecond, peakMb);
     }
 
+    static byte[] Convert(string htmlPath) => PdfPecker.HtmlToPdf.Convert(File.ReadAllText(htmlPath),
+        new PdfPecker.PdfOptions { BaseDirectory = Path.GetDirectoryName(htmlPath) });
+
     /// <summary>
-    /// Runs one engine in a fresh process of the given build of this program. .NET sizes the garbage collector's
+    /// Runs PdfPecker in a fresh process of the given build of this program. .NET sizes the garbage collector's
     /// allocation budget from the CPU's L3 cache, so the same build peaks at 90 MB on one cloud VM and 190 MB on
     /// another; a fixed 16 MB budget keeps peak memory comparable between machines (unless DOTNET_GCgen0size is
     /// already set). Returns null when the run fails.
     /// </summary>
-    public static Result? RunInChild(string assembly, string engine)
+    public static Result? RunInChild(string assembly)
     {
         var psi = new ProcessStartInfo("dotnet") { RedirectStandardOutput = true };
         psi.ArgumentList.Add(assembly);
-        psi.ArgumentList.Add(engine);
+        psi.ArgumentList.Add("pdfpecker");
         if (Environment.GetEnvironmentVariable("DOTNET_GCgen0size") == null) psi.Environment["DOTNET_GCgen0size"] = GcBudget;
         using var p = Process.Start(psi)!;
         var output = p.StandardOutput.ReadToEnd();
@@ -179,7 +154,7 @@ static class Versions
             foreach (var (label, assembly) in builds)
             {
                 Console.Error.WriteLine($"Round {round}/{rounds}: {label} build...");
-                runs[label].Add(Bench.RunInChild(assembly, "pdfpecker") ?? throw new InvalidOperationException($"The {label} build failed."));
+                runs[label].Add(Bench.RunInChild(assembly) ?? throw new InvalidOperationException($"The {label} build failed."));
             }
 
         Console.WriteLine(Bench.MachineLine());
@@ -209,9 +184,8 @@ static class Versions
 }
 
 /// <summary>
-/// Samples the proportional set size (PSS) of this process and every process it started (browser, renderer and GPU
-/// processes, wkhtmltopdf). PSS splits shared pages between the processes that map them, so a browser's processes
-/// are not counted several times over. Linux only.
+/// Samples the proportional set size (PSS) of this process and every process it started. PSS splits shared pages
+/// between the processes that map them, so they are not counted several times over. Linux only.
 /// </summary>
 sealed class MemorySampler : IDisposable
 {
