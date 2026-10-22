@@ -17,7 +17,8 @@ and leave out anything private.
 
 The NuGet package depends only on the .NET base class library. It has its own HTML, CSS, Markdown and PDF parsers,
 layout engine, PDF writer and renderer, and that is the point of the project. A pull request that adds a
-`PackageReference` to `src/PdfPecker` cannot be merged. The library must also stay trimmable and Native AOT
+`PackageReference` to `src/PdfPecker` cannot be merged, and the PdfPecker.Fluent package in `src/PdfPecker.Fluent`
+references nothing but the library. The library must also stay trimmable and Native AOT
 compatible, so no reflection-based code.
 
 ## Building and testing

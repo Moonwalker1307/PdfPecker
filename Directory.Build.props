@@ -1,9 +1,15 @@
 <Project>
   <!-- Settings every project in the repository shares, so the tests, fuzzer, benchmarks, sample and generators are held
-       to the library's standard: nullable reference types on, and a warning breaks the build. The comparison benchmark
-       is left out because it builds against third-party packages whose warnings are not ours to fix. -->
-  <PropertyGroup Condition="'$(MSBuildProjectName)' != 'PdfPecker.Comparison'">
+       to the library's standard: nullable reference types on, and a warning breaks the build. The two comparison
+       benchmarks are left out because they build against third-party packages whose warnings are not ours to fix. -->
+  <PropertyGroup Condition="'$(MSBuildProjectName)' != 'PdfPecker.Comparison' And '$(MSBuildProjectName)' != 'PdfPecker.Fluent.Comparison'">
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <!-- PdfPecker and PdfPecker.Fluent always ship with the same version. Local builds pack as a pre-release above the API
+       baseline; CI passes the real version to both. -->
+  <PropertyGroup>
+    <Version>1.18.1-dev</Version>
   </PropertyGroup>
 </Project>

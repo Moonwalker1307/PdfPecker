@@ -69,6 +69,39 @@ renderer.RenderPage(0, new ImageOptions { Dpi = 150 }).Save("page1.png");
 
 The conversion methods are static and thread-safe, so you can convert many documents in parallel. The few instance types are `FontCollection` and `PdfRenderer`, which can be shared by parallel work, and `StreamingPdfMerger`, which is not thread-safe: it builds one output and is used from one thread at a time.
 
+## Fluent API
+
+[PdfPecker.Fluent](https://www.nuget.org/packages/PdfPecker.Fluent) builds the same PDFs from C# code instead of HTML,
+in the style of QuestPDF, so most QuestPDF documents port by changing the `using` lines. It is a separate package from
+this repository, released with every PdfPecker release under the same version, and its only dependency is PdfPecker.
+
+```
+dotnet add package PdfPecker.Fluent
+```
+
+```csharp
+using PdfPecker.Fluent;
+
+Document.Create(container => container.Page(page =>
+{
+    page.Size(PageSizes.A4);
+    page.Margin(2, Unit.Centimetre);
+    page.Header().Text("Invoice 2026-104").FontSize(20).Bold();
+    page.Content().Table(table =>
+    {
+        table.ColumnsDefinition(columns => { columns.RelativeColumn(3); columns.RelativeColumn(); });
+        table.Cell().Text("Consulting");
+        table.Cell().AlignRight().Text("1,200.00");
+    });
+    page.Footer().AlignCenter().Text(x => { x.CurrentPageNumber(); x.Span(" / "); x.TotalPages(); });
+}))
+.GeneratePdf("invoice.pdf");
+```
+
+It writes compact HTML and CSS and renders it with PdfPecker, so every `PdfOptions` feature (PDF/A, PDF/UA,
+signatures, e-invoices) works with it. What it covers and how it differs from QuestPDF is in its
+[README](https://github.com/Moonwalker1307/PdfPecker/blob/main/src/PdfPecker.Fluent/README.md).
+
 ## Features
 
 - **HTML and CSS**: flexbox, grid and subgrid (whose items keep their children's margins inside them, as in Chrome), `min-content`, `max-content` and `fit-content` widths (boxes that shrink to fit, such as floats, `inline-flex` and table columns, leave out a trailing space as Chrome does), units measured from the font (`ex`, `ch`, `cap`, `lh`) and the viewport units `vi`, `vb`, `svh`, `lvh` and `dvh`, logical `inset-inline`, `inset-block` and `inline-size`, logical borders (`border-inline-start`, `border-block-end`, `border-start-start-radius` and the rest, on the side `direction` and `writing-mode` give them), CSS tables on any element (`display: table`, `inline-table` and lone cells) with columns sized as in Chrome, also under cells that span several, hold a long URL, ask for more than 100%, have a `max-width` or hold an image with a percentage width, and collapsed borders resolved as Chrome does (on rows and row groups too, and `hidden`), `display: contents` wrappers whose children join the flex, grid or table around them, multi-column layout, floats (cleared by an empty `clear: both` clearfix div or `<br clear=all>` as in Chrome, and with text wrapping round `shape-outside` circles, polygons and image outlines), drop caps with `initial-letter`, positioning (painted in document order whether a box is relative or absolute, as in Chrome, also of badges and ribbons placed absolutely in flex and grid boxes, in their grid area or aligned by the flex box when they have no offsets, or in `position: relative` table cells), transforms (3D ones drawn flat, with the perspective taken at the box's centre), gradients and background images (also clipped to text), outlined text with `-webkit-text-stroke` and `paint-order`, backgrounds and borders on inline elements across line breaks with `box-decoration-break`, balanced and pretty line breaks with `text-wrap`, filters and `backdrop-filter`, masks (`mask-image` and `-webkit-mask`), media and container queries, vertical text labels (`writing-mode`), superscripts and subscripts that nest and set line heights as in Chrome, `vertical-align: top`, `middle` and `text-top` on smaller inline text (such as a currency sign in a price), with `top` and `bottom` moving everything inside the span, underlines that skip descenders (`text-decoration-skip-ink`) and dashed, dotted, double and wavy decorations drawn the way Chrome draws them, inline SVG, `details`, `progress` and `meter` drawn as Chrome prints them, and PNG, JPEG, GIF, WebP, BMP and TIFF images (an image that is missing prints its alt text, as in Chrome). A fragment without `html`, `head` or `body` tags gets them, as in a browser, so `body { ... }` and `html { ... }` rules apply (an implied body has no default margin, so fragments keep their layout). [More](https://pdfpecker.net/docs/html-and-css/)
@@ -126,10 +159,12 @@ of their memory. How to read the table, how it was measured and how to run it yo
 dotnet build
 dotnet test
 dotnet run --project samples/PdfPecker.Sample -c Release      # converts samples/PdfPecker.Sample/html/*.html and *.md into ./output
+dotnet run --project samples/PdfPecker.Fluent.Sample -c Release   # writes the PdfPecker.Fluent examples into ./output
 dotnet run --project bench/PdfPecker.Benchmarks -c Release
 dotnet run --project bench/PdfPecker.Benchmarks -c Release -- --requirements    # memory and CPU per conversion
 bench/compare-versions.sh v1.18.0                              # this checkout against a release, in turns on this machine
 dotnet pack src/PdfPecker -c Release -o ./nupkg                # also checks the public API against the last release
+dotnet pack src/PdfPecker.Fluent -c Release -o ./nupkg         # the fluent package, with the same version
 ```
 
 Requirements and details are in [BUILD.md](https://github.com/Moonwalker1307/PdfPecker/blob/main/BUILD.md) and

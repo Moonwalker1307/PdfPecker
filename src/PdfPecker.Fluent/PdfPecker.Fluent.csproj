@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>PdfPecker.Fluent</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+
+    <PackageId>PdfPecker.Fluent</PackageId>
+    <!-- The package always has PdfPecker's version: it takes the library's local version from Directory.Build.props,
+         and CI passes the same -p:Version to both packs. -->
+    <Authors>Moonwalker1307</Authors>
+    <Description>Fluent C# API for building PDFs with PdfPecker: pages, headers, footers, columns, rows, tables, text, images and barcodes in code. It writes HTML and CSS and renders them with PdfPecker, so it needs no browser and no native binaries.</Description>
+    <PackageTags>pdf;pdf-generator;pdf-generation;fluent;fluent-api;csharp;dotnet;invoice;report;pdfpecker;questpdf-alternative</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>logo.png</PackageIcon>
+    <PackageProjectUrl>https://pdfpecker.net/</PackageProjectUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Copyright>Copyright (c) 2026 Moonwalker1307</Copyright>
+    <RepositoryUrl>https://github.com/Moonwalker1307/PdfPecker</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+    <!-- Checks the package's frameworks agree with each other. There is no API baseline until the first release is on
+         nuget.org; from then on PackageValidationBaselineVersion follows PdfPecker's, as RELEASING.md describes. -->
+    <EnablePackageValidation>true</EnablePackageValidation>
+  </PropertyGroup>
+
+  <!-- CI builds use repository-relative source paths in the PDB, so builds are reproducible from the same commit. -->
+  <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The one dependency. Pack turns the project reference into a PdfPecker dependency of the same version as this
+         package, as a minimum: PdfPecker keeps its public API until 2.0, and this package uses nothing else. -->
+    <ProjectReference Include="../PdfPecker/PdfPecker.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="/" />
+    <None Include="../../LICENSE" Pack="true" PackagePath="/" />
+    <None Include="../../assets/logo.png" Pack="true" PackagePath="/" />
+    <InternalsVisibleTo Include="PdfPecker.Fluent.Tests" />
+    <InternalsVisibleTo Include="PdfPecker.Fluent.Fuzz" />
+    <InternalsVisibleTo Include="PdfPecker.Fluent.Benchmarks" />
+  </ItemGroup>
+
+</Project>

@@ -96,11 +96,13 @@ jobs:
       - run: dotnet build -c Release -p:Version=${{ steps.version.outputs.version }}
       - run: dotnet test -c Release --no-build
 
+      # PdfPecker.Fluent is released with every PdfPecker release, with the same version, and depends on that version.
       - run: dotnet pack src/PdfPecker -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
+      - run: dotnet pack src/PdfPecker.Fluent -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: PdfPecker.${{ steps.version.outputs.version }}.nupkg
+          name: packages-${{ steps.version.outputs.version }}
           path: |
             artifacts/*.nupkg
             artifacts/*.snupkg
@@ -165,9 +167,11 @@ jobs:
 
       - run: dotnet build -c Release -f net10.0 tests/PdfPecker.Tests
       - run: dotnet test -c Release -f net10.0 --no-build tests/PdfPecker.Tests
+      - run: dotnet build -c Release -f net10.0 tests/PdfPecker.Fluent.Tests
+      - run: dotnet test -c Release -f net10.0 --no-build tests/PdfPecker.Fluent.Tests
 
-  # IsAotCompatible only turns on the analyzers; publishing and running the sample as a native executable proves the
-  # library really works trimmed and ahead-of-time compiled.
+  # IsAotCompatible only turns on the analyzers; publishing and running the samples as native executables proves both
+  # packages really work trimmed and ahead-of-time compiled.
   native-aot:
     runs-on: ubuntu-latest
     steps:
@@ -191,6 +195,14 @@ jobs:
           ./aot/PdfPecker.Sample aot/html aot-output
           test "$(ls aot-output/*.pdf | wc -l)" -ge 1
 
+      - name: Publish the Fluent sample with native AOT
+        run: dotnet publish samples/PdfPecker.Fluent.Sample -c Release -p:PublishAot=true -p:TreatWarningsAsErrors=true -o aot-fluent
+
+      - name: Generate the Fluent examples
+        run: |
+          ./aot-fluent/PdfPecker.Fluent.Sample aot-fluent-output
+          test "$(ls aot-fluent-output/*.pdf | wc -l)" -ge 5
+
   release:
     if: github.event_name == 'release'
     needs: build
@@ -200,17 +212,17 @@ jobs:
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: PdfPecker.${{ needs.build.outputs.version }}.nupkg
+          name: packages-${{ needs.build.outputs.version }}
           path: artifacts
 
-      - name: Attach package to the release
+      - name: Attach the packages to the release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ github.event.release.tag_name }}
         run: gh release upload "$TAG" artifacts/*.nupkg --clobber
 
-  # Pushes the release package to nuget.org with Trusted Publishing: NuGet/login swaps a GitHub OIDC token
+  # Pushes both release packages, PdfPecker and PdfPecker.Fluent, to nuget.org with Trusted Publishing: NuGet/login swaps a GitHub OIDC token
   # for a short-lived API key, so no long-lived key is stored in the repository. Runs only for published releases.
   publish:
     if: github.event_name == 'release'
@@ -222,7 +234,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: PdfPecker.${{ needs.build.outputs.version }}.nupkg
+          name: packages-${{ needs.build.outputs.version }}
           path: artifacts
 
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
