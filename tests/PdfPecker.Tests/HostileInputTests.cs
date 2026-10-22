@@ -712,6 +712,17 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Svg_symbol_of_many_uses_of_itself_stays_within_the_drawing_budget()
+    {
+        // Found by the fuzzer (target svg, timeout|uncancellable): a symbol whose two thousand children each use the
+        // symbol again. The uses nest until the depth limit, where every visit the budget counted looped over all the
+        // children for free, so the drawing ran for billions of calls and did not react to cancellation.
+        var svg = "<svg width='40' height='40'><symbol id='s' viewBox='0 0 24 24'>" + Repeat("<use href='#s'/>", 2000)
+            + "</symbol><use href='#s'/></svg>";
+        AssertStructurallyValid(Bounded(() => Bounded(svg)));
+    }
+
+    [Fact]
     public void Svg_marker_that_uses_itself_is_left_out_inside_itself()
     {
         // Found by the fuzzer (target html, timeout-522fb4dc): a marker whose own path uses it at both ends drew copies of
