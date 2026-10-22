@@ -388,6 +388,22 @@ public sealed class PdfOptions
     public bool EmbedStandardFonts { get; set; }
 
     /// <summary>
+    /// How PDF viewers open the document: the start page and zoom, the page layout, the panel shown next to the pages
+    /// (such as the bookmarks) and the window and print dialog settings. Default: null, the viewer's own choices.
+    /// </summary>
+    public PdfViewerSettings? Viewer { get; set; }
+
+    /// <summary>
+    /// Page labels: the page numbers viewers show instead of the physical ones, such as roman numerals for the front
+    /// matter. Each range runs from its <see cref="PdfPageLabel.StartPage"/> to the next range's; ranges starting past
+    /// the last page are left out. They do not change <c>{page}</c> or CSS page counters. Default: empty, pages are
+    /// labelled 1, 2, 3, ...
+    /// </summary>
+    /// <example><code>options.PageLabels.Add(new PdfPageLabel(1, PdfPageNumberStyle.LowerRoman));
+    /// options.PageLabels.Add(new PdfPageLabel(3));</code></example>
+    public IList<PdfPageLabel> PageLabels { get; set; } = new List<PdfPageLabel>();
+
+    /// <summary>
     /// Digitally sign the PDF with a certificate. Default: null, unsigned. Works together with <see cref="Security"/>
     /// and <see cref="Conformance"/>.
     /// </summary>
