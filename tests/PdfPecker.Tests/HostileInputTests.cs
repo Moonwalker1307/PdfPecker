@@ -779,6 +779,19 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Backdrop_filters_stacked_on_each_other_count_the_backdrops_they_redraw()
+    {
+        // Found by the fuzzer: target html, timeout-fc51c4c5. Each backdrop's rendering decodes and draws the filtered
+        // backdrops behind it again, which the budget did not count, so boxes stacked on one place grew with the square of
+        // their number: 64 of them allocated 1.5 GB.
+        var html = "<div style='position:relative;height:120mm;background:linear-gradient(90deg, red, blue)'>"
+                   + Repeat("<div style='position:absolute;inset:0;backdrop-filter:grayscale(1);background:#ffffff1a'></div>", 64) + "</div>";
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 768L << 20);
+    }
+
+    [Fact]
     public void Nested_and_huge_backdrop_filters_are_bounded()
     {
         var nested = Repeat("<div style='padding:1px;backdrop-filter:invert(1)'>", 400) + "x" + Repeat("</div>", 400);
