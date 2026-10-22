@@ -83,6 +83,10 @@ internal sealed class PageLinks
         if (bytes == null || bytes.Length == 0 || bytes.Length > 8192) return null;
         // URIs in PDFs are 7-bit ASCII; some writers put UTF-8 there, which Uri then escapes.
         string text = Encoding.UTF8.GetString(bytes).Trim();
+        // The scheme is checked before System.Uri parses the address: .NET throws IndexOutOfRangeException for some
+        // file and UNC paths, such as two backslashes and a right-to-left override.
+        int colon = text.IndexOf(':');
+        if (colon <= 0 || Array.FindIndex(Schemes, s => text.AsSpan(0, colon).Equals(s, StringComparison.OrdinalIgnoreCase)) < 0) return null;
         if (!Uri.TryCreate(text, UriKind.Absolute, out var uri)) return null;
         return Array.IndexOf(Schemes, uri.Scheme) >= 0 ? uri.AbsoluteUri : null;
     }

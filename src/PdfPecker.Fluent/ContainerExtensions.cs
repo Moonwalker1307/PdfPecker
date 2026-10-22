@@ -261,7 +261,12 @@ internal static class Links
     public static string Check(string url, string paramName)
     {
         ArgumentNullException.ThrowIfNull(url, paramName);
-        if (!Uri.TryCreate(url.Trim(), UriKind.Absolute, out var uri)
+        url = url.Trim();
+        // The scheme is checked before System.Uri parses the address: .NET throws IndexOutOfRangeException for some
+        // file and UNC paths, such as two backslashes and a right-to-left override.
+        if (!(url.StartsWith("http:", StringComparison.OrdinalIgnoreCase) || url.StartsWith("https:", StringComparison.OrdinalIgnoreCase)
+              || url.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase))
+            || !Uri.TryCreate(url, UriKind.Absolute, out var uri)
             || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeMailto))
             throw new ArgumentException("A link must be an absolute http, https or mailto address.", paramName);
         return uri.OriginalString;
