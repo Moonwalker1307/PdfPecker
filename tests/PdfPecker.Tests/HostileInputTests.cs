@@ -2034,6 +2034,43 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Deep_long_and_repetitive_xmp_metadata_is_read_in_bounded_time()
+    {
+        const string head = "<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'><rdf:Description xmlns:dc='http://purl.org/dc/elements/1.1/'>";
+        var deep = head + "<dc:title>" + Repeat("<a>", 200_000) + Repeat("</a>", 200_000) + "</dc:title><dc:subject>s</dc:subject></rdf:Description></rdf:RDF>";
+        Assert.Equal("s", Bounded(() => PdfPecker.Pdf.XmpReader.Properties(deep))["http://purl.org/dc/elements/1.1/subject"]);
+        var items = head + "<dc:creator><rdf:Seq>" + Repeat("<rdf:li>x</rdf:li>", 200_000) + "</rdf:Seq></dc:creator></rdf:Description></rdf:RDF>";
+        Assert.Equal(200_000 * 3 - 2, Bounded(() => PdfPecker.Pdf.XmpReader.Properties(items))["http://purl.org/dc/elements/1.1/creator"].Length);
+        // Past the character limit the packet stops being read; what came before stays.
+        var huge = head + "<dc:subject>s</dc:subject><dc:title>" + new string('x', 17 << 20) + "</dc:title></rdf:Description></rdf:RDF>";
+        var read = Bounded(() => PdfPecker.Pdf.XmpReader.Properties(huge));
+        Assert.Equal("s", read["http://purl.org/dc/elements/1.1/subject"]);
+        Assert.False(read.ContainsKey("http://purl.org/dc/elements/1.1/title"));
+    }
+
+    [Fact]
+    public void Xmp_metadata_that_decodes_to_more_than_its_budget_is_left_out()
+    {
+        var zeros = new MemoryStream();
+        using (var z = new ZLibStream(zeros, CompressionLevel.SmallestSize, leaveOpen: true))
+        {
+            var chunk = new byte[1 << 20];
+            for (int i = 0; i < 64; i++) z.Write(chunk);
+        }
+        var ms = new MemoryStream();
+        void W(string s) => ms.Write(Encoding.ASCII.GetBytes(s));
+        W("%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R /Metadata 4 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n"
+            + "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 10 10] >> endobj\n5 0 obj << /Title (Bomb) >> endobj\n"
+            + "4 0 obj << /Type /Metadata /Subtype /XML /Filter /FlateDecode /Length " + zeros.Length + " >> stream\n");
+        zeros.WriteTo(ms);
+        W("\nendstream endobj\ntrailer << /Root 1 0 R /Info 5 0 R >>\n%%EOF\n");
+        var pdf = ms.ToArray();
+        var properties = Bounded(() => PdfDocumentProperties.Read(pdf));
+        Assert.Equal("Bomb", properties.Title);
+        Assert.Null(properties.XmpMetadata);
+    }
+
+    [Fact]
     public void Narrow_column_width_on_a_huge_box_is_capped_at_a_hundred_columns()
     {
         var html = "<div style='width:1e9px;column-width:1px'>"
