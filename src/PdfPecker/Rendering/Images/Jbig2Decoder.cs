@@ -151,15 +151,22 @@ internal sealed partial class Jbig2Decoder
 
     private Bitmap NewBitmap(int w, int h)
     {
-        Work((long)w * h + 16);
+        Work(BitmapWork(w, h));
         return new Bitmap(w, h);
     }
 
     private Bitmap Crop(Bitmap b, int x, int y, int w, int h)
     {
-        Work((long)w * h + 16);
+        Work(BitmapWork(w, h));
         return b.Crop(x, y, w, h);
     }
+
+    /// <summary>
+    /// The work of allocating a bitmap and visiting it row by row. The rows are charged as well as the pixels, because a
+    /// bitmap of no width holds no pixels but the decoders still loop over each of its rows, and a damaged refinement can
+    /// ask for billions of them.
+    /// </summary>
+    private static long BitmapWork(int w, int h) => (long)w * h + h + 16;
 
     // ------------------------------------------------------------------ bitmaps
 
