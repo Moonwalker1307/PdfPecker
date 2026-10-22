@@ -10,17 +10,21 @@ namespace PdfPecker.Pdf;
 /// <summary>Text: fonts, their embedded subsets, glyph runs and strings.</summary>
 internal sealed partial class PdfDocumentWriter
 {
-    private void CollectSvgFonts(SvgImage svg, bool[] usedFonts) => CollectSvgFonts(svg.Shapes, usedFonts, 0);
+    private void CollectSvgFonts(SvgImage svg, bool[] usedFonts) => CollectSvgFonts(svg.Shapes, usedFonts);
 
-    /// <summary>The fonts of SVG text, also inside masks, pattern tiles, embedded drawings and filtered content.</summary>
-    private void CollectSvgFonts(List<SvgShape> shapes, bool[] usedFonts, int depth)
+    /// <summary>
+    /// The fonts of SVG text, also inside masks, pattern tiles, embedded drawings, translucent groups and filtered
+    /// content. The walk has no depth limit of its own: it must reach every text run the writer draws, and the writer
+    /// draws the whole shape tree, whose depth the SVG parser already bounds. A shallower limit here left the fonts of
+    /// text in deeply nested groups unregistered, and writing that text then failed.
+    /// </summary>
+    private void CollectSvgFonts(List<SvgShape> shapes, bool[] usedFonts)
     {
-        if (depth > 16) return;
         foreach (var shape in shapes)
         {
-            if (shape.Kind is SvgShape.KindMask or SvgShape.KindImage or SvgShape.KindFilter && shape.Children != null) CollectSvgFonts(shape.Children, usedFonts, depth + 1);
-            if (shape.FillPattern != null) CollectSvgFonts(shape.FillPattern.Shapes, usedFonts, depth + 1);
-            if (shape.StrokePattern != null) CollectSvgFonts(shape.StrokePattern.Shapes, usedFonts, depth + 1);
+            if (shape.Kind is SvgShape.KindMask or SvgShape.KindImage or SvgShape.KindFilter && shape.Children != null) CollectSvgFonts(shape.Children, usedFonts);
+            if (shape.FillPattern != null) CollectSvgFonts(shape.FillPattern.Shapes, usedFonts);
+            if (shape.StrokePattern != null) CollectSvgFonts(shape.StrokePattern.Shapes, usedFonts);
             if (shape.Font == null || shape.Kind != SvgShape.KindText) continue;
             if (Leaf(shape.Font) is EmbeddedFont ef) AddGlyphs(ef, shape.Text!, 0, shape.Text!.Length, shape.Rtl);
             else usedFonts[((StandardFont)shape.Font).Index] = true;
