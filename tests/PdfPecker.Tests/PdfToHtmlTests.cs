@@ -125,6 +125,8 @@ public class PdfToHtmlTests
     [InlineData("vbscript:x", null)]
     [InlineData("page2.html", null)]
     [InlineData("//example.com", null)]
+    [InlineData("\\\\\u202E", null)] // System.Uri throws IndexOutOfRangeException for these two
+    [InlineData("//\u200F", null)]
     [InlineData("", null)]
     public void Only_web_mail_and_phone_addresses_are_kept(string uri, string? expected)
         => Assert.Equal(expected, PageLinks.WebAddress(Encoding.UTF8.GetBytes(uri)));

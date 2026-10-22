@@ -57,6 +57,7 @@ public sealed class ApiTests
     [InlineData("file:///etc/passwd")]
     [InlineData("relative/path")]
     [InlineData("data:text/html,x")]
+    [InlineData("\n\\\\\u202E")] // System.Uri throws IndexOutOfRangeException for this one; found by the fuzzer
     public void Links_only_go_to_web_and_mail_addresses(string url)
     {
         Assert.Throws<ArgumentException>(() => Html.Of(c => c.Hyperlink(url)));
