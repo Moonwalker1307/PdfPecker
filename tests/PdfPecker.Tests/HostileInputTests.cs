@@ -820,6 +820,20 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Filters_over_many_translucent_gradients_count_the_soft_mask_of_each()
+    {
+        // Found by the fuzzer: target css, timeout-b1715c82. A gradient with translucent stops is drawn through a soft
+        // mask, which the renderer paints on a canvas the size of the whole filtered image, and the work budget did not
+        // count those, nor the shading of any gradient, so these forty boxes took 40 s.
+        var layers = string.Join(",", Enumerable.Repeat("radial-gradient(red 10%, rgba(0,0,255,.5) 90%)", 300));
+        var html = Repeat($"<div style='height:40px;background:{layers};filter:blur(2px)'></div>", 40);
+        var pdf = Bounded(() => Bounded(html, new PdfOptions { Compress = false }));
+        AssertStructurallyValid(pdf);
+        // The first filters run; the boxes after the document's budget is spent are drawn without them.
+        Assert.InRange(CountOf(Latin1(pdf), "/Subtype /Image") / 2, 1, 39);
+    }
+
+    [Fact]
     public void Mask_layers_are_capped()
     {
         // Each mask layer nests a soft mask in the one below it, so the declaration is dropped beyond sixteen layers.
