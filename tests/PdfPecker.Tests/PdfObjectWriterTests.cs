@@ -108,6 +108,19 @@ public class PdfObjectWriterTests
     }
 
     [Fact]
+    public void A_rented_buffer_grows_and_is_empty_after_it_is_returned()
+    {
+        var b = ByteBuffer.Rent(16);
+        for (int i = 0; i < 100; i++) b.Int(i % 10);
+        Assert.Equal(string.Concat(Enumerable.Repeat("0123456789", 10)), Encoding.ASCII.GetString(b.Span));
+        b.Return();
+        Assert.Equal(0, b.Length);
+        b.Return();
+        b.Ascii("still usable");
+        Assert.Equal("still usable", Encoding.ASCII.GetString(b.Span));
+    }
+
+    [Fact]
     public void Object_ids_that_were_never_written_are_free_entries()
     {
         var b = new ByteBuffer();
