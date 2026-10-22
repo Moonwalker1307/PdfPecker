@@ -48,6 +48,13 @@ internal sealed partial class PdfFont
     public PdfStream?[]? Type3Procs { get; private set; }
     public PdfDict? Type3Resources { get; private set; }
 
+    /// <summary>
+    /// The height of the font's glyphs in text space units, for text extraction: 1 for most fonts, but a Type 3 font
+    /// whose glyphs are drawn at another scale (such as a FontMatrix of [1 0 0 1 0 0] with glyphs 72 units high, used at
+    /// 0.24 points) has its own, so its letters are not taken for words.
+    /// </summary>
+    public double TextSizeScale { get; private set; } = 1;
+
     public static PdfFont Load(PdfFile file, PdfDict dict)
     {
         var font = new PdfFont();
@@ -159,6 +166,12 @@ internal sealed partial class PdfFont
         Kind = FontKind.Type3;
         FontMatrix = Matrix.FromArray(file.GetNumbers(dict, "FontMatrix") ?? new double[] { 0.001, 0, 0, 0.001, 0, 0 });
         Type3Resources = file.GetDict(dict, "Resources");
+        // The nominal size holds for glyphs about one text unit high; only a font far off that uses its bounding box.
+        if (file.GetNumbers(dict, "FontBBox") is { Length: 4 } bbox)
+        {
+            double height = Math.Abs(bbox[3] - bbox[1]) * Math.Sqrt(FontMatrix.C * FontMatrix.C + FontMatrix.D * FontMatrix.D);
+            if (double.IsFinite(height) && height > 0 && (height < 0.5 || height > 2)) TextSizeScale = height;
+        }
         int first = file.GetInt(dict, "FirstChar", 0);
         var widths = file.GetNumbers(dict, "Widths");
         for (int c = 0; c < 256; c++)

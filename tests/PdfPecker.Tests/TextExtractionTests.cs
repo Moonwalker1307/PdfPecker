@@ -199,6 +199,28 @@ public class TextExtractionTests
     }
 
     [Fact]
+    public void Type3_font_drawn_at_its_own_scale_keeps_its_words_whole()
+    {
+        // As a real PDF does: FontMatrix [1 0 0 1 0 0] with glyphs about 72 units high, used at 0.24 points, and each
+        // letter group placed on its own with a small gap. The size seen is that of the glyphs, about 17 points, so
+        // the gaps are kerning and only the wide one is a word break.
+        const string content =
+            "BT /F1 0.24 Tf 1 0 0 1 100 700 Tm (ab) Tj 1 0 0 1 120.7 700 Tm (ab) Tj 1 0 0 1 145 700 Tm (ab) Tj ET\n";
+        var pdf = BuildPdf(
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 6 0 R >>",
+            "<< /Type /Font /Subtype /Type3 /FontMatrix [1 0 0 1 0 0] /FontBBox [0 -14 64 58] /CharProcs 5 0 R " +
+            "/Encoding << /Differences [97 /a /b] >> /FirstChar 97 /LastChar 98 /Widths [40 40] >>",
+            "<< /a 7 0 R /b 7 0 R >>",
+            $"<< /Length {content.Length} >>\nstream\n{content}endstream",
+            "<< /Length 33 >>\nstream\n40 0 0 0 40 58 d1 0 0 40 58 re f\nendstream");
+        var line = Assert.Single(PdfText.ExtractPage(pdf, 1).Lines);
+        Assert.Equal("abab ab", line.Text);
+        Assert.Equal(17.3, line.Words[0].FontSize, 1);
+    }
+
+    [Fact]
     public void Standard_symbol_fonts_without_a_descriptor_use_their_built_in_encodings()
     {
         // As ReportLab writes them: no FontDescriptor, so no flag says the font is symbolic, and no Encoding.

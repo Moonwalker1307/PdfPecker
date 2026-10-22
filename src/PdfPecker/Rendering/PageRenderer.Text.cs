@@ -132,7 +132,7 @@ internal sealed partial class PageRenderer
         var (ex, ey) = vertical ? trm.Apply(0, w1) : trm.Apply(advance, 0);
         double xLen = Math.Sqrt(trm.A * trm.A + trm.B * trm.B), yLen = Math.Sqrt(trm.C * trm.C + trm.D * trm.D);
         // Vertical text runs down the text space's y axis, so its lines follow that axis.
-        double dx = vertical ? -trm.C : trm.A, dy = vertical ? -trm.D : trm.B, size = yLen;
+        double dx = vertical ? -trm.C : trm.A, dy = vertical ? -trm.D : trm.B, size = yLen * font.TextSizeScale;
         double len = Math.Sqrt(dx * dx + dy * dy);
         if (!(len > 1e-9) || !double.IsFinite(x) || !double.IsFinite(y) || !double.IsFinite(ex) || !double.IsFinite(ey)) return;
         string? text;
