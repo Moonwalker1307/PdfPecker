@@ -243,6 +243,14 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Hyphenating_a_decomposed_word_with_a_letter_beyond_the_basic_plane_does_not_throw()
+    {
+        // Found by the fuzzer: target html, exception-1f68b0e4. Composing a decomposed word letter by letter took each
+        // half of a surrogate pair as a letter of its own, and normalising half a pair throws ArgumentException.
+        AssertStructurallyValid(Bounded("<p lang=en style='hyphens: auto; width: 40pt'>Lorem cafe\u0301\U0001D400hyphenation ipsum</p>"));
+    }
+
+    [Fact]
     public void Many_custom_properties_on_many_elements_stay_linear()
     {
         var sb = new StringBuilder("<style>:root{");
