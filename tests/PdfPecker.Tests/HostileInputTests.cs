@@ -115,6 +115,16 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Thousands_of_marks_on_one_base_shape_in_linear_time()
+    {
+        // Found by the fuzzer: target html, timeout-522fb4dc. Each mark searched back over every mark before it for its
+        // base, and then summed the advances between them, so a long run of marks took the square of its length.
+        var options = new PdfOptions();
+        options.Fonts.Add(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "NotoSansHebrew-Subset.ttf")), "He");
+        AssertStructurallyValid(Bounded("<p style='font-family:He'>\u05E9" + Repeat("\u05B9", 80_000) + "</p>", options));
+    }
+
+    [Fact]
     public void Balancing_lines_of_thousands_of_tiny_words_stays_fast()
     {
         // Choosing breaks again costs the square of a line's break opportunities: tiny words on wide lines keep their
