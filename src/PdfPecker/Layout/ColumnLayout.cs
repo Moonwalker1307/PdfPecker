@@ -29,6 +29,9 @@ internal sealed partial class LayoutEngine
     // A box split between more columns than this is drawn in the first ones only (a huge height in tiny columns).
     private const int MaxSplitFragments = 4096;
 
+    // Columns narrower than this (one CSS pixel) are laid out as a single column.
+    private const float MinColumnWidth = 0.75f;
+
     // Without pages or a height, columns start this tall, so that only forced breaks end them; taller content would
     // break there too.
     private const float UnboundedColumn = 100_000;
@@ -73,6 +76,10 @@ internal sealed partial class LayoutEngine
         int n = ColumnCountFor(s, w, gap);
         if (n <= 1) return LayoutFlow(e, x, y, w);
         float colW = Math.Max(0, (w - (n - 1) * gap) / n);
+        // Columns narrower than a pixel hold nothing readable, and each nested multi-column box divides the width
+        // again: laid out as columns, every level copied all the content inside it, so hundreds of nested boxes took
+        // the square of their depth. They are laid out as one column, which bounds the nesting to a few dozen levels.
+        if (colW < MinColumnWidth) return LayoutFlow(e, x, y, w);
         if (_columnDepth >= MaxBalancedNesting) return LayoutWholeColumns(e, x, y, w, n, colW, gap);
         // The columns are as wide on every page: the page geometry does not reach into them.
         _pageBox = null;
