@@ -93,6 +93,23 @@ public sealed class ApiTests
         }).WithSettings(new DocumentSettings { PdfUA = true }).GeneratePdf());
 
     [Fact]
+    public void Viewer_settings_and_page_labels_cover_every_page_set()
+    {
+        byte[] pdf = Document.Create(d =>
+        {
+            d.Page(p => p.Content().Text("cover"));
+            d.Page(p => p.Content().Text("body"));
+        }).GeneratePdf(new PdfOptions
+        {
+            Viewer = new PdfViewerSettings { PageLayout = PdfPageLayout.OneColumn, StartPage = 2 },
+            PageLabels = { new PdfPageLabel(2, PdfPageNumberStyle.LowerRoman) },
+        });
+        string text = System.Text.Encoding.Latin1.GetString(pdf);
+        Assert.Contains("/PageLayout /OneColumn /OpenAction [", text);
+        Assert.Contains("/PageLabels << /Nums [0 << /S /D >> 1 << /S /r >> ] >>", text);
+    }
+
+    [Fact]
     public void Pdf_ua_settings_make_a_tagged_pdf()
     {
         byte[] pdf = Html.Page(c => c.Heading(1).Text("Title"))
@@ -125,7 +142,7 @@ public sealed class ApiTests
             "UserStyleSheet", "Bookmarks", "FormFields", "MaxPages", "Compress", "CompressionLevel", "Title", "Author",
             "Subject", "Keywords", "Creator", "Producer", "CustomProperties", "CreationDate", "FooterText", "HeaderText",
             "Watermark", "Security", "Conformance", "Accessibility", "Language", "Hyphenation", "EInvoice", "Attachments",
-            "EmbedStandardFonts", "Signature",
+            "EmbedStandardFonts", "Signature", "Viewer", "PageLabels",
         ];
         var settable = typeof(PdfOptions).GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(p => p.CanWrite).Select(p => p.Name).Order(StringComparer.Ordinal);

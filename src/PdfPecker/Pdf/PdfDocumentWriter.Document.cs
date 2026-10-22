@@ -11,7 +11,7 @@ internal sealed partial class PdfDocumentWriter
     /// of bytes above 127, which marks the file as binary for tools that guess.
     /// </summary>
     private void WriteHeader()
-        => _out.Ascii(Pdf20 ? "%PDF-2.0\n%" : IsPdfA || _crypt != null || Tagged ? "%PDF-1.7\n%" : "%PDF-1.4\n%").Bytes(new byte[] { 0xE2, 0xE3, 0xCF, 0xD3 }).Nl();
+        => _out.Ascii(Pdf20 ? "%PDF-2.0\n%" : IsPdfA || _crypt != null || Tagged || ViewerCatalog.NeedsPdf17(Viewer) ? "%PDF-1.7\n%" : "%PDF-1.4\n%").Bytes(new byte[] { 0xE2, 0xE3, 0xCF, 0xD3 }).Nl();
 
     private void WriteCatalog(WriteState doc)
     {
@@ -26,9 +26,8 @@ internal sealed partial class PdfDocumentWriter
         }
         // PDF/UA: viewers show the title, not the file name. A right-to-left document's pages progress from right to
         // left, which a viewer showing two pages side by side needs to know to put them in the right order.
-        bool displayTitle = Tagged && !string.IsNullOrEmpty(doc.Title);
-        if (displayTitle || RightToLeft)
-            _out.Ascii(" /ViewerPreferences <<").Ascii(displayTitle ? " /DisplayDocTitle true" : "").Ascii(RightToLeft ? " /Direction /R2L" : "").Ascii(" >>");
+        ViewerCatalog.Write(_out, Viewer, Tagged && !string.IsNullOrEmpty(doc.Title), RightToLeft, doc.PageIds, doc.OpenActionId);
+        ViewerCatalog.WriteLabels(_out, PageLabels, doc.PageCount, WriteTextString);
         if (doc.FileSpecIds.Length > 0) WriteEmbeddedFilesEntries(doc.FileSpecIds);
         WriteAcroForm();
         // AES-256 (revision 6) is the Adobe extension level 8 to PDF 1.7, standardised in PDF 2.0.

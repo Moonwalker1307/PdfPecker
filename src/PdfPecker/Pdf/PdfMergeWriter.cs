@@ -358,10 +358,12 @@ internal sealed class PdfMergeWriter : PdfObjectWriter
         if (_structRootId != 0)
         {
             _out.Ascii(" /MarkInfo << /Marked true >> /StructTreeRoot ").Int(_structRootId).Ascii(" 0 R");
-            if (!string.IsNullOrEmpty(_props!.Title)) _out.Ascii(" /ViewerPreferences << /DisplayDocTitle true >>");
         }
+        // A tagged result is PDF/UA when its inputs are, which needs the title in the title bar.
+        ViewerCatalog.Write(_out, _options.Viewer, _structRootId != 0 && !string.IsNullOrEmpty(_props!.Title), false, _pageIds);
         if (_lang != null) { _out.Ascii(" /Lang "); PdfSyntax.HexString(_out, _lang.Bytes); }
-        if (_anyLabels) WritePageLabels();
+        if (_options.PageLabels is { Count: > 0 } labels) ViewerCatalog.WriteLabels(_out, labels, _pageCount, PdfSyntax.TextString);
+        else if (_anyLabels) WritePageLabels();
         if (_attachments.Count > 0)
         {
             _attachments.Sort((x, y) => x.Key.AsSpan().SequenceCompareTo(y.Key));

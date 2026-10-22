@@ -124,7 +124,14 @@ internal static class DocumentGenerator
         foreach (var page in pages)
         {
             string html = HtmlWriter.Write(page, composed.Container.Css, composed.Metadata, images);
-            pdfs.Add(HtmlToPdf.Convert(html, Options(options, composed, page, images), cancellationToken));
+            var pageOptions = Options(options, composed, page, images);
+            if (pages.Count > 1)
+            {
+                // The page sets are merged, which sets these for the whole document.
+                pageOptions.Viewer = null;
+                pageOptions.PageLabels = new List<PdfPageLabel>();
+            }
+            pdfs.Add(HtmlToPdf.Convert(html, pageOptions, cancellationToken));
         }
         if (pdfs.Count == 1) return pdfs[0];
 
@@ -140,7 +147,12 @@ internal static class DocumentGenerator
             MaxPages = options?.MaxPages ?? new PdfOptions().MaxPages,
             Bookmarks = options?.Bookmarks ?? true,
         };
-        if (options != null) merge.CustomProperties = options.CustomProperties;
+        if (options != null)
+        {
+            merge.CustomProperties = options.CustomProperties;
+            merge.Viewer = options.Viewer;
+            merge.PageLabels = options.PageLabels;
+        }
         return PdfMerger.Merge(pdfs, merge, cancellationToken);
     }
 
@@ -213,6 +225,8 @@ internal static class DocumentGenerator
         Attachments = o.Attachments,
         EmbedStandardFonts = o.EmbedStandardFonts,
         Signature = o.Signature,
+        Viewer = o.Viewer,
+        PageLabels = o.PageLabels,
     };
 }
 
