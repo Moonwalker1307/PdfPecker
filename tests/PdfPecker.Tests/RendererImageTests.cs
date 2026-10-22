@@ -496,6 +496,28 @@ public class RendererImageTests
     }
 
     [Fact]
+    public void Explicit_mask_finer_than_its_image_keeps_its_resolution()
+    {
+        // One red pixel under a 4x1 stencil: the image is drawn at the mask's resolution, so each quarter shows or
+        // hides on its own instead of the whole pixel following one mask sample.
+        var pdf = new FixturePdf();
+        int mask = pdf.AddStream("/Type /XObject /Subtype /Image /Width 4 /Height 1 /ImageMask true /BitsPerComponent 1", new byte[] { 0b0101_0000 });
+        int im = pdf.AddStream($"/Type /XObject /Subtype /Image /Width 1 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceRGB /Mask {mask} 0 R", Uniform(1, 255, 0, 0));
+        var img = Render(pdf.Build(16, 4, "q 16 0 0 4 0 0 cm /Im Do Q", $"/XObject << /Im {im} 0 R >>"));
+        AssertGrid(img, 4, 1, 4, new[] { Red, White, Red, White });
+    }
+
+    [Fact]
+    public void Smask_finer_than_its_image_keeps_its_resolution()
+    {
+        var pdf = new FixturePdf();
+        int mask = pdf.AddStream("/Type /XObject /Subtype /Image /Width 4 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceGray", new byte[] { 255, 0, 0, 255 });
+        int im = pdf.AddStream($"/Type /XObject /Subtype /Image /Width 2 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceRGB /SMask {mask} 0 R", new byte[] { 255, 0, 0, 0, 0, 255 });
+        var img = Render(pdf.Build(16, 4, "q 16 0 0 4 0 0 cm /Im Do Q", $"/XObject << /Im {im} 0 R >>"));
+        AssertGrid(img, 4, 1, 4, new[] { Red, White, White, Blue });
+    }
+
+    [Fact]
     public void Explicit_mask_with_a_reversed_decode_array_flips_the_mask()
     {
         var pdf = new FixturePdf();
