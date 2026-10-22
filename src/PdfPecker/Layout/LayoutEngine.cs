@@ -2238,15 +2238,18 @@ internal sealed partial class LayoutEngine
     /// Whether a box captured in columns was measured in the column pass in progress, as it would be measured now. It has
     /// then noted its breaks for balancing already, and noting the same breaks again changes nothing, unless a forced
     /// break noted since would cut its margins otherwise (see TruncatedMargin). It must also measure the same at any
-    /// depth: boxes that took measurements from another pass, and columns inside it, which lay their boxes out again
-    /// only to a depth (see MaxPlacedOnPagesInColumns), may not.
+    /// depth: boxes that took measurements from another pass, and columns inside it that laid a box out again where it
+    /// landed, which they do only to a depth (see MaxPlacedOnPagesInColumns), may not. Columns that did neither measure
+    /// the same at any depth: counting every multi-column box made a box with two columns of plain paragraphs at the
+    /// bottom of 250 nested flex rows lay out everything below each of the eight levels laid out again above it.
     /// </summary>
     private bool SamePass(Captured known)
         => known.NotedIn == _columnNotes && known.NotedForced == _columnNotes!.ForcedCount && !known.DependsOnDepth;
 
     /// <summary>
-    /// How many layouts so far may come out otherwise when nested less or more deeply: multi-column boxes, and boxes that
-    /// took measurements from another column pass or hold boxes that did.
+    /// How many layouts so far may come out otherwise when nested less or more deeply: boxes laid out again where they
+    /// landed in columns, columns whose balancing ran out of its budget, and boxes that took measurements from another
+    /// column pass or hold boxes that did.
     /// </summary>
     private long _depthDependentLayouts;
 
@@ -2393,13 +2396,22 @@ internal sealed partial class LayoutEngine
     {
         // Each nested box laid out again lays out its own boxes again, so only the outer two levels may do that twice,
         // to give a stretched box its height back; deeper ones keep the height of their content.
-        // In columns only the boxes measured in the same balancing pass can be reused inside (their breaks are noted for
-        // balancing), so a level laid out again may lay out everything below it again. Deeper levels keep their measured
-        // layout.
-        if (c.Source is not { } src || Reusable(c, dy) || _columnNotes != null && _placingOnPages >= MaxPlacedOnPagesInColumns)
+        if (c.Source is not { } src || Reusable(c, dy))
         {
             Place(c, dx, dy);
             return dy + c.Height;
+        }
+        // In columns only the boxes measured in the same balancing pass can be reused inside (their breaks are noted for
+        // balancing), so a level laid out again may lay out everything below it again. Deeper levels keep their measured
+        // layout, so from here on the layout around this box depends on how deeply it is nested.
+        if (_columnNotes != null)
+        {
+            _depthDependentLayouts++;
+            if (_placingOnPages >= MaxPlacedOnPagesInColumns)
+            {
+                Place(c, dx, dy);
+                return dy + c.Height;
+            }
         }
         var e = src.El;
         var s = e.Style;

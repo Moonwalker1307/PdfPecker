@@ -942,6 +942,22 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Columns_inside_nested_flex_rows_in_columns_do_not_make_each_level_lay_out_the_rest_again()
+    {
+        // Every multi-column box counted as laid out differently at another depth, so no box around the inner columns
+        // could be reused in a column pass: each of the eight levels laid out again where it landed in the outer columns
+        // laid out everything below it again. A fuzzed page of 250 nested flex rows took 7.5 s and 1.3 GB.
+        const string text = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio praesent libero sed cursus ante dapibus diam.";
+        var html = "<style>@page{size:148mm 190mm;margin:12mm}body{font:8pt sans-serif;margin:0}.c3{columns:3}.c2{columns:2}"
+                   + ".card{break-inside:avoid;border:.5pt solid #888}</style><div class=c3><div class=card>" + text + "</div><div class=card>"
+                   + Repeat("<div style='display:flex'>", 100) + Repeat("<div style='display:flex'></div>", 1500)
+                   + "<div>" + Repeat(text + " ", 20) + "</div><div class=c2>" + Repeat("<p>" + text + "</p>", 30) + "</div>";
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 192L << 20);
+    }
+
+    [Fact]
     public void Tables_with_one_wide_row_among_many_rows_store_only_the_cells_they_have()
     {
         // A grid of every row and column of this table is 18 million places, 144 MB, almost all of them empty; a fuzzed

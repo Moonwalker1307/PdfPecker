@@ -74,7 +74,6 @@ internal sealed partial class LayoutEngine
     private float LayoutColumns(Element e, float x, float y, float w, float? definiteH)
     {
         var s = e.Style;
-        _depthDependentLayouts++;
         float gap = s.ColumnGap is { } g ? Math.Max(0, g.Resolve(w)) : s.FontSize; // normal = 1em
         int n = ColumnCountFor(s, w, gap);
         if (n <= 1) return LayoutFlow(e, x, y, w);
@@ -313,8 +312,13 @@ internal sealed partial class LayoutEngine
         for (int pass = 0; pass < MaxBalancePasses && h < hi - 0.01f; pass++)
         {
             Cancellation.ThrowIfCancellationRequested();
-            // Another pass costs about what the last one did.
-            if (_boxLayouts - start + passCost > MaxBalanceLayouts) break;
+            // Another pass costs about what the last one did. What a pass costs depends on what it could reuse, which
+            // depends on how deeply the columns are nested, so the columns kept then may too.
+            if (_boxLayouts - start + passCost > MaxBalanceLayouts)
+            {
+                _depthDependentLayouts++;
+                break;
+            }
             long before = _boxLayouts;
             rows[row] = h;
             var grid = new ColumnGrid(fillGrid.Outer, fillGrid.FirstPage, fillGrid.Top, n, (float[])rows.Clone(), overflows);
