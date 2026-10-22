@@ -887,9 +887,13 @@ internal sealed partial class LayoutEngine
 
     /// <summary>
     /// How many times a block-level box, a table cell or a run of inline content has been laid out, counting each time it
-    /// was laid out again. Cells and inline runs count because they hold most of the work in a box of tables or text.
+    /// was laid out again. Cells and inline runs count because they hold most of the work in a box of tables or text, and
+    /// a run counts once more for every <see cref="CharactersPerLayout"/> characters of its text: a word of 80,000
+    /// characters in 46 boxes nested in each other took as long as 2,300 layouts of the boxes around it would have
+    /// alone, so each level laid it out again well within the budget, for 4.7 s.
     /// </summary>
     private long _boxLayouts;
+    private const int CharactersPerLayout = 32;
 
     /// <summary>
     /// The box layouts after which a box is no longer laid out again only to place a page break better: moved to the next
