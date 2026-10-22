@@ -199,13 +199,32 @@ internal sealed partial class PdfDocumentWriter
             ph = Math.Max(1, Math.Floor(ph * k));
         }
         int w = (int)pw, h = (int)ph;
-        if (!WithinRenderBudget(f, behind, w, h)) return default;
+        // The backdrops filtered already that are behind this one are decoded and drawn again in its rendering, so boxes
+        // stacked on each other cost the square of their number.
+        if (!WithinRenderBudget(f, behind, w, h, BackdropImagePixels(behind) * ImageWorkPerPixel)) return default;
         var pdf = RenderFlow(behind, rx, ry, rw, rh);
         if (pdf == null) return default;
         var source = RenderPremultiplied(pdf, w, h);
         if (source == null) return default;
         var image = FilterImage(f.Apply(source, w, h, w / rw, h / rh, Cancellation), w, h);
         return (image, rx, ry, rw, rh);
+    }
+
+    // An image pixel in a rendering is compressed into the page rendered, then inflated, unpredicted, converted, masked
+    // and drawn, with its soft mask: measured at about 32 times the work of a pixel of a filter primitive.
+    private const long ImageWorkPerPixel = 32;
+
+    /// <summary>The pixels of the filtered backdrops made already that the ops draw.</summary>
+    private long BackdropImagePixels(List<DrawOp> ops)
+    {
+        long n = 0;
+        foreach (var op in ops)
+        {
+            if (op is LayerOp { Backdrop: not null } l && _backdrops.TryGetValue(l, out var r) && r.Image is { } image)
+                n += (long)image.Width * image.Height;
+            if (op is GroupOp g) n += BackdropImagePixels(g.Ops);
+        }
+        return n;
     }
 
     /// <summary>

@@ -670,8 +670,18 @@ internal sealed partial class LayoutEngine
     {
         var s = e.Style;
         return !s.IsFlex && !s.IsGrid && !s.IsMultiColumn
-               && !s.AvoidBreakInside && !s.Layered && e.Control == null && !e.IsReplaced && e.Name != "hr";
+               && !s.AvoidBreakInside && !MovesContent(s) && e.Control == null && !e.IsReplaced && e.Name != "hr";
     }
+
+    /// <summary>
+    /// Whether a box moves its content once laid out in a way that changes where it breaks: transforms do. Opacity,
+    /// clips, masks, blend modes and filters only wrap the content in a layer where it is, which the scan for the first
+    /// content still looks into, and a relative offset moves the content after its page breaks are made, as in Chrome.
+    /// Without them, nested boxes with such effects or offsets each probed for their first content themselves, and
+    /// each level laid out everything inside it once more.
+    /// </summary>
+    private static bool MovesContent(ComputedStyle s)
+        => s.Position is not (Position.Static or Position.Relative) || s.Transform != null || s.Perspective != null;
 
     /// <summary>The first content op of a probed box: its index among the ops and where it starts.</summary>
     private (int At, float Y)? FirstContent(KeepProbe p)
@@ -1002,7 +1012,12 @@ internal sealed partial class LayoutEngine
         // A box without content of its own, such as an empty one with a height, ends the content around it itself.
         if (float.IsNaN(_lastContentBottom)) _lastContentBottom = bottom - y > Eps ? bottom : lastContent;
         if (table) _boxTrailing = 0;
-        if (s.Layered) FinishLayered(e, opsStart, availW);
+        if (s.Layered)
+        {
+            FinishLayered(e, opsStart, availW);
+            // The box's ops are now one layer at opsStart: a probe it took scans that layer, not past where its ops ended.
+            if (probe != null) probe.ScanFrom = Math.Min(probe.ScanFrom, opsStart);
+        }
         if (avoidInside) _avoidDepth--;
         return bottom;
     }
@@ -2451,6 +2466,14 @@ internal sealed partial class LayoutEngine
     {
         float moveX = dx - c.PlacedX, moveY = dy - c.PlacedY;
         (c.PlacedX, c.PlacedY) = (dx, dy);
+        // Deep down, the content goes into one group the first time it is placed: each level around it then adds that
+        // one op to its own content instead of all of them, which grew with the depth times the content.
+        if (_captureDepth >= LazyOffsetDepth && c.Ops.Count > 1)
+        {
+            var group = new GroupOp();
+            group.Ops.AddRange(c.Ops);
+            c.Ops = [group];
+        }
         foreach (var op in c.Ops)
         {
             if (op is GroupOp g && _captureDepth >= LazyOffsetDepth) g.OffsetLater(moveX, moveY);

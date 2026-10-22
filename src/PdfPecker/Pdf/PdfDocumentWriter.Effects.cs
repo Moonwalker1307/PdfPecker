@@ -114,11 +114,12 @@ internal sealed partial class PdfDocumentWriter
     /// Whether a filter may run on w × h pixels of ops rendered through a page of their own, counting its work against the
     /// document's budget when it may. Besides the filter's own work, the renderer paints every transparency group and
     /// soft mask in the ops on a canvas of its own the size of the whole image, so hundreds of masked boxes nested in
-    /// each other cost hundreds of full images. A filter whose canvases alone are beyond the document's budget never runs.
+    /// each other cost hundreds of full images; <paramref name="imageWork"/> is the work of the images drawn in the ops. A
+    /// filter whose canvases and images alone are beyond the document's budget never runs.
     /// </summary>
-    private bool WithinRenderBudget(SvgFilter f, List<DrawOp> ops, int w, int h)
+    private bool WithinRenderBudget(SvgFilter f, List<DrawOp> ops, int w, int h, long imageWork = 0)
     {
-        long canvasWork = OffscreenCanvases(ops) * w * h * CanvasWorkPerPixel;
+        long canvasWork = OffscreenCanvases(ops) * w * h * CanvasWorkPerPixel + imageWork;
         return canvasWork <= SvgFilter.MaxDocumentWork && f.WithinBudget(w, h) && _filterBudget.TrySpend(f.DocumentWork(w, h) + canvasWork);
     }
 
