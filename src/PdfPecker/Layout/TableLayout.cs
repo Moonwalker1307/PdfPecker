@@ -104,7 +104,9 @@ internal sealed partial class LayoutEngine
     /// The deepest nested table whose rows are measured before they are laid out: to share the table's height out
     /// over them, or to resolve percentage heights in their cells. Measuring lays out everything inside the rows, and
     /// each level measured the levels inside it again, so the work grew with the square of the depth. Deeper tables
-    /// lay their rows out once, at the height of their content.
+    /// lay their rows out once, at the height of their content, and so do all tables once the relayout budget is spent
+    /// (see <see cref="MayLayOutAgain"/>), when rows also no longer move to the next page whole: a row of 7,000 cells
+    /// in 25 tables of percentage height nested in each other was laid out 790 times.
     /// </summary>
     private const int MaxMeasuredTableNesting = 16;
 
@@ -632,7 +634,7 @@ internal sealed partial class LayoutEngine
             // Inside rows that are only measured, a table is as tall without sharing out its height over its rows (it
             // is at least that height either way), so it is not laid out twice for that: with tables nested in each
             // other, each level would double the work.
-            if (tableH is float th && m.Rows.Count > 0 && _measuringRows == 0 && _tableDepth <= MaxMeasuredTableNesting)
+            if (tableH is float th && m.Rows.Count > 0 && _measuringRows == 0 && _tableDepth <= MaxMeasuredTableNesting && MayLayOutAgain)
                 m.RowExtra = RowExtras(m, th - frameT - frameB - vs, colX, widths, hs, vs, collapse);
             // A caption comes before the rows, and the probe is not handed to it. In columns that are being balanced,
             // the breaks of the rows that the probe would skip count for the balancing even when the layout is thrown
@@ -882,7 +884,7 @@ internal sealed partial class LayoutEngine
             // As in Chrome, percentage heights in a cell whose height is definite (it has a fixed height, or the table
             // has one) resolve against the cell's final height, which is only known once the row is: the row is laid
             // out once to find it, with those percentages as auto, and then again. The first layout only measures.
-            bool percent = _measuringRows == 0 && _tableDepth <= MaxMeasuredTableNesting && PercentCells(m, row);
+            bool percent = _measuringRows == 0 && _tableDepth <= MaxMeasuredTableNesting && MayLayOutAgain && PercentCells(m, row);
             // The first layout of such a row is thrown away, so the probe stops here and the table is laid out in full.
             if (percent) _rowProbe = null;
             if (percent) _measuringRows++;
@@ -920,7 +922,7 @@ internal sealed partial class LayoutEngine
 
             // A body row leaves room on its page for the footer repeated under it.
             float reserve = r >= m.HeadCount && r < m.Rows.Count - m.FootCount ? m.FootReserve : 0;
-            bool move = allowMove && attempt == 0 && CrossesPage(rowTop, rowBottom + reserve) && rowBottom - rowTop <= _grid.Height(PageOf(rowTop) + 1) && !AtPageTop(rowTop);
+            bool move = allowMove && attempt == 0 && MayLayOutAgain && CrossesPage(rowTop, rowBottom + reserve) && rowBottom - rowTop <= _grid.Height(PageOf(rowTop) + 1) && !AtPageTop(rowTop);
             // A row that starts a page or column because the row before it ended right at the break gets the header too.
             bool atBreak = !move && allowMove && attempt == 0 && r > m.HeadCount && m.HeadCount > 0
                            && PageOf(rowTop) > 0 && AtPageTop(rowTop);
