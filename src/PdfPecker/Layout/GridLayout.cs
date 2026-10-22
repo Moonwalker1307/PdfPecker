@@ -877,6 +877,9 @@ internal sealed partial class LayoutEngine
             _knownBoxes = src.BorderH == null ? c.Known : null;
             _probingGridRow = true;
             _placingOnPages++;
+            // The item is placed later from where it was captured, moving its anchors from where that left them, so the
+            // anchors the probe moves go back too; otherwise their bookmarks and links pointed where the probe left them.
+            var anchors = c.AnchorIds?.ConvertAll(id => Anchors.TryGetValue(id, out float ay) ? ay : float.NaN);
             bool starts;
             try
             {
@@ -892,6 +895,11 @@ internal sealed partial class LayoutEngine
                 if (src.BorderW.HasValue) _widthOverride.Remove(e);
                 Truncate(start);
                 (_currentListIndex, _forcedBreaks, _marker) = (list, breaks, marker);
+                for (int i = 0; anchors != null && i < anchors.Count; i++)
+                {
+                    if (float.IsNaN(anchors[i])) Anchors.Remove(c.AnchorIds![i]);
+                    else Anchors[c.AnchorIds![i]] = anchors[i];
+                }
             }
             if (!starts) return false;
         }

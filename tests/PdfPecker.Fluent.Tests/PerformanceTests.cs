@@ -55,9 +55,21 @@ public sealed class PerformanceTests
     public void Html_generation_is_small_next_to_the_conversion()
     {
         // The report has no barcodes, whose encoding is PdfPecker's work rather than the fluent layer's.
+        // The two are timed in turns, so that the other test assemblies running beside this one slow both alike: timed one
+        // after the other, a busy spell during only the conversion's runs failed the test.
         var document = Examples.All["report"]();
-        var html = Time(() => DocumentGenerator.Html(document, false, out _), repeat: 20);
-        var pdf = Time(() => document.GeneratePdf(), repeat: 20);
+        DocumentGenerator.Html(document, false, out _);
+        document.GeneratePdf();
+        TimeSpan html = TimeSpan.MaxValue, pdf = TimeSpan.MaxValue;
+        for (int i = 0; i < 20; i++)
+        {
+            var watch = Stopwatch.StartNew();
+            DocumentGenerator.Html(document, false, out _);
+            if (watch.Elapsed < html) html = watch.Elapsed;
+            watch.Restart();
+            document.GeneratePdf();
+            if (watch.Elapsed < pdf) pdf = watch.Elapsed;
+        }
         Assert.True(html.TotalMilliseconds * 3 < pdf.TotalMilliseconds, $"HTML {html}, PDF {pdf}.");
     }
 }
