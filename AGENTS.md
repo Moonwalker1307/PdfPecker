@@ -29,8 +29,9 @@ Before non-trivial work, read:
 ## Core rules
 
 - **No dependencies.** Never add a `PackageReference` to `src/PdfPecker`. Everything the library does is its own code
-  on top of the base class library; third-party packages may appear only in `bench/PdfPecker.Comparison` and
-  `bench/PdfPecker.Fluent.Comparison`, which are deliberately outside the solution. `src/PdfPecker.Fluent` references
+  on top of the base class library. No project in this repository uses a third-party package at run time: the
+  comparisons with other converters and with QuestPDF live in
+  [PdfPecker.Benchmarks](https://github.com/Moonwalker1307/PdfPecker.Benchmarks). `src/PdfPecker.Fluent` references
   `src/PdfPecker` as a project and nothing else.
 - **No JavaScript and no network.** PdfPecker is for HTML templates the caller controls. It runs no scripts, and
   conversion never fetches anything itself: remote resources load only through a `ResourceResolver` the caller
@@ -84,8 +85,9 @@ Before non-trivial work, read:
 - `samples/PdfPecker.Fluent.Sample` – writes the fluent examples as PDF and HTML; CI also publishes it with Native AOT.
   Its `Examples.cs` and `assets/` (invoice, report, catalogue, layout and text examples) are shared with the fluent
   tests and benchmarks.
-- `bench/PdfPecker.Benchmarks` and `bench/PdfPecker.Fluent.Benchmarks` (in the solution), `bench/PdfPecker.Comparison`
-  and `bench/PdfPecker.Fluent.Comparison` (QuestPDF; not in the solution) and `bench/compare-versions.sh`.
+- `bench/PdfPecker.Benchmarks`, `bench/PdfPecker.Fluent.Benchmarks` and `bench/PdfPecker.Versions`, which
+  `bench/compare-versions.sh` runs. The comparisons with other converters and QuestPDF are in the
+  [PdfPecker.Benchmarks](https://github.com/Moonwalker1307/PdfPecker.Benchmarks) repository.
 - `fuzz/PdfPecker.Fuzz` – the dependency-free mutation fuzzer; `fuzz/PdfPecker.Fluent.Fuzz` – the generative fuzzer of
   the fluent package.
 - `tools/` – generators for checked-in data (see "Change-specific guidance"), the veraPDF conformance samples, the

@@ -33,6 +33,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PdfPecker.Fluent.Benchmarks
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PdfPecker.Fluent.Fuzz", "fuzz\PdfPecker.Fluent.Fuzz\PdfPecker.Fluent.Fuzz.csproj", "{A26AA255-D9C1-41AC-A9D4-3EF2573EE580}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PdfPecker.Versions", "bench\PdfPecker.Versions\PdfPecker.Versions.csproj", "{FFB0665E-62EE-41E0-81D6-2B2E0A207C98}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -163,6 +165,18 @@ Global
 		{A26AA255-D9C1-41AC-A9D4-3EF2573EE580}.Release|x64.Build.0 = Release|Any CPU
 		{A26AA255-D9C1-41AC-A9D4-3EF2573EE580}.Release|x86.ActiveCfg = Release|Any CPU
 		{A26AA255-D9C1-41AC-A9D4-3EF2573EE580}.Release|x86.Build.0 = Release|Any CPU
+		{FFB0665E-62EE-41E0-81D6-2B2E0A207C98}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FFB0665E-62EE-41E0-81D6-2B2E0A207C98}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FFB0665E-62EE-41E0-81D6-2B2E0A207C98}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{FFB0665E-62EE-41E0-81D6-2B2E0A207C98}.Debug|x64.Build.0 = Debug|Any CPU
+		{FFB0665E-62EE-41E0-81D6-2B2E0A207C98}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{FFB0665E-62EE-41E0-81D6-2B2E0A207C98}.Debug|x86.Build.0 = Debug|Any CPU
+		{FFB0665E-62EE-41E0-81D6-2B2E0A207C98}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FFB0665E-62EE-41E0-81D6-2B2E0A207C98}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FFB0665E-62EE-41E0-81D6-2B2E0A207C98}.Release|x64.ActiveCfg = Release|Any CPU
+		{FFB0665E-62EE-41E0-81D6-2B2E0A207C98}.Release|x64.Build.0 = Release|Any CPU
+		{FFB0665E-62EE-41E0-81D6-2B2E0A207C98}.Release|x86.ActiveCfg = Release|Any CPU
+		{FFB0665E-62EE-41E0-81D6-2B2E0A207C98}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -178,5 +192,6 @@ Global
 		{A023B2CC-C943-417C-A48D-7F04E5A1E886} = {16114950-F9A0-46DA-B965-4676EB308279}
 		{F2E7698E-B65A-4548-912F-B9EAC66CF6A3} = {4F7C3153-62C0-48AE-818A-15C8149FE18B}
 		{A26AA255-D9C1-41AC-A9D4-3EF2573EE580} = {90448AA3-F814-A1CB-DFCE-838EB2907C94}
+		{FFB0665E-62EE-41E0-81D6-2B2E0A207C98} = {4F7C3153-62C0-48AE-818A-15C8149FE18B}
 	EndGlobalSection
 EndGlobal
