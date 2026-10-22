@@ -25,7 +25,7 @@ public static class PdfSigner
     /// <param name="options">The certificate and signature settings.</param>
     /// <param name="password">The user or owner password, when the PDF is encrypted.</param>
     /// <exception cref="PdfPasswordException">The PDF is encrypted and the password does not open it.</exception>
-    /// <exception cref="PdfSignatureException">The timestamp server failed, or the external signer's signature does not verify.</exception>
+    /// <exception cref="PdfSignatureException">The timestamp server failed, the external signer's signature does not verify, or the PDF is certified in a way that does not allow this signature (see <see cref="PdfSignatureOptions.Certification"/>).</exception>
     public static byte[] Sign(byte[] pdf, PdfSignatureOptions options, string? password = null)
     {
         if (pdf == null) throw new ArgumentNullException(nameof(pdf));
@@ -43,7 +43,7 @@ public static class PdfSigner
     /// <param name="password">The user or owner password, when the PDF is encrypted.</param>
     /// <param name="cancellationToken">Cancels the external signer and the timestamp request.</param>
     /// <exception cref="PdfPasswordException">The PDF is encrypted and the password does not open it.</exception>
-    /// <exception cref="PdfSignatureException">The timestamp server failed, or the external signer's signature does not verify.</exception>
+    /// <exception cref="PdfSignatureException">The timestamp server failed, the external signer's signature does not verify, or the PDF is certified in a way that does not allow this signature (see <see cref="PdfSignatureOptions.Certification"/>).</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public static byte[] Sign(byte[] pdf, PdfSignatureOptions options, string? password, CancellationToken cancellationToken)
     {
@@ -62,7 +62,7 @@ public static class PdfSigner
     /// <param name="password">The user or owner password, when the PDF is encrypted.</param>
     /// <param name="cancellationToken">Cancels the external signer and the timestamp request.</param>
     /// <exception cref="PdfPasswordException">The PDF is encrypted and the password does not open it.</exception>
-    /// <exception cref="PdfSignatureException">The timestamp server failed, or the external signer's signature does not verify.</exception>
+    /// <exception cref="PdfSignatureException">The timestamp server failed, the external signer's signature does not verify, or the PDF is certified in a way that does not allow this signature (see <see cref="PdfSignatureOptions.Certification"/>).</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public static Task<byte[]> SignAsync(byte[] pdf, PdfSignatureOptions options, string? password = null, CancellationToken cancellationToken = default)
     {
@@ -131,7 +131,7 @@ public static class PdfSigner
     /// <exception cref="ArgumentNullException">A path or <paramref name="options"/> is null.</exception>
     /// <exception cref="ArgumentException">The signing certificate has no private key, or its key does not suit the external signer.</exception>
     /// <exception cref="PdfPasswordException">The PDF is encrypted and the password does not open it.</exception>
-    /// <exception cref="PdfSignatureException">The timestamp server failed, or the external signer's signature does not verify.</exception>
+    /// <exception cref="PdfSignatureException">The timestamp server failed, the external signer's signature does not verify, or the PDF is certified in a way that does not allow this signature (see <see cref="PdfSignatureOptions.Certification"/>).</exception>
     /// <exception cref="NotSupportedException"><see cref="PdfSignatureOptions.HashAlgorithm"/> is not SHA-256, SHA-384 or SHA-512.</exception>
     /// <exception cref="IOException">
     /// The input file cannot be read (it does not exist, for example) or the output file cannot be written.
