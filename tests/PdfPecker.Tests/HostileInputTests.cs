@@ -958,6 +958,22 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void A_header_taller_than_the_page_is_not_laid_out_and_written_again_on_every_page()
+    {
+        // A header whose padding leaves no room for its text puts each letter on a line of its own, far below the page.
+        // It was laid out again for every page and all of it written on each: a fuzzed page of 500 pages and a word of
+        // 18,000 letters took 57 s and 8 GB. A header without page numbers is now laid out once, and only what lands on
+        // the paper is written.
+        var html = "<style>@page{size:300pt 300pt;margin:0}body{overflow-wrap:break-word}</style>"
+                   + "<header data-sticky-pdf-header style='padding:0 200pt'><p>" + new string('y', 6000) + "</p></header>"
+                   + "<main style='padding-top:90000pt'></main>";
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(pdf.Length, 0, 1L << 20);
+        Assert.InRange(allocated, 0, 128L << 20);
+    }
+
+    [Fact]
     public void Tables_with_one_wide_row_among_many_rows_store_only_the_cells_they_have()
     {
         // A grid of every row and column of this table is 18 million places, 144 MB, almost all of them empty; a fuzzed
