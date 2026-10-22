@@ -1018,6 +1018,24 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void A_footer_with_braces_that_are_not_page_numbers_is_laid_out_once()
+    {
+        // The fluent package writes a caller's brace as "{<span></span>" so that its text stays as written. Any brace
+        // made a band count as numbered, so a footer with a table of 3,000 rows was laid out again for each of 625
+        // pages, which took 11 s and allocated 2.7 GB. Only {page}, {pages} and {total-pages} now do, and this footer
+        // is laid out once.
+        var html = "<style>@page{size:300pt 300pt;margin:0}</style>"
+                   + "<footer data-sticky-pdf-footer height='40pt'><table>" + Repeat("<tr><td>{a}</td><td>b</td></tr>", 3000)
+                   + "</table><p>Total {<span></span>page} of {net}</p></footer>"
+                   + "<main style='padding-top:75000pt'></main>";
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.Equal(625, PageCount(pdf));
+        Assert.Contains("Total {page} of {net}", PdfText.ExtractPage(pdf, 625).Text, StringComparison.Ordinal);
+        Assert.InRange(allocated, 0, 256L << 20);
+    }
+
+    [Fact]
     public void Tables_with_one_wide_row_among_many_rows_store_only_the_cells_they_have()
     {
         // A grid of every row and column of this table is 18 million places, 144 MB, almost all of them empty; a fuzzed

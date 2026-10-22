@@ -128,12 +128,22 @@ public static partial class HtmlToPdf
             if (op is GroupOp g and not LayerOp) OffPaper(g.Ops, top, bottom);
     }
 
+    /// <summary>
+    /// The text nodes of a band that hold {page}, {pages} or {total-pages}. Text with other braces, such as the fluent
+    /// package's caller text, which it writes as "{&lt;span&gt;&lt;/span&gt;page}" so that it stays as written, is the
+    /// same on every page and must not make the band be laid out again for each.
+    /// </summary>
     private static void CollectPlaceholders(Element e, List<(TextNode, string)> texts)
     {
         foreach (var c in e.Children)
         {
-            if (c is TextNode t && t.Text.IndexOf('{') >= 0) texts.Add((t, t.Text));
+            if (c is TextNode t && HasPlaceholder(t.Text)) texts.Add((t, t.Text));
             else if (c is Element ce) CollectPlaceholders(ce, texts);
         }
     }
+
+    /// <summary>Whether the text holds a placeholder that <see cref="ReplacePlaceholders"/> replaces.</summary>
+    private static bool HasPlaceholder(string text)
+        => text.Contains("{page}", StringComparison.Ordinal) || text.Contains("{pages}", StringComparison.Ordinal)
+           || text.Contains("{total-pages}", StringComparison.Ordinal);
 }
