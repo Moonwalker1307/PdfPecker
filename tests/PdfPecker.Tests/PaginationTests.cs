@@ -240,6 +240,22 @@ public class PaginationTests
     }
 
     [Fact]
+    public void Bookmarks_in_a_grid_row_point_at_their_heading_after_the_row_is_probed()
+    {
+        // The row crosses the page, so its item is laid out on the pages to see where its content starts and then placed
+        // from where it was captured. The probe left the heading's anchor where it laid the heading out, and placing
+        // moved it from there: the bookmark pointed about 250 points above the heading.
+        var pdf = ConvertUncompressed("<div style='height:250mm'></div><div style='display:grid;grid-template-columns:20mm 1fr'><div>"
+                                      + "<div style='break-inside:avoid'>Card<div style='display:flex;flex-direction:column;height:100mm'>"
+                                      + "<div style='margin-top:auto'><h2>Heading</h2></div></div></div></div></div>");
+        var dest = Regex.Match(Latin1(pdf), @"/Title \(Heading\) .*?/Dest \[\d+ 0 R /XYZ 0 ([\d.]+) null\]");
+        Assert.True(dest.Success);
+        var page = PdfText.ExtractPages(pdf)[1];
+        var heading = page.Lines.Single(l => l.Text == "Heading");
+        Assert.InRange(double.Parse(dest.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture), page.Height - heading.Y - 2, page.Height - heading.Y + 4);
+    }
+
+    [Fact]
     public void Bookmarks_follow_the_heading_levels()
     {
         var pdf = ConvertUncompressed("<h1>Intro</h1><h2>Part A</h2><h3>Detail</h3><h2>Part B</h2>" +
