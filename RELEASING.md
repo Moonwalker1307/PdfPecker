@@ -36,7 +36,7 @@ PdfPecker.Fluent depends on the PdfPecker package of its own version, as a minim
 Open one pull request on the library that:
 
 - raises `PackageValidationBaselineVersion` to the new version in both `src/PdfPecker/PdfPecker.csproj` and
-  `src/PdfPecker.Fluent/PdfPecker.Fluent.csproj` (after PdfPecker.Fluent's first release, add the property there), and
+  `src/PdfPecker.Fluent/PdfPecker.Fluent.csproj`, and
   `Version` in `Directory.Build.props` to the next patch's `-dev` (CI warns while the library's baseline lags behind
   the latest tag);
 - updates the version placeholder in `.github/ISSUE_TEMPLATE/bug_report.yml`;
