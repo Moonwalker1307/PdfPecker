@@ -29,6 +29,12 @@ internal sealed partial class LayoutEngine
     // A box split between more columns than this is drawn in the first ones only (a huge height in tiny columns).
     private const int MaxSplitFragments = 4096;
 
+    // Columns narrower than this (one CSS pixel) are laid out as a single column.
+    private const float MinColumnWidth = 0.75f;
+
+    // The widest a PDF page can be, in points. Overflow columns further than this beside a box are on no page.
+    private const float MaxPageExtent = 14_400;
+
     // Without pages or a height, columns start this tall, so that only forced breaks end them; taller content would
     // break there too.
     private const float UnboundedColumn = 100_000;
@@ -73,6 +79,10 @@ internal sealed partial class LayoutEngine
         int n = ColumnCountFor(s, w, gap);
         if (n <= 1) return LayoutFlow(e, x, y, w);
         float colW = Math.Max(0, (w - (n - 1) * gap) / n);
+        // Columns narrower than a pixel hold nothing readable, and each nested multi-column box divides the width
+        // again: laid out as columns, every level copied all the content inside it, so hundreds of nested boxes took
+        // the square of their depth. They are laid out as one column, which bounds the nesting to a few dozen levels.
+        if (colW < MinColumnWidth) return LayoutFlow(e, x, y, w);
         if (_columnDepth >= MaxBalancedNesting) return LayoutWholeColumns(e, x, y, w, n, colW, gap);
         // The columns are as wide on every page: the page geometry does not reach into them.
         _pageBox = null;
@@ -596,8 +606,23 @@ internal sealed partial class LayoutEngine
         bool rtl = s.Rtl;
         var parts = new SortedDictionary<int, List<DrawOp>>();
         int lastK = 0;
+        // Overflow columns beside the last row that are further away than any page is wide show nothing, so what falls
+        // in them is dropped rather than split between them. A row of columns half a point tall, left at the bottom of
+        // a column around the box, split each of 3,000 boxes 40 mm tall into 150 copies, nearly half a million in all.
+        int last = g.GivenRows - 1;
+        if (last >= 0 && g.IsLastRow(last))
+        {
+            long beside = step > 0 ? (long)Math.Min(int.MaxValue, Math.Ceiling(MaxPageExtent / step)) : 0;
+            g.Hidden = (int)Math.Min(int.MaxValue, g.FirstFragmentOf(last) + (long)n + beside);
+        }
+        var dropped = new List<DrawOp>();
         List<DrawOp> Into(int k)
         {
+            if (k >= g.Hidden)
+            {
+                dropped.Clear();
+                return dropped;
+            }
             if (!parts.TryGetValue(k, out var list)) parts[k] = list = new List<DrawOp>();
             return list;
         }
@@ -747,8 +772,8 @@ internal sealed partial class LayoutEngine
         }
     }
 
-    /// <summary>The fragment a y is in, as the layout decides it.</summary>
-    private static int Frag(ColumnGrid g, float y) => g.PageOf(y + Eps);
+    /// <summary>The fragment a y is in, as the layout decides it; all of the hidden ones count as the first of them.</summary>
+    private static int Frag(ColumnGrid g, float y) => Math.Min(g.PageOf(y + Eps), g.Hidden);
 
     /// <summary>The fragments [top, bottom) falls in, at most <see cref="MaxSplitFragments"/>.</summary>
     private static (int First, int Last) FragRange(ColumnGrid g, float top, float bottom)
@@ -1024,6 +1049,9 @@ internal sealed class ColumnGrid : PageGrid
     public readonly float Top;
 
     public readonly int Columns;
+
+    /// <summary>The first fragment on no page, whose content and the content after it are not drawn.</summary>
+    public int Hidden = int.MaxValue;
 
     /// <summary>The number of rows whose heights were given.</summary>
     public int GivenRows => _rowH.Length;

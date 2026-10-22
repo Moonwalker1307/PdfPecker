@@ -137,6 +137,15 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Thousands_of_nested_multi_column_boxes_stay_fast()
+    {
+        // Found by the fuzzer: target html, timeout-36981e1b. Each multi-column box divides the width again, and each
+        // level copied all the content inside it into its columns; columns narrower than a pixel are now one column.
+        string level = "<h2>Multi-column</h2><div class=cols><h3>column-span: all heading</h3><p>Column rules sit in the gaps between columns.";
+        AssertStructurallyValid(Bounded("<style>.cols { columns: 3; column-gap: 14pt } .cols h3 { column-span: all }</style>" + Repeat(level, 2400)));
+    }
+
+    [Fact]
     public void Balancing_lines_of_thousands_of_tiny_words_stays_fast()
     {
         // Choosing breaks again costs the square of a line's break opportunities: tiny words on wide lines keep their
@@ -901,6 +910,20 @@ public class HostileInputTests
         var (pdf, allocated) = Allocating(() => Bounded(html));
         AssertStructurallyValid(pdf);
         Assert.InRange(allocated, 0, 128L << 20);
+    }
+
+    [Fact]
+    public void Content_in_overflow_columns_beside_every_page_is_not_split_between_them()
+    {
+        // The inner box starts half a point above the end of the outer box's column, so its overflow columns are half a
+        // point tall: each 40 mm box in them was split into 150 copies, 450,000 in all, a 3.5 MB page in 4.5 s. All but
+        // the first few columns are further beside the page than any page is wide.
+        var fill = "<div style='column-count:2;column-fill:auto;height:40mm;border:0.5pt solid #ccc'>";
+        var html = Repeat(fill, 2) + Repeat(fill + "</div>", 3000) + "x</div></div>";
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(pdf.Length, 1, 256 << 10);
+        Assert.InRange(allocated, 0, 256L << 20);
     }
 
     [Fact]
