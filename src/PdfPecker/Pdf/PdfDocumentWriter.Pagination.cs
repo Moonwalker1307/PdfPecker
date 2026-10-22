@@ -80,6 +80,7 @@ internal sealed partial class PdfDocumentWriter
         private int _pageOffset;         // pages of the sections before the one being distributed
         private Func<int, float>? _footnoteCut; // the space footnote areas take at the bottom of the pages being distributed
         private int _backdrops;          // boxes with a backdrop-filter given a part on every page they reach
+        private int _clipFirst, _clipLast = int.MaxValue; // the pages the clips being distributed show
 
         public PageDistributor(int maxPages) => _maxPages = maxPages;
 
@@ -136,7 +137,9 @@ internal sealed partial class PdfDocumentWriter
         {
             if (bottom < top) (top, bottom) = (bottom, top);
             int p0 = PageOf(top), p1 = Math.Max(p0, PageOf(bottom - 0.5f));
-            for (int p = p0; p <= p1; p++)
+            // Parts on pages a clip hides are left out: a column's part of a box as tall as many pages is drawn
+            // whole in that column, clipped to it, and would otherwise be split over every page the box reaches.
+            for (int p = Math.Max(p0, _clipFirst), last = Math.Min(p1, _clipLast); p <= last; p++)
             {
                 float y0 = Math.Max(top, _grid.Start(p)), y1 = Math.Min(bottom, _grid.Start(p + 1) - (_footnoteCut?.Invoke(p) ?? 0));
                 if (y1 > y0 || top == bottom) Target(into, p).Add(new Placed(op, y0, y1));
@@ -165,9 +168,12 @@ internal sealed partial class PdfDocumentWriter
                 {
                     // Content hidden beyond the clip's last page must not add pages of its own.
                     var parts = new SortedDictionary<int, List<Placed>>();
-                    foreach (var o in clip.Ops) Distribute(o, parts);
                     bool clipsY = clip.H < ClipOp.Far;
                     int first = clipsY ? PageOf(clip.Y) : 0, last = clipsY ? Math.Max(first, PageOf(clip.Y + clip.H - 0.5f)) : int.MaxValue;
+                    var (savedFirst, savedLast) = (_clipFirst, _clipLast);
+                    (_clipFirst, _clipLast) = (Math.Max(first, savedFirst), Math.Min(last, savedLast));
+                    foreach (var o in clip.Ops) Distribute(o, parts);
+                    (_clipFirst, _clipLast) = (savedFirst, savedLast);
                     // Content starting above the clip's first page, such as an image that object-fit: none centres in a
                     // smaller box, shows only through the clip, so it is drawn with the clip on that page.
                     List<Placed>? above = null;
