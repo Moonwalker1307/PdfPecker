@@ -124,7 +124,10 @@ internal static class DocumentGenerator
         foreach (var page in pages)
         {
             string html = HtmlWriter.Write(page, composed.Container.Css, composed.Metadata, images);
-            pdfs.Add(HtmlToPdf.Convert(html, Options(options, composed, page, images), cancellationToken));
+            var pageOptions = Options(options, composed, page, images);
+            // Merging rewrites the parts, so a merged document is linearized once, after merging.
+            if (pages.Count > 1) pageOptions.Linearize = false;
+            pdfs.Add(HtmlToPdf.Convert(html, pageOptions, cancellationToken));
         }
         if (pdfs.Count == 1) return pdfs[0];
 
@@ -141,7 +144,8 @@ internal static class DocumentGenerator
             Bookmarks = options?.Bookmarks ?? true,
         };
         if (options != null) merge.CustomProperties = options.CustomProperties;
-        return PdfMerger.Merge(pdfs, merge, cancellationToken);
+        var merged = PdfMerger.Merge(pdfs, merge, cancellationToken);
+        return options is { Linearize: true } ? PdfLinearizer.Linearize(merged, cancellationToken) : merged;
     }
 
     /// <summary>A copy of the caller's options with the document's page, metadata and settings applied.</summary>
@@ -213,6 +217,7 @@ internal static class DocumentGenerator
         Attachments = o.Attachments,
         EmbedStandardFonts = o.EmbedStandardFonts,
         Signature = o.Signature,
+        Linearize = o.Linearize,
     };
 }
 

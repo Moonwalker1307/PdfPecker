@@ -43,20 +43,24 @@ const string Rtl = """
     </body></html>
     """;
 
-var profiles = new (string Name, PdfConformance Conformance, PdfAccessibility Accessibility, string[] Flavours)[]
+var profiles = new (string Name, PdfConformance Conformance, PdfAccessibility Accessibility, string[] Flavours, bool Linearize)[]
 {
-    ("pdfa-2b", PdfConformance.PdfA2b, PdfAccessibility.None, ["2b"]),
-    ("pdfa-2u", PdfConformance.PdfA2u, PdfAccessibility.None, ["2u"]),
-    ("pdfa-3b", PdfConformance.PdfA3b, PdfAccessibility.None, ["3b"]),
-    ("pdfa-3u", PdfConformance.PdfA3u, PdfAccessibility.None, ["3u"]),
-    ("pdfa-4", PdfConformance.PdfA4, PdfAccessibility.None, ["4"]),
-    ("pdfua-1", PdfConformance.None, PdfAccessibility.PdfUA1, ["ua1"]),
-    ("pdfua-2-pdfa-4", PdfConformance.PdfA4, PdfAccessibility.PdfUA2, ["4", "ua2"]),
-    ("pdfa-2b-pdfua-1", PdfConformance.PdfA2b, PdfAccessibility.PdfUA1, ["2b", "ua1"]),
-    ("pdfa-3b-pdfua-1", PdfConformance.PdfA3b, PdfAccessibility.PdfUA1, ["3b", "ua1"]),
+    ("pdfa-2b", PdfConformance.PdfA2b, PdfAccessibility.None, ["2b"], false),
+    ("pdfa-2u", PdfConformance.PdfA2u, PdfAccessibility.None, ["2u"], false),
+    ("pdfa-3b", PdfConformance.PdfA3b, PdfAccessibility.None, ["3b"], false),
+    ("pdfa-3u", PdfConformance.PdfA3u, PdfAccessibility.None, ["3u"], false),
+    ("pdfa-4", PdfConformance.PdfA4, PdfAccessibility.None, ["4"], false),
+    ("pdfua-1", PdfConformance.None, PdfAccessibility.PdfUA1, ["ua1"], false),
+    ("pdfua-2-pdfa-4", PdfConformance.PdfA4, PdfAccessibility.PdfUA2, ["4", "ua2"], false),
+    ("pdfa-2b-pdfua-1", PdfConformance.PdfA2b, PdfAccessibility.PdfUA1, ["2b", "ua1"], false),
+    ("pdfa-3b-pdfua-1", PdfConformance.PdfA3b, PdfAccessibility.PdfUA1, ["3b", "ua1"], false),
     // Tagged PDF has no veraPDF profile of its own: these files are only generated, and the PDF/UA-1 profiles above
     // cover the structure tree. The empty flavour list tells check.py to skip them.
-    ("tagged", PdfConformance.None, PdfAccessibility.Tagged, []),
+    ("tagged", PdfConformance.None, PdfAccessibility.Tagged, [], false),
+    // Linearized (Fast Web View) files are rewritten after writing, so they are checked again for each standard.
+    ("pdfa-2b-linearized", PdfConformance.PdfA2b, PdfAccessibility.None, ["2b"], true),
+    ("pdfua-1-linearized", PdfConformance.None, PdfAccessibility.PdfUA1, ["ua1"], true),
+    ("pdfua-2-pdfa-4-linearized", PdfConformance.PdfA4, PdfAccessibility.PdfUA2, ["4", "ua2"], true),
 };
 
 Directory.CreateDirectory(outDir);
@@ -76,6 +80,7 @@ foreach (var profile in profiles)
         BaseDirectory = baseDirectory,
         Title = "Conformance sample",
         Language = "en",
+        Linearize = profile.Linearize,
     };
 
     foreach (var input in inputs)
@@ -90,11 +95,12 @@ foreach (var profile in profiles)
 }
 
 // The attachment levels: the golden e-invoice page with its XML attached. PDF/A-3 and PDF/A-4f may carry attachments.
-foreach (var (name, conformance, accessibility, flavours) in new (string, PdfConformance, PdfAccessibility, string[])[]
+foreach (var (name, conformance, accessibility, flavours, linearize) in new (string, PdfConformance, PdfAccessibility, string[], bool)[]
 {
-    ("pdfa-3b-einvoice", PdfConformance.PdfA3b, PdfAccessibility.None, ["3b"]),
-    ("pdfa-4f-einvoice", PdfConformance.PdfA4f, PdfAccessibility.None, ["4f"]),
-    ("pdfa-3b-pdfua-1-einvoice", PdfConformance.PdfA3b, PdfAccessibility.PdfUA1, ["3b", "ua1"]),
+    ("pdfa-3b-einvoice", PdfConformance.PdfA3b, PdfAccessibility.None, ["3b"], false),
+    ("pdfa-4f-einvoice", PdfConformance.PdfA4f, PdfAccessibility.None, ["4f"], false),
+    ("pdfa-3b-pdfua-1-einvoice", PdfConformance.PdfA3b, PdfAccessibility.PdfUA1, ["3b", "ua1"], false),
+    ("pdfa-3b-einvoice-linearized", PdfConformance.PdfA3b, PdfAccessibility.None, ["3b"], true),
 })
 {
     var dir = Path.Combine(outDir, name);
@@ -109,6 +115,7 @@ foreach (var (name, conformance, accessibility, flavours) in new (string, PdfCon
         Title = "Invoice INV-2026-0042",
         Language = "en",
         EInvoice = new PdfEInvoice(invoiceXml),
+        Linearize = linearize,
     });
     File.WriteAllBytes(Path.Combine(dir, "einvoice.pdf"), pdf);
 }

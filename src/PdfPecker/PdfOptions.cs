@@ -392,4 +392,14 @@ public sealed class PdfOptions
     /// and <see cref="Conformance"/>.
     /// </summary>
     public PdfSignatureOptions? Signature { get; set; }
+
+    /// <summary>
+    /// Writes a linearized PDF (Fast Web View): the first page and what it needs come first, with a hint stream that tells
+    /// a viewer where every later page lies, so a browser or viewer loading the file over the web shows the first page
+    /// before the rest has arrived. It costs a second pass over the file and adds a little to its size, and pays off for
+    /// large documents served over a network. Works together with <see cref="Security"/>, <see cref="Conformance"/> and
+    /// <see cref="Accessibility"/>, but not with <see cref="Signature"/>: a signature is added as an incremental update,
+    /// which ends the linearization. Default: false.
+    /// </summary>
+    public bool Linearize { get; set; }
 }

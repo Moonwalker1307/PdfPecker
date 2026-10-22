@@ -118,19 +118,19 @@ internal sealed class PdfRewriter : PdfObjectWriter
         PdfFile.CheckCancel();
         Begin(id);
         if (obj is PdfStream s) WriteStream(_out, _file, s);
-        else if (isRoot && _crypt != null && obj is PdfDict catalog) WriteDict(_out, WithExtensionLevel(catalog), 0);
+        else if (isRoot && _crypt != null && obj is PdfDict catalog) WriteDict(_out, WithExtensionLevel(_file, catalog), 0);
         else WriteObject(_out, obj);
         End();
     }
 
     /// <summary>The catalog with /Extensions declaring Adobe extension level 8, under which PDF 1.7 readers expect AES-256.</summary>
-    private PdfDict WithExtensionLevel(PdfDict catalog)
+    internal static PdfDict WithExtensionLevel(PdfFile file, PdfDict catalog)
     {
         var entries = new Dictionary<string, PdfObject>(catalog.Entries, StringComparer.Ordinal);
-        var extensions = _file.Resolve(catalog["Extensions"]) is PdfDict ext
+        var extensions = file.Resolve(catalog["Extensions"]) is PdfDict ext
             ? new Dictionary<string, PdfObject>(ext.Entries, StringComparer.Ordinal)
             : new Dictionary<string, PdfObject>(StringComparer.Ordinal);
-        if (_file.Resolve(extensions.GetValueOrDefault("ADBE")) is not PdfDict adbe || _file.GetInt(adbe, "ExtensionLevel", 0) < 8)
+        if (file.Resolve(extensions.GetValueOrDefault("ADBE")) is not PdfDict adbe || file.GetInt(adbe, "ExtensionLevel", 0) < 8)
             extensions["ADBE"] = new PdfDict(new Dictionary<string, PdfObject>(StringComparer.Ordinal)
             {
                 ["BaseVersion"] = PdfName.Get("1.7"),

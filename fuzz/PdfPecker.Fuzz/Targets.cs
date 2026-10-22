@@ -196,6 +196,13 @@ internal static class Targets
             },
             new()
             {
+                Name = "pdf-linearize", Extension = ".pdf", Seeds = pdfSeeds, MaxSize = 1 << 20,
+                // A mutated input can turn out signed or encrypted, which linearizing refuses as documented.
+                ExtraExpected = ex => ex is ArgumentException { ParamName: "pdf" },
+                Run = (d, ct) => PdfLinearizer.Linearize(d, ct),
+            },
+            new()
+            {
                 Name = "pdf-verify", Extension = ".pdf", Seeds = pdfSeeds, MaxSize = 1 << 20,
                 Run = (d, ct) => PdfSignatureVerifier.Verify(d, new PdfSignatureVerificationOptions { TrustedRoots = SeedContext.TrustedRoots() }),
             },

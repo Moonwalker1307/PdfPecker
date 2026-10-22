@@ -73,6 +73,7 @@ public static partial class HtmlToPdf
             Watermark = _options.Watermark,
             RightToLeft = _rtlPages,
             Security = _options.Security,
+            Linearize = _options.Linearize,
             Conformance = _settings.Conformance,
             EInvoice = _options.EInvoice,
             Attachments = _settings.Attachments,
