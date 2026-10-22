@@ -731,6 +731,17 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Svg_text_in_deeply_nested_translucent_groups_has_its_font()
+    {
+        // Found by the fuzzer (target svg, nightly run 70): each translucent group wraps its content in a child list, and
+        // the pass that registers the fonts of SVG text stopped 16 lists deep while the writer drew all of them, so text
+        // needing an embedded font 17 or more groups deep was written with a font that had no subset.
+        var pdf = Bounded("<svg width='100' height='50'>" + Repeat("<g opacity='.5'>", 20)
+            + "<text x='5' y='20'>\u05D0\u05A5 %</text>" + Repeat("</g>", 20) + "</svg>");
+        AssertStructurallyValid(pdf);
+    }
+
+    [Fact]
     public void Svg_path_numbers_after_a_closepath_end_the_path()
     {
         // A closepath reads no numbers, so numbers after it were taken as one more closepath that never moved past
