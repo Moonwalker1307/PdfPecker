@@ -487,6 +487,19 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Content_deep_in_nested_flex_items_is_not_copied_at_every_level()
+    {
+        // Found by the fuzzer: target html, a card in columns around 250 nested flex rows. Each flex item is laid out
+        // on its own and then placed in its container, which copied everything drawn inside it, so the content at the
+        // bottom was copied once for every level above it, in every layout of them: 285 MB for twenty thousand boxes.
+        var html = "<style>.f { display: flex } .b { border-top: 1pt solid; height: 1pt }</style>"
+                   + Repeat("<div class=f>", 250) + "<div>" + Repeat("<div class=b></div>", 20_000) + "</div>";
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 80L << 20);
+    }
+
+    [Fact]
     public void Stretched_grid_items_reuse_the_measurements_inside_them()
     {
         // Found by the fuzzer: target html, timeout-d2edd0b0. A grid item stretched to a taller row is laid out again at
