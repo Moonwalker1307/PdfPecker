@@ -9,6 +9,31 @@ internal sealed partial class PageRenderer
     private const int MaxTileSize = 2048;
     private Dictionary<(PdfObject, int, int, int, int, uint), TileShader?>? _tiles;
 
+    // The device pixels the fill being set up can touch, while a pattern for it is created; null for the whole clip.
+    private (int X0, int Y0, int X1, int Y1)? _fillArea;
+
+    /// <summary>
+    /// The device pixels a path can cover, from its points and control points (which bound its curves), with a margin
+    /// for anti-aliasing; null when it has no finite points.
+    /// </summary>
+    private static (int X0, int Y0, int X1, int Y1)? DeviceBounds(PathData path, in Matrix ctm)
+    {
+        var points = path.Points;
+        double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
+        for (int i = 0; i + 1 < points.Count; i += 2)
+        {
+            var (x, y) = ctm.Apply(points[i], points[i + 1]);
+            minX = Math.Min(minX, x); maxX = Math.Max(maxX, x);
+            minY = Math.Min(minY, y); maxY = Math.Max(maxY, y);
+        }
+        if (!(minX <= maxX && minY <= maxY) || !double.IsFinite(minX) || !double.IsFinite(maxX) || !double.IsFinite(minY) || !double.IsFinite(maxY))
+            return null;
+        const double Margin = 2;
+        static int Floor(double v) => (int)Math.Clamp(Math.Floor(v - Margin), int.MinValue / 2, int.MaxValue / 2);
+        static int Ceiling(double v) => (int)Math.Clamp(Math.Ceiling(v + Margin) + 1, int.MinValue / 2, int.MaxValue / 2);
+        return (Floor(minX), Floor(minY), Ceiling(maxX), Ceiling(maxY));
+    }
+
     /// <summary>The <c>sh</c> operator: paints a shading over the current clip.</summary>
     private void PaintShadingOperator(string name, PdfDict? res)
     {
@@ -152,9 +177,17 @@ internal sealed partial class PageRenderer
                 case 3: return GradientShader.Create(_file, shading, type, cs, fn, inv, background);
                 case 4: case 5: case 6: case 7:
                 {
-                    var layer = new Canvas(_canvas.Width, _canvas.Height, background);
-                    MeshShading.Paint(_file, shading, type, cs, fn, shadingToDevice, layer, _gs.Clip);
-                    return new CanvasShader(layer);
+                    // The mesh is painted into a layer covering only the clip and the area being filled: a full-page
+                    // layer for every filled shape made pages with many small shaded shapes allocate gigabytes.
+                    var clip = _gs.Clip;
+                    int x0 = Math.Max(0, clip.X0), y0 = Math.Max(0, clip.Y0);
+                    int x1 = Math.Min(_canvas.Width, clip.X1), y1 = Math.Min(_canvas.Height, clip.Y1);
+                    if (_fillArea is var (ax0, ay0, ax1, ay1))
+                        (x0, y0, x1, y1) = (Math.Max(x0, ax0), Math.Max(y0, ay0), Math.Min(x1, ax1), Math.Min(y1, ay1));
+                    if (x1 <= x0 || y1 <= y0) return null;
+                    var layer = new Canvas(x1 - x0, y1 - y0, background);
+                    MeshShading.Paint(_file, shading, type, cs, fn, shadingToDevice, layer, x0, y0, clip, _canvas.Width, _canvas.Height);
+                    return new CanvasShader(layer, x0, y0, background);
                 }
             }
         }

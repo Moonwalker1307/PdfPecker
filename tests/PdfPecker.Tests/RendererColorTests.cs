@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using static PdfPecker.Tests.FixturePdf;
 
 namespace PdfPecker.Tests;
@@ -551,5 +552,33 @@ public class RendererColorTests
         // Only the 20x20 square is painted, with the gradient inside it; the rest stays white.
         AssertBarycentric(img, new V(0, 0, 255, 0, 0), new V(40, 0, 0, 255, 0), new V(0, 40, 0, 0, 255), 2, 2);
         AssertAt(img, 30, 30, 255, 255, 255);
+    }
+
+    [Fact]
+    public void Many_small_mesh_pattern_fills_paint_only_their_own_area()
+    {
+        // 400 small triangles each filled with a mesh shading pattern on a 1000 x 1000 pixel page, as a 3D figure in a
+        // LaTeX thesis does. Each fill used to get a page-sized layer (4 MB, so 1.6 GB here); now it gets its own area.
+        var pdf = new FixturePdf();
+        byte[] data = { 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 255, 0, 0, 0, 255, 0, 0, 255 };
+        int sh = pdf.AddStream("/ShadingType 4 /ColorSpace /DeviceRGB /BitsPerCoordinate 8 /BitsPerComponent 8 /BitsPerFlag 8 /Decode [0 1000 0 1000 0 1 0 1 0 1]", data);
+        int pat = pdf.Add($"<< /PatternType 2 /Shading {sh} 0 R >>");
+        var content = new StringBuilder("/Pattern cs /P scn ");
+        for (int i = 0; i < 400; i++)
+        {
+            int x = i % 20 * 50, y = i / 20 * 50;
+            content.Append(CultureInfo.InvariantCulture, $"{x} {y} m {x + 40} {y} l {x} {y + 40} l f ");
+        }
+        var page = pdf.Build(1000, 1000, content.ToString(), $"/Pattern << /P {pat} 0 R >>");
+        Render(page);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        var img = Render(page);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.True(allocated < 200L << 20, $"{allocated >> 20} MB allocated");
+        // The gradient still runs over the whole page: red at the origin, green along x and blue along y.
+        AssertAt(img, 2, 2, 254, 1, 1, 8);
+        AssertAt(img, 952, 2, 11, 243, 1, 8);
+        AssertAt(img, 2, 952, 11, 1, 243, 8);
+        AssertAt(img, 45, 2, 255, 255, 255); // between two triangles
     }
 }
