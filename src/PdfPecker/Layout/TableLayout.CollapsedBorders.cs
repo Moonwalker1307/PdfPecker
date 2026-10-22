@@ -217,7 +217,8 @@ internal sealed partial class LayoutEngine
         foreach (int side in (ReadOnlySpan<int>)[BoxPainter.Top, BoxPainter.Bottom, BoxPainter.Left, BoxPainter.Right])
         {
             bool horizontal = side is BoxPainter.Top or BoxPainter.Bottom;
-            int count = horizontal ? cols : rows;
+            // A table whose rows hold no cells has no columns, and so no cell beside any side.
+            int count = rows == 0 || cols == 0 ? 0 : horizontal ? cols : rows;
             bool whole = count > 0;
             for (int k = 0; k < count && whole; k++)
             {

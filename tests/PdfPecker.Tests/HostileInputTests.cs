@@ -43,6 +43,18 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Rounded_boxes_split_over_columns_on_many_pages_stay_linear()
+    {
+        // Each column holds its part of every rounded box around it, drawn whole and clipped to the column. The parts
+        // of a box as tall as a hundred pages must not each be split over every page the box reaches, and a page must
+        // not redraw the parts of all the pages before it.
+        const int depth = 200;
+        string html = "<style>.c { columns: 3 } .b { border: 1pt solid #888; border-radius: 2pt; padding: 0 1pt }</style><div class=\"c\">"
+            + Repeat("<div class=\"b\">", depth) + Repeat("x<br>", 24_000) + Repeat("</div>", depth) + "</div>";
+        Assert.NotEmpty(Bounded(html));
+    }
+
+    [Fact]
     public void Content_moved_out_of_tables_stays_linear()
     {
         // Each stray node between rows goes in front of its table; inserting at the table's place must not search or
@@ -112,6 +124,16 @@ public class HostileInputTests
         string word = Repeat("e\u0301", 20_000);
         var pdf = Bounded("<style>p { text-align: justify; text-justify: inter-character; width: 300pt }</style>"
             + "<p>" + word + " " + word + " x</p><p>" + Repeat("漢字 ", 20_000) + "</p>");
+    }
+
+    [Fact]
+    public void Thousands_of_marks_on_one_base_shape_in_linear_time()
+    {
+        // Found by the fuzzer: target html, timeout-522fb4dc. Each mark searched back over every mark before it for its
+        // base, and then summed the advances between them, so a long run of marks took the square of its length.
+        var options = new PdfOptions();
+        options.Fonts.Add(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "NotoSansHebrew-Subset.ttf")), "He");
+        AssertStructurallyValid(Bounded("<p style='font-family:He'>\u05E9" + Repeat("\u05B9", 80_000) + "</p>", options));
     }
 
     [Fact]
@@ -345,6 +367,16 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(Repeat(level, 50) + end));
     }
 
+    [Theory]
+    [InlineData("<style>table{border-collapse:collapse</style><table><tr")]
+    [InlineData("<table style='border-collapse:collapse; border:1pt solid'><tr></tr><tr></tr></table><p>end</p>")]
+    public void Collapsed_table_whose_rows_hold_no_cells_converts(string html)
+    {
+        // Rows without cells give a table no columns. Its left and right sides then looked for the cell beside them
+        // in column -1, which threw IndexOutOfRangeException.
+        AssertStructurallyValid(Bounded(html));
+    }
+
     [Fact]
     public void Nested_wrapping_column_flex_boxes_stay_bounded()
     {
@@ -493,6 +525,19 @@ public class HostileInputTests
         var (pdf, allocated) = Allocating(() => Bounded(html));
         AssertStructurallyValid(pdf);
         Assert.InRange(allocated, 0, 160L << 20);
+    }
+
+    [Fact]
+    public void Content_deep_in_nested_flex_items_is_not_copied_at_every_level()
+    {
+        // Found by the fuzzer: target html, a card in columns around 250 nested flex rows. Each flex item is laid out
+        // on its own and then placed in its container, which copied everything drawn inside it, so the content at the
+        // bottom was copied once for every level above it, in every layout of them: 285 MB for twenty thousand boxes.
+        var html = "<style>.f { display: flex } .b { border-top: 1pt solid; height: 1pt }</style>"
+                   + Repeat("<div class=f>", 250) + "<div>" + Repeat("<div class=b></div>", 20_000) + "</div>";
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 80L << 20);
     }
 
     [Fact]
@@ -788,6 +833,19 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Backdrop_filters_stacked_on_each_other_count_the_backdrops_they_redraw()
+    {
+        // Found by the fuzzer: target html, timeout-fc51c4c5. Each backdrop's rendering decodes and draws the filtered
+        // backdrops behind it again, which the budget did not count, so boxes stacked on one place grew with the square of
+        // their number: 64 of them allocated 1.5 GB.
+        var html = "<div style='position:relative;height:120mm;background:linear-gradient(90deg, red, blue)'>"
+                   + Repeat("<div style='position:absolute;inset:0;backdrop-filter:grayscale(1);background:#ffffff1a'></div>", 64) + "</div>";
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 768L << 20);
+    }
+
+    [Fact]
     public void Nested_and_huge_backdrop_filters_are_bounded()
     {
         var nested = Repeat("<div style='padding:1px;backdrop-filter:invert(1)'>", 400) + "x" + Repeat("</div>", 400);
@@ -822,6 +880,22 @@ public class HostileInputTests
         AssertStructurallyValid(pdf);
         Assert.InRange(pdf.Length, 1, 64 << 20);
         Assert.InRange(allocated, 0, 1024L << 20);
+    }
+
+    [Theory]
+    [InlineData("isolation:isolate")]
+    [InlineData("opacity:.99")]
+    [InlineData("mask:linear-gradient(#000,#000)")]
+    [InlineData("backdrop-filter:invert(1)")]
+    [InlineData("position:relative;top:1pt")]
+    public void Nested_boxes_with_effects_break_across_pages_as_plain_boxes_do(string effect)
+    {
+        // A box with an effect or a relative offset did not hand the probe for its first content to the box inside it, so each level probed
+        // and was laid out again on its own: 140 levels used up the relayout budget, ended on 3 pages instead of 38
+        // and took over a second.
+        static string Nested(string style) => Repeat($"<div style='padding:4pt;background:#eee;{style}'>", 140) + "end" + Repeat("</div>", 140);
+        int plain = PdfToImage.GetPageCount(Bounded(Nested("")));
+        Assert.Equal(plain, PdfToImage.GetPageCount(Bounded(Nested(effect))));
     }
 
     [Fact]

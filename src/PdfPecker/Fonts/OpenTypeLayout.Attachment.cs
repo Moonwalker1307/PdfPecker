@@ -159,23 +159,42 @@ internal sealed partial class OpenTypeLayout
     // that is not a mark or an invisible control, whatever the lookup's flags. Of the glyphs a multiple substitution
     // made, a mark attaches to the first, unless the subtable covers a later one (HarfBuzz's MarkBasePos accept); with
     // no base coverage, as for mark-to-ligature positioning, to the nearest.
+    //
+    // A long run of marks after one base would make searching back from each mark quadratic, so the search stops where
+    // the previous mark's search of the same lookup started and takes over its answer, as HarfBuzz's last_base does.
     private int PreviousBase(LookupState c, int i, int baseCoverage)
     {
-        var buf = c.Buf;
-        for (int k = i - 1; k >= 0; k--)
+        int stop = 0, found = -1;
+        if (c.BaseCoverage == baseCoverage && c.BaseSearchedBelow <= i)
         {
-            var g = buf[k];
-            if ((g.Props & Mark) != 0 || MaySkip(c, g, context: false)) continue;
-            if (baseCoverage >= 0 && k > 0 && (g.Substitutions & Multiplied) != 0 && g.LigComp != 0)
-            {
-                var before = buf[k - 1];
-                bool laterComponent = (before.Props & Mark) == 0 && (before.Substitutions & Multiplied) != 0
-                    && before.LigId == g.LigId && g.LigComp == before.LigComp + 1;
-                if (laterComponent && CoverageIndex(baseCoverage, g.Gid) < 0) continue;
-            }
-            return k;
+            stop = c.BaseSearchedBelow;
+            found = c.LastBase;
         }
-        return -1;
+        for (int k = i - 1; k >= stop; k--)
+            if (IsBase(c, k, baseCoverage))
+            {
+                found = k;
+                break;
+            }
+        c.BaseCoverage = baseCoverage;
+        c.BaseSearchedBelow = i;
+        c.LastBase = found;
+        return found;
+    }
+
+    private bool IsBase(LookupState c, int k, int baseCoverage)
+    {
+        var buf = c.Buf;
+        var g = buf[k];
+        if ((g.Props & Mark) != 0 || MaySkip(c, g, context: false)) return false;
+        if (baseCoverage >= 0 && k > 0 && (g.Substitutions & Multiplied) != 0 && g.LigComp != 0)
+        {
+            var before = buf[k - 1];
+            bool laterComponent = (before.Props & Mark) == 0 && (before.Substitutions & Multiplied) != 0
+                && before.LigId == g.LigId && g.LigComp == before.LigComp + 1;
+            if (laterComponent && CoverageIndex(baseCoverage, g.Gid) < 0) return false;
+        }
+        return true;
     }
 
     // The mark a mark attaches to for mark-to-mark positioning: the previous glyph, skipping only what the lookup's mark
@@ -224,10 +243,11 @@ internal sealed partial class OpenTypeLayout
     /// </summary>
     public static void PropagateAttachments(GlyphRun buf, bool rtl)
     {
-        for (int i = 0; i < buf.Count; i++) Propagate(buf, i, rtl, MaxAttachmentNesting);
+        Advances? advances = null;
+        for (int i = 0; i < buf.Count; i++) Propagate(buf, i, rtl, MaxAttachmentNesting, ref advances);
     }
 
-    private static void Propagate(GlyphRun buf, int i, bool rtl, int nesting)
+    private static void Propagate(GlyphRun buf, int i, bool rtl, int nesting, ref Advances? advances)
     {
         var g = buf[i];
         int chain = g.AttachChain;
@@ -236,7 +256,7 @@ internal sealed partial class OpenTypeLayout
         buf[i] = g;
         int j = i + chain;
         if ((uint)j >= (uint)buf.Count) return;
-        Propagate(buf, j, rtl, nesting - 1);
+        Propagate(buf, j, rtl, nesting - 1, ref advances);
         g = buf[i];
         var p = buf[j];
         if ((g.AttachType & AttachCursive) != 0) g.YOffset += p.YOffset;
@@ -244,19 +264,38 @@ internal sealed partial class OpenTypeLayout
         {
             g.XOffset += p.XOffset;
             g.YOffset += p.YOffset;
-            if (j < i) g = MoveAfterAdvances(buf, g, j, i, rtl);
+            if (j < i)
+            {
+                // A mark attached to an earlier glyph is drawn after the advances between them, so it moves back over
+                // them (left to right) or forward (right to left). Many marks on one distant base would make summing
+                // the advances for each of them quadratic, so the sums come from running totals, which stay valid
+                // because this pass changes only offsets.
+                advances ??= new Advances(buf);
+                var (x, y) = rtl ? advances.Between(j + 1, i + 1) : advances.Between(j, i);
+                if (rtl) { g.XOffset += x; g.YOffset += y; }
+                else { g.XOffset -= x; g.YOffset -= y; }
+            }
         }
         buf[i] = g;
     }
 
-    // A mark attached to an earlier glyph is drawn after the advances between them, so it moves back over them (left to
-    // right) or forward (right to left).
-    private static GlyphInfo MoveAfterAdvances(GlyphRun buf, GlyphInfo g, int parent, int i, bool rtl)
+    // Running totals of the glyph advances. The sums wrap as the int additions they replace would.
+    private sealed class Advances
     {
-        if (!rtl)
-            for (int k = parent; k < i; k++) { g.XOffset -= buf[k].XAdvance; g.YOffset -= buf[k].YAdvance; }
-        else
-            for (int k = parent + 1; k <= i; k++) { g.XOffset += buf[k].XAdvance; g.YOffset += buf[k].YAdvance; }
-        return g;
+        private readonly long[] _x, _y;
+
+        public Advances(GlyphRun buf)
+        {
+            _x = new long[buf.Count + 1];
+            _y = new long[buf.Count + 1];
+            for (int k = 0; k < buf.Count; k++)
+            {
+                _x[k + 1] = _x[k] + buf[k].XAdvance;
+                _y[k + 1] = _y[k] + buf[k].YAdvance;
+            }
+        }
+
+        // The advances of the glyphs from index start up to, but not including, end.
+        public (int X, int Y) Between(int start, int end) => (unchecked((int)(_x[end] - _x[start])), unchecked((int)(_y[end] - _y[start])));
     }
 }
