@@ -1,5 +1,3 @@
-using PdfPecker.Rendering.Parsing;
-
 namespace PdfPecker.Rendering.Images;
 
 // The decoded components as an image: through the palette and channel definitions of the JP2 header, in the colour
@@ -132,7 +130,7 @@ internal sealed partial class JpxDecoder
         var component = _components[c];
         var plane = _planes[c];
         if (plane.Width == width && plane.Height == height) return plane.Samples;
-        PdfFile.ChargeDecoded((long)width * height);
+        Charge((long)width * height);
         var o = new byte[width * height];
         int pw = plane.Width, ph = plane.Height;
         if (pw <= 0 || ph <= 0) return o;
