@@ -110,27 +110,38 @@ internal sealed partial class PdfDocumentWriter
     // pixel of a filter primitive.
     private const long CanvasWorkPerPixel = 2;
 
+    // A gradient is evaluated again at every pixel it paints: measured at about four times the work of a pixel of a
+    // filter primitive.
+    private const long GradientWorkPerPixel = 4;
+
     /// <summary>
     /// Whether a filter may run on w × h pixels of ops rendered through a page of their own, counting its work against the
     /// document's budget when it may. Besides the filter's own work, the renderer paints every transparency group and
     /// soft mask in the ops on a canvas of its own the size of the whole image, so hundreds of masked boxes nested in
-    /// each other cost hundreds of full images; <paramref name="imageWork"/> is the work of the images drawn in the ops. A
-    /// filter whose canvases and images alone are beyond the document's budget never runs.
+    /// each other cost hundreds of full images, and every background gradient may cover the whole image too;
+    /// <paramref name="imageWork"/> is the work of the images drawn in the ops. A filter whose canvases, gradients and
+    /// images alone are beyond the document's budget never runs.
     /// </summary>
     private bool WithinRenderBudget(SvgFilter f, List<DrawOp> ops, int w, int h, long imageWork = 0)
     {
-        long canvasWork = OffscreenCanvases(ops) * w * h * CanvasWorkPerPixel + imageWork;
+        long canvasWork = RenderWorkPerPixel(ops) * w * h + imageWork;
         return canvasWork <= SvgFilter.MaxDocumentWork && f.WithinBudget(w, h) && _filterBudget.TrySpend(f.DocumentWork(w, h) + canvasWork);
     }
 
-    /// <summary>How many offscreen canvases the renderer paints for the ops: one per transparency group and soft mask.</summary>
-    private static long OffscreenCanvases(List<DrawOp> ops)
+    /// <summary>
+    /// The work for each pixel of the image of what the renderer paints over all of it for the ops: an offscreen canvas
+    /// for every transparency group and soft mask, and the shading of every background gradient. A gradient with
+    /// translucent stops is painted twice, its colours through a soft mask that holds its alphas, so hundreds of them
+    /// in one blurred box took seconds while the budget counted none of it.
+    /// </summary>
+    private static long RenderWorkPerPixel(List<DrawOp> ops)
     {
         long n = 0;
         foreach (var op in ops)
         {
-            if (op is LayerOp l) n += (l.NeedsGroup ? 1 : 0) + (l.Mask?.Length ?? 0) + (l.MaskFill != null ? 1 : 0);
-            if (op is GroupOp g) n += OffscreenCanvases(g.Ops);
+            if (op is LayerOp l) n += ((l.NeedsGroup ? 1 : 0) + (l.Mask?.Length ?? 0) + (l.MaskFill != null ? 1 : 0)) * CanvasWorkPerPixel;
+            if (op is BackgroundOp { Gradient: { } g }) n += g.Alphas != null ? CanvasWorkPerPixel + 2 * GradientWorkPerPixel : GradientWorkPerPixel;
+            if (op is GroupOp group) n += RenderWorkPerPixel(group.Ops);
         }
         return n;
     }
