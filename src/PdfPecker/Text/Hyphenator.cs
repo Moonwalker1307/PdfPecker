@@ -249,7 +249,8 @@ internal sealed class Hyphenator
         var starts = new List<int>(word.Length);
         for (int i = 0; i < word.Length;)
         {
-            int j = i + 1;
+            // A letter outside the Basic Multilingual Plane is a surrogate pair; normalising half of one throws.
+            int j = i + (char.IsSurrogatePair(word[i], i + 1 < word.Length ? word[i + 1] : '\0') ? 2 : 1);
             while (j < word.Length && CharUnicodeInfo.GetUnicodeCategory(word[j]) == UnicodeCategory.NonSpacingMark) j++;
             string letter;
             try
