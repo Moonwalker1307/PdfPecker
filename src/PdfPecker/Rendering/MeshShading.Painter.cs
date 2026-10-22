@@ -38,23 +38,30 @@ internal static partial class MeshShading
         private static ReadOnlySpan<byte> PatchPointGridPositions => new byte[] { 0, 1, 2, 3, 7, 11, 15, 14, 13, 12, 8, 4, 5, 6, 10, 9 };
 
         private readonly uint[] _pixels;
-        private readonly int _width;
+        private readonly int _width, _layerX, _layerY;
         private readonly int _clipX0, _clipY0, _clipX1, _clipY1;
         private readonly uint[]? _lut;
         private readonly double _t0, _tRange;
         private long _budget;
         private long _nextCancelCheck;
 
-        public MeshPainter(Canvas layer, ClipRegion clip, long budget)
+        /// <summary>
+        /// A painter into <paramref name="layer"/>, whose top left pixel is device pixel (<paramref name="layerX"/>,
+        /// <paramref name="layerY"/>); it paints only where the layer and the clip bounds overlap.
+        /// </summary>
+        public MeshPainter(Canvas layer, int layerX, int layerY, ClipRegion clip, long budget)
         {
             _pixels = layer.Pixels;
             _width = layer.Width;
-            (_clipX0, _clipY0, _clipX1, _clipY1) = (clip.X0, clip.Y0, clip.X1, clip.Y1);
+            (_layerX, _layerY) = (layerX, layerY);
+            (_clipX0, _clipY0) = (Math.Max(clip.X0, layerX), Math.Max(clip.Y0, layerY));
+            (_clipX1, _clipY1) = (Math.Min(clip.X1, layerX + layer.Width), Math.Min(clip.Y1, layerY + layer.Height));
             _budget = budget;
             _nextCancelCheck = budget - CancelCheckInterval;
         }
 
-        private MeshPainter(Canvas layer, ClipRegion clip, long budget, uint[] lut, double t0, double t1) : this(layer, clip, budget)
+        private MeshPainter(Canvas layer, int layerX, int layerY, ClipRegion clip, long budget, uint[] lut, double t0, double t1)
+            : this(layer, layerX, layerY, clip, budget)
         {
             _lut = lut;
             _t0 = t0;
@@ -62,15 +69,16 @@ internal static partial class MeshShading
         }
 
         /// <summary>A painter whose vertex colours are parameters of <paramref name="fn"/> over the colour Decode range.</summary>
-        public static MeshPainter WithFunction(Canvas layer, ClipRegion clip, long budget, ColorSpace cs, PdfFunction fn, ReadOnlySpan<double> decode)
+        public static MeshPainter WithFunction(Canvas layer, int layerX, int layerY, ClipRegion clip, long budget, ColorSpace cs, PdfFunction fn,
+            ReadOnlySpan<double> decode)
         {
             double t0 = decode[MeshReader.ColorDecodeStart], t1 = decode[MeshReader.ColorDecodeStart + 1];
-            return new MeshPainter(layer, clip, budget, ShadingColor.BuildLut(cs, fn, t0, t1, LutSize), t0, t1);
+            return new MeshPainter(layer, layerX, layerY, clip, budget, ShadingColor.BuildLut(cs, fn, t0, t1, LutSize), t0, t1);
         }
 
-        /// <summary>The work budget for a mesh of <paramref name="dataLength"/> bytes painted into <paramref name="layer"/>.</summary>
-        public static long WorkBudget(Canvas layer, int dataLength) =>
-            BaseBudget + BudgetPerPixel * layer.Width * (long)layer.Height + BudgetPerDataByte * dataLength;
+        /// <summary>The work budget for a mesh of <paramref name="dataLength"/> bytes painted on a page of the given size.</summary>
+        public static long WorkBudget(int pageWidth, int pageHeight, int dataLength) =>
+            BaseBudget + BudgetPerPixel * pageWidth * (long)pageHeight + BudgetPerDataByte * dataLength;
 
         /// <summary>Whether work is left in the budget; once it is spent, nothing more is painted.</summary>
         public bool HasBudget => _budget > 0;
@@ -100,7 +108,7 @@ internal static partial class MeshShading
             for (int y = y0; y <= y1; y++)
             {
                 double py = y + 0.5;
-                int row = y * _width;
+                int row = (y - _layerY) * _width - _layerX;
                 for (int x = x0; x <= x1; x++)
                 {
                     double px = x + 0.5;

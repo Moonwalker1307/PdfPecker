@@ -65,7 +65,8 @@ internal static partial class MeshShading
             && ColorComponents >= 0;
     }
 
-    public static void Paint(PdfFile file, PdfDict shading, int type, ColorSpace cs, PdfFunction? fn, Matrix toDevice, Canvas layer, ClipRegion clip)
+    public static void Paint(PdfFile file, PdfDict shading, int type, ColorSpace cs, PdfFunction? fn, Matrix toDevice, Canvas layer, int layerX,
+        int layerY, ClipRegion clip, int pageWidth, int pageHeight)
     {
         var format = new MeshFormat(
             file.GetInt(shading, "BitsPerCoordinate", DefaultBitsPerCoordinate),
@@ -76,8 +77,10 @@ internal static partial class MeshShading
         if (!format.IsValid(flagged: type != LatticeType)) return;
         if (decode == null || decode.Length < MeshReader.ColorDecodeStart + 2L * format.ColorComponents) return;
         byte[] data = shading is PdfStream stream ? file.DecodeStream(stream) : Array.Empty<byte>();
-        long budget = MeshPainter.WorkBudget(layer, data.Length);
-        var painter = fn == null ? new MeshPainter(layer, clip, budget) : MeshPainter.WithFunction(layer, clip, budget, cs, fn, decode);
+        long budget = MeshPainter.WorkBudget(pageWidth, pageHeight, data.Length);
+        var painter = fn == null
+            ? new MeshPainter(layer, layerX, layerY, clip, budget)
+            : MeshPainter.WithFunction(layer, layerX, layerY, clip, budget, cs, fn, decode);
         var reader = new MeshReader(data, format, decode, toDevice, cs, parametric: fn != null);
         switch (type)
         {
