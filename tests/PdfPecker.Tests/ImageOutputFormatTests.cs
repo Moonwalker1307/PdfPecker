@@ -162,6 +162,24 @@ public class ImageOutputFormatTests
         Assert.Equal(85, new ImageOptions().Quality);
     }
 
+    [Fact]
+    public void WebP_defaults_to_effort_29_and_JPEG_to_quality_85()
+    {
+        // The effort only trades encoding time for size, so the WebP default is far lower than the JPEG quality.
+        Assert.Equal(29, new ImageOptions { Format = PdfImageFormat.WebP }.Quality);
+        Assert.Equal(85, new ImageOptions { Format = PdfImageFormat.Jpeg }.Quality);
+        Assert.Equal(29, new PdfHtmlOptions().Quality);
+        Assert.Equal(85, new PdfHtmlOptions { ImageFormat = PdfImageFormat.Jpeg }.Quality);
+        Assert.Equal(60, new ImageOptions { Quality = 60, Format = PdfImageFormat.WebP }.Quality);
+
+        var pdf = SamplePdf();
+        var img = PdfRenderer.Open(pdf).RenderPage(0, new ImageOptions { Dpi = 30 });
+        Assert.Equal(img.ToWebP(29), img.ToWebP());
+        Assert.Equal(img.ToJpeg(85), img.ToJpeg());
+        var webp = PdfRenderer.Open(pdf).RenderPage(0, new ImageOptions { Dpi = 30, Format = PdfImageFormat.WebP, Quality = 85 });
+        Assert.Equal(img.ToWebP(85), webp.Encode());
+    }
+
     [Theory]
     [InlineData(PdfImageFormat.Png, ".png")]
     [InlineData(PdfImageFormat.Jpeg, ".jpg")]

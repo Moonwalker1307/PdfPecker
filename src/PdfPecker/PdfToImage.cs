@@ -100,20 +100,33 @@ public sealed class ImageOptions
     /// <summary>The encoded format of <see cref="PdfToImage"/> results and of <see cref="RenderedImage.Encode"/>. Default <see cref="PdfImageFormat.Png"/>.</summary>
     public PdfImageFormat Format { get; set; } = PdfImageFormat.Png;
 
-    private int _quality = 85;
+    /// <summary>The JPEG quality when <see cref="Quality"/> is not set.</summary>
+    internal const int DefaultJpegQuality = 85;
 
     /// <summary>
-    /// Quality from 1 to 100, default 85. For <see cref="PdfImageFormat.Jpeg"/> it scales the standard quantisation
-    /// tables as libjpeg does (90 and up also keep full-resolution colour instead of 4:2:0 subsampling). WebP output is
-    /// always lossless, so for <see cref="PdfImageFormat.WebP"/> it is the compression effort: higher values search
-    /// harder for smaller files and take longer, but never change a pixel. PNG ignores it (see <see cref="PngCompression"/>).
+    /// The WebP effort when <see cref="Quality"/> is not set. Rendered pages come out about 1% larger than at 85 and
+    /// encode in little more than half the time, as the harder searches above it find little more on pages.
+    /// </summary>
+    internal const int DefaultWebPEffort = 29;
+
+    private int? _quality;
+
+    /// <summary>
+    /// Quality from 1 to 100. For <see cref="PdfImageFormat.Jpeg"/> it scales the standard quantisation tables as
+    /// libjpeg does (90 and up also keep full-resolution colour instead of 4:2:0 subsampling); default 85. WebP output
+    /// is always lossless, so for <see cref="PdfImageFormat.WebP"/> it is the compression effort: higher values search
+    /// harder for smaller files and take longer, but never change a pixel; default 29. Until it is set, it reads as the
+    /// default of <see cref="Format"/>. PNG ignores it (see <see cref="PngCompression"/>).
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">The value is not between 1 and 100.</exception>
     public int Quality
     {
-        get => _quality;
+        get => _quality ?? (Format == PdfImageFormat.WebP ? DefaultWebPEffort : DefaultJpegQuality);
         set => _quality = value is >= 1 and <= 100 ? value : throw new ArgumentOutOfRangeException(nameof(value), value, "Quality must be between 1 and 100.");
     }
+
+    /// <summary>The quality the caller set, or null to use each format's default.</summary>
+    internal int? QualitySet => _quality;
 
     /// <summary>Upper limit for either image dimension in pixels, protecting against huge pages. Default 20000.</summary>
     public int MaxDimension { get; set; } = 20000;
@@ -146,7 +159,7 @@ public sealed class RenderedImage
 {
     private readonly uint[] _premultiplied; // 0xAABBGGRR, premultiplied alpha
     private readonly CompressionLevel _compression;
-    private readonly int _quality;
+    private readonly int? _quality; // null for each format's default
     private readonly uint _matte; // 0xRRGGBB that JPEG, greyscale and black and white TIFF flatten transparency onto
     private readonly TiffColorMode _tiffColorMode;
     private readonly TiffCompression? _tiffCompression;
@@ -166,7 +179,7 @@ public sealed class RenderedImage
         _premultiplied = premultiplied;
         _compression = options.PngCompression;
         Format = options.Format;
-        _quality = options.Quality;
+        _quality = options.QualitySet;
         // BackgroundColor over white, so a transparent or translucent background still gives a defined matte.
         uint bg = options.BackgroundColor, a = bg >> 24;
         uint Channel(int shift) => (((bg >> shift) & 255) * a + 255 * (255 - a) + 127) / 255;
@@ -201,13 +214,13 @@ public sealed class RenderedImage
     /// <param name="quality">1 to 100; null uses <see cref="ImageOptions.Quality"/>.</param>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="quality"/> is not between 1 and 100.</exception>
     /// <exception cref="NotSupportedException">A dimension exceeds 65,535 pixels.</exception>
-    public byte[] ToJpeg(int? quality = null) => JpegEncoder.Encode(_premultiplied, Width, Height, quality ?? _quality, _matte);
+    public byte[] ToJpeg(int? quality = null) => JpegEncoder.Encode(_premultiplied, Width, Height, quality ?? _quality ?? ImageOptions.DefaultJpegQuality, _matte);
 
     /// <summary>Encodes the image as lossless WebP (VP8L), alpha included.</summary>
     /// <param name="quality">The compression effort, 1 to 100; null uses <see cref="ImageOptions.Quality"/>. It never changes pixels.</param>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="quality"/> is not between 1 and 100.</exception>
     /// <exception cref="NotSupportedException">A dimension exceeds 16,384 pixels, the WebP limit.</exception>
-    public byte[] ToWebP(int? quality = null) => WebPEncoder.Encode(_premultiplied, Width, Height, quality ?? _quality);
+    public byte[] ToWebP(int? quality = null) => WebPEncoder.Encode(_premultiplied, Width, Height, quality ?? _quality ?? ImageOptions.DefaultWebPEffort);
 
     /// <summary>
     /// Encodes the image as a single-page TIFF, with its resolution recorded. Colour mode, compression and threshold
