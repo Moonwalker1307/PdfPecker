@@ -322,4 +322,32 @@ public class StyleTests
         Assert.Equal(Display.Block, r.Display); // the user agent's p { display: block } stays
         Assert.Equal(0f, r.PaddingTop.Value);
     }
+
+    [Fact]
+    public void Author_blocks_of_the_same_text_share_their_declarations_but_not_with_the_user_agent()
+    {
+        var first = new Stylesheet { ShareDeclarations = true };
+        var second = new Stylesheet { ShareDeclarations = true };
+        CssParser.ParseStylesheet("p { margin: 0 1px; color: red }", first);
+        CssParser.ParseStylesheet("@media print { div { margin: 0 1px; color: red } }", second);
+        Assert.Same(first.Rules[0].Declarations, second.Rules[0].Declarations);
+        Assert.Equal(["margin-top", "margin-right", "margin-bottom", "margin-left", "color"], first.Rules[0].Declarations.Select(d => d.Property));
+
+        var own = new Stylesheet();
+        CssParser.ParseStylesheet("p { margin: 0 1px; color: red }", own);
+        Assert.NotSame(first.Rules[0].Declarations[0], own.Rules[0].Declarations[0]);
+    }
+
+    [Fact]
+    public void All_revert_tells_an_author_block_from_the_user_agents_of_the_same_text()
+    {
+        // ".x" has the same block as the user agent's "b, strong { font-weight: bold; }". If they shared declarations,
+        // the span and the b would share one computed style, though revert drops the span's bold and keeps the b's.
+        var doc = HtmlParser.Parse("<style>.x { font-weight: bold; } .r { all: revert }</style><div><span id=s class='x r'>a</span><b id=b class=r>b</b></div>");
+        var sheet = new Stylesheet { ShareDeclarations = true };
+        CssParser.ParseStylesheet(".x { font-weight: bold; } .r { all: revert }", sheet);
+        new StyleResolver(sheet).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
+        Assert.False(ById(doc, "s").Style.Bold);
+        Assert.True(ById(doc, "b").Style.Bold);
+    }
 }

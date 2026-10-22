@@ -11,7 +11,7 @@ public static partial class HtmlToPdf
 
     private static Stylesheet ReadStyles(Element doc, MediaContext media, PdfOptions options, string? baseDirectory, Func<string, byte[]?>? resolver)
     {
-        var sheet = new Stylesheet { Media = media };
+        var sheet = new Stylesheet { Media = media, ShareDeclarations = true };
         bool allowFiles = options.AllowFileAccess;
         sheet.ImportLoader = (url, importer) =>
         {

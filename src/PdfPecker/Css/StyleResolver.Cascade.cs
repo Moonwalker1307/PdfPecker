@@ -30,12 +30,11 @@ internal sealed partial class StyleResolver
         {
             if (!_inlineCache.TryGetValue(inline!, out var parsed))
             {
-                parsed = new List<Declaration>();
-                CssParser.ParseDeclarations(inline!, parsed);
+                parsed = SharedDeclarations.Get(inline!);
                 _inlineCache[inline!] = parsed;
                 if (!_containerUnits && ContainerQuery.HasContainerUnit(inline!)) _containerUnits = true;
             }
-            for (int i = 0; i < parsed.Count; i++)
+            for (int i = 0; i < parsed.Length; i++)
                 Push(parsed[i].Important ? TierInlineImportant : TierInline, 0, 0, i, parsed[i]);
         }
         StyledControlFallback(e, authorStart);
