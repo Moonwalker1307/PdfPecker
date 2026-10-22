@@ -35,6 +35,12 @@ internal sealed partial class JpxDecoder
     private const int MaxLevels = 32;
     private const int MaxTiles = 65535;
 
+    // The most memory one image may take while it decodes, as much as a page may decode. A render charges the page's
+    // budget as well, but the decoder also runs where no budget is set, and a few header fields can describe an image
+    // whose planes, coefficients and code-block structure need gigabytes.
+    private const long MaxDecodedBytes = PdfFile.MaxDecodedPerPage;
+    private const string OverBudget = "The image decodes to more data than allowed.";
+
     private readonly byte[] _data;
 
     // The reference grid from the SIZ segment: the image area runs from (_imageX0, _imageY0) to (_imageX1, _imageY1),
@@ -46,7 +52,19 @@ internal sealed partial class JpxDecoder
     // Each component decoded at its own resolution, 8 bits per sample.
     private ComponentPlane[] _planes = Array.Empty<ComponentPlane>();
 
+    private long _budget = MaxDecodedBytes;
+
     private JpxDecoder(byte[] data) => _data = data;
+
+    /// <summary>
+    /// Charges memory the decoder is about to allocate against the page's decode budget and against the image's own,
+    /// and fails when either runs out.
+    /// </summary>
+    private void Charge(long bytes)
+    {
+        PdfFile.ChargeDecoded(bytes);
+        if ((_budget -= bytes) < 0) throw new InvalidDataException(OverBudget);
+    }
 
     /// <summary>Decodes a JP2 file or raw JPEG 2000 codestream, or returns null when it cannot be read.</summary>
     public static JpxImage? Decode(byte[] data)
