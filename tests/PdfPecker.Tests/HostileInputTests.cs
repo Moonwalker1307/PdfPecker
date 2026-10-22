@@ -43,6 +43,18 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Rounded_boxes_split_over_columns_on_many_pages_stay_linear()
+    {
+        // Each column holds its part of every rounded box around it, drawn whole and clipped to the column. The parts
+        // of a box as tall as a hundred pages must not each be split over every page the box reaches, and a page must
+        // not redraw the parts of all the pages before it.
+        const int depth = 200;
+        string html = "<style>.c { columns: 3 } .b { border: 1pt solid #888; border-radius: 2pt; padding: 0 1pt }</style><div class=\"c\">"
+            + Repeat("<div class=\"b\">", depth) + Repeat("x<br>", 24_000) + Repeat("</div>", depth) + "</div>";
+        Assert.NotEmpty(Bounded(html));
+    }
+
+    [Fact]
     public void Content_moved_out_of_tables_stays_linear()
     {
         // Each stray node between rows goes in front of its table; inserting at the table's place must not search or
