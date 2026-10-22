@@ -674,12 +674,14 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>
-    /// Whether a box moves its content once laid out: relative offsets and transforms do. Opacity, clips, masks, blend
-    /// modes and filters only wrap the content in a layer where it is, which the scan for the first content still looks
-    /// into. Without them, nested boxes with such effects each probed for their first content themselves, and each
-    /// level laid out everything inside it once more.
+    /// Whether a box moves its content once laid out in a way that changes where it breaks: transforms do. Opacity,
+    /// clips, masks, blend modes and filters only wrap the content in a layer where it is, which the scan for the first
+    /// content still looks into, and a relative offset moves the content after its page breaks are made, as in Chrome.
+    /// Without them, nested boxes with such effects or offsets each probed for their first content themselves, and
+    /// each level laid out everything inside it once more.
     /// </summary>
-    private static bool MovesContent(ComputedStyle s) => s.Position != Position.Static || s.Transform != null || s.Perspective != null;
+    private static bool MovesContent(ComputedStyle s)
+        => s.Position is not (Position.Static or Position.Relative) || s.Transform != null || s.Perspective != null;
 
     /// <summary>The first content op of a probed box: its index among the ops and where it starts.</summary>
     private (int At, float Y)? FirstContent(KeepProbe p)
