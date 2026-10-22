@@ -87,6 +87,28 @@ foreach (var profile in profiles)
     }
 
     File.WriteAllBytes(Path.Combine(dir, "rtl-scripts.pdf"), HtmlToPdf.Convert(Rtl, Options(fixtures)));
+
+    // Every viewer setting and page labels with a prefix, on the report sample, which has several pages and bookmarks.
+    var report = Path.Combine(samples, "report.html");
+    var viewer = Options(Path.GetDirectoryName(report)!);
+    viewer.Viewer = new PdfViewerSettings
+    {
+        PageLayout = PdfPageLayout.TwoPageRight,
+        PageMode = PdfPageMode.Bookmarks,
+        StartPage = 2,
+        Zoom = PdfZoom.FitWidth,
+        DisplayDocTitle = true,
+        FitWindow = true,
+        CenterWindow = true,
+        HideToolbar = true,
+        HideMenuBar = true,
+        HideWindowControls = true,
+        DisablePrintScaling = true,
+        Duplex = PdfDuplex.FlipLongEdge,
+    };
+    viewer.PageLabels.Add(new PdfPageLabel(1, PdfPageNumberStyle.LowerRoman));
+    viewer.PageLabels.Add(new PdfPageLabel(2, PdfPageNumberStyle.Decimal, "Side "));
+    File.WriteAllBytes(Path.Combine(dir, "viewer-settings.pdf"), HtmlToPdf.Convert(File.ReadAllText(report), viewer));
 }
 
 // The attachment levels: the golden e-invoice page with its XML attached. PDF/A-3 and PDF/A-4f may carry attachments.
