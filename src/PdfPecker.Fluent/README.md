@@ -1,11 +1,16 @@
 # PdfPecker.Fluent
 
-A fluent C# API for building PDFs with [PdfPecker](https://github.com/Moonwalker1307/PdfPecker). You describe pages,
+A fluent C# API for building PDFs with [PdfPecker](https://www.nuget.org/packages/PdfPecker). You describe pages,
 headers, footers, columns, rows, tables, text, images and barcodes in code, in the style of QuestPDF. PdfPecker.Fluent
 turns that into compact HTML and CSS and renders it with PdfPecker, so it needs no browser, no native binaries and no
 package other than PdfPecker.
 
-> **Not on NuGet yet.** The first version is being built in this repository; the package will be published later.
+```
+dotnet add package PdfPecker.Fluent
+```
+
+PdfPecker.Fluent is released together with PdfPecker and always has the same version, and it depends on the PdfPecker
+release of that version.
 
 ```csharp
 using PdfPecker.Fluent;
@@ -109,8 +114,8 @@ Most QuestPDF code ports by changing the `using` lines: `Document.Create`, `Page
 - Of the section page numbers, only `BeginPageNumberOfSection` is available.
 - Not available: `Dynamic`, `Canvas`, `StopPaging`, `ShowOnce`, `SkipOnce`, `RepeatContent`, `ScaleToFit`,
   `ExtendLastCellsToTableBottom`, `EndPageNumberOfSection`, `PageNumberWithinSection`, `TotalPagesWithinSection` and
-  the Companion previewer. `ScaleToFit` and a different first-page header (for `ShowOnce` and `SkipOnce`) come with
-  the next PdfPecker release.
+  the Companion previewer. PdfPecker can now scale a box's content to fit it and give the first page a header of its
+  own, so `ScaleToFit`, `ShowOnce` and `SkipOnce` are the next calls planned.
 
 ## Performance
 
@@ -128,14 +133,17 @@ takes about 0.8 ms, against about 1.2 ms for PdfPecker to render that HTML. Meas
 Both invoices come from the same code, call for call: `bench/PdfPecker.Fluent.Comparison`. Run
 `bench/PdfPecker.Fluent.Benchmarks` to see the fluent layer's own cost.
 
-## Repository
+## Source
+
+PdfPecker.Fluent lives in the [PdfPecker repository](https://github.com/Moonwalker1307/PdfPecker), next to the
+library:
 
 - `src/PdfPecker.Fluent` – the package.
-- `examples/Examples.cs` – an invoice, a report, a product catalogue, a layout tour and a text tour, shared by the
-  sample, the tests and the benchmarks.
-- `samples/PdfPecker.Fluent.Sample` – writes each example as a PDF and as HTML.
-- `tests/PdfPecker.Fluent.Tests`, `fuzz/PdfPecker.Fluent.Fuzz`, `bench/` – see `TESTING.md`.
+- `samples/PdfPecker.Fluent.Sample` – writes each example as a PDF and as HTML. Its `Examples.cs` holds an invoice, a
+  report, a product catalogue, a layout tour and a text tour, shared by the sample, the tests and the benchmarks.
+- `tests/PdfPecker.Fluent.Tests`, `fuzz/PdfPecker.Fluent.Fuzz` and `bench/PdfPecker.Fluent.*` – see `TESTING.md`.
 
 ## License
 
-MIT. PdfPecker, the one dependency, has its own license; see its repository.
+MIT. PdfPecker, the one dependency, is MIT too, with the licenses of the fonts and data it bundles in its
+`THIRD-PARTY-NOTICES.md`.

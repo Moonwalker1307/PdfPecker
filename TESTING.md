@@ -71,8 +71,9 @@ steps: fetch veraPDF with Maven, `dotnet run -c Release --project tools/Conforma
 
 ## Fuzzing
 
-`fuzz/PdfPecker.Fuzz` mutates seeds from the repository against every parser of untrusted input, and runs nightly in
-`fuzz.yml`. How to run a target, reproduce a finding and turn it into a test is in `fuzz/README.md`.
+`fuzz/PdfPecker.Fuzz` mutates seeds from the repository against every parser of untrusted input, and
+`fuzz/PdfPecker.Fluent.Fuzz` builds random documents from random fluent calls; both run nightly in `fuzz.yml`. How to
+run a target, reproduce a finding and turn it into a test is in `fuzz/README.md`.
 
 ## Performance
 
@@ -84,6 +85,38 @@ bench/compare-versions.sh v1.11.0     # the working tree against a release tag, 
 ```
 
 Cloud VMs differ too much to compare a run with the README table.
+
+## PdfPecker.Fluent
+
+The fluent package's tests are in `tests/PdfPecker.Fluent.Tests` and run with the rest:
+
+- `LayoutTests` and `ExtrasTests` – the HTML each fluent call writes: which elements, which declarations, how
+  decorators merge. `QuestPdfCallsTests` covers the calls named after QuestPDF's.
+- `ApiTests` – argument checks, options handling (including a check that `DocumentGenerator.Copy` covers every public
+  `PdfOptions` property), metadata, several page sets, images and the generate methods.
+- `GoldenTests` – the examples in `samples/PdfPecker.Fluent.Sample/Examples.cs`, compared with
+  `Golden/*.expected.html` exactly and with `Golden/*.expected.pdf` after inflating every stream (`PdfCompare.cs`),
+  because .NET 9's zlib compresses the same bytes differently. They also run under ar-SA, fa-IR and da-DK.
+- `HostileInputTests` – hostile strings in every text, link, name and CSS value, deep nesting, huge spans and damaged
+  images. Caller text must never become markup, and only documented exceptions may come out.
+- `PerformanceTests` – the HTML writer stays linear, 100,000 rows finish within a time bound, and writing HTML stays
+  a small part of producing a PDF.
+
+Their goldens use the same switch, and render through the library, so a library change of output can change them:
+
+```
+PDFPECKER_UPDATE_GOLDEN=1 dotnet test -f net10.0 tests/PdfPecker.Fluent.Tests --filter "FullyQualifiedName~GoldenTests"
+```
+
+The benchmarks:
+
+```
+dotnet run --project bench/PdfPecker.Fluent.Benchmarks -c Release                 # the fluent layer's own cost
+dotnet run --project bench/PdfPecker.Fluent.Comparison -c Release -- 200 12 out   # against QuestPDF, PDFs in ./out
+```
+
+The first times composing and writing HTML, `GeneratePdf`, and `HtmlToPdf` on the same HTML; the second builds the
+same invoice with PdfPecker.Fluent and QuestPDF. Both warm up for 12 seconds by default.
 
 ## Coverage
 
