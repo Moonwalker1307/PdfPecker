@@ -146,6 +146,11 @@ internal static class Targets
             },
             new()
             {
+                Name = "pdf-images", Extension = ".pdf", Seeds = pdfSeeds, MaxSize = 1 << 20,
+                Run = (d, ct) => PdfImages.Extract(d, new PdfImagesOptions { MaxPages = 200, MaxImages = 1000 }, ct),
+            },
+            new()
+            {
                 Name = "pdf-html", Extension = ".pdf", Seeds = pdfSeeds, MaxSize = 1 << 20,
                 Run = (d, ct) =>
                 {
@@ -274,6 +279,7 @@ internal static class Targets
             {
                 PdfImage.FromBytes(d);
                 JpegDecoder.Decode(d);
+                ExifReader.Read(d);
             }),
             Image("gif", ".gif", c => c.ImageFiles(".gif"), d => PdfImage.FromBytes(d)),
             Image("webp", ".webp", c => c.ImageFiles(".webp").Concat(c.RenderedImages().Where(i => i.Ext == ".webp").Select(i => (i.Name, i.Data))), d => PdfImage.FromBytes(d)),
