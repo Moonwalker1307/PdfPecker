@@ -56,7 +56,8 @@ internal sealed partial class PdfDocumentWriter
             sb.Ascii(img.ColorSpace.Substring(gt + 1));
             colorSpace = System.Text.Encoding.ASCII.GetString(sb.Span);
         }
-        var data = _crypt != null ? _crypt.Encrypt(img.Data) : img.Data;
+        var data = StripImageMetadata && img.IsDct ? PdfImage.WithoutMetadata(img.Data) : img.Data;
+        if (_crypt != null) data = _crypt.Encrypt(data);
         Begin(img.ObjectNumber).Ascii("<< /Type /XObject /Subtype /Image /Width ").Int(img.Width).Ascii(" /Height ").Int(img.Height)
             .Ascii(" /ColorSpace ").Ascii(colorSpace).Ascii(" /BitsPerComponent ").Int(img.BitsPerComponent)
             .Ascii(" /Filter ").Ascii(img.Filter);

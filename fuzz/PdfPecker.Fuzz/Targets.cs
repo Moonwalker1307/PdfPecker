@@ -274,6 +274,7 @@ internal static class Targets
             {
                 PdfImage.FromBytes(d);
                 JpegDecoder.Decode(d);
+                PdfImage.WithoutMetadata(d);
             }),
             Image("gif", ".gif", c => c.ImageFiles(".gif"), d => PdfImage.FromBytes(d)),
             Image("webp", ".webp", c => c.ImageFiles(".webp").Concat(c.RenderedImages().Where(i => i.Ext == ".webp").Select(i => (i.Name, i.Data))), d => PdfImage.FromBytes(d)),

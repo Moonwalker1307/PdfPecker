@@ -12,6 +12,48 @@ internal sealed partial class PdfImage
     // An APP14 segment can come after the frame header; the bytes searched for it there are bounded.
     private const int AdobeSearchLimit = 65536;
 
+    // Segments that only describe the photo: APP1 holds EXIF and XMP, APP13 Photoshop's IPTC data, and COM a comment.
+    // None of them changes how the image looks; APP0 (JFIF), APP2 (ICC profile) and APP14 (Adobe colour transform) do
+    // or may, and are kept.
+    private const byte JpegApp1 = 0xE1, JpegApp13 = 0xED, JpegComment = 0xFE;
+
+    /// <summary>Whether the image is stored as JPEG data (DCTDecode).</summary>
+    public bool IsDct => Filter == DctFilter;
+
+    /// <summary>
+    /// The JPEG data without its metadata segments (EXIF, XMP, IPTC and comments), or the data itself when it has none
+    /// or its segments before the image data cannot be followed.
+    /// </summary>
+    public static byte[] WithoutMetadata(byte[] d)
+    {
+        if (!IsJpeg(d)) return d;
+        var removed = new List<(int Start, int End)>();
+        int i = 2;
+        while (true)
+        {
+            if (i + 4 > d.Length || d[i] != JpegMarkerPrefix) return d;
+            byte marker = d[i + 1];
+            if (marker == JpegMarkerPrefix) { i++; continue; }
+            if (IsJpegStandalone(marker)) { i += 2; continue; }
+            if (marker == JpegStartOfScan) break;
+            int length = d[i + 2] << 8 | d[i + 3];
+            if (length < 2 || i + 2 + length > d.Length) return d;
+            if (marker is JpegApp1 or JpegApp13 or JpegComment) removed.Add((i, i + 2 + length));
+            i += 2 + length;
+        }
+        if (removed.Count == 0) return d;
+        var result = new byte[d.Length - removed.Sum(r => r.End - r.Start)];
+        int from = 0, to = 0;
+        foreach (var (start, end) in removed)
+        {
+            d.AsSpan(from, start - from).CopyTo(result.AsSpan(to));
+            to += start - from;
+            from = end;
+        }
+        d.AsSpan(from).CopyTo(result.AsSpan(to));
+        return result;
+    }
+
     private static bool IsJpeg(byte[] data) => data.Length > 3 && data[0] == JpegMarkerPrefix && data[1] == JpegStartOfImage;
 
     /// <summary>
