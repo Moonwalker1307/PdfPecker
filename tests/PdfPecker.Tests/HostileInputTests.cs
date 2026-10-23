@@ -1036,6 +1036,20 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void A_footer_with_page_numbers_and_a_huge_table_stops_at_a_limit()
+    {
+        // A footer with {page} is laid out again for every page. A fuzzed one held a table of 85,000 rows, laid out
+        // 350 times for over five minutes while its ops grew by 70 MB a second. That work is now charged to a budget
+        // for the whole document, and a band that would take too much of it stops the document.
+        var html = "<style>@page{size:300pt 300pt;margin:0}</style>"
+                   + "<footer data-sticky-pdf-footer height='40pt'><table>" + Repeat("<tr><td></td><td>x</td></tr>", 20_000)
+                   + "</table><p>Page {page} of {total-pages}</p></footer>"
+                   + "<main style='padding-top:90000pt'></main>";
+        var e = Assert.Throws<PdfLimitException>(() => Bounded(html));
+        Assert.Contains("{page}", e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Tables_with_one_wide_row_among_many_rows_store_only_the_cells_they_have()
     {
         // A grid of every row and column of this table is 18 million places, 144 MB, almost all of them empty; a fuzzed

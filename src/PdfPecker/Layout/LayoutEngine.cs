@@ -895,6 +895,9 @@ internal sealed partial class LayoutEngine
     private long _boxLayouts;
     private const int CharactersPerLayout = 32;
 
+    /// <summary>The box layouts so far (see <see cref="_boxLayouts"/>), by which a band laid out for every page is charged.</summary>
+    public long BoxLayouts => _boxLayouts;
+
     /// <summary>
     /// The box layouts after which a box is no longer laid out again only to place a page break better: moved to the next
     /// page to keep it whole or to keep its edges with its content. Each such layout lays out everything inside the box
