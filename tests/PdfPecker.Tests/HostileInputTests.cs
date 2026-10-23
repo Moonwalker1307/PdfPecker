@@ -2365,6 +2365,18 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Tables_beside_initial_letters_of_their_headings_move_to_a_bounded_depth()
+    {
+        // Found by the fuzzer: target html, timeout-d2edd0b0. Each level is a heading with an initial letter, kept with
+        // a table that holds the next level and starts beside the letter. Tables beside floats did not count towards
+        // the depth that chains move to, so where a heading ended a page every level was laid out in full and then
+        // again on the next page, and the work doubled with each level: 30 levels did not finish in 30 s.
+        var html = "<style>h2::first-letter{initial-letter:3}</style>"
+            + Repeat("<div style='height:500pt'></div><h2>Heading</h2><table><tr><td>", 30);
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
     public void Headings_nested_deeper_than_chains_move_are_laid_out_once()
     {
         // Found by the nightly fuzz run: target html, timeout-b4187992. Each level is a box holding an empty bordered box
