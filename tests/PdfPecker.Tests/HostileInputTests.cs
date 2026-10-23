@@ -1012,6 +1012,22 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Nested_flex_rows_across_a_page_break_lay_out_their_content_a_constant_number_of_times()
+    {
+        // A flex line whose item grew on the pages was placed again even when that item was its only one, and boxes
+        // captured inside two levels of boxes laid out again on the pages were laid out again with everything inside
+        // them: each level of nested rows did both for all the levels inside it. A fuzzed page of 250 nested flex rows
+        // around 5,000 bordered boxes laid each of those out 82 times per layout, for 5 s. These 120 rows around 2,000
+        // boxes allocated 124 MB, and 36 MB now.
+        const string css = ".f{display:flex;gap:6pt}.f div{border:0.5pt solid #888;padding:4pt}";
+        var html = "<style>" + css + "</style><h2>Flex</h2>" + Repeat("<div class=f>", 120) + Repeat("<div class=f></div>", 2000)
+                   + "<div>text</div>" + Repeat("</div>", 120);
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 64L << 20);
+    }
+
+    [Fact]
     public void Content_in_overflow_columns_beside_every_page_is_not_split_between_them()
     {
         // The inner box starts half a point above the end of the outer box's column, so its overflow columns are half a

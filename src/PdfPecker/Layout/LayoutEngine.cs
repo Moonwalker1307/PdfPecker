@@ -2072,6 +2072,9 @@ internal sealed partial class LayoutEngine
         /// <summary>Whether the flex lines in the box could still be laid out again when it was captured.</summary>
         public bool RepeatsOnPages;
 
+        /// <summary>Whether its layout asked that (see <see cref="MayRepeatOnPages"/>), so that it may lay out otherwise without.</summary>
+        public bool DependsOnRepeats;
+
         /// <summary>
         /// The breaks of the column layout pass the box was captured in, which hold the breaks it noted, and how many
         /// forced breaks they held then.
@@ -2128,7 +2131,7 @@ internal sealed partial class LayoutEngine
         _capturing = true;
         _lastBoxRight = 0;
         int breaks = _forcedBreaks;
-        long depthDependent = _depthDependentLayouts;
+        long depthDependent = _depthDependentLayouts, repeatDependent = _repeatDependentLayouts;
         _captureDepth++;
         try
         {
@@ -2143,12 +2146,16 @@ internal sealed partial class LayoutEngine
                 ContentH = _lastBoxContentH, FrameV = _lastBoxFrameV, ChildCb = _lastBoxChildCb,
                 Absolutes = absolutes, Known = _captureLog, NotedIn = _columnNotes is { Paused: false } notes ? notes : null,
                 NotedForced = _columnNotes?.ForcedCount ?? 0, DependsOnDepth = _depthDependentLayouts != depthDependent,
+                DependsOnRepeats = _repeatDependentLayouts != repeatDependent,
             };
         }
         finally
         {
             _captureDepth--;
-            _frames.Remove(boundary);
+            // The boundary is the last frame, so it is looked for from the end: from the start, each of hundreds of
+            // captures nested in each other went through all the frames around it.
+            int frame = _frames.LastIndexOf(boundary);
+            if (frame >= 0) _frames.RemoveAt(frame);
             boundary.TakePending();
             _boundaryPool.Push(boundary);
             LeaveFormattingContext(savedFloats, 0);
@@ -2230,6 +2237,7 @@ internal sealed partial class LayoutEngine
             // Measurements from another pass are taken only that deep, so the boxes around them may measure otherwise
             // where they are laid out less deeply nested.
             if (known.DependsOnDepth || _columnNotes != null && !SamePass(known)) _depthDependentLayouts++;
+            if (known.DependsOnRepeats) _repeatDependentLayouts++;
             // Measured already where the box around it was captured: only its content may still be needed.
             c = Measured(known);
             // Its content is laid out as it was measured, so the items inside it take what they measured then too.
@@ -2349,18 +2357,18 @@ internal sealed partial class LayoutEngine
         Ops = [], Width = c.Width, Height = c.Height, Baseline = c.Baseline, ForcedBreaks = c.ForcedBreaks, Source = c.Source,
         BoxX = c.BoxX, BoxY = c.BoxY, BoxW = c.BoxW, BoxH = c.BoxH,
         ContentH = c.ContentH, FrameV = c.FrameV, ChildCb = c.ChildCb, Known = c.Known,
-        ListIndexBefore = c.ListIndexBefore, ListIndexAfter = c.ListIndexAfter, Cb = c.Cb, CbKind = c.CbKind, RepeatsOnPages = c.RepeatsOnPages,
+        ListIndexBefore = c.ListIndexBefore, ListIndexAfter = c.ListIndexAfter, Cb = c.Cb, CbKind = c.CbKind, RepeatsOnPages = c.RepeatsOnPages, DependsOnRepeats = c.DependsOnRepeats,
         AnchorIds = c.AnchorIds, AnchorYs = c.AnchorYs, NotedIn = c.NotedIn, NotedForced = c.NotedForced, DependsOnDepth = c.DependsOnDepth,
     };
 
     /// <summary>
     /// Whether <paramref name="e"/> lays out now as it did when <paramref name="known"/> was captured: flex lines may
-    /// grow as deep as they could then, and the box's own percentage heights resolve the same. Only the box's own can
-    /// differ: its children's containing block is its own height, auto here.
+    /// grow as deep as they could then, if its layout asked, and the box's own percentage heights resolve the same. Only
+    /// the box's own can differ: its children's containing block is its own height, auto here.
     /// </summary>
     private bool SameContext(Element e, Captured known)
     {
-        if (known.RepeatsOnPages != _placingOnPages < MaxRepeatedOnPages) return false;
+        if (known.DependsOnRepeats && known.RepeatsOnPages != _placingOnPages < MaxRepeatedOnPages) return false;
         var s = e.Style;
         if (!s.Height.IsPercent && !s.MinHeight.IsPercent && !s.MaxHeight.IsPercent) return true;
         return known.CbKind == _cbKind && (known.Cb, _cbHeight) switch
@@ -2453,7 +2461,7 @@ internal sealed partial class LayoutEngine
         try
         {
             float bottom = LayoutBlockBox(e, dx, dy + mt, src.OuterW, src.ShrinkToFit) + mb;
-            if (src.BorderH is float bh && bottom - dy < c.Height - Eps && _placingOnPages <= MaxRepeatedOnPages)
+            if (src.BorderH is float bh && bottom - dy < c.Height - Eps && Repeats(_placingOnPages <= MaxRepeatedOnPages))
             {
                 // A stretched box keeps the height it was given when its content still fits in it on the pages.
                 Truncate(start);
@@ -2485,6 +2493,24 @@ internal sealed partial class LayoutEngine
 
     /// <summary>The depth up to which a box laid out again on the pages may be laid out a second time.</summary>
     private const int MaxRepeatedOnPages = 2;
+
+    /// <summary>
+    /// Whether a box laid out again on the pages may still be laid out a second time there, noting that the layouts in
+    /// progress asked. A box captured where it could is reused where it cannot, and the other way round, only when its
+    /// layout never asked (see <see cref="SameContext"/>). Few captures ask, since without pages a flex line grows only
+    /// past a definite height; before, every box captured two levels deep on the pages was laid out again with
+    /// everything inside it, at every level of nested flex rows.
+    /// </summary>
+    private bool MayRepeatOnPages() => Repeats(_placingOnPages < MaxRepeatedOnPages);
+
+    private bool Repeats(bool may)
+    {
+        _repeatDependentLayouts++;
+        return may;
+    }
+
+    /// <summary>How many layouts so far asked whether boxes may be laid out a second time on the pages.</summary>
+    private long _repeatDependentLayouts;
 
     /// <summary>
     /// How many boxes, one inside the other, are laid out again where they land in columns. Boxes captured deeper than

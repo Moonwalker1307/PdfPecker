@@ -858,7 +858,7 @@ internal sealed partial class LayoutEngine
     /// </summary>
     private bool RowStartsOnPage(ref GridPass g, int r, float y)
     {
-        if (_probingGridRow || _placingOnPages >= MaxRepeatedOnPages || _columnNotes != null) return true;
+        if (_probingGridRow || !MayRepeatOnPages() || _columnNotes != null) return true;
         int page = PageOf(y);
         foreach (var it in g.Items)
         {

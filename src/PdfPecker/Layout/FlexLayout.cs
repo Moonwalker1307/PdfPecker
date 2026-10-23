@@ -323,7 +323,10 @@ internal sealed partial class LayoutEngine
             float cross = lineCross[li];
 
             // An item laid out again across a page boundary may make the line taller; the line is then placed once more
-            // with that height, so that the items stretched to it reach the new bottom.
+            // with that height, so that the items stretched to it reach the new bottom. When they all reach it already at
+            // their own height, as the only item of a line does when it is the one that grew, placing them again lays
+            // them out as they are: in nested flex rows each level did that for everything inside it, which doubled the
+            // work per level.
             int lineOps = _ops.Count;
             var lineMarker = _marker;
             int lineListIndex = _currentListIndex;
@@ -368,6 +371,7 @@ internal sealed partial class LayoutEngine
 
                 float cx = x + before;
                 lineBottom = lineTop + cross;
+                float stretchedBottom = float.PositiveInfinity; // the bottom of the shortest stretched item
                 foreach (var it in line)
                 {
                     if (it.AutoMl) cx += autoShare;
@@ -387,13 +391,17 @@ internal sealed partial class LayoutEngine
                     }
                     // An item that lands across a page boundary is laid out again there and may get taller, which
                     // moves the next line down.
-                    lineBottom = Math.Max(lineBottom, PlaceOnPages(box, cx, lineTop + dy));
+                    float bottom = PlaceOnPages(box, cx, lineTop + dy);
+                    lineBottom = Math.Max(lineBottom, bottom);
+                    // A stretched item that was given a height is laid out again with the new one, which its content may use.
+                    if (it.El != null && SelfAlign(it, s.AlignItems) == BoxAlign.Stretch)
+                        stretchedBottom = Math.Min(stretchedBottom, box.Source is { BorderH: null } ? bottom : float.NegativeInfinity);
                     if (float.IsNaN(firstBaseline) && !float.IsNaN(box.Baseline)) firstBaseline = lineTop + dy + box.Baseline;
                     cx += it.Main + it.Ml + it.Mr + between + colGap;
                     if (it.AutoMr) cx += autoShare;
                     _lastBoxRight = Math.Max(_lastBoxRight, cx);
                 }
-                if (regrown || lineBottom - lineTop <= cross + Eps || _placingOnPages >= MaxRepeatedOnPages || !line.Exists(it => it.El != null && SelfAlign(it, s.AlignItems) == BoxAlign.Stretch)) break;
+                if (regrown || lineBottom - lineTop <= cross + Eps || stretchedBottom >= lineBottom - Eps || !MayRepeatOnPages()) break;
                 Truncate(lineOps);
                 _marker = lineMarker;
                 _currentListIndex = lineListIndex;
