@@ -58,6 +58,15 @@ internal sealed partial class LayoutEngine
     /// <summary>The most pages the flow may fill; checked as lines are placed, before their ops pile up.</summary>
     public int MaxPages { get; init; } = int.MaxValue;
 
+    /// <summary>
+    /// The part of the relayout budget that every document gets whatever its size (see <see cref="_relayoutBudget"/>),
+    /// or what earlier layouts of the same document left of it.
+    /// </summary>
+    public long SharedRelayouts { get; init; } = BaseRelayouts;
+
+    /// <summary>How much of <see cref="SharedRelayouts"/> the layout took: the box layouts past its share per element.</summary>
+    public long SharedRelayoutsUsed => Math.Clamp(_boxLayouts - (_relayoutBudget - SharedRelayouts), 0, SharedRelayouts);
+
     /// <summary>Makes the content ops from <paramref name="start"/> on artifacts, for content drawn again (repeated table headers).</summary>
     private static void Untag(List<DrawOp> ops, int start = 0)
     {
@@ -106,7 +115,7 @@ internal sealed partial class LayoutEngine
         // height 100% fill whichever page the section starts on, as in Chrome.
         _cbHeight = new CbHeights(_grid.Height(0), _grid.Height(1), _grid.Height(2));
         _cbKind = 0;
-        _relayoutBudget = BaseRelayouts + RelayoutsPerElement * CountElements(document);
+        _relayoutBudget = SharedRelayouts + RelayoutsPerElement * CountElements(document);
         float bottom = LayoutFlow(document, 0, 0, width);
         _cbHeight = null;
         _pageBox = null;
@@ -913,9 +922,13 @@ internal sealed partial class LayoutEngine
     /// page to keep it whole or to keep its edges with its content. Each such layout lays out everything inside the box
     /// again, and nested boxes that each try it multiply the work. Every limit on the depth of that still left nesting
     /// to the power of the limit, which a page of nested boxes reached; real documents stay far below the budget.
+    /// A document is laid out run by run of named pages, again for the page numbers of target-counter() and again to
+    /// shrink it to fit, and the base of the budget is for all of those layouts together (see
+    /// <see cref="SharedRelayouts"/>), while the share per element is for each: with a base for each, a page of 460
+    /// nested boxes kept whole in columns used most of it in each of its twelve layouts, for 4 s.
     /// </summary>
     private long _relayoutBudget = long.MaxValue;
-    private const long BaseRelayouts = 250_000;
+    public const long BaseRelayouts = 250_000;
     private const int RelayoutsPerElement = 64;
 
     /// <summary>Whether a box may still be laid out again to place a page break better (see <see cref="_relayoutBudget"/>).</summary>

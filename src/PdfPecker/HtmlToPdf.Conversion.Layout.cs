@@ -37,6 +37,9 @@ public static partial class HtmlToPdf
         private Dictionary<string, int>? _targetPages;
         private Dictionary<int, int>? _footnotePages;
 
+        /// <summary>What the layouts so far left of the base of the relayout budget, which all layouts of the document share.</summary>
+        private long _sharedRelayouts = LayoutEngine.BaseRelayouts;
+
         private void PreparePageSetups()
         {
             _htmlElement = _doc.FindFirst("html");
@@ -165,10 +168,11 @@ public static partial class HtmlToPdf
                 run.Engine = new LayoutEngine(run.Grid, _images)
                 {
                     Cancellation = _cancellation, MaxPages = Math.Max(1, _options.MaxPages), FixedAreaHeight = run.Page.ContentHeight,
-                    CanvasRoot = _htmlElement, Tags = _structure, Headings = _headings,
+                    CanvasRoot = _htmlElement, Tags = _structure, Headings = _headings, SharedRelayouts = _sharedRelayouts,
                     Footnotes = _styles.Footnotes.Count == 0 ? null : new FootnoteSetup(_styles.Footnotes.ToArray(), FootnoteArea(run.Name)),
                 };
                 run.Height = run.Engine.Layout(_doc, run.Width);
+                _sharedRelayouts -= run.Engine.SharedRelayoutsUsed;
             }
             finally
             {
