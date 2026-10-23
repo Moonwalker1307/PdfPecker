@@ -13,6 +13,9 @@ namespace PdfPecker.Rendering.Html;
 /// </remarks>
 internal static class HtmlPageWriter
 {
+    /// <summary>How many times larger than on the page the text layer lays out its lines before scaling them down.</summary>
+    private const double LineScale = 10;
+
     /// <summary>The class names and style sheet the pages rely on, without the page size rules.</summary>
     public static void WriteStyles(StringBuilder sb)
     {
@@ -23,9 +26,12 @@ internal static class HtmlPageWriter
         sb.Append(".pdf-page>img{position:absolute;left:0;top:0;width:100%;height:100%;user-select:none;-webkit-user-select:none}\n");
         // The line breaks between lines are in the layer's own flow; at size 0 they take no room and show no selection.
         sb.Append(".pdf-text{position:absolute;inset:0;overflow:hidden;font-size:0;line-height:1;font-family:\"PdfPecker Text Layer\";color:transparent;forced-color-adjust:none}\n");
-        // Each word is stretched to its glyphs in the image; kerning, ligatures and spacing would change its width.
+        // Each line is a box whose words are stretched to their glyphs in the image; kerning, ligatures and spacing other
+        // than the layer's own would change their widths. Every word is isolated, so the browser lays out the words of
+        // right-to-left text in the order they are written in, where the layer has placed them.
         sb.Append(".pdf-text>span{position:absolute;white-space:pre;transform-origin:0 ")
             .Append(Number(TextLayerFont.Ascent)).Append("em;font-kerning:none;font-variant-ligatures:none;letter-spacing:0;word-spacing:0}\n");
+        sb.Append(".pdf-text>span>span{unicode-bidi:isolate;transform-origin:0 0}\n");
         // Word selections touch and can overlap a little, as browsers widen a selection at the end of each span. An
         // opaque colour multiplied onto the page looks the same where they overlap, which a translucent one would not.
         sb.Append(".pdf-text{mix-blend-mode:multiply}\n");
@@ -84,50 +90,124 @@ internal static class HtmlPageWriter
     }
 
     /// <summary>
-    /// A line of the text layer: a span per word, each followed by the space that separates it from the next, so copied
-    /// text keeps its spaces, and a line break after the last.
+    /// A line of the text layer: a box at the start of the line's baseline, turned with the line, holding a span per word,
+    /// each followed by the space that separates it from the next, so copied text keeps its spaces, and a line break
+    /// after the box.
     /// </summary>
+    /// <remarks>
+    /// Browsers search for a phrase only within one block of text, and every absolutely positioned box is a block of
+    /// its own, so the words of a line flow inline in one box for a search to find words that follow each other. A word
+    /// is stretched with letter spacing to reach the next word, as an inline box cannot be scaled, and a margin moves it
+    /// to its place where the gap before it is wider than a space or its words go right to left.
+    /// <para>
+    /// Browsers put each glyph on a 64th of a pixel, and with letter spacing those steps add up along a line to a pixel
+    /// or two. A line is laid out <see cref="LineScale"/> times larger and scaled down, which shrinks them as much.
+    /// </para>
+    /// </remarks>
     private static void WriteLine(StringBuilder sb, PdfTextLine line, double width, double height)
     {
         var words = line.Words;
+        int first = -1;
+        double lineSize = 0;
+        for (int i = 0; i < words.Count; i++)
+        {
+            if (TextLayerFont.Ems(words[i].Text) == 0 || !(words[i].FontSize > 0)) continue;
+            if (first < 0) first = i;
+            lineSize = Math.Max(lineSize, words[i].FontSize);
+        }
+        if (first < 0)
+        {
+            sb.Append("<br>\n");
+            return;
+        }
         bool rotated = Math.Abs(line.Angle) > 1e-6;
         double rad = line.Angle * Math.PI / 180, dx = Math.Cos(rad), dy = -Math.Sin(rad); // along the baseline, y down
-        for (int i = 0; i < words.Count; i++)
+        var start = words[first];
+        // The box's line height is its font size, the largest of the line, which puts the baseline of its words an
+        // ascent below its top whatever their sizes.
+        sb.Append("<span style=\"left:").Append(Percent(start.OriginX, width))
+            .Append(";top:").Append(Percent(start.OriginY - TextLayerFont.Ascent * lineSize * LineScale, height))
+            .Append(";font-size:").Append(Cqw(lineSize, width)).Append(";transform:");
+        if (rotated) sb.Append("rotate(").Append(Number(-line.Angle)).Append("deg) ");
+        sb.Append("scale(").Append(Number(1 / LineScale)).Append(")\">");
+        double pen = 0; // where the previous word ends, along the baseline from the start of the box
+        for (int i = first; i < words.Count; i++)
         {
             var word = words[i];
             int ems = TextLayerFont.Ems(word.Text);
             if (ems == 0 || !(word.FontSize > 0)) continue;
             double size = word.FontSize, advance = word.Advance;
-            bool space = i < words.Count - 1;
-            if (space)
+            bool last = i == words.Count - 1;
+            if (!last)
             {
                 // The word and its space reach to where the next word starts, so their selections meet without
                 // overlapping. A next word that is not ahead on the baseline, as in right-to-left lines, or far away
-                // leaves the space with no width.
+                // leaves the space squeezed into the word.
                 var next = words[i + 1];
                 double reach = (next.OriginX - word.OriginX) * dx + (next.OriginY - word.OriginY) * dy;
-                if (reach > advance && reach - advance < 3 * size) { advance = reach; ems++; }
-                else space = false;
+                if (reach > advance && reach - advance < 3 * size) advance = reach;
             }
-            double scale = advance > 0 ? advance / (ems * size) : 1;
-            sb.Append("<span style=\"left:").Append(Percent(word.OriginX, width))
-                .Append(";top:").Append(Percent(word.OriginY - TextLayerFont.Ascent * size, height))
-                .Append(";font-size:").Append(Number(size / width * 100)).Append("cqw");
-            bool scaled = Math.Abs(scale - 1) > 1e-4;
-            if (rotated || scaled)
+            int characters = last ? ems : ems + 1;
+            double natural = characters * size;
+            double ox = word.OriginX - start.OriginX, oy = word.OriginY - start.OriginY;
+            double along = ox * dx + oy * dy, across = oy * dx - ox * dy;
+            double margin = along - pen;
+            // Letter spacing follows every character, which a word of single characters in a script whose letters do
+            // not join stretches evenly. Browsers leave it out where letters join, as in Arabic, and between a letter
+            // and its marks, so other words are scaled instead, as boxes of their own that a phrase search stops at.
+            bool spaced = LetterSpaced(word.Text);
+            pen = along + (spaced ? advance : natural);
+            sb.Append("<span style=\"");
+            int styleStart = sb.Length;
+            if (Math.Abs(size - lineSize) > 1e-6) sb.Append("font-size:").Append(Cqw(size, width)).Append(';');
+            if (Math.Abs(margin) > 1e-3) sb.Append("margin-left:").Append(Cqw(margin, width)).Append(';');
+            if (Math.Abs(across) > 1e-3) sb.Append("position:relative;top:").Append(Cqw(across, width)).Append(';');
+            if (spaced)
             {
-                sb.Append(";transform:");
-                if (rotated) sb.Append("rotate(").Append(Number(-line.Angle)).Append("deg)");
-                if (rotated && scaled) sb.Append(' ');
-                if (scaled) sb.Append("scaleX(").Append(Number(scale)).Append(')');
+                double spacing = (advance - natural) / characters / size;
+                if (Math.Abs(spacing) > 1e-6) sb.Append("letter-spacing:").Append(Number(spacing)).Append("em;");
             }
-            if (!space && i < words.Count - 1) sb.Append(";word-spacing:-1em");
-            sb.Append("\">");
+            else if (Math.Abs(advance - natural) > 1e-6 * natural)
+                sb.Append("display:inline-block;transform:scaleX(").Append(Number(advance / natural)).Append(");");
+            // A word that needs no style has no style attribute.
+            if (sb.Length == styleStart) sb.Length -= " style=\"".Length;
+            else
+            {
+                sb.Length--;
+                sb.Append('"');
+            }
+            sb.Append('>');
             AppendEscaped(sb, word.Text, attribute: false);
-            if (i < words.Count - 1) sb.Append(' ');
+            if (!last) sb.Append(' ');
             sb.Append("</span>");
         }
-        sb.Append("<br>\n");
+        sb.Append("</span><br>\n");
+    }
+
+    /// <summary>
+    /// Whether every character of <paramref name="text"/> takes letter spacing of its own in browsers: letters, digits,
+    /// punctuation and symbols of the Basic Multilingual Plane that are neither marks nor parts of a cluster, in scripts
+    /// whose letters do not join.
+    /// </summary>
+    private static bool LetterSpaced(string text)
+    {
+        foreach (char c in text)
+        {
+            // Arabic, Syriac, Thaana, N'Ko, Mandaic and their extensions and presentation forms; Mongolian; Hangul jamo,
+            // which join into syllables; and Thai and Lao sara am, which belong to the letter before them.
+            if (c is (>= '\u0600' and <= '\u08FF') or (>= '\u1800' and <= '\u18AF') or (>= '\u1100' and <= '\u11FF')
+                or (>= '\uA960' and <= '\uA97F') or (>= '\uD7B0' and <= '\uD7FF') or (>= '\uFB50' and <= '\uFDFF')
+                or (>= '\uFE70' and <= '\uFEFF') or '\u0E33' or '\u0EB3')
+                return false;
+            switch (CharUnicodeInfo.GetUnicodeCategory(c))
+            {
+                case UnicodeCategory.NonSpacingMark or UnicodeCategory.SpacingCombiningMark or UnicodeCategory.EnclosingMark
+                    or UnicodeCategory.Format or UnicodeCategory.Control or UnicodeCategory.Surrogate
+                    or UnicodeCategory.PrivateUse or UnicodeCategory.OtherNotAssigned:
+                    return false;
+            }
+        }
+        return true;
     }
 
     /// <summary>
@@ -162,6 +242,12 @@ internal static class HtmlPageWriter
     }
 
     private static string Percent(double value, double of) => Number(value / of * 100) + "%";
+
+    /// <summary>
+    /// A length in points as container query units of a page <paramref name="width"/> points wide, in a line laid out
+    /// <see cref="LineScale"/> times larger.
+    /// </summary>
+    private static string Cqw(double value, double width) => Number(value * LineScale / width * 100) + "cqw";
 
     /// <summary>A number for CSS, with at most four decimals and no exponent.</summary>
     public static string Number(double value)

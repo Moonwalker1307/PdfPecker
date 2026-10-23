@@ -81,19 +81,32 @@ public class PdfToHtmlTests
     [Fact]
     public void Words_cover_their_glyphs()
     {
-        var spans = Spans(Html(HandWritten()));
-        // "Hello" in 12 pt Helvetica at (72, 700): its baseline is 92 pt from the top, and the layer font's ascent is
-        // 0.8 em. Each layer character is one em wide, so the five letters, 27.336 pt in Helvetica, are scaled to fit.
-        double scale = (722 + 556 + 222 + 222 + 556) * 12 / 1000.0 / (5 * 12);
+        var html = Html(HandWritten());
+        // "Hello" in 12 pt Helvetica at (72, 700): its baseline is 92 pt from the top. The line is laid out ten times
+        // larger and scaled down, and the layer font's ascent is 0.8 em. Each layer character is one em wide, so the
+        // five letters, 27.336 pt in Helvetica, are drawn closer together with letter spacing.
+        double spacing = ((722 + 556 + 222 + 222 + 556) * 12 / 1000.0 - 5 * 12) / 5 / 12;
         string expected = string.Create(CultureInfo.InvariantCulture,
-            $"<span style=\"left:11.7647%;top:{Math.Round((92 - 9.6) / 792 * 100, 4)}%;font-size:1.9608cqw;transform:scaleX({Math.Round(scale, 4)})\">Hello</span>");
-        Assert.Contains(expected, spans);
-        // Text is escaped, and the words of a line are separated by a space at the end of each but the last.
-        Assert.Contains(spans, s => s.EndsWith(">a&lt;b </span>", StringComparison.Ordinal));
-        Assert.Contains(spans, s => s.EndsWith(">&amp; </span>", StringComparison.Ordinal));
-        Assert.Contains(spans, s => s.EndsWith(">\"c\"</span>", StringComparison.Ordinal));
+            $"<span style=\"left:11.7647%;top:{Math.Round((92 - 96) / 792.0 * 100, 4)}%;font-size:19.6078cqw;transform:scale(0.1)\">" +
+            $"<span style=\"letter-spacing:{Math.Round(spacing, 4)}em\">Hello</span></span><br>");
+        Assert.Contains(expected, html);
+        // Text is escaped, and the words of a line are spans in one line box, separated by a space at the end of each but
+        // the last, so a browser finds a phrase in it.
+        Assert.Matches("<span style=\"[^\"]*\">a&lt;b </span><span style=\"[^\"]*\">&amp; </span><span style=\"[^\"]*\">\"c\"</span></span><br>", html);
         // Text running up the page is turned about the start of its baseline.
-        Assert.Contains(spans, s => s.Contains("transform:rotate(-90deg) scaleX(", StringComparison.Ordinal) && s.EndsWith(">Upward</span>", StringComparison.Ordinal));
+        Assert.Matches("<span style=\"[^\"]*;transform:rotate\\(-90deg\\) scale\\(0.1\\)\"><span[^>]*>Upward</span></span>", html);
+    }
+
+    [Fact]
+    public void Words_that_letter_spacing_cannot_stretch_are_scaled()
+    {
+        // Browsers put no letter spacing between Arabic letters, which join, nor between a letter and its marks.
+        var pdf = HtmlToPdf.Convert("<p style='font-family:Arabic'>سلام world e\u0301te</p>",
+            new PdfOptions { Fonts = new FontCollection().AddFile(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "NotoSansArabic-Subset.ttf"), "Arabic") });
+        var spans = Regex.Matches(Html(pdf), "<span( style=\"([^\"]*)\")?>([^<]*)</span>").Select(m => (Style: m.Groups[2].Value, Text: m.Groups[3].Value)).ToList();
+        Assert.Contains(spans, s => s.Text.StartsWith("سلام", StringComparison.Ordinal) && s.Style.Contains("display:inline-block;transform:scaleX(", StringComparison.Ordinal));
+        Assert.Contains(spans, s => s.Text.StartsWith("world", StringComparison.Ordinal) && !s.Style.Contains("scaleX", StringComparison.Ordinal));
+        Assert.Contains(spans, s => s.Text.StartsWith("e\u0301te", StringComparison.Ordinal) && s.Style.Contains("scaleX", StringComparison.Ordinal));
     }
 
     [Fact]
