@@ -1643,6 +1643,33 @@ public class HostileInputTests
         Assert.Equal("\u05D0 \u05D0", page.Text);
     }
 
+    [Fact]
+    public void Cid_width_ranges_at_the_end_of_the_int_range_or_in_great_numbers_are_bounded()
+    {
+        // A W range ending at int.MaxValue wrapped its loop counter and filled memory without end, and one spanning the
+        // whole int range passed the range limit through overflow. Thousands of ranges each within the limit took
+        // unbounded time too, so an array now sets a bounded number of entries in all. W2 ranges are read the same way.
+        const string edges = "2147483647 2147483647 500 -2147483648 2147483647 500 ";
+        var w = "[0 [600 600] " + edges + Repeat("0 65535 500 ", 5_000) + "]";
+        var w2 = "[0 [-1000 300 880] " + edges.Replace("500", "-1000 300 880", StringComparison.Ordinal) + Repeat("0 65535 -1000 300 880 ", 5_000) + "]";
+        const string content = "BT /F1 12 Tf 72 700 Td <00000001> Tj ET";
+        var pdf = SimplePdf(new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /Font << /F1 4 0 R >> >> /Contents 6 0 R >>",
+            "<< /Type /Font /Subtype /Type0 /BaseFont /Test /Encoding /Identity-H /DescendantFonts [5 0 R] >>",
+            $"<< /Type /Font /Subtype /CIDFontType2 /BaseFont /Test /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /W {w} /W2 {w2} >>",
+            $"<< /Length {content.Length} >>\nstream\n{content}\nendstream",
+        });
+
+        var (image, allocated) = Allocating(() => PdfRenderer.Open(pdf).RenderPage(0, new ImageOptions { Dpi = 36 }));
+        Assert.Equal(100, image.Width);
+        Assert.True(allocated < 256L << 20, $"rendering allocated {allocated} bytes");
+        Bounded(() => PdfText.Extract(pdf));
+        Assert.NotEmpty(Bounded(() => PdfToHtml.Convert(pdf)));
+    }
+
     /// <summary>
     /// A one-page PDF showing <paramref name="content"/>, compressed, in a font mapping code 1 to U+0301, drawn
     /// <paramref name="markWidth"/> wide, and A to U+05D0.
