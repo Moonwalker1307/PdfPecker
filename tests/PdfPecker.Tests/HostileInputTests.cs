@@ -813,6 +813,29 @@ public class HostileInputTests
     }
 
     [Theory]
+    [InlineData("inline")]
+    [InlineData("img")]
+    [InlineData("background")]
+    public void Svg_filter_region_far_longer_than_wide_stays_within_the_pixel_cap(string use)
+    {
+        // Found by the fuzzer: target html, memory-36949edf. The filtered group reaches 10¹¹ units down, so its filter
+        // region is about 66 × 10¹¹ units; scaled to the pixel cap it kept one pixel across and became 84 million
+        // pixels long, and its buffers took gigabytes.
+        const string svg = "<svg xmlns='http://www.w3.org/2000/svg' width='600' height='200'><defs><filter id='hue'><feColorMatrix/></filter></defs>"
+            + "<g filter='url(#hue)'><rect x='540' width='5' height='8'/><rect x='590' y='99999999999' width='5' height='8'/></g></svg>";
+        string uri = "data:image/svg+xml;base64," + Convert.ToBase64String(Encoding.UTF8.GetBytes(svg));
+        string html = use switch
+        {
+            "inline" => svg,
+            "img" => $"<img src='{uri}'>",
+            _ => $"<div style='width:600px;height:200px;background-image:url({uri})'></div>",
+        };
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.True(allocated < 1L << 30, $"allocated {allocated >> 20} MB");
+    }
+
+    [Theory]
     // html, timeout-1f7d8566: a thousand blurred circles, each filter well within its own budget.
     [InlineData("<svg width='760' height='760'><filter id='blur'><feGaussianBlur stdDeviation='4'/></filter>",
         "<circle cx='160' cy='160' r='160' fill='#cc3333' filter='url(#blur)'/>", "</svg>")]
