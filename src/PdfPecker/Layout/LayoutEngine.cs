@@ -552,7 +552,17 @@ internal sealed partial class LayoutEngine
     {
         var (bx, bw) = f.Pages != null ? OnPage(f.Pages, top) : (f.X, f.W);
         passed = null;
-        if (FloatsBelow(top) && AvoidsFloats(e)) return LayoutBesideFloats(e, bx, ref top, bw);
+        if (FloatsBelow(top) && AvoidsFloats(e))
+        {
+            // A box beside floats, such as a table beside the initial letter of the heading it is kept with, counts
+            // towards the depth that chains move to like any other box kept with a chain. Without it, every level of
+            // such tables nested in each other was laid out in full and then again on the next page when its chain
+            // moved, so the work doubled with each level: 30 levels did not finish.
+            if (joins) _joinDepth++;
+            float besideBottom = LayoutBesideFloats(e, bx, ref top, bw);
+            if (joins) _joinDepth--;
+            return besideBottom;
+        }
 
         // A box that must start on the page of the chain before it is only laid out until it is clear where its
         // first content lands, when that is a later page and the chain has to move anyway.
