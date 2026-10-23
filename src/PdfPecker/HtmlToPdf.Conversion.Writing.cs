@@ -109,7 +109,7 @@ public static partial class HtmlToPdf
         private Func<int, int, List<DrawOp>> PageBands(PdfDocumentWriter writer, PageMarginBoxes? marginBoxes)
         {
             var strings = _styles.Strings;
-            var unnumbered = new Dictionary<(Element, PageSetup), List<DrawOp>>();
+            var laidOut = new BandLayouts();
             return (p, count) =>
             {
                 var (section, local) = writer.SectionOfPage(p);
@@ -123,8 +123,8 @@ public static partial class HtmlToPdf
                     ops.AddRange(marginBoxes.Layout(p, count, setup, run.Name));
                 }
                 var (header, footer) = BandsOf(p == 0);
-                if (header != null) ops.AddRange(LayoutBandForPage(header, setup, _images, p, count, alignBottom: false, unnumbered, _cancellation));
-                if (footer != null) ops.AddRange(LayoutBandForPage(footer, setup, _images, p, count, alignBottom: true, unnumbered, _cancellation));
+                if (header != null) ops.AddRange(LayoutBandForPage(header, setup, _images, p, count, alignBottom: false, laidOut, _cancellation));
+                if (footer != null) ops.AddRange(LayoutBandForPage(footer, setup, _images, p, count, alignBottom: true, laidOut, _cancellation));
                 return ops;
             };
         }
