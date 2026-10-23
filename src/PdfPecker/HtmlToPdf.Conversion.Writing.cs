@@ -75,6 +75,7 @@ public static partial class HtmlToPdf
             Viewer = _options.Viewer,
             PageLabels = _options.PageLabels,
             Security = _options.Security,
+            Linearize = _options.Linearize,
             Conformance = _settings.Conformance,
             EInvoice = _options.EInvoice,
             Attachments = _settings.Attachments,

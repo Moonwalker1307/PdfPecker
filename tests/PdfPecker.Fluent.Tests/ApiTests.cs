@@ -117,6 +117,20 @@ public sealed class ApiTests
         Assert.Contains("/StructTreeRoot", System.Text.Encoding.Latin1.GetString(pdf));
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void Linearize_writes_a_linearized_pdf_also_from_several_page_sets(int pageSets)
+    {
+        byte[] pdf = Document.Create(d =>
+        {
+            for (int i = 0; i < pageSets; i++) d.Page(p => p.Content().Text("Page set " + i));
+        }).GeneratePdf(new PdfOptions { Linearize = true });
+        var text = System.Text.Encoding.Latin1.GetString(pdf);
+        Assert.Matches(@"^%PDF-1\.\d\n%[^\n]*\n\d+ 0 obj\n<< /Linearized 1 /L " + pdf.Length + " ", text);
+        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(text, "/Linearized"));
+    }
+
     [Fact]
     public void Generate_leaves_the_callers_options_unchanged()
     {
@@ -142,7 +156,7 @@ public sealed class ApiTests
             "UserStyleSheet", "Bookmarks", "FormFields", "MaxPages", "Compress", "CompressionLevel", "Title", "Author",
             "Subject", "Keywords", "Creator", "Producer", "CustomProperties", "CreationDate", "FooterText", "HeaderText",
             "Watermark", "Security", "Conformance", "Accessibility", "Language", "Hyphenation", "EInvoice", "Attachments",
-            "EmbedStandardFonts", "Signature", "Viewer", "PageLabels",
+            "EmbedStandardFonts", "Signature", "Viewer", "PageLabels", "Linearize",
         ];
         var settable = typeof(PdfOptions).GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(p => p.CanWrite).Select(p => p.Name).Order(StringComparer.Ordinal);

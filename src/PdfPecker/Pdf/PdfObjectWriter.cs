@@ -32,6 +32,12 @@ internal sealed class PdfObjectSyntax
     /// <summary>Hex strings that were encrypted with the digits A-F in upper case.</summary>
     public bool UpperHexEncryptedStrings { get; init; }
 
+    /// <summary>
+    /// Unencrypted strings as literals rather than hex, as <see cref="PdfDocumentWriter"/> writes them. veraPDF compares
+    /// a hex /Alt with an annotation's /Contents by its spelling, so PDF/UA files keep their literals.
+    /// </summary>
+    public bool LiteralStrings { get; init; }
+
     /// <summary>A stream met as a direct object is an error rather than written as null.</summary>
     public bool ThrowOnDirectStream { get; init; }
 
@@ -52,6 +58,9 @@ internal sealed class PdfObjectSyntax
     /// own hex writer.
     /// </summary>
     public static readonly PdfObjectSyntax Stamp = new() { MaxDepth = 256, UpperHexEncryptedStrings = true };
+
+    /// <summary>The linearizer, which rewrites this library's own files among others and keeps their literal strings.</summary>
+    public static readonly PdfObjectSyntax Linearize = new() { MaxDepth = 256, LiteralStrings = true };
 
     /// <summary>The compactor, which writes every object in as few bytes as it can.</summary>
     public static readonly PdfObjectSyntax Compact = new() { MaxDepth = 256, Minimal = true };
@@ -204,13 +213,13 @@ internal class PdfObjectWriter
     }
 
     /// <summary>
-    /// Writes a string as hex (as a literal with <see cref="PdfObjectSyntax.Minimal"/>), encrypted for the current object
+    /// Writes a string as hex (as a literal with <see cref="PdfObjectSyntax.Minimal"/> or <see cref="PdfObjectSyntax.LiteralStrings"/>), encrypted for the current object
     /// when there is an encryption.
     /// </summary>
     public void WriteString(ByteBuffer b, byte[] bytes)
     {
         if (Encryption != null) PdfSyntax.Hex(b, Encryption.EncryptString(bytes, ObjectNumber, Generation), Syntax.UpperHexEncryptedStrings);
-        else if (Syntax.Minimal) PdfSyntax.LiteralString(b, bytes);
+        else if (Syntax.Minimal || Syntax.LiteralStrings) PdfSyntax.LiteralString(b, bytes);
         else PdfSyntax.Hex(b, bytes, Syntax.UpperHexStrings);
     }
 

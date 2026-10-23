@@ -72,8 +72,9 @@ Document.Create(container =>
   calls write the HTML elements PdfPecker tags a PDF/UA document from.
 - **Everything else in PdfPecker** through the normal `PdfOptions`: PDF/A, PDF/UA, signatures, encryption,
   watermarks, e-invoices (ZUGFeRD, Factur-X, XRechnung), attachments, fonts, viewer settings and page labels (which
-  number the pages across every `Page` call). `GeneratePdf(options)` copies the options, so one options object can be
-  shared.
+  number the pages across every `Page` call) and linearized output for Fast Web View (a document with several `Page`
+  calls is linearized once, after its page sets are merged). `GeneratePdf(options)` copies the options, so one options
+  object can be shared.
 - **An escape hatch**: `container.Html("...")` places raw HTML anywhere, and `documentContainer.Css("...")` adds
   stylesheet rules, for anything the fluent calls do not cover yet (form fields, floats, grid, footnotes).
 - **Output**: `GeneratePdf` (bytes, file or stream), `GeneratePdfAsync`, `GenerateImages` (PNG, JPEG, WebP, TIFF)
