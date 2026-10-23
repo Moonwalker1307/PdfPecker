@@ -8,6 +8,12 @@ internal sealed partial class PdfFont
     /// <summary>A W or W2 array range longer than this is ignored, so a damaged array cannot fill memory.</summary>
     private const int MaxCidRange = 65536;
 
+    /// <summary>
+    /// The entries one W or W2 array may set in all. Each range is bounded on its own, but many of them would still
+    /// take unbounded time, and no font has more CIDs than this.
+    /// </summary>
+    private const long MaxCidEntries = 1 << 20;
+
     /// <summary>The Latin fallback of a non-embedded CID font treats CIDs below this as character codes.</summary>
     private const int LatinCidLimit = 0x250;
 
@@ -136,6 +142,7 @@ internal sealed partial class PdfFont
     private void ReadCidWidths(PdfFile file, PdfArray w)
     {
         int i = 0;
+        long budget = MaxCidEntries;
         while (i < w.Count)
         {
             int first = file.GetIntValue(w[i]);
@@ -143,7 +150,9 @@ internal sealed partial class PdfFont
             var next = file.Resolve(w[i + 1]);
             if (next is PdfArray list)
             {
-                for (int k = 0; k < list.Count && k < MaxCidRange; k++) _cidWidths[first + k] = file.Num(list[k]);
+                int count = (int)Math.Min(Math.Min(list.Count, MaxCidRange), budget);
+                budget -= count;
+                for (int k = 0; k < count; k++) _cidWidths[first + k] = file.Num(list[k]);
                 i += 2;
             }
             else
@@ -151,9 +160,12 @@ internal sealed partial class PdfFont
                 if (i + 2 >= w.Count) break;
                 int last = file.GetIntValue(next);
                 double width = file.Num(w[i + 2]);
-                if (last - first <= MaxCidRange)
+                // Long arithmetic, because a range ending at int.MaxValue would otherwise wrap and never end.
+                long span = (long)last - first;
+                if (span >= 0 && span <= MaxCidRange && span < budget)
                 {
-                    for (int c = first; c <= last; c++) _cidWidths[c] = width;
+                    budget -= span + 1;
+                    for (long c = first; c <= last; c++) _cidWidths[(int)c] = width;
                 }
                 i += 3;
             }
@@ -164,6 +176,7 @@ internal sealed partial class PdfFont
     private void ReadVerticalMetrics(PdfFile file, PdfArray w2)
     {
         int i = 0;
+        long budget = MaxCidEntries;
         while (i < w2.Count)
         {
             int first = file.GetIntValue(w2[i]);
@@ -171,7 +184,9 @@ internal sealed partial class PdfFont
             var next = file.Resolve(w2[i + 1]);
             if (next is PdfArray list)
             {
-                for (int k = 0; k + 2 < list.Count; k += 3) _vMetrics[first + k / 3] = (file.Num(list[k]), file.Num(list[k + 1]), file.Num(list[k + 2]));
+                int count = (int)Math.Min(list.Count / 3, budget);
+                budget -= count;
+                for (int k = 0; k < count; k++) _vMetrics[first + k] = (file.Num(list[3 * k]), file.Num(list[3 * k + 1]), file.Num(list[3 * k + 2]));
                 i += 2;
             }
             else
@@ -179,9 +194,11 @@ internal sealed partial class PdfFont
                 if (i + 4 >= w2.Count) break;
                 int last = file.GetIntValue(next);
                 var metrics = (file.Num(w2[i + 2]), file.Num(w2[i + 3]), file.Num(w2[i + 4]));
-                if (last - first <= MaxCidRange)
+                long span = (long)last - first;
+                if (span >= 0 && span <= MaxCidRange && span < budget)
                 {
-                    for (int c = first; c <= last; c++) _vMetrics[c] = metrics;
+                    budget -= span + 1;
+                    for (long c = first; c <= last; c++) _vMetrics[(int)c] = metrics;
                 }
                 i += 5;
             }
