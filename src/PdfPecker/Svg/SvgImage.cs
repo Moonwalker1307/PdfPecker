@@ -279,7 +279,10 @@ internal sealed partial class SvgImage
 
     private void Render(Element e, Matrix ctm, float opacity, int depth)
     {
-        if (depth > 32 || --_budget.Remaining < 0) return;
+        // The budget is charged before the depth is checked: an element at the depth limit still loops over its
+        // children, so a use of a symbol with thousands of children would otherwise make thousands of free calls for
+        // every visit the budget counts, and run for billions of calls before the budget ran out.
+        if (--_budget.Remaining < 0 || depth > 32) return;
         var s = e.Style;
         if (s == null || s.Display == Display.None) return;
         if (e.GetAttribute("transform") is { } tf) ctm = ParseTransform(tf).Then(ctm);

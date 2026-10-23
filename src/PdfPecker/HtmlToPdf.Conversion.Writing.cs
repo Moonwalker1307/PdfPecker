@@ -72,6 +72,8 @@ public static partial class HtmlToPdf
         {
             Watermark = _options.Watermark,
             RightToLeft = _rtlPages,
+            Viewer = _options.Viewer,
+            PageLabels = _options.PageLabels,
             Security = _options.Security,
             Linearize = _options.Linearize,
             Conformance = _settings.Conformance,
@@ -104,10 +106,11 @@ public static partial class HtmlToPdf
                     _page, _images, _cancellation, _paged, _styles.CounterStyles) { FirstPageLeft = _rtlPages }
                 : null;
 
-        /// <summary>Draws the margin boxes and the running header and footer of each page, laid out per page.</summary>
+        /// <summary>Draws the margin boxes and the running header and footer of each page, laid out per page when they number it.</summary>
         private Func<int, int, List<DrawOp>> PageBands(PdfDocumentWriter writer, PageMarginBoxes? marginBoxes)
         {
             var strings = _styles.Strings;
+            var laidOut = new BandLayouts();
             return (p, count) =>
             {
                 var (section, local) = writer.SectionOfPage(p);
@@ -121,8 +124,8 @@ public static partial class HtmlToPdf
                     ops.AddRange(marginBoxes.Layout(p, count, setup, run.Name));
                 }
                 var (header, footer) = BandsOf(p == 0);
-                if (header != null) ops.AddRange(LayoutBandForPage(header, setup, _images, p, count, alignBottom: false, _cancellation));
-                if (footer != null) ops.AddRange(LayoutBandForPage(footer, setup, _images, p, count, alignBottom: true, _cancellation));
+                if (header != null) ops.AddRange(LayoutBandForPage(header, setup, _images, p, count, alignBottom: false, laidOut, _cancellation));
+                if (footer != null) ops.AddRange(LayoutBandForPage(footer, setup, _images, p, count, alignBottom: true, laidOut, _cancellation));
                 return ops;
             };
         }

@@ -243,6 +243,14 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Hyphenating_a_decomposed_word_with_a_letter_beyond_the_basic_plane_does_not_throw()
+    {
+        // Found by the fuzzer: target html, exception-1f68b0e4. Composing a decomposed word letter by letter took each
+        // half of a surrogate pair as a letter of its own, and normalising half a pair throws ArgumentException.
+        AssertStructurallyValid(Bounded("<p lang=en style='hyphens: auto; width: 40pt'>Lorem cafe\u0301\U0001D400hyphenation ipsum</p>"));
+    }
+
+    [Fact]
     public void Many_custom_properties_on_many_elements_stay_linear()
     {
         var sb = new StringBuilder("<style>:root{");
@@ -704,6 +712,17 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Svg_symbol_of_many_uses_of_itself_stays_within_the_drawing_budget()
+    {
+        // Found by the fuzzer (target svg, timeout|uncancellable): a symbol whose two thousand children each use the
+        // symbol again. The uses nest until the depth limit, where every visit the budget counted looped over all the
+        // children for free, so the drawing ran for billions of calls and did not react to cancellation.
+        var svg = "<svg width='40' height='40'><symbol id='s' viewBox='0 0 24 24'>" + Repeat("<use href='#s'/>", 2000)
+            + "</symbol><use href='#s'/></svg>";
+        AssertStructurallyValid(Bounded(() => Bounded(svg)));
+    }
+
+    [Fact]
     public void Svg_marker_that_uses_itself_is_left_out_inside_itself()
     {
         // Found by the fuzzer (target html, timeout-522fb4dc): a marker whose own path uses it at both ends drew copies of
@@ -728,6 +747,17 @@ public class HostileInputTests
         var pdf = Bounded(sb.ToString());
         AssertStructurallyValid(pdf);
         Assert.True(pdf.Length < 1_000_000, $"{pdf.Length} bytes");
+    }
+
+    [Fact]
+    public void Svg_text_in_deeply_nested_translucent_groups_has_its_font()
+    {
+        // Found by the fuzzer (target svg, nightly run 70): each translucent group wraps its content in a child list, and
+        // the pass that registers the fonts of SVG text stopped 16 lists deep while the writer drew all of them, so text
+        // needing an embedded font 17 or more groups deep was written with a font that had no subset.
+        var pdf = Bounded("<svg width='100' height='50'>" + Repeat("<g opacity='.5'>", 20)
+            + "<text x='5' y='20'>\u05D0\u05A5 %</text>" + Repeat("</g>", 20) + "</svg>");
+        AssertStructurallyValid(pdf);
     }
 
     [Fact]
@@ -798,6 +828,20 @@ public class HostileInputTests
         // are drawn without them.
         Assert.InRange(CountOf(text, "/Subtype /Image") / 2, 1, 1999);
         Assert.Contains("0.8 0.2 0.2 rg", text);
+    }
+
+    [Fact]
+    public void Filters_over_many_translucent_gradients_count_the_soft_mask_of_each()
+    {
+        // Found by the fuzzer: target css, timeout-b1715c82. A gradient with translucent stops is drawn through a soft
+        // mask, which the renderer paints on a canvas the size of the whole filtered image, and the work budget did not
+        // count those, nor the shading of any gradient, so these forty boxes took 40 s.
+        var layers = string.Join(",", Enumerable.Repeat("radial-gradient(red 10%, rgba(0,0,255,.5) 90%)", 300));
+        var html = Repeat($"<div style='height:40px;background:{layers};filter:blur(2px)'></div>", 40);
+        var pdf = Bounded(() => Bounded(html, new PdfOptions { Compress = false }));
+        AssertStructurallyValid(pdf);
+        // The first filters run; the boxes after the document's budget is spent are drawn without them.
+        Assert.InRange(CountOf(Latin1(pdf), "/Subtype /Image") / 2, 1, 39);
     }
 
     [Fact]
@@ -955,6 +999,54 @@ public class HostileInputTests
         var (pdf, allocated) = Allocating(() => Bounded(html));
         AssertStructurallyValid(pdf);
         Assert.InRange(allocated, 0, 192L << 20);
+    }
+
+    [Fact]
+    public void A_header_taller_than_the_page_is_not_laid_out_and_written_again_on_every_page()
+    {
+        // A header whose padding leaves no room for its text puts each letter on a line of its own, far below the page.
+        // It was laid out again for every page and all of it written on each: a fuzzed page of 500 pages and a word of
+        // 18,000 letters took 57 s and 8 GB. A header without page numbers is now laid out once, and only what lands on
+        // the paper is written.
+        var html = "<style>@page{size:300pt 300pt;margin:0}body{overflow-wrap:break-word}</style>"
+                   + "<header data-sticky-pdf-header style='padding:0 200pt'><p>" + new string('y', 6000) + "</p></header>"
+                   + "<main style='padding-top:90000pt'></main>";
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(pdf.Length, 0, 1L << 20);
+        Assert.InRange(allocated, 0, 128L << 20);
+    }
+
+    [Fact]
+    public void A_footer_with_braces_that_are_not_page_numbers_is_laid_out_once()
+    {
+        // The fluent package writes a caller's brace as "{<span></span>" so that its text stays as written. Any brace
+        // made a band count as numbered, so a footer with a table of 3,000 rows was laid out again for each of 625
+        // pages, which took 11 s and allocated 2.7 GB. Only {page}, {pages} and {total-pages} now do, and this footer
+        // is laid out once.
+        var html = "<style>@page{size:300pt 300pt;margin:0}</style>"
+                   + "<footer data-sticky-pdf-footer height='40pt'><table>" + Repeat("<tr><td>{a}</td><td>b</td></tr>", 3000)
+                   + "</table><p>Total {<span></span>page} of {net}</p></footer>"
+                   + "<main style='padding-top:75000pt'></main>";
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.Equal(625, PageCount(pdf));
+        Assert.Contains("Total {page} of {net}", PdfText.ExtractPage(pdf, 625).Text, StringComparison.Ordinal);
+        Assert.InRange(allocated, 0, 256L << 20);
+    }
+
+    [Fact]
+    public void A_footer_with_page_numbers_and_a_huge_table_stops_at_a_limit()
+    {
+        // A footer with {page} is laid out again for every page. A fuzzed one held a table of 85,000 rows, laid out
+        // 350 times for over five minutes while its ops grew by 70 MB a second. That work is now charged to a budget
+        // for the whole document, and a band that would take too much of it stops the document.
+        var html = "<style>@page{size:300pt 300pt;margin:0}</style>"
+                   + "<footer data-sticky-pdf-footer height='40pt'><table>" + Repeat("<tr><td></td><td>x</td></tr>", 20_000)
+                   + "</table><p>Page {page} of {total-pages}</p></footer>"
+                   + "<main style='padding-top:90000pt'></main>";
+        var e = Assert.Throws<PdfLimitException>(() => Bounded(html));
+        Assert.Contains("{page}", e.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -2034,6 +2126,43 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Deep_long_and_repetitive_xmp_metadata_is_read_in_bounded_time()
+    {
+        const string head = "<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#'><rdf:Description xmlns:dc='http://purl.org/dc/elements/1.1/'>";
+        var deep = head + "<dc:title>" + Repeat("<a>", 200_000) + Repeat("</a>", 200_000) + "</dc:title><dc:subject>s</dc:subject></rdf:Description></rdf:RDF>";
+        Assert.Equal("s", Bounded(() => PdfPecker.Pdf.XmpReader.Properties(deep))["http://purl.org/dc/elements/1.1/subject"]);
+        var items = head + "<dc:creator><rdf:Seq>" + Repeat("<rdf:li>x</rdf:li>", 200_000) + "</rdf:Seq></dc:creator></rdf:Description></rdf:RDF>";
+        Assert.Equal(200_000 * 3 - 2, Bounded(() => PdfPecker.Pdf.XmpReader.Properties(items))["http://purl.org/dc/elements/1.1/creator"].Length);
+        // Past the character limit the packet stops being read; what came before stays.
+        var huge = head + "<dc:subject>s</dc:subject><dc:title>" + new string('x', 17 << 20) + "</dc:title></rdf:Description></rdf:RDF>";
+        var read = Bounded(() => PdfPecker.Pdf.XmpReader.Properties(huge));
+        Assert.Equal("s", read["http://purl.org/dc/elements/1.1/subject"]);
+        Assert.False(read.ContainsKey("http://purl.org/dc/elements/1.1/title"));
+    }
+
+    [Fact]
+    public void Xmp_metadata_that_decodes_to_more_than_its_budget_is_left_out()
+    {
+        var zeros = new MemoryStream();
+        using (var z = new ZLibStream(zeros, CompressionLevel.SmallestSize, leaveOpen: true))
+        {
+            var chunk = new byte[1 << 20];
+            for (int i = 0; i < 64; i++) z.Write(chunk);
+        }
+        var ms = new MemoryStream();
+        void W(string s) => ms.Write(Encoding.ASCII.GetBytes(s));
+        W("%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R /Metadata 4 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n"
+            + "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 10 10] >> endobj\n5 0 obj << /Title (Bomb) >> endobj\n"
+            + "4 0 obj << /Type /Metadata /Subtype /XML /Filter /FlateDecode /Length " + zeros.Length + " >> stream\n");
+        zeros.WriteTo(ms);
+        W("\nendstream endobj\ntrailer << /Root 1 0 R /Info 5 0 R >>\n%%EOF\n");
+        var pdf = ms.ToArray();
+        var properties = Bounded(() => PdfDocumentProperties.Read(pdf));
+        Assert.Equal("Bomb", properties.Title);
+        Assert.Null(properties.XmpMetadata);
+    }
+
+    [Fact]
     public void Narrow_column_width_on_a_huge_box_is_capped_at_a_hundred_columns()
     {
         var html = "<div style='width:1e9px;column-width:1px'>"
@@ -2264,6 +2393,18 @@ public class HostileInputTests
         // the heading moved to the next page and everything in the box was laid out again, at every level, so the work
         // doubled with each one: 31 levels took 15 s. Headings nested deeper than eight such boxes stay where they are.
         var html = "<p style='height: 600pt'>Before</p>" + Repeat(level, depth) + "end";
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
+    public void Tables_beside_initial_letters_of_their_headings_move_to_a_bounded_depth()
+    {
+        // Found by the fuzzer: target html, timeout-d2edd0b0. Each level is a heading with an initial letter, kept with
+        // a table that holds the next level and starts beside the letter. Tables beside floats did not count towards
+        // the depth that chains move to, so where a heading ended a page every level was laid out in full and then
+        // again on the next page, and the work doubled with each level: 30 levels did not finish in 30 s.
+        var html = "<style>h2::first-letter{initial-letter:3}</style>"
+            + Repeat("<div style='height:500pt'></div><h2>Heading</h2><table><tr><td>", 30);
         AssertStructurallyValid(Bounded(html));
     }
 
@@ -3443,6 +3584,29 @@ public class Jbig2SymbolDictionaryTests
         Assert.Equal(new byte[] { 0b00111111 }, Jbig2Decoder.Decode(stream, null, 8, 1));
     }
 
+    // jbig2, nightly fuzz run 70 (fuzzer framing): a text region whose refined symbol instance makes a symbol 15 pixels
+    // wide by -15 pixels and 1.7 billion pixels high. The refined bitmap of no width held no pixels and was charged
+    // nothing, but the refinement still looped over each of its rows, which took seconds for each such region.
+    private const string RefinedInstanceOfNoWidth =
+        "oAAAAGQAAABUAAAAAAAAAQAAAAAAAEkEAAP/AAAABwAAAAc/ujOXOp1/yECVwTSzWpzd/aLfvX5cln5BQxJHnOmfHn+8wB2bxSk4UrRnB9FOoHKCQ5u1QMklsJhwRP+sAAAAAjAAAQAAABMAAACgAAAAZAAAAAAAAAAAAAAAAAAAAwYgAQEAAAA/AAAAoAAAAGQAAAAAAAAAAAAAEv////8AAAAJnlk3+oCuWuzYpSZDaAAAAA==";
+
+    [Fact]
+    public void Rows_of_a_refined_instance_of_no_width_are_charged_to_the_work_budget()
+    {
+        var input = Convert.FromBase64String(RefinedInstanceOfNoWidth);
+        int width = BitConverter.ToInt32(input, 0), height = BitConverter.ToInt32(input, 4), globals = BitConverter.ToInt32(input, 8);
+        var dictionary = input[12..(12 + globals)];
+        Assert.Null(Record.Exception(() => Bounded(() => Jbig2Decoder.Decode(input[(12 + globals)..], dictionary, width, height))));
+
+        // The stream is the page information segment (30 bytes) and the text region segment, whose data runs to the end of
+        // the input. Repeated with its true length, the region takes far longer than the time bound when its rows are free.
+        int page = 12 + globals + 30;
+        var region = input[page..];
+        BinaryPrimitives.WriteUInt32BigEndian(region.AsSpan(8), (uint)(region.Length - 12));
+        var stream = input[(12 + globals)..page].Concat(Enumerable.Repeat(region, 16).SelectMany(r => r)).ToArray();
+        Assert.Null(Record.Exception(() => Bounded(() => Jbig2Decoder.Decode(stream, dictionary, width, height))));
+    }
+
     /// <summary>
     /// A page, a Huffman-coded dictionary of <paramref name="symbols"/> empty symbols, then <paramref name="regions"/>
     /// text regions of no width that each refer to it <paramref name="references"/> times. A region of no width is skipped
@@ -3586,6 +3750,28 @@ public class JpxLengthTests
         var cs = Codestream();
         int end = index == 0 ? cs.Length - 2 : IndexOf(cs, 0xFF, 0x90);
         Assert.NotNull(Decode(Cat(cs[..end], Segment(0xFF5D, Array.Empty<byte>()))));
+    }
+
+    [Fact]
+    public async Task Image_that_outgrows_its_decode_budget_fails_cleanly()
+    {
+        // One tile 61 samples wide and 1,638,447 tall: within the pixel limit, but its three components need 300 MB of
+        // planes, 1.2 GB of coefficients and millions of code-blocks. The code-blocks were charged to the budget only
+        // once they were built, and without a render's budget nothing stopped them: the decoder allocated 3.4 GB over
+        // 30 s. The image's own budget, charged before each allocation, now stops it at the coefficients.
+        var cs = Codestream();
+        int siz = IndexOf(cs, 0xFF, 0x51);
+        BinaryPrimitives.WriteInt32BigEndian(cs.AsSpan(siz + 10), 1_638_447); // Ysiz
+        BinaryPrimitives.WriteInt32BigEndian(cs.AsSpan(siz + 22), 64); // XTsiz
+        BinaryPrimitives.WriteInt32BigEndian(cs.AsSpan(siz + 26), 1_638_447); // YTsiz
+        var (error, allocated) = await Task.Run(() =>
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            var error = Record.Exception(() => PdfPecker.Rendering.Images.JpxDecoder.Decode(cs));
+            return (error, Allocated: GC.GetAllocatedBytesForCurrentThread() - before);
+        }).WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.IsType<InvalidDataException>(error);
+        Assert.True(allocated < 400L << 20, $"Allocated {allocated:N0} bytes");
     }
 
     private static PdfPecker.Rendering.Images.JpxImage? Decode(byte[] data)

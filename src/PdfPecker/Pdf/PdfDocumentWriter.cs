@@ -107,6 +107,12 @@ internal sealed partial class PdfDocumentWriter
     /// <summary>The document is right to left: its pages progress from right to left (/ViewerPreferences /Direction).</summary>
     public bool RightToLeft { get; init; }
 
+    /// <summary>How viewers open the document, or null for their own choices.</summary>
+    public PdfViewerSettings? Viewer { get; init; }
+
+    /// <summary>The caller's page label ranges.</summary>
+    public IList<PdfPageLabel>? PageLabels { get; init; }
+
     /// <summary>Encrypt the file with these passwords.</summary>
     public PdfSecurity? Security { get; init; }
 
@@ -405,6 +411,7 @@ internal sealed partial class PdfDocumentWriter
         WritePages(doc);
         // The structure elements get their object numbers now: PDF 2.0 links and bookmarks refer to them.
         if (Tagged) doc.StructElements = NumberStructure(ref doc.Next);
+        if (doc.OpenActionId != 0) WriteOpenAction(doc);
         WriteLinkAnnotations(doc);
         WriteFields(doc.PageFields, doc.PageIds, doc.ImageIds, doc.AnnotKeys, ref doc.Next);
         SetPage(0, out _);
@@ -497,6 +504,7 @@ internal sealed partial class PdfDocumentWriter
         // the next free key of the parent tree and the key of each annotation in it.
         public readonly List<(int Id, Placed Link, float Origin, float PageTop, int Page)> Annotations = new();
         public McStream[] PageStreams = null!;
+        public int OpenActionId; // the open action as an object of its own (PDF 2.0 tagged files), or 0
         public int ParentKey;
         public readonly Dictionary<int, int> AnnotKeys = new();
         public List<StructElem>? StructElements;
@@ -552,6 +560,32 @@ internal sealed partial class PdfDocumentWriter
             conic.FunctionId = doc.Next++;
             if (conic.Alphas != null) conic.AlphaFunctionId = doc.Next++;
         }
+        if (Pdf20 && Tagged && ViewerCatalog.StartPage(Viewer, doc.PageCount) >= 0) doc.OpenActionId = doc.Next++;
+    }
+
+    /// <summary>
+    /// Writes the open action of a PDF 2.0 tagged file: a GoTo action whose structure destination, which PDF/UA-2 requires,
+    /// is the first element with content on the start page (or the first element of all, on a page without any).
+    /// </summary>
+    private void WriteOpenAction(WriteState doc)
+    {
+        int page = ViewerCatalog.StartPage(Viewer, doc.PageCount);
+        StructElem? target = null;
+        foreach (var e in doc.PageStreams[page]?.Elements ?? new List<StructElem>())
+        {
+            for (target = e; target is { Id: 0 }; target = target.Parent) { }
+            if (target != null) break;
+        }
+        int targetId = target?.Id ?? (doc.StructElements!.Count > 0 ? doc.StructElements[0].Id : 0);
+        Begin(doc.OpenActionId).Ascii("<< /S /GoTo /D ");
+        ViewerCatalog.Destination(_out, doc.PageIds[page], Viewer!.Zoom);
+        if (targetId != 0)
+        {
+            _out.Ascii(" /SD ");
+            ViewerCatalog.Destination(_out, targetId, Viewer.Zoom);
+        }
+        _out.Ascii(" >>");
+        End();
     }
 
     private ByteBuffer Begin(int id) => _xref.Begin(_out, id);

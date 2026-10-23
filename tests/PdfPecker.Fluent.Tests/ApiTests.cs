@@ -57,6 +57,7 @@ public sealed class ApiTests
     [InlineData("file:///etc/passwd")]
     [InlineData("relative/path")]
     [InlineData("data:text/html,x")]
+    [InlineData("\n\\\\\u202E")] // System.Uri throws IndexOutOfRangeException for this one; found by the fuzzer
     public void Links_only_go_to_web_and_mail_addresses(string url)
     {
         Assert.Throws<ArgumentException>(() => Html.Of(c => c.Hyperlink(url)));
@@ -90,6 +91,23 @@ public sealed class ApiTests
             d.Page(p => p.Content().Text("a"));
             d.Page(p => p.Content().Text("b"));
         }).WithSettings(new DocumentSettings { PdfUA = true }).GeneratePdf());
+
+    [Fact]
+    public void Viewer_settings_and_page_labels_cover_every_page_set()
+    {
+        byte[] pdf = Document.Create(d =>
+        {
+            d.Page(p => p.Content().Text("cover"));
+            d.Page(p => p.Content().Text("body"));
+        }).GeneratePdf(new PdfOptions
+        {
+            Viewer = new PdfViewerSettings { PageLayout = PdfPageLayout.OneColumn, StartPage = 2 },
+            PageLabels = { new PdfPageLabel(2, PdfPageNumberStyle.LowerRoman) },
+        });
+        string text = System.Text.Encoding.Latin1.GetString(pdf);
+        Assert.Contains("/PageLayout /OneColumn /OpenAction [", text);
+        Assert.Contains("/PageLabels << /Nums [0 << /S /D >> 1 << /S /r >> ] >>", text);
+    }
 
     [Fact]
     public void Pdf_ua_settings_make_a_tagged_pdf()
@@ -138,7 +156,7 @@ public sealed class ApiTests
             "UserStyleSheet", "Bookmarks", "FormFields", "MaxPages", "Compress", "CompressionLevel", "Title", "Author",
             "Subject", "Keywords", "Creator", "Producer", "CustomProperties", "CreationDate", "FooterText", "HeaderText",
             "Watermark", "Security", "Conformance", "Accessibility", "Language", "Hyphenation", "EInvoice", "Attachments",
-            "EmbedStandardFonts", "Signature", "Linearize",
+            "EmbedStandardFonts", "Signature", "Viewer", "PageLabels", "Linearize",
         ];
         var settable = typeof(PdfOptions).GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(p => p.CanWrite).Select(p => p.Name).Order(StringComparer.Ordinal);

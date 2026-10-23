@@ -16,6 +16,25 @@ public enum PdfSignatureFormat
     Pkcs7Detached,
 }
 
+/// <summary>
+/// What a certification signature allows to change once it is made: the DocMDP permissions of ISO 32000-1 12.8.2.2.
+/// Adding validation data and document timestamps (PAdES B-LT and B-LTA) is allowed at every level.
+/// </summary>
+public enum PdfCertificationLevel
+{
+    /// <summary>Not a certification: an ordinary approval signature, which says nothing about later changes. The default.</summary>
+    None = 0,
+
+    /// <summary>No changes at all. Any later change, including another signature or a filled-in field, breaks the certification.</summary>
+    NoChanges = 1,
+
+    /// <summary>Filling in form fields and signing (including adding signature fields) are allowed; anything else breaks the certification.</summary>
+    FormFilling = 2,
+
+    /// <summary>As <see cref="FormFilling"/>, and comments: annotations may also be added, changed and deleted.</summary>
+    FormFillingAndAnnotations = 3,
+}
+
 /// <summary>The public-key algorithm an <see cref="PdfExternalSigner"/> signs with.</summary>
 public enum PdfSignatureAlgorithm
 {
@@ -207,6 +226,14 @@ public sealed class PdfSignatureOptions
 
     /// <summary>Show a signature box on a page. Default: null, an invisible signature.</summary>
     public PdfSignatureAppearance? Appearance { get; set; }
+
+    /// <summary>
+    /// Makes this a certification signature, which states what may change after signing; viewers show a certified
+    /// document with a blue ribbon and flag changes the level does not allow. Only the first signature of a document can
+    /// certify it, so signing a PDF that already has a signature with a level other than
+    /// <see cref="PdfCertificationLevel.None"/> fails. Default: <see cref="PdfCertificationLevel.None"/>, an approval signature.
+    /// </summary>
+    public PdfCertificationLevel Certification { get; set; }
 
     /// <summary>Signature encoding. Default: <see cref="PdfSignatureFormat.PAdES"/>.</summary>
     public PdfSignatureFormat Format { get; set; } = PdfSignatureFormat.PAdES;

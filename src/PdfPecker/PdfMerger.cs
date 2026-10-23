@@ -52,6 +52,18 @@ public sealed class PdfMergeOptions
     /// <see cref="PdfOptions.CreationDate"/> does. Dates are written in UTC to the second. Default: null.
     /// </summary>
     public DateTimeOffset? CreationDate { get; set; }
+
+    /// <summary>
+    /// How PDF viewers open the merged document (see <see cref="PdfOptions.Viewer"/>). Default: null, the viewer's own
+    /// choices; the inputs' settings are not kept.
+    /// </summary>
+    public PdfViewerSettings? Viewer { get; set; }
+
+    /// <summary>
+    /// Page labels for the merged document, by its page numbers (see <see cref="PdfOptions.PageLabels"/>). When there are
+    /// any, they replace the inputs' page labels. Default: empty, the inputs' page labels are kept.
+    /// </summary>
+    public IList<PdfPageLabel> PageLabels { get; set; } = new List<PdfPageLabel>();
 }
 
 /// <summary>

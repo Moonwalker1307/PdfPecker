@@ -78,6 +78,33 @@ internal sealed partial class PdfFile
     /// <summary>The highest object number in the cross-reference table.</summary>
     public int MaxObjectNumber => _xref.Count == 0 ? 0 : _xref.Keys.Max();
 
+    /// <summary>
+    /// The numbers of the objects that the incremental updates after byte <paramref name="revisionEnd"/> wrote or freed:
+    /// those stored at or after it, in an object stream stored at or after it, or free. An earlier revision is a prefix of
+    /// the file, so every other object reads as it did in that revision. Objects free in both are included; they compare
+    /// equal.
+    /// </summary>
+    public List<int> ObjectsChangedAfter(long revisionEnd)
+    {
+        var changed = new List<int>();
+        lock (_lock)
+        {
+            foreach (var (num, entry) in _xref)
+            {
+                bool after = entry.Kind switch
+                {
+                    // Offsets may be relative to a header after junk, so the comparison errs towards "changed".
+                    XrefEntryKind.InFile => entry.Offset + _headerOffset >= revisionEnd,
+                    XrefEntryKind.InObjectStream => !_xref.TryGetValue(entry.StreamNumber, out var stream)
+                        || stream.Kind != XrefEntryKind.InFile || stream.Offset + _headerOffset >= revisionEnd,
+                    _ => true,
+                };
+                if (after) changed.Add(num);
+            }
+        }
+        return changed;
+    }
+
     private PdfFile(byte[] data)
     {
         Data = data;

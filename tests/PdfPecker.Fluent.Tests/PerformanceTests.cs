@@ -57,8 +57,11 @@ public sealed class PerformanceTests
         // The report has no barcodes, whose encoding is PdfPecker's work rather than the fluent layer's.
         // The two are timed in turns, so that the other test assemblies running beside this one slow both alike: timed one
         // after the other, a busy spell during only the conversion's runs failed the test.
+        // The HTML is written a hundred times first: the writer's methods are compiled with full optimisation only after
+        // about thirty calls, while the conversion's are called often enough inside a single PDF. With only the twenty
+        // timed calls the writer was measured unoptimised, at 12 ms on a busy runner against 25 ms for the PDF.
         var document = Examples.All["report"]();
-        DocumentGenerator.Html(document, false, out _);
+        for (int i = 0; i < 100; i++) DocumentGenerator.Html(document, false, out _);
         document.GeneratePdf();
         TimeSpan html = TimeSpan.MaxValue, pdf = TimeSpan.MaxValue;
         for (int i = 0; i < 20; i++)

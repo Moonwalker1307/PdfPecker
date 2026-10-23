@@ -208,6 +208,11 @@ internal static class Targets
             },
             new()
             {
+                Name = "pdf-properties", Extension = ".pdf", Seeds = pdfSeeds, MaxSize = 1 << 20,
+                Run = (d, ct) => PdfDocumentProperties.Read(d),
+            },
+            new()
+            {
                 Name = "html", Extension = ".html", Text = true, MaxSize = 128 * 1024, Seeds = c => c.HtmlFiles(),
                 Dictionary = HtmlWords, Nesters = HtmlNesters, Run = (d, ct) => Html(d, ct),
             },
