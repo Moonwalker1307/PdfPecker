@@ -972,6 +972,23 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Layouts_of_named_page_runs_share_the_base_of_the_relayout_budget()
+    {
+        // Each run of a named page, and each layout again for target-counter() or to shrink to fit, had the 250,000 box
+        // layouts at the base of the relayout budget to itself, so a small document's work grew with its number of
+        // layouts: a fuzzed page of 460 nested boxes kept whole in columns used most of it in each of its twelve layouts,
+        // for 4 s. These 16 runs of boxes around a long word took 1.6 s and 520 MB; sharing the base, 0.16 s and 40 MB.
+        const string css = "@page{size:148mm 190mm;margin:12mm}@page wide{size:190mm 148mm}.w{page:wide}"
+                           + "body{font:8pt sans-serif;margin:0;line-height:1.3}"
+                           + ".card{break-inside:avoid;border:0.5pt solid #888;padding:4pt;margin-bottom:4pt}";
+        var nest = Repeat("<div class=card>", 60) + "<p>Lorem " + Repeat("Integer", 11_500) + " nec odio</p>" + Repeat("</div>", 60);
+        var html = "<style>" + css + "</style>" + Repeat("<div>" + nest + "</div><div class=w>" + nest + "</div>", 8);
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 128L << 20);
+    }
+
+    [Fact]
     public void Content_in_overflow_columns_beside_every_page_is_not_split_between_them()
     {
         // The inner box starts half a point above the end of the outer box's column, so its overflow columns are half a
