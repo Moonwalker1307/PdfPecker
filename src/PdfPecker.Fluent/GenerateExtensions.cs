@@ -127,9 +127,11 @@ internal static class DocumentGenerator
             var pageOptions = Options(options, composed, page, images);
             if (pages.Count > 1)
             {
-                // The page sets are merged, which sets these for the whole document.
+                // The page sets are merged, which sets these for the whole document, and the merged document is
+                // linearized once, after merging, since merging rewrites the parts.
                 pageOptions.Viewer = null;
                 pageOptions.PageLabels = new List<PdfPageLabel>();
+                pageOptions.Linearize = false;
             }
             pdfs.Add(HtmlToPdf.Convert(html, pageOptions, cancellationToken));
         }
@@ -153,7 +155,8 @@ internal static class DocumentGenerator
             merge.Viewer = options.Viewer;
             merge.PageLabels = options.PageLabels;
         }
-        return PdfMerger.Merge(pdfs, merge, cancellationToken);
+        var merged = PdfMerger.Merge(pdfs, merge, cancellationToken);
+        return options is { Linearize: true } ? PdfLinearizer.Linearize(merged, cancellationToken) : merged;
     }
 
     /// <summary>A copy of the caller's options with the document's page, metadata and settings applied.</summary>
@@ -227,6 +230,7 @@ internal static class DocumentGenerator
         Signature = o.Signature,
         Viewer = o.Viewer,
         PageLabels = o.PageLabels,
+        Linearize = o.Linearize,
     };
 }
 

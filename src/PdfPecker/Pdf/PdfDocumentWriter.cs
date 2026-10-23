@@ -116,6 +116,9 @@ internal sealed partial class PdfDocumentWriter
     /// <summary>Encrypt the file with these passwords.</summary>
     public PdfSecurity? Security { get; init; }
 
+    /// <summary>Write a linearized file (Fast Web View); see <see cref="PdfLinearizer"/>.</summary>
+    public bool Linearize { get; init; }
+
     /// <summary>Write a PDF/A file.</summary>
     public PdfConformance Conformance { get; init; }
 
@@ -428,9 +431,11 @@ internal sealed partial class PdfDocumentWriter
         WriteSharedResources(doc);
         WriteTrailer(doc);
 
-        _crypt?.Dispose();
         var pdf = _out.Span.ToArray();
         _out.Return();
+        // The linearized file is written from the finished one, encrypted again with the same keys.
+        if (Linearize) pdf = PdfLinearizer.LinearizeOwn(pdf, _crypt, Security?.OwnerPassword ?? Security?.UserPassword, Cancellation);
+        _crypt?.Dispose();
         return pdf;
     }
 
