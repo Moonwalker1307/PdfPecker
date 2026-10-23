@@ -520,9 +520,11 @@ internal sealed partial class PdfDocumentWriter
         _mc = pageMc;
         _mcOpen = open;
         RestoreState(saved);
+        // The group is isolated: Poppler otherwise gives the pixels on the anti-aliased outer edge of the bands nearly
+        // full coverage, which draws a thin line of the shadow's colour where the blur should have faded out.
         var dict = new ByteBuffer(256);
         dict.Ascii("/Type /XObject /Subtype /Form /BBox [").Num(left).Sp().Num(lower).Sp().Num(right).Sp().Num(upper)
-            .Ascii("] /Group << /S /Transparency /CS /DeviceRGB >> /Resources ").Int(_resourcesId).Ascii(" 0 R");
+            .Ascii("] /Group << /S /Transparency /CS /DeviceRGB /I true >> /Resources ").Int(_resourcesId).Ascii(" 0 R");
         _masks.Add((content.Span.ToArray(), System.Text.Encoding.ASCII.GetString(dict.Span), false));
 
         Mark(b, null); // the shadow is decoration

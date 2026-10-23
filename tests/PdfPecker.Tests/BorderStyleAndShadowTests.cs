@@ -352,6 +352,15 @@ public class BorderStyleAndShadowTests
         Assert.DoesNotContain("/ca ", PdfTestHelpers.Latin1(pdf));
     }
 
+    [Fact]
+    public void A_blurred_shadows_mask_is_an_isolated_group()
+    {
+        // Poppler drew a thin line along the faded outer edge of a non-isolated mask, over a tinted background.
+        var pdf = HtmlToPdf.Convert(Body + "<div style='width:100px;height:60px;transform:scale(1.03);box-shadow:0 8px 20px rgba(37,99,235,.18)'></div>",
+            new PdfOptions { Compress = false });
+        Assert.Contains("/Group << /S /Transparency /CS /DeviceRGB /I true >>", PdfTestHelpers.Latin1(pdf));
+    }
+
     // ---- text-overflow ----
 
     private static List<TextOp> TextOps(string html, string css = "")
