@@ -192,13 +192,7 @@ internal sealed partial class PdfDocumentWriter
         float rx = layer.BackdropX + f.X, ry = layer.BackdropY + f.Y, rw = layer.BackdropW + f.W, rh = layer.BackdropH + f.H;
         if (!(rw > 0 && rh > 0) || rw > 1e5f || rh > 1e6f) return default;
         double pw = Math.Ceiling(rw * FilterPixelsPerPoint), ph = Math.Ceiling(rh * FilterPixelsPerPoint);
-        if (pw * ph > MaxFilterPixels)
-        {
-            double k = Math.Sqrt(MaxFilterPixels / (pw * ph));
-            pw = Math.Max(1, Math.Floor(pw * k));
-            ph = Math.Max(1, Math.Floor(ph * k));
-        }
-        int w = (int)pw, h = (int)ph;
+        var (w, h) = FilterPixels(pw, ph);
         // The backdrops filtered already that are behind this one are decoded and drawn again in its rendering, so boxes
         // stacked on each other cost the square of their number.
         if (!WithinRenderBudget(f, behind, w, h, BackdropImagePixels(behind) * ImageWorkPerPixel)) return default;

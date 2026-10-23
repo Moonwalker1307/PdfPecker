@@ -60,13 +60,7 @@ internal sealed partial class PdfDocumentWriter
         if (!(rw > 0 && rh > 0) || ry + rh <= 1 || rw > 1e5f || rh > 1e6f) return default;
         float density = layer.RasterDensity > 0 ? layer.RasterDensity : FilterPixelsPerPoint;
         double pw = Math.Ceiling(rw * density), ph = Math.Ceiling(rh * density);
-        if (pw * ph > MaxFilterPixels)
-        {
-            double k = Math.Sqrt(MaxFilterPixels / (pw * ph));
-            pw = Math.Max(1, Math.Floor(pw * k));
-            ph = Math.Max(1, Math.Floor(ph * k));
-        }
-        int w = (int)pw, h = (int)ph;
+        var (w, h) = FilterPixels(pw, ph);
         if (!WithinRenderBudget(f, layer.Ops, w, h)) return (-1, 0, 0, 0, 0, 0, 0); // drawn without the filter
         // A page of w × h points shows the flow rectangle (rx, ry, rw, rh) scaled to fill it, one point per pixel: the
         // margins move the flow's origin off the page (and keep all of it on the first page), and a layer scales it.

@@ -330,6 +330,27 @@ internal sealed partial class PdfDocumentWriter
     private const float FilterPixelsPerPoint = 2;
     private const long MaxFilterPixels = 4_000_000;
 
+    /// <summary>
+    /// The pixels of a filter result pw × ph pixels wide and high, scaled down to at most <see cref="MaxFilterPixels"/>.
+    /// A region far longer than it is wide keeps one pixel across, so its length is capped on its own: scaling both
+    /// sides alike left a region of 66 × 10¹¹ points one pixel wide and tens of millions of pixels long.
+    /// </summary>
+    private static (int W, int H) FilterPixels(double pw, double ph)
+    {
+        if (pw * ph > MaxFilterPixels)
+        {
+            double k = Math.Sqrt(MaxFilterPixels / (pw * ph));
+            pw = Math.Max(1, Math.Floor(pw * k));
+            ph = Math.Max(1, Math.Floor(ph * k));
+            if (pw * ph > MaxFilterPixels)
+            {
+                if (pw <= ph) ph = Math.Floor(MaxFilterPixels / pw);
+                else pw = Math.Floor(MaxFilterPixels / ph);
+            }
+        }
+        return ((int)pw, (int)ph);
+    }
+
     // The pixels per point of this writer's SVG filter results. A writer that renders the content of a filter has pages
     // measured in that filter's pixels already, so a filter inside it needs one pixel per point; with two, every level
     // of nested filters doubled the resolution of the one around it, up to the pixel cap at each level.
@@ -354,13 +375,7 @@ internal sealed partial class PdfDocumentWriter
         float ky = MathF.Sqrt(toPage.C * toPage.C + toPage.D * toPage.D) * _svgFilterDensity;
         double pw = Math.Ceiling(f.W * kx), ph = Math.Ceiling(f.H * ky);
         if (!(pw >= 1 && ph >= 1)) return;
-        if (pw * ph > MaxFilterPixels)
-        {
-            double k = Math.Sqrt(MaxFilterPixels / (pw * ph));
-            pw = Math.Max(1, Math.Floor(pw * k));
-            ph = Math.Max(1, Math.Floor(ph * k));
-        }
-        int w = (int)pw, h = (int)ph;
+        var (w, h) = FilterPixels(pw, ph);
         if (!f.WithinBudget(w, h) || !_filterBudget.TrySpend(f.DocumentWork(w, h)))
         {
             // Too much work: the content is drawn without the filter, as a filter that can not run is left out.
