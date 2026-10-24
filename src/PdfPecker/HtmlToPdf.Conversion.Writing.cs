@@ -76,6 +76,7 @@ public static partial class HtmlToPdf
             PageLabels = _options.PageLabels,
             Security = _options.Security,
             Linearize = _options.Linearize,
+            StripImageMetadata = _options.StripImageMetadata,
             Conformance = _settings.Conformance,
             EInvoice = _options.EInvoice,
             Attachments = _settings.Attachments,

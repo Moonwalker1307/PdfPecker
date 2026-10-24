@@ -231,6 +231,7 @@ internal static class DocumentGenerator
         Viewer = o.Viewer,
         PageLabels = o.PageLabels,
         Linearize = o.Linearize,
+        StripImageMetadata = o.StripImageMetadata,
     };
 }
 

@@ -148,6 +148,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   [More](https://pdfpecker.net/docs/compacting/)
 - **Images to PDF**: `ImageToPdf` puts scans and photos on pages of their own size or fitted to a page size.
   [More](https://pdfpecker.net/docs/images-to-pdf/)
+- **Photo privacy**: `PdfOptions.StripImageMetadata` removes EXIF (GPS location included), XMP, IPTC and comments
+  from embedded JPEGs while keeping their pixels and colours.
 - **PDF to image**: renders any PDF page to PNG, JPEG or WebP, or a whole PDF to a multi-page TIFF, and
   `HtmlToImage` goes from HTML to images in one call. [More](https://pdfpecker.net/docs/pdf-to-image/)
 - **PDF to HTML**: `PdfToHtml` turns any PDF into one script-free HTML file that looks like the PDF, with text you can
