@@ -36,7 +36,7 @@ jobs:
       - id: pick
         env:
           ALL: >-
-            fluent pdf-render pdf-text pdf-html pdf-merge pdf-form pdf-compact pdf-linearize pdf-verify pdf-properties html css svg markdown barcode png jpeg gif webp bmp tiff jpx jbig2 font-ttf font-otf font-woff font-woff2 font-variable
+            fluent pdf-render pdf-text pdf-images pdf-html pdf-merge pdf-form pdf-compact pdf-linearize pdf-verify pdf-properties html css svg markdown barcode png jpeg gif webp bmp tiff jpx jbig2 font-ttf font-otf font-woff font-woff2 font-variable
           TARGET: ${{ github.event_name == 'schedule' && 'all' || inputs.target }}
         run: |
           if [ "$TARGET" = "all" ]; then

@@ -42,10 +42,11 @@ internal sealed partial class PageRenderer
     private void ShowText(byte[] bytes, PdfDict? res)
     {
         var font = _gs.Font;
-        if (font == null) return;
+        // Images drawn inside Type 3 glyphs are part of the text, not pictures of the page.
+        if (font == null || _images != null) return;
         var gs = _gs;
         int mode = gs.TextRender;
-        bool fill = mode is 0 or 2 or 4 or 6, stroke = mode is 1 or 2 or 5 or 6, clip = mode >= 4 && _text == null;
+        bool fill = mode is 0 or 2 or 4 or 6, stroke = mode is 1 or 2 or 5 or 6, clip = mode >= 4 && !Collecting;
         if (clip) _textClip ??= new PathData();
         double fs = gs.FontSize, th = gs.HScale;
         bool canFill = fill && _hidden == 0 && SetupPaint(false);

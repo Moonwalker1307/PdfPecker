@@ -70,6 +70,15 @@ internal sealed class TiffDirectory
             if (!StartsDirectory(data, offset)) return null;
             offset = ReadUInt32(data, offset + 2 + ReadUInt16(data, offset) * (long)EntryLength);
         }
+        return ReadAt(data, offset);
+    }
+
+    /// <summary>
+    /// Reads the directory at <paramref name="offset"/> of data that starts with a TIFF header, such as an EXIF
+    /// sub-directory. Returns null when the offset is outside the data.
+    /// </summary>
+    public static TiffDirectory? ReadAt(byte[] data, long offset)
+    {
         if (!StartsDirectory(data, offset)) return null;
 
         int count = ReadUInt16(data, offset);
@@ -103,6 +112,26 @@ internal sealed class TiffDirectory
         if (entry.Count <= 0 || entry.Count > data.Length) return Array.Empty<byte>();
         long at = entry.Count <= 4 ? entry.ValueOffset : ReadUInt32(data, entry.ValueOffset);
         return at < 0 || at + entry.Count > data.Length ? Array.Empty<byte>() : data.AsSpan((int)at, (int)entry.Count).ToArray();
+    }
+
+    /// <summary>
+    /// The tag's unsigned fractions (RATIONAL), or none when the tag is missing, of another type, too long or outside
+    /// the file. A fraction with a zero denominator reads as NaN.
+    /// </summary>
+    public double[] Rationals(int tag)
+    {
+        const int RationalType = 5, RationalSize = 8;
+        if (!entries.TryGetValue(tag, out var entry) || entry.Type != RationalType || entry.Count <= 0 || entry.Count > MaxValues)
+            return Array.Empty<double>();
+        long at = ReadUInt32(data, entry.ValueOffset);
+        if (at < HeaderLength || at + RationalSize * entry.Count > data.Length) return Array.Empty<double>();
+        var values = new double[entry.Count];
+        for (int i = 0; i < values.Length; i++)
+        {
+            long numerator = ReadUInt32(data, at + i * (long)RationalSize), denominator = ReadUInt32(data, at + i * (long)RationalSize + 4);
+            values[i] = denominator == 0 ? double.NaN : (double)numerator / denominator;
+        }
+        return values;
     }
 
     /// <summary>Reads a 16-bit number at <paramref name="offset"/>, or 0 when it is past the end.</summary>
