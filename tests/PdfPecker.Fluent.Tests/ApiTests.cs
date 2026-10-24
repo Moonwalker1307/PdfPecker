@@ -156,7 +156,7 @@ public sealed class ApiTests
             "UserStyleSheet", "Bookmarks", "FormFields", "MaxPages", "Compress", "CompressionLevel", "Title", "Author",
             "Subject", "Keywords", "Creator", "Producer", "CustomProperties", "CreationDate", "FooterText", "HeaderText",
             "Watermark", "Security", "Conformance", "Accessibility", "Language", "Hyphenation", "EInvoice", "Attachments",
-            "EmbedStandardFonts", "Signature", "Viewer", "PageLabels", "Linearize",
+            "EmbedStandardFonts", "Signature", "Viewer", "PageLabels", "Linearize", "StripImageMetadata",
         ];
         var settable = typeof(PdfOptions).GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(p => p.CanWrite).Select(p => p.Name).Order(StringComparer.Ordinal);

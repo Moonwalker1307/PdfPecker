@@ -418,4 +418,12 @@ public sealed class PdfOptions
     /// which ends the linearization. Default: false.
     /// </summary>
     public bool Linearize { get; set; }
+
+    /// <summary>
+    /// Removes the metadata of embedded JPEG images: EXIF (camera, the time a photo was taken and its GPS location), XMP,
+    /// IPTC and comments, which a JPEG otherwise keeps because it is embedded byte for byte. The pixels and the colour
+    /// information (the ICC profile and the Adobe colour transform) are kept, so the images look the same. Other image
+    /// formats are decoded on embedding and never keep their metadata. Default: false.
+    /// </summary>
+    public bool StripImageMetadata { get; set; }
 }

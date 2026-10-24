@@ -119,6 +119,9 @@ internal sealed partial class PdfDocumentWriter
     /// <summary>Write a linearized file (Fast Web View); see <see cref="PdfLinearizer"/>.</summary>
     public bool Linearize { get; init; }
 
+    /// <summary>Remove EXIF, XMP, IPTC and comments from embedded JPEG images.</summary>
+    public bool StripImageMetadata { get; init; }
+
     /// <summary>Write a PDF/A file.</summary>
     public PdfConformance Conformance { get; init; }
 
