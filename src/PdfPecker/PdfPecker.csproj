@@ -19,6 +19,7 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageIcon>logo.png</PackageIcon>
     <PackageProjectUrl>https://pdfpecker.net/</PackageProjectUrl>
+    <PackageReleaseNotes>What changed in each release: https://pdfpecker.net/docs/changelog/</PackageReleaseNotes>
     <!-- nuget.org only accepts OSI/FSF-approved licenses in an expression (not Bitstream-Vera or APAFML), so the package
          points at the notices file, which reproduces every license that applies. -->
     <PackageLicenseFile>THIRD-PARTY-NOTICES.md</PackageLicenseFile>
