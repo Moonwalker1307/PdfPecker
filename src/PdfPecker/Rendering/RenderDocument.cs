@@ -101,6 +101,19 @@ internal sealed class RenderDocument
         return collector.Glyphs;
     }
 
+    /// <summary>
+    /// Runs a page for its images: the images it draws, in content order, with their transforms to points on the
+    /// displayed page (after /Rotate and /UserUnit), origin top left.
+    /// </summary>
+    public List<ImageDraw> CollectImages(int index, bool annotations, CancellationToken cancel)
+    {
+        var p = Pages[index];
+        var collector = new ImageCollector();
+        var r = new PageRenderer(File, _cache, collector, cancel);
+        using (PdfFile.BeginRender(cancel)) r.RenderPage(p.Dict, p.Resources, PageMatrix(p, p.UserUnit, p.UserUnit), annotations);
+        return collector.Draws;
+    }
+
     /// <summary>Renders a page at the given pixels per point (x and y) onto a canvas of premultiplied RGBA pixels.</summary>
     public Canvas Render(int index, double scaleX, double scaleY, int width, int height, uint background, bool annotations, CancellationToken cancel)
     {

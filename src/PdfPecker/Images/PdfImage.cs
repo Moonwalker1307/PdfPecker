@@ -13,7 +13,7 @@ internal sealed partial class PdfImage
     public PdfImage? SMask;
     public int ObjectNumber; // assigned by the writer
 
-    private const string DeviceRgb = "/DeviceRGB", DeviceGray = "/DeviceGray", DeviceCmyk = "/DeviceCMYK";
+    internal const string DeviceRgb = "/DeviceRGB", DeviceGray = "/DeviceGray", DeviceCmyk = "/DeviceCMYK";
     private const string FlateFilter = "/FlateDecode", DctFilter = "/DCTDecode";
 
     // Adobe CMYK JPEGs store their values inverted; this Decode array turns them back.

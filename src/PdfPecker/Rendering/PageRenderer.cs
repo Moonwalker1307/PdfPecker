@@ -59,6 +59,10 @@ internal sealed partial class PageRenderer
     private bool _actualTextShown;
     private readonly Stack<(string? Text, bool Shown)> _actualStack = new();
     private bool _textMoved; // the text position was set, not advanced, since the last glyph
+    // Image extraction: when set, the images the page draws go to the collector and nothing is painted or clipped.
+    private readonly ImageCollector? _images;
+    /// <summary>Whether the page is run for its text or images rather than painted.</summary>
+    private bool Collecting => _text != null || _images != null;
 
     public PageRenderer(PdfFile file, RenderCache cache, Canvas canvas, CancellationToken cancel)
     {
@@ -74,6 +78,13 @@ internal sealed partial class PageRenderer
         : this(file, cache, new Canvas(1, 1, 0), cancel)
     {
         _text = text;
+    }
+
+    /// <summary>A renderer that runs pages for their images: each image drawn goes to <paramref name="images"/>.</summary>
+    public PageRenderer(PdfFile file, RenderCache cache, ImageCollector images, CancellationToken cancel)
+        : this(file, cache, new Canvas(1, 1, 0), cancel)
+    {
+        _images = images;
     }
 
     /// <summary>Renders a page's contents and (optionally) its annotation appearances with the given base transform.</summary>
@@ -308,10 +319,14 @@ internal sealed partial class PageRenderer
                 if (n >= 1 && ops[0].Name is string xname) DoXObject(xname, res);
                 break;
             case "BI":
-                if (p.InlineDict != null && p.InlineData != null && _hidden == 0 && _text == null) DrawInlineImage(p.InlineDict, p.InlineData, res);
+                if (p.InlineDict != null && p.InlineData != null && _hidden == 0 && _text == null)
+                {
+                    if (_images != null) _images.Add(null, p.InlineDict, p.InlineData, res, _gs.Ctm);
+                    else DrawInlineImage(p.InlineDict, p.InlineData, res);
+                }
                 break;
             case "sh":
-                if (n >= 1 && ops[0].Name is string shName && _hidden == 0 && _text == null) PaintShadingOperator(shName, res);
+                if (n >= 1 && ops[0].Name is string shName && _hidden == 0 && !Collecting) PaintShadingOperator(shName, res);
                 break;
 
             // ---------------------------------------------------------- marked content
@@ -413,7 +428,7 @@ internal sealed partial class PageRenderer
     private bool SetupPaint(bool stroke)
     {
         var gs = _gs;
-        if (_text != null || _hidden > 0 || gs.Clip.IsEmpty) return false;
+        if (Collecting || _hidden > 0 || gs.Clip.IsEmpty) return false;
         float alpha = stroke ? gs.StrokeAlpha : gs.FillAlpha;
         if (alpha <= 0) return false;
         var pattern = stroke ? gs.StrokePattern : gs.FillPattern;
@@ -501,7 +516,7 @@ internal sealed partial class PageRenderer
 
     private void ApplyClip(bool evenOdd)
     {
-        if (_text != null) return; // text is extracted whether or not a clip hides it
+        if (Collecting) return; // text and images are extracted whether or not a clip hides them
         var ctm = _gs.Ctm;
         if (_path.IsEmpty)
         {
@@ -593,7 +608,8 @@ internal sealed partial class PageRenderer
         if (subtype == "Image")
         {
             if (_hidden > 0 || _text != null) return;
-            DrawImageXObject(xobj, res);
+            if (_images != null) _images.Add(xobj, xobj, null, res, _gs.Ctm);
+            else DrawImageXObject(xobj, res);
         }
         else if (subtype == "Form" || xobj["BBox"] != null)
         {
@@ -630,7 +646,7 @@ internal sealed partial class PageRenderer
             // An isolated group (/I true) is drawn on its own transparent canvas even when it is opaque, so that blend
             // modes inside it blend only with each other and not with the page below.
             if (isolatedGroup && (_gs.FillAlpha < 1 || _gs.SoftMask != null || _gs.Blend != BlendMode.Normal || _file.GetBool(group, "I", false))
-                && _hidden == 0 && _text == null)
+                && _hidden == 0 && !Collecting)
             {
                 RenderGroup(data, res);
             }
@@ -711,7 +727,7 @@ internal sealed partial class PageRenderer
     /// <summary>Renders an ExtGState soft mask group to a per-pixel mask over the whole canvas.</summary>
     private byte[]? BuildSoftMask(PdfDict sm)
     {
-        if (_text != null) return null;
+        if (Collecting) return null;
         var g = _file.GetStream(sm, "G");
         if (g == null) return null;
         // A mask nested deeper than MaxSoftMaskDepth is ignored, as if its group had set none.
