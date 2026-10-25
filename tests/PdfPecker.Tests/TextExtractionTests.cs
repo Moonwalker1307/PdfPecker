@@ -55,6 +55,20 @@ public class TextExtractionTests
     }
 
     [Fact]
+    public void Small_lines_beside_a_large_heading_keep_their_letters_apart()
+    {
+        // Two small lines in a corner sit within the large heading's line height; joining both to the heading's line
+        // used to interleave their letters ("RequDeasttee d2 1b.y1").
+        var pdf = HtmlToPdf.Convert(
+            "<div style='display:flex;justify-content:space-between;align-items:flex-end'><h1 style='margin:0;font-size:24pt'>Purchase order</h1>" +
+            "<div style='font-size:8pt;text-align:right'>Date 21.10.2026<br>Requested by J. Doe</div></div><p>Body text.</p>");
+        var lines = PdfText.ExtractPage(pdf, 1).Lines.Select(l => l.Text).ToList();
+        Assert.Contains(lines, l => l.Contains("Date 21.10.2026", StringComparison.Ordinal));
+        Assert.Contains(lines, l => l.Contains("Requested by J. Doe", StringComparison.Ordinal));
+        Assert.Contains(lines, l => l.Contains("Purchase order", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Embedded_fonts_and_ligatures()
     {
         var pdf = HtmlToPdf.Convert("<style>" + Face("R", "Roboto-Liga.ttf") + Face("W", "WorkSans-Regular.ttf") + "</style>" +

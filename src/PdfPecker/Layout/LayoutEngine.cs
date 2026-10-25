@@ -126,13 +126,14 @@ internal sealed partial class LayoutEngine
         return Math.Max(bottom, FootnotesBottom());
     }
 
-    /// <summary>Lays out a running header or footer on its own, unpaginated, at y = 0. Returns its height including margins.</summary>
     /// <summary>Min-content and max-content border-box widths of a block-level element.</summary>
     public (float Min, float Max) MeasureIntrinsic(Element e) => Intrinsic(e);
 
+    /// <summary>Lays out a running header or footer on its own, unpaginated, at y = 0. Returns its height including margins.</summary>
     public float LayoutBand(Element band, float width)
     {
         _paginate = false;
+        _treeRoot = band;
         var s = band.Style;
         float mt = s.MarginTop.IsAuto ? 0 : s.MarginTop.Resolve(width), mb = s.MarginBottom.IsAuto ? 0 : s.MarginBottom.Resolve(width);
         float bottom = LayoutBlockBox(band, 0, mt, width, shrinkToFit: false) + mb;
