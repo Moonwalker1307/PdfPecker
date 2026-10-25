@@ -245,6 +245,73 @@ internal sealed partial class LayoutEngine
     private static int CollapsedSides(CellModel cell, bool atPageTop) => cell.SelfSides | (atPageTop ? BoxPainter.Top : 0);
 
     /// <summary>
+    /// How far the backgrounds of a row, its row group and the columns stay inside the collapsed borders that were drawn
+    /// before them, at each side: half of each such border. A row's backgrounds are painted after the rows above it and
+    /// the table's own border, so without this they would cover the inner half of those borders (all of it once snapped
+    /// to the pixel grid); as in Chrome, the borders stay on top. The borders the row's own cells and later rows draw
+    /// come after its backgrounds and cover them anyway.
+    /// </summary>
+    private sealed class EarlierBorders(float left, float right, float bottom)
+    {
+        public readonly float Left = left, Right = right, Bottom = bottom;
+        // The cells starting in the row whose top border was drawn before, with half its width, by column: in a table
+        // of thousands of columns most rows have few cells.
+        public readonly List<(int Col, int Span, float Inset)> Tops = new();
+    }
+
+    /// <summary>
+    /// The borders drawn before the backgrounds of row <paramref name="r"/> laid out at <paramref name="rowTop"/>: the
+    /// sides the table draws whole, and the border above each cell that the cell above draws. At the top of a page the
+    /// row's cells draw their top border again, so nothing above it is covered. Null when there is none.
+    /// </summary>
+    private EarlierBorders? BordersUnder(TableModel m, int r, float rowTop)
+    {
+        var t = m.TableStyle;
+        int whole = m.WholeTableSides;
+        var under = new EarlierBorders(
+            (whole & BoxPainter.Left) != 0 ? t.BorderLeft / 2 : 0,
+            (whole & BoxPainter.Right) != 0 ? t.BorderRight / 2 : 0,
+            r == m.Rows.Count - 1 && (whole & BoxPainter.Bottom) != 0 ? t.BorderBottom / 2 : 0);
+        if (!AtPageTop(rowTop))
+            foreach (var cell in m.Rows[r].Cells)
+                if (TopInset(m, cell) is var inset and > 0) under.Tops.Add((cell.Col, cell.ColSpan, inset));
+        if (under.Tops.Count == 0 && under.Left == 0 && under.Right == 0 && under.Bottom == 0) return null;
+        under.Tops.Sort(static (a, b) => a.Col.CompareTo(b.Col));
+        return under;
+    }
+
+    /// <summary>Half the border above a cell when it was drawn before the cell's row: by the table or by the cell above.</summary>
+    private static float TopInset(TableModel m, CellModel cell)
+    {
+        if (cell.Row == 0) return (m.WholeTableSides & BoxPainter.Top) != 0 ? m.TableStyle.BorderTop / 2 : 0;
+        return ((cell.SelfSides | cell.ForeignSides) & BoxPainter.Top) == 0 ? cell.CollapsedT / 2 : 0;
+    }
+
+    /// <summary>
+    /// Draws the border above a cell of a footer repeated at the bottom of a page where a cell of the table's last body
+    /// row wins it, as Chrome does. That cell is pages away, and the body row now above the footer may have left the
+    /// line to the row that moved to the next page, so otherwise no one would draw it.
+    /// </summary>
+    private static void PaintBorrowedTop(TableModel m, CellModel cell, int above)
+    {
+        if (!m.TableStyle.Visible || cell.Row == 0) return;
+        // Along a cell spanning columns, the widest of the borders above it, across the cell, as its height counts it.
+        EdgeWinner widest = default;
+        bool drawn = above >= 0;
+        for (int c = cell.Col, end = Math.Min(m.ColCount, cell.Col + cell.ColSpan); c < end; c++)
+        {
+            var edge = ResolveEdge(m, cell, BoxPainter.Top, c);
+            if (edge.Width > widest.Width) widest = edge;
+            // Where the cells of the row above drew their bottom borders, the line is there already.
+            drawn = drawn && m.Grid[above, c] is { } up && up.Row + up.RowSpan - 1 == above && (up.SelfSides & BoxPainter.Bottom) != 0;
+        }
+        if (drawn) return;
+        if (widest.Style is not { } s || widest.Self || widest.Origin != CellOrigin) return;
+        float w = widest.Width;
+        BoxPainter.PaintCollapsedBand(cell.Group!, s, widest.Side, BoxPainter.Top, cell.X, cell.Top - w / 2, cell.W, w);
+    }
+
+    /// <summary>
     /// Draws the borders of rows, row groups and the table that win along a cell's edges, centred on the grid lines as
     /// the cells' borders are: along its top, and along its bottom, left and right where those are the table's edge.
     /// A table side the table draws whole is left to it.
