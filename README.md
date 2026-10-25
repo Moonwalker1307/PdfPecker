@@ -120,7 +120,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   `text-wrap`, drop caps, inline SVG and PNG, JPEG, GIF, WebP, BMP and TIFF images, laid out as Chrome lays them out.
   [More](https://pdfpecker.net/docs/html-and-css/)
 - **Paged media**: `@page` sizes and margin boxes, running headers and footers (also a first page of its own),
-  footnotes, tables of contents with page numbers, break control and table headers repeated on every page.
+  footnotes, tables of contents with page numbers, break control (also table row groups and group header rows kept
+  together, as reports keep a group on one page) and table headers repeated on every page.
   [More](https://pdfpecker.net/docs/paged-media/)
 - **Content scaled to fit a box**: `-pdfpecker-scale-to-fit: shrink` fits text of any length into a fixed space, for
   labels, badges and certificates. [More](https://pdfpecker.net/docs/html-and-css/#scale-content-to-fit-a-box)
