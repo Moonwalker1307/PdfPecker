@@ -93,12 +93,19 @@ internal sealed class RenderDocument
     /// /Rotate and /UserUnit), origin top left.
     /// </summary>
     public List<TextGlyph> CollectText(int index, bool annotations, CancellationToken cancel)
+        => CollectText(index, annotations, rules: false, cancel).Glyphs;
+
+    /// <summary>
+    /// Runs a page for its text as <see cref="CollectText(int, bool, CancellationToken)"/> does and, when
+    /// <paramref name="rules"/> is set, also for the straight lines it draws, which outline tables.
+    /// </summary>
+    public TextCollector CollectText(int index, bool annotations, bool rules, CancellationToken cancel)
     {
         var p = Pages[index];
-        var collector = new TextCollector();
+        var collector = new TextCollector(rules);
         var r = new PageRenderer(File, _cache, collector, cancel);
         using (PdfFile.BeginRender(cancel)) r.RenderPage(p.Dict, p.Resources, PageMatrix(p, p.UserUnit, p.UserUnit), annotations);
-        return collector.Glyphs;
+        return collector;
     }
 
     /// <summary>
