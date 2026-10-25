@@ -511,7 +511,7 @@ internal static partial class PageStructure
         for (int c = 0; c < bands.Count; c++)
         {
             var cells = rows.SelectMany(r => r).Where(t => t.Column == c && t.ColumnSpan == 1).ToList();
-            if (cells.Count < 2 || !LinedUp(cells)) return null;
+            if (cells.Count < 2 || !(LinedUp(cells) || c == 0 && Indented(cells))) return null;
             words += cells.Sum(t => t.Lines.Sum(l => l.Words.Count));
             entries += cells.Count;
         }
@@ -695,6 +695,30 @@ internal static partial class PageStructure
         var centres = cells.Select(c => (c.Lines.Min(l => l.X0) + c.Lines.Max(l => l.X1)) / 2).ToList();
         int most = Math.Max(Most(lefts), Math.Max(Most(rights), Most(centres)));
         return most >= Math.Max(2, 0.7 * cells.Count);
+    }
+
+    /// <summary>
+    /// Whether the row labels of a table's first column line up in a few levels of indent, as group headings and the
+    /// rows under them do: nearly all entries start at one of at most three places, each a little in from the one
+    /// before, and the outermost and the next level each hold two or more entries.
+    /// </summary>
+    private static bool Indented(List<TableCell> cells)
+    {
+        var lefts = cells.Select(c => c.Lines.Min(l => l.X0)).OrderBy(x => x).ToList();
+        double size = cells.Max(c => c.Lines.Max(l => l.Size));
+        var levels = new List<(double X, int Count)>();
+        foreach (double x in lefts)
+        {
+            if (levels.Count > 0 && x - levels[^1].X <= AlignTolerance) levels[^1] = (levels[^1].X, levels[^1].Count + 1);
+            else levels.Add((x, 1));
+        }
+        int kept = 0;
+        for (int i = 0; i < levels.Count && i < 3; i++)
+        {
+            if (i > 0 && levels[i].X - levels[i - 1].X > 1.5 * size) break;
+            kept += levels[i].Count;
+        }
+        return levels.Count >= 2 && levels[0].Count >= 2 && levels[1].Count >= 2 && kept >= 0.9 * cells.Count;
     }
 
     /// <summary>

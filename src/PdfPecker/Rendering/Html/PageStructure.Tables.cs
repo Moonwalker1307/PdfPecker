@@ -72,7 +72,10 @@ internal static partial class PageStructure
             if (found.Exists(f => f.X0 >= box.X0 - Reach && f.X1 <= box.X1 + Reach && f.Y0 >= box.Y0 - Reach && f.Y1 <= box.Y1 + Reach)) continue;
             var inside = words.FindAll(w => !w.Used && Inside(w, box));
             if (inside.Count == 0) continue;
-            var block = Grid(gh, gv, box, inside, body);
+            var breaks = Breaks(rules, gh, gv, box, inside);
+            var block = Grid(gh, gv.Concat(breaks).ToList(), box, inside, body);
+            // Columns drawn only by breaks in the row lines say nothing of a row whose one bold label spans them.
+            if (breaks.Count > 0 && block is TableBlock broken) SpanHeadings(broken);
             if (block == null) continue;
             foreach (var w in inside) w.Used = true;
             blocks.Add(block);
@@ -88,6 +91,63 @@ internal static partial class PageStructure
             cancellationToken.ThrowIfCancellationRequested();
             RuledRows(stack, words, body, blocks);
         }
+    }
+
+    /// <summary>
+    /// Column boundaries a grid shows only by where its row lines are broken: some tables draw each row's line cell by
+    /// cell and no lines between the columns. A place inside the grid where most of its row lines have a piece end and
+    /// the next start is such a boundary.
+    /// </summary>
+    private static List<Segment> Breaks(List<PageRule> rules, List<Segment> h, List<Segment> v, (double X0, double Y0, double X1, double Y1) box,
+        List<FlowWord> words)
+    {
+        var inBox = rules.FindAll(r => r.Horizontal && !r.Edge && r.Position >= box.Y0 - Reach && r.Position <= box.Y1 + Reach);
+        // A line is broken at a place no piece of it, or of a line drawn over it, runs across.
+        bool Broken(double x, double y) => !inBox.Exists(r => Math.Abs(r.Position - y) <= SameLine && r.Start < x - Join && r.End > x + Join);
+        var ends = new List<(double X, double Y)>();
+        foreach (var r in inBox)
+        {
+            if (r.Start > box.X0 + Close && r.Start < box.X1 - Close && Broken(r.Start, r.Position)) ends.Add((r.Start, r.Position));
+            if (r.End > box.X0 + Close && r.End < box.X1 - Close && Broken(r.End, r.Position)) ends.Add((r.End, r.Position));
+        }
+        var breaks = new List<Segment>();
+        // Only a grid with no vertical line inside it that runs down most of it, such as one only in the header: where
+        // there are such lines, the breaks are where rows meet them.
+        if (ends.Count == 0 || h.Count < 3
+            || v.Exists(s => s.Pos > box.X0 + Close && s.Pos < box.X1 - Close && s.End - s.Start >= 0.5 * (box.Y1 - box.Y0))) return breaks;
+        ends.Sort((a, b) => a.X.CompareTo(b.X));
+        // Row lines that cross the whole grid, which a column boundary must break.
+        int across = h.Count(s => s.Start <= box.X0 + Close && s.End >= box.X1 - Close);
+        // The row lines, one per place, with the grid's top and bottom: tables with collapsed borders draw the lines
+        // above and below two rows together.
+        var rows = new List<double>();
+        foreach (double y in h.Select(s => s.Pos).Append(box.Y0).Append(box.Y1).OrderBy(y => y))
+            if (rows.Count == 0 || y - rows[^1] > Close) rows.Add(y);
+        for (int i = 0; i < ends.Count;)
+        {
+            int j = i + 1;
+            while (j < ends.Count && ends[j].X - ends[i].X <= SameLine) j++;
+            var at = ends.GetRange(i, j - i);
+            int lines = at.Select(e => Math.Round(e.Y / SameLine)).Distinct().Count();
+            if (across >= 3 && lines >= 3 && lines * 2 >= across)
+            {
+                // Some writers break every row line at every column, so the breaks say nothing of a cell that spans
+                // columns: the boundary runs down each row except those whose text crosses it, with a word across it or
+                // words on either side no further apart than words within a cell.
+                double x = at.Average(e => e.X);
+                for (int k = 0; k + 1 < rows.Count; k++)
+                {
+                    double top = rows[k], bottom = rows[k + 1];
+                    var band = words.FindAll(w => w.CenterY > top && w.CenterY < bottom);
+                    bool crossed = band.Exists(w => w.X0 < x - 1 && w.X1 > x + 1)
+                        || band.Exists(a => a.X1 <= x + 1 && band.Exists(b => b.X0 >= x - 1 && b.X0 >= a.X1 - 1 && b.X0 - a.X1 < CellGap * a.Size
+                            && Math.Abs(b.Bottom - a.Bottom) <= 0.3 * a.Size));
+                    if (!crossed) breaks.Add(new Segment(x, top, bottom));
+                }
+            }
+            i = j;
+        }
+        return breaks;
     }
 
     private static bool Inside(FlowWord w, (double X0, double Y0, double X1, double Y1) box)

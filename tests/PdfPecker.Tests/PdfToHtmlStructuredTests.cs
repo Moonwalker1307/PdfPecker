@@ -230,6 +230,53 @@ public class PdfToHtmlStructuredTests
     }
 
     [Fact]
+    public void Row_lines_broken_at_each_column_make_the_columns()
+    {
+        // Lines between the columns only in the header; below it, only small gaps in each row's line mark the columns.
+        var html = Html("""
+            <style>table{border-collapse:separate;border-spacing:1px 0}td,th{border-bottom:1px solid #000;padding:4px 8px;text-align:left}
+            th{border-top:1px solid #000;border-left:1px solid #000}th:last-child{border-right:1px solid #000}
+            td:first-child{border-left:1px solid #000}td:last-child{border-right:1px solid #000}</style>
+            <table><tr><th>Country</th><th>Domestic (%)</th><th>Imported (%)</th><th>Total</th></tr>
+            <tr><td>Austria</td><td>86.2</td><td>13.8</td><td>3,375</td></tr>
+            <tr><td>Belgium</td><td>0</td><td>0</td><td>3,973</td></tr>
+            <tr><td>Cyprus</td><td>81.0</td><td>3.8</td><td>158</td></tr>
+            <tr><td>Denmark</td><td>3.1</td><td>10.2</td><td>1,662</td></tr></table>
+            """);
+        Assert.Single(Regex.Matches(html, "<table"));
+        HasRow(html, "Country", "Domestic (%)", "Imported (%)", "Total");
+        HasRow(html, "Austria", "86.2", "13.8", "3,375");
+        HasRow(html, "Denmark", "3.1", "10.2", "1,662");
+    }
+
+    [Fact]
+    public void Indented_row_labels_stay_in_their_column()
+    {
+        var html = Html("""
+            <style>td{padding:1px 10px}.r{text-align:right}.i{padding-left:24px}</style>
+            <table><tr><td><b>Characteristic</b></td><td class="r"><b>2007</b></td><td class="r"><b>2009</b></td></tr>
+            <tr><td>Sex</td><td></td><td></td></tr>
+            <tr><td class="i">Male</td><td class="r">61,206</td><td class="r">60,721</td></tr>
+            <tr><td class="i">Female</td><td class="r">49,486</td><td class="r">51,084</td></tr>
+            <tr><td>Age</td><td></td><td></td></tr>
+            <tr><td class="i">Under 45</td><td class="r">40,112</td><td class="r">39,870</td></tr>
+            <tr><td class="i">45 or older</td><td class="r">70,580</td><td class="r">71,935</td></tr></table>
+            """);
+        Assert.Single(Regex.Matches(html, "<table"));
+        HasRow(html, "Male", "61,206", "60,721");
+        HasRow(html, "45 or older", "70,580", "71,935");
+        Assert.Contains(Rows(html), r => r.Count > 0 && r[0] == "Age");
+    }
+
+    [Fact]
+    public void A_lone_large_letter_is_not_a_heading()
+    {
+        var html = Html("""<p style="font-size:40px;margin:0">A</p><p>Acme Trading, 1 High Street</p>""");
+        Assert.DoesNotContain("<h", Body(html).Replace("<hr", "", StringComparison.Ordinal), StringComparison.Ordinal);
+        Assert.Contains("A", Text(Body(html)), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Output_is_the_same_every_time()
     {
         var pdf = Pdf("<table><tr><td>a</td><td>1</td></tr><tr><td>b</td><td>2</td></tr></table><p>End</p>");

@@ -350,10 +350,21 @@ internal static partial class PageStructure
             blocks.Add(current);
             previous = line;
         }
-        // A heading of many lines is large body text, such as a title page, rather than a heading.
+        // A heading of many lines is large body text, such as a title page, rather than a heading, and a lone large
+        // letter or number is a logo, an initial or a page number.
         foreach (var block in blocks)
-            if (block is TextBlock { Kind: TextKind.Heading } t && t.Lines.Count > 4) t.Kind = TextKind.Paragraph;
+            if (block is TextBlock { Kind: TextKind.Heading } t && (t.Lines.Count > 4 || Letters(t) < 2)) t.Kind = TextKind.Paragraph;
         return blocks;
+    }
+
+    private static int Letters(TextBlock block)
+    {
+        int letters = 0;
+        foreach (var line in block.Lines)
+            foreach (var word in line.Words)
+                foreach (char c in word.Text)
+                    if (char.IsLetter(c) && ++letters >= 2) return letters;
+        return letters;
     }
 
     private static int HeadingLevel(double size, double body)
