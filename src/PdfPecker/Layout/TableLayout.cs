@@ -86,7 +86,16 @@ internal sealed partial class LayoutEngine
         public CellGrid Grid = new(0, 0); // the cell covering each row and column
         public ComputedStyle TableStyle = null!;
         public int WholeTableSides; // with collapsed borders, the sides of its own border the table draws whole
+        public readonly List<TableBreak> Breaks = new(); // per layout pass, with collapsed borders: where rows moved to the next page
     }
+
+    /// <summary>
+    /// A page a collapsed table stops on before a row moves to the next page: its body ends at <see cref="BodyEnd"/>, and
+    /// the table at <see cref="End"/>, under the footer repeated there or under the last row, as Chrome closes it on every
+    /// page. It goes on at <see cref="PageTop"/> with its body at <see cref="Resume"/>, under the repeated header. Without
+    /// a footer, the border under the last row is <see cref="EdgeHalf"/> wide on each side of <see cref="End"/>.
+    /// </summary>
+    private readonly record struct TableBreak(float BodyEnd, float End, float EdgeHalf, bool Footer, float PageTop, float Resume);
 
     private readonly Dictionary<Element, TableModel> _tables = new();
 
@@ -649,6 +658,7 @@ internal sealed partial class LayoutEngine
             m.FootReserve = FootReserve(m, cy, colX, widths, hs, vs, collapse);
             _rowProbe = m.Captions.Count == 0 && _columnNotes == null ? probe : null;
             m.TableMove = null;
+            m.Breaks.Clear();
             for (int r = 0; r < m.Rows.Count; r++)
             {
                 cy = LayoutRow(m, r, cy, colX, widths, hs, vs, collapse, allowMove: mayMove, pageColumns) + vs;
@@ -679,9 +689,12 @@ internal sealed partial class LayoutEngine
         foreach (var caption in m.Captions)
             if (caption.Style.CaptionBottom) bottom = LayoutCaption(caption, bx, bottom, boxW);
         int sides = collapse && m.Rows.Count > 0 ? m.WholeTableSides : BoxPainter.AllSides;
-        if (pageColumns != null && !SameOnPages(tableBox!, tableTop, tableBottom))
+        if (collapse && m.Breaks.Count > 0)
+            PaintTablePages(tableGroup, s, m, pageColumns != null ? tableBox : null, bx, boxW, availW, tableTop, tableBottom, frameB, sides);
+        else if (pageColumns != null && !SameOnPages(tableBox!, tableTop, tableBottom))
             PaintOnPages(tableGroup, s, tableBox!, tableTop, tableBottom, sides, collapse);
         else BoxPainter.Paint(tableGroup, s, bx, tableTop, boxW, tableBottom - tableTop, _images, availW, sides, collapsedCell: collapse);
+        m.Breaks.Clear();
         _lastBoxRight = bx + boxW;
         _lastBoxX = bx;
         _lastBoxTop = tableTop;
@@ -945,9 +958,11 @@ internal sealed partial class LayoutEngine
                     m.TableMove = rowBottom + reserve - FlowEnd(PageOf(rowTop));
                     return rowTop;
                 }
+                TableBreak? pageBreak = null;
                 if (move)
                 {
                     _columnNotes?.Break(PageOf(rowTop), rowTop, rowBottom - FlowEnd(PageOf(rowTop)));
+                    float bodyEnd = rowTop, end = rowTop, edgeHalf = 0;
                     if (reserve > 0)
                     {
                         // The footer closes the table on this page, where the row would have started.
@@ -961,8 +976,11 @@ internal sealed partial class LayoutEngine
                         _repeatingFoot = outerFoot;
                         // The structure has the footer once: its repeats are artifacts.
                         if (Tags != null) Untag(_ops, footOps);
+                        end = footTop - vs;
                     }
+                    else if (collapse && _measuringRows == 0) edgeHalf = PaintBreakEdge(m, r, rowTop, colX, widths);
                     rowTop = NextPage(rowTop);
+                    if (collapse && _measuringRows == 0) pageBreak = new TableBreak(bodyEnd, end, edgeHalf, reserve > 0, rowTop, rowTop);
                 }
                 else _columnNotes?.Exact(PageOf(rowTop), rowTop, rowBottom - rowTop, _grid);
                 if (r >= m.HeadCount)
@@ -980,6 +998,7 @@ internal sealed partial class LayoutEngine
                         rowTop = headStart;
                     }
                 }
+                if (pageBreak is { } pb) m.Breaks.Add(pb with { Resume = rowTop });
                 continue;
             }
             break;
@@ -1189,8 +1208,31 @@ internal sealed partial class LayoutEngine
         }
         // empty-cells: hide leaves a cell without content bare, with separated borders only.
         if (cs.EmptyCellsHide && !collapse && IsEmptyCell(cell.Td)) return;
-        BoxPainter.Paint(cell.Group!, cs, x, y, w, h, _images, w, sides, collapsedCell: collapse, backgroundArea);
-        if (collapse) PaintForeignEdges(m, cell, rowBottom);
+        if (collapse && CrossesBreak(m, cell.Top, rowBottom))
+        {
+            // On the pages the table stops on before the row ends, the cell stops with it, above the repeated footer,
+            // and goes on under the repeated header.
+            float clipTop = _grid.Start(PageOf(cell.Top));
+            for (int i = 0; i <= m.Breaks.Count; i++)
+            {
+                float clipBottom = ClipOp.Far;
+                if (i < m.Breaks.Count)
+                {
+                    if (m.Breaks[i].BodyEnd <= cell.Top + Eps || m.Breaks[i].BodyEnd >= rowBottom - Eps) continue;
+                    clipBottom = m.Breaks[i].BodyEnd;
+                }
+                var part = new ClipOp(-ClipOp.Far, clipTop, 2 * ClipOp.Far, clipBottom - clipTop, null);
+                BoxPainter.Paint(part, cs, x, y, w, h, _images, w, sides, collapsedCell: true, backgroundArea);
+                PaintForeignEdges(m, cell, rowBottom, part);
+                if (part.Ops.Count > 0) cell.Group!.Ops.Add(part);
+                if (i < m.Breaks.Count) clipTop = m.Breaks[i].Resume;
+            }
+        }
+        else
+        {
+            BoxPainter.Paint(cell.Group!, cs, x, y, w, h, _images, w, sides, collapsedCell: collapse, backgroundArea);
+            if (collapse) PaintForeignEdges(m, cell, rowBottom);
+        }
         if (collapse && _repeatingFoot == m && cell.Row == m.Rows.Count - m.FootCount && !AtPageTop(cell.Top)) PaintBorrowedTop(m, cell, _rowAboveFoot);
         if (collapse && cs.OutlineStyle != BorderStyle.None && cs.Visible)
         {
