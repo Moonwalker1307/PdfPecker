@@ -343,6 +343,19 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(Repeat(level, 40)));
     }
 
+    [Fact]
+    public void Headings_kept_with_their_boxes_move_to_the_next_page_within_the_relayout_budget()
+    {
+        // The fuzz finding (html, timeout-d2edd0b0 of 2026-10-25): headings left open, each holding the next level, inside
+        // and around boxes of closed headings. Moving a heading with the box after it to the next page lays everything in
+        // the chain out again, and only eight levels of such chains may move, but the levels below them still moved at
+        // every one of those eight, with no regard to the relayout budget. These 578 levels took 48 s; 0.2 s within it.
+        const string css = "<style>@page{size:148mm 210mm;margin:12mm}body{font:10pt/1.4 sans-serif;margin:0}"
+                           + "h2{font-size:10pt;margin:8pt 0 3pt}</style>";
+        const string closed = "<div><h2>Heading</h2><div>text</div>";
+        AssertStructurallyValid(Bounded(css + Repeat(closed, 47) + Repeat("<div><h2>Heading", 131) + Repeat(closed, 400)));
+    }
+
     [Theory]
     // The fuzz finding (html, timeout-b4187992): each unterminated href swallows the next line, so two lines make one
     // level of nav, heading, list and item. Sixty lines took 13 s.
