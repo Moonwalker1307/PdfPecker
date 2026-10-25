@@ -54,6 +54,9 @@ internal sealed partial class LayoutEngine
     private readonly Stack<CbFrame> _boundaryPool = new();
     private bool _hasLayers;
     private Dictionary<Element, int>? _treeOrder;
+    // The subtree that TreeOrder numbers, when it is not the whole document: a header or footer laid out on its own for
+    // every page would otherwise number the document's whole tree once per page.
+    private Element? _treeRoot;
     // The content boxes of the flex containers whose absolutely positioned children have a static position, as width,
     // height and where in them a box goes on each axis (0 start, 0.5 centre, 1 end), from that static position.
     private Dictionary<Element, (float W, float H, float Fx, float Fy)>? _staticAreas;
@@ -193,8 +196,8 @@ internal sealed partial class LayoutEngine
     {
         if (_treeOrder == null)
         {
-            var root = e;
-            while (root.Parent != null) root = root.Parent;
+            var root = _treeRoot ?? e;
+            if (_treeRoot == null) while (root.Parent != null) root = root.Parent;
             _treeOrder = new Dictionary<Element, int>(ReferenceEqualityComparer.Instance);
             var stack = new Stack<Element>();
             stack.Push(root);

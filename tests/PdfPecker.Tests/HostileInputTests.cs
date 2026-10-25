@@ -1119,6 +1119,22 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void A_transformed_header_with_page_numbers_numbers_only_its_own_boxes()
+    {
+        // A transformed box is a layer, and layers are put in document order by numbering the tree. The header laid out
+        // for every page numbered the whole document each time, so a fuzzed fluent document of 6,400 pages with a table
+        // of 280,000 empty cells took 268 s. The header now numbers only its own boxes.
+        var html = "<style>@page{size:300pt 300pt;margin:0}</style>"
+                   + "<header data-sticky-pdf-header><p style='transform:translate(0,10pt)'>Page {page} of {total-pages}</p></header>"
+                   + "<main style='padding-top:90000pt'><table>" + Repeat("<tr><td></td><td></td></tr>", 20_000) + "</table></main>";
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.Equal(524, PageCount(pdf));
+        Assert.Contains("Page 524 of 524", PdfText.ExtractPage(pdf, 524).Text, StringComparison.Ordinal);
+        Assert.InRange(allocated, 0, 128L << 20);
+    }
+
+    [Fact]
     public void Tables_with_one_wide_row_among_many_rows_store_only_the_cells_they_have()
     {
         // A grid of every row and column of this table is 18 million places, 144 MB, almost all of them empty; a fuzzed
