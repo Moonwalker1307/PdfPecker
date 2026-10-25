@@ -158,9 +158,11 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
 - **PDF to HTML**: `PdfToHtml` turns any PDF into one script-free HTML file that looks like the PDF, with text you can
   select, search and copy. `PdfHtmlMode.Structured` writes the text instead as flowing headings, paragraphs, lists and
   real `<table>` elements in reading order, with nothing placed at a fixed position, for search indexes and language
-  models: tables come from the rules and borders the PDF draws and from text that lines up in columns, with header
-  rows, spanned cells and wrapped cells. Table detection reads the layout, so unusual layouts, floats and charts can
-  come out as plain paragraphs, and scanned pages have no text to give. [More](https://pdfpecker.net/docs/pdf-to-html/)
+  models. A tagged PDF (PDF/UA, or any PDF with a structure tree) is read from its tags, which say exactly what each
+  heading, list item and table cell is. Other PDFs are read from their layout: tables come from the rules and borders
+  the PDF draws and from text that lines up in columns, with header rows, spanned cells and wrapped cells. Reading the
+  layout can turn unusual layouts, floats and charts into plain paragraphs, and scanned pages have no text to give.
+  [More](https://pdfpecker.net/docs/pdf-to-html/)
 - **Viewer settings and page labels**: the page, zoom and panel a viewer opens with, print settings, and page numbers
   such as "i" to "iv" for front matter. [More](https://pdfpecker.net/docs/options/)
 - **Reproducible output**: a fixed `CreationDate` or `SOURCE_DATE_EPOCH` gives byte-identical PDFs, for build pipelines

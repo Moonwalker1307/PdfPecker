@@ -37,12 +37,23 @@ internal static class FlowHtmlWriter
 
     private static void WriteBlocks(StringBuilder sb, List<FlowBlock> blocks, Func<int, int> pageIds)
     {
-        string? list = null; // the list element open, "ul" or "ol"
+        string? list = null, listType = null; // the list element open, "ul" or "ol", and how it counts
         foreach (var block in blocks)
         {
             string? wanted = block is TextBlock { Kind: TextKind.Bullet } ? "ul" : block is TextBlock { Kind: TextKind.Numbered } ? "ol" : null;
-            if (list != null && list != wanted) { sb.Append("</").Append(list).Append(">\n"); list = null; }
-            if (wanted != null && list == null) { sb.Append('<').Append(wanted).Append(">\n"); list = wanted; }
+            string? type = wanted == "ol" && block is TextBlock { ListType: "a" or "A" or "i" or "I" } t0 ? t0.ListType : null;
+            if (list != null && (list != wanted || listType != type || block is TextBlock { NewList: true }))
+            {
+                sb.Append("</").Append(list).Append(">\n");
+                list = null;
+            }
+            if (wanted != null && list == null)
+            {
+                sb.Append('<').Append(wanted);
+                if (type != null) sb.Append(" type=\"").Append(type).Append('"');
+                sb.Append(">\n");
+                (list, listType) = (wanted, type);
+            }
             switch (block)
             {
                 case TextBlock t: WriteText(sb, t, pageIds); break;
@@ -75,7 +86,7 @@ internal static class FlowHtmlWriter
         if (block.Lines.Count(l => l.RightToLeft) * 2 > block.Lines.Count) sb.Append(" dir=\"rtl\"");
         sb.Append('>');
         // A list item's marker is the list's own.
-        int skip = block.Kind is TextKind.Bullet or TextKind.Numbered ? 1 : 0;
+        int skip = block.Kind is TextKind.Bullet or TextKind.Numbered ? block.MarkerWords : 0;
         // Lines that end at one edge but start at different places, or share a centre, are set right-aligned or centred
         // one by one, as an address block in a corner is; each is a line of its own.
         bool aligned = block.Lines.Count >= 2 && block.Lines.Max(l => l.X0) - block.Lines.Min(l => l.X0) > 4

@@ -9,28 +9,32 @@ public class StructuredHtmlHostileInputTests
 {
     private static readonly PdfHtmlOptions Structured = new() { Mode = PdfHtmlMode.Structured };
 
-    /// <summary>A one-page PDF of the given size showing <paramref name="content"/> in Helvetica.</summary>
-    private static byte[] Page(string content, int width = 612, int height = 792)
+    /// <summary>
+    /// A one-page PDF of the given size showing <paramref name="content"/> in Helvetica; with a structure tree, its root
+    /// is object 6 and the objects of <paramref name="structure"/> follow from there.
+    /// </summary>
+    private static byte[] Page(string content, int width = 612, int height = 792, string[]? structure = null)
     {
-        var objects = new[]
+        var objects = new List<string>
         {
-            "<< /Type /Catalog /Pages 2 0 R >>",
+            structure == null ? "<< /Type /Catalog /Pages 2 0 R >>" : "<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 6 0 R /MarkInfo << /Marked true >> >>",
             "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
             $"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width} {height}] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
             "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
             $"<< /Length {content.Length} >>\nstream\n{content}\nendstream",
         };
+        if (structure != null) objects.AddRange(structure);
         var sb = new StringBuilder("%PDF-1.5\n");
         var offsets = new List<int>();
-        for (int i = 0; i < objects.Length; i++)
+        for (int i = 0; i < objects.Count; i++)
         {
             offsets.Add(sb.Length);
             sb.Append(i + 1).Append(" 0 obj\n").Append(objects[i]).Append("\nendobj\n");
         }
         int xref = sb.Length;
-        sb.Append("xref\n0 ").Append(objects.Length + 1).Append("\n0000000000 65535 f \n");
+        sb.Append("xref\n0 ").Append(objects.Count + 1).Append("\n0000000000 65535 f \n");
         foreach (var o in offsets) sb.Append(o.ToString("D10", CultureInfo.InvariantCulture)).Append(" 00000 n \n");
-        sb.Append("trailer\n<< /Size ").Append(objects.Length + 1).Append(" /Root 1 0 R >>\nstartxref\n").Append(xref).Append("\n%%EOF\n");
+        sb.Append("trailer\n<< /Size ").Append(objects.Count + 1).Append(" /Root 1 0 R >>\nstartxref\n").Append(xref).Append("\n%%EOF\n");
         return Encoding.Latin1.GetBytes(sb.ToString());
     }
 
@@ -126,5 +130,60 @@ public class StructuredHtmlHostileInputTests
             sb.Append(Text(120 + i % 40 * 2, y + i % 3 * 0.7, 2 + i % 2, "right part"));
         }
         Assert.Contains("<section", Convert(Page(sb.ToString(), 612, 9100)));
+    }
+
+    /// <summary>Marked content <paramref name="mcid"/> showing a word.</summary>
+    private static string Tagged(int mcid, double x, double y, string text) => $"/P << /MCID {mcid} >> BDC " + Text(x, y, 8, text) + "EMC\n";
+
+    [Fact]
+    public void A_structure_tree_that_nests_deeply_and_loops_stays_bounded()
+    {
+        // Five thousand elements, each the only child of the one before, the last pointing back to the first.
+        const int depth = 5000;
+        var structure = new List<string> { "<< /Type /StructTreeRoot /K 7 0 R >>" };
+        for (int i = 0; i < depth; i++)
+        {
+            int next = i + 1 < depth ? 8 + i : 7;
+            structure.Add($"<< /Type /StructElem /S /Div /Pg 3 0 R /K [{i % 50} {next} 0 R] >>");
+        }
+        var content = new StringBuilder();
+        for (int i = 0; i < 50; i++) content.Append(Tagged(i, 20, 20 + i * 12, "word" + i.ToString(CultureInfo.InvariantCulture)));
+        var html = Convert(Page(content.ToString(), structure: structure.ToArray()));
+        Assert.Contains("word49", html);
+    }
+
+    [Fact]
+    public void A_tagged_table_with_huge_spans_stays_bounded()
+    {
+        // A thousand cells, each claiming to span a thousand rows and columns.
+        var structure = new List<string> { "<< /Type /StructTreeRoot /K 7 0 R >>", "<< /Type /StructElem /S /Table /Pg 3 0 R /K 8 0 R >>" };
+        var cells = string.Join(" ", Enumerable.Range(0, 1000).Select(i => $"<< /Type /StructElem /S /TD /A << /O /Table /RowSpan 1000 /ColSpan 1000 >> /K {i} >>"));
+        structure.Add($"<< /Type /StructElem /S /TR /Pg 3 0 R /K [{cells}] >>");
+        var content = new StringBuilder();
+        for (int i = 0; i < 1000; i++) content.Append(Tagged(i, 10 + i % 20 * 29, 20 + i / 20 * 14, "c" + i.ToString(CultureInfo.InvariantCulture)));
+        var html = Convert(Page(content.ToString(), structure: structure.ToArray()));
+        Assert.Contains("c999", html);
+    }
+
+    [Fact]
+    public void Wide_tagged_rows_with_cells_left_out_stay_bounded()
+    {
+        // A full header row of 2,000 cells, then rows that leave most cells out, which are lined up with the header.
+        var structure = new List<string> { "<< /Type /StructTreeRoot /K 7 0 R >>" };
+        var rows = new StringBuilder();
+        var content = new StringBuilder();
+        int mcid = 0;
+        for (int r = 0; r < 20; r++)
+        {
+            rows.Append("<< /Type /StructElem /S /TR /Pg 3 0 R /K [");
+            for (int c = 0; c < (r == 0 ? 2000 : 1000); c++)
+            {
+                rows.Append($"<< /S /TD /K {mcid} >> ");
+                content.Append(Tagged(mcid++, 5 + c * 0.39, 20 + r * 30, "x"));
+            }
+            rows.Append("] >> ");
+        }
+        structure.Add($"<< /Type /StructElem /S /Table /Pg 3 0 R /K [{rows}] >>");
+        Assert.Contains("<section", Convert(Page(content.ToString(), 792, 792, structure.ToArray())));
     }
 }

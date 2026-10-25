@@ -17,7 +17,8 @@ public enum PdfHtmlMode
 
     /// <summary>
     /// The text of the pages as headings, paragraphs, lists and tables, in reading order, with nothing placed at a
-    /// position: tables come from the borders and rules the PDF draws and from text that lines up in columns. For
+    /// position: a tagged PDF's structure tree says what each piece of text is, and otherwise tables come from the
+    /// borders and rules the PDF draws and from text that lines up in columns. For
     /// programs and language models that read the text, and for reflowing on small screens. Images are left out.
     /// </summary>
     Structured,
@@ -118,9 +119,13 @@ public sealed class PdfHtmlOptions
 /// <para>
 /// Structured HTML flows like any web page, with nothing placed at a position on the page: each page is a
 /// <c>section</c> of headings, paragraphs, lists and <c>table</c> elements, for search indexes, language models and
-/// small screens. Tables come from the borders and rules the PDF draws and from text that lines up in columns; this is
-/// inferred from the layout, so a table can be missed, or read as text columns, where the layout is unusual, and what
-/// is not certain stays plain paragraphs. Images, drawings and the text of scanned pages are not part of it.
+/// small screens. A tagged PDF, such as one written for PDF/UA, has a structure tree that says what each piece of text
+/// is, and its headings, paragraphs, lists and tables, with their header rows and spanned cells, are read from it;
+/// text marked as an artifact, such as a running header, comes from the layout at its height on the page. For a PDF
+/// without tags, or a page whose tags leave much of its text out, tables come from the borders and rules the PDF draws
+/// and from text that lines up in columns; this is inferred from the layout, so a table can be missed, or read as text
+/// columns, where the layout is unusual, and what is not certain stays plain paragraphs. Images, drawings and the text
+/// of scanned pages are not part of it.
 /// </para>
 /// </remarks>
 public static class PdfToHtml
@@ -254,6 +259,7 @@ public static class PdfToHtml
         write(head.ToString());
 
         var links = options.IncludeLinks ? new PageLinks(doc) : null;
+        var tree = structured ? Tree(doc) : null;
         var imageOptions = new ImageOptions
         {
             Dpi = options.Dpi,
@@ -283,7 +289,7 @@ public static class PdfToHtml
                     // Only the first copy of a page has the id that links go to.
                     int id = firstCopy[i] ? index + 1 : 0;
                     batch[k] = structured
-                        ? StructuredPage(doc, links, index, id, options, PageId, cancellationToken)
+                        ? StructuredPage(doc, tree, links, index, id, options, PageId, cancellationToken)
                         : Page(renderer, links, index, id, pageNames[i], imageOptions, mediaType, options, PageId, cancellationToken);
                 });
             }
@@ -325,16 +331,35 @@ public static class PdfToHtml
         return sb.ToString();
     }
 
-    private static string StructuredPage(RenderDocument doc, PageLinks? links, int index, int id, PdfHtmlOptions options, Func<int, int> pageIds,
-        CancellationToken cancellationToken)
+    /// <summary>The structure tree of a tagged PDF, or null for an untagged one or a tree too damaged to read.</summary>
+    private static StructureTree? Tree(RenderDocument doc)
+    {
+        try
+        {
+            return StructureTree.Read(doc.File, doc.Pages);
+        }
+        catch (PdfFormatException)
+        {
+            return null;
+        }
+    }
+
+    private static string StructuredPage(RenderDocument doc, StructureTree? tree, PageLinks? links, int index, int id, PdfHtmlOptions options,
+        Func<int, int> pageIds, CancellationToken cancellationToken)
     {
         var (w, h) = doc.PageSize(index);
         List<FlowBlock> blocks;
         try
         {
             var collected = doc.CollectText(index, options.RenderAnnotations, rules: true, cancellationToken);
+            var pageLinks = links?.Read(index) ?? new List<PageLink>();
+            // A tagged page says what its text is, but writers tag some tables, such as a grid of labels and values, as
+            // paragraphs; tables its layout shows where the tags have only paragraphs replace those paragraphs.
+            var tagged = tree != null && tree.Root.OnPage(index)
+                ? PageStructure.BuildTagged(tree, index, collected.Glyphs, w, h, pageLinks, cancellationToken) : null;
             var text = TextLayout.Build(collected.Glyphs, index + 1, w, h, true, cancellationToken);
-            blocks = PageStructure.Build(text, collected.Rules, collected.Bullets, links?.Read(index) ?? new List<PageLink>(), cancellationToken);
+            blocks = PageStructure.Build(text, collected.Rules, collected.Bullets, pageLinks, cancellationToken);
+            if (tagged != null) blocks = PageStructure.AddLayoutTables(tagged, blocks);
         }
         catch (PdfFormatException ex)
         {
