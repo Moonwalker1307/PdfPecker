@@ -224,6 +224,44 @@ public class PaginationTests
         Assert.All(Lines(ops, "row"), l => Assert.Equal(1, Page(l.LineTop)));
     }
 
+    private static string Rows(string prefix, int count, string attributes = "")
+        => string.Concat(Enumerable.Range(1, count).Select(i => $"<tr{attributes}><td>{prefix}{i}</td></tr>"));
+
+    [Fact]
+    public void Break_inside_avoid_keeps_a_row_group_together()
+    {
+        // After 90pt of filler the first group of four 20pt rows fits; the second would break after its first row, so it moves
+        // whole, as Chrome moves it, while the first group stays where it starts.
+        const string style = "<style>" + Body + " table{border-spacing:0} td{padding:0; font: 10pt/20pt Helvetica} tbody{break-inside:avoid}</style>";
+        var ops = Layout(style + "<div style='height:90pt'></div><table><tbody>" + Rows("a", 4) + "</tbody><tbody>" + Rows("b", 4) + "</tbody></table>");
+        Assert.All(Lines(ops, "a"), l => Assert.Equal(0, Page(l.LineTop)));
+        Assert.All(Lines(ops, "b"), l => Assert.Equal(1, Page(l.LineTop)));
+
+        // Without break-inside: avoid the second group fills the first page.
+        var loose = Layout(style.Replace("break-inside:avoid", "break-inside:auto") + "<div style='height:90pt'></div><table><tbody>" + Rows("a", 4) + "</tbody><tbody>" + Rows("b", 4) + "</tbody></table>");
+        Assert.Equal(0, Page(Lines(loose, "b1").Single().LineTop));
+    }
+
+    [Fact]
+    public void Break_after_avoid_keeps_a_group_header_row_with_the_next_row()
+    {
+        const string style = "<style>" + Body + " table{border-spacing:0} td{padding:0; font: 10pt/20pt Helvetica} .h{break-after:avoid}</style>";
+        var ops = Layout(style + "<div style='height:160pt'></div><table><tr><td>first</td></tr><tr class='h'><td>Header</td></tr><tr><td>detail</td></tr></table>");
+        Assert.Equal(0, Page(Lines(ops, "first").Single().LineTop));
+        Assert.Equal(1, Page(Lines(ops, "Header").Single().LineTop));
+        Assert.Equal(1, Page(Lines(ops, "detail").Single().LineTop));
+    }
+
+    [Fact]
+    public void A_kept_row_group_taller_than_a_page_starts_a_page_and_then_breaks()
+    {
+        // Chrome breaks before a group that cannot fit anywhere rather than inside it on the page it would start on.
+        const string style = "<style>" + Body + " table{border-spacing:0} td{padding:0; font: 10pt/20pt Helvetica} tbody{break-inside:avoid}</style>";
+        var ops = Layout(style + "<table><tbody>" + Rows("a", 3) + "</tbody><tbody>" + Rows("b", 14) + "</tbody></table>");
+        Assert.Equal(1, Page(Lines(ops, "b1")[0].LineTop));
+        Assert.Equal(2, Page(Lines(ops, "b14").Single().LineTop));
+    }
+
     [Fact]
     public void Bookmarks_keep_document_order_when_a_grid_row_breaks_across_pages()
     {

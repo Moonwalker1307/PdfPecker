@@ -661,7 +661,8 @@ internal sealed partial class LayoutEngine
             m.Breaks.Clear();
             for (int r = 0; r < m.Rows.Count; r++)
             {
-                cy = LayoutRow(m, r, cy, colX, widths, hs, vs, collapse, allowMove: mayMove, pageColumns) + vs;
+                float keep = mayMove && StartsKeptRun(m, r) ? KeptRunHeight(m, r, cy, colX, widths, hs, vs, collapse) : 0;
+                cy = LayoutRow(m, r, cy, colX, widths, hs, vs, collapse, allowMove: mayMove, pageColumns, keep) + vs;
                 // The first content is past the chain's page: the chain moves and lays the table out again, so the rest
                 // of this layout would be thrown away.
                 if (probe is { Done: true } || m.TableMove != null) break;
@@ -886,10 +887,47 @@ internal sealed partial class LayoutEngine
         return foot.Height <= _grid.Height(PageOf(top)) / 2 ? foot.Height : 0;
     }
 
+    /// <summary>
+    /// Whether body rows <paramref name="r"/> and <paramref name="r"/> + 1 stay on one page: both are in a row group with
+    /// break-inside: avoid, or break-after: avoid on the first or break-before: avoid on the second asks for it, as a
+    /// report keeps a group together or a group's header row with its first detail row.
+    /// </summary>
+    private static bool KeepsWithNext(TableModel m, int r)
+    {
+        if (r < m.HeadCount || r + 1 >= m.Rows.Count - m.FootCount) return false;
+        RowModel a = m.Rows[r], b = m.Rows[r + 1];
+        return a.Tr.Style.AvoidBreakAfter || b.Tr.Style.AvoidBreakBefore
+               || a.Group != null && a.Group == b.Group && a.Group.Style.AvoidBreakInside;
+    }
+
+    /// <summary>Whether row <paramref name="r"/> is the first of rows that stay on one page (see <see cref="KeepsWithNext"/>).</summary>
+    private bool StartsKeptRun(TableModel m, int r)
+        => _paginate && _measuringRows == 0 && MayLayOutAgain && KeepsWithNext(m, r) && (r == 0 || !KeepsWithNext(m, r - 1));
+
+    /// <summary>
+    /// The height the rows kept on one page with row <paramref name="r"/> take below it, spacing included. Measuring stops
+    /// once they are taller than a page: as in Chrome, such rows still start on a new page and then break where they must.
+    /// </summary>
+    private float KeptRunHeight(TableModel m, int r, float top, float[] colX, float[] widths, float hs, float vs, bool collapse)
+    {
+        float limit = _grid.Height(PageOf(top) + 1);
+        var run = Capture(() =>
+        {
+            _measuringRows++;
+            float y = 0;
+            for (int k = r + 1; k < m.Rows.Count && KeepsWithNext(m, k - 1) && y <= limit; k++)
+                y = LayoutRow(m, k, y + vs, colX, widths, hs, vs, collapse, allowMove: false);
+            _measuringRows--;
+            return y;
+        });
+        return run.Height;
+    }
+
     /// <summary>Lays out one table row at <paramref name="rowTop"/> and returns its bottom. A row that would straddle a
-    /// page boundary moves to the next page, where the table's header rows are repeated first.</summary>
+    /// page boundary moves to the next page, where the table's header rows are repeated first; so does a row whose
+    /// following rows, <paramref name="keepWith"/> tall, should stay on its page and do not fit there.</summary>
     private float LayoutRow(TableModel m, int r, float rowTop, float[] colX, float[] widths, float hs, float vs, bool collapse, bool allowMove,
-        TableColumns[]? pageColumns = null)
+        TableColumns[]? pageColumns = null, float keepWith = 0)
     {
         var row = m.Rows[r];
         int n = m.ColCount;
@@ -942,7 +980,11 @@ internal sealed partial class LayoutEngine
 
             // A body row leaves room on its page for the footer repeated under it.
             float reserve = r >= m.HeadCount && r < m.Rows.Count - m.FootCount ? m.FootReserve : 0;
-            bool move = allowMove && attempt == 0 && MayLayOutAgain && CrossesPage(rowTop, rowBottom + reserve) && rowBottom - rowTop <= _grid.Height(PageOf(rowTop) + 1) && !AtPageTop(rowTop);
+            float keptBottom = rowBottom + keepWith;
+            bool move = allowMove && attempt == 0 && MayLayOutAgain && !AtPageTop(rowTop)
+                        && (CrossesPage(rowTop, rowBottom + reserve) && rowBottom - rowTop <= _grid.Height(PageOf(rowTop) + 1)
+                            || keepWith > 0 && CrossesPage(rowTop, keptBottom + reserve));
+            if (move && !CrossesPage(rowTop, rowBottom + reserve)) rowBottom = keptBottom;
             // A row that starts a page or column because the row before it ended right at the break gets the header too.
             bool atBreak = !move && allowMove && attempt == 0 && r > m.HeadCount && m.HeadCount > 0
                            && PageOf(rowTop) > 0 && AtPageTop(rowTop);
