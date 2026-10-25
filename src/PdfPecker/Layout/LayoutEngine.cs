@@ -576,9 +576,10 @@ internal sealed partial class LayoutEngine
         // A box that must start on the page of the chain before it is only laid out until it is clear where its
         // first content lands, when that is a later page and the chain has to move anyway.
         // Nested deeper than chains move (see KeepTogetherFails), the chain stays whatever the probe finds, and the box
-        // stopped early was laid out again in full: at every level, so the work doubled with each page.
+        // stopped early was laid out again in full: at every level, so the work doubled with each page. The same holds
+        // once the relayout budget is spent.
         var childProbe = joins && f.Chain.Index != f.ForcedAt && !AtPageTop(f.Chain.Top) && _joinDepth < MaxKeptWholeNesting
-                         && CanProbe(e)
+                         && MayLayOutAgain && CanProbe(e)
             ? new KeepProbe(boxOps, f.Chain.FirstPage)
             : null;
         // A flow that is probed itself hands its probe to its first box, whose first content is this flow's.
@@ -731,10 +732,12 @@ internal sealed partial class LayoutEngine
     /// <remarks>
     /// Chains nested in more boxes that are themselves kept with a chain than <see cref="MaxKeptWholeNesting"/> stay
     /// where they are: moving a chain lays out everything in it again, at every level of such nesting, so the work
-    /// doubled with each level.
+    /// doubled with each level. So do all chains once the relayout budget is spent (see <see cref="MayLayOutAgain"/>):
+    /// headings left open, each holding the next, still moved their chains at each of those levels, and a page of 578
+    /// such levels took 48 s.
     /// </remarks>
     private bool KeepTogetherFails(in FlowMark chain, int opsStart, float fallbackY, int forcedAt)
-        => chain.Index != forcedAt && !AtPageTop(chain.Top) && _joinDepth < MaxKeptWholeNesting
+        => chain.Index != forcedAt && !AtPageTop(chain.Top) && _joinDepth < MaxKeptWholeNesting && MayLayOutAgain
            && FirstContentPage(opsStart, fallbackY) > chain.FirstPage;
 
     /// <summary>How many boxes that keep-with-next chains may move to the next page are being laid out around this point.</summary>
