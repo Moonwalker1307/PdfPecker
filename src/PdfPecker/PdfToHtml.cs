@@ -6,9 +6,32 @@ using PdfPecker.Rendering.Parsing;
 
 namespace PdfPecker;
 
+/// <summary>The kind of HTML <see cref="PdfToHtml"/> writes.</summary>
+public enum PdfHtmlMode
+{
+    /// <summary>
+    /// Pages that look like the PDF: an image of each page with its text laid invisibly over it, every line at its
+    /// place on the page. For people to read and search.
+    /// </summary>
+    Visual,
+
+    /// <summary>
+    /// The text of the pages as headings, paragraphs, lists and tables, in reading order, with nothing placed at a
+    /// position: tables come from the borders and rules the PDF draws and from text that lines up in columns. For
+    /// programs and language models that read the text, and for reflowing on small screens. Images are left out.
+    /// </summary>
+    Structured,
+}
+
 /// <summary>Options for <see cref="PdfToHtml"/>.</summary>
 public sealed class PdfHtmlOptions
 {
+    /// <summary>
+    /// Whether the HTML looks like the PDF (<see cref="PdfHtmlMode.Visual"/>, the default) or gives its structure as
+    /// flowing text and tables (<see cref="PdfHtmlMode.Structured"/>). The image options do not apply to structured HTML.
+    /// </summary>
+    public PdfHtmlMode Mode { get; set; } = PdfHtmlMode.Visual;
+
     /// <summary>
     /// The password of an encrypted PDF: its user or owner password. Not needed for a PDF that only restricts permissions.
     /// </summary>
@@ -75,21 +98,29 @@ public sealed class PdfHtmlOptions
 }
 
 /// <summary>
-/// Converts PDFs, any PDFs and not only those this library makes, to HTML pages that look like the PDF: each page is an
-/// image of the page with its text laid invisibly over it, so the text can be selected, copied, searched and read by
-/// screen readers, and with its links.
+/// Converts PDFs, any PDFs and not only those this library makes, to HTML: by default pages that look like the PDF, an
+/// image of each page with its text laid invisibly over it, so the text can be selected, copied, searched and read by
+/// screen readers, and with its links; or, with <see cref="PdfHtmlMode.Structured"/>, the text as headings,
+/// paragraphs, lists and tables in reading order.
 /// </summary>
 /// <remarks>
 /// <para>
 /// The output is one self-contained HTML file with no scripts: the page images, the style sheet and the small web font
-/// of the text layer are all inside it. Pages scale to the width of the window, down to a phone screen, and print on
-/// paper of their own size. Every page is a <c>div</c> with the class <c>pdf-page</c> and the id <c>page-</c> followed
-/// by its page number.
+/// of the text layer are all inside it. Every page is an element with the class <c>pdf-page</c> and the id
+/// <c>page-</c> followed by its page number.
 /// </para>
 /// <para>
-/// The text comes from <see cref="PdfText"/>, so what it can and cannot extract applies here too. The layout is that of
-/// the PDF: the HTML does not reflow into paragraphs and tables, and text is not drawn in the PDF's fonts but shown in
-/// the image, so it zooms as an image does.
+/// The text comes from <see cref="PdfText"/>, so what it can and cannot extract applies here too. In the visual mode
+/// the layout is that of the PDF: pages scale to the width of the window, down to a phone screen, and print on paper of
+/// their own size, but the HTML does not reflow into paragraphs and tables, and text is not drawn in the PDF's fonts
+/// but shown in the image, so it zooms as an image does.
+/// </para>
+/// <para>
+/// Structured HTML flows like any web page, with nothing placed at a position on the page: each page is a
+/// <c>section</c> of headings, paragraphs, lists and <c>table</c> elements, for search indexes, language models and
+/// small screens. Tables come from the borders and rules the PDF draws and from text that lines up in columns; this is
+/// inferred from the layout, so a table can be missed, or read as text columns, where the layout is unusual, and what
+/// is not certain stays plain paragraphs. Images, drawings and the text of scanned pages are not part of it.
 /// </para>
 /// </remarks>
 public static class PdfToHtml
@@ -100,9 +131,9 @@ public static class PdfToHtml
     /// <param name="cancellationToken">Stops the conversion.</param>
     /// <returns>The HTML document.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="pdf"/> is null.</exception>
-    /// <exception cref="ArgumentException"><see cref="PdfHtmlOptions.ImageFormat"/> is TIFF.</exception>
+    /// <exception cref="ArgumentException"><see cref="PdfHtmlOptions.ImageFormat"/> is TIFF in the visual mode.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
-    /// <see cref="PdfHtmlOptions.Dpi"/> is not positive, or a page of <see cref="PdfHtmlOptions.Pages"/> is past the last page.
+    /// <see cref="PdfHtmlOptions.Dpi"/> is not positive in the visual mode, or a page of <see cref="PdfHtmlOptions.Pages"/> is past the last page.
     /// </exception>
     /// <exception cref="PdfPasswordException">The PDF is encrypted and cannot be opened with the given password.</exception>
     /// <exception cref="InvalidDataException">The PDF is not readable, or a page is too complex.</exception>
@@ -173,9 +204,10 @@ public static class PdfToHtml
     {
         if (pdf == null) throw new ArgumentNullException(nameof(pdf));
         options ??= new PdfHtmlOptions();
-        if (options.ImageFormat == PdfImageFormat.Tiff)
+        bool structured = options.Mode == PdfHtmlMode.Structured;
+        if (!structured && options.ImageFormat == PdfImageFormat.Tiff)
             throw new ArgumentException("Browsers do not show TIFF images; use WebP, PNG or JPEG.", nameof(options));
-        if (!(options.Dpi > 0)) throw new ArgumentOutOfRangeException(nameof(options), options.Dpi, "Dpi must be positive.");
+        if (!structured && !(options.Dpi > 0)) throw new ArgumentOutOfRangeException(nameof(options), options.Dpi, "Dpi must be positive.");
         cancellationToken.ThrowIfCancellationRequested();
 
         var renderer = PdfRenderer.Open(pdf, options.Password);
@@ -211,9 +243,13 @@ public static class PdfToHtml
         head.Append("<meta name=\"generator\" content=\"PdfPecker\">\n<title>");
         HtmlPageWriter.AppendEscaped(head, options.Title ?? DocumentTitle(doc.File) ?? "PDF document", attribute: false);
         head.Append("</title>\n<style>\n");
-        HtmlPageWriter.WriteStyles(head);
-        foreach (var ((w, h), name) in sizes)
-            head.Append("@page ").Append(name).Append("{size:").Append(HtmlPageWriter.Number(w)).Append("pt ").Append(HtmlPageWriter.Number(h)).Append("pt}\n");
+        if (structured) FlowHtmlWriter.WriteStyles(head);
+        else
+        {
+            HtmlPageWriter.WriteStyles(head);
+            foreach (var ((w, h), name) in sizes)
+                head.Append("@page ").Append(name).Append("{size:").Append(HtmlPageWriter.Number(w)).Append("pt ").Append(HtmlPageWriter.Number(h)).Append("pt}\n");
+        }
         head.Append("</style>\n</head>\n<body>\n");
         write(head.ToString());
 
@@ -246,7 +282,9 @@ public static class PdfToHtml
                     int i = start + k, index = indices[i];
                     // Only the first copy of a page has the id that links go to.
                     int id = firstCopy[i] ? index + 1 : 0;
-                    batch[k] = Page(renderer, links, index, id, pageNames[i], imageOptions, mediaType, options, PageId, cancellationToken);
+                    batch[k] = structured
+                        ? StructuredPage(doc, links, index, id, options, PageId, cancellationToken)
+                        : Page(renderer, links, index, id, pageNames[i], imageOptions, mediaType, options, PageId, cancellationToken);
                 });
             }
             catch (AggregateException ex) when (ex.InnerExceptions.Count > 0)
@@ -284,6 +322,26 @@ public static class PdfToHtml
         }
         var sb = new StringBuilder(encoded.Length * 4 / 3 + 4096);
         HtmlPageWriter.WritePage(sb, id, w, h, pageName, mediaType, encoded, image.Width, image.Height, text, pageLinks, pageIds);
+        return sb.ToString();
+    }
+
+    private static string StructuredPage(RenderDocument doc, PageLinks? links, int index, int id, PdfHtmlOptions options, Func<int, int> pageIds,
+        CancellationToken cancellationToken)
+    {
+        var (w, h) = doc.PageSize(index);
+        List<FlowBlock> blocks;
+        try
+        {
+            var collected = doc.CollectText(index, options.RenderAnnotations, rules: true, cancellationToken);
+            var text = TextLayout.Build(collected.Glyphs, index + 1, w, h, true, cancellationToken);
+            blocks = PageStructure.Build(text, collected.Rules, collected.Bullets, links?.Read(index) ?? new List<PageLink>(), cancellationToken);
+        }
+        catch (PdfFormatException ex)
+        {
+            throw new InvalidDataException(ex.Message, ex);
+        }
+        var sb = new StringBuilder(4096);
+        FlowHtmlWriter.WritePage(sb, id, blocks, pageIds);
         return sb.ToString();
     }
 

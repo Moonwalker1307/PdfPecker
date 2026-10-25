@@ -458,6 +458,7 @@ internal sealed partial class PageRenderer
     private void Fill(bool evenOdd)
     {
         if (_path.IsEmpty) return;
+        if (_text?.Rules != null) CollectRules(stroke: false);
         // A mesh shading is painted only where the fill can reach, not over the whole page.
         _fillArea = _gs.FillSpace is PatternSpace ? DeviceBounds(_path, _gs.Ctm) : null;
         bool paint = SetupPaint(false);
@@ -488,6 +489,7 @@ internal sealed partial class PageRenderer
 
     private void Stroke()
     {
+        if (_text?.Rules != null && !_path.IsEmpty) CollectRules(stroke: true);
         if (_path.IsEmpty || !SetupPaint(true)) return;
         StrokePathData(_path, _gs.Ctm);
     }

@@ -70,6 +70,9 @@ Console.WriteLine($"{properties.Title} by {properties.Author}: PDF {properties.V
 // Any PDF as one self-contained HTML page: page images with selectable, searchable text and working links
 string html = PdfToHtml.Convert(File.ReadAllBytes("statement.pdf"));
 
+// Or its text as headings, paragraphs, lists and real <table> elements in reading order, for search and language models
+string structured = PdfToHtml.Convert(File.ReadAllBytes("statement.pdf"), new PdfHtmlOptions { Mode = PdfHtmlMode.Structured });
+
 // Open a PDF once and render its pages one at a time, or in parallel
 var renderer = PdfRenderer.Open(pdf);
 renderer.RenderPage(0, new ImageOptions { Dpi = 150 }).Save("page1.png");
@@ -153,7 +156,11 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
 - **PDF to image**: renders any PDF page to PNG, JPEG or WebP, or a whole PDF to a multi-page TIFF, and
   `HtmlToImage` goes from HTML to images in one call. [More](https://pdfpecker.net/docs/pdf-to-image/)
 - **PDF to HTML**: `PdfToHtml` turns any PDF into one script-free HTML file that looks like the PDF, with text you can
-  select, search and copy. [More](https://pdfpecker.net/docs/pdf-to-html/)
+  select, search and copy. `PdfHtmlMode.Structured` writes the text instead as flowing headings, paragraphs, lists and
+  real `<table>` elements in reading order, with nothing placed at a fixed position, for search indexes and language
+  models: tables come from the rules and borders the PDF draws and from text that lines up in columns, with header
+  rows, spanned cells and wrapped cells. Table detection reads the layout, so unusual layouts, floats and charts can
+  come out as plain paragraphs, and scanned pages have no text to give. [More](https://pdfpecker.net/docs/pdf-to-html/)
 - **Viewer settings and page labels**: the page, zoom and panel a viewer opens with, print settings, and page numbers
   such as "i" to "iv" for front matter. [More](https://pdfpecker.net/docs/options/)
 - **Reproducible output**: a fixed `CreationDate` or `SOURCE_DATE_EPOCH` gives byte-identical PDFs, for build pipelines
