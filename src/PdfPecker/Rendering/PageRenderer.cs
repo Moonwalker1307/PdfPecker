@@ -328,7 +328,7 @@ internal sealed partial class PageRenderer
             case "BI":
                 if (p.InlineDict != null && p.InlineData != null && _hidden == 0 && _text == null)
                 {
-                    if (_images != null) _images.Add(null, p.InlineDict, p.InlineData, res, _gs.Ctm);
+                    if (_images != null) _images.Add(null, p.InlineDict, p.InlineData, res, _gs.Ctm, new ClipBoxes(_gs.ClipBoxes).Bounds());
                     else DrawInlineImage(p.InlineDict, p.InlineData, res);
                 }
                 break;
@@ -552,7 +552,13 @@ internal sealed partial class PageRenderer
 
     private void ApplyClip(bool evenOdd)
     {
-        if (Collecting) return; // text and images are extracted whether or not a clip hides them
+        if (Collecting)
+        {
+            // Text and images are extracted whether or not a clip hides them; fills are taken as backgrounds only where
+            // the clip lets them paint, and a picture in flowing HTML shows as much as the clip leaves.
+            if (_text?.Fills != null || _images is { Clips: true }) _gs.ClipBoxes = AddClipBoxes(_gs.ClipBoxes);
+            return;
+        }
         var ctm = _gs.Ctm;
         if (_path.IsEmpty)
         {
@@ -644,7 +650,7 @@ internal sealed partial class PageRenderer
         if (subtype == "Image")
         {
             if (_hidden > 0 || _text != null) return;
-            if (_images != null) _images.Add(xobj, xobj, null, res, _gs.Ctm);
+            if (_images != null) _images.Add(xobj, xobj, null, res, _gs.Ctm, new ClipBoxes(_gs.ClipBoxes).Bounds());
             else DrawImageXObject(xobj, res);
         }
         else if (subtype == "Form" || xobj["BBox"] != null)

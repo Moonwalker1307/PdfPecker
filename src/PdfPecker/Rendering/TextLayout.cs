@@ -413,6 +413,8 @@ internal static class TextLayout
         var word = new StringBuilder();
         double wu0 = double.MaxValue, wu1 = double.MinValue, wv = 0, wsize = 0;
         string font = "";
+        uint color = 0;
+        List<(int, uint)>? colors = null; // where the colour changes within the word, when it does
         double lu0 = double.MaxValue, lu1 = double.MinValue, lsize = 0;
 
         void Flush()
@@ -424,7 +426,10 @@ internal static class TextLayout
                 OriginX = wu0 * cx - wv * cy,
                 OriginY = wu0 * cy + wv * cx,
                 Advance = wu1 - wu0,
+                Color = color,
+                ColorRuns = colors?.ToArray(),
             });
+            colors = null;
             if (lineText.Length > 0) lineText.Append(' ');
             lineText.Append(word);
             word.Clear();
@@ -436,7 +441,9 @@ internal static class TextLayout
             var it = visual[k];
             if (it.Glyph < 0 || IsSpace(glyphs[it.Glyph].Text)) { Flush(); continue; }
             var g = glyphs[it.Glyph];
-            if (word.Length == 0) { font = g.Font; wv = it.V; }
+            if (word.Length == 0) { font = g.Font; color = g.Color; wv = it.V; }
+            else if (g.Color != (colors is { Count: > 0 } ? colors[^1].Item2 : color) && (colors?.Count ?? 0) < 64)
+                (colors ??= new List<(int, uint)>()).Add((word.Length, g.Color));
             AppendText(word, g.Text, expandLigatures);
             wu0 = Math.Min(wu0, it.U0); wu1 = Math.Max(wu1, it.U1);
             if (it.Size > wsize) { wsize = it.Size; wv = it.V; }

@@ -126,6 +126,9 @@ public sealed class PdfImagePlacement
 
     /// <summary>The height of the image's bounding box, in points.</summary>
     public double Height { get; }
+
+    /// <summary>The box the clips leave visible, where they were collected; null for none.</summary>
+    internal (double X0, double Y0, double X1, double Y1)? Clip { get; init; }
 }
 
 /// <summary>
@@ -218,6 +221,35 @@ public static class PdfImages
     /// <exception cref="UnauthorizedAccessException">The process may not read the file.</exception>
     public static IReadOnlyList<PdfExtractedImage> ExtractFile(string path, PdfImagesOptions? options = null, CancellationToken cancellationToken = default)
         => Extract(File.ReadAllBytes(path ?? throw new ArgumentNullException(nameof(path))), options, cancellationToken);
+
+    /// <summary>
+    /// The images one page draws, each decoded once, with every place on the page it is drawn, for structured HTML;
+    /// images that cannot be decoded are left out.
+    /// </summary>
+    internal static List<PdfExtractedImage> PageImages(RenderDocument doc, int index, bool annotations, int max, CancellationToken cancellationToken)
+    {
+        var found = new List<Found>();
+        var byObject = new Dictionary<PdfStream, Found>(ReferenceEqualityComparer.Instance);
+        foreach (var draw in doc.CollectImages(index, annotations, cancellationToken, clips: true))
+        {
+            if (!Bounds(draw.Ctm, out var placement, index + 1)) continue;
+            if (draw.Clip != null) placement = new PdfImagePlacement(index + 1, placement.X, placement.Y, placement.Width, placement.Height) { Clip = draw.Clip };
+            if (draw.XObject is { } xobject && byObject.TryGetValue(xobject, out var known))
+            {
+                known.Placements.Add(placement);
+                continue;
+            }
+            if (found.Count == max) break;
+            var image = new Found(draw);
+            image.Placements.Add(placement);
+            found.Add(image);
+            if (draw.XObject is { } x) byObject[x] = image;
+        }
+        var images = new List<PdfExtractedImage>(found.Count);
+        foreach (var f in found)
+            if (Decode(doc.File, f, true, cancellationToken) is { } image) images.Add(image);
+        return images;
+    }
 
     /// <summary>An image found on the pages, with the first draw of it and every place it is drawn.</summary>
     private sealed class Found(ImageDraw draw)

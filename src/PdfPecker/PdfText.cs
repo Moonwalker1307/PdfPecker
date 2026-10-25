@@ -153,6 +153,12 @@ public sealed class PdfTextWord
     /// <summary>The length of the word along its baseline, in points.</summary>
     internal double Advance { get; init; }
 
+    /// <summary>The colour of the word's first letter, packed R | G &lt;&lt; 8 | B &lt;&lt; 16.</summary>
+    internal uint Color { get; init; }
+
+    /// <summary>Where the colour changes within the word: the index in <see cref="Text"/> and the new colour; null when it does not.</summary>
+    internal (int Start, uint Color)[]? ColorRuns { get; init; }
+
     /// <summary>The word.</summary>
     public override string ToString() => Text;
 }

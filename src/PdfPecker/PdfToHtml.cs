@@ -19,7 +19,8 @@ public enum PdfHtmlMode
     /// The text of the pages as headings, paragraphs, lists and tables, in reading order, with nothing placed at a
     /// position: a tagged PDF's structure tree says what each piece of text is, and otherwise tables come from the
     /// borders and rules the PDF draws and from text that lines up in columns. For
-    /// programs and language models that read the text, and for reflowing on small screens. Images are left out.
+    /// programs and language models that read the text, and for reflowing on small screens. Images are left out unless
+    /// <see cref="PdfHtmlOptions.IncludeImages"/> is set, and the text is plain unless <see cref="PdfHtmlOptions.IncludeStyles"/> is.
     /// </summary>
     Structured,
 }
@@ -81,6 +82,23 @@ public sealed class PdfHtmlOptions
 
     /// <summary>Whether annotation appearances (form fields, stamps, comments) are drawn and their text included. Default true.</summary>
     public bool RenderAnnotations { get; set; } = true;
+
+    /// <summary>
+    /// For <see cref="PdfHtmlMode.Structured"/> HTML: whether the text and tables keep how they look in the PDF, as CSS
+    /// classes of each page: fonts, sizes and colours of the text, the backgrounds and border lines of table cells and
+    /// coloured boxes, where text sits in its cell or on the line, the widths of tables and columns, and the width of the
+    /// page. The text still flows, with nothing placed at a position. Default false: plain text and tables in one
+    /// readable style. Visual HTML always looks like the PDF and ignores it.
+    /// </summary>
+    public bool IncludeStyles { get; set; }
+
+    /// <summary>
+    /// For <see cref="PdfHtmlMode.Structured"/> HTML: whether the pictures the pages draw, such as a logo, are included
+    /// where they sit in the flow, as JPEG or PNG images in the HTML file. A picture that fills most of a page, such as a
+    /// scanned page under its text, is left out, as are image masks, pictures drawn turned and pictures too small to see.
+    /// Default false. Visual HTML always draws the whole page and ignores it.
+    /// </summary>
+    public bool IncludeImages { get; set; }
 
     /// <summary>The document title. Default: the PDF's own title, or "PDF document" when it has none.</summary>
     public string? Title { get; set; }
@@ -248,7 +266,7 @@ public static class PdfToHtml
         head.Append("<meta name=\"generator\" content=\"PdfPecker\">\n<title>");
         HtmlPageWriter.AppendEscaped(head, options.Title ?? DocumentTitle(doc.File) ?? "PDF document", attribute: false);
         head.Append("</title>\n<style>\n");
-        if (structured) FlowHtmlWriter.WriteStyles(head);
+        if (structured) FlowHtmlWriter.WriteStyles(head, options.IncludeStyles);
         else
         {
             HtmlPageWriter.WriteStyles(head);
@@ -349,6 +367,7 @@ public static class PdfToHtml
     {
         var (w, h) = doc.PageSize(index);
         List<FlowBlock> blocks;
+        FlowStyles? styles = null;
         try
         {
             var collected = doc.CollectText(index, options.RenderAnnotations, rules: true, cancellationToken);
@@ -360,14 +379,56 @@ public static class PdfToHtml
             var text = TextLayout.Build(collected.Glyphs, index + 1, w, h, true, cancellationToken);
             blocks = PageStructure.Build(text, collected.Rules, collected.Bullets, pageLinks, cancellationToken);
             if (tagged != null) blocks = PageStructure.AddLayoutTables(tagged, blocks);
+            if (options.IncludeImages) AddImages(doc, index, w, h, options, blocks, cancellationToken);
+            if (options.IncludeStyles) styles = new FlowStyles(index + 1, w, h, collected.Fills, collected.Rules, blocks);
         }
         catch (PdfFormatException ex)
         {
             throw new InvalidDataException(ex.Message, ex);
         }
         var sb = new StringBuilder(4096);
-        FlowHtmlWriter.WritePage(sb, id, blocks, pageIds);
+        FlowHtmlWriter.WritePage(sb, id, blocks, pageIds, styles);
         return sb.ToString();
+    }
+
+    /// <summary>The most pictures of one page put in structured HTML.</summary>
+    private const int MaxPageImages = 100;
+
+    /// <summary>
+    /// Puts a page's pictures in its blocks where they sit, such as at the top of the table cell or text column under
+    /// them: pictures that fill most of the page, image masks, pictures too small to see and pictures drawn turned are
+    /// left out.
+    /// </summary>
+    private static void AddImages(RenderDocument doc, int index, double width, double height, PdfHtmlOptions options, List<FlowBlock> blocks,
+        CancellationToken cancellationToken)
+    {
+        int placed = 0;
+        foreach (var image in PdfImages.PageImages(doc, index, options.RenderAnnotations, MaxPageImages, cancellationToken))
+        {
+            if (image.IsMask) continue;
+            string mediaType = image.Format == PdfImageFormat.Jpeg ? "image/jpeg" : "image/png";
+            foreach (var at in image.Placements)
+            {
+                if (at.Width < 8 || at.Height < 8 || at.Width * at.Height > 0.5 * width * height) continue;
+                // A picture whose box on the page is far out of its own shape is drawn turned or skewed, as a corner
+                // ribbon is, and would show upright and out of place in the flow.
+                double shape = at.Width / at.Height * image.Height / Math.Max(1, image.Width);
+                if (shape is > 1.5 or < 1 / 1.5) continue;
+                // The part a clip leaves, as of a photo cropped to its card.
+                double x0 = at.X, y0 = at.Y, x1 = at.X + at.Width, y1 = at.Y + at.Height;
+                if (at.Clip is var (cx0, cy0, cx1, cy1))
+                    (x0, y0, x1, y1) = (Math.Max(x0, cx0), Math.Max(y0, cy0), Math.Min(x1, cx1), Math.Min(y1, cy1));
+                if (x1 - x0 < 8 || y1 - y0 < 8) continue;
+                // A picture drawn over and over, as a pattern tile can be, is in the file once per place it is drawn.
+                if (++placed > MaxPageImages) return;
+                var block = new ImageBlock
+                {
+                    Top = y0, Left = x0, X0 = x0, X1 = x1, Y0 = y0, Y1 = y1, MediaType = mediaType, Data = image.Data,
+                    Drawn = (at.X, at.Y, at.X + at.Width, at.Y + at.Height),
+                };
+                FlowStyles.Place(blocks, block);
+            }
+        }
     }
 
     private static string? DocumentTitle(PdfFile file)

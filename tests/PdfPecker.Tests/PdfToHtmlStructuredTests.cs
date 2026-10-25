@@ -335,4 +335,88 @@ public class PdfToHtmlStructuredTests
         var html = Body(Tagged("<p style=\"text-shadow:1px 1px 0 red\">Shadowed words</p>"));
         Assert.Single(Regex.Matches(html, "Shadowed words"));
     }
+
+    private static readonly PdfHtmlOptions Styled = new() { Mode = PdfHtmlMode.Structured, IncludeStyles = true };
+
+    /// <summary>The declarations of the class the first element with the given text has, in output with styles.</summary>
+    private static string StyleOf(string html, string text)
+    {
+        int at = html.IndexOf(text, StringComparison.Ordinal);
+        var tag = Regex.Matches(html[..at], "<[a-z0-9]+ class=\"([^\"]+)\"[^>]*>").Last();
+        return Regex.Match(html, "\\." + Regex.Escape(tag.Groups[1].Value) + "\\{([^}]*)\\}").Groups[1].Value;
+    }
+
+    [Fact]
+    public void Styles_keep_fonts_colours_and_backgrounds()
+    {
+        var pdf = Pdf("""
+            <style>body{font-family:Times;color:#333}.b{background:#ffeecc;padding:8px}</style>
+            <h1 style="color:#0055aa">Report</h1>
+            <p class="b">Shaded note with <span style="color:#008000">green words</span> inside.</p>
+            <p>A plain paragraph of the usual text.</p>
+            """);
+        var html = PdfToHtml.Convert(pdf, Styled);
+        Assert.Contains("font-family:\"Times New Roman\",Times,serif;", html);
+        Assert.Contains("color:#333333;", html);
+        Assert.Contains("color:#0055aa;", StyleOf(html, "Report"));
+        Assert.Contains("background:#ffeecc;", StyleOf(html, "Shaded note"));
+        Assert.Contains("color:#008000;", StyleOf(html, "green words"));
+        Assert.Contains("<p>A plain paragraph", html);
+        // The text and structure are those of the output without styles.
+        Assert.Equal(Text(Body(Html(pdf))), Text(Body(html)));
+    }
+
+    [Fact]
+    public void Styles_keep_table_borders_cell_backgrounds_and_widths()
+    {
+        var html = PdfToHtml.Convert(Pdf("""
+            <style>td,th{border:1px solid #c00;padding:4px}table{border-collapse:collapse;width:50%}</style>
+            <table><tr><th>Item</th><th>Qty</th></tr>
+            <tr><td style="background:#ddeeff">Apples</td><td>3</td></tr>
+            <tr><td>Pears</td><td style="border-bottom:2px dashed #00f">5</td></tr></table>
+            """), Styled);
+        HasRow(html, "Apples", "3");
+        Assert.Contains("<colgroup>", html);
+        Assert.Contains("border-left:1pt solid #cc0000;", StyleOf(html, "Item"));
+        Assert.Contains("background:#ddeeff;", StyleOf(html, "Apples"));
+        Assert.DoesNotContain("background", StyleOf(html, "Pears"));
+        Assert.Contains("dashed #0000ff", StyleOf(html, ">5<"));
+    }
+
+    [Fact]
+    public void Images_are_included_when_asked_for()
+    {
+        const string png = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP4z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==";
+        var pdf = Pdf($"<p>Before</p><p><img src=\"data:image/png;base64,{png}\" style=\"width:60px;height:60px\"></p><p>After</p>");
+        Assert.DoesNotContain("<img", Html(pdf), StringComparison.Ordinal);
+        var html = PdfToHtml.Convert(pdf, new PdfHtmlOptions { Mode = PdfHtmlMode.Structured, IncludeImages = true });
+        Assert.Matches("Before.*<img alt=\"\" width=\"60\" src=\"data:image/png;base64,.*After", html.ReplaceLineEndings(""));
+        var styled = PdfToHtml.Convert(pdf, new PdfHtmlOptions { Mode = PdfHtmlMode.Structured, IncludeImages = true, IncludeStyles = true });
+        var image = Regex.Match(styled, "<img class=\"([^\"]+)\"").Groups[1].Value;
+        Assert.Contains("." + image + "{width:45pt;}", styled);
+    }
+
+    [Fact]
+    public void Pictures_side_by_side_stay_side_by_side_and_cropped_pictures_stay_cropped()
+    {
+        const string png = "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP4z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg==";
+        string img = $"<img src=\"data:image/png;base64,{png}\" style=\"width:80px;height:80px\">";
+        var pdf = Pdf($"""
+            <p>Photos</p>
+            <p>{img} {img}</p>
+            <div style="width:40px;height:40px;overflow:hidden">{img}</div>
+            <p>After</p>
+            """);
+        var html = PdfToHtml.Convert(pdf, new PdfHtmlOptions { Mode = PdfHtmlMode.Structured, IncludeImages = true, IncludeStyles = true });
+        Assert.Matches("<p><img [^>]+><img [^>]+></p>", html);
+        Assert.Contains("{width:30pt;aspect-ratio:1;object-fit:cover;object-position:0% 0%;}", html);
+    }
+
+    [Fact]
+    public void Output_without_styles_has_no_classes_or_style_elements()
+    {
+        var html = Body(Html("<p style=\"color:red;background:#eee\">Red</p><table style=\"border:1px solid\"><tr><td>a</td><td>b</td></tr></table>"));
+        Assert.DoesNotMatch("class=\"p[0-9]", html);
+        Assert.DoesNotContain("<style", html, StringComparison.Ordinal);
+    }
 }

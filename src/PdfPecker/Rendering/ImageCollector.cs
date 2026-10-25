@@ -9,8 +9,10 @@ namespace PdfPecker.Rendering;
 /// </summary>
 internal readonly struct ImageDraw
 {
-    public ImageDraw(PdfStream? xobject, PdfDict dict, byte[]? inlineData, PdfDict? resources, in Matrix ctm)
+    public ImageDraw(PdfStream? xobject, PdfDict dict, byte[]? inlineData, PdfDict? resources, in Matrix ctm,
+        (double X0, double Y0, double X1, double Y1)? clip = null)
     {
+        Clip = clip;
         XObject = xobject;
         Dict = dict;
         InlineData = inlineData;
@@ -31,6 +33,9 @@ internal readonly struct ImageDraw
     public PdfDict? Resources { get; }
 
     public Matrix Ctm { get; }
+
+    /// <summary>The box the clips in force leave visible, when the collector keeps clips; null for none.</summary>
+    public (double X0, double Y0, double X1, double Y1)? Clip { get; }
 }
 
 /// <summary>Receives the images <see cref="PageRenderer"/> draws when it runs a page for its images instead of pixels.</summary>
@@ -44,8 +49,14 @@ internal sealed class ImageCollector
 
     public readonly List<ImageDraw> Draws = new();
 
-    public void Add(PdfStream? xobject, PdfDict dict, byte[]? inlineData, PdfDict? resources, in Matrix ctm)
+    /// <summary>Whether each draw keeps the box its clips leave visible, as a picture cropped to a card is drawn.</summary>
+    public readonly bool Clips;
+
+    public ImageCollector(bool clips = false) => Clips = clips;
+
+    public void Add(PdfStream? xobject, PdfDict dict, byte[]? inlineData, PdfDict? resources, in Matrix ctm,
+        (double X0, double Y0, double X1, double Y1)? clip = null)
     {
-        if (Draws.Count < MaxDraws) Draws.Add(new ImageDraw(xobject, dict, inlineData, resources, ctm));
+        if (Draws.Count < MaxDraws) Draws.Add(new ImageDraw(xobject, dict, inlineData, resources, ctm, clip));
     }
 }

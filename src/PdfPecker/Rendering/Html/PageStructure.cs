@@ -6,6 +6,9 @@ internal sealed class FlowWord
     public required string Text;
     public double X0, X1, Top, Bottom, Size;
     public bool Bold, Italic;
+    public string Font = ""; // the PostScript name of its font
+    public uint Color; // packed R | G << 8 | B << 16
+    public (int Start, uint Color)[]? ColorRuns; // where the colour changes within the word, as in a row of rating stars
     public int Line; // the text line the word came from
     public int Order; // the word's place in that line's reading order
     public string? Href; // a web address the word links to
@@ -65,6 +68,7 @@ internal sealed class TableCell
     public int Row, Column, RowSpan = 1, ColumnSpan = 1;
     public double X0, X1; // the cell's sides, which tell a wrapped line from a line break
     public readonly List<FlowLine> Lines = new();
+    public List<ImageBlock>? Images; // pictures at the top of the cell, with images included
 }
 
 /// <summary>A table: its cells on a grid of rows and columns, columns counted from the left of the page.</summary>
@@ -130,7 +134,7 @@ internal static partial class PageStructure
                 var word = new FlowWord
                 {
                     Text = w.Text, X0 = w.X, X1 = w.X + w.Width, Top = w.Y, Bottom = w.Y + w.Height, Size = w.FontSize,
-                    Bold = IsBold(w.FontName), Italic = IsItalic(w.FontName), Line = lines.Count, Order = words.Count,
+                    Bold = IsBold(w.FontName), Italic = IsItalic(w.FontName), Font = w.FontName, Color = w.Color, ColorRuns = w.ColorRuns, Line = lines.Count, Order = words.Count,
                 };
                 foreach (var link in links)
                 {

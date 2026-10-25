@@ -15,15 +15,24 @@ internal struct TextGlyph
     public string Font;
     public bool Moved; // the first glyph after the PDF set the text position, as at the start of a table cell
     public int Mcid; // the marked-content id that ties the glyph to a tagged PDF's structure, -1 for none, -2 in an artifact
+    public uint Color; // the colour the glyph is painted in, packed R | G << 8 | B << 16
 }
 
 /// <summary>
 /// A straight horizontal or vertical line a page draws, such as a table border, in points from the top-left corner of
 /// the displayed page: a horizontal rule runs from <see cref="Start"/> to <see cref="End"/> along x at height
 /// <see cref="Position"/>, a vertical one along y at <see cref="Position"/> across. <see cref="Edge"/> marks the top or
-/// bottom edge of a filled area, such as a cell's background, rather than a line drawn as such.
+/// bottom edge of a filled area, such as a cell's background, rather than a line drawn as such. <see cref="Color"/> and
+/// <see cref="Width"/> are how the line looks, packed R | G &lt;&lt; 8 | B &lt;&lt; 16 and in points across.
 /// </summary>
-internal readonly record struct PageRule(bool Horizontal, double Position, double Start, double End, bool Edge = false);
+internal readonly record struct PageRule(bool Horizontal, double Position, double Start, double End, bool Edge = false, uint Color = 0, double Width = 0,
+    bool Dashed = false);
+
+/// <summary>
+/// A box a page fills with one colour, such as a table cell's or a banner's background, in points from the top left, with
+/// the radius of its rounded corners, 0 for square ones.
+/// </summary>
+internal readonly record struct PageFill(double X0, double Y0, double X1, double Y1, uint Color, double Radius = 0);
 
 /// <summary>Receives the glyphs <see cref="PageRenderer"/> shows when it runs a page for text instead of pixels.</summary>
 internal sealed class TextCollector
@@ -49,13 +58,22 @@ internal sealed class TextCollector
     /// <summary>The largest bullet shape kept, in points across.</summary>
     public const double MaxBullet = 7;
 
+    /// <summary>The areas the page fills with a plain colour, collected with the rules, in painting order.</summary>
+    public readonly List<PageFill>? Fills;
+
     public TextCollector(bool rules = false)
     {
         if (rules)
         {
             Rules = new List<PageRule>();
             Bullets = new List<(double, double, double, double)>();
+            Fills = new List<PageFill>();
         }
+    }
+
+    public void AddFill(in PageFill fill)
+    {
+        if (Fills != null && Fills.Count < MaxRules) Fills.Add(fill);
     }
 
     public void AddBullet(double x0, double y0, double x1, double y1)
