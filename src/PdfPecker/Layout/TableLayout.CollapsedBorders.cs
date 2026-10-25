@@ -316,7 +316,7 @@ internal sealed partial class LayoutEngine
     /// the cells' borders are: along its top, and along its bottom, left and right where those are the table's edge.
     /// A table side the table draws whole is left to it.
     /// </summary>
-    private void PaintForeignEdges(TableModel m, CellModel cell, float rowBottom)
+    private void PaintForeignEdges(TableModel m, CellModel cell, float rowBottom, GroupOp? into = null)
     {
         if (!m.TableStyle.Visible) return;
         int rows = m.Rows.Count, cols = m.ColCount;
@@ -326,7 +326,7 @@ internal sealed partial class LayoutEngine
         bool leftEdge = m.Rtl ? end : start, rightEdge = m.Rtl ? start : end;
         float x0 = cell.X - (leftEdge ? cell.CollapsedL / 2 : 0), x1 = cell.X + cell.W + (rightEdge ? cell.CollapsedR / 2 : 0);
         float y0 = cell.Top - (first && !AtPageTop(cell.Top) ? cell.CollapsedT / 2 : 0), y1 = rowBottom + (last ? cell.CollapsedB / 2 : 0);
-        var group = cell.Group!;
+        var group = into ?? cell.Group!;
         foreach (int side in (ReadOnlySpan<int>)[BoxPainter.Top, BoxPainter.Bottom, BoxPainter.Left, BoxPainter.Right])
         {
             bool edgeOfTable = side switch { BoxPainter.Top => first, BoxPainter.Bottom => last, BoxPainter.Left => leftEdge, _ => rightEdge };
@@ -349,6 +349,78 @@ internal sealed partial class LayoutEngine
                     BoxPainter.PaintCollapsedBand(group, s, edge.Side, side, x, y0, w, y1 - y0);
                     break;
             }
+        }
+    }
+
+    /// <summary>Whether a collapsed table stops on a page between <paramref name="top"/> and <paramref name="bottom"/>.</summary>
+    private static bool CrossesBreak(TableModel m, float top, float bottom)
+    {
+        foreach (var b in m.Breaks)
+            if (b.BodyEnd > top + Eps && b.BodyEnd < bottom - Eps) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Draws the border under the last row on a page, at <paramref name="y"/>, when row <paramref name="below"/> moved to
+    /// the next page and no footer closes the table there. As in Chrome, the border between the two rows is drawn on both
+    /// pages; the row above may have left it to the row below, which draws it at the top of the next page. Returns half
+    /// the widest of those borders, where the table's sides stop.
+    /// </summary>
+    private float PaintBreakEdge(TableModel m, int below, float y, float[] colX, float[] widths)
+    {
+        float half = 0;
+        if (below == 0 || !m.TableStyle.Visible) return half;
+        GroupOp? group = null;
+        int above = below - 1;
+        foreach (var cell in m.Rows[below].Cells)
+            for (int c = cell.Col, end = Math.Min(m.ColCount, cell.Col + cell.ColSpan); c < end; c++)
+            {
+                var edge = ResolveEdge(m, cell, BoxPainter.Top, c);
+                if (edge.Style is not { } s) continue;
+                float w = edge.Width;
+                half = Math.Max(half, w / 2);
+                // Where the cell above drew its bottom border, the line is there already.
+                if (m.Grid[above, c] is { } up && up.Row + up.RowSpan - 1 == above && (up.SelfSides & BoxPainter.Bottom) != 0) continue;
+                if (group == null) _ops.Add(group = new GroupOp());
+                float x = m.Rtl ? colX[0] + colX[^1] - colX[c] - widths[c] : colX[c];
+                BoxPainter.PaintCollapsedBand(group, s, edge.Side, BoxPainter.Bottom, x, y - w / 2, widths[c], w);
+            }
+        return half;
+    }
+
+    /// <summary>
+    /// Paints a collapsed table's own background and the sides of its border it draws whole, page by page where rows
+    /// moved to the next page (see <see cref="TableBreak"/>): as in Chrome, the table stops under the footer repeated on a
+    /// page, which gets the table's bottom border, or under the last row, instead of running on to the bottom of the page.
+    /// </summary>
+    private void PaintTablePages(GroupOp group, ComputedStyle s, TableModel m, PageBox? box, float bx, float boxW, float availW,
+        float top, float bottom, float frameB, int sides)
+    {
+        for (int i = 0; i <= m.Breaks.Count; i++)
+        {
+            int part = i == 0 ? sides : sides & ~BoxPainter.Top;
+            float partBottom = bottom;
+            if (i < m.Breaks.Count)
+            {
+                var b = m.Breaks[i];
+                if (b.Footer) partBottom = b.End + frameB;
+                else
+                {
+                    part &= ~BoxPainter.Bottom;
+                    partBottom = b.End + b.EdgeHalf;
+                }
+            }
+            if (partBottom > top)
+            {
+                if (box != null && !SameOnPages(box, top, partBottom)) PaintOnPages(group, s, box, top, partBottom, part, collapsedCell: true);
+                else
+                {
+                    int k = PageBox.Kind(PageOf(top));
+                    BoxPainter.Paint(group, s, box?.BX[k] ?? bx, top, box?.BW[k] ?? boxW, partBottom - top, _images, box?.AW[k] ?? availW, part,
+                        collapsedCell: true);
+                }
+            }
+            if (i < m.Breaks.Count) top = m.Breaks[i].PageTop;
         }
     }
 }

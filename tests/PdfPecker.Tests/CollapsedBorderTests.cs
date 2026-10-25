@@ -156,4 +156,50 @@ public class CollapsedBorderTests
         var blue = Rects(ops, 0xFF0000FF);
         Assert.Contains(blue, r => r.W > r.H && r.Y < footers[0].Baseline && r.Y > footers[0].Baseline - 30);
     }
+
+    [Fact]
+    public void ATableStopsUnderItsFooterRepeatedUnderABreak()
+    {
+        // As in Chrome, the table's own border closes under the footer repeated on each page, instead of its sides
+        // running on to the bottom of the page with no line under the footer.
+        var ops = Layout(LongTable("table{border:3px solid #f00} td{border:1px solid #000}"));
+        var footer = Flatten(ops).OfType<TextOp>().First(t => t.Text == "Total");
+        var red = Rects(ops, 0xFFFF0000);
+        var left = red.Where(r => r.H > r.W).MinBy(r => r.Y)!;
+        var under = red.Single(r => r.W > r.H && r.Y > footer.Baseline && r.Y < footer.Baseline + 20);
+        Assert.Equal(under.Y + under.H, left.Y + left.H, 2);
+        Assert.True(left.Y + left.H < PageHeight - 5);
+    }
+
+    [Fact]
+    public void ATableWithoutAFooterStopsUnderTheLastRowOnAPage()
+    {
+        // Lines above each cell only: the row that moved to the next page draws the line above it there, and Chrome
+        // draws it under the last row on the page too, where the table's sides stop.
+        var ops = Layout("<style>body{margin:0} td{padding:0;height:23pt;border-top:1px solid #000} table{border:3px solid #f00}</style>"
+                         + "<table style='border-collapse:collapse;width:300px'>"
+                         + string.Concat(Enumerable.Range(1, 60).Select(i => $"<tr><td>Row {i}</td><td>{i}</td></tr>")) + "</table>");
+        var left = Rects(ops, 0xFFFF0000).Where(r => r.H > r.W).MinBy(r => r.Y)!;
+        float bottom = left.Y + left.H;
+        Assert.True(bottom < PageHeight - 5);
+        Assert.Contains(Rects(ops, 0xFF000000), r => r.W > r.H && Math.Abs(r.Y + r.H - bottom) < 0.01f);
+    }
+
+    [Fact]
+    public void ARowspanCellCrossingABreakStopsAboveTheRepeatedFooter()
+    {
+        var html = "<style>body{margin:0} td{padding:0;height:20pt;border:1px solid #000} tr{break-inside:avoid}</style>"
+                   + "<table style='border-collapse:collapse;width:300px'><tbody>"
+                   + string.Concat(Enumerable.Range(1, 60).Select(i => i % 4 == 1
+                       ? $"<tr><td rowspan='4' style='background:#0c0'>S{i}</td><td>Row {i}</td></tr>"
+                       : $"<tr><td>Row {i}</td></tr>"))
+                   + "</tbody><tfoot><tr><td colspan='2'>Total</td></tr></tfoot></table>";
+        var ops = Layout(html);
+        var footer = Flatten(ops).OfType<TextOp>().First(t => t.Text == "Total");
+        // The spanning cell is painted page by page, its first part clipped where the footer starts.
+        var clip = Flatten(ops).OfType<ClipOp>().First(c => Flatten(c.Ops).OfType<RectOp>().Any(r => r.Color == 0xFF00CC00));
+        Assert.True(clip.Y + clip.H < footer.Baseline - 10);
+        Assert.True(clip.Y + clip.H > footer.Baseline - 25);
+    }
 }
+
