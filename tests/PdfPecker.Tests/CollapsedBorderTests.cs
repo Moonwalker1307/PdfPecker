@@ -104,4 +104,56 @@ public class CollapsedBorderTests
         Assert.Equal(3, red.Count);
         Assert.Contains(red, r => r.X < 0.5f);
     }
+
+    private static string LongTable(string style, int rows = 60) =>
+        "<style>body{margin:0} td{padding:0;height:20pt}" + style + "</style><table style='border-collapse:collapse;width:300px'><tbody>"
+        + string.Concat(Enumerable.Range(1, rows).Select(i => $"<tr><td>Row {i}</td><td>{i}</td></tr>"))
+        + "</tbody><tfoot><tr><td>Total</td><td>60</td></tr></tfoot></table>";
+
+    [Fact]
+    public void ARowBackgroundLeavesTheBorderAboveItUncovered()
+    {
+        // The cell above draws the shared line before the row's background is painted: the background starts where the
+        // line ends rather than covering its lower half, as Chrome paints the line over the background.
+        var ops = Layout("<style>body{margin:0} td{padding:0;border:2px solid #000}</style><table style='border-collapse:collapse'>" +
+                         "<tr><td>one</td></tr><tr style='background:#0c0'><td>two</td></tr></table>");
+        var green = Assert.Single(Rects(ops, 0xFF00CC00));
+        var line = Rects(ops, 0xFF000000).Single(r => r.W > r.H && r.Y > Text(ops, "one").Baseline && r.Y < Text(ops, "two").Baseline);
+        Assert.Equal(line.Y + line.H, green.Y, 2);
+    }
+
+    [Fact]
+    public void ARowBackgroundLeavesTheTableBorderUncovered()
+    {
+        var ops = Layout("<style>body{margin:0} td{padding:0}</style><table style='border-collapse:collapse;border:4px solid #000'>" +
+                         "<tr style='background:#0c0'><td>one</td></tr></table>");
+        var green = Assert.Single(Rects(ops, 0xFF00CC00));
+        // The table's 3-point border is centred on the grid line at 1.5 points, so its inner half ends at 3.
+        Assert.Equal(3, green.X, 2);
+        Assert.Equal(3, green.Y, 2);
+    }
+
+    [Fact]
+    public void AFooterRepeatedUnderABreakKeepsTheLineAboveIt()
+    {
+        // The footer's row background starts where the line drawn by the last row on the page ends.
+        var ops = Layout(LongTable("td{border:1px solid #000} tfoot tr{background:#0c0}"));
+        var greens = Rects(ops, 0xFF00CC00).OrderBy(r => r.Y).ToList();
+        Assert.True(greens.Count >= 2);
+        var first = greens[0];
+        Assert.Contains(Rects(ops, 0xFF000000), r => r.W > r.H && r.X <= first.X && Math.Abs(r.Y + r.H - first.Y) < 0.01f);
+    }
+
+    [Fact]
+    public void AFooterRepeatedUnderABreakDrawsTheLineTheLastBodyRowWins()
+    {
+        // Lines above each cell only, and a wide blue line under the table's last body row, which wins the line above
+        // the footer. On the first page the row above the footer leaves its bottom line to the row that moved to the
+        // next page, so the repeated footer draws the blue line itself, as Chrome does.
+        var ops = Layout(LongTable("td{border-top:1px solid #000} tbody tr:last-child td{border-bottom:3px solid #00f}"));
+        var footers = Flatten(ops).OfType<TextOp>().Where(t => t.Text == "Total").ToList();
+        Assert.True(footers.Count >= 2);
+        var blue = Rects(ops, 0xFF0000FF);
+        Assert.Contains(blue, r => r.W > r.H && r.Y < footers[0].Baseline && r.Y > footers[0].Baseline - 30);
+    }
 }

@@ -214,7 +214,8 @@ public class BrowserMatchTests
     public void A_collapsed_border_set_only_on_the_row_above_takes_room_in_the_row_below()
     {
         // Lines under each row only (2px): every row after the first owns half the line above it and half its own,
-        // so rows are 10.5 + 1.5 = 12pt apart in Chrome, not 10.5 + 0.75.
+        // so rows are 10.5 + 1.5 = 12pt apart in Chrome, not 10.5 + 0.75. A row's background starts where the line above
+        // it, which the row above draws, ends, so it shows 12 - 0.75 = 11.25pt.
         var ops = Layout("""
             <table style="border-collapse: collapse; font: 12px Arial">
               <tr style="background: #ff0000"><td style="padding: 0; border-bottom: 2px solid #000">a</td></tr>
@@ -223,8 +224,8 @@ public class BrowserMatchTests
             </table>
             """);
         Near(11.25f, Box(ops, "#ff0000").H);
-        Near(12f, Box(ops, "#00ff00").H);
-        Near(12f, Box(ops, "#0000ff").H);
+        Near(11.25f, Box(ops, "#00ff00").H);
+        Near(11.25f, Box(ops, "#0000ff").H);
         Near(12f, Box(ops, "#0000ff").Y - Box(ops, "#00ff00").Y);
     }
 
