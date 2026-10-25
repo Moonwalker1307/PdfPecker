@@ -30,7 +30,7 @@
     <!-- Checks the public API against the last release, so a breaking change can't ship in a minor release by accident.
          PackageValidationBaselineVersion follows PdfPecker's after each release, as RELEASING.md describes. -->
     <EnablePackageValidation>true</EnablePackageValidation>
-    <PackageValidationBaselineVersion>1.19.0</PackageValidationBaselineVersion>
+    <PackageValidationBaselineVersion>1.20.0</PackageValidationBaselineVersion>
   </PropertyGroup>
 
   <!-- CI builds use repository-relative source paths in the PDB, so builds are reproducible from the same commit. -->
