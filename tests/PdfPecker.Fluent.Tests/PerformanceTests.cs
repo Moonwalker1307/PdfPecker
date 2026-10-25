@@ -38,8 +38,21 @@ public sealed class PerformanceTests
     [Fact]
     public void Html_generation_is_linear()
     {
-        var small = Time(() => DocumentGenerator.Html(Table(20_000), false, out _));
-        var large = Time(() => DocumentGenerator.Html(Table(80_000), false, out _));
+        // The two sizes are timed in turns, as in Html_generation_is_small_next_to_the_conversion: timed one after the
+        // other, a busy spell while the library's tests ran on three runtimes beside this one fell on the large table
+        // alone, and 0.7 s against 5.8 s failed a test that measures 3.5x on a quiet machine.
+        DocumentGenerator.Html(Table(20_000), false, out _);
+        DocumentGenerator.Html(Table(80_000), false, out _);
+        TimeSpan small = TimeSpan.MaxValue, large = TimeSpan.MaxValue;
+        for (int i = 0; i < 4; i++)
+        {
+            var watch = Stopwatch.StartNew();
+            DocumentGenerator.Html(Table(20_000), false, out _);
+            if (watch.Elapsed < small) small = watch.Elapsed;
+            watch.Restart();
+            DocumentGenerator.Html(Table(80_000), false, out _);
+            if (watch.Elapsed < large) large = watch.Elapsed;
+        }
         // Four times the rows: linear is about 4x; quadratic would be 16x.
         Assert.True(large.TotalMilliseconds < Math.Max(small.TotalMilliseconds, 5) * 8, $"20k rows {small}, 80k rows {large}.");
     }
