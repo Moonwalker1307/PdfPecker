@@ -116,6 +116,13 @@ internal sealed partial class LayoutEngine
     /// </summary>
     private KeepProbe? _rowProbe;
 
+    /// <summary>
+    /// The table whose footer is being repeated at the bottom of a page, while it is; null otherwise. With collapsed
+    /// borders, its first footer row draws the border above it there (see <see cref="PaintBorrowedTop"/>).
+    /// </summary>
+    private TableModel? _repeatingFoot;
+    private int _rowAboveFoot; // the body row above the footer repeated on this page
+
     private TableModel GetTableModel(Element table)
     {
         if (_tables.TryGetValue(table, out var m)) return m;
@@ -946,8 +953,12 @@ internal sealed partial class LayoutEngine
                         // The footer closes the table on this page, where the row would have started.
                         float footTop = rowTop;
                         int footOps = _ops.Count;
+                        var outerFoot = _repeatingFoot;
+                        _repeatingFoot = m;
+                        _rowAboveFoot = r - 1;
                         for (int f = m.Rows.Count - m.FootCount; f < m.Rows.Count; f++)
                             footTop = LayoutRow(m, f, footTop, colX, widths, hs, vs, collapse, allowMove: false, pageColumns) + vs;
+                        _repeatingFoot = outerFoot;
                         // The structure has the footer once: its repeats are artifacts.
                         if (Tags != null) Untag(_ops, footOps);
                     }
@@ -979,28 +990,86 @@ internal sealed partial class LayoutEngine
         // Under the cells, from the bottom up (CSS 2.1 §17.5.1): column groups, columns, the row group and the row.
         if (row.Cells.Count + row.Ending.Count > 0)
         {
-            if (m.ColGroupBackground != null) PaintColumns(m, m.ColGroupBackground, r, rowGroup, rowTop, rowBottom, colX, widths, hs);
-            if (m.ColBackground != null) PaintColumns(m, m.ColBackground, r, rowGroup, rowTop, rowBottom, colX, widths, hs);
+            var under = collapse ? BordersUnder(m, r, rowTop) : null;
+            if (m.ColGroupBackground != null) PaintColumns(m, m.ColGroupBackground, r, rowGroup, rowTop, rowBottom, colX, widths, hs, under);
+            if (m.ColBackground != null) PaintColumns(m, m.ColBackground, r, rowGroup, rowTop, rowBottom, colX, widths, hs, under);
             if (row.Group?.Style is { } gs && CssColor.IsVisible(gs.BackgroundColor))
-                rowGroup.Ops.Add(new RectOp(colX[0], rowTop, colX[n] - hs - colX[0], rowBottom - rowTop, gs.BackgroundColor));
+                PaintRowBackground(m, gs.BackgroundColor, rowGroup, rowTop, rowBottom, colX, widths, hs, under);
             var rs = row.Tr.Style;
             if (CssColor.IsVisible(rs.BackgroundColor))
-                rowGroup.Ops.Add(new RectOp(colX[0], rowTop, colX[n] - hs - colX[0], rowBottom - rowTop, rs.BackgroundColor));
+                PaintRowBackground(m, rs.BackgroundColor, rowGroup, rowTop, rowBottom, colX, widths, hs, under);
         }
         return rowBottom;
     }
 
-    /// <summary>The background of each column that has one, in row <paramref name="r"/> where a cell covers it.</summary>
-    private static void PaintColumns(TableModel m, uint[] colors, int r, GroupOp into, float top, float bottom, float[] colX, float[] widths, float hs)
+    /// <summary>
+    /// The background of a row or row group across the table. With collapsed borders it stops where the borders already
+    /// drawn round the row end (see <see cref="BordersUnder"/>), cell by cell.
+    /// </summary>
+    private static void PaintRowBackground(TableModel m, uint color, GroupOp into, float top, float bottom, float[] colX, float[] widths, float hs,
+        EarlierBorders? under)
+    {
+        int n = m.ColCount;
+        if (under == null)
+        {
+            into.Ops.Add(new RectOp(colX[0], top, colX[n] - hs - colX[0], bottom - top, color));
+            return;
+        }
+        // Collapsed borders leave no spacing between the columns, so the cells' spans and the gaps between them tile the
+        // row from left to right; right to left, the first column is on the right. Neighbours with the same inset make one
+        // band.
+        float left = colX[0] + under.Left, right = colX[n] - hs - under.Right, b = bottom - under.Bottom;
+        float runX = left, runInset = 0;
+        var tops = under.Tops;
+        for (int i = 0; i < tops.Count; i++)
+        {
+            var (col, span, inset) = tops[m.Rtl ? tops.Count - 1 - i : i];
+            float x0 = m.Rtl ? ColumnX(m, col + span - 1, colX, widths, hs) : colX[col];
+            float x1 = m.Rtl ? col > 0 ? ColumnX(m, col - 1, colX, widths, hs) : colX[n] - hs : col + span < n ? colX[col + span] : colX[n] - hs;
+            Switch(Math.Max(x0, left), inset);
+            int next = i + 1;
+            if (next < tops.Count && tops[m.Rtl ? tops.Count - 1 - next : next] is var (nc, ns, ni) && ni == inset
+                && (m.Rtl ? nc + ns == col : nc == col + span)) continue;
+            Switch(Math.Min(x1, right), 0);
+        }
+        if (right > runX) into.Ops.Add(new RectOp(runX, top + runInset, right - runX, b - top - runInset, color));
+
+        // Ends the band so far at x and starts one with another inset there.
+        void Switch(float x, float inset)
+        {
+            if (inset == runInset) return;
+            if (x > runX) into.Ops.Add(new RectOp(runX, top + runInset, x - runX, b - top - runInset, color));
+            runX = Math.Max(runX, x);
+            runInset = inset;
+        }
+    }
+
+    /// <summary>
+    /// The background of each column that has one, in row <paramref name="r"/> where a cell covers it. With collapsed
+    /// borders it stops where the borders already drawn round the row end (see <see cref="BordersUnder"/>).
+    /// </summary>
+    private void PaintColumns(TableModel m, uint[] colors, int r, GroupOp into, float top, float bottom, float[] colX, float[] widths, float hs,
+        EarlierBorders? under)
     {
         for (int c = 0; c < m.ColCount; c++)
         {
-            if (!CssColor.IsVisible(colors[c]) || m.Grid[r, c] == null) continue;
-            // Right to left, the columns run from the right, as the cells do (see LayoutCell).
-            float x = m.Rtl ? colX[0] + colX[^1] - hs - colX[c] - widths[c] : colX[c];
-            into.Ops.Add(new RectOp(x, top, widths[c], bottom - top, colors[c]));
+            if (!CssColor.IsVisible(colors[c]) || m.Grid[r, c] is not { } cell) continue;
+            float x = ColumnX(m, c, colX, widths, hs), w = widths[c], t = top, b = bottom;
+            if (under != null)
+            {
+                bool leftEdge = m.Rtl ? c == m.ColCount - 1 : c == 0, rightEdge = m.Rtl ? c == 0 : c == m.ColCount - 1;
+                if (leftEdge) { x += under.Left; w -= under.Left; }
+                if (rightEdge) w -= under.Right;
+                if (cell.Row == r && !AtPageTop(top)) t += TopInset(m, cell);
+                b -= under.Bottom;
+            }
+            into.Ops.Add(new RectOp(x, t, w, b - t, colors[c]));
         }
     }
+
+    /// <summary>The left edge of column <paramref name="c"/>: right to left, the columns run from the right, as the cells do (see LayoutCell).</summary>
+    private static float ColumnX(TableModel m, int c, float[] colX, float[] widths, float hs) =>
+        m.Rtl ? colX[0] + colX[^1] - hs - colX[c] - widths[c] : colX[c];
 
     /// <summary>
     /// The height of row <paramref name="r"/> from its cells laid out last and its own height, and with
@@ -1122,6 +1191,7 @@ internal sealed partial class LayoutEngine
         if (cs.EmptyCellsHide && !collapse && IsEmptyCell(cell.Td)) return;
         BoxPainter.Paint(cell.Group!, cs, x, y, w, h, _images, w, sides, collapsedCell: collapse, backgroundArea);
         if (collapse) PaintForeignEdges(m, cell, rowBottom);
+        if (collapse && _repeatingFoot == m && cell.Row == m.Rows.Count - m.FootCount && !AtPageTop(cell.Top)) PaintBorrowedTop(m, cell, _rowAboveFoot);
         if (collapse && cs.OutlineStyle != BorderStyle.None && cs.Visible)
         {
             // Collapsed borders are painted cell by cell, so the cells after this one would cover its outline. As in
