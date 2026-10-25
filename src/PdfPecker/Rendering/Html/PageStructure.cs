@@ -54,6 +54,9 @@ internal sealed class TextBlock : FlowBlock
     public TextKind Kind;
     public int Level; // the heading level, 1 to 6
     public int Number; // the number of a numbered list item
+    public int MarkerWords = 1; // the words at the start of a list item that are its marker, which the list writes itself
+    public string? ListType; // how a numbered list counts, as HTML's type attribute says: "1", "a", "A", "i" or "I"
+    public bool NewList; // the first item of a list, which a list just before it does not continue
     public readonly List<FlowLine> Lines = new();
 }
 

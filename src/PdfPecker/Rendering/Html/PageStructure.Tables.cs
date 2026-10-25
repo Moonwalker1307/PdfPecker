@@ -727,12 +727,18 @@ internal static partial class PageStructure
         bool header = head.Count > 0 && table.Rows > rows && head.TrueForAll(c => c.Lines.TrueForAll(l => l.Words.TrueForAll(w => w.Bold)))
             && rest.Exists(w => !w.Bold) && !table.Cells.Exists(c => c.Row < rows && c.Row + c.RowSpan > rows);
         table.HeaderRows = header ? rows : 0;
+        SetDirection(table);
+        return table;
+    }
+
+    /// <summary>Sets a table right-to-left when most of its lines are, and its lines with it.</summary>
+    private static void SetDirection(TableBlock table)
+    {
         var all = table.Cells.SelectMany(c => c.Lines).ToList();
         table.RightToLeft = all.Count > 0 && all.Count(l => l.Words.Exists(w => IsRightToLeft(w.Text))) > all.Count / 2;
         if (table.RightToLeft)
             foreach (var c in table.Cells)
                 for (int i = 0; i < c.Lines.Count; i++) c.Lines[i] = new FlowLine(c.Lines[i].Words, c.Lines[i].Id, true);
-        return table;
     }
 
     private static bool IsRightToLeft(string text)

@@ -58,6 +58,10 @@ internal sealed partial class PageRenderer
     private string? _actualText; // the /ActualText of the marked content being run, which replaces its glyphs
     private bool _actualTextShown;
     private readonly Stack<(string? Text, bool Shown)> _actualStack = new();
+    // The marked-content id of the page content being run, which ties its glyphs to the structure tree of a tagged PDF;
+    // -1 outside any, and -2 inside an artifact, such as a running header, which is not part of the document's content.
+    private int _mcid = -1;
+    private readonly Stack<int> _mcids = new();
     private bool _textMoved; // the text position was set, not advanced, since the last glyph
     // Image extraction: when set, the images the page draws go to the collector and nothing is painted or clipped.
     private readonly ImageCollector? _images;
@@ -140,6 +144,7 @@ internal sealed partial class PageRenderer
         int markedBase = _marked.Count;
         int hiddenBase = _hidden;
         int actualBase = _actualStack.Count;
+        int mcidBase = _mcids.Count, mcid = _mcid;
         var parser = new ContentParser(data);
         try
         {
@@ -168,6 +173,8 @@ internal sealed partial class PageRenderer
             while (_marked.Count > markedBase) _marked.Pop();
             _hidden = hiddenBase;
             while (_actualStack.Count > actualBase) (_actualText, _actualTextShown) = _actualStack.Pop();
+            while (_mcids.Count > mcidBase) _mcids.Pop();
+            _mcid = mcid;
             _depth--;
         }
     }
@@ -332,7 +339,11 @@ internal sealed partial class PageRenderer
             // ---------------------------------------------------------- marked content
             case "BMC":
                 _marked.Push(false);
-                if (_text != null) _actualStack.Push((_actualText, _actualTextShown));
+                if (_text != null)
+                {
+                    _actualStack.Push((_actualText, _actualTextShown));
+                    BeginMarked(p, res);
+                }
                 break;
             case "BDC":
             {
@@ -345,13 +356,36 @@ internal sealed partial class PageRenderer
                 }
                 _marked.Push(hide);
                 if (hide) _hidden++;
-                if (_text != null) BeginActualText(p, res);
+                if (_text != null)
+                {
+                    BeginActualText(p, res);
+                    BeginMarked(p, res);
+                }
                 break;
             }
             case "EMC":
                 if (_marked.Count > 0 && _marked.Pop()) _hidden--;
                 if (_text != null && _actualStack.Count > 0) (_actualText, _actualTextShown) = _actualStack.Pop();
+                if (_text != null && _mcids.Count > 0) _mcid = _mcids.Pop();
                 break;
+        }
+    }
+
+    /// <summary>
+    /// Starts marked content for text extraction: an artifact, or a marked-content id of the page's own content. An id
+    /// inside a form XObject belongs to the form's place in the structure tree rather than the page's, so it is not
+    /// taken.
+    /// </summary>
+    private void BeginMarked(ContentParser p, PdfDict? res)
+    {
+        _mcids.Push(_mcid);
+        var ops = p.Operands;
+        if (_mcid == -2 || ops.Count < 1) return;
+        if (ops[0].Name == "Artifact") _mcid = -2;
+        else if (ops.Count >= 2 && _depth == 1)
+        {
+            var props = ops[1].Kind == OperandKind.Name ? _file.Resolve(_file.GetDict(res, "Properties")?[ops[1].Name!]) as PdfDict : ops[1].Dict;
+            if (_file.Resolve(props?["MCID"]) is PdfNumber { IsInteger: true, Value: >= 0 and <= int.MaxValue } id) _mcid = (int)id.Value;
         }
     }
 
