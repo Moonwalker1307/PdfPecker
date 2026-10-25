@@ -110,12 +110,13 @@ internal sealed class RenderDocument
 
     /// <summary>
     /// Runs a page for its images: the images it draws, in content order, with their transforms to points on the
-    /// displayed page (after /Rotate and /UserUnit), origin top left.
+    /// displayed page (after /Rotate and /UserUnit), origin top left, and with <paramref name="clips"/> the box the
+    /// clips leave visible of each.
     /// </summary>
-    public List<ImageDraw> CollectImages(int index, bool annotations, CancellationToken cancel)
+    public List<ImageDraw> CollectImages(int index, bool annotations, CancellationToken cancel, bool clips = false)
     {
         var p = Pages[index];
-        var collector = new ImageCollector();
+        var collector = new ImageCollector(clips);
         var r = new PageRenderer(File, _cache, collector, cancel);
         using (PdfFile.BeginRender(cancel)) r.RenderPage(p.Dict, p.Resources, PageMatrix(p, p.UserUnit, p.UserUnit), annotations);
         return collector.Draws;

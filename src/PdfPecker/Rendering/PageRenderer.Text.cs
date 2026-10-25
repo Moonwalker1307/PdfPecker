@@ -155,6 +155,8 @@ internal sealed partial class PageRenderer
         {
             Text = text, Moved = moved, X = x, Y = y, EndX = ex, EndY = ey, DirX = dx / len, DirY = dy / len, Size = size,
             SpaceWidth = vertical ? 0 : font.SpaceWidth * xLen, Font = font.BaseFont, Mcid = _mcid,
+            // Text that is only outlined shows the stroke colour.
+            Color = _gs.TextRender is 1 or 5 ? _gs.StrokeRgb : _gs.FillRgb,
         });
     }
 

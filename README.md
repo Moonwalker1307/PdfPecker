@@ -73,6 +73,10 @@ string html = PdfToHtml.Convert(File.ReadAllBytes("statement.pdf"));
 // Or its text as headings, paragraphs, lists and real <table> elements in reading order, for search and language models
 string structured = PdfToHtml.Convert(File.ReadAllBytes("statement.pdf"), new PdfHtmlOptions { Mode = PdfHtmlMode.Structured });
 
+// The same structure with the PDF's fonts, colours, backgrounds, borders and pictures
+string styled = PdfToHtml.Convert(File.ReadAllBytes("statement.pdf"),
+    new PdfHtmlOptions { Mode = PdfHtmlMode.Structured, IncludeStyles = true, IncludeImages = true });
+
 // Open a PDF once and render its pages one at a time, or in parallel
 var renderer = PdfRenderer.Open(pdf);
 renderer.RenderPage(0, new ImageOptions { Dpi = 150 }).Save("page1.png");
@@ -163,6 +167,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   heading, list item and table cell is. Other PDFs are read from their layout: tables come from the rules and borders
   the PDF draws and from text that lines up in columns, with header rows, spanned cells and wrapped cells. Reading the
   layout can turn unusual layouts, floats and charts into plain paragraphs, and scanned pages have no text to give.
+  `IncludeStyles` keeps how the page looks in that structure: fonts, sizes, colours, backgrounds, rounded boxes, table
+  borders, column widths and alignment, as CSS classes. `IncludeImages` adds the page's pictures as `<img>` elements.
   [More](https://pdfpecker.net/docs/pdf-to-html/)
 - **Viewer settings and page labels**: the page, zoom and panel a viewer opens with, print settings, and page numbers
   such as "i" to "iv" for front matter. [More](https://pdfpecker.net/docs/options/)

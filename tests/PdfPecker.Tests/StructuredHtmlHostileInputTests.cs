@@ -9,6 +9,8 @@ public class StructuredHtmlHostileInputTests
 {
     private static readonly PdfHtmlOptions Structured = new() { Mode = PdfHtmlMode.Structured };
 
+    private static readonly PdfHtmlOptions Styled = new() { Mode = PdfHtmlMode.Structured, IncludeStyles = true, IncludeImages = true };
+
     /// <summary>
     /// A one-page PDF of the given size showing <paramref name="content"/> in Helvetica; with a structure tree, its root
     /// is object 6 and the objects of <paramref name="structure"/> follow from there.
@@ -42,12 +44,19 @@ public class StructuredHtmlHostileInputTests
 
     private static string Text(double x, double y, double size, string text) => $"BT /F1 {N(size)} Tf {N(x)} {N(y)} Td ({text}) Tj ET\n";
 
+    /// <summary>The page in plain structured HTML, after checking that the output with styles and images is bounded too.</summary>
     private static string Convert(byte[] pdf)
+    {
+        Convert(pdf, Styled);
+        return Convert(pdf, Structured);
+    }
+
+    private static string Convert(byte[] pdf, PdfHtmlOptions options)
     {
         var task = Task.Run(() =>
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-            return PdfToHtml.Convert(pdf, Structured, cts.Token);
+            return PdfToHtml.Convert(pdf, options, cts.Token);
         });
         Assert.True(task.Wait(TimeSpan.FromSeconds(20)), "Did not finish in time");
         return task.Result;
@@ -185,5 +194,32 @@ public class StructuredHtmlHostileInputTests
         }
         structure.Add($"<< /Type /StructElem /S /Table /Pg 3 0 R /K [{rows}] >>");
         Assert.Contains("<section", Convert(Page(content.ToString(), 792, 792, structure.ToArray())));
+    }
+
+    [Fact]
+    public void One_path_of_thousands_of_nested_boxes_under_deep_clips_stays_bounded()
+    {
+        // Nested clips, then a single path of boxes inside one another, which the styles look at pairwise for frames.
+        var sb = new StringBuilder();
+        for (int i = 0; i < 200; i++) sb.Append("q ").Append(N(i)).Append(' ').Append(N(i)).Append(" 600 600 re 1 1 3 3 re W n\n");
+        sb.Append("0.9 0.2 0.1 rg\n");
+        for (int i = 0; i < 5000; i++) sb.Append(N(10 + i * 0.05)).Append(' ').Append(N(10 + i * 0.05)).Append(' ').Append(N(590 - i * 0.1)).Append(' ').Append(N(590 - i * 0.1)).Append(" re\n");
+        sb.Append("f\n");
+        for (int i = 0; i < 200; i++) sb.Append("Q\n");
+        sb.Append(Text(50, 300, 10, "inside"));
+        Assert.Contains("inside", Convert(Page(sb.ToString())));
+    }
+
+    [Fact]
+    public void Words_that_change_colour_at_every_letter_stay_bounded()
+    {
+        var sb = new StringBuilder("BT /F1 8 Tf 10 780 Td\n");
+        for (int i = 0; i < 20_000; i++)
+        {
+            sb.Append(N(i % 7 / 7.0)).Append(' ').Append(N(i % 5 / 5.0)).Append(" 0.3 rg (").Append((char)('a' + i % 26)).Append(") Tj\n");
+            if (i % 120 == 119) sb.Append("0 -9 Td\n");
+        }
+        sb.Append("ET\n");
+        Assert.Contains("<section", Convert(Page(sb.ToString())));
     }
 }

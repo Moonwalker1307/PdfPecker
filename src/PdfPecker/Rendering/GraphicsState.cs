@@ -10,6 +10,9 @@ internal sealed class GraphicsState
 {
     public Matrix Ctm = Matrix.Identity;
     public ClipRegion Clip = null!;
+    // When a page is run for its text: the boxes of the subpaths of each clip in force, in points on the page, which
+    // tell whether a fill paints its middle or only its edge.
+    public (double X0, double Y0, double X1, double Y1)[][]? ClipBoxes;
 
     public ColorSpace FillSpace = ColorSpace.Gray, StrokeSpace = ColorSpace.Gray;
     public uint FillRgb, StrokeRgb; // packed R | G << 8 | B << 16
