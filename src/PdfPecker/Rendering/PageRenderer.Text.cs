@@ -154,7 +154,7 @@ internal sealed partial class PageRenderer
         _text!.Add(new TextGlyph
         {
             Text = text, Moved = moved, X = x, Y = y, EndX = ex, EndY = ey, DirX = dx / len, DirY = dy / len, Size = size,
-            SpaceWidth = vertical ? 0 : font.SpaceWidth * xLen, Font = font.BaseFont,
+            SpaceWidth = vertical ? 0 : font.SpaceWidth * xLen, Font = font.BaseFont, Mcid = _mcid,
         });
     }
 

@@ -235,4 +235,57 @@ public class PdfToHtmlStructuredTests
         var pdf = Pdf("<table><tr><td>a</td><td>1</td></tr><tr><td>b</td><td>2</td></tr></table><p>End</p>");
         Assert.Equal(Html(pdf), Html(pdf));
     }
+
+    private static string Tagged(string html) => Html(HtmlToPdf.Convert(html, new PdfOptions { Accessibility = PdfAccessibility.Tagged }));
+
+    [Fact]
+    public void A_tagged_table_keeps_its_header_spans_and_empty_cells()
+    {
+        // No borders and an empty cell: the layout alone could not tell all of this, the tags do.
+        var html = Tagged("""
+            <table><thead><tr><th rowspan="2">Region</th><th colspan="2">Sales</th></tr><tr><th>2025</th><th>2026</th></tr></thead>
+            <tbody><tr><td>North</td><td></td><td>12</td></tr><tr><td>South</td><td>7</td><td>9</td></tr></tbody>
+            <tfoot><tr><td>Total</td><td>7</td><td>21</td></tr></tfoot></table>
+            """);
+        Assert.Matches("<thead>\\s*<tr><th rowspan=\"2\">Region</th><th colspan=\"2\">Sales</th></tr>\\s*<tr><th>2025</th><th>2026</th></tr>\\s*</thead>", html);
+        HasRow(html, "North", "", "12");
+        HasRow(html, "South", "7", "9");
+        HasRow(html, "Total", "7", "21");
+    }
+
+    [Fact]
+    public void Tagged_lists_keep_their_numbering()
+    {
+        var html = Body(Tagged("""
+            <ol start="9"><li>nine</li><li>ten</li></ol>
+            <ol type="a"><li>alpha</li><li>beta</li></ol>
+            <ol type="I"><li>one</li><li>two</li><li>three</li></ol>
+            <ul><li>milk</li></ul>
+            """));
+        Assert.Matches("<ol>\\s*<li value=\"9\">nine</li>\\s*<li value=\"10\">ten</li>\\s*</ol>", html);
+        Assert.Matches("<ol type=\"a\">\\s*<li value=\"1\">alpha</li>\\s*<li value=\"2\">beta</li>\\s*</ol>", html);
+        Assert.Matches("<ol type=\"I\">\\s*<li value=\"1\">one</li>\\s*<li value=\"2\">two</li>\\s*<li value=\"3\">three</li>\\s*</ol>", html);
+        Assert.Matches("<ul>\\s*<li>milk</li>\\s*</ul>", html);
+    }
+
+    [Fact]
+    public void Tagged_headings_and_paragraphs_follow_the_tags()
+    {
+        // Headings no larger than the text, and paragraphs with no space between them, which the layout would merge.
+        var html = Body(Tagged("""
+            <style>h1,h2{font-size:12pt;margin:0}p{margin:0}</style>
+            <h1>Offer</h1><h2>Terms</h2><p>Payment is due in thirty days.</p><p>Goods remain ours until paid.</p>
+            """));
+        Assert.Contains("<h1>Offer</h1>", html);
+        Assert.Contains("<h2>Terms</h2>", html);
+        Assert.Contains("<p>Payment is due in thirty days.</p>", html);
+        Assert.Contains("<p>Goods remain ours until paid.</p>", html);
+    }
+
+    [Fact]
+    public void A_text_shadow_in_a_tagged_pdf_is_read_once()
+    {
+        var html = Body(Tagged("<p style=\"text-shadow:1px 1px 0 red\">Shadowed words</p>"));
+        Assert.Single(Regex.Matches(html, "Shadowed words"));
+    }
 }

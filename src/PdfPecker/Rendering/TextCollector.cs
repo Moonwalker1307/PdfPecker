@@ -14,6 +14,7 @@ internal struct TextGlyph
     public double SpaceWidth; // the width of the font's space as drawn, or 0 when the font has none
     public string Font;
     public bool Moved; // the first glyph after the PDF set the text position, as at the start of a table cell
+    public int Mcid; // the marked-content id that ties the glyph to a tagged PDF's structure, -1 for none, -2 in an artifact
 }
 
 /// <summary>
