@@ -154,6 +154,20 @@ public class FloatPositionTests
         Assert.Equal(7.5f, a.Y, 1);
     }
 
+    [Theory]
+    [InlineData("display:grid;grid-template-columns:100px;grid-auto-rows:100px")]
+    [InlineData("display:flex;height:100px")]
+    public void StretchedItemWithoutBackgroundPlacesAbsoluteChildrenAtItsFullHeight(string container)
+    {
+        // A label in a grid row or flex line: the item has no background or border, but it is stretched to 100px, and
+        // its code sits 10px above that bottom edge, not above the bottom of its one line of text.
+        var (ops, _) = Layout("<style>body{margin:0} .c{" + container + "} .i{position:relative;width:100px}" +
+                              ".a{position:absolute;right:0;bottom:10px;width:20px;height:10px;background:#f00}</style>" +
+                              "<div class=c><div class=i>Name<div class=a></div></div></div>");
+        var a = Rect(ops, 0xFFFF0000);
+        Assert.Equal(80 * 0.75f, a.Y, 1);
+    }
+
     [Fact]
     public void RelativeTableCellContainsAbsoluteChildren()
     {

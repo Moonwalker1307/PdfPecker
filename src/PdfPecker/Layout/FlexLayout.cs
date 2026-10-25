@@ -122,13 +122,17 @@ internal sealed partial class LayoutEngine
 
     /// <summary>
     /// Whether an item has to be laid out again when a container stretches it (otherwise stretching is invisible). A
-    /// stretched item's height is definite (css-flexbox §9.4 step 11), so percentage heights inside it change too.
+    /// stretched item's height is definite (css-flexbox §9.4 step 11), so percentage heights inside it change too. A
+    /// positioned item places its absolutely positioned children against its full height, and an outline, a shadow, a
+    /// transform's origin, a clip or a filter take the item's size too, so without a background or border each of them
+    /// still shows the stretch.
     /// </summary>
     private static bool NeedsRelayoutWhenStretched(BoxItem it)
     {
         if (it.El == null) return false;
         var s = it.Style;
         return CssColor.IsVisible(s.BackgroundColor) || s.BackgroundImages != null || s.HasBorder || s.BorderImageSource != null || s.IsFlex || s.IsGrid
+               || s.Positioned || s.Transform != null || s.HasEffects || s.BoxShadows != null || s.OutlineStyle != BorderStyle.None && s.OutlineWidth > 0
                || HasPercentHeightChild(it.El);
     }
 
