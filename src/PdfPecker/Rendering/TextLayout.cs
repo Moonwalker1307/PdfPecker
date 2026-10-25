@@ -98,6 +98,7 @@ internal static class TextLayout
             current.Items.Add(it);
             lines.Add(current);
         }
+        lines = SeparateBaselines(lines);
         foreach (var line in lines) line.Items.Sort((a, b) => a.U0 != b.U0 ? a.U0.CompareTo(b.U0) : a.Glyph.CompareTo(b.Glyph));
         marks.Sort((a, b) => a.Glyph.CompareTo(b.Glyph));
         for (int m = 0; m < marks.Count; m++)
@@ -108,6 +109,89 @@ internal static class TextLayout
         // The lines of this group are written out next, so they must see the marks joined to their letters.
         attached.Flush();
         return lines;
+    }
+
+    /// <summary>
+    /// Splits a line whose glyphs sit on baselines that are close but distinct and overlap along the line, such as two
+    /// small lines set beside one large heading, which the tolerance for superscripts would otherwise join and
+    /// interleave letter by letter. The glyphs of each baseline stay with the line while they overlap none of its
+    /// glyphs, so a superscript between words stays in its line; a baseline that overlaps goes to a line of its own.
+    /// </summary>
+    private static List<Line> SeparateBaselines(List<Line> lines)
+    {
+        List<Line>? result = null;
+        for (int l = 0; l < lines.Count; l++)
+        {
+            var line = lines[l];
+            // The line's baselines: runs of glyphs, sorted across the line, less than a fifth of the smaller size apart.
+            List<List<Item>>? groups = null;
+            double minV = double.MaxValue, maxV = double.MinValue;
+            foreach (var it in line.Items) { minV = Math.Min(minV, it.V); maxV = Math.Max(maxV, it.V); }
+            if (maxV - minV > 0.1 * line.Size)
+            {
+                var sorted = line.Items.OrderBy(it => it.V).ToList();
+                groups = new List<List<Item>> { new() { sorted[0] } };
+                for (int i = 1; i < sorted.Count; i++)
+                {
+                    if (sorted[i].V - sorted[i - 1].V > 0.2 * Math.Min(sorted[i].Size, sorted[i - 1].Size)) groups.Add(new List<Item>());
+                    groups[^1].Add(sorted[i]);
+                }
+            }
+            if (groups == null || groups.Count < 2)
+            {
+                result?.Add(line);
+                continue;
+            }
+            result ??= lines.GetRange(0, l);
+            // The largest text first: it is the line's own; the rest join it while they overlap nothing in it.
+            groups.Sort((a, b) => b.Max(it => it.Size).CompareTo(a.Max(it => it.Size)) is var c and not 0 ? c : b.Count.CompareTo(a.Count));
+            while (groups.Count > 0)
+            {
+                var kept = new List<Item>(groups[0]);
+                kept.Sort((a, b) => a.U0.CompareTo(b.U0));
+                var deferred = new List<List<Item>>();
+                for (int g = 1; g < groups.Count; g++)
+                {
+                    if (Overlaps(kept, groups[g])) { deferred.Add(groups[g]); continue; }
+                    kept.AddRange(groups[g]);
+                    kept.Sort((a, b) => a.U0.CompareTo(b.U0));
+                }
+                var split = new Line();
+                double size = 0;
+                foreach (var it in kept)
+                {
+                    split.Items.Add(it);
+                    if (it.Size > size) { size = it.Size; split.V = it.V; }
+                }
+                split.Size = size;
+                result.Add(split);
+                groups = deferred;
+            }
+        }
+        if (result == null) return lines;
+        result.Sort((a, b) => a.V.CompareTo(b.V));
+        return result;
+
+        // Whether any glyph of the group covers more than a third of a glyph of the line, sorted along it.
+        static bool Overlaps(List<Item> line, List<Item> group)
+        {
+            foreach (var it in group)
+            {
+                int lo = 0, hi = line.Count;
+                while (lo < hi)
+                {
+                    int mid = (lo + hi) / 2;
+                    if (line[mid].U0 < it.U1) lo = mid + 1; else hi = mid;
+                }
+                // Glyphs that start before this one ends; the widest glyph is at most a few sizes, so few are checked.
+                for (int k = lo - 1; k >= 0 && line[k].U0 > it.U0 - 4 * Math.Max(it.Size, line[k].Size); k--)
+                {
+                    double overlap = Math.Min(it.U1, line[k].U1) - Math.Max(it.U0, line[k].U0);
+                    if (overlap > Math.Min(it.U1 - it.U0, line[k].U1 - line[k].U0) / 3) return true;
+                }
+            }
+            return false;
+        }
     }
 
     /// <summary>
