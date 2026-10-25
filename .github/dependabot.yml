@@ -7,6 +7,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # CodeQL refuses to run when its init and analyze steps are on different versions, so they must move together.
+    groups:
+      codeql-action:
+        patterns: ["github/codeql-action*"]
 
   # The veraPDF validator the conformance workflow runs.
   - package-ecosystem: maven
