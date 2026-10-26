@@ -500,8 +500,30 @@ internal static class ColorFunctions
         double alphaScale = sum < 100 ? sum / 100 : 1;
         double t = w2 / sum;
 
+        if (!TryInterpolate(c1, c2, t, space, hueMethod, out color)) return false;
+        color = color with { A = Math.Clamp(color.A * alphaScale, 0, 1) };
+        return true;
+    }
+
+    /// <summary>
+    /// Whether colours can be interpolated in <paramref name="space"/> (a color-mix() or gradient interpolation space),
+    /// and whether it is polar, so that a hue interpolation method may follow it.
+    /// </summary>
+    internal static bool IsInterpolationSpace(string space, out bool polar) => TryToSpace(space, default, out _, out polar);
+
+    /// <summary>
+    /// The colour a fraction <paramref name="t"/> of the way from <paramref name="from"/> to <paramref name="to"/>,
+    /// interpolated in <paramref name="space"/> with the hue method <paramref name="hueMethod"/>, as gradients with a
+    /// colour interpolation method mix their stops.
+    /// </summary>
+    internal static uint Interpolate(uint from, uint to, double t, string space, string hueMethod)
+        => TryInterpolate(Rgba.FromArgb(from), Rgba.FromArgb(to), t, space, hueMethod, out var c) ? c.ToArgb() : t < 0.5 ? from : to;
+
+    /// <summary>Interpolates two colours in a space, premultiplied by alpha (the hue of a polar space is not).</summary>
+    private static bool TryInterpolate(Rgba c1, Rgba c2, double t, string space, string hueMethod, out Rgba color)
+    {
+        color = default;
         if (!TryToSpace(space, c1, out var v1, out bool polar) || !TryToSpace(space, c2, out var v2, out _)) return false;
-        // Interpolate premultiplied by alpha (the hue of a polar space is not premultiplied).
         double a = c1.A * (1 - t) + c2.A * t;
         double[] r = new double[3];
         for (int k = 0; k < 3; k++)
@@ -516,7 +538,7 @@ internal static class ColorFunctions
             r[k] = a > 0 ? mixed / a : 0;
         }
         if (!TryFromSpaceVector(space, r, out var rgb)) return false;
-        color = new Rgba(rgb.R, rgb.G, rgb.B, Math.Clamp(a * alphaScale, 0, 1));
+        color = new Rgba(rgb.R, rgb.G, rgb.B, Math.Clamp(a, 0, 1));
         return true;
     }
 

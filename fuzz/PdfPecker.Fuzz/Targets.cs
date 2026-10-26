@@ -58,7 +58,7 @@ internal static class Targets
         "page-break-before:always", "overflow:hidden", "transform:scale(1e9)", "content:\"x\"", "counter-increment:a 999999999", "font-size:0", "line-height:0", "<![CDATA[",
         "backdrop-filter:blur(99px)", "mask:linear-gradient(red,#0000) exclude", "-webkit-mask-image:url(#a)", "<mask id=\"a\">",
         "shape-outside:circle(50%)", "shape-outside:polygon(0 0,1e9px 0,0 100%)", "shape-outside:linear-gradient(red,#0000)", "shape-margin:1e9px",
-        "shape-image-threshold:.5",
+        "shape-image-threshold:.5", "background:linear-gradient(in oklch longer hue,red,red,blue 1e-9%)", "background:radial-gradient(in hsl decreasing hue circle,#0000,red)",
         "<style>*::first-letter{initial-letter:3 2}</style>", "<style>p::first-letter{initial-letter:1e9 raise;padding:1e9px}</style>",
         "<img srcset=\"data:image/png;base64, 1e-30x, a 1e30x, b 1x 2w,,\">", "<img srcset=\"a 999999999w, b 1w\" sizes=\"(width>0) calc(1e9px*1e9), -1px, ((((\">",
         "<source srcset=\"a 2x\" media=\"(((\" type=\"image/png;x\">", "sizes=\"0px\"", "srcset=\"a 0.0001x, b 0x\"",
