@@ -122,7 +122,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
 - **HTML and CSS**: flexbox, grid and subgrid, CSS tables, floats with `shape-outside`, multi-column layout,
   positioning, transforms, gradients (also `in oklch` and other colour spaces), filters, masks, media and container
   queries, logical properties, `writing-mode`, `text-wrap`, drop caps, inline SVG and PNG, JPEG, GIF, WebP, BMP and
-  TIFF images (also chosen by `srcset` and `<picture>`), laid out as Chrome lays them out.
+  TIFF images (also chosen by `srcset` and `<picture>`, and photos turned upright by their EXIF orientation), laid out
+  as Chrome lays them out.
   [More](https://pdfpecker.net/docs/html-and-css/)
 - **Paged media**: `@page` sizes and margin boxes, running headers and footers (also a first page of its own),
   footnotes, tables of contents with page numbers, break control (also table row groups and group header rows kept
@@ -155,7 +156,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
 - **Compacting and Fast Web View**: `PdfCompactor` makes any PDF smaller without changing how it looks, and
   `PdfOptions.Linearize` or `PdfLinearizer` writes a linearized PDF whose first page shows before the rest arrives.
   [More](https://pdfpecker.net/docs/compacting/)
-- **Images to PDF**: `ImageToPdf` puts scans and photos on pages of their own size or fitted to a page size.
+- **Images to PDF**: `ImageToPdf` puts scans and photos on pages of their own size or fitted to a page size, with
+  photos turned upright by their EXIF orientation.
   [More](https://pdfpecker.net/docs/images-to-pdf/)
 - **Photo privacy**: `PdfOptions.StripImageMetadata` removes EXIF (GPS location included), XMP, IPTC and comments
   from embedded JPEGs while keeping their pixels and colours.

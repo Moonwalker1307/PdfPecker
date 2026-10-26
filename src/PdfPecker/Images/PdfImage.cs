@@ -28,15 +28,19 @@ internal sealed partial class PdfImage
         var copy = (PdfImage)MemberwiseClone();
         copy.ObjectNumber = 0;
         copy.SMask = SMask?.Copy();
+        copy.AsStored = AsStored?.Copy();
         return copy;
     }
 
-    /// <summary>Decodes JPEG, PNG, GIF, WebP, BMP or TIFF data. Returns null for unsupported or corrupt images.</summary>
-    public static PdfImage? FromBytes(byte[] data)
+    /// <summary>
+    /// Decodes JPEG, PNG, GIF, WebP, BMP or TIFF data. Returns null for unsupported or corrupt images. A JPEG photo is
+    /// turned as its EXIF orientation says unless <paramref name="asStored"/>.
+    /// </summary>
+    public static PdfImage? FromBytes(byte[] data, bool asStored = false)
     {
         try
         {
-            if (IsJpeg(data)) return FromJpeg(data);
+            if (IsJpeg(data)) return asStored ? FromJpeg(data) : Upright(FromJpeg(data), data);
             if (IsPng(data)) return FromPng(data);
             if (GifDecoder.IsGif(data)) return FromPixels(GifDecoder.Decode(data, MaxPixels));
             if (WebPDecoder.IsWebP(data)) return FromPixels(WebPDecoder.Decode(data, MaxPixels));

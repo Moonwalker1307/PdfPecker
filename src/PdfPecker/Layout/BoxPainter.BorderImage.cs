@@ -33,7 +33,7 @@ internal static partial class BoxPainter
         SvgImage? svg = null;
         if (source.Url != null)
         {
-            image = images?.Load(source.Url);
+            image = images?.Load(source.Url, s.ImageOrientationNone);
             if (image is { Width: <= 0 } or { Height: <= 0 }) image = null;
             if (image == null) svg = images?.LoadSvg(source.Url);
             if (image == null && svg == null) return false;

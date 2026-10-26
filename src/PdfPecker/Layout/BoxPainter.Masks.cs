@@ -59,7 +59,7 @@ internal static partial class BoxPainter
                 if (op.PaintsAnything()) layer.Ops.Add(op);
                 continue;
             }
-            if (!LayerSource.TryLoad(image, images, out _)) continue;
+            if (!LayerSource.TryLoad(image, images, s.ImageOrientationNone, out _)) continue;
             any = true;
             var group = new GroupOp();
             PaintLayer(group, view, image, i, x, y, w, h, images, basis, White, radii);

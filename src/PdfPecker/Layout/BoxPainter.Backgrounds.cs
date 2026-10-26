@@ -25,11 +25,11 @@ internal static partial class BoxPainter
         public readonly bool IsGradient => Image == null && Svg == null;
 
         /// <summary>Loads the layer's image or SVG file; false when the layer draws nothing (no gradient, or an image that cannot be shown).</summary>
-        public static bool TryLoad(BackgroundImage layer, ImageLoader? images, out LayerSource source)
+        public static bool TryLoad(BackgroundImage layer, ImageLoader? images, bool asStored, out LayerSource source)
         {
             source = default;
             if (layer.Url == null) return layer.Gradient != null;
-            source.Image = images?.Load(layer.Url);
+            source.Image = images?.Load(layer.Url, asStored);
             if (source.Image is { } image)
             {
                 if (image.Width <= 0 || image.Height <= 0) return false;
@@ -73,7 +73,7 @@ internal static partial class BoxPainter
         ImageLoader? images, float basis, uint backdrop, CornerRadii? radii,
         ComputedStyle? box = null, (float X, float Y, float W, float H)? canvas = null, (float X, float Y, float W, float H)? fragment = null)
     {
-        if (!LayerSource.TryLoad(layer, images, out var source)) return;
+        if (!LayerSource.TryLoad(layer, images, s.ImageOrientationNone, out var source)) return;
         var (ox, oy, ow, oh) = BoxOf(box ?? s, LayerValue(s.BackgroundOrigins, i, BackgroundBox.PaddingBox), x, y, w, h, basis);
         // A line fragment of an inline box paints only its own part of the box, inside its own corners.
         var (cx, cy, cw, ch) = canvas ?? Within(BoxOf(s, LayerValue(s.BackgroundClips, i, BackgroundBox.BorderBox), x, y, w, h, basis), fragment);

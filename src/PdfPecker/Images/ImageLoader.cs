@@ -57,8 +57,12 @@ internal sealed class ImageLoader
         return slices;
     }
 
-    /// <summary>The raster image at <paramref name="src"/>, or null when there is none or it is an SVG file.</summary>
-    public PdfImage? Load(string? src) => LoadAny(src) as PdfImage;
+    /// <summary>
+    /// The raster image at <paramref name="src"/>, or null when there is none or it is an SVG file. A photo is turned as
+    /// its EXIF orientation says unless <paramref name="asStored"/> (image-orientation: none).
+    /// </summary>
+    public PdfImage? Load(string? src, bool asStored = false)
+        => LoadAny(src) is PdfImage image ? asStored ? image.AsStored ?? image : image : null;
 
     /// <summary>The SVG drawing at <paramref name="src"/>, or null when there is none or it is a raster image.</summary>
     public PdfPecker.Svg.SvgImage? LoadSvg(string? src) => LoadAny(src) as PdfPecker.Svg.SvgImage;

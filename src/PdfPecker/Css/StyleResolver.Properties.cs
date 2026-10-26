@@ -125,6 +125,8 @@ internal sealed partial class StyleResolver
             case "border-collapse": s.BorderCollapse = d.Lower == "collapse"; break;
             case "caption-side": s.CaptionBottom = d.Lower == "bottom"; break;
             case "empty-cells": s.EmptyCellsHide = d.Lower == "hide"; break;
+            // Angles are deprecated and ignored, as in Chrome, so only none turns EXIF orientation off.
+            case "image-orientation": s.ImageOrientationNone = d.Lower == "none"; break;
             case "border-spacing-h": ApplyBorderSpacing(ref s.BorderSpacingH, in d); break;
             case "border-spacing-v": ApplyBorderSpacing(ref s.BorderSpacingV, in d); break;
 

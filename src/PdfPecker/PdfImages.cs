@@ -378,7 +378,8 @@ public static class PdfImages
         if (file.Resolve(dict["ImageMask"] ?? dict["IM"]) is PdfBool { Value: true }) return null;
         if ((dict["ColorSpace"] ?? dict["CS"]) is { } cs
             && ColorSpace.Parse(file, cs, draw.Resources) is not (DeviceGray or DeviceRgb or CalSpace)) return null;
-        if (PdfImage.FromBytes(jpeg) is not { } header || header.Decode != null) return null;
+        // A PDF viewer ignores EXIF orientation, so the header is read as stored.
+        if (PdfImage.FromBytes(jpeg, asStored: true) is not { } header || header.Decode != null) return null;
         if (header.ColorSpace is not (PdfImage.DeviceGray or PdfImage.DeviceRgb)) return null;
         return (header.Width, header.Height);
     }

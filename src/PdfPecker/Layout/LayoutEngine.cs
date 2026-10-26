@@ -1071,7 +1071,7 @@ internal sealed partial class LayoutEngine
             Inside = s.ListStylePositionInside,
         };
         // list-style-image wins over the type unless ::marker has content; an image that does not load falls back to the type.
-        if (e.MarkerContent != null || s.ListStyleImage is not { } imageSrc || !LoadMarkerImage(marker, imageSrc))
+        if (e.MarkerContent != null || s.ListStyleImage is not { } imageSrc || !LoadMarkerImage(marker, imageSrc, s.ImageOrientationNone))
             marker.Text = custom ?? s.ListCounterStyle?.MarkerText(_currentListIndex);
         if (marker.Text != null || marker.Image != null || marker.Svg != null || s.ListStyleType != ListStyleType.None) _marker = marker;
     }
@@ -1527,9 +1527,9 @@ internal sealed partial class LayoutEngine
     /// Loads a list-style-image and sizes it as Chrome does: a raster image at its pixel size, an SVG drawing at its
     /// width and height, and a drawing without them at half the font's ascent (wide, with its viewBox's aspect ratio).
     /// </summary>
-    private bool LoadMarkerImage(ListMarker m, string src)
+    private bool LoadMarkerImage(ListMarker m, string src, bool asStored)
     {
-        var image = _images.Load(src);
+        var image = _images.Load(src, asStored);
         var svg = image == null ? _images.LoadSvg(src) : null;
         if (image == null && svg == null) return false;
         if (image != null)
@@ -1687,7 +1687,7 @@ internal sealed partial class LayoutEngine
     private PdfImage? ImageSize(Element e, float availW, out float w, out float h, out SvgImage? svg, float percentW = float.NaN)
     {
         var src = _images.SourceOf(e);
-        var img = _images.Load(src);
+        var img = _images.Load(src, e.Style.ImageOrientationNone);
         svg = img == null ? _images.LoadSvg(src) : null;
         // A srcset candidate for 2x shows its pixels at half size.
         float density = _images.DensityOf(e);

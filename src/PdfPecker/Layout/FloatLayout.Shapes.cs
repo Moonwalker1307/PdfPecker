@@ -170,11 +170,11 @@ internal sealed partial class LayoutEngine
         float ix = 0, iy = 0, iw, ih;
         if (image.Url is { } url)
         {
-            bitmap = _images.Load(url);
+            bitmap = _images.Load(url, e.Style.ImageOrientationNone);
             if (bitmap == null || bitmap.Width <= 0 || bitmap.Height <= 0) return null;
             iw = bitmap.Width * Px;
             ih = bitmap.Height * Px;
-            if (e.IsPicture && _images.Load(_images.SourceOf(e)) is { Width: > 0, Height: > 0 } own)
+            if (e.IsPicture && _images.Load(_images.SourceOf(e), e.Style.ImageOrientationNone) is { Width: > 0, Height: > 0 } own)
                 (ix, iy, iw, ih) = ObjectFitRect(e.Style, own, _images.DensityOf(e), cw, ch);
         }
         else

@@ -140,10 +140,12 @@ public class ImageExtractionTests
     public void ExifSummaryIsRead()
     {
         var jpeg = WithExif(Fixture("rgb.jpg"), Exif());
-        var pdf = HtmlToPdf.Convert($"<img src='{JpegUri(jpeg)}'>");
+        var pdf = HtmlToPdf.Convert($"<img src='{JpegUri(jpeg)}' style='image-orientation:none'>");
 
         var image = Assert.Single(PdfImages.Extract(pdf));
         Assert.Equal(jpeg, image.Data);
+        // The PDF draws the JPEG as stored, as viewers ignore its EXIF orientation, and the extracted size says so.
+        Assert.Equal((320, 160), (image.Width, image.Height));
         var exif = image.Exif!;
         Assert.Equal("PeckerCam", exif.Make);
         Assert.Equal("Model 7", exif.Model);
@@ -160,10 +162,22 @@ public class ImageExtractionTests
     }
 
     [Fact]
+    public void ExifOfATurnedPhotoSaysItIsUpright()
+    {
+        // The photo says it is stored on its side, so it is drawn turned, and its EXIF block goes along with orientation 1.
+        var jpeg = WithExif(Fixture("rgb.jpg"), Exif());
+        var image = Assert.Single(PdfImages.Extract(HtmlToPdf.Convert($"<img src='{JpegUri(jpeg)}'>")));
+        Assert.Equal((160, 320), (image.Width, image.Height));
+        Assert.Equal(1, image.Exif!.Orientation);
+        Assert.Equal("PeckerCam", image.Exif.Make);
+        Assert.Equal(-3.5, image.Exif.Altitude!.Value, 6);
+    }
+
+    [Fact]
     public void ExifFixtureHasSoftwareAndModifiedDate()
     {
         var jpeg = Fixture(Path.Combine("images", "exif.jpg"));
-        var exif = Assert.Single(PdfImages.Extract(HtmlToPdf.Convert($"<img src='{JpegUri(jpeg)}'>"))).Exif!;
+        var exif = Assert.Single(PdfImages.Extract(HtmlToPdf.Convert($"<img src='{JpegUri(jpeg)}' style='image-orientation:none'>"))).Exif!;
         Assert.Equal("PdfPecker fuzz seed", exif.Software);
         Assert.Equal(new DateTime(2026, 10, 23, 15, 0, 0), exif.DateModified);
         Assert.Equal(new DateTime(2026, 10, 23, 14, 5, 9), exif.DateTaken);
@@ -178,7 +192,7 @@ public class ImageExtractionTests
         for (int i = 8; i + 12 <= 80 && i + 12 <= damaged.Length; i++)
             if (damaged[i] == 0x87 && damaged[i + 1] == 0x69 || damaged[i] == 0x88 && damaged[i + 1] == 0x25)
                 BinaryPrimitives.WriteUInt32BigEndian(damaged.AsSpan(i + 8), 0x7FFF_FFF0);
-        var pdf = HtmlToPdf.Convert($"<img src='{JpegUri(WithExif(Fixture("rgb.jpg"), damaged))}'>");
+        var pdf = HtmlToPdf.Convert($"<img src='{JpegUri(WithExif(Fixture("rgb.jpg"), damaged))}' style='image-orientation:none'>");
 
         var image = Assert.Single(PdfImages.Extract(pdf));
         Assert.Equal("PeckerCam", image.Exif!.Make);
