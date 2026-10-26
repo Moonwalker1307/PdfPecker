@@ -45,17 +45,20 @@ public static partial class HtmlToPdf
         private ComputedStyle _root = null!;
         private StyleResolver _styles = null!;
 
-        /// <summary>The running header and footer (data-sticky-pdf-header / data-sticky-pdf-footer), out of the flow.</summary>
-        private Element? _header, _footer;
+        /// <summary>
+        /// The running header and footer (data-sticky-pdf-header / data-sticky-pdf-footer), out of the flow, and the
+        /// first page's own (data-sticky-pdf-first-header / data-sticky-pdf-first-footer).
+        /// </summary>
+        private BandSet _bands = new();
 
         /// <summary>
-        /// The header and footer of the first page (data-sticky-pdf-first-header / data-sticky-pdf-first-footer), which
-        /// take the place of the running ones there; an empty one leaves the first page without that band.
+        /// The bands of named pages (data-sticky-pdf-page="name" on the band), which take the place of the document's
+        /// bands on the pages of that name; null when there are none.
         /// </summary>
-        private Element? _firstHeader, _firstFooter;
+        private Dictionary<string, BandSet>? _namedBands;
 
-        /// <summary>Whether the first page has a band of its own, and so a page setup of its own.</summary>
-        private bool FirstPageBands => _firstHeader != null || _firstFooter != null;
+        /// <summary>Whether some page has a header or footer.</summary>
+        private bool AnyBands => _bands.Any || _namedBands != null;
 
         /// <summary>Whether the source mentions a band attribute at all; when it does not, the tree is not searched for one.</summary>
         private bool _mayHaveBands;
@@ -226,17 +229,13 @@ public static partial class HtmlToPdf
         /// </summary>
         private void PrepareBands()
         {
-            _header = _mayHaveBands ? FindBand(_doc, "data-sticky-pdf-header") : null;
-            _footer = _mayHaveBands ? FindBand(_doc, "data-sticky-pdf-footer") : null;
-            if (_footer == _header) _footer = null;
-            _firstHeader = _mayHaveBands ? FindBand(_doc, "data-sticky-pdf-first-header") : null;
-            _firstFooter = _mayHaveBands ? FindBand(_doc, "data-sticky-pdf-first-footer") : null;
-            if (_firstFooter == _firstHeader) _firstFooter = null;
-            if (_header != null) _header.Detached = true;
-            if (_footer != null) _footer.Detached = true;
-            if (_firstHeader != null) _firstHeader.Detached = true;
-            if (_firstFooter != null) _firstFooter.Detached = true;
-            ReserveBands(_page);
+            _bands = new BandSet();
+            _namedBands = null;
+            if (_mayHaveBands) CollectBands(_doc);
+            _bands.DropFootersThatAreHeaders();
+            if (_namedBands != null)
+                foreach (var set in _namedBands.Values) set.DropFootersThatAreHeaders();
+            ReserveBands(_page, null, false, false);
 
             if (_styles.UsedViewportHeight && Math.Abs(_page.FlowHeight - _viewport) > 0.01f)
             {
@@ -246,12 +245,41 @@ public static partial class HtmlToPdf
         }
 
         /// <summary>
-        /// Reserves the heights of the header and footer on a page, together at most 60% of its content area: the first
-        /// page's own bands on the document's first page, the running ones elsewhere.
+        /// Finds the bands: of each kind, the first displayed element with its attribute, for the document and for each
+        /// named page. An element that is both a header and a footer is the header, and an element that is not a band in
+        /// use is left in the flow.
         /// </summary>
-        private void ReserveBands(PageSetup setup, bool firstPage = false)
+        private void CollectBands(Element parent)
         {
-            var (header, footer) = BandsOf(firstPage);
+            foreach (var child in parent.Children)
+            {
+                if (child is not Element e || e.Style == null || e.Style.Display == Display.None) continue;
+                if (e.HasAttribute("data-sticky-pdf-header") || e.HasAttribute("data-sticky-pdf-footer")
+                    || e.HasAttribute("data-sticky-pdf-first-header") || e.HasAttribute("data-sticky-pdf-first-footer"))
+                {
+                    var set = _bands;
+                    if (e.GetAttribute("data-sticky-pdf-page")?.Trim() is { Length: > 0 } name)
+                    {
+                        _namedBands ??= new Dictionary<string, BandSet>(StringComparer.Ordinal);
+                        if (!_namedBands.TryGetValue(name, out set)) _namedBands[name] = set = new BandSet();
+                    }
+                    if (e.HasAttribute("data-sticky-pdf-header")) set.Header ??= e;
+                    if (e.HasAttribute("data-sticky-pdf-footer")) set.Footer ??= e;
+                    if (e.HasAttribute("data-sticky-pdf-first-header")) set.FirstHeader ??= e;
+                    if (e.HasAttribute("data-sticky-pdf-first-footer")) set.FirstFooter ??= e;
+                    if (set.Header == e || set.Footer == e || set.FirstHeader == e || set.FirstFooter == e) e.Detached = true;
+                }
+                CollectBands(e);
+            }
+        }
+
+        /// <summary>
+        /// Reserves the heights of the header and footer on a page, together at most 60% of its content area: the bands
+        /// that <see cref="BandsOf"/> gives the page.
+        /// </summary>
+        private void ReserveBands(PageSetup setup, string? pageName, bool documentFirst, bool runFirst)
+        {
+            var (header, footer) = BandsOf(pageName, documentFirst, runFirst);
             if (header == null && footer == null) return;
             bool truncate = _options.TruncateBandsToWholePoints;
             if (header != null) setup.BandTop = Math.Max(DeclaredHeight(header, setup, truncate), BandHeight(header, setup, _images, _cancellation));
@@ -265,9 +293,41 @@ public static partial class HtmlToPdf
             }
         }
 
-        /// <summary>The header and footer of a page: on the first page, its own bands take the place of the running ones.</summary>
-        private (Element? Header, Element? Footer) BandsOf(bool firstPage)
-            => firstPage && FirstPageBands ? (_firstHeader ?? _header, _firstFooter ?? _footer) : (_header, _footer);
+        /// <summary>
+        /// The header and footer of a page. A named page's own header or footer takes the place of the document's, and
+        /// on the first page of each run of that named page, its first-page bands take the place of both. Otherwise the
+        /// document's first-page bands take the place of the running ones on the first page of the document.
+        /// </summary>
+        private (Element? Header, Element? Footer) BandsOf(string? pageName, bool documentFirst, bool runFirst)
+        {
+            BandSet? named = null;
+            if (pageName != null) _namedBands?.TryGetValue(pageName, out named);
+            var header = named?.Header ?? _bands.Header;
+            var footer = named?.Footer ?? _bands.Footer;
+            if (runFirst && named is { HasFirst: true }) return (named.FirstHeader ?? header, named.FirstFooter ?? footer);
+            if (documentFirst && _bands.HasFirst) return (_bands.FirstHeader ?? header, _bands.FirstFooter ?? footer);
+            return (header, footer);
+        }
+
+        /// <summary>
+        /// The header and footer of the pages of the document or of one named page. An empty first-page band leaves the
+        /// first page without that band.
+        /// </summary>
+        private sealed class BandSet
+        {
+            public Element? Header, Footer, FirstHeader, FirstFooter;
+
+            public bool HasFirst => FirstHeader != null || FirstFooter != null;
+
+            public bool Any => Header != null || Footer != null || HasFirst;
+
+            /// <summary>An element that is both the header and the footer is the header only.</summary>
+            public void DropFootersThatAreHeaders()
+            {
+                if (Footer == Header) Footer = null;
+                if (FirstFooter == FirstHeader) FirstFooter = null;
+            }
+        }
 
         /// <summary>PdfOptions.Hyphenation with its language tags in lower case with hyphens, as the layout looks them up.</summary>
         private static Dictionary<string, HyphenationPatterns>? HyphenationTable(IDictionary<string, HyphenationPatterns>? patterns)

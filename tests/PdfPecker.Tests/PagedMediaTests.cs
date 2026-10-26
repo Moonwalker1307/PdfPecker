@@ -320,4 +320,78 @@ public class PagedMediaTests
         Assert.Contains("Running 2 of 2", pages[1]);
         Assert.Equal(new[] { "595x842", "842x595" }, PageSizes(ConvertUncompressed(html)));
     }
+
+    private static string Lines(string prefix, int count) => string.Concat(Enumerable.Range(1, count).Select(i => $"<p>{prefix} {i}</p>"));
+
+    [Fact]
+    public void Named_pages_have_bands_of_their_own_and_numbers_run_on()
+    {
+        string html = "<html><head><style>@page cover { size: A5 } @page body { size: A4 landscape }</style></head><body>"
+                      + "<div data-sticky-pdf-header data-sticky-pdf-page='cover'>Cover header</div>"
+                      + "<div data-sticky-pdf-footer data-sticky-pdf-page='cover'>Cover page {page} of {total-pages}</div>"
+                      + "<div data-sticky-pdf-header data-sticky-pdf-page='body'>Body header</div>"
+                      + "<div data-sticky-pdf-footer data-sticky-pdf-page='body'>Body page {page} of {total-pages}</div>"
+                      + "<section style='page: cover'>" + Lines("Cover", 40) + "</section>"
+                      + "<section style='page: body'>" + Lines("Body", 60) + "</section></body></html>";
+        var pages = PdfText.ExtractPages(HtmlToPdf.Convert(html)).Select(p => p.Text).ToArray();
+        int coverPages = pages.Count(p => p.Contains("Cover 1", StringComparison.Ordinal) || p.Contains("Cover header", StringComparison.Ordinal));
+        Assert.True(coverPages >= 2 && pages.Length > coverPages + 1);
+        for (int p = 0; p < pages.Length; p++)
+        {
+            bool cover = p < coverPages;
+            Assert.Contains(cover ? "Cover header" : "Body header", pages[p]);
+            Assert.DoesNotContain(cover ? "Body header" : "Cover header", pages[p]);
+            Assert.Contains($"{(cover ? "Cover" : "Body")} page {p + 1} of {pages.Length}", pages[p]);
+        }
+        var sizes = PageSizes(ConvertUncompressed(html));
+        Assert.All(sizes.Take(coverPages), s => Assert.Equal("420x595", s));
+        Assert.All(sizes.Skip(coverPages), s => Assert.Equal("842x595", s));
+    }
+
+    [Fact]
+    public void A_named_page_without_a_band_of_its_own_uses_the_documents()
+    {
+        string html = "<html><body><div data-sticky-pdf-header>Document header</div><div data-sticky-pdf-footer>Document footer</div>"
+                      + "<div data-sticky-pdf-header data-sticky-pdf-page='b'>B header</div>"
+                      + "<section style='page: a'><p>A</p></section><section style='page: b'><p>B</p></section>"
+                      + "<section><p>C</p></section></body></html>";
+        var pages = PdfText.ExtractPages(HtmlToPdf.Convert(html)).Select(p => p.Text).ToArray();
+        Assert.Equal(3, pages.Length);
+        Assert.Contains("Document header", pages[0]);
+        Assert.Contains("B header", pages[1]);
+        Assert.DoesNotContain("Document header", pages[1]);
+        Assert.Contains("Document footer", pages[1]);
+        Assert.Contains("Document header", pages[2]);
+    }
+
+    [Fact]
+    public void A_named_pages_first_page_bands_show_on_the_first_page_of_each_of_its_runs()
+    {
+        string html = "<html><body>"
+                      + "<div data-sticky-pdf-header data-sticky-pdf-page='letter'>Continued</div>"
+                      + "<div data-sticky-pdf-first-header data-sticky-pdf-page='letter'>Letterhead</div>"
+                      + "<section style='page: letter'>" + Lines("First letter", 70) + "</section>"
+                      + "<section style='page: other'><p>Between</p></section>"
+                      + "<section style='page: letter'>" + Lines("Second letter", 70) + "</section></body></html>";
+        var pages = PdfText.ExtractPages(HtmlToPdf.Convert(html)).Select(p => p.Text).ToArray();
+        int between = Array.FindIndex(pages, p => p.Contains("Between", StringComparison.Ordinal));
+        Assert.True(between >= 2 && pages.Length >= between + 3);
+        Assert.Contains("Letterhead", pages[0]);
+        Assert.Contains("Continued", pages[1]);
+        Assert.DoesNotContain("Letterhead", pages[between]);
+        Assert.DoesNotContain("Continued", pages[between]);
+        Assert.Contains("Letterhead", pages[between + 1]);
+        Assert.DoesNotContain("Continued", pages[between + 1]);
+        Assert.Contains("Continued", pages[between + 2]);
+    }
+
+    [Fact]
+    public void A_named_pages_band_does_not_reach_the_flow_of_other_pages()
+    {
+        string html = "<html><body><div data-sticky-pdf-header data-sticky-pdf-page='x' style='height: 300pt'>X header</div>"
+                      + Lines("Plain", 80) + "</body></html>";
+        var withBand = PdfText.ExtractPages(HtmlToPdf.Convert(html)).Select(p => p.Text).ToArray();
+        var plain = PdfText.ExtractPages(HtmlToPdf.Convert("<html><body>" + Lines("Plain", 80) + "</body></html>")).Select(p => p.Text).ToArray();
+        Assert.Equal(plain, withBand);
+    }
 }

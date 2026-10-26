@@ -20,7 +20,7 @@ public static partial class HtmlToPdf
             var (marginFont, watermarkFont) = ChooseTextFonts();
             var writer = CreateWriter(marginFont, watermarkFont);
             var marginBoxes = CreateMarginBoxes();
-            var pageBands = _header != null || _footer != null || FirstPageBands || marginBoxes != null ? PageBands(writer, marginBoxes) : null;
+            var pageBands = AnyBands || marginBoxes != null ? PageBands(writer, marginBoxes) : null;
             return writer.Write(sections, _page.Background, title, _options.Author, _options.Subject,
                 _options.FooterText, _options.HeaderText, pageBands, _headings);
         }
@@ -124,7 +124,7 @@ public static partial class HtmlToPdf
                     if (_paged.Running == null && strings.Count > 0) _paged.Running = PlaceRunningStrings(writer, strings);
                     ops.AddRange(marginBoxes.Layout(p, count, setup, run.Name));
                 }
-                var (header, footer) = BandsOf(p == 0);
+                var (header, footer) = BandsOf(run.Name, p == 0, local == 0);
                 if (header != null) ops.AddRange(LayoutBandForPage(header, setup, _images, p, count, alignBottom: false, laidOut, _cancellation));
                 if (footer != null) ops.AddRange(LayoutBandForPage(footer, setup, _images, p, count, alignBottom: true, laidOut, _cancellation));
                 return ops;

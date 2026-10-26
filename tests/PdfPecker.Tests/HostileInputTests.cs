@@ -1087,6 +1087,21 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Thousands_of_named_pages_with_bands_of_their_own_stay_bounded()
+    {
+        // Each named page with a band gets a page setup of its own, and its bands are measured and laid out for it, so
+        // the work grows with the number of names, not with names times pages.
+        var html = new System.Text.StringBuilder("<style>@page{size:200pt 200pt;margin:10pt}</style>");
+        for (int i = 0; i < 2000; i++)
+            html.Append("<header data-sticky-pdf-header data-sticky-pdf-page='p").Append(i).Append("'>Page {page} of p").Append(i).Append("</header>")
+                .Append("<header data-sticky-pdf-first-header data-sticky-pdf-page='p").Append(i).Append("'>First</header>");
+        for (int i = 0; i < 2000; i++) html.Append("<section style='page:p").Append(i).Append("'><p>x</p></section>");
+        var (pdf, allocated) = Allocating(() => Bounded(html.ToString()));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 1L << 30);
+    }
+
+    [Fact]
     public void A_footer_with_braces_that_are_not_page_numbers_is_laid_out_once()
     {
         // The fluent package writes a caller's brace as "{<span></span>" so that its text stays as written. Any brace
