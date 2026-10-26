@@ -121,7 +121,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
 
 - **HTML and CSS**: flexbox, grid and subgrid, CSS tables, floats with `shape-outside`, multi-column layout,
   positioning, transforms, gradients, filters, masks, media and container queries, logical properties, `writing-mode`,
-  `text-wrap`, drop caps, inline SVG and PNG, JPEG, GIF, WebP, BMP and TIFF images, laid out as Chrome lays them out.
+  `text-wrap`, drop caps, inline SVG and PNG, JPEG, GIF, WebP, BMP and TIFF images (also chosen by `srcset` and
+  `<picture>`), laid out as Chrome lays them out.
   [More](https://pdfpecker.net/docs/html-and-css/)
 - **Paged media**: `@page` sizes and margin boxes, running headers and footers (also a first page of its own),
   footnotes, tables of contents with page numbers, break control (also table row groups and group header rows kept

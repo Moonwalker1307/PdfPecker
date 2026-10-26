@@ -174,8 +174,8 @@ internal sealed partial class LayoutEngine
             if (bitmap == null || bitmap.Width <= 0 || bitmap.Height <= 0) return null;
             iw = bitmap.Width * Px;
             ih = bitmap.Height * Px;
-            if (e.IsPicture && _images.Load(e.GetAttribute("src")) is { Width: > 0, Height: > 0 } own)
-                (ix, iy, iw, ih) = ObjectFitRect(e.Style, own, cw, ch);
+            if (e.IsPicture && _images.Load(_images.SourceOf(e)) is { Width: > 0, Height: > 0 } own)
+                (ix, iy, iw, ih) = ObjectFitRect(e.Style, own, _images.DensityOf(e), cw, ch);
         }
         else
         {
@@ -227,11 +227,14 @@ internal sealed partial class LayoutEngine
         if (first >= 0) rows.Unite(y, x0 + first, x0 + last + 1);
     }
 
-    /// <summary>Where object-fit and object-position draw an image in a content box w × h, from its top-left corner.</summary>
-    private static (float X, float Y, float W, float H) ObjectFitRect(ComputedStyle s, PdfImage image, float w, float h)
+    /// <summary>
+    /// Where object-fit and object-position draw an image of <paramref name="density"/> image pixels per CSS pixel in a
+    /// content box w × h, from its top-left corner.
+    /// </summary>
+    private static (float X, float Y, float W, float H) ObjectFitRect(ComputedStyle s, PdfImage image, float density, float w, float h)
     {
         if (s.ObjectFit == ObjectFit.Fill || w <= 0 || h <= 0) return (0, 0, w, h);
-        float nw = image.Width * Px, nh = image.Height * Px;
+        float nw = image.Width * Px / density, nh = image.Height * Px / density;
         float contain = Math.Min(w / nw, h / nh);
         float k = s.ObjectFit switch
         {

@@ -60,6 +60,8 @@ internal static class Targets
         "shape-outside:circle(50%)", "shape-outside:polygon(0 0,1e9px 0,0 100%)", "shape-outside:linear-gradient(red,#0000)", "shape-margin:1e9px",
         "shape-image-threshold:.5",
         "<style>*::first-letter{initial-letter:3 2}</style>", "<style>p::first-letter{initial-letter:1e9 raise;padding:1e9px}</style>",
+        "<img srcset=\"data:image/png;base64, 1e-30x, a 1e30x, b 1x 2w,,\">", "<img srcset=\"a 999999999w, b 1w\" sizes=\"(width>0) calc(1e9px*1e9), -1px, ((((\">",
+        "<source srcset=\"a 2x\" media=\"(((\" type=\"image/png;x\">", "sizes=\"0px\"", "srcset=\"a 0.0001x, b 0x\"",
     };
 
     private static readonly (string, string)[] HtmlNesters =
@@ -67,7 +69,7 @@ internal static class Targets
         ("<div>", "</div>"), ("<span>", "</span>"), ("<b>", "</b>"), ("<table><tr><td>", "</td></tr></table>"), ("<ul><li>", "</li></ul>"), ("<p>", "</p>"),
         ("<div style=\"display:flex\">", "</div>"), ("<div style=\"float:left\">", "</div>"), ("<a href=\"#\">", "</a>"), ("<svg><g>", "</g></svg>"),
         ("<div style=\"position:relative;overflow:hidden\">", "</div>"), ("<blockquote>", "</blockquote>"), ("<details>", "</details>"), ("<i>", "</i>"),
-        ("<div style=\"backdrop-filter:invert(1);mask:radial-gradient(#000,#0000)\">", "</div>"),
+        ("<div style=\"backdrop-filter:invert(1);mask:radial-gradient(#000,#0000)\">", "</div>"), ("<picture>", "</picture>"),
         ("<div style=\"float:right;width:50%;height:9em;shape-outside:ellipse(at 0 50%);shape-margin:1em\">", "</div>"),
     };
 
