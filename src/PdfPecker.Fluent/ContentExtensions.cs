@@ -3,7 +3,7 @@ using PdfPecker.Fluent.Model;
 namespace PdfPecker.Fluent;
 
 /// <summary>Content for a slot: text, layouts, images, barcodes, lines and breaks.</summary>
-public static class ContentExtensions
+public static partial class ContentExtensions
 {
     /// <summary>A paragraph of text. Line breaks (<c>\n</c>) and spaces are kept; long lines wrap.</summary>
     public static TextBlockDescriptor Text(this IContainer container, string? text)

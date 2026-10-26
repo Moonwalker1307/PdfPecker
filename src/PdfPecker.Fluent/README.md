@@ -68,6 +68,9 @@ Document.Create(container =>
   in them. `ShowOnce` and `SkipOnce` in the header or footer give the first page a band of its own, such as a
   letterhead followed by a slim header. Several `Page` calls give page sets with their own size, margins, header and
   footer in one document, and the page numbers run on through all of them.
+- **Form fields and footnotes**, which QuestPDF does not have: `TextField` (one line, multiline or password),
+  `CheckBox`, `RadioButton`, `ComboBox` and `ListBox` become fillable PDF fields, and `text.Footnote("...")` numbers a
+  note and sets it at the bottom of its page. Browsers show footnotes in the text, where `GenerateHtml` puts them.
 - **Images and graphics**: PNG, JPEG, WebP, BMP, TIFF and GIF images, SVG, solid, dashed and dotted lines, and QR,
   EPC payment QR, Code 128 and EAN-13 barcodes.
 - **Accessibility**: `SemanticSection`, `SemanticArticle`, `SemanticHeader1` to `6`, `SemanticList`,
@@ -78,7 +81,7 @@ Document.Create(container =>
   number the pages across every `Page` call) and linearized output for Fast Web View, also for documents with several
   `Page` calls. `GeneratePdf(options)` copies the options, so one options object can be shared.
 - **An escape hatch**: `container.Html("...")` places raw HTML anywhere, and `documentContainer.Css("...")` adds
-  stylesheet rules, for anything the fluent calls do not cover yet (form fields, floats, grid, footnotes).
+  stylesheet rules, for anything the fluent calls do not cover yet (floats, grid).
 - **Output**: `GeneratePdf` (bytes, file or stream), `GeneratePdfAsync`, `GenerateImages` (PNG, JPEG, WebP, TIFF)
   and `GenerateHtml`, which shows the HTML PdfPecker renders and opens in a browser. `GeneratePdfAndShow` and
   `GenerateHtmlAndShow` write a temporary file and open it, and `Placeholders` makes up text, numbers, dates,
