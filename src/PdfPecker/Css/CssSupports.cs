@@ -58,11 +58,14 @@ internal static class CssSupports
         "mask-position-x", "mask-position-y", "mask-size", "mask-repeat", "mask-origin", "mask-clip", "mask-composite",
         "mask-mode", "-webkit-mask", "-webkit-mask-image", "-webkit-mask-position", "-webkit-mask-position-x",
         "-webkit-mask-position-y", "-webkit-mask-size", "-webkit-mask-repeat", "-webkit-mask-origin", "-webkit-mask-clip",
-        "-webkit-mask-composite", "-pdfpecker-scale-to-fit",
+        "-webkit-mask-composite", "-webkit-column-break-before", "-webkit-column-break-after", "-webkit-column-break-inside",
+        "-webkit-box-orient", "-webkit-box-direction", "-webkit-box-pack", "-webkit-box-align", "-webkit-box-flex",
+        "-webkit-box-ordinal-group", "-pdfpecker-scale-to-fit",
     };
 
     /// <summary>Whether this library applies the property.</summary>
-    public static bool IsKnownProperty(string name) => name.StartsWith("--", StringComparison.Ordinal) || Known.Contains(name);
+    public static bool IsKnownProperty(string name)
+        => name.StartsWith("--", StringComparison.Ordinal) || Known.Contains(name) || PrefixedProperties.Unprefixed(name) is { } standard && Known.Contains(standard);
 
     /// <summary>Evaluates the prelude of an @supports rule; a condition that does not parse is false.</summary>
     public static bool Evaluate(string condition) => Condition(condition.Trim(), 0) == true;
@@ -130,7 +133,7 @@ internal static class CssSupports
         var value = inner.Substring(colon + 1).Trim();
         if (value.EndsWith("!important", StringComparison.OrdinalIgnoreCase)) value = value.Substring(0, value.Length - 10).TrimEnd();
         if (!IsKnownProperty(name) || value.Length == 0 && !name.StartsWith("--", StringComparison.Ordinal)) return false;
-        return ValueSupported(name, value);
+        return ValueSupported(PrefixedProperties.Unprefixed(name) ?? name, value);
     }
 
     /// <summary>A light check of the value: colours must parse, display must be a known keyword.</summary>
@@ -154,7 +157,8 @@ internal static class CssSupports
                 return lower is "block" or "inline" or "inline-block" or "flex" or "inline-flex" or "grid" or "inline-grid"
                     or "flow-root" or "contents" or "list-item" or "none" or "table" or "inline-table" or "table-row"
                     or "table-cell" or "table-row-group" or "table-header-group" or "table-footer-group" or "table-caption"
-                    or "table-column" or "table-column-group" or "block flex" or "block grid" or "inline flex" or "inline grid";
+                    or "table-column" or "table-column-group" or "block flex" or "block grid" or "inline flex" or "inline grid"
+                    or "-webkit-box" or "-webkit-inline-box" or "-webkit-flex" or "-webkit-inline-flex";
             case "position":
                 return lower is "static" or "relative" or "absolute" or "fixed" or "sticky";
             case "container-type":

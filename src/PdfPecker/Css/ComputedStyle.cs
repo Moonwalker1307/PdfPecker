@@ -515,6 +515,13 @@ internal sealed class ComputedStyle
     public bool ColumnSpanAll;           // column-span: all
     public bool ColumnFillAuto;          // column-fill: auto (fill each column in turn) rather than balance
     public int LineClamp;                // -webkit-line-clamp / line-clamp: lines shown, then an ellipsis; 0 = none
+    // The legacy flexible box (display: -webkit-box) and its -webkit-box- properties, which Chrome lays out as a flex
+    // container in place of the flex properties. -webkit-box-direction is inherited, the others are not.
+    public bool LegacyBox;
+    public bool BoxVertical, BoxReverse;
+    public BoxAlign BoxPack = BoxAlign.Start, BoxAlignItems = BoxAlign.Stretch;
+    public float BoxFlex;
+    public int BoxOrdinalGroup = 1;
 
     private TextFont? _font;
 
@@ -851,6 +858,11 @@ internal sealed class ComputedStyle
         c.ColumnSpanAll = false;
         c.ColumnFillAuto = false;
         c.LineClamp = 0;
+        c.LegacyBox = c.BoxVertical = false;
+        c.BoxPack = BoxAlign.Start;
+        c.BoxAlignItems = BoxAlign.Stretch;
+        c.BoxFlex = 0;
+        c.BoxOrdinalGroup = 1;
         c.StringSet = null;
         c.BookmarkLevel = null;
         c.BookmarkLabel = null;

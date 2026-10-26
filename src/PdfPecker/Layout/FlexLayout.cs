@@ -34,6 +34,9 @@ internal sealed partial class LayoutEngine
         {
             s = parent.CreateChild();
             s.Display = Display.Block;
+            // In a legacy flexible box an anonymous item has the default -webkit-box-flex and ordinal group: it neither
+            // grows nor shrinks, and keeps its place among the items of group 1.
+            if (parent.LegacyBox) (s.FlexShrink, s.Order) = (0, 1);
             _anonStyles[parent] = s;
         }
         return s;
@@ -62,6 +65,13 @@ internal sealed partial class LayoutEngine
             // A line break between text stays in the text's anonymous item, as in Chrome: "a<br>b" is one item of two
             // lines, not three items.
             if (e.Name == "br" && !e.Style.OutOfFlow && !e.Style.Floated)
+            {
+                (run ??= new List<Node>()).Add(c);
+                continue;
+            }
+            // A legacy flexible box does not blockify its children, so inline-level ones share an anonymous item with
+            // the text around them, as in Chrome.
+            if (container.Style.LegacyBox && !e.Style.IsBlockLevel && !e.Style.OutOfFlow)
             {
                 (run ??= new List<Node>()).Add(c);
                 continue;
