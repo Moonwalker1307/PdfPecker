@@ -58,6 +58,48 @@ public class TablePaginationTests
     }
 
     [Theory]
+    [InlineData("<tr style='break-before: page'><td>Row 3</td></tr>", "")]
+    [InlineData("<tr><td>Row 3</td></tr>", "break-after: page")]
+    [InlineData("<tr style='page-break-before: always'><td>Row 3</td></tr>", "")]
+    public void A_forced_break_between_table_rows_starts_a_new_page_with_the_header(string third, string secondStyle)
+    {
+        var pages = Pages("<table><thead><tr><th>Head</th></tr></thead><tbody><tr><td>Row 1</td></tr>"
+                          + $"<tr style='{secondStyle}'><td>Row 2</td></tr>{third}<tr><td>Row 4</td></tr></tbody></table><p>After</p>");
+        Assert.Equal(2, pages.Count);
+        Assert.Equal(new[] { "Head", "Row 1", "Row 2" }, pages[0].Lines.Select(l => l.Text));
+        Assert.Equal(new[] { "Head", "Row 3", "Row 4", "After" }, pages[1].Lines.Select(l => l.Text));
+    }
+
+    [Fact]
+    public void A_forced_break_on_a_row_group_breaks_between_the_groups()
+    {
+        var pages = Pages("<table><tbody><tr><td>One</td></tr></tbody><tbody style='break-before: page'><tr><td>Two</td></tr></tbody>"
+                          + "<tbody><tr><td>Three</td></tr></tbody></table>");
+        Assert.Equal(new[] { "One" }, pages[0].Lines.Select(l => l.Text));
+        Assert.Equal(new[] { "Two", "Three" }, pages[1].Lines.Select(l => l.Text));
+    }
+
+    [Fact]
+    public void Forced_breaks_before_the_first_row_or_after_the_last_are_ignored_as_in_Chrome()
+    {
+        var pages = Pages("<p>Before</p><table><tr style='break-before: page'><td>One</td></tr>"
+                          + "<tr style='break-after: page'><td>Two</td></tr></table><p>After</p>");
+        Assert.Single(pages);
+        Assert.Equal(new[] { "Before", "One", "Two", "After" }, pages[0].Lines.Select(l => l.Text));
+    }
+
+    [Fact]
+    public void A_column_break_on_a_table_row_moves_it_to_the_next_column()
+    {
+        var page = Pages("<div style='columns: 2; column-gap: 0'><table><tr><td>One</td></tr><tr style='break-before: column'><td>Two</td></tr>"
+                         + "<tr style='break-before: page'><td>Three</td></tr></table></div>").Single();
+        // Two goes to the top of the second column, beside One; the page break inside the columns is ignored, as in
+        // Chrome, so Three follows Two there.
+        Assert.Equal(new[] { "One Two", "Three" }, page.Lines.Select(l => l.Text));
+        Assert.True(page.Lines[1].X > 100);
+    }
+
+    [Theory]
     [InlineData("middle")]
     [InlineData("bottom")]
     public void A_cell_split_across_pages_keeps_its_content_at_the_top(string align)
