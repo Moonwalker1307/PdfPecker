@@ -1,3 +1,6 @@
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+
 namespace PdfPecker.Barcodes;
 
 /// <summary>
@@ -453,21 +456,22 @@ internal static class QrEncoder
         /// <summary>The penalty score of ISO/IEC 18004 section 7.8.3, used to pick the mask.</summary>
         public int Penalty()
         {
+            // The modules as one row-major span, so rows and columns are read with a step and no 2D index checks: this
+            // runs eight times per symbol and was most of the time of a document with a QR code.
+            var m = MemoryMarshal.CreateReadOnlySpan(ref Unsafe.As<byte, bool>(ref MemoryMarshal.GetArrayDataReference(Modules)), _size * _size);
             var result = 0;
             var dark = 0;
             for (var a = 0; a < _size; a++)
             {
-                result += LinePenalty(a, rows: true) + LinePenalty(a, rows: false);
+                result += LinePenalty(m, a * _size, 1) + LinePenalty(m, a, _size);
+                var row = a * _size;
                 for (var b = 0; b < _size; b++)
                 {
-                    if (Modules[a, b])
+                    var c = m[row + b];
+                    if (c)
                         dark++;
-                    if (a + 1 < _size && b + 1 < _size)
-                    {
-                        var c = Modules[a, b];
-                        if (c == Modules[a, b + 1] && c == Modules[a + 1, b] && c == Modules[a + 1, b + 1])
-                            result += 3;
-                    }
+                    if (a + 1 < _size && b + 1 < _size && c == m[row + b + 1] && c == m[row + _size + b] && c == m[row + _size + b + 1])
+                        result += 3;
                 }
             }
             var total = _size * _size;
@@ -475,43 +479,48 @@ internal static class QrEncoder
             return result + k * 10;
         }
 
-        private bool At(int line, int i, bool rows) => rows ? Modules[line, i] : Modules[i, line];
-
-        private int LinePenalty(int line, bool rows)
+        /// <summary>
+        /// The penalties of one row or column, starting at <paramref name="first"/> and going on by <paramref name="step"/>:
+        /// runs of five or more modules of one colour, and finder-like 1:1:3:1:1 patterns with four light modules on either
+        /// side, where outside the symbol counts as light. An 11-module window slides along the line once for the patterns.
+        /// </summary>
+        private int LinePenalty(ReadOnlySpan<bool> m, int first, int step)
         {
             var result = 0;
-            var run = 1;
-            for (var i = 1; i <= _size; i++)
+            var run = 0;
+            var previous = false;
+            // The window holds the last 11 modules, the first of them in its highest bit; it starts with the light
+            // modules before the line.
+            var window = 0;
+            for (var i = 0; i < _size; i++)
             {
-                if (i < _size && At(line, i, rows) == At(line, i - 1, rows))
+                var dark = m[first + i * step];
+                if (i > 0 && dark == previous)
                 {
                     run++;
-                    continue;
                 }
-                if (run >= 5)
-                    result += run - 2;
-                run = 1;
+                else
+                {
+                    if (run >= 5)
+                        result += run - 2;
+                    run = 1;
+                }
+                previous = dark;
+                window = ((window << 1) | (dark ? 1 : 0)) & 0x7FF;
+                if (i >= 6 && IsFinderLike(window))
+                    result += 40;
             }
-
-            // Finder-like 1:1:3:1:1 patterns with four light modules on either side; outside the symbol counts as light.
-            for (var i = -4; i + 11 <= _size + 4; i++)
+            if (run >= 5)
+                result += run - 2;
+            for (var i = 0; i < 4; i++)
             {
-                if (Matches(line, i, rows, 0b00001011101) || Matches(line, i, rows, 0b10111010000))
+                window = (window << 1) & 0x7FF;
+                if (IsFinderLike(window))
                     result += 40;
             }
             return result;
         }
 
-        private bool Matches(int line, int start, bool rows, int pattern)
-        {
-            for (var j = 0; j < 11; j++)
-            {
-                var p = start + j;
-                var dark = (uint)p < (uint)_size && At(line, p, rows);
-                if (dark != (((pattern >> (10 - j)) & 1) != 0))
-                    return false;
-            }
-            return true;
-        }
+        private static bool IsFinderLike(int window) => window is 0b00001011101 or 0b10111010000;
     }
 }
