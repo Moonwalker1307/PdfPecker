@@ -41,14 +41,7 @@ public static class GenerateExtensions
     /// The HTML that PdfPecker turns into the PDF, with images as data URIs, so it opens in any browser. It is the
     /// quickest way to see what a fluent call does, and the starting point for moving a document to an HTML template.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The document has more than one page set; each would be its own HTML document.</exception>
-    public static string GenerateHtml(this IDocument document)
-    {
-        var pages = DocumentGenerator.Html(document, dataUris: true, out _);
-        if (pages.Count > 1)
-            throw new InvalidOperationException("A document with several Page calls makes one HTML document per call; GenerateHtml needs a single Page call.");
-        return pages[0];
-    }
+    public static string GenerateHtml(this IDocument document) => DocumentGenerator.Html(document, dataUris: true, out _);
 
     /// <summary>
     /// Writes the PDF to a new file in the temporary folder and opens it in the system's PDF viewer, for trying a layout
@@ -67,7 +60,7 @@ public static class GenerateExtensions
     /// Writes the HTML of <see cref="GenerateHtml"/> to a new file in the temporary folder and opens it in the browser,
     /// where its layout can be inspected. Returns the file's path.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The document has more than one page set, or no application is set up to open HTML files.</exception>
+    /// <exception cref="InvalidOperationException">No application is set up to open HTML files; the file is written all the same.</exception>
     public static string GenerateHtmlAndShow(this IDocument document)
     {
         string path = Path.Combine(Path.GetTempPath(), "PdfPecker.Fluent-" + Guid.NewGuid().ToString("N") + ".html");
@@ -100,63 +93,20 @@ internal static class DocumentGenerator
         return new Composed(container, document.GetMetadata() ?? DocumentMetadata.Default, document.GetSettings() ?? DocumentSettings.Default);
     }
 
-    /// <summary>One HTML document per page set.</summary>
-    public static List<string> Html(IDocument document, bool dataUris, out ImageTable images)
+    /// <summary>The HTML document of all page sets.</summary>
+    public static string Html(IDocument document, bool dataUris, out ImageTable images)
     {
         var composed = Compose(document);
         images = new ImageTable(dataUris);
-        var html = new List<string>(composed.Container.Pages.Count);
-        foreach (var page in composed.Container.Pages)
-            html.Add(HtmlWriter.Write(page, composed.Container.Css, composed.Metadata, images));
-        return html;
+        return HtmlWriter.Write(composed.Container.Pages, composed.Container.Css, composed.Metadata, images);
     }
 
     public static byte[] Pdf(IDocument document, PdfOptions? options, CancellationToken cancellationToken)
     {
         var composed = Compose(document);
-        var pages = composed.Container.Pages;
         var images = new ImageTable(dataUris: false);
-        if (pages.Count > 1 && (composed.Settings.PdfA || composed.Settings.PdfUA
-            || options is { } o && (o.Conformance != PdfConformance.None || o.Accessibility != PdfAccessibility.None || o.Signature != null)))
-            throw new InvalidOperationException("PDF/A, PDF/UA and signatures need a document with a single Page call.");
-
-        var pdfs = new List<byte[]>(pages.Count);
-        foreach (var page in pages)
-        {
-            string html = HtmlWriter.Write(page, composed.Container.Css, composed.Metadata, images);
-            var pageOptions = Options(options, composed, page, images);
-            if (pages.Count > 1)
-            {
-                // The page sets are merged, which sets these for the whole document, and the merged document is
-                // linearized once, after merging, since merging rewrites the parts.
-                pageOptions.Viewer = null;
-                pageOptions.PageLabels = new List<PdfPageLabel>();
-                pageOptions.Linearize = false;
-            }
-            pdfs.Add(HtmlToPdf.Convert(html, pageOptions, cancellationToken));
-        }
-        if (pdfs.Count == 1) return pdfs[0];
-
-        var merge = new PdfMergeOptions
-        {
-            Title = options?.Title ?? composed.Metadata.Title,
-            Author = options?.Author ?? composed.Metadata.Author,
-            Subject = options?.Subject ?? composed.Metadata.Subject,
-            Keywords = options?.Keywords ?? composed.Metadata.Keywords,
-            Creator = options?.Creator ?? composed.Metadata.Creator,
-            Producer = options?.Producer ?? composed.Metadata.Producer,
-            CreationDate = options?.CreationDate ?? composed.Metadata.CreationDate,
-            MaxPages = options?.MaxPages ?? new PdfOptions().MaxPages,
-            Bookmarks = options?.Bookmarks ?? true,
-        };
-        if (options != null)
-        {
-            merge.CustomProperties = options.CustomProperties;
-            merge.Viewer = options.Viewer;
-            merge.PageLabels = options.PageLabels;
-        }
-        var merged = PdfMerger.Merge(pdfs, merge, cancellationToken);
-        return options is { Linearize: true } ? PdfLinearizer.Linearize(merged, cancellationToken) : merged;
+        string html = HtmlWriter.Write(composed.Container.Pages, composed.Container.Css, composed.Metadata, images);
+        return HtmlToPdf.Convert(html, Options(options, composed, composed.Container.Pages[0], images), cancellationToken);
     }
 
     /// <summary>A copy of the caller's options with the document's page, metadata and settings applied.</summary>

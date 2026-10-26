@@ -21,7 +21,7 @@ public sealed class GoldenTests
     [MemberData(nameof(Names))]
     public void Html_matches_the_baseline(string name)
     {
-        string html = DocumentGenerator.Html(Examples.All[name](), dataUris: false, out _).Single();
+        string html = DocumentGenerator.Html(Examples.All[name](), dataUris: false, out _);
         string path = Path.Combine(GoldenDirectory(), name + ".expected.html");
         if (Update) File.WriteAllText(path, html);
         Assert.Equal(File.ReadAllText(path).ReplaceLineEndings("\n"), html);
@@ -47,14 +47,14 @@ public sealed class GoldenTests
     [InlineData("da-DK")]
     public void Output_does_not_depend_on_the_culture(string culture)
     {
-        var expected = Examples.All.ToDictionary(e => e.Key, e => (Html: DocumentGenerator.Html(e.Value(), false, out _).Single(), Pdf: e.Value().GeneratePdf()));
+        var expected = Examples.All.ToDictionary(e => e.Key, e => (Html: DocumentGenerator.Html(e.Value(), false, out _), Pdf: e.Value().GeneratePdf()));
         var previous = CultureInfo.CurrentCulture;
         try
         {
             CultureInfo.CurrentCulture = CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo(culture);
             foreach (var (name, create) in Examples.All)
             {
-                Assert.Equal(expected[name].Html, DocumentGenerator.Html(create(), false, out _).Single());
+                Assert.Equal(expected[name].Html, DocumentGenerator.Html(create(), false, out _));
                 Assert.Null(PdfCompare.FirstDifference(expected[name].Pdf, create().GeneratePdf()));
             }
         }

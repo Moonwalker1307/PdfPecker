@@ -30,7 +30,7 @@ Console.WriteLine($"{"Case",-24} {"Pages",6} {"Compose+HTML",13} {"GeneratePdf",
 foreach (var (name, create) in cases)
 {
     var document = create();
-    var html = DocumentGenerator.Html(document, false, out var images)[0];
+    var html = DocumentGenerator.Html(document, false, out var images);
     var options = new PdfOptions { ResourceResolver = images.Resolve };
     int pages = PdfToImage.GetPageCount(document.GeneratePdf());
 

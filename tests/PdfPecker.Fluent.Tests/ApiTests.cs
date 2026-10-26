@@ -85,12 +85,19 @@ public sealed class ApiTests
     }
 
     [Fact]
-    public void Pdf_ua_and_several_page_sets_do_not_mix()
-        => Assert.Throws<InvalidOperationException>(() => Document.Create(d =>
+    public void Pdf_ua_and_pdf_a_work_with_several_page_sets()
+    {
+        byte[] pdf = Document.Create(d =>
         {
-            d.Page(p => p.Content().Text("a"));
-            d.Page(p => p.Content().Text("b"));
-        }).WithSettings(new DocumentSettings { PdfUA = true }).GeneratePdf());
+            d.Page(p => p.Content().Heading(1).Text("Cover"));
+            d.Page(p => { p.Size(PageSizes.A4.Landscape); p.Content().Text("Body"); });
+        }).WithMetadata(new DocumentMetadata { Title = "Title", Language = "en" })
+            .WithSettings(new DocumentSettings { PdfA = true, PdfUA = true }).GeneratePdf();
+        string text = System.Text.Encoding.Latin1.GetString(pdf);
+        Assert.Contains("/StructTreeRoot", text);
+        Assert.Contains("pdfaid:part", text);
+        Assert.Equal(2, PdfToImage.GetPageCount(pdf));
+    }
 
     [Fact]
     public void Viewer_settings_and_page_labels_cover_every_page_set()

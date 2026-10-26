@@ -200,8 +200,9 @@ are in `BUILD.md` and `TESTING.md`.
   the cell when `Background` comes before `Padding` in the chain; the writer can't fix that alone.
 - Fluent page numbers are PdfPecker's `{page}` and `{total-pages}` tokens, which work only in the sticky header and
   footer. Caller text with braces in those bands is written so the library leaves it alone.
-- Several fluent `Page` calls are converted separately and merged with `PdfMerger`, which is why page numbers restart
-  and why PDF/A, PDF/UA and signatures need a single page set.
+- Several fluent `Page` calls become named pages (`page: p0`, `p1`, ...) of one HTML document, each with its own
+  `@page` rule and bands marked `data-sticky-pdf-page`, so page numbers, links, PDF/A, PDF/UA and signatures work across
+  them. A single `Page` call writes no page names, which keeps its output as it was.
 - The fluent golden PDFs are compared after inflating streams, because .NET 9's zlib compresses differently from .NET 8
   and 10.
 - The QR and Code 128 encoders dominate the fluent layer's own time in documents that have barcodes.

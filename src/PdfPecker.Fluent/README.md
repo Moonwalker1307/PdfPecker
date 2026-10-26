@@ -66,7 +66,8 @@ Document.Create(container =>
   section starts on (`BeginPageNumberOfSection`).
 - **Pages**: size, margins, page colour, a header and footer on every page, and `CurrentPageNumber` / `TotalPages`
   in them. `ShowOnce` and `SkipOnce` in the header or footer give the first page a band of its own, such as a
-  letterhead followed by a slim header. Several `Page` calls give page sets with their own size and margins.
+  letterhead followed by a slim header. Several `Page` calls give page sets with their own size, margins, header and
+  footer in one document, and the page numbers run on through all of them.
 - **Images and graphics**: PNG, JPEG, WebP, BMP, TIFF and GIF images, SVG, solid, dashed and dotted lines, and QR,
   EPC payment QR, Code 128 and EAN-13 barcodes.
 - **Accessibility**: `SemanticSection`, `SemanticArticle`, `SemanticHeader1` to `6`, `SemanticList`,
@@ -74,9 +75,8 @@ Document.Create(container =>
   calls write the HTML elements PdfPecker tags a PDF/UA document from.
 - **Everything else in PdfPecker** through the normal `PdfOptions`: PDF/A, PDF/UA, signatures, encryption,
   watermarks, e-invoices (ZUGFeRD, Factur-X, XRechnung), attachments, fonts, viewer settings and page labels (which
-  number the pages across every `Page` call) and linearized output for Fast Web View (a document with several `Page`
-  calls is linearized once, after its page sets are merged). `GeneratePdf(options)` copies the options, so one options
-  object can be shared.
+  number the pages across every `Page` call) and linearized output for Fast Web View, also for documents with several
+  `Page` calls. `GeneratePdf(options)` copies the options, so one options object can be shared.
 - **An escape hatch**: `container.Html("...")` places raw HTML anywhere, and `documentContainer.Css("...")` adds
   stylesheet rules, for anything the fluent calls do not cover yet (form fields, floats, grid, footnotes).
 - **Output**: `GeneratePdf` (bytes, file or stream), `GeneratePdfAsync`, `GenerateImages` (PNG, JPEG, WebP, TIFF)
@@ -105,8 +105,6 @@ Most QuestPDF code ports by changing the `using` lines: `Document.Create`, `Page
 - `Color.FromHex` reads CSS order, so `#rrggbbaa` puts alpha last, where QuestPDF reads `#aarrggbb`.
 - Page numbers work in the header and footer, not in the content.
 - In a table cell, put `Background` before `Padding` (`.Background(...).Padding(...)`) to fill the whole cell.
-- Each `Page` call is converted on its own and the results are merged, so page numbers restart for each page set.
-  PDF/A, PDF/UA and signatures need a single `Page` call.
 - Transforms change how content is drawn, not the space it takes: `Scale(2)` draws twice as large from the top-left
   corner without making room. `RotateLeft` and `RotateRight` turn the layout itself (CSS `writing-mode`), so give
   longer rotated content a height.
