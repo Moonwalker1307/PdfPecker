@@ -69,12 +69,71 @@ internal sealed partial class StyleResolver
         var s = Compute(host.Name, host.Style);
         if (s.Content == null || s.Display == Display.None) return;
         if (s.CounterReset != null || s.CounterSet != null || s.CounterIncrement != null) { _countersUsed = true; ApplyCounters(s, ref scope); }
-        var text = GeneratedContent.Evaluate(s.Content, host, this, s);
-        if (text == null) return;
         var box = new Element(which == PseudoElement.Before ? "::before" : "::after") { Generated = true, Style = s, Parent = host };
-        if (text.Length > 0) box.AppendChild(new TextNode(text));
+        if (GeneratedContent.HasImage(s.Content))
+        {
+            if (!GenerateWithImages(box, host, s.Content)) return;
+        }
+        else
+        {
+            var text = GeneratedContent.Evaluate(s.Content, host, this, s);
+            if (text == null) return;
+            if (text.Length > 0) box.AppendChild(new TextNode(text));
+        }
         if (which == PseudoElement.Before) host.Children.Insert(0, box);
         else host.Children.Add(box);
+    }
+
+    /// <summary>
+    /// Fills a ::before or ::after box whose content has images, as Chrome draws them: each url() becomes an inline
+    /// image at its own size between the text around it, and a gradient that is the whole content paints the box, which
+    /// shows when the box has a width and a height (a gradient has no size of its own). Alternative text after "/" is
+    /// not drawn. False when the content is not valid, which generates no box.
+    /// </summary>
+    private bool GenerateWithImages(Element box, Element host, string content)
+    {
+        var tokens = CssParser.Tokens(content);
+        int slash = tokens.IndexOf("/");
+        if (slash >= 0) tokens.RemoveRange(slash, tokens.Count - slash);
+        var s = box.Style;
+        if (tokens.Count == 1 && CssGradient.Parse(tokens[0], s.Color, s.FontSize, _rootFontSize, _vw, _vh) is { } alone)
+        {
+            s = box.Style = s.Clone();
+            var layers = new BackgroundImage?[(s.BackgroundImages?.Length ?? 0) + 1];
+            layers[0] = new BackgroundImage { Gradient = alone };
+            s.BackgroundImages?.CopyTo(layers, 1);
+            s.BackgroundImages = layers;
+            return true;
+        }
+        var text = new System.Text.StringBuilder();
+        void Flush(ref bool valid)
+        {
+            if (text.Length == 0) return;
+            var part = GeneratedContent.Evaluate(text.ToString(), host, this, s);
+            text.Clear();
+            if (part == null) valid = false;
+            else if (part.Length > 0) box.AppendChild(new TextNode(part));
+        }
+        bool valid = true;
+        foreach (var token in tokens)
+        {
+            if (CssBackground.Url(token) is { } url)
+            {
+                Flush(ref valid);
+                var img = new Element("img") { Generated = true, Style = s.CreateChild(), Parent = box };
+                img.AddAttribute("src", url);
+                box.AppendChild(img);
+            }
+            // A gradient among other content has no size to take, so it draws nothing, as in Chrome.
+            else if (token.Contains("gradient(", StringComparison.OrdinalIgnoreCase))
+            {
+                if (CssGradient.Parse(token, s.Color, s.FontSize, _rootFontSize, _vw, _vh) == null) return false;
+            }
+            else text.Append(token).Append(' ');
+            if (!valid) return false;
+        }
+        Flush(ref valid);
+        return valid;
     }
 
     private const string FirstLetterName = "::first-letter";

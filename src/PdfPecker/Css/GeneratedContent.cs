@@ -93,6 +93,10 @@ internal static class GeneratedContent
     /// </summary>
     internal const int MaxMarkLength = 64;
 
+    /// <summary>Whether a content value has an image in it: a url() or a gradient.</summary>
+    public static bool HasImage(string value)
+        => value.Contains("url(", StringComparison.OrdinalIgnoreCase) || value.Contains("gradient(", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>The text to show, or null when the value is invalid or generates no box.</summary>
     public static string? Evaluate(string value, Element host, StyleResolver resolver, ComputedStyle? style = null)
     {
