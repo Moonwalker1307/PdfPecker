@@ -145,7 +145,12 @@ public static partial class HtmlToPdf
                 embedStandard: _options.EmbedStandardFonts || _settings.Conformance != PdfConformance.None || _settings.IsPdfUA,
                 systemFonts: _options.UseSystemFonts, report: _missingFonts, needsFallback: NeedsFallbackFonts);
             _images.Fonts = _fonts;
-            if ((_namesUsed & NamesUsed.Img) != 0) MissingImageText.Prepare(_doc, _images);
+            if ((_namesUsed & NamesUsed.Img) != 0)
+            {
+                ResponsiveImages.Prepare(_doc, _images, new MediaContext { Width = _page.ContentWidth, Height = _page.ContentHeight, Screen = true },
+                    _page.ContentWidth / 100, _viewport / 100);
+                MissingImageText.Prepare(_doc, _images);
+            }
             _paged = new PagedContent();
             if (!_options.IgnoreCssPageRules) _paged.FootnotePageReset = FootnotePageReset(_sheet.PageRules);
             // hyphens: auto: the language of the text is its nearest lang attribute, else PdfOptions.Language.

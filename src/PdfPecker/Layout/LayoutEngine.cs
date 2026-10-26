@@ -1092,7 +1092,7 @@ internal sealed partial class LayoutEngine
         }
         // Rounded corners clip the image to the content box's curve.
         var radii = BoxPainter.InnerRadii(BoxPainter.Radii(s, imgW + left + right, imgH + top + bottom), left, top, right, bottom);
-        if (image != null) AddImage(s, image, cx, cy, imgW, imgH, radii, Tags?.Of(e));
+        if (image != null) AddImage(s, image, _images.DensityOf(e), cx, cy, imgW, imgH, radii, Tags?.Of(e));
         if (svg != null) AddSvgImage(_ops, s, svg, cx, cy, imgW, imgH, radii, Tags?.Of(e));
     }
 
@@ -1686,11 +1686,18 @@ internal sealed partial class LayoutEngine
     /// </summary>
     private PdfImage? ImageSize(Element e, float availW, out float w, out float h, out SvgImage? svg, float percentW = float.NaN)
     {
-        var src = e.GetAttribute("src");
+        var src = _images.SourceOf(e);
         var img = _images.Load(src);
         svg = img == null ? _images.LoadSvg(src) : null;
-        float iw = img != null ? img.Width * 0.75f : 0, ih = img != null ? img.Height * 0.75f : 0;
-        if (svg != null) (iw, ih) = SvgNaturalSize(svg, availW); // as for an inline svg element, as in Chrome
+        // A srcset candidate for 2x shows its pixels at half size.
+        float density = _images.DensityOf(e);
+        float iw = img != null ? img.Width * 0.75f / density : 0, ih = img != null ? img.Height * 0.75f / density : 0;
+        if (svg != null)
+        {
+            (iw, ih) = SvgNaturalSize(svg, availW); // as for an inline svg element, as in Chrome
+            iw /= density;
+            ih /= density;
+        }
         ReplacedSize(e, iw, ih, availW, out w, out h, percentW);
         return img;
     }
@@ -1792,17 +1799,18 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>
-    /// Draws an image into its content box (x, y, w, h), sized and placed by object-fit and object-position, and clipped
+    /// Draws an image of <paramref name="density"/> image pixels per CSS pixel into its content box (x, y, w, h), sized
+    /// and placed by object-fit and object-position, and clipped
     /// to the box (and its rounded corners) where it reaches outside.
     /// </summary>
-    private void AddImage(ComputedStyle s, PdfImage image, float x, float y, float w, float h, CornerRadii? radii, ContentSlot? tag)
+    private void AddImage(ComputedStyle s, PdfImage image, float density, float x, float y, float w, float h, CornerRadii? radii, ContentSlot? tag)
     {
         if (s.ObjectFit == ObjectFit.Fill || image.Width <= 0 || image.Height <= 0 || w <= 0 || h <= 0)
         {
             _ops.Add(new ImageOp(x, y, w, h, image) { Radii = radii, Tag = tag });
             return;
         }
-        float nw = image.Width * 0.75f, nh = image.Height * 0.75f;
+        float nw = image.Width * 0.75f / density, nh = image.Height * 0.75f / density;
         float contain = Math.Min(w / nw, h / nh);
         float k = s.ObjectFit switch
         {

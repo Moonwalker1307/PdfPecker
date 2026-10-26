@@ -19,6 +19,18 @@ internal sealed class ImageLoader
     /// <summary>Parsed inline SVG drawings, shared by every layout pass of a document (pages, headers, footers).</summary>
     public readonly Dictionary<PdfPecker.Html.Element, PdfPecker.Svg.SvgImage> Svgs = new();
 
+    /// <summary>
+    /// The pictures that srcset or a picture element chose for img elements, with their pixel densities (see
+    /// <see cref="ResponsiveImages"/>). An img not listed shows its src at 1x.
+    /// </summary>
+    public readonly Dictionary<PdfPecker.Html.Element, (string Url, float Density)> Chosen = new();
+
+    /// <summary>The source an img element shows.</summary>
+    public string? SourceOf(PdfPecker.Html.Element img) => Chosen.TryGetValue(img, out var c) ? c.Url : img.GetAttribute("src");
+
+    /// <summary>The image pixels per CSS pixel of the picture an img element shows: 2 for a 2x srcset candidate.</summary>
+    public float DensityOf(PdfPecker.Html.Element img) => Chosen.TryGetValue(img, out var c) ? c.Density : 1;
+
     /// <summary>The drawing work left for the document's inline SVGs.</summary>
     public readonly PdfPecker.Svg.SvgBudget SvgBudget = new();
 
