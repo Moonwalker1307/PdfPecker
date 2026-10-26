@@ -570,14 +570,16 @@ internal sealed partial class LayoutEngine
         {
             var st = it.Style;
             float borderW;
-            if (it.El != null && !st.Width.IsAuto && !it.IsReplaced) borderW = st.Width.Resolve(w) + (st.BorderBox ? 0 : HorizontalFrame(st, w));
+            float? percentW = null;
+            if (it.El != null && !st.Width.IsAuto && !it.IsReplaced && st.Width.IsPercent) borderW = (percentW = PercentBorderWidth(st, w)).Value;
+            else if (it.El != null && !st.Width.IsAuto && !it.IsReplaced) borderW = st.Width.Resolve(w) + (st.BorderBox ? 0 : HorizontalFrame(st, w));
             else
             {
                 var (mn, mx) = ItemIntrinsic(it);
                 borderW = st.WidthKeyword == SizeKeyword.MaxContent ? mx : Math.Min(mx, Math.Max(mn, w - it.Ml - it.Mr));
             }
             it.Hypo = borderW + it.Ml + it.Mr;
-            float h = Measure(it, e, it.Hypo, stretch: false).Height;
+            float h = Measure(it, e, it.Hypo, stretch: false, percentW).Height;
             if (it.El != null && !st.FlexBasis.IsAuto)
                 h = Math.Max(h, st.FlexBasis.Resolve(height) + (st.BorderBox ? 0 : VerticalFrame(st, w)) + it.Mt + it.Mb);
             if (cur.Count > 0 && usedH + gap + h > height + Eps)
@@ -610,6 +612,9 @@ internal sealed partial class LayoutEngine
         var outerW = new float[items.Count];
         var offsetX = new float[items.Count];
         var stretch = new bool[items.Count];
+        // The border widths of items whose width is a percentage of the container: laid out in a room as wide as
+        // themselves, they would otherwise take the percentage of that room once more.
+        var percentW = new float?[items.Count];
         for (int i = 0; i < items.Count; i++)
         {
             var it = items[i];
@@ -623,7 +628,8 @@ internal sealed partial class LayoutEngine
                 continue;
             }
             float borderW;
-            if (it.El != null && !st.Width.IsAuto && !it.IsReplaced) borderW = st.Width.Resolve(w) + (st.BorderBox ? 0 : HorizontalFrame(st, w));
+            if (it.El != null && !st.Width.IsAuto && !it.IsReplaced && st.Width.IsPercent) borderW = (percentW[i] = PercentBorderWidth(st, w)).Value;
+            else if (it.El != null && !st.Width.IsAuto && !it.IsReplaced) borderW = st.Width.Resolve(w) + (st.BorderBox ? 0 : HorizontalFrame(st, w));
             else if (st.WidthKeyword == SizeKeyword.MaxContent) borderW = ItemIntrinsic(it).Max;
             else borderW = Math.Min(ItemIntrinsic(it).Max, Math.Max(ItemIntrinsic(it).Min, w - it.Ml - it.Mr));
             float outer = borderW + it.Ml + it.Mr;
@@ -666,14 +672,20 @@ internal sealed partial class LayoutEngine
             for (int i = 0; i < items.Count; i++)
             {
                 var it = items[i];
-                var c = measured[i] = Measure(it, e, outerW[i], stretch[i]);
+                var c = measured[i] = Measure(it, e, outerW[i], stretch[i], percentW[i]);
                 contentH[i] = c.Height - it.Mt - it.Mb;
                 float h = contentH[i];
                 var st = it.Style;
                 if (it.El != null && !st.FlexBasis.IsAuto && !(st.FlexBasis.IsPercent && definiteH == null))
                 {
-                    float basis = st.FlexBasis.Resolve(definiteH ?? 0) + (st.BorderBox ? 0 : VerticalFrame(st, w));
-                    h = Math.Max(basis, contentH[i]); // min-height: auto keeps the content visible
+                    float frameV = VerticalFrame(st, w);
+                    float basis = st.FlexBasis.Resolve(definiteH ?? 0) + (st.BorderBox ? 0 : frameV);
+                    // min-height: auto keeps the content visible; a min-height of its own takes the place of that
+                    // automatic minimum (css-flexbox §4.5), so the content may overflow a box flexed from a zero basis.
+                    // A min-height of zero is the initial value here, so it still counts as auto.
+                    float ownMin = st.MinHeight.IsAuto || st.MinHeight.IsPercent && definiteH == null ? 0 : st.MinHeight.Resolve(definiteH ?? 0);
+                    float floor = ownMin > 0 ? Math.Max(frameV, ownMin + (st.BorderBox ? 0 : frameV)) : contentH[i];
+                    h = Math.Max(basis, floor);
                 }
                 if (it.El != null && !st.MaxHeight.IsAuto && !st.MaxHeight.IsPercent)
                     h = Math.Min(h, Math.Max(contentH[i], st.MaxHeight.Value));
@@ -749,6 +761,7 @@ internal sealed partial class LayoutEngine
                 // measured everything inside it again, and the work grew with the square of the depth.
                 var pool = _knownBoxes;
                 if (measured[i] is { } known && forcedH[i] == null) _knownBoxes = known.Known;
+                if (percentW[i] is { } pw) _widthOverride[it.El] = pw;
                 try
                 {
                     bottom = LayoutBlockBox(it.El, x + offsetX[i], top, outerW[i], shrinkToFit: !stretch[i]);
@@ -756,6 +769,7 @@ internal sealed partial class LayoutEngine
                 finally
                 {
                     _knownBoxes = pool;
+                    if (percentW[i].HasValue) _widthOverride.Remove(it.El);
                     if (forcedH[i].HasValue)
                     {
                         _heightOverride.Remove(it.El);
@@ -780,8 +794,18 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>Measures an item laid out at the given outer width (unpaginated).</summary>
-    private Captured Measure(BoxItem it, Element container, float outerW, bool stretch)
-        => it.El != null ? CaptureBox(it.El, outerW, shrinkToFit: !stretch, reuse: true) : CaptureRun(it.Run!, container, outerW);
+    private Captured Measure(BoxItem it, Element container, float outerW, bool stretch, float? borderW = null)
+        => it.El != null ? CaptureBox(it.El, outerW, shrinkToFit: !stretch, borderW, reuse: true) : CaptureRun(it.Run!, container, outerW);
+
+    /// <summary>The border-box width of a column flex item whose width is a percentage of the container's width <paramref name="w"/>, within its min and max widths.</summary>
+    private static float PercentBorderWidth(ComputedStyle s, float w)
+    {
+        float frame = HorizontalFrame(s, w);
+        float contentW = s.Width.Resolve(w) - (s.BorderBox ? frame : 0);
+        if (!s.MaxWidth.IsAuto) contentW = Math.Min(contentW, s.MaxWidth.Resolve(w) - (s.BorderBox ? frame : 0));
+        if (!s.MinWidth.IsAuto) contentW = Math.Max(contentW, s.MinWidth.Resolve(w) - (s.BorderBox ? frame : 0));
+        return Math.Max(0, contentW) + frame;
+    }
 
     /// <summary>Min-content and max-content widths of a flex container's content box.</summary>
     private (float Min, float Max) FlexIntrinsic(Element e)
