@@ -134,6 +134,18 @@ public class BrowserMatchTests
     }
 
     [Theory]
+    [InlineData("word-break: break-all")]
+    [InlineData("overflow-wrap: anywhere")]
+    public void A_table_cell_that_may_break_inside_words_fits_its_container(string wrap)
+    {
+        // The cell's min-content width is its widest letter, so the table stays within the 60px box, as in Chrome.
+        var lines = Lines(Layout($"<div style='width: 60px; font: 12px Courier New'><table><tr><td style='{wrap}'>"
+                                 + "url(data:image/png;base64,iVBORw0KGgo)</td></tr></table></div>"));
+        Assert.True(lines.Count > 1);
+        Assert.All(lines, l => Assert.True(l.Length <= 8, l));
+    }
+
+    [Theory]
     [InlineData("P*")]
     [InlineData("P(")]
     [InlineData("P&nbsp;")]
