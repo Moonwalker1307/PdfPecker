@@ -42,7 +42,7 @@ internal static class CssSupports
         "border-top-color", "border-right-color", "border-bottom-color", "border-left-color", "border-top-left-radius",
         "border-top-right-radius", "border-bottom-right-radius", "border-bottom-left-radius", "border-image",
         "border-image-source", "border-image-slice", "border-image-width", "border-image-outset", "border-image-repeat", "tab-size",
-        "line-clamp", "-webkit-line-clamp", "hyphens", "hyphenate-character", "hyphenate-limit-chars", "quotes", "size", "string-set", "bookmark-level", "bookmark-label", "bookmark-state", "page", "direction", "unicode-bidi", "margin-inline",
+        "line-clamp", "-webkit-line-clamp", "block-ellipsis", "hyphens", "hyphenate-character", "hyphenate-limit-chars", "quotes", "size", "string-set", "bookmark-level", "bookmark-label", "bookmark-state", "page", "direction", "unicode-bidi", "margin-inline",
         "margin-inline-start", "margin-inline-end", "padding-inline", "padding-inline-start", "padding-inline-end", "margin-block",
         "margin-block-start", "margin-block-end", "padding-block", "padding-block-start", "padding-block-end",
         "inset-inline", "inset-inline-start", "inset-inline-end", "inset-block", "inset-block-start", "inset-block-end",

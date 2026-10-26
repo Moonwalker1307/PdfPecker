@@ -42,16 +42,20 @@ internal sealed partial class LayoutEngine
         for (; k < items.Count; k++)
             if (items[k].Kind is ItemKind.Anchor or ItemKind.Absolute) kept.Add(items[k]);
         while (kept.Count > 0 && kept[^1].Kind == ItemKind.Space) { used -= kept[^1].Width; kept.RemoveAt(kept.Count - 1); }
-        var dots = Rent(ItemKind.Text, block);
-        dots.Tag = kept.LastOrDefault(k => k.Tag != null)?.Tag;
-        dots.Source = ellipsis;
-        dots.Length = ellipsis.Length;
-        dots.Width = ew;
-        dots.Level = dots.Para = para;
-        // The ellipsis takes the place of the last visible item, after any anchors kept at the end.
-        int at = kept.Count;
-        while (at > 0 && kept[at - 1].Kind is ItemKind.Anchor or ItemKind.Absolute) at--;
-        kept.Insert(at, dots);
+        // block-ellipsis: none cuts the line without a mark.
+        if (ellipsis.Length > 0)
+        {
+            var dots = Rent(ItemKind.Text, block);
+            dots.Tag = kept.LastOrDefault(k => k.Tag != null)?.Tag;
+            dots.Source = ellipsis;
+            dots.Length = ellipsis.Length;
+            dots.Width = ew;
+            dots.Level = dots.Para = para;
+            // The ellipsis takes the place of the last visible item, after any anchors kept at the end.
+            int at = kept.Count;
+            while (at > 0 && kept[at - 1].Kind is ItemKind.Anchor or ItemKind.Absolute) at--;
+            kept.Insert(at, dots);
+        }
         if (reversed) kept.Reverse();
         items.Clear();
         items.AddRange(kept);

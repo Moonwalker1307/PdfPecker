@@ -312,8 +312,8 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>
-    /// Line clamping: only the first lines are laid out, the last of them ending in an ellipsis. Returns the number of
-    /// lines left.
+    /// Line clamping: only the first lines are laid out, the last of them ending in an ellipsis or the block-ellipsis
+    /// string (nothing for none). Returns the number of lines left.
     /// </summary>
     private int ClampLines(List<Line> lines, ComputedStyle block, float w, float indent)
     {
@@ -323,7 +323,7 @@ internal sealed partial class LayoutEngine
         var last = lines[n - 1];
         lines.RemoveRange(n, lines.Count - n);
         float room = (last.HasRoom ? last.Avail : w) - (n == 1 ? indent : 0);
-        Ellipsize(last, block, room, mark: "…");
+        Ellipsize(last, block, room, mark: block.BlockEllipsis ?? Ellipsis);
         last.Forced = true;
         return n;
     }
