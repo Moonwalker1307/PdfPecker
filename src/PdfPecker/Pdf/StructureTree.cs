@@ -225,7 +225,7 @@ internal sealed class StructureTree
         switch (type)
         {
             case "LI":
-                if (e.Style.Display == Display.ListItem && (e.Style.ListStyleType != ListStyleType.None || e.Style.ListStyleImage != null))
+                if (e.Style.Display == Display.ListItem && (e.Style.ListStyleType != ListStyleType.None || e.Style.ListStyleImage != null || e.Style.ListStyleGradient != null))
                 {
                     _markers[e] = new ContentSlot(new StructElem("Lbl", se));
                     // A list with labels says how they number its items (PDF/UA-2), as its first marked item draws them.

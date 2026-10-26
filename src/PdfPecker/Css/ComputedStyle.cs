@@ -310,6 +310,7 @@ internal sealed class ComputedStyle
     public string? ListStyleString;          // list-style-type: "string": the marker text
     public CounterStyle? ListCounterStyle;   // the counter style of a text marker; null for the bullets, a string and none
     public string? ListStyleImage;           // list-style-image: the url
+    public CssGradient? ListStyleGradient;   // list-style-image: a gradient
     public bool ListStylePositionInside;
     public TextTransform TextTransform;
     public TextDecoration TextDecoration; // propagated to descendants, approximated as inherited
