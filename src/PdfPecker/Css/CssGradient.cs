@@ -18,6 +18,8 @@ internal sealed class CssGradient
     private const double DegreesPerPercent = 3.6;
     // A repeating gradient whose stops span less than this fraction of the line is painted as its last colour.
     private const float MinRepeatPeriod = 1e-4f;
+    // Stops added between two stops of a gradient that interpolates in another colour space, and in all at most.
+    private const int StepsPerPair = 16, MaxSubdividedStops = 1024;
     // A radial gradient with no size (a centre on the box edge, or a zero length) still gets this radius.
     private const float MinRadius = 0.01f;
 
@@ -36,6 +38,8 @@ internal sealed class CssGradient
     private Length _sizeX, _sizeY;
     private Length _posX = new(50, LengthUnit.Percent), _posY = new(50, LengthUnit.Percent);
     private readonly List<(uint Color, Length? Position)> _stops = new();
+    private string? _space;         // the colour interpolation space ("in oklch"), or null for sRGB
+    private string _hueMethod = "shorter";
 
     /// <summary>Parses one gradient function; null when it is not a gradient this engine draws.</summary>
     public static CssGradient? Parse(string value, uint currentColor, float em, float rem, float vw, float vh)
@@ -62,7 +66,8 @@ internal sealed class CssGradient
         var head = CssParser.Tokens(args[0].Trim().ToLowerInvariant());
         if (head.Count > 0 && !CssColor.TryParse(head[0], currentColor, out _))
         {
-            bool ok = g.Kind switch
+            if (!g.TakeInterpolationMethod(head)) return null;
+            bool ok = head.Count == 0 || g.Kind switch
             {
                 GradientKind.Conic => g.ParseConicHead(head, em, rem, vw, vh),
                 GradientKind.Radial => g.ParseRadialShape(head, em, rem, vw, vh),
@@ -113,6 +118,30 @@ internal sealed class CssGradient
         return StyleResolver.TryParseLength(t, em, rem, out pos, vw, vh) && pos.IsPercent && pos.Unit == LengthUnit.Percent;
     }
 
+    /// <summary>
+    /// Takes the colour interpolation method (<c>in oklch</c>, <c>in hsl longer hue</c>) out of the gradient's first
+    /// argument, which it may start or end. False when the method names no space PdfPecker interpolates in, or gives
+    /// a hue method to a space without hue, which makes the gradient invalid as in Chrome.
+    /// </summary>
+    private bool TakeInterpolationMethod(List<string> t)
+    {
+        int at = t.IndexOf("in");
+        if (at < 0) return true;
+        if (at + 1 >= t.Count || !ColorFunctions.IsInterpolationSpace(t[at + 1], out bool polar)) return false;
+        int end = at + 2;
+        if (end + 1 < t.Count && t[end + 1] == "hue")
+        {
+            if (!polar || t[end] is not ("shorter" or "longer" or "increasing" or "decreasing")) return false;
+            _hueMethod = t[end];
+            end += 2;
+        }
+        // The method comes first or last, never between the parts of a direction, shape or position.
+        if (at != 0 && end != t.Count) return false;
+        _space = t[at + 1] == "srgb" ? null : t[at + 1];
+        t.RemoveRange(at, end - at);
+        return true;
+    }
+
     private bool ParseDirection(List<string> t)
     {
         if (t[0] == "to")
@@ -144,7 +173,7 @@ internal sealed class CssGradient
         return false;
     }
 
-    /// <summary>The start of a conic-gradient(): <c>from &lt;angle&gt;</c>, <c>at &lt;position&gt;</c> and an ignored <c>in &lt;colorspace&gt;</c>.</summary>
+    /// <summary>The start of a conic-gradient(): <c>from &lt;angle&gt;</c> and <c>at &lt;position&gt;</c>.</summary>
     private bool ParseConicHead(List<string> t, float em, float rem, float vw, float vh)
     {
         int i = 0;
@@ -156,16 +185,10 @@ internal sealed class CssGradient
                 _angle = (float)deg;
                 i += 2;
             }
-            else if (t[i] == "in")
-            {
-                // Interpolation colour space: stops are interpolated in sRGB.
-                i += 2;
-                if (i < t.Count && t[i] is "shorter" or "longer" or "increasing" or "decreasing") i += 2;
-            }
             else if (t[i] == "at")
             {
                 int end = i + 1;
-                while (end < t.Count && t[end] is not ("from" or "in")) end++;
+                while (end < t.Count && t[end] != "from") end++;
                 if (!ParsePosition(t.GetRange(i + 1, end - i - 1), em, rem, vw, vh)) return false;
                 i = end;
             }
@@ -424,9 +447,39 @@ internal sealed class CssGradient
         {
             // Offsets past [0, 1] are clipped, keeping the colour interpolated at the edge.
             for (int i = 0; i < count; i++) stops.Add((pos[i], _stops[i].Color));
+            if (_space != null) Subdivide(stops, _space, _hueMethod);
             ClipStops(stops);
         }
         return stops;
+    }
+
+    /// <summary>
+    /// Adds stops between each pair of stops with the colours interpolated in <paramref name="space"/>, since the
+    /// PDF interpolates in RGB: sixteen steps per pair keep the curve within a level or two of Chrome's, and the total
+    /// stays within <see cref="MaxSubdividedStops"/>.
+    /// </summary>
+    private static void Subdivide(List<(float Offset, uint Color)> stops, string space, string hueMethod)
+    {
+        int pairs = stops.Count - 1;
+        int steps = Math.Clamp(MaxSubdividedStops / Math.Max(1, pairs), 1, StepsPerPair);
+        if (steps == 1) return;
+        var result = new List<(float, uint)>(pairs * steps + 1) { stops[0] };
+        for (int i = 1; i < stops.Count; i++)
+        {
+            var (o0, c0) = stops[i - 1];
+            var (o1, c1) = stops[i];
+            // A hard edge has nothing to interpolate, nor do two stops of the same colour, unless the longer hue
+            // takes them once round the hue circle.
+            if (o1 > o0 && (c0 != c1 || hueMethod == "longer"))
+                for (int k = 1; k < steps; k++)
+                {
+                    double t = (double)k / steps;
+                    result.Add((o0 + (o1 - o0) * (float)t, ColorFunctions.Interpolate(c0, c1, t, space, hueMethod)));
+                }
+            result.Add(stops[i]);
+        }
+        stops.Clear();
+        stops.AddRange(result);
     }
 
     /// <summary>Replaces stops outside [0, 1] by the colours interpolated at 0 and 1.</summary>
