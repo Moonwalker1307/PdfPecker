@@ -8,8 +8,12 @@ internal readonly struct FontRun
     public FontRun(TextFont font, int start, int length) { Font = font; Start = start; Length = length; }
 }
 
-/// <summary>The font metrics font-size-adjust can hold constant (font-size-adjust: ex-height 0.5).</summary>
-internal enum FontMetric : byte { XHeight, CapHeight, ZeroWidth, IdeographWidth }
+/// <summary>
+/// Font metrics: the ones font-size-adjust can hold constant (font-size-adjust: ex-height 0.5), and the underline
+/// positions of text-underline-position (from-font is the top of the font's underline below the baseline, under the
+/// bottom of the em box).
+/// </summary>
+internal enum FontMetric : byte { XHeight, CapHeight, ZeroWidth, IdeographWidth, UnderlinePosition, EmDescent }
 
 /// <summary>A font as seen by layout: metrics and widths in 1/1000 em units.</summary>
 internal abstract class TextFont

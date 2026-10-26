@@ -167,6 +167,7 @@ internal sealed partial class StyleResolver
             case "text-justify": s.TextJustify = from.TextJustify; break;
             case "text-spacing-trim": s.TextSpacingTrim = from.TextSpacingTrim; break;
             case "text-decoration-skip-ink": s.SkipInk = from.SkipInk; break;
+            case "text-underline-position": s.UnderlinePosition = from.UnderlinePosition; break;
             case "text-transform": s.TextTransform = from.TextTransform; break;
             case "letter-spacing": s.LetterSpacing = from.LetterSpacing; break;
             case "word-spacing": s.WordSpacing = from.WordSpacing; break;

@@ -389,7 +389,13 @@ internal sealed partial class LayoutEngine
         small.FontSize = style.FontSize * SmallCapsScale;
         // Decorations keep the full size's thickness and position, so a line under mixed capitals stays straight.
         small.DecorationThickness ??= Length.Pt(Math.Max(style.TextSize * DecorationThicknessRatio, MinDecorationThickness));
-        small.UnderlineOffset ??= Length.Pt(style.TextSize * UnderlineOffsetRatio);
+        if (style.UnderlinePosition == UnderlinePosition.Auto) small.UnderlineOffset ??= Length.Pt(style.TextSize * UnderlineOffsetRatio);
+        else
+        {
+            // from-font and under depend on the font size, so the full size's position becomes a fixed offset.
+            small.UnderlinePosition = UnderlinePosition.Auto;
+            small.UnderlineOffset = Length.Pt(UnderlineTop(style, DecorationStyle.Solid, 0, style.TextSize, 0));
+        }
         small.InvalidateFont();
         _smallCapsStyles[style] = small;
         return small;

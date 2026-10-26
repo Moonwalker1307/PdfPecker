@@ -246,6 +246,18 @@ internal sealed partial class StyleResolver
             _ => s.SkipInk,
         };
 
+    /// <summary>text-underline-position: auto | from-font | [ under || [ left | right ] ]; anything else is dropped.</summary>
+    private static void ApplyUnderlinePosition(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        switch (d.Lower)
+        {
+            case "inherit": s.UnderlinePosition = parent.UnderlinePosition; return;
+            case "auto" or "initial" or "unset" or "left" or "right": s.UnderlinePosition = UnderlinePosition.Auto; return;
+            case "from-font": s.UnderlinePosition = UnderlinePosition.FromFont; return;
+            case "under" or "under left" or "under right" or "left under" or "right under": s.UnderlinePosition = UnderlinePosition.Under; return;
+        }
+    }
+
     private void ApplyTextDecorationThickness(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
         if (d.Inherit) s.DecorationThickness = parent.DecorationThickness;

@@ -71,6 +71,8 @@ internal sealed class EmbeddedFont : TextFont
             FontMetric.CapHeight => Program.CapHeight / upm,
             FontMetric.ZeroWidth => Program.GlyphId('0') is > 0 and var zero ? Program.Advance(zero) / upm : 0,
             FontMetric.IdeographWidth => Program.GlyphId(0x6C34) is > 0 and var water ? Program.Advance(water) / upm : 0,
+            FontMetric.UnderlinePosition => -Program.UnderlinePosition / upm,
+            FontMetric.EmDescent => Program.EmDescent,
             _ => 0,
         };
     }

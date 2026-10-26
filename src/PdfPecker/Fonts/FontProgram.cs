@@ -56,7 +56,7 @@ internal sealed partial class FontProgram
     private const double CapHeightShareOfAscender = 0.7;
 
     // post: the italic angle as a 16.16 fixed number and the fixed pitch flag.
-    private const int PostMinimumLength = 16, ItalicAngleField = 4, IsFixedPitchField = 12;
+    private const int PostMinimumLength = 16, ItalicAngleField = 4, UnderlinePositionField = 8, IsFixedPitchField = 12;
 
     // One font keeps at most this many instances, so a stylesheet with many weights cannot grow memory without bound;
     // further locations use the default instance.
@@ -74,6 +74,8 @@ internal sealed partial class FontProgram
     public readonly int CapHeight;
     private readonly int _os2XHeight; // sxHeight of OS/2 version 2 and later; 0 when the font does not say
     public readonly float ItalicAngle;
+    public readonly int UnderlinePosition; // post: the top of the underline, negative below the baseline, in font units
+    public readonly float EmDescent;       // the descent of the em box, as a fraction of the em
     public readonly bool FixedPitch;
     public readonly int WeightClass;
     public readonly bool IsItalic;
@@ -147,7 +149,14 @@ internal sealed partial class FontProgram
         {
             ItalicAngle = Reader.S16(post.Offset + ItalicAngleField) + Reader.U16(post.Offset + ItalicAngleField + 2) / 65536f;
             FixedPitch = Reader.U32(post.Offset + IsFixedPitchField) != 0;
+            UnderlinePosition = Reader.S16(post.Offset + UnderlinePositionField);
         }
+        // The em box is the OS/2 typographic ascender and descender, or else the hhea ones, scaled to one em together, as
+        // in Chrome, which puts text-underline-position: under at its bottom.
+        var (emAscender, emDescender) = Table("OS/2") is { Length: >= Os2MinimumLength } os2
+            && Reader.S16(os2.Offset + TypoAscenderField) - Reader.S16(os2.Offset + TypoDescenderField) > 0
+            ? (Reader.S16(os2.Offset + TypoAscenderField), Reader.S16(os2.Offset + TypoDescenderField)) : (Ascender, Descender);
+        EmDescent = emAscender - emDescender > 0 ? Math.Clamp(-emDescender / (float)(emAscender - emDescender), 0, 1) : 0;
 
         var names = Table("name") is { } name ? ReadNames(name) : default;
         TypographicFamily = names.TypographicFamily;
