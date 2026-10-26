@@ -72,13 +72,14 @@ internal static class Fuzz
         {
             var task = Task.Run(() =>
             {
-                var html = DocumentGenerator.Html(document, false, out _);
-                foreach (var page in html)
+                string page = DocumentGenerator.Html(document, false, out _);
+                if (!Raw)
                 {
-                    if (Raw) break;
                     if (page.Contains("<x-evil", StringComparison.Ordinal) || page.Contains("<script", StringComparison.Ordinal))
                         return "caller text became markup";
-                    if (Count(page, "</style>") != 1 || Count(page, "</main>") != 1 || Count(page, "<body") != 1)
+                    // One main element per page set, all in one document.
+                    if (Count(page, "</style>") != 1 || Count(page, "</main>") < 1 || Count(page, "</main>") != Count(page, "<main")
+                        || Count(page, "<body") != 1)
                         return "the document structure was broken";
                     if (page.Contains('\0')) return "a NUL character reached the HTML";
                 }

@@ -155,6 +155,69 @@ public sealed class LayoutTests
         var pages = PdfText.ExtractPages(pdf);
         Assert.Equal(2, pages.Count);
         Assert.Contains("landscape", pages[1].Text);
+        Assert.True(pages[0].Width < pages[0].Height);
+        Assert.True(pages[1].Width > pages[1].Height);
+    }
+
+    [Fact]
+    public void Page_sets_are_named_pages_of_one_html_document()
+    {
+        string html = Document.Create(d =>
+        {
+            d.Page(p => { p.Size(PageSizes.A5); p.Margin(10); p.Header().Text("H0"); p.Content().Text("a"); });
+            d.Page(p => { p.Size(PageSizes.A4); p.PageColor(Colors.Grey.Lighten4); p.DefaultTextStyle(x => x.FontSize(9)); p.ContentFromRightToLeft(); p.Content().Text("b"); p.Footer().Text("F1"); });
+        }).GenerateHtml();
+        Assert.Contains("@page p0{size:419.53pt 595.28pt;margin:10pt 10pt 10pt 10pt}", html);
+        Assert.Contains("@page p1{size:595.28pt 841.89pt;margin:0pt 0pt 0pt 0pt;background:#f5f5f5}", html);
+        Assert.Contains("<body><div class=\"c0\"><header data-sticky-pdf-header=\"\" data-sticky-pdf-page=\"p0\"><p>H0</p></header><main><p>a</p></main></div>"
+            + "<div class=\"c1\" dir=\"rtl\"><main><p>b</p></main><footer data-sticky-pdf-footer=\"\" data-sticky-pdf-page=\"p1\"><p>F1</p></footer></div></body>", html);
+        Assert.Contains(".c0{page:p0}.c1{page:p1;font-size:9pt}", html);
+    }
+
+    [Fact]
+    public void Page_numbers_run_on_through_the_page_sets_with_their_own_bands()
+    {
+        byte[] pdf = Document.Create(d =>
+        {
+            d.Page(p =>
+            {
+                p.Size(PageSizes.A5);
+                p.Margin(20);
+                p.Header().Text("Cover header");
+                p.Content().Column(k => { for (int i = 0; i < 40; i++) k.Item().Text("Cover line " + i); });
+                p.Footer().Text(t => { t.Span("Cover "); t.CurrentPageNumber(); t.Span(" of "); t.TotalPages(); });
+            });
+            d.Page(p =>
+            {
+                p.Size(PageSizes.A4.Landscape);
+                p.Margin(30);
+                p.Header().Column(k => { k.Item().ShowOnce().Text("Report letterhead"); k.Item().SkipOnce().Text("Report continued"); });
+                p.Content().Column(k => { for (int i = 0; i < 60; i++) k.Item().Text("Report line " + i); });
+                p.Footer().Text(t => { t.Span("Report "); t.CurrentPageNumber(); t.Span(" of "); t.TotalPages(); });
+            });
+        }).GeneratePdf();
+        var pages = PdfText.ExtractPages(pdf);
+        int cover = pages.Count(p => p.Text.Contains("Cover header", StringComparison.Ordinal));
+        Assert.True(cover >= 2 && pages.Count >= cover + 2);
+        for (int i = 0; i < pages.Count; i++)
+        {
+            string text = pages[i].Text;
+            Assert.Contains($"{(i < cover ? "Cover" : "Report")} {i + 1} of {pages.Count}", text, StringComparison.Ordinal);
+            Assert.Equal(i < cover, text.Contains("Cover header", StringComparison.Ordinal));
+            Assert.Equal(i == cover, text.Contains("Report letterhead", StringComparison.Ordinal));
+            Assert.Equal(i > cover, text.Contains("Report continued", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public void A_section_link_reaches_into_another_page_set()
+    {
+        byte[] pdf = Document.Create(d =>
+        {
+            d.Page(p => p.Content().Text(t => { t.SectionLink("Go to the appendix on page ", "appendix"); t.BeginPageNumberOfSection("appendix"); }));
+            d.Page(p => p.Content().Section("appendix").Text("Appendix"));
+        }).GeneratePdf();
+        Assert.Contains("appendix on page 2", PdfText.ExtractPages(pdf)[0].Text, StringComparison.Ordinal);
     }
 
     [Fact]

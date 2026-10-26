@@ -6,7 +6,7 @@ internal static class Html
     public static Document Page(Action<IContainer> content) => Document.Create(d => d.Page(p => content(p.Content())));
 
     /// <summary>The &lt;main&gt; element, the page content slot.</summary>
-    public static string Of(Action<IContainer> content) => Body(DocumentGenerator.Html(Page(content), false, out _).Single());
+    public static string Of(Action<IContainer> content) => Body(DocumentGenerator.Html(Page(content), false, out _));
 
     /// <summary>
     /// The HTML of one column item, where no page slot is around to take the first styles: the column's own element
@@ -29,7 +29,7 @@ internal static class Html
     /// <summary>The CSS rules, so a test can check what a class holds.</summary>
     public static string Css(IDocument document)
     {
-        string html = DocumentGenerator.Html(document, false, out _).Single();
+        string html = DocumentGenerator.Html(document, false, out _);
         int start = html.IndexOf("<style>", StringComparison.Ordinal);
         return html[(start + 7)..html.IndexOf("</style>", StringComparison.Ordinal)];
     }

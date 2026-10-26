@@ -50,23 +50,44 @@ internal sealed class HtmlWriter
 
     private HtmlWriter(ImageTable images) => _images = images;
 
-    /// <summary>The complete HTML document for one page set.</summary>
-    public static string Write(PageSet page, IReadOnlyList<string> css, DocumentMetadata metadata, ImageTable images)
+    /// <summary>
+    /// The complete HTML document. Several page sets each become a named page of their own (page: p0, p1, ...), with
+    /// their own size, margins, header and footer, so page numbers run on through the whole document.
+    /// </summary>
+    public static string Write(IReadOnlyList<PageSet> pages, IReadOnlyList<string> css, DocumentMetadata metadata, ImageTable images)
     {
         var writer = new HtmlWriter(images);
-        return writer.Document(page, css, metadata);
+        return writer.Document(pages, css, metadata);
     }
 
-    private string Document(PageSet page, IReadOnlyList<string> css, DocumentMetadata metadata)
+    private string Document(IReadOnlyList<PageSet> pages, IReadOnlyList<string> css, DocumentMetadata metadata)
     {
-        var bodyDeclarations = new List<(string, string)>();
-        CssValue.AddTextStyle(bodyDeclarations, page.Style, forBox: true);
-        string? bodyClass = bodyDeclarations.Count > 0 ? Class(bodyDeclarations) : null;
-
-        if (page.Header.Child != null) RenderBand(page.Header, "header");
-        // The footer comes after the content, so a browser that does not repeat it (Chrome) still shows it last.
-        RenderContainer(page.Content, Box.Slot("main"));
-        if (page.Footer.Child != null) RenderBand(page.Footer, "footer");
+        string? bodyClass = null;
+        if (pages.Count == 1)
+        {
+            var bodyDeclarations = new List<(string, string)>();
+            CssValue.AddTextStyle(bodyDeclarations, pages[0].Style, forBox: true);
+            bodyClass = bodyDeclarations.Count > 0 ? Class(bodyDeclarations) : null;
+            RenderPageSet(pages[0], null);
+        }
+        else
+        {
+            for (int i = 0; i < pages.Count; i++)
+            {
+                // The page set's text style and direction go on an element around its bands and content, which puts
+                // them all on its named page.
+                var page = pages[i];
+                string name = PageName(i);
+                var declarations = new List<(string, string)> { ("page", name) };
+                CssValue.AddTextStyle(declarations, page.Style, forBox: true);
+                _html.Append("<div");
+                WriteAttribute("class", Class(declarations));
+                if (page.RightToLeft) WriteAttribute("dir", "rtl");
+                _html.Append('>');
+                RenderPageSet(page, name);
+                _html.Append("</div>");
+            }
+        }
         string body = _html.ToString();
 
         _html.Clear();
@@ -79,37 +100,62 @@ internal sealed class HtmlWriter
             WriteText(metadata.Title);
             _html.Append("</title>");
         }
-        _html.Append("<style>").Append(BaseCss)
-            .Append("@page{size:").Append(CssValue.Pt(page.Size.Width)).Append(' ').Append(CssValue.Pt(page.Size.Height))
-            .Append(";margin:").Append(CssValue.Pt(page.MarginTop)).Append(' ').Append(CssValue.Pt(page.MarginRight)).Append(' ')
-            .Append(CssValue.Pt(page.MarginBottom)).Append(' ').Append(CssValue.Pt(page.MarginLeft));
-        if (page.Background is { } background) _html.Append(";background:").Append(CssValue.Color(background));
-        _html.Append('}').Append(_rules);
+        _html.Append("<style>").Append(BaseCss);
+        PageRule(pages[0], null);
+        if (pages.Count > 1)
+            for (int i = 0; i < pages.Count; i++) PageRule(pages[i], PageName(i));
+        _html.Append(_rules);
         if (_sectionPages) _html.Append("[data-section-page]::after{content:target-counter(attr(data-section-page),page)}");
         foreach (var rule in css) _html.Append('\n').Append(rule);
         _html.Append("</style></head>\n<body");
         if (bodyClass != null) WriteAttribute("class", bodyClass);
-        if (page.RightToLeft) WriteAttribute("dir", "rtl");
+        if (pages.Count == 1 && pages[0].RightToLeft) WriteAttribute("dir", "rtl");
         _html.Append('>').Append(body).Append("</body></html>\n");
         return _html.ToString();
+    }
+
+    private static string PageName(int index) => "p" + index.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>The @page rule of a page set: the document's when <paramref name="name"/> is null, else its named page's.</summary>
+    private void PageRule(PageSet page, string? name)
+    {
+        _html.Append("@page");
+        if (name != null) _html.Append(' ').Append(name);
+        _html.Append("{size:").Append(CssValue.Pt(page.Size.Width)).Append(' ').Append(CssValue.Pt(page.Size.Height))
+            .Append(";margin:").Append(CssValue.Pt(page.MarginTop)).Append(' ').Append(CssValue.Pt(page.MarginRight)).Append(' ')
+            .Append(CssValue.Pt(page.MarginBottom)).Append(' ').Append(CssValue.Pt(page.MarginLeft));
+        if (page.Background is { } background) _html.Append(";background:").Append(CssValue.Color(background));
+        _html.Append('}');
+    }
+
+    /// <summary>The header, content and footer of a page set; its bands name its page when there are several.</summary>
+    private void RenderPageSet(PageSet page, string? name)
+    {
+        if (page.Header.Child != null) RenderBand(page.Header, "header", name);
+        // The footer comes after the content, so a browser that does not repeat it (Chrome) still shows it last.
+        RenderContainer(page.Content, Box.Slot("main"));
+        if (page.Footer.Child != null) RenderBand(page.Footer, "footer", name);
     }
 
     /// <summary>
     /// Writes a header or footer, which PdfPecker repeats on every page. When some of its content uses ShowOnce or
     /// SkipOnce, the band is written a second time for the first page, which PdfPecker then uses there instead.
     /// </summary>
-    private void RenderBand(Container band, string tag)
+    private void RenderBand(Container band, string tag, string? pageName)
     {
         _band = Band.Running;
         _bandHasOnce = false;
-        RenderContainer(band, Box.Slot(tag, ("data-sticky-pdf-" + tag, "")));
+        RenderContainer(band, BandSlot(tag, "data-sticky-pdf-" + tag, pageName));
         if (_bandHasOnce)
         {
             _band = Band.First;
-            RenderContainer(band, Box.Slot(tag, ("data-sticky-pdf-first-" + tag, "")));
+            RenderContainer(band, BandSlot(tag, "data-sticky-pdf-first-" + tag, pageName));
         }
         _band = Band.None;
     }
+
+    private static Box BandSlot(string tag, string attribute, string? pageName)
+        => pageName == null ? Box.Slot(tag, (attribute, "")) : Box.Slot(tag, (attribute, ""), ("data-sticky-pdf-page", pageName));
 
     // Slots and decorators
 

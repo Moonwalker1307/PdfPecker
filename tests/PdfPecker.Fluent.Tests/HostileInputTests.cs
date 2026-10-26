@@ -63,7 +63,7 @@ public sealed class HostileInputTests
             p.Footer().Text(t => { t.Span(value); t.CurrentPageNumber(); });
         })).WithMetadata(new DocumentMetadata { Title = value, Language = value, Author = value });
 
-        string html = DocumentGenerator.Html(document, false, out _).Single();
+        string html = DocumentGenerator.Html(document, false, out _);
         Assert.DoesNotContain("<x-evil", html, StringComparison.Ordinal);
         Assert.DoesNotContain("<script", html, StringComparison.Ordinal);
         Assert.Equal(1, html.Split("</style>").Length - 1);
