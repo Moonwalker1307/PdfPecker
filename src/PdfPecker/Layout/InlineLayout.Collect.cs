@@ -37,7 +37,7 @@ internal sealed partial class LayoutEngine
 
         if (s.Floated || s.OutOfFlow)
         {
-            AddOutOfFlow(st, e, s);
+            AddOutOfFlow(st, e, s, deco);
             return;
         }
 
@@ -114,10 +114,16 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>A float or an absolutely positioned box met in the text: an item that places it when its line is placed.</summary>
-    private void AddOutOfFlow(CollectState st, Element e, ComputedStyle s)
+    private void AddOutOfFlow(CollectState st, Element e, ComputedStyle s, InlineDeco? deco)
     {
         var oof = Rent(s.Floated ? ItemKind.Float : ItemKind.Absolute, s);
         oof.Element = e;
+        // An absolutely positioned box inside a positioned inline element is placed against that element's fragments.
+        if (!s.Floated && s.Position == Position.Absolute && PositionedDeco(deco) is { } cb)
+        {
+            oof.Deco = cb;
+            cb.HoldsAbsolutes = true;
+        }
         if (_measuring && s.Floated)
         {
             // Measuring: a float takes its width on the line, as it would beside the text.
@@ -165,7 +171,8 @@ internal sealed partial class LayoutEngine
     {
         float boxLeft = s.PaddingLeft.Resolve(0) + s.BorderLeft, boxRight = s.PaddingRight.Resolve(0) + s.BorderRight;
         var outer = deco;
-        if (PaintsInlineBox(s) || s.BoxDecorationClone && (boxLeft > 0 || boxRight > 0)) deco = new InlineDeco(e, s, outer, boxLeft, boxRight);
+        bool paints = PaintsInlineBox(s) || s.BoxDecorationClone && (boxLeft > 0 || boxRight > 0);
+        if (paints || s.Positioned) deco = new InlineDeco(e, s, outer, boxLeft, boxRight) { Paints = paints };
         float marginLeft = AutoAsZero(s.MarginLeft), marginRight = AutoAsZero(s.MarginRight);
         int first = st.Items.Count;
         var (bidiOpen, bidiClose) = BidiControls(s);
@@ -174,7 +181,18 @@ internal sealed partial class LayoutEngine
         foreach (var c in e.Children) CollectNode(st, c, href, deco);
         AddInlineEdge(st, s, boxRight, marginRight, href, deco, outer, marginFirst: false);
         if (bidiClose != null) AddBidiControl(st, s, bidiClose);
+        // A positioned element that paints nothing and holds no absolutely positioned box needs no fragments.
+        if (deco is { Paints: false, HoldsAbsolutes: false } && !ReferenceEquals(deco, outer))
+            for (int k = first; k < st.Items.Count; k++)
+                if (ReferenceEquals(st.Items[k].Deco, deco)) st.Items[k].Deco = outer;
         if (s.Position == Position.Relative) ShiftRelative(st, first, s);
+    }
+
+    /// <summary>The nearest positioned inline element of a deco's chain, which is the containing block of absolutely positioned boxes in it.</summary>
+    private static InlineDeco? PositionedDeco(InlineDeco? deco)
+    {
+        while (deco != null && !deco.Style.Positioned) deco = deco.Parent;
+        return deco;
     }
 
     /// <summary>Whether an inline element paints anything of its own box: a background, shadows, borders or an outline.</summary>

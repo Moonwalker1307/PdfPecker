@@ -120,7 +120,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
 ## Features
 
 - **HTML and CSS**: flexbox, grid and subgrid, CSS tables, floats with `shape-outside`, multi-column layout,
-  positioning (also the legacy `clip: rect()`), transforms, gradients (also `in oklch` and other colour spaces, and as
+  positioning (also the legacy `clip: rect()`, and absolute boxes inside a positioned inline element, such as
+  tooltips and badges), transforms, gradients (also `in oklch` and other colour spaces, and as
   list markers), filters, masks, media and container queries, logical properties, `writing-mode`, `text-wrap`,
   `line-clamp` with your own `block-ellipsis`, underlines from the font or below the descenders
   (`text-underline-position`), drop caps, images and gradients in `::before` and `::after` content, inline SVG and

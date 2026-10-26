@@ -262,17 +262,25 @@ internal sealed partial class LayoutEngine
     {
         // The backgrounds of inline boxes are painted once all their fragments are placed; a footnote laid out while
         // placing the lines has fragments of its own.
+        // Absolutely positioned boxes inside positioned inline elements are laid out once those are placed too.
         var outerFragments = _inlineFragments;
+        var outerCbs = _inlineCbs;
+        var outerCbIndex = _inlineCbIndex;
         _inlineFragments = null;
+        _inlineCbs = null;
+        _inlineCbIndex = null;
         try
         {
             y = PlaceLinesCore(lines, block, x, y, w, indent, besideFloats);
             if (_inlineFragments != null) PaintInlineFragments(_inlineFragments);
+            if (_inlineCbs != null) LayoutInlineAbsolutes(_inlineCbs);
             return y;
         }
         finally
         {
             _inlineFragments = outerFragments;
+            _inlineCbs = outerCbs;
+            _inlineCbIndex = outerCbIndex;
         }
     }
 
@@ -344,7 +352,7 @@ internal sealed partial class LayoutEngine
     {
         foreach (var it in items)
         {
-            if (it.Kind == ItemKind.Absolute) QueueAbsolute(it.Element!, x, y);
+            if (it.Kind == ItemKind.Absolute) QueueLineAbsolute(it, x, y);
             else if (it.Kind == ItemKind.Anchor) SetAnchor(it.AnchorId!, y);
         }
     }
@@ -444,6 +452,7 @@ internal sealed partial class LayoutEngine
 
         _alignedSubtrees = AlignedSubtrees(items, block);
         int fragments = NoteInlineFragments(items, xs, baseline, ascent, lineH - ascent);
+        NoteEmptyInlineCbs(items, xs, baseline, ascent, lineH - ascent);
         EmitLinks(items, xs, y, lineH);
 
         // Footnote calls inside inline boxes are placed once the line is drawn, not while its buffers are in use.
@@ -503,7 +512,7 @@ internal sealed partial class LayoutEngine
                     break;
                 }
                 case ItemKind.Absolute:
-                    QueueAbsolute(it.Element!, xs[i], y);
+                    QueueLineAbsolute(it, xs[i], y);
                     break;
                 case ItemKind.Anchor:
                     SetAnchor(it.AnchorId!, y);
