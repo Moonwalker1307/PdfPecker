@@ -1,4 +1,5 @@
 using PdfPecker.Css;
+using PdfPecker.Fonts;
 using PdfPecker.Svg;
 
 namespace PdfPecker.Layout;
@@ -42,7 +43,7 @@ internal sealed partial class LayoutEngine
         float styled = style == DecorationStyle.Solid || s.DecorationThickness != null ? thickness : Math.Max(size * StyledThicknessRatio, Pixel);
         if ((s.TextDecoration & TextDecoration.Underline) != 0)
         {
-            float y = s.UnderlineOffset is { } uo ? baseline + uo.Resolve(size) : AutoUnderlineTop(style, baseline, size, styled);
+            float y = UnderlineTop(s, style, baseline, size, styled);
             var (top, bottom) = DecorationBand(style, y, styled, below: true);
             DecorationLine(style, x, y, w, styled, color, below: true, InkGaps(s, text, top, bottom, styled));
         }
@@ -71,7 +72,26 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>
-    /// The top of an underline when text-underline-offset is auto. A solid one hangs a tenth of the size below the
+    /// The top of an underline. from-font and under follow Chrome, in whole CSS pixels: from-font at the top of the
+    /// font's own underline, rounded, and under one pixel below the bottom of the em box, rounded down, so that it
+    /// clears the descenders. text-underline-offset moves either; a font without an underline position draws auto.
+    /// </summary>
+    private static float UnderlineTop(ComputedStyle s, DecorationStyle style, float baseline, float size, float styled)
+    {
+        float offset = s.UnderlineOffset is { } uo ? uo.Resolve(size) : 0;
+        switch (s.UnderlinePosition)
+        {
+            case UnderlinePosition.Under:
+                return baseline + (MathF.Floor((s.Font.Metric(FontMetric.EmDescent) * size + offset) / Pixel) + 1) * Pixel;
+            case UnderlinePosition.FromFont when s.Font.Metric(FontMetric.UnderlinePosition) is not 0 and var position:
+                return baseline + MathF.Round((position * size + offset) / Pixel, MidpointRounding.AwayFromZero) * Pixel;
+            default:
+                return s.UnderlineOffset != null ? baseline + offset : AutoUnderlineTop(style, baseline, size, styled);
+        }
+    }
+
+    /// <summary>
+    /// The top of an underline when text-underline-position and text-underline-offset are auto. A solid one hangs a tenth of the size below the
     /// baseline; the middle of a dashed, dotted or double one is there, as in Chrome, and a wave starts a fixed way below.
     /// </summary>
     private static float AutoUnderlineTop(DecorationStyle style, float baseline, float size, float styled) => style switch

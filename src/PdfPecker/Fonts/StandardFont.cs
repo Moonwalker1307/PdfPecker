@@ -101,6 +101,13 @@ internal sealed class StandardFont : TextFont
         (0, FontMetric.ZeroWidth) => 0.556f,
         (1, FontMetric.ZeroWidth) => 0.5f,
         (_, FontMetric.ZeroWidth) => 0.6f,
+        // The Liberation fonts' post underline position and OS/2 typographic em box.
+        (0, FontMetric.UnderlinePosition) => 67 / 2048f,
+        (1, FontMetric.UnderlinePosition) => 123 / 2048f,
+        (_, FontMetric.UnderlinePosition) => 393 / 2048f,
+        (0, FontMetric.EmDescent) => 431 / 1922f,
+        (1, FontMetric.EmDescent) => 442 / 1862f,
+        (_, FontMetric.EmDescent) => 386 / 1641f,
         _ => 0,
     };
 

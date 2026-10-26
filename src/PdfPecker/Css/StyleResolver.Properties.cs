@@ -163,6 +163,7 @@ internal sealed partial class StyleResolver
             case "text-decoration-thickness": ApplyTextDecorationThickness(s, parent, in d); break;
             case "text-underline-offset": ApplyTextUnderlineOffset(s, parent, in d); break;
             case "text-decoration-skip-ink": ApplySkipInk(s, parent, in d); break;
+            case "text-underline-position": ApplyUnderlinePosition(s, parent, in d); break;
             case "text-overflow": ApplyTextOverflow(s, in d); break;
             case "letter-spacing": ApplyLetterSpacing(s, in d); break;
             case "word-spacing": ApplyWordSpacing(s, in d); break;
