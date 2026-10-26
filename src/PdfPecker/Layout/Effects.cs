@@ -35,6 +35,24 @@ internal sealed partial class LayoutEngine
             layer.ClipPoints = path?.Points.ToArray() ?? Array.Empty<float>();
             layer.ClipEvenOdd = evenOdd;
         }
+        if (s.Clipped && layer.ClipVerbs == null)
+        {
+            // clip: rect() from the border box's top-left corner; an auto side is the border box's own edge. A box with
+            // a clip-path too keeps only that, which this rectangle rarely narrows in practice.
+            var r = s.ClipRect!;
+            float top = r[0].IsAuto ? 0 : r[0].Resolve(h), right = r[1].IsAuto ? w : r[1].Resolve(w);
+            float bottom = r[2].IsAuto ? h : r[2].Resolve(h), left = r[3].IsAuto ? 0 : r[3].Resolve(w);
+            float cw = Math.Max(0, right - left), ch = Math.Max(0, bottom - top);
+            var p = new PathBuilder();
+            p.MoveTo(x + left, y + top);
+            p.LineTo(x + left + cw, y + top);
+            p.LineTo(x + left + cw, y + top + ch);
+            p.LineTo(x + left, y + top + ch);
+            p.Close();
+            layer.ClipVerbs = p.Verbs.ToArray();
+            layer.ClipPoints = p.Points.ToArray();
+            layer.ClipEvenOdd = false;
+        }
         if (s.Filters is { } filters) ApplyFilter(layer, filters, s.Color);
         if (s.MaskImages != null)
         {

@@ -88,6 +88,29 @@ internal sealed partial class StyleResolver
         else if (ClipShape.Parse(d.Value, d.Em, _rootFontSize, _vw, _vh) is { } shape) { s.ClipShape = shape; s.SvgClipPath = null; }
     }
 
+    /// <summary>
+    /// clip: rect(top, right, bottom, left), the deprecated clip of absolutely positioned boxes, with commas or (as
+    /// browsers also accept) without; each side a length or auto. auto and anything else that does not parse clip nothing.
+    /// </summary>
+    private void ApplyClip(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit) { s.ClipRect = parent.ClipRect; return; }
+        s.ClipRect = null;
+        var v = d.Lower.AsSpan().Trim();
+        if (!v.StartsWith("rect(") || v[^1] != ')') return;
+        var args = v[5..^1].ToString();
+        var parts = args.Contains(',') ? args.Split(',', StringSplitOptions.TrimEntries) : CssParser.Tokens(args).ToArray();
+        if (parts.Length != 4) return;
+        var sides = new Length[4];
+        for (int i = 0; i < 4; i++)
+        {
+            if (parts[i] == "auto") sides[i] = Length.Auto;
+            else if (TryParseLength(parts[i], d.Em, _rootFontSize, out var l, _vw, _vh) && !l.IsAuto && !l.IsPercent) sides[i] = l;
+            else return;
+        }
+        s.ClipRect = sides;
+    }
+
     /// <summary>filter: a reference to an SVG filter, or a list of filter functions; setting one clears the other.</summary>
     private void ApplyFilter(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {

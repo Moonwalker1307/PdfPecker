@@ -295,6 +295,7 @@ internal sealed partial class StyleResolver
             case "backface-visibility":
                 break;
             case "clip-path": ApplyClipPath(s, parent, in d); break;
+            case "clip": ApplyClip(s, parent, in d); break;
             case "filter": ApplyFilter(s, parent, in d); break;
             case "backdrop-filter": ApplyBackdropFilter(s, parent, in d); break;
             case "mask-image": ApplyMaskImage(s, parent, in d); break;
