@@ -334,6 +334,7 @@ internal sealed class ComputedStyle
     public bool TableLayoutFixed; // table-layout: fixed
     public bool CaptionBottom;    // caption-side: bottom (inherited)
     public bool EmptyCellsHide;   // empty-cells: hide (inherited): with separated borders, empty cells paint nothing
+    public bool ImageOrientationNone; // image-orientation: none (inherited): photos are drawn as stored, ignoring EXIF
     public BoxShadow[]? BoxShadows;
     public BoxShadow[]? TextShadows; // text-shadow (inherited); spread and inset are not used
     public float TextStrokeWidth;    // -webkit-text-stroke-width (inherited): the outline drawn on the glyphs, centred on their edge

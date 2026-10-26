@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Globalization;
 using System.Text;
 
@@ -36,8 +37,52 @@ internal static class ExifReader
             altitude);
     }
 
+    /// <summary>
+    /// The EXIF orientation of a JPEG file, 1 to 8 (1 is upright as stored), or 1 when it has none or it is not
+    /// readable. Only the main directory is read.
+    /// </summary>
+    public static int ReadOrientation(byte[] jpeg)
+        => Find(jpeg) is { } tiff && TiffDirectory.Read(tiff, 0) is { } main && main.Single(Orientation, 1) is >= 1 and <= 8 and var o
+            ? (int)o : 1;
+
     /// <summary>The TIFF data of the first EXIF APP1 segment, found among the segments before the image data.</summary>
     private static byte[]? Find(byte[] d)
+        => FindSegment(d) is var (at, length) ? d.AsSpan(at + 4 + ExifHeader.Length, length - 2 - ExifHeader.Length).ToArray() : null;
+
+    /// <summary>
+    /// The first EXIF APP1 segment of a JPEG file, marker included, with its orientation set to 1, for the same photo
+    /// once it has been turned upright; null when it has none or the orientation is not where the reader found it.
+    /// </summary>
+    public static byte[]? UprightSegment(byte[] jpeg)
+    {
+        if (FindSegment(jpeg) is not var (at, length)) return null;
+        var segment = jpeg.AsSpan(at, 2 + length).ToArray();
+        var tiff = segment.AsSpan(4 + ExifHeader.Length);
+        bool little = tiff[0] == (byte)'I';
+        uint U32(ReadOnlySpan<byte> b) => little ? BinaryPrimitives.ReadUInt32LittleEndian(b) : BinaryPrimitives.ReadUInt32BigEndian(b);
+        int U16(ReadOnlySpan<byte> b) => little ? BinaryPrimitives.ReadUInt16LittleEndian(b) : BinaryPrimitives.ReadUInt16BigEndian(b);
+        uint ifd = U32(tiff[4..]);
+        if (ifd > (uint)tiff.Length - 2) return null;
+        int count = U16(tiff[(int)ifd..]);
+        for (int i = 0; i < count; i++)
+        {
+            int entry = (int)ifd + 2 + i * 12;
+            if (entry > tiff.Length - 12) return null;
+            // A SHORT whose value sits in the entry itself, in its first two bytes.
+            if (U16(tiff[entry..]) != Orientation) continue;
+            if (U16(tiff[(entry + 2)..]) != 3 || U32(tiff[(entry + 4)..]) != 1) return null;
+            if (little) BinaryPrimitives.WriteUInt16LittleEndian(tiff[(entry + 8)..], 1);
+            else BinaryPrimitives.WriteUInt16BigEndian(tiff[(entry + 8)..], 1);
+            return segment;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// The start and length (after the marker) of the first EXIF APP1 segment with a TIFF header, found among the
+    /// segments before the image data.
+    /// </summary>
+    private static (int At, int Length)? FindSegment(byte[] d)
     {
         int i = 2;
         while (i + 4 <= d.Length && d[i] == MarkerPrefix)
@@ -52,7 +97,7 @@ internal static class ExifReader
             {
                 var tiff = payload[ExifHeader.Length..];
                 bool header = tiff.Length >= 8 && (tiff.StartsWith("II*\0"u8) || tiff.StartsWith("MM\0*"u8));
-                return header ? tiff.ToArray() : null;
+                return header ? (i, length) : null;
             }
             i += 2 + length;
         }
