@@ -485,6 +485,9 @@ internal sealed class ComputedStyle
     public Length PerspectiveOriginX = new(50, LengthUnit.Percent), PerspectiveOriginY = new(50, LengthUnit.Percent);
     public string? Content;                     // the content property as written; null = normal
     public string? StringSet;                   // string-set as written (named strings for running headers); null = none
+    public int? BookmarkLevel;                  // bookmark-level: null = unset (h1-h6 take their own level), 0 = none
+    public string? BookmarkLabel;               // bookmark-label as written; null = content(text)
+    public bool BookmarkClosed;                 // bookmark-state: closed
     public string? PageName;                    // page: the named page this box goes on (inherited; null = auto)
     public CounterOp[]? CounterReset, CounterSet, CounterIncrement;
 
@@ -847,6 +850,9 @@ internal sealed class ComputedStyle
         c.ColumnFillAuto = false;
         c.LineClamp = 0;
         c.StringSet = null;
+        c.BookmarkLevel = null;
+        c.BookmarkLabel = null;
+        c.BookmarkClosed = false;
         c.TableLayoutFixed = false;
         c.BoxShadows = null;
         return c;

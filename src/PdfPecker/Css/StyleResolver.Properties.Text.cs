@@ -450,6 +450,7 @@ internal sealed partial class StyleResolver
     }
 
     private const int MaxQuoteStrings = 64;
+    private const int MaxBookmarkLevel = 1000; // deeper nesting than any viewer shows, and a bound on the outline's depth
 
     private static void ApplyHyphenateLimitChars(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
@@ -489,6 +490,16 @@ internal sealed partial class StyleResolver
             if (c is < '0' or > '9') return null;
         int n = Invariant.TryParseInt(digits, out int v) ? Math.Min(v, HyphenateLimits.Max) : HyphenateLimits.Max;
         return n >= 1 ? n : null;
+    }
+
+    /// <summary>bookmark-level: none, or the level (1 and up) of the bookmark the element makes in the PDF outline.</summary>
+    private static void ApplyBookmarkLevel(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit) s.BookmarkLevel = parent.BookmarkLevel;
+        else if (d.Lower is "initial" or "unset") s.BookmarkLevel = null;
+        else if (d.Lower == "none") s.BookmarkLevel = 0;
+        else if (int.TryParse(d.Lower, NumberStyles.Integer, CultureInfo.InvariantCulture, out int level) && level > 0)
+            s.BookmarkLevel = Math.Min(level, MaxBookmarkLevel);
     }
 
     private static void ApplyLineClamp(ComputedStyle s, in DeclaredValue d)

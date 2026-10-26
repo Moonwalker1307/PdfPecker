@@ -355,6 +355,12 @@ internal sealed partial class StyleResolver
             case "widows": ApplyWidows(s, parent, in d); break;
             case "page": ApplyPage(s, parent, in d); break;
             case "string-set": s.StringSet = d.Lower is "none" ? null : d.Inherit ? parent.StringSet : d.Value; break;
+            case "bookmark-level": ApplyBookmarkLevel(s, parent, in d); break;
+            case "bookmark-label": s.BookmarkLabel = d.Inherit ? parent.BookmarkLabel : d.Lower is "initial" or "unset" ? null : d.Value; break;
+            case "bookmark-state":
+                if (d.Inherit) s.BookmarkClosed = parent.BookmarkClosed;
+                else if (d.Lower is "open" or "initial" or "unset" or "closed") s.BookmarkClosed = d.Lower == "closed";
+                break;
             case "footnote-display": ApplyFootnoteDisplay(s, parent, in d); break;
             case "footnote-policy": ApplyFootnotePolicy(s, parent, in d); break;
 

@@ -14,6 +14,7 @@ internal sealed partial class PdfDocumentWriter
     {
         public string Title = "";
         public int Level, Id, Descendants;
+        public bool Closed;
         public float Y;
         public Html.Element? Heading;
         public OutlineItem? Parent, Prev, Next;
@@ -33,7 +34,7 @@ internal sealed partial class PdfDocumentWriter
         foreach (var h in headings)
         {
             if (!anchors.TryGetValue(h.Key, out float y)) continue;
-            var item = new OutlineItem { Title = h.Title, Level = h.Level, Y = y, Heading = h.Element };
+            var item = new OutlineItem { Title = h.Title, Level = h.Level, Y = y, Heading = h.Element, Closed = h.Closed };
             while (stack.Count > 0 && stack[^1].Level >= h.Level) stack.RemoveAt(stack.Count - 1);
             if (stack.Count > 0)
             {
@@ -41,7 +42,12 @@ internal sealed partial class PdfDocumentWriter
                 item.Parent = parent;
                 if (parent.Children.Count > 0) { item.Prev = parent.Children[^1]; item.Prev.Next = item; }
                 parent.Children.Add(item);
-                for (var p = parent; p != null; p = p.Parent) p.Descendants++;
+                // An item counts the descendants it shows when open: those not inside a closed item below it.
+                for (var p = parent; p != null; p = p.Parent)
+                {
+                    p.Descendants++;
+                    if (p.Closed) break;
+                }
             }
             else
             {
@@ -59,8 +65,10 @@ internal sealed partial class PdfDocumentWriter
     {
         var items = doc.OutlineItems;
         var top = items.Where(o => o.Parent == null).ToList();
+        // The outline counts the items shown at first: the top level and what open items show.
+        int shown = top.Sum(o => 1 + (o.Closed ? 0 : o.Descendants));
         Begin(doc.OutlinesId).Ascii("<< /Type /Outlines /First ").Int(top[0].Id).Ascii(" 0 R /Last ").Int(top[^1].Id)
-            .Ascii(" 0 R /Count ").Int(items.Count).Ascii(" >>");
+            .Ascii(" 0 R /Count ").Int(shown).Ascii(" >>");
         End();
         foreach (var item in items)
         {
@@ -71,7 +79,7 @@ internal sealed partial class PdfDocumentWriter
             if (item.Next != null) _out.Ascii(" /Next ").Int(item.Next.Id).Ascii(" 0 R");
             if (item.Children.Count > 0)
                 _out.Ascii(" /First ").Int(item.Children[0].Id).Ascii(" 0 R /Last ").Int(item.Children[^1].Id)
-                    .Ascii(" 0 R /Count ").Int(item.Descendants);
+                    .Ascii(" 0 R /Count ").Int(item.Closed ? -item.Descendants : item.Descendants);
             _out.Sp();
             WriteGoTo(item.Y, item.Heading is { } h ? Structure?.ElementOf(h) : null);
             _out.Ascii(" >>");
