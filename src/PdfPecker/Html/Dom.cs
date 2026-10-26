@@ -88,11 +88,17 @@ internal sealed class Element : Node
     /// </summary>
     public string? AltText;
 
-    /// <summary>An img element that shows a picture (not its alt text).</summary>
-    public bool IsPicture => AltText == null && Name == "img";
+    /// <summary>
+    /// An embed or object element whose resource is a picture: it is laid out and drawn as an img showing that picture,
+    /// as browsers show it, and an object's fallback content is not shown.
+    /// </summary>
+    public bool EmbedsPicture;
+
+    /// <summary>An img element that shows a picture (not its alt text), or an embed or object element that shows one.</summary>
+    public bool IsPicture => AltText == null && Name == "img" || EmbedsPicture;
 
     /// <summary>An element drawn as a picture or drawing that CSS sizes from its intrinsic size: a picture or an inline svg.</summary>
-    public bool IsReplaced => AltText == null && Name is "img" or "svg";
+    public bool IsReplaced => AltText == null && Name is "img" or "svg" || EmbedsPicture;
 
     /// <summary>
     /// For a query container: the size of its content box at its last layout, in points, or NaN before it was laid

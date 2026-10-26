@@ -24,6 +24,8 @@ internal sealed partial class StyleResolver
         switch (e.Name)
         {
             case "img":
+            case "embed":
+            case "object":
                 if ((v = e.GetAttribute("width")) != null) Hint("width", PxOrPercent(v));
                 if ((v = e.GetAttribute("height")) != null) Hint("height", PxOrPercent(v));
                 if ((v = e.GetAttribute("hspace")) != null) { Hint("margin-left", PxOrPercent(v)); Hint("margin-right", PxOrPercent(v)); }
