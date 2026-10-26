@@ -73,6 +73,8 @@ internal sealed partial class PdfDocumentWriter
     private uint _fill;
     private bool _inText;
     private TextFont? _textFont;
+    private GlyphSubset? _textSubset; // the colour font subset and its Type 3 font (page) last selected with _textFont
+    private int _textPage;
     private float _textSize, _tw, _tc;
     private int _tr;           // text rendering mode: 0 fill, 2 fill and stroke (synthetic bold), 3 invisible
     // Writing only the text of content drawn as pixels, invisibly, so that it can still be selected, searched and tagged.
@@ -94,6 +96,10 @@ internal sealed partial class PdfDocumentWriter
     private readonly List<FontRun> _runs = new();
     private readonly Dictionary<FontProgram, GlyphSubset> _subsets = new();
     private readonly List<GlyphSubset> _subsetList = new();
+    // The subsets of colour fonts that draw with the text colour, one for each colour (RGB) they are drawn in.
+    private readonly Dictionary<(FontProgram, uint), GlyphSubset> _colorSubsets = new();
+    // The object number of each subset's first object.
+    private int[] _subsetIds = Array.Empty<int>();
     private float _yOrigin; // distance from the page top to flow y = 0 on the page being written
     private readonly ByteBuffer _patterns = new(256); // "/P1 << ... >>" entries for the shared resources
     private readonly List<Gradient> _conics = new();  // conic gradients, whose functions are stream objects
@@ -397,6 +403,7 @@ internal sealed partial class PdfDocumentWriter
 
         // Every object gets its number before the first is written, except those that only writing the pages
         // reveals (annotations, patterns, transparency groups, masks), which are numbered after them.
+        PrepareColorGlyphs();
         NumberObjects(doc);
 
         // The objects are written in the order of the file, which with their numbers makes its bytes: keep it.
@@ -497,7 +504,7 @@ internal sealed partial class PdfDocumentWriter
 
         // Object numbers: the next free one, then those handed out (0 for an object the file does not have).
         public int Next = 1;
-        public int CatalogId, PagesId, ResourcesId, InfoId, FirstEmbeddedId, OutlinesId, WatermarkId, WatermarkSvgId;
+        public int CatalogId, PagesId, ResourcesId, GlyphResourcesId, InfoId, OutlinesId, WatermarkId, WatermarkSvgId;
         public int MetadataId, OutputIntentId, IccId, EncryptId, StructRootId;
         public int[] FontIds = null!, PageIds = null!, ContentIds = null!, FileSpecIds = null!, FormIds = null!, MaskIds = null!;
         public List<OutlineItem> OutlineItems = null!;
@@ -532,8 +539,17 @@ internal sealed partial class PdfDocumentWriter
         var usedFonts = doc.UsedFonts;
         doc.FontIds = new int[usedFonts.Length];
         for (int i = 0; i < usedFonts.Length; i++) if (usedFonts[i]) doc.FontIds[i] = doc.Next++;
-        doc.FirstEmbeddedId = doc.Next;
-        doc.Next += _subsetList.Count * 5; // Type0 font, CIDFont, descriptor, font file, ToUnicode CMap
+        _subsetIds = new int[_subsetList.Count];
+        for (int i = 0; i < _subsetList.Count; i++)
+        {
+            _subsetIds[i] = doc.Next;
+            // Type0 font, CIDFont, descriptor, font file, ToUnicode CMap; or, for colour glyphs, a Type 3 font, its
+            // descriptor and ToUnicode CMap for every 256 glyphs, and a glyph procedure for each glyph.
+            var subset = _subsetList[i];
+            doc.Next += subset.Color == null ? 5 : ColorFontPages(subset) * 3 + subset.Glyphs.Count;
+        }
+        // The colour fonts' resources: the shared ones without the fonts, so that no font lists itself.
+        if (_subsetList.Exists(static s => s.Color != null)) doc.GlyphResourcesId = doc.Next++;
         foreach (var img in doc.Images)
         {
             img.ObjectNumber = doc.Next++;

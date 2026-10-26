@@ -124,12 +124,13 @@ internal sealed partial class PdfDocumentWriter
         }
         var m = shape.TextMatrix;
         var svgFont = Leaf(shape.Font!);
-        if (svgFont is EmbeddedFont svgEmbedded) b.Ascii("BT /E").Int(_subsetList.IndexOf(_subsets[svgEmbedded.Program]) + 1);
+        if (svgFont is EmbeddedFont svgEmbedded) WriteFontName(b.Ascii("BT "), Subset(svgEmbedded.Program, SvgTextColor(shape)), 0);
         else b.Ascii("BT /F").Int(((StandardFont)shape.Font!).Index + 1);
         b.Sp().Num(shape.FontSize).Ascii(" Tf ").Int(mode).Ascii(" Tr 0 Tw ")
             .Num(shape.CharSpacing).Ascii(" Tc ").Num6(m.A).Sp().Num6(m.B).Sp().Num6(m.C).Sp().Num6(m.D).Sp().Num(m.E).Sp().Num(m.F)
             .Ascii(" Tm ");
-        if (svgFont is EmbeddedFont svgFontEmbedded) WriteGlyphHex(b, svgFontEmbedded, _subsets[svgFontEmbedded.Program], shape.Text!, shape.FontSize, shape.Rtl, shape.CharSpacing);
+        if (svgFont is EmbeddedFont svgFontEmbedded)
+            WriteGlyphHex(b, svgFontEmbedded, Subset(svgFontEmbedded.Program, SvgTextColor(shape)), shape.Text!, shape.FontSize, shape.Rtl, shape.CharSpacing);
         else WriteStandardText(b, shape.Font!, shape.Rtl ? Text.Bidi.VisualText(shape.Text!) : shape.Text!);
         b.Ascii(" ET\n");
     }
@@ -145,12 +146,13 @@ internal sealed partial class PdfDocumentWriter
         var path = shape.TextPath!;
         var font = Leaf(shape.Font!);
         float size = shape.FontSize, pen = shape.PathStart;
-        if (font is EmbeddedFont embedded) b.Ascii("BT /E").Int(_subsetList.IndexOf(_subsets[embedded.Program]) + 1);
+        if (font is EmbeddedFont embedded) WriteFontName(b.Ascii("BT "), Subset(embedded.Program, SvgTextColor(shape)), 0);
         else b.Ascii("BT /F").Int(((StandardFont)font).Index + 1);
         b.Sp().Num(size).Ascii(" Tf ").Int(mode).Ascii(" Tr 0 Tw 0 Tc\n");
         if (font is EmbeddedFont ef)
         {
-            var subset = _subsets[ef.Program];
+            var subset = Subset(ef.Program, SvgTextColor(shape));
+            int page = 0;
             bool positioned = ef.Shape(shape.Text!, 0, shape.Text!.Length, _glyphs, shape.Rtl);
             if (shape.Rtl) _glyphs.Reverse();
             bool skipNotdef = NoNotdef;
@@ -174,8 +176,16 @@ internal sealed partial class PdfDocumentWriter
                 int cid = subset.Cid(_glyphs, i, shape.Text!);
                 if (!(cid == 0 && skipNotdef) && PlaceOnPath(b, shape, pen, advance * size / 1000f, dx * size / 1000f, dy * size / 1000f))
                 {
+                    if (subset.Color != null && cid >> 8 != page)
+                    {
+                        // A colour font's glyphs are spread over Type 3 fonts of 256 glyphs each.
+                        page = cid >> 8;
+                        WriteFontName(b, subset, page);
+                        b.Sp().Num(size).Ascii(" Tf ");
+                    }
                     b.Byte((byte)'<');
-                    Hex4(b, cid);
+                    if (subset.Color != null) b.Byte(HexDigits[(cid >> 4) & 15]).Byte(HexDigits[cid & 15]);
+                    else Hex4(b, cid);
                     b.Ascii("> Tj\n");
                 }
                 pen += advance * size / 1000f + shape.CharSpacing;
@@ -300,7 +310,7 @@ internal sealed partial class PdfDocumentWriter
         if (shape.Children is not { Count: > 0 } children) return;
         var inner = shape.ImageMatrix.Then(toPage);
         var saved = SaveState();
-        if (shape.ImageAlpha == 255)
+        if (shape.ImageAlpha == 255 && shape.BlendMode == null && !shape.Isolated)
         {
             b.Ascii("q ");
             WriteMatrix(b, shape.ImageMatrix).Ascii(" cm\n");
@@ -320,8 +330,14 @@ internal sealed partial class PdfDocumentWriter
         _streamSpace = streamSpace;
         RestoreState(saved);
         _forms.Add(group.Span.ToArray());
-        _formIsolated.Add(false);
+        _formIsolated.Add(shape.Isolated);
         _formStreams.Add(null);
+        if (shape.BlendMode is { } blend)
+        {
+            _blendStates.Add((shape.ImageAlpha, blend));
+            b.Ascii("q /g").Int(shape.ImageAlpha).Ascii(blend).Ascii(" gs /Fx").Int(_forms.Count).Ascii(" Do Q\n");
+            return;
+        }
         _groupAlphas.Add(shape.ImageAlpha);
         b.Ascii("q /g").Int(shape.ImageAlpha).Ascii(" gs /Fx").Int(_forms.Count).Ascii(" Do Q\n");
     }

@@ -1,6 +1,7 @@
 Copyright 2022 The Noto Project Authors (https://github.com/notofonts/arabic)
 Copyright 2024 The Noto Project Authors (https://github.com/notofonts/hebrew)
 Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source' (Noto Sans SC)
+Copyright 2022 Google Inc. (https://github.com/googlefonts/noto-emoji, Noto Color Emoji)
 
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.

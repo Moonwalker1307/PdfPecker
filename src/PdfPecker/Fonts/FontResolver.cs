@@ -271,18 +271,18 @@ internal sealed class FontResolver
         if (candidates.Count == 0) candidates.Add(standard);
 
         var primary = candidates[0];
-        var result = new FontChain(primary, cp =>
+        var result = new FontChain(primary, (cp, accept) =>
         {
             for (int i = 1; i < candidates.Count; i++)
-                if (Covers(candidates[i], cp)) return candidates[i];
-            if (!candidates.Contains(standard) && Covers(standard, cp)) return standard;
+                if (Covers(candidates[i], cp) && (accept == null || accept(candidates[i]))) return candidates[i];
+            if (!candidates.Contains(standard) && Covers(standard, cp) && (accept == null || accept(standard))) return standard;
             foreach (var family in AllFamilies())
             {
                 if (listed.Contains(family)) continue;
                 foreach (var f in MatchFamily(family, weight, italic, variation))
-                    if (f.Covers(cp)) return f;
+                    if (f.Covers(cp) && (accept == null || accept(f))) return f;
             }
-            return Bundled(generic, bold, italic, cp);
+            return Bundled(generic, bold, italic, cp) is { } bundled && (accept == null || accept(bundled)) ? bundled : null;
         });
         _resolved[key] = result;
         return result;
