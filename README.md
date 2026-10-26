@@ -126,10 +126,10 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   (`text-underline-position`), drop caps, inline SVG and PNG, JPEG, GIF, WebP, BMP and TIFF images (also chosen by
   `srcset` and `<picture>`, and photos turned upright by their EXIF orientation), laid out as Chrome lays them out.
   [More](https://pdfpecker.net/docs/html-and-css/)
-- **Paged media**: `@page` sizes and margin boxes, running headers and footers (also a first page of its own),
-  footnotes, tables of contents with page numbers, break control (also table row groups and group header rows kept
-  together, as reports keep a group on one page), table headers repeated on every page, and bookmarks from the
-  headings that `bookmark-level`, `bookmark-label` and `bookmark-state` can extend, rename or close.
+- **Paged media**: `@page` sizes and margin boxes, running headers and footers (also a first page of its own, and bands
+  of their own for named pages), footnotes, tables of contents with page numbers, break control (also table row groups
+  and group header rows kept together, as reports keep a group on one page), table headers repeated on every page, and
+  bookmarks from the headings that `bookmark-level`, `bookmark-label` and `bookmark-state` can extend, rename or close.
   [More](https://pdfpecker.net/docs/paged-media/)
 - **Content scaled to fit a box**: `-pdfpecker-scale-to-fit: shrink` fits text of any length into a fixed space, for
   labels, badges and certificates. [More](https://pdfpecker.net/docs/html-and-css/#scale-content-to-fit-a-box)

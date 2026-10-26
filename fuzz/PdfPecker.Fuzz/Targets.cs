@@ -62,6 +62,8 @@ internal static class Targets
         "<style>*::first-letter{initial-letter:3 2}</style>", "<style>p::first-letter{initial-letter:1e9 raise;padding:1e9px}</style>",
         "<img srcset=\"data:image/png;base64, 1e-30x, a 1e30x, b 1x 2w,,\">", "<img srcset=\"a 999999999w, b 1w\" sizes=\"(width>0) calc(1e9px*1e9), -1px, ((((\">",
         "<source srcset=\"a 2x\" media=\"(((\" type=\"image/png;x\">", "sizes=\"0px\"", "srcset=\"a 0.0001x, b 0x\"",
+        "<header data-sticky-pdf-header data-sticky-pdf-page=a>{page} of {total-pages}</header>", "<div data-sticky-pdf-first-footer data-sticky-pdf-page=\" a \">",
+        "<section style=\"page:a\">", "<section style=\"page:b;break-before:page\">", "data-sticky-pdf-page=b",
     };
 
     private static readonly (string, string)[] HtmlNesters =

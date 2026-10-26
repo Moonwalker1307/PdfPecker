@@ -27,7 +27,7 @@ public static partial class HtmlToPdf
         /// <summary>Whether the root element is right to left, which makes the first page a left page.</summary>
         private bool _rtlPages;
         private readonly Dictionary<string, PageSetup> _namedSetups = new(StringComparer.Ordinal);
-        private readonly Dictionary<(string?, bool, bool), PageSetup> _variants = new();
+        private readonly Dictionary<(string?, bool, bool, bool), PageSetup> _variants = new();
         private readonly Dictionary<string, ComputedStyle> _footnoteAreas = new(StringComparer.Ordinal);
 
         /// <summary>The canvas background's style, the root element's or else the body's, or null for none.</summary>
@@ -52,18 +52,21 @@ public static partial class HtmlToPdf
 
         /// <summary>
         /// Named pages (page: wide with @page wide { ... }): each run of content on one named page gets that page's
-        /// setup, or the document's when no rule names it.
+        /// setup, or the document's when neither a rule nor a band names it.
         /// </summary>
         private PageSetup SetupFor(string? name)
         {
-            if (name == null || _options.IgnoreCssPageRules || !_sheet.PageRules.Any(r => r.Name == name && r.Selector.Length == 0)) return _page;
+            if (name == null) return _page;
+            bool rules = !_options.IgnoreCssPageRules && _sheet.PageRules.Any(r => r.Name == name && r.Selector.Length == 0);
+            if (!rules && _namedBands?.ContainsKey(name) != true) return _page;
             if (_namedSetups.TryGetValue(name, out var cached)) return cached;
             var setup = PageOfOptions(_options);
-            ApplyPageRules(_sheet.PageDeclarations, setup);
-            foreach (var rule in _sheet.PageRules)
-                if (rule.Name == name && rule.Selector.Length == 0) ApplyPageRules(rule.Declarations, setup);
+            if (!_options.IgnoreCssPageRules) ApplyPageRules(_sheet.PageDeclarations, setup);
+            if (rules)
+                foreach (var rule in _sheet.PageRules)
+                    if (rule.Name == name && rule.Selector.Length == 0) ApplyPageRules(rule.Declarations, setup);
             ScaleAndFit(setup, _scale, _options.Scale != 1);
-            ReserveBands(setup);
+            ReserveBands(setup, name, false, false);
             return _namedSetups[name] = setup;
         }
 
@@ -71,16 +74,17 @@ public static partial class HtmlToPdf
         /// The setup of a document page: @page :first, :left and :right rules that change the size, margins or
         /// background give those pages their own. The first page of the document is a right page, as in left-to-right
         /// books, and a left page when the root element is right to left, as in Chrome: the pages then progress from
-        /// right to left (CSS Paged Media 3, 4.2). A first page with a header or footer of its own also gets its own
-        /// setup, since the bands it reserves differ.
+        /// right to left (CSS Paged Media 3, 4.2). A first page with a header or footer of its own, of the document or of
+        /// a run of a named page, also gets its own setup, since the bands it reserves differ.
         /// </summary>
-        private PageSetup VariantFor(string? name, int documentPage)
+        private PageSetup VariantFor(string? name, int documentPage, bool runFirst)
         {
             var plain = SetupFor(name);
-            bool first = documentPage == 0, firstBands = first && FirstPageBands;
+            bool first = documentPage == 0;
+            bool firstBands = BandsOf(name, first, runFirst) != BandsOf(name, false, false);
             if (!_pageVariants && !firstBands) return plain;
             bool right = documentPage % 2 == (_rtlPages ? 1 : 0);
-            if (_variants.TryGetValue((name, first, right), out var cached)) return cached;
+            if (_variants.TryGetValue((name, first, right, firstBands), out var cached)) return cached;
             var setup = PageOfOptions(_options);
             // The rules that match the page, of lower specificity first and in source order otherwise.
             var side = right ? ":right" : ":left";
@@ -92,10 +96,10 @@ public static partial class HtmlToPdf
                 && setup.MarginTop == plain.MarginTop * plain.Scale && setup.MarginRight == plain.MarginRight * plain.Scale
                 && setup.MarginBottom == plain.MarginBottom * plain.Scale && setup.MarginLeft == plain.MarginLeft * plain.Scale
                 && setup.Background == plain.Background)
-                return _variants[(name, first, right)] = plain;
+                return _variants[(name, first, right, firstBands)] = plain;
             ScaleAndFit(setup, _scale, _options.Scale != 1);
-            ReserveBands(setup, first);
-            return _variants[(name, first, right)] = setup;
+            ReserveBands(setup, name, first, runFirst);
+            return _variants[(name, first, right, firstBands)] = setup;
         }
 
         /// <summary>The footnote area of a run's pages: the @footnote rules of the document's @page rules and of its named page.</summary>
@@ -159,7 +163,8 @@ public static partial class HtmlToPdf
         private int LayOutRun(PageRun run, int documentPage)
         {
             run.Page = SetupFor(run.Name);
-            run.Grid = new PageGrid(VariantFor(run.Name, documentPage), VariantFor(run.Name, documentPage + 1), VariantFor(run.Name, documentPage + 2));
+            run.Grid = new PageGrid(VariantFor(run.Name, documentPage, true), VariantFor(run.Name, documentPage + 1, false),
+                VariantFor(run.Name, documentPage + 2, false));
             // The layout starts at the first page's width; on pages of other widths the content takes their width.
             run.Width = run.Grid.SetupOf(0).ContentWidth;
             var restore = run.Keep is { } keep ? KeepOnly(keep) : null;
