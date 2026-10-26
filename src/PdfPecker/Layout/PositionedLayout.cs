@@ -269,7 +269,7 @@ internal sealed partial class LayoutEngine
         var layer = WrapLayer(opsStart, order, stackingContext: s.ZIndex != null || s.Transform != null || s.Perspective != null || s.Opacity < 1 || s.HasEffects);
         layer.TreeOrder = TreeOrder(e);
         layer.Opacity = s.Opacity;
-        if (s.HasEffects) ApplyEffects(e, layer, cbW);
+        if (s.HasEffects || s.Clipped) ApplyEffects(e, layer, cbW);
         if (s.Transform is { } fns)
         {
             float w = _lastBoxW, h = _lastBoxH;

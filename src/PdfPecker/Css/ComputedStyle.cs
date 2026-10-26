@@ -391,6 +391,7 @@ internal sealed class ComputedStyle
     public float SvgFloodOpacity = 1;           // flood-opacity
     public uint SvgLightingColor = 0xFFFFFFFFu; // lighting-color
     public ClipShape? ClipShape;                // clip-path: a basic shape or a reference box, on HTML elements
+    public Length[]? ClipRect;                  // clip: rect(top, right, bottom, left) from the border box's corner, auto sides as auto
     public string? BlendMode;                   // mix-blend-mode, as a PDF blend mode name; null = normal
     public string?[]? BackgroundBlendModes;     // background-blend-mode per layer, as PDF names (null = normal); null = all normal
     public bool Isolate;                        // isolation: isolate
@@ -701,6 +702,8 @@ internal sealed class ComputedStyle
 
     /// <summary>Absolutely positioned (absolute or fixed): taken out of the flow and placed against a containing block.</summary>
     public bool OutOfFlow => Position is Position.Absolute or Position.Fixed;
+    /// <summary>The clip rectangle applies only to absolutely positioned boxes.</summary>
+    public bool Clipped => ClipRect != null && OutOfFlow;
 
     /// <summary>Positioned (anything but static): a containing block for absolutely positioned descendants.</summary>
     public bool Positioned => Position != Position.Static;
@@ -747,6 +750,7 @@ internal sealed class ComputedStyle
         c.SvgFloodOpacity = 1;
         c.SvgLightingColor = 0xFFFFFFFFu;
         c.ClipShape = null;
+        c.ClipRect = null;
         c.BlendMode = null;
         c.BackgroundBlendModes = null;
         c.Isolate = false;
