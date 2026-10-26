@@ -68,7 +68,7 @@ internal sealed partial class LayoutEngine
                 AddAtomicBreaks(st, e, before, at);
                 return;
             }
-            case "img" when e.AltText == null:
+            case "img" or "embed" or "object" when e.IsPicture:
             {
                 int at = st.Items.Count;
                 AddInlineImage(st, e, s, href);

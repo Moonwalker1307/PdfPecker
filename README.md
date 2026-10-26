@@ -125,9 +125,9 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   list markers), filters, masks, media and container queries, logical properties, `writing-mode`, `text-wrap`,
   `line-clamp` with your own `block-ellipsis`, underlines from the font or below the descenders
   (`text-underline-position`), drop caps, images and gradients in `::before` and `::after` content, inline SVG and
-  PNG, JPEG, GIF, WebP, BMP and TIFF images (also chosen by `srcset` and `<picture>`, and photos turned upright by
-  their EXIF orientation), and CSS-only charts such as Charts.css (column, bar, area, line and pie charts), laid out
-  as Chrome lays them out.
+  PNG, JPEG, GIF, WebP, BMP and TIFF images (also chosen by `srcset` and `<picture>`, shown by `<embed>` and `<object>`,
+  and photos turned upright by their EXIF orientation), and CSS-only charts such as Charts.css (column, bar, area,
+  line and pie charts), laid out as Chrome lays them out.
   [More](https://pdfpecker.net/docs/html-and-css/)
 - **Paged media**: `@page` sizes and margin boxes, running headers and footers (also a first page of its own, and bands
   of their own for named pages), footnotes, tables of contents with page numbers, break control (also table row groups
