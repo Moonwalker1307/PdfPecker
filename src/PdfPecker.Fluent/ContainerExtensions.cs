@@ -182,6 +182,18 @@ public static partial class ContainerExtensions
     public static IContainer ShowIf(this IContainer container, bool condition)
         => condition ? container : Decorate(container, new Decorator(DecoratorKind.Hidden));
 
+    /// <summary>
+    /// In a page header or footer, shows the content on the first page only, as for a letterhead. Elsewhere content
+    /// appears once anyway, so this changes nothing there.
+    /// </summary>
+    public static IContainer ShowOnce(this IContainer container) => Decorate(container, new Decorator(DecoratorKind.ShowOnce));
+
+    /// <summary>
+    /// In a page header or footer, shows the content on every page but the first, as for a slim header after a
+    /// letterhead. Elsewhere content appears once, on its first page, so it is left out there.
+    /// </summary>
+    public static IContainer SkipOnce(this IContainer container) => Decorate(container, new Decorator(DecoratorKind.SkipOnce));
+
     // Text and semantics
 
     /// <summary>The text style for every text inside the slot.</summary>

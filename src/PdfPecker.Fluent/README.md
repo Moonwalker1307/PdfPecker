@@ -52,7 +52,8 @@ Document.Create(container =>
   `ShowIf` and right-to-left content.
 - **More layout**: `Layers` (watermarks under and stamps over content), `Inlined` (items that wrap like words, such as
   tags), `MultiColumn` (newspaper columns), `EnsureSpace` (keeps a heading off the bottom of a page), `Unconstrained`,
-  `ZIndex`, `AspectRatio`, `Shadow`, rounded single corners, `Shrink`, `Placeholder`, `DebugArea` and `Lazy`.
+  `ZIndex`, `AspectRatio`, `Shadow`, rounded single corners, `Shrink`, `ScaleToFit` (draws content smaller until it
+  fits a box of fixed size, for badges and labels), `Placeholder`, `DebugArea` and `Lazy`.
 - **Repeating and lists**: `Decoration` (content with a part before and after it that repeat on every page it
   crosses) and `List` (bulleted, numbered or custom-marker lists, tagged as lists in PDF/UA).
 - **Transforms**: `Rotate`, `RotateLeft`, `RotateRight`, `Scale`, `ScaleHorizontal`, `ScaleVertical`, `FlipHorizontal`,
@@ -64,7 +65,8 @@ Document.Create(container =>
   (`text.Element()`); headings, which become PDF bookmarks and tags; links and links to named sections, and the page a
   section starts on (`BeginPageNumberOfSection`).
 - **Pages**: size, margins, page colour, a header and footer on every page, and `CurrentPageNumber` / `TotalPages`
-  in them. Several `Page` calls give page sets with their own size and margins.
+  in them. `ShowOnce` and `SkipOnce` in the header or footer give the first page a band of its own, such as a
+  letterhead followed by a slim header. Several `Page` calls give page sets with their own size and margins.
 - **Images and graphics**: PNG, JPEG, WebP, BMP, TIFF and GIF images, SVG, solid, dashed and dotted lines, and QR,
   EPC payment QR, Code 128 and EAN-13 barcodes.
 - **Accessibility**: `SemanticSection`, `SemanticArticle`, `SemanticHeader1` to `6`, `SemanticList`,
@@ -114,10 +116,13 @@ Most QuestPDF code ports by changing the `using` lines: `Document.Create`, `Page
   page breaks between items of a `Column` content, not inside one item taller than a page.
 - `text.Element` with `BelowBaseline` sits like `Top`. Font features work with embedded fonts that have them.
 - Of the section page numbers, only `BeginPageNumberOfSection` is available.
-- Not available: `Dynamic`, `Canvas`, `StopPaging`, `ShowOnce`, `SkipOnce`, `RepeatContent`, `ScaleToFit`,
-  `ExtendLastCellsToTableBottom`, `EndPageNumberOfSection`, `PageNumberWithinSection`, `TotalPagesWithinSection` and
-  the Companion previewer. PdfPecker can now scale a box's content to fit it and give the first page a header of its
-  own, so `ScaleToFit`, `ShowOnce` and `SkipOnce` are the next calls planned.
+- `ShowOnce` and `SkipOnce` act on the first page of the header and footer. Elsewhere content appears only once, so
+  `ShowOnce` changes nothing and `SkipOnce` leaves the content out, also in a `Decoration` or a table header, whose
+  repeats are all the same.
+- `ScaleToFit` fits the content into a `Height` or `MaxHeight` set before it, or into the height of the slot around it,
+  such as a row or a box with a `Height`.
+- Not available: `Dynamic`, `Canvas`, `StopPaging`, `RepeatContent`, `ExtendLastCellsToTableBottom`,
+  `EndPageNumberOfSection`, `PageNumberWithinSection`, `TotalPagesWithinSection` and the Companion previewer.
 
 ## Performance
 

@@ -37,7 +37,10 @@ internal sealed class HtmlWriter
     private readonly StringBuilder _rules = new();
     private readonly Stack<string> _open = new();
     private readonly ImageTable _images;
-    private bool _inBand;
+    private Band _band;
+
+    /// <summary>Whether the band being written has content for the first page only or for the other pages only.</summary>
+    private bool _bandHasOnce;
 
     /// <summary>The text alternative that SemanticImage gives the images inside it.</summary>
     private string? _alternativeText;
@@ -60,20 +63,10 @@ internal sealed class HtmlWriter
         CssValue.AddTextStyle(bodyDeclarations, page.Style, forBox: true);
         string? bodyClass = bodyDeclarations.Count > 0 ? Class(bodyDeclarations) : null;
 
-        if (page.Header.Child != null)
-        {
-            _inBand = true;
-            RenderContainer(page.Header, Box.Slot("header", ("data-sticky-pdf-header", "")));
-            _inBand = false;
-        }
+        if (page.Header.Child != null) RenderBand(page.Header, "header");
         // The footer comes after the content, so a browser that does not repeat it (Chrome) still shows it last.
         RenderContainer(page.Content, Box.Slot("main"));
-        if (page.Footer.Child != null)
-        {
-            _inBand = true;
-            RenderContainer(page.Footer, Box.Slot("footer", ("data-sticky-pdf-footer", "")));
-            _inBand = false;
-        }
+        if (page.Footer.Child != null) RenderBand(page.Footer, "footer");
         string body = _html.ToString();
 
         _html.Clear();
@@ -101,6 +94,23 @@ internal sealed class HtmlWriter
         return _html.ToString();
     }
 
+    /// <summary>
+    /// Writes a header or footer, which PdfPecker repeats on every page. When some of its content uses ShowOnce or
+    /// SkipOnce, the band is written a second time for the first page, which PdfPecker then uses there instead.
+    /// </summary>
+    private void RenderBand(Container band, string tag)
+    {
+        _band = Band.Running;
+        _bandHasOnce = false;
+        RenderContainer(band, Box.Slot(tag, ("data-sticky-pdf-" + tag, "")));
+        if (_bandHasOnce)
+        {
+            _band = Band.First;
+            RenderContainer(band, Box.Slot(tag, ("data-sticky-pdf-first-" + tag, "")));
+        }
+        _band = Band.None;
+    }
+
     // Slots and decorators
 
     /// <summary>
@@ -119,6 +129,19 @@ internal sealed class HtmlWriter
             {
                 element = null;
                 break;
+            }
+            if (decorator.Kind is DecoratorKind.ShowOnce or DecoratorKind.SkipOnce)
+            {
+                // Content outside the bands appears once, on its first page, so ShowOnce keeps it and SkipOnce
+                // leaves it out, as QuestPDF does.
+                _bandHasOnce |= _band != Band.None;
+                if (decorator.Kind == DecoratorKind.ShowOnce ? _band == Band.Running : _band != Band.Running)
+                {
+                    element = null;
+                    break;
+                }
+                element = decorator.Inner.Child;
+                continue;
             }
             if (decorator.Kind == DecoratorKind.Heading) heading = decorator.Level;
             else if (decorator.Kind == DecoratorKind.AlternativeText) _alternativeText = decorator.Text;
@@ -552,7 +575,7 @@ internal sealed class HtmlWriter
                     break;
                 case RunKind.PageNumber:
                 case RunKind.TotalPages:
-                    if (!_inBand)
+                    if (_band == Band.None)
                         throw new InvalidOperationException("CurrentPageNumber and TotalPages work only in a page header or footer.");
                     OpenInline("span", cls, null);
                     _html.Append(run.Kind == RunKind.PageNumber ? "{page}" : "{total-pages}");
@@ -733,7 +756,7 @@ internal sealed class HtmlWriter
                 case '&': _html.Append("&amp;"); break;
                 case '<': _html.Append("&lt;"); break;
                 case '>': _html.Append("&gt;"); break;
-                case '{' when _inBand: _html.Append("{<span></span>"); break;
+                case '{' when _band != Band.None: _html.Append("{<span></span>"); break;
                 default: _html.Append(c); break;
             }
         }
@@ -779,8 +802,12 @@ internal sealed class HtmlWriter
     /// sizes, then paint, then padding. A decorator that would need to sit outside what is already there starts a
     /// nested box instead.
     /// </summary>
+    private enum Band { None, Running, First }
+
     private sealed class Box
     {
+        private const string ScaleToFitProperty = "-pdfpecker-scale-to-fit";
+
         public string Tag { get; set; } = "div";
 
         /// <summary>Written even without content or styles: page slots, row items, table cells.</summary>
@@ -885,6 +912,12 @@ internal sealed class HtmlWriter
                     if (Direction != null) return false;
                     Direction = decorator.Text;
                     return true;
+                case DecoratorKind.ScaleToFit:
+                    // PdfPecker scales a box's content into the box's height or max-height; without one, the box takes
+                    // the height of the slot around it as its largest.
+                    return Has("height") || Has("max-height")
+                        ? TryAdd(Rank.Size, [(ScaleToFitProperty, "shrink")])
+                        : TryAdd(Rank.Size, [(ScaleToFitProperty, "shrink"), ("max-height", "100%")]);
                 case DecoratorKind.TextStyle:
                     // Inherited properties: an inner style simply wins over an outer one on the same element.
                     var declarations = new List<(string, string)>();

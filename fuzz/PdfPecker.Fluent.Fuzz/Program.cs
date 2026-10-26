@@ -362,8 +362,10 @@ internal static class Fuzz
 
     private static float Signed(Random r) => r.Next(2) == 0 ? Number(r) : -Number(r);
 
-    private static IContainer Decorate(IContainer c, Random r) => r.Next(46) switch
+    private static IContainer Decorate(IContainer c, Random r) => r.Next(48) switch
     {
+        46 => c.ScaleToFit(),
+        47 => r.Next(2) == 0 ? c.ShowOnce() : c.SkipOnce(),
         41 => c.ShrinkHorizontal(),
         42 => r.Next(2) == 0 ? c.Shrink() : c.ShrinkVertical(),
         43 => r.Next(6) switch
