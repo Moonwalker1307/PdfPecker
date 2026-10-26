@@ -264,9 +264,15 @@ internal sealed partial class PdfDocumentWriter
             {
                 EndText(b);
                 SetFillAlpha(b, CssColor.Black); // an image is painted with the fill alpha
+                // Chrome paints an image on whole CSS pixels, as it paints the box and border around it: without
+                // snapping, an image at a fractional position overlaps its border on one side and leaves a gap on the other.
+                float x0 = SnapPx(im.X), x1 = SnapPx(im.X + im.W);
+                float top = pageTop + SnapPx(im.Y - pageTop), bottom = pageTop + SnapPx(im.Y + im.H - pageTop);
+                if (x1 <= x0) { x0 = im.X; x1 = im.X + im.W; }
+                if (bottom <= top) { top = im.Y; bottom = im.Y + im.H; }
                 b.Ascii("q ");
-                if (im.Radii is { } ir) { RoundRectPath(b, im.X, im.Y, im.W, im.H, ir, pageTop); b.Ascii("W n "); }
-                b.Num(im.W).Ascii(" 0 0 ").Num(im.H).Sp().Num(PX(im.X)).Sp().Num(PY(im.Y + im.H, pageTop))
+                if (im.Radii is { } ir) { RoundRectPath(b, x0, top, x1 - x0, bottom - top, ir, pageTop); b.Ascii("W n "); }
+                b.Num(x1 - x0).Ascii(" 0 0 ").Num(bottom - top).Sp().Num(PX(x0)).Sp().Num(PY(bottom, pageTop))
                     .Ascii(" cm /Im").Int(imageIds[im.Image]).Ascii(" Do Q\n");
                 break;
             }
