@@ -249,7 +249,9 @@ public sealed class PdfOptions
     public string? UserStyleSheet { get; set; }
 
     /// <summary>
-    /// Add bookmarks (the PDF outline) built from the h1-h6 headings, nested by level. Default: true.
+    /// Add bookmarks (the PDF outline) built from the h1-h6 headings, nested by level. Default: true. The CSS
+    /// properties bookmark-level, bookmark-label and bookmark-state make other elements bookmarks, leave headings out
+    /// (bookmark-level: none), change a bookmark's text or start it closed.
     /// Links (<c>&lt;a href&gt;</c>) are always clickable: external URLs open in the browser and <c>#id</c> links jump to the element.
     /// </summary>
     public bool Bookmarks { get; set; } = true;

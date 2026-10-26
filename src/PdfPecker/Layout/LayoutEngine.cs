@@ -1328,7 +1328,7 @@ internal sealed partial class LayoutEngine
         // A box whose layout stopped early is laid out again in full right away; recording it now would put it in the
         // outline ahead of the headings inside it that were not reached yet. A grid row is laid out to see where its
         // content starts before the rows above it are placed, so headings found then would come out of order.
-        if (Headings != null && HeadingLevel(e.Name) is int level and > 0 && probe is not { Done: true } && !_probingGridRow)
+        if (Headings != null && (s.BookmarkLevel ?? HeadingLevel(e.Name)) is int level and > 0 && probe is not { Done: true } && !_probingGridRow)
             RecordHeading(e, level, y, opsStart);
         if (e.LayoutKey != null) SetAnchor(e.LayoutKey, ContentTop(y, opsStart));
         _boxTrailing = trailing;
@@ -1973,7 +1973,7 @@ internal sealed partial class LayoutEngine
         _headingKeys ??= new Dictionary<Element, string>();
         if (!_headingKeys.TryGetValue(e, out var key))
         {
-            var title = CollapseWhitespace(e.InnerText());
+            var title = CollapseWhitespace(e.BookmarkLabel ?? e.InnerText());
             // A heading without text gets no bookmark, which is remembered too: a heading's text is that of everything
             // in it, and headings nested in each other were read again in full every time they were laid out.
             if (title.Length == 0)
@@ -1983,7 +1983,7 @@ internal sealed partial class LayoutEngine
             }
             key = "\u0001h" + Headings!.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
             _headingKeys[e] = key;
-            Headings.Add(new OutlineHeading(title, level, key, e));
+            Headings.Add(new OutlineHeading(title, level, key, e, e.Style.BookmarkClosed));
         }
         if (key.Length > 0) SetAnchor(key, ContentTop(top, opsStart));
     }
@@ -2571,7 +2571,8 @@ internal sealed partial class LayoutEngine
 }
 
 /// <summary>
-/// A heading that becomes a PDF bookmark: its text, level (1-6), the key of its position in the anchors and its element
-/// (for the structure destination of a PDF/UA-2 bookmark).
+/// A heading, or an element with a CSS bookmark-level, that becomes a PDF bookmark: its text, level (1 and up), the key
+/// of its position in the anchors, its element (for the structure destination of a PDF/UA-2 bookmark) and whether it
+/// starts closed (bookmark-state: closed).
 /// </summary>
-internal readonly record struct OutlineHeading(string Title, int Level, string Key, Element? Element = null);
+internal readonly record struct OutlineHeading(string Title, int Level, string Key, Element? Element = null, bool Closed = false);

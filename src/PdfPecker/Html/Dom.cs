@@ -70,6 +70,8 @@ internal sealed class Element : Node
     public Css.FirstLineStyle? FirstLine;
     /// <summary>An anchor key under which layout records where this element starts (string-set elements).</summary>
     public string? LayoutKey;
+    /// <summary>The text of this element's bookmark when bookmark-label sets one; null for its own text.</summary>
+    public string? BookmarkLabel;
 
     /// <summary>A footnote (float: footnote): its number among the document's footnotes, from 0 in document order; else -1.</summary>
     public int FootnoteIndex = -1;

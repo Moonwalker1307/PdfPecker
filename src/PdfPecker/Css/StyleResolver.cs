@@ -411,6 +411,9 @@ internal sealed partial class StyleResolver
                 if (_firstLetterRules) GenerateFirstLetter(e);
             }
             if (e.Style.StringSet != null) SetStrings(e);
+            // bookmark-label is evaluated here, where counters and attributes have their values; content(text) is the default.
+            if (e.Style.BookmarkLabel is { } label && !label.Equals("content(text)", StringComparison.OrdinalIgnoreCase))
+                e.BookmarkLabel = GeneratedContent.Evaluate(label, e, this);
             if (container) PopContainer();
         }
         if (pseudos) Generate(parent, PseudoElement.After, ref scope);
