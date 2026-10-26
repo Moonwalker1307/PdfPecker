@@ -72,12 +72,12 @@ Before non-trivial work, read:
 - `src/PdfPecker.Fluent/` – the fluent package. The public API sits at the top level: `Document`, `PageDescriptor`,
   `ContainerExtensions` (decorators; transforms, placement and shadows in `ContainerExtensions.Layout.cs`, semantic
   calls in `ContainerExtensions.Semantics.cs`), `ContentExtensions` (text, column, row, table, layers, lists, images,
-  barcodes, lines), `Descriptors.cs`, `TextDescriptors.cs`, `TextStyle`, `Color`, `Colors`, `PageSizes`, `Unit`,
-  `FontManager`, `Placeholders` and `GenerateExtensions`. `Model/Elements.cs` is the tree the calls build;
-  `Html/HtmlWriter.cs` turns it into HTML, merging decorator chains into as few elements as the CSS box model allows
-  (see the comments on `Box`), with one class per distinct set of declarations; `Html/TableLayout.cs` places table
-  cells, `Html/ImageTable.cs` hands images to PdfPecker through a resource resolver, and `Html/CssValue.cs` formats and
-  escapes CSS values.
+  barcodes, lines; form fields in `ContentExtensions.Forms.cs` with `FormDescriptors.cs`), `Descriptors.cs`,
+  `TextDescriptors.cs`, `TextStyle`, `Color`, `Colors`, `PageSizes`, `Unit`, `FontManager`, `Placeholders` and
+  `GenerateExtensions`. `Model/Elements.cs` is the tree the calls build; `Html/HtmlWriter.cs` turns it into HTML,
+  merging decorator chains into as few elements as the CSS box model allows (see the comments on `Box`), with one class
+  per distinct set of declarations; `Html/TableLayout.cs` places table cells, `Html/ImageTable.cs` hands images to
+  PdfPecker through a resource resolver, and `Html/CssValue.cs` formats and escapes CSS values.
 - `tests/PdfPecker.Tests/` – xUnit. `Fixtures/` holds inputs, `Golden/` the baseline PDFs.
 - `tests/PdfPecker.Fluent.Tests/` – xUnit for the fluent package. `Golden/` holds the baseline HTML and PDFs of the
   examples.

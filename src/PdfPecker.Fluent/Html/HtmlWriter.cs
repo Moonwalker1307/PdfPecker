@@ -48,6 +48,9 @@ internal sealed class HtmlWriter
     /// <summary>Whether some text shows a section's page number, which needs the rule that shows it.</summary>
     private bool _sectionPages;
 
+    /// <summary>Whether some text has a footnote, which needs the rule that sets out the footnote area.</summary>
+    private bool _footnotes;
+
     private HtmlWriter(ImageTable images) => _images = images;
 
     /// <summary>
@@ -106,6 +109,7 @@ internal sealed class HtmlWriter
             for (int i = 0; i < pages.Count; i++) PageRule(pages[i], PageName(i));
         _html.Append(_rules);
         if (_sectionPages) _html.Append("[data-section-page]::after{content:target-counter(attr(data-section-page),page)}");
+        if (_footnotes) _html.Append("@page{@footnote{margin-top:8pt;padding-top:4pt;border-top:0.5pt solid currentColor}}");
         foreach (var rule in css) _html.Append('\n').Append(rule);
         _html.Append("</style></head>\n<body");
         if (bodyClass != null) WriteAttribute("class", bodyClass);
@@ -248,6 +252,9 @@ internal sealed class HtmlWriter
                 break;
             case ListElement list:
                 RenderList(list, box);
+                break;
+            case FormFieldElement field:
+                RenderFormField(field, box);
                 break;
             case HtmlElement html:
                 if (box.MustEmit) Open(box);
@@ -488,6 +495,95 @@ internal sealed class HtmlWriter
         _html.Append('>');
     }
 
+    /// <summary>
+    /// Writes a form control, which PdfPecker turns into a fillable field. Its text follows the slot's text style
+    /// rather than the browser's form font, and text fields and lists are as wide as the slot.
+    /// </summary>
+    private void RenderFormField(FormFieldElement field, Box box)
+    {
+        if (box.MustEmit) Open(box);
+        var declarations = new List<(string, string)> { ("display", "block"), ("margin", "0") };
+        if (field.Kind is FormFieldKind.CheckBox or FormFieldKind.RadioButton)
+        {
+            if (field.Size is { } size)
+            {
+                declarations.Add(("width", CssValue.Pt(size)));
+                declarations.Add(("height", CssValue.Pt(size)));
+            }
+        }
+        else
+        {
+            declarations.Add(("width", "100%"));
+            declarations.Add(("box-sizing", "border-box"));
+            declarations.Add(("font-family", "inherit"));
+            declarations.Add(("font-size", "inherit"));
+            declarations.Add(("font-weight", "inherit"));
+            declarations.Add(("font-style", "inherit"));
+            declarations.Add(("color", "inherit"));
+        }
+        string cls = Class(declarations);
+
+        switch (field.Kind)
+        {
+            case FormFieldKind.Text when field.Rows > 0:
+                _html.Append("<textarea");
+                FieldAttributes(field, cls);
+                WriteAttribute("rows", field.Rows.ToString(CultureInfo.InvariantCulture));
+                _html.Append('>');
+                // A textarea drops a line break straight after its start tag, so one more keeps a value that starts with one.
+                if (field.Value?.StartsWith('\n') == true) _html.Append('\n');
+                WriteText(field.Value ?? "");
+                _html.Append("</textarea>");
+                break;
+            case FormFieldKind.Text:
+                _html.Append("<input");
+                WriteAttribute("type", field.Password ? "password" : "text");
+                FieldAttributes(field, cls);
+                if (field.Value != null) WriteAttribute("value", field.Value);
+                _html.Append('>');
+                break;
+            case FormFieldKind.CheckBox:
+            case FormFieldKind.RadioButton:
+                _html.Append("<input");
+                WriteAttribute("type", field.Kind == FormFieldKind.CheckBox ? "checkbox" : "radio");
+                FieldAttributes(field, cls);
+                if (field.Value != null) WriteAttribute("value", field.Value);
+                if (field.Checked) _html.Append(" checked");
+                _html.Append('>');
+                break;
+            default:
+                _html.Append("<select");
+                FieldAttributes(field, cls);
+                if (field.Kind == FormFieldKind.ListBox)
+                {
+                    WriteAttribute("size", field.Rows.ToString(CultureInfo.InvariantCulture));
+                    if (field.MultiSelect) _html.Append(" multiple");
+                }
+                _html.Append('>');
+                foreach (var (text, value, selected) in field.Options)
+                {
+                    _html.Append("<option");
+                    if (value != null) WriteAttribute("value", value);
+                    if (selected) _html.Append(" selected");
+                    _html.Append('>');
+                    WriteText(text);
+                    _html.Append("</option>");
+                }
+                _html.Append("</select>");
+                break;
+        }
+    }
+
+    private void FieldAttributes(FormFieldElement field, string cls)
+    {
+        WriteAttribute("class", cls);
+        WriteAttribute("name", field.Name);
+        if (field.MaxLength > 0) WriteAttribute("maxlength", field.MaxLength.ToString(CultureInfo.InvariantCulture));
+        if (field.Tooltip != null) WriteAttribute("title", field.Tooltip);
+        if (field.ReadOnly) _html.Append(" readonly");
+        if (field.Required) _html.Append(" required");
+    }
+
     private void RenderLine(LineElement line, Box box)
     {
         bool absorbed = box.CanBecomeBlock;
@@ -580,7 +676,8 @@ internal sealed class HtmlWriter
                     style = position == TextPosition.Superscript ? style.Superscript() : position == TextPosition.Subscript ? style.Subscript() : style.NormalPosition();
                 CssValue.AddTextStyle(declarations, style, forBox: false);
             }
-            string? cls = declarations.Count > 0 ? Class(declarations) : null;
+            // A footnote writes a class of its own from these declarations.
+            string? cls = declarations.Count > 0 && run.Kind != RunKind.Footnote ? Class(declarations) : null;
 
             if (run.Kind == RunKind.Text && paragraphs)
             {
@@ -619,6 +716,18 @@ internal sealed class HtmlWriter
                     WriteAttribute("data-section-page", "#" + run.Target);
                     _html.Append("></span>");
                     break;
+                case RunKind.Footnote:
+                {
+                    if (_band != Band.None) throw new InvalidOperationException("Footnote works in the page content, not in a header or footer.");
+                    _footnotes = true;
+                    // The note keeps the span's own style; the paragraph's comes with it from where it is called.
+                    var note = new List<(string, string)>(declarations) { ("float", "footnote") };
+                    if (run.Style.Size == null) note.Add(("font-size", "0.8em"));
+                    OpenInline("span", Class(note), null);
+                    WriteText(run.Text);
+                    _html.Append("</span>");
+                    break;
+                }
                 case RunKind.PageNumber:
                 case RunKind.TotalPages:
                     if (_band == Band.None)

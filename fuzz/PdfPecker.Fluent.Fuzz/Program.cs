@@ -253,7 +253,8 @@ internal static class Fuzz
                 });
                 break;
             case 17:
-                c.Placeholder(r.Next(2) == 0 ? null : Text(r));
+                if (r.Next(2) == 0) c.Placeholder(r.Next(2) == 0 ? null : Text(r));
+                else FormField(c, r);
                 break;
             case 0:
                 c.Text(Text(r)).FontSize(Number(r));
@@ -274,8 +275,9 @@ internal static class Fuzz
                             Content(t.Element((TextInjectedElementAlignment)r.Next(0, r.Next(20) == 0 ? 8 : 5)), r, depth + 1);
                             continue;
                         }
-                        _ = r.Next(9) switch
+                        _ = r.Next(10) switch
                         {
+                            8 => t.Footnote(Text(r)).Style(Style(TextStyle.Default, r)),
                             0 => t.CurrentPageNumber(),
                             1 => t.TotalPages(),
                             2 => t.Hyperlink(Text(r), r.Next(10) != 0 ? "https://example.com/" + Uri.EscapeDataString(Text(r)) : Text(r)),
@@ -348,6 +350,29 @@ internal static class Fuzz
                     for (int i = r.Next(10); i > 0; i--) Cell(t.Cell(), r, depth);
                     if (r.Next(4) == 0) t.Footer(f => Cell(f.Cell(), r, depth));
                 });
+                break;
+        }
+    }
+
+    private static void FormField(IContainer c, Random r)
+    {
+        string name = r.Next(10) == 0 ? Text(r) : "f" + r.Next(5).ToString(CultureInfo.InvariantCulture);
+        switch (r.Next(5))
+        {
+            case 0:
+                var text = c.TextField(name).Value(Text(r)).Tooltip(Text(r)).ReadOnly(r.Next(4) == 0).Password(r.Next(6) == 0);
+                if (r.Next(3) == 0) text.Multiline(r.Next(20) == 0 ? r.Next(-2, 2000) : r.Next(1, 6));
+                if (r.Next(3) == 0) text.MaxLength(r.Next(20) == 0 ? r.Next(-2, 200_000) : r.Next(1, 50));
+                break;
+            case 1:
+                c.CheckBox(name).Checked(r.Next(2) == 0).ExportValue(r.Next(4) == 0 ? Text(r) : "Yes").Size(Number(r));
+                break;
+            case 2:
+                c.RadioButton(name, r.Next(4) == 0 ? Text(r) : "v" + r.Next(3).ToString(CultureInfo.InvariantCulture)).Checked(r.Next(2) == 0).Required(r.Next(4) == 0);
+                break;
+            default:
+                var choice = r.Next(2) == 0 ? c.ComboBox(name) : c.ListBox(name).MultiSelect(r.Next(2) == 0).Rows(r.Next(20) == 0 ? r.Next(-2, 2000) : r.Next(1, 6));
+                for (int i = r.Next(6); i > 0; i--) choice.Option(Text(r), r.Next(2) == 0 ? null : Text(r), r.Next(3) == 0);
                 break;
         }
     }

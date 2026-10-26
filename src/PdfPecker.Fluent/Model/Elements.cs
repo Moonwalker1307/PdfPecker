@@ -143,7 +143,7 @@ internal sealed class TableElement : Element
     public List<TableCell> Footer { get; } = [];
 }
 
-internal enum RunKind { Text, PageNumber, TotalPages, Hyperlink, SectionLink, SectionPageNumber, Element }
+internal enum RunKind { Text, PageNumber, TotalPages, Hyperlink, SectionLink, SectionPageNumber, Element, Footnote }
 
 internal sealed class TextRun
 {
@@ -232,6 +232,38 @@ internal sealed class ListElement : Element
     public string MarkerStyle { get; set; } = "disc";
     public bool Ordered { get; set; }
     public int Start { get; set; } = 1;
+}
+
+internal enum FormFieldKind { Text, CheckBox, RadioButton, ComboBox, ListBox }
+
+/// <summary>A form field that PdfPecker turns into a fillable PDF field.</summary>
+internal sealed class FormFieldElement : Element
+{
+    public FormFieldElement(FormFieldKind kind, string name)
+    {
+        Kind = kind;
+        Name = name;
+    }
+
+    public FormFieldKind Kind { get; }
+    public string Name { get; }
+
+    /// <summary>A text field's text, or the value a check box or radio button exports when it is checked.</summary>
+    public string? Value { get; set; }
+    public bool Checked { get; set; }
+    public bool ReadOnly { get; set; }
+    public bool Required { get; set; }
+    public bool Password { get; set; }
+    public bool MultiSelect { get; set; }
+
+    /// <summary>The lines a multiline text field shows, or the rows of a list box; 0 for one line.</summary>
+    public int Rows { get; set; }
+    public int MaxLength { get; set; }
+    public string? Tooltip { get; set; }
+
+    /// <summary>A check box or radio button's width and height, in points; null for the default.</summary>
+    public float? Size { get; set; }
+    public List<(string Text, string? Value, bool Selected)> Options { get; } = [];
 }
 
 internal sealed class PageBreakElement : Element;

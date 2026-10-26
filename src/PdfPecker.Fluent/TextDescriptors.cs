@@ -148,6 +148,13 @@ public sealed class TextDescriptor
         => Add(new TextRun { Kind = RunKind.SectionPageNumber, Target = Links.Section(sectionName, nameof(sectionName)) });
 
     /// <summary>
+    /// A footnote: a number where it is called in the text, and the note with the same number at the bottom of the
+    /// page, below a short rule. Notes are numbered through the document and are 80% of the paragraph's size unless the
+    /// span sets a size. It works in the page content, not in a header or footer.
+    /// </summary>
+    public TextSpanDescriptor Footnote(string? text) => Add(new TextRun { Kind = RunKind.Footnote, Text = text ?? "" });
+
+    /// <summary>
     /// A slot inside the text, placed like a word and wrapped with the lines, for an icon, a badge or a small image.
     /// </summary>
     public IContainer Element(TextInjectedElementAlignment alignment = TextInjectedElementAlignment.AboveBaseline)
