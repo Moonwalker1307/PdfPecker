@@ -505,6 +505,34 @@ internal sealed partial class StyleResolver
     private static void ApplyLineClamp(ComputedStyle s, in DeclaredValue d)
         => s.LineClamp = int.TryParse(d.Lower, NumberStyles.Integer, CultureInfo.InvariantCulture, out int clamp) && clamp > 0 ? Math.Min(clamp, 10000) : 0;
 
+    /// <summary>
+    /// line-clamp: none or a number of lines, optionally followed by a block-ellipsis value (line-clamp: 3 "… more"),
+    /// which then sets block-ellipsis too.
+    /// </summary>
+    private static void ApplyLineClampShorthand(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        var tokens = CssParser.Tokens(d.Value.Trim());
+        if (tokens.Count != 2 || d.Inherit) { ApplyLineClamp(s, in d); return; }
+        if (!int.TryParse(tokens[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out int clamp) || clamp <= 0) return;
+        var mark = tokens[1];
+        if (!ApplyBlockEllipsis(s, parent, mark, mark.ToLowerInvariant(), inherit: false)) return;
+        s.LineClamp = Math.Min(clamp, 10000);
+    }
+
+    /// <summary>
+    /// block-ellipsis: auto (an ellipsis), none, or a string, ending the last line of a block that line-clamp cuts
+    /// short. False when the value is not one of these.
+    /// </summary>
+    private static bool ApplyBlockEllipsis(ComputedStyle s, ComputedStyle parent, string value, string lower, bool inherit)
+    {
+        if (inherit) s.BlockEllipsis = parent.BlockEllipsis;
+        else if (lower is "auto" or "initial" or "unset") s.BlockEllipsis = null;
+        else if (lower == "none") s.BlockEllipsis = "";
+        else if (GeneratedContent.UnquoteMark(value) is { } mark) s.BlockEllipsis = mark;
+        else return false;
+        return true;
+    }
+
     private void ApplyVerticalAlign(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
         // A length raises the box by that much (a negative one lowers it); a percentage is of the box's line height.

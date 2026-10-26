@@ -297,6 +297,7 @@ internal sealed class ComputedStyle
     public bool HyphensAuto;                 // hyphens: auto (words also break where the language's patterns allow)
     public string[]? Quotes;                 // quotes: open and close strings of each nesting level; null = auto (by language), empty = none
     public string? HyphenateCharacter;       // hyphenate-character: "string"; null = auto (a hyphen-minus)
+    public string? BlockEllipsis;            // block-ellipsis: the mark ending a clamped block; null = auto ("…"), "" = none
     public HyphenateLimits HyphenateLimitChars; // hyphenate-limit-chars; each value 0 = auto
     public string? Lang;                     // the content language: the nearest lang attribute, else PdfOptions.Language
     public IReadOnlyDictionary<string, HyphenationPatterns>? Hyphenation; // PdfOptions.Hyphenation, keys in lower case
