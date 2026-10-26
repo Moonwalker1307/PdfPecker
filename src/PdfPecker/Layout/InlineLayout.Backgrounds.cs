@@ -69,23 +69,47 @@ internal sealed partial class LayoutEngine
         int first = fragments.Count;
         foreach (var run in runs)
         {
-            if (run.Deco.Depth >= MaxInlineDecoDepth || _inlineFragmentCount >= MaxInlineFragments) continue;
-            _inlineFragmentCount++;
-            var s = run.Deco.Style;
+            var deco = run.Deco;
+            bool paints = deco.Paints && deco.Depth < MaxInlineDecoDepth && _inlineFragmentCount < MaxInlineFragments;
+            if (!paints && !deco.HoldsAbsolutes) continue;
+            var s = deco.Style;
             var it = items[run.Start];
             s.Font.LineMetrics(s.TextSize, out float asc, out float desc);
             float above = asc + s.PaddingTop.Resolve(0) + s.BorderTop, below = desc + s.PaddingBottom.Resolve(0) + s.BorderBottom;
+            float fx = xs[run.Start] + it.RelX, fw = xs[run.End] - xs[run.Start];
+            float fy = baseline + TextShift(s, lineA, lineD) - above + it.RelY, fh = above + below;
+            if (deco.HoldsAbsolutes) NoteInlineCb(deco.Element, baseline, fx, fy, fw, fh);
+            if (!paints) continue;
+            _inlineFragmentCount++;
             var group = new GroupOp();
             _ops.Add(group);
             fragments.Add(new InlineFragment
             {
-                Deco = run.Deco,
-                X = xs[run.Start] + it.RelX, W = xs[run.End] - xs[run.Start],
-                Y = baseline + TextShift(s, lineA, lineD) - above + it.RelY, H = above + below,
+                Deco = deco,
+                X = fx, W = fw, Y = fy, H = fh,
                 Group = group, Ops = _ops,
             });
         }
         return fragments.Count > first ? first : -1;
+    }
+
+    /// <summary>
+    /// Notes an empty fragment, where its absolutely positioned box is, for each inline containing block on the line that
+    /// has no content of its own to make a fragment from, as Chrome gives such an element.
+    /// </summary>
+    private void NoteEmptyInlineCbs(List<Item> items, float[] xs, float baseline, float lineA, float lineD)
+    {
+        if (_measuring) return;
+        for (int k = 0; k < items.Count; k++)
+        {
+            var it = items[k];
+            if (it.Kind != ItemKind.Absolute || it.Deco is not { } d) continue;
+            if (_inlineCbIndex != null && _inlineCbIndex.TryGetValue(d.Element, out var cb) && cb.Placed) continue;
+            var s = d.Style;
+            s.Font.LineMetrics(s.TextSize, out float asc, out float desc);
+            float above = asc + s.PaddingTop.Resolve(0) + s.BorderTop, below = desc + s.PaddingBottom.Resolve(0) + s.BorderBottom;
+            NoteInlineCb(d.Element, baseline, xs[k] + it.RelX, baseline + TextShift(s, lineA, lineD) - above + it.RelY, 0, above + below);
+        }
     }
 
     /// <summary>

@@ -169,6 +169,59 @@ public class FloatPositionTests
     }
 
     [Fact]
+    public void RelativeInlineContainsAbsoluteChildren()
+    {
+        // A tooltip below a word and a badge on its corner, as Chrome places them: against the inline box, not the page.
+        var (ops, _) = Layout("<style>body{margin:0} p{margin:40px;font:16px/2 sans-serif} .r{position:relative;background:#00f}" +
+                              ".a{position:absolute;width:20px;height:10px}</style>" +
+                              "<p>Hover <span class=r>this word<b class=a style='top:100%;left:0;background:#f00'></b>" +
+                              "<b class=a style='top:-5px;right:-5px;background:#0f0'></b></span> to see.</p>");
+        var span = Rect(ops, 0xFF0000FF);
+        var below = Rect(ops, 0xFFFF0000);
+        Assert.Equal(span.X, below.X, 1);
+        Assert.Equal(span.Y + span.H, below.Y, 1);
+        var badge = Rect(ops, 0xFF00FF00);
+        Assert.Equal(span.X + span.W + 3.75f - 15, badge.X, 1);
+        Assert.Equal(span.Y - 3.75f, badge.Y, 1);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void InlineContainingBlockSpansFromFirstFragmentToLast(bool rtl)
+    {
+        // Split over two lines, the containing block starts where the first fragment starts and ends where the last one
+        // ends, inside the borders; when the last fragment ends before the first starts, it has no width.
+        var (ops, _) = Layout("<style>body{margin:0} p{width:200px;margin:0;font:16px/2 sans-serif} .r{position:relative;border:2px solid #00f}" +
+                              ".a{position:absolute;top:0;bottom:0;left:0;right:0;min-width:4px;background:#f00}</style>" +
+                              "<p" + (rtl ? " dir=rtl" : "") + ">aaaa bbbb cccc dddd <span class=r>eeee ffff gggg hhhh<b class=a></b></span> iiii.</p>");
+        var borders = Flatten(ops).OfType<BorderRectOp>().Where(b => b.Color == 0xFF0000FF).OrderBy(b => b.Y).ToList();
+        Assert.Equal(2, borders.Count);
+        var (first, last) = (borders[0], borders[1]);
+        var a = Rect(ops, 0xFFFF0000);
+        Assert.Equal(first.Y + 1.5f, a.Y, 1);
+        Assert.Equal(last.Y + last.H - 1.5f, a.Y + a.H, 1);
+        // Right to left, the first fragment's start is its right edge and the last one's end its left edge.
+        float start = rtl ? first.X + first.W - 1.5f : first.X + 1.5f, end = rtl ? last.X + 1.5f : last.X + last.W - 1.5f;
+        float w = Math.Max(3, rtl ? start - end : end - start);
+        Assert.Equal(rtl ? start - w : start, a.X, 1);
+        Assert.Equal(w, a.W, 1);
+    }
+
+    [Fact]
+    public void EmptyRelativeInlineContainsAbsoluteChildren()
+    {
+        // With nothing else in it, the inline element still has a fragment on its line, of no width.
+        var (ops, _) = Layout("<style>body{margin:0} p{margin:0;font:16px/2 sans-serif}" +
+                              ".a{position:absolute;top:0;bottom:0;left:0;right:0;min-width:10px;background:#f00}</style>" +
+                              "<div style='height:100px'></div><p>Text <span style='position:relative'><b class=a></b></span></p>");
+        var a = Rect(ops, 0xFFFF0000);
+        Assert.InRange(a.Y, 75, 75 + 24);
+        Assert.InRange(a.H, 9, 18);
+        Assert.InRange(a.X, 10, 60);
+    }
+
+    [Fact]
     public void RelativeTableCellContainsAbsoluteChildren()
     {
         var (ops, _) = Layout("<style>body{margin:0} table{border-collapse:collapse;width:200px} td{padding:0;height:100px}" +

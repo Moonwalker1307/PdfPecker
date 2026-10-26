@@ -85,6 +85,113 @@ internal sealed partial class LayoutEngine
         _fixedFrame.Add(e, staticX, staticY);
     }
 
+    /// <summary>
+    /// A positioned inline element that is the containing block of absolutely positioned boxes: its pending boxes, and
+    /// the border boxes of its fragments on its first and last line, each the union of the fragments on that line.
+    /// </summary>
+    private sealed class InlineCb
+    {
+        public required Element Element;
+        public readonly CbFrame Frame = new();
+        public bool Placed;
+        public float FirstBaseline, LastBaseline;
+        public float FirstLeft, FirstRight, Top, LastLeft, LastRight, Bottom;
+    }
+
+    // The containing inline elements of the lines being placed, in the order they were met; null until one is.
+    private List<InlineCb>? _inlineCbs;
+    private Dictionary<Element, InlineCb>? _inlineCbIndex;
+
+    private InlineCb InlineCbOf(Element e)
+    {
+        var list = _inlineCbs ??= new List<InlineCb>();
+        var index = _inlineCbIndex ??= new Dictionary<Element, InlineCb>(ReferenceEqualityComparer.Instance);
+        if (index.TryGetValue(e, out var cb)) return cb;
+        cb = new InlineCb { Element = e };
+        list.Add(cb);
+        index[e] = cb;
+        return cb;
+    }
+
+    /// <summary>Notes a line fragment of an inline containing block, in its border box.</summary>
+    private void NoteInlineCb(Element e, float baseline, float x, float y, float w, float h)
+    {
+        if (_measuring) return;
+        var cb = InlineCbOf(e);
+        if (!cb.Placed)
+        {
+            cb.Placed = true;
+            cb.FirstBaseline = cb.LastBaseline = baseline;
+            cb.FirstLeft = cb.LastLeft = x;
+            cb.FirstRight = cb.LastRight = x + w;
+            cb.Top = y;
+            cb.Bottom = y + h;
+            return;
+        }
+        if (baseline != cb.LastBaseline)
+        {
+            cb.LastBaseline = baseline;
+            cb.LastLeft = x;
+            cb.LastRight = x + w;
+            cb.Bottom = y + h;
+        }
+        else
+        {
+            cb.LastLeft = Math.Min(cb.LastLeft, x);
+            cb.LastRight = Math.Max(cb.LastRight, x + w);
+            cb.Bottom = Math.Max(cb.Bottom, y + h);
+        }
+        if (baseline == cb.FirstBaseline)
+        {
+            cb.FirstLeft = cb.LastLeft;
+            cb.FirstRight = cb.LastRight;
+            cb.Top = Math.Min(cb.Top, y);
+        }
+    }
+
+    /// <summary>
+    /// Notes an absolutely positioned box of a line: inside a positioned inline element it waits for the element's
+    /// fragments, otherwise for the containing block around the lines.
+    /// </summary>
+    private void QueueLineAbsolute(Item it, float x, float y)
+    {
+        if (it.Deco is { } d && !_measuring) InlineCbOf(d.Element).Frame.Add(it.Element!, x, y);
+        else QueueAbsolute(it.Element!, x, y);
+    }
+
+    /// <summary>
+    /// Lays out the boxes waiting for the inline containing blocks of the lines just placed. As in Chrome, the containing
+    /// block runs from the start of the element's first fragment to the end of its last, as padding boxes, and has no
+    /// width when the end comes before the start; an element with no fragment leaves its boxes to the block around it.
+    /// </summary>
+    private void LayoutInlineAbsolutes(List<InlineCb> cbs)
+    {
+        foreach (var cb in cbs)
+        {
+            if (cb.Frame.Pending.Count == 0) continue;
+            if (!cb.Placed)
+            {
+                foreach (var (e, sx, sy) in cb.Frame.TakePending()!) QueueAbsolute(e, sx, sy);
+                continue;
+            }
+            var s = cb.Element.Style;
+            float top = cb.Top + s.BorderTop, h = Math.Max(0, cb.Bottom - s.BorderBottom - top);
+            float x, w;
+            if (s.Rtl)
+            {
+                float right = cb.FirstRight - s.BorderRight;
+                w = Math.Max(0, right - (cb.LastLeft + s.BorderLeft));
+                x = right - w;
+            }
+            else
+            {
+                x = cb.FirstLeft + s.BorderLeft;
+                w = Math.Max(0, cb.LastRight - s.BorderRight - x);
+            }
+            LayoutAbsolutes(cb.Frame, x, top, w, h);
+        }
+    }
+
     /// <summary>Lays out the absolutely positioned boxes of a frame against the padding box given.</summary>
     private void LayoutAbsolutes(CbFrame frame, float cbX, float cbY, float cbW, float cbH)
     {
