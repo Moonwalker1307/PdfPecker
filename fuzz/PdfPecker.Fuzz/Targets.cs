@@ -329,11 +329,12 @@ internal static class Targets
                     Jbig2Decoder.Decode(d.AsSpan(12 + g).ToArray(), g == 0 ? null : d.AsSpan(12, g).ToArray(), w, h);
                 },
             },
-            Font("font-ttf", ".ttf", c => c.FontFiles(".ttf", ".ttc").Where(f => !f.Name.Contains("Variable") && !f.Name.Contains("RobotoFlex"))),
+            Font("font-ttf", ".ttf", c => c.FontFiles(".ttf", ".ttc").Where(f => !f.Name.Contains("Variable") && !f.Name.Contains("RobotoFlex") && !IsColorFont(f.Name))),
             Font("font-otf", ".otf", c => c.FontFiles(".otf").Where(f => !f.Name.Contains("VarTest"))),
             Font("font-woff", ".woff", c => c.FontFiles(".woff")),
             Font("font-woff2", ".woff2", c => c.FontFiles(".woff2")),
             Font("font-variable", ".font", c => c.FontFiles(".ttf", ".otf").Where(f => f.Name.Contains("Variable") || f.Name.Contains("RobotoFlex") || f.Name.Contains("VarTest"))),
+            Font("font-color", ".ttf", c => c.FontFiles(".ttf").Where(f => IsColorFont(f.Name)), ColorFontPage),
         };
         return list;
     }
@@ -359,7 +360,23 @@ internal static class Targets
         }
     }
 
-    private static Target Font(string name, string ext, Func<SeedContext, IEnumerable<(string, byte[])>> seeds) => new()
+    // COLR colour fonts: Google's test glyphs (U+F0000 on), Noto Color Emoji, Nabla (variable) and the generated ones
+    // (U+E000 on), in several text colours, so the writer keeps a font for each, and translucent, so glyphs are groups.
+    private static bool IsColorFont(string name) => name.Contains("COLR") || name.Contains("Color") || name.Contains("Nabla");
+
+    private static string ColorFontPage => ColorFontPageText.Value;
+
+    // A class of its own, so the page is built before the target list that uses it, whatever the field order.
+    private static class ColorFontPageText
+    {
+        public static readonly string Value =
+            "<!doctype html><body style=\"font-family:Fz;font-size:18px\"><p>ABC \uE000\uE001\uE002\uE096\uE12B \U0001F39B\U0001F39F\U0001F3AB</p>"
+            + "<p style=\"color:#c00;opacity:0.6;font-variation-settings:'wght' 700,'HLGT' 8\">ABC \uE000\uE096 \U0001F39B</p><p style=\"font-size:8px\">"
+            + string.Concat(Enumerable.Range(0xF0000, 0x1200).Select(char.ConvertFromUtf32)) + "</p>"
+            + "<svg width=\"200\" height=\"40\"><text x=\"0\" y=\"30\" font-family=\"Fz\" fill=\"blue\">ABC \uE096 \U0001F39B</text></svg></body>";
+    }
+
+    private static Target Font(string name, string ext, Func<SeedContext, IEnumerable<(string, byte[])>> seeds, string page = FontPage) => new()
     {
         Name = name, Extension = ext, Seeds = seeds, MaxSize = 512 * 1024,
         Run = (d, ct) =>
@@ -367,7 +384,7 @@ internal static class Targets
             var fonts = new FontCollection();
             fonts.Add(d, "Fz");
             // Registering is lazy about the tables; laying out and embedding text is what exercises them.
-            HtmlToPdf.Convert(FontPage, new PdfOptions { Fonts = fonts, MaxPages = 20 }, ct);
+            HtmlToPdf.Convert(page, new PdfOptions { Fonts = fonts, MaxPages = 20 }, ct);
         },
     };
 

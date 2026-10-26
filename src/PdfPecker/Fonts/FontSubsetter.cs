@@ -15,7 +15,21 @@ internal sealed class GlyphSubset
     private readonly Dictionary<int, int> _byGlyph = new() { [0] = 0 };
     private Dictionary<int, string>? _texts;          // new id -> the characters of a shaped glyph ("" for none)
 
-    public GlyphSubset(FontProgram program) => Program = program;
+    /// <summary>The font's colour glyphs, when the subset is written as Type 3 fonts that draw them; else null.</summary>
+    public readonly ColorGlyphs? Color;
+    /// <summary>The text colour the colour glyphs are drawn with, for a font whose drawings use it.</summary>
+    public readonly uint Foreground;
+    // CFF subsets keep the original glyph ids as CIDs; colour subsets number their glyphs in order like TrueType ones,
+    // since a Type 3 font has only 256 codes.
+    private readonly bool _keepGids;
+
+    public GlyphSubset(FontProgram program, ColorGlyphs? color = null, uint foreground = 0)
+    {
+        Program = program;
+        Color = color;
+        Foreground = foreground;
+        _keepGids = program.IsCff && color == null;
+    }
 
     /// <summary>The CID for a code point. CFF fonts keep their glyph ids when subset, so their CIDs are the original glyph ids.</summary>
     public int Cid(int codePoint)
@@ -24,7 +38,7 @@ internal sealed class GlyphSubset
         int gid = Program.GlyphId(codePoint);
         if (!_byGlyph.TryGetValue(gid, out id))
         {
-            id = Program.IsCff ? gid : Glyphs.Count;
+            id = _keepGids ? gid : Glyphs.Count;
             _byGlyph[gid] = id;
             Glyphs.Add(gid);
             Unicode.Add(codePoint);
@@ -75,7 +89,7 @@ internal sealed class GlyphSubset
             if (id != 0 && mapped.Length > 0 && !HasText(id)) (_texts ??= new())[Index(id)] = mapped;
             return id;
         }
-        id = Program.IsCff ? g.Gid : Glyphs.Count;
+        id = _keepGids ? g.Gid : Glyphs.Count;
         _byGlyph[g.Gid] = id;
         Glyphs.Add(g.Gid);
         Unicode.Add(0);
@@ -84,7 +98,7 @@ internal sealed class GlyphSubset
     }
 
     // The index into Glyphs and Unicode of a CID: CFF subsets keep the original glyph ids as CIDs.
-    private int Index(int id) => Program.IsCff ? Glyphs.IndexOf(id) : id;
+    private int Index(int id) => _keepGids ? Glyphs.IndexOf(id) : id;
 
     // True when the CID maps to at least one character.
     private bool HasText(int id)
@@ -101,7 +115,7 @@ internal sealed class GlyphSubset
     {
         var list = new List<(int, int, int, string?)>(Glyphs.Count);
         for (int i = 0; i < Glyphs.Count; i++)
-            list.Add((Program.IsCff ? Glyphs[i] : i, Glyphs[i], Unicode[i], Unicode[i] == 0 && _texts != null && _texts.TryGetValue(i, out var t) ? t : null));
+            list.Add((_keepGids ? Glyphs[i] : i, Glyphs[i], Unicode[i], Unicode[i] == 0 && _texts != null && _texts.TryGetValue(i, out var t) ? t : null));
         list.Sort((a, b) => a.Item1.CompareTo(b.Item1));
         return list;
     }

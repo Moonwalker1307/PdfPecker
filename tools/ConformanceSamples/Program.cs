@@ -43,6 +43,23 @@ const string Rtl = """
     </body></html>
     """;
 
+// Colour fonts, which are written as Type 3 fonts whose glyphs paint transparency groups: emoji with gradients, a
+// variable colour font, and emoji-style sequences joined into one glyph, in translucent text. Only code points outside
+// the Private Use Area, which PDF/UA-2 would want described.
+const string ColorFonts = """
+    <html lang="en"><head><title>Colour fonts</title><style>
+    @font-face { font-family: 'Emoji'; src: url('fonts/NotoColorEmoji-Subset.ttf'); }
+    @font-face { font-family: 'Nabla'; src: url('fonts/Nabla-Subset.ttf'); }
+    @font-face { font-family: 'Grid'; src: url('fonts/ColorGrid.ttf'); }
+    p { font-size: 32pt; margin: 0 0 8pt }
+    </style></head><body>
+    <h1>Colour fonts</h1>
+    <p style="font-family: Emoji">&#x1F39B;&#x1F39F;&#x1F3AB;</p>
+    <p style="font-family: Nabla; font-variation-settings: 'wght' 700">ABC</p>
+    <p style="font-family: Grid; color: #c00; opacity: 0.6">&#x1F1E9;&#x1F1F0; &#x1F3F4;&#xE0067;&#xE0062;&#xE007F; &#x1F3FD; A</p>
+    </body></html>
+    """;
+
 var profiles = new (string Name, PdfConformance Conformance, PdfAccessibility Accessibility, string[] Flavours, bool Linearize)[]
 {
     ("pdfa-2b", PdfConformance.PdfA2b, PdfAccessibility.None, ["2b"], false),
@@ -92,6 +109,7 @@ foreach (var profile in profiles)
     }
 
     File.WriteAllBytes(Path.Combine(dir, "rtl-scripts.pdf"), HtmlToPdf.Convert(Rtl, Options(fixtures)));
+    File.WriteAllBytes(Path.Combine(dir, "colour-fonts.pdf"), HtmlToPdf.Convert(ColorFonts, Options(fixtures)));
 
     // Every viewer setting and page labels with a prefix, on the report sample, which has several pages and bookmarks.
     var report = Path.Combine(samples, "report.html");

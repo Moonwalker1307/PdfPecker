@@ -150,7 +150,7 @@ public class CssUnitTests
         Assert.InRange(font.Metric(FontMetric.CapHeight), 0.5, 0.9);
         Assert.Equal(1082 / 2048f, StandardFont.Get(PdfPecker.Fonts.FontFamily.Courier, true, false).Metric(FontMetric.XHeight), 4);
         // A fallback chain measures its first font.
-        Assert.Equal(font.Metric(FontMetric.XHeight), new FontChain(font, _ => null).Metric(FontMetric.XHeight), 4);
+        Assert.Equal(font.Metric(FontMetric.XHeight), new FontChain(font, (_, _) => null).Metric(FontMetric.XHeight), 4);
     }
 
     [Fact]

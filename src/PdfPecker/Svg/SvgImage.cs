@@ -56,6 +56,9 @@ internal sealed class SvgShape
     public PdfPecker.Images.PdfImage? Image;
     public Matrix ImageMatrix;
     public byte ImageAlpha = 255;
+    // A group of Children (no Image) can also be blended with what is below (a PDF blend mode name) and isolated.
+    public string? BlendMode;
+    public bool Isolated;
 
     /// <summary>A copy with its fill, stroke, gradient and pattern colours mapped, and those of the shapes inside it.</summary>
     public SvgShape Recolored(Func<uint, uint> map)

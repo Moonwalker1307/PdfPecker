@@ -52,12 +52,18 @@ internal static partial class ComplexShaper
             or (>= ArabicExtendedCFirst and <= ArabicExtendedCLast)
             or (>= IndicFirst and <= IndicLast) or (>= ThaiFirst and <= LaoLast)
             or (>= DevanagariExtendedFirst and <= DevanagariExtendedLast)
-            || IsCombiningMark(cp);
+            || IsCombiningMark(cp) || IsEmojiSequencePart(cp);
 
     // Combining marks, which the font's GPOS places on letters that have no precomposed form, such as q̃ or ą́.
     private static bool IsCombiningMark(int cp)
         => cp is (>= 0x0300 and <= 0x036F) or (>= 0x1AB0 and <= 0x1AFF) or (>= 0x1DC0 and <= 0x1DFF) or (>= 0x20D0 and <= 0x20FF)
             or (>= 0xFE20 and <= 0xFE2F);
+
+    // The characters that join emoji into one picture: the zero width joiner, the emoji variation selector, the skin
+    // tone modifiers, the regional indicators of flags and the tags of subdivision flags. Colour emoji fonts join them
+    // with their ccmp lookups, which only this shaper runs.
+    private static bool IsEmojiSequencePart(int cp)
+        => cp is 0x200D or 0xFE0F or (>= 0x1F3FB and <= 0x1F3FF) or (>= 0x1F1E6 and <= 0x1F1FF) or (>= 0xE0020 and <= 0xE007F);
 
     /// <summary>The direction complex text is shaped for when the caller does not know it: its first strong character's.</summary>
     public static bool GuessRtl(string s, int start, int length)
@@ -224,8 +230,9 @@ internal static partial class ComplexShaper
         Compose(font, layout, run);
         if (Joins(script)) ArabicJoining(run, script);
         // Joiners and other invisible controls have done their part; they are not drawn. Thai and Lao keep them as
-        // long as HarfBuzz does, which keeps the marks on either side apart.
-        bool keepIgnorables = script is Script.Thai or Script.Lao;
+        // long as HarfBuzz does, which keeps the marks on either side apart, and so does text with emoji, whose font
+        // joins sequences such as family members or the flags of Scotland and Wales with zero width joiners and tags.
+        bool keepIgnorables = script is Script.Thai or Script.Lao || HasEmoji(s, start, length);
         if (!keepIgnorables) RemoveIgnorables(run);
         if (Joins(script) && !plan.HasForms) PresentationForms(font, run, ligate: !plan.HasRlig);
         if (script == Script.Thai && !plan.HasScriptGsub) ThaiPrivateUseForms(font, layout, run);
@@ -240,6 +247,18 @@ internal static partial class ComplexShaper
         if (keepIgnorables) RemoveIgnorables(run);
 
         WriteOutput(font, run, output);
+    }
+
+    // Pictographs, dingbats and the emoji blocks of the supplementary planes, which emoji sequences start with.
+    private static bool HasEmoji(string s, int start, int length)
+    {
+        for (int i = start, end = start + length; i < end;)
+        {
+            var (cp, units) = CodePointAt(s, i, end);
+            if (cp is (>= 0x2600 and <= 0x27BF) or (>= 0x1F000 and <= 0x1FAFF)) return true;
+            i += units;
+        }
+        return false;
     }
 
     private static void RemoveIgnorables(GlyphRun run) => run.RemoveAll(static g => UnicodeTables.IsDefaultIgnorable(g.CodePoint));

@@ -179,7 +179,7 @@ public class BidiAndShapingTests
         // in browsers, and as the layout measured them.
         var arabic = new EmbeddedFont(Assert.Single(FontProgram.Load(Arabic)), false, false);
         var helvetica = StandardFont.Get(FontFamily.Helvetica, false, false);
-        var chain = new FontChain(arabic, _ => helvetica);
+        var chain = new FontChain(arabic, (_, _) => helvetica);
         var runs = new List<FontRun>();
         chain.Split("Widget Pro", runs);
         Assert.Equal(new[] { (0, 6), (6, 1), (7, 3) }, runs.Select(r => (r.Start, r.Length)));
