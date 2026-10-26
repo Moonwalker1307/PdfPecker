@@ -17,7 +17,7 @@ internal static class MissingImageText
             if (e.Name == "img")
             {
                 // Looking at the alt text first spares loading the picture of the many images that have none.
-                if (e.GetAttribute("alt") is not { } alt || string.IsNullOrWhiteSpace(alt) || images.LoadAny(e.GetAttribute("src")) != null) continue;
+                if (e.GetAttribute("alt") is not { } alt || string.IsNullOrWhiteSpace(alt) || images.LoadAny(images.SourceOf(e)) != null) continue;
                 e.AltText = alt;
                 e.AppendChild(new TextNode(alt));
             }
