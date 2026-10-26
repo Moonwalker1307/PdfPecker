@@ -18,6 +18,13 @@ public static partial class ContainerExtensions
     public static IContainer Shrink(this IContainer container)
         => Style(container, Rank.Size, ("width", "fit-content"), ("height", "auto"));
 
+    /// <summary>
+    /// Draws the content smaller, keeping its proportions, when it is taller or wider than the slot, as for a name on a
+    /// badge or a label of fixed size. Text first wraps into fewer, longer lines before it gets smaller. The slot's
+    /// height comes from a <c>Height</c> or <c>MaxHeight</c> before this call, or from the slot around it.
+    /// </summary>
+    public static IContainer ScaleToFit(this IContainer container) => Decorate(container, new Decorator(DecoratorKind.ScaleToFit));
+
     // Semantics. PdfPecker tags a PDF/UA document from its HTML elements, so each call writes the matching element.
 
     /// <summary>Tags the content as a section (Sect) in PDF/UA.</summary>

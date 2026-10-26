@@ -60,6 +60,15 @@ internal enum DecoratorKind
 
     /// <summary>The text alternative of the images inside.</summary>
     AlternativeText,
+
+    /// <summary>Shows the content only on the first page of a header or footer; elsewhere it shows as usual.</summary>
+    ShowOnce,
+
+    /// <summary>Shows the content on every page of a header or footer but the first; elsewhere it is left out.</summary>
+    SkipOnce,
+
+    /// <summary>Draws the content smaller, keeping its proportions, when it does not fit the slot.</summary>
+    ScaleToFit,
 }
 
 /// <summary>

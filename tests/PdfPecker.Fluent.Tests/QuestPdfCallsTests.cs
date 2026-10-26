@@ -184,4 +184,94 @@ public sealed class QuestPdfCallsTests
         Assert.True(pdf.Length > 0);
         Assert.Throws<ArgumentOutOfRangeException>(() => Placeholders.Image(0, 10));
     }
+
+    [Fact]
+    public void ShowOnce_and_SkipOnce_in_a_band_write_a_first_page_band()
+    {
+        string html = Document.Create(d => d.Page(p =>
+        {
+            p.Header().Column(k =>
+            {
+                k.Item().ShowOnce().Text("Letterhead");
+                k.Item().SkipOnce().Text("Continued");
+            });
+            p.Content().Text("x");
+        })).GenerateHtml();
+        Assert.Contains("<header data-sticky-pdf-header=\"\"><div class=\"c0\"><p>Continued</p></div></header>", html, StringComparison.Ordinal);
+        Assert.Contains("<header data-sticky-pdf-first-header=\"\"><div class=\"c0\"><p>Letterhead</p></div></header>", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_band_without_ShowOnce_or_SkipOnce_has_no_first_page_band()
+    {
+        string html = Document.Create(d => d.Page(p =>
+        {
+            p.Header().Text("Header");
+            p.Footer().Text("Footer");
+            p.Content().Text("x");
+        })).GenerateHtml();
+        Assert.DoesNotContain("data-sticky-pdf-first", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ShowOnce_and_SkipOnce_choose_the_band_per_page()
+    {
+        byte[] pdf = Document.Create(d => d.Page(p =>
+        {
+            p.Header().Column(k =>
+            {
+                k.Item().ShowOnce().Text("LETTERHEAD").FontSize(30);
+                k.Item().SkipOnce().Text("CONTINUED");
+            });
+            p.Content().Column(k => { for (int i = 0; i < 120; i++) k.Item().Text("Line " + i); });
+            p.Footer().SkipOnce().Text("PAGE FOOTER");
+        })).GeneratePdf();
+        var pages = PdfText.ExtractPages(pdf);
+        Assert.True(pages.Count > 2);
+        Assert.Contains("LETTERHEAD", pages[0].Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("CONTINUED", pages[0].Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("PAGE FOOTER", pages[0].Text, StringComparison.Ordinal);
+        foreach (var page in pages.Skip(1))
+        {
+            Assert.DoesNotContain("LETTERHEAD", page.Text, StringComparison.Ordinal);
+            Assert.Contains("CONTINUED", page.Text, StringComparison.Ordinal);
+            Assert.Contains("PAGE FOOTER", page.Text, StringComparison.Ordinal);
+        }
+        Assert.Contains("Line 119", string.Concat(pages.Select(p => p.Text)), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Outside_the_bands_ShowOnce_keeps_the_content_and_SkipOnce_leaves_it_out()
+    {
+        Assert.Equal("<p>x</p>", Html.Item(c => c.ShowOnce().Text("x")));
+        Assert.Equal("", Html.Item(c => c.SkipOnce().Text("x")));
+    }
+
+    [Fact]
+    public void ScaleToFit_takes_the_height_before_it_or_the_slot_around_it()
+    {
+        Assert.Contains("{height:40pt;-pdfpecker-scale-to-fit:shrink}", Css(c => c.Height(40).ScaleToFit().Text("x")));
+        Assert.Contains("{max-height:40pt;-pdfpecker-scale-to-fit:shrink}", Css(c => c.MaxHeight(40).ScaleToFit().Text("x")));
+        Assert.Contains("{-pdfpecker-scale-to-fit:shrink;max-height:100%}", Css(c => c.Height(40).Padding(5).ScaleToFit().Text("x")));
+    }
+
+    [Fact]
+    public void ScaleToFit_draws_long_text_smaller_inside_the_box()
+    {
+        string name = string.Join(' ', Enumerable.Repeat("Bartholomew", 12));
+        PdfTextPage Page(bool fit) => PdfText.ExtractPages(Html.Page(c => c.Column(k =>
+        {
+            var box = k.Item().Width(200).Height(50);
+            (fit ? box.ScaleToFit() : box).Text(name).FontSize(20);
+            k.Item().Text("AFTER");
+        })).GeneratePdf())[0];
+
+        var fitted = Page(true);
+        var plain = Page(false);
+        double FontHeight(PdfTextPage p) => p.Lines[0].Height;
+        Assert.True(FontHeight(fitted) < FontHeight(plain) * 0.8);
+        double bottom = fitted.Lines.Where(l => l.Text.Contains("Bartholomew", StringComparison.Ordinal)).Max(l => l.Y + l.Height);
+        var after = fitted.Lines.Single(l => l.Text == "AFTER");
+        Assert.True(bottom <= after.Y + 0.5, $"text ends at {bottom}, the next item starts at {after.Y}");
+    }
 }
