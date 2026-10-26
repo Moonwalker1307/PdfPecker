@@ -106,7 +106,8 @@ public static class Barcode
         var quiet = options.QuietZone ? 4 : 0;
         var total = size + 2 * quiet;
         var moduleSize = options.ModuleSize > 0 ? options.ModuleSize : 3;
-        var sb = new StringBuilder(size * size / 2 + 256);
+        // About a quarter of the modules start a run, and each run is about 14 characters of path data.
+        var sb = new StringBuilder(size * size * 4 + 256);
         Open(sb, total, total, moduleSize, options);
         sb.Append("<path fill=\"").Append(Escape(options.Color)).Append("\" d=\"");
         for (var y = 0; y < size; y++)
