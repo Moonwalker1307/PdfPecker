@@ -208,6 +208,14 @@ internal sealed partial class StyleResolver
             case "flex-shrink": ApplyFlexShrink(s, in d); break;
             case "flex-basis": ApplyFlexBasis(s, in d); break;
             case "order": ApplyOrder(s, in d); break;
+            case "-webkit-box-orient":
+            case "-webkit-box-direction":
+            case "-webkit-box-pack":
+            case "-webkit-box-align":
+            case "-webkit-box-flex":
+            case "-webkit-box-ordinal-group":
+                ApplyLegacyBox(s, parent, prop, in d);
+                break;
             case "justify-content": s.JustifyContent = ParseAlign(d.Lower, s.JustifyContent); break;
             case "align-items": s.AlignItems = ParseAlign(d.Lower, s.AlignItems); break;
             case "align-content": s.AlignContent = ParseAlign(d.Lower, s.AlignContent); break;

@@ -8,7 +8,7 @@ namespace PdfPecker.Css;
 /// A CSS linear-gradient(), radial-gradient(), conic-gradient() or repeating variant, as specified. Lengths that depend on the box are
 /// kept until <see cref="Resolve"/> knows its size.
 /// </summary>
-internal sealed class CssGradient
+internal sealed partial class CssGradient
 {
     private enum RadialSize : byte { FarthestCorner, FarthestSide, ClosestCorner, ClosestSide, Explicit }
 
@@ -48,6 +48,11 @@ internal sealed class CssGradient
         int paren = v.IndexOf('(');
         if (paren < 0 || !v.EndsWith(')')) return null;
         var name = v.Substring(0, paren).Trim().ToLowerInvariant();
+        var args = CssParser.SplitTopLevel(v.Substring(paren + 1, v.Length - paren - 2), ',');
+        if (name == "-webkit-gradient") return ParseWebkitGradient(args, currentColor);
+        // The prefixed linear and radial gradients, and their repeating variants, take the legacy first arguments.
+        bool prefixed = name.StartsWith("-webkit-", StringComparison.Ordinal) && !name.Contains("conic", StringComparison.Ordinal);
+        if (prefixed) name = name.Substring("-webkit-".Length);
         (GradientKind Kind, bool Repeating)? function = name switch
         {
             "linear-gradient" => (GradientKind.Linear, false),
@@ -56,15 +61,18 @@ internal sealed class CssGradient
             "repeating-radial-gradient" => (GradientKind.Radial, true),
             "conic-gradient" => (GradientKind.Conic, false),
             "repeating-conic-gradient" => (GradientKind.Conic, true),
-            _ => null, // -webkit-gradient() and prefixed legacy syntaxes are not supported
+            _ => null,
         };
         if (function is not (var kind, var repeating)) return null;
         var g = new CssGradient { Kind = kind, Repeating = repeating };
-        var args = CssParser.SplitTopLevel(v.Substring(paren + 1, v.Length - paren - 2), ',');
         if (args.Count == 0) return null;
         int first = 0;
         var head = CssParser.Tokens(args[0].Trim().ToLowerInvariant());
-        if (head.Count > 0 && !CssColor.TryParse(head[0], currentColor, out _))
+        if (prefixed)
+        {
+            if (!g.ParsePrefixedHead(args, currentColor, ref first, em, rem, vw, vh)) return null;
+        }
+        else if (head.Count > 0 && !CssColor.TryParse(head[0], currentColor, out _))
         {
             if (!g.TakeInterpolationMethod(head)) return null;
             bool ok = head.Count == 0 || g.Kind switch
@@ -270,7 +278,7 @@ internal sealed class CssGradient
     {
         var g = new Gradient { Kind = Kind, Spread = Repeating ? GradientSpread.Repeat : GradientSpread.Pad };
         // The gradient line or ray, which stop lengths are measured against.
-        float length = Kind switch
+        float length = _points != null ? ResolvePoints(g, w, h) : Kind switch
         {
             GradientKind.Conic => ResolveConic(g, w, h),
             GradientKind.Radial => ResolveRadial(g, w, h),
@@ -278,7 +286,7 @@ internal sealed class CssGradient
         };
         var pos = PlaceStops(length);
         if (Repeating) ApplyRepeat(g, pos);
-        if (Radial) { g.X0 = g.X1; g.Y0 = g.Y1; }
+        if (Radial && _points == null) { g.X0 = g.X1; g.Y0 = g.Y1; }
         var stops = ResolvedStops(g, pos);
         (g.Offsets, g.Colors) = Gradient.NormalizeStops(stops, backdrop);
         g.KeepAlpha(stops);
@@ -314,6 +322,12 @@ internal sealed class CssGradient
         {
             double rad = deg * Math.PI / 180;
             return ((float)Math.Sin(rad), (float)-Math.Cos(rad));
+        }
+        if (_toX != 0 && _toY != 0 && _alongDiagonal)
+        {
+            // A prefixed gradient towards a corner runs along the diagonal, from the opposite corner to that one.
+            float d = MathF.Sqrt(w * w + h * h);
+            return (d > 0 ? _toX * w / d : _toX, d > 0 ? _toY * h / d : _toY);
         }
         if (_toX != 0 && _toY != 0)
         {
