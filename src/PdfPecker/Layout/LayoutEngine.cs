@@ -97,6 +97,7 @@ internal sealed partial class LayoutEngine
         public ListStyleType Type;
         public PdfImage? Image; // list-style-image: a raster image or an SVG drawing, ImageW by ImageH points
         public SvgImage? Svg;
+        public CssGradient? Gradient;
         public float ImageW, ImageH;
         public ComputedStyle Style = null!;
         public float ContentX;
@@ -1071,9 +1072,15 @@ internal sealed partial class LayoutEngine
             Inside = s.ListStylePositionInside,
         };
         // list-style-image wins over the type unless ::marker has content; an image that does not load falls back to the type.
-        if (e.MarkerContent != null || s.ListStyleImage is not { } imageSrc || !LoadMarkerImage(marker, imageSrc, s.ImageOrientationNone))
+        if (e.MarkerContent == null && s.ListStyleGradient is { } gradient)
+        {
+            marker.Gradient = gradient;
+            marker.ImageW = marker.ImageH = DefaultMarkerImageSide(marker.Style);
+        }
+        else if (e.MarkerContent != null || s.ListStyleImage is not { } imageSrc || !LoadMarkerImage(marker, imageSrc, s.ImageOrientationNone))
             marker.Text = custom ?? s.ListCounterStyle?.MarkerText(_currentListIndex);
-        if (marker.Text != null || marker.Image != null || marker.Svg != null || s.ListStyleType != ListStyleType.None) _marker = marker;
+        if (marker.Text != null || marker.Image != null || marker.Svg != null || marker.Gradient != null || s.ListStyleType != ListStyleType.None)
+            _marker = marker;
     }
 
     /// <summary>
@@ -1191,7 +1198,7 @@ internal sealed partial class LayoutEngine
         // part of a legend below the top border, which only a fieldset has.
         float sizing = s.BorderBox ? frameV : legendExtra;
 
-        if (s.Display == Display.ListItem && (s.ListStyleType != ListStyleType.None || e.MarkerContent != null || s.ListStyleImage != null))
+        if (s.Display == Display.ListItem && (s.ListStyleType != ListStyleType.None || e.MarkerContent != null || s.ListStyleImage != null || s.ListStyleGradient != null))
             StartMarker(e, cx, contentW);
 
         float contentBottom;
@@ -1540,8 +1547,7 @@ internal sealed partial class LayoutEngine
             m.ImageH = image.Height * 0.75f;
             return true;
         }
-        m.Style.Font.LineMetrics(m.Style.TextSize, out float ascentPt, out _);
-        float side = MathF.Round(ascentPt / 0.75f) / 2 * 0.75f;
+        float side = DefaultMarkerImageSide(m.Style);
         float? ratio = svg!.HasViewBox && svg.ViewBoxWidth > 0 && svg.ViewBoxHeight > 0 ? svg.ViewBoxHeight / svg.ViewBoxWidth : null;
         if (svg.Width is { } w && svg.Height is { } h) (m.ImageW, m.ImageH) = (w, h);
         else if (svg.Width is { } w1 && ratio is { } r1) (m.ImageW, m.ImageH) = (w1, w1 * r1);
@@ -1553,6 +1559,13 @@ internal sealed partial class LayoutEngine
         return true;
     }
 
+    /// <summary>The side of a marker image without a size of its own (a gradient, or an SVG file without one): half the font's ascent, in whole pixels.</summary>
+    private static float DefaultMarkerImageSide(ComputedStyle s)
+    {
+        s.Font.LineMetrics(s.TextSize, out float ascentPt, out _);
+        return MathF.Round(ascentPt / 0.75f) / 2 * 0.75f;
+    }
+
     private void EmitMarker(float baseline, float lineTop)
     {
         var m = _marker!;
@@ -1560,7 +1573,7 @@ internal sealed partial class LayoutEngine
         var s = m.Style;
         if (!s.Visible) return;
         float size = s.TextSize;
-        if (m.Type is ListStyleType.DisclosureOpen or ListStyleType.DisclosureClosed && m.Text == null && m.Image == null && m.Svg == null)
+        if (m.Type is ListStyleType.DisclosureOpen or ListStyleType.DisclosureClosed && m.Text == null && m.Image == null && m.Svg == null && m.Gradient == null)
         {
             // Chrome's disclosure triangles fill a square of 0.66 times the font size in whole pixels, standing on the
             // baseline in a marker box that ends 1 + 7px (the marker padding) before the content.
@@ -1571,12 +1584,19 @@ internal sealed partial class LayoutEngine
             _ops.Add(new SvgOp(left, baseline - triangle, triangle, triangle, DisclosureTriangle(m.Type == ListStyleType.DisclosureOpen, m.Rtl, s.Color)));
             return;
         }
-        if (m.Image != null || m.Svg != null)
+        if (m.Image != null || m.Svg != null || m.Gradient != null)
         {
             // An image marker sits on the baseline, 7px (the marker padding) before the content.
             float ix = m.Rtl ? m.ContentRight + 5.25f : m.ContentX - 5.25f - m.ImageW, iy = baseline - m.ImageH;
             if (m.Image != null) _ops.Add(new ImageOp(ix, iy, m.ImageW, m.ImageH, m.Image));
-            else _ops.Add(new SvgOp(ix, iy, m.ImageW, m.ImageH, m.Svg!));
+            else if (m.Svg != null) _ops.Add(new SvgOp(ix, iy, m.ImageW, m.ImageH, m.Svg));
+            else
+            {
+                // A gradient is painted as the only background layer of a box the marker's size.
+                var group = new GroupOp();
+                BoxPainter.Paint(group, new ComputedStyle { BackgroundImages = [new BackgroundImage { Gradient = m.Gradient }] }, ix, iy, m.ImageW, m.ImageH);
+                _ops.AddRange(group.Ops);
+            }
             return;
         }
         if (m.Text != null)
@@ -1635,9 +1655,9 @@ internal sealed partial class LayoutEngine
         float size = s.FontSize;
         // Chrome's inside disclosure triangle and symbols start the line; the triangle takes 0.78125em and a space,
         // a symbol its side, 1px and a font size.
-        if (m.Type is ListStyleType.DisclosureOpen or ListStyleType.DisclosureClosed && m.Text == null && m.Image == null && m.Svg == null)
+        if (m.Type is ListStyleType.DisclosureOpen or ListStyleType.DisclosureClosed && m.Text == null && m.Image == null && m.Svg == null && m.Gradient == null)
             return size * 0.78125f + s.Font.CharWidth(' ', size);
-        if (m.Image != null || m.Svg != null) return m.ImageW + 5.25f;
+        if (m.Image != null || m.Svg != null || m.Gradient != null) return m.ImageW + 5.25f;
         if (m.Text != null)
         {
             var text = m.Text;
