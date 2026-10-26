@@ -78,9 +78,10 @@ public class ResponsiveImageTests
     }
 
     [Fact]
+    // As in Chrome, which chooses as the page loads on screen, a source for print media is passed over.
     public void A_picture_takes_its_first_source_whose_media_and_type_match()
-        => Shows("<picture><source media='screen' srcset='blue.png'><source type='image/avif' srcset='blue.png'>"
-                 + "<source media='print' type='image/png' srcset='green.png'><img src='red.png'></picture>", Green, 60);
+        => Shows("<picture><source media='print' srcset='blue.png'><source type='image/avif' srcset='blue.png'>"
+                 + "<source media='screen and (orientation: portrait)' type='image/png' srcset='green.png'><img src='red.png'></picture>", Green, 60);
 
     [Fact]
     public void A_picture_without_a_matching_source_shows_its_img()

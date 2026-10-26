@@ -147,7 +147,7 @@ public static partial class HtmlToPdf
             _images.Fonts = _fonts;
             if ((_namesUsed & NamesUsed.Img) != 0)
             {
-                ResponsiveImages.Prepare(_doc, _images, new MediaContext { Width = _page.ContentWidth, Height = _page.ContentHeight },
+                ResponsiveImages.Prepare(_doc, _images, new MediaContext { Width = _page.ContentWidth, Height = _page.ContentHeight, Screen = true },
                     _page.ContentWidth / 100, _viewport / 100);
                 MissingImageText.Prepare(_doc, _images);
             }

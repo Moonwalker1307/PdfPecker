@@ -14,6 +14,12 @@ internal sealed class MediaContext
 
     /// <summary>Set once a query has tested the page size, so a change of size (from @page) is known to matter.</summary>
     public bool UsedSize;
+
+    /// <summary>
+    /// The screen media type matches instead of print: Chrome picks a picture element's sources as the page loads on
+    /// screen, before it prints.
+    /// </summary>
+    public bool Screen;
 }
 
 /// <summary>
@@ -52,7 +58,7 @@ internal static class MediaQuery
         var rest = string.Join(" ", tokens, k, tokens.Length - k);
         int sp = rest.IndexOf(' ');
         string type = sp < 0 ? rest : rest.Substring(0, sp);
-        bool result = type is "print" or "all";
+        bool result = type == "all" || type == (context.Screen ? "screen" : "print");
         if (sp >= 0)
         {
             var tail = rest.Substring(sp + 1).TrimStart();

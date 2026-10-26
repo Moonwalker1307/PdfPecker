@@ -6,8 +6,9 @@ namespace PdfPecker.Images;
 
 /// <summary>
 /// Chooses the picture of each img that has a srcset or sits in a picture element (HTML, "Images"), as Chrome does when
-/// it prints: a picture's first source whose media and type match, else the img's own srcset and src, and from that
-/// set the candidate nearest to one device pixel per CSS pixel. The choice and its pixel density are kept in the
+/// it prints: a picture's first source whose media and type match, else the img's own srcset and src, and from that set
+/// the candidate nearest to one device pixel per CSS pixel. Chrome chooses as the page loads on screen and keeps the
+/// choice when it prints, so media queries here see the screen media type (sized like the page area), not print. The choice and its pixel density are kept in the
 /// <see cref="ImageLoader"/>, so an img keeps its src attribute for selectors and its size follows the density.
 /// </summary>
 internal static class ResponsiveImages
