@@ -163,7 +163,10 @@ internal static partial class CssParser
         if (CounterStyleRule.Parse(prelude, body) is { } rule) sheet.CounterStyles.Add(rule);
     }
 
-    /// <summary>Parses an @property rule; one without a valid "inherits" descriptor is ignored, as the spec requires.</summary>
+    /// <summary>
+    /// Parses an @property rule; one without a valid "inherits" descriptor, or whose syntax or initial value is not
+    /// valid, is ignored, as the spec requires.
+    /// </summary>
     private static void ParseProperty(string prelude, string body, Stylesheet sheet)
     {
         var name = prelude.Trim();
@@ -186,8 +189,8 @@ internal static partial class CssParser
             }
         }
         if (inherits == null || syntax == null) return;
-        // A syntax other than "*" needs an initial value.
-        if (syntax != "*" && string.IsNullOrEmpty(initial)) return;
+        // A syntax other than "*" needs an initial value that matches it.
+        if (!CssPropertySyntax.Accepts(syntax, initial)) return;
         if (sheet.RegisteredProperties.Count >= MaxRegisteredProperties) return;
         sheet.RegisteredProperties.RemoveAll(p => p.Name == name); // the last registration wins
         sheet.RegisteredProperties.Add(new RegisteredProperty(name, string.IsNullOrEmpty(initial) ? null : initial, inherits.Value));

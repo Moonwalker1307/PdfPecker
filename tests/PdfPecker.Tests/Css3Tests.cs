@@ -323,6 +323,54 @@ public class Css3Tests
         Assert.Equal(Blue, ColorOf(doc, "d")); // no "inherits": not registered
     }
 
+    [Fact]
+    public void A_registration_whose_initial_value_does_not_match_its_syntax_is_ignored()
+    {
+        // Charts.css registers --aspect-ratio as <ratio>, a type Chrome does not know, with initial-value auto; Chrome
+        // drops the rule, so var(--aspect-ratio, 21/9) falls back to 21/9 instead of taking auto.
+        var doc = Styled(@"<style>
+            @property --ratio { syntax: '<ratio>'; inherits: true; initial-value: auto; }
+            @property --len { syntax: '<length>'; inherits: false; initial-value: 1em; }
+            @property --col { syntax: '<color>'; inherits: false; initial-value: 10px; }
+            #a { color: var(--ratio, blue) }
+            #b { color: var(--col, blue) }
+          </style><p id=a>a</p><p id=b>b</p>");
+        Assert.Equal(Blue, ColorOf(doc, "a"));
+        Assert.Equal(Blue, ColorOf(doc, "b"));
+    }
+
+    [Theory]
+    [InlineData("<ratio>", "16/9", false)]
+    [InlineData("<length>", "10px", true)]
+    [InlineData("<length>", "0", true)]
+    [InlineData("<length>", "1em", false)]
+    [InlineData("<length>", "1vw", true)]
+    [InlineData("<length>", "calc(1px + 2px)", true)]
+    [InlineData("<number>", "1px", false)]
+    [InlineData("<integer>", "1.5", false)]
+    [InlineData("<integer>", "3", true)]
+    [InlineData("<percentage>", "10%", true)]
+    [InlineData("<length-percentage>", "10%", true)]
+    [InlineData("<color>", "currentcolor", true)]
+    [InlineData("<color>", "rgb(1 2 3)", true)]
+    [InlineData("<color>", "foo", false)]
+    [InlineData("auto | <length>", "auto", true)]
+    [InlineData("<custom-ident>", "inherit", false)]
+    [InlineData("<custom-ident>", "foo", true)]
+    [InlineData("<length>+", "1px 2px", true)]
+    [InlineData("<length>#", "1px, 2px", true)]
+    [InlineData("<angle>", "0", false)]
+    [InlineData("<angle>", "1turn", true)]
+    [InlineData("<time>", "1s", true)]
+    [InlineData("<resolution>", "1x", true)]
+    [InlineData("<image>", "none", false)]
+    [InlineData("<url>", "url(a.png)", true)]
+    [InlineData("<string>", "\"x\"", true)]
+    [InlineData("<transform-list>", "rotate(1deg)", true)]
+    [InlineData("*", "", true)]
+    public void Registered_initial_values_are_checked_as_Chrome_checks_them(string syntax, string initial, bool valid)
+        => Assert.Equal(valid, CssPropertySyntax.Accepts(syntax, initial));
+
     // ---- media queries ----
 
     [Theory]
