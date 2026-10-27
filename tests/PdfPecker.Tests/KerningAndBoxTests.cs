@@ -178,7 +178,19 @@ public class KerningAndBoxTests
         var stroke = ops.OfType<BorderRectOp>().Single();
         Assert.Equal(Color("red"), stroke.Color);
         Near(0.75f, stroke.Width);
-        Assert.Equal(3, ops.OfType<RectOp>().Count(r => r.Color == Color("blue")));
+        // Sides of different colours meet along mitred corners, as in Chrome: each is the border ring cut to its part.
+        Assert.Equal(3, ops.OfType<RoundRectOp>().Count(r => r.Color == Color("blue") && r.Clip != null));
+        Assert.Single(ops.OfType<RoundRectOp>(), r => r.Color == Color("green"));
+    }
+
+    [Fact]
+    public void Borders_thicker_than_half_the_box_meet_at_the_inner_corner()
+    {
+        // Acid2's nose: no top border, yellow sides and a black bottom around no content make a black triangle.
+        var ops = Layout("<div style='width:0;height:0;border-style:none solid solid;border-width:20px;border-color:red yellow black yellow'></div>");
+        var bottom = ops.OfType<RoundRectOp>().Single(r => r.Color == Color("black"));
+        // Its polygon: the bottom corners, then the two inner corners, which are both the top middle of the box.
+        Assert.Equal(new[] { 30f, 15f, 0f, 15f, 15f, 0f, 15f, 0f }, bottom.Clip!.Select(v => MathF.Round(v, 2)));
     }
 
     // ---- List markers ----
