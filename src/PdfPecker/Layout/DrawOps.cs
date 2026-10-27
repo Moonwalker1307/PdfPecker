@@ -94,6 +94,11 @@ internal sealed class LineOp : DrawOp
     public bool Solid;
     /// <summary>A dash pattern of its own, with butt caps (text decorations); 0 for the pattern of the dotted flag.</summary>
     public float DashLength, DashGap;
+    /// <summary>
+    /// How far into its pattern the line starts. A dotted line with a <see cref="DashGap"/> but no
+    /// <see cref="DashLength"/> has round dots that far apart (borders).
+    /// </summary>
+    public float DashPhase;
 
     public LineOp(float x1, float y1, float x2, float y2, float width, uint color, bool dotted)
     {
@@ -124,6 +129,11 @@ internal sealed class TextOp : DrawOp
     public uint StrokeColor;
     /// <summary>paint-order: stroke, the fill is drawn over the stroke.</summary>
     public bool StrokeFirst;
+    /// <summary>
+    /// Drawn upside down about its baseline: a copy, for background-clip: text, of text in a line that a vertical-lr box
+    /// flips back.
+    /// </summary>
+    public bool UpsideDown;
 
     public TextOp(float x, float baseline, float lineTop, TextFont font, float size, uint color, string text, float wordSpacing, float charSpacing)
     {
@@ -231,4 +241,65 @@ internal sealed class FixedSlotOp : DrawOp
 
     // The fixed box keeps its place on the page wherever the flow moves.
     public override void Offset(float dx, float dy) { }
+}
+
+/// <summary>
+/// Closed loops of straight edges (x, y pairs), each corner rounded by its radius, filled by the even-odd rule or, with
+/// <see cref="StrokeWidth"/>, stroked dashed or dotted along them: the outline Chrome draws around an inline box that
+/// wraps over several lines, which follows the edge of all its lines together.
+/// </summary>
+internal sealed class PathOp : DrawOp
+{
+    public float[][] Loops;
+    /// <summary>The corner radius at each point of each loop; null for square corners.</summary>
+    public float[][]? Radii;
+    public uint Color;
+    public float StrokeWidth;
+    public BorderStyle Style = BorderStyle.Solid;
+    /// <summary>Whether the loops are open lines, the corners at their two ends left out; only for stroking.</summary>
+    public bool Open;
+    /// <summary>A polygon (x, y pairs) the path is painted inside of, or null.</summary>
+    public float[]? Clip;
+    /// <summary>The box around every point, which pagination places the op by.</summary>
+    public float X0, Y0, X1, Y1;
+
+    public PathOp(float[][] loops, float[][]? radii, uint color)
+    {
+        Loops = loops;
+        Radii = radii;
+        Color = color;
+        X0 = Y0 = float.MaxValue;
+        X1 = Y1 = float.MinValue;
+        foreach (var loop in loops)
+            for (int i = 0; i + 1 < loop.Length; i += 2)
+            {
+                X0 = Math.Min(X0, loop[i]); X1 = Math.Max(X1, loop[i]);
+                Y0 = Math.Min(Y0, loop[i + 1]); Y1 = Math.Max(Y1, loop[i + 1]);
+            }
+    }
+
+    protected override void OwnArrays()
+    {
+        var loops = new float[Loops.Length][];
+        for (int i = 0; i < loops.Length; i++) loops[i] = (float[])Loops[i].Clone();
+        Loops = loops;
+        Clip = (float[]?)Clip?.Clone();
+    }
+
+    public override void Offset(float dx, float dy)
+    {
+        X0 += dx; X1 += dx; Y0 += dy; Y1 += dy;
+        foreach (var loop in Loops)
+            for (int i = 0; i + 1 < loop.Length; i += 2)
+            {
+                loop[i] += dx;
+                loop[i + 1] += dy;
+            }
+        if (Clip == null) return;
+        for (int i = 0; i + 1 < Clip.Length; i += 2)
+        {
+            Clip[i] += dx;
+            Clip[i + 1] += dy;
+        }
+    }
 }

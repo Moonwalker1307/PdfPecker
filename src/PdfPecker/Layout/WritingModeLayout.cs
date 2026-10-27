@@ -8,7 +8,9 @@ namespace PdfPecker.Layout;
 /// Vertical writing modes. A block whose writing mode turns it against its parent's (an orthogonal flow) is laid out as
 /// horizontal text in a box with its height and width swapped, then turned a quarter turn into place. Lines therefore
 /// run down the page (vertical-rl, vertical-lr, sideways-rl) or up it (sideways-lr) with every glyph turned, as Chrome
-/// draws Latin text in those modes; upright CJK glyphs and the left-to-right line order of vertical-lr are not done.
+/// draws Latin text in those modes; upright CJK glyphs are not done. A vertical-lr box is turned by a reflection in its
+/// diagonal instead, which puts its first line on the left and the lines after it to the right, and each line is
+/// flipped back in its own line box so that its glyphs are turned rather than mirrored.
 /// </summary>
 internal sealed partial class LayoutEngine
 {
@@ -35,6 +37,30 @@ internal sealed partial class LayoutEngine
     private readonly HashSet<Element> _turning = new();
 
     /// <summary>
+    /// The content being laid out is that of a vertical-lr box, which is reflected in its diagonal: each line, picture and
+    /// turned box in it is flipped back where it stands.
+    /// </summary>
+    private bool _transposed;
+
+    /// <summary>The diagonal reflection that turns horizontal layout at the origin into vertical-lr.</summary>
+    private static readonly Matrix Transpose = new(0, 1, 1, 0, 0, 0);
+
+    /// <summary>Whether the box, turned a quarter clockwise against its parent, has its lines from left to right.</summary>
+    private static bool Transposes(ComputedStyle s, int turn) => turn > 0 && s.WritingMode == WritingMode.VerticalLr;
+
+    /// <summary>
+    /// Flips the ops from <paramref name="start"/> on upside down about the line at <paramref name="centerY"/>, which in a
+    /// reflected vertical-lr box turns them the right way round again; returns the layer that holds them.
+    /// </summary>
+    private LayerOp FlipBack(int start, float centerY)
+    {
+        var layer = WrapLayer(start, 0, stackingContext: false);
+        layer.Transform = Matrix.Scale(1, -1);
+        layer.OriginY = centerY;
+        return layer;
+    }
+
+    /// <summary>
     /// Lays out a block-level box in an orthogonal flow at (<paramref name="x"/>, <paramref name="y"/>) and returns its
     /// bottom margin edge. Its height is the length of its lines: the height it is given, or else as long as its
     /// content wants, up to the page height; its width is the depth of its lines unless it is given one.
@@ -42,6 +68,7 @@ internal sealed partial class LayoutEngine
     private float LayoutOrthogonal(Element e, float x, float y, float availW, int turn)
     {
         var s = e.Style;
+        bool flipBack = _transposed;
         float ml = s.MarginLeft.IsAuto ? 0 : s.MarginLeft.Resolve(availW);
         float mt = s.MarginTop.IsAuto ? 0 : s.MarginTop.Resolve(availW), mb = s.MarginBottom.IsAuto ? 0 : s.MarginBottom.Resolve(availW);
         var c = CaptureOrthogonal(e, turn, availW, _grid.Height(PageOf(y)));
@@ -54,11 +81,21 @@ internal sealed partial class LayoutEngine
         int start = _ops.Count;
         Place(c, px, py);
         var layer = WrapLayer(start, 0, stackingContext: false);
-        layer.Transform = Matrix.Rotate(turn);
-        // The origin that turns the horizontal box at (px, py) into the box of the swapped size at the same place.
-        float half = (turn > 0 ? depth : lineLength) / 2;
-        layer.OriginX = px + half;
-        layer.OriginY = py + half;
+        if (Transposes(s, turn))
+        {
+            layer.Transform = Transpose;
+            (layer.OriginX, layer.OriginY) = (px, py);
+        }
+        else
+        {
+            layer.Transform = Matrix.Rotate(turn);
+            // The origin that turns the horizontal box at (px, py) into the box of the swapped size at the same place.
+            float half = (turn > 0 ? depth : lineLength) / 2;
+            layer.OriginX = px + half;
+            layer.OriginY = py + half;
+        }
+        // Inside a vertical-lr box the turned box would be reflected with it.
+        if (flipBack) FlipBack(_ops.Count - 1, py + lineLength / 2);
 
         (_lastBoxX, _lastBoxTop, _lastBoxW, _lastBoxH) = (px, py, depth, lineLength);
         _lastBoxRight = Math.Max(_lastBoxRight, px + depth);
@@ -93,17 +130,22 @@ internal sealed partial class LayoutEngine
             : null;
         // The widths measured for the box on the page are its depth; laid out turned, it measures its lines instead.
         bool measured = _intrinsicCache.Remove(e, out var pageWidths);
-        e.Style = Turned(s, turn);
+        bool transposed = Transposes(s, turn), outerTransposed = _transposed;
+        e.Style = Turned(s, turn, transposed);
         _turning.Add(e);
+        _transposed = transposed;
         // The boxes inside are laid out turned too, so their widths, heights, margins, padding and borders, which are
         // physical, turn with them: a float 40px wide and 50px tall in vertical text stays so on the page.
-        var inner = TurnDescendants(e, turn);
+        var inner = TurnDescendants(e, turn, transposed);
         try
         {
-            return CaptureBox(e, lineLength ?? pageHeight, shrinkToFit: lineLength == null, lineLength, depth);
+            var c = CaptureBox(e, lineLength ?? pageHeight, shrinkToFit: lineLength == null, lineLength, depth);
+            if (transposed) FlipPictures(c.Ops);
+            return c;
         }
         finally
         {
+            _transposed = outerTransposed;
             foreach (var (d, style) in inner)
             {
                 d.Style = style;
@@ -123,16 +165,19 @@ internal sealed partial class LayoutEngine
     /// the layout, and each side's padding and border taken from the side the turn brings it to.
     /// </summary>
     // The physical side (top 0, right 1, bottom 2, left 3) that each side of the turned box, in the same order, comes from.
-    private static readonly int[] ClockwiseSides = { 1, 2, 3, 0 }, AnticlockwiseSides = { 3, 0, 1, 2 };
+    // Reflected in the diagonal for vertical-lr, the top comes from the left and the right from the bottom.
+    private static readonly int[] ClockwiseSides = { 1, 2, 3, 0 }, AnticlockwiseSides = { 3, 0, 1, 2 }, TransposedSides = { 3, 2, 1, 0 };
 
-    private static ComputedStyle Turned(ComputedStyle s, int turn)
+    private static int[] SidesFrom(int turn, bool transposed) => transposed ? TransposedSides : turn > 0 ? ClockwiseSides : AnticlockwiseSides;
+
+    private static ComputedStyle Turned(ComputedStyle s, int turn, bool transposed)
     {
         var t = s.Clone();
         t.MarginTop = t.MarginRight = t.MarginBottom = t.MarginLeft = Length.Zero;
         t.Width = t.Height = t.MinWidth = t.MaxWidth = t.MaxHeight = Length.Auto;
         t.MinHeight = Length.Zero;
         t.AspectRatio = 0;
-        TurnSides(t, s, turn);
+        TurnSides(t, s, turn, transposed);
         return t;
     }
 
@@ -140,7 +185,7 @@ internal sealed partial class LayoutEngine
     /// Gives the elements inside a box laid out turned the styles they are laid out with there, and returns their own
     /// styles to put back. An element whose style is shared keeps one turned copy for all who share it.
     /// </summary>
-    private static List<(Element Element, ComputedStyle Style)> TurnDescendants(Element root, int turn)
+    private static List<(Element Element, ComputedStyle Style)> TurnDescendants(Element root, int turn, bool transposed)
     {
         var saved = new List<(Element, ComputedStyle)>();
         var turned = new Dictionary<ComputedStyle, ComputedStyle>(ReferenceEqualityComparer.Instance);
@@ -152,7 +197,7 @@ internal sealed partial class LayoutEngine
             var d = stack.Pop();
             if (d.Style is { } s)
             {
-                if (!turned.TryGetValue(s, out var t)) turned[s] = t = TurnedInside(s, turn);
+                if (!turned.TryGetValue(s, out var t)) turned[s] = t = TurnedInside(s, turn, transposed);
                 saved.Add((d, s));
                 d.Style = t;
             }
@@ -166,7 +211,7 @@ internal sealed partial class LayoutEngine
     /// The style of a box inside a box laid out turned: its width and height, and the limits on them, swap, and each side's
     /// margin, padding and border is taken from the side the turn brings it to, as for the turned box itself.
     /// </summary>
-    private static ComputedStyle TurnedInside(ComputedStyle s, int turn)
+    private static ComputedStyle TurnedInside(ComputedStyle s, int turn, bool transposed)
     {
         var t = s.Clone();
         (t.Width, t.Height) = (s.Height, s.Width);
@@ -176,20 +221,20 @@ internal sealed partial class LayoutEngine
         t.MinHeight = s.MinWidth.IsAuto ? Length.Zero : s.MinWidth;
         t.WidthKeyword = SizeKeyword.None;
         if (s.AspectRatio > 0) t.AspectRatio = 1 / s.AspectRatio;
-        var from = turn > 0 ? ClockwiseSides : AnticlockwiseSides;
+        var from = SidesFrom(turn, transposed);
         Length[] margins = { s.MarginTop, s.MarginRight, s.MarginBottom, s.MarginLeft };
         (t.MarginTop, t.MarginRight, t.MarginBottom, t.MarginLeft) = (margins[from[0]], margins[from[1]], margins[from[2]], margins[from[3]]);
-        TurnSides(t, s, turn);
+        TurnSides(t, s, turn, transposed);
         return t;
     }
 
     /// <summary>Sets the padding, borders, corner radii and overflow of <paramref name="t"/> from those of <paramref name="s"/> turned.</summary>
-    private static void TurnSides(ComputedStyle t, ComputedStyle s, int turn)
+    private static void TurnSides(ComputedStyle t, ComputedStyle s, int turn, bool transposed)
     {
         (t.OverflowX, t.OverflowY) = (s.OverflowY, s.OverflowX);
         // Turned clockwise, the horizontal box's left side becomes the top, its top the right, and so on; turned
         // anticlockwise, its left side becomes the bottom.
-        var from = turn > 0 ? ClockwiseSides : AnticlockwiseSides;
+        var from = SidesFrom(turn, transposed);
         Length[] padding = { s.PaddingTop, s.PaddingRight, s.PaddingBottom, s.PaddingLeft };
         float[] widths = { s.BorderTopWidth, s.BorderRightWidth, s.BorderBottomWidth, s.BorderLeftWidth };
         BorderStyle[] styles = { s.BorderTopStyle, s.BorderRightStyle, s.BorderBottomStyle, s.BorderLeftStyle };
@@ -200,16 +245,49 @@ internal sealed partial class LayoutEngine
         (t.BorderTopColor, t.BorderRightColor, t.BorderBottomColor, t.BorderLeftColor) = (colors[from[0]], colors[from[1]], colors[from[2]], colors[from[3]]);
         if (s.BorderRadii is { } radii)
         {
-            // Corners turn the same way (top-left, top-right, bottom-right, bottom-left), with their two radii swapped.
+            // Corners turn the same way (top-left, top-right, bottom-right, bottom-left), with their two radii swapped;
+            // reflected, the top-left corner stays and the top-right and bottom-left change places.
             var turned = new Length[8];
             for (int k = 0; k < 4; k++)
             {
-                int p = turn > 0 ? (k + 1) % 4 : (k + 3) % 4;
+                int p = transposed ? (4 - k) % 4 : turn > 0 ? (k + 1) % 4 : (k + 3) % 4;
                 turned[k * 2] = radii[p * 2 + 1];
                 turned[k * 2 + 1] = radii[p * 2];
             }
             t.BorderRadii = turned;
         }
+    }
+
+    /// <summary>
+    /// Flips back the pictures laid out in a vertical-lr box outside its lines, so that the reflection leaves them the
+    /// right way round; lines and turned boxes, which are layers with a transform, were flipped back already.
+    /// </summary>
+    private static void FlipPictures(List<DrawOp> ops)
+    {
+        for (int i = 0; i < ops.Count; i++)
+        {
+            switch (ops[i])
+            {
+                case ImageOp img:
+                    ops[i] = FlippedBack(img, img.Y + img.H / 2);
+                    break;
+                case SvgOp svg:
+                    ops[i] = FlippedBack(svg, svg.Y + svg.H / 2);
+                    break;
+                case LayerOp { Transform: not null }:
+                    break;
+                case GroupOp g:
+                    FlipPictures(g.Ops);
+                    break;
+            }
+        }
+    }
+
+    private static LayerOp FlippedBack(DrawOp op, float centerY)
+    {
+        var layer = new LayerOp { Transform = Matrix.Scale(1, -1), OriginY = centerY };
+        layer.Ops.Add(op);
+        return layer;
     }
 
     /// <summary>

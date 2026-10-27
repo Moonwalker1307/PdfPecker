@@ -319,6 +319,7 @@ internal sealed partial class PdfDocumentWriter
             case RectOp r: if (r.W > 0 && r.H > 0) list.Add(new Placed(r, r.Y, r.Y + r.H)); break;
             case BorderRectOp br: list.Add(new Placed(br, br.Y, br.Y + br.H)); break;
             case RoundRectOp rr: list.Add(new Placed(rr, rr.Y, rr.Y + rr.H)); break;
+            case PathOp path: list.Add(new Placed(path, path.Y0, path.Y1)); break;
             case BackgroundOp bg:
             {
                 var (_, y0, _, y1) = bg.Painted();

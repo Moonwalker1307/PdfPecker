@@ -115,11 +115,11 @@ internal ref struct CssReader
 
     public readonly bool AtEnd => _position >= _end;
 
-    public void SkipWhitespaceAndSemicolons()
+    public void SkipWhitespace()
     {
         string text = _text;
         int i = _position, end = _end;
-        while (i < end && (char.IsWhiteSpace(text[i]) || text[i] == ';')) i++;
+        while (i < end && char.IsWhiteSpace(text[i])) i++;
         _position = i;
     }
 
@@ -160,12 +160,26 @@ internal ref struct CssReader
         {
             char c = text[i];
             if (c == target) return i;
-            if (c is '"' or '\'')
+            if (c == '\\') i++; // an escaped character, such as the "\}" Acid2 hides in a declaration, is not syntax
+            else if (c is '"' or '\'')
             {
-                int close = text.IndexOf(c, i + 1, to - i - 1);
+                int close = StringEnd(text, i, to);
                 if (close < 0) return -1;
                 i = close;
             }
+        }
+        return -1;
+    }
+
+    /// <summary>The quote closing the string that opens at <paramref name="open"/>, past escaped quotes, or -1.</summary>
+    private static int StringEnd(string text, int open, int to)
+    {
+        char quote = text[open];
+        for (int i = open + 1; i < to; i++)
+        {
+            char c = text[i];
+            if (c == quote) return i;
+            if (c == '\\') i++;
         }
         return -1;
     }
@@ -178,9 +192,10 @@ internal ref struct CssReader
         for (int i = open; i < end; i++)
         {
             char c = text[i];
-            if (c is '"' or '\'')
+            if (c == '\\') i++;
+            else if (c is '"' or '\'')
             {
-                int close = text.IndexOf(c, i + 1, end - i - 1);
+                int close = StringEnd(text, i, end);
                 if (close < 0) return end;
                 i = close;
             }

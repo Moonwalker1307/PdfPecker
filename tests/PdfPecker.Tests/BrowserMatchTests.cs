@@ -134,6 +134,18 @@ public class BrowserMatchTests
     }
 
     [Theory]
+    [InlineData("word-break: break-all")]
+    [InlineData("overflow-wrap: anywhere")]
+    public void A_table_cell_that_may_break_inside_words_fits_its_container(string wrap)
+    {
+        // The cell's min-content width is its widest letter, so the table stays within the 60px box, as in Chrome.
+        var lines = Lines(Layout($"<div style='width: 60px; font: 12px Courier New'><table><tr><td style='{wrap}'>"
+                                 + "url(data:image/png;base64,iVBORw0KGgo)</td></tr></table></div>"));
+        Assert.True(lines.Count > 1);
+        Assert.All(lines, l => Assert.True(l.Length <= 8, l));
+    }
+
+    [Theory]
     [InlineData("P*")]
     [InlineData("P(")]
     [InlineData("P&nbsp;")]
@@ -273,6 +285,24 @@ public class BrowserMatchTests
         // Chrome: the empty <p> adds one 12px margin, not two, and nothing for its own height.
         var ops = Layout("<div style='font: 12px Arial'><div>A</div><p style='margin: 12px 0'></p><div>B</div></div>").OfType<TextOp>().ToList();
         Near((14 + 12) * 0.75f, ops[1].Baseline - ops[0].Baseline);
+    }
+
+    [Theory]
+    // Acid2: an empty box's 75px margins and its empty child's -72px bottom margin take 3px, also with the next box's
+    // 60px top margin and when its height is a percentage of an auto height, which acts as auto (Chrome).
+    [InlineData("", 3)]
+    [InlineData("margin-top: 60px", 3)]
+    [InlineData("margin-top: 60px; height: 10%", 3)]
+    [InlineData("margin-top: -80px", -5)]
+    public void Positive_and_negative_margins_collapse_as_one_set(string nextStyle, float gap)
+    {
+        string emptyHeight = nextStyle.Contains("10%") ? "height: 10%" : "";
+        var ops = Layout($"""
+            <div style="height: 20px; background: #0000ff"></div>
+            <div style="margin: 75px; {emptyHeight}"><div style="margin: 0 0 -72px"></div></div>
+            <div style="height: 20px; background: #ff0000; {nextStyle.Replace("; height: 10%", "")}"></div>
+            """);
+        Near((20 + gap) * 0.75f, Box(ops, "#ff0000").Y - Box(ops, "#0000ff").Y);
     }
 
     [Fact]

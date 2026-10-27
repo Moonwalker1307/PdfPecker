@@ -78,7 +78,9 @@ internal static partial class CssParser
         {
             while (true)
             {
-                _reader.SkipWhitespaceAndSemicolons();
+                // A stray ';' is not skipped: it starts the prelude of the next rule, whose selector it makes invalid,
+                // so that rule is dropped as in browsers (Acid2 counts on it).
+                _reader.SkipWhitespace();
                 if (_reader.AtEnd) return;
                 // A stray closing brace, and the HTML comment markers of old style blocks, are skipped.
                 if (_reader.Skip('}') || _reader.Skip("<!--") || _reader.Skip("-->")) continue;

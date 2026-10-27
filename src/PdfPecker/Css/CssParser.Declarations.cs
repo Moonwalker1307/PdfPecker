@@ -33,7 +33,28 @@ internal static partial class CssParser
             important = true;
             value = value.Substring(0, bang).TrimEnd();
         }
+        // Any other '!' in a property's value, such as Acid2's "! error", makes the declaration invalid.
+        if (!custom && HasBang(value)) return false;
         return name.Length > 0 && (value.Length > 0 || custom);
+    }
+
+    /// <summary>Whether a '!' appears in the value outside strings, escapes and functions such as url().</summary>
+    private static bool HasBang(string value)
+    {
+        if (value.IndexOf('!') < 0) return false;
+        int depth = 0;
+        char quote = '\0';
+        for (int i = 0; i < value.Length; i++)
+        {
+            char c = value[i];
+            if (c == '\\') i++;
+            else if (quote != '\0') { if (c == quote) quote = '\0'; }
+            else if (c is '"' or '\'') quote = c;
+            else if (c == '(') depth++;
+            else if (c == ')') depth = Math.Max(0, depth - 1);
+            else if (c == '!' && depth == 0) return true;
+        }
+        return false;
     }
 
     /// <summary>True when the value references a custom property and can only be expanded once the element's variables are known.</summary>

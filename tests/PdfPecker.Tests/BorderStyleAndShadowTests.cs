@@ -84,15 +84,20 @@ public class BorderStyleAndShadowTests
     // ---- 3D border colours ----
 
     [Theory]
-    // Measured in Chrome: the dark side of an inset border, then its light side.
-    [InlineData(0xCC0000u, 0x780000u, 0xCC0000u)]
-    [InlineData(0x000000u, 0x000000u, 0x545454u)]
+    // Measured in Chrome 153: the dark side of an inset border, then its light side.
+    [InlineData(0xCC0000u, 0x780000u, 0xFF0000u)]
+    [InlineData(0x000000u, 0x545454u, 0xA8A8A8u)]
     [InlineData(0xFFFFFFu, 0xABABABu, 0xFFFFFFu)]
-    [InlineData(0xC0C0C0u, 0x6C6C6Cu, 0xC0C0C0u)]
+    [InlineData(0xC0C0C0u, 0x6C6C6Cu, 0xFFFFFFu)]
     [InlineData(0x333333u, 0x000000u, 0x878787u)]
-    [InlineData(0x404040u, 0x000000u, 0x404040u)]
+    [InlineData(0x404040u, 0x000000u, 0x949494u)]
     [InlineData(0x7F0000u, 0x2B0000u, 0xD30000u)]
     [InlineData(0x0000C0u, 0x00006Cu, 0x0000FFu)]
+    [InlineData(0x4A90D9u, 0x2D5885u, 0x57A9FFu)]
+    [InlineData(0x202020u, 0x747474u, 0xC8C8C8u)] // too dark to darken: lightened first
+    [InlineData(0x222222u, 0x000000u, 0x767676u)]
+    [InlineData(0xEEEEEEu, 0x9A9A9Au, 0xEEEEEEu)] // near white: the light side keeps the colour
+    [InlineData(0xEBEBEBu, 0x979797u, 0xFFFFFFu)]
     public void Inset_sides_are_shaded_as_in_Chrome(uint color, uint dark, uint light)
     {
         uint c = 0xFF000000 | color;
@@ -111,9 +116,9 @@ public class BorderStyleAndShadowTests
         string Box(string style) => Body + $"<div style='width:40px;height:40px;border:20px {style} #c00'></div>";
         Near(0x78, 0, 0, Pixel(Box("inset"), 40, 5));   // top
         Near(0x78, 0, 0, Pixel(Box("inset"), 5, 40));   // left
-        Near(0xCC, 0, 0, Pixel(Box("inset"), 40, 75));  // bottom
-        Near(0xCC, 0, 0, Pixel(Box("inset"), 75, 40));  // right
-        Near(0xCC, 0, 0, Pixel(Box("outset"), 40, 5));
+        Near(0xFF, 0, 0, Pixel(Box("inset"), 40, 75));  // bottom
+        Near(0xFF, 0, 0, Pixel(Box("inset"), 75, 40));  // right
+        Near(0xFF, 0, 0, Pixel(Box("outset"), 40, 5));
         Near(0x78, 0, 0, Pixel(Box("outset"), 40, 75));
     }
 
@@ -123,10 +128,10 @@ public class BorderStyleAndShadowTests
         string Box(string style) => Body + $"<div style='width:40px;height:40px;border:20px {style} #c00'></div>";
         // A groove's top is dark outside and light inside; a ridge the other way round.
         Near(0x78, 0, 0, Pixel(Box("groove"), 40, 4));
-        Near(0xCC, 0, 0, Pixel(Box("groove"), 40, 15));
-        Near(0xCC, 0, 0, Pixel(Box("groove"), 40, 75));
+        Near(0xFF, 0, 0, Pixel(Box("groove"), 40, 15));
+        Near(0xFF, 0, 0, Pixel(Box("groove"), 40, 75));
         Near(0x78, 0, 0, Pixel(Box("groove"), 40, 65));
-        Near(0xCC, 0, 0, Pixel(Box("ridge"), 40, 4));
+        Near(0xFF, 0, 0, Pixel(Box("ridge"), 40, 4));
         Near(0x78, 0, 0, Pixel(Box("ridge"), 40, 15));
     }
 
@@ -136,10 +141,10 @@ public class BorderStyleAndShadowTests
         // Chrome splits a groove from two pixels up: the default fieldset border is a dark and a light line, not one dark one.
         string Box(string style) => Body + $"<div style='width:40px;height:40px;border:2px {style} #c00'></div>";
         Near(0x78, 0, 0, Pixel(Box("groove"), 20, 0));
-        Near(0xCC, 0, 0, Pixel(Box("groove"), 20, 1));
+        Near(0xFF, 0, 0, Pixel(Box("groove"), 20, 1));
         Near(0x78, 0, 0, Pixel(Box("groove"), 20, 42));
-        Near(0xCC, 0, 0, Pixel(Box("groove"), 20, 43));
-        Near(0xCC, 0, 0, Pixel(Box("ridge"), 0, 20));
+        Near(0xFF, 0, 0, Pixel(Box("groove"), 20, 43));
+        Near(0xFF, 0, 0, Pixel(Box("ridge"), 0, 20));
         Near(0x78, 0, 0, Pixel(Box("ridge"), 1, 20));
     }
 
@@ -170,7 +175,7 @@ public class BorderStyleAndShadowTests
     public void Three_d_borders_with_rounded_corners_are_shaded()
     {
         var html = Body + "<div style='width:60px;height:40px;border:12px outset #c00;border-radius:16px'></div>";
-        Near(0xCC, 0, 0, Pixel(html, 42, 5));
+        Near(0xFF, 0, 0, Pixel(html, 42, 5));
         Near(0x78, 0, 0, Pixel(html, 42, 58));
     }
 

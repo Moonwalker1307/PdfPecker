@@ -122,14 +122,15 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
 - **HTML and CSS**: flexbox, grid and subgrid, CSS tables, floats with `shape-outside`, multi-column layout,
   positioning (also the legacy `clip: rect()`, and absolute boxes inside a positioned inline element, such as
   tooltips and badges), transforms, gradients (also `in oklch` and other colour spaces, and as
-  list markers), filters, masks, media and container queries, logical properties, `writing-mode` (with floats and sized boxes), `text-wrap`,
-  `line-clamp` with your own `block-ellipsis`, underlines from the font or below the descenders
-  (`text-underline-position`), drop caps, images and gradients in `::before` and `::after` content, inline SVG (with HTML in `<foreignObject>`) and
-  PNG, JPEG, GIF, WebP, BMP and TIFF images (also chosen by `srcset` and `<picture>`, shown by `<embed>` and `<object>`,
-  and photos turned upright by their EXIF orientation), and CSS-only charts such as Charts.css (column, bar, area,
-  line and pie charts), laid out as Chrome lays them out. Older CSS works too: the `-webkit-` property names Chrome
-  still takes (`-webkit-transform`, `-webkit-flex`, ...), the legacy `display: -webkit-box` and its `-webkit-box-`
-  properties, and the `-webkit-gradient()` and prefixed gradient syntaxes.
+  list markers), filters, masks, media and container queries, logical properties, `writing-mode` (with floats, sized
+  boxes and vertical-lr line order), `text-wrap`, `line-clamp` with your own `block-ellipsis`, underlines from the
+  font or below the descenders (`text-underline-position`), drop caps, images and gradients in `::before` and
+  `::after` content, inline SVG (with HTML in `<foreignObject>`) and PNG, JPEG, GIF, WebP, BMP and TIFF images (also
+  chosen by `srcset` and `<picture>`, shown by `<embed>` and `<object>`, and photos turned upright by their EXIF
+  orientation), and CSS-only charts such as Charts.css (column, bar, area, line and pie charts), laid out as Chrome
+  lays them out. Older CSS works too: the `-webkit-` property names Chrome still takes (`-webkit-transform`,
+  `-webkit-flex`, ...), the legacy `display: -webkit-box` and its `-webkit-box-` properties, and the
+  `-webkit-gradient()` and prefixed gradient syntaxes.
   [More](https://pdfpecker.net/docs/html-and-css/)
 - **Paged media**: `@page` sizes and margin boxes, running headers and footers (also a first page of its own, and bands
   of their own for named pages), footnotes, tables of contents with page numbers, break control (also table row groups
@@ -189,8 +190,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   half-written output. [More](https://pdfpecker.net/docs/options/#errors-cancellation-and-output-files)
 
 PdfPecker is built for HTML templates you control: it runs no JavaScript, and conversion never fetches anything from
-the network (remote images and stylesheets load only through a `ResourceResolver` you supply). Only signing goes online,
-and only when you ask: a timestamp from the server you name in `TimestampUrl`, OCSP and CRL data for long-term
+the network (remote images and stylesheets load only through a `ResourceResolver` you supply; those in `data:` URLs need
+none). Only signing goes online, and only when you ask: a timestamp from the server you name in `TimestampUrl`, OCSP and CRL data for long-term
 validation when you turn on `FetchRevocationData`, and online revocation checks when verification uses
 `X509RevocationMode.Online`. See the [limitations](https://pdfpecker.net/docs/limitations/) for what it does not do yet.
 

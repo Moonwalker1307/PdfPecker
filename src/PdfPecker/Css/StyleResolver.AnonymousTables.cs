@@ -36,7 +36,8 @@ internal sealed partial class StyleResolver
             case Display.Table:
                 // Everything that is no row, row group, caption or column goes into an anonymous row. Wrappers such as a
                 // <form> around rows stay: the table looks into them for its rows.
-                WrapRuns(parent, c => !IsTableChild(c.Style.Display) && !HasRows(c), Display.TableRow, AnonymousRowName);
+                // A table in a table is content, whatever rows it has: it goes into an anonymous row and cell too.
+                WrapRuns(parent, c => !IsTableChild(c.Style.Display) && (c.Style.Display == Display.Table || !HasRows(c)), Display.TableRow, AnonymousRowName);
                 break;
             case Display.TableRowGroup or Display.TableHeaderGroup or Display.TableFooterGroup:
                 WrapRuns(parent, c => c.Style.Display != Display.TableRow, Display.TableRow, AnonymousRowName);

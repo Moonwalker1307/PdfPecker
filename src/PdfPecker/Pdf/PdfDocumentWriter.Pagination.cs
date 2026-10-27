@@ -280,6 +280,9 @@ internal sealed partial class PdfDocumentWriter
                 case RoundRectOp rr:
                     if (rr.W > 0 && rr.H > 0) AddSplit(rr, rr.Y, rr.Y + rr.H, into); // only the outer shape is painted
                     break;
+                case PathOp path:
+                    if (path.Y1 > path.Y0) AddSplit(path, path.Y0, path.Y1, into);
+                    break;
                 case BorderRectOp br:
                     if (PageOf(br.Y) == PageOf(br.Y + br.H - 0.5f)) Target(into, PageOf(br.Y)).Add(new Placed(br, br.Y, br.Y + br.H));
                     else foreach (var side in br.Sides()) Distribute(side, into); // a box split by a page break is open at the break
