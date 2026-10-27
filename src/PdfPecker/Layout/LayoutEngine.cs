@@ -1267,7 +1267,7 @@ internal sealed partial class LayoutEngine
             childCb = _cbHeight;
             // The legend was laid out already: the content leaves it out.
             if (legend != null) legend.Detached = true;
-            _flowTrailing = 0;
+            _flowTrailing = default;
             try
             {
                 contentBottom = s.ScaleToFit && FitHeight(e, definiteH, MaxContentHeight(s, sizing, cbH)) is float fitH
@@ -1278,12 +1278,12 @@ internal sealed partial class LayoutEngine
             _cbHeight = outerCb;
             _pageBox = null;
             bool collapsesBottom = joinsChildren && CollapsesBottom(e) && !s.IsFlex && !s.IsGrid;
-            if (!collapsesBottom && _paginate && _flowTrailing > 0 && !s.IsFlex && !s.IsGrid && !s.IsMultiColumn && !s.ScaleToFit)
+            if (!collapsesBottom && _paginate && _flowTrailing.Value > 0 && !s.IsFlex && !s.IsGrid && !s.IsMultiColumn && !s.ScaleToFit)
             {
                 // A bottom margin kept inside the box that runs past the end of a page is truncated at the break, as in
                 // Chrome: the box's bottom edge starts the next page, and a document that ends in a tall margin makes
                 // no blank pages.
-                int page = PageOf(contentBottom - _flowTrailing);
+                int page = PageOf(contentBottom - _flowTrailing.Value);
                 if (PageOf(contentBottom - 0.5f) > page) contentBottom = FlowStart(page + 1);
             }
             if (outerFloats != null) contentBottom = LeaveFormattingContext(outerFloats, contentBottom);
