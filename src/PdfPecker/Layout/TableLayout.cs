@@ -130,6 +130,31 @@ internal sealed partial class LayoutEngine
     /// borders, its first footer row draws the border above it there (see <see cref="PaintBorrowedTop"/>).
     /// </summary>
     private TableModel? _repeatingFoot;
+
+    // While a table row split across pages is laid out again: as in Chrome, the table's header repeats at the top of
+    // each page after the first one the row is on, and its footer at the bottom of each page, so the row's content
+    // leaves room for them there (see FlowStart and FlowEnd).
+    private SplitRowRoom? _splitRow;
+
+    private readonly record struct SplitRowRoom(int FirstPage, float Head, float Foot);
+
+    /// <summary>The page's first flow position content may take: its start, below a header repeated over a split row.</summary>
+    private float FlowStart(int page)
+        => _splitRow is { } r && page > r.FirstPage ? _grid.Start(page) + r.Head : _grid.Start(page);
+
+    private float SplitRowFoot(int page) => _splitRow is { } r && page >= r.FirstPage ? r.Foot : 0;
+
+    /// <summary>
+    /// The bottom of a box from <paramref name="top"/> to <paramref name="bottom"/> once the room for a split row's
+    /// repeated footer and header at each page break it crosses is added, as its size goes on below the header.
+    /// </summary>
+    private float PastSplitRowRoom(float top, float bottom)
+    {
+        if (!_paginate || _splitRow is not { } r) return bottom;
+        for (int p = Math.Max(PageOf(top), r.FirstPage); p < PageOf(bottom - 0.5f); p++)
+            bottom += r.Foot + r.Head;
+        return bottom;
+    }
     private int _rowAboveFoot; // the body row above the footer repeated on this page
 
     private TableModel GetTableModel(Element table)
@@ -1076,6 +1101,12 @@ internal sealed partial class LayoutEngine
             break;
         }
 
+        if (allowMove && RepeatsAroundSplit(m, r, rowTop, rowBottom))
+        {
+            Truncate(rowStartOps);
+            return LayoutSplitRow(m, r, rowTop, rowBottom, colX, widths, hs, vs, collapse, pageColumns);
+        }
+
         foreach (var cell in row.Ending) FinishCell(m, cell, rowBottom, collapse);
 
         // Under the cells, from the bottom up (CSS 2.1 §17.5.1): column groups, columns, the row group and the row.
@@ -1091,6 +1122,111 @@ internal sealed partial class LayoutEngine
                 PaintRowBackground(m, rs.BackgroundColor, rowGroup, rowTop, rowBottom, colX, widths, hs, under);
         }
         return rowBottom;
+    }
+
+    /// <summary>
+    /// Whether body row <paramref name="r"/>, laid out where it stays, is split across pages with a header or footer to
+    /// repeat around it. Rows spanned by cells of other rows, rows in columns and rows inside a split row keep their layout.
+    /// </summary>
+    private bool RepeatsAroundSplit(TableModel m, int r, float rowTop, float rowBottom)
+    {
+        if (!_paginate || _measuringRows > 0 || _splitRow != null || _grid is ColumnGrid || !MayLayOutAgain) return false;
+        if (r < m.HeadCount || r >= m.Rows.Count - m.FootCount || m.HeadCount == 0 && m.FootReserve == 0) return false;
+        if (!CrossesPage(rowTop, rowBottom)) return false;
+        var row = m.Rows[r];
+        foreach (var cell in row.Cells)
+            if (cell.RowSpan > 1) return false;
+        foreach (var cell in row.Ending)
+            if (cell.RowSpan > 1) return false;
+        return true;
+    }
+
+    /// <summary>
+    /// Lays out a body row split across pages as Chrome does: its content leaves room for the table's footer at the
+    /// bottom of each page it goes on from and for the header at the top of each page it goes on to, where the header and
+    /// footer are repeated, and its cells stop above the footer and go on below the header. Returns the row's bottom.
+    /// </summary>
+    private float LayoutSplitRow(TableModel m, int r, float rowTop, float firstBottom, float[] colX, float[] widths, float hs, float vs,
+        bool collapse, TableColumns[]? pageColumns)
+    {
+        int first = PageOf(rowTop);
+        float head = 0;
+        if (m.HeadCount > 0)
+        {
+            var heads = Capture(() =>
+            {
+                _measuringRows++;
+                float y = 0;
+                for (int h = 0; h < m.HeadCount; h++)
+                    y = LayoutRow(m, h, y, colX, widths, hs, vs, collapse, allowMove: false) + vs;
+                _measuringRows--;
+                return y;
+            });
+            // Headers too tall to repeat usefully are not repeated, as when a row moves to the next page.
+            if (heads.Height <= _grid.Height(first + 1) / 2) head = heads.Height;
+        }
+        float foot = m.FootReserve;
+
+        // The pages the row may reach once it leaves that room: its breaks are known before its cells are painted, and
+        // those it does not reach are dropped again.
+        int breaksBefore = m.Breaks.Count;
+        if (collapse)
+        {
+            int pages = PageOf(firstBottom - 0.5f) - first + 1;
+            int last = PageOf(firstBottom - 0.5f) + 1 + (int)Math.Ceiling(pages * (head + foot) / Math.Max(1, _grid.MinHeight));
+            for (int p = first; p < last; p++)
+                m.Breaks.Add(SplitBreak(p, head, foot, vs));
+        }
+
+        float bottom;
+        var outer = _splitRow;
+        _splitRow = new SplitRowRoom(first, head, foot);
+        try
+        {
+            bottom = LayoutRow(m, r, rowTop, colX, widths, hs, vs, collapse, allowMove: false, pageColumns);
+        }
+        finally
+        {
+            _splitRow = outer;
+        }
+        int lastPage = PageOf(bottom - 0.5f);
+        if (collapse)
+            for (int i = m.Breaks.Count - 1; i >= breaksBefore; i--)
+                if (PageOf(m.Breaks[i].PageTop) > lastPage) m.Breaks.RemoveAt(i);
+
+        for (int p = first; p < lastPage; p++)
+        {
+            var at = SplitBreak(p, head, foot, vs);
+            if (foot > 0)
+            {
+                int footOps = _ops.Count;
+                var outerFoot = _repeatingFoot;
+                _repeatingFoot = m;
+                _rowAboveFoot = r;
+                float footTop = at.BodyEnd;
+                for (int f = m.Rows.Count - m.FootCount; f < m.Rows.Count; f++)
+                    footTop = LayoutRow(m, f, footTop, colX, widths, hs, vs, collapse, allowMove: false, pageColumns) + vs;
+                _repeatingFoot = outerFoot;
+                // The structure has the footer once: its repeats are artifacts.
+                if (Tags != null) Untag(_ops, footOps);
+            }
+            if (head > 0)
+            {
+                int headOps = _ops.Count;
+                float headTop = at.PageTop;
+                for (int h = 0; h < m.HeadCount; h++)
+                    headTop = LayoutRow(m, h, headTop, colX, widths, hs, vs, collapse, allowMove: false, pageColumns) + vs;
+                if (Tags != null) Untag(_ops, headOps);
+            }
+        }
+        return bottom;
+    }
+
+    /// <summary>Where a table stops on page <paramref name="page"/> of a row split across pages, and goes on after it.</summary>
+    private TableBreak SplitBreak(int page, float head, float foot, float vs)
+    {
+        float bodyEnd = _grid.Start(page + 1) - FootnoteReserve(page) - foot, top = _grid.Start(page + 1);
+        return new TableBreak(bodyEnd, foot > 0 ? bodyEnd + foot - vs : bodyEnd, 0, foot > 0, top, top + head);
     }
 
     /// <summary>

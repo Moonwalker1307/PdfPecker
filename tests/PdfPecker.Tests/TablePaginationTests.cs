@@ -128,4 +128,40 @@ public class TablePaginationTests
         // The margin is there: the heading is lower than text at the top of the page would be.
         Assert.True(before[1].Lines[0].Y - after[0].Lines[0].Y > 20);
     }
+
+    [Theory]
+    [InlineData("collapse")]
+    [InlineData("separate")]
+    public void A_row_split_across_pages_has_the_header_and_footer_on_every_page(string model)
+    {
+        // As in Chrome, the header repeats at the top of each page the row goes on to and the footer at the bottom of
+        // each page it goes on from, and the row's lines go on below the header rather than under it.
+        var lines = string.Concat(Enumerable.Range(1, 40).Select(i => $"<div>Line {i}</div>"));
+        var pages = Pages($"<table style='border-collapse: {model}'><thead><tr><th>Head</th></tr></thead>"
+                          + $"<tfoot><tr><td>Foot</td></tr></tfoot><tbody><tr><td>{lines}</td></tr></tbody></table>");
+        Assert.True(pages.Count >= 2);
+        var rows = new List<string>();
+        foreach (var page in pages)
+        {
+            var text = page.Lines.Select(l => l.Text).ToList();
+            Assert.Equal("Head", text[0]);
+            Assert.Equal("Foot", text[^1]);
+            rows.AddRange(text.Where(l => l.StartsWith("Line ", StringComparison.Ordinal)));
+        }
+        Assert.Equal(Enumerable.Range(1, 40).Select(i => "Line " + i), rows);
+    }
+
+    [Fact]
+    public void A_box_in_a_split_row_goes_on_below_the_repeated_header()
+    {
+        // A 400-point box on 300-point pages under a 30-point header: 270 points fit on the first page, and the other
+        // 130 go on below the header repeated on the second, so the row after it starts 160 points down, as in Chrome,
+        // not 130.
+        var pages = Pages("<table style='border-spacing: 0'><thead><tr><th style='height: 30pt'>Head</th></tr></thead><tbody>"
+                          + "<tr><td><div style='height: 400pt'></div></td></tr><tr><td>After</td></tr></tbody></table>");
+        Assert.Equal(2, pages.Count);
+        var after = pages[1].Lines.Single(l => l.Text == "After");
+        var head = pages[1].Lines.Single(l => l.Text == "Head");
+        Assert.InRange(after.Y - head.Y, 145, 155);
+    }
 }

@@ -117,10 +117,10 @@ internal sealed partial class LayoutEngine
     public IEnumerable<(int Index, int Page)> FootnoteCallPages => _footnoteCalls.Select(c => (c.Index, c.Page));
 
     /// <summary>
-    /// The page's last flow position content may reach: its end, less the space of its footnote area and the room kept
-    /// for the bottom edges of the boxes around the content.
+    /// The page's last flow position content may reach: its end, less the space of its footnote area, the room kept
+    /// for the bottom edges of the boxes around the content and that of a table footer repeated under a split row.
     /// </summary>
-    private float FlowEnd(int page) => _grid.Start(page + 1) - FootnoteReserve(page) - EdgeReserve(page);
+    private float FlowEnd(int page) => _grid.Start(page + 1) - FootnoteReserve(page) - EdgeReserve(page) - SplitRowFoot(page);
 
     /// <summary>The bottom of the last page a footnote area is on, for the page count; 0 without footnotes.</summary>
     private float FootnotesBottom()
@@ -153,7 +153,7 @@ internal sealed partial class LayoutEngine
         if (!AtPageTop(y))
         {
             if (RegisterFootnotes(fresh, y, y + lineH, allowMove: true)) return y;
-            y = FitOnPage(_grid.Start(PageOf(y) + 1), lineH);
+            y = FitOnPage(FlowStart(PageOf(y) + 1), lineH);
         }
         RegisterFootnotes(fresh, y, y + lineH, allowMove: false);
         return y;
