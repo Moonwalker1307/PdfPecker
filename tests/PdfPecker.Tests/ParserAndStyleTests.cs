@@ -189,6 +189,29 @@ public class StyleTests
     }
 
     [Fact]
+    public void Invalid_css_is_dropped_as_in_browsers()
+    {
+        // Acid2's parser tests, each against a valid declaration before it.
+        var doc = Styled(@"<style>
+            p { background: yellow; height: 10px; margin-left: 4px }
+            #a { error: \}; height: 20px }
+            ;
+            #b { height: 30px }
+            #c { background: red pink }
+            #d { border: 5px solid red ! error }
+            #e { background: url(a.png) red, blue }
+            #f { content: ""!"" ; margin-left: 8px }
+          </style>
+          <p id=a>t</p><p id=b>t</p><p id=c>t</p><p id=d>t</p><p id=e>t</p><p id=f>t</p>");
+        Assert.Equal(15f, ById(doc, "a").Style.Height.Value, 2);  // an escaped brace does not end the rule
+        Assert.Equal(7.5f, ById(doc, "b").Style.Height.Value, 2); // the stray ';' makes the next selector invalid
+        Assert.Equal(0xFFFFFF00u, ById(doc, "c").Style.BackgroundColor); // two colours
+        Assert.Equal(0f, ById(doc, "d").Style.BorderLeft);                 // '!' that is not !important
+        Assert.Equal(0xFFFFFF00u, ById(doc, "e").Style.BackgroundColor); // a colour before the last layer
+        Assert.Equal(6f, ById(doc, "f").Style.MarginLeft.Value, 2);      // '!' in a string is fine
+    }
+
+    [Fact]
     public void Specificity_order_and_importance_are_respected()
     {
         var doc = Styled(@"<style>

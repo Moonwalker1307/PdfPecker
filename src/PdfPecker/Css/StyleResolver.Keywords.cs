@@ -144,7 +144,7 @@ internal sealed partial class StyleResolver
             case "border-right-color": s.BorderRightColor = from.BorderRightColor; break;
             case "border-bottom-color": s.BorderBottomColor = from.BorderBottomColor; break;
             case "border-left-color": s.BorderLeftColor = from.BorderLeftColor; break;
-            case "outline-style": s.OutlineStyle = from.OutlineStyle; break;
+            case "outline-style": (s.OutlineStyle, s.OutlineAuto) = (from.OutlineStyle, from.OutlineAuto); break;
             case "outline-width": s.OutlineWidth = from.OutlineWidth; break;
             case "outline-color": s.OutlineColor = from.OutlineColor; break;
             case "outline-offset": s.OutlineOffset = from.OutlineOffset; break;
