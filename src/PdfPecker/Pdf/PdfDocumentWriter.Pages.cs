@@ -68,20 +68,22 @@ internal sealed partial class PdfDocumentWriter
         _pageCanvas = (background, doc.Canvas[p], pageTop);
         foreach (var placed in doc.Pages[p])
         {
+            if (placed.Op is FixedBlock fixedBox)
+            {
+                // Drawn as the bands are, from the top of the page area, between the flow content below and above it.
+                var (flowOrigin, flowTop, flowBottom) = (_yOrigin, _flowTop, _flowBottom);
+                (_yOrigin, _flowTop, _flowBottom) = (_page.MarginTop, float.NaN, float.NaN);
+                WriteBand(doc, content, fixedBox.Items, pageLinks);
+                (_yOrigin, _flowTop, _flowBottom) = (flowOrigin, flowTop, flowBottom);
+                continue;
+            }
             if (placed.Op is LinkOp) { pageLinks.Add((placed, _yOrigin, pageTop)); continue; }
             AddUntransformedLinks(placed, pageLinks, _yOrigin, pageTop);
             WriteOp(content, placed, pageTop, doc.ImageIds);
         }
         _flowTop = _flowBottom = float.NaN;
         _yOrigin = _page.MarginTop;
-        _forceArtifact = true;
-        foreach (var placed in doc.Bands[p])
-        {
-            if (placed.Op is LinkOp) { pageLinks.Add((placed, _yOrigin, 0)); continue; }
-            AddUntransformedLinks(placed, pageLinks, _yOrigin, 0);
-            WriteOp(content, placed, 0, doc.ImageIds);
-        }
-        _forceArtifact = false;
+        WriteBand(doc, content, doc.Bands[p], pageLinks);
         if (doc.HasMargins)
         {
             Mark(content, null);
@@ -95,6 +97,19 @@ internal sealed partial class PdfDocumentWriter
         if (_page.Scale != 1) content.Ascii("Q\n");
         _streamSpace = null;
         return pageLinks;
+    }
+
+    /// <summary>Writes band ops, such as running headers and fixed boxes, as artifacts placed from the top of the page area.</summary>
+    private void WriteBand(WriteState doc, ByteBuffer content, List<Placed> items, List<(Placed Link, float Origin, float PageTop)> pageLinks)
+    {
+        _forceArtifact = true;
+        foreach (var placed in items)
+        {
+            if (placed.Op is LinkOp) { pageLinks.Add((placed, _yOrigin, 0)); continue; }
+            AddUntransformedLinks(placed, pageLinks, _yOrigin, 0);
+            WriteOp(content, placed, 0, doc.ImageIds);
+        }
+        _forceArtifact = false;
     }
 
     /// <summary>

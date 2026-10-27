@@ -216,3 +216,19 @@ internal sealed class CircleOp : DrawOp
 
     public override void Offset(float dx, float dy) { Cx += dx; Cy += dy; }
 }
+
+/// <summary>
+/// Where a position: fixed box paints among the flow's layers. The box is laid out once in page coordinates and
+/// repeats on every page, so the flow holds only this marker, in a layer of the box's order; the writer draws the box
+/// there on each page, so that flow content with a higher z-index covers it.
+/// </summary>
+internal sealed class FixedSlotOp : DrawOp
+{
+    /// <summary>The fixed box's layer, in coordinates from the top-left of the page area.</summary>
+    public readonly LayerOp Fixed;
+
+    public FixedSlotOp(LayerOp fixedLayer) => Fixed = fixedLayer;
+
+    // The fixed box keeps its place on the page wherever the flow moves.
+    public override void Offset(float dx, float dy) { }
+}

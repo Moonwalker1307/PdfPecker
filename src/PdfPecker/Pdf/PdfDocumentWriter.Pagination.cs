@@ -26,6 +26,7 @@ internal sealed partial class PdfDocumentWriter
             sectionBase[si + 1] = sectionBase[si] + section.Grid.Start(sectionPages);
         }
         doc.Pages = distributor.Pages;
+        doc.SlottedFixed = distributor.Slotted;
         doc.PageCount = doc.Pages.Count;
         _page = doc.FirstSetup;
         _sections = sections;
@@ -65,7 +66,9 @@ internal sealed partial class PdfDocumentWriter
             if (section.Canvas != null) foreach (var op in section.Canvas(p - _sectionFirst[_pageSection[p]])) Flatten(op, canvas[p]);
             if (pageBands != null) foreach (var op in pageBands(p, pageCount)) Flatten(op, list);
             // position: fixed boxes repeat on every page, as in Chrome's print output.
-            if (fixedOps != null) foreach (var op in fixedOps) Flatten(op, list);
+            if (fixedOps != null)
+                foreach (var op in fixedOps)
+                    if (!doc.SlottedFixed.Contains(op)) Flatten(op, list);
         }
     }
 
@@ -87,6 +90,9 @@ internal sealed partial class PdfDocumentWriter
         /// <summary>The ops of each page of the document, by page index.</summary>
         public List<List<Placed>> Pages { get; } = new();
 
+        /// <summary>The fixed boxes drawn among the pages' flow; the others are drawn over it with the page bands.</summary>
+        public HashSet<DrawOp> Slotted { get; } = new();
+
         /// <summary>
         /// Distributes a section's ops, and then its footnotes, over the pages from <paramref name="firstPage"/> on.
         /// Returns the number of pages the section takes: as many as its content needs, and at least one.
@@ -96,7 +102,26 @@ internal sealed partial class PdfDocumentWriter
             _grid = section.Grid;
             _pageOffset = firstPage;
             _footnoteCut = section.FootnoteReserve;
-            foreach (var op in section.Ops) Distribute(op, null);
+            List<(List<Placed> Items, int[] Before)>? slots = null;
+            foreach (var op in section.Ops)
+            {
+                if (op is ClipOp { OfViewport: true } viewport && HasSlot(viewport))
+                {
+                    // The fixed boxes among the root's layers are not clipped by the root: the clip ends before each
+                    // of them and starts again after it.
+                    var part = (ClipOp)viewport.Copy();
+                    foreach (var o in viewport.Ops)
+                    {
+                        if (o is not LayerOp { Ops: [FixedSlotOp] }) { part.Ops.Add(o); continue; }
+                        Distribute(part, null);
+                        part = (ClipOp)viewport.Copy();
+                        AddSlot(o, firstPage, ref slots);
+                    }
+                    Distribute(part, null);
+                }
+                else if (op is LayerOp { Ops: [FixedSlotOp] }) AddSlot(op, firstPage, ref slots);
+                else Distribute(op, null);
+            }
             _footnoteCut = null;
             if (section.FootnoteOps != null) foreach (var op in section.FootnoteOps) Distribute(op, null);
             int contentPages = Math.Max(1, PageOf(Math.Max(0, section.ContentHeight - 0.5f)) + 1);
@@ -104,7 +129,36 @@ internal sealed partial class PdfDocumentWriter
             while (Pages.Count > firstPage + contentPages && (Pages[^1].Count == 0 || Placed.AllInk(Pages[^1]))) Pages.RemoveAt(Pages.Count - 1);
             int sectionPages = Math.Max(Pages.Count - firstPage, contentPages);
             while (Pages.Count < firstPage + sectionPages) Pages.Add(new List<Placed>());
+            // Inserted last to first, so that boxes at the same place keep their order.
+            if (slots != null)
+                for (int k = slots.Count - 1; k >= 0; k--)
+                {
+                    var (items, before) = slots[k];
+                    for (int p = 0; p < sectionPages; p++)
+                        Pages[firstPage + p].Insert(p < before.Length ? before[p] : 0, new Placed(new FixedBlock(items), 0, 0));
+                }
             return sectionPages;
+        }
+
+        private static bool HasSlot(ClipOp clip)
+        {
+            foreach (var op in clip.Ops) if (op is LayerOp { Ops: [FixedSlotOp] }) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Notes where a fixed box paints: on every page of the section, after what each page holds so far (later pages
+        /// hold nothing yet).
+        /// </summary>
+        private void AddSlot(DrawOp marker, int firstPage, ref List<(List<Placed> Items, int[] Before)>? slots)
+        {
+            var box = ((FixedSlotOp)((LayerOp)marker).Ops[0]).Fixed;
+            var before = new int[Math.Max(0, Pages.Count - firstPage)];
+            for (int p = 0; p < before.Length; p++) before[p] = Pages[firstPage + p].Count;
+            var items = new List<Placed>();
+            Flatten(box, items);
+            (slots ??= new()).Add((items, before));
+            Slotted.Add(box);
         }
 
         /// <summary>The page, within the section, that flow position <paramref name="y"/> is on.</summary>

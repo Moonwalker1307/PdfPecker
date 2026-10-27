@@ -429,6 +429,19 @@ internal sealed partial class LayoutEngine
             });
             FixedOps.AddRange(c.Ops);
             LayerOp.SortLayers(FixedOps);
+            // A fixed box paints by its z-index and tree order among the root's layers, as in Chrome: content with a
+            // higher z-index covers it. A marker layer of the same order says where in the flow it goes, inside the
+            // clip of the viewport's overflow when there is one, as the root's layers are there.
+            List<DrawOp> root = _ops;
+            foreach (var op in _ops) if (op is ClipOp { OfViewport: true } viewport) root = viewport.Ops;
+            foreach (var op in c.Ops)
+            {
+                if (op is not LayerOp fixedLayer) continue;
+                var slot = new LayerOp { Order = fixedLayer.Order, TreeOrder = fixedLayer.TreeOrder };
+                slot.Ops.Add(new FixedSlotOp(fixedLayer));
+                root.Add(slot);
+                _hasLayers = true;
+            }
         }
         if (_hasLayers) LayerOp.SortLayers(_ops);
     }
