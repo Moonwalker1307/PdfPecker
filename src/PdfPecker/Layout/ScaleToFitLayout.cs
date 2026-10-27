@@ -99,7 +99,7 @@ internal sealed partial class LayoutEngine
             layer.OriginX = originX;
             layer.OriginY = y;
             _lastBaseline = float.NaN;
-            _flowTrailing = 0;
+            _flowTrailing = default;
             float bottom = y + best.Height * scale;
             if (_paginate) _lastContentBottom = bottom;
             return bottom;
