@@ -8,28 +8,76 @@ internal sealed partial class StyleResolver
     private void ApplyFontSize(ComputedStyle s, ComputedStyle parent, string value)
     {
         var v = value.Trim().ToLowerInvariant();
-        float px;
+        int keyword = Array.IndexOf(FontSizeKeywords, v) + 1;
+        if (keyword > 0)
+        {
+            s.FontSizeKeyword = (byte)keyword;
+            s.FontSizeAbsolute = false;
+            s.FontSize = KeywordFontSize(keyword, monospace: false);
+            return;
+        }
         switch (v)
         {
-            case "xx-small": px = 9; break;
-            case "x-small": px = 10; break;
-            case "small": px = 13; break;
-            case "medium": px = 16; break;
-            case "large": px = 18; break;
-            case "x-large": px = 24; break;
-            case "xx-large": px = 32; break;
-            case "xxx-large": px = 48; break;
-            case "smaller": s.FontSize = parent.FontSize / 1.2f; return;
-            case "larger": s.FontSize = parent.FontSize * 1.2f; return;
-            case "inherit" or "unset": s.FontSize = parent.FontSize; return;
-            case "initial": s.FontSize = 12; return;
-            default:
-                if (TryParseLength(v, parent.FontSize, _rootFontSize, out var len, _vw, _vh) && !len.IsAuto)
-                    s.FontSize = Math.Max(0, len.Resolve(parent.FontSize));
+            case "smaller" or "larger":
+                s.FontSize = v == "smaller" ? parent.FontSize / 1.2f : parent.FontSize * 1.2f;
+                s.FontSizeKeyword = 0;
+                s.FontSizeAbsolute = parent.FontSizeAbsolute;
+                return;
+            case "inherit" or "unset":
+                s.FontSize = parent.FontSize;
+                s.FontSizeKeyword = parent.FontSizeKeyword;
+                s.FontSizeAbsolute = parent.FontSizeAbsolute;
+                return;
+            case "initial":
+                s.FontSize = KeywordFontSize(4, monospace: false);
+                s.FontSizeKeyword = 4;
+                s.FontSizeAbsolute = false;
                 return;
         }
-        s.FontSize = px * 0.75f;
+        if (TryParseLength(v, parent.FontSize, _rootFontSize, out var len, _vw, _vh) && !len.IsAuto)
+        {
+            s.FontSize = Math.Max(0, len.Resolve(parent.FontSize));
+            s.FontSizeKeyword = 0;
+            // As in Chrome, a size relative to the parent's (em, ex, ch or a percentage) stays relative to the default
+            // size; any other length (px, pt, rem, vw, ...) makes it absolute for this element and its descendants.
+            s.FontSizeAbsolute = parent.FontSizeAbsolute || !IsFontRelative(v);
+        }
     }
+
+    private static readonly string[] FontSizeKeywords = ["xx-small", "x-small", "small", "medium", "large", "x-large", "xx-large", "xxx-large"];
+
+    // Chrome's sizes in px for the keywords, for its default font size of 16px and for its monospace one of 13px.
+    private static readonly byte[] KeywordPx = [9, 10, 13, 16, 18, 24, 32, 48];
+    private static readonly byte[] MonospaceKeywordPx = [9, 10, 12, 13, 16, 20, 26, 39];
+
+    /// <summary>The size in points of font-size keyword <paramref name="keyword"/> (1 to 8).</summary>
+    private static float KeywordFontSize(int keyword, bool monospace) => (monospace ? MonospaceKeywordPx : KeywordPx)[keyword - 1] * 0.75f;
+
+    private static bool IsFontRelative(string v)
+    {
+        if (v.EndsWith('%')) return true;
+        if (v.StartsWith("calc(", StringComparison.Ordinal) || v.StartsWith("min(", StringComparison.Ordinal)
+            || v.StartsWith("max(", StringComparison.Ordinal) || v.StartsWith("clamp(", StringComparison.Ordinal))
+            return false;
+        return v.EndsWith("em", StringComparison.Ordinal) && !v.EndsWith("rem", StringComparison.Ordinal)
+               || v.EndsWith("ex", StringComparison.Ordinal) || v.EndsWith("ch", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Browsers give text whose font-family is the bare generic <c>monospace</c> a smaller default size: 13px rather
+    /// than 16px. As in Chrome, a font size that no absolute length set, here or on an ancestor, switches between the
+    /// two when the family changes to or from monospace: a keyword size takes the keyword's monospace size, and any
+    /// other size scales by 13/16. <c>font-family: monospace, monospace</c> is the usual way around it, and keeps 16px.
+    /// </summary>
+    private static void AdjustForMonospace(ComputedStyle s, ComputedStyle parent, string? family)
+    {
+        bool mono = IsBareMonospace(family), parentMono = IsBareMonospace(parent.FontFamilyName);
+        if (s.FontSizeAbsolute || (!mono && !parentMono)) return;
+        if (s.FontSizeKeyword > 0) s.FontSize = KeywordFontSize(s.FontSizeKeyword, mono);
+        else if (mono != parentMono) s.FontSize *= mono ? 13f / 16f : 16f / 13f;
+    }
+
+    private static bool IsBareMonospace(string? family) => family != null && family.Trim().Equals("monospace", StringComparison.OrdinalIgnoreCase);
 
     private static void ApplyFontFamily(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
