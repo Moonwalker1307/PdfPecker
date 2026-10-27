@@ -465,7 +465,17 @@ internal sealed partial class LayoutEngine
             ShrinkPercentColumns(m, w, avail);
             return w;
         }
-        if (autoCount == 0) return w;
+        if (autoCount == 0)
+        {
+            // As in Chrome, a table with a width whose columns all have percentages adding up to less than 100% still
+            // fills that width: the percentage columns share the rest in proportion to their percentages.
+            float pctSum = 0;
+            for (int c = 0; c < n; c++) pctSum += m.ColPct[c];
+            if (widthSpecified && remaining > 0.01f && pctSum > 0)
+                for (int c = 0; c < n; c++)
+                    w[c] += remaining * m.ColPct[c] / pctSum;
+            return w;
+        }
 
         float target = widthSpecified || sumMax > remaining ? remaining : sumMax;
         if (target >= sumMax)
