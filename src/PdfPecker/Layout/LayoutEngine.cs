@@ -148,7 +148,7 @@ internal sealed partial class LayoutEngine
 
     private int PageOf(float y) => _grid.PageOf(y + Eps);
 
-    private bool AtPageTop(float y) => y - _grid.Start(PageOf(y)) < 0.5f;
+    private bool AtPageTop(float y) => y - FlowStart(PageOf(y)) < 0.5f;
 
     /// <summary>Returns the y at which a box of height h should start so that it does not straddle a page boundary.</summary>
     private float FitOnPage(float y, float h)
@@ -162,10 +162,10 @@ internal sealed partial class LayoutEngine
         {
             float pageEnd = _grid.Start(p + 1);
             // The page's footnote area takes the bottom of its flow.
-            float flowEnd = _footnoteReserve.Count > 0 || _edgeReserve.Count > 0 ? FlowEnd(p) : pageEnd;
+            float flowEnd = _footnoteReserve.Count > 0 || _edgeReserve.Count > 0 || _splitRow != null ? FlowEnd(p) : pageEnd;
             if (y + h <= flowEnd + Eps) return y;
             _columnNotes?.Break(p, y, y + h - flowEnd);
-            y = pageEnd;
+            y = FlowStart(p + 1);
             if (_grid is not ColumnGrid) break;
             Cancellation.ThrowIfCancellationRequested();
             p++;
@@ -178,7 +178,7 @@ internal sealed partial class LayoutEngine
         if (!_paginate || AtPageTop(y)) return y;
         int p = PageOf(y);
         _columnNotes?.Break(p, y, 0);
-        return _grid.Start(p + 1);
+        return FlowStart(p + 1);
     }
 
     /// <summary>True when the ops draw nothing: only the empty groups that boxes reserve for their backgrounds.</summary>
@@ -190,7 +190,8 @@ internal sealed partial class LayoutEngine
     }
 
     private bool CrossesPage(float top, float bottom) => _paginate && bottom - top > Eps
-        && (PageOf(top) != PageOf(bottom - 0.5f) || (_footnoteReserve.Count > 0 || _edgeReserve.Count > 0) && bottom > FlowEnd(PageOf(top)) + Eps);
+        && (PageOf(top) != PageOf(bottom - 0.5f)
+            || (_footnoteReserve.Count > 0 || _edgeReserve.Count > 0 || _splitRow != null) && bottom > FlowEnd(PageOf(top)) + Eps);
 
     private void Truncate(int count, bool keepFloats = false)
     {
@@ -551,7 +552,7 @@ internal sealed partial class LayoutEngine
         float y = f.Y;
         if (!_paginate || top <= y) return top;
         int k = PageOf(y);
-        if (PageOf(top) > k) return _grid.Start(k + 1);
+        if (PageOf(top) > k) return FlowStart(k + 1);
         return k > 0 && f.AnyContent && !f.AfterForcedBreak && AtPageTop(y) ? y : top;
     }
 
@@ -1009,7 +1010,9 @@ internal sealed partial class LayoutEngine
             bool failedBefore = !fitsNext && _failedAvoidTrials?.Contains(trial) == true;
             // A box nested in more than six boxes kept whole in columns is tried there only when it fits: each box around
             // it is tried there too, and with each level trying the levels inside it again, the work doubled per level.
-            if (!failedBefore && MayLayOutAgain && (fitsNext || _grid is ColumnGrid && _avoidDepth <= MaxTriedInColumnsNesting))
+            // On pages, as in Chrome, a box taller than the next page still starts there, and breaks where it must.
+            bool paged = _grid is not ColumnGrid;
+            if (!failedBefore && MayLayOutAgain && (fitsNext || _avoidDepth <= MaxTriedInColumnsNesting))
             {
                 float oy = y, ox = x, oavailW = availW;
                 int page = PageOf(y);
@@ -1028,7 +1031,7 @@ internal sealed partial class LayoutEngine
                     // Columns taller by this much would have kept the whole box where it started.
                     _columnNotes?.Break(page, oy, oy + (bottom - ny) - FlowEnd(page));
                 }
-                else if (!fitsNext)
+                else if (!fitsNext && !paged)
                 {
                     (_failedAvoidTrials ??= new HashSet<AvoidTrial>()).Add(trial);
                     Truncate(opsStart);
@@ -1145,6 +1148,16 @@ internal sealed partial class LayoutEngine
             {
                 if (s.Height.IsAuto || s.Height.IsPercent && cbH == null) imgH *= Math.Max(0, room) / imgW;
                 imgW = Math.Max(0, room);
+            }
+            // A height imposed by the container (a stretched or flexed item) is the picture's height, as in Chrome,
+            // within its min-height and max-height.
+            if (hasHOverride)
+            {
+                float boxFrame = s.BorderBox ? frameV : 0;
+                imgH = overrideH - frameV;
+                if (HeightOf(s.MaxHeight, cbH) is float maxH) imgH = Math.Min(imgH, maxH - boxFrame);
+                if (MinHeightOf(s, cbH) is float minH) imgH = Math.Max(imgH, minH - boxFrame);
+                imgH = Math.Max(0, imgH);
             }
             contentW = imgW;
         }
@@ -1306,6 +1319,9 @@ internal sealed partial class LayoutEngine
         }
 
         float bottom = cy + contentH + pb + bb;
+        // A box taller than its content is that height on the pages it is split across, under a header repeated over a
+        // split table row and above a footer there.
+        if (_splitRow != null && contentH > contentBottom - cy + Eps) bottom = PastSplitRowRoom(y, bottom);
         // A legend taller than the top border moves the border down to its middle, and the background with it.
         float paintTop = y + borderOutset;
         if (pages != null && !SameOnPages(pages, y, bottom)) PaintOnPages(group, s, pages, paintTop, bottom, borderGap: borderGap);
@@ -1424,10 +1440,12 @@ internal sealed partial class LayoutEngine
         else
         {
             contentW = availW - ml - mr - frame;
+            // Shrink-to-fit is min(max(min-content, available), max-content): a box never gets narrower than its
+            // longest word, even in a containing block of no width, such as an empty inline.
             if (shrinkToFit)
             {
-                var (_, max) = Intrinsic(e);
-                contentW = Math.Min(contentW, max - frame);
+                var (min, max) = Intrinsic(e);
+                contentW = Math.Min(Math.Max(contentW, min - frame), max - frame);
             }
             // min-height and max-height carry over to the width through the ratio.
             if (s.AspectRatio > 0)
@@ -2218,7 +2236,9 @@ internal sealed partial class LayoutEngine
     private static void ClipBackgroundToText(GroupOp background, List<DrawOp> ops, int from, int to, float left, float right)
     {
         List<DrawOp>? texts = null;
-        void Collect(DrawOp op)
+        // The line of a vertical-lr box is a layer that flips it upside down about its middle; its copies are flipped
+        // themselves, since the clip takes only text.
+        void Collect(DrawOp op, float flipY)
         {
             if (op is TextOp t)
             {
@@ -2226,12 +2246,19 @@ internal sealed partial class LayoutEngine
                 var copy = (TextOp)t.Copy();
                 copy.Tag = null; // the copies only clip: the text itself is drawn and tagged on its own
                 copy.Color = CssColor.Black; // opaque, also when the text itself is transparent, as it usually is here
+                if (!float.IsNaN(flipY))
+                {
+                    copy.Baseline = 2 * flipY - t.Baseline;
+                    copy.UpsideDown = !t.UpsideDown;
+                }
                 (texts ??= new List<DrawOp>()).Add(copy);
             }
+            else if (op is LayerOp { Transform: { A: 1, B: 0, C: 0, D: -1, E: 0, F: 0 } } flip)
+                foreach (var o in flip.Ops) Collect(o, flip.OriginY);
             else if (op is GroupOp g and not LayerOp { TextClip: true }) // a descendant's own clipping copies
-                foreach (var o in g.Ops) Collect(o);
+                foreach (var o in g.Ops) Collect(o, flipY);
         }
-        for (int i = from; i < to; i++) Collect(ops[i]);
+        for (int i = from; i < to; i++) Collect(ops[i], float.NaN);
         void Fill(GroupOp g)
         {
             foreach (var op in g.Ops)

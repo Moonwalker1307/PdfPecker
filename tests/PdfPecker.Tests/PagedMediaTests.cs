@@ -394,4 +394,32 @@ public class PagedMediaTests
         var plain = PdfText.ExtractPages(HtmlToPdf.Convert("<html><body>" + Lines("Plain", 80) + "</body></html>")).Select(p => p.Text).ToArray();
         Assert.Equal(plain, withBand);
     }
+
+    [Theory]
+    [InlineData("<div class='i' style='break-after: page'>A</div><div class='i'>B</div><div class='i'>C</div><div class='i'>D</div>")]
+    [InlineData("<div class='i'>A</div><div class='i'>B</div><div class='i' style='break-before: page'>C</div><div class='i'>D</div>")]
+    public void A_forced_break_on_a_flex_item_breaks_between_its_line_and_the_next(string items)
+    {
+        // As in Chrome, the break is between the lines: B stays beside A, and the line with C opens the next page.
+        var html = "<style>@page { size: 300pt 300pt; margin: 0 } body { margin: 0 } .i { width: 45% }</style>"
+                   + $"<p>Before</p><div style='display: flex; flex-wrap: wrap'>{items}</div><p>After</p>";
+        var pages = PdfText.ExtractPages(HtmlToPdf.Convert(html)).Select(p => p.Text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToArray();
+        Assert.Equal(2, pages.Length);
+        Assert.Equal(new[] { "Before", "A", "B" }, pages[0]);
+        Assert.Equal(new[] { "C", "D", "After" }, pages[1]);
+    }
+
+    [Fact]
+    public void A_box_kept_whole_but_taller_than_a_page_starts_on_the_next_page()
+    {
+        // As in Chrome, break-inside: avoid still moves the box to a new page when it cannot fit on any, so that it breaks
+        // as few times as it must, rather than starting below the paragraph before it.
+        var lines = string.Concat(Enumerable.Range(1, 30).Select(i => $"<div>Line {i}</div>"));
+        var html = "<style>@page { size: 300pt 300pt; margin: 0 } body { margin: 0; font: 10pt/14pt sans-serif }</style>"
+                   + $"<p>Before</p><div style='break-inside: avoid'>{lines}</div>";
+        var pages = PdfText.ExtractPages(HtmlToPdf.Convert(html)).Select(p => p.Lines.Select(l => l.Text).ToArray()).ToArray();
+        Assert.Equal(new[] { "Before" }, pages[0]);
+        Assert.Equal("Line 1", pages[1][0]);
+        Assert.Equal(3, pages.Length);
+    }
 }

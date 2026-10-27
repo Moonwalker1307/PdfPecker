@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text;
 using PdfPecker.Css;
 using PdfPecker.Fonts;
@@ -451,6 +452,10 @@ internal sealed partial class LayoutEngine
         NoteLineReach(items, xs, x + lineLeft + lineW);
 
         _alignedSubtrees = AlignedSubtrees(items, block);
+        // In a vertical-lr box the line is flipped back as a whole; what is inside it, inline-blocks too, stays as drawn.
+        int lineStart = _ops.Count;
+        bool flipBack = _transposed;
+        _transposed = false;
         int fragments = NoteInlineFragments(items, xs, baseline, ascent, lineH - ascent);
         NoteEmptyInlineCbs(items, xs, baseline, ascent, lineH - ascent);
         EmitLinks(items, xs, y, lineH);
@@ -465,6 +470,22 @@ internal sealed partial class LayoutEngine
         if (_deferredFootnoteCalls is { Count: > 0 } && !deferCalls) PlaceDeferredFootnoteCalls();
         _lastBaseline = baseline;
         if (_marker != null) EmitMarker(baseline, y);
+        if (flipBack)
+        {
+            _transposed = true;
+            var layer = FlipBack(lineStart, y + lineH / 2);
+            if (fragments >= 0)
+            {
+                // The fragments' backgrounds are painted into the line once all lines are placed, and find its text there.
+                var noted = CollectionsMarshal.AsSpan(_inlineFragments);
+                for (int f = fragments; f < noted.Length; f++)
+                {
+                    noted[f].Ops = layer.Ops;
+                    noted[f].TextFrom -= lineStart;
+                    noted[f].TextTo -= lineStart;
+                }
+            }
+        }
     }
 
     /// <summary>

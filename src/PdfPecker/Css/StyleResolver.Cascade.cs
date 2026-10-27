@@ -68,6 +68,24 @@ internal sealed partial class StyleResolver
 
     private const uint RuleBase = 0xFFEEEEEE;
 
+    /// <summary>The font-family the element ends up with, as written, which the font size depends on.</summary>
+    private string? WinningFontFamily(ComputedStyle s, ComputedStyle parent, (int Index, AllKeyword Keyword) allDecl)
+    {
+        for (int i = _count - 1; i >= 0; i--)
+        {
+            if (_decls[i].Property != "font-family" || ResetByAll(i, allDecl)) continue;
+            var family = Substituted(_decls[i].Value, s);
+            if (family == null) break;
+            return family.Trim().ToLowerInvariant() switch
+            {
+                "inherit" or "unset" => parent.FontFamilyName,
+                "initial" => InitialStyle.FontFamilyName,
+                _ => family,
+            };
+        }
+        return s.FontFamilyName;
+    }
+
     /// <summary>Computes a style from the sorted declarations in the working buffer, sharing it when it was computed before.</summary>
     private ComputedStyle Compute(string name, ComputedStyle parent)
     {
@@ -119,6 +137,7 @@ internal sealed partial class StyleResolver
                 break;
             }
         }
+        AdjustForMonospace(s, parent, WinningFontFamily(s, parent, allDecl));
         if (name == "html") _rootFontSize = s.FontSize;
 
         // color next: currentColor in any other property (background-color: currentColor under an icon's mask) is the

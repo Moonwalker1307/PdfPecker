@@ -2,6 +2,7 @@ using PdfPecker.Css;
 using PdfPecker.Html;
 using PdfPecker.Images;
 using PdfPecker.Layout;
+using PdfPecker.Svg;
 using static PdfPecker.Tests.PdfTestHelpers;
 
 namespace PdfPecker.Tests;
@@ -103,6 +104,53 @@ public class WritingModeTests
         var cell = Fill(ops, 0xFFFF0000);
         Assert.True(cell.W < 20, $"cell width {cell.W}");
         Assert.True(cell.H > 60, $"cell height {cell.H}");
+    }
+
+    [Theory]
+    [InlineData("ltr")]
+    [InlineData("rtl")]
+    public void Vertical_lr_lines_run_from_left_to_right(string direction)
+    {
+        // The box is reflected in its diagonal, so the lines that follow each other down the horizontal layout follow each
+        // other to the right on the page; each line is flipped back about its middle so that its glyphs are turned, not
+        // mirrored.
+        var ops = Layout("<style>body{margin:0;font:12pt Helvetica}</style>"
+                         + $"<div style='writing-mode:vertical-lr;direction:{direction};height:60pt;width:100pt'>One two three four five six seven</div>");
+        var layer = All(ops).OfType<LayerOp>().Single(l => l.Transform is { B: not 0 });
+        Assert.Equal(new Matrix(0, 1, 1, 0, 0, 0), layer.Transform!.Value);
+        var lines = All(layer.Ops).OfType<LayerOp>().Where(l => l.Transform is { A: 1, D: -1 }).ToList();
+        Assert.True(lines.Count >= 3, $"{lines.Count} lines");
+        for (int i = 1; i < lines.Count; i++) Assert.True(lines[i].OriginY > lines[i - 1].OriginY);
+        Assert.All(lines, l => Assert.NotEmpty(l.Ops.OfType<TextOp>()));
+    }
+
+    [Fact]
+    public void Vertical_lr_borders_keep_their_sides_on_the_page()
+    {
+        // Reflected in the diagonal, the left border is the top of the horizontal layout and the bottom one its right.
+        var ops = Layout("<style>body{margin:0;font:12pt Helvetica}</style><div style='writing-mode:vertical-lr;height:60pt;"
+                         + "border-left:3pt solid #ff0000;border-bottom:1.5pt solid #00ff00'>Text</div>");
+        var layer = All(ops).OfType<LayerOp>().Single(l => l.Transform is { B: not 0 });
+        var left = Fill(layer.Ops, 0xFFFF0000);
+        var bottom = Fill(layer.Ops, 0xFF00FF00);
+        Assert.Equal((0f, 3f), (left.Y, left.H));
+        Assert.Equal(1.5f, bottom.W, 3);
+        Assert.True(bottom.X > left.X, $"bottom border at {bottom.X}");
+    }
+
+    [Fact]
+    public void Vertical_lr_text_clips_its_background_the_right_way_up()
+    {
+        var ops = Layout("<style>body{margin:0;font:20pt Helvetica}</style><div style='writing-mode:vertical-lr;"
+                         + "background:linear-gradient(red,blue);background-clip:text;color:transparent'>Clip</div>");
+        var text = All(ops).OfType<TextOp>().ToList();
+        var drawn = text.Single(t => !t.UpsideDown);
+        var copy = text.Single(t => t.UpsideDown);
+        var line = All(ops).OfType<LayerOp>().Single(l => l.Transform is { A: 1, D: -1 });
+        // The copy is the drawn text flipped about the middle of its line, where the line's layer draws it.
+        Assert.Equal(2 * line.OriginY - drawn.Baseline, copy.Baseline, 3);
+        AssertStructurallyValid(ConvertUncompressed("<div style='writing-mode:vertical-lr;background:linear-gradient(red,blue);"
+                                                    + "background-clip:text;color:transparent'>Clip</div>"));
     }
 
     [Fact]

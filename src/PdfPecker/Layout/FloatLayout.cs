@@ -559,10 +559,17 @@ internal sealed partial class LayoutEngine
                     if (!ReferenceEquals(it.Style, measured))
                     {
                         measured = it.Style;
-                        TextMetrics(measured, out measuredA, out measuredD);
+                        InlineMetrics(measured, out measuredA, out measuredD);
                     }
                     a = measuredA;
                     d = measuredD;
+                    // A spacer of no width is an empty inline's strut: it makes a line taller but not visible on its own.
+                    if (it.Kind == ItemKind.Spacer && it.Width == 0)
+                    {
+                        if (a > maxA) maxA = a;
+                        if (d > maxD) maxD = d;
+                        continue;
+                    }
                     break;
             }
             visible = true;
@@ -584,6 +591,20 @@ internal sealed partial class LayoutEngine
                     Grow(a + d, root.VerticalAlign == VerticalAlign.Top, ref maxA, ref maxD);
         }
         if (!visible) maxA = float.NaN;
+
+        // Text and the inline boxes it is in: each of them is on the line, with its own font and line height, so an
+        // inline with a larger font makes every line of it taller even where its text is smaller (CSS 2.1 §10.8.1).
+        static void InlineMetrics(ComputedStyle s, out float a, out float d)
+        {
+            TextMetrics(s, out a, out d);
+            var p = s.ParentStyle;
+            for (int depth = 0; p is { Display: Display.Inline } && depth < MaxAlignedDepth; p = p.ParentStyle, depth++)
+            {
+                TextMetrics(p, out float pa, out float pd);
+                if (pa > a) a = pa;
+                if (pd > d) d = pd;
+            }
+        }
 
         static void Grow(float h, bool top, ref float maxA, ref float maxD)
         {

@@ -269,7 +269,7 @@ internal sealed partial class PdfDocumentWriter
         // Font objects are keyed by the leaf font in SetFont, so an embedded font of the same size is switched back.
         SetFont(b, font, "/F", font.Index + 1, t.Size);
         SetTextPaint(b, t, pass, 0);
-        b.Ascii("1 0 0 1 ").Num(x).Sp().Num(y).Ascii(" Tm ");
+        b.Ascii(t.UpsideDown ? "1 0 0 -1 " : "1 0 0 1 ").Num(x).Sp().Num(y).Ascii(" Tm ");
         string text = start == 0 && length == t.Text.Length ? t.Text : t.Text.Substring(start, length);
         WriteStandardText(b, font, t.Rtl ? Text.Bidi.VisualText(text) : text);
         b.Ascii("\n");
@@ -316,7 +316,7 @@ internal sealed partial class PdfDocumentWriter
             boldWidth = t.Size * (1f / 24f + (1f / 32f - 1f / 24f) * k);
         }
         SetTextPaint(b, t, pass, boldWidth);
-        b.Ascii(font.SyntheticItalic ? "1 0 0.2 1 " : "1 0 0 1 ").Num(x).Sp().Num(y).Ascii(" Tm ");
+        b.Ascii(font.SyntheticItalic ? t.UpsideDown ? "1 0 0.2 -1 " : "1 0 0.2 1 " : t.UpsideDown ? "1 0 0 -1 " : "1 0 0 1 ").Num(x).Sp().Num(y).Ascii(" Tm ");
 
         // Word spacing (Tw) only applies to the single-byte code 32, so justified text moves spaces explicitly.
         // PDF/A forbids showing .notdef: characters no font has become blank space of the same width.
