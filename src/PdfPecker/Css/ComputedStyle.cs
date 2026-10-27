@@ -429,6 +429,8 @@ internal sealed class ComputedStyle
     public BorderImageValue[]? BorderImageWidths, BorderImageOutsets;
     public BorderImageRepeat BorderImageRepeatX, BorderImageRepeatY;
     public BorderStyle OutlineStyle;
+    /// <summary>outline-style: auto, drawn as a solid focus ring of its own width.</summary>
+    public bool OutlineAuto;
     public float OutlineWidth = 1.5f, OutlineOffset;
     public uint? OutlineColor; // null = currentColor
     public ObjectFit ObjectFit;
@@ -791,6 +793,7 @@ internal sealed class ComputedStyle
         c.BorderImageFill = false;
         c.BorderImageRepeatX = c.BorderImageRepeatY = BorderImageRepeat.Stretch;
         c.OutlineStyle = BorderStyle.None;
+        c.OutlineAuto = false;
         c.OutlineWidth = 1.5f;
         c.OutlineOffset = 0;
         c.OutlineColor = null;

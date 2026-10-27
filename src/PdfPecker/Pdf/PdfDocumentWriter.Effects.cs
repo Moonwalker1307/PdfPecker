@@ -189,7 +189,7 @@ internal sealed partial class PdfDocumentWriter
                 case LineOp l:
                     sb.Append("|L").Append(Rel(l.X1, x0)).Append(',').Append(Rel(l.Y1, y0)).Append(',').Append(Rel(l.X2, x0)).Append(',')
                         .Append(Rel(l.Y2, y0)).Append(',').Append(Rel(l.Width, 0)).Append(l.Dotted ? 'd' : l.Solid ? 's' : 'a')
-                        .Append(Rel(l.DashLength, 0)).Append(',').Append(Rel(l.DashGap, 0));
+                        .Append(Rel(l.DashLength, 0)).Append(',').Append(Rel(l.DashGap, 0)).Append(',').Append(Rel(l.DashPhase, 0));
                     break;
                 default:
                     return null;

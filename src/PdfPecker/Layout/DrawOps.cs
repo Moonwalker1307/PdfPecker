@@ -94,6 +94,11 @@ internal sealed class LineOp : DrawOp
     public bool Solid;
     /// <summary>A dash pattern of its own, with butt caps (text decorations); 0 for the pattern of the dotted flag.</summary>
     public float DashLength, DashGap;
+    /// <summary>
+    /// How far into its pattern the line starts. A dotted line with a <see cref="DashGap"/> but no
+    /// <see cref="DashLength"/> has round dots that far apart (borders).
+    /// </summary>
+    public float DashPhase;
 
     public LineOp(float x1, float y1, float x2, float y2, float width, uint color, bool dotted)
     {
