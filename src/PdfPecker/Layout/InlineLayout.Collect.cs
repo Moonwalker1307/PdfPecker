@@ -322,7 +322,7 @@ internal sealed partial class LayoutEngine
                 var radii = BoxPainter.InnerRadii(BoxPainter.Radii(s, boxW, boxH), pl, ptop, pr, pbot);
                 AddSvgImage(ops, s, svg, pl, ptop, sw, sh, radii, Tags?.Of(e));
             }
-            else ops.Add(new SvgOp(pl, ptop, sw, sh, svg) { Tag = Tags?.Of(e) });
+            else AddSvgDrawing(ops, svg, pl, ptop, sw, sh, Tags?.Of(e));
         }
         if (ml > 0) AddSpacer(st, s, ml, href);
         st.Items.Add(new Item
