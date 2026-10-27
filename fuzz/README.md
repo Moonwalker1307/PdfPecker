@@ -36,7 +36,7 @@ supervisor), so a seed that hangs is reported once instead of on every restart. 
 
 Targets: `pdf-render`, `pdf-text`, `pdf-images`, `pdf-html`, `pdf-html-structured`, `pdf-merge`, `pdf-form`, `pdf-compact`, `pdf-linearize`, `pdf-verify`, `pdf-properties`, `html`, `css` (as a `<style>` in a page), `svg`
 (inline in a page and as a data-URI image), `markdown`, `barcode` (QR, EPC, Code 128 and EAN-13 encoders), `png`, `jpeg`, `gif`, `webp`, `bmp`, `tiff`, `jpx`, `jbig2`,
-`font-ttf`, `font-otf`, `font-woff`, `font-woff2` and `font-variable` (variable TrueType and CFF2 fonts). The font
+`font-ttf`, `font-otf`, `font-woff`, `font-woff2`, `font-variable` (variable TrueType and CFF2 fonts) and `font-color` (COLR colour fonts). The font
 targets register the font and then lay out and embed text in it, because most font bugs are in shaping and subsetting
 rather than in loading.
 

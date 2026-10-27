@@ -154,6 +154,7 @@ public static partial class HtmlToPdf
                     _page.ContentWidth / 100, _viewport / 100);
                 MissingImageText.Prepare(_doc, _images);
             }
+            if ((_namesUsed & NamesUsed.Embed) != 0) EmbeddedPictures.Prepare(_doc, _images);
             _paged = new PagedContent();
             if (!_options.IgnoreCssPageRules) _paged.FootnotePageReset = FootnotePageReset(_sheet.PageRules);
             // hyphens: auto: the language of the text is its nearest lang attribute, else PdfOptions.Language.

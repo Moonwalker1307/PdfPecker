@@ -180,6 +180,7 @@ internal sealed class StructureTree
                 break;
             case "img":
             case "svg":
+            case "embed" or "object" when e.EmbedsPicture:
             {
                 // Images without a text alternative are decorative (alt="" says so explicitly) and become artifacts.
                 var alt = AltText(e);

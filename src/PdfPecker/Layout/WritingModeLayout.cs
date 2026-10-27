@@ -95,12 +95,20 @@ internal sealed partial class LayoutEngine
         bool measured = _intrinsicCache.Remove(e, out var pageWidths);
         e.Style = Turned(s, turn);
         _turning.Add(e);
+        // The boxes inside are laid out turned too, so their widths, heights, margins, padding and borders, which are
+        // physical, turn with them: a float 40px wide and 50px tall in vertical text stays so on the page.
+        var inner = TurnDescendants(e, turn);
         try
         {
             return CaptureBox(e, lineLength ?? pageHeight, shrinkToFit: lineLength == null, lineLength, depth);
         }
         finally
         {
+            foreach (var (d, style) in inner)
+            {
+                d.Style = style;
+                _intrinsicCache.Remove(d);
+            }
             e.Style = s;
             _turning.Remove(e);
             _intrinsicCache.Remove(e);
@@ -124,6 +132,60 @@ internal sealed partial class LayoutEngine
         t.Width = t.Height = t.MinWidth = t.MaxWidth = t.MaxHeight = Length.Auto;
         t.MinHeight = Length.Zero;
         t.AspectRatio = 0;
+        TurnSides(t, s, turn);
+        return t;
+    }
+
+    /// <summary>
+    /// Gives the elements inside a box laid out turned the styles they are laid out with there, and returns their own
+    /// styles to put back. An element whose style is shared keeps one turned copy for all who share it.
+    /// </summary>
+    private static List<(Element Element, ComputedStyle Style)> TurnDescendants(Element root, int turn)
+    {
+        var saved = new List<(Element, ComputedStyle)>();
+        var turned = new Dictionary<ComputedStyle, ComputedStyle>(ReferenceEqualityComparer.Instance);
+        var stack = new Stack<Element>();
+        foreach (var c in root.Children)
+            if (c is Element ce) stack.Push(ce);
+        while (stack.Count > 0)
+        {
+            var d = stack.Pop();
+            if (d.Style is { } s)
+            {
+                if (!turned.TryGetValue(s, out var t)) turned[s] = t = TurnedInside(s, turn);
+                saved.Add((d, s));
+                d.Style = t;
+            }
+            foreach (var c in d.Children)
+                if (c is Element ce) stack.Push(ce);
+        }
+        return saved;
+    }
+
+    /// <summary>
+    /// The style of a box inside a box laid out turned: its width and height, and the limits on them, swap, and each side's
+    /// margin, padding and border is taken from the side the turn brings it to, as for the turned box itself.
+    /// </summary>
+    private static ComputedStyle TurnedInside(ComputedStyle s, int turn)
+    {
+        var t = s.Clone();
+        (t.Width, t.Height) = (s.Height, s.Width);
+        (t.MaxWidth, t.MaxHeight) = (s.MaxHeight, s.MaxWidth);
+        // A min-height of zero is the initial value, as min-width: auto is.
+        t.MinWidth = s.MinHeight.IsAuto || !s.MinHeight.IsPercent && s.MinHeight.Value == 0 ? Length.Auto : s.MinHeight;
+        t.MinHeight = s.MinWidth.IsAuto ? Length.Zero : s.MinWidth;
+        t.WidthKeyword = SizeKeyword.None;
+        if (s.AspectRatio > 0) t.AspectRatio = 1 / s.AspectRatio;
+        var from = turn > 0 ? ClockwiseSides : AnticlockwiseSides;
+        Length[] margins = { s.MarginTop, s.MarginRight, s.MarginBottom, s.MarginLeft };
+        (t.MarginTop, t.MarginRight, t.MarginBottom, t.MarginLeft) = (margins[from[0]], margins[from[1]], margins[from[2]], margins[from[3]]);
+        TurnSides(t, s, turn);
+        return t;
+    }
+
+    /// <summary>Sets the padding, borders, corner radii and overflow of <paramref name="t"/> from those of <paramref name="s"/> turned.</summary>
+    private static void TurnSides(ComputedStyle t, ComputedStyle s, int turn)
+    {
         (t.OverflowX, t.OverflowY) = (s.OverflowY, s.OverflowX);
         // Turned clockwise, the horizontal box's left side becomes the top, its top the right, and so on; turned
         // anticlockwise, its left side becomes the bottom.
@@ -148,7 +210,6 @@ internal sealed partial class LayoutEngine
             }
             t.BorderRadii = turned;
         }
-        return t;
     }
 
     /// <summary>

@@ -59,6 +59,9 @@ internal static class Targets
         "backdrop-filter:blur(99px)", "mask:linear-gradient(red,#0000) exclude", "-webkit-mask-image:url(#a)", "<mask id=\"a\">",
         "shape-outside:circle(50%)", "shape-outside:polygon(0 0,1e9px 0,0 100%)", "shape-outside:linear-gradient(red,#0000)", "shape-margin:1e9px",
         "shape-image-threshold:.5", "background:linear-gradient(in oklch longer hue,red,red,blue 1e-9%)", "background:radial-gradient(in hsl decreasing hue circle,#0000,red)",
+        "display:-webkit-box", "-webkit-box-orient:vertical", "-webkit-box-flex:1e9", "-webkit-box-ordinal-group:2147483647", "-webkit-transform:rotate(9deg)",
+        "background:-webkit-gradient(radial,1e9 0,1e9,0 1e9,0,from(red),color-stop(-1e9,blue),to(#0000))", "background:-webkit-linear-gradient(left top,red,blue)",
+        "background:-webkit-repeating-radial-gradient(1e9px 0,1e-9px 1e9px,red,blue 1e-9px)", "-webkit-column-break-before:always",
         "<style>*::first-letter{initial-letter:3 2}</style>", "<style>p::first-letter{initial-letter:1e9 raise;padding:1e9px}</style>",
         "<img srcset=\"data:image/png;base64, 1e-30x, a 1e30x, b 1x 2w,,\">", "<img srcset=\"a 999999999w, b 1w\" sizes=\"(width>0) calc(1e9px*1e9), -1px, ((((\">",
         "<source srcset=\"a 2x\" media=\"(((\" type=\"image/png;x\">", "sizes=\"0px\"", "srcset=\"a 0.0001x, b 0x\"",
@@ -79,7 +82,7 @@ internal static class Targets
     {
         "var(--a)", "calc(", "min(", "max(", "clamp(", "!important", "@media print {", "@media (min-width: 1px) {", "@supports (display:grid) {", "@page {", "@font-face {", "@keyframes a {",
         "@import url(x);", "@container (min-width:1px) {", "@counter-style a {", ":is(", ":not(", ":where(", ":has(", ":nth-child(2n+1 of p)", "::before", "::after", "::marker",
-        "*", ">", "~", "+", "|", "[a=b i]", "url(data:,)", "linear-gradient(", "radial-gradient(", "conic-gradient(", "repeating-linear-gradient(", "rotate(", "matrix(",
+        "*", ">", "~", "+", "|", "[a=b i]", "url(data:,)", "linear-gradient(", "radial-gradient(", "conic-gradient(", "repeating-linear-gradient(", "-webkit-gradient(", "-webkit-", "rotate(", "matrix(",
         "attr(a)", "counter(a)", "counters(a, \".\")", "content:", "display:grid", "grid-template-columns: repeat(999999, 1fr)", "grid-column: 1 / span 99999", "flex: 1e9",
         "1e9px", "-1e9px", "100000%", "calc(1/0)", "calc(0/0)", "inherit", "initial", "unset", "revert", "all:unset", "--a:", "var(--a, var(--b, var(--a)))",
         "mask-image:", "-webkit-mask:", "mask-composite: exclude", "mask-mode: luminance", "mask-size: 1e9px", "url(#m)", "backdrop-filter: blur(1e9px)", "-webkit-backdrop-filter:",
@@ -329,11 +332,12 @@ internal static class Targets
                     Jbig2Decoder.Decode(d.AsSpan(12 + g).ToArray(), g == 0 ? null : d.AsSpan(12, g).ToArray(), w, h);
                 },
             },
-            Font("font-ttf", ".ttf", c => c.FontFiles(".ttf", ".ttc").Where(f => !f.Name.Contains("Variable") && !f.Name.Contains("RobotoFlex"))),
+            Font("font-ttf", ".ttf", c => c.FontFiles(".ttf", ".ttc").Where(f => !f.Name.Contains("Variable") && !f.Name.Contains("RobotoFlex") && !IsColorFont(f.Name))),
             Font("font-otf", ".otf", c => c.FontFiles(".otf").Where(f => !f.Name.Contains("VarTest"))),
             Font("font-woff", ".woff", c => c.FontFiles(".woff")),
             Font("font-woff2", ".woff2", c => c.FontFiles(".woff2")),
             Font("font-variable", ".font", c => c.FontFiles(".ttf", ".otf").Where(f => f.Name.Contains("Variable") || f.Name.Contains("RobotoFlex") || f.Name.Contains("VarTest"))),
+            Font("font-color", ".ttf", c => c.FontFiles(".ttf").Where(f => IsColorFont(f.Name)), ColorFontPage),
         };
         return list;
     }
@@ -359,7 +363,23 @@ internal static class Targets
         }
     }
 
-    private static Target Font(string name, string ext, Func<SeedContext, IEnumerable<(string, byte[])>> seeds) => new()
+    // COLR colour fonts: Google's test glyphs (U+F0000 on), Noto Color Emoji, Nabla (variable) and the generated ones
+    // (U+E000 on), in several text colours, so the writer keeps a font for each, and translucent, so glyphs are groups.
+    private static bool IsColorFont(string name) => name.Contains("COLR") || name.Contains("Color") || name.Contains("Nabla");
+
+    private static string ColorFontPage => ColorFontPageText.Value;
+
+    // A class of its own, so the page is built before the target list that uses it, whatever the field order.
+    private static class ColorFontPageText
+    {
+        public static readonly string Value =
+            "<!doctype html><body style=\"font-family:Fz;font-size:18px\"><p>ABC \uE000\uE001\uE002\uE096\uE12B \U0001F39B\U0001F39F\U0001F3AB</p>"
+            + "<p style=\"color:#c00;opacity:0.6;font-variation-settings:'wght' 700,'HLGT' 8\">ABC \uE000\uE096 \U0001F39B</p><p style=\"font-size:8px\">"
+            + string.Concat(Enumerable.Range(0xF0000, 0x1200).Select(char.ConvertFromUtf32)) + "</p>"
+            + "<svg width=\"200\" height=\"40\"><text x=\"0\" y=\"30\" font-family=\"Fz\" fill=\"blue\">ABC \uE096 \U0001F39B</text></svg></body>";
+    }
+
+    private static Target Font(string name, string ext, Func<SeedContext, IEnumerable<(string, byte[])>> seeds, string page = FontPage) => new()
     {
         Name = name, Extension = ext, Seeds = seeds, MaxSize = 512 * 1024,
         Run = (d, ct) =>
@@ -367,7 +387,7 @@ internal static class Targets
             var fonts = new FontCollection();
             fonts.Add(d, "Fz");
             // Registering is lazy about the tables; laying out and embedding text is what exercises them.
-            HtmlToPdf.Convert(FontPage, new PdfOptions { Fonts = fonts, MaxPages = 20 }, ct);
+            HtmlToPdf.Convert(page, new PdfOptions { Fonts = fonts, MaxPages = 20 }, ct);
         },
     };
 

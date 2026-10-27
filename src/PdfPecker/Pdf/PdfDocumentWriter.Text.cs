@@ -26,7 +26,7 @@ internal sealed partial class PdfDocumentWriter
             if (shape.FillPattern != null) CollectSvgFonts(shape.FillPattern.Shapes, usedFonts);
             if (shape.StrokePattern != null) CollectSvgFonts(shape.StrokePattern.Shapes, usedFonts);
             if (shape.Font == null || shape.Kind != SvgShape.KindText) continue;
-            if (Leaf(shape.Font) is EmbeddedFont ef) AddGlyphs(ef, shape.Text!, 0, shape.Text!.Length, shape.Rtl);
+            if (Leaf(shape.Font) is EmbeddedFont ef) AddGlyphs(ef, shape.Text!, 0, shape.Text!.Length, shape.Rtl, SvgTextColor(shape));
             else usedFonts[((StandardFont)shape.Font).Index] = true;
             CheckCharacters(shape.Font, shape.Text!, 0, shape.Text!.Length);
         }
@@ -44,7 +44,7 @@ internal sealed partial class PdfDocumentWriter
         t.Font.Split(t.Text, _runs);
         foreach (var run in _runs)
         {
-            if (Leaf(run.Font) is EmbeddedFont ef) AddGlyphs(ef, t.Text, run.Start, run.Length, t.Rtl);
+            if (Leaf(run.Font) is EmbeddedFont ef) AddGlyphs(ef, t.Text, run.Start, run.Length, t.Rtl, t.Color);
             else usedFonts[((StandardFont)run.Font).Index] = true;
             CheckCharacters(run.Font, t.Text, run.Start, run.Length);
         }
@@ -139,9 +139,9 @@ internal sealed partial class PdfDocumentWriter
 
     private readonly List<ShapedGlyph> _glyphs = new();
 
-    private void AddGlyphs(EmbeddedFont font, string text, int start, int length, bool rtl = false)
+    private void AddGlyphs(EmbeddedFont font, string text, int start, int length, bool rtl, uint color)
     {
-        var subset = Subset(font.Program);
+        var subset = Subset(font.Program, color);
         font.Shape(text, start, length, _glyphs, rtl);
         for (int k = 0; k < _glyphs.Count; k++) subset.Cid(_glyphs, k, text);
     }
@@ -162,7 +162,9 @@ internal sealed partial class PdfDocumentWriter
             WritePositionedGlyphs(b, font, subset, text, size, 0, skipNotdef, notdefAdjust, 0);
             return;
         }
-        bool array = font.HasKerning || skipNotdef;
+        // A colour font's glyphs are one-byte codes of Type 3 fonts, and a glyph of another of them ends the array.
+        bool array = font.HasKerning || skipNotdef || subset.Color != null;
+        if (subset.Color != null) _textPage = 0;
         int prev = -1;
         b.Ascii(array ? "[<" : "<");
         for (int i = 0; i < _glyphs.Count; i++)
@@ -173,20 +175,38 @@ internal sealed partial class PdfDocumentWriter
             prev = g.Gid;
             int cid = subset.Cid(_glyphs, i, text);
             if (cid == 0 && skipNotdef) b.Ascii(">").Num(notdefAdjust).Ascii("<");
-            else Hex4(b, cid);
+            else WriteCode(b, font, subset, cid, size);
         }
         b.Ascii(array ? ">] TJ" : "> Tj");
     }
 
-    private GlyphSubset Subset(FontProgram program)
+    /// <summary>
+    /// The subset of a font's glyphs the document uses, made on first use. A font whose colour glyphs use the text
+    /// colour has a subset for each colour, since its Type 3 glyphs draw that colour.
+    /// </summary>
+    private GlyphSubset Subset(FontProgram program, uint color)
     {
+        var colors = program.ColorGlyphs;
+        if (colors is { UsesForeground: true })
+        {
+            var key = (program, color & 0xFFFFFF);
+            if (!_colorSubsets.TryGetValue(key, out var colored))
+            {
+                _colorSubsets[key] = colored = new GlyphSubset(program, colors, color);
+                _subsetList.Add(colored);
+            }
+            return colored;
+        }
         if (!_subsets.TryGetValue(program, out var s))
         {
-            _subsets[program] = s = new GlyphSubset(program);
+            _subsets[program] = s = new GlyphSubset(program, colors);
             _subsetList.Add(s);
         }
         return s;
     }
+
+    /// <summary>The colour SVG text is drawn in, which the colour glyphs of its font use as the text colour.</summary>
+    private static uint SvgTextColor(SvgShape shape) => shape.Fill ?? CssColor.Black;
 
     private void SetFont(ByteBuffer b, TextFont font, string resource, int index, float size)
     {
@@ -194,6 +214,46 @@ internal sealed partial class PdfDocumentWriter
         _textFont = font;
         _textSize = size;
         b.Ascii(resource).Int(index).Sp().Num(size).Ascii(" Tf\n");
+    }
+
+    /// <summary>Selects the Type 3 font that holds page <paramref name="page"/> (256 glyphs) of a colour font's subset.</summary>
+    private void SetColorFont(ByteBuffer b, EmbeddedFont font, GlyphSubset subset, int page, float size)
+    {
+        if (ReferenceEquals(_textFont, font) && _textSubset == subset && _textPage == page && _textSize == size) return;
+        _textFont = font;
+        _textSubset = subset;
+        _textPage = page;
+        _textSize = size;
+        WriteFontName(b, subset, page);
+        b.Sp().Num(size).Ascii(" Tf\n");
+    }
+
+    /// <summary>The resource name of an embedded font: /E1, /E2, ..., and /E1_1, /E1_2, ... for the further Type 3 fonts of a colour font.</summary>
+    private void WriteFontName(ByteBuffer b, GlyphSubset subset, int page)
+    {
+        b.Ascii("/E").Int(_subsetList.IndexOf(subset) + 1);
+        if (page > 0) b.Ascii("_").Int(page);
+    }
+
+    /// <summary>
+    /// Writes the code of a glyph in a hex string inside a TJ array: four hex digits of its CID, or for a colour font one
+    /// byte of the Type 3 font its CID is on, ending the array and changing font when that is another one.
+    /// </summary>
+    private void WriteCode(ByteBuffer b, EmbeddedFont font, GlyphSubset subset, int cid, float size)
+    {
+        if (subset.Color == null)
+        {
+            Hex4(b, cid);
+            return;
+        }
+        int page = cid >> 8;
+        if (page != _textPage)
+        {
+            b.Ascii(">] TJ ");
+            SetColorFont(b, font, subset, page, size);
+            b.Ascii("[<");
+        }
+        b.Byte(HexDigits[(cid >> 4) & 15]).Byte(HexDigits[cid & 15]);
     }
 
     private void SetRenderMode(ByteBuffer b, int mode)
@@ -244,8 +304,10 @@ internal sealed partial class PdfDocumentWriter
 
     private void WriteEmbeddedRun(ByteBuffer b, EmbeddedFont font, TextOp t, int start, int length, float x, float y, int pass)
     {
-        var subset = _subsets[font.Program];
-        SetFont(b, font, "/E", _subsetList.IndexOf(subset) + 1, t.Size);
+        var subset = Subset(font.Program, t.Color);
+        bool color = subset.Color != null;
+        if (color) SetColorFont(b, font, subset, _textSubset == subset && ReferenceEquals(_textFont, font) ? _textPage : 0, t.Size);
+        else SetFont(b, font, "/E", _subsetList.IndexOf(subset) + 1, t.Size);
         float boldWidth = 0;
         if (font.SyntheticBold)
         {
@@ -262,8 +324,8 @@ internal sealed partial class PdfDocumentWriter
         bool skipNotdef = NoNotdef && t.Size > 0;
         // Kerning moves the glyph after a kerned pair, as the layout measured it.
         bool kern = font.HasKerning && t.Size > 0;
-        bool adjust = (t.WordSpacing != 0 || skipNotdef || kern) && t.Size > 0;
-        float spaceAdjust = adjust ? -t.WordSpacing * 1000f / t.Size : 0;
+        bool adjust = (t.WordSpacing != 0 || skipNotdef || kern) && t.Size > 0 || color;
+        float spaceAdjust = adjust && t.Size > 0 ? -t.WordSpacing * 1000f / t.Size : 0;
         float notdefAdjust = skipNotdef ? -(font.Program.Advance1000(0) + t.CharSpacing * 1000f / t.Size) : 0;
         bool positioned = font.Shape(text, start, length, _glyphs, t.Rtl);
         if (t.Rtl) _glyphs.Reverse();
@@ -283,7 +345,7 @@ internal sealed partial class PdfDocumentWriter
             prev = g.Gid;
             int cid = subset.Cid(_glyphs, k, text);
             if (cid == 0 && skipNotdef) b.Ascii(">").Num(notdefAdjust).Ascii("<");
-            else Hex4(b, cid);
+            else WriteCode(b, font, subset, cid, t.Size);
             if (adjust && text[g.Start] == ' ' && t.WordSpacing != 0 && k + 1 < _glyphs.Count) b.Ascii(">").Num(spaceAdjust).Ascii("<");
         }
         b.Ascii(adjust ? ">] TJ\n" : "> Tj\n");
@@ -313,7 +375,7 @@ internal sealed partial class PdfDocumentWriter
                 b.Ascii(">] TJ ").Num(g.Dy * size / 1000f).Ascii(" Ts [<");
             }
             if (g.Dx != 0) b.Ascii(">").Num(-g.Dx).Ascii("<");
-            Hex4(b, cid);
+            WriteCode(b, font, subset, cid, size);
             float after = g.Dx + width - g.Advance;
             if (wordSpacing != 0 && g.Length > 0 && text[g.Start] == ' ' && k + 1 < _glyphs.Count) after += spaceAdjust;
             if (after != 0) b.Ascii(">").Num(after).Ascii("<");
@@ -351,7 +413,11 @@ internal sealed partial class PdfDocumentWriter
                 .Ascii(" /Encoding /WinAnsiEncoding >>");
             End();
         }
-        for (int i = 0; i < _subsetList.Count; i++) WriteEmbeddedFont(_subsetList[i], doc.FirstEmbeddedId + i * 5);
+        for (int i = 0; i < _subsetList.Count; i++)
+        {
+            if (_subsetList[i].Color != null) WriteColorFont(_subsetList[i], _subsetIds[i], doc);
+            else WriteEmbeddedFont(_subsetList[i], _subsetIds[i]);
+        }
     }
 
     /// <summary>The entries of a /Font resource dictionary: /F1, /F2, ... for the standard fonts, /E1, /E2, ... for the subsets.</summary>
@@ -359,7 +425,15 @@ internal sealed partial class PdfDocumentWriter
     {
         for (int i = 0; i < doc.UsedFonts.Length; i++)
             if (doc.UsedFonts[i]) b.Ascii(" /F").Int(i + 1).Sp().Int(doc.FontIds[i]).Ascii(" 0 R");
-        for (int i = 0; i < _subsetList.Count; i++) b.Ascii(" /E").Int(i + 1).Sp().Int(doc.FirstEmbeddedId + i * 5).Ascii(" 0 R");
+        for (int i = 0; i < _subsetList.Count; i++)
+        {
+            int pages = _subsetList[i].Color == null ? 1 : ColorFontPages(_subsetList[i]);
+            for (int page = 0; page < pages; page++)
+            {
+                WriteFontName(b.Sp(), _subsetList[i], page);
+                b.Sp().Int(_subsetIds[i] + page * 3).Ascii(" 0 R");
+            }
+        }
     }
 
     /// <summary>Writes the five objects of an embedded font: Type0 font, CIDFont, descriptor, font file and ToUnicode CMap.</summary>
@@ -405,11 +479,20 @@ internal sealed partial class PdfDocumentWriter
         var file = EmbeddedFontFiles.Get(subset, _level);
         WriteStreamObject(id + 3, file.Body, file.Deflated, font.IsCff ? "/Subtype /OpenType" : "/Length1 " + file.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
+        WriteToUnicode(id + 4, used.Select(u => (u.Cid, u.CodePoint, u.Text)).ToList(), oneByte: false);
+    }
+
+    /// <summary>
+    /// Writes a ToUnicode CMap for the codes of a font: two-byte CIDs, or the one-byte codes of a Type 3 font. Every drawn
+    /// glyph but .notdef gets an entry, as PDF/A level U and PDF/UA require; the extra glyphs of a shaped cluster map to
+    /// an empty string, so extracted text holds the cluster's characters once.
+    /// </summary>
+    private void WriteToUnicode(int id, List<(int Code, int CodePoint, string? Text)> used, bool oneByte)
+    {
         var cmap = new ByteBuffer(256 + used.Count * 16);
         cmap.Ascii("/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n")
-            .Ascii("/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n");
-        // Every drawn glyph but .notdef gets an entry, as PDF/A level U and PDF/UA require; the extra glyphs of a shaped
-        // cluster map to an empty string, so extracted text holds the cluster's characters once.
+            .Ascii("/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n1 begincodespacerange\n")
+            .Ascii(oneByte ? "<00> <FF>" : "<0000> <FFFF>").Ascii("\nendcodespacerange\n");
         var mapped = used.Where(u => u.CodePoint > 0 || u.Text != null).ToList();
         for (int i = 0; i < mapped.Count; i += 100)
         {
@@ -418,7 +501,9 @@ internal sealed partial class PdfDocumentWriter
             for (int k = i; k < i + n; k++)
             {
                 cmap.Byte((byte)'<');
-                Hex4(cmap, mapped[k].Cid);
+                int code = mapped[k].Code;
+                if (oneByte) cmap.Byte(HexDigits[(code >> 4) & 15]).Byte(HexDigits[code & 15]);
+                else Hex4(cmap, code);
                 cmap.Ascii("> <");
                 int cp = mapped[k].CodePoint;
                 if (mapped[k].Text is { } chars)
@@ -435,10 +520,11 @@ internal sealed partial class PdfDocumentWriter
             cmap.Ascii("endbfchar\n");
         }
         cmap.Ascii("endcmap\nCMapName currentdict /CMapResource defineresource pop\nend\nend\n");
-        WriteStream(id + 4, cmap.Span, _compress, extraDict: null);
+        WriteStream(id, cmap.Span, _compress, extraDict: null);
     }
 
     private const float MarginTextSize = 9f;
+    private const uint MarginTextColor = 0xFF666666;
 
     private void WriteMarginText(ByteBuffer b, TextFont font, string template, int page, int pages, bool top)
     {
@@ -452,8 +538,8 @@ internal sealed partial class PdfDocumentWriter
         b.Ascii("BT\n");
         if (_tw != 0) { _tw = 0; b.Ascii("0 Tw\n"); }
         if (_tc != 0) { _tc = 0; b.Ascii("0 Tc\n"); }
-        SetFill(b, 0xFF666666);
-        WriteTextLine(b, new TextOp(0, 0, 0, font, size, 0xFF666666, text, 0, 0), x, y);
+        SetFill(b, MarginTextColor);
+        WriteTextLine(b, new TextOp(0, 0, 0, font, size, MarginTextColor, text, 0, 0), x, y);
         b.Ascii("ET\n");
     }
 

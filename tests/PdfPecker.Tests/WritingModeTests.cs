@@ -57,6 +57,22 @@ public class WritingModeTests
         Assert.Equal(90, Fill(ops, 0xFF00FF00).Y, 2);
     }
 
+    [Theory]
+    [InlineData("left", 10)]
+    [InlineData("right", 200 - 50 - 10)]
+    public void A_float_in_vertical_text_keeps_its_width_and_height_on_the_page(string side, float start)
+    {
+        // A float 40pt wide and 50pt tall goes to the top (left) or bottom (right) of vertical-rl lines, as in Chrome.
+        // Inside the turn, its 50pt height runs along the lines and its top margin is before it there.
+        var ops = Layout("<style>body{margin:0;font:12pt Helvetica}</style><div style='writing-mode:vertical-rl;height:200pt'>Text "
+                         + $"<div style='float:{side};width:40pt;height:50pt;margin-top:10pt;margin-bottom:10pt;background:#ff0000'></div> more text</div>");
+        var layer = All(ops).OfType<LayerOp>().Single(l => l.Transform != null);
+        var box = Fill(layer.Ops, 0xFFFF0000);
+        Assert.Equal(50, box.W, 1);
+        Assert.Equal(40, box.H, 1);
+        Assert.Equal(start, box.X, 1);
+    }
+
     [Fact]
     public void A_vertical_label_without_a_height_is_as_long_as_its_text()
     {

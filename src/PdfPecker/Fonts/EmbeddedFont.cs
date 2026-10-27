@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace PdfPecker.Fonts;
 
 /// <summary>
@@ -215,10 +217,12 @@ internal sealed class EmbeddedFont : TextFont
 internal sealed class FontChain : TextFont
 {
     private readonly TextFont _primary;
-    private readonly Func<int, TextFont?> _fallback;   // finds a font for a character the primary lacks
+    // Finds a font for a character the primary lacks, the first after the primary that also passes the test when one
+    // is given.
+    private readonly Func<int, Func<TextFont, bool>?, TextFont?> _fallback;
     private readonly Dictionary<int, TextFont> _picked = new();
 
-    public FontChain(TextFont primary, Func<int, TextFont?> fallback)
+    public FontChain(TextFont primary, Func<int, Func<TextFont, bool>?, TextFont?> fallback)
     {
         _primary = primary;
         _fallback = fallback;
@@ -236,15 +240,64 @@ internal sealed class FontChain : TextFont
         => f is EmbeddedFont e ? e.CharUnits(cp) : ((StandardFont)f).CharUnits((char)cp);
 
     // Combining marks and joiners are drawn with the font of the character before them when it has them, so that they
-    // shape with it.
-    private static bool StaysInRun(int cp) => cp >= 0x0300 && (cp is 0x200C or 0x200D || Text.UnicodeTables.IsMark(cp));
+    // shape with it, and so is the rest of an emoji sequence: skin tones, tags, the character after a zero width joiner
+    // and the second letter of a flag.
+    private static bool StaysInRun(int previous, int cp)
+        => cp >= 0x0300 && (cp is 0x200C or 0x200D or (>= 0xE0020 and <= 0xE007F) or (>= 0x1F3FB and <= 0x1F3FF)
+            || previous == 0x200D || IsRegionalIndicator(previous) && IsRegionalIndicator(cp) || Text.UnicodeTables.IsMark(cp));
+
+    private static bool IsRegionalIndicator(int cp) => cp is >= 0x1F1E6 and <= 0x1F1FF;
+
+    /// <summary>
+    /// The font for the text from <paramref name="i"/>, and where the stretch it decides ends. A cluster of several code
+    /// points, such as an emoji sequence, is drawn with the first font that has all of it, as Chrome keeps a cluster in
+    /// one font, which matters when unicode-range splits a font in parts; otherwise each code point has its own.
+    /// </summary>
+    private TextFont Next(string s, int i, int end, TextFont? current, ref int previous, out int next)
+    {
+        int cp = s[i];
+        next = i + 1;
+        if (char.IsHighSurrogate(s[i]) && next < end && char.IsLowSurrogate(s[next])) cp = char.ConvertToUtf32(s[i], s[next++]);
+        bool stays = current != null && StaysInRun(previous, cp);
+        if (!stays && next < end && StaysInRun(cp, CodePointAt(s, next, end)))
+        {
+            int clusterEnd = i + StringInfo.GetNextTextElementLength(s.AsSpan(i, end - i));
+            var first = Pick(cp);
+            if (clusterEnd > next && (CoversAll(first, s, i, clusterEnd) ? first : _fallback(cp, f => CoversAll(f, s, i, clusterEnd))) is { } font)
+            {
+                previous = CodePointBefore(s, clusterEnd);
+                next = clusterEnd;
+                return font;
+            }
+        }
+        previous = cp;
+        return stays && Covers(current!, cp) ? current! : Pick(cp);
+    }
+
+    private static int CodePointAt(string s, int i, int end)
+        => char.IsHighSurrogate(s[i]) && i + 1 < end && char.IsLowSurrogate(s[i + 1]) ? char.ConvertToUtf32(s[i], s[i + 1]) : s[i];
+
+    private static int CodePointBefore(string s, int end)
+        => end >= 2 && char.IsLowSurrogate(s[end - 1]) && char.IsHighSurrogate(s[end - 2]) ? char.ConvertToUtf32(s[end - 2], s[end - 1]) : s[end - 1];
+
+    // Whether a font has every code point of a cluster that is drawn; joiners and other invisible ones are not.
+    private static bool CoversAll(TextFont f, string s, int start, int end)
+    {
+        for (int i = start; i < end;)
+        {
+            int cp = CodePointAt(s, i, end);
+            if (!Text.UnicodeTables.IsDefaultIgnorable(cp) && !Covers(f, cp)) return false;
+            i += cp >= 0x10000 ? 2 : 1;
+        }
+        return true;
+    }
 
     /// <summary>The font that draws a code point.</summary>
     public TextFont Pick(int cp)
     {
         if (cp < 0x20 || Covers(_primary, cp)) return _primary;
         if (_picked.TryGetValue(cp, out var f)) return f;
-        f = _fallback(cp) ?? _primary;
+        f = _fallback(cp, null) ?? _primary;
         _picked[cp] = f;
         return f;
     }
@@ -252,13 +305,12 @@ internal sealed class FontChain : TextFont
     // Each stretch of characters drawn with one font is measured as a run of that font, so it is kerned and ligated.
     public override int MeasureUnits(string s, int start, int length)
     {
-        int total = 0, runStart = start, end = start + length;
+        int total = 0, runStart = start, end = start + length, previous = 0;
         TextFont? runFont = null;
-        for (int i = start; i < end; i++)
+        for (int i = start, next; i < end; i = next)
         {
-            int at = i, cp = s[i];
-            if (char.IsHighSurrogate(s[i]) && i + 1 < end && char.IsLowSurrogate(s[i + 1])) cp = char.ConvertToUtf32(s[i], s[++i]);
-            var f = runFont != null && StaysInRun(cp) && Covers(runFont, cp) ? runFont : Pick(cp);
+            int at = i;
+            var f = Next(s, i, end, runFont, ref previous, out next);
             if (ReferenceEquals(f, runFont)) continue;
             if (runFont != null) total += runFont.MeasureUnits(s, runStart, at - runStart);
             runFont = f;
@@ -275,10 +327,10 @@ internal sealed class FontChain : TextFont
     private FontChain? _withoutLigatures, _withoutKerning;
 
     public override TextFont WithoutLigatures()
-        => _withoutLigatures ??= new FontChain(_primary.WithoutLigatures(), cp => _fallback(cp)?.WithoutLigatures());
+        => _withoutLigatures ??= new FontChain(_primary.WithoutLigatures(), (cp, accept) => _fallback(cp, accept)?.WithoutLigatures());
 
     public override TextFont WithoutKerning()
-        => _withoutKerning ??= new FontChain(_primary.WithoutKerning(), cp => _fallback(cp)?.WithoutKerning());
+        => _withoutKerning ??= new FontChain(_primary.WithoutKerning(), (cp, accept) => _fallback(cp, accept)?.WithoutKerning());
 
     // The first font of the list is the one font-size-adjust holds constant.
     public override float Metric(FontMetric metric) => _primary.Metric(metric);
@@ -294,7 +346,7 @@ internal sealed class FontChain : TextFont
         if (variants.TryGetValue(features, out var cached)) return cached;
         // Bundled font chains live as long as the process, so ever new feature settings must not grow this forever.
         if (variants.Count >= MaxVariants) return this;
-        return variants.GetOrAdd(features, k => new FontChain(_primary.WithFeatures(k), cp => _fallback(cp)?.WithFeatures(k)));
+        return variants.GetOrAdd(features, k => new FontChain(_primary.WithFeatures(k), (cp, accept) => _fallback(cp, accept)?.WithFeatures(k)));
     }
 
     public override int KernUnits(int left, int right)
@@ -306,14 +358,13 @@ internal sealed class FontChain : TextFont
     public override void Split(string text, List<FontRun> runs)
     {
         TextFont? current = null;
-        int runStart = 0;
-        for (int i = 0; i < text.Length; i++)
+        int runStart = 0, previous = 0;
+        for (int i = 0, next; i < text.Length; i = next)
         {
-            int start = i, cp = text[i];
-            if (char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1])) cp = char.ConvertToUtf32(text[i], text[++i]);
+            int start = i;
             // Marks and joiners stay with the run they are in. Spaces are drawn with the font that measured them (the
             // primary font, as in browsers), or text after a fallback run would be drawn where the layout did not put it.
-            var f = StaysInRun(cp) && current != null && Covers(current, cp) ? current : Pick(cp);
+            var f = Next(text, i, text.Length, current, ref previous, out next);
             if (!ReferenceEquals(f, current))
             {
                 if (current != null) runs.Add(new FontRun(current, runStart, start - runStart));

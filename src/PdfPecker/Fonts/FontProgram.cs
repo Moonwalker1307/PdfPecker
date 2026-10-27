@@ -97,6 +97,8 @@ internal sealed partial class FontProgram
     private OpenTypeLayout? _layout;
     private bool _layoutLoaded;
     private VariationAxis[]? _axes;
+    private ColorGlyphs? _colorGlyphs;
+    private bool _colorGlyphsLoaded;
     private ConcurrentDictionary<string, FontProgram> _instances = new(StringComparer.Ordinal);
     private ConcurrentDictionary<string, FontProgram>? _featureVariants;
 
@@ -424,6 +426,7 @@ internal sealed partial class FontProgram
             if (_instances.Count >= MaxInstances) return this;
             var instance = new FontProgram(FontVariations.Instance(this, coords, values, axes), 0);
             instance.PostScriptName = SanitizeName(PostScriptName + InstanceNameSuffix(axes, coords, values));
+            instance.InstanceCoordinates = coords;
             return _instances.GetOrAdd(key, instance);
         }
         catch (Exception ex) when (IsFormatError(ex) || ex is InvalidOperationException)
@@ -480,6 +483,27 @@ internal sealed partial class FontProgram
                     Volatile.Write(ref _ligaturesLoaded, true);
                 }
                 return _ligatures;
+            }
+        }
+    }
+
+    /// <summary>The normalized coordinates of a variable font's instance, which its colour glyphs' variations follow; null for any other font.</summary>
+    internal float[]? InstanceCoordinates { get; private set; }
+
+    /// <summary>The font's colour glyphs (COLR and CPAL), or null when it has none.</summary>
+    public ColorGlyphs? ColorGlyphs
+    {
+        get
+        {
+            if (Volatile.Read(ref _colorGlyphsLoaded)) return _colorGlyphs;
+            lock (_lock)
+            {
+                if (!_colorGlyphsLoaded)
+                {
+                    _colorGlyphs = ColorGlyphs.Load(this);
+                    Volatile.Write(ref _colorGlyphsLoaded, true);
+                }
+                return _colorGlyphs;
             }
         }
     }

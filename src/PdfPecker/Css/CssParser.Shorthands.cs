@@ -70,6 +70,7 @@ internal static partial class CssParser
     internal static void Expand(string name, string value, bool important, List<Declaration> output)
     {
         var longhands = new LonghandWriter(output, important);
+        name = PrefixedProperties.Unprefixed(name) ?? name;
 
         // A custom property is kept as written, and so is a shorthand whose value uses var(): the style resolver
         // substitutes and expands it per element.
@@ -142,6 +143,11 @@ internal static partial class CssParser
             case "page-break-after":
             case "page-break-inside":
                 longhands.Add(name.Substring("page-".Length), value.ToLowerInvariant());
+                break;
+            case "-webkit-column-break-before":
+            case "-webkit-column-break-after":
+            case "-webkit-column-break-inside":
+                if (PrefixedProperties.ColumnBreak(value) is { } columnBreak) longhands.Add(name.Substring("-webkit-column-".Length), columnBreak);
                 break;
             case "text-decoration": ExpandTextDecoration(value, longhands); break;
             case "-webkit-text-stroke": ExpandTextStroke(value, longhands); break;

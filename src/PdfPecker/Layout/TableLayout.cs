@@ -900,6 +900,25 @@ internal sealed partial class LayoutEngine
                || a.Group != null && a.Group == b.Group && a.Group.Style.AvoidBreakInside;
     }
 
+    /// <summary>
+    /// Whether a body row starts a new page (a new column in multi-column layout) because of break-before on it or on
+    /// the row group it starts, or break-after on the row or row group before it. As in Chrome, only breaks between
+    /// body rows count: one before the first body row or after the last does not move the table or what follows it.
+    /// </summary>
+    private bool ForcedBreakBefore(TableModel m, int r)
+    {
+        if (!_paginate || r <= m.HeadCount || r >= m.Rows.Count - m.FootCount) return false;
+        bool columns = _grid is ColumnGrid;
+        RowModel row = m.Rows[r], prev = m.Rows[r - 1];
+        bool startsGroup = prev.Group != row.Group;
+        return Breaks(row.Tr.Style, before: true, columns) || Breaks(prev.Tr.Style, before: false, columns)
+               || startsGroup && (row.Group?.Style is { } gs && Breaks(gs, before: true, columns)
+                                  || prev.Group?.Style is { } ps && Breaks(ps, before: false, columns));
+
+        static bool Breaks(ComputedStyle s, bool before, bool columns)
+            => columns ? before ? s.ColumnBreakBefore : s.ColumnBreakAfter : before ? s.PageBreakBefore : s.PageBreakAfter;
+    }
+
     /// <summary>Whether row <paramref name="r"/> is the first of rows that stay on one page (see <see cref="KeepsWithNext"/>).</summary>
     private bool StartsKeptRun(TableModel m, int r)
         => _paginate && _measuringRows == 0 && MayLayOutAgain && KeepsWithNext(m, r) && (r == 0 || !KeepsWithNext(m, r - 1));
@@ -981,7 +1000,8 @@ internal sealed partial class LayoutEngine
             // A body row leaves room on its page for the footer repeated under it.
             float reserve = r >= m.HeadCount && r < m.Rows.Count - m.FootCount ? m.FootReserve : 0;
             float keptBottom = rowBottom + keepWith;
-            bool move = allowMove && attempt == 0 && MayLayOutAgain && !AtPageTop(rowTop)
+            bool forced = allowMove && attempt == 0 && !AtPageTop(rowTop) && ForcedBreakBefore(m, r);
+            bool move = forced || allowMove && attempt == 0 && MayLayOutAgain && !AtPageTop(rowTop)
                         && (CrossesPage(rowTop, rowBottom + reserve) && rowBottom - rowTop <= _grid.Height(PageOf(rowTop) + 1)
                             || keepWith > 0 && CrossesPage(rowTop, keptBottom + reserve));
             if (move && !CrossesPage(rowTop, rowBottom + reserve)) rowBottom = keptBottom;

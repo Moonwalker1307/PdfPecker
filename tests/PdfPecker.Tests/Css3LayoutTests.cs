@@ -497,6 +497,32 @@ public class Css3LayoutTests
         Assert.Contains(ops.OfType<TextOp>(), t => t.Text.StartsWith("—", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData("flex-start")]
+    [InlineData("center")]
+    [InlineData("stretch")]
+    public void A_percentage_width_in_a_column_flex_box_is_of_the_container(string align)
+    {
+        // A bar chart's bars: each 30% of the column box, whatever the box aligns them to, as in Chrome.
+        var ops = Layout("<div style='display:flex;flex-direction:column;align-items:" + align + ";width:300pt'>" +
+                         "<div style='width:30%;padding:0 5%;min-width:10pt;background:#ff0000'>x</div>" +
+                         "<div style='width:calc(100% * 0.5);background:#00ff00'>y</div></div>");
+        Near(90 + 30, Box(ops, "#ff0000").W);
+        Near(150, Box(ops, "#00ff00").W);
+    }
+
+    [Fact]
+    public void A_min_height_of_its_own_replaces_the_content_minimum_of_a_column_flex_item()
+    {
+        // With a zero flex basis and min-height: 20pt, the item is 20pt tall and its three lines overflow it, as in
+        // Chrome; without a min-height of its own it keeps its content's height.
+        var ops = Layout("<div style='display:flex;flex-direction:column;font:10pt Helvetica'>" +
+                         "<div style='flex:1 1 0;min-height:20pt;background:#ff0000'>a<br>b<br>c</div>" +
+                         "<div style='flex:1 1 0;background:#00ff00'>a<br>b<br>c</div></div>");
+        Near(20, Box(ops, "#ff0000").H);
+        Assert.True(Box(ops, "#00ff00").H > 30);
+    }
+
     [Fact]
     public void Aspect_ratio_with_a_definite_height_gives_the_width_in_a_flex_row()
     {

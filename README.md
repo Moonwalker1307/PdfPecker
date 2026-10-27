@@ -120,16 +120,20 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
 ## Features
 
 - **HTML and CSS**: flexbox, grid and subgrid, CSS tables, floats with `shape-outside`, multi-column layout,
-  positioning (also the legacy `clip: rect()`), transforms, gradients (also `in oklch` and other colour spaces, and as
-  list markers), filters, masks, media and container queries, logical properties, `writing-mode`, `text-wrap`,
+  positioning (also the legacy `clip: rect()`, and absolute boxes inside a positioned inline element, such as
+  tooltips and badges), transforms, gradients (also `in oklch` and other colour spaces, and as
+  list markers), filters, masks, media and container queries, logical properties, `writing-mode` (with floats and sized boxes), `text-wrap`,
   `line-clamp` with your own `block-ellipsis`, underlines from the font or below the descenders
   (`text-underline-position`), drop caps, images and gradients in `::before` and `::after` content, inline SVG and
-  PNG, JPEG, GIF, WebP, BMP and TIFF images (also chosen by `srcset` and `<picture>`, and photos turned upright by
-  their EXIF orientation), laid out as Chrome lays them out.
+  PNG, JPEG, GIF, WebP, BMP and TIFF images (also chosen by `srcset` and `<picture>`, shown by `<embed>` and `<object>`,
+  and photos turned upright by their EXIF orientation), and CSS-only charts such as Charts.css (column, bar, area,
+  line and pie charts), laid out as Chrome lays them out. Older CSS works too: the `-webkit-` property names Chrome
+  still takes (`-webkit-transform`, `-webkit-flex`, ...), the legacy `display: -webkit-box` and its `-webkit-box-`
+  properties, and the `-webkit-gradient()` and prefixed gradient syntaxes.
   [More](https://pdfpecker.net/docs/html-and-css/)
 - **Paged media**: `@page` sizes and margin boxes, running headers and footers (also a first page of its own, and bands
   of their own for named pages), footnotes, tables of contents with page numbers, break control (also table row groups
-  and group header rows kept together, as reports keep a group on one page), table headers repeated on every page, and
+  and group header rows kept together, as reports keep a group on one page, and forced breaks between table rows), table headers repeated on every page, and
   bookmarks from the headings that `bookmark-level`, `bookmark-label` and `bookmark-state` can extend, rename or close.
   [More](https://pdfpecker.net/docs/paged-media/)
 - **Content scaled to fit a box**: `-pdfpecker-scale-to-fit: shrink` fits text of any length into a fixed space, for
@@ -137,7 +141,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
 - **Markdown**: CommonMark 0.31 and GitHub Flavored Markdown to PDF or HTML, with footnotes, definition lists and YAML
   front matter. [More](https://pdfpecker.net/docs/markdown/)
 - **Fonts**: TrueType, OpenType, WOFF and WOFF2, subset and embedded, with kerning, ligatures, variable fonts and
-  OpenType features, and bundled fallback fonts for letters and symbols a document's fonts lack.
+  OpenType features, and bundled fallback fonts for letters and symbols a document's fonts lack. COLR colour fonts,
+  versions 0 and 1 (such as Noto Color Emoji), print in colour as Chrome prints them, with the default palette.
   [More](https://pdfpecker.net/docs/fonts/)
 - **Languages**: Arabic and Hebrew with bidi and shaping, Indic scripts, Thai and Lao, CJK line breaking and
   justification, and hyphenation in eleven languages. [More](https://pdfpecker.net/docs/languages/)

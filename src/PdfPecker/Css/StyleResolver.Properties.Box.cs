@@ -11,15 +11,15 @@ internal sealed partial class StyleResolver
         {
             "block" => Display.Block,
             "flow-root" => Display.Block,
-            "flex" or "block flex" => Display.Flex,
+            "flex" or "block flex" or "-webkit-flex" => Display.Flex,
             "grid" or "block grid" => Display.Grid,
-            "inline-flex" or "inline flex" => Display.InlineFlex,
+            "inline-flex" or "inline flex" or "-webkit-inline-flex" => Display.InlineFlex,
             "inline-grid" or "inline grid" => Display.InlineGrid,
             "inline" or "contents" => Display.Inline,
             "inline-block" => Display.InlineBlock,
-            // The legacy box of line clamping (display: -webkit-box; -webkit-box-orient: vertical) lays out as a block.
-            "-webkit-box" => Display.Block,
-            "-webkit-inline-box" => Display.InlineBlock,
+            // The legacy flexible box, which FinishLegacyBox turns into a flex container or a line-clamped block.
+            "-webkit-box" => Display.Flex,
+            "-webkit-inline-box" => Display.InlineFlex,
             "list-item" => Display.ListItem,
             "table" or "inline-table" => Display.Table,
             "table-row" => Display.TableRow,
@@ -41,6 +41,7 @@ internal sealed partial class StyleResolver
         if (d.Lower == "flow-root") s.FormattingRoot = true;
         s.InlineTable = s.Display == Display.Table && (d.Lower == "inline-table" || d.Lower == "inherit" && parent.InlineTable);
         s.Contents = d.Lower == "contents" || d.Lower == "inherit" && parent.Contents;
+        s.LegacyBox = d.Lower is "-webkit-box" or "-webkit-inline-box" || d.Lower == "inherit" && parent.LegacyBox;
     }
 
     /// <summary>width: a length, or an intrinsic size keyword, which leaves the length auto for layout to size.</summary>

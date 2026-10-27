@@ -23,7 +23,7 @@ internal sealed partial class PdfDocumentWriter
         {
             // Page numbers are only known per page: collect every digit.
             foreach (var template in new[] { doc.HeaderTemplate, doc.FooterTemplate })
-                if (template != null) CollectFonts(new TextOp(0, 0, 0, doc.MarginFont, MarginTextSize, 0, template + "0123456789", 0, 0), doc.UsedFonts);
+                if (template != null) CollectFonts(new TextOp(0, 0, 0, doc.MarginFont, MarginTextSize, MarginTextColor, template + "0123456789", 0, 0), doc.UsedFonts);
         }
     }
 
@@ -114,6 +114,16 @@ internal sealed partial class PdfDocumentWriter
         Begin(doc.ResourcesId).Ascii("<< /ProcSet [/PDF /Text /ImageB /ImageC /ImageI] /Font <<");
         WriteFontEntries(_out, doc);
         _out.Ascii(" >>");
+        WriteGraphicsResources(doc);
+        if (doc.GlyphResourcesId == 0) return;
+        // The colour fonts' glyphs draw no text, and a font among its own resources sends some validators in circles.
+        Begin(doc.GlyphResourcesId).Ascii("<< /ProcSet [/PDF /ImageB /ImageC /ImageI]");
+        WriteGraphicsResources(doc);
+    }
+
+    // The rest of a resources dictionary after its fonts, and its end.
+    private void WriteGraphicsResources(WriteState doc)
+    {
         if (doc.Images.Count > 0 || doc.Watermark != null || _forms.Count > 0 || _rasters.Count > 0) WriteXObjectResources(doc);
         if (_fillAlphas.Count + _strokeAlphas.Count + _groupAlphas.Count + _blendStates.Count + _layerBlends.Count + _masks.Count > 0)
             WriteExtGStateResources(doc);

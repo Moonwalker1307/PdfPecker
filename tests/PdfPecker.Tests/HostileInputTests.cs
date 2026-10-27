@@ -1392,6 +1392,50 @@ public class HostileInputTests
         }
     }
 
+    private static PdfOptions ColorFont(byte[] font) => new() { Fonts = new FontCollection().Add(font, "C") };
+
+    [Fact]
+    public void Colour_glyph_paint_graphs_stop_at_their_limits()
+    {
+        // A paint graph that doubles at each of 60 levels, 300 nested transforms and a glyph that paints itself: each
+        // draws what it can within the limits, or nothing, in bounded time.
+        var font = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "ColorHostile.ttf"));
+        var pdf = Bounded("<p style='font:20px C'>\uE000 \uE001 \uE002</p>", ColorFont(font));
+        AssertStructurallyValid(pdf);
+        Assert.True(pdf.Length < 4_000_000, $"{pdf.Length} bytes");
+    }
+
+    [Theory]
+    [InlineData("COLRv1-TestGlyphs.ttf")]
+    [InlineData("Nabla-Subset.ttf")] // variable, so the variation store is read too
+    public void Damaged_colour_tables_draw_nothing_instead_of_failing(string file)
+    {
+        var clean = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", file));
+        var tables = new List<(int Offset, int Length)>();
+        for (int i = 0, n = BinaryPrimitives.ReadUInt16BigEndian(clean.AsSpan(4)); i < n; i++)
+        {
+            var record = clean.AsSpan(12 + i * 16);
+            if (record[..4].SequenceEqual("COLR"u8) || record[..4].SequenceEqual("CPAL"u8))
+                tables.Add(((int)BinaryPrimitives.ReadUInt32BigEndian(record[8..]), (int)BinaryPrimitives.ReadUInt32BigEndian(record[12..])));
+        }
+        Assert.Equal(2, tables.Count);
+        var sb = new StringBuilder("<p style='font:8px C;font-variation-settings:\"wght\" 600, \"HLGT\" 3'>ABC");
+        for (int cp = 0xF0000; cp < 0xF1200; cp++) sb.Append(char.ConvertFromUtf32(cp));
+        string html = sb.Append("</p>").ToString();
+
+        var random = new Random(4321);
+        for (int round = 0; round < 60; round++)
+        {
+            var data = (byte[])clean.Clone();
+            for (int k = 0, n = random.Next(1, 8); k < n; k++)
+            {
+                var (offset, length) = tables[random.Next(tables.Count)];
+                data[offset + random.Next(length)] = (byte)random.Next(256);
+            }
+            AssertStructurallyValid(Bounded(html, ColorFont(data)));
+        }
+    }
+
     [Fact]
     public void Pdf_with_unterminated_streams_opens_in_linear_time()
     {
