@@ -75,6 +75,12 @@ internal static partial class BoxPainter
             PaintRoundedBorder(group, s, x, y, w, h, default);
             return;
         }
+        // Solid sides of different colours meet along mitred corners too, as Acid2's nose shows.
+        if (wholeBox && hasArea && SolidSidesDiffer(s))
+        {
+            PaintRoundedBorder(group, s, x, y, w, h, default);
+            return;
+        }
         // Chrome fills collapsed table borders side by side, and strokes other boxes' uniform borders.
         if (wholeBox && IsUniformSolid(s, w, h))
         {
@@ -86,6 +92,22 @@ internal static partial class BoxPainter
         if ((sides & Bottom) != 0) Side(group, Collapsed(s.BorderBottomStyle, collapsedCell), bb, s.BorderBottomColor ?? s.Color, x, y + h - bb, w, bb, horizontal: true, SideBottom);
         if ((sides & Left) != 0) Side(group, Collapsed(s.BorderLeftStyle, collapsedCell), bl, s.BorderLeftColor ?? s.Color, x, y, bl, h, horizontal: false, SideLeft);
         if ((sides & Right) != 0) Side(group, Collapsed(s.BorderRightStyle, collapsedCell), br, s.BorderRightColor ?? s.Color, x + w - br, y, br, h, horizontal: false, SideRight);
+    }
+
+    /// <summary>True when the sides that show are all solid and two that meet at a corner differ in colour.</summary>
+    private static bool SolidSidesDiffer(ComputedStyle s)
+    {
+        var sides = new BorderSides(s);
+        bool differ = false;
+        for (int i = 0; i < 4; i++)
+        {
+            var side = sides[i];
+            if (!side.Shows) continue;
+            if (side.Style != BorderStyle.Solid) return false;
+            var next = sides[(i + 1) % 4];
+            if (next.Shows && next.Color != side.Color) differ = true;
+        }
+        return differ;
     }
 
     /// <summary>True when all four sides are solid, visible, of one width and colour, and leave room inside the box.</summary>
@@ -235,7 +257,8 @@ internal static partial class BoxPainter
 
     /// <summary>
     /// The lines along which the sides of a border with differing sides meet: from each outer corner of the box through
-    /// its inner corner, continued inward by half the box's smaller dimension so that they reach past the corner curves.
+    /// its inner corner, continued inward by half the box's smaller dimension so that they reach past the corner curves,
+    /// and at least to the inner corner.
     /// </summary>
     private readonly struct MitreCorners
     {
@@ -248,7 +271,8 @@ internal static partial class BoxPainter
             float reach = Math.Min(w, h) / 2;
             (float X, float Y) Toward(float cx, float cy, float dx, float dy)
             {
-                float k = reach / Math.Max(Math.Max(dx, dy), 0.01f);
+                // At least to the inner corner: borders wider than half the box, around little or no content, meet there.
+                float k = Math.Max(reach / Math.Max(Math.Max(dx, dy), 0.01f), 1);
                 return (cx + Math.Sign(x + w / 2 - cx) * dx * k, cy + Math.Sign(y + h / 2 - cy) * dy * k);
             }
             _topLeft = Toward(_x0, _y0, left, top);
