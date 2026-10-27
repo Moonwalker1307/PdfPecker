@@ -95,6 +95,14 @@ internal sealed class SvgPattern
 }
 
 /// <summary>
+/// A foreignObject of an inline SVG: its HTML content is laid out by the layout engine in the box (X, Y, Width, Height)
+/// of the element's user space, which <see cref="ToRoot"/> maps to the root's. It is painted before the shape at
+/// <see cref="ShapeIndex"/>, or over the whole drawing when that is -1 (inside a group, clip, mask or filter, whose
+/// effects it does not get).
+/// </summary>
+internal sealed record SvgForeignObject(Element Element, Matrix ToRoot, float X, float Y, float Width, float Height, float Opacity, int ShapeIndex);
+
+/// <summary>
 /// The drawing work left for a document's inline SVGs. &lt;use&gt; can reference groups that reference groups, so a
 /// small drawing can expand exponentially; past the budget, the rest of the drawing is left out.
 /// </summary>
@@ -122,6 +130,8 @@ internal sealed partial class SvgImage
     public string Align = "xmidymid";
     public bool Slice;
     public List<SvgShape> Shapes { get; private set; } = new();
+    /// <summary>The foreignObject elements to lay out and paint with the drawing, in painting order; null for none.</summary>
+    public List<SvgForeignObject>? ForeignObjects;
 
     private readonly Dictionary<string, Element> _ids = new(StringComparer.Ordinal);
     private int _clipDepth, _maskDepth, _filterDepth, _patternDepth;
@@ -132,6 +142,8 @@ internal sealed partial class SvgImage
     private float _diagonal; // the root viewport's normalised diagonal, which percentage dash lengths refer to
     private Func<string, object?>? _load; // the PdfImage or SvgImage at an image element's href, or null
     private Dictionary<Element, (SvgPathMeasure?, float)>? _textPaths; // the paths text is laid along, measured
+    private int _wrapDepth; // groups, clips, masks and filters around the element being drawn
+    private float _wrapOpacity = 1; // the opacity of the translucent groups around it
 
     /// <summary>
     /// Builds the drawing of an svg element. <paramref name="load"/> resolves the href of image elements to a PdfImage
@@ -172,6 +184,48 @@ internal sealed partial class SvgImage
         foreach (var child in svg.Children)
             if (child is Element e) img.Render(e, Matrix.Identity, 1, 0);
         return img;
+    }
+
+    /// <summary>
+    /// How user space maps to a box of <paramref name="w"/> × <paramref name="h"/> points: a point (x, y) goes to
+    /// (tx + (x - vx) · sx, ty + (y - vy) · sy) from the box's top-left corner, y down. The viewBox is fitted by
+    /// preserveAspectRatio; without one, user units are CSS pixels, or with <paramref name="stretch"/> each natural
+    /// dimension the file gives maps to the box.
+    /// </summary>
+    public void UserSpaceToBox(float w, float h, bool stretch, out float sx, out float sy, out float tx, out float ty, out float vx, out float vy)
+    {
+        tx = ty = vx = vy = 0;
+        if (HasViewBox)
+        {
+            vx = ViewBoxX;
+            vy = ViewBoxY;
+            sx = w / ViewBoxWidth;
+            sy = h / ViewBoxHeight;
+            if (Align != "none")
+            {
+                float scale = Slice ? Math.Max(sx, sy) : Math.Min(sx, sy);
+                sx = sy = scale;
+                float extraX = w - ViewBoxWidth * scale, extraY = h - ViewBoxHeight * scale;
+                var a = Align;
+                tx = a.StartsWith("xmid", StringComparison.Ordinal) ? extraX / 2 : a.StartsWith("xmax", StringComparison.Ordinal) ? extraX : 0;
+                ty = a.EndsWith("ymid", StringComparison.Ordinal) ? extraY / 2 : a.EndsWith("ymax", StringComparison.Ordinal) ? extraY : 0;
+            }
+        }
+        else
+        {
+            // User units are CSS pixels. Stretched, each natural dimension (in points) the file gives maps to the box.
+            sx = stretch && Width is > 0 and float nw ? 0.75f * w / nw : 0.75f;
+            sy = stretch && Height is > 0 and float nh ? 0.75f * h / nh : 0.75f;
+        }
+    }
+
+    /// <summary>A copy of the drawing with shapes <paramref name="start"/> to <paramref name="end"/> only.</summary>
+    public SvgImage Part(int start, int end)
+    {
+        var c = (SvgImage)MemberwiseClone();
+        c.Shapes = Shapes.GetRange(start, end - start);
+        c.ForeignObjects = null;
+        return c;
     }
 
     /// <summary>A copy of the drawing with every colour mapped, for an HTML filter's colour functions.</summary>
@@ -302,12 +356,18 @@ internal sealed partial class SvgImage
         if (filter != null) _filterDepth++;
         if (clip != null) _clipDepth++;
         if (mask != null) _maskDepth++;
+        bool wraps = group || filter != null || clip != null || mask != null;
+        float wrapOpacity = _wrapOpacity;
+        if (wraps) _wrapDepth++;
+        if (group) _wrapOpacity *= s.Opacity;
         try { RenderElement(e, s, ctm, op, depth); }
         finally
         {
             if (filter != null) _filterDepth--;
             if (clip != null) _clipDepth--;
             if (mask != null) _maskDepth--;
+            if (wraps) _wrapDepth--;
+            _wrapOpacity = wrapOpacity;
         }
         if (Shapes.Count == start) return;
         if (group) WrapInGroup(start, s.Opacity);
@@ -406,6 +466,15 @@ internal sealed partial class SvgImage
             case "image":
                 RenderImage(e, s, ctm, op);
                 return;
+            case "foreignobject":
+            {
+                float w = Num(e, "width"), h = Num(e, "height");
+                if (!(w > 0 && h > 0)) return;
+                ForeignObjects ??= new List<SvgForeignObject>();
+                ForeignObjects.Add(new SvgForeignObject(e, ctm, Num(e, "x"), Num(e, "y"), w, h, op * _wrapOpacity,
+                    _wrapDepth == 0 ? Shapes.Count : -1));
+                return;
+            }
             case "line":
             {
                 var line = ShapePath(e);

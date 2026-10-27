@@ -75,6 +75,19 @@ public class TableWidthTests
     }
 
     [Fact]
+    public void PercentagesUnderAHundredStillFillATableWithAWidth()
+    {
+        // As in Chrome, 20% + 40% in a table with a width become a third and two thirds: the columns share what their
+        // percentages leave in proportion to them, instead of leaving the table narrower than its width.
+        var ops = Layout("<style>body{margin:0} td{padding:0}</style><table style='width:100%;border-spacing:0'><tr>" +
+                         "<td style='width:20%;background:#f00'>one</td><td style='width:40%;background:#00f'>two</td></tr></table>");
+        var one = Rect(ops, 0xFFFF0000);
+        var two = Rect(ops, 0xFF0000FF);
+        Assert.Equal(Width / 3, one.W, 1);
+        Assert.Equal(Width, two.X + two.W, 1);
+    }
+
+    [Fact]
     public void PercentageColumnsMakeRoomForTheOthersContent()
     {
         // As in Chrome, 60% + 40% + 20% with text in the last column: the percentage columns shrink, in proportion, to

@@ -17,29 +17,7 @@ internal sealed partial class PdfDocumentWriter
     private void WriteSvg(ByteBuffer b, SvgImage img, float left, float top, float w, float h, bool stretch = false)
     {
         if (img.Shapes.Count == 0 || w <= 0 || h <= 0) return;
-        float sx, sy, tx = 0, ty = 0, vx = 0, vy = 0;
-        if (img.HasViewBox)
-        {
-            vx = img.ViewBoxX;
-            vy = img.ViewBoxY;
-            sx = w / img.ViewBoxWidth;
-            sy = h / img.ViewBoxHeight;
-            if (img.Align != "none")
-            {
-                float scale = img.Slice ? Math.Max(sx, sy) : Math.Min(sx, sy);
-                sx = sy = scale;
-                float extraX = w - img.ViewBoxWidth * scale, extraY = h - img.ViewBoxHeight * scale;
-                var a = img.Align;
-                tx = a.StartsWith("xmid", StringComparison.Ordinal) ? extraX / 2 : a.StartsWith("xmax", StringComparison.Ordinal) ? extraX : 0;
-                ty = a.EndsWith("ymid", StringComparison.Ordinal) ? extraY / 2 : a.EndsWith("ymax", StringComparison.Ordinal) ? extraY : 0;
-            }
-        }
-        else
-        {
-            // User units are CSS pixels. Stretched, each natural dimension (in points) the file gives maps to the box.
-            sx = stretch && img.Width is > 0 and float nw ? 0.75f * w / nw : 0.75f;
-            sy = stretch && img.Height is > 0 and float nh ? 0.75f * h / nh : 0.75f;
-        }
+        img.UserSpaceToBox(w, h, stretch, out float sx, out float sy, out float tx, out float ty, out float vx, out float vy);
 
         var saved = SaveState();
         b.Ascii("q ").Num(left).Sp().Num(top - h).Sp().Num(w).Sp().Num(h).Ascii(" re W n\n");

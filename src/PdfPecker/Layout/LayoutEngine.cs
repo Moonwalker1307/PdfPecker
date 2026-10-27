@@ -1009,7 +1009,9 @@ internal sealed partial class LayoutEngine
             bool failedBefore = !fitsNext && _failedAvoidTrials?.Contains(trial) == true;
             // A box nested in more than six boxes kept whole in columns is tried there only when it fits: each box around
             // it is tried there too, and with each level trying the levels inside it again, the work doubled per level.
-            if (!failedBefore && MayLayOutAgain && (fitsNext || _grid is ColumnGrid && _avoidDepth <= MaxTriedInColumnsNesting))
+            // On pages, as in Chrome, a box taller than the next page still starts there, and breaks where it must.
+            bool paged = _grid is not ColumnGrid;
+            if (!failedBefore && MayLayOutAgain && (fitsNext || _avoidDepth <= MaxTriedInColumnsNesting))
             {
                 float oy = y, ox = x, oavailW = availW;
                 int page = PageOf(y);
@@ -1028,7 +1030,7 @@ internal sealed partial class LayoutEngine
                     // Columns taller by this much would have kept the whole box where it started.
                     _columnNotes?.Break(page, oy, oy + (bottom - ny) - FlowEnd(page));
                 }
-                else if (!fitsNext)
+                else if (!fitsNext && !paged)
                 {
                     (_failedAvoidTrials ??= new HashSet<AvoidTrial>()).Add(trial);
                     Truncate(opsStart);
@@ -1094,7 +1096,7 @@ internal sealed partial class LayoutEngine
         var s = e.Style;
         if (image == null && e.Name == "svg")
         {
-            _ops.Add(new SvgOp(cx, cy, imgW, imgH, svg!) { Tag = Tags?.Of(e) });
+            AddSvgDrawing(_ops, svg!, cx, cy, imgW, imgH, Tags?.Of(e));
             return;
         }
         // Rounded corners clip the image to the content box's curve.

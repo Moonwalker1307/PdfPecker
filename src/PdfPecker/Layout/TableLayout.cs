@@ -500,12 +500,13 @@ internal sealed partial class LayoutEngine
         }
         if (autoCount == 0)
         {
-            // As in Chrome, when every column has a percentage, the width they leave over goes to them in proportion
-            // to their percentages (equally when those are all zero), so a 25% and a 75% column fill the table.
+            // As in Chrome, a table with a width whose columns all have percentages adding up to less than 100% still
+            // fills that width: the percentage columns share the rest in proportion to their percentages.
             float pctSum = 0;
             for (int c = 0; c < n; c++) pctSum += m.ColPct[c];
-            if (widthSpecified && remaining > 0 && n > 0)
-                for (int c = 0; c < n; c++) w[c] += pctSum > 0 ? remaining * m.ColPct[c] / pctSum : remaining / n;
+            if (widthSpecified && remaining > 0.01f && pctSum > 0)
+                for (int c = 0; c < n; c++)
+                    w[c] += remaining * m.ColPct[c] / pctSum;
             return w;
         }
 
