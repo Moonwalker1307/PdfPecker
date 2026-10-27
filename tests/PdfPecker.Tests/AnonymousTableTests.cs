@@ -117,6 +117,24 @@ public class AnonymousTableTests
     }
 
     [Fact]
+    public void Tables_in_css_tables_get_a_cell_and_keep_their_size()
+    {
+        // Acid2's smile: an empty display: table among table cells keeps its 1em square, in an anonymous cell. A table
+        // with content in it is a cell's content too, not rows for the outer table.
+        var ops = Layout(@"<style>ul { display: table; margin: 0; padding: 0; background: red }
+            li { margin: 0; padding: 0; list-style: none } .cell { display: table-cell; width: 12px; height: 12px; background: black }
+            .table { display: table; width: 12px; height: 12px; background: blue }
+            .outer { display: table; background: red } .inner { display: table; width: 30px; background: green }</style>
+            <ul><li class=cell></li><li class=table></li><li class=cell></li></ul>
+            <div class=outer><div class=inner>x</div></div>");
+        var blue = Rect(ops, 0xFF0000FFu);
+        Assert.Equal(9, blue.W, 0.01f);
+        Assert.Equal(9, blue.H, 0.01f);
+        Assert.Equal(9, blue.X - Rect(ops, 0xFF000000u).X, 0.01f);
+        Assert.Equal(22.5f, Fill(ops, 0xFF008000u).W, 0.01f);
+    }
+
+    [Fact]
     public void AnonymousBoxesSurviveAnotherStylePass()
     {
         var ops = Layout("<style>body{margin:0} .c{display:table-cell}</style><div style='display:table'>t1<div class=c>c1</div></div>" +

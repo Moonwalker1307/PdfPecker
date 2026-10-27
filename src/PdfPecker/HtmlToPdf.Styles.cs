@@ -132,7 +132,10 @@ public static partial class HtmlToPdf
         if (string.IsNullOrWhiteSpace(href)) return null;
         try
         {
-            var bytes = resolver?.Invoke(href!);
+            // A data URI is the sheet itself, as browsers read it; it needs no resolver or file access.
+            if (href!.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                return Images.ImageLoader.DecodeDataUri(href) is { } data ? System.Text.Encoding.UTF8.GetString(data) : null;
+            var bytes = resolver?.Invoke(href);
             if (bytes != null) return System.Text.Encoding.UTF8.GetString(bytes);
             if (href!.StartsWith("http:", StringComparison.OrdinalIgnoreCase) || href.StartsWith("https:", StringComparison.OrdinalIgnoreCase)) return null;
             var path = LocalFiles.Resolve(href, baseDirectory, allowFiles);
@@ -141,7 +144,7 @@ public static partial class HtmlToPdf
             using var reader = new StreamReader(new MemoryStream(file), System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
             return reader.ReadToEnd();
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or FormatException)
         {
             return null;
         }
