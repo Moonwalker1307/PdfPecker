@@ -28,6 +28,11 @@ internal sealed class BackgroundOp : DrawOp
     public (float X, float Y, float W, float H)? Inner;
     /// <summary>background-blend-mode as a PDF name; null for normal.</summary>
     public string? BlendMode;
+    /// <summary>
+    /// For background-attachment: fixed, the tile on the paper, given the paper's width and height, measured from its
+    /// top-left corner; the Tile and Step fields are unused. Null for a layer that moves with its box.
+    /// </summary>
+    public Func<float, float, BackgroundTile?>? OnPage;
 
     public override void Offset(float dx, float dy)
     {
@@ -38,6 +43,7 @@ internal sealed class BackgroundOp : DrawOp
     /// <summary>The flow rectangle actually painted: the clip, narrowed to the tile's row or column on axes that do not repeat.</summary>
     public (float X0, float Y0, float X1, float Y1) Painted()
     {
+        if (OnPage != null) return (ClipX, ClipY, ClipX + ClipW, ClipY + ClipH); // the tile is placed per page
         float x0 = ClipX, y0 = ClipY, x1 = ClipX + ClipW, y1 = ClipY + ClipH;
         if (!RepeatX) { x0 = Math.Max(x0, TileX); x1 = Math.Min(x1, TileX + TileW); }
         if (!RepeatY) { y0 = Math.Max(y0, TileY); y1 = Math.Min(y1, TileY + TileH); }
@@ -51,3 +57,6 @@ internal sealed class BackgroundOp : DrawOp
         return x1 > x0 && y1 > y0;
     }
 }
+
+/// <summary>A background layer's tile: its place and size, the step between repeats and the axes it repeats along.</summary>
+internal readonly record struct BackgroundTile(float X, float Y, float W, float H, float StepX, float StepY, bool RepeatX, bool RepeatY);

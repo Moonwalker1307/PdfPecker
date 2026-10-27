@@ -10,6 +10,7 @@ internal static class CssSupports
     {
         "display", "color", "background", "background-color", "background-image", "background-repeat", "background-size",
         "background-position", "background-position-x", "background-position-y", "background-origin", "background-clip",
+        "background-attachment",
         "font", "font-family", "font-size", "font-weight", "font-style", "font-variant", "font-variant-ligatures",
         "font-variant-caps", "font-variant-numeric", "font-variant-east-asian", "font-variant-position", "font-kerning", "font-synthesis",
         "font-synthesis-weight", "font-synthesis-style", "font-synthesis-small-caps", "font-synthesis-position", "font-size-adjust", "font-feature-settings", "font-stretch", "font-variation-settings", "font-optical-sizing", "line-height", "text-align", "text-align-last", "text-justify", "text-spacing-trim",

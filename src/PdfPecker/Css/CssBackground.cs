@@ -189,9 +189,10 @@ internal static class CssBackground
         var repeats = new List<string>();
         var origins = new List<string>();
         var clips = new List<string>();
+        var attachments = new List<string>();
         foreach (var layer in CssParser.SplitTopLevel(value, ','))
         {
-            string image = "none";
+            string image = "none", attachment = "scroll";
             var repeat = new List<string>();
             var pos = new List<string>();
             var size = new List<string>();
@@ -211,7 +212,7 @@ internal static class CssBackground
                 else if (lower == "none") image = "none";
                 else if (IsRepeatKeyword(lower)) repeat.Add(lower);
                 else if (IsBoxKeyword(lower)) boxes.Add(lower);
-                else if (lower is "scroll" or "fixed" or "local") { } // background-attachment: paged media has no scrolling
+                else if (lower is "scroll" or "fixed" or "local") attachment = lower;
                 else if (IsPositionKeyword(lower) || char.IsDigit(lower[0]) || lower[0] is '.' or '-' or '+') pos.Add(lower);
                 else if (CssColor.TryParse(tok, CssColor.Black, out _)) color = tok;
             }
@@ -221,6 +222,7 @@ internal static class CssBackground
             repeats.Add(repeat.Count > 0 ? string.Join(" ", repeat) : "repeat");
             origins.Add(boxes.Count > 0 ? boxes[0] : "padding-box");
             clips.Add(boxes.Count > 1 ? boxes[1] : boxes.Count == 1 ? boxes[0] : "border-box");
+            attachments.Add(attachment);
         }
         add("background-color", color);
         add("background-image", images.Count > 0 ? string.Join(", ", images) : "none");
@@ -229,6 +231,7 @@ internal static class CssBackground
         add("background-repeat", string.Join(", ", repeats));
         add("background-origin", string.Join(", ", origins));
         add("background-clip", string.Join(", ", clips));
+        add("background-attachment", string.Join(", ", attachments));
     }
 
     /// <summary>Puts spaces around slashes outside functions and strings so "center/cover" splits into tokens.</summary>

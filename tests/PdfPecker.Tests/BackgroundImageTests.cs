@@ -254,6 +254,26 @@ public class BackgroundImageTests
     }
 
     [Fact]
+    public void Fixed_backgrounds_are_placed_on_the_paper_of_every_page()
+    {
+        // As Chrome prints it: 40px 40px from the paper's corner, not the box's, on each page the box reaches.
+        var html = "<style>@page { size: 300pt 200pt; margin: 20pt } body { margin: 0 }</style>"
+                   + $"<div style='height: 480pt; background: yellow url({Square}) no-repeat fixed 40px 40px'></div>"
+                   + $"<div style='margin-left: 100pt; height: 100pt; background: yellow url({Square}) no-repeat fixed'></div>";
+        var pdf = HtmlToPdf.Convert(html, new PdfOptions { Compress = false });
+        AssertStructurallyValid(pdf);
+        for (int page = 0; page < 3; page++)
+        {
+            Color(255, 0, 0, Pixel(pdf, 37, 37, page));
+            Color(255, 255, 0, Pixel(pdf, 25, 25, page));
+            Color(255, 255, 0, Pixel(pdf, 50, 50, page));
+        }
+        // The second box is far from the paper's corner, so its layer does not show.
+        Color(255, 255, 0, Pixel(pdf, 125, 80, 3));
+        Color(255, 255, 255, Pixel(pdf, 10, 10, 3));
+    }
+
+    [Fact]
     public void Repeated_image_is_a_tiling_pattern()
     {
         var html = $"<body style='margin:0'><div style='width:100pt; height:15pt; background: url({Square}) space no-repeat'></div></body>";
