@@ -860,6 +860,8 @@ internal sealed partial class LayoutEngine
                 foreach (var cw in widths) contentW += cw;
             }
         }
+        // A table without columns still has the width it is given, as in Chrome, which paints it at that size.
+        if (n == 0 && specified) contentW = Math.Max(contentW, avail);
         float boxW = contentW + frameL + frameR;
         if (s.MarginLeft.IsAuto && s.MarginRight.IsAuto) ml = Math.Max(0, (availW - boxW) / 2);
         else if (s.MarginLeft.IsAuto) ml = Math.Max(0, availW - boxW - mr);
