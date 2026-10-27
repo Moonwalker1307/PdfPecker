@@ -188,6 +188,7 @@ internal sealed partial class LayoutEngine
             case RectOp r: top = r.Y; break;
             case BorderRectOp b: top = b.Y; break;
             case RoundRectOp rr: top = rr.Y; break;
+            case PathOp path: top = path.Y0; break;
             case BackgroundOp bg: top = bg.ClipY; break;
             case LineOp l: top = Math.Min(l.Y1, l.Y2); break;
             case CircleOp c: top = c.Cy - c.R; break;

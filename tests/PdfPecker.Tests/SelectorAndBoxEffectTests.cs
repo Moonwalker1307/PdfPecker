@@ -372,6 +372,48 @@ public class SelectorAndBoxEffectTests
     }
 
     [Fact]
+    public void Wrapped_inline_outline_is_one_shape_around_all_its_lines()
+    {
+        var ops = Ops("<p style='font:12pt Arial; line-height:1.2'><span style='outline:3pt solid #00f'>Alpha<br>Be<br>Gamma ray</span></p>");
+        var path = Assert.Single(ops.OfType<PathOp>());
+        Assert.Empty(ops.OfType<BorderRectOp>());
+        Assert.Equal(3f, path.StrokeWidth);
+        // The lines touch once grown by the outline, so their union has one edge: in at the short line and out again.
+        var loop = Assert.Single(path.Loops);
+        Assert.Equal(8, loop.Length / 2);
+        Assert.Null(path.Radii);
+    }
+
+    [Fact]
+    public void Wrapped_inline_outline_stays_in_pieces_when_its_lines_are_apart()
+    {
+        var ops = Ops("<p style='font:12pt Arial; line-height:3'><span style='outline:3pt solid #00f; border-radius:4pt'>Alpha<br>Be<br>Gamma ray</span></p>");
+        var paths = ops.OfType<PathOp>().ToList();
+        Assert.Equal(3, paths.Count);
+        Assert.All(paths, p => Assert.Equal(4, Assert.Single(p.Loops).Length / 2));
+        // Rounded like the box, along the middle of the outline.
+        Assert.All(paths, p => Assert.Equal(4f + 1.5f, p.Radii![0][0], 0.01f));
+    }
+
+    [Fact]
+    public void Wrapped_inline_outline_in_a_3d_style_shades_each_edge_by_the_side_it_faces()
+    {
+        var ops = Ops("<p style='font:12pt Arial; line-height:1.2'><span style='outline:6pt inset #4a90d9'>Alpha<br>Be<br>Gamma ray</span></p>");
+        var edges = ops.OfType<PathOp>().ToList();
+        Assert.Equal(8, edges.Count);
+        Assert.All(edges, e => Assert.NotNull(e.Clip));
+        Assert.Equal(2, edges.Select(e => e.Color).Distinct().Count());
+    }
+
+    [Fact]
+    public void Wrapped_inline_dashed_outline_fits_dashes_to_each_edge()
+    {
+        var ops = Ops("<p style='font:12pt Arial; line-height:1.2'><span style='outline:3pt dashed #00f'>Alpha<br>Be<br>Gamma ray</span></p>");
+        Assert.Empty(ops.OfType<PathOp>());
+        Assert.Equal(8, ops.OfType<LineOp>().Count());
+    }
+
+    [Fact]
     public void Text_shadow_paints_a_copy_under_the_text()
     {
         var ops = Ops("<p style='color:#000; text-shadow: 2pt 3pt #f00'>Shadow</p>");

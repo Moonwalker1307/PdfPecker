@@ -200,6 +200,10 @@ internal sealed partial class PdfDocumentWriter
                 EndText(b);
                 WriteRoundRect(b, rr, placed, pageTop);
                 break;
+            case PathOp path:
+                EndText(b);
+                WritePath(b, path, placed, pageTop);
+                break;
             case LayerBlock { Layer.MaskFill: { } maskFill } mb:
                 EndText(b);
                 WriteMaskedFill(b, mb, maskFill, pageTop, imageIds);
@@ -575,9 +579,12 @@ internal sealed partial class PdfDocumentWriter
     /// starts at the end of the top left corner.
     /// </summary>
     private static void RoundedDashPattern(ByteBuffer b, float w, float h, in CornerRadii r, float width, bool dotted)
+        => ClosedDashPattern(b, 2 * (w + h) - (r.TLx + r.TLy + r.TRx + r.TRy + r.BRx + r.BRy + r.BLx + r.BLy)
+            + QuarterArc(r.TLx, r.TLy) + QuarterArc(r.TRx, r.TRy) + QuarterArc(r.BRx, r.BRy) + QuarterArc(r.BLx, r.BLy), width, dotted);
+
+    /// <summary>The dash pattern of <see cref="RoundedDashPattern"/> for a closed path <paramref name="perimeter"/> long.</summary>
+    private static void ClosedDashPattern(ByteBuffer b, float perimeter, float width, bool dotted)
     {
-        float perimeter = 2 * (w + h) - (r.TLx + r.TLy + r.TRx + r.TRy + r.BRx + r.BRy + r.BLx + r.BLy)
-            + QuarterArc(r.TLx, r.TLy) + QuarterArc(r.TRx, r.TRy) + QuarterArc(r.BRx, r.BRy) + QuarterArc(r.BLx, r.BLy);
         bool thick = width >= 2.25f;
         float dash = dotted ? width : width * (thick ? 2 : 3), gap = dotted ? width : width * (thick ? 1 : 2);
         // On a closed path there are as many gaps as dashes; the count is the one that leaves the gap closest to the wanted one.
@@ -587,14 +594,99 @@ internal sealed partial class PdfDocumentWriter
             gap = manyGap <= 0 || MathF.Abs(fewGap - gap) < MathF.Abs(manyGap - gap) ? fewGap : manyGap;
         if (dotted) b.Ascii("1 J [0 ").Num(dash + gap).Ascii("] 0 d\n");
         else b.Ascii("[").Num(dash).Sp().Num(gap).Ascii("] 0 d\n");
+    }
 
-        // Ramanujan's perimeter of an ellipse, a quarter of it.
-        static float QuarterArc(float a, float c)
+    /// <summary>Ramanujan's perimeter of an ellipse with radii a and c, a quarter of it.</summary>
+    private static float QuarterArc(float a, float c)
+    {
+        if (a <= 0 || c <= 0) return 0;
+        float hh = (a - c) * (a - c) / ((a + c) * (a + c));
+        return MathF.PI * (a + c) * (1 + 3 * hh / (10 + MathF.Sqrt(4 - 3 * hh))) / 4;
+    }
+
+    /// <summary>Draws a <see cref="PathOp"/>, limited to the part of it on this page.</summary>
+    private void WritePath(ByteBuffer b, PathOp path, in Placed placed, float pageTop)
+    {
+        var saved = SaveState();
+        b.Ascii("q ");
+        if (placed.Y0 > path.Y0 + 0.01f || placed.Y1 < path.Y1 - 0.01f)
         {
-            if (a <= 0 || c <= 0) return 0;
-            float hh = (a - c) * (a - c) / ((a + c) * (a + c));
-            return MathF.PI * (a + c) * (1 + 3 * hh / (10 + MathF.Sqrt(4 - 3 * hh))) / 4;
+            float grow = path.StrokeWidth + 1;
+            b.Num(PX(path.X0 - grow)).Sp().Num(PY(placed.Y1, pageTop)).Sp().Num(path.X1 - path.X0 + 2 * grow).Sp()
+                .Num(placed.Y1 - placed.Y0).Ascii(" re W n\n");
         }
+        if (path.Clip is { Length: >= 6 } poly)
+        {
+            b.Num(PX(poly[0])).Sp().Num(PY(poly[1], pageTop)).Ascii(" m ");
+            for (int i = 2; i + 1 < poly.Length; i += 2) b.Num(PX(poly[i])).Sp().Num(PY(poly[i + 1], pageTop)).Ascii(" l ");
+            b.Ascii("h W n\n");
+        }
+        float perimeter = 0;
+        for (int l = 0; l < path.Loops.Length; l++) perimeter += LoopPath(b, path.Loops[l], path.Radii?[l], path.Open, pageTop);
+        if (path.StrokeWidth > 0)
+        {
+            SetStroke(b, path.Color);
+            b.Num(path.StrokeWidth).Ascii(" w 0 j ");
+            // One pattern for all the loops, which are drawn as one path; each is about as long as the others.
+            if (path.Style is BorderStyle.Dashed or BorderStyle.Dotted)
+                ClosedDashPattern(b, perimeter / path.Loops.Length, path.StrokeWidth, path.Style == BorderStyle.Dotted);
+            b.Ascii("S Q\n");
+        }
+        else
+        {
+            SetFill(b, path.Color);
+            b.Ascii("f* Q\n");
+        }
+        RestoreState(saved);
+    }
+
+    /// <summary>
+    /// Adds one loop of a <see cref="PathOp"/> to the path, closed unless <paramref name="open"/>, each corner rounded by
+    /// its radius (no more than half of either edge it joins); returns the loop's length.
+    /// </summary>
+    private float LoopPath(ByteBuffer b, float[] loop, float[]? radii, bool open, float pageTop)
+    {
+        const float k = 0.5523f;
+        int n = loop.Length / 2;
+        if (n < (open ? 2 : 3)) return 0;
+        float length = 0;
+        for (int step = 0; step <= n; step++)
+        {
+            int i = step % n, prev = (i + n - 1) % n, next = (i + 1) % n;
+            float px = loop[2 * i], py = loop[2 * i + 1];
+            if (open && (step == 0 || step >= n - 1))
+            {
+                // The ends of an open loop, which have no corner.
+                if (step == n) break;
+                b.Num(PX(px)).Sp().Num(PY(py, pageTop)).Ascii(step == 0 ? " m " : " l ");
+                continue;
+            }
+            float ax = loop[2 * prev] - px, ay = loop[2 * prev + 1] - py, bx = loop[2 * next] - px, by = loop[2 * next + 1] - py;
+            float la = MathF.Sqrt(ax * ax + ay * ay), lb = MathF.Sqrt(bx * bx + by * by);
+            float r = radii == null ? 0 : Math.Min(radii[i], Math.Min(la, lb) / 2);
+            if (!(r > 0) || la <= 0 || lb <= 0)
+            {
+                b.Num(PX(px)).Sp().Num(PY(py, pageTop)).Ascii(step == 0 ? " m " : " l ");
+                if (step < n) length += lb;
+                continue;
+            }
+            // The corner from the point r back along the edge before to the point r on along the edge after.
+            float sx = px + ax / la * r, sy = py + ay / la * r, ex = px + bx / lb * r, ey = py + by / lb * r;
+            if (step == 0)
+            {
+                b.Num(PX(ex)).Sp().Num(PY(ey, pageTop)).Ascii(" m ");
+                if (step < n) length += lb - r;
+                continue;
+            }
+            b.Num(PX(sx)).Sp().Num(PY(sy, pageTop)).Ascii(" l ")
+                .Num(PX(sx + k * (px - sx))).Sp().Num(PY(sy + k * (py - sy), pageTop)).Sp()
+                .Num(PX(ex + k * (px - ex))).Sp().Num(PY(ey + k * (py - ey), pageTop)).Sp()
+                .Num(PX(ex)).Sp().Num(PY(ey, pageTop)).Ascii(" c ");
+            length += MathF.PI * r / 2 - 2 * r;
+            if (step < n) length += lb;
+        }
+        b.Ascii(open ? "\n" : "h\n");
+        return length;
     }
 
     /// <summary>Draws a rounded rectangle, ring or shadow, limited to the part of it on this page.</summary>

@@ -217,6 +217,12 @@ internal sealed partial class PdfDocumentWriter
                 Add(rr.X - grow, rr.Y - grow, rr.W + 2 * grow, rr.H + 2 * grow, ref x0, ref y0, ref x1, ref y1);
                 break;
             }
+            case PathOp path:
+            {
+                float grow = path.StrokeWidth / 2;
+                Add(path.X0 - grow, path.Y0 - grow, path.X1 - path.X0 + 2 * grow, path.Y1 - path.Y0 + 2 * grow, ref x0, ref y0, ref x1, ref y1);
+                break;
+            }
             case BackgroundOp bg:
             {
                 var (bx0, by0, bx1, by1) = bg.Painted();
