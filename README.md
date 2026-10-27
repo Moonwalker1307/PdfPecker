@@ -122,16 +122,17 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
 - **HTML and CSS**: flexbox, grid and subgrid, CSS tables, floats with `shape-outside`, multi-column layout,
   positioning (also the legacy `clip: rect()`, and absolute boxes inside a positioned inline element, such as
   tooltips and badges), transforms, gradients (also `in oklch` and other colour spaces, and as
-  list markers), filters, masks, media and container queries, logical properties, `writing-mode` (with floats, sized
-  boxes and vertical-lr line order), `text-wrap`, `line-clamp` with your own `block-ellipsis`, underlines from the
-  font or below the descenders (`text-underline-position`), drop caps, images and gradients in `::before` and
-  `::after` content, inline SVG (with HTML in `<foreignObject>`) and PNG, JPEG, GIF, WebP, BMP and TIFF images (also
-  chosen by `srcset` and `<picture>`, shown by `<embed>` and `<object>`, and photos turned upright by their EXIF
-  orientation), and CSS-only charts such as Charts.css (column, bar, area, line and pie charts), laid out as Chrome
-  lays them out. Older CSS works too: the `-webkit-` property names Chrome still takes (`-webkit-transform`,
-  `-webkit-flex`, ...), the legacy `display: -webkit-box` and its `-webkit-box-` properties, and the
-  `-webkit-gradient()` and prefixed gradient syntaxes. As in browsers, a length without a unit (`width: 200`) counts
-  as pixels only in a page without a doctype; with `<!DOCTYPE html>` it is ignored.
+  list markers), fixed background images (placed on each page's paper, as Chrome prints them), filters, masks,
+  media and container queries, logical properties, `writing-mode` (with floats, sized boxes and vertical-lr line
+  order), `text-wrap`, `line-clamp` with your own `block-ellipsis`, underlines from the font or below the descenders
+  (`text-underline-position`), drop caps, images and gradients in `::before` and `::after` content, inline SVG (with
+  HTML in `<foreignObject>`) and PNG, JPEG, GIF, WebP, BMP and TIFF images (also chosen by `srcset` and `<picture>`,
+  shown by `<embed>` and `<object>`, and photos turned upright by their EXIF orientation), and CSS-only charts such as
+  Charts.css (column, bar, area, line and pie charts), laid out as Chrome lays them out. Older CSS works too: the
+  `-webkit-` property names Chrome still takes (`-webkit-transform`, `-webkit-flex`, ...), the legacy
+  `display: -webkit-box` and its `-webkit-box-` properties, and the `-webkit-gradient()` and prefixed gradient
+  syntaxes. As in browsers, a length without a unit (`width: 200`) counts as pixels only in a page without a doctype;
+  with `<!DOCTYPE html>` it is ignored.
   [More](https://pdfpecker.net/docs/html-and-css/)
 - **Paged media**: `@page` sizes and margin boxes, running headers and footers (also a first page of its own, and bands
   of their own for named pages), footnotes, tables of contents with page numbers, break control (also table row groups

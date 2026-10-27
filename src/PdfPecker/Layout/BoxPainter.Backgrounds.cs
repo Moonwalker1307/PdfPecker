@@ -79,7 +79,42 @@ internal static partial class BoxPainter
         var (cx, cy, cw, ch) = canvas ?? Within(BoxOf(s, LayerValue(s.BackgroundClips, i, BackgroundBox.BorderBox), x, y, w, h, basis), fragment);
         var (fx, fy, fw, fh) = fragment ?? (x, y, w, h);
         if (cw <= 0 || ch <= 0) return;
-        if (source.Svg != null && !source.SizeSvg(ow, oh)) return;
+        var radiiInside = canvas == null ? InnerRadii(radii, cx - fx, cy - fy, fx + fw - cx - cw, fy + fh - cy - ch) : null;
+        if (LayerValue(s.BackgroundFixed, i, false) && !source.IsGradient)
+        {
+            // background-attachment: fixed positions the layer against the page, as Chrome prints it: against the whole
+            // sheet of paper, the same on every page, and shown only where the box is. The writer knows the paper.
+            var fixedSource = source;
+            group.Ops.Add(new BackgroundOp
+            {
+                ClipX = cx, ClipY = cy, ClipW = cw, ClipH = ch,
+                Image = source.Image,
+                Svg = source.Svg,
+                ClipRadii = radiiInside,
+                OnPage = (paperW, paperH) => Tile(s, i, fixedSource, 0, 0, paperW, paperH),
+            });
+            return;
+        }
+        if (Tile(s, i, source, ox, oy, ow, oh) is not { } tile) return;
+
+        var op = new BackgroundOp
+        {
+            ClipX = cx, ClipY = cy, ClipW = cw, ClipH = ch,
+            TileX = tile.X, TileY = tile.Y, TileW = tile.W, TileH = tile.H,
+            StepX = tile.StepX, StepY = tile.StepY,
+            RepeatX = tile.RepeatX, RepeatY = tile.RepeatY,
+            Image = source.Image,
+            Svg = source.Svg,
+            Gradient = layer.Gradient?.Resolve(tile.W, tile.H, backdrop),
+            ClipRadii = radiiInside,
+        };
+        if (op.PaintsAnything()) group.Ops.Add(op);
+    }
+
+    /// <summary>Sizes, positions and spaces the tile of layer <paramref name="i"/> in the positioning area (ox, oy, ow, oh); null when nothing shows.</summary>
+    private static BackgroundTile? Tile(ComputedStyle s, int i, LayerSource source, float ox, float oy, float ow, float oh)
+    {
+        if (source.Svg != null && !source.SizeSvg(ow, oh)) return null;
 
         var size = LayerValue(s.BackgroundSizes, i, BackgroundSize.Auto);
         var (tw, th) = TileSize(size, source, ow, oh);
@@ -98,7 +133,7 @@ internal static partial class BoxPainter
             if (keepRatio && repeatX != BackgroundRepeat.Round) tw *= nh / th;
             th = nh;
         }
-        if (!(tw >= MinTile && th >= MinTile) || float.IsInfinity(tw) || float.IsInfinity(th)) return;
+        if (!(tw >= MinTile && th >= MinTile) || float.IsInfinity(tw) || float.IsInfinity(th)) return null;
 
         float px = ox + LayerValue(s.BackgroundPositionsX, i, BackgroundOffset.Start).Resolve(ow - tw);
         float py = oy + LayerValue(s.BackgroundPositionsY, i, BackgroundOffset.Start).Resolve(oh - th);
@@ -106,19 +141,7 @@ internal static partial class BoxPainter
         bool rx = repeatX != BackgroundRepeat.NoRepeat, ry = repeatY != BackgroundRepeat.NoRepeat;
         if (repeatX == BackgroundRepeat.Space) SpaceTiles(ox, ow, tw, ref px, ref stepX, ref rx);
         if (repeatY == BackgroundRepeat.Space) SpaceTiles(oy, oh, th, ref py, ref stepY, ref ry);
-
-        var op = new BackgroundOp
-        {
-            ClipX = cx, ClipY = cy, ClipW = cw, ClipH = ch,
-            TileX = px, TileY = py, TileW = tw, TileH = th,
-            StepX = stepX, StepY = stepY,
-            RepeatX = rx, RepeatY = ry,
-            Image = source.Image,
-            Svg = source.Svg,
-            Gradient = layer.Gradient?.Resolve(tw, th, backdrop),
-            ClipRadii = canvas == null ? InnerRadii(radii, cx - fx, cy - fy, fx + fw - cx - cw, fy + fh - cy - ch) : null,
-        };
-        if (op.PaintsAnything()) group.Ops.Add(op);
+        return new BackgroundTile(px, py, tw, th, stepX, stepY, rx, ry);
     }
 
     /// <summary>

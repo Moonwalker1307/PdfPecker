@@ -388,6 +388,7 @@ internal sealed class ComputedStyle
     public BackgroundOffset[]? BackgroundPositionsX, BackgroundPositionsY;
     public BackgroundSize[]? BackgroundSizes;
     public BackgroundBox[]? BackgroundOrigins, BackgroundClips;
+    public bool[]? BackgroundFixed; // background-attachment: fixed per layer; null when every layer scrolls
     public string? SvgClipPath;                 // clip-path: url(#id), as "#id"
     public string? SvgMask, SvgFilter;          // mask and filter: url(#id), as "#id"
     public bool SvgMaskAlpha;                   // mask-type: alpha (else luminance)
@@ -759,6 +760,7 @@ internal sealed class ComputedStyle
         c.BackgroundPositionsX = c.BackgroundPositionsY = null;
         c.BackgroundSizes = null;
         c.BackgroundOrigins = c.BackgroundClips = null;
+        c.BackgroundFixed = null;
         c.SvgClipPath = null;
         c.SvgMask = c.SvgFilter = null;
         c.SvgMaskAlpha = false;

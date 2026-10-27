@@ -256,6 +256,7 @@ internal sealed partial class StyleResolver
             case "background-position-y": ApplyBackgroundPositionY(s, parent, in d); break;
             case "background-origin": ApplyBackgroundOrigin(s, parent, in d); break;
             case "background-clip": ApplyBackgroundClip(s, parent, in d); break;
+            case "background-attachment": ApplyBackgroundAttachment(s, parent, in d); break;
             case "border-top-width": s.BorderTopWidth = BorderWidth(d.Lower, d.Em, s.BorderTopWidth); break;
             case "border-right-width": s.BorderRightWidth = BorderWidth(d.Lower, d.Em, s.BorderRightWidth); break;
             case "border-bottom-width": s.BorderBottomWidth = BorderWidth(d.Lower, d.Em, s.BorderBottomWidth); break;

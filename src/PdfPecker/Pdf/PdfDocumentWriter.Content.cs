@@ -744,6 +744,18 @@ internal sealed partial class PdfDocumentWriter
     /// <summary>Draws one background layer: a single clipped tile, or a tiling pattern filling the painted area.</summary>
     private void WriteBackground(ByteBuffer b, BackgroundOp bg, in Placed placed, float pageTop, Dictionary<PdfImage, int> imageIds)
     {
+        if (bg.OnPage is { } onPage)
+        {
+            // background-attachment: fixed: the tile's place on the paper, the same on every page, moved into this
+            // page's flow coordinates.
+            if (onPage(_page.Width, _page.Height) is not { } tile) return;
+            (bg.TileX, bg.TileY, bg.TileW, bg.TileH) = (tile.X - _page.MarginLeft, pageTop + tile.Y - _yOrigin, tile.W, tile.H);
+            (bg.StepX, bg.StepY, bg.RepeatX, bg.RepeatY) = (tile.StepX, tile.StepY, tile.RepeatX, tile.RepeatY);
+            bg.OnPage = null;
+            try { WriteBackground(b, bg, placed, pageTop, imageIds); }
+            finally { bg.OnPage = onPage; }
+            return;
+        }
         var (x0, y0, x1, y1) = bg.Painted();
         y0 = Math.Max(y0, placed.Y0);
         y1 = Math.Min(y1, placed.Y1);

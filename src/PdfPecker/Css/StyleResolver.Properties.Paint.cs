@@ -63,6 +63,15 @@ internal sealed partial class StyleResolver
     private static void ApplyBackgroundClip(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
         => s.BackgroundClips = d.Inherit ? parent.BackgroundClips : BackgroundList(d.Value, l => CssBackground.Box(l.Trim().ToLowerInvariant())) ?? s.BackgroundClips;
 
+    /// <summary>background-attachment: scroll and local are the same on paper; fixed places the layer on the page.</summary>
+    private static void ApplyBackgroundAttachment(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit) { s.BackgroundFixed = parent.BackgroundFixed; return; }
+        if (d.Lower is "initial" or "unset") { s.BackgroundFixed = null; return; }
+        var layers = BackgroundList(d.Lower, l => l.Trim() switch { "fixed" => true, "scroll" or "local" => false, _ => (bool?)null });
+        if (layers != null) s.BackgroundFixed = Array.IndexOf(layers, true) >= 0 ? layers : null;
+    }
+
     private void ApplyBorderImageSource(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
         if (d.Inherit) s.BorderImageSource = parent.BorderImageSource;
