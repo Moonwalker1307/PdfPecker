@@ -408,4 +408,18 @@ public class PagedMediaTests
         Assert.Equal(new[] { "Before", "A", "B" }, pages[0]);
         Assert.Equal(new[] { "C", "D", "After" }, pages[1]);
     }
+
+    [Fact]
+    public void A_box_kept_whole_but_taller_than_a_page_starts_on_the_next_page()
+    {
+        // As in Chrome, break-inside: avoid still moves the box to a new page when it cannot fit on any, so that it breaks
+        // as few times as it must, rather than starting below the paragraph before it.
+        var lines = string.Concat(Enumerable.Range(1, 30).Select(i => $"<div>Line {i}</div>"));
+        var html = "<style>@page { size: 300pt 300pt; margin: 0 } body { margin: 0; font: 10pt/14pt sans-serif }</style>"
+                   + $"<p>Before</p><div style='break-inside: avoid'>{lines}</div>";
+        var pages = PdfText.ExtractPages(HtmlToPdf.Convert(html)).Select(p => p.Lines.Select(l => l.Text).ToArray()).ToArray();
+        Assert.Equal(new[] { "Before" }, pages[0]);
+        Assert.Equal("Line 1", pages[1][0]);
+        Assert.Equal(3, pages.Length);
+    }
 }
