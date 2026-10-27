@@ -304,6 +304,12 @@ internal sealed class HtmlParser
                 _pos = end < 0 ? s.Length : end + 3;
                 return;
             }
+            // Only a doctype before the first tag sets the document's mode; one without a doctype stays in quirks mode.
+            if (_html == null && _stack.Count == 1 && string.Compare(s, p + 1, "doctype", 0, 7, StringComparison.OrdinalIgnoreCase) == 0)
+            {
+                int close = s.IndexOf('>', p + 8);
+                if (!Doctype.IsQuirks(s.AsSpan(p + 8, (close < 0 ? s.Length : close) - (p + 8)))) _used |= NamesUsed.StandardsMode;
+            }
             SkipPast('>', p);
             return;
         }
@@ -608,4 +614,6 @@ internal enum NamesUsed : byte
     Title = 4,
     /// <summary>embed or object.</summary>
     Embed = 8,
+    /// <summary>A doctype that puts the document in standards mode rather than quirks mode, such as &lt;!DOCTYPE html&gt;.</summary>
+    StandardsMode = 16,
 }

@@ -214,7 +214,7 @@ public static partial class HtmlToPdf
         private void ResolveStyles()
         {
             _root = InitialStyle(_options.Language);
-            var styles = new StyleResolver(_sheet, _page.ContentWidth, _viewport) { Cancellation = _cancellation, Paged = _paged };
+            var styles = new StyleResolver(_sheet, _page.ContentWidth, _viewport) { Cancellation = _cancellation, Paged = _paged, StandardsMode = (_namesUsed & NamesUsed.StandardsMode) != 0 };
             styles.ResolveTree(_doc, _root);
             _styles = styles;
         }
