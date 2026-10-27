@@ -189,9 +189,12 @@ internal static class CssBackground
         var repeats = new List<string>();
         var origins = new List<string>();
         var clips = new List<string>();
-        foreach (var layer in CssParser.SplitTopLevel(value, ','))
+        var layers = CssParser.SplitTopLevel(value, ',');
+        for (int l = 0; l < layers.Count; l++)
         {
+            var layer = layers[l];
             string image = "none";
+            int imageCount = 0, colorCount = 0;
             var repeat = new List<string>();
             var pos = new List<string>();
             var size = new List<string>();
@@ -207,14 +210,17 @@ internal static class CssBackground
                     continue;
                 }
                 afterSlash = false;
-                if (lower.Contains("gradient(") || lower.StartsWith("url(", StringComparison.Ordinal)) image = tok;
-                else if (lower == "none") image = "none";
+                if (lower.Contains("gradient(") || lower.StartsWith("url(", StringComparison.Ordinal)) { image = tok; imageCount++; }
+                else if (lower == "none") { image = "none"; imageCount++; }
                 else if (IsRepeatKeyword(lower)) repeat.Add(lower);
                 else if (IsBoxKeyword(lower)) boxes.Add(lower);
                 else if (lower is "scroll" or "fixed" or "local") { } // background-attachment: paged media has no scrolling
                 else if (IsPositionKeyword(lower) || char.IsDigit(lower[0]) || lower[0] is '.' or '-' or '+') pos.Add(lower);
-                else if (CssColor.TryParse(tok, CssColor.Black, out _)) color = tok;
+                else if (CssColor.TryParse(tok, CssColor.Black, out _)) { color = tok; colorCount++; }
             }
+            // Two images or colours in a layer, or a colour before the last layer, make the declaration invalid, as
+            // Acid2's "background: red pink" is: it is dropped.
+            if (imageCount > 1 || colorCount > 1 || colorCount > 0 && l < layers.Count - 1) return;
             images.Add(image);
             positions.Add(pos.Count > 0 ? string.Join(" ", pos) : "0% 0%");
             sizes.Add(size.Count > 0 ? string.Join(" ", size) : "auto");
