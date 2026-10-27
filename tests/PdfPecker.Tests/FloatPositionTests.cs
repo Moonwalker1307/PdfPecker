@@ -340,6 +340,17 @@ public class FloatPositionTests
         Assert.Equal(new[] { "FLOWMARK", "FIXEDMARK", "ABOVEMARK" }.Concat(Enumerable.Repeat("FIXEDMARK", PageCount(pdf) - 1)), marks);
     }
 
+    [Fact]
+    public void FixedBoxPaintsInTreeOrderAmongItsPositionedAncestorsLayers()
+    {
+        // As Acid2's eyes cover its fixed bars: an absolute box after the fixed one in their positioned parent is on top.
+        var pdf = ConvertUncompressed("<style>html{overflow:hidden}</style><div style='position:relative'>" +
+                                      "<div style='position:fixed;top:0'>FIXEDMARK</div><div style='position:absolute;top:0'>HIDINGMARK</div></div>" +
+                                      "<div style='height:3000px'></div>");
+        var marks = Regex.Matches(AllContent(pdf), "FIXEDMARK|HIDINGMARK").Select(m => m.Value);
+        Assert.Equal(new[] { "FIXEDMARK", "HIDINGMARK" }.Concat(Enumerable.Repeat("FIXEDMARK", PageCount(pdf) - 1)), marks);
+    }
+
     private static int CountOf(string s, string word)
     {
         int n = 0, i = 0;
