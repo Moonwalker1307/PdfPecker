@@ -125,6 +125,16 @@ public class ImageFormatTests
 
     // ---- raster images in documents ----
 
+    [Fact]
+    public void Percent_encoded_base64_data_uris_load()
+    {
+        // As Acid2 writes its images: '/', '+' and '=' percent-encoded inside the base64.
+        var b64 = Convert.ToBase64String(RgbaPng(16)).Replace("/", "%2F").Replace("+", "%2B").Replace("=", "%3D");
+        Assert.Contains("%", b64);
+        var pdf = Latin1(ConvertUncompressed($"<img src='data:image/png;base64,{b64}'>"));
+        Assert.Contains("/Subtype /Image", pdf);
+    }
+
     [Theory]
     [InlineData("image/webp", "lossy-alpha.webp", true)]
     [InlineData("image/webp", "lossy.webp", false)]

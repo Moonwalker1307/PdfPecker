@@ -77,6 +77,19 @@ public class ImportAndPageSideTests
     }
 
     [Fact]
+    public void Data_uri_stylesheets_load_without_a_resolver()
+    {
+        // As in Acid2, whose preferred sheet is a percent-encoded data URI; a base64 one imports another.
+        var css = System.Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("b { color: #00ff00 }"));
+        var pdf = ConvertUncompressed(
+            "<link rel='appendix stylesheet' href='data:text/css,p%20%7B%20color%3A%20%230000ff%20%7D'>"
+            + "<style>@import url(\"data:text/css;base64," + css + "\");</style>"
+            + "<link rel='stylesheet' href='data:text/css;base64,!!'><p>blue <b>green</b></p>");
+        Assert.Equal("0 0 1", ColorOf(pdf, "blue "));
+        Assert.Equal("0 1 0", ColorOf(pdf, "green"));
+    }
+
+    [Fact]
     public void Imported_rules_come_before_the_rest_of_the_sheet()
     {
         var files = new Dictionary<string, string> { ["a.css"] = "p { color: #ff0000 }" };
