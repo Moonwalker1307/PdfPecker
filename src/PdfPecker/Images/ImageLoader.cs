@@ -102,8 +102,8 @@ internal sealed class ImageLoader
     public PdfPecker.Svg.SvgImage? ParseSvg(byte[] data) => PdfPecker.Svg.SvgImage.FromFile(data, Fonts, SvgBudget, LoadEmbedded);
 
     /// <summary>
-    /// The bytes of a data URI, base64 or percent-encoded; null without a comma. Bad base64 throws
-    /// <see cref="FormatException"/>.
+    /// The bytes of a data URI, base64 (which may be percent-encoded too) or percent-encoded; null without a comma. Bad
+    /// base64 throws <see cref="FormatException"/>.
     /// </summary>
     internal static byte[]? DecodeDataUri(string src)
     {
@@ -112,7 +112,11 @@ internal sealed class ImageLoader
         var meta = src.Substring(5, comma - 5);
         var payload = src.Substring(comma + 1);
         if (meta.EndsWith(";base64", StringComparison.OrdinalIgnoreCase))
+        {
+            // Browsers take percent-encoded base64 too, such as %2F for '/' in Acid2's images.
+            if (payload.Contains('%')) payload = Uri.UnescapeDataString(payload);
             return Convert.FromBase64String(payload.Replace("\n", "").Replace("\r", "").Replace(" ", ""));
+        }
         return System.Text.Encoding.UTF8.GetBytes(Uri.UnescapeDataString(payload));
     }
 
