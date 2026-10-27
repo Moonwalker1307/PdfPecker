@@ -251,11 +251,13 @@ internal sealed partial class PdfDocumentWriter
                 b.Ascii("q ");
                 SetStroke(b, l.Color);
                 b.Num(l.Width).Ascii(" w ");
-                if (l.Solid) b.Ascii("1 J ");
-                else if (l.DashLength > 0) b.Ascii("0 J [").Num(l.DashLength).Sp().Num(l.DashGap).Ascii("] 0 d ");
-                else if (l.Dotted) b.Ascii("1 J [0 ").Num(l.Width * 2).Ascii("] 0 d ");
-                else b.Ascii("[").Num(l.Width * 3).Sp().Num(l.Width * 3).Ascii("] 0 d ");
                 float y1 = l.X1 == l.X2 ? placed.Y0 : l.Y1, y2 = l.X1 == l.X2 ? placed.Y1 : l.Y2;
+                // A vertical line split by a page break goes on with its pattern where the previous page left it.
+                float phase = l.DashPhase + (l.X1 == l.X2 && l.Y1 < l.Y2 ? y1 - l.Y1 : 0);
+                if (l.Solid) b.Ascii("1 J ");
+                else if (l.DashLength > 0) b.Ascii("0 J [").Num(l.DashLength).Sp().Num(l.DashGap).Ascii("] ").Num(phase).Ascii(" d ");
+                else if (l.Dotted) b.Ascii("1 J [0 ").Num(l.DashGap > 0 ? l.DashGap : l.Width * 2).Ascii("] ").Num(phase).Ascii(" d ");
+                else b.Ascii("[").Num(l.Width * 3).Sp().Num(l.Width * 3).Ascii("] 0 d ");
                 b.Num(PX(l.X1)).Sp().Num(PY(y1, pageTop)).Ascii(" m ").Num(PX(l.X2)).Sp().Num(PY(y2, pageTop)).Ascii(" l S Q\n");
                 RestoreState(saved);
                 break;
@@ -567,6 +569,34 @@ internal sealed partial class PdfDocumentWriter
         b.Ascii("h\n");
     }
 
+    /// <summary>
+    /// The dash pattern Chrome strokes a dashed or dotted rounded border with: dashes of two widths with gaps of one
+    /// (three and two below three pixels), or round dots, spread evenly around the whole centre line (x, y, w, h), which
+    /// starts at the end of the top left corner.
+    /// </summary>
+    private static void RoundedDashPattern(ByteBuffer b, float w, float h, in CornerRadii r, float width, bool dotted)
+    {
+        float perimeter = 2 * (w + h) - (r.TLx + r.TLy + r.TRx + r.TRy + r.BRx + r.BRy + r.BLx + r.BLy)
+            + QuarterArc(r.TLx, r.TLy) + QuarterArc(r.TRx, r.TRy) + QuarterArc(r.BRx, r.BRy) + QuarterArc(r.BLx, r.BLy);
+        bool thick = width >= 2.25f;
+        float dash = dotted ? width : width * (thick ? 2 : 3), gap = dotted ? width : width * (thick ? 1 : 2);
+        // On a closed path there are as many gaps as dashes; the count is the one that leaves the gap closest to the wanted one.
+        float fewest = MathF.Max(1, MathF.Floor(perimeter / (dash + gap)));
+        float fewGap = (perimeter - fewest * dash) / fewest, manyGap = (perimeter - (fewest + 1) * dash) / (fewest + 1);
+        if (perimeter > 0 && perimeter / (dash + gap) < 10000)
+            gap = manyGap <= 0 || MathF.Abs(fewGap - gap) < MathF.Abs(manyGap - gap) ? fewGap : manyGap;
+        if (dotted) b.Ascii("1 J [0 ").Num(dash + gap).Ascii("] 0 d\n");
+        else b.Ascii("[").Num(dash).Sp().Num(gap).Ascii("] 0 d\n");
+
+        // Ramanujan's perimeter of an ellipse, a quarter of it.
+        static float QuarterArc(float a, float c)
+        {
+            if (a <= 0 || c <= 0) return 0;
+            float hh = (a - c) * (a - c) / ((a + c) * (a + c));
+            return MathF.PI * (a + c) * (1 + 3 * hh / (10 + MathF.Sqrt(4 - 3 * hh))) / 4;
+        }
+    }
+
     /// <summary>Draws a rounded rectangle, ring or shadow, limited to the part of it on this page.</summary>
     private void WriteRoundRect(ByteBuffer b, RoundRectOp rr, in Placed placed, float pageTop)
     {
@@ -604,10 +634,10 @@ internal sealed partial class PdfDocumentWriter
             float half = rr.StrokeWidth / 2;
             SetStroke(b, rr.Color);
             b.Num(rr.StrokeWidth).Ascii(" w ");
-            if (rr.Style == BorderStyle.Dotted) b.Ascii("1 J [0 ").Num(rr.StrokeWidth * 2).Ascii("] 0 d\n");
-            else if (rr.Style == BorderStyle.Dashed) b.Ascii("[").Num(rr.StrokeWidth * 3).Sp().Num(rr.StrokeWidth * 3).Ascii("] 0 d\n");
-            RoundRectPath(b, x0 + half, y0 + half, x1 - x0 - rr.StrokeWidth, y1 - y0 - rr.StrokeWidth,
-                rr.R.Inset(half, half, half, half) ?? default, pageTop);
+            var centre = rr.R.Inset(half, half, half, half) ?? default;
+            if (rr.Style is BorderStyle.Dashed or BorderStyle.Dotted)
+                RoundedDashPattern(b, x1 - x0 - rr.StrokeWidth, y1 - y0 - rr.StrokeWidth, centre, rr.StrokeWidth, rr.Style == BorderStyle.Dotted);
+            RoundRectPath(b, x0 + half, y0 + half, x1 - x0 - rr.StrokeWidth, y1 - y0 - rr.StrokeWidth, centre, pageTop);
             b.Ascii("S Q\n");
         }
         else

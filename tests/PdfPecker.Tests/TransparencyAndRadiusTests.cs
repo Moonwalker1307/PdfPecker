@@ -380,6 +380,7 @@ public class TransparencyAndRadiusTests
 
         var pdf = Pdf("<div style='height:50pt; border:2pt solid red; border-top-style:dotted; border-radius:12pt'></div>");
         AssertStructurallyValid(pdf);
-        Assert.Contains("1 J [0 3] 0 d", AllContent(pdf)); // 2pt snaps to 2px
+        // Round dots, spread evenly around the whole curve.
+        Assert.Matches(@"1 J \[0 [\d.]+\] 0 d", AllContent(pdf));
     }
 }

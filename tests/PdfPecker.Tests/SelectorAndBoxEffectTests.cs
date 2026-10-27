@@ -299,6 +299,79 @@ public class SelectorAndBoxEffectTests
     }
 
     [Fact]
+    public void Dashed_outline_sides_start_and_end_on_a_dash_like_chrome()
+    {
+        // 6pt (8px) dashes are two widths long with gaps of about one, spread so that each side ends on a dash.
+        var ops = Ops("<div style='margin:20pt; width:75pt; height:30pt; outline: 6pt dashed #00f'></div>");
+        var lines = ops.OfType<LineOp>().ToList();
+        Assert.Equal(4, lines.Count);
+        var top = lines[0];
+        Assert.Equal(12f, top.DashLength, 0.01f);
+        float length = top.X2 - top.X1, dashes = MathF.Round((length + top.DashGap) / (top.DashLength + top.DashGap));
+        Assert.Equal(length, dashes * top.DashLength + (dashes - 1) * top.DashGap, 0.01f);
+        Assert.InRange(top.DashGap, 4.5f, 9f);
+    }
+
+    [Fact]
+    public void Dotted_outline_dots_sit_in_the_corners()
+    {
+        var ops = Ops("<div style='margin:20pt; width:75pt; height:30pt; outline: 6pt dotted #00f'></div>");
+        var top = ops.OfType<LineOp>().First();
+        // From the centre of the first corner's dot to the centre of the last one, a whole number of steps.
+        Assert.Equal(20f - 6 + 3, top.X1, 0.01f);
+        Assert.Equal(20f + 75 + 6 - 3, top.X2, 0.01f);
+        float steps = (top.X2 - top.X1) / top.DashGap;
+        Assert.Equal(MathF.Round(steps), steps, 0.01f);
+    }
+
+    [Fact]
+    public void Translucent_dashed_outline_paints_each_corner_once()
+    {
+        var ops = Ops("<div style='margin:20pt; width:75pt; height:30pt; outline: 6pt dashed rgba(0,0,255,.5)'></div>");
+        var lines = ops.OfType<LineOp>().ToList();
+        var left = Assert.Single(lines, l => l.X1 == l.X2 && l.X1 < 20);
+        // The vertical sides leave the corner squares to the horizontal ones and keep their pattern where it was.
+        Assert.Equal(20f - 6 + 6, left.Y1 - 0, 0.01f);
+        Assert.Equal(6f, left.DashPhase, 0.01f);
+        Assert.All(lines.Where(l => l.Y1 == l.Y2), l => Assert.Equal(0f, l.DashPhase));
+    }
+
+    [Fact]
+    public void Outline_in_a_3d_style_has_mitred_shaded_sides()
+    {
+        var ops = Ops("<div style='width:100pt; height:40pt; outline: 6pt inset #4a90d9'></div>");
+        var sides = ops.OfType<RoundRectOp>().ToList();
+        Assert.Equal(4, sides.Count);
+        Assert.All(sides, s => Assert.NotNull(s.Clip));
+        Assert.Equal(2, sides.Select(s => s.Color).Distinct().Count());
+    }
+
+    [Fact]
+    public void Rounded_outline_in_a_3d_style_keeps_its_shades()
+    {
+        var ops = Ops("<div style='width:100pt; height:40pt; border-radius:12pt; outline: 6pt groove #4a90d9'></div>");
+        var rings = ops.OfType<RoundRectOp>().ToList();
+        Assert.Equal(8, rings.Count); // two halves of each side
+        Assert.True(rings.Select(s => s.Color).Distinct().Count() >= 2);
+    }
+
+    [Fact]
+    public void Outline_style_auto_is_a_thin_focus_ring_whatever_its_width()
+    {
+        foreach (var width in new[] { "1px", "8px" })
+        {
+            var ops = Ops($"<div style='margin:20pt; width:100pt; height:40pt; outline: {width} auto #00f'></div>");
+            var ring = Assert.Single(ops.OfType<RoundRectOp>());
+            // Two pixels wide, centred on the border edge, with rounded corners.
+            Assert.Equal(20f - 0.75f, ring.X, 0.01f);
+            Assert.Equal(20f + 0.75f, ring.HoleX, 0.01f);
+            Assert.Equal(3f, ring.R.TLx, 0.01f);
+        }
+        var solid = Ops("<div style='height:20pt; outline: 8px auto #00f; outline-style: dashed'></div>");
+        Assert.Equal(4, solid.OfType<LineOp>().Count());
+    }
+
+    [Fact]
     public void Text_shadow_paints_a_copy_under_the_text()
     {
         var ops = Ops("<p style='color:#000; text-shadow: 2pt 3pt #f00'>Shadow</p>");

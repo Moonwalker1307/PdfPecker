@@ -189,7 +189,7 @@ internal sealed partial class PdfDocumentWriter
                 case LineOp l:
                     sb.Append("|L").Append(Rel(l.X1, x0)).Append(',').Append(Rel(l.Y1, y0)).Append(',').Append(Rel(l.X2, x0)).Append(',')
                         .Append(Rel(l.Y2, y0)).Append(',').Append(Rel(l.Width, 0)).Append(l.Dotted ? 'd' : l.Solid ? 's' : 'a')
-                        .Append(Rel(l.DashLength, 0)).Append(',').Append(Rel(l.DashGap, 0));
+                        .Append(Rel(l.DashLength, 0)).Append(',').Append(Rel(l.DashGap, 0)).Append(',').Append(Rel(l.DashPhase, 0));
                     break;
                 default:
                     return null;
@@ -231,7 +231,7 @@ internal sealed partial class PdfDocumentWriter
             {
                 // Glyphs can reach past their advance widths and above the em box: pad by part of the font size.
                 float width = t.Font.Measure(t.Text, t.Size) + Math.Abs(t.CharSpacing) * t.Text.Length + Math.Abs(t.WordSpacing) * 8;
-                Add(t.X - t.Size * 0.5f, t.Baseline - t.Size * 1.25f, width + t.Size, t.Size * 1.75f, ref x0, ref y0, ref x1, ref y1);
+                Add(t.X - t.Size * 0.5f, t.Baseline - t.Size * (t.UpsideDown ? 0.5f : 1.25f), width + t.Size, t.Size * 1.75f, ref x0, ref y0, ref x1, ref y1);
                 break;
             }
             case ImageOp im: Add(im.X, im.Y, im.W, im.H, ref x0, ref y0, ref x1, ref y1); break;

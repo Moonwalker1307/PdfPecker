@@ -94,6 +94,11 @@ internal sealed class LineOp : DrawOp
     public bool Solid;
     /// <summary>A dash pattern of its own, with butt caps (text decorations); 0 for the pattern of the dotted flag.</summary>
     public float DashLength, DashGap;
+    /// <summary>
+    /// How far into its pattern the line starts. A dotted line with a <see cref="DashGap"/> but no
+    /// <see cref="DashLength"/> has round dots that far apart (borders).
+    /// </summary>
+    public float DashPhase;
 
     public LineOp(float x1, float y1, float x2, float y2, float width, uint color, bool dotted)
     {
@@ -124,6 +129,11 @@ internal sealed class TextOp : DrawOp
     public uint StrokeColor;
     /// <summary>paint-order: stroke, the fill is drawn over the stroke.</summary>
     public bool StrokeFirst;
+    /// <summary>
+    /// Drawn upside down about its baseline: a copy, for background-clip: text, of text in a line that a vertical-lr box
+    /// flips back.
+    /// </summary>
+    public bool UpsideDown;
 
     public TextOp(float x, float baseline, float lineTop, TextFont font, float size, uint color, string text, float wordSpacing, float charSpacing)
     {
