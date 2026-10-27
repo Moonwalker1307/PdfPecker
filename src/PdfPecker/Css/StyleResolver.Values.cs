@@ -339,6 +339,13 @@ internal sealed partial class StyleResolver
             url = null;
             return;
         }
+        // context-fill and context-stroke are kept as the url of a paint the drawing resolves (SvgImage.ContextFill).
+        if (t.Equals("context-fill", StringComparison.OrdinalIgnoreCase) || t.Equals("context-stroke", StringComparison.OrdinalIgnoreCase))
+        {
+            color = null;
+            url = t.ToLowerInvariant();
+            return;
+        }
         if (t.StartsWith("url(", StringComparison.OrdinalIgnoreCase))
         {
             int close = t.IndexOf(')');

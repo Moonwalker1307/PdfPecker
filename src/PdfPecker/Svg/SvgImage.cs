@@ -132,6 +132,18 @@ internal sealed partial class SvgImage
     private float _diagonal; // the root viewport's normalised diagonal, which percentage dash lengths refer to
     private Func<string, object?>? _load; // the PdfImage or SvgImage at an image element's href, or null
     private Dictionary<Element, (SvgPathMeasure?, float)>? _textPaths; // the paths text is laid along, measured
+    private ContextPaint? _contextFill, _contextStroke; // what context-fill and context-stroke paint with, or null for none
+    private (float Width, float Height)? _useSize; // the width and height of a use element drawing a nested svg
+
+    /// <summary>The url that stands for context-fill and context-stroke in a computed style.</summary>
+    public const string ContextFill = "context-fill", ContextStroke = "context-stroke";
+
+    /// <summary>
+    /// The fill or stroke of a context element (a use element, or the shape a marker is on), which context-fill and
+    /// context-stroke inside it paint with: a gradient or pattern is laid over the context element's bounds, in its
+    /// user space.
+    /// </summary>
+    private sealed record ContextPaint(uint? Color, string? Url, float MinX, float MinY, float MaxX, float MaxY, Matrix Ctm);
 
     /// <summary>
     /// Builds the drawing of an svg element. <paramref name="load"/> resolves the href of image elements to a PdfImage
@@ -364,15 +376,9 @@ internal sealed partial class SvgImage
                 return;
             case "svg":
             {
-                float x = Num(e, "x"), y = Num(e, "y");
-                var inner = Matrix.Translate(x, y).Then(ctm);
-                var vb = ParseNumbers(e.GetAttribute("viewbox"));
-                float w = Num(e, "width", float.NaN), h = Num(e, "height", float.NaN);
-                if (vb.Count == 4 && vb[2] > 0 && vb[3] > 0 && !float.IsNaN(w) && !float.IsNaN(h))
-                {
-                    float sc = Math.Min(w / vb[2], h / vb[3]);
-                    inner = Matrix.Translate(-vb[0], -vb[1]).Then(Matrix.Scale(sc, sc)).Then(inner);
-                }
+                var size = _useSize;
+                _useSize = null;
+                var inner = NestedSvgTransform(e, size).Then(ctm);
                 foreach (var c in e.Children) if (c is Element ce) Render(ce, inner, op, depth + 1);
                 return;
             }
@@ -380,24 +386,42 @@ internal sealed partial class SvgImage
             {
                 var target = Reference(e.GetAttribute("href") ?? e.GetAttribute("xlink:href"));
                 if (target == null) return;
-                var m = Matrix.Translate(Num(e, "x"), Num(e, "y")).Then(ctm);
-                if (target.Name == "symbol")
+                var place = Matrix.Translate(Num(e, "x"), Num(e, "y"));
+                var m = place.Then(ctm);
+                // The use element is the context element of what it draws.
+                var (outerFill, outerStroke) = (_contextFill, _contextStroke);
+                float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
+                // Only a gradient or pattern needs the bounds of what the use element draws.
+                if (IsPaintServer(s.SvgFillUrl) || IsPaintServer(s.SvgStrokeUrl))
                 {
-                    // The symbol's viewBox is fitted into the use element's width and height (100% of the viewport when
-                    // absent, which is taken as the root's viewBox size).
-                    var vb = ParseNumbers(target.GetAttribute("viewbox"));
-                    if (vb.Count == 4 && vb[2] > 0 && vb[3] > 0)
-                    {
-                        float w = Num(e, "width", float.NaN), h = Num(e, "height", float.NaN);
-                        if (float.IsNaN(w)) w = Num(target, "width", ViewportWidth);
-                        if (float.IsNaN(h)) h = Num(target, "height", ViewportHeight);
-                        float sc = Math.Min(w / vb[2], h / vb[3]);
-                        m = Matrix.Translate(-vb[0], -vb[1]).Then(Matrix.Scale(sc, sc))
-                            .Then(Matrix.Translate((w - vb[2] * sc) / 2, (h - vb[3] * sc) / 2)).Then(m);
-                    }
-                    foreach (var c in target.Children) if (c is Element ce) Render(ce, m, op, depth + 1);
+                    if (target.Name == "symbol")
+                        foreach (var c in target.Children)
+                        {
+                            if (c is Element ce) ContentBounds(ce, SymbolTransform(target, e).Then(place), ref minX, ref minY, ref maxX, ref maxY, depth);
+                        }
+                    else ContentBounds(target, place, ref minX, ref minY, ref maxX, ref maxY, depth, e);
                 }
-                else RenderReferenced(target, e, m, op, depth + 1);
+                (_contextFill, _contextStroke) = (Context(s.SvgFill, s.SvgFillUrl, minX, minY, maxX, maxY, ctm),
+                    Context(s.SvgStroke, s.SvgStrokeUrl, minX, minY, maxX, maxY, ctm));
+                try
+                {
+                    if (target.Name == "symbol")
+                    {
+                        m = SymbolTransform(target, e).Then(m);
+                        foreach (var c in target.Children) if (c is Element ce) Render(ce, m, op, depth + 1);
+                    }
+                    else
+                    {
+                        // A use element's width and height replace those of the svg element it draws.
+                        if (target.Name == "svg") _useSize = (Num(e, "width", float.NaN), Num(e, "height", float.NaN));
+                        RenderReferenced(target, e, m, op, depth + 1);
+                    }
+                }
+                finally
+                {
+                    (_contextFill, _contextStroke) = (outerFill, outerStroke);
+                    _useSize = null;
+                }
                 return;
             }
             case "text":
@@ -421,6 +445,110 @@ internal sealed partial class SvgImage
                     if (e.Name is "path" or "polyline" or "polygon") RenderMarkers(s, ctm, op, path, depth);
                 }
                 return;
+        }
+    }
+
+    /// <summary>
+    /// The transform that fits a symbol's viewBox into the width and height of the use element drawing it (100% of the
+    /// viewport when absent, which is taken as the root's viewBox size); none without a viewBox.
+    /// </summary>
+    private Matrix SymbolTransform(Element symbol, Element use)
+    {
+        var vb = ParseNumbers(symbol.GetAttribute("viewbox"));
+        if (vb.Count != 4 || !(vb[2] > 0) || !(vb[3] > 0)) return Matrix.Identity;
+        float w = Num(use, "width", float.NaN), h = Num(use, "height", float.NaN);
+        if (float.IsNaN(w)) w = Num(symbol, "width", ViewportWidth);
+        if (float.IsNaN(h)) h = Num(symbol, "height", ViewportHeight);
+        float sc = Math.Min(w / vb[2], h / vb[3]);
+        return Matrix.Translate(-vb[0], -vb[1]).Then(Matrix.Scale(sc, sc))
+            .Then(Matrix.Translate((w - vb[2] * sc) / 2, (h - vb[3] * sc) / 2));
+    }
+
+    /// <summary>
+    /// The transform a nested svg element's x, y, width, height and viewBox add, with the width and height of a use
+    /// element drawing it in place of its own.
+    /// </summary>
+    private static Matrix NestedSvgTransform(Element svg, (float Width, float Height)? useSize)
+    {
+        var inner = Matrix.Translate(Num(svg, "x"), Num(svg, "y"));
+        var vb = ParseNumbers(svg.GetAttribute("viewbox"));
+        float w = Num(svg, "width", float.NaN), h = Num(svg, "height", float.NaN);
+        if (useSize is { } size)
+        {
+            if (!float.IsNaN(size.Width)) w = size.Width;
+            if (!float.IsNaN(size.Height)) h = size.Height;
+        }
+        if (vb.Count == 4 && vb[2] > 0 && vb[3] > 0 && !float.IsNaN(w) && !float.IsNaN(h))
+        {
+            float sc = Math.Min(w / vb[2], h / vb[3]);
+            inner = Matrix.Translate(-vb[0], -vb[1]).Then(Matrix.Scale(sc, sc)).Then(inner);
+        }
+        return inner;
+    }
+
+    /// <summary>Whether a paint's url refers to a gradient or pattern rather than standing for a context paint.</summary>
+    private static bool IsPaintServer(string? url) => url != null && url != ContextFill && url != ContextStroke;
+
+    /// <summary>
+    /// A context element's paint, with the bounds and user space a gradient or pattern of it is laid over; a paint that
+    /// is itself context-fill or context-stroke is the one of the context element around it.
+    /// </summary>
+    private ContextPaint? Context(uint? color, string? url, float minX, float minY, float maxX, float maxY, Matrix ctm)
+    {
+        if (url == ContextFill) return _contextFill;
+        if (url == ContextStroke) return _contextStroke;
+        if (color == null && url == null) return null;
+        return new ContextPaint(color, url, minX, minY, maxX, maxY, ctm);
+    }
+
+    /// <summary>
+    /// Adds the bounds of what an element draws, its geometry without strokes, in the space <paramref name="m"/> maps
+    /// it to. Text adds nothing.
+    /// </summary>
+    private void ContentBounds(Element e, Matrix m, ref float minX, ref float minY, ref float maxX, ref float maxY, int depth, Element? use = null)
+    {
+        if (--_budget.Remaining < 0 || depth > 32 || e.Style is not { } s || s.Display == Display.None) return;
+        if (e.GetAttribute("transform") is { } tf) m = ParseTransform(tf).Then(m);
+        switch (e.Name)
+        {
+            case "g":
+            case "a":
+            case "switch":
+                foreach (var c in e.Children) if (c is Element ce) ContentBounds(ce, m, ref minX, ref minY, ref maxX, ref maxY, depth + 1);
+                return;
+            case "svg":
+            {
+                var size = use != null ? (Num(use, "width", float.NaN), Num(use, "height", float.NaN)) : ((float, float)?)null;
+                var inner = NestedSvgTransform(e, size).Then(m);
+                foreach (var c in e.Children) if (c is Element ce) ContentBounds(ce, inner, ref minX, ref minY, ref maxX, ref maxY, depth + 1);
+                return;
+            }
+            case "use":
+            {
+                if (Reference(e.GetAttribute("href") ?? e.GetAttribute("xlink:href")) is not { } target) return;
+                var place = Matrix.Translate(Num(e, "x"), Num(e, "y")).Then(m);
+                if (target.Name == "symbol")
+                {
+                    var fitted = SymbolTransform(target, e).Then(place);
+                    foreach (var c in target.Children) if (c is Element ce) ContentBounds(ce, fitted, ref minX, ref minY, ref maxX, ref maxY, depth + 1);
+                }
+                else ContentBounds(target, place, ref minX, ref minY, ref maxX, ref maxY, depth + 1, e);
+                return;
+            }
+            default:
+            {
+                if (ShapePath(e) is not { } path) return;
+                var pts = path.Points;
+                if ((_budget.Remaining -= pts.Count / 2) < 0) return;
+                for (int i = 0; i + 1 < pts.Count; i += 2)
+                {
+                    float x = pts[i], y = pts[i + 1];
+                    m.Apply(ref x, ref y);
+                    minX = Math.Min(minX, x); maxX = Math.Max(maxX, x);
+                    minY = Math.Min(minY, y); maxY = Math.Max(maxY, y);
+                }
+                return;
+            }
         }
     }
 
@@ -552,6 +680,12 @@ internal sealed partial class SvgImage
     {
         gradient = null;
         pattern = null;
+        if (url is ContextFill or ContextStroke)
+        {
+            // The context element's paint, over its bounds in its own user space; none outside a context element.
+            if ((url == ContextFill ? _contextFill : _contextStroke) is not { } context) return null;
+            (color, url, minX, minY, maxX, maxY, ctm) = context;
+        }
         uint? c = color;
         if (Reference(url) is { Name: "pattern" } tile)
         {
