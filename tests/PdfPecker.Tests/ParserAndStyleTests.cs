@@ -36,6 +36,22 @@ public class HtmlParserTests
     }
 
     [Fact]
+    public void A_stray_end_p_makes_an_empty_paragraph()
+    {
+        // Acid2's markup: the table closes the first paragraph, so the </p> after it opens and closes a new one.
+        var doc = Body("<div><p><table><tr><td></td></tr></table></p><p class=bad>x</p></div>");
+        var names = doc.FindFirst("div")!.Children.OfType<Element>().Select(e => e.Name + (e.GetAttribute("class") is { } c ? "." + c : ""));
+        Assert.Equal(new[] { "p", "table", "p", "p.bad" }, names);
+        Assert.Empty(Elements(doc, "p").ElementAt(1).Children);
+        // A </p> inside a cell, a button or an object makes one there and closes nothing outside.
+        var cell = Body("<p>a<table><tr><td>b</p>c</td></tr></table>");
+        Assert.Equal("p", cell.FindFirst("td")!.Children.OfType<Element>().Single().Name);
+        var button = Body("<p>a<button>b</p>c</button>d</p>");
+        Assert.Equal("p", button.FindFirst("button")!.Children.OfType<Element>().Single().Name);
+        Assert.Equal("abcd", Elements(button, "p").First().InnerText());
+    }
+
+    [Fact]
     public void List_items_and_table_cells_close_implicitly()
     {
         var doc = Body("<ul><li>a<li>b</ul><table><tr><td>1<td>2<tr><td>3</table>");
