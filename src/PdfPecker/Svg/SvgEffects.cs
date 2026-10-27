@@ -185,12 +185,22 @@ internal sealed partial class SvgImage
         if (start == null && mid == null && end == null) return;
         var vertices = Vertices(path);
         if (vertices.Count == 0) return;
-        for (int i = 0; i < vertices.Count; i++)
+        // The shape is the context element of its markers: context-fill and context-stroke in them paint with its paint.
+        var (outerFill, outerStroke) = (_contextFill, _contextStroke);
+        var pts = path.Points.ToArray();
+        Bounds(pts, out float minX, out float minY, out float maxX, out float maxY);
+        (_contextFill, _contextStroke) = (Context(s.SvgFill, s.SvgFillUrl, minX, minY, maxX, maxY, ctm),
+            Context(s.SvgStroke, s.SvgStrokeUrl, minX, minY, maxX, maxY, ctm));
+        try
         {
-            var marker = i == 0 ? start : i == vertices.Count - 1 ? end : mid;
-            if (marker != null) RenderMarker(marker, vertices[i], i == 0, s.SvgStrokeWidth, ctm, opacity, depth);
-            if (i == 0 && vertices.Count == 1 && end != null) RenderMarker(end, vertices[0], false, s.SvgStrokeWidth, ctm, opacity, depth);
+            for (int i = 0; i < vertices.Count; i++)
+            {
+                var marker = i == 0 ? start : i == vertices.Count - 1 ? end : mid;
+                if (marker != null) RenderMarker(marker, vertices[i], i == 0, s.SvgStrokeWidth, ctm, opacity, depth);
+                if (i == 0 && vertices.Count == 1 && end != null) RenderMarker(end, vertices[0], false, s.SvgStrokeWidth, ctm, opacity, depth);
+            }
         }
+        finally { (_contextFill, _contextStroke) = (outerFill, outerStroke); }
     }
 
     /// <summary>
