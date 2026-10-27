@@ -124,6 +124,11 @@ internal sealed class TextOp : DrawOp
     public uint StrokeColor;
     /// <summary>paint-order: stroke, the fill is drawn over the stroke.</summary>
     public bool StrokeFirst;
+    /// <summary>
+    /// Drawn upside down about its baseline: a copy, for background-clip: text, of text in a line that a vertical-lr box
+    /// flips back.
+    /// </summary>
+    public bool UpsideDown;
 
     public TextOp(float x, float baseline, float lineTop, TextFont font, float size, uint color, string text, float wordSpacing, float charSpacing)
     {

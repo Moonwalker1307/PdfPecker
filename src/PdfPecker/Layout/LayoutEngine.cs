@@ -2218,7 +2218,9 @@ internal sealed partial class LayoutEngine
     private static void ClipBackgroundToText(GroupOp background, List<DrawOp> ops, int from, int to, float left, float right)
     {
         List<DrawOp>? texts = null;
-        void Collect(DrawOp op)
+        // The line of a vertical-lr box is a layer that flips it upside down about its middle; its copies are flipped
+        // themselves, since the clip takes only text.
+        void Collect(DrawOp op, float flipY)
         {
             if (op is TextOp t)
             {
@@ -2226,12 +2228,19 @@ internal sealed partial class LayoutEngine
                 var copy = (TextOp)t.Copy();
                 copy.Tag = null; // the copies only clip: the text itself is drawn and tagged on its own
                 copy.Color = CssColor.Black; // opaque, also when the text itself is transparent, as it usually is here
+                if (!float.IsNaN(flipY))
+                {
+                    copy.Baseline = 2 * flipY - t.Baseline;
+                    copy.UpsideDown = !t.UpsideDown;
+                }
                 (texts ??= new List<DrawOp>()).Add(copy);
             }
+            else if (op is LayerOp { Transform: { A: 1, B: 0, C: 0, D: -1, E: 0, F: 0 } } flip)
+                foreach (var o in flip.Ops) Collect(o, flip.OriginY);
             else if (op is GroupOp g and not LayerOp { TextClip: true }) // a descendant's own clipping copies
-                foreach (var o in g.Ops) Collect(o);
+                foreach (var o in g.Ops) Collect(o, flipY);
         }
-        for (int i = from; i < to; i++) Collect(ops[i]);
+        for (int i = from; i < to; i++) Collect(ops[i], float.NaN);
         void Fill(GroupOp g)
         {
             foreach (var op in g.Ops)
