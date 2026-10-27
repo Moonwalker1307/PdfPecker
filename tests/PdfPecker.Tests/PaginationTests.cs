@@ -48,6 +48,20 @@ public class PaginationTests
 
     private const string Body = "body{margin:0} p{margin:0; font: 10pt/20pt Helvetica}";
 
+    [Theory]
+    [InlineData("<div style='height:50px;background:blue;margin-bottom:1000px'></div>", 1)]
+    [InlineData("<div style='position:relative;border:10px solid transparent;margin-bottom:1000px'><div style='height:50px'></div></div>", 1)]
+    [InlineData("<style>body { border-bottom: 2px solid red }</style><div style='height:50px;margin-bottom:1000px'></div>", 2)]
+    [InlineData("<div style='height:50px;margin-bottom:300px'></div><div style='height:10px;background:red;margin-bottom:1000px'></div>", 2)]
+    [InlineData("<div style='height:50px'></div><div style='height:1000px'></div>", 5)]
+    public void Bottom_margins_are_truncated_at_page_breaks(string body, int pages)
+    {
+        // As in Chrome: a margin that runs past the end of a page makes no pages of its own; whatever follows it, such
+        // as its parent's border, starts the next page.
+        var html = "<!DOCTYPE html><style>@page { size: 300pt 200pt; margin: 20pt } body { margin: 0 }</style>" + body;
+        Assert.Equal(pages, PageCount(HtmlToPdf.Convert(html)));
+    }
+
     [Fact]
     public void Heading_moves_to_the_next_page_with_its_paragraph()
     {
