@@ -1094,7 +1094,7 @@ internal sealed partial class LayoutEngine
         var s = e.Style;
         if (image == null && e.Name == "svg")
         {
-            _ops.Add(new SvgOp(cx, cy, imgW, imgH, svg!) { Tag = Tags?.Of(e) });
+            AddSvgDrawing(_ops, svg!, cx, cy, imgW, imgH, Tags?.Of(e));
             return;
         }
         // Rounded corners clip the image to the content box's curve.
