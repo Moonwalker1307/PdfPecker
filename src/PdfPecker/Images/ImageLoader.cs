@@ -101,19 +101,25 @@ internal sealed class ImageLoader
     /// <summary>Parses SVG file data (such as a watermark) with the document's fonts; its images may be data URIs.</summary>
     public PdfPecker.Svg.SvgImage? ParseSvg(byte[] data) => PdfPecker.Svg.SvgImage.FromFile(data, Fonts, SvgBudget, LoadEmbedded);
 
+    /// <summary>
+    /// The bytes of a data URI, base64 or percent-encoded; null without a comma. Bad base64 throws
+    /// <see cref="FormatException"/>.
+    /// </summary>
+    internal static byte[]? DecodeDataUri(string src)
+    {
+        int comma = src.IndexOf(',');
+        if (comma < 0) return null;
+        var meta = src.Substring(5, comma - 5);
+        var payload = src.Substring(comma + 1);
+        if (meta.EndsWith(";base64", StringComparison.OrdinalIgnoreCase))
+            return Convert.FromBase64String(payload.Replace("\n", "").Replace("\r", "").Replace(" ", ""));
+        return System.Text.Encoding.UTF8.GetBytes(Uri.UnescapeDataString(payload));
+    }
+
     /// <summary>The bytes of a resource (data URI, user resolver or local file), or null.</summary>
     public byte[]? Fetch(string src)
     {
-        if (src.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
-        {
-            int comma = src.IndexOf(',');
-            if (comma < 0) return null;
-            var meta = src.Substring(5, comma - 5);
-            var payload = src.Substring(comma + 1);
-            if (meta.EndsWith(";base64", StringComparison.OrdinalIgnoreCase))
-                return Convert.FromBase64String(payload.Replace("\n", "").Replace("\r", "").Replace(" ", ""));
-            return System.Text.Encoding.UTF8.GetBytes(Uri.UnescapeDataString(payload));
-        }
+        if (src.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) return DecodeDataUri(src);
 
         // A user resolver gets the first chance at everything else (http, custom schemes, embedded resources).
         if (_resolver != null)
