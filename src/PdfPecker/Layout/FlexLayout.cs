@@ -150,6 +150,7 @@ internal sealed partial class LayoutEngine
     private static bool NeedsRelayoutWhenStretched(BoxItem it)
     {
         if (it.El == null) return false;
+        if (it.IsReplaced) return true; // an image stretched by an explicit stretch alignment scales to its new height
         var s = it.Style;
         return CssColor.IsVisible(s.BackgroundColor) || s.BackgroundImages != null || s.HasBorder || s.BorderImageSource != null || s.IsFlex || s.IsGrid
                || s.Positioned || s.Transform != null || s.HasEffects || s.BoxShadows != null || s.OutlineStyle != BorderStyle.None && s.OutlineWidth > 0
@@ -173,10 +174,14 @@ internal sealed partial class LayoutEngine
         return box.ContentH == content && box.ChildCb is { Uniform: true } cb && cb.First == content;
     }
 
-    private static BoxAlign SelfAlign(BoxItem it, BoxAlign containerValue)
+    /// <summary>
+    /// An item's align-self. normal stretches a flex item, images included (css-align-3 §6.1), but places a grid item
+    /// with a natural ratio, such as an image, at the start (<paramref name="grid"/>).
+    /// </summary>
+    private static BoxAlign SelfAlign(BoxItem it, BoxAlign containerValue, bool grid = false)
     {
         var a = it.Style.AlignSelf == BoxAlign.Auto ? containerValue : it.Style.AlignSelf;
-        if (a is BoxAlign.Normal or BoxAlign.Auto) a = it.IsReplaced ? BoxAlign.Start : BoxAlign.Stretch;
+        if (a is BoxAlign.Normal or BoxAlign.Auto) a = grid && it.IsReplaced ? BoxAlign.Start : BoxAlign.Stretch;
         return a;
     }
 
@@ -648,6 +653,7 @@ internal sealed partial class LayoutEngine
             {
                 stretch[i] = true;
                 outerW[i] = w;
+                if (it.IsReplaced) percentW[i] = StretchedReplacedWidth(it, w, w);
                 continue;
             }
             float borderW;
@@ -819,6 +825,21 @@ internal sealed partial class LayoutEngine
     /// <summary>Measures an item laid out at the given outer width (unpaginated).</summary>
     private Captured Measure(BoxItem it, Element container, float outerW, bool stretch, float? borderW = null)
         => it.El != null ? CaptureBox(it.El, outerW, shrinkToFit: !stretch, borderW, reuse: true) : CaptureRun(it.Run!, container, outerW);
+
+    /// <summary>
+    /// The border-box width of an image or other replaced item stretched across <paramref name="outerW"/> by an explicit
+    /// stretch alignment, as in Chrome: what its margins leave, within its min and max widths. Its height then follows
+    /// from its ratio unless it has one of its own.
+    /// </summary>
+    private static float StretchedReplacedWidth(BoxItem it, float outerW, float basis)
+    {
+        var st = it.Style;
+        float frame = HorizontalFrame(st, basis), boxFrame = st.BorderBox ? frame : 0;
+        float content = outerW - it.Ml - it.Mr - frame;
+        if (!st.MaxWidth.IsAuto) content = Math.Min(content, st.MaxWidth.Resolve(basis) - boxFrame);
+        if (!st.MinWidth.IsAuto) content = Math.Max(content, st.MinWidth.Resolve(basis) - boxFrame);
+        return Math.Max(0, content) + frame;
+    }
 
     /// <summary>The border-box width of a column flex item whose width is a percentage of the container's width <paramref name="w"/>, within its min and max widths.</summary>
     private static float PercentBorderWidth(ComputedStyle s, float w)
