@@ -119,6 +119,9 @@ internal sealed partial class LayoutEngine
     /// </summary>
     private const int MaxMeasuredTableNesting = 16;
 
+    /// <summary>The widest a table's columns grow to fit their percentages, as Chrome caps them.</summary>
+    private const float MaxColumnsWidth = 1_000_000f;
+
     /// <summary>
     /// The keep-with-next probe of the table whose rows are being laid out, until its first content is placed (see
     /// <see cref="CanProbe"/>); null otherwise, and inside the cells, whose tables take a probe of their own.
@@ -432,6 +435,36 @@ internal sealed partial class LayoutEngine
         return w;
     }
 
+    /// <summary>
+    /// The columns' max-content width, as Chrome works it out for a table with percentage columns: wide enough that
+    /// each percentage column gets its max-content width as its percentage of the table, and that the other columns
+    /// get theirs from the percentage left over. Without percentage columns it is the sum of the max-content widths.
+    /// </summary>
+    private static float ColumnsMaxWidth(TableModel m)
+    {
+        float sum = 0, pctMax = 0, nonPct = 0, pctLeft = 100;
+        for (int c = 0; c < m.ColCount; c++)
+        {
+            sum += m.ColMax[c];
+            if (m.ColPct[c] > 0)
+            {
+                pctMax = Math.Max(pctMax, m.ColMax[c] * 100f / m.ColPct[c]);
+                pctLeft -= m.ColPct[c];
+            }
+            else nonPct += m.ColMax[c];
+        }
+        // Columns without a percentage in a table whose percentages add up to 100% make it as wide as it can be.
+        if (nonPct > 0) nonPct = pctLeft > 0.01f ? nonPct * 100f / pctLeft : MaxColumnsWidth;
+        return Math.Min(MaxColumnsWidth, Math.Max(sum, Math.Max(pctMax, nonPct)));
+    }
+
+    private static bool HasPercentColumn(TableModel m)
+    {
+        for (int c = 0; c < m.ColCount; c++)
+            if (m.ColPct[c] >= 0) return true;
+        return false;
+    }
+
     /// <summary>A percentage column's width in <paramref name="basis"/>, never below its min-content width.</summary>
     private static float PercentWidth(TableModel m, int c, float basis) => Math.Max(m.ColMin[c], m.ColPct[c] * basis / 100f);
 
@@ -465,7 +498,16 @@ internal sealed partial class LayoutEngine
             ShrinkPercentColumns(m, w, avail);
             return w;
         }
-        if (autoCount == 0) return w;
+        if (autoCount == 0)
+        {
+            // As in Chrome, when every column has a percentage, the width they leave over goes to them in proportion
+            // to their percentages (equally when those are all zero), so a 25% and a 75% column fill the table.
+            float pctSum = 0;
+            for (int c = 0; c < n; c++) pctSum += m.ColPct[c];
+            if (widthSpecified && remaining > 0 && n > 0)
+                for (int c = 0; c < n; c++) w[c] += pctSum > 0 ? remaining * m.ColPct[c] / pctSum : remaining / n;
+            return w;
+        }
 
         float target = widthSpecified || sumMax > remaining ? remaining : sumMax;
         if (target >= sumMax)
@@ -767,8 +809,16 @@ internal sealed partial class LayoutEngine
         }
         else avail = Math.Min(availW - ml - mr, ratioMax) - frameH - gridSpace;
         if (!s.MaxWidth.IsAuto) avail = Math.Min(avail, s.MaxWidth.Resolve(availW) - frameL - frameR - gridSpace);
+        // As in Chrome, a table of auto width with percentage columns is as wide as their percentages need (when there
+        // is room), and its columns then share that width as they would a specified one.
+        bool fill = specified;
+        if (!specified && HasPercentColumn(m))
+        {
+            avail = Math.Min(avail, ColumnsMaxWidth(m));
+            fill = true;
+        }
 
-        var widths = specified && s.TableLayoutFixed ? FixedColumns(m, avail) : AllocateColumns(m, avail, specified);
+        var widths = specified && s.TableLayoutFixed ? FixedColumns(m, avail) : AllocateColumns(m, avail, fill);
         float contentW = gridSpace;
         foreach (var cw in widths) contentW += cw;
         // As in Chrome, a table is at least as wide as its captions' min-content widths: the columns share the rest.
@@ -1418,12 +1468,8 @@ internal sealed partial class LayoutEngine
             var m = GetTableModel(e);
             float hs = s.BorderCollapse ? 0 : s.BorderSpacingH;
             float mn = (m.ColCount > 0 ? (m.ColCount + 1) * hs : 0) + frame, mx = mn;
-            for (int c = 0; c < m.ColCount; c++)
-            {
-                mn += m.ColMin[c];
-                mx += m.ColPct[c] >= 0 ? m.ColMax[c] : m.ColMax[c];
-            }
-            result = (mn, mx);
+            for (int c = 0; c < m.ColCount; c++) mn += m.ColMin[c];
+            result = (mn, Math.Max(mn, mx + ColumnsMaxWidth(m)));
         }
         else if (e.Control is { Kind: ControlKind.Text })
         {
