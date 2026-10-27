@@ -232,18 +232,26 @@ internal sealed partial class LayoutEngine
         return false;
     }
 
-    private static float CollapseMargins(float a, float b)
+    /// <summary>
+    /// Margins that collapse together: the largest positive one and the most negative one, whose sum is the space they
+    /// take (CSS 2.1 §8.3.1). The two are kept apart because a margin that later joins a positive and a negative one must
+    /// be compared with each: an empty box's 75px margins around a child's -72px take 3px, and a sibling's 60px top
+    /// margin joining them still makes 3px, not 63px.
+    /// </summary>
+    private readonly record struct Collapsed(float Pos, float Neg)
     {
-        if (a >= 0 && b >= 0) return Math.Max(a, b);
-        if (a < 0 && b < 0) return Math.Min(a, b);
-        return a + b;
+        public static Collapsed Of(float margin) => margin >= 0 ? new(margin, 0) : new(0, margin);
+        public Collapsed With(Collapsed other) => new(Math.Max(Pos, other.Pos), Math.Min(Neg, other.Neg));
+        public Collapsed With(float margin) => With(Of(margin));
+        public float Value => Pos + Neg;
     }
 
     /// <summary>Where a block box of a flow started, so that layout can rewind to it (break-after/before: avoid).</summary>
     private struct FlowMark
     {
         public int Index, OpsCount, ListIndex, CurrentListIndex;
-        public float Y, PendingMargin, Top;
+        public float Y, Top;
+        public Collapsed PendingMargin;
         public bool AnyContent;
         public ListMarker? Marker;
         public int FirstPage; // page of the box's first painted content, found when the box starts a keep chain
@@ -265,7 +273,7 @@ internal sealed partial class LayoutEngine
         public List<FlowResume>? Marks; // where a later balancing pass could go on from
         public List<Node>? Run;         // the inline content collected since the last block box
         public bool InColumns;
-        public float PendingMargin;
+        public Collapsed PendingMargin;
         public bool AnyContent;
         public bool AbsorbFirst;        // the parent has taken its first child's top margin as its own
         public bool FirstBlock;
@@ -322,21 +330,21 @@ internal sealed partial class LayoutEngine
             {
                 // Its static position: where its top margin edge would be in the flow.
                 float smt = s.MarginTop.Resolve(f.W);
-                float sy = f.Y + CollapseMargins(f.PendingMargin, smt) - smt;
+                float sy = f.Y + f.PendingMargin.With(smt).Value - smt;
                 QueueAbsolute(e, f.Pages != null ? OnPage(f.Pages, sy).X : f.X, sy);
                 continue;
             }
             if (s.Floated)
             {
-                var (fx, fw) = f.Pages != null ? OnPage(f.Pages, f.Y + f.PendingMargin) : (f.X, f.W);
-                PlaceFloat(MeasureFloat(e, fw), f.Y + f.PendingMargin, fx, fw);
+                var (fx, fw) = f.Pages != null ? OnPage(f.Pages, f.Y + f.PendingMargin.Value) : (f.X, f.W);
+                PlaceFloat(MeasureFloat(e, fw), f.Y + f.PendingMargin.Value, fx, fw);
                 continue;
             }
             if (LayoutFlowBox(ref f, e) == FlowStep.Stop) break;
         }
         _flowTrailing = f.PendingMargin;
         ReturnRun(f.Run);
-        return f.Y + f.PendingMargin;
+        return f.Y + f.PendingMargin.Value;
     }
 
     /// <summary>
@@ -410,14 +418,14 @@ internal sealed partial class LayoutEngine
         int runOps = _ops.Count;
         // The lines' content (inline blocks, percentages) is sized for the page the paragraph starts on; each
         // line then takes the width of its own page.
-        float top = f.InColumns ? f.Y + f.PendingMargin : TruncatedPageMargin(ref f, f.Y + f.PendingMargin);
+        float top = f.InColumns ? f.Y + f.PendingMargin.Value : TruncatedPageMargin(ref f, f.Y + f.PendingMargin.Value);
         var (ix, iw) = f.Pages != null ? OnPage(f.Pages, top) : (f.X, f.W);
         _inlinePageBox = f.Pages;
         f.Y = FlushInline(run, f.Parent, ix, top, iw, !f.AnyContent, out bool produced);
         run.Clear();
         if (produced)
         {
-            f.PendingMargin = 0;
+            f.PendingMargin = default;
             f.AnyContent = true;
             f.AfterForcedBreak = false;
             if (f.HasChain && f.PrevAvoidAfter && KeepTogetherFails(f.Chain, runOps, before, f.ForcedAt))
@@ -466,21 +474,21 @@ internal sealed partial class LayoutEngine
             _currentListIndex = f.ListIndex;
         }
 
-        float top = FlowBoxTop(ref f, e, breakBefore, out float mt, out bool cleared);
+        float top = FlowBoxTop(ref f, e, breakBefore, out var mt, out bool cleared);
         int boxOps = _ops.Count;
         float bottom = LayoutFlowBoxContent(ref f, e, ref top, joins, boxOps, out var passed);
-        float trailing = _boxTrailing;
+        var trailing = _boxTrailing;
         if (joins && KeepTogetherFails(f.Chain, boxOps, top, f.ForcedAt))
         {
             RewindToChain(ref f);
             return FlowStep.Next;
         }
-        float mb = CollapseMargins(s.MarginBottom.Resolve(f.W), trailing);
+        var mb = trailing.With(s.MarginBottom.Resolve(f.W));
         if (bottom - top < Eps && CollapsesThrough(e) && !breakBefore && !breakAfter && !cleared)
         {
             // An empty box: its margins collapse with each other and with those around it. One that clears floats
             // stays below them, so what follows does too: that is how an empty clearfix div ends a row of floats.
-            f.PendingMargin = CollapseMargins(CollapseMargins(f.PendingMargin, mt), mb);
+            f.PendingMargin = f.PendingMargin.With(mt).With(mb);
             return FlowStep.Next;
         }
         f.AnyContent = true;
@@ -489,8 +497,8 @@ internal sealed partial class LayoutEngine
         f.AfterForcedBreak = breakAfter;
         if (breakAfter)
         {
-            f.Y = ForcedBreak(f.Y + f.PendingMargin);
-            f.PendingMargin = 0;
+            f.Y = ForcedBreak(f.Y + f.PendingMargin.Value);
+            f.PendingMargin = default;
         }
 
         mark.Top = top;
@@ -513,15 +521,15 @@ internal sealed partial class LayoutEngine
     /// the floats it clears and on a new page when a break is forced before it. <paramref name="cleared"/> tells
     /// whether clearing floats moved it down.
     /// </summary>
-    private float FlowBoxTop(ref FlowState f, Element e, bool breakBefore, out float mt, out bool cleared)
+    private float FlowBoxTop(ref FlowState f, Element e, bool breakBefore, out Collapsed mt, out bool cleared)
     {
         var s = e.Style;
         // A box's top margin collapses with those of its first children (CSS 2.1 §8.3.1).
         mt = f.AbsorbFirst && f.FirstBlock && !f.AnyContent
-            ? 0
-            : CollapseMargins(s.MarginTop.Resolve(f.W), LeadingMargin(e, f.W));
+            ? default
+            : LeadingMargin(e, f.W).With(s.MarginTop.Resolve(f.W));
         f.FirstBlock = false;
-        float top = f.Y + CollapseMargins(f.PendingMargin, mt);
+        float top = f.Y + f.PendingMargin.With(mt).Value;
         if (f.InColumns) top = TruncatedMargin(f.Y, top);
         else if (!breakBefore) top = TruncatedPageMargin(ref f, top);
         float uncleared = top;
@@ -536,7 +544,7 @@ internal sealed partial class LayoutEngine
             // after a break-after on the box before (CSS Fragmentation 3 §5.2). Content that already ends at the top
             // of a page, after a break-after on the box before, needs no second break.
             float next = ForcedBreak(top);
-            if (next != top) top = next + mt;
+            if (next != top) top = next + mt.Value;
         }
         return top;
     }
@@ -831,8 +839,8 @@ internal sealed partial class LayoutEngine
 
     // Margin collapsing between a box and its children: set by LayoutBlockBoxCore and LayoutFlow for their callers.
     private bool _absorbTop;      // the box being laid out has taken its first child's top margin
-    private float _flowTrailing;  // the bottom margin of the last child of the flow just laid out
-    private float _boxTrailing;   // the bottom margin of its last child that the box just laid out passes on
+    private Collapsed _flowTrailing;  // the bottom margin of the last child of the flow just laid out
+    private Collapsed _boxTrailing;   // the bottom margin of its last child that the box just laid out passes on
 
     /// <summary>
     /// A box in normal flow whose margins can collapse with its children's (not a flex, grid, table or column box, nor a
@@ -862,14 +870,16 @@ internal sealed partial class LayoutEngine
     private static bool CollapsesTop(Element e)
         => IsPlainFlow(e) && !IsRoot(e) && e.Style.BorderTop == 0 && e.Style.PaddingTop.Resolve(0) == 0 && !e.Style.PaddingTop.IsPercent;
 
-    private static bool CollapsesBottom(Element e)
+    private bool CollapsesBottom(Element e)
     {
         var s = e.Style;
+        // A percentage height of a containing block with no definite height behaves as auto (CSS 2.1 §10.5), as Acid2's
+        // empty box with height: 10% does.
         return IsPlainFlow(e) && !IsRoot(e) && s.BorderBottom == 0 && s.PaddingBottom.Resolve(0) == 0 && !s.PaddingBottom.IsPercent
-               && s.Height.IsAuto && (s.MinHeight.IsAuto || s.MinHeight.Value <= 0);
+               && (s.Height.IsAuto || s.Height.Unit == LengthUnit.Percent && HeightBasis(e) == null) && (s.MinHeight.IsAuto || s.MinHeight.Value <= 0);
     }
 
-    private static bool CollapsesThrough(Element e) => CollapsesTop(e) && CollapsesBottom(e);
+    private bool CollapsesThrough(Element e) => CollapsesTop(e) && CollapsesBottom(e);
 
     /// <summary>The first child of a box whose top margin collapses with the box's, or null.</summary>
     private static Element? FirstBlockChild(Element e)
@@ -891,10 +901,10 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>The collapsed top margin of a box's first children, which the box takes as part of its own.</summary>
-    private static float LeadingMargin(Element e, float w)
+    private static Collapsed LeadingMargin(Element e, float w)
     {
         var c = FirstBlockChild(e);
-        return c == null ? 0 : CollapseMargins(c.Style.MarginTop.Resolve(w), LeadingMargin(c, w));
+        return c == null ? default : LeadingMargin(c, w).With(c.Style.MarginTop.Resolve(w));
     }
 
     /// <summary>
@@ -1049,7 +1059,7 @@ internal sealed partial class LayoutEngine
         if (avoidInside && !CrossesPage(y, bottom)) _columnNotes?.Unbreakable(PageOf(y), bottom - y);
         // A box without content of its own, such as an empty one with a height, ends the content around it itself.
         if (float.IsNaN(_lastContentBottom)) _lastContentBottom = bottom - y > Eps ? bottom : lastContent;
-        if (table) _boxTrailing = 0;
+        if (table) _boxTrailing = default;
         if (s.Layered)
         {
             FinishLayered(e, opsStart, availW);
@@ -1215,7 +1225,7 @@ internal sealed partial class LayoutEngine
             StartMarker(e, cx, contentW);
 
         float contentBottom;
-        float trailing = 0;
+        Collapsed trailing = default;
         CbHeights? childCb = null;
         if (isImage || isSvg)
         {
@@ -1271,7 +1281,7 @@ internal sealed partial class LayoutEngine
             if (joinsChildren && CollapsesBottom(e) && !s.IsFlex && !s.IsGrid)
             {
                 trailing = _flowTrailing;
-                contentBottom -= trailing;
+                contentBottom -= trailing.Value;
             }
         }
 
