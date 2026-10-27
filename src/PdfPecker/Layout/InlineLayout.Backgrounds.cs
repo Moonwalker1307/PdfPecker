@@ -186,7 +186,29 @@ internal sealed partial class LayoutEngine
             PaintInlineFragment(f, p);
             p.Before += f.W;
             p.Seen++;
+            if (p.Seen == p.Count && MergesOutline(f.Deco.Style, p)) PaintMergedOutline(fragments, f);
         }
+    }
+
+    /// <summary>Whether a box's outline goes around all its fragments as one shape rather than around each.</summary>
+    private static bool MergesOutline(ComputedStyle s, in FragmentProgress p)
+        => s.OutlineStyle != BorderStyle.None && p.Count is > 1 and <= BoxPainter.MaxMergedOutlineFragments;
+
+    /// <summary>Paints the outline of the box whose last fragment is <paramref name="last"/> around all its visible fragments.</summary>
+    private void PaintMergedOutline(List<InlineFragment> fragments, in InlineFragment last)
+    {
+        var s = last.Deco.Style;
+        if (!s.Visible || _inlinePaintWork >= MaxInlinePaintWork) return;
+        var rects = new List<(float X, float Y, float W, float H)>();
+        CornerRadii? radii = null;
+        foreach (var f in fragments)
+        {
+            if (f.Deco.Element != last.Deco.Element || !(f.W > 0 && f.H > 0)) continue;
+            rects.Add((f.X, f.Y, f.W, f.H));
+            radii ??= BoxPainter.Radii(s, f.W, f.H);
+        }
+        _inlinePaintWork += rects.Count;
+        BoxPainter.PaintMergedOutline(last.Group, s, CollectionsMarshal.AsSpan(rects), radii);
     }
 
     /// <summary>
@@ -225,6 +247,6 @@ internal sealed partial class LayoutEngine
         BoxPainter.PaintFragment(group, s, boxX, f.Y, boxW, f.H, (f.X, f.Y, f.W, f.H), radii, _images, s.InlineFade);
         if (clipsToText) ClipBackgroundToText(group, f.Ops, f.TextFrom, f.TextTo, f.X, f.X + f.W);
         if (s.HasBorder) BoxPainter.PaintFragmentBorders(group, s, boxX, f.Y, boxW, f.H, (f.X, f.Y, f.W, f.H), !(left && right), s.InlineFade);
-        if (s.OutlineStyle != BorderStyle.None) BoxPainter.PaintOutline(group, s, f.X, f.Y, f.W, f.H, radii);
+        if (s.OutlineStyle != BorderStyle.None && !MergesOutline(s, p)) BoxPainter.PaintOutline(group, s, f.X, f.Y, f.W, f.H, radii);
     }
 }

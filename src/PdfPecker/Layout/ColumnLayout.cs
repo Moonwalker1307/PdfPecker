@@ -764,6 +764,9 @@ internal sealed partial class LayoutEngine
             case RoundRectOp rr:
                 ClipToFragments(rr, rr.Y, rr.Y + rr.H, g, into, ref lastK);
                 break;
+            case PathOp path:
+                ClipToFragments(path, path.Y0, path.Y1, g, into, ref lastK);
+                break;
             case BackgroundOp bg:
             {
                 var (_, y0, _, y1) = bg.Painted();

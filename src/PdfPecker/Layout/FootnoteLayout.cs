@@ -541,6 +541,7 @@ internal sealed partial class LayoutEngine
         RectOp r => r.Y,
         BorderRectOp b => b.Y,
         RoundRectOp rr => rr.Y,
+        PathOp path => path.Y0,
         BackgroundOp bg => bg.Painted().Y0,
         LineOp l => Math.Min(l.Y1, l.Y2),
         ImageOp im => im.Y,
