@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using PdfPecker.Css;
 using PdfPecker.Html;
 using PdfPecker.Images;
@@ -325,6 +326,29 @@ public class FloatPositionTests
 
         var pdf = ConvertUncompressed("<div style='position:fixed;top:0'>FIXEDMARK</div><div style='height:3000px'></div>");
         Assert.Equal(PageCount(pdf), CountOf(AllContent(pdf), "FIXEDMARK"));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("html{overflow:hidden}")] // as in Acid2, whose root clip holds the root's layers
+    public void FixedBoxPaintsBelowHigherZIndex(string rootStyle)
+    {
+        // Chrome paints a fixed box by its z-index among the root's layers on every page: over the flow, under z-index 2.
+        var pdf = ConvertUncompressed("<style>" + rootStyle + "</style><div style='position:fixed;top:0'>FIXEDMARK</div>" +
+                                      "<div style='position:relative;z-index:2'>ABOVEMARK</div><p>FLOWMARK</p><div style='height:3000px'></div>");
+        var marks = Regex.Matches(AllContent(pdf), "FIXEDMARK|ABOVEMARK|FLOWMARK").Select(m => m.Value);
+        Assert.Equal(new[] { "FLOWMARK", "FIXEDMARK", "ABOVEMARK" }.Concat(Enumerable.Repeat("FIXEDMARK", PageCount(pdf) - 1)), marks);
+    }
+
+    [Fact]
+    public void FixedBoxPaintsInTreeOrderAmongItsPositionedAncestorsLayers()
+    {
+        // As Acid2's eyes cover its fixed bars: an absolute box after the fixed one in their positioned parent is on top.
+        var pdf = ConvertUncompressed("<style>html{overflow:hidden}</style><div style='position:relative'>" +
+                                      "<div style='position:fixed;top:0'>FIXEDMARK</div><div style='position:absolute;top:0'>HIDINGMARK</div></div>" +
+                                      "<div style='height:3000px'></div>");
+        var marks = Regex.Matches(AllContent(pdf), "FIXEDMARK|HIDINGMARK").Select(m => m.Value);
+        Assert.Equal(new[] { "FIXEDMARK", "HIDINGMARK" }.Concat(Enumerable.Repeat("FIXEDMARK", PageCount(pdf) - 1)), marks);
     }
 
     private static int CountOf(string s, string word)

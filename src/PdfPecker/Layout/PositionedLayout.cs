@@ -429,7 +429,44 @@ internal sealed partial class LayoutEngine
             });
             FixedOps.AddRange(c.Ops);
             LayerOp.SortLayers(FixedOps);
+            // A fixed box paints by its z-index and tree order in its stacking context, as in Chrome: content with a
+            // higher z-index covers it. A marker layer of the same order says where in the flow it goes: among the
+            // layers of its nearest positioned ancestor, which holds its positioned descendants, or else among the
+            // root's, inside the clip of the viewport's overflow when there is one.
+            List<DrawOp> root = _ops;
+            foreach (var op in _ops) if (op is ClipOp { OfViewport: true } viewport) root = viewport.Ops;
+            var layers = new Dictionary<int, LayerOp>();
+            CollectTreeLayers(_ops, layers);
+            var fixedByOrder = new Dictionary<int, Element>();
+            foreach (var (e, _, _) in list) fixedByOrder.TryAdd(TreeOrder(e), e);
+            foreach (var op in c.Ops)
+            {
+                if (op is not LayerOp fixedLayer) continue;
+                var slot = new LayerOp { Order = fixedLayer.Order, TreeOrder = fixedLayer.TreeOrder };
+                slot.Ops.Add(new FixedSlotOp(fixedLayer));
+                var host = root;
+                if (fixedByOrder.TryGetValue(fixedLayer.TreeOrder, out var fixedBox))
+                    for (var a = fixedBox.Parent; a != null; a = a.Parent)
+                        if (a.Style != null && layers.TryGetValue(TreeOrder(a), out var ancestor))
+                        {
+                            host = ancestor.Ops;
+                            break;
+                        }
+                host.Add(slot);
+                _hasLayers = true;
+            }
         }
         if (_hasLayers) LayerOp.SortLayers(_ops);
+    }
+
+    /// <summary>The layers of positioned boxes among the ops, by their tree order.</summary>
+    private static void CollectTreeLayers(List<DrawOp> ops, Dictionary<int, LayerOp> layers)
+    {
+        foreach (var op in ops)
+        {
+            if (op is not GroupOp g) continue;
+            if (g is LayerOp { TreeOrder: >= 0 } layer) layers.TryAdd(layer.TreeOrder, layer);
+            CollectTreeLayers(g.Ops, layers);
+        }
     }
 }

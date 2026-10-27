@@ -26,6 +26,7 @@ internal sealed partial class PdfDocumentWriter
             sectionBase[si + 1] = sectionBase[si] + section.Grid.Start(sectionPages);
         }
         doc.Pages = distributor.Pages;
+        doc.SlottedFixed = distributor.Slotted;
         doc.PageCount = doc.Pages.Count;
         _page = doc.FirstSetup;
         _sections = sections;
@@ -65,7 +66,9 @@ internal sealed partial class PdfDocumentWriter
             if (section.Canvas != null) foreach (var op in section.Canvas(p - _sectionFirst[_pageSection[p]])) Flatten(op, canvas[p]);
             if (pageBands != null) foreach (var op in pageBands(p, pageCount)) Flatten(op, list);
             // position: fixed boxes repeat on every page, as in Chrome's print output.
-            if (fixedOps != null) foreach (var op in fixedOps) Flatten(op, list);
+            if (fixedOps != null)
+                foreach (var op in fixedOps)
+                    if (!doc.SlottedFixed.Contains(op)) Flatten(op, list);
         }
     }
 
@@ -81,11 +84,19 @@ internal sealed partial class PdfDocumentWriter
         private Func<int, float>? _footnoteCut; // the space footnote areas take at the bottom of the pages being distributed
         private int _backdrops;          // boxes with a backdrop-filter given a part on every page they reach
         private int _clipFirst, _clipLast = int.MaxValue; // the pages the clips being distributed show
+        // The root's clip of the viewport's overflow being distributed, whose parts so far are added to the pages
+        // before a fixed box inside it.
+        private (ClipOp? Clip, SortedDictionary<int, List<Placed>>? Parts, int First, int Last) _viewport;
+        // The fixed boxes of the section being distributed, and how many ops each page held before each.
+        private List<(List<Placed> Items, int[] Before)>? _slots;
 
         public PageDistributor(int maxPages) => _maxPages = maxPages;
 
         /// <summary>The ops of each page of the document, by page index.</summary>
         public List<List<Placed>> Pages { get; } = new();
+
+        /// <summary>The fixed boxes drawn among the pages' flow; the others are drawn over it with the page bands.</summary>
+        public HashSet<DrawOp> Slotted { get; } = new();
 
         /// <summary>
         /// Distributes a section's ops, and then its footnotes, over the pages from <paramref name="firstPage"/> on.
@@ -96,6 +107,7 @@ internal sealed partial class PdfDocumentWriter
             _grid = section.Grid;
             _pageOffset = firstPage;
             _footnoteCut = section.FootnoteReserve;
+            _slots = null;
             foreach (var op in section.Ops) Distribute(op, null);
             _footnoteCut = null;
             if (section.FootnoteOps != null) foreach (var op in section.FootnoteOps) Distribute(op, null);
@@ -104,7 +116,58 @@ internal sealed partial class PdfDocumentWriter
             while (Pages.Count > firstPage + contentPages && (Pages[^1].Count == 0 || Placed.AllInk(Pages[^1]))) Pages.RemoveAt(Pages.Count - 1);
             int sectionPages = Math.Max(Pages.Count - firstPage, contentPages);
             while (Pages.Count < firstPage + sectionPages) Pages.Add(new List<Placed>());
+            // Inserted last to first, so that boxes at the same place keep their order.
+            if (_slots != null)
+                for (int k = _slots.Count - 1; k >= 0; k--)
+                {
+                    var (items, before) = _slots[k];
+                    for (int p = 0; p < sectionPages; p++)
+                        Pages[firstPage + p].Insert(p < before.Length ? before[p] : 0, new Placed(new FixedBlock(items), 0, 0));
+                }
             return sectionPages;
+        }
+
+        /// <summary>
+        /// Notes where a fixed box paints: on every page of the section, after what each page holds so far (later pages
+        /// hold nothing yet).
+        /// </summary>
+        private void AddSlot(LayerOp marker)
+        {
+            var box = ((FixedSlotOp)marker.Ops[0]).Fixed;
+            var before = new int[Math.Max(0, Pages.Count - _pageOffset)];
+            for (int p = 0; p < before.Length; p++) before[p] = Pages[_pageOffset + p].Count;
+            var items = new List<Placed>();
+            Flatten(box, items);
+            (_slots ??= new()).Add((items, before));
+            Slotted.Add(box);
+        }
+
+        /// <summary>
+        /// Adds a clip's parts to the pages from <paramref name="first"/> to <paramref name="last"/> it shows, each drawn
+        /// inside the clip, and empties <paramref name="parts"/>.
+        /// </summary>
+        private void AddClipParts(ClipOp clip, SortedDictionary<int, List<Placed>> parts, int first, int last, SortedDictionary<int, List<Placed>>? into)
+        {
+            // Content starting above the clip's first page, such as an image that object-fit: none centres in a
+            // smaller box, shows only through the clip, so it is drawn with the clip on that page.
+            List<Placed>? above = null;
+            foreach (var (p, items) in parts)
+            {
+                if (p < first)
+                {
+                    (above ??= new List<Placed>()).AddRange(items);
+                    continue;
+                }
+                if (p > last) continue;
+                if (p == first && above != null)
+                {
+                    items.InsertRange(0, above);
+                    above = null;
+                }
+                Target(into, p).Add(new Placed(new ClipBlock(clip, items), 0, 0, Placed.AllInk(items)));
+            }
+            if (above != null && first <= last) Target(into, first).Add(new Placed(new ClipBlock(clip, above), 0, 0, Placed.AllInk(above)));
+            parts.Clear();
         }
 
         /// <summary>The page, within the section, that flow position <paramref name="y"/> is on.</summary>
@@ -164,6 +227,14 @@ internal sealed partial class PdfDocumentWriter
                     foreach (var (p, items) in parts) Target(into, p).Add(new Placed(new LayerBlock(layer, items), 0, 0, Placed.AllInk(items)));
                     break;
                 }
+                case LayerOp { Ops: [FixedSlotOp] } marker when into == null || into == _viewport.Parts:
+                {
+                    // The root's clip of the viewport's overflow does not clip a fixed box: it ends before the box and
+                    // starts again after it.
+                    if (into != null) AddClipParts(_viewport.Clip!, into, _viewport.First, _viewport.Last, null);
+                    AddSlot(marker);
+                    break;
+                }
                 case ClipOp clip:
                 {
                     // Content hidden beyond the clip's last page must not add pages of its own.
@@ -172,27 +243,12 @@ internal sealed partial class PdfDocumentWriter
                     int first = clipsY ? PageOf(clip.Y) : 0, last = clipsY ? Math.Max(first, PageOf(clip.Y + clip.H - 0.5f)) : int.MaxValue;
                     var (savedFirst, savedLast) = (_clipFirst, _clipLast);
                     (_clipFirst, _clipLast) = (Math.Max(first, savedFirst), Math.Min(last, savedLast));
+                    var savedViewport = _viewport;
+                    if (clip.OfViewport && into == null) _viewport = (clip, parts, first, last);
                     foreach (var o in clip.Ops) Distribute(o, parts);
+                    _viewport = savedViewport;
                     (_clipFirst, _clipLast) = (savedFirst, savedLast);
-                    // Content starting above the clip's first page, such as an image that object-fit: none centres in a
-                    // smaller box, shows only through the clip, so it is drawn with the clip on that page.
-                    List<Placed>? above = null;
-                    foreach (var (p, items) in parts)
-                    {
-                        if (p < first)
-                        {
-                            (above ??= new List<Placed>()).AddRange(items);
-                            continue;
-                        }
-                        if (p > last) continue;
-                        if (p == first && above != null)
-                        {
-                            items.InsertRange(0, above);
-                            above = null;
-                        }
-                        Target(into, p).Add(new Placed(new ClipBlock(clip, items), 0, 0, Placed.AllInk(items)));
-                    }
-                    if (above != null && first <= last) Target(into, first).Add(new Placed(new ClipBlock(clip, above), 0, 0, Placed.AllInk(above)));
+                    AddClipParts(clip, parts, first, last, into);
                     break;
                 }
                 case FieldOp field:

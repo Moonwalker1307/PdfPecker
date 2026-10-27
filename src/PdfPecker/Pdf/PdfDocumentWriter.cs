@@ -272,6 +272,14 @@ internal sealed partial class PdfDocumentWriter
         public override void Offset(float dx, float dy) => throw new NotSupportedException();
     }
 
+    /// <summary>A position: fixed box, drawn where its z-index puts it among the page's flow, in page area coordinates.</summary>
+    private sealed class FixedBlock : DrawOp
+    {
+        public readonly List<Placed> Items;
+        public FixedBlock(List<Placed> items) => Items = items;
+        public override void Offset(float dx, float dy) => throw new NotSupportedException();
+    }
+
     /// <summary>A form field on one page: its widget's appearance, or, where it cannot be a widget, a drawing of it.</summary>
     private sealed class FieldBlock : DrawOp
     {
@@ -372,6 +380,7 @@ internal sealed partial class PdfDocumentWriter
             }
             else if (p.Op is ClipBlock cb) ForEachLeaf(cb.Items, visit);
             else if (p.Op is FieldBlock fb) ForEachLeaf(fb.Items, visit);
+            else if (p.Op is FixedBlock xb) ForEachLeaf(xb.Items, visit);
             else visit(p);
         }
     }
@@ -487,6 +496,8 @@ internal sealed partial class PdfDocumentWriter
         // The ops of each page: its flowing content, its running headers, footers and fixed boxes, and its canvas.
         public List<List<Placed>> Pages = null!;
         public List<Placed>[] Bands = null!, Canvas = null!;
+        /// <summary>The fixed boxes that the pages' flow draws (see <see cref="FixedBlock"/>), left out of the bands.</summary>
+        public HashSet<DrawOp> SlottedFixed = null!;
         public int PageCount;
         /// <summary>The anchors of all sections, at their y in the document's one flow (see <see cref="_sectionBase"/>).</summary>
         public IReadOnlyDictionary<string, float> Anchors = null!;
