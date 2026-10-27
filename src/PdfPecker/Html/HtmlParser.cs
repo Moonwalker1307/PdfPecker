@@ -304,6 +304,12 @@ internal sealed class HtmlParser
                 _pos = end < 0 ? s.Length : end + 3;
                 return;
             }
+            // Only a doctype before the first tag sets the document's mode; one without a doctype stays in quirks mode.
+            if (_html == null && _stack.Count == 1 && string.Compare(s, p + 1, "doctype", 0, 7, StringComparison.OrdinalIgnoreCase) == 0)
+            {
+                int close = s.IndexOf('>', p + 8);
+                if (!Doctype.IsQuirks(s.AsSpan(p + 8, (close < 0 ? s.Length : close) - (p + 8)))) _used |= NamesUsed.StandardsMode;
+            }
             SkipPast('>', p);
             return;
         }
@@ -550,6 +556,18 @@ internal sealed class HtmlParser
         }
     }
 
+    /// <summary>Whether a &lt;p&gt; is open in button scope, the scope a &lt;/p&gt; looks in (HTML, 13.2.4.2).</summary>
+    private bool ParagraphInButtonScope()
+    {
+        for (int i = _stack.Count - 1; i > 0; i--)
+        {
+            string n = _stack[i].Name;
+            if (n == "p") return true;
+            if (n is "applet" or "caption" or "html" or "table" or "td" or "th" or "marquee" or "object" or "template" or "button") return false;
+        }
+        return false;
+    }
+
     private void CloseElement(string name)
     {
         // Browsers keep adding to the body after </body> and </html>.
@@ -558,6 +576,14 @@ internal sealed class HtmlParser
         {
             // </br> is treated as <br> by browsers.
             Current.AppendChild(new Element("br"));
+            return;
+        }
+        if (name == "p" && !ParagraphInButtonScope())
+        {
+            // A </p> with no paragraph open makes an empty one, as in browsers: Acid2's "p + table + p" counts on it.
+            var empty = new Element("p");
+            if (IsTableContext(Current.Name)) Foster(empty);
+            else Current.AppendChild(empty);
             return;
         }
         for (int i = _stack.Count - 1; i > 0; i--)
@@ -588,4 +614,6 @@ internal enum NamesUsed : byte
     Title = 4,
     /// <summary>embed or object.</summary>
     Embed = 8,
+    /// <summary>A doctype that puts the document in standards mode rather than quirks mode, such as &lt;!DOCTYPE html&gt;.</summary>
+    StandardsMode = 16,
 }

@@ -63,6 +63,12 @@ internal sealed partial class StyleResolver
     /// <summary>True once a declaration with vh, vmin or vmax units has been applied.</summary>
     public bool UsedViewportHeight { get; private set; }
 
+    /// <summary>
+    /// Whether the document has a doctype that puts browsers in standards mode, where author lengths without a unit are
+    /// invalid. Without one, they are read as pixels, as in quirks mode.
+    /// </summary>
+    public bool StandardsMode { get; init; }
+
     /// <summary>Pagination results that generated content uses (target-counter(), string()); shared between passes.</summary>
     public PagedContent Paged { get; init; } = new();
 

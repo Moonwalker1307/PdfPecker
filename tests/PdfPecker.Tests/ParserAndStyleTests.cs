@@ -17,6 +17,22 @@ public class HtmlParserTests
         }
     }
 
+    [Theory]
+    [InlineData("<p>x", false)]
+    [InlineData("<!DOCTYPE html><p>x", true)]
+    [InlineData("\n\n<!doctype HTML><p>x", true)]
+    [InlineData("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\"><p>x", true)]
+    [InlineData("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01 Transitional//EN\"><p>x", false)]
+    [InlineData("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01 Transitional//EN\" \"http://www.w3.org/TR/html4/loose.dtd\"><p>x", true)]
+    [InlineData("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 3.2 Final//EN\"><p>x", false)]
+    [InlineData("<!DOCTYPE svg><p>x", false)]
+    [InlineData("<p>x<!DOCTYPE html>", false)]
+    public void A_doctype_sets_standards_mode_as_in_browsers(string html, bool standards)
+    {
+        HtmlParser.Parse(html, out var used);
+        Assert.Equal(standards, (used & NamesUsed.StandardsMode) != 0);
+    }
+
     [Fact]
     public void Decodes_named_and_numeric_entities()
     {
@@ -33,6 +49,22 @@ public class HtmlParserTests
         Assert.Equal("one", ps[0].InnerText());
         Assert.Equal("two", ps[1].InnerText());
         Assert.Equal("body", doc.FindFirst("div")!.Parent!.Name);
+    }
+
+    [Fact]
+    public void A_stray_end_p_makes_an_empty_paragraph()
+    {
+        // Acid2's markup: the table closes the first paragraph, so the </p> after it opens and closes a new one.
+        var doc = Body("<div><p><table><tr><td></td></tr></table></p><p class=bad>x</p></div>");
+        var names = doc.FindFirst("div")!.Children.OfType<Element>().Select(e => e.Name + (e.GetAttribute("class") is { } c ? "." + c : ""));
+        Assert.Equal(new[] { "p", "table", "p", "p.bad" }, names);
+        Assert.Empty(Elements(doc, "p").ElementAt(1).Children);
+        // A </p> inside a cell, a button or an object makes one there and closes nothing outside.
+        var cell = Body("<p>a<table><tr><td>b</p>c</td></tr></table>");
+        Assert.Equal("p", cell.FindFirst("td")!.Children.OfType<Element>().Single().Name);
+        var button = Body("<p>a<button>b</p>c</button>d</p>");
+        Assert.Equal("p", button.FindFirst("button")!.Children.OfType<Element>().Single().Name);
+        Assert.Equal("abcd", Elements(button, "p").First().InnerText());
     }
 
     [Fact]
@@ -155,6 +187,21 @@ public class StyleTests
             }
             return null;
         }
+    }
+
+    [Theory]
+    [InlineData("<!DOCTYPE html>", 24f)]
+    [InlineData("", 150f)]
+    public void Unitless_lengths_count_as_pixels_only_in_quirks_mode(string doctype, float width)
+    {
+        // Acid2 sets width: 2em and then width: 200, which a page with a doctype must ignore.
+        var doc = HtmlParser.Parse(doctype + "<p id=p>x</p>", out var used);
+        var sheet = new Stylesheet();
+        CssParser.ParseStylesheet("p { width: 2em; width: 200; margin: 0 7 }", sheet);
+        new StyleResolver(sheet) { StandardsMode = (used & NamesUsed.StandardsMode) != 0 }.ResolveTree(doc, new ComputedStyle { Display = Display.Block });
+        var p = ById(doc, "p");
+        Assert.Equal(width, p.Style.Width.Value, 0.01f);
+        Assert.Equal(width == 150f ? 5.25f : 0f, p.Style.MarginLeft.Value, 0.01f);
     }
 
     [Fact]

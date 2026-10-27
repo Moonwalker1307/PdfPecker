@@ -131,11 +131,19 @@ public class WritingModeTests
         var ops = Layout("<style>body{margin:0;font:12pt Helvetica}</style><div style='writing-mode:vertical-lr;height:60pt;"
                          + "border-left:3pt solid #ff0000;border-bottom:1.5pt solid #00ff00'>Text</div>");
         var layer = All(ops).OfType<LayerOp>().Single(l => l.Transform is { B: not 0 });
-        var left = Fill(layer.Ops, 0xFFFF0000);
-        var bottom = Fill(layer.Ops, 0xFF00FF00);
-        Assert.Equal((0f, 3f), (left.Y, left.H));
-        Assert.Equal(1.5f, bottom.W, 3);
-        Assert.True(bottom.X > left.X, $"bottom border at {bottom.X}");
+        // Sides of different colours meet in mitred corners, so each is the border ring cut to its own polygon.
+        var left = All(layer.Ops).OfType<RoundRectOp>().Single(r => r.Color == 0xFFFF0000);
+        var bottom = All(layer.Ops).OfType<RoundRectOp>().Single(r => r.Color == 0xFF00FF00);
+        Assert.Equal((0f, 3f), (left.Y, left.HoleY - left.Y));
+        Assert.Equal(1.5f, bottom.X + bottom.W - bottom.HoleX - bottom.HoleW, 3);
+        Assert.True(MinX(bottom.Clip!) > MinX(left.Clip!), $"bottom border from {MinX(bottom.Clip!)}");
+    }
+
+    private static float MinX(float[] polygon)
+    {
+        float min = float.MaxValue;
+        for (int i = 0; i < polygon.Length; i += 2) min = Math.Min(min, polygon[i]);
+        return min;
     }
 
     [Fact]
