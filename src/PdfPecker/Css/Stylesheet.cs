@@ -20,13 +20,16 @@ internal sealed class Declaration
     // Whether the value has var() and a viewport-height unit: 0 until checked, then 1 for no and 2 for yes. The style
     // resolver asks for every element a declaration applies to, and the answer is kept here so that each declaration of
     // a style sheet is searched once. Conversions running in parallel may both search, and store the same answer.
-    private byte _var, _viewportHeight;
+    private byte _var, _viewportHeight, _unitless;
 
     /// <summary>Whether the value uses var().</summary>
     public bool HasVar => _var != 0 ? _var == 2 : Remember(ref _var, CssParser.HasVar(Value));
 
     /// <summary>Whether the value may depend on the viewport's height: vh, vb, vmin, vmax, or var().</summary>
     public bool HasViewportHeightUnit => _viewportHeight != 0 ? _viewportHeight == 2 : Remember(ref _viewportHeight, ViewportHeightUnit(Value));
+
+    /// <summary>Whether the value gives a length property a number without a unit, which only quirks mode accepts.</summary>
+    public bool HasUnitlessLength => _unitless != 0 ? _unitless == 2 : Remember(ref _unitless, CssUnits.HasUnitlessLength(Property, Value));
 
     private static bool Remember(ref byte answer, bool value)
     {

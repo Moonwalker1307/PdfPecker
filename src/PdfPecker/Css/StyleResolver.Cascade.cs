@@ -360,6 +360,8 @@ internal sealed partial class StyleResolver
 
     private void Push(long tier, int specificity, int order, int declIndex, Declaration d, int layer = 0)
     {
+        // In standards mode a unitless length is invalid, so an earlier declaration of the property wins, as Acid2 tests.
+        if (StandardsMode && tier >= TierAuthor && d.HasUnitlessLength) return;
         if (_count == _keys.Length)
         {
             Array.Resize(ref _keys, _count * 2);

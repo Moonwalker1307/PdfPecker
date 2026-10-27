@@ -27,6 +27,30 @@ internal static class CssUnits
             || unit.Equals("lh", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Whether the declaration gives a length property a number without a unit, such as <c>width: 200</c>. Browsers
+    /// read that as pixels only in quirks mode; in standards mode the declaration is invalid and dropped.
+    /// </summary>
+    public static bool HasUnitlessLength(string property, string value)
+    {
+        if (!IsLengthProperty(property) || value.AsSpan().IndexOfAnyInRange('1', '9') < 0) return false;
+        foreach (var token in CssParser.Tokens(value))
+        {
+            if (token[0] is not ((>= '0' and <= '9') or '.' or '+' or '-')) continue;
+            if (float.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out float n) && n != 0) return true;
+        }
+        return false;
+    }
+
+    // The properties that take only lengths (and keywords), where quirks mode reads a bare number as pixels.
+    private static bool IsLengthProperty(string p)
+        => p is "width" or "height" or "min-width" or "min-height" or "max-width" or "max-height" or "inline-size" or "block-size"
+               or "min-inline-size" or "min-block-size" or "max-inline-size" or "max-block-size" or "top" or "right" or "bottom" or "left"
+               or "font-size" or "text-indent" or "letter-spacing" or "word-spacing" or "outline-width" or "outline-offset"
+           || p.StartsWith("margin-", StringComparison.Ordinal) || p.StartsWith("padding-", StringComparison.Ordinal)
+           || p.StartsWith("inset-", StringComparison.Ordinal)
+           || (p.StartsWith("border-", StringComparison.Ordinal) && p.EndsWith("-width", StringComparison.Ordinal));
+
     /// <summary>Whether a value has a number with a metric unit outside strings and url().</summary>
     public static bool HasMetricUnit(string value)
     {
