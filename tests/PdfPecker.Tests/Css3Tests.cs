@@ -260,6 +260,32 @@ public class Css3Tests
     }
 
     [Fact]
+    public void Bare_monospace_text_takes_the_smaller_default_size_as_in_Chrome()
+    {
+        // The sizes Chrome 153 computes for each element, in px.
+        var doc = Styled(@"<body>
+            <code id=k1 style='font-size:xx-small'>x</code><code id=k3 style='font-size:small'>x</code>
+            <code id=k4 style='font-size:medium'>x</code><code id=k5 style='font-size:large'>x</code>
+            <code id=k8 style='font-size:xxx-large'>x</code>
+            <code id=em style='font-size:1em'>x</code><code id=pc style='font-size:90%'>x</code>
+            <code id=sm style='font-size:smaller'>x</code><code id=rem style='font-size:1rem'>x</code>
+            <div style='font-size:20px'><code id=abs>x</code><span style='font-size:1.5em'><code id=absem>x</code></span></div>
+            <div style='font-size:large'><code id=kw>x</code><span style='font-size:1.5em'><code id=kwem>x</code></span></div>
+            <pre><span id=arial style='font-family:Arial'>x</span><code id=inpre>x</code></pre>
+            <code id=twice style='font-family:monospace,monospace'>x</code>
+            <code id=courier style=""font-family:'Courier New',monospace"">x</code>
+            <div style='font-family:monospace;font-size:1.2em'><span id=back style='font-family:Arial'>x</span></div>
+            <code id=inh style='font-size:inherit'>x</code></body>");
+        var expected = new Dictionary<string, float>
+        {
+            ["k1"] = 9, ["k3"] = 12, ["k4"] = 13, ["k5"] = 16, ["k8"] = 39, ["em"] = 13, ["pc"] = 11.7f, ["sm"] = 10.8333f,
+            ["rem"] = 16, ["abs"] = 20, ["absem"] = 30, ["kw"] = 16, ["kwem"] = 21.9375f, ["arial"] = 16, ["inpre"] = 13,
+            ["twice"] = 16, ["courier"] = 16, ["back"] = 19.2f, ["inh"] = 13,
+        };
+        foreach (var (id, px) in expected) Assert.True(Math.Abs(px * 0.75f - ById(doc, id).Style.FontSize) < 0.01f, $"{id}: {ById(doc, id).Style.FontSize / 0.75f}px, not {px}px");
+    }
+
+    [Fact]
     public void Declarations_after_a_nested_rule_still_apply()
     {
         var doc = Styled(@"<style>

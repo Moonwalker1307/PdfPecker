@@ -134,6 +134,18 @@ public class BrowserMatchTests
     }
 
     [Theory]
+    [InlineData("word-break: break-all")]
+    [InlineData("overflow-wrap: anywhere")]
+    public void A_table_cell_that_may_break_inside_words_fits_its_container(string wrap)
+    {
+        // The cell's min-content width is its widest letter, so the table stays within the 60px box, as in Chrome.
+        var lines = Lines(Layout($"<div style='width: 60px; font: 12px Courier New'><table><tr><td style='{wrap}'>"
+                                 + "url(data:image/png;base64,iVBORw0KGgo)</td></tr></table></div>"));
+        Assert.True(lines.Count > 1);
+        Assert.All(lines, l => Assert.True(l.Length <= 8, l));
+    }
+
+    [Theory]
     [InlineData("P*")]
     [InlineData("P(")]
     [InlineData("P&nbsp;")]
@@ -666,5 +678,55 @@ public class BrowserMatchTests
             <body style="margin: 0"><div style="height: 120mm; box-shadow: 0 0 6px 2px #ff0000"></div></body>
             """);
         Assert.Equal(2, PdfPages.Count(pdf));
+    }
+
+    [Fact]
+    public void An_empty_inline_with_a_larger_font_makes_its_line_taller()
+    {
+        // The inline box is on the line even with no text, so its 28px font and 1.2 line height make the line 33.6px
+        // tall, as in Chrome; a line holding nothing but such an inline still has no height (CSS 2.1 §10.8).
+        var ops = Layout("""
+            <p style="font: 12px Arial; line-height: 1.2; margin: 0; background: #00ff00">Before<span style="font-size: 28px"></span> after</p>
+            <p style="font: 12px Arial; line-height: 1.2; margin: 0; background: #0000ff">Before after</p>
+            <p style="font: 12px Arial; line-height: 1.2; margin: 0; background: #ff0000"><span style="font-size: 28px"></span></p>
+            """);
+        Near(33.6f * 0.75f, Box(ops, "#00ff00").H, 0.2f);
+        Near(14.4f * 0.75f, Box(ops, "#0000ff").H, 0.2f);
+        Assert.DoesNotContain(ops.OfType<RectOp>(), r => r.Color == 0xFFFF0000 && r.H > 0);
+    }
+
+    [Fact]
+    public void An_inline_with_a_larger_font_makes_each_of_its_lines_taller()
+    {
+        // Its smaller text wraps onto a second line, which the outer inline box is on too: two lines of 33.6px.
+        var ops = Layout("""
+            <p style="font: 12px Arial; line-height: 1.2; margin: 0; width: 120px; background: #00ff00">Some words <span style="font-size: 28px"><span style="font-size: 12px">that wrap onto two lines</span></span></p>
+            """);
+        Near(67.2f * 0.75f, Box(ops, "#00ff00").H, 0.3f);
+    }
+
+    [Theory]
+    [InlineData("2 comments", new[] { "2 comments" }, "white-space: nowrap")]
+    [InlineData("two words", new[] { "two", "words" }, "")]
+    public void A_badge_in_an_empty_positioned_inline_is_as_wide_as_its_longest_word(string text, string[] lines, string style)
+    {
+        // The empty inline is a containing block of no width, but shrink-to-fit never goes below min-content.
+        var ops = Layout($"""
+            <p style="font: 12px Arial; margin: 20px 0 0">Status: shipped<span style="position: relative"><span style="position: absolute; left: 0; bottom: 100%; font-size: 9px; padding: 2px; background: #00ff00; {style}">{text}</span></span> this week.</p>
+            """);
+        Assert.Equal(lines, ops.OfType<TextOp>().Where(t => t.Size < 8).Select(t => t.Text));
+        // "words" at 9px is about 22px wide; a badge sized by the empty inline would be its padding alone.
+        Assert.True(Box(ops, "#00ff00").W > 15, $"The badge is {Box(ops, "#00ff00").W}pt wide");
+    }
+
+    [Fact]
+    public void A_cloned_inline_box_may_overflow_by_its_right_edge_where_it_wraps()
+    {
+        // Chrome fits the words of a cloned inline box without the padding and border the break adds at the end of the
+        // line, so "opened" stays on the first line and its closing edge runs past the block.
+        var ops = Layout("""
+            <div style="width: 160pt; font: 9pt/2.4 Arial">A <span style="border: 2pt solid blue; padding: 2pt 8pt; box-decoration-break: clone">framed inline whose box is opened and closed on every line</span> here.</div>
+            """);
+        Assert.Equal("framed inline whose box is opened", Lines(ops)[1].Trim());
     }
 }

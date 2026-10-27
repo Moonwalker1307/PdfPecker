@@ -222,12 +222,18 @@ internal sealed partial class StyleResolver
         return result;
     }
 
-    /// <summary>True for &lt;svg&gt; and the elements inside it.</summary>
+    /// <summary>
+    /// True for &lt;svg&gt; and the elements inside it, except the HTML inside a foreignObject, which is styled as any
+    /// other HTML.
+    /// </summary>
     internal static bool IsSvgElement(Element e)
     {
         if (e.Name == "svg") return true;
         for (var p = e.Parent; p != null; p = p.Parent)
+        {
+            if (p.Name == "foreignobject") return false;
             if (p.Name == "svg") return true;
+        }
         return false;
     }
 

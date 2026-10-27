@@ -281,6 +281,8 @@ internal sealed class ComputedStyle
     public bool FontOpticalSizingNone;       // font-optical-sizing: none
     public float FontSize = 12f; // 16px
     public float ParentFontSize = 12f; // the parent's font size, which sub and super shift by
+    public byte FontSizeKeyword = 4;   // the font-size keyword the size comes from (1 xx-small to 8 xxx-large); 0 = none
+    public bool FontSizeAbsolute;      // the size comes from an absolute length, here or on an ancestor
     public float ParentBaselineShift;  // how far below the line's baseline the parent inline box's baseline sits
     public ComputedStyle? ParentStyle; // the parent's style, whose font text-top, text-bottom and middle align to
     public LineHeightKind LineHeightKind = LineHeightKind.Normal;

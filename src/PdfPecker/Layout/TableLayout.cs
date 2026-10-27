@@ -119,6 +119,9 @@ internal sealed partial class LayoutEngine
     /// </summary>
     private const int MaxMeasuredTableNesting = 16;
 
+    /// <summary>The widest a table's columns grow to fit their percentages, as Chrome caps them.</summary>
+    private const float MaxColumnsWidth = 1_000_000f;
+
     /// <summary>
     /// The keep-with-next probe of the table whose rows are being laid out, until its first content is placed (see
     /// <see cref="CanProbe"/>); null otherwise, and inside the cells, whose tables take a probe of their own.
@@ -130,6 +133,31 @@ internal sealed partial class LayoutEngine
     /// borders, its first footer row draws the border above it there (see <see cref="PaintBorrowedTop"/>).
     /// </summary>
     private TableModel? _repeatingFoot;
+
+    // While a table row split across pages is laid out again: as in Chrome, the table's header repeats at the top of
+    // each page after the first one the row is on, and its footer at the bottom of each page, so the row's content
+    // leaves room for them there (see FlowStart and FlowEnd).
+    private SplitRowRoom? _splitRow;
+
+    private readonly record struct SplitRowRoom(int FirstPage, float Head, float Foot);
+
+    /// <summary>The page's first flow position content may take: its start, below a header repeated over a split row.</summary>
+    private float FlowStart(int page)
+        => _splitRow is { } r && page > r.FirstPage ? _grid.Start(page) + r.Head : _grid.Start(page);
+
+    private float SplitRowFoot(int page) => _splitRow is { } r && page >= r.FirstPage ? r.Foot : 0;
+
+    /// <summary>
+    /// The bottom of a box from <paramref name="top"/> to <paramref name="bottom"/> once the room for a split row's
+    /// repeated footer and header at each page break it crosses is added, as its size goes on below the header.
+    /// </summary>
+    private float PastSplitRowRoom(float top, float bottom)
+    {
+        if (!_paginate || _splitRow is not { } r) return bottom;
+        for (int p = Math.Max(PageOf(top), r.FirstPage); p < PageOf(bottom - 0.5f); p++)
+            bottom += r.Foot + r.Head;
+        return bottom;
+    }
     private int _rowAboveFoot; // the body row above the footer repeated on this page
 
     private TableModel GetTableModel(Element table)
@@ -432,6 +460,36 @@ internal sealed partial class LayoutEngine
         return w;
     }
 
+    /// <summary>
+    /// The columns' max-content width, as Chrome works it out for a table with percentage columns: wide enough that
+    /// each percentage column gets its max-content width as its percentage of the table, and that the other columns
+    /// get theirs from the percentage left over. Without percentage columns it is the sum of the max-content widths.
+    /// </summary>
+    private static float ColumnsMaxWidth(TableModel m)
+    {
+        float sum = 0, pctMax = 0, nonPct = 0, pctLeft = 100;
+        for (int c = 0; c < m.ColCount; c++)
+        {
+            sum += m.ColMax[c];
+            if (m.ColPct[c] > 0)
+            {
+                pctMax = Math.Max(pctMax, m.ColMax[c] * 100f / m.ColPct[c]);
+                pctLeft -= m.ColPct[c];
+            }
+            else nonPct += m.ColMax[c];
+        }
+        // Columns without a percentage in a table whose percentages add up to 100% make it as wide as it can be.
+        if (nonPct > 0) nonPct = pctLeft > 0.01f ? nonPct * 100f / pctLeft : MaxColumnsWidth;
+        return Math.Min(MaxColumnsWidth, Math.Max(sum, Math.Max(pctMax, nonPct)));
+    }
+
+    private static bool HasPercentColumn(TableModel m)
+    {
+        for (int c = 0; c < m.ColCount; c++)
+            if (m.ColPct[c] >= 0) return true;
+        return false;
+    }
+
     /// <summary>A percentage column's width in <paramref name="basis"/>, never below its min-content width.</summary>
     private static float PercentWidth(TableModel m, int c, float basis) => Math.Max(m.ColMin[c], m.ColPct[c] * basis / 100f);
 
@@ -465,7 +523,17 @@ internal sealed partial class LayoutEngine
             ShrinkPercentColumns(m, w, avail);
             return w;
         }
-        if (autoCount == 0) return w;
+        if (autoCount == 0)
+        {
+            // As in Chrome, a table with a width whose columns all have percentages adding up to less than 100% still
+            // fills that width: the percentage columns share the rest in proportion to their percentages.
+            float pctSum = 0;
+            for (int c = 0; c < n; c++) pctSum += m.ColPct[c];
+            if (widthSpecified && remaining > 0.01f && pctSum > 0)
+                for (int c = 0; c < n; c++)
+                    w[c] += remaining * m.ColPct[c] / pctSum;
+            return w;
+        }
 
         float target = widthSpecified || sumMax > remaining ? remaining : sumMax;
         if (target >= sumMax)
@@ -767,8 +835,16 @@ internal sealed partial class LayoutEngine
         }
         else avail = Math.Min(availW - ml - mr, ratioMax) - frameH - gridSpace;
         if (!s.MaxWidth.IsAuto) avail = Math.Min(avail, s.MaxWidth.Resolve(availW) - frameL - frameR - gridSpace);
+        // As in Chrome, a table of auto width with percentage columns is as wide as their percentages need (when there
+        // is room), and its columns then share that width as they would a specified one.
+        bool fill = specified;
+        if (!specified && HasPercentColumn(m))
+        {
+            avail = Math.Min(avail, ColumnsMaxWidth(m));
+            fill = true;
+        }
 
-        var widths = specified && s.TableLayoutFixed ? FixedColumns(m, avail) : AllocateColumns(m, avail, specified);
+        var widths = specified && s.TableLayoutFixed ? FixedColumns(m, avail) : AllocateColumns(m, avail, fill);
         float contentW = gridSpace;
         foreach (var cw in widths) contentW += cw;
         // As in Chrome, a table is at least as wide as its captions' min-content widths: the columns share the rest.
@@ -1066,6 +1142,12 @@ internal sealed partial class LayoutEngine
             break;
         }
 
+        if (allowMove && RepeatsAroundSplit(m, r, rowTop, rowBottom))
+        {
+            Truncate(rowStartOps);
+            return LayoutSplitRow(m, r, rowTop, rowBottom, colX, widths, hs, vs, collapse, pageColumns);
+        }
+
         foreach (var cell in row.Ending) FinishCell(m, cell, rowBottom, collapse);
 
         // Under the cells, from the bottom up (CSS 2.1 §17.5.1): column groups, columns, the row group and the row.
@@ -1081,6 +1163,111 @@ internal sealed partial class LayoutEngine
                 PaintRowBackground(m, rs.BackgroundColor, rowGroup, rowTop, rowBottom, colX, widths, hs, under);
         }
         return rowBottom;
+    }
+
+    /// <summary>
+    /// Whether body row <paramref name="r"/>, laid out where it stays, is split across pages with a header or footer to
+    /// repeat around it. Rows spanned by cells of other rows, rows in columns and rows inside a split row keep their layout.
+    /// </summary>
+    private bool RepeatsAroundSplit(TableModel m, int r, float rowTop, float rowBottom)
+    {
+        if (!_paginate || _measuringRows > 0 || _splitRow != null || _grid is ColumnGrid || !MayLayOutAgain) return false;
+        if (r < m.HeadCount || r >= m.Rows.Count - m.FootCount || m.HeadCount == 0 && m.FootReserve == 0) return false;
+        if (!CrossesPage(rowTop, rowBottom)) return false;
+        var row = m.Rows[r];
+        foreach (var cell in row.Cells)
+            if (cell.RowSpan > 1) return false;
+        foreach (var cell in row.Ending)
+            if (cell.RowSpan > 1) return false;
+        return true;
+    }
+
+    /// <summary>
+    /// Lays out a body row split across pages as Chrome does: its content leaves room for the table's footer at the
+    /// bottom of each page it goes on from and for the header at the top of each page it goes on to, where the header and
+    /// footer are repeated, and its cells stop above the footer and go on below the header. Returns the row's bottom.
+    /// </summary>
+    private float LayoutSplitRow(TableModel m, int r, float rowTop, float firstBottom, float[] colX, float[] widths, float hs, float vs,
+        bool collapse, TableColumns[]? pageColumns)
+    {
+        int first = PageOf(rowTop);
+        float head = 0;
+        if (m.HeadCount > 0)
+        {
+            var heads = Capture(() =>
+            {
+                _measuringRows++;
+                float y = 0;
+                for (int h = 0; h < m.HeadCount; h++)
+                    y = LayoutRow(m, h, y, colX, widths, hs, vs, collapse, allowMove: false) + vs;
+                _measuringRows--;
+                return y;
+            });
+            // Headers too tall to repeat usefully are not repeated, as when a row moves to the next page.
+            if (heads.Height <= _grid.Height(first + 1) / 2) head = heads.Height;
+        }
+        float foot = m.FootReserve;
+
+        // The pages the row may reach once it leaves that room: its breaks are known before its cells are painted, and
+        // those it does not reach are dropped again.
+        int breaksBefore = m.Breaks.Count;
+        if (collapse)
+        {
+            int pages = PageOf(firstBottom - 0.5f) - first + 1;
+            int last = PageOf(firstBottom - 0.5f) + 1 + (int)Math.Ceiling(pages * (head + foot) / Math.Max(1, _grid.MinHeight));
+            for (int p = first; p < last; p++)
+                m.Breaks.Add(SplitBreak(p, head, foot, vs));
+        }
+
+        float bottom;
+        var outer = _splitRow;
+        _splitRow = new SplitRowRoom(first, head, foot);
+        try
+        {
+            bottom = LayoutRow(m, r, rowTop, colX, widths, hs, vs, collapse, allowMove: false, pageColumns);
+        }
+        finally
+        {
+            _splitRow = outer;
+        }
+        int lastPage = PageOf(bottom - 0.5f);
+        if (collapse)
+            for (int i = m.Breaks.Count - 1; i >= breaksBefore; i--)
+                if (PageOf(m.Breaks[i].PageTop) > lastPage) m.Breaks.RemoveAt(i);
+
+        for (int p = first; p < lastPage; p++)
+        {
+            var at = SplitBreak(p, head, foot, vs);
+            if (foot > 0)
+            {
+                int footOps = _ops.Count;
+                var outerFoot = _repeatingFoot;
+                _repeatingFoot = m;
+                _rowAboveFoot = r;
+                float footTop = at.BodyEnd;
+                for (int f = m.Rows.Count - m.FootCount; f < m.Rows.Count; f++)
+                    footTop = LayoutRow(m, f, footTop, colX, widths, hs, vs, collapse, allowMove: false, pageColumns) + vs;
+                _repeatingFoot = outerFoot;
+                // The structure has the footer once: its repeats are artifacts.
+                if (Tags != null) Untag(_ops, footOps);
+            }
+            if (head > 0)
+            {
+                int headOps = _ops.Count;
+                float headTop = at.PageTop;
+                for (int h = 0; h < m.HeadCount; h++)
+                    headTop = LayoutRow(m, h, headTop, colX, widths, hs, vs, collapse, allowMove: false, pageColumns) + vs;
+                if (Tags != null) Untag(_ops, headOps);
+            }
+        }
+        return bottom;
+    }
+
+    /// <summary>Where a table stops on page <paramref name="page"/> of a row split across pages, and goes on after it.</summary>
+    private TableBreak SplitBreak(int page, float head, float foot, float vs)
+    {
+        float bodyEnd = _grid.Start(page + 1) - FootnoteReserve(page) - foot, top = _grid.Start(page + 1);
+        return new TableBreak(bodyEnd, foot > 0 ? bodyEnd + foot - vs : bodyEnd, 0, foot > 0, top, top + head);
     }
 
     /// <summary>
@@ -1418,12 +1605,8 @@ internal sealed partial class LayoutEngine
             var m = GetTableModel(e);
             float hs = s.BorderCollapse ? 0 : s.BorderSpacingH;
             float mn = (m.ColCount > 0 ? (m.ColCount + 1) * hs : 0) + frame, mx = mn;
-            for (int c = 0; c < m.ColCount; c++)
-            {
-                mn += m.ColMin[c];
-                mx += m.ColPct[c] >= 0 ? m.ColMax[c] : m.ColMax[c];
-            }
-            result = (mn, mx);
+            for (int c = 0; c < m.ColCount; c++) mn += m.ColMin[c];
+            result = (mn, Math.Max(mn, mx + ColumnsMaxWidth(m)));
         }
         else if (e.Control is { Kind: ControlKind.Text })
         {
@@ -1497,62 +1680,71 @@ internal sealed partial class LayoutEngine
         try
         {
             var st = CollectInline(nodes, 100000);
-            var items = st.Items;
-            float min = 0, max = 0, group = 0, line = 0, trailing = 0;
-            Item? prev = null;
-            foreach (var it in items)
-            {
-                // The kerning between neighbouring words and spaces counts, as it does when the lines are broken.
-                float kern = prev != null ? PairKern(prev, it) : 0;
-                prev = it;
-                TrailingSpace(it, kern, ref trailing);
-                if (it.Kind == ItemKind.Break)
-                {
-                    min = Math.Max(min, group);
-                    max = Math.Max(max, line - trailing);
-                    group = line = trailing = 0;
-                    continue;
-                }
-                if (it.Kind == ItemKind.Space && it.Breakable)
-                {
-                    min = Math.Max(min, group);
-                    group = 0;
-                    line += it.Width + kern;
-                    continue;
-                }
-                if (it.Kind == ItemKind.Float)
-                {
-                    min = Math.Max(min, it.FloatMin);
-                    line += it.Width;
-                    continue;
-                }
-                line += it.Width + kern;
-                if (it.Kind == ItemKind.Text && (it.Style.WordBreak == WordBreak.BreakAll || it.Style.OverflowWrap == OverflowWrap.Anywhere
-                    || it.Style.LineBreak == LineBreak.Anywhere))
-                {
-                    // overflow-wrap: anywhere, word-break: break-all and line-break: anywhere let the word shrink down to
-                    // its widest letter.
-                    min = Math.Max(min, group);
-                    group = 0;
-                    var f = it.Style.Font;
-                    for (int k = 0; k < it.Length; k++) min = Math.Max(min, f.CharWidth(it.Source[it.Start + k], it.Style.TextSize) + it.Style.LetterSpacing);
-                    continue;
-                }
-                group += (it.MinWidth >= 0 ? it.MinWidth : it.Width) + (group > 0 ? kern : 0);
-                if (it.BreakAfter != BreakAfter.None)
-                {
-                    min = Math.Max(min, group + (it.BreakAfter == BreakAfter.SoftHyphen ? HyphenWidth(it.Style) : 0));
-                    group = 0;
-                }
-            }
+            var result = ItemsIntrinsic(st.Items);
             ReturnState(st);
-            return (Math.Max(min, group), Math.Max(max, line - trailing));
+            return result;
         }
         finally
         {
             if (--_inlineDepth == 0) _itemPoolUsed = 0;
             _measuring = saved;
         }
+    }
+
+    /// <summary>
+    /// The min-content and max-content widths of a run's items: the widest unbreakable group of words and the widest
+    /// line between forced breaks.
+    /// </summary>
+    private static (float Min, float Max) ItemsIntrinsic(List<Item> items)
+    {
+        float min = 0, max = 0, group = 0, line = 0, trailing = 0;
+        Item? prev = null;
+        foreach (var it in items)
+        {
+            // The kerning between neighbouring words and spaces counts, as it does when the lines are broken.
+            float kern = prev != null ? PairKern(prev, it) : 0;
+            prev = it;
+            TrailingSpace(it, kern, ref trailing);
+            if (it.Kind == ItemKind.Break)
+            {
+                min = Math.Max(min, group);
+                max = Math.Max(max, line - trailing);
+                group = line = trailing = 0;
+                continue;
+            }
+            if (it.Kind == ItemKind.Space && it.Breakable)
+            {
+                min = Math.Max(min, group);
+                group = 0;
+                line += it.Width + kern;
+                continue;
+            }
+            if (it.Kind == ItemKind.Float)
+            {
+                min = Math.Max(min, it.FloatMin);
+                line += it.Width;
+                continue;
+            }
+            line += it.Width + kern;
+            if (it.Kind == ItemKind.Text && (it.Style.WordBreak == WordBreak.BreakAll || it.Style.OverflowWrap == OverflowWrap.Anywhere
+                || it.Style.LineBreak == LineBreak.Anywhere))
+            {
+                // overflow-wrap: anywhere, word-break: break-all and line-break: anywhere let the word shrink down to
+                // its widest letter.
+                min = Math.Max(min, group);
+                group = 0;
+                var f = it.Style.Font;
+                for (int k = 0; k < it.Length; k++) min = Math.Max(min, f.CharWidth(it.Source[it.Start + k], it.Style.TextSize) + it.Style.LetterSpacing);
+                continue;
+            }
+            group += (it.MinWidth >= 0 ? it.MinWidth : it.Width) + (group > 0 ? kern : 0);
+            if (it.BreakAfter != BreakAfter.None)
+            {
+                min = Math.Max(min, group + (it.BreakAfter == BreakAfter.SoftHyphen ? HyphenWidth(it.Style) : 0));
+                group = 0;
+            }
+        }
+        return (Math.Max(min, group), Math.Max(max, line - trailing));
     }
 
     /// <summary>
@@ -1600,47 +1792,10 @@ internal sealed partial class LayoutEngine
             // place of the words before it.
             _inlineDepth++;
             var st = CollectInline(run, 100000);
-            var items = st.Items;
             run.Clear();
-            float group = 0, line = 0, trailing = 0;
-            Item? prev = null;
-            foreach (var it in items)
-            {
-                // The kerning between neighbouring words and spaces counts, as it does when the lines are broken.
-                float kern = prev != null ? PairKern(prev, it) : 0;
-                prev = it;
-                TrailingSpace(it, kern, ref trailing);
-                if (it.Kind == ItemKind.Break)
-                {
-                    min = Math.Max(min, group);
-                    max = Math.Max(max, line - trailing);
-                    group = line = trailing = 0;
-                    continue;
-                }
-                if (it.Kind == ItemKind.Space && it.Breakable)
-                {
-                    min = Math.Max(min, group);
-                    group = 0;
-                    line += it.Width + kern;
-                    continue;
-                }
-                if (it.Kind == ItemKind.Float)
-                {
-                    min = Math.Max(min, it.FloatMin);
-                    line += it.Width;
-                    continue;
-                }
-                group += (it.MinWidth >= 0 ? it.MinWidth : it.Width) + (group > 0 ? kern : 0);
-                line += it.Width + kern;
-                // A break opportunity without a space (after a hyphen, around an inline-block) ends the group too.
-                if (it.BreakAfter != BreakAfter.None)
-                {
-                    min = Math.Max(min, group + (it.BreakAfter == BreakAfter.SoftHyphen ? HyphenWidth(it.Style) : 0));
-                    group = 0;
-                }
-            }
-            min = Math.Max(min, group);
-            max = Math.Max(max, line - trailing);
+            var (runMin, runMax) = ItemsIntrinsic(st.Items);
+            min = Math.Max(min, runMin);
+            max = Math.Max(max, runMax);
             ReturnState(st);
             if (--_inlineDepth == 0) _itemPoolUsed = 0;
         }

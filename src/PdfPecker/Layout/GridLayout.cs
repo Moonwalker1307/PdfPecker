@@ -720,7 +720,9 @@ internal sealed partial class LayoutEngine
             if (js is BoxAlign.Normal or BoxAlign.Auto) js = it.IsReplaced ? BoxAlign.Start : BoxAlign.Stretch;
             stretchX[i] = js == BoxAlign.Stretch && !it.AutoMl && !it.AutoMr;
             if (g.HasSubgrids) ShareGridTracks(ref g, it, i);
-            it.Box = measured?[i] ?? Measure(it, g.E, areaW, stretchX[i]);
+            // An image stretched by an explicit justify-self or justify-items takes the area's width, as in Chrome.
+            float? borderW = stretchX[i] && it.IsReplaced && it.Style.Width.IsAuto ? StretchedReplacedWidth(it, areaW, g.W) : null;
+            it.Box = measured?[i] ?? Measure(it, g.E, areaW, stretchX[i], borderW);
         }
     }
 
@@ -937,7 +939,7 @@ internal sealed partial class LayoutEngine
             float areaY = g.RowY[it.Row] + shiftTop;
             float areaH = g.RowY[lastRow] - g.RowY[it.Row] + (shiftBottom - shiftTop) + g.Rows[lastRow].Base;
 
-            var align = SelfAlign(it, s.AlignItems);
+            var align = SelfAlign(it, s.AlignItems, grid: true);
             var box = FitGridItemHeight(ref g, it, i, align, areaY, areaW, areaH, out bool rowSub);
             bool stretchX = g.StretchX[i];
 
@@ -1001,7 +1003,7 @@ internal sealed partial class LayoutEngine
         else if (align == BoxAlign.Stretch && st.Height.IsAuto && !it.AutoMt && !it.AutoMb) want = Math.Max(current, areaH - it.Mt - it.Mb);
         if (want is { } hh && (rowSub || Math.Abs(hh - current) > Eps && (NeedsRelayoutWhenStretched(it) || st.Height.IsPercent)))
         {
-            float? bw = g.StretchX[i] ? null : box.Width - it.Ml - it.Mr;
+            float? bw = g.StretchX[i] && !it.IsReplaced ? null : box.Width - it.Ml - it.Mr;
             box = it.Box = CaptureBox(it.El, areaW, shrinkToFit: !g.StretchX[i], borderW: bw, borderH: hh, reuse: true, inner: box.Known);
         }
         return box;

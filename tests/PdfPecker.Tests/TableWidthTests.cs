@@ -75,6 +75,19 @@ public class TableWidthTests
     }
 
     [Fact]
+    public void PercentagesUnderAHundredStillFillATableWithAWidth()
+    {
+        // As in Chrome, 20% + 40% in a table with a width become a third and two thirds: the columns share what their
+        // percentages leave in proportion to them, instead of leaving the table narrower than its width.
+        var ops = Layout("<style>body{margin:0} td{padding:0}</style><table style='width:100%;border-spacing:0'><tr>" +
+                         "<td style='width:20%;background:#f00'>one</td><td style='width:40%;background:#00f'>two</td></tr></table>");
+        var one = Rect(ops, 0xFFFF0000);
+        var two = Rect(ops, 0xFF0000FF);
+        Assert.Equal(Width / 3, one.W, 1);
+        Assert.Equal(Width, two.X + two.W, 1);
+    }
+
+    [Fact]
     public void PercentageColumnsMakeRoomForTheOthersContent()
     {
         // As in Chrome, 60% + 40% + 20% with text in the last column: the percentage columns shrink, in proportion, to
@@ -88,6 +101,31 @@ public class TableWidthTests
         Assert.Equal(Width, three.X + three.W, 1);
         Assert.InRange(three.W, 60, 120);
         Assert.Equal(1.5, one.W / two.W, 2);
+    }
+
+    [Fact]
+    public void PercentageColumnsShareTheWidthTheyLeave()
+    {
+        // As in Chrome, 10% + 30% in a full-width table become 25% + 75%: the columns fill the table in proportion to
+        // their percentages.
+        var ops = Layout("<style>body{margin:0} td{padding:0}</style><table style='width:100%;border-spacing:0'><tr>" +
+                         "<td style='width:10%;background:#f00'>a</td><td style='width:30%;background:#00f'>b</td></tr></table>");
+        Assert.Equal(125, Rect(ops, 0xFFFF0000).W, 1);
+        Assert.Equal(375, Rect(ops, 0xFF0000FF).W, 1);
+    }
+
+    [Fact]
+    public void PercentageColumnsSizeATableOfAutoWidth()
+    {
+        // As in Chrome, a 50% column holding 100px makes an auto-width table 200px wide, and the other column takes
+        // the other half rather than its 50px content width; a lone 10% column holding 100px fills the line.
+        var ops = Layout("<style>body{margin:0} td{padding:0} i{display:block;height:5px}</style>" +
+                         "<table style='border-spacing:0'><tr><td style='width:50%;background:#f00'><i style='width:100px'></i></td>" +
+                         "<td style='background:#00f'><i style='width:50px'></i></td></tr></table>" +
+                         "<table style='border-spacing:0'><tr><td style='width:10%;background:#0f0'><i style='width:100px'></i></td></tr></table>");
+        Assert.Equal(75, Rect(ops, 0xFFFF0000).W, 1);
+        Assert.Equal(75, Rect(ops, 0xFF0000FF).W, 1);
+        Assert.Equal(Width, Rect(ops, 0xFF00FF00).W, 1);
     }
 
     [Fact]
