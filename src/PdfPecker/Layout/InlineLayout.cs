@@ -195,8 +195,11 @@ internal sealed partial class LayoutEngine
                 case ItemKind.Image:
                 case ItemKind.Box:
                 case ItemKind.Break:
-                case ItemKind.Spacer:
                     return true;
+                case ItemKind.Spacer:
+                    // A spacer of no width only carries an empty inline's strut, which alone makes no line (CSS 2.1 §10.8).
+                    if (it.Width != 0) return true;
+                    break;
                 case ItemKind.Float:
                 case ItemKind.Absolute:
                     break;

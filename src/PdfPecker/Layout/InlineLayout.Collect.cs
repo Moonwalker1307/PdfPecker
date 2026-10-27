@@ -178,6 +178,10 @@ internal sealed partial class LayoutEngine
         var (bidiOpen, bidiClose) = BidiControls(s);
         if (bidiOpen != null) AddBidiControl(st, s, bidiOpen);
         AddInlineEdge(st, s, boxLeft, marginLeft, href, deco, outer, marginFirst: true);
+        // An inline box is on its line even where it has no text of its own (an empty one, or one holding only smaller
+        // text), so a larger font or line height makes the line taller, as in Chrome. A spacer of no width carries its
+        // strut when nothing else does.
+        if (!(boxLeft + marginLeft > 0) && StrutExceedsParent(s)) AddSpacer(st, s, 0, href, deco);
         foreach (var c in e.Children) CollectNode(st, c, href, deco);
         AddInlineEdge(st, s, boxRight, marginRight, href, deco, outer, marginFirst: false);
         if (bidiClose != null) AddBidiControl(st, s, bidiClose);
@@ -186,6 +190,17 @@ internal sealed partial class LayoutEngine
             for (int k = first; k < st.Items.Count; k++)
                 if (ReferenceEquals(st.Items[k].Deco, deco)) st.Items[k].Deco = outer;
         if (s.Position == Position.Relative) ShiftRelative(st, first, s);
+    }
+
+    /// <summary>Whether an inline element's strut reaches above or below its parent's on the line's baseline.</summary>
+    private static bool StrutExceedsParent(ComputedStyle s)
+    {
+        if (s.ParentStyle is not { } parent) return false;
+        TextMetrics(s, out float a, out float d);
+        float pa, pd;
+        if (parent.Display == Display.Inline) TextMetrics(parent, out pa, out pd);
+        else StrutMetrics(parent, out pa, out pd);
+        return a > pa + Eps || d > pd + Eps;
     }
 
     /// <summary>The nearest positioned inline element of a deco's chain, which is the containing block of absolutely positioned boxes in it.</summary>

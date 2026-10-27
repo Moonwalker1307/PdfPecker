@@ -61,8 +61,9 @@ internal sealed partial class LayoutEngine
 
     /// <summary>
     /// box-decoration-break: clone: where a line breaks inside an inline box, the line ends with the box's right
-    /// padding and border and the next line starts with its left ones, as spacers of the box. The line breaker has
-    /// already kept room for them.
+    /// padding and border and the next line starts with its left ones, as spacers of the box. The line breaker kept
+    /// room for the left ones only: as in Chrome, the right edge a break adds may overflow the line rather than move
+    /// the last word down.
     /// </summary>
     private void AddCloneEdges(List<Line> lines)
     {
@@ -337,8 +338,6 @@ internal sealed partial class LayoutEngine
             // the next.
             bool breakAll = splittable && _items[i].IsText && BreaksAtLineEnd(_items[i].Style);
 
-            // A cloned box the line would break inside ends the line with its right edge.
-            if (ClonesEdges && _hasContent && FirstContent(_items, j, skipSpaces: true) is var next and >= 0) need += CloneEdges(_items[j - 1], _items[next], right: true);
             // A planned paragraph breaks where the plan says, and greedily where it has no say.
             bool planned = _plan is { } plan && plan[i] != PlanGreedy;
             bool full = planned ? _plan![i] == PlanBreak : _curW + need > _avail + Eps && !breakAll;
