@@ -1,3 +1,4 @@
+using System.Globalization;
 using PdfPecker.Html;
 
 namespace PdfPecker.Css;
@@ -811,7 +812,7 @@ internal sealed class Selector
         else if (v.EndsWith(" s", StringComparison.OrdinalIgnoreCase) || v.Length > 2 && v[^2] is '"' or '\'' && v[^1] is 's' or 'S')
             v = v.Substring(0, v.Length - 1).TrimEnd();
         if (v.Length >= 2 && (v[0] == '"' || v[0] == '\'') && v[v.Length - 1] == v[0]) v = v.Substring(1, v.Length - 2);
-        a.Value = v;
+        a.Value = Unescape(v);
         return a.Name.Length > 0 ? a : null;
     }
 
@@ -824,9 +825,46 @@ internal sealed class Selector
         {
             char c = s[i];
             if (char.IsLetterOrDigit(c) || c == '-' || c == '_' || c > 127) i++;
-            else if (c == '\\' && i + 1 < s.Length) i += 2;
+            else if (c == '\\' && i + 1 < s.Length)
+            {
+                // A hex escape takes up to six digits and one white-space character after them.
+                int digits = 0;
+                for (i++; i < s.Length && digits < 6 && Uri.IsHexDigit(s[i]); digits++) i++;
+                if (digits == 0) i++;
+                else if (i < s.Length && s[i] is ' ' or '\t' or '\n') i++;
+            }
             else break;
         }
-        return s.Substring(start, i - start).Replace("\\", "");
+        return Unescape(s.AsSpan(start, i - start));
+    }
+
+    /// <summary>Resolves the backslash escapes in an identifier or attribute value: <c>\ </c> is a space, <c>\31 </c> is "1".</summary>
+    private static string Unescape(ReadOnlySpan<char> s)
+    {
+        int slash = s.IndexOf('\\');
+        if (slash < 0) return s.ToString();
+        var sb = new System.Text.StringBuilder(s.Length);
+        sb.Append(s.Slice(0, slash));
+        for (int i = slash; i < s.Length; i++)
+        {
+            char c = s[i];
+            if (c != '\\' || i + 1 == s.Length)
+            {
+                sb.Append(c);
+                continue;
+            }
+            int start = ++i;
+            while (i < s.Length && i - start < 6 && Uri.IsHexDigit(s[i])) i++;
+            if (i == start)
+            {
+                sb.Append(s[i]);
+                continue;
+            }
+            int code = int.Parse(s.Slice(start, i - start), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+            if (code == 0 || code > 0x10FFFF || code is >= 0xD800 and <= 0xDFFF) code = 0xFFFD;
+            sb.Append(char.ConvertFromUtf32(code));
+            if (i == s.Length || s[i] is not (' ' or '\t' or '\n')) i--; // one white-space character ends the escape
+        }
+        return sb.ToString();
     }
 }

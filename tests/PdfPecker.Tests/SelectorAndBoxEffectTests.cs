@@ -179,6 +179,21 @@ public class SelectorAndBoxEffectTests
     }
 
     [Fact]
+    public void Escapes_in_selectors_are_resolved()
+    {
+        // Acid2 matches class="second two" with [class=second\ two]; \31 is a hex escape for "1", ended by one space.
+        var doc = Styled(@"<style>
+            [class=second\ two][class=""second two""] { color: red }
+            .\31 0 { color: blue }
+            #a\:b { color: red }
+          </style>
+          <p id=p1 class='second two'>x</p><p id=p2 class=10>y</p><p id=a:b>z</p>");
+        Assert.Equal(Red, ColorOf(doc, "p1"));
+        Assert.Equal(Blue, ColorOf(doc, "p2"));
+        Assert.Equal(Red, ColorOf(doc, "a:b"));
+    }
+
+    [Fact]
     public void Nested_lists_keep_parse_limits()
     {
         Assert.NotNull(Selector.Parse(":is(" + string.Join(" ", Enumerable.Repeat("a", 20)) + ")"));
