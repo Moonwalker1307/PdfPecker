@@ -58,6 +58,33 @@ public class ImageSizingTests
         => AssertSize(666.67f, 166.67f, Image($"<div style='width:100px'><img src='{Src(2000, 500)}'></div>"));
 
     [Theory]
+    [InlineData("", 96, 48)]
+    [InlineData("justify-self:stretch", 200, 100)]
+    [InlineData("justify-self:stretch;height:30px", 200, 30)]
+    [InlineData("justify-self:stretch;max-width:150px", 150, 75)]
+    [InlineData("justify-self:stretch;margin:0 20px;border:3px solid;padding:2px", 150, 75)]
+    [InlineData("justify-self:stretch;align-self:stretch", 200, 150)]
+    public void An_image_in_a_grid_stretches_only_when_asked(string style, float w, float h)
+        => AssertSize(w, h, Image("<div style='display:grid;grid-template-columns:200px 200px'>" +
+                                  $"<img src='{Src(96, 48)}' style='display:block;{style}'><div style='height:150px'></div></div>"));
+
+    [Theory]
+    [InlineData("", "", 200, 100)]
+    [InlineData("", "max-width:120px", 120, 60)]
+    [InlineData("", "height:30px", 200, 30)]
+    [InlineData("height:200px", "flex:1", 200, 200)]
+    [InlineData("align-items:start", "", 96, 48)]
+    public void An_image_in_a_flex_column_stretches_across_it(string container, string style, float w, float h)
+        => AssertSize(w, h, Image($"<div style='display:flex;flex-direction:column;width:200px;{container}'><img src='{Src(96, 48)}' style='{style}'></div>"));
+
+    [Theory]
+    [InlineData("", 96, 80)]
+    [InlineData("width:60px", 60, 80)]
+    [InlineData("align-self:start", 96, 48)]
+    public void An_image_in_a_flex_row_stretches_to_the_line(string style, float w, float h)
+        => AssertSize(w, h, Image($"<div style='display:flex'><img src='{Src(96, 48)}' style='{style}'><div style='height:80px;width:50px'></div></div>"));
+
+    [Theory]
     [InlineData("max-height:100%", 128, 80)]
     [InlineData("height:100%", 128, 80)]
     [InlineData("max-height:50%", 64, 40)]

@@ -1146,6 +1146,16 @@ internal sealed partial class LayoutEngine
                 if (s.Height.IsAuto || s.Height.IsPercent && cbH == null) imgH *= Math.Max(0, room) / imgW;
                 imgW = Math.Max(0, room);
             }
+            // A height imposed by the container (a stretched or flexed item) is the picture's height, as in Chrome,
+            // within its min-height and max-height.
+            if (hasHOverride)
+            {
+                float boxFrame = s.BorderBox ? frameV : 0;
+                imgH = overrideH - frameV;
+                if (HeightOf(s.MaxHeight, cbH) is float maxH) imgH = Math.Min(imgH, maxH - boxFrame);
+                if (MinHeightOf(s, cbH) is float minH) imgH = Math.Max(imgH, minH - boxFrame);
+                imgH = Math.Max(0, imgH);
+            }
             contentW = imgW;
         }
         else if (hasWOverride)
