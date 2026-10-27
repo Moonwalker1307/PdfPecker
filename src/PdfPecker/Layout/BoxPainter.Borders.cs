@@ -107,16 +107,17 @@ internal static partial class BoxPainter
     private static BorderStyle Collapsed(BorderStyle style, bool collapsed)
         => !collapsed ? style : style switch { BorderStyle.Inset => BorderStyle.Ridge, BorderStyle.Outset => BorderStyle.Groove, _ => style };
 
-    // How Chrome shades the 3D styles: the dark side loses this much of its brightest channel, and a colour below the
-    // luminance threshold is too dark to darken, so its light side is lightened by the same amount instead.
-    private const float ShadeAmount = 0.33f, LightenBelowLuminance = 0.0622f;
-    private const uint BlackLightened = 0x545454;
+    // How Chrome shades the 3D styles: the dark side loses this much of its brightest channel and the light side gains
+    // it. A colour as dark as #202020 or darker (by squared distance from black) is lightened first and then shaded from
+    // there, and one nearer white than #ebebeb keeps its own colour on the light side.
+    private const float ShadeAmount = 0.33f;
+    private const int TooDark = 3 * 0x20 * 0x20, TooLight = 3 * (0xFF - 0xEB) * (0xFF - 0xEB);
 
     /// <summary>
-    /// The colour of one side of a 3D border, as Chrome shades it: the top and left of an inset border (and the bottom
-    /// and right of an outset one) are darkened; the other sides keep the colour, unless it is too dark to show a
-    /// difference, when they are lightened instead. A groove is an inset outer half with an outset inner half, a ridge
-    /// the reverse.
+    /// The colour of one side of a 3D border, as Chrome 153 shades it: the top and left of an inset border (and the
+    /// bottom and right of an outset one) are darkened, the other sides lightened, each by scaling the colour so that its
+    /// brightest channel moves by a third. A groove is an inset outer half with an outset inner half, a ridge the
+    /// reverse.
     /// </summary>
     public static uint Shade3D(BorderStyle style, int side, uint color, bool innerHalf = false)
     {
@@ -124,21 +125,25 @@ internal static partial class BoxPainter
             style = (style == BorderStyle.Groove) != innerHalf ? BorderStyle.Inset : BorderStyle.Outset;
         if (style is not (BorderStyle.Inset or BorderStyle.Outset)) return color;
         bool darken = (side is SideTop or SideLeft) == (style == BorderStyle.Inset);
-        uint a = color & 0xFF000000;
-        float r = (color >> 16 & 0xFF) / 255f, g = (color >> 8 & 0xFF) / 255f, b = (color & 0xFF) / 255f;
-        float v = Math.Max(r, Math.Max(g, b));
-        if (darken)
+        int ri = (int)(color >> 16 & 0xFF), gi = (int)(color >> 8 & 0xFF), bi = (int)(color & 0xFF);
+        if (ri * ri + gi * gi + bi * bi <= TooDark)
         {
-            float k = v > 0 ? Math.Max(0, (v - ShadeAmount) / v) : 0;
-            return a | Channel(r * k) << 16 | Channel(g * k) << 8 | Channel(b * k);
+            // Too dark to darken: both sides start from the colour lightened once.
+            color = Scale(color, lighten: true);
+            return darken ? color : Scale(color, lighten: true);
         }
-        // How dark the colour looks; the weights and the threshold reproduce which colours Chrome lightens (grey up to
-        // #363636, red up to #7f0000, green up to #004000, and nearly every blue).
-        float lum = 0.215f * MathF.Pow(r, 1.8f) + 0.73f * MathF.Pow(g, 1.8f) + 0.055f * MathF.Pow(b, 1.8f);
-        if (lum >= LightenBelowLuminance) return color;
-        float m = Math.Min(1, v + ShadeAmount) / Math.Max(v, 1e-6f);
-        if (v == 0) return a | BlackLightened;
-        return a | Channel(r * m) << 16 | Channel(g * m) << 8 | Channel(b * m);
+        if (!darken && (0xFF - ri) * (0xFF - ri) + (0xFF - gi) * (0xFF - gi) + (0xFF - bi) * (0xFF - bi) < TooLight) return color;
+        return Scale(color, !darken);
+
+        static uint Scale(uint color, bool lighten)
+        {
+            float r = (color >> 16 & 0xFF) / 255f, g = (color >> 8 & 0xFF) / 255f, b = (color & 0xFF) / 255f;
+            float v = Math.Max(r, Math.Max(g, b));
+            // Black has no channel to scale; Chrome lightens it to a third of white.
+            if (v == 0) return lighten ? color & 0xFF000000 | 0x545454 : color;
+            float m = lighten ? Math.Min(1, v + ShadeAmount) / v : Math.Max(0, v - ShadeAmount) / v;
+            return color & 0xFF000000 | Channel(r * m) << 16 | Channel(g * m) << 8 | Channel(b * m);
+        }
 
         static uint Channel(float c) => (uint)Math.Clamp(c * 255.999f, 0, 255);
     }
