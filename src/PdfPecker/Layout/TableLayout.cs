@@ -860,6 +860,8 @@ internal sealed partial class LayoutEngine
                 foreach (var cw in widths) contentW += cw;
             }
         }
+        // A table without columns still has the width it is given, as in Chrome, which paints it at that size.
+        if (n == 0 && specified) contentW = Math.Max(contentW, avail);
         float boxW = contentW + frameL + frameR;
         if (s.MarginLeft.IsAuto && s.MarginRight.IsAuto) ml = Math.Max(0, (availW - boxW) / 2);
         else if (s.MarginLeft.IsAuto) ml = Math.Max(0, availW - boxW - mr);
@@ -1680,62 +1682,71 @@ internal sealed partial class LayoutEngine
         try
         {
             var st = CollectInline(nodes, 100000);
-            var items = st.Items;
-            float min = 0, max = 0, group = 0, line = 0, trailing = 0;
-            Item? prev = null;
-            foreach (var it in items)
-            {
-                // The kerning between neighbouring words and spaces counts, as it does when the lines are broken.
-                float kern = prev != null ? PairKern(prev, it) : 0;
-                prev = it;
-                TrailingSpace(it, kern, ref trailing);
-                if (it.Kind == ItemKind.Break)
-                {
-                    min = Math.Max(min, group);
-                    max = Math.Max(max, line - trailing);
-                    group = line = trailing = 0;
-                    continue;
-                }
-                if (it.Kind == ItemKind.Space && it.Breakable)
-                {
-                    min = Math.Max(min, group);
-                    group = 0;
-                    line += it.Width + kern;
-                    continue;
-                }
-                if (it.Kind == ItemKind.Float)
-                {
-                    min = Math.Max(min, it.FloatMin);
-                    line += it.Width;
-                    continue;
-                }
-                line += it.Width + kern;
-                if (it.Kind == ItemKind.Text && (it.Style.WordBreak == WordBreak.BreakAll || it.Style.OverflowWrap == OverflowWrap.Anywhere
-                    || it.Style.LineBreak == LineBreak.Anywhere))
-                {
-                    // overflow-wrap: anywhere, word-break: break-all and line-break: anywhere let the word shrink down to
-                    // its widest letter.
-                    min = Math.Max(min, group);
-                    group = 0;
-                    var f = it.Style.Font;
-                    for (int k = 0; k < it.Length; k++) min = Math.Max(min, f.CharWidth(it.Source[it.Start + k], it.Style.TextSize) + it.Style.LetterSpacing);
-                    continue;
-                }
-                group += (it.MinWidth >= 0 ? it.MinWidth : it.Width) + (group > 0 ? kern : 0);
-                if (it.BreakAfter != BreakAfter.None)
-                {
-                    min = Math.Max(min, group + (it.BreakAfter == BreakAfter.SoftHyphen ? HyphenWidth(it.Style) : 0));
-                    group = 0;
-                }
-            }
+            var result = ItemsIntrinsic(st.Items);
             ReturnState(st);
-            return (Math.Max(min, group), Math.Max(max, line - trailing));
+            return result;
         }
         finally
         {
             if (--_inlineDepth == 0) _itemPoolUsed = 0;
             _measuring = saved;
         }
+    }
+
+    /// <summary>
+    /// The min-content and max-content widths of a run's items: the widest unbreakable group of words and the widest
+    /// line between forced breaks.
+    /// </summary>
+    private static (float Min, float Max) ItemsIntrinsic(List<Item> items)
+    {
+        float min = 0, max = 0, group = 0, line = 0, trailing = 0;
+        Item? prev = null;
+        foreach (var it in items)
+        {
+            // The kerning between neighbouring words and spaces counts, as it does when the lines are broken.
+            float kern = prev != null ? PairKern(prev, it) : 0;
+            prev = it;
+            TrailingSpace(it, kern, ref trailing);
+            if (it.Kind == ItemKind.Break)
+            {
+                min = Math.Max(min, group);
+                max = Math.Max(max, line - trailing);
+                group = line = trailing = 0;
+                continue;
+            }
+            if (it.Kind == ItemKind.Space && it.Breakable)
+            {
+                min = Math.Max(min, group);
+                group = 0;
+                line += it.Width + kern;
+                continue;
+            }
+            if (it.Kind == ItemKind.Float)
+            {
+                min = Math.Max(min, it.FloatMin);
+                line += it.Width;
+                continue;
+            }
+            line += it.Width + kern;
+            if (it.Kind == ItemKind.Text && (it.Style.WordBreak == WordBreak.BreakAll || it.Style.OverflowWrap == OverflowWrap.Anywhere
+                || it.Style.LineBreak == LineBreak.Anywhere))
+            {
+                // overflow-wrap: anywhere, word-break: break-all and line-break: anywhere let the word shrink down to
+                // its widest letter.
+                min = Math.Max(min, group);
+                group = 0;
+                var f = it.Style.Font;
+                for (int k = 0; k < it.Length; k++) min = Math.Max(min, f.CharWidth(it.Source[it.Start + k], it.Style.TextSize) + it.Style.LetterSpacing);
+                continue;
+            }
+            group += (it.MinWidth >= 0 ? it.MinWidth : it.Width) + (group > 0 ? kern : 0);
+            if (it.BreakAfter != BreakAfter.None)
+            {
+                min = Math.Max(min, group + (it.BreakAfter == BreakAfter.SoftHyphen ? HyphenWidth(it.Style) : 0));
+                group = 0;
+            }
+        }
+        return (Math.Max(min, group), Math.Max(max, line - trailing));
     }
 
     /// <summary>
@@ -1783,47 +1794,10 @@ internal sealed partial class LayoutEngine
             // place of the words before it.
             _inlineDepth++;
             var st = CollectInline(run, 100000);
-            var items = st.Items;
             run.Clear();
-            float group = 0, line = 0, trailing = 0;
-            Item? prev = null;
-            foreach (var it in items)
-            {
-                // The kerning between neighbouring words and spaces counts, as it does when the lines are broken.
-                float kern = prev != null ? PairKern(prev, it) : 0;
-                prev = it;
-                TrailingSpace(it, kern, ref trailing);
-                if (it.Kind == ItemKind.Break)
-                {
-                    min = Math.Max(min, group);
-                    max = Math.Max(max, line - trailing);
-                    group = line = trailing = 0;
-                    continue;
-                }
-                if (it.Kind == ItemKind.Space && it.Breakable)
-                {
-                    min = Math.Max(min, group);
-                    group = 0;
-                    line += it.Width + kern;
-                    continue;
-                }
-                if (it.Kind == ItemKind.Float)
-                {
-                    min = Math.Max(min, it.FloatMin);
-                    line += it.Width;
-                    continue;
-                }
-                group += (it.MinWidth >= 0 ? it.MinWidth : it.Width) + (group > 0 ? kern : 0);
-                line += it.Width + kern;
-                // A break opportunity without a space (after a hyphen, around an inline-block) ends the group too.
-                if (it.BreakAfter != BreakAfter.None)
-                {
-                    min = Math.Max(min, group + (it.BreakAfter == BreakAfter.SoftHyphen ? HyphenWidth(it.Style) : 0));
-                    group = 0;
-                }
-            }
-            min = Math.Max(min, group);
-            max = Math.Max(max, line - trailing);
+            var (runMin, runMax) = ItemsIntrinsic(st.Items);
+            min = Math.Max(min, runMin);
+            max = Math.Max(max, runMax);
             ReturnState(st);
             if (--_inlineDepth == 0) _itemPoolUsed = 0;
         }

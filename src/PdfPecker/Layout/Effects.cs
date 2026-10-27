@@ -253,6 +253,7 @@ internal sealed partial class LayoutEngine
             case RectOp r: r.Color = f.Apply(r.Color); break;
             case BorderRectOp br: br.Color = f.Apply(br.Color); break;
             case RoundRectOp rr: rr.Color = f.Apply(rr.Color); break;
+            case PathOp path: path.Color = f.Apply(path.Color); break;
             case LineOp l: l.Color = f.Apply(l.Color); break;
             case TextOp t: t.Color = f.Apply(t.Color); break;
             case CircleOp c: c.Color = f.Apply(c.Color); break;

@@ -124,10 +124,10 @@ internal sealed partial class LayoutEngine
     private float LayoutSpanner(Element e, float x, float y, float w)
     {
         var s = e.Style;
-        float top = y + CollapseMargins(s.MarginTop.IsAuto ? 0 : s.MarginTop.Resolve(w), LeadingMargin(e, w));
+        float top = y + LeadingMargin(e, w).With(s.MarginTop.IsAuto ? 0 : s.MarginTop.Resolve(w)).Value;
         if (s.PageBreakBefore) top = NextPage(top);
         float bottom = LayoutBlockBox(e, x, top, w, shrinkToFit: false);
-        float mb = CollapseMargins(s.MarginBottom.IsAuto ? 0 : s.MarginBottom.Resolve(w), _boxTrailing);
+        float mb = _boxTrailing.With(s.MarginBottom.IsAuto ? 0 : s.MarginBottom.Resolve(w)).Value;
         return s.PageBreakAfter ? NextPage(bottom + mb) : bottom + mb;
     }
 
@@ -195,7 +195,7 @@ internal sealed partial class LayoutEngine
             {
                 _flowRange = (from, to);
                 float end = LayoutFlow(e, x, y, colW);
-                return end - _flowTrailing;
+                return end - _flowTrailing.Value;
             }
             // Balancing starts from the content's height in columns that only forced breaks end.
             rows = new[] { UnboundedColumn };
@@ -562,7 +562,7 @@ internal sealed partial class LayoutEngine
         _flowMarks = marks;
         try
         {
-            float withMargin = LayoutFlow(e, x, 0, colW), end = withMargin - _flowTrailing;
+            float withMargin = LayoutFlow(e, x, 0, colW), end = withMargin - _flowTrailing.Value;
             if (_floats.Any && _floats.Bottom > end) end = _floats.Bottom;
             List<(string, float)>? anchors = null;
             if (_captureAnchors != null)
@@ -763,6 +763,9 @@ internal sealed partial class LayoutEngine
                 break;
             case RoundRectOp rr:
                 ClipToFragments(rr, rr.Y, rr.Y + rr.H, g, into, ref lastK);
+                break;
+            case PathOp path:
+                ClipToFragments(path, path.Y0, path.Y1, g, into, ref lastK);
                 break;
             case BackgroundOp bg:
             {
