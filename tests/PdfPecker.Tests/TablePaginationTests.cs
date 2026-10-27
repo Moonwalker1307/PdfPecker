@@ -28,7 +28,7 @@ public class TablePaginationTests
             Assert.Equal(1, lines.Count(l => l == "Foot"));
             rows.AddRange(lines.Where(l => l.StartsWith("Row ", StringComparison.Ordinal)));
         }
-        // No row is cut in half: each appears once, whole, on one page.
+        // Rows that break inside break below their text, which each row has once, on one page.
         Assert.Equal(Enumerable.Range(1, 20).Select(i => "Row " + i), rows);
         Assert.Equal("After", pages[^1].Lines[^1].Text);
     }
@@ -44,17 +44,40 @@ public class TablePaginationTests
         Assert.Equal("Row 10", pages[1].Lines[1].Text);
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void A_table_whose_first_row_does_not_fit_starts_on_the_next_page(bool foot)
+    [Fact]
+    public void A_table_whose_first_row_does_not_fit_starts_on_the_next_page()
     {
-        // 260 points of the 300-point page are used, so the header fits but the first 30-point row does not: as in
-        // Chrome, the header and footer move with it instead of staying behind on their own.
-        var pages = Pages($"<div style='height: 260pt'>Before</div>{Table(3, foot)}");
+        // 260 points of the 300-point page are used, so the header fits but the first 30-point row's text does not
+        // above the footer: as in Chrome, the header and footer move with it instead of staying behind on their own.
+        var pages = Pages($"<div style='height: 260pt'>Before</div>{Table(3)}");
         Assert.Equal(new[] { "Before" }, pages[0].Lines.Select(l => l.Text));
         Assert.Equal("Head", pages[1].Lines[0].Text);
         Assert.Equal("Row 1", pages[1].Lines[1].Text);
+    }
+
+    [Fact]
+    public void A_row_whose_text_fits_breaks_inside_with_the_rest_of_its_height_on_the_next_page()
+    {
+        // Without a footer, the first row's text fits under the header: as in Chrome, the row breaks below it, and the
+        // rest of its 30 points goes on under the header repeated on the next page.
+        var pages = Pages($"<div style='height: 260pt'>Before</div>{Table(3, foot: false)}");
+        Assert.Equal(new[] { "Before", "Head", "Row 1" }, pages[0].Lines.Select(l => l.Text));
+        Assert.Equal(new[] { "Head", "Row 2", "Row 3" }, pages[1].Lines.Select(l => l.Text));
+        Assert.True(pages[1].Lines[1].Y > pages[1].Lines[0].Y + 20);
+    }
+
+    [Theory]
+    [InlineData("", new[] { "Before", "L1", "L2", "L3", "L4" })]
+    [InlineData("tr { break-inside: avoid }", new[] { "Before" })]
+    [InlineData("td:first-child { padding-top: 60pt }", new[] { "Before" })]
+    public void A_row_breaks_between_the_lines_of_its_cells_unless_a_cell_has_none_before_the_break(string css, string[] firstPage)
+    {
+        // As in Chrome, a row that does not fit breaks inside, between its cells' lines, unless it may not or a cell
+        // would have nothing before the break: then it moves to the next page whole.
+        var pages = Pages($"<style>{css}</style><div style='height: 240pt'>Before</div><table><tr><td>L1<br>L2<br>L3<br>L4<br>L5<br>L6</td>"
+                          + "<td>Side</td></tr></table>");
+        Assert.Equal(firstPage, pages[0].Lines.Select(l => l.Text.Replace(" Side", "", StringComparison.Ordinal)).Where(t => t != "Side"));
+        Assert.Contains("L6", pages[1].Lines.Select(l => l.Text));
     }
 
     [Theory]
