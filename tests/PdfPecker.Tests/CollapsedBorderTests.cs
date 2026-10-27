@@ -175,8 +175,9 @@ public class CollapsedBorderTests
     public void ATableWithoutAFooterStopsUnderTheLastRowOnAPage()
     {
         // Lines above each cell only: the row that moved to the next page draws the line above it there, and Chrome
-        // draws it under the last row on the page too, where the table's sides stop.
-        var ops = Layout("<style>body{margin:0} td{padding:0;height:23pt;border-top:1px solid #000} table{border:3px solid #f00}</style>"
+        // draws it under the last row on the page too, where the table's sides stop. Rows that may break inside break at
+        // the page's end instead, as their content fits before it.
+        var ops = Layout("<style>body{margin:0} td{padding:0;height:23pt;border-top:1px solid #000} tr{break-inside:avoid} table{border:3px solid #f00}</style>"
                          + "<table style='border-collapse:collapse;width:300px'>"
                          + string.Concat(Enumerable.Range(1, 60).Select(i => $"<tr><td>Row {i}</td><td>{i}</td></tr>")) + "</table>");
         var left = Rects(ops, 0xFFFF0000).Where(r => r.H > r.W).MinBy(r => r.Y)!;
