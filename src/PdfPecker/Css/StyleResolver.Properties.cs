@@ -277,7 +277,10 @@ internal sealed partial class StyleResolver
             case "border-image-width": ApplyBorderImageWidth(s, parent, in d); break;
             case "border-image-outset": ApplyBorderImageOutset(s, parent, in d); break;
             case "border-image-repeat": ApplyBorderImageRepeat(s, parent, in d); break;
-            case "outline-style": s.OutlineStyle = d.Lower == "auto" ? BorderStyle.Solid : ParseBorderStyle(d.Lower, s.OutlineStyle); break;
+            case "outline-style":
+                if (d.Lower == "auto") (s.OutlineStyle, s.OutlineAuto) = (BorderStyle.Solid, true);
+                else if (CssParser.IsBorderStyle(d.Lower)) (s.OutlineStyle, s.OutlineAuto) = (ParseBorderStyle(d.Lower, s.OutlineStyle), false);
+                break;
             case "outline-width": s.OutlineWidth = BorderWidth(d.Lower, d.Em, s.OutlineWidth); break;
             // invert is drawn as the text colour, as browsers without inversion do.
             case "outline-color": s.OutlineColor = d.Lower == "invert" ? null : BorderColor(d.Value, s); break;

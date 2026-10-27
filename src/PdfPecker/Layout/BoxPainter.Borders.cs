@@ -17,6 +17,9 @@ internal static partial class BoxPainter
     /// </summary>
     private const float MinGrooveWidth = 1.5f;
 
+    /// <summary>A side with more dashes than this keeps the plain pattern instead of a fitted one.</summary>
+    private const float MaxBorderDashes = 10000;
+
     /// <summary>One side of a border: its width, style and colour, with the border's colour already resolved.</summary>
     private readonly record struct BorderSide(float Width, BorderStyle Style, uint Color)
     {
@@ -42,6 +45,9 @@ internal static partial class BoxPainter
             Left = new BorderSide(s.BorderLeft, s.BorderLeftStyle, s.BorderLeftColor ?? s.Color);
         }
 
+        /// <summary>Four alike sides, as an outline has.</summary>
+        public BorderSides(BorderSide all) => Top = Right = Bottom = Left = all;
+
         public BorderSide this[int side] => side switch { SideTop => Top, SideRight => Right, SideBottom => Bottom, _ => Left };
 
         public int ShownCount => (Top.Shows ? 1 : 0) + (Right.Shows ? 1 : 0) + (Bottom.Shows ? 1 : 0) + (Left.Shows ? 1 : 0);
@@ -65,14 +71,14 @@ internal static partial class BoxPainter
         bool hasArea = w > 0 && h > 0;
         if (radii is { } r && hasArea)
         {
-            PaintRoundedBorder(group, s, x, y, w, h, r);
+            PaintRoundedBorder(group, new BorderSides(s), x, y, w, h, r);
             return;
         }
         bool wholeBox = sides == AllSides && !collapsedCell;
         // Sides of the 3D styles differ in shade, so they meet along mitred corners like the sides of a rounded border.
         if (wholeBox && hasArea && (Is3D(s.BorderTopStyle) || Is3D(s.BorderRightStyle) || Is3D(s.BorderBottomStyle) || Is3D(s.BorderLeftStyle)))
         {
-            PaintRoundedBorder(group, s, x, y, w, h, default);
+            PaintRoundedBorder(group, new BorderSides(s), x, y, w, h, default);
             return;
         }
         // Chrome fills collapsed table borders side by side, and strokes other boxes' uniform borders.
@@ -82,10 +88,22 @@ internal static partial class BoxPainter
             return;
         }
         float bt = s.BorderTop, br = s.BorderRight, bb = s.BorderBottom, bl = s.BorderLeft;
+        bool trim = wholeBox && SharesTranslucentCorners(new BorderSides(s));
         if ((sides & Top) != 0) Side(group, Collapsed(s.BorderTopStyle, collapsedCell), bt, s.BorderTopColor ?? s.Color, x, y, w, bt, horizontal: true, SideTop);
         if ((sides & Bottom) != 0) Side(group, Collapsed(s.BorderBottomStyle, collapsedCell), bb, s.BorderBottomColor ?? s.Color, x, y + h - bb, w, bb, horizontal: true, SideBottom);
-        if ((sides & Left) != 0) Side(group, Collapsed(s.BorderLeftStyle, collapsedCell), bl, s.BorderLeftColor ?? s.Color, x, y, bl, h, horizontal: false, SideLeft);
-        if ((sides & Right) != 0) Side(group, Collapsed(s.BorderRightStyle, collapsedCell), br, s.BorderRightColor ?? s.Color, x + w - br, y, br, h, horizontal: false, SideRight);
+        if ((sides & Left) != 0) Side(group, Collapsed(s.BorderLeftStyle, collapsedCell), bl, s.BorderLeftColor ?? s.Color, x, y, bl, h, horizontal: false, SideLeft, trim);
+        if ((sides & Right) != 0) Side(group, Collapsed(s.BorderRightStyle, collapsedCell), br, s.BorderRightColor ?? s.Color, x + w - br, y, br, h, horizontal: false, SideRight, trim);
+    }
+
+    /// <summary>
+    /// True when all four sides are the same translucent dashes or dots: the corners, where a horizontal and a vertical
+    /// side both start with a dash or a dot, would then show darker than the rest, so the vertical sides leave them out.
+    /// </summary>
+    private static bool SharesTranslucentCorners(in BorderSides sides)
+    {
+        var top = sides.Top;
+        return top.Shows && top.IsDashedOrDotted && (top.Color >> 24) != 0xFF
+            && sides.Right == top && sides.Bottom == top && sides.Left == top;
     }
 
     /// <summary>True when all four sides are solid, visible, of one width and colour, and leave room inside the box.</summary>
@@ -147,9 +165,8 @@ internal static partial class BoxPainter
     /// Paints the borders of a box with rounded corners: one ring when the sides are alike, else each side as the part of
     /// the ring between the lines from its outer to its inner corners.
     /// </summary>
-    private static void PaintRoundedBorder(GroupOp group, ComputedStyle s, float x, float y, float w, float h, CornerRadii r)
+    private static void PaintRoundedBorder(GroupOp group, in BorderSides sides, float x, float y, float w, float h, CornerRadii r)
     {
-        var sides = new BorderSides(s);
         float bt = sides.Top.Width, br = sides.Right.Width, bb = sides.Bottom.Width, bl = sides.Left.Width;
         float ix = x + bl, iy = y + bt, iw = Math.Max(0, w - bl - br), ih = Math.Max(0, h - bt - bb);
         var inner = r.Inset(bt, br, bb, bl);
@@ -271,7 +288,8 @@ internal static partial class BoxPainter
     /// Paints one side of a border as the rectangle (x, y, w, h). <paramref name="which"/> (0 top, 1 right, 2 bottom,
     /// 3 left) shades the 3D styles; without it they are drawn solid, as is a groove or ridge too thin for two shades.
     /// </summary>
-    public static void Side(GroupOp group, BorderStyle style, float width, uint color, float x, float y, float w, float h, bool horizontal, int which = -1)
+    public static void Side(GroupOp group, BorderStyle style, float width, uint color, float x, float y, float w, float h, bool horizontal, int which = -1,
+        bool trimCorners = false)
     {
         if (width <= 0 || style == BorderStyle.None || !CssColor.IsVisible(color)) return;
         switch (style)
@@ -284,15 +302,64 @@ internal static partial class BoxPainter
                 break;
             case BorderStyle.Dashed:
             case BorderStyle.Dotted:
-                if (horizontal) group.Ops.Add(new LineOp(x, y + h / 2, x + w, y + h / 2, h, color, style == BorderStyle.Dotted));
-                else group.Ops.Add(new LineOp(x + w / 2, y, x + w / 2, y + h, w, color, style == BorderStyle.Dotted));
+            {
+                var line = horizontal
+                    ? new LineOp(x, y + h / 2, x + w, y + h / 2, h, color, style == BorderStyle.Dotted)
+                    : new LineOp(x + w / 2, y, x + w / 2, y + h, w, color, style == BorderStyle.Dotted);
+                FitDashes(line, width, horizontal ? w : h, trimCorners);
+                group.Ops.Add(line);
                 break;
+            }
             case BorderStyle.Double when width >= MinDoubleWidth:
                 PaintDouble(group, color, x, y, w, h, horizontal);
                 break;
             default:
                 group.Ops.Add(new RectOp(x, y, w, h, color));
                 break;
+        }
+    }
+
+    /// <summary>
+    /// Gives a dashed or dotted border side the pattern Chrome draws: dashes of two widths with gaps of one (three and two
+    /// below three pixels), or round dots a width apart, with the gaps spread so that the side starts and ends on a dash
+    /// or a dot, which then fills the corner. With <paramref name="trimCorners"/> the side leaves its two corners to the
+    /// sides that meet it there, keeping the pattern where it was.
+    /// </summary>
+    private static void FitDashes(LineOp line, float width, float length, bool trimCorners)
+    {
+        bool dotted = line.Dotted;
+        float dash = dotted ? width : width * (width >= 3 * CssPixel ? 2 : 3), gap = dotted ? width : width * (width >= 3 * CssPixel ? 1 : 2);
+        if (!(length > 0) || length / (dash + gap) > MaxBorderDashes) return;
+        float fewest = MathF.Floor((length + gap) / (dash + gap));
+        if (fewest >= 2)
+        {
+            // The number of dashes that leaves the gap closest to the wanted one.
+            float fewGap = (length - fewest * dash) / (fewest - 1), manyGap = (length - (fewest + 1) * dash) / fewest;
+            gap = manyGap <= 0 || MathF.Abs(fewGap - gap) < MathF.Abs(manyGap - gap) ? fewGap : manyGap;
+        }
+        else gap = Math.Max(gap, length);
+        bool vertical = line.X1 == line.X2;
+        if (dotted)
+        {
+            // Round caps on zero-length dashes, from the centre of the first dot to the centre of the last; the step is a
+            // hair short so that rounding never drops the last dot.
+            float step = dash + gap, inset = width / 2 + (trimCorners && fewest >= 3 ? step : 0);
+            Shorten(line, vertical, inset, inset);
+            line.DashGap = step * (1 - 1e-4f);
+            return;
+        }
+        line.DashLength = dash;
+        line.DashGap = gap;
+        if (trimCorners)
+        {
+            Shorten(line, vertical, width, width);
+            line.DashPhase = width;
+        }
+
+        static void Shorten(LineOp line, bool vertical, float start, float end)
+        {
+            if (vertical) { line.Y1 += start; line.Y2 -= end; }
+            else { line.X1 += start; line.X2 -= end; }
         }
     }
 
