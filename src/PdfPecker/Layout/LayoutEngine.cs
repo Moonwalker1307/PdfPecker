@@ -148,7 +148,7 @@ internal sealed partial class LayoutEngine
 
     private int PageOf(float y) => _grid.PageOf(y + Eps);
 
-    private bool AtPageTop(float y) => y - _grid.Start(PageOf(y)) < 0.5f;
+    private bool AtPageTop(float y) => y - FlowStart(PageOf(y)) < 0.5f;
 
     /// <summary>Returns the y at which a box of height h should start so that it does not straddle a page boundary.</summary>
     private float FitOnPage(float y, float h)
@@ -162,10 +162,10 @@ internal sealed partial class LayoutEngine
         {
             float pageEnd = _grid.Start(p + 1);
             // The page's footnote area takes the bottom of its flow.
-            float flowEnd = _footnoteReserve.Count > 0 || _edgeReserve.Count > 0 ? FlowEnd(p) : pageEnd;
+            float flowEnd = _footnoteReserve.Count > 0 || _edgeReserve.Count > 0 || _splitRow != null ? FlowEnd(p) : pageEnd;
             if (y + h <= flowEnd + Eps) return y;
             _columnNotes?.Break(p, y, y + h - flowEnd);
-            y = pageEnd;
+            y = FlowStart(p + 1);
             if (_grid is not ColumnGrid) break;
             Cancellation.ThrowIfCancellationRequested();
             p++;
@@ -178,7 +178,7 @@ internal sealed partial class LayoutEngine
         if (!_paginate || AtPageTop(y)) return y;
         int p = PageOf(y);
         _columnNotes?.Break(p, y, 0);
-        return _grid.Start(p + 1);
+        return FlowStart(p + 1);
     }
 
     /// <summary>True when the ops draw nothing: only the empty groups that boxes reserve for their backgrounds.</summary>
@@ -190,7 +190,8 @@ internal sealed partial class LayoutEngine
     }
 
     private bool CrossesPage(float top, float bottom) => _paginate && bottom - top > Eps
-        && (PageOf(top) != PageOf(bottom - 0.5f) || (_footnoteReserve.Count > 0 || _edgeReserve.Count > 0) && bottom > FlowEnd(PageOf(top)) + Eps);
+        && (PageOf(top) != PageOf(bottom - 0.5f)
+            || (_footnoteReserve.Count > 0 || _edgeReserve.Count > 0 || _splitRow != null) && bottom > FlowEnd(PageOf(top)) + Eps);
 
     private void Truncate(int count, bool keepFloats = false)
     {
@@ -551,7 +552,7 @@ internal sealed partial class LayoutEngine
         float y = f.Y;
         if (!_paginate || top <= y) return top;
         int k = PageOf(y);
-        if (PageOf(top) > k) return _grid.Start(k + 1);
+        if (PageOf(top) > k) return FlowStart(k + 1);
         return k > 0 && f.AnyContent && !f.AfterForcedBreak && AtPageTop(y) ? y : top;
     }
 
@@ -1308,6 +1309,9 @@ internal sealed partial class LayoutEngine
         }
 
         float bottom = cy + contentH + pb + bb;
+        // A box taller than its content is that height on the pages it is split across, under a header repeated over a
+        // split table row and above a footer there.
+        if (_splitRow != null && contentH > contentBottom - cy + Eps) bottom = PastSplitRowRoom(y, bottom);
         // A legend taller than the top border moves the border down to its middle, and the background with it.
         float paintTop = y + borderOutset;
         if (pages != null && !SameOnPages(pages, y, bottom)) PaintOnPages(group, s, pages, paintTop, bottom, borderGap: borderGap);
