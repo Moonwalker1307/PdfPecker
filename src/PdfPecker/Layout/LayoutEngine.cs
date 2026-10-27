@@ -1426,10 +1426,12 @@ internal sealed partial class LayoutEngine
         else
         {
             contentW = availW - ml - mr - frame;
+            // Shrink-to-fit is min(max(min-content, available), max-content): a box never gets narrower than its
+            // longest word, even in a containing block of no width, such as an empty inline.
             if (shrinkToFit)
             {
-                var (_, max) = Intrinsic(e);
-                contentW = Math.Min(contentW, max - frame);
+                var (min, max) = Intrinsic(e);
+                contentW = Math.Min(Math.Max(contentW, min - frame), max - frame);
             }
             // min-height and max-height carry over to the width through the ratio.
             if (s.AspectRatio > 0)
