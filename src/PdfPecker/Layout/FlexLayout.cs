@@ -130,6 +130,16 @@ internal sealed partial class LayoutEngine
 
     private static float GapOf(Length? gap, float basis) => gap is { } g ? Math.Max(0, g.Resolve(basis)) : 0;
 
+    /// <summary>Whether the break between two flex lines is forced, by an item of either line.</summary>
+    private static bool ForcedBreakBetween(List<BoxItem> above, List<BoxItem> below)
+    {
+        foreach (var it in above)
+            if (it.El != null && it.Style.PageBreakAfter) return true;
+        foreach (var it in below)
+            if (it.El != null && it.Style.PageBreakBefore) return true;
+        return false;
+    }
+
     /// <summary>
     /// Whether an item has to be laid out again when a container stretches it (otherwise stretching is invisible). A
     /// stretched item's height is definite (css-flexbox §9.4 step 11), so percentage heights inside it change too. A
@@ -346,6 +356,9 @@ internal sealed partial class LayoutEngine
             int lineListIndex = _currentListIndex;
             float lineRight = _lastBoxRight, lineFirstBaseline = firstBaseline;
             float lineBottom;
+            // A forced break between two lines is taken when an item of the line above asks for a break after it or
+            // an item of this line for one before it (css-break §3.1): the line opens the next page.
+            if (_paginate && li > 0 && ForcedBreakBetween(lines[li - 1], line)) lineTop = NextPage(lineTop);
             for (bool regrown = false; ; regrown = true)
             {
                 // Stretched items get the line's cross size.
