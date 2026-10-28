@@ -325,7 +325,9 @@ internal sealed class ComputedStyle
     public Length? UnderlineOffset;        // null = auto; from the alphabetic baseline
     public SkipInk SkipInk;                // text-decoration-skip-ink, inherited
     public UnderlinePosition UnderlinePosition; // text-underline-position, inherited
-    public float TextIndent;
+    public Length TextIndent;           // percentages of the block's width
+    public bool TextIndentHanging;      // text-indent: hanging, every line but the first indented
+    public bool TextIndentEachLine;     // text-indent: each-line, lines after forced breaks too
     public float LetterSpacing;
     public bool NoLigatures; // font-variant-ligatures: none or no-common-ligatures, or font-feature-settings: "liga" 0
     public bool NoKerning;               // font-kerning: none, or font-feature-settings: "kern" 0
