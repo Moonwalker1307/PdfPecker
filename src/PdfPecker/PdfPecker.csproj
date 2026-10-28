@@ -34,7 +34,7 @@
          ship in a minor release by accident. Raise the baseline after each release; a deliberate break needs a major
          version and a CompatibilitySuppressions.xml entry. -->
     <EnablePackageValidation>true</EnablePackageValidation>
-    <PackageValidationBaselineVersion>1.20.0</PackageValidationBaselineVersion>
+    <PackageValidationBaselineVersion>1.21.0</PackageValidationBaselineVersion>
   </PropertyGroup>
 
   <!-- CI builds use repository-relative source paths in the PDB, so builds are reproducible from the same commit. -->
