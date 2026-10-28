@@ -182,14 +182,15 @@ public static partial class HtmlToPdf
                         return true;
                     case Element e:
                         foreach (var a in e.Attributes)
-                            if (BundledFonts.BeyondStandard(a.Value) || (a.Key == "style" && CssEscapesBeyondStandard(a.Value))) return true;
+                            if (BundledFonts.BeyondStandard(a.Value) || (a.Key == "style" && (CssEscapesBeyondStandard(a.Value)
+                                || a.Value.Contains("emphasis", StringComparison.OrdinalIgnoreCase)))) return true;
                         foreach (var child in e.Children) stack.Push(child);
                         break;
                 }
             }
             foreach (var rule in _sheet.Rules)
                 foreach (var d in rule.Declarations)
-                    if (BundledFonts.BeyondStandard(d.Value) || CssEscapesBeyondStandard(d.Value)) return true;
+                    if (BundledFonts.BeyondStandard(d.Value) || CssEscapesBeyondStandard(d.Value) || DrawsEmphasisMarks(d.Property, d.Value)) return true;
             foreach (var page in _sheet.PageRules)
                 foreach (var box in page.MarginBoxes.Values)
                     foreach (var d in box)
@@ -198,6 +199,10 @@ public static partial class HtmlToPdf
         }
 
         // A CSS escape such as \2713 in a string, which the text of the style sheet does not show as the character.
+        /// <summary>Whether a declaration draws emphasis marks, most of which are symbols beyond the standard fonts.</summary>
+        private static bool DrawsEmphasisMarks(string property, string value)
+            => property.Contains("emphasis", StringComparison.Ordinal) && !value.Trim().Equals("none", StringComparison.OrdinalIgnoreCase);
+
         private static bool CssEscapesBeyondStandard(string css)
         {
             for (int i = css.IndexOf('\\'); i >= 0 && i + 1 < css.Length; i = css.IndexOf('\\', i + 1))

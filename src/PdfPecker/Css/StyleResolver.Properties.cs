@@ -164,6 +164,9 @@ internal sealed partial class StyleResolver
             case "text-underline-offset": ApplyTextUnderlineOffset(s, parent, in d); break;
             case "text-decoration-skip-ink": ApplySkipInk(s, parent, in d); break;
             case "text-underline-position": ApplyUnderlinePosition(s, parent, in d); break;
+            case "text-emphasis-style": ApplyEmphasisStyle(s, in d); break;
+            case "text-emphasis-color": ApplyEmphasisColor(s, in d); break;
+            case "text-emphasis-position": ApplyEmphasisPosition(s, in d); break;
             case "text-overflow": ApplyTextOverflow(s, in d); break;
             case "letter-spacing": ApplyLetterSpacing(s, in d); break;
             case "word-spacing": ApplyWordSpacing(s, in d); break;

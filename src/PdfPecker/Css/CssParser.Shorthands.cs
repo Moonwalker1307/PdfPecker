@@ -151,6 +151,7 @@ internal static partial class CssParser
                 break;
             case "text-decoration": ExpandTextDecoration(value, longhands); break;
             case "-webkit-text-stroke": ExpandTextStroke(value, longhands); break;
+            case "text-emphasis": ExpandTextEmphasis(value, longhands); break;
             case "border-spacing": ExpandPair(value, "border-spacing-h", "border-spacing-v", longhands); break;
             case "word-wrap": longhands.Add("overflow-wrap", value); break;
             case "-webkit-background-clip": longhands.Add("background-clip", value); break;
@@ -359,6 +360,56 @@ internal static partial class CssParser
         }
         longhands.Add("-webkit-text-stroke-width", width);
         longhands.Add("-webkit-text-stroke-color", color);
+    }
+
+    /// <summary>
+    /// text-emphasis: a style and a colour, either one first and each with its initial value when left out. The colour
+    /// comes before or after the whole style, as in Chrome, which drops "open red dot".
+    /// </summary>
+    private static void ExpandTextEmphasis(string value, LonghandWriter longhands)
+    {
+        var tokens = Tokens(value);
+        string color = "currentcolor";
+        if (tokens.Count > 0 && !IsCssWideKeyword(value))
+        {
+            if (IsColorToken(tokens[^1])) { color = tokens[^1]; tokens.RemoveAt(tokens.Count - 1); }
+            else if (IsColorToken(tokens[0])) { color = tokens[0]; tokens.RemoveAt(0); }
+            if (tokens.Count > 0 && ParseEmphasisStyle(string.Join(" ", tokens)) == null) return;
+        }
+        longhands.Add("text-emphasis-style", tokens.Count == 0 ? "none" : string.Join(" ", tokens));
+        longhands.Add("text-emphasis-color", color);
+
+        static bool IsColorToken(string token) => token.Equals("currentcolor", StringComparison.OrdinalIgnoreCase) || CssColor.TryParse(token, 0, out _);
+    }
+
+    /// <summary>
+    /// text-emphasis-style: none, a string, or filled or open and a shape in either order, either of them alone. Null
+    /// when the value is none of those.
+    /// </summary>
+    internal static (EmphasisShape Shape, bool Open, string? Mark)? ParseEmphasisStyle(string value)
+    {
+        var tokens = Tokens(value.Trim());
+        // A string's first character, with the marks that combine with it, is the mark.
+        if (tokens.Count == 1 && GeneratedContent.UnquoteMark(tokens[0]) is { } mark)
+            return (EmphasisShape.String, false, mark.Length == 0 ? mark : mark.Substring(0, StringInfo.GetNextTextElementLength(mark)));
+        if (tokens.Count == 1 && tokens[0].Equals("none", StringComparison.OrdinalIgnoreCase)) return (EmphasisShape.None, false, null);
+        if (tokens.Count is not (1 or 2)) return null;
+        bool? open = null;
+        EmphasisShape? shape = null;
+        foreach (var token in tokens)
+        {
+            switch (token.ToLowerInvariant())
+            {
+                case "filled" or "open" when open == null: open = token.Equals("open", StringComparison.OrdinalIgnoreCase); break;
+                case "dot" when shape == null: shape = EmphasisShape.Dot; break;
+                case "circle" when shape == null: shape = EmphasisShape.Circle; break;
+                case "double-circle" when shape == null: shape = EmphasisShape.DoubleCircle; break;
+                case "triangle" when shape == null: shape = EmphasisShape.Triangle; break;
+                case "sesame" when shape == null: shape = EmphasisShape.Sesame; break;
+                default: return null;
+            }
+        }
+        return (shape ?? EmphasisShape.Auto, open == true, null);
     }
 
     /// <summary>A pair of longhands (gap, border-spacing): the second repeats the first when there is only one value.</summary>
