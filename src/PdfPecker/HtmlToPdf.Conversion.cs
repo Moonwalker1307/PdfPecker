@@ -128,7 +128,7 @@ public static partial class HtmlToPdf
         /// </summary>
         private void SetUpPage()
         {
-            ScaleAndFit(_page, _scale, _options.Scale != 1);
+            ScaleAndFit(_page, _scale, _options.Scale != 1, InitialStyle(_options.Language));
 
             // Most documents have no bands: one search of the source spares walking the whole tree four times.
             _mayHaveBands = _html.Contains("data-sticky-pdf-", StringComparison.OrdinalIgnoreCase);
@@ -198,11 +198,11 @@ public static partial class HtmlToPdf
             return false;
         }
 
-        // A CSS escape such as \2713 in a string, which the text of the style sheet does not show as the character.
         /// <summary>Whether a declaration draws emphasis marks, most of which are symbols beyond the standard fonts.</summary>
         private static bool DrawsEmphasisMarks(string property, string value)
             => property.Contains("emphasis", StringComparison.Ordinal) && !value.Trim().Equals("none", StringComparison.OrdinalIgnoreCase);
 
+        // A CSS escape such as \2713 in a string, which the text of the style sheet does not show as the character.
         private static bool CssEscapesBeyondStandard(string css)
         {
             for (int i = css.IndexOf('\\'); i >= 0 && i + 1 < css.Length; i = css.IndexOf('\\', i + 1))

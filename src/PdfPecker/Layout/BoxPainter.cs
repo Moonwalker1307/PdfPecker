@@ -171,6 +171,30 @@ internal static partial class BoxPainter
         }
     }
 
+    /// <summary>
+    /// Paints the background layers of an @page box, whose border box is (x, y, w, h), over the whole sheet: the page
+    /// background covers the margins too, whatever background-clip says (CSS Paged Media 3, 3.1), and its layers are
+    /// positioned in the page box's padding box, or the box background-origin names. Its colour is the writer's, which
+    /// fills the sheet first.
+    /// </summary>
+    public static void PaintPageBackground(GroupOp group, ComputedStyle s, float x, float y, float w, float h,
+        (float X, float Y, float W, float H) sheet, ImageLoader? images, float basis)
+    {
+        var layers = s.BackgroundImages;
+        if (layers == null || !s.Visible || w <= 0 || h <= 0) return;
+        uint backdrop = Backdrop(s);
+        for (int i = layers.Length - 1; i >= 0; i--)
+            if (layers[i] is { } layer) PaintLayer(group, s, layer, i, x, y, w, h, images, basis, backdrop, null, null, sheet);
+    }
+
+    /// <summary>The border, or border image, of an @page box whose border box is (x, y, w, h): drawn over the canvas.</summary>
+    public static void PaintPageBorder(GroupOp group, ComputedStyle s, float x, float y, float w, float h, ImageLoader? images)
+    {
+        if (!s.Visible || w <= 0 || h <= 0) return;
+        bool borderImage = s.BorderImageSource != null && PaintBorderImage(group, s, x, y, w, h, images);
+        if (s.HasBorder && !borderImage) PaintBorders(group, s, x, y, w, h, AllSides, false, Radii(s, w, h));
+    }
+
     // A tile start within this distance of the page edge is put on the edge; a tile count this far below a whole
     // number is rounded up to it.
     private const double TileSnap = 0.01, TileCountSlack = 1e-4;
