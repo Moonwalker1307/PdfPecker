@@ -337,6 +337,35 @@ public class GraphicsFeatureTests
     }
 
     [Fact]
+    public void Grid_shorthand_sets_templates_and_auto_flow()
+    {
+        var ops = Layout("""
+            <div style="display:grid; grid-auto-flow: column; grid: auto / 100pt 50pt">
+              <div style="height:10pt; background:#ff0000"></div>
+              <div style="height:10pt; background:#00ff00"></div>
+            </div>
+            <div style="display:grid; grid: 20pt 30pt / auto-flow dense 40pt">
+              <div style="background:#0000ff"></div>
+              <div style="background:#ffff00"></div>
+            </div>
+            <div style="display:grid; grid: auto-flow 15pt / 1fr 4fr">
+              <div style="background:#00ffff"></div>
+              <div style="background:#ff00ff"></div>
+              <div style="background:#000080"></div>
+            </div>
+            """);
+        // The plain template form resets grid-auto-flow to row, so the second item sits beside the first.
+        var a = Box(ops, "#ff0000"); var b = Box(ops, "#00ff00");
+        Near(0, a.X); Near(100, a.W); Near(100, b.X); Near(50, b.W); Near(a.Y, b.Y);
+        // auto-flow after the slash places items down columns of the given size.
+        var c = Box(ops, "#0000ff"); var d = Box(ops, "#ffff00");
+        Near(40, c.W); Near(20, c.H); Near(30, d.H); Near(c.X, d.X); Near(c.Y + 20, d.Y);
+        // auto-flow before the slash sizes the implicit rows.
+        var e = Box(ops, "#00ffff"); var f = Box(ops, "#ff00ff"); var g = Box(ops, "#000080");
+        Near(100, e.W); Near(400, f.W); Near(15, e.H); Near(e.Y, f.Y); Near(e.Y + 15, g.Y); Near(0, g.X);
+    }
+
+    [Fact]
     public void Grid_areas_parse_and_reject_non_rectangles()
     {
         var areas = StyleResolver.ParseGridAreas("\"a a .\" \"a a b\"")!;
