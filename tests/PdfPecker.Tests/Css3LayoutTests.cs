@@ -497,6 +497,17 @@ public class Css3LayoutTests
         Assert.Contains(ops.OfType<TextOp>(), t => t.Text.StartsWith("—", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void Marker_content_none_removes_the_marker()
+    {
+        // content: none leaves no marker, outside or inside; content: normal keeps the counter style's.
+        var ops = Layout("<style>.n li::marker { content: none } .k li::marker { content: normal }</style>" +
+                         "<ol class=n><li>a</li></ol><ul class=n style='list-style-position:inside'><li>b</li></ul><ol class=k><li>c</li></ol>");
+        Assert.DoesNotContain(ops.OfType<TextOp>(), t => t.Text == "1." && t.Baseline == Text(ops, "a").Baseline);
+        Assert.DoesNotContain(ops, op => op is CircleOp);
+        Assert.Contains(ops.OfType<TextOp>(), t => t.Text == "1." && t.Baseline == Text(ops, "c").Baseline);
+    }
+
     [Theory]
     [InlineData("flex-start")]
     [InlineData("center")]

@@ -1076,6 +1076,8 @@ internal sealed partial class LayoutEngine
     private void StartMarker(Element e, float cx, float contentW)
     {
         var s = e.Style;
+        // ::marker { content: none } or an empty string: no marker box at all, as in Chrome.
+        if (e.MarkerContent is { Length: 0 }) return;
         // ::marker { content } and list-style-type: "string" give the marker's own text, drawn as written.
         var custom = e.MarkerContent ?? s.ListStyleString;
         var marker = new ListMarker
