@@ -498,6 +498,17 @@ public class Css3LayoutTests
     }
 
     [Fact]
+    public void Marker_content_none_removes_the_marker()
+    {
+        // content: none leaves no marker, outside or inside; content: normal keeps the counter style's.
+        var ops = Layout("<style>.n li::marker { content: none } .k li::marker { content: normal }</style>" +
+                         "<ol class=n><li>a</li></ol><ul class=n style='list-style-position:inside'><li>b</li></ul><ol class=k><li>c</li></ol>");
+        Assert.DoesNotContain(ops.OfType<TextOp>(), t => t.Text == "1." && t.Baseline == Text(ops, "a").Baseline);
+        Assert.DoesNotContain(ops, op => op is CircleOp);
+        Assert.Contains(ops.OfType<TextOp>(), t => t.Text == "1." && t.Baseline == Text(ops, "c").Baseline);
+    }
+
+    [Fact]
     public void A_larger_marker_makes_its_line_taller_as_in_Chrome()
     {
         // An outside marker moves its line down until the line's ascent holds the marker's; an inside marker is an
