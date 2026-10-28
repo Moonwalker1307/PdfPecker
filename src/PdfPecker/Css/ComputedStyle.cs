@@ -492,6 +492,7 @@ internal sealed class ComputedStyle
     public float? Perspective;                  // points; null = none. Applies to the 3D transforms of the children
     public Length PerspectiveOriginX = new(50, LengthUnit.Percent), PerspectiveOriginY = new(50, LengthUnit.Percent);
     public string? Content;                     // the content property as written; null = normal
+    public bool ContentNone;                    // content: none, which on ::marker removes the marker (normal keeps it)
     public string? StringSet;                   // string-set as written (named strings for running headers); null = none
     public int? BookmarkLevel;                  // bookmark-level: null = unset (h1-h6 take their own level), 0 = none
     public string? BookmarkLabel;               // bookmark-label as written; null = content(text)
@@ -842,6 +843,7 @@ internal sealed class ComputedStyle
         c.Perspective = null;
         c.PerspectiveOriginX = c.PerspectiveOriginY = new Length(50, LengthUnit.Percent);
         c.Content = null;
+        c.ContentNone = false;
         c.CounterReset = c.CounterSet = c.CounterIncrement = null;
         c.FlexDirection = FlexDirection.Row;
         c.UnicodeBidi = UnicodeBidi.Normal;
