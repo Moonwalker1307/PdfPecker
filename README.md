@@ -135,7 +135,7 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   syntaxes. As in browsers, a length without a unit (`width: 200`) counts as pixels only in a page without a doctype;
   with `<!DOCTYPE html>` it is ignored.
   [More](https://pdfpecker.net/docs/html-and-css/)
-- **Paged media**: `@page` sizes and margin boxes, running headers and footers (also a first page of its own, and bands
+- **Paged media**: `@page` sizes, borders, padding and background images (which cover the whole sheet) and margin boxes, running headers and footers (also a first page of its own, and bands
   of their own for named pages), footnotes, tables of contents with page numbers, break control (also table row groups
   and group header rows kept together, as reports keep a group on one page, and forced breaks between table rows and between flex lines), table rows that break inside at a page's end as in Chrome, unless a cell would have nothing before the break, table
   headers and footers repeated on every page (also around a row split across pages), and
