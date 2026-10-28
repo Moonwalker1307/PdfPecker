@@ -122,17 +122,26 @@ internal sealed class ColorGlyphs
     /// The paint tree of a glyph's colour drawing, inside its clip box when it has one. Null when the glyph's drawing
     /// is damaged, has a cycle or is too large: the glyph then draws nothing.
     /// </summary>
-    public ColorPaint? Paint(int gid)
+    public ColorPaint? Paint(int gid) => Paint(gid, out _);
+
+    /// <summary>
+    /// The colour drawing of a glyph, and in <paramref name="read"/> how many paints reading it took, which a glyph past
+    /// the limits also spends before it draws nothing.
+    /// </summary>
+    public ColorPaint? Paint(int gid, out int read)
     {
+        int budget = MaxPaints;
         try
         {
-            int budget = MaxPaints;
             // The glyphs whose paints are being read, outermost first, to stop a cycle of PaintColrGlyph references.
             var stack = new List<int>();
-            return Glyph(gid, stack, 0, ref budget);
+            var paint = Glyph(gid, stack, 0, ref budget);
+            read = MaxPaints - budget;
+            return paint;
         }
         catch (Exception ex) when (ex is FormatException or IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException)
         {
+            read = Math.Clamp(MaxPaints - budget, 1, MaxPaints);
             return null;
         }
     }

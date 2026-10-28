@@ -14,6 +14,12 @@ internal sealed partial class PdfDocumentWriter
     // The drawing of each glyph of a colour subset, by CID: null for a glyph without colour.
     private readonly Dictionary<GlyphSubset, List<SvgShape>?[]> _colorDrawings = new(ReferenceEqualityComparer.Instance);
 
+    // How many colour paints one document may read and draw in all. A font that paints in the text colour gets a subset,
+    // and so a drawing of each glyph, for every text colour, so a 15 KB font whose glyphs each read 50,000 paints in 300
+    // text colours ran for minutes, past cancellation. Real colour fonts take tens to hundreds of paints a glyph; past
+    // this, glyphs draw nothing, as a glyph past the per-glyph limits does.
+    private const int MaxDocumentPaints = 4_000_000;
+
     /// <summary>The number of Type 3 fonts a colour subset needs: one for every 256 glyphs.</summary>
     private static int ColorFontPages(GlyphSubset subset) => (subset.Glyphs.Count - 1) / 256 + 1;
 
@@ -23,15 +29,23 @@ internal sealed partial class PdfDocumentWriter
     /// </summary>
     private void PrepareColorGlyphs()
     {
+        int budget = MaxDocumentPaints;
         foreach (var subset in _subsetList)
         {
             if (subset.Color is not { } colors) continue;
+            Cancellation.ThrowIfCancellationRequested();
             var drawings = new List<SvgShape>?[subset.Glyphs.Count];
             for (int cid = 0; cid < drawings.Length; cid++)
             {
                 int gid = subset.Glyphs[cid];
                 if (!colors.Has(gid)) continue;
-                drawings[cid] = colors.Paint(gid) is { } paint ? ColorGlyphDrawing.Draw(subset.Program, paint, subset.Foreground) : new();
+                ColorPaint? paint = null;
+                if (budget > 0)
+                {
+                    paint = colors.Paint(gid, out int read);
+                    budget -= read;
+                }
+                drawings[cid] = paint != null && budget >= 0 ? ColorGlyphDrawing.Draw(subset.Program, paint, subset.Foreground) : new();
                 RegisterConics(drawings[cid]!);
             }
             _colorDrawings[subset] = drawings;

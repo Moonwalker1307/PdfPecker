@@ -1405,6 +1405,24 @@ public class HostileInputTests
         Assert.True(pdf.Length < 4_000_000, $"{pdf.Length} bytes");
     }
 
+    [Fact]
+    public void Colour_glyphs_in_many_text_colours_stay_bounded()
+    {
+        // 100 glyphs of 32,768 paints each, all in the text colour, written in 300 colours: each colour gets its own
+        // subset and so its own drawing of every glyph, which the limit on the paints of the document keeps bounded.
+        var font = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "ColorHostile.ttf"));
+        var glyphs = new string(Enumerable.Range(0xE100, 100).Select(c => (char)c).ToArray());
+        var sb = new StringBuilder("<div style='font:4px C'>");
+        for (int i = 0; i < 300; i++) sb.Append(CultureInfo.InvariantCulture, $"<span style='color:#{i:x6}'>{glyphs}</span>");
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        long before = GC.GetTotalAllocatedBytes(true);
+        var pdf = Bounded(sb.Append("</div>").ToString(), ColorFont(font));
+        long allocated = GC.GetTotalAllocatedBytes(true) - before;
+        AssertStructurallyValid(pdf);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), $"{watch.Elapsed}");
+        Assert.True(allocated < 4L << 30, $"{allocated} bytes allocated");
+    }
+
     [Theory]
     [InlineData("COLRv1-TestGlyphs.ttf")]
     [InlineData("Nabla-Subset.ttf")] // variable, so the variation store is read too
