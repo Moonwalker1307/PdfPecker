@@ -11,7 +11,7 @@ internal enum PseudoKind : byte
 {
     FirstChild, LastChild, OnlyChild, NthChild, NthLastChild, FirstOfType, LastOfType, OnlyOfType, NthOfType, NthLastOfType,
     Root, Link, Empty, Never, Not, Is, Where, Has, HasAnchor, Lang, Checked, Disabled, Enabled, Required, Optional, ReadOnly,
-    ReadWrite, PlaceholderShown, Default, Always, Dir,
+    ReadWrite, PlaceholderShown, Default, Always, Dir, Valid, Invalid, Open,
 }
 
 /// <summary>The pseudo-element a selector's subject names, if any.</summary>
@@ -138,8 +138,8 @@ internal sealed class Compound
                 return e.Name == "input" && IsCheckable(e) && e.HasAttribute("checked") || e.Name == "option" && e.HasAttribute("selected");
             case PseudoKind.Default:
                 return e.Name == "input" && IsCheckable(e) && e.HasAttribute("checked") || e.Name == "option" && e.HasAttribute("selected");
-            case PseudoKind.Disabled: return IsFormElement(e) && IsDisabled(e);
-            case PseudoKind.Enabled: return IsFormElement(e) && !IsDisabled(e);
+            case PseudoKind.Disabled: return IsFormElement(e) && IsDisabledControl(e);
+            case PseudoKind.Enabled: return IsFormElement(e) && !IsDisabledControl(e);
             case PseudoKind.Required: return IsRequirable(e) && e.HasAttribute("required");
             case PseudoKind.Optional: return IsRequirable(e) && !e.HasAttribute("required");
             case PseudoKind.ReadWrite: return IsReadWrite(e);
@@ -147,6 +147,10 @@ internal sealed class Compound
             case PseudoKind.PlaceholderShown:
                 return (e.Name == "textarea" ? e.InnerText().Length == 0 : e.Name == "input" && string.IsNullOrEmpty(e.GetAttribute("value")))
                        && e.HasAttribute("placeholder") && (e.Name == "textarea" || IsTextInput(e));
+            case PseudoKind.Valid: return FormValidity.Of(e) == true;
+            case PseudoKind.Invalid: return FormValidity.Of(e) == false;
+            // A details or dialog element shown open; a printed page has no open select or picker.
+            case PseudoKind.Open: return e.Name is "details" or "dialog" && e.HasAttribute("open");
             default: return false;
         }
     }
@@ -163,7 +167,8 @@ internal sealed class Compound
 
     private static bool IsRequirable(Element e) => e.Name is "select" or "textarea" || e.Name == "input" && InputType(e) is not ("hidden" or "button" or "submit" or "reset" or "image" or "range" or "color");
 
-    private static bool IsDisabled(Element e)
+    /// <summary>Whether a form element is disabled: by its own attribute, a disabled optgroup or a disabled fieldset around it.</summary>
+    internal static bool IsDisabledControl(Element e)
     {
         if (e.HasAttribute("disabled")) return true;
         if (e.Name == "option" && e.Parent is { Name: "optgroup" } g && g.HasAttribute("disabled")) return true;
@@ -181,8 +186,8 @@ internal sealed class Compound
 
     private static bool IsReadWrite(Element e)
     {
-        if (e.Name == "textarea") return !e.HasAttribute("readonly") && !IsDisabled(e);
-        if (e.Name == "input") return IsTextInput(e) && !e.HasAttribute("readonly") && !IsDisabled(e);
+        if (e.Name == "textarea") return !e.HasAttribute("readonly") && !IsDisabledControl(e);
+        if (e.Name == "input") return IsTextInput(e) && !e.HasAttribute("readonly") && !IsDisabledControl(e);
         for (var x = e; x != null; x = x.Parent)
         {
             var ce = x.GetAttribute("contenteditable");
@@ -301,6 +306,7 @@ internal sealed class Compound
     {
         var saved = _memo;
         _memo = new Dictionary<(PseudoCondition, Element), bool>();
+        FormValidity.Reset();
         return saved;
     }
 
@@ -665,6 +671,9 @@ internal sealed class Selector
             case "read-only": return new PseudoCondition { Kind = PseudoKind.ReadOnly };
             case "read-write": return new PseudoCondition { Kind = PseudoKind.ReadWrite };
             case "placeholder-shown": return new PseudoCondition { Kind = PseudoKind.PlaceholderShown };
+            case "valid": return new PseudoCondition { Kind = PseudoKind.Valid };
+            case "invalid": return new PseudoCondition { Kind = PseudoKind.Invalid };
+            case "open": return new PseudoCondition { Kind = PseudoKind.Open };
             case "scope": return new PseudoCondition { Kind = PseudoKind.Root };
             case "defined": return new PseudoCondition { Kind = PseudoKind.Always };
             case "not":
