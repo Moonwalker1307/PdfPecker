@@ -16,7 +16,9 @@
 #
 # ColorHostile.ttf is for HostileInputTests. U+E000 is a paint graph that doubles at each of 60 levels, so walking it as
 # a tree visits 2^60 paints; U+E001 is 300 transforms nested in one another; U+E002 is a glyph whose clip glyph is a
-# colour glyph that refers back to it.
+# colour glyph that refers back to it. U+E100 to U+E163 are 100 glyphs in the text colour, each a paint graph that
+# doubles at each of 16 levels to 32,768 squares, within the limits of one glyph: in many text colours they test the
+# limit on the paints of a whole document.
 import os
 from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.ttGlyphPen import TTGlyphPen
@@ -98,10 +100,14 @@ feature ccmp {
 save(fb, "ColorGrid.ttf")
 
 levels = [f"level{i:02d}" for i in range(60)]
-order = [".notdef", "square", "bomb", "deep", "loop"] + levels
+ink = [f"ink{i:02d}" for i in range(16)]
+inked = [f"inked{i:03d}" for i in range(100)]
+order = [".notdef", "square", "bomb", "deep", "loop"] + levels + ink + inked
 fb = FontBuilder(1000, isTTF=True)
 fb.setupGlyphOrder(order)
-fb.setupCharacterMap({0xE000: "bomb", 0xE001: "deep", 0xE002: "loop"})
+cmap = {0xE000: "bomb", 0xE001: "deep", 0xE002: "loop"}
+cmap.update({0xE100 + i: name for i, name in enumerate(inked)})
+fb.setupCharacterMap(cmap)
 fb.setupGlyf({name: square() if name != ".notdef" else empty() for name in order})
 fb.setupHorizontalMetrics({name: (1000, 0) for name in order})
 fb.setupHorizontalHeader(ascent=900, descent=-100)
@@ -119,6 +125,12 @@ deep = solid
 for i in range(300):
     deep = {"Format": ot.PaintFormat.PaintTranslate, "dx": 1, "dy": 0, "Paint": deep}
 colr["deep"] = deep
+colr["ink00"] = {"Format": ot.PaintFormat.PaintGlyph, "Glyph": "square", "Paint": {"Format": ot.PaintFormat.PaintSolid, "PaletteIndex": 0xFFFF, "Alpha": 1.0}}
+for i in range(1, 16):
+    below = {"Format": ot.PaintFormat.PaintColrGlyph, "Glyph": ink[i - 1]}
+    colr[ink[i]] = (ot.PaintFormat.PaintColrLayers, [below, below])
+for i, name in enumerate(inked):
+    colr[name] = {"Format": ot.PaintFormat.PaintTranslate, "dx": i, "dy": 0, "Paint": {"Format": ot.PaintFormat.PaintColrGlyph, "Glyph": ink[-1]}}
 colr["loop"] = {"Format": ot.PaintFormat.PaintGlyph, "Glyph": "loop", "Paint": {"Format": ot.PaintFormat.PaintColrGlyph, "Glyph": "loop"}}
 fb.setupCOLR(colr, version=1)
 save(fb, "ColorHostile.ttf")
