@@ -66,4 +66,24 @@ public class GradientListMarkerTests
     [Fact]
     public void Marker_content_wins_over_the_gradient()
         => Assert.Empty(Gradients(Layout("<ul><li style='list-style-image:linear-gradient(red,blue)'>Item</li></ul>", "li::marker { content: '> ' }")));
+
+    [Fact]
+    public void A_marker_image_taller_than_the_line_moves_the_line_down()
+    {
+        // As in Chrome, the image stands on the first line's baseline and the line's ascent grows to hold it, outside
+        // and inside alike; the descent stays the text's.
+        var png = PdfTestHelpers.DataUri(PdfTestHelpers.SolidPng(16, 40, 200, 0, 0));
+        foreach (var position in new[] { "outside", "inside" })
+        {
+            var ops = Layout($"<ul style=\"font:12pt Helvetica;list-style:url('{png}') {position}\"><li>a</li><li>b</li></ul>");
+            var image = ops.OfType<ImageOp>().First();
+            var a = ops.OfType<TextOp>().First(t => t.Text == "a");
+            var b = ops.OfType<TextOp>().First(t => t.Text == "b");
+            Assert.Equal(30, image.H, 2);
+            Assert.True(image.Y >= -0.01f, position);
+            Assert.Equal(a.Baseline, image.Y + image.H, 2);
+            Assert.True(b.Baseline - a.Baseline > 30, position);
+        }
+    }
 }
+
