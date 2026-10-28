@@ -1,4 +1,6 @@
+using System.Text;
 using PdfPecker.Css;
+using PdfPecker.Html;
 using PdfPecker.Pdf;
 
 namespace PdfPecker;
@@ -17,7 +19,7 @@ public static partial class HtmlToPdf
     /// divided by the scale, as Chrome's print scale does; the writer then draws it scaled, so the margins come out at
     /// their paper size again. A page scaled by PdfOptions.Scale is written at the paper size Chrome would give it.
     /// </summary>
-    private static void ScaleAndFit(PageSetup page, float scale, bool chromePaper)
+    private static void ScaleAndFit(PageSetup page, float scale, bool chromePaper, ComputedStyle initial)
     {
         page.ChromePaper = chromePaper;
         if (scale != 1)
@@ -26,7 +28,59 @@ public static partial class HtmlToPdf
             page.Width /= scale; page.Height /= scale;
             page.MarginTop /= scale; page.MarginRight /= scale; page.MarginBottom /= scale; page.MarginLeft /= scale;
         }
+        if (page.BoxDeclarations != null) ResolvePageBox(page, initial);
         FitMargins(page);
+        // Margins shrunk to fit may leave less room than the page box's border and padding.
+        page.BoxTop = Math.Min(page.BoxTop, page.MarginTop);
+        page.BoxRight = Math.Min(page.BoxRight, page.MarginRight);
+        page.BoxBottom = Math.Min(page.BoxBottom, page.MarginBottom);
+        page.BoxLeft = Math.Min(page.BoxLeft, page.MarginLeft);
+    }
+
+    /// <summary>
+    /// The properties of an @page rule that style the page box itself: its border, padding and background. Chrome draws
+    /// the border inside the page margins and lays the content out inside the border and padding.
+    /// </summary>
+    private static bool IsPageBoxProperty(string p)
+        => p.StartsWith("border", StringComparison.Ordinal) || p.StartsWith("padding", StringComparison.Ordinal)
+           || p.StartsWith("background", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Resolves the page box's style from its declarations, as the style of an element would be, and moves the page area
+    /// in by its border and padding. The page's background colour is the style's. A page box without a border, padding or
+    /// background image keeps no style, so that a page with only a background colour is drawn as before.
+    /// </summary>
+    private static void ResolvePageBox(PageSetup page, ComputedStyle initial)
+    {
+        var doc = new Element("#document");
+        var box = new Element("div");
+        var style = new StringBuilder();
+        foreach (var d in page.BoxDeclarations!)
+        {
+            style.Append(d.Property).Append(':').Append(d.Value);
+            if (d.Important) style.Append(" !important");
+            style.Append(';');
+        }
+        box.AddAttribute("style", style.ToString());
+        doc.AppendChild(box);
+        new StyleResolver(new Stylesheet(), page.ContentWidth, page.ContentHeight).ResolveTree(doc, initial);
+        var s = box.Style!;
+        page.Background = s.BackgroundColor;
+        // Percentages refer to the width of the page area the margins leave, as for a block's padding.
+        float basis = page.ContentWidth;
+        float top = s.PaddingTop.Resolve(basis), right = s.PaddingRight.Resolve(basis);
+        float bottom = s.PaddingBottom.Resolve(basis), left = s.PaddingLeft.Resolve(basis);
+        if (!s.HasBorder && s.BorderImageSource == null && s.BackgroundImages == null && top <= 0 && right <= 0 && bottom <= 0 && left <= 0)
+            return;
+        page.Box = s;
+        page.BoxTop = s.BorderTop + Math.Max(0, top);
+        page.BoxRight = s.BorderRight + Math.Max(0, right);
+        page.BoxBottom = s.BorderBottom + Math.Max(0, bottom);
+        page.BoxLeft = s.BorderLeft + Math.Max(0, left);
+        page.MarginTop += page.BoxTop;
+        page.MarginRight += page.BoxRight;
+        page.MarginBottom += page.BoxBottom;
+        page.MarginLeft += page.BoxLeft;
     }
 
     /// <summary>Applies the size, margin and background declarations of an @page rule to a page.</summary>
@@ -34,6 +88,7 @@ public static partial class HtmlToPdf
     {
         foreach (var d in decls)
         {
+            if (IsPageBoxProperty(d.Property)) (page.BoxDeclarations ??= new List<Declaration>()).Add(d);
             var v = d.Value.Trim().ToLowerInvariant();
             switch (d.Property)
             {

@@ -169,6 +169,7 @@ internal static partial class CssParser
                 break;
             case "grid-area": ExpandGridArea(value, longhands); break;
             case "grid-template": ExpandGridTemplate(value, longhands); break;
+            case "grid": ExpandGrid(value, longhands); break;
             case "place-items":
             case "place-content":
             case "place-self":
@@ -511,6 +512,44 @@ internal static partial class CssParser
         longhands.Add("grid-template-areas", areas.ToString().Trim());
         longhands.Add("grid-template-rows", rows.ToString().Trim());
         longhands.Add("grid-template-columns", columns);
+    }
+
+    /// <summary>
+    /// grid: a grid-template value, or "rows / auto-flow dense? auto-columns" or "auto-flow dense? auto-rows / columns".
+    /// Every grid longhand but the gaps is set, so the parts left out go back to their initial values.
+    /// </summary>
+    private static void ExpandGrid(string value, LonghandWriter longhands)
+    {
+        var parts = SplitTopLevel(value.Trim(), '/');
+        if (parts.Count == 2)
+        {
+            for (int side = 0; side < 2; side++)
+            {
+                var tokens = Tokens(parts[side]);
+                if (!tokens.Exists(t => t.Equals("auto-flow", StringComparison.OrdinalIgnoreCase))) continue;
+                bool dense = false;
+                var tracks = new StringBuilder();
+                foreach (var token in tokens)
+                {
+                    if (token.Equals("dense", StringComparison.OrdinalIgnoreCase)) dense = true;
+                    else if (!token.Equals("auto-flow", StringComparison.OrdinalIgnoreCase)) tracks.Append(' ').Append(token);
+                }
+                string autoTracks = tracks.Length > 0 ? tracks.ToString().Trim() : "auto";
+                string other = parts[1 - side].Trim();
+                bool rows = side == 0;
+                longhands.Add("grid-template-rows", rows ? "none" : other);
+                longhands.Add("grid-template-columns", rows ? other : "none");
+                longhands.Add("grid-template-areas", "none");
+                longhands.Add("grid-auto-rows", rows ? autoTracks : "auto");
+                longhands.Add("grid-auto-columns", rows ? "auto" : autoTracks);
+                longhands.Add("grid-auto-flow", (rows ? "row" : "column") + (dense ? " dense" : ""));
+                return;
+            }
+        }
+        ExpandGridTemplate(value, longhands);
+        longhands.Add("grid-auto-rows", "auto");
+        longhands.Add("grid-auto-columns", "auto");
+        longhands.Add("grid-auto-flow", "row");
     }
 
     /// <summary>flex: the keywords none, auto and initial, or grow, shrink and basis, where a number is grow then shrink and anything else the basis.</summary>
