@@ -2324,7 +2324,7 @@ internal sealed partial class LayoutEngine
         // is reused there (see SamePass), and below MaxPlacedOnPagesInColumns any other; without the first, each nested
         // flex level laid out everything inside it again, in every balancing pass.
         if (_knownBoxes != null && FindKnown(_knownBoxes, src) is { } known && known.ListIndexBefore == _currentListIndex
-            && !_measuring && Tags == null && (Footnotes == null || !HasFootnoteCalls(known))
+            && !_measuring && Tags == null && (Footnotes == null || !HasFootnoteCalls(known) || !MayLayOutAgain)
             && (_columnNotes == null || SamePass(known) || _captureDepth >= MaxPlacedOnPagesInColumns)
             && SameContext(e, known))
         {
