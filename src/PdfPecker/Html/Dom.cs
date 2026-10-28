@@ -49,6 +49,12 @@ internal sealed class Element : Node
     public bool Generated;
 
     /// <summary>
+    /// What <see cref="FormValidity"/> found: 0 not yet looked at, 1 valid, 2 invalid, 3 neither; and the same for the
+    /// controls below the element (0, 1 for none invalid, 2 for some).
+    /// </summary>
+    public byte Validity, SubtreeValidity;
+
+    /// <summary>
     /// An anonymous table, row or cell box the style resolver wrapped around table parts that miss one (CSS 2.1 §17.2.1),
     /// such as a lone display: table-cell. Selectors never see it: it is taken out again before the next style pass.
     /// </summary>
