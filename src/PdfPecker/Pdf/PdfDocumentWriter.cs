@@ -12,6 +12,15 @@ internal sealed class PageSetup
     public float Width, Height;
     public float MarginTop, MarginRight, MarginBottom, MarginLeft;
     public uint Background; // @page background colour, painted over the whole sheet
+    /// <summary>
+    /// The border and padding of the @page box, which sit inside the page margins: the margins above include them, so
+    /// the page area is the page box's content box. The page-margin boxes keep to the margins outside them.
+    /// </summary>
+    public float BoxTop, BoxRight, BoxBottom, BoxLeft;
+    /// <summary>The @page box's border, padding and background, or null when its rules give it no border, padding or background image.</summary>
+    public ComputedStyle? Box;
+    /// <summary>The declarations of the @page rules that style the page box, in cascade order.</summary>
+    public List<Declaration>? BoxDeclarations;
     public float BandTop, BandBottom; // space for running headers and footers at the top and bottom of the content area
     /// <summary>
     /// Size on paper of one layout point (PdfOptions.Scale). The other fields are in layout points, so the page is laid

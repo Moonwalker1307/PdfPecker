@@ -82,7 +82,9 @@ internal sealed class PageMarginBoxes
         if (boxes.Count == 0) return ops;
 
         float W = _page.Width, H = _page.Height;
-        float mt = _page.MarginTop, mr = _page.MarginRight, mb = _page.MarginBottom, ml = _page.MarginLeft;
+        // The margins outside the page box's border and padding.
+        float mt = _page.MarginTop - _page.BoxTop, mr = _page.MarginRight - _page.BoxRight;
+        float mb = _page.MarginBottom - _page.BoxBottom, ml = _page.MarginLeft - _page.BoxLeft;
 
         // Corners: the size of the margins they sit between.
         Corner("top-left-corner", 0, 0, ml, mt);

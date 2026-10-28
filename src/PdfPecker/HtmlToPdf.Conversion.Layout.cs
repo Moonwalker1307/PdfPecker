@@ -65,7 +65,7 @@ public static partial class HtmlToPdf
             if (rules)
                 foreach (var rule in _sheet.PageRules)
                     if (rule.Name == name && rule.Selector.Length == 0) ApplyPageRules(rule.Declarations, setup);
-            ScaleAndFit(setup, _scale, _options.Scale != 1);
+            ScaleAndFit(setup, _scale, _options.Scale != 1, InitialStyle(_options.Language));
             ReserveBands(setup, name, false, false);
             return _namedSetups[name] = setup;
         }
@@ -92,15 +92,19 @@ public static partial class HtmlToPdf
                          .Where(r => (r.Name.Length == 0 || r.Name == name) && (r.Selector.Length == 0 || r.Selector == side || first && r.Selector == ":first"))
                          .OrderBy(r => r.Specificity))
                 ApplyPageRules(rule.Declarations, setup);
+            // The plain setup's margins include its page box's border and padding, which this one does not have yet.
             if (!firstBands && setup.Width == plain.Width * plain.Scale && setup.Height == plain.Height * plain.Scale
-                && setup.MarginTop == plain.MarginTop * plain.Scale && setup.MarginRight == plain.MarginRight * plain.Scale
-                && setup.MarginBottom == plain.MarginBottom * plain.Scale && setup.MarginLeft == plain.MarginLeft * plain.Scale
-                && setup.Background == plain.Background)
+                && setup.MarginTop == (plain.MarginTop - plain.BoxTop) * plain.Scale && setup.MarginRight == (plain.MarginRight - plain.BoxRight) * plain.Scale
+                && setup.MarginBottom == (plain.MarginBottom - plain.BoxBottom) * plain.Scale && setup.MarginLeft == (plain.MarginLeft - plain.BoxLeft) * plain.Scale
+                && setup.Background == plain.Background && SameDeclarations(setup.BoxDeclarations, plain.BoxDeclarations))
                 return _variants[(name, first, right, firstBands)] = plain;
-            ScaleAndFit(setup, _scale, _options.Scale != 1);
+            ScaleAndFit(setup, _scale, _options.Scale != 1, InitialStyle(_options.Language));
             ReserveBands(setup, name, first, runFirst);
             return _variants[(name, first, right, firstBands)] = setup;
         }
+
+        private static bool SameDeclarations(List<Declaration>? a, List<Declaration>? b)
+            => a == null || b == null ? a == b : a.SequenceEqual(b);
 
         /// <summary>The footnote area of a run's pages: the @footnote rules of the document's @page rules and of its named page.</summary>
         private ComputedStyle FootnoteArea(string? name)
@@ -261,12 +265,16 @@ public static partial class HtmlToPdf
             return sections;
         }
 
-        /// <summary>The canvas background of a run's pages, drawn per page, or null when the document has none.</summary>
+        /// <summary>
+        /// The canvas of a run's pages, drawn per page: the @page box's background layers, the canvas background of the
+        /// document, and the page box's border, in the order CSS Paged Media paints them. Null when there is none of them.
+        /// </summary>
         private Func<int, List<DrawOp>>? CanvasOf(PageRun run)
         {
-            if (_canvasStyle == null) return null;
-            var rootStyle = _htmlElement?.Style ?? _canvasStyle;
             var grid = run.Grid;
+            bool pageBoxes = grid.SetupOf(0).Box != null || grid.SetupOf(1).Box != null || grid.SetupOf(2).Box != null;
+            if (_canvasStyle == null && !pageBoxes) return null;
+            var rootStyle = _htmlElement?.Style ?? _canvasStyle;
             // Chrome sizes the positioning area like the root element's border box but puts it at the page area's top
             // left corner, whatever the root element's margins.
             var (_, _, rw, rhBox) = run.Engine.CanvasRootBox ?? (0, 0, run.Width, run.Height);
@@ -276,11 +284,25 @@ public static partial class HtmlToPdf
             {
                 // y = 0 is the top of the page area; flow y = 0 of page p sits BandTop below it.
                 var setup = grid.SetupOf(p);
-                // html { height: 100% } refers to the page area.
-                float rh = rootStyle.Height.IsPercent ? rootStyle.Height.Resolve(setup.ContentHeight) : rhBox;
                 var group = new GroupOp();
-                BoxPainter.PaintCanvas(group, painted, rootStyle, 0, setup.BandTop - grid.Start(p), rw, rh,
-                    0, 0, setup.ContentWidth, setup.ContentHeight, images, setup.ContentWidth);
+                var box = setup.Box;
+                // The page box's border box, inside the margins.
+                float bx = -setup.BoxLeft, by = -setup.BoxTop;
+                float bw = setup.ContentWidth + setup.BoxLeft + setup.BoxRight, bh = setup.ContentHeight + setup.BoxTop + setup.BoxBottom;
+                if (box != null)
+                    BoxPainter.PaintPageBackground(group, box, bx, by, bw, bh, (-setup.MarginLeft, -setup.MarginTop, setup.Width, setup.Height),
+                        images, setup.ContentWidth);
+                if (painted != null)
+                {
+                    // html { height: 100% } refers to the page area.
+                    float rh = rootStyle!.Height.IsPercent ? rootStyle.Height.Resolve(setup.ContentHeight) : rhBox;
+                    // Inside a page box's border, Chrome paints the canvas over the padding too.
+                    float pl = box != null ? setup.BoxLeft - box.BorderLeft : 0, pt = box != null ? setup.BoxTop - box.BorderTop : 0;
+                    float pr = box != null ? setup.BoxRight - box.BorderRight : 0, pb = box != null ? setup.BoxBottom - box.BorderBottom : 0;
+                    BoxPainter.PaintCanvas(group, painted, rootStyle, 0, setup.BandTop - grid.Start(p), rw, rh,
+                        -pl, -pt, setup.ContentWidth + pl + pr, setup.ContentHeight + pt + pb, images, setup.ContentWidth);
+                }
+                if (box != null) BoxPainter.PaintPageBorder(group, box, bx, by, bw, bh, images);
                 return group.Ops;
             };
         }
