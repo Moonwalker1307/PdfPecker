@@ -45,7 +45,8 @@ internal sealed partial class JpegDecoder
     {
         private readonly byte[] _data;
         private uint _bits; // the next bits, left-aligned
-        private int _count; // how many of them come from the data
+        private int _count; // how many of them there are
+        private int _padding; // how many of the last of them are zero bits supplied at a marker or the end of the data
         private bool _hitMarker;
 
         public BitReader(byte[] data, int position)
@@ -58,7 +59,7 @@ internal sealed partial class JpegDecoder
         public int Position { get; private set; }
 
         /// <summary>Whether every bit up to the marker or the end of the data has been read.</summary>
-        public readonly bool Exhausted => _hitMarker && _count <= 0;
+        public readonly bool Exhausted => _hitMarker && _count <= _padding;
 
         private void Fill()
         {
@@ -79,6 +80,7 @@ internal sealed partial class JpegDecoder
                     else Position++;
                 }
                 else if (Position >= d.Length) _hitMarker = true;
+                if (_hitMarker) _padding += 8;
                 _bits |= (uint)b << (24 - _count);
                 _count += 8;
             }
