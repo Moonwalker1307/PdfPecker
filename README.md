@@ -125,7 +125,7 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   list markers), fixed background images (placed on each page's paper, as Chrome prints them), filters, masks,
   media and container queries, logical properties, `writing-mode` (with floats, sized boxes and vertical-lr line
   order), `text-wrap`, `line-clamp` with your own `block-ellipsis`, underlines from the font or below the descenders
-  (`text-underline-position`), drop caps, images and gradients in `::before` and `::after` content, inline SVG (with
+  (`text-underline-position`), drop caps, `::marker` styles (also `counter(list-item)` in its content), images and gradients in `::before` and `::after` content, inline SVG (with
   HTML in `<foreignObject>`) and PNG, JPEG, GIF, WebP, BMP and TIFF images (also chosen by `srcset` and `<picture>`,
   shown by `<embed>` and `<object>`, and photos turned upright by their EXIF orientation), and CSS-only charts such as
   Charts.css (column, bar, area, line and pie charts), laid out as Chrome lays them out. Older CSS works too: the

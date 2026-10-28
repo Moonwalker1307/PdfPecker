@@ -387,6 +387,7 @@ internal sealed partial class StyleResolver
             if (container) PushContainer(e);
             bool footnote = e.Style.Footnote && _footnoteDepth == 0;
             if (footnote) StartFootnote();
+            if (e.Style.Display == Display.ListItem) StepListItem(parent, e, ref scope);
             if (_countersUsed) ApplyCounters(e.Style, ref scope);
             Element? footnoteMarker = null;
             if (footnote)
