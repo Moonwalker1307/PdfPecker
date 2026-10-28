@@ -92,6 +92,10 @@ internal sealed partial class StyleResolver
     /// </summary>
     private bool GenerateWithImages(Element box, Element host, string content)
     {
+        // Content with images is charged to the document's generated-content budget like text, by the length of the
+        // value: a rule with thousands of url()s on thousands of elements otherwise made millions of image boxes.
+        if (GeneratedBudget <= 0) return true;
+        GeneratedBudget -= content.Length;
         var tokens = CssParser.Tokens(content);
         int slash = tokens.IndexOf("/");
         if (slash >= 0) tokens.RemoveRange(slash, tokens.Count - slash);

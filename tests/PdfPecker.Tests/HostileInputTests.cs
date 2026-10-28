@@ -2864,6 +2864,20 @@ public class HostileInputTests
         return b.ToArray();
     }
 
+    // Content with images skipped the generated-content budget: 2,000 url()s in one ::before rule on 2,000 elements made
+    // four million image boxes, 7 GB and 37 s, past cancellation. It is charged to the budget like text now.
+    [Fact]
+    public void Images_in_content_repeated_on_many_elements_stay_bounded()
+    {
+        const string Gif = "url(data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7)";
+        var html = "<style>i::before{content:" + string.Join(" ", Enumerable.Repeat(Gif, 2000)) + "}</style><p>" + Repeat("<i></i>", 2000) + "</p>";
+        var before = GC.GetTotalAllocatedBytes();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        AssertStructurallyValid(Bounded(html, new PdfOptions { MaxPages = 1000 }));
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10), $"took {sw.Elapsed}");
+        Assert.True(GC.GetTotalAllocatedBytes() - before < 4L << 30, "allocated more than 4 GB");
+    }
+
     // A string in one rule is copied onto every element the rule matches: 240 KB of HTML made 200 million characters of
     // ::before text, which took 10 GB and minutes and ignored cancellation. Generated content now has a budget per
     // document, and the strings drawn once per element or line (markers, quotes, ellipses, hyphens) are cut short.
