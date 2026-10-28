@@ -533,7 +533,7 @@ internal sealed partial class PdfDocumentWriter
         const float size = MarginTextSize;
         float w = font.Measure(text, size);
         float x = (_page.Width - w) / 2;
-        float marginH = top ? _page.MarginTop : _page.MarginBottom;
+        float marginH = top ? _page.MarginTop - _page.BoxTop : _page.MarginBottom - _page.BoxBottom;
         float y = top ? _page.Height - marginH / 2 - size / 3 : marginH / 2 - size / 3;
         b.Ascii("BT\n");
         if (_tw != 0) { _tw = 0; b.Ascii("0 Tw\n"); }

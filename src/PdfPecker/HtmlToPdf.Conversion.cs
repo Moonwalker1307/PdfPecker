@@ -128,7 +128,7 @@ public static partial class HtmlToPdf
         /// </summary>
         private void SetUpPage()
         {
-            ScaleAndFit(_page, _scale, _options.Scale != 1);
+            ScaleAndFit(_page, _scale, _options.Scale != 1, InitialStyle(_options.Language));
 
             // Most documents have no bands: one search of the source spares walking the whole tree four times.
             _mayHaveBands = _html.Contains("data-sticky-pdf-", StringComparison.OrdinalIgnoreCase);

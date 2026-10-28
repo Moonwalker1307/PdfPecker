@@ -340,7 +340,8 @@ internal sealed partial class StyleResolver
         SortDeclarations();
         var s = Compute("::marker", e.Style);
         e.MarkerStyle = s;
-        e.MarkerContent = s.Content != null ? GeneratedContent.Evaluate(s.Content, e, this) : null;
+        // content: none leaves the item without a marker, which an empty text says; normal keeps the usual one.
+        e.MarkerContent = s.ContentNone ? "" : s.Content != null ? GeneratedContent.Evaluate(s.Content, e, this) : null;
     }
 
 

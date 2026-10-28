@@ -376,7 +376,10 @@ internal sealed partial class StyleResolver
             case "footnote-policy": ApplyFootnotePolicy(s, parent, in d); break;
 
             // ---- generated content, counters and list markers (Properties.Lists.cs)
-            case "content": s.Content = d.Lower is "normal" or "none" ? null : d.Inherit ? parent.Content : d.Value; break;
+            case "content":
+                s.Content = d.Lower is "normal" or "none" ? null : d.Inherit ? parent.Content : d.Value;
+                s.ContentNone = d.Inherit ? parent.ContentNone : d.Lower == "none";
+                break;
             case "counter-reset": s.CounterReset = d.Inherit ? parent.CounterReset : ParseCounters(d.Value, 0); break;
             case "counter-set": s.CounterSet = d.Inherit ? parent.CounterSet : ParseCounters(d.Value, 0); break;
             case "counter-increment": s.CounterIncrement = d.Inherit ? parent.CounterIncrement : ParseCounters(d.Value, 1); break;
