@@ -335,6 +335,26 @@ public class CounterStyleTests
     }
 
     [Fact]
+    public void Marker_direction_orders_its_text_on_the_items_side()
+    {
+        // The item's direction puts the marker before its content and the marker's own direction orders its text,
+        // with the suffix's space at the marker's end: ".1" right against the content, or "1." right after its end.
+        var ops = Layout("<ol style='direction:ltr;padding-left:40pt'><li style='font:10pt Helvetica'>a</li></ol>" +
+                         "<style>.r li::marker { direction: rtl } .l li::marker { direction: ltr }</style>" +
+                         "<ol class=r style='padding-left:40pt'><li style='font:10pt Helvetica'>b</li></ol>" +
+                         "<ol class=l dir=rtl style='padding-right:40pt'><li style='font:10pt Helvetica'>c</li></ol>");
+        var texts = ops.OfType<TextOp>().ToList();
+        TextOp Of(string t) => texts.First(o => o.Text == t);
+        var b = texts.First(o => o.Text.Contains('b'));
+        var c = texts.First(o => o.Text.Contains('c'));
+        Assert.Contains(texts, o => o.Text == "1.");
+        Assert.Equal(".1", Of(".1").Text);
+        Assert.Equal(b.X, Of(".1").X + Of(".1").Font.Measure(".1", 10), 1);
+        var ltrMarker = texts.Last(o => o.Text == "1.");
+        Assert.Equal(c.X + c.Font.Measure("c", 10), ltrMarker.X, 1);
+    }
+
+    [Fact]
     public void List_style_shorthand_resets_the_longhands()
     {
         var ops = Layout("<ol style='list-style: inside'><li>a</li></ol><ol style='list-style: none'><li>b</li></ol>");
