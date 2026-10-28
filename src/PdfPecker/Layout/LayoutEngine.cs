@@ -1090,7 +1090,7 @@ internal sealed partial class LayoutEngine
             marker.Gradient = gradient;
             marker.ImageW = marker.ImageH = DefaultMarkerImageSide(marker.Style);
         }
-        else if (e.MarkerContent != null || s.ListStyleImage is not { } imageSrc || !LoadMarkerImage(marker, imageSrc, s.ImageOrientationNone))
+        else if (e.MarkerContent != null || s.ListStyleImage is not { } imageSrc || !LoadMarkerImage(marker, imageSrc, s.ImageOrientationNone, s.ListStyleImageResolution))
             marker.Text = custom ?? s.ListCounterStyle?.MarkerText(_currentListIndex);
         if (marker.Text != null || marker.Image != null || marker.Svg != null || marker.Gradient != null || s.ListStyleType != ListStyleType.None)
             _marker = marker;
@@ -1569,10 +1569,11 @@ internal sealed partial class LayoutEngine
     // ------------------------------------------------------------------ list markers
 
     /// <summary>
-    /// Loads a list-style-image and sizes it as Chrome does: a raster image at its pixel size, an SVG drawing at its
+    /// Loads a list-style-image and sizes it as Chrome does: a raster image at its pixel size over its image-set()
+    /// resolution, an SVG drawing at its
     /// width and height, and a drawing without them at half the font's ascent (wide, with its viewBox's aspect ratio).
     /// </summary>
-    private bool LoadMarkerImage(ListMarker m, string src, bool asStored)
+    private bool LoadMarkerImage(ListMarker m, string src, bool asStored, float resolution)
     {
         var image = _images.Load(src, asStored);
         var svg = image == null ? _images.LoadSvg(src) : null;
@@ -1581,8 +1582,8 @@ internal sealed partial class LayoutEngine
         {
             if (image.Width <= 0 || image.Height <= 0) return false;
             m.Image = image;
-            m.ImageW = image.Width * 0.75f;
-            m.ImageH = image.Height * 0.75f;
+            m.ImageW = image.Width * 0.75f / resolution;
+            m.ImageH = image.Height * 0.75f / resolution;
             return true;
         }
         float side = DefaultMarkerImageSide(m.Style);

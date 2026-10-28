@@ -94,6 +94,9 @@ internal sealed class Element : Node
     /// </summary>
     public bool EmbedsPicture;
 
+    /// <summary>The image pixels per CSS pixel of a generated img that shows an image-set() option; 1 otherwise.</summary>
+    public float GeneratedResolution = 1;
+
     /// <summary>An img element that shows a picture (not its alt text), or an embed or object element that shows one.</summary>
     public bool IsPicture => AltText == null && Name == "img" || EmbedsPicture;
 

@@ -303,7 +303,7 @@ internal static partial class CssParser
             }
             else if (lower == "none") nones++;
             else if (lower.StartsWith("url(", StringComparison.Ordinal) || lower.Contains("gradient(", StringComparison.Ordinal)
-                     || lower.StartsWith("image-set(", StringComparison.Ordinal))
+                     || CssImageSet.IsImageSet(lower))
             {
                 if (image != null) return;
                 image = token;

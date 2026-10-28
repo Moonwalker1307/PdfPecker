@@ -185,7 +185,7 @@ internal static class CssSupports
                 return StyleResolver.ParseHyphenateLimitChars(lower) != null;
         }
         // Other values: functions this library does not know make the value unsupported.
-        foreach (var fn in new[] { "attr(", "anchor(", "env(", "image-set(", "element(", "paint(", "cross-fade(" })
+        foreach (var fn in new[] { "attr(", "anchor(", "env(", "element(", "paint(", "cross-fade(" })
             if (lower.Contains(fn, StringComparison.Ordinal)) return false;
         return true;
     }

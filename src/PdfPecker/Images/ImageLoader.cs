@@ -29,7 +29,7 @@ internal sealed class ImageLoader
     public string? SourceOf(PdfPecker.Html.Element img) => Chosen.TryGetValue(img, out var c) ? c.Url : img.GetAttribute("src");
 
     /// <summary>The image pixels per CSS pixel of the picture an img element shows: 2 for a 2x srcset candidate.</summary>
-    public float DensityOf(PdfPecker.Html.Element img) => Chosen.TryGetValue(img, out var c) ? c.Density : 1;
+    public float DensityOf(PdfPecker.Html.Element img) => Chosen.TryGetValue(img, out var c) ? c.Density : img.GeneratedResolution;
 
     /// <summary>The drawing work left for the document's inline SVGs.</summary>
     public readonly PdfPecker.Svg.SvgBudget SvgBudget = new();

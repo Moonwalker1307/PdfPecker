@@ -67,7 +67,13 @@ internal sealed partial class StyleResolver
         for (int i = 0; i < layers.Count; i++)
         {
             var layer = layers[i].Trim();
-            if (CssBackground.Url(layer) is { } url) result[i] = new BackgroundImage { Url = url };
+            float resolution = 1;
+            if (CssImageSet.IsImageSet(layer))
+            {
+                if (CssImageSet.Choose(layer) is not { } chosen) continue;
+                (layer, resolution) = chosen;
+            }
+            if (CssBackground.Url(layer) is { } url) result[i] = new BackgroundImage { Url = url, Resolution = resolution };
             else if (layer.IndexOf("gradient(", StringComparison.OrdinalIgnoreCase) >= 0
                      && CssGradient.Parse(layer, s.Color, s.FontSize, _rootFontSize, _vw, _vh) is { } g) result[i] = new BackgroundImage { Gradient = g };
             any |= result[i] != null;

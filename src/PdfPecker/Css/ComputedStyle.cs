@@ -313,6 +313,7 @@ internal sealed class ComputedStyle
     public string? ListStyleString;          // list-style-type: "string": the marker text
     public CounterStyle? ListCounterStyle;   // the counter style of a text marker; null for the bullets, a string and none
     public string? ListStyleImage;           // list-style-image: the url
+    public float ListStyleImageResolution = 1; // list-style-image: image pixels per CSS pixel, from image-set()
     public CssGradient? ListStyleGradient;   // list-style-image: a gradient
     public bool ListStylePositionInside;
     public TextTransform TextTransform;
