@@ -125,7 +125,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   list markers), fixed background images (placed on each page's paper, as Chrome prints them), filters, masks,
   media and container queries, logical properties, `writing-mode` (with floats, sized boxes and vertical-lr line
   order), `text-wrap`, `line-clamp` with your own `block-ellipsis`, underlines from the font or below the descenders
-  (`text-underline-position`), drop caps, `::first-line` styles with a background, images and gradients in `::before` and `::after` content, inline SVG (with
+  (`text-underline-position`), drop caps, `::first-line` styles with a background, `::marker` styles (a larger
+  marker font makes its line taller, as in Chrome), images and gradients in `::before` and `::after` content, inline SVG (with
   HTML in `<foreignObject>`) and PNG, JPEG, GIF, WebP, BMP and TIFF images (also chosen by `srcset` and `<picture>`,
   shown by `<embed>` and `<object>`, and photos turned upright by their EXIF orientation), and CSS-only charts such as
   Charts.css (column, bar, area, line and pie charts), laid out as Chrome lays them out. Older CSS works too: the
@@ -134,7 +135,7 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   syntaxes. As in browsers, a length without a unit (`width: 200`) counts as pixels only in a page without a doctype;
   with `<!DOCTYPE html>` it is ignored.
   [More](https://pdfpecker.net/docs/html-and-css/)
-- **Paged media**: `@page` sizes and margin boxes, running headers and footers (also a first page of its own, and bands
+- **Paged media**: `@page` sizes, borders, padding and background images (which cover the whole sheet) and margin boxes, running headers and footers (also a first page of its own, and bands
   of their own for named pages), footnotes, tables of contents with page numbers, break control (also table row groups
   and group header rows kept together, as reports keep a group on one page, and forced breaks between table rows and between flex lines), table rows that break inside at a page's end as in Chrome, unless a cell would have nothing before the break, table
   headers and footers repeated on every page (also around a row split across pages), and

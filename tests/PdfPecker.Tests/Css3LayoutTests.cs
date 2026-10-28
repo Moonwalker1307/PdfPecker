@@ -497,6 +497,22 @@ public class Css3LayoutTests
         Assert.Contains(ops.OfType<TextOp>(), t => t.Text.StartsWith("—", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void A_larger_marker_makes_its_line_taller_as_in_Chrome()
+    {
+        // An outside marker moves its line down until the line's ascent holds the marker's; an inside marker is an
+        // inline box, so its descent counts too. Either way the marker stands on the text's baseline.
+        static float Pitch(List<DrawOp> ops) => Text(ops, "b").Baseline - Text(ops, "a").Baseline;
+        const string list = "<ol style='font:10pt Helvetica;margin:0'><li>a</li><li>b</li></ol>";
+        var plain = Layout(list);
+        var outside = Layout("<style>li::marker { font-size: 20pt }</style>" + list);
+        var inside = Layout("<style>li::marker { font-size: 20pt } ol { list-style-position: inside }</style>" + list);
+        Assert.True(Pitch(outside) > Pitch(plain) + 5);
+        Assert.True(Pitch(inside) > Pitch(outside) + 1);
+        Assert.Equal(Text(outside, "a").Baseline, Text(outside, "1.").Baseline);
+        Assert.Equal(Text(inside, "a").Baseline, Text(inside, "1.").Baseline);
+    }
+
     [Theory]
     [InlineData("flex-start")]
     [InlineData("center")]
