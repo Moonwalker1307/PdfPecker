@@ -591,6 +591,15 @@ internal sealed partial class LayoutEngine
                     Grow(a + d, root.VerticalAlign == VerticalAlign.Top, ref maxA, ref maxD);
         }
         if (!visible) maxA = float.NaN;
+        else if (line.Marker is { } marker)
+        {
+            // A marker with a style of its own sits on the line's baseline: an inside one like text in an inline box,
+            // an outside one beside the line, which only moves down far enough for the marker's ascent, as in Chrome.
+            TextMetrics(marker, out float ma, out float md);
+            if (ma > maxA) maxA = ma;
+            if (md > maxD && !line.MarkerOutside) maxD = md;
+        }
+        else if (line.MarkerImageH > maxA) maxA = line.MarkerImageH; // a marker image stands on the baseline
 
         // Text and the inline boxes it is in: each of them is on the line, with its own font and line height, so an
         // inline with a larger font makes every line of it taller even where its text is smaller (CSS 2.1 §10.8.1).

@@ -267,12 +267,25 @@ public class FontPropertyTests
     [InlineData("font-stretch: 80%", "WorkSans")]
     [InlineData("font-stretch: 112%", "NotoSansSC")]
     [InlineData("font-stretch: 110%", "NotoSansSC")]
+    [InlineData("font-width: condensed", "WorkSans")]
+    [InlineData("font-width: 125%", "NotoSansSC")]
+    [InlineData("font: condensed 12px F", "WorkSans")]
     public void Font_face_font_stretch_picks_the_closest_width(string style, string expected)
     {
         var pdf = ConvertUncompressed(StretchFaces($"<p style='{style}'>Hello</p>"));
         var fonts = Regex.Matches(Latin1(pdf), @"/BaseFont /[A-Z]{6}\+([A-Za-z]+)").Select(m => m.Groups[1].Value).Distinct().ToList();
         Assert.Contains(expected, fonts);
         Assert.Single(fonts);
+    }
+
+    [Fact]
+    public void Font_width_is_the_font_face_descriptor_and_supports_query_too()
+    {
+        var pdf = ConvertUncompressed("<style>" + Face("H", "WorkSans-Regular.ttf", "font-width: 75%;") + Face("H", "Inter-Position.otf", "font-width: 100%;")
+            + " p { font-family: H; margin: 0 }</style><p style='font-width: 75%'>Hello</p>");
+        Assert.Contains("WorkSans", Latin1(pdf));
+        Assert.DoesNotContain("Inter", Latin1(pdf));
+        Assert.True(PdfPecker.Css.CssSupports.Evaluate("(font-width: condensed)"));
     }
 
     [Fact]

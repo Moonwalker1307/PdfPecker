@@ -355,6 +355,22 @@ public class CounterStyleTests
     }
 
     [Fact]
+    public void Counter_list_item_numbers_marker_and_before_content()
+    {
+        // Each list counts its own items, from an ol's start, down in a reversed list, and from a value attribute,
+        // as the default markers do; a counter-reset on the list and a counter-increment on an item take part.
+        var ops = Layout("<style>li::marker { content: counter(list-item) ') ' } .b li::before { content: '[' counter(list-item) ']' }</style>" +
+                         "<ol><li>a</li><li value=7>b</li><li>c<ol><li>d</li></ol></li></ol>" +
+                         "<ol start=4 reversed><li>e</li><li>f</li></ol><ol class=b style='counter-reset: list-item 10'><li>g</li></ol>" +
+                         "<ol><li style='counter-increment: list-item 5'>h</li><li>i</li></ol>");
+        var texts = Texts(ops).Select(t => t.Trim()).ToList();
+        foreach (var marker in new[] { "1)", "7)", "8)", "4)", "3)", "11)", "5)", "6)" }) Assert.Contains(marker, texts);
+        Assert.Equal(2, texts.Count(t => t == "1)")); // the nested list starts again
+        Assert.Contains(texts, t => t.StartsWith("[11]", StringComparison.Ordinal));
+        Assert.DoesNotContain("0)", texts);
+    }
+
+    [Fact]
     public void List_style_shorthand_resets_the_longhands()
     {
         var ops = Layout("<ol style='list-style: inside'><li>a</li></ol><ol style='list-style: none'><li>b</li></ol>");

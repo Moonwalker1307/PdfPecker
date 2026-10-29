@@ -104,6 +104,7 @@ internal sealed partial class LayoutEngine
         public float ContentRight; // right to left, the marker goes after the content's right edge
         public bool Rtl;
         public bool Inside; // list-style-position: inside, so the marker starts the first line instead of hanging before it
+        public bool OwnStyle; // ::marker rules gave it a style of its own, rather than the list item's
         public ContentSlot? Tag;
     }
 
@@ -1076,13 +1077,15 @@ internal sealed partial class LayoutEngine
     private void StartMarker(Element e, float cx, float contentW)
     {
         var s = e.Style;
+        // ::marker { content: none } or an empty string: no marker box at all, as in Chrome.
+        if (e.MarkerContent is { Length: 0 }) return;
         // ::marker { content } and list-style-type: "string" give the marker's own text, drawn as written.
         var custom = e.MarkerContent ?? s.ListStyleString;
         var marker = new ListMarker
         {
             Custom = custom != null, Type = s.ListStyleType,
             Style = e.MarkerStyle ?? s, ContentX = cx, ContentRight = cx + contentW, Rtl = s.Rtl, Tag = Tags?.MarkerOf(e),
-            Inside = s.ListStylePositionInside,
+            Inside = s.ListStylePositionInside, OwnStyle = e.MarkerStyle != null,
         };
         // list-style-image wins over the type unless ::marker has content; an image that does not load falls back to the type.
         if (e.MarkerContent == null && s.ListStyleGradient is { } gradient)
@@ -1595,6 +1598,24 @@ internal sealed partial class LayoutEngine
         if (m.ImageW <= 0 || m.ImageH <= 0) return false;
         m.Svg = svg;
         return true;
+    }
+
+    /// <summary>
+    /// Notes on a paragraph's first line what of the marker drawn with it may make the line taller. In Chrome an inside
+    /// marker is an inline box on its item's first line, and an outside marker moves that line down until the line's
+    /// ascent holds the marker's, so a ::marker with a larger font or line height than the text grows the line, and so
+    /// does a marker image taller than the line's ascent, which stands on the baseline. A text marker in the item's own
+    /// style is left out, as its strut is the line's own.
+    /// </summary>
+    private void NoteMarkerLine(Line line)
+    {
+        if (_marker is not { } m || !m.Style.Visible) return;
+        if (m.Image != null || m.Svg != null || m.Gradient != null) line.MarkerImageH = m.ImageH;
+        else if (m.OwnStyle)
+        {
+            line.Marker = m.Style;
+            line.MarkerOutside = !m.Inside;
+        }
     }
 
     /// <summary>The side of a marker image without a size of its own (a gradient, or an SVG file without one): half the font's ascent, in whole pixels.</summary>

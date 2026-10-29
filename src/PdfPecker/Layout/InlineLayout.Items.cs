@@ -169,6 +169,11 @@ internal sealed partial class LayoutEngine
         public bool Forced;
         // Beside floats: the line's top and its room (left offset and width); NaN when the line simply follows the last.
         public float Top = float.NaN, Left, Avail = float.NaN;
+        // The first line of a list item whose ::marker has a style of its own: the marker sits on this line's baseline,
+        // so its font and line height can make the line taller. An outside marker only raises the line's top.
+        public ComputedStyle? Marker;
+        public bool MarkerOutside;
+        public float MarkerImageH; // a marker image, which stands on the baseline: the line's ascent holds its height
 
         /// <summary>Whether the line was placed beside floats while it was broken, which fixed its room.</summary>
         public bool HasRoom => !float.IsNaN(Avail);
@@ -233,6 +238,9 @@ internal sealed partial class LayoutEngine
         line.Top = float.NaN;
         line.Left = 0;
         line.Avail = float.NaN;
+        line.Marker = null;
+        line.MarkerOutside = false;
+        line.MarkerImageH = 0;
         return line;
     }
 
