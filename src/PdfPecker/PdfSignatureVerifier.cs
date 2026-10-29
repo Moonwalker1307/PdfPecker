@@ -19,6 +19,14 @@ public sealed class PdfSignatureVerificationOptions
     public X509Certificate2Collection? ExtraCertificates { get; set; }
 
     /// <summary>
+    /// Accept signatures and timestamps that hash with SHA-1, as old archives may need. Default: false, because SHA-1
+    /// collisions can be computed (a chosen-prefix collision costs tens of thousands of dollars), so a document someone
+    /// was led to sign with SHA-1 can be swapped for another with the same hash. Such a signature is then listed in
+    /// <see cref="PdfSignatureVerification.Problems"/> and is not <see cref="PdfSignatureVerification.Valid"/>.
+    /// </summary>
+    public bool AllowSha1 { get; set; }
+
+    /// <summary>
     /// Revocation checking. Default: <see cref="X509RevocationMode.NoCheck"/>, which keeps verification offline.
     /// <see cref="X509RevocationMode.Online"/> lets the platform fetch CRLs, OCSP answers and missing intermediates.
     /// </summary>
@@ -69,6 +77,15 @@ public sealed class PdfSignatureVerification
 
     /// <summary>The digest algorithm, e.g. SHA256.</summary>
     public string? HashAlgorithm { get; internal set; }
+
+    /// <summary>
+    /// Whether the signature (or document timestamp) hashes with SHA-1: as its digest, in its signature algorithm, or as
+    /// the old adbe.pkcs7.sha1 format. Unless <see cref="PdfSignatureVerificationOptions.AllowSha1"/> is set, such a
+    /// signature is not <see cref="Valid"/>.
+    /// </summary>
+    public bool UsesSha1 { get; internal set; }
+
+    internal bool Sha1Allowed;
 
     /// <summary>The /ByteRange: offset and length of the two signed parts of the file.</summary>
     public IReadOnlyList<long> ByteRange { get; internal set; } = Array.Empty<long>();
@@ -151,12 +168,13 @@ public sealed class PdfSignatureVerification
     /// added), so check <see cref="CoversWholeDocument"/> too when the last signature must cover everything.
     /// </summary>
     /// <remarks>
-    /// Revocation is not checked by default: with <see cref="PdfSignatureVerificationOptions.RevocationMode"/> at its
-    /// default, <see cref="X509RevocationMode.NoCheck"/>, a signature made with a revoked certificate still reports
+    /// A signature that hashes with SHA-1 is not valid unless <see cref="PdfSignatureVerificationOptions.AllowSha1"/>
+    /// is set (see <see cref="UsesSha1"/>). Revocation is not checked by default: with
+    /// <see cref="PdfSignatureVerificationOptions.RevocationMode"/> at its default, <see cref="X509RevocationMode.NoCheck"/>, a signature made with a revoked certificate still reports
     /// valid. Set it to <see cref="X509RevocationMode.Online"/>, or to <see cref="X509RevocationMode.Offline"/> with the
     /// revocation data cached on the machine, when that matters.
     /// </remarks>
-    public bool Valid => IsIntact && ChainTrusted && DisallowedChanges.Count == 0;
+    public bool Valid => IsIntact && ChainTrusted && DisallowedChanges.Count == 0 && (!UsesSha1 || Sha1Allowed);
 }
 
 /// <summary>Checks the digital signatures and document timestamps in an existing PDF.</summary>
@@ -317,6 +335,11 @@ public static class PdfSignatureVerifier
             }
             var hash = CmsReader.HashFromOid(cms.Signer.DigestOid) ?? throw new CryptographicException("Unsupported digest algorithm " + cms.Signer.DigestOid + ".");
             v.HashAlgorithm = hash.Name;
+            v.UsesSha1 = hash == HashAlgorithmName.SHA1 || CmsReader.SignatureHash(cms.Signer, hash) == HashAlgorithmName.SHA1
+                || f.SubFilter == "adbe.pkcs7.sha1";
+            v.Sha1Allowed = options.AllowSha1;
+            if (v.UsesSha1 && !options.AllowSha1)
+                problems.Add("The signature uses SHA-1, whose collisions can be computed, so the signed content could have been swapped.");
             byte[] rangeDigest = hashes.Hash(f.ByteRange, hash);
 
             if (f.IsDocumentTimestamp)
@@ -353,7 +376,7 @@ public static class PdfSignatureVerifier
                 if (tokenAttr != null)
                 {
                     v.HasTimestamp = true;
-                    v.TimestampValid = CheckTimestamp(tokenAttr, cms.Signer.Signature, out var time, out var tsa, out var tsCerts, out var tsProblem);
+                    v.TimestampValid = CheckTimestamp(tokenAttr, cms.Signer.Signature, out var time, out var tsa, out var tsCerts, out var tsProblem, out bool tsSha1);
                     v.TimestampTime = time;
                     v.TimestampTrusted = false;
                     if (tsProblem != null) problems.Add(tsProblem);
@@ -366,6 +389,12 @@ public static class PdfSignatureVerifier
                         {
                             tsaTrusted = false;
                             tsaErrors.Add("The certificate is not meant for timestamping.");
+                        }
+                        // A SHA-1 token could vouch for a time made up for another signature with the same hash.
+                        if (tsSha1 && !options.AllowSha1)
+                        {
+                            tsaTrusted = false;
+                            tsaErrors.Add("The timestamp uses SHA-1.");
                         }
                         v.TimestampTrusted = tsaTrusted;
                         if (!tsaTrusted) problems.Add("The timestamp is not trusted, so its time is not used: " + string.Join("; ", tsaErrors));
@@ -409,8 +438,9 @@ public static class PdfSignatureVerifier
     /// the authority in <paramref name="tsa"/> is trusted is for the caller to decide.
     /// </summary>
     private static bool CheckTimestamp(byte[] token, byte[] signatureValue, out DateTimeOffset? time, out X509Certificate2? tsa,
-        out List<X509Certificate2> tsCerts, out string? problem)
+        out List<X509Certificate2> tsCerts, out string? problem, out bool sha1)
     {
+        sha1 = false;
         time = null;
         tsa = null;
         tsCerts = new List<X509Certificate2>();
@@ -433,6 +463,7 @@ public static class PdfSignatureVerifier
             tsCerts = cms.Certificates.Select(CmsReader.LoadCertificate).OfType<X509Certificate2>().ToList();
             tsa = CmsReader.FindSigner(cms.Signer, tsCerts);
             var digestHash = CmsReader.HashFromOid(cms.Signer.DigestOid) ?? throw new CryptographicException("Unsupported timestamp digest.");
+            sha1 = hash == HashAlgorithmName.SHA1 || digestHash == HashAlgorithmName.SHA1 || CmsReader.SignatureHash(cms.Signer, digestHash) == HashAlgorithmName.SHA1;
             var (digestOk, sigOk) = CmsReader.Verify(cms.Signer, CmsReader.Hash(digestHash, cms.Content), tsa);
             if (!digestOk || !sigOk) problem = "The timestamp token's own signature does not verify.";
             return digestOk && sigOk;

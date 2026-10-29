@@ -299,13 +299,42 @@ public class SignatureVerificationTests
         var hex = Convert.ToHexString(cms.Encode());
         Encoding.ASCII.GetBytes(hex).CopyTo(pdf, (int)r[1] + 1);
 
+        // SHA-1 collisions can be computed, so the signature is intact but not valid unless the caller accepts SHA-1.
         var v = Assert.Single(PdfSignatureVerifier.Verify(pdf, Trusting(Cert.Value)));
         Assert.Equal("adbe.pkcs7.sha1", v.SubFilter);
         Assert.Equal("SHA1", v.HashAlgorithm);
+        Assert.True(v.UsesSha1);
+        Assert.True(v.IsIntact);
+        Assert.False(v.Valid);
+        Assert.Contains(v.Problems, p => p.Contains("SHA-1", StringComparison.Ordinal));
+
+        var allowing = Trusting(Cert.Value);
+        allowing.AllowSha1 = true;
+        v = Assert.Single(PdfSignatureVerifier.Verify(pdf, allowing));
         Assert.True(v.Valid, string.Join("\n", v.Problems));
 
         pdf[10] ^= 1; // inside the header comment, which the SHA-1 covers
-        Assert.False(PdfSignatureVerifier.Verify(pdf, Trusting(Cert.Value))[0].DigestMatches);
+        Assert.False(PdfSignatureVerifier.Verify(pdf, allowing)[0].DigestMatches);
+    }
+
+    [Fact]
+    public void A_detached_signature_with_a_SHA1_digest_is_not_valid_by_default()
+    {
+        var pdf = Signed(new PdfSignatureOptions(Cert.Value) { Format = PdfSignatureFormat.Pkcs7Detached });
+        Assert.False(Assert.Single(PdfSignatureVerifier.Verify(pdf, Trusting(Cert.Value))).UsesSha1);
+
+        // The same byte ranges signed again by SignedCms with a SHA-1 digest, in the space the signature left.
+        var r = PdfSignatureVerifier.Verify(pdf)[0].ByteRange;
+        var ranges = pdf.AsSpan(0, (int)r[1]).ToArray().Concat(pdf.AsSpan((int)r[2], (int)r[3]).ToArray()).ToArray();
+        var cms = new SignedCms(new ContentInfo(ranges), detached: true);
+        cms.ComputeSignature(new CmsSigner(Cert.Value) { DigestAlgorithm = new Oid("1.3.14.3.2.26") });
+        var hex = Convert.ToHexString(cms.Encode());
+        Encoding.ASCII.GetBytes(hex.PadRight((int)(r[2] - r[1] - 2), '0')).CopyTo(pdf, (int)r[1] + 1);
+
+        var v = Assert.Single(PdfSignatureVerifier.Verify(pdf, Trusting(Cert.Value)));
+        Assert.True(v.UsesSha1);
+        Assert.True(v.IsIntact, string.Join("\n", v.Problems));
+        Assert.False(v.Valid);
     }
 
     [Fact]

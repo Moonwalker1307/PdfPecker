@@ -189,7 +189,7 @@ internal static class CmsReader
     }
 
     // Signature OIDs such as sha256WithRSAEncryption name their own hash; plain rsaEncryption uses the digest algorithm.
-    private static HashAlgorithmName SignatureHash(CmsSignerInfo s, HashAlgorithmName digestHash)
+    internal static HashAlgorithmName SignatureHash(CmsSignerInfo s, HashAlgorithmName digestHash)
     {
         if (s.SignatureOid == "1.2.840.113549.1.1.10") return PssHash(s.SignatureParameters) ?? digestHash;
         return s.SignatureOid is "1.2.840.113549.1.1.1" or "1.2.840.10045.2.1" ? digestHash : HashFromOid(s.SignatureOid) ?? digestHash;
