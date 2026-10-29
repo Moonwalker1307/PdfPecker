@@ -14,11 +14,11 @@ public class BrowserMatchTests
 {
     private const float Width = 500, PageHeight = 800;
 
-    private static List<DrawOp> Layout(string html)
+    private static List<DrawOp> Layout(string html, bool quirks = false)
     {
         var doc = HtmlParser.Parse(html);
         FormControls.Prepare(doc, interactive: false);
-        new StyleResolver(new Stylesheet(), Width, PageHeight).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
+        new StyleResolver(new Stylesheet(), Width, PageHeight).ResolveTree(doc, new ComputedStyle { Display = Display.Block, Quirks = quirks });
         var engine = new LayoutEngine(PageHeight, new ImageLoader(null, null, false));
         engine.Layout(doc, Width);
         return Flatten(engine.Ops).ToList();
@@ -54,6 +54,38 @@ public class BrowserMatchTests
         Near(8.25f, baselines[0]);
         Near(18.75f, baselines[1]);
         Near(29.25f, baselines[2]);
+    }
+
+    [Theory]
+    [InlineData(true, 11.25f)]   // Arial 13px: 15px lines, the body's 16px Times strut left out
+    [InlineData(false, 13.5f)]   // the strut's 18px lines
+    public void In_quirks_mode_lines_without_text_of_the_block_have_no_strut(bool quirks, float spacing)
+    {
+        // As Chrome measures a legacy table cell: <font size="2"> text with line breaks, no doctype.
+        var ops = Layout("<p style='margin:0'><span style='font:13px Arial'>one<br>two<br>three</span></p>", quirks);
+        var baselines = ops.OfType<TextOp>().Select(t => t.Baseline).ToList();
+        Near(spacing, baselines[1] - baselines[0]);
+        Near(spacing, baselines[2] - baselines[1]);
+    }
+
+    [Theory]
+    [InlineData(true, 7.5f)]     // Chrome: 10px
+    [InlineData(false, 13.5f)]   // Chrome: 18px, the strut's line
+    public void In_quirks_mode_a_line_of_only_a_box_has_no_gap_below_it(bool quirks, float height)
+    {
+        // An image or inline-block alone on its line sits on the bottom of the block, with no room for descenders.
+        var ops = Layout("<div style='background:#0000ff'><span style='display:inline-block;width:10px;height:10px;background:red'></span></div>", quirks);
+        Near(height, Box(ops, "#0000ff").H, 0.4f);
+    }
+
+    [Fact]
+    public void In_quirks_mode_text_of_the_block_brings_its_strut_back()
+    {
+        var ops = Layout("<p style='margin:0'>a <span style='font:13px Arial'>one<br>two</span></p>", quirks: true);
+        var baselines = ops.OfType<TextOp>().Select(t => t.Baseline).Distinct().ToList();
+        // The first line is as tall as the strut and the second only as tall as the small text (Chrome: 18px and 15px),
+        // so the baselines are the strut's descent plus Arial's ascent apart: 4px + 12px.
+        Near(12, baselines[1] - baselines[0]);
     }
 
     [Fact]

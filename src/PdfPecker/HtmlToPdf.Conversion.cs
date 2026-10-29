@@ -226,7 +226,11 @@ public static partial class HtmlToPdf
 
         /// <summary>The style that boxes inherit from when nothing in the document sets a property.</summary>
         private ComputedStyle InitialStyle(string? lang)
-            => new() { Display = Display.Block, Fonts = _fonts, MissingFonts = _missingFonts, Lang = lang, Hyphenation = _hyphenation };
+            => new()
+            {
+                Display = Display.Block, Fonts = _fonts, MissingFonts = _missingFonts, Lang = lang, Hyphenation = _hyphenation,
+                Quirks = (_namesUsed & NamesUsed.StandardsMode) == 0,
+            };
 
         /// <summary>
         /// Takes the running header and footer out of the flow and reserves their space on the page: they are drawn at
