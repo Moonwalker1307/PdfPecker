@@ -282,7 +282,10 @@ public static class PdfSignatureVerifier
             v.CoversWholeDocument = end <= data.Length && OnlyWhiteSpaceAfter(data, end);
         }
         if (!f.ByteRangeValid) problems.Add("The byte range is malformed or does not leave out exactly the signature's /Contents.");
-        if (!f.IsDocumentTimestamp && DocMdp.Level(file, f.Dict) is var level and > 0 && ReferenceEquals(DocMdp.Certification(file), f.Dict))
+        if (!f.IsDocumentTimestamp && DocMdp.Level(file, f.Dict) is var level and > 0
+            && (ReferenceEquals(DocMdp.Certification(file), f.Dict)
+                // A later update may have dropped or replaced /Perms; the signed revision still says what was certified.
+                || f.ByteRangeValid && f.Contents != null && DocMdp.CertifiedRevision(file, f.ByteRange[2] + f.ByteRange[3], f.Contents, password)))
         {
             v.CertificationLevel = (PdfCertificationLevel)level;
             // Only a well-formed byte range marks where the certified revision ends.
