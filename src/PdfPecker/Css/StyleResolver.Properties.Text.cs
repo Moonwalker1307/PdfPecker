@@ -235,9 +235,22 @@ internal sealed partial class StyleResolver
             _ => s.TextSpacingTrim,
         };
 
+    /// <summary>text-indent: a length or percentage, with hanging and each-line in any order; anything else is dropped.</summary>
     private void ApplyTextIndent(ComputedStyle s, in DeclaredValue d)
     {
-        if (TryParseLength(d.Lower, d.Em, _rootFontSize, out var ti, _vw, _vh)) s.TextIndent = ti.IsPercent ? 0 : ti.Resolve(0);
+        Length? amount = null;
+        bool hanging = false, eachLine = false;
+        foreach (var part in CssParser.Tokens(d.Lower.Trim()))
+        {
+            if (part == "hanging" && !hanging) hanging = true;
+            else if (part == "each-line" && !eachLine) eachLine = true;
+            else if (amount == null && TryParseLength(part, d.Em, _rootFontSize, out var ti, _vw, _vh) && !ti.IsAuto) amount = ti;
+            else return;
+        }
+        if (amount is not { } length) return;
+        s.TextIndent = length;
+        s.TextIndentHanging = hanging;
+        s.TextIndentEachLine = eachLine;
     }
 
     private static void ApplyTextTransform(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)

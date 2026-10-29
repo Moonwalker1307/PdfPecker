@@ -333,7 +333,9 @@ internal sealed class ComputedStyle
     public string? EmphasisString;         // text-emphasis-style: a string, the mark itself
     public uint? EmphasisColor;            // text-emphasis-color; null = currentColor
     public bool EmphasisUnder;             // text-emphasis-position: under the line instead of over it
-    public float TextIndent;
+    public Length TextIndent;           // percentages of the block's width
+    public bool TextIndentHanging;      // text-indent: hanging, every line but the first indented
+    public bool TextIndentEachLine;     // text-indent: each-line, lines after forced breaks too
     public float LetterSpacing;
     public bool NoLigatures; // font-variant-ligatures: none or no-common-ligatures, or font-feature-settings: "liga" 0
     public bool NoKerning;               // font-kerning: none, or font-feature-settings: "kern" 0

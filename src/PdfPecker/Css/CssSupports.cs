@@ -13,7 +13,7 @@ internal static class CssSupports
         "background-attachment",
         "font", "font-family", "font-size", "font-weight", "font-style", "font-variant", "font-variant-ligatures",
         "font-variant-caps", "font-variant-numeric", "font-variant-east-asian", "font-variant-position", "font-kerning", "font-synthesis",
-        "font-synthesis-weight", "font-synthesis-style", "font-synthesis-small-caps", "font-synthesis-position", "font-size-adjust", "font-feature-settings", "font-stretch", "font-variation-settings", "font-optical-sizing", "line-height", "text-align", "text-align-last", "text-justify", "text-spacing-trim",
+        "font-synthesis-weight", "font-synthesis-style", "font-synthesis-small-caps", "font-synthesis-position", "font-size-adjust", "font-feature-settings", "font-stretch", "font-width", "font-variation-settings", "font-optical-sizing", "line-height", "text-align", "text-align-last", "text-justify", "text-spacing-trim",
         "text-decoration", "text-decoration-line", "text-decoration-color", "text-decoration-style", "text-decoration-thickness", "text-decoration-skip-ink", "text-underline-position",
         "text-emphasis", "text-emphasis-style", "text-emphasis-color", "text-emphasis-position",
         "text-underline-offset", "text-transform", "text-indent", "letter-spacing", "word-spacing", "white-space",

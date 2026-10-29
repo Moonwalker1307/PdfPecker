@@ -1601,15 +1601,21 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>
-    /// The style of the marker the next line is drawn with, when it may make that line taller. In Chrome an inside
+    /// Notes on a paragraph's first line what of the marker drawn with it may make the line taller. In Chrome an inside
     /// marker is an inline box on its item's first line, and an outside marker moves that line down until the line's
-    /// ascent holds the marker's, so a ::marker with a larger font or line height than the text grows the line. A
-    /// marker in the item's own style is left out, as its strut is the line's own; so are image markers.
+    /// ascent holds the marker's, so a ::marker with a larger font or line height than the text grows the line, and so
+    /// does a marker image taller than the line's ascent, which stands on the baseline. A text marker in the item's own
+    /// style is left out, as its strut is the line's own.
     /// </summary>
-    private ComputedStyle? MarkerLineStyle(out bool outside)
+    private void NoteMarkerLine(Line line)
     {
-        outside = _marker is { Inside: false };
-        return _marker is { OwnStyle: true, Image: null, Svg: null, Gradient: null } m && m.Style.Visible ? m.Style : null;
+        if (_marker is not { } m || !m.Style.Visible) return;
+        if (m.Image != null || m.Svg != null || m.Gradient != null) line.MarkerImageH = m.ImageH;
+        else if (m.OwnStyle)
+        {
+            line.Marker = m.Style;
+            line.MarkerOutside = !m.Inside;
+        }
     }
 
     /// <summary>The side of a marker image without a size of its own (a gradient, or an SVG file without one): half the font's ascent, in whole pixels.</summary>
@@ -1667,13 +1673,18 @@ internal sealed partial class LayoutEngine
                 if (text.Length == 0) return;
             }
             float tw = font.Measure(text, size) + s.LetterSpacing * text.Length;
+            // The item's direction puts the marker before its content; the marker's own direction orders its text, and
+            // the suffix's space goes at the marker's end in that direction, as in Chrome: ".1Item" for a ::marker
+            // { direction: rtl } in a left-to-right item, "Item1." for a left-to-right marker in a right-to-left one.
             if (m.Rtl)
             {
                 // Right to left the marker follows the content's right edge, its text in right-to-left order (".1").
-                _ops.Add(new TextOp(m.ContentRight + gap, baseline, lineTop, font, size, s.Color, VisualMarkerText(text), 0, 0) { Tag = m.Tag });
+                if (s.Rtl) _ops.Add(new TextOp(m.ContentRight + gap, baseline, lineTop, font, size, s.Color, VisualMarkerText(text), 0, 0) { Tag = m.Tag });
+                else _ops.Add(new TextOp(m.ContentRight, baseline, lineTop, font, size, s.Color, text, 0, 0) { Tag = m.Tag });
                 return;
             }
-            _ops.Add(new TextOp(m.ContentX - gap - tw, baseline, lineTop, font, size, s.Color, text, 0, 0) { Tag = m.Tag });
+            if (s.Rtl) _ops.Add(new TextOp(m.ContentX - tw, baseline, lineTop, font, size, s.Color, VisualMarkerText(text), 0, 0) { Tag = m.Tag });
+            else _ops.Add(new TextOp(m.ContentX - gap - tw, baseline, lineTop, font, size, s.Color, text, 0, 0) { Tag = m.Tag });
             return;
         }
         // Chrome's symbol markers, in whole pixels from the font's rounded ascent: a square of side (2/3 ascent + 1) / 2,

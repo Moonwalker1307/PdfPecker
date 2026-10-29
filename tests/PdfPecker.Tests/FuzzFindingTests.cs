@@ -104,6 +104,45 @@ public class FuzzFindingTests
     }
 
     [Fact]
+    public void Jpeg_frame_header_over_the_pixel_cap_keeps_the_earlier_frame_size()
+    {
+        // jpeg, memory-d130ecb3: a 320 x 160 frame header, then a second one cut off after a size of 10573 x 60501.
+        // The refused size replaced the first one, and the partial output of the first frame was allocated at it.
+        var jpeg = Convert.FromBase64String("/9j/wAARCACgAUADHh4eHh4eHh4e/8AAEQjsVSlN");
+        long allocated = Bounded(() =>
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            var image = JpegDecoder.Decode(jpeg);
+            if (image is { } i) Assert.Equal((320, 160), (i.Width, i.Height));
+            return GC.GetAllocatedBytesForCurrentThread() - before;
+        });
+        Assert.True(allocated < 16 << 20, $"Allocated {allocated:N0} bytes");
+    }
+
+    [Fact]
+    public void Jpeg_scans_stop_where_their_data_runs_out()
+    {
+        // jpeg, timeout-522fb4dc: a large frame with many scans of a few bytes each. Past its data a scan read zero bits
+        // to the last block of the frame, because the zeros supplied at the marker counted as data.
+        var fixture = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "rgb.jpg"));
+        int scan = fixture.AsSpan().IndexOf(new byte[] { 0xFF, 0xDA });
+        var jpeg = new MemoryStream();
+        jpeg.Write(fixture, 0, scan);
+        var bytes = jpeg.GetBuffer();
+        int frame = fixture.AsSpan().IndexOf(new byte[] { 0xFF, 0xC0 });
+        bytes[frame + 5] = bytes[frame + 7] = 2000 >> 8; // 2000 x 2000 pixels
+        bytes[frame + 6] = bytes[frame + 8] = 2000 & 0xFF;
+        for (int i = 0; i < 2000; i++)
+        {
+            jpeg.Write(fixture, scan, 14);
+            jpeg.Write(new byte[] { 0x12, 0x34 });
+        }
+        jpeg.Write(new byte[] { 0xFF, 0xD9 });
+        var image = Bounded(() => JpegDecoder.Decode(jpeg.ToArray()));
+        Assert.Equal((2000, 2000), (image!.Value.Width, image.Value.Height));
+    }
+
+    [Fact]
     public void Jbig2_halftone_region_larger_than_the_image_is_not_allocated()
     {
         // jbig2, memory-8128463a: the fuzzer's framing is width, height and globals length, then the stream. The

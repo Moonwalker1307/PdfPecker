@@ -50,21 +50,21 @@ internal sealed partial class LayoutEngine
         }
         var cs = container.Style;
         ResolveBidi(items, cs);
-        float indent = firstInBlock ? cs.TextIndent : 0;
+        var indent = ParagraphIndent(cs, w, firstInBlock);
         if (_marker is { Inside: true } inside)
         {
             // An inside marker starts the first line: the line moves over by the marker's width, and the marker is drawn
             // just before where its content now begins.
             float mw = InsideMarkerWidth(inside);
-            inside.ContentX = x + indent + mw;
-            inside.ContentRight = x + w - indent - mw;
-            indent += mw;
+            inside.ContentX = x + indent.First + mw;
+            inside.ContentRight = x + w - indent.First - mw;
+            indent = indent with { First = indent.First + mw };
         }
         bool besideFloats = FloatsBelow(y) || items.Exists(it => it.Kind == ItemKind.Float);
         // An initial letter starts the first line after its text-indent, and the lines beside it start where it ends.
         float letterIndent = 0;
-        if (firstInBlock && indent != 0 && items.Exists(it => it.Kind == ItemKind.Float && IsInitialLetter(it.Element!)))
-            (letterIndent, indent) = (indent, 0);
+        if (firstInBlock && indent.First != 0 && items.Exists(it => it.Kind == ItemKind.Float && IsInitialLetter(it.Element!)))
+            (letterIndent, indent) = (indent.First, indent with { First = 0 });
         // On pages of different widths each line is measured for the page it goes on, as lines beside floats are.
         if (_measuring || !_paginate) pages = null;
         StrutMetrics(cs, out float strutA, out float strutD);
@@ -150,18 +150,40 @@ internal sealed partial class LayoutEngine
         return n;
     }
 
+    /// <summary>
+    /// The text-indent of a paragraph's lines. It moves the block's first line in, and with each-line every line after
+    /// a forced break too; hanging turns that round, so that it moves every other line in. Lines of a run that follows
+    /// a block inside the same block are not its first lines. Percentages are of the block's width, and of nothing
+    /// while the width is still being measured, as in Chrome.
+    /// </summary>
+    private static LineIndent ParagraphIndent(ComputedStyle cs, float w, bool firstInBlock)
+    {
+        float amount = cs.TextIndent.IsPercent && w >= UnboundedMeasure ? 0 : cs.TextIndent.Resolve(w);
+        if (amount == 0) return default;
+        bool hanging = cs.TextIndentHanging;
+        return new LineIndent(firstInBlock != hanging ? amount : 0, hanging ? amount : 0, cs.TextIndentEachLine != hanging ? amount : 0);
+    }
+
+    /// <summary>How far a paragraph's lines are indented: its first line, a line after a soft wrap and a line after a forced break.</summary>
+    private readonly record struct LineIndent(float First, float Wrapped, float Forced)
+    {
+        /// <summary>The indent of line <paramref name="li"/>, which follows the lines before it in <paramref name="lines"/>.</summary>
+        public float Of(List<Line> lines, int li) => li == 0 ? First : lines[li - 1].Forced ? Forced : Wrapped;
+    }
+
     /// <summary>A paragraph being laid out: what its line breaker needs, and the lines beside floats it may be broken with.</summary>
     private ref struct Paragraph
     {
         private readonly LayoutEngine _engine;
         private readonly List<Item> _items;
         private readonly ComputedStyle _block;
-        private readonly float _x, _y, _w, _indent, _strutH;
+        private readonly float _x, _y, _w, _strutH;
+        private readonly LineIndent _indent;
         private readonly PageBox? _pages;
         public CollectState? First;
         public float LetterIndent;
 
-        public Paragraph(LayoutEngine engine, List<Item> items, ComputedStyle block, float x, float y, float w, float indent, float strutH, PageBox? pages)
+        public Paragraph(LayoutEngine engine, List<Item> items, ComputedStyle block, float x, float y, float w, LineIndent indent, float strutH, PageBox? pages)
         {
             _engine = engine;
             _items = items;
