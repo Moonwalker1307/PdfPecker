@@ -200,7 +200,7 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
 PdfPecker is built for HTML templates you control: it runs no JavaScript, and conversion never fetches anything from
 the network (remote images and stylesheets load only through a `ResourceResolver` you supply; those in `data:` URLs need
 none). Only signing goes online, and only when you ask: a timestamp from the server you name in `TimestampUrl`, OCSP and CRL data for long-term
-validation when you turn on `FetchRevocationData`, and online revocation checks when verification uses
+validation when you turn on `FetchRevocationData` (from public addresses only, unless your `UrlFilter` allows others), and online revocation checks when verification uses
 `X509RevocationMode.Online`. See the [limitations](https://pdfpecker.net/docs/limitations/) for what it does not do yet.
 
 ## How it compares

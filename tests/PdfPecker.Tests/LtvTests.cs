@@ -410,4 +410,58 @@ public class LtvTests
         Assert.Equal(new[] { new Uri(OcspUrl), new Uri(CrlUrl) }, seen);
         Assert.Equal(new[] { CrlUrl }, handler.Requests);
     }
+
+    [Fact]
+    public void Internal_addresses_in_certificates_are_not_contacted_without_a_filter()
+    {
+        // A hostile certificate can name a cloud metadata service or a server on the signer's own network.
+        string[] ocsp = { "http://169.254.169.254/latest/meta-data/", "http://localhost:8080/ocsp" };
+        string[] crls = { "http://127.0.0.1/ca.crl", "http://[::1]/ca.crl", "http://10.0.0.5/ca.crl", "http://192.168.1.1/ca.crl", "http://crl.test/old.crl" };
+        var pdf = SignedWithUrls(ocsp, crls);
+        var handler = new Recorder(url => url == "http://crl.test/old.crl" ? Redirect("http://172.16.0.1/ca.crl") : new HttpResponseMessage(HttpStatusCode.NotFound));
+        try { PdfSigner.AddValidationData(pdf, new PdfLtvOptions { Certificates = new[] { Ca.Value.Root }, FetchRevocationData = true, HttpClient = new HttpClient(handler) }); }
+        catch (PdfSignatureException) { } // nothing could be fetched
+        Assert.Equal(new[] { "http://crl.test/old.crl" }, handler.Requests); // and its redirect to 172.16.0.1 is not followed
+
+        // A filter decides alone, so it can let requests reach internal servers.
+        var allowed = new Recorder(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
+        try { PdfSigner.AddValidationData(pdf, new PdfLtvOptions { Certificates = new[] { Ca.Value.Root }, FetchRevocationData = true, HttpClient = new HttpClient(allowed), UrlFilter = _ => true }); }
+        catch (PdfSignatureException) { }
+        Assert.Contains("http://127.0.0.1/ca.crl", allowed.Requests);
+    }
+
+    [Fact]
+    public void The_default_client_refuses_to_connect_to_internal_addresses()
+    {
+        // The check runs when connecting, after name resolution, so it also covers host names that resolve inward.
+        var ex = Assert.Throws<HttpRequestException>(() =>
+            PdfPecker.Signing.RevocationFetcher.DefaultClient.Send(new HttpRequestMessage(HttpMethod.Get, "http://127.0.0.1:9/")));
+        Assert.Contains("not a public address", ex.Message);
+    }
+
+    [Theory]
+    [InlineData("8.8.8.8", true)]
+    [InlineData("2606:4700:4700::1111", true)]
+    [InlineData("100.63.255.255", true)]
+    [InlineData("172.32.0.1", true)]
+    [InlineData("127.0.0.1", false)]
+    [InlineData("0.0.0.0", false)]
+    [InlineData("10.1.2.3", false)]
+    [InlineData("100.64.0.1", false)]
+    [InlineData("169.254.169.254", false)]
+    [InlineData("172.16.0.1", false)]
+    [InlineData("172.31.255.255", false)]
+    [InlineData("192.168.0.1", false)]
+    [InlineData("224.0.0.1", false)]
+    [InlineData("255.255.255.255", false)]
+    [InlineData("::1", false)]
+    [InlineData("::", false)]
+    [InlineData("fe80::1", false)]
+    [InlineData("fd00::1", false)]
+    [InlineData("ff02::1", false)]
+    [InlineData("::ffff:127.0.0.1", false)]
+    [InlineData("::ffff:8.8.8.8", true)]
+    [InlineData("64:ff9b::a9fe:a9fe", false)]
+    public void Tells_public_addresses_from_internal_ones(string address, bool isPublic)
+        => Assert.Equal(isPublic, PdfPecker.Signing.RevocationFetcher.IsPublic(IPAddress.Parse(address)));
 }

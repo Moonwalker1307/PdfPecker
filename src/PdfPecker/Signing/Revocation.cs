@@ -1,5 +1,7 @@
 using System.Formats.Asn1;
+using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Sockets;
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -272,8 +274,19 @@ internal sealed class RevocationFetcher : IDisposable
     private static readonly TimeSpan PerRequest = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan Total = TimeSpan.FromMinutes(2);
 
-    // Redirects are followed here rather than by the handler, so each hop is checked like any other URL.
-    private static readonly Lazy<HttpClient> Shared = new(() => new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = PerRequest });
+    // Redirects are followed here rather than by the handler, so each hop is checked like any other URL. The default
+    // client connects only to public addresses, checked when it connects, so a host name that resolves to an internal
+    // address is refused too; a caller's filter that names its own internal servers gets a client without that check.
+    private static readonly Lazy<HttpClient> PublicOnly = new(() => new HttpClient(new SocketsHttpHandler
+    {
+        AllowAutoRedirect = false,
+        ConnectCallback = ConnectPublicAsync,
+    }) { Timeout = PerRequest });
+
+    /// <summary>The client used when the caller supplies neither a client nor a filter.</summary>
+    internal static HttpClient DefaultClient => PublicOnly.Value;
+
+    private static readonly Lazy<HttpClient> Open = new(() => new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = PerRequest });
 
     private readonly HttpClient _client;
     private readonly Func<Uri, bool>? _filter;
@@ -287,7 +300,7 @@ internal sealed class RevocationFetcher : IDisposable
 
     public RevocationFetcher(HttpClient? client, Func<Uri, bool>? filter, bool async, CancellationToken cancellationToken)
     {
-        _client = client ?? Shared.Value;
+        _client = client ?? (filter == null ? PublicOnly.Value : Open.Value);
         _filter = filter;
         _async = async;
         _cancellation = cancellationToken;
@@ -388,11 +401,72 @@ internal sealed class RevocationFetcher : IDisposable
             Limit(errors, $"The certificates name more OCSP and CRL addresses than the limit of {MaxUrls} per call; the rest were not contacted.");
             return false;
         }
-        // A vetoed URL is skipped as if the certificate did not name it.
-        if (_filter != null && !_filter(uri)) return false;
+        // A vetoed URL is skipped as if the certificate did not name it. Without a filter, internal addresses written
+        // into the URL are skipped here too, whichever client sends the request.
+        if (_filter != null ? !_filter(uri) : !IsPublicHost(uri)) return false;
         _urls.Add(key);
         _requests++;
         return true;
+    }
+
+    /// <summary>
+    /// Whether the URL's host may be contacted without a filter: not "localhost", and not an address literal outside the
+    /// public internet. Host names are checked again when the default client connects.
+    /// </summary>
+    internal static bool IsPublicHost(Uri uri)
+    {
+        string host = uri.IdnHost.TrimEnd('.');
+        if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase) || host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase)) return false;
+        return !IPAddress.TryParse(host.Trim('[', ']'), out var address) || IsPublic(address);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="address"/> belongs to the public internet: not loopback, private, link-local, shared
+    /// carrier-grade, multicast, reserved or unspecified, for IPv4 and IPv6 (and IPv4 written as IPv6).
+    /// </summary>
+    internal static bool IsPublic(IPAddress address)
+    {
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        if (address.AddressFamily == AddressFamily.InterNetwork)
+        {
+            Span<byte> b = stackalloc byte[4];
+            address.TryWriteBytes(b, out _);
+            return !(b[0] is 0 or 10 or 127 or >= 224
+                || b[0] == 100 && (b[1] & 0xC0) == 64     // 100.64.0.0/10, shared address space
+                || b[0] == 169 && b[1] == 254             // link-local, which includes cloud metadata services
+                || b[0] == 172 && (b[1] & 0xF0) == 16     // 172.16.0.0/12
+                || b[0] == 192 && b[1] == 168
+                || b[0] == 192 && b[1] == 0 && b[2] == 0  // IETF protocol assignments
+                || b[0] == 198 && (b[1] & 0xFE) == 18);   // benchmarking
+        }
+        if (address.AddressFamily != AddressFamily.InterNetworkV6) return false;
+        if (IPAddress.IPv6Loopback.Equals(address) || IPAddress.IPv6None.Equals(address) || address.IsIPv6LinkLocal
+            || address.IsIPv6SiteLocal || address.IsIPv6UniqueLocal || address.IsIPv6Multicast) return false;
+        Span<byte> v6 = stackalloc byte[16];
+        address.TryWriteBytes(v6, out _);
+        // 64:ff9b::/96 translates to the IPv4 address in its last four bytes.
+        if (v6[..12].SequenceEqual(stackalloc byte[] { 0, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0 }))
+            return IsPublic(new IPAddress(v6[12..]));
+        return true;
+    }
+
+    /// <summary>Connects the default client only to public addresses of the host, refusing it when it has any other.</summary>
+    private static async ValueTask<Stream> ConnectPublicAsync(SocketsHttpConnectionContext context, CancellationToken cancellationToken)
+    {
+        var addresses = await Dns.GetHostAddressesAsync(context.DnsEndPoint.Host, cancellationToken).ConfigureAwait(false);
+        if (addresses.Length == 0 || !Array.TrueForAll(addresses, IsPublic))
+            throw new HttpRequestException($"{context.DnsEndPoint.Host} is not a public address; set PdfLtvOptions.UrlFilter to allow internal servers.");
+        var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+        try
+        {
+            await socket.ConnectAsync(addresses, context.DnsEndPoint.Port, cancellationToken).ConfigureAwait(false);
+            return new NetworkStream(socket, ownsSocket: true);
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
     }
 
     private byte[]? Limit(List<string> errors, string message)
