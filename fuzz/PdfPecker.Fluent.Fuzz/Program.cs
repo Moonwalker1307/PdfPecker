@@ -285,7 +285,13 @@ internal static class Fuzz
                             2 => t.Hyperlink(Text(r), r.Next(10) != 0 ? "https://example.com/" + Uri.EscapeDataString(Text(r)) : Text(r)),
                             3 => t.SectionLink(Text(r), Name(r)),
                             4 => t.Line(Text(r)),
-                            5 => t.BeginPageNumberOfSection(Name(r)),
+                            5 => r.Next(4) switch
+                            {
+                                0 => t.BeginPageNumberOfSection(Name(r)),
+                                1 => t.EndPageNumberOfSection(Name(r)),
+                                2 => t.TotalPagesWithinSection(Name(r)),
+                                _ => t.PageNumberWithinSection(Name(r)),
+                            },
                             _ => t.Span(Text(r)).Style(Style(TextStyle.Default, r)),
                         };
                     }
