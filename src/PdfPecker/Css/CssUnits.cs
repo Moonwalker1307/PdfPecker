@@ -43,13 +43,14 @@ internal static class CssUnits
     }
 
     // The properties that take only lengths (and keywords), where quirks mode reads a bare number as pixels.
+    // border-image-width is not one of them: a bare number there is a multiple of the border width.
     private static bool IsLengthProperty(string p)
         => p is "width" or "height" or "min-width" or "min-height" or "max-width" or "max-height" or "inline-size" or "block-size"
                or "min-inline-size" or "min-block-size" or "max-inline-size" or "max-block-size" or "top" or "right" or "bottom" or "left"
                or "font-size" or "text-indent" or "letter-spacing" or "word-spacing" or "outline-width" or "outline-offset"
            || p.StartsWith("margin-", StringComparison.Ordinal) || p.StartsWith("padding-", StringComparison.Ordinal)
            || p.StartsWith("inset-", StringComparison.Ordinal)
-           || (p.StartsWith("border-", StringComparison.Ordinal) && p.EndsWith("-width", StringComparison.Ordinal));
+           || (p.StartsWith("border-", StringComparison.Ordinal) && p.EndsWith("-width", StringComparison.Ordinal) && p != "border-image-width");
 
     /// <summary>Whether a value has a number with a metric unit outside strings and url().</summary>
     public static bool HasMetricUnit(string value)
