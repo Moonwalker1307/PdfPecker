@@ -976,6 +976,9 @@ internal sealed partial class LayoutEngine
     /// </summary>
     private const int MaxTriedInColumnsNesting = 6;
 
+    /// <summary>The box that <see cref="PlaceOnPages"/> lays out next, when its measured height crosses a page boundary.</summary>
+    private Element? _crossingBox;
+
     /// <summary>Lays out a block-level box whose top border edge is at <paramref name="y"/>. Returns its bottom border edge.</summary>
     private float LayoutBlockBox(Element e, float x, float y, float availW, bool shrinkToFit)
     {
@@ -1007,6 +1010,22 @@ internal sealed partial class LayoutEngine
             ? new KeepProbe(opsStart, PageOf(y)) { Edge = true }
             : null;
         if (edgeProbe != null) _childProbe = edgeProbe;
+        // On pages a box kept whole that crosses a page boundary is laid out again on the next page, and stays there
+        // whether it fits or not. A box laid out again where it lands whose measured height already crosses one goes
+        // there straight away: laying it out here first, with the boxes kept whole inside it doing the same, doubled
+        // the work with each level of them.
+        bool crosses = _crossingBox == e;
+        _crossingBox = null;
+        if (crosses && avoidInside && movable && _paginate && _grid is not ColumnGrid && _columnNotes == null && !AtPageTop(y)
+            && MayLayOutAgain && _avoidDepth <= MaxTriedInColumnsNesting)
+        {
+            y = NextPage(y);
+            if (pages != null)
+            {
+                (x, availW) = OnPage(pages, y);
+                if (!table) _childPageBox = pages;
+            }
+        }
         float bottom = table ? LayoutTable(e, x, y, availW, pages) : LayoutBlockBoxCore(e, x, y, availW, shrinkToFit);
         // A first child laid out with its parent's probe goes along with the parent: its own top edge is not content.
         if (probe is { Edge: true } && opsStart < _ops.Count && _ops[opsStart] is GroupOp chained) (probe.Chained ??= new()).Add(chained);
@@ -1093,7 +1112,7 @@ internal sealed partial class LayoutEngine
             marker.Gradient = gradient;
             marker.ImageW = marker.ImageH = DefaultMarkerImageSide(marker.Style);
         }
-        else if (e.MarkerContent != null || s.ListStyleImage is not { } imageSrc || !LoadMarkerImage(marker, imageSrc, s.ImageOrientationNone))
+        else if (e.MarkerContent != null || s.ListStyleImage is not { } imageSrc || !LoadMarkerImage(marker, imageSrc, s.ImageOrientationNone, s.ListStyleImageResolution))
             marker.Text = custom ?? s.ListCounterStyle?.MarkerText(_currentListIndex);
         if (marker.Text != null || marker.Image != null || marker.Svg != null || marker.Gradient != null || s.ListStyleType != ListStyleType.None)
             _marker = marker;
@@ -1572,10 +1591,11 @@ internal sealed partial class LayoutEngine
     // ------------------------------------------------------------------ list markers
 
     /// <summary>
-    /// Loads a list-style-image and sizes it as Chrome does: a raster image at its pixel size, an SVG drawing at its
+    /// Loads a list-style-image and sizes it as Chrome does: a raster image at its pixel size over its image-set()
+    /// resolution, an SVG drawing at its
     /// width and height, and a drawing without them at half the font's ascent (wide, with its viewBox's aspect ratio).
     /// </summary>
-    private bool LoadMarkerImage(ListMarker m, string src, bool asStored)
+    private bool LoadMarkerImage(ListMarker m, string src, bool asStored, float resolution)
     {
         var image = _images.Load(src, asStored);
         var svg = image == null ? _images.LoadSvg(src) : null;
@@ -1584,8 +1604,8 @@ internal sealed partial class LayoutEngine
         {
             if (image.Width <= 0 || image.Height <= 0) return false;
             m.Image = image;
-            m.ImageW = image.Width * 0.75f;
-            m.ImageH = image.Height * 0.75f;
+            m.ImageW = image.Width * 0.75f / resolution;
+            m.ImageH = image.Height * 0.75f / resolution;
             return true;
         }
         float side = DefaultMarkerImageSide(m.Style);
@@ -1601,15 +1621,21 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>
-    /// The style of the marker the next line is drawn with, when it may make that line taller. In Chrome an inside
+    /// Notes on a paragraph's first line what of the marker drawn with it may make the line taller. In Chrome an inside
     /// marker is an inline box on its item's first line, and an outside marker moves that line down until the line's
-    /// ascent holds the marker's, so a ::marker with a larger font or line height than the text grows the line. A
-    /// marker in the item's own style is left out, as its strut is the line's own; so are image markers.
+    /// ascent holds the marker's, so a ::marker with a larger font or line height than the text grows the line, and so
+    /// does a marker image taller than the line's ascent, which stands on the baseline. A text marker in the item's own
+    /// style is left out, as its strut is the line's own.
     /// </summary>
-    private ComputedStyle? MarkerLineStyle(out bool outside)
+    private void NoteMarkerLine(Line line)
     {
-        outside = _marker is { Inside: false };
-        return _marker is { OwnStyle: true, Image: null, Svg: null, Gradient: null } m && m.Style.Visible ? m.Style : null;
+        if (_marker is not { } m || !m.Style.Visible) return;
+        if (m.Image != null || m.Svg != null || m.Gradient != null) line.MarkerImageH = m.ImageH;
+        else if (m.OwnStyle)
+        {
+            line.Marker = m.Style;
+            line.MarkerOutside = !m.Inside;
+        }
     }
 
     /// <summary>The side of a marker image without a size of its own (a gradient, or an SVG file without one): half the font's ascent, in whole pixels.</summary>
@@ -1667,13 +1693,18 @@ internal sealed partial class LayoutEngine
                 if (text.Length == 0) return;
             }
             float tw = font.Measure(text, size) + s.LetterSpacing * text.Length;
+            // The item's direction puts the marker before its content; the marker's own direction orders its text, and
+            // the suffix's space goes at the marker's end in that direction, as in Chrome: ".1Item" for a ::marker
+            // { direction: rtl } in a left-to-right item, "Item1." for a left-to-right marker in a right-to-left one.
             if (m.Rtl)
             {
                 // Right to left the marker follows the content's right edge, its text in right-to-left order (".1").
-                _ops.Add(new TextOp(m.ContentRight + gap, baseline, lineTop, font, size, s.Color, VisualMarkerText(text), 0, 0) { Tag = m.Tag });
+                if (s.Rtl) _ops.Add(new TextOp(m.ContentRight + gap, baseline, lineTop, font, size, s.Color, VisualMarkerText(text), 0, 0) { Tag = m.Tag });
+                else _ops.Add(new TextOp(m.ContentRight, baseline, lineTop, font, size, s.Color, text, 0, 0) { Tag = m.Tag });
                 return;
             }
-            _ops.Add(new TextOp(m.ContentX - gap - tw, baseline, lineTop, font, size, s.Color, text, 0, 0) { Tag = m.Tag });
+            if (s.Rtl) _ops.Add(new TextOp(m.ContentX - tw, baseline, lineTop, font, size, s.Color, VisualMarkerText(text), 0, 0) { Tag = m.Tag });
+            else _ops.Add(new TextOp(m.ContentX - gap - tw, baseline, lineTop, font, size, s.Color, text, 0, 0) { Tag = m.Tag });
             return;
         }
         // Chrome's symbol markers, in whole pixels from the font's rounded ascent: a square of side (2/3 ascent + 1) / 2,
@@ -2554,7 +2585,11 @@ internal sealed partial class LayoutEngine
         _knownBoxes = src.BorderH == null ? c.Known : null;
         try
         {
+            // Nothing moves down to a next page without pagination, so a box whose measured border box crosses a page
+            // boundary crosses it on the pages too.
+            if (!c.ForcedBreaks && CrossesPage(dy + mt, dy + c.Height - mb)) _crossingBox = e;
             float bottom = LayoutBlockBox(e, dx, dy + mt, src.OuterW, src.ShrinkToFit) + mb;
+            _crossingBox = null; // a box turned to an orthogonal writing mode does not look at it
             if (src.BorderH is float bh && bottom - dy < c.Height - Eps && Repeats(_placingOnPages <= MaxRepeatedOnPages))
             {
                 // A stretched box keeps the height it was given when its content still fits in it on the pages.

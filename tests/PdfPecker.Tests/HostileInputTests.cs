@@ -1025,6 +1025,22 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Nested_grid_items_kept_whole_across_pages_go_to_the_next_page_without_a_trial_layout()
+    {
+        // The fuzz finding (html, timeout-5baedb4b of 2026-10-28): grids of figures kept whole, each holding the next grid.
+        // A grid item taller than the page was laid out where it landed, and then again on the next page, at every level
+        // of figures inside it too, so the work doubled with each level until the relayout budget ran out. These eight
+        // levels around a long text allocated 194 MB; going straight to the next page, 13 MB.
+        const string css = "<style>@page{size:A4;margin:15mm}body{font:9pt sans-serif;margin:0}"
+                           + ".grid{display:grid;grid-template-columns:1fr 1fr;gap:6mm}"
+                           + "figure{margin:0;border:0.5pt solid #ccc;padding:4pt;break-inside:avoid}</style>";
+        var html = css + Repeat("<h1>Charts</h1><div class=\"grid\"><figure><figcaption>Bar chart", 8) + Repeat(" Lorem ipsum dolor sit amet", 600);
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 64L << 20);
+    }
+
+    [Fact]
     public void Nested_flex_rows_across_a_page_break_lay_out_their_content_a_constant_number_of_times()
     {
         // A flex line whose item grew on the pages was placed again even when that item was its only one, and boxes

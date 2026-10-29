@@ -162,12 +162,15 @@ internal sealed partial class StyleResolver
             case "font-style": s.Italic = from.Italic; break;
             case "line-height": s.LineHeightKind = from.LineHeightKind; s.LineHeightValue = from.LineHeightValue; break;
             case "text-align": s.TextAlign = from.TextAlign; s.BlockAlign = from.BlockAlign; break;
-            case "text-indent": s.TextIndent = from.TextIndent; break;
+            case "text-indent": s.TextIndent = from.TextIndent; s.TextIndentHanging = from.TextIndentHanging; s.TextIndentEachLine = from.TextIndentEachLine; break;
             case "initial-letter": s.InitialLetterSize = from.InitialLetterSize; s.InitialLetterSink = from.InitialLetterSink; break;
             case "text-justify": s.TextJustify = from.TextJustify; break;
             case "text-spacing-trim": s.TextSpacingTrim = from.TextSpacingTrim; break;
             case "text-decoration-skip-ink": s.SkipInk = from.SkipInk; break;
             case "text-underline-position": s.UnderlinePosition = from.UnderlinePosition; break;
+            case "text-emphasis-style": s.EmphasisShape = from.EmphasisShape; s.EmphasisOpen = from.EmphasisOpen; s.EmphasisString = from.EmphasisString; break;
+            case "text-emphasis-color": s.EmphasisColor = from.EmphasisColor; break;
+            case "text-emphasis-position": s.EmphasisUnder = from.EmphasisUnder; break;
             case "text-transform": s.TextTransform = from.TextTransform; break;
             case "letter-spacing": s.LetterSpacing = from.LetterSpacing; break;
             case "word-spacing": s.WordSpacing = from.WordSpacing; break;

@@ -59,14 +59,30 @@ internal sealed partial class StyleResolver
     private void ApplyListStyleImage(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
         string lower = d.Lower;
-        if (lower is "inherit" or "unset") (s.ListStyleImage, s.ListStyleGradient) = (parent.ListStyleImage, parent.ListStyleGradient);
-        else if (lower is "none" or "initial") (s.ListStyleImage, s.ListStyleGradient) = (null, null);
-        else if (CssBackground.Url(d.Value) is { } listImage) (s.ListStyleImage, s.ListStyleGradient) = (listImage, null);
+        string value = d.Value;
+        float resolution = 1;
+        if (lower is "inherit" or "unset")
+        {
+            (s.ListStyleImage, s.ListStyleGradient, s.ListStyleImageResolution) = (parent.ListStyleImage, parent.ListStyleGradient, parent.ListStyleImageResolution);
+            return;
+        }
+        if (CssImageSet.IsImageSet(value))
+        {
+            // An image-set without an option to show leaves the type to show, like an image that fails to load.
+            if (CssImageSet.Choose(value) is not { } chosen)
+            {
+                (s.ListStyleImage, s.ListStyleGradient) = (null, null);
+                return;
+            }
+            (value, resolution) = chosen;
+            lower = value.ToLowerInvariant();
+        }
+        s.ListStyleImageResolution = resolution;
+        if (lower is "none" or "initial") (s.ListStyleImage, s.ListStyleGradient) = (null, null);
+        else if (CssBackground.Url(value) is { } listImage) (s.ListStyleImage, s.ListStyleGradient) = (listImage, null);
         else if (lower.Contains("gradient(", StringComparison.Ordinal))
             // A gradient has no size of its own: it is drawn as a small square, as in Chrome; one that does not parse
             // leaves the type to show, like an image that fails to load.
-            (s.ListStyleImage, s.ListStyleGradient) = (null, CssGradient.Parse(d.Value, s.Color, s.FontSize, _rootFontSize, _vw, _vh));
-        // image-set() is not drawn as a marker: like an image that fails to load, the type shows.
-        else if (lower.StartsWith("image-set(", StringComparison.Ordinal)) (s.ListStyleImage, s.ListStyleGradient) = (null, null);
+            (s.ListStyleImage, s.ListStyleGradient) = (null, CssGradient.Parse(value, s.Color, s.FontSize, _rootFontSize, _vw, _vh));
     }
 }

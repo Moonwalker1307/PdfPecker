@@ -65,6 +65,8 @@ internal static class Targets
         "<style>*::first-letter{initial-letter:3 2}</style>", "<style>p::first-letter{initial-letter:1e9 raise;padding:1e9px}</style>",
         "<img srcset=\"data:image/png;base64, 1e-30x, a 1e30x, b 1x 2w,,\">", "<img srcset=\"a 999999999w, b 1w\" sizes=\"(width>0) calc(1e9px*1e9), -1px, ((((\">",
         "<source srcset=\"a 2x\" media=\"(((\" type=\"image/png;x\">", "sizes=\"0px\"", "srcset=\"a 0.0001x, b 0x\"",
+        "background-image:image-set(url(a) 1e-30x, 'b' 1e30dpi type('image/png'), linear-gradient(red,blue) 2x)",
+        "list-style-image:-webkit-image-set(url(a) 0.0001dppx, url(b) 1e9dpcm)", "content:image-set(url(a) 2x type(\"((\"))",
         ":valid", ":invalid", ":open", "<input pattern=\"(a+)+\\1(((\" value=aaaa required>", "<input type=number min=1e308 step=1e-308 value=-1e308>",
         "<input type=week value=2026-W53 min=0001-W01><input type=time min=23:00 max=01:00 value=12:00:00.12>", "<input type=radio name=r required>",
         "<header data-sticky-pdf-header data-sticky-pdf-page=a>{page} of {total-pages}</header>", "<div data-sticky-pdf-first-footer data-sticky-pdf-page=\" a \">",

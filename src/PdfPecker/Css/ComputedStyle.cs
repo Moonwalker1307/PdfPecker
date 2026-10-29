@@ -159,6 +159,9 @@ internal enum SkipInk : byte { Auto, None, All }
 // text-underline-position: near the baseline as the UA likes, where the font says, or under the em box (clear of
 // descenders). left and right only matter in vertical text, which draws them as auto.
 internal enum UnderlinePosition : byte { Auto, FromFont, Under }
+// text-emphasis-style: the shape of the mark drawn by each character. Auto is filled or open alone, a dot in horizontal
+// text and sesame in vertical text, as in Chrome; String is a mark of the author's own.
+internal enum EmphasisShape : byte { None, Auto, Dot, Circle, DoubleCircle, Triangle, Sesame, String }
 
 /// <summary>Pt and Percent are plain values; Calc is a math function that depends on a percentage (see <see cref="CssMath"/>).</summary>
 internal enum LengthUnit : byte { Pt, Percent, Auto, Calc }
@@ -313,6 +316,7 @@ internal sealed class ComputedStyle
     public string? ListStyleString;          // list-style-type: "string": the marker text
     public CounterStyle? ListCounterStyle;   // the counter style of a text marker; null for the bullets, a string and none
     public string? ListStyleImage;           // list-style-image: the url
+    public float ListStyleImageResolution = 1; // list-style-image: image pixels per CSS pixel, from image-set()
     public CssGradient? ListStyleGradient;   // list-style-image: a gradient
     public bool ListStylePositionInside;
     public TextTransform TextTransform;
@@ -325,7 +329,14 @@ internal sealed class ComputedStyle
     public Length? UnderlineOffset;        // null = auto; from the alphabetic baseline
     public SkipInk SkipInk;                // text-decoration-skip-ink, inherited
     public UnderlinePosition UnderlinePosition; // text-underline-position, inherited
-    public float TextIndent;
+    public EmphasisShape EmphasisShape;    // text-emphasis-style, inherited
+    public bool EmphasisOpen;              // text-emphasis-style: open, hollow marks
+    public string? EmphasisString;         // text-emphasis-style: a string, the mark itself
+    public uint? EmphasisColor;            // text-emphasis-color; null = currentColor
+    public bool EmphasisUnder;             // text-emphasis-position: under the line instead of over it
+    public Length TextIndent;           // percentages of the block's width
+    public bool TextIndentHanging;      // text-indent: hanging, every line but the first indented
+    public bool TextIndentEachLine;     // text-indent: each-line, lines after forced breaks too
     public float LetterSpacing;
     public bool NoLigatures; // font-variant-ligatures: none or no-common-ligatures, or font-feature-settings: "liga" 0
     public bool NoKerning;               // font-kerning: none, or font-feature-settings: "kern" 0
@@ -671,6 +682,25 @@ internal sealed class ComputedStyle
     /// The ascent and descent of this style's strut: its font and line height on its own baseline. Chrome gives the top
     /// half of the leading whole CSS pixels and the rest to the bottom.
     /// </summary>
+    /// <summary>The text-emphasis mark drawn by each character, or null for none.</summary>
+    public string? EmphasisMark => EmphasisShape switch
+    {
+        EmphasisShape.None => null,
+        EmphasisShape.String => EmphasisString is { Length: > 0 } mark ? mark : null,
+        EmphasisShape.Auto => ShapeMark(WritingMode == WritingMode.HorizontalTb ? EmphasisShape.Dot : EmphasisShape.Sesame),
+        _ => ShapeMark(EmphasisShape),
+    };
+
+    /// <summary>The character Chrome draws for a shape, filled or open.</summary>
+    private string ShapeMark(EmphasisShape shape) => shape switch
+    {
+        EmphasisShape.Dot => EmphasisOpen ? "\u25E6" : "\u2022",
+        EmphasisShape.Circle => EmphasisOpen ? "\u25CB" : "\u25CF",
+        EmphasisShape.DoubleCircle => EmphasisOpen ? "\u25CE" : "\u25C9",
+        EmphasisShape.Triangle => EmphasisOpen ? "\u25B3" : "\u25B2",
+        _ => EmphasisOpen ? "\uFE46" : "\uFE45",
+    };
+
     public void Strut(out float ascent, out float descent)
     {
         Font.LineMetrics(TextSize, out float asc, out float desc);

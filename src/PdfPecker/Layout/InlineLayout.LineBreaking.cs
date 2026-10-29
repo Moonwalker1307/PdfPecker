@@ -13,15 +13,15 @@ internal sealed partial class LayoutEngine
     /// Breaks items into lines. With <paramref name="after"/>, a list matching <paramref name="items"/> item for item,
     /// the lines after the first are made from that list instead (::first-line).
     /// </summary>
-    private List<Line> BreakLines(List<Item> items, float availW, float firstIndent, FloatLines? fl = null, List<Item>? after = null, ComputedStyle? block = null)
+    private List<Line> BreakLines(List<Item> items, float availW, LineIndent indent, FloatLines? fl = null, List<Item>? after = null, ComputedStyle? block = null)
     {
-        var breaker = new LineBreaker(this, items, availW, firstIndent, fl, after);
+        var breaker = new LineBreaker(this, items, availW, indent, fl, after);
         breaker.Run();
         if (breaker.ClonesEdges) AddCloneEdges(breaker.Lines);
         // text-wrap: balance and pretty choose the breaks again once the greedy ones are known; beside floats, on pages
         // of different widths and with a ::first-line style the lines keep their greedy breaks.
         if (block is { TextWrap: not TextWrapStyle.Auto } && fl == null && after == null && !breaker.ClonesEdges)
-            return WrapLines(items, breaker.Lines, block, availW, firstIndent);
+            return WrapLines(items, breaker.Lines, block, availW, indent);
         return breaker.Lines;
     }
 
@@ -129,7 +129,8 @@ internal sealed partial class LayoutEngine
     private ref struct LineBreaker
     {
         private readonly LayoutEngine _engine;
-        private readonly float _availW, _firstIndent;
+        private readonly float _availW;
+        private readonly LineIndent _indent;
         private readonly FloatLines? _fl;
         // text-wrap: where each line must start, or null for greedy breaks throughout.
         private readonly byte[]? _plan;
@@ -145,13 +146,13 @@ internal sealed partial class LayoutEngine
         public readonly bool ClonesEdges;
         private Item? _edgeAfter;
 
-        public LineBreaker(LayoutEngine engine, List<Item> items, float availW, float firstIndent, FloatLines? fl, List<Item>? after, byte[]? plan = null)
+        public LineBreaker(LayoutEngine engine, List<Item> items, float availW, LineIndent indent, FloatLines? fl, List<Item>? after, byte[]? plan = null)
         {
             _engine = engine;
             _plan = plan;
             _items = items;
             _availW = availW;
-            _firstIndent = firstIndent;
+            _indent = indent;
             _fl = fl;
             _after = after;
             _count = items.Count;
@@ -159,13 +160,13 @@ internal sealed partial class LayoutEngine
             _edgeAfter = null;
             Lines = engine.RentLineList();
             _cur = engine.RentLine();
-            _cur.Marker = engine.MarkerLineStyle(out _cur.MarkerOutside);
+            engine.NoteMarkerLine(_cur);
             fl?.Begin(Lines);
-            _avail = (fl?.Avail ?? availW) - firstIndent;
+            _avail = (fl?.Avail ?? availW) - indent.First;
         }
 
-        /// <summary>The room of the current line, after floats changed it: the first line also loses its indent.</summary>
-        private void TakeFloatRoom() => _avail = _fl!.Avail - (Lines.Count == 0 ? _firstIndent : 0);
+        /// <summary>The room of the current line, after floats changed it, less the line's indent.</summary>
+        private void TakeFloatRoom() => _avail = _fl!.Avail - _indent.Of(Lines, Lines.Count);
 
         private void Add(Item it)
         {
@@ -206,7 +207,7 @@ internal sealed partial class LayoutEngine
             _hasContent = false;
             _curW = 0;
             _fl?.Begin(Lines);
-            _avail = _fl?.Avail ?? _availW;
+            _avail = (_fl?.Avail ?? _availW) - _indent.Of(Lines, Lines.Count);
         }
 
         /// <summary>
