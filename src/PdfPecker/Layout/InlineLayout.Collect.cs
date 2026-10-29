@@ -297,7 +297,8 @@ internal sealed partial class LayoutEngine
         }
         if (!(w > 0 && h > 0)) return;
         float ml = AutoAsZero(s.MarginLeft), mr = AutoAsZero(s.MarginRight);
-        if (ml > 0) AddSpacer(st, s, ml, href);
+        var around = MarginStyle(s);
+        if (ml > 0) AddSpacer(st, around, ml, href);
         var image = Rent(ItemKind.Image, s);
         image.Image = s.Visible ? img : null;
         image.Width = w;
@@ -309,7 +310,7 @@ internal sealed partial class LayoutEngine
         image.Href = href ?? LinkOf(e);
         image.Tag = Tags?.Of(e);
         st.Items.Add(image);
-        if (mr > 0) AddSpacer(st, s, mr, href);
+        if (mr > 0) AddSpacer(st, around, mr, href);
         st.LastWasSpace = false;
     }
 
@@ -341,15 +342,23 @@ internal sealed partial class LayoutEngine
             }
             else AddSvgDrawing(ops, svg, pl, ptop, sw, sh, Tags?.Of(e));
         }
-        if (ml > 0) AddSpacer(st, s, ml, href);
+        var around = MarginStyle(s);
+        if (ml > 0) AddSpacer(st, around, ml, href);
         st.Items.Add(new Item
         {
             Kind = ItemKind.Box, Style = s, Width = boxW, Height = boxH, BoxBaseline = boxH, BoxOps = ops, Href = href ?? LinkOf(e),
             MinWidth = _measuring && IsCompressible(s) ? pl + pr : -1,
         });
-        if (mr > 0) AddSpacer(st, s, mr, href);
+        if (mr > 0) AddSpacer(st, around, mr, href);
         st.LastWasSpace = false;
     }
+
+    /// <summary>
+    /// The style of the spacers that hold a replaced element's horizontal margins: its parent's, since a margin is no
+    /// text and must not give the line the element's own font metrics, which its vertical-align would shift (an icon
+    /// with vertical-align: -2px and a margin made its line 2px deeper).
+    /// </summary>
+    private static ComputedStyle MarginStyle(ComputedStyle s) => s.ParentStyle ?? s;
 
     /// <summary>
     /// Each inline-block laid out while measuring intrinsic widths, by element and available width: its size, and the

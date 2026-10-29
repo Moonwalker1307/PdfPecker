@@ -189,6 +189,20 @@ internal static partial class CssParser
             var keyword = value.Trim();
             for (int i = first; i < output.Count; i++) output[i] = new Declaration(output[i].Property, keyword, important);
         }
+        else if (output.Count - first > 1) MarkUnitlessShorthand(output, first);
+    }
+
+    /// <summary>
+    /// A shorthand is invalid as a whole when one of its parts is: <c>margin: 20px 10</c> sets no margin at all in
+    /// standards mode, rather than only the top and bottom. When one longhand has a length without a unit, every
+    /// longhand of the shorthand is marked so that the cascade drops them together; quirks mode keeps them all.
+    /// </summary>
+    private static void MarkUnitlessShorthand(List<Declaration> output, int first)
+    {
+        bool any = false;
+        for (int i = first; i < output.Count && !any; i++) any = output[i].HasUnitlessLength;
+        if (!any) return;
+        for (int i = first; i < output.Count; i++) output[i] = new Declaration(output[i]);
     }
 
     /// <summary>Whether a value is inherit, initial, unset, revert or revert-layer, which every property takes.</summary>
