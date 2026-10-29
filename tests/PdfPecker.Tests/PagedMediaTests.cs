@@ -175,6 +175,21 @@ public class PagedMediaTests
     }
 
     [Fact]
+    public void Counter_pages_in_the_content_shows_the_number_of_pages()
+    {
+        // As in Prince: the page margin boxes are not the only place for "page 1 of 3". A counter of the content's own
+        // named pages keeps its value.
+        var pdf = ConvertUncompressed(@"<style>
+            .of::after { content: 'of ' counter(pages) }
+            .own { counter-reset: pages 7 } .own::after { content: 'own ' counter(pages) }
+            h2 { break-before: page }
+          </style><p class='of'></p><div class='own'></div><h2>Two</h2><h2>Three</h2>");
+        var content = AllContent(pdf);
+        Assert.Contains("(of 3)", content);
+        Assert.Contains("(own 7)", content);
+    }
+
+    [Fact]
     public void Target_counter_reads_other_counters_and_target_text_reads_the_text()
     {
         var pdf = ConvertUncompressed(@"<style>

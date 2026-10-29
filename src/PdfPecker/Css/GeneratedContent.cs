@@ -169,7 +169,15 @@ internal static class GeneratedContent
                 if (args.Count is < 1 or > 2) return false;
                 var values = resolver.CounterValues(args[0]);
                 if (!TryStyle(resolver, args.Count == 2 ? args[1] : "decimal", out var counterStyle)) return false;
-                sb.Append(Format(counterStyle, values.Count > 0 ? values[^1] : 0));
+                int value = values.Count > 0 ? values[^1] : 0;
+                if (values.Count == 0 && args[0].Trim() == "pages")
+                {
+                    // In the page's content, as in Prince, the number of pages is known once the document is laid out:
+                    // the layout runs again with the count of the previous one, as for target-counter().
+                    resolver.Paged.UsesTargets = true;
+                    value = resolver.Paged.PageCount ?? 0;
+                }
+                sb.Append(Format(counterStyle, value));
                 return true;
             }
             case "counters":
