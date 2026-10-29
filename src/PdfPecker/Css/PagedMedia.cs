@@ -16,6 +16,9 @@ internal sealed class PagedContent
     /// <summary>The page number (1-based) of the element with an id, from the last layout; null before one.</summary>
     public Func<string, int?>? PageOfId;
 
+    /// <summary>The number of pages of the last layout, for <c>counter(pages)</c> outside the page-margin boxes; null before one.</summary>
+    public int? PageCount;
+
     /// <summary>Counters other than page that <c>target-counter()</c> asks for, and their values at each element with an id.</summary>
     public readonly HashSet<string> WantedCounters = new(StringComparer.Ordinal);
     public readonly Dictionary<string, Dictionary<string, int>> CounterSnapshots = new(StringComparer.Ordinal);
