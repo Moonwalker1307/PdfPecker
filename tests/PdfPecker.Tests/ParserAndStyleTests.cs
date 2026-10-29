@@ -221,6 +221,24 @@ public class StyleTests
         Assert.Equal(quirks ? 1.5f : 0f, p.Style.BorderTop, 0.01f);
     }
 
+    [Theory]
+    // Measured in Chrome 153: each attribute sets two sides, the later one wins, and a value is its leading digits.
+    [InlineData("topmargin=20 leftmargin=20", 20, 20)]
+    [InlineData("marginheight=5 topmargin=20 marginwidth=3 leftmargin=30", 20, 30)]
+    [InlineData("leftmargin=30px topmargin=' 12abc'", 12, 30)]
+    [InlineData("leftmargin=x topmargin=-5", 8, 8)]
+    [InlineData("rightmargin=40 bottommargin=9", 8, 8)]
+    public void Body_margin_attributes_set_the_page_margins_like_chrome(string attributes, float vertical, float horizontal)
+    {
+        var doc = HtmlParser.Parse($"<body id=b {attributes}>x</body>");
+        new StyleResolver(new Stylesheet()).ResolveTree(doc, new ComputedStyle { Display = Display.Block });
+        var body = ById(doc, "b");
+        Assert.Equal(vertical * 0.75f, body.Style.MarginTop.Value, 0.01f);
+        Assert.Equal(vertical * 0.75f, body.Style.MarginBottom.Value, 0.01f);
+        Assert.Equal(horizontal * 0.75f, body.Style.MarginLeft.Value, 0.01f);
+        Assert.Equal(horizontal * 0.75f, body.Style.MarginRight.Value, 0.01f);
+    }
+
     [Fact]
     public void Invalid_css_is_dropped_as_in_browsers()
     {

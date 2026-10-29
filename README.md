@@ -137,7 +137,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   `display: -webkit-box` and its `-webkit-box-` properties, and the `-webkit-gradient()` and prefixed gradient
   syntaxes. As in browsers, a length without a unit (`width: 200`) counts as pixels only in a page without a doctype;
   with `<!DOCTYPE html>` it is ignored. Without a doctype, lines also follow Chrome's quirks-mode line heights: a line of
-  small `<font>` text, or an image alone in a table cell, is only as tall as its content.
+  small `<font>` text, or an image alone in a table cell, is only as tall as its content. The old body attributes
+  `topmargin`, `leftmargin`, `marginheight` and `marginwidth` set the page margins as they do in Chrome.
   [More](https://pdfpecker.net/docs/html-and-css/)
 - **Paged media**: `@page` sizes, borders, padding and background images (which cover the whole sheet) and margin boxes, running headers and footers (also a first page of its own, and bands
   of their own for named pages), footnotes, tables of contents with page numbers, break control (also table row groups
