@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text;
 
@@ -17,6 +18,20 @@ internal static class FontFeatures
     /// by <see cref="Ligatures"/>) are left out. Null when there are none.
     /// </summary>
     public static string? Key(string? numeric, string? settings, string? eastAsian = null, string? position = null, int smallCaps = 0)
+    {
+        // Text layout asks for the key of a style on every measurement and every run it draws, and a document has few
+        // distinct values, so keys are kept. Values come from style sheets, so only the first MaxKeys are.
+        var input = (numeric, settings, eastAsian, position, smallCaps);
+        if (Keys.TryGetValue(input, out var cached)) return cached;
+        var key = BuildKey(numeric, settings, eastAsian, position, smallCaps);
+        if (Keys.Count < MaxKeys) Keys.TryAdd(input, key);
+        return key;
+    }
+
+    private const int MaxKeys = 1024;
+    private static readonly ConcurrentDictionary<(string?, string?, string?, string?, int), string?> Keys = new();
+
+    private static string? BuildKey(string? numeric, string? settings, string? eastAsian, string? position, int smallCaps)
     {
         var features = new Dictionary<string, int>(StringComparer.Ordinal);
         if (smallCaps != 0) features["smcp"] = 1;
