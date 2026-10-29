@@ -128,7 +128,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   list markers), fixed background images (placed on each page's paper, as Chrome prints them), filters, masks,
   media and container queries, logical properties, `writing-mode` (with floats, sized boxes and vertical-lr line
   order), `text-wrap`, hanging indents (`text-indent` with `hanging` and `each-line`), emphasis
-  marks (`text-emphasis`), `line-clamp` with your own `block-ellipsis`, underlines from the font or below the descenders
+  marks (`text-emphasis`), trimming lines to the cap height and baseline (`text-box`, for optically centred
+  buttons and badges), `line-clamp` with your own `block-ellipsis`, underlines from the font or below the descenders
   (`text-underline-position`), drop caps, `::first-line` styles with a background, `::marker` styles (a larger marker font or a tall marker image makes its
   line taller, `content: none` hides the marker, `counter(list-item)` numbers it and its own `direction` orders its
   text, as in Chrome), images and gradients in `::before` and `::after` content, inline SVG (with

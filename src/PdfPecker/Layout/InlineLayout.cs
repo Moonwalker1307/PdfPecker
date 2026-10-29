@@ -14,15 +14,19 @@ internal sealed partial class LayoutEngine
     // until it settles, at most this many times.
     private const int MaxRebreaks = 8;
 
+    private TextBoxTrim _inlineTrim; // text-box-trim of the first and last line of the lines FlushInline is about to lay out
+
     private float FlushInline(List<Node> run, Element container, float x, float y, float w, bool firstInBlock, out bool produced)
     {
         Cancellation.ThrowIfCancellationRequested();
         var pages = _inlinePageBox;
         _inlinePageBox = null;
+        var trim = _inlineTrim;
+        _inlineTrim = 0;
         _inlineDepth++;
         try
         {
-            return FlushInlineCore(run, container, x, y, w, firstInBlock, pages, out produced);
+            return FlushInlineCore(run, container, x, y, w, firstInBlock, pages, trim, out produced);
         }
         finally
         {
@@ -30,7 +34,7 @@ internal sealed partial class LayoutEngine
         }
     }
 
-    private float FlushInlineCore(List<Node> run, Element container, float x, float y, float w, bool firstInBlock, PageBox? pages, out bool produced)
+    private float FlushInlineCore(List<Node> run, Element container, float x, float y, float w, bool firstInBlock, PageBox? pages, TextBoxTrim trim, out bool produced)
     {
         _boxLayouts++;
         // Percentage heights of the images and inline-blocks of the lines resolve as on the page the lines start on.
@@ -100,7 +104,7 @@ internal sealed partial class LayoutEngine
             }
         }
         produced = true;
-        float bottom = PlaceLines(lines, cs, x, y, w, indent, firstInBlock ? EmphasisRoomAbove(container) : 0, besideFloats);
+        float bottom = PlaceLines(lines, cs, x, y, w, indent, firstInBlock ? EmphasisRoomAbove(container) : 0, trim, besideFloats);
         // A br that clears floats at the end of the last line moves what follows the lines below the floats too.
         if (besideFloats && lines.Count > 0 && ClearingBreak(lines[^1]) is { } br) bottom = Cleared(br, bottom);
         if (besideFloats && _floats.ShapeIn(y, bottom)) LiftInlineContent(opsMark);
