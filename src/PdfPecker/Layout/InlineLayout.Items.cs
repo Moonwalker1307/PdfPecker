@@ -173,6 +173,7 @@ internal sealed partial class LayoutEngine
         // so its font and line height can make the line taller. An outside marker only raises the line's top.
         public ComputedStyle? Marker;
         public bool MarkerOutside;
+        public float MarkerImageH; // a marker image, which stands on the baseline: the line's ascent holds its height
 
         /// <summary>Whether the line was placed beside floats while it was broken, which fixed its room.</summary>
         public bool HasRoom => !float.IsNaN(Avail);
@@ -238,6 +239,8 @@ internal sealed partial class LayoutEngine
         line.Left = 0;
         line.Avail = float.NaN;
         line.Marker = null;
+        line.MarkerOutside = false;
+        line.MarkerImageH = 0;
         return line;
     }
 
