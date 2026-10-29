@@ -207,12 +207,15 @@ internal sealed partial class JpegDecoder
         if (d[p] != SupportedPrecision) throw new InvalidDataException("Only 8-bit JPEG is supported.");
         // The size is kept even when the rest of the header is bad: the partial output of a damaged file has the size
         // of the last frame header it read.
-        _height = ReadUInt16(p + 1);
-        _width = ReadUInt16(p + 3);
+        // A size over the pixel cap is refused before it replaces the size of an earlier header, so the partial output
+        // made of the earlier frame's components is never allocated at the refused size.
+        int height = Math.Max(1, ReadUInt16(p + 1)); // a DNL-defined height of 0: decode what we can
+        int width = ReadUInt16(p + 3);
+        if ((long)width * height > PdfImageDecoder.MaxPixels) throw new InvalidDataException("JPEG too large.");
+        _height = height;
+        _width = width;
         int count = d[p + 5];
         if (_width <= 0 || count < 1 || count > MaxComponents) throw new InvalidDataException("Bad JPEG frame.");
-        if (_height == 0) _height = 1; // DNL-defined height: decode what we can
-        if ((long)_width * _height > PdfImageDecoder.MaxPixels) throw new InvalidDataException("JPEG too large.");
         // The components are published only once the whole header has been read: a truncated header must not leave
         // half-built components behind for the partial output that Decode makes of a damaged file.
         var components = new Component[count];

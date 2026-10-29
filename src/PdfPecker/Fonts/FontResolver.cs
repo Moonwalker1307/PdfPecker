@@ -145,6 +145,7 @@ internal sealed class FontResolver
                     break;
                 }
                 case "font-stretch":
+                case "font-width":
                 {
                     // One width or a range of two; keywords and percentages.
                     var parts = v.ToLowerInvariant().Split(' ', StringSplitOptions.RemoveEmptyEntries);

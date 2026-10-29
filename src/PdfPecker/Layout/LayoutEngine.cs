@@ -1601,15 +1601,21 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>
-    /// The style of the marker the next line is drawn with, when it may make that line taller. In Chrome an inside
+    /// Notes on a paragraph's first line what of the marker drawn with it may make the line taller. In Chrome an inside
     /// marker is an inline box on its item's first line, and an outside marker moves that line down until the line's
-    /// ascent holds the marker's, so a ::marker with a larger font or line height than the text grows the line. A
-    /// marker in the item's own style is left out, as its strut is the line's own; so are image markers.
+    /// ascent holds the marker's, so a ::marker with a larger font or line height than the text grows the line, and so
+    /// does a marker image taller than the line's ascent, which stands on the baseline. A text marker in the item's own
+    /// style is left out, as its strut is the line's own.
     /// </summary>
-    private ComputedStyle? MarkerLineStyle(out bool outside)
+    private void NoteMarkerLine(Line line)
     {
-        outside = _marker is { Inside: false };
-        return _marker is { OwnStyle: true, Image: null, Svg: null, Gradient: null } m && m.Style.Visible ? m.Style : null;
+        if (_marker is not { } m || !m.Style.Visible) return;
+        if (m.Image != null || m.Svg != null || m.Gradient != null) line.MarkerImageH = m.ImageH;
+        else if (m.OwnStyle)
+        {
+            line.Marker = m.Style;
+            line.MarkerOutside = !m.Inside;
+        }
     }
 
     /// <summary>The side of a marker image without a size of its own (a gradient, or an SVG file without one): half the font's ascent, in whole pixels.</summary>
