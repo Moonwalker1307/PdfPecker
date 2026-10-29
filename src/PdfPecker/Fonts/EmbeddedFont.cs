@@ -263,7 +263,7 @@ internal sealed class FontChain : TextFont
         {
             int clusterEnd = i + StringInfo.GetNextTextElementLength(s.AsSpan(i, end - i));
             var first = Pick(cp);
-            if (clusterEnd > next && (CoversAll(first, s, i, clusterEnd) ? first : _fallback(cp, f => CoversAll(f, s, i, clusterEnd))) is { } font)
+            if (clusterEnd > next && PickCluster(first, cp, s, i, clusterEnd) is { } font)
             {
                 previous = CodePointBefore(s, clusterEnd);
                 next = clusterEnd;
@@ -273,6 +273,11 @@ internal sealed class FontChain : TextFont
         previous = cp;
         return stays && Covers(current!, cp) ? current! : Pick(cp);
     }
+
+    // The first font that has every code point of a cluster. Its test captures the text, so it lives in a method of its
+    // own: in Next, the closure's object was made on every character, which made text layout allocate three times as much.
+    private TextFont? PickCluster(TextFont first, int cp, string s, int start, int end)
+        => CoversAll(first, s, start, end) ? first : _fallback(cp, f => CoversAll(f, s, start, end));
 
     private static int CodePointAt(string s, int i, int end)
         => char.IsHighSurrogate(s[i]) && i + 1 < end && char.IsLowSurrogate(s[i + 1]) ? char.ConvertToUtf32(s[i], s[i + 1]) : s[i];
