@@ -17,6 +17,12 @@ internal sealed class Declaration
         MetricUnits = !property.StartsWith("--", StringComparison.Ordinal) && CssUnits.HasMetricUnit(value);
     }
 
+    /// <summary>
+    /// A longhand of a shorthand that gave some other longhand a length without a unit. In standards mode that makes
+    /// the whole shorthand invalid, so every one of its longhands counts as having a unitless length.
+    /// </summary>
+    public Declaration(Declaration longhand) : this(longhand.Property, longhand.Value, longhand.Important) => _unitless = 2;
+
     // Whether the value has var() and a viewport-height unit: 0 until checked, then 1 for no and 2 for yes. The style
     // resolver asks for every element a declaration applies to, and the answer is kept here so that each declaration of
     // a style sheet is searched once. Conversions running in parallel may both search, and store the same answer.
