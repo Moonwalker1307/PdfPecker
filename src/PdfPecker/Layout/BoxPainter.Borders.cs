@@ -350,14 +350,15 @@ internal static partial class BoxPainter
 
     /// <summary>
     /// Gives a dashed or dotted border side the pattern Chrome draws: dashes of two widths with gaps of one (three and two
-    /// below three pixels), or round dots a width apart, with the gaps spread so that the side starts and ends on a dash
-    /// or a dot, which then fills the corner. With <paramref name="trimCorners"/> the side leaves its two corners to the
-    /// sides that meet it there, keeping the pattern where it was.
+    /// below three pixels), or round dots a width apart (square dots below three pixels), with the gaps spread so that the
+    /// side starts and ends on a dash or a dot, which then fills the corner. With <paramref name="trimCorners"/> the side
+    /// leaves its two corners to the sides that meet it there, keeping the pattern where it was.
     /// </summary>
     private static void FitDashes(LineOp line, float width, float length, bool trimCorners)
     {
-        bool dotted = line.Dotted;
-        float dash = dotted ? width : width * (width >= 3 * CssPixel ? 2 : 3), gap = dotted ? width : width * (width >= 3 * CssPixel ? 1 : 2);
+        // A thin dotted side is drawn as dashes as long as they are wide: round dots of one or two pixels look faint.
+        bool dotted = line.Dotted && width >= 3 * CssPixel, thin = width < 3 * CssPixel;
+        float dash = line.Dotted ? width : width * (thin ? 3 : 2), gap = line.Dotted ? width : width * (thin ? 2 : 1);
         if (!(length > 0) || length / (dash + gap) > MaxBorderDashes) return;
         float fewest = MathF.Floor((length + gap) / (dash + gap));
         if (fewest >= 2)

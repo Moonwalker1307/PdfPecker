@@ -339,6 +339,21 @@ public class SelectorAndBoxEffectTests
         Assert.Equal(MathF.Round(steps), steps, 0.01f);
     }
 
+    [Theory]
+    [InlineData("1px")]
+    [InlineData("2px")]
+    public void Thin_dotted_borders_have_square_dots_like_chrome(string width)
+    {
+        // Below three pixels Chrome draws dots as squares a width apart: round dots of one or two pixels look faint.
+        var ops = Ops($"<div style='width:300px; border-bottom:{width} dotted #000'></div>");
+        var line = Assert.Single(ops.OfType<LineOp>());
+        float w = line.Width;
+        Assert.Equal(w, line.DashLength, 0.01f);
+        Assert.InRange(line.DashGap, w * 0.9f, w * 1.1f);
+        float length = line.X2 - line.X1, dots = MathF.Round((length + line.DashGap) / (line.DashLength + line.DashGap));
+        Assert.Equal(length, dots * line.DashLength + (dots - 1) * line.DashGap, 0.01f);
+    }
+
     [Fact]
     public void Translucent_dashed_outline_paints_each_corner_once()
     {
