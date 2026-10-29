@@ -344,6 +344,32 @@ public class TransparencyAndRadiusTests
         Color(255, 0, 0, Pixel(pdf, 50, 50));
     }
 
+    [Theory]
+    // A 120 x 80 pt border box with 6pt borders, 4pt padding and 20pt corners; measured against Chrome 153.
+    [InlineData("overflow-clip-margin: 10pt", -4, 128, 24)]              // the padding box grown by 10pt
+    [InlineData("overflow-clip-margin: border-box", 0, 120, 20)]
+    [InlineData("overflow-clip-margin: 3pt content-box", 7, 106, 13)]     // radii 20 - 10 + 3
+    [InlineData("overflow-clip-margin: -2pt", 8, 104, 12)]                // Chrome takes a negative margin too
+    [InlineData("overflow: hidden; overflow-clip-margin: 10pt", 6, 108, 14)] // only overflow: clip has a margin
+    [InlineData("overflow-clip-margin: 10%", 6, 108, 14)]                // a percentage is invalid
+    public void Overflow_clip_margin_moves_the_clip_edge(string style, float x, float w, float radius)
+    {
+        var ops = Ops($"<div style='box-sizing:border-box; width:120pt; height:80pt; overflow:clip; border:6pt solid; padding:4pt; border-radius:20pt; {style}'><p>x</p></div>");
+        var clip = ops.OfType<ClipOp>().Single();
+        Assert.Equal(x, clip.X, 1);
+        Assert.Equal(w, clip.W, 1);
+        Assert.Equal(radius, clip.Radii!.Value.TLx, 1);
+    }
+
+    [Fact]
+    public void Overflow_clip_margin_needs_clip_on_both_axes()
+    {
+        // As in Chrome, overflow-x: clip alone clips to the padding box whatever the margin.
+        var ops = Ops("<div style='width:120pt; height:80pt; overflow-x:clip; overflow-clip-margin:10pt'><p>x</p></div>");
+        Assert.Equal(0, ops.OfType<ClipOp>().Single().X, 2);
+        Assert.True(CssSupports.Evaluate("(overflow-clip-margin: content-box 4px)"));
+    }
+
     [Fact]
     public void Hidden_overflow_adds_no_pages()
     {

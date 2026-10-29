@@ -68,6 +68,8 @@ internal sealed partial class ComputedStyle
     public bool CaptionBottom { get => _typography.CaptionBottom; set => Typography.CaptionBottom = value; }
     public bool EmptyCellsHide { get => _typography.EmptyCellsHide; set => Typography.EmptyCellsHide = value; }
     public bool ImageOrientationNone { get => _typography.ImageOrientationNone; set => Typography.ImageOrientationNone = value; }
+    public TextEdgeOver TextEdgeOver { get => _typography.TextEdgeOver; set => Typography.TextEdgeOver = value; }
+    public TextEdgeUnder TextEdgeUnder { get => _typography.TextEdgeUnder; set => Typography.TextEdgeUnder = value; }
     public int Orphans { get => _typography.Orphans; set => Typography.Orphans = value; }
     public int Widows { get => _typography.Widows; set => Typography.Widows = value; }
 
@@ -107,6 +109,8 @@ internal sealed partial class ComputedStyle
         public bool CaptionBottom;    // caption-side: bottom (inherited)
         public bool EmptyCellsHide;   // empty-cells: hide (inherited): with separated borders, empty cells paint nothing
         public bool ImageOrientationNone; // image-orientation: none (inherited): photos are drawn as stored, ignoring EXIF
+        public TextEdgeOver TextEdgeOver;   // text-box-edge, over the text (inherited)
+        public TextEdgeUnder TextEdgeUnder; // text-box-edge, under the text (inherited)
         public int Orphans = 2, Widows = 2; // minimum lines of a paragraph left at the bottom / carried to the top of a page
 
         public TypographyFields Copy()
@@ -436,6 +440,7 @@ internal sealed partial class ComputedStyle
 
     public bool TableLayoutFixed { get => _rare.TableLayoutFixed; set => Rare.TableLayoutFixed = value; }
     public string? TextOverflow { get => _rare.TextOverflow; set => Rare.TextOverflow = value; }
+    public TextBoxTrim TextBoxTrim { get => _rare.TextBoxTrim; set => Rare.TextBoxTrim = value; }
     public float AspectRatio { get => _rare.AspectRatio; set => Rare.AspectRatio = value; }
     public bool AspectRatioAuto { get => _rare.AspectRatioAuto; set => Rare.AspectRatioAuto = value; }
     public ContainerType ContainerType { get => _rare.ContainerType; set => Rare.ContainerType = value; }
@@ -450,6 +455,8 @@ internal sealed partial class ComputedStyle
     public ShapeOutside? ShapeOutside { get => _rare.ShapeOutside; set => Rare.ShapeOutside = value; }
     public Length ShapeMargin { get => _rare.ShapeMargin; set => Rare.ShapeMargin = value; }
     public float ShapeImageThreshold { get => _rare.ShapeImageThreshold; set => Rare.ShapeImageThreshold = value; }
+    public ShapeBox OverflowClipBox { get => _rare.OverflowClipBox; set => Rare.OverflowClipBox = value; }
+    public float OverflowClipMargin { get => _rare.OverflowClipMargin; set => Rare.OverflowClipMargin = value; }
     public float InitialLetterSize { get => _rare.InitialLetterSize; set => Rare.InitialLetterSize = value; }
     public int InitialLetterSink { get => _rare.InitialLetterSink; set => Rare.InitialLetterSink = value; }
     public bool InitialLetterSunk { get => _rare.InitialLetterSunk; set => Rare.InitialLetterSunk = value; }
@@ -487,6 +494,7 @@ internal sealed partial class ComputedStyle
         public bool TableLayoutFixed; // table-layout: fixed
         /// <summary>What replaces the cut end of an overflowing line (text-overflow): "…" for ellipsis, a custom string, or null for clip.</summary>
         public string? TextOverflow;
+        public TextBoxTrim TextBoxTrim; // text-box-trim
         public float AspectRatio;    // width / height; 0 = auto
         public bool AspectRatioAuto; // "auto <ratio>": a replaced element keeps its natural ratio
         public ContainerType ContainerType;
@@ -498,6 +506,8 @@ internal sealed partial class ComputedStyle
         public ShapeOutside? ShapeOutside;          // shape-outside on a float; null = none
         public Length ShapeMargin = Length.Zero;    // shape-margin; a percentage is of the containing block's width
         public float ShapeImageThreshold;           // shape-image-threshold, from 0 to 1
+        public ShapeBox OverflowClipBox = ShapeBox.PaddingBox; // overflow-clip-margin: the box that overflow: clip clips to
+        public float OverflowClipMargin;            // overflow-clip-margin: how far past that box, in points
         /// <summary>
         /// initial-letter on a ::first-letter: how many lines the letter is tall, or 0 for normal, and how many lines it sinks
         /// (0 for drop, which sinks it by its size rounded up; raise is 1). InitialLetterSunk is false for a letter its author

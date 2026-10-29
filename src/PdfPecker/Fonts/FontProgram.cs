@@ -73,6 +73,7 @@ internal sealed partial class FontProgram
     public readonly int LineAscender, LineDescender, LineGapUnits; // what browsers space lines with: hhea, or OS/2 typo metrics
     public readonly int CapHeight;
     private readonly int _os2XHeight; // sxHeight of OS/2 version 2 and later; 0 when the font does not say
+    private readonly int _os2CapHeight; // sCapHeight of OS/2 version 2 and later; 0 when the font does not say
     public readonly float ItalicAngle;
     public readonly int UnderlinePosition; // post: the top of the underline, negative below the baseline, in font units
     public readonly float EmDescent;       // the descent of the em box, as a fraction of the em
@@ -143,6 +144,7 @@ internal sealed partial class FontProgram
         IsItalic = style.Italic || (macStyle & MacStyleItalic) != 0;
         CapHeight = style.CapHeight ?? (int)(Ascender * CapHeightShareOfAscender);
         _os2XHeight = style.XHeight ?? 0;
+        _os2CapHeight = style.CapHeight ?? 0;
         LineAscender = style.TypoAscender ?? Ascender;
         LineDescender = style.TypoDescender ?? Descender;
         LineGapUnits = style.TypoLineGap ?? LineGap;
@@ -278,6 +280,23 @@ internal sealed partial class FontProgram
             if (_xHeight >= 0) return _xHeight;
             int top = _os2XHeight > 0 ? _os2XHeight : GlyphTop(GlyphId('x'));
             return _xHeight = top > 0 ? top : UnitsPerEm / 2;
+        }
+    }
+
+    private int _textCapHeight = -1;
+
+    /// <summary>
+    /// The height of a capital H in font units, which the cap unit, initial letters and text-box-edge read: the OS/2
+    /// table's value, else the top of the glyph for H in a TrueType font, as Chrome measures it, else
+    /// <see cref="CapHeight"/>. The font descriptor keeps <see cref="CapHeight"/>, so PDF output stays as it was.
+    /// </summary>
+    public int TextCapHeight
+    {
+        get
+        {
+            if (_textCapHeight >= 0) return _textCapHeight;
+            int top = _os2CapHeight > 0 ? _os2CapHeight : GlyphTop(GlyphId('H'));
+            return _textCapHeight = top > 0 ? top : CapHeight;
         }
     }
 

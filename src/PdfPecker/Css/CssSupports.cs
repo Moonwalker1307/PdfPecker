@@ -16,12 +16,13 @@ internal static class CssSupports
         "font-synthesis-weight", "font-synthesis-style", "font-synthesis-small-caps", "font-synthesis-position", "font-size-adjust", "font-feature-settings", "font-stretch", "font-width", "font-variation-settings", "font-optical-sizing", "line-height", "text-align", "text-align-last", "text-justify", "text-spacing-trim",
         "text-decoration", "text-decoration-line", "text-decoration-color", "text-decoration-style", "text-decoration-thickness", "text-decoration-skip-ink", "text-underline-position",
         "text-emphasis", "text-emphasis-style", "text-emphasis-color", "text-emphasis-position",
+        "text-box", "text-box-trim", "text-box-edge",
         "text-underline-offset", "text-transform", "text-indent", "letter-spacing", "word-spacing", "white-space",
         "text-wrap", "text-wrap-mode", "text-wrap-style",
         "overflow-wrap", "word-wrap", "word-break", "line-break", "vertical-align", "list-style", "list-style-type", "list-style-position",
         "list-style-image",
         "visibility", "box-shadow", "table-layout", "border-collapse", "border-spacing", "caption-side", "empty-cells", "image-orientation", "box-sizing", "float", "clear", "shape-outside", "shape-margin", "shape-image-threshold", "initial-letter",
-        "position", "inset", "top", "right", "bottom", "left", "z-index", "overflow", "overflow-x", "overflow-y", "transform",
+        "position", "inset", "top", "right", "bottom", "left", "z-index", "overflow", "overflow-x", "overflow-y", "overflow-clip-margin", "transform",
         "transform-origin", "perspective", "perspective-origin", "transform-style", "backface-visibility", "translate", "rotate", "scale", "content", "counter-reset", "counter-set", "counter-increment",
         "break-before", "break-after", "break-inside", "page-break-before", "page-break-after", "page-break-inside",
         "orphans", "widows", "margin", "margin-top", "margin-right", "margin-bottom", "margin-left", "padding", "padding-top",
@@ -186,6 +187,12 @@ internal static class CssSupports
                 return lower is "block" or "inline" or "compact";
             case "footnote-policy":
                 return lower is "auto" or "line" or "block";
+            case "text-box":
+                return CssParser.ParseTextBox(lower) != null;
+            case "text-box-trim":
+                return CssParser.ParseTextBoxTrim(lower) != null;
+            case "text-box-edge":
+                return CssParser.ParseTextBoxEdge(lower) != null;
             case "hyphenate-limit-chars":
                 return StyleResolver.ParseHyphenateLimitChars(lower) != null;
         }

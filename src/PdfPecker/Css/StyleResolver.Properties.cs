@@ -59,6 +59,7 @@ internal sealed partial class StyleResolver
             case "bottom": SetLength(ref s.Bottom, d.Lower, d.Em, d.Inherit ? parent.Bottom : null); break;
             case "left": SetLength(ref s.Left, d.Lower, d.Em, d.Inherit ? parent.Left : null); break;
             case "z-index": ApplyZIndex(s, parent, in d); break;
+            case "overflow-clip-margin": ApplyOverflowClipMargin(s, parent, in d); break;
             case "overflow":
             case "overflow-x":
             case "overflow-y":
@@ -171,6 +172,8 @@ internal sealed partial class StyleResolver
             case "text-emphasis-style": ApplyEmphasisStyle(s, in d); break;
             case "text-emphasis-color": ApplyEmphasisColor(s, in d); break;
             case "text-emphasis-position": ApplyEmphasisPosition(s, in d); break;
+            case "text-box-trim": if (CssParser.ParseTextBoxTrim(d.Lower) is { } trim) s.TextBoxTrim = trim; break;
+            case "text-box-edge": if (CssParser.ParseTextBoxEdge(d.Lower) is { } edge) (s.TextEdgeOver, s.TextEdgeUnder) = edge; break;
             case "text-overflow": ApplyTextOverflow(s, in d); break;
             case "letter-spacing": ApplyLetterSpacing(s, in d); break;
             case "word-spacing": ApplyWordSpacing(s, in d); break;

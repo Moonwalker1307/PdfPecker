@@ -172,6 +172,8 @@ internal sealed partial class StyleResolver
             case "text-emphasis-style": s.EmphasisShape = from.EmphasisShape; s.EmphasisOpen = from.EmphasisOpen; s.EmphasisString = from.EmphasisString; break;
             case "text-emphasis-color": s.EmphasisColor = from.EmphasisColor; break;
             case "text-emphasis-position": s.EmphasisUnder = from.EmphasisUnder; break;
+            case "text-box-trim": s.TextBoxTrim = from.TextBoxTrim; break;
+            case "text-box-edge": s.TextEdgeOver = from.TextEdgeOver; s.TextEdgeUnder = from.TextEdgeUnder; break;
             case "text-transform": s.TextTransform = from.TextTransform; break;
             case "letter-spacing": s.LetterSpacing = from.LetterSpacing; break;
             case "word-spacing": s.WordSpacing = from.WordSpacing; break;

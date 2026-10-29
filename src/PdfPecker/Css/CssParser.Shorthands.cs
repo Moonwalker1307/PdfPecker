@@ -161,6 +161,7 @@ internal static partial class CssParser
             case "text-decoration": ExpandTextDecoration(value, longhands); break;
             case "-webkit-text-stroke": ExpandTextStroke(value, longhands); break;
             case "text-emphasis": ExpandTextEmphasis(value, longhands); break;
+            case "text-box": ExpandTextBox(value, longhands); break;
             case "border-spacing": ExpandPair(value, "border-spacing-h", "border-spacing-v", longhands); break;
             case "word-wrap": longhands.Add("overflow-wrap", value); break;
             // CSS Fonts 4 renamed font-stretch to font-width and keeps the old name as an alias.
@@ -463,6 +464,64 @@ internal static partial class CssParser
             }
         }
         return (shape ?? EmphasisShape.Auto, open == true, null);
+    }
+
+    /// <summary>
+    /// text-box: normal, or a text-box-trim and a text-box-edge in either order. A trim left out is trim-both and an
+    /// edge left out is auto, as in Chrome.
+    /// </summary>
+    private static void ExpandTextBox(string value, LonghandWriter longhands)
+    {
+        if (IsCssWideKeyword(value))
+        {
+            longhands.Add("text-box-trim", value);
+            longhands.Add("text-box-edge", value);
+            return;
+        }
+        if (ParseTextBox(value) is not var (trim, edge)) return;
+        longhands.Add("text-box-trim", trim);
+        longhands.Add("text-box-edge", edge);
+    }
+
+    /// <summary>The text-box-trim and text-box-edge values a text-box value sets, or null when it is not valid.</summary>
+    internal static (string Trim, string Edge)? ParseTextBox(string value)
+    {
+        var tokens = Tokens(value.Trim().ToLowerInvariant());
+        if (tokens.Count == 1 && tokens[0] == "normal") return ("none", "auto");
+        string? trim = null, edge = null;
+        for (int i = 0; i < tokens.Count; i++)
+        {
+            if (trim == null && ParseTextBoxTrim(tokens[i]) != null) trim = tokens[i];
+            else if (edge == null && i + 1 < tokens.Count && ParseTextBoxEdge(tokens[i] + " " + tokens[i + 1]) != null) edge = tokens[i] + " " + tokens[++i];
+            else if (edge == null && ParseTextBoxEdge(tokens[i]) != null) edge = tokens[i];
+            else return null;
+        }
+        if (trim == null && edge == null) return null;
+        return (trim ?? "trim-both", edge ?? "auto");
+    }
+
+    /// <summary>text-box-trim: none, trim-start, trim-end or trim-both; null for anything else.</summary>
+    internal static TextBoxTrim? ParseTextBoxTrim(string lower) => lower.Trim() switch
+    {
+        "none" => TextBoxTrim.None,
+        "trim-start" => TextBoxTrim.Start,
+        "trim-end" => TextBoxTrim.End,
+        "trim-both" => TextBoxTrim.Both,
+        _ => null,
+    };
+
+    /// <summary>
+    /// text-box-edge: auto, or an over edge (text, cap or ex) and an under edge (text or alphabetic). Only text may
+    /// stand alone, for both edges: Chrome drops cap or ex without an under edge. Null when the value is none of those.
+    /// </summary>
+    internal static (TextEdgeOver Over, TextEdgeUnder Under)? ParseTextBoxEdge(string lower)
+    {
+        var tokens = Tokens(lower.Trim());
+        if (tokens.Count == 1 && tokens[0] is "auto" or "text") return (TextEdgeOver.Text, TextEdgeUnder.Text);
+        if (tokens.Count != 2) return null;
+        TextEdgeOver? over = tokens[0] switch { "text" => TextEdgeOver.Text, "cap" => TextEdgeOver.Cap, "ex" => TextEdgeOver.Ex, _ => null };
+        TextEdgeUnder? under = tokens[1] switch { "text" => TextEdgeUnder.Text, "alphabetic" => TextEdgeUnder.Alphabetic, _ => null };
+        return over is { } o && under is { } u ? (o, u) : null;
     }
 
     /// <summary>A pair of longhands (gap, border-spacing): the second repeats the first when there is only one value.</summary>
