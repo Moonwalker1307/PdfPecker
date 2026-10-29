@@ -475,6 +475,9 @@ internal sealed partial class StyleResolver
         return block is "top" or "bottom" ? "border-" + block + "-" + inline + "-radius" : "border-" + inline + "-" + block + "-radius";
     }
 
+    /// <summary>The corner-shape longhand of the corner whose border-radius longhand is <paramref name="radius"/>.</summary>
+    private static string CornerShapeOf(string radius) => "corner-" + radius["border-".Length..^"-radius".Length] + "-shape";
+
     /// <summary>Sets one corner's border radius: one length for both axes, or horizontal then vertical.</summary>
     private void SetRadius(ComputedStyle s, int corner, string lower, float em, ComputedStyle? inherited)
     {
@@ -501,6 +504,38 @@ internal sealed partial class StyleResolver
         else s.BorderRadii = (Length[])s.BorderRadii.Clone(); // the array may be shared with the style it was copied from
         s.BorderRadii[corner * 2] = h;
         s.BorderRadii[corner * 2 + 1] = v;
+    }
+
+    /// <summary>
+    /// Sets one corner's corner-shape: round, squircle, bevel, scoop, notch, square or superellipse() with a number or
+    /// (minus) infinity; anything else keeps the previous value.
+    /// </summary>
+    private static void SetCornerShape(ComputedStyle s, int corner, string lower, ComputedStyle? inherited)
+    {
+        float k;
+        if (inherited != null) k = inherited.CornerShapes?[corner] ?? 1;
+        else if (lower is "initial" or "unset") k = 1;
+        else if (ParseCornerShape(lower) is { } parsed) k = parsed;
+        else return;
+        if (s.CornerShapes == null)
+        {
+            if (k == 1) return;
+            s.CornerShapes = [1, 1, 1, 1];
+        }
+        else s.CornerShapes = (float[])s.CornerShapes.Clone(); // the array may be shared with the style it was copied from
+        s.CornerShapes[corner] = k;
+    }
+
+    /// <summary>The superellipse parameter of a corner-shape value, or null when it is not one.</summary>
+    internal static float? ParseCornerShape(string lower)
+    {
+        if (Layout.CornerShape.Keyword(lower) is { } keyword) return keyword;
+        if (!lower.StartsWith("superellipse(", StringComparison.Ordinal) || lower[^1] != ')') return null;
+        var arg = lower.AsSpan("superellipse(".Length, lower.Length - "superellipse(".Length - 1).Trim();
+        if (arg.SequenceEqual("infinity")) return float.PositiveInfinity;
+        if (arg.SequenceEqual("-infinity")) return float.NegativeInfinity;
+        if (float.TryParse(arg, NumberStyles.Float, CultureInfo.InvariantCulture, out float n) && !float.IsNaN(n)) return n;
+        return CssMath.IsMathFunction(arg.ToString()) && CssMath.TryParseNumber(arg.ToString(), out n) && !float.IsNaN(n) ? n : null;
     }
 
     private static uint? BorderColor(string v, ComputedStyle s)

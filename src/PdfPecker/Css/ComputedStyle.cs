@@ -339,6 +339,8 @@ internal sealed partial class ComputedStyle
     // border-radius: horizontal and vertical radius of the top-left, top-right, bottom-right and bottom-left corner
     // (percentages of the border box's width and height); null when every corner is square.
     public Length[]? BorderRadii;
+    // corner-shape: the superellipse parameter of the same four corners (1 round, 0 bevel, ...); null when all are round.
+    public float[]? CornerShapes;
     public bool TextOverflowEllipsis => TextOverflow != null;
     public Length Width = Length.Auto, Height = Length.Auto;
     public Length MinWidth = Length.Auto, MaxWidth = Length.Auto, MinHeight = Length.Zero, MaxHeight = Length.Auto;
@@ -621,6 +623,7 @@ internal sealed partial class ComputedStyle
         c.BorderHiddenSides = 0;
         c.BorderTopColor = c.BorderRightColor = c.BorderBottomColor = c.BorderLeftColor = null;
         c.BorderRadii = null;
+        c.CornerShapes = null;
         c.Width = c.Height = Length.Auto;
         c.MinWidth = Length.Auto; // min-width: auto, which differs from 0 for boxes with aspect-ratio
         c.MinHeight = Length.Zero;

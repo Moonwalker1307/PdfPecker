@@ -256,6 +256,13 @@ internal sealed partial class LayoutEngine
             }
             t.BorderRadii = turned;
         }
+        if (s.CornerShapes is { } shapes)
+        {
+            // A corner keeps its shape wherever it turns to; the curve is symmetric, so swapped radii need no change.
+            var turned = new float[4];
+            for (int k = 0; k < 4; k++) turned[k] = shapes[transposed ? (4 - k) % 4 : turn > 0 ? (k + 1) % 4 : (k + 3) % 4];
+            t.CornerShapes = turned;
+        }
     }
 
     /// <summary>

@@ -550,6 +550,15 @@ internal sealed partial class PdfDocumentWriter
     /// <summary>Appends the outline of a rounded rectangle given in flow coordinates, as a closed path.</summary>
     private void RoundRectPath(ByteBuffer b, float x, float y, float w, float h, in CornerRadii r, float pageTop)
     {
+        if (r.Shape is { } shape)
+        {
+            // Corner shapes other than round are drawn as the polygon of their curves.
+            var points = shape.Polygon(x, y, w, h);
+            for (int i = 0; i < points.Count; i++)
+                b.Num(PX(points[i].X)).Sp().Num(PY(points[i].Y, pageTop)).Ascii(i == 0 ? " m " : " l ");
+            b.Ascii("h\n");
+            return;
+        }
         const float k = 0.5523f; // a quarter ellipse as one cubic Bézier
         float r0 = x + w, b0 = y + h;
         void Line(float px, float py) => b.Num(PX(px)).Sp().Num(PY(py, pageTop)).Ascii(" l ");
@@ -579,8 +588,9 @@ internal sealed partial class PdfDocumentWriter
     /// starts at the end of the top left corner.
     /// </summary>
     private static void RoundedDashPattern(ByteBuffer b, float w, float h, in CornerRadii r, float width, bool dotted)
-        => ClosedDashPattern(b, 2 * (w + h) - (r.TLx + r.TLy + r.TRx + r.TRy + r.BRx + r.BRy + r.BLx + r.BLy)
-            + QuarterArc(r.TLx, r.TLy) + QuarterArc(r.TRx, r.TRy) + QuarterArc(r.BRx, r.BRy) + QuarterArc(r.BLx, r.BLy), width, dotted);
+        => ClosedDashPattern(b, r.Shape is { } shape ? CornerShape.Perimeter(shape.Polygon(0, 0, w, h))
+            : 2 * (w + h) - (r.TLx + r.TLy + r.TRx + r.TRy + r.BRx + r.BRy + r.BLx + r.BLy)
+                + QuarterArc(r.TLx, r.TLy) + QuarterArc(r.TRx, r.TRy) + QuarterArc(r.BRx, r.BRy) + QuarterArc(r.BLx, r.BLy), width, dotted);
 
     /// <summary>The dash pattern of <see cref="RoundedDashPattern"/> for a closed path <paramref name="perimeter"/> long.</summary>
     private static void ClosedDashPattern(ByteBuffer b, float perimeter, float width, bool dotted)
