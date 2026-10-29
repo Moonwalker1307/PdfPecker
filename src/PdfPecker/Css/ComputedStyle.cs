@@ -271,8 +271,10 @@ internal readonly record struct HyphenateLimits(int Word, int Before, int After)
 }
 
 /// <summary>The computed values of the supported CSS properties for one element. All lengths are in points.</summary>
-internal sealed class ComputedStyle
+internal sealed partial class ComputedStyle
 {
+    // The properties few boxes set are in shared groups, in ComputedStyle.Groups.cs.
+
     // ---- Inherited ----
     public uint Color = CssColor.Black;
     public FontFamily FontFamily = FontFamily.Times;
@@ -280,8 +282,6 @@ internal sealed class ComputedStyle
     public int FontWeight = 400;
     public bool Italic;
     public float FontStretch = 100;          // font-stretch as a percentage of normal width
-    public string? FontVariationSettings;    // font-variation-settings, as written; null = normal
-    public bool FontOpticalSizingNone;       // font-optical-sizing: none
     public float FontSize = 12f; // 16px
     public float ParentFontSize = 12f; // the parent's font size, which sub and super shift by
     public byte FontSizeKeyword = 4;   // the font-size keyword the size comes from (1 xx-small to 8 xxx-large); 0 = none
@@ -293,17 +293,8 @@ internal sealed class ComputedStyle
     public TextAlign TextAlign = TextAlign.Start;
     public bool Rtl;                         // direction: rtl
     public WritingMode WritingMode;          // writing-mode
-    public TextAlign? TextAlignLast;         // null = auto
-    public TextJustify TextJustify;
-    public TextSpacingTrim TextSpacingTrim;
-    public TextAlign? BlockAlign;            // -webkit-left, -webkit-center or -webkit-right: also aligns child blocks
-    public int TabSize = 8;                  // in spaces
     public bool NoHyphens;                   // hyphens: none (soft hyphens are no break opportunity)
     public bool HyphensAuto;                 // hyphens: auto (words also break where the language's patterns allow)
-    public string[]? Quotes;                 // quotes: open and close strings of each nesting level; null = auto (by language), empty = none
-    public string? HyphenateCharacter;       // hyphenate-character: "string"; null = auto (a hyphen-minus)
-    public string? BlockEllipsis;            // block-ellipsis: the mark ending a clamped block; null = auto ("…"), "" = none
-    public HyphenateLimits HyphenateLimitChars; // hyphenate-limit-chars; each value 0 = auto
     public string? Lang;                     // the content language: the nearest lang attribute, else PdfOptions.Language
     public bool Quirks;                      // the document has no doctype, or an old one: quirks mode
     public IReadOnlyDictionary<string, HyphenationPatterns>? Hyphenation; // PdfOptions.Hyphenation, keys in lower case
@@ -312,81 +303,24 @@ internal sealed class ComputedStyle
     public TextWrapStyle TextWrap;
     public OverflowWrap OverflowWrap;
     public WordBreak WordBreak;
-    public LineBreak LineBreak;              // line-break: how strictly Chinese and Japanese text breaks
     public ListStyleType ListStyleType;
-    public string? ListStyleString;          // list-style-type: "string": the marker text
-    public CounterStyle? ListCounterStyle;   // the counter style of a text marker; null for the bullets, a string and none
-    public string? ListStyleImage;           // list-style-image: the url
-    public float ListStyleImageResolution = 1; // list-style-image: image pixels per CSS pixel, from image-set()
-    public CssGradient? ListStyleGradient;   // list-style-image: a gradient
     public bool ListStylePositionInside;
     public TextTransform TextTransform;
     public TextDecoration TextDecoration; // propagated to descendants, approximated as inherited
-    // text-decoration-color, -style, -thickness and text-underline-offset, propagated with the decoration. The colour is
-    // fixed to the decorating box's color when it sets the line, as Chrome draws a link's underline in the link colour.
-    public uint? DecorationColor;          // null = currentColor
-    public DecorationStyle DecorationStyle;
-    public Length? DecorationThickness;    // null = auto; percentages of 1em
-    public Length? UnderlineOffset;        // null = auto; from the alphabetic baseline
-    public SkipInk SkipInk;                // text-decoration-skip-ink, inherited
-    public UnderlinePosition UnderlinePosition; // text-underline-position, inherited
-    public EmphasisShape EmphasisShape;    // text-emphasis-style, inherited
-    public bool EmphasisOpen;              // text-emphasis-style: open, hollow marks
-    public string? EmphasisString;         // text-emphasis-style: a string, the mark itself
-    public uint? EmphasisColor;            // text-emphasis-color; null = currentColor
-    public bool EmphasisUnder;             // text-emphasis-position: under the line instead of over it
     public Length TextIndent;           // percentages of the block's width
-    public bool TextIndentHanging;      // text-indent: hanging, every line but the first indented
-    public bool TextIndentEachLine;     // text-indent: each-line, lines after forced breaks too
     public float LetterSpacing;
     public bool NoLigatures; // font-variant-ligatures: none or no-common-ligatures, or font-feature-settings: "liga" 0
     public bool NoKerning;               // font-kerning: none, or font-feature-settings: "kern" 0
-    public FontSynthesis Synthesis = FontSynthesis.All; // font-synthesis: the faces the browser may make up
-    public FontSizeAdjust SizeAdjust;    // font-size-adjust; none by default
-    public string? FontVariantEastAsian; // font-variant-east-asian keywords; null = normal
-    public string? FontVariantPosition;  // font-variant-position: sub or super; null = normal
-    public string? FontVariantNumeric;   // font-variant-numeric keywords; null = normal
-    public string? FontFeatureSettings;  // font-feature-settings as written; null = normal
     public float WordSpacing;
     public bool Visible = true;
     public bool CanvasBackground; // the background is painted on every page's canvas instead of on this box (html/body propagation)
     public bool BorderCollapse;
-    public bool TableLayoutFixed; // table-layout: fixed
-    public bool CaptionBottom;    // caption-side: bottom (inherited)
-    public bool EmptyCellsHide;   // empty-cells: hide (inherited): with separated borders, empty cells paint nothing
-    public bool ImageOrientationNone; // image-orientation: none (inherited): photos are drawn as stored, ignoring EXIF
-    public BoxShadow[]? BoxShadows;
-    public BoxShadow[]? TextShadows; // text-shadow (inherited); spread and inset are not used
-    public float TextStrokeWidth;    // -webkit-text-stroke-width (inherited): the outline drawn on the glyphs, centred on their edge
-    public uint? TextFillColor;      // -webkit-text-fill-color (inherited): the glyph fill instead of color; null = currentcolor
-    public uint? TextStrokeColor;    // -webkit-text-stroke-color (inherited); null = currentcolor
-    public bool PaintStrokeFirst;    // paint-order: stroke (inherited): the fill covers the inner half of the stroke
     public float BorderSpacingH, BorderSpacingV; // initially 0; the user agent style gives <table> 2px
     public string? FontFamilyName;
     public FontResolver? Fonts; // the document's fonts; null when only the standard fonts exist
     public MissingFontReport? MissingFonts; // set when PdfOptions.MissingFont is
     public CssVarScope? CustomProperties; // custom properties (--name), shared with the parent until changed
 
-    // SVG presentation properties (inherited).
-    public uint? SvgFill = CssColor.Black;  // null = none
-    public string? SvgFillUrl;               // fill: url(#id)
-    public uint? SvgStroke;
-    public string? SvgStrokeUrl;
-    public float SvgStrokeWidth = 1;         // user units
-    public float SvgFillOpacity = 1, SvgStrokeOpacity = 1;
-    public bool SvgEvenOdd;
-    public SvgLineCap SvgLineCap;
-    public SvgLineJoin SvgLineJoin;
-    public float SvgMiterLimit = 4;
-    public SvgDashArray? SvgDashArray;       // stroke-dasharray; null = none
-    public float SvgDashOffset;              // stroke-dashoffset, in user units or a percentage
-    public bool SvgDashOffsetPercent;
-    public bool SvgClipEvenOdd;              // clip-rule
-    public byte SvgTextAnchor;               // 0 start, 1 middle, 2 end
-    public byte SvgBaseline;                 // dominant-baseline: 0 alphabetic, 1 middle/central, 2 hanging, 3 text-after-edge
-    public string? SvgMarkerStart, SvgMarkerMid, SvgMarkerEnd; // marker-start/mid/end: url(#id), as "#id"
-    public bool SvgFilterSrgb;               // color-interpolation-filters: sRGB (else linearRGB)
-    public int Orphans = 2, Widows = 2; // minimum lines of a paragraph left at the bottom / carried to the top of a page
 
     // ---- Not inherited ----
     public Display Display = Display.Inline;
@@ -394,36 +328,6 @@ internal sealed class ComputedStyle
     public bool Contents;                       // display: contents, an element without a box whose children take its place
     public UnicodeBidi UnicodeBidi;
     public uint BackgroundColor;
-    // Background layers, topmost first. Each list repeats when it is shorter than BackgroundImages; null is the initial value.
-    public BackgroundImage?[]? BackgroundImages; // null entries are "none" layers
-    public (BackgroundRepeat X, BackgroundRepeat Y)[]? BackgroundRepeats;
-    public BackgroundOffset[]? BackgroundPositionsX, BackgroundPositionsY;
-    public BackgroundSize[]? BackgroundSizes;
-    public BackgroundBox[]? BackgroundOrigins, BackgroundClips;
-    public bool[]? BackgroundFixed; // background-attachment: fixed per layer; null when every layer scrolls
-    public string? SvgClipPath;                 // clip-path: url(#id), as "#id"
-    public string? SvgMask, SvgFilter;          // mask and filter: url(#id), as "#id"
-    public bool SvgMaskAlpha;                   // mask-type: alpha (else luminance)
-    public uint SvgFloodColor = CssColor.Black; // flood-color
-    public float SvgFloodOpacity = 1;           // flood-opacity
-    public uint SvgLightingColor = 0xFFFFFFFFu; // lighting-color
-    public ClipShape? ClipShape;                // clip-path: a basic shape or a reference box, on HTML elements
-    public Length[]? ClipRect;                  // clip: rect(top, right, bottom, left) from the border box's corner, auto sides as auto
-    public string? BlendMode;                   // mix-blend-mode, as a PDF blend mode name; null = normal
-    public string?[]? BackgroundBlendModes;     // background-blend-mode per layer, as PDF names (null = normal); null = all normal
-    public bool Isolate;                        // isolation: isolate
-    public bool BoxDecorationClone;             // box-decoration-break: clone (else slice)
-    public bool ScaleToFit;                     // -pdfpecker-scale-to-fit: shrink
-    public FilterFunction[]? Filters;           // filter functions on HTML elements; null = none
-    public FilterFunction[]? BackdropFilters;   // backdrop-filter functions; null = none
-    // Mask layers on HTML elements, topmost first, repeated like the background lists; null MaskImages is mask-image: none.
-    public BackgroundImage?[]? MaskImages;      // null entries are "none" layers
-    public (BackgroundRepeat X, BackgroundRepeat Y)[]? MaskRepeats;
-    public BackgroundOffset[]? MaskPositionsX, MaskPositionsY;
-    public BackgroundSize[]? MaskSizes;
-    public BackgroundBox[]? MaskOrigins, MaskClips; // null = border-box
-    public MaskMode[]? MaskModes;
-    public MaskComposite[]? MaskComposites;
     public Length MarginTop = Length.Zero, MarginRight = Length.Zero, MarginBottom = Length.Zero, MarginLeft = Length.Zero;
     public Length PaddingTop = Length.Zero, PaddingRight = Length.Zero, PaddingBottom = Length.Zero, PaddingLeft = Length.Zero;
     public float BorderTopWidth = 1.5f, BorderRightWidth = 1.5f, BorderBottomWidth = 1.5f, BorderLeftWidth = 1.5f; // medium = 3px
@@ -435,54 +339,16 @@ internal sealed class ComputedStyle
     // border-radius: horizontal and vertical radius of the top-left, top-right, bottom-right and bottom-left corner
     // (percentages of the border box's width and height); null when every corner is square.
     public Length[]? BorderRadii;
-    // border-image. Null slices, widths and outsets are the initial values: 100%, 1 and 0 on every side.
-    public BackgroundImage? BorderImageSource;
-    public BorderImageValue[]? BorderImageSlice; // top, right, bottom, left
-    public bool BorderImageFill;
-    public BorderImageValue[]? BorderImageWidths, BorderImageOutsets;
-    public BorderImageRepeat BorderImageRepeatX, BorderImageRepeatY;
-    public BorderStyle OutlineStyle;
-    /// <summary>outline-style: auto, drawn as a solid focus ring of its own width.</summary>
-    public bool OutlineAuto;
-    public float OutlineWidth = 1.5f, OutlineOffset;
-    public uint? OutlineColor; // null = currentColor
-    public ObjectFit ObjectFit;
-    public BackgroundOffset ObjectPositionX = BackgroundOffset.Center, ObjectPositionY = BackgroundOffset.Center;
-    /// <summary>What replaces the cut end of an overflowing line (text-overflow): "…" for ellipsis, a custom string, or null for clip.</summary>
-    public string? TextOverflow;
     public bool TextOverflowEllipsis => TextOverflow != null;
-    public float AspectRatio;    // width / height; 0 = auto
-    public bool AspectRatioAuto; // "auto <ratio>": a replaced element keeps its natural ratio
-    public ContainerType ContainerType;
-    public string[]? ContainerNames; // container-name; null for none
     public Length Width = Length.Auto, Height = Length.Auto;
-    public Length ControlWidth = Length.Auto;   // a text field's own width, used while width is auto and not stretched
-    public SizeKeyword WidthKeyword;            // width: min-content, max-content or fit-content; Width is then auto
     public Length MinWidth = Length.Auto, MaxWidth = Length.Auto, MinHeight = Length.Zero, MaxHeight = Length.Auto;
     public bool BorderBox;
     public VerticalAlign VerticalAlign;
     public Length VerticalAlignLength = Length.Zero; // the raise of vertical-align: <length-percentage>
     public bool PageBreakBefore, PageBreakAfter, AvoidBreakInside;
     public bool AvoidBreakBefore, AvoidBreakAfter; // break-before/after: avoid (keep with the next or previous box)
-    public bool ColumnBreakBefore, ColumnBreakAfter; // break-before/after: column, which only breaks inside a multicol
-    public bool AvoidColumnBreakBefore, AvoidColumnBreakAfter, AvoidColumnBreakInside; // avoid-column: only inside a multicol
     public bool Floated;
     public FloatSide Float;
-    public ShapeOutside? ShapeOutside;          // shape-outside on a float; null = none
-    public Length ShapeMargin = Length.Zero;    // shape-margin; a percentage is of the containing block's width
-    public float ShapeImageThreshold;           // shape-image-threshold, from 0 to 1
-    /// <summary>
-    /// initial-letter on a ::first-letter: how many lines the letter is tall, or 0 for normal, and how many lines it sinks
-    /// (0 for drop, which sinks it by its size rounded up; raise is 1). InitialLetterSunk is false for a letter its author
-    /// floats, which keeps its float instead of sinking into the lines.
-    /// </summary>
-    public float InitialLetterSize;
-    public int InitialLetterSink;
-    public bool InitialLetterSunk;
-    /// <summary>float: footnote: the box leaves the flow for the footnote area of the page its call lands on.</summary>
-    public bool Footnote;
-    public FootnoteDisplay FootnoteDisplay;
-    public FootnotePolicy FootnotePolicy;
     public bool ClearLeft, ClearRight;
     public float Opacity = 1;
     // An inline box's opacity times that of the inline boxes around it, up to the block. Inline boxes get no layer of
@@ -490,56 +356,15 @@ internal sealed class ComputedStyle
     public float InlineFade = 1;
     public Position Position;
     public Length Top = Length.Auto, Right = Length.Auto, Bottom = Length.Auto, Left = Length.Auto;
-    public int? ZIndex;                         // null = auto
     public bool FormattingRoot;                 // overflow other than visible, or display: flow-root
     public Overflow OverflowX, OverflowY;
 
     /// <summary>Whether the box clips its content horizontally and vertically (visible next to hidden computes to auto).</summary>
     public bool ClipsX => OverflowX == Overflow.Clip || OverflowX == Overflow.Hidden || OverflowX == Overflow.Visible && OverflowY == Overflow.Hidden;
     public bool ClipsY => OverflowY == Overflow.Clip || OverflowY == Overflow.Hidden || OverflowY == Overflow.Visible && OverflowX == Overflow.Hidden;
-    public TransformFn[]? Transform;            // null = none; includes translate, rotate and scale once computed
-    public TransformFn[]? Translate, Rotate, Scale; // the individual transform properties; null = none
-    public Length TransformOriginX = new(50, LengthUnit.Percent), TransformOriginY = new(50, LengthUnit.Percent);
-    public float? Perspective;                  // points; null = none. Applies to the 3D transforms of the children
-    public Length PerspectiveOriginX = new(50, LengthUnit.Percent), PerspectiveOriginY = new(50, LengthUnit.Percent);
-    public string? Content;                     // the content property as written; null = normal
-    public bool ContentNone;                    // content: none, which on ::marker removes the marker (normal keeps it)
-    public string? StringSet;                   // string-set as written (named strings for running headers); null = none
-    public int? BookmarkLevel;                  // bookmark-level: null = unset (h1-h6 take their own level), 0 = none
-    public string? BookmarkLabel;               // bookmark-label as written; null = content(text)
-    public bool BookmarkClosed;                 // bookmark-state: closed
     public string? PageName;                    // page: the named page this box goes on (inherited; null = auto)
-    public CounterOp[]? CounterReset, CounterSet, CounterIncrement;
 
-    // Flexbox, grid and multi-column.
-    public FlexDirection FlexDirection;
-    public FlexWrap FlexWrap;
-    public float FlexGrow, FlexShrink = 1;
-    public Length FlexBasis = Length.Auto;
-    public int Order;
-    public BoxAlign JustifyContent, AlignItems, AlignContent, JustifyItems;
-    public BoxAlign AlignSelf = BoxAlign.Auto, JustifySelf = BoxAlign.Auto;
-    public Length? RowGap, ColumnGap; // null = normal
-    public TrackList? GridTemplateColumns, GridTemplateRows;
-    public Track[]? GridAutoColumns, GridAutoRows;
-    public bool GridAutoFlowColumn, GridAutoFlowDense;
-    public GridLine GridColumnStart, GridColumnEnd, GridRowStart, GridRowEnd;
-    public GridAreas? GridTemplateAreas;
-    public int ColumnCount;
-    public Length ColumnWidth = Length.Auto;
-    public BorderStyle ColumnRuleStyle;
-    public float ColumnRuleWidth = 1.5f; // medium
-    public uint? ColumnRuleColor;        // null = currentColor
-    public bool ColumnSpanAll;           // column-span: all
-    public bool ColumnFillAuto;          // column-fill: auto (fill each column in turn) rather than balance
-    public int LineClamp;                // -webkit-line-clamp / line-clamp: lines shown, then an ellipsis; 0 = none
-    // The legacy flexible box (display: -webkit-box) and its -webkit-box- properties, which Chrome lays out as a flex
-    // container in place of the flex properties. -webkit-box-direction is inherited, the others are not.
-    public bool LegacyBox;
-    public bool BoxVertical, BoxReverse;
-    public BoxAlign BoxPack = BoxAlign.Start, BoxAlignItems = BoxAlign.Stretch;
-    public float BoxFlex;
-    public int BoxOrdinalGroup = 1;
+    public bool BoxReverse; // -webkit-box-direction: reverse, which is inherited
 
     private TextFont? _font;
 
@@ -778,7 +603,9 @@ internal sealed class ComputedStyle
     /// <summary>Creates the starting style for a child: inherited properties copied, the rest reset.</summary>
     public ComputedStyle CreateChild()
     {
+        ShareInheritedGroups();
         var c = (ComputedStyle)MemberwiseClone();
+        c.ResetGroups();
         c.ParentFontSize = FontSize;
         c.ParentBaselineShift = ChildBaselineShift;
         c.ParentStyle = this;
@@ -786,35 +613,7 @@ internal sealed class ComputedStyle
         c.InlineTable = false;
         c.Contents = false;
         c.BackgroundColor = 0;
-        c.BackgroundImages = null;
         c.CanvasBackground = false;
-        c.BackgroundRepeats = null;
-        c.BackgroundPositionsX = c.BackgroundPositionsY = null;
-        c.BackgroundSizes = null;
-        c.BackgroundOrigins = c.BackgroundClips = null;
-        c.BackgroundFixed = null;
-        c.SvgClipPath = null;
-        c.SvgMask = c.SvgFilter = null;
-        c.SvgMaskAlpha = false;
-        c.SvgFloodColor = CssColor.Black;
-        c.SvgFloodOpacity = 1;
-        c.SvgLightingColor = 0xFFFFFFFFu;
-        c.ClipShape = null;
-        c.ClipRect = null;
-        c.BlendMode = null;
-        c.BackgroundBlendModes = null;
-        c.Isolate = false;
-        c.BoxDecorationClone = false;
-        c.ScaleToFit = false;
-        c.Filters = null;
-        c.BackdropFilters = null;
-        c.MaskImages = null;
-        c.MaskRepeats = null;
-        c.MaskPositionsX = c.MaskPositionsY = null;
-        c.MaskSizes = null;
-        c.MaskOrigins = c.MaskClips = null;
-        c.MaskModes = null;
-        c.MaskComposites = null;
         c.MarginTop = c.MarginRight = c.MarginBottom = c.MarginLeft = Length.Zero;
         c.PaddingTop = c.PaddingRight = c.PaddingBottom = c.PaddingLeft = Length.Zero;
         c.BorderTopWidth = c.BorderRightWidth = c.BorderBottomWidth = c.BorderLeftWidth = 1.5f;
@@ -822,24 +621,7 @@ internal sealed class ComputedStyle
         c.BorderHiddenSides = 0;
         c.BorderTopColor = c.BorderRightColor = c.BorderBottomColor = c.BorderLeftColor = null;
         c.BorderRadii = null;
-        c.BorderImageSource = null;
-        c.BorderImageSlice = c.BorderImageWidths = c.BorderImageOutsets = null;
-        c.BorderImageFill = false;
-        c.BorderImageRepeatX = c.BorderImageRepeatY = BorderImageRepeat.Stretch;
-        c.OutlineStyle = BorderStyle.None;
-        c.OutlineAuto = false;
-        c.OutlineWidth = 1.5f;
-        c.OutlineOffset = 0;
-        c.OutlineColor = null;
-        c.ObjectFit = ObjectFit.Fill;
-        c.ObjectPositionX = c.ObjectPositionY = BackgroundOffset.Center;
-        c.TextOverflow = null;
-        c.AspectRatio = 0;
-        c.AspectRatioAuto = false;
-        c.ContainerType = ContainerType.Normal;
-        c.ContainerNames = null;
-        c.Width = c.Height = c.ControlWidth = Length.Auto;
-        c.WidthKeyword = SizeKeyword.None;
+        c.Width = c.Height = Length.Auto;
         c.MinWidth = Length.Auto; // min-width: auto, which differs from 0 for boxes with aspect-ratio
         c.MinHeight = Length.Zero;
         c.MaxWidth = c.MaxHeight = Length.Auto;
@@ -847,70 +629,22 @@ internal sealed class ComputedStyle
         c.VerticalAlign = VerticalAlign.Baseline;
         c.PageBreakBefore = c.PageBreakAfter = c.AvoidBreakInside = false;
         c.AvoidBreakBefore = c.AvoidBreakAfter = false;
-        c.ColumnBreakBefore = c.ColumnBreakAfter = false;
-        c.AvoidColumnBreakBefore = c.AvoidColumnBreakAfter = c.AvoidColumnBreakInside = false;
         c.Floated = false;
         c.Float = FloatSide.None;
-        c.ShapeOutside = null;
-        c.ShapeMargin = Length.Zero;
-        c.ShapeImageThreshold = 0;
-        c.InitialLetterSize = 0;
-        c.InitialLetterSink = 0;
-        c.InitialLetterSunk = false;
-        c.Footnote = false;
-        c.FootnoteDisplay = FootnoteDisplay.Block;
-        c.FootnotePolicy = FootnotePolicy.Auto;
         c.ClearLeft = c.ClearRight = false;
         c.Opacity = 1;
         c.Position = Position.Static;
         c.Top = c.Right = c.Bottom = c.Left = Length.Auto;
-        c.ZIndex = null;
         c.FormattingRoot = false;
         c.OverflowX = c.OverflowY = Overflow.Visible;
-        c.Transform = null;
-        c.Translate = c.Rotate = c.Scale = null;
-        c.TransformOriginX = c.TransformOriginY = new Length(50, LengthUnit.Percent);
-        c.Perspective = null;
-        c.PerspectiveOriginX = c.PerspectiveOriginY = new Length(50, LengthUnit.Percent);
-        c.Content = null;
-        c.ContentNone = false;
-        c.CounterReset = c.CounterSet = c.CounterIncrement = null;
-        c.FlexDirection = FlexDirection.Row;
         c.UnicodeBidi = UnicodeBidi.Normal;
-        c.FlexWrap = FlexWrap.NoWrap;
-        c.FlexGrow = 0;
-        c.FlexShrink = 1;
-        c.FlexBasis = Length.Auto;
-        c.Order = 0;
-        c.JustifyContent = c.AlignItems = c.AlignContent = c.JustifyItems = BoxAlign.Normal;
-        c.AlignSelf = c.JustifySelf = BoxAlign.Auto;
-        c.RowGap = c.ColumnGap = null;
-        c.GridTemplateColumns = c.GridTemplateRows = null;
-        c.GridAutoColumns = c.GridAutoRows = null;
-        c.GridAutoFlowColumn = c.GridAutoFlowDense = false;
-        c.GridColumnStart = c.GridColumnEnd = c.GridRowStart = c.GridRowEnd = default;
-        c.GridTemplateAreas = null;
-        c.ColumnCount = 0;
-        c.ColumnWidth = Length.Auto;
-        c.ColumnRuleStyle = BorderStyle.None;
-        c.ColumnRuleWidth = 1.5f;
-        c.ColumnRuleColor = null;
-        c.ColumnSpanAll = false;
-        c.ColumnFillAuto = false;
-        c.LineClamp = 0;
-        c.LegacyBox = c.BoxVertical = false;
-        c.BoxPack = BoxAlign.Start;
-        c.BoxAlignItems = BoxAlign.Stretch;
-        c.BoxFlex = 0;
-        c.BoxOrdinalGroup = 1;
-        c.StringSet = null;
-        c.BookmarkLevel = null;
-        c.BookmarkLabel = null;
-        c.BookmarkClosed = false;
-        c.TableLayoutFixed = false;
-        c.BoxShadows = null;
         return c;
     }
 
-    public ComputedStyle Clone() => (ComputedStyle)MemberwiseClone();
+    public ComputedStyle Clone()
+    {
+        ShareInheritedGroups();
+        ShareGroups();
+        return (ComputedStyle)MemberwiseClone();
+    }
 }
