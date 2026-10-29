@@ -119,6 +119,14 @@ internal sealed partial class LayoutEngine
     /// </summary>
     private const int MaxMeasuredTableNesting = 16;
 
+    /// <summary>
+    /// How many cells spanning rows are being laid out again around the current point (see
+    /// <see cref="LayOutSpanningCellAgain"/>), and how deep in nested tables that happens: each level lays out the
+    /// levels inside it again, so the work doubles with each, and cells nested deeper keep their first layout.
+    /// </summary>
+    private int _spanRelayouts;
+    private const int MaxSpanRelayoutNesting = 2, MaxSpanRelayoutTableNesting = 4;
+
     /// <summary>The widest a table's columns grow to fit their percentages, as Chrome caps them.</summary>
     private const float MaxColumnsWidth = 1_000_000f;
 
@@ -1529,7 +1537,7 @@ internal sealed partial class LayoutEngine
     private void LayOutSpanningCellAgain(TableModel m, CellModel cell, float rowBottom, float[] colX, float[] widths, float hs, bool collapse)
     {
         int group = cell.OpsStart - 1, first = cell.OpsStart, end = cell.OpsEnd;
-        if (_measuringRows > 0 || _tableDepth > MaxMeasuredTableNesting || !MayLayOutAgain || end <= first || end > _ops.Count
+        if (_measuringRows > 0 || _tableDepth > MaxSpanRelayoutTableNesting || _spanRelayouts >= MaxSpanRelayoutNesting || !MayLayOutAgain || end <= first || end > _ops.Count
             || !ReferenceEquals(_ops[group], cell.Group) || CrossesPage(cell.Top, rowBottom)
             || !IsDefiniteCell(m, cell) || !HasPercentHeightChild(cell.Td))
             return;
@@ -1537,7 +1545,9 @@ internal sealed partial class LayoutEngine
             if (ReferenceEquals(call.Owner, _ops) && call.OpsIndex >= group) return;
 
         int start = _ops.Count;
+        _spanRelayouts++;
         LayoutCell(cell, cell.Top, colX, widths, hs, collapse, m.Rtl, rowBottom - cell.Top);
+        _spanRelayouts--;
         var content = new GroupOp();
         for (int i = cell.OpsStart; i < cell.OpsEnd; i++) content.Ops.Add(_ops[i]);
         _ops[group] = cell.Group!;
