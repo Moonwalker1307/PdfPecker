@@ -21,7 +21,7 @@ internal static class CssSupports
         "overflow-wrap", "word-wrap", "word-break", "line-break", "vertical-align", "list-style", "list-style-type", "list-style-position",
         "list-style-image",
         "visibility", "box-shadow", "table-layout", "border-collapse", "border-spacing", "caption-side", "empty-cells", "image-orientation", "box-sizing", "float", "clear", "shape-outside", "shape-margin", "shape-image-threshold", "initial-letter",
-        "position", "inset", "top", "right", "bottom", "left", "z-index", "overflow", "overflow-x", "overflow-y", "transform",
+        "position", "inset", "top", "right", "bottom", "left", "z-index", "overflow", "overflow-x", "overflow-y", "overflow-clip-margin", "transform",
         "transform-origin", "perspective", "perspective-origin", "transform-style", "backface-visibility", "translate", "rotate", "scale", "content", "counter-reset", "counter-set", "counter-increment",
         "break-before", "break-after", "break-inside", "page-break-before", "page-break-after", "page-break-inside",
         "orphans", "widows", "margin", "margin-top", "margin-right", "margin-bottom", "margin-left", "padding", "padding-top",

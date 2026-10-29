@@ -59,6 +59,7 @@ internal sealed partial class StyleResolver
             case "bottom": SetLength(ref s.Bottom, d.Lower, d.Em, d.Inherit ? parent.Bottom : null); break;
             case "left": SetLength(ref s.Left, d.Lower, d.Em, d.Inherit ? parent.Left : null); break;
             case "z-index": ApplyZIndex(s, parent, in d); break;
+            case "overflow-clip-margin": ApplyOverflowClipMargin(s, parent, in d); break;
             case "overflow":
             case "overflow-x":
             case "overflow-y":

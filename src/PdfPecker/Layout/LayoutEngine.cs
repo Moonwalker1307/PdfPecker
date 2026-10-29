@@ -1411,7 +1411,7 @@ internal sealed partial class LayoutEngine
             LayoutAbsolutes(cbFrame, bx + bl, y + bt, used - bl - br, bottom - y - bt - bb);
         }
         if ((s.ClipsX || s.ClipsY) && !isImage && !isSvg && _ops.Count > opsStart + 1)
-            WrapClip(opsStart + 1, s, bx, y, used, bottom - y);
+            WrapClip(opsStart + 1, s, bx, y, used, bottom - y, pl, pt, pr, pb);
         _lastBoxRight = bx + used;
         _lastBoxX = bx;
         _lastBoxTop = y;
@@ -1572,14 +1572,11 @@ internal sealed partial class LayoutEngine
 
     /// <summary>
     /// Moves the ops from <paramref name="start"/>, the content of the border box (x, y, w, h), into a clip to its
-    /// padding box, rounded like its inner border edge.
+    /// padding box, rounded like its inner border edge, or to the box overflow-clip-margin names.
     /// </summary>
-    private void WrapClip(int start, ComputedStyle s, float x, float y, float w, float h)
+    private void WrapClip(int start, ComputedStyle s, float x, float y, float w, float h, float pl, float pt, float pr, float pb)
     {
-        float bl = s.BorderLeft, bt = s.BorderTop, br = s.BorderRight, bb = s.BorderBottom;
-        float px = x + bl, py = y + bt, pw = Math.Max(0, w - bl - br), ph = Math.Max(0, h - bt - bb);
-        // Rounded corners only clip when both axes do.
-        var radii = s.ClipsX && s.ClipsY ? BoxPainter.InnerRadii(BoxPainter.Radii(s, w, h), bl, bt, br, bb) : null;
+        var (px, py, pw, ph, radii) = BoxPainter.OverflowClip(s, x, y, w, h, s.BorderLeft, s.BorderTop, s.BorderRight, s.BorderBottom, pl, pt, pr, pb);
         if (!s.ClipsX) { px -= ClipOp.Far; pw += 2 * ClipOp.Far; }
         if (!s.ClipsY) { py -= ClipOp.Far; ph += 2 * ClipOp.Far; }
         var clip = new ClipOp(px, py, pw, ph, radii) { OfViewport = IsViewportOverflow(s) };
