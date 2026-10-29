@@ -60,48 +60,128 @@ internal sealed class Element : Node
     /// </summary>
     public bool Anonymous;
 
+    // Fields few elements use live in a side object made on the first write of a value other than the default, so that
+    // the many elements of a large document stay small: elements were about a sixth of what a 30-page report allocated.
+    private sealed class RareFields
+    {
+        public List<Node>? DomChildren;
+        public string? ContentsHref;
+        public ComputedStyle? MarkerStyle;
+        public string? MarkerContent;
+        public FirstLineStyle? FirstLine;
+        public string? LayoutKey;
+        public string? BookmarkLabel;
+        public int FootnoteIndex = -1;
+        public Element? FootnoteBody;
+        public Layout.FormControl? Control;
+        public string? AltText;
+        public bool EmbedsPicture;
+        public float GeneratedResolution = 1;
+        public float ContainerWidth = float.NaN, ContainerHeight = float.NaN;
+    }
+
+    private RareFields? _rare;
+
+    private RareFields Rare => _rare ??= new RareFields();
+
     /// <summary>
     /// The children of this element as the parser made them, while the style resolver has put the children of its
     /// display: contents children in their place. The next style pass restores them.
     /// </summary>
-    public List<Node>? DomChildren;
+    public List<Node>? DomChildren
+    {
+        get => _rare?.DomChildren;
+        set { if (value != null || _rare != null) Rare.DomChildren = value; }
+    }
 
     /// <summary>The link of the display: contents <c>a</c> element this element was taken out of, which it still links to.</summary>
-    public string? ContentsHref;
+    public string? ContentsHref
+    {
+        get => _rare?.ContentsHref;
+        set { if (value != null || _rare != null) Rare.ContentsHref = value; }
+    }
 
     /// <summary>The style of this list item's ::marker, when a rule styles it; its content replaces the marker text.</summary>
-    public Css.ComputedStyle? MarkerStyle;
-    public string? MarkerContent;
+    public ComputedStyle? MarkerStyle
+    {
+        get => _rare?.MarkerStyle;
+        set { if (value != null || _rare != null) Rare.MarkerStyle = value; }
+    }
+
+    public string? MarkerContent
+    {
+        get => _rare?.MarkerContent;
+        set { if (value != null || _rare != null) Rare.MarkerContent = value; }
+    }
+
     /// <summary>The ::first-line style of the block whose first line this element's inline content starts, if any.</summary>
-    public Css.FirstLineStyle? FirstLine;
+    public FirstLineStyle? FirstLine
+    {
+        get => _rare?.FirstLine;
+        set { if (value != null || _rare != null) Rare.FirstLine = value; }
+    }
+
     /// <summary>An anchor key under which layout records where this element starts (string-set elements).</summary>
-    public string? LayoutKey;
+    public string? LayoutKey
+    {
+        get => _rare?.LayoutKey;
+        set { if (value != null || _rare != null) Rare.LayoutKey = value; }
+    }
+
     /// <summary>The text of this element's bookmark when bookmark-label sets one; null for its own text.</summary>
-    public string? BookmarkLabel;
+    public string? BookmarkLabel
+    {
+        get => _rare?.BookmarkLabel;
+        set { if (value != null || _rare != null) Rare.BookmarkLabel = value; }
+    }
 
     /// <summary>A footnote (float: footnote): its number among the document's footnotes, from 0 in document order; else -1.</summary>
-    public int FootnoteIndex = -1;
+    public int FootnoteIndex
+    {
+        get => _rare?.FootnoteIndex ?? -1;
+        set { if (value != -1 || _rare != null) Rare.FootnoteIndex = value; }
+    }
 
     /// <summary>For a ::footnote-call box: the footnote it calls.</summary>
-    public Element? FootnoteBody;
+    public Element? FootnoteBody
+    {
+        get => _rare?.FootnoteBody;
+        set { if (value != null || _rare != null) Rare.FootnoteBody = value; }
+    }
 
     /// <summary>For input, textarea, select and button elements: the form control they draw.</summary>
-    public Layout.FormControl? Control;
+    public Layout.FormControl? Control
+    {
+        get => _rare?.Control;
+        set { if (value != null || _rare != null) Rare.Control = value; }
+    }
 
     /// <summary>
     /// For an img element whose picture is missing or cannot be decoded and that has alt text: that text, which is also
     /// its only child. Such an img is laid out as an ordinary box around the text, as browsers do, not as a replaced one.
     /// </summary>
-    public string? AltText;
+    public string? AltText
+    {
+        get => _rare?.AltText;
+        set { if (value != null || _rare != null) Rare.AltText = value; }
+    }
 
     /// <summary>
     /// An embed or object element whose resource is a picture: it is laid out and drawn as an img showing that picture,
     /// as browsers show it, and an object's fallback content is not shown.
     /// </summary>
-    public bool EmbedsPicture;
+    public bool EmbedsPicture
+    {
+        get => _rare?.EmbedsPicture ?? false;
+        set { if (value || _rare != null) Rare.EmbedsPicture = value; }
+    }
 
     /// <summary>The image pixels per CSS pixel of a generated img that shows an image-set() option; 1 otherwise.</summary>
-    public float GeneratedResolution = 1;
+    public float GeneratedResolution
+    {
+        get => _rare?.GeneratedResolution ?? 1;
+        set { if (value != 1 || _rare != null) Rare.GeneratedResolution = value; }
+    }
 
     /// <summary>An img element that shows a picture (not its alt text), or an embed or object element that shows one.</summary>
     public bool IsPicture => AltText == null && Name == "img" || EmbedsPicture;
@@ -113,7 +193,17 @@ internal sealed class Element : Node
     /// For a query container: the size of its content box at its last layout, in points, or NaN before it was laid
     /// out. Container queries and cq units of the next style pass read it.
     /// </summary>
-    public float ContainerWidth = float.NaN, ContainerHeight = float.NaN;
+    public float ContainerWidth
+    {
+        get => _rare?.ContainerWidth ?? float.NaN;
+        set { if (!float.IsNaN(value) || _rare != null) Rare.ContainerWidth = value; }
+    }
+
+    public float ContainerHeight
+    {
+        get => _rare?.ContainerHeight ?? float.NaN;
+        set { if (!float.IsNaN(value) || _rare != null) Rare.ContainerHeight = value; }
+    }
 
     public Element(string name) => Name = name;
 

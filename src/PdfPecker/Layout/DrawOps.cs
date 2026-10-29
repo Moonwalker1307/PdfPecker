@@ -33,6 +33,9 @@ internal abstract class DrawOp
         return copy;
     }
 
+    /// <summary>A copy that can be moved on its own, with copies of everything a group holds, however deeply.</summary>
+    public virtual DrawOp DeepCopy() => Copy();
+
     /// <summary>Gives a copy its own instances of what <see cref="Offset"/> changes in place.</summary>
     protected virtual void OwnArrays() { }
 }

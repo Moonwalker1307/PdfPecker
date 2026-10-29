@@ -47,9 +47,9 @@ Document.Create(container =>
 ## Features
 
 - **Layout**: `Column`, `Row` (relative, constant and auto items), `Table` (constant and relative columns, row and
-  column spans, explicit placement, header and footer rows that repeat on every page), padding, borders, corner
-  radius, background, width and height with minimum and maximum, alignment, page breaks, `PreventPageBreak`,
-  `ShowIf` and right-to-left content.
+  column spans, explicit placement, cell backgrounds and borders that fill the row in any call order, header and footer
+  rows that repeat on every page), padding, borders, corner radius, background, width and height with minimum and
+  maximum, alignment, page breaks, `PreventPageBreak`, `ShowIf` and right-to-left content.
 - **More layout**: `Layers` (watermarks under and stamps over content), `Inlined` (items that wrap like words, such as
   tags), `MultiColumn` (newspaper columns), `EnsureSpace` (keeps a heading off the bottom of a page), `Unconstrained`,
   `ZIndex`, `AspectRatio`, `Shadow`, rounded single corners, `Shrink`, `ScaleToFit` (draws content smaller until it
@@ -106,7 +106,6 @@ Most QuestPDF code ports by changing the `using` lines: `Document.Create`, `Page
 
 - `PageSizes.A4.Landscape` is a property, not a method.
 - `Color.FromHex` reads CSS order, so `#rrggbbaa` puts alpha last, where QuestPDF reads `#aarrggbb`.
-- In a table cell, put `Background` before `Padding` (`.Background(...).Padding(...)`) to fill the whole cell.
 - Transforms change how content is drawn, not the space it takes: `Scale(2)` draws twice as large from the top-left
   corner without making room. `RotateLeft` and `RotateRight` turn the layout itself (CSS `writing-mode`), so give
   longer rotated content a height.

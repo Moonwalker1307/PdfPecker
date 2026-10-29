@@ -87,6 +87,30 @@ public sealed class LayoutTests
     }
 
     [Fact]
+    public void A_cells_painted_content_fills_the_cell_whatever_the_call_order()
+    {
+        // QuestPDF draws a cell's content over the whole row, so a background inside the padding fills it; a cell with
+        // an alignment keeps its content's own size, and a background on the cell itself needs nothing more.
+        var document = Html.Page(c => c.Table(t =>
+        {
+            t.ColumnsDefinition(d => { d.RelativeColumn(); d.RelativeColumn(); d.RelativeColumn(); });
+            t.Cell().Padding(5).Background(Colors.Red.Medium).Text("a");
+            t.Cell().Padding(5).AlignMiddle().Border(1).Text("b");
+            t.Cell().Background(Colors.Red.Medium).Padding(5).Text("c");
+        }));
+        string html = Html.Body(DocumentGenerator.Html(document, false, out _));
+        Assert.Equal(
+            "<main><table><colgroup><col class=\"c0\"><col class=\"c0\"><col class=\"c0\"></colgroup><tbody><tr>" +
+            "<td class=\"c1\"><p class=\"c2\">a</p></td>" +
+            "<td class=\"c3\"><p class=\"c4\">b</p></td>" +
+            "<td class=\"c5\"><p>c</p></td></tr></tbody></table></main>", html);
+        string css = Html.Css(document);
+        Assert.Contains(".c1{padding-top:5pt;padding-right:5pt;padding-bottom:5pt;padding-left:5pt;height:1px}", css);
+        Assert.Contains(".c2{height:100%;background-color:", css);
+        Assert.DoesNotContain("height", css[css.IndexOf(".c3{", StringComparison.Ordinal)..css.IndexOf(".c5{", StringComparison.Ordinal)]);
+    }
+
+    [Fact]
     public void Relative_columns_share_what_constant_columns_leave()
     {
         var document = Html.Page(c => c.Table(t =>

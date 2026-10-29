@@ -29,6 +29,26 @@ internal static class DocMdp
     public static PdfDict? Certification(PdfFile file) => file.GetDict(file.GetDict(file.Catalog, "Perms"), "DocMDP");
 
     /// <summary>
+    /// Whether the signature whose value is <paramref name="contents"/> certified the revision that ends at
+    /// <paramref name="revisionEnd"/>: that revision's catalog names it in /Perms. An update may write the catalog again
+    /// without /Perms, so a certification is recognised by the revision it signed, not by the newest catalog.
+    /// </summary>
+    public static bool CertifiedRevision(PdfFile file, long revisionEnd, byte[] contents, string? password)
+    {
+        if (revisionEnd <= 0 || revisionEnd >= file.Data.Length) return false;
+        try
+        {
+            var revision = PdfFile.Open(file.Data.AsSpan(0, (int)revisionEnd).ToArray(), password);
+            return revision.Resolve(Certification(revision)?["Contents"]) is PdfString c && c.Bytes.AsSpan().SequenceEqual(contents);
+        }
+        catch (Exception ex) when (ex is PdfFormatException or PdfPasswordException or InvalidDataException or ArgumentException
+            or InvalidOperationException or OverflowException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Throws when a signature with <paramref name="level"/> cannot be added to <paramref name="file"/>: a certification
     /// must be the document's first signature, and a document certified with no changes allowed takes no more signatures.
     /// </summary>
