@@ -71,6 +71,9 @@ internal static class Targets
         "<input type=week value=2026-W53 min=0001-W01><input type=time min=23:00 max=01:00 value=12:00:00.12>", "<input type=radio name=r required>",
         "<header data-sticky-pdf-header data-sticky-pdf-page=a>{page} of {total-pages}</header>", "<div data-sticky-pdf-first-footer data-sticky-pdf-page=\" a \">",
         "<section style=\"page:a\">", "<section style=\"page:b;break-before:page\">", "data-sticky-pdf-page=b",
+        "{section-page:a}", "{section-page:%zz", "{section-page:}}", "<section id=a>",
+        "content:-pdfpecker-target-pages(attr(id),count)", "content:-pdfpecker-target-pages('#a',current,upper-roman)",
+        "content:-pdfpecker-target-pages(url(#a),last)", "content:counter(pages)",
     };
 
     private static readonly (string, string)[] HtmlNesters =

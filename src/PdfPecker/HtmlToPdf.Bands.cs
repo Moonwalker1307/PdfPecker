@@ -60,7 +60,7 @@ public static partial class HtmlToPdf
     {
         var texts = new List<(TextNode Node, string Original)>();
         CollectPlaceholders(band, texts);
-        foreach (var (node, original) in texts) node.Text = ReplacePlaceholders(original, "99", "99");
+        foreach (var (node, original) in texts) node.Text = ReplacePlaceholders(original, "99", "99", null, 99);
         try
         {
             return Math.Max(0, new LayoutEngine(page.ContentHeight, images) { Cancellation = cancellationToken }.LayoutBand(band, page.ContentWidth));
@@ -71,16 +71,49 @@ public static partial class HtmlToPdf
         }
     }
 
-    private static string ReplacePlaceholders(string text, string page, string pages)
-        => text.Replace("{page}", page).Replace("{total-pages}", pages).Replace("{pages}", pages);
+    private const string SectionPagePlaceholder = "{section-page:";
 
     /// <summary>
-    /// Lays out a band for one page, with {page}, {pages} and {total-pages} replaced in its text. A band without them
+    /// The text with its placeholders replaced: {page}, {pages} and {total-pages}, and {section-page:id} with the page's
+    /// number counted from the page the element with that (percent-encoded) id starts on, which
+    /// <paramref name="firstPageOf"/> gives; 0 for an id it does not know.
+    /// </summary>
+    private static string ReplacePlaceholders(string text, string page, string pages, Func<string, int?>? firstPageOf, int pageNumber)
+    {
+        text = text.Replace("{page}", page).Replace("{total-pages}", pages).Replace("{pages}", pages);
+        int at = text.IndexOf(SectionPagePlaceholder, StringComparison.Ordinal);
+        if (at < 0) return text;
+        var sb = new System.Text.StringBuilder(text.Length);
+        int from = 0;
+        while (at >= 0)
+        {
+            int close = text.IndexOf('}', at + SectionPagePlaceholder.Length);
+            if (close < 0) break;
+            sb.Append(text, from, at - from);
+            string encoded = text.Substring(at + SectionPagePlaceholder.Length, close - at - SectionPagePlaceholder.Length);
+            if (firstPageOf == null) sb.Append("99");
+            else
+            {
+                string id;
+                try { id = Uri.UnescapeDataString(encoded); }
+                catch (UriFormatException) { id = encoded; }
+                int number = firstPageOf(id) is int first ? pageNumber - first + 1 : 0;
+                sb.Append(number.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+            from = close + 1;
+            at = text.IndexOf(SectionPagePlaceholder, from, StringComparison.Ordinal);
+        }
+        sb.Append(text, from, text.Length - from);
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Lays out a band for one page, with {page}, {pages}, {total-pages} and {section-page:id} replaced in its text. A band without them
     /// looks the same on every page, so it is laid out once per page setup and its ops are drawn on each page, as fixed
     /// boxes are. A band with them is laid out for every page, within a budget for the whole document.
     /// </summary>
     private static List<DrawOp> LayoutBandForPage(Element band, PageSetup page, ImageLoader images, int pageIndex, int pageCount, bool alignBottom,
-        BandLayouts laidOut, CancellationToken cancellationToken)
+        BandLayouts laidOut, Func<string, int?> firstPageOf, CancellationToken cancellationToken)
     {
         if (laidOut.Unnumbered.TryGetValue((band, page), out var same)) return same;
         var texts = new List<(TextNode Node, string Original)>();
@@ -89,7 +122,7 @@ public static partial class HtmlToPdf
         string number = (pageIndex + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
         string total = pageCount.ToString(System.Globalization.CultureInfo.InvariantCulture);
         foreach (var (node, original) in texts)
-            node.Text = ReplacePlaceholders(original, number, total);
+            node.Text = ReplacePlaceholders(original, number, total, firstPageOf, pageIndex + 1);
         try
         {
             var engine = new LayoutEngine(page.ContentHeight, images) { Cancellation = cancellationToken };
@@ -201,5 +234,5 @@ public static partial class HtmlToPdf
     /// <summary>Whether the text holds a placeholder that <see cref="ReplacePlaceholders"/> replaces.</summary>
     private static bool HasPlaceholder(string text)
         => text.Contains("{page}", StringComparison.Ordinal) || text.Contains("{pages}", StringComparison.Ordinal)
-           || text.Contains("{total-pages}", StringComparison.Ordinal);
+           || text.Contains("{total-pages}", StringComparison.Ordinal) || text.Contains(SectionPagePlaceholder, StringComparison.Ordinal);
 }
