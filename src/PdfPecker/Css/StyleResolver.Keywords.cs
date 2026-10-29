@@ -65,6 +65,7 @@ internal sealed partial class StyleResolver
                 // all leaves direction alone, and the language and the document's fonts are not properties.
                 s.Rtl = parent.Rtl;
                 s.Lang = parent.Lang;
+                s.Quirks = parent.Quirks;
                 s.Hyphenation = parent.Hyphenation;
                 s.Fonts = parent.Fonts;
                 s.MissingFonts = parent.MissingFonts;
