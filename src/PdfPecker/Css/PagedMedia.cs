@@ -16,6 +16,9 @@ internal sealed class PagedContent
     /// <summary>The page number (1-based) of the element with an id, from the last layout; null before one.</summary>
     public Func<string, int?>? PageOfId;
 
+    /// <summary>The number of pages of the last layout, for <c>counter(pages)</c> outside the page-margin boxes; null before one.</summary>
+    public int? PageCount;
+
     /// <summary>
     /// The anchor of where the element with an id ends, which the layout records next to where it starts, for the last
     /// page of a section in <c>-pdfpecker-target-pages()</c>.

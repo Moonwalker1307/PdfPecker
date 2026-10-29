@@ -221,13 +221,17 @@ public static partial class HtmlToPdf
             LayOut();
         }
 
-        /// <summary>Records the pages of the elements that target-counter() refers to; true when they moved.</summary>
+        /// <summary>Records the pages of the elements that target-counter() refers to, and the number of pages; true when they changed.</summary>
         private bool UpdateTargetPages()
         {
             if (!_paged.UsesTargets) return false;
             var pages = PagesOfAnchors(_runs);
-            if (_targetPages != null && pages.Count == _targetPages.Count && !pages.Except(_targetPages).Any()) return false;
+            int count = 0;
+            foreach (var run in _runs) count += run.Grid.PagesFor(run.Height);
+            if (_targetPages != null && count == _paged.PageCount && pages.Count == _targetPages.Count && !pages.Except(_targetPages).Any())
+                return false;
             _targetPages = pages;
+            _paged.PageCount = count;
             _paged.PageOfId = id => pages.TryGetValue(id, out int n) ? n : null;
             return true;
         }

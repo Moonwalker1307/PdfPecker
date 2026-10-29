@@ -6,6 +6,26 @@ internal sealed partial class PdfFile
     /// <summary>The most objects one object stream is read to hold (/N), against a bogus count allocating its tables.</summary>
     private const int MaxObjectsPerStream = 1_000_000;
 
+    /// <summary>
+    /// The most bytes the object streams of one file may decode to in all, whatever its size. Decoded object streams stay
+    /// cached for the life of the file, and each one may decode to a quarter of a gigabyte, so without a total a few
+    /// megabytes of compressed streams would hold gigabytes of memory.
+    /// </summary>
+    private const long MinObjectStreamBudget = 256L * 1024 * 1024;
+
+    /// <summary>
+    /// How much a file's object streams may decode to per byte of the file, for files so large that the fixed budget is
+    /// too small. Object streams of real files are text that compresses by well under this factor.
+    /// </summary>
+    private const int ObjectStreamBudgetPerFileByte = 16;
+
+    private long _objectStreamBytes;
+
+    /// <summary>The bytes the object streams read so far decoded to, counted once per decode.</summary>
+    internal long ObjectStreamBytes => _objectStreamBytes;
+
+    private long ObjectStreamBudget => Math.Max(MinObjectStreamBudget, (long)Data.Length * ObjectStreamBudgetPerFileByte);
+
     /// <summary>The decoded data of an object stream and the table that says where each object starts in it.</summary>
     private sealed class ObjectStream
     {
@@ -53,11 +73,17 @@ internal sealed partial class PdfFile
         if (GetObject(streamNum) is not PdfStream stream) throw new PdfFormatException("Object stream " + streamNum + " is missing.");
         int count = Math.Clamp(GetInt(stream, "N", 0), 0, MaxObjectsPerStream);
         int first = GetInt(stream, "First", 0);
+        // The total only grows: a stream decoded again after the cache is cleared counts again, which bounds the work too.
+        if (_objectStreamBytes >= ObjectStreamBudget) throw ObjectStreamBudgetExceeded();
         var data = DecodeStream(stream);
+        _objectStreamBytes += data.Length;
+        if (_objectStreamBytes > ObjectStreamBudget) throw ObjectStreamBudgetExceeded();
         var objectStream = new ObjectStream(ReadObjectTable(data, first, count, out var offsets), offsets, data, first);
         _objStreams[streamNum] = objectStream;
         return objectStream;
     }
+
+    private static PdfFormatException ObjectStreamBudgetExceeded() => new("The object streams decode to more data than allowed.");
 
     /// <summary>Reads up to <paramref name="count"/> "number offset" pairs from the header before <paramref name="first"/>; a damaged pair ends the table.</summary>
     private static int[] ReadObjectTable(byte[] data, int first, int count, out int[] offsets)

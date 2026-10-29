@@ -875,7 +875,12 @@ internal sealed partial class LayoutEngine
             bool content = false;
             foreach (var node in run)
                 if (node is not TextNode t || !string.IsNullOrWhiteSpace(t.Text)) { content = true; break; }
-            if (content) pieces.Add(CaptureRun(new List<Node>(run), e, colW));
+            if (content)
+            {
+                var outside = EnterWhole();
+                pieces.Add(CaptureRun(new List<Node>(run), e, colW));
+                LeaveWhole(outside);
+            }
             run.Clear();
         }
         float cy = y;
@@ -890,20 +895,111 @@ internal sealed partial class LayoutEngine
             {
                 cy = FlowWholeColumns(pieces, s, n, x, cy, colW, gap);
                 pieces.Clear();
+                var outside = EnterWhole();
                 var span = CaptureBox(ce, w, shrinkToFit: false);
+                LeaveWhole(outside);
                 if (_paginate && !AtPageTop(cy) && cy + span.Height > FlowEnd(PageOf(cy)) + Eps && span.Height <= _grid.Height(PageOf(cy) + 1))
                     cy = NextPage(cy);
                 Place(span, x, cy);
                 cy += span.Height;
                 continue;
             }
-            pieces.Add(CaptureBox(ce, colW, shrinkToFit: false));
+            pieces.Add(CaptureWhole(ce, colW));
         }
         FlushRun();
         cy = FlowWholeColumns(pieces, s, n, x, cy, colW, gap);
         _lastBoxRight = Math.Max(_lastBoxRight, x + w);
         return cy;
     }
+
+    /// <summary>
+    /// A child of a box kept whole in columns, captured as <see cref="CaptureBox"/> does or, on the pages, a copy of what
+    /// it captured before at the same width, nested as deeply. Such a box sits in the columns of boxes balanced around
+    /// it, whose every balancing pass laid out all of its content again: in columns nested in table cells hundreds of
+    /// levels deep each table was laid out up to 150 times, and 780 levels took 4.5 s. Captured content is not
+    /// paginated and is laid out outside the columns (see <see cref="EnterWhole"/>), so it comes out the same each time,
+    /// as long as its layout never ran out of the relayout budget and nothing around it changed what it counts on: list
+    /// numbering, the tags of a tagged PDF and footnotes.
+    /// </summary>
+    private Captured CaptureWhole(Element e, float w)
+    {
+        var key = new WholeKey(new BoxSource(e, w, false, null, null), _captureDepth, _columnDepth, _placingOnPages);
+        bool cacheable = _paginate && Tags == null && Footnotes == null && !_measuring;
+        if (cacheable && _wholeBoxes.TryGetValue(key, out var known) && known.Box.ListIndexBefore == _currentListIndex
+            && known.ContentBottomBefore.Equals(_lastContentBottom) && _boxLayouts + known.Layouts < _relayoutBudget
+            && SameContext(e, known.Box))
+            return Replay(known);
+        long layouts = _boxLayouts, depthDependent = _depthDependentLayouts, repeatDependent = _repeatDependentLayouts;
+        int breaks = _forcedBreaks;
+        float contentBottom = _lastContentBottom;
+        var outside = EnterWhole();
+        var c = CaptureBox(e, w, shrinkToFit: false);
+        LeaveWhole(outside);
+        if (cacheable && MayLayOutAgain)
+        {
+            var copy = Measured(c);
+            copy.Ops = c.Ops.ConvertAll(op => op.DeepCopy());
+            copy.Absolutes = c.Absolutes;
+            _wholeBoxes[key] = new WholeBox(copy, _boxLayouts - layouts, _depthDependentLayouts - depthDependent,
+                _repeatDependentLayouts - repeatDependent, _forcedBreaks - breaks, contentBottom, _lastContentBottom);
+        }
+        return c;
+    }
+
+    /// <summary>
+    /// Lays out content captured to be kept whole as on its own, outside the columns it goes into: it is laid out from
+    /// the top of the first column, not where it lands, and it never breaks. Laid out in the columns, its margins were
+    /// cut where it would have crossed their ends and its lines noted as orphans there, which made balancing try taller
+    /// columns for nothing, and its layout differed from one balancing pass to the next. Returns what to restore.
+    /// </summary>
+    private (PageGrid Grid, bool Paused) EnterWhole()
+    {
+        var saved = (_grid, _columnNotes?.Paused ?? false);
+        while (_grid is ColumnGrid columns) _grid = columns.Outer;
+        if (_columnNotes != null) _columnNotes.Paused = true;
+        return saved;
+    }
+
+    private void LeaveWhole((PageGrid Grid, bool Paused) saved)
+    {
+        _grid = saved.Grid;
+        if (_columnNotes != null) _columnNotes.Paused = saved.Paused;
+    }
+
+    /// <summary>What <see cref="CaptureWhole"/> does when it lays the box out again, without laying it out.</summary>
+    private Captured Replay(WholeBox known)
+    {
+        var box = known.Box;
+        var c = Measured(box);
+        c.Ops = box.Ops.ConvertAll(op => op.DeepCopy());
+        c.Absolutes = box.Absolutes;
+        c.NotedIn = null; // captured with the notes paused (see EnterWhole)
+        c.NotedForced = _columnNotes?.ForcedCount ?? 0;
+        // The layouts it stands for count as made, so that the budgets run out where they would have.
+        _boxLayouts += known.Layouts;
+        _depthDependentLayouts += known.DepthDependent;
+        _repeatDependentLayouts += known.RepeatDependent;
+        _forcedBreaks += known.ForcedBreaks;
+        _currentListIndex = box.ListIndexAfter;
+        _lastContentBottom = known.ContentBottomAfter;
+        (_lastBoxX, _lastBoxTop, _lastBoxW, _lastBoxH) = (box.BoxX, box.BoxY, box.BoxW, box.BoxH);
+        (_lastBoxContentH, _lastBoxFrameV, _lastBoxChildCb) = (box.ContentH, box.FrameV, box.ChildCb);
+        if (box.AnchorIds != null)
+            for (int i = 0; i < box.AnchorIds.Count; i++) Anchors[box.AnchorIds[i]] = box.AnchorYs![i];
+        if (_logItems) (_captureLog ??= new Dictionary<BoxSource, Captured>()).TryAdd(box.Source!, Measured(c));
+        return c;
+    }
+
+    private readonly record struct WholeKey(BoxSource Source, int CaptureDepth, int ColumnDepth, int PlacingOnPages);
+
+    /// <summary>
+    /// A box captured by <see cref="CaptureWhole"/>, its content as it was before it was placed, and what laying it out
+    /// changed besides.
+    /// </summary>
+    private sealed record WholeBox(Captured Box, long Layouts, long DepthDependent, long RepeatDependent, int ForcedBreaks,
+        float ContentBottomBefore, float ContentBottomAfter);
+
+    private readonly Dictionary<WholeKey, WholeBox> _wholeBoxes = new();
 
     /// <summary>Balances pieces over n columns from y, continuing on later pages as needed. Returns the bottom.</summary>
     private float FlowWholeColumns(List<Captured> pieces, ComputedStyle s, int n, float x, float y, float colW, float gap)
@@ -992,6 +1088,10 @@ internal sealed partial class LayoutEngine
                 var p = pieces[next];
                 bool empty = cy == top;
                 if (!empty && cy + p.Height > top + h + Eps && !(last && fillAll)) break;
+                // Balancing the columns around learns that the piece stays whole, as from break-inside: avoid. It used
+                // to learn something like it only from the notes made inside the piece; without either, it tried
+                // columns too short for the pieces, which then spread over hundreds of tiny overflow columns.
+                if (_paginate) _columnNotes?.Unbreakable(PageOf(cy), p.Height);
                 Place(p, x + col * (colW + gap), cy);
                 cy += p.Height;
                 next++;

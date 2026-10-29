@@ -99,6 +99,18 @@ public class BrowserMatchTests
         Near(13, Box(ops, "#0000ff").H);
     }
 
+    [Theory]
+    [InlineData("left", 0f)]
+    [InlineData("right", 210f)]   // (400 - 120) px from the left, in points
+    public void A_floats_auto_margins_are_zero(string side, float x)
+    {
+        // Chrome: margin: 8px auto on a float leaves it at its side, with the text beside it.
+        var ops = Layout($"<div style='width:400px'><div style='float:{side}; width:120px; height:20px; margin:8px auto; background:#0000ff'></div>text</div>");
+        var box = Box(ops, "#0000ff");
+        Near(x, box.X);
+        Near(6, box.Y);
+    }
+
     [Fact]
     public void Line_height_normal_differs_per_font()
     {

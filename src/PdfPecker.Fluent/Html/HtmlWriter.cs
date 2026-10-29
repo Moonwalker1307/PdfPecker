@@ -198,8 +198,13 @@ internal sealed class HtmlWriter
             else if (decorator.Kind == DecoratorKind.EnsureSpace) box = EnsureSpace(box, decorator.Value);
             else if (!box.TryApply(decorator))
             {
+                bool fill = box.FillsWith(decorator);
+                // A percentage height resolves against a table cell only when the cell has a height of its own, as in
+                // Chrome, so the cell gets one too small to matter and grows with its row.
+                if (fill) box.Declarations.Add(("height", "1px"));
                 Open(box);
                 box = box.Child();
+                if (fill) box.Declarations.Add(("height", "100%"));
                 if (!box.TryApply(decorator))
                 {
                     Open(box);
@@ -821,6 +826,7 @@ internal sealed class HtmlWriter
                     var box = Box.Slot(tag);
                     box.IsCell = true;
                     box.SizeLocked = true;
+                    box.InGrid = true;
                     if (tag == "th") box.Attributes.Add(("scope", "col"));
                     if (cell.ColumnSpan > 1) box.Attributes.Add(("colspan", cell.ColumnSpan.ToString(CultureInfo.InvariantCulture)));
                     int rowSpan = Math.Min(cell.RowSpan, rows - r);
@@ -976,6 +982,9 @@ internal sealed class HtmlWriter
         /// </summary>
         public bool SizeLocked { get; set; }
 
+        /// <summary>A cell of a fluent Table, whose content fills the row's height as in QuestPDF.</summary>
+        public bool InGrid { get; set; }
+
         /// <summary>A cell's horizontal alignment, which its non-text content gets from a flex wrapper inside it.</summary>
         private HorizontalAlignment? _cellAlignment;
         public List<(string Property, string Value)> Declarations { get; } = [];
@@ -1083,6 +1092,14 @@ internal sealed class HtmlWriter
                     return true;
             }
         }
+
+        /// <summary>
+        /// Whether the box inside this table cell must fill it: it paints a background, border or shadow, which QuestPDF
+        /// draws over the whole height of the row. Aligned content keeps its own size.
+        /// </summary>
+        public bool FillsWith(Decorator decorator)
+            => InGrid && _cellAlignment == null && !Has("vertical-align")
+               && (decorator.Kind == DecoratorKind.Border || decorator.Kind == DecoratorKind.Style && decorator.Rank == Rank.Paint);
 
         /// <summary>The box inside this one: plain, or aligned when this is a cell with a horizontal alignment.</summary>
         public Box Child()

@@ -140,7 +140,7 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   small `<font>` text, or an image alone in a table cell, is only as tall as its content.
   [More](https://pdfpecker.net/docs/html-and-css/)
 - **Paged media**: `@page` sizes, borders, padding and background images (which cover the whole sheet) and margin boxes, running headers and footers (also a first page of its own, and bands
-  of their own for named pages), footnotes, tables of contents with page numbers, the first and last page of a section and page numbers counted within it (`-pdfpecker-target-pages()`, and `{section-page:id}` in running headers and footers), break control (also table row groups
+  of their own for named pages), footnotes, tables of contents with page numbers, the page count anywhere in the content (`counter(pages)`, as in Prince), the first and last page of a section and page numbers counted within it (`-pdfpecker-target-pages()`, and `{section-page:id}` in running headers and footers), break control (also table row groups
   and group header rows kept together, as reports keep a group on one page, and forced breaks between table rows and between flex lines), table rows that break inside at a page's end as in Chrome, unless a cell would have nothing before the break, table
   headers and footers repeated on every page (also around a row split across pages), and
   bookmarks from the headings that `bookmark-level`, `bookmark-label` and `bookmark-state` can extend, rename or close.

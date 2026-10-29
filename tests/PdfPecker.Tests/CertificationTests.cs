@@ -1,5 +1,6 @@
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using System.Text.RegularExpressions;
 using PdfPecker.Pdf;
 using PdfPecker.Rendering.Parsing;
 
@@ -264,7 +265,8 @@ public class CertificationTests
         catalog.Entries.Remove("Perms");
         var dropped = Replace(pdf, rootRef.Num, catalog);
         v = Assert.Single(Verify(dropped));
-        Assert.Equal(PdfCertificationLevel.None, v.CertificationLevel); // the newest catalog no longer names it
+        Assert.Equal(PdfCertificationLevel.FormFillingAndAnnotations, v.CertificationLevel); // the signed revision names it
+        Assert.Contains(v.DisallowedChanges, c => c.StartsWith("The document catalog's /Perms", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -295,5 +297,81 @@ public class CertificationTests
         Assert.Equal("adbe.pkcs7.detached", v.SubFilter);
         Assert.Equal(PdfCertificationLevel.FormFilling, v.CertificationLevel);
         Assert.True(v.Valid, string.Join("\n", v.Problems));
+    }
+
+    /// <summary>Appends an incremental update that writes object <paramref name="num"/> again, stream or not.</summary>
+    private static byte[] Rewrite(byte[] pdf, int num, PdfObject value)
+    {
+        var file = PdfFile.Open(pdf, null);
+        var update = new PdfUpdateWriter(file, pdf, 4096);
+        if (value is PdfStream stream) update.WriteStream(num, 0, new Dictionary<string, PdfObject>(stream.Entries, StringComparer.Ordinal), stream.RawData);
+        else update.WriteObject(num, 0, value);
+        update.Finish((PdfRef)file.Trailer["Root"]!, Math.Max(file.GetInt(file.Trailer, "Size", 0), file.MaxObjectNumber + 1));
+        return update.Output.Span.ToArray();
+    }
+
+    /// <summary>
+    /// Appends an update that holds nothing but a cross-reference section pointing object <paramref name="num"/> at
+    /// <paramref name="offset"/>, which may lie in the signed part of the file.
+    /// </summary>
+    private static byte[] RedirectObject(byte[] pdf, int num, long offset)
+    {
+        var file = PdfFile.Open(pdf, null);
+        var root = (PdfRef)file.Trailer["Root"]!;
+        int size = Math.Max(file.GetInt(file.Trailer, "Size", 0), file.MaxObjectNumber + 1);
+        string prev = Regex.Matches(Encoding.Latin1.GetString(pdf), @"startxref\s+(\d+)")[^1].Groups[1].Value;
+        long xref = pdf.Length + 1;
+        var update = $"\nxref\n{num} 1\n{offset:D10} 00000 n \ntrailer\n<< /Size {size} /Root {root.Num} {root.Gen} R /Prev {prev} >>\nstartxref\n{xref}\n%%EOF\n";
+        return pdf.Concat(Encoding.Latin1.GetBytes(update)).ToArray();
+    }
+
+    private static (int Num, PdfStream Stream, byte[] Decoded) FirstContent(byte[] pdf)
+    {
+        var (file, _, page) = FirstPage(pdf);
+        var contentRef = page["Contents"] as PdfRef ?? (PdfRef)((PdfArray)file.Resolve(page["Contents"])!)[0];
+        var stream = (PdfStream)file.Resolve(contentRef)!;
+        return (contentRef.Num, stream, file.DecodeStream(stream));
+    }
+
+    private static PdfStream RedBox(byte[] content)
+        => new(new Dictionary<string, PdfObject>(StringComparer.Ordinal), content.Concat("\nq 1 0 0 rg 0 0 600 400 re f Q\n"u8.ToArray()).ToArray());
+
+    [Fact]
+    public void A_cross_reference_entry_pointing_back_at_signed_content_is_a_change()
+    {
+        // The "hide and replace" shadow attack: the certified file still holds an older body of the page content (here an
+        // earlier revision). An update that writes no object, only a cross-reference entry, points the page back at it.
+        var original = HtmlToPdf.Convert(Html);
+        var (num, content, decoded) = FirstContent(original);
+        var shadow = RedBox(decoded);
+        var withShadow = Rewrite(original, num, shadow);
+        long shadowOffset = Encoding.Latin1.GetString(withShadow).LastIndexOf($"\n{num} 0 obj", StringComparison.Ordinal) + 1;
+        var certified = PdfSigner.Sign(Rewrite(withShadow, num, content),
+            new PdfSignatureOptions(Cert.Value) { Certification = PdfCertificationLevel.NoChanges });
+        Assert.True(Assert.Single(Verify(certified)).Valid);
+
+        var attacked = RedirectObject(certified, num, shadowOffset);
+        Assert.Equal(shadow.RawData, FirstContent(attacked).Decoded); // viewers draw the shadow content now
+
+        var v = Assert.Single(Verify(attacked));
+        Assert.False(v.Valid);
+        Assert.Contains(v.DisallowedChanges, c => c.StartsWith($"Object {num} was changed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Removing_perms_does_not_turn_a_certification_into_an_approval_signature()
+    {
+        var certified = Certified(PdfCertificationLevel.NoChanges);
+        var (file, _, _) = FirstPage(certified);
+        var catalog = Copy(file.Catalog!);
+        catalog.Entries.Remove("Perms");
+        var (num, _, decoded) = FirstContent(certified);
+        var attacked = Rewrite(Rewrite(certified, ((PdfRef)file.Trailer["Root"]!).Num, catalog), num, RedBox(decoded));
+
+        var v = Assert.Single(Verify(attacked));
+        Assert.Equal(PdfCertificationLevel.NoChanges, v.CertificationLevel);
+        Assert.False(v.Valid);
+        Assert.Contains(v.DisallowedChanges, c => c.Contains("/Perms", StringComparison.Ordinal));
+        Assert.Contains(v.DisallowedChanges, c => c.StartsWith($"Object {num} was changed", StringComparison.Ordinal));
     }
 }

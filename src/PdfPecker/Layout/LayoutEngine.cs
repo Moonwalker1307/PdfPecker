@@ -1551,6 +1551,8 @@ internal sealed partial class LayoutEngine
         var s = e.Style;
         // An inline-block's auto margins are zero: text-align places it on its line. Flex and grid items keep theirs.
         if (s.IsAtomicInline && !s.Floated && !s.OutOfFlow && e.Parent?.Style is not { IsFlex: true } and not { IsGrid: true }) return ml;
+        // A float's auto margins are zero too (CSS 2.1 §10.3.5): it goes to its side, not to the middle or the far side.
+        if (s.Floated) return ml;
         if (s.MarginLeft.IsAuto && s.MarginRight.IsAuto) return Math.Max(0, (availW - used) / 2);
         if (s.MarginLeft.IsAuto) return Math.Max(0, availW - used - mr);
         if (!sized && !s.Floated && !s.OutOfFlow && e.Parent?.Style is { Rtl: true }) return Math.Max(0, availW - used - mr);
