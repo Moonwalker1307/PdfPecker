@@ -80,8 +80,15 @@ internal sealed class DocMdpChanges
             Report("The document catalog was replaced after the certification");
             return;
         }
+        // A rebuilt table takes the last body of each object, while viewers follow the table, so the two can show
+        // different documents; changes cannot be judged from either one alone.
+        if (_new.Reconstructed)
+        {
+            Report("The cross-reference data after the certification is damaged, so the changes made after it cannot be checked");
+            return;
+        }
         Classify(oldRoot);
-        var changed = _new.ObjectsChangedAfter(_old.Data.Length);
+        var changed = _new.ObjectsChangedSince(_old);
         if (changed.Count > MaxChangedObjects)
         {
             Report("The updates after the certification change too many objects to check");
@@ -91,11 +98,14 @@ internal sealed class DocMdpChanges
         foreach (int num in changed)
         {
             if (_found.Count >= MaxReported) break;
-            var before = _old.GetObject(num);
-            var after = _new.GetObject(num);
+            // Free objects are not looked up, as that would rebuild the table; a freed object reads as deleted.
+            var before = _old.IsFree(num) ? null : _old.GetObject(num);
+            var after = _new.IsFree(num) ? PdfNull.Instance : _new.GetObject(num);
             if (before == null || before.IsNull || Same(before, after, 0)) continue; // new objects count where they are used
             CheckObject(num, before, after);
         }
+        if (_new.Reconstructed)
+            Report("The cross-reference data after the certification is damaged, so the changes made after it cannot be checked");
     }
 
     // ------------------------------------------------------------------ what each object was in the certified revision
