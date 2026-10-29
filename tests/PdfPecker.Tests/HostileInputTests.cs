@@ -2258,6 +2258,20 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Inflating_a_large_stream_allocates_little_more_than_its_output()
+    {
+        // A growing buffer doubled past the output and was then copied: five times the output in allocations, and three
+        // times at the peak. Pooled segments copied once into the result stay near twice the output.
+        const int size = 64 << 20;
+        var packed = new MemoryStream();
+        using (var z = new ZLibStream(packed, CompressionLevel.SmallestSize, leaveOpen: true)) z.Write(new byte[size]);
+        var data = packed.ToArray();
+        var (result, allocated) = Allocating(() => Filters.Inflate(data));
+        Assert.Equal(size, result.Length);
+        Assert.InRange(allocated, size, 3L * size);
+    }
+
+    [Fact]
     public void Many_certificate_store_entries_pointing_at_one_compression_bomb_are_decoded_once_within_a_budget()
     {
         // Two hundred megabytes of zeros compress to a few hundred kilobytes; a thousand references to it would decode
