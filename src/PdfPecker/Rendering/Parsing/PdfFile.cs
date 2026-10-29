@@ -51,6 +51,8 @@ internal sealed partial class PdfFile
 
         public static XrefEntry Free => default;
 
+        public bool SameAs(XrefEntry other) => Kind == other.Kind && location == other.location && ordinal == other.ordinal;
+
         public static XrefEntry AtOffset(long offset, int generation) => new(XrefEntryKind.InFile, offset, generation);
 
         public static XrefEntry InStream(long streamNumber, int index) => new(XrefEntryKind.InObjectStream, streamNumber, index);
@@ -79,16 +81,40 @@ internal sealed partial class PdfFile
     public int MaxObjectNumber => _xref.Count == 0 ? 0 : _xref.Keys.Max();
 
     /// <summary>
-    /// The numbers of the objects that the incremental updates after byte <paramref name="revisionEnd"/> wrote or freed:
-    /// those stored at or after it, in an object stream stored at or after it, or free. An earlier revision is a prefix of
-    /// the file, so every other object reads as it did in that revision. Objects free in both are included; they compare
-    /// equal.
+    /// Whether the cross-reference table names <paramref name="num"/> as free: deleted, or never used. Looking such an
+    /// object up would rebuild the table from the object headers, as for a damaged file.
     /// </summary>
-    public List<int> ObjectsChangedAfter(long revisionEnd)
+    public bool IsFree(int num)
     {
+        lock (_lock) return _xref.TryGetValue(num, out var entry) && entry.Kind == XrefEntryKind.Free;
+    }
+
+    /// <summary>
+    /// Whether the cross-reference table did not hold up and was rebuilt from the object headers, which ignores what
+    /// the table said and takes the last body of each object number in the file.
+    /// </summary>
+    public bool Reconstructed
+    {
+        get { lock (_lock) return _reconstructed; }
+    }
+
+    /// <summary>
+    /// The numbers of the objects that the incremental updates after <paramref name="revision"/>, an earlier revision of
+    /// this file opened from a prefix of it, wrote, freed or pointed elsewhere: those stored after the revision, in an
+    /// object stream stored after it, free, or whose cross-reference entry (or their object stream's) differs from the
+    /// revision's. The last case catches an update that writes no object at all and only points an object at an older
+    /// body still in the signed bytes, as the "hide and replace" shadow attack does. Objects free in both are included;
+    /// they compare equal.
+    /// </summary>
+    public List<int> ObjectsChangedSince(PdfFile revision)
+    {
+        long revisionEnd = revision.Data.Length;
+        Dictionary<int, XrefEntry> before;
+        lock (revision._lock) before = new Dictionary<int, XrefEntry>(revision._xref);
         var changed = new List<int>();
         lock (_lock)
         {
+            bool Moved(int num) => !before.TryGetValue(num, out var old) || !old.SameAs(_xref[num]);
             foreach (var (num, entry) in _xref)
             {
                 bool after = entry.Kind switch
@@ -96,10 +122,10 @@ internal sealed partial class PdfFile
                     // Offsets may be relative to a header after junk, so the comparison errs towards "changed".
                     XrefEntryKind.InFile => entry.Offset + _headerOffset >= revisionEnd,
                     XrefEntryKind.InObjectStream => !_xref.TryGetValue(entry.StreamNumber, out var stream)
-                        || stream.Kind != XrefEntryKind.InFile || stream.Offset + _headerOffset >= revisionEnd,
+                        || stream.Kind != XrefEntryKind.InFile || stream.Offset + _headerOffset >= revisionEnd || Moved(entry.StreamNumber),
                     _ => true,
                 };
-                if (after) changed.Add(num);
+                if (after || Moved(num)) changed.Add(num);
             }
         }
         return changed;
