@@ -477,9 +477,15 @@ internal sealed partial class LayoutEngine
 
         float top = FlowBoxTop(ref f, e, breakBefore, out var mt, out bool cleared);
         int boxOps = _ops.Count;
+        var movedAround = _movedWhole;
+        _movedWhole = null;
         float bottom = LayoutFlowBoxContent(ref f, e, ref top, joins, boxOps, out var passed);
         var trailing = _boxTrailing;
-        if (joins && KeepTogetherFails(f.Chain, boxOps, top, f.ForcedAt))
+        // The flow around this one sees a box moved whole inside this box too, when it lies above any it saw before.
+        var moved = _movedWhole;
+        _movedWhole = movedAround;
+        if (moved is { } m && !(movedAround?.Top < m.Top)) _movedWhole = m;
+        if (joins && KeepTogetherFails(f.Chain, boxOps, top, f.ForcedAt) && SharesPageWithChain(f.Chain, top, boxOps, moved))
         {
             RewindToChain(ref f);
             return FlowStep.Next;
@@ -617,6 +623,17 @@ internal sealed partial class LayoutEngine
         }
         return bottom;
     }
+
+    /// <summary>
+    /// Whether a box whose first content landed on a later page than the chain before it would share a page with the
+    /// chain if the chain moved there too. Not when that first content is in a box kept whole that went to the next
+    /// page because it did not fit, and that box and the chain together are taller than a page: moving the chain
+    /// along then left the page it was on blank, or sent the box on to the page after. Chrome leaves the chain
+    /// where it is (it has no break-after: avoid on headings) and starts the box on the next page, and so does this.
+    /// </summary>
+    private bool SharesPageWithChain(in FlowMark chain, float top, int boxOps, (float Top, float Height)? moved)
+        => moved is not { } m || FirstContentPage(boxOps, top) != PageOf(m.Top)
+           || m.Height + (top - chain.Top) <= _grid.Height(PageOf(m.Top));
 
     /// <summary>Moves the flow back to the start of its keep-with-next chain, which then goes to the next page.</summary>
     private void RewindToChain(ref FlowState f)
@@ -979,6 +996,13 @@ internal sealed partial class LayoutEngine
     /// <summary>The box that <see cref="PlaceOnPages"/> lays out next, when its measured height crosses a page boundary.</summary>
     private Element? _crossingBox;
 
+    /// <summary>
+    /// Where the first box kept whole that <see cref="LayoutBlockBox"/> moved to the next page landed, and its height
+    /// there, while a box of a flow is laid out. The flow looks at it to tell whether moving the chain of boxes before
+    /// that box along would let the two share a page.
+    /// </summary>
+    private (float Top, float Height)? _movedWhole;
+
     /// <summary>Lays out a block-level box whose top border edge is at <paramref name="y"/>. Returns its bottom border edge.</summary>
     private float LayoutBlockBox(Element e, float x, float y, float availW, bool shrinkToFit)
     {
@@ -1016,9 +1040,11 @@ internal sealed partial class LayoutEngine
         // the work with each level of them.
         bool crosses = _crossingBox == e;
         _crossingBox = null;
+        bool moved = false;
         if (crosses && avoidInside && movable && _paginate && _grid is not ColumnGrid && _columnNotes == null && !AtPageTop(y)
             && MayLayOutAgain && _avoidDepth <= MaxTriedInColumnsNesting)
         {
+            moved = true;
             y = NextPage(y);
             if (pages != null)
             {
@@ -1055,6 +1081,7 @@ internal sealed partial class LayoutEngine
                     if (!table) _childPageBox = pages;
                 }
                 y = ny;
+                moved = true;
                 bottom = table ? LayoutTable(e, x, ny, availW, pages) : LayoutBlockBoxCore(e, x, ny, availW, shrinkToFit);
                 if (!CrossesPage(ny, bottom))
                 {
@@ -1067,6 +1094,7 @@ internal sealed partial class LayoutEngine
                     Truncate(opsStart);
                     _marker = savedMarker;
                     (y, x, availW) = (oy, ox, oavailW);
+                    moved = false;
                     _childPageBox = table ? null : pages;
                     bottom = table ? LayoutTable(e, x, y, availW, pages) : LayoutBlockBoxCore(e, x, y, availW, shrinkToFit);
                 }
@@ -1087,6 +1115,8 @@ internal sealed partial class LayoutEngine
             if (probe != null) probe.ScanFrom = Math.Min(probe.ScanFrom, opsStart);
         }
         if (avoidInside) _avoidDepth--;
+        // Boxes inside this one finish first, and a later box lands lower: the first box moved is the topmost.
+        if (moved && !(_movedWhole?.Top < y)) _movedWhole = (y, bottom - y);
         return bottom;
     }
 
@@ -1821,6 +1851,10 @@ internal sealed partial class LayoutEngine
         if (!_images.Svgs.TryGetValue(e, out var svg)) _images.Svgs[e] = svg = SvgImage.Build(e, _images.SvgBudget, _images.LoadAny);
         var (iw, ih) = SvgNaturalSize(svg, availW);
         ReplacedSize(e, iw, ih, availW, out w, out h, percentW);
+        // Percentages in an svg without a viewBox refer to its used size (width="100%" on the svg and a rect 100% wide),
+        // so the drawing is built again for that size.
+        if (svg.UsesPercentages && !_measuring && w > 0 && h > 0 && !svg.FitsViewport(w, h))
+            _images.Svgs[e] = svg = SvgImage.Build(e, _images.SvgBudget, _images.LoadAny, (w / 0.75f, h / 0.75f));
         return svg;
     }
 

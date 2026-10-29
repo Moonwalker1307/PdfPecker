@@ -1,7 +1,7 @@
 name: Performance
 
-# Runs the short benchmark nightly on main and compares it with the last successful run, so a slowdown or an
-# allocation increase is noticed within a day instead of at the next release.
+# Runs the short benchmark nightly on main and compares it with the previous run, so a slowdown or an allocation
+# increase is noticed within a day instead of at the next release.
 on:
   schedule:
     - cron: "17 3 * * *"
@@ -49,36 +49,41 @@ jobs:
           DOTNET_GCgen0size: "0x4000000"
         run: dotnet bench/PdfPecker.Benchmarks/bin/Release/net10.0/PdfPecker.Benchmarks.dll --perf perf.json
 
-      # Only successful runs count as a baseline, so a regression that failed this job does not become the new normal.
-      # Hosted runners come in several processor models whose times are not comparable, so the newest of the recent
-      # successful runs on the same model is the baseline; without one, the newest run is used for allocation only.
-      # A first run, or one whose artifacts have expired, has no baseline and passes.
-      - name: Download the previous successful result
+      # The newest earlier run is the baseline for allocation, and the newest earlier run on the same processor model
+      # the baseline for time, as hosted runners come in several models whose times are not comparable. A run counts
+      # whether it passed or failed: a regression fails the night it lands, and the nights after compare with it, so a
+      # cost that is meant, such as a new feature's work, fails once instead of every night until the next change. A
+      # run that left no results, such as one whose build failed, is skipped. A first run, or one whose artifacts have
+      # expired, has no baseline and passes.
+      - name: Download the previous results
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           cpu=$(jq -r '.cpu // empty' perf.json)
-          runs=$(gh run list --workflow perf.yml --status success --limit 20 --json databaseId --jq '.[].databaseId' || true)
+          runs=$(gh run list --workflow perf.yml --branch main --status completed --limit 20 --json databaseId --jq '.[].databaseId' || true)
           for id in $runs; do
+            [ "$id" = "$RUN_ID" ] && continue
             rm -rf candidate
             gh run download "$id" --name perf-results --dir candidate 2>/dev/null || continue
             [ -f candidate/perf.json ] || continue
             if [ ! -f baseline/perf.json ]; then
-              mkdir -p baseline && cp candidate/perf.json baseline/perf.json && chosen=$id
+              mkdir -p baseline && cp candidate/perf.json baseline/perf.json && echo "Allocation baseline: run $id"
             fi
             if [ -n "$cpu" ] && [ "$(jq -r '.cpu // empty' candidate/perf.json)" = "$cpu" ]; then
-              cp candidate/perf.json baseline/perf.json && chosen=$id
+              cp candidate/perf.json baseline/time.json && echo "Time baseline: run $id"
               break
             fi
           done
           rm -rf candidate
-          if [ -f baseline/perf.json ]; then echo "Baseline: run $chosen"; else echo "No baseline found."; fi
+          if [ ! -f baseline/perf.json ]; then echo "No baseline found."; fi
 
       - name: Compare with the baseline
         run: |
           args=(perf.json)
           if [ -f baseline/perf.json ]; then args+=(baseline/perf.json); fi
+          if [ -f baseline/time.json ]; then args+=(baseline/time.json); fi
           set +e
           python3 .github/scripts/perf-compare.py "${args[@]}" | tee perf-summary.md
           status=${PIPESTATUS[0]}

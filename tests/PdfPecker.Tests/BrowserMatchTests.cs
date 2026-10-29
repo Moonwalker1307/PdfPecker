@@ -88,6 +88,17 @@ public class BrowserMatchTests
         Near(12, baselines[1] - baselines[0]);
     }
 
+    [Theory]
+    [InlineData("<svg width='14' height='14' style='vertical-align:-2px; margin-right:6px'><rect width='14' height='14'/></svg>")]
+    [InlineData("<img style='width:14px; height:14px; vertical-align:-2px; margin:0 6px' src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2214%22 height=%2214%22/%3E'>")]
+    public void A_lowered_icon_with_a_margin_leaves_its_line_as_tall_as_the_text(string icon)
+    {
+        // Chrome: the icon reaches 12px above and 2px below the baseline, inside the 13.33px Arial text's line, so the
+        // line stays 17.33px (13pt) tall; the icon's margin is no text and adds nothing.
+        var ops = Layout($"<div style='font:10pt/1.3 Arial; background:#0000ff'>{icon}Team</div>");
+        Near(13, Box(ops, "#0000ff").H);
+    }
+
     [Fact]
     public void Line_height_normal_differs_per_font()
     {

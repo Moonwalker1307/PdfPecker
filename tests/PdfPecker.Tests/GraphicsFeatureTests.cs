@@ -179,6 +179,44 @@ public class GraphicsFeatureTests
     }
 
     [Fact]
+    public void Svg_percentage_lengths_refer_to_the_viewport()
+    {
+        var doc = Styled("""
+            <svg id="s" width="200" height="100" font-family="Helvetica">
+              <rect x="10%" width="50%" height="100%" fill="red"/>
+              <circle cx="50%" cy="50%" r="10%" fill="blue"/>
+              <text x="50%" y="25%" font-size="10">A</text>
+            </svg>
+            """);
+        var svg = SvgImage.Build(ById(doc, "s"));
+        Assert.True(svg.UsesPercentages);
+        Assert.Equal(new[] { 20f, 0f, 120f, 0f, 120f, 100f, 20f, 100f }, svg.Shapes[0].Points);
+        // r refers to the normalised diagonal, sqrt((200² + 100²) / 2).
+        var circle = svg.Shapes[1];
+        Near(100 - 15.81f, circle.MinX, 0.01f);
+        Near(100 + 15.81f, circle.MaxX, 0.01f);
+        var text = svg.Shapes.Single(s => s.Kind == SvgShape.KindText);
+        Near(100, text.TextMatrix.E, 0.01f);
+        Near(25, text.TextMatrix.F, 0.01f);
+    }
+
+    [Fact]
+    public void Svg_percentages_without_a_view_box_refer_to_the_used_size()
+    {
+        // Bootstrap's placeholder images: a 100% wide svg filled by a 100% wide rect.
+        var html = """
+            <body style="margin:0"><div style="width:200px"><svg width="100%" height="100">
+              <rect width="100%" height="100%" fill="#ff0000"/>
+            </svg></div></body>
+            """;
+        var pdf = ConvertUncompressed(html, NoMargins);
+        var right = Pixel(pdf, 145, 37);   // 195 px = 146 pt
+        var outside = Pixel(pdf, 155, 37);
+        Assert.True(right.R > 230 && right.G < 30 && right.B < 30, $"right {right}");
+        Assert.True(outside.R > 230 && outside.G > 230 && outside.B > 230, $"outside {outside}");
+    }
+
+    [Fact]
     public void Svg_clip_path_clips_drawing()
     {
         var html = """

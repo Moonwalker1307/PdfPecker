@@ -27,6 +27,10 @@ static class Perf
         var report = Documents.LargeReport();
 
         var results = new List<(string Name, double MeanMs, long AllocBytes, double? PerSecond)>();
+        // The cases that run on every test fixture of a kind grow when a test adds one, which is no slowdown. Each such
+        // case records a fingerprint of its files, and the comparison does not judge a case whose files changed. A
+        // change to a case's work in this file should rename the case, so the comparison reports it as new.
+        var inputs = new Dictionary<string, string>();
         results.Add(Measure("invoice", invoice, htmlDir, runs: 100));
         results.Add(Measure("report-30", report, null, runs: 15));
 
@@ -36,6 +40,9 @@ static class Perf
         var bmps = Fixtures(fixtureDir, "*.bmp");
         var webps = Fixtures(fixtureDir, "*.webp");
         var tiffs = Fixtures(fixtureDir, "*.tif");
+        inputs["decode-bmp"] = Fingerprint(bmps);
+        inputs["decode-webp"] = Fingerprint(webps);
+        inputs["decode-tiff"] = Fingerprint(tiffs);
         results.Add(Measure("decode-bmp", () => { foreach (var b in bmps) BmpDecoder.Decode(b, MaxPixels); }, runs: 20000));
         results.Add(Measure("decode-webp", () => { foreach (var w in webps) WebPDecoder.Decode(w, MaxPixels); }, runs: 1000));
         results.Add(Measure("decode-tiff", () => { foreach (var t in tiffs) TiffDecoder.Decode(t, MaxPixels); }, runs: 300));
@@ -47,6 +54,7 @@ static class Perf
         // the first page of features.pdf at 96 dpi, written by the library's own encoder. One run decodes each once.
         var losslessWebps = Fixtures(fixtureDir, "lossless*.webp")
             .Append(PdfToImage.ConvertPage(pdf, 0, new ImageOptions { Dpi = 96, Format = PdfImageFormat.WebP })).ToArray();
+        inputs["decode-webp-lossless"] = Fingerprint(losslessWebps);
         results.Add(Measure("decode-webp-lossless", () => { foreach (var w in losslessWebps) WebPDecoder.Decode(w, MaxPixels); }, runs: 50));
 
         // The JPEG and CCITT fax decoders, which photographs in pages and scanned PDFs go through: the JPEG fixtures, the
@@ -54,6 +62,7 @@ static class Perf
         // 150 dpi in black and white as Group 4 fax data. One run decodes each once.
         var jpegs = Fixtures(fixtureDir, "*.jpg").Append(PdfToImage.ConvertPage(pdf, 0, new ImageOptions { Dpi = 96, Format = PdfImageFormat.Jpeg })).ToArray();
         var (fax, faxWidth, faxHeight) = Group4Page(pdf);
+        inputs["decode-jpeg-ccitt"] = Fingerprint(jpegs);
         results.Add(Measure("decode-jpeg-ccitt", () =>
         {
             foreach (var j in jpegs) PdfPecker.Rendering.Images.JpegDecoder.Decode(j);
@@ -81,6 +90,7 @@ static class Perf
         // The font tables: kerning pairs, ligature lookups, variation deltas (GDEF, GPOS, CFF2) and CFF parsing and
         // subsetting, on each test font. A pass loads every font afresh, so none of it is cached from the one before.
         var fonts = Fixtures(Path.Combine(fixtureDir, "fonts"), "*.ttf").Concat(Fixtures(Path.Combine(fixtureDir, "fonts"), "*.otf")).ToArray();
+        inputs["parse-font-tables"] = inputs["parse-render-fonts"] = Fingerprint(fonts);
         results.Add(Measure("parse-font-tables", () => { foreach (var f in fonts) ParseFontTables(f); }, runs: 300));
 
         // The renderer's font programs: TrueType outlines and cmaps, CFF charstrings, a Type 1 program and an embedded
@@ -92,6 +102,7 @@ static class Perf
         // document would embed is built for a mixed text, which covers the sfnt reader, the character map, the WOFF
         // decoders and the sfnt builder. One run subsets every font once.
         var fontFiles = new[] { "*.ttf", "*.otf", "*.ttc", "*.woff", "*.woff2" }.SelectMany(p => Fixtures(Path.Combine(fixtureDir, "fonts"), p)).ToArray();
+        inputs["subset-fonts"] = Fingerprint(fontFiles);
         results.Add(Measure("subset-fonts", () => { foreach (var f in fontFiles) SubsetFont(f); }, runs: 200));
 
         // The bidi algorithm: the levels, the L1 reset and the visual order of generated paragraphs that mix Arabic,
@@ -228,13 +239,15 @@ static class Perf
 
         var cpu = CpuModel().Replace("\\", "", StringComparison.Ordinal).Replace("\"", "", StringComparison.Ordinal);
         Console.WriteLine($"{cpu}, {Environment.ProcessorCount} cores");
-        var json = new StringBuilder($"{{\n  \"cpu\": \"{cpu}\",\n  \"cores\": {Environment.ProcessorCount},\n  \"cases\": [\n");
+        // "allocation" names how allocation was counted, so runs that counted it differently are not compared.
+        var json = new StringBuilder($"{{\n  \"cpu\": \"{cpu}\",\n  \"cores\": {Environment.ProcessorCount},\n  \"allocation\": \"all threads\",\n  \"cases\": [\n");
         for (int i = 0; i < results.Count; i++)
         {
             var r = results[i];
             var perSecond = r.PerSecond is { } p ? p.ToString("F2", CultureInfo.InvariantCulture) : "null";
+            var fingerprint = inputs.TryGetValue(r.Name, out var f) ? $", \"inputs\": \"{f}\"" : "";
             json.Append(CultureInfo.InvariantCulture,
-                $"    {{ \"name\": \"{r.Name}\", \"meanMs\": {r.MeanMs:F4}, \"allocBytes\": {r.AllocBytes}, \"perSecond\": {perSecond} }}{(i + 1 < results.Count ? "," : "")}\n");
+                $"    {{ \"name\": \"{r.Name}\", \"meanMs\": {r.MeanMs:F4}, \"allocBytes\": {r.AllocBytes}, \"perSecond\": {perSecond}{fingerprint} }}{(i + 1 < results.Count ? "," : "")}\n");
             Console.WriteLine($"{r.Name,-20} {r.MeanMs,9:F3} ms {r.AllocBytes / 1024.0,10:F0} KB {(r.PerSecond is { } q ? $"{q:F0} docs/s" : "")}");
         }
         json.Append("  ]\n}\n");
@@ -246,6 +259,20 @@ static class Perf
 
     static byte[][] Fixtures(string dir, string pattern)
         => Directory.GetFiles(dir, pattern).Order(StringComparer.Ordinal).Select(File.ReadAllBytes).ToArray();
+
+    /// <summary>A short SHA-256 of a case's input files, in order, each with its length.</summary>
+    static string Fingerprint(byte[][] files)
+    {
+        using var hash = System.Security.Cryptography.IncrementalHash.CreateHash(System.Security.Cryptography.HashAlgorithmName.SHA256);
+        Span<byte> length = stackalloc byte[8];
+        foreach (var file in files)
+        {
+            System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(length, file.Length);
+            hash.AppendData(length);
+            hash.AppendData(file);
+        }
+        return Convert.ToHexStringLower(hash.GetHashAndReset())[..16];
+    }
 
     /// <summary>The first page of a PDF at 150 dpi, thresholded to black and white and coded as Group 4 fax data.</summary>
     static (byte[] Data, int Width, int Height) Group4Page(byte[] pdf)
@@ -880,18 +907,22 @@ static class Perf
         // The runs are timed in rounds and the median round is reported, so a burst from a noisy neighbour on a shared
         // runner moves one round instead of the whole figure. Each round starts from a collected heap, so a case does not
         // pay for garbage the one before it left behind.
+        // Allocation is counted on every thread, as the text extractor, the image encoders and the SVG filters share
+        // their work with the thread pool, and a count of this thread alone varied with how much of it the pool took.
         int perRound = Math.Max(1, runs / Rounds);
         var rounds = new double[Rounds];
-        long allocBefore = GC.GetAllocatedBytesForCurrentThread();
+        long allocated = 0;
         for (int r = 0; r < Rounds; r++)
         {
             GC.Collect();
             GC.WaitForPendingFinalizers();
+            long allocBefore = GC.GetTotalAllocatedBytes(precise: true);
             long t0 = Stopwatch.GetTimestamp();
             for (int i = 0; i < perRound; i++) run();
             rounds[r] = Stopwatch.GetElapsedTime(t0).TotalMilliseconds / perRound;
+            allocated += GC.GetTotalAllocatedBytes(precise: true) - allocBefore;
         }
-        long alloc = (GC.GetAllocatedBytesForCurrentThread() - allocBefore) / (perRound * Rounds);
+        long alloc = allocated / (perRound * Rounds);
         Array.Sort(rounds);
         return (name, rounds[Rounds / 2], alloc, null);
     }
