@@ -16,8 +16,8 @@ internal sealed partial class SvgImage
     private void RenderImage(Element e, ComputedStyle s, Matrix ctm, float opacity)
     {
         if (!s.Visible) return;
-        DrawImage((e.GetAttribute("href") ?? e.GetAttribute("xlink:href"))?.Trim(), Num(e, "x"), Num(e, "y"),
-            Num(e, "width", float.NaN), Num(e, "height", float.NaN), e.GetAttribute("preserveaspectratio"), ctm, opacity);
+        DrawImage((e.GetAttribute("href") ?? e.GetAttribute("xlink:href"))?.Trim(), Len(e, "x", Axis.X), Len(e, "y", Axis.Y),
+            Len(e, "width", Axis.X, float.NaN), Len(e, "height", Axis.Y, float.NaN), e.GetAttribute("preserveaspectratio"), ctm, opacity);
     }
 
     /// <summary>
