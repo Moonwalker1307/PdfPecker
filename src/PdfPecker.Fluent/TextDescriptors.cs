@@ -126,10 +126,10 @@ public sealed class TextDescriptor
     /// <summary>An empty line.</summary>
     public TextSpanDescriptor EmptyLine() => Add(new TextRun { Text = "\n" });
 
-    /// <summary>The current page number. It works in a page header or footer only.</summary>
+    /// <summary>The current page number: in a header or footer, the page's; in the content, the page the text lands on.</summary>
     public TextSpanDescriptor CurrentPageNumber() => Add(new TextRun { Kind = RunKind.PageNumber });
 
-    /// <summary>The number of pages. It works in a page header or footer only.</summary>
+    /// <summary>The number of pages of the document, in a header or footer or in the content.</summary>
     public TextSpanDescriptor TotalPages() => Add(new TextRun { Kind = RunKind.TotalPages });
 
     /// <summary>A link to a web address (http, https or mailto).</summary>
@@ -141,8 +141,8 @@ public sealed class TextDescriptor
         => Add(new TextRun { Kind = RunKind.SectionLink, Text = text ?? "", Target = Links.Section(sectionName, nameof(sectionName)) });
 
     /// <summary>
-    /// The page number of a <see cref="ContainerExtensions.Section"/>'s first page, for a table of contents. Unlike
-    /// <see cref="CurrentPageNumber"/>, it works anywhere in the document.
+    /// The page number of a <see cref="ContainerExtensions.Section"/>'s first page, for a table of contents. It works
+    /// anywhere in the document.
     /// </summary>
     public TextSpanDescriptor BeginPageNumberOfSection(string sectionName)
         => Add(new TextRun { Kind = RunKind.SectionPageNumber, Target = Links.Section(sectionName, nameof(sectionName)) });

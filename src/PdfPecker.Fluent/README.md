@@ -65,7 +65,7 @@ Document.Create(container =>
   (`text.Element()`); headings, which become PDF bookmarks and tags; links and links to named sections, and the page a
   section starts on (`BeginPageNumberOfSection`).
 - **Pages**: size, margins, page colour, a header and footer on every page, and `CurrentPageNumber` / `TotalPages`
-  in them. `ShowOnce` and `SkipOnce` in the header or footer give the first page a band of its own, such as a
+  in them or anywhere in the content. `ShowOnce` and `SkipOnce` in the header or footer give the first page a band of its own, such as a
   letterhead followed by a slim header. Several `Page` calls give page sets with their own size, margins, header and
   footer in one document, and the page numbers run on through all of them.
 - **Form fields and footnotes**, which QuestPDF does not have: `TextField` (one line, multiline or password),
@@ -106,7 +106,6 @@ Most QuestPDF code ports by changing the `using` lines: `Document.Create`, `Page
 
 - `PageSizes.A4.Landscape` is a property, not a method.
 - `Color.FromHex` reads CSS order, so `#rrggbbaa` puts alpha last, where QuestPDF reads `#aarrggbb`.
-- Page numbers work in the header and footer, not in the content.
 - Transforms change how content is drawn, not the space it takes: `Scale(2)` draws twice as large from the top-left
   corner without making room. `RotateLeft` and `RotateRight` turn the layout itself (CSS `writing-mode`), so give
   longer rotated content a height.

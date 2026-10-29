@@ -47,6 +47,10 @@ internal sealed class HtmlWriter
 
     /// <summary>Whether some text shows a section's page number, which needs the rule that shows it.</summary>
     private bool _sectionPages;
+    private bool _totalPages;
+
+    /// <summary>The page numbers written in the content so far, which each get an id of their own.</summary>
+    private int _pageNumbers;
 
     /// <summary>Whether some text has a footnote, which needs the rule that sets out the footnote area.</summary>
     private bool _footnotes;
@@ -109,6 +113,7 @@ internal sealed class HtmlWriter
             for (int i = 0; i < pages.Count; i++) PageRule(pages[i], PageName(i));
         _html.Append(_rules);
         if (_sectionPages) _html.Append("[data-section-page]::after{content:target-counter(attr(data-section-page),page)}");
+        if (_totalPages) _html.Append("[data-total-pages]::after{content:counter(pages)}");
         if (_footnotes) _html.Append("@page{@footnote{margin-top:8pt;padding-top:4pt;border-top:0.5pt solid currentColor}}");
         foreach (var rule in css) _html.Append('\n').Append(rule);
         _html.Append("</style></head>\n<body");
@@ -733,10 +738,24 @@ internal sealed class HtmlWriter
                     _html.Append("</span>");
                     break;
                 }
+                case RunKind.PageNumber when _band == Band.None:
+                    // In the content, the number is the page the span itself lands on: a page reference to itself.
+                    _sectionPages = true;
+                    string self = "pdfpecker-page-" + (++_pageNumbers).ToString(CultureInfo.InvariantCulture);
+                    _html.Append("<span");
+                    if (cls != null) WriteAttribute("class", cls);
+                    WriteAttribute("id", self);
+                    WriteAttribute("data-section-page", "#" + self);
+                    _html.Append("></span>");
+                    break;
+                case RunKind.TotalPages when _band == Band.None:
+                    _totalPages = true;
+                    _html.Append("<span");
+                    if (cls != null) WriteAttribute("class", cls);
+                    _html.Append(" data-total-pages></span>");
+                    break;
                 case RunKind.PageNumber:
                 case RunKind.TotalPages:
-                    if (_band == Band.None)
-                        throw new InvalidOperationException("CurrentPageNumber and TotalPages work only in a page header or footer.");
                     OpenInline("span", cls, null);
                     _html.Append(run.Kind == RunKind.PageNumber ? "{page}" : "{total-pages}");
                     _html.Append("</span>");

@@ -148,8 +148,23 @@ public sealed class LayoutTests
         => Assert.Throws<InvalidOperationException>(() => Html.Page(c => c.Padding(2).BorderColor(Colors.Red.Medium)).GenerateHtml());
 
     [Fact]
-    public void Page_numbers_outside_a_header_or_footer_fail()
-        => Assert.Throws<InvalidOperationException>(() => Html.Page(c => c.Text(t => t.CurrentPageNumber())).GeneratePdf());
+    public void Page_numbers_in_the_content_refer_to_their_own_page()
+    {
+        var document = Html.Page(c => c.Column(col =>
+        {
+            col.Item().Text(t => { t.Span("Page "); t.CurrentPageNumber(); t.Span(" of "); t.TotalPages(); });
+            col.Item().PageBreak();
+            col.Item().Text(t => { t.Span("Now "); t.CurrentPageNumber().Bold(); });
+        }));
+        string html = Html.Body(DocumentGenerator.Html(document, false, out _));
+        Assert.Contains("<span id=\"pdfpecker-page-1\" data-section-page=\"#pdfpecker-page-1\"></span>", html);
+        Assert.Contains("<span data-total-pages></span>", html);
+        Assert.Contains("id=\"pdfpecker-page-2\" data-section-page=\"#pdfpecker-page-2\"", html);
+        Assert.Contains("[data-total-pages]::after{content:counter(pages)}", Html.Css(document));
+        var pages = PdfText.ExtractPages(document.GeneratePdf());
+        Assert.Contains("Page 1 of 2", pages[0].Text);
+        Assert.Contains("Now 2", pages[1].Text);
+    }
 
     [Fact]
     public void Header_and_footer_repeat_with_page_numbers()
