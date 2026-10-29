@@ -84,7 +84,7 @@ internal static partial class Filters
         using var input = new MemoryStream(data, offset, data.Length - offset, writable: false);
         using var inflater = new DeflateStream(input, CompressionMode.Decompress);
         int limit = Limit;
-        var output = new ArrayBufferWriter<byte>(Math.Max(1, Math.Min(limit, Math.Max(256, data.Length * 4))));
+        using var output = new SegmentedOutput(Math.Max(1, Math.Min(limit, Math.Max(256, data.Length * 4))));
         Span<byte> chunk = stackalloc byte[InflateChunkSize];
         try
         {
@@ -92,15 +92,72 @@ internal static partial class Filters
             while ((count = inflater.Read(chunk)) > 0)
             {
                 output.Write(chunk.Slice(0, count));
-                if (output.WrittenCount > limit) break;
+                if (output.Length > limit) break;
             }
         }
         catch (InvalidDataException)
         {
             // Corrupt or truncated data: keep what was decoded.
-            if (output.WrittenCount == 0) failedEarly = true;
+            if (output.Length == 0) failedEarly = true;
         }
-        return output.WrittenSpan.ToArray();
+        return output.ToArray();
+    }
+
+    /// <summary>
+    /// Collects decoded bytes in pooled segments of at most a megabyte and copies them once into an array of the exact
+    /// size. A growing buffer would double past the result and then copy it, holding about three times the output at
+    /// its peak, plus the earlier buffers until they are collected; a stream that decodes to the 256 MB limit took
+    /// gigabytes that way.
+    /// </summary>
+    private sealed class SegmentedOutput : IDisposable
+    {
+        private const int MaxSegment = 1 << 20;
+        private readonly List<byte[]> _full = new();
+        private byte[] _current;
+        private int _used;
+
+        public SegmentedOutput(int initialSize) => _current = ArrayPool<byte>.Shared.Rent(Math.Min(initialSize, MaxSegment));
+
+        public int Length { get; private set; }
+
+        public void Write(ReadOnlySpan<byte> bytes)
+        {
+            Length += bytes.Length;
+            while (bytes.Length > 0)
+            {
+                if (_used == _current.Length)
+                {
+                    _full.Add(_current);
+                    _current = ArrayPool<byte>.Shared.Rent(Math.Min(_current.Length * 2, MaxSegment));
+                    _used = 0;
+                }
+                int n = Math.Min(bytes.Length, _current.Length - _used);
+                bytes[..n].CopyTo(_current.AsSpan(_used));
+                _used += n;
+                bytes = bytes[n..];
+            }
+        }
+
+        public byte[] ToArray()
+        {
+            if (Length == 0) return Array.Empty<byte>();
+            var result = GC.AllocateUninitializedArray<byte>(Length);
+            int at = 0;
+            foreach (var segment in _full)
+            {
+                segment.CopyTo(result, at);
+                at += segment.Length;
+            }
+            _current.AsSpan(0, _used).CopyTo(result.AsSpan(at));
+            return result;
+        }
+
+        public void Dispose()
+        {
+            foreach (var segment in _full) ArrayPool<byte>.Shared.Return(segment);
+            _full.Clear();
+            ArrayPool<byte>.Shared.Return(_current);
+        }
     }
 
     // ------------------------------------------------------------------ ASCII filters, run length
