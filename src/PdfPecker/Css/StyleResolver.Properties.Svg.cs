@@ -9,12 +9,20 @@ internal sealed partial class StyleResolver
     private static readonly SearchValues<char> DashSeparators = SearchValues.Create(" \t\r\n\f,");
 
     private static void ApplyFill(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
-        => ParsePaint(d.Value, s, d.Inherit ? parent.SvgFill : null, d.Inherit ? parent.SvgFillUrl : null, d.Inherit,
-            out s.SvgFill, out s.SvgFillUrl, s.SvgFill, s.SvgFillUrl);
+    {
+        ParsePaint(d.Value, s, d.Inherit ? parent.SvgFill : null, d.Inherit ? parent.SvgFillUrl : null, d.Inherit,
+            out var color, out var url, s.SvgFill, s.SvgFillUrl);
+        s.SvgFill = color;
+        s.SvgFillUrl = url;
+    }
 
     private static void ApplyStroke(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
-        => ParsePaint(d.Value, s, d.Inherit ? parent.SvgStroke : null, d.Inherit ? parent.SvgStrokeUrl : null, d.Inherit,
-            out s.SvgStroke, out s.SvgStrokeUrl, s.SvgStroke, s.SvgStrokeUrl);
+    {
+        ParsePaint(d.Value, s, d.Inherit ? parent.SvgStroke : null, d.Inherit ? parent.SvgStrokeUrl : null, d.Inherit,
+            out var color, out var url, s.SvgStroke, s.SvgStrokeUrl);
+        s.SvgStroke = color;
+        s.SvgStrokeUrl = url;
+    }
 
     /// <summary>stroke-width: a plain number is in user units (CSS pixels); a length is converted to them.</summary>
     private void ApplyStrokeWidth(ComputedStyle s, in DeclaredValue d)

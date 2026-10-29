@@ -31,7 +31,12 @@ internal sealed partial class StyleResolver
     private void ApplyFlexBasis(ComputedStyle s, in DeclaredValue d)
     {
         if (d.Lower is "content" or "auto" or "max-content" or "min-content" or "fit-content") s.FlexBasis = Length.Auto;
-        else SetLength(ref s.FlexBasis, d.Lower, d.Em, null);
+        else
+        {
+            var basis = s.FlexBasis;
+            SetLength(ref basis, d.Lower, d.Em, null);
+            s.FlexBasis = basis;
+        }
     }
 
     private static void ApplyOrder(ComputedStyle s, in DeclaredValue d)
@@ -145,7 +150,8 @@ internal sealed partial class StyleResolver
 
     private void ApplyColumnWidth(ComputedStyle s, in DeclaredValue d)
     {
-        SetLength(ref s.ColumnWidth, d.Lower, d.Em, null);
-        if (s.ColumnWidth.IsPercent) s.ColumnWidth = Length.Auto;
+        var width = s.ColumnWidth;
+        SetLength(ref width, d.Lower, d.Em, null);
+        s.ColumnWidth = width.IsPercent ? Length.Auto : width;
     }
 }
