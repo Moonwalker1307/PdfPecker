@@ -196,19 +196,12 @@ are in `BUILD.md` and `TESTING.md`.
   callers' output caches possible; signed and encrypted output stay unique on purpose.
 - The website (PdfPecker.Web) uses the NuGet package, so a library feature reaches pdfpecker.net only after a release
   and a `PackageReference` bump there.
-<<<<<<< HEAD
-- In the fluent package, a percentage height inside a table cell does not stretch, so a cell's background only fills
-  the cell when `Background` comes before `Padding` in the chain; the writer can't fix that alone.
-- Fluent page numbers are PdfPecker's `{page}` and `{total-pages}` tokens in the sticky header and footer. Caller text
-  with braces in those bands is written so the library leaves it alone. In the content, a page number is a span that
-  refers to its own id with `target-counter()`, and the page count is `counter(pages)`.
-=======
 - In the fluent package, a table cell's painted content fills the row as in QuestPDF through `height: 1px` on the cell
   and `height: 100%` on the box inside it: as in Chrome, a percentage height resolves against a cell only when the
   cell has a height of its own. Cells with an alignment keep their content's size.
-- Fluent page numbers are PdfPecker's `{page}` and `{total-pages}` tokens, which work only in the sticky header and
-  footer. Caller text with braces in those bands is written so the library leaves it alone.
->>>>>>> origin/main
+- Fluent page numbers are PdfPecker's `{page}` and `{total-pages}` tokens in the sticky header and footer. Caller text
+  with braces in those bands is written so the library leaves it alone. In the content, a page number is a span that
+  refers to its own id with `target-counter()`, and the page count is `counter(pages)`.
 - Several fluent `Page` calls become named pages (`page: p0`, `p1`, ...) of one HTML document, each with its own
   `@page` rule and bands marked `data-sticky-pdf-page`, so page numbers, links, PDF/A, PDF/UA and signatures work across
   them. A single `Page` call writes no page names, which keeps its output as it was.
