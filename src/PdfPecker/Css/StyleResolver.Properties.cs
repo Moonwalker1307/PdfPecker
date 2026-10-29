@@ -202,7 +202,11 @@ internal sealed partial class StyleResolver
                 ApplyWritingMode(s, parent, in d);
                 break;
             case LangProperty: s.Lang = d.Value; break;
-            case ControlWidthProperty: SetLength(ref s.ControlWidth, d.Lower, d.Em, null); break;
+            case ControlWidthProperty:
+                var controlWidth = s.ControlWidth;
+                SetLength(ref controlWidth, d.Lower, d.Em, null);
+                s.ControlWidth = controlWidth;
+                break;
 
             // ---- flexbox, grid and multi-column layout (Properties.Layout.cs)
             case "flex-direction": ApplyFlexDirection(s, in d); break;

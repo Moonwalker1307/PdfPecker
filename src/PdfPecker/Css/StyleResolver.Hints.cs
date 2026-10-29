@@ -176,6 +176,7 @@ internal sealed partial class StyleResolver
                 }
                 if ((v = e.GetAttribute("bgcolor")) != null) Hint("background-color", v);
                 if ((v = e.GetAttribute("text")) != null) Hint("color", v);
+                BodyMarginHints(e);
                 break;
             default:
                 if ((v = e.GetAttribute("align")) != null) Hint("text-align", LegacyTextAlign(v));
@@ -449,6 +450,27 @@ internal sealed partial class StyleResolver
         int n = 0;
         while (n < v.Length && (char.IsDigit(v[n]) || v[n] == '.')) n++;
         return n == 0 ? "0px" : string.Concat(v.AsSpan(0, n), "px");
+    }
+
+    /// <summary>
+    /// The legacy page margins of the body element, as Chrome reads them: topmargin or marginheight sets the top and bottom
+    /// margins, leftmargin or marginwidth the left and right ones, the later attribute winning, and rightmargin and
+    /// bottommargin do nothing. A value is the whole number it starts with, in pixels; one with no leading digit is ignored.
+    /// </summary>
+    private void BodyMarginHints(Element e)
+    {
+        foreach (var (name, value) in e.Attributes)
+        {
+            bool vertical = name is "topmargin" or "marginheight";
+            if (!vertical && name is not ("leftmargin" or "marginwidth")) continue;
+            var t = value.AsSpan().Trim();
+            int n = 0;
+            while (n < t.Length && char.IsAsciiDigit(t[n])) n++;
+            if (n == 0 || !Invariant.TryParseInt(t[..n], out int px)) continue;
+            var length = px.ToString(CultureInfo.InvariantCulture) + "px";
+            Hint(vertical ? "margin-top" : "margin-left", length);
+            Hint(vertical ? "margin-bottom" : "margin-right", length);
+        }
     }
 
     private static string FontSizeAttr(string v)

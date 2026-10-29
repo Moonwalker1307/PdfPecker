@@ -32,14 +32,20 @@ public sealed class PdfLtvOptions
     /// </summary>
     public bool FetchRevocationData { get; set; }
 
-    /// <summary>HTTP client for OCSP and CRL requests, e.g. with a proxy. Default: a shared client.</summary>
+    /// <summary>
+    /// HTTP client for OCSP and CRL requests, e.g. with a proxy. Default: a shared client that connects only to public
+    /// addresses (or, when <see cref="UrlFilter"/> is set, to whatever the filter allows). A supplied client resolves
+    /// and connects as it is configured to.
+    /// </summary>
     public HttpClient? HttpClient { get; set; }
 
     /// <summary>
     /// Decides which OCSP and CRL URLs may be contacted when <see cref="FetchRevocationData"/> is on. It is called with
     /// each URL, redirect targets included, before the request; return false to skip it, as if the certificate did not
-    /// name it. The URLs come from certificates in the PDF, so use this to keep requests away from internal hosts.
-    /// Default: null, so every http and https URL is allowed. Whatever the filter says, one call contacts at most 32
+    /// name it. The URLs come from certificates in the PDF, which may be hostile. Default: null, so every http and https
+    /// URL to a public address is allowed: "localhost", loopback, private, link-local (including cloud metadata
+    /// services) and other internal addresses are skipped, and the default client checks the addresses a host name
+    /// resolves to as well. Set a filter to reach internal OCSP or CRL servers; it then decides alone. Whatever the filter says, one call contacts at most 32
     /// distinct URLs, follows at most 3 redirects per CRL download (never from https to http) and stops fetching after
     /// two minutes in total. A supplied <see cref="HttpClient"/> whose handler follows redirects itself does so without
     /// asking the filter.

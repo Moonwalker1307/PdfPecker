@@ -137,7 +137,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   `display: -webkit-box` and its `-webkit-box-` properties, and the `-webkit-gradient()` and prefixed gradient
   syntaxes. As in browsers, a length without a unit (`width: 200`) counts as pixels only in a page without a doctype;
   with `<!DOCTYPE html>` it is ignored. Without a doctype, lines also follow Chrome's quirks-mode line heights: a line of
-  small `<font>` text, or an image alone in a table cell, is only as tall as its content.
+  small `<font>` text, or an image alone in a table cell, is only as tall as its content. The old body attributes
+  `topmargin`, `leftmargin`, `marginheight` and `marginwidth` set the page margins as they do in Chrome.
   [More](https://pdfpecker.net/docs/html-and-css/)
 - **Paged media**: `@page` sizes, borders, padding and background images (which cover the whole sheet) and margin boxes, running headers and footers (also a first page of its own, and bands
   of their own for named pages), footnotes, tables of contents with page numbers, the page count anywhere in the content (`counter(pages)`, as in Prince), the first and last page of a section and page numbers counted within it (`-pdfpecker-target-pages()`, and `{section-page:id}` in running headers and footers), break control (also table row groups
@@ -161,8 +162,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   [More](https://pdfpecker.net/docs/accessibility/)
 - **Forms**: HTML inputs become fillable PDF fields; read, fill and flatten the fields of existing PDFs.
   [More](https://pdfpecker.net/docs/forms/)
-- **Digital signatures**: PAdES signing, certification signatures, timestamps, external signers, verification and
-  long-term validation. [More](https://pdfpecker.net/docs/signatures/)
+- **Digital signatures**: PAdES signing, certification signatures, timestamps, external signers, verification (SHA-1
+  signatures count as not valid unless you allow them) and long-term validation. [More](https://pdfpecker.net/docs/signatures/)
 - **E-invoices and attachments**: Factur-X, ZUGFeRD, XRechnung and Peppol BIS 3.0 XML built from invoice data and
   checked against EN 16931, a ready-made invoice layout, and embedded files.
   [More](https://pdfpecker.net/docs/e-invoices/)
@@ -200,7 +201,7 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
 PdfPecker is built for HTML templates you control: it runs no JavaScript, and conversion never fetches anything from
 the network (remote images and stylesheets load only through a `ResourceResolver` you supply; those in `data:` URLs need
 none). Only signing goes online, and only when you ask: a timestamp from the server you name in `TimestampUrl`, OCSP and CRL data for long-term
-validation when you turn on `FetchRevocationData`, and online revocation checks when verification uses
+validation when you turn on `FetchRevocationData` (from public addresses only, unless your `UrlFilter` allows others), and online revocation checks when verification uses
 `X509RevocationMode.Online`. See the [limitations](https://pdfpecker.net/docs/limitations/) for what it does not do yet.
 
 ## How it compares
