@@ -59,6 +59,9 @@ byte[] tiff = PdfToImage.ConvertToTiff(pdf, new ImageOptions { Dpi = 200, TiffCo
 byte[] smaller = PdfCompactor.Compact(File.ReadAllBytes("scan.pdf"));
 byte[] smallest = PdfCompactor.Compact(pdf, new PdfCompactOptions { MaxImageDpi = 150, ImageQuality = 75 });
 
+// Strip JavaScript, launch and submit actions and other active content from a PDF someone sent you
+byte[] safe = PdfSanitizer.RemoveActiveContent(File.ReadAllBytes("received.pdf"));
+
 // Fast Web View: the first page shows while the rest of a large PDF is still downloading
 byte[] web = HtmlToPdf.Convert(html, new PdfOptions { Linearize = true });
 byte[] mergedForWeb = PdfLinearizer.Linearize(PdfMerger.Merge(invoicePdf, termsPdf));
@@ -173,6 +176,9 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
 - **Compacting and Fast Web View**: `PdfCompactor` makes any PDF smaller without changing how it looks, and
   `PdfOptions.Linearize` or `PdfLinearizer` writes a linearized PDF whose first page shows before the rest arrives.
   [More](https://pdfpecker.net/docs/compacting/)
+- **Removing active content**: `PdfSanitizer` takes JavaScript, actions that launch programs, open other files or
+  submit form data, XFA and media annotations out of PDFs from others, and `HasActiveContent` tells whether a PDF has
+  any. Pages, text, links and form fields stay.
 - **Images to PDF**: `ImageToPdf` puts scans and photos on pages of their own size or fitted to a page size, with
   photos turned upright by their EXIF orientation.
   [More](https://pdfpecker.net/docs/images-to-pdf/)
