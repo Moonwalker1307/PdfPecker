@@ -357,4 +357,35 @@ public class PaginationTests
         Assert.Equal(2, pages.Count);
         Assert.Matches($@"/Subtype /Link /Rect \[[^\]]+\] /F 4 /Border \[0 0 0\] /Dest \[{pages[1]} 0 R /XYZ 0", text);
     }
+
+    [Theory]
+    [InlineData("flex-start")]
+    [InlineData("stretch")]
+    [InlineData("flex-end")]
+    public void A_flex_row_across_a_page_end_breaks_inside_its_items(string align)
+    {
+        // As in Chrome: the row starts on the first page and its items continue on the next, instead of the whole row
+        // moving there. The short item ends on the first page, and the container's bottom edge follows the long one.
+        string words = string.Join(" ", Enumerable.Repeat("word", 60));
+        var ops = Layout("<style>" + Body + "</style><div style='height:150pt'></div>"
+                         + $"<div style='display:flex;align-items:{align};border:2px solid'>"
+                         + $"<div style='flex:1'><p>{words}</p></div><div style='flex:1'><p>Short</p></div></div><p>After</p>");
+        var lines = Lines(ops, "word");
+        Assert.Equal(0, Page(lines[0].LineTop));
+        Assert.Equal(1, Page(lines[^1].LineTop));
+        Assert.Equal(align == "flex-end" ? 1 : 0, Page(Lines(ops, "Short").Single().LineTop));
+        Assert.Equal(1, Page(Lines(ops, "After").Single().LineTop));
+    }
+
+    [Theory]
+    [InlineData("<div style='flex:1;break-inside:avoid'><p>Kept</p><p>whole</p></div>")]
+    [InlineData("<img style='display:block;width:20pt;height:40pt'>")]
+    public void A_flex_row_with_an_item_kept_whole_moves_to_the_next_page_whole(string item)
+    {
+        // Chrome moves the whole row when one of its items goes to the next page whole.
+        string words = string.Join(" ", Enumerable.Repeat("word", 60));
+        var ops = Layout("<style>" + Body + "</style><div style='height:170pt'></div>"
+                         + $"<div style='display:flex'><div style='flex:1'><p>{words}</p></div>{item}</div>");
+        Assert.Equal(1, Page(Lines(ops, "word")[0].LineTop));
+    }
 }
