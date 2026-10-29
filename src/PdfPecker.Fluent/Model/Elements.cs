@@ -143,7 +143,13 @@ internal sealed class TableElement : Element
     public List<TableCell> Footer { get; } = [];
 }
 
-internal enum RunKind { Text, PageNumber, TotalPages, Hyperlink, SectionLink, SectionPageNumber, Element, Footnote }
+internal enum RunKind
+{
+    Text, PageNumber, TotalPages, Hyperlink, SectionLink, SectionPageNumber, Element, Footnote,
+
+    /// <summary>The page a section ends on, the number of its pages, and the page counted from its first.</summary>
+    SectionEndPage, SectionPageCount, SectionPageWithin,
+}
 
 internal sealed class TextRun
 {

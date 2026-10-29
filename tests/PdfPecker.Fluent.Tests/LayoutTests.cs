@@ -260,6 +260,41 @@ public sealed class LayoutTests
     }
 
     [Fact]
+    public void Section_page_numbers_give_its_last_page_its_page_count_and_the_page_within_it()
+    {
+        var document = Document.Create(d => d.Page(p =>
+        {
+            p.Content().Column(c =>
+            {
+                c.Item().Text(t =>
+                {
+                    t.Span("Terms: pages "); t.BeginPageNumberOfSection("terms & more"); t.Span("-");
+                    t.EndPageNumberOfSection("terms & more"); t.Span(", "); t.TotalPagesWithinSection("terms & more");
+                    t.Span(" pages");
+                });
+                c.Item().PageBreak();
+                c.Item().Section("terms & more").Column(terms =>
+                {
+                    terms.Item().Height(500).Text("Terms");
+                    terms.Item().Height(500).Text("More terms");
+                    terms.Item().Text(t => { t.Span("Terms page "); t.PageNumberWithinSection("terms & more"); });
+                });
+            });
+            p.Footer().Text(t => { t.Span("Within "); t.PageNumberWithinSection("terms & more"); });
+        }));
+        string html = DocumentGenerator.Html(document, false, out _);
+        Assert.Contains("data-section-end=\"#", html);
+        Assert.Contains("data-section-pages=\"#", html);
+        Assert.Contains("{section-page:", html);
+        var pages = PdfText.ExtractPages(document.GeneratePdf());
+        Assert.Equal(3, pages.Count);
+        Assert.Contains("Terms: pages 2-3, 2 pages", pages[0].Text);
+        Assert.Contains("Terms page 2", pages[2].Text);
+        Assert.Contains("Within 1", pages[1].Text);
+        Assert.Contains("Within 2", pages[2].Text);
+    }
+
+    [Fact]
     public void An_empty_document_is_one_blank_page()
         => Assert.Equal(1, PdfToImage.GetPageCount(Document.Create(_ => { }).GeneratePdf()));
 

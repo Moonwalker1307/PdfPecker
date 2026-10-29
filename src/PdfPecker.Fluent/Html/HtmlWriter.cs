@@ -48,6 +48,7 @@ internal sealed class HtmlWriter
     /// <summary>Whether some text shows a section's page number, which needs the rule that shows it.</summary>
     private bool _sectionPages;
     private bool _totalPages;
+    private bool _sectionEnds, _sectionCounts, _sectionWithin;
 
     /// <summary>The page numbers written in the content so far, which each get an id of their own.</summary>
     private int _pageNumbers;
@@ -114,6 +115,9 @@ internal sealed class HtmlWriter
         _html.Append(_rules);
         if (_sectionPages) _html.Append("[data-section-page]::after{content:target-counter(attr(data-section-page),page)}");
         if (_totalPages) _html.Append("[data-total-pages]::after{content:counter(pages)}");
+        if (_sectionEnds) _html.Append("[data-section-end]::after{content:-pdfpecker-target-pages(attr(data-section-end),last)}");
+        if (_sectionCounts) _html.Append("[data-section-pages]::after{content:-pdfpecker-target-pages(attr(data-section-pages),count)}");
+        if (_sectionWithin) _html.Append("[data-section-within]::after{content:-pdfpecker-target-pages(attr(data-section-within),current)}");
         if (_footnotes) _html.Append("@page{@footnote{margin-top:8pt;padding-top:4pt;border-top:0.5pt solid currentColor}}");
         foreach (var rule in css) _html.Append('\n').Append(rule);
         _html.Append("</style></head>\n<body");
@@ -725,6 +729,39 @@ internal sealed class HtmlWriter
                     if (cls != null) WriteAttribute("class", cls);
                     WriteAttribute("data-section-page", "#" + run.Target);
                     _html.Append("></span>");
+                    break;
+                case RunKind.SectionEndPage:
+                    _sectionEnds = true;
+                    _html.Append("<span");
+                    if (cls != null) WriteAttribute("class", cls);
+                    WriteAttribute("data-section-end", "#" + run.Target);
+                    _html.Append("></span>");
+                    break;
+                case RunKind.SectionPageCount:
+                    _sectionCounts = true;
+                    _html.Append("<span");
+                    if (cls != null) WriteAttribute("class", cls);
+                    WriteAttribute("data-section-pages", "#" + run.Target);
+                    _html.Append("></span>");
+                    break;
+                case RunKind.SectionPageWithin when _band == Band.None:
+                {
+                    // In the content, the page the span lands on, which needs an id of its own, counted from the section's.
+                    _sectionWithin = true;
+                    string ownId = "pdfpecker-page-" + (++_pageNumbers).ToString(CultureInfo.InvariantCulture);
+                    _html.Append("<span");
+                    if (cls != null) WriteAttribute("class", cls);
+                    WriteAttribute("id", ownId);
+                    WriteAttribute("data-section-within", "#" + run.Target);
+                    _html.Append("></span>");
+                    break;
+                }
+                case RunKind.SectionPageWithin:
+                    // In a header or footer, a placeholder the library fills in for each page, like {page}. The encoded
+                    // name holds no braces or markup.
+                    OpenInline("span", cls, null);
+                    _html.Append("{section-page:").Append(Uri.EscapeDataString(run.Target!)).Append('}');
+                    _html.Append("</span>");
                     break;
                 case RunKind.Footnote:
                 {

@@ -147,6 +147,21 @@ public sealed class TextDescriptor
     public TextSpanDescriptor BeginPageNumberOfSection(string sectionName)
         => Add(new TextRun { Kind = RunKind.SectionPageNumber, Target = Links.Section(sectionName, nameof(sectionName)) });
 
+    /// <summary>The page number of a <see cref="ContainerExtensions.Section"/>'s last page. It works anywhere in the document.</summary>
+    public TextSpanDescriptor EndPageNumberOfSection(string sectionName)
+        => Add(new TextRun { Kind = RunKind.SectionEndPage, Target = Links.Section(sectionName, nameof(sectionName)) });
+
+    /// <summary>
+    /// The page number counted from a <see cref="ContainerExtensions.Section"/>'s first page, which is 1: in a header or
+    /// footer, the page's; in the content, the page the text lands on.
+    /// </summary>
+    public TextSpanDescriptor PageNumberWithinSection(string sectionName)
+        => Add(new TextRun { Kind = RunKind.SectionPageWithin, Target = Links.Section(sectionName, nameof(sectionName)) });
+
+    /// <summary>The number of pages a <see cref="ContainerExtensions.Section"/> covers. It works anywhere in the document.</summary>
+    public TextSpanDescriptor TotalPagesWithinSection(string sectionName)
+        => Add(new TextRun { Kind = RunKind.SectionPageCount, Target = Links.Section(sectionName, nameof(sectionName)) });
+
     /// <summary>
     /// A footnote: a number where it is called in the text, and the note with the same number at the bottom of the
     /// page, below a short rule. Notes are numbered through the document and are 80% of the paragraph's size unless the

@@ -63,7 +63,8 @@ Document.Create(container =>
   subscript; OpenType features (`EnableFontFeature`, `DisableFontFeature`); justified text, `ClampLines` with an
   ellipsis, a first-line indent and `ParagraphSpacing`; small slots inside the text for icons and badges
   (`text.Element()`); headings, which become PDF bookmarks and tags; links and links to named sections, and the page a
-  section starts on (`BeginPageNumberOfSection`).
+  section starts on and ends on, its number of pages and the page within it (`BeginPageNumberOfSection`,
+  `EndPageNumberOfSection`, `TotalPagesWithinSection`, `PageNumberWithinSection`).
 - **Pages**: size, margins, page colour, a header and footer on every page, and `CurrentPageNumber` / `TotalPages`
   in them or anywhere in the content. `ShowOnce` and `SkipOnce` in the header or footer give the first page a band of its own, such as a
   letterhead followed by a slim header. Several `Page` calls give page sets with their own size, margins, header and
@@ -114,14 +115,13 @@ Most QuestPDF code ports by changing the `using` lines: `Document.Create`, `Page
 - `Decoration` is a table underneath, so PDF/UA tags it as one, and its before and after parts repeat only where the
   page breaks between items of a `Column` content, not inside one item taller than a page.
 - `text.Element` with `BelowBaseline` sits like `Top`. Font features work with embedded fonts that have them.
-- Of the section page numbers, only `BeginPageNumberOfSection` is available.
 - `ShowOnce` and `SkipOnce` act on the first page of the header and footer. Elsewhere content appears only once, so
   `ShowOnce` changes nothing and `SkipOnce` leaves the content out, also in a `Decoration` or a table header, whose
   repeats are all the same.
 - `ScaleToFit` fits the content into a `Height` or `MaxHeight` set before it, or into the height of the slot around it,
   such as a row or a box with a `Height`.
-- Not available: `Dynamic`, `Canvas`, `StopPaging`, `RepeatContent`, `ExtendLastCellsToTableBottom`,
-  `EndPageNumberOfSection`, `PageNumberWithinSection`, `TotalPagesWithinSection` and the Companion previewer.
+- Not available: `Dynamic`, `Canvas`, `StopPaging`, `RepeatContent`, `ExtendLastCellsToTableBottom` and the Companion
+  previewer.
 
 ## Performance
 
