@@ -259,7 +259,7 @@ internal sealed partial class LayoutEngine
 
     // ------------------------------------------------------------------ placing
 
-    private float PlaceLines(List<Line> lines, ComputedStyle block, float x, float y, float w, LineIndent indent, bool besideFloats = false)
+    private float PlaceLines(List<Line> lines, ComputedStyle block, float x, float y, float w, LineIndent indent, float emphasisRoom, bool besideFloats = false)
     {
         // The backgrounds of inline boxes are painted once all their fragments are placed; a footnote laid out while
         // placing the lines has fragments of its own.
@@ -272,7 +272,7 @@ internal sealed partial class LayoutEngine
         _inlineCbIndex = null;
         try
         {
-            y = PlaceLinesCore(lines, block, x, y, w, indent, besideFloats);
+            y = PlaceLinesCore(lines, block, x, y, w, indent, emphasisRoom, besideFloats);
             if (_inlineFragments != null) PaintInlineFragments(_inlineFragments);
             if (_inlineCbs != null) LayoutInlineAbsolutes(_inlineCbs);
             return y;
@@ -285,10 +285,11 @@ internal sealed partial class LayoutEngine
         }
     }
 
-    private float PlaceLinesCore(List<Line> lines, ComputedStyle block, float x, float y, float w, LineIndent indent, bool besideFloats)
+    private float PlaceLinesCore(List<Line> lines, ComputedStyle block, float x, float y, float w, LineIndent indent, float emphasisRoom, bool besideFloats)
     {
         int n = ClampLines(lines, block, w, indent);
         var (lineA, lineD) = LineExtents(lines, n, block);
+        MakeRoomForEmphasis(lines, n, lineA, lineD, block, emphasisRoom);
         // Beside floats the lines' positions were fixed while breaking them.
         bool[]? breakBefore = _paginate && n > 1 && !besideFloats ? PlanBreaks(n, lineA, lineD, y, block.Orphans, block.Widows) : null;
         var chunk = new LineChunk { Start = -1 };
@@ -589,6 +590,7 @@ internal sealed partial class LayoutEngine
                 wordSpacing, letterSpacing) { Tag = first.Tag, Rtl = rtlRun }.WithStroke(style);
             _ops.Add(op);
             if (style.TextDecoration != TextDecoration.None) Decorate(style, runX, runEnd - runX, bl, text: op);
+            if (style.EmphasisShape != EmphasisShape.None && style.EmphasisMark is { } mark) DrawEmphasisMarks(items, start, end, xs, rx, bl, lineTop, style, mark);
         }
         return end;
     }

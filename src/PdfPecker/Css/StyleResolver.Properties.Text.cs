@@ -319,6 +319,30 @@ internal sealed partial class StyleResolver
         }
     }
 
+    private static void ApplyEmphasisStyle(ComputedStyle s, in DeclaredValue d)
+    {
+        if (CssParser.ParseEmphasisStyle(d.Value) is { } e) (s.EmphasisShape, s.EmphasisOpen, s.EmphasisString) = e;
+    }
+
+    private static void ApplyEmphasisColor(ComputedStyle s, in DeclaredValue d)
+    {
+        if (d.Lower == "currentcolor") s.EmphasisColor = null;
+        else if (CssColor.TryParse(d.Value, s.Color, out var c)) s.EmphasisColor = c;
+    }
+
+    /// <summary>text-emphasis-position: over or under, and right or left for vertical text, in either order; as in Chrome, right or left alone means over.</summary>
+    private static void ApplyEmphasisPosition(ComputedStyle s, in DeclaredValue d)
+    {
+        bool? under = null, side = null;
+        foreach (var part in CssParser.Tokens(d.Lower.Trim()))
+        {
+            if (part is "over" or "under" && under == null) under = part == "under";
+            else if (part is "right" or "left" && side == null) side = true;
+            else return;
+        }
+        if (under != null || side != null) s.EmphasisUnder = under == true;
+    }
+
     private void ApplyTextDecorationThickness(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
         if (d.Inherit) s.DecorationThickness = parent.DecorationThickness;

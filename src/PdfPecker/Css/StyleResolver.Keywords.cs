@@ -168,6 +168,9 @@ internal sealed partial class StyleResolver
             case "text-spacing-trim": s.TextSpacingTrim = from.TextSpacingTrim; break;
             case "text-decoration-skip-ink": s.SkipInk = from.SkipInk; break;
             case "text-underline-position": s.UnderlinePosition = from.UnderlinePosition; break;
+            case "text-emphasis-style": s.EmphasisShape = from.EmphasisShape; s.EmphasisOpen = from.EmphasisOpen; s.EmphasisString = from.EmphasisString; break;
+            case "text-emphasis-color": s.EmphasisColor = from.EmphasisColor; break;
+            case "text-emphasis-position": s.EmphasisUnder = from.EmphasisUnder; break;
             case "text-transform": s.TextTransform = from.TextTransform; break;
             case "letter-spacing": s.LetterSpacing = from.LetterSpacing; break;
             case "word-spacing": s.WordSpacing = from.WordSpacing; break;
