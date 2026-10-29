@@ -1821,6 +1821,10 @@ internal sealed partial class LayoutEngine
         if (!_images.Svgs.TryGetValue(e, out var svg)) _images.Svgs[e] = svg = SvgImage.Build(e, _images.SvgBudget, _images.LoadAny);
         var (iw, ih) = SvgNaturalSize(svg, availW);
         ReplacedSize(e, iw, ih, availW, out w, out h, percentW);
+        // Percentages in an svg without a viewBox refer to its used size (width="100%" on the svg and a rect 100% wide),
+        // so the drawing is built again for that size.
+        if (svg.UsesPercentages && !_measuring && w > 0 && h > 0 && !svg.FitsViewport(w, h))
+            _images.Svgs[e] = svg = SvgImage.Build(e, _images.SvgBudget, _images.LoadAny, (w / 0.75f, h / 0.75f));
         return svg;
     }
 
