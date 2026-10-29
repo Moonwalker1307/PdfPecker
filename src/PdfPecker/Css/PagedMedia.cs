@@ -19,6 +19,12 @@ internal sealed class PagedContent
     /// <summary>The number of pages of the last layout, for <c>counter(pages)</c> outside the page-margin boxes; null before one.</summary>
     public int? PageCount;
 
+    /// <summary>
+    /// The anchor of where the element with an id ends, which the layout records next to where it starts, for the last
+    /// page of a section in <c>-pdfpecker-target-pages()</c>.
+    /// </summary>
+    public static string EndKey(string id) => id + "\u0001end";
+
     /// <summary>Counters other than page that <c>target-counter()</c> asks for, and their values at each element with an id.</summary>
     public readonly HashSet<string> WantedCounters = new(StringComparer.Ordinal);
     public readonly Dictionary<string, Dictionary<string, int>> CounterSnapshots = new(StringComparer.Ordinal);

@@ -112,6 +112,8 @@ public static partial class HtmlToPdf
         {
             var strings = _styles.Strings;
             var laidOut = new BandLayouts();
+            Dictionary<string, int>? anchorPages = null;
+            int? FirstPageOf(string id) => (anchorPages ??= PagesOfAnchors(_runs)).TryGetValue(id, out int n) ? n : null;
             return (p, count) =>
             {
                 var (section, local) = writer.SectionOfPage(p);
@@ -125,8 +127,8 @@ public static partial class HtmlToPdf
                     ops.AddRange(marginBoxes.Layout(p, count, setup, run.Name));
                 }
                 var (header, footer) = BandsOf(run.Name, p == 0, local == 0);
-                if (header != null) ops.AddRange(LayoutBandForPage(header, setup, _images, p, count, alignBottom: false, laidOut, _cancellation));
-                if (footer != null) ops.AddRange(LayoutBandForPage(footer, setup, _images, p, count, alignBottom: true, laidOut, _cancellation));
+                if (header != null) ops.AddRange(LayoutBandForPage(header, setup, _images, p, count, alignBottom: false, laidOut, FirstPageOf, _cancellation));
+                if (footer != null) ops.AddRange(LayoutBandForPage(footer, setup, _images, p, count, alignBottom: true, laidOut, FirstPageOf, _cancellation));
                 return ops;
             };
         }

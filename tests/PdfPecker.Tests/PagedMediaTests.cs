@@ -175,6 +175,28 @@ public class PagedMediaTests
     }
 
     [Fact]
+    public void Target_pages_give_the_first_and_last_page_of_a_section_and_the_page_within_it()
+    {
+        // Section a is page 2. Section b starts on page 3 and its tall paragraph takes page 4, where the span is.
+        var html = @"<style>
+            a::after { content: '[' -pdfpecker-target-pages(attr(href), first) '-' -pdfpecker-target-pages(attr(href), last)
+                ' n=' -pdfpecker-target-pages(attr(href), count) ']' }
+            #here::after { content: 'within ' -pdfpecker-target-pages('#b%20x', current, lower-roman) }
+            section { break-before: page }
+          </style>
+          <div data-sticky-pdf-header>Section page {section-page:b%20x}</div>
+          <a href='#a'></a><a href='#b x'></a><section id='a'><h2>A</h2></section>
+          <section id='b x'><h2>B</h2><p style='height: 1200px'>tall</p><p>end <span id='here'></span></p></section>";
+        var pages = PdfText.ExtractPages(HtmlToPdf.Convert(html)).Select(p => p.Text).ToArray();
+        Assert.Equal(4, pages.Length);
+        Assert.Contains("[2-2 n=1]", pages[0]);
+        Assert.Contains("[3-4 n=2]", pages[0]);
+        Assert.Contains("within ii", pages[3]);
+        Assert.Contains("Section page 1", pages[2]);
+        Assert.Contains("Section page 2", pages[3]);
+    }
+
+    [Fact]
     public void Counter_pages_in_the_content_shows_the_number_of_pages()
     {
         // As in Prince: the page margin boxes are not the only place for "page 1 of 3". A counter of the content's own
