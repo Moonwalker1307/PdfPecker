@@ -228,6 +228,30 @@ internal static class GeneratedContent
                 sb.Append(Format(targetStyle, value));
                 return true;
             }
+            case "-pdfpecker-target-pages":
+            {
+                // -pdfpecker-target-pages(attr(href), first | last | count | current[, style]): the pages of the element
+                // linked to, for sections. current is the page of this element (which needs an id) counted from the
+                // target's first page.
+                if (args.Count is < 2 or > 3) return false;
+                var which = args[1].Trim().ToLowerInvariant();
+                if (which is not ("first" or "last" or "count" or "current")) return false;
+                if (!TryStyle(resolver, args.Count == 3 ? args[2] : "decimal", out var pagesStyle)) return false;
+                var paged = resolver.Paged;
+                paged.UsesTargets = true;
+                var id = TargetId(args[0], host);
+                int? first = id != null ? paged.PageOfId?.Invoke(id) : null;
+                int? last = id != null ? paged.PageOfId?.Invoke(PagedContent.EndKey(id)) ?? first : null;
+                int value = which switch
+                {
+                    "first" => first ?? 0,
+                    "last" => last ?? 0,
+                    "count" => first is int f && last is int l ? Math.Max(1, l - f + 1) : 0,
+                    _ => first is int f2 && host.Id != null && paged.PageOfId?.Invoke(host.Id) is int here ? here - f2 + 1 : 0,
+                };
+                sb.Append(Format(pagesStyle, value));
+                return true;
+            }
             case "target-text":
             {
                 // target-text(attr(href)[, content | before | after | first-letter]): the text of the element linked to.

@@ -1114,6 +1114,9 @@ internal sealed partial class LayoutEngine
             // The box's ops are now one layer at opsStart: a probe it took scans that layer, not past where its ops ended.
             if (probe != null) probe.ScanFrom = Math.Min(probe.ScanFrom, opsStart);
         }
+        // Where the box ends, for the last page of a section: just above its bottom edge, so that a box that ends where
+        // a page does counts that page and not the next.
+        if (e.Id != null) SetAnchor(PagedContent.EndKey(e.Id), Math.Max(y, bottom - 0.05f));
         if (avoidInside) _avoidDepth--;
         // Boxes inside this one finish first, and a later box lands lower: the first box moved is the topmost.
         if (moved && !(_movedWhole?.Top < y)) _movedWhole = (y, bottom - y);
