@@ -73,6 +73,19 @@ internal class GroupOp : DrawOp
         Ops = new List<DrawOp>(2);
         _later = false;
     }
+
+    /// <summary>
+    /// The copy keeps any offset put off for the ops inside, as this group does: moving them now would add the offsets
+    /// up in another order, which can round a coordinate otherwise.
+    /// </summary>
+    public override DrawOp DeepCopy()
+    {
+        var copy = (GroupOp)Copy();
+        copy._ops = new List<DrawOp>(_ops.Count);
+        foreach (var op in _ops) copy._ops.Add(op.DeepCopy());
+        (copy._laterX, copy._laterY, copy._later) = (_laterX, _laterY, _later);
+        return copy;
+    }
 }
 
 /// <summary>
@@ -235,6 +248,13 @@ internal sealed class LayerOp : GroupOp
         if (Mask != null) Mask = Array.ConvertAll(Mask, m => m.Copy());
     }
 
+    public override DrawOp DeepCopy()
+    {
+        var copy = (LayerOp)base.DeepCopy();
+        if (Mask != null) copy.Mask = Array.ConvertAll(Mask, m => m.DeepCopy());
+        return copy;
+    }
+
     protected override void OffsetOwn(float dx, float dy)
     {
         OriginX += dx;
@@ -305,4 +325,7 @@ internal sealed class MaskLayerOps
 
     /// <summary>A copy whose ops can be moved on their own.</summary>
     public MaskLayerOps Copy() => new() { Ops = Ops.ConvertAll(op => op.Copy()), Luminance = Luminance, Composite = Composite };
+
+    /// <summary>A copy with copies of everything the groups in it hold.</summary>
+    public MaskLayerOps DeepCopy() => new() { Ops = Ops.ConvertAll(op => op.DeepCopy()), Luminance = Luminance, Composite = Composite };
 }

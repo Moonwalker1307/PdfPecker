@@ -2593,6 +2593,24 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(() => HtmlToPdf.Convert(html)));
     }
 
+    [Fact]
+    public void Columns_nested_in_table_cells_are_not_laid_out_again_in_every_balancing_pass()
+    {
+        // Found by the fuzzer: target html, timeout-c201378d of 2026-10-25. A stray end tag in a cell nests the next
+        // heading and two-column box in it, 780 levels deep. Below the two levels that balance, the columns keep their
+        // children whole, and those were laid out against the columns they were not in yet: their lines counted as
+        // orphans there, which made balancing try taller columns, and every pass laid out all the levels below again.
+        // 400 levels took 770 MB and 3 s.
+        var html = "<style>@page{size:148mm 190mm;margin:12mm}body{font-size:8pt;line-height:1.3}"
+            + "h2{font-size:10pt;margin:10pt 0 4pt;background:#eef2f7;padding:2pt 4pt}.c2{column-count:2;column-gap:6mm}"
+            + "table{border-collapse:collapse;width:100%}td,th{border:0.5pt solid #aaa;padding:1pt 2pt}</style>"
+            + Repeat("<h2>Tables and lists inside columns</h2><div class=\"c2\"><table><tr><th>Key</th><th>Value</th></tr>"
+                + "<tr><td>K1</td><td>1</td></tr><tr><td>K2</td><td>4</p></div>", 400);
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 200L << 20);
+    }
+
     [Theory]
     [InlineData("<div style='height:690px'></div>", "<div class=\"c\">", "text")]
     [InlineData("<div style='height:300px'></div>", "<div class=\"c\">", "text<br>text<br>text<br>text<br>text")]
