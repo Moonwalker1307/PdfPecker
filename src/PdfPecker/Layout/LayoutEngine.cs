@@ -976,6 +976,9 @@ internal sealed partial class LayoutEngine
     /// </summary>
     private const int MaxTriedInColumnsNesting = 6;
 
+    /// <summary>The box that <see cref="PlaceOnPages"/> lays out next, when its measured height crosses a page boundary.</summary>
+    private Element? _crossingBox;
+
     /// <summary>Lays out a block-level box whose top border edge is at <paramref name="y"/>. Returns its bottom border edge.</summary>
     private float LayoutBlockBox(Element e, float x, float y, float availW, bool shrinkToFit)
     {
@@ -1007,6 +1010,22 @@ internal sealed partial class LayoutEngine
             ? new KeepProbe(opsStart, PageOf(y)) { Edge = true }
             : null;
         if (edgeProbe != null) _childProbe = edgeProbe;
+        // On pages a box kept whole that crosses a page boundary is laid out again on the next page, and stays there
+        // whether it fits or not. A box laid out again where it lands whose measured height already crosses one goes
+        // there straight away: laying it out here first, with the boxes kept whole inside it doing the same, doubled
+        // the work with each level of them.
+        bool crosses = _crossingBox == e;
+        _crossingBox = null;
+        if (crosses && avoidInside && movable && _paginate && _grid is not ColumnGrid && _columnNotes == null && !AtPageTop(y)
+            && MayLayOutAgain && _avoidDepth <= MaxTriedInColumnsNesting)
+        {
+            y = NextPage(y);
+            if (pages != null)
+            {
+                (x, availW) = OnPage(pages, y);
+                if (!table) _childPageBox = pages;
+            }
+        }
         float bottom = table ? LayoutTable(e, x, y, availW, pages) : LayoutBlockBoxCore(e, x, y, availW, shrinkToFit);
         // A first child laid out with its parent's probe goes along with the parent: its own top edge is not content.
         if (probe is { Edge: true } && opsStart < _ops.Count && _ops[opsStart] is GroupOp chained) (probe.Chained ??= new()).Add(chained);
@@ -2566,7 +2585,11 @@ internal sealed partial class LayoutEngine
         _knownBoxes = src.BorderH == null ? c.Known : null;
         try
         {
+            // Nothing moves down to a next page without pagination, so a box whose measured border box crosses a page
+            // boundary crosses it on the pages too.
+            if (!c.ForcedBreaks && CrossesPage(dy + mt, dy + c.Height - mb)) _crossingBox = e;
             float bottom = LayoutBlockBox(e, dx, dy + mt, src.OuterW, src.ShrinkToFit) + mb;
+            _crossingBox = null; // a box turned to an orthogonal writing mode does not look at it
             if (src.BorderH is float bh && bottom - dy < c.Height - Eps && Repeats(_placingOnPages <= MaxRepeatedOnPages))
             {
                 // A stretched box keeps the height it was given when its content still fits in it on the pages.
