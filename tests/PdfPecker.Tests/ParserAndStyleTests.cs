@@ -204,6 +204,23 @@ public class StyleTests
         Assert.Equal(width == 150f ? 5.25f : 0f, p.Style.MarginLeft.Value, 0.01f);
     }
 
+    [Theory]
+    [InlineData("<!DOCTYPE html>", false)]
+    [InlineData("", true)]
+    public void A_shorthand_with_a_unitless_length_is_dropped_whole_in_standards_mode(string doctype, bool quirks)
+    {
+        // margin: 20px 10 is invalid as a whole in standards mode, so the 20px must not reach the top and bottom.
+        var doc = HtmlParser.Parse(doctype + "<p id=p>x</p>", out var used);
+        var sheet = new Stylesheet();
+        CssParser.ParseStylesheet("p { margin: 4px; margin: 20px 10; padding: 10 20px; border: 2 solid red }", sheet);
+        new StyleResolver(sheet) { StandardsMode = (used & NamesUsed.StandardsMode) != 0 }.ResolveTree(doc, new ComputedStyle { Display = Display.Block });
+        var p = ById(doc, "p");
+        Assert.Equal(quirks ? 15f : 3f, p.Style.MarginTop.Value, 0.01f);
+        Assert.Equal(quirks ? 7.5f : 3f, p.Style.MarginLeft.Value, 0.01f);
+        Assert.Equal(quirks ? 15f : 0f, p.Style.PaddingLeft.Value, 0.01f);
+        Assert.Equal(quirks ? 1.5f : 0f, p.Style.BorderTop, 0.01f);
+    }
+
     [Fact]
     public void Invalid_css_is_dropped_as_in_browsers()
     {
