@@ -219,6 +219,27 @@ internal static partial class BoxPainter
             r[4].Resolve(w), r[5].Resolve(h), r[6].Resolve(w), r[7].Resolve(h), w, h);
     }
 
+    /// <summary>
+    /// The rectangle and rounded corners that a box with the border box (x, y, w, h) clips its overflow to: the padding
+    /// box, or with overflow: clip on both axes the box overflow-clip-margin names, grown by its margin as Chrome grows
+    /// it. Rounded corners only clip when both axes do; the caller widens an axis that does not clip.
+    /// </summary>
+    public static (float X, float Y, float W, float H, CornerRadii? Radii) OverflowClip(ComputedStyle s, float x, float y, float w, float h,
+        float bl, float bt, float br, float bb, float pl, float pt, float pr, float pb, bool rounded = true)
+    {
+        var box = ShapeBox.PaddingBox;
+        float m = 0;
+        if (s.OverflowX == Overflow.Clip && s.OverflowY == Overflow.Clip) (box, m) = (s.OverflowClipBox, s.OverflowClipMargin);
+        float l = 0, t = 0, r = 0, b = 0;
+        if (box != ShapeBox.BorderBox) (l, t, r, b) = (bl, bt, br, bb);
+        if (box == ShapeBox.ContentBox) (l, t, r, b) = (l + pl, t + pt, r + pr, b + pb);
+        float cx = x + l - m, cy = y + t - m;
+        float cw = Math.Max(0, Math.Max(0, w - l - r) + 2 * m), ch = Math.Max(0, Math.Max(0, h - t - b) + 2 * m);
+        var radii = rounded && s.ClipsX && s.ClipsY ? InnerRadii(Radii(s, w, h), l, t, r, b) : null;
+        if (radii is { } rr && m != 0) radii = rr.Outset(m);
+        return (cx, cy, cw, ch, radii);
+    }
+
     /// <summary>The radii of a box inset from the border box by the given distances.</summary>
     public static CornerRadii? InnerRadii(CornerRadii? radii, float left, float top, float right, float bottom)
         => radii is { } r ? r.Inset(top, right, bottom, left) : null;

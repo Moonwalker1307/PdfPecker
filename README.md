@@ -123,7 +123,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
 ## Features
 
 - **HTML and CSS**: flexbox, grid and subgrid, CSS tables, floats with `shape-outside`, `clip-path` shapes (also
-  `rect()` and `xywh()`), multi-column layout, positioning (also the legacy `clip: rect()`, and absolute boxes inside a positioned inline element, such as
+  `rect()` and `xywh()`), `overflow: clip` with `overflow-clip-margin`, multi-column layout, positioning (also the
+  legacy `clip: rect()`, and absolute boxes inside a positioned inline element, such as
   tooltips and badges), transforms, gradients (also `in oklch` and other colour spaces, and as
   list markers), fixed background images (placed on each page's paper, as Chrome prints them), filters, masks,
   media and container queries, logical properties, `writing-mode` (with floats, sized boxes and vertical-lr line

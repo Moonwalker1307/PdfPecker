@@ -1700,8 +1700,9 @@ internal sealed partial class LayoutEngine
         var cs = cell.Td.Style;
         float bl = collapse ? cell.CollapsedL / 2 : cs.BorderLeft, br = collapse ? cell.CollapsedR / 2 : cs.BorderRight;
         float bt = collapse ? cell.CollapsedT / 2 : cs.BorderTop, bb = collapse ? cell.CollapsedB / 2 : cs.BorderBottom;
-        float px = cell.X + bl, py = cell.Top + bt, pw = Math.Max(0, cell.W - bl - br), ph = Math.Max(0, h - bt - bb);
-        var radii = cs.ClipsX && cs.ClipsY && !collapse ? BoxPainter.InnerRadii(BoxPainter.Radii(cs, cell.W, h), bl, bt, br, bb) : null;
+        var (px, py, pw, ph, radii) = BoxPainter.OverflowClip(cs, cell.X, cell.Top, cell.W, h, bl, bt, br, bb,
+            cs.PaddingLeft.Resolve(cell.W), cs.PaddingTop.Resolve(cell.W), cs.PaddingRight.Resolve(cell.W), cs.PaddingBottom.Resolve(cell.W),
+            rounded: !collapse);
         if (!cs.ClipsX) { px -= ClipOp.Far; pw += 2 * ClipOp.Far; }
         if (!cs.ClipsY) { py -= ClipOp.Far; ph += 2 * ClipOp.Far; }
         var clip = new ClipOp(px, py, pw, ph, radii);

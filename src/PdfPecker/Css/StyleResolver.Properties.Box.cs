@@ -179,6 +179,34 @@ internal sealed partial class StyleResolver
         if (prop != "overflow-x") s.OverflowY = Parse(parts[prop == "overflow" && parts.Length > 1 ? 1 : 0], parent.OverflowY);
     }
 
+    /// <summary>
+    /// overflow-clip-margin: a visual box (padding-box when left out) and a length. Chrome 153 also takes a negative
+    /// length, which pulls the clip inside the box, so this does too.
+    /// </summary>
+    private void ApplyOverflowClipMargin(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit) { s.OverflowClipBox = parent.OverflowClipBox; s.OverflowClipMargin = parent.OverflowClipMargin; return; }
+        if (d.Lower is "initial" or "unset") { s.OverflowClipBox = ShapeBox.PaddingBox; s.OverflowClipMargin = 0; return; }
+        var tokens = CssParser.Tokens(d.Lower);
+        if (tokens.Count is 0 or > 2) return;
+        ShapeBox? box = null;
+        float? margin = null;
+        foreach (var t in tokens)
+        {
+            var b = t switch { "border-box" => ShapeBox.BorderBox, "padding-box" => ShapeBox.PaddingBox, "content-box" => ShapeBox.ContentBox, _ => (ShapeBox?)null };
+            if (b != null)
+            {
+                if (box != null) return;
+                box = b;
+            }
+            else if (margin == null && TryParseLength(t, d.Em, _rootFontSize, out var len, _vw, _vh) && !len.IsAuto && !len.IsPercent
+                     && len.Resolve(0) is var pt && float.IsFinite(pt)) margin = pt;
+            else return;
+        }
+        s.OverflowClipBox = box ?? ShapeBox.PaddingBox;
+        s.OverflowClipMargin = margin ?? 0;
+    }
+
     private static void ApplyAspectRatio(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
         if (d.Inherit) { s.AspectRatio = parent.AspectRatio; s.AspectRatioAuto = parent.AspectRatioAuto; }
