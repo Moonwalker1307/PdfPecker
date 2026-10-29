@@ -83,7 +83,9 @@ internal static class Fuzz
                         return "the document structure was broken";
                     if (page.Contains('\0')) return "a NUL character reached the HTML";
                 }
-                if (pdf) document.GeneratePdf();
+                // Like the library fuzzer's html target, a page limit keeps a document of huge margins or padding, which
+                // can run to tens of thousands of pages at the default limit, from spending the time bound on pages.
+                if (pdf) document.GeneratePdf(new PdfOptions { MaxPages = 100 });
                 return null;
             });
             if (!task.Wait(Bound)) return $"took longer than {Bound.TotalSeconds} s";

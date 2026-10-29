@@ -599,6 +599,7 @@ internal sealed partial class LayoutEngine
             if (ma > maxA) maxA = ma;
             if (md > maxD && !line.MarkerOutside) maxD = md;
         }
+        else if (line.MarkerImageH > maxA) maxA = line.MarkerImageH; // a marker image stands on the baseline
 
         // Text and the inline boxes it is in: each of them is on the line, with its own font and line height, so an
         // inline with a larger font makes every line of it taller even where its text is smaller (CSS 2.1 §10.8.1).

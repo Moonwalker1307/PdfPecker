@@ -159,7 +159,7 @@ internal sealed partial class LayoutEngine
             _edgeAfter = null;
             Lines = engine.RentLineList();
             _cur = engine.RentLine();
-            _cur.Marker = engine.MarkerLineStyle(out _cur.MarkerOutside);
+            engine.NoteMarkerLine(_cur);
             fl?.Begin(Lines);
             _avail = (fl?.Avail ?? availW) - firstIndent;
         }

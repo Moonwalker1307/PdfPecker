@@ -386,6 +386,49 @@ internal sealed partial class StyleResolver
                 Instance(c.Name, ref scope)[^1] = c.Value;
     }
 
+    /// <summary>
+    /// The list-item counter that counter(list-item) reads in ::marker and ::before content, numbered as the layout
+    /// numbers the default markers: each list starts its own (an ol at its start, a reversed one counting down from its
+    /// number of items), each item steps it unless its counter-increment names it, and a value attribute sets it.
+    /// A counter-reset of list-item on the list takes the place of the list's own start.
+    /// </summary>
+    private void StepListItem(Element parent, Element e, ref HashSet<string>? scope)
+    {
+        const string ListItem = "list-item";
+        bool reversed = parent.Name == "ol" && parent.HasAttribute("reversed");
+        if ((scope == null || !scope.Contains(ListItem)) && !Names(parent.Style.CounterReset, ListItem))
+        {
+            int start = 0;
+            if (parent.Name == "ol" && Invariant.TryParseInt(parent.GetAttribute("start"), out int first)) start = reversed ? first + 1 : first - 1;
+            else if (reversed) start = CountListItems(parent) + 1;
+            if (!_counters.TryGetValue(ListItem, out var lists)) _counters[ListItem] = lists = new List<int>();
+            if (lists.Count >= 64) return; // runaway nesting
+            lists.Add(start);
+            (scope ??= new HashSet<string>(StringComparer.Ordinal)).Add(ListItem);
+        }
+        var s = e.Style;
+        var stack = Instance(ListItem, ref scope);
+        if (!Names(s.CounterIncrement, ListItem)) stack[^1] = unchecked(stack[^1] + (reversed ? -1 : 1));
+        if (!Names(s.CounterSet, ListItem) && Invariant.TryParseInt(e.GetAttribute("value"), out int value)) stack[^1] = value;
+
+        static bool Names(CounterOp[]? ops, string name)
+        {
+            if (ops != null)
+                foreach (var op in ops)
+                    if (op.Name == name) return true;
+            return false;
+        }
+
+        // The items of a reversed list without a start; the later ones are not resolved yet, so li elements count.
+        static int CountListItems(Element list)
+        {
+            int n = 0;
+            foreach (var c in list.Children)
+                if (c is Element { Name: "li" }) n++;
+            return n;
+        }
+    }
+
     /// <summary>The counter's instances, creating one (at 0, scoped to the current parent) when none is in scope.</summary>
     private List<int> Instance(string name, ref HashSet<string>? scope)
     {
