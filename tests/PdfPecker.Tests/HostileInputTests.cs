@@ -2290,6 +2290,89 @@ public class HostileInputTests
         Assert.Empty(Bounded(() => PdfSignatureVerifier.Verify(pdf)));
     }
 
+    [Fact]
+    public void Many_object_stream_bombs_stay_within_a_total_budget()
+    {
+        // Each page's resources sit in an object stream of their own that decodes to 64 MB of padding. Decoded object
+        // streams stay cached, so before the total budget a 4 MB file of such streams held 9 GB once every page was read.
+        const int pages = 8;
+        var pdf = ObjectStreamBombs(pages, 64 << 20);
+
+        var file = PdfFile.Open(pdf, null);
+        var kids = file.GetArray(file.GetDict(file.Catalog, "Pages"), "Kids")!;
+        int readable = 0;
+        for (int i = 0; i < pages; i++)
+            if (file.GetDict((PdfDict)file.Resolve(kids[i])!, "Resources") != null) readable++;
+        Assert.InRange(file.ObjectStreamBytes, 1, 256L << 20);
+        Assert.InRange(readable, 1, pages - 1); // the first streams within the budget still read
+
+        Assert.NotNull(Bounded(() => PdfText.Extract(pdf)));
+        Assert.NotNull(Bounded(() => PdfSignatureVerifier.Verify(pdf)));
+    }
+
+    /// <summary>
+    /// A PDF of <paramref name="pages"/> pages whose resources and text fields sit in one object stream per page, each
+    /// padded with spaces to <paramref name="streamSize"/> bytes. The streams share one compressed payload pattern.
+    /// </summary>
+    private static byte[] ObjectStreamBombs(int pages, int streamSize)
+    {
+        static byte[] L(string t) => Encoding.Latin1.GetBytes(t);
+        var ms = new MemoryStream();
+        var offsets = new SortedDictionary<int, long>();
+        void Add(int num, byte[] body)
+        {
+            offsets[num] = ms.Position;
+            ms.Write(L(num + " 0 obj\n"));
+            ms.Write(body);
+            ms.Write(L("\nendobj\n"));
+        }
+        ms.Write(L("%PDF-1.7\n"));
+        var kids = string.Join(" ", Enumerable.Range(0, pages).Select(i => (10 + i) + " 0 R"));
+        var fields = string.Join(" ", Enumerable.Range(0, pages).Select(i => (3000 + i) + " 0 R"));
+        Add(1, L("<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [" + fields + "] >> >>"));
+        Add(2, L("<< /Type /Pages /Count " + pages + " /Kids [" + kids + "] >>"));
+        var content = "BT /F1 12 Tf 72 720 Td (Hello) Tj ET";
+        Add(5, L("<< /Length " + content.Length + " >>\nstream\n" + content + "\nendstream"));
+        Add(6, L("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"));
+        for (int i = 0; i < pages; i++)
+        {
+            Add(10 + i, L($"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources {2000 + i} 0 R /Contents 5 0 R >>"));
+            var resources = "<< /Font << /F1 6 0 R >> >>";
+            var field = $"<< /FT /Tx /T (f{i}) /V (x) >>";
+            var data = new byte[streamSize];
+            Array.Fill(data, (byte)' ');
+            L($"{2000 + i} 0 {3000 + i} {resources.Length + 1}".PadRight(64) + resources + " " + field).CopyTo(data, 0);
+            var packed = new MemoryStream();
+            using (var z = new ZLibStream(packed, CompressionLevel.Fastest, leaveOpen: true)) z.Write(data);
+            Add(1000 + i, L($"<< /Type /ObjStm /N 2 /First 64 /Filter /FlateDecode /Length {packed.Length} >>\nstream\n")
+                .Concat(packed.ToArray()).Concat(L("\nendstream")).ToArray());
+        }
+
+        // A cross-reference stream, which is what can point into object streams.
+        int xrefNum = 3000 + pages;
+        var rows = new MemoryStream();
+        void Row(int type, long a, int b)
+        {
+            rows.WriteByte((byte)type);
+            Span<byte> buf = stackalloc byte[6];
+            BinaryPrimitives.WriteUInt32BigEndian(buf, (uint)a);
+            BinaryPrimitives.WriteUInt16BigEndian(buf[4..], (ushort)b);
+            rows.Write(buf);
+        }
+        offsets[xrefNum] = ms.Position;
+        for (int num = 0; num <= xrefNum; num++)
+        {
+            if (offsets.TryGetValue(num, out long at)) Row(1, at, 0);
+            else if (num is >= 2000 and < 3000 + 1000 && num % 1000 < pages) Row(2, 1000 + num % 1000, num / 1000 - 2);
+            else Row(0, 0, num == 0 ? 65535 : 0);
+        }
+        long xref = ms.Position;
+        ms.Write(L($"{xrefNum} 0 obj\n<< /Type /XRef /Size {xrefNum + 1} /W [1 4 2] /Root 1 0 R /Length {rows.Length} >>\nstream\n"));
+        ms.Write(rows.ToArray());
+        ms.Write(L($"\nendstream\nendobj\nstartxref\n{xref}\n%%EOF\n"));
+        return ms.ToArray();
+    }
+
     /// <summary>A PDF whose embedded-files list has many entries, all pointing at one stream of 200 MB of zeros.</summary>
     private static byte[] SharedAttachmentBomb(int entries, string extension)
     {
