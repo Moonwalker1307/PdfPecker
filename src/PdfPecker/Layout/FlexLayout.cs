@@ -130,6 +130,17 @@ internal sealed partial class LayoutEngine
 
     private static float GapOf(Length? gap, float basis) => gap is { } g ? Math.Max(0, g.Resolve(basis)) : 0;
 
+    /// <summary>
+    /// Whether a flex line goes to the next page whole when it crosses a page boundary: as in Chrome, it does when one
+    /// of its items would go there whole anyway, being kept whole or replaced. Otherwise the items break where they cross.
+    /// </summary>
+    private static bool LineMovesWhole(List<BoxItem> line)
+    {
+        foreach (var it in line)
+            if (it.El != null && (it.Style.AvoidBreakInside || it.El.IsReplaced)) return true;
+        return false;
+    }
+
     /// <summary>Whether the break between two flex lines is forced, by an item of either line.</summary>
     private static bool ForcedBreakBetween(List<BoxItem> above, List<BoxItem> below)
     {
@@ -346,6 +357,9 @@ internal sealed partial class LayoutEngine
 
         float lineTop = y + crossBefore;
         float firstBaseline = float.NaN;
+        // The lowest content of the items, which the container's bottom edge follows on pages: the last item laid out
+        // is not always the one that ends lowest.
+        float lowestContent = float.NaN;
         for (int li = 0; li < lines.Count; li++)
         {
             var line = lines[li];
@@ -359,7 +373,7 @@ internal sealed partial class LayoutEngine
             int lineOps = _ops.Count;
             var lineMarker = _marker;
             int lineListIndex = _currentListIndex;
-            float lineRight = _lastBoxRight, lineFirstBaseline = firstBaseline;
+            float lineRight = _lastBoxRight, lineFirstBaseline = firstBaseline, lineLowestContent = lowestContent;
             float lineBottom;
             // A forced break between two lines is taken when an item of the line above asks for a break after it or
             // an item of this line for one before it (css-break §3.1): the line opens the next page.
@@ -385,7 +399,7 @@ internal sealed partial class LayoutEngine
                         it.Box = CaptureBox(it.El, it.OuterMain, shrinkToFit: false, borderW: it.Main, borderH: h, reuse: true, inner: it.Box.Known);
                 }
 
-                if (_paginate && !regrown) lineTop = FitOnPage(lineTop, cross);
+                if (_paginate && !regrown && LineMovesWhole(line)) lineTop = FitOnPage(lineTop, cross);
 
                 // Main axis: auto margins first, then justify-content.
                 float usedMain = colGap * (line.Count - 1);
@@ -424,6 +438,7 @@ internal sealed partial class LayoutEngine
                     // An item that lands across a page boundary is laid out again there and may get taller, which
                     // moves the next line down.
                     float bottom = PlaceOnPages(box, cx, lineTop + dy);
+                    if (!float.IsNaN(_lastContentBottom) && !(_lastContentBottom <= lowestContent)) lowestContent = _lastContentBottom;
                     lineBottom = Math.Max(lineBottom, bottom);
                     // A stretched item that was given a height is laid out again with the new one, which its content may use.
                     if (it.El != null && SelfAlign(it, s.AlignItems) == BoxAlign.Stretch)
@@ -439,11 +454,13 @@ internal sealed partial class LayoutEngine
                 _currentListIndex = lineListIndex;
                 _lastBoxRight = lineRight;
                 firstBaseline = lineFirstBaseline;
+                lowestContent = lineLowestContent;
                 cross = lineBottom - lineTop;
             }
             lineTop = lineBottom + rowGap + crossBetween;
         }
         if (!float.IsNaN(firstBaseline)) _lastBaseline = firstBaseline;
+        if (!float.IsNaN(lowestContent)) _lastContentBottom = lowestContent;
         return lineTop - rowGap - crossBetween;
     }
 
