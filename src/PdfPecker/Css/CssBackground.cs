@@ -9,6 +9,8 @@ internal sealed class BackgroundImage
 {
     public CssGradient? Gradient;
     public string? Url;
+    /// <summary>Image pixels per CSS pixel: 1, or the resolution of the option an image-set() takes.</summary>
+    public float Resolution = 1;
 }
 
 /// <summary>One axis of a background-position: an offset from the start edge, or from the end edge.</summary>
@@ -211,7 +213,7 @@ internal static class CssBackground
                     continue;
                 }
                 afterSlash = false;
-                if (lower.Contains("gradient(") || lower.StartsWith("url(", StringComparison.Ordinal)) { image = tok; imageCount++; }
+                if (lower.Contains("gradient(") || lower.StartsWith("url(", StringComparison.Ordinal) || CssImageSet.IsImageSet(lower)) { image = tok; imageCount++; }
                 else if (lower == "none") { image = "none"; imageCount++; }
                 else if (IsRepeatKeyword(lower)) repeat.Add(lower);
                 else if (IsBoxKeyword(lower)) boxes.Add(lower);

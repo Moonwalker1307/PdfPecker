@@ -97,7 +97,7 @@ internal static class ResponsiveImages
     }
 
     /// <summary>Whether a source's type attribute names a format PdfPecker decodes; an empty type matches any.</summary>
-    private static bool IsDecodedType(string type)
+    internal static bool IsDecodedType(string type)
     {
         var t = type.AsSpan().Trim();
         int semicolon = t.IndexOf(';');

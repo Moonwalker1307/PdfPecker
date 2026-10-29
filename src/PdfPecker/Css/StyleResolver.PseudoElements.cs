@@ -86,7 +86,7 @@ internal sealed partial class StyleResolver
 
     /// <summary>
     /// Fills a ::before or ::after box whose content has images, as Chrome draws them: each url() becomes an inline
-    /// image at its own size between the text around it, and a gradient that is the whole content paints the box, which
+    /// image at its own size between the text around it (an image-set() shows its chosen option at its resolution), and a gradient that is the whole content paints the box, which
     /// shows when the box has a width and a height (a gradient has no size of its own). Alternative text after "/" is
     /// not drawn. False when the content is not valid, which generates no box.
     /// </summary>
@@ -119,12 +119,19 @@ internal sealed partial class StyleResolver
             else if (part.Length > 0) box.AppendChild(new TextNode(part));
         }
         bool valid = true;
-        foreach (var token in tokens)
+        foreach (var item in tokens)
         {
+            var token = item;
+            float resolution = 1;
+            if (CssImageSet.IsImageSet(token))
+            {
+                if (CssImageSet.Choose(token) is not { } chosen) return false;
+                (token, resolution) = chosen;
+            }
             if (CssBackground.Url(token) is { } url)
             {
                 Flush(ref valid);
-                var img = new Element("img") { Generated = true, Style = s.CreateChild(), Parent = box };
+                var img = new Element("img") { Generated = true, Style = s.CreateChild(), Parent = box, GeneratedResolution = resolution };
                 img.AddAttribute("src", url);
                 box.AppendChild(img);
             }
