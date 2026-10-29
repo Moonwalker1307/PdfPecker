@@ -7,12 +7,16 @@ namespace PdfPecker.Css;
 internal enum ShapeBox : byte { BorderBox, PaddingBox, ContentBox, MarginBox }
 
 /// <summary>
-/// A clip-path basic shape on an HTML element: inset(), circle(), ellipse(), polygon() or path(), or only a reference
-/// box. Lengths stay unresolved until the reference box is known.
+/// A clip-path basic shape on an HTML element: inset(), rect(), xywh(), circle(), ellipse(), polygon() or path(), or only
+/// a reference box. Lengths stay unresolved until the reference box is known.
 /// </summary>
 internal sealed class ClipShape
 {
     public enum ShapeKind : byte { Box, Inset, Circle, Ellipse, Polygon, Path }
+
+    // How the four lengths of an inset-like shape are written: inset() as distances in from each side, rect() as the
+    // top, right, bottom and left edges measured from the box's top and left, xywh() as a position and a size.
+    private enum InsetForm : byte { Inset, Rect, Xywh }
 
     // A radius keyword of circle() and ellipse(), kept apart from lengths.
     private const float ClosestSide = -1, FarthestSide = -2;
@@ -25,6 +29,7 @@ internal sealed class ClipShape
     private Length[] _args = Array.Empty<Length>();
     private float[] _keywords = Array.Empty<float>(); // ClosestSide / FarthestSide per radius, 0 when it is a length
     private Length[]? _round;                         // inset(... round ...): 8 radii as border-radius stores them
+    private InsetForm _form;                          // inset(), rect() or xywh(), which all resolve to an inset
     private PathBuilder? _path;                       // path(): CSS pixels from the reference box's top-left corner
 
     /// <summary>
@@ -51,6 +56,8 @@ internal sealed class ClipShape
             shape = name switch
             {
                 "inset" => ParseInset(args.ToLowerInvariant(), em, rem, vw, vh),
+                "rect" => ParseInset(args.ToLowerInvariant(), em, rem, vw, vh, InsetForm.Rect),
+                "xywh" => ParseInset(args.ToLowerInvariant(), em, rem, vw, vh, InsetForm.Xywh),
                 "circle" => ParseRound(args.ToLowerInvariant(), em, rem, vw, vh, ellipse: false),
                 "ellipse" => ParseRound(args.ToLowerInvariant(), em, rem, vw, vh, ellipse: true),
                 "polygon" => ParsePolygon(args.ToLowerInvariant(), em, rem, vw, vh),
@@ -77,18 +84,26 @@ internal sealed class ClipShape
     private static bool Len(string t, float em, float rem, float vw, float vh, out Length len)
         => StyleResolver.TryParseLength(t, em, rem, out len, vw, vh) && !len.IsAuto;
 
-    private static ClipShape? ParseInset(string args, float em, float rem, float vw, float vh)
+    private static ClipShape? ParseInset(string args, float em, float rem, float vw, float vh, InsetForm form = InsetForm.Inset)
     {
         var tokens = CssParser.Tokens(args);
         int round = tokens.IndexOf("round");
         var sides = new List<Length>(4);
         for (int i = 0; i < (round < 0 ? tokens.Count : round); i++)
         {
-            if (!Len(tokens[i], em, rem, vw, vh, out var l) || sides.Count == 4) return null;
-            sides.Add(l);
+            if (sides.Count == 4) return null;
+            // rect() takes auto for any edge: the reference box's own edge on that side.
+            if (form == InsetForm.Rect && tokens[i] == "auto") sides.Add(new Length(sides.Count is 1 or 2 ? 100 : 0, LengthUnit.Percent));
+            else if (!Len(tokens[i], em, rem, vw, vh, out var l)) return null;
+            else
+            {
+                // xywh() gives the width and height last, and neither may be negative.
+                if (form == InsetForm.Xywh && sides.Count >= 2 && l.Value < 0) return null;
+                sides.Add(l);
+            }
         }
-        if (sides.Count == 0) return null;
-        var shape = new ClipShape { Kind = ShapeKind.Inset, _args = Expand4(sides) };
+        if (form == InsetForm.Inset ? sides.Count == 0 : sides.Count != 4) return null;
+        var shape = new ClipShape { Kind = ShapeKind.Inset, _form = form, _args = Expand4(sides) };
         if (round >= 0)
         {
             // The radii follow the border-radius syntax: up to four horizontal radii, then "/" and up to four vertical ones.
@@ -285,18 +300,31 @@ internal sealed class ClipShape
         return (p.Verbs.ToArray(), p.Points.ToArray());
     }
 
-    /// <summary>An inset() shape in a w × h reference box: its rectangle from the box's top-left corner and its radii.</summary>
+    /// <summary>An inset(), rect() or xywh() shape in a w × h reference box: its rectangle from the box's top-left corner and its radii.</summary>
     public (float X, float Y, float W, float H, Layout.CornerRadii? Radii) ResolveInset(float w, float h)
     {
-        float t = _args[0].Resolve(h), r = _args[1].Resolve(w), b = _args[2].Resolve(h), l = _args[3].Resolve(w);
+        float t, r, b, l;
+        switch (_form)
+        {
+            case InsetForm.Rect:
+                t = _args[0].Resolve(h); r = w - _args[1].Resolve(w); b = h - _args[2].Resolve(h); l = _args[3].Resolve(w);
+                break;
+            case InsetForm.Xywh:
+                l = _args[0].Resolve(w); t = _args[1].Resolve(h); r = w - l - _args[2].Resolve(w); b = h - t - _args[3].Resolve(h);
+                break;
+            default:
+                t = _args[0].Resolve(h); r = _args[1].Resolve(w); b = _args[2].Resolve(h); l = _args[3].Resolve(w);
+                break;
+        }
         // Insets that add up to more than the box are scaled down together.
         if (l + r > w && l + r > 0) { float k = w / (l + r); l *= k; r *= k; }
         if (t + b > h && t + b > 0) { float k = h / (t + b); t *= k; b *= k; }
         float iw = Math.Max(0, w - l - r), ih = Math.Max(0, h - t - b);
         Layout.CornerRadii? cr = null;
         if (_round is { } rr)
-            cr = Layout.CornerRadii.Fit(rr[0].Resolve(iw), rr[1].Resolve(ih), rr[2].Resolve(iw), rr[3].Resolve(ih),
-                rr[4].Resolve(iw), rr[5].Resolve(ih), rr[6].Resolve(iw), rr[7].Resolve(ih), iw, ih);
+            // As in Chrome, percentages refer to the reference box, not to the inset rectangle, before the radii are fitted.
+            cr = Layout.CornerRadii.Fit(rr[0].Resolve(w), rr[1].Resolve(h), rr[2].Resolve(w), rr[3].Resolve(h),
+                rr[4].Resolve(w), rr[5].Resolve(h), rr[6].Resolve(w), rr[7].Resolve(h), iw, ih);
         return (l, t, iw, ih, cr);
     }
 
