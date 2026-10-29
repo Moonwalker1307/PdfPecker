@@ -161,6 +161,27 @@ public class BorderImageTests
     }
 
     [Fact]
+    public void Number_widths_are_kept_in_standards_mode()
+    {
+        // A bare number in border-image-width multiplies the border width, so a page with a doctype keeps it, as in
+        // Chrome; the shorthand's default width of 1 used to drop the whole border-image there.
+        static ComputedStyle Standards(string style)
+        {
+            var doc = HtmlParser.Parse($"<!DOCTYPE html><div style='{style}'></div>", out var used);
+            new StyleResolver(new Stylesheet(), Width, PageHeight) { StandardsMode = (used & NamesUsed.StandardsMode) != 0 }
+                .ResolveTree(doc, new ComputedStyle { Display = Display.Block });
+            return doc.FindFirst("div")!.Style!;
+        }
+        var shorthand = Standards("border: 10px solid; border-image: linear-gradient(red, blue) 10");
+        Assert.NotNull(shorthand.BorderImageSource);
+        Assert.Equal(1, shorthand.BorderImageWidths![0].Number);
+        Assert.Equal(2, Standards($"border-image: url({Grid}) 10 / 2").BorderImageWidths![0].Number);
+        Assert.Equal(3, Standards("border-image-width: 3").BorderImageWidths![0].Number);
+        // A bare number is still invalid for the border widths themselves.
+        Assert.Equal(0, Standards("border: 2 solid red").BorderTop);
+    }
+
+    [Fact]
     public void Border_shorthand_resets_the_border_image()
     {
         var s = StyleOf($"border-image: url({Grid}) 10 fill round; border: 5px solid red");

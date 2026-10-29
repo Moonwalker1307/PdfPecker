@@ -39,6 +39,8 @@ public class CssEffectTests
     [InlineData("ellipse(farthest-side closest-side at right 10px bottom 20%)")]
     [InlineData("inset(10px)")]
     [InlineData("inset(5% 10px 2em round 8px 4px / 6px)")]
+    [InlineData("rect(10px auto 50% 0 round 4px)")]
+    [InlineData("xywh(-5px 10% 2em 30px round 50%) content-box")]
     [InlineData("polygon(evenodd, 0 0, 100% 0, 50% 100%)")]
     [InlineData("path(nonzero, 'M0 0 L10 0 L5 10 Z')")]
     [InlineData("content-box")]
@@ -53,10 +55,43 @@ public class CssEffectTests
     [InlineData("polygon(0 0, 100%)")]
     [InlineData("path('not a path')")]
     [InlineData("inset()")]
+    [InlineData("rect(10px 20px 30px)")]
+    [InlineData("xywh(0 0 -10px 20px)")]
+    [InlineData("xywh(0 0 auto 20px)")]
     [InlineData("border-box padding-box")]
     [InlineData("star(5)")]
     public void Invalid_clip_path_shapes_are_rejected(string value)
         => Assert.Null(ClipShape.Parse(value, 12, 12, 6, 8));
+
+    [Theory]
+    // rect() gives the edges from the top and left, auto meaning the box's own edge, and xywh() a position and a size.
+    // A right edge left of the left one leaves nothing, as in Chrome 153.
+    [InlineData("rect(10px 120px 80px 20px)", 15, 7.5f, 75, 52.5f)]
+    [InlineData("rect(auto auto 50% 30%)", 31.5f, 0, 73.5f, 33.75f)]
+    [InlineData("rect(10px 30px 80px 90px)", 47.25f, 7.5f, 0, 52.5f)]
+    [InlineData("xywh(10px 10px 100px 60px)", 7.5f, 7.5f, 75, 45)]
+    [InlineData("xywh(80px 40px 100px 100px)", 60, 30, 75, 75)]
+    [InlineData("inset(10px 20px)", 15, 7.5f, 75, 52.5f)]
+    public void Rect_and_xywh_resolve_like_inset(string value, float x, float y, float w, float h)
+    {
+        var (ix, iy, iw, ih, _) = ClipShape.Parse(value, 12, 12, 6, 8)!.ResolveInset(105, 67.5f);
+        Assert.Equal(x, ix, 2);
+        Assert.Equal(y, iy, 2);
+        Assert.Equal(w, iw, 2);
+        Assert.Equal(h, ih, 2);
+    }
+
+    [Fact]
+    public void Percentage_radii_of_inset_shapes_refer_to_the_reference_box()
+    {
+        // Chrome resolves round 50% against the 140 x 90 px box (70 x 45 px) and then fits the radii into the 84 x 72 px
+        // rectangle, scaling them by 0.6, rather than taking half the rectangle.
+        var (_, _, iw, ih, radii) = ClipShape.Parse("xywh(20% 10% 60% 80% round 50%)", 12, 12, 6, 8)!.ResolveInset(105, 67.5f);
+        Assert.Equal(63, iw, 2);
+        Assert.Equal(54, ih, 2);
+        Assert.Equal(31.5f, radii!.Value.TLx, 2);
+        Assert.Equal(20.25f, radii.Value.TLy, 2);
+    }
 
     [Fact]
     public void Filter_functions_parse_in_order_with_defaults()
