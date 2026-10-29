@@ -162,8 +162,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   [More](https://pdfpecker.net/docs/accessibility/)
 - **Forms**: HTML inputs become fillable PDF fields; read, fill and flatten the fields of existing PDFs.
   [More](https://pdfpecker.net/docs/forms/)
-- **Digital signatures**: PAdES signing, certification signatures, timestamps, external signers, verification and
-  long-term validation. [More](https://pdfpecker.net/docs/signatures/)
+- **Digital signatures**: PAdES signing, certification signatures, timestamps, external signers, verification (SHA-1
+  signatures count as not valid unless you allow them) and long-term validation. [More](https://pdfpecker.net/docs/signatures/)
 - **E-invoices and attachments**: Factur-X, ZUGFeRD, XRechnung and Peppol BIS 3.0 XML built from invoice data and
   checked against EN 16931, a ready-made invoice layout, and embedded files.
   [More](https://pdfpecker.net/docs/e-invoices/)
