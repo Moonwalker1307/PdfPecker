@@ -129,14 +129,15 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   (`text-underline-position`), drop caps, `::first-line` styles with a background, `::marker` styles (a larger marker font or a tall marker image makes its
   line taller, `content: none` hides the marker, `counter(list-item)` numbers it and its own `direction` orders its
   text, as in Chrome), images and gradients in `::before` and `::after` content, inline SVG (with
-  HTML in `<foreignObject>`) and PNG, JPEG, GIF, WebP, BMP and TIFF images (also chosen by `srcset`, `<picture>` and
+  percentage coordinates and sizes, as in Bootstrap's placeholder images, and HTML in `<foreignObject>`) and PNG, JPEG, GIF, WebP, BMP and TIFF images (also chosen by `srcset`, `<picture>` and
   `image-set()`,
   shown by `<embed>` and `<object>`, and photos turned upright by their EXIF orientation), and CSS-only charts such as
   Charts.css (column, bar, area, line and pie charts), laid out as Chrome lays them out. Older CSS works too: the
   `-webkit-` property names Chrome still takes (`-webkit-transform`, `-webkit-flex`, ...), the legacy
   `display: -webkit-box` and its `-webkit-box-` properties, and the `-webkit-gradient()` and prefixed gradient
   syntaxes. As in browsers, a length without a unit (`width: 200`) counts as pixels only in a page without a doctype;
-  with `<!DOCTYPE html>` it is ignored.
+  with `<!DOCTYPE html>` it is ignored. Without a doctype, lines also follow Chrome's quirks-mode line heights: a line of
+  small `<font>` text, or an image alone in a table cell, is only as tall as its content.
   [More](https://pdfpecker.net/docs/html-and-css/)
 - **Paged media**: `@page` sizes, borders, padding and background images (which cover the whole sheet) and margin boxes, running headers and footers (also a first page of its own, and bands
   of their own for named pages), footnotes, tables of contents with page numbers, break control (also table row groups

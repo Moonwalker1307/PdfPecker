@@ -516,6 +516,13 @@ internal sealed partial class LayoutEngine
         }
     }
 
+    /// <summary>
+    /// Whether a box's strut counts only where it has text of its own on the line: in quirks mode, for a box with no
+    /// vertical padding or border (the line height calculation quirk of the Quirks Mode standard).
+    /// </summary>
+    private static bool QuirkyStrut(ComputedStyle s)
+        => s.Quirks && s.BorderTop == 0 && s.BorderBottom == 0 && s.PaddingTop.Value == 0 && s.PaddingBottom.Value == 0;
+
     /// <summary>The height of a line box: its tallest ascent plus its deepest descent, 0 for a line of anchors only.</summary>
     private static float LineBoxHeight(Line line, ComputedStyle block)
     {
@@ -525,7 +532,12 @@ internal sealed partial class LayoutEngine
 
     private static void LineExtent(Line line, ComputedStyle block, out float maxA, out float maxD)
     {
-        StrutMetrics(block, out maxA, out maxD);
+        StrutMetrics(block, out float strutA, out float strutD);
+        // In quirks mode the block's strut counts only on a line with text or a line break directly in the block, so a
+        // line of small <font> text is as tall as that text, as in Chrome (the line height calculation quirk).
+        bool quirkyStrut = block.Quirks, direct = false;
+        if (quirkyStrut) maxA = maxD = 0;
+        else (maxA, maxD) = (strutA, strutD);
         bool visible = false, lineAligned = false;
         // The words of a line mostly share a style, whose metrics are found once.
         var measured = block;
@@ -563,9 +575,13 @@ internal sealed partial class LayoutEngine
                     }
                     a = measuredA;
                     d = measuredD;
+                    if (quirkyStrut && !direct && it.Kind is ItemKind.Text or ItemKind.Space or ItemKind.Break
+                        && (ReferenceEquals(it.Style, block) || it.Kind == ItemKind.Break && ReferenceEquals(it.Style.ParentStyle, block)))
+                        direct = true;
                     // A spacer of no width is an empty inline's strut: it makes a line taller but not visible on its own.
                     if (it.Kind == ItemKind.Spacer && it.Width == 0)
                     {
+                        if (QuirkyStrut(it.Style)) continue;
                         if (a > maxA) maxA = a;
                         if (d > maxD) maxD = d;
                         continue;
@@ -575,6 +591,11 @@ internal sealed partial class LayoutEngine
             visible = true;
             if (a > maxA) maxA = a;
             if (d > maxD) maxD = d;
+        }
+        if (direct)
+        {
+            if (strutA > maxA) maxA = strutA;
+            if (strutD > maxD) maxD = strutD;
         }
         if (lineAligned)
         {
@@ -609,6 +630,7 @@ internal sealed partial class LayoutEngine
             var p = s.ParentStyle;
             for (int depth = 0; p is { Display: Display.Inline } && depth < MaxAlignedDepth; p = p.ParentStyle, depth++)
             {
+                if (QuirkyStrut(p)) continue; // an inline box with no text of its own on the line
                 TextMetrics(p, out float pa, out float pd);
                 if (pa > a) a = pa;
                 if (pd > d) d = pd;

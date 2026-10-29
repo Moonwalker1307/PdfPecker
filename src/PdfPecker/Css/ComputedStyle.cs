@@ -305,6 +305,7 @@ internal sealed class ComputedStyle
     public string? BlockEllipsis;            // block-ellipsis: the mark ending a clamped block; null = auto ("…"), "" = none
     public HyphenateLimits HyphenateLimitChars; // hyphenate-limit-chars; each value 0 = auto
     public string? Lang;                     // the content language: the nearest lang attribute, else PdfOptions.Language
+    public bool Quirks;                      // the document has no doctype, or an old one: quirks mode
     public IReadOnlyDictionary<string, HyphenationPatterns>? Hyphenation; // PdfOptions.Hyphenation, keys in lower case
     public byte SmallCaps;                   // font-variant-caps: 1 small-caps, 2 all-small-caps (synthesized)
     public WhiteSpace WhiteSpace;            // with text-wrap-mode, which it is a shorthand for

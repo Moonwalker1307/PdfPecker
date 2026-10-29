@@ -422,4 +422,33 @@ public class PagedMediaTests
         Assert.Equal("Line 1", pages[1][0]);
         Assert.Equal(3, pages.Length);
     }
+
+    [Theory]
+    [InlineData("<h1>Title</h1>", false)]
+    [InlineData("<p>Before</p><h1>Title</h1>", false)]
+    [InlineData("<h1>Title</h1>", true)]
+    public void A_heading_stays_put_before_a_box_kept_whole_but_taller_than_a_page(string start, bool wrapped)
+    {
+        // The heading keeps with the box after it, but the two cannot share a page: moving the heading along left its
+        // page blank and sent the box on to the page after. As in Chrome, the heading stays and the box starts next.
+        var lines = string.Concat(Enumerable.Range(1, 30).Select(i => $"<div>Line {i}</div>"));
+        var box = $"<div style='break-inside: avoid'>{lines}</div>";
+        var html = "<style>@page { size: 300pt 300pt; margin: 0 } body { margin: 0; font: 10pt/14pt sans-serif }</style>"
+                   + start + (wrapped ? $"<div>{box}</div>" : box);
+        var pages = PdfText.ExtractPages(HtmlToPdf.Convert(html)).Select(p => p.Lines.Select(l => l.Text).ToArray()).ToArray();
+        Assert.Equal("Title", pages[0][^1]);
+        Assert.Equal("Line 1", pages[1][0]);
+        Assert.Equal(3, pages.Length);
+    }
+
+    [Fact]
+    public void A_heading_still_moves_with_a_box_kept_whole_that_fits_with_it()
+    {
+        var lines = string.Concat(Enumerable.Range(1, 15).Select(i => $"<div>Line {i}</div>"));
+        var html = "<style>@page { size: 300pt 300pt; margin: 0 } body { margin: 0; font: 10pt/14pt sans-serif }</style>"
+                   + string.Concat(Enumerable.Range(1, 12).Select(i => $"<p>Text {i}</p>"))
+                   + $"<h1>Title</h1><div style='break-inside: avoid'>{lines}</div>";
+        var pages = PdfText.ExtractPages(HtmlToPdf.Convert(html)).Select(p => p.Lines.Select(l => l.Text).ToArray()).ToArray();
+        Assert.Equal(new[] { "Title", "Line 1" }, pages[1][..2]);
+    }
 }

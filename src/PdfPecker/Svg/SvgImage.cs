@@ -138,6 +138,16 @@ internal sealed partial class SvgImage
     private readonly HashSet<Element> _markersDrawing = new(ReferenceEqualityComparer.Instance);
     private SvgBudget _budget = null!;
     private float ViewportWidth = 300, ViewportHeight = 150; // the root viewport in user units
+
+    /// <summary>
+    /// Whether a coordinate or size is a percentage of the viewport. Without a viewBox that viewport is the svg element's
+    /// used size, so layout builds the drawing again once it knows that size (see <see cref="FitsViewport"/>).
+    /// </summary>
+    public bool UsesPercentages { get; private set; }
+
+    /// <summary>Whether the drawing was built for a viewport of <paramref name="width"/> × <paramref name="height"/> points.</summary>
+    public bool FitsViewport(float width, float height)
+        => HasViewBox || (Math.Abs(ViewportWidth * 0.75f - width) < 0.01f && Math.Abs(ViewportHeight * 0.75f - height) < 0.01f);
     private Element? _documentRoot; // read for ids this svg lacks, until it has been
     private float _diagonal; // the root viewport's normalised diagonal, which percentage dash lengths refer to
     private Func<string, object?>? _load; // the PdfImage or SvgImage at an image element's href, or null
@@ -161,7 +171,13 @@ internal sealed partial class SvgImage
     /// Builds the drawing of an svg element. <paramref name="load"/> resolves the href of image elements to a PdfImage
     /// or an SvgImage; without it, image elements draw nothing.
     /// </summary>
-    public static SvgImage Build(Element svg, SvgBudget? budget = null, Func<string, object?>? load = null)
+    public static SvgImage Build(Element svg, SvgBudget? budget = null, Func<string, object?>? load = null) => Build(svg, budget, load, null);
+
+    /// <summary>
+    /// Builds the drawing for a used size of <paramref name="viewport"/> CSS pixels, which percentages in an svg without a
+    /// viewBox refer to; null takes the size from the width and height attributes, or 300 × 150.
+    /// </summary>
+    public static SvgImage Build(Element svg, SvgBudget? budget, Func<string, object?>? load, (float Width, float Height)? viewport)
     {
         var img = new SvgImage { _budget = budget ?? new SvgBudget(), _load = load };
         img.Width = IntrinsicLength(svg.GetAttribute("width"));
@@ -176,8 +192,8 @@ internal sealed partial class SvgImage
             img.ViewBoxHeight = vb[3];
         }
         // Without a viewBox, the viewport is the given size, else the default size of a replaced element (300 × 150).
-        float vpw = img.HasViewBox ? img.ViewBoxWidth : img.Width / 0.75f ?? 300;
-        float vph = img.HasViewBox ? img.ViewBoxHeight : img.Height / 0.75f ?? 150;
+        float vpw = img.HasViewBox ? img.ViewBoxWidth : viewport?.Width ?? img.Width / 0.75f ?? 300;
+        float vph = img.HasViewBox ? img.ViewBoxHeight : viewport?.Height ?? img.Height / 0.75f ?? 150;
         img.ViewportWidth = vpw;
         img.ViewportHeight = vph;
         img._diagonal = MathF.Sqrt((vpw * vpw + vph * vph) / 2);
@@ -446,7 +462,7 @@ internal sealed partial class SvgImage
             {
                 var target = Reference(e.GetAttribute("href") ?? e.GetAttribute("xlink:href"));
                 if (target == null) return;
-                var place = Matrix.Translate(Num(e, "x"), Num(e, "y"));
+                var place = Matrix.Translate(Len(e, "x", Axis.X), Len(e, "y", Axis.Y));
                 var m = place.Then(ctm);
                 // The use element is the context element of what it draws.
                 var (outerFill, outerStroke) = (_contextFill, _contextStroke);
@@ -492,10 +508,10 @@ internal sealed partial class SvgImage
                 return;
             case "foreignobject":
             {
-                float w = Num(e, "width"), h = Num(e, "height");
+                float w = Len(e, "width", Axis.X), h = Len(e, "height", Axis.Y);
                 if (!(w > 0 && h > 0)) return;
                 ForeignObjects ??= new List<SvgForeignObject>();
-                ForeignObjects.Add(new SvgForeignObject(e, ctm, Num(e, "x"), Num(e, "y"), w, h, op * _wrapOpacity,
+                ForeignObjects.Add(new SvgForeignObject(e, ctm, Len(e, "x", Axis.X), Len(e, "y", Axis.Y), w, h, op * _wrapOpacity,
                     _wrapDepth == 0 ? Shapes.Count : -1));
                 return;
             }
@@ -622,7 +638,7 @@ internal sealed partial class SvgImage
     }
 
     /// <summary>The outline of a basic shape or path element, in its own user space; null for anything else.</summary>
-    private static PathBuilder? ShapePath(Element e)
+    private PathBuilder? ShapePath(Element e)
     {
         switch (e.Name)
         {
@@ -632,21 +648,21 @@ internal sealed partial class SvgImage
                 return RectPath(e);
             case "circle":
             {
-                float r = Num(e, "r");
-                return r > 0 ? EllipsePath(Num(e, "cx"), Num(e, "cy"), r, r) : null;
+                float r = Len(e, "r", Axis.Diagonal);
+                return r > 0 ? EllipsePath(Len(e, "cx", Axis.X), Len(e, "cy", Axis.Y), r, r) : null;
             }
             case "ellipse":
             {
-                float rx = Num(e, "rx", float.NaN), ry = Num(e, "ry", float.NaN);
+                float rx = Len(e, "rx", Axis.X, float.NaN), ry = Len(e, "ry", Axis.Y, float.NaN);
                 if (float.IsNaN(rx)) rx = ry;
                 if (float.IsNaN(ry)) ry = rx;
-                return rx > 0 && ry > 0 ? EllipsePath(Num(e, "cx"), Num(e, "cy"), rx, ry) : null;
+                return rx > 0 && ry > 0 ? EllipsePath(Len(e, "cx", Axis.X), Len(e, "cy", Axis.Y), rx, ry) : null;
             }
             case "line":
             {
                 var p = new PathBuilder();
-                p.MoveTo(Num(e, "x1"), Num(e, "y1"));
-                p.LineTo(Num(e, "x2"), Num(e, "y2"));
+                p.MoveTo(Len(e, "x1", Axis.X), Len(e, "y1", Axis.Y));
+                p.LineTo(Len(e, "x2", Axis.X), Len(e, "y2", Axis.Y));
                 return p;
             }
             case "polyline":
@@ -1012,9 +1028,9 @@ internal sealed partial class SvgImage
                 WalkTextPath(el, depth);
                 return;
             }
-            var xs = ParseNumbers(el.GetAttribute("x"));
+            var xs = Lens(el.GetAttribute("x"), Axis.X);
             // Along a path, y has no meaning: only dy shifts the text off it.
-            var ys = onPath == null ? ParseNumbers(el.GetAttribute("y")) : new List<float>();
+            var ys = onPath == null ? Lens(el.GetAttribute("y"), Axis.Y) : new List<float>();
             if (xs.Count > 0 || ys.Count > 0 || depth == 0) chunkStarts.Add(runs.Count);
             if (xs.Count > 0) penX = xs[0];
             if (ys.Count > 0) penY = ys[0];
@@ -1335,11 +1351,11 @@ internal sealed partial class SvgImage
 
     // ------------------------------------------------------------------ basic shapes
 
-    private static PathBuilder? RectPath(Element e)
+    private PathBuilder? RectPath(Element e)
     {
-        float x = Num(e, "x"), y = Num(e, "y"), w = Num(e, "width"), h = Num(e, "height");
+        float x = Len(e, "x", Axis.X), y = Len(e, "y", Axis.Y), w = Len(e, "width", Axis.X), h = Len(e, "height", Axis.Y);
         if (w <= 0 || h <= 0) return null;
-        float rx = Num(e, "rx", float.NaN), ry = Num(e, "ry", float.NaN);
+        float rx = Len(e, "rx", Axis.X, float.NaN), ry = Len(e, "ry", Axis.Y, float.NaN);
         if (float.IsNaN(rx)) rx = float.IsNaN(ry) ? 0 : ry;
         if (float.IsNaN(ry)) ry = rx;
         rx = Math.Clamp(rx, 0, w / 2);
@@ -1382,6 +1398,40 @@ internal sealed partial class SvgImage
     }
 
     // ------------------------------------------------------------------ attribute helpers
+
+    /// <summary>What a percentage length refers to: the viewport's width, its height, or its normalised diagonal.</summary>
+    private enum Axis { X, Y, Diagonal }
+
+    /// <summary>A coordinate or size attribute in user units, where a percentage refers to the viewport.</summary>
+    private float Len(Element e, string name, Axis axis, float fallback = 0)
+    {
+        var v = e.GetAttribute(name);
+        return v != null && Percentage(v.AsSpan().Trim(), axis) is float f ? f : Num(e, name, fallback);
+    }
+
+    /// <summary>A list of coordinates (the x and y of text), each a number or a percentage of the viewport.</summary>
+    private List<float> Lens(string? value, Axis axis)
+    {
+        if (value == null || value.IndexOf('%') < 0) return ParseNumbers(value);
+        var list = new List<float>();
+        foreach (var token in value.Split(ListSeparators, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (Percentage(token, axis) is float f) list.Add(f);
+            else if (float.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out float n) && float.IsFinite(n)) list.Add(n);
+            else break;
+        }
+        return list;
+    }
+
+    private static readonly char[] ListSeparators = { ' ', ',', '\t', '\n', '\r' };
+
+    private float? Percentage(ReadOnlySpan<char> v, Axis axis)
+    {
+        if (v.Length < 2 || v[^1] != '%' || !float.TryParse(v[..^1], NumberStyles.Float, CultureInfo.InvariantCulture, out float pct)
+            || !float.IsFinite(pct)) return null;
+        UsesPercentages = true;
+        return pct / 100 * (axis switch { Axis.X => ViewportWidth, Axis.Y => ViewportHeight, _ => _diagonal });
+    }
 
     private static float Num(Element e, string name, float fallback = 0)
     {
