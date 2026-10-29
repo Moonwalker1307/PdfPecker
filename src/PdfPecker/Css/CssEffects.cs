@@ -398,6 +398,14 @@ internal sealed class ClipShape
             p.Close();
             return;
         }
+        if (r.Shape is { } shape)
+        {
+            var points = shape.Polygon(x, y, w, h);
+            p.MoveTo(points[0].X, points[0].Y);
+            for (int i = 1; i < points.Count; i++) p.LineTo(points[i].X, points[i].Y);
+            p.Close();
+            return;
+        }
         float x1 = x + w, y1 = y + h;
         p.MoveTo(x + r.TLx, y);
         p.LineTo(x1 - r.TRx, y);

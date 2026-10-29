@@ -114,6 +114,15 @@ internal static partial class CssParser
                 ExpandLogicalBorderAxis(name, value, longhands);
                 break;
             case "border-radius": ExpandBorderRadius(value, longhands); break;
+            case "corner-shape": ExpandCornerShape(value, longhands); break;
+            case "corner-top-shape": ExpandCornerPair(value, "corner-top-left-shape", "corner-top-right-shape", longhands); break;
+            case "corner-right-shape": ExpandCornerPair(value, "corner-top-right-shape", "corner-bottom-right-shape", longhands); break;
+            case "corner-bottom-shape": ExpandCornerPair(value, "corner-bottom-left-shape", "corner-bottom-right-shape", longhands); break;
+            case "corner-left-shape": ExpandCornerPair(value, "corner-top-left-shape", "corner-bottom-left-shape", longhands); break;
+            case "corner-block-start-shape": ExpandCornerPair(value, "corner-start-start-shape", "corner-start-end-shape", longhands); break;
+            case "corner-block-end-shape": ExpandCornerPair(value, "corner-end-start-shape", "corner-end-end-shape", longhands); break;
+            case "corner-inline-start-shape": ExpandCornerPair(value, "corner-start-start-shape", "corner-end-start-shape", longhands); break;
+            case "corner-inline-end-shape": ExpandCornerPair(value, "corner-start-end-shape", "corner-end-end-shape", longhands); break;
             case "border-width":
             case "border-style":
             case "border-color":
@@ -267,6 +276,33 @@ internal static partial class CssParser
         var h = new SideValues(horizontal);
         var v = new SideValues(vertical);
         for (int k = 0; k < 4; k++) longhands.Add("border-" + Corners[k] + "-radius", h[k] == v[k] ? h[k] : h[k] + " " + v[k]);
+    }
+
+    /// <summary>corner-shape: one to four corner shapes, for the corners in the order of border-radius.</summary>
+    private static void ExpandCornerShape(string value, LonghandWriter longhands)
+    {
+        if (CornerShapeValues(value, 4) is not { } values) return;
+        var corners = new SideValues(values);
+        for (int k = 0; k < 4; k++) longhands.Add("corner-" + Corners[k] + "-shape", corners[k]);
+    }
+
+    /// <summary>A shorthand for the two corners of one side: one shape for both, or the first corner's then the second's.</summary>
+    private static void ExpandCornerPair(string value, string first, string second, LonghandWriter longhands)
+    {
+        if (CornerShapeValues(value, 2) is not { } values) return;
+        longhands.Add(first, values[0]);
+        longhands.Add(second, values[^1]);
+    }
+
+    /// <summary>Up to <paramref name="max"/> corner shapes, or one CSS-wide keyword; null when the value is neither.</summary>
+    private static List<string>? CornerShapeValues(string value, int max)
+    {
+        if (IsCssWideKeyword(value)) return [value.Trim()];
+        var tokens = Tokens(value.ToLowerInvariant());
+        if (tokens.Count == 0 || tokens.Count > max) return null;
+        foreach (var t in tokens)
+            if (StyleResolver.ParseCornerShape(t) == null) return null;
+        return tokens;
     }
 
     private static void ExpandBorder(string value, LonghandWriter longhands)

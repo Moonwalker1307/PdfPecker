@@ -104,6 +104,10 @@ internal sealed partial class StyleResolver
             case "border-start-end-radius": Apply(s, parent, PhysicalCorner(s, false, true), raw); break;
             case "border-end-start-radius": Apply(s, parent, PhysicalCorner(s, true, false), raw); break;
             case "border-end-end-radius": Apply(s, parent, PhysicalCorner(s, true, true), raw); break;
+            case "corner-start-start-shape": Apply(s, parent, CornerShapeOf(PhysicalCorner(s, false, false)), raw); break;
+            case "corner-start-end-shape": Apply(s, parent, CornerShapeOf(PhysicalCorner(s, false, true)), raw); break;
+            case "corner-end-start-shape": Apply(s, parent, CornerShapeOf(PhysicalCorner(s, true, false)), raw); break;
+            case "corner-end-end-shape": Apply(s, parent, CornerShapeOf(PhysicalCorner(s, true, true)), raw); break;
             // Every box is horizontal, so the inline axis is the width and the block axis the height.
             case "inline-size": Apply(s, parent, "width", raw); break;
             case "block-size": Apply(s, parent, "height", raw); break;
@@ -283,6 +287,10 @@ internal sealed partial class StyleResolver
             case "border-top-right-radius": SetRadius(s, 1, d.Lower, d.Em, d.Inherit ? parent : null); break;
             case "border-bottom-right-radius": SetRadius(s, 2, d.Lower, d.Em, d.Inherit ? parent : null); break;
             case "border-bottom-left-radius": SetRadius(s, 3, d.Lower, d.Em, d.Inherit ? parent : null); break;
+            case "corner-top-left-shape": SetCornerShape(s, 0, d.Lower, d.Inherit ? parent : null); break;
+            case "corner-top-right-shape": SetCornerShape(s, 1, d.Lower, d.Inherit ? parent : null); break;
+            case "corner-bottom-right-shape": SetCornerShape(s, 2, d.Lower, d.Inherit ? parent : null); break;
+            case "corner-bottom-left-shape": SetCornerShape(s, 3, d.Lower, d.Inherit ? parent : null); break;
             case "border-image-source": ApplyBorderImageSource(s, parent, in d); break;
             case "border-image-slice": ApplyBorderImageSlice(s, parent, in d); break;
             case "border-image-width": ApplyBorderImageWidth(s, parent, in d); break;

@@ -216,7 +216,7 @@ internal static partial class BoxPainter
         var r = s.BorderRadii;
         if (r == null) return null;
         return CornerRadii.Fit(r[0].Resolve(w), r[1].Resolve(h), r[2].Resolve(w), r[3].Resolve(h),
-            r[4].Resolve(w), r[5].Resolve(h), r[6].Resolve(w), r[7].Resolve(h), w, h);
+            r[4].Resolve(w), r[5].Resolve(h), r[6].Resolve(w), r[7].Resolve(h), w, h)?.WithShapes(s.CornerShapes);
     }
 
     /// <summary>
@@ -266,7 +266,7 @@ internal static partial class BoxPainter
     {
         if (Radii(s, boxW, boxH) is not { } r) return null;
         return CornerRadii.Fit(left ? r.TLx : 0, left ? r.TLy : 0, right ? r.TRx : 0, right ? r.TRy : 0,
-            right ? r.BRx : 0, right ? r.BRy : 0, left ? r.BLx : 0, left ? r.BLy : 0, w, h);
+            right ? r.BRx : 0, right ? r.BRy : 0, left ? r.BLx : 0, left ? r.BLy : 0, w, h)?.WithShapes(s.CornerShapes);
     }
 
     /// <summary>The border, padding or content box of a border box.</summary>
