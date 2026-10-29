@@ -259,7 +259,7 @@ internal sealed partial class LayoutEngine
 
     // ------------------------------------------------------------------ placing
 
-    private float PlaceLines(List<Line> lines, ComputedStyle block, float x, float y, float w, LineIndent indent, float emphasisRoom, bool besideFloats = false)
+    private float PlaceLines(List<Line> lines, ComputedStyle block, float x, float y, float w, LineIndent indent, float emphasisRoom, TextBoxTrim trim, bool besideFloats = false)
     {
         // The backgrounds of inline boxes are painted once all their fragments are placed; a footnote laid out while
         // placing the lines has fragments of its own.
@@ -272,7 +272,7 @@ internal sealed partial class LayoutEngine
         _inlineCbIndex = null;
         try
         {
-            y = PlaceLinesCore(lines, block, x, y, w, indent, emphasisRoom, besideFloats);
+            y = PlaceLinesCore(lines, block, x, y, w, indent, emphasisRoom, trim, besideFloats);
             if (_inlineFragments != null) PaintInlineFragments(_inlineFragments);
             if (_inlineCbs != null) LayoutInlineAbsolutes(_inlineCbs);
             return y;
@@ -285,11 +285,13 @@ internal sealed partial class LayoutEngine
         }
     }
 
-    private float PlaceLinesCore(List<Line> lines, ComputedStyle block, float x, float y, float w, LineIndent indent, float emphasisRoom, bool besideFloats)
+    private float PlaceLinesCore(List<Line> lines, ComputedStyle block, float x, float y, float w, LineIndent indent, float emphasisRoom, TextBoxTrim trim, bool besideFloats)
     {
         int n = ClampLines(lines, block, w, indent);
         var (lineA, lineD) = LineExtents(lines, n, block);
         MakeRoomForEmphasis(lines, n, lineA, lineD, block, emphasisRoom);
+        var (trimFirst, trimLast) = TrimmedLines(lineA, n, trim);
+        float lift = 0; // how far trimming the first line moved the lines up from where they were broken
         // Beside floats the lines' positions were fixed while breaking them.
         bool[]? breakBefore = _paginate && n > 1 && !besideFloats ? PlanBreaks(n, lineA, lineD, y, block.Orphans, block.Widows) : null;
         var chunk = new LineChunk { Start = -1 };
@@ -297,7 +299,7 @@ internal sealed partial class LayoutEngine
         for (int li = 0; li < n; li++)
         {
             var line = lines[li];
-            if (!float.IsNaN(line.Top) && line.Top > y) y = line.Top;
+            if (!float.IsNaN(line.Top) && line.Top - lift > y) y = line.Top - lift;
             float lineLeft = line.HasRoom ? line.Left : 0, lineW = line.HasRoom ? line.Avail : w;
             if (float.IsNaN(lineA[li]))
             {
@@ -305,7 +307,17 @@ internal sealed partial class LayoutEngine
                 continue;
             }
             float lineH = lineA[li] + lineD[li];
-            y = FitOnPage(y, lineH);
+            // text-box-trim: the first line starts and the last line ends at the block's text-box-edge rather than at
+            // the line box's edge. The text keeps its place on the baseline and reaches past the trimmed edge.
+            float over = 0, under = 0;
+            if (li == trimFirst || li == trimLast)
+            {
+                block.TextBoxEdges(out float edgeA, out float edgeD);
+                if (li == trimFirst) over = lineA[li] - edgeA;
+                if (li == trimLast) under = lineD[li] - edgeD;
+            }
+            y = FitOnPage(y, lineH - over - under) - over;
+            lift += over;
             CheckPageLimit(y);
             if (breakBefore != null && breakBefore[li])
             {
@@ -315,10 +327,27 @@ internal sealed partial class LayoutEngine
             if (_columnNotes != null) NoteOrphans(ref chunk, li, y, lineA, lineD, n, block.Orphans);
             if (Footnotes != null && _paginate && !_measuring && _columnNotes == null) y = PlaceFootnoteCalls(line.Items, y, lineH);
             DrawLine(line, block, x, y, lineLeft, lineW, indent.Of(lines, li), lineA[li], lineH);
-            y += lineH;
+            y += lineH - under;
             if (_paginate) _lastContentBottom = y;
         }
         return y;
+    }
+
+    /// <summary>
+    /// The lines text-box-trim trims: the first and the last line with content, or -1. Lines that only hold anchors
+    /// and positioned boxes have no box to trim.
+    /// </summary>
+    private static (int First, int Last) TrimmedLines(float[] lineA, int n, TextBoxTrim trim)
+    {
+        int first = -1, last = -1;
+        if (trim == TextBoxTrim.None) return (first, last);
+        for (int li = 0; li < n; li++)
+        {
+            if (float.IsNaN(lineA[li])) continue;
+            if (first < 0) first = li;
+            last = li;
+        }
+        return ((trim & TextBoxTrim.Start) != 0 ? first : -1, (trim & TextBoxTrim.End) != 0 ? last : -1);
     }
 
     /// <summary>

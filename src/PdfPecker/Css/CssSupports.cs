@@ -16,6 +16,7 @@ internal static class CssSupports
         "font-synthesis-weight", "font-synthesis-style", "font-synthesis-small-caps", "font-synthesis-position", "font-size-adjust", "font-feature-settings", "font-stretch", "font-width", "font-variation-settings", "font-optical-sizing", "line-height", "text-align", "text-align-last", "text-justify", "text-spacing-trim",
         "text-decoration", "text-decoration-line", "text-decoration-color", "text-decoration-style", "text-decoration-thickness", "text-decoration-skip-ink", "text-underline-position",
         "text-emphasis", "text-emphasis-style", "text-emphasis-color", "text-emphasis-position",
+        "text-box", "text-box-trim", "text-box-edge",
         "text-underline-offset", "text-transform", "text-indent", "letter-spacing", "word-spacing", "white-space",
         "text-wrap", "text-wrap-mode", "text-wrap-style",
         "overflow-wrap", "word-wrap", "word-break", "line-break", "vertical-align", "list-style", "list-style-type", "list-style-position",
@@ -182,6 +183,12 @@ internal static class CssSupports
                 return lower is "block" or "inline" or "compact";
             case "footnote-policy":
                 return lower is "auto" or "line" or "block";
+            case "text-box":
+                return CssParser.ParseTextBox(lower) != null;
+            case "text-box-trim":
+                return CssParser.ParseTextBoxTrim(lower) != null;
+            case "text-box-edge":
+                return CssParser.ParseTextBoxEdge(lower) != null;
             case "hyphenate-limit-chars":
                 return StyleResolver.ParseHyphenateLimitChars(lower) != null;
         }

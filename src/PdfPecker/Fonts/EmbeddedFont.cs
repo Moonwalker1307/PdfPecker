@@ -70,7 +70,7 @@ internal sealed class EmbeddedFont : TextFont
         return metric switch
         {
             FontMetric.XHeight => Program.XHeight / upm,
-            FontMetric.CapHeight => Program.CapHeight / upm,
+            FontMetric.CapHeight => Program.TextCapHeight / upm,
             FontMetric.ZeroWidth => Program.GlyphId('0') is > 0 and var zero ? Program.Advance(zero) / upm : 0,
             FontMetric.IdeographWidth => Program.GlyphId(0x6C34) is > 0 and var water ? Program.Advance(water) / upm : 0,
             FontMetric.UnderlinePosition => -Program.UnderlinePosition / upm,

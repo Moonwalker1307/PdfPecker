@@ -286,6 +286,8 @@ internal sealed partial class LayoutEngine
         public bool HasPrev, HasChain, PrevAvoidAfter;
         public int ForcedAt;            // the box that was moved to a new page to keep its chain together
         public bool AfterForcedBreak;   // the content so far ends with a forced page break
+        public bool TrimStart, TrimEnd; // text-box-trim: the flow's first line and last line are trimmed
+        public int LastInFlow;          // with TrimEnd, the last child laid out in the flow, whose last line is trimmed
     }
 
     /// <summary>What the flow does after a phase: go on with the current child, go on with the next one, or stop.</summary>
@@ -320,7 +322,7 @@ internal sealed partial class LayoutEngine
 
             if (f.Run is { Count: > 0 })
             {
-                var step = FlushFlowRun(ref f);
+                var step = FlushFlowRun(ref f, last: e == null);
                 if (step == FlowStep.Next) continue;
                 if (step == FlowStep.Stop) break;
             }
@@ -374,6 +376,8 @@ internal sealed partial class LayoutEngine
         f.AbsorbFirst = _absorbTop;
         _absorbTop = false;
         f.FirstBlock = true;
+        if (resume == null) (f.TrimStart, f.TrimEnd) = FlowTrim(parent, range == null || range.Value.From == 0, range == null || range.Value.To >= f.Children.Count);
+        if (f.TrimEnd) f.LastInFlow = LastInFlow(parent, f.Children);
 
         if (parent.Name == "ol")
         {
@@ -400,6 +404,50 @@ internal sealed partial class LayoutEngine
         return f;
     }
 
+    // The text-box-trim a flow passes on to the block box it lays out, for that box's own flow.
+    private (Element? Box, TextBoxTrim Trim) _trimChild;
+
+    /// <summary>
+    /// Whether the first and last lines of a flow are trimmed (text-box-trim): when its box asks for it, or when the
+    /// flow around the box passes it on and no border or padding of the box comes between, as in Chrome. A flow that
+    /// lays out only some of the children trims only at the ends it holds.
+    /// </summary>
+    private (bool Start, bool End) FlowTrim(Element parent, bool atStart, bool atEnd)
+    {
+        var s = parent.Style;
+        if (s == null) return default;
+        var trim = s.TextBoxTrim;
+        if (ReferenceEquals(_trimChild.Box, parent))
+        {
+            var passed = _trimChild.Trim;
+            if (s.BorderTop != 0 || !IsZero(s.PaddingTop)) passed &= ~TextBoxTrim.Start;
+            if (s.BorderBottom != 0 || !IsZero(s.PaddingBottom)) passed &= ~TextBoxTrim.End;
+            trim |= passed;
+        }
+        return (atStart && (trim & TextBoxTrim.Start) != 0, atEnd && (trim & TextBoxTrim.End) != 0);
+
+        static bool IsZero(Length l) => l.Value == 0 && l.Unit is LengthUnit.Pt or LengthUnit.Percent;
+    }
+
+    /// <summary>
+    /// The last child that is laid out in the flow, or -1: only floats, positioned and hidden boxes and collapsible
+    /// white space may follow it, as Chrome's IsLastInflowChild sees it.
+    /// </summary>
+    private static int LastInFlow(Element parent, List<Node> children)
+    {
+        for (int k = children.Count - 1; k >= 0; k--)
+        {
+            switch (children[k])
+            {
+                case TextNode t when t.Text.AsSpan().IndexOfAnyExcept(" \t\n\f\r") < 0 && parent.Style is { } ps && IsCollapsible(ps):
+                case Element { Detached: true } or Element { Style: null or { Display: Display.None } or { Floated: true } or { OutOfFlow: true } }:
+                    continue;
+            }
+            return k;
+        }
+        return -1;
+    }
+
     private static int CountListItems(Element list)
     {
         int n = 0;
@@ -409,10 +457,11 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>
-    /// Lays out the inline content collected before the current child as lines. Returns <see cref="FlowStep.Next"/>
-    /// when the lines broke a keep-with-next chain and the flow rewound to it.
+    /// Lays out the inline content collected before the current child as lines, the <paramref name="last"/> content of
+    /// the flow when no block box follows them. Returns <see cref="FlowStep.Next"/> when the lines broke a
+    /// keep-with-next chain and the flow rewound to it.
     /// </summary>
-    private FlowStep FlushFlowRun(ref FlowState f)
+    private FlowStep FlushFlowRun(ref FlowState f, bool last)
     {
         var run = f.Run!;
         float before = f.Y;
@@ -422,6 +471,7 @@ internal sealed partial class LayoutEngine
         float top = f.InColumns ? f.Y + f.PendingMargin.Value : TruncatedPageMargin(ref f, f.Y + f.PendingMargin.Value);
         var (ix, iw) = f.Pages != null ? OnPage(f.Pages, top) : (f.X, f.W);
         _inlinePageBox = f.Pages;
+        _inlineTrim = (f.TrimStart && f.FirstBlock && !f.AnyContent ? TextBoxTrim.Start : 0) | (f.TrimEnd && last ? TextBoxTrim.End : 0);
         f.Y = FlushInline(run, f.Parent, ix, top, iw, !f.AnyContent, out bool produced);
         run.Clear();
         if (produced)
@@ -475,11 +525,16 @@ internal sealed partial class LayoutEngine
             _currentListIndex = f.ListIndex;
         }
 
+        // text-box-trim reaches the box when it is the flow's first or last content.
+        var trim = (f.TrimStart && f.FirstBlock && !f.AnyContent ? TextBoxTrim.Start : 0) | (f.TrimEnd && f.Index == f.LastInFlow ? TextBoxTrim.End : 0);
         float top = FlowBoxTop(ref f, e, breakBefore, out var mt, out bool cleared);
         int boxOps = _ops.Count;
         var movedAround = _movedWhole;
         _movedWhole = null;
+        var trimAround = _trimChild;
+        _trimChild = (e, trim);
         float bottom = LayoutFlowBoxContent(ref f, e, ref top, joins, boxOps, out var passed);
+        _trimChild = trimAround;
         var trailing = _boxTrailing;
         // The flow around this one sees a box moved whole inside this box too, when it lies above any it saw before.
         var moved = _movedWhole;

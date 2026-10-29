@@ -162,6 +162,12 @@ internal enum UnderlinePosition : byte { Auto, FromFont, Under }
 // text-emphasis-style: the shape of the mark drawn by each character. Auto is filled or open alone, a dot in horizontal
 // text and sesame in vertical text, as in Chrome; String is a mark of the author's own.
 internal enum EmphasisShape : byte { None, Auto, Dot, Circle, DoubleCircle, Triangle, Sesame, String }
+// text-box-trim: whether a block's first line loses the space above its over edge and its last line the space below
+// its under edge.
+[Flags] internal enum TextBoxTrim : byte { None = 0, Start = 1, End = 2, Both = Start | End }
+// text-box-edge: the edges lines are trimmed to, over and under the text. auto trims as text does, as in Chrome.
+internal enum TextEdgeOver : byte { Text, Cap, Ex }
+internal enum TextEdgeUnder : byte { Text, Alphabetic }
 
 /// <summary>Pt and Percent are plain values; Calc is a math function that depends on a percentage (see <see cref="CssMath"/>).</summary>
 internal enum LengthUnit : byte { Pt, Percent, Auto, Calc }
@@ -534,6 +540,24 @@ internal sealed partial class ComputedStyle
         float half = MathF.Floor((lineH - (asc + desc)) / 2 / PointsPerPixel + HalfLeadingSlack) * PointsPerPixel;
         ascent = asc + half;
         descent = lineH - ascent;
+    }
+
+    /// <summary>
+    /// How far above and below its own baseline this style's text-box-edge lies: the font's ascent and descent for
+    /// text, its cap height or x-height over the text, and the baseline itself for alphabetic. Lines are trimmed to
+    /// these edges, as Chrome trims them.
+    /// </summary>
+    public void TextBoxEdges(out float over, out float under)
+    {
+        var font = Font;
+        font.LineMetrics(TextSize, out float ascent, out float descent);
+        over = TextEdgeOver switch
+        {
+            TextEdgeOver.Cap => font.Metric(FontMetric.CapHeight) is > 0 and var cap ? cap * TextSize : ascent,
+            TextEdgeOver.Ex => font.Metric(FontMetric.XHeight) is > 0 and var ex ? ex * TextSize : ascent,
+            _ => ascent,
+        };
+        under = TextEdgeUnder == TextEdgeUnder.Alphabetic ? 0 : descent;
     }
 
     // The half-leading is rounded down to whole pixels, with a little slack against rounding error.

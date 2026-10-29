@@ -68,6 +68,8 @@ internal sealed partial class ComputedStyle
     public bool CaptionBottom { get => _typography.CaptionBottom; set => Typography.CaptionBottom = value; }
     public bool EmptyCellsHide { get => _typography.EmptyCellsHide; set => Typography.EmptyCellsHide = value; }
     public bool ImageOrientationNone { get => _typography.ImageOrientationNone; set => Typography.ImageOrientationNone = value; }
+    public TextEdgeOver TextEdgeOver { get => _typography.TextEdgeOver; set => Typography.TextEdgeOver = value; }
+    public TextEdgeUnder TextEdgeUnder { get => _typography.TextEdgeUnder; set => Typography.TextEdgeUnder = value; }
     public int Orphans { get => _typography.Orphans; set => Typography.Orphans = value; }
     public int Widows { get => _typography.Widows; set => Typography.Widows = value; }
 
@@ -107,6 +109,8 @@ internal sealed partial class ComputedStyle
         public bool CaptionBottom;    // caption-side: bottom (inherited)
         public bool EmptyCellsHide;   // empty-cells: hide (inherited): with separated borders, empty cells paint nothing
         public bool ImageOrientationNone; // image-orientation: none (inherited): photos are drawn as stored, ignoring EXIF
+        public TextEdgeOver TextEdgeOver;   // text-box-edge, over the text (inherited)
+        public TextEdgeUnder TextEdgeUnder; // text-box-edge, under the text (inherited)
         public int Orphans = 2, Widows = 2; // minimum lines of a paragraph left at the bottom / carried to the top of a page
 
         public TypographyFields Copy()
@@ -436,6 +440,7 @@ internal sealed partial class ComputedStyle
 
     public bool TableLayoutFixed { get => _rare.TableLayoutFixed; set => Rare.TableLayoutFixed = value; }
     public string? TextOverflow { get => _rare.TextOverflow; set => Rare.TextOverflow = value; }
+    public TextBoxTrim TextBoxTrim { get => _rare.TextBoxTrim; set => Rare.TextBoxTrim = value; }
     public float AspectRatio { get => _rare.AspectRatio; set => Rare.AspectRatio = value; }
     public bool AspectRatioAuto { get => _rare.AspectRatioAuto; set => Rare.AspectRatioAuto = value; }
     public ContainerType ContainerType { get => _rare.ContainerType; set => Rare.ContainerType = value; }
@@ -487,6 +492,7 @@ internal sealed partial class ComputedStyle
         public bool TableLayoutFixed; // table-layout: fixed
         /// <summary>What replaces the cut end of an overflowing line (text-overflow): "…" for ellipsis, a custom string, or null for clip.</summary>
         public string? TextOverflow;
+        public TextBoxTrim TextBoxTrim; // text-box-trim
         public float AspectRatio;    // width / height; 0 = auto
         public bool AspectRatioAuto; // "auto <ratio>": a replaced element keeps its natural ratio
         public ContainerType ContainerType;
