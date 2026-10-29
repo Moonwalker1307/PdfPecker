@@ -11,12 +11,14 @@ namespace PdfPecker.Layout;
 internal sealed partial class LayoutEngine
 {
     /// <summary>The items of a run of inline content. Hand the state back with <see cref="ReturnState"/> when done.</summary>
-    private CollectState CollectInline(List<Node> run, float availW, FirstLineStyle? firstLine = null)
+    private CollectState CollectInline(List<Node> run, float availW, FirstLineStyle? firstLine = null, Element? block = null)
     {
         var st = RentState();
         st.AvailWidth = availW;
         st.FirstLine = firstLine;
-        foreach (var node in run) CollectNode(st, node, null, null);
+        // A ::first-line background is painted as the background of an inline box around everything on the line.
+        var lineBox = firstLine?.Box is { } box && block != null ? new InlineDeco(block, box, null, 0, 0) : null;
+        foreach (var node in run) CollectNode(st, node, null, lineBox);
         st.FirstLine = null;
         TrimAdjacentPunctuation(st.Items);
         return st;

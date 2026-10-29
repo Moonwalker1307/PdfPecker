@@ -16,6 +16,37 @@ internal sealed class FirstLineStyle
         Line = line;
     }
 
+    /// <summary>
+    /// The style of the first line's own box, which wraps the line's content as an inline box does, when it paints a
+    /// background; null when it does not. It has the line's fonts and backgrounds but no padding, border or margin, which
+    /// ::first-line does not take.
+    /// </summary>
+    public ComputedStyle? Box
+    {
+        get
+        {
+            if (_boxResolved) return _box;
+            _boxResolved = true;
+            var l = Line;
+            if (!CssColor.IsVisible(l.BackgroundColor) && l.BackgroundImages == null) return null;
+            var c = l.CreateChild();
+            c.BackgroundColor = l.BackgroundColor;
+            c.BackgroundImages = l.BackgroundImages;
+            c.BackgroundRepeats = l.BackgroundRepeats;
+            c.BackgroundPositionsX = l.BackgroundPositionsX;
+            c.BackgroundPositionsY = l.BackgroundPositionsY;
+            c.BackgroundSizes = l.BackgroundSizes;
+            c.BackgroundOrigins = l.BackgroundOrigins;
+            c.BackgroundClips = l.BackgroundClips;
+            c.BackgroundFixed = l.BackgroundFixed;
+            c.BackgroundBlendModes = l.BackgroundBlendModes;
+            return _box = c;
+        }
+    }
+
+    private ComputedStyle? _box;
+    private bool _boxResolved;
+
     /// <summary>The style of text in style <paramref name="s"/> when it is on the first line.</summary>
     public ComputedStyle Map(ComputedStyle s)
     {

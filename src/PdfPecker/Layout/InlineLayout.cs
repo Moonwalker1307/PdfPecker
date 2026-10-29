@@ -130,7 +130,7 @@ internal sealed partial class LayoutEngine
     private CollectState? FirstLineItems(List<Node> run, Element container, bool firstInBlock, float w, List<Item> items, ComputedStyle cs)
     {
         if (!firstInBlock || container.FirstLine is not { } firstLine || _measuring) return null;
-        var first = CollectInline(run, w, firstLine);
+        var first = CollectInline(run, w, firstLine, container);
         ResolveBidi(first.Items, cs);
         // text-transform and small capitals change letters but not their number, so both lists hold as many
         // characters. Were that ever not so, the breaker could not find its place, and the first line keeps the usual

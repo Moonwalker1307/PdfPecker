@@ -546,6 +546,27 @@ public class BorderStyleAndShadowTests
         Assert.Equal(0xFF008000u, texts[1].Color);
     }
 
+    [Fact]
+    public void First_line_background_is_painted_behind_the_first_line_only()
+    {
+        const string html = "<style>p::first-line { background: #ff0000 }</style>" + Body
+                            + "<p style='width:300px; margin:0; font:20px sans-serif; line-height:30px; word-spacing:40px'>First line<br>Second line</p>";
+        // As an inline box around the line's content: behind its text (the wide space between its words, 39 to 85px),
+        // not to the end of the line, and not on the next line.
+        Near(255, 0, 0, Pixel(html, 60, 15));
+        Near(255, 255, 255, Pixel(html, 200, 15));
+        Near(255, 255, 255, Pixel(html, 2, 2));
+        Near(255, 255, 255, Pixel(html, 150, 45));
+    }
+
+    [Fact]
+    public void First_line_takes_no_padding_or_border()
+    {
+        var plain = TextOps($"<p style='width:300px'>{Long}</p>", "p::first-line { background: red }");
+        var boxed = TextOps($"<p style='width:300px'>{Long}</p>", "p::first-line { background: red; padding: 20px; border: 5px solid blue; margin: 10px }");
+        Assert.Equal(plain.Select(t => (t.X, t.Baseline, t.Text)), boxed.Select(t => (t.X, t.Baseline, t.Text)));
+    }
+
     // Small capitals cut aBא into A|Bא and bidi into aB|א, and hyphenation of a lower-case first line breaks a word the
     // usual items keep whole: the first line still ends where its own items say, and the next starts right after it.
     [Theory]
