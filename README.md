@@ -124,7 +124,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   tooltips and badges), transforms, gradients (also `in oklch` and other colour spaces, and as
   list markers), fixed background images (placed on each page's paper, as Chrome prints them), filters, masks,
   media and container queries, logical properties, `writing-mode` (with floats, sized boxes and vertical-lr line
-  order), `text-wrap`, `line-clamp` with your own `block-ellipsis`, underlines from the font or below the descenders
+  order), `text-wrap`, hanging indents (`text-indent` with `hanging` and `each-line`),
+  `line-clamp` with your own `block-ellipsis`, underlines from the font or below the descenders
   (`text-underline-position`), drop caps, `::marker` styles (a larger marker font or a tall marker image makes its
   line taller, `content: none` hides the marker, `counter(list-item)` numbers it and its own `direction` orders its
   text, as in Chrome), images and gradients in `::before` and `::after` content, inline SVG (with

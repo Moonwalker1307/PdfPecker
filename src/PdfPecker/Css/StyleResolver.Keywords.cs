@@ -162,7 +162,7 @@ internal sealed partial class StyleResolver
             case "font-style": s.Italic = from.Italic; break;
             case "line-height": s.LineHeightKind = from.LineHeightKind; s.LineHeightValue = from.LineHeightValue; break;
             case "text-align": s.TextAlign = from.TextAlign; s.BlockAlign = from.BlockAlign; break;
-            case "text-indent": s.TextIndent = from.TextIndent; break;
+            case "text-indent": s.TextIndent = from.TextIndent; s.TextIndentHanging = from.TextIndentHanging; s.TextIndentEachLine = from.TextIndentEachLine; break;
             case "initial-letter": s.InitialLetterSize = from.InitialLetterSize; s.InitialLetterSink = from.InitialLetterSink; break;
             case "text-justify": s.TextJustify = from.TextJustify; break;
             case "text-spacing-trim": s.TextSpacingTrim = from.TextSpacingTrim; break;
