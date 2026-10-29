@@ -549,6 +549,18 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Deeply_nested_cells_spanning_rows_with_percentage_heights_are_laid_out_a_bounded_number_of_times()
+    {
+        // A definite cell spanning rows is laid out again once its rows end, which lays out everything inside it again,
+        // with its own cells spanning rows, so 300 such tables nested in each other must stay within the relayout budget.
+        var html = Repeat("<table><tr><td rowspan=2 style='height: 1px'><div style='height: 100%; border-top: 1pt solid'>", 300)
+                   + "x" + Repeat("</div></td><td>a</td></tr><tr><td>b</td></tr></table>", 300);
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 160L << 20);
+    }
+
+    [Fact]
     public void Content_deep_in_nested_flex_items_is_not_copied_at_every_level()
     {
         // Found by the fuzzer: target html, a card in columns around 250 nested flex rows. Each flex item is laid out
