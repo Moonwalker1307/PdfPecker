@@ -17,11 +17,17 @@ internal static class FormValidity
     /// <summary>Longest pattern attribute compiled; a longer one constrains nothing.</summary>
     private const int MaxPatternLength = 2048;
 
-    /// <summary>Patterns kept compiled, at most, and the time one may take to match a value.</summary>
+    /// <summary>Patterns kept compiled, at most.</summary>
     private const int MaxCachedPatterns = 128;
-    private static readonly TimeSpan PatternTimeout = TimeSpan.FromMilliseconds(20);
 
-    /// <summary>Patterns that may take the full timeout in one document before the rest are no longer matched.</summary>
+    /// <summary>
+    /// The time a pattern that needs backtracking may take to match a value. Patterns that run without backtracking
+    /// have no timeout: their time is linear in the value, and a timeout would make the answer depend on the machine's
+    /// load (the first match also builds the matcher, which on a busy machine took longer than a short timeout).
+    /// </summary>
+    private static readonly TimeSpan BacktrackingTimeout = TimeSpan.FromMilliseconds(20);
+
+    /// <summary>Backtracking patterns that may take the full timeout in one document before the rest are no longer matched.</summary>
     private const int MaxSlowPatterns = 8;
 
     [ThreadStatic] private static Dictionary<string, Regex?>? _patterns;
@@ -401,11 +407,11 @@ internal static class FormValidity
         string anchored = "^(?:" + pattern + @")\z";
         try
         {
-            regex = new Regex(anchored, RegexOptions.NonBacktracking | RegexOptions.CultureInvariant, PatternTimeout);
+            regex = new Regex(anchored, RegexOptions.NonBacktracking | RegexOptions.CultureInvariant, Regex.InfiniteMatchTimeout);
         }
         catch (NotSupportedException)
         {
-            try { regex = new Regex(anchored, RegexOptions.CultureInvariant, PatternTimeout); }
+            try { regex = new Regex(anchored, RegexOptions.CultureInvariant, BacktrackingTimeout); }
             catch (ArgumentException) { regex = null; }
         }
         catch (ArgumentException)
