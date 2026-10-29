@@ -1673,13 +1673,18 @@ internal sealed partial class LayoutEngine
                 if (text.Length == 0) return;
             }
             float tw = font.Measure(text, size) + s.LetterSpacing * text.Length;
+            // The item's direction puts the marker before its content; the marker's own direction orders its text, and
+            // the suffix's space goes at the marker's end in that direction, as in Chrome: ".1Item" for a ::marker
+            // { direction: rtl } in a left-to-right item, "Item1." for a left-to-right marker in a right-to-left one.
             if (m.Rtl)
             {
                 // Right to left the marker follows the content's right edge, its text in right-to-left order (".1").
-                _ops.Add(new TextOp(m.ContentRight + gap, baseline, lineTop, font, size, s.Color, VisualMarkerText(text), 0, 0) { Tag = m.Tag });
+                if (s.Rtl) _ops.Add(new TextOp(m.ContentRight + gap, baseline, lineTop, font, size, s.Color, VisualMarkerText(text), 0, 0) { Tag = m.Tag });
+                else _ops.Add(new TextOp(m.ContentRight, baseline, lineTop, font, size, s.Color, text, 0, 0) { Tag = m.Tag });
                 return;
             }
-            _ops.Add(new TextOp(m.ContentX - gap - tw, baseline, lineTop, font, size, s.Color, text, 0, 0) { Tag = m.Tag });
+            if (s.Rtl) _ops.Add(new TextOp(m.ContentX - tw, baseline, lineTop, font, size, s.Color, VisualMarkerText(text), 0, 0) { Tag = m.Tag });
+            else _ops.Add(new TextOp(m.ContentX - gap - tw, baseline, lineTop, font, size, s.Color, text, 0, 0) { Tag = m.Tag });
             return;
         }
         // Chrome's symbol markers, in whole pixels from the font's rounded ascent: a square of side (2/3 ascent + 1) / 2,
