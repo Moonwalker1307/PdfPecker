@@ -235,9 +235,22 @@ internal sealed partial class StyleResolver
             _ => s.TextSpacingTrim,
         };
 
+    /// <summary>text-indent: a length or percentage, with hanging and each-line in any order; anything else is dropped.</summary>
     private void ApplyTextIndent(ComputedStyle s, in DeclaredValue d)
     {
-        if (TryParseLength(d.Lower, d.Em, _rootFontSize, out var ti, _vw, _vh)) s.TextIndent = ti.IsPercent ? 0 : ti.Resolve(0);
+        Length? amount = null;
+        bool hanging = false, eachLine = false;
+        foreach (var part in CssParser.Tokens(d.Lower.Trim()))
+        {
+            if (part == "hanging" && !hanging) hanging = true;
+            else if (part == "each-line" && !eachLine) eachLine = true;
+            else if (amount == null && TryParseLength(part, d.Em, _rootFontSize, out var ti, _vw, _vh) && !ti.IsAuto) amount = ti;
+            else return;
+        }
+        if (amount is not { } length) return;
+        s.TextIndent = length;
+        s.TextIndentHanging = hanging;
+        s.TextIndentEachLine = eachLine;
     }
 
     private static void ApplyTextTransform(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
@@ -304,6 +317,30 @@ internal sealed partial class StyleResolver
             case "from-font": s.UnderlinePosition = UnderlinePosition.FromFont; return;
             case "under" or "under left" or "under right" or "left under" or "right under": s.UnderlinePosition = UnderlinePosition.Under; return;
         }
+    }
+
+    private static void ApplyEmphasisStyle(ComputedStyle s, in DeclaredValue d)
+    {
+        if (CssParser.ParseEmphasisStyle(d.Value) is { } e) (s.EmphasisShape, s.EmphasisOpen, s.EmphasisString) = e;
+    }
+
+    private static void ApplyEmphasisColor(ComputedStyle s, in DeclaredValue d)
+    {
+        if (d.Lower == "currentcolor") s.EmphasisColor = null;
+        else if (CssColor.TryParse(d.Value, s.Color, out var c)) s.EmphasisColor = c;
+    }
+
+    /// <summary>text-emphasis-position: over or under, and right or left for vertical text, in either order; as in Chrome, right or left alone means over.</summary>
+    private static void ApplyEmphasisPosition(ComputedStyle s, in DeclaredValue d)
+    {
+        bool? under = null, side = null;
+        foreach (var part in CssParser.Tokens(d.Lower.Trim()))
+        {
+            if (part is "over" or "under" && under == null) under = part == "under";
+            else if (part is "right" or "left" && side == null) side = true;
+            else return;
+        }
+        if (under != null || side != null) s.EmphasisUnder = under == true;
     }
 
     private void ApplyTextDecorationThickness(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)

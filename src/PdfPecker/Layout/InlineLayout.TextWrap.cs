@@ -47,7 +47,7 @@ internal sealed partial class LayoutEngine
     /// The lines of a paragraph with text-wrap: balance or pretty, from its greedy lines: the same lines when nothing
     /// changes, or new ones (the greedy ones are returned to the pool).
     /// </summary>
-    private List<Line> WrapLines(List<Item> items, List<Line> lines, ComputedStyle block, float availW, float indent)
+    private List<Line> WrapLines(List<Item> items, List<Line> lines, ComputedStyle block, float availW, LineIndent indent)
     {
         if (lines.Count < 2 || !CanRewrap(items)) return lines;
         int[]? starts = LineStarts(items, lines);
@@ -56,7 +56,7 @@ internal sealed partial class LayoutEngine
         int n = lines.Count;
         // A line that overflows its room has no better breaks, as in Chrome.
         for (int li = 0; li < n; li++)
-            if (LineSpan(items, pos, starts[li], li + 1 < n ? starts[li + 1] : items.Count) > availW - (li == 0 ? indent : 0) + Eps) return lines;
+            if (LineSpan(items, pos, starts[li], li + 1 < n ? starts[li + 1] : items.Count) > availW - indent.Of(lines, li) + Eps) return lines;
 
         byte[]? plan = null;
         if (block.TextWrap == TextWrapStyle.Balance)
@@ -67,7 +67,7 @@ internal sealed partial class LayoutEngine
             int count = end + 1;
             if (count < 2 || count > MaxBalancedLines) return lines;
             int to = end + 1 < n ? starts[end + 1] : items.Count;
-            var breaks = ChooseBreaks(items, pos, starts[0], to, count, block, availW, indent, balanced: true);
+            var breaks = ChooseBreaks(items, pos, starts[0], to, count, block, availW, indent.First, indent.Wrapped, balanced: true);
             if (breaks != null) plan = Plan(plan, items.Count, starts[0], to, breaks);
             else if (count == n && !HasForcedBreak(items)) return BalanceByWidth(items, lines, availW, indent);
         }
@@ -82,7 +82,7 @@ internal sealed partial class LayoutEngine
                 int to = end + 1 < n ? starts[end + 1] : items.Count;
                 if (count >= 2 && WorthRewrapping(items, pos, starts, from, end, to, availW))
                 {
-                    var breaks = ChooseBreaks(items, pos, starts[from], to, count, block, availW, from == 0 ? indent : 0, balanced: false);
+                    var breaks = ChooseBreaks(items, pos, starts[from], to, count, block, availW, indent.Of(lines, from), indent.Wrapped, balanced: false);
                     if (breaks != null) plan = Plan(plan, items.Count, starts[from], to, breaks);
                 }
                 first = end + 1;
@@ -213,7 +213,7 @@ internal sealed partial class LayoutEngine
     /// do not make <paramref name="count"/> lines or there are fewer than three break opportunities to choose from.
     /// </summary>
     private static int[]? ChooseBreaks(List<Item> items, float[] pos, int from, int to, int count, ComputedStyle block,
-        float availW, float indent, bool balanced)
+        float availW, float firstIndent, float wrappedIndent, bool balanced)
     {
         var c = new List<WrapBreak>(16) { new() { Item = from, NoBreak = pos[from] / CssPixel, IfBreak = pos[from] / CssPixel } };
         // Chrome's penalties grow with the line's width and the font size: a hyphen costs as much as free space of the
@@ -248,7 +248,7 @@ internal sealed partial class LayoutEngine
             if (!b.Hyphenated) break;
         }
 
-        float full = availW / CssPixel, first = Math.Max(0, (availW - indent) / CssPixel);
+        float full = (availW - wrappedIndent) / CssPixel, first = Math.Max(0, (availW - firstIndent) / CssPixel);
         var score = new float[c.Count];
         var prev = new int[c.Count];
         var line = new int[c.Count];
@@ -316,7 +316,7 @@ internal sealed partial class LayoutEngine
     /// Chrome's other way to balance: the lines broken greedily at the narrowest width, to a CSS pixel, that still
     /// makes as many lines; they are aligned in the full width.
     /// </summary>
-    private List<Line> BalanceByWidth(List<Item> items, List<Line> lines, float availW, float indent)
+    private List<Line> BalanceByWidth(List<Item> items, List<Line> lines, float availW, LineIndent indent)
     {
         int n = lines.Count;
         float sum = 0;
@@ -328,7 +328,7 @@ internal sealed partial class LayoutEngine
             var trial = BreakLines(items, mid, indent);
             bool fits = trial.Count <= n;
             for (int li = 0; li < trial.Count && fits; li++)
-                if (trial[li].Width > mid - (li == 0 ? indent : 0) + Eps) fits = false;
+                if (trial[li].Width > mid - indent.Of(trial, li) + Eps) fits = false;
             ReturnLines(trial);
             if (fits) upper = mid;
             else lower = mid;

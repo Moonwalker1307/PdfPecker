@@ -33,8 +33,8 @@ internal static partial class BoxPainter
             if (source.Image is { } image)
             {
                 if (image.Width <= 0 || image.Height <= 0) return false;
-                source.Width = image.Width * CssPixel;
-                source.Height = image.Height * CssPixel;
+                source.Width = image.Width * CssPixel / layer.Resolution;
+                source.Height = image.Height * CssPixel / layer.Resolution;
                 source.HasRatio = true;
                 return true;
             }
