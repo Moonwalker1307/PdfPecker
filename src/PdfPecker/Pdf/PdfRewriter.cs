@@ -37,8 +37,12 @@ internal sealed class PdfRewriter : PdfObjectWriter
     /// result, so the same input gives the same file; an encrypted result has random keys, so it stays random.
     /// </summary>
     public static ByteBuffer Write(PdfFile file, PdfEncryptor? crypt, DateTimeOffset? creationDate = null)
+        => Write(file, crypt, crypt == null && ReproducibleDate.Resolve(creationDate) != null);
+
+    /// <summary>Rewrites <paramref name="file"/>; with <paramref name="reproducible"/>, the identifier is a hash of the result.</summary>
+    public static ByteBuffer Write(PdfFile file, PdfEncryptor? crypt, bool reproducible)
     {
-        var w = new PdfRewriter(file, crypt, crypt == null && ReproducibleDate.Resolve(creationDate) != null);
+        var w = new PdfRewriter(file, crypt, reproducible);
         w.Run();
         return w._out;
     }

@@ -229,6 +229,17 @@ internal static class Targets
             },
             new()
             {
+                Name = "pdf-sanitize", Extension = ".pdf", Seeds = pdfSeeds, MaxSize = 1 << 20,
+                // A mutated input can turn out encrypted, which sanitizing refuses as documented.
+                ExtraExpected = ex => ex is ArgumentException { ParamName: "pdf" },
+                Run = (d, ct) =>
+                {
+                    PdfSanitizer.HasActiveContent(d);
+                    PdfSanitizer.RemoveActiveContent(d, new PdfSanitizeOptions { RemoveAttachments = true }, ct);
+                },
+            },
+            new()
+            {
                 Name = "pdf-linearize", Extension = ".pdf", Seeds = pdfSeeds, MaxSize = 1 << 20,
                 // A mutated input can turn out signed or encrypted, which linearizing refuses as documented.
                 ExtraExpected = ex => ex is ArgumentException { ParamName: "pdf" },
