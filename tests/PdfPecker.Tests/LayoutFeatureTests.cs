@@ -839,6 +839,23 @@ public class LayoutFeatureTests
     }
 
     [Fact]
+    public void Percentage_heights_in_a_definite_cell_spanning_rows_resolve_against_all_its_rows()
+    {
+        // As in Chrome: the cell is definite through its tiny height and spans two rows of 30pt and 40pt, so its child
+        // fills 70pt, and a child of 50% in a cell spanning three rows is half of them, centred like the cell's content.
+        var html = """
+            <style>body { margin: 0 } table { border-spacing: 0 } td { padding: 0; width: 100pt }
+            .a { height: 30pt } .b { height: 40pt } .c { height: 20pt }</style>
+            <table><tr><td rowspan="2" style="height: 1px"><div style="height: 100%; background: #0000ff">x</div></td><td><div class="a"></div></td></tr>
+            <tr><td><div class="b"></div></td></tr></table>
+            <table><tr><td rowspan="3" style="height: 1px"><div style="height: 50%; background: #ff0000"></div></td><td><div class="c"></div></td></tr>
+            <tr><td><div class="c"></div></td></tr><tr><td><div class="c"></div></td></tr></table>
+            """;
+        NearBox(Rect(html, "#0000ff"), 0, 0, 100, 70);
+        NearBox(Rect(html, "#ff0000"), 0, 85, 100, 30);
+    }
+
+    [Fact]
     public void Tall_percentage_box_breaks_across_pages_and_its_children_resolve_against_it()
     {
         var ops = Layout("""

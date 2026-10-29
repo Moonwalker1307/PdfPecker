@@ -1170,7 +1170,11 @@ internal sealed partial class LayoutEngine
             goto layOut;
         }
 
-        foreach (var cell in row.Ending) FinishCell(m, cell, rowBottom, collapse);
+        foreach (var cell in row.Ending)
+        {
+            if (cell.RowSpan > 1) LayOutSpanningCellAgain(m, cell, rowBottom, colX, widths, hs, collapse);
+            FinishCell(m, cell, rowBottom, collapse);
+        }
 
         // Under the cells, from the bottom up (CSS 2.1 §17.5.1): column groups, columns, the row group and the row.
         if (row.Cells.Count + row.Ending.Count > 0)
@@ -1514,6 +1518,34 @@ internal sealed partial class LayoutEngine
         cell.NeededH = cell.ContentH = bt + pt + (contentBottom - contentTop) + pb + bb;
         if (!cs.Height.IsAuto && !cs.Height.IsPercent)
             cell.NeededH = Math.Max(cell.NeededH, cs.Height.Value + (cs.BorderBox ? 0 : bt + pt + pb + bb));
+    }
+
+    /// <summary>
+    /// Lays out a definite cell that spans rows again once its last row ends, so that the percentage heights inside
+    /// resolve against its height, as Chrome does; a cell of one row gets this from <see cref="LayoutRow"/>. The cell's
+    /// ops sit among those of the rows after its first, so the new content takes the place of the old in one group. A
+    /// cell broken across pages, or with footnote calls, which point at its ops, keeps its first layout.
+    /// </summary>
+    private void LayOutSpanningCellAgain(TableModel m, CellModel cell, float rowBottom, float[] colX, float[] widths, float hs, bool collapse)
+    {
+        int group = cell.OpsStart - 1, first = cell.OpsStart, end = cell.OpsEnd;
+        if (_measuringRows > 0 || _tableDepth > MaxMeasuredTableNesting || !MayLayOutAgain || end <= first || end > _ops.Count
+            || !ReferenceEquals(_ops[group], cell.Group) || CrossesPage(cell.Top, rowBottom)
+            || !IsDefiniteCell(m, cell) || !HasPercentHeightChild(cell.Td))
+            return;
+        foreach (var call in _footnoteCalls)
+            if (ReferenceEquals(call.Owner, _ops) && call.OpsIndex >= group) return;
+
+        int start = _ops.Count;
+        LayoutCell(cell, cell.Top, colX, widths, hs, collapse, m.Rtl, rowBottom - cell.Top);
+        var content = new GroupOp();
+        for (int i = cell.OpsStart; i < cell.OpsEnd; i++) content.Ops.Add(_ops[i]);
+        _ops[group] = cell.Group!;
+        _ops[first] = content;
+        for (int i = first + 1; i < end; i++) _ops[i] = new GroupOp();
+        _ops.RemoveRange(start, _ops.Count - start);
+        cell.OpsStart = first;
+        cell.OpsEnd = first + 1;
     }
 
     private void FinishCell(TableModel m, CellModel cell, float rowBottom, bool collapse)
