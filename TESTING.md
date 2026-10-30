@@ -100,8 +100,9 @@ The fluent package's tests are in `tests/PdfPecker.Fluent.Tests` and run with th
   because .NET 9's zlib compresses the same bytes differently. They also run under ar-SA, fa-IR and da-DK.
 - `HostileInputTests` – hostile strings in every text, link, name and CSS value, deep nesting, huge spans and damaged
   images. Caller text must never become markup, and only documented exceptions may come out.
-- `PerformanceTests` – the HTML writer stays linear, 100,000 rows finish within a time bound, and writing HTML stays
-  a small part of producing a PDF.
+- `PerformanceTests` – the HTML writer stays linear and writing HTML stays a small part of producing a PDF, both
+  measured in allocated bytes, which do not depend on the machine's load; 100,000 rows finish within a loose time
+  bound that only guards against a hang.
 
 Their goldens use the same switch, and render through the library, so a library change of output can change them:
 

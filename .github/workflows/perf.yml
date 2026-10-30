@@ -47,7 +47,12 @@ jobs:
       - name: Run the benchmark
         env:
           DOTNET_GCgen0size: "0x4000000"
-        run: dotnet bench/PdfPecker.Benchmarks/bin/Release/net10.0/PdfPecker.Benchmarks.dll --perf perf.json
+        # It runs twice and each case keeps its better time, so that a busy minute on a shared runner during one case
+        # does not read as a regression of that case; see .github/scripts/perf-best.py.
+        run: |
+          dotnet bench/PdfPecker.Benchmarks/bin/Release/net10.0/PdfPecker.Benchmarks.dll --perf perf.json
+          dotnet bench/PdfPecker.Benchmarks/bin/Release/net10.0/PdfPecker.Benchmarks.dll --perf perf-again.json
+          python3 -I .github/scripts/perf-best.py perf.json perf-again.json
 
       # The newest earlier run is the baseline for allocation, and the newest earlier run on the same processor model
       # the baseline for time, as hosted runners come in several models whose times are not comparable. A run counts
