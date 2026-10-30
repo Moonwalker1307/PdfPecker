@@ -676,6 +676,66 @@ public class FontTests
         Parallel.For(0, 64, i => Assert.Equal(expected[i % 2], HtmlToPdf.Convert(Html(i % 2 == 0 ? "Quick zephyrs" : "Ångström 1/2"), options)));
     }
 
+    // ------------------------------------------------------------------ character maps
+
+    [Fact]
+    public void The_renderer_and_html_to_pdf_read_a_cmap_alike()
+    {
+        var program = Assert.Single(FontProgram.Load(Regular));
+        var trueType = TrueTypeFont.Parse(Regular)!;
+        for (int c = 0; c < 0x10000; c++) Assert.Equal(program.GlyphId(c), trueType.Lookup(3, 1, c));
+    }
+
+    [Fact]
+    public void A_font_whose_only_cmap_is_format_13_is_used()
+    {
+        // Many-to-one range mappings, as last-resort fonts have, here with one group for each character of the font.
+        var program = Assert.Single(FontProgram.Load(Regular));
+        var groups = Enumerable.Range(0, 0x10000).Where(c => program.GlyphId(c) != 0).Select(c => (c, c, program.GlyphId(c)));
+        var font = CmapFonts.With(Regular, 3, 10, CmapFonts.Groups(13, groups));
+        const string Html = "<p style='font-family: \"Work Sans\"'>Grüße aus Łódź, Ω</p>";
+        var pdf = HtmlToPdf.Convert(Html, WithFonts(font));
+        AssertStructurallyValid(pdf);
+        var text = Latin1(pdf);
+        Assert.Matches(@"/BaseFont /[A-Z]{6}\+WorkSans-Regular", text);
+        Assert.DoesNotContain("/BaseFont /Helvetica", text);
+        Assert.Equal(AllContent(HtmlToPdf.Convert(Html, WithFonts(Regular))), AllContent(pdf));
+    }
+
+    [Fact]
+    public void A_format_13_group_maps_its_whole_range_to_one_glyph()
+    {
+        var program = Assert.Single(FontProgram.Load(Regular));
+        int question = program.GlyphId('?');
+        var font = CmapFonts.With(Regular, 3, 10, CmapFonts.Groups(13, [(0x20, 0x10FFFF, question)]));
+        var lastResort = Assert.Single(FontProgram.Load(font));
+        var trueType = TrueTypeFont.Parse(font)!;
+        foreach (int c in new[] { 'A', 0x4E00, 0x1F600 })
+        {
+            Assert.Equal(question, lastResort.GlyphId(c));
+            Assert.Equal(question, trueType.Lookup(3, 10, c));
+        }
+        Assert.Equal(0, lastResort.GlyphId(0x1F));
+    }
+
+    [Fact]
+    public void A_font_whose_only_cmap_is_format_10_is_used()
+    {
+        // A trimmed array of 32-bit codes over Basic Latin and Latin Extended-A.
+        var program = Assert.Single(FontProgram.Load(Regular));
+        var font = CmapFonts.With(Regular, 3, 10, CmapFonts.TrimmedArray(0x20, Enumerable.Range(0x20, 0x160).Select(program.GlyphId)));
+        var trimmed = Assert.Single(FontProgram.Load(font));
+        var trueType = TrueTypeFont.Parse(font)!;
+        foreach (int c in "AzŁ")
+        {
+            Assert.NotEqual(0, program.GlyphId(c));
+            Assert.Equal(program.GlyphId(c), trimmed.GlyphId(c));
+            Assert.Equal(program.GlyphId(c), trueType.Lookup(3, 10, c));
+        }
+        Assert.Equal(0, trimmed.GlyphId('Ω'));
+        Assert.Matches(@"/BaseFont /[A-Z]{6}\+WorkSans-Regular", Latin1(HtmlToPdf.Convert("<p style='font-family: \"Work Sans\"'>Łódź</p>", WithFonts(font))));
+    }
+
     [Fact]
     public void A_web_font_url_that_gives_other_bytes_gives_the_other_font()
     {
@@ -685,4 +745,57 @@ public class FontTests
         Assert.Matches(@"/BaseFont /[A-Z]{6}\+WorkSans-Bold", Latin1(Convert(Bold)));
         Assert.Matches(@"/BaseFont /[A-Z]{6}\+WorkSans-Regular", Latin1(Convert(Regular)));
     }
+}
+
+/// <summary>Fonts whose cmap table is replaced by one subtable, for the tests of the cmap formats and their limits.</summary>
+internal static class CmapFonts
+{
+    /// <summary>The font with a cmap of the one subtable under the platform and encoding.</summary>
+    public static byte[] With(byte[] font, int platform, int encoding, byte[] subtable)
+    {
+        var cmap = new List<byte>();
+        U16(cmap, 0); U16(cmap, 1); U16(cmap, platform); U16(cmap, encoding); U32(cmap, 12);
+        cmap.AddRange(subtable);
+        var program = Assert.Single(FontProgram.Load(font));
+        var tables = program.Tables.Select(t => (t.Tag, t.Tag == FontProgram.Tag("cmap") ? cmap.ToArray() : program.Data.AsSpan(t.Offset, t.Length).ToArray())).ToList();
+        return SfntBuilder.Build(0x00010000, tables);
+    }
+
+    /// <summary>A format 12 or 13 subtable of (start, end, glyph) groups.</summary>
+    public static byte[] Groups(int format, IEnumerable<(int Start, int End, int Glyph)> groups)
+    {
+        var list = groups.ToList();
+        var subtable = new List<byte>();
+        U16(subtable, format); U16(subtable, 0); U32(subtable, 16 + list.Count * 12); U32(subtable, 0); U32(subtable, list.Count);
+        foreach (var (start, end, glyph) in list) { U32(subtable, start); U32(subtable, end); U32(subtable, glyph); }
+        return subtable.ToArray();
+    }
+
+    /// <summary>A format 10 subtable: the glyphs of the codes from <paramref name="first"/> on.</summary>
+    public static byte[] TrimmedArray(int first, IEnumerable<int> glyphs)
+    {
+        var list = glyphs.ToList();
+        var subtable = new List<byte>();
+        U16(subtable, 10); U16(subtable, 0); U32(subtable, 20 + list.Count * 2); U32(subtable, 0); U32(subtable, first); U32(subtable, list.Count);
+        foreach (int glyph in list) U16(subtable, glyph);
+        return subtable.ToArray();
+    }
+
+    /// <summary>A format 4 subtable of (start, end, delta) segments, without a closing 0xFFFF segment.</summary>
+    public static byte[] Segments(IReadOnlyList<(int Start, int End, int Delta)> segments)
+    {
+        var subtable = new List<byte>();
+        int n = segments.Count;
+        U16(subtable, 4); U16(subtable, 16 + n * 8); U16(subtable, 0); U16(subtable, n * 2); U16(subtable, 0); U16(subtable, 0); U16(subtable, 0);
+        foreach (var s in segments) U16(subtable, s.End);
+        U16(subtable, 0);
+        foreach (var s in segments) U16(subtable, s.Start);
+        foreach (var s in segments) U16(subtable, s.Delta & 0xFFFF);
+        foreach (var _ in segments) U16(subtable, 0);
+        return subtable.ToArray();
+    }
+
+    private static void U16(List<byte> to, int v) { to.Add((byte)(v >> 8)); to.Add((byte)v); }
+
+    private static void U32(List<byte> to, int v) { U16(to, v >> 16); U16(to, v & 0xFFFF); }
 }

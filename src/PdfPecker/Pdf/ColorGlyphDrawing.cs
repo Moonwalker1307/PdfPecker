@@ -530,16 +530,7 @@ internal static class ColorGlyphDrawing
 
         public Outlines(FontProgram program)
         {
-            try
-            {
-                var tables = program.Tables.Select(t => (TagName(t.Tag), t.Offset, t.Length));
-                var trueType = TrueTypeFont.Parse(program.Data, tables);
-                _source = trueType?.CffTable is { } cff ? CffFont.Parse(cff) : trueType;
-            }
-            catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or OverflowException or InvalidOperationException)
-            {
-                _source = null;
-            }
+            _source = FontProgramOutlines.Source(program);
             _toFontUnits = program.UnitsPerEm;
         }
 
@@ -577,7 +568,5 @@ internal static class ColorGlyphDrawing
             }
             return (path.Verbs.ToArray(), points);
         }
-
-        private static string TagName(uint tag) => new([(char)(tag >> 24), (char)(tag >> 16 & 0xFF), (char)(tag >> 8 & 0xFF), (char)(tag & 0xFF)]);
     }
 }
