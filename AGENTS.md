@@ -120,8 +120,6 @@ are in `BUILD.md` and `TESTING.md`.
   PDFs, and compare with Chrome printing the `GenerateHtml` output when layout is involved.
 - **Something PdfPecker cannot render for the fluent package**: don't work around it in the writer with fragile
   markup; fix the library in the same repository, in its own PR first.
-- **New `PdfOptions` properties**: `DocumentGenerator.Copy` in the fluent package must copy them (`ApiTests` fails
-  until it does).
 - **Public API**: code is `internal` unless it is meant for callers (tests can see internals). Every public member
   needs an XML doc comment (CS1591 is an error). Add overloads rather than changing signatures, add a README line for
   a new feature, and remember the manual in PdfPecker.Web gets a docs change that goes live with the next release.

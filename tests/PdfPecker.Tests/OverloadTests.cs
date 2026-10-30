@@ -291,4 +291,20 @@ public class OverloadTests
             AssertSamePdf(PdfStamper.Stamp(ThreePages.Value, File.ReadAllBytes(stamp)), File.ReadAllBytes(output));
         });
     }
+
+    [Fact]
+    public void PdfOptions_Clone_copies_every_setting_and_leaves_the_original_alone()
+    {
+        var original = new PdfOptions { Title = "Original", PageSize = PageSize.Letter, MaxPages = 7, Linearize = true };
+        var copy = original.Clone();
+        foreach (var property in typeof(PdfOptions).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+            Assert.Equal(property.GetValue(original), property.GetValue(copy));
+
+        copy.Title = "Copy";
+        copy.MaxPages = 9;
+        Assert.Equal("Original", original.Title);
+        Assert.Equal(7, original.MaxPages);
+        // The copy is shallow, as its documentation says: the font collection is the same object.
+        Assert.Same(original.Fonts, copy.Fonts);
+    }
 }

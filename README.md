@@ -48,6 +48,11 @@ var options = new PdfOptions
 options.Fonts.AddFile("fonts/OpenSans-Regular.ttf");
 byte[] letter = HtmlToPdf.Convert(html, options);
 
+// A copy of shared options with one setting changed, leaving the shared ones as they are
+var draft = options.Clone();
+draft.HeaderText = "Draft";
+byte[] draftLetter = HtmlToPdf.Convert(html, draft);
+
 // Markdown to PDF or HTML, merging, PDF pages to PNG, and a whole PDF to one black and white fax TIFF
 byte[] guide = MarkdownToPdf.Convert(File.ReadAllText("README.md"));
 string guideHtml = MarkdownToHtml.Convert(File.ReadAllText("README.md"));

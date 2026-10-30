@@ -1,7 +1,5 @@
 using FluentExamples;
 
-using System.Reflection;
-
 namespace PdfPecker.Fluent.Tests;
 
 /// <summary>Argument checks, colours, units, metadata and options.</summary>
@@ -147,27 +145,6 @@ public sealed class ApiTests
         Assert.Same(resolver, options.ResourceResolver);
         Assert.Null(options.Title);
         Assert.Equal(PageSize.A4.Width, options.PageSize.Width);
-    }
-
-    /// <summary>
-    /// The options copy names every property by hand. When PdfPecker adds a setting, this test fails until the copy
-    /// carries it too; otherwise the new setting would be silently dropped.
-    /// </summary>
-    [Fact]
-    public void The_options_copy_covers_every_setting()
-    {
-        string[] copied =
-        [
-            "PageSize", "Margins", "Scale", "ShrinkToFit", "TruncateBandsToWholePoints", "IgnoreCssPageRules",
-            "BaseDirectory", "ResourceResolver", "AllowFileAccess", "Fonts", "UseSystemFonts", "MissingFont", "MissingCharacter",
-            "UserStyleSheet", "Bookmarks", "FormFields", "MaxPages", "Compress", "CompressionLevel", "Title", "Author",
-            "Subject", "Keywords", "Creator", "Producer", "CustomProperties", "CreationDate", "FooterText", "HeaderText",
-            "Watermark", "Security", "Conformance", "Accessibility", "Language", "Hyphenation", "EInvoice", "Attachments",
-            "EmbedStandardFonts", "Signature", "Viewer", "PageLabels", "Linearize", "StripImageMetadata",
-        ];
-        var settable = typeof(PdfOptions).GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(p => p.CanWrite).Select(p => p.Name).Order(StringComparer.Ordinal);
-        Assert.Equal(copied.Order(StringComparer.Ordinal), settable);
     }
 
     [Fact]
