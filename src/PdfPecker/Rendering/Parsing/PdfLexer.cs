@@ -179,8 +179,6 @@ internal sealed class PdfLexer
     public bool KeywordIs(string s)
         => Kind == TokenKind.Keyword && TokLen == s.Length && Ascii.Equals(Data.AsSpan(TokStart, TokLen), s);
 
-    public string KeywordString() => Encoding.Latin1.GetString(Data, TokStart, TokLen);
-
     // The scanner stops at End, so that a lexer over a prefix of the array never reads past it.
     private ByteScanner Scan() => new(Data.AsSpan(0, End), Pos);
 

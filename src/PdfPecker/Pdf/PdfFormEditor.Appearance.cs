@@ -479,8 +479,8 @@ internal sealed partial class PdfFormEditor
         sb.Append("Q\nEMC\n");
 
         // Resources: those of the old appearance, with the font added.
-        var res = new PdfDict(oldResources == null ? Entries() : new Dictionary<string, PdfObject>(oldResources.Entries, StringComparer.Ordinal));
-        var fonts = new PdfDict(D(res, "Font") is PdfDict of ? new Dictionary<string, PdfObject>(of.Entries, StringComparer.Ordinal) : Entries());
+        var res = PdfDict.CopyOf(oldResources);
+        var fonts = PdfDict.CopyOf(D(res, "Font") as PdfDict);
         fonts.Entries[font.ResourceName] = font.Ref;
         res.Entries["Font"] = fonts;
 
@@ -627,8 +627,8 @@ internal sealed partial class PdfFormEditor
             if (forms.Count == 0) continue;
 
             var res = InheritedResources(page!);
-            var newRes = new PdfDict(res == null ? Entries() : new Dictionary<string, PdfObject>(res.Entries, StringComparer.Ordinal));
-            var xobjects = new PdfDict(existing == null ? Entries() : new Dictionary<string, PdfObject>(existing.Entries, StringComparer.Ordinal));
+            var newRes = PdfDict.CopyOf(res);
+            var xobjects = PdfDict.CopyOf(existing);
             foreach (var (name, r) in forms) xobjects.Entries[name] = r;
             newRes.Entries["XObject"] = xobjects;
             edited.Entries["Resources"] = newRes;

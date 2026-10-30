@@ -10,8 +10,6 @@ internal sealed partial class TrueTypeFont
         if (Table("cmap") is { } cmap) _cmaps = CmapTable.Subtables(_font, cmap.Offset, cmap.Length);
     }
 
-    public bool HasCmap(int platform, int encoding) => _cmaps.Any(c => c.Platform == platform && c.Encoding == encoding);
-
     public bool HasAnyCmap => _cmaps.Count > 0;
 
     /// <summary>Looks a code up in the (platform, encoding) subtable. Returns 0 if absent.</summary>

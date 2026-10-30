@@ -314,8 +314,8 @@ internal static class EmbeddedFiles
         tree.Entries["Names"] = new PdfArray(entries.SelectMany(e => new PdfObject[] { new PdfString(e.Key), e.Value }).ToList());
         update.WriteObject(treeNum, 0, tree);
 
-        var cat = Copy(catalog);
-        var names = Copy(file.GetDict(catalog, "Names"));
+        var cat = PdfDict.CopyOf(catalog);
+        var names = PdfDict.CopyOf(file.GetDict(catalog, "Names"));
         names.Entries["EmbeddedFiles"] = new PdfRef(treeNum, 0);
         cat.Entries["Names"] = names;
         if (part == 3)
@@ -329,7 +329,4 @@ internal static class EmbeddedFiles
         update.Finish(rootRef, next);
         return update.Output.Span.ToArray();
     }
-
-    private static PdfDict Copy(PdfDict? d)
-        => d == null ? new PdfDict() : new PdfDict(new Dictionary<string, PdfObject>(d.Entries, StringComparer.Ordinal));
 }

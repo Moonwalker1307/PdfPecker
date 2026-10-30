@@ -109,6 +109,13 @@ internal class PdfDict : PdfObject
     public PdfDict() => Entries = new Dictionary<string, PdfObject>(StringComparer.Ordinal);
     public PdfDict(Dictionary<string, PdfObject> entries) => Entries = entries;
 
+    /// <summary>
+    /// A new dictionary with the entries of <paramref name="source"/>, or an empty one. The values are shared, not copied,
+    /// so the writers that add or replace entries in the copy leave the parsed document as it was.
+    /// </summary>
+    public static PdfDict CopyOf(PdfDict? source)
+        => source == null ? new PdfDict() : new PdfDict(new Dictionary<string, PdfObject>(source.Entries, StringComparer.Ordinal));
+
     public PdfObject? this[string key] => Entries.TryGetValue(key, out var v) ? v : null;
     public bool ContainsKey(string key) => Entries.ContainsKey(key);
     public override string ToString() => "<<" + string.Join(" ", Entries.Select(e => "/" + e.Key + " " + e.Value)) + ">>";

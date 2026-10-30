@@ -1489,6 +1489,9 @@ internal sealed partial class SvgImage
     }
 }
 
+// This stays apart from the renderer's Rendering.Graphics.Matrix. It computes in float, as the coordinates of the HTML
+// and SVG writer are, and its inverse divides by the determinant where the renderer's multiplies by its reciprocal, so
+// sharing one type would change the bytes the writer produces.
 /// <summary>An affine transform [a c e; b d f; 0 0 1] mapping (x, y) to (a x + c y + e, b x + d y + f).</summary>
 internal readonly struct Matrix
 {
