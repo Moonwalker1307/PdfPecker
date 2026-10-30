@@ -4313,6 +4313,54 @@ public class JpxLengthTests
     }
 }
 
+/// <summary>
+/// A page that fills shapes with hundreds of distinct tiling patterns, each a page-sized cell: the renderer cached the
+/// rendered cell of every pattern for the whole page, so the heap grew by a page of pixels per pattern. The fuzzer
+/// found it through an SVG filter whose content filled 300 rectangles with a pattern in object bounding box units.
+/// </summary>
+[Collection(HostileInputCollection.Name)]
+public class PatternTileCacheTests
+{
+    [Fact]
+    public void Distinct_page_sized_patterns_do_not_accumulate()
+    {
+        const int Size = 1000, Patterns = 150;
+        var pdf = new FixturePdf();
+        var names = new StringBuilder();
+        var content = new StringBuilder();
+        for (int i = 0; i < Patterns; i++)
+        {
+            int p = pdf.AddStream($"/PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 {Size} {Size}] /XStep {Size} /YStep {Size} /Resources << >>",
+                $"0 0.5 0 rg 0 0 {Size} {Size} re f");
+            names.Append(CultureInfo.InvariantCulture, $"/P{i} {p} 0 R ");
+            content.Append(CultureInfo.InvariantCulture, $"/Pattern cs /P{i} scn {i} {i} 10 10 re f\n");
+        }
+        var bytes = pdf.Build(Size, Size, content.ToString(), $"/Pattern << {names} >>");
+
+        // A cell is 1000 × 1000 pixels, 4 MB, so keeping all 150 of them retains 600 MB.
+        long baseline = GC.GetTotalMemory(true), peak = 0;
+        using var done = new ManualResetEventSlim();
+        var sampler = new Thread(() =>
+        {
+            while (!done.Wait(20)) peak = Math.Max(peak, GC.GetTotalMemory(true) - baseline);
+        });
+        sampler.Start();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        RenderedImage img;
+        try
+        {
+            img = PdfRenderer.Open(bytes).RenderPage(0, new ImageOptions { Dpi = 72 }, cts.Token);
+        }
+        finally
+        {
+            done.Set();
+            sampler.Join();
+        }
+        FixturePdf.AssertAt(img, Patterns - 5, Patterns - 5, 0, 128, 0);
+        Assert.True(peak < 256L << 20, $"the renderer retained {peak >> 20} MB");
+    }
+}
+
 [CollectionDefinition(Name, DisableParallelization = true)]
 public sealed class HostileInputCollection
 {
