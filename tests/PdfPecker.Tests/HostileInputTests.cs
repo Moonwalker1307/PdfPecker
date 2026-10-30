@@ -1440,6 +1440,31 @@ public class HostileInputTests
         }
     }
 
+    [Fact]
+    public void Overlapping_cmap_ranges_stop_at_the_code_limit()
+    {
+        // Every segment of a format 4 subtable and every group of a format 12 or 13 one covers all its codes again:
+        // billions of mappings from a few hundred kilobytes, unless a subtable stops at its limit of codes.
+        var regular = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "WorkSans-Regular.ttf"));
+        var fonts = new[]
+        {
+            CmapFonts.With(regular, 3, 1, CmapFonts.Segments(Enumerable.Repeat((0, 0xFFFE, 1), 30_000).ToList())),
+            CmapFonts.With(regular, 3, 10, CmapFonts.Groups(12, Enumerable.Repeat((0, 0x10FFFF, 1), 30_000))),
+            CmapFonts.With(regular, 3, 10, CmapFonts.Groups(13, Enumerable.Repeat((0, 0x10FFFF, 1), 30_000))),
+        };
+        foreach (var font in fonts)
+        {
+            var program = Bounded(() => Assert.Single(FontProgram.Load(font)));
+            Assert.NotEqual(0, Bounded(() => program.GlyphId('A')));
+            var trueType = TrueTypeFont.Parse(font)!;
+            var map = Bounded(() => trueType.GetCmap(3, 10) ?? trueType.GetCmap(3, 1));
+            Assert.InRange(map!.Count, 1, 200_000);
+            var options = new PdfOptions();
+            options.Fonts.Add(font);
+            AssertStructurallyValid(Bounded("<p style='font-family: \"Work Sans\"'>A \U0001F600</p>", options));
+        }
+    }
+
     private static PdfOptions ColorFont(byte[] font) => new() { Fonts = new FontCollection().Add(font, "C") };
 
     [Fact]

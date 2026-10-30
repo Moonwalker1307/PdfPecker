@@ -40,7 +40,7 @@ internal sealed partial class TrueTypeFont : IGlyphSource
     private int[] _loca = Array.Empty<int>();
     private int _glyf = -1, _glyfLength;
     private int _numberOfHMetrics, _hmtx = -1;
-    private readonly List<CmapSubtable> _cmaps = new();
+    private List<CmapTable.Subtable> _cmaps = new();
     private readonly Dictionary<int, Dictionary<int, int>?> _cmapCache = new();
     private Dictionary<string, int>? _postNames;
     private bool _postLoaded;
@@ -48,8 +48,6 @@ internal sealed partial class TrueTypeFont : IGlyphSource
     private readonly object _lock = new();
 
     private readonly record struct TableRecord(int Offset, int Length);
-
-    private readonly record struct CmapSubtable(int Platform, int Encoding, int Offset);
 
     public int UnitsPerEm { get; private set; } = DefaultUnitsPerEm;
     public int GlyphCount { get; private set; }

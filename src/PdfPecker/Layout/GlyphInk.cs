@@ -36,12 +36,7 @@ internal static class GlyphInk
         private readonly Dictionary<int, Contours?> _glyphs = new();
         private readonly FlatPath _flat = new();
 
-        public Outlines(FontProgram program)
-        {
-            var tables = program.Tables.Select(t => (TagName(t.Tag), t.Offset, t.Length));
-            var trueType = TrueTypeFont.Parse(program.Data, tables);
-            _source = trueType?.CffTable is { } cff ? CffFont.Parse(cff) : trueType;
-        }
+        public Outlines(FontProgram program) => _source = FontProgramOutlines.Source(program);
 
         public Outlines(byte[]? data) => _source = data == null ? null : TrueTypeFont.Parse(data);
 
@@ -92,8 +87,6 @@ internal static class GlyphInk
             if (n < points.Length) Array.Resize(ref points, n);
             return new Contours(points, bottom, top);
         }
-
-        private static string TagName(uint tag) => new([(char)(tag >> 24), (char)(tag >> 16 & 0xFF), (char)(tag >> 8 & 0xFF), (char)(tag & 0xFF)]);
     }
 
     /// <summary>
