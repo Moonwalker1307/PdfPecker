@@ -150,6 +150,7 @@ internal static class HanKerning
             }
             catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException)
             {
+                SwallowedErrors.Record(ex);
                 return 0;
             }
             return run.Count == 1 ? run[0].XAdvance : 0;

@@ -73,6 +73,7 @@ internal sealed partial class PdfFile
             }
             catch (Exception ex) when (IsDamagedObjectError(ex))
             {
+                SwallowedErrors.Record(ex);
                 return false;
             }
         }

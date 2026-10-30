@@ -64,6 +64,7 @@ internal static class GlyphInk
             }
             catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or OverflowException or InvalidOperationException)
             {
+                SwallowedErrors.Record(ex);
                 return null;
             }
             if (path == null || path.IsEmpty) return null;

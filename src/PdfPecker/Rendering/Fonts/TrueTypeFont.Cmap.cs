@@ -35,7 +35,7 @@ internal sealed partial class TrueTypeFont
                 // A damaged subtable is lost as a whole, and the next one for the same platform and encoding is tried.
                 var sink = new CmapDictionary(new Dictionary<int, int>());
                 try { map = CmapTable.Read(_font, subtable.Offset, ref sink) ? sink.Map : null; }
-                catch (IndexOutOfRangeException) { map = null; }
+                catch (IndexOutOfRangeException ex) { SwallowedErrors.Record(ex); map = null; }
                 if (map != null) break;
             }
             _cmapCache[key] = map;

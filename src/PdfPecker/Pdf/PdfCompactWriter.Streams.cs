@@ -36,6 +36,7 @@ internal sealed partial class PdfCompactWriter
         }
         catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or PdfFormatException or ArgumentException or IndexOutOfRangeException or OverflowException)
         {
+            SwallowedErrors.Record(ex);
             return s;
         }
         // The decoders stop at their limit rather than fail, so data that reaches it may be cut short.

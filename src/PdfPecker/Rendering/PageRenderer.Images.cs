@@ -29,6 +29,7 @@ internal sealed partial class PageRenderer
         catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or PdfFormatException or IndexOutOfRangeException
                                        or ArgumentException or OverflowException or InvalidCastException)
         {
+            SwallowedErrors.Record(ex);
             return null;
         }
     }

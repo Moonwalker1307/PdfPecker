@@ -342,6 +342,7 @@ public static class PdfImages
         catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or PdfFormatException or IndexOutOfRangeException
                                        or ArgumentException or OverflowException or InvalidCastException)
         {
+            SwallowedErrors.Record(ex);
             return null;
         }
     }
@@ -395,6 +396,7 @@ public static class PdfImages
         }
         catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or PdfFormatException or IndexOutOfRangeException)
         {
+            SwallowedErrors.Record(ex);
             return null;
         }
     }

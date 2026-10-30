@@ -67,6 +67,7 @@ internal sealed partial class CffFont : IGlyphSource
         }
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or FormatException or OverflowException or InvalidOperationException)
         {
+            SwallowedErrors.Record(ex);
             return null;
         }
     }
@@ -345,6 +346,7 @@ internal sealed partial class CffFont : IGlyphSource
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException)
         {
             // A damaged charstring draws what it managed to before the damage.
+            SwallowedErrors.Record(ex);
         }
         return glyph;
     }

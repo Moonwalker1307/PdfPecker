@@ -85,6 +85,7 @@ internal sealed class Ligatures
         }
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException)
         {
+            SwallowedErrors.Record(ex);
             return null;
         }
     }

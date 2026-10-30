@@ -74,9 +74,10 @@ internal sealed partial class JpegDecoder
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or InvalidDataException or OverflowException)
         {
             // Truncated or corrupt: return what was decoded if the frame is known.
+            SwallowedErrors.Record(ex);
             if (!decoder.HasSupportedFrame) return null;
             try { return (decoder.Output(), decoder._width, decoder._height, decoder._components.Length); }
-            catch (Exception ex2) when (ex2 is IndexOutOfRangeException or ArgumentException) { return null; }
+            catch (Exception ex2) when (ex2 is IndexOutOfRangeException or ArgumentException) { SwallowedErrors.Record(ex2); return null; }
         }
     }
 

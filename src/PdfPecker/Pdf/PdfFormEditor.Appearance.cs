@@ -247,6 +247,7 @@ internal sealed partial class PdfFormEditor
             }
             catch (Exception ex) when (ex is FormatException or InvalidDataException or IndexOutOfRangeException or ArgumentException)
             {
+                SwallowedErrors.Record(ex);
                 throw new ArgumentException("PdfFormFillOptions.Font is not a TrueType or OpenType font: " + ex.Message, "options", ex);
             }
         }

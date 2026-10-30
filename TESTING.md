@@ -49,6 +49,17 @@ and must finish within their time bounds. Malformed input may only surface as th
 documents. A fix for a crash, hang or huge allocation on bad input gets a regression test there; a new parser of
 untrusted input also gets resource limits and a fuzz target.
 
+### Swallowed exceptions
+
+To keep going on damaged input, the library catches `IndexOutOfRangeException`, `NullReferenceException` and
+`InvalidCastException` in its parsers, decoders and renderer. On well-formed input the same catch would hide a bug,
+so every such catch calls `SwallowedErrors.Record`, which passes the exception to `SwallowedErrors.Sink` when one is
+set. The sink is per execution context (an `AsyncLocal`), so a test sees only its own work and the hostile-input tests,
+which never set it, are unaffected; release behaviour does not change. `SwallowedErrorTests` sets it and fails when
+anything is swallowed while converting every golden sample, rendering and reading back the golden PDFs and the
+third-party fixtures, and embedding the fixture fonts and images. A new catch of these types must call
+`SwallowedErrors.Record`, and a new well-formed fixture belongs in that test.
+
 ## CommonMark
 
 `MarkdownSpecTests` runs the CommonMark 0.31.2 examples. The spec is downloaded into the temp folder (or read from

@@ -209,6 +209,7 @@ internal sealed class PdfLinearWriter : PdfObjectWriter
             }
             catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or PdfFormatException or ArgumentException or IndexOutOfRangeException or OverflowException)
             {
+                SwallowedErrors.Record(ex);
                 return resources;
             }
         }

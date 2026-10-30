@@ -117,6 +117,7 @@ internal sealed partial class Vp8Decoder
         }
         catch (Exception ex) when (ex is IndexOutOfRangeException or InvalidDataException)
         {
+            SwallowedErrors.Record(ex);
             return null;
         }
     }

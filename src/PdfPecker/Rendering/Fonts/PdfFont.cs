@@ -72,6 +72,7 @@ internal sealed partial class PdfFont
         catch (Exception ex) when (ex is PdfFormatException or IndexOutOfRangeException or ArgumentException or NotSupportedException or InvalidDataException)
         {
             // Unusable font program: fall back to substitution.
+            SwallowedErrors.Record(ex);
             if (font.Kind != FontKind.Type3)
             {
                 font.Kind = FontKind.Simple;

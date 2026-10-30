@@ -51,8 +51,9 @@ internal sealed partial class TrueTypeFont
             int budget = ComponentBudgetPerGlyph;
             AppendGlyph(path, gid, Matrix.Identity, 0, ref budget);
         }
-        catch (IndexOutOfRangeException)
+        catch (IndexOutOfRangeException ex)
         {
+            SwallowedErrors.Record(ex);
             path.Clear();
         }
         Volatile.Write(ref _glyphCache[gid], path);

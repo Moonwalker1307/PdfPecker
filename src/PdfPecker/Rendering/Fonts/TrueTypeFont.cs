@@ -70,6 +70,7 @@ internal sealed partial class TrueTypeFont : IGlyphSource
         }
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or OverflowException)
         {
+            SwallowedErrors.Record(ex);
             return null;
         }
     }
@@ -85,6 +86,7 @@ internal sealed partial class TrueTypeFont : IGlyphSource
         }
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or OverflowException)
         {
+            SwallowedErrors.Record(ex);
             return null;
         }
     }
@@ -173,7 +175,7 @@ internal sealed partial class TrueTypeFont : IGlyphSource
             {
                 _postLoaded = true;
                 try { _postNames = ReadPostNames(); }
-                catch (IndexOutOfRangeException) { _postNames = null; }
+                catch (IndexOutOfRangeException ex) { SwallowedErrors.Record(ex); _postNames = null; }
             }
         }
         return _postNames != null && _postNames.TryGetValue(name, out int gid) ? gid : -1;

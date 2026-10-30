@@ -50,6 +50,7 @@ internal sealed partial class PdfImage
         }
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or InvalidDataException or EndOfStreamException or OverflowException)
         {
+            SwallowedErrors.Record(ex);
         }
         return null;
     }
@@ -96,6 +97,7 @@ internal sealed partial class PdfImage
         }
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or InvalidDataException or FormatException or EndOfStreamException)
         {
+            SwallowedErrors.Record(ex);
             return null;
         }
     }
@@ -124,6 +126,7 @@ internal sealed partial class PdfImage
         }
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or InvalidDataException or FormatException or EndOfStreamException)
         {
+            SwallowedErrors.Record(ex);
             return false;
         }
     }
@@ -234,6 +237,7 @@ internal sealed partial class PdfImage
         catch (Exception ex) when (ex is InvalidDataException or IndexOutOfRangeException or ArgumentException or NotSupportedException
                                        or FormatException or Rendering.Parsing.PdfFormatException)
         {
+            SwallowedErrors.Record(ex);
             return null;
         }
     }

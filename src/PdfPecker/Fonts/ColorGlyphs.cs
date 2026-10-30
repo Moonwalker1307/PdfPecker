@@ -87,6 +87,7 @@ internal sealed class ColorGlyphs
         }
         catch (Exception ex) when (ex is FormatException or IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException)
         {
+            SwallowedErrors.Record(ex);
             return null;
         }
     }
@@ -141,6 +142,7 @@ internal sealed class ColorGlyphs
         }
         catch (Exception ex) when (ex is FormatException or IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException)
         {
+            SwallowedErrors.Record(ex);
             read = Math.Clamp(MaxPaints - budget, 1, MaxPaints);
             return null;
         }
@@ -494,6 +496,7 @@ internal sealed class ColorGlyphs
         }
         catch (Exception ex) when (ex is FormatException or IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException)
         {
+            SwallowedErrors.Record(ex);
             return true;
         }
     }

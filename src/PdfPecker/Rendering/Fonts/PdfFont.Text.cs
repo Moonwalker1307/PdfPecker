@@ -24,6 +24,7 @@ internal sealed partial class PdfFont
         catch (Exception ex) when (ex is PdfFormatException or InvalidDataException or NotSupportedException or IndexOutOfRangeException)
         {
             // A damaged ToUnicode map only loses the text, not the drawing; the other sources still apply.
+            SwallowedErrors.Record(ex);
         }
         var source = Source;
         _gidToUnicode = new Lazy<Dictionary<int, int>?>(() => ReverseCmap(source), LazyThreadSafetyMode.ExecutionAndPublication);

@@ -435,6 +435,7 @@ internal sealed class PdfStampWriter : PdfObjectWriter
         }
         catch (Exception ex) when (ex is PdfFormatException or InvalidDataException or NotSupportedException or IndexOutOfRangeException or ArgumentException or OverflowException)
         {
+            SwallowedErrors.Record(ex);
             return (0, 0);
         }
         int under = Math.Min(-low, 10_000);
@@ -504,6 +505,7 @@ internal sealed class PdfStampWriter : PdfObjectWriter
             }
             catch (Exception ex) when (ex is PdfFormatException or NotSupportedException or IndexOutOfRangeException or ArgumentException or OverflowException)
             {
+                SwallowedErrors.Record(ex);
                 throw new InvalidDataException("The stamp page's content cannot be read: " + ex.Message, ex);
             }
             content = WithoutMarkedContentIds(data.ToArray());

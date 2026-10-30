@@ -243,6 +243,7 @@ internal sealed partial class FontProgram
         }
         catch (Exception ex) when (ex is not (FormatException or NotSupportedException) && IsFormatError(ex))
         {
+            SwallowedErrors.Record(ex);
             throw new FormatException("The font file is damaged.", ex);
         }
         return result;
@@ -252,7 +253,7 @@ internal sealed partial class FontProgram
     private static void TryAdd(List<FontProgram> fonts, byte[] data, int offsetTable)
     {
         try { fonts.Add(new FontProgram(data, offsetTable)); }
-        catch (Exception ex) when (IsFormatError(ex)) { }
+        catch (Exception ex) when (IsFormatError(ex)) { SwallowedErrors.Record(ex); }
     }
 
     internal static bool IsFormatError(Exception ex)
@@ -349,7 +350,7 @@ internal sealed partial class FontProgram
         int[]? map;
         string[]? contextual;
         try { map = FontFeatures.Substitutions(this, features, out contextual); }
-        catch (Exception ex) when (IsFormatError(ex)) { map = null; contextual = null; }
+        catch (Exception ex) when (IsFormatError(ex)) { SwallowedErrors.Record(ex); map = null; contextual = null; }
         if (map == null && contextual == null) return this;
         // The variant shares the font data and every table reader; only the character map and widths differ. Features
         // are applied after a variable font is instanced, so a variant never makes instances of its own.
@@ -413,7 +414,7 @@ internal sealed partial class FontProgram
             var axes = Volatile.Read(ref _axes);
             if (axes != null) return axes;
             try { axes = FontVariations.CanInstance(this) ? FontVariations.ReadAxes(this) : Array.Empty<VariationAxis>(); }
-            catch (Exception ex) when (IsFormatError(ex)) { axes = Array.Empty<VariationAxis>(); }
+            catch (Exception ex) when (IsFormatError(ex)) { SwallowedErrors.Record(ex); axes = Array.Empty<VariationAxis>(); }
             Volatile.Write(ref _axes, axes);
             return axes;
         }
@@ -450,6 +451,7 @@ internal sealed partial class FontProgram
         }
         catch (Exception ex) when (IsFormatError(ex) || ex is InvalidOperationException)
         {
+            SwallowedErrors.Record(ex);
             return this;
         }
     }
@@ -544,6 +546,7 @@ internal sealed partial class FontProgram
                     }
                     catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException)
                     {
+                        SwallowedErrors.Record(ex);
                         _layout = null;
                     }
                     Volatile.Write(ref _layoutLoaded, true);

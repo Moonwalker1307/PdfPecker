@@ -78,6 +78,7 @@ public sealed class FontCollection
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException || FontProgram.IsFormatError(ex))
             {
+                SwallowedErrors.Record(ex);
                 continue;
             }
             lock (_lock)
@@ -156,7 +157,7 @@ public sealed class FontCollection
         var program = new Lazy<FontProgram?>(() =>
         {
             try { return load(); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException || FontProgram.IsFormatError(ex)) { return null; }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException || FontProgram.IsFormatError(ex)) { SwallowedErrors.Record(ex); return null; }
         });
         foreach (var name in names)
         {

@@ -24,6 +24,7 @@ dotnet fuzz/PdfPecker.Fuzz/bin/Release/net10.0/PdfPecker.Fuzz.dll --target html 
 | `--timeout <s>` | Wall-clock limit per input (default 5). The `svg` target raises it to at least 30, because large inputs of filtered shapes are slow but linear. |
 | `--max-memory-mb <n>` | Heap ceiling per input (default 1536). |
 | `--strict` | Also report the exceptions that `ImageLoader` swallows around the image decoders (see below). |
+| `--swallowed` | Count the bug-type exceptions the library catches and carries on from (see below), by type and throwing frame, in the progress and final lines. |
 | `--no-minimize` | Save inputs as found. |
 | `--repro <file> --target <name>` | Run one saved input once; prints the verdict and exits with 10 when it fails. |
 
@@ -49,6 +50,11 @@ rather than in loading.
   not reported unless `--strict` is given. `pdf-form` also accepts the documented `InvalidOperationException` for
   flattening a signed PDF, `pdf-compact` and `pdf-linearize` the documented `ArgumentException` for a signed or
   encrypted PDF, and `pdf-sanitize` the same for an encrypted one.
+* **swallowed** (counted, never a finding): with `--swallowed`, the worker sets `SwallowedErrors.Sink` and counts each
+  `IndexOutOfRangeException`, `NullReferenceException` and `InvalidCastException` that a catch inside the library
+  swallows to keep going on damaged input, such as the renderer's catch around each content-stream operator. Damaged
+  input may legitimately end there, so these are not reported; a frame that keeps coming up is worth a look, because
+  the same catch hides real bugs. `SwallowedErrorTests` fails on any of them for well-formed input.
 * **timeout**: an input that runs longer than `--timeout`. The token is cancelled first; a target without a token
   (`pdf-verify`, the image decoders) is waited for three more seconds, then its thread is abandoned and the process
   restarted.

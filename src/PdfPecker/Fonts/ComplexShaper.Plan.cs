@@ -88,7 +88,7 @@ internal static partial class ComplexShaper
                 if (IsIndic(script)) return BuildIndicScriptPlan(font, layout, script);
                 return layout == null ? Plan.Empty : BuildPlan(layout, script, ScriptTag(script), font.ShapedFeatures);
             }
-            catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException) { return Plan.Empty; }
+            catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException) { SwallowedErrors.Record(ex); return Plan.Empty; }
         }, (font, layout));
 
     // An Indic script's plan: the Indic stages for GSUB, and the positioning features of the script's tag in GPOS, which

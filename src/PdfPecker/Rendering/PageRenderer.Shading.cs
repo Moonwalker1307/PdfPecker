@@ -193,6 +193,7 @@ internal sealed partial class PageRenderer
         }
         catch (Exception ex) when (ex is IndexOutOfRangeException or InvalidDataException or PdfFormatException or ArgumentException or NotSupportedException)
         {
+            SwallowedErrors.Record(ex);
         }
         return null;
     }
