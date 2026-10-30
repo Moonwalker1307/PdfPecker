@@ -299,6 +299,13 @@ internal sealed class Compound
     /// work; with them every list is matched at most once per element. The results stay valid only while the tree does
     /// not change, so the cache lives for one <see cref="StyleResolver.ResolveTree"/>.
     /// </summary>
+    /// <remarks>
+    /// It stays a thread static rather than state of the <see cref="ConversionContext"/>: it lives for a style pass,
+    /// not a conversion, and matching, the hottest code of the cascade, reaches it through static methods and
+    /// <see cref="Matches"/>, which would otherwise all take the context as a parameter. The same holds for
+    /// <see cref="_hasAnchor"/>, which is matching state, and for the parser's flag of a :has() argument in
+    /// <see cref="Selector"/>.
+    /// </remarks>
     [ThreadStatic] private static Dictionary<(PseudoCondition, Element), bool>? _memo;
 
     /// <summary>Starts remembering list results; returns the previous cache for <see cref="EndMatching"/>.</summary>

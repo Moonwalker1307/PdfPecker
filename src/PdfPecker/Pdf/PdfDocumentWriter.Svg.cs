@@ -350,11 +350,12 @@ internal sealed partial class PdfDocumentWriter
     // of nested filters doubled the resolution of the one around it, up to the pixel cap at each level.
     private float _svgFilterDensity = FilterPixelsPerPoint;
 
-    // The work the document's filters have spent, shared with the writers that render filtered content for this one.
-    private SvgFilterBudget _filterBudget = new();
+    // The work the document's filters have spent, shared through the context with the writers that render filtered
+    // content for this one.
+    private SvgFilterBudget FilterBudget => _context.SvgFilters;
 
     // The pieces the document's tiled repeating gradients have written, shared in the same way.
-    private GradientTilingBudget _gradientBudget = new();
+    private GradientTilingBudget GradientBudget => _context.GradientTiling;
 
     /// <summary>
     /// Draws filtered SVG content: the content is rendered to pixels over the filter region, the filter runs on them,
@@ -370,7 +371,7 @@ internal sealed partial class PdfDocumentWriter
         double pw = Math.Ceiling(f.W * kx), ph = Math.Ceiling(f.H * ky);
         if (!(pw >= 1 && ph >= 1)) return;
         var (w, h) = FilterPixels(pw, ph);
-        if (!f.WithinBudget(w, h) || !_filterBudget.TrySpend(f.DocumentWork(w, h)))
+        if (!f.WithinBudget(w, h) || !FilterBudget.TrySpend(f.DocumentWork(w, h)))
         {
             // Too much work: the content is drawn without the filter, as a filter that can not run is left out.
             WriteSvgShapes(b, shape.Children!, toPage);
@@ -434,7 +435,7 @@ internal sealed partial class PdfDocumentWriter
         byte[] pdf;
         try
         {
-            var writer = new PdfDocumentWriter(page, compress: false, CompressionLevel.NoCompression) { Cancellation = Cancellation, _svgFilterDensity = 1, _filterBudget = _filterBudget, _gradientBudget = _gradientBudget };
+            var writer = new PdfDocumentWriter(page, compress: false, CompressionLevel.NoCompression, _context) { _svgFilterDensity = 1 };
             pdf = writer.Write(new List<DrawOp> { new SvgOp(0, 0, pixelsW, pixelsH, drawing) }, pixelsH,
                 new Dictionary<string, float>(), 0, null, null, null, null, null);
         }

@@ -20,7 +20,8 @@ public static partial class HtmlToPdf
         private readonly ConversionSettings _settings;
         private readonly string? _baseDirectory;
         private readonly Func<string, byte[]?>? _resolver;
-        private readonly CancellationToken _cancellation;
+        /// <summary>The caller's cancellation and the limits that every step of the conversion shares.</summary>
+        private readonly ConversionContext _context;
 
         private Element _doc = null!;
         private NamesUsed _namesUsed;
@@ -70,7 +71,7 @@ public static partial class HtmlToPdf
             _settings = settings;
             _baseDirectory = baseDirectory;
             _resolver = options.ResourceResolver;
-            _cancellation = cancellation;
+            _context = new ConversionContext(cancellation);
             _scale = options.Scale;
         }
 
@@ -142,7 +143,7 @@ public static partial class HtmlToPdf
         /// <summary>Sets up the loaders of images and fonts, and what the style passes need besides the stylesheet.</summary>
         private void LoadResources()
         {
-            _images = new ImageLoader(_baseDirectory, _resolver, _options.AllowFileAccess);
+            _images = new ImageLoader(_baseDirectory, _resolver, _options.AllowFileAccess, _context);
             _missingFonts = _options.MissingFont is { } onMissing ? new MissingFontReport(onMissing) : null;
             _fonts = FontResolver.Create(_sheet.FontFaces, _options.Fonts, FetchFont(_images),
                 embedStandard: _options.EmbedStandardFonts || _settings.Conformance != PdfConformance.None || _settings.IsPdfUA,
@@ -219,7 +220,7 @@ public static partial class HtmlToPdf
         private void ResolveStyles()
         {
             _root = InitialStyle(_options.Language);
-            var styles = new StyleResolver(_sheet, _page.ContentWidth, _viewport) { Cancellation = _cancellation, Paged = _paged, StandardsMode = (_namesUsed & NamesUsed.StandardsMode) != 0 };
+            var styles = new StyleResolver(_sheet, _page.ContentWidth, _viewport) { Context = _context, Paged = _paged, StandardsMode = (_namesUsed & NamesUsed.StandardsMode) != 0 };
             styles.ResolveTree(_doc, _root);
             _styles = styles;
         }
@@ -292,8 +293,8 @@ public static partial class HtmlToPdf
             var (header, footer) = BandsOf(pageName, documentFirst, runFirst);
             if (header == null && footer == null) return;
             bool truncate = _options.TruncateBandsToWholePoints;
-            if (header != null) setup.BandTop = Math.Max(DeclaredHeight(header, setup, truncate), BandHeight(header, setup, _images, _cancellation));
-            if (footer != null) setup.BandBottom = Math.Max(DeclaredHeight(footer, setup, truncate), BandHeight(footer, setup, _images, _cancellation));
+            if (header != null) setup.BandTop = Math.Max(DeclaredHeight(header, setup, truncate), BandHeight(header, setup, _images, _context));
+            if (footer != null) setup.BandBottom = Math.Max(DeclaredHeight(footer, setup, truncate), BandHeight(footer, setup, _images, _context));
             float limit = setup.ContentHeight * 0.6f;
             float bands = setup.BandTop + setup.BandBottom;
             if (bands > limit)

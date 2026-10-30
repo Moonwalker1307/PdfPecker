@@ -70,7 +70,7 @@ internal sealed partial class PdfDocumentWriter
         byte[] pdf;
         try
         {
-            var writer = new PdfDocumentWriter(page, compress: false, CompressionLevel.NoCompression) { Cancellation = Cancellation, _filterBudget = _filterBudget, _gradientBudget = _gradientBudget };
+            var writer = new PdfDocumentWriter(page, compress: false, CompressionLevel.NoCompression, _context);
             pdf = writer.Write(new List<DrawOp> { scaled }, ry + rh, new Dictionary<string, float>(), 0, null, null, null, null, null);
         }
         catch (PdfLimitException) { return default; }
@@ -119,7 +119,7 @@ internal sealed partial class PdfDocumentWriter
     private bool WithinRenderBudget(SvgFilter f, List<DrawOp> ops, int w, int h, long imageWork = 0)
     {
         long canvasWork = RenderWorkPerPixel(ops) * w * h + imageWork;
-        return canvasWork <= SvgFilter.MaxDocumentWork && f.WithinBudget(w, h) && _filterBudget.TrySpend(f.DocumentWork(w, h) + canvasWork);
+        return canvasWork <= SvgFilter.MaxDocumentWork && f.WithinBudget(w, h) && FilterBudget.TrySpend(f.DocumentWork(w, h) + canvasWork);
     }
 
     /// <summary>

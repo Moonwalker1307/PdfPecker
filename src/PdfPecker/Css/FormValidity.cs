@@ -27,9 +27,13 @@ internal static class FormValidity
     /// </summary>
     private static readonly TimeSpan BacktrackingTimeout = TimeSpan.FromMilliseconds(20);
 
-    /// <summary>Backtracking patterns that may take the full timeout in one document before the rest are no longer matched.</summary>
+    /// <summary>Backtracking patterns that may take the full timeout in one style pass before the rest are no longer matched.</summary>
     private const int MaxSlowPatterns = 8;
 
+    // The compiled patterns are a cache that outlives a document, like a buffer pool. The slow patterns are counted for
+    // one style pass, from Selector.BeginMatching, which resets them, and selector matching reaches this class through
+    // static methods that know no conversion; so the count stays per thread rather than in the ConversionContext, which
+    // names it among the limits it does not hold.
     [ThreadStatic] private static Dictionary<string, Regex?>? _patterns;
     [ThreadStatic] private static int _slowPatterns;
 

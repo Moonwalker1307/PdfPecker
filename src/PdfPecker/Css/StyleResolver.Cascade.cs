@@ -7,12 +7,16 @@ namespace PdfPecker.Css;
 /// <summary>The cascade: matching rules, ordering their declarations and computing styles from them.</summary>
 internal sealed partial class StyleResolver
 {
-    /// <summary>Stops resolving when cancelled.</summary>
-    public CancellationToken Cancellation { get; init; }
+    /// <summary>
+    /// The conversion the style pass is part of, whose cancellation stops it; null for a tree styled on its own. The
+    /// generated content of a pass has a limit of its own, <see cref="GeneratedBudget"/>, rather than one in the
+    /// context, because every pass evaluates the same content again.
+    /// </summary>
+    public ConversionContext? Context { get; init; }
 
     private void Resolve(Element e, ComputedStyle parent)
     {
-        if ((++_resolved & 255) == 0) Cancellation.ThrowIfCancellationRequested();
+        if ((++_resolved & 255) == 0) Context?.Cancellation.ThrowIfCancellationRequested();
         _count = 0;
         if (_registeredEach.Count > 0 || _registeredRoot.Count > 0) PushRegistered(e);
         Collect(UaIndex.Value, e, TierUa, TierUaImportant);

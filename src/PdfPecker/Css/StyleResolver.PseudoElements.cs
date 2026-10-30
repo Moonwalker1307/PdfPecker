@@ -357,7 +357,7 @@ internal sealed partial class StyleResolver
     private readonly bool _firstLetterRules, _firstLineRules;
     internal int QuoteDepth;
 
-    /// <summary>Characters of content values this document may still evaluate; see <see cref="GeneratedContent.MaxDocumentLength"/>.</summary>
+    /// <summary>Characters of content values this style pass may still evaluate; see <see cref="GeneratedContent.MaxDocumentLength"/>.</summary>
     internal int GeneratedBudget = GeneratedContent.MaxDocumentLength;
 
     /// <summary>Applies counter-reset, counter-increment and counter-set, in that order (CSS Lists 3).</summary>

@@ -418,7 +418,8 @@ internal sealed class ContainerQuery
 
     // The sizes that cq units refer to while the style resolver computes an element: 1% of the nearest container's
     // content box, NaN without one. Lengths are parsed by static helpers all over the CSS code, so the sizes are kept
-    // per thread for the duration of a style pass rather than passed through every one of them.
+    // per thread for the duration of a style pass rather than held in the ConversionContext and passed through every
+    // one of them.
     [ThreadStatic] private static float t_cqWidth, t_cqHeight;
     [ThreadStatic] private static bool t_cqSet;
 

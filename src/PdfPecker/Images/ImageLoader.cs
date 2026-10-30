@@ -31,17 +31,18 @@ internal sealed class ImageLoader
     /// <summary>The image pixels per CSS pixel of the picture an img element shows: 2 for a 2x srcset candidate.</summary>
     public float DensityOf(PdfPecker.Html.Element img) => Chosen.TryGetValue(img, out var c) ? c.Density : img.GeneratedResolution;
 
-    /// <summary>The drawing work left for the document's inline SVGs.</summary>
-    public readonly PdfPecker.Svg.SvgBudget SvgBudget = new();
+    /// <summary>The drawing work left for the document's inline SVGs and SVG images: the conversion's, when there is one.</summary>
+    public readonly PdfPecker.Svg.SvgBudget SvgBudget;
 
     /// <summary>The document's fonts, for the text in SVG images.</summary>
     public PdfPecker.Fonts.FontResolver? Fonts;
 
-    public ImageLoader(string? baseDirectory, Func<string, byte[]?>? resolver, bool allowFiles = false)
+    public ImageLoader(string? baseDirectory, Func<string, byte[]?>? resolver, bool allowFiles = false, ConversionContext? context = null)
     {
         _allowFiles = allowFiles;
         _baseDirectory = baseDirectory;
         _resolver = resolver;
+        SvgBudget = context?.SvgDrawing ?? new PdfPecker.Svg.SvgBudget();
     }
 
     private readonly Dictionary<(PdfImage Image, string Rects), PdfImage?[]?> _slices = new();

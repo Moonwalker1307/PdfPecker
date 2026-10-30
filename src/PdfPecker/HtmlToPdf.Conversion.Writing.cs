@@ -68,7 +68,7 @@ public static partial class HtmlToPdf
             return (marginFont, watermarkFont);
         }
 
-        private PdfDocumentWriter CreateWriter(TextFont? marginFont, TextFont? watermarkFont) => new(_page, _options.Compress, _options.CompressionLevel)
+        private PdfDocumentWriter CreateWriter(TextFont? marginFont, TextFont? watermarkFont) => new(_page, _options.Compress, _options.CompressionLevel, _context)
         {
             Watermark = _options.Watermark,
             RightToLeft = _rtlPages,
@@ -87,7 +87,6 @@ public static partial class HtmlToPdf
             MissingCharacter = _options.MissingCharacter,
             FixedDate = ReproducibleDate.Resolve(_options.CreationDate),
             MaxPages = _options.MaxPages,
-            Cancellation = _cancellation,
             Structure = _structure,
             PdfUAPart = _settings.PdfUAPart,
             Language = _structure == null ? null : _options.Language ?? _structure.Language ?? (_settings.IsPdfUA ? "en" : null),
@@ -104,14 +103,15 @@ public static partial class HtmlToPdf
         private PageMarginBoxes? CreateMarginBoxes()
             => !_options.IgnoreCssPageRules && PageMarginBoxes.AnyIn(_sheet.PageRules)
                 ? new PageMarginBoxes(_sheet.PageRules, () => InitialStyle(_htmlLang ?? _options.Language),
-                    _page, _images, _cancellation, _paged, _styles.CounterStyles) { FirstPageLeft = _rtlPages }
+                    _page, _images, _context, _paged, _styles.CounterStyles) { FirstPageLeft = _rtlPages }
                 : null;
 
         /// <summary>Draws the margin boxes and the running header and footer of each page, laid out per page when they number it.</summary>
         private Func<int, int, List<DrawOp>> PageBands(PdfDocumentWriter writer, PageMarginBoxes? marginBoxes)
         {
             var strings = _styles.Strings;
-            var laidOut = new BandLayouts();
+            // The bands without page numbers, laid out once per page setup and drawn again on every page.
+            var unnumbered = new Dictionary<(Element, PageSetup), List<DrawOp>>();
             Dictionary<string, int>? anchorPages = null;
             int? FirstPageOf(string id) => (anchorPages ??= PagesOfAnchors(_runs)).TryGetValue(id, out int n) ? n : null;
             return (p, count) =>
@@ -127,8 +127,8 @@ public static partial class HtmlToPdf
                     ops.AddRange(marginBoxes.Layout(p, count, setup, run.Name));
                 }
                 var (header, footer) = BandsOf(run.Name, p == 0, local == 0);
-                if (header != null) ops.AddRange(LayoutBandForPage(header, setup, _images, p, count, alignBottom: false, laidOut, FirstPageOf, _cancellation));
-                if (footer != null) ops.AddRange(LayoutBandForPage(footer, setup, _images, p, count, alignBottom: true, laidOut, FirstPageOf, _cancellation));
+                if (header != null) ops.AddRange(LayoutBandForPage(header, setup, _images, p, count, alignBottom: false, unnumbered, FirstPageOf, _context));
+                if (footer != null) ops.AddRange(LayoutBandForPage(footer, setup, _images, p, count, alignBottom: true, unnumbered, FirstPageOf, _context));
                 return ops;
             };
         }

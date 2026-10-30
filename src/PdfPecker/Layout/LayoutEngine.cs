@@ -52,20 +52,40 @@ internal sealed partial class LayoutEngine
     /// <summary>For a tagged PDF: the document's structure, whose slots the text, image and marker ops are tagged with.</summary>
     public StructureTree? Tags { get; init; }
 
-    /// <summary>Stops the layout when cancelled.</summary>
-    public CancellationToken Cancellation { get; init; }
+    /// <summary>
+    /// The conversion the layout is part of: its cancellation stops the layout, and <see cref="Layout"/> takes the base
+    /// of the relayout budget from it and leaves it what it did not use. Null for a tree laid out on its own, which
+    /// stops at no cancellation and gets the whole base.
+    /// </summary>
+    public ConversionContext? Context
+    {
+        get => _context;
+        init
+        {
+            _context = value;
+            _cancellation = value?.Cancellation ?? default;
+        }
+    }
+
+    private readonly ConversionContext? _context;
+
+    // The context's token, kept apart so that the checks while laying out each box read one field.
+    private readonly CancellationToken _cancellation;
+
+    /// <summary>Stops the layout when the conversion is cancelled.</summary>
+    public CancellationToken Cancellation => _cancellation;
 
     /// <summary>The most pages the flow may fill; checked as lines are placed, before their ops pile up.</summary>
     public int MaxPages { get; init; } = int.MaxValue;
 
     /// <summary>
     /// The part of the relayout budget that every document gets whatever its size (see <see cref="_relayoutBudget"/>),
-    /// or what earlier layouts of the same document left of it.
+    /// or what earlier layouts of the same document left of it: the context's when the layout started.
     /// </summary>
-    public long SharedRelayouts { get; init; } = BaseRelayouts;
+    private long _sharedRelayouts = BaseRelayouts;
 
-    /// <summary>How much of <see cref="SharedRelayouts"/> the layout took: the box layouts past its share per element.</summary>
-    public long SharedRelayoutsUsed => Math.Clamp(_boxLayouts - (_relayoutBudget - SharedRelayouts), 0, SharedRelayouts);
+    /// <summary>How much of <see cref="_sharedRelayouts"/> the layout took: the box layouts past its share per element.</summary>
+    private long SharedRelayoutsUsed => Math.Clamp(_boxLayouts - (_relayoutBudget - _sharedRelayouts), 0, _sharedRelayouts);
 
     /// <summary>Makes the content ops from <paramref name="start"/> on artifacts, for content drawn again (repeated table headers).</summary>
     private static void Untag(List<DrawOp> ops, int start = 0)
@@ -117,7 +137,8 @@ internal sealed partial class LayoutEngine
         // height 100% fill whichever page the section starts on, as in Chrome.
         _cbHeight = new CbHeights(_grid.Height(0), _grid.Height(1), _grid.Height(2));
         _cbKind = 0;
-        _relayoutBudget = SharedRelayouts + RelayoutsPerElement * CountElements(document);
+        if (_context != null) _sharedRelayouts = _context.SharedRelayouts;
+        _relayoutBudget = _sharedRelayouts + RelayoutsPerElement * CountElements(document);
         float bottom = LayoutFlow(document, 0, 0, width);
         _cbHeight = null;
         _pageBox = null;
@@ -125,7 +146,9 @@ internal sealed partial class LayoutEngine
         FinishFootnotes();
         FinishRoot(width);
         // A footnote continued past the last page of content needs a page of its own.
-        return Math.Max(bottom, FootnotesBottom());
+        float height = Math.Max(bottom, FootnotesBottom());
+        if (_context != null) _context.SharedRelayouts -= SharedRelayoutsUsed;
+        return height;
     }
 
     /// <summary>Min-content and max-content border-box widths of a block-level element.</summary>
@@ -1013,8 +1036,8 @@ internal sealed partial class LayoutEngine
     /// to the power of the limit, which a page of nested boxes reached; real documents stay far below the budget.
     /// A document is laid out run by run of named pages, again for the page numbers of target-counter() and again to
     /// shrink it to fit, and the base of the budget is for all of those layouts together (see
-    /// <see cref="SharedRelayouts"/>), while the share per element is for each: with a base for each, a page of 460
-    /// nested boxes kept whole in columns used most of it in each of its twelve layouts, for 4 s.
+    /// <see cref="ConversionContext.SharedRelayouts"/>), while the share per element is for each: with a base for each,
+    /// a page of 460 nested boxes kept whole in columns used most of it in each of its twelve layouts, for 4 s.
     /// </summary>
     private long _relayoutBudget = long.MaxValue;
     public const long BaseRelayouts = 250_000;
