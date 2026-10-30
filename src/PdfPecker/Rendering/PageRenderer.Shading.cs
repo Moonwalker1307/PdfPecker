@@ -7,7 +7,11 @@ namespace PdfPecker.Rendering;
 internal sealed partial class PageRenderer
 {
     private const int MaxTileSize = 2048;
+    // Pixels the cached tiles may hold together, 64 MB. Each pattern object has its own cache entry, and a page that
+    // fills shapes with hundreds of distinct patterns, each a page-sized cell, kept a page of pixels per pattern.
+    private const long MaxCachedTilePixels = 16L * 1024 * 1024;
     private Dictionary<(PdfObject, int, int, int, int, uint), TileShader?>? _tiles;
+    private long _cachedTilePixels;
 
     // The device pixels the fill being set up can touch, while a pattern for it is created; null for the whole clip.
     private (int X0, int Y0, int X1, int Y1)? _fillArea;
@@ -83,7 +87,16 @@ internal sealed partial class PageRenderer
         _tiles ??= new();
         if (_tiles.TryGetValue(key, out var cached) && cached != null && cached.SameOrigin(m)) return cached;
         var tile = BuildTile(ps, m, uncolored, rgb);
+        if (cached != null) _cachedTilePixels -= cached.Pixels;
+        long pixels = tile?.Pixels ?? 0;
+        if (_cachedTilePixels + pixels > MaxCachedTilePixels)
+        {
+            // Starting over keeps the tiles of the patterns drawn next; one that is used again is rendered again.
+            _tiles.Clear();
+            _cachedTilePixels = 0;
+        }
         _tiles[key] = tile;
+        _cachedTilePixels += pixels;
         return tile;
     }
 
@@ -218,6 +231,9 @@ internal sealed class TileShader : IShader
         _ph = tile.Height;
         _ = xs; _ = ys; _ = bx0; _ = by0;
     }
+
+    /// <summary>The pixels of the rendered cell, which the tile cache counts against its limit.</summary>
+    public long Pixels => (long)_tile.Width * _tile.Height;
 
     public bool SameOrigin(in Matrix m) => Math.Abs(m.E - _m.E) < 1e-6 && Math.Abs(m.F - _m.F) < 1e-6;
 
