@@ -24,6 +24,9 @@ internal static partial class PdfImageDecoder
     public static DecodedImage? Decode(PdfFile file, PdfDict dict, byte[] rawOrDecoded, bool alreadyDecoded, PdfDict? resources,
         bool inline, uint fillRgbForStencil = 0)
     {
+        // The image codecs charge what they allocate to the budget of this thread, which is the file's own when the
+        // caller opened no render scope.
+        using var budget = file.BeginFileBudget();
         int width = GetInt(file, dict, "Width", "W");
         int height = GetInt(file, dict, "Height", "H");
         if (width <= 0 || height <= 0 || (long)width * height > MaxPixels) return null;

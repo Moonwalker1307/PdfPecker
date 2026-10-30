@@ -96,13 +96,35 @@ internal sealed partial class PdfFile
     // ------------------------------------------------------------------ decode budget
 
     // Work limits for the page being rendered on this thread (see BeginRender): content streams, forms, fonts and images
-    // drawn many times or decompressing to huge sizes add up, and one page must not decode without bound.
+    // drawn many times or decompressing to huge sizes add up, and one page must not decode without bound. Decoding with
+    // no scope open on the thread is charged to the file's own budget instead (see BeginFileBudget).
     [ThreadStatic] private static long t_decodeBudget;
     [ThreadStatic] private static bool t_budgeted;
     [ThreadStatic] private static CancellationToken t_cancel;
+    // Set while the budget on this thread is a file's own (see BeginFileBudget) rather than a page's, for the message.
+    [ThreadStatic] private static bool t_fileBudget;
 
     /// <summary>The most decoded stream bytes one page render may produce, counting repeated decodes.</summary>
     public const long MaxDecodedPerPage = 512L * 1024 * 1024;
+
+    /// <summary>
+    /// How much the work on a file outside any render scope may decode per byte of the file, for files so large that
+    /// <see cref="MaxDecodedPerPage"/> is too small. It is twice the allowance of the object streams, so that they and
+    /// the cross-reference streams of a real file fit with room to spare.
+    /// </summary>
+    private const int UnscopedBudgetPerFileByte = 2 * ObjectStreamBudgetPerFileByte;
+
+    private long _unscopedDecoded;
+
+    /// <summary>
+    /// The most decoded bytes all work on this file outside a render scope may produce together, counting repeated
+    /// decodes: reading its cross-reference and object streams, walking its page tree, and any code that decodes
+    /// without <see cref="BeginRender"/>, on whatever thread it runs.
+    /// </summary>
+    internal long UnscopedBudget => Math.Max(MaxDecodedPerPage, (long)Data.Length * UnscopedBudgetPerFileByte);
+
+    /// <summary>The bytes decoded so far outside a render scope, counted once per decode.</summary>
+    internal long UnscopedDecoded => Interlocked.Read(ref _unscopedDecoded);
 
     /// <summary>What the page being rendered on this thread may still decode.</summary>
     internal static long DecodeLimit => t_budgeted ? Math.Max(0, t_decodeBudget) : long.MaxValue;
@@ -128,6 +150,45 @@ internal sealed partial class PdfFile
         }
     }
 
+    /// <summary>
+    /// Charges decoding on this thread to the file's own budget until disposed, when no render scope is open here. An
+    /// entry point that forgets <see cref="BeginRender"/>, work on a thread other than the one that opened the scope,
+    /// and reading the file before any page then stay bounded, where before only the per-stream limit applied. Inside
+    /// a render scope it does nothing, so scoped work keeps its own budget and cancellation.
+    /// </summary>
+    internal FileBudgetScope BeginFileBudget()
+    {
+        if (t_budgeted) return default;
+        long left = UnscopedBudget - Interlocked.Read(ref _unscopedDecoded);
+        t_budgeted = true;
+        t_fileBudget = true;
+        t_decodeBudget = left;
+        t_cancel = default;
+        return new FileBudgetScope(this, left);
+    }
+
+    internal readonly struct FileBudgetScope : IDisposable
+    {
+        private readonly PdfFile? _file;
+        private readonly long _start;
+
+        public FileBudgetScope(PdfFile file, long start)
+        {
+            _file = file;
+            _start = start;
+        }
+
+        public void Dispose()
+        {
+            if (_file == null) return;
+            // Threads that decode the same file at once each start from what was left, so together they may pass the
+            // budget by what each of them could still decode, but the total stays bounded.
+            Interlocked.Add(ref _file._unscopedDecoded, _start - t_decodeBudget);
+            t_budgeted = false;
+            t_fileBudget = false;
+        }
+    }
+
     /// <summary>Charges memory an image codec allocates against the page's decode budget, and checks for cancellation.</summary>
     internal static void ChargeDecoded(long bytes)
     {
@@ -135,7 +196,7 @@ internal sealed partial class PdfFile
         if (t_budgeted && (t_decodeBudget -= bytes) < 0) throw BudgetExceeded();
     }
 
-    /// <summary>True while a <see cref="BeginRender"/> scope is open on this thread.</summary>
+    /// <summary>True while a <see cref="BeginRender"/> scope, or a file's own budget, is open on this thread.</summary>
     internal static bool InRenderScope => t_budgeted;
 
     /// <summary>The cancellation token of the render running on this thread.</summary>
@@ -144,7 +205,8 @@ internal sealed partial class PdfFile
     /// <summary>Throws if the render running on this thread was cancelled.</summary>
     internal static void CheckCancel() => t_cancel.ThrowIfCancellationRequested();
 
-    private static InvalidDataException BudgetExceeded() => new("The page decodes to more data than allowed.");
+    private static InvalidDataException BudgetExceeded()
+        => new(t_fileBudget ? "The document decodes to more data than allowed." : "The page decodes to more data than allowed.");
 
     // ------------------------------------------------------------------ decoding
 
@@ -163,6 +225,7 @@ internal sealed partial class PdfFile
         var parmsObject = Resolve(s["DecodeParms"] ?? s["DP"]);
         var data = s.RawData;
         if (filterObject == null || filterObject.IsNull) return data;
+        using var budget = BeginFileBudget();
         foreach (var (name, parms) in FilterChain(filterObject, parmsObject))
         {
             if (Filters.IsImageFilter(name))

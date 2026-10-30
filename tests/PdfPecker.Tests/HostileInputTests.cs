@@ -2442,6 +2442,93 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Decoding_outside_a_render_scope_stays_within_the_file_budget()
+    {
+        // Code that opened no render scope used to be limited only per stream: a stream of 200 MB of zeros, a few
+        // hundred kilobytes in the file, could be decoded again and again without bound. Now all such decoding of one
+        // file shares a budget of its own.
+        const int size = 200 << 20;
+        var file = PdfFile.Open(SingleStreamBomb(size), null);
+        var stream = (PdfStream)file.GetObject(4)!;
+        int decoded = Bounded(() =>
+        {
+            int count = 0;
+            var ex = Assert.Throws<InvalidDataException>(() =>
+            {
+                for (int i = 0; i < 100; i++)
+                {
+                    Assert.Equal(size, file.DecodeStream(stream).Length);
+                    count++;
+                }
+            });
+            Assert.Contains("document", ex.Message, StringComparison.Ordinal);
+            return count;
+        });
+        Assert.Equal((int)(file.UnscopedBudget / size), decoded);
+        Assert.InRange(file.UnscopedDecoded, file.UnscopedBudget, file.UnscopedBudget + (1 << 20));
+
+        // A render scope keeps its own budget, which the file's spent one does not touch.
+        using (PdfFile.BeginRender(CancellationToken.None)) Assert.Equal(size, file.DecodeStream(stream).Length);
+        Assert.Throws<InvalidDataException>(() => file.DecodeStream(stream));
+    }
+
+    [Fact]
+    public void Decoding_outside_a_render_scope_on_many_threads_shares_one_file_budget()
+    {
+        // Thread-local scopes do not reach worker threads, so work handed to them without a scope of its own falls back
+        // to the file's budget, which every thread draws from.
+        const int size = 64 << 20, threads = 4;
+        var file = PdfFile.Open(SingleStreamBomb(size), null);
+        var stream = (PdfStream)file.GetObject(4)!;
+        int decoded = 0, stopped = 0;
+        Bounded(() => Parallel.For(0, threads, new ParallelOptions { MaxDegreeOfParallelism = threads }, _ =>
+        {
+            try
+            {
+                for (int i = 0; i < 100; i++)
+                {
+                    file.DecodeStream(stream);
+                    Interlocked.Increment(ref decoded);
+                }
+            }
+            catch (InvalidDataException)
+            {
+                Interlocked.Increment(ref stopped);
+            }
+        }));
+        Assert.Equal(threads, stopped);
+        // Threads that start a decode at the same time may each pass the budget by up to one stream.
+        Assert.InRange(decoded, 1, (int)(file.UnscopedBudget / size) + threads);
+        Assert.InRange(file.UnscopedDecoded, file.UnscopedBudget, file.UnscopedBudget + threads * (size + (1L << 20)));
+    }
+
+    /// <summary>A PDF whose object 4 is a Flate stream of <paramref name="size"/> zero bytes that nothing refers to.</summary>
+    private static byte[] SingleStreamBomb(int size)
+    {
+        var bomb = new MemoryStream();
+        using (var z = new ZLibStream(bomb, CompressionLevel.SmallestSize, leaveOpen: true))
+            for (int i = 0; i < size >> 20; i++) z.Write(new byte[1 << 20]);
+        static byte[] L(string t) => Encoding.Latin1.GetBytes(t);
+        var objects = new List<byte[]>
+        {
+            L("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"),
+            L("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"),
+            L("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] >>\nendobj\n"),
+            L("4 0 obj\n<< /Length " + bomb.Length + " /Filter /FlateDecode >>\nstream\n").Concat(bomb.ToArray()).Concat(L("\nendstream\nendobj\n")).ToArray(),
+        };
+        var ms = new MemoryStream();
+        ms.Write(L("%PDF-1.7\n"));
+        var offsets = new List<long>();
+        foreach (var o in objects) { offsets.Add(ms.Position); ms.Write(o); }
+        long xref = ms.Position;
+        var sb = new StringBuilder("xref\n0 " + (offsets.Count + 1) + "\n0000000000 65535 f \n");
+        foreach (var o in offsets) sb.Append(o.ToString("D10", CultureInfo.InvariantCulture)).Append(" 00000 n \n");
+        sb.Append("trailer\n<< /Size " + (offsets.Count + 1) + " /Root 1 0 R >>\nstartxref\n" + xref + "\n%%EOF\n");
+        ms.Write(L(sb.ToString()));
+        return ms.ToArray();
+    }
+
+    [Fact]
     public void Many_einvoice_candidates_sharing_one_compression_bomb_are_cheap()
     {
         var pdf = SharedAttachmentBomb(400, ".xml");
