@@ -2,6 +2,8 @@ using System.Globalization;
 using System.Text;
 using PdfPecker.Css;
 using PdfPecker.Html;
+using Item = PdfPecker.Layout.InlineLayout.Item;
+using ItemKind = PdfPecker.Layout.InlineLayout.ItemKind;
 
 namespace PdfPecker.Layout;
 
@@ -141,7 +143,7 @@ internal sealed partial class LayoutEngine
     /// Places the footnotes whose calls are in a line about to be placed at <paramref name="y"/>, and returns where the
     /// line goes: on the next page when footnote-policy moves it there.
     /// </summary>
-    private float PlaceFootnoteCalls(List<Item> items, float y, float lineH)
+    internal float PlaceFootnoteCalls(List<Item> items, float y, float lineH)
     {
         List<int>? fresh = null;
         foreach (var it in items)
@@ -159,8 +161,8 @@ internal sealed partial class LayoutEngine
         return y;
     }
 
-    private bool _deferFootnoteCalls; // a line is being drawn: calls wait until it is done
-    private List<(string Id, float Y)>? _deferredFootnoteCalls;
+    internal bool _deferFootnoteCalls; // a line is being drawn: calls wait until it is done
+    internal List<(string Id, float Y)>? _deferredFootnoteCalls;
 
     /// <summary>A call whose anchor was set outside line placement (content laid out on its own and moved into place).</summary>
     private void PlaceFootnoteCallAt(string id, float y)
@@ -174,7 +176,7 @@ internal sealed partial class LayoutEngine
         RegisterFootnotes(new List<int>(1) { k }, y, y, allowMove: false);
     }
 
-    private void PlaceDeferredFootnoteCalls()
+    internal void PlaceDeferredFootnoteCalls()
     {
         var calls = _deferredFootnoteCalls!;
         _deferredFootnoteCalls = null;

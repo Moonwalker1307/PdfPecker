@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using PdfPecker.Css;
+using FloatLines = PdfPecker.Layout.LayoutEngine.FloatLines;
 
 namespace PdfPecker.Layout;
 
@@ -7,7 +8,7 @@ namespace PdfPecker.Layout;
 /// Line breaking: the items of a paragraph are taken in chunks between break opportunities, and a chunk that does not
 /// fit starts the next line, unless the style lets it break between characters.
 /// </summary>
-internal sealed partial class LayoutEngine
+internal sealed partial class InlineLayout
 {
     /// <summary>
     /// Breaks items into lines. With <paramref name="after"/>, a list matching <paramref name="items"/> item for item,
@@ -117,7 +118,7 @@ internal sealed partial class LayoutEngine
     /// <summary>The text shown where a line breaks at a soft hyphen or hyphenation point (hyphenate-character).</summary>
     private static string HyphenText(ComputedStyle s) => s.HyphenateCharacter ?? "-";
 
-    private static float HyphenWidth(ComputedStyle s) => s.HyphenateCharacter is { } h
+    internal static float HyphenWidth(ComputedStyle s) => s.HyphenateCharacter is { } h
         ? TextWidth(s.Font, h, 0, h.Length, s.TextSize, s.LetterSpacing)
         : CharAdvance(s.Font, '-', s.TextSize, s.LetterSpacing);
 
@@ -128,7 +129,7 @@ internal sealed partial class LayoutEngine
     /// </summary>
     private ref struct LineBreaker
     {
-        private readonly LayoutEngine _engine;
+        private readonly InlineLayout _inline;
         private readonly float _availW;
         private readonly LineIndent _indent;
         private readonly FloatLines? _fl;
@@ -146,9 +147,9 @@ internal sealed partial class LayoutEngine
         public readonly bool ClonesEdges;
         private Item? _edgeAfter;
 
-        public LineBreaker(LayoutEngine engine, List<Item> items, float availW, LineIndent indent, FloatLines? fl, List<Item>? after, byte[]? plan = null)
+        public LineBreaker(InlineLayout inline, List<Item> items, float availW, LineIndent indent, FloatLines? fl, List<Item>? after, byte[]? plan = null)
         {
-            _engine = engine;
+            _inline = inline;
             _plan = plan;
             _items = items;
             _availW = availW;
@@ -158,9 +159,9 @@ internal sealed partial class LayoutEngine
             _count = items.Count;
             ClonesEdges = HasCloneEdges(items) || after != null && HasCloneEdges(after);
             _edgeAfter = null;
-            Lines = engine.RentLineList();
-            _cur = engine.RentLine();
-            engine.NoteMarkerLine(_cur);
+            Lines = inline.RentLineList();
+            _cur = inline.RentLine();
+            inline._engine.NoteMarkerLine(_cur);
             fl?.Begin(Lines);
             _avail = (fl?.Avail ?? availW) - indent.First;
         }
@@ -203,7 +204,7 @@ internal sealed partial class LayoutEngine
             _fl?.End(_cur);
             _edgeAfter = ClonesEdges && LastContent(li) is var last and >= 0 ? li[last] : null;
             Lines.Add(_cur);
-            _cur = _engine.RentLine();
+            _cur = _inline.RentLine();
             _hasContent = false;
             _curW = 0;
             _fl?.Begin(Lines);
@@ -281,7 +282,7 @@ internal sealed partial class LayoutEngine
             }
             if (_cur.Items.Count > 0) Finish(forced: true);
             else if (Lines.Count > 0) Lines[^1].Forced = true;
-            _engine.ReturnLine(_cur); // the empty line Finish started
+            _inline.ReturnLine(_cur); // the empty line Finish started
         }
 
         // The chunk helpers run once per word of the document, so they are inlined into PlaceChunk as they were

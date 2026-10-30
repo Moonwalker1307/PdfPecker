@@ -10,7 +10,7 @@ namespace PdfPecker.Layout;
 /// are Chrome's: a character takes space after it, or before it when the one before takes none, and a line's last
 /// opportunity is dropped so that its text still ends at the line's end.
 /// </summary>
-internal sealed partial class LayoutEngine
+internal sealed partial class InlineLayout
 {
     // Where an item of a justified line gets a share of the free space: before it, after it, and with Letters after each
     // of its characters but the last as well, so that it is drawn with that share as letter spacing.

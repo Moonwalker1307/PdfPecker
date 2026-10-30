@@ -1,5 +1,8 @@
 using PdfPecker.Css;
 using PdfPecker.Html;
+using Item = PdfPecker.Layout.InlineLayout.Item;
+using ItemKind = PdfPecker.Layout.InlineLayout.ItemKind;
+using Line = PdfPecker.Layout.InlineLayout.Line;
 
 namespace PdfPecker.Layout;
 
@@ -7,7 +10,7 @@ namespace PdfPecker.Layout;
 internal sealed partial class LayoutEngine
 {
     /// <summary>A float's margin box in flow coordinates.</summary>
-    private struct FloatBox
+    internal struct FloatBox
     {
         public float X0, Y0, X1, Y1;
         public bool Right;
@@ -17,7 +20,7 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>The floats of one block formatting context.</summary>
-    private sealed class FloatContext
+    internal sealed class FloatContext
     {
         private const float Tiny = 0.001f; // a float touching a band at an edge only is not beside it
 
@@ -164,7 +167,7 @@ internal sealed partial class LayoutEngine
         }
     }
 
-    private FloatContext _floats = new();
+    internal FloatContext _floats = new();
     private readonly Stack<FloatContext> _floatPool = new(); // formatting contexts come and go with every table cell
 
     private FloatContext RentFloats()
@@ -180,7 +183,7 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>Whether floats reach below <paramref name="y"/>, so that content laid out there must flow around them.</summary>
-    private bool FloatsBelow(float y) => _floats.Any && _floats.Bottom > y + Eps;
+    internal bool FloatsBelow(float y) => _floats.Any && _floats.Bottom > y + Eps;
 
     /// <summary>Starts a new block formatting context: floats inside it stay inside it. Returns the outer one.</summary>
     private FloatContext EnterFormattingContext()
@@ -200,7 +203,7 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>The top of a block that clears floats.</summary>
-    private float Cleared(ComputedStyle s, float top)
+    internal float Cleared(ComputedStyle s, float top)
     {
         if (!(s.ClearLeft || s.ClearRight) || !_floats.Any) return top;
         float y = _floats.ClearY(s.ClearLeft, s.ClearRight);
@@ -208,7 +211,7 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>The style of the br that ends <paramref name="line"/> when it clears floats (HTML's br clear), else null.</summary>
-    private static ComputedStyle? ClearingBreak(Line line)
+    internal static ComputedStyle? ClearingBreak(Line line)
     {
         foreach (var it in line.Items)
             if (it.Kind == ItemKind.Break && (it.Style.ClearLeft || it.Style.ClearRight)) return it.Style;
@@ -250,7 +253,7 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>A float laid out on its own, waiting to be placed.</summary>
-    private sealed class PendingFloat
+    internal sealed class PendingFloat
     {
         public Element Element = null!;
         public Captured Box = null!;
@@ -263,7 +266,7 @@ internal sealed partial class LayoutEngine
     /// <summary>The size of each float measured so far, by element and containing block width.</summary>
     private readonly Dictionary<(Element, float), (float Width, float Height, bool ForcedBreaks)> _floatSizes = new();
 
-    private PendingFloat MeasureFloat(Element e, float cbW)
+    internal PendingFloat MeasureFloat(Element e, float cbW)
     {
         if (IsInitialLetter(e) && MeasureInitialLetter(e, cbW) is { } letter) return letter;
         // A float that is laid out again on the page, because it crosses a page boundary or forces a break, measures
@@ -287,7 +290,7 @@ internal sealed partial class LayoutEngine
     /// Places a float as high as it can go, but not above <paramref name="y"/> nor above earlier floats, beside the floats
     /// already there within the containing block from <paramref name="cbX"/> to <paramref name="cbX"/> + <paramref name="cbW"/>.
     /// </summary>
-    private void PlaceFloat(PendingFloat f, float y, float cbX, float cbW)
+    internal void PlaceFloat(PendingFloat f, float y, float cbX, float cbW)
     {
         if (f.Letter != null)
         {
@@ -345,7 +348,7 @@ internal sealed partial class LayoutEngine
     /// beside a float with shape-outside may overlap the float's box where its shape leaves room. Floats and positioned
     /// boxes among them keep their own order. Only such paragraphs are lifted, so other pages paint as they did.
     /// </summary>
-    private void LiftInlineContent(int start)
+    internal void LiftInlineContent(int start)
     {
         var lifted = new LayerOp { Order = LayerOp.InlineOverFloatsOrder };
         int keep = start;
@@ -380,7 +383,7 @@ internal sealed partial class LayoutEngine
     /// Tracks where each line of a paragraph goes while the paragraph is broken into lines, so that each line gets the
     /// room the floats beside it leave, and floats met in the text are placed as the lines reach them.
     /// </summary>
-    private sealed class FloatLines
+    internal sealed class FloatLines
     {
         public LayoutEngine Engine = null!;
         public ComputedStyle Block = null!;
@@ -530,9 +533,9 @@ internal sealed partial class LayoutEngine
         return float.IsNaN(a) ? 0 : a + d;
     }
 
-    private static void LineExtent(Line line, ComputedStyle block, out float maxA, out float maxD)
+    internal static void LineExtent(Line line, ComputedStyle block, out float maxA, out float maxD)
     {
-        StrutMetrics(block, out float strutA, out float strutD);
+        InlineLayout.StrutMetrics(block, out float strutA, out float strutD);
         // In quirks mode the block's strut counts only on a line with text or a line break directly in the block, so a
         // line of small <font> text is as tall as that text, as in Chrome (the line height calculation quirk).
         bool quirkyStrut = block.Quirks, direct = false;
@@ -554,16 +557,16 @@ internal sealed partial class LayoutEngine
                     continue;
                 case ItemKind.Image:
                 case ItemKind.Box:
-                    if (IsLineAligned(it))
+                    if (InlineLayout.IsLineAligned(it))
                     {
                         // Placed against the line's top or bottom once the rest of the line is measured.
                         lineAligned = visible = true;
                         continue;
                     }
-                    AtomicMetrics(it, block, out a, out d);
+                    InlineLayout.AtomicMetrics(it, block, out a, out d);
                     break;
                 default:
-                    if (IsLineAligned(it))
+                    if (InlineLayout.IsLineAligned(it))
                     {
                         lineAligned = visible = true;
                         continue;
@@ -607,7 +610,7 @@ internal sealed partial class LayoutEngine
                 Grow(it.Height, it.Style.VerticalAlign == VerticalAlign.Top, ref maxA, ref maxD);
             }
             // The inline boxes aligned that way, with all that is inside them.
-            if (AlignedSubtrees(line.Items, block) is { } subtrees)
+            if (InlineLayout.AlignedSubtrees(line.Items, block) is { } subtrees)
                 foreach (var (root, (a, d)) in subtrees)
                     Grow(a + d, root.VerticalAlign == VerticalAlign.Top, ref maxA, ref maxD);
         }
@@ -616,7 +619,7 @@ internal sealed partial class LayoutEngine
         {
             // A marker with a style of its own sits on the line's baseline: an inside one like text in an inline box,
             // an outside one beside the line, which only moves down far enough for the marker's ascent, as in Chrome.
-            TextMetrics(marker, out float ma, out float md);
+            InlineLayout.TextMetrics(marker, out float ma, out float md);
             if (ma > maxA) maxA = ma;
             if (md > maxD && !line.MarkerOutside) maxD = md;
         }
@@ -626,12 +629,12 @@ internal sealed partial class LayoutEngine
         // inline with a larger font makes every line of it taller even where its text is smaller (CSS 2.1 §10.8.1).
         static void InlineMetrics(ComputedStyle s, out float a, out float d)
         {
-            TextMetrics(s, out a, out d);
+            InlineLayout.TextMetrics(s, out a, out d);
             var p = s.ParentStyle;
-            for (int depth = 0; p is { Display: Display.Inline } && depth < MaxAlignedDepth; p = p.ParentStyle, depth++)
+            for (int depth = 0; p is { Display: Display.Inline } && depth < InlineLayout.MaxAlignedDepth; p = p.ParentStyle, depth++)
             {
                 if (QuirkyStrut(p)) continue; // an inline box with no text of its own on the line
-                TextMetrics(p, out float pa, out float pd);
+                InlineLayout.TextMetrics(p, out float pa, out float pd);
                 if (pa > a) a = pa;
                 if (pd > d) d = pd;
             }

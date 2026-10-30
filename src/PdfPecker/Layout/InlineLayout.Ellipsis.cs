@@ -3,7 +3,7 @@ using PdfPecker.Css;
 namespace PdfPecker.Layout;
 
 /// <summary>text-overflow and line-clamp: cutting a line that overflows its box short with an ellipsis.</summary>
-internal sealed partial class LayoutEngine
+internal sealed partial class InlineLayout
 {
     private const string Ellipsis = "…";
 

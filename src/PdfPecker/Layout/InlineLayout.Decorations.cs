@@ -5,7 +5,7 @@ using PdfPecker.Svg;
 namespace PdfPecker.Layout;
 
 /// <summary>Text decorations (underline, overline, line-through in each style) and text shadows of a run of text.</summary>
-internal sealed partial class LayoutEngine
+internal sealed partial class InlineLayout
 {
     // A decoration line is 5.5% of the font size thick, at least half a point, unless text-decoration-thickness says
     // otherwise (then at least a tenth); the underline sits a tenth of the size below the baseline and the
@@ -167,8 +167,8 @@ internal sealed partial class LayoutEngine
                 // Two whole-pixel lines; the second goes away from the text.
                 var (line, step) = DoubleLine(t);
                 float second = below ? y + step : y - step;
-                _ops.Add(new RectOp(x, y, w, line, color) { IsDecoration = true });
-                _ops.Add(new RectOp(x, second, w, line, color) { IsDecoration = true });
+                _engine.Ops.Add(new RectOp(x, y, w, line, color) { IsDecoration = true });
+                _engine.Ops.Add(new RectOp(x, second, w, line, color) { IsDecoration = true });
                 break;
             }
             case DecorationStyle.Dotted:
@@ -176,14 +176,14 @@ internal sealed partial class LayoutEngine
             {
                 var dashed = new LineOp(x, y + t / 2, x + w, y + t / 2, t, color, dotted: style == DecorationStyle.Dotted);
                 SetDashes(dashed, style == DecorationStyle.Dotted, t, w);
-                _ops.Add(dashed);
+                _engine.Ops.Add(dashed);
                 break;
             }
             case DecorationStyle.Wavy:
                 WavyLine(origin, x, y, w, t, color, below);
                 break;
             default:
-                _ops.Add(new RectOp(x, y, w, t, color) { IsDecoration = true });
+                _engine.Ops.Add(new RectOp(x, y, w, t, color) { IsDecoration = true });
                 break;
         }
     }
@@ -224,7 +224,7 @@ internal sealed partial class LayoutEngine
         {
             float nx = x + w * k / segments;
             float ny = mid - amplitude * MathF.Sin((nx - origin) / wavelength * 2 * MathF.PI);
-            _ops.Add(new LineOp(px, py, nx, ny, t, color, dotted: false) { Solid = true });
+            _engine.Ops.Add(new LineOp(px, py, nx, ny, t, color, dotted: false) { Solid = true });
             px = nx; py = ny;
         }
     }
@@ -253,7 +253,7 @@ internal sealed partial class LayoutEngine
             if (blurred != null) { BlurredTextShadows(style, x, w, baseline, lineTop, text, wordSpacing, letterSpacing, rtl, blurred); blurred = null; }
             float sx = x + sh.X, sy = baseline + sh.Y;
             var copy = new TextOp(sx, sy, lineTop, style.Font, style.TextSize, color, text, wordSpacing, letterSpacing) { Rtl = rtl };
-            _ops.Add(copy);
+            _engine.Ops.Add(copy);
             if (style.TextDecoration != TextDecoration.None) Decorate(style, sx, w, sy, color, copy);
         }
         if (blurred != null) BlurredTextShadows(style, x, w, baseline, lineTop, text, wordSpacing, letterSpacing, rtl, blurred);
@@ -273,14 +273,14 @@ internal sealed partial class LayoutEngine
         if (style.TextDecoration != TextDecoration.None)
         {
             // The decorations are drawn into the main list and moved into the layer.
-            int before = _ops.Count;
+            int before = _engine.Ops.Count;
             Decorate(style, x, w, baseline, CssColor.Black, shape);
-            for (int k = before; k < _ops.Count; k++) layer.Ops.Add(_ops[k]);
-            _ops.RemoveRange(before, _ops.Count - before);
+            for (int k = before; k < _engine.Ops.Count; k++) layer.Ops.Add(_engine.Ops[k]);
+            _engine.Ops.RemoveRange(before, _engine.Ops.Count - before);
         }
         layer.Raster = TextShadowFilter(shadows, out float minSigma);
         layer.RasterDensity = Math.Clamp(PixelsPerSigma / minSigma, MinRasterDensity, MaxRasterDensity);
-        _ops.Add(layer);
+        _engine.Ops.Add(layer);
     }
 
     /// <summary>

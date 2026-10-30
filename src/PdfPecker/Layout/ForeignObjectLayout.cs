@@ -18,7 +18,7 @@ internal sealed partial class LayoutEngine
     /// Adds an inline SVG drawing in the box (x, y, w, h) to <paramref name="ops"/>, with the content of its
     /// foreignObject elements painted between its shapes in document order.
     /// </summary>
-    private void AddSvgDrawing(List<DrawOp> ops, SvgImage svg, float x, float y, float w, float h, ContentSlot? tag)
+    internal void AddSvgDrawing(List<DrawOp> ops, SvgImage svg, float x, float y, float w, float h, ContentSlot? tag)
     {
         if (svg.ForeignObjects is not { } objects || _foreignObjectDepth >= MaxForeignObjectDepth || !(w > 0 && h > 0))
         {

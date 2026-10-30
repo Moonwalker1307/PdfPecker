@@ -40,7 +40,7 @@ internal sealed partial class LayoutEngine
     private const float UnboundedColumn = 100_000;
 
     private int _columnDepth;
-    private ColumnNotes? _columnNotes;      // the breaks of the column layout in progress, for balancing
+    internal ColumnNotes? _columnNotes;      // the breaks of the column layout in progress, for balancing
     private (int From, int To)? _flowRange; // the children the next LayoutFlow lays out
     private List<FlowResume>? _flowMarks;   // where the next LayoutFlow notes that a later pass could go on from
     private FlowResume? _flowResume;        // where the next LayoutFlow goes on from
@@ -377,7 +377,7 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>The lines of a paragraph placed in one column so far.</summary>
-    private struct LineChunk
+    internal struct LineChunk
     {
         public int Start, Lines, Fragment;
         public float Top;
@@ -388,7 +388,7 @@ internal sealed partial class LayoutEngine
     /// than orphans before the next break could not move back: Chrome then makes the columns taller, by at least what
     /// the missing lines need, rather than leave them.
     /// </summary>
-    private void NoteOrphans(ref LineChunk chunk, int li, float y, float[] lineA, float[] lineD, int n, int orphans)
+    internal void NoteOrphans(ref LineChunk chunk, int li, float y, float[] lineA, float[] lineD, int n, int orphans)
     {
         int k = PageOf(y);
         if (chunk.Start >= 0 && k != chunk.Fragment)
@@ -415,7 +415,7 @@ internal sealed partial class LayoutEngine
     /// Notes a break that orphans or widows move before line li, ahead of where the lines would break by themselves:
     /// the column falls short there by what the first line that does not fit needs.
     /// </summary>
-    private void NotePlannedBreak(int li, float y, float[] lineA, float[] lineD, int n)
+    internal void NotePlannedBreak(int li, float y, float[] lineA, float[] lineD, int n)
     {
         if (AtPageTop(y)) return;
         int k = PageOf(y);
@@ -452,7 +452,7 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>The breaks of a column layout: where the content of each column ends, and the smallest shortage.</summary>
-    private sealed class ColumnNotes(int from)
+    internal sealed class ColumnNotes(int from)
     {
         private readonly Dictionary<int, float> _ends = new();
 

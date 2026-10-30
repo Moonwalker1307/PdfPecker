@@ -8,7 +8,7 @@ namespace PdfPecker.Layout;
 /// Text into items: white space handling, the words with their break opportunities (hyphens, soft hyphens, East Asian
 /// text, hyphenation), text-transform and synthesized small capitals.
 /// </summary>
-internal sealed partial class LayoutEngine
+internal sealed partial class InlineLayout
 {
     // Synthesized small capitals are capitals at 70% of the font size, as Chrome makes them.
     private const float SmallCapsScale = 0.7f;
@@ -30,7 +30,7 @@ internal sealed partial class LayoutEngine
             Breakable: ws is WhiteSpace.Normal or WhiteSpace.PreWrap or WhiteSpace.PreLine);
     }
 
-    private static bool IsCollapsible(ComputedStyle s) => s.WhiteSpace is WhiteSpace.Normal or WhiteSpace.NoWrap or WhiteSpace.PreLine or WhiteSpace.PreLineNoWrap;
+    internal static bool IsCollapsible(ComputedStyle s) => s.WhiteSpace is WhiteSpace.Normal or WhiteSpace.NoWrap or WhiteSpace.PreLine or WhiteSpace.PreLineNoWrap;
 
     private static bool IsBreakable(ComputedStyle s) => s.WhiteSpace is WhiteSpace.Normal or WhiteSpace.PreWrap or WhiteSpace.PreLine;
 

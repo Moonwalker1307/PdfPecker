@@ -3,6 +3,7 @@ using System.Text;
 using PdfPecker.Css;
 using PdfPecker.Fonts;
 using PdfPecker.Pdf;
+using LineChunk = PdfPecker.Layout.LayoutEngine.LineChunk;
 
 namespace PdfPecker.Layout;
 
@@ -10,10 +11,10 @@ namespace PdfPecker.Layout;
 /// Placing the lines of a paragraph: each line's extent, its page, its alignment and justification, and the draw ops
 /// of its items (text runs, images, boxes, leaders, inline backgrounds and links).
 /// </summary>
-internal sealed partial class LayoutEngine
+internal sealed partial class InlineLayout
 {
     /// <summary>Points per CSS pixel, the unit Chrome rounds half-leading and baseline shifts to.</summary>
-    private const float CssPixel = 0.75f;
+    internal const float CssPixel = 0.75f;
 
     // vertical-align: middle centres an image on the baseline plus a quarter of the block's font size (about half the x-height).
     private const float MiddleRaiseRatio = 0.25f;
@@ -36,7 +37,7 @@ internal sealed partial class LayoutEngine
 
     // ------------------------------------------------------------------ metrics
 
-    private static void TextMetrics(ComputedStyle s, out float a, out float d)
+    internal static void TextMetrics(ComputedStyle s, out float a, out float d)
     {
         StrutMetrics(s, out a, out d);
         float shift = s.BaselineShift;
@@ -48,7 +49,7 @@ internal sealed partial class LayoutEngine
     /// The ascent and descent of a block's strut: its font and line height on the line's own baseline. The block's own
     /// vertical-align moves the block on the line it sits on, not the lines inside it.
     /// </summary>
-    private static void StrutMetrics(ComputedStyle s, out float a, out float d) => s.Strut(out a, out d);
+    internal static void StrutMetrics(ComputedStyle s, out float a, out float d) => s.Strut(out a, out d);
 
     /// <summary>
     /// How far below the line's baseline text in style <paramref name="s"/> sits, on a line whose box reaches
@@ -87,7 +88,7 @@ internal sealed partial class LayoutEngine
         return null;
     }
 
-    private const int MaxAlignedDepth = 32;
+    internal const int MaxAlignedDepth = 32;
 
     /// <summary>
     /// The inline box aligned to the line's top or bottom that an item is in, or null. An image or inline-block aligned
@@ -105,7 +106,7 @@ internal sealed partial class LayoutEngine
     /// baseline: its strut and the content inside it, which may be taller (an inline-block, larger text). Null when
     /// the line has none.
     /// </summary>
-    private static Dictionary<ComputedStyle, (float A, float D)>? AlignedSubtrees(List<Item> items, ComputedStyle block)
+    internal static Dictionary<ComputedStyle, (float A, float D)>? AlignedSubtrees(List<Item> items, ComputedStyle block)
     {
         Dictionary<ComputedStyle, (float A, float D)>? extents = null;
         ComputedStyle? lastStyle = null, lastRoot = null;
@@ -139,7 +140,7 @@ internal sealed partial class LayoutEngine
     /// The ascent and descent of an image or inline-block on its line's baseline. One aligned to the line's top or
     /// bottom has none of its own (see <see cref="IsLineAligned"/>); text-top hangs it from the top of the block's strut.
     /// </summary>
-    private static void AtomicMetrics(Item it, ComputedStyle block, out float a, out float d)
+    internal static void AtomicMetrics(Item it, ComputedStyle block, out float a, out float d)
     {
         float baseline = it.Kind == ItemKind.Box ? it.BoxBaseline : it.Height;
         switch (it.Style.VerticalAlign)
@@ -162,7 +163,7 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>Whether an item is aligned to its line's top or bottom edge rather than to the baseline.</summary>
-    private static bool IsLineAligned(Item it) => it.Kind switch
+    internal static bool IsLineAligned(Item it) => it.Kind switch
     {
         ItemKind.Image or ItemKind.Box when it.Style.VerticalAlign is VerticalAlign.Top or VerticalAlign.Bottom => true,
         ItemKind.Image or ItemKind.Box or ItemKind.Text or ItemKind.Space => AlignedRoot(it) != null,
@@ -215,7 +216,7 @@ internal sealed partial class LayoutEngine
     /// The kerning between two neighbouring items when they are drawn as one run of text (same style, left to right),
     /// which neither item's own width holds.
     /// </summary>
-    private static float PairKern(Item a, Item b)
+    internal static float PairKern(Item a, Item b)
     {
         ComputedStyle? style = null;
         TextFont? font = null;
@@ -265,23 +266,23 @@ internal sealed partial class LayoutEngine
         // placing the lines has fragments of its own.
         // Absolutely positioned boxes inside positioned inline elements are laid out once those are placed too.
         var outerFragments = _inlineFragments;
-        var outerCbs = _inlineCbs;
-        var outerCbIndex = _inlineCbIndex;
+        var outerCbs = _engine._inlineCbs;
+        var outerCbIndex = _engine._inlineCbIndex;
         _inlineFragments = null;
-        _inlineCbs = null;
-        _inlineCbIndex = null;
+        _engine._inlineCbs = null;
+        _engine._inlineCbIndex = null;
         try
         {
             y = PlaceLinesCore(lines, block, x, y, w, indent, emphasisRoom, trim, besideFloats);
             if (_inlineFragments != null) PaintInlineFragments(_inlineFragments);
-            if (_inlineCbs != null) LayoutInlineAbsolutes(_inlineCbs);
+            if (_engine._inlineCbs != null) _engine.LayoutInlineAbsolutes(_engine._inlineCbs);
             return y;
         }
         finally
         {
             _inlineFragments = outerFragments;
-            _inlineCbs = outerCbs;
-            _inlineCbIndex = outerCbIndex;
+            _engine._inlineCbs = outerCbs;
+            _engine._inlineCbIndex = outerCbIndex;
         }
     }
 
@@ -293,7 +294,7 @@ internal sealed partial class LayoutEngine
         var (trimFirst, trimLast) = TrimmedLines(lineA, n, trim);
         float lift = 0; // how far trimming the first line moved the lines up from where they were broken
         // Beside floats the lines' positions were fixed while breaking them.
-        bool[]? breakBefore = _paginate && n > 1 && !besideFloats ? PlanBreaks(n, lineA, lineD, y, block.Orphans, block.Widows) : null;
+        bool[]? breakBefore = _engine._paginate && n > 1 && !besideFloats ? PlanBreaks(n, lineA, lineD, y, block.Orphans, block.Widows) : null;
         var chunk = new LineChunk { Start = -1 };
 
         for (int li = 0; li < n; li++)
@@ -316,19 +317,19 @@ internal sealed partial class LayoutEngine
                 if (li == trimFirst) over = lineA[li] - edgeA;
                 if (li == trimLast) under = lineD[li] - edgeD;
             }
-            y = FitOnPage(y, lineH - over - under) - over;
+            y = _engine.FitOnPage(y, lineH - over - under) - over;
             lift += over;
-            CheckPageLimit(y);
+            _engine.CheckPageLimit(y);
             if (breakBefore != null && breakBefore[li])
             {
-                if (_columnNotes != null) NotePlannedBreak(li, y, lineA, lineD, n);
-                y = NextPage(y);
+                if (_engine._columnNotes != null) _engine.NotePlannedBreak(li, y, lineA, lineD, n);
+                y = _engine.NextPage(y);
             }
-            if (_columnNotes != null) NoteOrphans(ref chunk, li, y, lineA, lineD, n, block.Orphans);
-            if (Footnotes != null && _paginate && !_measuring && _columnNotes == null) y = PlaceFootnoteCalls(line.Items, y, lineH);
+            if (_engine._columnNotes != null) _engine.NoteOrphans(ref chunk, li, y, lineA, lineD, n, block.Orphans);
+            if (_engine.Footnotes != null && _engine._paginate && !_engine._measuring && _engine._columnNotes == null) y = _engine.PlaceFootnoteCalls(line.Items, y, lineH);
             DrawLine(line, block, x, y, lineLeft, lineW, indent.Of(lines, li), lineA[li], lineH);
             y += lineH - under;
-            if (_paginate) _lastContentBottom = y;
+            if (_engine._paginate) _engine._lastContentBottom = y;
         }
         return y;
     }
@@ -372,9 +373,9 @@ internal sealed partial class LayoutEngine
     {
         if (_lineA.Length < n) { _lineA = new float[n * 2]; _lineD = new float[n * 2]; }
         float[] lineA = _lineA, lineD = _lineD;
-        for (int li = 0; li < n; li++) LineExtent(lines[li], block, out lineA[li], out lineD[li]);
+        for (int li = 0; li < n; li++) LayoutEngine.LineExtent(lines[li], block, out lineA[li], out lineD[li]);
         // Placing a footnote lays it out, which reuses the shared line buffers: these lines keep their own copy.
-        if (Footnotes != null && _paginate) { lineA = (float[])lineA.Clone(); lineD = (float[])lineD.Clone(); }
+        if (_engine.Footnotes != null && _engine._paginate) { lineA = (float[])lineA.Clone(); lineD = (float[])lineD.Clone(); }
         return (lineA, lineD);
     }
 
@@ -383,8 +384,8 @@ internal sealed partial class LayoutEngine
     {
         foreach (var it in items)
         {
-            if (it.Kind == ItemKind.Absolute) QueueLineAbsolute(it, x, y);
-            else if (it.Kind == ItemKind.Anchor) SetAnchor(it.AnchorId!, y);
+            if (it.Kind == ItemKind.Absolute) _engine.QueueLineAbsolute(it, x, y);
+            else if (it.Kind == ItemKind.Anchor) _engine.SetAnchor(it.AnchorId!, y);
         }
     }
 
@@ -432,7 +433,7 @@ internal sealed partial class LayoutEngine
                 break;
         }
 
-        if (block.TextOverflowEllipsis && block.ClipsX && !_measuring && line.Width + lineKern > lineW - lineIndent + Eps)
+        if (block.TextOverflowEllipsis && block.ClipsX && !_engine._measuring && line.Width + lineKern > lineW - lineIndent + Eps)
         {
             Ellipsize(line, block, lineW - lineIndent, visual: true, rtl);
             lineKern = LineKerning(items);
@@ -483,27 +484,27 @@ internal sealed partial class LayoutEngine
 
         _alignedSubtrees = AlignedSubtrees(items, block);
         // In a vertical-lr box the line is flipped back as a whole; what is inside it, inline-blocks too, stays as drawn.
-        int lineStart = _ops.Count;
-        bool flipBack = _transposed;
-        _transposed = false;
+        int lineStart = _engine.Ops.Count;
+        bool flipBack = _engine._transposed;
+        _engine._transposed = false;
         int fragments = NoteInlineFragments(items, xs, baseline, ascent, lineH - ascent);
         NoteEmptyInlineCbs(items, xs, baseline, ascent, lineH - ascent);
         EmitLinks(items, xs, y, lineH);
 
         // Footnote calls inside inline boxes are placed once the line is drawn, not while its buffers are in use.
-        bool deferCalls = _deferFootnoteCalls;
-        if (Footnotes != null) _deferFootnoteCalls = true;
-        int textFrom = _ops.Count;
+        bool deferCalls = _engine._deferFootnoteCalls;
+        if (_engine.Footnotes != null) _engine._deferFootnoteCalls = true;
+        int textFrom = _engine.Ops.Count;
         DrawItems(items, xs, block, x, y, baseline, y + lineH - baseline, fit.SpaceExtra, fit.CharExtra);
         if (fragments >= 0) NoteFragmentText(fragments, textFrom);
-        _deferFootnoteCalls = deferCalls;
-        if (_deferredFootnoteCalls is { Count: > 0 } && !deferCalls) PlaceDeferredFootnoteCalls();
-        _lastBaseline = baseline;
-        if (_marker != null) EmitMarker(baseline, y);
+        _engine._deferFootnoteCalls = deferCalls;
+        if (_engine._deferredFootnoteCalls is { Count: > 0 } && !deferCalls) _engine.PlaceDeferredFootnoteCalls();
+        _engine._lastBaseline = baseline;
+        if (_engine._marker != null) _engine.EmitMarker(baseline, y);
         if (flipBack)
         {
-            _transposed = true;
-            var layer = FlipBack(lineStart, y + lineH / 2);
+            _engine._transposed = true;
+            var layer = _engine.FlipBack(lineStart, y + lineH / 2);
             if (fragments >= 0)
             {
                 // The fragments' backgrounds are painted into the line once all lines are placed, and find its text there.
@@ -527,7 +528,7 @@ internal sealed partial class LayoutEngine
     {
         int last = items.Count - 1;
         while (last >= 0 && items[last].Kind == ItemKind.Space) last--;
-        if (last >= 0 && xs[last + 1] > roomRight + 0.01f) _ops.Add(new GroupOp { Reach = xs[last + 1] });
+        if (last >= 0 && xs[last + 1] > roomRight + 0.01f) _engine.Ops.Add(new GroupOp { Reach = xs[last + 1] });
     }
 
     private void DrawItems(List<Item> items, float[] xs, ComputedStyle block, float x, float y, float baseline, float descent, float spaceExtra, float charExtra)
@@ -546,27 +547,27 @@ internal sealed partial class LayoutEngine
                     if (it.Image != null)
                     {
                         float ia = AtomicAscent(it, block, baseline - y, descent);
-                        _ops.Add(new ImageOp(xs[i] + it.RelX, baseline - ia + it.RelY, it.Width, it.Height, it.Image) { Tag = it.Tag });
+                        _engine.Ops.Add(new ImageOp(xs[i] + it.RelX, baseline - ia + it.RelY, it.Width, it.Height, it.Image) { Tag = it.Tag });
                     }
-                    if (it.PageExcess > 0) _ops.Add(new GroupOp { Reach = xs[i] + it.RelX + it.Width + it.PageExcess });
+                    if (it.PageExcess > 0) _engine.Ops.Add(new GroupOp { Reach = xs[i] + it.RelX + it.Width + it.PageExcess });
                     break;
                 case ItemKind.Box:
                 {
                     float dx = xs[i] + it.RelX, dy = baseline - AtomicAscent(it, block, baseline - y, descent) + it.RelY;
-                    if (it.Capture != null) Place(it.Capture, dx, dy);
+                    if (it.Capture != null) _engine.Place(it.Capture, dx, dy);
                     else
                         foreach (var op in it.BoxOps!)
                         {
                             op.Offset(dx, dy);
-                            _ops.Add(op);
+                            _engine.Ops.Add(op);
                         }
                     break;
                 }
                 case ItemKind.Absolute:
-                    QueueLineAbsolute(it, xs[i], y);
+                    _engine.QueueLineAbsolute(it, xs[i], y);
                     break;
                 case ItemKind.Anchor:
-                    SetAnchor(it.AnchorId!, y);
+                    _engine.SetAnchor(it.AnchorId!, y);
                     break;
                 case ItemKind.Leader:
                     if (it.Style.Visible) DrawLeader(it, x, xs[i] + it.RelX, xs[i + 1] + it.RelX, baseline + it.Style.BaselineShift + it.RelY, y);
@@ -617,7 +618,7 @@ internal sealed partial class LayoutEngine
             if (style.TextShadows != null) TextShadows(style, textX, runEnd - textX, bl, lineTop, text, wordSpacing, letterSpacing, rtlRun);
             var op = new TextOp(textX, bl, lineTop, style.Font, style.TextSize, CssColor.Fade(style.TextFillColor ?? style.Color, style.InlineFade), text,
                 wordSpacing, letterSpacing) { Tag = first.Tag, Rtl = rtlRun }.WithStroke(style);
-            _ops.Add(op);
+            _engine.Ops.Add(op);
             if (style.TextDecoration != TextDecoration.None) Decorate(style, runX, runEnd - runX, bl, text: op);
             if (style.EmphasisShape != EmphasisShape.None && style.EmphasisMark is { } mark) DrawEmphasisMarks(items, start, end, xs, rx, bl, lineTop, style, mark);
         }
@@ -642,7 +643,7 @@ internal sealed partial class LayoutEngine
         int count = (int)Math.Min(copies, Math.Min(MaxLeaderCopies, Math.Ceiling(MaxLeaderLength / pw)));
         var text = new StringBuilder(pattern.Length * count);
         for (int k = 0; k < count; k++) text.Append(pattern);
-        _ops.Add(new TextOp(start, baseline, lineTop, style.Font, style.TextSize, CssColor.Fade(style.TextFillColor ?? style.Color, style.InlineFade), text.ToString(),
+        _engine.Ops.Add(new TextOp(start, baseline, lineTop, style.Font, style.TextSize, CssColor.Fade(style.TextFillColor ?? style.Color, style.InlineFade), text.ToString(),
             style.WordSpacing, style.LetterSpacing) { Tag = it.Tag }.WithStroke(style));
     }
 
@@ -661,7 +662,7 @@ internal sealed partial class LayoutEngine
                 link ??= items[i].Tag?.Parent.Closest("Link");
                 i++;
             }
-            _ops.Add(new LinkOp(xs[start], lineTop, xs[i] - xs[start], lineH, href) { Link = link });
+            _engine.Ops.Add(new LinkOp(xs[start], lineTop, xs[i] - xs[start], lineH, href) { Link = link });
         }
     }
 }

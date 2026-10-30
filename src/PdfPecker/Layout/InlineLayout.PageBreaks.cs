@@ -3,7 +3,7 @@ using PdfPecker.Css;
 namespace PdfPecker.Layout;
 
 /// <summary>Orphans and widows: which lines of a paragraph start a new page so that neither is left alone.</summary>
-internal sealed partial class LayoutEngine
+internal sealed partial class InlineLayout
 {
     // Each forced break can move the lines after it onto other pages, so the plan is made again until it settles, at
     // most this many times.
@@ -24,11 +24,11 @@ internal sealed partial class LayoutEngine
         // CrossesPage allows half a point past the page end, but the lines themselves break as soon as one does not fit:
         // a paragraph a hair too tall would then leave its last line alone on the next page. Only lines that end well
         // inside the page skip the plan.
-        if (visibleCount < 2 || !CrossesPage(top, top + total + 0.5f)) return null;
+        if (visibleCount < 2 || !_engine.CrossesPage(top, top + total + 0.5f)) return null;
 
         bool[]? forced = null;
         // The plan only tries breaks: a multi-column box balancing its columns must not take them for real ones.
-        var notes = _columnNotes;
+        var notes = _engine._columnNotes;
         bool paused = notes is { Paused: true };
         if (notes != null) notes.Paused = true;
         try
@@ -57,13 +57,13 @@ internal sealed partial class LayoutEngine
         {
             if (float.IsNaN(lineA[li])) continue;
             float h = lineA[li] + lineD[li];
-            float fy = FitOnPage(y, h);
-            if (forced != null && forced[li]) fy = NextPage(fy);
-            if (chunkStart >= 0 && PageOf(fy) > chunkPage)
+            float fy = _engine.FitOnPage(y, h);
+            if (forced != null && forced[li]) fy = _engine.NextPage(fy);
+            if (chunkStart >= 0 && _engine.PageOf(fy) > chunkPage)
             {
                 // A page break before line li: chunkLines lines stay behind, visibleCount - seen lines move on.
                 // Only the paragraph's first chunk can move as a whole: later chunks already start at a page top.
-                bool canMoveChunk = chunkLines == seen && !AtPageTop(top);
+                bool canMoveChunk = chunkLines == seen && !_engine.AtPageTop(top);
                 int after = visibleCount - seen;
                 if (chunkLines < orphans && canMoveChunk)
                 {
@@ -85,7 +85,7 @@ internal sealed partial class LayoutEngine
                 }
                 chunkStart = -1;
             }
-            if (chunkStart < 0) { chunkStart = li; chunkLines = 0; chunkPage = PageOf(fy); }
+            if (chunkStart < 0) { chunkStart = li; chunkLines = 0; chunkPage = _engine.PageOf(fy); }
             chunkLines++;
             seen++;
             y = fy + h;
@@ -100,7 +100,7 @@ internal sealed partial class LayoutEngine
         if (n < 2 || block.LineClamp > 0) return null;
         var a = new float[n];
         var d = new float[n];
-        for (int li = 0; li < n; li++) LineExtent(lines[li], block, out a[li], out d[li]);
+        for (int li = 0; li < n; li++) LayoutEngine.LineExtent(lines[li], block, out a[li], out d[li]);
         return PlanBreaks(n, a, d, top, block.Orphans, block.Widows);
     }
 

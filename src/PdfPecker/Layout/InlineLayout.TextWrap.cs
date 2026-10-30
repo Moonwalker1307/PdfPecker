@@ -11,7 +11,7 @@ namespace PdfPecker.Layout;
 /// space counts too, which evens the lines out; when there are too few break opportunities to choose from, balance
 /// instead breaks the lines at the narrowest width that keeps their number.
 /// </summary>
-internal sealed partial class LayoutEngine
+internal sealed partial class InlineLayout
 {
     // Chrome's limits: balance only paragraphs of up to six lines, and pretty only the last four lines of a paragraph.
     private const int MaxBalancedLines = 6, MaxPrettyLines = 4;

@@ -32,7 +32,7 @@ internal sealed partial class LayoutEngine
     private int _edgeProbesOff;
 
     // The bottom of the last line or image laid out, which a box's bottom edges and the margins between them follow.
-    private float _lastContentBottom = float.NaN;
+    internal float _lastContentBottom = float.NaN;
 
     // Where the content ended that room for bottom edges did not move: the boxes around it, which end with it, need not
     // try. Nested boxes can end their content at two places in turn, so remembering only the latest let each level try

@@ -40,7 +40,7 @@ internal sealed partial class LayoutEngine
     /// The content being laid out is that of a vertical-lr box, which is reflected in its diagonal: each line, picture and
     /// turned box in it is flipped back where it stands.
     /// </summary>
-    private bool _transposed;
+    internal bool _transposed;
 
     /// <summary>The diagonal reflection that turns horizontal layout at the origin into vertical-lr.</summary>
     private static readonly Matrix Transpose = new(0, 1, 1, 0, 0, 0);
@@ -52,7 +52,7 @@ internal sealed partial class LayoutEngine
     /// Flips the ops from <paramref name="start"/> on upside down about the line at <paramref name="centerY"/>, which in a
     /// reflected vertical-lr box turns them the right way round again; returns the layer that holds them.
     /// </summary>
-    private LayerOp FlipBack(int start, float centerY)
+    internal LayerOp FlipBack(int start, float centerY)
     {
         var layer = WrapLayer(start, 0, stackingContext: false);
         layer.Transform = Matrix.Scale(1, -1);
