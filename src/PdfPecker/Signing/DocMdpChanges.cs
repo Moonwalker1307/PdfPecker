@@ -156,41 +156,33 @@ internal sealed class DocMdpChanges
     }
 
     private void ClassifyPages(PdfRef root)
-    {
-        var stack = new Stack<(PdfRef Node, int Depth)>();
-        stack.Push((root, 0));
-        var seen = new HashSet<int>();
-        while (stack.Count > 0 && seen.Count < MaxWalked)
+        => PageTree.Walk(_old, root, (node, d) =>
         {
-            var (node, depth) = stack.Pop();
-            if (depth > 64 || !seen.Add(node.Num) || _old.Resolve(node) is not PdfDict d) continue;
-            var kids = _old.GetArray(d, "Kids");
-            if (kids != null && _old.GetName(d, "Type") != "Page")
-            {
-                for (int i = kids.Count - 1; i >= 0; i--)
-                    if (kids[i] is PdfRef k) stack.Push((k, depth + 1));
-                continue;
-            }
-            if (_roles.ContainsKey(node.Num)) continue;
-            _roles[node.Num] = Role.Page;
-            _pageNumbers[node.Num] = _pageNumbers.Count + 1;
-            if (d["Annots"] is PdfRef annotsRef)
-            {
-                _roles.TryAdd(annotsRef.Num, Role.PageAnnotations);
-                _pageNumbers.TryAdd(annotsRef.Num, _pageNumbers[node.Num]);
-            }
-            if (_old.GetArray(d, "Annots") is not { } annots) continue;
-            foreach (var a in annots.Items)
-            {
-                if (a is not PdfRef ar || _roles.ContainsKey(ar.Num) || _old.Resolve(ar) is not PdfDict annot) continue;
-                if (_old.GetName(annot, "Subtype") == "Widget") continue; // a field the form does not list: not fillable
-                _roles[ar.Num] = Role.Annotation;
-                if (annot["Popup"] is PdfRef popup) _roles.TryAdd(popup.Num, Role.Annotation);
-                if (annot["AP"] is PdfRef apRef) _roles.TryAdd(apRef.Num, Role.Annotation);
-                if (_old.Resolve(annot["AP"]) is PdfDict apDict)
-                    foreach (var state in apDict.Entries.Values)
-                        if (state is PdfRef s) _roles.TryAdd(s.Num, Role.Annotation);
-            }
+            ClassifyPage(((PdfRef)node).Num, d);
+            return true;
+        }, referencesOnly: true, maxNodes: MaxWalked);
+
+    private void ClassifyPage(int num, PdfDict d)
+    {
+        if (_roles.ContainsKey(num)) return;
+        _roles[num] = Role.Page;
+        _pageNumbers[num] = _pageNumbers.Count + 1;
+        if (d["Annots"] is PdfRef annotsRef)
+        {
+            _roles.TryAdd(annotsRef.Num, Role.PageAnnotations);
+            _pageNumbers.TryAdd(annotsRef.Num, _pageNumbers[num]);
+        }
+        if (_old.GetArray(d, "Annots") is not { } annots) return;
+        foreach (var a in annots.Items)
+        {
+            if (a is not PdfRef ar || _roles.ContainsKey(ar.Num) || _old.Resolve(ar) is not PdfDict annot) continue;
+            if (_old.GetName(annot, "Subtype") == "Widget") continue; // a field the form does not list: not fillable
+            _roles[ar.Num] = Role.Annotation;
+            if (annot["Popup"] is PdfRef popup) _roles.TryAdd(popup.Num, Role.Annotation);
+            if (annot["AP"] is PdfRef apRef) _roles.TryAdd(apRef.Num, Role.Annotation);
+            if (_old.Resolve(annot["AP"]) is PdfDict apDict)
+                foreach (var state in apDict.Entries.Values)
+                    if (state is PdfRef s) _roles.TryAdd(s.Num, Role.Annotation);
         }
     }
 

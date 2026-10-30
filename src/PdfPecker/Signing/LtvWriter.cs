@@ -374,7 +374,7 @@ internal static class LtvWriter
         var trailer = file.Trailer;
         var rootRef = trailer["Root"] as PdfRef ?? throw new PdfSignatureException("The PDF has no document catalog reference.");
         var catalog = file.Catalog!;
-        var page = FirstPage(file, catalog["Pages"], 0) ?? throw new PdfSignatureException("The PDF has no pages.");
+        var page = FirstPage(file, catalog["Pages"]) ?? throw new PdfSignatureException("The PDF has no pages.");
 
         var acroEntry = catalog["AcroForm"];
         var acro = Copy(file.Resolve(acroEntry) as PdfDict);
@@ -461,14 +461,15 @@ internal static class LtvWriter
         return new PreparedTimestamp(output, contentsStart, hash.GetHashAndReset());
     }
 
-    private static (PdfRef Ref, PdfDict Dict)? FirstPage(PdfFile file, PdfObject? node, int depth)
+    private static (PdfRef Ref, PdfDict Dict)? FirstPage(PdfFile file, PdfObject? root)
     {
-        if (depth > 64 || node is not PdfRef r || file.Resolve(r) is not PdfDict d) return null;
-        var kids = file.GetArray(d, "Kids");
-        if (kids == null || file.GetName(d, "Type") == "Page") return (r, d);
-        foreach (var k in kids.Items)
-            if (FirstPage(file, k, depth + 1) is { } found) return found;
-        return null;
+        (PdfRef Ref, PdfDict Dict)? first = null;
+        PageTree.Walk(file, root, (node, d) =>
+        {
+            first = ((PdfRef)node, d);
+            return false;
+        }, referencesOnly: true);
+        return first;
     }
 
     private static byte[] Deflate(byte[] data)

@@ -232,34 +232,23 @@ internal sealed class PdfStampWriter : PdfObjectWriter
     private static void CollectPages(Source source, PdfObject? root)
     {
         var file = source.File;
-        var seen = new HashSet<PdfDict>(ReferenceEqualityComparer.Instance);
-        var stack = new Stack<(PdfObject Node, PdfObject? Res, PdfObject? Media, PdfObject? Crop, PdfObject? Rotate, int Depth)>();
-        if (root != null) stack.Push((root, null, null, null, null, 0));
-        while (stack.Count > 0)
+        PageTree.Walk(file, root, (node, dict, inherited) =>
         {
-            var (node, res, media, crop, rotate, depth) = stack.Pop();
-            if (depth > 64 || file.Resolve(node) is not PdfDict dict || !seen.Add(dict)) continue;
-            res = dict["Resources"] ?? res;
-            media = dict["MediaBox"] ?? media;
-            crop = dict["CropBox"] ?? crop;
-            rotate = dict["Rotate"] ?? rotate;
-            var kids = file.GetArray(dict, "Kids");
-            if (kids != null && file.GetName(dict, "Type") != "Page")
-            {
-                if (source.IsStamp && node is PdfRef r) source.Map[r.Num] = 0;
-                for (int i = kids.Count - 1; i >= 0; i--) stack.Push((kids[i], res, media, crop, rotate, depth + 1));
-                continue;
-            }
             if (source.Pages.Count >= 1_000_000) throw new PdfLimitException("The PDF has more than 1,000,000 pages.");
             source.Pages.Add(new PageInfo
             {
                 Dict = dict,
                 Num = node is PdfRef pr ? pr.Num : 0,
-                Resources = res,
-                Box = VisibleBox(file, media, crop),
-                Rotate = ((int)Math.Round(file.Num(rotate) / 90) % 4 + 4) % 4 * 90,
+                Resources = inherited.Resources,
+                Box = VisibleBox(file, inherited.MediaBox, inherited.CropBox),
+                Rotate = ((int)Math.Round(file.Num(inherited.Rotate) / 90) % 4 + 4) % 4 * 90,
             });
-        }
+            return true;
+        },
+        (node, _) =>
+        {
+            if (source.IsStamp && node is PdfRef r) source.Map[r.Num] = 0;
+        });
         // A page listed twice in the tree is stamped once.
         var nums = new HashSet<int>();
         foreach (var p in source.Pages)

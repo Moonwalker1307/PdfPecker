@@ -25,9 +25,6 @@ internal sealed class PdfLinearWriter : PdfObjectWriter
     // their parents' /Kids, which get keys from FirstDirectPageKey downwards.
     private const int PagesKey = -1, DirectRootKey = -2, DirectInfoKey = -3, EncryptKey = -4, FirstDirectPageKey = -5;
 
-    /// <summary>The page attributes a page inherits from its ancestors, which a linearized file's pages must carry themselves.</summary>
-    private static readonly string[] Inheritable = { "Resources", "MediaBox", "CropBox", "Rotate" };
-
     /// <summary>The catalog entries whose objects a viewer needs to open the document (annex F, part 4).</summary>
     private static readonly HashSet<string> OpenDocumentKeys = new(StringComparer.Ordinal) { "ViewerPreferences", "PageMode", "Threads", "OpenAction", "AcroForm" };
 
@@ -87,9 +84,7 @@ internal sealed class PdfLinearWriter : PdfObjectWriter
         var catalog = _file.Catalog ?? throw new InvalidDataException("The PDF is not readable: it has no catalog.");
         _rootKey = trailer["Root"] is PdfRef root ? root.Num : DirectRootKey;
 
-        int nextDirect = FirstDirectPageKey;
-        var seen = new HashSet<PdfDict>(ReferenceEqualityComparer.Instance);
-        CollectPages(catalog["Pages"], new PdfObject?[Inheritable.Length], seen, 0, ref nextDirect);
+        CollectPages(catalog["Pages"]);
         if (_pages.Count == 0) throw new InvalidDataException("The PDF is not readable: it has no pages.");
 
         var kids = new List<PdfObject>(_pages.Count);
@@ -116,31 +111,38 @@ internal sealed class PdfLinearWriter : PdfObjectWriter
     /// Walks the page tree, recording each page as a copy with the attributes it inherits, a /Type and its new parent;
     /// intermediate nodes are written as the one new node.
     /// </summary>
-    private void CollectPages(PdfObject? node, PdfObject?[] inherited, HashSet<PdfDict> seen, int depth, ref int nextDirect)
+    private void CollectPages(PdfObject? root)
     {
-        if (depth > 64 || _file.Resolve(node) is not PdfDict dict || !seen.Add(dict)) return;
-        PdfFile.CheckCancel();
-        var here = (PdfObject?[])inherited.Clone();
-        for (int i = 0; i < Inheritable.Length; i++) here[i] = dict[Inheritable[i]] ?? here[i];
-        if (_file.GetArray(dict, "Kids") is { } kids && _file.GetName(dict, "Type") != "Page")
+        int nextDirect = FirstDirectPageKey;
+        PageTree.Walk(_file, root, (node, dict, inherited) =>
+        {
+            int key = node is PdfRef pr ? pr.Num : nextDirect--;
+            if (dict is PdfStream || key == _rootKey || _pageSet.Contains(key)) return true;
+            var entries = new Dictionary<string, PdfObject>(dict.Entries, StringComparer.Ordinal)
+            {
+                ["Type"] = PdfName.Get("Page"),
+                ["Parent"] = new PdfRef(PagesKey, 0),
+            };
+            // A linearized file's pages carry what they inherit themselves.
+            Carry("Resources", inherited.Resources);
+            Carry("MediaBox", inherited.MediaBox);
+            Carry("CropBox", inherited.CropBox);
+            Carry("Rotate", inherited.Rotate);
+            if (entries.TryGetValue("Resources", out var resources)) entries["Resources"] = OwnResources(resources, Contents(entries.GetValueOrDefault("Contents")));
+            _objects[key] = new PdfDict(entries);
+            _pages.Add(key);
+            _pageSet.Add(key);
+            return true;
+
+            void Carry(string name, PdfObject? value)
+            {
+                if (value is { IsNull: false }) entries[name] = value;
+            }
+        },
+        (node, _) =>
         {
             if (node is PdfRef r && r.Num != _rootKey) _redirect[r.Num] = PagesKey;
-            foreach (var k in kids.Items) CollectPages(k, here, seen, depth + 1, ref nextDirect);
-            return;
-        }
-        int key = node is PdfRef pr ? pr.Num : nextDirect--;
-        if (dict is PdfStream || key == _rootKey || _pageSet.Contains(key)) return;
-        var entries = new Dictionary<string, PdfObject>(dict.Entries, StringComparer.Ordinal)
-        {
-            ["Type"] = PdfName.Get("Page"),
-            ["Parent"] = new PdfRef(PagesKey, 0),
-        };
-        for (int i = 0; i < Inheritable.Length; i++)
-            if (here[i] is { IsNull: false } value) entries[Inheritable[i]] = value;
-        if (entries.TryGetValue("Resources", out var resources)) entries["Resources"] = OwnResources(resources, Contents(entries.GetValueOrDefault("Contents")));
-        _objects[key] = new PdfDict(entries);
-        _pages.Add(key);
-        _pageSet.Add(key);
+        });
     }
 
     private static PdfDict Dict(params (string Key, PdfObject Value)[] entries)
