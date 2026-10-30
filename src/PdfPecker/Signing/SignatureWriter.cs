@@ -97,17 +97,13 @@ internal static class SignatureWriter
 
         // Pages, with their inherited media boxes.
         var pages = new List<(PdfRef Ref, PdfDict Dict, double[] Media)>();
-        void Walk(PdfObject? node, double[] media, int depth)
-        {
-            if (depth > 64 || node is not PdfRef r || file.Resolve(r) is not PdfDict d) return;
-            var box = file.GetNumbers(d, "MediaBox");
-            if (box is { Length: 4 }) media = box;
-            var kids = file.GetArray(d, "Kids");
-            if (kids != null && file.GetName(d, "Type") != "Page")
-                foreach (var k in kids.Items) Walk(k, media, depth + 1);
-            else pages.Add((r, d, media));
-        }
-        Walk(catalog["Pages"], new double[] { 0, 0, 612, 792 }, 0);
+        PageTree.Walk(file, catalog["Pages"], new double[] { 0, 0, 612, 792 },
+            (d, media) => file.GetNumbers(d, "MediaBox") is { Length: 4 } box ? box : media,
+            (node, d, media) =>
+            {
+                pages.Add(((PdfRef)node, d, media));
+                return true;
+            }, referencesOnly: true);
         if (pages.Count == 0) throw new PdfSignatureException("The PDF has no pages.");
 
         var ap = o.Appearance;

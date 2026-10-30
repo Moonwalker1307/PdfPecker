@@ -166,23 +166,16 @@ internal sealed partial class PdfFormEditor
 
     private void CollectPages()
     {
-        var seen = new HashSet<int>();
-        void Walk(PdfObject? node, int depth)
+        // Nothing has been changed yet, so the source file is the document as it stands.
+        PageTree.Walk(_file, Catalog["Pages"], (node, d) =>
         {
-            if (depth > 64 || node is not PdfRef r || !seen.Add(r.Num) || R(r) is not PdfDict d || _pages.Count >= 1_000_000) return;
-            var kids = A(d, "Kids");
-            if (kids != null && Nm(d, "Type") != "Page")
-            {
-                foreach (var k in kids.Items) Walk(k, depth + 1);
-                return;
-            }
             int index = _pages.Count;
-            _pages.Add(r);
+            _pages.Add((PdfRef)node);
             if (A(d, "Annots") is PdfArray annots)
                 foreach (var a in annots.Items)
                     if (a is PdfRef ar) _widgetPage.TryAdd(ar.Num, index);
-        }
-        Walk(Catalog["Pages"], 0);
+            return _pages.Count < 1_000_000;
+        }, referencesOnly: true);
     }
 
     private PdfDict? AcroForm => D(Catalog, "AcroForm");

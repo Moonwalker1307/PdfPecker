@@ -22,27 +22,22 @@ internal sealed class RenderDocument
     public RenderDocument(byte[] data, string? password)
     {
         File = PdfFile.Open(data, password);
-        var root = File.GetDict(File.Catalog, "Pages");
-        if (root != null) Collect(root, null, null, null, 0, new HashSet<PdfDict>(ReferenceEqualityComparer.Instance), 0);
+        PageTree.Walk(File, File.Catalog?["Pages"], new Inherited(null, null, null, 0), Inherit, AddPage);
     }
 
-    private void Collect(PdfDict node, PdfDict? res, double[]? media, double[]? crop, int rotate, HashSet<PdfDict> seen, int depth)
+    /// <summary>What a page inherits, as the renderer reads it: resources or a box that are not usable leave the parent's in place.</summary>
+    private readonly record struct Inherited(PdfDict? Resources, double[]? Media, double[]? Crop, int Rotate);
+
+    private Inherited Inherit(PdfDict node, Inherited parent) => new(
+        File.GetDict(node, "Resources") ?? parent.Resources,
+        Box(File.GetNumbers(node, "MediaBox")) ?? parent.Media,
+        Box(File.GetNumbers(node, "CropBox")) ?? parent.Crop,
+        node["Rotate"] != null ? File.GetInt(node, "Rotate", 0) : parent.Rotate);
+
+    private bool AddPage(PdfObject _, PdfDict node, Inherited inherited)
     {
-        if (depth > 64 || !seen.Add(node)) return;
-        res = File.GetDict(node, "Resources") ?? res;
-        media = Box(File.GetNumbers(node, "MediaBox")) ?? media;
-        crop = Box(File.GetNumbers(node, "CropBox")) ?? crop;
-        if (node["Rotate"] != null) rotate = File.GetInt(node, "Rotate", 0);
-        var kids = File.GetArray(node, "Kids");
-        var type = File.GetName(node, "Type");
-        if (kids != null && type != "Page")
-        {
-            foreach (var k in kids.Items)
-                if (File.Resolve(k) is PdfDict kid) Collect(kid, res, media, crop, rotate, seen, depth + 1);
-            return;
-        }
-        var m = media ?? new double[] { 0, 0, 612, 792 };
-        var c = crop;
+        var m = inherited.Media ?? new double[] { 0, 0, 612, 792 };
+        var c = inherited.Crop;
         double x0 = m[0], y0 = m[1], x1 = m[2], y1 = m[3];
         if (c != null)
         {
@@ -51,11 +46,12 @@ internal sealed class RenderDocument
         }
         if (x1 - x0 < 1) x1 = x0 + 1;
         if (y1 - y0 < 1) y1 = y0 + 1;
-        rotate %= 360;
+        int rotate = inherited.Rotate % 360;
         if (rotate < 0) rotate += 360;
         rotate = rotate / 90 * 90;
         double uu = File.GetNumber(node, "UserUnit", 1);
-        Pages.Add(new PageInfo { Dict = node, Resources = res, X0 = x0, Y0 = y0, X1 = x1, Y1 = y1, Rotate = rotate, UserUnit = uu > 0 ? uu : 1 });
+        Pages.Add(new PageInfo { Dict = node, Resources = inherited.Resources, X0 = x0, Y0 = y0, X1 = x1, Y1 = y1, Rotate = rotate, UserUnit = uu > 0 ? uu : 1 });
+        return true;
     }
 
     private static double[]? Box(double[]? b)

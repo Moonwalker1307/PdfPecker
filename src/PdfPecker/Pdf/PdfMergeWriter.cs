@@ -189,9 +189,8 @@ internal sealed class PdfMergeWriter : PdfObjectWriter
             if (input.File.Trailer["Root"] is PdfRef root) input.Map[root.Num] = 0;
             if (input.File.Trailer["Encrypt"] is PdfRef enc) input.Map[enc.Num] = 0;
             bool selecting = spec?.Pages != null;
-            if (catalog?["Pages"] is { } pagesRef)
-                CollectPages(input, pagesRef, null, null, null, null, new HashSet<PdfDict>(ReferenceEqualityComparer.Instance), 0,
-                    selecting ? Math.Max(maxPages, MaxSourcePages) : maxPages, selecting ? $"{Label(index)} has" : "The merged document has");
+            CollectPages(input, catalog?["Pages"], selecting ? Math.Max(maxPages, MaxSourcePages) : maxPages,
+                selecting ? $"{Label(index)} has" : "The merged document has");
             SelectPages(input, spec, index, maxPages);
             _pageCount += input.Out.Count;
             if (_pageCount > maxPages)
@@ -435,47 +434,32 @@ internal sealed class PdfMergeWriter : PdfObjectWriter
 
     // ------------------------------------------------------------------ reading
 
-    private void CollectPages(Input input, PdfObject node, PdfObject? res, PdfObject? media, PdfObject? crop, PdfObject? rotate,
-        HashSet<PdfDict> seen, int depth, int limit, string tooMany)
+    private void CollectPages(Input input, PdfObject? root, int limit, string tooMany)
     {
-        var file = input.File;
-        if (depth > 64 || file.Resolve(node) is not PdfDict dict || !seen.Add(dict)) return;
-        res = dict["Resources"] ?? res;
-        media = dict["MediaBox"] ?? media;
-        crop = dict["CropBox"] ?? crop;
-        rotate = dict["Rotate"] ?? rotate;
-        var kids = file.GetArray(dict, "Kids");
-        if (kids != null && file.GetName(dict, "Type") != "Page")
+        PageTree.Walk(input.File, root, (node, dict, inherited) =>
+        {
+            if (input.Source.Count + 1 > limit)
+                throw new PdfLimitException(limit == Math.Max(1, _options.MaxPages)
+                    ? $"{tooMany} more than {limit} pages (PdfMergeOptions.MaxPages)."
+                    : $"{tooMany} more than {limit} pages.");
+            int num = node is PdfRef pr ? pr.Num : 0;
+            if (num != 0) input.PageNums.Add(num);
+            input.Source.Add(new SourcePage(dict, num, inherited.Resources, inherited.MediaBox, inherited.CropBox, inherited.Rotate));
+            return true;
+        },
+        (node, _) =>
         {
             // An intermediate node: references to it (a page's /Parent) are dropped.
             if (node is PdfRef r) input.Map[r.Num] = 0;
-            foreach (var k in kids.Items) CollectPages(input, k, res, media, crop, rotate, seen, depth + 1, limit, tooMany);
-            return;
-        }
-        if (input.Source.Count + 1 > limit)
-            throw new PdfLimitException(limit == Math.Max(1, _options.MaxPages)
-                ? $"{tooMany} more than {limit} pages (PdfMergeOptions.MaxPages)."
-                : $"{tooMany} more than {limit} pages.");
-        int num = node is PdfRef pr ? pr.Num : 0;
-        if (num != 0) input.PageNums.Add(num);
-        input.Source.Add(new SourcePage(dict, num, res, media, crop, rotate));
+        });
     }
 
     /// <summary>The number of pages of a parsed PDF, found as <see cref="CollectPages"/> finds them.</summary>
     public static int CountPages(PdfFile file)
     {
-        var seen = new HashSet<PdfDict>(ReferenceEqualityComparer.Instance);
         int count = 0;
-        Walk(file.Catalog?["Pages"], 0);
+        PageTree.Walk(file, file.Catalog?["Pages"], (_, _) => ++count <= MaxSourcePages);
         return count;
-
-        void Walk(PdfObject? node, int depth)
-        {
-            if (depth > 64 || file.Resolve(node) is not PdfDict dict || !seen.Add(dict) || count > MaxSourcePages) return;
-            if (file.GetArray(dict, "Kids") is { } kids && file.GetName(dict, "Type") != "Page")
-                foreach (var k in kids.Items) Walk(k, depth + 1);
-            else count++;
-        }
     }
 
     /// <summary>
