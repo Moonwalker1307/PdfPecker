@@ -112,7 +112,7 @@ internal static class DocumentGenerator
     /// <summary>A copy of the caller's options with the document's page, metadata and settings applied.</summary>
     private static PdfOptions Options(PdfOptions? caller, Composed composed, PageSet page, ImageTable images)
     {
-        var options = Copy(caller ?? new PdfOptions());
+        var options = caller?.Clone() ?? new PdfOptions();
         var metadata = composed.Metadata;
         var settings = composed.Settings;
 
@@ -135,54 +135,6 @@ internal static class DocumentGenerator
         options.ResourceResolver = source => images.Resolve(source) ?? resolver?.Invoke(source);
         return options;
     }
-
-    /// <summary>A shallow copy of every setting. A test checks that this list covers every public property.</summary>
-    internal static PdfOptions Copy(PdfOptions o) => new()
-    {
-        PageSize = o.PageSize,
-        Margins = o.Margins,
-        Scale = o.Scale,
-        ShrinkToFit = o.ShrinkToFit,
-        TruncateBandsToWholePoints = o.TruncateBandsToWholePoints,
-        IgnoreCssPageRules = o.IgnoreCssPageRules,
-        BaseDirectory = o.BaseDirectory,
-        ResourceResolver = o.ResourceResolver,
-        AllowFileAccess = o.AllowFileAccess,
-        Fonts = o.Fonts,
-        UseSystemFonts = o.UseSystemFonts,
-        MissingFont = o.MissingFont,
-        MissingCharacter = o.MissingCharacter,
-        UserStyleSheet = o.UserStyleSheet,
-        Bookmarks = o.Bookmarks,
-        FormFields = o.FormFields,
-        MaxPages = o.MaxPages,
-        Compress = o.Compress,
-        CompressionLevel = o.CompressionLevel,
-        Title = o.Title,
-        Author = o.Author,
-        Subject = o.Subject,
-        Keywords = o.Keywords,
-        Creator = o.Creator,
-        Producer = o.Producer,
-        CustomProperties = o.CustomProperties,
-        CreationDate = o.CreationDate,
-        FooterText = o.FooterText,
-        HeaderText = o.HeaderText,
-        Watermark = o.Watermark,
-        Security = o.Security,
-        Conformance = o.Conformance,
-        Accessibility = o.Accessibility,
-        Language = o.Language,
-        Hyphenation = o.Hyphenation,
-        EInvoice = o.EInvoice,
-        Attachments = o.Attachments,
-        EmbedStandardFonts = o.EmbedStandardFonts,
-        Signature = o.Signature,
-        Viewer = o.Viewer,
-        PageLabels = o.PageLabels,
-        Linearize = o.Linearize,
-        StripImageMetadata = o.StripImageMetadata,
-    };
 }
 
 /// <summary>Opens a file with the application the system associates with it.</summary>

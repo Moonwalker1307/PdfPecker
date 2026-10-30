@@ -93,8 +93,8 @@ The fluent package's tests are in `tests/PdfPecker.Fluent.Tests` and run with th
 
 - `LayoutTests` and `ExtrasTests` – the HTML each fluent call writes: which elements, which declarations, how
   decorators merge. `QuestPdfCallsTests` covers the calls named after QuestPDF's.
-- `ApiTests` – argument checks, options handling (including a check that `DocumentGenerator.Copy` covers every public
-  `PdfOptions` property), metadata, several page sets, images and the generate methods.
+- `ApiTests` – argument checks, options handling (the caller's `PdfOptions` are copied, never changed), metadata,
+  several page sets, images and the generate methods.
 - `GoldenTests` – the examples in `samples/PdfPecker.Fluent.Sample/Examples.cs`, compared with
   `Golden/*.expected.html` exactly and with `Golden/*.expected.pdf` after inflating every stream (`PdfCompare.cs`),
   because .NET 9's zlib compresses the same bytes differently. They also run under ar-SA, fa-IR and da-DK.
