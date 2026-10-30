@@ -4,9 +4,15 @@ name: .NET preview
 # .NET shows up long before it ships. Nothing is packed: a package built against preview reference assemblies should
 # not ship, and .NET 11 already runs the net10.0 build, so net11.0 joins the released package once .NET 11 is
 # generally available. The job never blocks a pull request or a release: preview SDKs change between drops, and a
-# failure here is a heads-up, not a reason to hold back a stable release.
+# failure here is a heads-up, not a reason to hold back a stable release. It runs on main and weekly rather than on
+# every pull request, since a preview break is rarely caused by the change under review.
 on:
-  pull_request:
+  push:
+    branches: [main]
+    paths:
+      - src/**
+      - tests/**
+      - .github/workflows/dotnet-preview.yml
   release:
     types: [published]
   schedule:
@@ -16,8 +22,10 @@ on:
 permissions:
   contents: read
 
+# A PR's newer push replaces its older run. Every push to main runs on its own: with one group for main, GitHub keeps
+# only the newest waiting run and cancels the others, so commits merged minutes apart got no result.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:

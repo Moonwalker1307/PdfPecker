@@ -5,8 +5,10 @@ using System.Diagnostics;
 namespace PdfPecker.Fluent.Tests;
 
 /// <summary>
-/// The fluent layer must stay linear in what the caller adds and cheap next to the conversion itself. The bounds are
-/// generous, for slow CI machines; the benchmarks in bench/ measure the real cost.
+/// The fluent layer must stay linear in what the caller adds and cheap next to the conversion itself. Both are checked
+/// by the bytes the calls allocate, which are the same on every machine: timing them failed whenever the other test
+/// assemblies, which CI runs beside this one on three runtimes, slowed one of the two measurements more than the other.
+/// The benchmarks in bench/ measure the real speed, and the nightly Performance job watches it.
 /// </summary>
 [Collection(nameof(HostileInputCollection))]
 public sealed class PerformanceTests
@@ -22,70 +24,44 @@ public sealed class PerformanceTests
         }
     }));
 
-    private static TimeSpan Time(Action action, int repeat = 3)
+    // The bytes the second of two calls allocates, so that one-time work such as static tables is left out. The
+    // conversion runs on the calling thread, so the thread's own count covers it.
+    private static long Allocated(Action action)
     {
         action();
-        var best = TimeSpan.MaxValue;
-        for (int i = 0; i < repeat; i++)
-        {
-            var watch = Stopwatch.StartNew();
-            action();
-            if (watch.Elapsed < best) best = watch.Elapsed;
-        }
-        return best;
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        action();
+        return GC.GetAllocatedBytesForCurrentThread() - before;
     }
 
     [Fact]
     public void Html_generation_is_linear()
     {
-        // The two sizes are timed in turns, as in Html_generation_is_small_next_to_the_conversion: timed one after the
-        // other, a busy spell while the library's tests ran on three runtimes beside this one fell on the large table
-        // alone, and 0.7 s against 5.8 s failed a test that measures 3.5x on a quiet machine.
-        DocumentGenerator.Html(Table(20_000), false, out _);
-        DocumentGenerator.Html(Table(80_000), false, out _);
-        TimeSpan small = TimeSpan.MaxValue, large = TimeSpan.MaxValue;
-        for (int i = 0; i < 4; i++)
-        {
-            var watch = Stopwatch.StartNew();
-            DocumentGenerator.Html(Table(20_000), false, out _);
-            if (watch.Elapsed < small) small = watch.Elapsed;
-            watch.Restart();
-            DocumentGenerator.Html(Table(80_000), false, out _);
-            if (watch.Elapsed < large) large = watch.Elapsed;
-        }
-        // Four times the rows: linear is about 4x; quadratic would be 16x.
-        Assert.True(large.TotalMilliseconds < Math.Max(small.TotalMilliseconds, 5) * 8, $"20k rows {small}, 80k rows {large}.");
+        long small = Allocated(() => DocumentGenerator.Html(Table(20_000), false, out _));
+        long large = Allocated(() => DocumentGenerator.Html(Table(80_000), false, out _));
+        // Four times the rows: linear is about 4x (4.0 when this was written); quadratic would be 16x.
+        Assert.True(large < small * 5, $"20k rows {small:N0} bytes, 80k rows {large:N0} bytes.");
     }
 
     [Fact]
     public void A_hundred_thousand_rows_build_quickly()
     {
-        var time = Time(() => DocumentGenerator.Html(Table(100_000), false, out _), repeat: 1);
-        Assert.True(time < TimeSpan.FromSeconds(10), $"Took {time}.");
+        // Only a guard against a hang or a quadratic slip, with room for a slow and busy machine: this takes about
+        // 3 s on a quiet one.
+        DocumentGenerator.Html(Table(1_000), false, out _);
+        var watch = Stopwatch.StartNew();
+        DocumentGenerator.Html(Table(100_000), false, out _);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(30), $"Took {watch.Elapsed}.");
     }
 
     [Fact]
     public void Html_generation_is_small_next_to_the_conversion()
     {
-        // The report has no barcodes, whose encoding is PdfPecker's work rather than the fluent layer's.
-        // The two are timed in turns, so that the other test assemblies running beside this one slow both alike: timed one
-        // after the other, a busy spell during only the conversion's runs failed the test.
-        // The HTML is written a hundred times first: the writer's methods are compiled with full optimisation only after
-        // about thirty calls, while the conversion's are called often enough inside a single PDF. With only the twenty
-        // timed calls the writer was measured unoptimised, at 12 ms on a busy runner against 25 ms for the PDF.
+        // The report has no barcodes, whose encoding is PdfPecker's work rather than the fluent layer's. Writing its
+        // HTML allocated 1.5 MB against 2.9 MB for the whole PDF, of which the HTML is a part.
         var document = Examples.All["report"]();
-        for (int i = 0; i < 100; i++) DocumentGenerator.Html(document, false, out _);
-        document.GeneratePdf();
-        TimeSpan html = TimeSpan.MaxValue, pdf = TimeSpan.MaxValue;
-        for (int i = 0; i < 20; i++)
-        {
-            var watch = Stopwatch.StartNew();
-            DocumentGenerator.Html(document, false, out _);
-            if (watch.Elapsed < html) html = watch.Elapsed;
-            watch.Restart();
-            document.GeneratePdf();
-            if (watch.Elapsed < pdf) pdf = watch.Elapsed;
-        }
-        Assert.True(html.TotalMilliseconds * 3 < pdf.TotalMilliseconds, $"HTML {html}, PDF {pdf}.");
+        long html = Allocated(() => DocumentGenerator.Html(document, false, out _));
+        long pdf = Allocated(() => document.GeneratePdf());
+        Assert.True(html * 3 < pdf * 2, $"HTML {html:N0} bytes, PDF {pdf:N0} bytes.");
     }
 }

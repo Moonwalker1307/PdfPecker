@@ -31,13 +31,16 @@ nuget.org only accepts OSI- or FSF-approved licence IDs and some bundled font li
 
 | Workflow | When | What |
 | --- | --- | --- |
-| `nuget.yml` | Every PR, pushes to main, published releases | Builds and tests net8.0, net9.0 and net10.0 on Linux and net10.0 on Windows, publishes both samples with Native AOT, reports coverage and packs PdfPecker and PdfPecker.Fluent with the same version. On a release it attaches both packages and publishes them to nuget.org. |
-| `dotnet-preview.yml` | Every PR, published releases, Mondays | Builds and tests on the latest .NET 11 preview SDK with an extra `net11.0` target. Never blocks: the job is `continue-on-error`, and it packs and publishes nothing. |
+| `nuget.yml` | Every PR, pushes to main, published releases | Builds and tests net8.0, net9.0 and net10.0 on Linux and net10.0 on Windows, publishes both samples with Native AOT, reports coverage (main only) and packs PdfPecker and PdfPecker.Fluent with the same version. On a release it attaches both packages and publishes them to nuget.org. |
+| `dotnet-preview.yml` | Pushes to main, published releases, Mondays | Builds and tests on the latest .NET 11 preview SDK with an extra `net11.0` target. Never blocks: the job is `continue-on-error`, and it packs and publishes nothing. |
 | `conformance.yml` | PRs and pushes touching `src`, `tests` or the samples | veraPDF validation of the PDF/A and PDF/UA samples. |
 | `codeql.yml` | PRs, pushes and a schedule | CodeQL analysis. |
-| `perf.yml` | Nightly | Benchmark on main against the previous night's run. |
+| `perf.yml` | Nightly | Benchmark on main, run twice keeping each case's better time, against the previous night's run. |
 | `fuzz.yml` | Nightly | Fuzzes every target, including `fluent`, the fluent package's generative fuzzer. |
 | `dependabot-auto-merge.yml` | Dependabot PRs | Turns on auto-merge (squash) for patch and minor updates, so GitHub merges them once the required checks pass. Major updates and veraPDF updates wait for a person. |
+
+Each push to main gets its own run, while a newer push to a PR cancels that PR's older run. Package and coverage
+artifacts are kept for 7 days (release packages for 90), as artifact storage is shared by the account's repositories.
 
 Actions are pinned to commit SHAs, and jobs get read-only permissions unless they need more: the release job may
 attach files, and the publish job may request an OIDC token.
