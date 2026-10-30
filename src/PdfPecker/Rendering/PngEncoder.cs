@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using PdfPecker.Images;
 
 namespace PdfPecker.Rendering;
 
@@ -209,7 +210,7 @@ internal static class PngEncoder
             }
             for (int i = bytesPerPixel; i < current.Length; i++)
             {
-                byte v = (byte)(current[i] - PaethPredictor(current[i - bytesPerPixel], previous[i], previous[i - bytesPerPixel]));
+                byte v = (byte)(current[i] - PngFilters.PaethPredictor(current[i - bytesPerPixel], previous[i], previous[i - bytesPerPixel]));
                 output[i] = v;
                 sum += Abs(v);
             }
@@ -266,14 +267,6 @@ internal static class PngEncoder
 
     /// <summary>The magnitude of a filtered byte read as a signed value.</summary>
     private static int Abs(byte v) => v < 128 ? v : 256 - v;
-
-    private static int PaethPredictor(int left, int above, int aboveLeft)
-    {
-        int estimate = left + above - aboveLeft;
-        int toLeft = Math.Abs(estimate - left), toAbove = Math.Abs(estimate - above), toAboveLeft = Math.Abs(estimate - aboveLeft);
-        if (toLeft <= toAbove && toLeft <= toAboveLeft) return left;
-        return toAbove <= toAboveLeft ? above : aboveLeft;
-    }
 
     /// <summary>Writes a chunk: big-endian length, type, data and the CRC of type and data.</summary>
     private static void WriteChunk(Stream output, ReadOnlySpan<byte> type, ReadOnlySpan<byte> data)

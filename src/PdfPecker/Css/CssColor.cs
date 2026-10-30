@@ -16,8 +16,6 @@ internal static partial class CssColor
     private const uint OpaqueAlpha = 0xFF000000;
     private const uint FullAlpha = 0xFF;
 
-    public static bool IsOpaque(uint color) => color >> AlphaShift == FullAlpha;
-
     public static bool IsVisible(uint color) => color >> AlphaShift != 0;
 
     /// <summary>The colour with its alpha multiplied by <paramref name="opacity"/>.</summary>

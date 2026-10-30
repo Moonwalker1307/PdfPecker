@@ -119,7 +119,7 @@ internal static class SignatureWriter
 
         // AcroForm: the signature goes into the named empty signature field when there is one, else into a new field.
         var acroEntry = catalog["AcroForm"];
-        var acro = Copy(file.Resolve(acroEntry) as PdfDict);
+        var acro = PdfDict.CopyOf(file.Resolve(acroEntry) as PdfDict);
         var names = new HashSet<string>(StringComparer.Ordinal);
         var target = FindField(file, file.GetArray(acro, "Fields"), o.FieldName, names);
         if (target != null)
@@ -160,11 +160,11 @@ internal static class SignatureWriter
         if (acroEntry is PdfRef acroRef) update.WriteObject(acroRef.Num, acroRef.Gen, acro);
         if (acroEntry is not PdfRef || certify)
         {
-            var cat = Copy(catalog);
+            var cat = PdfDict.CopyOf(catalog);
             if (acroEntry is not PdfRef) cat.Entries["AcroForm"] = acro;
             if (certify)
             {
-                var perms = Copy(file.GetDict(catalog, "Perms"));
+                var perms = PdfDict.CopyOf(file.GetDict(catalog, "Perms"));
                 perms.Entries["DocMDP"] = new PdfRef(sigNum, 0);
                 cat.Entries["Perms"] = perms;
             }
@@ -183,7 +183,7 @@ internal static class SignatureWriter
             if (annotsEntry is PdfRef annotsRef) update.WriteObject(annotsRef.Num, annotsRef.Gen, new PdfArray(annots));
             else
             {
-                var page = Copy(pageDict);
+                var page = PdfDict.CopyOf(pageDict);
                 page.Entries["Annots"] = new PdfArray(annots);
                 update.WriteObject(pageRef.Num, pageRef.Gen, page);
             }
@@ -209,7 +209,7 @@ internal static class SignatureWriter
         else
         {
             // The existing field keeps its place on the page; the signature box fills its rectangle.
-            widget = Copy(target.Widget);
+            widget = PdfDict.CopyOf(target.Widget);
             if (file.GetNumbers(widget, "Rect") is { Length: 4 } rect)
             {
                 w = (float)Math.Abs(rect[2] - rect[0]);
@@ -219,7 +219,7 @@ internal static class SignatureWriter
             if (ReferenceEquals(target.Field, target.Widget)) widget.Entries["V"] = new PdfRef(sigNum, 0);
             else
             {
-                var field = Copy(target.Field);
+                var field = PdfDict.CopyOf(target.Field);
                 field.Entries["V"] = new PdfRef(sigNum, 0);
                 update.WriteObject(target.FieldRef.Num, target.FieldRef.Gen, field);
             }
@@ -382,7 +382,4 @@ internal static class SignatureWriter
     }
 
     private static PdfNumber Real(float v) => PdfNumber.Real(Math.Round(v, 3));
-
-    private static PdfDict Copy(PdfDict? d)
-        => d == null ? new PdfDict() : new PdfDict(new Dictionary<string, PdfObject>(d.Entries, StringComparer.Ordinal));
 }

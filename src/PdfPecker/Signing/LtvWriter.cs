@@ -277,13 +277,13 @@ internal static class LtvWriter
         var ocspRefs = WriteStreams(ocsps);
         var crlRefs = WriteStreams(crls);
 
-        var dss = existingDss == null ? new PdfDict() : Copy(existingDss);
+        var dss = PdfDict.CopyOf(existingDss);
         dss.Entries["Type"] = PdfName.Get("DSS");
         if (certRefs.Count > 0) dss.Entries["Certs"] = new PdfArray(certRefs);
         if (ocspRefs.Count > 0) dss.Entries["OCSPs"] = new PdfArray(ocspRefs);
         if (crlRefs.Count > 0) dss.Entries["CRLs"] = new PdfArray(crlRefs);
 
-        var vriDict = Copy(file.GetDict(existingDss, "VRI"));
+        var vriDict = PdfDict.CopyOf(file.GetDict(existingDss, "VRI"));
         string now = PdfDate(DateTimeOffset.Now);
         foreach (var (key, v) in vris)
         {
@@ -305,11 +305,11 @@ internal static class LtvWriter
         bool needsExtension = file.GetDict(extensions, "ESIC") == null && !IsPdf2(file, catalog);
         if (catalog["DSS"] is not PdfRef || needsExtension)
         {
-            var cat = Copy(catalog);
+            var cat = PdfDict.CopyOf(catalog);
             cat.Entries["DSS"] = dssRef;
             if (needsExtension)
             {
-                var ext = Copy(extensions);
+                var ext = PdfDict.CopyOf(extensions);
                 var esic = new PdfDict();
                 esic.Entries["BaseVersion"] = PdfName.Get("1.7");
                 esic.Entries["ExtensionLevel"] = PdfNumber.Int(5);
@@ -377,7 +377,7 @@ internal static class LtvWriter
         var page = FirstPage(file, catalog["Pages"]) ?? throw new PdfSignatureException("The PDF has no pages.");
 
         var acroEntry = catalog["AcroForm"];
-        var acro = Copy(file.Resolve(acroEntry) as PdfDict);
+        var acro = PdfDict.CopyOf(file.Resolve(acroEntry) as PdfDict);
         var names = new HashSet<string>(StringComparer.Ordinal);
         var fields = new List<PdfObject>();
         if (file.GetArray(acro, "Fields") is { } existing)
@@ -402,7 +402,7 @@ internal static class LtvWriter
         if (acroEntry is PdfRef acroRef) update.WriteObject(acroRef.Num, acroRef.Gen, acro);
         else
         {
-            var cat = Copy(catalog);
+            var cat = PdfDict.CopyOf(catalog);
             cat.Entries["AcroForm"] = acro;
             update.WriteObject(rootRef.Num, rootRef.Gen, cat);
         }
@@ -415,7 +415,7 @@ internal static class LtvWriter
         if (annotsEntry is PdfRef annotsRef) update.WriteObject(annotsRef.Num, annotsRef.Gen, new PdfArray(annots));
         else
         {
-            var p = Copy(pageDict);
+            var p = PdfDict.CopyOf(pageDict);
             p.Entries["Annots"] = new PdfArray(annots);
             update.WriteObject(pageRef.Num, pageRef.Gen, p);
         }
@@ -478,9 +478,6 @@ internal static class LtvWriter
         using (var z = new ZLibStream(ms, CompressionLevel.Optimal, leaveOpen: true)) z.Write(data);
         return ms.ToArray();
     }
-
-    private static PdfDict Copy(PdfDict? d)
-        => d == null ? new PdfDict() : new PdfDict(new Dictionary<string, PdfObject>(d.Entries, StringComparer.Ordinal));
 
     private static string PdfDate(DateTimeOffset t)
     {

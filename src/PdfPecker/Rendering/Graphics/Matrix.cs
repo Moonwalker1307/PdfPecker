@@ -39,7 +39,6 @@ internal readonly struct Matrix
     }
 
     public (double X, double Y) Apply(double x, double y) => (A * x + C * y + E, B * x + D * y + F);
-    public (double X, double Y) ApplyVector(double x, double y) => (A * x + C * y, B * x + D * y);
 
     /// <summary>Average linear scale factor (square root of the area scale).</summary>
     public double MeanScale => Math.Sqrt(Math.Abs(Determinant));

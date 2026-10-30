@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using PdfPecker.Images;
 using PdfPecker.Rendering.Parsing;
 
 namespace PdfPecker.Pdf;
@@ -199,7 +200,7 @@ internal sealed partial class PdfCompactWriter
                 sub[i] = (byte)(x - left);
                 up[i] = (byte)(x - upValue);
                 average[i] = (byte)(x - ((left + upValue) >> 1));
-                paeth[i] = (byte)(x - Paeth(left, upValue, upLeft));
+                paeth[i] = (byte)(x - PngFilters.PaethPredictor(left, upValue, upLeft));
             }
             int best = 0;
             long bestSum = long.MaxValue;
@@ -213,12 +214,5 @@ internal sealed partial class PdfCompactWriter
             candidates[best].CopyTo(result, r * (rowBytes + 1) + 1);
         }
         return result;
-    }
-
-    private static int Paeth(int a, int b, int c)
-    {
-        int p = a + b - c;
-        int pa = Math.Abs(p - a), pb = Math.Abs(p - b), pc = Math.Abs(p - c);
-        return pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
     }
 }

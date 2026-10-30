@@ -1,5 +1,6 @@
 using PdfPecker.Rendering;
 using PdfPecker.Rendering.Content;
+using PdfPecker.Rendering.Graphics;
 using PdfPecker.Rendering.Images;
 using PdfPecker.Rendering.Parsing;
 
@@ -191,20 +192,6 @@ internal sealed partial class PdfCompactWriter
         return joined;
     }
 
-    /// <summary>An affine transformation [a b c d e f], applied to row vectors as PDF does.</summary>
-    private readonly record struct Matrix(double A, double B, double C, double D, double E, double F)
-    {
-        public static readonly Matrix Identity = new(1, 0, 0, 1, 0, 0);
-
-        /// <summary>This transformation followed by <paramref name="m"/>.</summary>
-        public Matrix Then(Matrix m) => new(
-            A * m.A + B * m.C, A * m.B + B * m.D,
-            C * m.A + D * m.C, C * m.B + D * m.D,
-            E * m.A + F * m.C + m.E, E * m.B + F * m.D + m.F);
-
-        public static Matrix? From(double[]? v) => v is { Length: 6 } ? new Matrix(v[0], v[1], v[2], v[3], v[4], v[5]) : null;
-    }
-
     /// <summary>Follows content streams and forms, tracking the transformation, and records where each image is drawn.</summary>
     private sealed class PlacementScan(PdfFile file)
     {
@@ -245,7 +232,7 @@ internal sealed partial class PdfCompactWriter
             {
                 // The form's bounding box, transformed by its matrix, is scaled into the rectangle (PDF 12.5.5).
                 var bbox = file.GetNumbers(form, "BBox");
-                var matrix = Matrix.From(file.GetNumbers(form, "Matrix")) ?? Matrix.Identity;
+                var matrix = FormMatrix(file.GetNumbers(form, "Matrix"));
                 if (bbox is not { Length: 4 }) continue;
                 double w = Math.Abs(bbox[2] - bbox[0]) * Math.Max(Math.Abs(matrix.A), Math.Abs(matrix.C));
                 double h = Math.Abs(bbox[3] - bbox[1]) * Math.Max(Math.Abs(matrix.B), Math.Abs(matrix.D));
@@ -277,7 +264,7 @@ internal sealed partial class PdfCompactWriter
                         break;
                     case "cm" when parser.Operands.Count == 6 && parser.Operands.All(o => o.Kind == OperandKind.Number):
                         var o = parser.Operands;
-                        ctm = new Matrix(o[0].Num, o[1].Num, o[2].Num, o[3].Num, o[4].Num, o[5].Num).Then(ctm);
+                        ctm = new Matrix(o[0].Num, o[1].Num, o[2].Num, o[3].Num, o[4].Num, o[5].Num).Multiply(ctm);
                         break;
                     case "Do" when parser.Operands.Count == 1 && parser.Operands[0].Name is { } name:
                         Draw(file.GetDict(resources, "XObject")?[name], resources, ctm, depth);
@@ -314,10 +301,14 @@ internal sealed partial class PdfCompactWriter
                 Complete = false;
                 return;
             }
-            var matrix = Matrix.From(file.GetNumbers(form, "Matrix")) ?? Matrix.Identity;
+            var matrix = FormMatrix(file.GetNumbers(form, "Matrix"));
             // A form drawn many times is decoded once.
             if (!_forms.TryGetValue(form, out var content)) _forms[form] = content = TryDecode(file, form);
-            Content(content, file.GetDict(form, "Resources") ?? resources, matrix.Then(ctm), depth + 1);
+            Content(content, file.GetDict(form, "Resources") ?? resources, matrix.Multiply(ctm), depth + 1);
         }
+
+        // Unlike the renderer, which takes the first six numbers of a longer array, a form matrix of any length but six is
+        // ignored here, as it always was, so the images this scan resamples stay the same.
+        private static Matrix FormMatrix(double[]? numbers) => numbers is { Length: 6 } ? Matrix.FromArray(numbers) : Matrix.Identity;
     }
 }

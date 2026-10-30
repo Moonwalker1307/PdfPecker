@@ -13,9 +13,6 @@ internal sealed partial class PdfImage
 
     private const int Grayscale = 0, Truecolor = 2, Indexed = 3, GrayscaleAlpha = 4, TruecolorAlpha = 6;
 
-    // The filter type byte before each row.
-    private const byte FilterSub = 1, FilterUp = 2, FilterAverage = 3, FilterPaeth = 4;
-
     private static bool IsPng(byte[] data)
         => data.Length > PngSignatureLength && data[0] == 0x89 && data[1] == (byte)'P' && data[2] == (byte)'N' && data[3] == (byte)'G';
 
@@ -160,46 +157,18 @@ internal sealed partial class PdfImage
         return sb.ToString();
     }
 
-    /// <summary>The Paeth predictor of PNG: whichever of left, up and upper left is closest to left + up - upper left.</summary>
-    private static int Paeth(int a, int b, int c)
-    {
-        int p = a + b - c, pa = Math.Abs(p - a), pb = Math.Abs(p - b), pc = Math.Abs(p - c);
-        return pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
-    }
-
     /// <summary>Reverses PNG row filters in place. Each row is preceded by its filter-type byte.</summary>
     private static void UnfilterInPlace(byte[] raw, int stride, int height, int bpp)
     {
         if (raw.Length < (stride + 1) * height) throw new InvalidDataException("Truncated PNG data");
+        // The row above the first is zeros.
+        ReadOnlySpan<byte> above = new byte[stride];
         for (int y = 0; y < height; y++)
         {
             int row = y * (stride + 1);
-            byte filter = raw[row];
-            int cur = row + 1, prev = cur - (stride + 1);
-            bool first = y == 0; // the row above the first is zeros
-            switch (filter)
-            {
-                case FilterSub:
-                    for (int i = bpp; i < stride; i++) raw[cur + i] += raw[cur + i - bpp];
-                    break;
-                case FilterUp:
-                    if (!first) for (int i = 0; i < stride; i++) raw[cur + i] += raw[prev + i];
-                    break;
-                case FilterAverage:
-                    for (int i = 0; i < stride; i++)
-                    {
-                        int a = i >= bpp ? raw[cur + i - bpp] : 0, b = first ? 0 : raw[prev + i];
-                        raw[cur + i] += (byte)((a + b) >> 1);
-                    }
-                    break;
-                case FilterPaeth:
-                    for (int i = 0; i < stride; i++)
-                    {
-                        int a = i >= bpp ? raw[cur + i - bpp] : 0, b = first ? 0 : raw[prev + i], c = !first && i >= bpp ? raw[prev + i - bpp] : 0;
-                        raw[cur + i] += (byte)Paeth(a, b, c);
-                    }
-                    break;
-            }
+            var current = raw.AsSpan(row + 1, stride);
+            PngFilters.Undo(raw[row], current, above, bpp);
+            above = current;
         }
     }
 
@@ -215,21 +184,7 @@ internal sealed partial class PdfImage
             byte filter = raw[offset++];
             Buffer.BlockCopy(raw, offset, cur, 0, stride);
             offset += stride;
-            switch (filter)
-            {
-                case FilterSub:
-                    for (int i = bpp; i < stride; i++) cur[i] += cur[i - bpp];
-                    break;
-                case FilterUp:
-                    for (int i = 0; i < stride; i++) cur[i] += prev[i];
-                    break;
-                case FilterAverage:
-                    for (int i = 0; i < stride; i++) cur[i] += (byte)(((i >= bpp ? cur[i - bpp] : 0) + prev[i]) >> 1);
-                    break;
-                case FilterPaeth:
-                    for (int i = 0; i < stride; i++) cur[i] += (byte)Paeth(i >= bpp ? cur[i - bpp] : 0, prev[i], i >= bpp ? prev[i - bpp] : 0);
-                    break;
-            }
+            PngFilters.Undo(filter, cur, prev, bpp);
             StoreRow(cur, width, pass.Y + y * pass.Dy, pass, target);
             (prev, cur) = (cur, prev);
         }

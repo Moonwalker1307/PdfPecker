@@ -12,16 +12,6 @@ internal static partial class Filters
     private const int MaxColors = 32;
     private const int DefaultBitsPerComponent = 8;
 
-    /// <summary>The filter type that starts each row of data written with a PNG predictor (10 to 15).</summary>
-    private enum PngFilter : byte
-    {
-        None,
-        Sub,
-        Up,
-        Average,
-        Paeth,
-    }
-
     private static byte[] ApplyPredictor(byte[] data, PdfDict? parms, PdfFile? file)
     {
         if (parms == null || file == null) return data;
@@ -87,58 +77,10 @@ internal static partial class Filters
             var row = output.AsSpan(written, rowBytes);
             cursor.TryRead(Math.Min(rowBytes, cursor.Remaining), out var filtered);
             filtered.CopyTo(row);
-            UndoPngFilter((PngFilter)filter, row, previous, bytesPerPixel);
+            PngFilters.Undo(filter, row, previous, bytesPerPixel);
             row.CopyTo(previous);
             written += rowBytes;
         }
         return written == output.Length ? output : output.AsSpan(0, written).ToArray();
-    }
-
-    // A filter type that no PNG filter has leaves the row as it is.
-    private static void UndoPngFilter(PngFilter filter, Span<byte> row, ReadOnlySpan<byte> above, int bytesPerPixel)
-    {
-        switch (filter)
-        {
-            case PngFilter.Sub: AddLeftBytes(row, bytesPerPixel); break;
-            case PngFilter.Up: AddAbove(row, above); break;
-            case PngFilter.Average: UndoAverage(row, above, bytesPerPixel); break;
-            case PngFilter.Paeth: UndoPaeth(row, above, bytesPerPixel); break;
-        }
-    }
-
-    private static void AddAbove(Span<byte> row, ReadOnlySpan<byte> above)
-    {
-        for (int i = 0; i < row.Length; i++) row[i] = (byte)(row[i] + above[i]);
-    }
-
-    private static void UndoAverage(Span<byte> row, ReadOnlySpan<byte> above, int bytesPerPixel)
-    {
-        // Before the first pixel there is no byte to the left.
-        for (int i = 0; i < row.Length; i++)
-        {
-            int left = i >= bytesPerPixel ? row[i - bytesPerPixel] : 0;
-            row[i] = (byte)(row[i] + ((left + above[i]) >> 1));
-        }
-    }
-
-    private static void UndoPaeth(Span<byte> row, ReadOnlySpan<byte> above, int bytesPerPixel)
-    {
-        for (int i = 0; i < row.Length; i++)
-        {
-            int left = i >= bytesPerPixel ? row[i - bytesPerPixel] : 0;
-            int upperLeft = i >= bytesPerPixel ? above[i - bytesPerPixel] : 0;
-            row[i] = (byte)(row[i] + PaethPredictor(left, above[i], upperLeft));
-        }
-    }
-
-    /// <summary>Picks whichever of the left, upper and upper-left bytes is closest to left + upper - upper-left.</summary>
-    private static int PaethPredictor(int left, int upper, int upperLeft)
-    {
-        int estimate = left + upper - upperLeft;
-        int leftDistance = Math.Abs(estimate - left);
-        int upperDistance = Math.Abs(estimate - upper);
-        int upperLeftDistance = Math.Abs(estimate - upperLeft);
-        if (leftDistance <= upperDistance && leftDistance <= upperLeftDistance) return left;
-        return upperDistance <= upperLeftDistance ? upper : upperLeft;
     }
 }

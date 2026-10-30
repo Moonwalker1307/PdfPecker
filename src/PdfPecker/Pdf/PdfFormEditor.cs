@@ -136,7 +136,7 @@ internal sealed partial class PdfFormEditor
         var source = _file.Resolve(r) as PdfDict ?? new PdfDict();
         var copy = source is PdfStream s
             ? new PdfStream(new Dictionary<string, PdfObject>(s.Entries, StringComparer.Ordinal), s.RawData)
-            : new PdfDict(new Dictionary<string, PdfObject>(source.Entries, StringComparer.Ordinal));
+            : PdfDict.CopyOf(source);
         _changed[r.Num] = (r.Gen, copy);
         return copy;
     }
@@ -404,7 +404,7 @@ internal sealed partial class PdfFormEditor
         var entry = Catalog["AcroForm"];
         if (entry is PdfRef r) return R(r) is PdfDict ? Edit(r) : null;
         if (entry is not PdfDict direct) return null;
-        var copy = new PdfDict(new Dictionary<string, PdfObject>(direct.Entries, StringComparer.Ordinal));
+        var copy = PdfDict.CopyOf(direct);
         Edit(_rootRef).Entries["AcroForm"] = copy;
         return copy;
     }

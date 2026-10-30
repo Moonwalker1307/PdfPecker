@@ -35,14 +35,14 @@ internal sealed partial class PdfImage
             if (row == 0)
             {
                 // The row above the first is zeros, so Sub, which looks only to the left, is the useful filter there.
-                output[at - 1] = FilterSub;
+                output[at - 1] = PngFilters.Sub;
                 for (int i = 0; i < stride; i++) output[at + i] = (byte)(pixels[i] - (i >= colors ? pixels[i - colors] : 0));
                 continue;
             }
-            output[at - 1] = FilterPaeth;
+            output[at - 1] = PngFilters.Paeth;
             for (int i = 0; i < colors; i++) output[at + i] = (byte)(pixels[line + i] - pixels[prev + i]);
             for (int i = colors; i < stride; i++)
-                output[at + i] = (byte)(pixels[line + i] - Paeth(pixels[line + i - colors], pixels[prev + i], pixels[prev + i - colors]));
+                output[at + i] = (byte)(pixels[line + i] - PngFilters.PaethPredictor(pixels[line + i - colors], pixels[prev + i], pixels[prev + i - colors]));
         }
         decodeParms = "<< /Predictor 15 /Colors " + colors.ToString(CultureInfo.InvariantCulture) + " /BitsPerComponent 8 /Columns "
             + width.ToString(CultureInfo.InvariantCulture) + " >>";
