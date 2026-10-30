@@ -51,6 +51,7 @@ internal sealed partial class FontProgram
                 catch (Exception ex) when (IsFormatError(ex))
                 {
                     // A damaged character map: keep what was read before the damage.
+                    SwallowedErrors.Record(ex);
                 }
             _astral = map.Astral;
             _bmp = map.Bmp;

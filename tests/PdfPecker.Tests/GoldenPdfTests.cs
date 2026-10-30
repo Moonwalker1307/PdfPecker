@@ -19,7 +19,7 @@ namespace PdfPecker.Tests;
 /// </remarks>
 public class GoldenPdfTests
 {
-    private static readonly string Root = Path.Combine(SourceDirectory(), "Golden");
+    internal static readonly string Root = Path.Combine(SourceDirectory(), "Golden");
 
     private static string SourceDirectory([CallerFilePath] string path = "") => Path.GetDirectoryName(path)!;
 
@@ -99,7 +99,7 @@ public class GoldenPdfTests
         ["complex/pdfa.html"] = o => o.Conformance = PdfConformance.PdfA2u,
     };
 
-    private static byte[] Render(string path)
+    internal static byte[] Render(string path)
     {
         var options = new PdfOptions
         {

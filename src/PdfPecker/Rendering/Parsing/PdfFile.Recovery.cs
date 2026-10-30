@@ -91,6 +91,7 @@ internal sealed partial class PdfFile
                 }
                 catch (Exception ex) when (ex is PdfFormatException or IndexOutOfRangeException or ArgumentException or InvalidOperationException)
                 {
+                    SwallowedErrors.Record(ex);
                     continue;
                 }
                 if (o is not PdfStream stream) continue;
@@ -185,6 +186,7 @@ internal sealed partial class PdfFile
         catch (Exception ex) when (ex is PdfFormatException or IndexOutOfRangeException or ArgumentException or NotSupportedException or InvalidDataException)
         {
             // An unreadable object stream contributes nothing.
+            SwallowedErrors.Record(ex);
         }
     }
 

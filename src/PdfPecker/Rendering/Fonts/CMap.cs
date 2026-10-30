@@ -93,6 +93,7 @@ internal sealed class CMap
         catch (Exception ex) when (ex is PdfFormatException or IndexOutOfRangeException or ArgumentException)
         {
             // A damaged CMap keeps the mappings read so far.
+            SwallowedErrors.Record(ex);
         }
         return map;
     }

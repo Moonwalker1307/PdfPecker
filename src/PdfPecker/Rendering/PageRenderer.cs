@@ -131,7 +131,7 @@ internal sealed partial class PageRenderer
     private byte[] SafeDecode(PdfStream s)
     {
         try { return _file.DecodeStream(s); }
-        catch (Exception ex) when (ex is NotSupportedException or InvalidDataException or PdfFormatException or IndexOutOfRangeException) { return Array.Empty<byte>(); }
+        catch (Exception ex) when (ex is NotSupportedException or InvalidDataException or PdfFormatException or IndexOutOfRangeException) { SwallowedErrors.Record(ex); return Array.Empty<byte>(); }
     }
 
     // ------------------------------------------------------------------ content streams
@@ -164,6 +164,7 @@ internal sealed partial class PageRenderer
                                                or PdfFormatException or OverflowException or KeyNotFoundException)
                 {
                     // A bad operator does not stop the page.
+                    SwallowedErrors.Record(ex);
                 }
             }
         }
@@ -888,6 +889,7 @@ internal sealed partial class PageRenderer
             }
             catch (Exception ex) when (ex is InvalidCastException or IndexOutOfRangeException or ArgumentException or NullReferenceException or PdfFormatException)
             {
+                SwallowedErrors.Record(ex);
             }
         }
     }

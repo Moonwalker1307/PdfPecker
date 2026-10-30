@@ -51,6 +51,7 @@ internal sealed partial class Type1Font : IGlyphSource
         }
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException or OverflowException or FormatException)
         {
+            SwallowedErrors.Record(ex);
             return null;
         }
     }

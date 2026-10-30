@@ -25,6 +25,7 @@ internal static partial class CffSubsetter
         }
         catch (Exception ex) when (FontProgram.IsFormatError(ex) || ex is InvalidOperationException)
         {
+            SwallowedErrors.Record(ex);
             return null;
         }
     }

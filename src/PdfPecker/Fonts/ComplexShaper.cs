@@ -302,6 +302,7 @@ internal static partial class ComplexShaper
             }
             catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException)
             {
+                SwallowedErrors.Record(ex);
             }
         }
 
@@ -316,6 +317,7 @@ internal static partial class ComplexShaper
             }
             catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException)
             {
+                SwallowedErrors.Record(ex);
             }
         }
     }

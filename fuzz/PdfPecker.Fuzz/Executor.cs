@@ -27,10 +27,15 @@ internal sealed class Executor
     /// <summary>Threads that ignored cancellation and are still running; the caller should restart the process.</summary>
     public int AbandonedThreads { get; private set; }
 
-    public Executor(TimeSpan timeout, long memoryCeiling)
+    // With --swallowed: how often the library swallowed a bug-type exception, by type and throwing frame. Damaged input
+    // is allowed to end there, so these are counted rather than reported; a count that grows on one frame is worth a look.
+    private readonly Dictionary<string, long>? _swallowed;
+
+    public Executor(TimeSpan timeout, long memoryCeiling, bool countSwallowed = false)
     {
         _timeout = timeout;
         _memoryCeiling = memoryCeiling;
+        if (countSwallowed) _swallowed = new Dictionary<string, long>(StringComparer.Ordinal);
         _retained = GC.GetTotalMemory(true);
     }
 
@@ -52,6 +57,7 @@ internal sealed class Executor
         using var done = new ManualResetEventSlim();
         var thread = new Thread(() =>
         {
+            if (_swallowed != null) SwallowedErrors.Sink = CountSwallowed;
             try { target.Run(input, cts.Token); }
             catch (Exception ex) { error = ex; }
             finally { done.Set(); }
@@ -100,6 +106,21 @@ internal sealed class Executor
             return null;
         }
         return new Verdict("exception", ex.GetType().FullName + "|" + TopFrames(ex.StackTrace), Describe(ex));
+    }
+
+    private void CountSwallowed(Exception ex)
+    {
+        var key = ex.GetType().Name + " " + TopFrames(ex.StackTrace);
+        lock (_swallowed!) _swallowed[key] = _swallowed.GetValueOrDefault(key) + 1;
+    }
+
+    /// <summary>The ten most frequent swallowed exceptions counted so far.</summary>
+    public string SwallowedSummary()
+    {
+        if (_swallowed == null) return "not counted";
+        lock (_swallowed)
+            return _swallowed.Count == 0 ? "none"
+                : string.Join("; ", _swallowed.OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key, StringComparer.Ordinal).Take(10).Select(kv => kv.Key + "=" + kv.Value));
     }
 
     private static Exception? Unwrap(Exception? ex)

@@ -154,6 +154,7 @@ internal sealed partial class PdfFile
         }
         catch (Exception ex) when (IsDamagedObjectError(ex))
         {
+            SwallowedErrors.Record(ex);
             ok = false;
         }
         if (!ok || Trailer["Root"] == null || Resolve(Trailer["Root"]) is not PdfDict) Reconstruct();
@@ -234,6 +235,7 @@ internal sealed partial class PdfFile
         }
         catch (Exception ex) when (IsDamagedObjectError(ex))
         {
+            SwallowedErrors.Record(ex);
             return null;
         }
     }

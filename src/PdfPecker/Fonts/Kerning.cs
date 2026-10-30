@@ -60,6 +60,7 @@ internal sealed class Kerning
         }
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException)
         {
+            SwallowedErrors.Record(ex);
             return null;
         }
     }
@@ -72,7 +73,7 @@ internal sealed class Kerning
         if (_cache.TryGetValue(key, out short cached)) return cached;
         int value;
         try { value = _pairPositioning.Count > 0 ? LookupGpos(left, right) : LookupKern(left, right); }
-        catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException) { value = 0; }
+        catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException) { SwallowedErrors.Record(ex); value = 0; }
         short clamped = (short)Math.Clamp(value, short.MinValue, short.MaxValue);
         _cache.TryAdd(key, clamped);
         return clamped;

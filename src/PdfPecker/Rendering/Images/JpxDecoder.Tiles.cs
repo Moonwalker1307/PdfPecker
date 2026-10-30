@@ -97,6 +97,7 @@ internal sealed partial class JpxDecoder
             catch (Exception ex) when (IsTileDamage(ex))
             {
                 // A damaged tile leaves its area blank; other tiles still draw.
+                SwallowedErrors.Record(ex);
             }
         }
         return any || _tileOrder.Count == 0;

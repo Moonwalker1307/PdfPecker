@@ -175,6 +175,7 @@ internal sealed class FontResolver
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException || FontProgram.IsFormatError(ex))
                 {
                     // try the next source
+                    SwallowedErrors.Record(ex);
                 }
             }
             return null;

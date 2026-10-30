@@ -14,6 +14,7 @@ internal sealed class Options
     public long MaxMemoryMb = 1536;
     public string? Repo;
     public bool Strict;
+    public bool Swallowed;
     public bool NoMinimize;
     public bool Worker;
     public string? Repro;
@@ -38,6 +39,7 @@ internal sealed class Options
                 case "--max-memory-mb": o.MaxMemoryMb = long.Parse(Value()); break;
                 case "--repo": o.Repo = Value(); break;
                 case "--strict": o.Strict = true; break;
+                case "--swallowed": o.Swallowed = true; break;
                 case "--no-minimize": o.NoMinimize = true; break;
                 case "--worker": o.Worker = true; break;
                 case "--repro": o.Repro = Value(); break;
@@ -69,6 +71,7 @@ internal sealed class Options
         };
         if (Repo != null) { a.Add("--repo"); a.Add(Repo); }
         if (Strict) a.Add("--strict");
+        if (Swallowed) a.Add("--swallowed");
         if (NoMinimize) a.Add("--no-minimize");
         if (worker) a.Add("--worker");
         if (skipSeeds > 0) { a.Add("--skip-seeds"); a.Add(skipSeeds.ToString()); }
@@ -96,7 +99,7 @@ internal static class Program
         catch (Exception ex) when (ex is ArgumentException or FormatException)
         {
             Console.Error.WriteLine(ex.Message);
-            Console.Error.WriteLine("Usage: PdfPecker.Fuzz --target <name|all> [--duration 2m] [--out dir] [--seed 1] [--timeout 5] [--max-memory-mb 1536] [--strict] [--no-minimize] [--repo path] [--jobs n] | --list | --repro <file> --target <name>");
+            Console.Error.WriteLine("Usage: PdfPecker.Fuzz --target <name|all> [--duration 2m] [--out dir] [--seed 1] [--timeout 5] [--max-memory-mb 1536] [--strict] [--swallowed] [--no-minimize] [--repo path] [--jobs n] | --list | --repro <file> --target <name>");
             return Exit.Usage;
         }
         if (o.List)
@@ -126,9 +129,10 @@ internal static class Program
     {
         var target = Targets.Find(o.Target);
         if (target == null) return Exit.Usage;
-        var executor = new Executor(target.TimeoutFor(o.Timeout), o.MaxMemoryMb << 20);
+        var executor = new Executor(target.TimeoutFor(o.Timeout), o.MaxMemoryMb << 20, o.Swallowed);
         var verdict = executor.Run(target, File.ReadAllBytes(o.Repro!), o.Strict, out _);
         if (verdict != null) Console.WriteLine($"{verdict.Kind}: {verdict.Signature}\n{verdict.Detail}");
+        if (o.Swallowed) Console.WriteLine("swallowed: " + executor.SwallowedSummary());
         return executor.AbandonedThreads > 0 ? Exit.Restart : verdict != null ? Exit.ReproFails : Exit.Done;
     }
 
@@ -256,7 +260,7 @@ internal sealed class Worker
         if (seeds.Count == 0) { Console.Error.WriteLine($"[{target.Name}] no seed inputs found under {root}"); return Exit.Usage; }
 
         var store = new FindingStore(_o.Out, target.Name, _o.Lane);
-        var executor = new Executor(target.TimeoutFor(_o.Timeout), _o.MaxMemoryMb << 20);
+        var executor = new Executor(target.TimeoutFor(_o.Timeout), _o.MaxMemoryMb << 20, _o.Swallowed);
         long startRetained = executor.Retained;
         bool leakReported = false, shed = false;
         var rng = new Random(unchecked((int)_o.Seed));
@@ -346,10 +350,12 @@ internal sealed class Worker
             {
                 nextReport += TimeSpan.FromSeconds(20);
                 Console.WriteLine($"[{tag}] {executions} executions ({executions / clock.Elapsed.TotalSeconds:0.#}/s), {store.Count} finding(s), {duplicates} duplicate(s), {flaky} unconfirmed, "
-                    + $"tolerated: {(tolerated.Count == 0 ? "none" : string.Join(", ", tolerated.Select(kv => kv.Key + "=" + kv.Value)))}");
+                    + $"tolerated: {(tolerated.Count == 0 ? "none" : string.Join(", ", tolerated.Select(kv => kv.Key + "=" + kv.Value)))}"
+                    + (_o.Swallowed ? ", swallowed: " + executor.SwallowedSummary() : ""));
             }
         }
         Console.WriteLine($"[{tag}] finished: {executions} executions, {store.Count} finding(s), {duplicates} duplicate(s), {flaky} unconfirmed slow or large input(s)");
+        if (_o.Swallowed) Console.WriteLine($"[{tag}] swallowed: {executor.SwallowedSummary()}");
         File.Delete(store.CurrentInputPath);
         return Exit.Done;
     }

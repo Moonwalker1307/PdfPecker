@@ -63,6 +63,7 @@ internal sealed partial class Type1Font
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentException)
         {
             // A damaged charstring draws what it managed to before the damage.
+            SwallowedErrors.Record(ex);
         }
         return glyph;
     }

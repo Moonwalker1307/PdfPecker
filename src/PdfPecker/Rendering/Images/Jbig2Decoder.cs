@@ -54,6 +54,7 @@ internal sealed partial class Jbig2Decoder
         {
             // Damaged data: show what was decoded so far. Only the page's decode budget, whose message starts with
             // "The page", is passed on, so the renderer can stop the page.
+            SwallowedErrors.Record(ex);
         }
         return dec._page == null ? null : PackRows(dec._page, width, height);
     }

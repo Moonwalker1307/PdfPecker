@@ -548,7 +548,7 @@ internal sealed partial class PdfFormEditor
     private byte[] Decode(PdfStream s)
     {
         try { return _file.DecodeStream(s); }
-        catch (Exception ex) when (ex is PdfFormatException or InvalidDataException or NotSupportedException or IndexOutOfRangeException) { return Array.Empty<byte>(); }
+        catch (Exception ex) when (ex is PdfFormatException or InvalidDataException or NotSupportedException or IndexOutOfRangeException) { SwallowedErrors.Record(ex); return Array.Empty<byte>(); }
     }
 
     /// <summary>

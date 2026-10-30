@@ -48,6 +48,7 @@ internal sealed partial class PdfCompactWriter
         }
         catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or PdfFormatException or ArgumentException or IndexOutOfRangeException or OverflowException)
         {
+            SwallowedErrors.Record(ex);
             return null;
         }
         if (image?.Pixels == null || image.Width != width || image.Height != height) return null;
@@ -224,6 +225,7 @@ internal sealed partial class PdfCompactWriter
             }
             catch (Exception ex) when (ex is NotSupportedException or PdfFormatException or ArgumentException or IndexOutOfRangeException or OverflowException)
             {
+                SwallowedErrors.Record(ex);
                 return Array.Empty<byte>();
             }
         }

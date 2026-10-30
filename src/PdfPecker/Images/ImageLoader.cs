@@ -84,6 +84,7 @@ internal sealed class ImageLoader
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or FormatException or ArgumentException or NotSupportedException
                                        or InvalidDataException or OverflowException or IndexOutOfRangeException)
         {
+            SwallowedErrors.Record(ex);
             img = null; // a missing or damaged image must not fail the whole document
         }
         finally { _loading.Remove(src); }

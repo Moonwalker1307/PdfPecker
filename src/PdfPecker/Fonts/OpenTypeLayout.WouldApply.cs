@@ -30,6 +30,7 @@ internal sealed partial class OpenTypeLayout
         }
         catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException)
         {
+            SwallowedErrors.Record(ex);
         }
         return false;
     }
