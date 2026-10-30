@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Runtime.CompilerServices;
 
 namespace PdfPecker.Rendering.Graphics;
@@ -75,7 +76,18 @@ internal sealed class Rasterizer
     {
         ax -= _x0; bx -= _x0;
         ay -= _y0; by -= _y0;
-        if (ay == by || float.IsNaN(ax + ay + bx + by)) return;
+        // A NaN or infinite coordinate has no position to draw, so the segment is skipped; letting it in would turn
+        // the clipped coordinates into NaN, which .NET 8 converts to a negative index.
+        if (ay == by || !float.IsFinite(ax) || !float.IsFinite(ay) || !float.IsFinite(bx) || !float.IsFinite(by)) return;
+        // Clipping in float overflows when the coordinates are so far apart that their difference is infinite, or when
+        // the segment is so nearly horizontal that its slope is. Such segments are clipped in double precision, which
+        // holds any float's slope; every other segment keeps the float arithmetic and with it its exact coverage.
+        if (float.IsFinite(by - ay) && float.IsFinite((bx - ax) / (by - ay))) Clip(ax, ay, bx, by);
+        else Clip<double>(ax, ay, bx, by);
+    }
+
+    private void Clip<T>(T ax, T ay, T bx, T by) where T : IFloatingPointIeee754<T>
+    {
         float dir = 1;
         if (ay > by)
         {
@@ -83,27 +95,28 @@ internal sealed class Rasterizer
             (ay, by) = (by, ay);
             dir = -1;
         }
-        if (by <= 0 || ay >= _h) return;
+        T h = T.CreateTruncating(_h);
+        if (by <= T.Zero || ay >= h) return;
         // Clip vertically.
-        float dxdy = (bx - ax) / (by - ay);
-        if (ay < 0) { ax -= ay * dxdy; ay = 0; }
-        if (by > _h) { bx -= (by - _h) * dxdy; by = _h; }
+        T dxdy = (bx - ax) / (by - ay);
+        if (ay < T.Zero) { ax -= ay * dxdy; ay = T.Zero; }
+        if (by > h) { bx -= (by - h) * dxdy; by = h; }
         if (by <= ay) return;
         // Split at the left and right edges so every piece lies within [0, w]; pieces left of the area become vertical
         // at x = 0 (they still change the winding of everything to their right), pieces to the right are dropped.
-        float w = _w;
-        if ((ax < 0) != (bx < 0) && ax != bx)
+        T w = T.CreateTruncating(_w);
+        if ((ax < T.Zero) != (bx < T.Zero) && ax != bx)
         {
-            float ym = ay + (0 - ax) / (bx - ax) * (by - ay);
-            ym = Math.Clamp(ym, ay, by);
-            Piece(ax, ay, 0, ym, dir);
-            Piece(0, ym, bx, by, dir);
+            T ym = ay + (T.Zero - ax) / (bx - ax) * (by - ay);
+            ym = T.Clamp(ym, ay, by);
+            Piece(ax, ay, T.Zero, ym, dir);
+            Piece(T.Zero, ym, bx, by, dir);
             return;
         }
         if ((ax > w) != (bx > w) && ax != bx)
         {
-            float ym = ay + (w - ax) / (bx - ax) * (by - ay);
-            ym = Math.Clamp(ym, ay, by);
+            T ym = ay + (w - ax) / (bx - ax) * (by - ay);
+            ym = T.Clamp(ym, ay, by);
             Piece(ax, ay, w, ym, dir);
             Piece(w, ym, bx, by, dir);
             return;
@@ -111,20 +124,25 @@ internal sealed class Rasterizer
         Piece(ax, ay, bx, by, dir);
     }
 
-    private void Piece(float ax, float ay, float bx, float by, float dir)
+    private void Piece<T>(T ax, T ay, T bx, T by, float dir) where T : IFloatingPointIeee754<T>
     {
         if (by <= ay) return;
-        if (ax >= _w && bx >= _w) return;
-        if (ax <= 0 && bx <= 0) { ax = bx = 0; }
-        else if ((ax < 0) != (bx < 0))
+        T w = T.CreateTruncating(_w);
+        if (ax >= w && bx >= w) return;
+        if (ax <= T.Zero && bx <= T.Zero) { ax = bx = T.Zero; }
+        else if ((ax < T.Zero) != (bx < T.Zero))
         {
             // Splitting may leave a tiny negative from rounding.
-            ax = Math.Max(0, ax);
-            bx = Math.Max(0, bx);
+            ax = T.Max(T.Zero, ax);
+            bx = T.Max(T.Zero, bx);
         }
-        ax = Math.Min(ax, _w);
-        bx = Math.Min(bx, _w);
-        Accumulate(ax, ay, bx, by, dir);
+        ax = T.Min(ax, w);
+        bx = T.Min(bx, w);
+        // Every coordinate now lies within the area, so a double piece fits a float, but its two ends may round to the
+        // same row position.
+        float fay = float.CreateTruncating(ay), fby = float.CreateTruncating(by);
+        if (fby <= fay) return;
+        Accumulate(float.CreateTruncating(ax), fay, float.CreateTruncating(bx), fby, dir);
     }
 
     private void Accumulate(float ax, float ay, float bx, float by, float dir)
@@ -133,6 +151,10 @@ internal sealed class Rasterizer
         int stride = _stride;
         float dxdy = (bx - ax) / (by - ay);
         float x = ax;
+        // The steps along the rows add up to bx only up to rounding, which the large slope of a nearly horizontal segment
+        // magnifies: unbounded, the last step of a segment that ends on the left edge could land just below 0 and index
+        // the cell before the row, and an infinite slope would step to infinity.
+        float xLo = MathF.Min(ax, bx), xHi = MathF.Max(ax, bx);
         int yStart = (int)ay;
         int yEnd = Math.Min(_h, (int)MathF.Ceiling(by));
         if (yStart < _minRow) _minRow = yStart;
@@ -142,6 +164,8 @@ internal sealed class Rasterizer
             int line = y * stride;
             float dy = MathF.Min(y + 1, by) - MathF.Max(y, ay);
             float xnext = x + dxdy * dy;
+            if (!(xnext >= xLo)) xnext = xLo;
+            else if (xnext > xHi) xnext = xHi;
             float d = dy * dir;
             float x0 = x, x1 = xnext;
             if (x0 > x1) (x0, x1) = (x1, x0);

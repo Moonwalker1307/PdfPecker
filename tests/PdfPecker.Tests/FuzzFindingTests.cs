@@ -92,6 +92,35 @@ public class FuzzFindingTests
             Assert.NotEmpty(Bounded(() => renderer.RenderPageToPng(i, new ImageOptions { Dpi = 72 })));
     }
 
+    // pdf-render, IndexOutOfRangeException in Rasterizer.Accumulate. The renderer's catch dropped the rest of the fill
+    // and left its cells in the accumulation buffer for the next fill to pick up. The first path is well formed: its
+    // nearly horizontal top edge ends on the left edge of the area it fills, and the rounding of its long last step
+    // went just past 0. The second has a coordinate that parses as infinity, which turned the clipped edge into NaN, a
+    // negative index on .NET 8. The top edges of the next two rise by less than 1e-38 of a pixel, so their float slope
+    // is infinite: the first stepped to infinity, and the second, which crosses the top of the area, was clipped to
+    // infinity and then to NaN, again a negative index on .NET 8. The last spans almost the whole float range. Each is followed by a blue triangle at the top of the page, which must still be drawn.
+    [Theory]
+    [InlineData("10 100.18 m 95.48 100.78 l 60 20 l f", 55, 126, true)]
+    [InlineData("10 100 m 10 1e39 l 50 50 l f", 0, 0, false)]
+    [InlineData("q 1 0 0 1 0 200 cm 0 0 m 100 -1e-40 l 100 -50 l f Q", 80, 10, true)]
+    [InlineData("q 1 0 0 1 0 200 cm 0 1e-40 m 100 -1e-40 l 100 -50 l f Q", 80, 10, true)]
+    [InlineData("-3e38 100 m 100 99.99999 l 100 50 l f", 50, 125, true)]
+    public void Path_edges_that_round_or_overflow_in_the_rasterizer_are_filled(string path, int x, int y, bool painted)
+    {
+        string content = "0 g " + path + " 0 0 1 rg 150 150 m 190 150 l 170 190 l f";
+        var pdf = Encoding.Latin1.GetBytes("%PDF-1.7\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj 2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj "
+            + "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Contents 4 0 R>>endobj "
+            + $"4 0 obj<</Length {content.Length}>>stream\n{content}\nendstream endobj trailer<</Root 1 0 R>>");
+        var image = Bounded(() => PdfRenderer.Open(pdf).RenderPage(0, new ImageOptions { Dpi = 72 }));
+        if (painted)
+        {
+            int i = (y * image.Width + x) * 4;
+            Assert.True(image.Rgba[i] < 16 && image.Rgba[i + 1] < 16 && image.Rgba[i + 2] < 16, $"pixel {x},{y} of the path is not black");
+        }
+        int blue = (40 * image.Width + 170) * 4;
+        Assert.True(image.Rgba[blue] < 16 && image.Rgba[blue + 1] < 16 && image.Rgba[blue + 2] > 240, "the triangle after the path is not drawn");
+    }
+
     // ------------------------------------------------------------------ images
 
     [Fact]
