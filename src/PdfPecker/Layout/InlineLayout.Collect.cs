@@ -1,6 +1,7 @@
 using PdfPecker.Css;
 using PdfPecker.Html;
 using PdfPecker.Svg;
+using Captured = PdfPecker.Layout.LayoutEngine.Captured;
 
 namespace PdfPecker.Layout;
 
@@ -8,10 +9,10 @@ namespace PdfPecker.Layout;
 /// Collecting a run of inline content into items: text nodes become words and spaces, inline elements add their
 /// padding and anchors around their children, and images, inline SVG and inline-blocks become boxes.
 /// </summary>
-internal sealed partial class LayoutEngine
+internal sealed partial class InlineLayout
 {
     /// <summary>The items of a run of inline content. Hand the state back with <see cref="ReturnState"/> when done.</summary>
-    private CollectState CollectInline(List<Node> run, float availW, FirstLineStyle? firstLine = null, Element? block = null)
+    internal CollectState CollectInline(List<Node> run, float availW, FirstLineStyle? firstLine = null, Element? block = null)
     {
         var st = RentState();
         st.AvailWidth = availW;
@@ -64,7 +65,7 @@ internal sealed partial class LayoutEngine
                 return;
             case "svg":
             {
-                var svg = SvgSize(e, st.AvailWidth, out float sw, out float sh);
+                var svg = _engine.SvgSize(e, st.AvailWidth, out float sw, out float sh);
                 int at = st.Items.Count;
                 AddInlineSvg(st, e, s, svg, sw, sh, href);
                 AddAtomicBreaks(st, e, before, at);
@@ -108,7 +109,7 @@ internal sealed partial class LayoutEngine
 
     private void CollectTextNode(CollectState st, TextNode t, string? href, InlineDeco? deco)
     {
-        if (Tags != null) _textTag = Tags.Of(t);
+        if (_engine.Tags != null) _textTag = _engine.Tags.Of(t);
         var parent = t.Parent!;
         if (parent.Generated && t.Text.IndexOf(GeneratedContent.LeaderStart) >= 0) AddWithLeaders(st, t.Text, parent.Style, href, deco);
         else AddText(st, t.Text, st.FirstLine is { } fl ? fl.Map(parent.Style) : parent.Style, href, deco);
@@ -126,10 +127,10 @@ internal sealed partial class LayoutEngine
             oof.Deco = cb;
             cb.HoldsAbsolutes = true;
         }
-        if (_measuring && s.Floated)
+        if (_engine._measuring && s.Floated)
         {
             // Measuring: a float takes its width on the line, as it would beside the text.
-            var (fmin, fmax) = Intrinsic(e);
+            var (fmin, fmax) = _engine.Intrinsic(e);
             float margins = FixedHorizontalMargins(s);
             oof.Width = fmax + margins;
             oof.FloatMin = fmin + margins;
@@ -258,7 +259,7 @@ internal sealed partial class LayoutEngine
     private static float AutoAsZero(Length margin) => margin.IsAuto ? 0 : margin.Resolve(0);
 
     /// <summary>The left and right margins that are neither auto nor percentages, which is all that counts when measuring.</summary>
-    private static float FixedHorizontalMargins(ComputedStyle s) =>
+    internal static float FixedHorizontalMargins(ComputedStyle s) =>
         (s.MarginLeft.IsAuto || s.MarginLeft.IsPercent ? 0 : s.MarginLeft.Value)
         + (s.MarginRight.IsAuto || s.MarginRight.IsPercent ? 0 : s.MarginRight.Value);
 
@@ -289,7 +290,7 @@ internal sealed partial class LayoutEngine
     /// <summary>An img element, with its margins as spacers; an SVG file in it becomes an inline box.</summary>
     private void AddInlineImage(CollectState st, Element e, ComputedStyle s, string? href)
     {
-        var img = ImageSize(e, st.AvailWidth, out float w, out float h, out var svgFile);
+        var img = _engine.ImageSize(e, st.AvailWidth, out float w, out float h, out var svgFile);
         if (svgFile != null)
         {
             AddInlineSvg(st, e, s, svgFile, w, h, href, file: true);
@@ -305,10 +306,10 @@ internal sealed partial class LayoutEngine
         image.Height = h;
         // A percentage width or max-width makes the image compressible (CSS Sizing 3 §5.2.2): as in Chrome, it has no
         // min-content width, so it does not hold a table column or a shrink-to-fit box open at its natural width.
-        if (_measuring && IsCompressible(s)) image.MinWidth = 0;
-        image.PageExcess = _replacedExcess;
+        if (_engine._measuring && IsCompressible(s)) image.MinWidth = 0;
+        image.PageExcess = _engine._replacedExcess;
         image.Href = href ?? LinkOf(e);
-        image.Tag = Tags?.Of(e);
+        image.Tag = _engine.Tags?.Of(e);
         st.Items.Add(image);
         if (mr > 0) AddSpacer(st, around, mr, href);
         st.LastWasSpace = false;
@@ -329,25 +330,25 @@ internal sealed partial class LayoutEngine
         float ptop = s.PaddingTop.Resolve(0) + s.BorderTop, pbot = s.PaddingBottom.Resolve(0) + s.BorderBottom;
         float boxW = sw + pl + pr, boxH = sh + ptop + pbot;
         var ops = new List<DrawOp>();
-        var group = new GroupOp { Reach = boxW + _replacedExcess };
+        var group = new GroupOp { Reach = boxW + _engine._replacedExcess };
         ops.Add(group);
-        BoxPainter.Paint(group, s, 0, 0, boxW, boxH, _images);
+        BoxPainter.Paint(group, s, 0, 0, boxW, boxH, _engine._images);
         if (s.Visible && svg != null)
         {
             if (file)
             {
                 // An SVG file in an img element: sized and placed by object-fit and object-position.
                 var radii = BoxPainter.InnerRadii(BoxPainter.Radii(s, boxW, boxH), pl, ptop, pr, pbot);
-                AddSvgImage(ops, s, svg, pl, ptop, sw, sh, radii, Tags?.Of(e));
+                LayoutEngine.AddSvgImage(ops, s, svg, pl, ptop, sw, sh, radii, _engine.Tags?.Of(e));
             }
-            else AddSvgDrawing(ops, svg, pl, ptop, sw, sh, Tags?.Of(e));
+            else _engine.AddSvgDrawing(ops, svg, pl, ptop, sw, sh, _engine.Tags?.Of(e));
         }
         var around = MarginStyle(s);
         if (ml > 0) AddSpacer(st, around, ml, href);
         st.Items.Add(new Item
         {
             Kind = ItemKind.Box, Style = s, Width = boxW, Height = boxH, BoxBaseline = boxH, BoxOps = ops, Href = href ?? LinkOf(e),
-            MinWidth = _measuring && IsCompressible(s) ? pl + pr : -1,
+            MinWidth = _engine._measuring && IsCompressible(s) ? pl + pr : -1,
         });
         if (mr > 0) AddSpacer(st, around, mr, href);
         st.LastWasSpace = false;
@@ -370,7 +371,7 @@ internal sealed partial class LayoutEngine
     private Item LayoutInlineBlock(Element e, float availW, string? href)
     {
         Captured c;
-        if (!_measuring) c = CaptureBox(e, availW, shrinkToFit: true);
+        if (!_engine._measuring) c = _engine.CaptureBox(e, availW, shrinkToFit: true);
         else if (_measuredInlineBlocks.TryGetValue((e, MeasuredWidthKey(e, availW)), out var measured)) c = measured;
         else
         {
@@ -379,7 +380,7 @@ internal sealed partial class LayoutEngine
             // was laid out once for every level above it, and its drawing was copied up through every level each time.
             // Measurement is unpaginated and its drawing is thrown away, so the same element in the same width always
             // gets the same size: it is laid out once, and later measurements reuse that without drawing anything.
-            var laid = CaptureBox(e, availW, shrinkToFit: true);
+            var laid = _engine.CaptureBox(e, availW, shrinkToFit: true);
             _measuredInlineBlocks[(e, MeasuredWidthKey(e, availW))] = new Captured
             {
                 Ops = [], AnchorIds = laid.AnchorIds, Width = laid.Width, Height = laid.Height, Baseline = laid.Baseline,
@@ -394,11 +395,11 @@ internal sealed partial class LayoutEngine
         if (e.Control is { Kind: ControlKind.CheckBox or ControlKind.Radio } && float.IsNaN(c.Baseline))
             baseline -= AutoAsZero(e.Style.MarginBottom);
         var item = new Item { Kind = ItemKind.Box, Style = e.Style, Width = c.Width, Height = c.Height, BoxBaseline = baseline, Capture = c, Href = href };
-        if (_measuring)
+        if (_engine._measuring)
         {
             // An inline-block can wrap its own content, so its min-content contribution is its min-content width,
             // not the width it takes when laid out at the (very wide) measuring width.
-            var (min, max) = Intrinsic(e);
+            var (min, max) = _engine.Intrinsic(e);
             float margins = FixedHorizontalMargins(e.Style);
             // A percentage width has nothing to resolve against here, so the box counts with the width it would have
             // with an auto width, as in Chrome, not with a share of the very wide measuring width.
@@ -419,7 +420,7 @@ internal sealed partial class LayoutEngine
     private float MeasuredWidthKey(Element e, float availW)
     {
         var s = e.Style;
-        if (e.IsReplaced || !_intrinsicCache.TryGetValue(e, out var intrinsic)) return availW;
+        if (e.IsReplaced || !_engine._intrinsicCache.TryGetValue(e, out var intrinsic)) return availW;
         if (s.Width.IsPercent || s.MinWidth.IsPercent || s.MaxWidth.IsPercent
             || s.MarginLeft.IsAuto || s.MarginLeft.IsPercent || s.MarginRight.IsAuto || s.MarginRight.IsPercent
             || s.MarginTop.IsPercent || s.MarginBottom.IsPercent

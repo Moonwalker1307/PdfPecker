@@ -12,7 +12,7 @@ namespace PdfPecker.Layout;
 /// it fit, space-first trims the opening character that starts every wrapped line, and trim-start the one that starts
 /// any line. Only fonts with the halt feature trim, and only by what that feature takes off.
 /// </summary>
-internal sealed partial class LayoutEngine
+internal sealed partial class InlineLayout
 {
     // A trim found between the characters of a paragraph's items: the item, the character's offset in it, whether its
     // left (start) or right (end) half goes, and by how much.

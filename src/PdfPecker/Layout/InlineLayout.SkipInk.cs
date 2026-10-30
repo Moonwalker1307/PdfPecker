@@ -9,7 +9,7 @@ namespace PdfPecker.Layout;
 /// whose ink reaches into the line's band cuts a gap from where its ink starts to where it ends there, widened by the
 /// line's thickness (at most 13 CSS pixels) on both sides. CJK ideographs and Hangul cut no gaps unless the value is all.
 /// </summary>
-internal sealed partial class LayoutEngine
+internal sealed partial class InlineLayout
 {
     // Chrome ignores ink that reaches less than half a pixel into the line, and widens the gaps by the line's
     // thickness, up to 13 pixels.
@@ -57,7 +57,7 @@ internal sealed partial class LayoutEngine
     /// with its origin at x, raised by dy points and slanted by skew (a synthetic italic); or the character at start, which
     /// is c, in a standard font.
     /// </summary>
-    private interface IGlyphVisitor
+    internal interface IGlyphVisitor
     {
         void Glyph(FontProgram program, int gid, string text, int start, float x, float dy, float skew);
         void Glyph(StandardFont font, char c, string text, int start, float x);
@@ -67,7 +67,7 @@ internal sealed partial class LayoutEngine
     /// Walks the glyphs of a text op as the writer draws them: shaped, kerned and spaced, each at its pen position, with
     /// the outlines of a standard font's bundled replacement.
     /// </summary>
-    private void VisitGlyphs<T>(TextOp text, ref T visitor) where T : struct, IGlyphVisitor
+    internal void VisitGlyphs<T>(TextOp text, ref T visitor) where T : struct, IGlyphVisitor
     {
         float scale = text.Size / 1000f;
         string str = text.Text;

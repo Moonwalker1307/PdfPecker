@@ -3,6 +3,7 @@ using PdfPecker.Html;
 using PdfPecker.Images;
 using PdfPecker.Pdf;
 using PdfPecker.Svg;
+using Line = PdfPecker.Layout.InlineLayout.Line;
 
 namespace PdfPecker.Layout;
 
@@ -13,19 +14,21 @@ namespace PdfPecker.Layout;
 internal sealed partial class LayoutEngine
 {
     private PageGrid _grid; // the pages, or while a multi-column box lays out its content, its columns
-    private readonly ImageLoader _images;
+    internal readonly ImageLoader _images;
     private List<DrawOp> _ops = new(256);
-    private bool _paginate = true;
-    private ListMarker? _marker;
+    internal bool _paginate = true;
+    internal ListMarker? _marker;
     private int _currentListIndex;
-    private float _lastBaseline = float.NaN;
+    internal float _lastBaseline = float.NaN;
     private float _lastBoxRight; // right border edge (plus nothing else) of the last block box laid out
     private float _lastBoxX, _lastBoxTop, _lastBoxW, _lastBoxH; // border box of the last block box laid out
     // The content height, vertical padding and borders of the last block box laid out, and the containing block height
     // it gave its children (null when that was not definite, or the box is replaced).
     private float _lastBoxContentH, _lastBoxFrameV;
     private CbHeights? _lastBoxChildCb;
-    private readonly Dictionary<Element, (float Min, float Max)> _intrinsicCache = new();
+    internal readonly Dictionary<Element, (float Min, float Max)> _intrinsicCache = new();
+    // Inline formatting, with its pools and per-paragraph state, which lives as long as this layout does.
+    private readonly InlineLayout _inline;
 
     public readonly Dictionary<string, float> Anchors = new(StringComparer.Ordinal);
 
@@ -39,6 +42,7 @@ internal sealed partial class LayoutEngine
     {
         _grid = pages;
         _images = images;
+        _inline = new InlineLayout(this);
     }
 
     public List<DrawOp> Ops => _ops;
@@ -97,7 +101,7 @@ internal sealed partial class LayoutEngine
         }
     }
 
-    private void CheckPageLimit(float y)
+    internal void CheckPageLimit(float y)
     {
         // In a column the limit applies to the page the column is on.
         var grid = _grid;
@@ -110,7 +114,7 @@ internal sealed partial class LayoutEngine
         if (py >= (grid.Uniform ? (double)MaxPages * grid.Height(0) : grid.Start(MaxPages))) throw new PdfLimitException($"The document would have more than {MaxPages:N0} pages (PdfOptions.MaxPages).");
     }
 
-    private sealed class ListMarker
+    internal sealed class ListMarker
     {
         public string? Text;
         public bool Custom; // the text comes from ::marker content or a string list-style-type: drawn as written
@@ -168,14 +172,14 @@ internal sealed partial class LayoutEngine
 
     // ------------------------------------------------------------------ pagination helpers
 
-    private const float Eps = 0.01f;
+    internal const float Eps = 0.01f;
 
-    private int PageOf(float y) => _grid.PageOf(y + Eps);
+    internal int PageOf(float y) => _grid.PageOf(y + Eps);
 
-    private bool AtPageTop(float y) => y - FlowStart(PageOf(y)) < 0.5f;
+    internal bool AtPageTop(float y) => y - FlowStart(PageOf(y)) < 0.5f;
 
     /// <summary>Returns the y at which a box of height h should start so that it does not straddle a page boundary.</summary>
-    private float FitOnPage(float y, float h)
+    internal float FitOnPage(float y, float h)
     {
         if (!_paginate) return y;
         int p = PageOf(y);
@@ -197,7 +201,7 @@ internal sealed partial class LayoutEngine
         return y;
     }
 
-    private float NextPage(float y)
+    internal float NextPage(float y)
     {
         if (!_paginate || AtPageTop(y)) return y;
         int p = PageOf(y);
@@ -213,11 +217,11 @@ internal sealed partial class LayoutEngine
         return true;
     }
 
-    private bool CrossesPage(float top, float bottom) => _paginate && bottom - top > Eps
+    internal bool CrossesPage(float top, float bottom) => _paginate && bottom - top > Eps
         && (PageOf(top) != PageOf(bottom - 0.5f)
             || (_footnoteReserve.Count > 0 || _edgeReserve.Count > 0 || _splitRow != null) && bottom > FlowEnd(PageOf(top)) + Eps);
 
-    private void Truncate(int count, bool keepFloats = false)
+    internal void Truncate(int count, bool keepFloats = false)
     {
         if (_ops.Count > count) _ops.RemoveRange(count, _ops.Count - count);
         if (!keepFloats) _floats.Truncate(count);
@@ -329,7 +333,7 @@ internal sealed partial class LayoutEngine
                 var child = children[f.Index];
                 if (child is TextNode)
                 {
-                    (f.Run ??= RentRun()).Add(child);
+                    (f.Run ??= _inline.RentRun()).Add(child);
                     continue;
                 }
                 e = (Element)child;
@@ -338,7 +342,7 @@ internal sealed partial class LayoutEngine
                 if (IsInlineLevel(e) || (es.Floated || es.OutOfFlow) && f.Run is { Count: > 0 })
                 {
                     // Floats and absolutely positioned boxes among inline content are placed as the lines reach them.
-                    (f.Run ??= RentRun()).Add(child);
+                    (f.Run ??= _inline.RentRun()).Add(child);
                     continue;
                 }
             }
@@ -369,7 +373,7 @@ internal sealed partial class LayoutEngine
             if (LayoutFlowBox(ref f, e) == FlowStep.Stop) break;
         }
         _flowTrailing = f.PendingMargin;
-        ReturnRun(f.Run);
+        _inline.ReturnRun(f.Run);
         return f.Y + f.PendingMargin.Value;
     }
 
@@ -462,7 +466,7 @@ internal sealed partial class LayoutEngine
         {
             switch (children[k])
             {
-                case TextNode t when t.Text.AsSpan().IndexOfAnyExcept(" \t\n\f\r") < 0 && parent.Style is { } ps && IsCollapsible(ps):
+                case TextNode t when t.Text.AsSpan().IndexOfAnyExcept(" \t\n\f\r") < 0 && parent.Style is { } ps && InlineLayout.IsCollapsible(ps):
                 case Element { Detached: true } or Element { Style: null or { Display: Display.None } or { Floated: true } or { OutOfFlow: true } }:
                     continue;
             }
@@ -493,9 +497,8 @@ internal sealed partial class LayoutEngine
         // line then takes the width of its own page.
         float top = f.InColumns ? f.Y + f.PendingMargin.Value : TruncatedPageMargin(ref f, f.Y + f.PendingMargin.Value);
         var (ix, iw) = f.Pages != null ? OnPage(f.Pages, top) : (f.X, f.W);
-        _inlinePageBox = f.Pages;
-        _inlineTrim = (f.TrimStart && f.FirstBlock && !f.AnyContent ? TextBoxTrim.Start : 0) | (f.TrimEnd && last ? TextBoxTrim.End : 0);
-        f.Y = FlushInline(run, f.Parent, ix, top, iw, !f.AnyContent, out bool produced);
+        var trim = (f.TrimStart && f.FirstBlock && !f.AnyContent ? TextBoxTrim.Start : 0) | (f.TrimEnd && last ? TextBoxTrim.End : 0);
+        f.Y = _inline.FlushInline(run, f.Parent, ix, top, iw, !f.AnyContent, out bool produced, f.Pages, trim);
         run.Clear();
         if (produced)
         {
@@ -879,7 +882,7 @@ internal sealed partial class LayoutEngine
     /// The height of a containing block on each kind of page (the grid's first, odd and even pages). It is the same on
     /// all of them unless it comes from the page area through percentage heights and the pages differ in height.
     /// </summary>
-    private readonly struct CbHeights(float first, float odd, float even)
+    internal readonly struct CbHeights(float first, float odd, float even)
     {
         public readonly float First = first, Odd = odd, Even = even;
 
@@ -916,7 +919,7 @@ internal sealed partial class LayoutEngine
     private float? HeightBasis(Element e) => HeightBasis(e, _cbKind);
 
     /// <summary>Notes the kind of page that content laid out at <paramref name="y"/> starts on.</summary>
-    private void NoteCbKind(float y)
+    internal void NoteCbKind(float y)
     {
         if (_paginate && _cbHeight is { Uniform: false }) _cbKind = PageBox.Kind(PageOf(y));
     }
@@ -985,7 +988,7 @@ internal sealed partial class LayoutEngine
         {
             if (child is TextNode t)
             {
-                if (string.IsNullOrWhiteSpace(t.Text) && IsCollapsible(e.Style)) continue;
+                if (string.IsNullOrWhiteSpace(t.Text) && InlineLayout.IsCollapsible(e.Style)) continue;
                 return null;
             }
             var c = (Element)child;
@@ -1023,8 +1026,8 @@ internal sealed partial class LayoutEngine
     /// characters in 46 boxes nested in each other took as long as 2,300 layouts of the boxes around it would have
     /// alone, so each level laid it out again well within the budget, for 4.7 s.
     /// </summary>
-    private long _boxLayouts;
-    private const int CharactersPerLayout = 32;
+    internal long _boxLayouts;
+    internal const int CharactersPerLayout = 32;
 
     /// <summary>The box layouts so far (see <see cref="_boxLayouts"/>), by which a band laid out for every page is charged.</summary>
     public long BoxLayouts => _boxLayouts;
@@ -1737,7 +1740,7 @@ internal sealed partial class LayoutEngine
     /// does a marker image taller than the line's ascent, which stands on the baseline. A text marker in the item's own
     /// style is left out, as its strut is the line's own.
     /// </summary>
-    private void NoteMarkerLine(Line line)
+    internal void NoteMarkerLine(Line line)
     {
         if (_marker is not { } m || !m.Style.Visible) return;
         if (m.Image != null || m.Svg != null || m.Gradient != null) line.MarkerImageH = m.ImageH;
@@ -1755,7 +1758,7 @@ internal sealed partial class LayoutEngine
         return MathF.Round(ascentPt / 0.75f) / 2 * 0.75f;
     }
 
-    private void EmitMarker(float baseline, float lineTop)
+    internal void EmitMarker(float baseline, float lineTop)
     {
         var m = _marker!;
         _marker = null;
@@ -1809,11 +1812,11 @@ internal sealed partial class LayoutEngine
             if (m.Rtl)
             {
                 // Right to left the marker follows the content's right edge, its text in right-to-left order (".1").
-                if (s.Rtl) _ops.Add(new TextOp(m.ContentRight + gap, baseline, lineTop, font, size, s.Color, VisualMarkerText(text), 0, 0) { Tag = m.Tag });
+                if (s.Rtl) _ops.Add(new TextOp(m.ContentRight + gap, baseline, lineTop, font, size, s.Color, InlineLayout.VisualMarkerText(text), 0, 0) { Tag = m.Tag });
                 else _ops.Add(new TextOp(m.ContentRight, baseline, lineTop, font, size, s.Color, text, 0, 0) { Tag = m.Tag });
                 return;
             }
-            if (s.Rtl) _ops.Add(new TextOp(m.ContentX - tw, baseline, lineTop, font, size, s.Color, VisualMarkerText(text), 0, 0) { Tag = m.Tag });
+            if (s.Rtl) _ops.Add(new TextOp(m.ContentX - tw, baseline, lineTop, font, size, s.Color, InlineLayout.VisualMarkerText(text), 0, 0) { Tag = m.Tag });
             else _ops.Add(new TextOp(m.ContentX - gap - tw, baseline, lineTop, font, size, s.Color, text, 0, 0) { Tag = m.Tag });
             return;
         }
@@ -1843,7 +1846,7 @@ internal sealed partial class LayoutEngine
     /// The width an inside marker takes at the start of its line: what <see cref="EmitMarker"/> draws before the content,
     /// with the gap after it.
     /// </summary>
-    private static float InsideMarkerWidth(ListMarker m)
+    internal static float InsideMarkerWidth(ListMarker m)
     {
         var s = m.Style;
         float size = s.FontSize;
@@ -1898,7 +1901,7 @@ internal sealed partial class LayoutEngine
     /// Computes the used size of an image in points. Returns the decoded raster image, or null with the drawing in
     /// <paramref name="svg"/> when the source is an SVG file, or null for both when it could not be loaded.
     /// </summary>
-    private PdfImage? ImageSize(Element e, float availW, out float w, out float h, out SvgImage? svg, float percentW = float.NaN)
+    internal PdfImage? ImageSize(Element e, float availW, out float w, out float h, out SvgImage? svg, float percentW = float.NaN)
     {
         var src = _images.SourceOf(e);
         var img = _images.Load(src, e.Style.ImageOrientationNone);
@@ -1926,7 +1929,7 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>Computes the used size of an inline &lt;svg&gt; in points and returns its parsed drawing.</summary>
-    private SvgImage? SvgSize(Element e, float availW, out float w, out float h, float percentW = float.NaN)
+    internal SvgImage? SvgSize(Element e, float availW, out float w, out float h, float percentW = float.NaN)
     {
         if (!_images.Svgs.TryGetValue(e, out var svg)) _images.Svgs[e] = svg = SvgImage.Build(e, _images.SvgBudget, _images.LoadAny);
         var (iw, ih) = SvgNaturalSize(svg, availW);
@@ -2056,7 +2059,7 @@ internal sealed partial class LayoutEngine
     /// that viewport, and the file's own viewBox and preserveAspectRatio then fit the drawing inside it. The drawing is
     /// clipped to the content box (and its rounded corners) where it reaches outside.
     /// </summary>
-    private static void AddSvgImage(List<DrawOp> ops, ComputedStyle s, SvgImage svg, float x, float y, float w, float h, CornerRadii? radii,
+    internal static void AddSvgImage(List<DrawOp> ops, ComputedStyle s, SvgImage svg, float x, float y, float w, float h, CornerRadii? radii,
         ContentSlot? tag)
     {
         var (cw, ch) = ConcreteObjectSize(s.ObjectFit, svg, w, h);
@@ -2120,7 +2123,7 @@ internal sealed partial class LayoutEngine
     /// shrunk to the page: it still counts toward how far the content reaches, so that the page is shrunk to fit it
     /// instead, as in Chrome.
     /// </summary>
-    private float _replacedExcess;
+    internal float _replacedExcess;
 
     private void ReplacedSize(Element e, float iw, float ih, float availW, out float w, out float h, float percentW = float.NaN)
     {
@@ -2234,7 +2237,7 @@ internal sealed partial class LayoutEngine
         return sb.ToString();
     }
 
-    private void SetAnchor(string id, float y)
+    internal void SetAnchor(string id, float y)
     {
         Anchors[id] = y;
         // Inside captured content, the anchors move with it when it is placed (and footnote calls are placed then).
@@ -2257,7 +2260,7 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>Content laid out on its own (unpaginated, at the origin) so that it can be measured and then moved into place.</summary>
-    private sealed class Captured
+    internal sealed class Captured
     {
         private List<DrawOp>? _ops;
 
@@ -2413,7 +2416,7 @@ internal sealed partial class LayoutEngine
     /// <paramref name="from"/> to <paramref name="to"/> of <paramref name="ops"/> that starts between
     /// <paramref name="left"/> and <paramref name="right"/>: the text of one line fragment of an inline box.
     /// </summary>
-    private static void ClipBackgroundToText(GroupOp background, List<DrawOp> ops, int from, int to, float left, float right)
+    internal static void ClipBackgroundToText(GroupOp background, List<DrawOp> ops, int from, int to, float left, float right)
     {
         List<DrawOp>? texts = null;
         // The line of a vertical-lr box is a layer that flips it upside down about its middle; its copies are flipped
@@ -2456,10 +2459,10 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>The arguments a box was captured with.</summary>
-    private sealed record BoxSource(Element El, float OuterW, bool ShrinkToFit, float? BorderW, float? BorderH);
+    internal sealed record BoxSource(Element El, float OuterW, bool ShrinkToFit, float? BorderW, float? BorderH);
 
     /// <summary>Lays out a block-level box in a box of <paramref name="outerW"/> (its margin box), optionally with a forced border-box size.</summary>
-    private Captured CaptureBox(Element e, float outerW, bool shrinkToFit, float? borderW = null, float? borderH = null, bool reuse = false,
+    internal Captured CaptureBox(Element e, float outerW, bool shrinkToFit, float? borderW = null, float? borderH = null, bool reuse = false,
         Dictionary<BoxSource, Captured>? inner = null)
     {
         var src = new BoxSource(e, outerW, shrinkToFit, borderW, borderH);
@@ -2648,7 +2651,7 @@ internal sealed partial class LayoutEngine
     /// <summary>Lays out a run of inline content (an anonymous block) at width <paramref name="w"/>.</summary>
     private Captured CaptureRun(List<Node> run, Element container, float w)
     {
-        var c = Capture(() => FlushInline(run, container, 0, 0, w, true, out _));
+        var c = Capture(() => _inline.FlushInline(run, container, 0, 0, w, true, out _));
         c.Width = w;
         return c;
     }
@@ -2773,7 +2776,7 @@ internal sealed partial class LayoutEngine
     private const int LazyOffsetDepth = 32;
 
     /// <summary>Moves captured content to its final position and appends it to the output.</summary>
-    private void Place(Captured c, float dx, float dy)
+    internal void Place(Captured c, float dx, float dy)
     {
         float moveX = dx - c.PlacedX, moveY = dy - c.PlacedY;
         (c.PlacedX, c.PlacedY) = (dx, dy);

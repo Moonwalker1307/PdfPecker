@@ -829,7 +829,7 @@ internal sealed partial class LayoutEngine
             }
             else
             {
-                cy = FlushInline(it.Run!, e, x + offsetX[i], cy, outerW[i], true, out _);
+                cy = _inline.FlushInline(it.Run!, e, x + offsetX[i], cy, outerW[i], true, out _);
                 if (float.IsNaN(firstBaseline)) firstBaseline = _lastBaseline;
             }
             cy += autoAfter[i];

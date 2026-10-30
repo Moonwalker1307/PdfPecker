@@ -1,5 +1,7 @@
 using PdfPecker.Css;
 using PdfPecker.Html;
+using FloatLines = PdfPecker.Layout.LayoutEngine.FloatLines;
+using PageBox = PdfPecker.Layout.LayoutEngine.PageBox;
 
 namespace PdfPecker.Layout;
 
@@ -8,21 +10,46 @@ namespace PdfPecker.Layout;
 /// items and their pools, collecting, the words, line breaking, placing, orphans and widows, the ellipsis and the
 /// decorations each have a partial file of their own; this one lays out a paragraph from start to end.
 /// </summary>
-internal sealed partial class LayoutEngine
+/// <remarks>
+/// Each <see cref="LayoutEngine"/> owns one, so the pools and scratch buffers here live as long as the layout does.
+/// Block layout reaches inline layout only through the members marked internal here; inline layout reaches block
+/// layout through <see cref="_engine"/>, for what lines share with the flow around them: the ops, the page, floats,
+/// markers, footnotes, positioned boxes and the inline-blocks it lays out as boxes of their own.
+/// </remarks>
+internal sealed partial class InlineLayout
 {
+    private readonly LayoutEngine _engine;
+
+    // The layout's tolerance for comparing positions, the same one block layout uses.
+    private const float Eps = LayoutEngine.Eps;
+
+    public InlineLayout(LayoutEngine engine) => _engine = engine;
+
+    /// <summary>
+    /// Opens a run whose items block layout collects itself to measure, so that a paragraph laid out inside it (an
+    /// inline-block's) leaves the run's items in the pool alone.
+    /// </summary>
+    internal void EnterRun() => _inlineDepth++;
+
+    /// <summary>Closes a run <see cref="EnterRun"/> opened, handing the item pool out from the start once no run is open.</summary>
+    internal void LeaveRun()
+    {
+        if (--_inlineDepth == 0) _itemPoolUsed = 0;
+    }
+
     // A paragraph whose lines move between pages of different widths, or to keep orphans and widows, is broken again
     // until it settles, at most this many times.
     private const int MaxRebreaks = 8;
 
-    private TextBoxTrim _inlineTrim; // text-box-trim of the first and last line of the lines FlushInline is about to lay out
-
-    private float FlushInline(List<Node> run, Element container, float x, float y, float w, bool firstInBlock, out bool produced)
+    /// <summary>
+    /// Lays out a run of inline content as lines. <paramref name="pages"/> is the containing block of the lines on each
+    /// kind of page when the pages differ in width, and <paramref name="trim"/> the text-box-trim of their first and
+    /// last line; only the lines of a block's own flow pass them.
+    /// </summary>
+    internal float FlushInline(List<Node> run, Element container, float x, float y, float w, bool firstInBlock, out bool produced,
+        PageBox? pages = null, TextBoxTrim trim = 0)
     {
-        Cancellation.ThrowIfCancellationRequested();
-        var pages = _inlinePageBox;
-        _inlinePageBox = null;
-        var trim = _inlineTrim;
-        _inlineTrim = 0;
+        _engine.Cancellation.ThrowIfCancellationRequested();
         _inlineDepth++;
         try
         {
@@ -36,15 +63,15 @@ internal sealed partial class LayoutEngine
 
     private float FlushInlineCore(List<Node> run, Element container, float x, float y, float w, bool firstInBlock, PageBox? pages, TextBoxTrim trim, out bool produced)
     {
-        _boxLayouts++;
+        _engine._boxLayouts++;
         // Percentage heights of the images and inline-blocks of the lines resolve as on the page the lines start on.
-        NoteCbKind(y);
+        _engine.NoteCbKind(y);
         var st = CollectInline(run, w);
         var items = st.Items;
         long chars = 0;
         foreach (var it in items)
             if (it.IsText) chars += it.Length;
-        _boxLayouts += chars / CharactersPerLayout;
+        _engine._boxLayouts += chars / LayoutEngine.CharactersPerLayout;
         if (!HasRenderable(items))
         {
             PlaceEmptyRun(items, x, y, w);
@@ -55,27 +82,27 @@ internal sealed partial class LayoutEngine
         var cs = container.Style;
         ResolveBidi(items, cs);
         var indent = ParagraphIndent(cs, w, firstInBlock);
-        if (_marker is { Inside: true } inside)
+        if (_engine._marker is { Inside: true } inside)
         {
             // An inside marker starts the first line: the line moves over by the marker's width, and the marker is drawn
             // just before where its content now begins.
-            float mw = InsideMarkerWidth(inside);
+            float mw = LayoutEngine.InsideMarkerWidth(inside);
             inside.ContentX = x + indent.First + mw;
             inside.ContentRight = x + w - indent.First - mw;
             indent = indent with { First = indent.First + mw };
         }
-        bool besideFloats = FloatsBelow(y) || items.Exists(it => it.Kind == ItemKind.Float);
+        bool besideFloats = _engine.FloatsBelow(y) || items.Exists(it => it.Kind == ItemKind.Float);
         // An initial letter starts the first line after its text-indent, and the lines beside it start where it ends.
         float letterIndent = 0;
-        if (firstInBlock && indent.First != 0 && items.Exists(it => it.Kind == ItemKind.Float && IsInitialLetter(it.Element!)))
+        if (firstInBlock && indent.First != 0 && items.Exists(it => it.Kind == ItemKind.Float && LayoutEngine.IsInitialLetter(it.Element!)))
             (letterIndent, indent) = (indent.First, indent with { First = 0 });
         // On pages of different widths each line is measured for the page it goes on, as lines beside floats are.
-        if (_measuring || !_paginate) pages = null;
+        if (_engine._measuring || !_engine._paginate) pages = null;
         StrutMetrics(cs, out float strutA, out float strutD);
         var paragraph = new Paragraph(this, items, cs, x, y, w, indent, strutA + strutD, pages) { LetterIndent = letterIndent };
         FloatLines? fl = besideFloats || pages != null ? paragraph.NewLines() : null;
         paragraph.First = FirstLineItems(run, container, firstInBlock, w, items, cs);
-        int opsMark = _ops.Count;
+        int opsMark = _engine.Ops.Count;
         var lines = paragraph.Break(fl);
         if (pages != null)
         {
@@ -96,7 +123,7 @@ internal sealed partial class LayoutEngine
                     plan = next;
                 }
                 ReturnLines(lines);
-                Truncate(opsMark); // the floats the lines placed
+                _engine.Truncate(opsMark); // the floats the lines placed
                 fl = paragraph.NewLines();
                 fl.HeightHints = hints;
                 fl.ForcedBefore = plan;
@@ -106,8 +133,8 @@ internal sealed partial class LayoutEngine
         produced = true;
         float bottom = PlaceLines(lines, cs, x, y, w, indent, firstInBlock ? EmphasisRoomAbove(container) : 0, trim, besideFloats);
         // A br that clears floats at the end of the last line moves what follows the lines below the floats too.
-        if (besideFloats && lines.Count > 0 && ClearingBreak(lines[^1]) is { } br) bottom = Cleared(br, bottom);
-        if (besideFloats && _floats.ShapeIn(y, bottom)) LiftInlineContent(opsMark);
+        if (besideFloats && lines.Count > 0 && LayoutEngine.ClearingBreak(lines[^1]) is { } br) bottom = _engine.Cleared(br, bottom);
+        if (besideFloats && _engine._floats.ShapeIn(y, bottom)) _engine.LiftInlineContent(opsMark);
         ReturnLines(lines);
         if (paragraph.First != null) ReturnState(paragraph.First);
         ReturnState(st);
@@ -119,9 +146,9 @@ internal sealed partial class LayoutEngine
     {
         foreach (var it in items)
         {
-            if (it.Kind == ItemKind.Anchor) SetAnchor(it.AnchorId!, y);
-            else if (it.Kind == ItemKind.Float) PlaceFloat(MeasureFloat(it.Element!, w), y, x, w);
-            else if (it.Kind == ItemKind.Absolute) QueueAbsolute(it.Element!, x, y);
+            if (it.Kind == ItemKind.Anchor) _engine.SetAnchor(it.AnchorId!, y);
+            else if (it.Kind == ItemKind.Float) _engine.PlaceFloat(_engine.MeasureFloat(it.Element!, w), y, x, w);
+            else if (it.Kind == ItemKind.Absolute) _engine.QueueAbsolute(it.Element!, x, y);
         }
     }
 
@@ -133,7 +160,7 @@ internal sealed partial class LayoutEngine
     /// </summary>
     private CollectState? FirstLineItems(List<Node> run, Element container, bool firstInBlock, float w, List<Item> items, ComputedStyle cs)
     {
-        if (!firstInBlock || container.FirstLine is not { } firstLine || _measuring) return null;
+        if (!firstInBlock || container.FirstLine is not { } firstLine || _engine._measuring) return null;
         var first = CollectInline(run, w, firstLine, container);
         ResolveBidi(first.Items, cs);
         // text-transform and small capitals change letters but not their number, so both lists hold as many
@@ -178,7 +205,7 @@ internal sealed partial class LayoutEngine
     /// <summary>A paragraph being laid out: what its line breaker needs, and the lines beside floats it may be broken with.</summary>
     private ref struct Paragraph
     {
-        private readonly LayoutEngine _engine;
+        private readonly InlineLayout _inline;
         private readonly List<Item> _items;
         private readonly ComputedStyle _block;
         private readonly float _x, _y, _w, _strutH;
@@ -187,9 +214,9 @@ internal sealed partial class LayoutEngine
         public CollectState? First;
         public float LetterIndent;
 
-        public Paragraph(LayoutEngine engine, List<Item> items, ComputedStyle block, float x, float y, float w, LineIndent indent, float strutH, PageBox? pages)
+        public Paragraph(InlineLayout inline, List<Item> items, ComputedStyle block, float x, float y, float w, LineIndent indent, float strutH, PageBox? pages)
         {
-            _engine = engine;
+            _inline = inline;
             _items = items;
             _block = block;
             _x = x;
@@ -200,12 +227,12 @@ internal sealed partial class LayoutEngine
             _pages = pages;
         }
 
-        public readonly FloatLines NewLines() => new() { Engine = _engine, Block = _block, X = _x, W = _w, Y = _y, StrutH = _strutH, Pages = _pages, LetterIndent = LetterIndent };
+        public readonly FloatLines NewLines() => new() { Engine = _inline._engine, Block = _block, X = _x, W = _w, Y = _y, StrutH = _strutH, Pages = _pages, LetterIndent = LetterIndent };
 
         /// <summary>Breaks the paragraph into lines, from the ::first-line items when there are any, and flushes the floats.</summary>
         public List<Line> Break(FloatLines? fl)
         {
-            var broken = First != null ? _engine.BreakLines(First.Items, _w, _indent, fl, after: _items) : _engine.BreakLines(_items, _w, _indent, fl, block: _block);
+            var broken = First != null ? _inline.BreakLines(First.Items, _w, _indent, fl, after: _items) : _inline.BreakLines(_items, _w, _indent, fl, block: _block);
             fl?.Flush(broken);
             return broken;
         }

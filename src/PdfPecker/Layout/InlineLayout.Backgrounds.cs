@@ -10,7 +10,7 @@ namespace PdfPecker.Layout;
 /// as Chrome paints them: with box-decoration-break: slice a background runs on from one fragment to the next as if the
 /// fragments were one box, and with clone each fragment is a box of its own.
 /// </summary>
-internal sealed partial class LayoutEngine
+internal sealed partial class InlineLayout
 {
     /// <summary>One line fragment of an inline box: its border box, the group it is painted into and the ops of its line's text.</summary>
     private struct InlineFragment
@@ -78,16 +78,16 @@ internal sealed partial class LayoutEngine
             float above = asc + s.PaddingTop.Resolve(0) + s.BorderTop, below = desc + s.PaddingBottom.Resolve(0) + s.BorderBottom;
             float fx = xs[run.Start] + it.RelX, fw = xs[run.End] - xs[run.Start];
             float fy = baseline + TextShift(s, lineA, lineD) - above + it.RelY, fh = above + below;
-            if (deco.HoldsAbsolutes) NoteInlineCb(deco.Element, baseline, fx, fy, fw, fh);
+            if (deco.HoldsAbsolutes) _engine.NoteInlineCb(deco.Element, baseline, fx, fy, fw, fh);
             if (!paints) continue;
             _inlineFragmentCount++;
             var group = new GroupOp();
-            _ops.Add(group);
+            _engine.Ops.Add(group);
             fragments.Add(new InlineFragment
             {
                 Deco = deco,
                 X = fx, W = fw, Y = fy, H = fh,
-                Group = group, Ops = _ops,
+                Group = group, Ops = _engine.Ops,
             });
         }
         return fragments.Count > first ? first : -1;
@@ -99,16 +99,16 @@ internal sealed partial class LayoutEngine
     /// </summary>
     private void NoteEmptyInlineCbs(List<Item> items, float[] xs, float baseline, float lineA, float lineD)
     {
-        if (_measuring) return;
+        if (_engine._measuring) return;
         for (int k = 0; k < items.Count; k++)
         {
             var it = items[k];
             if (it.Kind != ItemKind.Absolute || it.Deco is not { } d) continue;
-            if (_inlineCbIndex != null && _inlineCbIndex.TryGetValue(d.Element, out var cb) && cb.Placed) continue;
+            if (_engine._inlineCbIndex != null && _engine._inlineCbIndex.TryGetValue(d.Element, out var cb) && cb.Placed) continue;
             var s = d.Style;
             s.Font.LineMetrics(s.TextSize, out float asc, out float desc);
             float above = asc + s.PaddingTop.Resolve(0) + s.BorderTop, below = desc + s.PaddingBottom.Resolve(0) + s.BorderBottom;
-            NoteInlineCb(d.Element, baseline, xs[k] + it.RelX, baseline + TextShift(s, lineA, lineD) - above + it.RelY, 0, above + below);
+            _engine.NoteInlineCb(d.Element, baseline, xs[k] + it.RelX, baseline + TextShift(s, lineA, lineD) - above + it.RelY, 0, above + below);
         }
     }
 
@@ -166,7 +166,7 @@ internal sealed partial class LayoutEngine
         for (int f = first; f < fragments.Length; f++)
         {
             fragments[f].TextFrom = textFrom;
-            fragments[f].TextTo = _ops.Count;
+            fragments[f].TextTo = _engine.Ops.Count;
         }
     }
 
@@ -244,8 +244,8 @@ internal sealed partial class LayoutEngine
         _inlinePaintWork += work;
         var radii = BoxPainter.FragmentRadii(s, boxW, f.H, f.W, f.H, left, right);
         if (s.BoxShadows != null) BoxPainter.PaintShadows(group, s, f.X, f.Y, f.W, f.H, radii);
-        BoxPainter.PaintFragment(group, s, boxX, f.Y, boxW, f.H, (f.X, f.Y, f.W, f.H), radii, _images, s.InlineFade);
-        if (clipsToText) ClipBackgroundToText(group, f.Ops, f.TextFrom, f.TextTo, f.X, f.X + f.W);
+        BoxPainter.PaintFragment(group, s, boxX, f.Y, boxW, f.H, (f.X, f.Y, f.W, f.H), radii, _engine._images, s.InlineFade);
+        if (clipsToText) LayoutEngine.ClipBackgroundToText(group, f.Ops, f.TextFrom, f.TextTo, f.X, f.X + f.W);
         if (s.HasBorder) BoxPainter.PaintFragmentBorders(group, s, boxX, f.Y, boxW, f.H, (f.X, f.Y, f.W, f.H), !(left && right), s.InlineFade);
         if (s.OutlineStyle != BorderStyle.None && !MergesOutline(s, p)) BoxPainter.PaintOutline(group, s, f.X, f.Y, f.W, f.H, radii);
     }

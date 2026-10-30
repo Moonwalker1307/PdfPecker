@@ -1,5 +1,8 @@
 using PdfPecker.Css;
 using PdfPecker.Html;
+using BreakAfter = PdfPecker.Layout.InlineLayout.BreakAfter;
+using Item = PdfPecker.Layout.InlineLayout.Item;
+using ItemKind = PdfPecker.Layout.InlineLayout.ItemKind;
 
 namespace PdfPecker.Layout;
 
@@ -861,7 +864,7 @@ internal sealed partial class LayoutEngine
         {
             float captionMin = 0;
             foreach (var caption in m.Captions)
-                captionMin = Math.Max(captionMin, Intrinsic(caption).Min + FixedHorizontalMargins(caption.Style));
+                captionMin = Math.Max(captionMin, Intrinsic(caption).Min + InlineLayout.FixedHorizontalMargins(caption.Style));
             if (captionMin > contentW + frameH + 0.01f && n > 0)
             {
                 widths = AllocateColumns(m, captionMin - frameH - gridSpace, widthSpecified: true);
@@ -1716,10 +1719,10 @@ internal sealed partial class LayoutEngine
 
     // ------------------------------------------------------------------ intrinsic widths
 
-    private bool _measuring;
+    internal bool _measuring;
 
     /// <summary>Min-content and max-content border-box widths of a block-level element.</summary>
-    private (float Min, float Max) Intrinsic(Element e)
+    internal (float Min, float Max) Intrinsic(Element e)
     {
         if (_intrinsicCache.TryGetValue(e, out var cached)) return cached;
         var s = e.Style;
@@ -1817,17 +1820,17 @@ internal sealed partial class LayoutEngine
     {
         bool saved = _measuring;
         _measuring = true;
-        _inlineDepth++;
+        _inline.EnterRun();
         try
         {
-            var st = CollectInline(nodes, 100000);
+            var st = _inline.CollectInline(nodes, 100000);
             var result = ItemsIntrinsic(st.Items);
-            ReturnState(st);
+            _inline.ReturnState(st);
             return result;
         }
         finally
         {
-            if (--_inlineDepth == 0) _itemPoolUsed = 0;
+            _inline.LeaveRun();
             _measuring = saved;
         }
     }
@@ -1843,7 +1846,7 @@ internal sealed partial class LayoutEngine
         foreach (var it in items)
         {
             // The kerning between neighbouring words and spaces counts, as it does when the lines are broken.
-            float kern = prev != null ? PairKern(prev, it) : 0;
+            float kern = prev != null ? InlineLayout.PairKern(prev, it) : 0;
             prev = it;
             TrailingSpace(it, kern, ref trailing);
             if (it.Kind == ItemKind.Break)
@@ -1881,7 +1884,7 @@ internal sealed partial class LayoutEngine
             group += (it.MinWidth >= 0 ? it.MinWidth : it.Width) + (group > 0 ? kern : 0);
             if (it.BreakAfter != BreakAfter.None)
             {
-                min = Math.Max(min, group + (it.BreakAfter == BreakAfter.SoftHyphen ? HyphenWidth(it.Style) : 0));
+                min = Math.Max(min, group + (it.BreakAfter == BreakAfter.SoftHyphen ? InlineLayout.HyphenWidth(it.Style) : 0));
                 group = 0;
             }
         }
@@ -1899,7 +1902,7 @@ internal sealed partial class LayoutEngine
         switch (it.Kind)
         {
             case ItemKind.Space:
-                trailing = IsCollapsible(it.Style) ? trailing + it.Width + kern : 0;
+                trailing = InlineLayout.IsCollapsible(it.Style) ? trailing + it.Width + kern : 0;
                 break;
             case ItemKind.Spacer:
             case ItemKind.Anchor:
@@ -1931,23 +1934,23 @@ internal sealed partial class LayoutEngine
             // The items come from the pool, which a paragraph laid out inside (an inline-block's) hands out again from
             // the start when it is done unless this run counts as open, and the words after the box then took the
             // place of the words before it.
-            _inlineDepth++;
-            var st = CollectInline(run, 100000);
+            _inline.EnterRun();
+            var st = _inline.CollectInline(run, 100000);
             run.Clear();
             var (runMin, runMax) = ItemsIntrinsic(st.Items);
             min = Math.Max(min, runMin);
             max = Math.Max(max, runMax);
-            ReturnState(st);
-            if (--_inlineDepth == 0) _itemPoolUsed = 0;
+            _inline.ReturnState(st);
+            _inline.LeaveRun();
         }
 
         foreach (var child in e.Children)
         {
-            if (child is TextNode) { (run ??= RentRun()).Add(child); continue; }
+            if (child is TextNode) { (run ??= _inline.RentRun()).Add(child); continue; }
             var ce = (Element)child;
             if (ce.Style == null || ce.Style.Display == Display.None || ce.Detached) continue;
             if (ce.Style.OutOfFlow) continue;
-            if (IsInlineLevel(ce) || ce.Style.Floated) { (run ??= RentRun()).Add(child); continue; }
+            if (IsInlineLevel(ce) || ce.Style.Floated) { (run ??= _inline.RentRun()).Add(child); continue; }
             FlushRun();
             var (cmin, cmax) = Intrinsic(ce);
             var cs = ce.Style;
@@ -1957,7 +1960,7 @@ internal sealed partial class LayoutEngine
             max = Math.Max(max, cmax + margins);
         }
         FlushRun();
-        ReturnRun(run);
+        _inline.ReturnRun(run);
         _measuring = saved;
         return (min, max);
     }

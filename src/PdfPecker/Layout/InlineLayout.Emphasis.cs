@@ -11,7 +11,7 @@ namespace PdfPecker.Layout;
 /// in the text's font at half its size, and they take room from the space around the text first: a line whose marks
 /// reach past it moves down (or the next line does) only by what that space cannot hold.
 /// </summary>
-internal sealed partial class LayoutEngine
+internal sealed partial class InlineLayout
 {
     /// <summary>The size of the marks of text in style <paramref name="s"/>: half the font size, rounded to whole CSS pixels as in Chrome.</summary>
     private static float EmphasisMarkSize(ComputedStyle s) => MathF.Round(s.TextSize / CssPixel * 0.5f, MidpointRounding.AwayFromZero) * CssPixel;
@@ -166,8 +166,8 @@ internal sealed partial class LayoutEngine
                 {
                     float center = pos + (adv - ls) / 2;
                     float cx = rtl ? x0 + it.Width - center : x0 + center;
-                    if (sesameShape) _ops.Add(SesameShape(cx, emCenter, size, color, style.EmphasisOpen));
-                    else _ops.Add(new TextOp(cx - markW / 2, markBaseline, lineTop, font, size, color, mark, 0, 0));
+                    if (sesameShape) _engine.Ops.Add(SesameShape(cx, emCenter, size, color, style.EmphasisOpen));
+                    else _engine.Ops.Add(new TextOp(cx - markW / 2, markBaseline, lineTop, font, size, color, mark, 0, 0));
                 }
                 pos += adv;
                 j += len;

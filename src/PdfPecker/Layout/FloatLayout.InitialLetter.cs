@@ -1,6 +1,7 @@
 using PdfPecker.Css;
 using PdfPecker.Fonts;
 using PdfPecker.Html;
+using IGlyphVisitor = PdfPecker.Layout.InlineLayout.IGlyphVisitor;
 
 namespace PdfPecker.Layout;
 
@@ -13,13 +14,13 @@ namespace PdfPecker.Layout;
 internal sealed partial class LayoutEngine
 {
     /// <summary>Where an initial letter goes, from the top of its paragraph's first line.</summary>
-    private sealed class InitialLetterPlace
+    internal sealed class InitialLetterPlace
     {
         public float Top;   // the top of its margin box
         public float Shift; // how far a raised letter moves the text of the first line down
     }
 
-    private static bool IsInitialLetter(Element e)
+    internal static bool IsInitialLetter(Element e)
         => e.Generated && e.Style is { InitialLetterSize: > 0, Floated: true } && e.Name == "::first-letter";
 
     /// <summary>
@@ -46,7 +47,7 @@ internal sealed partial class LayoutEngine
 
         var paragraph = StyleResolver.ParagraphStyle(e.Parent!, null, firstLine: true);
         float lineH = paragraph.LineHeight;
-        TextMetrics(paragraph, out _, out float descent);
+        InlineLayout.TextMetrics(paragraph, out _, out float descent);
         int size = (int)MathF.Ceiling(s.InitialLetterSize);
         int sink = s.InitialLetterSink > 0 ? s.InitialLetterSink : size;
         var place = new InitialLetterPlace();
@@ -108,7 +109,7 @@ internal sealed partial class LayoutEngine
             {
                 if (float.IsNaN(ink.Baseline)) ink.Baseline = text.Baseline;
                 ink.Op = text;
-                VisitGlyphs(text, ref ink);
+                _inline.VisitGlyphs(text, ref ink);
             }
         }
     }
@@ -145,13 +146,13 @@ internal sealed partial class LayoutEngine
         private void Add(float x, float dy, float l, float b, float r, float t)
         {
             float size = Op.Size, y = Op.Baseline - dy;
-            Left = Math.Min(Left, x + MathF.Floor(Pixels(l * size)) * CssPixel);
-            Right = Math.Max(Right, x + MathF.Ceiling(Pixels(r * size)) * CssPixel);
-            Top = Math.Min(Top, y - MathF.Ceiling(Pixels(t * size)) * CssPixel);
-            Bottom = Math.Max(Bottom, y - MathF.Floor(Pixels(b * size)) * CssPixel);
+            Left = Math.Min(Left, x + MathF.Floor(Pixels(l * size)) * InlineLayout.CssPixel);
+            Right = Math.Max(Right, x + MathF.Ceiling(Pixels(r * size)) * InlineLayout.CssPixel);
+            Top = Math.Min(Top, y - MathF.Ceiling(Pixels(t * size)) * InlineLayout.CssPixel);
+            Bottom = Math.Max(Bottom, y - MathF.Floor(Pixels(b * size)) * InlineLayout.CssPixel);
         }
 
         // FreeType scales outlines to 1/64 pixel before it measures them.
-        private static float Pixels(float points) => MathF.Round(points / CssPixel * 64) / 64;
+        private static float Pixels(float points) => MathF.Round(points / InlineLayout.CssPixel * 64) / 64;
     }
 }

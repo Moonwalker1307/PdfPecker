@@ -2,14 +2,15 @@ using PdfPecker.Css;
 using PdfPecker.Html;
 using PdfPecker.Images;
 using PdfPecker.Pdf;
+using Captured = PdfPecker.Layout.LayoutEngine.Captured;
 
 namespace PdfPecker.Layout;
 
 /// <summary>The pieces inline content is collected into (items), the lines they are broken into, and their pools.</summary>
-internal sealed partial class LayoutEngine
+internal sealed partial class InlineLayout
 {
     /// <summary>What an inline item is: a word, a space, a forced break, a replaced box, or a marker that takes no room.</summary>
-    private enum ItemKind : byte
+    internal enum ItemKind : byte
     {
         Text,     // a word or a piece of one, a slice of Source
         Space,    // a run of spaces, or a tab, with a width
@@ -25,9 +26,9 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>A line break opportunity right after a text item: none, a plain one, or one that shows a hyphen.</summary>
-    private enum BreakAfter : byte { None, Break, SoftHyphen }
+    internal enum BreakAfter : byte { None, Break, SoftHyphen }
 
-    private sealed class Item
+    internal sealed class Item
     {
         public ItemKind Kind;
         public ComputedStyle Style = null!;
@@ -129,7 +130,7 @@ internal sealed partial class LayoutEngine
     /// The two collections of a paragraph with a ::first-line style each make their own, so the fragments of one
     /// element are matched by the element, not by the deco; nor by the style, which siblings styled alike share.
     /// </summary>
-    private sealed class InlineDeco
+    internal sealed class InlineDeco
     {
         public readonly Element Element;
         public readonly ComputedStyle Style;
@@ -162,7 +163,7 @@ internal sealed partial class LayoutEngine
         }
     }
 
-    private sealed class Line
+    internal sealed class Line
     {
         public readonly List<Item> Items = new();
         public float Width;
@@ -180,7 +181,7 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>The state of collecting a run of inline content into items.</summary>
-    private sealed class CollectState
+    internal sealed class CollectState
     {
         public readonly List<Item> Items = new();
         public bool LastWasSpace = true;      // a collapsible space after this would be dropped
@@ -207,9 +208,9 @@ internal sealed partial class LayoutEngine
     private readonly Stack<List<Line>> _lineListPool = new();
     private readonly Stack<List<Node>> _runPool = new();
 
-    private List<Node> RentRun() => _runPool.Count > 0 ? _runPool.Pop() : new List<Node>();
+    internal List<Node> RentRun() => _runPool.Count > 0 ? _runPool.Pop() : new List<Node>();
 
-    private void ReturnRun(List<Node>? run)
+    internal void ReturnRun(List<Node>? run)
     {
         if (run == null) return;
         run.Clear();
@@ -224,7 +225,7 @@ internal sealed partial class LayoutEngine
         return st;
     }
 
-    private void ReturnState(CollectState st)
+    internal void ReturnState(CollectState st)
     {
         st.Items.Clear();
         _statePool.Push(st);

@@ -7,7 +7,7 @@ namespace PdfPecker.Layout;
 /// Bidirectional text in inline layout: the embedding levels of a block's inline content (UAX #9 over its text, with
 /// direction and unicode-bidi as CSS maps them to bidi controls), and the visual order of each line.
 /// </summary>
-internal sealed partial class LayoutEngine
+internal sealed partial class InlineLayout
 {
     // The bidi controls that open and close an inline element's unicode-bidi (CSS Writing Modes 3, §2.4.2).
     private static (string? Open, string? Close) BidiControls(ComputedStyle s) => s.UnicodeBidi switch
@@ -171,7 +171,7 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>A list marker's text as drawn left to right in a right-to-left list.</summary>
-    private static string VisualMarkerText(string text)
+    internal static string VisualMarkerText(string text)
     {
         var types = new BidiClass[text.Length];
         var cps = new int[text.Length];

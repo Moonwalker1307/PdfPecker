@@ -1,6 +1,7 @@
 using PdfPecker.Css;
 using PdfPecker.Html;
 using PdfPecker.Svg;
+using Item = PdfPecker.Layout.InlineLayout.Item;
 
 namespace PdfPecker.Layout;
 
@@ -11,7 +12,7 @@ internal sealed partial class LayoutEngine
     /// A containing block for absolutely positioned descendants: a positioned or transformed box, the initial containing
     /// block, or the boundary of content laid out on its own (whose pending boxes move with it when it is placed).
     /// </summary>
-    private sealed class CbFrame
+    internal sealed class CbFrame
     {
         private static readonly List<(Element E, float X, float Y)> None = new();
         private List<(Element E, float X, float Y)>? _pending; // made on the first box: most frames get none
@@ -74,7 +75,7 @@ internal sealed partial class LayoutEngine
     /// Notes an absolutely positioned box met during layout, with its static position (where its top-left margin corner
     /// would be in the flow). It is laid out when its containing block is complete.
     /// </summary>
-    private void QueueAbsolute(Element e, float staticX, float staticY)
+    internal void QueueAbsolute(Element e, float staticX, float staticY)
     {
         bool isFixed = e.Style.Position == Position.Fixed;
         for (int i = _frames.Count - 1; i >= 0; i--)
@@ -89,7 +90,7 @@ internal sealed partial class LayoutEngine
     /// A positioned inline element that is the containing block of absolutely positioned boxes: its pending boxes, and
     /// the border boxes of its fragments on its first and last line, each the union of the fragments on that line.
     /// </summary>
-    private sealed class InlineCb
+    internal sealed class InlineCb
     {
         public required Element Element;
         public readonly CbFrame Frame = new();
@@ -99,8 +100,8 @@ internal sealed partial class LayoutEngine
     }
 
     // The containing inline elements of the lines being placed, in the order they were met; null until one is.
-    private List<InlineCb>? _inlineCbs;
-    private Dictionary<Element, InlineCb>? _inlineCbIndex;
+    internal List<InlineCb>? _inlineCbs;
+    internal Dictionary<Element, InlineCb>? _inlineCbIndex;
 
     private InlineCb InlineCbOf(Element e)
     {
@@ -114,7 +115,7 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>Notes a line fragment of an inline containing block, in its border box.</summary>
-    private void NoteInlineCb(Element e, float baseline, float x, float y, float w, float h)
+    internal void NoteInlineCb(Element e, float baseline, float x, float y, float w, float h)
     {
         if (_measuring) return;
         var cb = InlineCbOf(e);
@@ -153,7 +154,7 @@ internal sealed partial class LayoutEngine
     /// Notes an absolutely positioned box of a line: inside a positioned inline element it waits for the element's
     /// fragments, otherwise for the containing block around the lines.
     /// </summary>
-    private void QueueLineAbsolute(Item it, float x, float y)
+    internal void QueueLineAbsolute(Item it, float x, float y)
     {
         if (it.Deco is { } d && !_measuring) InlineCbOf(d.Element).Frame.Add(it.Element!, x, y);
         else QueueAbsolute(it.Element!, x, y);
@@ -164,7 +165,7 @@ internal sealed partial class LayoutEngine
     /// block runs from the start of the element's first fragment to the end of its last, as padding boxes, and has no
     /// width when the end comes before the start; an element with no fragment leaves its boxes to the block around it.
     /// </summary>
-    private void LayoutInlineAbsolutes(List<InlineCb> cbs)
+    internal void LayoutInlineAbsolutes(List<InlineCb> cbs)
     {
         foreach (var cb in cbs)
         {

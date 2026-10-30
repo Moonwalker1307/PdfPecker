@@ -13,7 +13,7 @@ namespace PdfPecker.Layout;
 internal sealed partial class LayoutEngine
 {
     /// <summary>The geometry of a block box in normal flow on each kind of page: the first, odd and even pages of the grid.</summary>
-    private sealed class PageBox
+    internal sealed class PageBox
     {
         public readonly float[] X = new float[3], W = new float[3];   // the content box
         public readonly float[] BX = new float[3], BW = new float[3]; // the border box
@@ -33,11 +33,10 @@ internal sealed partial class LayoutEngine
     }
 
     // The content box of the flow being laid out on each kind of page, when the pages differ in width. LayoutFlow takes
-    // it as it starts and hands it on only to the boxes and lines of its own flow, through the two fields below, so that
-    // the content of floats, tables and other boxes laid out on the way never sees it.
+    // it as it starts and hands it on only to the boxes and lines of its own flow, through the field below and an
+    // argument of FlushInline, so that the content of floats, tables and other boxes laid out on the way never sees it.
     private PageBox? _pageBox;
     private PageBox? _childPageBox;  // the containing block of the block box LayoutBlockBox is about to lay out
-    private PageBox? _inlinePageBox; // the containing block of the lines FlushInline is about to lay out
 
     /// <summary>The root's content box on each kind of page, when the grid's pages differ in content width; else null.</summary>
     private PageBox? RootPageBox(float width)
