@@ -161,8 +161,8 @@ internal sealed partial class PdfDocumentWriter
     /// <summary>The most pages the document may have.</summary>
     public int MaxPages { get; init; } = int.MaxValue;
 
-    /// <summary>Stops writing when cancelled.</summary>
-    public CancellationToken Cancellation { get; init; }
+    /// <summary>Stops writing when the conversion is cancelled.</summary>
+    private CancellationToken Cancellation => _context.Cancellation;
 
     /// <summary>Keywords, Creator, Producer and custom entries for the document information dictionary (and the XMP for PDF/A).</summary>
     public DocumentProperties Properties { get; init; } = new();
@@ -238,12 +238,20 @@ internal sealed partial class PdfDocumentWriter
 
     private PdfEncryptor? _crypt;
 
-    public PdfDocumentWriter(PageSetup page, bool compress, CompressionLevel level)
+    /// <summary>
+    /// A writer for the conversion of <paramref name="context"/>, whose cancellation it stops at and whose filter and
+    /// gradient budgets it spends. The writers that render filtered content for it get the same context, so that their
+    /// work counts against the document's limits too.
+    /// </summary>
+    public PdfDocumentWriter(PageSetup page, bool compress, CompressionLevel level, ConversionContext context)
     {
         _page = page;
         _compress = compress;
         _level = level;
+        _context = context;
     }
+
+    private readonly ConversionContext _context;
 
     private readonly struct Placed
     {

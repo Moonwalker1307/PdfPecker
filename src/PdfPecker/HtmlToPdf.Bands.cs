@@ -56,14 +56,14 @@ public static partial class HtmlToPdf
     }
 
     /// <summary>The laid-out height of a band, measured with two-digit page numbers in place of the placeholders.</summary>
-    private static float BandHeight(Element band, PageSetup page, ImageLoader images, CancellationToken cancellationToken)
+    private static float BandHeight(Element band, PageSetup page, ImageLoader images, ConversionContext context)
     {
         var texts = new List<(TextNode Node, string Original)>();
         CollectPlaceholders(band, texts);
         foreach (var (node, original) in texts) node.Text = ReplacePlaceholders(original, "99", "99", null, 99);
         try
         {
-            return Math.Max(0, new LayoutEngine(page.ContentHeight, images) { Cancellation = cancellationToken }.LayoutBand(band, page.ContentWidth));
+            return Math.Max(0, new LayoutEngine(page.ContentHeight, images) { Context = context }.LayoutBand(band, page.ContentWidth));
         }
         finally
         {
@@ -113,19 +113,19 @@ public static partial class HtmlToPdf
     /// boxes are. A band with them is laid out for every page, within a budget for the whole document.
     /// </summary>
     private static List<DrawOp> LayoutBandForPage(Element band, PageSetup page, ImageLoader images, int pageIndex, int pageCount, bool alignBottom,
-        BandLayouts laidOut, Func<string, int?> firstPageOf, CancellationToken cancellationToken)
+        Dictionary<(Element, PageSetup), List<DrawOp>> unnumbered, Func<string, int?> firstPageOf, ConversionContext context)
     {
-        if (laidOut.Unnumbered.TryGetValue((band, page), out var same)) return same;
+        if (unnumbered.TryGetValue((band, page), out var same)) return same;
         var texts = new List<(TextNode Node, string Original)>();
         CollectPlaceholders(band, texts);
-        if (texts.Count > 0) laidOut.CheckBefore(band, pageCount);
+        if (texts.Count > 0) context.NumberedBands.CheckBefore(band, pageCount);
         string number = (pageIndex + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
         string total = pageCount.ToString(System.Globalization.CultureInfo.InvariantCulture);
         foreach (var (node, original) in texts)
             node.Text = ReplacePlaceholders(original, number, total, firstPageOf, pageIndex + 1);
         try
         {
-            var engine = new LayoutEngine(page.ContentHeight, images) { Cancellation = cancellationToken };
+            var engine = new LayoutEngine(page.ContentHeight, images) { Context = context };
             float h = engine.LayoutBand(band, page.ContentWidth);
             if (alignBottom)
             {
@@ -134,8 +134,8 @@ public static partial class HtmlToPdf
             }
             // A band taller than the page shows only the part on the paper; the rest would be written on every page.
             OffPaper(engine.Ops, -page.MarginTop, page.Height - page.MarginTop);
-            if (texts.Count == 0) laidOut.Unnumbered[(band, page)] = engine.Ops;
-            else laidOut.Charge(band, engine.BoxLayouts + CountOps(engine.Ops), pageCount);
+            if (texts.Count == 0) unnumbered[(band, page)] = engine.Ops;
+            else context.NumberedBands.Charge(band, engine.BoxLayouts + CountOps(engine.Ops), pageCount);
             return engine.Ops;
         }
         finally
@@ -145,10 +145,10 @@ public static partial class HtmlToPdf
     }
 
     /// <summary>
-    /// The bands of a document laid out so far: those without page numbers, whose ops are drawn again on every page, and
-    /// the work that those laid out again for each page have taken.
+    /// The work that the bands of a document laid out again for each page, to number it, have taken: one of the limits
+    /// that the conversion's <see cref="ConversionContext"/> holds.
     /// </summary>
-    private sealed class BandLayouts
+    internal sealed class NumberedBandBudget
     {
         /// <summary>
         /// The work, in box layouts and kept ops, that the bands laid out for each page may take in all: a base and a
@@ -161,9 +161,6 @@ public static partial class HtmlToPdf
 
         private readonly Dictionary<Element, long> _lastWork = new();
         private long _spent;
-
-        /// <summary>The ops of the bands without page numbers, by band and page setup.</summary>
-        public Dictionary<(Element, PageSetup), List<DrawOp>> Unnumbered { get; } = new();
 
         /// <summary>
         /// Before a numbered band is laid out again, stops the document when doing so as often as last time would go over

@@ -18,13 +18,14 @@ internal sealed class PageMarginBoxes
     private readonly Func<ComputedStyle> _initial;
     private PageSetup _page; // the setup of the page being laid out
     private readonly ImageLoader _images;
-    private readonly CancellationToken _cancellation;
+    private readonly ConversionContext _context;
     private readonly PagedContent? _paged;
     private readonly CounterStyles _counterStyles;
 
     // initial makes a style with initial values: margin boxes inherit from the page, not from the document.
-    // paged gives string() the running strings.
-    public PageMarginBoxes(List<PageRule> rules, Func<ComputedStyle> initial, PageSetup page, ImageLoader images, CancellationToken cancellation,
+    // paged gives string() the running strings. context is the conversion's, whose cancellation stops the layouts of
+    // the boxes.
+    public PageMarginBoxes(List<PageRule> rules, Func<ComputedStyle> initial, PageSetup page, ImageLoader images, ConversionContext context,
         PagedContent? paged = null, CounterStyles? counterStyles = null)
     {
         _paged = paged;
@@ -35,7 +36,7 @@ internal sealed class PageMarginBoxes
         _initial = initial;
         _page = page;
         _images = images;
-        _cancellation = cancellation;
+        _context = context;
     }
 
     /// <summary>
@@ -139,7 +140,7 @@ internal sealed class PageMarginBoxes
         {
             var box = Build(name, decls, ctx, page, count, w, h);
             if (box == null) return;
-            var engine = new LayoutEngine(Math.Max(h, 1), _images) { Cancellation = _cancellation };
+            var engine = new LayoutEngine(Math.Max(h, 1), _images) { Context = _context };
             engine.LayoutBand(box.Element, w);
             foreach (var op in engine.Ops)
             {
@@ -236,12 +237,12 @@ internal sealed class PageMarginBoxes
         float maxContent = 0, measured = 0;
         if (width == null)
         {
-            var engine = new LayoutEngine(100000, _images) { Cancellation = _cancellation };
+            var engine = new LayoutEngine(100000, _images) { Context = _context };
             maxContent = engine.MeasureIntrinsic(box).Max;
         }
         else if (height == null)
         {
-            var engine = new LayoutEngine(100000, _images) { Cancellation = _cancellation };
+            var engine = new LayoutEngine(100000, _images) { Context = _context };
             measured = engine.LayoutBand(box, width.Value);
         }
         return new Built(box, maxContent, measured);

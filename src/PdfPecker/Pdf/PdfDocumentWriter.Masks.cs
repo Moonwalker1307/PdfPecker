@@ -185,7 +185,7 @@ internal sealed partial class PdfDocumentWriter
     private (PdfImage?, float, float, float, float) RasterizeBackdrop(LayerOp layer)
     {
         var f = layer.Backdrop!;
-        if (!(layer.BackdropW > 0 && layer.BackdropH > 0) || !_filterBudget.TryBackdrop()) return default;
+        if (!(layer.BackdropW > 0 && layer.BackdropH > 0) || !FilterBudget.TryBackdrop()) return default;
         var behind = BackdropOps(layer);
         if (behind == null) return default;
         // The border box grown by how far a blur reaches, so that its edges blur with what is around them.
@@ -232,10 +232,7 @@ internal sealed partial class PdfDocumentWriter
         var page = new PageSetup { Width = rw, Height = rh, MarginLeft = -rx, MarginTop = -ry, MarginBottom = -1e6f };
         try
         {
-            var writer = new PdfDocumentWriter(page, compress: false, CompressionLevel.NoCompression)
-            {
-                Cancellation = Cancellation, _filterBudget = _filterBudget, _gradientBudget = _gradientBudget, _backdrops = _backdrops,
-            };
+            var writer = new PdfDocumentWriter(page, compress: false, CompressionLevel.NoCompression, _context) { _backdrops = _backdrops };
             return writer.Write(ops, ry + rh, new Dictionary<string, float>(), 0, null, null, null, null, null);
         }
         catch (PdfLimitException) { return null; }
