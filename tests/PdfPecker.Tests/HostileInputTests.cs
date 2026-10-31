@@ -587,6 +587,16 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Paginated_grid_rows_go_through_the_items_once()
+    {
+        // Found by the fuzzer: target html, timeout-d2edd0b0 (daily run 85). Nested past the parser's depth limit, an
+        // application form became one grid of thousands of items, laid out again by the fieldsets kept whole around it.
+        // Positioning the rows on the pages went through every item for each row, so 60,000 items took 7 seconds once.
+        var html = "<div style='display:grid; grid-template-columns: 1fr 1fr'>" + Repeat("<div>x</div>", 120_000) + "</div>";
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
     public void Grids_far_above_the_first_page_are_not_stretched_by_rounding()
     {
         // Found by the fuzzer: target html, timeout-d2edd0b0. A heading with a margin of -1e6pt puts what follows a

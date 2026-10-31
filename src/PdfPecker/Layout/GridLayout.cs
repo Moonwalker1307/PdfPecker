@@ -813,26 +813,35 @@ internal sealed partial class LayoutEngine
         int rowCount = g.RowCount;
         float rowGap = g.RowGap;
         float ry = g.Y + rowBefore;
+        // Keep each row with any item that starts in it and spans further rows. The items are gone through once, not
+        // once per row: a grid of thousands of items laid out again and again spent seconds here.
+        float[]? extents = null;
+        bool[]? whole = null;
+        if (_paginate)
+        {
+            extents = new float[rowCount];
+            whole = new bool[rowCount];
+            for (int r = 0; r < rowCount; r++) extents[r] = rows[r].Base;
+            foreach (var it in g.Items)
+            {
+                int r = it.Row;
+                if ((uint)r >= (uint)rowCount) continue;
+                whole[r] |= !BreaksInside(it);
+                if (it.RowSpan <= 1) continue;
+                float span = rowGap * (it.RowSpan - 1);
+                for (int k = r; k < Math.Min(rowCount, r + it.RowSpan); k++) span += rows[k].Base;
+                extents[r] = Math.Max(extents[r], span);
+            }
+        }
         for (int r = 0; r < rowCount; r++)
         {
             if (r > 0) ry += rowGap + rowBetween;
             float h = rows[r].Base;
-            if (_paginate)
+            if (extents != null && whole != null)
             {
-                // Keep the row with any item that starts in it and spans further rows.
-                float extent = h;
-                bool whole = false;
-                foreach (var it in g.Items)
-                {
-                    if (it.Row != r) continue;
-                    whole |= !BreaksInside(it);
-                    if (it.RowSpan <= 1) continue;
-                    float span = rowGap * (it.RowSpan - 1);
-                    for (int k = r; k < Math.Min(rowCount, r + it.RowSpan); k++) span += rows[k].Base;
-                    extent = Math.Max(extent, span);
-                }
+                float extent = extents[r];
                 // A row taller than a page breaks wherever it starts.
-                if (whole || CrossesPage(ry, ry + extent) && !AtPageTop(ry) && extent <= _grid.Height(PageOf(ry) + 1) && !RowStartsOnPage(ref g, r, ry))
+                if (whole[r] || CrossesPage(ry, ry + extent) && !AtPageTop(ry) && extent <= _grid.Height(PageOf(ry) + 1) && !RowStartsOnPage(ref g, r, ry))
                     ry = FitOnPage(ry, extent);
             }
             rowY[r] = ry;
