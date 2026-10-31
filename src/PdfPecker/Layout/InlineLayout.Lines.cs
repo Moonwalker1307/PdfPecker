@@ -138,7 +138,8 @@ internal sealed partial class InlineLayout
 
     /// <summary>
     /// The ascent and descent of an image or inline-block on its line's baseline. One aligned to the line's top or
-    /// bottom has none of its own (see <see cref="IsLineAligned"/>); text-top hangs it from the top of the block's strut.
+    /// bottom has none of its own (see <see cref="IsLineAligned"/>); text-top hangs it from the top of its parent's
+    /// font and text-bottom stands it on the bottom of that font, without the leading (CSS 2.1 §10.8.1), as in Chrome.
     /// </summary>
     internal static void AtomicMetrics(Item it, ComputedStyle block, out float a, out float d)
     {
@@ -150,10 +151,21 @@ internal sealed partial class InlineLayout
                 d = it.Height - a;
                 break;
             case VerticalAlign.TextTop:
-                StrutMetrics(block, out a, out _);
+            {
+                var parent = it.Style.ParentStyle ?? block;
+                parent.Font.LineMetrics(parent.TextSize, out float ascent, out _);
+                a = ascent - it.Style.ParentBaselineShift;
                 d = it.Height - a;
-                if (d < 0) { a = it.Height; d = 0; }
                 break;
+            }
+            case VerticalAlign.TextBottom:
+            {
+                var parent = it.Style.ParentStyle ?? block;
+                parent.Font.LineMetrics(parent.TextSize, out _, out float descent);
+                d = descent + it.Style.ParentBaselineShift;
+                a = it.Height - d;
+                break;
+            }
             default:
                 float shift = it.Style.AtomicBaselineShift;
                 a = baseline - shift;
