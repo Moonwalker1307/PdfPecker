@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Compares a perf.json run with a baseline and writes a Markdown table.
 
-Usage: perf-compare.py current.json [baseline.json [time-baseline.json]]
+Usage: perf-compare.py current.json [baseline.json [time-baseline.json ...]]
 
 Exits 1 when a case allocates more than ALLOC_LIMIT more bytes, or is more than TIME_LIMIT slower once the runner's
 own speed is taken out. Allocation per conversion is deterministic, so its limit is tight and needs no correction.
 
 Time is not: GitHub's hosted runners come in several processor models and are shared, so the same commit measured
 twice a few minutes apart came out 20 to 90 percent slower, and not by the same factor in every case. Time is
-therefore only judged against a baseline from the same processor model, which the workflow picks from recent runs and
-passes as time-baseline.json when it is not the run that baseline.json comes from. There, the median of the cases' time ratios is taken as the runner's speed against the baseline's, and a case fails
+therefore only judged against baselines from the same processor model, which the workflow picks from recent runs and
+passes as the time-baseline files; each case's baseline time is its median over them, so that one run that was slow
+or fast in a case does not decide its verdict. There, the median of the cases' time ratios is taken as the runner's speed against the baseline's, and a case fails
 when it strays more than TIME_LIMIT from that median, or when the median itself is more than TIME_LIMIT slower. On a
 different processor the times are shown but not judged.
 
@@ -39,6 +40,20 @@ def fmt(delta):
     return "none" if delta is None else f"{delta:+.1%}"
 
 
+def median_times(runs):
+    """One baseline from several runs on the same processor: each case's median time over the runs that have it."""
+    merged = {}
+    for name in runs[0]:
+        same = [r[name] for r in runs if name in r and r[name].get("inputs") == runs[0][name].get("inputs")]
+        case = dict(runs[0][name])
+        for key in ("meanMs", "perSecond"):
+            values = [c[key] for c in same if c.get(key) is not None]
+            if values:
+                case[key] = statistics.median(values)
+        merged[name] = case
+    return merged
+
+
 def comparable(cur, base):
     """The baseline's figures for a case, or None when it lacks the case or ran it on other input files."""
     if not base or cur.get("inputs") != base.get("inputs", cur.get("inputs")):
@@ -49,8 +64,12 @@ def comparable(cur, base):
 def main():
     cpu, counted, current = load(sys.argv[1])
     base_cpu, base_counted, baseline = load(sys.argv[2]) if len(sys.argv) > 2 else (None, None, {})
-    # Allocation is judged against the newest run, and time against the newest run on the same processor model.
-    time_cpu, _, time_baseline = load(sys.argv[3]) if len(sys.argv) > 3 else (base_cpu, None, baseline)
+    # Allocation is judged against the newest run, and time against the newest runs on the same processor model.
+    if len(sys.argv) > 3:
+        time_runs = [load(path) for path in sys.argv[3:]]
+        time_cpu, time_baseline = time_runs[0][0], median_times([cases for _, _, cases in time_runs])
+    else:
+        time_cpu, time_baseline = base_cpu, baseline
     same_cpu = cpu is not None and cpu == time_cpu
     # Runs from before allocation was counted on every thread have figures of their own that are not comparable.
     same_count = counted == base_counted

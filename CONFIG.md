@@ -35,7 +35,7 @@ nuget.org only accepts OSI- or FSF-approved licence IDs and some bundled font li
 | `dotnet-preview.yml` | Pushes to main, published releases, Mondays | Builds and tests on the latest .NET 11 preview SDK with an extra `net11.0` target. Never blocks: the job is `continue-on-error`, and it packs and publishes nothing. |
 | `conformance.yml` | PRs and pushes touching `src`, `tests` or the samples | veraPDF validation of the PDF/A and PDF/UA samples. |
 | `codeql.yml` | PRs, pushes and a schedule | CodeQL analysis. |
-| `perf.yml` | Nightly | Benchmark on main, run twice keeping each case's better time, against the previous night's run. |
+| `perf.yml` | Nightly | Benchmark on main, run twice keeping each case's better time, against the previous run for allocation and the median of the three previous runs on the same processor for time. |
 | `fuzz.yml` | Nightly | Fuzzes every target, including `fluent`, the fluent package's generative fuzzer. |
 | `dependabot-auto-merge.yml` | Dependabot PRs | Turns on auto-merge (squash) for patch and minor updates, so GitHub merges them once the required checks pass. Major updates and veraPDF updates wait for a person. |
 
