@@ -210,6 +210,29 @@ public class LayoutFeatureTests
     }
 
     [Fact]
+    public void Stretch_keyword_fills_the_containing_block_less_the_margins()
+    {
+        var ops = Layout("""
+            <div style="width:200pt">
+              <span style="display:inline-block; width:-webkit-fill-available; height:10pt; background:#ff0000"></span>
+              <div style="float:left; width:stretch; margin:0 10pt 0 5%; height:10pt; background:#00ff00"></div>
+              <div style="clear:both; display:inline-block; box-sizing:border-box; width:stretch; padding:0 20pt; height:10pt; background:#0000ff"></div>
+              <div style="display:inline-block; width:-moz-available; height:10pt; background:#ffff00"><span style="display:inline-block; width:30pt"></span></div>
+            </div>
+            <div style="position:relative; width:200pt; height:100pt">
+              <div style="position:absolute; left:20pt; right:30pt; top:0; width:stretch; height:-webkit-fill-available; margin:5pt; background:#ff00ff"></div>
+            </div>
+            """);
+        Near(200, Box(ops, "#ff0000").W);   // an inline-block as wide as a block
+        var green = Box(ops, "#00ff00");    // a float less its margins, a percentage one included
+        Near(10, green.X); Near(180, green.W);
+        Near(200, Box(ops, "#0000ff").W);   // border-box: the padding is inside the stretched width
+        Near(30, Box(ops, "#ffff00").W);    // Chrome ignores Firefox's -moz-available, so the box shrinks to fit
+        var abs = Box(ops, "#ff00ff");      // between the insets, less the margins, in both directions
+        Near(25, abs.X); Near(140, abs.W); Near(90, abs.H);
+    }
+
+    [Fact]
     public void Grid_fit_content_track_is_capped_at_its_length()
     {
         var ops = Layout("""

@@ -60,6 +60,7 @@ internal sealed partial class StyleResolver
         c.Display = Display.InlineBlock;
         c.Width = c.Height = Length.Auto;
         c.WidthKeyword = SizeKeyword.None;
+        c.Stretched = StretchSizes.None;
         return c;
     }
 
@@ -227,6 +228,7 @@ internal sealed partial class StyleResolver
             if (s.BorderBottomColor == null && s.BorderBottomStyle is BorderStyle.Inset or BorderStyle.Outset) s.BorderBottomColor = RuleBase;
             if (s.BorderLeftColor == null && s.BorderLeftStyle is BorderStyle.Inset or BorderStyle.Outset) s.BorderLeftColor = RuleBase;
         }
+        if (s.Stretched != StretchSizes.None) ResolveStretched(s);
         if (!s.ControlWidth.IsAuto && s.Width.IsAuto && s.WidthKeyword == SizeKeyword.None && !StretchedAcross(s, parent)) s.Width = s.ControlWidth;
         // Flex and grid items are laid out as blocks, which carry their own opacity layer.
         bool inlineBox = s.Display == Display.Inline && (!parent.IsFlex || parent.LegacyBox) && !parent.IsGrid;

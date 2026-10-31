@@ -179,6 +179,13 @@ internal enum FloatSide : byte { None, Left, Right }
 /// <summary>An intrinsic size keyword given for width (CSS Sizing 3): the box is as wide as its content says.</summary>
 internal enum SizeKeyword : byte { None, MinContent, MaxContent, FitContent }
 
+/// <summary>
+/// The sizes given the stretch keyword (or Chrome's older -webkit-fill-available): the box fills its containing block,
+/// less its margins, as a block with an auto width does. The length itself is the percentage that does that.
+/// </summary>
+[Flags]
+internal enum StretchSizes : byte { None = 0, Width = 1, Height = 2, MinWidth = 4, MaxWidth = 8, MinHeight = 16, MaxHeight = 32 }
+
 /// <summary>How a footnote sits in the footnote area (footnote-display); compact is laid out as inline.</summary>
 internal enum FootnoteDisplay : byte { Block, Inline, Compact }
 

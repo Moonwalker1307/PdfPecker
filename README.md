@@ -128,7 +128,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
 ## Features
 
 - **HTML and CSS**: flexbox, grid and subgrid, CSS tables, floats with `shape-outside`, `clip-path` shapes (also
-  `rect()` and `xywh()`), `corner-shape` (squircle, bevel, scoop, notch and `superellipse()` corners on borders,
+  `rect()` and `xywh()`), sizes that fill the containing block (`width: stretch` and `-webkit-fill-available`, also for
+  heights and their limits), `corner-shape` (squircle, bevel, scoop, notch and `superellipse()` corners on borders,
   backgrounds, shadows, outlines and clips), `overflow: clip` with `overflow-clip-margin`, multi-column layout,
   positioning (also the legacy `clip: rect()`, and absolute boxes inside a positioned inline element, such as
   tooltips and badges), transforms, gradients (also `in oklch` and other colour spaces, and as
