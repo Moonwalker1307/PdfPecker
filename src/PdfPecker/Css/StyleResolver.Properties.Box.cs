@@ -47,6 +47,13 @@ internal sealed partial class StyleResolver
     /// <summary>width: a length, or an intrinsic size keyword, which leaves the length auto for layout to size.</summary>
     private void ApplyWidth(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
+        if (IsStretch(d.Lower))
+        {
+            s.Width = Length.Auto;
+            s.WidthKeyword = SizeKeyword.None;
+            s.Stretched |= StretchSizes.Width;
+            return;
+        }
         var keyword = d.Lower switch
         {
             "min-content" or "-webkit-min-content" => SizeKeyword.MinContent,
@@ -58,11 +65,89 @@ internal sealed partial class StyleResolver
         {
             s.Width = Length.Auto;
             s.WidthKeyword = keyword;
+            s.Stretched &= ~StretchSizes.Width;
             return;
         }
-        SetLength(ref s.Width, d.Lower, d.Em, d.Inherit ? parent.Width : null);
+        bool set = SetLength(ref s.Width, d.Lower, d.Em, d.Inherit ? parent.Width : null);
         if (d.Inherit) s.WidthKeyword = parent.WidthKeyword;
         else if (d.Lower == "auto" || !s.Width.IsAuto) s.WidthKeyword = SizeKeyword.None;
+        if (d.Inherit) s.Stretched = s.Stretched & ~StretchSizes.Width | parent.Stretched & StretchSizes.Width;
+        else if (set) s.Stretched &= ~StretchSizes.Width;
+    }
+
+    /// <summary>
+    /// height, min-width, min-height, max-width or max-height (<paramref name="which"/>): a length, none for the maximums,
+    /// or stretch, which <see cref="ResolveStretched"/> turns into a length once the margins are known.
+    /// </summary>
+    private void ApplySize(ref Length target, ComputedStyle s, ComputedStyle parent, in DeclaredValue d, StretchSizes which, Length? inherited)
+    {
+        if (IsStretch(d.Lower))
+        {
+            s.Stretched |= which;
+            return;
+        }
+        bool max = which is StretchSizes.MaxWidth or StretchSizes.MaxHeight;
+        bool set = SetLength(ref target, max && d.Lower == "none" ? "auto" : d.Lower, d.Em, inherited);
+        if (d.Inherit && inherited != null) s.Stretched = s.Stretched & ~which | parent.Stretched & which;
+        else if (set) s.Stretched &= ~which;
+    }
+
+    /// <summary>
+    /// The stretch keyword of CSS Sizing 4, and -webkit-fill-available, the name Chrome gave it first. Chrome takes both
+    /// and nothing else (not Firefox's -moz-available), so a page that lists all three gets Chrome's choice.
+    /// </summary>
+    private static bool IsStretch(string lower) => lower is "stretch" or "-webkit-fill-available";
+
+    /// <summary>
+    /// Turns the sizes set to stretch into lengths: 100% of the containing block less the box's margins, and less its
+    /// padding and border unless box-sizing is border-box, with auto margins as zero (CSS Sizing 4 §6.1). An absolutely
+    /// positioned box also leaves out its insets, so that it reaches from its left offset to its right one. Horizontal
+    /// percentages are of the containing block's width, as the result is, so they stay exact; vertical margins and
+    /// padding in percent refer to the width, which a height cannot know, and count as zero.
+    /// </summary>
+    private static void ResolveStretched(ComputedStyle s)
+    {
+        var st = s.Stretched;
+        if ((st & StretchSizes.Width) != 0) s.Width = StretchLength(s, horizontal: true);
+        if ((st & StretchSizes.MinWidth) != 0) s.MinWidth = StretchLength(s, horizontal: true);
+        if ((st & StretchSizes.MaxWidth) != 0) s.MaxWidth = StretchLength(s, horizontal: true);
+        if ((st & StretchSizes.Height) != 0) s.Height = StretchLength(s, horizontal: false);
+        if ((st & StretchSizes.MinHeight) != 0) s.MinHeight = StretchLength(s, horizontal: false);
+        if ((st & StretchSizes.MaxHeight) != 0) s.MaxHeight = StretchLength(s, horizontal: false);
+    }
+
+    private static Length StretchLength(ComputedStyle s, bool horizontal)
+    {
+        float pt = 0, pct = 100;
+        Func<float, float>? rest = null;
+        void Less(Length l)
+        {
+            switch (l.Unit)
+            {
+                case LengthUnit.Pt: pt -= l.Value; break;
+                case LengthUnit.Percent: if (horizontal) pct -= l.Value; break;
+                case LengthUnit.Calc when l.IsLinear: pt -= l.Value; if (horizontal) pct -= l.Pct; break;
+                case LengthUnit.Calc when horizontal:
+                    var before = rest;
+                    rest = before == null ? b => l.Resolve(b) : b => before(b) + l.Resolve(b);
+                    break;
+            }
+        }
+        if (horizontal) { Less(s.MarginLeft); Less(s.MarginRight); }
+        else { Less(s.MarginTop); Less(s.MarginBottom); }
+        if (!s.BorderBox)
+        {
+            if (horizontal) { Less(s.PaddingLeft); Less(s.PaddingRight); pt -= s.BorderLeft + s.BorderRight; }
+            else { Less(s.PaddingTop); Less(s.PaddingBottom); pt -= s.BorderTop + s.BorderBottom; }
+        }
+        if (s.OutOfFlow)
+        {
+            if (horizontal) { Less(s.Left); Less(s.Right); }
+            else { Less(s.Top); Less(s.Bottom); }
+        }
+        if (rest == null) return Length.Calc(pt, pct);
+        var others = rest;
+        return Length.Calc(b => pt + pct * b / 100f - others(b));
     }
 
     private static void ApplyInitialLetter(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)

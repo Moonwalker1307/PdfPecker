@@ -387,10 +387,13 @@ internal sealed partial class StyleResolver
         return list.ToArray();
     }
 
-    private void SetLength(ref Length target, string lower, float em, Length? inherited, bool noAuto = false)
+    /// <summary>Sets <paramref name="target"/> to the inherited value or the length in <paramref name="lower"/>; false when that is no valid length.</summary>
+    private bool SetLength(ref Length target, string lower, float em, Length? inherited, bool noAuto = false)
     {
-        if (inherited.HasValue) { target = inherited.Value; return; }
-        if (TryParseLength(lower, em, _rootFontSize, out var len, _vw, _vh) && !(noAuto && len.IsAuto)) target = ToLayoutUnits(len);
+        if (inherited.HasValue) { target = inherited.Value; return true; }
+        if (!TryParseLength(lower, em, _rootFontSize, out var len, _vw, _vh) || noAuto && len.IsAuto) return false;
+        target = ToLayoutUnits(len);
+        return true;
     }
 
     /// <summary>

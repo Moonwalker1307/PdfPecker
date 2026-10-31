@@ -116,11 +116,11 @@ internal sealed partial class StyleResolver
             case "max-inline-size": Apply(s, parent, "max-width", raw); break;
             case "max-block-size": Apply(s, parent, "max-height", raw); break;
             case "width": ApplyWidth(s, parent, in d); break;
-            case "height": SetLength(ref s.Height, d.Lower, d.Em, d.Inherit ? parent.Height : null); break;
-            case "min-width": SetLength(ref s.MinWidth, d.Lower, d.Em, null); break;
-            case "min-height": SetLength(ref s.MinHeight, d.Lower, d.Em, null); break;
-            case "max-width": SetLength(ref s.MaxWidth, d.Lower == "none" ? "auto" : d.Lower, d.Em, null); break;
-            case "max-height": SetLength(ref s.MaxHeight, d.Lower == "none" ? "auto" : d.Lower, d.Em, null); break;
+            case "height": ApplySize(ref s.Height, s, parent, in d, StretchSizes.Height, d.Inherit ? parent.Height : null); break;
+            case "min-width": ApplySize(ref s.MinWidth, s, parent, in d, StretchSizes.MinWidth, null); break;
+            case "min-height": ApplySize(ref s.MinHeight, s, parent, in d, StretchSizes.MinHeight, null); break;
+            case "max-width": ApplySize(ref s.MaxWidth, s, parent, in d, StretchSizes.MaxWidth, null); break;
+            case "max-height": ApplySize(ref s.MaxHeight, s, parent, in d, StretchSizes.MaxHeight, null); break;
             case "aspect-ratio": ApplyAspectRatio(s, parent, in d); break;
             case "object-fit": ApplyObjectFit(s, parent, in d); break;
             case "object-position": ApplyObjectPosition(s, parent, in d); break;
