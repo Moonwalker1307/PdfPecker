@@ -7,12 +7,12 @@ body { font: 10pt/1.4 sans-serif; margin: 0; color: #222 }
 h1 { font-size: 15pt; margin: 0 0 6pt; border-bottom: 1pt solid #d35400 }
 h2 { font-size: 10pt; margin: 7pt 0 2pt; color: #d35400 }
 p { margin: 2pt 0 }
-.frame { border: 0.5pt dashed #999; padding: 3pt; margin: 2pt 0 }
-.ib { display: inline-block; background: #fad7a0; border: 1pt solid #d35400; padding: 2pt; box-sizing: border-box }
+.frame { border: 0.5pt dashed #999; padding: 3pt; margin: 4pt 0; line-height: 0 }
+.ib { display: inline-block; vertical-align: top; line-height: 1.4; background: #fad7a0; border: 1pt solid #d35400; padding: 2pt 4pt; box-sizing: border-box }
 .stretch { width: stretch }
 .webkit { width: -webkit-fill-available; margin: 0 10pt }
-.sized-parent { height: 18mm; border: 0.5pt solid #999 }
-.sized-parent > div { height: stretch; background: #d6eaf8 }
+.sized-parent { height: 18mm; border: 0.5pt dashed #999; padding: 3pt; margin: 4pt 0 }
+.sized-parent > div { height: stretch; background: #d6eaf8; border: 1pt solid #2980b9; padding: 2pt 4pt; box-sizing: border-box }
 .grid { grid: auto-flow 10mm / repeat(3, 1fr); gap: 3pt; display: grid }
 .grid > div { background: #e8daef; padding: 2pt }
 .areas { display: grid; grid: "head head" 8mm "side main" 14mm / 25mm 1fr; gap: 2pt }
@@ -26,6 +26,8 @@ details:open > summary { color: #2980b9; font-weight: bold }
 .grad-srgb { height: 7mm; background: linear-gradient(90deg, #00f, #ff0) }
 .grad-oklch { height: 7mm; background: linear-gradient(90deg in oklch, #00f, #ff0) }
 .grad-hue { height: 7mm; background: linear-gradient(90deg in hsl longer hue, red, red) }
+.keep { break-inside: avoid }
+.cap { font-size: 7.5pt; color: #666; margin: 1pt 0 4pt }
 .objects img, .objects embed, .objects object, .objects picture { vertical-align: middle; margin-right: 6pt }
 </style></head>
 <body>
@@ -53,8 +55,13 @@ details:open > summary { color: #2980b9; font-weight: bold }
 <details open><summary>An open details element</summary><p>Its summary matches :open.</p></details>
 
 <h2>image-set() and gradient interpolation</h2>
+<div class="keep">
 <div class="bg-set"></div>
-<div class="grad-srgb"></div><div class="grad-oklch"></div><div class="grad-hue"></div>
+<p class="cap">image-set() with a 1x checkerboard tile</p>
+<div class="grad-srgb"></div><p class="cap">linear-gradient(90deg, blue, yellow): sRGB, the default</p>
+<div class="grad-oklch"></div><p class="cap">the same in oklch</p>
+<div class="grad-hue"></div><p class="cap">red to red in hsl longer hue: once round the colour wheel</p>
+</div>
 
 <h2>picture with srcset, embed, object and SVG</h2>
 <p class="objects">
