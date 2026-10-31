@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en"><head><title>Sizing and newer syntax</title>
+<link rel="stylesheet" href="data:text/css,.from-data-url%7Bcolor:%23fff;background:%2316a085;padding:2pt%7D">
+<style>
+@page { size: 148mm 210mm; margin: 12mm }
+body { font: 10pt/1.4 sans-serif; margin: 0; color: #222 }
+h1 { font-size: 15pt; margin: 0 0 6pt; border-bottom: 1pt solid #d35400 }
+h2 { font-size: 10pt; margin: 7pt 0 2pt; color: #d35400 }
+p { margin: 2pt 0 }
+.frame { border: 0.5pt dashed #999; padding: 3pt; margin: 2pt 0 }
+.ib { display: inline-block; background: #fad7a0; border: 1pt solid #d35400; padding: 2pt; box-sizing: border-box }
+.stretch { width: stretch }
+.webkit { width: -webkit-fill-available; margin: 0 10pt }
+.sized-parent { height: 18mm; border: 0.5pt solid #999 }
+.sized-parent > div { height: stretch; background: #d6eaf8 }
+.grid { grid: auto-flow 10mm / repeat(3, 1fr); gap: 3pt; display: grid }
+.grid > div { background: #e8daef; padding: 2pt }
+.areas { display: grid; grid: "head head" 8mm "side main" 14mm / 25mm 1fr; gap: 2pt }
+.areas > div { background: #d5f5e3; padding: 2pt }
+.condensed { font-width: 75% }
+form .field { display: inline-block; width: 30mm; margin-right: 4pt }
+input:valid, select:valid { border: 1.5pt solid #27ae60 }
+input:invalid { border: 1.5pt solid #c0392b; background: #fdedec }
+details:open > summary { color: #2980b9; font-weight: bold }
+.bg-set { height: 12mm; background: image-set(url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Crect width='5' height='5' fill='%23c0392b'/%3E%3Crect x='5' y='5' width='5' height='5' fill='%23c0392b'/%3E%3C/svg%3E") 1x) }
+.grad-srgb { height: 7mm; background: linear-gradient(90deg, #00f, #ff0) }
+.grad-oklch { height: 7mm; background: linear-gradient(90deg in oklch, #00f, #ff0) }
+.grad-hue { height: 7mm; background: linear-gradient(90deg in hsl longer hue, red, red) }
+.objects img, .objects embed, .objects object, .objects picture { vertical-align: middle; margin-right: 6pt }
+</style></head>
+<body>
+<h1>Sizing and newer syntax</h1>
+
+<h2>stretch and -webkit-fill-available</h2>
+<div class="frame"><span class="ib">inline-block, auto width</span></div>
+<div class="frame"><span class="ib stretch">inline-block with width: stretch</span></div>
+<div class="frame"><span class="ib webkit">-webkit-fill-available with side margins</span></div>
+<div class="sized-parent"><div>height: stretch in a parent 18mm tall</div></div>
+
+<h2>The grid shorthand</h2>
+<div class="grid"><div>1</div><div>2</div><div>3</div><div>4</div><div>5</div></div>
+<div class="areas" style="margin-top:3pt"><div style="grid-area:head">head</div><div style="grid-area:side">side</div><div style="grid-area:main">main</div></div>
+
+<h2>font-width and a stylesheet in a data: URL</h2>
+<p><span class="condensed">font-width: 75%</span> next to normal width text, and <span class="from-data-url">styled from a data: URL</span>.</p>
+
+<h2>:valid, :invalid and :open</h2>
+<form>
+<input class="field" type="email" value="name@example.com">
+<input class="field" type="email" value="not an e-mail">
+<input class="field" required value="">
+</form>
+<details open><summary>An open details element</summary><p>Its summary matches :open.</p></details>
+
+<h2>image-set() and gradient interpolation</h2>
+<div class="bg-set"></div>
+<div class="grad-srgb"></div><div class="grad-oklch"></div><div class="grad-hue"></div>
+
+<h2>picture with srcset, embed, object and SVG</h2>
+<p class="objects">
+<picture><source media="(max-width: 1px)" srcset="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Crect width='24' height='24' fill='%23c0392b'/%3E%3C/svg%3E"><img alt="" width="24" height="24" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Crect width='24' height='24' fill='%2327ae60'/%3E%3C/svg%3E"></picture>
+<embed type="image/svg+xml" width="24" height="24" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Cpath d='M12 0L24 24H0z' fill='%23f39c12'/%3E%3C/svg%3E">
+<object type="image/svg+xml" width="24" height="24" data="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Crect width='24' height='24' rx='6' fill='%238e44ad'/%3E%3C/svg%3E">fallback</object>
+</p>
+<svg width="120" height="50" viewBox="0 0 120 50">
+<defs><g id="shape"><rect width="20" height="20" fill="context-fill" stroke="context-stroke" stroke-width="3"/></g></defs>
+<use href="#shape" x="5" y="5" fill="#e74c3c" stroke="#922b21"/>
+<use href="#shape" x="35" y="5" fill="#3498db" stroke="#1b4f72"/>
+<foreignObject x="62" y="2" width="56" height="46"><div style="font: 7pt sans-serif; background: #fef9e7; border: 1px solid #b7950b; height: 40px; padding: 2px">HTML inside SVG</div></foreignObject>
+</svg>
+</body></html>

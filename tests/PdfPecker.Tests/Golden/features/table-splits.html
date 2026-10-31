@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en"><head><title>Tables split across pages</title>
+<style>
+@page { size: 148mm 105mm; margin: 10mm }
+body { font: 8pt/1.35 sans-serif; margin: 0; color: #222 }
+h1 { font-size: 12pt; margin: 0 0 4pt; border-bottom: 1pt solid #2980b9 }
+h2 { font-size: 9pt; margin: 6pt 0 3pt; color: #2980b9 }
+p { margin: 2pt 0 }
+table { border-collapse: collapse; width: 100%; margin: 3pt 0 }
+th, td { border: 0.5pt solid #888; padding: 1.5pt 3pt; vertical-align: top }
+thead th { background: #dde6f0 }
+tfoot td { background: #f3f3f3; font-style: italic }
+tbody.group { break-inside: avoid }
+tbody.group th { background: #fbeee0; text-align: left }
+tr.new-page { break-before: page }
+.n { text-align: right }
+.tall { height: 72mm; background: linear-gradient(#e8f4ea, #fdf2e9); border: 0.5pt solid #27ae60; padding: 3pt; break-inside: avoid }
+</style></head>
+<body>
+<h1>Tables split across pages</h1>
+<h2>A row taller than the room left breaks inside, and the header and footer repeat around it</h2>
+<table>
+<thead><tr><th style="width:12%">Item</th><th>Description</th><th style="width:15%">Amount</th></tr></thead>
+<tfoot><tr><td colspan="3">Continued on the next page where the table goes on</td></tr></tfoot>
+<tbody>
+<tr><td>1</td><td>Short row.</td><td class="n">10.00</td></tr>
+<tr><td>2</td><td>Short row.</td><td class="n">20.00</td></tr>
+<tr><td>3</td><td>A long row whose text runs over several lines. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium, totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt. Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit, sed quia non numquam eius modi tempora incidunt ut labore et dolore magnam aliquam quaerat voluptatem.</td><td class="n">30.00</td></tr>
+<tr><td>4</td><td>Short row after the split.</td><td class="n">40.00</td></tr>
+</tbody>
+</table>
+
+<h2>Row groups kept together and a forced break between rows</h2>
+<table>
+<thead><tr><th>Region</th><th style="width:20%">Q1</th><th style="width:20%">Q2</th></tr></thead>
+<tbody class="group"><tr><th colspan="3">North</th></tr><tr><td>Oslo</td><td class="n">12</td><td class="n">14</td></tr><tr><td>Bergen</td><td class="n">8</td><td class="n">9</td></tr><tr><td>Trondheim</td><td class="n">5</td><td class="n">7</td></tr></tbody>
+<tbody class="group"><tr><th colspan="3">South</th></tr><tr><td>Aarhus</td><td class="n">11</td><td class="n">10</td></tr><tr><td>Odense</td><td class="n">6</td><td class="n">8</td></tr><tr><td>Aalborg</td><td class="n">4</td><td class="n">5</td></tr></tbody>
+<tbody class="group"><tr><th colspan="3">East</th></tr><tr><td>Malmö</td><td class="n">9</td><td class="n">9</td></tr><tr><td>Lund</td><td class="n">3</td><td class="n">4</td></tr><tr><td>Helsingborg</td><td class="n">2</td><td class="n">3</td></tr></tbody>
+<tbody><tr class="new-page"><td>Total (on a page of its own)</td><td class="n">60</td><td class="n">69</td></tr></tbody>
+</table>
+
+<h2>A box kept whole but taller than the room left starts on the next page</h2>
+<div class="tall">This box has break-inside: avoid and does not fit below the heading, so it moves to the next page, where it fits.</div>
+</body></html>

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en"><head><title>The page box</title>
+<style>
+@page {
+  size: 148mm 105mm; margin: 14mm;
+  border: 1.5pt solid #2c3e50; padding: 4mm;
+  background: #fdfefe url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Ccircle cx='10' cy='10' r='1.5' fill='%23d5dbdb'/%3E%3C/svg%3E");
+  @bottom-center { content: "Page " counter(page) " of " counter(pages); font: 7pt sans-serif; color: #555 }
+}
+@page wide { size: 210mm 105mm; border: 3pt double #8e44ad; border-radius: 4mm; padding: 2mm; background: #f5eef8 }
+body { font: 9pt/1.35 sans-serif; margin: 0; color: #222 }
+h1 { font-size: 13pt; margin: 0 0 4pt; color: #2c3e50; bookmark-level: 1 }
+h2 { font-size: 10pt; margin: 4pt 0 2pt; color: #2c3e50; bookmark-level: 2 }
+.marked { bookmark-level: 2; bookmark-label: "Custom label: " content(); bookmark-state: closed; font-weight: bold }
+.flex { display: flex; flex-wrap: wrap; gap: 4pt }
+.flex > div { width: 60mm; padding: 3pt; background: #ebf5fb; border: 0.5pt solid #2980b9 }
+.flex > .break { break-before: page }
+.wide { page: wide }
+.cols { display: flex; gap: 6pt }
+.cols > div { flex: 1; border-left: 2pt solid #16a085; padding-left: 4pt }
+</style></head>
+<body>
+<h1>The page box</h1>
+<p>Every page has a border, padding and a dotted background image on its page box, behind the margin boxes and around the page area.</p>
+<p class="marked">This paragraph is a closed bookmark with a label of its own.</p>
+
+<h2>A forced break between flex lines</h2>
+<div class="flex">
+<div>Item one</div><div>Item two</div><div>Item three</div><div class="break">Item four starts a new page</div><div>Item five</div>
+</div>
+
+<h2>A flex row breaks inside its items at the end of a page</h2>
+<div class="cols">
+<div>Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. Sed ut perspiciatis unde omnis iste natus error sit voluptatem accusantium doloremque laudantium.</div>
+<div>Totam rem aperiam, eaque ipsa quae ab illo inventore veritatis et quasi architecto beatae vitae dicta sunt explicabo. Nemo enim ipsam voluptatem quia voluptas sit aspernatur aut odit aut fugit, sed quia consequuntur magni dolores eos qui ratione voluptatem sequi nesciunt. Neque porro quisquam est, qui dolorem ipsum quia dolor sit amet, consectetur, adipisci velit.</div>
+</div>
+
+<div class="wide">
+<h2>A named page with a border of its own</h2>
+<p>This section is on the named page "wide", which is wider and has a double border with rounded corners and a background colour of its own.</p>
+</div>
+</body></html>

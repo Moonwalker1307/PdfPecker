@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en"><head><title>Text styling</title>
+<style>
+@page { size: 148mm 210mm; margin: 12mm }
+body { font: 10pt/1.4 sans-serif; margin: 0; color: #222 }
+h1 { font-size: 15pt; margin: 0 0 6pt; border-bottom: 1pt solid #16a085 }
+h2 { font-size: 10pt; margin: 8pt 0 2pt; color: #16a085 }
+p { margin: 2pt 0 }
+.em-dot { text-emphasis: filled dot #c0392b }
+.em-circle { text-emphasis: open circle; text-emphasis-position: under right }
+.em-string { text-emphasis: "*" #2980b9 }
+.em-sesame { text-emphasis: filled sesame #8e44ad; font-size: 12pt }
+.hang { text-indent: 18pt hanging; padding-left: 18pt; border-left: 2pt solid #ddd }
+.each { text-indent: 12pt each-line; width: 70mm }
+.pct { text-indent: 25%; width: 90mm }
+.first::first-line { background: #fdebd0; color: #a04000; font-weight: bold }
+.under-auto { text-decoration: underline; text-underline-position: auto }
+.under-under { text-decoration: underline; text-underline-position: under }
+.under-font { text-decoration: underline; text-underline-position: from-font }
+.clamp { width: 80mm; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; border: 0.5pt solid #aaa; padding: 2pt }
+.clamp.custom { block-ellipsis: " [more]" }
+.trim { display: inline-block; vertical-align: top; width: 38mm; background: #d6eaf8; font-size: 18pt; line-height: 1.6; margin-right: 4pt }
+.trim.both { text-box: trim-both cap alphabetic }
+.trim.start { text-box: trim-start cap alphabetic }
+</style></head>
+<body>
+<h1>Text styling</h1>
+
+<h2>text-emphasis</h2>
+<p><span class="em-dot">Filled dots</span> over each letter, <span class="em-circle">open circles</span> under, and <span class="em-string">a custom mark</span>.</p>
+<p class="em-sesame">Sesame marks over larger text</p>
+
+<h2>text-indent with hanging, each-line and percentages</h2>
+<p class="hang">A hanging indent leaves the first line where it is and indents every other line of this paragraph, as in bibliographies and lists of references.</p>
+<p class="each">each-line indents the first line and each line after a forced break.<br>This line follows a line break and is indented too, while wrapped lines are not.</p>
+<p class="pct">A percentage indent is a share of the paragraph's width, here a quarter of it.</p>
+
+<h2>::first-line background</h2>
+<p class="first">The first line of this paragraph has a background, a colour and a bold weight of its own, and the lines after it keep the paragraph's style.</p>
+
+<h2>text-underline-position</h2>
+<p><span class="under-auto">auto: gypsy jog</span> · <span class="under-under">under: gypsy jog</span> · <span class="under-font">from-font: gypsy jog</span></p>
+
+<h2>line-clamp and block-ellipsis</h2>
+<p class="clamp">Only two lines of this paragraph are shown and the second ends with an ellipsis because line-clamp cuts the rest of the text off here.</p>
+<p class="clamp custom">Only two lines of this paragraph are shown and the second ends with a mark of its own because block-ellipsis names one.</p>
+
+<h2>text-box trimming</h2>
+<div class="trim">Untrimmed</div><div class="trim both">Trim both</div><div class="trim start">Trim start</div>
+</body></html>

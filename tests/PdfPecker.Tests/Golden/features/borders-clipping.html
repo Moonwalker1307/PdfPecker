@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en"><head><title>Borders, outlines and clipping</title>
+<style>
+@page { size: 148mm 210mm; margin: 12mm }
+body { font: 10pt/1.4 sans-serif; margin: 0; color: #222 }
+h1 { font-size: 15pt; margin: 0 0 6pt; border-bottom: 1pt solid #c0392b }
+h2 { font-size: 9.5pt; margin: 5pt 0 2pt; color: #c0392b }
+.row { display: flex; gap: 8pt; flex-wrap: wrap; padding: 0 4pt }
+.tile { width: 21mm; height: 13mm; background: #f5b7b1; border: 2pt solid #922b21; border-radius: 6mm; font-size: 7pt; padding: 2pt; box-sizing: border-box }
+.bevel { corner-shape: bevel }
+.scoop { corner-shape: scoop }
+.notch { corner-shape: notch }
+.squircle { corner-shape: squircle }
+.super { corner-shape: superellipse(-1) round bevel scoop }
+.outline-dashed { outline: 2pt dashed #2980b9; outline-offset: 2pt; border-radius: 4pt }
+.outline-dotted { outline: 3pt dotted #27ae60; outline-offset: 3pt }
+.wrapped { outline: 1.5pt solid #e67e22; outline-offset: 1pt }
+.narrow { width: 50mm }
+.mitre { border-width: 6pt; border-style: solid; border-color: #c0392b #2980b9 #27ae60 #f1c40f; background: none; border-radius: 0 }
+.groove { border: 6pt groove #7f8c8d; border-radius: 0; background: none }
+.ridge { border: 6pt ridge #8e44ad; border-radius: 0; background: none }
+.inset { border: 6pt inset #2980b9; border-radius: 0; background: none }
+.outset { border: 6pt outset #d35400; border-radius: 0; background: none }
+.bimage { border: 8pt solid transparent; border-image: repeating-linear-gradient(45deg, #c0392b 0 4px, #f1c40f 4px 8px) 10; border-radius: 0; background: #fff }
+.bimage-num { border: 4pt solid transparent; border-image: linear-gradient(#16a085, #2980b9) 10 / 2; border-radius: 0; background: #fff }
+.clipbox { position: relative; width: 60mm; height: 18mm; background: #eee }
+.clipbox .abs { position: absolute; left: 4pt; top: 4pt; width: 40mm; height: 14mm; background: repeating-linear-gradient(90deg, #2980b9 0 6pt, #85c1e9 6pt 12pt); clip: rect(2pt, 30mm, 10mm, 4pt) }
+.cp-rect { clip-path: rect(4pt 20mm 12mm 6pt round 3pt); background: #27ae60 }
+.cp-xywh { clip-path: xywh(2mm 2mm 14mm 8mm round 50%); background: #8e44ad }
+.ocm { width: 40mm; height: 8mm; overflow: clip; overflow-clip-margin: 6pt; border: 1pt solid #555; margin: 8pt 8pt }
+.ocm div { width: 52mm; height: 14mm; margin: -4mm 0 0 -2mm; background: rgba(230, 126, 34, 0.6) }
+</style></head>
+<body>
+<h1>Borders, outlines and clipping</h1>
+
+<h2>corner-shape</h2>
+<div class="row">
+<div class="tile">round</div><div class="tile bevel">bevel</div><div class="tile scoop">scoop</div><div class="tile notch">notch</div><div class="tile squircle">squircle</div><div class="tile super">mixed</div>
+</div>
+
+<h2>Outlines and dashed corners</h2>
+<div class="row">
+<div class="tile outline-dashed" style="background:#d6eaf8; border-style: dashed">dashed</div>
+<div class="tile outline-dotted" style="background:#d5f5e3; border-radius:0; border-style: dotted">dotted</div>
+</div>
+<p class="narrow">An outline on an inline that wraps: <span class="wrapped">this span wraps over more than one line and its outline is one shape around all of them</span>.</p>
+
+<h2>Border styles and mitred corners</h2>
+<div class="row">
+<div class="tile mitre">four colours</div><div class="tile groove">groove</div><div class="tile ridge">ridge</div><div class="tile inset">inset</div><div class="tile outset">outset</div>
+</div>
+
+<h2>border-image</h2>
+<div class="row"><div class="tile bimage">slice 10</div><div class="tile bimage-num">width 2</div></div>
+
+<h2>clip: rect(), clip-path rect() and xywh()</h2>
+<div class="row">
+<div class="clipbox"><div class="abs"></div></div>
+<div class="tile cp-rect"></div><div class="tile cp-xywh"></div>
+</div>
+
+<h2>overflow-clip-margin</h2>
+<div class="ocm"><div></div></div>
+</body></html>
