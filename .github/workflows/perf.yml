@@ -54,11 +54,14 @@ jobs:
           dotnet bench/PdfPecker.Benchmarks/bin/Release/net10.0/PdfPecker.Benchmarks.dll --perf perf-again.json
           python3 -I .github/scripts/perf-best.py perf.json perf-again.json
 
-      # The newest earlier run is the baseline for allocation, and the newest earlier run on the same processor model
-      # the baseline for time, as hosted runners come in several models whose times are not comparable. A run counts
-      # whether it passed or failed: a regression fails the night it lands, and the nights after compare with it, so a
-      # cost that is meant, such as a new feature's work, fails once instead of every night until the next change. A
-      # run that left no results, such as one whose build failed, is skipped. A first run, or one whose artifacts have
+      # The newest earlier run is the baseline for allocation, and the three newest earlier runs on the same processor
+      # model the baseline for time, as hosted runners come in several models whose times are not comparable. A single
+      # run can be slow in one case for minutes at a time, in both of its passes: on 30 October a manual run measured
+      # parse-css 30% slower and the nightly run half an hour later, on the same commit and processor, 13% faster than
+      # that. Each case's time is therefore judged against its median over those runs. A run counts whether it passed
+      # or failed: a regression fails the night it lands, and the nights after compare with it, so a cost that is meant,
+      # such as a new feature's work, fails on the night it lands (and its time, until the median has caught up, on the
+      # next) instead of every night until the next change. A run that left no results, such as one whose build failed, is skipped. A first run, or one whose artifacts have
       # expired, has no baseline and passes.
       - name: Download the previous results
         env:
@@ -67,6 +70,7 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: |
           cpu=$(jq -r '.cpu // empty' perf.json)
+          times=0
           runs=$(gh run list --workflow perf.yml --branch main --status completed --limit 20 --json databaseId --jq '.[].databaseId' || true)
           for id in $runs; do
             [ "$id" = "$RUN_ID" ] && continue
@@ -77,8 +81,9 @@ jobs:
               mkdir -p baseline && cp candidate/perf.json baseline/perf.json && echo "Allocation baseline: run $id"
             fi
             if [ -n "$cpu" ] && [ "$(jq -r '.cpu // empty' candidate/perf.json)" = "$cpu" ]; then
-              cp candidate/perf.json baseline/time.json && echo "Time baseline: run $id"
-              break
+              times=$((times + 1))
+              cp candidate/perf.json "baseline/time-$times.json" && echo "Time baseline: run $id"
+              [ "$times" -ge 3 ] && break
             fi
           done
           rm -rf candidate
@@ -88,7 +93,7 @@ jobs:
         run: |
           args=(perf.json)
           if [ -f baseline/perf.json ]; then args+=(baseline/perf.json); fi
-          if [ -f baseline/time.json ]; then args+=(baseline/time.json); fi
+          for f in baseline/time-*.json; do [ -f "$f" ] && args+=("$f"); done
           set +e
           python3 .github/scripts/perf-compare.py "${args[@]}" | tee perf-summary.md
           status=${PIPESTATUS[0]}
