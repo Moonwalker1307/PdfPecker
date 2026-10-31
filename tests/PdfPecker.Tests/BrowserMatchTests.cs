@@ -611,6 +611,22 @@ public class BrowserMatchTests
         Near(x.Baseline + shift, ops.Single(t => t.Text == "a").Baseline);
     }
 
+    [Theory]
+    // Chrome 153: text-top hangs the 28px box from the top of the font (not of the 24px line), so it reaches 8px
+    // below the line and the next line moves down; text-bottom stands it on the bottom of the font, so it reaches 8px
+    // above the line and moves its own line down instead.
+    [InlineData("text-top", 18, 24)]
+    [InlineData("text-bottom", 24, 18)]
+    public void Text_top_and_text_bottom_boxes_line_up_with_the_font_not_the_leading(string align, float above, float below)
+    {
+        var ops = Layout($"""
+            <p style="font: 15px serif; line-height: 24px; margin: 0">aaa<br>bbb <span style="display: inline-block; width: 34px; height: 28px; vertical-align: {align}"></span> ccc<br>ddd</p>
+            """).OfType<TextOp>().ToList();
+        float Baseline(string text) => ops.First(t => t.Text.Contains(text, StringComparison.Ordinal)).Baseline;
+        Near(above, Baseline("bbb") - Baseline("aaa"), 0.3f);
+        Near(below, Baseline("ddd") - Baseline("bbb"), 0.3f);
+    }
+
     [Fact]
     public void Text_aligned_to_the_line_top_follows_a_taller_line()
     {
