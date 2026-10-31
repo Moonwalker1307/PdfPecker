@@ -1306,8 +1306,13 @@ internal sealed partial class LayoutEngine
         int breaksBefore = m.Breaks.Count;
         if (collapse)
         {
-            int pages = PageOf(firstBottom - 0.5f) - first + 1;
-            int last = PageOf(firstBottom - 0.5f) + 1 + (int)Math.Ceiling(pages * (head + foot) / Math.Max(1, _grid.MinHeight));
+            // A split row only gets taller, so one whose unsplit bottom is past the page limit ends the layout there.
+            CheckPageLimit(firstBottom - 0.5f);
+            long pages = (long)PageOf(firstBottom - 0.5f) - first + 1;
+            double reach = PageOf(firstBottom - 0.5f) + 1.0 + Math.Ceiling(pages * (head + foot) / Math.Max(1, _grid.MinHeight));
+            // The pages past the limit are never reached either: without these two checks, a cell with a padding of 1e96px
+            // added a break for each of millions of pages, and painted its borders once per break.
+            int last = (int)Math.Min(reach, MaxPages + 1.0);
             for (int p = first; p < last; p++)
                 m.Breaks.Add(SplitBreak(p, head, foot, vs));
         }

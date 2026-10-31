@@ -701,6 +701,21 @@ public class HostileInputTests
         Bounded(() => PdfRenderer.Open(pdf).RenderPage(0, new ImageOptions { Dpi = 300 }));
     }
 
+    [Theory]
+    [InlineData(100)]
+    [InlineData(100_000)]
+    public void A_split_row_with_collapsed_borders_adds_no_breaks_past_the_page_limit(int maxPages)
+    {
+        // The fuzz finding (css, memory-c058a39b of 2026-10-31): a cell's padding of 1e96px makes its row reach millions of
+        // pages. A split row with collapsed borders adds a break for each page it may reach before laying out its cells,
+        // and each cell paints its borders once per break, so the row took 22 s and 4 GB before the page limit stopped
+        // it. The pages past the limit are never reached, so their breaks are no longer added.
+        const string html = "<style>table{border-collapse:collapse}td{border:1px solid #aaa;padding:2px 2px 1e96px}</style>"
+                            + "<table><thead><tr><th>A<th>B<tbody><tr><td>cell<td>cell</table>";
+        var (_, allocated) = Allocating(() => Assert.Throws<PdfLimitException>(() => Bounded(html, new PdfOptions { MaxPages = maxPages })));
+        Assert.InRange(allocated, 0, 256L << 20);
+    }
+
     [Fact]
     public void Page_count_is_limited()
     {
