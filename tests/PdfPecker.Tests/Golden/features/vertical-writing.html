@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"><head><title>Vertical writing</title>
+<style>
+@page { size: 148mm 105mm; margin: 10mm }
+body { font: 9pt/1.4 sans-serif; margin: 0; color: #222 }
+h1 { font-size: 13pt; margin: 0 0 4pt; border-bottom: 1pt solid #2471a3 }
+.row { display: flex; gap: 6mm; align-items: flex-start }
+.v { height: 60mm; border: 0.5pt solid #999; padding: 3pt }
+.lr { writing-mode: vertical-lr }
+.rl { writing-mode: vertical-rl }
+.v .float { float: left; width: 12mm; height: 14mm; background: #f5cba7; margin: 0 0 3pt 0 }
+.v .sized { width: 10mm; height: 30mm; background: #a9cce3; margin: 3pt 0 }
+.cap { font-size: 7pt; color: #555; writing-mode: horizontal-tb }
+</style></head>
+<body>
+<h1>Vertical writing</h1>
+<div class="row">
+<div class="v lr">vertical-lr lines run left to right. Second line of text. שורה בעברית בכיוון מימין לשמאל. Third line.</div>
+<div class="v lr" dir="rtl">dir=rtl in vertical-lr: הטקסט נכתב מלמטה למעלה, and lines still go left to right.</div>
+<div class="v rl">vertical-rl lines run right to left. Second line of text, and a third one.</div>
+<div class="v lr"><div class="float"></div>A float in vertical-lr sits at the top and the text flows beside it. <div class="sized"></div>A sized box follows.</div>
+<div class="v rl"><div class="float"></div>A float in vertical-rl sits at the top and the text flows beside it.</div>
+</div>
+</body></html>

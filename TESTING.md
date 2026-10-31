@@ -32,7 +32,9 @@ A change to `footnotes-toc/demo` or `features/images` changes these baselines to
 
 `Golden/features/` holds one page per group of features that came with the Chrome comparison work (text wrapping,
 decorations, drop caps and float shapes, masks and filters, units and fonts, selectors, tables, CSS tables, images,
-and documents without `html` or `body`). Each was compared with Chromium's print to PDF before it was checked in.
+and documents without `html` or `body`), and since 1.22.0 for the newer ones (tables split across pages, list markers,
+text styling, borders, outlines and clipping, the page box, sizing keywords and newer syntax, vertical writing, and page
+numbers and fixed boxes in the content). Each was compared with Chromium's print to PDF before it was checked in.
 
 When a change is meant to alter output, regenerate them and say in the commit and PR which baselines changed and why:
 

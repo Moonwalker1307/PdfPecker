@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en"><head><title>List markers</title>
+<style>
+@page { size: 148mm 210mm; margin: 12mm }
+body { font: 9pt/1.35 sans-serif; margin: 0; color: #222 }
+h1 { font-size: 15pt; margin: 0 0 6pt; border-bottom: 1pt solid #8e44ad }
+h2 { font-size: 9.5pt; margin: 6pt 0 1pt; color: #8e44ad }
+ul, ol { margin: 2pt 0; padding-left: 22pt }
+.big li::marker { font-size: 20pt; color: #c0392b }
+.none li:nth-child(2)::marker { content: none }
+.counter { padding-left: 46pt }
+.counter li::marker { content: "Step " counter(list-item) ": "; font-weight: bold; color: #2980b9 }
+.before { list-style: none; padding-left: 0 }
+.before li::before { content: counter(list-item, upper-roman) ". "; color: #16a085 }
+.rtl { direction: rtl }
+.rtl li::marker { content: "(" counter(list-item) ") " }
+.ltr-marker li::marker { direction: ltr; content: "[" counter(list-item) "] " }
+.gradient { list-style-image: linear-gradient(135deg, #e67e22, #8e44ad) }
+.tall-image { list-style-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='30'%3E%3Crect width='14' height='30' rx='3' fill='%2327ae60'/%3E%3C/svg%3E") }
+.set { list-style-image: image-set(url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Ccircle cx='5' cy='5' r='5' fill='%23c0392b'/%3E%3C/svg%3E") 1x, url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Crect width='20' height='20' fill='%232980b9'/%3E%3C/svg%3E") 2x) }
+.styled li::marker { color: #e67e22; font-family: serif; font-style: italic }
+</style></head>
+<body>
+<h1>List markers</h1>
+
+<h2>A larger marker font makes its line taller</h2>
+<ul class="big"><li>First item with a large red bullet.</li><li>Second item.</li></ul>
+
+<h2>content: none removes one marker</h2>
+<ol class="none"><li>One</li><li>Two has no marker</li><li>Three</li></ol>
+
+<h2>counter(list-item) in ::marker and ::before</h2>
+<ol class="counter" start="4"><li>Open the box.</li><li>Take out the parts.</li><li>Put them together.</li></ol>
+<ol class="before"><li>Roman numbers from ::before</li><li>Second</li><li>Third</li></ol>
+
+<h2>Marker direction</h2>
+<ol class="rtl"><li>עברית ראשון</li><li>שני</li></ol>
+<ol class="rtl ltr-marker"><li>סימן משמאל לימין</li><li>שני</li></ol>
+
+<h2>Gradient, tall image and image-set() markers</h2>
+<ul class="gradient"><li>Gradient marker</li><li>Another one</li></ul>
+<ul class="tall-image"><li>A marker image taller than its line moves the line down.</li><li>Second line.</li></ul>
+<ul class="set"><li>image-set() picks the 1x image, as Chrome does when it prints.</li></ul>
+
+<h2>Marker colour and font</h2>
+<ol class="styled" start="9"><li>Nine</li><li>Ten</li><li>Eleven</li></ol>
+</body></html>
