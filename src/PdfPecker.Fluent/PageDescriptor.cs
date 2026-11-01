@@ -145,4 +145,14 @@ public sealed class PageDescriptor
 
     /// <summary>The slot repeated at the bottom of every page. Page numbers go here or in the header.</summary>
     public IContainer Footer() => _page.Footer;
+
+    /// <summary>
+    /// The header of the even pages (2, 4, ...), which takes the place of <see cref="Header"/> there, for documents
+    /// printed on both sides: a page number on the outer edge, for example. The page numbers count through the whole
+    /// document, also with several <c>Page</c> calls. Without a <see cref="Header"/>, the odd pages have no header.
+    /// </summary>
+    public IContainer EvenPageHeader() => _page.EvenHeader;
+
+    /// <summary>The footer of the even pages (2, 4, ...), which takes the place of <see cref="Footer"/> there; see <see cref="EvenPageHeader"/>.</summary>
+    public IContainer EvenPageFooter() => _page.EvenFooter;
 }
