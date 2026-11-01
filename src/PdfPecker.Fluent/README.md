@@ -62,7 +62,7 @@ Document.Create(container =>
   wavy, dotted or dashed, in their own colour and thickness), line height, letter and word spacing, superscript and
   subscript; OpenType features (`EnableFontFeature`, `DisableFontFeature`); justified text, `ClampLines` with an
   ellipsis, a first-line indent and `ParagraphSpacing`; small slots inside the text for icons and badges
-  (`text.Element()`); headings, which become PDF bookmarks and tags; links and links to named sections, and the page a
+  (`text.Element()`); dot leaders that fill the rest of a line (`Leader`), for tables of contents and price lists; headings, which become PDF bookmarks and tags; links and links to named sections, and the page a
   section starts on and ends on, its number of pages and the page within it (`BeginPageNumberOfSection`,
   `EndPageNumberOfSection`, `TotalPagesWithinSection`, `PageNumberWithinSection`).
 - **Pages**: size, margins, page colour, a header and footer on every page, and `CurrentPageNumber` / `TotalPages`

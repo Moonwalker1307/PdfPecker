@@ -53,6 +53,9 @@ internal sealed class HtmlWriter
     /// <summary>The page numbers written in the content so far, which each get an id of their own.</summary>
     private int _pageNumbers;
 
+    /// <summary>The leaders' CSS arguments, each with the number its spans name in data-leader.</summary>
+    private readonly Dictionary<string, int> _leaders = new(StringComparer.Ordinal);
+
     /// <summary>Whether some text has a footnote, which needs the rule that sets out the footnote area.</summary>
     private bool _footnotes;
 
@@ -118,6 +121,8 @@ internal sealed class HtmlWriter
         if (_sectionEnds) _html.Append("[data-section-end]::after{content:-pdfpecker-target-pages(attr(data-section-end),last)}");
         if (_sectionCounts) _html.Append("[data-section-pages]::after{content:-pdfpecker-target-pages(attr(data-section-pages),count)}");
         if (_sectionWithin) _html.Append("[data-section-within]::after{content:-pdfpecker-target-pages(attr(data-section-within),current)}");
+        foreach (var (pattern, number) in _leaders)
+            _html.Append("[data-leader=\"").Append(number.ToString(CultureInfo.InvariantCulture)).Append("\"]::after{content:leader(").Append(pattern).Append(")}");
         if (_footnotes) _html.Append("@page{@footnote{margin-top:8pt;padding-top:4pt;border-top:0.5pt solid currentColor}}");
         foreach (var rule in css) _html.Append('\n').Append(rule);
         _html.Append("</style></head>\n<body");
@@ -763,6 +768,17 @@ internal sealed class HtmlWriter
                     _html.Append("{section-page:").Append(Uri.EscapeDataString(run.Target!)).Append('}');
                     _html.Append("</span>");
                     break;
+                case RunKind.Leader:
+                {
+                    // CSS has leaders only in generated content, so the leader is an empty span whose ::after holds it,
+                    // with one rule for each distinct pattern.
+                    if (!_leaders.TryGetValue(run.Text, out int number)) _leaders.Add(run.Text, number = _leaders.Count);
+                    _html.Append("<span");
+                    if (cls != null) WriteAttribute("class", cls);
+                    WriteAttribute("data-leader", number.ToString(CultureInfo.InvariantCulture));
+                    _html.Append("></span>");
+                    break;
+                }
                 case RunKind.Footnote:
                 {
                     if (_band != Band.None) throw new InvalidOperationException("Footnote works in the page content, not in a header or footer.");

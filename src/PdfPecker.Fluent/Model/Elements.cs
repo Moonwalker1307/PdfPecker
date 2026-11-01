@@ -149,6 +149,9 @@ internal enum RunKind
 
     /// <summary>The page a section ends on, the number of its pages, and the page counted from its first.</summary>
     SectionEndPage, SectionPageCount, SectionPageWithin,
+
+    /// <summary>A leader that fills the rest of the line; <see cref="TextRun.Text"/> holds its CSS leader() argument.</summary>
+    Leader,
 }
 
 internal sealed class TextRun
