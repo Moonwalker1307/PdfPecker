@@ -903,7 +903,9 @@ internal sealed partial class PdfDocumentWriter
             InvalidateState();
             return;
         }
-        WriteSvg(b, svg, left, top, w, h);
+        // An SVG file used as an image is scaled to the size CSS gives it, as browsers draw it: one without a viewBox
+        // stretches its natural width and height to the tile, as an img element does.
+        WriteSvg(b, svg, left, top, w, h, stretch: !svg.HasViewBox);
     }
 
     // Maps user space (PDF space, y up, as the ops are written) to the default space of the stream being written, or null
