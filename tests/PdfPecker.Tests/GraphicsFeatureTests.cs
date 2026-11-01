@@ -329,6 +329,31 @@ public class GraphicsFeatureTests
         Assert.Contains(" rg", content);
     }
 
+    [Theory]
+    // Bootstrap's icon sprite: the svg holding the symbols is display: none itself.
+    [InlineData("<svg style='display:none'>{0}</svg>")]
+    [InlineData("<svg class='d-none'>{0}</svg>")]
+    // The sprite inside a hidden element.
+    [InlineData("<div hidden><svg>{0}</svg></div>")]
+    public void Svg_use_draws_a_symbol_from_a_hidden_sprite(string sprite)
+    {
+        // As in Chrome, a sprite that is not rendered itself still lends its symbols to use elements.
+        var html = "<style>.d-none{display:none!important}</style>"
+            + string.Format(System.Globalization.CultureInfo.InvariantCulture, sprite,
+                "<symbol id='s' viewBox='0 0 10 10'><rect width='10' height='10' fill='#ff0000'/></symbol>")
+            + "<p>Text</p><svg width='50' height='50'><use href='#s'/></svg>";
+        var content = AllContent(ConvertUncompressed(html));
+        Assert.Contains("1 0 0 rg", content);
+    }
+
+    [Fact]
+    public void Svg_in_a_hidden_element_draws_nothing_itself()
+    {
+        var content = AllContent(ConvertUncompressed(
+            "<p>Text</p><div hidden><svg width='50' height='50'><rect width='10' height='10' fill='#ff0000'/></svg></div>"));
+        Assert.DoesNotContain("1 0 0 rg", content);
+    }
+
     [Fact]
     public void Svg_group_opacity_composites_the_group_as_one()
     {
