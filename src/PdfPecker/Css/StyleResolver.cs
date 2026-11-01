@@ -382,7 +382,12 @@ internal sealed partial class StyleResolver
         {
             if (children[i] is not Element e || e.Generated) continue;
             Resolve(e, parent.Style);
-            if (e.Style.Display == Display.None) continue; // descendants are never rendered
+            if (e.Style.Display == Display.None)
+            {
+                // Descendants are never rendered, except svg content another svg uses (see ResolveHiddenSvg).
+                if (e.Name == "svg" || ContainsSvg(e)) ResolveHiddenSvg(e);
+                continue;
+            }
             bool container = IsContainer(e.Style);
             if (container) PushContainer(e);
             bool footnote = e.Style.Footnote && _footnoteDepth == 0;
@@ -433,6 +438,33 @@ internal sealed partial class StyleResolver
                 var stack = _counters[name];
                 stack.RemoveAt(stack.Count - 1);
             }
+    }
+
+    /// <summary>
+    /// Gives styles to the descendants of a display: none element that is or holds an svg element. Nothing there is
+    /// rendered, but as in Chrome a use element elsewhere may draw a symbol from it, the way icon sprites such as
+    /// Bootstrap's hide their symbols in an <c>&lt;svg class="d-none"&gt;</c>. The svg drawing reads each element's
+    /// style, so without one the symbol drew nothing. Only the cascade
+    /// runs here; counters, pseudo-elements and the other work of rendered elements are left out. The parser's depth
+    /// limit bounds the recursion, and each hidden subtree is walked once.
+    /// </summary>
+    private void ResolveHiddenSvg(Element parent)
+    {
+        Prepare(parent);
+        foreach (var c in parent.Children)
+        {
+            if (c is not Element e || e.Generated) continue;
+            Resolve(e, parent.Style);
+            ResolveHiddenSvg(e);
+        }
+    }
+
+    /// <summary>Whether an svg element is among the descendants of <paramref name="e"/>.</summary>
+    private static bool ContainsSvg(Element e)
+    {
+        foreach (var c in e.Children)
+            if (c is Element ce && (ce.Name == "svg" || ContainsSvg(ce))) return true;
+        return false;
     }
 
     /// <summary>Keeps the values of the counters target-counter() asks for at an element with an id.</summary>
