@@ -63,7 +63,7 @@ public static partial class HtmlToPdf
                 foreach (var rule in _sheet.PageRules)
                     if (rule.Name == name && rule.Selector.Length == 0) ApplyPageRules(rule.Declarations, setup);
             ScaleAndFit(setup, _scale, _options.Scale != 1, InitialStyle(_options.Language));
-            ReserveBands(setup, name, false, false);
+            ReserveBands(setup, name, false, false, false);
             return _namedSetups[name] = setup;
         }
 
@@ -72,16 +72,17 @@ public static partial class HtmlToPdf
         /// background give those pages their own. The first page of the document is a right page, as in left-to-right
         /// books, and a left page when the root element is right to left, as in Chrome: the pages then progress from
         /// right to left (CSS Paged Media 3, 4.2). A first page with a header or footer of its own, of the document or of
-        /// a run of a named page, also gets its own setup, since the bands it reserves differ.
+        /// a run of a named page, also gets its own setup, since the bands it reserves differ, and so do even pages with
+        /// bands of their own.
         /// </summary>
         private PageSetup VariantFor(string? name, int documentPage, bool runFirst)
         {
             var plain = SetupFor(name);
-            bool first = documentPage == 0;
-            bool firstBands = BandsOf(name, first, runFirst) != BandsOf(name, false, false);
-            if (!_pageVariants && !firstBands) return plain;
+            bool first = documentPage == 0, even = documentPage % 2 == 1;
+            bool ownBands = BandsOf(name, first, runFirst, even) != BandsOf(name, false, false, false);
+            if (!_pageVariants && !ownBands) return plain;
             bool right = documentPage % 2 == (_rtlPages ? 1 : 0);
-            if (_variants.TryGetValue((name, first, right, firstBands), out var cached)) return cached;
+            if (_variants.TryGetValue((name, first, right, ownBands), out var cached)) return cached;
             var setup = PageOfOptions(_options);
             // The rules that match the page, of lower specificity first and in source order otherwise.
             var side = right ? ":right" : ":left";
@@ -90,14 +91,14 @@ public static partial class HtmlToPdf
                          .OrderBy(r => r.Specificity))
                 ApplyPageRules(rule.Declarations, setup);
             // The plain setup's margins include its page box's border and padding, which this one does not have yet.
-            if (!firstBands && setup.Width == plain.Width * plain.Scale && setup.Height == plain.Height * plain.Scale
+            if (!ownBands && setup.Width == plain.Width * plain.Scale && setup.Height == plain.Height * plain.Scale
                 && setup.MarginTop == (plain.MarginTop - plain.BoxTop) * plain.Scale && setup.MarginRight == (plain.MarginRight - plain.BoxRight) * plain.Scale
                 && setup.MarginBottom == (plain.MarginBottom - plain.BoxBottom) * plain.Scale && setup.MarginLeft == (plain.MarginLeft - plain.BoxLeft) * plain.Scale
                 && setup.Background == plain.Background && SameDeclarations(setup.BoxDeclarations, plain.BoxDeclarations))
-                return _variants[(name, first, right, firstBands)] = plain;
+                return _variants[(name, first, right, ownBands)] = plain;
             ScaleAndFit(setup, _scale, _options.Scale != 1, InitialStyle(_options.Language));
-            ReserveBands(setup, name, first, runFirst);
-            return _variants[(name, first, right, firstBands)] = setup;
+            ReserveBands(setup, name, first, runFirst, even);
+            return _variants[(name, first, right, ownBands)] = setup;
         }
 
         private static bool SameDeclarations(List<Declaration>? a, List<Declaration>? b)

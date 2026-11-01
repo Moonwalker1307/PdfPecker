@@ -395,6 +395,53 @@ public class PagedMediaTests
         Assert.Equal(new[] { "595x842", "842x595" }, PageSizes(ConvertUncompressed(html)));
     }
 
+    [Fact]
+    public void Even_page_bands_replace_the_running_ones_on_even_pages()
+    {
+        var pages = TextOfPages("<div data-sticky-pdf-header>Odd {page}</div><div data-sticky-pdf-even-header>Even {page}</div>"
+                                + "<div data-sticky-pdf-footer>Foot {page}</div>");
+        Assert.True(pages.Length >= 3);
+        for (int p = 0; p < pages.Length; p++)
+        {
+            bool even = (p + 1) % 2 == 0;
+            Assert.Contains($"{(even ? "Even" : "Odd")} {p + 1}", pages[p]);
+            Assert.DoesNotContain(even ? "Odd" : "Even", pages[p]);
+            Assert.Contains($"Foot {p + 1}", pages[p]);
+        }
+    }
+
+    [Fact]
+    public void An_even_page_band_alone_shows_on_even_pages_and_the_flow_uses_the_space_on_odd_ones()
+    {
+        var pages = TextOfPages("<div data-sticky-pdf-even-footer style='height: 200pt'>Only even</div><div data-sticky-pdf-first-header>Letterhead</div>");
+        var plain = TextOfPages("<div data-sticky-pdf-first-header>Letterhead</div>");
+        int Lines(string page) => Regex.Matches(page, @"Line \d+").Count;
+        Assert.DoesNotContain("Only even", pages[0]);
+        Assert.Contains("Only even", pages[1]);
+        Assert.True(Lines(pages[1]) < Lines(plain[1]));
+        Assert.True(pages.Length >= 3);
+        Assert.DoesNotContain("Only even", pages[2]);
+    }
+
+    [Fact]
+    public void A_named_pages_own_running_band_stays_on_its_even_pages()
+    {
+        string html = "<html><body><div data-sticky-pdf-header>Doc</div><div data-sticky-pdf-even-header>Doc even</div>"
+                      + "<div data-sticky-pdf-header data-sticky-pdf-page='n'>Named</div>"
+                      + "<section>" + Lines("Plain", 70) + "</section>"
+                      + "<section style='page: n'>" + Lines("Named", 120) + "</section></body></html>";
+        var pages = PdfText.ExtractPages(HtmlToPdf.Convert(html)).Select(p => p.Text).ToArray();
+        Assert.Contains("Doc", pages[0]);
+        Assert.Contains("Doc even", pages[1]);
+        int named = Array.FindIndex(pages, p => p.Contains("Named 1", StringComparison.Ordinal));
+        Assert.True(named >= 2 && pages.Length >= named + 2);
+        for (int p = named; p < pages.Length; p++)
+        {
+            Assert.Contains("Named", pages[p]);
+            Assert.DoesNotContain("Doc", pages[p]);
+        }
+    }
+
     private static string Lines(string prefix, int count) => string.Concat(Enumerable.Range(1, count).Select(i => $"<p>{prefix} {i}</p>"));
 
     [Fact]

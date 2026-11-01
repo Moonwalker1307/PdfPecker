@@ -48,7 +48,8 @@ public static partial class HtmlToPdf
 
         /// <summary>
         /// The running header and footer (data-sticky-pdf-header / data-sticky-pdf-footer), out of the flow, and the
-        /// first page's own (data-sticky-pdf-first-header / data-sticky-pdf-first-footer).
+        /// first page's own (data-sticky-pdf-first-header / data-sticky-pdf-first-footer) and the even pages' own
+        /// (data-sticky-pdf-even-header / data-sticky-pdf-even-footer).
         /// </summary>
         private BandSet _bands = new();
 
@@ -246,7 +247,7 @@ public static partial class HtmlToPdf
             _bands.DropFootersThatAreHeaders();
             if (_namedBands != null)
                 foreach (var set in _namedBands.Values) set.DropFootersThatAreHeaders();
-            ReserveBands(_page, null, false, false);
+            ReserveBands(_page, null, false, false, false);
 
             if (_styles.UsedViewportHeight && Math.Abs(_page.FlowHeight - _viewport) > 0.01f)
             {
@@ -266,7 +267,8 @@ public static partial class HtmlToPdf
             {
                 if (child is not Element e || e.Style == null || e.Style.Display == Display.None) continue;
                 if (e.HasAttribute("data-sticky-pdf-header") || e.HasAttribute("data-sticky-pdf-footer")
-                    || e.HasAttribute("data-sticky-pdf-first-header") || e.HasAttribute("data-sticky-pdf-first-footer"))
+                    || e.HasAttribute("data-sticky-pdf-first-header") || e.HasAttribute("data-sticky-pdf-first-footer")
+                    || e.HasAttribute("data-sticky-pdf-even-header") || e.HasAttribute("data-sticky-pdf-even-footer"))
                 {
                     var set = _bands;
                     if (e.GetAttribute("data-sticky-pdf-page")?.Trim() is { Length: > 0 } name)
@@ -278,7 +280,10 @@ public static partial class HtmlToPdf
                     if (e.HasAttribute("data-sticky-pdf-footer")) set.Footer ??= e;
                     if (e.HasAttribute("data-sticky-pdf-first-header")) set.FirstHeader ??= e;
                     if (e.HasAttribute("data-sticky-pdf-first-footer")) set.FirstFooter ??= e;
-                    if (set.Header == e || set.Footer == e || set.FirstHeader == e || set.FirstFooter == e) e.Detached = true;
+                    if (e.HasAttribute("data-sticky-pdf-even-header")) set.EvenHeader ??= e;
+                    if (e.HasAttribute("data-sticky-pdf-even-footer")) set.EvenFooter ??= e;
+                    if (set.Header == e || set.Footer == e || set.FirstHeader == e || set.FirstFooter == e || set.EvenHeader == e || set.EvenFooter == e)
+                        e.Detached = true;
                 }
                 CollectBands(e);
             }
@@ -288,9 +293,9 @@ public static partial class HtmlToPdf
         /// Reserves the heights of the header and footer on a page, together at most 60% of its content area: the bands
         /// that <see cref="BandsOf"/> gives the page.
         /// </summary>
-        private void ReserveBands(PageSetup setup, string? pageName, bool documentFirst, bool runFirst)
+        private void ReserveBands(PageSetup setup, string? pageName, bool documentFirst, bool runFirst, bool even)
         {
-            var (header, footer) = BandsOf(pageName, documentFirst, runFirst);
+            var (header, footer) = BandsOf(pageName, documentFirst, runFirst, even);
             if (header == null && footer == null) return;
             bool truncate = _options.TruncateBandsToWholePoints;
             if (header != null) setup.BandTop = Math.Max(DeclaredHeight(header, setup, truncate), BandHeight(header, setup, _images, _context));
@@ -307,18 +312,23 @@ public static partial class HtmlToPdf
         /// <summary>
         /// The header and footer of a page. A named page's own header or footer takes the place of the document's, and
         /// on the first page of each run of that named page, its first-page bands take the place of both. Otherwise the
-        /// document's first-page bands take the place of the running ones on the first page of the document.
+        /// document's first-page bands take the place of the running ones on the first page of the document. On an even
+        /// page (2, 4, ... of the document) an even-page band takes the place of the running one: the named page's when
+        /// it has one, else the document's, unless the named page has a running band of its own.
         /// </summary>
-        private (Element? Header, Element? Footer) BandsOf(string? pageName, bool documentFirst, bool runFirst)
+        private (Element? Header, Element? Footer) BandsOf(string? pageName, bool documentFirst, bool runFirst, bool even)
         {
             BandSet? named = null;
             if (pageName != null) _namedBands?.TryGetValue(pageName, out named);
-            var header = named?.Header ?? _bands.Header;
-            var footer = named?.Footer ?? _bands.Footer;
+            var header = Running(named?.Header, named?.EvenHeader, _bands.Header, _bands.EvenHeader, even);
+            var footer = Running(named?.Footer, named?.EvenFooter, _bands.Footer, _bands.EvenFooter, even);
             if (runFirst && named is { HasFirst: true }) return (named.FirstHeader ?? header, named.FirstFooter ?? footer);
             if (documentFirst && _bands.HasFirst) return (_bands.FirstHeader ?? header, _bands.FirstFooter ?? footer);
             return (header, footer);
         }
+
+        private static Element? Running(Element? named, Element? namedEven, Element? document, Element? documentEven, bool even)
+            => !even ? named ?? document : namedEven ?? named ?? documentEven ?? document;
 
         /// <summary>
         /// The header and footer of the pages of the document or of one named page. An empty first-page band leaves the
@@ -326,17 +336,20 @@ public static partial class HtmlToPdf
         /// </summary>
         private sealed class BandSet
         {
-            public Element? Header, Footer, FirstHeader, FirstFooter;
+            public Element? Header, Footer, FirstHeader, FirstFooter, EvenHeader, EvenFooter;
 
             public bool HasFirst => FirstHeader != null || FirstFooter != null;
 
-            public bool Any => Header != null || Footer != null || HasFirst;
+            public bool HasEven => EvenHeader != null || EvenFooter != null;
+
+            public bool Any => Header != null || Footer != null || HasFirst || HasEven;
 
             /// <summary>An element that is both the header and the footer is the header only.</summary>
             public void DropFootersThatAreHeaders()
             {
                 if (Footer == Header) Footer = null;
                 if (FirstFooter == FirstHeader) FirstFooter = null;
+                if (EvenFooter == EvenHeader) EvenFooter = null;
             }
         }
 
