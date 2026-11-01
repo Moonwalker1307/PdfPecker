@@ -147,6 +147,20 @@ public static partial class ContentExtensions
     public static ImageDescriptor Ean13(this IContainer container, string digits, BarcodeOptions? options = null)
         => Svg(container, Barcode.Ean13(digits, options)).FitArea();
 
+    /// <summary>
+    /// A column, bar, line or pie chart of the series the handler adds, drawn as an SVG image and scaled to the slot's
+    /// width unless told otherwise. Its text alternative names the chart type and series, unless you give one.
+    /// </summary>
+    public static ImageDescriptor Chart(this IContainer container, Action<ChartDescriptor> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        var chart = new ChartDescriptor();
+        handler(chart);
+        string kind = chart.Kind switch { ChartType.Bar => "Bar", ChartType.Line => "Line", ChartType.Pie => "Pie", _ => "Column" };
+        var names = chart.SeriesList.Select(s => s.Name).Where(n => n.Length > 0).Take(10).ToList();
+        return Svg(container, chart.ToSvg()).AlternativeText(names.Count > 0 ? kind + " chart: " + string.Join(", ", names) : kind + " chart");
+    }
+
     /// <summary>A horizontal line across the slot.</summary>
     public static LineDescriptor LineHorizontal(this IContainer container, float thickness, Unit unit = Unit.Point)
         => new(Container.Of(container).Set(new LineElement { Thickness = Length.Points(thickness, unit, nameof(thickness)) }));
