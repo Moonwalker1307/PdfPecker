@@ -289,6 +289,22 @@ public class BackgroundImageTests
         Color(255, 255, 255, Pixel(pdf, 50, 25)); // below the box
     }
 
+    [Theory]
+    [InlineData("no-repeat")]
+    [InlineData("repeat")]
+    public void Svg_without_a_viewBox_is_scaled_to_the_background_size(string repeat)
+    {
+        // As in Chrome, the file's width and height stretch to the tile: a 40px (30pt) square drawn 60pt wide fills it.
+        var svg = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Crect width='40' height='40' fill='red'/%3E%3C/svg%3E";
+        var html = $"<style>body {{ margin: 0 }} div {{ width: 120pt; height: 60pt; background: url(\"{svg}\") {repeat} 0 0 / 60pt }}</style><div></div>";
+        var pdf = HtmlToPdf.Convert(html, NoMargins);
+        Color(255, 0, 0, Pixel(pdf, 10, 10));
+        Color(255, 0, 0, Pixel(pdf, 50, 50)); // past the file's own 30pt
+        var right = Pixel(pdf, 90, 30);       // the second tile, when it repeats
+        if (repeat == "repeat") Color(255, 0, 0, right);
+        else Color(255, 255, 255, right);
+    }
+
     [Fact]
     public void Transparent_pixels_show_the_background_colour()
     {

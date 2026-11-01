@@ -219,7 +219,7 @@ internal sealed partial class PdfDocumentWriter
             (_fill, _stroke, _lineWidth, _fillAlpha, _strokeAlpha) = (1, 1, -1, -1, -1);
             _anyAlpha = true;
             var streamSpace = StartStreamSpace();
-            WriteSvg(drawing, svg, 0, ih, iw, ih);
+            WriteSvg(drawing, svg, 0, ih, iw, ih, stretch: !svg.HasViewBox);
             _streamSpace = streamSpace;
             RestoreState(saved);
             _noAlpha = true;
