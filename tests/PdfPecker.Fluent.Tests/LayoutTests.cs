@@ -312,4 +312,56 @@ public sealed class LayoutTests
         byte[] logo = File.ReadAllBytes(Examples.AssetPath("logo.png"));
         Assert.Contains("src=\"data:image/png;base64,", Html.Page(c => c.Image(logo)).GenerateHtml());
     }
+
+    [Fact]
+    public void A_leader_is_an_empty_span_with_one_rule_for_each_pattern()
+    {
+        var document = Html.Page(c => c.Text(t =>
+        {
+            t.Span("Intro");
+            t.Leader();
+            t.Span("1");
+            t.Leader(LeaderStyle.Solid).FontColor(Colors.Grey.Medium);
+            t.Leader();
+            t.Leader("-</style>");
+        }));
+        string body = Html.Body(document.GenerateHtml());
+        Assert.Equal("<main><p>Intro<span data-leader=\"0\"></span>1<span class=\"c0\" data-leader=\"1\"></span><span data-leader=\"0\"></span><span data-leader=\"2\"></span></p></main>", body);
+        string css = Html.Css(document);
+        Assert.Contains("[data-leader=\"0\"]::after{content:leader(dotted)}", css);
+        Assert.Contains("[data-leader=\"1\"]::after{content:leader(solid)}", css);
+        Assert.Contains("[data-leader=\"2\"]::after{content:leader(\"-\\3c /style\\3e \")}", css);
+    }
+
+    [Fact]
+    public void A_leader_puts_the_text_after_it_at_the_end_of_the_line()
+    {
+        byte[] pdf = Document.Create(d => d.Page(p =>
+        {
+            p.Size(PageSizes.A4);
+            p.Margin(50);
+            p.Content().Column(c =>
+            {
+                c.Item().Text(t => { t.Span("Introduction"); t.Leader(); t.Span("3"); });
+                c.Item().Text(t => { t.Span("Price list"); t.Leader("-"); t.Span("12.50"); });
+            });
+        })).GeneratePdf();
+        var page = PdfText.ExtractPages(pdf)[0];
+        Assert.Contains(". . .", page.Text);
+        Assert.Contains("---", page.Text);
+        foreach (string last in new[] { "3", "12.50" })
+        {
+            var word = page.Lines.SelectMany(l => l.Words).Last(w => w.Text.EndsWith(last, StringComparison.Ordinal));
+            Assert.InRange(word.X + word.Width, page.Width - 50 - 2, page.Width - 50 + 0.5);
+        }
+    }
+
+    [Fact]
+    public void Bad_leader_patterns_throw()
+    {
+        Assert.ThrowsAny<ArgumentException>(() => Html.Of(c => c.Text(t => t.Leader(""))));
+        Assert.ThrowsAny<ArgumentException>(() => Html.Of(c => c.Text(t => t.Leader(new string('.', 33)))));
+        Assert.ThrowsAny<ArgumentException>(() => Html.Of(c => c.Text(t => t.Leader("a\nb"))));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Html.Of(c => c.Text(t => t.Leader((LeaderStyle)9))));
+    }
 }

@@ -170,6 +170,37 @@ public sealed class TextDescriptor
     public TextSpanDescriptor Footnote(string? text) => Add(new TextRun { Kind = RunKind.Footnote, Text = text ?? "" });
 
     /// <summary>
+    /// A row of dots that fills the rest of the line, so the text after it ends at the right edge: the page numbers of
+    /// a table of contents, or the prices of a price list. The leader takes the style of the span and has at least the
+    /// width of one dot; when the line is full, it moves the text after it to the end of the next line.
+    /// </summary>
+    public TextSpanDescriptor Leader() => Leader(LeaderStyle.Dotted);
+
+    /// <summary>A leader of dots, a solid line or blank space that fills the rest of the line; see <see cref="Leader()"/>.</summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="style"/> is not a <see cref="LeaderStyle"/>.</exception>
+    public TextSpanDescriptor Leader(LeaderStyle style) => Add(new TextRun
+    {
+        Kind = RunKind.Leader,
+        Text = style switch
+        {
+            LeaderStyle.Dotted => "dotted",
+            LeaderStyle.Solid => "solid",
+            LeaderStyle.Space => "space",
+            _ => throw new ArgumentOutOfRangeException(nameof(style), style, "Not a leader style."),
+        },
+    });
+
+    /// <summary>A leader that repeats <paramref name="pattern"/>, such as <c>"-"</c> or <c>". "</c>, to fill the rest of the line; see <see cref="Leader()"/>.</summary>
+    /// <exception cref="ArgumentException"><paramref name="pattern"/> is empty, longer than 32 characters or holds a line break.</exception>
+    public TextSpanDescriptor Leader(string pattern)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(pattern);
+        if (pattern.Length > 32) throw new ArgumentException("A leader pattern has at most 32 characters.", nameof(pattern));
+        if (pattern.AsSpan().IndexOfAny('\n', '\r') >= 0) throw new ArgumentException("A leader pattern holds no line break.", nameof(pattern));
+        return Add(new TextRun { Kind = RunKind.Leader, Text = Html.CssValue.String(pattern) });
+    }
+
+    /// <summary>
     /// A slot inside the text, placed like a word and wrapped with the lines, for an icon, a badge or a small image.
     /// </summary>
     public IContainer Element(TextInjectedElementAlignment alignment = TextInjectedElementAlignment.AboveBaseline)
@@ -199,6 +230,19 @@ public sealed class TextDescriptor
         _text.Runs.Add(run);
         return new TextSpanDescriptor(run);
     }
+}
+
+/// <summary>What a <see cref="TextDescriptor.Leader(LeaderStyle)"/> fills the rest of its line with.</summary>
+public enum LeaderStyle
+{
+    /// <summary>Dots with a space between them, as in a table of contents.</summary>
+    Dotted,
+
+    /// <summary>A solid line on the baseline, drawn with underscores.</summary>
+    Solid,
+
+    /// <summary>Blank space, which pushes the text after it to the end of the line.</summary>
+    Space,
 }
 
 /// <summary>Where a slot inside text (<see cref="TextDescriptor.Element(TextInjectedElementAlignment)"/>) sits on its line.</summary>

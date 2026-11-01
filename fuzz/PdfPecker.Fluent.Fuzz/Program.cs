@@ -280,6 +280,12 @@ internal static class Fuzz
                         _ = r.Next(10) switch
                         {
                             8 => t.Footnote(Text(r)).Style(Style(TextStyle.Default, r)),
+                            6 => r.Next(3) switch
+                            {
+                                0 => t.Leader(),
+                                1 => t.Leader((LeaderStyle)r.Next(0, r.Next(20) == 0 ? 6 : 3)),
+                                _ => t.Leader(Text(r)),
+                            },
                             0 => t.CurrentPageNumber(),
                             1 => t.TotalPages(),
                             2 => t.Hyperlink(Text(r), r.Next(10) != 0 ? "https://example.com/" + Uri.EscapeDataString(Text(r)) : Text(r)),
