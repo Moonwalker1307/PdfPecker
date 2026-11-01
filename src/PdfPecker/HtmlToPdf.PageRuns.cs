@@ -103,8 +103,11 @@ public static partial class HtmlToPdf
         };
     }
 
-    /// <summary>The page number (1-based) of each id's element in the laid-out runs, for target-counter().</summary>
-    private static Dictionary<string, int> PagesOfAnchors(List<PageRun> runs)
+    /// <summary>
+    /// The page number (1-based) of each id's element in the laid-out runs, for target-counter(), and of the elements
+    /// that show their own page within a section (<paramref name="selfKeys"/>).
+    /// </summary>
+    private static Dictionary<string, int> PagesOfAnchors(List<PageRun> runs, HashSet<string>? selfKeys)
     {
         var pages = new Dictionary<string, int>(StringComparer.Ordinal);
         int first = 0;
@@ -112,7 +115,7 @@ public static partial class HtmlToPdf
         {
             var grid = run.Grid;
             foreach (var (key, y) in run.Engine.Anchors)
-                if (key.Length > 0 && key[0] != '\u0001') pages.TryAdd(key, first + Math.Max(0, (int)grid.PageOf(y + 0.01)) + 1);
+                if (key.Length > 0 && (key[0] != '\u0001' || selfKeys?.Contains(key) == true)) pages.TryAdd(key, first + Math.Max(0, (int)grid.PageOf(y + 0.01)) + 1);
             first += grid.PagesFor(run.Height);
         }
         return pages;

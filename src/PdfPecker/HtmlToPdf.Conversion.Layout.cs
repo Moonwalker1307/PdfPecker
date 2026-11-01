@@ -221,7 +221,7 @@ public static partial class HtmlToPdf
         private bool UpdateTargetPages()
         {
             if (!_paged.UsesTargets) return false;
-            var pages = PagesOfAnchors(_runs);
+            var pages = PagesOfAnchors(_runs, _paged.SelfKeys);
             int count = 0;
             foreach (var run in _runs) count += run.Grid.PagesFor(run.Height);
             if (_targetPages != null && count == _paged.PageCount && pages.Count == _targetPages.Count && !pages.Except(_targetPages).Any())
