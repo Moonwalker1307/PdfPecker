@@ -150,9 +150,22 @@ internal sealed class HtmlWriter
     private void RenderPageSet(PageSet page, string? name)
     {
         if (page.Header.Child != null) RenderBand(page.Header, "header", name);
+        if (page.EvenHeader.Child != null) RenderEvenBand(page.EvenHeader, "header", name);
         // The footer comes after the content, so a browser that does not repeat it (Chrome) still shows it last.
         RenderContainer(page.Content, Box.Slot("main"));
         if (page.Footer.Child != null) RenderBand(page.Footer, "footer", name);
+        if (page.EvenFooter.Child != null) RenderEvenBand(page.EvenFooter, "footer", name);
+    }
+
+    /// <summary>
+    /// Writes the header or footer of the even pages. The first page is never even, so ShowOnce and SkipOnce act in it
+    /// as in the running band of the later pages.
+    /// </summary>
+    private void RenderEvenBand(Container band, string tag, string? pageName)
+    {
+        _band = Band.Running;
+        RenderContainer(band, BandSlot(tag, "data-sticky-pdf-even-" + tag, pageName));
+        _band = Band.None;
     }
 
     /// <summary>

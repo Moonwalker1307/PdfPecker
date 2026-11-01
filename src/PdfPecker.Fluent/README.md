@@ -67,7 +67,7 @@ Document.Create(container =>
   `EndPageNumberOfSection`, `TotalPagesWithinSection`, `PageNumberWithinSection`).
 - **Pages**: size, margins, page colour, a header and footer on every page, and `CurrentPageNumber` / `TotalPages`
   in them or anywhere in the content. `ShowOnce` and `SkipOnce` in the header or footer give the first page a band of its own, such as a
-  letterhead followed by a slim header. Several `Page` calls give page sets with their own size, margins, header and
+  letterhead followed by a slim header. `EvenPageHeader` and `EvenPageFooter` give the even pages bands of their own, for printing on both sides. Several `Page` calls give page sets with their own size, margins, header and
   footer in one document, and the page numbers run on through all of them.
 - **Form fields and footnotes**, which QuestPDF does not have: `TextField` (one line, multiline or password),
   `CheckBox`, `RadioButton`, `ComboBox` and `ListBox` become fillable PDF fields, and `text.Footnote("...")` numbers a
