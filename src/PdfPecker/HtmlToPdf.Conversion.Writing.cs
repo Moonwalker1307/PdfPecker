@@ -113,7 +113,7 @@ public static partial class HtmlToPdf
             // The bands without page numbers, laid out once per page setup and drawn again on every page.
             var unnumbered = new Dictionary<(Element, PageSetup), List<DrawOp>>();
             Dictionary<string, int>? anchorPages = null;
-            int? FirstPageOf(string id) => (anchorPages ??= PagesOfAnchors(_runs)).TryGetValue(id, out int n) ? n : null;
+            int? FirstPageOf(string id) => (anchorPages ??= PagesOfAnchors(_runs, _paged.SelfKeys)).TryGetValue(id, out int n) ? n : null;
             return (p, count) =>
             {
                 var (section, local) = writer.SectionOfPage(p);

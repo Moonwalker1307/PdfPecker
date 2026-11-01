@@ -218,6 +218,22 @@ public class PagedMediaTests
     }
 
     [Fact]
+    public void The_page_within_a_section_needs_no_id()
+    {
+        // The element showing its page has no id, and it is where its own line is, not where its box started.
+        var html = @"<style>
+            section { break-before: page }
+            .w::after { content: 'within ' -pdfpecker-target-pages('#s', current) }
+          </style>
+          <p>intro</p>
+          <section id='s'><p class='w'></p><p style='height: 1000px'>tall</p><p class='w'></p></section>";
+        var pages = PdfText.ExtractPages(HtmlToPdf.Convert(html)).Select(p => p.Text).ToArray();
+        Assert.Equal(3, pages.Length);
+        Assert.Contains("within 1", pages[1]);
+        Assert.Contains("within 2", pages[2]);
+    }
+
+    [Fact]
     public void Counter_pages_in_the_content_shows_the_number_of_pages()
     {
         // As in Prince: the page margin boxes are not the only place for "page 1 of 3". A counter of the content's own

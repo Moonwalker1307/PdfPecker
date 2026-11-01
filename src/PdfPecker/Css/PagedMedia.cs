@@ -1,3 +1,4 @@
+using System.Globalization;
 using PdfPecker.Html;
 
 namespace PdfPecker.Css;
@@ -24,6 +25,31 @@ internal sealed class PagedContent
     /// page of a section in <c>-pdfpecker-target-pages()</c>.
     /// </summary>
     public static string EndKey(string id) => id + "\u0001end";
+
+    /// <summary>
+    /// The layout keys of the elements that show their own page within a section, which the layout records where their
+    /// content starts. They need no id, and an element whose first line moves to the next page counts as being there.
+    /// </summary>
+    public HashSet<string>? SelfKeys;
+
+    private Dictionary<Element, string>? _selfKeyOf;
+
+    /// <summary>
+    /// The layout key of an element that shows its own page: the one it already has, or one of its own that stays the
+    /// same each time the styles are resolved again, so the pages of the last layout can be found under it.
+    /// </summary>
+    public string SelfKey(Element e)
+    {
+        _selfKeyOf ??= new Dictionary<Element, string>(ReferenceEqualityComparer.Instance);
+        if (e.LayoutKey == null)
+        {
+            if (!_selfKeyOf.TryGetValue(e, out var key))
+                _selfKeyOf[e] = key = "\u0001p" + _selfKeyOf.Count.ToString(CultureInfo.InvariantCulture);
+            e.LayoutKey = key;
+        }
+        (SelfKeys ??= new HashSet<string>(StringComparer.Ordinal)).Add(e.LayoutKey);
+        return e.LayoutKey;
+    }
 
     /// <summary>Counters other than page that <c>target-counter()</c> asks for, and their values at each element with an id.</summary>
     public readonly HashSet<string> WantedCounters = new(StringComparer.Ordinal);
