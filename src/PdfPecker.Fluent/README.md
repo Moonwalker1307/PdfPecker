@@ -74,6 +74,8 @@ Document.Create(container =>
   note and sets it at the bottom of its page. Browsers show footnotes in the text, where `GenerateHtml` puts them.
 - **Images and graphics**: PNG, JPEG, WebP, BMP, TIFF and GIF images, SVG, solid, dashed and dotted lines, and QR,
   EPC payment QR, Code 128 and EAN-13 barcodes.
+- **Charts**: `Chart` draws column, bar, line and pie charts from your series as vector SVG, with a legend, data
+  labels, your own colours and a .NET number format for the values; MigraDoc users will find the usual report charts here.
 - **Accessibility**: `SemanticSection`, `SemanticArticle`, `SemanticHeader1` to `6`, `SemanticList`,
   `SemanticBlockQuotation`, `SemanticCaption`, `SemanticImage`, `SemanticIgnore` and the rest of QuestPDF's semantic
   calls write the HTML elements PdfPecker tags a PDF/UA document from.

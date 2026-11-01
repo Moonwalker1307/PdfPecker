@@ -307,6 +307,22 @@ internal static class Fuzz
             case 3:
                 c.Image(Image(r)).AlternativeText(Text(r));
                 break;
+            case 4 when r.Next(3) == 0:
+                c.Chart(chart =>
+                {
+                    chart.Type((ChartType)r.Next(0, r.Next(20) == 0 ? 6 : 4));
+                    chart.Categories(Enumerable.Range(0, r.Next(8)).Select(_ => Text(r)).ToArray());
+                    for (int s = r.Next(4); s > 0; s--)
+                        chart.Series(Text(r), Enumerable.Range(0, r.Next(10)).Select(_ => r.Next(15) == 0 ? (double)Number(r) : r.Next(4) == 0 ? -r.NextDouble() * 1e6 : r.NextDouble() * 1e3))
+                            .Color(Color(r));
+                    if (r.Next(2) == 0) chart.DataLabels();
+                    if (r.Next(3) == 0) chart.Legend(r.Next(2) == 0);
+                    if (r.Next(4) == 0) chart.Size(Number(r), Number(r));
+                    if (r.Next(4) == 0) chart.FontSize(Number(r));
+                    if (r.Next(6) == 0) chart.ValueFormat(r.Next(2) == 0 ? "N1" : Text(r));
+                    if (r.Next(8) == 0) chart.FontFamily(Text(r));
+                });
+                break;
             case 4:
                 c.Svg(r.Next(2) == 0 ? "<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'><rect width='5' height='5'/></svg>" : Text(r));
                 break;
