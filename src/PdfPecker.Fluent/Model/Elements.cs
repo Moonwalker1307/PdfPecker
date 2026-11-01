@@ -295,4 +295,6 @@ internal sealed class PageSet
     public Container Header { get; } = new();
     public Container Content { get; } = new();
     public Container Footer { get; } = new();
+    public Container EvenHeader { get; } = new();
+    public Container EvenFooter { get; } = new();
 }

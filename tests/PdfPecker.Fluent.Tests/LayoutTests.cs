@@ -312,4 +312,47 @@ public sealed class LayoutTests
         byte[] logo = File.ReadAllBytes(Examples.AssetPath("logo.png"));
         Assert.Contains("src=\"data:image/png;base64,", Html.Page(c => c.Image(logo)).GenerateHtml());
     }
+
+    [Fact]
+    public void Even_page_bands_replace_the_header_and_footer_on_even_pages()
+    {
+        var document = Document.Create(d => d.Page(p =>
+        {
+            p.Margin(30);
+            p.Header().AlignRight().Text(t => { t.Span("Odd "); t.CurrentPageNumber(); });
+            p.EvenPageHeader().Text(t => { t.Span("Even "); t.CurrentPageNumber(); });
+            p.EvenPageFooter().Text("Even footer");
+            p.Content().Column(c => { for (int i = 0; i < 3; i++) { c.Item().Text("Page body"); c.Item().PageBreak(); } c.Item().Text("Last"); });
+        }));
+        string html = document.GenerateHtml();
+        Assert.Contains("<header data-sticky-pdf-even-header", html);
+        Assert.Contains("<footer data-sticky-pdf-even-footer", html);
+        var pages = PdfText.ExtractPages(document.GeneratePdf());
+        Assert.Equal(4, pages.Count);
+        for (int i = 0; i < pages.Count; i++)
+        {
+            bool even = i % 2 == 1;
+            Assert.Contains((even ? "Even " : "Odd ") + (i + 1), pages[i].Text);
+            Assert.Equal(even, pages[i].Text.Contains("Even footer", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public void Even_page_bands_belong_to_their_page_set_and_count_through_the_document()
+    {
+        var pages = PdfText.ExtractPages(Document.Create(d =>
+        {
+            d.Page(p => { p.Header().Text("Cover"); p.Content().Text("cover"); });
+            d.Page(p =>
+            {
+                p.Header().Text("Body odd");
+                p.EvenPageHeader().Text("Body even");
+                p.Content().Column(c => { c.Item().Text("a"); c.Item().PageBreak(); c.Item().Text("b"); });
+            });
+        }).GeneratePdf());
+        Assert.Equal(3, pages.Count);
+        Assert.Contains("Cover", pages[0].Text);
+        Assert.Contains("Body even", pages[1].Text);
+        Assert.Contains("Body odd", pages[2].Text);
+    }
 }
