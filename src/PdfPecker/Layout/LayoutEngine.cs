@@ -315,6 +315,7 @@ internal sealed partial class LayoutEngine
         public bool AfterForcedBreak;   // the content so far ends with a forced page break
         public bool TrimStart, TrimEnd; // text-box-trim: the flow's first line and last line are trimmed
         public int LastInFlow;          // with TrimEnd, the last child laid out in the flow, whose last line is trimmed
+        public bool BreakCarried;       // the parent took its first child's forced break before as its own
     }
 
     /// <summary>What the flow does after a phase: go on with the current child, go on with the next one, or stop.</summary>
@@ -403,6 +404,8 @@ internal sealed partial class LayoutEngine
         f.AbsorbFirst = _absorbTop;
         _absorbTop = false;
         f.FirstBlock = true;
+        f.BreakCarried = _breakCarriedBy == parent;
+        _breakCarriedBy = null;
         if (resume == null) (f.TrimStart, f.TrimEnd) = FlowTrim(parent, range == null || range.Value.From == 0, range == null || range.Value.To >= f.Children.Count);
         if (f.TrimEnd) f.LastInFlow = LastInFlow(parent, f.Children);
 
@@ -532,6 +535,12 @@ internal sealed partial class LayoutEngine
         // A forced break wins over avoid.
         // In columns a box breaks to the next column; Chrome ignores page breaks there.
         bool breakBefore = f.InColumns ? s.ColumnBreakBefore : s.PageBreakBefore;
+        // A forced page break before a box's first child is the box's own (CSS Fragmentation 3 §3.1), as Chrome
+        // breaks: the box, its border and its id start on the new page, not just the child. The box that took the
+        // break hands it down, so the children it came from do not break again inside it.
+        bool carriesChildBreak = !f.InColumns && _paginate && FirstChildBreaksPage(e);
+        if (f.BreakCarried && f.FirstBlock && !f.AnyContent) breakBefore = false;
+        else if (carriesChildBreak) breakBefore = true;
         bool breakAfter = f.InColumns ? s.ColumnBreakAfter : s.PageBreakAfter;
         bool joins = _paginate && f.HasPrev && (f.PrevAvoidAfter || s.AvoidBreakBefore || f.InColumns && s.AvoidColumnBreakBefore) && !breakBefore;
         if (!joins) f.HasChain = false;
@@ -554,6 +563,7 @@ internal sealed partial class LayoutEngine
         // text-box-trim reaches the box when it is the flow's first or last content.
         var trim = (f.TrimStart && f.FirstBlock && !f.AnyContent ? TextBoxTrim.Start : 0) | (f.TrimEnd && f.Index == f.LastInFlow ? TextBoxTrim.End : 0);
         float top = FlowBoxTop(ref f, e, breakBefore, out var mt, out bool cleared);
+        if (carriesChildBreak) _breakCarriedBy = e;
         int boxOps = _ops.Count;
         var movedAround = _movedWhole;
         _movedWhole = null;
@@ -980,6 +990,35 @@ internal sealed partial class LayoutEngine
 
     private bool CollapsesThrough(Element e) => CollapsesTop(e) && CollapsesBottom(e);
 
+    /// <summary>
+    /// Whether the first in-flow child of a block box, or the first child of that child and so on, has a forced page
+    /// break before it, which then breaks before the box itself.
+    /// </summary>
+    private static bool FirstChildBreaksPage(Element e)
+    {
+        for (int depth = 0; depth < MaxBreakPropagationDepth && IsPlainFlow(e); depth++)
+        {
+            Element? first = null;
+            foreach (var child in e.Children)
+            {
+                if (child is TextNode t)
+                {
+                    if (string.IsNullOrWhiteSpace(t.Text) && InlineLayout.IsCollapsible(e.Style)) continue;
+                    return false;
+                }
+                var c = (Element)child;
+                if (c.Style == null || c.Style.Display == Display.None || c.Detached || c.Style.OutOfFlow || c.Style.Floated) continue;
+                if (IsInlineLevel(c)) return false;
+                first = c;
+                break;
+            }
+            if (first == null) return false;
+            if (first.Style.PageBreakBefore) return true;
+            e = first;
+        }
+        return false;
+    }
+
     /// <summary>The first child of a box whose top margin collapses with the box's, or null.</summary>
     private static Element? FirstBlockChild(Element e)
     {
@@ -1067,6 +1106,12 @@ internal sealed partial class LayoutEngine
     /// when it fits on the next one, which costs one more layout per level.
     /// </summary>
     private const int MaxKeptWholeNesting = 8;
+
+    // How deep the first children of a box are searched for a forced break that becomes the box's own.
+    private const int MaxBreakPropagationDepth = 32;
+
+    // The box whose flow is next laid out after it took its first child's forced break as its own.
+    private Element? _breakCarriedBy;
 
     /// <summary>
     /// How many boxes kept whole, counting the box itself, a box in columns that looks taller than the next column can

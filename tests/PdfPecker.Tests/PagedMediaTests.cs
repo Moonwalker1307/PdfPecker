@@ -158,6 +158,27 @@ public class PagedMediaTests
     // ---- target-counter and leaders ----
 
     [Fact]
+    public void A_break_before_a_first_heading_breaks_before_its_section()
+    {
+        // As in Chrome, the forced break of a section's first child is the section's own: the section's id points at
+        // the page its heading is on, and a bordered section leaves no empty fragment of itself on the page before.
+        var html = @"<style>
+            a::after { content: ' p. ' target-counter(attr(href), page) ' to ' -pdfpecker-target-pages(attr(href), last) }
+            h2 { break-before: page }
+            #b { border: 2px solid red; padding: 4px; margin-top: 20px }
+          </style>
+          <a href='#a'>A</a> <a href='#b'>B</a>
+          <section id='a'><div><h2>A</h2></div><p>one</p></section>
+          <section id='b'><h2>B</h2><p>two</p></section>";
+        var pages = PdfText.ExtractPages(HtmlToPdf.Convert(html)).Select(p => p.Text).ToArray();
+        Assert.Equal(3, pages.Length);
+        Assert.Contains("A p. 2 to 2", pages[0]);
+        Assert.Contains("B p. 3 to 3", pages[0]);
+        Assert.Contains("A", pages[1]);
+        Assert.Contains("B", pages[2]);
+    }
+
+    [Fact]
     public void Target_counter_shows_the_page_of_the_linked_element()
     {
         var pdf = ConvertUncompressed(@"<style>
