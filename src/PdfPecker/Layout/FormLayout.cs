@@ -33,9 +33,17 @@ internal sealed partial class LayoutEngine
         bool button = control.Kind is ControlKind.CheckBox or ControlKind.Radio;
         if (button)
         {
+            // Without its native look the control is only what the page's CSS draws, for :checked too, as Chrome prints
+            // it. That drawing has no unchecked and checked states of its own, so it is not made a form field.
+            if (s.AppearanceNone) return;
             // Drawn checked over the whole box, border included; the unchecked box is the page's own drawing. A field
             // keeps the checked look as its "on" appearance either way.
-            if (control.Checked || control.Field != null) AddCheckedLook(control.Kind, x, y, w, h, control.Disabled ? DisabledAccent : Accent);
+            if (control.Checked || control.Field != null)
+            {
+                // A disabled control is grey with a white mark whatever its accent, as in Chrome.
+                uint accent = control.Disabled ? DisabledAccent : s.AccentColor == 0 ? Accent : OverWhite(s.AccentColor);
+                AddCheckedLook(control.Kind, x, y, w, h, accent, control.Disabled ? 0xFFFFFFFF : MarkColor(accent));
+            }
             if (control.Field == null) return;
         }
 
@@ -88,15 +96,45 @@ internal sealed partial class LayoutEngine
         _floats.Fold(start);
     }
 
-    /// <summary>A checked check box (a blue square with a white tick) or radio button (a blue ring round a blue dot).</summary>
-    private void AddCheckedLook(ControlKind kind, float x, float y, float w, float h, uint accent)
+    /// <summary>
+    /// An accent-color as Chrome paints it on a white page: a colour that is partly transparent shows the white through
+    /// it, and the tick is chosen from what shows.
+    /// </summary>
+    private static uint OverWhite(uint color)
+    {
+        uint a = color >> 24;
+        if (a == 255) return color;
+        static uint Mix(uint c, uint a) => (c * a + 255 * (255 - a) + 127) / 255;
+        return 0xFF000000u | Mix(color >> 16 & 0xFF, a) << 16 | Mix(color >> 8 & 0xFF, a) << 8 | Mix(color & 0xFF, a);
+    }
+
+    /// <summary>
+    /// The colour of the tick and of the ring between a radio button's edge and its dot: white, or Chrome's dark grey on
+    /// an accent so light that white would stand out from it by less than 3:1.
+    /// </summary>
+    private static uint MarkColor(uint accent)
+    {
+        static double Linear(uint c)
+        {
+            double v = c / 255.0;
+            return v <= 0.04045 ? v / 12.92 : Math.Pow((v + 0.055) / 1.055, 2.4);
+        }
+        double luminance = 0.2126 * Linear(accent >> 16 & 0xFF) + 0.7152 * Linear(accent >> 8 & 0xFF) + 0.0722 * Linear(accent & 0xFF);
+        return 1.05 / (luminance + 0.05) < 3 ? 0xFF3B3B3B : 0xFFFFFFFF;
+    }
+
+    /// <summary>
+    /// A checked check box (a square of the accent colour with a tick) or radio button (a ring of the accent colour
+    /// round a dot of it).
+    /// </summary>
+    private void AddCheckedLook(ControlKind kind, float x, float y, float w, float h, uint accent, uint mark)
     {
         if (w <= 0 || h <= 0) return;
         if (kind == ControlKind.Radio)
         {
             float cx = x + w / 2, cy = y + h / 2, r = Math.Min(w, h) / 2;
             _ops.Add(new CircleOp(cx, cy, r, accent, filled: true));
-            _ops.Add(new CircleOp(cx, cy, r * 0.77f, 0xFFFFFFFF, filled: true));
+            _ops.Add(new CircleOp(cx, cy, r * 0.77f, mark, filled: true));
             _ops.Add(new CircleOp(cx, cy, r * 0.54f, accent, filled: true));
             return;
         }
@@ -122,6 +160,6 @@ internal sealed partial class LayoutEngine
             b.X + (n1.Item1 + n2.Item1) / 2 * 1.4f, b.Y + (n1.Item2 + n2.Item2) / 2 * 1.4f,
             a.X + n1.Item1, a.Y + n1.Item2,
         };
-        _ops.Add(new RoundRectOp(x, y, w, h, default, 0xFFFFFFFF) { Clip = poly });
+        _ops.Add(new RoundRectOp(x, y, w, h, default, mark) { Clip = poly });
     }
 }

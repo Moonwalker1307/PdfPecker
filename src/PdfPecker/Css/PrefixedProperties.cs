@@ -13,6 +13,7 @@ internal static class PrefixedProperties
         "-webkit-align-content" => "align-content",
         "-webkit-align-items" => "align-items",
         "-webkit-align-self" => "align-self",
+        "-webkit-appearance" => "appearance",
         "-webkit-backface-visibility" => "backface-visibility",
         "-webkit-background-origin" => "background-origin",
         "-webkit-background-size" => "background-size",

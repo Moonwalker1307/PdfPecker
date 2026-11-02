@@ -180,7 +180,9 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   [More](https://pdfpecker.net/docs/pdfa-and-passwords/)
 - **Accessibility**: tagged PDF, PDF/UA-1 and PDF/UA-2 built from your HTML.
   [More](https://pdfpecker.net/docs/accessibility/)
-- **Forms**: HTML inputs become fillable PDF fields; read, fill and flatten the fields of existing PDFs.
+- **Forms**: HTML inputs become fillable PDF fields; read, fill and flatten the fields of existing PDFs. Check boxes
+  and radio buttons take `accent-color`, and `appearance: none` leaves them to the page's own CSS (`:checked`,
+  `::before` and `::after`), as for toggle switches; such a control is drawn rather than made a field.
   [More](https://pdfpecker.net/docs/forms/)
 - **Digital signatures**: PAdES signing, certification signatures, timestamps, external signers, verification (SHA-1
   signatures count as not valid unless you allow them) and long-term validation. [More](https://pdfpecker.net/docs/signatures/)

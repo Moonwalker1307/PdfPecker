@@ -69,6 +69,7 @@ internal sealed partial class ComputedStyle
     public bool EmptyCellsHide { get => _typography.EmptyCellsHide; set => Typography.EmptyCellsHide = value; }
     public bool ImageOrientationNone { get => _typography.ImageOrientationNone; set => Typography.ImageOrientationNone = value; }
     public bool ImagePixelated { get => _typography.ImagePixelated; set => Typography.ImagePixelated = value; }
+    public uint AccentColor { get => _typography.AccentColor; set => Typography.AccentColor = value; }
     public TextEdgeOver TextEdgeOver { get => _typography.TextEdgeOver; set => Typography.TextEdgeOver = value; }
     public TextEdgeUnder TextEdgeUnder { get => _typography.TextEdgeUnder; set => Typography.TextEdgeUnder = value; }
     public int Orphans { get => _typography.Orphans; set => Typography.Orphans = value; }
@@ -111,6 +112,7 @@ internal sealed partial class ComputedStyle
         public bool EmptyCellsHide;   // empty-cells: hide (inherited): with separated borders, empty cells paint nothing
         public bool ImageOrientationNone; // image-orientation: none (inherited): photos are drawn as stored, ignoring EXIF
         public bool ImagePixelated;   // image-rendering: pixelated or crisp-edges (inherited): enlarged images keep hard pixel edges
+        public uint AccentColor;      // accent-color (inherited), the colour of checked check boxes and radio buttons; 0 = auto
         public TextEdgeOver TextEdgeOver;   // text-box-edge, over the text (inherited)
         public TextEdgeUnder TextEdgeUnder; // text-box-edge, under the text (inherited)
         public int Orphans = 2, Widows = 2; // minimum lines of a paragraph left at the bottom / carried to the top of a page
@@ -499,6 +501,7 @@ internal sealed partial class ComputedStyle
     public bool ContentNone { get => _rare.ContentNone; set => Rare.ContentNone = value; }
     public string? StringSet { get => _rare.StringSet; set => Rare.StringSet = value; }
     public string? RunningName { get => _rare.RunningName; set => Rare.RunningName = value; }
+    public bool AppearanceNone { get => _rare.AppearanceNone; set => Rare.AppearanceNone = value; }
     public int? BookmarkLevel { get => _rare.BookmarkLevel; set => Rare.BookmarkLevel = value; }
     public string? BookmarkLabel { get => _rare.BookmarkLabel; set => Rare.BookmarkLabel = value; }
     public bool BookmarkClosed { get => _rare.BookmarkClosed; set => Rare.BookmarkClosed = value; }
@@ -554,6 +557,7 @@ internal sealed partial class ComputedStyle
         public bool ContentNone;                    // content: none, which on ::marker removes the marker (normal keeps it)
         public string? StringSet;                   // string-set as written (named strings for running headers); null = none
         public string? RunningName;                 // position: running(name): taken out of the flow for element() in margin boxes
+        public bool AppearanceNone;                 // appearance: none: a form control drawn only as its CSS box, without its native look
         public int? BookmarkLevel;                  // bookmark-level: null = unset (h1-h6 take their own level), 0 = none
         public string? BookmarkLabel;               // bookmark-label as written; null = content(text)
         public bool BookmarkClosed;                 // bookmark-state: closed

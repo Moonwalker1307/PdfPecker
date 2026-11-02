@@ -376,6 +376,14 @@ internal sealed partial class StyleResolver
     private static readonly Declaration[] ButtonFallback = Fallback("border-width: 2px; border-style: outset; padding: 1px 6px; border-radius: 0");
     private static readonly Declaration[] ButtonFallbackColor = Fallback("border-color: black");
     private static readonly Declaration[] SquareFallback = Fallback("border-radius: 0");
+    // A check box or radio button without its native look has no box of its own, as in Chrome: no size, border or background.
+    private static readonly Declaration[] CheckableFallback =
+        Fallback("width: auto; height: auto; border: 0 none; border-radius: 0; background-color: transparent; -pdfpecker-control-width: auto");
+
+    /// <summary>Whether a value is one appearance takes: none, auto, or one of the keywords that mean auto for a control.</summary>
+    internal static bool IsAppearance(string lower) => lower is "none" or "auto" or "menulist-button" or "textfield" or "button"
+        or "checkbox" or "radio" or "listbox" or "menulist" or "meter" or "progress-bar" or "push-button" or "searchfield"
+        or "slider-horizontal" or "square-button" or "textarea" or "base-select";
 
     private static Declaration[] Fallback(string css)
     {
@@ -393,22 +401,34 @@ internal sealed partial class StyleResolver
     {
         if (e.Name is not ("input" or "textarea" or "select" or "button")) return;
         bool styled = false;
-        for (int i = authorStart; i < _count && !styled; i++)
+        // appearance: none takes the native look away too; the declaration that wins the cascade decides.
+        long appearanceKey = -1;
+        bool none = false;
+        for (int i = authorStart; i < _count; i++)
         {
             var p = _decls[i].Property;
-            styled = p.StartsWith("background", StringComparison.Ordinal)
-                     || p.StartsWith("border", StringComparison.Ordinal) && p is not ("border-collapse" or "border-spacing");
+            styled |= p.StartsWith("background", StringComparison.Ordinal)
+                      || p.StartsWith("border", StringComparison.Ordinal) && p is not ("border-collapse" or "border-spacing");
+            if (p is "appearance" or "-webkit-appearance" && _keys[i] > appearanceKey)
+            {
+                var lower = _decls[i].Value.Trim().ToLowerInvariant();
+                if (!IsAppearance(lower)) continue;
+                appearanceKey = _keys[i];
+                none = lower == "none";
+            }
         }
-        if (!styled) return;
+        if (!styled && !none) return;
         string? type = e.Name == "input" ? e.GetAttribute("type")?.Trim().ToLowerInvariant() : null;
         Declaration[] fallback;
         bool button = e.Name == "button" || type is "submit" or "reset" or "button";
         if (button) fallback = ButtonFallback;
         else if (e.Name == "input")
         {
-            // Check boxes and radio buttons keep their native look in Chrome; the rest have no box of their own.
-            if (type is "checkbox" or "radio" or "hidden" or "image" or "file" or "range" or "color") return;
-            fallback = FieldFallback;
+            // Check boxes and radio buttons keep their native look in Chrome unless appearance: none takes it away; the
+            // rest have no box of their own.
+            if (type is "checkbox" or "radio") fallback = none ? CheckableFallback : [];
+            else if (type is "hidden" or "image" or "file" or "range" or "color") return;
+            else fallback = FieldFallback;
         }
         else fallback = SquareFallback;
         // After every user-agent rule, before the presentational hints and the page's rules.
