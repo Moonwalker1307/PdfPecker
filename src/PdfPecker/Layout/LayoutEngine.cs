@@ -1762,8 +1762,8 @@ internal sealed partial class LayoutEngine
         {
             if (image.Width <= 0 || image.Height <= 0) return false;
             m.Image = image;
-            m.ImageW = image.Width * 0.75f / resolution;
-            m.ImageH = image.Height * 0.75f / resolution;
+            m.ImageW = image.Width * 0.75f / resolution * m.Style.Zoom;
+            m.ImageH = image.Height * 0.75f / resolution * m.Style.Zoom;
             return true;
         }
         float side = DefaultMarkerImageSide(m.Style);
@@ -1978,6 +1978,7 @@ internal sealed partial class LayoutEngine
     {
         if (!_images.Svgs.TryGetValue(e, out var svg)) _images.Svgs[e] = svg = SvgImage.Build(e, _images.SvgBudget, _images.LoadAny);
         var (iw, ih) = SvgNaturalSize(svg, availW);
+        if (e.Style.Zoom != 1 && (svg.Width != null || svg.Height != null)) (iw, ih) = (iw * e.Style.Zoom, ih * e.Style.Zoom);
         ReplacedSize(e, iw, ih, availW, out w, out h, percentW);
         // Percentages in an svg without a viewBox refer to its used size (width="100%" on the svg and a rect 100% wide),
         // so the drawing is built again for that size.

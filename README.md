@@ -130,7 +130,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
 - **HTML and CSS**: flexbox, grid and subgrid, CSS tables, floats with `shape-outside`, `clip-path` shapes (also
   `rect()` and `xywh()`), sizes that fill the containing block (`width: stretch` and `-webkit-fill-available`, also for
   heights and their limits), `corner-shape` (squircle, bevel, scoop, notch and `superellipse()` corners on borders,
-  backgrounds, shadows, outlines and clips), `overflow: clip` with `overflow-clip-margin`, multi-column layout,
+  backgrounds, shadows, outlines and clips), `overflow: clip` with `overflow-clip-margin`, `zoom` (as Chrome
+  computes it, for templates that shrink a page to fit), multi-column layout,
   positioning (also the legacy `clip: rect()`, and absolute boxes inside a positioned inline element, such as
   tooltips and badges), transforms, gradients (also `in oklch` and other colour spaces, and as
   list markers), fixed background images (placed on each page's paper, as Chrome prints them), filters, masks,
