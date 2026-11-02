@@ -72,6 +72,10 @@ Document.Create(container =>
 - **Form fields and footnotes**, which QuestPDF does not have: `TextField` (one line, multiline or password),
   `CheckBox`, `RadioButton`, `ComboBox` and `ListBox` become fillable PDF fields, and `text.Footnote("...")` numbers a
   note and sets it at the bottom of its page. Browsers show footnotes in the text, where `GenerateHtml` puts them.
+- **Markdown**: `container.Markdown("...")` places Markdown text anywhere, converted by PdfPecker's own parser
+  (CommonMark with GitHub tables, task lists, strikethrough, autolinks and footnotes, and definition lists). It takes
+  the surrounding font, size and colour, styles headings, code, quotes and tables as on GitHub, and is safe for text
+  from users: HTML in it stays text and only web, mail and in-document links keep their target.
 - **Images and graphics**: PNG, JPEG, WebP, BMP, TIFF and GIF images, SVG, solid, dashed and dotted lines, and QR,
   EPC payment QR, Code 128 and EAN-13 barcodes.
 - **Charts**: `Chart` draws column, bar, line and pie charts from your series as vector SVG, with a legend, data
@@ -94,8 +98,10 @@ Document.Create(container =>
 ## Safety
 
 Text, links, colours and names you pass are encoded, so caller data never turns into markup: the fuzzer and the
-hostile-input tests check that. Links must be absolute `http`, `https` or `mailto` addresses. `Html` and `Css` are
-the exceptions: they insert trusted markup as it is, so never pass user input to them.
+hostile-input tests check that. Links must be absolute `http`, `https` or `mailto` addresses. `Markdown` shows HTML
+written in the Markdown as text and drops the target of any other link, such as `javascript:` or a file. Its images load
+as any other resource would, from data URIs or through your `ResourceResolver`. `Html` and `Css` are the exceptions:
+they insert trusted markup as it is, so never pass user input to them.
 
 Invalid arguments throw `ArgumentException` (or `ArgumentOutOfRangeException`), an invalid document structure such
 as an overlapping table cell throws `InvalidOperationException`, and PdfPecker's own limits throw
@@ -122,6 +128,8 @@ Most QuestPDF code ports by changing the `using` lines: `Document.Create`, `Page
   repeats are all the same.
 - `ScaleToFit` fits the content into a `Height` or `MaxHeight` set before it, or into the height of the slot around it,
   such as a row or a box with a `Height`.
+- `Markdown` is built in, with the same call as the community QuestPDF.Markdown package's `container.Markdown(text)`;
+  its look comes from CSS rules on the `md` class, which `documentContainer.Css("...")` can change.
 - Not available: `Dynamic`, `Canvas`, `StopPaging`, `RepeatContent`, `ExtendLastCellsToTableBottom` and the Companion
   previewer.
 
