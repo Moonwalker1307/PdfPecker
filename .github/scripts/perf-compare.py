@@ -131,7 +131,7 @@ def main():
         if not same_count:
             print("The baseline counted allocation in another way, so allocation is shown but not judged.")
             print()
-        elif runner - 1 > TIME_LIMIT:
+        elif same_cpu and runner - 1 > TIME_LIMIT:
             failures.append(f"every case: {runner - 1:+.0%} slower on the same processor (limit {TIME_LIMIT:+.0%})")
     if not baseline:
         print("No baseline from an earlier run, so nothing was compared.")
