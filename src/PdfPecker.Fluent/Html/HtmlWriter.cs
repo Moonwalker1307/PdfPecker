@@ -971,6 +971,7 @@ internal sealed class HtmlWriter
         if (box.Declarations.Count > 0) WriteAttribute("class", Class(box.Declarations));
         if (box.Id != null) WriteAttribute("id", Scoped(box.Id));
         if (box.Direction != null) WriteAttribute("dir", box.Direction);
+        if (box.Lang != null) WriteAttribute("lang", box.Lang);
         if (box.Href != null) WriteAttribute("href", box.Href.StartsWith('#') ? "#" + Scoped(box.Href[1..]) : box.Href);
         foreach (var (name, value) in box.Attributes) WriteAttribute(name, value);
         _html.Append('>');
@@ -1110,6 +1111,7 @@ internal sealed class HtmlWriter
         public List<(string Name, string Value)> Attributes { get; } = [];
         public string? Id { get; private set; }
         public string? Direction { get; private set; }
+        public string? Lang { get; private set; }
         public string? Href { get; private set; }
 
         private int _rank = Rank.Any;
@@ -1123,8 +1125,8 @@ internal sealed class HtmlWriter
             return box;
         }
 
-        public bool MustEmit => Required || Declarations.Count > 0 || Id != null || Direction != null || Href != null
-            || Tag != "div" || Attributes.Count > 0;
+        public bool MustEmit => Required || Declarations.Count > 0 || Id != null || Direction != null || Lang != null
+            || Href != null || Tag != "div" || Attributes.Count > 0;
 
         /// <summary>Whether block content (a paragraph, column, row, line) can be this element instead of a child of it.</summary>
         public bool CanBecomeBlock => Tag is "div" or "a" && !_aligned && !Has("display") && (!Required || Tag == "div");
@@ -1194,6 +1196,11 @@ internal sealed class HtmlWriter
                 case DecoratorKind.Direction:
                     if (Direction != null) return false;
                     Direction = decorator.Text;
+                    return true;
+                case DecoratorKind.Language:
+                    // An inner language wins over an outer one, so a second one on the same element needs its own.
+                    if (Lang != null) return false;
+                    Lang = decorator.Text;
                     return true;
                 case DecoratorKind.ScaleToFit:
                     // PdfPecker scales a box's content into the box's height or max-height; without one, the box takes

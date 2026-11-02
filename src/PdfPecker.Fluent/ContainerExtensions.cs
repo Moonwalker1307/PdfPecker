@@ -219,6 +219,38 @@ public static partial class ContainerExtensions
         => Decorate(container, new Decorator(DecoratorKind.Direction) { Text = "ltr" });
 
     /// <summary>
+    /// The language of the content, as a language tag such as "da" or "en-GB", when it differs from
+    /// <see cref="DocumentMetadata.Language"/>. It picks the hyphenation rules of <see cref="TextStyle.Hyphenate"/>, and
+    /// PDF/UA tags the content with it so that screen readers read it in that language.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="language"/> is not a language tag.</exception>
+    public static IContainer Language(this IContainer container, string language)
+    {
+        ArgumentNullException.ThrowIfNull(language);
+        if (!IsLanguageTag(language))
+            throw new ArgumentException("A language is a tag such as \"da\" or \"en-GB\": letters, digits and hyphens.", nameof(language));
+        return Decorate(container, new Decorator(DecoratorKind.Language) { Text = language });
+    }
+
+    /// <summary>Whether the text has the shape of a BCP 47 language tag: subtags of 1 to 8 letters or digits, a letter first.</summary>
+    private static bool IsLanguageTag(string tag)
+    {
+        if (tag.Length is 0 or > 64 || !char.IsAsciiLetter(tag[0])) return false;
+        int subtag = 0;
+        foreach (char c in tag)
+        {
+            if (c == '-')
+            {
+                if (subtag == 0) return false;
+                subtag = 0;
+            }
+            else if (char.IsAsciiLetterOrDigit(c) && ++subtag <= 8) { }
+            else return false;
+        }
+        return subtag > 0;
+    }
+
+    /// <summary>
     /// Marks the text inside as a heading of the given level (1 to 6). Headings become PDF bookmarks and tagged
     /// headings in PDF/UA; the look stays the text's own style.
     /// </summary>

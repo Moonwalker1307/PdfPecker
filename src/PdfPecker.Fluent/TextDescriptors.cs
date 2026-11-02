@@ -378,6 +378,9 @@ public static class TextSpanExtensions
     /// <summary>Extra space between words, as a fraction of the font size.</summary>
     public static T WordSpacing<T>(this T descriptor, float factor) where T : TextSpanDescriptor => Apply(descriptor, s => s.WordSpacing(factor));
 
+    /// <summary>Breaks long words with a hyphen by the rules of the text's language, or only at soft hyphens with <c>false</c>.</summary>
+    public static T Hyphenate<T>(this T descriptor, bool value = true) where T : TextSpanDescriptor => Apply(descriptor, s => s.Hyphenate(value));
+
     /// <summary>Raised and smaller.</summary>
     public static T Superscript<T>(this T descriptor) where T : TextSpanDescriptor => Apply(descriptor, s => s.Superscript());
 

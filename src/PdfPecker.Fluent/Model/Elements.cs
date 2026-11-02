@@ -69,6 +69,9 @@ internal enum DecoratorKind
 
     /// <summary>Draws the content smaller, keeping its proportions, when it does not fit the slot.</summary>
     ScaleToFit,
+
+    /// <summary>The language of the content, the tag in <see cref="Decorator.Text"/>.</summary>
+    Language,
 }
 
 /// <summary>
