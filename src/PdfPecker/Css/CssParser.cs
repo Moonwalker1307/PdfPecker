@@ -41,12 +41,12 @@ internal static partial class CssParser
     /// Where the rules being parsed land: the sheet, the layer and the container conditions of the blocks around
     /// them, and how deep inside blocks they are.
     /// </summary>
-    private readonly record struct RuleScope(Stylesheet Sheet, CascadeLayer? Layer, ContainerQuery[]? Containers, int Depth)
+    private readonly record struct RuleScope(Stylesheet Sheet, CascadeLayer? Layer, ContainerQuery[]? Containers, int Depth, ScopeRule? Scope = null)
     {
         public bool CanNest => Depth < MaxBlockNesting;
 
         /// <summary>The scope of the rules inside a block of this scope.</summary>
-        public RuleScope Inside(CascadeLayer? layer, ContainerQuery[]? containers) => new(Sheet, layer, containers, Depth + 1);
+        public RuleScope Inside(CascadeLayer? layer, ContainerQuery[]? containers) => new(Sheet, layer, containers, Depth + 1, Scope);
     }
 
     private static void ParseRules(string text, int start, int end, in RuleScope scope)
@@ -165,7 +165,7 @@ internal static partial class CssParser
             }
             int close = _reader.MatchingBrace(open);
             var selectors = SplitTopLevel(_reader.Text(_reader.Position, open), ',');
-            for (int k = 0; k < selectors.Count; k++) selectors[k] = selectors[k].Trim();
+            for (int k = 0; k < selectors.Count; k++) selectors[k] = _scope.Scope != null ? Scoped(selectors[k].Trim()) : selectors[k].Trim();
             _reader.MoveTo(close + 1);
             ParseStyleBlock(_reader.Inside(open, close), selectors, _scope);
         }
@@ -208,7 +208,8 @@ internal static partial class CssParser
         {
             var reader = new CssReader(prelude, 1, prelude.Length);
             string name = reader.ReadAtRuleName();
-            if (TryEnterConditionalBlock(name, reader.RemainingText().Trim(), scope, out var inner))
+            // @scope inside a style rule is not supported: its rules would keep the parent's selectors.
+            if (name != "scope" && TryEnterConditionalBlock(name, reader.RemainingText().Trim(), scope, out var inner))
                 ParseStyleBlock(block, selectors, inner);
         }
         else if (prelude.Length > 0)
@@ -226,7 +227,7 @@ internal static partial class CssParser
         foreach (var text in selectors)
         {
             if (Selector.Parse(text) is { } selector)
-                scope.Sheet.Rules.Add(new StyleRule(selector, array, scope.Sheet.NextOrder++, scope.Layer, scope.Containers));
+                scope.Sheet.Rules.Add(new StyleRule(selector, array, scope.Sheet.NextOrder++, scope.Layer, scope.Containers, scope.Scope));
         }
     }
 

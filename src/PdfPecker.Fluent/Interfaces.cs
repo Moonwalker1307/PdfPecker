@@ -43,6 +43,18 @@ internal sealed class DocumentContainer : IDocumentContainer
     public List<PageSet> Pages { get; } = [];
     public List<string> Css { get; } = [];
 
+    /// <summary>The number that page sets added now are given, which <see cref="MergedDocument"/> changes.</summary>
+    public int Document { get; set; }
+
+    /// <summary>Whether a merge with continuous page numbers is being composed.</summary>
+    public bool Continuous { get; set; }
+
+    /// <summary>The last number <see cref="StartDocument"/> handed out.</summary>
+    private int _documents;
+
+    /// <summary>Starts a document that numbers its pages apart from the ones before it.</summary>
+    public void StartDocument() => Document = ++_documents;
+
     public static DocumentContainer Of(IDocumentContainer container)
     {
         ArgumentNullException.ThrowIfNull(container);
