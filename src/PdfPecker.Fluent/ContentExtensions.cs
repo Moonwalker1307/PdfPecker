@@ -61,6 +61,18 @@ public static partial class ContentExtensions
         content(new DecorationDescriptor(element));
     }
 
+    /// <summary>
+    /// A table of contents built from the headings of the page content (<see cref="ContainerExtensions.Heading(IContainer, int)"/> and
+    /// <c>SemanticHeader1</c> to <c>6</c>): one line for each heading, indented by its level, with a dot leader and the
+    /// page the heading lands on. Each line links to its heading. Headings in headers and footers and in raw
+    /// <see cref="Html(IContainer, string)"/> are left out, and so are headings deeper than
+    /// <see cref="TableOfContentsDescriptor.MaxLevel(int)"/>, which is 3 unless you set it. Give the table's own title
+    /// no heading, or it lists itself. A heading without a <see cref="ContainerExtensions.Section"/> name gets an id of
+    /// the form <c>pdfpecker-heading-1</c> to link to.
+    /// </summary>
+    public static TableOfContentsDescriptor TableOfContents(this IContainer container)
+        => new(Container.Of(container).Set(new TableOfContentsElement()));
+
     /// <summary>A bulleted or numbered list, tagged as a list in PDF/UA.</summary>
     public static void List(this IContainer container, Action<ListDescriptor> content)
     {

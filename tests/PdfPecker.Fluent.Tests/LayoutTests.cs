@@ -87,6 +87,49 @@ public sealed class LayoutTests
     }
 
     [Fact]
+    public void Last_cells_extend_to_the_bottom_of_the_body()
+    {
+        string html = Html.Of(c => c.Table(t =>
+        {
+            t.ColumnsDefinition(d => { d.ConstantColumn(50); d.RelativeColumn(); d.RelativeColumn(3); });
+            t.ExtendLastCellsToTableBottom();
+            t.Header(h => { h.Cell().Text("h1"); h.Cell().ColumnSpan(2).RowSpan(1).Text("h2"); h.Cell().Row(2).Column(3).Text("h3"); });
+            t.Cell().RowSpan(2).Text("a");
+            t.Cell().ColumnSpan(2).Text("b");
+            t.Cell().Text("c");
+            t.Cell().Row(3).Column(3).Text("d");
+        }));
+        // a and c are the last cells of their columns and grow to the third row; b is not the last in its columns, and
+        // the header keeps its gaps.
+        Assert.Equal(
+            "<main><table><colgroup><col class=\"c0\"><col class=\"c1\"><col class=\"c2\"></colgroup>" +
+            "<thead><tr><th scope=\"col\"><p>h1</p></th><th scope=\"col\" colspan=\"2\"><p>h2</p></th></tr>" +
+            "<tr><th></th><th></th><th scope=\"col\"><p>h3</p></th></tr></thead>" +
+            "<tbody><tr><td rowspan=\"3\"><p>a</p></td><td colspan=\"2\"><p>b</p></td></tr>" +
+            "<tr><td rowspan=\"2\"><p>c</p></td><td></td></tr>" +
+            "<tr><td><p>d</p></td></tr></tbody></table></main>", html);
+    }
+
+    [Fact]
+    public void A_cell_spanning_columns_extends_only_when_it_is_last_in_all_of_them()
+    {
+        string html = Html.Of(c => c.Table(t =>
+        {
+            t.ColumnsDefinition(d => { d.RelativeColumn(); d.RelativeColumn(); });
+            t.ExtendLastCellsToTableBottom();
+            t.Cell().ColumnSpan(2).Text("wide");
+            t.Cell().Row(2).Column(1).Text("left");
+            t.Cell().Row(4).Column(1).Text("bottom");
+        }));
+        // "wide" is the last cell of the second column only, so it stays one row; "left" ends above "bottom".
+        Assert.Equal(
+            "<main><table><colgroup><col class=\"c0\"><col class=\"c0\"></colgroup>" +
+            "<tbody><tr><td colspan=\"2\"><p>wide</p></td></tr>" +
+            "<tr><td><p>left</p></td><td></td></tr><tr><td></td><td></td></tr>" +
+            "<tr><td><p>bottom</p></td><td></td></tr></tbody></table></main>", html);
+    }
+
+    [Fact]
     public void A_cells_painted_content_fills_the_cell_whatever_the_call_order()
     {
         // QuestPDF draws a cell's content over the whole row, so a background inside the padding fills it; a cell with
@@ -552,6 +595,108 @@ public sealed class LayoutTests
         Assert.ThrowsAny<ArgumentException>(() => Html.Of(c => c.Text(t => t.Leader(new string('.', 33)))));
         Assert.ThrowsAny<ArgumentException>(() => Html.Of(c => c.Text(t => t.Leader("a\nb"))));
         Assert.Throws<ArgumentOutOfRangeException>(() => Html.Of(c => c.Text(t => t.Leader((LeaderStyle)9))));
+    }
+
+    [Fact]
+    public void A_table_of_contents_links_to_the_headings_with_a_leader_and_their_page()
+    {
+        var document = Document.Create(d => d.Page(p =>
+        {
+            p.Header().Heading(1).Text("Running title");
+            p.Content().Column(c =>
+            {
+                c.Item().TableOfContents();
+                c.Item().Section("intro").Heading(1).Text("Intro <&>");
+                c.Item().Heading(2).Text(t => { t.Span("Part\none"); t.Footnote("Note"); });
+                c.Item().Heading(4).Text("Too deep");
+                c.Item().ShowIf(false).Heading(2).Text("Hidden");
+                c.Item().Heading(3).Text("  ");
+                c.Item().Heading(3).Text("Detail");
+            });
+        }));
+        string body = Html.Body(DocumentGenerator.Html(document, false, out _));
+        Assert.StartsWith("<main><div class=\"c0\"><div>"
+            + "<p><a href=\"#intro\">Intro &lt;&amp;&gt;<span data-leader=\"0\"></span><span data-section-page=\"#intro\"></span></a></p>"
+            + "<p class=\"c1\"><a href=\"#pdfpecker-heading-1\">Part one<span data-leader=\"0\"></span><span data-section-page=\"#pdfpecker-heading-1\"></span></a></p>"
+            + "<p class=\"c2\"><a href=\"#pdfpecker-heading-3\">Detail<span data-leader=\"0\"></span><span data-section-page=\"#pdfpecker-heading-3\"></span></a></p>"
+            + "</div><h1 id=\"intro\">Intro &lt;&amp;&gt;</h1><h2 id=\"pdfpecker-heading-1\">", body);
+        Assert.Contains("<h4 id=\"pdfpecker-heading-2\">Too deep</h4>", body);
+        Assert.Contains("<h3 id=\"pdfpecker-heading-3\">Detail</h3>", body);
+        string css = Html.Css(document);
+        Assert.Contains(".c1{padding-inline-start:12pt}", css);
+        Assert.Contains(".c2{padding-inline-start:24pt}", css);
+        Assert.Contains("[data-leader=\"0\"]::after{content:leader(dotted)}", css);
+        Assert.Contains("[data-section-page]::after{content:target-counter(attr(data-section-page),page)}", css);
+        Assert.DoesNotContain("Running title<span", body);
+    }
+
+    [Fact]
+    public void Headings_get_no_ids_without_a_table_of_contents()
+        => Assert.Equal("<main><h1>Intro</h1></main>", Html.Of(c => c.Heading(1).Text("Intro")));
+
+    [Fact]
+    public void A_table_of_contents_takes_its_levels_indent_spacing_leader_and_styles()
+    {
+        var document = Html.Page(c => c.Column(col =>
+        {
+            col.Item().TableOfContents().MaxLevel(1).Indent(1, Unit.Centimetre).Spacing(4).Leader("- ")
+                .Style(TextStyle.Default.FontSize(10)).LevelStyle(1, TextStyle.Default.Bold());
+            col.Item().Heading(1).Text("One");
+            col.Item().Heading(1).Text("Two");
+            col.Item().Heading(2).Text("Left out");
+        }));
+        string body = Html.Body(document.GenerateHtml());
+        Assert.Contains("<div><p class=\"c1\"><a href=\"#pdfpecker-heading-1\">One", body);
+        Assert.Contains("<p class=\"c2\"><a href=\"#pdfpecker-heading-2\">Two", body);
+        Assert.DoesNotContain("#pdfpecker-heading-3", body);
+        string css = Html.Css(document);
+        Assert.Contains(".c1{font-size:10pt;font-weight:700}", css);
+        Assert.Contains(".c2{font-size:10pt;font-weight:700;margin-top:4pt}", css);
+        Assert.Contains("[data-leader=\"0\"]::after{content:leader(\"- \")}", css);
+    }
+
+    [Fact]
+    public void A_table_of_contents_shows_the_page_of_each_heading_at_the_end_of_its_line()
+    {
+        byte[] pdf = Document.Create(d => d.Page(p =>
+        {
+            p.Size(PageSizes.A5);
+            p.Margin(40);
+            p.Content().Column(c =>
+            {
+                c.Item().Text("Contents");
+                c.Item().TableOfContents();
+                c.Item().PageBreak();
+                c.Item().Heading(1).Text("Chapter one");
+                c.Item().PageBreak();
+                c.Item().Heading(1).Text("Chapter two");
+                c.Item().Section("three").Heading(2).Text("Part three");
+            });
+        })).GeneratePdf();
+        var pages = PdfText.ExtractPages(pdf);
+        Assert.Equal(3, pages.Count);
+        var first = pages[0];
+        foreach (var (title, page) in new[] { ("Chapter one", "2"), ("Chapter two", "3"), ("Part three", "3") })
+        {
+            var line = first.Lines.Single(l => l.Text.StartsWith(title, StringComparison.Ordinal));
+            Assert.Contains(". . .", line.Text);
+            var number = line.Words[^1];
+            Assert.Equal(page, number.Text);
+            Assert.InRange(number.X + number.Width, first.Width - 40 - 2, first.Width - 40 + 0.5);
+        }
+        Assert.Equal(3, pdf.AsSpan().Count("/Subtype /Link"u8) + pdf.AsSpan().Count("/Subtype/Link"u8));
+    }
+
+    [Fact]
+    public void Bad_table_of_contents_settings_throw()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => Html.Of(c => c.TableOfContents().MaxLevel(0)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Html.Of(c => c.TableOfContents().MaxLevel(7)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Html.Of(c => c.TableOfContents().LevelStyle(7, TextStyle.Default)));
+        Assert.ThrowsAny<ArgumentException>(() => Html.Of(c => c.TableOfContents().Leader("")));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Html.Of(c => c.TableOfContents().Leader((LeaderStyle)9)));
+        Assert.ThrowsAny<ArgumentException>(() => Html.Of(c => c.TableOfContents().Indent(-1)));
+        Assert.Throws<ArgumentNullException>(() => Html.Of(c => c.TableOfContents().Style(null!)));
     }
 
     [Fact]

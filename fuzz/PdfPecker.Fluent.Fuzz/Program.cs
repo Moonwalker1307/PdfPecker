@@ -185,6 +185,21 @@ internal static class Fuzz
         }
     }
 
+    private static void TableOfContents(IContainer c, Random r)
+    {
+        var contents = c.TableOfContents();
+        if (r.Next(2) == 0) contents.MaxLevel(r.Next(20) == 0 ? r.Next(-2, 10) : r.Next(1, 7));
+        if (r.Next(3) == 0) contents.Indent(Number(r), Unit(r));
+        if (r.Next(3) == 0) contents.Spacing(Number(r));
+        switch (r.Next(4))
+        {
+            case 0: contents.Leader((LeaderStyle)r.Next(0, r.Next(20) == 0 ? 6 : 3)); break;
+            case 1: contents.Leader(Text(r)); break;
+        }
+        if (r.Next(3) == 0) contents.Style(Style(TextStyle.Default, r));
+        if (r.Next(3) == 0) contents.LevelStyle(r.Next(20) == 0 ? r.Next(-2, 10) : r.Next(1, 7), Style(TextStyle.Default, r));
+    }
+
     private static TextStyle Style(TextStyle s, Random r)
     {
         for (int i = r.Next(4); i > 0; i--)
@@ -274,8 +289,12 @@ internal static class Fuzz
                 });
                 break;
             case 17:
-                if (r.Next(2) == 0) c.Placeholder(r.Next(2) == 0 ? null : Text(r));
-                else FormField(c, r);
+                switch (r.Next(3))
+                {
+                    case 0: c.Placeholder(r.Next(2) == 0 ? null : Text(r)); break;
+                    case 1: FormField(c, r); break;
+                    default: TableOfContents(c, r); break;
+                }
                 break;
             case 0:
                 c.Text(Text(r)).FontSize(Number(r));
@@ -396,6 +415,7 @@ internal static class Fuzz
                                 else d.ConstantColumn(Number(r));
                         });
                     if (r.Next(3) == 0) t.Header(h => Cell(h.Cell(), r, depth));
+                    if (r.Next(4) == 0) t.ExtendLastCellsToTableBottom();
                     for (int i = r.Next(10); i > 0; i--) Cell(t.Cell(), r, depth);
                     if (r.Next(4) == 0) t.Footer(f => Cell(f.Cell(), r, depth));
                 });

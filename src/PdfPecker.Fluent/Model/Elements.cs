@@ -151,6 +151,7 @@ internal sealed class TableElement : Element
     public List<TableCell> Header { get; } = [];
     public List<TableCell> Body { get; } = [];
     public List<TableCell> Footer { get; } = [];
+    public bool ExtendLastCells { get; set; }
 }
 
 internal enum RunKind
@@ -283,6 +284,23 @@ internal sealed class FormFieldElement : Element
     /// <summary>A check box or radio button's width and height, in points; null for the default.</summary>
     public float? Size { get; set; }
     public List<(string Text, string? Value, bool Selected)> Options { get; } = [];
+}
+
+/// <summary>A table of contents, which the HTML writer fills from the headings of the page content.</summary>
+internal sealed class TableOfContentsElement : Element
+{
+    public int MaxLevel { get; set; } = 3;
+    public float Indent { get; set; } = 12;
+    public float Spacing { get; set; }
+
+    /// <summary>The CSS leader() argument between an entry's text and its page number.</summary>
+    public string Leader { get; set; } = "dotted";
+
+    /// <summary>The text style of every entry, under each level's own.</summary>
+    public TextStyle Style { get; set; } = TextStyle.Default;
+
+    /// <summary>The text style of the entries of each level, from level 1 at index 0; null where a level has none.</summary>
+    public TextStyle?[] LevelStyles { get; } = new TextStyle?[6];
 }
 
 internal sealed class PageBreakElement : Element;

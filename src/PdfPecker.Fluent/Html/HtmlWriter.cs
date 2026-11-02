@@ -65,6 +65,12 @@ internal sealed class HtmlWriter
     /// <summary>Whether some text has a footnote, which needs the rule that sets out the footnote area.</summary>
     private bool _footnotes;
 
+    /// <summary>The headings of the page content in document order, which a table of contents lists; empty without one.</summary>
+    private readonly List<(int Level, string Text, string Id)> _headings = [];
+
+    /// <summary>The ids that headings without a Section name get, so a table of contents can link to them.</summary>
+    private readonly Dictionary<TextElement, string> _headingIds = new(ReferenceEqualityComparer.Instance);
+
     private HtmlWriter(ImageTable images) => _images = images;
 
     /// <summary>
@@ -79,6 +85,7 @@ internal sealed class HtmlWriter
 
     private string Document(IReadOnlyList<PageSet> pages, IReadOnlyList<string> css, DocumentMetadata metadata)
     {
+        CollectHeadings(pages);
         string? bodyClass = null;
         if (pages.Count == 1)
         {
@@ -307,6 +314,9 @@ internal sealed class HtmlWriter
                 break;
             case ListElement list:
                 RenderList(list, box);
+                break;
+            case TableOfContentsElement contents:
+                RenderTableOfContents(contents, box);
                 break;
             case FormFieldElement field:
                 RenderFormField(field, box);
@@ -665,6 +675,8 @@ internal sealed class HtmlWriter
             Open(box);
             box = new Box { Tag = tag };
         }
+        // A heading that a table of contents links to, and that has no Section name, gets an id of its own.
+        if (heading != null && _band == Band.None && box.Id == null && _headingIds.TryGetValue(text, out var headingId)) box.Id = headingId;
         // A paragraph with a single plain span (container.Text("...")) carries the span's font itself, so its line
         // height follows that font, as in QuestPDF, instead of the strut of an inherited larger font.
         bool single = text.Runs.Count == 1 && text.Runs[0].Kind == RunKind.Text;
@@ -888,6 +900,151 @@ internal sealed class HtmlWriter
         _html.Append('>');
     }
 
+    // Table of contents
+
+    /// <summary>
+    /// Finds the headings of the page content in the order they are written, when some content is a table of
+    /// contents. A heading with a Section name is linked by that name; the others get ids of their own. The walk keeps
+    /// its own stack, since the tree can be nested deeper than the writer allows before the writer gets to say so.
+    /// </summary>
+    private void CollectHeadings(IReadOnlyList<PageSet> pages)
+    {
+        var headings = new List<(int, string, TextElement, string?)>();
+        bool hasContents = false;
+        var pending = new Stack<Container>();
+        for (int i = pages.Count - 1; i >= 0; i--) pending.Push(pages[i].Content);
+        while (pending.Count > 0)
+        {
+            var slot = pending.Pop();
+            int? heading = null;
+            string? section = null;
+            Element? element = slot.Child;
+            while (element is Decorator decorator)
+            {
+                // As in RenderContainer, content outside the bands shows unless it is hidden or skipped once.
+                if (decorator.Kind is DecoratorKind.Hidden or DecoratorKind.SkipOnce)
+                {
+                    element = null;
+                    break;
+                }
+                if (decorator.Kind == DecoratorKind.Heading) heading = decorator.Level;
+                else if (decorator.Kind == DecoratorKind.Section) section ??= decorator.Text;
+                element = decorator.Inner.Child;
+            }
+
+            int count = pending.Count;
+            switch (element)
+            {
+                case TextElement text:
+                    if (heading is { } level && HeadingText(text) is { Length: > 0 } title) headings.Add((level, title, text, section));
+                    foreach (var run in text.Runs)
+                        if (run.Slot != null) pending.Push(run.Slot);
+                    break;
+                case TableOfContentsElement:
+                    hasContents = true;
+                    break;
+                case ColumnElement column:
+                    foreach (var item in column.Items) pending.Push(item);
+                    break;
+                case RowElement row:
+                    foreach (var (_, _, item) in row.Items) pending.Push(item);
+                    break;
+                case TableElement table:
+                    foreach (var cell in table.Header) pending.Push(cell);
+                    foreach (var cell in table.Body) pending.Push(cell);
+                    foreach (var cell in table.Footer) pending.Push(cell);
+                    break;
+                case LayersElement layers:
+                    foreach (var (_, layer) in layers.Layers) pending.Push(layer);
+                    break;
+                case InlinedElement inlined:
+                    foreach (var item in inlined.Items) pending.Push(item);
+                    break;
+                case MultiColumnElement multiColumn:
+                    pending.Push(multiColumn.Content);
+                    break;
+                case DecorationElement decoration:
+                    pending.Push(decoration.Before);
+                    pending.Push(decoration.Content);
+                    pending.Push(decoration.After);
+                    break;
+                case ListElement list:
+                    foreach (var item in list.Items) pending.Push(item);
+                    break;
+            }
+            // The children were pushed first to last; reversing them pops them in document order.
+            ReverseTop(pending, pending.Count - count);
+        }
+        if (!hasContents) return;
+
+        int number = 0;
+        foreach (var (level, title, text, section) in headings)
+        {
+            string id = section ?? "pdfpecker-heading-" + (++number).ToString(CultureInfo.InvariantCulture);
+            if (section == null) _headingIds[text] = id;
+            _headings.Add((level, title, id));
+        }
+    }
+
+    private static void ReverseTop(Stack<Container> stack, int count)
+    {
+        if (count < 2) return;
+        var top = new Container[count];
+        for (int i = 0; i < count; i++) top[i] = stack.Pop();
+        foreach (var item in top) stack.Push(item);
+    }
+
+    /// <summary>A heading's text on one line, as a table of contents shows it: its words, without footnotes or page numbers.</summary>
+    private static string HeadingText(TextElement text)
+    {
+        var sb = new StringBuilder();
+        foreach (var run in text.Runs)
+            if (run.Kind is RunKind.Text or RunKind.Hyperlink or RunKind.SectionLink) sb.Append(run.Text);
+        for (int i = 0; i < sb.Length; i++)
+            if (sb[i] is '\n' or '\r' or '\t') sb[i] = ' ';
+        return sb.ToString().Trim();
+    }
+
+    /// <summary>
+    /// Writes one paragraph for each heading the table of contents lists: a link to the heading holding its text, a
+    /// leader and the page the heading lands on. Levels are indented from the shallowest one listed.
+    /// </summary>
+    private void RenderTableOfContents(TableOfContentsElement contents, Box box)
+    {
+        box = Absorbing(box);
+        Open(box);
+        int top = int.MaxValue;
+        foreach (var (level, _, _) in _headings)
+            if (level <= contents.MaxLevel) top = Math.Min(top, level);
+        string? leaderNumber = null;
+        bool first = true;
+        foreach (var (level, title, id) in _headings)
+        {
+            if (level > contents.MaxLevel) continue;
+            if (leaderNumber == null)
+            {
+                if (!_leaders.TryGetValue(contents.Leader, out int leader)) _leaders.Add(contents.Leader, leader = _leaders.Count);
+                leaderNumber = leader.ToString(CultureInfo.InvariantCulture);
+            }
+            var declarations = new List<(string, string)>();
+            CssValue.AddTextStyle(declarations, contents.Style.Override(contents.LevelStyles[level - 1]), forBox: true);
+            if (level > top) declarations.Add(("padding-inline-start", CssValue.Pt(contents.Indent * (level - top))));
+            if (!first && contents.Spacing > 0) declarations.Add(("margin-top", CssValue.Pt(contents.Spacing)));
+            first = false;
+            _html.Append("<p");
+            if (declarations.Count > 0) WriteAttribute("class", Class(declarations));
+            _html.Append('>');
+            OpenInline("a", null, "#" + id);
+            WriteText(title);
+            _html.Append("<span");
+            WriteAttribute("data-leader", leaderNumber);
+            _html.Append("></span><span");
+            WriteAttribute("data-section-page", "#" + id);
+            _html.Append("></span></a></p>");
+        }
+        _sectionPages |= !first;
+    }
+
     // Tables
 
     private void RenderTable(TableElement table, Box box)
@@ -921,7 +1078,7 @@ internal sealed class HtmlWriter
             _html.Append("</thead>");
         }
         _html.Append("<tbody>");
-        RenderRows(table.Body, columns, "td");
+        RenderRows(table.Body, columns, "td", table.ExtendLastCells);
         _html.Append("</tbody>");
         if (table.Footer.Count > 0)
         {
@@ -932,9 +1089,11 @@ internal sealed class HtmlWriter
         _html.Append("</table>");
     }
 
-    private void RenderRows(List<TableCell> cells, int columns, string tag)
+    private void RenderRows(List<TableCell> cells, int columns, string tag, bool extendLast = false)
     {
         var placed = TableLayout.Place(cells, columns, out int rows, out var covered);
+        var extended = extendLast ? TableLayout.ExtendLastCells(placed, columns, rows) : null;
+        var extendedFrom = extended != null ? TableLayout.ExtendedFrom(extended, placed, columns) : null;
         for (int r = 0; r < rows; r++)
         {
             _html.Append("<tr>");
@@ -948,11 +1107,11 @@ internal sealed class HtmlWriter
                     box.InGrid = true;
                     if (tag == "th") box.Attributes.Add(("scope", "col"));
                     if (cell.ColumnSpan > 1) box.Attributes.Add(("colspan", cell.ColumnSpan.ToString(CultureInfo.InvariantCulture)));
-                    int rowSpan = Math.Min(cell.RowSpan, rows - r);
+                    int rowSpan = extended != null && extended.Contains((r, c)) ? rows - r : Math.Min(cell.RowSpan, rows - r);
                     if (rowSpan > 1) box.Attributes.Add(("rowspan", rowSpan.ToString(CultureInfo.InvariantCulture)));
                     RenderContainer(cell, box);
                 }
-                else if (!covered(r, c))
+                else if (!covered(r, c) && !(extendedFrom != null && extendedFrom[c] >= 0 && r > extendedFrom[c]))
                 {
                     _html.Append('<').Append(tag).Append("></").Append(tag).Append('>');
                 }
@@ -1109,7 +1268,7 @@ internal sealed class HtmlWriter
         private HorizontalAlignment? _cellAlignment;
         public List<(string Property, string Value)> Declarations { get; } = [];
         public List<(string Name, string Value)> Attributes { get; } = [];
-        public string? Id { get; private set; }
+        public string? Id { get; set; }
         public string? Direction { get; private set; }
         public string? Lang { get; private set; }
         public string? Href { get; private set; }

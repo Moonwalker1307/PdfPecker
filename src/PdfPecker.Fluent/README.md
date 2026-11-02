@@ -48,9 +48,9 @@ Document.Create(container =>
 
 - **Layout**: `Column`, `Row` (relative, constant and auto items), `Table` (constant and relative columns, row and
   column spans, explicit placement, cell backgrounds and borders that fill the row in any call order, header and footer
-  rows that repeat on every page), padding, borders, corner radius, background, width and height with minimum and
-  maximum, alignment, page breaks, `PreventPageBreak`, `StopPaging` (content kept to one page or to its height, the
-  rest left out), `ShowIf` and right-to-left content.
+  rows that repeat on every page, last cells extended to the bottom), padding, borders, corner radius, background,
+  width and height with minimum and maximum, alignment, page breaks, `PreventPageBreak`, `StopPaging` (content kept to
+  one page or to its height, the rest left out), `ShowIf` and right-to-left content.
 - **Gradients and opacity**: `BackgroundLinearGradient` (QuestPDF's call, with its angles), `BackgroundRadialGradient`
   (from the middle or a centre you choose, for a glow on a cover page) and `Opacity`, which fades a slot and everything
   in it, such as a watermark over the content. Paint called before `Opacity` stays as it is.
@@ -60,6 +60,9 @@ Document.Create(container =>
   fits a box of fixed size, for badges and labels), `Placeholder`, `DebugArea` and `Lazy`.
 - **Repeating and lists**: `Decoration` (content with a part before and after it that repeat on every page it
   crosses) and `List` (bulleted, numbered or custom-marker lists, tagged as lists in PDF/UA).
+- **Table of contents**: `TableOfContents()` lists the headings of the content, indented by level, each with a dot
+  leader and the page it lands on, and links every line to its heading. `MaxLevel`, `Indent`, `Spacing`, `Leader`,
+  `Style` and `LevelStyle` set it out. Give the table's own title no `Heading`, or it lists itself.
 - **Transforms**: `Rotate`, `RotateLeft`, `RotateRight`, `Scale`, `ScaleHorizontal`, `ScaleVertical`, `FlipHorizontal`,
   `FlipVertical`, `FlipOver`, `TranslateX` and `TranslateY`.
 - **Text**: spans with font family, size, weight, colour, background, italic, underline, strikethrough (solid, double,
@@ -130,13 +133,15 @@ Most QuestPDF code ports by changing the `using` lines: `Document.Create`, `Page
   repeats are all the same.
 - `ScaleToFit` fits the content into a `Height` or `MaxHeight` set before it, or into the height of the slot around it,
   such as a row or a box with a `Height`.
+- `ExtendLastCellsToTableBottom` grows the last cell of each column of the table's body down to its last row. A cell
+  spanning several columns grows only when it is the last cell in all of them, since HTML table cells cannot overlap.
 - `BackgroundLinearGradient` runs the way its angle points: 0 left to right, 90 top to bottom, 180 right to left and
   270 bottom to top. QuestPDF 2026.9 runs the angles between 90 and 270 other than 180 rightwards instead, so a gradient
   ported from such an angle is reversed. `BackgroundRadialGradient` and `Opacity` are not in QuestPDF.
 - `Document.Merge` composes the documents into one HTML document, so the result has one set of metadata and settings:
   those of `WithMetadata` and `WithSettings` on the merge, or the first document's. With original page numbers,
   `BeginPageNumberOfSection` and `EndPageNumberOfSection` still give pages of the whole PDF.
-- Not available: `Dynamic`, `Canvas`, `StopPaging`, `RepeatContent`, `ExtendLastCellsToTableBottom` and the Companion
+- Not available: `Dynamic`, `Canvas`, `StopPaging`, `RepeatContent` and the Companion
   previewer.
 
 ## Performance
