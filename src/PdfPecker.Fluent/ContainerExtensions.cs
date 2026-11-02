@@ -241,6 +241,13 @@ public static partial class ContainerExtensions
     /// <summary>The same as <see cref="PreventPageBreak"/>, under QuestPDF's older name.</summary>
     public static IContainer ShowEntire(this IContainer container) => PreventPageBreak(container);
 
+    /// <summary>
+    /// Keeps the content to the page it starts on, or to a <c>Height</c> or <c>MaxHeight</c> set before this call when
+    /// that ends first: what does not fit is left out instead of going on to the next page. Lines, images and table rows
+    /// that would cross the end are left out whole.
+    /// </summary>
+    public static IContainer StopPaging(this IContainer container) => Style(container, Rank.Size, ("continue", "discard"));
+
     /// <summary>Renders the content only when <paramref name="condition"/> is true.</summary>
     public static IContainer ShowIf(this IContainer container, bool condition)
         => condition ? container : Decorate(container, new Decorator(DecoratorKind.Hidden));

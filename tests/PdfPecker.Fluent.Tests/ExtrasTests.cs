@@ -122,6 +122,39 @@ public sealed class ExtrasTests
     }
 
     [Fact]
+    public void Stop_paging_joins_the_height_before_it()
+    {
+        Assert.Equal("<p class=\"c1\">x</p>", Html.Item(c => c.Height(100).StopPaging().Text("x")));
+        Assert.Contains(".c1{height:100pt;continue:discard}", Css(c => c.Height(100).StopPaging().Text("x")));
+    }
+
+    [Fact]
+    public void Stop_paging_leaves_out_what_does_not_fit_on_the_page()
+    {
+        static byte[] Pdf(bool stop) => Document.Create(d => d.Page(p =>
+        {
+            p.Size(300, 300);
+            p.Margin(20);
+            p.Content().Column(col =>
+            {
+                var item = col.Item();
+                (stop ? item.StopPaging() : item).Column(inner =>
+                {
+                    for (int i = 1; i <= 40; i++) inner.Item().Height(20).Text("Line " + i.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                });
+                col.Item().Text("After");
+            });
+        })).GeneratePdf();
+
+        Assert.Equal(4, PdfToImage.GetPageCount(Pdf(false)));
+        var pages = PdfText.ExtractPages(Pdf(true));
+        Assert.Equal(2, pages.Count);
+        Assert.Contains(pages[0].Lines, l => l.Text.Contains("Line 13", StringComparison.Ordinal));
+        Assert.DoesNotContain(pages.SelectMany(p => p.Lines), l => l.Text.Contains("Line 14", StringComparison.Ordinal));
+        Assert.Contains(pages[1].Lines, l => l.Text.Contains("After", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Ensure_space_writes_an_unbreakable_spacer_before_the_content()
     {
         Assert.Equal("<div><div class=\"c1\"></div><p>x</p></div>", Html.Item(c => c.EnsureSpace(100).Text("x")));
