@@ -38,7 +38,13 @@ public static partial class HtmlToPdf
             if (e.Name == "style")
             {
                 var media = e.GetAttribute("media");
-                if (media == null || MediaQuery.Matches(media, sheet.Media)) CssParser.ParseStylesheet(e.InnerText(), sheet);
+                if (media == null || MediaQuery.Matches(media, sheet.Media))
+                {
+                    // An @scope block without a start in a style element applies below the style element's parent.
+                    sheet.CurrentScopeRoot = e.Parent is { Name: not "#document" } styleParent ? styleParent : null;
+                    CssParser.ParseStylesheet(e.InnerText(), sheet);
+                    sheet.CurrentScopeRoot = null;
+                }
                 continue;
             }
             if (e.Name == "link" && (e.GetAttribute("rel") ?? "").IndexOf("stylesheet", StringComparison.OrdinalIgnoreCase) >= 0)

@@ -11,7 +11,7 @@ internal enum PseudoKind : byte
 {
     FirstChild, LastChild, OnlyChild, NthChild, NthLastChild, FirstOfType, LastOfType, OnlyOfType, NthOfType, NthLastOfType,
     Root, Link, Empty, Never, Not, Is, Where, Has, HasAnchor, Lang, Checked, Disabled, Enabled, Required, Optional, ReadOnly,
-    ReadWrite, PlaceholderShown, Default, Always, Dir, Valid, Invalid, Open,
+    ReadWrite, PlaceholderShown, Default, Always, Dir, Valid, Invalid, Open, Scope,
 }
 
 /// <summary>The pseudo-element a selector's subject names, if any.</summary>
@@ -108,6 +108,11 @@ internal sealed class Compound
     /// <summary>The element :has() is being matched for; its relative selectors start at this element.</summary>
     [ThreadStatic] private static Element? _hasAnchor;
 
+    /// <summary>The scope root of the @scope rule being matched, which :scope matches; null outside one.</summary>
+    [ThreadStatic] internal static Element? _scopeRoot;
+
+    internal static bool IsRoot(Element e) => e.Name == "html" || e.Parent?.Name == "#document" && e.ElementSiblingCount == 1;
+
     private static bool MatchPseudo(Element e, PseudoCondition p)
     {
         switch (p.Kind)
@@ -123,7 +128,9 @@ internal sealed class Compound
             case PseudoKind.OnlyOfType: return e.TypeCount == 1;
             case PseudoKind.NthOfType: return MatchNth(p.A, p.B, e.TypeIndex);
             case PseudoKind.NthLastOfType: return MatchNth(p.A, p.B, e.TypeCount - e.TypeIndex + 1);
-            case PseudoKind.Root: return e.Name == "html" || e.Parent?.Name == "#document" && e.ElementSiblingCount == 1;
+            case PseudoKind.Root: return IsRoot(e);
+            // :scope is the scope root of an @scope rule being matched; elsewhere the document's root, as in a style sheet.
+            case PseudoKind.Scope: return _scopeRoot != null ? ReferenceEquals(e, _scopeRoot) : IsRoot(e);
             case PseudoKind.Link: return e.Name == "a" && e.HasAttribute("href");
             case PseudoKind.Empty: return e.Children.Count == 0;
             case PseudoKind.Not: return !ListMatches(p, e);
@@ -681,7 +688,7 @@ internal sealed class Selector
             case "valid": return new PseudoCondition { Kind = PseudoKind.Valid };
             case "invalid": return new PseudoCondition { Kind = PseudoKind.Invalid };
             case "open": return new PseudoCondition { Kind = PseudoKind.Open };
-            case "scope": return new PseudoCondition { Kind = PseudoKind.Root };
+            case "scope": return new PseudoCondition { Kind = PseudoKind.Scope };
             case "defined": return new PseudoCondition { Kind = PseudoKind.Always };
             case "not":
             case "is":

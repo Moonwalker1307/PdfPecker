@@ -141,7 +141,7 @@ internal sealed class PageMarginBoxes
             var box = Build(name, decls, ctx, page, count, w, h);
             if (box == null) return;
             var engine = new LayoutEngine(Math.Max(h, 1), _images) { Context = _context };
-            engine.LayoutBand(box.Element, w);
+            using (Show(box.Running)) engine.LayoutBand(box.Element, w);
             foreach (var op in engine.Ops)
             {
                 op.Offset(x - _page.MarginLeft, y - _page.MarginTop);
@@ -193,7 +193,7 @@ internal sealed class PageMarginBoxes
         return (available * a / sum, available * b / sum);
     }
 
-    private sealed record Built(Element Element, float MaxContentWidth, float MeasuredHeight);
+    private sealed record Built(Element Element, float MaxContentWidth, float MeasuredHeight, Element? Running);
 
     /// <summary>
     /// Builds a margin box: its element (in a page-context element), styled from the declarations, with its content.
@@ -230,22 +230,86 @@ internal sealed class PageMarginBoxes
         box.AppendChild(inner);
 
         resolver.ResolveTree(doc, _initial());
-        var text = GeneratedContent.Evaluate(content, page, resolver);
-        if (text == null) return null;
-        if (text.Length > 0) inner.AppendChild(new TextNode(text));
+        Element? running = null;
+        if (ElementArguments(c) is { } element)
+        {
+            // element(name): the running element of that name for this page, laid out in the box with the styles it
+            // has where it was taken from. A page with none gets no box.
+            running = _paged?.RunningElements?.Get(element.Name, pageIndex, element.Policy);
+            if (running == null) return null;
+            inner.Children.Add(running);
+            NumberPages(running, resolver);
+        }
+        else
+        {
+            var text = GeneratedContent.Evaluate(content, page, resolver);
+            if (text == null) return null;
+            if (text.Length > 0) inner.AppendChild(new TextNode(text));
+        }
 
         float maxContent = 0, measured = 0;
-        if (width == null)
+        using (Show(running))
         {
-            var engine = new LayoutEngine(100000, _images) { Context = _context };
-            maxContent = engine.MeasureIntrinsic(box).Max;
+            if (width == null)
+            {
+                var engine = new LayoutEngine(100000, _images) { Context = _context };
+                maxContent = engine.MeasureIntrinsic(box).Max;
+            }
+            else if (height == null)
+            {
+                var engine = new LayoutEngine(100000, _images) { Context = _context };
+                measured = engine.LayoutBand(box, width.Value);
+            }
         }
-        else if (height == null)
+        return new Built(box, maxContent, measured, running);
+    }
+
+    /// <summary>The name and policy of content that is element(name[, first | start | last | first-except]) alone, else null.</summary>
+    internal static (string Name, string Policy)? ElementArguments(string lower)
+    {
+        if (!lower.StartsWith("element(", StringComparison.Ordinal) || !lower.EndsWith(')')) return null;
+        var args = lower.Substring(8, lower.Length - 9).Split(',');
+        if (args.Length > 2) return null;
+        var name = args[0].Trim();
+        var policy = args.Length == 2 ? args[1].Trim() : "first";
+        if (name.Length == 0 || policy is not ("first" or "start" or "last" or "first-except")) return null;
+        return (name, policy);
+    }
+
+    /// <summary>
+    /// Shows a running element while a margin box is laid out: the main flow skips it, as it was taken out of the flow.
+    /// </summary>
+    private static Shown Show(Element? running)
+    {
+        if (running != null) running.Detached = false;
+        return new Shown(running);
+    }
+
+    private readonly struct Shown(Element? running) : IDisposable
+    {
+        public void Dispose()
         {
-            var engine = new LayoutEngine(100000, _images) { Context = _context };
-            measured = engine.LayoutBand(box, width.Value);
+            if (running != null) running.Detached = true;
         }
-        return new Built(box, maxContent, measured);
+    }
+
+    /// <summary>
+    /// Gives the page numbers in a running element's ::before and ::after content (counter(page), counter(pages)) the
+    /// values of the page whose margin box shows it.
+    /// </summary>
+    private static void NumberPages(Element e, StyleResolver resolver)
+    {
+        foreach (var child in e.Children)
+        {
+            if (child is not Element c) continue;
+            if (c.Generated && c.Style?.Content is { } content && content.Contains("counter(page", StringComparison.OrdinalIgnoreCase)
+                && !GeneratedContent.HasImage(content) && GeneratedContent.Evaluate(content, e, resolver, c.Style) is { } text)
+            {
+                c.Children.Clear();
+                if (text.Length > 0) c.AppendChild(new TextNode(text));
+            }
+            else NumberPages(c, resolver);
+        }
     }
 
     /// <summary>The default text-align and vertical alignment of each box (CSS Paged Media 3, 6.3.1).</summary>

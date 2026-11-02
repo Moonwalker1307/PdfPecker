@@ -73,7 +73,7 @@ internal sealed partial class StyleResolver
     {
         bool mono = IsBareMonospace(family), parentMono = IsBareMonospace(parent.FontFamilyName);
         if (s.FontSizeAbsolute || (!mono && !parentMono)) return;
-        if (s.FontSizeKeyword > 0) s.FontSize = KeywordFontSize(s.FontSizeKeyword, mono);
+        if (s.FontSizeKeyword > 0) s.FontSize = KeywordFontSize(s.FontSizeKeyword, mono) * s.Zoom;
         else if (mono != parentMono) s.FontSize *= mono ? 13f / 16f : 16f / 13f;
     }
 

@@ -346,6 +346,12 @@ internal sealed partial class StyleResolver
                 s.ScaleToFit = d.Lower == "shrink" || d.Inherit && parent.ScaleToFit;
                 if (s.ScaleToFit) s.FormattingRoot = true;
                 break;
+            case "continue":
+                // The box is a fragmentation container of its own whose content after the first fragment is left out,
+                // and like any such container it holds its floats and keeps its margins from its children's.
+                s.ContinueDiscard = d.Lower == "discard" || d.Inherit && parent.ContinueDiscard;
+                if (s.ContinueDiscard) s.FormattingRoot = true;
+                break;
 
             // ---- SVG presentation properties (Properties.Svg.cs)
             case "fill": ApplyFill(s, parent, in d); break;

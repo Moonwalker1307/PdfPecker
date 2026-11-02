@@ -154,6 +154,98 @@ public sealed class LayoutTests
     }
 
     [Fact]
+    public void Linear_gradients_turn_the_QuestPDF_angle_into_the_CSS_one()
+    {
+        // QuestPDF's 0 runs left to right, which CSS calls 90deg.
+        string css = Html.Css(Html.Page(c => c.Column(col =>
+        {
+            col.Item().BackgroundLinearGradient(0, Colors.Red.Medium, "#2196f380").Text("a");
+            col.Item().BackgroundLinearGradient(-90, Colors.Red.Medium).Text("b");
+            col.Item().BackgroundLinearGradient(405.5f, [Colors.Red.Medium, Colors.White, Colors.Black]).Text("c");
+        })));
+        Assert.Contains("{background-image:linear-gradient(90deg,#f44336,#2196f380)}", css);
+        Assert.Contains("{background-image:linear-gradient(0deg,#f44336,#f44336)}", css);
+        Assert.Contains("{background-image:linear-gradient(135.5deg,#f44336,#ffffff,#000000)}", css);
+    }
+
+    [Fact]
+    public void Radial_gradients_start_in_the_middle_or_at_the_given_centre()
+    {
+        string css = Html.Css(Html.Page(c => c.Column(col =>
+        {
+            col.Item().BackgroundRadialGradient(Colors.White, Colors.Red.Medium).Text("a");
+            col.Item().BackgroundRadialGradient(0, 0.25f, Colors.White, Colors.Red.Medium).Text("b");
+        })));
+        Assert.Contains("{background-image:radial-gradient(#ffffff,#f44336)}", css);
+        Assert.Contains("{background-image:radial-gradient(at 0% 25%,#ffffff,#f44336)}", css);
+    }
+
+    [Fact]
+    public void A_gradient_merges_with_the_background_colour_under_it()
+        => Assert.Equal("<p class=\"c1\">x</p>", Html.Item(c => c.Background(Colors.Black).BackgroundRadialGradient(Colors.White).Padding(4).Text("x")));
+
+    [Fact]
+    public void Opacity_merges_before_paint_and_nests_after_it()
+    {
+        // Paint called before Opacity must not fade, so it stays on an element outside the faded one.
+        Assert.Equal("<p class=\"c1\">x</p>", Html.Item(c => c.Width(100).Opacity(0.5f).Background(Colors.Red.Medium).Padding(4).Text("x")));
+        Assert.Equal("<div class=\"c1\"><p class=\"c2\">x</p></div>", Html.Item(c => c.Background(Colors.Red.Medium).Opacity(0.5f).Text("x")));
+        Assert.Contains(".c2{opacity:0.5}", Html.Css(Html.Page(c => c.Column(col => col.Item().Background(Colors.Red.Medium).Opacity(0.5f).Text("x")))));
+    }
+
+    [Fact]
+    public void Full_opacity_writes_nothing()
+        => Assert.Equal("<p>x</p>", Html.Item(c => c.Opacity(1).Text("x")));
+
+    [Fact]
+    public void A_faded_cell_fades_a_box_that_fills_the_row()
+    {
+        var document = Html.Page(c => c.Table(t =>
+        {
+            t.ColumnsDefinition(d => d.RelativeColumn());
+            t.Cell().Opacity(0.25f).Background(Colors.Red.Medium).Text("a");
+        }));
+        Assert.Equal("<main><table><colgroup><col class=\"c0\"></colgroup><tbody><tr><td class=\"c1\"><p class=\"c2\">a</p></td></tr></tbody></table></main>",
+            Html.Body(DocumentGenerator.Html(document, false, out _)));
+        string css = Html.Css(document);
+        Assert.Contains(".c1{height:1px}", css);
+        Assert.Contains(".c2{height:100%;opacity:0.25;background-color:#f44336}", css);
+    }
+
+    [Fact]
+    public void Gradients_and_opacity_reach_the_PDF()
+    {
+        byte[] pdf = Html.Page(c => c.Column(col =>
+        {
+            col.Item().Height(20).BackgroundLinearGradient(0, Colors.Red.Medium, Colors.Blue.Medium);
+            col.Item().Height(20).BackgroundRadialGradient(Colors.White, Colors.Green.Medium);
+            col.Item().Opacity(0.5f).Text("faded");
+        })).GeneratePdf();
+        string text = System.Text.Encoding.Latin1.GetString(pdf);
+        Assert.Contains("/ShadingType 2", text);
+        Assert.Contains("/ShadingType 3", text);
+        Assert.Contains("/Group << /S /Transparency", text);
+        Assert.Contains("/ca 0.502", text);
+        Assert.Contains("faded", Html.Text(pdf));
+    }
+
+    [Theory]
+    [InlineData(-0.1f)]
+    [InlineData(1.5f)]
+    [InlineData(float.NaN)]
+    public void Opacity_outside_zero_to_one_is_refused(float value)
+        => Assert.Throws<ArgumentOutOfRangeException>(() => Html.Of(c => c.Opacity(value)));
+
+    [Fact]
+    public void Gradients_check_their_arguments()
+    {
+        Assert.Throws<ArgumentException>(() => Html.Of(c => c.BackgroundLinearGradient(0)));
+        Assert.Throws<ArgumentNullException>(() => Html.Of(c => c.BackgroundRadialGradient(null!)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Html.Of(c => c.BackgroundLinearGradient(float.PositiveInfinity, Colors.Red.Medium)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Html.Of(c => c.BackgroundRadialGradient(float.NaN, 0, Colors.Red.Medium)));
+    }
+
+    [Fact]
     public void Relative_columns_share_what_constant_columns_leave()
     {
         var document = Html.Page(c => c.Table(t =>
@@ -335,6 +427,103 @@ public sealed class LayoutTests
         Assert.Contains("Terms page 2", pages[2].Text);
         Assert.Contains("Within 1", pages[1].Text);
         Assert.Contains("Within 2", pages[2].Text);
+    }
+
+    /// <summary>An invoice of two pages: page numbers in the footer and the content, and a section with a link to it.</summary>
+    private static Document Invoice(string number) => Document.Create(d => d.Page(p =>
+    {
+        p.Size(PageSizes.A5);
+        p.Content().Column(c =>
+        {
+            c.Item().Text(t => { t.Span("Invoice " + number + ", see "); t.SectionLink("the terms", "terms"); t.Span(". Pages: "); t.TotalPages(); });
+            c.Item().PageBreak();
+            c.Item().Section("terms").Text(t => { t.Span("Terms of " + number + " on page "); t.CurrentPageNumber(); });
+        });
+        p.Footer().Text(t => { t.Span("Page "); t.CurrentPageNumber(); t.Span(" of "); t.TotalPages(); });
+    }));
+
+    [Fact]
+    public void Merged_documents_number_their_pages_on_their_own_by_default()
+    {
+        var merged = Document.Merge(Invoice("A"), Invoice("B"));
+        string html = DocumentGenerator.Html(merged, false, out _);
+        Assert.Contains("<div id=\"pdfpecker-document-1\">", html);
+        Assert.Contains("<div id=\"pdfpecker-document-2\">", html);
+        // Each document's section is its own, so the same name can be used in both.
+        Assert.Contains("id=\"pdfpecker-document-1-terms\"", html);
+        Assert.Contains("href=\"#pdfpecker-document-2-terms\"", html);
+        Assert.Contains("{section-page:pdfpecker-document-2}", html);
+        Assert.DoesNotContain("{page}", html);
+
+        var pages = PdfText.ExtractPages(merged.GeneratePdf());
+        Assert.Equal(4, pages.Count);
+        Assert.Contains("Invoice A", pages[0].Text);
+        Assert.Contains("Pages: 2", pages[0].Text);
+        Assert.Contains("Page 1 of 2", pages[0].Text);
+        Assert.Contains("Terms of A on page 2", pages[1].Text);
+        Assert.Contains("Page 2 of 2", pages[1].Text);
+        Assert.Contains("Invoice B", pages[2].Text);
+        Assert.Contains("Pages: 2", pages[2].Text);
+        Assert.Contains("Page 1 of 2", pages[2].Text);
+        Assert.Contains("Terms of B on page 2", pages[3].Text);
+        Assert.Contains("Page 2 of 2", pages[3].Text);
+    }
+
+    [Fact]
+    public void Merged_documents_with_continuous_page_numbers_count_on()
+    {
+        var merged = Document.Merge([Invoice("A"), Invoice("B")]).UseContinuousPageNumbers();
+        string html = DocumentGenerator.Html(merged, false, out _);
+        Assert.DoesNotContain("pdfpecker-document-", html);
+        Assert.Contains("{page}", html);
+
+        var pages = PdfText.ExtractPages(merged.GeneratePdf());
+        Assert.Equal(4, pages.Count);
+        Assert.Contains("Page 1 of 4", pages[0].Text);
+        Assert.Contains("Pages: 4", pages[2].Text);
+        Assert.Contains("Page 3 of 4", pages[2].Text);
+        Assert.Contains("Terms of B on page 4", pages[3].Text);
+    }
+
+    [Fact]
+    public void Merging_one_document_writes_what_the_document_writes_alone()
+    {
+        var invoice = Invoice("A");
+        Assert.Equal(DocumentGenerator.Html(invoice, false, out _), DocumentGenerator.Html(Document.Merge(invoice), false, out _));
+        Assert.Equal(DocumentGenerator.Html(invoice, false, out _),
+            DocumentGenerator.Html(Document.Merge(invoice).UseContinuousPageNumbers(), false, out _));
+    }
+
+    [Fact]
+    public void A_merge_takes_the_first_documents_metadata_unless_it_has_its_own()
+    {
+        var first = Invoice("A").WithMetadata(new DocumentMetadata { Title = "First" });
+        var merged = Document.Merge(first, Invoice("B"));
+        Assert.Equal("First", merged.GetMetadata().Title);
+        Assert.Equal("Both", merged.WithMetadata(new DocumentMetadata { Title = "Both" }).GetMetadata().Title);
+        Assert.Contains("<title>Both</title>", merged.GenerateHtml());
+    }
+
+    [Fact]
+    public void A_merge_inside_a_merge_with_continuous_numbers_counts_on_with_it()
+    {
+        var inner = Document.Merge(Invoice("A"), Invoice("B"));
+        var merged = Document.Merge(inner, Invoice("C")).UseContinuousPageNumbers();
+        Assert.DoesNotContain("pdfpecker-document-", DocumentGenerator.Html(merged, false, out _));
+
+        var apart = Document.Merge(Document.Merge(Invoice("A"), Invoice("B")).UseContinuousPageNumbers(), Invoice("C"));
+        var pages = PdfText.ExtractPages(apart.GeneratePdf());
+        Assert.Equal(6, pages.Count);
+        Assert.Contains("Page 3 of 4", pages[2].Text);
+        Assert.Contains("Page 1 of 2", pages[4].Text);
+    }
+
+    [Fact]
+    public void Merge_checks_its_documents()
+    {
+        Assert.Throws<ArgumentException>(() => Document.Merge());
+        Assert.Throws<ArgumentNullException>(() => Document.Merge((IEnumerable<IDocument>)null!));
+        Assert.Throws<ArgumentNullException>(() => Document.Merge(Invoice("A"), null!));
     }
 
     [Fact]

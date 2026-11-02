@@ -36,7 +36,12 @@ internal sealed partial class InlineLayout
         }
         var e = (Element)node;
         var s = e.Style;
-        if (s == null || s.Display == Display.None || e.Detached) return;
+        if (s == null || s.Display == Display.None || e.Detached)
+        {
+            // Where a running element was taken from decides the pages whose margin boxes show it.
+            if (s is { RunningName: not null } && e.Detached && e.LayoutKey != null) AddAnchor(st, s, e.LayoutKey);
+            return;
+        }
 
         if (s.Floated || s.OutOfFlow)
         {
