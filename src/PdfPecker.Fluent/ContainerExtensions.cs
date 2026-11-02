@@ -242,6 +242,12 @@ public static partial class ContainerExtensions
     public static IContainer ShowEntire(this IContainer container) => PreventPageBreak(container);
 
     /// <summary>
+    /// Draws the content again at the top of each later page the slot around it continues on, such as a label in a row
+    /// item beside a text several pages long, or in a table cell split across pages. Elsewhere content appears once.
+    /// </summary>
+    public static IContainer Repeat(this IContainer container) => Decorate(container, new Decorator(DecoratorKind.Repeat));
+
+    /// <summary>
     /// Keeps the content to the page it starts on, or to a <c>Height</c> or <c>MaxHeight</c> set before this call when
     /// that ends first: what does not fit is left out instead of going on to the next page. Lines, images and table rows
     /// that would cross the end are left out whole.

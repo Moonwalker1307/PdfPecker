@@ -122,6 +122,39 @@ public sealed class ExtrasTests
     }
 
     [Fact]
+    public void Repeat_gets_an_element_of_its_own_inside_the_slot()
+    {
+        Assert.Equal("<p class=\"c1\">x</p>", Html.Item(c => c.Repeat().Text("x")));
+        Assert.Contains(".c1{-pdfpecker-repeat:each-page}", Css(c => c.Repeat().Text("x")));
+        // The padding stays outside: the repeated element is the background and the text inside it.
+        Assert.Equal("<div class=\"c1\"><p class=\"c2\">x</p></div>", Html.Item(c => c.Padding(5).Repeat().Background(Colors.Red.Medium).Text("x")));
+        Assert.Contains(".c2{-pdfpecker-repeat:each-page;background-color:", Css(c => c.Padding(5).Repeat().Background(Colors.Red.Medium).Text("x")));
+    }
+
+    [Fact]
+    public void Repeat_draws_a_label_on_each_page_of_its_row()
+    {
+        static byte[] Pdf(bool repeat) => Document.Create(d => d.Page(p =>
+        {
+            p.Size(300, 300);
+            p.Margin(20);
+            p.Content().Row(row =>
+            {
+                var label = row.ConstantItem(80);
+                (repeat ? label.Repeat() : label).Text("Label");
+                row.RelativeItem().Column(col =>
+                {
+                    for (int i = 1; i <= 30; i++) col.Item().Height(20).Text("Line " + i.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                });
+            });
+        })).GeneratePdf();
+
+        static int[] Labels(byte[] pdf) => PdfText.ExtractPages(pdf).Select(p => p.Lines.Count(l => l.Text.Contains("Label", StringComparison.Ordinal))).ToArray();
+        Assert.Equal([1, 0, 0], Labels(Pdf(false)));
+        Assert.Equal([1, 1, 1], Labels(Pdf(true)));
+    }
+
+    [Fact]
     public void Stop_paging_joins_the_height_before_it()
     {
         Assert.Equal("<p class=\"c1\">x</p>", Html.Item(c => c.Height(100).StopPaging().Text("x")));
