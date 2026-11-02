@@ -1180,11 +1180,11 @@ internal sealed class HtmlWriter
 
         /// <summary>
         /// Whether the box inside this table cell must fill it: it paints a background, border or shadow, which QuestPDF
-        /// draws over the whole height of the row. Aligned content keeps its own size.
+        /// draws over the whole height of the row, or fades what may paint one. Aligned content keeps its own size.
         /// </summary>
         public bool FillsWith(Decorator decorator)
             => InGrid && _cellAlignment == null && !Has("vertical-align")
-               && (decorator.Kind == DecoratorKind.Border || decorator.Kind == DecoratorKind.Style && decorator.Rank == Rank.Paint);
+               && (decorator.Kind == DecoratorKind.Border || decorator.Kind == DecoratorKind.Style && decorator.Rank is Rank.Paint or Rank.Opacity);
 
         /// <summary>The box inside this one: plain, or aligned when this is a cell with a horizontal alignment.</summary>
         public Box Child()
@@ -1197,6 +1197,9 @@ internal sealed class HtmlWriter
         private bool TryAdd(int rank, (string Property, string Value)[] declarations)
         {
             if (rank != Rank.Any && (_aligned || rank < _rank || (rank == Rank.Size && SizeLocked) || _cellAlignment != null)) return false;
+            // A table cell is not faded itself: its background and borders belong to the table's layout, and the
+            // box inside it that fills it fades the same area.
+            if (rank == Rank.Opacity && IsCell) return false;
             foreach (var (property, _) in declarations)
                 if (Has(property)) return false;
             Declarations.AddRange(declarations);

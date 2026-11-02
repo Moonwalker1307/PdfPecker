@@ -111,6 +111,98 @@ public sealed class LayoutTests
     }
 
     [Fact]
+    public void Linear_gradients_turn_the_QuestPDF_angle_into_the_CSS_one()
+    {
+        // QuestPDF's 0 runs left to right, which CSS calls 90deg.
+        string css = Html.Css(Html.Page(c => c.Column(col =>
+        {
+            col.Item().BackgroundLinearGradient(0, Colors.Red.Medium, "#2196f380").Text("a");
+            col.Item().BackgroundLinearGradient(-90, Colors.Red.Medium).Text("b");
+            col.Item().BackgroundLinearGradient(405.5f, [Colors.Red.Medium, Colors.White, Colors.Black]).Text("c");
+        })));
+        Assert.Contains("{background-image:linear-gradient(90deg,#f44336,#2196f380)}", css);
+        Assert.Contains("{background-image:linear-gradient(0deg,#f44336,#f44336)}", css);
+        Assert.Contains("{background-image:linear-gradient(135.5deg,#f44336,#ffffff,#000000)}", css);
+    }
+
+    [Fact]
+    public void Radial_gradients_start_in_the_middle_or_at_the_given_centre()
+    {
+        string css = Html.Css(Html.Page(c => c.Column(col =>
+        {
+            col.Item().BackgroundRadialGradient(Colors.White, Colors.Red.Medium).Text("a");
+            col.Item().BackgroundRadialGradient(0, 0.25f, Colors.White, Colors.Red.Medium).Text("b");
+        })));
+        Assert.Contains("{background-image:radial-gradient(#ffffff,#f44336)}", css);
+        Assert.Contains("{background-image:radial-gradient(at 0% 25%,#ffffff,#f44336)}", css);
+    }
+
+    [Fact]
+    public void A_gradient_merges_with_the_background_colour_under_it()
+        => Assert.Equal("<p class=\"c1\">x</p>", Html.Item(c => c.Background(Colors.Black).BackgroundRadialGradient(Colors.White).Padding(4).Text("x")));
+
+    [Fact]
+    public void Opacity_merges_before_paint_and_nests_after_it()
+    {
+        // Paint called before Opacity must not fade, so it stays on an element outside the faded one.
+        Assert.Equal("<p class=\"c1\">x</p>", Html.Item(c => c.Width(100).Opacity(0.5f).Background(Colors.Red.Medium).Padding(4).Text("x")));
+        Assert.Equal("<div class=\"c1\"><p class=\"c2\">x</p></div>", Html.Item(c => c.Background(Colors.Red.Medium).Opacity(0.5f).Text("x")));
+        Assert.Contains(".c2{opacity:0.5}", Html.Css(Html.Page(c => c.Column(col => col.Item().Background(Colors.Red.Medium).Opacity(0.5f).Text("x")))));
+    }
+
+    [Fact]
+    public void Full_opacity_writes_nothing()
+        => Assert.Equal("<p>x</p>", Html.Item(c => c.Opacity(1).Text("x")));
+
+    [Fact]
+    public void A_faded_cell_fades_a_box_that_fills_the_row()
+    {
+        var document = Html.Page(c => c.Table(t =>
+        {
+            t.ColumnsDefinition(d => d.RelativeColumn());
+            t.Cell().Opacity(0.25f).Background(Colors.Red.Medium).Text("a");
+        }));
+        Assert.Equal("<main><table><colgroup><col class=\"c0\"></colgroup><tbody><tr><td class=\"c1\"><p class=\"c2\">a</p></td></tr></tbody></table></main>",
+            Html.Body(DocumentGenerator.Html(document, false, out _)));
+        string css = Html.Css(document);
+        Assert.Contains(".c1{height:1px}", css);
+        Assert.Contains(".c2{height:100%;opacity:0.25;background-color:#f44336}", css);
+    }
+
+    [Fact]
+    public void Gradients_and_opacity_reach_the_PDF()
+    {
+        byte[] pdf = Html.Page(c => c.Column(col =>
+        {
+            col.Item().Height(20).BackgroundLinearGradient(0, Colors.Red.Medium, Colors.Blue.Medium);
+            col.Item().Height(20).BackgroundRadialGradient(Colors.White, Colors.Green.Medium);
+            col.Item().Opacity(0.5f).Text("faded");
+        })).GeneratePdf();
+        string text = System.Text.Encoding.Latin1.GetString(pdf);
+        Assert.Contains("/ShadingType 2", text);
+        Assert.Contains("/ShadingType 3", text);
+        Assert.Contains("/Group << /S /Transparency", text);
+        Assert.Contains("/ca 0.502", text);
+        Assert.Contains("faded", Html.Text(pdf));
+    }
+
+    [Theory]
+    [InlineData(-0.1f)]
+    [InlineData(1.5f)]
+    [InlineData(float.NaN)]
+    public void Opacity_outside_zero_to_one_is_refused(float value)
+        => Assert.Throws<ArgumentOutOfRangeException>(() => Html.Of(c => c.Opacity(value)));
+
+    [Fact]
+    public void Gradients_check_their_arguments()
+    {
+        Assert.Throws<ArgumentException>(() => Html.Of(c => c.BackgroundLinearGradient(0)));
+        Assert.Throws<ArgumentNullException>(() => Html.Of(c => c.BackgroundRadialGradient(null!)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Html.Of(c => c.BackgroundLinearGradient(float.PositiveInfinity, Colors.Red.Medium)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Html.Of(c => c.BackgroundRadialGradient(float.NaN, 0, Colors.Red.Medium)));
+    }
+
+    [Fact]
     public void Relative_columns_share_what_constant_columns_leave()
     {
         var document = Html.Page(c => c.Table(t =>
