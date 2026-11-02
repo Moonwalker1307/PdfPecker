@@ -78,6 +78,14 @@ public sealed class TableDescriptor
 
     /// <summary>The next cell. Cells fill the rows from left to right, then top to bottom.</summary>
     public ITableCellContainer Cell() => TableCellDescriptor.Add(_table.Body);
+
+    /// <summary>
+    /// Makes the last cell of each column reach down to the bottom of the table's body, so that columns whose cells
+    /// end above the others, because of row spans or cells left out, still run to the end with their borders and
+    /// backgrounds. A cell spanning several columns grows only when it is the last cell in all of them. The header and
+    /// footer keep their cells as they are.
+    /// </summary>
+    public void ExtendLastCellsToTableBottom() => _table.ExtendLastCells = true;
 }
 
 /// <summary>Adds cells to a table's header or footer.</summary>

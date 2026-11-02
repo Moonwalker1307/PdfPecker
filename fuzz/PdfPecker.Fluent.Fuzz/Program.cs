@@ -382,6 +382,7 @@ internal static class Fuzz
                                 else d.ConstantColumn(Number(r));
                         });
                     if (r.Next(3) == 0) t.Header(h => Cell(h.Cell(), r, depth));
+                    if (r.Next(4) == 0) t.ExtendLastCellsToTableBottom();
                     for (int i = r.Next(10); i > 0; i--) Cell(t.Cell(), r, depth);
                     if (r.Next(4) == 0) t.Footer(f => Cell(f.Cell(), r, depth));
                 });

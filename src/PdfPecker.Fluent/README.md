@@ -48,7 +48,7 @@ Document.Create(container =>
 
 - **Layout**: `Column`, `Row` (relative, constant and auto items), `Table` (constant and relative columns, row and
   column spans, explicit placement, cell backgrounds and borders that fill the row in any call order, header and footer
-  rows that repeat on every page), padding, borders, corner radius, background, width and height with minimum and
+  rows that repeat on every page, last cells extended to the bottom), padding, borders, corner radius, background, width and height with minimum and
   maximum, alignment, page breaks, `PreventPageBreak`, `ShowIf` and right-to-left content.
 - **More layout**: `Layers` (watermarks under and stamps over content), `Inlined` (items that wrap like words, such as
   tags), `MultiColumn` (newspaper columns), `EnsureSpace` (keeps a heading off the bottom of a page), `Unconstrained`,
@@ -123,7 +123,9 @@ Most QuestPDF code ports by changing the `using` lines: `Document.Create`, `Page
   repeats are all the same.
 - `ScaleToFit` fits the content into a `Height` or `MaxHeight` set before it, or into the height of the slot around it,
   such as a row or a box with a `Height`.
-- Not available: `Dynamic`, `Canvas`, `StopPaging`, `RepeatContent`, `ExtendLastCellsToTableBottom` and the Companion
+- `ExtendLastCellsToTableBottom` grows the last cell of each column of the table's body down to its last row. A cell
+  spanning several columns grows only when it is the last cell in all of them, since HTML table cells cannot overlap.
+- Not available: `Dynamic`, `Canvas`, `StopPaging`, `RepeatContent` and the Companion
   previewer.
 
 ## Performance

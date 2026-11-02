@@ -144,6 +144,7 @@ internal sealed class TableElement : Element
     public List<TableCell> Header { get; } = [];
     public List<TableCell> Body { get; } = [];
     public List<TableCell> Footer { get; } = [];
+    public bool ExtendLastCells { get; set; }
 }
 
 internal enum RunKind
