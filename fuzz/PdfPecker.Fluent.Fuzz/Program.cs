@@ -435,11 +435,22 @@ internal static class Fuzz
         Content(cell, r, depth + 1);
     }
 
+    /// <summary>The colours of a gradient: sometimes none, which the call must refuse, sometimes very many.</summary>
+    private static Color[] Palette(Random r)
+    {
+        var colors = new Color[r.Next(30) == 0 ? r.Next(200) : r.Next(4)];
+        for (int i = 0; i < colors.Length; i++) colors[i] = Color(r);
+        return colors;
+    }
+
     private static float Signed(Random r) => r.Next(2) == 0 ? Number(r) : -Number(r);
 
-    private static IContainer Decorate(IContainer c, Random r) => r.Next(49) switch
+    private static IContainer Decorate(IContainer c, Random r) => r.Next(52) switch
     {
         48 => c.Language(r.Next(10) == 0 ? Text(r) : Languages[r.Next(Languages.Length)]),
+        49 => c.BackgroundLinearGradient(r.Next(20) == 0 ? float.NaN : Signed(r) * 10, Palette(r)),
+        50 => r.Next(2) == 0 ? c.BackgroundRadialGradient(Palette(r)) : c.BackgroundRadialGradient(Signed(r) / 50, Signed(r) / 50, Palette(r)),
+        51 => c.Opacity(r.Next(20) == 0 ? Signed(r) : (float)r.NextDouble()),
         46 => c.ScaleToFit(),
         47 => r.Next(2) == 0 ? c.ShowOnce() : c.SkipOnce(),
         41 => c.ShrinkHorizontal(),

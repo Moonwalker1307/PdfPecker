@@ -84,8 +84,15 @@ internal static class Rank
     /// <summary>Applies anywhere: inherited text properties, page-break control.</summary>
     public const int Any = -1;
     public const int Size = 0;
-    public const int Paint = 1;
-    public const int Padding = 2;
+
+    /// <summary>
+    /// Opacity fades everything its element paints, so it joins an element only before that element's own background,
+    /// border or shadow: one painted outside it gets an element of its own and stays as it is.
+    /// </summary>
+    public const int Opacity = 1;
+
+    public const int Paint = 2;
+    public const int Padding = 3;
 }
 
 /// <summary>A decoration of the content inside it: a style, alignment, link, or one of the other kinds.</summary>
