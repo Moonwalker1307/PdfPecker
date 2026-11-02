@@ -113,6 +113,11 @@ internal sealed partial class StyleResolver
             if (_decls[i].Property.StartsWith("--", StringComparison.Ordinal)) _custom.Add(new(_decls[i].Property, _decls[i].Value));
         if (_custom.Count > 0) s.CustomProperties = CssVariables.Compute(parent.CustomProperties, _custom);
 
+        // zoom before any length: every absolute length on the element is multiplied by its effective zoom.
+        ApplyZoom(s, parent);
+        if (name == "html") _rootZoom = s.Zoom;
+        bool zoomed = s.Zoom != 1 || _rootZoom != 1;
+
         // direction and writing-mode before the logical properties (padding-inline-start, ...) that depend on them.
         for (int i = _count - 1; i >= 0; i--)
         {
@@ -137,8 +142,13 @@ internal sealed partial class StyleResolver
             if (_decls[i].Property == "font-size" && !ResetByAll(i, allDecl))
             {
                 var fs = Substituted(_decls[i].Value, s);
+                if (fs != null && zoomed) fs = Zoomed("font-size", fs, s, parent);
                 if (fs != null && CssUnits.HasMetricUnit(fs)) fs = RewriteMetricUnits(fs, parent, parent);
-                if (fs != null) ApplyFontSize(s, parent, fs);
+                if (fs != null)
+                {
+                    ApplyFontSize(s, parent, fs);
+                    if (zoomed) ZoomFontSizeKeyword(s, parent, fs);
+                }
                 break;
             }
         }
@@ -161,7 +171,8 @@ internal sealed partial class StyleResolver
             if (fontFirst && _applied[i]) continue;
             if (!d.HasVar)
             {
-                Apply(s, parent, d.Property, d.MetricUnits ? RewriteMetricUnits(d.Value, s, d.Property == "line-height" ? parent : s) : d.Value);
+                var dv = zoomed ? Zoomed(d.Property, d.Value, s, parent) : d.Value;
+                Apply(s, parent, d.Property, d.MetricUnits ? RewriteMetricUnits(dv, s, d.Property == "line-height" ? parent : s) : dv);
                 continue;
             }
             // var(): substitute, then expand shorthands now that the value is known.
@@ -171,8 +182,13 @@ internal sealed partial class StyleResolver
             CssParser.Expand(d.Property, value, d.Important, _expanded);
             foreach (var x in _expanded)
             {
-                var xv = CssUnits.HasMetricUnit(x.Value) ? RewriteMetricUnits(x.Value, x.Property == "font-size" ? parent : s, x.Property is "font-size" or "line-height" ? parent : s) : x.Value;
-                if (x.Property == "font-size") ApplyFontSize(s, parent, xv);
+                var xv = zoomed ? Zoomed(x.Property, x.Value, s, parent) : x.Value;
+                xv = CssUnits.HasMetricUnit(xv) ? RewriteMetricUnits(xv, x.Property == "font-size" ? parent : s, x.Property is "font-size" or "line-height" ? parent : s) : xv;
+                if (x.Property == "font-size")
+                {
+                    ApplyFontSize(s, parent, xv);
+                    if (zoomed) ZoomFontSizeKeyword(s, parent, xv);
+                }
                 else Apply(s, parent, x.Property, xv);
             }
         }
@@ -234,6 +250,7 @@ internal sealed partial class StyleResolver
         bool inlineBox = s.Display == Display.Inline && (!parent.IsFlex || parent.LegacyBox) && !parent.IsGrid;
         s.InlineFade = inlineBox ? s.Opacity * (parent.Display == Display.Inline ? parent.InlineFade : 1) : 1;
         s.InvalidateFont();
+        _zoom = 1;
         if (name == "html") _htmlStyle = s;
         if (cacheable) _styleCache[_probe.Freeze()] = s;
         Array.Clear(_decls, 0, _count);
@@ -284,7 +301,14 @@ internal sealed partial class StyleResolver
     {
         foreach (var r in rules)
         {
-            if (r.Selector.PseudoElement != which || r.Containers != null && !ContainersMatch(r.Containers, e, which) || !r.Selector.Matches(e)) continue;
+            if (r.Selector.PseudoElement != which || r.Containers != null && !ContainersMatch(r.Containers, e, which)) continue;
+            int closeness = 0;
+            if (r.Scope != null)
+            {
+                if (ScopeHops(r.Scope, r.Selector, e) is not int hops) continue;
+                closeness = ScopeCloseness(hops);
+            }
+            else if (!r.Selector.Matches(e)) continue;
             var decls = r.Declarations;
             // Cascade layers: later layers win over earlier ones and unlayered rules over all of them; for !important
             // declarations the order is reversed.
@@ -293,7 +317,7 @@ internal sealed partial class StyleResolver
             for (int i = 0; i < decls.Length; i++)
             {
                 bool important = decls[i].Important;
-                Push(important ? importantTier : tier, r.Selector.Specificity, r.Order, i, decls[i], important ? importantLayer : layer);
+                Push(important ? importantTier : tier, r.Selector.Specificity, r.Order, i, decls[i], important ? importantLayer : layer, closeness);
             }
         }
     }
@@ -364,7 +388,7 @@ internal sealed partial class StyleResolver
         (decls[i], decls[j]) = (decls[j], decls[i]);
     }
 
-    private void Push(long tier, int specificity, int order, int declIndex, Declaration d, int layer = 0)
+    private void Push(long tier, int specificity, int order, int declIndex, Declaration d, int layer = 0, int closeness = 0)
     {
         // In standards mode a unitless length is invalid, so an earlier declaration of the property wins, as Acid2 tests.
         if (StandardsMode && tier >= TierAuthor && d.HasUnitlessLength) return;
@@ -375,7 +399,10 @@ internal sealed partial class StyleResolver
         }
         long key = tier << 60
                    | (long)layer << 52
-                   | (long)Math.Min(specificity, 0xFFFFF) << 32
+                   // Scope proximity decides between equal specificities before the order does: a closer scope root
+                   // wins, and a rule outside any @scope (closeness 0) loses to a scoped one.
+                   | (long)Math.Min(specificity, 0xFFFF) << 36
+                   | (long)closeness << 32
                    | (long)Math.Min(order, 0xFFFFF) << 12
                    | (long)Math.Min(declIndex, 0xFFF);
         _keys[_count] = key;

@@ -30,7 +30,20 @@ for (int n = only ?? 0; only == null ? watch.Elapsed.TotalSeconds < seconds : n 
     cases++;
     // Each composition gets a fresh generator, so the HTML and the PDF see the same document.
     int caseSeed = unchecked(seed * 1_000_003 + n);
-    var document = Document.Create(d => Fuzz.Compose(d, new Random(caseSeed)));
+    IDocument document = Document.Create(d => Fuzz.Compose(d, new Random(caseSeed)));
+    // Some cases merge several documents, each composed from a generator of its own.
+    if (new Random(unchecked(caseSeed * 31 + 7)).Next(8) == 0)
+    {
+        var parts = new IDocument[1 + new Random(caseSeed + 1).Next(3)];
+        for (int i = 0; i < parts.Length; i++)
+        {
+            int partSeed = unchecked(caseSeed + 2 + i);
+            bool first = i == 0;
+            parts[i] = Document.Create(d => Fuzz.Compose(d, new Random(partSeed), first));
+        }
+        var merged = Document.Merge(parts);
+        document = new Random(caseSeed + 1).Next(2) == 0 ? merged.UseContinuousPageNumbers() : merged;
+    }
     bool pdf = only != null || n % pdfEvery == 0;
     string? failure = Fuzz.Check(document, pdf, ref rejected);
     if (pdf) pdfs++;
@@ -144,9 +157,10 @@ internal static class Fuzz
 
     private static Unit Unit(Random r) => (Unit)(r.Next(40) == 0 ? 7 : r.Next(0, 7));
 
-    public static void Compose(IDocumentContainer document, Random r)
+    /// <summary>Adds random pages; <paramref name="first"/> is false for the later documents of a merge.</summary>
+    public static void Compose(IDocumentContainer document, Random r, bool first = true)
     {
-        Raw = false;
+        if (first) Raw = false;
         if (r.Next(10) == 0)
         {
             document.Css(Text(r));
@@ -421,11 +435,22 @@ internal static class Fuzz
         Content(cell, r, depth + 1);
     }
 
+    /// <summary>The colours of a gradient: sometimes none, which the call must refuse, sometimes very many.</summary>
+    private static Color[] Palette(Random r)
+    {
+        var colors = new Color[r.Next(30) == 0 ? r.Next(200) : r.Next(4)];
+        for (int i = 0; i < colors.Length; i++) colors[i] = Color(r);
+        return colors;
+    }
+
     private static float Signed(Random r) => r.Next(2) == 0 ? Number(r) : -Number(r);
 
-    private static IContainer Decorate(IContainer c, Random r) => r.Next(49) switch
+    private static IContainer Decorate(IContainer c, Random r) => r.Next(52) switch
     {
         48 => c.Language(r.Next(10) == 0 ? Text(r) : Languages[r.Next(Languages.Length)]),
+        49 => c.BackgroundLinearGradient(r.Next(20) == 0 ? float.NaN : Signed(r) * 10, Palette(r)),
+        50 => r.Next(2) == 0 ? c.BackgroundRadialGradient(Palette(r)) : c.BackgroundRadialGradient(Signed(r) / 50, Signed(r) / 50, Palette(r)),
+        51 => c.Opacity(r.Next(20) == 0 ? Signed(r) : (float)r.NextDouble()),
         46 => c.ScaleToFit(),
         47 => r.Next(2) == 0 ? c.ShowOnce() : c.SkipOnce(),
         41 => c.ShrinkHorizontal(),

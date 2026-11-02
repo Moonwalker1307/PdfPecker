@@ -349,6 +349,12 @@ internal sealed partial class StyleResolver
             case RepeatProperty:
                 s.RepeatOnPages = d.Lower == "each-page" || d.Inherit && parent.RepeatOnPages;
                 break;
+            case "continue":
+                // The box is a fragmentation container of its own whose content after the first fragment is left out,
+                // and like any such container it holds its floats and keeps its margins from its children's.
+                s.ContinueDiscard = d.Lower == "discard" || d.Inherit && parent.ContinueDiscard;
+                if (s.ContinueDiscard) s.FormattingRoot = true;
+                break;
 
             // ---- SVG presentation properties (Properties.Svg.cs)
             case "fill": ApplyFill(s, parent, in d); break;

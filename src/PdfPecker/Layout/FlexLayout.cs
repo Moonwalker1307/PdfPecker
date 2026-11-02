@@ -319,6 +319,11 @@ internal sealed partial class LayoutEngine
             foreach (var it in lines[li])
             {
                 float h = it.Box!.Height;
+                // An item with continue: discard ends at the end of the page the first line starts on, so it does not
+                // make the line, and the items stretched to it, run on to the next page. Its own layout cuts it there;
+                // here it was laid out away from the pages.
+                if (li == 0 && _paginate && _grid is not ColumnGrid && it.El?.Style.ContinueDiscard == true)
+                    h = Math.Min(h, Math.Max(0, FlowEnd(PageOf(y)) - y));
                 if (SelfAlign(it, s.AlignItems) == BoxAlign.Baseline)
                 {
                     float b = BaselineOf(it);

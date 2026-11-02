@@ -408,9 +408,9 @@ internal sealed partial class StyleResolver
     {
         switch (lower)
         {
-            case "thin": return 0.75f;
-            case "medium": return 1.5f;
-            case "thick": return 3.75f;
+            case "thin": return _zoom == 1 ? 0.75f : SnapBorderWidth(0.75f * _zoom);
+            case "medium": return _zoom == 1 ? 1.5f : SnapBorderWidth(1.5f * _zoom);
+            case "thick": return _zoom == 1 ? 3.75f : SnapBorderWidth(3.75f * _zoom);
         }
         return TryParseLength(lower, em, _rootFontSize, out var len, _vw, _vh) && !len.IsAuto && !len.IsPercent ? SnapBorderWidth(len.Value) : current;
     }

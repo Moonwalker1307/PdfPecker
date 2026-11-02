@@ -130,11 +130,12 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
 - **HTML and CSS**: flexbox, grid and subgrid, CSS tables, floats with `shape-outside`, `clip-path` shapes (also
   `rect()` and `xywh()`), sizes that fill the containing block (`width: stretch` and `-webkit-fill-available`, also for
   heights and their limits), `corner-shape` (squircle, bevel, scoop, notch and `superellipse()` corners on borders,
-  backgrounds, shadows, outlines and clips), `overflow: clip` with `overflow-clip-margin`, multi-column layout,
+  backgrounds, shadows, outlines and clips), `overflow: clip` with `overflow-clip-margin`, `zoom` (as Chrome
+  computes it, for templates that shrink a page to fit), multi-column layout,
   positioning (also the legacy `clip: rect()`, and absolute boxes inside a positioned inline element, such as
   tooltips and badges), transforms, gradients (also `in oklch` and other colour spaces, and as
   list markers), fixed background images (placed on each page's paper, as Chrome prints them), filters, masks,
-  media and container queries, logical properties, `writing-mode` (with floats, sized boxes and vertical-lr line
+  media and container queries, `@scope` (scope roots, limits and proximity, as in Chrome), logical properties, `writing-mode` (with floats, sized boxes and vertical-lr line
   order), `text-wrap`, hanging indents (`text-indent` with `hanging` and `each-line`), emphasis
   marks (`text-emphasis`), trimming lines to the cap height and baseline (`text-box`, for optically centred
   buttons and badges), `line-clamp` with your own `block-ellipsis`, underlines from the font or below the descenders
@@ -153,7 +154,7 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   small `<font>` text, or an image alone in a table cell, is only as tall as its content. The old body attributes
   `topmargin`, `leftmargin`, `marginheight` and `marginwidth` set the page margins as they do in Chrome.
   [More](https://pdfpecker.net/docs/html-and-css/)
-- **Paged media**: `@page` sizes, borders, padding and background images (which cover the whole sheet) and margin boxes, running headers and footers (also a first page of its own, even pages of their own for printing on both sides, and bands
+- **Paged media**: `@page` sizes, borders, padding and background images (which cover the whole sheet) and margin boxes (also with running elements, `position: running()` and `element()`, as in Prince and WeasyPrint), running headers and footers (also a first page of its own, even pages of their own for printing on both sides, and bands
   of their own for named pages), footnotes, tables of contents with page numbers, the page count anywhere in the content (`counter(pages)`, as in Prince), the first and last page of a section and page numbers counted within it (`-pdfpecker-target-pages()`, and `{section-page:id}` in running headers and footers), break control (also table row groups
   and group header rows kept together, as reports keep a group on one page, and forced breaks between table rows and between flex lines), table rows that break inside at a page's end as in Chrome, unless a cell would have nothing before the break, flex rows whose items break at a page's end as in Chrome (the row moves whole when an item is kept whole), table
   headers and footers repeated on every page (also around a row split across pages), and
@@ -161,6 +162,9 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   [More](https://pdfpecker.net/docs/paged-media/)
 - **Content scaled to fit a box**: `-pdfpecker-scale-to-fit: shrink` fits text of any length into a fixed space, for
   labels, badges and certificates. [More](https://pdfpecker.net/docs/html-and-css/#scale-content-to-fit-a-box)
+- **Content kept to one page or box**: `continue: discard` (CSS Overflow 4) keeps the part of a box that fits on the
+  page it starts on, or in its height or `max-height`, and leaves the rest out instead of continuing on the next page.
+  Lines, images and table rows that would cross the end are left out whole.
 - **Content repeated on each page**: `-pdfpecker-repeat: each-page` draws a box again at the top of each later page its
   parent continues on, such as a label in a row beside a text several pages long.
 - **Markdown**: CommonMark 0.31 and GitHub Flavored Markdown to PDF or HTML, with footnotes, definition lists and YAML

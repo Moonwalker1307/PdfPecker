@@ -199,6 +199,21 @@ internal sealed partial class ComputedStyle
     public string? SvgMarkerEnd { get => _svgPaint.SvgMarkerEnd; set => SvgPaint.SvgMarkerEnd = value; }
     public bool SvgFilterSrgb { get => _svgPaint.SvgFilterSrgb; set => SvgPaint.SvgFilterSrgb = value; }
 
+    /// <summary>
+    /// Whether this style took every SVG paint property from <paramref name="parent"/> unchanged. A child shares its
+    /// parent's group until it sets a value in it, so this tells an element that sets no paint of its own.
+    /// </summary>
+    internal bool InheritsSvgPaint(ComputedStyle parent) => ReferenceEquals(_svgPaint, parent._svgPaint);
+
+    /// <summary>A copy of this style with the SVG paint properties of <paramref name="from"/>.</summary>
+    internal ComputedStyle WithSvgPaintOf(ComputedStyle from)
+    {
+        var c = Clone();
+        from._svgPaint.Shared = true;
+        c._svgPaint = from._svgPaint;
+        return c;
+    }
+
     // The group to change a value in, copied first when other styles share it.
     private SvgPaintFields SvgPaint => _svgPaint.Shared ? _svgPaint = _svgPaint.Copy() : _svgPaint;
 
@@ -261,6 +276,7 @@ internal sealed partial class ComputedStyle
     public bool BoxDecorationClone { get => _visual.BoxDecorationClone; set => Visual.BoxDecorationClone = value; }
     public bool ScaleToFit { get => _visual.ScaleToFit; set => Visual.ScaleToFit = value; }
     public bool RepeatOnPages { get => _visual.RepeatOnPages; set => Visual.RepeatOnPages = value; }
+    public bool ContinueDiscard { get => _visual.ContinueDiscard; set => Visual.ContinueDiscard = value; }
     public FilterFunction[]? Filters { get => _visual.Filters; set => Visual.Filters = value; }
     public FilterFunction[]? BackdropFilters { get => _visual.BackdropFilters; set => Visual.BackdropFilters = value; }
     public BackgroundImage?[]? MaskImages { get => _visual.MaskImages; set => Visual.MaskImages = value; }
@@ -318,6 +334,7 @@ internal sealed partial class ComputedStyle
         public bool BoxDecorationClone;             // box-decoration-break: clone (else slice)
         public bool ScaleToFit;                     // -pdfpecker-scale-to-fit: shrink
         public bool RepeatOnPages;                  // -pdfpecker-repeat: each-page
+        public bool ContinueDiscard;                // continue: discard
         public FilterFunction[]? Filters;           // filter functions on HTML elements; null = none
         public FilterFunction[]? BackdropFilters;   // backdrop-filter functions; null = none
         // Mask layers on HTML elements, topmost first, repeated like the background lists; null MaskImages is mask-image: none.
@@ -479,6 +496,7 @@ internal sealed partial class ComputedStyle
     public string? Content { get => _rare.Content; set => Rare.Content = value; }
     public bool ContentNone { get => _rare.ContentNone; set => Rare.ContentNone = value; }
     public string? StringSet { get => _rare.StringSet; set => Rare.StringSet = value; }
+    public string? RunningName { get => _rare.RunningName; set => Rare.RunningName = value; }
     public int? BookmarkLevel { get => _rare.BookmarkLevel; set => Rare.BookmarkLevel = value; }
     public string? BookmarkLabel { get => _rare.BookmarkLabel; set => Rare.BookmarkLabel = value; }
     public bool BookmarkClosed { get => _rare.BookmarkClosed; set => Rare.BookmarkClosed = value; }
@@ -533,6 +551,7 @@ internal sealed partial class ComputedStyle
         public string? Content;                     // the content property as written; null = normal
         public bool ContentNone;                    // content: none, which on ::marker removes the marker (normal keeps it)
         public string? StringSet;                   // string-set as written (named strings for running headers); null = none
+        public string? RunningName;                 // position: running(name): taken out of the flow for element() in margin boxes
         public int? BookmarkLevel;                  // bookmark-level: null = unset (h1-h6 take their own level), 0 = none
         public string? BookmarkLabel;               // bookmark-label as written; null = content(text)
         public bool BookmarkClosed;                 // bookmark-state: closed
