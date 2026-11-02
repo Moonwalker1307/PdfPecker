@@ -24,7 +24,10 @@ internal sealed class PagedContent
     /// The anchor of where the element with an id ends, which the layout records next to where it starts, for the last
     /// page of a section in <c>-pdfpecker-target-pages()</c>.
     /// </summary>
-    public static string EndKey(string id) => id + "\u0001end";
+    public static string EndKey(string id) => id + EndSuffix;
+
+    /// <summary>What <see cref="EndKey"/> adds to an id.</summary>
+    public const string EndSuffix = "\u0001end";
 
     /// <summary>
     /// The layout keys of the elements that show their own page within a section, which the layout records where their
