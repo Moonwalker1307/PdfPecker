@@ -1251,6 +1251,7 @@ internal sealed partial class LayoutEngine
             // The box's ops are now one layer at opsStart: a probe it took scans that layer, not past where its ops ended.
             if (probe != null) probe.ScanFrom = Math.Min(probe.ScanFrom, opsStart);
         }
+        if (s.RepeatOnPages) RecordRepeat(e, y, bottom, opsStart);
         // Where the box ends, for the last page of a section: just above its bottom edge, so that a box that ends where
         // a page does counts that page and not the next.
         if (e.Id != null) SetAnchor(PagedContent.EndKey(e.Id), Math.Max(y, bottom - 0.05f));
@@ -1316,6 +1317,7 @@ internal sealed partial class LayoutEngine
         var probe = _childProbe;
         _childProbe = null;
         var s = e.Style;
+        int repeatMark = RepeatMark;
         var markerAtStart = _marker;
         int listIndexAtStart = _currentListIndex;
         if (e.Id != null) SetAnchor(e.Id, y);
@@ -1503,6 +1505,7 @@ internal sealed partial class LayoutEngine
                 {
                     if (cbFrame != null) _frames.Remove(cbFrame);
                     Truncate(opsStart);
+                    if (_repeats != null && _repeats.Count > repeatMark) _repeats.RemoveRange(repeatMark, _repeats.Count - repeatMark);
                     _marker = markerAtStart;
                     _currentListIndex = listIndexAtStart;
                     _childPageBox = parentPages;
@@ -1565,6 +1568,7 @@ internal sealed partial class LayoutEngine
             e.ContainerHeight = contentH;
         }
 
+        DrawRepeats(e, repeatMark, cy + contentH);
         float bottom = cy + contentH + pb + bb;
         // A box taller than its content is that height on the pages it is split across, under a header repeated over a
         // split table row and above a footer there.

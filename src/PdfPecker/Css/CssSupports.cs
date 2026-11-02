@@ -67,7 +67,7 @@ internal static class CssSupports
         "-webkit-mask-position-y", "-webkit-mask-size", "-webkit-mask-repeat", "-webkit-mask-origin", "-webkit-mask-clip",
         "-webkit-mask-composite", "-webkit-column-break-before", "-webkit-column-break-after", "-webkit-column-break-inside",
         "-webkit-box-orient", "-webkit-box-direction", "-webkit-box-pack", "-webkit-box-align", "-webkit-box-flex",
-        "-webkit-box-ordinal-group", "-pdfpecker-scale-to-fit", "continue",
+        "-webkit-box-ordinal-group", "-pdfpecker-scale-to-fit", "-pdfpecker-repeat", "continue",
     };
 
     /// <summary>Whether this library applies the property.</summary>

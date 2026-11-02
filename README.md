@@ -165,6 +165,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
 - **Content kept to one page or box**: `continue: discard` (CSS Overflow 4) keeps the part of a box that fits on the
   page it starts on, or in its height or `max-height`, and leaves the rest out instead of continuing on the next page.
   Lines, images and table rows that would cross the end are left out whole.
+- **Content repeated on each page**: `-pdfpecker-repeat: each-page` draws a box again at the top of each later page its
+  parent continues on, such as a label in a row beside a text several pages long.
 - **Markdown**: CommonMark 0.31 and GitHub Flavored Markdown to PDF or HTML, with footnotes, definition lists and YAML
   front matter. [More](https://pdfpecker.net/docs/markdown/)
 - **Fonts**: TrueType, OpenType, WOFF and WOFF2, subset and embedded, with kerning, ligatures, variable fonts and

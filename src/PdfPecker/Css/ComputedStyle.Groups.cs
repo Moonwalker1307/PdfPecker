@@ -275,6 +275,7 @@ internal sealed partial class ComputedStyle
     public bool Isolate { get => _visual.Isolate; set => Visual.Isolate = value; }
     public bool BoxDecorationClone { get => _visual.BoxDecorationClone; set => Visual.BoxDecorationClone = value; }
     public bool ScaleToFit { get => _visual.ScaleToFit; set => Visual.ScaleToFit = value; }
+    public bool RepeatOnPages { get => _visual.RepeatOnPages; set => Visual.RepeatOnPages = value; }
     public bool ContinueDiscard { get => _visual.ContinueDiscard; set => Visual.ContinueDiscard = value; }
     public FilterFunction[]? Filters { get => _visual.Filters; set => Visual.Filters = value; }
     public FilterFunction[]? BackdropFilters { get => _visual.BackdropFilters; set => Visual.BackdropFilters = value; }
@@ -332,6 +333,7 @@ internal sealed partial class ComputedStyle
         public bool Isolate;                        // isolation: isolate
         public bool BoxDecorationClone;             // box-decoration-break: clone (else slice)
         public bool ScaleToFit;                     // -pdfpecker-scale-to-fit: shrink
+        public bool RepeatOnPages;                  // -pdfpecker-repeat: each-page
         public bool ContinueDiscard;                // continue: discard
         public FilterFunction[]? Filters;           // filter functions on HTML elements; null = none
         public FilterFunction[]? BackdropFilters;   // backdrop-filter functions; null = none
