@@ -65,6 +65,12 @@ internal sealed class HtmlWriter
     /// <summary>Whether some text has a footnote, which needs the rule that sets out the footnote area.</summary>
     private bool _footnotes;
 
+    /// <summary>Whether the document has Markdown, which needs its stylesheet.</summary>
+    private bool _markdown;
+
+    /// <summary>The ids the Markdown written so far has taken, so a later call's repeated headings and footnotes get new ones.</summary>
+    private readonly HashSet<string> _markdownIds = new(StringComparer.Ordinal);
+
     /// <summary>The headings of the page content in document order, which a table of contents lists; empty without one.</summary>
     private readonly List<(int Level, string Text, string Id)> _headings = [];
 
@@ -150,6 +156,7 @@ internal sealed class HtmlWriter
         if (_sectionWithin) _html.Append("[data-section-within]::after{content:-pdfpecker-target-pages(attr(data-section-within),current)}");
         foreach (var (pattern, number) in _leaders)
             _html.Append("[data-leader=\"").Append(number.ToString(CultureInfo.InvariantCulture)).Append("\"]::after{content:leader(").Append(pattern).Append(")}");
+        if (_markdown) _html.Append(MarkdownHtml.Css);
         if (_footnotes) _html.Append("@page{@footnote{margin-top:8pt;padding-top:4pt;border-top:0.5pt solid currentColor}}");
         foreach (var rule in css) _html.Append('\n').Append(rule);
         _html.Append("</style></head>\n<body");
@@ -169,8 +176,10 @@ internal sealed class HtmlWriter
     {
         _html.Append("@page");
         if (name != null) _html.Append(' ').Append(name);
-        _html.Append("{size:").Append(CssValue.Pt(page.Size.Width)).Append(' ').Append(CssValue.Pt(page.Size.Height))
-            .Append(";margin:").Append(CssValue.Pt(page.MarginTop)).Append(' ').Append(CssValue.Pt(page.MarginRight)).Append(' ')
+        _html.Append("{size:").Append(CssValue.Pt(page.Size.Width)).Append(' ');
+        if (page.ContinuousHeight) _html.Append("auto");
+        else _html.Append(CssValue.Pt(page.Size.Height));
+        _html.Append(";margin:").Append(CssValue.Pt(page.MarginTop)).Append(' ').Append(CssValue.Pt(page.MarginRight)).Append(' ')
             .Append(CssValue.Pt(page.MarginBottom)).Append(' ').Append(CssValue.Pt(page.MarginLeft));
         if (page.Background is { } background) _html.Append(";background:").Append(CssValue.Color(background));
         _html.Append('}');
@@ -324,6 +333,11 @@ internal sealed class HtmlWriter
             case HtmlElement html:
                 if (box.MustEmit) Open(box);
                 _html.Append(html.Html);
+                break;
+            case MarkdownElement markdown:
+                if (box.MustEmit) Open(box);
+                _markdown = true;
+                MarkdownHtml.Write(_html, markdown.Html, _markdownIds);
                 break;
         }
         CloseTo(depth);

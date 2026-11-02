@@ -1,3 +1,4 @@
+using System.Globalization;
 using FluentExamples;
 
 namespace PdfPecker.Fluent.Tests;
@@ -526,6 +527,53 @@ public sealed class LayoutTests
         Assert.Throws<ArgumentNullException>(() => Document.Merge(Invoice("A"), null!));
     }
 
+    /// <summary>The page sizes in page order, in points.</summary>
+    private static List<(double W, double H)> MediaBoxes(byte[] pdf)
+        => System.Text.RegularExpressions.Regex.Matches(System.Text.Encoding.Latin1.GetString(pdf), @"/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]")
+            .Select(m => (double.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture), double.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture)))
+            .ToList();
+
+    [Fact]
+    public void A_continuous_page_is_as_tall_as_its_content()
+    {
+        var receipt = Document.Create(d => d.Page(p =>
+        {
+            p.ContinuousSize(200);
+            p.Margin(10);
+            p.Header().Height(30).Text("Shop");
+            p.Content().Column(c => { for (int i = 0; i < 5; i++) c.Item().Height(20).Text("Item " + i); });
+            p.Footer().Height(20).Text("Thanks");
+        }));
+        Assert.Contains("@page{size:200pt auto;", Html.Css(receipt));
+        var size = Assert.Single(MediaBoxes(receipt.GeneratePdf(new PdfOptions { Compress = false })));
+        Assert.Equal(200, size.W, 0.01);
+        Assert.Equal(10 + 30 + 100 + 20 + 10, size.H, 0.5);
+    }
+
+    [Fact]
+    public void Each_merged_receipt_is_a_page_of_its_own_height()
+    {
+        static Document Receipt(int items) => Document.Create(d => d.Page(p =>
+        {
+            p.ContinuousSize(80, Unit.Millimetre);
+            p.Content().Column(c => { for (int i = 0; i < items; i++) c.Item().Height(20).Text("Item " + i); });
+        }));
+        var pdf = Document.Merge(Receipt(3), Receipt(10)).GeneratePdf(new PdfOptions { Compress = false });
+        var sizes = MediaBoxes(pdf);
+        Assert.Equal(2, sizes.Count);
+        Assert.Equal(60, sizes[0].H, 0.5);
+        Assert.Equal(200, sizes[1].H, 0.5);
+        Assert.Equal(80 * 72 / 25.4, sizes[0].W, 0.1);
+    }
+
+    [Fact]
+    public void A_size_after_continuous_size_gives_a_fixed_page_again()
+    {
+        var document = Document.Create(d => d.Page(p => { p.ContinuousSize(200); p.Size(PageSizes.A6); p.Content().Text("x"); }));
+        Assert.DoesNotContain("auto", Html.Css(document));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Document.Create(d => d.Page(p => p.ContinuousSize(0))).GenerateHtml());
+    }
+
     [Fact]
     public void An_empty_document_is_one_blank_page()
         => Assert.Equal(1, PdfToImage.GetPageCount(Document.Create(_ => { }).GeneratePdf()));
@@ -741,6 +789,88 @@ public sealed class LayoutTests
         Assert.Contains("Body even", pages[1].Text);
         Assert.Contains("Body odd", pages[2].Text);
     }
+
+    [Fact]
+    public void Markdown_becomes_its_html_in_a_styled_block()
+    {
+        var document = Html.Page(c => c.Markdown("# Title\n\nSome *soft*\nwrapped text."));
+        Assert.Equal(
+            "<main><div class=\"md\"><h1 id=\"title\">Title</h1>\n<p>Some <em>soft</em>\nwrapped text.</p>\n</div></main>",
+            Html.Body(DocumentGenerator.Html(document, false, out _)));
+        Assert.Contains(".md p,.md h1,", Html.Css(document));
+        Assert.DoesNotContain(".md{", Html.Css(Html.Page(c => c.Text("x"))));
+    }
+
+    [Fact]
+    public void Markdown_shows_raw_html_as_text()
+    {
+        string html = Html.Of(c => c.Markdown("<script>alert(1)</script>\n\nA <b>bold</b> <x-evil> tag."));
+        Assert.DoesNotContain("<script", html);
+        Assert.DoesNotContain("<b>", html);
+        Assert.DoesNotContain("<x-evil", html);
+        Assert.Contains("&lt;script&gt;", html);
+    }
+
+    [Theory]
+    [InlineData("[x](javascript:alert(1))")]
+    [InlineData("[x](JavaScript:alert(1))")]
+    [InlineData("[x](file:///etc/passwd)")]
+    [InlineData("[x](data:text/html,hi)")]
+    [InlineData("[x](relative/page.html)")]
+    [InlineData("<vbscript:x>")]
+    public void Markdown_drops_links_that_are_not_web_mail_or_in_document(string markdown)
+    {
+        string html = Html.Of(c => c.Markdown(markdown));
+        Assert.DoesNotContain("href", html);
+        Assert.Contains("<a>", html);
+    }
+
+    [Fact]
+    public void Markdown_keeps_web_mail_and_heading_links()
+    {
+        string html = Html.Of(c => c.Markdown("# Top\n\n[a](https://example.com/?a=1&b=2) [b](mailto:me@example.com) [c](#top) <https://x.org>"));
+        Assert.Contains("<a href=\"https://example.com/?a=1&amp;b=2\">a</a>", html);
+        Assert.Contains("<a href=\"mailto:me@example.com\">b</a>", html);
+        Assert.Contains("<a href=\"#top\">c</a>", html);
+        Assert.Contains("<a href=\"https://x.org\">https://x.org</a>", html);
+    }
+
+    [Fact]
+    public void Repeated_markdown_ids_are_renamed_so_each_call_links_to_its_own_footnotes()
+    {
+        const string text = "# Notes\n\nClaim[^1] and [back](#notes).\n\n[^1]: Source.";
+        string html = Html.Of(c => c.Column(col => { col.Item().Markdown(text); col.Item().Markdown(text); }));
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(html, "id=\"notes\""));
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(html, "id=\"fn-1\""));
+        Assert.Contains("id=\"notes-2\"", html);
+        Assert.Contains("id=\"fn-1-2\"", html);
+        Assert.Contains("href=\"#fn-1-2\"", html);
+        Assert.Contains("href=\"#notes-2\"", html);
+    }
+
+    [Fact]
+    public void Markdown_renders_into_the_pdf_with_the_page_around_it()
+    {
+        var document = Document.Create(d => d.Page(p =>
+        {
+            p.Header().Text("Header");
+            p.Content().Column(c =>
+            {
+                c.Item().Text("Before");
+                c.Item().Markdown("## Section\n\n| Item | Price |\n|---|--:|\n| Tea | 4.00 |\n\n- [x] done\n- open\n\n```\ncode()\n```");
+                c.Item().Text("After");
+            });
+        }));
+        string text = PdfText.Extract(document.GeneratePdf());
+        foreach (var part in new[] { "Header", "Before", "Section", "Tea", "4.00", "done", "code()", "After" })
+            Assert.Contains(part, text);
+        Assert.True(text.IndexOf("Before", StringComparison.Ordinal) < text.IndexOf("Section", StringComparison.Ordinal));
+        Assert.True(text.IndexOf("code()", StringComparison.Ordinal) < text.IndexOf("After", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Markdown_rejects_null()
+        => Assert.Throws<ArgumentNullException>(() => Html.Of(c => c.Markdown(null!)));
 
     [Fact]
     public void Language_writes_the_lang_attribute_and_an_inner_language_nests()

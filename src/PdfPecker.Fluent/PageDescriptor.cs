@@ -50,6 +50,19 @@ public sealed class PageDescriptor
         Check(size.Width, nameof(size));
         Check(size.Height, nameof(size));
         _page.Size = size;
+        _page.ContinuousHeight = false;
+        return this;
+    }
+
+    /// <summary>
+    /// A page of the given width that is as tall as its content, header, footer and margins, for receipts and labels
+    /// on a roll. Content taller than 14,400 points (200 inches) goes on to more pages of that height.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The width is not between 1 and 14,400 points.</exception>
+    public PageDescriptor ContinuousSize(float width, Unit unit = Unit.Point)
+    {
+        _page.Size = new PageSize(Check(Length.ToPoints(width, unit), nameof(width)), 14_400);
+        _page.ContinuousHeight = true;
         return this;
     }
 

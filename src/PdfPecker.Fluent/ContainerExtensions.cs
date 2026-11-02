@@ -247,6 +247,13 @@ public static partial class ContainerExtensions
     /// </summary>
     public static IContainer Repeat(this IContainer container) => Decorate(container, new Decorator(DecoratorKind.Repeat));
 
+    /// <summary>
+    /// Keeps the content to the page it starts on, or to a <c>Height</c> or <c>MaxHeight</c> set before this call when
+    /// that ends first: what does not fit is left out instead of going on to the next page. Lines, images and table rows
+    /// that would cross the end are left out whole.
+    /// </summary>
+    public static IContainer StopPaging(this IContainer container) => Style(container, Rank.Size, ("continue", "discard"));
+
     /// <summary>Renders the content only when <paramref name="condition"/> is true.</summary>
     public static IContainer ShowIf(this IContainer container, bool condition)
         => condition ? container : Decorate(container, new Decorator(DecoratorKind.Hidden));
@@ -374,15 +381,27 @@ internal static class Links
     public static string Check(string url, string paramName)
     {
         ArgumentNullException.ThrowIfNull(url, paramName);
+        return TryCheck(url, out var checkedUrl)
+            ? checkedUrl
+            : throw new ArgumentException("A link must be an absolute http, https or mailto address.", paramName);
+    }
+
+    /// <summary>Whether a link is an absolute http, https or mailto address, as <see cref="Check"/> requires.</summary>
+    public static bool IsSafe(string url) => TryCheck(url, out _);
+
+    private static bool TryCheck(string url, out string checkedUrl)
+    {
         url = url.Trim();
+        checkedUrl = url;
         // The scheme is checked before System.Uri parses the address: .NET throws IndexOutOfRangeException for some
         // file and UNC paths, such as two backslashes and a right-to-left override.
         if (!(url.StartsWith("http:", StringComparison.OrdinalIgnoreCase) || url.StartsWith("https:", StringComparison.OrdinalIgnoreCase)
               || url.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase))
             || !Uri.TryCreate(url, UriKind.Absolute, out var uri)
             || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeMailto))
-            throw new ArgumentException("A link must be an absolute http, https or mailto address.", paramName);
-        return uri.OriginalString;
+            return false;
+        checkedUrl = uri.OriginalString;
+        return true;
     }
 
     public static string Section(string name, string paramName)

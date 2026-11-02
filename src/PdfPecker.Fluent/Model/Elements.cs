@@ -315,10 +315,21 @@ internal sealed class HtmlElement : Element
     public string Html { get; }
 }
 
+/// <summary>A Markdown call: the HTML PdfPecker's Markdown converter made of it, with raw HTML escaped.</summary>
+internal sealed class MarkdownElement : Element
+{
+    public MarkdownElement(string html) => Html = html;
+
+    public string Html { get; }
+}
+
 /// <summary>One <c>Page</c> call: a page size, margins and the header, content and footer slots.</summary>
 internal sealed class PageSet
 {
     public PageSize Size { get; set; } = PageSize.A4;
+
+    /// <summary>Whether the page is as tall as its content (ContinuousSize), which PdfPecker's <c>size: width auto</c> gives.</summary>
+    public bool ContinuousHeight { get; set; }
     public float MarginTop { get; set; }
     public float MarginRight { get; set; }
     public float MarginBottom { get; set; }

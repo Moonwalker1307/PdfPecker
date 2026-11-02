@@ -158,6 +158,18 @@ internal sealed partial class StyleResolver
     }
 
     /// <summary>
+    /// Whether an image-rendering value keeps an enlarged image's pixels sharp: true for pixelated and crisp-edges (and
+    /// the older names Firefox, Safari and SVG use for crisp-edges), false for auto, smooth and high-quality, and null
+    /// for a value that is not valid.
+    /// </summary>
+    internal static bool? ParseImageRendering(string lower) => lower switch
+    {
+        "pixelated" or "crisp-edges" or "-moz-crisp-edges" or "-webkit-optimize-contrast" or "optimizespeed" or "optimize-contrast" => true,
+        "auto" or "smooth" or "high-quality" or "optimizequality" => false,
+        _ => null,
+    };
+
+    /// <summary>
     /// Parses initial-letter: a size of at least 1 followed by a whole sink of at least 1, or by drop or raise (raise
     /// sinks by one line, drop and nothing by the size rounded up, given as 0). Null when the value is not valid.
     /// </summary>

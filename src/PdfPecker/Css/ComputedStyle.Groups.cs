@@ -68,6 +68,7 @@ internal sealed partial class ComputedStyle
     public bool CaptionBottom { get => _typography.CaptionBottom; set => Typography.CaptionBottom = value; }
     public bool EmptyCellsHide { get => _typography.EmptyCellsHide; set => Typography.EmptyCellsHide = value; }
     public bool ImageOrientationNone { get => _typography.ImageOrientationNone; set => Typography.ImageOrientationNone = value; }
+    public bool ImagePixelated { get => _typography.ImagePixelated; set => Typography.ImagePixelated = value; }
     public TextEdgeOver TextEdgeOver { get => _typography.TextEdgeOver; set => Typography.TextEdgeOver = value; }
     public TextEdgeUnder TextEdgeUnder { get => _typography.TextEdgeUnder; set => Typography.TextEdgeUnder = value; }
     public int Orphans { get => _typography.Orphans; set => Typography.Orphans = value; }
@@ -109,6 +110,7 @@ internal sealed partial class ComputedStyle
         public bool CaptionBottom;    // caption-side: bottom (inherited)
         public bool EmptyCellsHide;   // empty-cells: hide (inherited): with separated borders, empty cells paint nothing
         public bool ImageOrientationNone; // image-orientation: none (inherited): photos are drawn as stored, ignoring EXIF
+        public bool ImagePixelated;   // image-rendering: pixelated or crisp-edges (inherited): enlarged images keep hard pixel edges
         public TextEdgeOver TextEdgeOver;   // text-box-edge, over the text (inherited)
         public TextEdgeUnder TextEdgeUnder; // text-box-edge, under the text (inherited)
         public int Orphans = 2, Widows = 2; // minimum lines of a paragraph left at the bottom / carried to the top of a page

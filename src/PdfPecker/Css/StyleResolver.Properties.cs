@@ -132,6 +132,7 @@ internal sealed partial class StyleResolver
             case "empty-cells": s.EmptyCellsHide = d.Lower == "hide"; break;
             // Angles are deprecated and ignored, as in Chrome, so only none turns EXIF orientation off.
             case "image-orientation": s.ImageOrientationNone = d.Lower == "none"; break;
+            case "image-rendering": if (ParseImageRendering(d.Lower) is { } pixelated) s.ImagePixelated = pixelated; break;
             case "border-spacing-h": ApplyBorderSpacing(ref s.BorderSpacingH, in d); break;
             case "border-spacing-v": ApplyBorderSpacing(ref s.BorderSpacingV, in d); break;
 

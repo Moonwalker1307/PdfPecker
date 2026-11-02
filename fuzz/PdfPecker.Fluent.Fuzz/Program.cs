@@ -95,6 +95,9 @@ internal static class Fuzz
                         || Count(page, "<body") != 1)
                         return "the document structure was broken";
                     if (page.Contains('\0')) return "a NUL character reached the HTML";
+                    if (page.Contains("href=\"javascript:", StringComparison.OrdinalIgnoreCase) || page.Contains("href=\"data:", StringComparison.OrdinalIgnoreCase)
+                        || page.Contains("href=\"file:", StringComparison.OrdinalIgnoreCase))
+                        return "an unsafe link reached the HTML";
                 }
                 // Like the library fuzzer's html target, a page limit keeps a document of huge margins or padding, which
                 // can run to tens of thousands of pages at the default limit, from spending the time bound on pages.
@@ -131,6 +134,22 @@ internal static class Fuzz
             else s.Append(Pieces[r.Next(Pieces.Length)]);
         }
         if (r.Next(50) == 0) s.Append('y', r.Next(1, 20_000));
+        return s.ToString();
+    }
+
+    private static readonly string[] MarkdownPieces =
+    [
+        "# ", "## ", "\n", "\n\n", "*", "_", "**", "~~", "`", "```\n", "> ", "- ", "1. ", "- [x] ", "---\n", "[a](", "](",
+        ")", "[^1]", "[^1]: ", "![i](", "<javascript:x>", "javascript:", "data:", "file:", "https://x.org", "#a", "\"",
+        "| a | b |\n|---|--:|\n| 1 | 2 |\n", "Term\n: ", "<b>", "&quot;", " id=\"x\"", " href=\"", "---\ntitle: t\n---\n",
+    ];
+
+    /// <summary>Markdown syntax mixed with hostile text, which must never become markup or an unsafe link.</summary>
+    private static string Markdown(Random r)
+    {
+        var s = new System.Text.StringBuilder();
+        for (int i = r.Next(0, 12); i > 0; i--)
+            s.Append(r.Next(3) == 0 ? Text(r) : MarkdownPieces[r.Next(MarkdownPieces.Length)]);
         return s.ToString();
     }
 
@@ -172,6 +191,7 @@ internal static class Fuzz
             document.Page(page =>
             {
                 if (r.Next(3) == 0) page.Size(r.Next(30) == 0 ? Number(r) : r.Next(20, 1500), r.Next(30) == 0 ? Number(r) : r.Next(20, 1500));
+                if (r.Next(8) == 0) page.ContinuousSize(r.Next(30) == 0 ? Number(r) : r.Next(20, 1500));
                 if (r.Next(2) == 0) page.Margin(Number(r), Unit(r));
                 if (r.Next(4) == 0) page.PageColor(Color(r));
                 if (r.Next(4) == 0) page.DefaultTextStyle(s => Style(s, r));
@@ -381,6 +401,7 @@ internal static class Fuzz
                     c.Html(Text(r));
                     Raw = true;
                 }
+                else if (r.Next(3) == 0) c.Markdown(Markdown(r));
                 else c.LineVertical(Number(r));
                 break;
             case 9:
@@ -465,9 +486,10 @@ internal static class Fuzz
 
     private static float Signed(Random r) => r.Next(2) == 0 ? Number(r) : -Number(r);
 
-    private static IContainer Decorate(IContainer c, Random r) => r.Next(53) switch
+    private static IContainer Decorate(IContainer c, Random r) => r.Next(54) switch
     {
-        52 => c.Repeat(),
+        52 => c.StopPaging(),
+        53 => c.Repeat(),
         48 => c.Language(r.Next(10) == 0 ? Text(r) : Languages[r.Next(Languages.Length)]),
         49 => c.BackgroundLinearGradient(r.Next(20) == 0 ? float.NaN : Signed(r) * 10, Palette(r)),
         50 => r.Next(2) == 0 ? c.BackgroundRadialGradient(Palette(r)) : c.BackgroundRadialGradient(Signed(r) / 50, Signed(r) / 50, Palette(r)),
