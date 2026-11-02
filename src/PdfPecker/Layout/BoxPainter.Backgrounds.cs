@@ -43,9 +43,10 @@ internal static partial class BoxPainter
         }
 
         /// <summary>Sizes an SVG file against its positioning area; false when it has no size to draw at.</summary>
-        public bool SizeSvg(float areaW, float areaH)
+        public bool SizeSvg(float areaW, float areaH, float zoom)
         {
-            (Width, Height, HasRatio, _) = SvgSize(Svg!, areaW, areaH);
+            (Width, Height, HasRatio, bool natural) = SvgSize(Svg!, areaW, areaH);
+            if (natural && zoom != 1) (Width, Height) = (Width * zoom, Height * zoom);
             return Width > 0 && Height > 0;
         }
     }
@@ -74,6 +75,8 @@ internal static partial class BoxPainter
         ComputedStyle? box = null, (float X, float Y, float W, float H)? canvas = null, (float X, float Y, float W, float H)? fragment = null)
     {
         if (!LayerSource.TryLoad(layer, images, s.ImageOrientationNone, out var source)) return;
+        // An image's own size is in CSS pixels, which a zoomed box shows that much larger.
+        if (s.Zoom != 1 && source.Image != null) (source.Width, source.Height) = (source.Width * s.Zoom, source.Height * s.Zoom);
         var (ox, oy, ow, oh) = BoxOf(box ?? s, LayerValue(s.BackgroundOrigins, i, BackgroundBox.PaddingBox), x, y, w, h, basis);
         // A line fragment of an inline box paints only its own part of the box, inside its own corners.
         var (cx, cy, cw, ch) = canvas ?? Within(BoxOf(s, LayerValue(s.BackgroundClips, i, BackgroundBox.BorderBox), x, y, w, h, basis), fragment);
@@ -114,7 +117,7 @@ internal static partial class BoxPainter
     /// <summary>Sizes, positions and spaces the tile of layer <paramref name="i"/> in the positioning area (ox, oy, ow, oh); null when nothing shows.</summary>
     private static BackgroundTile? Tile(ComputedStyle s, int i, LayerSource source, float ox, float oy, float ow, float oh)
     {
-        if (source.Svg != null && !source.SizeSvg(ow, oh)) return null;
+        if (source.Svg != null && !source.SizeSvg(ow, oh, s.Zoom)) return null;
 
         var size = LayerValue(s.BackgroundSizes, i, BackgroundSize.Auto);
         var (tw, th) = TileSize(size, source, ow, oh);

@@ -90,7 +90,30 @@ internal static class CssUnits
         return sb.Append(value, copied, value.Length - copied).ToString();
     }
 
-    // Finds the next number followed by a unit: its start (with a sign), the end of the number, and the unit's extent.
+    /// <summary>
+    /// Multiplies every number with a unit (or a percentage) by the factor <paramref name="factorOf"/> gives for its
+    /// unit in lower case, keeping the unit. Numbers whose factor is 1 are left as written.
+    /// </summary>
+    public static string Scale(string value, Func<string, float> factorOf)
+    {
+        StringBuilder? sb = null;
+        int copied = 0, i = 0, rewrites = 0;
+        while (rewrites < MaxRewrites && NextNumber(value, ref i, out int start, out int numberEnd, out int unitStart, out int unitEnd))
+        {
+            float k = factorOf(value.Substring(unitStart, unitEnd - unitStart).ToLowerInvariant());
+            if (k == 1 || !float.TryParse(value.AsSpan(start, numberEnd - start), NumberStyles.Float, CultureInfo.InvariantCulture, out float n)) continue;
+            float result = n * k;
+            if (!float.IsFinite(result)) continue;
+            sb ??= new StringBuilder(value.Length + 8);
+            sb.Append(value, copied, start - copied).Append(result.ToString("0.########", CultureInfo.InvariantCulture));
+            copied = numberEnd;
+            rewrites++;
+        }
+        if (sb == null) return value;
+        return sb.Append(value, copied, value.Length - copied).ToString();
+    }
+
+    // Finds the next number followed by a unit (or a percent sign): its start (with a sign), the end of the number, and the unit's extent.
     // Numbers inside strings and url() and the digits of identifiers (h1, --a2, #fff) are not numbers.
     private static bool NextNumber(string v, ref int i, out int start, out int numberEnd, out int unitStart, out int unitEnd)
     {
@@ -132,6 +155,7 @@ internal static class CssUnits
             }
             int u = j;
             while (u < v.Length && v[u] is (>= 'a' and <= 'z') or (>= 'A' and <= 'Z')) u++;
+            if (u == j && u < v.Length && v[u] == '%') u++;
             i = Math.Max(u, i + 1);
             if (!boundary || u == j) continue;
             start = s; numberEnd = j; unitStart = j; unitEnd = u;

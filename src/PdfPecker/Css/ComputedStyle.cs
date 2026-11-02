@@ -296,6 +296,7 @@ internal sealed partial class ComputedStyle
     public bool Italic;
     public float FontStretch = 100;          // font-stretch as a percentage of normal width
     public float FontSize = 12f; // 16px
+    public float Zoom = 1;       // the effective zoom: this element's zoom times its parent's, which every absolute length has
     public float ParentFontSize = 12f; // the parent's font size, which sub and super shift by
     public byte FontSizeKeyword = 4;   // the font-size keyword the size comes from (1 xx-small to 8 xxx-large); 0 = none
     public bool FontSizeAbsolute;      // the size comes from an absolute length, here or on an ancestor
