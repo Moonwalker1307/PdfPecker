@@ -218,6 +218,23 @@ public class PagedMediaTests
     }
 
     [Fact]
+    public void Target_pages_count_a_section_over_several_named_pages()
+    {
+        // Each named page is laid out on its own, and the section's end is in the last of them.
+        var html = @"<style>
+            @page one { size: A6 } @page two { size: A5 }
+            .one { page: one } .two { page: two }
+            a::after { content: '[' -pdfpecker-target-pages(attr(href), first) '-' -pdfpecker-target-pages(attr(href), last)
+                ' n=' -pdfpecker-target-pages(attr(href), count) ']' }
+          </style>
+          <p><a href='#s'></a></p>
+          <div id='s'><div class='one'><p>one</p></div><div class='two'><p style='height: 1000px'>two</p><p>end</p></div></div>";
+        var pages = PdfText.ExtractPages(HtmlToPdf.Convert(html)).Select(p => p.Text).ToArray();
+        Assert.Equal(4, pages.Length);
+        Assert.Contains("[2-4 n=3]", pages[0]);
+    }
+
+    [Fact]
     public void The_page_within_a_section_needs_no_id()
     {
         // The element showing its page has no id, and it is where its own line is, not where its box started.

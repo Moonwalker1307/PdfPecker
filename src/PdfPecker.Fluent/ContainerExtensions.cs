@@ -60,6 +60,69 @@ public static partial class ContainerExtensions
     public static IContainer Background(this IContainer container, Color color)
         => Style(container, Rank.Paint, ("background-color", CssValue.Color(color)));
 
+    /// <summary>
+    /// Fills the slot with a linear gradient through <paramref name="colors"/>, spread evenly. The angle is in degrees
+    /// clockwise from a gradient running left to right, as in QuestPDF: 0 runs left to right, 90 top to bottom, and 45
+    /// from the top-left corner to the bottom-right one. A <see cref="Background"/> before it shows through translucent
+    /// colours.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="colors"/> is empty.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="angle"/> is not finite.</exception>
+    // CSS measures the angle clockwise from a gradient running bottom to top, a quarter turn before QuestPDF's.
+    public static IContainer BackgroundLinearGradient(this IContainer container, float angle, params Color[] colors)
+        => Gradient(container, "linear-gradient(" + CssValue.Number(Finite(angle, nameof(angle)) % 360 + 90) + "deg,", colors);
+
+    /// <summary>
+    /// Fills the slot with an elliptical gradient through <paramref name="colors"/>, spread evenly from the slot's
+    /// centre (the first colour) to its corners (the last), for a glow behind a cover page or a badge.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="colors"/> is empty.</exception>
+    public static IContainer BackgroundRadialGradient(this IContainer container, params Color[] colors)
+        => Gradient(container, "radial-gradient(", colors);
+
+    /// <summary>
+    /// Fills the slot with an elliptical gradient through <paramref name="colors"/> from a centre of your choice to the
+    /// farthest corner. <paramref name="centerX"/> and <paramref name="centerY"/> are fractions of the slot's width and
+    /// height: 0.5 and 0.5 is the middle, 0 and 0 the top-left corner.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="colors"/> is empty.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The centre is not finite or beyond ±1,000.</exception>
+    public static IContainer BackgroundRadialGradient(this IContainer container, float centerX, float centerY, params Color[] colors)
+        => Gradient(container, "radial-gradient(at " + CssValue.Number(Fraction(centerX, nameof(centerX)) * 100) + "% "
+            + CssValue.Number(Fraction(centerY, nameof(centerY)) * 100) + "%,", colors);
+
+    private static Container Gradient(IContainer container, string start, Color[] colors)
+    {
+        ArgumentNullException.ThrowIfNull(colors);
+        if (colors.Length == 0)
+            throw new ArgumentException("A gradient needs at least one colour.", nameof(colors));
+        var css = new System.Text.StringBuilder(start);
+        // A gradient needs two colour stops, so a single colour is given twice and fills the slot evenly.
+        for (int i = 0; i < Math.Max(colors.Length, 2); i++)
+            css.Append(i == 0 ? "" : ",").Append(CssValue.Color(colors[Math.Min(i, colors.Length - 1)]));
+        return Style(container, Rank.Paint, ("background-image", css.Append(')').ToString()));
+    }
+
+    private static float Fraction(float value, string paramName)
+    {
+        if (!float.IsFinite(value) || Math.Abs(value) > 1000)
+            throw new ArgumentOutOfRangeException(paramName, value, "The fraction must be a finite number from -1,000 to 1,000.");
+        return value;
+    }
+
+    /// <summary>
+    /// Fades the slot and everything in it: 0 is invisible, 1 unchanged. Paint called before it, such as a
+    /// <see cref="Background"/>, stays as it is; paint called after it fades with the content. The content keeps its
+    /// space even when invisible.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="opacity"/> is not from 0 to 1.</exception>
+    public static IContainer Opacity(this IContainer container, float opacity)
+    {
+        if (!(opacity >= 0 && opacity <= 1))
+            throw new ArgumentOutOfRangeException(nameof(opacity), opacity, "The opacity must be from 0 to 1.");
+        return opacity == 1 ? container : Style(container, Rank.Opacity, ("opacity", CssValue.Number(opacity)));
+    }
+
     /// <summary>Rounds the slot's corners; its background and content are clipped to them.</summary>
     public static IContainer CornerRadius(this IContainer container, float value, Unit unit = Unit.Point)
         => Style(container, Rank.Paint, ("border-radius", CssValue.Pt(Length.Points(value, unit, nameof(value)))), ("overflow", "hidden"));
@@ -217,6 +280,38 @@ public static partial class ContainerExtensions
     /// <summary>Lays the slot's content out left to right.</summary>
     public static IContainer ContentFromLeftToRight(this IContainer container)
         => Decorate(container, new Decorator(DecoratorKind.Direction) { Text = "ltr" });
+
+    /// <summary>
+    /// The language of the content, as a language tag such as "da" or "en-GB", when it differs from
+    /// <see cref="DocumentMetadata.Language"/>. It picks the hyphenation rules of <see cref="TextStyle.Hyphenate"/>, and
+    /// PDF/UA tags the content with it so that screen readers read it in that language.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="language"/> is not a language tag.</exception>
+    public static IContainer Language(this IContainer container, string language)
+    {
+        ArgumentNullException.ThrowIfNull(language);
+        if (!IsLanguageTag(language))
+            throw new ArgumentException("A language is a tag such as \"da\" or \"en-GB\": letters, digits and hyphens.", nameof(language));
+        return Decorate(container, new Decorator(DecoratorKind.Language) { Text = language });
+    }
+
+    /// <summary>Whether the text has the shape of a BCP 47 language tag: subtags of 1 to 8 letters or digits, a letter first.</summary>
+    private static bool IsLanguageTag(string tag)
+    {
+        if (tag.Length is 0 or > 64 || !char.IsAsciiLetter(tag[0])) return false;
+        int subtag = 0;
+        foreach (char c in tag)
+        {
+            if (c == '-')
+            {
+                if (subtag == 0) return false;
+                subtag = 0;
+            }
+            else if (char.IsAsciiLetterOrDigit(c) && ++subtag <= 8) { }
+            else return false;
+        }
+        return subtag > 0;
+    }
 
     /// <summary>
     /// Marks the text inside as a heading of the given level (1 to 6). Headings become PDF bookmarks and tagged

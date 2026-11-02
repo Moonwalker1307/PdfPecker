@@ -111,6 +111,98 @@ public sealed class LayoutTests
     }
 
     [Fact]
+    public void Linear_gradients_turn_the_QuestPDF_angle_into_the_CSS_one()
+    {
+        // QuestPDF's 0 runs left to right, which CSS calls 90deg.
+        string css = Html.Css(Html.Page(c => c.Column(col =>
+        {
+            col.Item().BackgroundLinearGradient(0, Colors.Red.Medium, "#2196f380").Text("a");
+            col.Item().BackgroundLinearGradient(-90, Colors.Red.Medium).Text("b");
+            col.Item().BackgroundLinearGradient(405.5f, [Colors.Red.Medium, Colors.White, Colors.Black]).Text("c");
+        })));
+        Assert.Contains("{background-image:linear-gradient(90deg,#f44336,#2196f380)}", css);
+        Assert.Contains("{background-image:linear-gradient(0deg,#f44336,#f44336)}", css);
+        Assert.Contains("{background-image:linear-gradient(135.5deg,#f44336,#ffffff,#000000)}", css);
+    }
+
+    [Fact]
+    public void Radial_gradients_start_in_the_middle_or_at_the_given_centre()
+    {
+        string css = Html.Css(Html.Page(c => c.Column(col =>
+        {
+            col.Item().BackgroundRadialGradient(Colors.White, Colors.Red.Medium).Text("a");
+            col.Item().BackgroundRadialGradient(0, 0.25f, Colors.White, Colors.Red.Medium).Text("b");
+        })));
+        Assert.Contains("{background-image:radial-gradient(#ffffff,#f44336)}", css);
+        Assert.Contains("{background-image:radial-gradient(at 0% 25%,#ffffff,#f44336)}", css);
+    }
+
+    [Fact]
+    public void A_gradient_merges_with_the_background_colour_under_it()
+        => Assert.Equal("<p class=\"c1\">x</p>", Html.Item(c => c.Background(Colors.Black).BackgroundRadialGradient(Colors.White).Padding(4).Text("x")));
+
+    [Fact]
+    public void Opacity_merges_before_paint_and_nests_after_it()
+    {
+        // Paint called before Opacity must not fade, so it stays on an element outside the faded one.
+        Assert.Equal("<p class=\"c1\">x</p>", Html.Item(c => c.Width(100).Opacity(0.5f).Background(Colors.Red.Medium).Padding(4).Text("x")));
+        Assert.Equal("<div class=\"c1\"><p class=\"c2\">x</p></div>", Html.Item(c => c.Background(Colors.Red.Medium).Opacity(0.5f).Text("x")));
+        Assert.Contains(".c2{opacity:0.5}", Html.Css(Html.Page(c => c.Column(col => col.Item().Background(Colors.Red.Medium).Opacity(0.5f).Text("x")))));
+    }
+
+    [Fact]
+    public void Full_opacity_writes_nothing()
+        => Assert.Equal("<p>x</p>", Html.Item(c => c.Opacity(1).Text("x")));
+
+    [Fact]
+    public void A_faded_cell_fades_a_box_that_fills_the_row()
+    {
+        var document = Html.Page(c => c.Table(t =>
+        {
+            t.ColumnsDefinition(d => d.RelativeColumn());
+            t.Cell().Opacity(0.25f).Background(Colors.Red.Medium).Text("a");
+        }));
+        Assert.Equal("<main><table><colgroup><col class=\"c0\"></colgroup><tbody><tr><td class=\"c1\"><p class=\"c2\">a</p></td></tr></tbody></table></main>",
+            Html.Body(DocumentGenerator.Html(document, false, out _)));
+        string css = Html.Css(document);
+        Assert.Contains(".c1{height:1px}", css);
+        Assert.Contains(".c2{height:100%;opacity:0.25;background-color:#f44336}", css);
+    }
+
+    [Fact]
+    public void Gradients_and_opacity_reach_the_PDF()
+    {
+        byte[] pdf = Html.Page(c => c.Column(col =>
+        {
+            col.Item().Height(20).BackgroundLinearGradient(0, Colors.Red.Medium, Colors.Blue.Medium);
+            col.Item().Height(20).BackgroundRadialGradient(Colors.White, Colors.Green.Medium);
+            col.Item().Opacity(0.5f).Text("faded");
+        })).GeneratePdf();
+        string text = System.Text.Encoding.Latin1.GetString(pdf);
+        Assert.Contains("/ShadingType 2", text);
+        Assert.Contains("/ShadingType 3", text);
+        Assert.Contains("/Group << /S /Transparency", text);
+        Assert.Contains("/ca 0.502", text);
+        Assert.Contains("faded", Html.Text(pdf));
+    }
+
+    [Theory]
+    [InlineData(-0.1f)]
+    [InlineData(1.5f)]
+    [InlineData(float.NaN)]
+    public void Opacity_outside_zero_to_one_is_refused(float value)
+        => Assert.Throws<ArgumentOutOfRangeException>(() => Html.Of(c => c.Opacity(value)));
+
+    [Fact]
+    public void Gradients_check_their_arguments()
+    {
+        Assert.Throws<ArgumentException>(() => Html.Of(c => c.BackgroundLinearGradient(0)));
+        Assert.Throws<ArgumentNullException>(() => Html.Of(c => c.BackgroundRadialGradient(null!)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Html.Of(c => c.BackgroundLinearGradient(float.PositiveInfinity, Colors.Red.Medium)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Html.Of(c => c.BackgroundRadialGradient(float.NaN, 0, Colors.Red.Medium)));
+    }
+
+    [Fact]
     public void Relative_columns_share_what_constant_columns_leave()
     {
         var document = Html.Page(c => c.Table(t =>
@@ -294,6 +386,103 @@ public sealed class LayoutTests
         Assert.Contains("Within 2", pages[2].Text);
     }
 
+    /// <summary>An invoice of two pages: page numbers in the footer and the content, and a section with a link to it.</summary>
+    private static Document Invoice(string number) => Document.Create(d => d.Page(p =>
+    {
+        p.Size(PageSizes.A5);
+        p.Content().Column(c =>
+        {
+            c.Item().Text(t => { t.Span("Invoice " + number + ", see "); t.SectionLink("the terms", "terms"); t.Span(". Pages: "); t.TotalPages(); });
+            c.Item().PageBreak();
+            c.Item().Section("terms").Text(t => { t.Span("Terms of " + number + " on page "); t.CurrentPageNumber(); });
+        });
+        p.Footer().Text(t => { t.Span("Page "); t.CurrentPageNumber(); t.Span(" of "); t.TotalPages(); });
+    }));
+
+    [Fact]
+    public void Merged_documents_number_their_pages_on_their_own_by_default()
+    {
+        var merged = Document.Merge(Invoice("A"), Invoice("B"));
+        string html = DocumentGenerator.Html(merged, false, out _);
+        Assert.Contains("<div id=\"pdfpecker-document-1\">", html);
+        Assert.Contains("<div id=\"pdfpecker-document-2\">", html);
+        // Each document's section is its own, so the same name can be used in both.
+        Assert.Contains("id=\"pdfpecker-document-1-terms\"", html);
+        Assert.Contains("href=\"#pdfpecker-document-2-terms\"", html);
+        Assert.Contains("{section-page:pdfpecker-document-2}", html);
+        Assert.DoesNotContain("{page}", html);
+
+        var pages = PdfText.ExtractPages(merged.GeneratePdf());
+        Assert.Equal(4, pages.Count);
+        Assert.Contains("Invoice A", pages[0].Text);
+        Assert.Contains("Pages: 2", pages[0].Text);
+        Assert.Contains("Page 1 of 2", pages[0].Text);
+        Assert.Contains("Terms of A on page 2", pages[1].Text);
+        Assert.Contains("Page 2 of 2", pages[1].Text);
+        Assert.Contains("Invoice B", pages[2].Text);
+        Assert.Contains("Pages: 2", pages[2].Text);
+        Assert.Contains("Page 1 of 2", pages[2].Text);
+        Assert.Contains("Terms of B on page 2", pages[3].Text);
+        Assert.Contains("Page 2 of 2", pages[3].Text);
+    }
+
+    [Fact]
+    public void Merged_documents_with_continuous_page_numbers_count_on()
+    {
+        var merged = Document.Merge([Invoice("A"), Invoice("B")]).UseContinuousPageNumbers();
+        string html = DocumentGenerator.Html(merged, false, out _);
+        Assert.DoesNotContain("pdfpecker-document-", html);
+        Assert.Contains("{page}", html);
+
+        var pages = PdfText.ExtractPages(merged.GeneratePdf());
+        Assert.Equal(4, pages.Count);
+        Assert.Contains("Page 1 of 4", pages[0].Text);
+        Assert.Contains("Pages: 4", pages[2].Text);
+        Assert.Contains("Page 3 of 4", pages[2].Text);
+        Assert.Contains("Terms of B on page 4", pages[3].Text);
+    }
+
+    [Fact]
+    public void Merging_one_document_writes_what_the_document_writes_alone()
+    {
+        var invoice = Invoice("A");
+        Assert.Equal(DocumentGenerator.Html(invoice, false, out _), DocumentGenerator.Html(Document.Merge(invoice), false, out _));
+        Assert.Equal(DocumentGenerator.Html(invoice, false, out _),
+            DocumentGenerator.Html(Document.Merge(invoice).UseContinuousPageNumbers(), false, out _));
+    }
+
+    [Fact]
+    public void A_merge_takes_the_first_documents_metadata_unless_it_has_its_own()
+    {
+        var first = Invoice("A").WithMetadata(new DocumentMetadata { Title = "First" });
+        var merged = Document.Merge(first, Invoice("B"));
+        Assert.Equal("First", merged.GetMetadata().Title);
+        Assert.Equal("Both", merged.WithMetadata(new DocumentMetadata { Title = "Both" }).GetMetadata().Title);
+        Assert.Contains("<title>Both</title>", merged.GenerateHtml());
+    }
+
+    [Fact]
+    public void A_merge_inside_a_merge_with_continuous_numbers_counts_on_with_it()
+    {
+        var inner = Document.Merge(Invoice("A"), Invoice("B"));
+        var merged = Document.Merge(inner, Invoice("C")).UseContinuousPageNumbers();
+        Assert.DoesNotContain("pdfpecker-document-", DocumentGenerator.Html(merged, false, out _));
+
+        var apart = Document.Merge(Document.Merge(Invoice("A"), Invoice("B")).UseContinuousPageNumbers(), Invoice("C"));
+        var pages = PdfText.ExtractPages(apart.GeneratePdf());
+        Assert.Equal(6, pages.Count);
+        Assert.Contains("Page 3 of 4", pages[2].Text);
+        Assert.Contains("Page 1 of 2", pages[4].Text);
+    }
+
+    [Fact]
+    public void Merge_checks_its_documents()
+    {
+        Assert.Throws<ArgumentException>(() => Document.Merge());
+        Assert.Throws<ArgumentNullException>(() => Document.Merge((IEnumerable<IDocument>)null!));
+        Assert.Throws<ArgumentNullException>(() => Document.Merge(Invoice("A"), null!));
+    }
+
     [Fact]
     public void An_empty_document_is_one_blank_page()
         => Assert.Equal(1, PdfToImage.GetPageCount(Document.Create(_ => { }).GeneratePdf()));
@@ -363,6 +552,108 @@ public sealed class LayoutTests
         Assert.ThrowsAny<ArgumentException>(() => Html.Of(c => c.Text(t => t.Leader(new string('.', 33)))));
         Assert.ThrowsAny<ArgumentException>(() => Html.Of(c => c.Text(t => t.Leader("a\nb"))));
         Assert.Throws<ArgumentOutOfRangeException>(() => Html.Of(c => c.Text(t => t.Leader((LeaderStyle)9))));
+    }
+
+    [Fact]
+    public void A_table_of_contents_links_to_the_headings_with_a_leader_and_their_page()
+    {
+        var document = Document.Create(d => d.Page(p =>
+        {
+            p.Header().Heading(1).Text("Running title");
+            p.Content().Column(c =>
+            {
+                c.Item().TableOfContents();
+                c.Item().Section("intro").Heading(1).Text("Intro <&>");
+                c.Item().Heading(2).Text(t => { t.Span("Part\none"); t.Footnote("Note"); });
+                c.Item().Heading(4).Text("Too deep");
+                c.Item().ShowIf(false).Heading(2).Text("Hidden");
+                c.Item().Heading(3).Text("  ");
+                c.Item().Heading(3).Text("Detail");
+            });
+        }));
+        string body = Html.Body(DocumentGenerator.Html(document, false, out _));
+        Assert.StartsWith("<main><div class=\"c0\"><div>"
+            + "<p><a href=\"#intro\">Intro &lt;&amp;&gt;<span data-leader=\"0\"></span><span data-section-page=\"#intro\"></span></a></p>"
+            + "<p class=\"c1\"><a href=\"#pdfpecker-heading-1\">Part one<span data-leader=\"0\"></span><span data-section-page=\"#pdfpecker-heading-1\"></span></a></p>"
+            + "<p class=\"c2\"><a href=\"#pdfpecker-heading-3\">Detail<span data-leader=\"0\"></span><span data-section-page=\"#pdfpecker-heading-3\"></span></a></p>"
+            + "</div><h1 id=\"intro\">Intro &lt;&amp;&gt;</h1><h2 id=\"pdfpecker-heading-1\">", body);
+        Assert.Contains("<h4 id=\"pdfpecker-heading-2\">Too deep</h4>", body);
+        Assert.Contains("<h3 id=\"pdfpecker-heading-3\">Detail</h3>", body);
+        string css = Html.Css(document);
+        Assert.Contains(".c1{padding-inline-start:12pt}", css);
+        Assert.Contains(".c2{padding-inline-start:24pt}", css);
+        Assert.Contains("[data-leader=\"0\"]::after{content:leader(dotted)}", css);
+        Assert.Contains("[data-section-page]::after{content:target-counter(attr(data-section-page),page)}", css);
+        Assert.DoesNotContain("Running title<span", body);
+    }
+
+    [Fact]
+    public void Headings_get_no_ids_without_a_table_of_contents()
+        => Assert.Equal("<main><h1>Intro</h1></main>", Html.Of(c => c.Heading(1).Text("Intro")));
+
+    [Fact]
+    public void A_table_of_contents_takes_its_levels_indent_spacing_leader_and_styles()
+    {
+        var document = Html.Page(c => c.Column(col =>
+        {
+            col.Item().TableOfContents().MaxLevel(1).Indent(1, Unit.Centimetre).Spacing(4).Leader("- ")
+                .Style(TextStyle.Default.FontSize(10)).LevelStyle(1, TextStyle.Default.Bold());
+            col.Item().Heading(1).Text("One");
+            col.Item().Heading(1).Text("Two");
+            col.Item().Heading(2).Text("Left out");
+        }));
+        string body = Html.Body(document.GenerateHtml());
+        Assert.Contains("<div><p class=\"c1\"><a href=\"#pdfpecker-heading-1\">One", body);
+        Assert.Contains("<p class=\"c2\"><a href=\"#pdfpecker-heading-2\">Two", body);
+        Assert.DoesNotContain("#pdfpecker-heading-3", body);
+        string css = Html.Css(document);
+        Assert.Contains(".c1{font-size:10pt;font-weight:700}", css);
+        Assert.Contains(".c2{font-size:10pt;font-weight:700;margin-top:4pt}", css);
+        Assert.Contains("[data-leader=\"0\"]::after{content:leader(\"- \")}", css);
+    }
+
+    [Fact]
+    public void A_table_of_contents_shows_the_page_of_each_heading_at_the_end_of_its_line()
+    {
+        byte[] pdf = Document.Create(d => d.Page(p =>
+        {
+            p.Size(PageSizes.A5);
+            p.Margin(40);
+            p.Content().Column(c =>
+            {
+                c.Item().Text("Contents");
+                c.Item().TableOfContents();
+                c.Item().PageBreak();
+                c.Item().Heading(1).Text("Chapter one");
+                c.Item().PageBreak();
+                c.Item().Heading(1).Text("Chapter two");
+                c.Item().Section("three").Heading(2).Text("Part three");
+            });
+        })).GeneratePdf();
+        var pages = PdfText.ExtractPages(pdf);
+        Assert.Equal(3, pages.Count);
+        var first = pages[0];
+        foreach (var (title, page) in new[] { ("Chapter one", "2"), ("Chapter two", "3"), ("Part three", "3") })
+        {
+            var line = first.Lines.Single(l => l.Text.StartsWith(title, StringComparison.Ordinal));
+            Assert.Contains(". . .", line.Text);
+            var number = line.Words[^1];
+            Assert.Equal(page, number.Text);
+            Assert.InRange(number.X + number.Width, first.Width - 40 - 2, first.Width - 40 + 0.5);
+        }
+        Assert.Equal(3, pdf.AsSpan().Count("/Subtype /Link"u8) + pdf.AsSpan().Count("/Subtype/Link"u8));
+    }
+
+    [Fact]
+    public void Bad_table_of_contents_settings_throw()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => Html.Of(c => c.TableOfContents().MaxLevel(0)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Html.Of(c => c.TableOfContents().MaxLevel(7)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Html.Of(c => c.TableOfContents().LevelStyle(7, TextStyle.Default)));
+        Assert.ThrowsAny<ArgumentException>(() => Html.Of(c => c.TableOfContents().Leader("")));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Html.Of(c => c.TableOfContents().Leader((LeaderStyle)9)));
+        Assert.ThrowsAny<ArgumentException>(() => Html.Of(c => c.TableOfContents().Indent(-1)));
+        Assert.Throws<ArgumentNullException>(() => Html.Of(c => c.TableOfContents().Style(null!)));
     }
 
     [Fact]
@@ -489,4 +780,52 @@ public sealed class LayoutTests
     [Fact]
     public void Markdown_rejects_null()
         => Assert.Throws<ArgumentNullException>(() => Html.Of(c => c.Markdown(null!)));
+
+    [Fact]
+    public void Language_writes_the_lang_attribute_and_an_inner_language_nests()
+    {
+        Assert.Equal("<p lang=\"da\">x</p>", Html.Item(c => c.Language("da").Text("x")));
+        Assert.Equal("<div lang=\"da\"><p lang=\"en-GB\">x</p></div>", Html.Item(c => c.Language("da").Language("en-GB").Text("x")));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("-da")]
+    [InlineData("da-")]
+    [InlineData("da--DK")]
+    [InlineData("1da")]
+    [InlineData("da DK")]
+    [InlineData("da\"><script>")]
+    [InlineData("toolongsubtag")]
+    public void Language_refuses_what_is_not_a_language_tag(string language)
+        => Assert.Throws<ArgumentException>(() => Html.Item(c => c.Language(language).Text("x")));
+
+    [Fact]
+    public void Hyphenate_writes_hyphens_on_the_paragraph_and_on_spans()
+    {
+        Assert.Contains("{hyphens:auto}", Html.Css(Html.Page(c => c.DefaultTextStyle(s => s.Hyphenate()).Text("x"))));
+        string css = Html.Css(Html.Page(c => c.Text(t =>
+        {
+            t.Span("a");
+            t.Span("b").Hyphenate(false);
+        })));
+        Assert.Contains("hyphens:manual", css);
+    }
+
+    [Fact]
+    public void Hyphenate_breaks_long_words_by_the_rules_of_the_language()
+    {
+        const string words = "Arbejdsmarkedsuddannelserne og sundhedsplejerskerne";
+        string Render(bool hyphenate, string? language) => Html.Text(Document.Create(d => d.Page(p =>
+        {
+            p.Size(PageSizes.A6);
+            var content = p.Content().Width(90);
+            if (language != null) content = content.Language(language);
+            content.Text(words).Hyphenate(hyphenate);
+        })).GeneratePdf());
+
+        Assert.Contains("-", Render(hyphenate: true, "da"), StringComparison.Ordinal);
+        Assert.DoesNotContain("-", Render(hyphenate: false, "da"), StringComparison.Ordinal);
+        Assert.DoesNotContain("-", Render(hyphenate: true, language: null), StringComparison.Ordinal);
+    }
 }

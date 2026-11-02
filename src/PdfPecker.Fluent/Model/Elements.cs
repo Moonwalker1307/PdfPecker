@@ -69,6 +69,9 @@ internal enum DecoratorKind
 
     /// <summary>Draws the content smaller, keeping its proportions, when it does not fit the slot.</summary>
     ScaleToFit,
+
+    /// <summary>The language of the content, the tag in <see cref="Decorator.Text"/>.</summary>
+    Language,
 }
 
 /// <summary>
@@ -81,8 +84,15 @@ internal static class Rank
     /// <summary>Applies anywhere: inherited text properties, page-break control.</summary>
     public const int Any = -1;
     public const int Size = 0;
-    public const int Paint = 1;
-    public const int Padding = 2;
+
+    /// <summary>
+    /// Opacity fades everything its element paints, so it joins an element only before that element's own background,
+    /// border or shadow: one painted outside it gets an element of its own and stays as it is.
+    /// </summary>
+    public const int Opacity = 1;
+
+    public const int Paint = 2;
+    public const int Padding = 3;
 }
 
 /// <summary>A decoration of the content inside it: a style, alignment, link, or one of the other kinds.</summary>
@@ -275,6 +285,23 @@ internal sealed class FormFieldElement : Element
     public List<(string Text, string? Value, bool Selected)> Options { get; } = [];
 }
 
+/// <summary>A table of contents, which the HTML writer fills from the headings of the page content.</summary>
+internal sealed class TableOfContentsElement : Element
+{
+    public int MaxLevel { get; set; } = 3;
+    public float Indent { get; set; } = 12;
+    public float Spacing { get; set; }
+
+    /// <summary>The CSS leader() argument between an entry's text and its page number.</summary>
+    public string Leader { get; set; } = "dotted";
+
+    /// <summary>The text style of every entry, under each level's own.</summary>
+    public TextStyle Style { get; set; } = TextStyle.Default;
+
+    /// <summary>The text style of the entries of each level, from level 1 at index 0; null where a level has none.</summary>
+    public TextStyle?[] LevelStyles { get; } = new TextStyle?[6];
+}
+
 internal sealed class PageBreakElement : Element;
 
 internal sealed class HtmlElement : Element
@@ -308,4 +335,10 @@ internal sealed class PageSet
     public Container Footer { get; } = new();
     public Container EvenHeader { get; } = new();
     public Container EvenFooter { get; } = new();
+
+    /// <summary>
+    /// The merged document the page set belongs to when <see cref="MergedDocument.UseOriginalPageNumbers"/> keeps the
+    /// documents apart; page sets of one document, or of documents merged with continuous numbers, share a number.
+    /// </summary>
+    public int Document { get; set; }
 }

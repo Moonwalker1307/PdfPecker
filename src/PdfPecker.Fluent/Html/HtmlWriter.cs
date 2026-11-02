@@ -53,6 +53,12 @@ internal sealed class HtmlWriter
     /// <summary>The page numbers written in the content so far, which each get an id of their own.</summary>
     private int _pageNumbers;
 
+    /// <summary>
+    /// The id of the element around the merged document being written, when the documents number their pages apart,
+    /// which its page numbers count from and its section names are prefixed with.
+    /// </summary>
+    private string? _documentId;
+
     /// <summary>The leaders' CSS arguments, each with the number its spans name in data-leader.</summary>
     private readonly Dictionary<string, int> _leaders = new(StringComparer.Ordinal);
 
@@ -64,6 +70,12 @@ internal sealed class HtmlWriter
 
     /// <summary>The ids the Markdown written so far has taken, so a later call's repeated headings and footnotes get new ones.</summary>
     private readonly HashSet<string> _markdownIds = new(StringComparer.Ordinal);
+
+    /// <summary>The headings of the page content in document order, which a table of contents lists; empty without one.</summary>
+    private readonly List<(int Level, string Text, string Id)> _headings = [];
+
+    /// <summary>The ids that headings without a Section name get, so a table of contents can link to them.</summary>
+    private readonly Dictionary<TextElement, string> _headingIds = new(ReferenceEqualityComparer.Instance);
 
     private HtmlWriter(ImageTable images) => _images = images;
 
@@ -79,6 +91,7 @@ internal sealed class HtmlWriter
 
     private string Document(IReadOnlyList<PageSet> pages, IReadOnlyList<string> css, DocumentMetadata metadata)
     {
+        CollectHeadings(pages);
         string? bodyClass = null;
         if (pages.Count == 1)
         {
@@ -89,8 +102,20 @@ internal sealed class HtmlWriter
         }
         else
         {
+            bool apart = false;
+            for (int i = 1; i < pages.Count; i++) apart |= pages[i].Document != pages[0].Document;
             for (int i = 0; i < pages.Count; i++)
             {
+                // Merged documents that number their pages apart each go in an element of their own, whose pages
+                // their page numbers count, as a section's are.
+                if (apart && (i == 0 || pages[i].Document != pages[i - 1].Document))
+                {
+                    if (i > 0) _html.Append("</div>");
+                    _documentId = "pdfpecker-document-" + pages[i].Document.ToString(CultureInfo.InvariantCulture);
+                    _html.Append("<div");
+                    WriteAttribute("id", _documentId);
+                    _html.Append('>');
+                }
                 // The page set's text style and direction go on an element around its bands and content, which puts
                 // them all on its named page.
                 var page = pages[i];
@@ -104,6 +129,8 @@ internal sealed class HtmlWriter
                 RenderPageSet(page, name);
                 _html.Append("</div>");
             }
+            if (apart) _html.Append("</div>");
+            _documentId = null;
         }
         string body = _html.ToString();
 
@@ -138,6 +165,9 @@ internal sealed class HtmlWriter
         _html.Append('>').Append(body).Append("</body></html>\n");
         return _html.ToString();
     }
+
+    /// <summary>A section name as written in the HTML: prefixed with its merged document's id when they are kept apart.</summary>
+    private string Scoped(string name) => _documentId == null ? name : _documentId + "-" + name;
 
     private static string PageName(int index) => "p" + index.ToString(CultureInfo.InvariantCulture);
 
@@ -291,6 +321,9 @@ internal sealed class HtmlWriter
                 break;
             case ListElement list:
                 RenderList(list, box);
+                break;
+            case TableOfContentsElement contents:
+                RenderTableOfContents(contents, box);
                 break;
             case FormFieldElement field:
                 RenderFormField(field, box);
@@ -654,6 +687,8 @@ internal sealed class HtmlWriter
             Open(box);
             box = new Box { Tag = tag };
         }
+        // A heading that a table of contents links to, and that has no Section name, gets an id of its own.
+        if (heading != null && _band == Band.None && box.Id == null && _headingIds.TryGetValue(text, out var headingId)) box.Id = headingId;
         // A paragraph with a single plain span (container.Text("...")) carries the span's font itself, so its line
         // height follows that font, as in QuestPDF, instead of the strut of an inherited larger font.
         bool single = text.Runs.Count == 1 && text.Runs[0].Kind == RunKind.Text;
@@ -741,7 +776,18 @@ internal sealed class HtmlWriter
             StartContent();
             paragraphEmpty = false;
 
-            switch (run.Kind)
+            // In a merged document that numbers its pages apart, the page number and count are those of the element
+            // around it, and section names are its own.
+            var kind = run.Kind;
+            string? target = run.Kind is RunKind.SectionLink or RunKind.SectionPageNumber or RunKind.SectionEndPage
+                or RunKind.SectionPageCount or RunKind.SectionPageWithin ? Scoped(run.Target!) : run.Target;
+            if (_documentId != null && kind is RunKind.PageNumber or RunKind.TotalPages)
+            {
+                kind = kind == RunKind.PageNumber ? RunKind.SectionPageWithin : RunKind.SectionPageCount;
+                target = _documentId;
+            }
+
+            switch (kind)
             {
                 case RunKind.Element:
                 {
@@ -757,21 +803,21 @@ internal sealed class HtmlWriter
                     _sectionPages = true;
                     _html.Append("<span");
                     if (cls != null) WriteAttribute("class", cls);
-                    WriteAttribute("data-section-page", "#" + run.Target);
+                    WriteAttribute("data-section-page", "#" + target);
                     _html.Append("></span>");
                     break;
                 case RunKind.SectionEndPage:
                     _sectionEnds = true;
                     _html.Append("<span");
                     if (cls != null) WriteAttribute("class", cls);
-                    WriteAttribute("data-section-end", "#" + run.Target);
+                    WriteAttribute("data-section-end", "#" + target);
                     _html.Append("></span>");
                     break;
                 case RunKind.SectionPageCount:
                     _sectionCounts = true;
                     _html.Append("<span");
                     if (cls != null) WriteAttribute("class", cls);
-                    WriteAttribute("data-section-pages", "#" + run.Target);
+                    WriteAttribute("data-section-pages", "#" + target);
                     _html.Append("></span>");
                     break;
                 case RunKind.SectionPageWithin when _band == Band.None:
@@ -782,7 +828,7 @@ internal sealed class HtmlWriter
                     _html.Append("<span");
                     if (cls != null) WriteAttribute("class", cls);
                     WriteAttribute("id", ownId);
-                    WriteAttribute("data-section-within", "#" + run.Target);
+                    WriteAttribute("data-section-within", "#" + target);
                     _html.Append("></span>");
                     break;
                 }
@@ -790,7 +836,7 @@ internal sealed class HtmlWriter
                     // In a header or footer, a placeholder the library fills in for each page, like {page}. The encoded
                     // name holds no braces or markup.
                     OpenInline("span", cls, null);
-                    _html.Append("{section-page:").Append(Uri.EscapeDataString(run.Target!)).Append('}');
+                    _html.Append("{section-page:").Append(Uri.EscapeDataString(target!)).Append('}');
                     _html.Append("</span>");
                     break;
                 case RunKind.Leader:
@@ -835,12 +881,12 @@ internal sealed class HtmlWriter
                 case RunKind.PageNumber:
                 case RunKind.TotalPages:
                     OpenInline("span", cls, null);
-                    _html.Append(run.Kind == RunKind.PageNumber ? "{page}" : "{total-pages}");
+                    _html.Append(kind == RunKind.PageNumber ? "{page}" : "{total-pages}");
                     _html.Append("</span>");
                     break;
                 case RunKind.Hyperlink:
                 case RunKind.SectionLink:
-                    OpenInline("a", cls, run.Kind == RunKind.Hyperlink ? run.Target : "#" + run.Target);
+                    OpenInline("a", cls, kind == RunKind.Hyperlink ? target : "#" + target);
                     WriteText(run.Text);
                     _html.Append("</a>");
                     break;
@@ -864,6 +910,151 @@ internal sealed class HtmlWriter
         if (cls != null) WriteAttribute("class", cls);
         if (href != null) WriteAttribute("href", href);
         _html.Append('>');
+    }
+
+    // Table of contents
+
+    /// <summary>
+    /// Finds the headings of the page content in the order they are written, when some content is a table of
+    /// contents. A heading with a Section name is linked by that name; the others get ids of their own. The walk keeps
+    /// its own stack, since the tree can be nested deeper than the writer allows before the writer gets to say so.
+    /// </summary>
+    private void CollectHeadings(IReadOnlyList<PageSet> pages)
+    {
+        var headings = new List<(int, string, TextElement, string?)>();
+        bool hasContents = false;
+        var pending = new Stack<Container>();
+        for (int i = pages.Count - 1; i >= 0; i--) pending.Push(pages[i].Content);
+        while (pending.Count > 0)
+        {
+            var slot = pending.Pop();
+            int? heading = null;
+            string? section = null;
+            Element? element = slot.Child;
+            while (element is Decorator decorator)
+            {
+                // As in RenderContainer, content outside the bands shows unless it is hidden or skipped once.
+                if (decorator.Kind is DecoratorKind.Hidden or DecoratorKind.SkipOnce)
+                {
+                    element = null;
+                    break;
+                }
+                if (decorator.Kind == DecoratorKind.Heading) heading = decorator.Level;
+                else if (decorator.Kind == DecoratorKind.Section) section ??= decorator.Text;
+                element = decorator.Inner.Child;
+            }
+
+            int count = pending.Count;
+            switch (element)
+            {
+                case TextElement text:
+                    if (heading is { } level && HeadingText(text) is { Length: > 0 } title) headings.Add((level, title, text, section));
+                    foreach (var run in text.Runs)
+                        if (run.Slot != null) pending.Push(run.Slot);
+                    break;
+                case TableOfContentsElement:
+                    hasContents = true;
+                    break;
+                case ColumnElement column:
+                    foreach (var item in column.Items) pending.Push(item);
+                    break;
+                case RowElement row:
+                    foreach (var (_, _, item) in row.Items) pending.Push(item);
+                    break;
+                case TableElement table:
+                    foreach (var cell in table.Header) pending.Push(cell);
+                    foreach (var cell in table.Body) pending.Push(cell);
+                    foreach (var cell in table.Footer) pending.Push(cell);
+                    break;
+                case LayersElement layers:
+                    foreach (var (_, layer) in layers.Layers) pending.Push(layer);
+                    break;
+                case InlinedElement inlined:
+                    foreach (var item in inlined.Items) pending.Push(item);
+                    break;
+                case MultiColumnElement multiColumn:
+                    pending.Push(multiColumn.Content);
+                    break;
+                case DecorationElement decoration:
+                    pending.Push(decoration.Before);
+                    pending.Push(decoration.Content);
+                    pending.Push(decoration.After);
+                    break;
+                case ListElement list:
+                    foreach (var item in list.Items) pending.Push(item);
+                    break;
+            }
+            // The children were pushed first to last; reversing them pops them in document order.
+            ReverseTop(pending, pending.Count - count);
+        }
+        if (!hasContents) return;
+
+        int number = 0;
+        foreach (var (level, title, text, section) in headings)
+        {
+            string id = section ?? "pdfpecker-heading-" + (++number).ToString(CultureInfo.InvariantCulture);
+            if (section == null) _headingIds[text] = id;
+            _headings.Add((level, title, id));
+        }
+    }
+
+    private static void ReverseTop(Stack<Container> stack, int count)
+    {
+        if (count < 2) return;
+        var top = new Container[count];
+        for (int i = 0; i < count; i++) top[i] = stack.Pop();
+        foreach (var item in top) stack.Push(item);
+    }
+
+    /// <summary>A heading's text on one line, as a table of contents shows it: its words, without footnotes or page numbers.</summary>
+    private static string HeadingText(TextElement text)
+    {
+        var sb = new StringBuilder();
+        foreach (var run in text.Runs)
+            if (run.Kind is RunKind.Text or RunKind.Hyperlink or RunKind.SectionLink) sb.Append(run.Text);
+        for (int i = 0; i < sb.Length; i++)
+            if (sb[i] is '\n' or '\r' or '\t') sb[i] = ' ';
+        return sb.ToString().Trim();
+    }
+
+    /// <summary>
+    /// Writes one paragraph for each heading the table of contents lists: a link to the heading holding its text, a
+    /// leader and the page the heading lands on. Levels are indented from the shallowest one listed.
+    /// </summary>
+    private void RenderTableOfContents(TableOfContentsElement contents, Box box)
+    {
+        box = Absorbing(box);
+        Open(box);
+        int top = int.MaxValue;
+        foreach (var (level, _, _) in _headings)
+            if (level <= contents.MaxLevel) top = Math.Min(top, level);
+        string? leaderNumber = null;
+        bool first = true;
+        foreach (var (level, title, id) in _headings)
+        {
+            if (level > contents.MaxLevel) continue;
+            if (leaderNumber == null)
+            {
+                if (!_leaders.TryGetValue(contents.Leader, out int leader)) _leaders.Add(contents.Leader, leader = _leaders.Count);
+                leaderNumber = leader.ToString(CultureInfo.InvariantCulture);
+            }
+            var declarations = new List<(string, string)>();
+            CssValue.AddTextStyle(declarations, contents.Style.Override(contents.LevelStyles[level - 1]), forBox: true);
+            if (level > top) declarations.Add(("padding-inline-start", CssValue.Pt(contents.Indent * (level - top))));
+            if (!first && contents.Spacing > 0) declarations.Add(("margin-top", CssValue.Pt(contents.Spacing)));
+            first = false;
+            _html.Append("<p");
+            if (declarations.Count > 0) WriteAttribute("class", Class(declarations));
+            _html.Append('>');
+            OpenInline("a", null, "#" + id);
+            WriteText(title);
+            _html.Append("<span");
+            WriteAttribute("data-leader", leaderNumber);
+            _html.Append("></span><span");
+            WriteAttribute("data-section-page", "#" + id);
+            _html.Append("></span></a></p>");
+        }
+        _sectionPages |= !first;
     }
 
     // Tables
@@ -947,9 +1138,10 @@ internal sealed class HtmlWriter
             throw new InvalidOperationException("The document nests more than 200 elements deep, more than PdfPecker lays out.");
         _html.Append('<').Append(box.Tag);
         if (box.Declarations.Count > 0) WriteAttribute("class", Class(box.Declarations));
-        if (box.Id != null) WriteAttribute("id", box.Id);
+        if (box.Id != null) WriteAttribute("id", Scoped(box.Id));
         if (box.Direction != null) WriteAttribute("dir", box.Direction);
-        if (box.Href != null) WriteAttribute("href", box.Href);
+        if (box.Lang != null) WriteAttribute("lang", box.Lang);
+        if (box.Href != null) WriteAttribute("href", box.Href.StartsWith('#') ? "#" + Scoped(box.Href[1..]) : box.Href);
         foreach (var (name, value) in box.Attributes) WriteAttribute(name, value);
         _html.Append('>');
         _open.Push(box.Tag);
@@ -1086,8 +1278,9 @@ internal sealed class HtmlWriter
         private HorizontalAlignment? _cellAlignment;
         public List<(string Property, string Value)> Declarations { get; } = [];
         public List<(string Name, string Value)> Attributes { get; } = [];
-        public string? Id { get; private set; }
+        public string? Id { get; set; }
         public string? Direction { get; private set; }
+        public string? Lang { get; private set; }
         public string? Href { get; private set; }
 
         private int _rank = Rank.Any;
@@ -1101,8 +1294,8 @@ internal sealed class HtmlWriter
             return box;
         }
 
-        public bool MustEmit => Required || Declarations.Count > 0 || Id != null || Direction != null || Href != null
-            || Tag != "div" || Attributes.Count > 0;
+        public bool MustEmit => Required || Declarations.Count > 0 || Id != null || Direction != null || Lang != null
+            || Href != null || Tag != "div" || Attributes.Count > 0;
 
         /// <summary>Whether block content (a paragraph, column, row, line) can be this element instead of a child of it.</summary>
         public bool CanBecomeBlock => Tag is "div" or "a" && !_aligned && !Has("display") && (!Required || Tag == "div");
@@ -1173,6 +1366,11 @@ internal sealed class HtmlWriter
                     if (Direction != null) return false;
                     Direction = decorator.Text;
                     return true;
+                case DecoratorKind.Language:
+                    // An inner language wins over an outer one, so a second one on the same element needs its own.
+                    if (Lang != null) return false;
+                    Lang = decorator.Text;
+                    return true;
                 case DecoratorKind.ScaleToFit:
                     // PdfPecker scales a box's content into the box's height or max-height; without one, the box takes
                     // the height of the slot around it as its largest.
@@ -1192,11 +1390,11 @@ internal sealed class HtmlWriter
 
         /// <summary>
         /// Whether the box inside this table cell must fill it: it paints a background, border or shadow, which QuestPDF
-        /// draws over the whole height of the row. Aligned content keeps its own size.
+        /// draws over the whole height of the row, or fades what may paint one. Aligned content keeps its own size.
         /// </summary>
         public bool FillsWith(Decorator decorator)
             => InGrid && _cellAlignment == null && !Has("vertical-align")
-               && (decorator.Kind == DecoratorKind.Border || decorator.Kind == DecoratorKind.Style && decorator.Rank == Rank.Paint);
+               && (decorator.Kind == DecoratorKind.Border || decorator.Kind == DecoratorKind.Style && decorator.Rank is Rank.Paint or Rank.Opacity);
 
         /// <summary>The box inside this one: plain, or aligned when this is a cell with a horizontal alignment.</summary>
         public Box Child()
@@ -1209,6 +1407,9 @@ internal sealed class HtmlWriter
         private bool TryAdd(int rank, (string Property, string Value)[] declarations)
         {
             if (rank != Rank.Any && (_aligned || rank < _rank || (rank == Rank.Size && SizeLocked) || _cellAlignment != null)) return false;
+            // A table cell is not faded itself: its background and borders belong to the table's layout, and the
+            // box inside it that fills it fades the same area.
+            if (rank == Rank.Opacity && IsCell) return false;
             foreach (var (property, _) in declarations)
                 if (Has(property)) return false;
             Declarations.AddRange(declarations);

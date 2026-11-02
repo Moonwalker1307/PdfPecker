@@ -31,7 +31,8 @@ internal sealed partial class StyleResolver
                 bool lineHeight = d.Property == "line-height";
                 if (lineHeight != (pass == 1) || !IsFontProperty(d.Property) || d.HasVar || ResetByAll(i, all)) continue;
                 _applied[i] = true;
-                Apply(s, parent, d.Property, d.MetricUnits ? RewriteMetricUnits(d.Value, s, lineHeight ? parent : s) : d.Value);
+                var value = s.Zoom != 1 || _rootZoom != 1 ? Zoomed(d.Property, d.Value, s, parent) : d.Value;
+                Apply(s, parent, d.Property, d.MetricUnits ? RewriteMetricUnits(value, s, lineHeight ? parent : s) : value);
             }
         }
     }

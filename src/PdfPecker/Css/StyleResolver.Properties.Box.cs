@@ -227,7 +227,17 @@ internal sealed partial class StyleResolver
     }
 
     private static void ApplyPosition(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
-        => s.Position = d.Lower switch
+    {
+        // position: running(name) takes the element out of the flow for element() in the page-margin boxes, as in
+        // Prince and WeasyPrint; the box itself is static wherever it is drawn.
+        if (RunningName(d.Lower) is { } running)
+        {
+            s.RunningName = running;
+            s.Position = Position.Static;
+            return;
+        }
+        s.RunningName = null;
+        s.Position = d.Lower switch
         {
             "relative" or "sticky" => Position.Relative,
             "absolute" => Position.Absolute,
@@ -236,6 +246,18 @@ internal sealed partial class StyleResolver
             "inherit" => parent.Position,
             _ => s.Position,
         };
+    }
+
+    /// <summary>The name in running(name), or null when the value is not one.</summary>
+    internal static string? RunningName(string lower)
+    {
+        if (!lower.StartsWith("running(", StringComparison.Ordinal) || !lower.EndsWith(')')) return null;
+        var name = lower.AsSpan(8, lower.Length - 9).Trim();
+        if (name.Length == 0) return null;
+        foreach (char c in name)
+            if (!(char.IsAsciiLetterOrDigit(c) || c is '-' or '_' || c > 0x7F)) return null;
+        return name.ToString();
+    }
 
     private static void ApplyZIndex(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {

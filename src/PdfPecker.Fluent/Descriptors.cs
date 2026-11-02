@@ -373,6 +373,80 @@ public enum ListNumbering
     UpperRoman,
 }
 
+/// <summary>
+/// Sets out a <see cref="ContentExtensions.TableOfContents(IContainer)"/>: the levels it lists, the indent of each
+/// level, the space between entries, the leader and the style of each level's entries.
+/// </summary>
+public sealed class TableOfContentsDescriptor
+{
+    private readonly TableOfContentsElement _contents;
+
+    internal TableOfContentsDescriptor(TableOfContentsElement contents) => _contents = contents;
+
+    /// <summary>Lists headings of levels 1 to <paramref name="level"/>. The default is 3.</summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="level"/> is not 1 to 6.</exception>
+    public TableOfContentsDescriptor MaxLevel(int level)
+    {
+        _contents.MaxLevel = Level(level, nameof(level));
+        return this;
+    }
+
+    /// <summary>How much further in each level is set than the one above it. The default is 12 points.</summary>
+    public TableOfContentsDescriptor Indent(float value, Unit unit = Unit.Point)
+    {
+        _contents.Indent = Length.Points(value, unit, nameof(value));
+        return this;
+    }
+
+    /// <summary>The space between entries. The default is none.</summary>
+    public TableOfContentsDescriptor Spacing(float value, Unit unit = Unit.Point)
+    {
+        _contents.Spacing = Length.Points(value, unit, nameof(value));
+        return this;
+    }
+
+    /// <summary>What fills the line between an entry's text and its page number. The default is dots.</summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="style"/> is not a <see cref="LeaderStyle"/>.</exception>
+    public TableOfContentsDescriptor Leader(LeaderStyle style)
+    {
+        _contents.Leader = TextDescriptor.LeaderArgument(style);
+        return this;
+    }
+
+    /// <summary>A leader that repeats <paramref name="pattern"/>, such as <c>"-"</c> or <c>". "</c>, between an entry's text and its page number.</summary>
+    /// <exception cref="ArgumentException"><paramref name="pattern"/> is empty, longer than 32 characters or holds a line break.</exception>
+    public TableOfContentsDescriptor Leader(string pattern)
+    {
+        _contents.Leader = TextDescriptor.LeaderArgument(pattern, nameof(pattern));
+        return this;
+    }
+
+    /// <summary>The text style of every entry, such as its font and size. A level's own style is applied over it.</summary>
+    public TableOfContentsDescriptor Style(TextStyle style)
+    {
+        ArgumentNullException.ThrowIfNull(style);
+        _contents.Style = _contents.Style.Override(style);
+        return this;
+    }
+
+    /// <summary>The text style of the entries of headings of one level, such as bold chapters at level 1.</summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="level"/> is not 1 to 6.</exception>
+    public TableOfContentsDescriptor LevelStyle(int level, TextStyle style)
+    {
+        ArgumentNullException.ThrowIfNull(style);
+        int index = Level(level, nameof(level)) - 1;
+        _contents.LevelStyles[index] = _contents.LevelStyles[index] is { } current ? current.Override(style) : style;
+        return this;
+    }
+
+    private static int Level(int level, string paramName)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(level, 1, paramName);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(level, 6, paramName);
+        return level;
+    }
+}
+
 /// <summary>Adds items to a list and sets its markers: bullets unless told otherwise.</summary>
 public sealed class ListDescriptor
 {
