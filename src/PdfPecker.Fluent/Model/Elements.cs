@@ -300,4 +300,10 @@ internal sealed class PageSet
     public Container Footer { get; } = new();
     public Container EvenHeader { get; } = new();
     public Container EvenFooter { get; } = new();
+
+    /// <summary>
+    /// The merged document the page set belongs to when <see cref="MergedDocument.UseOriginalPageNumbers"/> keeps the
+    /// documents apart; page sets of one document, or of documents merged with continuous numbers, share a number.
+    /// </summary>
+    public int Document { get; set; }
 }
