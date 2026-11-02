@@ -204,7 +204,7 @@ internal static class GeneratedContent
                 if (args.Count is < 1 or > 2) return false;
                 var paged = resolver.Paged;
                 if (paged.Running != null)
-                    sb.Append(paged.Running.Get(args[0].Trim(), paged.CurrentPage, args.Count == 2 ? args[1].Trim().ToLowerInvariant() : "first"));
+                    sb.Append(paged.Running.Get(args[0].Trim(), paged.CurrentPage, args.Count == 2 ? args[1].Trim().ToLowerInvariant() : "first") ?? "");
                 return true;
             }
             case "content":

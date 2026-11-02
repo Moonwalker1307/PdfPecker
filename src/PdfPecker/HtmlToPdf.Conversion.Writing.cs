@@ -124,6 +124,7 @@ public static partial class HtmlToPdf
                 {
                     // Running strings (string-set) for string() are known once the writer has placed the pages.
                     if (_paged.Running == null && strings.Count > 0) _paged.Running = PlaceRunningStrings(writer, strings);
+                    if (_paged.RunningElements == null && _styles.Runnings.Count > 0) _paged.RunningElements = PlaceRunningElements(writer, _styles.Runnings);
                     ops.AddRange(marginBoxes.Layout(p, count, setup, run.Name));
                 }
                 var (header, footer) = BandsOf(run.Name, p == 0, local == 0, p % 2 == 1);
@@ -134,18 +135,25 @@ public static partial class HtmlToPdf
         }
 
         /// <summary>The running strings of string-set, on the pages their elements landed on.</summary>
-        private RunningStrings PlaceRunningStrings(PdfDocumentWriter writer, List<StringAssignment> strings)
+        private RunningValues<string> PlaceRunningStrings(PdfDocumentWriter writer, List<StringAssignment> strings)
+            => new(strings.Select(a => (a.Name, PageOfKey(writer, a.Key), a.Value)).Where(a => a.Item2 != null)
+                .Select(a => (a.Name, a.Item2!.Value.Page, a.Item2.Value.Top, a.Value)));
+
+        /// <summary>
+        /// The running elements, on the pages they were taken from. One whose place the layout did not record (inside a
+        /// flex, grid or table layout) counts from the first page.
+        /// </summary>
+        private RunningValues<Element> PlaceRunningElements(PdfDocumentWriter writer, List<RunningAssignment> runnings)
+            => new(runnings.Select(a => (a.Name, PageOfKey(writer, a.Key) ?? (0, 0f), a.Element))
+                .Select(a => (a.Name, a.Item2.Page, a.Item2.Top, a.Element)));
+
+        /// <summary>The page and the position on it of a layout key's anchor, or null when the layout recorded none.</summary>
+        private (int Page, float Top)? PageOfKey(PdfDocumentWriter writer, string key)
         {
-            var assignments = new List<(string, int, float, string)>(strings.Count);
-            foreach (var a in strings)
-                for (int s = 0; s < _runs.Count; s++)
-                    if (_runs[s].Engine.Anchors.TryGetValue(a.Key, out float y))
-                    {
-                        var (page, top) = writer.PageAt(s, y);
-                        assignments.Add((a.Name, page, top, a.Value));
-                        break;
-                    }
-            return new RunningStrings(assignments);
+            for (int s = 0; s < _runs.Count; s++)
+                if (_runs[s].Engine.Anchors.TryGetValue(key, out float y))
+                    return writer.PageAt(s, y);
+            return null;
         }
     }
 }

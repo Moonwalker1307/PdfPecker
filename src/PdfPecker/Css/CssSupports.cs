@@ -167,7 +167,7 @@ internal static class CssSupports
                     or "table-column" or "table-column-group" or "block flex" or "block grid" or "inline flex" or "inline grid"
                     or "-webkit-box" or "-webkit-inline-box" or "-webkit-flex" or "-webkit-inline-flex";
             case "position":
-                return lower is "static" or "relative" or "absolute" or "fixed" or "sticky";
+                return lower is "static" or "relative" or "absolute" or "fixed" or "sticky" || StyleResolver.RunningName(lower) != null;
             case "container-type":
                 return lower is "normal" or "size" or "inline-size";
             case "container-name":
