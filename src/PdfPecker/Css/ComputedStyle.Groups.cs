@@ -199,6 +199,21 @@ internal sealed partial class ComputedStyle
     public string? SvgMarkerEnd { get => _svgPaint.SvgMarkerEnd; set => SvgPaint.SvgMarkerEnd = value; }
     public bool SvgFilterSrgb { get => _svgPaint.SvgFilterSrgb; set => SvgPaint.SvgFilterSrgb = value; }
 
+    /// <summary>
+    /// Whether this style took every SVG paint property from <paramref name="parent"/> unchanged. A child shares its
+    /// parent's group until it sets a value in it, so this tells an element that sets no paint of its own.
+    /// </summary>
+    internal bool InheritsSvgPaint(ComputedStyle parent) => ReferenceEquals(_svgPaint, parent._svgPaint);
+
+    /// <summary>A copy of this style with the SVG paint properties of <paramref name="from"/>.</summary>
+    internal ComputedStyle WithSvgPaintOf(ComputedStyle from)
+    {
+        var c = Clone();
+        from._svgPaint.Shared = true;
+        c._svgPaint = from._svgPaint;
+        return c;
+    }
+
     // The group to change a value in, copied first when other styles share it.
     private SvgPaintFields SvgPaint => _svgPaint.Shared ? _svgPaint = _svgPaint.Copy() : _svgPaint;
 
