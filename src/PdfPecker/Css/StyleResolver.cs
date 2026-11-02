@@ -75,6 +75,9 @@ internal sealed partial class StyleResolver
     /// <summary>The string-set assignments of the last resolution, in document order.</summary>
     public List<StringAssignment> Strings { get; } = new();
 
+    /// <summary>The running elements (position: running(name)) in document order, for element() in margin boxes.</summary>
+    public List<RunningAssignment> Runnings { get; } = new();
+
     /// <summary>The counter styles of list-style-type and counter(): the predefined ones and the sheet's @counter-style rules.</summary>
     public CounterStyles CounterStyles { get; init; }
 
@@ -423,6 +426,7 @@ internal sealed partial class StyleResolver
                 if (_firstLetterRules) GenerateFirstLetter(e);
             }
             if (e.Style.StringSet != null) SetStrings(e);
+            if (e.Style.RunningName != null && e.Style.Display != Display.None) SetRunning(e);
             // bookmark-label is evaluated here, where counters and attributes have their values; content(text) is the default.
             if (e.Style.BookmarkLabel is { } label && !label.Equals("content(text)", StringComparison.OrdinalIgnoreCase))
                 e.BookmarkLabel = GeneratedContent.Evaluate(label, e, this);
@@ -474,6 +478,17 @@ internal sealed partial class StyleResolver
         foreach (var name in Paged.WantedCounters)
             if (_counters.TryGetValue(name, out var stack) && stack.Count > 0) values[name] = stack[^1];
         Paged.CounterSnapshots[id] = values;
+    }
+
+    /// <summary>
+    /// Takes a running element (position: running(name)) out of the flow. The layout records where it would have been,
+    /// under its layout key, which decides the pages whose margin boxes show it.
+    /// </summary>
+    private void SetRunning(Element e)
+    {
+        e.Detached = true;
+        e.LayoutKey ??= "\u0001r" + Runnings.Count.ToString(CultureInfo.InvariantCulture);
+        Runnings.Add(new RunningAssignment(e, e.Style.RunningName!, e.LayoutKey));
     }
 
     /// <summary>Evaluates an element's string-set: "name content-list" pairs separated by commas.</summary>

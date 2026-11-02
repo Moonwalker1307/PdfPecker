@@ -53,6 +53,12 @@ internal sealed class HtmlWriter
     /// <summary>The page numbers written in the content so far, which each get an id of their own.</summary>
     private int _pageNumbers;
 
+    /// <summary>
+    /// The id of the element around the merged document being written, when the documents number their pages apart,
+    /// which its page numbers count from and its section names are prefixed with.
+    /// </summary>
+    private string? _documentId;
+
     /// <summary>The leaders' CSS arguments, each with the number its spans name in data-leader.</summary>
     private readonly Dictionary<string, int> _leaders = new(StringComparer.Ordinal);
 
@@ -83,8 +89,20 @@ internal sealed class HtmlWriter
         }
         else
         {
+            bool apart = false;
+            for (int i = 1; i < pages.Count; i++) apart |= pages[i].Document != pages[0].Document;
             for (int i = 0; i < pages.Count; i++)
             {
+                // Merged documents that number their pages apart each go in an element of their own, whose pages
+                // their page numbers count, as a section's are.
+                if (apart && (i == 0 || pages[i].Document != pages[i - 1].Document))
+                {
+                    if (i > 0) _html.Append("</div>");
+                    _documentId = "pdfpecker-document-" + pages[i].Document.ToString(CultureInfo.InvariantCulture);
+                    _html.Append("<div");
+                    WriteAttribute("id", _documentId);
+                    _html.Append('>');
+                }
                 // The page set's text style and direction go on an element around its bands and content, which puts
                 // them all on its named page.
                 var page = pages[i];
@@ -98,6 +116,8 @@ internal sealed class HtmlWriter
                 RenderPageSet(page, name);
                 _html.Append("</div>");
             }
+            if (apart) _html.Append("</div>");
+            _documentId = null;
         }
         string body = _html.ToString();
 
@@ -131,6 +151,9 @@ internal sealed class HtmlWriter
         _html.Append('>').Append(body).Append("</body></html>\n");
         return _html.ToString();
     }
+
+    /// <summary>A section name as written in the HTML: prefixed with its merged document's id when they are kept apart.</summary>
+    private string Scoped(string name) => _documentId == null ? name : _documentId + "-" + name;
 
     private static string PageName(int index) => "p" + index.ToString(CultureInfo.InvariantCulture);
 
@@ -729,7 +752,18 @@ internal sealed class HtmlWriter
             StartContent();
             paragraphEmpty = false;
 
-            switch (run.Kind)
+            // In a merged document that numbers its pages apart, the page number and count are those of the element
+            // around it, and section names are its own.
+            var kind = run.Kind;
+            string? target = run.Kind is RunKind.SectionLink or RunKind.SectionPageNumber or RunKind.SectionEndPage
+                or RunKind.SectionPageCount or RunKind.SectionPageWithin ? Scoped(run.Target!) : run.Target;
+            if (_documentId != null && kind is RunKind.PageNumber or RunKind.TotalPages)
+            {
+                kind = kind == RunKind.PageNumber ? RunKind.SectionPageWithin : RunKind.SectionPageCount;
+                target = _documentId;
+            }
+
+            switch (kind)
             {
                 case RunKind.Element:
                 {
@@ -745,21 +779,21 @@ internal sealed class HtmlWriter
                     _sectionPages = true;
                     _html.Append("<span");
                     if (cls != null) WriteAttribute("class", cls);
-                    WriteAttribute("data-section-page", "#" + run.Target);
+                    WriteAttribute("data-section-page", "#" + target);
                     _html.Append("></span>");
                     break;
                 case RunKind.SectionEndPage:
                     _sectionEnds = true;
                     _html.Append("<span");
                     if (cls != null) WriteAttribute("class", cls);
-                    WriteAttribute("data-section-end", "#" + run.Target);
+                    WriteAttribute("data-section-end", "#" + target);
                     _html.Append("></span>");
                     break;
                 case RunKind.SectionPageCount:
                     _sectionCounts = true;
                     _html.Append("<span");
                     if (cls != null) WriteAttribute("class", cls);
-                    WriteAttribute("data-section-pages", "#" + run.Target);
+                    WriteAttribute("data-section-pages", "#" + target);
                     _html.Append("></span>");
                     break;
                 case RunKind.SectionPageWithin when _band == Band.None:
@@ -770,7 +804,7 @@ internal sealed class HtmlWriter
                     _html.Append("<span");
                     if (cls != null) WriteAttribute("class", cls);
                     WriteAttribute("id", ownId);
-                    WriteAttribute("data-section-within", "#" + run.Target);
+                    WriteAttribute("data-section-within", "#" + target);
                     _html.Append("></span>");
                     break;
                 }
@@ -778,7 +812,7 @@ internal sealed class HtmlWriter
                     // In a header or footer, a placeholder the library fills in for each page, like {page}. The encoded
                     // name holds no braces or markup.
                     OpenInline("span", cls, null);
-                    _html.Append("{section-page:").Append(Uri.EscapeDataString(run.Target!)).Append('}');
+                    _html.Append("{section-page:").Append(Uri.EscapeDataString(target!)).Append('}');
                     _html.Append("</span>");
                     break;
                 case RunKind.Leader:
@@ -823,12 +857,12 @@ internal sealed class HtmlWriter
                 case RunKind.PageNumber:
                 case RunKind.TotalPages:
                     OpenInline("span", cls, null);
-                    _html.Append(run.Kind == RunKind.PageNumber ? "{page}" : "{total-pages}");
+                    _html.Append(kind == RunKind.PageNumber ? "{page}" : "{total-pages}");
                     _html.Append("</span>");
                     break;
                 case RunKind.Hyperlink:
                 case RunKind.SectionLink:
-                    OpenInline("a", cls, run.Kind == RunKind.Hyperlink ? run.Target : "#" + run.Target);
+                    OpenInline("a", cls, kind == RunKind.Hyperlink ? target : "#" + target);
                     WriteText(run.Text);
                     _html.Append("</a>");
                     break;
@@ -935,10 +969,10 @@ internal sealed class HtmlWriter
             throw new InvalidOperationException("The document nests more than 200 elements deep, more than PdfPecker lays out.");
         _html.Append('<').Append(box.Tag);
         if (box.Declarations.Count > 0) WriteAttribute("class", Class(box.Declarations));
-        if (box.Id != null) WriteAttribute("id", box.Id);
+        if (box.Id != null) WriteAttribute("id", Scoped(box.Id));
         if (box.Direction != null) WriteAttribute("dir", box.Direction);
         if (box.Lang != null) WriteAttribute("lang", box.Lang);
-        if (box.Href != null) WriteAttribute("href", box.Href);
+        if (box.Href != null) WriteAttribute("href", box.Href.StartsWith('#') ? "#" + Scoped(box.Href[1..]) : box.Href);
         foreach (var (name, value) in box.Attributes) WriteAttribute(name, value);
         _html.Append('>');
         _open.Push(box.Tag);

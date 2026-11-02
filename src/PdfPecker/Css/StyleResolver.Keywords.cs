@@ -71,6 +71,7 @@ internal sealed partial class StyleResolver
                 s.MissingFonts = parent.MissingFonts;
                 s.PageName = parent.PageName;
                 s.CustomProperties = parent.CustomProperties;
+                s.Zoom = parent.Zoom;
                 return s;
             }
             case AllKeyword.Inherit:
