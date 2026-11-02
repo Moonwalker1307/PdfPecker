@@ -58,6 +58,7 @@ public sealed class HostileInputTests
                 });
                 c.Item().Decoration(d => { d.Before().Text(value); d.Content().Text(value); });
                 c.Item().Section(value).Text("target");
+                c.Item().Markdown(value + "\n\n# " + value + "\n\n[" + value + "](" + value + ") `" + value + "`");
                 c.Item().Image(File.ReadAllBytes(Examples.AssetPath("logo.png"))).AlternativeText(value);
             });
             p.Footer().Text(t => { t.Span(value); t.CurrentPageNumber(); });
@@ -154,5 +155,26 @@ public sealed class HostileInputTests
             c.Item().Text("after");
         }))).GeneratePdf();
         Assert.True(pdf.Length > 0);
+    }
+
+    [Fact]
+    public void Deeply_nested_markdown_finishes_quickly()
+    {
+        // Fifty thousand nested quotes each indent the text further, so the document may end at the page limit
+        // instead; either way it ends quickly, with a PDF or with the library's documented exception.
+        var watch = Stopwatch.StartNew();
+        try
+        {
+            Document.Create(d => d.Page(p => p.Content().Column(c =>
+            {
+                c.Item().Markdown(new string('>', 50_000) + " quote");
+                c.Item().Markdown(string.Concat(Enumerable.Repeat("- ", 5_000)) + "list");
+                c.Item().Markdown(new string('[', 20_000) + new string('*', 20_000));
+            }))).GeneratePdf(new PdfOptions { MaxPages = 100 });
+        }
+        catch (PdfPeckerException)
+        {
+        }
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(20), $"took {watch.Elapsed}");
     }
 }
