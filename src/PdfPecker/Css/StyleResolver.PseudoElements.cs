@@ -49,6 +49,9 @@ internal sealed partial class StyleResolver
     /// <summary>Elements that can hold ::before and ::after boxes: not replaced or void elements, SVG or table internals.</summary>
     private static bool CanHaveGenerated(Element e)
     {
+        // A check box or radio button without its native look is a plain box, which Chrome gives ::before and ::after
+        // (toggle switches are drawn with them).
+        if (e.Name == "input" && e.Style.AppearanceNone && StyledCheckable(e)) return e.Style.Display != Display.None;
         if (e.Name is "#document" or "img" or "br" or "wbr" or "svg" or "input" or "select" or "textarea" or "video" or "audio"
             or "iframe" or "canvas" or "object" or "embed" or "meta" or "link" or "style" or "script" or "head" or "title" or "html") return false;
         var d = e.Style.Display;
@@ -56,6 +59,8 @@ internal sealed partial class StyleResolver
             or Display.TableFooterGroup or Display.TableColumn or Display.TableColumnGroup) return false;
         return !IsSvgElement(e);
     }
+
+    private static bool StyledCheckable(Element e) => e.GetAttribute("type")?.Trim().ToLowerInvariant() is "checkbox" or "radio";
 
     /// <summary>Adds the ::before or ::after box of <paramref name="host"/> when a rule gives it content.</summary>
     private void Generate(Element host, PseudoElement which, ref HashSet<string>? scope)
