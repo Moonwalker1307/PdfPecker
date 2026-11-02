@@ -56,6 +56,9 @@ Document.Create(container =>
   fits a box of fixed size, for badges and labels), `Placeholder`, `DebugArea` and `Lazy`.
 - **Repeating and lists**: `Decoration` (content with a part before and after it that repeat on every page it
   crosses) and `List` (bulleted, numbered or custom-marker lists, tagged as lists in PDF/UA).
+- **Table of contents**: `TableOfContents()` lists the headings of the content, indented by level, each with a dot
+  leader and the page it lands on, and links every line to its heading. `MaxLevel`, `Indent`, `Spacing`, `Leader`,
+  `Style` and `LevelStyle` set it out. Give the table's own title no `Heading`, or it lists itself.
 - **Transforms**: `Rotate`, `RotateLeft`, `RotateRight`, `Scale`, `ScaleHorizontal`, `ScaleVertical`, `FlipHorizontal`,
   `FlipVertical`, `FlipOver`, `TranslateX` and `TranslateY`.
 - **Text**: spans with font family, size, weight, colour, background, italic, underline, strikethrough (solid, double,

@@ -114,7 +114,7 @@ supervisor and the abandoned-thread handling.
 
 `fuzz/PdfPecker.Fluent.Fuzz` is a separate, dependency-free generative fuzzer for the fluent package. Each case is a
 random document built from random fluent calls (pages, bands, decorators and transforms, text, columns, rows, tables
-with spans and explicit placement, layers, inlined and multi-column content, images, SVG, barcodes, lines, page breaks)
+with spans and explicit placement, layers, inlined and multi-column content, tables of contents, images, SVG, barcodes, lines, page breaks)
 with hostile strings and edge values: markup, braces, page tokens, control characters, lone surrogates, right-to-left
 text, NaN, infinity, negative and huge lengths, invalid colours, units and indices. Invalid values are rare on
 purpose, so most cases get past the argument checks and reach the writer and PdfPecker.
