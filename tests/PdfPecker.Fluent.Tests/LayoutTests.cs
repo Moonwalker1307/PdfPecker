@@ -294,6 +294,103 @@ public sealed class LayoutTests
         Assert.Contains("Within 2", pages[2].Text);
     }
 
+    /// <summary>An invoice of two pages: page numbers in the footer and the content, and a section with a link to it.</summary>
+    private static Document Invoice(string number) => Document.Create(d => d.Page(p =>
+    {
+        p.Size(PageSizes.A5);
+        p.Content().Column(c =>
+        {
+            c.Item().Text(t => { t.Span("Invoice " + number + ", see "); t.SectionLink("the terms", "terms"); t.Span(". Pages: "); t.TotalPages(); });
+            c.Item().PageBreak();
+            c.Item().Section("terms").Text(t => { t.Span("Terms of " + number + " on page "); t.CurrentPageNumber(); });
+        });
+        p.Footer().Text(t => { t.Span("Page "); t.CurrentPageNumber(); t.Span(" of "); t.TotalPages(); });
+    }));
+
+    [Fact]
+    public void Merged_documents_number_their_pages_on_their_own_by_default()
+    {
+        var merged = Document.Merge(Invoice("A"), Invoice("B"));
+        string html = DocumentGenerator.Html(merged, false, out _);
+        Assert.Contains("<div id=\"pdfpecker-document-1\">", html);
+        Assert.Contains("<div id=\"pdfpecker-document-2\">", html);
+        // Each document's section is its own, so the same name can be used in both.
+        Assert.Contains("id=\"pdfpecker-document-1-terms\"", html);
+        Assert.Contains("href=\"#pdfpecker-document-2-terms\"", html);
+        Assert.Contains("{section-page:pdfpecker-document-2}", html);
+        Assert.DoesNotContain("{page}", html);
+
+        var pages = PdfText.ExtractPages(merged.GeneratePdf());
+        Assert.Equal(4, pages.Count);
+        Assert.Contains("Invoice A", pages[0].Text);
+        Assert.Contains("Pages: 2", pages[0].Text);
+        Assert.Contains("Page 1 of 2", pages[0].Text);
+        Assert.Contains("Terms of A on page 2", pages[1].Text);
+        Assert.Contains("Page 2 of 2", pages[1].Text);
+        Assert.Contains("Invoice B", pages[2].Text);
+        Assert.Contains("Pages: 2", pages[2].Text);
+        Assert.Contains("Page 1 of 2", pages[2].Text);
+        Assert.Contains("Terms of B on page 2", pages[3].Text);
+        Assert.Contains("Page 2 of 2", pages[3].Text);
+    }
+
+    [Fact]
+    public void Merged_documents_with_continuous_page_numbers_count_on()
+    {
+        var merged = Document.Merge([Invoice("A"), Invoice("B")]).UseContinuousPageNumbers();
+        string html = DocumentGenerator.Html(merged, false, out _);
+        Assert.DoesNotContain("pdfpecker-document-", html);
+        Assert.Contains("{page}", html);
+
+        var pages = PdfText.ExtractPages(merged.GeneratePdf());
+        Assert.Equal(4, pages.Count);
+        Assert.Contains("Page 1 of 4", pages[0].Text);
+        Assert.Contains("Pages: 4", pages[2].Text);
+        Assert.Contains("Page 3 of 4", pages[2].Text);
+        Assert.Contains("Terms of B on page 4", pages[3].Text);
+    }
+
+    [Fact]
+    public void Merging_one_document_writes_what_the_document_writes_alone()
+    {
+        var invoice = Invoice("A");
+        Assert.Equal(DocumentGenerator.Html(invoice, false, out _), DocumentGenerator.Html(Document.Merge(invoice), false, out _));
+        Assert.Equal(DocumentGenerator.Html(invoice, false, out _),
+            DocumentGenerator.Html(Document.Merge(invoice).UseContinuousPageNumbers(), false, out _));
+    }
+
+    [Fact]
+    public void A_merge_takes_the_first_documents_metadata_unless_it_has_its_own()
+    {
+        var first = Invoice("A").WithMetadata(new DocumentMetadata { Title = "First" });
+        var merged = Document.Merge(first, Invoice("B"));
+        Assert.Equal("First", merged.GetMetadata().Title);
+        Assert.Equal("Both", merged.WithMetadata(new DocumentMetadata { Title = "Both" }).GetMetadata().Title);
+        Assert.Contains("<title>Both</title>", merged.GenerateHtml());
+    }
+
+    [Fact]
+    public void A_merge_inside_a_merge_with_continuous_numbers_counts_on_with_it()
+    {
+        var inner = Document.Merge(Invoice("A"), Invoice("B"));
+        var merged = Document.Merge(inner, Invoice("C")).UseContinuousPageNumbers();
+        Assert.DoesNotContain("pdfpecker-document-", DocumentGenerator.Html(merged, false, out _));
+
+        var apart = Document.Merge(Document.Merge(Invoice("A"), Invoice("B")).UseContinuousPageNumbers(), Invoice("C"));
+        var pages = PdfText.ExtractPages(apart.GeneratePdf());
+        Assert.Equal(6, pages.Count);
+        Assert.Contains("Page 3 of 4", pages[2].Text);
+        Assert.Contains("Page 1 of 2", pages[4].Text);
+    }
+
+    [Fact]
+    public void Merge_checks_its_documents()
+    {
+        Assert.Throws<ArgumentException>(() => Document.Merge());
+        Assert.Throws<ArgumentNullException>(() => Document.Merge((IEnumerable<IDocument>)null!));
+        Assert.Throws<ArgumentNullException>(() => Document.Merge(Invoice("A"), null!));
+    }
+
     [Fact]
     public void An_empty_document_is_one_blank_page()
         => Assert.Equal(1, PdfToImage.GetPageCount(Document.Create(_ => { }).GeneratePdf()));
