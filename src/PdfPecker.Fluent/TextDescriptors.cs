@@ -178,26 +178,29 @@ public sealed class TextDescriptor
 
     /// <summary>A leader of dots, a solid line or blank space that fills the rest of the line; see <see cref="Leader()"/>.</summary>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="style"/> is not a <see cref="LeaderStyle"/>.</exception>
-    public TextSpanDescriptor Leader(LeaderStyle style) => Add(new TextRun
-    {
-        Kind = RunKind.Leader,
-        Text = style switch
-        {
-            LeaderStyle.Dotted => "dotted",
-            LeaderStyle.Solid => "solid",
-            LeaderStyle.Space => "space",
-            _ => throw new ArgumentOutOfRangeException(nameof(style), style, "Not a leader style."),
-        },
-    });
+    public TextSpanDescriptor Leader(LeaderStyle style) => Add(new TextRun { Kind = RunKind.Leader, Text = LeaderArgument(style) });
 
     /// <summary>A leader that repeats <paramref name="pattern"/>, such as <c>"-"</c> or <c>". "</c>, to fill the rest of the line; see <see cref="Leader()"/>.</summary>
     /// <exception cref="ArgumentException"><paramref name="pattern"/> is empty, longer than 32 characters or holds a line break.</exception>
     public TextSpanDescriptor Leader(string pattern)
+        => Add(new TextRun { Kind = RunKind.Leader, Text = LeaderArgument(pattern, nameof(pattern)) });
+
+    /// <summary>The CSS leader() argument of a leader style.</summary>
+    internal static string LeaderArgument(LeaderStyle style) => style switch
     {
-        ArgumentException.ThrowIfNullOrEmpty(pattern);
-        if (pattern.Length > 32) throw new ArgumentException("A leader pattern has at most 32 characters.", nameof(pattern));
-        if (pattern.AsSpan().IndexOfAny('\n', '\r') >= 0) throw new ArgumentException("A leader pattern holds no line break.", nameof(pattern));
-        return Add(new TextRun { Kind = RunKind.Leader, Text = Html.CssValue.String(pattern) });
+        LeaderStyle.Dotted => "dotted",
+        LeaderStyle.Solid => "solid",
+        LeaderStyle.Space => "space",
+        _ => throw new ArgumentOutOfRangeException(nameof(style), style, "Not a leader style."),
+    };
+
+    /// <summary>The CSS leader() argument of a pattern, a quoted string once the pattern is checked.</summary>
+    internal static string LeaderArgument(string pattern, string paramName)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(pattern, paramName);
+        if (pattern.Length > 32) throw new ArgumentException("A leader pattern has at most 32 characters.", paramName);
+        if (pattern.AsSpan().IndexOfAny('\n', '\r') >= 0) throw new ArgumentException("A leader pattern holds no line break.", paramName);
+        return Html.CssValue.String(pattern);
     }
 
     /// <summary>
