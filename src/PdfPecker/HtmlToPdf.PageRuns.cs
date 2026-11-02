@@ -115,7 +115,14 @@ public static partial class HtmlToPdf
         {
             var grid = run.Grid;
             foreach (var (key, y) in run.Engine.Anchors)
-                if (key.Length > 0 && (key[0] != '\u0001' || selfKeys?.Contains(key) == true)) pages.TryAdd(key, first + Math.Max(0, (int)grid.PageOf(y + 0.01)) + 1);
+            {
+                if (key.Length == 0 || (key[0] == '\u0001' && selfKeys?.Contains(key) != true)) continue;
+                int page = first + Math.Max(0, (int)grid.PageOf(y + 0.01)) + 1;
+                // An element around several named pages is in each of their runs: it starts in the first, and ends in
+                // the last.
+                if (key.EndsWith(PagedContent.EndSuffix, StringComparison.Ordinal)) pages[key] = page;
+                else pages.TryAdd(key, page);
+            }
             first += grid.PagesFor(run.Height);
         }
         return pages;
