@@ -87,6 +87,49 @@ public sealed class LayoutTests
     }
 
     [Fact]
+    public void Last_cells_extend_to_the_bottom_of_the_body()
+    {
+        string html = Html.Of(c => c.Table(t =>
+        {
+            t.ColumnsDefinition(d => { d.ConstantColumn(50); d.RelativeColumn(); d.RelativeColumn(3); });
+            t.ExtendLastCellsToTableBottom();
+            t.Header(h => { h.Cell().Text("h1"); h.Cell().ColumnSpan(2).RowSpan(1).Text("h2"); h.Cell().Row(2).Column(3).Text("h3"); });
+            t.Cell().RowSpan(2).Text("a");
+            t.Cell().ColumnSpan(2).Text("b");
+            t.Cell().Text("c");
+            t.Cell().Row(3).Column(3).Text("d");
+        }));
+        // a and c are the last cells of their columns and grow to the third row; b is not the last in its columns, and
+        // the header keeps its gaps.
+        Assert.Equal(
+            "<main><table><colgroup><col class=\"c0\"><col class=\"c1\"><col class=\"c2\"></colgroup>" +
+            "<thead><tr><th scope=\"col\"><p>h1</p></th><th scope=\"col\" colspan=\"2\"><p>h2</p></th></tr>" +
+            "<tr><th></th><th></th><th scope=\"col\"><p>h3</p></th></tr></thead>" +
+            "<tbody><tr><td rowspan=\"3\"><p>a</p></td><td colspan=\"2\"><p>b</p></td></tr>" +
+            "<tr><td rowspan=\"2\"><p>c</p></td><td></td></tr>" +
+            "<tr><td><p>d</p></td></tr></tbody></table></main>", html);
+    }
+
+    [Fact]
+    public void A_cell_spanning_columns_extends_only_when_it_is_last_in_all_of_them()
+    {
+        string html = Html.Of(c => c.Table(t =>
+        {
+            t.ColumnsDefinition(d => { d.RelativeColumn(); d.RelativeColumn(); });
+            t.ExtendLastCellsToTableBottom();
+            t.Cell().ColumnSpan(2).Text("wide");
+            t.Cell().Row(2).Column(1).Text("left");
+            t.Cell().Row(4).Column(1).Text("bottom");
+        }));
+        // "wide" is the last cell of the second column only, so it stays one row; "left" ends above "bottom".
+        Assert.Equal(
+            "<main><table><colgroup><col class=\"c0\"><col class=\"c0\"></colgroup>" +
+            "<tbody><tr><td colspan=\"2\"><p>wide</p></td></tr>" +
+            "<tr><td><p>left</p></td><td></td></tr><tr><td></td><td></td></tr>" +
+            "<tr><td><p>bottom</p></td><td></td></tr></tbody></table></main>", html);
+    }
+
+    [Fact]
     public void A_cells_painted_content_fills_the_cell_whatever_the_call_order()
     {
         // QuestPDF draws a cell's content over the whole row, so a background inside the padding fills it; a cell with
