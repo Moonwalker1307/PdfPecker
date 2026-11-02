@@ -16,7 +16,7 @@ public class ComputedStyleInheritanceTests
     // The fields a child takes from its parent. The three inherited groups hold the rarely set inherited properties.
     private static readonly string[] Inherited =
     [
-        "Color", "FontFamily", "Bold", "FontWeight", "Italic", "FontStretch", "FontSize", "FontSizeKeyword",
+        "Color", "FontFamily", "Bold", "FontWeight", "Italic", "FontStretch", "FontSize", "Zoom", "FontSizeKeyword",
         "FontSizeAbsolute", "LineHeightKind", "LineHeightValue", "TextAlign", "Rtl", "WritingMode", "NoHyphens",
         "HyphensAuto", "Lang", "Quirks", "Hyphenation", "SmallCaps", "WhiteSpace", "TextWrap", "OverflowWrap", "WordBreak",
         "ListStyleType", "ListStylePositionInside", "TextTransform", "TextDecoration", "TextIndent", "LetterSpacing",

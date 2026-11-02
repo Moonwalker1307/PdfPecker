@@ -154,6 +154,7 @@ internal sealed partial class SvgImage
     private Dictionary<Element, (SvgPathMeasure?, float)>? _textPaths; // the paths text is laid along, measured
     private ContextPaint? _contextFill, _contextStroke; // what context-fill and context-stroke paint with, or null for none
     private (float Width, float Height)? _useSize; // the width and height of a use element drawing a nested svg
+    private ComputedStyle? _useParent; // inside what a use element draws: the style the next element inherits from
     private int _wrapDepth; // groups, clips, masks and filters around the element being drawn
     private float _wrapOpacity = 1; // the opacity of the translucent groups around it
 
@@ -370,6 +371,8 @@ internal sealed partial class SvgImage
         if (--_budget.Remaining < 0 || depth > 32) return;
         var s = e.Style;
         if (s == null || s.Display == Display.None) return;
+        var useParent = _useParent;
+        if (useParent != null) s = InUse(s, useParent);
         if (e.GetAttribute("transform") is { } tf) ctm = ParseTransform(tf).Then(ctm);
         // A translucent container is composited as one group, so its children do not show through each other.
         bool group = s.Opacity < 1 && e.Name is "g" or "a" or "switch" or "use" or "svg";
@@ -388,9 +391,11 @@ internal sealed partial class SvgImage
         float wrapOpacity = _wrapOpacity;
         if (wraps) _wrapDepth++;
         if (group) _wrapOpacity *= s.Opacity;
+        if (useParent != null) _useParent = s;
         try { RenderElement(e, s, ctm, op, depth); }
         finally
         {
+            _useParent = useParent;
             if (filter != null) _filterDepth--;
             if (clip != null) _clipDepth--;
             if (mask != null) _maskDepth--;
@@ -479,10 +484,14 @@ internal sealed partial class SvgImage
                 }
                 (_contextFill, _contextStroke) = (Context(s.SvgFill, s.SvgFillUrl, minX, minY, maxX, maxY, ctm),
                     Context(s.SvgStroke, s.SvgStrokeUrl, minX, minY, maxX, maxY, ctm));
+                // What the use element draws inherits from the use element, not from where it is defined.
+                var useParent = _useParent;
+                _useParent = s;
                 try
                 {
                     if (target.Name == "symbol")
                     {
+                        if (target.Style is { } symbol) _useParent = InUse(symbol, s);
                         m = SymbolTransform(target, e).Then(m);
                         foreach (var c in target.Children) if (c is Element ce) Render(ce, m, op, depth + 1);
                     }
@@ -496,6 +505,7 @@ internal sealed partial class SvgImage
                 finally
                 {
                     (_contextFill, _contextStroke) = (outerFill, outerStroke);
+                    _useParent = useParent;
                     _useSize = null;
                 }
                 return;
@@ -683,6 +693,15 @@ internal sealed partial class SvgImage
 
     /// <summary>Renders an element referenced by &lt;use&gt;; the use element's own presentation styles were already
     /// inherited by the target through the cascade only when the target is its descendant, so they are applied here.</summary>
+    /// <summary>
+    /// The style of an element that a use element draws, whose parent in that drawing has the style
+    /// <paramref name="parent"/>. An element that sets no paint of its own takes the paint of that parent, as the
+    /// element's copy in the use element's shadow tree would, instead of the paint where it is defined. One that sets
+    /// some keeps its own style: the properties it left alone still come from where it is defined.
+    /// </summary>
+    private static ComputedStyle InUse(ComputedStyle s, ComputedStyle parent)
+        => s.ParentStyle is { } defined && s.InheritsSvgPaint(defined) && !s.InheritsSvgPaint(parent) ? s.WithSvgPaintOf(parent) : s;
+
     private void RenderReferenced(Element target, Element use, Matrix m, float opacity, int depth)
         => Render(target, m, opacity * (use.Style?.Opacity ?? 1), depth);
 

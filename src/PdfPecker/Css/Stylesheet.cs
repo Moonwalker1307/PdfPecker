@@ -1,3 +1,5 @@
+using PdfPecker.Html;
+
 namespace PdfPecker.Css;
 
 /// <summary>One declaration of a rule, after shorthand expansion: a longhand property, its value and its importance.</summary>
@@ -59,15 +61,32 @@ internal sealed class StyleRule
     public readonly CascadeLayer? Layer; // null for rules outside any @layer
     /// <summary>The conditions of the @container blocks around the rule, outermost first; null outside any.</summary>
     public readonly ContainerQuery[]? Containers;
+    /// <summary>The @scope block around the rule (the innermost one); null outside any.</summary>
+    public readonly ScopeRule? Scope;
 
-    public StyleRule(Selector selector, Declaration[] declarations, int order, CascadeLayer? layer = null, ContainerQuery[]? containers = null)
+    public StyleRule(Selector selector, Declaration[] declarations, int order, CascadeLayer? layer = null, ContainerQuery[]? containers = null,
+        ScopeRule? scope = null)
     {
         Selector = selector;
         Declarations = declarations;
         Order = order;
         Layer = layer;
         Containers = containers;
+        Scope = scope;
     }
+}
+
+/// <summary>
+/// An <c>@scope (start) to (end)</c> block. Its rules apply below each element that matches the start (the scope
+/// root, which <c>:scope</c> matches) and not at or below an element under the root that matches the end. Without a
+/// start, the root is the parent of the style element the block is in, or the document's root in a linked sheet.
+/// </summary>
+internal sealed class ScopeRule
+{
+    public Selector[]? Start;
+    public Selector[]? End;
+    public Element? ImplicitRoot;
+    public ScopeRule? Parent; // an @scope block this one is nested in: its roots must be in that block's scope
 }
 
 /// <summary>
@@ -163,6 +182,8 @@ internal sealed class Stylesheet
 
     /// <summary>The href of the sheet being parsed, for the @import rules in it.</summary>
     internal string? CurrentHref;
+    /// <summary>The parent of the style element being parsed: the root of an @scope block without a start.</summary>
+    internal Element? CurrentScopeRoot;
     internal readonly List<string> ImportChain = new(); // hrefs of the sheets being imported, against import cycles
     internal int ImportCount;
     private int _anonymousLayers;

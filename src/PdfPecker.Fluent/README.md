@@ -50,6 +50,9 @@ Document.Create(container =>
   column spans, explicit placement, cell backgrounds and borders that fill the row in any call order, header and footer
   rows that repeat on every page), padding, borders, corner radius, background, width and height with minimum and
   maximum, alignment, page breaks, `PreventPageBreak`, `ShowIf` and right-to-left content.
+- **Gradients and opacity**: `BackgroundLinearGradient` (QuestPDF's call, with its angles), `BackgroundRadialGradient`
+  (from the middle or a centre you choose, for a glow on a cover page) and `Opacity`, which fades a slot and everything
+  in it, such as a watermark over the content. Paint called before `Opacity` stays as it is.
 - **More layout**: `Layers` (watermarks under and stamps over content), `Inlined` (items that wrap like words, such as
   tags), `MultiColumn` (newspaper columns), `EnsureSpace` (keeps a heading off the bottom of a page), `Unconstrained`,
   `ZIndex`, `AspectRatio`, `Shadow`, rounded single corners, `Shrink`, `ScaleToFit` (draws content smaller until it
@@ -70,6 +73,9 @@ Document.Create(container =>
   in them or anywhere in the content. `ShowOnce` and `SkipOnce` in the header or footer give the first page a band of its own, such as a
   letterhead followed by a slim header. `EvenPageHeader` and `EvenPageFooter` give the even pages bands of their own, for printing on both sides. Several `Page` calls give page sets with their own size, margins, header and
   footer in one document, and the page numbers run on through all of them.
+- **Merging**: `Document.Merge(invoice1, invoice2, ...)` generates several documents as one PDF or HTML document, such
+  as a batch of invoices. Each keeps its own page numbers, totals and section names, or `UseContinuousPageNumbers()`
+  numbers the pages through all of them.
 - **Form fields and footnotes**, which QuestPDF does not have: `TextField` (one line, multiline or password),
   `CheckBox`, `RadioButton`, `ComboBox` and `ListBox` become fillable PDF fields, and `text.Footnote("...")` numbers a
   note and sets it at the bottom of its page. Browsers show footnotes in the text, where `GenerateHtml` puts them.
@@ -123,6 +129,12 @@ Most QuestPDF code ports by changing the `using` lines: `Document.Create`, `Page
   repeats are all the same.
 - `ScaleToFit` fits the content into a `Height` or `MaxHeight` set before it, or into the height of the slot around it,
   such as a row or a box with a `Height`.
+- `BackgroundLinearGradient` runs the way its angle points: 0 left to right, 90 top to bottom, 180 right to left and
+  270 bottom to top. QuestPDF 2026.9 runs the angles between 90 and 270 other than 180 rightwards instead, so a gradient
+  ported from such an angle is reversed. `BackgroundRadialGradient` and `Opacity` are not in QuestPDF.
+- `Document.Merge` composes the documents into one HTML document, so the result has one set of metadata and settings:
+  those of `WithMetadata` and `WithSettings` on the merge, or the first document's. With original page numbers,
+  `BeginPageNumberOfSection` and `EndPageNumberOfSection` still give pages of the whole PDF.
 - Not available: `Dynamic`, `Canvas`, `StopPaging`, `RepeatContent`, `ExtendLastCellsToTableBottom` and the Companion
   previewer.
 

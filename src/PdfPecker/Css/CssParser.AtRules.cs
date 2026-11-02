@@ -36,9 +36,74 @@ internal static partial class CssParser
                 var layer = LayerFor(scope.Sheet, scope.Layer, prelude.Length == 0 ? scope.Sheet.AnonymousLayerName() : prelude);
                 inner = scope.Inside(layer, scope.Containers);
                 return true;
+            case "scope":
+                if (ParseScope(prelude, scope) is not { } scoped) return false;
+                inner = scope.Inside(scope.Layer, scope.Containers) with { Scope = scoped };
+                return true;
             default:
                 return false;
         }
+    }
+
+    /// <summary>
+    /// The prelude of an @scope block: an optional "(start)" and an optional "to (end)", each a selector list. Null when
+    /// it is not valid, which drops the block as in Chrome.
+    /// </summary>
+    private static ScopeRule? ParseScope(string prelude, in RuleScope scope)
+    {
+        var rule = new ScopeRule { Parent = scope.Scope };
+        var rest = prelude.AsSpan().Trim();
+        if (rest.StartsWith("("))
+        {
+            int close = MatchingParen(rest);
+            if (close < 0 || ParseSelectorList(rest.Slice(1, close - 1)) is not { } start) return null;
+            rule.Start = start;
+            rest = rest.Slice(close + 1).TrimStart();
+        }
+        else if (scope.Scope == null) rule.ImplicitRoot = scope.Sheet.CurrentScopeRoot;
+        if (rest.Length > 0)
+        {
+            if (!rest.StartsWith("to", StringComparison.OrdinalIgnoreCase)) return null;
+            rest = rest.Slice(2).TrimStart();
+            if (!rest.StartsWith("(")) return null;
+            int close = MatchingParen(rest);
+            if (close != rest.Length - 1 || ParseSelectorList(rest.Slice(1, close - 1)) is not { } end) return null;
+            rule.End = end;
+        }
+        return rule;
+    }
+
+    private static int MatchingParen(ReadOnlySpan<char> s)
+    {
+        int depth = 0;
+        for (int i = 0; i < s.Length; i++)
+        {
+            if (s[i] == '(') depth++;
+            else if (s[i] == ')' && --depth == 0) return i;
+        }
+        return -1;
+    }
+
+    private static Selector[]? ParseSelectorList(ReadOnlySpan<char> text)
+    {
+        var list = new List<Selector>();
+        foreach (var part in SplitTopLevel(text.ToString(), ','))
+        {
+            if (Selector.Parse(part.Trim()) is not { } selector) return null;
+            list.Add(selector);
+        }
+        return list.Count == 0 ? null : list.ToArray();
+    }
+
+    /// <summary>
+    /// A selector in an @scope block: one that names neither :scope nor &amp; matches below the scope root, as if it
+    /// started with ":where(:scope) "; &amp; stands for the root.
+    /// </summary>
+    private static string Scoped(string selector)
+    {
+        if (selector.Contains('&')) return selector.Replace("&", ":scope");
+        if (selector.Contains(":scope", StringComparison.OrdinalIgnoreCase)) return selector;
+        return ":where(:scope) " + selector;
     }
 
     /// <summary>The layer named <paramref name="name"/> (dotted for sub-layers) inside <paramref name="parent"/>, created on first use.</summary>

@@ -14,7 +14,7 @@ public static class DocumentContainerExtensions
     {
         var document = DocumentContainer.Of(container);
         ArgumentNullException.ThrowIfNull(handler);
-        var page = new PageSet();
+        var page = new PageSet { Document = document.Document };
         handler(new PageDescriptor(page));
         document.Pages.Add(page);
         return container;

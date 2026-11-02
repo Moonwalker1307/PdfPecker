@@ -339,7 +339,18 @@ internal sealed partial class LayoutEngine
                 }
                 e = (Element)child;
                 var es = e.Style;
-                if (es == null || es.Display == Display.None || e.Detached) continue;
+                if (es is { RunningName: not null } && e.Detached && f.Run is { Count: > 0 })
+                {
+                    // A running element among inline content: the lines record where it was taken from.
+                    f.Run.Add(child);
+                    continue;
+                }
+                if (es == null || es.Display == Display.None || e.Detached)
+                {
+                    // Where a running element was taken from decides the pages whose margin boxes show it.
+                    if (es is { RunningName: not null } && e.Detached && e.LayoutKey != null) SetAnchor(e.LayoutKey, f.Y);
+                    continue;
+                }
                 if (IsInlineLevel(e) || (es.Floated || es.OutOfFlow) && f.Run is { Count: > 0 })
                 {
                     // Floats and absolutely positioned boxes among inline content are placed as the lines reach them.
@@ -1305,6 +1316,8 @@ internal sealed partial class LayoutEngine
         var probe = _childProbe;
         _childProbe = null;
         var s = e.Style;
+        var markerAtStart = _marker;
+        int listIndexAtStart = _currentListIndex;
         if (e.Id != null) SetAnchor(e.Id, y);
         if (e.Name == "a" && e.GetAttribute("name") is { } aname) SetAnchor(aname, y);
 
@@ -1408,6 +1421,8 @@ internal sealed partial class LayoutEngine
         float contentBottom;
         Collapsed trailing = default;
         CbHeights? childCb = null;
+        // continue: discard ends the content at this y (see DiscardEdge); infinity for other boxes.
+        float discardEnd = float.PositiveInfinity;
         if (isImage || isSvg)
         {
             if (_paginate)
@@ -1449,13 +1464,24 @@ internal sealed partial class LayoutEngine
             // The legend was laid out already: the content leaves it out.
             if (legend != null) legend.Detached = true;
             _flowTrailing = default;
+            int discardPage = -1;
+            float reserveBefore = 0;
+            if (s.ContinueDiscard) discardEnd = DiscardEdge(cy, definiteH ?? MaxContentHeight(s, sizing, cbH), pb + bb, out discardPage, out reserveBefore);
             try
             {
                 contentBottom = s.ScaleToFit && FitHeight(e, definiteH, MaxContentHeight(s, sizing, cbH)) is float fitH
                     ? LayoutScaledToFit(e, cx, cy, contentW, definiteH, minH, fitH)
                     : LayoutContent(e, cx, cy, contentW, definiteH, minH);
             }
-            finally { if (legend != null) legend.Detached = false; }
+            finally
+            {
+                if (legend != null) legend.Detached = false;
+                if (discardPage >= 0)
+                {
+                    if (reserveBefore > 0) _edgeReserve[discardPage] = reserveBefore;
+                    else _edgeReserve.Remove(discardPage);
+                }
+            }
             _cbHeight = outerCb;
             _pageBox = null;
             bool collapsesBottom = joinsChildren && CollapsesBottom(e) && !s.IsFlex && !s.IsGrid;
@@ -1469,6 +1495,24 @@ internal sealed partial class LayoutEngine
             }
             if (outerFloats != null) contentBottom = LeaveFormattingContext(outerFloats, contentBottom);
             _absorbTop = false;
+            if (contentBottom > discardEnd + Eps)
+            {
+                // A box that starts too low on its page for any of its content goes to the next page, as a box that
+                // keeps its edges with its content does, rather than showing nothing.
+                if (_paginate && _grid is not ColumnGrid && !AtPageTop(y) && !KeepsContentAbove(opsStart + 1, discardEnd))
+                {
+                    if (cbFrame != null) _frames.Remove(cbFrame);
+                    Truncate(opsStart);
+                    _marker = markerAtStart;
+                    _currentListIndex = listIndexAtStart;
+                    _childPageBox = parentPages;
+                    _childProbe = probe;
+                    _lastContentBottom = float.NaN;
+                    return LayoutBlockBoxCore(e, x, NextPage(y), availW, shrinkToFit);
+                }
+                Discard(opsStart + 1, y, discardEnd);
+                contentBottom = discardEnd;
+            }
             if (collapsesBottom)
             {
                 trailing = _flowTrailing;
@@ -1512,6 +1556,8 @@ internal sealed partial class LayoutEngine
             float mh = minHeight - sizing;
             if (contentH < mh) contentH = mh;
         }
+        // The first fragment of a box with continue: discard is all there is of it, whatever its height asks for.
+        if (discardEnd < float.PositiveInfinity) contentH = Math.Min(contentH, Math.Max(0, discardEnd - cy));
         if (container && !_measuring)
         {
             // The next style pass evaluates container queries and cq units against this size.
@@ -1762,8 +1808,8 @@ internal sealed partial class LayoutEngine
         {
             if (image.Width <= 0 || image.Height <= 0) return false;
             m.Image = image;
-            m.ImageW = image.Width * 0.75f / resolution;
-            m.ImageH = image.Height * 0.75f / resolution;
+            m.ImageW = image.Width * 0.75f / resolution * m.Style.Zoom;
+            m.ImageH = image.Height * 0.75f / resolution * m.Style.Zoom;
             return true;
         }
         float side = DefaultMarkerImageSide(m.Style);
@@ -1978,6 +2024,7 @@ internal sealed partial class LayoutEngine
     {
         if (!_images.Svgs.TryGetValue(e, out var svg)) _images.Svgs[e] = svg = SvgImage.Build(e, _images.SvgBudget, _images.LoadAny);
         var (iw, ih) = SvgNaturalSize(svg, availW);
+        if (e.Style.Zoom != 1 && (svg.Width != null || svg.Height != null)) (iw, ih) = (iw * e.Style.Zoom, ih * e.Style.Zoom);
         ReplacedSize(e, iw, ih, availW, out w, out h, percentW);
         // Percentages in an svg without a viewBox refer to its used size (width="100%" on the svg and a rect 100% wide),
         // so the drawing is built again for that size.
