@@ -134,7 +134,7 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   positioning (also the legacy `clip: rect()`, and absolute boxes inside a positioned inline element, such as
   tooltips and badges), transforms, gradients (also `in oklch` and other colour spaces, and as
   list markers), fixed background images (placed on each page's paper, as Chrome prints them), filters, masks,
-  media and container queries, logical properties, `writing-mode` (with floats, sized boxes and vertical-lr line
+  media and container queries, `@scope` (scope roots, limits and proximity, as in Chrome), logical properties, `writing-mode` (with floats, sized boxes and vertical-lr line
   order), `text-wrap`, hanging indents (`text-indent` with `hanging` and `each-line`), emphasis
   marks (`text-emphasis`), trimming lines to the cap height and baseline (`text-box`, for optically centred
   buttons and badges), `line-clamp` with your own `block-ellipsis`, underlines from the font or below the descenders

@@ -284,7 +284,14 @@ internal sealed partial class StyleResolver
     {
         foreach (var r in rules)
         {
-            if (r.Selector.PseudoElement != which || r.Containers != null && !ContainersMatch(r.Containers, e, which) || !r.Selector.Matches(e)) continue;
+            if (r.Selector.PseudoElement != which || r.Containers != null && !ContainersMatch(r.Containers, e, which)) continue;
+            int closeness = 0;
+            if (r.Scope != null)
+            {
+                if (ScopeHops(r.Scope, r.Selector, e) is not int hops) continue;
+                closeness = ScopeCloseness(hops);
+            }
+            else if (!r.Selector.Matches(e)) continue;
             var decls = r.Declarations;
             // Cascade layers: later layers win over earlier ones and unlayered rules over all of them; for !important
             // declarations the order is reversed.
@@ -293,7 +300,7 @@ internal sealed partial class StyleResolver
             for (int i = 0; i < decls.Length; i++)
             {
                 bool important = decls[i].Important;
-                Push(important ? importantTier : tier, r.Selector.Specificity, r.Order, i, decls[i], important ? importantLayer : layer);
+                Push(important ? importantTier : tier, r.Selector.Specificity, r.Order, i, decls[i], important ? importantLayer : layer, closeness);
             }
         }
     }
@@ -364,7 +371,7 @@ internal sealed partial class StyleResolver
         (decls[i], decls[j]) = (decls[j], decls[i]);
     }
 
-    private void Push(long tier, int specificity, int order, int declIndex, Declaration d, int layer = 0)
+    private void Push(long tier, int specificity, int order, int declIndex, Declaration d, int layer = 0, int closeness = 0)
     {
         // In standards mode a unitless length is invalid, so an earlier declaration of the property wins, as Acid2 tests.
         if (StandardsMode && tier >= TierAuthor && d.HasUnitlessLength) return;
@@ -375,7 +382,10 @@ internal sealed partial class StyleResolver
         }
         long key = tier << 60
                    | (long)layer << 52
-                   | (long)Math.Min(specificity, 0xFFFFF) << 32
+                   // Scope proximity decides between equal specificities before the order does: a closer scope root
+                   // wins, and a rule outside any @scope (closeness 0) loses to a scoped one.
+                   | (long)Math.Min(specificity, 0xFFFF) << 36
+                   | (long)closeness << 32
                    | (long)Math.Min(order, 0xFFFFF) << 12
                    | (long)Math.Min(declIndex, 0xFFF);
         _keys[_count] = key;
