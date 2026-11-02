@@ -339,7 +339,18 @@ internal sealed partial class LayoutEngine
                 }
                 e = (Element)child;
                 var es = e.Style;
-                if (es == null || es.Display == Display.None || e.Detached) continue;
+                if (es is { RunningName: not null } && e.Detached && f.Run is { Count: > 0 })
+                {
+                    // A running element among inline content: the lines record where it was taken from.
+                    f.Run.Add(child);
+                    continue;
+                }
+                if (es == null || es.Display == Display.None || e.Detached)
+                {
+                    // Where a running element was taken from decides the pages whose margin boxes show it.
+                    if (es is { RunningName: not null } && e.Detached && e.LayoutKey != null) SetAnchor(e.LayoutKey, f.Y);
+                    continue;
+                }
                 if (IsInlineLevel(e) || (es.Floated || es.OutOfFlow) && f.Run is { Count: > 0 })
                 {
                     // Floats and absolutely positioned boxes among inline content are placed as the lines reach them.

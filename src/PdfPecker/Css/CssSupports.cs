@@ -169,7 +169,7 @@ internal static class CssSupports
             case "zoom":
                 return StyleResolver.ParseZoom(lower) != null;
             case "position":
-                return lower is "static" or "relative" or "absolute" or "fixed" or "sticky";
+                return lower is "static" or "relative" or "absolute" or "fixed" or "sticky" || StyleResolver.RunningName(lower) != null;
             case "container-type":
                 return lower is "normal" or "size" or "inline-size";
             case "container-name":
