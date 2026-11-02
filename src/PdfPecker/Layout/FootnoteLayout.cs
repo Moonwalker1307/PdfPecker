@@ -194,7 +194,7 @@ internal sealed partial class LayoutEngine
         var onPage = PartsOn(page);
         // The room the area's content may take on this page: below the line, and within the area's maximum height.
         float cap = Math.Min(_grid.Start(page + 1) - lineBottom - frame, MaxAreaContent(page));
-        var planned = new List<FootnotePart>(); // parts given to later pages by this call
+        var planned = new FootnotePlan(); // parts given to later pages by this call
         var calls = new List<FootnoteCall>(fresh.Count);
         bool deferRest = false;
         foreach (int k in fresh)
@@ -233,7 +233,7 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>Gives the rest of a footnote, from <paramref name="from"/>, to the footnote areas from page <paramref name="page"/> on.</summary>
-    private void Continue(FootnoteCall call, float from, int page, List<FootnotePart> planned)
+    private void Continue(FootnoteCall call, float from, int page, FootnotePlan planned)
     {
         int k = call.Index;
         bool inline = Footnotes!.Bodies[k].Style.Display == Display.Inline;
@@ -244,10 +244,13 @@ internal sealed partial class LayoutEngine
         {
             int b = basis < 0 ? page : basis;
             var m = inline ? null : Measure(k, b);
-            var parts = PartsOn(page);
-            foreach (var p in planned)
-                if (p.Page == page) parts.Add(p);
-            float used = AreaContent(parts), room = MaxAreaContent(page) - used;
+            if (!planned.Used.TryGetValue(page, out float used))
+            {
+                var parts = PartsOn(page);
+                if (planned.Parts.TryGetValue(page, out var later)) parts.AddRange(later);
+                planned.Used[page] = used = AreaContent(parts);
+            }
+            float room = MaxAreaContent(page) - used;
             if (m == null || m.Height - from <= room + Eps)
             {
                 Add(new FootnotePart(k, page, from, float.PositiveInfinity, true, b));
@@ -270,8 +273,21 @@ internal sealed partial class LayoutEngine
         void Add(FootnotePart part)
         {
             call.Parts.Add(part);
-            planned.Add(part);
+            if (!planned.Parts.TryGetValue(part.Page, out var list)) planned.Parts[part.Page] = list = new List<FootnotePart>();
+            list.Add(part);
+            planned.Used.Remove(part.Page);
         }
+    }
+
+    /// <summary>
+    /// The parts that one line's footnotes give to later pages, by page, and the height each of those pages' areas
+    /// then has. A line with thousands of footnotes that do not fit hands each of them on through the same full pages,
+    /// and going through every part planned so far, and adding up each page again, made that quadratic.
+    /// </summary>
+    private sealed class FootnotePlan
+    {
+        public readonly Dictionary<int, List<FootnotePart>> Parts = new();
+        public readonly Dictionary<int, float> Used = new();
     }
 
     /// <summary>The farthest line boundary of footnote <paramref name="k"/> after <paramref name="from"/> within <paramref name="room"/>, or 0.</summary>
