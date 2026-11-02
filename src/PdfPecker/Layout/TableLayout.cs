@@ -1570,6 +1570,8 @@ internal sealed partial class LayoutEngine
     {
         var cs = cell.Td.Style;
         float h = rowBottom - cell.Top;
+        // Boxes inside the cell drawn again on the later pages the cell is split across.
+        if (_repeats != null) DrawCellRepeats(cell.Td, rowBottom - (collapse ? cell.CollapsedB / 2 : cs.BorderBottom) - cs.PaddingBottom.Resolve(cell.W));
         // As in Chrome, a cell that is split across pages or columns keeps its content at the top: aligned within the
         // whole cell, the content would start pages later, away from the heading that must stay with the table.
         float shift = CrossesPage(cell.Top, rowBottom) ? 0 : cs.VerticalAlign switch

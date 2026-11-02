@@ -346,6 +346,9 @@ internal sealed partial class StyleResolver
                 s.ScaleToFit = d.Lower == "shrink" || d.Inherit && parent.ScaleToFit;
                 if (s.ScaleToFit) s.FormattingRoot = true;
                 break;
+            case RepeatProperty:
+                s.RepeatOnPages = d.Lower == "each-page" || d.Inherit && parent.RepeatOnPages;
+                break;
 
             // ---- SVG presentation properties (Properties.Svg.cs)
             case "fill": ApplyFill(s, parent, in d); break;

@@ -161,6 +161,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   [More](https://pdfpecker.net/docs/paged-media/)
 - **Content scaled to fit a box**: `-pdfpecker-scale-to-fit: shrink` fits text of any length into a fixed space, for
   labels, badges and certificates. [More](https://pdfpecker.net/docs/html-and-css/#scale-content-to-fit-a-box)
+- **Content repeated on each page**: `-pdfpecker-repeat: each-page` draws a box again at the top of each later page its
+  parent continues on, such as a label in a row beside a text several pages long.
 - **Markdown**: CommonMark 0.31 and GitHub Flavored Markdown to PDF or HTML, with footnotes, definition lists and YAML
   front matter. [More](https://pdfpecker.net/docs/markdown/)
 - **Fonts**: TrueType, OpenType, WOFF and WOFF2, subset and embedded, with kerning, ligatures, variable fonts and
