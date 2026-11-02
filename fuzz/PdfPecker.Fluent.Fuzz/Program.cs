@@ -445,8 +445,9 @@ internal static class Fuzz
 
     private static float Signed(Random r) => r.Next(2) == 0 ? Number(r) : -Number(r);
 
-    private static IContainer Decorate(IContainer c, Random r) => r.Next(52) switch
+    private static IContainer Decorate(IContainer c, Random r) => r.Next(53) switch
     {
+        52 => c.StopPaging(),
         48 => c.Language(r.Next(10) == 0 ? Text(r) : Languages[r.Next(Languages.Length)]),
         49 => c.BackgroundLinearGradient(r.Next(20) == 0 ? float.NaN : Signed(r) * 10, Palette(r)),
         50 => r.Next(2) == 0 ? c.BackgroundRadialGradient(Palette(r)) : c.BackgroundRadialGradient(Signed(r) / 50, Signed(r) / 50, Palette(r)),

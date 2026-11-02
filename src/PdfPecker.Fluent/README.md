@@ -49,7 +49,8 @@ Document.Create(container =>
 - **Layout**: `Column`, `Row` (relative, constant and auto items), `Table` (constant and relative columns, row and
   column spans, explicit placement, cell backgrounds and borders that fill the row in any call order, header and footer
   rows that repeat on every page), padding, borders, corner radius, background, width and height with minimum and
-  maximum, alignment, page breaks, `PreventPageBreak`, `ShowIf` and right-to-left content.
+  maximum, alignment, page breaks, `PreventPageBreak`, `StopPaging` (content kept to one page or to its height, the
+  rest left out), `ShowIf` and right-to-left content.
 - **Gradients and opacity**: `BackgroundLinearGradient` (QuestPDF's call, with its angles), `BackgroundRadialGradient`
   (from the middle or a centre you choose, for a glow on a cover page) and `Opacity`, which fades a slot and everything
   in it, such as a watermark over the content. Paint called before `Opacity` stays as it is.
