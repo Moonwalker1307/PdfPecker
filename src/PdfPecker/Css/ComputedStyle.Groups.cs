@@ -477,6 +477,7 @@ internal sealed partial class ComputedStyle
     public string? Content { get => _rare.Content; set => Rare.Content = value; }
     public bool ContentNone { get => _rare.ContentNone; set => Rare.ContentNone = value; }
     public string? StringSet { get => _rare.StringSet; set => Rare.StringSet = value; }
+    public string? RunningName { get => _rare.RunningName; set => Rare.RunningName = value; }
     public int? BookmarkLevel { get => _rare.BookmarkLevel; set => Rare.BookmarkLevel = value; }
     public string? BookmarkLabel { get => _rare.BookmarkLabel; set => Rare.BookmarkLabel = value; }
     public bool BookmarkClosed { get => _rare.BookmarkClosed; set => Rare.BookmarkClosed = value; }
@@ -531,6 +532,7 @@ internal sealed partial class ComputedStyle
         public string? Content;                     // the content property as written; null = normal
         public bool ContentNone;                    // content: none, which on ::marker removes the marker (normal keeps it)
         public string? StringSet;                   // string-set as written (named strings for running headers); null = none
+        public string? RunningName;                 // position: running(name): taken out of the flow for element() in margin boxes
         public int? BookmarkLevel;                  // bookmark-level: null = unset (h1-h6 take their own level), 0 = none
         public string? BookmarkLabel;               // bookmark-label as written; null = content(text)
         public bool BookmarkClosed;                 // bookmark-state: closed

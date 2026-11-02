@@ -24,7 +24,10 @@ internal sealed class PagedContent
     /// The anchor of where the element with an id ends, which the layout records next to where it starts, for the last
     /// page of a section in <c>-pdfpecker-target-pages()</c>.
     /// </summary>
-    public static string EndKey(string id) => id + "\u0001end";
+    public static string EndKey(string id) => id + EndSuffix;
+
+    /// <summary>What <see cref="EndKey"/> adds to an id.</summary>
+    public const string EndSuffix = "\u0001end";
 
     /// <summary>
     /// The layout keys of the elements that show their own page within a section, which the layout records where their
@@ -56,7 +59,10 @@ internal sealed class PagedContent
     public readonly Dictionary<string, Dictionary<string, int>> CounterSnapshots = new(StringComparer.Ordinal);
 
     /// <summary>The running strings, once the pages of their elements are known; for margin boxes.</summary>
-    public RunningStrings? Running;
+    public RunningValues<string>? Running;
+
+    /// <summary>The running elements, once the pages they were taken from are known; for element() in margin boxes.</summary>
+    public RunningValues<Element>? RunningElements;
 
     /// <summary>The page (0-based) whose margin boxes are being generated.</summary>
     public int CurrentPage;
@@ -74,31 +80,36 @@ internal sealed class PagedContent
 /// <summary>A <c>string-set</c> assignment: the element's name and value, and the anchor key that finds its page.</summary>
 internal sealed record StringAssignment(Element Element, string Name, string Value, string Key);
 
-/// <summary>The values of named strings per page, for <c>string(name, first | start | last | first-except)</c>.</summary>
-internal sealed class RunningStrings
+/// <summary>A running element: the element with position: running(name), and the anchor key that finds its page.</summary>
+internal sealed record RunningAssignment(Element Element, string Name, string Key);
+
+/// <summary>
+/// The values of named strings (string-set) or running elements (position: running()) per page, for
+/// <c>string(name, policy)</c> and <c>element(name, policy)</c>.
+/// </summary>
+internal sealed class RunningValues<T> where T : class
 {
     // Per name, the assignments in document order with their page and position on it.
-    private readonly Dictionary<string, List<(int Page, float Y, string Value)>> _byName = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<(int Page, float Y, T Value)>> _byName = new(StringComparer.Ordinal);
 
-    public RunningStrings(IEnumerable<(string Name, int Page, float Y, string Value)> assignments)
+    public RunningValues(IEnumerable<(string Name, int Page, float Y, T Value)> assignments)
     {
         foreach (var (name, page, y, value) in assignments)
         {
-            if (!_byName.TryGetValue(name, out var list)) _byName[name] = list = new List<(int, float, string)>();
+            if (!_byName.TryGetValue(name, out var list)) _byName[name] = list = new List<(int, float, T)>();
             list.Add((page, y, value));
         }
     }
 
     /// <summary>
-    /// The string's value on a page. first: the first assignment on the page, else the value carried in from earlier
-    /// pages; start: the carried-in value unless an assignment starts the page; last: the last assignment on the page,
-    /// else the carried-in value; first-except: empty on a page with an assignment, else the carried-in value.
+    /// The value on a page, null for none. first: the first assignment on the page, else the value carried in from
+    /// earlier pages; start: the carried-in value unless an assignment starts the page; last: the last assignment on the
+    /// page, else the carried-in value; first-except: none on a page with an assignment, else the carried-in value.
     /// </summary>
-    public string Get(string name, int page, string policy)
+    public T? Get(string name, int page, string policy)
     {
-        if (!_byName.TryGetValue(name, out var list)) return "";
-        string entry = "";
-        string? first = null, last = null;
+        if (!_byName.TryGetValue(name, out var list)) return null;
+        T? entry = null, first = null, last = null;
         bool startsPage = false;
         foreach (var (p, y, value) in list)
         {
@@ -110,8 +121,8 @@ internal sealed class RunningStrings
         return policy switch
         {
             "last" => last ?? entry,
-            "start" => startsPage ? first! : entry,
-            "first-except" => first != null ? "" : entry,
+            "start" => startsPage ? first : entry,
+            "first-except" => first != null ? null : entry,
             _ => first ?? entry,
         };
     }
