@@ -185,6 +185,21 @@ public static partial class ContentExtensions
     public static void PageBreak(this IContainer container) => Container.Of(container).Set(new PageBreakElement());
 
     /// <summary>
+    /// Markdown text, converted by PdfPecker's Markdown parser: CommonMark with the GitHub extensions (tables,
+    /// strikethrough, task lists, autolinks and footnotes), definition lists and YAML front matter, which is not shown.
+    /// It takes the font, size and colour of the surrounding text style, with headings, code, quotes and tables styled
+    /// as on GitHub. Unlike <see cref="Html"/>, the text is safe to come from anyone: HTML written in it is shown as
+    /// text, links other than http, https, mailto and to the Markdown's own headings and footnotes lose their target,
+    /// and images load as any other resource would, from data URIs or through the caller's resource resolver.
+    /// </summary>
+    public static void Markdown(this IContainer container, string markdown)
+    {
+        ArgumentNullException.ThrowIfNull(markdown);
+        string html = MarkdownToHtml.Convert(markdown, new MarkdownOptions { AllowRawHtml = false });
+        Container.Of(container).Set(new MarkdownElement(html));
+    }
+
+    /// <summary>
     /// HTML written into the document as given, for what the fluent API does not cover. Only pass markup you wrote
     /// yourself: unlike every other call, it is not escaped.
     /// </summary>

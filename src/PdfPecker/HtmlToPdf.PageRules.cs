@@ -117,11 +117,22 @@ public static partial class HtmlToPdf
                     {
                         size = new PageSize(w.Value, h.Value);
                     }
+                    // A width and auto, which CSS has no meaning for, is PdfPecker's page as tall as its content, for
+                    // receipts and other paper on a roll. It is laid out at the largest height PDF readers accept.
+                    if (tokens.Count == 2 && tokens[1] == "auto" && !landscape && !portrait
+                        && StyleResolver.TryParseLength(tokens[0], 12, 12, out var rollWidth) && !rollWidth.IsAuto && !rollWidth.IsPercent && rollWidth.Value > 0)
+                    {
+                        page.Width = rollWidth.Value;
+                        page.Height = MaxPageHeight;
+                        page.AutoHeight = true;
+                        break;
+                    }
                     var final = size ?? new PageSize(page.Width, page.Height);
                     if (landscape) final = final.Landscape;
                     else if (portrait && final.Width > final.Height) final = new PageSize(final.Height, final.Width);
                     page.Width = final.Width;
                     page.Height = final.Height;
+                    page.AutoHeight = false;
                     break;
                 }
                 case "margin-top": SetMargin(v, ref page.MarginTop, page.Height); break;
@@ -162,6 +173,9 @@ public static partial class HtmlToPdf
             }
         return value;
     }
+
+    /// <summary>The tallest page PDF readers accept: 200 inches (PDF 32000-1, annex C).</summary>
+    internal const float MaxPageHeight = 14400;
 
     /// <summary>The smallest content area, in layout points, that a page may have in either direction.</summary>
     private const float MinContentSize = 10;

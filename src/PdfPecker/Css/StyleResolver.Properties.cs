@@ -132,6 +132,7 @@ internal sealed partial class StyleResolver
             case "empty-cells": s.EmptyCellsHide = d.Lower == "hide"; break;
             // Angles are deprecated and ignored, as in Chrome, so only none turns EXIF orientation off.
             case "image-orientation": s.ImageOrientationNone = d.Lower == "none"; break;
+            case "image-rendering": if (ParseImageRendering(d.Lower) is { } pixelated) s.ImagePixelated = pixelated; break;
             case "accent-color":
                 if (d.Lower == "auto") s.AccentColor = 0;
                 else if (CssColor.TryParse(d.Value, s.Color, out var accent)) s.AccentColor = accent;
@@ -352,6 +353,9 @@ internal sealed partial class StyleResolver
                 // The box contains its scaled content, so its margins no longer collapse with its children's.
                 s.ScaleToFit = d.Lower == "shrink" || d.Inherit && parent.ScaleToFit;
                 if (s.ScaleToFit) s.FormattingRoot = true;
+                break;
+            case RepeatProperty:
+                s.RepeatOnPages = d.Lower == "each-page" || d.Inherit && parent.RepeatOnPages;
                 break;
             case "continue":
                 // The box is a fragmentation container of its own whose content after the first fragment is left out,

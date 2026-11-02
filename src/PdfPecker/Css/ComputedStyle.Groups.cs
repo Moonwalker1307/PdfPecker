@@ -68,6 +68,7 @@ internal sealed partial class ComputedStyle
     public bool CaptionBottom { get => _typography.CaptionBottom; set => Typography.CaptionBottom = value; }
     public bool EmptyCellsHide { get => _typography.EmptyCellsHide; set => Typography.EmptyCellsHide = value; }
     public bool ImageOrientationNone { get => _typography.ImageOrientationNone; set => Typography.ImageOrientationNone = value; }
+    public bool ImagePixelated { get => _typography.ImagePixelated; set => Typography.ImagePixelated = value; }
     public uint AccentColor { get => _typography.AccentColor; set => Typography.AccentColor = value; }
     public TextEdgeOver TextEdgeOver { get => _typography.TextEdgeOver; set => Typography.TextEdgeOver = value; }
     public TextEdgeUnder TextEdgeUnder { get => _typography.TextEdgeUnder; set => Typography.TextEdgeUnder = value; }
@@ -110,6 +111,7 @@ internal sealed partial class ComputedStyle
         public bool CaptionBottom;    // caption-side: bottom (inherited)
         public bool EmptyCellsHide;   // empty-cells: hide (inherited): with separated borders, empty cells paint nothing
         public bool ImageOrientationNone; // image-orientation: none (inherited): photos are drawn as stored, ignoring EXIF
+        public bool ImagePixelated;   // image-rendering: pixelated or crisp-edges (inherited): enlarged images keep hard pixel edges
         public uint AccentColor;      // accent-color (inherited), the colour of checked check boxes and radio buttons; 0 = auto
         public TextEdgeOver TextEdgeOver;   // text-box-edge, over the text (inherited)
         public TextEdgeUnder TextEdgeUnder; // text-box-edge, under the text (inherited)
@@ -277,6 +279,7 @@ internal sealed partial class ComputedStyle
     public bool Isolate { get => _visual.Isolate; set => Visual.Isolate = value; }
     public bool BoxDecorationClone { get => _visual.BoxDecorationClone; set => Visual.BoxDecorationClone = value; }
     public bool ScaleToFit { get => _visual.ScaleToFit; set => Visual.ScaleToFit = value; }
+    public bool RepeatOnPages { get => _visual.RepeatOnPages; set => Visual.RepeatOnPages = value; }
     public bool ContinueDiscard { get => _visual.ContinueDiscard; set => Visual.ContinueDiscard = value; }
     public FilterFunction[]? Filters { get => _visual.Filters; set => Visual.Filters = value; }
     public FilterFunction[]? BackdropFilters { get => _visual.BackdropFilters; set => Visual.BackdropFilters = value; }
@@ -334,6 +337,7 @@ internal sealed partial class ComputedStyle
         public bool Isolate;                        // isolation: isolate
         public bool BoxDecorationClone;             // box-decoration-break: clone (else slice)
         public bool ScaleToFit;                     // -pdfpecker-scale-to-fit: shrink
+        public bool RepeatOnPages;                  // -pdfpecker-repeat: each-page
         public bool ContinueDiscard;                // continue: discard
         public FilterFunction[]? Filters;           // filter functions on HTML elements; null = none
         public FilterFunction[]? BackdropFilters;   // backdrop-filter functions; null = none

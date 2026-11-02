@@ -36,6 +36,8 @@ public static partial class HtmlToPdf
         private List<PageRun> _runs = null!;
         private Dictionary<string, int>? _targetPages;
         private Dictionary<int, int>? _footnotePages;
+        /// <summary>The page height of each run, by its index, whose page is as tall as its content.</summary>
+        private Dictionary<int, float>? _fittedHeights;
 
         private void PreparePageSetups()
         {
@@ -158,15 +160,26 @@ public static partial class HtmlToPdf
             _headings?.Clear();
             _runs = _styles.UsedPageNames ? SplitByPageName(_doc) : new List<PageRun> { new() };
             int documentPage = 0;
-            foreach (var run in _runs) documentPage += LayOutRun(run, documentPage);
+            for (int i = 0; i < _runs.Count; i++) documentPage += LayOutRun(_runs[i], i, documentPage);
         }
 
-        /// <summary>Lays out one run, whose first page is the given page of the document, and returns its number of pages.</summary>
-        private int LayOutRun(PageRun run, int documentPage)
+        /// <summary>
+        /// Lays out one run, the given one of the document's, whose first page is the given page of the document, and
+        /// returns its number of pages.
+        /// </summary>
+        private int LayOutRun(PageRun run, int index, int documentPage)
         {
             run.Page = SetupFor(run.Name);
             run.Grid = new PageGrid(VariantFor(run.Name, documentPage, true), VariantFor(run.Name, documentPage + 1, false),
                 VariantFor(run.Name, documentPage + 2, false));
+            if (_fittedHeights != null && _fittedHeights.TryGetValue(index, out float fitted))
+            {
+                // A page as tall as its content: the run's one page, and the setup the run's bands are laid out with.
+                var page = run.Grid.SetupOf(0).Copy();
+                page.Height = fitted;
+                run.Grid = new PageGrid(page, run.Grid.SetupOf(1), run.Grid.SetupOf(2));
+                run.Page = page;
+            }
             // The layout starts at the first page's width; on pages of other widths the content takes their width.
             run.Width = run.Grid.SetupOf(0).ContentWidth;
             var restore = run.Keep is { } keep ? KeepOnly(keep) : null;
@@ -215,6 +228,30 @@ public static partial class HtmlToPdf
             SetUpPage();
             ResolveStyles();
             PrepareBands();
+            LayOut();
+        }
+
+        /// <summary>
+        /// Makes pages of an auto height (<c>@page { size: 80mm auto }</c>) as tall as their content, and lays the
+        /// document out again with those heights. A run whose first page has an auto height and whose content fits on
+        /// that page gets one page as tall as the content, its bands, footnotes and margins; longer content keeps pages
+        /// of the largest height.
+        /// </summary>
+        private void FitPageHeights()
+        {
+            Dictionary<int, float>? fitted = null;
+            for (int i = 0; i < _runs.Count; i++)
+            {
+                var run = _runs[i];
+                var page = run.Grid.SetupOf(0);
+                if (!page.AutoHeight || run.Grid.PagesFor(run.Height) != 1) continue;
+                float flow = run.Height;
+                if (run.Engine.FootnoteOps.Count > 0) flow += run.Engine.FootnoteReserve(0);
+                flow = Math.Max(MinContentSize, MathF.Ceiling(Math.Min(flow, page.FlowHeight) * 100) / 100);
+                (fitted ??= new Dictionary<int, float>())[i] = page.Height - page.FlowHeight + flow;
+            }
+            if (fitted == null) return;
+            _fittedHeights = fitted;
             LayOut();
         }
 

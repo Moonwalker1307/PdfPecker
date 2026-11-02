@@ -87,6 +87,7 @@ public static partial class HtmlToPdf
             PreparePageSetups();
             LayOut();
             ShrinkToFit();
+            FitPageHeights();
             return Write(BuildSections());
         }
 

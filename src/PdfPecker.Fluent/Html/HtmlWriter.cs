@@ -65,6 +65,12 @@ internal sealed class HtmlWriter
     /// <summary>Whether some text has a footnote, which needs the rule that sets out the footnote area.</summary>
     private bool _footnotes;
 
+    /// <summary>Whether the document has Markdown, which needs its stylesheet.</summary>
+    private bool _markdown;
+
+    /// <summary>The ids the Markdown written so far has taken, so a later call's repeated headings and footnotes get new ones.</summary>
+    private readonly HashSet<string> _markdownIds = new(StringComparer.Ordinal);
+
     /// <summary>The headings of the page content in document order, which a table of contents lists; empty without one.</summary>
     private readonly List<(int Level, string Text, string Id)> _headings = [];
 
@@ -150,6 +156,7 @@ internal sealed class HtmlWriter
         if (_sectionWithin) _html.Append("[data-section-within]::after{content:-pdfpecker-target-pages(attr(data-section-within),current)}");
         foreach (var (pattern, number) in _leaders)
             _html.Append("[data-leader=\"").Append(number.ToString(CultureInfo.InvariantCulture)).Append("\"]::after{content:leader(").Append(pattern).Append(")}");
+        if (_markdown) _html.Append(MarkdownHtml.Css);
         if (_footnotes) _html.Append("@page{@footnote{margin-top:8pt;padding-top:4pt;border-top:0.5pt solid currentColor}}");
         foreach (var rule in css) _html.Append('\n').Append(rule);
         _html.Append("</style></head>\n<body");
@@ -324,6 +331,11 @@ internal sealed class HtmlWriter
             case HtmlElement html:
                 if (box.MustEmit) Open(box);
                 _html.Append(html.Html);
+                break;
+            case MarkdownElement markdown:
+                if (box.MustEmit) Open(box);
+                _markdown = true;
+                MarkdownHtml.Write(_html, markdown.Html, _markdownIds);
                 break;
         }
         CloseTo(depth);
@@ -1078,7 +1090,7 @@ internal sealed class HtmlWriter
             _html.Append("</thead>");
         }
         _html.Append("<tbody>");
-        RenderRows(table.Body, columns, "td");
+        RenderRows(table.Body, columns, "td", table.ExtendLastCells);
         _html.Append("</tbody>");
         if (table.Footer.Count > 0)
         {
@@ -1089,9 +1101,11 @@ internal sealed class HtmlWriter
         _html.Append("</table>");
     }
 
-    private void RenderRows(List<TableCell> cells, int columns, string tag)
+    private void RenderRows(List<TableCell> cells, int columns, string tag, bool extendLast = false)
     {
         var placed = TableLayout.Place(cells, columns, out int rows, out var covered);
+        var extended = extendLast ? TableLayout.ExtendLastCells(placed, columns, rows) : null;
+        var extendedFrom = extended != null ? TableLayout.ExtendedFrom(extended, placed, columns) : null;
         for (int r = 0; r < rows; r++)
         {
             _html.Append("<tr>");
@@ -1105,11 +1119,11 @@ internal sealed class HtmlWriter
                     box.InGrid = true;
                     if (tag == "th") box.Attributes.Add(("scope", "col"));
                     if (cell.ColumnSpan > 1) box.Attributes.Add(("colspan", cell.ColumnSpan.ToString(CultureInfo.InvariantCulture)));
-                    int rowSpan = Math.Min(cell.RowSpan, rows - r);
+                    int rowSpan = extended != null && extended.Contains((r, c)) ? rows - r : Math.Min(cell.RowSpan, rows - r);
                     if (rowSpan > 1) box.Attributes.Add(("rowspan", rowSpan.ToString(CultureInfo.InvariantCulture)));
                     RenderContainer(cell, box);
                 }
-                else if (!covered(r, c))
+                else if (!covered(r, c) && !(extendedFrom != null && extendedFrom[c] >= 0 && r > extendedFrom[c]))
                 {
                     _html.Append('<').Append(tag).Append("></").Append(tag).Append('>');
                 }

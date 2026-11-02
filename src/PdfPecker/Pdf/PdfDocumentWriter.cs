@@ -32,10 +32,18 @@ internal sealed class PageSetup
     /// PdfOptions.Scale, but not for a page only shrunk to fit its content, whose paper keeps the size asked for.
     /// </summary>
     public bool ChromePaper;
+    /// <summary>
+    /// The page is as tall as its content (<c>@page { size: 80mm auto }</c>): it is laid out <see cref="Height"/> tall,
+    /// the most PDF readers accept, and then made as tall as the content of a run that fits on one page.
+    /// </summary>
+    public bool AutoHeight;
     public float ContentWidth => Width - MarginLeft - MarginRight;
     public float ContentHeight => Height - MarginTop - MarginBottom;
     /// <summary>Height available to the flowing content on each page.</summary>
     public float FlowHeight => ContentHeight - BandTop - BandBottom;
+
+    /// <summary>A copy that can be changed on its own.</summary>
+    public PageSetup Copy() => (PageSetup)MemberwiseClone();
 }
 
 /// <summary>

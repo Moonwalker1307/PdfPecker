@@ -21,7 +21,7 @@ internal static class CssSupports
         "text-wrap", "text-wrap-mode", "text-wrap-style",
         "overflow-wrap", "word-wrap", "word-break", "line-break", "vertical-align", "list-style", "list-style-type", "list-style-position",
         "list-style-image",
-        "visibility", "box-shadow", "table-layout", "border-collapse", "border-spacing", "caption-side", "empty-cells", "image-orientation", "accent-color", "appearance", "box-sizing", "float", "clear", "shape-outside", "shape-margin", "shape-image-threshold", "initial-letter",
+        "visibility", "box-shadow", "table-layout", "border-collapse", "border-spacing", "caption-side", "empty-cells", "image-orientation", "image-rendering", "accent-color", "appearance", "box-sizing", "float", "clear", "shape-outside", "shape-margin", "shape-image-threshold", "initial-letter",
         "zoom", "position", "inset", "top", "right", "bottom", "left", "z-index", "overflow", "overflow-x", "overflow-y", "overflow-clip-margin", "transform",
         "transform-origin", "perspective", "perspective-origin", "transform-style", "backface-visibility", "translate", "rotate", "scale", "content", "counter-reset", "counter-set", "counter-increment",
         "break-before", "break-after", "break-inside", "page-break-before", "page-break-after", "page-break-inside",
@@ -67,7 +67,7 @@ internal static class CssSupports
         "-webkit-mask-position-y", "-webkit-mask-size", "-webkit-mask-repeat", "-webkit-mask-origin", "-webkit-mask-clip",
         "-webkit-mask-composite", "-webkit-column-break-before", "-webkit-column-break-after", "-webkit-column-break-inside",
         "-webkit-box-orient", "-webkit-box-direction", "-webkit-box-pack", "-webkit-box-align", "-webkit-box-flex",
-        "-webkit-box-ordinal-group", "-pdfpecker-scale-to-fit", "continue",
+        "-webkit-box-ordinal-group", "-pdfpecker-scale-to-fit", "-pdfpecker-repeat", "continue",
     };
 
     /// <summary>Whether this library applies the property.</summary>
@@ -168,6 +168,8 @@ internal static class CssSupports
                     or "-webkit-box" or "-webkit-inline-box" or "-webkit-flex" or "-webkit-inline-flex";
             case "zoom":
                 return StyleResolver.ParseZoom(lower) != null;
+            case "image-rendering":
+                return StyleResolver.ParseImageRendering(lower) != null;
             case "accent-color":
                 return lower == "auto" || CssColor.TryParse(value, CssColor.Black, out _);
             case "appearance":

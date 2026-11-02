@@ -145,7 +145,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   percentage coordinates and sizes, as in Bootstrap's placeholder images, HTML in `<foreignObject>`, and icons drawn
   with `<use>` from a sprite of symbols that is itself hidden, as in Bootstrap's icon sprites) and PNG, JPEG, GIF, WebP, BMP and TIFF images (also chosen by `srcset`, `<picture>` and
   `image-set()`,
-  shown by `<embed>` and `<object>`, and photos turned upright by their EXIF orientation), and CSS-only charts such as
+  shown by `<embed>` and `<object>`, photos turned upright by their EXIF orientation, and `image-rendering: pixelated`
+  or `crisp-edges` writing enlarged images, such as QR codes and pixel art, with hard pixel edges in every PDF viewer), and CSS-only charts such as
   Charts.css (column, bar, area, line and pie charts), laid out as Chrome lays them out. Older CSS works too: the
   `-webkit-` property names Chrome still takes (`-webkit-transform`, `-webkit-flex`, ...), the legacy
   `display: -webkit-box` and its `-webkit-box-` properties, and the `-webkit-gradient()` and prefixed gradient
@@ -154,7 +155,7 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   small `<font>` text, or an image alone in a table cell, is only as tall as its content. The old body attributes
   `topmargin`, `leftmargin`, `marginheight` and `marginwidth` set the page margins as they do in Chrome.
   [More](https://pdfpecker.net/docs/html-and-css/)
-- **Paged media**: `@page` sizes, borders, padding and background images (which cover the whole sheet) and margin boxes (also with running elements, `position: running()` and `element()`, as in Prince and WeasyPrint), running headers and footers (also a first page of its own, even pages of their own for printing on both sides, and bands
+- **Paged media**: `@page` sizes (also a page as tall as its content, `size: 80mm auto`, for receipts on a roll), borders, padding and background images (which cover the whole sheet) and margin boxes (also with running elements, `position: running()` and `element()`, as in Prince and WeasyPrint), running headers and footers (also a first page of its own, even pages of their own for printing on both sides, and bands
   of their own for named pages), footnotes, tables of contents with page numbers, the page count anywhere in the content (`counter(pages)`, as in Prince), the first and last page of a section and page numbers counted within it (`-pdfpecker-target-pages()`, and `{section-page:id}` in running headers and footers), break control (also table row groups
   and group header rows kept together, as reports keep a group on one page, and forced breaks between table rows and between flex lines), table rows that break inside at a page's end as in Chrome, unless a cell would have nothing before the break, flex rows whose items break at a page's end as in Chrome (the row moves whole when an item is kept whole), table
   headers and footers repeated on every page (also around a row split across pages), and
@@ -165,6 +166,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
 - **Content kept to one page or box**: `continue: discard` (CSS Overflow 4) keeps the part of a box that fits on the
   page it starts on, or in its height or `max-height`, and leaves the rest out instead of continuing on the next page.
   Lines, images and table rows that would cross the end are left out whole.
+- **Content repeated on each page**: `-pdfpecker-repeat: each-page` draws a box again at the top of each later page its
+  parent continues on, such as a label in a row beside a text several pages long.
 - **Markdown**: CommonMark 0.31 and GitHub Flavored Markdown to PDF or HTML, with footnotes, definition lists and YAML
   front matter. [More](https://pdfpecker.net/docs/markdown/)
 - **Fonts**: TrueType, OpenType, WOFF and WOFF2, subset and embedded, with kerning, ligatures, variable fonts and

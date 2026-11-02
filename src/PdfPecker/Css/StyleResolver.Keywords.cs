@@ -134,6 +134,7 @@ internal sealed partial class StyleResolver
             case "box-sizing": s.BorderBox = from.BorderBox; break;
             case "visibility": s.Visible = from.Visible; break;
             case "image-orientation": s.ImageOrientationNone = from.ImageOrientationNone; break;
+            case "image-rendering": s.ImagePixelated = from.ImagePixelated; break;
             case "accent-color": s.AccentColor = from.AccentColor; break;
             case "appearance": s.AppearanceNone = from.AppearanceNone; break;
             case "border-top-width": s.BorderTopWidth = from.BorderTopWidth; break;

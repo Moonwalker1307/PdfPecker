@@ -71,6 +71,47 @@ internal static class TableLayout
         return placed;
     }
 
+    /// <summary>
+    /// The cells, by where they start, that grow down to the last of <paramref name="rows"/> rows as QuestPDF's
+    /// ExtendLastCellsToTableBottom makes them: the cell that ends lowest in each column, when it ends above the last
+    /// row and is the lowest in every column it spans. The grid below such a cell is empty, so the longer span covers
+    /// no other cell.
+    /// </summary>
+    public static HashSet<(int Row, int Column)> ExtendLastCells(Dictionary<(int Row, int Column), TableCell> placed, int columns, int rows)
+    {
+        var lowest = new (int Row, int Column, int End)?[columns];
+        foreach (var ((row, column), cell) in placed)
+        {
+            int end = Math.Min(row + cell.RowSpan, rows);
+            for (int c = column; c < column + cell.ColumnSpan && c < columns; c++)
+                if (lowest[c] is not { } l || end > l.End) lowest[c] = (row, column, end);
+        }
+        var extended = new HashSet<(int, int)>();
+        foreach (var l in lowest)
+        {
+            if (l is not { } last || last.End >= rows || extended.Contains((last.Row, last.Column))) continue;
+            var cell = placed[(last.Row, last.Column)];
+            bool lowestInAll = true;
+            for (int c = last.Column; c < last.Column + cell.ColumnSpan && c < columns; c++)
+                if (lowest[c] is not { } other || other.Row != last.Row || other.Column != last.Column) lowestInAll = false;
+            if (lowestInAll) extended.Add((last.Row, last.Column));
+        }
+        return extended;
+    }
+
+    /// <summary>
+    /// For each column, the row of the cell <see cref="ExtendLastCells"/> grew over it, below which the grid is that
+    /// cell's; -1 for the other columns.
+    /// </summary>
+    public static int[] ExtendedFrom(HashSet<(int Row, int Column)> extended, Dictionary<(int Row, int Column), TableCell> placed, int columns)
+    {
+        var from = new int[columns];
+        Array.Fill(from, -1);
+        foreach (var (r, c) in extended)
+            for (int k = c; k < c + placed[(r, c)].ColumnSpan && k < columns; k++) from[k] = r;
+        return from;
+    }
+
     private static bool Fits(List<bool[]> grid, int row, int column, int span, int rowSpan, int columns)
     {
         for (int r = row; r < row + rowSpan && r < grid.Count; r++)

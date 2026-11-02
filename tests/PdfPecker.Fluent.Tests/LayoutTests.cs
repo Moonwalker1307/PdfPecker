@@ -87,6 +87,49 @@ public sealed class LayoutTests
     }
 
     [Fact]
+    public void Last_cells_extend_to_the_bottom_of_the_body()
+    {
+        string html = Html.Of(c => c.Table(t =>
+        {
+            t.ColumnsDefinition(d => { d.ConstantColumn(50); d.RelativeColumn(); d.RelativeColumn(3); });
+            t.ExtendLastCellsToTableBottom();
+            t.Header(h => { h.Cell().Text("h1"); h.Cell().ColumnSpan(2).RowSpan(1).Text("h2"); h.Cell().Row(2).Column(3).Text("h3"); });
+            t.Cell().RowSpan(2).Text("a");
+            t.Cell().ColumnSpan(2).Text("b");
+            t.Cell().Text("c");
+            t.Cell().Row(3).Column(3).Text("d");
+        }));
+        // a and c are the last cells of their columns and grow to the third row; b is not the last in its columns, and
+        // the header keeps its gaps.
+        Assert.Equal(
+            "<main><table><colgroup><col class=\"c0\"><col class=\"c1\"><col class=\"c2\"></colgroup>" +
+            "<thead><tr><th scope=\"col\"><p>h1</p></th><th scope=\"col\" colspan=\"2\"><p>h2</p></th></tr>" +
+            "<tr><th></th><th></th><th scope=\"col\"><p>h3</p></th></tr></thead>" +
+            "<tbody><tr><td rowspan=\"3\"><p>a</p></td><td colspan=\"2\"><p>b</p></td></tr>" +
+            "<tr><td rowspan=\"2\"><p>c</p></td><td></td></tr>" +
+            "<tr><td><p>d</p></td></tr></tbody></table></main>", html);
+    }
+
+    [Fact]
+    public void A_cell_spanning_columns_extends_only_when_it_is_last_in_all_of_them()
+    {
+        string html = Html.Of(c => c.Table(t =>
+        {
+            t.ColumnsDefinition(d => { d.RelativeColumn(); d.RelativeColumn(); });
+            t.ExtendLastCellsToTableBottom();
+            t.Cell().ColumnSpan(2).Text("wide");
+            t.Cell().Row(2).Column(1).Text("left");
+            t.Cell().Row(4).Column(1).Text("bottom");
+        }));
+        // "wide" is the last cell of the second column only, so it stays one row; "left" ends above "bottom".
+        Assert.Equal(
+            "<main><table><colgroup><col class=\"c0\"><col class=\"c0\"></colgroup>" +
+            "<tbody><tr><td colspan=\"2\"><p>wide</p></td></tr>" +
+            "<tr><td><p>left</p></td><td></td></tr><tr><td></td><td></td></tr>" +
+            "<tr><td><p>bottom</p></td><td></td></tr></tbody></table></main>", html);
+    }
+
+    [Fact]
     public void A_cells_painted_content_fills_the_cell_whatever_the_call_order()
     {
         // QuestPDF draws a cell's content over the whole row, so a background inside the padding fills it; a cell with
@@ -698,6 +741,88 @@ public sealed class LayoutTests
         Assert.Contains("Body even", pages[1].Text);
         Assert.Contains("Body odd", pages[2].Text);
     }
+
+    [Fact]
+    public void Markdown_becomes_its_html_in_a_styled_block()
+    {
+        var document = Html.Page(c => c.Markdown("# Title\n\nSome *soft*\nwrapped text."));
+        Assert.Equal(
+            "<main><div class=\"md\"><h1 id=\"title\">Title</h1>\n<p>Some <em>soft</em>\nwrapped text.</p>\n</div></main>",
+            Html.Body(DocumentGenerator.Html(document, false, out _)));
+        Assert.Contains(".md p,.md h1,", Html.Css(document));
+        Assert.DoesNotContain(".md{", Html.Css(Html.Page(c => c.Text("x"))));
+    }
+
+    [Fact]
+    public void Markdown_shows_raw_html_as_text()
+    {
+        string html = Html.Of(c => c.Markdown("<script>alert(1)</script>\n\nA <b>bold</b> <x-evil> tag."));
+        Assert.DoesNotContain("<script", html);
+        Assert.DoesNotContain("<b>", html);
+        Assert.DoesNotContain("<x-evil", html);
+        Assert.Contains("&lt;script&gt;", html);
+    }
+
+    [Theory]
+    [InlineData("[x](javascript:alert(1))")]
+    [InlineData("[x](JavaScript:alert(1))")]
+    [InlineData("[x](file:///etc/passwd)")]
+    [InlineData("[x](data:text/html,hi)")]
+    [InlineData("[x](relative/page.html)")]
+    [InlineData("<vbscript:x>")]
+    public void Markdown_drops_links_that_are_not_web_mail_or_in_document(string markdown)
+    {
+        string html = Html.Of(c => c.Markdown(markdown));
+        Assert.DoesNotContain("href", html);
+        Assert.Contains("<a>", html);
+    }
+
+    [Fact]
+    public void Markdown_keeps_web_mail_and_heading_links()
+    {
+        string html = Html.Of(c => c.Markdown("# Top\n\n[a](https://example.com/?a=1&b=2) [b](mailto:me@example.com) [c](#top) <https://x.org>"));
+        Assert.Contains("<a href=\"https://example.com/?a=1&amp;b=2\">a</a>", html);
+        Assert.Contains("<a href=\"mailto:me@example.com\">b</a>", html);
+        Assert.Contains("<a href=\"#top\">c</a>", html);
+        Assert.Contains("<a href=\"https://x.org\">https://x.org</a>", html);
+    }
+
+    [Fact]
+    public void Repeated_markdown_ids_are_renamed_so_each_call_links_to_its_own_footnotes()
+    {
+        const string text = "# Notes\n\nClaim[^1] and [back](#notes).\n\n[^1]: Source.";
+        string html = Html.Of(c => c.Column(col => { col.Item().Markdown(text); col.Item().Markdown(text); }));
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(html, "id=\"notes\""));
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(html, "id=\"fn-1\""));
+        Assert.Contains("id=\"notes-2\"", html);
+        Assert.Contains("id=\"fn-1-2\"", html);
+        Assert.Contains("href=\"#fn-1-2\"", html);
+        Assert.Contains("href=\"#notes-2\"", html);
+    }
+
+    [Fact]
+    public void Markdown_renders_into_the_pdf_with_the_page_around_it()
+    {
+        var document = Document.Create(d => d.Page(p =>
+        {
+            p.Header().Text("Header");
+            p.Content().Column(c =>
+            {
+                c.Item().Text("Before");
+                c.Item().Markdown("## Section\n\n| Item | Price |\n|---|--:|\n| Tea | 4.00 |\n\n- [x] done\n- open\n\n```\ncode()\n```");
+                c.Item().Text("After");
+            });
+        }));
+        string text = PdfText.Extract(document.GeneratePdf());
+        foreach (var part in new[] { "Header", "Before", "Section", "Tea", "4.00", "done", "code()", "After" })
+            Assert.Contains(part, text);
+        Assert.True(text.IndexOf("Before", StringComparison.Ordinal) < text.IndexOf("Section", StringComparison.Ordinal));
+        Assert.True(text.IndexOf("code()", StringComparison.Ordinal) < text.IndexOf("After", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Markdown_rejects_null()
+        => Assert.Throws<ArgumentNullException>(() => Html.Of(c => c.Markdown(null!)));
 
     [Fact]
     public void Language_writes_the_lang_attribute_and_an_inner_language_nests()

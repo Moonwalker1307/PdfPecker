@@ -151,6 +151,7 @@ internal sealed class TableElement : Element
     public List<TableCell> Header { get; } = [];
     public List<TableCell> Body { get; } = [];
     public List<TableCell> Footer { get; } = [];
+    public bool ExtendLastCells { get; set; }
 }
 
 internal enum RunKind
@@ -307,6 +308,14 @@ internal sealed class PageBreakElement : Element;
 internal sealed class HtmlElement : Element
 {
     public HtmlElement(string html) => Html = html;
+
+    public string Html { get; }
+}
+
+/// <summary>A Markdown call: the HTML PdfPecker's Markdown converter made of it, with raw HTML escaped.</summary>
+internal sealed class MarkdownElement : Element
+{
+    public MarkdownElement(string html) => Html = html;
 
     public string Html { get; }
 }

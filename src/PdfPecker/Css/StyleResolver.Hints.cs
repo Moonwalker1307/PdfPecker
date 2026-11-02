@@ -447,6 +447,10 @@ internal sealed partial class StyleResolver
     // PdfPecker's own property that draws a box's content smaller until it fits the box's height (no CSS equivalent).
     internal const string ScaleToFitProperty = "-pdfpecker-scale-to-fit";
 
+    // PdfPecker's own property that draws a box again at the top of each later page its parent box continues on, as a
+    // label beside a long text (no CSS equivalent).
+    internal const string RepeatProperty = "-pdfpecker-repeat";
+
     private void Hint(string property, string value)
     {
         // Interned so that elements with identical attributes produce identical declaration lists (see the style cache).

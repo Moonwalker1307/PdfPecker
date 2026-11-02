@@ -48,7 +48,7 @@ Document.Create(container =>
 
 - **Layout**: `Column`, `Row` (relative, constant and auto items), `Table` (constant and relative columns, row and
   column spans, explicit placement, cell backgrounds and borders that fill the row in any call order, header and footer
-  rows that repeat on every page), padding, borders, corner radius, background, width and height with minimum and
+  rows that repeat on every page, last cells extended to the bottom), padding, borders, corner radius, background, width and height with minimum and
   maximum, alignment, page breaks, `PreventPageBreak`, `ShowIf` and right-to-left content.
 - **Gradients and opacity**: `BackgroundLinearGradient` (QuestPDF's call, with its angles), `BackgroundRadialGradient`
   (from the middle or a centre you choose, for a glow on a cover page) and `Opacity`, which fades a slot and everything
@@ -82,6 +82,10 @@ Document.Create(container =>
 - **Form fields and footnotes**, which QuestPDF does not have: `TextField` (one line, multiline or password),
   `CheckBox`, `RadioButton`, `ComboBox` and `ListBox` become fillable PDF fields, and `text.Footnote("...")` numbers a
   note and sets it at the bottom of its page. Browsers show footnotes in the text, where `GenerateHtml` puts them.
+- **Markdown**: `container.Markdown("...")` places Markdown text anywhere, converted by PdfPecker's own parser
+  (CommonMark with GitHub tables, task lists, strikethrough, autolinks and footnotes, and definition lists). It takes
+  the surrounding font, size and colour, styles headings, code, quotes and tables as on GitHub, and is safe for text
+  from users: HTML in it stays text and only web, mail and in-document links keep their target.
 - **Images and graphics**: PNG, JPEG, WebP, BMP, TIFF and GIF images, SVG, solid, dashed and dotted lines, and QR,
   EPC payment QR, Code 128 and EAN-13 barcodes.
 - **Charts**: `Chart` draws column, bar, line and pie charts from your series as vector SVG, with a legend, data
@@ -104,8 +108,10 @@ Document.Create(container =>
 ## Safety
 
 Text, links, colours and names you pass are encoded, so caller data never turns into markup: the fuzzer and the
-hostile-input tests check that. Links must be absolute `http`, `https` or `mailto` addresses. `Html` and `Css` are
-the exceptions: they insert trusted markup as it is, so never pass user input to them.
+hostile-input tests check that. Links must be absolute `http`, `https` or `mailto` addresses. `Markdown` shows HTML
+written in the Markdown as text and drops the target of any other link, such as `javascript:` or a file. Its images load
+as any other resource would, from data URIs or through your `ResourceResolver`. `Html` and `Css` are the exceptions:
+they insert trusted markup as it is, so never pass user input to them.
 
 Invalid arguments throw `ArgumentException` (or `ArgumentOutOfRangeException`), an invalid document structure such
 as an overlapping table cell throws `InvalidOperationException`, and PdfPecker's own limits throw
@@ -132,13 +138,17 @@ Most QuestPDF code ports by changing the `using` lines: `Document.Create`, `Page
   repeats are all the same.
 - `ScaleToFit` fits the content into a `Height` or `MaxHeight` set before it, or into the height of the slot around it,
   such as a row or a box with a `Height`.
+- `Markdown` is built in, with the same call as the community QuestPDF.Markdown package's `container.Markdown(text)`;
+  its look comes from CSS rules on the `md` class, which `documentContainer.Css("...")` can change.
+- `ExtendLastCellsToTableBottom` grows the last cell of each column of the table's body down to its last row. A cell
+  spanning several columns grows only when it is the last cell in all of them, since HTML table cells cannot overlap.
 - `BackgroundLinearGradient` runs the way its angle points: 0 left to right, 90 top to bottom, 180 right to left and
   270 bottom to top. QuestPDF 2026.9 runs the angles between 90 and 270 other than 180 rightwards instead, so a gradient
   ported from such an angle is reversed. `BackgroundRadialGradient` and `Opacity` are not in QuestPDF.
 - `Document.Merge` composes the documents into one HTML document, so the result has one set of metadata and settings:
   those of `WithMetadata` and `WithSettings` on the merge, or the first document's. With original page numbers,
   `BeginPageNumberOfSection` and `EndPageNumberOfSection` still give pages of the whole PDF.
-- Not available: `Dynamic`, `Canvas`, `StopPaging`, `RepeatContent`, `ExtendLastCellsToTableBottom` and the Companion
+- Not available: `Dynamic`, `Canvas`, `StopPaging`, `RepeatContent` and the Companion
   previewer.
 
 ## Performance

@@ -165,7 +165,7 @@ internal sealed partial class LayoutEngine
         var s = it.Style;
         return CssColor.IsVisible(s.BackgroundColor) || s.BackgroundImages != null || s.HasBorder || s.BorderImageSource != null || s.IsFlex || s.IsGrid
                || s.Positioned || s.Transform != null || s.HasEffects || s.BoxShadows != null || s.OutlineStyle != BorderStyle.None && s.OutlineWidth > 0
-               || HasPercentHeightChild(it.El);
+               || HasPercentHeightChild(it.El) || HasRepeatedChild(it.El);
     }
 
     /// <summary>
