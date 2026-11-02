@@ -72,6 +72,7 @@ public sealed class TextStyle
     internal float? DecorationWidth { get; private set; }
     internal float? WordGap { get; private set; }
     internal (string Tag, bool On)[]? Features { get; private set; }
+    internal bool? IsHyphenated { get; private set; }
 
     /// <summary>The empty style: every property inherited.</summary>
     public static TextStyle Default { get; } = new();
@@ -215,6 +216,15 @@ public sealed class TextStyle
         return With(s => s.WordGap = factor);
     }
 
+    /// <summary>
+    /// Breaks long words at the end of a line with a hyphen, by the hyphenation rules of the text's language, or only
+    /// where the text has soft hyphens with <c>false</c>. The language comes from <c>Language</c> on a container or
+    /// <see cref="DocumentMetadata.Language"/>; text without a language is not hyphenated. PdfPecker has the rules of
+    /// English, Danish, German, Dutch, Norwegian, Spanish, Swedish, French, Italian, Portuguese and Polish built in,
+    /// and <see cref="PdfOptions.Hyphenation"/> adds others.
+    /// </summary>
+    public TextStyle Hyphenate(bool value = true) => With(s => s.IsHyphenated = value);
+
     /// <summary>Raised and smaller, as in x².</summary>
     public TextStyle Superscript() => With(s => s.Position = TextPosition.Superscript);
 
@@ -278,6 +288,7 @@ public sealed class TextStyle
         copy.DecorationWidth = other.DecorationWidth ?? DecorationWidth;
         copy.WordGap = other.WordGap ?? WordGap;
         copy.Features = MergeFeatures(Features, other.Features);
+        copy.IsHyphenated = other.IsHyphenated ?? IsHyphenated;
         return copy;
     }
 }

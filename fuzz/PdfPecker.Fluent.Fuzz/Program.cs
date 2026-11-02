@@ -122,6 +122,8 @@ internal static class Fuzz
     }
 
     // Invalid values are rare, so most cases get past argument checks and reach the writer and the renderer.
+    private static readonly string[] Languages = ["da", "en-GB", "de", "fr", "pl", "x-unknown", "zh-Hant-TW"];
+
     private static string Name(Random r) => r.Next(20) == 0 ? Text(r) : "s" + r.Next(5) + Text(r);
 
     private static float Number(Random r) => r.Next(60) switch
@@ -173,8 +175,9 @@ internal static class Fuzz
     {
         for (int i = r.Next(4); i > 0; i--)
         {
-            s = r.Next(18) switch
+            s = r.Next(19) switch
             {
+                17 => s.Hyphenate(r.Next(4) != 0),
                 16 => r.Next(2) == 0
                     ? s.EnableFontFeature(r.Next(10) == 0 ? Text(r) : FontFeatures.SmallCapitals)
                     : s.DisableFontFeature(r.Next(10) == 0 ? Text(r) : FontFeatures.StandardLigatures),
@@ -420,8 +423,9 @@ internal static class Fuzz
 
     private static float Signed(Random r) => r.Next(2) == 0 ? Number(r) : -Number(r);
 
-    private static IContainer Decorate(IContainer c, Random r) => r.Next(48) switch
+    private static IContainer Decorate(IContainer c, Random r) => r.Next(49) switch
     {
+        48 => c.Language(r.Next(10) == 0 ? Text(r) : Languages[r.Next(Languages.Length)]),
         46 => c.ScaleToFit(),
         47 => r.Next(2) == 0 ? c.ShowOnce() : c.SkipOnce(),
         41 => c.ShrinkHorizontal(),
