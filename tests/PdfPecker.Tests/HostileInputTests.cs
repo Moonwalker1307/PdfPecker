@@ -1114,6 +1114,18 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void A_line_with_thousands_of_footnotes_hands_them_on_in_linear_time()
+    {
+        // Found by the fuzzer: target html, timeout-d2edd0b0 (daily run 88). The footnotes of one line that do not fit
+        // on its page go on to the next pages, each past the pages the ones before it filled. Each of those pages went
+        // through every part handed on so far and added up its area again: 10,000 footnotes took 21 s and 8.5 GB.
+        var html = "<style>.fn { float: footnote }</style><p>x" + Repeat("<span class=fn>note</span>", 10_000) + "</p>";
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.InRange(allocated, 0, 1024L << 20);
+    }
+
+    [Fact]
     public void Content_in_overflow_columns_beside_every_page_is_not_split_between_them()
     {
         // The inner box starts half a point above the end of the outer box's column, so its overflow columns are half a
