@@ -143,14 +143,15 @@ internal static class PdfTestHelpers
 
     public static string DataUri(byte[] png) => "data:image/png;base64," + Convert.ToBase64String(png);
 
-    private static byte[] Png(int w, int h, byte colorType, byte[] raw)
+    /// <summary>A PNG of the given colour type and bit depth from its filtered rows.</summary>
+    public static byte[] Png(int w, int h, byte colorType, byte[] raw, byte bitDepth = 8)
     {
         var ms = new MemoryStream();
         ms.Write(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A });
         var ihdr = new byte[13];
         WriteBE(ihdr, 0, w);
         WriteBE(ihdr, 4, h);
-        ihdr[8] = 8;
+        ihdr[8] = bitDepth;
         ihdr[9] = colorType;
         Chunk(ms, "IHDR", ihdr);
         var z = new MemoryStream();

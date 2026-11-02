@@ -106,7 +106,7 @@ internal static partial class BoxPainter
             TileX = tile.X, TileY = tile.Y, TileW = tile.W, TileH = tile.H,
             StepX = tile.StepX, StepY = tile.StepY,
             RepeatX = tile.RepeatX, RepeatY = tile.RepeatY,
-            Image = source.Image,
+            Image = s.ImagePixelated ? source.Image?.Pixelated(tile.W, tile.H) : source.Image,
             Svg = source.Svg,
             Gradient = layer.Gradient?.Resolve(tile.W, tile.H, backdrop),
             ClipRadii = radiiInside,

@@ -145,7 +145,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   percentage coordinates and sizes, as in Bootstrap's placeholder images, HTML in `<foreignObject>`, and icons drawn
   with `<use>` from a sprite of symbols that is itself hidden, as in Bootstrap's icon sprites) and PNG, JPEG, GIF, WebP, BMP and TIFF images (also chosen by `srcset`, `<picture>` and
   `image-set()`,
-  shown by `<embed>` and `<object>`, and photos turned upright by their EXIF orientation), and CSS-only charts such as
+  shown by `<embed>` and `<object>`, photos turned upright by their EXIF orientation, and `image-rendering: pixelated`
+  or `crisp-edges` writing enlarged images, such as QR codes and pixel art, with hard pixel edges in every PDF viewer), and CSS-only charts such as
   Charts.css (column, bar, area, line and pie charts), laid out as Chrome lays them out. Older CSS works too: the
   `-webkit-` property names Chrome still takes (`-webkit-transform`, `-webkit-flex`, ...), the legacy
   `display: -webkit-box` and its `-webkit-box-` properties, and the `-webkit-gradient()` and prefixed gradient
