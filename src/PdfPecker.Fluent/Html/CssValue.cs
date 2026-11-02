@@ -80,6 +80,7 @@ internal static class CssValue
         if (style.Leading is { } leading) declarations.Add(("line-height", Number(leading)));
         if (style.Tracking is { } tracking) declarations.Add(("letter-spacing", Number(tracking) + "em"));
         if (style.WordGap is { } wordGap) declarations.Add(("word-spacing", Number(wordGap) + "em"));
+        if (style.IsHyphenated is { } hyphenated) declarations.Add(("hyphens", hyphenated ? "auto" : "manual"));
         if (style.Features is { } features)
         {
             var sb = new StringBuilder();
