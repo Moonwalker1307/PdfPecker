@@ -241,6 +241,12 @@ public static partial class ContainerExtensions
     /// <summary>The same as <see cref="PreventPageBreak"/>, under QuestPDF's older name.</summary>
     public static IContainer ShowEntire(this IContainer container) => PreventPageBreak(container);
 
+    /// <summary>
+    /// Draws the content again at the top of each later page the slot around it continues on, such as a label in a row
+    /// item beside a text several pages long, or in a table cell split across pages. Elsewhere content appears once.
+    /// </summary>
+    public static IContainer Repeat(this IContainer container) => Decorate(container, new Decorator(DecoratorKind.Repeat));
+
     /// <summary>Renders the content only when <paramref name="condition"/> is true.</summary>
     public static IContainer ShowIf(this IContainer container, bool condition)
         => condition ? container : Decorate(container, new Decorator(DecoratorKind.Hidden));

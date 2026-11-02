@@ -53,7 +53,8 @@ Document.Create(container =>
 - **Gradients and opacity**: `BackgroundLinearGradient` (QuestPDF's call, with its angles), `BackgroundRadialGradient`
   (from the middle or a centre you choose, for a glow on a cover page) and `Opacity`, which fades a slot and everything
   in it, such as a watermark over the content. Paint called before `Opacity` stays as it is.
-- **More layout**: `Layers` (watermarks under and stamps over content), `Inlined` (items that wrap like words, such as
+- **More layout**: `Repeat` (content drawn again on each later page of its row item or table cell, such as a label
+  beside a long text), `Layers` (watermarks under and stamps over content), `Inlined` (items that wrap like words, such as
   tags), `MultiColumn` (newspaper columns), `EnsureSpace` (keeps a heading off the bottom of a page), `Unconstrained`,
   `ZIndex`, `AspectRatio`, `Shadow`, rounded single corners, `Shrink`, `ScaleToFit` (draws content smaller until it
   fits a box of fixed size, for badges and labels), `Placeholder`, `DebugArea` and `Lazy`.

@@ -72,6 +72,9 @@ internal enum DecoratorKind
 
     /// <summary>The language of the content, the tag in <see cref="Decorator.Text"/>.</summary>
     Language,
+
+    /// <summary>Draws the content again on each later page its parent continues on.</summary>
+    Repeat,
 }
 
 /// <summary>

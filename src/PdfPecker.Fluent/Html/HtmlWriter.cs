@@ -1247,6 +1247,7 @@ internal sealed class HtmlWriter
     private sealed class Box
     {
         private const string ScaleToFitProperty = "-pdfpecker-scale-to-fit";
+        private const string RepeatProperty = "-pdfpecker-repeat";
 
         public string Tag { get; set; } = "div";
 
@@ -1367,6 +1368,12 @@ internal sealed class HtmlWriter
                     return Has("height") || Has("max-height")
                         ? TryAdd(Rank.Size, [(ScaleToFitProperty, "shrink")])
                         : TryAdd(Rank.Size, [(ScaleToFitProperty, "shrink"), ("max-height", "100%")]);
+                case DecoratorKind.Repeat:
+                    // PdfPecker draws the box again on the later pages of the box around it, so the content gets an
+                    // element of its own inside the slot, which is what continues across the pages.
+                    if (Required || IsCell || Tag != "div" || Href != null || _aligned || Declarations.Count > 0 || Id != null) return false;
+                    Declarations.Add((RepeatProperty, "each-page"));
+                    return true;
                 case DecoratorKind.TextStyle:
                     // Inherited properties: an inner style simply wins over an outer one on the same element.
                     var declarations = new List<(string, string)>();
