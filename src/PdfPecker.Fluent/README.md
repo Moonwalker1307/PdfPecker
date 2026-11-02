@@ -141,8 +141,7 @@ Most QuestPDF code ports by changing the `using` lines: `Document.Create`, `Page
 - `Document.Merge` composes the documents into one HTML document, so the result has one set of metadata and settings:
   those of `WithMetadata` and `WithSettings` on the merge, or the first document's. With original page numbers,
   `BeginPageNumberOfSection` and `EndPageNumberOfSection` still give pages of the whole PDF.
-- Not available: `Dynamic`, `Canvas`, `StopPaging`, `RepeatContent` and the Companion
-  previewer.
+- Not available: `Dynamic`, `Canvas`, `StopPaging` and the Companion previewer.
 
 ## Performance
 
