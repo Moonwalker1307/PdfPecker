@@ -407,4 +407,52 @@ public sealed class LayoutTests
         Assert.Contains("Body even", pages[1].Text);
         Assert.Contains("Body odd", pages[2].Text);
     }
+
+    [Fact]
+    public void Language_writes_the_lang_attribute_and_an_inner_language_nests()
+    {
+        Assert.Equal("<p lang=\"da\">x</p>", Html.Item(c => c.Language("da").Text("x")));
+        Assert.Equal("<div lang=\"da\"><p lang=\"en-GB\">x</p></div>", Html.Item(c => c.Language("da").Language("en-GB").Text("x")));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("-da")]
+    [InlineData("da-")]
+    [InlineData("da--DK")]
+    [InlineData("1da")]
+    [InlineData("da DK")]
+    [InlineData("da\"><script>")]
+    [InlineData("toolongsubtag")]
+    public void Language_refuses_what_is_not_a_language_tag(string language)
+        => Assert.Throws<ArgumentException>(() => Html.Item(c => c.Language(language).Text("x")));
+
+    [Fact]
+    public void Hyphenate_writes_hyphens_on_the_paragraph_and_on_spans()
+    {
+        Assert.Contains("{hyphens:auto}", Html.Css(Html.Page(c => c.DefaultTextStyle(s => s.Hyphenate()).Text("x"))));
+        string css = Html.Css(Html.Page(c => c.Text(t =>
+        {
+            t.Span("a");
+            t.Span("b").Hyphenate(false);
+        })));
+        Assert.Contains("hyphens:manual", css);
+    }
+
+    [Fact]
+    public void Hyphenate_breaks_long_words_by_the_rules_of_the_language()
+    {
+        const string words = "Arbejdsmarkedsuddannelserne og sundhedsplejerskerne";
+        string Render(bool hyphenate, string? language) => Html.Text(Document.Create(d => d.Page(p =>
+        {
+            p.Size(PageSizes.A6);
+            var content = p.Content().Width(90);
+            if (language != null) content = content.Language(language);
+            content.Text(words).Hyphenate(hyphenate);
+        })).GeneratePdf());
+
+        Assert.Contains("-", Render(hyphenate: true, "da"), StringComparison.Ordinal);
+        Assert.DoesNotContain("-", Render(hyphenate: false, "da"), StringComparison.Ordinal);
+        Assert.DoesNotContain("-", Render(hyphenate: true, language: null), StringComparison.Ordinal);
+    }
 }
