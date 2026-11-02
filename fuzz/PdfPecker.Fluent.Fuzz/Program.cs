@@ -172,6 +172,7 @@ internal static class Fuzz
             document.Page(page =>
             {
                 if (r.Next(3) == 0) page.Size(r.Next(30) == 0 ? Number(r) : r.Next(20, 1500), r.Next(30) == 0 ? Number(r) : r.Next(20, 1500));
+                if (r.Next(8) == 0) page.ContinuousSize(r.Next(30) == 0 ? Number(r) : r.Next(20, 1500));
                 if (r.Next(2) == 0) page.Margin(Number(r), Unit(r));
                 if (r.Next(4) == 0) page.PageColor(Color(r));
                 if (r.Next(4) == 0) page.DefaultTextStyle(s => Style(s, r));

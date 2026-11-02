@@ -316,6 +316,9 @@ internal sealed class HtmlElement : Element
 internal sealed class PageSet
 {
     public PageSize Size { get; set; } = PageSize.A4;
+
+    /// <summary>Whether the page is as tall as its content (ContinuousSize), which PdfPecker's <c>size: width auto</c> gives.</summary>
+    public bool ContinuousHeight { get; set; }
     public float MarginTop { get; set; }
     public float MarginRight { get; set; }
     public float MarginBottom { get; set; }

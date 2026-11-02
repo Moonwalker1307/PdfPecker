@@ -169,8 +169,10 @@ internal sealed class HtmlWriter
     {
         _html.Append("@page");
         if (name != null) _html.Append(' ').Append(name);
-        _html.Append("{size:").Append(CssValue.Pt(page.Size.Width)).Append(' ').Append(CssValue.Pt(page.Size.Height))
-            .Append(";margin:").Append(CssValue.Pt(page.MarginTop)).Append(' ').Append(CssValue.Pt(page.MarginRight)).Append(' ')
+        _html.Append("{size:").Append(CssValue.Pt(page.Size.Width)).Append(' ');
+        if (page.ContinuousHeight) _html.Append("auto");
+        else _html.Append(CssValue.Pt(page.Size.Height));
+        _html.Append(";margin:").Append(CssValue.Pt(page.MarginTop)).Append(' ').Append(CssValue.Pt(page.MarginRight)).Append(' ')
             .Append(CssValue.Pt(page.MarginBottom)).Append(' ').Append(CssValue.Pt(page.MarginLeft));
         if (page.Background is { } background) _html.Append(";background:").Append(CssValue.Color(background));
         _html.Append('}');

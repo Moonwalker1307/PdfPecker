@@ -1,3 +1,4 @@
+using System.Globalization;
 using FluentExamples;
 
 namespace PdfPecker.Fluent.Tests;
@@ -524,6 +525,53 @@ public sealed class LayoutTests
         Assert.Throws<ArgumentException>(() => Document.Merge());
         Assert.Throws<ArgumentNullException>(() => Document.Merge((IEnumerable<IDocument>)null!));
         Assert.Throws<ArgumentNullException>(() => Document.Merge(Invoice("A"), null!));
+    }
+
+    /// <summary>The page sizes in page order, in points.</summary>
+    private static List<(double W, double H)> MediaBoxes(byte[] pdf)
+        => System.Text.RegularExpressions.Regex.Matches(System.Text.Encoding.Latin1.GetString(pdf), @"/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]")
+            .Select(m => (double.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture), double.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture)))
+            .ToList();
+
+    [Fact]
+    public void A_continuous_page_is_as_tall_as_its_content()
+    {
+        var receipt = Document.Create(d => d.Page(p =>
+        {
+            p.ContinuousSize(200);
+            p.Margin(10);
+            p.Header().Height(30).Text("Shop");
+            p.Content().Column(c => { for (int i = 0; i < 5; i++) c.Item().Height(20).Text("Item " + i); });
+            p.Footer().Height(20).Text("Thanks");
+        }));
+        Assert.Contains("@page{size:200pt auto;", Html.Css(receipt));
+        var size = Assert.Single(MediaBoxes(receipt.GeneratePdf(new PdfOptions { Compress = false })));
+        Assert.Equal(200, size.W, 0.01);
+        Assert.Equal(10 + 30 + 100 + 20 + 10, size.H, 0.5);
+    }
+
+    [Fact]
+    public void Each_merged_receipt_is_a_page_of_its_own_height()
+    {
+        static Document Receipt(int items) => Document.Create(d => d.Page(p =>
+        {
+            p.ContinuousSize(80, Unit.Millimetre);
+            p.Content().Column(c => { for (int i = 0; i < items; i++) c.Item().Height(20).Text("Item " + i); });
+        }));
+        var pdf = Document.Merge(Receipt(3), Receipt(10)).GeneratePdf(new PdfOptions { Compress = false });
+        var sizes = MediaBoxes(pdf);
+        Assert.Equal(2, sizes.Count);
+        Assert.Equal(60, sizes[0].H, 0.5);
+        Assert.Equal(200, sizes[1].H, 0.5);
+        Assert.Equal(80 * 72 / 25.4, sizes[0].W, 0.1);
+    }
+
+    [Fact]
+    public void A_size_after_continuous_size_gives_a_fixed_page_again()
+    {
+        var document = Document.Create(d => d.Page(p => { p.ContinuousSize(200); p.Size(PageSizes.A6); p.Content().Text("x"); }));
+        Assert.DoesNotContain("auto", Html.Css(document));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Document.Create(d => d.Page(p => p.ContinuousSize(0))).GenerateHtml());
     }
 
     [Fact]
