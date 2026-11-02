@@ -1117,3 +1117,9 @@ Inc.) and Nabla (Copyright 2022 The Nabla Project Authors), licensed under the S
 (Copyright 2011 Google Inc.) and Google's COLRv1 test glyphs (https://github.com/googlefonts/color-fonts, Copyright
 Google Inc.), licensed under the Apache License 2.0. They are used only by the tests, and their license texts are next
 to the fonts.
+
+## MathJax output in a test page (not part of the library or the NuGet package)
+
+`tests/PdfPecker.Tests/Golden/features/math-svg.html` holds formulas as MathJax 3.2.2 (https://www.mathjax.org,
+Copyright The MathJax Consortium) writes them as SVG, with glyph outlines from the MathJax TeX fonts, licensed under
+the Apache License 2.0. They are used only by the tests.

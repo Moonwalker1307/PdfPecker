@@ -21,9 +21,10 @@ internal sealed partial class PdfDocumentWriter
 
         var saved = SaveState();
         b.Ascii("q ").Num(left).Sp().Num(top - h).Sp().Num(w).Sp().Num(h).Ascii(" re W n\n");
-        // User space (y down) to PDF space (y up).
+        // User space (y down) to PDF space (y up). The scale takes six decimals: a viewBox of thousands of units, as formula
+        // renderers write, would otherwise be drawn up to a few percent too large or too small for its box.
         var toPage = new Matrix(sx, 0, 0, -sy, left + tx - vx * sx, top - ty + vy * sy);
-        b.Num(sx).Ascii(" 0 0 ").Num(-sy).Sp().Num(toPage.E).Sp().Num(toPage.F).Ascii(" cm\n");
+        WriteMatrix(b, toPage).Ascii(" cm\n");
         WriteSvgShapes(b, img.Shapes, toPage);
         b.Ascii("Q\n");
         RestoreState(saved);
