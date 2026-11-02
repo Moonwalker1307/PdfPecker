@@ -1090,7 +1090,7 @@ internal sealed class HtmlWriter
             _html.Append("</thead>");
         }
         _html.Append("<tbody>");
-        RenderRows(table.Body, columns, "td");
+        RenderRows(table.Body, columns, "td", table.ExtendLastCells);
         _html.Append("</tbody>");
         if (table.Footer.Count > 0)
         {
@@ -1101,9 +1101,11 @@ internal sealed class HtmlWriter
         _html.Append("</table>");
     }
 
-    private void RenderRows(List<TableCell> cells, int columns, string tag)
+    private void RenderRows(List<TableCell> cells, int columns, string tag, bool extendLast = false)
     {
         var placed = TableLayout.Place(cells, columns, out int rows, out var covered);
+        var extended = extendLast ? TableLayout.ExtendLastCells(placed, columns, rows) : null;
+        var extendedFrom = extended != null ? TableLayout.ExtendedFrom(extended, placed, columns) : null;
         for (int r = 0; r < rows; r++)
         {
             _html.Append("<tr>");
@@ -1117,11 +1119,11 @@ internal sealed class HtmlWriter
                     box.InGrid = true;
                     if (tag == "th") box.Attributes.Add(("scope", "col"));
                     if (cell.ColumnSpan > 1) box.Attributes.Add(("colspan", cell.ColumnSpan.ToString(CultureInfo.InvariantCulture)));
-                    int rowSpan = Math.Min(cell.RowSpan, rows - r);
+                    int rowSpan = extended != null && extended.Contains((r, c)) ? rows - r : Math.Min(cell.RowSpan, rows - r);
                     if (rowSpan > 1) box.Attributes.Add(("rowspan", rowSpan.ToString(CultureInfo.InvariantCulture)));
                     RenderContainer(cell, box);
                 }
-                else if (!covered(r, c))
+                else if (!covered(r, c) && !(extendedFrom != null && extendedFrom[c] >= 0 && r > extendedFrom[c]))
                 {
                     _html.Append('<').Append(tag).Append("></").Append(tag).Append('>');
                 }
