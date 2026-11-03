@@ -494,6 +494,16 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Floats_stacked_one_below_the_other_look_only_at_the_floats_beside_them()
+    {
+        // Found by the fuzzer: target html, timeout-d2edd0b0 (daily run 89). Cards nested until they left no width put
+        // thousands of floats one below the other, and placing each one went through every float before it to find the
+        // room beside it: 60,000 floats took 7 seconds once, and the cards laid them out again and again.
+        var html = "<style>i { float: left; width: 10pt; height: 1pt }</style><div style='width:0'>" + Repeat("<i></i>", 120_000) + "</div>";
+        AssertStructurallyValid(Bounded(html));
+    }
+
+    [Fact]
     public void Nested_lone_table_parts_get_bounded_anonymous_tables()
     {
         // Each lone cell, row or text in a display: table box gets anonymous table boxes around it, so nesting them as
