@@ -31,18 +31,28 @@ internal sealed partial class LayoutEngine
         public float Bottom = float.NegativeInfinity; // lowest float bottom
         private int _lastOps = -1; // no float's OpsIndex is above this, so that folding usually has nothing to look at
 
+        // The lowest bottom among the boxes up to each one, and whether the boxes' tops never go up along the list,
+        // which placing floats keeps. Together they let a band look only at the boxes that can reach into it: each of
+        // thousands of floats stacked one below the other went through all the floats before it, n squared in all.
+        private List<float>? _maxBottom;
+        private bool _ordered = true;
+
         public bool Any => _boxes is { Count: > 0 };
 
         public void Clear()
         {
             _boxes?.Clear();
+            _maxBottom?.Clear();
+            _ordered = true;
             MinTop = Bottom = float.NegativeInfinity;
             _lastOps = -1;
         }
 
         public void Add(FloatBox box)
         {
-            (_boxes ??= new List<FloatBox>()).Add(box);
+            _boxes ??= new List<FloatBox>();
+            Order(box);
+            _boxes.Add(box);
             if (box.Y0 > MinTop) MinTop = box.Y0;
             if (box.Y1 > Bottom) Bottom = box.Y1;
             if (box.OpsIndex > _lastOps) _lastOps = box.OpsIndex;
@@ -58,12 +68,58 @@ internal sealed partial class LayoutEngine
             Boxes.RemoveRange(n, Boxes.Count - n);
             MinTop = Bottom = float.NegativeInfinity;
             _lastOps = -1;
-            foreach (var b in Boxes)
+            _maxBottom!.Clear();
+            _ordered = true;
+            for (int i = 0; i < n; i++)
             {
+                var b = Boxes[i];
+                Order(b, i);
                 if (b.Y0 > MinTop) MinTop = b.Y0;
                 if (b.Y1 > Bottom) Bottom = b.Y1;
                 if (b.OpsIndex > _lastOps) _lastOps = b.OpsIndex;
             }
+        }
+
+        /// <summary>Notes a box about to go at <paramref name="index"/> (the end of the list by default) in the order kept for bands.</summary>
+        private void Order(FloatBox box, int index = -1)
+        {
+            var maxBottom = _maxBottom ??= new List<float>();
+            if (index < 0) index = maxBottom.Count;
+            float prev = index > 0 ? maxBottom[index - 1] : float.NegativeInfinity;
+            // A box that is not a number anywhere a band compares it would be skipped wrongly: such lists are looked at whole.
+            if (float.IsNaN(box.Y0) || float.IsNaN(box.Y1) || index > 0 && !(box.Y0 >= Boxes[index - 1].Y0)) _ordered = false;
+            maxBottom.Add(box.Y1 > prev ? box.Y1 : prev);
+        }
+
+        /// <summary>
+        /// The boxes that can reach into the band whose top is <paramref name="y"/> and whose bottom is
+        /// <paramref name="bottom"/>: those before the range end above it, and those after it start below it. Looking at
+        /// the range in order gives the same result as looking at every box.
+        /// </summary>
+        private (int Start, int End) Near(float y, float bottom)
+        {
+            int n = Boxes.Count;
+            if (!_ordered || n < 8) return (0, n);
+            var boxes = Boxes;
+            var maxBottom = _maxBottom!;
+            float above = y + Tiny, below = bottom - Tiny;
+            int lo = 0, hi = n;
+            while (lo < hi)
+            {
+                int mid = lo + (hi - lo) / 2;
+                if (maxBottom[mid] <= above) lo = mid + 1;
+                else hi = mid;
+            }
+            int start = lo;
+            lo = start;
+            hi = n;
+            while (lo < hi)
+            {
+                int mid = lo + (hi - lo) / 2;
+                if (boxes[mid].Y0 >= below) hi = mid;
+                else lo = mid + 1;
+            }
+            return (start, lo);
         }
 
         /// <summary>The ops of floats at or after <paramref name="start"/> were folded into one op at that index.</summary>
@@ -84,8 +140,10 @@ internal sealed partial class LayoutEngine
         public (float Left, float Right) Band(float y, float h, float left, float right)
         {
             float bottom = y + Math.Max(h, Eps);
-            foreach (var b in Boxes)
+            var (start, end) = Near(y, bottom);
+            for (int i = start; i < end; i++)
             {
+                var b = Boxes[i];
                 if (b.Y0 >= bottom - Tiny || b.Y1 <= y + Tiny || b.X1 <= b.X0) continue;
                 if (b.Right) { if (b.X0 < right) right = b.X0; }
                 else if (b.X1 > left) left = b.X1;
@@ -102,8 +160,10 @@ internal sealed partial class LayoutEngine
         public (float Left, float Right) LineBand(float y, float h, float left, float right)
         {
             float bottom = y + Math.Max(h, Eps);
-            foreach (var b in Boxes)
+            var (start, end) = Near(y, bottom);
+            for (int i = start; i < end; i++)
             {
+                var b = Boxes[i];
                 if (b.Y0 >= bottom - Tiny || b.Y1 <= y + Tiny || b.X1 <= b.X0) continue;
                 float x0 = b.X0, x1 = b.X1;
                 if (b.Shape is { } shape)
@@ -140,8 +200,10 @@ internal sealed partial class LayoutEngine
         public float NextBottom(float y, float h)
         {
             float bottom = y + Math.Max(h, Eps), next = float.NaN;
-            foreach (var b in Boxes)
+            var (start, end) = Near(y, bottom);
+            for (int i = start; i < end; i++)
             {
+                var b = Boxes[i];
                 if (b.Y0 >= bottom - Tiny || b.Y1 <= y + Tiny) continue;
                 if (float.IsNaN(next) || b.Y1 < next) next = b.Y1;
             }
