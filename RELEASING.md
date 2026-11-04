@@ -3,19 +3,22 @@
 Only the repository owner publishes a release. Agents and contributors prepare the pull requests around it, but never
 create tags or GitHub releases.
 
-A release publishes three packages from this repository, PdfPecker, PdfPecker.Fluent and PdfPecker.Razor, always with
-the same version. PdfPecker.Fluent and PdfPecker.Razor depend on the PdfPecker package of their own version, as a
-minimum. PdfPecker.Razor also depends on Microsoft's `Microsoft.AspNetCore.Components.Web`, the release of each target
-framework's .NET version.
+A release publishes four packages from this repository, PdfPecker, PdfPecker.Fluent, PdfPecker.Testing and
+PdfPecker.Razor, always with the same version. The other three depend on the PdfPecker package of their own version,
+as a minimum. PdfPecker.Razor also depends on Microsoft's `Microsoft.AspNetCore.Components.Web`, the release of each
+target framework's .NET version.
 
 ## Versions
 
 - Semantic versioning. New features are minor versions, fixes are patches, and a breaking change to the public API
   belongs only in a major version. No breaking changes are planned before 2.0.
 - Package validation enforces this: `dotnet pack` compares the public API with `PackageValidationBaselineVersion` in
-  `src/PdfPecker/PdfPecker.csproj` and fails on a break. A deliberate break, in a major version only, needs a
+  each package's project file and fails on a break. A deliberate break, in a major version only, needs a
   `CompatibilitySuppressions.xml` entry.
-- Local builds pack as `<next patch>-dev` (the `Version` in `Directory.Build.props`, which all packages share). CI builds of main and pull requests
+- PdfPecker.Testing and PdfPecker.Razor have no baseline until their first release: their package validation checks
+  only the package's own consistency, and the pull request after that release adds their
+  `PackageValidationBaselineVersion` (see below).
+- Local builds pack as `<next patch>-dev` (the `Version` in `Directory.Build.props`, which all four packages share). CI builds of main and pull requests
   are `<next patch>-preview.<run number>`, computed from the latest `v*` tag, so they sort between two releases.
 
 ## Before a release
@@ -30,19 +33,20 @@ framework's .NET version.
 ## Publishing
 
 1. The owner creates a GitHub release with a tag `vX.Y.Z` (or `vX.Y.Z-suffix` for a pre-release) and the notes.
-2. `nuget.yml` builds and tests with that version, attaches the three `.nupkg` files to the release, and pushes them to
+2. `nuget.yml` builds and tests with that version, attaches the four `.nupkg` files to the release, and pushes them to
    nuget.org with Trusted Publishing: `NuGet/login` swaps the workflow's OIDC token for a short-lived key, in the
    `nuget` environment with the `NUGET_USER` repository variable. There is no stored API key. The Trusted Publishing
-   policy covers every package its owner owns, so PdfPecker.Fluent and PdfPecker.Razor need no policy of their own; a
-   package's first push creates it on nuget.org under that account.
+   policy covers every package its owner owns, so the other packages need no policy of their own; a package's first
+   push creates it on nuget.org under that account.
 
 ## After a release
 
 Open one pull request on the library that:
 
 - raises `PackageValidationBaselineVersion` to the new version in `src/PdfPecker/PdfPecker.csproj`,
-  `src/PdfPecker.Fluent/PdfPecker.Fluent.csproj` and `src/PdfPecker.Razor/PdfPecker.Razor.csproj` (the Razor package
-  gets the line after its first release; until then package validation checks only its target frameworks), and
+  `src/PdfPecker.Fluent/PdfPecker.Fluent.csproj`, `src/PdfPecker.Testing/PdfPecker.Testing.csproj` and
+  `src/PdfPecker.Razor/PdfPecker.Razor.csproj` (after the first release that includes PdfPecker.Testing or
+  PdfPecker.Razor, this adds the property there, next to `EnablePackageValidation`), and
   `Version` in `Directory.Build.props` to the next patch's `-dev` (CI warns while the library's baseline lags behind
   the latest tag);
 - updates the version placeholder in `.github/ISSUE_TEMPLATE/bug_report.yml`;

@@ -98,10 +98,11 @@ jobs:
       - run: dotnet build -c Release -p:Version=${{ steps.version.outputs.version }}
       - run: dotnet test -c Release --no-build
 
-      # PdfPecker.Fluent and PdfPecker.Razor are released with every PdfPecker release, with the same version, and depend
-      # on that version.
+      # PdfPecker.Fluent, PdfPecker.Testing and PdfPecker.Razor are released with every PdfPecker release, with the same
+      # version, and depend on that version.
       - run: dotnet pack src/PdfPecker -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
       - run: dotnet pack src/PdfPecker.Fluent -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
+      - run: dotnet pack src/PdfPecker.Testing -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
       - run: dotnet pack src/PdfPecker.Razor -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -179,6 +180,9 @@ jobs:
       - run: dotnet test -c Release -f net10.0 --no-build tests/PdfPecker.Tests
       - run: dotnet build -c Release -f net10.0 tests/PdfPecker.Fluent.Tests
       - run: dotnet test -c Release -f net10.0 --no-build tests/PdfPecker.Fluent.Tests
+      # Snapshot paths, file names and the files a failure writes depend on the file system.
+      - run: dotnet build -c Release -f net10.0 tests/PdfPecker.Testing.Tests
+      - run: dotnet test -c Release -f net10.0 --no-build tests/PdfPecker.Testing.Tests
       - run: dotnet build -c Release -f net10.0 tests/PdfPecker.Razor.Tests
       - run: dotnet test -c Release -f net10.0 --no-build tests/PdfPecker.Razor.Tests
 
@@ -244,7 +248,7 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
         run: gh release upload "$TAG" artifacts/*.nupkg --clobber
 
-  # Pushes the release packages, PdfPecker, PdfPecker.Fluent and PdfPecker.Razor, to nuget.org with Trusted Publishing: NuGet/login swaps a GitHub OIDC token
+  # Pushes the release packages, PdfPecker, PdfPecker.Fluent, PdfPecker.Testing and PdfPecker.Razor, to nuget.org with Trusted Publishing: NuGet/login swaps a GitHub OIDC token
   # for a short-lived API key, so no long-lived key is stored in the repository. Runs only for published releases.
   publish:
     if: github.event_name == 'release'

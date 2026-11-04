@@ -45,6 +45,22 @@ public sealed class DocumentSettings
 
     /// <summary>Compresses the PDF's streams (on by default).</summary>
     public bool CompressDocument { get; set; } = true;
+
+    /// <summary>
+    /// The direction of every page's content, unless the page sets its own with <c>ContentFromLeftToRight</c> or
+    /// <c>ContentFromRightToLeft</c>. Left to right by default.
+    /// </summary>
+    public ContentDirection ContentDirection { get; set; }
+}
+
+/// <summary>The direction content is laid out in, for <see cref="DocumentSettings.ContentDirection"/>.</summary>
+public enum ContentDirection
+{
+    /// <summary>Left to right, as in English (the default).</summary>
+    LeftToRight,
+
+    /// <summary>Right to left, as in Arabic and Hebrew.</summary>
+    RightToLeft,
 }
 
 /// <summary>

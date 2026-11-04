@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en"><head><title>Gap decorations</title>
+<style>
+@page { size: 148mm 210mm; margin: 12mm }
+body { font: 9pt/1.35 sans-serif; margin: 0; color: #222 }
+h1 { font-size: 15pt; margin: 0 0 6pt; border-bottom: 1pt solid #1f618d }
+h2 { font-size: 9.5pt; margin: 8pt 0 3pt; color: #1f618d }
+.pair { display: flex; gap: 10mm; align-items: start }
+.grid { display: grid; grid-template-columns: repeat(4, 13mm); grid-auto-rows: 9mm; gap: 3mm; column-rule: 2px solid #2e86c1; row-rule: 2px solid #c0392b }
+.grid > div, .flex > div, .list > div { background: #d5f5e3; font-size: 7pt; padding: 1pt 2pt }
+.wide { grid-column: span 2 }
+.tall { grid-row: span 2 }
+.empty { background: none !important }
+.flex { display: flex; flex-wrap: wrap; width: 60mm; gap: 3mm 4mm; column-rule: 3px dotted #8e44ad; row-rule: 3px double #d35400; rule-break: intersection; rule-inset: 2px }
+.list { display: flex; flex-direction: column; width: 60mm; gap: 4mm; row-rule: 1px dashed #566573; row-rule-inset: 6mm 0 }
+.cols { columns: 3; column-gap: 6mm; column-rule: 2px solid #17a589; column-rule-color: #17a589, #b03a2e; column-rule-inset: 2mm; text-align: justify }
+.pages { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4mm; column-rule: 2px solid #2e86c1; row-rule: 2px solid #c0392b; rule-inset: 1mm; break-before: page }
+.pages > div { background: #fdebd0; height: 28mm; break-inside: avoid; padding: 2pt }
+</style></head><body>
+<h1>Gap decorations</h1>
+
+<h2>Grid: rules break at spanning items (rule-break: normal), and with intersection at every crossing</h2>
+<div class="pair">
+  <div class="grid"><div>1</div><div class="wide">2</div><div>3</div><div class="tall">4</div><div>5</div><div>6</div><div>7</div><div>8</div><div>9</div><div>10</div></div>
+  <div class="grid" style="rule-break: intersection; rule-inset: 1mm; column-rule-style: dashed"><div>1</div><div class="wide">2</div><div>3</div><div class="tall">4</div><div>5</div><div>6</div><div>7</div><div>8</div><div>9</div><div>10</div></div>
+</div>
+
+<h2>Empty cells (rule-visibility-items: between and around), overlap-join, lists and rule-overlap</h2>
+<div class="pair">
+  <div class="grid" style="rule-visibility-items: between"><div>1</div><div>2</div><div style="grid-column: 4">3</div><div style="grid-row: 3; grid-column: 2">4</div><div style="grid-row: 3; grid-column: 3">5</div></div>
+  <div class="grid" style="rule-visibility-items: around"><div>1</div><div>2</div><div style="grid-column: 4">3</div><div style="grid-row: 3; grid-column: 2">4</div><div style="grid-row: 3; grid-column: 3">5</div></div>
+</div>
+<div class="pair" style="margin-top: 4mm">
+  <div class="grid" style="rule-break: intersection; rule-inset: overlap-join; rule-width: 4px; column-rule-color: #2e86c1, #27ae60"><div>1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div><div>8</div></div>
+  <div class="grid" style="rule: 5px solid #f5b041; column-rule-color: repeat(auto, #2e86c1); rule-overlap: column-over-row; rule-inset: 0 / -50%; rule-break: intersection"><div>1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div><div>8</div></div>
+</div>
+
+<h2>Flex: a wrapped row and a column list</h2>
+<div class="pair">
+  <div class="flex"><div style="width: 12mm; height: 8mm">a</div><div style="width: 22mm">b</div><div style="width: 16mm">c</div><div style="width: 28mm">d</div><div style="width: 14mm">e</div><div style="width: 18mm">f</div><div style="width: 10mm">g</div></div>
+  <div class="list"><div>First entry</div><div>Second entry, a little longer</div><div>Third entry</div><div>Fourth entry</div></div>
+</div>
+
+<h2>Multi-column: alternating colours and insets</h2>
+<div class="cols">Gap decorations draw a line in the middle of each gap between the columns of a multi-column box, and now
+also between the tracks of a grid and the items and lines of a flex container. A list of colours gives the gaps their
+values in turn, and the rule-inset properties move the ends of each line.</div>
+
+<h2 class="pages-title" style="break-before: page">A grid across a page break</h2>
+<div class="pages" style="break-before: auto">
+  <div>1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div><div>8</div><div>9</div>
+  <div>10</div><div>11</div><div>12</div><div>13</div><div>14</div><div>15</div><div>16</div><div>17</div><div>18</div>
+</div>
+</body></html>

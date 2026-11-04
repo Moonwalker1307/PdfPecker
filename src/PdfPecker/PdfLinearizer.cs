@@ -21,9 +21,10 @@ namespace PdfPecker;
 /// <para>
 /// Any later change written as an incremental update, such as a signature from <see cref="PdfSigner"/>, keeps the file
 /// valid but ends its linearization, so viewers load it as a whole again. Digitally signed PDFs are refused, because
-/// rewriting them breaks the signatures, and so are encrypted ones: decrypt with
-/// <see cref="PdfProtector.Decrypt(byte[], string?)"/> first, or set <see cref="PdfOptions.Linearize"/> together with
-/// <see cref="PdfOptions.Security"/> when converting.
+/// rewriting them breaks the signatures. An encrypted PDF, or one that should be encrypted, goes through
+/// <see cref="Linearize(byte[], PdfSecurity?, string?, CancellationToken)"/>, which opens it with its password and encrypts
+/// the result in the same pass; when converting, set <see cref="PdfOptions.Linearize"/> together with
+/// <see cref="PdfOptions.Security"/>.
 /// </para>
 /// </remarks>
 public static class PdfLinearizer
@@ -81,6 +82,77 @@ public static class PdfLinearizer
         output.Write(result.RawBuffer, 0, result.Length);
     }
 
+    /// <summary>
+    /// Linearizes <paramref name="pdf"/> for Fast Web View and encrypts the result with <paramref name="security"/> in the
+    /// same pass, since encrypting a linearized file afterwards would write it out again and end its linearization. An
+    /// encrypted input is opened with <paramref name="password"/>.
+    /// </summary>
+    /// <param name="pdf">The PDF to linearize, encrypted or not.</param>
+    /// <param name="security">The passwords and permissions of the result (always AES-256, as with
+    /// <see cref="PdfProtector"/>); null writes the result unencrypted, also when the input was encrypted.</param>
+    /// <param name="password">The user or owner password of <paramref name="pdf"/>, when it is encrypted.</param>
+    /// <param name="cancellationToken">Stops the work between objects.</param>
+    /// <returns>The linearized PDF.</returns>
+    /// <exception cref="ArgumentException"><paramref name="pdf"/> is digitally signed; or <paramref name="security"/> is
+    /// set and <paramref name="pdf"/> claims PDF/A conformance, or claims PDF/UA while <paramref name="security"/> does
+    /// not allow <see cref="PdfPermissions.ExtractForAccessibility"/>.</exception>
+    /// <exception cref="PdfPasswordException"><paramref name="pdf"/> is encrypted and <paramref name="password"/> does not open it.</exception>
+    /// <exception cref="InvalidDataException"><paramref name="pdf"/> is not a readable PDF, or has no pages.</exception>
+    /// <exception cref="NotSupportedException"><paramref name="pdf"/> uses an encryption handler other than the standard one.</exception>
+    public static byte[] Linearize(byte[] pdf, PdfSecurity? security, string? password, CancellationToken cancellationToken = default)
+    {
+        if (pdf == null) throw new ArgumentNullException(nameof(pdf));
+        return LinearizeCore(pdf, security, password, cancellationToken).Span.ToArray();
+    }
+
+    /// <summary>
+    /// Linearizes the PDF read from <paramref name="input"/> (from its current position), encrypts it with
+    /// <paramref name="security"/> in the same pass and writes the result to <paramref name="output"/>; see
+    /// <see cref="Linearize(byte[], PdfSecurity?, string?, CancellationToken)"/>.
+    /// </summary>
+    /// <remarks>The streams are not closed. Nothing is written when the input cannot be linearized or the work is cancelled.</remarks>
+    /// <param name="input">The PDF to linearize, encrypted or not.</param>
+    /// <param name="output">Where the linearized PDF is written.</param>
+    /// <param name="security">The passwords and permissions of the result; null writes it unencrypted.</param>
+    /// <param name="password">The user or owner password of the input, when it is encrypted.</param>
+    /// <param name="cancellationToken">Stops the work between objects.</param>
+    /// <exception cref="ArgumentException">The PDF cannot be linearized with this protection (see the byte array overload),
+    /// or <paramref name="output"/> is not writable.</exception>
+    /// <exception cref="PdfPasswordException">The PDF is encrypted and <paramref name="password"/> does not open it.</exception>
+    /// <exception cref="InvalidDataException">The PDF is not readable, or has no pages.</exception>
+    /// <exception cref="NotSupportedException">The PDF uses an encryption handler other than the standard one.</exception>
+    public static void Linearize(Stream input, Stream output, PdfSecurity? security, string? password, CancellationToken cancellationToken = default)
+    {
+        if (input == null) throw new ArgumentNullException(nameof(input));
+        if (output == null) throw new ArgumentNullException(nameof(output));
+        if (!output.CanWrite) throw new ArgumentException("The output stream is not writable.", nameof(output));
+        var result = LinearizeCore(PdfMerger.ReadAll(input), security, password, cancellationToken);
+        output.Write(result.RawBuffer, 0, result.Length);
+    }
+
+    private static ByteBuffer LinearizeCore(byte[] pdf, PdfSecurity? security, string? password, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        using (PdfFile.BeginRender(cancellationToken))
+        {
+            PdfFile file;
+            try
+            {
+                file = PdfFile.Open(pdf, password);
+            }
+            catch (PdfFormatException ex)
+            {
+                throw new InvalidDataException("The PDF is not readable: " + ex.Message, ex);
+            }
+            if (file.Catalog == null) throw new InvalidDataException("The PDF is not readable: it has no catalog.");
+            PdfProtector.CheckNotSigned(file);
+            if (security == null) return PdfLinearWriter.Write(file, null, MD5.HashData(pdf));
+            PdfProtector.CheckCanEncrypt(file, security);
+            using var crypt = new PdfEncryptor(security);
+            return PdfLinearWriter.Write(file, crypt, MD5.HashData(pdf));
+        }
+    }
+
     private static ByteBuffer LinearizeCore(byte[] pdf, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -108,7 +180,7 @@ public static class PdfLinearizer
     }
 
     private const string EncryptedMessage =
-        "The PDF is encrypted: decrypt it with PdfProtector.Decrypt first, or set PdfOptions.Linearize with PdfOptions.Security when converting.";
+        "The PDF is encrypted: linearize it with the overload that takes its password and a PdfSecurity, or set PdfOptions.Linearize with PdfOptions.Security when converting.";
 
     /// <summary>
     /// Linearizes a file <see cref="PdfDocumentWriter"/> has just written, opened with <paramref name="password"/> and

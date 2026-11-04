@@ -43,6 +43,13 @@ internal enum TextDecorationStyle
     Dashed,
 }
 
+internal enum TextDirection
+{
+    Auto,
+    LeftToRight,
+    RightToLeft,
+}
+
 internal enum TextPosition
 {
     Normal,
@@ -73,6 +80,9 @@ public sealed class TextStyle
     internal float? WordGap { get; private set; }
     internal (string Tag, bool On)[]? Features { get; private set; }
     internal bool? IsHyphenated { get; private set; }
+    internal bool? IsOverline { get; private set; }
+    internal bool? IsBreakAnywhere { get; private set; }
+    internal TextDirection? Direction { get; private set; }
 
     /// <summary>The empty style: every property inherited.</summary>
     public static TextStyle Default { get; } = new();
@@ -162,6 +172,12 @@ public sealed class TextStyle
     /// <summary>Struck through, or not with <c>false</c>.</summary>
     public TextStyle Strikethrough(bool value = true) => With(s => s.IsStrikethrough = value);
 
+    /// <summary>
+    /// A line above the text, or none with <c>false</c>. It takes the style, colour and thickness of the decoration
+    /// calls, as underlines do.
+    /// </summary>
+    public TextStyle Overline(bool value = true) => With(s => s.IsOverline = value);
+
     /// <summary>The line height as a multiple of the font size, such as 1.4; <c>null</c> for the font's own.</summary>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="factor"/> is not positive or not finite.</exception>
     public TextStyle LineHeight(float? factor)
@@ -224,6 +240,26 @@ public sealed class TextStyle
     /// and <see cref="PdfOptions.Hyphenation"/> adds others.
     /// </summary>
     public TextStyle Hyphenate(bool value = true) => With(s => s.IsHyphenated = value);
+
+    /// <summary>
+    /// Lets a line break between any two characters, not only between words, or only between words with
+    /// <c>false</c>. For text without spaces in a narrow column, such as long links, identifiers, hashes and paths.
+    /// Without it, only a word wider than the whole line is broken.
+    /// </summary>
+    public TextStyle BreakAnywhere(bool value = true) => With(s => s.IsBreakAnywhere = value);
+
+    /// <summary>
+    /// Takes the text's direction from its first letter that has one, so a Hebrew or Arabic name reads right to left
+    /// inside left-to-right text and the other way round. This is how text is laid out until a direction is set, so
+    /// the call mostly undoes <see cref="DirectionFromLeftToRight"/> and <see cref="DirectionFromRightToLeft"/>.
+    /// </summary>
+    public TextStyle DirectionAuto() => With(s => s.Direction = TextDirection.Auto);
+
+    /// <summary>Lays the text out left to right, whatever letters it starts with.</summary>
+    public TextStyle DirectionFromLeftToRight() => With(s => s.Direction = TextDirection.LeftToRight);
+
+    /// <summary>Lays the text out right to left, whatever letters it starts with.</summary>
+    public TextStyle DirectionFromRightToLeft() => With(s => s.Direction = TextDirection.RightToLeft);
 
     /// <summary>Raised and smaller, as in x².</summary>
     public TextStyle Superscript() => With(s => s.Position = TextPosition.Superscript);
@@ -289,6 +325,9 @@ public sealed class TextStyle
         copy.WordGap = other.WordGap ?? WordGap;
         copy.Features = MergeFeatures(Features, other.Features);
         copy.IsHyphenated = other.IsHyphenated ?? IsHyphenated;
+        copy.IsOverline = other.IsOverline ?? IsOverline;
+        copy.IsBreakAnywhere = other.IsBreakAnywhere ?? IsBreakAnywhere;
+        copy.Direction = other.Direction ?? Direction;
         return copy;
     }
 }

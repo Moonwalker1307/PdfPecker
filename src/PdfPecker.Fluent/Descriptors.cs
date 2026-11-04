@@ -146,6 +146,17 @@ public static class TableCellExtensions
         return cell;
     }
 
+    /// <summary>
+    /// Marks the cell as the header of its row, such as the first cell of each row of a comparison table, so PDF/UA
+    /// tags it as a header cell (TH) that screen readers announce with the other cells of the row. Cells of the
+    /// table's <c>Header</c> are column headers already.
+    /// </summary>
+    public static ITableCellContainer SemanticHorizontalHeader(this ITableCellContainer cell)
+    {
+        Cell(cell).RowHeader = true;
+        return cell;
+    }
+
     /// <summary>Places the cell in a given row, counted from 1.</summary>
     public static ITableCellContainer Row(this ITableCellContainer cell, uint row)
     {

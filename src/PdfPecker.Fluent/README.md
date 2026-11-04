@@ -66,15 +66,17 @@ Document.Create(container =>
   `Style` and `LevelStyle` set it out. Give the table's own title no `Heading`, or it lists itself.
 - **Transforms**: `Rotate`, `RotateLeft`, `RotateRight`, `Scale`, `ScaleHorizontal`, `ScaleVertical`, `FlipHorizontal`,
   `FlipVertical`, `FlipOver`, `TranslateX` and `TranslateY`.
-- **Text**: spans with font family, size, weight, colour, background, italic, underline, strikethrough (solid, double,
-  wavy, dotted or dashed, in their own colour and thickness), line height, letter and word spacing, superscript and
+- **Text**: spans with font family, size, weight, colour, background, italic, underline, overline, strikethrough
+  (solid, double, wavy, dotted or dashed, in their own colour and thickness), line height, letter and word spacing, superscript and
   subscript; OpenType features (`EnableFontFeature`, `DisableFontFeature`); justified text, `ClampLines` with an
-  ellipsis, a first-line indent and `ParagraphSpacing`; `Hyphenate` (hyphenation of long words in eleven languages,
+  ellipsis, `BreakAnywhere` (lines that break between any two characters, for long links and identifiers), a direction
+  of their own (`DirectionFromRightToLeft`, `DirectionFromLeftToRight`, `DirectionAuto`), a first-line indent and `ParagraphSpacing`; `Hyphenate` (hyphenation of long words in eleven languages,
   which QuestPDF does not have) with the language of the document or of a container (`Language("da")`); small slots inside the text for icons and badges
   (`text.Element()`); dot leaders that fill the rest of a line (`Leader`), for tables of contents and price lists; headings, which become PDF bookmarks and tags; links and links to named sections, and the page a
   section starts on and ends on, its number of pages and the page within it (`BeginPageNumberOfSection`,
   `EndPageNumberOfSection`, `TotalPagesWithinSection`, `PageNumberWithinSection`).
-- **Pages**: size, margins, page colour, `ContinuousSize` (a page as tall as its content, for receipts on a roll), a header and footer on every page, and `CurrentPageNumber` / `TotalPages`
+- **Pages**: size, margins, page colour, direction (per page, or for the whole document with
+  `DocumentSettings.ContentDirection`), `ContinuousSize` (a page as tall as its content, for receipts on a roll), a header and footer on every page, and `CurrentPageNumber` / `TotalPages`
   in them or anywhere in the content. `ShowOnce` and `SkipOnce` in the header or footer give the first page a band of its own, such as a
   letterhead followed by a slim header. `EvenPageHeader` and `EvenPageFooter` give the even pages bands of their own, for printing on both sides. Several `Page` calls give page sets with their own size, margins, header and
   footer in one document, and the page numbers run on through all of them.
@@ -92,9 +94,10 @@ Document.Create(container =>
   EPC payment QR, Code 128 and EAN-13 barcodes.
 - **Charts**: `Chart` draws column, bar, line and pie charts from your series as vector SVG, with a legend, data
   labels, your own colours and a .NET number format for the values; MigraDoc users will find the usual report charts here.
-- **Accessibility**: `SemanticSection`, `SemanticArticle`, `SemanticHeader1` to `6`, `SemanticList`,
-  `SemanticBlockQuotation`, `SemanticCaption`, `SemanticImage`, `SemanticIgnore` and the rest of QuestPDF's semantic
-  calls write the HTML elements PdfPecker tags a PDF/UA document from.
+- **Accessibility**: `SemanticSection`, `SemanticArticle`, `SemanticHeader1` to `6` (and `SemanticHeading1` to `6`),
+  `SemanticList`, `SemanticBlockQuotation`, `SemanticQuote`, `SemanticCode`, `SemanticCaption`, `SemanticImage`,
+  `SemanticLanguage`, `SemanticIgnore`, `SemanticHorizontalHeader` on a table cell (a row's header) and the rest of
+  QuestPDF's semantic calls write the HTML elements PdfPecker tags a PDF/UA document from.
 - **Everything else in PdfPecker** through the normal `PdfOptions`: PDF/A, PDF/UA, signatures, encryption,
   watermarks, e-invoices (ZUGFeRD, Factur-X, XRechnung), attachments, fonts, viewer settings and page labels (which
   number the pages across every `Page` call) and linearized output for Fast Web View, also for documents with several
@@ -130,7 +133,7 @@ Most QuestPDF code ports by changing the `using` lines: `Document.Create`, `Page
 - Transforms change how content is drawn, not the space it takes: `Scale(2)` draws twice as large from the top-left
   corner without making room. `RotateLeft` and `RotateRight` turn the layout itself (CSS `writing-mode`), so give
   longer rotated content a height.
-- `MultiColumn` balances the columns unless `BalanceHeight(false)`, and has no `Spacer`. `ClampLines` always ends with
+- `MultiColumn` balances the columns unless `BalanceHeight(false)`. `ClampLines` always ends with
   an ellipsis. `Lazy` builds its content straight away, since PdfPecker lays out the document in one pass.
 - `Decoration` is a table underneath, so PDF/UA tags it as one, and its before and after parts repeat only where the
   page breaks between items of a `Column` content, not inside one item taller than a page.
@@ -150,7 +153,12 @@ Most QuestPDF code ports by changing the `using` lines: `Document.Create`, `Page
 - `Document.Merge` composes the documents into one HTML document, so the result has one set of metadata and settings:
   those of `WithMetadata` and `WithSettings` on the merge, or the first document's. With original page numbers,
   `BeginPageNumberOfSection` and `EndPageNumberOfSection` still give pages of the whole PDF.
-- Not available: `Dynamic`, `Canvas` and the Companion previewer.
+- `SemanticDivision`, `SemanticSpan` and `SemanticTable` write nothing: PdfPecker tags content by what it is, a
+  `Table` is tagged as a table already, and plain groups stay out of the tag tree. `SemanticCode` and `SemanticQuote`
+  keep the surrounding font and add no quotation marks. `SemanticFormula`, `SemanticIndex`,
+  `SemanticTableOfContentsItem`, `SemanticListLabel` and `SemanticListItemBody` are not there yet; `List` tags its
+  labels and bodies itself.
+- Not available: `Dynamic`, `Canvas`, the Companion previewer and the `MultiColumn` `Spacer`.
 
 ## Performance
 

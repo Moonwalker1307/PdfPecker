@@ -88,7 +88,7 @@ internal sealed partial class PdfDocumentWriter
         // before a fixed box inside it.
         private (ClipOp? Clip, SortedDictionary<int, List<Placed>>? Parts, int First, int Last) _viewport;
         // The fixed boxes of the section being distributed, and how many ops each page held before each.
-        private List<(List<Placed> Items, int[] Before)>? _slots;
+        private List<(List<Placed> Items, int[] Before, float Order)>? _slots;
 
         public PageDistributor(int maxPages) => _maxPages = maxPages;
 
@@ -120,9 +120,9 @@ internal sealed partial class PdfDocumentWriter
             if (_slots != null)
                 for (int k = _slots.Count - 1; k >= 0; k--)
                 {
-                    var (items, before) = _slots[k];
+                    var (items, before, order) = _slots[k];
                     for (int p = 0; p < sectionPages; p++)
-                        Pages[firstPage + p].Insert(p < before.Length ? before[p] : 0, new Placed(new FixedBlock(items), 0, 0));
+                        Pages[firstPage + p].Insert(p < before.Length ? before[p] : 0, new Placed(new FixedBlock(items, order), 0, 0));
                 }
             return sectionPages;
         }
@@ -138,7 +138,7 @@ internal sealed partial class PdfDocumentWriter
             for (int p = 0; p < before.Length; p++) before[p] = Pages[_pageOffset + p].Count;
             var items = new List<Placed>();
             Flatten(box, items);
-            (_slots ??= new()).Add((items, before));
+            (_slots ??= new()).Add((items, before, marker.Order));
             Slotted.Add(box);
         }
 

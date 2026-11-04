@@ -133,6 +133,8 @@ internal sealed partial class StyleResolver
             // Angles are deprecated and ignored, as in Chrome, so only none turns EXIF orientation off.
             case "image-orientation": s.ImageOrientationNone = d.Lower == "none"; break;
             case "image-rendering": if (ParseImageRendering(d.Lower) is { } pixelated) s.ImagePixelated = pixelated; break;
+            case "-pdfpecker-image-quality": if (ParseImageQuality(d.Lower) is { } quality) s.ImageQuality = quality; break;
+            case "-pdfpecker-image-max-resolution": if (ParseImageMaxResolution(d.Lower) is { } dpi) s.ImageMaxDpi = dpi; break;
             case "accent-color":
                 if (d.Lower == "auto") s.AccentColor = 0;
                 else if (CssColor.TryParse(d.Value, s.Color, out var accent)) s.AccentColor = accent;
@@ -265,11 +267,33 @@ internal sealed partial class StyleResolver
             case "grid-row-end": s.GridRowEnd = ParseGridLine(d.Lower); break;
             case "column-count": ApplyColumnCount(s, in d); break;
             case "column-width": ApplyColumnWidth(s, in d); break;
-            case "column-rule-style": s.ColumnRuleStyle = ParseBorderStyle(d.Lower, s.ColumnRuleStyle); break;
-            case "column-rule-width": s.ColumnRuleWidth = BorderWidth(d.Lower, d.Em, s.ColumnRuleWidth); break;
-            case "column-rule-color": s.ColumnRuleColor = BorderColor(d.Value, s); break;
+            case "column-rule-style":
+            case "column-rule-width":
+            case "column-rule-color":
+                ApplyColumnRule(s, prop, in d);
+                break;
             case "column-span": s.ColumnSpanAll = d.Lower == "all"; break;
             case "column-fill": s.ColumnFillAuto = d.Lower == "auto"; break;
+
+            // ---- gap decorations (Properties.Gaps.cs)
+            case "row-rule-style":
+            case "row-rule-width":
+            case "row-rule-color":
+            case "column-rule-break":
+            case "row-rule-break":
+            case "column-rule-visibility-items":
+            case "row-rule-visibility-items":
+            case "rule-overlap":
+            case "column-rule-inset-cap-start":
+            case "column-rule-inset-cap-end":
+            case "column-rule-inset-junction-start":
+            case "column-rule-inset-junction-end":
+            case "row-rule-inset-cap-start":
+            case "row-rule-inset-cap-end":
+            case "row-rule-inset-junction-start":
+            case "row-rule-inset-junction-end":
+                ApplyGapRule(s, prop, in d);
+                break;
 
             // ---- colours, backgrounds, borders, outlines and shadows (Properties.Paint.cs)
             case "color": ApplyColor(s, parent, in d); break;

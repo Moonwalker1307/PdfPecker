@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/PdfPecker/PdfPecker.csproj" />
+    <ProjectReference Include="../../src/PdfPecker.Testing/PdfPecker.Testing.csproj" />
   </ItemGroup>
 
 </Project>

@@ -362,6 +362,9 @@ internal sealed partial class LayoutEngine
 
         float lineTop = y + crossBefore;
         float firstBaseline = float.NaN;
+        // The gap decorations paint below the items; each line notes its top, its bottom and its items' edges for them.
+        var rules = ReserveGapRules(s);
+        var ruleLines = rules != null ? new List<(float Top, float Bottom, float[] Edges)>(lines.Count) : null;
         // The lowest content of the items, which the container's bottom edge follows on pages: the last item laid out
         // is not always the one that ends lowest.
         float lowestContent = float.NaN;
@@ -422,9 +425,12 @@ internal sealed partial class LayoutEngine
 
                 float cx = x + before;
                 lineBottom = lineTop + cross;
+                var edges = ruleLines != null ? new float[2 * line.Count] : null;
+                int edge = 0;
                 float stretchedBottom = float.PositiveInfinity; // the bottom of the shortest stretched item
                 foreach (var it in line)
                 {
+                    if (edges != null) edges[edge++] = cx;
                     if (it.AutoMl) cx += autoShare;
                     var box = it.Box!;
                     float outerCross = box.Height;
@@ -449,11 +455,17 @@ internal sealed partial class LayoutEngine
                     if (it.El != null && SelfAlign(it, s.AlignItems) == BoxAlign.Stretch)
                         stretchedBottom = Math.Min(stretchedBottom, box.Source is { BorderH: null } ? bottom : float.NegativeInfinity);
                     if (float.IsNaN(firstBaseline) && !float.IsNaN(box.Baseline)) firstBaseline = lineTop + dy + box.Baseline;
-                    cx += it.Main + it.Ml + it.Mr + between + colGap;
+                    cx += it.Main + it.Ml + it.Mr;
                     if (it.AutoMr) cx += autoShare;
+                    if (edges != null) edges[edge++] = cx;
+                    cx += between + colGap;
                     _lastBoxRight = Math.Max(_lastBoxRight, cx);
                 }
-                if (regrown || lineBottom - lineTop <= cross + Eps || stretchedBottom >= lineBottom - Eps || !MayRepeatOnPages()) break;
+                if (regrown || lineBottom - lineTop <= cross + Eps || stretchedBottom >= lineBottom - Eps || !MayRepeatOnPages())
+                {
+                    ruleLines?.Add((lineTop, lineBottom, edges!));
+                    break;
+                }
                 Truncate(lineOps);
                 _marker = lineMarker;
                 _currentListIndex = lineListIndex;
@@ -464,6 +476,7 @@ internal sealed partial class LayoutEngine
             }
             lineTop = lineBottom + rowGap + crossBetween;
         }
+        if (rules != null) FlexRowGapRules(s, x, w, y, Math.Max(lineTop - rowGap - crossBetween, y + (definiteH ?? 0)), ruleLines!, reverse, rules);
         if (!float.IsNaN(firstBaseline)) _lastBaseline = firstBaseline;
         if (!float.IsNaN(lowestContent)) _lastContentBottom = lowestContent;
         return lineTop - rowGap - crossBetween;
@@ -592,13 +605,19 @@ internal sealed partial class LayoutEngine
         bool fromRight = (s.FlexWrap == FlexWrap.WrapReverse) != s.Rtl;
         float lx = before, bottom = y;
         float firstBaseline = float.NaN;
+        // The gap decorations paint below the items; each line notes where it is and its items' edges for them.
+        var rules = ReserveGapRules(s);
+        var ruleLines = rules != null ? new List<(float X, float W, List<float> Edges)>(lines.Count) : null;
         for (int li = 0; li < lines.Count; li++)
         {
             float left = fromRight ? x + w - lx - lineW[li] : x + lx;
-            bottom = Math.Max(bottom, LayoutFlexColumnLine(e, lines[li], left, y, lineW[li], definiteH, minH));
+            var edges = ruleLines != null ? new List<float>(2 * lines[li].Count) : null;
+            ruleLines?.Add((left, lineW[li], edges!));
+            bottom = Math.Max(bottom, LayoutFlexColumnLine(e, lines[li], left, y, lineW[li], definiteH, minH, edges));
             if (float.IsNaN(firstBaseline)) firstBaseline = _lastBaseline;
             lx += lineW[li] + colGap + between;
         }
+        if (rules != null) FlexColumnGapRules(s, ruleLines!, s.FlexDirection == FlexDirection.ColumnReverse, y, y + definiteH!.Value, rules, (x, y, x + w, y + definiteH!.Value));
         if (!float.IsNaN(firstBaseline)) _lastBaseline = firstBaseline;
         return bottom;
     }
@@ -645,8 +664,13 @@ internal sealed partial class LayoutEngine
         return lines.Count > 1 ? lines : null;
     }
 
-    /// <summary>Lays out one line of a column flex box, <paramref name="w"/> wide, from top to bottom.</summary>
-    private float LayoutFlexColumnLine(Element e, List<BoxItem> items, float x, float y, float w, float? definiteH, float minH)
+    /// <summary>
+    /// Lays out one line of a column flex box, <paramref name="w"/> wide, from top to bottom. A line of a wrapping box
+    /// notes the top and bottom of each item's margin box in <paramref name="itemEdges"/> for the box's gap decorations;
+    /// a box of one line paints its row rules itself.
+    /// </summary>
+    private float LayoutFlexColumnLine(Element e, List<BoxItem> items, float x, float y, float w, float? definiteH, float minH,
+        List<float>? itemEdges = null)
     {
         var s = e.Style;
         bool reverse = s.FlexDirection == FlexDirection.ColumnReverse;
@@ -782,9 +806,13 @@ internal sealed partial class LayoutEngine
 
         float cy = y + startOffset;
         float firstBaseline = float.NaN;
+        // The gap decorations paint below the items.
+        var rules = itemEdges == null ? ReserveGapRules(s) : null;
+        var edges = rules != null ? new List<float>(2 * items.Count) : itemEdges;
         for (int i = 0; i < items.Count; i++)
         {
             var it = items[i];
+            float itemTop = cy;
             cy += autoBefore[i];
             if (measured[i] is { } m && forcedH[i] == null && !it.Style.PageBreakBefore && !it.Style.PageBreakAfter && Reusable(m, cy))
             {
@@ -796,7 +824,11 @@ internal sealed partial class LayoutEngine
             else if (it.El != null)
             {
                 float top = cy + it.Mt;
-                if (it.Style.PageBreakBefore) top = NextPage(top);
+                if (it.Style.PageBreakBefore)
+                {
+                    top = NextPage(top);
+                    itemTop = top - it.Mt - autoBefore[i];
+                }
                 if (forcedH[i] is { } fh)
                 {
                     _heightOverride[it.El] = fh;
@@ -838,8 +870,14 @@ internal sealed partial class LayoutEngine
                 if (float.IsNaN(firstBaseline)) firstBaseline = _lastBaseline;
             }
             cy += autoAfter[i];
+            if (edges != null)
+            {
+                edges.Add(itemTop);
+                edges.Add(cy);
+            }
             if (i < items.Count - 1) cy += gap + between;
         }
+        if (rules != null) FlexColumnGapRules(s, [(x, w, edges!)], reverse, 0, 0, rules, (x, y, x + w, Math.Max(cy, y + (definiteH ?? 0))));
         if (!float.IsNaN(firstBaseline)) _lastBaseline = firstBaseline;
         return cy;
     }

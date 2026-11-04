@@ -585,7 +585,10 @@ internal sealed partial class LayoutEngine
             PositionGridRows(ref g, rowBefore, rowBetween);
         }
 
+        // The gap decorations paint below the items, in a slot taken before them.
+        var rules = ReserveGapRules(s);
         var rowShift = PlaceGridItemsInAreas(ref g);
+        if (rules != null) GridGapRules(ref g, rowShift, rules);
         NoteAbsoluteGridAreas(ref g, rowShift, g.ColCtx?.Count ?? Math.Max(colDefs.Count, s.GridTemplateAreas?.Columns ?? 0),
             g.RowCtx?.Count ?? Math.Max(rowDefs.Count, s.GridTemplateAreas?.Rows ?? 0));
         if (g.HasSubgrids)

@@ -15,6 +15,8 @@ dotnet build -c Release                                         # library, tests
 dotnet test -c Release --no-build                               # all tests on net8.0, net9.0 and net10.0
 dotnet test -f net10.0 --filter "FullyQualifiedName~MarkdownTests"   # one class, one runtime
 dotnet pack src/PdfPecker -c Release -o ./nupkg                 # the package, with API validation
+dotnet pack src/PdfPecker.Fluent -c Release -o ./nupkg          # PdfPecker.Fluent, with the same version
+dotnet pack src/PdfPecker.Testing -c Release -o ./nupkg         # PdfPecker.Testing, with the same version
 dotnet run --project samples/PdfPecker.Sample -c Release        # converts the sample HTML and Markdown into ./output
 dotnet publish samples/PdfPecker.Sample -c Release -p:PublishAot=true -o aot   # Native AOT, as CI checks it
 dotnet run --project samples/PdfPecker.Fluent.Sample -c Release -- output   # writes the fluent examples as PDF and HTML

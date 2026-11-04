@@ -70,6 +70,7 @@ byte[] safe = PdfSanitizer.RemoveActiveContent(File.ReadAllBytes("received.pdf")
 // Fast Web View: the first page shows while the rest of a large PDF is still downloading
 byte[] web = HtmlToPdf.Convert(html, new PdfOptions { Linearize = true });
 byte[] mergedForWeb = PdfLinearizer.Linearize(PdfMerger.Merge(invoicePdf, termsPdf));
+byte[] protectedForWeb = PdfLinearizer.Linearize(mergedForWeb, new PdfSecurity { UserPassword = "secret" }, password: null);
 
 // Title, author, PDF version, page sizes, encryption and PDF/A claim of any PDF
 var properties = PdfDocumentProperties.Read(File.ReadAllBytes("received.pdf"));
@@ -125,6 +126,30 @@ It writes compact HTML and CSS and renders it with PdfPecker, so every `PdfOptio
 signatures, e-invoices) works with it. What it covers and how it differs from QuestPDF is in its
 [README](https://github.com/Moonwalker1307/PdfPecker/blob/main/src/PdfPecker.Fluent/README.md).
 
+## Testing PDFs
+
+[PdfPecker.Testing](https://www.nuget.org/packages/PdfPecker.Testing) adds snapshot tests for the PDFs your code makes.
+`PdfAssert.MatchesSnapshot` compares a PDF with a stored one, leaving out dates, file IDs and stream compression, and
+when they differ it writes the new PDF and page images with the changed pixels marked. It works with any test
+framework, because a failed check throws. It is released with every PdfPecker release under the same version, and its
+only dependency is PdfPecker.
+
+```
+dotnet add package PdfPecker.Testing
+```
+
+```csharp
+using PdfPecker.Testing;
+
+byte[] pdf = HtmlToPdf.Convert(invoiceHtml);
+PdfAssert.MatchesSnapshot(pdf, "invoice");   // Snapshots/invoice.pdf next to the test file
+PdfAssert.ContainsText(pdf, "Total due: 1,500.00");
+PdfAssert.HasPageCount(pdf, 1);
+```
+
+How snapshots are created and accepted, and the appearance comparison for PDFs from other producers, are in its
+[README](https://github.com/Moonwalker1307/PdfPecker/blob/main/src/PdfPecker.Testing/README.md).
+
 ## Razor components
 
 [PdfPecker.Razor](https://www.nuget.org/packages/PdfPecker.Razor) turns Razor components (`.razor` files) into PDFs,
@@ -145,7 +170,8 @@ byte[] pdf = await RazorToPdf.ConvertAsync<Invoice>(new Dictionary<string, objec
 ```
 
 Razor encodes caller data, every `PdfOptions` setting works, and the package is trimmable and runs with Native AOT
-(Microsoft's components assembly reports trim warnings of its own, which its README explains). How to set up the Razor project, inject services and stream to an ASP.NET Core response is in its
+(Microsoft's components assembly reports trim warnings of its own, which its README explains). How to set up the
+Razor project, inject services and stream to an ASP.NET Core response is in its
 [README](https://github.com/Moonwalker1307/PdfPecker/blob/main/src/PdfPecker.Razor/README.md).
 
 ## Features
@@ -154,7 +180,9 @@ Razor encodes caller data, every `PdfOptions` setting works, and the package is 
   `rect()` and `xywh()`), sizes that fill the containing block (`width: stretch` and `-webkit-fill-available`, also for
   heights and their limits), `corner-shape` (squircle, bevel, scoop, notch and `superellipse()` corners on borders,
   backgrounds, shadows, outlines and clips), `overflow: clip` with `overflow-clip-margin`, `zoom` (as Chrome
-  computes it, for templates that shrink a page to fit), multi-column layout,
+  computes it, for templates that shrink a page to fit), multi-column layout, gap decorations (`column-rule` and
+  `row-rule` in grid and flex containers too, with lists and `repeat()`, `rule-break`, `rule-inset`,
+  `rule-visibility-items` and `rule-overlap`, cut where a grid or flex container breaks across pages),
   positioning (also the legacy `clip: rect()`, and absolute boxes inside a positioned inline element, such as
   tooltips and badges), transforms, gradients (also `in oklch` and other colour spaces, and as
   list markers), fixed background images (placed on each page's paper, as Chrome prints them), filters, masks,
@@ -181,7 +209,7 @@ Razor encodes caller data, every `PdfOptions` setting works, and the package is 
   `topmargin`, `leftmargin`, `marginheight` and `marginwidth` set the page margins as they do in Chrome.
   [More](https://pdfpecker.net/docs/html-and-css/)
 - **Paged media**: `@page` sizes (also a page as tall as its content, `size: 80mm auto`, for receipts on a roll), borders, padding and background images (which cover the whole sheet) and margin boxes (also with running elements, `position: running()` and `element()`, as in Prince and WeasyPrint), running headers and footers (also a first page of its own, even pages of their own for printing on both sides, and bands
-  of their own for named pages), footnotes, tables of contents with page numbers, the page count anywhere in the content (`counter(pages)`, as in Prince), the first and last page of a section and page numbers counted within it (`-pdfpecker-target-pages()`, and `{section-page:id}` in running headers and footers), break control (also table row groups
+  of their own for named pages), `position: fixed` boxes repeated on every page of their named page, also in the page margins with negative offsets, and over the running headers and footers unless their z-index is negative (for watermarks and page frames), footnotes, tables of contents with page numbers, the page count anywhere in the content (`counter(pages)`, as in Prince), the first and last page of a section and page numbers counted within it (`-pdfpecker-target-pages()`, and `{section-page:id}` in running headers and footers), break control (also table row groups
   and group header rows kept together, as reports keep a group on one page, and forced breaks between table rows and between flex lines), table rows that break inside at a page's end as in Chrome, unless a cell would have nothing before the break, flex rows whose items break at a page's end as in Chrome (the row moves whole when an item is kept whole), table
   headers and footers repeated on every page (also around a row split across pages), boxes split across pages or
   columns that repeat their border, padding, rounded corners, shadow and background on each page with
@@ -195,6 +223,10 @@ Razor encodes caller data, every `PdfOptions` setting works, and the package is 
   Lines, images and table rows that would cross the end are left out whole.
 - **Content repeated on each page**: `-pdfpecker-repeat: each-page` draws a box again at the top of each later page its
   parent continues on, such as a label in a row beside a text several pages long.
+- **Smaller images while converting**: `-pdfpecker-image-quality: 75` writes images as JPEGs at that quality, and
+  `-pdfpecker-image-max-resolution: 150dpi` downsamples images drawn denser than that, judged by the size each is
+  drawn at. Both are inherited, so `body { ... }` sets them for the document and `none` turns them off for one image;
+  transparency is kept losslessly, and an image is only replaced when the result is smaller.
 - **Markdown**: CommonMark 0.31 and GitHub Flavored Markdown to PDF or HTML, with footnotes, definition lists and YAML
   front matter. [More](https://pdfpecker.net/docs/markdown/)
 - **Fonts**: TrueType, OpenType, WOFF and WOFF2, subset and embedded, with kerning, ligatures, variable fonts and
@@ -222,7 +254,8 @@ Razor encodes caller data, every `PdfOptions` setting works, and the package is 
 - **Existing PDFs**: merge (also streamed), split, reorder, rotate, stamp, extract text with positions, extract images
   and read document properties. [More](https://pdfpecker.net/docs/merging/)
 - **Compacting and Fast Web View**: `PdfCompactor` makes any PDF smaller without changing how it looks, and
-  `PdfOptions.Linearize` or `PdfLinearizer` writes a linearized PDF whose first page shows before the rest arrives.
+  `PdfOptions.Linearize` or `PdfLinearizer` writes a linearized PDF whose first page shows before the rest arrives,
+  also encrypted: `PdfLinearizer` opens a protected PDF with its password and encrypts the result in the same pass.
   [More](https://pdfpecker.net/docs/compacting/)
 - **Removing active content**: `PdfSanitizer` takes JavaScript, actions that launch programs, open other files or
   submit form data, XFA and media annotations out of PDFs from others, and `HasActiveContent` tells whether a PDF has
@@ -294,6 +327,7 @@ dotnet run --project bench/PdfPecker.Benchmarks -c Release -- --requirements    
 bench/compare-versions.sh v1.22.0                              # this checkout against a release, in turns on this machine
 dotnet pack src/PdfPecker -c Release -o ./nupkg                # also checks the public API against the last release
 dotnet pack src/PdfPecker.Fluent -c Release -o ./nupkg         # the fluent package, with the same version
+dotnet pack src/PdfPecker.Testing -c Release -o ./nupkg        # the snapshot testing package, with the same version
 dotnet pack src/PdfPecker.Razor -c Release -o ./nupkg          # the Razor package, with the same version
 ```
 

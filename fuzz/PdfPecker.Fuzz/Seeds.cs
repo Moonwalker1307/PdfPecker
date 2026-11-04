@@ -184,6 +184,11 @@ internal sealed class SeedContext
             + "<p style='float:left;width:30%'>float</p><p style='position:absolute;top:10px;left:5px'>abs</p><h2 style='page-break-before:always'>next</h2>"
             + "<style>.il::first-letter{initial-letter:3}</style><p class=il>Drop cap " + string.Concat(Enumerable.Repeat("word ", 40)) + "</p>"
             + "<picture><source media='print' srcset='a.png 1x, b.png 2x'><img src='c.png' srcset='d.png 40w, e.png 80w' sizes='(max-width: 300px) 50vw, 100px' alt=pic></picture>"));
+        yield return ("builtin:image-quality.html", Encoding.UTF8.GetBytes(
+            "<div style='-pdfpecker-image-quality:40;-pdfpecker-image-max-resolution:20dpi'>"
+            + "<img src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAp0lEQVR4nA3KQYEFMQgFQRx8BzgYBziYS87PQRzgIA5wMA5wsA4w1Js6l5kZbj/CHNlDWlD20qY1tpeZ/3B3wh/kQfpLuWjfazxvCMfjISJQvGSIik1Hrolzgx5cQehFEqlNKWmdNaobMvB8iRTKTWZSeeisNfndUC9eImqjSrIOVUXXt6b6hhbem+hEfcguqj+6e03/3TAbnyTmoClyPmqanr81M+sfrNWDkXSeqv4AAAAASUVORK5CYII=' style='width:3px;height:40px'>"
+            + "<span style='display:inline-block;width:5px;height:5px;background:url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAp0lEQVR4nA3KQYEFMQgFQRx8BzgYBziYS87PQRzgIA5wMA5wsA4w1Js6l5kZbj/CHNlDWlD20qY1tpeZ/3B3wh/kQfpLuWjfazxvCMfjISJQvGSIik1Hrolzgx5cQehFEqlNKWmdNaobMvB8iRTKTWZSeeisNfndUC9eImqjSrIOVUXXt6b6hhbem+hEfcguqj+6e03/3TAbnyTmoClyPmqanr81M+sfrNWDkXSeqv4AAAAASUVORK5CYII=) 0 0/2px 7px'></span>"
+            + "<img src='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAp0lEQVR4nA3KQYEFMQgFQRx8BzgYBziYS87PQRzgIA5wMA5wsA4w1Js6l5kZbj/CHNlDWlD20qY1tpeZ/3B3wh/kQfpLuWjfazxvCMfjISJQvGSIik1Hrolzgx5cQehFEqlNKWmdNaobMvB8iRTKTWZSeeisNfndUC9eImqjSrIOVUXXt6b6hhbem+hEfcguqj+6e03/3TAbnyTmoClyPmqanr81M+sfrNWDkXSeqv4AAAAASUVORK5CYII=' style='width:2px;object-fit:cover;-pdfpecker-image-quality:none;image-rendering:pixelated'></div>"));
     }
 
     public IEnumerable<(string Name, byte[] Data)> CssFiles()

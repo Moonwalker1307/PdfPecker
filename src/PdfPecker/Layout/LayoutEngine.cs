@@ -2145,7 +2145,7 @@ internal sealed partial class LayoutEngine
     {
         if (s.ObjectFit == ObjectFit.Fill || image.Width <= 0 || image.Height <= 0 || w <= 0 || h <= 0)
         {
-            if (s.ImagePixelated) image = image.Pixelated(w, h);
+            image = DrawnImages.For(s, image, w, h);
             _ops.Add(new ImageOp(x, y, w, h, image) { Radii = radii, Tag = tag });
             return;
         }
@@ -2160,7 +2160,7 @@ internal sealed partial class LayoutEngine
         };
         float dw = nw * k, dh = nh * k;
         float dx = x + s.ObjectPositionX.Resolve(w - dw), dy = y + s.ObjectPositionY.Resolve(h - dh);
-        var op = new ImageOp(dx, dy, dw, dh, s.ImagePixelated ? image.Pixelated(dw, dh) : image) { Tag = tag };
+        var op = new ImageOp(dx, dy, dw, dh, DrawnImages.For(s, image, dw, dh)) { Tag = tag };
         if (radii == null && dx >= x - Eps && dy >= y - Eps && dx + dw <= x + w + Eps && dy + dh <= y + h + Eps)
         {
             _ops.Add(op);
