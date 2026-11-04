@@ -38,14 +38,14 @@ internal static class CssSupports
         "fill", "stroke", "stroke-width", "fill-opacity", "stroke-opacity", "fill-rule", "stroke-linecap", "stroke-linejoin",
         "stroke-miterlimit", "clip-path", "clip", "clip-rule", "mask", "mask-type", "filter", "marker", "marker-start", "marker-mid",
         "marker-end", "flood-color", "flood-opacity", "lighting-color", "color-interpolation-filters", "text-anchor", "dominant-baseline",
-        "stroke-dasharray", "stroke-dashoffset",
+        "stroke-dasharray", "stroke-dashoffset", "cx", "cy", "r", "rx", "ry", "x", "y", "d", "stop-color", "stop-opacity",
         "alignment-baseline", "border", "border-top", "border-right", "border-bottom", "border-left", "border-width",
         "border-style", "border-color", "border-radius", "border-top-width", "border-right-width", "border-bottom-width",
         "border-left-width", "border-top-style", "border-right-style", "border-bottom-style", "border-left-style",
         "border-top-color", "border-right-color", "border-bottom-color", "border-left-color", "border-top-left-radius",
         "border-top-right-radius", "border-bottom-right-radius", "border-bottom-left-radius", "border-image",
         "border-image-source", "border-image-slice", "border-image-width", "border-image-outset", "border-image-repeat", "tab-size",
-        "line-clamp", "-webkit-line-clamp", "block-ellipsis", "hyphens", "hyphenate-character", "hyphenate-limit-chars", "quotes", "size", "string-set", "bookmark-level", "bookmark-label", "bookmark-state", "page", "direction", "unicode-bidi", "margin-inline",
+        "line-clamp", "-webkit-line-clamp", "block-ellipsis", "hyphens", "hyphenate-character", "hyphenate-limit-chars", "hyphenate-limit-lines", "-webkit-hyphenate-limit-lines", "quotes", "size", "string-set", "bookmark-level", "bookmark-label", "bookmark-state", "page", "direction", "unicode-bidi", "margin-inline",
         "margin-inline-start", "margin-inline-end", "padding-inline", "padding-inline-start", "padding-inline-end", "margin-block",
         "margin-block-start", "margin-block-end", "padding-block", "padding-block-start", "padding-block-end",
         "inset-inline", "inset-inline-start", "inset-inline-end", "inset-block", "inset-block-start", "inset-block-end",
@@ -203,6 +203,9 @@ internal static class CssSupports
                 return CssParser.ParseTextBoxEdge(lower) != null;
             case "hyphenate-limit-chars":
                 return StyleResolver.ParseHyphenateLimitChars(lower) != null;
+            case "hyphenate-limit-lines":
+            case "-webkit-hyphenate-limit-lines":
+                return StyleResolver.ParseHyphenateLimitLines(lower) != null;
         }
         // Other values: functions this library does not know make the value unsupported.
         foreach (var fn in new[] { "attr(", "anchor(", "env(", "element(", "paint(", "cross-fade(" })
