@@ -380,11 +380,19 @@ internal sealed partial class LayoutEngine
         if (s.HasEffects || s.Clipped) ApplyEffects(e, layer, cbW);
         if (s.Transform is { } fns)
         {
-            float w = _lastBoxW, h = _lastBoxH;
+            float w = _lastBoxW, h = _lastBoxH, bx = 0, by = 0;
+            if (s.TransformBox is TransformBox.ContentBox or TransformBox.FillBox)
+            {
+                // The content box is the reference box of the origin and of the percentages; the others are the border box.
+                float l = s.BorderLeft + s.PaddingLeft.Resolve(cbW), t = s.BorderTop + s.PaddingTop.Resolve(cbW);
+                w = Math.Max(0, w - l - s.BorderRight - s.PaddingRight.Resolve(cbW));
+                h = Math.Max(0, h - t - s.BorderBottom - s.PaddingBottom.Resolve(cbW));
+                (bx, by) = (l, t);
+            }
             float ox = s.TransformOriginX.Resolve(w), oy = s.TransformOriginY.Resolve(h);
             layer.Transform = CssTransform.ToMatrix(fns, w, h, ox, oy, null) ?? Matrix.Scale(0, 0);
-            layer.OriginX = _lastBoxX + ox;
-            layer.OriginY = _lastBoxTop + oy;
+            layer.OriginX = _lastBoxX + bx + ox;
+            layer.OriginY = _lastBoxTop + by + oy;
             if (CssTransform.Has3D(fns)) layer.Transform3D = new Transform3D(e, fns, w, h, ox, oy);
         }
         if (s.Perspective is { } distance)
