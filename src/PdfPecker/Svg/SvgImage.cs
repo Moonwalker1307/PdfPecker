@@ -157,6 +157,8 @@ internal sealed partial class SvgImage
     // A user unit of the outermost viewport is a CSS pixel, which is 0.75 points: the length a non-scaling stroke keeps
     // however the user space is scaled (see SvgShape.NonScalingStroke).
     private const float NonScalingScale = 0.75f;
+    private Element? _root; // the svg element being built, whose viewport ViewportWidth and ViewportHeight are
+    private Dictionary<Element, (float MinX, float MinY, float MaxX, float MaxY)>? _localBounds; // bounds in each element's own space, for transform-box
     private (float Width, float Height)? _useSize; // the width and height of a use element drawing a nested svg
     private ComputedStyle? _useParent; // inside what a use element draws: the style the next element inherits from
     private int _wrapDepth; // groups, clips, masks and filters around the element being drawn
@@ -212,6 +214,7 @@ internal sealed partial class SvgImage
             if (parts.Length > 0) img.Align = parts[0];
             if (parts.Length > 1) img.Slice = parts[1] == "slice";
         }
+        img._root = svg;
         img.CollectIds(svg);
         var top = svg;
         while (top.Parent is { } parent) top = parent;
@@ -379,7 +382,7 @@ internal sealed partial class SvgImage
         if (s == null || s.Display == Display.None) return;
         var useParent = _useParent;
         if (useParent != null) s = InUse(s, useParent);
-        if (OwnTransform(e, s) is { } own) ctm = own.Then(ctm);
+        if (OwnTransform(e, s, depth) is { } own) ctm = own.Then(ctm);
         // A translucent container is composited as one group, so its children do not show through each other.
         bool group = s.Opacity < 1 && e.Name is "g" or "a" or "switch" or "use" or "svg";
         float op = group ? opacity : opacity * s.Opacity;
@@ -612,7 +615,7 @@ internal sealed partial class SvgImage
     {
         if (--_budget.Remaining < 0 || depth > 32 || e.Style is not { } s || s.Display == Display.None) return;
         // The element's own transform is left out when its bounds are wanted in its own user space, as a transform-box does.
-        if (!local && OwnTransform(e, s) is { } own) m = own.Then(m);
+        if (!local && OwnTransform(e, s, depth) is { } own) m = own.Then(m);
         switch (e.Name)
         {
             case "g":
@@ -662,17 +665,26 @@ internal sealed partial class SvgImage
     /// viewport (0 0) unless transform-origin is declared, and for fill-box and stroke-box that origin is the corner of
     /// the element's bounds. The transform attribute takes the origin too, as in browsers. Null when there is none.
     /// </summary>
-    private Matrix? OwnTransform(Element e, ComputedStyle s)
+    private Matrix? OwnTransform(Element e, ComputedStyle s, int depth)
     {
         var fns = s.Transform;
         var attribute = e.GetAttribute("transform");
         if (fns == null && attribute == null) return null;
         if (fns == null && !s.TransformOriginSet && s.TransformBox == TransformBox.ViewBox) return ParseTransform(attribute!);
-        float bx = 0, by = 0, bw = ViewportWidth, bh = ViewportHeight;
+        var (bw, bh) = ViewportOf(e);
+        float bx = 0, by = 0;
         if (s.TransformBox is not TransformBox.ViewBox)
         {
-            float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
-            ContentBounds(e, Matrix.Identity, ref minX, ref minY, ref maxX, ref maxY, 0, null, local: true);
+            // The bounds of an element are worked out once: a descendant with a transform-box asks for its own, so
+            // without the cache every level of nesting would repeat the work of the levels below it.
+            _localBounds ??= new Dictionary<Element, (float, float, float, float)>();
+            if (!_localBounds.TryGetValue(e, out var bounds))
+            {
+                float lx = float.MaxValue, ly = float.MaxValue, hx = float.MinValue, hy = float.MinValue;
+                ContentBounds(e, Matrix.Identity, ref lx, ref ly, ref hx, ref hy, depth, null, local: true);
+                _localBounds[e] = bounds = (lx, ly, hx, hy);
+            }
+            var (minX, minY, maxX, maxY) = bounds;
             bx = by = bw = bh = 0;
             if (maxX >= minX && maxY >= minY)
             {
@@ -699,6 +711,21 @@ internal sealed partial class SvgImage
         ox += bx;
         oy += by;
         return ox == 0 && oy == 0 ? m : Matrix.Translate(-ox, -oy).Then(m).Then(Matrix.Translate(ox, oy));
+    }
+
+    /// <summary>The size of the viewport an element is in, in its user units: the nearest svg element's viewBox or size.</summary>
+    private (float Width, float Height) ViewportOf(Element e)
+    {
+        for (var parent = e.Parent; parent != null && !ReferenceEquals(parent, _root); parent = parent.Parent)
+        {
+            if (parent.Name != "svg") continue;
+            var vb = ParseNumbers(parent.GetAttribute("viewbox"));
+            if (vb.Count == 4 && vb[2] > 0 && vb[3] > 0) return (vb[2], vb[3]);
+            float w = Num(parent, "width", float.NaN), h = Num(parent, "height", float.NaN);
+            if (!float.IsNaN(w) && !float.IsNaN(h)) return (w, h);
+            break;
+        }
+        return (ViewportWidth, ViewportHeight);
     }
 
     /// <summary>A transform-origin coordinate in user units: a percentage of the reference box size, or a length.</summary>

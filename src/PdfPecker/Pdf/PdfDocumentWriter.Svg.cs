@@ -266,7 +266,11 @@ internal sealed partial class PdfDocumentWriter
         // A pattern cell starts from the default graphics state and uses the shared resources.
         (_fill, _stroke, _lineWidth, _fillAlpha, _strokeAlpha) = (CssColor.Black, CssColor.Black, 1, 255, 255);
         var streamSpace = StartStreamSpace();
+        var tile = pattern.ToRoot.Then(toPage).ScaleFactor;
+        float nonScaling = _nonScalingLength;
+        if (tile > 1e-6f) _nonScalingLength = nonScaling / tile;
         WriteSvgShapes(cell, pattern.Shapes, Matrix.Identity);
+        _nonScalingLength = nonScaling;
         _streamSpace = streamSpace;
         RestoreState(saved);
         var m = InStream(pattern.ToRoot.Then(toPage));
@@ -367,6 +371,10 @@ internal sealed partial class PdfDocumentWriter
     // of nested filters doubled the resolution of the one around it, up to the pixel cap at each level.
     private float _svgFilterDensity = FilterPixelsPerPoint;
 
+    // What the lengths of a non-scaling stroke (points of the page) are multiplied by in the space being drawn in: pixels
+    // per point in a filter's rasterisation, and the inverse of the tile's scale inside a pattern.
+    private float _nonScalingLength = 1;
+
     // The work the document's filters have spent, shared through the context with the writers that render filtered
     // content for this one.
     private SvgFilterBudget FilterBudget => _context.SvgFilters;
@@ -452,7 +460,7 @@ internal sealed partial class PdfDocumentWriter
         byte[] pdf;
         try
         {
-            var writer = new PdfDocumentWriter(page, compress: false, CompressionLevel.NoCompression, _context) { _svgFilterDensity = 1 };
+            var writer = new PdfDocumentWriter(page, compress: false, CompressionLevel.NoCompression, _context) { _svgFilterDensity = 1, _nonScalingLength = _nonScalingLength * _svgFilterDensity };
             pdf = writer.Write(new List<DrawOp> { new SvgOp(0, 0, pixelsW, pixelsH, drawing) }, pixelsH,
                 new Dictionary<string, float>(), 0, null, null, null, null, null);
         }
@@ -623,6 +631,7 @@ internal sealed partial class PdfDocumentWriter
     private void WriteSvgLineStyle(ByteBuffer b, SvgShape shape, float scale = 1)
     {
         _lineWidth = -1;
+        if (shape.NonScalingStroke) scale *= _nonScalingLength;
         b.Num(shape.StrokeWidth * scale).Ascii(" w ").Int((int)shape.LineCap).Ascii(" J ").Int((int)shape.LineJoin).Ascii(" j ")
             .Num(shape.MiterLimit).Ascii(" M\n");
         if (shape.Dash is not { } dash) return;

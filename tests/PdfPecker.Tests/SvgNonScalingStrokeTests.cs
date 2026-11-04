@@ -103,4 +103,26 @@ public class SvgNonScalingStrokeTests
         Assert.True(Red(pdf, 20, 37.5f + 1.2f) && Red(pdf, 20, 37.5f - 1.2f), "the horizontal line is 3 pt high");
         Assert.False(Red(pdf, 20, 37.5f + 2f) || Red(pdf, 20, 37.5f - 2f));
     }
+
+    [Fact]
+    public void A_filtered_stroke_keeps_its_width()
+    {
+        // 30 x 10 units in 300 x 100 px: a unit is 7.5 pt, and the stroke 3 pt, as without the filter.
+        var pdf = HtmlToPdf.Convert("<body style='margin:0'><svg width='300' height='100' viewBox='0 0 30 10' style='display:block'>"
+            + "<filter id='f' filterUnits='userSpaceOnUse' x='0' y='0' width='30' height='10'><feOffset dx='0' dy='0'/></filter>"
+            + "<path d='M2 5H28' stroke='red' stroke-width='4' vector-effect='non-scaling-stroke' filter='url(#f)'/></svg></body>", NoMargins);
+        Assert.True(Red(pdf, 100, 37.5f + 0.6f) && Red(pdf, 100, 37.5f - 0.6f), "about 3 pt wide, not 0.75 pt");
+        Assert.False(Red(pdf, 100, 37.5f + 2.4f) || Red(pdf, 100, 37.5f - 2.4f));
+    }
+
+    [Fact]
+    public void A_stroke_in_a_pattern_tile_keeps_its_width()
+    {
+        // 2 px is 1.5 pt, not the 2 units of 7.5 pt (15 pt) the pattern and the viewBox would make it.
+        var pdf = HtmlToPdf.Convert("<body style='margin:0'><svg width='300' height='100' viewBox='0 0 30 10' style='display:block'>"
+            + "<pattern id='p' width='10' height='10' patternUnits='userSpaceOnUse'><path d='M0 5H10' stroke='red' stroke-width='2' vector-effect='non-scaling-stroke'/></pattern>"
+            + "<rect width='30' height='10' fill='url(#p)'/></svg></body>", NoMargins);
+        Assert.True(Red(pdf, 100, 37.5f + 0.5f) && Red(pdf, 100, 37.5f - 0.5f));
+        Assert.False(Red(pdf, 100, 37.5f + 1.5f) || Red(pdf, 100, 37.5f - 1.5f));
+    }
 }
