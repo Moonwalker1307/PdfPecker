@@ -126,7 +126,9 @@ Document.Create(container => container.Page(page =>
 ```
 
 It writes compact HTML and CSS and renders it with PdfPecker, so every `PdfOptions` feature (PDF/A, PDF/UA,
-signatures, e-invoices) works with it. What it covers and how it differs from QuestPDF is in its
+signatures, e-invoices) works with it. Its `DocumentOperation` takes QuestPDF's calls for existing PDFs (choosing and
+merging pages, overlays and underlays, attachments, encryption, linearization) and runs them on PdfPecker's merger,
+stamper and protector. What it covers and how it differs from QuestPDF is in its
 [README](https://github.com/Moonwalker1307/PdfPecker/blob/main/src/PdfPecker.Fluent/README.md).
 
 ## Command line
