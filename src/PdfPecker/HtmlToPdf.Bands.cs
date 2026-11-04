@@ -56,11 +56,11 @@ public static partial class HtmlToPdf
     }
 
     /// <summary>The laid-out height of a band, measured with two-digit page numbers in place of the placeholders.</summary>
-    private static float BandHeight(Element band, PageSetup page, ImageLoader images, ConversionContext context)
+    private static float BandHeight(Element band, PageSetup page, ImageLoader images, ConversionContext context, CounterStyles styles)
     {
         var texts = new List<(TextNode Node, string Original)>();
         CollectPlaceholders(band, texts);
-        foreach (var (node, original) in texts) node.Text = ReplacePlaceholders(original, "99", "99", null, 99);
+        foreach (var (node, original) in texts) node.Text = ReplacePlaceholders(original, 99, 99, null, styles);
         try
         {
             return Math.Max(0, new LayoutEngine(page.ContentHeight, images) { Context = context }.LayoutBand(band, page.ContentWidth));
@@ -76,35 +76,74 @@ public static partial class HtmlToPdf
     /// <summary>
     /// The text with its placeholders replaced: {page}, {pages} and {total-pages}, and {section-page:id} with the page's
     /// number counted from the page the element with that (percent-encoded) id starts on, which
-    /// <paramref name="firstPageOf"/> gives; 0 for an id it does not know.
+    /// <paramref name="firstPageOf"/> gives; 0 for an id it does not know. Each can name a counter style after a colon,
+    /// such as {page:upper-roman} or {section-page:id:lower-alpha}, from the predefined styles or the document's
+    /// @counter-style rules; an unknown style is decimal, as in CSS. Without <paramref name="firstPageOf"/>, every number
+    /// is 99, to measure the band.
     /// </summary>
-    private static string ReplacePlaceholders(string text, string page, string pages, Func<string, int?>? firstPageOf, int pageNumber)
+    private static string ReplacePlaceholders(string text, int page, int pages, Func<string, int?>? firstPageOf, CounterStyles styles)
     {
-        text = text.Replace("{page}", page).Replace("{total-pages}", pages).Replace("{pages}", pages);
-        int at = text.IndexOf(SectionPagePlaceholder, StringComparison.Ordinal);
-        if (at < 0) return text;
+        int open = text.IndexOf('{');
+        if (open < 0) return text;
         var sb = new System.Text.StringBuilder(text.Length);
         int from = 0;
-        while (at >= 0)
+        while (open >= 0)
         {
-            int close = text.IndexOf('}', at + SectionPagePlaceholder.Length);
+            int close = text.IndexOf('}', open + 1);
             if (close < 0) break;
-            sb.Append(text, from, at - from);
-            string encoded = text.Substring(at + SectionPagePlaceholder.Length, close - at - SectionPagePlaceholder.Length);
-            if (firstPageOf == null) sb.Append("99");
-            else
+            // A placeholder has no brace inside, so only the last opening brace before the closing one can start one,
+            // which keeps text full of braces linear.
+            open = text.LastIndexOf('{', close - 1, close - open);
+            if (Placeholder(text.Substring(open + 1, close - open - 1), page, pages, firstPageOf, styles) is { } value)
             {
-                string id;
-                try { id = Uri.UnescapeDataString(encoded); }
-                catch (UriFormatException) { id = encoded; }
-                int number = firstPageOf(id) is int first ? pageNumber - first + 1 : 0;
-                sb.Append(number.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                sb.Append(text, from, open - from).Append(value);
+                from = close + 1;
             }
-            from = close + 1;
-            at = text.IndexOf(SectionPagePlaceholder, from, StringComparison.Ordinal);
+            open = text.IndexOf('{', close + 1);
         }
         sb.Append(text, from, text.Length - from);
         return sb.ToString();
+    }
+
+    /// <summary>The text of one placeholder, the part between the braces; null when it is none.</summary>
+    private static string? Placeholder(string token, int page, int pages, Func<string, int?>? firstPageOf, CounterStyles styles)
+    {
+        int colon = token.IndexOf(':');
+        string name = colon < 0 ? token : token[..colon];
+        string? argument = colon < 0 ? null : token[(colon + 1)..];
+        int number;
+        string? style = argument;
+        switch (name)
+        {
+            case "page":
+                number = page;
+                break;
+            case "pages" or "total-pages":
+                number = pages;
+                break;
+            case "section-page" when argument != null:
+            {
+                // The id is percent-encoded, so a colon in it is the start of the style.
+                int styleColon = argument.IndexOf(':');
+                string encoded = styleColon < 0 ? argument : argument[..styleColon];
+                style = styleColon < 0 ? null : argument[(styleColon + 1)..];
+                if (firstPageOf == null) number = page;
+                else
+                {
+                    string id;
+                    try { id = Uri.UnescapeDataString(encoded); }
+                    catch (UriFormatException) { id = encoded; }
+                    number = firstPageOf(id) is int first ? page - first + 1 : 0;
+                }
+                break;
+            }
+            default:
+                return null;
+        }
+        if (style == null) return number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        // A style is a counter style's name; anything else, such as a symbols() function, leaves the text as it is.
+        if (!CounterStyles.IsIdent(style) || !styles.TryGet(style, out var counterStyle)) return null;
+        return counterStyle.Represent(number);
     }
 
     /// <summary>
@@ -113,16 +152,14 @@ public static partial class HtmlToPdf
     /// boxes are. A band with them is laid out for every page, within a budget for the whole document.
     /// </summary>
     private static List<DrawOp> LayoutBandForPage(Element band, PageSetup page, ImageLoader images, int pageIndex, int pageCount, bool alignBottom,
-        Dictionary<(Element, PageSetup), List<DrawOp>> unnumbered, Func<string, int?> firstPageOf, ConversionContext context)
+        Dictionary<(Element, PageSetup), List<DrawOp>> unnumbered, Func<string, int?> firstPageOf, ConversionContext context, CounterStyles styles)
     {
         if (unnumbered.TryGetValue((band, page), out var same)) return same;
         var texts = new List<(TextNode Node, string Original)>();
         CollectPlaceholders(band, texts);
         if (texts.Count > 0) context.NumberedBands.CheckBefore(band, pageCount);
-        string number = (pageIndex + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
-        string total = pageCount.ToString(System.Globalization.CultureInfo.InvariantCulture);
         foreach (var (node, original) in texts)
-            node.Text = ReplacePlaceholders(original, number, total, firstPageOf, pageIndex + 1);
+            node.Text = ReplacePlaceholders(original, pageIndex + 1, pageCount, firstPageOf, styles);
         try
         {
             var engine = new LayoutEngine(page.ContentHeight, images) { Context = context };
@@ -215,7 +252,7 @@ public static partial class HtmlToPdf
     }
 
     /// <summary>
-    /// The text nodes of a band that hold {page}, {pages} or {total-pages}. Text with other braces, such as the fluent
+    /// The text nodes of a band that may hold {page}, {pages} or {total-pages}, with or without a counter style. Text with other braces, such as the fluent
     /// package's caller text, which it writes as "{&lt;span&gt;&lt;/span&gt;page}" so that it stays as written, is the
     /// same on every page and must not make the band be laid out again for each.
     /// </summary>
@@ -230,6 +267,6 @@ public static partial class HtmlToPdf
 
     /// <summary>Whether the text holds a placeholder that <see cref="ReplacePlaceholders"/> replaces.</summary>
     private static bool HasPlaceholder(string text)
-        => text.Contains("{page}", StringComparison.Ordinal) || text.Contains("{pages}", StringComparison.Ordinal)
-           || text.Contains("{total-pages}", StringComparison.Ordinal) || text.Contains(SectionPagePlaceholder, StringComparison.Ordinal);
+        => text.Contains("{page", StringComparison.Ordinal) || text.Contains("{total-pages", StringComparison.Ordinal)
+           || text.Contains(SectionPagePlaceholder, StringComparison.Ordinal);
 }
