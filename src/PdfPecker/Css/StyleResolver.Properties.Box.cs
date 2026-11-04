@@ -169,6 +169,23 @@ internal sealed partial class StyleResolver
         _ => null,
     };
 
+    /// <summary>Parses -pdfpecker-image-quality: none (0) or a whole JPEG quality from 1 to 100; null when not valid.</summary>
+    internal static int? ParseImageQuality(string lower)
+    {
+        if (lower == "none") return 0;
+        return Invariant.TryParseInt(lower, out int quality) && quality is >= 1 and <= 100 ? quality : null;
+    }
+
+    /// <summary>
+    /// Parses -pdfpecker-image-max-resolution: none (0) or a positive resolution (dpi, dpcm, dppx or x), in dots per
+    /// inch; null when not valid.
+    /// </summary>
+    internal static float? ParseImageMaxResolution(string lower)
+    {
+        if (lower == "none") return 0;
+        return CssImageSet.Resolution(lower) is float dppx ? dppx * 96 : null;
+    }
+
     /// <summary>
     /// Parses initial-letter: a size of at least 1 followed by a whole sink of at least 1, or by drop or raise (raise
     /// sinks by one line, drop and nothing by the size rounded up, given as 0). Null when the value is not valid.

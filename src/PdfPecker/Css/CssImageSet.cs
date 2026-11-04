@@ -86,7 +86,7 @@ internal static class CssImageSet
     }
 
     /// <summary>A resolution in dppx: x, dppx, dpi or dpcm; null when the token is none or out of range.</summary>
-    private static float? Resolution(string token)
+    internal static float? Resolution(string token)
     {
         var lower = token.ToLowerInvariant();
         (string unit, float scale) = lower.EndsWith("dppx", StringComparison.Ordinal) ? ("dppx", 1f)
