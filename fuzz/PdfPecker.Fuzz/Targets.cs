@@ -259,6 +259,19 @@ internal static class Targets
             },
             new()
             {
+                // PdfPecker.Testing's snapshot comparison reads any file it is given as a snapshot, without the library's
+                // parser, so it gets its own target: it must take damaged files without throwing.
+                Name = "pdf-snapshot", Extension = ".pdf", Seeds = pdfSeeds, MaxSize = 1 << 20,
+                Run = (d, ct) =>
+                {
+                    var objects = PdfPecker.Testing.PdfNormalizer.Normalize(d);
+                    ct.ThrowIfCancellationRequested();
+                    if (PdfPecker.Testing.PdfNormalizer.FirstDifference(objects, objects) is not null)
+                        throw new InvalidOperationException("A file differs from itself.");
+                },
+            },
+            new()
+            {
                 Name = "html", Extension = ".html", Text = true, MaxSize = 128 * 1024, Seeds = c => c.HtmlFiles(),
                 Dictionary = HtmlWords, Nesters = HtmlNesters, Run = (d, ct) => Html(d, ct),
             },
