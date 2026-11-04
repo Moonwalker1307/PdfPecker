@@ -1,0 +1,65 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>PdfPecker.Razor</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+
+    <PackageId>PdfPecker.Razor</PackageId>
+    <!-- The package always has PdfPecker's version: it takes the library's local version from Directory.Build.props,
+         and CI passes the same -p:Version to every pack. -->
+    <Authors>Moonwalker1307</Authors>
+    <Description>Razor components (.razor) to PDF with PdfPecker: typed templates with layouts, child components and dependency injection, rendered to HTML with Microsoft's HtmlRenderer and converted to PDF without a browser, an ASP.NET Core host or native binaries.</Description>
+    <PackageTags>pdf;pdf-generator;pdf-generation;razor;razor-components;blazor;html-to-pdf;csharp;dotnet;invoice;report;pdfpecker</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>logo.png</PackageIcon>
+    <PackageProjectUrl>https://pdfpecker.net/</PackageProjectUrl>
+    <PackageReleaseNotes>What changed in each release: https://pdfpecker.net/docs/changelog/</PackageReleaseNotes>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Copyright>Copyright (c) 2026 Moonwalker1307</Copyright>
+    <RepositoryUrl>https://github.com/Moonwalker1307/PdfPecker</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+    <!-- Checks the package's target frameworks now, and its public API against the last release once there is one:
+         PackageValidationBaselineVersion is added after the package's first release, as RELEASING.md describes. -->
+    <EnablePackageValidation>true</EnablePackageValidation>
+  </PropertyGroup>
+
+  <!-- CI builds use repository-relative source paths in the PDB, so builds are reproducible from the same commit. -->
+  <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Pack turns the project reference into a PdfPecker dependency of the same version as this package. -->
+    <ProjectReference Include="../PdfPecker/PdfPecker.csproj" />
+  </ItemGroup>
+
+  <!-- Microsoft's HtmlRenderer, the one package this project may use (AGENTS.md). Each target framework takes the
+       ASP.NET Core release of its own .NET version, so an app never gets a newer ASP.NET Core than its runtime; the
+       version is the minimum, and an ASP.NET Core app uses the copy in its shared framework instead. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="8.0.33" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="9.0.22" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="10.0.14" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="/" />
+    <None Include="../../LICENSE" Pack="true" PackagePath="/" />
+    <None Include="../../assets/logo.png" Pack="true" PackagePath="/" />
+    <InternalsVisibleTo Include="PdfPecker.Razor.Tests" />
+  </ItemGroup>
+
+</Project>

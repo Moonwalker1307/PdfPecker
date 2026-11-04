@@ -175,6 +175,30 @@ PdfAssert.HasPageCount(pdf, 1);
 How snapshots are created and accepted, and the appearance comparison for PDFs from other producers, are in its
 [README](https://github.com/Moonwalker1307/PdfPecker/blob/main/src/PdfPecker.Testing/README.md).
 
+## Razor components
+
+[PdfPecker.Razor](https://www.nuget.org/packages/PdfPecker.Razor) turns Razor components (`.razor` files) into PDFs,
+so a template gets typed parameters, compile-time checks, child components, layouts and dependency injection. It renders
+the component to HTML with Microsoft's `HtmlRenderer`, without an ASP.NET Core host, and converts the HTML with
+PdfPecker. It is released with every PdfPecker release under the same version, and it is the one package here with a
+dependency besides PdfPecker: Microsoft's `Microsoft.AspNetCore.Components.Web`, which holds the renderer.
+
+```
+dotnet add package PdfPecker.Razor
+```
+
+```csharp
+using PdfPecker.Razor;
+
+// Invoice.razor has [Parameter] public InvoiceModel Data { get; set; }
+byte[] pdf = await RazorToPdf.ConvertAsync<Invoice>(new Dictionary<string, object?> { ["Data"] = invoice });
+```
+
+Razor encodes caller data, every `PdfOptions` setting works, and the package is trimmable and runs with Native AOT
+(Microsoft's components assembly reports trim warnings of its own, which its README explains). How to set up the
+Razor project, inject services and stream to an ASP.NET Core response is in its
+[README](https://github.com/Moonwalker1307/PdfPecker/blob/main/src/PdfPecker.Razor/README.md).
+
 ## Features
 
 - **HTML and CSS**: flexbox, grid and subgrid, CSS tables, floats with `shape-outside`, `clip-path` shapes (also
@@ -332,6 +356,7 @@ dotnet test
 dotnet run --project samples/PdfPecker.Sample -c Release      # converts samples/PdfPecker.Sample/html/*.html and *.md into ./output
 dotnet run --project samples/PdfPecker.Fluent.Sample -c Release   # writes the PdfPecker.Fluent examples into ./output
 dotnet run --project src/PdfPecker.Cli -c Release -- convert in.html out.pdf   # the pdfpecker command-line tool
+dotnet run --project samples/PdfPecker.Razor.Sample -c Release    # writes the PdfPecker.Razor invoice into ./output
 dotnet run --project bench/PdfPecker.Benchmarks -c Release
 dotnet run --project bench/PdfPecker.Benchmarks -c Release -- --requirements    # memory and CPU per conversion
 bench/compare-versions.sh v1.22.0                              # this checkout against a release, in turns on this machine
@@ -339,6 +364,7 @@ dotnet pack src/PdfPecker -c Release -o ./nupkg                # also checks the
 dotnet pack src/PdfPecker.Fluent -c Release -o ./nupkg         # the fluent package, with the same version
 dotnet pack src/PdfPecker.Cli -c Release -o ./nupkg            # the pdfpecker dotnet tool, with the same version
 dotnet pack src/PdfPecker.Testing -c Release -o ./nupkg        # the snapshot testing package, with the same version
+dotnet pack src/PdfPecker.Razor -c Release -o ./nupkg          # the Razor package, with the same version
 ```
 
 Requirements and details are in [BUILD.md](https://github.com/Moonwalker1307/PdfPecker/blob/main/BUILD.md) and

@@ -31,7 +31,7 @@ nuget.org only accepts OSI- or FSF-approved licence IDs and some bundled font li
 
 | Workflow | When | What |
 | --- | --- | --- |
-| `nuget.yml` | Every PR, pushes to main, published releases | Builds and tests net8.0, net9.0 and net10.0 on Linux and net10.0 on Windows, publishes both samples with Native AOT, reports coverage (main only) and packs PdfPecker, PdfPecker.Fluent, PdfPecker.Testing and the `PdfPecker.Cli` dotnet tool with the same version. On a release it attaches the packages and publishes them to nuget.org. |
+| `nuget.yml` | Every PR, pushes to main, published releases | Builds and tests net8.0, net9.0 and net10.0 on Linux and net10.0 on Windows, publishes the samples and the command-line tool with Native AOT, reports coverage (main only) and packs PdfPecker, PdfPecker.Fluent, PdfPecker.Testing, the `PdfPecker.Cli` dotnet tool and PdfPecker.Razor with the same version. On a release it attaches the packages and publishes them to nuget.org. |
 | `dotnet-preview.yml` | Pushes to main, published releases, Mondays | Builds and tests on the latest .NET 11 preview SDK with an extra `net11.0` target. Never blocks: the job is `continue-on-error`, and it packs and publishes nothing. |
 | `conformance.yml` | PRs and pushes touching `src`, `tests` or the samples | veraPDF validation of the PDF/A and PDF/UA samples. |
 | `codeql.yml` | PRs, pushes and a schedule | CodeQL analysis. |
@@ -54,4 +54,4 @@ ruleset (or branch protection) on `main` that requires the status checks `build`
 `analyze` and no approving review. Without required checks, enabling auto-merge fails and the PR waits for a person.
 
 Repository settings the release relies on: the `nuget` environment, and the `NUGET_USER` variable naming the
-nuget.org account that owns the Trusted Publishing policy and both package IDs. No NuGet API key is stored. See `RELEASING.md`.
+nuget.org account that owns the Trusted Publishing policy and the package IDs. No NuGet API key is stored. See `RELEASING.md`.
