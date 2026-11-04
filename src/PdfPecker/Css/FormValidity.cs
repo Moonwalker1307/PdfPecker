@@ -44,6 +44,35 @@ internal static class FormValidity
         return e.Validity switch { 1 => true, 2 => false, _ => null };
     }
 
+    /// <summary>
+    /// Whether the element matches :in-range (true), :out-of-range (false) or neither (null). Only the input types with
+    /// a range (number, range, date, month, week, time, datetime-local) can match, and only when they are candidates
+    /// for validation, so a disabled or read-only input matches neither. Chrome also matches an input with no usable
+    /// min or max as in range while its value is empty, and as neither once it has a value; a range slider's value is
+    /// always clamped into its range, so it is always in range.
+    /// </summary>
+    public static bool? RangeState(Element e)
+    {
+        if (e.Name != "input" || !IsCandidate(e)) return null;
+        string type = InputType(e);
+        if (type == "range") return true;
+        if (type is not ("number" or "date" or "month" or "week" or "time" or "datetime-local")) return null;
+        double? value = ParseValue(type, e.GetAttribute("value") ?? "");
+        double? min = ParseValue(type, e.GetAttribute("min") ?? "");
+        double? max = ParseValue(type, e.GetAttribute("max") ?? "");
+        if (value is not { } v) return true; // the value sanitizes to the empty string
+        if (min == null && max == null) return null;
+        return IsOutOfRange(type, v, min, max) ? false : true;
+    }
+
+    /// <summary>Whether a value lies outside its range; a range whose max is before its min holds no value, except for a time, which wraps midnight.</summary>
+    private static bool IsOutOfRange(string type, double value, double? min, double? max)
+    {
+        if (min is { } lo && max is { } hi && hi < lo)
+            return type != "time" || value < lo && value > hi;
+        return value < min || value > max;
+    }
+
     private static byte Compute(Element e)
     {
         switch (e.Name)
@@ -431,15 +460,20 @@ internal static class FormValidity
 
     private static string StripNewlines(string s) => s.IndexOfAny(['\n', '\r']) < 0 ? s : s.Replace("\n", "").Replace("\r", "");
 
+    // Chrome also leaves a read-only slider out of constraint validation, although HTML does not list readonly for range.
     private static bool TakesReadonly(string type)
-        => type is "text" or "search" or "url" or "tel" or "email" or "password" or "date" or "month" or "week" or "time" or "datetime-local" or "number";
+        => type is "text" or "search" or "url" or "tel" or "email" or "password" or "date" or "month" or "week" or "time" or "datetime-local" or "number"
+            or "range";
 
     private static bool TakesPattern(string type) => type is "text" or "search" or "url" or "tel" or "email" or "password";
 
-    /// <summary>The input's type, with an unknown one as text, as browsers treat it.</summary>
+    /// <summary>
+    /// The input's type, with an unknown one as text, as browsers treat it. The value is not trimmed: browsers take
+    /// type=" number" as an unknown type, so as text.
+    /// </summary>
     private static string InputType(Element e)
     {
-        string type = (e.GetAttribute("type") ?? "text").Trim().ToLowerInvariant();
+        string type = (e.GetAttribute("type") ?? "text").ToLowerInvariant();
         return type is "text" or "search" or "url" or "tel" or "email" or "password" or "date" or "month" or "week" or "time"
             or "datetime-local" or "number" or "range" or "color" or "checkbox" or "radio" or "file" or "submit" or "image"
             or "reset" or "button" or "hidden" ? type : "text";
