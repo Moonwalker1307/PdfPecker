@@ -530,6 +530,30 @@ internal sealed partial class FontProgram
         }
     }
 
+    private ulong[]? _multiGlyphStarts;
+    private bool _multiGlyphStartsLoaded;
+
+    /// <summary>
+    /// The glyphs at which the font's lookups of more than one glyph can start, one bit per glyph id (see
+    /// <see cref="OpenTypeLayout.MultiGlyphStarts"/>); null when that is not known, so any glyph may.
+    /// </summary>
+    public ulong[]? MultiGlyphStarts
+    {
+        get
+        {
+            if (Volatile.Read(ref _multiGlyphStartsLoaded)) return _multiGlyphStarts;
+            lock (_lock)
+            {
+                if (!_multiGlyphStartsLoaded)
+                {
+                    _multiGlyphStarts = Layout?.MultiGlyphStarts();
+                    Volatile.Write(ref _multiGlyphStartsLoaded, true);
+                }
+                return _multiGlyphStarts;
+            }
+        }
+    }
+
     /// <summary>The font's OpenType layout tables for complex shaping, or null when it has neither GSUB nor GPOS.</summary>
     public OpenTypeLayout? Layout
     {

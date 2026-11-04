@@ -35,6 +35,8 @@ internal sealed partial class InlineLayout
     // The line's last run of text and the chunk that may join it, which line breaking measures shaped (see ContextOf).
     private readonly List<Item> _contextItems = new();
     private readonly StringBuilder _contextText = new(256);
+    // The windows of inert text on the line being broken that were not shaped (see ContextOf), as item indexes.
+    private readonly List<(int From, int LastWord, int NewLast)> _pendingWindows = new();
     // The extents of the inline boxes aligned to the top or bottom of the line being drawn (see AlignedSubtrees).
     private Dictionary<ComputedStyle, (float A, float D)>? _alignedSubtrees;
 

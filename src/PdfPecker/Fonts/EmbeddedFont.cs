@@ -26,6 +26,7 @@ internal sealed class EmbeddedFont : TextFont
     // Whether all text goes through the shaper because the font substitutes in context (calt, clig or rclt) and those
     // features are on, as browsers apply them to all horizontal text. Decided when the font is made, never per run.
     private bool _shapesInContext;
+    private ShapeCache? _shapeCache; // the text this font has shaped, made on first use
 
     // metrics: line metrics to use instead of the font's own, for a bundled font standing in for a standard font.
     // faceMetrics: the size-adjust and metric overrides of the @font-face rule the font comes from.
@@ -194,7 +195,7 @@ internal sealed class EmbeddedFont : TextFont
     {
         if (UsesShaper(s, start, length))
         {
-            ComplexShaper.Shape(Program, s, start, length, rtl, glyphs, _off);
+            ShapeComplex(s, start, length, rtl, glyphs);
             return true;
         }
         glyphs.Clear();
@@ -264,11 +265,68 @@ internal sealed class EmbeddedFont : TextFont
 
     private int MeasureComplex(string s, int start, int length)
     {
+        bool rtl = ComplexShaper.GuessRtl(s, start, length);
+        if (Shapes.TryGet(s, start, length, rtl, null, out int width, out _)) return width;
         var glyphs = t_glyphs ??= new List<ShapedGlyph>();
-        ComplexShaper.Shape(Program, s, start, length, ComplexShaper.GuessRtl(s, start, length), glyphs, _off);
-        float total = 0;
-        foreach (var g in glyphs) total += g.Advance;
-        return (int)MathF.Round(total);
+        ShapeComplex(s, start, length, rtl, glyphs);
+        return ShapeCache.Width(glyphs);
+    }
+
+    private ShapeCache Shapes
+    {
+        get
+        {
+            if (Volatile.Read(ref _shapeCache) is { } cache) return cache;
+            Interlocked.CompareExchange(ref _shapeCache, new ShapeCache(), null);
+            return _shapeCache!;
+        }
+    }
+
+    /// <summary>
+    /// The OpenType shaper's glyphs for the text, kept for the next time the font shapes the same text; returns whether
+    /// the text is inert (see <see cref="InertInContext"/>).
+    /// </summary>
+    private bool ShapeComplex(string s, int start, int length, bool rtl, List<ShapedGlyph> glyphs)
+    {
+        var cache = Shapes;
+        if (cache.TryGet(s, start, length, rtl, glyphs, out _, out bool inert)) return inert;
+        ComplexShaper.Shape(Program, s, start, length, rtl, glyphs, _off);
+        inert = !rtl && IsInert(s, start, length, glyphs);
+        cache.Add(s, start, length, rtl, glyphs, inert);
+        return inert;
+    }
+
+    /// <summary>
+    /// Whether the text is inert in context: shaped on its own, every character keeps its own glyph, unmoved, and none
+    /// of those glyphs starts a lookup of more than one glyph. Next to other inert text it is then shaped as on its
+    /// own, so a run of such words is as wide as its words and the kerning between them, give or take the rounding of
+    /// each width to 1/1000 em.
+    /// </summary>
+    public override bool InertInContext(string s, int start, int length)
+    {
+        if (length == 0) return true;
+        if (!UsesShaper(s, start, length) || ComplexShaper.GuessRtl(s, start, length)) return false;
+        var glyphs = t_glyphs ??= new List<ShapedGlyph>();
+        return ShapeComplex(s, start, length, false, glyphs);
+    }
+
+    private bool IsInert(string s, int start, int length, List<ShapedGlyph> glyphs)
+    {
+        // Features asked for by font-feature-settings and the complex scripts have lookups of their own.
+        if (Program.ShapedFeatures != null || ComplexShaper.Handles(s, start, length) || Program.MultiGlyphStarts is not { } starts) return false;
+        int at = start, end = start + length;
+        foreach (var g in glyphs)
+        {
+            if (g.Start != at || g.Dx != 0 || g.Dy != 0) return false;
+            if (at >= end) return false;
+            int cp = s[at], n = 1;
+            if (char.IsHighSurrogate(s[at]) && at + 1 < end && char.IsLowSurrogate(s[at + 1])) { cp = char.ConvertToUtf32(s[at], s[at + 1]); n = 2; }
+            if (g.Length != n || g.Gid != Program.GlyphId(cp) || (starts[g.Gid >> 6] >> (g.Gid & 63) & 1) != 0
+                || (Program.Layout!.GlyphProps(g.Gid) & OpenTypeLayout.Mark) != 0)
+                return false;
+            at += n;
+        }
+        return at == end;
     }
 
     public override float CharWidth(char c, float size) => SizeAdjust == 1 ? _widths[c] * size / 1000f : _widths[c] * size * SizeAdjust / 1000f;
@@ -397,6 +455,20 @@ internal sealed class FontChain : TextFont
         }
         if (runFont != null) total += runFont.MeasureUnits(s, runStart, end - runStart);
         return total;
+    }
+
+    // Only text drawn in one of the fonts is known to be inert: a change of font ends the shaped run.
+    public override bool InertInContext(string s, int start, int length)
+    {
+        int previous = 0;
+        TextFont? runFont = null;
+        for (int i = start, end = start + length, next; i < end; i = next)
+        {
+            var f = Next(s, i, end, runFont, ref previous, out next);
+            if (runFont != null && !ReferenceEquals(f, runFont)) return false;
+            runFont = f;
+        }
+        return runFont == null || runFont.InertInContext(s, start, length);
     }
 
     public override float CharWidth(char c, float size)

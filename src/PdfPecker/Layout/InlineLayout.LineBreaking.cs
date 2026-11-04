@@ -150,11 +150,15 @@ internal sealed partial class InlineLayout
         private int _hyphenatedRun;
         // hyphenate-limit-lines of the block container, which applies to the whole paragraph whatever the inline styles say; -1 = no limit.
         private readonly int _hyphenLimit;
+        // The most that the windows of inert text on the current line which were not shaped (see ContextOf) can change its
+        // width; they are in _inline._pendingWindows until a decision needs them.
+        private float _uncertain;
 
         public LineBreaker(InlineLayout inline, List<Item> items, float availW, LineIndent indent, FloatLines? fl, List<Item>? after, byte[]? plan = null, int hyphenLimit = -1)
         {
             _inline = inline;
             _hyphenLimit = hyphenLimit;
+            _uncertain = 0;
             _plan = plan;
             _items = items;
             _availW = availW;
@@ -216,6 +220,8 @@ internal sealed partial class InlineLayout
             _cur = _inline.RentLine();
             _hasContent = false;
             _curW = 0;
+            _uncertain = 0;
+            _inline._pendingWindows.Clear();
             _fl?.Begin(Lines);
             _avail = (_fl?.Avail ?? _availW) - _indent.Of(Lines, Lines.Count);
         }
@@ -266,6 +272,7 @@ internal sealed partial class InlineLayout
                 {
                     if (_fl != null)
                     {
+                        ShapePending();
                         _fl.Float(it, _curW, _hasContent);
                         TakeFloatRoom();
                     }
@@ -347,16 +354,22 @@ internal sealed partial class InlineLayout
             gw += KernWithin(i, j);
             float need = Needed(i, j, gw) + KernWithLast(_items[i]);
             var context = ContextOf(i, j);
-            need += context;
+            need += context.Value;
             // word-break: break-all and line-break: anywhere break the chunk at the end of the line instead of moving it to
             // the next.
             bool breakAll = splittable && _items[i].IsText && BreaksAtLineEnd(_items[i].Style);
 
             // A planned paragraph breaks where the plan says, and greedily where it has no say.
             bool planned = _plan is { } plan && plan[i] != PlanGreedy;
+            // The windows not shaped only matter when they could tip the chunk over the end of the line or back.
+            if (!planned && !breakAll && _uncertain + context.Bound > 0
+                && Math.Abs(_curW + need - (_avail + Eps)) <= _uncertain + context.Bound)
+                ShapeAll(ref context, ref need, i);
             bool full = planned ? _plan![i] == PlanBreak : _curW + need > _avail + Eps && !breakAll;
             // text-spacing-trim: a chunk that ends with closing punctuation fits when the punctuation's blank half goes.
-            if (full && !planned && !breakAll && TrimLineEnd(j) is { } trimmed && _curW + need - (_items[j - 1].Width - trimmed.Width) <= _avail + Eps)
+            Item? trimmed = full && !planned && !breakAll ? TrimLineEnd(j) : null;
+            if (trimmed != null) ShapeAll(ref context, ref need, i);
+            if (trimmed != null && _curW + need - (_items[j - 1].Width - trimmed.Width) <= _avail + Eps)
             {
                 _curW += gw - (_items[j - 1].Width - trimmed.Width) + KernWithLast(_items[i]);
                 for (int k = i; k < j - 1; k++) Add(_items[k]);
@@ -382,13 +395,16 @@ internal sealed partial class InlineLayout
                     j = ChunkEnd(i, out gw, out splittable);
                     if (j == i) return i;
                     gw += KernWithin(i, j);
-                    need = Needed(i, j, gw) + context;
+                    need = Needed(i, j, gw) + context.Value;
                 }
                 // On the new line the chunk starts a run of its own.
-                need -= context;
+                need -= context.Value;
                 context = ContextOf(i, j);
-                need += context;
+                need += context.Value;
             }
+            // The chunk's own window is shaped at the start of a line, where adding it may change the line's first item,
+            // and before breaking a chunk between characters, which works from the line's exact width.
+            if (!_hasContent || splittable) ShapeAll(ref context, ref need, i);
             // Too narrow beside the floats: the line moves down past them until the chunk fits.
             if (_fl != null && !_hasContent && need > _avail + Eps)
                 while (_fl.Lower())
@@ -398,7 +414,7 @@ internal sealed partial class InlineLayout
                 }
             // The kerning with the line's last item counts here too: a space before "A" narrows the word just enough that
             // a box as wide as its content (measured with that kerning) holds it, so it must not break inside it.
-            if (splittable && _curW + gw + KernWithLast(_items[i]) + context > _avail + Eps)
+            if (splittable && _curW + gw + KernWithLast(_items[i]) + context.Value > _avail + Eps)
             {
                 // A chunk wider than the line that overflow-wrap or word-break lets break between characters.
                 for (int k = i; k < j; k++)
@@ -407,8 +423,14 @@ internal sealed partial class InlineLayout
             else
             {
                 // Fits, or may not break: a word too wide for the line overflows it, as in browsers.
-                _curW += gw + KernWithLast(_items[i]) + context;
+                _curW += gw + KernWithLast(_items[i]) + context.Value;
                 for (int k = i; k < j; k++) Add(_items[k]);
+                if (context.Bound > 0)
+                {
+                    // The chunk's items are now the line's, at the same indexes as in the window.
+                    _inline._pendingWindows.Add((context.From, context.LastWord, context.NewLast));
+                    _uncertain += context.Bound;
+                }
             }
             return j;
         }
@@ -423,15 +445,17 @@ internal sealed partial class InlineLayout
         /// Shaping the whole run again for every chunk would make breaking a line quadratic in its length, so the change
         /// is measured where the chunk meets the run: from the start of the run's last two words to the chunk's last
         /// word, with and without the chunk. Contextual lookups look a few glyphs around the one they change, which that
-        /// window holds; the line is still aligned by its whole run.
+        /// window holds; the line is still aligned by its whole run. Most windows are inert text (see
+        /// TextFont.InertInContext), whose change is only the rounding of its widths: those are not shaped but kept with
+        /// a bound on that rounding, and shaped only when a decision about the line comes within the bound.
         /// </remarks>
-        private readonly float ContextOf(int i, int j)
+        private readonly ContextChange ContextOf(int i, int j)
         {
             bool inContext = false;
             for (int k = i; k < j && !inContext; k++) inContext = _items[k].IsText && _items[k].Style.Font.ShapesInContext;
-            if (!inContext) return 0;
+            if (!inContext) return default;
             for (int k = i + 1; k < j; k++)
-                if (!JoinedItems(_items[k - 1], _items[k])) return ContextOfMixed(i, j);
+                if (!JoinedItems(_items[k - 1], _items[k])) return new ContextChange(ContextOfMixed(i, j));
             var li = _cur.Items;
             int n = li.Count, end = n + j - i;
             // The last word of the run the chunk continues, and the start of the window: the word before it.
@@ -448,15 +472,37 @@ internal sealed partial class InlineLayout
             int newLast = -1;
             for (int k = end - 1; k >= n && newLast < 0; k--)
                 if (IsWord(At(k, i))) newLast = k;
-            if (newLast < 0) return 0;
+            if (newLast < 0) return default;
             if (lastWord < 0)
             {
                 // The chunk starts a run, which only a chunk of several items draws differently.
                 for (int k = n; k < newLast && from < 0; k++)
                     if (IsWord(At(k, i))) from = k;
-                if (from < 0) return 0;
+                if (from < 0) return default;
                 lastWord = from;
             }
+            bool inert = true;
+            for (int m = from; m <= newLast && inert; m++)
+            {
+                var it = At(m, i);
+                inert = it.Style.Font.InertInContext(it.Source, it.Start, it.Length);
+            }
+            if (!inert) return new ContextChange(WindowValue(from, lastWord, newLast, i));
+            // Each width in the window and the kerning between its items are rounded to 1/1000 em on their own.
+            float bound = (2 * (newLast - from) + 4) * At(from, i).Style.TextSize / 1000f;
+            return new ContextChange(0, bound, from, lastWord, newLast);
+        }
+
+        /// <summary>
+        /// What <see cref="ContextOf"/> found for a chunk: the change to the line's width, or, for a window of inert text
+        /// that was not shaped, 0 with the most its change can be, Bound, and the window's items, as indexes of the line
+        /// followed by the chunk.
+        /// </summary>
+        private readonly record struct ContextChange(float Value, float Bound = 0, int From = 0, int LastWord = 0, int NewLast = 0);
+
+        /// <summary>The change a window makes to the width of its run, shaped with and without its last items.</summary>
+        private readonly float WindowValue(int from, int lastWord, int newLast, int i)
+        {
             var first = At(from, i);
             var font = first.Style.Font;
             float units = Shaped(from, newLast, i) - Shaped(from, lastWord, i), kern = 0;
@@ -467,6 +513,27 @@ internal sealed partial class InlineLayout
                 kern += PairKern(At(m - 1, i), it);
             }
             return units * first.Style.TextSize / 1000f - kern;
+        }
+
+        /// <summary>Shapes the windows of the line that were not shaped, so that its width is exact.</summary>
+        private void ShapePending()
+        {
+            var pending = _inline._pendingWindows;
+            if (pending.Count == 0) return;
+            // The windows are all items of the line now, so the chunk index is not used.
+            foreach (var (from, lastWord, newLast) in pending) _curW += WindowValue(from, lastWord, newLast, 0);
+            pending.Clear();
+            _uncertain = 0;
+        }
+
+        /// <summary>Shapes the line's windows and the chunk's, and corrects the room the chunk needs by the latter.</summary>
+        private void ShapeAll(ref ContextChange context, ref float need, int i)
+        {
+            ShapePending();
+            if (context.Bound <= 0) return;
+            float value = WindowValue(context.From, context.LastWord, context.NewLast, i);
+            need += value - context.Value;
+            context = new ContextChange(value);
         }
 
         /// <summary>A word of a run that ContextBetweenItems shapes.</summary>
