@@ -47,6 +47,16 @@ public static partial class ContentExtensions
         return new ChoiceFieldDescriptor(field);
     }
 
+    /// <summary>
+    /// An empty signature field as large as the slot, 40 points tall unless the slot has a height, which a PDF viewer
+    /// offers for signing and <see cref="PdfSigner"/> signs later with <see cref="PdfSignatureOptions.FieldName"/> set to
+    /// <paramref name="name"/>. The field shows nothing of its own until it is signed, so put a line or a border around it,
+    /// or text behind it with <c>Layers</c>.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is empty.</exception>
+    public static SignatureFieldDescriptor SignatureField(this IContainer container, string name)
+        => new(Field(container, FormFieldKind.Signature, name));
+
     private static FormFieldElement Field(IContainer container, FormFieldKind kind, string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
