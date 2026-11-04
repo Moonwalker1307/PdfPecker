@@ -633,7 +633,7 @@ internal sealed partial class SvgImage
             case "use":
             {
                 if (Reference(e.GetAttribute("href") ?? e.GetAttribute("xlink:href")) is not { } target) return;
-                var place = Matrix.Translate(Num(e, "x"), Num(e, "y")).Then(m);
+                var place = Matrix.Translate(Len(e, "x", Axis.X), Len(e, "y", Axis.Y)).Then(m);
                 if (target.Name == "symbol")
                 {
                     var fitted = SymbolTransform(target, e).Then(place);
@@ -741,7 +741,7 @@ internal sealed partial class SvgImage
         switch (e.Name)
         {
             case "path":
-                return PathParser.Parse(e.GetAttribute("d"));
+                return PathParser.Parse(e.Style?.SvgGeometry is { HasPath: true } declared ? declared.PathData : e.GetAttribute("d"));
             case "rect":
                 return RectPath(e);
             case "circle":
@@ -939,6 +939,12 @@ internal sealed partial class SvgImage
                         if (name == "stop-color") color = decl.Substring(colon + 1).Trim();
                         else if (name == "stop-opacity") alphaText = decl.Substring(colon + 1).Trim();
                     }
+                }
+                // Rules (and the style attribute, which is one) win over what the attributes say.
+                if (stop.Style?.SvgGeometry is { } declared)
+                {
+                    color = declared.StopColor ?? color;
+                    if (declared.StopOpacity is float declaredOpacity) alphaText = declaredOpacity.ToString(CultureInfo.InvariantCulture);
                 }
                 uint current = stop.Style?.Color ?? CssColor.Black;
                 if (!CssColor.TryParse(color ?? "black", current, out uint col)) col = CssColor.Black;
@@ -1514,8 +1520,42 @@ internal sealed partial class SvgImage
     /// <summary>A coordinate or size attribute in user units, where a percentage refers to the viewport.</summary>
     private float Len(Element e, string name, Axis axis, float fallback = 0)
     {
+        if (DeclaredLength(e, name) is { } declared)
+        {
+            // auto (rx and ry) leaves the radius to the other one, as a missing attribute does.
+            if (declared.IsAuto) return fallback;
+            if (declared.IsPercent) UsesPercentages = true;
+            float basis = axis switch { Axis.X => ViewportWidth, Axis.Y => ViewportHeight, _ => _diagonal };
+            float value = declared.Resolve(basis * 0.75f) / 0.75f;
+            // A calc() that comes out negative is a radius of zero.
+            return name is "r" or "rx" or "ry" ? Math.Max(0, value) : value;
+        }
         var v = e.GetAttribute(name);
         return v != null && Percentage(v.AsSpan().Trim(), axis) is float f ? f : Num(e, name, fallback);
+    }
+
+    /// <summary>
+    /// The length a style sheet gives the geometry property <paramref name="name"/> of an element, which wins over the
+    /// attribute; null when none does, or when the property does not apply to that kind of element.
+    /// </summary>
+    private static Length? DeclaredLength(Element e, string name)
+    {
+        if (e.Style is not { } style) return null;
+        // width and height are ordinary CSS properties, which Chrome applies to these elements instead of the attributes.
+        if (name is "width" or "height" && e.Name is "rect" or "image" or "foreignobject")
+            return (name == "width" ? style.Width : style.Height) is { IsAuto: false } size ? size : null;
+        if (style.SvgGeometry is not { } g) return null;
+        return name switch
+        {
+            "cx" when e.Name is "circle" or "ellipse" => g.Cx,
+            "cy" when e.Name is "circle" or "ellipse" => g.Cy,
+            "r" when e.Name == "circle" => g.R,
+            "rx" when e.Name is "rect" or "ellipse" => g.Rx,
+            "ry" when e.Name is "rect" or "ellipse" => g.Ry,
+            "x" when e.Name is "rect" or "image" or "foreignobject" or "use" => g.X,
+            "y" when e.Name is "rect" or "image" or "foreignobject" or "use" => g.Y,
+            _ => null,
+        };
     }
 
     /// <summary>A list of coordinates (the x and y of text), each a number or a percentage of the viewport.</summary>

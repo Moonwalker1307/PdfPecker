@@ -1,0 +1,20 @@
+<html><head><style>
+body { margin: 10px; font-family: Helvetica }
+svg { width: 90px; height: 60px; border: 1px solid #ccc; margin: 0 6px 6px 0 }
+.warm { stop-color: #e33 }
+.cool { stop-color: #36c; stop-opacity: .5 }
+.badge { fill: url(#sunset) }
+circle.dot { r: 18px; cx: 45px; cy: 30px; fill: #393 }
+circle.pct { r: 25%; cx: 50%; cy: 50%; fill: #f90 }
+rect.pill { x: 10px; y: 15px; rx: 15px; ry: auto; fill: teal }
+path.icon { d: path("M10 50 L45 8 L80 50 Z"); fill: #639 }
+path.hidden { d: none; fill: red }
+</style></head><body>
+<svg viewBox="0 0 90 60"><defs><linearGradient id="sunset"><stop class="warm" offset="0"/><stop class="cool" offset="1"/></linearGradient></defs><rect class="badge" width="90" height="60"/></svg>
+<svg viewBox="0 0 90 60"><circle class="dot" r="2" cx="5" cy="5"/></svg>
+<svg viewBox="0 0 90 60"><circle class="pct" r="1" cx="1" cy="1"/></svg>
+<svg viewBox="0 0 90 60"><rect class="pill" width="70" height="30" rx="1"/></svg>
+<svg viewBox="0 0 90 60"><path class="icon" d="M0 0 L5 5"/></svg>
+<svg viewBox="0 0 90 60"><path class="hidden" d="M5 5 H85 V55 H5Z"/></svg>
+<img width="90" height="60" style="border:1px solid #ccc" src='data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 90 60"><style>.a{stop-color:%23fc0}.b{stop-color:%23c06}rect{fill:url(%23g);x:10px;y:10px;width:70px;height:40px;rx:8px}</style><linearGradient id="g"><stop class="a" offset="0"/><stop class="b" offset="1"/></linearGradient><rect/></svg>'>
+</body></html>

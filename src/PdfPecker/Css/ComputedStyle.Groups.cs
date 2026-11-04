@@ -270,6 +270,7 @@ internal sealed partial class ComputedStyle
     public string? SvgClipPath { get => _visual.SvgClipPath; set => Visual.SvgClipPath = value; }
     public string? SvgMask { get => _visual.SvgMask; set => Visual.SvgMask = value; }
     public string? SvgFilter { get => _visual.SvgFilter; set => Visual.SvgFilter = value; }
+    public SvgGeometry? SvgGeometry { get => _visual.SvgGeometry; set => Visual.SvgGeometry = value; }
     public bool SvgMaskAlpha { get => _visual.SvgMaskAlpha; set => Visual.SvgMaskAlpha = value; }
     public bool SvgNonScalingStroke { get => _visual.SvgNonScalingStroke; set => Visual.SvgNonScalingStroke = value; }
     public uint SvgFloodColor { get => _visual.SvgFloodColor; set => Visual.SvgFloodColor = value; }
@@ -329,6 +330,7 @@ internal sealed partial class ComputedStyle
         public bool[]? BackgroundFixed; // background-attachment: fixed per layer; null when every layer scrolls
         public string? SvgClipPath;                 // clip-path: url(#id), as "#id"
         public string? SvgMask, SvgFilter;          // mask and filter: url(#id), as "#id"
+        public SvgGeometry? SvgGeometry;            // cx, cy, r, rx, ry, x, y, d, stop-color and stop-opacity set by rules
         public bool SvgMaskAlpha;                   // mask-type: alpha (else luminance)
         public bool SvgNonScalingStroke;            // vector-effect: non-scaling-stroke (not inherited)
         public uint SvgFloodColor = CssColor.Black; // flood-color

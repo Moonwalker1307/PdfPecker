@@ -110,6 +110,88 @@ internal sealed partial class StyleResolver
         return false;
     }
 
+    /// <summary>
+    /// cx, cy, r, rx, ry, x, y, d, stop-color and stop-opacity, which style sheets can set on SVG elements instead of
+    /// attributes. They are kept on the style as declared and read by the SVG renderer, which knows the viewport that
+    /// percentages refer to; the cascade only decides that a rule beats the attribute. Like Chrome, it takes plain
+    /// numbers as user units. A declaration with an invalid value is dropped, so the attribute stays.
+    /// r, rx and ry cannot be negative, so such a declaration is ignored, and so is a path() that names a fill rule,
+    /// which Chrome does not take for d, or whose data has an error.
+    /// </summary>
+    private void ApplySvgGeometry(ComputedStyle s, ComputedStyle parent, string prop, in DeclaredValue d)
+    {
+        var g = s.SvgGeometry?.Copy() ?? new SvgGeometry();
+        // The CSS-wide keywords give a value like any other, which beats the attribute: none for d, black for
+        // stop-color, 0 for the coordinates and auto for rx and ry. These properties are not inherited, so unset is
+        // initial, and inherit takes what the parent computed.
+        bool initial = d.Lower is "initial" or "unset";
+        var from = d.Inherit ? parent.SvgGeometry : null;
+        switch (prop)
+        {
+            case "d":
+                if (initial || d.Inherit || d.Lower == "none")
+                {
+                    g.HasPath = true;
+                    g.PathData = d.Inherit && from is { HasPath: true } ? from.PathData : null;
+                }
+                else if (SvgPathValue(d.Value) is { } data && PdfPecker.Svg.PathParser.IsValid(data)) { g.HasPath = true; g.PathData = data; }
+                else return;
+                break;
+            case "stop-color":
+                if (initial || d.Inherit) g.StopColor = from?.StopColor ?? "black";
+                else if (CssColor.TryParse(d.Value, s.Color, out _)) g.StopColor = d.Value;
+                else return;
+                break;
+            case "stop-opacity":
+                if (initial || d.Inherit) g.StopOpacity = from?.StopOpacity ?? 1;
+                else if (TryParseNumberOrPercent(d.Lower, out float so)) g.StopOpacity = Math.Clamp(so, 0, 1);
+                else return;
+                break;
+            default:
+            {
+                Length? len;
+                if (initial || d.Inherit)
+                {
+                    len = d.Inherit ? InheritedGeometry(from, prop) : null;
+                    len ??= prop is "rx" or "ry" ? Length.Auto : Length.Zero;
+                }
+                else
+                {
+                    Length l;
+                    // A plain number is in user units (CSS pixels), as it is in the attributes.
+                    if (float.TryParse(d.Lower, NumberStyles.Float, CultureInfo.InvariantCulture, out float n) && float.IsFinite(n)) l = Length.Pt(Math.Clamp(n, -Length.MaxMagnitude, Length.MaxMagnitude) * 0.75f);
+                    else if (!TryParseLength(d.Lower, d.Em, _rootFontSize, out l, _vw, _vh)) return;
+                    if (l.IsAuto) { if (prop is not ("rx" or "ry")) return; }
+                    // A plain negative radius is invalid; the result of a calc() is clamped to zero when it is used.
+                    else if (prop is "r" or "rx" or "ry" && !d.Lower.EndsWith(')') && l.Value < 0) return;
+                    len = l;
+                }
+                switch (prop)
+                {
+                    case "cx": g.Cx = len; break;
+                    case "cy": g.Cy = len; break;
+                    case "r": g.R = len; break;
+                    case "rx": g.Rx = len; break;
+                    case "ry": g.Ry = len; break;
+                    case "x": g.X = len; break;
+                    default: g.Y = len; break;
+                }
+                break;
+            }
+        }
+        s.SvgGeometry = g;
+    }
+
+    private static Length? InheritedGeometry(SvgGeometry? g, string prop) => g == null ? null : prop switch
+    {
+        "cx" => g.Cx, "cy" => g.Cy, "r" => g.R, "rx" => g.Rx, "ry" => g.Ry, "x" => g.X, _ => g.Y,
+    };
+
+    /// <summary>The path data of <c>path("...")</c>; null for anything else.</summary>
+    private static string? SvgPathValue(string v)
+        => v.StartsWith("path(", StringComparison.OrdinalIgnoreCase) && v[^1] == ')'
+            ? GeneratedContent.UnquoteString(v.AsSpan(5, v.Length - 6).Trim().ToString()) : null;
+
     private static void ApplyFloodColor(ComputedStyle s, in DeclaredValue d)
     {
         if (CssColor.TryParse(d.Value, s.Color, out uint flood)) s.SvgFloodColor = flood;
