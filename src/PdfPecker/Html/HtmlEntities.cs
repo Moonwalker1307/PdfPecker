@@ -78,7 +78,8 @@ internal static class HtmlEntities
             }
             if (p == digitsStart) return 0;
             if (p < s.Length && s[p] == ';') p++;
-            if (value == 0 || value > 0x10FFFF || (value >= 0xD800 && value <= 0xDFFF)) value = 0xFFFD;
+            // Eight hex digits can overflow into a negative value, so the range check is unsigned.
+            if (value == 0 || (uint)value > 0x10FFFF || (value >= 0xD800 && value <= 0xDFFF)) value = 0xFFFD;
             // Windows-1252 remapping of C1 controls, as browsers do.
             if (value >= 0x80 && value <= 0x9F) value = Fonts.WinAnsi.C1ToUnicode(value);
             sb.Append(char.ConvertFromUtf32(value));
