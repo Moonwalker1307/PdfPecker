@@ -5,9 +5,9 @@ using PdfPecker.Barcodes;
 namespace PdfPecker;
 
 /// <summary>
-/// Draws QR codes and Code 128 and EAN-13 barcodes as SVG markup, to put in an HTML template as an inline
-/// <c>&lt;svg&gt;</c> or, through <see cref="ToDataUri"/>, as an <c>&lt;img&gt;</c>. The SVG stays vector graphics in
-/// the PDF, so it scans at any print size. All methods are static and thread-safe.
+/// Draws QR codes, Data Matrix codes and Code 128 and EAN-13 barcodes as SVG markup, to put in an HTML template as an
+/// inline <c>&lt;svg&gt;</c> or, through <see cref="ToDataUri"/>, as an <c>&lt;img&gt;</c>. The SVG stays vector
+/// graphics in the PDF, so it scans at any print size. All methods are static and thread-safe.
 /// </summary>
 public static class Barcode
 {
@@ -41,6 +41,45 @@ public static class Barcode
         ArgumentNullException.ThrowIfNull(payment);
         options ??= new BarcodeOptions();
         return QrSvg(QrEncoder.Encode(payment.ToPayload(), QrErrorCorrection.Medium, maxVersion: 13), options);
+    }
+
+    /// <summary>
+    /// A Data Matrix code (ECC 200) holding <paramref name="text"/>, in the smallest square size that fits, from 10 x
+    /// 10 to 144 x 144 modules. Data Matrix packs more into a small square than a QR code, so it is the usual choice
+    /// for small labels. Digits are stored two to a codeword. Text outside ISO 8859-1 is stored as UTF-8 with the ECI
+    /// that says so, which most current scanners read. For GS1 data use <see cref="Gs1DataMatrix"/>.
+    /// <see cref="BarcodeOptions.ErrorCorrection"/> is ignored: each size has a fixed amount of error correction.
+    /// </summary>
+    /// <param name="text">The text. Up to 3,116 digits, or 1,556 other ASCII characters.</param>
+    /// <param name="options">Size and colours; null for the defaults.</param>
+    /// <returns>An <c>&lt;svg&gt;</c> element.</returns>
+    /// <exception cref="ArgumentException">The text is empty or does not fit in a 144 x 144 symbol.</exception>
+    public static string DataMatrix(string text, BarcodeOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        options ??= new BarcodeOptions();
+        return MatrixSvg(DataMatrixEncoder.Encode(text), quietZone: 2, options);
+    }
+
+    /// <summary>
+    /// A GS1 Data Matrix code, as used on shipping, healthcare and pharmaceutical labels, from an element string with
+    /// the application identifiers in parentheses: <c>"(01)09506000134352(17)270131(10)AB-123"</c>. The code starts
+    /// with FNC1, and a field of variable length is ended with the FNC1 separator, as the GS1 General Specifications
+    /// require. The fields with a fixed length (such as GTIN (01) and dates (11) to (17)) are checked for their number
+    /// of digits.
+    /// </summary>
+    /// <param name="elementString">The application identifiers and their data.</param>
+    /// <param name="options">Size and colours; null for the defaults.</param>
+    /// <returns>An <c>&lt;svg&gt;</c> element.</returns>
+    /// <exception cref="ArgumentException">
+    /// The element string is malformed, a field has the wrong length or a character GS1 does not allow, or the data
+    /// does not fit in a 144 x 144 symbol.
+    /// </exception>
+    public static string Gs1DataMatrix(string elementString, BarcodeOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(elementString);
+        options ??= new BarcodeOptions();
+        return MatrixSvg(DataMatrixEncoder.EncodeGs1(elementString), quietZone: 2, options);
     }
 
     /// <summary>
@@ -100,10 +139,12 @@ public static class Barcode
         return "data:image/svg+xml;base64," + Convert.ToBase64String(Encoding.UTF8.GetBytes(svg));
     }
 
-    private static string QrSvg(bool[,] modules, BarcodeOptions options)
+    private static string QrSvg(bool[,] modules, BarcodeOptions options) => MatrixSvg(modules, quietZone: 4, options);
+
+    private static string MatrixSvg(bool[,] modules, int quietZone, BarcodeOptions options)
     {
         var size = modules.GetLength(0);
-        var quiet = options.QuietZone ? 4 : 0;
+        var quiet = options.QuietZone ? quietZone : 0;
         var total = size + 2 * quiet;
         var moduleSize = options.ModuleSize > 0 ? options.ModuleSize : 3;
         // About a quarter of the modules start a run, and each run is about 14 characters of path data.
@@ -198,8 +239,9 @@ public enum QrErrorCorrection
 public sealed class BarcodeOptions
 {
     /// <summary>
-    /// The width of one module (the narrowest bar, or one QR square) in CSS pixels, which sets the SVG's width and
-    /// height. Default 0: 3 for QR codes and 1.5 for barcodes. CSS <c>width</c> on the SVG or image scales it too.
+    /// The width of one module (the narrowest bar, or one square of a QR or Data Matrix code) in CSS pixels, which sets
+    /// the SVG's width and height. Default 0: 3 for QR and Data Matrix codes and 1.5 for barcodes. CSS <c>width</c> on
+    /// the SVG or image scales it too.
     /// </summary>
     public float ModuleSize { get; set; }
 
@@ -210,8 +252,9 @@ public sealed class BarcodeOptions
     public QrErrorCorrection ErrorCorrection { get; set; } = QrErrorCorrection.Medium;
 
     /// <summary>
-    /// Leave the blank margin scanners need around the code: 4 modules for QR codes, 10 for Code 128, 11 and 7 for
-    /// EAN-13. Default: true. Turn it off only when the layout leaves that space around the code.
+    /// Leave the blank margin scanners need around the code: 4 modules for QR codes, 2 for Data Matrix codes, 10 for
+    /// Code 128, 11 and 7 for EAN-13. Default: true. Turn it off only when the layout leaves that space around the
+    /// code.
     /// </summary>
     public bool QuietZone { get; set; } = true;
 
