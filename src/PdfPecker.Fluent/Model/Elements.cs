@@ -78,6 +78,12 @@ internal enum DecoratorKind
 
     /// <summary>Draws the content again on each later page its parent continues on.</summary>
     Repeat,
+
+    /// <summary>
+    /// HTML attributes that tell PdfPecker how to tag the content, such as an ARIA role, held in
+    /// <see cref="Decorator.Declarations"/> as name and value pairs.
+    /// </summary>
+    Tagging,
 }
 
 /// <summary>
