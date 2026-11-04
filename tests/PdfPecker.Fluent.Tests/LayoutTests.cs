@@ -791,6 +791,62 @@ public sealed class LayoutTests
     }
 
     [Fact]
+    public void Page_background_and_foreground_are_fixed_boxes_over_the_whole_page()
+    {
+        var document = Document.Create(d => d.Page(p =>
+        {
+            p.MarginVertical(20);
+            p.MarginHorizontal(30);
+            p.Background().Padding(10).Border(2).Background(Colors.Blue.Lighten5);
+            p.Header().Text("Header");
+            p.Content().Text("Body");
+            p.Foreground().AlignCenter().AlignMiddle().Text("DRAFT");
+        }));
+        string html = document.GenerateHtml();
+        string body = html[(html.IndexOf("<body>", StringComparison.Ordinal) + 6)..html.IndexOf("</body>", StringComparison.Ordinal)];
+        // The background comes first and the foreground last, so the foreground paints over the bands and the content.
+        Assert.StartsWith("<div class=\"c0\"><div class=\"c1\"></div></div><header", body);
+        Assert.EndsWith("</main><div class=\"c2\"><p>DRAFT</p></div>", body);
+        Assert.Contains(".c0{position:fixed;top:-20pt;right:-30pt;bottom:-20pt;left:-30pt;z-index:-1;padding-top:10pt;", html);
+        // What paints fills the page, as in QuestPDF; aligned content keeps its own size.
+        Assert.Contains(".c1{height:100%;border-top-width:2pt;", html);
+        Assert.Contains(".c2{position:fixed;top:-20pt;right:-30pt;bottom:-20pt;left:-30pt;display:flex;", html);
+    }
+
+    [Fact]
+    public void Page_background_and_foreground_cover_the_margins_and_bands_of_their_page_set_only()
+    {
+        var pdf = Document.Create(d =>
+        {
+            d.Page(p =>
+            {
+                p.Size(200, 200);
+                p.Margin(20);
+                p.Background().Background("#0000ff");
+                p.Header().Height(40).Background("#00ff00");
+                p.Content().Column(c => { c.Item().Text("a"); c.Item().PageBreak(); c.Item().Text("b"); });
+                p.Foreground().Width(60).Height(60).Background("#ff0000");
+            });
+            d.Page(p => { p.Size(200, 200); p.Content().Text("c"); });
+        }).GeneratePdf();
+        var renderer = PdfRenderer.Open(pdf);
+        Assert.Equal(3, renderer.PageCount);
+        for (int page = 0; page < 3; page++)
+        {
+            var image = renderer.RenderPage(page, new ImageOptions { Dpi = 72 });
+            (int, int, int) At(int x, int y)
+            {
+                int i = (y * image.Width + x) * 4;
+                return (image.Rgba[i], image.Rgba[i + 1], image.Rgba[i + 2]);
+            }
+            bool layered = page < 2;
+            Assert.Equal(layered ? (255, 0, 0) : (255, 255, 255), At(30, 30)); // the foreground, over the header
+            Assert.Equal(layered ? (0, 0, 255) : (255, 255, 255), At(190, 190)); // the background, in the margin
+            Assert.Equal(layered ? (0, 255, 0) : (255, 255, 255), At(100, 30)); // the header, over the background
+        }
+    }
+
+    [Fact]
     public void Markdown_becomes_its_html_in_a_styled_block()
     {
         var document = Html.Page(c => c.Markdown("# Title\n\nSome *soft*\nwrapped text."));

@@ -293,36 +293,45 @@ public static class PdfToHtml
             _ => "image/webp",
         };
 
-        // Pages are converted in parallel a batch at a time and written in order, so memory holds one batch, not the document.
-        int parallel = Math.Max(1, options.MaxDegreeOfParallelism);
-        var batch = new string[Math.Min(parallel, Math.Max(1, indices.Count))];
-        for (int start = 0; start < indices.Count; start += batch.Length)
+        WritePages(indices.Count, options.MaxDegreeOfParallelism, cancellationToken, i =>
         {
-            int count = Math.Min(batch.Length, indices.Count - start);
+            int index = indices[i];
+            // Only the first copy of a page has the id that links go to.
+            int id = firstCopy[i] ? index + 1 : 0;
+            return structured
+                ? StructuredPage(doc, tree, links, index, id, options, PageId, cancellationToken)
+                : Page(renderer, links, index, id, pageNames[i], imageOptions, mediaType, options, PageId, cancellationToken);
+        }, write);
+        write("</body>\n</html>\n");
+    }
+
+    /// <summary>
+    /// Converts pages in parallel a batch at a time and writes them in order, so memory holds one batch, not the document.
+    /// </summary>
+    internal static void WritePages(int count, int maxDegreeOfParallelism, CancellationToken cancellationToken, Func<int, string> page,
+        Action<string> write)
+    {
+        int parallel = Math.Max(1, maxDegreeOfParallelism);
+        var batch = new string[Math.Min(parallel, Math.Max(1, count))];
+        for (int start = 0; start < count; start += batch.Length)
+        {
+            int n = Math.Min(batch.Length, count - start);
             try
             {
-                Parallel.For(0, count, new ParallelOptions { MaxDegreeOfParallelism = parallel, CancellationToken = cancellationToken }, k =>
-                {
-                    int i = start + k, index = indices[i];
-                    // Only the first copy of a page has the id that links go to.
-                    int id = firstCopy[i] ? index + 1 : 0;
-                    batch[k] = structured
-                        ? StructuredPage(doc, tree, links, index, id, options, PageId, cancellationToken)
-                        : Page(renderer, links, index, id, pageNames[i], imageOptions, mediaType, options, PageId, cancellationToken);
-                });
+                Parallel.For(0, n, new ParallelOptions { MaxDegreeOfParallelism = parallel, CancellationToken = cancellationToken },
+                    k => batch[k] = page(start + k));
             }
             catch (AggregateException ex) when (ex.InnerExceptions.Count > 0)
             {
                 // Report a damaged page the same way a single page does, not wrapped.
                 System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(ex.InnerExceptions[0]);
             }
-            for (int k = 0; k < count; k++)
+            for (int k = 0; k < n; k++)
             {
                 write(batch[k]);
                 batch[k] = null!;
             }
         }
-        write("</body>\n</html>\n");
     }
 
     private static string Page(PdfRenderer renderer, PageLinks? links, int index, int id, string pageName, ImageOptions imageOptions,
@@ -350,7 +359,7 @@ public static class PdfToHtml
     }
 
     /// <summary>The structure tree of a tagged PDF, or null for an untagged one or a tree too damaged to read.</summary>
-    private static StructureTree? Tree(RenderDocument doc)
+    internal static StructureTree? Tree(RenderDocument doc)
     {
         try
         {
@@ -365,30 +374,44 @@ public static class PdfToHtml
     private static string StructuredPage(RenderDocument doc, StructureTree? tree, PageLinks? links, int index, int id, PdfHtmlOptions options,
         Func<int, int> pageIds, CancellationToken cancellationToken)
     {
-        var (w, h) = doc.PageSize(index);
-        List<FlowBlock> blocks;
+        var blocks = StructuredBlocks(doc, tree, links, index, options.RenderAnnotations, options.IncludeImages, out var collected, cancellationToken);
         FlowStyles? styles = null;
+        if (options.IncludeStyles)
+        {
+            var (w, h) = doc.PageSize(index);
+            styles = new FlowStyles(index + 1, w, h, collected.Fills, collected.Rules, blocks);
+        }
+        var sb = new StringBuilder(4096);
+        FlowHtmlWriter.WritePage(sb, id, blocks, pageIds, styles);
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// A page's headings, paragraphs, lists and tables in reading order, read from its tags where the PDF is tagged and
+    /// otherwise from its layout; the structured HTML and Markdown are both written from these.
+    /// </summary>
+    internal static List<FlowBlock> StructuredBlocks(RenderDocument doc, StructureTree? tree, PageLinks? links, int index, bool renderAnnotations,
+        bool includeImages, out TextCollector collected, CancellationToken cancellationToken)
+    {
+        var (w, h) = doc.PageSize(index);
         try
         {
-            var collected = doc.CollectText(index, options.RenderAnnotations, rules: true, cancellationToken);
+            collected = doc.CollectText(index, renderAnnotations, rules: true, cancellationToken);
             var pageLinks = links?.Read(index) ?? new List<PageLink>();
             // A tagged page says what its text is, but writers tag some tables, such as a grid of labels and values, as
             // paragraphs; tables its layout shows where the tags have only paragraphs replace those paragraphs.
             var tagged = tree != null && tree.Root.OnPage(index)
                 ? PageStructure.BuildTagged(tree, index, collected.Glyphs, w, h, pageLinks, cancellationToken) : null;
             var text = TextLayout.Build(collected.Glyphs, index + 1, w, h, true, cancellationToken);
-            blocks = PageStructure.Build(text, collected.Rules, collected.Bullets, pageLinks, cancellationToken);
+            var blocks = PageStructure.Build(text, collected.Rules, collected.Bullets, pageLinks, cancellationToken);
             if (tagged != null) blocks = PageStructure.AddLayoutTables(tagged, blocks);
-            if (options.IncludeImages) AddImages(doc, index, w, h, options, blocks, cancellationToken);
-            if (options.IncludeStyles) styles = new FlowStyles(index + 1, w, h, collected.Fills, collected.Rules, blocks);
+            if (includeImages) AddImages(doc, index, w, h, renderAnnotations, blocks, cancellationToken);
+            return blocks;
         }
         catch (PdfFormatException ex)
         {
             throw new InvalidDataException(ex.Message, ex);
         }
-        var sb = new StringBuilder(4096);
-        FlowHtmlWriter.WritePage(sb, id, blocks, pageIds, styles);
-        return sb.ToString();
     }
 
     /// <summary>The most pictures of one page put in structured HTML.</summary>
@@ -399,11 +422,11 @@ public static class PdfToHtml
     /// them: pictures that fill most of the page, image masks, pictures too small to see and pictures drawn turned are
     /// left out.
     /// </summary>
-    private static void AddImages(RenderDocument doc, int index, double width, double height, PdfHtmlOptions options, List<FlowBlock> blocks,
+    private static void AddImages(RenderDocument doc, int index, double width, double height, bool renderAnnotations, List<FlowBlock> blocks,
         CancellationToken cancellationToken)
     {
         int placed = 0;
-        foreach (var image in PdfImages.PageImages(doc, index, options.RenderAnnotations, MaxPageImages, cancellationToken))
+        foreach (var image in PdfImages.PageImages(doc, index, renderAnnotations, MaxPageImages, cancellationToken))
         {
             if (image.IsMask) continue;
             string mediaType = image.Format == PdfImageFormat.Jpeg ? "image/jpeg" : "image/png";
@@ -431,7 +454,7 @@ public static class PdfToHtml
         }
     }
 
-    private static string? DocumentTitle(PdfFile file)
+    internal static string? DocumentTitle(PdfFile file)
     {
         var title = (file.Resolve(file.GetDict(file.Trailer, "Info")?["Title"]) as PdfString)?.Text.Trim();
         return string.IsNullOrEmpty(title) ? null : title;

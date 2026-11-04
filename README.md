@@ -4,8 +4,8 @@
 
 [![NuGet](https://img.shields.io/nuget/v/PdfPecker.svg)](https://www.nuget.org/packages/PdfPecker)
 
-Fast HTML and Markdown to PDF conversion, PDF to PNG, JPEG, WebP and TIFF rendering, and PDF to HTML, for .NET, with no
-dependencies.
+Fast HTML and Markdown to PDF conversion, PDF to PNG, JPEG, WebP and TIFF rendering, and PDF to HTML and Markdown, for
+.NET, with no dependencies.
 
 PdfPecker has its own HTML parser, Markdown parser, CSS engine, layout engine and PDF writer, and its own PDF renderer.
 It does not start a browser, ship native binaries or pull in third-party packages; the NuGet package depends only on
@@ -86,6 +86,9 @@ string structured = PdfToHtml.Convert(File.ReadAllBytes("statement.pdf"), new Pd
 string styled = PdfToHtml.Convert(File.ReadAllBytes("statement.pdf"),
     new PdfHtmlOptions { Mode = PdfHtmlMode.Structured, IncludeStyles = true, IncludeImages = true });
 
+// Or as Markdown: headings, lists, bold and italic, links and pipe tables, for language models and search indexes
+string markdown = PdfToMarkdown.Convert(File.ReadAllBytes("statement.pdf"), new PdfMarkdownOptions { IncludePageComments = true });
+
 // Open a PDF once and render its pages one at a time, or in parallel
 var renderer = PdfRenderer.Open(pdf);
 renderer.RenderPage(0, new ImageOptions { Dpi = 150 }).Save("page1.png");
@@ -126,6 +129,28 @@ It writes compact HTML and CSS and renders it with PdfPecker, so every `PdfOptio
 signatures, e-invoices) works with it. What it covers and how it differs from QuestPDF is in its
 [README](https://github.com/Moonwalker1307/PdfPecker/blob/main/src/PdfPecker.Fluent/README.md).
 
+## Command line
+
+[PdfPecker.Cli](https://www.nuget.org/packages/PdfPecker.Cli) is the same library as a `pdfpecker` command, for scripts,
+build pipelines and designing a template. It is a dotnet tool released with every PdfPecker release under the same
+version, and like the library it needs no browser, no JavaScript and no network.
+
+```
+dotnet tool install -g PdfPecker.Cli
+
+pdfpecker convert invoice.html                       # writes invoice.pdf; .md files are Markdown
+pdfpecker watch invoice.html                         # converts again on every save, for a live preview in your PDF viewer
+pdfpecker merge cover.pdf report.pdf:2-9 -o all.pdf  # also split, extract, remove, rotate, stamp, compact, linearize
+pdfpecker sign all.pdf signed.pdf --cert me.pfx      # also verify, encrypt, decrypt, sanitize
+pdfpecker to-image all.pdf pages --format webp       # also to-html, text, info
+```
+
+A call without a command word is read like wkhtmltopdf's, so a script can switch by changing the program name:
+`pdfpecker -s A4 -T 15mm --footer-center "[page] / [topage]" in.html out.pdf`. Page size, orientation, margins, headers and
+footers with their tokens, zoom, style sheets and quiet mode work as they do there; options that exist because
+wkhtmltopdf runs a browser (`--javascript-delay`, `--cookie`, `--header-html`, ...) are ignored with a warning. Web
+addresses are refused. Its README is
+[here](https://github.com/Moonwalker1307/PdfPecker/blob/main/src/PdfPecker.Cli/README.md).
 ## Testing PDFs
 
 [PdfPecker.Testing](https://www.nuget.org/packages/PdfPecker.Testing) adds snapshot tests for the PDFs your code makes.
@@ -249,8 +274,9 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
 - **E-invoices and attachments**: Factur-X, ZUGFeRD, XRechnung and Peppol BIS 3.0 XML built from invoice data and
   checked against EN 16931, a ready-made invoice layout, and embedded files.
   [More](https://pdfpecker.net/docs/e-invoices/)
-- **Barcodes**: QR codes, EPC payment QR codes, Code 128 and EAN-13 as vector SVG, e.g.
-  `Barcode.QrCode("https://example.com")`. [More](https://pdfpecker.net/docs/barcodes/)
+- **Barcodes**: QR codes, EPC payment QR codes, Swiss QR-bill codes (with the Swiss cross and a checked payload), Data
+  Matrix and GS1 Data Matrix, Code 128 and EAN-13 as vector SVG, e.g. `Barcode.QrCode("https://example.com")` or
+  `Barcode.Gs1DataMatrix("(01)09506000134352(10)AB-123")`. [More](https://pdfpecker.net/docs/barcodes/)
 - **Existing PDFs**: merge (also streamed), split, reorder, rotate, stamp, extract text with positions, extract images
   and read document properties. [More](https://pdfpecker.net/docs/merging/)
 - **Compacting and Fast Web View**: `PdfCompactor` makes any PDF smaller without changing how it looks, and
@@ -277,6 +303,11 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   `IncludeStyles` keeps how the page looks in that structure: fonts, sizes, colours, backgrounds, rounded boxes, table
   borders, column widths and alignment, as CSS classes. `IncludeImages` adds the page's pictures as `<img>` elements.
   [More](https://pdfpecker.net/docs/pdf-to-html/)
+- **PDF to Markdown**: `PdfToMarkdown` writes the same structure as GitHub Flavored Markdown: headings, paragraphs,
+  bulleted and numbered lists, bold and italic text, links, and pipe tables, with several header rows joined column by
+  column and spanned cells in their first row and column. Line breaks the PDF made on purpose stay, and text that would
+  read as Markdown is escaped. `IncludePageComments` marks where each page starts, so a passage can be traced to its
+  page, and `IncludeImages` adds the pictures as `data:` images.
 - **Viewer settings and page labels**: the page, zoom and panel a viewer opens with, print settings, and page numbers
   such as "i" to "iv" for front matter. [More](https://pdfpecker.net/docs/options/)
 - **Reproducible output**: a fixed `CreationDate` or `SOURCE_DATE_EPOCH` gives byte-identical PDFs, for build pipelines
@@ -321,12 +352,14 @@ dotnet build
 dotnet test
 dotnet run --project samples/PdfPecker.Sample -c Release      # converts samples/PdfPecker.Sample/html/*.html and *.md into ./output
 dotnet run --project samples/PdfPecker.Fluent.Sample -c Release   # writes the PdfPecker.Fluent examples into ./output
+dotnet run --project src/PdfPecker.Cli -c Release -- convert in.html out.pdf   # the pdfpecker command-line tool
 dotnet run --project samples/PdfPecker.Razor.Sample -c Release    # writes the PdfPecker.Razor invoice into ./output
 dotnet run --project bench/PdfPecker.Benchmarks -c Release
 dotnet run --project bench/PdfPecker.Benchmarks -c Release -- --requirements    # memory and CPU per conversion
 bench/compare-versions.sh v1.22.0                              # this checkout against a release, in turns on this machine
 dotnet pack src/PdfPecker -c Release -o ./nupkg                # also checks the public API against the last release
 dotnet pack src/PdfPecker.Fluent -c Release -o ./nupkg         # the fluent package, with the same version
+dotnet pack src/PdfPecker.Cli -c Release -o ./nupkg            # the pdfpecker dotnet tool, with the same version
 dotnet pack src/PdfPecker.Testing -c Release -o ./nupkg        # the snapshot testing package, with the same version
 dotnet pack src/PdfPecker.Razor -c Release -o ./nupkg          # the Razor package, with the same version
 ```

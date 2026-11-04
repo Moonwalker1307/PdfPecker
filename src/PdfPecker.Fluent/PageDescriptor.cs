@@ -168,4 +168,16 @@ public sealed class PageDescriptor
 
     /// <summary>The footer of the even pages (2, 4, ...), which takes the place of <see cref="Footer"/> there; see <see cref="EvenPageHeader"/>.</summary>
     public IContainer EvenPageFooter() => _page.EvenFooter;
+
+    /// <summary>
+    /// A slot as large as the whole page, margins included, drawn on every page of this set under the header, content
+    /// and footer: a watermark, a letterhead or a frame. A page number in it shows the number of the set's first page.
+    /// </summary>
+    public IContainer Background() => _page.BackgroundLayer;
+
+    /// <summary>
+    /// A slot as large as the whole page, margins included, drawn on every page of this set over the header, content
+    /// and footer: a "Draft" stamp or a frame. A page number in it shows the number of the set's first page.
+    /// </summary>
+    public IContainer Foreground() => _page.ForegroundLayer;
 }

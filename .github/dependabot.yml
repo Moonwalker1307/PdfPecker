@@ -36,7 +36,7 @@ updates:
 
   # PdfPecker.Razor's one package, Microsoft.AspNetCore.Components.Web. Each target framework references the release of
   # its own .NET version on purpose, so only patches are proposed: a major update would move net8.0 or net9.0 to a newer
-  # ASP.NET Core than the app's runtime. 
+  # ASP.NET Core than the app's runtime.
   - package-ecosystem: nuget
     directory: /src/PdfPecker.Razor
     schedule:
@@ -50,6 +50,14 @@ updates:
 
   - package-ecosystem: nuget
     directory: /tests/PdfPecker.Razor.Tests
+    schedule:
+      interval: weekly
+    groups:
+      nuget-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: nuget
+    directory: /tests/PdfPecker.Cli.Tests
     schedule:
       interval: weekly
     groups:
