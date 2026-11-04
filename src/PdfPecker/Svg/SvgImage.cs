@@ -157,6 +157,8 @@ internal sealed partial class SvgImage
     private ComputedStyle? _useParent; // inside what a use element draws: the style the next element inherits from
     private int _wrapDepth; // groups, clips, masks and filters around the element being drawn
     private float _wrapOpacity = 1; // the opacity of the translucent groups around it
+    // Patterns, masks and feImage draw into lists of their own (see Capture); HTML cannot be part of those.
+    private int _captureDepth;
 
     /// <summary>The url that stands for context-fill and context-stroke in a computed style.</summary>
     public const string ContextFill = "context-fill", ContextStroke = "context-stroke";
@@ -519,7 +521,9 @@ internal sealed partial class SvgImage
             case "foreignobject":
             {
                 float w = Len(e, "width", Axis.X), h = Len(e, "height", Axis.Y);
-                if (!(w > 0 && h > 0)) return;
+                // Inside a pattern tile, a mask or a filter image the content would have to be drawn into that list, and
+                // the shape index it was given pointed into that list rather than the drawing's own shapes.
+                if (!(w > 0 && h > 0) || _captureDepth > 0) return;
                 ForeignObjects ??= new List<SvgForeignObject>();
                 ForeignObjects.Add(new SvgForeignObject(e, ctm, Len(e, "x", Axis.X), Len(e, "y", Axis.Y), w, h, op * _wrapOpacity,
                     _wrapDepth == 0 ? Shapes.Count : -1));

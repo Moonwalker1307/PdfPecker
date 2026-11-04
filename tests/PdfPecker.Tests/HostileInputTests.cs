@@ -794,6 +794,18 @@ public class HostileInputTests
         Assert.True(pdf.Length < 100_000, $"{pdf.Length} bytes");
     }
 
+    [Theory]
+    [InlineData("<defs><pattern id='p' width='5' height='5'><circle r='8'/><circle r='8'/><foreignObject width='6' height='6'><p>x</p></foreignObject></pattern></defs><circle r='5' fill='url(#p)'/>")]
+    [InlineData("<defs><mask id='m'><rect width='9' height='9' fill='white'/><rect width='9' height='9'/><foreignObject width='6' height='6'><p>x</p></foreignObject></mask></defs><circle r='5' mask='url(#m)'/>")]
+    [InlineData("<defs><filter id='f'><feImage href='#g'/></filter><g id='g'><rect width='9' height='9'/><rect width='9' height='9'/><foreignObject width='6' height='6'><p>x</p></foreignObject></g></defs><circle r='5' filter='url(#f)'/>")]
+    public void Svg_foreign_objects_inside_patterns_masks_and_filter_images_are_left_out(string content)
+    {
+        // Found by the fuzzer: target svg, exception-927917ba (daily run 90). A foreignObject in a pattern noted its place
+        // among the pattern's shapes, and the drawing was then split at that place in its own, shorter list of shapes,
+        // which threw ArgumentException.
+        AssertStructurallyValid(Bounded("<svg width='20' height='20'>" + content + "</svg>"));
+    }
+
     [Fact]
     public void Svg_markers_that_use_other_markers_stay_within_the_drawing_budget()
     {
