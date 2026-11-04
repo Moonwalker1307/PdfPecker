@@ -159,6 +159,20 @@ public class FontFaceMetricsTests
     }
 
     [Fact]
+    public void ASplitFamilyTakesItsUnitsFromTheFaceWithTheSpace()
+    {
+        // Chrome's first available font is the first face whose unicode-range has the space, so the capitals' larger
+        // face does not change the ex unit here.
+        var css = Face("Plain") + $"@font-face {{ font-family: Split; src: url('{Uri}'); unicode-range: U+0041-005A; size-adjust: 150%; }}"
+            + $"@font-face {{ font-family: Split; src: url('{Uri}'); unicode-range: U+0020, U+0061-007A; }}"
+            + "b { display: block; height: 1px; width: 4ex; background: blue }";
+        var rect = new Regex(@"[\d.]+ [\d.]+ ([\d.]+) [\d.]+ re");
+        double ExBox(string family) => double.Parse(rect.Matches(AllContent(Convert(css, $"<div style='font-family: {family}'><b></b></div>")))[^1].Groups[1].Value,
+            CultureInfo.InvariantCulture);
+        Assert.Equal(ExBox("Plain"), ExBox("Split"), 2);
+    }
+
+    [Fact]
     public void DescriptorsAtTheirInitialValuesChangeNothing()
     {
         var plain = Convert(Face("F"), "<p style='font-family: F'>Hamburg</p>");
@@ -168,5 +182,26 @@ public class FontFaceMetricsTests
             "<p style='font-family: F'>Hamburg</p>");
         Assert.Equal(plain, initial);
         Assert.Equal(plain, invalid);
+    }
+}
+
+/// <summary>size-adjust at its cap on text long enough to pass the range of an int when scaled.</summary>
+[Collection(HostileInputCollection.Name)]
+public class FontFaceMetricsHostileInputTests
+{
+    private static readonly byte[] Regular = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "WorkSans-Regular.ttf"));
+
+    [Fact]
+    public void HugeSizeAdjustOnALongRunKeepsWidthsPositive()
+    {
+        var font = new EmbeddedFont(Assert.Single(FontProgram.Load(Regular)), false, false, faceMetrics: FaceMetrics.None with { SizeAdjust = 100 });
+        string run = new('W', 40_000);
+        Assert.Equal(int.MaxValue, font.MeasureUnits(run, 0, run.Length));
+
+        string uri = "data:font/ttf;base64," + System.Convert.ToBase64String(Regular);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var pdf = HtmlToPdf.Convert($"<style>@font-face {{ font-family: F; src: url('{uri}'); size-adjust: 1e30%; }}</style>"
+            + $"<p style='font-family: F'>{run}</p>", null, cts.Token);
+        AssertStructurallyValid(pdf);
     }
 }

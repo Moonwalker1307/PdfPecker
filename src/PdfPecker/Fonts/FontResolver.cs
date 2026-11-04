@@ -321,7 +321,14 @@ internal sealed class FontResolver
         if (candidates.Count == 0) candidates.Add(standard);
 
         var primary = candidates[0];
-        var result = new FontChain(primary, (cp, accept) =>
+        // The font-relative units and font-size-adjust come from the first available font, which CSS Fonts defines as
+        // the first face whose unicode-range has the space, as Chrome takes it. It differs from the first font only when
+        // unicode-range splits a family so that its first face lacks the space.
+        TextFont? metrics = null;
+        if (primary is EmbeddedFont first && !first.Covers(' '))
+            for (int i = 1; i < candidates.Count && metrics == null; i++)
+                if (Covers(candidates[i], ' ')) metrics = candidates[i];
+        var result = new FontChain(primary, metrics, (cp, accept) =>
         {
             for (int i = 1; i < candidates.Count; i++)
                 if (Covers(candidates[i], cp) && (accept == null || accept(candidates[i]))) return candidates[i];

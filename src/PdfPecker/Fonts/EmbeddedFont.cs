@@ -58,8 +58,13 @@ internal sealed class EmbeddedFont : TextFont
         }
     }
 
-    /// <summary>A width in thousandths of an em of the program, scaled by size-adjust to thousandths of the font size.</summary>
-    private int Scaled(int units) => SizeAdjust == 1 ? units : (int)MathF.Round(units * SizeAdjust);
+    /// <summary>
+    /// A width in thousandths of an em of the program, scaled by size-adjust to thousandths of the font size. It is
+    /// worked out in doubles and clamped, since a long run at a large size-adjust passes the range of an int, and the
+    /// conversion of such a value gives int.MinValue on .NET 8, a negative width.
+    /// </summary>
+    private int Scaled(int units)
+        => SizeAdjust == 1 ? units : (int)Math.Clamp(Math.Round((double)units * SizeAdjust), int.MinValue, int.MaxValue);
 
     /// <summary>True when the font has a glyph for the code point (and its unicode-range, if any, includes it).</summary>
     public bool Covers(int codePoint)
@@ -185,7 +190,7 @@ internal sealed class EmbeddedFont : TextFont
     [ThreadStatic] private static List<ShapedGlyph>? t_glyphs;
 
     public override int MeasureUnits(string s, int start, int length)
-        => SizeAdjust == 1 ? MeasureProgramUnits(s, start, length) : (int)MathF.Round(MeasureProgramUnits(s, start, length) * SizeAdjust);
+        => Scaled(MeasureProgramUnits(s, start, length));
 
     // The width in thousandths of the program's em, before size-adjust.
     private int MeasureProgramUnits(string s, int start, int length)
@@ -247,14 +252,24 @@ internal sealed class EmbeddedFont : TextFont
 internal sealed class FontChain : TextFont
 {
     private readonly TextFont _primary;
+    // The font of the font-relative units and font-size-adjust when it is not the primary one: a later face of a family
+    // split by unicode-range whose first face lacks the space. The line metrics stay the primary font's: Chrome takes
+    // them from that face too, but grows each line for the fonts its glyphs use, which the layout does not, and the
+    // primary font's metrics come closer to Chrome's lines when the text uses the first face.
+    private readonly TextFont? _metrics;
     // Finds a font for a character the primary lacks, the first after the primary that also passes the test when one
     // is given.
     private readonly Func<int, Func<TextFont, bool>?, TextFont?> _fallback;
     private readonly Dictionary<int, TextFont> _picked = new();
 
-    public FontChain(TextFont primary, Func<int, Func<TextFont, bool>?, TextFont?> fallback)
+    public FontChain(TextFont primary, Func<int, Func<TextFont, bool>?, TextFont?> fallback) : this(primary, null, fallback)
+    {
+    }
+
+    public FontChain(TextFont primary, TextFont? metrics, Func<int, Func<TextFont, bool>?, TextFont?> fallback)
     {
         _primary = primary;
+        _metrics = metrics;
         _fallback = fallback;
         Ascent = primary.Ascent;
         Descent = primary.Descent;
@@ -363,13 +378,13 @@ internal sealed class FontChain : TextFont
     private FontChain? _withoutLigatures, _withoutKerning;
 
     public override TextFont WithoutLigatures()
-        => _withoutLigatures ??= new FontChain(_primary.WithoutLigatures(), (cp, accept) => _fallback(cp, accept)?.WithoutLigatures());
+        => _withoutLigatures ??= new FontChain(_primary.WithoutLigatures(), _metrics, (cp, accept) => _fallback(cp, accept)?.WithoutLigatures());
 
     public override TextFont WithoutKerning()
-        => _withoutKerning ??= new FontChain(_primary.WithoutKerning(), (cp, accept) => _fallback(cp, accept)?.WithoutKerning());
+        => _withoutKerning ??= new FontChain(_primary.WithoutKerning(), _metrics, (cp, accept) => _fallback(cp, accept)?.WithoutKerning());
 
-    // The first font of the list is the one font-size-adjust holds constant.
-    public override float Metric(FontMetric metric) => _primary.Metric(metric);
+    // The first available font is the one font-size-adjust holds constant.
+    public override float Metric(FontMetric metric) => (_metrics ?? _primary).Metric(metric);
 
     public override bool Supports(string features) => _primary.Supports(features);
 
@@ -382,7 +397,7 @@ internal sealed class FontChain : TextFont
         if (variants.TryGetValue(features, out var cached)) return cached;
         // Bundled font chains live as long as the process, so ever new feature settings must not grow this forever.
         if (variants.Count >= MaxVariants) return this;
-        return variants.GetOrAdd(features, k => new FontChain(_primary.WithFeatures(k), (cp, accept) => _fallback(cp, accept)?.WithFeatures(k)));
+        return variants.GetOrAdd(features, k => new FontChain(_primary.WithFeatures(k), _metrics, (cp, accept) => _fallback(cp, accept)?.WithFeatures(k)));
     }
 
     public override int KernUnits(int left, int right)
