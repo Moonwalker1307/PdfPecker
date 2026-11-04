@@ -18,6 +18,7 @@ dotnet pack src/PdfPecker -c Release -o ./nupkg                 # the package, w
 dotnet run --project samples/PdfPecker.Sample -c Release        # converts the sample HTML and Markdown into ./output
 dotnet publish samples/PdfPecker.Sample -c Release -p:PublishAot=true -o aot   # Native AOT, as CI checks it
 dotnet run --project samples/PdfPecker.Fluent.Sample -c Release -- output   # writes the fluent examples as PDF and HTML
+dotnet run --project samples/PdfPecker.Razor.Sample -c Release -- output    # writes the Razor invoice as PDF and HTML
 ```
 
 ## What breaks the build

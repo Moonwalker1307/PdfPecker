@@ -1,0 +1,13 @@
+<DocumentLayout Title="@($"Invoice {Data.Number}")">
+    <h1>Invoice @Data.Number</h1>
+    <p>
+        @Data.Date.ToString("d MMMM yyyy", CultureInfo.InvariantCulture)<br>
+        <strong>@Data.Customer</strong><br>
+        @Data.CustomerAddress
+    </p>
+    <LineTable Lines="Data.Lines" Total="Data.Total" />
+</DocumentLayout>
+
+@code {
+    [Parameter, EditorRequired] public InvoiceModel Data { get; set; } = default!;
+}

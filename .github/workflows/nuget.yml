@@ -98,9 +98,11 @@ jobs:
       - run: dotnet build -c Release -p:Version=${{ steps.version.outputs.version }}
       - run: dotnet test -c Release --no-build
 
-      # PdfPecker.Fluent is released with every PdfPecker release, with the same version, and depends on that version.
+      # PdfPecker.Fluent and PdfPecker.Razor are released with every PdfPecker release, with the same version, and depend
+      # on that version.
       - run: dotnet pack src/PdfPecker -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
       - run: dotnet pack src/PdfPecker.Fluent -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
+      - run: dotnet pack src/PdfPecker.Razor -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -177,8 +179,10 @@ jobs:
       - run: dotnet test -c Release -f net10.0 --no-build tests/PdfPecker.Tests
       - run: dotnet build -c Release -f net10.0 tests/PdfPecker.Fluent.Tests
       - run: dotnet test -c Release -f net10.0 --no-build tests/PdfPecker.Fluent.Tests
+      - run: dotnet build -c Release -f net10.0 tests/PdfPecker.Razor.Tests
+      - run: dotnet test -c Release -f net10.0 --no-build tests/PdfPecker.Razor.Tests
 
-  # IsAotCompatible only turns on the analyzers; publishing and running the samples as native executables proves both
+  # IsAotCompatible only turns on the analyzers; publishing and running the samples as native executables proves the
   # packages really work trimmed and ahead-of-time compiled.
   native-aot:
     runs-on: ubuntu-latest
@@ -211,6 +215,16 @@ jobs:
           ./aot-fluent/PdfPecker.Fluent.Sample aot-fluent-output
           test "$(ls aot-fluent-output/*.pdf | wc -l)" -ge 5
 
+      # Warnings stay errors here; the sample's project file lets through only Microsoft.AspNetCore.Components' own.
+      - name: Publish the Razor sample with native AOT
+        run: dotnet publish samples/PdfPecker.Razor.Sample -c Release -p:PublishAot=true -p:TreatWarningsAsErrors=true -o aot-razor
+
+      - name: Convert the Razor invoice
+        run: |
+          ./aot-razor/PdfPecker.Razor.Sample aot-razor-output
+          test "$(head -c 5 aot-razor-output/invoice.pdf)" = "%PDF-"
+          grep -q "Template design &lt;draft &amp; final&gt;" aot-razor-output/invoice.html
+
   release:
     if: github.event_name == 'release'
     needs: build
@@ -230,7 +244,7 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
         run: gh release upload "$TAG" artifacts/*.nupkg --clobber
 
-  # Pushes both release packages, PdfPecker and PdfPecker.Fluent, to nuget.org with Trusted Publishing: NuGet/login swaps a GitHub OIDC token
+  # Pushes the release packages, PdfPecker, PdfPecker.Fluent and PdfPecker.Razor, to nuget.org with Trusted Publishing: NuGet/login swaps a GitHub OIDC token
   # for a short-lived API key, so no long-lived key is stored in the repository. Runs only for published releases.
   publish:
     if: github.event_name == 'release'

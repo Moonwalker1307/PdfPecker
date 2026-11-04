@@ -129,6 +129,17 @@ The benchmarks:
 dotnet run --project bench/PdfPecker.Fluent.Benchmarks -c Release                 # the fluent layer's own cost
 ```
 
+## PdfPecker.Razor
+
+The Razor package's tests are in `tests/PdfPecker.Razor.Tests`, a Razor SDK project with its own small components,
+and run with the rest. `RazorToPdfTests` checks parameters, encoding of caller text, `MarkupString`, injected services,
+asynchronous data, layouts, the errors for unknown parameters, missing services and component exceptions,
+cancellation, parallel conversions, and that the PDF is byte for byte the one `HtmlToPdf` makes from the rendered HTML.
+The package has no goldens of its own: its output is PdfPecker's output for the HTML Razor writes.
+
+CI's `native-aot` job publishes `samples/PdfPecker.Razor.Sample` with Native AOT and checks that it writes the invoice
+PDF.
+
 It times composing and writing HTML, `GeneratePdf`, and `HtmlToPdf` on the same HTML, after a 12-second warm-up. The
 comparison with QuestPDF, the same invoice built with both, is in the
 [PdfPecker.Benchmarks](https://github.com/Moonwalker1307/PdfPecker.Benchmarks) repository.
