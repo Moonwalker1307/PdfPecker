@@ -99,6 +99,9 @@ internal sealed class GridAreas
 }
 
 internal enum SvgLineCap : byte { Butt, Round, Square }
+
+/// <summary>transform-box: the reference box of transform-origin and of the percentages in a transform.</summary>
+internal enum TransformBox : byte { ViewBox, ContentBox, BorderBox, FillBox, StrokeBox }
 internal enum SvgLineJoin : byte { Miter, Round, Bevel }
 
 /// <summary>

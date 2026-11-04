@@ -143,7 +143,9 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   line taller, `content: none` hides the marker, `counter(list-item)` numbers it and its own `direction` orders its
   text, as in Chrome), images and gradients in `::before` and `::after` content, inline SVG (with
   percentage coordinates and sizes, as in Bootstrap's placeholder images, HTML in `<foreignObject>`, and icons drawn
-  with `<use>` from a sprite of symbols that is itself hidden, as in Bootstrap's icon sprites) and PNG, JPEG, GIF, WebP, BMP and TIFF images (also chosen by `srcset`, `<picture>` and
+  with `<use>` from a sprite of symbols that is itself hidden, as in Bootstrap's icon sprites; also CSS `transform` with `transform-box` and
+  `transform-origin` on SVG elements, such as a gauge needle turning about its own centre, and `vector-effect: non-scaling-stroke`
+  for hairlines in a scaled chart, though markers still scale) and PNG, JPEG, GIF, WebP, BMP and TIFF images (also chosen by `srcset`, `<picture>` and
   `image-set()`,
   shown by `<embed>` and `<object>`, photos turned upright by their EXIF orientation, and `image-rendering: pixelated`
   or `crisp-edges` writing enlarged images, such as QR codes and pixel art, with hard pixel edges in every PDF viewer), and CSS-only charts such as
