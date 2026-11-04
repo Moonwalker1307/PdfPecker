@@ -463,7 +463,7 @@ internal sealed partial class ComputedStyle
         }
     }
 
-    // ---- Other properties that are not inherited and that few boxes set: transforms, generated content, counters, bookmarks, shapes, initial letters, footnotes and container queries.
+    // ---- Other properties that are not inherited and that few boxes set: transforms, generated content, counters, bookmarks, shapes, initial letters, footnotes, container queries and gap decorations.
 
     public bool TableLayoutFixed { get => _rare.TableLayoutFixed; set => Rare.TableLayoutFixed = value; }
     public string? TextOverflow { get => _rare.TextOverflow; set => Rare.TextOverflow = value; }
@@ -512,6 +512,11 @@ internal sealed partial class ComputedStyle
     public CounterOp[]? CounterReset { get => _rare.CounterReset; set => Rare.CounterReset = value; }
     public CounterOp[]? CounterSet { get => _rare.CounterSet; set => Rare.CounterSet = value; }
     public CounterOp[]? CounterIncrement { get => _rare.CounterIncrement; set => Rare.CounterIncrement = value; }
+    /// <summary>The gap decoration properties other than a single column rule, or null when none is set.</summary>
+    public GapRules? GapRules => _rare.GapRules;
+
+    /// <summary>The gap decoration properties to change one in: a copy, since styles share them.</summary>
+    public GapRules ChangeGapRules() => Rare.GapRules = _rare.GapRules?.Copy() ?? new GapRules();
 
     // The group to change a value in, copied first when other styles share it.
     private RareFields Rare => _rare.Shared ? _rare = _rare.Copy() : _rare;
@@ -566,6 +571,7 @@ internal sealed partial class ComputedStyle
         public string? BookmarkLabel;               // bookmark-label as written; null = content(text)
         public bool BookmarkClosed;                 // bookmark-state: closed
         public CounterOp[]? CounterReset, CounterSet, CounterIncrement;
+        public GapRules? GapRules;                  // row rules, rule lists, breaks, insets, visibility and overlap; null = all initial
 
         public RareFields Copy()
         {

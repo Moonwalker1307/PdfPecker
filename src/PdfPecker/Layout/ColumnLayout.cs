@@ -827,32 +827,56 @@ internal sealed partial class LayoutEngine
         }
     }
 
-    /// <summary>column-rule: a line in the middle of each gap between columns that hold content.</summary>
+    /// <summary>
+    /// column-rule: a line in the middle of each gap between columns that hold content. Lists of values (CSS Gaps 1)
+    /// give the gaps their values in turn, and the cap insets move the ends of each line; a percentage of no junction
+    /// is zero.
+    /// </summary>
     private void ColumnRules(ComputedStyle s, int usedColumns, float x, float top, float bottom, float colW, float gap, int n, bool rtl)
     {
-        if (s.ColumnRuleStyle == BorderStyle.None || s.ColumnRuleWidth <= 0 || bottom <= top) return;
-        float rw = s.ColumnRuleWidth, h = bottom - top;
-        uint color = s.ColumnRuleColor ?? s.Color;
+        var rules = s.GapRules;
+        if (rules == null)
+        {
+            if (s.ColumnRuleStyle == BorderStyle.None || s.ColumnRuleWidth <= 0 || bottom <= top) return;
+            for (int col = 1; col < usedColumns; col++)
+                ColumnRule(x + (rtl ? n - col : col) * (colW + gap) - gap / 2, top, bottom, s.ColumnRuleStyle, s.ColumnRuleWidth, s.ColumnRuleColor ?? s.Color);
+            return;
+        }
+        var insets = rules.ColumnInsets;
+        float from = top + (insets.CapStart.OverlapJoin ? 0 : insets.CapStart.Length.Resolve(0));
+        float to = bottom - (insets.CapEnd.OverlapJoin ? 0 : insets.CapEnd.Length.Resolve(0));
+        if (to <= from) return;
+        int gaps = usedColumns - 1;
         for (int col = 1; col < usedColumns; col++)
         {
-            float mid = x + (rtl ? n - col : col) * (colW + gap) - gap / 2;
-            switch (s.ColumnRuleStyle)
+            var style = rules.ColumnStyles?.For(col - 1, gaps) ?? s.ColumnRuleStyle;
+            float width = rules.ColumnWidths?.For(col - 1, gaps) ?? s.ColumnRuleWidth;
+            uint color = (rules.ColumnColors != null ? rules.ColumnColors.For(col - 1, gaps) : s.ColumnRuleColor) ?? s.Color;
+            if (style != BorderStyle.None && width > 0)
+                ColumnRule(x + (rtl ? n - col : col) * (colW + gap) - gap / 2, from, to, style, width, color);
+        }
+    }
+
+    /// <summary>One column rule, centred on <paramref name="mid"/>.</summary>
+    private void ColumnRule(float mid, float top, float bottom, BorderStyle style, float rw, uint color)
+    {
+        float h = bottom - top;
+        switch (style)
+        {
+            case BorderStyle.Dotted:
+            case BorderStyle.Dashed:
+                _ops.Add(new LineOp(mid, top, mid, bottom, rw, color, dotted: style == BorderStyle.Dotted));
+                break;
+            case BorderStyle.Double when rw >= 2.25f:
             {
-                case BorderStyle.Dotted:
-                case BorderStyle.Dashed:
-                    _ops.Add(new LineOp(mid, top, mid, bottom, rw, color, dotted: s.ColumnRuleStyle == BorderStyle.Dotted));
-                    break;
-                case BorderStyle.Double when rw >= 2.25f:
-                {
-                    float line = rw / 3;
-                    _ops.Add(new RectOp(mid - rw / 2, top, line, h, color));
-                    _ops.Add(new RectOp(mid + rw / 2 - line, top, line, h, color));
-                    break;
-                }
-                default:
-                    _ops.Add(new RectOp(mid - rw / 2, top, rw, h, color));
-                    break;
+                float line = rw / 3;
+                _ops.Add(new RectOp(mid - rw / 2, top, line, h, color));
+                _ops.Add(new RectOp(mid + rw / 2 - line, top, line, h, color));
+                break;
             }
+            default:
+                _ops.Add(new RectOp(mid - rw / 2, top, rw, h, color));
+                break;
         }
     }
 
