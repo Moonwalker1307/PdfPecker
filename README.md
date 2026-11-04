@@ -70,6 +70,7 @@ byte[] safe = PdfSanitizer.RemoveActiveContent(File.ReadAllBytes("received.pdf")
 // Fast Web View: the first page shows while the rest of a large PDF is still downloading
 byte[] web = HtmlToPdf.Convert(html, new PdfOptions { Linearize = true });
 byte[] mergedForWeb = PdfLinearizer.Linearize(PdfMerger.Merge(invoicePdf, termsPdf));
+byte[] protectedForWeb = PdfLinearizer.Linearize(mergedForWeb, new PdfSecurity { UserPassword = "secret" }, password: null);
 
 // Title, author, PDF version, page sizes, encryption and PDF/A claim of any PDF
 var properties = PdfDocumentProperties.Read(File.ReadAllBytes("received.pdf"));
@@ -225,7 +226,8 @@ How snapshots are created and accepted, and the appearance comparison for PDFs f
 - **Existing PDFs**: merge (also streamed), split, reorder, rotate, stamp, extract text with positions, extract images
   and read document properties. [More](https://pdfpecker.net/docs/merging/)
 - **Compacting and Fast Web View**: `PdfCompactor` makes any PDF smaller without changing how it looks, and
-  `PdfOptions.Linearize` or `PdfLinearizer` writes a linearized PDF whose first page shows before the rest arrives.
+  `PdfOptions.Linearize` or `PdfLinearizer` writes a linearized PDF whose first page shows before the rest arrives,
+  also encrypted: `PdfLinearizer` opens a protected PDF with its password and encrypts the result in the same pass.
   [More](https://pdfpecker.net/docs/compacting/)
 - **Removing active content**: `PdfSanitizer` takes JavaScript, actions that launch programs, open other files or
   submit form data, XFA and media annotations out of PDFs from others, and `HasActiveContent` tells whether a PDF has

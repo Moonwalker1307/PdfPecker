@@ -151,12 +151,7 @@ public static class PdfProtector
         {
             var file = Open(pdf, password);
             CheckNotSigned(file);
-            var xmp = Xmp(file);
-            if (xmp != null && Regex.IsMatch(xmp, @"pdfaid:part\s*(>\s*|=\s*[""'])\d"))
-                throw new ArgumentException("The PDF claims PDF/A conformance, which does not allow encryption.", nameof(pdf));
-            if (xmp != null && xmp.Contains("http://www.aiim.org/pdfua/ns/id/", StringComparison.Ordinal)
-                && (security.Permissions & PdfPermissions.ExtractForAccessibility) == 0)
-                throw new ArgumentException("The PDF claims PDF/UA, which needs PdfPermissions.ExtractForAccessibility so screen readers can read an encrypted file.", nameof(security));
+            CheckCanEncrypt(file, security);
             using var crypt = new PdfEncryptor(security);
             return PdfRewriter.Write(file, crypt);
         }
@@ -186,6 +181,17 @@ public static class PdfProtector
         {
             throw new InvalidDataException("The PDF is not readable: " + ex.Message, ex);
         }
+    }
+
+    /// <summary>Refuses to encrypt a PDF that claims PDF/A, or one that claims PDF/UA without access for screen readers.</summary>
+    internal static void CheckCanEncrypt(PdfFile file, PdfSecurity security)
+    {
+        var xmp = Xmp(file);
+        if (xmp != null && Regex.IsMatch(xmp, @"pdfaid:part\s*(>\s*|=\s*[""'])\d"))
+            throw new ArgumentException("The PDF claims PDF/A conformance, which does not allow encryption.", "pdf");
+        if (xmp != null && xmp.Contains("http://www.aiim.org/pdfua/ns/id/", StringComparison.Ordinal)
+            && (security.Permissions & PdfPermissions.ExtractForAccessibility) == 0)
+            throw new ArgumentException("The PDF claims PDF/UA, which needs PdfPermissions.ExtractForAccessibility so screen readers can read an encrypted file.", nameof(security));
     }
 
     /// <summary>Refuses a PDF with a signed signature field or a certification (DocMDP) or usage rights signature.</summary>
