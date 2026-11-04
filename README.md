@@ -272,8 +272,9 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   [More](https://pdfpecker.net/docs/accessibility/)
 - **Forms**: HTML inputs become fillable PDF fields; read, fill and flatten the fields of existing PDFs. Check boxes
   and radio buttons take `accent-color`, and `appearance: none` leaves them to the page's own CSS (`:checked`,
-  `::before` and `::after`), as for toggle switches; such a control is drawn rather than made a field.
-  [More](https://pdfpecker.net/docs/forms/)
+  `::before` and `::after`), as for toggle switches; such a control is drawn rather than made a field. An element with
+  `data-pdf-signature="Buyer"` becomes an empty signature field over its box, which `PdfSigner` fills later with
+  `FieldName = "Buyer"`. [More](https://pdfpecker.net/docs/forms/)
 - **Digital signatures**: PAdES signing, certification signatures, timestamps, external signers, verification (SHA-1
   signatures count as not valid unless you allow them) and long-term validation. [More](https://pdfpecker.net/docs/signatures/)
 - **E-invoices and attachments**: Factur-X, ZUGFeRD, XRechnung and Peppol BIS 3.0 XML built from invoice data and

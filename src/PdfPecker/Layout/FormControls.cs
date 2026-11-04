@@ -3,7 +3,7 @@ using PdfPecker.Html;
 
 namespace PdfPecker.Layout;
 
-internal enum ControlKind { Text, CheckBox, Radio, Combo, List, Button }
+internal enum ControlKind { Text, CheckBox, Radio, Combo, List, Button, Signature }
 
 /// <summary>
 /// A form control (input, textarea, select or button) prepared for layout. Its value is laid out as ordinary content,
@@ -49,6 +49,12 @@ internal static class FormControls
     public const string ValueElement = "pdf-field-value";
     public const string GaugeElement = "pdf-gauge", GaugeValueElement = "pdf-gauge-value";
 
+    /// <summary>
+    /// The attribute that makes an element's box an empty signature field, named by its value, which
+    /// <see cref="PdfSigner"/> can sign later through <see cref="PdfSignatureOptions.FieldName"/>.
+    /// </summary>
+    public const string SignatureAttribute = "data-pdf-signature";
+
     /// <summary>The characters a text field is wide by its size attribute (a textarea's cols), or null without one.</summary>
     public static int? FieldChars(Element e)
         => int.TryParse(e.GetAttribute(e.Name == "textarea" ? "cols" : "size"), NumberStyles.Integer, CultureInfo.InvariantCulture, out int n)
@@ -85,7 +91,11 @@ internal static class FormControls
                 {
                     if (c.Name is "input" or "textarea" or "select" or "button") PrepareControl(c);
                     else if (c.Name is "progress" or "meter") PrepareGauge(c);
-                    else if (c.Name != "svg") Walk(c);
+                    else if (c.Name != "svg")
+                    {
+                        if (c.HasAttribute(SignatureAttribute)) PrepareSignature(c);
+                        Walk(c);
+                    }
                 }
         }
 
@@ -102,6 +112,22 @@ internal static class FormControls
             for (int k = 2; names.ContainsKey(candidate); k++) candidate = name + "_" + k.ToString(System.Globalization.CultureInfo.InvariantCulture);
             names[candidate] = 1;
             return candidate;
+        }
+
+        // The element is drawn as it is, its content included, and the field lies over its border box with nothing of
+        // its own to show until it is signed. Without fillable fields it is only the drawing.
+        void PrepareSignature(Element e)
+        {
+            if (!interactive) return;
+            e.Control = new FormControl
+            {
+                Kind = ControlKind.Signature,
+                Field = new PdfFormField
+                {
+                    Name = Unique(e.GetAttribute(SignatureAttribute), "Signature"),
+                    Tooltip = Tooltip(e, labels),
+                },
+            };
         }
 
         void PrepareControl(Element e)

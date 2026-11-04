@@ -78,6 +78,7 @@ internal sealed class StructureTree
 
     private readonly Dictionary<Node, ContentSlot> _content = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<Element, StructElem> _elements = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<Element, StructElem> _forms = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<Element, ContentSlot> _markers = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<string, StructElem> _targets = new(StringComparer.Ordinal);
     private int _lastHeading;
@@ -87,6 +88,9 @@ internal sealed class StructureTree
 
     /// <summary>The structure element of an element that has one of its own, such as a link.</summary>
     public StructElem? ElementOf(Element e) => _elements.TryGetValue(e, out var se) ? se : null;
+
+    /// <summary>The Form element of an element that is an empty signature field.</summary>
+    public StructElem? FormOf(Element e) => _forms.TryGetValue(e, out var se) ? se : null;
 
     /// <summary>
     /// The structure element a link to <c>#<paramref name="id"/></c> goes to: the element with that id (or name, for an
@@ -173,6 +177,12 @@ internal sealed class StructureTree
         // Link targets: the element itself when it gets a structure element (set below), else the one that holds it.
         if (e.Id != null) _targets[e.Id] = parent;
         if (e.Name == "a" && e.GetAttribute("name") is { Length: > 0 } name) _targets[name] = parent;
+        if (e.Control is { Kind: Layout.ControlKind.Signature, Field: { } signature })
+        {
+            // An empty signature field is a Form element that holds only its widget, as PDF/UA asks; the box's own
+            // content, such as a "Sign here" line, is tagged as usual beside it.
+            _forms[e] = new StructElem("Form", parent) { Alt = signature.Tooltip ?? signature.Name, Lang = LangOf(e) };
+        }
         switch (e.Name)
         {
             // An image that shows its alt text as text is no figure: the text is content of its parent.

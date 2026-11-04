@@ -110,4 +110,98 @@ public class SignatureFieldTests
         Assert.Equal(4, Fields(file).Count);
         Assert.Equal(4, file.GetArray((PdfDict)file.GetObject(3)!, "Annots")!.Count);
     }
+
+    private const string Agreement = """
+        <!DOCTYPE html><html lang="en"><head><title>Agreement</title><style>
+          @page { size: 595pt 842pt; margin: 0 }
+          body { margin: 0 }
+          .sign { position: absolute; top: 100pt; width: 200pt; height: 60pt; border-bottom: 1px solid #666 }
+        </style></head><body>
+        <p>Signed by both sides.</p>
+        <div class="sign" style="left: 50pt" data-pdf-signature="Seller" title="Seller's signature">Sign here</div>
+        <div class="sign" style="left: 300pt" data-pdf-signature="Buyer"></div>
+        </body></html>
+        """;
+
+    [Fact]
+    public void Html_makes_empty_signature_fields_over_the_boxes()
+    {
+        var pdf = HtmlToPdf.Convert(Agreement);
+        var fields = PdfForm.GetFields(pdf);
+        Assert.Equal(new[] { "Seller", "Buyer" }, fields.Select(f => f.Name));
+        Assert.All(fields, f => Assert.Equal(PdfFormFieldType.Signature, f.Type));
+        var file = PdfFile.Open(pdf, null);
+        Assert.Equal(1, file.GetInt(file.GetDict(file.Catalog, "AcroForm")!, "SigFlags", 0));
+        var seller = (PdfDict)file.Resolve(Fields(file).Items[0])!;
+        Assert.Null(file.Resolve(seller["V"]));
+        Assert.Equal("Seller's signature", ((PdfString)file.Resolve(seller["TU"])!).Text);
+        Assert.NotNull(file.Resolve(file.GetDict(seller, "AP")!["N"]));
+        // The widget covers the border box, 200 by 60 points, 100 points from the top of the page.
+        var rect = file.GetNumbers(seller, "Rect")!;
+        Assert.Equal(50, rect[0], 0.5);
+        Assert.Equal(842 - 160.75, rect[1], 0.5); // and its 1px bottom border
+        Assert.Equal(250, rect[2], 0.5);
+        Assert.Equal(842 - 100, rect[3], 0.5);
+        // The box's own content stays on the page.
+        Assert.Contains("Sign here", PdfText.Extract(pdf));
+        Assert.Empty(PdfSignatureVerifier.Verify(pdf));
+    }
+
+    [Fact]
+    public void Signs_an_empty_field_made_from_html()
+    {
+        var pdf = HtmlToPdf.Convert(Agreement);
+        var once = PdfSigner.Sign(pdf, new PdfSignatureOptions(Cert.Value) { FieldName = "Buyer" });
+        var twice = PdfSigner.Sign(once, new PdfSignatureOptions(Cert.Value) { FieldName = "Seller" });
+        var results = PdfSignatureVerifier.Verify(twice);
+        Assert.Equal(new[] { "Buyer", "Seller" }, results.Select(r => r.FieldName));
+        Assert.All(results, r => Assert.True(r.DigestMatches && r.SignatureValid));
+        var file = PdfFile.Open(twice, null);
+        Assert.Equal(2, Fields(file).Count); // signed in place, no new fields
+        var buyer = (PdfDict)file.Resolve(Fields(file).Items[1])!;
+        Assert.Equal(300, file.GetNumbers(buyer, "Rect")![0], 0.5);
+    }
+
+    [Fact]
+    public void Unnamed_fields_get_numbered_names()
+    {
+        var pdf = HtmlToPdf.Convert("<div data-pdf-signature style='height: 40px'></div><div data-pdf-signature style='height: 40px'></div>");
+        Assert.Equal(new[] { "Signature1", "Signature2" }, PdfForm.GetFields(pdf).Select(f => f.Name));
+    }
+
+    [Fact]
+    public void Without_form_fields_the_box_is_only_drawn()
+    {
+        var pdf = HtmlToPdf.Convert(Agreement, new PdfOptions { FormFields = false });
+        Assert.Empty(PdfForm.GetFields(pdf));
+        Assert.Contains("Sign here", PdfText.Extract(pdf));
+    }
+
+    [Fact]
+    public void A_tagged_field_is_a_form_element_with_the_box_content()
+    {
+        var pdf = PdfTestHelpers.ConvertUncompressed(Agreement, new PdfOptions { Accessibility = PdfAccessibility.PdfUA1 });
+        var file = PdfFile.Open(pdf, null);
+        foreach (var f in Fields(file).Items)
+            Assert.True(file.GetInt((PdfDict)file.Resolve(f)!, "StructParent", -1) >= 0);
+        Assert.Equal(2, Regex.Matches(PdfTestHelpers.Latin1(pdf), "/S /Form ").Count);
+        var signed = PdfSigner.Sign(pdf, new PdfSignatureOptions(Cert.Value) { FieldName = "Seller" });
+        Assert.True(PdfSignatureVerifier.Verify(signed).Single().SignatureValid);
+    }
+
+    [Fact]
+    public void Odd_places_make_no_field_and_do_not_fail()
+    {
+        // An inline box, a hidden one, one in a transformed box and an input with the attribute: none is a signature
+        // field. A box taller than a page still is one, on the page where it starts.
+        var pdf = HtmlToPdf.Convert("""
+            <p>Inline <span data-pdf-signature="Inline">here</span></p><div data-pdf-signature="Hidden" style="display: none"></div>
+            <div style="transform: rotate(5deg)"><div data-pdf-signature="Turned" style="height: 30px"></div></div>
+            <input data-pdf-signature="Input" name="text"><div data-pdf-signature="Tall" style="height: 2000px; border: 1px solid"></div>
+            """);
+        var fields = PdfForm.GetFields(pdf);
+        Assert.Equal(new[] { "text", "Tall" }, fields.Select(f => f.Name));
+        Assert.Equal(PdfFormFieldType.Text, fields[0].Type);
+        Assert.Equal(PdfFormFieldType.Signature, fields[1].Type);
+    }
 }

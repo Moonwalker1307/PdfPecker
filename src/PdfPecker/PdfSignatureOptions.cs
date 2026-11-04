@@ -221,6 +221,8 @@ public sealed class PdfSignatureOptions
     /// The name of the signature field. When the PDF already has an empty signature field with this (fully qualified) name,
     /// the signature goes into it, at the field's own place on its page; a field of another type, or one already signed,
     /// is an error. Otherwise a new field with this name is added. Default: "Signature1" (or the next free number).
+    /// HTML converted by <see cref="HtmlToPdf"/> makes empty signature fields with the <c>data-pdf-signature</c> attribute,
+    /// whose value is the field's name, so a template can say where each signature goes.
     /// </summary>
     public string? FieldName { get; set; }
 

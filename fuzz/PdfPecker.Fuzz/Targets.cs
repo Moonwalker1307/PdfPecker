@@ -74,6 +74,8 @@ internal static class Targets
         "{section-page:a}", "{section-page:%zz", "{section-page:}}", "<section id=a>",
         "content:-pdfpecker-target-pages(attr(id),count)", "content:-pdfpecker-target-pages('#a',current,upper-roman)",
         "content:-pdfpecker-target-pages(url(#a),last)", "content:counter(pages)",
+        "<div data-pdf-signature=a style=\"height:1e9px\">", "<span data-pdf-signature>", "data-pdf-signature=\"a.b\"",
+        "<td data-pdf-signature=\"\u0000\">", "<div data-pdf-signature=a style=\"display:inline-block;width:0;height:0\">",
     };
 
     private static readonly (string, string)[] HtmlNesters =

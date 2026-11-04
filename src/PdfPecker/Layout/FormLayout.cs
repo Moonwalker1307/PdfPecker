@@ -16,6 +16,13 @@ internal sealed partial class LayoutEngine
     {
         var s = e.Style;
         if (!s.Visible) return;
+        if (control.Kind == ControlKind.Signature)
+        {
+            // An empty signature field over the border box, after the box's own drawing, which stays page content.
+            if (control.Field != null)
+                _ops.Add(new FieldOp(x, y, w, h, control.Field) { Kind = ControlKind.Signature, Font = s.Font, FontSize = s.FontSize, Form = Tags?.FormOf(e) });
+            return;
+        }
         float px = x + s.BorderLeft, py = y + s.BorderTop;
         float pw = Math.Max(0, w - s.BorderLeft - s.BorderRight), ph = Math.Max(0, h - s.BorderTop - s.BorderBottom);
         if (control.Kind is ControlKind.Text or ControlKind.Combo or ControlKind.Button && !control.Multiline && contentH > laidH + Eps)
