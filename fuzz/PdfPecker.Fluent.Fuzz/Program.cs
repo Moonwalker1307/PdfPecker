@@ -30,7 +30,10 @@ for (int n = only ?? 0; only == null ? watch.Elapsed.TotalSeconds < seconds : n 
     cases++;
     // Each composition gets a fresh generator, so the HTML and the PDF see the same document.
     int caseSeed = unchecked(seed * 1_000_003 + n);
-    IDocument document = Document.Create(d => Fuzz.Compose(d, new Random(caseSeed)));
+    var created = Document.Create(d => Fuzz.Compose(d, new Random(caseSeed)));
+    if (new Random(unchecked(caseSeed * 17 + 3)).Next(10) == 0)
+        created.WithSettings(new DocumentSettings { ContentDirection = ContentDirection.RightToLeft });
+    IDocument document = created;
     // Some cases merge several documents, each composed from a generator of its own.
     if (new Random(unchecked(caseSeed * 31 + 7)).Next(8) == 0)
     {
@@ -224,8 +227,11 @@ internal static class Fuzz
     {
         for (int i = r.Next(4); i > 0; i--)
         {
-            s = r.Next(19) switch
+            s = r.Next(22) switch
             {
+                19 => s.Overline(r.Next(4) != 0),
+                20 => s.BreakAnywhere(r.Next(4) != 0),
+                21 => r.Next(3) switch { 0 => s.DirectionAuto(), 1 => s.DirectionFromLeftToRight(), _ => s.DirectionFromRightToLeft() },
                 17 => s.Hyphenate(r.Next(4) != 0),
                 16 => r.Next(2) == 0
                     ? s.EnableFontFeature(r.Next(10) == 0 ? Text(r) : FontFeatures.SmallCapitals)
@@ -473,6 +479,7 @@ internal static class Fuzz
         if (r.Next(5) == 0) cell.RowSpan(Index(r));
         if (r.Next(6) == 0) cell.Row(Index(r));
         if (r.Next(6) == 0) cell.Column(Index(r));
+        if (r.Next(8) == 0) cell.SemanticHorizontalHeader();
         Content(cell, r, depth + 1);
     }
 
@@ -498,8 +505,15 @@ internal static class Fuzz
         47 => r.Next(2) == 0 ? c.ShowOnce() : c.SkipOnce(),
         41 => c.ShrinkHorizontal(),
         42 => r.Next(2) == 0 ? c.Shrink() : c.ShrinkVertical(),
-        43 => r.Next(6) switch
+        43 => r.Next(13) switch
         {
+            6 => c.SemanticCode(),
+            7 => c.SemanticQuote(),
+            8 => c.SemanticHeading1(),
+            9 => c.SemanticLanguage(r.Next(10) == 0 ? Text(r) : Languages[r.Next(Languages.Length)]),
+            10 => c.SemanticDivision(),
+            11 => c.SemanticSpan(r.Next(2) == 0 ? null : Text(r)),
+            12 => c.SemanticTable(),
             0 => c.SemanticSection(),
             1 => c.SemanticBlockQuotation(),
             2 => c.SemanticCaption(),
