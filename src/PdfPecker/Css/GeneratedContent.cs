@@ -161,9 +161,15 @@ internal static class GeneratedContent
         switch (name)
         {
             case "attr":
+            {
                 if (args.Count == 0) return false;
-                sb.Append(host.GetAttribute(args[0].Split(' ')[0].ToLowerInvariant()) ?? "");
+                var attribute = host.GetAttribute(args[0].Split(' ')[0].ToLowerInvariant());
+                // A missing attribute takes the fallback string after the comma, as in Chrome.
+                int k = 0;
+                if (attribute == null && args.Count > 1 && args[1].Length > 0 && args[1][0] is '"' or '\'') ReadString(args[1], ref k, sb);
+                else sb.Append(attribute);
                 return true;
+            }
             case "counter":
             {
                 if (args.Count is < 1 or > 2) return false;

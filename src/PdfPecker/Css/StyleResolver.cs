@@ -132,6 +132,9 @@ internal sealed partial class StyleResolver
     private readonly List<(Element Element, float Width, float Height)> _containersSeen = new();
     private readonly bool _containerRules;
     private bool _containerUnits; // a declaration uses cq units, so styles that use them cannot be shared
+    private bool _attrUsed; // a declaration substitutes attr(), so styles that do cannot be shared: they depend on attributes
+    private CssAttr.Context? _attrs;
+    private Element? _attrHost; // the element whose attributes attr() reads in the style being computed
 
     /// <summary>
     /// Elements with the same parent style and the same winning declarations get the same computed style. This makes
@@ -183,6 +186,7 @@ internal sealed partial class StyleResolver
         _firstLineRules = authorSheet.Rules.Any(r => r.Selector.PseudoElement == PseudoElement.FirstLine);
         _containerRules = authorSheet.HasContainerRules;
         _containerUnits = authorSheet.HasContainerUnits;
+        _attrUsed = authorSheet.HasAttrSubstitution;
         CounterStyles = CounterStyles.From(authorSheet.CounterStyles);
         if (authorSheet.RegisteredProperties.Count > 0)
         {

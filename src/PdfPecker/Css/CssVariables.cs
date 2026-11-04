@@ -17,55 +17,171 @@ internal static class CssVariables
     /// Replaces every <c>var(--name, fallback)</c> in <paramref name="value"/>. Returns null when a reference cannot be
     /// resolved and has no fallback, which makes the declaration invalid at computed-value time.
     /// </summary>
-    public static string? Substitute(string value, CssVarScope? vars, int depth = 0) => Substitute(value, vars, null, depth);
+    public static string? Substitute(string value, CssVarScope? vars, int depth = 0)
+    {
+        bool tainted = false;
+        return Run(value, vars, null, null, depth, ref tainted);
+    }
 
-    private static string? Substitute(string value, CssVarScope? vars, OwnValues? own, int depth)
+    /// <summary>
+    /// Replaces every <c>var()</c> and <c>attr()</c> in <paramref name="value"/>, reading attributes through
+    /// <paramref name="attrs"/>. Returns null when the declaration is invalid at computed-value time.
+    /// </summary>
+    public static string? Substitute(string value, CssVarScope? vars, CssAttr.Context attrs)
+    {
+        bool tainted = false;
+        return Run(value, vars, null, attrs, 0, ref tainted);
+    }
+
+    /// <summary>
+    /// The substitution itself. <paramref name="tainted"/> is set when the result holds text that came from an attribute,
+    /// directly or through a custom property. Outside custom properties (where <paramref name="own"/> is null) such text
+    /// may not be or reach a resource such as url(): an attribute must not make the document load anything.
+    /// </summary>
+    private static string? Run(string value, CssVarScope? vars, OwnValues? own, CssAttr.Context? attrs, int depth, ref bool tainted)
     {
         if (depth > MaxDepth || value.Length > MaxLength) return null;
-        int i = value.IndexOf("var(", StringComparison.OrdinalIgnoreCase);
+        int i = Next(value, 0, attrs != null, out bool isAttr);
         if (i < 0) return value;
         var sb = new StringBuilder(value.Length + 16);
         int last = 0;
         while (i >= 0)
         {
-            // "var(" must start a token, not end a longer identifier.
-            if (i > 0 && (char.IsLetterOrDigit(value[i - 1]) || value[i - 1] == '-'))
-            {
-                i = value.IndexOf("var(", i + 4, StringComparison.OrdinalIgnoreCase);
-                continue;
-            }
-            int open = i + 3;
+            int open = i + (isAttr ? 4 : 3);
             int close = MatchingParen(value, open);
             if (close < 0) return null;
-            sb.Append(value, last, i - last);
             string inner = value.Substring(open + 1, close - open - 1);
-            int comma = TopLevelComma(inner);
-            string name = (comma < 0 ? inner : inner.Substring(0, comma)).Trim();
-            string? fallback = comma < 0 ? null : inner.Substring(comma + 1).Trim();
-
             string? replacement = null;
-            if (own != null && own.Declares(name))
+            bool fromAttribute = false;
+            if (isAttr)
             {
-                if (vars!.TryGetValue(name, out var ov) && ov.Length > 0) replacement = own.Resolve(name, depth + 1);
+                replacement = ResolveAttr(inner, vars, own, attrs!, depth, out bool keep);
+                if (keep)
+                {
+                    // An untyped attr() of generated text stays for GeneratedContent; a var() in its fallback is still replaced.
+                    i = Next(value, open + 1, true, out isAttr);
+                    continue;
+                }
+                fromAttribute = true;
             }
-            else if (vars != null && vars.TryGetValue(name, out var v) && v.Length > 0)
-                replacement = Substitute(v, vars, own, depth + 1);
-            if (replacement == null && fallback != null)
-                replacement = Substitute(fallback, vars, own, depth + 1);
+            else
+            {
+                int comma = TopLevelComma(inner);
+                string name = (comma < 0 ? inner : inner.Substring(0, comma)).Trim();
+                string? fallback = comma < 0 ? null : inner.Substring(comma + 1).Trim();
+                bool t = false;
+                if (own != null && own.Declares(name))
+                {
+                    if (vars!.TryGetValue(name, out var ov) && ov.Length > 0)
+                    {
+                        replacement = own.Resolve(name, depth + 1);
+                        t = own.IsTainted(name);
+                    }
+                }
+                else if (vars != null && vars.TryGetValue(name, out var v, out t) && v.Length > 0)
+                    // A value with text from an attribute is final: that text is never read as CSS again.
+                    replacement = t ? v : Run(v, vars, own, attrs, depth + 1, ref t);
+                // On an attribute reference cycle, every substitution up to the attr() of that attribute fails, fallbacks included.
+                if (replacement == null && fallback != null && attrs?.Cycle == null)
+                {
+                    t = false;
+                    replacement = Run(fallback, vars, own, attrs, depth + 1, ref t);
+                }
+                fromAttribute = t;
+            }
             if (replacement == null || sb.Length + replacement.Length > MaxLength) return null;
+            if (fromAttribute)
+            {
+                if (own == null && (CssAttr.InsideResource(value, i) || CssAttr.ContainsResource(replacement))) return null;
+                tainted = true;
+            }
+            sb.Append(value, last, i - last);
             sb.Append(replacement);
             last = close + 1;
-            i = value.IndexOf("var(", last, StringComparison.OrdinalIgnoreCase);
+            i = Next(value, last, attrs != null, out isAttr);
         }
         sb.Append(value, last, value.Length - last);
         return sb.Length > MaxLength ? null : sb.ToString();
     }
 
     /// <summary>
-    /// Builds the custom properties of an element from its parent's and the element's own declarations (in cascade
-    /// order). References between variables are resolved here, so stored values never contain var().
+    /// The next var( (or attr( with <paramref name="attrs"/>) from <paramref name="from"/> that starts a token. attr( is
+    /// looked for outside strings only, so that the text of an attribute, which becomes a string, is never read again.
     /// </summary>
-    public static CssVarScope Compute(CssVarScope? inherited, List<KeyValuePair<string, string>> own)
+    private static int Next(string value, int from, bool attrs, out bool isAttr)
+    {
+        isAttr = false;
+        int i = value.IndexOf("var(", from, StringComparison.OrdinalIgnoreCase);
+        // "var(" must start a token, not end a longer identifier.
+        while (i > 0 && (char.IsLetterOrDigit(value[i - 1]) || value[i - 1] == '-'))
+            i = value.IndexOf("var(", i + 4, StringComparison.OrdinalIgnoreCase);
+        if (!attrs) return i;
+        int a = CssAttr.Next(value, from);
+        if (a >= 0 && (i < 0 || a < i))
+        {
+            isAttr = true;
+            return a;
+        }
+        return i;
+    }
+
+    /// <summary>
+    /// The value of one attr() call: the attribute parsed as the call's type, else the fallback; null when neither
+    /// gives a value. <paramref name="keep"/> says that an untyped call is left for the generated text.
+    /// </summary>
+    private static string? ResolveAttr(string inner, CssVarScope? vars, OwnValues? own, CssAttr.Context attrs, int depth, out bool keep)
+    {
+        keep = false;
+        if (!CssAttr.TryParse(inner, out var call)) return null;
+        if (call.IsGeneratedText && attrs.KeepUntyped)
+        {
+            keep = true;
+            return null;
+        }
+        if (--attrs.Budget < 0 || depth > MaxDepth) return null;
+        foreach (var active in attrs.Active)
+        {
+            if (string.Equals(active, call.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                attrs.Cycle = active;
+                return null;
+            }
+        }
+        attrs.Active.Add(call.Name);
+        string? result = null;
+        var raw = attrs.Attribute(call.Name);
+        if (raw != null && CssAttr.Typed(call, raw) is { } typed)
+        {
+            if (call.Type != CssAttr.AttrType.Syntax) result = typed;
+            else
+            {
+                // The value of a type() is CSS: var() and attr() in it are substituted before it is matched to the syntax.
+                bool t = false;
+                var v = Run(typed, vars, own, attrs, depth + 1, ref t)?.Trim();
+                if (v != null && CssAttr.IsDeclarationValue(v) && !CssParser.IsCssWideKeyword(v)
+                    && (call.Argument == "*" || v.Length > 0 && CssPropertySyntax.Matches(call.Argument!, v, relativeLengths: true)))
+                    result = v;
+            }
+        }
+        if (result == null && attrs.Cycle == call.Name) attrs.Cycle = null;
+        if (result == null && call.Fallback != null && attrs.Cycle == null)
+        {
+            bool t = false;
+            result = Run(call.Fallback, vars, own, attrs, depth + 1, ref t);
+        }
+        // Without a type and a fallback, a missing attribute is the empty string.
+        else if (result == null && raw == null && call.Type == CssAttr.AttrType.String && call.Fallback == null) result = "\"\"";
+        attrs.Active.RemoveAt(attrs.Active.Count - 1);
+        if (attrs.Cycle == call.Name) attrs.Cycle = null;
+        return result;
+    }
+
+    /// <summary>
+    /// Builds the custom properties of an element from its parent's and the element's own declarations (in cascade
+    /// order). References between variables are resolved here, so stored values never contain var(); attr() is
+    /// resolved here too, on the element that declares the property, when <paramref name="attrs"/> is given.
+    /// </summary>
+    public static CssVarScope Compute(CssVarScope? inherited, List<KeyValuePair<string, string>> own, CssAttr.Context? attrs = null)
     {
         // Only the element's own declarations are stored; lookups fall through to the parent. Copying the whole inherited
         // set into every element would cost (variables x elements) time and memory.
@@ -75,13 +191,20 @@ internal static class CssVariables
             var v = value.Trim();
             if (v.Equals("initial", StringComparison.OrdinalIgnoreCase)) raw.Set(name, null);
             else if (v.Equals("inherit", StringComparison.OrdinalIgnoreCase))
-                raw.Set(name, inherited != null && inherited.TryGetValue(name, out var pv) ? pv : null);
+            {
+                if (inherited != null && inherited.TryGetValue(name, out var pv, out bool pt)) raw.Set(name, pv, pt);
+                else raw.Set(name, null);
+            }
             else raw.Set(name, v);
         }
         // Resolve the element's own values against the combined set; inherited values are already resolved.
-        var resolver = new OwnValues(raw, own);
+        var resolver = new OwnValues(raw, own, attrs);
         var result = new CssVarScope(inherited);
-        foreach (var (name, _) in own) result.Set(name, resolver.Resolve(name, 0));
+        foreach (var (name, _) in own)
+        {
+            var value = resolver.Resolve(name, 0);
+            result.Set(name, value, value != null && resolver.IsTainted(name));
+        }
         return result;
     }
 
@@ -90,12 +213,15 @@ internal static class CssVariables
     /// both its reference and its fallback was resolved twice per level, which is exponential in the nesting; and a
     /// variable that refers back to itself ran to the depth limit before its fallback was tried.
     /// </summary>
-    private sealed class OwnValues(CssVarScope raw, List<KeyValuePair<string, string>> own)
+    private sealed class OwnValues(CssVarScope raw, List<KeyValuePair<string, string>> own, CssAttr.Context? attrs)
     {
         private readonly Dictionary<string, string?> _resolved = new(StringComparer.Ordinal);
         private readonly List<string> _active = [];
         private readonly HashSet<string> _cyclic = new(StringComparer.Ordinal);
         private readonly HashSet<string> _names = NamesOf(own);
+        private HashSet<string>? _tainted; // the resolved values that hold text from an attribute
+
+        public bool IsTainted(string name) => _tainted != null && _tainted.Contains(name);
 
         private static HashSet<string> NamesOf(List<KeyValuePair<string, string>> own)
         {
@@ -116,12 +242,14 @@ internal static class CssVariables
                 for (int k = at; k < _active.Count; k++) _cyclic.Add(_active[k]);
                 return null;
             }
-            if (!raw.TryGetValue(name, out var v)) return _resolved[name] = null;
-            if (!CssParser.HasVar(v)) return _resolved[name] = v;
+            if (!raw.TryGetValue(name, out var v, out bool tainted)) return _resolved[name] = null;
+            if (tainted) (_tainted ??= new(StringComparer.Ordinal)).Add(name);
+            if (tainted || !CssParser.HasVar(v) && (attrs == null || !CssAttr.Has(v))) return _resolved[name] = v;
             _active.Add(name);
-            var result = Substitute(v, raw, this, depth);
+            var result = Run(v, raw, this, attrs, depth, ref tainted);
             _active.RemoveAt(_active.Count - 1);
             if (_cyclic.Contains(name)) result = null;
+            if (tainted && result != null) (_tainted ??= new(StringComparer.Ordinal)).Add(name);
             return _resolved[name] = result;
         }
     }
@@ -178,19 +306,31 @@ internal sealed class CssVarScope
     // custom properties add a link.
     public CssVarScope(CssVarScope? parent) => _parent = parent;
 
-    public void Set(string name, string? value) => _own[name] = value;
+    // The names whose values hold text from an attribute, which may not reach a url(); null while there are none.
+    private HashSet<string>? _tainted;
 
-    public bool TryGetValue(string name, out string value)
+    public void Set(string name, string? value, bool tainted = false)
+    {
+        _own[name] = value;
+        if (tainted) (_tainted ??= new(StringComparer.Ordinal)).Add(name);
+        else _tainted?.Remove(name);
+    }
+
+    public bool TryGetValue(string name, out string value) => TryGetValue(name, out value, out _);
+
+    public bool TryGetValue(string name, out string value, out bool tainted)
     {
         for (var s = this; s != null; s = s._parent)
         {
             if (s._own.TryGetValue(name, out var v))
             {
                 value = v!;
+                tainted = v != null && s._tainted != null && s._tainted.Contains(name);
                 return v != null;
             }
         }
         value = null!;
+        tainted = false;
         return false;
     }
 }

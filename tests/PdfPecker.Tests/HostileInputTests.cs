@@ -291,6 +291,18 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(sb.ToString()));
     }
 
+    // Attribute values are untrusted text that attr() type(*) reads as CSS: each attribute names the next one twice, in
+    // its value and its fallback, which without a budget is 2^40 lookups; a self-reference in every fallback is a cycle.
+    [Fact]
+    public void Attr_references_between_attributes_are_bounded()
+    {
+        var p = new StringBuilder("<style>p{width:attr(data-a0 type(*), 1px);margin-left:attr(data-a0 type(*));--x:attr(data-a0 type(*))}</style><p");
+        for (int i = 0; i < 40; i++) p.Append($" data-a{i}='attr(data-a{i + 1} type(*), attr(data-a{i + 1} type(*))) attr(data-a{i + 1} type(*))'");
+        p.Append(" data-a40='attr(data-a0 type(*), attr(data-a0 type(*), 2px))'>text</p>");
+        p.Append("<p style='width:attr(data-v px)' data-v='").Append('9', 200_000).Append("'>long</p>");
+        AssertStructurallyValid(Bounded(Repeat(p.ToString(), 20)));
+    }
+
     [Fact]
     public void Custom_properties_on_a_reference_cycle_take_the_fallback()
     {

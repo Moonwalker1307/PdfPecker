@@ -37,6 +37,7 @@ internal sealed partial class StyleResolver
                 parsed = SharedDeclarations.Get(inline!);
                 _inlineCache[inline!] = parsed;
                 if (!_containerUnits && ContainerQuery.HasContainerUnit(inline!)) _containerUnits = true;
+                if (!_attrUsed && Array.Exists(parsed, static d => d.UsesAttr)) _attrUsed = true;
             }
             for (int i = 0; i < parsed.Length; i++)
                 Push(parsed[i].Important ? TierInlineImportant : TierInline, 0, 0, i, parsed[i]);
@@ -44,7 +45,7 @@ internal sealed partial class StyleResolver
         StyledControlFallback(e, authorStart);
 
         SortDeclarations();
-        e.Style = Compute(e.Name, parent);
+        e.Style = Compute(e.Name, parent, e);
         if (e.Style.Contents) e.Style = ContentsStyle(e.Name, e.Style, parent);
         if (e.AltText != null && e.Style.Display == Display.Inline) e.Style = AltTextBox(e.Style);
         if (e.Style.CounterReset != null || e.Style.CounterSet != null || e.Style.CounterIncrement != null) _countersUsed = true;
@@ -79,7 +80,7 @@ internal sealed partial class StyleResolver
         for (int i = _count - 1; i >= 0; i--)
         {
             if (_decls[i].Property != "font-family" || ResetByAll(i, allDecl)) continue;
-            var family = Substituted(_decls[i].Value, s);
+            var family = Substituted(_decls[i], s);
             if (family == null) break;
             return family.Trim().ToLowerInvariant() switch
             {
@@ -91,11 +92,17 @@ internal sealed partial class StyleResolver
         return s.FontFamilyName;
     }
 
-    /// <summary>Computes a style from the sorted declarations in the working buffer, sharing it when it was computed before.</summary>
-    private ComputedStyle Compute(string name, ComputedStyle parent)
+    /// <summary>
+    /// Computes a style from the sorted declarations in the working buffer, sharing it when it was computed before.
+    /// <paramref name="host"/> is the element whose attributes attr() reads: the element itself, or a pseudo-element's
+    /// originating element.
+    /// </summary>
+    private ComputedStyle Compute(string name, ComputedStyle parent, Element host)
     {
-        // A style with cq units depends on the containers around the element, which the cache key does not include.
-        bool cacheable = !_containerUnits || !UsesContainerUnits();
+        // A style with cq units depends on the containers around the element, and one with attr() on its attributes,
+        // neither of which the cache key includes.
+        bool cacheable = (!_containerUnits || !UsesContainerUnits()) && (!_attrUsed || !UsesAttr());
+        _attrHost = host;
         if (cacheable) _probe.Set(parent, _decls, _count);
         if (cacheable && _styleCache.TryGetValue(_probe, out var shared))
         {
@@ -111,7 +118,7 @@ internal sealed partial class StyleResolver
         _custom.Clear();
         for (int i = 0; i < _count; i++)
             if (_decls[i].Property.StartsWith("--", StringComparison.Ordinal)) _custom.Add(new(_decls[i].Property, _decls[i].Value));
-        if (_custom.Count > 0) s.CustomProperties = CssVariables.Compute(parent.CustomProperties, _custom);
+        if (_custom.Count > 0) s.CustomProperties = CssVariables.Compute(parent.CustomProperties, _custom, _attrUsed ? AttrContext(false) : null);
 
         // zoom before any length: every absolute length on the element is multiplied by its effective zoom.
         ApplyZoom(s, parent);
@@ -123,7 +130,7 @@ internal sealed partial class StyleResolver
         {
             if (_decls[i].Property == "direction")
             {
-                if (Substituted(_decls[i].Value, s) is { } dir) Apply(s, parent, "direction", dir);
+                if (Substituted(_decls[i], s) is { } dir) Apply(s, parent, "direction", dir);
                 break;
             }
         }
@@ -131,7 +138,7 @@ internal sealed partial class StyleResolver
         {
             if (_decls[i].Property is "writing-mode" or "-webkit-writing-mode" && !ResetByAll(i, allDecl))
             {
-                if (Substituted(_decls[i].Value, s) is { } mode) Apply(s, parent, "writing-mode", mode);
+                if (Substituted(_decls[i], s) is { } mode) Apply(s, parent, "writing-mode", mode);
                 break;
             }
         }
@@ -141,7 +148,7 @@ internal sealed partial class StyleResolver
         {
             if (_decls[i].Property == "font-size" && !ResetByAll(i, allDecl))
             {
-                var fs = Substituted(_decls[i].Value, s);
+                var fs = Substituted(_decls[i], s);
                 if (fs != null && zoomed) fs = Zoomed("font-size", fs, s, parent);
                 if (fs != null && CssUnits.HasMetricUnit(fs)) fs = RewriteMetricUnits(fs, parent, parent);
                 if (fs != null)
@@ -158,7 +165,12 @@ internal sealed partial class StyleResolver
         // color next: currentColor in any other property (background-color: currentColor under an icon's mask) is the
         // element's own colour, whichever of the rules setting them comes first.
         for (int i = 0; i < _count; i++)
-            if (_decls[i].Property == "color" && !ResetByAll(i, allDecl) && Substituted(_decls[i].Value, s) is { } color) Apply(s, parent, "color", color);
+        {
+            if (_decls[i].Property != "color" || ResetByAll(i, allDecl)) continue;
+            // A colour from attr() that does not work out leaves color unset, as an invalid value at computed-value time does.
+            if (_attrUsed && _decls[i].UsesAttr) Apply(s, parent, "color", "unset");
+            if (Substituted(_decls[i], s) is { } color) Apply(s, parent, "color", color);
+        }
 
         bool fontFirst = HasMetricUnit();
         if (fontFirst) ApplyFontPropertiesFirst(s, parent, allDecl);
@@ -169,19 +181,25 @@ internal sealed partial class StyleResolver
             if (!UsedViewportHeight && d.HasViewportHeightUnit) UsedViewportHeight = true;
             if (d.Property is "font-size" or "color" or "all" || d.Property.StartsWith("--", StringComparison.Ordinal) || ResetByAll(i, allDecl)) continue;
             if (fontFirst && _applied[i]) continue;
-            if (!d.HasVar)
+            bool attr = _attrUsed && d.UsesAttr;
+            if (!d.HasVar && !attr)
             {
                 var dv = zoomed ? Zoomed(d.Property, d.Value, s, parent) : d.Value;
                 Apply(s, parent, d.Property, d.MetricUnits ? RewriteMetricUnits(dv, s, d.Property == "line-height" ? parent : s) : dv);
                 continue;
             }
-            // var(): substitute, then expand shorthands now that the value is known.
-            var value = CssVariables.Substitute(d.Value, s.CustomProperties);
+            // var() and attr(): substitute, then expand shorthands now that the value is known.
+            var value = Substitute(d, s);
+            // With attr(), the property starts unset, as Chrome treats a declaration that is invalid at computed-value
+            // time, whether the substitution fails or its result does not parse. var() keeps the earlier declarations.
+            if (attr) ApplyUnset(s, parent, d.Property);
             if (value == null) continue; // invalid at computed-value time
             _expanded.Clear();
             CssParser.Expand(d.Property, value, d.Important, _expanded);
             foreach (var x in _expanded)
             {
+                // A number where a length belongs is as invalid from an attribute as when written in standards mode.
+                if (attr && StandardsMode && x.HasUnitlessLength) continue;
                 var xv = zoomed ? Zoomed(x.Property, x.Value, s, parent) : x.Value;
                 xv = CssUnits.HasMetricUnit(xv) ? RewriteMetricUnits(xv, x.Property == "font-size" ? parent : s, x.Property is "font-size" or "line-height" ? parent : s) : xv;
                 if (x.Property == "font-size")
@@ -281,12 +299,45 @@ internal sealed partial class StyleResolver
     private bool UsesContainerUnits()
     {
         for (int i = 0; i < _count; i++)
-            if (ContainerQuery.HasContainerUnit(_decls[i].Value) || _decls[i].HasVar) return true;
+            if (ContainerQuery.HasContainerUnit(_decls[i].Value) || _decls[i].HasVar || _decls[i].UsesAttr) return true;
         return false;
     }
 
-    private static string? Substituted(string value, ComputedStyle s)
-        => CssParser.HasVar(value) ? CssVariables.Substitute(value, s.CustomProperties) : value;
+    /// <summary>Whether a declaration in the working buffer substitutes attr().</summary>
+    private bool UsesAttr()
+    {
+        for (int i = 0; i < _count; i++)
+            if (_decls[i].UsesAttr) return true;
+        return false;
+    }
+
+    /// <summary>The declaration's value with var() and attr() substituted, or as written when it has neither.</summary>
+    private string? Substituted(Declaration d, ComputedStyle s)
+        => d.HasVar || _attrUsed && d.UsesAttr ? Substitute(d, s) : d.Value;
+
+    private string? Substitute(Declaration d, ComputedStyle s)
+        => _attrUsed && d.UsesAttr
+            ? CssVariables.Substitute(d.Value, s.CustomProperties, AttrContext(CssAttr.IsGeneratedTextProperty(d.Property)))
+            : CssVariables.Substitute(d.Value, s.CustomProperties);
+
+    private CssAttr.Context AttrContext(bool keepUntyped)
+    {
+        var context = _attrs ??= new CssAttr.Context();
+        context.Reset(_attrHost, keepUntyped);
+        return context;
+    }
+
+    /// <summary>Gives a property, or every longhand of a shorthand, its unset value.</summary>
+    private void ApplyUnset(ComputedStyle s, ComputedStyle parent, string property)
+    {
+        _expanded.Clear();
+        CssParser.Expand(property, "unset", false, _expanded);
+        foreach (var x in _expanded)
+        {
+            if (x.Property == "font-size") ApplyFontSize(s, parent, "unset");
+            else Apply(s, parent, x.Property, "unset");
+        }
+    }
 
     private void Collect(RuleIndex index, Element e, long tier, long importantTier, PseudoElement which = PseudoElement.None)
     {

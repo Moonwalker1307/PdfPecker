@@ -72,10 +72,12 @@ internal static partial class CssParser
         var longhands = new LonghandWriter(output, important);
         name = PrefixedProperties.Unprefixed(name) ?? name;
 
-        // A custom property is kept as written, and so is a shorthand whose value uses var(): the style resolver
-        // substitutes and expands it per element.
-        if (name.StartsWith("--", StringComparison.Ordinal) || HasVar(value))
+        // A custom property is kept as written, and so is a shorthand whose value uses var() or attr(): the style resolver
+        // substitutes and expands it per element. As in Chrome, a malformed attr() drops the declaration here.
+        bool attr = CssAttr.Used(name, value);
+        if (name.StartsWith("--", StringComparison.Ordinal) || HasVar(value) || attr)
         {
+            if (attr && !CssAttr.SyntaxValid(value)) return;
             longhands.Add(name, value);
             return;
         }

@@ -35,7 +35,7 @@ internal sealed partial class StyleResolver
         if (_count == 0) return null;
         for (int i = 0; i < _registeredEach.Count; i++) Push(TierUa, 0, 0, i, _registeredEach[i]);
         SortDeclarations();
-        return Compute(name, host.Style);
+        return Compute(name, host.Style, host);
     }
 
     /// <summary>The footnote call and marker are inline boxes in the text, whatever display they were given.</summary>
@@ -71,7 +71,7 @@ internal sealed partial class StyleResolver
         if (_count == 0) return;
         for (int i = 0; i < _registeredEach.Count; i++) Push(TierUa, 0, 0, i, _registeredEach[i]);
         SortDeclarations();
-        var s = Compute(host.Name, host.Style);
+        var s = Compute(host.Name, host.Style, host);
         if (s.Content == null || s.Display == Display.None) return;
         if (s.CounterReset != null || s.CounterSet != null || s.CounterIncrement != null) { _countersUsed = true; ApplyCounters(s, ref scope); }
         var box = new Element(which == PseudoElement.Before ? "::before" : "::after") { Generated = true, Style = s, Parent = host };
@@ -177,7 +177,7 @@ internal sealed partial class StyleResolver
         var parentStyle = owner.Style;
         for (var a = owner; a != null; a = a == host ? null : a.Parent)
             if (a.FirstLine is { } fl) { parentStyle = fl.Map(owner.Style); break; }
-        var s = Compute(FirstLetterName, parentStyle);
+        var s = Compute(FirstLetterName, parentStyle, host);
         if (s.InitialLetterSize > 0 && s.Position is not (Position.Absolute or Position.Fixed))
         {
             // Computed styles are shared between elements that match the same rules, so the letter gets its own.
@@ -313,7 +313,7 @@ internal sealed partial class StyleResolver
         if (_author.PseudoElements is { } author) Collect(author, host, TierAuthor, TierAuthorImportant, PseudoElement.FirstLine);
         if (_count == 0) return;
         SortDeclarations();
-        var line = Compute("::first-line", host.Style);
+        var line = Compute("::first-line", host.Style, host);
         var target = host;
         while (FirstBlockChild(target) is { } inner) target = inner;
         // A ::first-line of a nested block was resolved first and stays: it is the more specific of the two.
@@ -350,7 +350,7 @@ internal sealed partial class StyleResolver
         if (_author.PseudoElements is { } author) Collect(author, e, TierAuthor, TierAuthorImportant, PseudoElement.Marker);
         if (_count == 0) { e.MarkerStyle = null; e.MarkerContent = null; return; }
         SortDeclarations();
-        var s = Compute("::marker", e.Style);
+        var s = Compute("::marker", e.Style, e);
         e.MarkerStyle = s;
         // content: none leaves the item without a marker, which an empty text says; normal keeps the usual one.
         e.MarkerContent = s.ContentNone ? "" : s.Content != null ? GeneratedContent.Evaluate(s.Content, e, this) : null;
