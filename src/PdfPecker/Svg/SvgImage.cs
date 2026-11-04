@@ -1440,7 +1440,9 @@ internal sealed partial class SvgImage
             if (declared.IsAuto) return fallback;
             if (declared.IsPercent) UsesPercentages = true;
             float basis = axis switch { Axis.X => ViewportWidth, Axis.Y => ViewportHeight, _ => _diagonal };
-            return declared.Resolve(basis * 0.75f) / 0.75f;
+            float value = declared.Resolve(basis * 0.75f) / 0.75f;
+            // A calc() that comes out negative is a radius of zero.
+            return name is "r" or "rx" or "ry" ? Math.Max(0, value) : value;
         }
         var v = e.GetAttribute(name);
         return v != null && Percentage(v.AsSpan().Trim(), axis) is float f ? f : Num(e, name, fallback);

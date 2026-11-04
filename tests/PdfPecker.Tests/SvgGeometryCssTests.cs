@@ -97,9 +97,9 @@ public class SvgGeometryCssTests
     [Fact]
     public void Path_data_from_a_rule_keeps_the_parser_limits()
     {
-        // Damaged data ends the path where it goes wrong, as in the attribute, and cannot make conversion fail.
+        // Damaged data makes the declaration invalid, so nothing is drawn here, and it cannot make conversion fail.
         var pdf = Svg("path { d: path('M20 20 H220 V220 H20 Z L x y garbage') }", "<path fill='#f00'/>");
-        Color(255, 0, 0, At(pdf, 120, 120));
+        Color(255, 255, 255, At(pdf, 120, 120));
         var many = Svg("path { d: path('" + string.Concat(Enumerable.Repeat("M0 0 L1 1 ", 2000)) + "') }", "<path fill='#f00'/>");
         Assert.NotEmpty(many);
     }
@@ -140,6 +140,53 @@ public class SvgGeometryCssTests
         var pdf = HtmlToPdf.Convert($"<body style='margin:0'><img width='100' height='100' style='display:block' src=\"data:image/svg+xml;utf8,{svg}\"></body>", NoMargins);
         Color(0, 0, 255, Pixel(pdf, 37, 37));
         Assert.Equal(White, Pixel(pdf, 2, 2));
+    }
+
+    [Fact]
+    public void A_negative_percentage_radius_is_invalid_like_a_negative_length()
+    {
+        var pdf = Svg("circle { r: -10% }", "<circle r='50' cx='100' cy='100' fill='#f00'/>");
+        Color(255, 0, 0, At(pdf, 100, 140));
+    }
+
+    [Fact]
+    public void A_path_with_an_error_is_an_invalid_declaration_and_the_attribute_stays()
+    {
+        var pdf = Svg("path { d: path('M10 10 L') }", "<path d='M0 0 H200 V200 H0Z' fill='#f00'/>");
+        Color(255, 0, 0, At(pdf, 100, 100));
+    }
+
+    [Fact]
+    public void Initial_and_unset_give_the_initial_value_instead_of_the_attribute()
+    {
+        // cx and cy go back to 0, so the circle sits in the corner and the attribute's place stays empty.
+        var pdf = Svg("circle { cx: initial; cy: unset }", "<circle r='50' cx='200' cy='200' fill='#f00'/>");
+        Color(255, 0, 0, At(pdf, 10, 10));
+        Color(255, 255, 255, At(pdf, 200, 200));
+        var stops = Svg("stop { stop-color: initial }",
+            "<linearGradient id='g'><stop offset='0' stop-color='#f00'/><stop offset='1' stop-color='#f00'/></linearGradient><rect width='400' height='400' fill='url(#g)'/>");
+        Color(0, 0, 0, At(stops, 200, 200));
+        var unset = Svg("stop { stop-color: unset }",
+            "<linearGradient id='g'><stop offset='0' stop-color='#f00'/><stop offset='1' stop-color='#f00'/></linearGradient><rect width='400' height='400' fill='url(#g)'/>");
+        Color(0, 0, 0, At(unset, 200, 200));
+    }
+
+    [Fact]
+    public void Inherit_takes_the_value_of_the_parent()
+    {
+        var pdf = Svg("g { cx: 100px; cy: 100px } circle { cx: inherit; cy: inherit; r: 30px }", "<g><circle cx='300' cy='300' fill='#f00'/></g>");
+        Color(255, 0, 0, At(pdf, 100, 100));
+        Color(255, 255, 255, At(pdf, 300, 300));
+        var stops = Svg("linearGradient { stop-color: #00f } stop { stop-color: inherit }",
+            "<linearGradient id='g'><stop offset='0'/><stop offset='1'/></linearGradient><rect width='400' height='400' fill='url(#g)'/>");
+        Color(0, 0, 255, At(stops, 200, 200));
+    }
+
+    [Fact]
+    public void A_calc_that_comes_out_negative_is_a_radius_of_zero()
+    {
+        var pdf = Svg("circle { r: calc(10px - 15px) }", "<circle r='50' cx='100' cy='100' fill='#f00'/>");
+        Color(255, 255, 255, At(pdf, 100, 100));
     }
 
     [Fact]
