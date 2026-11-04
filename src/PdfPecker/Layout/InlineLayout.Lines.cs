@@ -32,6 +32,9 @@ internal sealed partial class InlineLayout
     private float[] _xs = new float[64];
     private float[] _lineA = new float[32], _lineD = new float[32];
     private float[] _kern = new float[16];
+    // The line's last run of text and the chunk that may join it, which line breaking measures shaped (see ContextOf).
+    private readonly List<Item> _contextItems = new();
+    private readonly StringBuilder _contextText = new(256);
     // The extents of the inline boxes aligned to the top or bottom of the line being drawn (see AlignedSubtrees).
     private Dictionary<ComputedStyle, (float A, float D)>? _alignedSubtrees;
 
@@ -237,8 +240,10 @@ internal sealed partial class InlineLayout
     /// lookups can reach across spaces: Inter draws the x of "3 x 4" as a multiplication sign. So, in each run of such
     /// a font, the difference between the run's width and its items' widths replaces the kerning between the items,
     /// before its last word, and the line is aligned by the width it is drawn with. Returns the change to the total.
+    /// Without <paramref name="kern"/>, as line breaking asks, the kerning between the items is found again and
+    /// nothing is stored.
     /// </summary>
-    private static float ContextBetweenItems(List<Item> items, float[] kern, int lastText)
+    private static float ContextBetweenItems(List<Item> items, float[]? kern, int lastText)
     {
         float change = 0;
         for (int k = 0; k <= lastText;)
@@ -250,8 +255,7 @@ internal sealed partial class InlineLayout
             while (end <= lastText)
             {
                 var r = items[end];
-                if (!IsTextOrSpace(r) || !ReferenceEquals(r.Style, first.Style) || r.Tag != first.Tag || r.Level != 0
-                    || items[end - 1].TrimEnd != 0 || r.TrimStart != 0) break;
+                if (!JoinsRun(items[end - 1], r, first)) break;
                 if (r.IsText && r.Length > 0) lastWord = end;
                 end++;
             }
@@ -265,17 +269,27 @@ internal sealed partial class InlineLayout
                     var it = items[m];
                     text.Append(it.Source, it.Start, it.Length);
                     itemUnits += font.MeasureUnits(it.Source, it.Start, it.Length);
-                    if (m < lastWord) { change -= kern[m]; kern[m] = 0; }
+                    if (m >= lastWord) continue;
+                    if (kern == null) change -= PairKern(it, items[m + 1]);
+                    else { change -= kern[m]; kern[m] = 0; }
                 }
                 var run = text.ToString();
                 float difference = (font.MeasureUnits(run, 0, run.Length) - itemUnits) * first.Style.TextSize / 1000f;
-                kern[lastWord - 1] = difference;
+                if (kern != null) kern[lastWord - 1] = difference;
                 change += difference;
             }
             k = end;
         }
         return change;
     }
+
+    /// <summary>
+    /// Whether <paramref name="next"/> goes on the run of text that <paramref name="previous"/> ends and that starts
+    /// with <paramref name="first"/>, as the line draws it (see DrawTextRun).
+    /// </summary>
+    private static bool JoinsRun(Item previous, Item next, Item first)
+        => IsTextOrSpace(next) && ReferenceEquals(next.Style, first.Style) && next.Tag == first.Tag && next.Level == 0
+            && previous.TrimEnd == 0 && next.TrimStart == 0;
 
     /// <summary>
     /// The kerning between two neighbouring items when they are drawn as one run of text (same style, left to right),

@@ -63,6 +63,19 @@ public class ContextualAlternateTests
     }
 
     [Fact]
+    public void Lines_break_by_the_width_alternates_across_spaces_draw()
+    {
+        // Shaped as one run, "3 x 4 x 3 x 4" is 6222 units against 5862 for its words: 117.25px holds the words but not
+        // the run, so the last "4" goes to the next line, as in Chrome, rather than past the box's right edge.
+        var pdf = ConvertUncompressed(
+            "<!doctype html><style>@page{margin:0} body{margin:0} @font-face{font-family:I;src:url(data:font/ttf;base64," +
+            System.Convert.ToBase64String(Inter) + ")} div{width:117.25px;font:20px I}</style><div>3 x 4 x 3 x 4</div>");
+        var lines = Regex.Matches(AllContent(pdf), @"1 0 0 1 (-?[\d.]+) (-?[\d.]+) Tm");
+        Assert.Equal(2, lines.Count);
+        Assert.Equal("3 x 4 x 3 x\n4", PdfText.Extract(pdf).Trim().ReplaceLineEndings("\n"));
+    }
+
+    [Fact]
     public void Shaping_substitutes_in_context_and_can_be_turned_off()
     {
         var font = Font();
@@ -109,6 +122,22 @@ public class ContextualAlternateTests
     {
         var pdf = Convert("");
         Assert.Equal("Go -> 3x4 x 10:30", PdfText.Extract(pdf).Trim());
+        AssertStructurallyValid(pdf);
+    }
+
+    // Inter's calt draws the x of "3x4" with the glyph of its own multiplication sign, U+00D7. The real sign must still
+    // copy as itself and the x as an x, whichever comes first, also in PDF/A-2u, which maps every glyph to Unicode.
+    [Theory]
+    [InlineData("3x4 and 2×2", PdfConformance.None)]
+    [InlineData("2×2 and 3x4", PdfConformance.None)]
+    [InlineData("3x4 and 2×2", PdfConformance.PdfA2u)]
+    [InlineData("2×2 and 3x4", PdfConformance.PdfA2u)]
+    public void A_substituted_glyph_with_a_character_of_its_own_copies_as_both(string text, PdfConformance conformance)
+    {
+        var html = "<!doctype html><style>@font-face{font-family:I;src:url(data:font/ttf;base64," + System.Convert.ToBase64String(Inter)
+            + ")} p{font:20px I}</style><p>" + text + "</p>";
+        var pdf = HtmlToPdf.Convert(html, new PdfOptions { Conformance = conformance });
+        Assert.Equal(text, PdfText.Extract(pdf).Trim());
         AssertStructurallyValid(pdf);
     }
 }

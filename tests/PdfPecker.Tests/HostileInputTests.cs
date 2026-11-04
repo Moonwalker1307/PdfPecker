@@ -3692,6 +3692,54 @@ public class LayoutLookupFanOutTests
         AssertStructurallyValid(Bounded(() => HtmlToPdf.Convert(html)));
     }
 
+    // Regression: the glyph digest of a lookup walked every subtable and coverage entry for free, counting only the
+    // glyphs it added, and was built again for each lookup index. One lookup of 32,000 subtables that share a coverage
+    // of 65,535 inverted ranges took seconds per index, and a thousand indices pointing at it about an hour and a half.
+    [Fact]
+    public void Lookup_digests_of_many_subtables_and_inverted_ranges_stay_bounded()
+    {
+        var original = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "NotoSansArabic-Subset.ttf"));
+        var font = WithTable(original, "GSUB", SharedLookupIndexes(1000, 32000, 65535));
+        var program = Assert.Single(FontProgram.Load(font));
+        const string word = "بطيخ";
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var glyphs = Bounded(() =>
+        {
+            var output = new List<ShapedGlyph>();
+            ComplexShaper.Shape(program, word, 0, word.Length, true, output);
+            return output;
+        });
+        Assert.Equal(word.Length, glyphs.Count);
+        var html = $"<style>@font-face{{font-family:f;src:url(data:font/ttf;base64,{Convert.ToBase64String(font)})}}</style>"
+            + $"<p style='font-family:f'>{word} {word}</p>";
+        AssertStructurallyValid(Bounded(() => HtmlToPdf.Convert(html)));
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), $"took {watch.Elapsed}");
+    }
+
+    // A GSUB table whose DFLT ccmp names lookups 0 to n - 1, which all point at one single substitution lookup of
+    // subtables subtables, all one subtable whose coverage of format 2 has ranges ranges that end before they start.
+    private static byte[] SharedLookupIndexes(int n, int subtables, int ranges)
+    {
+        var t = new List<byte>();
+        void U16(int v) { t.Add((byte)(v >> 8)); t.Add((byte)v); }
+        void Tag(string s) => t.AddRange(Encoding.ASCII.GetBytes(s));
+        U16(1); U16(0); U16(10); U16(30); U16(42 + n * 2); // script list at 10, feature list at 30, lookup list after ccmp
+        U16(1); Tag("DFLT"); U16(8); // the DFLT script at 18
+        U16(4); U16(0); // its default language system at 22
+        U16(0); U16(0xFFFF); U16(1); U16(0); // no required feature and feature 0
+        U16(1); Tag("ccmp"); U16(8); // ccmp at 38
+        U16(0); U16(n);
+        for (int i = 0; i < n; i++) U16(i);
+        U16(n); // the lookup list: n offsets of the one lookup right after it
+        for (int i = 0; i < n; i++) U16(2 + n * 2);
+        U16(1); U16(0); U16(subtables); // single substitution, no flags
+        for (int s = 0; s < subtables; s++) U16(6 + subtables * 2);
+        U16(1); U16(6); U16(0); // format 1 with its coverage right after it and a delta of 0
+        U16(2); U16(ranges);
+        for (int r = 0; r < ranges; r++) { U16(5); U16(4); U16(0); }
+        return t.ToArray();
+    }
+
     // A GSUB table whose DFLT language system names feature 0 (ccmp) n times, and whose ccmp names lookup 0 n times, in
     // the same n zero words: the feature table starts at the language system's feature index count.
     private static (byte[] Table, int Lookup) SharedFeatureIndexes(int n)

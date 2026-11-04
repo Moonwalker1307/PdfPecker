@@ -345,6 +345,12 @@ internal sealed partial class PdfDocumentWriter
             prev = g.Gid;
             int cid = subset.Cid(_glyphs, k, text);
             if (cid == 0 && skipNotdef) b.Ascii(">").Num(notdefAdjust).Ascii("<");
+            else if (subset.ActualText(_glyphs, k, text, cid) is { } actual)
+            {
+                BeginActualText(b, actual, adjust);
+                WriteCode(b, font, subset, cid, t.Size);
+                EndActualText(b, adjust);
+            }
             else WriteCode(b, font, subset, cid, t.Size);
             if (adjust && text[g.Start] == ' ' && t.WordSpacing != 0 && k + 1 < _glyphs.Count) b.Ascii(">").Num(spaceAdjust).Ascii("<");
         }
@@ -369,6 +375,8 @@ internal sealed partial class PdfDocumentWriter
                 b.Ascii(">").Num(notdefAdjust - g.Advance + width).Ascii("<");
                 continue;
             }
+            var actual = subset.ActualText(_glyphs, k, text, cid);
+            if (actual != null) BeginActualText(b, actual, array: true);
             if (g.Dy != 0)
             {
                 // The raised glyph is shown on its own, between two TJ arrays.
@@ -380,9 +388,34 @@ internal sealed partial class PdfDocumentWriter
             if (wordSpacing != 0 && g.Length > 0 && text[g.Start] == ' ' && k + 1 < _glyphs.Count) after += spaceAdjust;
             if (after != 0) b.Ascii(">").Num(after).Ascii("<");
             if (g.Dy != 0) b.Ascii(">] TJ 0 Ts [<");
+            if (actual != null) EndActualText(b, array: true);
         }
         b.Ascii(">] TJ\n");
     }
+
+    /// <summary>
+    /// Ends the text being shown and starts a marked-content span whose /ActualText is <paramref name="actual"/>, for a
+    /// glyph that copies as other characters than its own (see <see cref="GlyphSubset.ActualText"/>); then goes on
+    /// showing text, in a TJ array when <paramref name="array"/>.
+    /// </summary>
+    private static void BeginActualText(ByteBuffer b, string actual, bool array)
+    {
+        b.Ascii(array ? ">] TJ /Span <</ActualText " : "> Tj /Span <</ActualText ");
+        // Content streams are encrypted as a whole, so the string is written as it is, in UTF-16 with its mark.
+        var raw = new byte[2 + actual.Length * 2];
+        raw[0] = 0xFE;
+        raw[1] = 0xFF;
+        for (int i = 0; i < actual.Length; i++)
+        {
+            raw[2 + i * 2] = (byte)(actual[i] >> 8);
+            raw[3 + i * 2] = (byte)actual[i];
+        }
+        PdfSyntax.Hex(b, raw, upper: true);
+        b.Ascii(">> BDC ").Ascii(array ? "[<" : "<");
+    }
+
+    /// <summary>Ends the span <see cref="BeginActualText"/> started and goes on showing text.</summary>
+    private static void EndActualText(ByteBuffer b, bool array) => b.Ascii(array ? ">] TJ EMC [<" : "> Tj EMC <");
 
     /// <summary>Horizontal advance of a run, including letter and word spacing.</summary>
     private static float RunAdvance(TextFont font, TextOp t, int start, int length)

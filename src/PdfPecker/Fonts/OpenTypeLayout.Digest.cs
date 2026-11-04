@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+
 namespace PdfPecker.Fonts;
 
 // Glyph digests: for each lookup, a small summary of the glyphs its subtables can start at, so that a lookup passes
@@ -5,12 +7,17 @@ namespace PdfPecker.Fonts;
 // as Inter has a contextual alternates lookup of 61 subtables, which every glyph of every word otherwise tries.
 internal sealed partial class OpenTypeLayout
 {
-    // A coverage glyph is read for at most this many entries per lookup and in all for the font, so a damaged font
-    // with huge coverages cannot make the digests expensive; past either, a lookup gets the digest that admits every
-    // glyph, which only means its subtables are tried as they always were.
+    // Every subtable, coverage entry and coverage glyph read counts as one step, at most this many per lookup and in
+    // all for the font, so a damaged font with huge or inverted coverages or thousands of subtables cannot make the
+    // digests expensive; past either, a lookup gets the digest that admits every glyph, which only means its subtables
+    // are tried as they always were, each of them spending the shaping call's operation budget.
     private const int MaxDigestReadsPerLookup = 1 << 16, MaxDigestReads = 1 << 22;
     private int _digestReads;
     private GlyphDigest?[]? _gsubDigests, _gposDigests;
+
+    // The digests by lookup offset (and table, which decides how subtables are read), so that many lookup indices
+    // pointing at one lookup build its digest only once.
+    private readonly ConcurrentDictionary<long, GlyphDigest> _digestsByOffset = new();
 
     /// <summary>
     /// Three 64-bit masks of glyph id bits (bits 0-5, 4-9 and 9-14 of the id). A glyph whose three bits are not all set
@@ -35,7 +42,9 @@ internal sealed partial class OpenTypeLayout
         if ((uint)lookupIndex >= (uint)array.Length) return GlyphDigest.All;
         // The digests are immutable, so two threads that build the same one at once both store an equal one.
         if (Volatile.Read(ref array[lookupIndex]) is { } digest) return digest;
-        digest = BuildDigest(gpos, lookup);
+        long key = (long)lookup << 1 | (gpos ? 1L : 0L);
+        if (!_digestsByOffset.TryGetValue(key, out digest))
+            digest = _digestsByOffset.GetOrAdd(key, BuildDigest(gpos, lookup));
         Volatile.Write(ref array[lookupIndex], digest);
         return digest;
     }
@@ -44,18 +53,21 @@ internal sealed partial class OpenTypeLayout
     {
         ulong low = 0, middle = 0, high = 0;
         int reads = 0;
+        bool Spent() => ++reads > MaxDigestReadsPerLookup || Interlocked.Increment(ref _digestReads) > MaxDigestReads;
         try
         {
             var subtables = new LayoutLookup(_reader, lookup);
             int extension = gpos ? ExtensionPositioning : ExtensionSubstitution;
             for (int s = 0; s < subtables.SubtableCount; s++)
             {
+                if (Spent()) return GlyphDigest.All;
                 var (type, subtable) = subtables.Subtable(s, extension);
                 int coverage = FirstCoverage(gpos, type, subtable);
                 if (coverage < 0) continue;
                 int format = _reader.U16(coverage), entries = _reader.U16(coverage + CoverageCountField);
                 for (int e = 0; e < entries; e++)
                 {
+                    if (Spent()) return GlyphDigest.All;
                     int first, last;
                     if (format == CoverageListFormat) first = last = _reader.U16(coverage + CoverageEntriesField + e * 2);
                     else if (format == CoverageRangeFormat)
@@ -67,7 +79,7 @@ internal sealed partial class OpenTypeLayout
                     else break;
                     for (int g = first; g <= last; g++)
                     {
-                        if (++reads > MaxDigestReadsPerLookup || Interlocked.Increment(ref _digestReads) > MaxDigestReads) return GlyphDigest.All;
+                        if (Spent()) return GlyphDigest.All;
                         low |= 1UL << (g & 63);
                         middle |= 1UL << ((g >> 4) & 63);
                         high |= 1UL << ((g >> 9) & 63);
