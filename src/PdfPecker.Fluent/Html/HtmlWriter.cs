@@ -53,6 +53,12 @@ internal sealed class HtmlWriter
     private bool _totalPages;
     private bool _sectionEnds, _sectionCounts, _sectionWithin;
 
+    /// <summary>The page number attributes used with a counter style other than decimal, each with its style, in order of use.</summary>
+    private readonly List<(string Attribute, string Style)> _styledNumbers = [];
+
+    /// <summary>The @counter-style rules of the page number formats used, by name.</summary>
+    private readonly SortedDictionary<string, string> _counterStyles = new(StringComparer.Ordinal);
+
     /// <summary>The page numbers written in the content so far, which each get an id of their own.</summary>
     private int _pageNumbers;
 
@@ -157,6 +163,20 @@ internal sealed class HtmlWriter
         if (_sectionEnds) _html.Append("[data-section-end]::after{content:-pdfpecker-target-pages(attr(data-section-end),last)}");
         if (_sectionCounts) _html.Append("[data-section-pages]::after{content:-pdfpecker-target-pages(attr(data-section-pages),count)}");
         if (_sectionWithin) _html.Append("[data-section-within]::after{content:-pdfpecker-target-pages(attr(data-section-within),current)}");
+        foreach (var rule in _counterStyles.Values) _html.Append(rule);
+        foreach (var (attribute, style) in _styledNumbers)
+        {
+            _html.Append('[').Append(attribute).Append("][data-number-style=\"").Append(style).Append("\"]::after{content:");
+            _html.Append(attribute switch
+            {
+                "data-total-pages" => "counter(pages",
+                "data-section-page" => "target-counter(attr(data-section-page),page",
+                "data-section-end" => "-pdfpecker-target-pages(attr(data-section-end),last",
+                "data-section-pages" => "-pdfpecker-target-pages(attr(data-section-pages),count",
+                _ => "-pdfpecker-target-pages(attr(data-section-within),current",
+            });
+            _html.Append(',').Append(style).Append(")}");
+        }
         foreach (var (pattern, number) in _leaders)
             _html.Append("[data-leader=\"").Append(number.ToString(CultureInfo.InvariantCulture)).Append("\"]::after{content:leader(").Append(pattern).Append(")}");
         if (_markdown) _html.Append(MarkdownHtml.Css);
@@ -839,6 +859,7 @@ internal sealed class HtmlWriter
                     _html.Append("<span");
                     if (cls != null) WriteAttribute("class", cls);
                     WriteAttribute("data-section-page", "#" + target);
+                    NumberStyle(run, "data-section-page");
                     _html.Append("></span>");
                     break;
                 case RunKind.SectionEndPage:
@@ -846,6 +867,7 @@ internal sealed class HtmlWriter
                     _html.Append("<span");
                     if (cls != null) WriteAttribute("class", cls);
                     WriteAttribute("data-section-end", "#" + target);
+                    NumberStyle(run, "data-section-end");
                     _html.Append("></span>");
                     break;
                 case RunKind.SectionPageCount:
@@ -853,6 +875,7 @@ internal sealed class HtmlWriter
                     _html.Append("<span");
                     if (cls != null) WriteAttribute("class", cls);
                     WriteAttribute("data-section-pages", "#" + target);
+                    NumberStyle(run, "data-section-pages");
                     _html.Append("></span>");
                     break;
                 case RunKind.SectionPageWithin when _band == Band.None:
@@ -864,6 +887,7 @@ internal sealed class HtmlWriter
                     if (cls != null) WriteAttribute("class", cls);
                     WriteAttribute("id", ownId);
                     WriteAttribute("data-section-within", "#" + target);
+                    NumberStyle(run, "data-section-within");
                     _html.Append("></span>");
                     break;
                 }
@@ -871,7 +895,7 @@ internal sealed class HtmlWriter
                     // In a header or footer, a placeholder the library fills in for each page, like {page}. The encoded
                     // name holds no braces or markup.
                     OpenInline("span", cls, null);
-                    _html.Append("{section-page:").Append(Uri.EscapeDataString(target!)).Append('}');
+                    _html.Append("{section-page:").Append(Uri.EscapeDataString(target!)).Append(BandStyle(run)).Append('}');
                     _html.Append("</span>");
                     break;
                 case RunKind.Leader:
@@ -905,18 +929,21 @@ internal sealed class HtmlWriter
                     if (cls != null) WriteAttribute("class", cls);
                     WriteAttribute("id", self);
                     WriteAttribute("data-section-page", "#" + self);
+                    NumberStyle(run, "data-section-page");
                     _html.Append("></span>");
                     break;
                 case RunKind.TotalPages when _band == Band.None:
                     _totalPages = true;
                     _html.Append("<span");
                     if (cls != null) WriteAttribute("class", cls);
-                    _html.Append(" data-total-pages></span>");
+                    _html.Append(" data-total-pages");
+                    NumberStyle(run, "data-total-pages");
+                    _html.Append("></span>");
                     break;
                 case RunKind.PageNumber:
                 case RunKind.TotalPages:
                     OpenInline("span", cls, null);
-                    _html.Append(kind == RunKind.PageNumber ? "{page}" : "{total-pages}");
+                    _html.Append(kind == RunKind.PageNumber ? "{page" : "{total-pages").Append(BandStyle(run)).Append('}');
                     _html.Append("</span>");
                     break;
                 case RunKind.Hyperlink:
@@ -1167,6 +1194,27 @@ internal sealed class HtmlWriter
             }
             _html.Append("</tr>");
         }
+    }
+
+    /// <summary>
+    /// Writes the counter style of a page number in the content, and remembers it for its CSS rule. The default,
+    /// decimal, writes nothing, so documents without formats stay as they were.
+    /// </summary>
+    private void NumberStyle(TextRun run, string attribute)
+    {
+        if (StyleOf(run) is not { } style) return;
+        WriteAttribute("data-number-style", style);
+        if (!_styledNumbers.Contains((attribute, style))) _styledNumbers.Add((attribute, style));
+    }
+
+    /// <summary>The counter style of a page number in a header or footer, as the placeholder's suffix: ":upper-roman".</summary>
+    private string BandStyle(TextRun run) => StyleOf(run) is { } style ? ":" + style : "";
+
+    private string? StyleOf(TextRun run)
+    {
+        if (run.NumberFormat is not { } format || format.Style == "decimal") return null;
+        if (format.Rule != null) _counterStyles[format.Style] = format.Rule;
+        return format.Style;
     }
 
     // Elements

@@ -77,7 +77,7 @@ Document.Create(container =>
   `EndPageNumberOfSection`, `TotalPagesWithinSection`, `PageNumberWithinSection`).
 - **Pages**: size, margins, page colour, direction (per page, or for the whole document with
   `DocumentSettings.ContentDirection`), `ContinuousSize` (a page as tall as its content, for receipts on a roll), a header and footer on every page, and `CurrentPageNumber` / `TotalPages`
-  in them or anywhere in the content. `ShowOnce` and `SkipOnce` in the header or footer give the first page a band of its own, such as a
+  in them or anywhere in the content, as 1, i, I, a, A or 001 with `Format(PageNumberFormat.UpperRoman)` and the other formats. `ShowOnce` and `SkipOnce` in the header or footer give the first page a band of its own, such as a
   letterhead followed by a slim header. `EvenPageHeader` and `EvenPageFooter` give the even pages bands of their own, for printing on both sides. `Background` and `Foreground` cover the whole page, margins included, under or over the header, content and footer, for letterheads, frames and watermarks. Several `Page` calls give page sets with their own size, margins, header and
   footer in one document, and the page numbers run on through all of them.
 - **Merging**: `Document.Merge(invoice1, invoice2, ...)` generates several documents as one PDF or HTML document, such
@@ -168,6 +168,9 @@ Most QuestPDF code ports by changing the `using` lines: `Document.Create`, `Page
   such as a row or a box with a `Height`.
 - `Markdown` is built in, with the same call as the community QuestPDF.Markdown package's `container.Markdown(text)`;
   its look comes from CSS rules on the `md` class, which `documentContainer.Css("...")` can change.
+- Page numbers take `Format(PageNumberFormat.LowerRoman)`, `UpperRoman`, `LowerLetters`, `UpperLetters` or
+  `ZeroPadded(digits)` instead of QuestPDF's `Format(number => ...)` function, because PdfPecker numbers the pages while
+  it lays them out and runs no code of yours then.
 - `ExtendLastCellsToTableBottom` grows the last cell of each column of the table's body down to its last row. A cell
   spanning several columns grows only when it is the last cell in all of them, since HTML table cells cannot overlap.
 - `BackgroundLinearGradient` runs the way its angle points: 0 left to right, 90 top to bottom, 180 right to left and

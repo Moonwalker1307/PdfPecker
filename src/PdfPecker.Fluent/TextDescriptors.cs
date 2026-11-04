@@ -283,6 +283,23 @@ internal static class TextLimits
 /// <summary>Styles a span; each method returns the same descriptor, so calls chain.</summary>
 public static class TextSpanExtensions
 {
+    /// <summary>
+    /// How a page number writes its number, such as <see cref="PageNumberFormat.LowerRoman"/> for the pages of a preface
+    /// or <see cref="PageNumberFormat.ZeroPadded"/> for 001. It applies to <c>CurrentPageNumber</c>, <c>TotalPages</c> and
+    /// the section page numbers, in a header or footer and in the content.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The span is not a page number.</exception>
+    public static T Format<T>(this T descriptor, PageNumberFormat format) where T : TextSpanDescriptor
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        ArgumentNullException.ThrowIfNull(format);
+        if (descriptor.Run.Kind is not (RunKind.PageNumber or RunKind.TotalPages or RunKind.SectionPageNumber or RunKind.SectionEndPage
+            or RunKind.SectionPageCount or RunKind.SectionPageWithin))
+            throw new InvalidOperationException("Format applies to page numbers: CurrentPageNumber, TotalPages and the section page numbers.");
+        descriptor.Run.NumberFormat = format;
+        return descriptor;
+    }
+
     private static T Apply<T>(T descriptor, Func<TextStyle, TextStyle> change) where T : TextSpanDescriptor
     {
         ArgumentNullException.ThrowIfNull(descriptor);
@@ -415,4 +432,49 @@ public static class TextSpanExtensions
 
     /// <summary>On the baseline.</summary>
     public static T NormalPosition<T>(this T descriptor) where T : TextSpanDescriptor => Apply(descriptor, s => s.NormalPosition());
+}
+
+/// <summary>
+/// How a page number is written, for <see cref="TextSpanExtensions.Format{T}"/>. QuestPDF formats page numbers
+/// with a function, which cannot run here because PdfPecker numbers the pages while it lays them out.
+/// </summary>
+public sealed class PageNumberFormat
+{
+    private PageNumberFormat(string style, string? rule = null)
+    {
+        Style = style;
+        Rule = rule;
+    }
+
+    /// <summary>The CSS counter style that writes the number.</summary>
+    internal string Style { get; }
+
+    /// <summary>The @counter-style rule that defines <see cref="Style"/>, when it is not a predefined one.</summary>
+    internal string? Rule { get; }
+
+    /// <summary>1, 2, 3 (the default).</summary>
+    public static PageNumberFormat Decimal { get; } = new("decimal");
+
+    /// <summary>i, ii, iii, iv.</summary>
+    public static PageNumberFormat LowerRoman { get; } = new("lower-roman");
+
+    /// <summary>I, II, III, IV.</summary>
+    public static PageNumberFormat UpperRoman { get; } = new("upper-roman");
+
+    /// <summary>a, b, c, and after z: aa, ab.</summary>
+    public static PageNumberFormat LowerLetters { get; } = new("lower-alpha");
+
+    /// <summary>A, B, C, and after Z: AA, AB.</summary>
+    public static PageNumberFormat UpperLetters { get; } = new("upper-alpha");
+
+    /// <summary>The number with zeros in front up to a number of digits: 001 for 1 with 3 digits.</summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="digits"/> is not from 1 to 10.</exception>
+    public static PageNumberFormat ZeroPadded(int digits)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(digits, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(digits, 10);
+        string digitsText = digits.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        string name = "pdfpecker-pad" + digitsText;
+        return new(name, "@counter-style " + name + "{system:extends decimal;pad:" + digitsText + " \"0\"}");
+    }
 }
