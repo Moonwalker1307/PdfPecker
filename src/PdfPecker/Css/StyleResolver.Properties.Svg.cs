@@ -110,6 +110,69 @@ internal sealed partial class StyleResolver
         return false;
     }
 
+    /// <summary>
+    /// cx, cy, r, rx, ry, x, y, d, stop-color and stop-opacity, which style sheets can set on SVG elements instead of
+    /// attributes. They are kept on the style as declared and read by the SVG renderer, which knows the viewport that
+    /// percentages refer to; the cascade only decides that a rule beats the attribute. Like Chrome, it takes plain
+    /// numbers as user units. A declaration with an invalid value is dropped, so the attribute stays.
+    /// r, rx and ry cannot be negative, so such a declaration is ignored, and so is a path() that names a fill rule,
+    /// which Chrome does not take for d.
+    /// </summary>
+    private void ApplySvgGeometry(ComputedStyle s, string prop, in DeclaredValue d)
+    {
+        var g = s.SvgGeometry?.Copy() ?? new SvgGeometry();
+        // The keywords clear the value so the attribute shows through, except for d, whose initial value is none.
+        bool reset = d.Lower is "initial" or "unset" or "inherit";
+        switch (prop)
+        {
+            case "d":
+                if (reset || d.Lower == "none") { g.HasPath = true; g.PathData = null; }
+                else if (SvgPathValue(d.Value) is { } data) { g.HasPath = true; g.PathData = data; }
+                else return;
+                break;
+            case "stop-color":
+                if (reset) g.StopColor = null;
+                else if (CssColor.TryParse(d.Value, s.Color, out _)) g.StopColor = d.Value;
+                else return;
+                break;
+            case "stop-opacity":
+                if (reset) g.StopOpacity = null;
+                else if (TryParseNumberOrPercent(d.Lower, out float so)) g.StopOpacity = Math.Clamp(so, 0, 1);
+                else return;
+                break;
+            default:
+            {
+                Length? len = null;
+                if (!reset)
+                {
+                    Length l;
+                    // A plain number is in user units (CSS pixels), as it is in the attributes.
+                    if (float.TryParse(d.Lower, NumberStyles.Float, CultureInfo.InvariantCulture, out float n) && float.IsFinite(n)) l = Length.Pt(Math.Clamp(n, -Length.MaxMagnitude, Length.MaxMagnitude) * 0.75f);
+                    else if (!TryParseLength(d.Lower, d.Em, _rootFontSize, out l, _vw, _vh)) return;
+                    if (l.IsAuto ? prop is not ("rx" or "ry") : prop is "r" or "rx" or "ry" && !l.IsPercent && l.Value < 0) return;
+                    len = l;
+                }
+                switch (prop)
+                {
+                    case "cx": g.Cx = len; break;
+                    case "cy": g.Cy = len; break;
+                    case "r": g.R = len; break;
+                    case "rx": g.Rx = len; break;
+                    case "ry": g.Ry = len; break;
+                    case "x": g.X = len; break;
+                    default: g.Y = len; break;
+                }
+                break;
+            }
+        }
+        s.SvgGeometry = g;
+    }
+
+    /// <summary>The path data of <c>path("...")</c>; null for anything else.</summary>
+    private static string? SvgPathValue(string v)
+        => v.StartsWith("path(", StringComparison.OrdinalIgnoreCase) && v[^1] == ')'
+            ? GeneratedContent.UnquoteString(v.AsSpan(5, v.Length - 6).Trim().ToString()) : null;
+
     private static void ApplyFloodColor(ComputedStyle s, in DeclaredValue d)
     {
         if (CssColor.TryParse(d.Value, s.Color, out uint flood)) s.SvgFloodColor = flood;
