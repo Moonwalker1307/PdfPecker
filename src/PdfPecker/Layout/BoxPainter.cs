@@ -51,6 +51,28 @@ internal static partial class BoxPainter
     }
 
     /// <summary>
+    /// Paints one fragment (x, y, w, h) of a block box with box-decoration-break: clone as a whole box. As Chrome prints
+    /// it, the background images are laid out on an area as tall as all the box's fragments together,
+    /// <paramref name="areaH"/>, from the fragment's top, and each fragment shows the top of it.
+    /// </summary>
+    public static void PaintClonedFragment(GroupOp group, ComputedStyle s, float x, float y, float w, float h, float areaH, ImageLoader? images, float basis)
+    {
+        if (s.BackgroundImages == null || s.CanvasBackground || areaH <= h)
+        {
+            Paint(group, s, x, y, w, h, images, basis);
+            return;
+        }
+        if (!s.Visible || !(w > 0 && h > 0)) return;
+        var radii = Radii(s, w, h);
+        if (s.BoxShadows != null) PaintShadows(group, s, x, y, w, h, radii);
+        PaintBackground(group, s, x, y, w, areaH, images, basis, radii, (x, y, w, h));
+        if (s.BoxShadows != null) PaintInsetShadows(group, s, x, y, w, h, radii);
+        bool borderImage = s.BorderImageSource != null && PaintBorderImage(group, s, x, y, w, h, images);
+        if (s.HasBorder && !borderImage) PaintBorders(group, s, x, y, w, h, AllSides, collapsedCell: false, radii);
+        if (s.OutlineStyle != BorderStyle.None) PaintOutline(group, s, x, y, w, h, radii);
+    }
+
+    /// <summary>
     /// Paints the background of one line fragment of an inline box, (fx, fy, fw, fh) in <paramref name="fragment"/>, whose
     /// corners are <paramref name="radii"/>. The background is laid out on the border box (x, y, w, h): the fragment
     /// itself, or with box-decoration-break: slice all the box's fragments put side by side, of which it shows this

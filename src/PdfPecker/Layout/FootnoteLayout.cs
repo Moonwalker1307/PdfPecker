@@ -120,9 +120,14 @@ internal sealed partial class LayoutEngine
 
     /// <summary>
     /// The page's last flow position content may reach: its end, less the space of its footnote area, the room kept
-    /// for the bottom edges of the boxes around the content and that of a table footer repeated under a split row.
+    /// for the bottom edges of the boxes around the content, that of a table footer repeated under a split row and that
+    /// of the bottom edges the boxes around the content clone in each fragment.
     /// </summary>
-    private float FlowEnd(int page) => _grid.Start(page + 1) - FootnoteReserve(page) - EdgeReserve(page) - SplitRowFoot(page);
+    private float FlowEnd(int page)
+    {
+        float end = _grid.Start(page + 1) - FootnoteReserve(page) - EdgeReserve(page) - SplitRowFoot(page);
+        return _cloneRoom == null ? end : end - CloneFoot(page);
+    }
 
     /// <summary>The bottom of the last page a footnote area is on, for the page count; 0 without footnotes.</summary>
     private float FootnotesBottom()
