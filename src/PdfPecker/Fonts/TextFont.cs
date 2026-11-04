@@ -41,6 +41,18 @@ internal abstract class TextFont
     /// </summary>
     public virtual TextFont WithoutLigatures() => this;
 
+    /// <summary>
+    /// The same font without contextual alternates (calt), as browsers draw text with letter-spacing,
+    /// font-variant-ligatures: no-contextual or font-feature-settings: "calt" 0.
+    /// </summary>
+    public virtual TextFont WithoutContextual() => this;
+
+    /// <summary>
+    /// True when all of the font's text is shaped because it substitutes glyphs in context (calt, clig or rclt), so a
+    /// run of words can be drawn with other glyphs than its words measured one by one.
+    /// </summary>
+    public virtual bool ShapesInContext => false;
+
     /// <summary>The same font without pair kerning, as browsers draw text with font-kerning: none.</summary>
     public virtual TextFont WithoutKerning() => this;
 

@@ -74,22 +74,36 @@ internal static partial class ComplexShaper
 
     // Keyed weakly by the font, so that a font registered for one conversion is not kept alive by its plans for the
     // life of the process.
-    private static readonly ConditionalWeakTable<FontProgram, ConcurrentDictionary<Script, Plan>> s_plans = new();
+    private static readonly ConditionalWeakTable<FontProgram, ConcurrentDictionary<(Script, FeaturesOff), Plan>> s_plans = new();
 
-    private static Plan GetPlan(FontProgram font, OpenTypeLayout? layout, Script script)
-        => s_plans.GetValue(font, static _ => new ConcurrentDictionary<Script, Plan>()).GetOrAdd(script, static (script, state) =>
+    private static Plan GetPlan(FontProgram font, OpenTypeLayout? layout, Script script, FeaturesOff off)
+    {
+        // The Indic plans have stages of their own, which keep every feature, so one plan serves all of their runs.
+        if (IsIndic(script)) off = FeaturesOff.None;
+        return s_plans.GetValue(font, static _ => new ConcurrentDictionary<(Script, FeaturesOff), Plan>()).GetOrAdd((script, off), static (key, state) =>
         {
             // OpenTypeLayout checks the lists a plan reads when it loads the font; should a damaged font still get
             // past that, its text is shaped without the layout tables rather than failing the document. The plan is
-            // cached, so this runs once per font and script.
+            // cached, so this runs once per font, script and set of features turned off.
+            var (script, off) = key;
             var (font, layout) = state;
             try
             {
                 if (IsIndic(script)) return BuildIndicScriptPlan(font, layout, script);
-                return layout == null ? Plan.Empty : BuildPlan(layout, script, ScriptTag(script), font.ShapedFeatures);
+                return layout == null ? Plan.Empty : BuildPlan(layout, script, ScriptTag(script), font.ShapedFeatures, off);
             }
             catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException) { SwallowedErrors.Record(ex); return Plan.Empty; }
         }, (font, layout));
+    }
+
+    // A stage without the features that CSS turned off. Features the author turned on by name in font-feature-settings
+    // are added after this, so they apply even to letter-spaced text, as in browsers.
+    private static (string Feature, uint Mask)[] Without((string Feature, uint Mask)[] features, FeaturesOff off)
+    {
+        if (off == FeaturesOff.None) return features;
+        return Array.FindAll(features, f => !((off & FeaturesOff.Ligatures) != 0 && f.Feature is "liga" or "clig"
+            || (off & FeaturesOff.Contextual) != 0 && f.Feature == "calt"));
+    }
 
     // An Indic script's plan: the Indic stages for GSUB, and the positioning features of the script's tag in GPOS, which
     // a font may list under the new tag, the old one, or both.
@@ -121,7 +135,7 @@ internal static partial class ComplexShaper
         return lookups;
     }
 
-    private static Plan BuildPlan(OpenTypeLayout layout, Script script, uint tag, string[]? shaped = null)
+    private static Plan BuildPlan(OpenTypeLayout layout, Script script, uint tag, string[]? shaped = null, FeaturesOff off = FeaturesOff.None)
     {
         // The features the author turned on that substitute in context join the ones every run gets, in the one stage
         // of the lookup list, as HarfBuzz merges the features of a run.
@@ -134,12 +148,12 @@ internal static partial class ComplexShaper
             AddStage(gsub, layout, gpos: false, tag, JoiningPreForms);
             foreach (var form in JoiningForms) hasForms |= AddStage(gsub, layout, gpos: false, tag, [form]);
             hasRlig = AddStage(gsub, layout, gpos: false, tag, [("rlig", AllGlyphs)]);
-            AddStage(gsub, layout, gpos: false, tag, [.. JoiningLigatures, .. extra]);
+            AddStage(gsub, layout, gpos: false, tag, [.. Without(JoiningLigatures, off), .. extra]);
         }
         else
         {
             hasRlig = layout.HasFeature(false, tag, FontProgram.Tag("rlig"));
-            AddStage(gsub, layout, gpos: false, tag, [.. OtherSubstitutions, .. extra]);
+            AddStage(gsub, layout, gpos: false, tag, [.. Without(OtherSubstitutions, off), .. extra]);
         }
 
         var gpos = new List<(int Lookup, uint Mask)>();

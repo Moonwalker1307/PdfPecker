@@ -123,7 +123,7 @@ internal sealed partial class PdfDocumentWriter
         float c = (float)Math.Cos(a), sn = (float)Math.Sin(a);
         const float lead = 1.15f, cap = 0.72f;
         float ls = float.IsFinite(wm.LetterSpacing) ? Math.Clamp(wm.LetterSpacing, -100, 100) : 0;
-        if (ls != 0) font = font.WithoutLigatures(); // as browsers set letter-spaced text
+        if (ls != 0) font = font.WithoutLigatures().WithoutContextual(); // as browsers set letter-spaced text
         int maxUnits = 1, maxChars = 0;
         foreach (var line in lines)
         {

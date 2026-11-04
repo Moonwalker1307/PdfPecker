@@ -127,8 +127,9 @@ internal sealed partial class OpenTypeLayout
         c.BaseCoverage = int.MinValue;
         int type = _reader.U16(lookup + LookupTypeField);
         c.LookupFlag = LookupFlagOf(lookup);
-        if (!gpos && SubtableType(lookup, type) == ReverseChainingSubstitution) ApplyBackwards(c, lookup);
-        else ApplyForwards(c, lookup);
+        var digest = DigestOf(gpos, table, lookupIndex, lookup);
+        if (!gpos && SubtableType(lookup, type) == ReverseChainingSubstitution) ApplyBackwards(c, lookup, digest);
+        else ApplyForwards(c, lookup, digest);
         nextLigId = c.NextLigId;
         operations = c.Operations;
     }
@@ -142,24 +143,24 @@ internal sealed partial class OpenTypeLayout
     }
 
     // Reverse chaining substitutions go from the end of the run to its start, and replace one glyph at a time.
-    private void ApplyBackwards(LookupState c, int lookup)
+    private void ApplyBackwards(LookupState c, int lookup, GlyphDigest digest)
     {
         var buf = c.Buf;
         for (int i = buf.Count - 1; i >= 0 && c.Operations > 0; i--)
-            if ((buf[i].Mask & c.LookupMask) != 0 && Matches(c, buf[i]))
+            if ((buf[i].Mask & c.LookupMask) != 0 && digest.MayHave(buf[i].Gid) && Matches(c, buf[i]))
             {
                 c.Syllable = c.PerSyllable ? buf[i].Syllable : (byte)0;
                 ApplySubtables(c, lookup, ref i, reverse: true);
             }
     }
 
-    private void ApplyForwards(LookupState c, int lookup)
+    private void ApplyForwards(LookupState c, int lookup, GlyphDigest digest)
     {
         var buf = c.Buf;
         int i = 0;
         while (i < buf.Count && c.Operations > 0)
         {
-            if ((buf[i].Mask & c.LookupMask) != 0 && Matches(c, buf[i]))
+            if ((buf[i].Mask & c.LookupMask) != 0 && digest.MayHave(buf[i].Gid) && Matches(c, buf[i]))
             {
                 c.Syllable = c.PerSyllable ? buf[i].Syllable : (byte)0;
                 int at = i, count = buf.Count;

@@ -216,12 +216,65 @@ internal sealed partial class InlineLayout
         // The words of a line mostly share a style, whose font is found once.
         ComputedStyle? style = null;
         TextFont? font = null;
+        bool inContext = false;
+        TextFont? checkedFont = null;
         for (int k = 0; k < lastText; k++)
         {
             kern[k] = PairKern(items[k], items[k + 1], ref style, ref font);
             total += kern[k];
+            if (!ReferenceEquals(font, checkedFont))
+            {
+                checkedFont = font;
+                inContext |= font!.ShapesInContext;
+            }
         }
+        if (inContext) total += ContextBetweenItems(items, kern, lastText);
         return total;
+    }
+
+    /// <summary>
+    /// The words of a font that substitutes in context are drawn as one shaped run, as browsers draw them, and a font's
+    /// lookups can reach across spaces: Inter draws the x of "3 x 4" as a multiplication sign. So, in each run of such
+    /// a font, the difference between the run's width and its items' widths replaces the kerning between the items,
+    /// before its last word, and the line is aligned by the width it is drawn with. Returns the change to the total.
+    /// </summary>
+    private static float ContextBetweenItems(List<Item> items, float[] kern, int lastText)
+    {
+        float change = 0;
+        for (int k = 0; k <= lastText;)
+        {
+            var first = items[k];
+            if (!first.IsText || first.Level != 0 || first.Length == 0 || !first.Style.Font.ShapesInContext) { k++; continue; }
+            // The run ends where the line draws its text as another run (see DrawTextRun).
+            int end = k + 1, lastWord = k;
+            while (end <= lastText)
+            {
+                var r = items[end];
+                if (!IsTextOrSpace(r) || !ReferenceEquals(r.Style, first.Style) || r.Tag != first.Tag || r.Level != 0
+                    || items[end - 1].TrimEnd != 0 || r.TrimStart != 0) break;
+                if (r.IsText && r.Length > 0) lastWord = end;
+                end++;
+            }
+            if (lastWord > k)
+            {
+                var font = first.Style.Font;
+                var text = new System.Text.StringBuilder();
+                int itemUnits = 0;
+                for (int m = k; m <= lastWord; m++)
+                {
+                    var it = items[m];
+                    text.Append(it.Source, it.Start, it.Length);
+                    itemUnits += font.MeasureUnits(it.Source, it.Start, it.Length);
+                    if (m < lastWord) { change -= kern[m]; kern[m] = 0; }
+                }
+                var run = text.ToString();
+                float difference = (font.MeasureUnits(run, 0, run.Length) - itemUnits) * first.Style.TextSize / 1000f;
+                kern[lastWord - 1] = difference;
+                change += difference;
+            }
+            k = end;
+        }
+        return change;
     }
 
     /// <summary>

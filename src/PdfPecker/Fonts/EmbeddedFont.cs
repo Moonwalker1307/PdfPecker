@@ -13,8 +13,12 @@ internal sealed class EmbeddedFont : TextFont
     private readonly short[] _widths;
     private readonly UnicodeRange? _range;
     private readonly Ligatures? _ligatures; // null when the font has none or they are turned off
-    private EmbeddedFont? _withoutLigatures, _withoutKerning;
+    private EmbeddedFont? _withoutLigatures, _withoutKerning, _withoutContextual;
     private bool _noKerning;
+    private FeaturesOff _off; // the optional features CSS turned off, which the shaper leaves out
+    // Whether all text goes through the shaper because the font substitutes in context (calt, clig or rclt) and those
+    // features are on, as browsers apply them to all horizontal text. Decided when the font is made, never per run.
+    private bool _shapesInContext;
 
     // metrics: line metrics to use instead of the font's own, for a bundled font standing in for a standard font.
     public EmbeddedFont(FontProgram program, bool syntheticBold, bool syntheticItalic, UnicodeRange? range = null, TextFont? metrics = null)
@@ -36,6 +40,15 @@ internal sealed class EmbeddedFont : TextFont
             Descent = metrics.Descent;
             LineGap = metrics.LineGap;
         }
+        _shapesInContext = SubstitutesInContext(program, FeaturesOff.None);
+    }
+
+    private static bool SubstitutesInContext(FontProgram program, FeaturesOff off)
+    {
+        var features = program.ContextualFeatures;
+        return (features & ContextualFeatures.Rclt) != 0
+            || (features & ContextualFeatures.Calt) != 0 && (off & FeaturesOff.Contextual) == 0
+            || (features & ContextualFeatures.Clig) != 0 && (off & FeaturesOff.Ligatures) == 0;
     }
 
     /// <summary>True when the font has a glyph for the code point (and its unicode-range, if any, includes it).</summary>
@@ -49,20 +62,31 @@ internal sealed class EmbeddedFont : TextFont
 
     public override int KernUnits(int left, int right) => _noKerning ? 0 : Program.Kern1000(Program.GlyphId(left), Program.GlyphId(right));
 
-    private EmbeddedFont(EmbeddedFont font, bool ligatures, bool kerning) : this(font.Program, font.SyntheticBold, font.SyntheticItalic, font._range)
+    private EmbeddedFont(EmbeddedFont font, FeaturesOff off, bool kerning) : this(font.Program, font.SyntheticBold, font.SyntheticItalic, font._range)
     {
         Ascent = font.Ascent;
         Descent = font.Descent;
         LineGap = font.LineGap;
-        if (!ligatures) _ligatures = null;
+        _off = off;
+        if ((off & FeaturesOff.Ligatures) != 0) _ligatures = null;
+        _shapesInContext = SubstitutesInContext(Program, off);
         _noKerning = !kerning;
     }
 
+    // A font with nothing to turn off is its own variant without ligatures: it has neither ligatures drawn without the
+    // shaper nor liga or clig lookups that the shaper would leave out.
     public override TextFont WithoutLigatures()
-        => _ligatures == null ? this : _withoutLigatures ??= new EmbeddedFont(this, ligatures: false, kerning: !_noKerning);
+        => (_off & FeaturesOff.Ligatures) != 0 || _ligatures == null && (Program.ContextualFeatures & (ContextualFeatures.Liga | ContextualFeatures.Clig)) == 0
+            ? this
+            : _withoutLigatures ??= new EmbeddedFont(this, _off | FeaturesOff.Ligatures, kerning: !_noKerning);
+
+    public override TextFont WithoutContextual()
+        => (_off & FeaturesOff.Contextual) != 0 || (Program.ContextualFeatures & ContextualFeatures.Calt) == 0
+            ? this
+            : _withoutContextual ??= new EmbeddedFont(this, _off | FeaturesOff.Contextual, kerning: !_noKerning);
 
     public override TextFont WithoutKerning()
-        => _noKerning || Program.Kerning == null ? this : _withoutKerning ??= new EmbeddedFont(this, ligatures: _ligatures != null, kerning: false);
+        => _noKerning || Program.Kerning == null ? this : _withoutKerning ??= new EmbeddedFont(this, _off, kerning: false);
 
     public override float Metric(FontMetric metric)
     {
@@ -98,14 +122,19 @@ internal sealed class EmbeddedFont : TextFont
         Descent = font.Descent;
         LineGap = font.LineGap;
         if (font._ligatures == null) _ligatures = null;
+        _off = font._off;
+        _shapesInContext = SubstitutesInContext(program, _off);
         _noKerning = font._noKerning;
     }
 
     /// <summary>
     /// True when the text goes through the OpenType shaper: it has characters of a complex script, or the font has
-    /// features on that substitute in context, such as fractions.
+    /// features on that substitute in context, such as contextual alternates or fractions.
     /// </summary>
-    public bool UsesShaper(string s, int start, int length) => Program.ShapedFeatures != null || ComplexShaper.Handles(s, start, length);
+    public bool UsesShaper(string s, int start, int length)
+        => _shapesInContext || Program.ShapedFeatures != null || ComplexShaper.Handles(s, start, length);
+
+    public override bool ShapesInContext => _shapesInContext;
 
     /// <summary>True when the text may form a ligature, so it has to be shaped glyph by glyph.</summary>
     public bool MayLigate(string s, int start, int length)
@@ -134,7 +163,7 @@ internal sealed class EmbeddedFont : TextFont
     {
         if (UsesShaper(s, start, length))
         {
-            ComplexShaper.Shape(Program, s, start, length, rtl, glyphs);
+            ComplexShaper.Shape(Program, s, start, length, rtl, glyphs, _off);
             return true;
         }
         glyphs.Clear();
@@ -201,7 +230,7 @@ internal sealed class EmbeddedFont : TextFont
     private int MeasureComplex(string s, int start, int length)
     {
         var glyphs = t_glyphs ??= new List<ShapedGlyph>();
-        ComplexShaper.Shape(Program, s, start, length, ComplexShaper.GuessRtl(s, start, length), glyphs);
+        ComplexShaper.Shape(Program, s, start, length, ComplexShaper.GuessRtl(s, start, length), glyphs, _off);
         float total = 0;
         foreach (var g in glyphs) total += g.Advance;
         return (int)MathF.Round(total);
@@ -329,10 +358,15 @@ internal sealed class FontChain : TextFont
 
     public override bool HasKerning => _primary.HasKerning;
 
-    private FontChain? _withoutLigatures, _withoutKerning;
+    private FontChain? _withoutLigatures, _withoutKerning, _withoutContextual;
 
     public override TextFont WithoutLigatures()
         => _withoutLigatures ??= new FontChain(_primary.WithoutLigatures(), (cp, accept) => _fallback(cp, accept)?.WithoutLigatures());
+
+    public override bool ShapesInContext => _primary.ShapesInContext;
+
+    public override TextFont WithoutContextual()
+        => _withoutContextual ??= new FontChain(_primary.WithoutContextual(), (cp, accept) => _fallback(cp, accept)?.WithoutContextual());
 
     public override TextFont WithoutKerning()
         => _withoutKerning ??= new FontChain(_primary.WithoutKerning(), (cp, accept) => _fallback(cp, accept)?.WithoutKerning());
