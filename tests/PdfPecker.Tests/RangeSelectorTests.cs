@@ -186,10 +186,11 @@ public class RangeSelectorTests
     public void Every_case_matches_as_in_Chrome() => Assert.Equal(Chrome, States(Page));
 
     [Fact]
-    public void Disabled_and_read_only_inputs_match_neither_but_a_read_only_slider_is_in_range()
-        => Assert.Equal("a=- b=- c=I d=- e=-", States(
+    public void Disabled_and_read_only_inputs_match_neither()
+        => Assert.Equal("a=- b=- c=- d=- e=- f=- g=-", States(
             "<input id=a type=number min=5 value=3 disabled><input id=b type=date min=2020-01-01 value=2019-01-01 readonly>"
-            + "<input id=c type=range readonly><fieldset disabled><input id=d type=number min=5 value=3></fieldset><input id=e type=range disabled>"));
+            + "<input id=c type=range readonly><fieldset disabled><input id=d type=number min=5 value=3></fieldset><input id=e type=range disabled>"
+            + "<input id=f type=range readonly max=3 value=9><input id=g type=' number' value=11 max=10>"));
 
     [Fact]
     public void Rules_with_the_selectors_apply()

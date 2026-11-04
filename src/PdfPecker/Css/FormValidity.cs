@@ -460,15 +460,20 @@ internal static class FormValidity
 
     private static string StripNewlines(string s) => s.IndexOfAny(['\n', '\r']) < 0 ? s : s.Replace("\n", "").Replace("\r", "");
 
+    // Chrome also leaves a read-only slider out of constraint validation, although HTML does not list readonly for range.
     private static bool TakesReadonly(string type)
-        => type is "text" or "search" or "url" or "tel" or "email" or "password" or "date" or "month" or "week" or "time" or "datetime-local" or "number";
+        => type is "text" or "search" or "url" or "tel" or "email" or "password" or "date" or "month" or "week" or "time" or "datetime-local" or "number"
+            or "range";
 
     private static bool TakesPattern(string type) => type is "text" or "search" or "url" or "tel" or "email" or "password";
 
-    /// <summary>The input's type, with an unknown one as text, as browsers treat it.</summary>
+    /// <summary>
+    /// The input's type, with an unknown one as text, as browsers treat it. The value is not trimmed: browsers take
+    /// type=" number" as an unknown type, so as text.
+    /// </summary>
     private static string InputType(Element e)
     {
-        string type = (e.GetAttribute("type") ?? "text").Trim().ToLowerInvariant();
+        string type = (e.GetAttribute("type") ?? "text").ToLowerInvariant();
         return type is "text" or "search" or "url" or "tel" or "email" or "password" or "date" or "month" or "week" or "time"
             or "datetime-local" or "number" or "range" or "color" or "checkbox" or "radio" or "file" or "submit" or "image"
             or "reset" or "button" or "hidden" ? type : "text";
