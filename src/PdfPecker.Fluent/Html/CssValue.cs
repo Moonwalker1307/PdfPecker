@@ -58,10 +58,11 @@ internal static class CssValue
         if (style.Families is { } families) declarations.Add(("font-family", FontFamilies(families)));
         if (style.Weight is { } weight) declarations.Add(("font-weight", ((int)weight).ToString(CultureInfo.InvariantCulture)));
         if (style.IsItalic is { } italic) declarations.Add(("font-style", italic ? "italic" : "normal"));
-        if (style.IsUnderline != null || style.IsStrikethrough != null)
+        if (style.IsUnderline != null || style.IsStrikethrough != null || style.IsOverline != null)
         {
-            bool under = style.IsUnderline == true, through = style.IsStrikethrough == true;
-            declarations.Add(("text-decoration-line", under && through ? "underline line-through" : under ? "underline" : through ? "line-through" : "none"));
+            bool under = style.IsUnderline == true, over = style.IsOverline == true, through = style.IsStrikethrough == true;
+            string lines = (under ? " underline" : "") + (over ? " overline" : "") + (through ? " line-through" : "");
+            declarations.Add(("text-decoration-line", lines.Length > 0 ? lines[1..] : "none"));
         }
         if (style.DecorationStyle is { } decoration)
             declarations.Add(("text-decoration-style", decoration switch
@@ -81,6 +82,14 @@ internal static class CssValue
         if (style.Tracking is { } tracking) declarations.Add(("letter-spacing", Number(tracking) + "em"));
         if (style.WordGap is { } wordGap) declarations.Add(("word-spacing", Number(wordGap) + "em"));
         if (style.IsHyphenated is { } hyphenated) declarations.Add(("hyphens", hyphenated ? "auto" : "manual"));
+        if (style.IsBreakAnywhere is { } anywhere) declarations.Add(("word-break", anywhere ? "break-all" : "normal"));
+        // A direction isolates the text from what is around it, as the dir attribute does; plaintext takes the direction
+        // from the first strong letter, as dir="auto" does.
+        if (style.Direction is { } direction)
+        {
+            if (direction != TextDirection.Auto) declarations.Add(("direction", direction == TextDirection.RightToLeft ? "rtl" : "ltr"));
+            declarations.Add(("unicode-bidi", direction == TextDirection.Auto ? "plaintext" : "isolate"));
+        }
         if (style.Features is { } features)
         {
             var sb = new StringBuilder();

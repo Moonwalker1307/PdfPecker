@@ -124,7 +124,7 @@ internal sealed class HtmlWriter
                 CssValue.AddTextStyle(declarations, page.Style, forBox: true);
                 _html.Append("<div");
                 WriteAttribute("class", Class(declarations));
-                if (page.RightToLeft) WriteAttribute("dir", "rtl");
+                if (page.RightToLeft == true) WriteAttribute("dir", "rtl");
                 _html.Append('>');
                 RenderPageSet(page, name);
                 _html.Append("</div>");
@@ -161,7 +161,7 @@ internal sealed class HtmlWriter
         foreach (var rule in css) _html.Append('\n').Append(rule);
         _html.Append("</style></head>\n<body");
         if (bodyClass != null) WriteAttribute("class", bodyClass);
-        if (pages.Count == 1 && pages[0].RightToLeft) WriteAttribute("dir", "rtl");
+        if (pages.Count == 1 && pages[0].RightToLeft == true) WriteAttribute("dir", "rtl");
         _html.Append('>').Append(body).Append("</body></html>\n");
         return _html.ToString();
     }
@@ -1115,11 +1115,13 @@ internal sealed class HtmlWriter
             {
                 if (placed.TryGetValue((r, c), out var cell))
                 {
-                    var box = Box.Slot(tag);
+                    bool rowHeader = cell.RowHeader && tag == "td";
+                    var box = Box.Slot(rowHeader ? "th" : tag);
                     box.IsCell = true;
                     box.SizeLocked = true;
                     box.InGrid = true;
                     if (tag == "th") box.Attributes.Add(("scope", "col"));
+                    else if (rowHeader) box.Attributes.Add(("scope", "row"));
                     if (cell.ColumnSpan > 1) box.Attributes.Add(("colspan", cell.ColumnSpan.ToString(CultureInfo.InvariantCulture)));
                     int rowSpan = extended != null && extended.Contains((r, c)) ? rows - r : Math.Min(cell.RowSpan, rows - r);
                     if (rowSpan > 1) box.Attributes.Add(("rowspan", rowSpan.ToString(CultureInfo.InvariantCulture)));
@@ -1363,6 +1365,11 @@ internal sealed class HtmlWriter
                         Declarations.Add(("margin", "0"));
                         Declarations.Add(("padding", "0"));
                     }
+                    // Code and quotes are inline elements with their own font and quotation marks, which here hold
+                    // a block of content in the font around it.
+                    if (Tag is "code" or "q") Declarations.Add(("display", "block"));
+                    if (Tag == "code") Declarations.Add(("font-family", "inherit"));
+                    if (Tag == "q") Declarations.Add(("quotes", "none"));
                     return true;
                 case DecoratorKind.Artifact:
                     Attributes.Add(("aria-hidden", "true"));
