@@ -12,12 +12,17 @@ internal sealed partial class SvgImage
     {
         var saved = Shapes;
         Shapes = new List<SvgShape>();
+        _captureDepth++;
         try
         {
             draw();
             return Shapes;
         }
-        finally { Shapes = saved; }
+        finally
+        {
+            Shapes = saved;
+            _captureDepth--;
+        }
     }
 
     /// <summary>The root viewport in user units: the viewBox, or the width and height (300 × 150 by default).</summary>
