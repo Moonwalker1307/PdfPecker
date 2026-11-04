@@ -346,6 +346,8 @@ internal sealed class PageSet
     public Container Footer { get; } = new();
     public Container EvenHeader { get; } = new();
     public Container EvenFooter { get; } = new();
+    public Container BackgroundLayer { get; } = new();
+    public Container ForegroundLayer { get; } = new();
 
     /// <summary>
     /// The merged document the page set belongs to when <see cref="MergedDocument.UseOriginalPageNumbers"/> keeps the
