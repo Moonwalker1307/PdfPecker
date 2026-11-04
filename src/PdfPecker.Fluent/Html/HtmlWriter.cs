@@ -633,6 +633,21 @@ internal sealed class HtmlWriter
     /// </summary>
     private void RenderFormField(FormFieldElement field, Box box)
     {
+        if (field.Kind == FormFieldKind.Signature)
+        {
+            // PdfPecker makes the element's border box the field, so the decorators around it can be that element and
+            // a border or height on it is the field's own. Inside an element that cannot be the field, such as a page
+            // slot, the field fills that element's height when it has one.
+            bool sized = box.Has("height");
+            var fieldBox = Absorbing(box);
+            if (!fieldBox.Has("height") && !fieldBox.Has("min-height"))
+                fieldBox.Declarations.Add(("height", fieldBox != box && sized ? "100%" : CssValue.Pt(40)));
+            box = fieldBox;
+            box.Attributes.Add(("data-pdf-signature", field.Name));
+            if (field.Tooltip != null) box.Attributes.Add(("title", field.Tooltip));
+            Open(box);
+            return;
+        }
         if (box.MustEmit) Open(box);
         var declarations = new List<(string, string)> { ("display", "block"), ("margin", "0") };
         if (field.Kind is FormFieldKind.CheckBox or FormFieldKind.RadioButton)

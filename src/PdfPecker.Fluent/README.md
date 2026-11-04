@@ -100,8 +100,9 @@ Document.Create(container =>
       .Save("invoice-final.pdf");
   ```
 - **Form fields and footnotes**, which QuestPDF does not have: `TextField` (one line, multiline or password),
-  `CheckBox`, `RadioButton`, `ComboBox` and `ListBox` become fillable PDF fields, and `text.Footnote("...")` numbers a
-  note and sets it at the bottom of its page. Browsers show footnotes in the text, where `GenerateHtml` puts them.
+  `CheckBox`, `RadioButton`, `ComboBox` and `ListBox` become fillable PDF fields, `SignatureField("Buyer")` is an
+  empty signature field as large as its slot that `PdfSigner` signs later with `FieldName = "Buyer"`, and
+  `text.Footnote("...")` numbers a note and sets it at the bottom of its page. Browsers show footnotes in the text, where `GenerateHtml` puts them.
 - **Markdown**: `container.Markdown("...")` places Markdown text anywhere, converted by PdfPecker's own parser
   (CommonMark with GitHub tables, task lists, strikethrough, autolinks and footnotes, and definition lists). It takes
   the surrounding font, size and colour, styles headings, code, quotes and tables as on GitHub, and is safe for text

@@ -163,3 +163,19 @@ internal static class FormLimits
         return rows;
     }
 }
+
+/// <summary>Sets up an empty signature field.</summary>
+public sealed class SignatureFieldDescriptor
+{
+    private readonly FormFieldElement _field;
+
+    internal SignatureFieldDescriptor(FormFieldElement field) => _field = field;
+
+    /// <summary>A short description that PDF viewers show over the field, and screen readers and PDF/UA read out.</summary>
+    public SignatureFieldDescriptor Tooltip(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        _field.Tooltip = text;
+        return this;
+    }
+}

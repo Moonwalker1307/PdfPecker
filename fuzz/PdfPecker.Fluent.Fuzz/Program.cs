@@ -534,8 +534,12 @@ internal static class Fuzz
     private static void FormField(IContainer c, Random r)
     {
         string name = r.Next(10) == 0 ? Text(r) : "f" + r.Next(5).ToString(CultureInfo.InvariantCulture);
-        switch (r.Next(5))
+        switch (r.Next(6))
         {
+            case 4:
+                var signature = c.SignatureField(name);
+                if (r.Next(2) == 0) signature.Tooltip(Text(r));
+                break;
             case 0:
                 var text = c.TextField(name).Value(Text(r)).Tooltip(Text(r)).ReadOnly(r.Next(4) == 0).Password(r.Next(6) == 0);
                 if (r.Next(3) == 0) text.Multiline(r.Next(20) == 0 ? r.Next(-2, 2000) : r.Next(1, 6));

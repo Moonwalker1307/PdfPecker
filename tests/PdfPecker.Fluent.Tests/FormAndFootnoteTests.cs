@@ -86,6 +86,62 @@ public sealed class FormAndFootnoteTests
     }
 
     [Fact]
+    public void A_signature_field_is_the_element_its_decorators_make()
+    {
+        Assert.Equal("<main><div class=\"c0\" data-pdf-signature=\"Buyer\" title=\"Buyer&#39;s signature\"></div></main>",
+            Html.Body(Html.Page(c => c.SignatureField("Buyer").Tooltip("Buyer's signature")).GenerateHtml()));
+        // In a column item the decorators and the field are one element; in the page slot the field fills the slot.
+        Assert.Equal("<div class=\"c1\" data-pdf-signature=\"Seller\"></div>", Html.Item(c => c.Height(50).BorderBottom(1).SignatureField("Seller")));
+        var document = Html.Page(c => c.Width(200).Height(50).SignatureField("Seller"));
+        Assert.Equal("<main class=\"c0\"><div class=\"c1\" data-pdf-signature=\"Seller\"></div></main>", Html.Body(document.GenerateHtml()));
+        Assert.Contains(".c1{height:100%}", Html.Css(document));
+    }
+
+    [Fact]
+    public void A_signature_field_without_a_height_is_40_points_tall()
+        => Assert.Contains(".c0{height:40pt}", Html.Css(Html.Page(c => c.SignatureField("a"))));
+
+    [Fact]
+    public void Signature_fields_are_signed_where_they_are()
+    {
+        byte[] pdf = Html.Page(c => c.Row(r =>
+        {
+            r.RelativeItem().Height(50).BorderBottom(1).SignatureField("Seller");
+            r.ConstantItem(20);
+            r.RelativeItem().Height(50).BorderBottom(1).SignatureField("Buyer").Tooltip("Buyer");
+        })).GeneratePdf();
+        var fields = PdfForm.GetFields(pdf);
+        Assert.Equal(new[] { "Seller", "Buyer" }, fields.Select(f => f.Name));
+        Assert.All(fields, f => Assert.Equal(PdfFormFieldType.Signature, f.Type));
+
+        using var key = System.Security.Cryptography.RSA.Create(2048);
+        var request = new System.Security.Cryptography.X509Certificates.CertificateRequest("CN=Fluent", key,
+            System.Security.Cryptography.HashAlgorithmName.SHA256, System.Security.Cryptography.RSASignaturePadding.Pkcs1);
+        using var self = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
+        byte[] pfx = self.Export(System.Security.Cryptography.X509Certificates.X509ContentType.Pfx, "pw");
+#if NET9_0_OR_GREATER
+        var cert = System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadPkcs12(pfx, "pw");
+#else
+        var cert = new System.Security.Cryptography.X509Certificates.X509Certificate2(pfx, "pw");
+#endif
+        var signed = PdfSigner.Sign(pdf, new PdfSignatureOptions(cert) { FieldName = "Buyer" });
+        var result = PdfSignatureVerifier.Verify(signed).Single();
+        Assert.Equal("Buyer", result.FieldName);
+        Assert.True(result.SignatureValid && result.DigestMatches);
+        Assert.Equal(2, PdfForm.GetFields(signed).Count);
+    }
+
+    [Fact]
+    public void Caller_text_in_a_signature_field_stays_text()
+    {
+        const string evil = "\"><x-evil a='";
+        string html = Html.Page(c => c.SignatureField(evil).Tooltip(evil)).GenerateHtml();
+        Assert.DoesNotContain("<x-evil", html, StringComparison.Ordinal);
+        Assert.ThrowsAny<ArgumentException>(() => Html.Of(c => c.SignatureField("")));
+        Assert.ThrowsAny<ArgumentException>(() => Html.Of(c => c.SignatureField("a").Tooltip(null!)));
+    }
+
+    [Fact]
     public void A_footnote_is_a_span_that_floats_to_the_footnote_area()
     {
         var document = Html.Page(c => c.Text(t => { t.Span("Text"); t.Footnote("Note").Italic(); t.Footnote("Big").FontSize(12); }));

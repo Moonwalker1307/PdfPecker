@@ -278,7 +278,7 @@ internal sealed class ListElement : Element
     public int Start { get; set; } = 1;
 }
 
-internal enum FormFieldKind { Text, CheckBox, RadioButton, ComboBox, ListBox }
+internal enum FormFieldKind { Text, CheckBox, RadioButton, ComboBox, ListBox, Signature }
 
 /// <summary>A form field that PdfPecker turns into a fillable PDF field.</summary>
 internal sealed class FormFieldElement : Element
