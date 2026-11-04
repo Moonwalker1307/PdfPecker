@@ -143,6 +143,41 @@ internal static class CssSupports
         return ValueSupported(PrefixedProperties.Unprefixed(name) ?? name, value);
     }
 
+    /// <summary>
+    /// Whether every top-level function of a content value is one generated content writes, so that a query for
+    /// target-counters() answers true here and a function nobody implements answers false. Strings are skipped, and
+    /// the arguments of a function are not looked into.
+    /// </summary>
+    private static bool ContentFunctionsKnown(string value)
+    {
+        int i = 0;
+        while (i < value.Length)
+        {
+            char c = value[i];
+            if (c is '"' or '\'')
+            {
+                int end = value.IndexOf(c, i + 1);
+                if (end < 0) return false;
+                i = end + 1;
+            }
+            else if (char.IsLetter(c) || c == '-')
+            {
+                int start = i;
+                while (i < value.Length && (char.IsLetterOrDigit(value[i]) || value[i] is '-' or '_')) i++;
+                if (i >= value.Length || value[i] != '(') continue;
+                int close = MediaQuery.MatchingParen(value, i);
+                if (close < 0) return false;
+                if (value.AsSpan(start, i - start).ToString().ToLowerInvariant() is not ("attr" or "counter" or "counters" or "string" or "content"
+                    or "target-counter" or "target-counters" or "target-text" or "-pdfpecker-target-pages" or "leader" or "url" or "image-set"
+                    or "linear-gradient" or "radial-gradient"))
+                    return false;
+                i = close + 1;
+            }
+            else i++;
+        }
+        return true;
+    }
+
     /// <summary>A light check of the value: colours must parse, display must be a known keyword.</summary>
     private static bool ValueSupported(string name, string value)
     {
@@ -201,6 +236,8 @@ internal static class CssSupports
                 return CssParser.ParseTextBoxTrim(lower) != null;
             case "text-box-edge":
                 return CssParser.ParseTextBoxEdge(lower) != null;
+            case "content":
+                return ContentFunctionsKnown(value);
             case "hyphenate-limit-chars":
                 return StyleResolver.ParseHyphenateLimitChars(lower) != null;
             case "hyphenate-limit-lines":

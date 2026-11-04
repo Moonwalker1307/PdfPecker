@@ -230,10 +230,41 @@ internal static class GeneratedContent
                     else
                     {
                         paged.WantedCounters.Add(counter);
-                        if (paged.CounterSnapshots.TryGetValue(id, out var values) && values.TryGetValue(counter, out int v)) value = v;
+                        if (paged.CounterSnapshots.TryGetValue(id, out var values) && values.TryGetValue(counter, out var v)) value = v[^1];
                     }
                 }
                 sb.Append(Format(targetStyle, value));
+                return true;
+            }
+            case "target-counters":
+            {
+                // target-counters(attr(href), name, "separator"[, style]): every nested value of a counter at the element
+                // a link points to, as counters() writes them at the element itself ("2.3.1" for a section in a section).
+                if (args.Count is < 3 or > 4) return false;
+                if (args[2].Length == 0 || args[2][0] is not ('"' or '\'')) return false;
+                var sep = new StringBuilder();
+                int k = 0;
+                if (!ReadString(args[2], ref k, sep)) return false;
+                var paged = resolver.Paged;
+                paged.UsesTargets = true;
+                var id = TargetId(args[0], host);
+                var counter = args[1].Trim();
+                if (!TryStyle(resolver, args.Count == 4 ? args[3] : "decimal", out var targetsStyle)) return false;
+                int[] values = [0];
+                if (id != null)
+                {
+                    if (counter == "page") values = [paged.PageOfId?.Invoke(id) ?? 0];
+                    else
+                    {
+                        paged.WantedCounters.Add(counter);
+                        if (paged.CounterSnapshots.TryGetValue(id, out var snapshot) && snapshot.TryGetValue(counter, out var v)) values = v;
+                    }
+                }
+                for (int i = 0; i < values.Length; i++)
+                {
+                    if (i > 0) sb.Append(sep);
+                    sb.Append(Format(targetsStyle, values[i]));
+                }
                 return true;
             }
             case "-pdfpecker-target-pages":
