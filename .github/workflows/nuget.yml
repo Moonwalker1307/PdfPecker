@@ -104,6 +104,18 @@ jobs:
       - run: dotnet pack src/PdfPecker.Fluent -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
       - run: dotnet pack src/PdfPecker.Testing -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
 
+      # PdfPecker.Cli is the `pdfpecker` dotnet tool. It carries PdfPecker's assembly inside the package, so it has no
+      # dependencies, and it gets the same version as the other two.
+      - run: dotnet pack src/PdfPecker.Cli -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
+
+      # The packed tool must install and run, which a successful pack does not show: install it from the artifacts
+      # folder into a throwaway tool path and convert a document.
+      - name: Install the tool from the package and use it
+        run: |
+          dotnet tool install PdfPecker.Cli --tool-path tool-check --add-source artifacts --version ${{ steps.version.outputs.version }}
+          echo '<h1>Tool check</h1>' | ./tool-check/pdfpecker convert - tool-check/check.pdf
+          ./tool-check/pdfpecker text tool-check/check.pdf | grep -q 'Tool check'
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: packages-${{ steps.version.outputs.version }}
@@ -179,6 +191,8 @@ jobs:
       - run: dotnet test -c Release -f net10.0 --no-build tests/PdfPecker.Tests
       - run: dotnet build -c Release -f net10.0 tests/PdfPecker.Fluent.Tests
       - run: dotnet test -c Release -f net10.0 --no-build tests/PdfPecker.Fluent.Tests
+      - run: dotnet build -c Release -f net10.0 tests/PdfPecker.Cli.Tests
+      - run: dotnet test -c Release -f net10.0 --no-build tests/PdfPecker.Cli.Tests
       # Snapshot paths, file names and the files a failure writes depend on the file system.
       - run: dotnet build -c Release -f net10.0 tests/PdfPecker.Testing.Tests
       - run: dotnet test -c Release -f net10.0 --no-build tests/PdfPecker.Testing.Tests
@@ -216,6 +230,15 @@ jobs:
           ./aot-fluent/PdfPecker.Fluent.Sample aot-fluent-output
           test "$(ls aot-fluent-output/*.pdf | wc -l)" -ge 5
 
+      - name: Publish the command-line tool with native AOT
+        run: dotnet publish src/PdfPecker.Cli -c Release -f net10.0 -p:PublishAot=true -p:TreatWarningsAsErrors=true -o aot-cli
+
+      - name: Convert and read a document with the native tool
+        run: |
+          printf '# Native tool\n\nWorks without a runtime.\n' > aot-cli/check.md
+          ./aot-cli/PdfPecker.Cli convert aot-cli/check.md aot-cli/check.pdf
+          ./aot-cli/PdfPecker.Cli text aot-cli/check.pdf | grep -q 'Works without a runtime'
+
   release:
     if: github.event_name == 'release'
     needs: build
@@ -235,7 +258,7 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
         run: gh release upload "$TAG" artifacts/*.nupkg --clobber
 
-  # Pushes the release packages, PdfPecker, PdfPecker.Fluent and PdfPecker.Testing, to nuget.org with Trusted Publishing: NuGet/login swaps a GitHub OIDC token
+  # Pushes the release packages, PdfPecker, PdfPecker.Fluent, PdfPecker.Testing and PdfPecker.Cli, to nuget.org with Trusted Publishing: NuGet/login swaps a GitHub OIDC token
   # for a short-lived API key, so no long-lived key is stored in the repository. Runs only for published releases.
   publish:
     if: github.event_name == 'release'

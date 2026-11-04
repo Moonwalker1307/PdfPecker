@@ -9,8 +9,8 @@
 ## Checklist
 
 - [ ] `dotnet build -c Release` and `dotnet test -c Release --no-build` pass
-- [ ] No new `PackageReference` in `src/PdfPecker` or `src/PdfPecker.Fluent`, and no reflection
+- [ ] No new `PackageReference` in `src/PdfPecker`, `src/PdfPecker.Fluent` or `src/PdfPecker.Cli`, and no reflection
 - [ ] Golden baselines unchanged, or regenerated on purpose and listed here with the reason
 - [ ] New public members have XML doc comments
 - [ ] Bug fixes for malformed or hostile input have a regression test in `HostileInputTests`
-- [ ] `README.md` (or `src/PdfPecker.Fluent/README.md`) updated if a feature was added or changed
+- [ ] `README.md` (or `src/PdfPecker.Fluent/README.md`, `src/PdfPecker.Cli/README.md`) updated if a feature was added or changed
