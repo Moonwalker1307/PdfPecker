@@ -66,6 +66,7 @@ internal sealed partial class PdfDocumentWriter
         _yOrigin = _page.MarginTop + _page.BandTop;
         (_flowTop, _flowBottom) = (pageTop, pageTop + _page.FlowHeight);
         _pageCanvas = (background, doc.Canvas[p], pageTop);
+        bool bandsWritten = false;
         foreach (var placed in doc.Pages[p])
         {
             if (placed.Op is FixedBlock fixedBox)
@@ -73,6 +74,13 @@ internal sealed partial class PdfDocumentWriter
                 // Drawn as the bands are, from the top of the page area, between the flow content below and above it.
                 var (flowOrigin, flowTop, flowBottom) = (_yOrigin, _flowTop, _flowBottom);
                 (_yOrigin, _flowTop, _flowBottom) = (_page.MarginTop, float.NaN, float.NaN);
+                // The running bands are the root's in-flow content, so a fixed box without a negative z-index paints
+                // over them, as it paints over a header that Chrome prints once in the flow.
+                if (!bandsWritten && fixedBox.Order >= 0)
+                {
+                    WriteBand(doc, content, doc.Bands[p], pageLinks);
+                    bandsWritten = true;
+                }
                 WriteBand(doc, content, fixedBox.Items, pageLinks);
                 (_yOrigin, _flowTop, _flowBottom) = (flowOrigin, flowTop, flowBottom);
                 continue;
@@ -83,7 +91,7 @@ internal sealed partial class PdfDocumentWriter
         }
         _flowTop = _flowBottom = float.NaN;
         _yOrigin = _page.MarginTop;
-        WriteBand(doc, content, doc.Bands[p], pageLinks);
+        if (!bandsWritten) WriteBand(doc, content, doc.Bands[p], pageLinks);
         if (doc.HasMargins)
         {
             Mark(content, null);
