@@ -31,8 +31,16 @@ for (int n = only ?? 0; only == null ? watch.Elapsed.TotalSeconds < seconds : n 
     // Each composition gets a fresh generator, so the HTML and the PDF see the same document.
     int caseSeed = unchecked(seed * 1_000_003 + n);
     var created = Document.Create(d => Fuzz.Compose(d, new Random(caseSeed)));
-    if (new Random(unchecked(caseSeed * 17 + 3)).Next(10) == 0)
+    var settingsRandom = new Random(unchecked(caseSeed * 17 + 3));
+    if (settingsRandom.Next(10) == 0)
         created.WithSettings(new DocumentSettings { ContentDirection = ContentDirection.RightToLeft });
+    // Some cases compress and downsample their images document-wide.
+    else if (settingsRandom.Next(6) == 0)
+        created.WithSettings(new DocumentSettings
+        {
+            ImageCompressionQuality = settingsRandom.Next(2) == 0 ? (ImageCompressionQuality)settingsRandom.Next(6) : null,
+            ImageRasterDpi = settingsRandom.Next(2) == 0 ? settingsRandom.Next(1, 400) : null,
+        });
     IDocument document = created;
     // Some cases merge several documents, each composed from a generator of its own.
     if (new Random(unchecked(caseSeed * 31 + 7)).Next(8) == 0)
@@ -425,7 +433,10 @@ internal static class Fuzz
                 });
                 break;
             case 3:
-                c.Image(Image(r)).AlternativeText(Text(r));
+                var image = (r.Next(3) == 0 ? c.Image(PdfPecker.Fluent.Image.FromBinaryData(Image(r))) : c.Image(Image(r))).AlternativeText(Text(r));
+                if (r.Next(4) == 0) image.WithCompressionQuality((ImageCompressionQuality)r.Next(0, r.Next(20) == 0 ? 8 : 6));
+                if (r.Next(4) == 0) image.WithRasterDpi(r.Next(20) == 0 ? r.Next(-2, 2) : r.Next(1, 600));
+                if (r.Next(8) == 0) image.UseOriginalImage(r.Next(2) == 0);
                 break;
             case 4 when r.Next(3) == 0:
                 c.Chart(chart =>
@@ -444,7 +455,9 @@ internal static class Fuzz
                 });
                 break;
             case 4:
-                c.Svg(r.Next(2) == 0 ? "<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'><rect width='5' height='5'/></svg>" : Text(r));
+                string svg = r.Next(2) == 0 ? "<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'><rect width='5' height='5'/></svg>" : Text(r);
+                if (r.Next(3) == 0) c.Svg(SvgImage.FromText(svg.Length > 0 ? svg : "<svg/>"));
+                else c.Svg(svg.EndsWith(".svg", StringComparison.OrdinalIgnoreCase) ? svg + " " : svg);
                 break;
             case 5:
                 var barcode = r.Next(5);

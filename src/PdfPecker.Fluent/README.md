@@ -107,7 +107,10 @@ Document.Create(container =>
   the surrounding font, size and colour, styles headings, code, quotes and tables as on GitHub, and is safe for text
   from users: HTML in it stays text and only web, mail and in-document links keep their target.
 - **Images and graphics**: PNG, JPEG, WebP, BMP, TIFF and GIF images, SVG, solid, dashed and dotted lines, and QR,
-  EPC payment QR, Swiss QR-bill, Data Matrix, GS1 Data Matrix, Code 128 and EAN-13 barcodes.
+  EPC payment QR, Swiss QR-bill, Data Matrix, GS1 Data Matrix, Code 128 and EAN-13 barcodes. `Image.FromFile` and `SvgImage.FromText` load an image once for every
+  page and document that draws it, and `WithCompressionQuality`, `WithRasterDpi` and `UseOriginalImage`, or
+  `ImageCompressionQuality` and `ImageRasterDpi` in `DocumentSettings`, write photos as JPEGs and downsample them to
+  the size they are drawn at.
 - **Swiss QR-bill**: `SwissQrBill(bill, language)` lays out the 210 x 105 mm payment part with its receipt as the
   QR-bill style guide sets it, in English, German, French or Italian, with blank fields for a missing amount or payer.
 - **Charts**: `Chart` draws column, bar, line and pie charts from your series as vector SVG, with a legend, data
@@ -176,6 +179,9 @@ Most QuestPDF code ports by changing the `using` lines: `Document.Create`, `Page
   keep the surrounding font and add no quotation marks. `SemanticFormula`, `SemanticIndex`,
   `SemanticTableOfContentsItem`, `SemanticListLabel` and `SemanticListItemBody` are not there yet; `List` tags its
   labels and bodies itself.
+- Images keep their data unless `ImageCompressionQuality` or `ImageRasterDpi` is set, where QuestPDF compresses at
+  `High` and 288 dpi by default; set those to match it. A compressed image replaces the original only when it is
+  smaller, and transparency stays lossless. `Image.Size` is not available.
 - A page number in `Background` or `Foreground` shows the number of the page set's first page on every page; put
   page numbers in the header or footer.
 - `DocumentOperation` encrypts with AES-256 for every `Encrypt` call, also `Encryption40Bit` and `Encryption128Bit`,

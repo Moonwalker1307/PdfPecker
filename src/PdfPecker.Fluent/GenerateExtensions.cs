@@ -101,15 +101,31 @@ internal static class DocumentGenerator
     {
         var composed = Compose(document);
         images = new ImageTable(dataUris);
-        return HtmlWriter.Write(composed.Container.Pages, composed.Container.Css, composed.Metadata, images);
+        return HtmlWriter.Write(composed.Container.Pages, Css(composed), composed.Metadata, images);
     }
 
     public static byte[] Pdf(IDocument document, PdfOptions? options, CancellationToken cancellationToken)
     {
         var composed = Compose(document);
         var images = new ImageTable(dataUris: false);
-        string html = HtmlWriter.Write(composed.Container.Pages, composed.Container.Css, composed.Metadata, images);
+        string html = HtmlWriter.Write(composed.Container.Pages, Css(composed), composed.Metadata, images);
         return HtmlToPdf.Convert(html, Options(options, composed, composed.Container.Pages[0], images), cancellationToken);
+    }
+
+    /// <summary>
+    /// The document's style sheets, with a rule for the image settings when the document has any. The properties are
+    /// inherited, so a rule on the root reaches every image, and an image's own calls override it.
+    /// </summary>
+    private static List<string> Css(Composed composed)
+    {
+        var settings = composed.Settings;
+        if (settings.ImageCompressionQuality == null && settings.ImageRasterDpi == null) return composed.Container.Css;
+        var rule = new System.Text.StringBuilder("html{");
+        if (settings.ImageCompressionQuality is { } quality)
+            rule.Append("-pdfpecker-image-quality:").Append(CssValue.Number(ImageCompression.Quality(quality))).Append(';');
+        if (settings.ImageRasterDpi is { } dpi) rule.Append("-pdfpecker-image-max-resolution:").Append(CssValue.Number(dpi)).Append("dpi;");
+        rule.Append('}');
+        return [rule.ToString(), .. composed.Container.Css];
     }
 
     /// <summary>A copy of the caller's options with the document's page, metadata and settings applied.</summary>

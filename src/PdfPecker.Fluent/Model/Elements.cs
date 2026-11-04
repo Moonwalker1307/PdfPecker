@@ -204,6 +204,15 @@ internal sealed class ImageElement : Element
     public byte[] Data { get; }
     public ImageScaling Scaling { get; set; }
     public string AlternativeText { get; set; } = "";
+
+    /// <summary>The JPEG quality to write the image at, 1 to 100; null to follow the document.</summary>
+    public int? Quality { get; set; }
+
+    /// <summary>The resolution, in dpi, above which the image is downsampled; null to follow the document.</summary>
+    public int? RasterDpi { get; set; }
+
+    /// <summary>Writes the image as it is, whatever the document and the calls above say.</summary>
+    public bool UseOriginal { get; set; }
 }
 
 internal sealed class LineElement : Element

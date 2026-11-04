@@ -211,6 +211,40 @@ public sealed class ImageDescriptor
         return this;
     }
 
+    /// <summary>
+    /// Writes the image as it is, ignoring <see cref="WithCompressionQuality"/>, <see cref="WithRasterDpi"/> and the
+    /// document's <see cref="DocumentSettings.ImageCompressionQuality"/> and <see cref="DocumentSettings.ImageRasterDpi"/>.
+    /// </summary>
+    public ImageDescriptor UseOriginalImage(bool value = true)
+    {
+        _image.UseOriginal = value;
+        return this;
+    }
+
+    /// <summary>
+    /// Downsamples the image where it is drawn at more than <paramref name="dpi"/> pixels per inch, judged by the size it
+    /// is drawn at, in place of the document's <see cref="DocumentSettings.ImageRasterDpi"/>. An image drawn at a lower
+    /// resolution keeps its pixels.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="dpi"/> is not positive.</exception>
+    public ImageDescriptor WithRasterDpi(int dpi)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(dpi);
+        _image.RasterDpi = dpi;
+        return this;
+    }
+
+    /// <summary>
+    /// Writes the image as a JPEG at <paramref name="quality"/>, in place of the document's
+    /// <see cref="DocumentSettings.ImageCompressionQuality"/>, unless the JPEG would be larger than the image as it is.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="quality"/> is not an <see cref="ImageCompressionQuality"/> value.</exception>
+    public ImageDescriptor WithCompressionQuality(ImageCompressionQuality quality)
+    {
+        _image.Quality = ImageCompression.Quality(quality);
+        return this;
+    }
+
     private ImageDescriptor Scale(ImageScaling scaling)
     {
         _image.Scaling = scaling;

@@ -51,6 +51,33 @@ public sealed class DocumentSettings
     /// <c>ContentFromRightToLeft</c>. Left to right by default.
     /// </summary>
     public ContentDirection ContentDirection { get; set; }
+
+    /// <summary>
+    /// Writes the document's images as JPEGs at this quality, unless a JPEG would be larger than the image as it is.
+    /// <see cref="ImageDescriptor.WithCompressionQuality"/> and <see cref="ImageDescriptor.UseOriginalImage"/> override it
+    /// for one image. Default: null, images keep their data. QuestPDF compresses at
+    /// <see cref="Fluent.ImageCompressionQuality.High"/> unless told otherwise; set that to match it.
+    /// </summary>
+    public ImageCompressionQuality? ImageCompressionQuality { get; set; }
+
+    /// <summary>
+    /// Downsamples the document's images where they are drawn at more than this many pixels per inch, judged by the size
+    /// each is drawn at. <see cref="ImageDescriptor.WithRasterDpi"/> and <see cref="ImageDescriptor.UseOriginalImage"/>
+    /// override it for one image. Default: null, images keep their pixels. QuestPDF downsamples to 288 unless told
+    /// otherwise; set that to match it.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is not positive.</exception>
+    public int? ImageRasterDpi
+    {
+        get => _imageRasterDpi;
+        set
+        {
+            if (value is <= 0) throw new ArgumentOutOfRangeException(nameof(value), value, "ImageRasterDpi must be positive.");
+            _imageRasterDpi = value;
+        }
+    }
+
+    private int? _imageRasterDpi;
 }
 
 /// <summary>The direction content is laid out in, for <see cref="DocumentSettings.ContentDirection"/>.</summary>
