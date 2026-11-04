@@ -125,6 +125,30 @@ It writes compact HTML and CSS and renders it with PdfPecker, so every `PdfOptio
 signatures, e-invoices) works with it. What it covers and how it differs from QuestPDF is in its
 [README](https://github.com/Moonwalker1307/PdfPecker/blob/main/src/PdfPecker.Fluent/README.md).
 
+## Testing PDFs
+
+[PdfPecker.Testing](https://www.nuget.org/packages/PdfPecker.Testing) adds snapshot tests for the PDFs your code makes.
+`PdfAssert.MatchesSnapshot` compares a PDF with a stored one, leaving out dates, file IDs and stream compression, and
+when they differ it writes the new PDF and page images with the changed pixels marked. It works with any test
+framework, because a failed check throws. It is released with every PdfPecker release under the same version, and its
+only dependency is PdfPecker.
+
+```
+dotnet add package PdfPecker.Testing
+```
+
+```csharp
+using PdfPecker.Testing;
+
+byte[] pdf = HtmlToPdf.Convert(invoiceHtml);
+PdfAssert.MatchesSnapshot(pdf, "invoice");   // Snapshots/invoice.pdf next to the test file
+PdfAssert.ContainsText(pdf, "Total due: 1,500.00");
+PdfAssert.HasPageCount(pdf, 1);
+```
+
+How snapshots are created and accepted, and the appearance comparison for PDFs from other producers, are in its
+[README](https://github.com/Moonwalker1307/PdfPecker/blob/main/src/PdfPecker.Testing/README.md).
+
 ## Features
 
 - **HTML and CSS**: flexbox, grid and subgrid, CSS tables, floats with `shape-outside`, `clip-path` shapes (also
@@ -269,6 +293,7 @@ dotnet run --project bench/PdfPecker.Benchmarks -c Release -- --requirements    
 bench/compare-versions.sh v1.22.0                              # this checkout against a release, in turns on this machine
 dotnet pack src/PdfPecker -c Release -o ./nupkg                # also checks the public API against the last release
 dotnet pack src/PdfPecker.Fluent -c Release -o ./nupkg         # the fluent package, with the same version
+dotnet pack src/PdfPecker.Testing -c Release -o ./nupkg        # the snapshot testing package, with the same version
 ```
 
 Requirements and details are in [BUILD.md](https://github.com/Moonwalker1307/PdfPecker/blob/main/BUILD.md) and
