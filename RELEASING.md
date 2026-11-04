@@ -21,9 +21,6 @@ dependencies.
   is not removed or renamed and the exit codes (0 success, 1 the work failed, 2 a wrong command line) do not change; add a
   new option instead. The `PdfPecker.Cli.Tests` run the commands and the `nuget.yml` build installs the packed tool and
   runs it, so a package that does not work fails the build.
-- PdfPecker.Testing and PdfPecker.Razor have no baseline until their first release: their package validation checks
-  only the package's own consistency, and the pull request after that release adds their
-  `PackageValidationBaselineVersion` (see below).
 - Local builds pack as `<next patch>-dev` (the `Version` in `Directory.Build.props`, which all five packages share). CI builds of main and pull requests
   are `<next patch>-preview.<run number>`, computed from the latest `v*` tag, so they sort between two releases.
 
@@ -51,8 +48,7 @@ Open one pull request on the library that:
 
 - raises `PackageValidationBaselineVersion` to the new version in `src/PdfPecker/PdfPecker.csproj`,
   `src/PdfPecker.Fluent/PdfPecker.Fluent.csproj`, `src/PdfPecker.Testing/PdfPecker.Testing.csproj` and
-  `src/PdfPecker.Razor/PdfPecker.Razor.csproj` (after the first release that includes PdfPecker.Testing or
-  PdfPecker.Razor, this adds the property there, next to `EnablePackageValidation`), and
+  `src/PdfPecker.Razor/PdfPecker.Razor.csproj`, and
   `Version` in `Directory.Build.props` to the next patch's `-dev` (CI warns while the library's baseline lags behind
   the latest tag). PdfPecker.Cli has no baseline to raise;
 - updates the version placeholder in `.github/ISSUE_TEMPLATE/bug_report.yml`;

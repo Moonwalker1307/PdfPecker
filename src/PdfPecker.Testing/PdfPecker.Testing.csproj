@@ -27,10 +27,10 @@
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
 
-    <!-- Package validation checks the package's own consistency now. The package has no release to compare its public API
-         with yet; after its first release, PackageValidationBaselineVersion joins the other two packages', as
-         RELEASING.md describes. -->
+    <!-- Checks the public API against the last release, so a breaking change can't ship in a minor release by accident.
+         PackageValidationBaselineVersion follows PdfPecker's after each release, as RELEASING.md describes. -->
     <EnablePackageValidation>true</EnablePackageValidation>
+    <PackageValidationBaselineVersion>1.23.0</PackageValidationBaselineVersion>
   </PropertyGroup>
 
   <!-- CI builds use repository-relative source paths in the PDB, so builds are reproducible from the same commit. -->
