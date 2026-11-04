@@ -11,7 +11,7 @@ internal enum PseudoKind : byte
 {
     FirstChild, LastChild, OnlyChild, NthChild, NthLastChild, FirstOfType, LastOfType, OnlyOfType, NthOfType, NthLastOfType,
     Root, Link, Empty, Never, Not, Is, Where, Has, HasAnchor, Lang, Checked, Disabled, Enabled, Required, Optional, ReadOnly,
-    ReadWrite, PlaceholderShown, Default, Always, Dir, Valid, Invalid, Open, Scope,
+    ReadWrite, PlaceholderShown, Default, Always, Dir, Valid, Invalid, InRange, OutOfRange, Open, Scope,
 }
 
 /// <summary>The pseudo-element a selector's subject names, if any.</summary>
@@ -156,6 +156,8 @@ internal sealed class Compound
                        && e.HasAttribute("placeholder") && (e.Name == "textarea" || IsTextInput(e));
             case PseudoKind.Valid: return FormValidity.Of(e) == true;
             case PseudoKind.Invalid: return FormValidity.Of(e) == false;
+            case PseudoKind.InRange: return FormValidity.RangeState(e) == true;
+            case PseudoKind.OutOfRange: return FormValidity.RangeState(e) == false;
             // A details or dialog element shown open; a printed page has no open select or picker.
             case PseudoKind.Open: return e.Name is "details" or "dialog" && e.HasAttribute("open");
             default: return false;
@@ -698,6 +700,8 @@ internal sealed class Selector
             case "placeholder-shown": return new PseudoCondition { Kind = PseudoKind.PlaceholderShown };
             case "valid": return new PseudoCondition { Kind = PseudoKind.Valid };
             case "invalid": return new PseudoCondition { Kind = PseudoKind.Invalid };
+            case "in-range": return new PseudoCondition { Kind = PseudoKind.InRange };
+            case "out-of-range": return new PseudoCondition { Kind = PseudoKind.OutOfRange };
             case "open": return new PseudoCondition { Kind = PseudoKind.Open };
             case "scope": return new PseudoCondition { Kind = PseudoKind.Scope };
             case "defined": return new PseudoCondition { Kind = PseudoKind.Always };
