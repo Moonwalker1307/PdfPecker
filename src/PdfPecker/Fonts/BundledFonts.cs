@@ -41,7 +41,7 @@ internal static class BundledFonts
 
     private static readonly Lazy<FontProgram?> SymbolProgram = new(LoadSymbols);
     private static readonly Lazy<EmbeddedFont?>[] SymbolFonts =
-        Enumerable.Range(0, 4).Select(i => new Lazy<EmbeddedFont?>(() => SymbolProgram.Value is { } p ? new EmbeddedFont(p, (i & 1) != 0, (i & 2) != 0) : null)).ToArray();
+        Enumerable.Range(0, 4).Select(i => new Lazy<EmbeddedFont?>(() => SymbolProgram.Value is { } p ? new EmbeddedFont(p, (i & 1) != 0, (i & 2) != 0) { Shared = true } : null)).ToArray();
 
     /// <summary>
     /// Whether text has a character that the standard fonts cannot encode and a bundled font may have: a letter of
@@ -73,7 +73,7 @@ internal static class BundledFonts
         => Decompress("PdfPeckerSymbols") is { } data ? FontProgram.Load(data)[0] : null;
 
     private static EmbeddedFont? Load(StandardFont sf)
-        => Data(sf) is { } data ? new EmbeddedFont(FontProgram.Load(data)[0], false, false, metrics: sf) : null;
+        => Data(sf) is { } data ? new EmbeddedFont(FontProgram.Load(data)[0], false, false, metrics: sf) { Shared = true } : null;
 
     // StandardFont.All orders styles regular, bold, oblique, bold-oblique, like Names.
     private static byte[]? Decompress(StandardFont sf) => Decompress(Names[sf.Index]);

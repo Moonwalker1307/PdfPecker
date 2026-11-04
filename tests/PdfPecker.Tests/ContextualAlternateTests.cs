@@ -182,6 +182,50 @@ public class ContextualAlternateTests
     }
 
     [Fact]
+    public void Bundled_fonts_keep_no_shaped_text()
+    {
+        // A bundled font lives as long as the process, so text it shapes, here Latin with combining marks, is not kept:
+        // a stream of documents must not make it grow.
+        var font = BundledFonts.Get(StandardFont.All[0])!;
+        var glyphs = new List<ShapedGlyph>();
+        for (int n = 0; n < 2000; n++)
+        {
+            string word = "e\u0301" + n.ToString(CultureInfo.InvariantCulture);
+            Assert.True(font.UsesShaper(word, 0, word.Length));
+            font.MeasureUnits(word, 0, word.Length);
+            font.Shape(word, 0, word.Length, glyphs, rtl: false);
+        }
+        Assert.Equal(0, font.CachedGlyphs);
+
+        // A font of one conversion whose text all goes through the shaper keeps what it shapes.
+        var inter = Font();
+        inter.MeasureUnits("3 x 4", 0, 5);
+        Assert.True(inter.CachedGlyphs > 0);
+    }
+
+    [Fact]
+    public void The_shape_cache_stays_within_its_bound()
+    {
+        var cache = new ShapeCache();
+        List<ShapedGlyph> none = [], three = [new(1, 0, 1, 500, 0, 0), new(2, 1, 1, 500, 0, 0), new(3, 2, 1, 500, 0, 0)];
+        // Entries without glyphs count too.
+        for (int n = 0; n < 100; n++)
+        {
+            string empty = "e" + n.ToString(CultureInfo.InvariantCulture);
+            cache.Add(empty, 0, empty.Length, false, none);
+        }
+        Assert.Equal(100, cache.Count);
+        for (int n = 0; n < ShapeCache.MaxGlyphs; n++)
+        {
+            string s = n.ToString(CultureInfo.InvariantCulture);
+            cache.Add(s, 0, s.Length, n % 3 == 0, n % 2 == 0 ? none : three);
+            cache.AddWord(n % 4, s, 0, s.Length, three, 0, free: true);
+            cache.AddPlain(s, 0, s.Length, plain: true);
+            Assert.InRange(cache.Count, 1, ShapeCache.MaxGlyphs);
+        }
+    }
+
+    [Fact]
     public void Text_is_shaped_whole_when_a_space_kerns_with_the_next_word()
     {
         // Roboto kerns a space with the glyph after it, which shaping a word at a time would leave out.

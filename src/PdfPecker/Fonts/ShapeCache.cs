@@ -10,12 +10,13 @@ namespace PdfPecker.Fonts;
 /// reused as it is.
 /// </summary>
 /// <remarks>
-/// The cache holds at most <see cref="MaxGlyphs"/> glyphs and starts again when that is reached, so a long document
-/// cannot make it grow without bound. It is shared by the threads that use the font.
+/// The cache holds at most <see cref="MaxGlyphs"/> glyphs, an entry without glyphs counting as one, and starts again
+/// when that is reached, so a long document cannot make it grow without bound. Only the fonts of one conversion keep a
+/// cache (see EmbeddedFont.Shared). It is shared by the threads that use the font.
 /// </remarks>
 internal sealed class ShapeCache
 {
-    private const int MaxGlyphs = 1 << 18;
+    internal const int MaxGlyphs = 1 << 18;
 
     // A word's key is its characters after a character for its script, which no text holds.
     private const char ScriptKeyBase = '\uE000';
@@ -47,6 +48,15 @@ internal sealed class ShapeCache
         _wordsSpan = _words.GetAlternateLookup<ReadOnlySpan<char>>();
         _plainSpan = _plain.GetAlternateLookup<ReadOnlySpan<char>>();
 #endif
+    }
+
+    /// <summary>The glyphs held, as the bound counts them.</summary>
+    public int Count
+    {
+        get
+        {
+            lock (_ltr) return _glyphs;
+        }
     }
 
     /// <summary>
@@ -175,8 +185,9 @@ internal sealed class ShapeCache
         var entry = new Entry(copy, (int)MathF.Round(total), free);
         lock (_ltr)
         {
-            if (_glyphs + copy.Length > MaxGlyphs) Clear();
-            if (table.TryAdd(key, entry)) _glyphs += copy.Length;
+            int size = Math.Max(1, copy.Length);
+            if (_glyphs + size > MaxGlyphs) Clear();
+            if (table.TryAdd(key, entry)) _glyphs += size;
         }
     }
 

@@ -26,7 +26,9 @@ internal sealed class EmbeddedFont : TextFont
     // Whether all text goes through the shaper because the font substitutes in context (calt, clig or rclt) and those
     // features are on, as browsers apply them to all horizontal text. Decided when the font is made, never per run.
     private bool _shapesInContext;
-    private ShapeCache? _shapeCache; // the text this font has shaped, made on first use
+    private ShapeCache? _shapeCache; // the text this font has shaped, made on first use (see CachesShapes)
+    // Whether the font lives as long as the process (a bundled font) rather than one conversion.
+    private bool _shared;
 
     // metrics: line metrics to use instead of the font's own, for a bundled font standing in for a standard font.
     // faceMetrics: the size-adjust and metric overrides of the @font-face rule the font comes from.
@@ -102,6 +104,7 @@ internal sealed class EmbeddedFont : TextFont
         if ((off & FeaturesOff.Ligatures) != 0) _ligatures = null;
         _shapesInContext = SubstitutesInContext(Program, off);
         _noKerning = !kerning;
+        _shared = font._shared;
     }
 
     // A font with nothing to turn off is its own variant without ligatures: it has neither ligatures drawn without the
@@ -157,6 +160,7 @@ internal sealed class EmbeddedFont : TextFont
         _off = font._off;
         _shapesInContext = SubstitutesInContext(program, _off);
         _noKerning = font._noKerning;
+        _shared = font._shared;
     }
 
     /// <summary>
@@ -165,7 +169,20 @@ internal sealed class EmbeddedFont : TextFont
     /// plain words only (see <see cref="PlainWords"/>).
     /// </summary>
     public bool UsesShaper(string s, int start, int length)
-        => Program.ShapedFeatures != null || ComplexShaper.Handles(s, start, length) || _shapesInContext && !PlainWords(s, start, length);
+        => Program.ShapedFeatures != null || ComplexShaper.Handles(s, start, length) || _shapesInContext && !(CachesShapes && PlainWords(s, start, length));
+
+    /// <summary>
+    /// Marks a font that the process keeps for every conversion, such as a bundled font. It keeps no shaped text, so
+    /// that the memory a stream of documents leaves behind stays as it was; shaped text is kept only by the fonts of
+    /// one conversion whose text all goes through the shaper.
+    /// </summary>
+    internal bool Shared { init => _shared = value; }
+
+    // Whether the font keeps the text it shapes: all its text goes through the shaper, and it lives for one conversion.
+    private bool CachesShapes => _shapesInContext && !_shared;
+
+    /// <summary>The glyphs the font keeps of the text it has shaped, as its cache counts them; for tests.</summary>
+    internal int CachedGlyphs => Volatile.Read(ref _shapeCache)?.Count ?? 0;
 
     /// <summary>
     /// Whether the text, in a font whose text goes through the shaper because it substitutes in context, is all plain
@@ -332,7 +349,7 @@ internal sealed class EmbeddedFont : TextFont
     private int MeasureComplex(string s, int start, int length)
     {
         bool rtl = ComplexShaper.GuessRtl(s, start, length);
-        if (Shapes.TryGet(s, start, length, rtl, null, out int width)) return width;
+        if (CachesShapes && Shapes.TryGet(s, start, length, rtl, null, out int width)) return width;
         var glyphs = t_glyphs ??= new List<ShapedGlyph>();
         ShapeComplex(s, start, length, rtl, glyphs);
         return ShapeCache.Width(glyphs);
@@ -351,6 +368,11 @@ internal sealed class EmbeddedFont : TextFont
     /// <summary>The OpenType shaper's glyphs for the text, kept for the next time the font shapes the same text.</summary>
     private void ShapeComplex(string s, int start, int length, bool rtl, List<ShapedGlyph> glyphs)
     {
+        if (!CachesShapes)
+        {
+            ComplexShaper.Shape(Program, s, start, length, rtl, glyphs, _off);
+            return;
+        }
         var cache = Shapes;
         if (cache.TryGet(s, start, length, rtl, glyphs, out _)) return;
         if (rtl || !ShapeWords(s, start, length, glyphs)) ComplexShaper.Shape(Program, s, start, length, rtl, glyphs, _off);
