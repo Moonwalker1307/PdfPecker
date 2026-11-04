@@ -154,7 +154,10 @@ internal static class CssSupports
     /// <summary>A light check of the value: colours must parse, display must be a known keyword.</summary>
     private static bool ValueSupported(string name, string value)
     {
-        if (name.StartsWith("--", StringComparison.Ordinal) || CssParser.HasVar(value)) return true;
+        // attr() is substituted per element like var(), so a well-formed one makes any property's value supported.
+        bool attr = CssAttr.Has(value);
+        if (attr && !CssAttr.SyntaxValid(value)) return false;
+        if (name.StartsWith("--", StringComparison.Ordinal) || CssParser.HasVar(value) || attr) return true;
         var lower = value.ToLowerInvariant();
         if (lower is "inherit" or "initial" or "unset" or "revert" or "revert-layer") return true;
         switch (name)
@@ -237,10 +240,11 @@ internal static class CssSupports
                 return lower is "row-over-column" or "column-over-row";
         }
         // Other values: functions this library does not know make the value unsupported.
-        // In content, attr() and the paged-media functions (target-counter(), target-counters(), target-text(), leader())
-        // are generated content this library writes.
-        foreach (var fn in new[] { "attr(", "anchor(", "env(", "element(", "paint(", "cross-fade(" })
-            if (lower.Contains(fn, StringComparison.Ordinal) && !(name == "content" && fn == "attr(")) return false;
+        // attr() never gets here: a well-formed one returned true above, in content and in every other property. The
+        // paged-media functions of content (target-counter(), target-counters(), target-text(), leader()) are generated
+        // content this library writes.
+        foreach (var fn in new[] { "anchor(", "env(", "element(", "paint(", "cross-fade(" })
+            if (lower.Contains(fn, StringComparison.Ordinal)) return false;
         return true;
     }
 }

@@ -201,7 +201,10 @@ How snapshots are created and accepted, and the appearance comparison for PDFs f
   `image-set()`,
   shown by `<embed>` and `<object>`, photos turned upright by their EXIF orientation, and `image-rendering: pixelated`
   or `crisp-edges` writing enlarged images, such as QR codes and pixel art, with hard pixel edges in every PDF viewer), and CSS-only charts such as
-  Charts.css (column, bar, area, line and pie charts), laid out as Chrome lays them out. Older CSS works too: the
+  Charts.css (column, bar, area, line and pie charts), laid out as Chrome lays them out. Typed `attr()` works in any
+  property, as in Chrome: `width: attr(data-pct %)`, `color: attr(data-color type(<color>), gray)` or
+  `calc(attr(data-v number) * 1mm)` draw bar charts and badges from data attributes, with fallbacks, `::before` reading
+  its element's attributes, and no attribute value ever reaching a `url()`. Older CSS works too: the
   `-webkit-` property names Chrome still takes (`-webkit-transform`, `-webkit-flex`, ...), the legacy
   `display: -webkit-box` and its `-webkit-box-` properties, and the `-webkit-gradient()` and prefixed gradient
   syntaxes. As in browsers, a length without a unit (`width: 200`) counts as pixels only in a page without a doctype;

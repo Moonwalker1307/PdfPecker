@@ -161,9 +161,19 @@ internal static class GeneratedContent
         switch (name)
         {
             case "attr":
+            {
                 if (args.Count == 0) return false;
-                sb.Append(host.GetAttribute(args[0].Split(' ')[0].ToLowerInvariant()) ?? "");
-                return true;
+                var attribute = host.GetAttribute(args[0].Split(' ')[0].ToLowerInvariant());
+                if (attribute != null || args.Count < 2)
+                {
+                    sb.Append(attribute);
+                    return true;
+                }
+                // A missing attribute takes the fallback after the comma, as in Chrome, where a fallback that is not a
+                // string (attr(x, 3)) makes the content invalid, so there is no box.
+                int k = 0;
+                return args[1].Length > 0 && args[1][0] is '"' or '\'' && ReadString(args[1], ref k, sb) && k == args[1].Length;
+            }
             case "counter":
             {
                 if (args.Count is < 1 or > 2) return false;
