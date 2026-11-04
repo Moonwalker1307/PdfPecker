@@ -308,6 +308,89 @@ public class BarcodeTests
         Assert.Throws<ArgumentException>(() => Barcode.Gs1DataMatrix("(10)" + new string('A', 91)));
     }
 
+    private static SwissQrBill SwissExample() => new()
+    {
+        // Example 1 of the Swiss Payment Standards' QR-bill guidelines: a QR-IBAN with a QR reference.
+        Account = "CH44 3199 9123 0008 8901 2",
+        Creditor = new SwissQrAddress { Name = "Robert Schneider AG", Street = "Rue du Lac", HouseNumber = "1268", PostalCode = "2501", Town = "Biel", Country = "CH" },
+        Amount = 1949.75m,
+        Debtor = new SwissQrAddress { Name = "Pia-Maria Rutschmann-Schnyder", Street = "Grosse Marktgasse", HouseNumber = "28", PostalCode = "9400", Town = "Rorschach", Country = "CH" },
+        Reference = "21 00000 00003 13947 14300 09017",
+        Message = "Order of 15 June 2020",
+        BillInformation = "//S1/10/10201409/11/200701/20/140.000-53/30/102673831/31/200615/32/7.7/33/7.7:6.4/40/0:30",
+    };
+
+    [Fact]
+    public void Swiss_qr_bill_payload_follows_the_guidelines()
+    {
+        string[] expected =
+        {
+            "SPC", "0200", "1", "CH4431999123000889012",
+            "S", "Robert Schneider AG", "Rue du Lac", "1268", "2501", "Biel", "CH",
+            "", "", "", "", "", "", "",
+            "1949.75", "CHF",
+            "S", "Pia-Maria Rutschmann-Schnyder", "Grosse Marktgasse", "28", "9400", "Rorschach", "CH",
+            "QRR", "210000000003139471430009017", "Order of 15 June 2020", "EPD",
+            "//S1/10/10201409/11/200701/20/140.000-53/30/102673831/31/200615/32/7.7/33/7.7:6.4/40/0:30",
+        };
+        Assert.Equal(string.Join('\n', expected), SwissExample().ToPayload());
+
+        // An ordinary IBAN takes a creditor reference or none, and no debtor leaves its seven fields empty.
+        var bill = new SwissQrBill
+        {
+            Account = "CH58 0079 1123 0008 8901 2",
+            Creditor = new SwissQrAddress { Name = "Robert Schneider AG", PostalCode = "2501", Town = "Biel" },
+            Currency = "EUR",
+            Reference = "RF18 5390 0754 7034",
+        };
+        Assert.EndsWith("\n\nEUR\n\n\n\n\n\n\n\nSCOR\nRF18539007547034\n\nEPD", bill.ToPayload(), StringComparison.Ordinal);
+        bill.Reference = null;
+        Assert.EndsWith("\nNON\n\n\nEPD", bill.ToPayload(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Swiss_qr_bill_rejects_invalid_fields()
+    {
+        void Throws(Action<SwissQrBill> change)
+        {
+            var bill = SwissExample();
+            change(bill);
+            Assert.Throws<ArgumentException>(() => Barcode.SwissQrCode(bill));
+        }
+        Throws(b => b.Account = "DE89370400440532013000");
+        Throws(b => b.Account = "CH44 3199 9123 0008 8901 3");
+        Throws(b => b.Reference = "21 00000 00003 13947 14300 09018");
+        Throws(b => b.Reference = "RF18 5390 0754 7034");
+        Throws(b => b.Reference = null);
+        Throws(b => b.Creditor = null);
+        Throws(b => b.Creditor!.Town = "");
+        Throws(b => b.Creditor!.Country = "Switzerland");
+        Throws(b => b.Debtor!.Name = new string('a', 71));
+        Throws(b => b.Amount = 0);
+        Throws(b => b.Amount = 1.001m);
+        Throws(b => b.Currency = "USD");
+        Throws(b => b.Message = "Line\nbreak");
+        Throws(b => b.Message = "\u65E5\u672C");
+        Throws(b => b.Message = new string('a', 60));
+        Assert.True(SwissQrBill.HasQrCheckDigit("210000000003139471430009017"));
+        Assert.True(SwissQrBill.IsCreditorReference("RF18539007547034"));
+        Assert.False(SwissQrBill.IsCreditorReference("RF19539007547034"));
+    }
+
+    [Fact]
+    public void Swiss_qr_code_has_the_swiss_cross_in_the_middle()
+    {
+        var svg = Barcode.SwissQrCode(SwissExample());
+        Assert.Equal(4, Regex.Matches(svg, "<rect ").Count - 1); // the background and the cross's four rectangles
+        Assert.Contains("fill=\"#000\"/><rect", svg, StringComparison.Ordinal);
+        var size = QrSize(svg);
+        var cross = Regex.Match(svg, "<rect x=\"([0-9.]+)\" y=\"([0-9.]+)\" width=\"([0-9.]+)\"");
+        var x = float.Parse(cross.Groups[1].Value, CultureInfo.InvariantCulture);
+        var width = float.Parse(cross.Groups[3].Value, CultureInfo.InvariantCulture);
+        Assert.Equal(size / 2f, x + width / 2, 2);
+        Assert.Equal((size - 8) * 7f / 46, width, 2);
+    }
+
     [Fact]
     public void Barcodes_convert_inline_and_as_images()
     {

@@ -327,6 +327,13 @@ internal static class Targets
                     RunExpectingArgument(() => Barcode.Ean13(text));
                     RunExpectingArgument(() => Barcode.DataMatrix(text));
                     RunExpectingArgument(() => Barcode.Gs1DataMatrix(text));
+                    RunExpectingArgument(() => Barcode.SwissQrCode(new SwissQrBill
+                    {
+                        Account = "CH5800791123000889012",
+                        Creditor = new SwissQrAddress { Name = text, PostalCode = "2501", Town = text },
+                        Reference = text,
+                        Message = text,
+                    }));
                     RunExpectingArgument(() => Barcode.EpcQrCode(new EpcPayment { Name = text, Iban = "DE89370400440532013000", Text = text }));
                 },
             },

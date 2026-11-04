@@ -5,9 +5,9 @@ using PdfPecker.Barcodes;
 namespace PdfPecker;
 
 /// <summary>
-/// Draws QR codes, Data Matrix codes and Code 128 and EAN-13 barcodes as SVG markup, to put in an HTML template as an
-/// inline <c>&lt;svg&gt;</c> or, through <see cref="ToDataUri"/>, as an <c>&lt;img&gt;</c>. The SVG stays vector
-/// graphics in the PDF, so it scans at any print size. All methods are static and thread-safe.
+/// Draws QR codes, Swiss QR-bill codes, Data Matrix codes and Code 128 and EAN-13 barcodes as SVG markup, to put in an
+/// HTML template as an inline <c>&lt;svg&gt;</c> or, through <see cref="ToDataUri"/>, as an <c>&lt;img&gt;</c>. The
+/// SVG stays vector graphics in the PDF, so it scans at any print size. All methods are static and thread-safe.
 /// </summary>
 public static class Barcode
 {
@@ -41,6 +41,24 @@ public static class Barcode
         ArgumentNullException.ThrowIfNull(payment);
         options ??= new BarcodeOptions();
         return QrSvg(QrEncoder.Encode(payment.ToPayload(), QrErrorCorrection.Medium, maxVersion: 13), options);
+    }
+
+    /// <summary>
+    /// The Swiss QR code of a QR-bill, with the Swiss cross in the middle, which Swiss banking apps read to pay the
+    /// bill. It uses error correction level M and at most version 25, as the QR-bill guidelines require;
+    /// <see cref="BarcodeOptions.ErrorCorrection"/> is ignored. On a printed payment part the code is 46 x 46 mm
+    /// without its quiet zone; set CSS <c>width</c> on the SVG or image for that.
+    /// </summary>
+    /// <param name="bill">The account, creditor, amount, debtor and reference.</param>
+    /// <param name="options">Size and colours; null for the defaults.</param>
+    /// <returns>An <c>&lt;svg&gt;</c> element.</returns>
+    /// <exception cref="ArgumentException">A field of the bill is missing, too long or invalid.</exception>
+    public static string SwissQrCode(SwissQrBill bill, BarcodeOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(bill);
+        options ??= new BarcodeOptions();
+        var modules = QrEncoder.Encode(bill.ToPayload(), QrErrorCorrection.Medium, maxVersion: 25);
+        return MatrixSvg(modules, quietZone: 4, options, SwissCross);
     }
 
     /// <summary>
@@ -141,7 +159,8 @@ public static class Barcode
 
     private static string QrSvg(bool[,] modules, BarcodeOptions options) => MatrixSvg(modules, quietZone: 4, options);
 
-    private static string MatrixSvg(bool[,] modules, int quietZone, BarcodeOptions options)
+    private static string MatrixSvg(bool[,] modules, int quietZone, BarcodeOptions options,
+        Action<StringBuilder, int, int>? overlay = null)
     {
         var size = modules.GetLength(0);
         var quiet = options.QuietZone ? quietZone : 0;
@@ -166,7 +185,27 @@ public static class Barcode
                 sb.Append(CultureInfo.InvariantCulture, $"M{start + quiet} {y + quiet}h{x - start}v1h-{x - start}z");
             }
         }
-        return sb.Append("\"/></svg>").ToString();
+        sb.Append("\"/>");
+        overlay?.Invoke(sb, size, quiet);
+        return sb.Append("</svg>").ToString();
+    }
+
+    /// <summary>
+    /// The Swiss cross of the QR-bill: 7 mm on a 46 mm code, a black square with a white border and a white cross in
+    /// the proportions of the official graphic. It is drawn in black and white whatever the options' colours, as the
+    /// style guide requires.
+    /// </summary>
+    private static void SwissCross(StringBuilder sb, int size, int quiet)
+    {
+        var unit = size * 7f / 46 / 19.8f;
+        var origin = quiet + (size - 19.8f * unit) / 2;
+        void Rect(float x, float y, float width, float height, string fill) =>
+            sb.Append(CultureInfo.InvariantCulture,
+                $"<rect x=\"{Number(origin + x * unit)}\" y=\"{Number(origin + y * unit)}\" width=\"{Number(width * unit)}\" height=\"{Number(height * unit)}\" fill=\"{fill}\"/>");
+        Rect(0, 0, 19.8f, 19.8f, "#fff");
+        Rect(1.4f, 1.4f, 17f, 17f, "#000");
+        Rect(8.25f, 4.5f, 3.3f, 10.8f, "#fff");
+        Rect(4.5f, 8.25f, 10.8f, 3.3f, "#fff");
     }
 
     private static string LinearSvg(bool[] modules, int quietLeft, int quietRight, BarcodeOptions options,
