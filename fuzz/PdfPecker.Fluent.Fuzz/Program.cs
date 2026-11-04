@@ -586,8 +586,14 @@ internal static class Fuzz
         47 => r.Next(2) == 0 ? c.ShowOnce() : c.SkipOnce(),
         41 => c.ShrinkHorizontal(),
         42 => r.Next(2) == 0 ? c.Shrink() : c.ShrinkVertical(),
-        43 => r.Next(13) switch
+        43 => r.Next(19) switch
         {
+            13 => c.SemanticTableOfContents(),
+            14 => c.SemanticTableOfContentsItem(),
+            15 => c.SemanticFormula(r.Next(10) == 0 ? " " : Text(r)),
+            16 => c.SemanticIndex(),
+            17 => c.SemanticListLabel(),
+            18 => c.SemanticListItemBody(),
             6 => c.SemanticCode(),
             7 => c.SemanticQuote(),
             8 => c.SemanticHeading1(),

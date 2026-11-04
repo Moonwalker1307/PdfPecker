@@ -22,6 +22,9 @@ internal sealed class HtmlWriter
     // Every element starts from these rules, so the fluent calls alone decide spacing, as in QuestPDF: no default
     // margins, text keeps its spaces and line breaks, tables have fixed column widths and no cell spacing. Long words
     // break where they would overflow.
+    /// <summary>The attribute that makes an element its list item's label in PdfPecker's tagging.</summary>
+    internal const string ListLabelAttribute = "data-pdf-list-label";
+
     private const string BaseCss =
         "*{box-sizing:border-box}" +
         "html,body{margin:0;padding:0}" +
@@ -1318,6 +1321,9 @@ internal sealed class HtmlWriter
         private HorizontalAlignment? _cellAlignment;
         public List<(string Property, string Value)> Declarations { get; } = [];
         public List<(string Name, string Value)> Attributes { get; } = [];
+
+        /// <summary>Whether a Tagging decorator has given the element a role or made it a list label.</summary>
+        private bool HasTagging => Attributes.Exists(a => a.Name is "role" or ListLabelAttribute);
         public string? Id { get; set; }
         public string? Direction { get; private set; }
         public string? Lang { get; private set; }
@@ -1388,7 +1394,7 @@ internal sealed class HtmlWriter
                     Id = decorator.Text;
                     return true;
                 case DecoratorKind.Semantic:
-                    if (Tag != "div" || Href != null || IsCell || _aligned || Declarations.Count > 0) return false;
+                    if (Tag != "div" || Href != null || IsCell || _aligned || Declarations.Count > 0 || HasTagging) return false;
                     Tag = decorator.Text!;
                     // The user agent's margins, padding and markers of these elements would add space the fluent
                     // calls did not ask for.
@@ -1406,6 +1412,11 @@ internal sealed class HtmlWriter
                     return true;
                 case DecoratorKind.Artifact:
                     Attributes.Add(("aria-hidden", "true"));
+                    return true;
+                case DecoratorKind.Tagging:
+                    // Each tag needs an element of its own, and a table cell is tagged as a cell.
+                    if (IsCell || HasTagging) return false;
+                    Attributes.AddRange(decorator.Declarations);
                     return true;
                 case DecoratorKind.Direction:
                     if (Direction != null) return false;
