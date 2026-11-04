@@ -13,6 +13,11 @@ under the same version, and its only dependency is the PdfPecker package of that
 its own: anything about how a page looks is PdfPecker's job, and the fluent package's job is to write the smallest
 HTML that says what the caller built.
 
+The repository also holds PdfPecker.Cli (`src/PdfPecker.Cli`), the `pdfpecker` dotnet tool: a thin command line over the
+library's public API (convert, watch, merge, split, sign, ...) with wkhtmltopdf-compatible options. It is a third NuGet
+package, released with every PdfPecker release under the same version; it carries the PdfPecker assembly inside it and
+has no dependencies of its own.
+
 ## Read first
 
 Before non-trivial work, read:
@@ -39,6 +44,9 @@ Before non-trivial work, read:
 - **No breaking API changes before 2.0**, in either package. `dotnet pack` checks the public API against the last
   release; a change it rejects needs a new overload or type instead, not a suppression. The fluent package keeps
   QuestPDF's names and signatures where they fit, so QuestPDF code ports by changing `using` lines.
+- **The command line is the CLI's API.** Before 2.0, `src/PdfPecker.Cli` does not remove or rename a command or an
+  option, and keeps the exit codes (0 success, 1 the work failed, 2 a wrong command line). It uses only PdfPecker's
+  public API, never reads a web address, and takes no reflection-based argument parser: `Options.cs` is its own.
 - **Caller data never becomes markup in the fluent package.** Text, links, colours, names and image data are encoded
   or validated; only `Html()` and `Css()` insert trusted markup, and their docs say so. It throws only
   `ArgumentException` (and subclasses) for bad arguments, `InvalidOperationException` for an invalid document structure
@@ -78,7 +86,12 @@ Before non-trivial work, read:
   merging decorator chains into as few elements as the CSS box model allows (see the comments on `Box`), with one class
   per distinct set of declarations; `Html/TableLayout.cs` places table cells, `Html/ImageTable.cs` hands images to
   PdfPecker through a resource resolver, and `Html/CssValue.cs` formats and escapes CSS values.
+- `src/PdfPecker.Cli/` – the tool. `CliApp.cs` finds the command; `ConvertCommand.cs` and `ConvertOptions.cs` hold
+  `convert`, `watch` and the wkhtmltopdf option mapping (header and footer texts become CSS margin boxes);
+  `PageCommands.cs`, `FileCommands.cs`, `SecurityCommands.cs` and `ExportCommands.cs` hold the PDF commands; `Options.cs`
+  parses arguments and `Units.cs` lengths and paper sizes.
 - `tests/PdfPecker.Tests/` – xUnit. `Fixtures/` holds inputs, `Golden/` the baseline PDFs.
+- `tests/PdfPecker.Cli.Tests/` – xUnit for the tool; it runs commands in process with in-memory streams.
 - `tests/PdfPecker.Fluent.Tests/` – xUnit for the fluent package. `Golden/` holds the baseline HTML and PDFs of the
   examples.
 - `samples/PdfPecker.Sample` – converts the sample documents; CI also publishes it with Native AOT.
@@ -107,7 +120,8 @@ dotnet test -f net10.0 --filter "FullyQualifiedName~MarkdownTests"   # one class
 Before pushing, the build must be warning-free (warnings are errors), the tests must pass, and the golden baselines
 must be unchanged unless the output change is intended. If only one runtime is installed, pass `-f net10.0`; CI runs
 `net8.0`, `net9.0` and `net10.0` on Linux and `net10.0` on Windows. A change to the public API also needs
-`dotnet pack src/PdfPecker -c Release -o ./nupkg` (or `src/PdfPecker.Fluent`), which runs package validation. Details
+`dotnet pack src/PdfPecker -c Release -o ./nupkg` (or `src/PdfPecker.Fluent`), which runs package validation. The
+tool has no assembly API to validate; pack it with `src/PdfPecker.Cli` when its csproj changes. Details
 are in `BUILD.md` and `TESTING.md`.
 
 ## Change-specific guidance
@@ -115,6 +129,9 @@ are in `BUILD.md` and `TESTING.md`.
 - **Output changes** (layout, CSS, fonts, PDF bytes): regenerate the goldens with `PDFPECKER_UPDATE_GOLDEN=1` (command
   in `TESTING.md`) and list in the commit and PR which baselines changed and why. A refactor must leave every golden
   unchanged. The fluent goldens render through the library too, so a library output change can change their PDFs.
+- **A new CLI command or option**: a test in `PdfPecker.Cli.Tests`, an entry in `Help.cs`, a line in
+  `src/PdfPecker.Cli/README.md`, and the root README's "Command line" section when it is a new kind of job. A new
+  wkhtmltopdf option is either mapped in `ConvertOptions.cs` or listed there as ignored with a warning, never rejected.
 - **A new fluent call**: XML doc comment, a `LayoutTests` test of the HTML it writes, a line in its README, and a
   place in the fluent fuzzer's generator. Prefer QuestPDF's name and signature when QuestPDF has the call. Look at the
   PDFs, and compare with Chrome printing the `GenerateHtml` output when layout is involved.
@@ -141,7 +158,7 @@ are in `BUILD.md` and `TESTING.md`.
   `tools/ConformanceSamples/known-failures.txt` fails CI.
 - **Performance-sensitive code**: compare with `bench/compare-versions.sh <base-ref>` on one machine, not with the
   README table.
-- **Releases**: follow `RELEASING.md`; only the repository owner publishes a release, and it publishes both packages.
+- **Releases**: follow `RELEASING.md`; only the repository owner publishes a release, and it publishes all three packages.
 
 ## Avoid
 

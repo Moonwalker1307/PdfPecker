@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>PdfPecker.Cli</RootNamespace>
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- PdfPecker's symbols and XML documentation are for people who reference the library, not for a tool's install folder. -->
+    <AllowedReferenceRelatedFileExtensions>.none</AllowedReferenceRelatedFileExtensions>
+    <DebugType>none</DebugType>
+
+    <!-- A dotnet tool: `dotnet tool install -g PdfPecker.Cli` puts the `pdfpecker` command on the path. The package carries
+         PdfPecker's assembly inside it, so it has no NuGet dependencies, and it gets PdfPecker's version (CI passes the
+         same -p:Version to every pack). Its public contract is the command line, not an assembly API, so there is no
+         API baseline to validate; RELEASING.md describes how command-line changes are held to the same rule. -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>pdfpecker</ToolCommandName>
+    <PackageId>PdfPecker.Cli</PackageId>
+    <Authors>Moonwalker1307</Authors>
+    <Description>The pdfpecker command-line tool: HTML and Markdown to PDF (with wkhtmltopdf-compatible options and a watch mode), merge, split, rotate, compact, sign, verify and encrypt PDFs, and PDF to image, HTML and text. Needs no browser and no native binaries.</Description>
+    <PackageTags>pdf;cli;dotnet-tool;html-to-pdf;wkhtmltopdf-alternative;markdown;pdfpecker</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>logo.png</PackageIcon>
+    <PackageProjectUrl>https://pdfpecker.net/</PackageProjectUrl>
+    <PackageReleaseNotes>What changed in each release: https://pdfpecker.net/docs/changelog/</PackageReleaseNotes>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Copyright>Copyright (c) 2026 Moonwalker1307</Copyright>
+    <RepositoryUrl>https://github.com/Moonwalker1307/PdfPecker</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+  </PropertyGroup>
+
+  <!-- CI builds use repository-relative source paths in the PDB, so builds are reproducible from the same commit. -->
+  <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../PdfPecker/PdfPecker.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="/" />
+    <None Include="../../LICENSE" Pack="true" PackagePath="/" />
+    <None Include="../../assets/logo.png" Pack="true" PackagePath="/" />
+    <InternalsVisibleTo Include="PdfPecker.Cli.Tests" />
+  </ItemGroup>
+
+</Project>

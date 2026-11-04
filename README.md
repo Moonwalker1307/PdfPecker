@@ -125,6 +125,29 @@ It writes compact HTML and CSS and renders it with PdfPecker, so every `PdfOptio
 signatures, e-invoices) works with it. What it covers and how it differs from QuestPDF is in its
 [README](https://github.com/Moonwalker1307/PdfPecker/blob/main/src/PdfPecker.Fluent/README.md).
 
+## Command line
+
+[PdfPecker.Cli](https://www.nuget.org/packages/PdfPecker.Cli) is the same library as a `pdfpecker` command, for scripts,
+build pipelines and designing a template. It is a dotnet tool released with every PdfPecker release under the same
+version, and like the library it needs no browser, no JavaScript and no network.
+
+```
+dotnet tool install -g PdfPecker.Cli
+
+pdfpecker convert invoice.html                       # writes invoice.pdf; .md files are Markdown
+pdfpecker watch invoice.html                         # converts again on every save, for a live preview in your PDF viewer
+pdfpecker merge cover.pdf report.pdf:2-9 -o all.pdf  # also split, extract, remove, rotate, stamp, compact, linearize
+pdfpecker sign all.pdf signed.pdf --cert me.pfx      # also verify, encrypt, decrypt, sanitize
+pdfpecker to-image all.pdf pages --format webp       # also to-html, text, info
+```
+
+A call without a command word is read like wkhtmltopdf's, so a script can switch by changing the program name:
+`pdfpecker -s A4 -T 15mm --footer-center "[page] / [topage]" in.html out.pdf`. Page size, orientation, margins, headers and
+footers with their tokens, zoom, style sheets and quiet mode work as they do there; options that exist because
+wkhtmltopdf runs a browser (`--javascript-delay`, `--cookie`, `--header-html`, ...) are ignored with a warning. Web
+addresses are refused. Its README is
+[here](https://github.com/Moonwalker1307/PdfPecker/blob/main/src/PdfPecker.Cli/README.md).
+
 ## Features
 
 - **HTML and CSS**: flexbox, grid and subgrid, CSS tables, floats with `shape-outside`, `clip-path` shapes (also
@@ -260,11 +283,13 @@ dotnet build
 dotnet test
 dotnet run --project samples/PdfPecker.Sample -c Release      # converts samples/PdfPecker.Sample/html/*.html and *.md into ./output
 dotnet run --project samples/PdfPecker.Fluent.Sample -c Release   # writes the PdfPecker.Fluent examples into ./output
+dotnet run --project src/PdfPecker.Cli -c Release -- convert in.html out.pdf   # the pdfpecker command-line tool
 dotnet run --project bench/PdfPecker.Benchmarks -c Release
 dotnet run --project bench/PdfPecker.Benchmarks -c Release -- --requirements    # memory and CPU per conversion
 bench/compare-versions.sh v1.22.0                              # this checkout against a release, in turns on this machine
 dotnet pack src/PdfPecker -c Release -o ./nupkg                # also checks the public API against the last release
 dotnet pack src/PdfPecker.Fluent -c Release -o ./nupkg         # the fluent package, with the same version
+dotnet pack src/PdfPecker.Cli -c Release -o ./nupkg            # the pdfpecker dotnet tool, with the same version
 ```
 
 Requirements and details are in [BUILD.md](https://github.com/Moonwalker1307/PdfPecker/blob/main/BUILD.md) and

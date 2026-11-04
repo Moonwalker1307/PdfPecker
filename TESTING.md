@@ -100,6 +100,20 @@ PDFPECKER_BENCH_WARMUP=15 bench/compare-versions.sh v1.11.0   # a 15-second warm
 
 Cloud VMs differ too much to compare a run with the README table.
 
+## PdfPecker.Cli
+
+The command-line tool's tests are in `tests/PdfPecker.Cli.Tests`. They run the tool in process (`CliRunner` gives each test a
+folder of its own and in-memory standard streams) and check exit codes, the files written and, for PDFs, their text and
+page count:
+
+- `ConvertTests` – `convert`, the wkhtmltopdf-style call, header and footer tokens, lengths and paper sizes, refusals
+  (web addresses, an output that would overwrite an input) and `watch`, which is started, given a changed file and
+  stopped through its cancellation token.
+- `PdfCommandTests` – merge, split, extract, remove, rotate, stamp, compact, linearize, sanitize, encrypt, decrypt,
+  sign and verify (with a throwaway self-signed certificate), to-image, to-html, text and info.
+
+`nuget.yml` also installs the packed tool and runs it, and publishes it with Native AOT.
+
 ## PdfPecker.Fluent
 
 The fluent package's tests are in `tests/PdfPecker.Fluent.Tests` and run with the rest:

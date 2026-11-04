@@ -33,3 +33,11 @@ updates:
     groups:
       nuget-minor-and-patch:
         update-types: [minor, patch]
+
+  - package-ecosystem: nuget
+    directory: /tests/PdfPecker.Cli.Tests
+    schedule:
+      interval: weekly
+    groups:
+      nuget-minor-and-patch:
+        update-types: [minor, patch]
