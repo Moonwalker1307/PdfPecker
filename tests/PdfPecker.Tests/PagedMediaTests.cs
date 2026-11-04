@@ -325,7 +325,12 @@ public class PagedMediaTests
     {
         Assert.True(CssSupports.Evaluate("(content: target-counters(attr(href url), section, '.'))"));
         Assert.True(CssSupports.Evaluate("(content: ' p. ' target-counter(attr(href), page))"));
-        Assert.False(CssSupports.Evaluate("(content: target-bogus(attr(href), page))"));
+        Assert.True(CssSupports.Evaluate("(content: target-text(attr(href)) leader(dotted))"));
+        Assert.True(CssSupports.Evaluate("(content: var(--x))"));
+        Assert.True(CssSupports.Evaluate("(content: conic-gradient(red, blue))"));
+        Assert.True(CssSupports.Evaluate("(content: repeating-linear-gradient(red, blue 10px))"));
+        Assert.False(CssSupports.Evaluate("(content: env(safe-area-inset-top))"));
+        Assert.False(CssSupports.Evaluate("(content: element(x))"));
     }
 
     [Fact]
