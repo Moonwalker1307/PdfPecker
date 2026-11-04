@@ -4,8 +4,8 @@
 
 [![NuGet](https://img.shields.io/nuget/v/PdfPecker.svg)](https://www.nuget.org/packages/PdfPecker)
 
-Fast HTML and Markdown to PDF conversion, PDF to PNG, JPEG, WebP and TIFF rendering, and PDF to HTML, for .NET, with no
-dependencies.
+Fast HTML and Markdown to PDF conversion, PDF to PNG, JPEG, WebP and TIFF rendering, and PDF to HTML and Markdown, for
+.NET, with no dependencies.
 
 PdfPecker has its own HTML parser, Markdown parser, CSS engine, layout engine and PDF writer, and its own PDF renderer.
 It does not start a browser, ship native binaries or pull in third-party packages; the NuGet package depends only on
@@ -84,6 +84,9 @@ string structured = PdfToHtml.Convert(File.ReadAllBytes("statement.pdf"), new Pd
 // The same structure with the PDF's fonts, colours, backgrounds, borders and pictures
 string styled = PdfToHtml.Convert(File.ReadAllBytes("statement.pdf"),
     new PdfHtmlOptions { Mode = PdfHtmlMode.Structured, IncludeStyles = true, IncludeImages = true });
+
+// Or as Markdown: headings, lists, bold and italic, links and pipe tables, for language models and search indexes
+string markdown = PdfToMarkdown.Convert(File.ReadAllBytes("statement.pdf"), new PdfMarkdownOptions { IncludePageComments = true });
 
 // Open a PDF once and render its pages one at a time, or in parallel
 var renderer = PdfRenderer.Open(pdf);
@@ -220,6 +223,11 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   `IncludeStyles` keeps how the page looks in that structure: fonts, sizes, colours, backgrounds, rounded boxes, table
   borders, column widths and alignment, as CSS classes. `IncludeImages` adds the page's pictures as `<img>` elements.
   [More](https://pdfpecker.net/docs/pdf-to-html/)
+- **PDF to Markdown**: `PdfToMarkdown` writes the same structure as GitHub Flavored Markdown: headings, paragraphs,
+  bulleted and numbered lists, bold and italic text, links, and pipe tables, with several header rows joined column by
+  column and spanned cells in their first row and column. Line breaks the PDF made on purpose stay, and text that would
+  read as Markdown is escaped. `IncludePageComments` marks where each page starts, so a passage can be traced to its
+  page, and `IncludeImages` adds the pictures as `data:` images.
 - **Viewer settings and page labels**: the page, zoom and panel a viewer opens with, print settings, and page numbers
   such as "i" to "iv" for front matter. [More](https://pdfpecker.net/docs/options/)
 - **Reproducible output**: a fixed `CreationDate` or `SOURCE_DATE_EPOCH` gives byte-identical PDFs, for build pipelines
