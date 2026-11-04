@@ -88,13 +88,12 @@ internal static class ActiveContent
     private static int Filter(PdfFile file, PdfObject value, bool remove, Func<PdfObject, bool> active)
     {
         if (file.Resolve(value) is not PdfArray array) return 0; // a single /Next action is a key of its own
+        // One pass: removing items one at a time moved the rest of the array each time, so an /Annots array of a
+        // million alternating active and harmless annotations took minutes, past cancellation.
+        if (remove) return array.Items.RemoveAll(item => active(item));
         int count = 0;
-        for (int i = array.Items.Count - 1; i >= 0; i--)
-        {
-            if (!active(array.Items[i])) continue;
-            count++;
-            if (remove) array.Items.RemoveAt(i);
-        }
+        foreach (var item in array.Items)
+            if (active(item)) count++;
         return count;
     }
 
