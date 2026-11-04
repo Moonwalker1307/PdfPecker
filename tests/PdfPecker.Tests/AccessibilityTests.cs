@@ -268,4 +268,56 @@ public class AccessibilityTests
         Assert.Equal("Document H1 P Link L LI LBody LI LBody", Types(pdf));
         Assert.Contains("/Title (Guide)", pdf);
     }
+
+    [Fact]
+    public void Aria_roles_tag_formulas_and_indexes()
+    {
+        var pdf = Tagged("<title>T</title><p>Area: <span role='math' aria-label='pi r squared'>πr²</span></p><div role='doc-index'><p>Apples, 4</p></div>",
+            PdfAccessibility.PdfUA1);
+        Assert.Equal("Document P Formula Index P", Types(pdf));
+        Assert.Contains("/S /Formula /P ", pdf);
+        Assert.Matches(@"/S /Formula /P \d+ 0 R /Alt \(pi r squared\)", pdf);
+        AssertAllContentMarked(Content(pdf));
+    }
+
+    [Fact]
+    public void A_table_of_contents_tags_its_list_items_as_entries()
+    {
+        var pdf = Tagged("""
+            <nav role="doc-toc"><ol>
+              <li><a href="#a">One</a><ol><li><a href="#b">One.one</a></li></ol></li>
+              <li><a href="#c">Two</a></li>
+            </ol></nav>
+            <h1 id="a">One</h1><h2 id="b">One.one</h2><h1 id="c">Two</h1>
+            """, PdfAccessibility.PdfUA1);
+        Assert.Equal("Document TOC TOCI P Link TOC TOCI P Link TOCI P Link H1 H2 H1", Types(pdf));
+        AssertAllContentMarked(Content(pdf));
+    }
+
+    [Fact]
+    public void A_marked_label_is_the_list_items_lbl_and_the_rest_its_body()
+    {
+        var pdf = Tagged("""
+            <title>T</title>
+            <ul style="list-style:none">
+              <li><div style="display:flex"><div data-pdf-list-label>1.</div><div><p>First</p><p>More</p></div></div></li>
+              <li><span data-pdf-list-label>2.</span> Second</li>
+              <li>Third, no label</li>
+            </ul>
+            """, PdfAccessibility.PdfUA1);
+        Assert.Equal("Document L LI Lbl LBody P P LI Lbl LBody LI LBody", Types(pdf));
+        // Hand-made labels say only that the list is unordered, which PDF 1.7 calls Disc.
+        Assert.Contains("/A << /O /List /ListNumbering /Disc >>", pdf);
+        AssertAllContentMarked(Content(pdf));
+    }
+
+    [Fact]
+    public void Pdf_ua_2_maps_the_pdf_1_7_table_of_contents_and_index_types()
+    {
+        var pdf = Tagged("<title>T</title><nav role='doc-toc'><ul><li>One</li></ul></nav><div role='doc-index'><p>A, 1</p></div>",
+            PdfAccessibility.PdfUA2, new PdfOptions { Language = "en" });
+        Assert.Contains("/TOC [/Div ", pdf);
+        Assert.Contains("/TOCI [/Div ", pdf);
+        Assert.Contains("/Index [/Sect ", pdf);
+    }
 }

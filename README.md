@@ -279,7 +279,10 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   independent, and keeps or converts attachments as the level allows. The result lists every change and every problem
   it could not fix, such as text in a font whose glyphs PdfPecker does not have (CJK fonts that are not embedded, for
   instance), and veraPDF checks the converted samples in CI. Encrypted and signed PDFs are refused.
-- **Accessibility**: tagged PDF, PDF/UA-1 and PDF/UA-2 built from your HTML.
+- **Accessibility**: tagged PDF, PDF/UA-1 and PDF/UA-2 built from your HTML. ARIA roles tag what HTML has no element
+  for: `role="math"` (with `aria-label`) a formula, `role="doc-toc"` a table of contents whose list items are its
+  entries, and `role="doc-index"` an index. `data-pdf-list-label` marks a list item's own label, such as a number in a
+  flex row, when the item has no list marker.
   [More](https://pdfpecker.net/docs/accessibility/)
 - **Forms**: HTML inputs become fillable PDF fields; read, fill and flatten the fields of existing PDFs. Check boxes
   and radio buttons take `accent-color`, and `appearance: none` leaves them to the page's own CSS (`:checked`,
