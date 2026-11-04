@@ -91,7 +91,9 @@ Document.Create(container =>
   the surrounding font, size and colour, styles headings, code, quotes and tables as on GitHub, and is safe for text
   from users: HTML in it stays text and only web, mail and in-document links keep their target.
 - **Images and graphics**: PNG, JPEG, WebP, BMP, TIFF and GIF images, SVG, solid, dashed and dotted lines, and QR,
-  EPC payment QR, Code 128 and EAN-13 barcodes.
+  EPC payment QR, Swiss QR-bill, Data Matrix, GS1 Data Matrix, Code 128 and EAN-13 barcodes.
+- **Swiss QR-bill**: `SwissQrBill(bill, language)` lays out the 210 x 105 mm payment part with its receipt as the
+  QR-bill style guide sets it, in English, German, French or Italian, with blank fields for a missing amount or payer.
 - **Charts**: `Chart` draws column, bar, line and pie charts from your series as vector SVG, with a legend, data
   labels, your own colours and a .NET number format for the values; MigraDoc users will find the usual report charts here.
 - **Accessibility**: `SemanticSection`, `SemanticArticle`, `SemanticHeader1` to `6` (and `SemanticHeading1` to `6`),

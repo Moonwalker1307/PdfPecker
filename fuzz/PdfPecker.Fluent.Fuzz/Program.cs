@@ -393,7 +393,19 @@ internal static class Fuzz
                 c.Svg(r.Next(2) == 0 ? "<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'><rect width='5' height='5'/></svg>" : Text(r));
                 break;
             case 5:
-                if (r.Next(2) == 0) c.QrCode(Text(r));
+                var barcode = r.Next(5);
+                if (barcode == 0) c.QrCode(Text(r));
+                else if (barcode == 1) c.DataMatrix(Text(r));
+                else if (barcode == 2) c.Gs1DataMatrix(r.Next(2) == 0 ? "(01)09506000134352(10)" + Text(r) : Text(r));
+                else if (barcode == 3) c.SwissQrBill(new SwissQrBill
+                {
+                    Account = "CH44 3199 9123 0008 8901 2",
+                    Creditor = new SwissQrAddress { Name = Text(r), PostalCode = "2501", Town = Text(r) },
+                    Amount = r.Next(2) == 0 ? null : r.Next(1, 100_000),
+                    Debtor = r.Next(2) == 0 ? null : new SwissQrAddress { Name = Text(r), Street = Text(r), PostalCode = Text(r), Town = Text(r), Country = "DE" },
+                    Reference = r.Next(4) == 0 ? Text(r) : "210000000003139471430009017",
+                    Message = r.Next(2) == 0 ? null : Text(r),
+                }, (SwissQrBillLanguage)r.Next(4));
                 else c.Ean13(r.Next(10) == 0 ? Text(r) : r.NextInt64(100_000_000_000, 999_999_999_999).ToString(CultureInfo.InvariantCulture));
                 break;
             case 6:

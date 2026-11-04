@@ -151,6 +151,24 @@ public static partial class ContentExtensions
     public static ImageDescriptor EpcQrCode(this IContainer container, EpcPayment payment, BarcodeOptions? options = null)
         => Svg(container, Barcode.EpcQrCode(payment, options)).FitArea();
 
+    /// <summary>
+    /// The Swiss QR code of a QR-bill, with the Swiss cross. For the whole payment part with its receipt, use
+    /// <see cref="SwissQrBill(IContainer, PdfPecker.SwissQrBill, SwissQrBillLanguage)"/>.
+    /// </summary>
+    public static ImageDescriptor SwissQrCode(this IContainer container, SwissQrBill bill, BarcodeOptions? options = null)
+        => Svg(container, Barcode.SwissQrCode(bill, options)).FitArea();
+
+    /// <summary>A Data Matrix code for the text, in the smallest square size that fits.</summary>
+    public static ImageDescriptor DataMatrix(this IContainer container, string text, BarcodeOptions? options = null)
+        => Svg(container, Barcode.DataMatrix(text, options)).FitArea();
+
+    /// <summary>
+    /// A GS1 Data Matrix code for an element string with the application identifiers in parentheses, such as
+    /// <c>"(01)09506000134352(10)AB-123"</c>.
+    /// </summary>
+    public static ImageDescriptor Gs1DataMatrix(this IContainer container, string elementString, BarcodeOptions? options = null)
+        => Svg(container, Barcode.Gs1DataMatrix(elementString, options)).FitArea();
+
     /// <summary>A Code 128 barcode for the text.</summary>
     public static ImageDescriptor Code128(this IContainer container, string text, BarcodeOptions? options = null)
         => Svg(container, Barcode.Code128(text, options)).FitArea();
