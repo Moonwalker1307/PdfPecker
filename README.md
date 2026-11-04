@@ -67,6 +67,10 @@ byte[] smallest = PdfCompactor.Compact(pdf, new PdfCompactOptions { MaxImageDpi 
 // Strip JavaScript, launch and submit actions and other active content from a PDF someone sent you
 byte[] safe = PdfSanitizer.RemoveActiveContent(File.ReadAllBytes("received.pdf"));
 
+// Turn any existing PDF into PDF/A-2b for archiving, with a list of what changed and of anything left to fix
+var archived = PdfToPdfA.Convert(File.ReadAllBytes("received.pdf"));
+if (!archived.IsConformant) Console.WriteLine(string.Join("\n", archived.Problems));
+
 // Fast Web View: the first page shows while the rest of a large PDF is still downloading
 byte[] web = HtmlToPdf.Convert(html, new PdfOptions { Linearize = true });
 byte[] mergedForWeb = PdfLinearizer.Linearize(PdfMerger.Merge(invoicePdf, termsPdf));
@@ -268,6 +272,13 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   justification, and hyphenation in eleven languages (with `hyphenate-limit-lines`). [More](https://pdfpecker.net/docs/languages/)
 - **PDF/A, passwords and watermarks**: PDF/A-2, 3 and 4, AES-256 encryption, and text, image and SVG watermarks.
   [More](https://pdfpecker.net/docs/pdfa-and-passwords/)
+- **Existing PDFs to PDF/A**: `PdfToPdfA` converts PDFs from any tool to PDF/A-2b, 2u, 3b or 3u without rasterizing
+  them. It embeds fonts that are not embedded (with the bundled glyphs, at the document's own widths), repairs embedded
+  TrueType fonts whose glyphs, widths or character maps disagree with the PDF, adds the output intent and XMP metadata,
+  removes scripts and other forbidden actions, gives annotations and form fields appearances, makes colours device
+  independent, and keeps or converts attachments as the level allows. The result lists every change and every problem
+  it could not fix, such as text in a font whose glyphs PdfPecker does not have (CJK fonts that are not embedded, for
+  instance), and veraPDF checks the converted samples in CI. Encrypted and signed PDFs are refused.
 - **Accessibility**: tagged PDF, PDF/UA-1 and PDF/UA-2 built from your HTML.
   [More](https://pdfpecker.net/docs/accessibility/)
 - **Forms**: HTML inputs become fillable PDF fields; read, fill and flatten the fields of existing PDFs. Check boxes

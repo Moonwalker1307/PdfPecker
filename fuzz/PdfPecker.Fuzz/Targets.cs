@@ -256,6 +256,17 @@ internal static class Targets
             },
             new()
             {
+                Name = "pdf-pdfa", Extension = ".pdf", Seeds = pdfSeeds, MaxSize = 1 << 20,
+                // A mutated input can turn out signed or encrypted, which the conversion refuses as documented.
+                ExtraExpected = ex => ex is ArgumentException { ParamName: "pdf" },
+                Run = (d, ct) =>
+                {
+                    PdfToPdfA.Convert(d, null, ct);
+                    PdfToPdfA.Convert(d, new PdfAConversionOptions { Conformance = PdfConformance.PdfA3u }, ct);
+                },
+            },
+            new()
+            {
                 Name = "pdf-linearize", Extension = ".pdf", Seeds = pdfSeeds, MaxSize = 1 << 20,
                 // A mutated input can turn out signed or encrypted, which linearizing refuses as documented.
                 ExtraExpected = ex => ex is ArgumentException { ParamName: "pdf" },

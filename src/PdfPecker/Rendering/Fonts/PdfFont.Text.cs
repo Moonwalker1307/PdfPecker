@@ -66,6 +66,9 @@ internal sealed partial class PdfFont
         return c is > 0x20 and < 0x7F ? ((char)c).ToString() : null;
     }
 
+    /// <summary>Whether the font's ToUnicode map gives the text of a code, as PDF/A level U wants of every code shown.</summary>
+    internal bool InToUnicode(int code) => _toUnicode?.ToUnicode((uint)code) != null;
+
     private string? GlyphText(int gid)
         => gid > 0 && _gidToUnicode?.Value is { } map && map.TryGetValue(gid, out int u) ? FromCodePoint(u) : null;
 

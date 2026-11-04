@@ -56,6 +56,9 @@ internal sealed partial class PdfFont
         SubstituteCidFont(file, dict, cidFont);
     }
 
+    /// <summary>The CID a code selects in a CID font, read through the font's CMap; the code itself in other fonts.</summary>
+    internal int Cid(int code) => Kind == FontKind.Cid ? _cmap!.ToCid((uint)code) : code;
+
     /// <summary>
     /// Uses the descendant's embedded program: TrueType (with its CIDToGIDMap) or the CFF table of an OpenType
     /// FontFile3, a bare CFF FontFile3, or a Type 1 FontFile.
@@ -103,7 +106,7 @@ internal sealed partial class PdfFont
     }
 
     // The CIDToGIDMap stream: a big-endian glyph id per CID.
-    private static int[] ReadCidToGid(byte[] bytes)
+    internal static int[] ReadCidToGid(byte[] bytes)
     {
         var map = new int[bytes.Length / 2];
         for (int i = 0; i < map.Length; i++) map[i] = bytes[2 * i] << 8 | bytes[2 * i + 1];

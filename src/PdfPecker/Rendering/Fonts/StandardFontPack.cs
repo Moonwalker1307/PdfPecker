@@ -135,6 +135,37 @@ internal sealed class PackFace : IGlyphSource
         return f;
     }
 
+    /// <summary>
+    /// The glyph's outline as stored, in font units: TrueType points with their on-curve flags, and the index of each
+    /// contour's last point. False for a glyph the face does not have.
+    /// </summary>
+    internal bool Outline(int gid, List<int> xs, List<int> ys, List<bool> onCurve, List<int> contourEnds)
+    {
+        xs.Clear();
+        ys.Clear();
+        onCurve.Clear();
+        contourEnds.Clear();
+        if (gid < 0 || gid >= _offsets.Length) return false;
+        var r = new StandardFontPack.Reader(_data) { Pos = _offsets[gid] };
+        int contours = r.VarInt();
+        int x = 0, y = 0;
+        for (int c = 0; c < contours; c++)
+        {
+            int n = r.VarInt();
+            for (int k = 0; k < n; k++) onCurve.Add((r.D[r.Pos + k / 8] >> (k % 8) & 1) != 0);
+            r.Pos += (n + 7) / 8;
+            for (int k = 0; k < n; k++)
+            {
+                x += r.ZigZag();
+                y += r.ZigZag();
+                xs.Add(x);
+                ys.Add(y);
+            }
+            if (n > 0) contourEnds.Add(xs.Count - 1);
+        }
+        return true;
+    }
+
     public PathData? GetGlyph(int gid)
     {
         if (gid < 0 || gid >= _offsets.Length) return null;

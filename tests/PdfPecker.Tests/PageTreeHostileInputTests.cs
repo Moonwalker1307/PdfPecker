@@ -105,6 +105,15 @@ public class PageTreeHostileInputTests
 
     [Theory]
     [MemberData(nameof(Trees))]
+    public void Pdfa_conversion_reads_the_one_page(string kind)
+    {
+        var pdf = Tree(kind);
+        var result = Bounded(() => PdfToPdfA.Convert(pdf));
+        Assert.Equal(1, PdfToImage.GetPageCount(result.Pdf));
+    }
+
+    [Theory]
+    [MemberData(nameof(Trees))]
     public void Form_filling_reads_the_one_page(string kind)
     {
         var pdf = Tree(kind);

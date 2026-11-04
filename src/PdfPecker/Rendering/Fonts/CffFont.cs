@@ -306,6 +306,9 @@ internal sealed partial class CffFont : IGlyphSource
         return _cidToGid.TryGetValue(cid, out int found) ? found : 0;
     }
 
+    /// <summary>The CID a glyph has: its charset entry in a CID-keyed font, its index in a name-keyed one.</summary>
+    public int CidForGid(int gid) => !IsCid ? gid : gid >= 0 && gid < _charset.Length ? _charset[gid] : 0;
+
     public double Advance(int gid)
     {
         if (gid < 0 || gid >= _widths.Length) return -1;
