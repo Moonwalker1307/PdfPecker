@@ -53,33 +53,42 @@ internal sealed partial class LayoutEngine
 
     /// <summary>
     /// The room a cloned box whose content starts at <paramref name="cy"/> keeps in its fragments, or null when it
-    /// keeps none: when it has no top or bottom edges, or when they would take half a fragment or more, which would
-    /// leave the content too little room to go on anywhere, as with a table header too tall to repeat.
+    /// keeps none: when it has no top or bottom edges, or when its edges and those of the cloned boxes around it would
+    /// together take half a fragment or more, which would leave the content too little room to go on anywhere, as with
+    /// a table header too tall to repeat. Counting the boxes around it keeps many nested boxes from leaving their content
+    /// a sliver of each page, and so from making pages without content.
     /// </summary>
     private CloneRoom? CloneRoomFor(float cy, float head, float foot)
     {
         if (head + foot <= Eps) return null;
         int first = PageOf(cy);
-        float left = _grid.MinHeight - CloneHead(first + 1) - CloneFoot(first + 1);
-        return head + foot < left / 2 ? new CloneRoom(_grid, first, head, foot, _cloneRoom) : null;
+        float kept = CloneHead(first + 1) + CloneFoot(first + 1);
+        return kept + head + foot < _grid.MinHeight / 2 ? new CloneRoom(_grid, first, head, foot, _cloneRoom) : null;
     }
 
     /// <summary>
-    /// Where a content box <paramref name="height"/> tall from <paramref name="top"/> ends in the flow, once it leaves
-    /// the room of its cloned edges at each break it crosses: as in Chrome, a height is the content's and each fragment
-    /// adds its padding and borders to it. <see cref="_cloneRoom"/> holds the boxes around the box, not the box itself.
+    /// Where a box <paramref name="height"/> tall from <paramref name="top"/> ends in the flow, once it leaves the room
+    /// of cloned edges at each break it crosses. For a cloned box, <paramref name="room"/> is its own and the height is
+    /// its content's: as in Chrome, each fragment adds its padding and borders to it. For a box inside cloned boxes,
+    /// such as one with a height of its own or a float, <paramref name="room"/> is null and the height is its border
+    /// box's, which goes on below the edges of the boxes around it on the next page, as a box's height goes on under a
+    /// table header repeated over a split row. <see cref="_cloneRoom"/> holds the boxes around the box, not the box itself.
     /// </summary>
-    private float PastCloneRoom(CloneRoom room, float top, float height)
+    private float PastCloneRoom(CloneRoom? room, float top, float height)
     {
+        float head = room?.Head ?? 0, foot = room?.Foot ?? 0;
         float end = top + height;
-        for (int p = Math.Max(PageOf(top), room.FirstPage); end > FlowEnd(p) - room.Foot + Eps; p++)
+        for (int p = Math.Max(PageOf(top), room?.FirstPage ?? 0); end > FlowEnd(p) - foot + Eps; p++)
         {
             // A box far taller than a page meets the page limit rather than adding room for millions of pages.
             CheckPageLimit(end - 0.5f);
-            end += FlowStart(p + 1) + room.Head - (FlowEnd(p) - room.Foot);
+            end += FlowStart(p + 1) + head - (FlowEnd(p) - foot);
         }
         return end;
     }
+
+    /// <summary>Whether the content being laid out is inside a cloned box that keeps room in the current grid.</summary>
+    private bool InCloneRoom => _cloneRoom != null && ReferenceEquals(_cloneRoom.Grid, _grid);
 
     /// <summary>
     /// Paints a cloned box from <paramref name="top"/> to <paramref name="bottom"/> as one whole box per page or column

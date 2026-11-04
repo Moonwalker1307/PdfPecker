@@ -1584,10 +1584,15 @@ internal sealed partial class LayoutEngine
         if (_splitRow != null && contentH > contentBottom - cy + Eps) bottom = PastSplitRowRoom(y, bottom);
         // A cloned box whose height is not its content's: the height goes on past the room for its edges at each break.
         if (cloneRoom != null && contentH != contentBottom - cy) bottom = PastCloneRoom(cloneRoom, cy, contentH) + pb + bb;
+        // So does a box inside a cloned one that is taller than its content, such as one with a height of its own.
+        else if (InCloneRoom && contentH > contentBottom - cy + Eps) bottom = PastCloneRoom(null, y, bottom - y);
         // A legend taller than the top border moves the border down to its middle, and the background with it.
         float paintTop = y + borderOutset;
-        if (s.BoxDecorationClone && ClonesFragments(e, isImage || isSvg) && PaintClonedFragments(group, s, pages, bx, paintTop, used, bottom, availW)
-            || _cloneRoom != null && ReferenceEquals(_cloneRoom.Grid, _grid) && s.Visible && PaintSlicedInClone(group, s, pages, bx, paintTop, used, bottom, availW, borderGap))
+        // A cloned box that keeps no room for its edges, as they would take too much of a page, is sliced: its content
+        // goes on where the repeated edges would be painted.
+        if (s.BoxDecorationClone && ClonesFragments(e, isImage || isSvg) && (cloneRoom != null || bt + pt + pb + bb <= Eps)
+            && PaintClonedFragments(group, s, pages, bx, paintTop, used, bottom, availW)
+            || InCloneRoom && s.Visible && PaintSlicedInClone(group, s, pages, bx, paintTop, used, bottom, availW, borderGap))
         {
             // Painted fragment by fragment.
         }

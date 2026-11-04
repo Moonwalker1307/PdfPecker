@@ -191,11 +191,62 @@ public class BoxDecorationBreakTests
     public void Edges_too_tall_to_repeat_keep_no_room()
     {
         // Edges of 170pt would leave the content 30pt of a 200pt page: as with a table header too tall to repeat, the
-        // content goes on as it would without them, and each fragment is still painted whole.
+        // content goes on as it would without them, and the box is sliced, so that no repeated edge covers it.
         var ops = Layout(Style + $"<div class='b c' style='padding:80.5pt'>{Lines(12)}</div>");
         Assert.Equal(12, ops.OfType<TextOp>().Count());
         Near(LineTop(ops, 1) + 18, LineTop(ops, 2));
-        Assert.True(Backgrounds(ops).Count > 1);
+        var background = Assert.Single(Backgrounds(ops));
+        Assert.True(background.H > PageHeight);
+        Assert.Single(ops.OfType<BorderRectOp>());
+    }
+
+    [Fact]
+    public void Nested_cloned_boxes_keep_room_for_at_most_half_a_page_together()
+    {
+        // Twenty boxes with 3pt of padding at each end would together keep 120pt of a 200pt page. The inner ones keep
+        // none once the boxes around them keep half a page, so the content still gets 104pt of each page instead of a
+        // sliver that no line fits in, which made a page per line.
+        string open = string.Concat(Enumerable.Repeat("<div style='box-decoration-break:clone; padding:3pt'>", 20));
+        string close = string.Concat(Enumerable.Repeat("</div>", 20));
+        var ops = Layout(Style + open + Lines(12) + close);
+        float last = LineTop(ops, 12);
+        Assert.InRange(last, 400, 600);
+        Near(60, LineTop(ops, 1));
+    }
+
+    [Fact]
+    public void A_box_with_a_height_inside_a_cloned_box_goes_on_below_the_repeated_edges()
+    {
+        string html = Style + $"<div class='b c'>{Lines(9)}<div style='height:60pt; background:#0f0'></div><p>line10</p></div>";
+        var ops = Layout(html);
+        // The 60pt box starts at 172pt: 18pt of it fit above the bottom edge kept at 190pt, the other 42pt go on below
+        // the top edge repeated at 210pt, and the next line follows it, as in Chrome.
+        Near(252, LineTop(ops, 10));
+        var parts = LayoutWithGroups(html).OfType<ClipOp>().Where(c => c.Ops.OfType<RectOp>().Any(r => r.Color == 0xFF00FF00)).ToList();
+        Assert.Equal(2, parts.Count);
+        Near(190, parts[0].Y + parts[0].H);
+        Near(210, parts[1].Y);
+        // The one box, 80pt tall in the flow, is painted in each page's part.
+        Assert.All(ops.OfType<RectOp>().Where(r => r.Color == 0xFF00FF00), r => Near(80, r.H));
+    }
+
+    [Fact]
+    public void A_float_inside_a_cloned_box_goes_on_below_the_repeated_edges()
+    {
+        string html = Style + $"<div class='b c'>{Lines(9)}<div style='float:left; width:50pt; height:60pt; background:#0f0'></div>{Lines(6).Replace("line", "z")}</div>";
+        var ops = Layout(html);
+        // The float's remainder is painted on the next page, and the lines beside it there stay beside it.
+        Assert.All(ops.OfType<RectOp>().Where(r => r.Color == 0xFF00FF00), r =>
+        {
+            Near(172, r.Y);
+            Near(80, r.H);
+        });
+        var parts = LayoutWithGroups(html).OfType<ClipOp>().Where(c => c.Ops.OfType<RectOp>().Any(r => r.Color == 0xFF00FF00)).ToList();
+        Assert.Equal(2, parts.Count);
+        Near(210, parts[1].Y);
+        var z2 = ops.OfType<TextOp>().Single(t => t.Text == "z2");
+        Near(210, z2.LineTop);
+        Assert.True(z2.X >= 50);
     }
 
     [Fact]

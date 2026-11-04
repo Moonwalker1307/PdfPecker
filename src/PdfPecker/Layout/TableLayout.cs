@@ -750,6 +750,8 @@ internal sealed partial class LayoutEngine
             // box-decoration-break: clone gives each fragment of a table with separate borders its own border, padding
             // and border spacing, which its rows leave room for.
             var cloneRoom = cloned ? CloneRoomFor(cy, frameT + vs, frameB + vs) : null;
+            // A table that keeps no room for its edges is sliced, as a block box is.
+            if (cloned && cloneRoom == null && frameT + frameB + 2 * vs > Eps) cloned = false;
             if (cloneRoom != null) _cloneRoom = cloneRoom;
             try
             {
