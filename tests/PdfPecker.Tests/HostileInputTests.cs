@@ -42,6 +42,18 @@ public class HostileInputTests
         return task.Result;
     }
 
+    [Theory]
+    [InlineData("&#xFFFFFFFF;")]
+    [InlineData("&#x80000000;")]
+    [InlineData("<a title='&#xFFFFFFFF;'>x</a>")]
+    public void Character_references_that_overflow_become_the_replacement_character(string html)
+    {
+        // Eight hex digits overflowed the decoder's int into a negative code point, which passed the range check and
+        // escaped as an ArgumentException from char.ConvertFromUtf32. Browsers decode them as U+FFFD.
+        Assert.NotEmpty(Bounded("<p>" + html + "</p>"));
+        Assert.Equal("\uFFFD", HtmlEntities.Decode("&#xFFFFFFFF;"));
+    }
+
     [Fact]
     public void Rounded_boxes_split_over_columns_on_many_pages_stay_linear()
     {
