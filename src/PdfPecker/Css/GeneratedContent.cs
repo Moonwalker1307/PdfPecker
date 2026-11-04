@@ -164,11 +164,15 @@ internal static class GeneratedContent
             {
                 if (args.Count == 0) return false;
                 var attribute = host.GetAttribute(args[0].Split(' ')[0].ToLowerInvariant());
-                // A missing attribute takes the fallback string after the comma, as in Chrome.
+                if (attribute != null || args.Count < 2)
+                {
+                    sb.Append(attribute);
+                    return true;
+                }
+                // A missing attribute takes the fallback after the comma, as in Chrome, where a fallback that is not a
+                // string (attr(x, 3)) makes the content invalid, so there is no box.
                 int k = 0;
-                if (attribute == null && args.Count > 1 && args[1].Length > 0 && args[1][0] is '"' or '\'') ReadString(args[1], ref k, sb);
-                else sb.Append(attribute);
-                return true;
+                return args[1].Length > 0 && args[1][0] is '"' or '\'' && ReadString(args[1], ref k, sb) && k == args[1].Length;
             }
             case "counter":
             {

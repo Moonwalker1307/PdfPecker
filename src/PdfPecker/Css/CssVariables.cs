@@ -44,28 +44,42 @@ internal static class CssVariables
         int i = Next(value, 0, attrs != null, out bool isAttr);
         if (i < 0) return value;
         var sb = new StringBuilder(value.Length + 16);
+        var resources = new CssAttr.ResourceScan();
         int last = 0;
         while (i >= 0)
         {
-            int open = i + (isAttr ? 4 : 3);
-            int close = MatchingParen(value, open);
-            if (close < 0) return null;
-            string inner = value.Substring(open + 1, close - open - 1);
+            int close;
             string? replacement = null;
             bool fromAttribute = false;
             if (isAttr)
             {
-                replacement = ResolveAttr(inner, vars, own, attrs!, depth, out bool keep);
-                if (keep)
+                // The head is read first, so that an attr() left for generated text costs nothing more, however deeply
+                // its fallback nests others.
+                if (!CssAttr.TryParseHead(value, i + 5, out var call)) return null;
+                if (call.IsGeneratedText && attrs!.KeepUntyped)
                 {
                     // An untyped attr() of generated text stays for GeneratedContent; a var() in its fallback is still replaced.
-                    i = Next(value, open + 1, true, out isAttr);
+                    i = Next(value, call.End, true, out isAttr);
                     continue;
                 }
+                string? fallback = null;
+                if (call.End >= value.Length) close = value.Length; // closed by the end of the declaration
+                else if (value[call.End] == ')') close = call.End;
+                else
+                {
+                    close = MatchingParen(value, i + 4);
+                    if (close < 0) close = value.Length;
+                    fallback = value.Substring(call.End + 1, close - call.End - 1).Trim();
+                }
+                replacement = ResolveAttr(call, fallback, vars, own, attrs!, depth);
                 fromAttribute = true;
             }
             else
             {
+                int open = i + 3;
+                close = MatchingParen(value, open);
+                if (close < 0) return null;
+                string inner = value.Substring(open + 1, close - open - 1);
                 int comma = TopLevelComma(inner);
                 string name = (comma < 0 ? inner : inner.Substring(0, comma)).Trim();
                 string? fallback = comma < 0 ? null : inner.Substring(comma + 1).Trim();
@@ -92,12 +106,12 @@ internal static class CssVariables
             if (replacement == null || sb.Length + replacement.Length > MaxLength) return null;
             if (fromAttribute)
             {
-                if (own == null && (CssAttr.InsideResource(value, i) || CssAttr.ContainsResource(replacement))) return null;
+                if (own == null && (resources.Inside(value, i) || CssAttr.ContainsResource(replacement))) return null;
                 tainted = true;
             }
             sb.Append(value, last, i - last);
             sb.Append(replacement);
-            last = close + 1;
+            last = Math.Min(close + 1, value.Length);
             i = Next(value, last, attrs != null, out isAttr);
         }
         sb.Append(value, last, value.Length - last);
@@ -127,17 +141,10 @@ internal static class CssVariables
 
     /// <summary>
     /// The value of one attr() call: the attribute parsed as the call's type, else the fallback; null when neither
-    /// gives a value. <paramref name="keep"/> says that an untyped call is left for the generated text.
+    /// gives a value. <paramref name="fallback"/> is null when the call has no comma.
     /// </summary>
-    private static string? ResolveAttr(string inner, CssVarScope? vars, OwnValues? own, CssAttr.Context attrs, int depth, out bool keep)
+    private static string? ResolveAttr(in CssAttr.Call call, string? fallback, CssVarScope? vars, OwnValues? own, CssAttr.Context attrs, int depth)
     {
-        keep = false;
-        if (!CssAttr.TryParse(inner, out var call)) return null;
-        if (call.IsGeneratedText && attrs.KeepUntyped)
-        {
-            keep = true;
-            return null;
-        }
         if (--attrs.Budget < 0 || depth > MaxDepth) return null;
         foreach (var active in attrs.Active)
         {
@@ -164,15 +171,18 @@ internal static class CssVariables
             }
         }
         if (result == null && attrs.Cycle == call.Name) attrs.Cycle = null;
-        if (result == null && call.Fallback != null && attrs.Cycle == null)
+        if (result == null && fallback != null && attrs.Cycle == null)
         {
             bool t = false;
-            result = Run(call.Fallback, vars, own, attrs, depth + 1, ref t);
+            result = Run(fallback, vars, own, attrs, depth + 1, ref t);
         }
         // Without a type and a fallback, a missing attribute is the empty string.
-        else if (result == null && raw == null && call.Type == CssAttr.AttrType.String && call.Fallback == null) result = "\"\"";
+        else if (result == null && raw == null && call.Type == CssAttr.AttrType.String && fallback == null) result = "\"\"";
         attrs.Active.RemoveAt(attrs.Active.Count - 1);
         if (attrs.Cycle == call.Name) attrs.Cycle = null;
+        // Attributes that refer to others twice double the text at each step; every result is charged to the
+        // declaration's budget of characters, and one result is no longer than an attribute may be.
+        if (result != null && (result.Length > CssAttr.MaxValueLength || (attrs.Characters -= result.Length) < 0)) return null;
         return result;
     }
 
@@ -245,6 +255,8 @@ internal static class CssVariables
             if (!raw.TryGetValue(name, out var v, out bool tainted)) return _resolved[name] = null;
             if (tainted) (_tainted ??= new(StringComparer.Ordinal)).Add(name);
             if (tainted || !CssParser.HasVar(v) && (attrs == null || !CssAttr.Has(v))) return _resolved[name] = v;
+            // Each custom property gets its own attr() budget; one it refers to shares the budget of the one being resolved.
+            if (_active.Count == 0) attrs?.ResetBudget();
             _active.Add(name);
             var result = Run(v, raw, this, attrs, depth, ref tainted);
             _active.RemoveAt(_active.Count - 1);

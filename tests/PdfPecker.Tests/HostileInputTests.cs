@@ -303,6 +303,35 @@ public class HostileInputTests
         AssertStructurallyValid(Bounded(Repeat(p.ToString(), 20)));
     }
 
+    // Review finding: the check of attr() calls found each one's closing parenthesis and copied its arguments, so attr()
+    // nested 20,000 deep in its own fallback took 14 s and 19 GB to parse (and 137 s in content).
+    [Theory]
+    [InlineData("p{width:", "attr(a px, ", "1px")]
+    [InlineData("p::before{content:", "attr(a, ", "\"x\"")]
+    [InlineData("p{--x:", "attr(a type(<length>), ", "1px")]
+    public void Deeply_nested_attr_fallbacks_parse_in_linear_time(string start, string call, string end)
+    {
+        const int depth = 20_000;
+        var html = $"<style>{start}{Repeat(call, depth)}{end}{new string(')', depth)}}}</style><p data-b=1>text</p>";
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        AssertStructurallyValid(Bounded(html));
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10), $"Took {sw.Elapsed}");
+    }
+
+    // Review finding: attributes that each name the next one twice built about a megabyte per declaration, which the
+    // lookup budget alone allowed; the characters an attr() builds are now budgeted too.
+    [Fact]
+    public void Attr_results_that_double_are_capped_in_size()
+    {
+        var p = new StringBuilder("<p class=d");
+        for (int i = 0; i < 16; i++) p.Append($" data-a{i}='attr(data-a{i + 1} type(*)) attr(data-a{i + 1} type(*))'");
+        p.Append(" data-a16='xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'>text</p>");
+        var html = "<style>.d{font-family:attr(data-a0 type(*));--x:attr(data-a0 type(*));--y:attr(data-a1 type(*))}</style>" + Repeat(p.ToString(), 100);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        AssertStructurallyValid(Bounded(html));
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10), $"Took {sw.Elapsed}");
+    }
+
     [Fact]
     public void Custom_properties_on_a_reference_cycle_take_the_fallback()
     {

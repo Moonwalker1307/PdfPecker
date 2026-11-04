@@ -95,6 +95,14 @@ public class CssAttrTests
     [InlineData("width: attr(data-v type(<length>), attr(data-w px))", "x", 8f)]
     [InlineData("width: attr(data-v type(<length>),)", "zz", null)]
     [InlineData("width: attr(data-v type(*), 5px)", "", null)]
+    [InlineData("width: attr(data-v type(<length>))", "10px/**/", 10f)]
+    [InlineData("width: attr(data-v type(<length>))", "/* c */ 10px", 10f)]
+    [InlineData("width: attr(data-v type(<length>))", "1\\70 x", 1f)]
+    [InlineData("width: attr(data-v px)", "5.", 5f)]
+    [InlineData("width: attr(data-v px)", ".", null)]
+    [InlineData("width: attr(data-v type(<length>", "12px", 12f)]
+    [InlineData("width: attr(data-v px", "13", 13f)]
+    [InlineData("width: attr(data-v px, 4px", "x", 4f)]
     public void Typed_values_and_fallbacks_match_chrome(string declaration, string? attr, float? expected)
     {
         var actual = WidthPx(declaration, attr);
@@ -230,6 +238,22 @@ public class CssAttrTests
         Assert.Equal(15f, before.Style.Width.Value, 3);
         Assert.Equal(Blue, before.Style.Color);
         Assert.Equal("Hi", ((TextNode)before.Children[0]).Text);
+    }
+
+    [Fact]
+    public void A_fallback_that_is_not_a_string_leaves_content_without_a_box()
+    {
+        var doc = Styled("<style>p::before{content: attr(data-x, 3)}</style><p id=a>a</p><p id=b data-x=X>b</p>");
+        Assert.DoesNotContain(ById(doc, "a").Children, c => c is Element { Name: "::before" });
+        Assert.Contains(ById(doc, "b").Children, c => c is Element { Name: "::before" });
+    }
+
+    [Fact]
+    public void An_unclosed_attr_at_the_end_of_a_style_attribute_is_closed()
+    {
+        var doc = Styled("<div id=a style='width: attr(data-w type(<length>' data-w=20px></div><div id=b style='width: attr(data-w px' data-w=40></div>");
+        Assert.Equal(15f, ById(doc, "a").Style.Width.Value, 3);
+        Assert.Equal(30f, ById(doc, "b").Style.Width.Value, 3);
     }
 
     [Fact]

@@ -25,11 +25,21 @@ internal static class CssAttr
     /// </summary>
     internal const int MaxLookups = 1024;
 
+    /// <summary>
+    /// How many characters the attr() results of one declaration may add up to, nested results counted at each level.
+    /// A bar chart needs a few dozen; the budget stops attributes that double each other from building megabytes.
+    /// </summary>
+    internal const int MaxCharacters = 1 << 18;
+
     /// <summary>What an attr() call parses its attribute as.</summary>
     internal enum AttrType : byte { String, RawString, Number, Unit, Syntax }
 
-    /// <summary>One attr() call: the attribute's name, its type and the fallback (null when there is no comma).</summary>
-    internal readonly record struct Call(string Name, AttrType Type, string? Argument, string? Fallback)
+    /// <summary>
+    /// The head of one attr() call: the attribute's name and its type. <see cref="End"/> is the index after the head in
+    /// the value, where a comma starts the fallback, a parenthesis closes the call, or the value ends (which closes it,
+    /// as the end of a declaration closes open functions in CSS).
+    /// </summary>
+    internal readonly record struct Call(string Name, AttrType Type, string? Argument, int End)
     {
         /// <summary>
         /// Whether generated text reads the call itself: no type, or the older <c>attr(href url)</c> of the target
@@ -50,7 +60,7 @@ internal static class CssAttr
         /// the generated text is made, as they always have.
         /// </summary>
         public bool KeepUntyped;
-        public int Budget;
+        public int Budget, Characters;
         /// <summary>The attribute on whose reference cycle the substitution failed, until that attribute's own call is left.</summary>
         public string? Cycle;
         public readonly List<string> Active = [];
@@ -59,9 +69,16 @@ internal static class CssAttr
         {
             Host = host;
             KeepUntyped = keepUntyped;
-            Budget = MaxLookups;
+            ResetBudget();
             Cycle = null;
             Active.Clear();
+        }
+
+        /// <summary>Gives the next declaration (or custom property) the whole budget again.</summary>
+        public void ResetBudget()
+        {
+            Budget = MaxLookups;
+            Characters = MaxCharacters;
         }
 
         /// <summary>The attribute's value, matched as written and then in lower case, as HTML attribute names are.</summary>
@@ -95,33 +112,36 @@ internal static class CssAttr
     {
         if (!Has(value)) return false;
         if (property.StartsWith("--", StringComparison.Ordinal) || !IsGeneratedTextProperty(property)) return true;
-        foreach (var call in Calls(value))
-            if (call is { IsGeneratedText: false }) return true;
-        return false;
+        Survey(value, out _, out bool typed);
+        return typed;
     }
 
     /// <summary>Whether every attr() in the value is well formed; Chrome drops a declaration with a malformed one when it parses it.</summary>
     public static bool SyntaxValid(string value)
     {
-        foreach (var call in Calls(value))
-            if (call == null) return false;
-        return true;
+        Survey(value, out bool valid, out _);
+        return valid;
     }
 
-    /// <summary>The attr() calls of a value, outside strings, with null for a malformed one.</summary>
-    private static IEnumerable<Call?> Calls(string value)
+    /// <summary>
+    /// Reads the head of every attr() in the value, outside strings, in one pass: whether all are well formed, and
+    /// whether one has a type that generated text does not read itself. Fallbacks are not taken apart: an attr() nested
+    /// in one is reached by the same pass, so a value of deeply nested calls costs time linear in its length.
+    /// </summary>
+    private static void Survey(string value, out bool valid, out bool typed)
     {
+        valid = true;
+        typed = false;
         int i = 0;
         while ((i = Next(value, i)) >= 0)
         {
-            int close = MatchingParen(value, i + 4);
-            if (close < 0)
+            if (!TryParseHead(value, i + 5, out var call))
             {
-                yield return null;
-                yield break;
+                valid = false;
+                return;
             }
-            yield return TryParse(value.Substring(i + 5, close - i - 5), out var call) ? call : null;
-            i += 5;
+            if (!call.IsGeneratedText) typed = true;
+            i = call.End;
         }
     }
 
@@ -146,53 +166,51 @@ internal static class CssAttr
     }
 
     /// <summary>
-    /// Parses the arguments of attr(): a name, an optional type and an optional fallback after a comma. A type that is an
-    /// identifier other than raw-string and number is taken as a unit here and checked when it is used, as Chrome does.
+    /// Parses the head of an attr() whose arguments start at <paramref name="start"/>: a name and an optional type,
+    /// followed by a comma, a closing parenthesis or the end of the value. A type that is an identifier other than
+    /// raw-string and number is taken as a unit here and checked when it is used, as Chrome does.
     /// </summary>
-    public static bool TryParse(string inner, out Call call)
+    public static bool TryParseHead(string value, int start, out Call call)
     {
         call = default;
-        int i = SkipSpace(inner, 0);
-        int start = i;
-        while (i < inner.Length && IsNameChar(inner[i])) i++;
-        if (i == start || char.IsAsciiDigit(inner[start]) || inner[start] == '-' && i - start > 1 && char.IsAsciiDigit(inner[start + 1])) return false;
-        string name = inner.Substring(start, i - start);
-        i = SkipSpace(inner, i);
+        int i = SkipSpace(value, start);
+        int nameStart = i;
+        while (i < value.Length && IsNameChar(value[i])) i++;
+        if (i == nameStart || char.IsAsciiDigit(value[nameStart])
+            || value[nameStart] == '-' && i - nameStart > 1 && char.IsAsciiDigit(value[nameStart + 1])) return false;
+        string name = value.Substring(nameStart, i - nameStart);
+        i = SkipSpace(value, i);
         var type = AttrType.String;
         string? argument = null;
-        if (i < inner.Length && inner[i] != ',')
+        if (i < value.Length && value[i] is not (',' or ')'))
         {
             int typeStart = i;
-            if (inner[i] == '%') i++;
-            else while (i < inner.Length && IsNameChar(inner[i])) i++;
+            if (value[i] == '%') i++;
+            else while (i < value.Length && IsNameChar(value[i])) i++;
             if (i == typeStart) return false;
-            string word = inner.Substring(typeStart, i - typeStart);
-            if (i < inner.Length && inner[i] == '(')
+            var word = value.AsSpan(typeStart, i - typeStart);
+            if (i < value.Length && value[i] == '(')
             {
                 if (!word.Equals("type", StringComparison.OrdinalIgnoreCase)) return false;
-                int close = MatchingParen(inner, i);
-                if (close < 0) return false;
-                argument = inner.Substring(i + 1, close - i - 1).Trim();
+                // A syntax holds no parentheses or strings, so the first ")" closes type(), or the end of the value does.
+                int close = value.IndexOf(')', i + 1);
+                if (close < 0) close = value.Length;
+                argument = value.Substring(i + 1, close - i - 1).Trim();
                 if (!CssPropertySyntax.IsValid(argument, allowUrl: false)) return false;
                 type = AttrType.Syntax;
-                i = close + 1;
+                i = Math.Min(close + 1, value.Length);
             }
             else if (word.Equals("raw-string", StringComparison.OrdinalIgnoreCase)) type = AttrType.RawString;
             else if (word.Equals("number", StringComparison.OrdinalIgnoreCase)) type = AttrType.Number;
             else
             {
                 type = AttrType.Unit;
-                argument = word.ToLowerInvariant();
+                argument = word.ToString().ToLowerInvariant();
             }
-            i = SkipSpace(inner, i);
+            i = SkipSpace(value, i);
         }
-        string? fallback = null;
-        if (i < inner.Length)
-        {
-            if (inner[i] != ',') return false;
-            fallback = inner.Substring(i + 1).Trim();
-        }
-        call = new Call(name, type, argument, fallback);
+        if (i < value.Length && value[i] is not (',' or ')')) return false;
+        call = new Call(name, type, argument, i);
         return true;
     }
 
@@ -213,8 +231,61 @@ internal static class CssAttr
             case AttrType.Unit:
                 return IsUnit(call.Argument!) && NumberToken(raw) is { } u ? Format(u) + call.Argument : null;
             default:
-                return raw.Trim();
+                return Normalized(raw).Trim();
         }
+    }
+
+    /// <summary>
+    /// The value of a type() as Chrome's tokenizer reads it: comments outside strings become spaces, and escapes outside
+    /// strings that stand for a letter, a digit or another name character become that character ("1\70 x" is 1px).
+    /// Other escapes stay as they are, so an escaped ";" or bracket still fails the checks that follow.
+    /// </summary>
+    private static string Normalized(string raw)
+    {
+        if (raw.IndexOf('\\') < 0 && raw.IndexOf("/*", StringComparison.Ordinal) < 0) return raw;
+        var sb = new StringBuilder(raw.Length);
+        char quote = '\0';
+        for (int i = 0; i < raw.Length; i++)
+        {
+            char c = raw[i];
+            if (quote != '\0')
+            {
+                sb.Append(c);
+                if (c == '\\' && i + 1 < raw.Length) sb.Append(raw[++i]);
+                else if (c == quote) quote = '\0';
+                continue;
+            }
+            if (c is '"' or '\'')
+            {
+                quote = c;
+                sb.Append(c);
+            }
+            else if (c == '/' && i + 1 < raw.Length && raw[i + 1] == '*')
+            {
+                int end = raw.IndexOf("*/", i + 2, StringComparison.Ordinal);
+                i = end < 0 ? raw.Length : end + 1;
+                sb.Append(' ');
+            }
+            else if (c == '\\' && i + 1 < raw.Length)
+            {
+                int k = i + 1, code;
+                if (Uri.IsHexDigit(raw[k]))
+                {
+                    while (k < raw.Length && k - i <= 6 && Uri.IsHexDigit(raw[k])) k++;
+                    code = int.Parse(raw.AsSpan(i + 1, k - i - 1), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+                    if (k < raw.Length && char.IsWhiteSpace(raw[k])) k++;
+                }
+                else code = raw[k++];
+                if (code < 0x10000 && IsNameChar((char)code) && !char.IsSurrogate((char)code))
+                {
+                    sb.Append((char)code);
+                    i = k - 1;
+                }
+                else sb.Append(c);
+            }
+            else sb.Append(c);
+        }
+        return sb.ToString();
     }
 
     /// <summary>
@@ -275,38 +346,45 @@ internal static class CssAttr
         return false;
     }
 
-    /// <summary>Whether <paramref name="at"/> lies inside the arguments of url() or another function that loads a resource.</summary>
-    public static bool InsideResource(string value, int at)
+    /// <summary>
+    /// Finds whether positions of a value lie inside the arguments of url() or another function that loads a resource.
+    /// The positions asked for only grow, so the scan goes on from where it stopped and a value is read once in all.
+    /// </summary>
+    internal struct ResourceScan
     {
-        Span<bool> stack = stackalloc bool[64];
-        int depth = 0, resources = 0;
-        char quote = '\0';
-        for (int i = 0; i < at && i < value.Length; i++)
+        private int _pos, _depth, _resources;
+        private ulong _levels; // bit n: level n is a resource function; deeper levels count as resources
+        private char _quote;
+
+        public bool Inside(string value, int at)
         {
-            char c = value[i];
-            if (c == '\\') { i++; continue; }
-            if (quote != '\0')
+            for (; _pos < at && _pos < value.Length; _pos++)
             {
-                if (c == quote) quote = '\0';
-                continue;
+                char c = value[_pos];
+                if (c == '\\') { _pos++; continue; }
+                if (_quote != '\0')
+                {
+                    if (c == _quote) _quote = '\0';
+                    continue;
+                }
+                if (c is '"' or '\'') _quote = c;
+                else if (c == '(')
+                {
+                    // Nesting deeper than the bits hold counts as inside, which errs on the side of refusing.
+                    bool resource = _depth >= 64 || IsResourceFunction(value, _pos);
+                    if (resource) _resources++;
+                    if (_depth < 64 && resource) _levels |= 1UL << _depth;
+                    _depth++;
+                }
+                else if (c == ')' && _depth > 0)
+                {
+                    _depth--;
+                    if (_depth >= 64 || (_levels >> _depth & 1) != 0) _resources--;
+                    if (_depth < 64) _levels &= ~(1UL << _depth);
+                }
             }
-            if (c is '"' or '\'') quote = c;
-            else if (c == '(')
-            {
-                bool resource = IsResourceFunction(value, i);
-                if (resource) resources++;
-                // Deeper nesting than the stack holds counts as inside, which errs on the side of refusing.
-                if (depth < stack.Length) stack[depth] = resource;
-                else resources++;
-                depth++;
-            }
-            else if (c == ')' && depth > 0)
-            {
-                depth--;
-                if (depth >= stack.Length || stack[depth]) resources--;
-            }
+            return _resources > 0;
         }
-        return resources > 0;
     }
 
     private static bool IsResourceFunction(string value, int paren)
@@ -333,7 +411,10 @@ internal static class CssAttr
         return sb.Append('"').ToString();
     }
 
-    /// <summary>The number when the whole value is one CSS number token, without spaces around it, as Chrome requires.</summary>
+    /// <summary>
+    /// The number when the whole value is one number, without spaces around it, as Chrome requires. Chrome reads it as
+    /// a number rather than a CSS token, so a trailing dot ("5.") counts as well.
+    /// </summary>
     private static double? NumberToken(string raw)
     {
         int i = 0, n = raw.Length;
@@ -345,7 +426,7 @@ internal static class CssAttr
             i++;
             int fraction = 0;
             while (i < n && char.IsAsciiDigit(raw[i])) { i++; fraction++; }
-            if (fraction == 0) return null;
+            if (fraction == 0 && digits == 0) return null;
             digits += fraction;
         }
         if (digits == 0) return null;
@@ -377,25 +458,5 @@ internal static class CssAttr
     {
         while (i < s.Length && char.IsWhiteSpace(s[i])) i++;
         return i;
-    }
-
-    private static int MatchingParen(string s, int open)
-    {
-        int depth = 0;
-        char quote = '\0';
-        for (int i = open; i < s.Length; i++)
-        {
-            char c = s[i];
-            if (c == '\\') { i++; continue; }
-            if (quote != '\0')
-            {
-                if (c == quote) quote = '\0';
-                continue;
-            }
-            if (c is '"' or '\'') quote = c;
-            else if (c == '(') depth++;
-            else if (c == ')' && --depth == 0) return i;
-        }
-        return -1;
     }
 }
