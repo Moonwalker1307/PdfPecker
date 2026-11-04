@@ -76,6 +76,13 @@ internal static class Targets
         "content:-pdfpecker-target-pages(url(#a),last)", "content:counter(pages)",
         "<div data-pdf-signature=a style=\"height:1e9px\">", "<span data-pdf-signature>", "data-pdf-signature=\"a.b\"",
         "<td data-pdf-signature=\"\u0000\">", "<div data-pdf-signature=a style=\"display:inline-block;width:0;height:0\">",
+        "zoom:1e9", "zoom:0", "zoom:-1", "zoom:1e-9", "zoom:50%", "<style>@scope (div) to (span) {:scope{zoom:3} p{color:red}}</style>",
+        "<style>@scope (.a) to (:scope > *) {@scope (p) {:scope{display:flex}}}</style>",
+        "position:running(a)", "position:running(header)", "<style>@page{@top-center{content:element(a)}@bottom-left{content:element(a,last-except)}}</style>",
+        "<style>@page{@top-right{content:counter(page,upper-roman) target-counters(attr(href url),list-item,'.')}}</style>",
+        "content:target-counters(attr(href url),a,'.',lower-greek)", "white-space-collapse:break-spaces", "white-space-collapse:preserve-breaks",
+        "box-decoration-break:clone", "hyphens:auto;hyphenate-limit-lines:1", "hyphenate-limit-lines:2147483647", "vector-effect:non-scaling-stroke",
+        "<input type=number min=5 max=1 value=3>", ":in-range", ":out-of-range", "gap:1e9px;row-rule:1px solid;column-rule:1e9px dotted",
     };
 
     private static readonly (string, string)[] HtmlNesters =
@@ -99,12 +106,16 @@ internal static class Targets
         "::first-letter", "initial-letter: 3", "initial-letter: 1e9 999999", "initial-letter: 2 raise",
         "rule: 1px solid red", "column-rule-color: red, repeat(auto, blue, green)", "row-rule-width: repeat(999999999, 1px)",
         "rule-inset: -1e9px / overlap-join", "column-rule-inset-cap-end: -1e9px", "row-rule-inset: 0 -1e30px", "rule-break: intersection", "rule-visibility-items: between", "rule-overlap: column-over-row",
+        "zoom:", "zoom: 1e9", "zoom: 0.0001", "zoom: 1e9%", "@scope (", ") to (", ":scope", "@scope {", "position: running(a)", "content: element(a)",
+        "element(a, first-except)", "@top-center {", "@bottom-right-corner {", "@page :first {", "target-counters(attr(id url), a, \".\")",
+        "counter(page, lower-roman)", "white-space-collapse:", "box-decoration-break: clone", "hyphenate-limit-lines: 1",
     };
 
     private static readonly (string, string)[] CssNesters =
     {
         ("{", "}"), ("(", ")"), ("[", "]"), ("calc(", ")"), ("var(--a, ", ")"), (":is(", ")"), (":not(", ")"), ("@media print {", "}"), ("@supports (a:b) {", "}"),
         ("min(", ")"), ("div ", ""), ("a > ", ""), ("b ~ ", ""), ("linear-gradient(", ")"), ("\"", "\""), ("url(", ")"),
+        ("@scope (div) {", "}"), ("@scope (.a) to (p) {", "}"), ("@page {", "}"),
     };
 
     private static readonly string[] SvgWords =
