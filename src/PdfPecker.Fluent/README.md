@@ -83,6 +83,22 @@ Document.Create(container =>
 - **Merging**: `Document.Merge(invoice1, invoice2, ...)` generates several documents as one PDF or HTML document, such
   as a batch of invoices. Each keeps its own page numbers, totals and section names, or `UseContinuousPageNumbers()`
   numbers the pages through all of them.
+- **Working on existing PDFs**: `DocumentOperation`, with QuestPDF's names, works on any PDF, also ones PdfPecker did
+  not write. `LoadFile` (or `Load` from bytes), then `TakePages` and `MergeFile` choose, reorder and append pages in
+  qpdf's page syntax (`"1-3,z"`, `"r3-r1"`, `"1-10,x4"`, `"1-z:even"`), `OverlayFile` and `UnderlayFile` draw the
+  pages of another PDF over or under chosen pages (a "COPY" stamp, letterhead with a different first page),
+  `AddAttachment` attaches files, and `Encrypt`, `Decrypt` and `Linearize` protect the result or prepare it for Fast
+  Web View, also both at once. `Save` writes a file or stream, and `GeneratePdf` returns the bytes:
+
+  ```csharp
+  DocumentOperation.LoadFile("invoice.pdf")
+      .MergeFile("terms.pdf")
+      .UnderlayFile(new DocumentOperation.LayerConfiguration { FilePath = "letterhead.pdf", SourcePages = "1", RepeatSourcePages = "2" })
+      .AddAttachment(new DocumentOperation.DocumentAttachment { FilePath = "invoice.xml", Relationship = DocumentOperation.DocumentAttachmentRelationship.Alternative })
+      .Encrypt(new DocumentOperation.Encryption256Bit { UserPassword = "secret", AllowModification = false })
+      .Linearize()
+      .Save("invoice-final.pdf");
+  ```
 - **Form fields and footnotes**, which QuestPDF does not have: `TextField` (one line, multiline or password),
   `CheckBox`, `RadioButton`, `ComboBox` and `ListBox` become fillable PDF fields, and `text.Footnote("...")` numbers a
   note and sets it at the bottom of its page. Browsers show footnotes in the text, where `GenerateHtml` puts them.
@@ -160,6 +176,13 @@ Most QuestPDF code ports by changing the `using` lines: `Document.Create`, `Page
   labels and bodies itself.
 - A page number in `Background` or `Foreground` shows the number of the page set's first page on every page; put
   page numbers in the header or footer.
+- `DocumentOperation` encrypts with AES-256 for every `Encrypt` call, also `Encryption40Bit` and `Encryption128Bit`,
+  keeping their permissions, and always encrypts the metadata. An encrypted PDF whose pages change or that is
+  linearized needs `Decrypt()` or an `Encrypt` call, where QuestPDF keeps the old encryption; adding attachments keeps
+  it. An attachment is named by its `AttachmentName` (by default the file name), not by `Key`, and one the loaded PDF
+  already has cannot be replaced. Overlays, underlays, encryption and linearization refuse digitally signed PDFs, whose
+  signatures they would break; attachments keep the signatures valid.
+  `ExtendMetadata` and `RemoveRestrictions` are not available.
 - Not available: `Dynamic`, `Canvas`, the Companion previewer and the `MultiColumn` `Spacer`.
 
 ## Performance
