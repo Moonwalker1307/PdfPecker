@@ -975,4 +975,54 @@ public sealed class LayoutTests
         Assert.DoesNotContain("-", Render(hyphenate: false, "da"), StringComparison.Ordinal);
         Assert.DoesNotContain("-", Render(hyphenate: true, language: null), StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Data_matrix_calls_write_an_image()
+    {
+        Assert.StartsWith("<img", Html.Item(c => c.DataMatrix("PdfPecker")), StringComparison.Ordinal);
+        Assert.StartsWith("<img", Html.Item(c => c.Gs1DataMatrix("(01)09506000134352(10)AB-123")), StringComparison.Ordinal);
+        Assert.Throws<ArgumentException>(() => Html.Item(c => c.Gs1DataMatrix("(01)123")));
+    }
+
+    private static SwissQrBill SwissBill(bool full) => new()
+    {
+        Account = "CH44 3199 9123 0008 8901 2",
+        Creditor = new SwissQrAddress { Name = "Robert <b>Schneider</b> AG", Street = "Rue du Lac", HouseNumber = "1268", PostalCode = "2501", Town = "Biel" },
+        Amount = full ? 1949.75m : null,
+        Debtor = full ? new SwissQrAddress { Name = "Pia Rutschmann", Street = "Marktgasse", HouseNumber = "28", PostalCode = "79539", Town = "Lörrach", Country = "DE" } : null,
+        Reference = "210000000003139471430009017",
+        Message = full ? "Order 15.06.2020" : null,
+    };
+
+    [Fact]
+    public void Swiss_qr_bill_lays_out_the_payment_part_and_receipt()
+    {
+        var html = Html.Of(c => c.SwissQrBill(SwissBill(full: true), SwissQrBillLanguage.German));
+        foreach (var text in new[] { "Empfangsschein", "Zahlteil", "Konto / Zahlbar an", "CH44 3199 9123 0008 8901 2",
+            "21 00000 00003 13947 14300 09017", "1 949.75", "Zusätzliche Informationen", "Order 15.06.2020",
+            "Zahlbar durch", "DE-79539 Lörrach", "Annahmestelle", "Robert &lt;b&gt;Schneider&lt;/b&gt; AG" })
+            Assert.Contains(text, html, StringComparison.Ordinal);
+        Assert.DoesNotContain("(Name/Adresse)", html, StringComparison.Ordinal);
+
+        // Without an amount and a debtor the slip has blank fields with corner marks instead.
+        var blank = Html.Of(c => c.SwissQrBill(SwissBill(full: false)));
+        Assert.Contains("Payable by (name/address)", blank, StringComparison.Ordinal);
+        Assert.DoesNotContain("Additional information", blank, StringComparison.Ordinal);
+
+        // At the foot of an A4 page with no bottom margin it fits on the page, and its text is in the PDF.
+        var pdf = Document.Create(d => d.Page(p =>
+        {
+            p.Size(PageSizes.A4);
+            p.MarginBottom(0);
+            p.Content().Text("Invoice");
+            p.Footer().SwissQrBill(SwissBill(full: true), SwissQrBillLanguage.French);
+        })).GeneratePdf();
+        Assert.Equal(1, PdfPages.Count(pdf));
+        var pdfText = Html.Text(pdf);
+        Assert.Contains("Section paiement", pdfText, StringComparison.Ordinal);
+        Assert.Contains("Point de dépôt", pdfText, StringComparison.Ordinal);
+
+        Assert.Throws<ArgumentException>(() => Html.Of(c => c.SwissQrBill(new SwissQrBill { Account = "CH44 3199 9123 0008 8901 2" })));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Html.Of(c => c.SwissQrBill(SwissBill(full: true), (SwissQrBillLanguage)9)));
+    }
 }
