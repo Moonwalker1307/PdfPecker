@@ -600,7 +600,7 @@ internal sealed partial class StyleResolver
     {
         var v = lower.AsSpan().Trim();
         if (v.SequenceEqual("no-limit")) return -1;
-        if (v.StartsWith('+')) v = v[1..];
+        if (v.Length > 0 && v[0] == '+') v = v[1..];
         if (v.IsEmpty) return null;
         foreach (char c in v)
             if (c is < '0' or > '9') return null;

@@ -322,8 +322,7 @@ public class HyphenationTests
             // Nothing is lost: the words are all still there.
             Assert.Equal(LongWords.Replace(" ", ""), string.Concat(lines.Select(l => l.EndsWith('-') ? l[..^1] : l)).Replace(" ", ""));
         }
-        Assert.True(LimitedLines("-webkit-hyphenate-limit-lines: 1").Count > 0);
-        Assert.Equal(1, Math.Min(1, LongestHyphenRun(LimitedLines("-webkit-hyphenate-limit-lines: 1"))));
+        Assert.True(LongestHyphenRun(LimitedLines("-webkit-hyphenate-limit-lines: 1")) <= 1);
     }
 
     [Fact]
@@ -356,6 +355,34 @@ public class HyphenationTests
             var lines = LimitedLines($"hyphenate-limit-lines: 1; text-wrap: {wrap}", "internationalization characteristically unquestionably misrepresentation");
             Assert.True(LongestHyphenRun(lines) <= 1, wrap + ": " + string.Join(" | ", lines));
         }
+    }
+
+    [Fact]
+    public void Hyphenate_limit_lines_of_the_block_wins_over_an_inline_box()
+    {
+        // The property applies to block containers: a span's own value does not lift the block's limit.
+        var lines = Lines(Layout($"<div lang='en' style='width: 150px; hyphens: auto; font-size: 16px; hyphenate-limit-lines: 0'><span style='hyphenate-limit-lines: no-limit'>{LongWords}</span></div>"));
+        Assert.Equal(0, LongestHyphenRun(lines));
+        lines = Lines(Layout($"<div lang='en' style='width: 150px; hyphens: auto; font-size: 16px; hyphenate-limit-lines: 0; text-wrap: balance'><span style='hyphenate-limit-lines: no-limit'>internationalization characteristically unquestionably misrepresentation</span></div>"));
+        Assert.Equal(0, LongestHyphenRun(lines));
+    }
+
+    [Fact]
+    public void Hyphenate_limit_lines_holds_after_a_first_line_style_and_with_cloned_box_edges()
+    {
+        var first = Lines(Layout($"<style>p::first-line {{ font-weight: bold }}</style><p lang='en' style='margin: 0; width: 150px; hyphens: auto; font-size: 16px; hyphenate-limit-lines: 0'>{LongWords}</p>"));
+        Assert.Equal(0, LongestHyphenRun(first));
+        string cloned = $"<span style='box-decoration-break: clone; padding: 0 2px; border: 1px solid'>{LongWords}</span>";
+        var lines = LimitedLines("hyphenate-limit-lines: 1", cloned);
+        Assert.True(LongestHyphenRun(lines) <= 1, string.Join(" | ", lines));
+    }
+
+    [Fact]
+    public void Hyphenate_limit_lines_leaves_visible_text_on_a_pre_wrap_line()
+    {
+        var lines = LimitedLines("white-space: pre-wrap; hyphenate-limit-lines: 0", "      " + LongWords);
+        Assert.Equal(0, LongestHyphenRun(lines));
+        Assert.All(lines, l => Assert.False(string.IsNullOrWhiteSpace(l), string.Join(" | ", lines)));
     }
 
     [Fact]
