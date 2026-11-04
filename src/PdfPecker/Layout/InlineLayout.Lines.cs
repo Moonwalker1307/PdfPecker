@@ -559,7 +559,7 @@ internal sealed partial class InlineLayout
                     if (it.Image != null)
                     {
                         float ia = AtomicAscent(it, block, baseline - y, descent);
-                        var image = it.Style.ImagePixelated ? it.Image.Pixelated(it.Width, it.Height) : it.Image;
+                        var image = DrawnImages.For(it.Style, it.Image, it.Width, it.Height);
                         _engine.Ops.Add(new ImageOp(xs[i] + it.RelX, baseline - ia + it.RelY, it.Width, it.Height, image) { Tag = it.Tag });
                     }
                     if (it.PageExcess > 0) _engine.Ops.Add(new GroupOp { Reach = xs[i] + it.RelX + it.Width + it.PageExcess });

@@ -135,6 +135,8 @@ internal sealed partial class StyleResolver
             case "visibility": s.Visible = from.Visible; break;
             case "image-orientation": s.ImageOrientationNone = from.ImageOrientationNone; break;
             case "image-rendering": s.ImagePixelated = from.ImagePixelated; break;
+            case "-pdfpecker-image-quality": s.ImageQuality = from.ImageQuality; break;
+            case "-pdfpecker-image-max-resolution": s.ImageMaxDpi = from.ImageMaxDpi; break;
             case "accent-color": s.AccentColor = from.AccentColor; break;
             case "appearance": s.AppearanceNone = from.AppearanceNone; break;
             case "border-top-width": s.BorderTopWidth = from.BorderTopWidth; break;

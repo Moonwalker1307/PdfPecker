@@ -70,6 +70,8 @@ internal sealed partial class ComputedStyle
     public bool EmptyCellsHide { get => _typography.EmptyCellsHide; set => Typography.EmptyCellsHide = value; }
     public bool ImageOrientationNone { get => _typography.ImageOrientationNone; set => Typography.ImageOrientationNone = value; }
     public bool ImagePixelated { get => _typography.ImagePixelated; set => Typography.ImagePixelated = value; }
+    public int ImageQuality { get => _typography.ImageQuality; set => Typography.ImageQuality = value; }
+    public float ImageMaxDpi { get => _typography.ImageMaxDpi; set => Typography.ImageMaxDpi = value; }
     public uint AccentColor { get => _typography.AccentColor; set => Typography.AccentColor = value; }
     public TextEdgeOver TextEdgeOver { get => _typography.TextEdgeOver; set => Typography.TextEdgeOver = value; }
     public TextEdgeUnder TextEdgeUnder { get => _typography.TextEdgeUnder; set => Typography.TextEdgeUnder = value; }
@@ -114,6 +116,8 @@ internal sealed partial class ComputedStyle
         public bool EmptyCellsHide;   // empty-cells: hide (inherited): with separated borders, empty cells paint nothing
         public bool ImageOrientationNone; // image-orientation: none (inherited): photos are drawn as stored, ignoring EXIF
         public bool ImagePixelated;   // image-rendering: pixelated or crisp-edges (inherited): enlarged images keep hard pixel edges
+        public int ImageQuality;      // -pdfpecker-image-quality (inherited): JPEG quality 1 to 100 images are written at; 0 = none
+        public float ImageMaxDpi;     // -pdfpecker-image-max-resolution (inherited), in dpi: images drawn denser are downsampled; 0 = none
         public uint AccentColor;      // accent-color (inherited), the colour of checked check boxes and radio buttons; 0 = auto
         public TextEdgeOver TextEdgeOver;   // text-box-edge, over the text (inherited)
         public TextEdgeUnder TextEdgeUnder; // text-box-edge, under the text (inherited)

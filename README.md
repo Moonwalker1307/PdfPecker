@@ -172,6 +172,10 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   Lines, images and table rows that would cross the end are left out whole.
 - **Content repeated on each page**: `-pdfpecker-repeat: each-page` draws a box again at the top of each later page its
   parent continues on, such as a label in a row beside a text several pages long.
+- **Smaller images while converting**: `-pdfpecker-image-quality: 75` writes images as JPEGs at that quality, and
+  `-pdfpecker-image-max-resolution: 150dpi` downsamples images drawn denser than that, judged by the size each is
+  drawn at. Both are inherited, so `body { ... }` sets them for the document and `none` turns them off for one image;
+  transparency is kept losslessly, and an image is only replaced when the result is smaller.
 - **Markdown**: CommonMark 0.31 and GitHub Flavored Markdown to PDF or HTML, with footnotes, definition lists and YAML
   front matter. [More](https://pdfpecker.net/docs/markdown/)
 - **Fonts**: TrueType, OpenType, WOFF and WOFF2, subset and embedded, with kerning, ligatures, variable fonts and

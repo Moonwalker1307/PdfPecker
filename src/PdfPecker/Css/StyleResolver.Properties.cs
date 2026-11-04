@@ -133,6 +133,8 @@ internal sealed partial class StyleResolver
             // Angles are deprecated and ignored, as in Chrome, so only none turns EXIF orientation off.
             case "image-orientation": s.ImageOrientationNone = d.Lower == "none"; break;
             case "image-rendering": if (ParseImageRendering(d.Lower) is { } pixelated) s.ImagePixelated = pixelated; break;
+            case "-pdfpecker-image-quality": if (ParseImageQuality(d.Lower) is { } quality) s.ImageQuality = quality; break;
+            case "-pdfpecker-image-max-resolution": if (ParseImageMaxResolution(d.Lower) is { } dpi) s.ImageMaxDpi = dpi; break;
             case "accent-color":
                 if (d.Lower == "auto") s.AccentColor = 0;
                 else if (CssColor.TryParse(d.Value, s.Color, out var accent)) s.AccentColor = accent;
