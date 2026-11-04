@@ -249,9 +249,18 @@ internal static class CssBackground
         var sb = new System.Text.StringBuilder(s.Length + 4);
         int depth = 0;
         char quote = '\0';
+        bool escaped = false;
         foreach (char c in s)
         {
-            if (quote != '\0') { if (c == quote) quote = '\0'; sb.Append(c); continue; }
+            if (quote != '\0')
+            {
+                // A backslash escapes the next character, so an escaped quote does not end the string.
+                if (escaped) escaped = false;
+                else if (c == '\\') escaped = true;
+                else if (c == quote) quote = '\0';
+                sb.Append(c);
+                continue;
+            }
             if (c == '"' || c == '\'') quote = c;
             else if (c == '(') depth++;
             else if (c == ')') depth--;

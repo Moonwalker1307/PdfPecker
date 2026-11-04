@@ -349,8 +349,57 @@ public class CssAttrTests
     [Fact]
     public void Untyped_attr_strings_escape_quotes_and_backslashes()
     {
-        Assert.Equal("\"a\\\"b\\\\c\"", CssAttr.Quote("a\"b\\c"));
+        Assert.Equal("\"a\\22 b\\5c c\"", CssAttr.Quote("a\"b\\c"));
         Assert.Equal("\"x\\a y\"", CssAttr.Quote("x\ny"));
+    }
+
+    // From an adversarial review: attribute text that ends a string early where a reader ignored escapes, one url()
+    // standing in for another, and text joined onto a url() token. Only the S... and CTRL files the style sheet itself
+    // names may be fetched, and S5 only as itself.
+    [Theory]
+    [InlineData("background-image: attr(a type(*))", "a='\"x\\\" url(K1.png) \"'")]
+    [InlineData("background-image: attr(a type(*))", "a=\"'x\\' url(K2.png) '\"")]
+    [InlineData("background-image: linear-gradient(red,red), attr(a type(*))", "a='\"x\\\", url(K3.png), \"'")]
+    [InlineData("background: attr(a type(*))", "a='\"x\\\" url(K4.png) \"'")]
+    [InlineData("list-style-image: attr(a type(*))", "a='\"x\\\" url(K5.png) \"'")]
+    [InlineData("border-image: attr(a type(*)) 30", "a='\"x\\\" url(K6.png) \"'")]
+    [InlineData("mask-image: attr(a type(*))", "a='\"x\\\" url(K7.png) \"'")]
+    [InlineData("content: attr(a type(*))", "a='\"x\\\" url(K8.png) \"'")]
+    [InlineData("background-image: attr(a type(*))", "a='\"x\\\\\" url(K9.png)'")]
+    [InlineData("background-image: attr(k type(*))url(S1.png), attr(b type(*))attr(c type(*))", "k='x' b='url' c='(W1.png)'")]
+    [InlineData("background-image: attr(k type(*))url(S2.png), attr(b type(*))attr(c type(*))", "k='-' b='url' c='(W2.png)'")]
+    [InlineData("--u: url(S3.png); background-image: attr(k type(*))var(--u), attr(b type(*))attr(c type(*))", "k='x' b='url' c='(W3.png)'")]
+    [InlineData("background-image: url(S4.png), attr(b type(*))attr(c type(*))", "b='url' c='(W4.png)'")]
+    [InlineData("background-image: url(S5.png)attr(c type(*))", "c='(W5.png)'")]
+    [InlineData("background-image: url(attr(c type(*)))", "c='W6.png'")]
+    [InlineData("background-image: url(S7.png attr(c type(*)))", "c='W7'")]
+    [InlineData("background-image: image-set(\"S8.png\" attr(c type(*)))", "c='1x, \"W8.png\" 2x'")]
+    [InlineData("background-image: image-set(attr(c type(*)) \"S9.png\" 1x)", "c='\"W9.png\" 1x,'")]
+    [InlineData("background-image: url(\"S10.png\") attr(c type(*))", "c='url(W10.png)'")]
+    [InlineData("background-image: var(--m, attr(c type(*)))", "c='url(W11.png)'")]
+    [InlineData("cursor: attr(c type(*)), auto", "c='url(W13.png)'")]
+    [InlineData("background-image: attr(c type(<custom-ident>))(S16.png)", "c='url'")]
+    [InlineData("background-image: attr(c type(*))", "c='url(W17.png'")]
+    [InlineData("background: attr(a)", "a='x\" url(U1.png) \"'")]
+    [InlineData("background: attr(a raw-string)", "a='x\" url(U2.png) \"'")]
+    [InlineData("background: attr(a type(<string>))", "a='\"x\\\" url(U3.png) \"'")]
+    [InlineData("background: red attr(a)", "a='x\" url(U4.png) \"'")]
+    [InlineData("background: attr(a type(*)), white", "a='\"x\\\" url(U5.png) \"'")]
+    [InlineData("background-image: attr(a)", "a='x\" url(U6.png) \"'")]
+    [InlineData("list-style: attr(a)", "a='x\" url(U7.png) \"'")]
+    [InlineData("--q: attr(a); background: var(--q)", "a='x\" url(U8.png) \"'")]
+    [InlineData("background: var(--m, attr(a))", "a='x\" url(U9.png) \"'")]
+    [InlineData("background: \"lit\\\" url(A1.png) \"", "a='x'")]
+    public void Escaped_quotes_and_neighbouring_urls_load_nothing_from_attributes(string declaration, string attributes)
+    {
+        var fetched = new List<string>();
+        var html = $"<!doctype html><style>div{{width:50px;height:50px;display:list-item;{declaration}}} div::before{{{declaration}}}"
+                   + $" p{{background-image:url(CTRL.png)}}</style><div {attributes}>x</div><p>p</p>";
+        var options = new PdfOptions { ResourceResolver = u => { lock (fetched) fetched.Add(u); return null; } };
+        HtmlToPdf.Convert(html, options);
+        Assert.Contains(fetched, u => u.Contains("CTRL.png", StringComparison.Ordinal));
+        foreach (var u in fetched)
+            Assert.True(u.EndsWith("CTRL.png", StringComparison.Ordinal) || System.Text.RegularExpressions.Regex.IsMatch(u, @"(^|/)S\d+\.png$"), u);
     }
 
     [Fact]

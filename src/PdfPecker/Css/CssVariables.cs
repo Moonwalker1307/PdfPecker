@@ -47,6 +47,7 @@ internal static class CssVariables
         var resources = new CssAttr.ResourceScan();
         int last = 0, ownResources = 0;
         bool anyTaint = false;
+        List<(int Start, int End)>? taintedRanges = null; // the parts of the result that came from attributes
         while (i >= 0)
         {
             int close;
@@ -111,6 +112,11 @@ internal static class CssVariables
             {
                 if (own == null && (resources.Inside(value, i) || CssAttr.ContainsResource(replacement))) return null;
                 tainted = anyTaint = true;
+                if (own == null)
+                {
+                    int start = sb.Length + i - last;
+                    (taintedRanges ??= []).Add((start, start + replacement.Length));
+                }
             }
             else ownResources += CssAttr.CountResources(replacement, 0, replacement.Length);
             ownResources += CssAttr.CountResources(value, last, i);
@@ -125,8 +131,11 @@ internal static class CssVariables
         // Pieces checked one by one can still join into a resource function (attr() giving "url" next to one giving
         // "(x.png)"), which Chrome never sees because it keeps token boundaries. So once text from an attribute is in the
         // value, it may hold no more resource functions than the pieces that did not come from attributes brought.
+        // Counting is not enough on its own, as one url() can stand in for another, so the parts that came from
+        // attributes must also stay clear of every resource function: its name, arguments and the rest of its token.
         if (anyTaint && own == null
-            && CssAttr.CountResources(result, 0, result.Length) > ownResources + CssAttr.CountResources(value, last, value.Length)) return null;
+            && (CssAttr.CountResources(result, 0, result.Length) > ownResources + CssAttr.CountResources(value, last, value.Length)
+                || taintedRanges != null && CssAttr.ResourceTouches(result, taintedRanges))) return null;
         return result;
     }
 

@@ -233,34 +233,47 @@ internal static class CssAttr
             case AttrType.Unit:
                 return IsUnit(call.Argument!) && NumberToken(raw) is { } u ? Format(u) + call.Argument : null;
             default:
-                return Normalized(raw).Trim();
+                return Normalized(raw)?.Trim();
         }
     }
 
     /// <summary>
     /// The value of a type() as Chrome's tokenizer reads it: comments outside strings become spaces, and escapes outside
     /// strings that stand for a letter, a digit or another name character become that character ("1\70 x" is 1px).
-    /// Other escapes stay as they are, so an escaped ";" or bracket still fails the checks that follow.
+    /// Strings are written again as <see cref="Quote"/> writes them, so no reader, whether it knows escapes or not, can
+    /// take a string to end elsewhere than this one did. Null for a string left open or another escape outside strings.
     /// </summary>
-    private static string Normalized(string raw)
+    private static string? Normalized(string raw)
     {
-        if (raw.IndexOf('\\') < 0 && raw.IndexOf("/*", StringComparison.Ordinal) < 0) return raw;
+        if (raw.AsSpan().IndexOfAny("\\\"'") < 0 && raw.IndexOf("/*", StringComparison.Ordinal) < 0) return raw;
         var sb = new StringBuilder(raw.Length);
-        char quote = '\0';
+        StringBuilder? text = null;
         for (int i = 0; i < raw.Length; i++)
         {
             char c = raw[i];
-            if (quote != '\0')
-            {
-                sb.Append(c);
-                if (c == '\\' && i + 1 < raw.Length) sb.Append(raw[++i]);
-                else if (c == quote) quote = '\0';
-                continue;
-            }
             if (c is '"' or '\'')
             {
-                quote = c;
-                sb.Append(c);
+                text = (text ?? new StringBuilder()).Clear();
+                int k = i + 1;
+                bool closed = false;
+                while (k < raw.Length)
+                {
+                    char d = raw[k++];
+                    if (d == c) { closed = true; break; }
+                    if (d is '\n' or '\r' or '\f') return null;
+                    if (d != '\\') { text.Append(d); continue; }
+                    if (k >= raw.Length) break;
+                    if (raw[k] is '\n' or '\r' or '\f') { k++; continue; } // an escaped newline continues the string
+                    if (!Uri.IsHexDigit(raw[k])) { text.Append(raw[k++]); continue; }
+                    int start = k;
+                    while (k < raw.Length && k - start < 6 && Uri.IsHexDigit(raw[k])) k++;
+                    int code = int.Parse(raw.AsSpan(start, k - start), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+                    if (k < raw.Length && char.IsWhiteSpace(raw[k])) k++;
+                    text.Append(code == 0 || code > 0x10FFFF || code is >= 0xD800 and <= 0xDFFF ? "�" : char.ConvertFromUtf32(code));
+                }
+                if (!closed) return null;
+                sb.Append(Quote(text.ToString()));
+                i = k - 1;
             }
             else if (c == '/' && i + 1 < raw.Length && raw[i + 1] == '*')
             {
@@ -268,8 +281,9 @@ internal static class CssAttr
                 i = end < 0 ? raw.Length : end + 1;
                 sb.Append(' ');
             }
-            else if (c == '\\' && i + 1 < raw.Length)
+            else if (c == '\\')
             {
+                if (i + 1 >= raw.Length) return null;
                 int k = i + 1, code;
                 if (Uri.IsHexDigit(raw[k]))
                 {
@@ -278,12 +292,9 @@ internal static class CssAttr
                     if (k < raw.Length && char.IsWhiteSpace(raw[k])) k++;
                 }
                 else code = raw[k++];
-                if (code < 0x10000 && IsNameChar((char)code) && !char.IsSurrogate((char)code))
-                {
-                    sb.Append((char)code);
-                    i = k - 1;
-                }
-                else sb.Append(c);
+                if (code >= 0x10000 || !IsNameChar((char)code) || char.IsSurrogate((char)code)) return null;
+                sb.Append((char)code);
+                i = k - 1;
             }
             else sb.Append(c);
         }
@@ -389,16 +400,82 @@ internal static class CssAttr
         }
     }
 
+    /// <summary>
+    /// Whether the parenthesis opens a resource function. Any name that ends in one counts ("xurl(" too): readers
+    /// differ in where they take a function name to start, and refusing too much is the safe side.
+    /// </summary>
     private static bool IsResourceFunction(string value, int paren, int from = 0)
     {
-        // The longest name is -webkit-cross-fade; a longer run of name characters is some other function.
-        int start = paren;
-        while (start > from && IsNameChar(value[start - 1]) && paren - start <= 18) start--;
-        if (start > from && IsNameChar(value[start - 1])) return false;
-        var name = value.AsSpan(start, paren - start);
+        var before = value.AsSpan(from, paren - from);
         foreach (var f in ResourceFunctions)
-            if (name.Equals(f, StringComparison.OrdinalIgnoreCase)) return true;
+            if (before.EndsWith(f, StringComparison.OrdinalIgnoreCase)) return true;
         return false;
+    }
+
+    /// <summary>
+    /// Whether a part of <paramref name="value"/> in <paramref name="ranges"/> (sorted, apart) touches the token of a
+    /// resource function: the text from the separator before its name (a space, a comma or an opening parenthesis) to
+    /// the separator after its closing parenthesis. Readers take a url() token as far as that, so text from an attribute
+    /// next to one can change the address even when it stays outside the parentheses.
+    /// </summary>
+    public static bool ResourceTouches(string value, List<(int Start, int End)> ranges)
+    {
+        const int MaxLevels = 64;
+        Span<int> tokenStart = stackalloc int[MaxLevels];
+        Span<bool> resource = stackalloc bool[MaxLevels];
+        int depth = 0;
+        tokenStart[0] = 0;
+        resource[0] = false;
+        char quote = '\0';
+        for (int i = 0; i <= value.Length; i++)
+        {
+            char c = i < value.Length ? value[i] : ' ';
+            if (quote != '\0')
+            {
+                if (c == '\\') i++;
+                else if (c == quote) quote = '\0';
+                if (i < value.Length) continue;
+                c = ' ';
+            }
+            if (c is '"' or '\'') { quote = c; continue; }
+            if (c == '(')
+            {
+                if (depth < MaxLevels && IsResourceFunction(value, i)) resource[depth] = true;
+                depth++;
+                // Nesting deeper than the stack is refused when it holds text from an attribute at all.
+                if (depth >= MaxLevels) return true;
+                tokenStart[depth] = i + 1;
+                resource[depth] = false;
+            }
+            else if (char.IsWhiteSpace(c) || c is ',' or ')' || i == value.Length)
+            {
+                if (resource[depth] && Overlaps(ranges, tokenStart[depth], i)) return true;
+                if (i == value.Length) break;
+                if (c == ')' && depth > 0)
+                {
+                    // The closing parenthesis ends the inner level's token, but not the token of the function it closes.
+                    depth--;
+                    continue;
+                }
+                resource[depth] = false;
+                tokenStart[depth] = i + 1;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>Whether a range of <paramref name="ranges"/> (sorted, apart) overlaps [start, end).</summary>
+    private static bool Overlaps(List<(int Start, int End)> ranges, int start, int end)
+    {
+        int lo = 0, hi = ranges.Count - 1;
+        // The first range that ends after start; it overlaps when it begins before end.
+        while (lo <= hi)
+        {
+            int mid = (lo + hi) >>> 1;
+            if (ranges[mid].End <= start) lo = mid + 1;
+            else hi = mid - 1;
+        }
+        return lo < ranges.Count && ranges[lo].Start < end;
     }
 
     /// <summary>
@@ -431,7 +508,10 @@ internal static class CssAttr
         var sb = new StringBuilder(raw.Length + 2).Append('"');
         foreach (char c in raw)
         {
-            if (c is '"' or '\\') sb.Append('\\').Append(c);
+            // Quotes and backslashes are hex escapes, so that even a reader that does not know escapes cannot end the
+            // string early and read the rest of an attribute as CSS.
+            if (c == '"') sb.Append("\\22 ");
+            else if (c == '\\') sb.Append("\\5c ");
             else if (c == '\0') sb.Append('�');
             else if (c < 0x20 || c == 0x7F) sb.Append('\\').Append(((int)c).ToString("x", CultureInfo.InvariantCulture)).Append(' ');
             else sb.Append(c);
