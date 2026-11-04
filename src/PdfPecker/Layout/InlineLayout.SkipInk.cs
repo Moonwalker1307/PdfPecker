@@ -59,7 +59,8 @@ internal sealed partial class InlineLayout
     /// </summary>
     internal interface IGlyphVisitor
     {
-        void Glyph(FontProgram program, int gid, string text, int start, float x, float dy, float skew);
+        // scale: the face's size-adjust, by which the glyph is drawn larger or smaller than the text's font size.
+        void Glyph(FontProgram program, int gid, string text, int start, float x, float dy, float skew, float scale);
         void Glyph(StandardFont font, char c, string text, int start, float x);
     }
 
@@ -85,14 +86,16 @@ internal sealed partial class InlineLayout
                     bool positioned = font.Shape(str, run.Start, run.Length, _inkGlyphs, text.Rtl);
                     if (text.Rtl) _inkGlyphs.Reverse();
                     bool kern = !positioned && font.HasKerning;
+                    float glyphScale = font.SizeAdjust == 1 ? scale : scale * font.SizeAdjust;
                     float skew = font.SyntheticItalic ? SyntheticItalicSkew : 0;
                     int previous = -1;
                     foreach (var g in _inkGlyphs)
                     {
-                        if (kern && previous >= 0) pen += (text.Rtl ? font.Program.Kern1000(g.Gid, previous) : font.Program.Kern1000(previous, g.Gid)) * scale;
+                        if (kern && previous >= 0) pen += (text.Rtl ? font.Program.Kern1000(g.Gid, previous) : font.Program.Kern1000(previous, g.Gid)) * glyphScale;
                         previous = g.Gid;
-                        visitor.Glyph(font.Program, g.Gid, str, g.Start, pen + (positioned ? g.Dx * scale : 0), positioned ? g.Dy * scale : 0, skew);
-                        pen += (positioned ? g.Advance : font.Program.Advance1000(g.Gid)) * scale + text.CharSpacing
+                        visitor.Glyph(font.Program, g.Gid, str, g.Start, pen + (positioned ? g.Dx * glyphScale : 0), positioned ? g.Dy * glyphScale : 0, skew,
+                            font.SizeAdjust);
+                        pen += (positioned ? g.Advance : font.Program.Advance1000(g.Gid)) * glyphScale + text.CharSpacing
                             + (g.Length > 0 && str[g.Start] == ' ' ? text.WordSpacing : 0);
                     }
                     break;
@@ -122,11 +125,19 @@ internal sealed partial class InlineLayout
         public List<(float Left, float Right)> Gaps;
         public float Size, Dilation, BandLow, BandHigh;
 
-        public readonly void Glyph(FontProgram program, int gid, string text, int start, float x, float dy, float skew)
+        public readonly void Glyph(FontProgram program, int gid, string text, int start, float x, float dy, float skew, float scale)
         {
-            if (SkipsInk(Style, text, start)
-                && GlyphInk.Intercept(program, gid, BandLow - dy / Size, BandHigh - dy / Size, skew, out float left, out float right))
-                Gaps.Add((x + left * Size - Dilation, x + right * Size + Dilation));
+            if (!SkipsInk(Style, text, start)) return;
+            float low = BandLow - dy / Size, high = BandHigh - dy / Size, size = Size;
+            if (scale != 1)
+            {
+                // The band is in ems of the font size, and the outline in ems of the glyphs drawn at size-adjust times it.
+                low /= scale;
+                high /= scale;
+                size *= scale;
+            }
+            if (GlyphInk.Intercept(program, gid, low, high, skew, out float left, out float right))
+                Gaps.Add((x + left * size - Dilation, x + right * size + Dilation));
         }
 
         public readonly void Glyph(StandardFont font, char c, string text, int start, float x)

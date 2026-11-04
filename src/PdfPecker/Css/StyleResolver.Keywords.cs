@@ -190,6 +190,27 @@ internal sealed partial class StyleResolver
             case "order": s.Order = from.Order; break;
             case "row-gap": s.RowGap = from.RowGap; break;
             case "column-gap": s.ColumnGap = from.ColumnGap; break;
+            case "column-rule-style":
+            case "column-rule-width":
+            case "column-rule-color":
+            case "row-rule-style":
+            case "row-rule-width":
+            case "row-rule-color":
+            case "column-rule-break":
+            case "row-rule-break":
+            case "column-rule-visibility-items":
+            case "row-rule-visibility-items":
+            case "rule-overlap":
+            case "column-rule-inset-cap-start":
+            case "column-rule-inset-cap-end":
+            case "column-rule-inset-junction-start":
+            case "column-rule-inset-junction-end":
+            case "row-rule-inset-cap-start":
+            case "row-rule-inset-cap-end":
+            case "row-rule-inset-junction-start":
+            case "row-rule-inset-junction-end":
+                CopyGapRule(s, from, prop);
+                break;
             default: return false;
         }
         return true;

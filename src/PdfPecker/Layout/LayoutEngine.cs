@@ -190,7 +190,7 @@ internal sealed partial class LayoutEngine
         {
             float pageEnd = _grid.Start(p + 1);
             // The page's footnote area takes the bottom of its flow.
-            float flowEnd = _footnoteReserve.Count > 0 || _edgeReserve.Count > 0 || _splitRow != null ? FlowEnd(p) : pageEnd;
+            float flowEnd = HasFlowRoom ? FlowEnd(p) : pageEnd;
             if (y + h <= flowEnd + Eps) return y;
             _columnNotes?.Break(p, y, y + h - flowEnd);
             y = FlowStart(p + 1);
@@ -219,7 +219,10 @@ internal sealed partial class LayoutEngine
 
     internal bool CrossesPage(float top, float bottom) => _paginate && bottom - top > Eps
         && (PageOf(top) != PageOf(bottom - 0.5f)
-            || (_footnoteReserve.Count > 0 || _edgeReserve.Count > 0 || _splitRow != null) && bottom > FlowEnd(PageOf(top)) + Eps);
+            || HasFlowRoom && bottom > FlowEnd(PageOf(top)) + Eps);
+
+    /// <summary>Whether something keeps room at the end of some page, so that content there ends before the page does.</summary>
+    private bool HasFlowRoom => _footnoteReserve.Count > 0 || _edgeReserve.Count > 0 || _splitRow != null || _cloneRoom != null;
 
     internal void Truncate(int count, bool keepFloats = false)
     {
@@ -1425,6 +1428,8 @@ internal sealed partial class LayoutEngine
         CbHeights? childCb = null;
         // continue: discard ends the content at this y (see DiscardEdge); infinity for other boxes.
         float discardEnd = float.PositiveInfinity;
+        // box-decoration-break: clone keeps room for the box's edges in each fragment its content goes on to.
+        CloneRoom? cloneRoom = null;
         if (isImage || isSvg)
         {
             if (_paginate)
@@ -1469,6 +1474,8 @@ internal sealed partial class LayoutEngine
             int discardPage = -1;
             float reserveBefore = 0;
             if (s.ContinueDiscard) discardEnd = DiscardEdge(cy, definiteH ?? MaxContentHeight(s, sizing, cbH), pb + bb, out discardPage, out reserveBefore);
+            if (s.BoxDecorationClone && ClonesFragments(e, replaced: false) && (cloneRoom = CloneRoomFor(cy, bt + pt, pb + bb)) != null)
+                _cloneRoom = cloneRoom;
             try
             {
                 contentBottom = s.ScaleToFit && FitHeight(e, definiteH, MaxContentHeight(s, sizing, cbH)) is float fitH
@@ -1477,6 +1484,7 @@ internal sealed partial class LayoutEngine
             }
             finally
             {
+                if (cloneRoom != null) _cloneRoom = cloneRoom.Outer;
                 if (legend != null) legend.Detached = false;
                 if (discardPage >= 0)
                 {
@@ -1493,7 +1501,8 @@ internal sealed partial class LayoutEngine
                 // Chrome: the box's bottom edge starts the next page, and a document that ends in a tall margin makes
                 // no blank pages.
                 int page = PageOf(contentBottom - _flowTrailing.Value);
-                if (PageOf(contentBottom - 0.5f) > page) contentBottom = FlowStart(page + 1);
+                // A cloned box ends on that page instead, its bottom edge in the room kept for it there.
+                if (PageOf(contentBottom - 0.5f) > page) contentBottom = cloneRoom != null ? FlowEnd(page) - cloneRoom.Foot : FlowStart(page + 1);
             }
             if (outerFloats != null) contentBottom = LeaveFormattingContext(outerFloats, contentBottom);
             _absorbTop = false;
@@ -1573,9 +1582,21 @@ internal sealed partial class LayoutEngine
         // A box taller than its content is that height on the pages it is split across, under a header repeated over a
         // split table row and above a footer there.
         if (_splitRow != null && contentH > contentBottom - cy + Eps) bottom = PastSplitRowRoom(y, bottom);
+        // A cloned box whose height is not its content's: the height goes on past the room for its edges at each break.
+        if (cloneRoom != null && contentH != contentBottom - cy) bottom = PastCloneRoom(cloneRoom, cy, contentH) + pb + bb;
+        // So does a box inside a cloned one that is taller than its content, such as one with a height of its own.
+        else if (InCloneRoom && contentH > contentBottom - cy + Eps) bottom = PastCloneRoom(null, y, bottom - y);
         // A legend taller than the top border moves the border down to its middle, and the background with it.
         float paintTop = y + borderOutset;
-        if (pages != null && !SameOnPages(pages, y, bottom)) PaintOnPages(group, s, pages, paintTop, bottom, borderGap: borderGap);
+        // A cloned box that keeps no room for its edges, as they would take too much of a page, is sliced: its content
+        // goes on where the repeated edges would be painted.
+        if (s.BoxDecorationClone && ClonesFragments(e, isImage || isSvg) && (cloneRoom != null || bt + pt + pb + bb <= Eps)
+            && PaintClonedFragments(group, s, pages, bx, paintTop, used, bottom, availW)
+            || InCloneRoom && s.Visible && PaintSlicedInClone(group, s, pages, bx, paintTop, used, bottom, availW, borderGap))
+        {
+            // Painted fragment by fragment.
+        }
+        else if (pages != null && !SameOnPages(pages, y, bottom)) PaintOnPages(group, s, pages, paintTop, bottom, borderGap: borderGap);
         else BoxPainter.Paint(group, s, bx, paintTop, used, bottom - paintTop, _images, availW, borderGap: borderGap);
         if (BoxPainter.ClipsToText(s)) ClipBackgroundToText(group, opsStart + 1);
         if (e.Control is { } control) FinishControl(e, control, opsStart + 1, bx, y, used, bottom - y, contentBottom - cy, contentH);

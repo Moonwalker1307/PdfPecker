@@ -758,6 +758,22 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Deeply_nested_svg_transform_boxes_are_worked_out_once_per_element()
+    {
+        // Each element with a transform-box needs the bounds of what it holds, which include those of its descendants
+        // with a transform-box: without a cache the work doubled with every level, and a second drawing after the
+        // nested one was left out because the shared budget was gone.
+        const int depth = 400;
+        string nested = Repeat("<g transform='translate(1 0)'>", depth) + "<rect width='5' height='5' fill='red'/>" + Repeat("</g>", depth);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var pdf = Bounded("<style>svg * { transform-box: fill-box; transform-origin: center }</style>"
+            + $"<svg width='100' height='100'>{nested}</svg><svg width='20' height='20'><rect width='20' height='20' fill='blue'/></svg>",
+            new PdfOptions { Compress = false });
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10), $"Took {sw.Elapsed}");
+        Assert.Contains("0 0 1 rg", System.Text.Encoding.Latin1.GetString(pdf)); // the second drawing is still there
+    }
+
+    [Fact]
     public void Svg_use_references_cannot_expand_exponentially()
     {
         var sb = new StringBuilder("<svg width=100 height=100><defs><g id=g0><rect width=1 height=1/></g>");

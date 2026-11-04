@@ -84,6 +84,66 @@ public class LinearizationTests
         AssertSameRendering(HtmlToPdf.Convert(Html, options), linear, "open");
     }
 
+    [Fact]
+    public void Existing_files_are_linearized_and_encrypted_in_one_pass()
+    {
+        var source = PdfMerger.Merge(HtmlToPdf.Convert(Html, Options(false)), Fixture("third-party/libreoffice.pdf"));
+        int pages = PdfRenderer.Open(source).PageCount;
+        var security = new PdfSecurity { UserPassword = "open", OwnerPassword = "admin", Permissions = PdfPermissions.Print | PdfPermissions.ExtractForAccessibility };
+        var linear = PdfLinearizer.Linearize(source, security, password: null);
+        AssertLinearized(linear, pages, hintStreamEncrypted: true);
+        Assert.True(PdfProtector.IsEncrypted(linear));
+        Assert.Throws<PdfPasswordException>(() => PdfText.Extract(linear));
+        Assert.Equal(PdfText.Extract(source), PdfText.Extract(linear, new PdfTextOptions { Password = "open" }));
+        AssertSameRendering(source, linear, "open");
+        Assert.Equal(PdfText.Extract(source), PdfText.Extract(linear, new PdfTextOptions { Password = "admin" }));
+
+        // An encrypted input is opened with its password: given new protection, or written unencrypted without one.
+        var reprotected = PdfLinearizer.Linearize(linear, new PdfSecurity { UserPassword = "new" }, "admin");
+        AssertLinearized(reprotected, pages, hintStreamEncrypted: true);
+        Assert.Throws<PdfPasswordException>(() => PdfText.Extract(reprotected, new PdfTextOptions { Password = "open" }));
+        AssertSameRendering(source, reprotected, "new");
+        var plain = PdfLinearizer.Linearize(linear, null, "open");
+        Assert.False(PdfProtector.IsEncrypted(plain));
+        AssertLinearized(plain, pages);
+        AssertSameRendering(source, plain);
+        Assert.Throws<PdfPasswordException>(() => PdfLinearizer.Linearize(linear, null, "wrong"));
+
+        // Without encryption the result is the plain overload's, and the stream overload writes the same.
+        Assert.Equal(PdfLinearizer.Linearize(source), PdfLinearizer.Linearize(source, null, null));
+        using var output = new MemoryStream();
+        PdfLinearizer.Linearize(new MemoryStream(linear), output, null, "open");
+        Assert.Equal(plain, output.ToArray());
+    }
+
+    [Fact]
+    public void Encrypted_linearization_refuses_signed_pdfa_and_unreadable_pdfua_files()
+    {
+        var security = new PdfSecurity { UserPassword = "open" };
+        using var key = RSA.Create(2048);
+        var req = new CertificateRequest("CN=Test Signer", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        using var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
+        var signed = PdfSigner.Sign(HtmlToPdf.Convert(Html, Options(false)), new PdfSignatureOptions(cert));
+        Assert.Contains("signed", Assert.Throws<ArgumentException>(() => PdfLinearizer.Linearize(signed, security, null)).Message);
+
+        var pdfa = Options(false);
+        pdfa.Conformance = PdfConformance.PdfA2b;
+        var archived = HtmlToPdf.Convert(Html, pdfa);
+        Assert.Contains("PDF/A", Assert.Throws<ArgumentException>(() => PdfLinearizer.Linearize(archived, security, null)).Message);
+        AssertLinearized(PdfLinearizer.Linearize(archived, null, null), pages: 3);
+
+        var pdfua = Options(false);
+        pdfua.Accessibility = PdfAccessibility.PdfUA1;
+        var accessible = HtmlToPdf.Convert(Html, pdfua);
+        security.Permissions = PdfPermissions.Print;
+        Assert.Contains("PDF/UA", Assert.Throws<ArgumentException>(() => PdfLinearizer.Linearize(accessible, security, null)).Message);
+        Assert.Throws<InvalidDataException>(() => PdfLinearizer.Linearize(Encoding.ASCII.GetBytes("not a pdf at all"), security, null));
+        Assert.Throws<ArgumentNullException>(() => PdfLinearizer.Linearize((byte[])null!, security, null));
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        Assert.Throws<OperationCanceledException>(() => PdfLinearizer.Linearize(accessible, null, null, cancelled.Token));
+    }
+
     [Theory]
     [InlineData(PdfConformance.PdfA2b, PdfAccessibility.None, "%PDF-1.7")]
     [InlineData(PdfConformance.None, PdfAccessibility.PdfUA1, "%PDF-1.7")]

@@ -301,7 +301,9 @@ internal sealed partial class PdfDocumentWriter
     private sealed class FixedBlock : DrawOp
     {
         public readonly List<Placed> Items;
-        public FixedBlock(List<Placed> items) => Items = items;
+        /// <summary>The fixed box's painting order among the root's layers: below 0 for a negative z-index.</summary>
+        public readonly float Order;
+        public FixedBlock(List<Placed> items, float order) { Items = items; Order = order; }
         public override void Offset(float dx, float dy) => throw new NotSupportedException();
     }
 

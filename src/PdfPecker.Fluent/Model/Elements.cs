@@ -34,6 +34,9 @@ internal sealed class TableCell : Container, ITableCellContainer
     public int? Column { get; set; }
     public int RowSpan { get; set; } = 1;
     public int ColumnSpan { get; set; } = 1;
+
+    /// <summary>Whether the cell is the header of its row (SemanticHorizontalHeader).</summary>
+    public bool RowHeader { get; set; }
 }
 
 internal enum DecoratorKind
@@ -336,7 +339,8 @@ internal sealed class PageSet
     public float MarginLeft { get; set; }
     public Color? Background { get; set; }
     public TextStyle Style { get; set; } = TextStyle.Default;
-    public bool RightToLeft { get; set; }
+    /// <summary>The page set's direction; null takes the document's <see cref="DocumentSettings.ContentDirection"/>.</summary>
+    public bool? RightToLeft { get; set; }
     public Container Header { get; } = new();
     public Container Content { get; } = new();
     public Container Footer { get; } = new();
