@@ -43,10 +43,12 @@ internal sealed class GlyphSubset
             Glyphs.Add(gid);
             Unicode.Add(codePoint);
         }
-        else if (gid != 0 && !HasText(id))
+        else if (gid != 0 && Unicode[Index(id)] == 0)
         {
-            // The glyph was first drawn as an extra glyph of a shaped cluster, which carries no characters of its own;
-            // its own character is the better mapping.
+            // The glyph was first drawn for other characters, as an extra glyph of a shaped cluster or as a glyph that
+            // shaping substituted, such as the multiplication sign that contextual alternates draw for an x between
+            // digits. Its own character is the better mapping: the glyph drawn for it directly must copy as itself, and
+            // the substituted uses copy as their characters through /ActualText (see ActualText).
             int index = Index(id);
             Unicode[index] = codePoint;
             _texts?.Remove(index);
@@ -95,6 +97,39 @@ internal sealed class GlyphSubset
         Unicode.Add(0);
         (_texts ??= new())[Glyphs.Count - 1] = mapped;
         return id;
+    }
+
+    /// <summary>
+    /// The characters that glyph k of shaped text stands for, when they differ from what its CID maps to; otherwise
+    /// null. A CMap maps each glyph once, but shaping can draw one glyph for different characters: Inter's contextual
+    /// alternates draw both the x and the multiplication sign between digits with one glyph, and that sign's own glyph
+    /// can also be drawn directly (see <see cref="Cid(int)"/>). The writer shows such a glyph in a span with these
+    /// characters as /ActualText, so that every use copies as what it stands for.
+    /// </summary>
+    public string? ActualText(List<ShapedGlyph> glyphs, int k, string text, int cid)
+    {
+        var g = glyphs[k];
+        if (cid == 0 || g.Length == 0) return null;
+        // A glyph drawn for a character the font maps to it copies as that character, or as one that shares it. That
+        // is most glyphs, which are answered before the CID's index is looked up: a CFF subset searches for it.
+        int cp = g.Length == 1 ? text[g.Start]
+            : g.Length == 2 && char.IsHighSurrogate(text[g.Start]) ? char.ConvertToUtf32(text[g.Start], text[g.Start + 1]) : -1;
+        if (cp >= 0 && Program.GlyphId(cp) == g.Gid) return null;
+        // Complex scripts keep the first mapping of a shared glyph, as they always have: their contextual forms share
+        // glyphs much more often, and giving them spans too is a change of its own to their output.
+        if (ComplexShaper.Handles(text, g.Start, g.Length)) return null;
+        // A part of a split character maps part by part (see Cid(List, int, string)) and is left as it is.
+        if ((k > 0 && glyphs[k - 1].Start == g.Start && glyphs[k - 1].Length == 0)
+            || (k + 1 < glyphs.Count && glyphs[k + 1].Start == g.Start && glyphs[k + 1].Length == 0)) return null;
+        int index = Index(cid);
+        int own = Unicode[index];
+        if (own != 0)
+        {
+            if (cp == own) return null;
+        }
+        else if (_texts == null || !_texts.TryGetValue(index, out var mapped) || mapped.Length == 0
+            || text.AsSpan(g.Start, g.Length).SequenceEqual(mapped)) return null;
+        return text.Substring(g.Start, g.Length);
     }
 
     // The index into Glyphs and Unicode of a CID: CFF subsets keep the original glyph ids as CIDs.

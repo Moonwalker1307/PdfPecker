@@ -263,8 +263,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   transparency is kept losslessly, and an image is only replaced when the result is smaller.
 - **Markdown**: CommonMark 0.31 and GitHub Flavored Markdown to PDF or HTML, with footnotes, definition lists and YAML
   front matter. [More](https://pdfpecker.net/docs/markdown/)
-- **Fonts**: TrueType, OpenType, WOFF and WOFF2, subset and embedded, with kerning, ligatures, variable fonts and
-  OpenType features, and bundled fallback fonts for letters and symbols a document's fonts lack. COLR colour fonts,
+- **Fonts**: TrueType, OpenType, WOFF and WOFF2, subset and embedded, with kerning, ligatures, contextual alternates
+  (as Chrome applies them, such as Fira Code's ligatures), variable fonts and OpenType features, and bundled fallback fonts for letters and symbols a document's fonts lack. COLR colour fonts,
   versions 0 and 1 (such as Noto Color Emoji), print in colour as Chrome prints them, with the default palette.
   `@font-face` takes `size-adjust`, `ascent-override`, `descent-override` and `line-gap-override`, so a fallback face
   can be sized to match a web font. [More](https://pdfpecker.net/docs/fonts/)

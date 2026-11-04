@@ -20,7 +20,8 @@ public class ComputedStyleInheritanceTests
         "FontSizeAbsolute", "LineHeightKind", "LineHeightValue", "TextAlign", "Rtl", "WritingMode", "NoHyphens",
         "HyphensAuto", "Lang", "Quirks", "Hyphenation", "SmallCaps", "WhiteSpace", "TextWrap", "OverflowWrap", "WordBreak",
         "ListStyleType", "ListStylePositionInside", "TextTransform", "TextDecoration", "TextIndent", "LetterSpacing",
-        "NoLigatures", "NoKerning", "WordSpacing", "Visible", "BorderCollapse", "BorderSpacingH", "BorderSpacingV",
+        "NoLigatures", "NoContextual", "CaltSetting", "NoKerning", "WordSpacing", "Visible", "BorderCollapse",
+        "BorderSpacingH", "BorderSpacingV",
         "FontFamilyName", "Fonts", "MissingFonts", "CustomProperties", "PageName", "BoxReverse",
         "_typography", "_decoration", "_svgPaint",
         // The font depends only on inherited properties, so the parent's cached font is the child's too.

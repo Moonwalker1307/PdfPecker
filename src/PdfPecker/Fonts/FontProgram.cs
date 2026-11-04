@@ -97,6 +97,7 @@ internal sealed partial class FontProgram
     private bool _ligaturesLoaded;
     private OpenTypeLayout? _layout;
     private bool _layoutLoaded;
+    private int _contextualFeatures = -1;       // a ContextualFeatures value once read
     private VariationAxis[]? _axes;
     private ColorGlyphs? _colorGlyphs;
     private bool _colorGlyphsLoaded;
@@ -529,6 +530,35 @@ internal sealed partial class FontProgram
         }
     }
 
+    private static readonly uint[] KernScripts = [.. new[] { "latn", "grek", "cyrl", "DFLT" }.Select(Tag)];
+    private OpenTypeLayout.WordContext? _wordContext;
+    private bool _wordContextLoaded;
+
+    /// <summary>
+    /// How the font's lookups reach across a space, for shaping text of the scripts that are not complex a word at a
+    /// time (see <see cref="OpenTypeLayout.WordContextOf"/>); null when it cannot be, which includes a font that kerns
+    /// with its kern table, whose pairs with a space are not known.
+    /// </summary>
+    public OpenTypeLayout.WordContext? WordContext
+    {
+        get
+        {
+            if (Volatile.Read(ref _wordContextLoaded)) return _wordContext;
+            lock (_lock)
+            {
+                if (!_wordContextLoaded)
+                {
+                    var layout = Layout;
+                    bool tableKerning = layout != null && Kerning != null
+                        && Array.Exists(KernScripts, script => !layout.HasFeature(true, script, Tag("kern")));
+                    _wordContext = layout == null || tableKerning ? null : layout.WordContextOf(GlyphId(' '));
+                    Volatile.Write(ref _wordContextLoaded, true);
+                }
+                return _wordContext;
+            }
+        }
+    }
+
     /// <summary>The font's OpenType layout tables for complex shaping, or null when it has neither GSUB nor GPOS.</summary>
     public OpenTypeLayout? Layout
     {
@@ -556,6 +586,48 @@ internal sealed partial class FontProgram
         }
     }
 
+    /// <summary>
+    /// Which of the features that browsers apply to all horizontal text and that substitute in context (calt, clig and
+    /// rclt) the font has lookups for in the scripts that have no shaping of their own (Latin, Greek, Cyrillic and the
+    /// default script), and whether it has standard ligatures (liga) there. Read once per font, so that whether a
+    /// font's text goes through the shaper is decided once rather than for every run.
+    /// </summary>
+    public ContextualFeatures ContextualFeatures
+    {
+        get
+        {
+            int features = Volatile.Read(ref _contextualFeatures);
+            if (features >= 0) return (ContextualFeatures)features;
+            var read = ReadContextualFeatures(Layout);
+            Volatile.Write(ref _contextualFeatures, (int)read);
+            return read;
+        }
+    }
+
+    private static readonly uint[] ContextualScripts = [Tag("latn"), Tag("grek"), Tag("cyrl"), Tag("DFLT")];
+
+    private static ContextualFeatures ReadContextualFeatures(OpenTypeLayout? layout)
+    {
+        if (layout == null) return ContextualFeatures.None;
+        var features = ContextualFeatures.None;
+        try
+        {
+            foreach (uint script in ContextualScripts)
+            {
+                if (layout.HasFeature(false, script, Tag("calt"))) features |= ContextualFeatures.Calt;
+                if (layout.HasFeature(false, script, Tag("clig"))) features |= ContextualFeatures.Clig;
+                if (layout.HasFeature(false, script, Tag("rclt"))) features |= ContextualFeatures.Rclt;
+                if (layout.HasFeature(false, script, Tag("liga"))) features |= ContextualFeatures.Liga;
+            }
+        }
+        catch (Exception ex) when (ex is IndexOutOfRangeException or ArgumentOutOfRangeException or OverflowException)
+        {
+            SwallowedErrors.Record(ex);
+            return ContextualFeatures.None;
+        }
+        return features;
+    }
+
     /// <summary>The kerning between two glyphs in 1/1000 em (usually negative), added to the first glyph's advance.</summary>
     public int Kern1000(int left, int right)
     {
@@ -573,4 +645,19 @@ internal sealed partial class FontProgram
     internal int U16(int offset) => Reader.U16(offset);
     internal short S16(int offset) => Reader.S16(offset);
     internal uint U32(int offset) => Reader.U32(offset);
+}
+
+/// <summary>The GSUB features of <see cref="FontProgram.ContextualFeatures"/> that a font has.</summary>
+[Flags]
+internal enum ContextualFeatures : byte
+{
+    None = 0,
+    /// <summary>Contextual alternates, which font-variant-ligatures: no-contextual turns off.</summary>
+    Calt = 1,
+    /// <summary>Contextual ligatures, which belong to the common ligatures.</summary>
+    Clig = 2,
+    /// <summary>Required contextual alternates, which are always on.</summary>
+    Rclt = 4,
+    /// <summary>Standard ligatures.</summary>
+    Liga = 8,
 }

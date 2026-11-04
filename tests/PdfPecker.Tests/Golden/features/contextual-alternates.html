@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en"><head><title>Contextual alternates</title>
+<style>
+@font-face { font-family: Inter; src: url('../../Fixtures/fonts/Inter-Calt.ttf') }
+@page { size: 148mm 80mm; margin: 10mm }
+body { font: 10pt/1.4 sans-serif; margin: 0; color: #222 }
+h1 { font-size: 13pt; margin: 0 0 6pt; border-bottom: 1pt solid #27ae60 }
+p { font: 14pt/1.5 Inter; margin: 0 }
+.r { text-align: right; background: #eafaf1 }
+.c { text-align: center; background: #eafaf1 }
+.label { font: 8pt sans-serif; color: #27ae60 }
+</style></head>
+<body>
+<h1>Contextual alternates (calt)</h1>
+<p>Go -&gt; 3x4 x 10:30 (H) A-B <span class="label">normal</span></p>
+<p style="font-variant-ligatures: no-contextual">Go -&gt; 3x4 x 10:30 (H) A-B <span class="label">no-contextual</span></p>
+<p style="font-feature-settings: 'calt' 0">Go -&gt; 3x4 x 10:30 (H) A-B <span class="label">'calt' 0</span></p>
+<p style="letter-spacing: 1pt">Go -&gt; 3x4 x 10:30 (H) A-B <span class="label">letter-spacing</span></p>
+<p class="r">Go -&gt; 3 x 4 x 10:30</p>
+<p class="c">Go -&gt; 3 x 4 x 10:30</p>
+</body></html>

@@ -346,6 +346,8 @@ internal sealed partial class InlineLayout
             // item and the chunk, as browsers shape the whole run (a space before "A" or "T" kerns in many fonts).
             gw += KernWithin(i, j);
             float need = Needed(i, j, gw) + KernWithLast(_items[i]);
+            var context = ContextOf(i, j);
+            need += context;
             // word-break: break-all and line-break: anywhere break the chunk at the end of the line instead of moving it to
             // the next.
             bool breakAll = splittable && _items[i].IsText && BreaksAtLineEnd(_items[i].Style);
@@ -380,8 +382,12 @@ internal sealed partial class InlineLayout
                     j = ChunkEnd(i, out gw, out splittable);
                     if (j == i) return i;
                     gw += KernWithin(i, j);
-                    need = Needed(i, j, gw);
+                    need = Needed(i, j, gw) + context;
                 }
+                // On the new line the chunk starts a run of its own.
+                need -= context;
+                context = ContextOf(i, j);
+                need += context;
             }
             // Too narrow beside the floats: the line moves down past them until the chunk fits.
             if (_fl != null && !_hasContent && need > _avail + Eps)
@@ -392,7 +398,7 @@ internal sealed partial class InlineLayout
                 }
             // The kerning with the line's last item counts here too: a space before "A" narrows the word just enough that
             // a box as wide as its content (measured with that kerning) holds it, so it must not break inside it.
-            if (splittable && _curW + gw + KernWithLast(_items[i]) > _avail + Eps)
+            if (splittable && _curW + gw + KernWithLast(_items[i]) + context > _avail + Eps)
             {
                 // A chunk wider than the line that overflow-wrap or word-break lets break between characters.
                 for (int k = i; k < j; k++)
@@ -401,10 +407,120 @@ internal sealed partial class InlineLayout
             else
             {
                 // Fits, or may not break: a word too wide for the line overflows it, as in browsers.
-                _curW += gw + KernWithLast(_items[i]);
+                _curW += gw + KernWithLast(_items[i]) + context;
                 for (int k = i; k < j; k++) Add(_items[k]);
             }
             return j;
+        }
+
+        /// <summary>
+        /// The change to the line's width when the chunk from <paramref name="i"/> to <paramref name="j"/> joins it, from
+        /// a font whose lookups reach across items: the line draws its last run of text and the chunk as one shaped run,
+        /// which can be wider or narrower than their words measured one by one (see ContextBetweenItems), and Chrome
+        /// breaks the line by the width it draws.
+        /// </summary>
+        /// <remarks>
+        /// Shaping the whole run again for every chunk would make breaking a line quadratic in its length, so the change
+        /// is measured where the chunk meets the run: from the start of the run's last two words to the chunk's last
+        /// word, with and without the chunk. Contextual lookups look a few glyphs around the one they change, which that
+        /// window holds; the line is still aligned by its whole run.
+        /// </remarks>
+        private readonly float ContextOf(int i, int j)
+        {
+            bool inContext = false;
+            for (int k = i; k < j && !inContext; k++) inContext = _items[k].IsText && _items[k].Style.Font.ShapesInContext;
+            if (!inContext) return 0;
+            for (int k = i + 1; k < j; k++)
+                if (!JoinedItems(_items[k - 1], _items[k])) return ContextOfMixed(i, j);
+            var li = _cur.Items;
+            int n = li.Count, end = n + j - i;
+            // The last word of the run the chunk continues, and the start of the window: the word before it.
+            int lastWord = -1, from = -1;
+            if (n > 0 && JoinedItems(li[n - 1], _items[i]))
+                for (int m = n - 1, words = 0; m >= 0 && words < 2; m--)
+                {
+                    if (m < n - 1 && !JoinedItems(li[m], li[m + 1])) break;
+                    if (!IsWord(li[m])) continue;
+                    if (lastWord < 0) lastWord = m;
+                    from = m;
+                    words++;
+                }
+            int newLast = -1;
+            for (int k = end - 1; k >= n && newLast < 0; k--)
+                if (IsWord(At(k, i))) newLast = k;
+            if (newLast < 0) return 0;
+            if (lastWord < 0)
+            {
+                // The chunk starts a run, which only a chunk of several items draws differently.
+                for (int k = n; k < newLast && from < 0; k++)
+                    if (IsWord(At(k, i))) from = k;
+                if (from < 0) return 0;
+                lastWord = from;
+            }
+            var first = At(from, i);
+            var font = first.Style.Font;
+            float units = Shaped(from, newLast, i) - Shaped(from, lastWord, i), kern = 0;
+            for (int m = lastWord + 1; m <= newLast; m++)
+            {
+                var it = At(m, i);
+                units -= font.MeasureUnits(it.Source, it.Start, it.Length);
+                kern += PairKern(At(m - 1, i), it);
+            }
+            return units * first.Style.TextSize / 1000f - kern;
+        }
+
+        /// <summary>A word of a run that ContextBetweenItems shapes.</summary>
+        private static bool IsWord(Item it) => it.IsText && it.Length > 0 && it.Level == 0 && it.Style.Font.ShapesInContext;
+
+        /// <summary>
+        /// The width of items <paramref name="from"/> to <paramref name="to"/> of the line followed by the chunk at
+        /// <paramref name="i"/> (see At), shaped as one run, in 1/1000 em.
+        /// </summary>
+        private readonly int Shaped(int from, int to, int i)
+        {
+            var text = _inline._contextText;
+            text.Clear();
+            for (int m = from; m <= to; m++)
+            {
+                var it = At(m, i);
+                text.Append(it.Source, it.Start, it.Length);
+            }
+            var run = text.ToString();
+            return At(from, i).Style.Font.MeasureUnits(run, 0, run.Length);
+        }
+
+        /// <summary>Item <paramref name="k"/> of the line followed by the chunk that starts at <paramref name="i"/>.</summary>
+        private readonly Item At(int k, int i) => k < _cur.Items.Count ? _cur.Items[k] : _items[i + k - _cur.Items.Count];
+
+        /// <summary>
+        /// <see cref="ContextOf"/> for a chunk whose items are drawn as more than one run, such as a word with a part
+        /// in another style: the change of the line's last run and the chunk, measured whole.
+        /// </summary>
+        private readonly float ContextOfMixed(int i, int j)
+        {
+            var li = _cur.Items;
+            int from = li.Count;
+            if (from > 0 && JoinedItems(li[from - 1], _items[i]))
+                for (from--; from > 0 && JoinedItems(li[from - 1], li[from]); from--) { }
+            var scratch = _inline._contextItems;
+            scratch.Clear();
+            for (int k = from; k < li.Count; k++) scratch.Add(li[k]);
+            float before = ContextBetweenItems(scratch, null, LastText(scratch, scratch.Count));
+            for (int k = i; k < j; k++) scratch.Add(_items[k]);
+            float after = ContextBetweenItems(scratch, null, LastText(scratch, scratch.Count));
+            scratch.Clear();
+            return after - before;
+        }
+
+        /// <summary>Whether two neighbouring items are drawn in one run of text (see JoinsRun).</summary>
+        private static bool JoinedItems(Item a, Item b) => IsTextOrSpace(a) && a.Level == 0 && JoinsRun(a, b, a);
+
+        /// <summary>The index of the last text item among the first <paramref name="count"/>, or -1.</summary>
+        private static int LastText(List<Item> items, int count)
+        {
+            for (int k = count - 1; k >= 0; k--)
+                if (items[k].IsText) return k;
+            return -1;
         }
 
         /// <summary>Whether the current line, if it ended here, would be hyphenated beyond hyphenate-limit-lines.</summary>

@@ -129,6 +129,31 @@ internal sealed partial class StyleResolver
         else if (lower == "none") s.NoLigatures = true;
         else if (lower.Contains("no-common-ligatures")) s.NoLigatures = true;
         else if (lower.Contains("common-ligatures")) s.NoLigatures = false;
+
+        if (d.Inherit) s.NoContextual = parent.NoContextual;
+        else if (lower is "normal" or "initial" or "unset") s.NoContextual = false;
+        else if (lower == "none") s.NoContextual = true;
+        else if (LigatureKeywords(lower) is { } noContextual) s.NoContextual = noContextual;
+    }
+
+    // Whether a list of font-variant-ligatures keywords turns contextual alternates off, or null for an invalid list. A
+    // list that leaves them out sets them back to normal, as every part the value does not name is.
+    private static bool? LigatureKeywords(string lower)
+    {
+        bool noContextual = false, any = false;
+        foreach (var word in lower.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            switch (word)
+            {
+                case "common-ligatures" or "no-common-ligatures" or "discretionary-ligatures" or "no-discretionary-ligatures"
+                    or "historical-ligatures" or "no-historical-ligatures" or "contextual":
+                    break;
+                case "no-contextual": noContextual = true; break;
+                default: return null;
+            }
+            any = true;
+        }
+        return any ? noContextual : null;
     }
 
     private static void ApplyFontVariantNumeric(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
@@ -144,11 +169,15 @@ internal sealed partial class StyleResolver
         if (d.Inherit)
         {
             s.NoLigatures = parent.NoLigatures;
+            s.CaltSetting = parent.CaltSetting;
             s.NoKerning = parent.NoKerning;
             s.FontFeatureSettings = parent.FontFeatureSettings;
             return;
         }
         if (FeatureSetting(d.Lower, "liga") is bool liga) s.NoLigatures = !liga;
+        // The value replaces the inherited one as a whole, so a value that does not name calt leaves it to
+        // font-variant-ligatures again.
+        s.CaltSetting = FeatureSetting(d.Lower, "calt");
         if (FeatureSetting(d.Lower, "kern") is bool kern) s.NoKerning = !kern;
         // Tags are case-sensitive, so the value is kept as written.
         s.FontFeatureSettings = d.Lower is "normal" or "initial" or "unset" ? null : d.Value;

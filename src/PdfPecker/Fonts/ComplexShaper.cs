@@ -164,18 +164,41 @@ internal static partial class ComplexShaper
 
     /// <summary>
     /// Shapes the text into glyphs in logical order, with advances and offsets in 1/1000 em for drawing it in the
-    /// given direction.
+    /// given direction. <paramref name="off"/> names the optional features that CSS turned off, which the scripts
+    /// other than the Indic ones leave out.
     /// </summary>
-    public static void Shape(FontProgram font, string s, int start, int length, bool rtl, List<ShapedGlyph> output)
+    public static void Shape(FontProgram font, string s, int start, int length, bool rtl, List<ShapedGlyph> output,
+        FeaturesOff off = FeaturesOff.None)
     {
         output.Clear();
         for (int i = start, end = start + length; i < end;)
         {
             int runEnd = ScriptRunEnd(s, i, end, out var script);
             if (!ShapedApart(script)) script = ScriptOfText(s, i, runEnd - i);
-            ShapeRun(font, s, i, runEnd - i, rtl, script, output);
+            ShapeRun(font, s, i, runEnd - i, rtl, script, off, output);
             i = runEnd;
         }
+    }
+
+    /// <summary>
+    /// The script <see cref="Shape"/> shapes the text as, when it shapes it as one run of a script that is not complex
+    /// and without emoji (whose joiners it keeps); otherwise -1. Parts of the text shaped with <see cref="ShapeAs"/> and
+    /// this script go through the same steps as the whole.
+    /// </summary>
+    public static int SimpleScript(string s, int start, int length)
+    {
+        if (Handles(s, start, length) || HasEmoji(s, start, length)) return -1;
+        int end = start + length;
+        if (ScriptRunEnd(s, start, end, out var run) != end || ShapedApart(run)) return -1;
+        var script = ScriptOfText(s, start, length);
+        return Joins(script) || ShapedApart(script) ? -1 : (int)script;
+    }
+
+    /// <summary>Shapes the text left to right as one run of a script that <see cref="SimpleScript"/> gave.</summary>
+    public static void ShapeAs(FontProgram font, string s, int start, int length, int script, List<ShapedGlyph> output, FeaturesOff off)
+    {
+        output.Clear();
+        ShapeRun(font, s, start, length, rtl: false, (Script)script, off, output);
     }
 
     /// <summary>
@@ -212,12 +235,13 @@ internal static partial class ComplexShaper
             or UnicodeCategory.TitlecaseLetter or UnicodeCategory.ModifierLetter or UnicodeCategory.OtherLetter ? Script.Other : null;
     }
 
-    private static void ShapeRun(FontProgram font, string s, int start, int length, bool rtl, Script script, List<ShapedGlyph> output)
+    private static void ShapeRun(FontProgram font, string s, int start, int length, bool rtl, Script script, FeaturesOff off,
+        List<ShapedGlyph> output)
     {
         var run = t_run ??= new GlyphRun();
         run.Clear();
         var layout = font.Layout;
-        var plan = GetPlan(font, layout, script);
+        var plan = GetPlan(font, layout, script, off);
         if (plan.Indic != null)
         {
             ShapeIndic(font, layout, run, plan, s, start, length, rtl, output);
@@ -323,4 +347,15 @@ internal static partial class ComplexShaper
     }
 
     private static bool IsMark(int props) => (props & OpenTypeLayout.Mark) != 0;
+}
+
+/// <summary>The optional GSUB features that CSS turned off for a run: letter-spacing and font-variant-ligatures.</summary>
+[Flags]
+internal enum FeaturesOff : byte
+{
+    None = 0,
+    /// <summary>The common ligatures, liga and clig.</summary>
+    Ligatures = 1,
+    /// <summary>The contextual alternates, calt.</summary>
+    Contextual = 2,
 }
