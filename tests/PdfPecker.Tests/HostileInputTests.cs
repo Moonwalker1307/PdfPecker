@@ -1526,6 +1526,19 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Scope_limits_over_deep_markup_stay_bounded()
+    {
+        // Every element is a scope root, and every limit is looked for between each element and each root above it:
+        // 100 blocks over 50 chains of 200 nested elements walked about 8,000 limit checks for each block and element.
+        string chain = string.Concat(Enumerable.Repeat("<div>", 200)) + "x" + string.Concat(Enumerable.Repeat("</div>", 200));
+        var sb = new StringBuilder("<style>");
+        for (int i = 0; i < 50; i++) sb.Append(CultureInfo.InvariantCulture, $"@scope (div) to (span.n{i}) {{ div:not(div) {{ color: red }} }}");
+        for (int i = 0; i < 50; i++) sb.Append(CultureInfo.InvariantCulture, $"@scope (div) to (:scope > span.n{i}) {{ div:not(div) {{ color: red }} }}");
+        sb.Append("</style>").Insert(sb.Length, string.Concat(Enumerable.Repeat(chain, 50)));
+        AssertStructurallyValid(Bounded(sb.ToString()));
+    }
+
+    [Fact]
     public void Colour_glyphs_in_many_text_colours_stay_bounded()
     {
         // 100 glyphs of 32,768 paints each, all in the text colour, written in 300 colours: each colour gets its own

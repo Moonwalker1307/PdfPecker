@@ -69,6 +69,7 @@ internal static partial class CssParser
             int close = MatchingParen(rest);
             if (close != rest.Length - 1 || ParseSelectorList(rest.Slice(1, close - 1)) is not { } end) return null;
             rule.End = end;
+            rule.EndNamesScope = Selector.NamesScope(end);
         }
         return rule;
     }

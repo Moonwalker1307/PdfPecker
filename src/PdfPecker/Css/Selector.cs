@@ -449,6 +449,17 @@ internal sealed class Selector
     private const int MaxParts = 64, MaxNesting = 16;
 
     /// <summary>Parses one complex selector. Returns null for unsupported syntax, which drops the rule.</summary>
+    /// <summary>Whether a selector of the list names :scope, here or inside :not(), :is(), :where() or :has().</summary>
+    public static bool NamesScope(Selector[] list)
+    {
+        foreach (var selector in list)
+            foreach (var part in selector.Parts)
+                if (part.Pseudos != null)
+                    foreach (var p in part.Pseudos)
+                        if (p.Kind == PseudoKind.Scope || p.List != null && NamesScope(p.List)) return true;
+        return false;
+    }
+
     public static Selector? Parse(string text) => Parse(text, 0);
 
     private static Selector? Parse(string text, int nesting)

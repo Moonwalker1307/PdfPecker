@@ -112,6 +112,16 @@ public class ScopeTests
         => Assert.Equal(0u, Red(Resolve("<style>@scope (.a) until (.b) { p { color: rgb(60,0,0) } }</style><div class=a><p id=p>p</p></div>"), "p"));
 
     [Fact]
+    public void A_limit_that_names_scope_is_matched_for_each_root()
+    {
+        // The limit is a .content child of the root: .content deeper down limits nothing.
+        var doc = Resolve("<style>@scope (.card) to (:scope > .content) { p { color: rgb(70,0,0) } }</style>"
+            + "<div class=card><div class=content><p id=a>a</p></div><div><div class=content><p id=b>b</p></div></div></div>");
+        Assert.Equal(0u, Red(doc, "a"));
+        Assert.Equal(70u, Red(doc, "b"));
+    }
+
+    [Fact]
     public void Deep_nesting_stays_fast()
     {
         // Every element is a root and a limit; matching walks a bounded number of generations.
