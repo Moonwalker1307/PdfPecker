@@ -173,7 +173,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
 - **Fonts**: TrueType, OpenType, WOFF and WOFF2, subset and embedded, with kerning, ligatures, variable fonts and
   OpenType features, and bundled fallback fonts for letters and symbols a document's fonts lack. COLR colour fonts,
   versions 0 and 1 (such as Noto Color Emoji), print in colour as Chrome prints them, with the default palette.
-  [More](https://pdfpecker.net/docs/fonts/)
+  `@font-face` takes `size-adjust`, `ascent-override`, `descent-override` and `line-gap-override`, so a fallback face
+  can be sized to match a web font. [More](https://pdfpecker.net/docs/fonts/)
 - **Languages**: Arabic and Hebrew with bidi and shaping, Indic scripts, Thai and Lao, CJK line breaking and
   justification, and hyphenation in eleven languages. [More](https://pdfpecker.net/docs/languages/)
 - **PDF/A, passwords and watermarks**: PDF/A-2, 3 and 4, AES-256 encryption, and text, image and SVG watermarks.

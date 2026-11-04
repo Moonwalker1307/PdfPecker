@@ -13,13 +13,15 @@ internal sealed class FontFace
     public readonly bool Italic;
     public readonly UnicodeRange? Range;
     public readonly string? FullName, PostScriptName; // for CSS local()
+    public readonly FaceMetrics Metrics; // size-adjust and the metric overrides of an @font-face rule
     private readonly Lazy<FontProgram?> _program;
 
     public FontFace(string family, int weightMin, int weightMax, bool italic, UnicodeRange? range, Lazy<FontProgram?> program,
         string? fullName = null, string? postScriptName = null, bool weightAuto = false, float stretchMin = 100, float stretchMax = 100,
-        bool stretchAuto = true)
+        bool stretchAuto = true, FaceMetrics? metrics = null)
     {
         Family = family;
+        Metrics = metrics ?? FaceMetrics.None;
         _stretchMin = stretchMin;
         _stretchMax = stretchMax;
         _stretchAuto = stretchAuto;
@@ -51,6 +53,19 @@ internal sealed class FontFace
 }
 
 /// <summary>
+/// The @font-face descriptors that change a face's size and line metrics: size-adjust scales the glyphs and every metric
+/// of the face (1 when absent), and ascent-override, descent-override and line-gap-override replace the font's own line
+/// metrics with fractions of the em (NaN for normal, the font's own). The default value changes nothing.
+/// </summary>
+internal readonly record struct FaceMetrics(float SizeAdjust, float Ascent, float Descent, float LineGap)
+{
+    public static readonly FaceMetrics None = new(1, float.NaN, float.NaN, float.NaN);
+
+    /// <summary>True when the face has none of the descriptors, so its fonts are the ones it had before they existed.</summary>
+    public bool IsNone => SizeAdjust == 1 && float.IsNaN(Ascent) && float.IsNaN(Descent) && float.IsNaN(LineGap);
+}
+
+/// <summary>
 /// What picks the instance of a variable font besides weight and style: font-stretch (a percentage), the font size in
 /// CSS pixels for the optical size axis (0 with font-optical-sizing: none), and font-variation-settings as written.
 /// Synthesis says which faces may be made up when the family has none (font-synthesis).
@@ -72,7 +87,7 @@ internal sealed class FontResolver
     private readonly FontCollection.Snapshot? _collection;
     private readonly Dictionary<(string, int, bool, FontFamily, FontVariation), TextFont> _resolved = new();
     private readonly Dictionary<(string, int, bool, FontVariation), List<EmbeddedFont>> _matched = new();
-    private readonly Dictionary<(FontProgram, bool, bool, UnicodeRange?), EmbeddedFont> _fonts = new();
+    private readonly Dictionary<(FontProgram, bool, bool, UnicodeRange?, FaceMetrics), EmbeddedFont> _fonts = new();
 
     private readonly bool _embedStandard;
     private readonly Lazy<FontCollection.Snapshot>? _system; // the system font folders, scanned on first use
@@ -125,6 +140,7 @@ internal sealed class FontResolver
         float sMin = 100, sMax = 100;
         bool italic = false;
         UnicodeRange? range = null;
+        var metrics = FaceMetrics.None;
         foreach (var d in decls)
         {
             var v = d.Value.Trim();
@@ -158,6 +174,19 @@ internal sealed class FontResolver
                     break;
                 }
                 case "unicode-range": range = UnicodeRange.Parse(v); break;
+                // An invalid value leaves the descriptor as it was, as an invalid declaration is dropped.
+                case "size-adjust":
+                    if (ParseFacePercent(v, allowNormal: false) is float sa) metrics = metrics with { SizeAdjust = sa };
+                    break;
+                case "ascent-override":
+                    if (ParseFacePercent(v, allowNormal: true) is float asc) metrics = metrics with { Ascent = asc };
+                    break;
+                case "descent-override":
+                    if (ParseFacePercent(v, allowNormal: true) is float desc) metrics = metrics with { Descent = desc };
+                    break;
+                case "line-gap-override":
+                    if (ParseFacePercent(v, allowNormal: true) is float gap) metrics = metrics with { LineGap = gap };
+                    break;
             }
         }
         if (string.IsNullOrEmpty(family) || string.IsNullOrEmpty(src)) return null;
@@ -180,7 +209,26 @@ internal sealed class FontResolver
             }
             return null;
         });
-        return new FontFace(family!, wMin, wMax, italic, range, program, weightAuto: !weightGiven, stretchMin: sMin, stretchMax: sMax, stretchAuto: !stretchGiven);
+        return new FontFace(family!, wMin, wMax, italic, range, program, weightAuto: !weightGiven, stretchMin: sMin, stretchMax: sMax, stretchAuto: !stretchGiven,
+            metrics: metrics);
+    }
+
+    // A face's size-adjust is capped, far above any sensible use, so that the glyph sizes it makes stay finite numbers.
+    private const float MaxFacePercent = 10_000;
+
+    /// <summary>
+    /// A size-adjust or metric override value as a fraction: a percentage that is not negative, or normal (NaN) for an
+    /// override. Null for anything else.
+    /// </summary>
+    internal static float? ParseFacePercent(string v, bool allowNormal)
+    {
+        v = v.Trim();
+        if (allowNormal && v.Equals("normal", StringComparison.OrdinalIgnoreCase)) return float.NaN;
+        if (v.Length < 2 || v[^1] != '%') return null;
+        if (!float.TryParse(v.AsSpan(0, v.Length - 1), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float p)
+            || !float.IsFinite(p) || p < 0)
+            return null;
+        return Math.Min(p, MaxFacePercent) / 100f;
     }
 
     private static FontProgram? LoadSource(string item, Func<string, byte[]?> fetch, FontCollection.Snapshot? collection,
@@ -342,8 +390,8 @@ internal sealed class FontResolver
             bool synthBold = weight >= 600 && face.WeightMax < 600 && variation.Synthesis.HasFlag(FontSynthesis.Weight);
             bool synthItalic = italic && !face.Italic && variation.Synthesis.HasFlag(FontSynthesis.Style);
             if (program.Axes.Length > 0) program = Instance(program, face, weight, italic, variation, ref synthItalic);
-            var fk = (program, synthBold, synthItalic, face.Range);
-            if (!_fonts.TryGetValue(fk, out var font)) _fonts[fk] = font = new EmbeddedFont(program, synthBold, synthItalic, face.Range);
+            var fk = (program, synthBold, synthItalic, face.Range, face.Metrics);
+            if (!_fonts.TryGetValue(fk, out var font)) _fonts[fk] = font = new EmbeddedFont(program, synthBold, synthItalic, face.Range, faceMetrics: face.Metrics);
             result.Add(font);
         }
         _matched[key] = result;

@@ -133,9 +133,9 @@ internal sealed partial class LayoutEngine
         public float Left, Top, Right, Bottom, Baseline;
         public TextOp Op;
 
-        public void Glyph(FontProgram program, int gid, string text, int start, float x, float dy, float skew)
+        public void Glyph(FontProgram program, int gid, string text, int start, float x, float dy, float skew, float scale)
         {
-            if (GlyphInk.Bounds(program, gid, skew, out float l, out float b, out float r, out float t)) Add(x, dy, l, b, r, t);
+            if (GlyphInk.Bounds(program, gid, skew, out float l, out float b, out float r, out float t)) Add(x, dy, l * scale, b * scale, r * scale, t * scale);
         }
 
         public void Glyph(StandardFont font, char c, string text, int start, float x)

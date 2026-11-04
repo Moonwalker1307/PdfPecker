@@ -12,12 +12,21 @@ internal sealed class EmbeddedFont : TextFont
     public readonly bool SyntheticBold, SyntheticItalic;
     private readonly short[] _widths;
     private readonly UnicodeRange? _range;
+    private readonly FaceMetrics _faceMetrics;
+
+    /// <summary>
+    /// The face's size-adjust: the glyphs are drawn at the font size times this, and every width and metric of the font
+    /// is scaled with them, while em-based lengths are not. 1 for a font without it.
+    /// </summary>
+    public readonly float SizeAdjust;
     private readonly Ligatures? _ligatures; // null when the font has none or they are turned off
     private EmbeddedFont? _withoutLigatures, _withoutKerning;
     private bool _noKerning;
 
     // metrics: line metrics to use instead of the font's own, for a bundled font standing in for a standard font.
-    public EmbeddedFont(FontProgram program, bool syntheticBold, bool syntheticItalic, UnicodeRange? range = null, TextFont? metrics = null)
+    // faceMetrics: the size-adjust and metric overrides of the @font-face rule the font comes from.
+    public EmbeddedFont(FontProgram program, bool syntheticBold, bool syntheticItalic, UnicodeRange? range = null, TextFont? metrics = null,
+        FaceMetrics? faceMetrics = null)
     {
         Program = program;
         SyntheticBold = syntheticBold;
@@ -36,20 +45,36 @@ internal sealed class EmbeddedFont : TextFont
             Descent = metrics.Descent;
             LineGap = metrics.LineGap;
         }
+        _faceMetrics = faceMetrics ?? FaceMetrics.None;
+        SizeAdjust = _faceMetrics.SizeAdjust;
+        if (!_faceMetrics.IsNone)
+        {
+            // The overrides are fractions of the font size, and size-adjust scales them with the rest of the font, as in
+            // Chrome and CSS Fonts level 5.
+            float sa = SizeAdjust;
+            Ascent = (float.IsNaN(_faceMetrics.Ascent) ? Ascent : _faceMetrics.Ascent) * sa;
+            Descent = (float.IsNaN(_faceMetrics.Descent) ? Descent : -_faceMetrics.Descent) * sa;
+            LineGap = (float.IsNaN(_faceMetrics.LineGap) ? LineGap : _faceMetrics.LineGap) * sa;
+        }
     }
+
+    /// <summary>A width in thousandths of an em of the program, scaled by size-adjust to thousandths of the font size.</summary>
+    private int Scaled(int units) => SizeAdjust == 1 ? units : (int)MathF.Round(units * SizeAdjust);
 
     /// <summary>True when the font has a glyph for the code point (and its unicode-range, if any, includes it).</summary>
     public bool Covers(int codePoint)
         => (_range == null || _range.Contains(codePoint)) && Program.GlyphId(codePoint) != 0;
 
+    /// <summary>The advance of a code point in thousandths of the program's em, before size-adjust.</summary>
     public int CharUnits(int codePoint)
         => (uint)codePoint < 0x10000 ? _widths[codePoint] : Program.Advance1000(Program.GlyphId(codePoint));
 
     public override bool HasKerning => !_noKerning && Program.Kerning != null;
 
-    public override int KernUnits(int left, int right) => _noKerning ? 0 : Program.Kern1000(Program.GlyphId(left), Program.GlyphId(right));
+    public override int KernUnits(int left, int right) => _noKerning ? 0 : Scaled(Program.Kern1000(Program.GlyphId(left), Program.GlyphId(right)));
 
-    private EmbeddedFont(EmbeddedFont font, bool ligatures, bool kerning) : this(font.Program, font.SyntheticBold, font.SyntheticItalic, font._range)
+    private EmbeddedFont(EmbeddedFont font, bool ligatures, bool kerning)
+        : this(font.Program, font.SyntheticBold, font.SyntheticItalic, font._range, faceMetrics: font._faceMetrics)
     {
         Ascent = font.Ascent;
         Descent = font.Descent;
@@ -66,7 +91,7 @@ internal sealed class EmbeddedFont : TextFont
 
     public override float Metric(FontMetric metric)
     {
-        float upm = Program.UnitsPerEm;
+        float upm = Program.UnitsPerEm / SizeAdjust;
         return metric switch
         {
             FontMetric.XHeight => Program.XHeight / upm,
@@ -74,7 +99,7 @@ internal sealed class EmbeddedFont : TextFont
             FontMetric.ZeroWidth => Program.GlyphId('0') is > 0 and var zero ? Program.Advance(zero) / upm : 0,
             FontMetric.IdeographWidth => Program.GlyphId(0x6C34) is > 0 and var water ? Program.Advance(water) / upm : 0,
             FontMetric.UnderlinePosition => -Program.UnderlinePosition / upm,
-            FontMetric.EmDescent => Program.EmDescent,
+            FontMetric.EmDescent => Program.EmDescent * SizeAdjust,
             _ => 0,
         };
     }
@@ -92,7 +117,8 @@ internal sealed class EmbeddedFont : TextFont
         return variants.GetOrAdd(features, _ => new EmbeddedFont(this, program));
     }
 
-    private EmbeddedFont(EmbeddedFont font, FontProgram program) : this(program, font.SyntheticBold, font.SyntheticItalic, font._range)
+    private EmbeddedFont(EmbeddedFont font, FontProgram program)
+        : this(program, font.SyntheticBold, font.SyntheticItalic, font._range, faceMetrics: font._faceMetrics)
     {
         Ascent = font.Ascent;
         Descent = font.Descent;
@@ -159,6 +185,10 @@ internal sealed class EmbeddedFont : TextFont
     [ThreadStatic] private static List<ShapedGlyph>? t_glyphs;
 
     public override int MeasureUnits(string s, int start, int length)
+        => SizeAdjust == 1 ? MeasureProgramUnits(s, start, length) : (int)MathF.Round(MeasureProgramUnits(s, start, length) * SizeAdjust);
+
+    // The width in thousandths of the program's em, before size-adjust.
+    private int MeasureProgramUnits(string s, int start, int length)
     {
         if (UsesShaper(s, start, length)) return MeasureComplex(s, start, length);
         if (MayLigate(s, start, length)) return MeasureShaped(s, start, length);
@@ -176,7 +206,7 @@ internal sealed class EmbeddedFont : TextFont
             else total += w[cp];
             if (kern)
             {
-                if (prev >= 0) total += KernUnits(prev, cp);
+                if (prev >= 0) total += Program.Kern1000(Program.GlyphId(prev), Program.GlyphId(cp));
                 prev = cp;
             }
         }
@@ -207,7 +237,7 @@ internal sealed class EmbeddedFont : TextFont
         return (int)MathF.Round(total);
     }
 
-    public override float CharWidth(char c, float size) => _widths[c] * size / 1000f;
+    public override float CharWidth(char c, float size) => SizeAdjust == 1 ? _widths[c] * size / 1000f : _widths[c] * size * SizeAdjust / 1000f;
 }
 
 /// <summary>
@@ -325,7 +355,8 @@ internal sealed class FontChain : TextFont
         return total;
     }
 
-    public override float CharWidth(char c, float size) => Units(Pick(c), c) * size / 1000f;
+    public override float CharWidth(char c, float size)
+        => Pick(c) is EmbeddedFont { SizeAdjust: not 1 } scaled ? scaled.CharWidth(c, size) : Units(Pick(c), c) * size / 1000f;
 
     public override bool HasKerning => _primary.HasKerning;
 
