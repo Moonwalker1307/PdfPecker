@@ -530,26 +530,31 @@ internal sealed partial class FontProgram
         }
     }
 
-    private ulong[]? _multiGlyphStarts;
-    private bool _multiGlyphStartsLoaded;
+    private static readonly uint[] KernScripts = [.. new[] { "latn", "grek", "cyrl", "DFLT" }.Select(Tag)];
+    private OpenTypeLayout.WordContext? _wordContext;
+    private bool _wordContextLoaded;
 
     /// <summary>
-    /// The glyphs at which the font's lookups of more than one glyph can start, one bit per glyph id (see
-    /// <see cref="OpenTypeLayout.MultiGlyphStarts"/>); null when that is not known, so any glyph may.
+    /// How the font's lookups reach across a space, for shaping text of the scripts that are not complex a word at a
+    /// time (see <see cref="OpenTypeLayout.WordContextOf"/>); null when it cannot be, which includes a font that kerns
+    /// with its kern table, whose pairs with a space are not known.
     /// </summary>
-    public ulong[]? MultiGlyphStarts
+    public OpenTypeLayout.WordContext? WordContext
     {
         get
         {
-            if (Volatile.Read(ref _multiGlyphStartsLoaded)) return _multiGlyphStarts;
+            if (Volatile.Read(ref _wordContextLoaded)) return _wordContext;
             lock (_lock)
             {
-                if (!_multiGlyphStartsLoaded)
+                if (!_wordContextLoaded)
                 {
-                    _multiGlyphStarts = Layout?.MultiGlyphStarts();
-                    Volatile.Write(ref _multiGlyphStartsLoaded, true);
+                    var layout = Layout;
+                    bool tableKerning = layout != null && Kerning != null
+                        && Array.Exists(KernScripts, script => !layout.HasFeature(true, script, Tag("kern")));
+                    _wordContext = layout == null || tableKerning ? null : layout.WordContextOf(GlyphId(' '));
+                    Volatile.Write(ref _wordContextLoaded, true);
                 }
-                return _multiGlyphStarts;
+                return _wordContext;
             }
         }
     }

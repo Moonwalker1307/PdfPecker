@@ -53,12 +53,6 @@ internal abstract class TextFont
     /// </summary>
     public virtual bool ShapesInContext => false;
 
-    /// <summary>
-    /// True when the text is shaped next to other inert text as on its own (see EmbeddedFont.InertInContext), so line
-    /// breaking need not shape a run of such words to know its width. False when that is not known.
-    /// </summary>
-    public virtual bool InertInContext(string s, int start, int length) => false;
-
     /// <summary>The same font without pair kerning, as browsers draw text with font-kerning: none.</summary>
     public virtual TextFont WithoutKerning() => this;
 

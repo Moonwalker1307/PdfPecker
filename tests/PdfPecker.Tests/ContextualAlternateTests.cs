@@ -140,4 +140,52 @@ public class ContextualAlternateTests
         Assert.Equal(text, PdfText.Extract(pdf).Trim());
         AssertStructurallyValid(pdf);
     }
+
+    // Words that Inter's contextual alternates change by their neighbours across spaces (the x between digits, the
+    // arrows, the colons and the brackets next to capitals), words they leave alone, and words with ligatures.
+    private static readonly string[] Words =
+        ["3", "x", "4", "->", "<-", "10:30", "Go", "(A)", "[b]", "{C}", "--", "==", "i", "office", "Ab", "a-b", ":", "x4", "+", "-", "×", "*", "@", "~",
+         "quick", "3x4", "A", "(", ")", "–", "—", "é", "ñ", "1:", ":2", "->>", "a=b", "IJ", "fi", "B:", "12%", "3,400"];
+
+    [Fact]
+    public void Text_shaped_a_word_at_a_time_is_shaped_as_a_whole()
+    {
+        var font = Font();
+        var program = font.Program;
+        Assert.True(font.ShapesInContext);
+        Assert.NotNull(program.WordContext);
+        var random = new Random(5);
+        List<ShapedGlyph> words = [], whole = [];
+        for (int n = 0; n < 3000; n++)
+        {
+            var text = new System.Text.StringBuilder();
+            if (random.Next(8) == 0) text.Append(' ');
+            for (int w = 0, count = 1 + random.Next(9); w < count; w++)
+            {
+                if (w > 0) text.Append(random.Next(6) == 0 ? "  " : " ");
+                text.Append(Words[random.Next(Words.Length)]);
+            }
+            if (random.Next(8) == 0) text.Append(' ');
+            string s = text.ToString();
+            // A prefix keeps the text from starting at 0, as a line's run does within its paragraph.
+            string source = "pre " + s;
+            if (!font.ShapeWords(source, 4, s.Length, words)) continue;
+            ComplexShaper.Shape(program, source, 4, s.Length, false, whole);
+            Assert.True(whole.Count == words.Count, $"'{s}': {whole.Count} glyphs whole, {words.Count} a word at a time");
+            for (int k = 0; k < whole.Count; k++)
+            {
+                var (a, b) = (whole[k], words[k]);
+                Assert.True(a.Gid == b.Gid && a.Start == b.Start && a.Length == b.Length && a.Advance == b.Advance && a.Dx == b.Dx && a.Dy == b.Dy,
+                    $"'{s}': glyph {k} is {a.Gid}@{a.Start}+{a.Advance} whole and {b.Gid}@{b.Start}+{b.Advance} a word at a time");
+            }
+        }
+    }
+
+    [Fact]
+    public void Text_is_shaped_whole_when_a_space_kerns_with_the_next_word()
+    {
+        // Roboto kerns a space with the glyph after it, which shaping a word at a time would leave out.
+        var roboto = Assert.Single(FontProgram.Load(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "Roboto-Liga.ttf"))));
+        Assert.Null(roboto.WordContext);
+    }
 }

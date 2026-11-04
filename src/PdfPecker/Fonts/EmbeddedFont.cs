@@ -161,10 +161,70 @@ internal sealed class EmbeddedFont : TextFont
 
     /// <summary>
     /// True when the text goes through the OpenType shaper: it has characters of a complex script, or the font has
-    /// features on that substitute in context, such as contextual alternates or fractions.
+    /// features on that substitute in context, such as contextual alternates or fractions, and the text is not made of
+    /// plain words only (see <see cref="PlainWords"/>).
     /// </summary>
     public bool UsesShaper(string s, int start, int length)
-        => _shapesInContext || Program.ShapedFeatures != null || ComplexShaper.Handles(s, start, length);
+        => Program.ShapedFeatures != null || ComplexShaper.Handles(s, start, length) || _shapesInContext && !PlainWords(s, start, length);
+
+    /// <summary>
+    /// Whether the text, in a font whose text goes through the shaper because it substitutes in context, is all plain
+    /// words and spaces: words that the shaper draws with the glyphs the font draws them with otherwise, one per
+    /// character apart from standard ligatures and unmoved, and none of which a rule matching a space may change. In
+    /// any text such words get those glyphs (see <see cref="OpenTypeLayout.WordContext"/>), so they are measured and
+    /// drawn as in a font without such features, which is much faster; their kerning and the rounding of their widths
+    /// are the font's own rather than the shaper's.
+    /// </summary>
+    private bool PlainWords(string s, int start, int length)
+    {
+        if (Program.WordContext is not { } context) return false;
+        var cache = Shapes;
+        for (int i = start, end = start + length; i < end;)
+        {
+            while (i < end && s[i] == ' ') i++;
+            int wordEnd = i;
+            while (wordEnd < end && s[wordEnd] != ' ') wordEnd++;
+            if (wordEnd > i && !PlainWord(context, cache, s, i, wordEnd - i)) return false;
+            i = wordEnd;
+        }
+        return true;
+    }
+
+    private bool PlainWord(OpenTypeLayout.WordContext context, ShapeCache cache, string s, int start, int length)
+    {
+        if (cache.TryGetPlain(s, start, length, out bool plain)) return plain;
+        plain = IsPlainWord(context, s, start, length);
+        cache.AddPlain(s, start, length, plain);
+        return plain;
+    }
+
+    private bool IsPlainWord(OpenTypeLayout.WordContext context, string s, int start, int length)
+    {
+        var layout = Program.Layout!;
+        for (int i = start, end = start + length; i < end; i++)
+        {
+            char c = s[i];
+            if (char.IsSurrogate(c) || Text.UnicodeTables.IsDefaultIgnorable(c) || Text.UnicodeTables.Bidi(c) is Text.BidiClass.R or Text.BidiClass.AL)
+                return false;
+            int gid = Program.GlyphId(c);
+            if (gid == 0 || context.MayChange(gid) || (layout.GlyphProps(gid) & OpenTypeLayout.Mark) != 0) return false;
+        }
+        var shaped = t_window ??= new();
+        ComplexShaper.Shape(Program, s, start, length, false, shaped, _off);
+        var plain = t_plain ??= new();
+        PlainGlyphs(s, start, length, plain, rtl: false);
+        if (shaped.Count != plain.Count) return false;
+        for (int k = 0; k < shaped.Count; k++)
+        {
+            var (a, b) = (shaped[k], plain[k]);
+            if (a.Gid != b.Gid || a.Start != b.Start || a.Length != b.Length || a.Dx != 0 || a.Dy != 0
+                || context.MayChange(a.Gid) || (layout.GlyphProps(a.Gid) & OpenTypeLayout.Mark) != 0)
+                return false;
+        }
+        return true;
+    }
+
+    [ThreadStatic] private static List<ShapedGlyph>? t_plain;
 
     public override bool ShapesInContext => _shapesInContext;
 
@@ -198,6 +258,13 @@ internal sealed class EmbeddedFont : TextFont
             ShapeComplex(s, start, length, rtl, glyphs);
             return true;
         }
+        PlainGlyphs(s, start, length, glyphs, rtl);
+        return false;
+    }
+
+    // The glyphs the font draws the text with outside the shaper: the characters' own, with standard ligatures.
+    private void PlainGlyphs(string s, int start, int length, List<ShapedGlyph> glyphs, bool rtl)
+    {
         glyphs.Clear();
         var lig = _ligatures;
         bool ligate = false;
@@ -214,7 +281,6 @@ internal sealed class EmbeddedFont : TextFont
             i += n - 1;
         }
         if (ligate) lig!.Apply(glyphs);
-        return false;
     }
 
     [ThreadStatic] private static List<ShapedGlyph>? t_glyphs;
@@ -266,7 +332,7 @@ internal sealed class EmbeddedFont : TextFont
     private int MeasureComplex(string s, int start, int length)
     {
         bool rtl = ComplexShaper.GuessRtl(s, start, length);
-        if (Shapes.TryGet(s, start, length, rtl, null, out int width, out _)) return width;
+        if (Shapes.TryGet(s, start, length, rtl, null, out int width)) return width;
         var glyphs = t_glyphs ??= new List<ShapedGlyph>();
         ShapeComplex(s, start, length, rtl, glyphs);
         return ShapeCache.Width(glyphs);
@@ -282,51 +348,117 @@ internal sealed class EmbeddedFont : TextFont
         }
     }
 
-    /// <summary>
-    /// The OpenType shaper's glyphs for the text, kept for the next time the font shapes the same text; returns whether
-    /// the text is inert (see <see cref="InertInContext"/>).
-    /// </summary>
-    private bool ShapeComplex(string s, int start, int length, bool rtl, List<ShapedGlyph> glyphs)
+    /// <summary>The OpenType shaper's glyphs for the text, kept for the next time the font shapes the same text.</summary>
+    private void ShapeComplex(string s, int start, int length, bool rtl, List<ShapedGlyph> glyphs)
     {
         var cache = Shapes;
-        if (cache.TryGet(s, start, length, rtl, glyphs, out _, out bool inert)) return inert;
-        ComplexShaper.Shape(Program, s, start, length, rtl, glyphs, _off);
-        inert = !rtl && IsInert(s, start, length, glyphs);
-        cache.Add(s, start, length, rtl, glyphs, inert);
-        return inert;
+        if (cache.TryGet(s, start, length, rtl, glyphs, out _)) return;
+        if (rtl || !ShapeWords(s, start, length, glyphs)) ComplexShaper.Shape(Program, s, start, length, rtl, glyphs, _off);
+        cache.Add(s, start, length, rtl, glyphs);
     }
+
+    // The words of the text being shaped by ShapeWords, each with the spaces after it, and the glyphs of one shaping call.
+    [ThreadStatic] private static List<(int Start, int End, int Glyphs, bool Free)>? t_words;
+    [ThreadStatic] private static List<ShapedGlyph>? t_window;
+
+    // Context around the words shaped together, in glyphs, at least: a mark at the start of a word sits on the space
+    // before it.
+    private const int MinWordContext = 2;
 
     /// <summary>
-    /// Whether the text is inert in context: shaped on its own, every character keeps its own glyph, unmoved, and none
-    /// of those glyphs starts a lookup of more than one glyph. Next to other inert text it is then shaped as on its
-    /// own, so a run of such words is as wide as its words and the kerning between them, give or take the rounding of
-    /// each width to 1/1000 em.
+    /// Shapes text of a script that is not complex a word at a time, with the glyphs that shaping the whole text gives,
+    /// so that a font whose text all goes through the shaper (contextual alternates) shapes each word of a document
+    /// about once instead of every line it is measured or drawn in. False when the text cannot be shaped so.
     /// </summary>
-    public override bool InertInContext(string s, int start, int length)
+    /// <remarks>
+    /// The font's lookups reach across a space only as context (see <see cref="OpenTypeLayout.WordContext"/>), so a
+    /// word none of whose glyphs a rule matching a space may change, and that has no marks, is shaped in the text as on
+    /// its own, together with the spaces after it, whose kerning with the word is the word's. The other words are
+    /// shaped together with the words around them as context, as many glyphs as such a rule looks at, and keep only
+    /// their own glyphs; words of that kind with fewer glyphs between them are shaped together.
+    /// </remarks>
+    internal bool ShapeWords(string s, int start, int length, List<ShapedGlyph> output)
     {
-        if (length == 0) return true;
-        if (!UsesShaper(s, start, length) || ComplexShaper.GuessRtl(s, start, length)) return false;
-        var glyphs = t_glyphs ??= new List<ShapedGlyph>();
-        return ShapeComplex(s, start, length, false, glyphs);
-    }
-
-    private bool IsInert(string s, int start, int length, List<ShapedGlyph> glyphs)
-    {
-        // Features asked for by font-feature-settings and the complex scripts have lookups of their own.
-        if (Program.ShapedFeatures != null || ComplexShaper.Handles(s, start, length) || Program.MultiGlyphStarts is not { } starts) return false;
-        int at = start, end = start + length;
-        foreach (var g in glyphs)
+        int end = start + length;
+        if (Program.ShapedFeatures != null || s.AsSpan(start, length).IndexOf(' ') < 0 || Program.WordContext is not { } context) return false;
+        foreach (char c in s.AsSpan(start, length))
+            if (char.IsSurrogate(c) || Text.UnicodeTables.IsDefaultIgnorable(c)) return false;
+        int script = ComplexShaper.SimpleScript(s, start, length);
+        if (script < 0) return false;
+        var cache = Shapes;
+        var layout = Program.Layout!;
+        var words = t_words ??= new();
+        var window = t_window ??= new();
+        words.Clear();
+        for (int i = start; i < end;)
         {
-            if (g.Start != at || g.Dx != 0 || g.Dy != 0) return false;
-            if (at >= end) return false;
-            int cp = s[at], n = 1;
-            if (char.IsHighSurrogate(s[at]) && at + 1 < end && char.IsLowSurrogate(s[at + 1])) { cp = char.ConvertToUtf32(s[at], s[at + 1]); n = 2; }
-            if (g.Length != n || g.Gid != Program.GlyphId(cp) || (starts[g.Gid >> 6] >> (g.Gid & 63) & 1) != 0
-                || (Program.Layout!.GlyphProps(g.Gid) & OpenTypeLayout.Mark) != 0)
-                return false;
-            at += n;
+            int next = i;
+            while (next < end && s[next] != ' ') next++;
+            while (next < end && s[next] == ' ') next++;
+            bool free = true;
+            for (int k = i; k < next && free; k++)
+            {
+                int gid = Program.GlyphId(s[k]);
+                free = !context.MayChange(gid) && (layout.GlyphProps(gid) & OpenTypeLayout.Mark) == 0;
+            }
+            int glyphs = next - i;
+            if (free)
+            {
+                window.Clear();
+                if (cache.TryAppendWord(script, s, i, next - i, window, out bool cached, out int count))
+                {
+                    free = cached;
+                    glyphs = Math.Min(glyphs, count);
+                }
+                else
+                {
+                    ComplexShaper.ShapeAs(Program, s, i, next - i, script, window, _off);
+                    foreach (var g in window)
+                        free &= !context.MayChange(g.Gid) && (layout.GlyphProps(g.Gid) & OpenTypeLayout.Mark) == 0;
+                    cache.AddWord(script, s, i, next - i, window, 0, free);
+                    glyphs = Math.Min(glyphs, window.Count);
+                }
+            }
+            words.Add((i, next, glyphs, free));
+            i = next;
         }
-        return at == end;
+
+        output.Clear();
+        int reach = Math.Max(context.Reach, MinWordContext);
+        for (int w = 0; w < words.Count;)
+        {
+            var word = words[w];
+            if (word.Free)
+            {
+                if (!cache.TryAppendWord(script, s, word.Start, word.End - word.Start, output, out _, out _))
+                {
+                    ComplexShaper.ShapeAs(Program, s, word.Start, word.End - word.Start, script, window, _off);
+                    output.AddRange(window);
+                }
+                w++;
+                continue;
+            }
+            // The words shaped together end where enough free words follow to hold all the context of the last.
+            int last = w, after = w + 1, seen = 0;
+            while (after < words.Count && seen < reach)
+            {
+                if (!words[after].Free)
+                {
+                    last = after++;
+                    seen = 0;
+                }
+                else seen += words[after++].Glyphs;
+            }
+            // Before them, as many free words as a rule looks back over; fewer would have joined the words before.
+            int before = w, back = 0;
+            while (before > 0 && back < reach) back += words[--before].Glyphs;
+            int from = words[w].Start, to = words[last].End;
+            ComplexShaper.ShapeAs(Program, s, words[before].Start, words[after - 1].End - words[before].Start, script, window, _off);
+            foreach (var g in window)
+                if (g.Start >= from && g.Start < to) output.Add(g);
+            w = last + 1;
+        }
+        return true;
     }
 
     public override float CharWidth(char c, float size) => SizeAdjust == 1 ? _widths[c] * size / 1000f : _widths[c] * size * SizeAdjust / 1000f;
@@ -455,20 +587,6 @@ internal sealed class FontChain : TextFont
         }
         if (runFont != null) total += runFont.MeasureUnits(s, runStart, end - runStart);
         return total;
-    }
-
-    // Only text drawn in one of the fonts is known to be inert: a change of font ends the shaped run.
-    public override bool InertInContext(string s, int start, int length)
-    {
-        int previous = 0;
-        TextFont? runFont = null;
-        for (int i = start, end = start + length, next; i < end; i = next)
-        {
-            var f = Next(s, i, end, runFont, ref previous, out next);
-            if (runFont != null && !ReferenceEquals(f, runFont)) return false;
-            runFont = f;
-        }
-        return runFont == null || runFont.InertInContext(s, start, length);
     }
 
     public override float CharWidth(char c, float size)
