@@ -57,10 +57,13 @@ internal static partial class CssParser
     /// <summary>
     /// column-rule or row-rule: width, style and colour in any order, or a comma-separated list of them with repeat()
     /// notations, which becomes a list of the same shape in each longhand. One rule gives each longhand one value, as
-    /// column-rule always did.
+    /// column-rule always did. A list with an entry that is not a rule sets nothing, as in Chrome, rather than the
+    /// longhands that happen to accept their part of it.
     /// </summary>
     private static void ExpandGapRule(string value, string prefix, LonghandWriter longhands)
     {
+        // The list splitter drops empty entries, which make the whole list invalid.
+        if (HasEmptyEntry(value)) return;
         var entries = SplitTopLevel(value, ',');
         if (entries.Count <= 1 && !value.TrimStart().StartsWith("repeat(", StringComparison.OrdinalIgnoreCase))
         {
@@ -70,6 +73,7 @@ internal static partial class CssParser
             longhands.Add(prefix + "-color", parts.Color);
             return;
         }
+        if (!IsGapRuleList(entries)) return;
         StringBuilder width = new(), style = new(), color = new();
         foreach (var raw in entries)
         {
@@ -110,6 +114,70 @@ internal static partial class CssParser
         longhands.Add(prefix + "-width", width.ToString());
         longhands.Add(prefix + "-style", style.ToString());
         longhands.Add(prefix + "-color", color.ToString());
+    }
+
+    /// <summary>
+    /// Whether every entry of a column-rule or row-rule list is a rule, or a repeat() of rules with a count: no empty
+    /// entry, no repeat() inside a repeat(), and no rule with a second width, style or colour or a colour that does not
+    /// parse. The longhands check the counts and the widths' units.
+    /// </summary>
+    private static bool IsGapRuleList(List<string> entries)
+    {
+        foreach (var raw in entries)
+        {
+            var entry = raw.Trim();
+            if (!entry.StartsWith("repeat(", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!IsGapRule(entry)) return false;
+                continue;
+            }
+            if (!entry.EndsWith(')')) return false;
+            var body = entry.Substring(7, entry.Length - 8);
+            if (HasEmptyEntry(body)) return false;
+            var args = SplitTopLevel(body, ',');
+            if (args.Count < 2) return false;
+            for (int i = 1; i < args.Count; i++)
+                if (!IsGapRule(args[i].Trim())) return false;
+        }
+        return true;
+    }
+
+    /// <summary>Whether a comma-separated list has an empty entry: a leading, trailing or doubled comma, or nothing at all.</summary>
+    private static bool HasEmptyEntry(string list)
+    {
+        int depth = 0;
+        bool content = false;
+        foreach (char c in list)
+        {
+            if (c == '(') depth++;
+            else if (c == ')') depth--;
+            if (c == ',' && depth == 0)
+            {
+                if (!content) return true;
+                content = false;
+            }
+            else if (!char.IsWhiteSpace(c)) content = true;
+        }
+        return !content;
+    }
+
+    /// <summary>One rule of a list: a width, a style and a colour in any order, each at most once and one at least.</summary>
+    private static bool IsGapRule(string entry)
+    {
+        var tokens = Tokens(entry);
+        if (tokens.Count is 0 or > 3) return false;
+        bool width = false, style = false, color = false;
+        foreach (var token in tokens)
+        {
+            var lower = token.ToLowerInvariant();
+            ref bool seen = ref color;
+            if (IsBorderStyle(lower)) seen = ref style;
+            else if (IsLineWidth(lower) || CssMath.IsMathFunction(lower)) seen = ref width;
+            else if (!lower.Equals("currentcolor", StringComparison.Ordinal) && !CssColor.TryParse(token, 0, out _)) return false;
+            if (seen) return false;
+            seen = true;
+        }
+        return true;
     }
 
     /// <summary>

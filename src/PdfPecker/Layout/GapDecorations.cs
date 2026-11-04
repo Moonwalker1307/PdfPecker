@@ -149,8 +149,11 @@ internal sealed partial class LayoutEngine
     /// <summary>
     /// Paints the rules of a container's column and row gaps into <paramref name="slot"/>. In a flex container the
     /// rules run through every crossing (rule-break: normal is none there), and every part of a gap is visible.
+    /// <paramref name="content"/> is the container's content box, which no rule passes (CSS Gaps §3.3): a negative cap
+    /// inset reaches the content edge at most, which also bounds the pieces of a rule laid out on the pages.
     /// </summary>
-    private void PaintGapRules(ComputedStyle s, List<DecorGap> columns, List<DecorGap> rows, bool flex, GroupOp slot)
+    private void PaintGapRules(ComputedStyle s, List<DecorGap> columns, List<DecorGap> rows, bool flex, GroupOp slot,
+        (float Left, float Top, float Right, float Bottom) content)
     {
         var col = ColumnRuleAxis(s, columns.Count);
         var row = RowRuleAxis(s, rows.Count);
@@ -163,8 +166,8 @@ internal sealed partial class LayoutEngine
         FindRuns(rows, row);
         var colGroup = new GroupOp();
         var rowGroup = new GroupOp();
-        PaintRuns(columns, rows, col, row, vertical: true, s.Color, colGroup);
-        PaintRuns(rows, columns, row, col, vertical: false, s.Color, rowGroup);
+        PaintRuns(columns, rows, col, row, vertical: true, s.Color, colGroup, content.Top, content.Bottom);
+        PaintRuns(rows, columns, row, col, vertical: false, s.Color, rowGroup, content.Left, content.Right);
         // rule-overlap: the row rules paint over the column rules unless column-over-row asks for the opposite.
         bool columnOverRow = s.GapRules?.ColumnOverRow == true;
         if (colGroup.Ops.Count > 0 && !columnOverRow) slot.Ops.Add(colGroup);
@@ -205,13 +208,19 @@ internal sealed partial class LayoutEngine
     /// <summary>
     /// Paints the segments of one direction's gaps, each end moved by its inset (CSS Gaps §3.3): a junction inset where
     /// another segment meets the end, a cap inset elsewhere. Percentages are of the junction's size, which is zero at
-    /// the container's edges, and overlap-join reaches into a junction to the far side of the crossing rule.
+    /// the container's edges, and overlap-join reaches into a junction to the far side of the crossing rule. Each end
+    /// stays between <paramref name="lo"/> and <paramref name="hi"/>, the content box along the gaps, or the gap's own
+    /// ends where they lie beyond it.
     /// </summary>
-    private void PaintRuns(List<DecorGap> gaps, List<DecorGap> crossing, RuleAxis axis, RuleAxis crossAxis, bool vertical, uint currentColor, GroupOp into)
+    private void PaintRuns(List<DecorGap> gaps, List<DecorGap> crossing, RuleAxis axis, RuleAxis crossAxis, bool vertical, uint currentColor, GroupOp into,
+        float lo, float hi)
     {
         foreach (var gap in gaps)
         {
             if (gap.Runs is not { } runs) continue;
+            float gapLo = gap.Edges[0], gapHi = gap.Edges[^1];
+            if (gap.Flip) (gapLo, gapHi) = (gap.FlipOrigin - gapHi, gap.FlipOrigin - gapLo);
+            float min = Math.Min(lo, Math.Min(gapLo, gapHi)), max = Math.Max(hi, Math.Max(gapLo, gapHi));
             var style = axis.Styles.For(gap.Index, axis.Count);
             float width = axis.Widths.For(gap.Index, axis.Count);
             uint color = axis.Colors.For(gap.Index, axis.Count) ?? currentColor;
@@ -224,6 +233,9 @@ internal sealed partial class LayoutEngine
                 if (last < gap.States.Count - 1) end -= JunctionInset(gap, last, crossing, crossAxis, axis.Insets.JunctionEnd, axis.Insets.CapEnd, other: last + 1);
                 else end -= Inset(axis.Insets.CapEnd, 0, 0, junction: false);
                 if (gap.Flip) (start, end) = (gap.FlipOrigin - end, gap.FlipOrigin - start);
+                // A huge negative inset would otherwise draw far past the container, a piece on every page down to it.
+                start = Math.Max(start, min);
+                end = Math.Min(end, max);
                 if (!(end > start)) continue;
                 if (vertical) PaintVerticalRule(into, style, width, color, gap.Mid, start, end, axis.Insets);
                 else BoxPainter.Side(into, style, width, color, start, gap.Mid - width / 2, end - start, width, horizontal: true);
@@ -386,7 +398,9 @@ internal sealed partial class LayoutEngine
             }
             colGaps.Add(gap);
         }
-        PaintGapRules(s, colGaps, rowGaps, flex: false, slot);
+        // The content box: a definite height may reach below the last row, and grows with the rows on the pages.
+        float contentBottom = g.Y + (g.DefiniteH ?? 0) + (rowShift?[rowCount] ?? 0);
+        PaintGapRules(s, colGaps, rowGaps, flex: false, slot, (g.X, g.Y, g.X + g.W, contentBottom));
     }
 
     // ------------------------------------------------------------------ flex
@@ -396,9 +410,10 @@ internal sealed partial class LayoutEngine
     /// line, and a row rule between the lines across the container's width, with a junction wherever a column gap of
     /// the line above or below meets it. <paramref name="lines"/> holds each line from the top with the left and right
     /// edges of its items' margin boxes from the left; <paramref name="reverse"/> says the items were placed from the
-    /// right. The values of a list go to the gaps in placement order across all the lines.
+    /// right. The values of a list go to the gaps in placement order across all the lines. The rules stay within the
+    /// content box, from <paramref name="contentTop"/> to <paramref name="contentBottom"/> and across the width.
     /// </summary>
-    private void FlexRowGapRules(ComputedStyle s, float x, float w, List<(float Top, float Bottom, float[] Edges)> lines, bool reverse, GroupOp slot)
+    private void FlexRowGapRules(ComputedStyle s, float x, float w, float contentTop, float contentBottom, List<(float Top, float Bottom, float[] Edges)> lines, bool reverse, GroupOp slot)
     {
         bool wrapReverse = s.FlexWrap == FlexWrap.WrapReverse;
         int count = lines.Count;
@@ -458,7 +473,7 @@ internal sealed partial class LayoutEngine
             if (s.Rtl) gap.Reverse(2 * x + w);
             rowGaps.Add(gap);
         }
-        PaintGapRules(s, colGaps, rowGaps, flex: true, slot);
+        PaintGapRules(s, colGaps, rowGaps, flex: true, slot, (x, contentTop, x + w, contentBottom));
     }
 
     /// <summary>
@@ -467,8 +482,10 @@ internal sealed partial class LayoutEngine
     /// (<paramref name="top"/> to <paramref name="bottom"/>), with a junction wherever a row gap of either line meets
     /// it. <paramref name="lines"/> holds each line in placement order with the top and bottom of its items' margin
     /// boxes from the top; <paramref name="reverse"/> says the items were placed from the bottom.
+    /// <paramref name="content"/> is the container's content box, which bounds the rules.
     /// </summary>
-    private void FlexColumnGapRules(ComputedStyle s, List<(float X, float W, List<float> Edges)> lines, bool reverse, float top, float bottom, GroupOp slot)
+    private void FlexColumnGapRules(ComputedStyle s, List<(float X, float W, List<float> Edges)> lines, bool reverse, float top, float bottom, GroupOp slot,
+        (float Left, float Top, float Right, float Bottom) content)
     {
         var rowGaps = new List<DecorGap>();
         var lineGaps = new int[lines.Count];
@@ -521,6 +538,6 @@ internal sealed partial class LayoutEngine
             gap.Portion(at, bottom, PortionOpen);
             colGaps.Add(gap);
         }
-        PaintGapRules(s, colGaps, rowGaps, flex: true, slot);
+        PaintGapRules(s, colGaps, rowGaps, flex: true, slot, content);
     }
 }

@@ -476,7 +476,7 @@ internal sealed partial class LayoutEngine
             }
             lineTop = lineBottom + rowGap + crossBetween;
         }
-        if (rules != null) FlexRowGapRules(s, x, w, ruleLines!, reverse, rules);
+        if (rules != null) FlexRowGapRules(s, x, w, y, Math.Max(lineTop - rowGap - crossBetween, y + (definiteH ?? 0)), ruleLines!, reverse, rules);
         if (!float.IsNaN(firstBaseline)) _lastBaseline = firstBaseline;
         if (!float.IsNaN(lowestContent)) _lastContentBottom = lowestContent;
         return lineTop - rowGap - crossBetween;
@@ -617,7 +617,7 @@ internal sealed partial class LayoutEngine
             if (float.IsNaN(firstBaseline)) firstBaseline = _lastBaseline;
             lx += lineW[li] + colGap + between;
         }
-        if (rules != null) FlexColumnGapRules(s, ruleLines!, s.FlexDirection == FlexDirection.ColumnReverse, y, y + definiteH!.Value, rules);
+        if (rules != null) FlexColumnGapRules(s, ruleLines!, s.FlexDirection == FlexDirection.ColumnReverse, y, y + definiteH!.Value, rules, (x, y, x + w, y + definiteH!.Value));
         if (!float.IsNaN(firstBaseline)) _lastBaseline = firstBaseline;
         return bottom;
     }
@@ -877,7 +877,7 @@ internal sealed partial class LayoutEngine
             }
             if (i < items.Count - 1) cy += gap + between;
         }
-        if (rules != null) FlexColumnGapRules(s, [(x, w, edges!)], reverse, 0, 0, rules);
+        if (rules != null) FlexColumnGapRules(s, [(x, w, edges!)], reverse, 0, 0, rules, (x, y, x + w, Math.Max(cy, y + (definiteH ?? 0))));
         if (!float.IsNaN(firstBaseline)) _lastBaseline = firstBaseline;
         return cy;
     }

@@ -829,8 +829,8 @@ internal sealed partial class LayoutEngine
 
     /// <summary>
     /// column-rule: a line in the middle of each gap between columns that hold content. Lists of values (CSS Gaps 1)
-    /// give the gaps their values in turn, and the cap insets move the ends of each line; a percentage of no junction
-    /// is zero.
+    /// give the gaps their values in turn, and the cap insets move the ends of each line within the column box; a
+    /// percentage of no junction is zero.
     /// </summary>
     private void ColumnRules(ComputedStyle s, int usedColumns, float x, float top, float bottom, float colW, float gap, int n, bool rtl)
     {
@@ -843,9 +843,10 @@ internal sealed partial class LayoutEngine
             return;
         }
         var insets = rules.ColumnInsets;
-        float from = top + (insets.CapStart.OverlapJoin ? 0 : insets.CapStart.Length.Resolve(0));
-        float to = bottom - (insets.CapEnd.OverlapJoin ? 0 : insets.CapEnd.Length.Resolve(0));
-        if (to <= from) return;
+        // A negative inset reaches the edge of the columns' content at most (CSS Gaps §3.3).
+        float from = Math.Max(top, top + (insets.CapStart.OverlapJoin ? 0 : insets.CapStart.Length.Resolve(0)));
+        float to = Math.Min(bottom, bottom - (insets.CapEnd.OverlapJoin ? 0 : insets.CapEnd.Length.Resolve(0)));
+        if (!(to > from)) return;
         int gaps = usedColumns - 1;
         for (int col = 1; col < usedColumns; col++)
         {

@@ -125,6 +125,18 @@ public class GapDecorationTests
     }
 
     [Fact]
+    public void Invalid_rule_lists_set_no_longhand()
+    {
+        // As in Chrome, a shorthand list with one bad entry is dropped whole, not applied to the longhands that accept it.
+        Assert.Null(StyleOf("column-rule: 2px solid red, foo").GapRules);
+        Assert.Null(StyleOf("row-rule: 2px solid red,").GapRules);
+        Assert.Null(StyleOf("rule: repeat(2, repeat(2, 1px solid red))").GapRules);
+        Assert.Null(StyleOf("row-rule: 1px solid red, solid dashed").GapRules);
+        Assert.Null(StyleOf("row-rule: repeat(2, 1px solid red,)").GapRules);
+        Assert.NotNull(StyleOf("row-rule: 1px solid red, repeat(2, thin dotted currentColor, calc(2px) double #00f)").GapRules);
+    }
+
+    [Fact]
     public void A_single_value_replaces_a_list()
     {
         var s = StyleOf("column-rule-color: red, blue; column-rule-color: green");
@@ -276,6 +288,19 @@ public class GapDecorationTests
     }
 
     [Fact]
+    public void Negative_cap_insets_stop_at_the_content_box()
+    {
+        // Huge negative caps reach the content edges of the padded grid and no further.
+        var ops = Layout($"<div class='g' style='{Grid}; padding: 20px; rule-inset: -1e6px; column-rule-inset-cap-end: -1e30px'>{Cells(9)}</div>");
+        Rule(Rules(ops, Blue)[0], 63, 20, 4, 110);
+        // Rows run across the content box, the full width less the padding.
+        Rule(Rules(ops, Red)[0], 20, 53, Width / Px - 40, 4);
+        var flex = Layout("<div class='f' style='display: flex; flex-wrap: wrap; width: 200px; gap: 10px; column-rule: 4px solid #00f; rule-inset: -1e6px'>"
+            + "<div style='width: 60px; height: 30px'></div><div style='width: 60px; height: 30px'></div></div>");
+        Rule(Assert.Single(Rules(flex, Blue)), 63, 0, 4, 30);
+    }
+
+    [Fact]
     public void Overlap_join_reaches_past_the_crossing_rule()
     {
         var ops = Layout($"<div class='g' style='{Grid}; rule-break: intersection; row-rule-inset: overlap-join'>{Cells(6)}</div>");
@@ -389,5 +414,15 @@ public class GapDecorationTests
         Assert.Single(Rules(ops, Green));
         Near(5, blue.Y);
         Near(30, blue.H);
+    }
+
+    [Fact]
+    public void Multicol_negative_insets_stop_at_the_column_box()
+    {
+        var ops = Layout("<div style='columns: 3; column-gap: 20px; column-rule: 2px solid #00f; column-rule-color: blue, green; column-rule-inset: -1e6px'>"
+            + "<p style='height: 40px; margin: 0'>a</p><p style='height: 40px; margin: 0'>b</p><p style='height: 40px; margin: 0'>c</p></div>");
+        var blue = Assert.Single(Rules(ops, Blue));
+        Near(0, blue.Y);
+        Near(40, blue.H);
     }
 }
