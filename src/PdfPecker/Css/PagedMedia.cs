@@ -54,9 +54,12 @@ internal sealed class PagedContent
         return e.LayoutKey;
     }
 
-    /// <summary>Counters other than page that <c>target-counter()</c> asks for, and their values at each element with an id.</summary>
+    /// <summary>
+    /// Counters other than page that <c>target-counter()</c> and <c>target-counters()</c> ask for, and all the nested
+    /// values of each at every element with an id, outermost first.
+    /// </summary>
     public readonly HashSet<string> WantedCounters = new(StringComparer.Ordinal);
-    public readonly Dictionary<string, Dictionary<string, int>> CounterSnapshots = new(StringComparer.Ordinal);
+    public readonly Dictionary<string, Dictionary<string, int[]>> CounterSnapshots = new(StringComparer.Ordinal);
 
     /// <summary>The running strings, once the pages of their elements are known; for margin boxes.</summary>
     public RunningValues<string>? Running;

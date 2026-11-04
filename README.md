@@ -142,8 +142,10 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   (`text-underline-position`), drop caps, `::first-line` styles with a background, `::marker` styles (a larger marker font or a tall marker image makes its
   line taller, `content: none` hides the marker, `counter(list-item)` numbers it and its own `direction` orders its
   text, as in Chrome), images and gradients in `::before` and `::after` content, inline SVG (with
-  percentage coordinates and sizes, as in Bootstrap's placeholder images, HTML in `<foreignObject>`, and icons drawn
-  with `<use>` from a sprite of symbols that is itself hidden, as in Bootstrap's icon sprites) and PNG, JPEG, GIF, WebP, BMP and TIFF images (also chosen by `srcset`, `<picture>` and
+  percentage coordinates and sizes, as in Bootstrap's placeholder images, `cx`, `cy`, `r`, `rx`, `ry`, `x`, `y`, `width`, `height`, `d: path()` and `stop-color` set from style sheets, HTML in `<foreignObject>`, and icons drawn
+  with `<use>` from a sprite of symbols that is itself hidden, as in Bootstrap's icon sprites; also CSS `transform` with `transform-box` and
+  `transform-origin` on SVG elements, such as a gauge needle turning about its own centre, and `vector-effect: non-scaling-stroke`
+  for hairlines in a scaled chart, though markers still scale) and PNG, JPEG, GIF, WebP, BMP and TIFF images (also chosen by `srcset`, `<picture>` and
   `image-set()`,
   shown by `<embed>` and `<object>`, photos turned upright by their EXIF orientation, and `image-rendering: pixelated`
   or `crisp-edges` writing enlarged images, such as QR codes and pixel art, with hard pixel edges in every PDF viewer), and CSS-only charts such as
@@ -161,7 +163,9 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
 - **Paged media**: `@page` sizes (also a page as tall as its content, `size: 80mm auto`, for receipts on a roll), borders, padding and background images (which cover the whole sheet) and margin boxes (also with running elements, `position: running()` and `element()`, as in Prince and WeasyPrint), running headers and footers (also a first page of its own, even pages of their own for printing on both sides, and bands
   of their own for named pages), footnotes, tables of contents with page numbers, the page count anywhere in the content (`counter(pages)`, as in Prince), the first and last page of a section and page numbers counted within it (`-pdfpecker-target-pages()`, and `{section-page:id}` in running headers and footers), break control (also table row groups
   and group header rows kept together, as reports keep a group on one page, and forced breaks between table rows and between flex lines), table rows that break inside at a page's end as in Chrome, unless a cell would have nothing before the break, flex rows whose items break at a page's end as in Chrome (the row moves whole when an item is kept whole), table
-  headers and footers repeated on every page (also around a row split across pages), and
+  headers and footers repeated on every page (also around a row split across pages), boxes split across pages or
+  columns that repeat their border, padding, rounded corners, shadow and background on each page with
+  `box-decoration-break: clone` (also tables with separate borders), and
   bookmarks from the headings that `bookmark-level`, `bookmark-label` and `bookmark-state` can extend, rename or close.
   [More](https://pdfpecker.net/docs/paged-media/)
 - **Content scaled to fit a box**: `-pdfpecker-scale-to-fit: shrink` fits text of any length into a fixed space, for
@@ -176,9 +180,10 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
 - **Fonts**: TrueType, OpenType, WOFF and WOFF2, subset and embedded, with kerning, ligatures, variable fonts and
   OpenType features, and bundled fallback fonts for letters and symbols a document's fonts lack. COLR colour fonts,
   versions 0 and 1 (such as Noto Color Emoji), print in colour as Chrome prints them, with the default palette.
-  [More](https://pdfpecker.net/docs/fonts/)
+  `@font-face` takes `size-adjust`, `ascent-override`, `descent-override` and `line-gap-override`, so a fallback face
+  can be sized to match a web font. [More](https://pdfpecker.net/docs/fonts/)
 - **Languages**: Arabic and Hebrew with bidi and shaping, Indic scripts, Thai and Lao, CJK line breaking and
-  justification, and hyphenation in eleven languages. [More](https://pdfpecker.net/docs/languages/)
+  justification, and hyphenation in eleven languages (with `hyphenate-limit-lines`). [More](https://pdfpecker.net/docs/languages/)
 - **PDF/A, passwords and watermarks**: PDF/A-2, 3 and 4, AES-256 encryption, and text, image and SVG watermarks.
   [More](https://pdfpecker.net/docs/pdfa-and-passwords/)
 - **Accessibility**: tagged PDF, PDF/UA-1 and PDF/UA-2 built from your HTML.

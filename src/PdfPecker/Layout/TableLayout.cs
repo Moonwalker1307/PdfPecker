@@ -152,9 +152,15 @@ internal sealed partial class LayoutEngine
 
     private readonly record struct SplitRowRoom(int FirstPage, float Head, float Foot);
 
-    /// <summary>The page's first flow position content may take: its start, below a header repeated over a split row.</summary>
+    /// <summary>
+    /// The page's first flow position content may take: its start, below a header repeated over a split row and the
+    /// top edges of the boxes around the content that clone their edges in each fragment.
+    /// </summary>
     private float FlowStart(int page)
-        => _splitRow is { } r && page > r.FirstPage ? _grid.Start(page) + r.Head : _grid.Start(page);
+    {
+        float start = _splitRow is { } r && page > r.FirstPage ? _grid.Start(page) + r.Head : _grid.Start(page);
+        return _cloneRoom == null ? start : start + CloneHead(page);
+    }
 
     private float SplitRowFoot(int page) => _splitRow is { } r && page >= r.FirstPage ? r.Foot : 0;
 
@@ -714,6 +720,8 @@ internal sealed partial class LayoutEngine
         bool mayMove = _tableDepth < MaxKeptWholeNesting || _grid is not ColumnGrid;
         m.MayMoveTable = mayMove && _paginate && !AtPageTop(startY);
         _tableDepth++;
+        // Collapsed borders belong to the cells, which are not cloned.
+        bool cloned = s.BoxDecorationClone && _paginate && !collapse;
         while (true)
         {
             foreach (var caption in m.Captions)
@@ -739,13 +747,26 @@ internal sealed partial class LayoutEngine
             _rowProbe = m.Captions.Count == 0 && _columnNotes == null ? probe : null;
             m.TableMove = null;
             m.Breaks.Clear();
-            for (int r = 0; r < m.Rows.Count; r++)
+            // box-decoration-break: clone gives each fragment of a table with separate borders its own border, padding
+            // and border spacing, which its rows leave room for.
+            var cloneRoom = cloned ? CloneRoomFor(cy, frameT + vs, frameB + vs) : null;
+            // A table that keeps no room for its edges is sliced, as a block box is.
+            if (cloned && cloneRoom == null && frameT + frameB + 2 * vs > Eps) cloned = false;
+            if (cloneRoom != null) _cloneRoom = cloneRoom;
+            try
             {
-                float keep = mayMove && StartsKeptRun(m, r) ? KeptRunHeight(m, r, cy, colX, widths, hs, vs, collapse) : 0;
-                cy = LayoutRow(m, r, cy, colX, widths, hs, vs, collapse, allowMove: mayMove, pageColumns, keep) + vs;
-                // The first content is past the chain's page: the chain moves and lays the table out again, so the rest
-                // of this layout would be thrown away.
-                if (probe is { Done: true } || m.TableMove != null) break;
+                for (int r = 0; r < m.Rows.Count; r++)
+                {
+                    float keep = mayMove && StartsKeptRun(m, r) ? KeptRunHeight(m, r, cy, colX, widths, hs, vs, collapse) : 0;
+                    cy = LayoutRow(m, r, cy, colX, widths, hs, vs, collapse, allowMove: mayMove, pageColumns, keep) + vs;
+                    // The first content is past the chain's page: the chain moves and lays the table out again, so the
+                    // rest of this layout would be thrown away.
+                    if (probe is { Done: true } || m.TableMove != null) break;
+                }
+            }
+            finally
+            {
+                if (cloneRoom != null) _cloneRoom = cloneRoom.Outer;
             }
             if (m.TableMove is not float shortage) break;
             Truncate(startOps);
@@ -770,7 +791,11 @@ internal sealed partial class LayoutEngine
         foreach (var caption in m.Captions)
             if (caption.Style.CaptionBottom) bottom = LayoutCaption(caption, bx, bottom, boxW);
         int sides = collapse && m.Rows.Count > 0 ? m.WholeTableSides : BoxPainter.AllSides;
-        if (collapse && m.Breaks.Count > 0)
+        if (cloned && PaintClonedFragments(tableGroup, s, pageColumns != null ? tableBox : null, bx, tableTop, boxW, tableBottom, availW))
+        {
+            // Painted fragment by fragment.
+        }
+        else if (collapse && m.Breaks.Count > 0)
             PaintTablePages(tableGroup, s, m, pageColumns != null ? tableBox : null, bx, boxW, availW, tableTop, tableBottom, frameB, sides);
         else if (pageColumns != null && !SameOnPages(tableBox!, tableTop, tableBottom))
             PaintOnPages(tableGroup, s, tableBox!, tableTop, tableBottom, sides, collapse);

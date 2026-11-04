@@ -78,6 +78,22 @@ internal sealed partial class PdfDocumentWriter
                     continue;
             }
             if (TranslucentGradient(shape)) { WriteSoftMaskedSvgShape(b, shape, toPage); continue; }
+            if (shape.NonScalingStroke && shape.HasStroke && toPage.TryInvert(out var toUser))
+            {
+                // A non-scaling stroke has the width the page gives it, however the user space is scaled. The path is
+                // drawn in page space, where the stroke is not stretched by a scale of the user space.
+                var page = SaveState();
+                b.Ascii("q ");
+                if (!IsIdentity(toPage)) WriteMatrix(b, toUser).Ascii(" cm");
+                b.Ascii("\n");
+                WritePath(b, shape, toPage);
+                WriteSvgPaint(b, shape, toPage, true);
+                b.Ascii(shape.HasFill ? (shape.EvenOdd ? "B*\n" : "B\n") : "S\n");
+                EndSvgDash(b, shape);
+                b.Ascii("Q\n");
+                RestoreState(page);
+                continue;
+            }
             WritePath(b, shape);
             WriteSvgPaint(b, shape, toPage);
             if (shape.HasFill && shape.HasStroke) b.Ascii(shape.EvenOdd ? "B*\n" : "B\n");
@@ -103,13 +119,15 @@ internal sealed partial class PdfDocumentWriter
         }
         var m = shape.TextMatrix;
         var svgFont = Leaf(shape.Font!);
+        // A face's size-adjust draws its glyphs at a font size of their own.
+        float size = svgFont is EmbeddedFont { SizeAdjust: not 1 } adjusted ? shape.FontSize * adjusted.SizeAdjust : shape.FontSize;
         if (svgFont is EmbeddedFont svgEmbedded) WriteFontName(b.Ascii("BT "), Subset(svgEmbedded.Program, SvgTextColor(shape)), 0);
         else b.Ascii("BT /F").Int(((StandardFont)shape.Font!).Index + 1);
-        b.Sp().Num(shape.FontSize).Ascii(" Tf ").Int(mode).Ascii(" Tr 0 Tw ")
+        b.Sp().Num(size).Ascii(" Tf ").Int(mode).Ascii(" Tr 0 Tw ")
             .Num(shape.CharSpacing).Ascii(" Tc ").Num6(m.A).Sp().Num6(m.B).Sp().Num6(m.C).Sp().Num6(m.D).Sp().Num(m.E).Sp().Num(m.F)
             .Ascii(" Tm ");
         if (svgFont is EmbeddedFont svgFontEmbedded)
-            WriteGlyphHex(b, svgFontEmbedded, Subset(svgFontEmbedded.Program, SvgTextColor(shape)), shape.Text!, shape.FontSize, shape.Rtl, shape.CharSpacing);
+            WriteGlyphHex(b, svgFontEmbedded, Subset(svgFontEmbedded.Program, SvgTextColor(shape)), shape.Text!, size, shape.Rtl, shape.CharSpacing);
         else WriteStandardText(b, shape.Font!, shape.Rtl ? Text.Bidi.VisualText(shape.Text!) : shape.Text!);
         b.Ascii(" ET\n");
     }
@@ -124,7 +142,7 @@ internal sealed partial class PdfDocumentWriter
     {
         var path = shape.TextPath!;
         var font = Leaf(shape.Font!);
-        float size = shape.FontSize, pen = shape.PathStart;
+        float size = font is EmbeddedFont { SizeAdjust: not 1 } adjusted ? shape.FontSize * adjusted.SizeAdjust : shape.FontSize, pen = shape.PathStart;
         if (font is EmbeddedFont embedded) WriteFontName(b.Ascii("BT "), Subset(embedded.Program, SvgTextColor(shape)), 0);
         else b.Ascii("BT /F").Int(((StandardFont)font).Index + 1);
         b.Sp().Num(size).Ascii(" Tf ").Int(mode).Ascii(" Tr 0 Tw 0 Tc\n");
@@ -250,7 +268,11 @@ internal sealed partial class PdfDocumentWriter
         // A pattern cell starts from the default graphics state and uses the shared resources.
         (_fill, _stroke, _lineWidth, _fillAlpha, _strokeAlpha) = (CssColor.Black, CssColor.Black, 1, 255, 255);
         var streamSpace = StartStreamSpace();
+        var tile = pattern.ToRoot.Then(toPage).ScaleFactor;
+        float nonScaling = _nonScalingLength;
+        if (tile > 1e-6f) _nonScalingLength = nonScaling / tile;
         WriteSvgShapes(cell, pattern.Shapes, Matrix.Identity);
+        _nonScalingLength = nonScaling;
         _streamSpace = streamSpace;
         RestoreState(saved);
         var m = InStream(pattern.ToRoot.Then(toPage));
@@ -351,6 +373,10 @@ internal sealed partial class PdfDocumentWriter
     // of nested filters doubled the resolution of the one around it, up to the pixel cap at each level.
     private float _svgFilterDensity = FilterPixelsPerPoint;
 
+    // What the lengths of a non-scaling stroke (points of the page) are multiplied by in the space being drawn in: pixels
+    // per point in a filter's rasterisation, and the inverse of the tile's scale inside a pattern.
+    private float _nonScalingLength = 1;
+
     // The work the document's filters have spent, shared through the context with the writers that render filtered
     // content for this one.
     private SvgFilterBudget FilterBudget => _context.SvgFilters;
@@ -436,7 +462,7 @@ internal sealed partial class PdfDocumentWriter
         byte[] pdf;
         try
         {
-            var writer = new PdfDocumentWriter(page, compress: false, CompressionLevel.NoCompression, _context) { _svgFilterDensity = 1 };
+            var writer = new PdfDocumentWriter(page, compress: false, CompressionLevel.NoCompression, _context) { _svgFilterDensity = 1, _nonScalingLength = _nonScalingLength * _svgFilterDensity };
             pdf = writer.Write(new List<DrawOp> { new SvgOp(0, 0, pixelsW, pixelsH, drawing) }, pixelsH,
                 new Dictionary<string, float>(), 0, null, null, null, null, null);
         }
@@ -462,9 +488,17 @@ internal sealed partial class PdfDocumentWriter
         return result;
     }
 
-    private static void WritePath(ByteBuffer b, SvgShape shape)
+    private static void WritePath(ByteBuffer b, SvgShape shape) => WritePath(b, shape, Matrix.Identity);
+
+    /// <summary>Writes the path of a shape with its points moved by <paramref name="m"/>.</summary>
+    private static void WritePath(ByteBuffer b, SvgShape shape, Matrix m)
     {
         var pts = shape.Points;
+        if (!IsIdentity(m))
+        {
+            pts = (float[])pts.Clone();
+            for (int i = 0; i + 1 < pts.Length; i += 2) m.Apply(ref pts[i], ref pts[i + 1]);
+        }
         int k = 0;
         foreach (var verb in shape.Verbs)
         {
@@ -494,7 +528,7 @@ internal sealed partial class PdfDocumentWriter
     {
         // The area the soft mask covers: the shape's bounds grown by how far a stroke (and, for text, the glyphs) can
         // reach past them, since outside it the mask hides everything.
-        float grow = (shape.HasStroke ? shape.StrokeWidth * Math.Max(1, shape.MiterLimit) / 2 : 0) + 1;
+        float grow = (shape.HasStroke ? shape.StrokeWidth * StrokeScale(shape, toPage, false) * Math.Max(1, shape.MiterLimit) / 2 : 0) + 1;
         if (shape.Kind == SvgShape.KindText) grow += (shape.MaxY - shape.MinY) / 2;
         float minX = shape.MinX - grow, minY = shape.MinY - grow, maxX = shape.MaxX + grow, maxY = shape.MaxY + grow;
         if (!(maxX > minX && maxY > minY)) return;
@@ -523,7 +557,7 @@ internal sealed partial class PdfDocumentWriter
             }
             else if (fill) WriteSvgFill(b, shape, toPage);
             else WriteSvgStroke(b, shape, toPage);
-            if (!fill) WriteSvgLineStyle(b, shape);
+            if (!fill) WriteSvgLineStyle(b, shape, StrokeScale(shape, toPage, false));
             if (shape.Kind == SvgShape.KindText) WriteSvgText(b, shape, fill ? 0 : 1);
             else
             {
@@ -535,14 +569,27 @@ internal sealed partial class PdfDocumentWriter
         }
     }
 
-    /// <summary>Sets the fill and stroke of an SVG shape: colours, or shading patterns for gradients.</summary>
-    private void WriteSvgPaint(ByteBuffer b, SvgShape shape, Matrix toPage)
+    /// <summary>
+    /// Sets the fill and stroke of an SVG shape: colours, or shading patterns for gradients. With
+    /// <paramref name="pageSpace"/> the shape is drawn in the space <paramref name="toPage"/> leads to, not in user space.
+    /// </summary>
+    private void WriteSvgPaint(ByteBuffer b, SvgShape shape, Matrix toPage, bool pageSpace = false)
     {
         WriteSvgFill(b, shape, toPage);
         if (!shape.HasStroke) return;
         WriteSvgStroke(b, shape, toPage);
-        WriteSvgLineStyle(b, shape);
+        WriteSvgLineStyle(b, shape, StrokeScale(shape, toPage, pageSpace));
     }
+
+    /// <summary>
+    /// What the lengths of a shape's stroke are multiplied by in the space it is drawn in. A non-scaling stroke has
+    /// them in points of the page, so in user space they are divided by the scale of the user space; text, which cannot
+    /// be moved to page space, is drawn that way, and a stretched user space gives it the average scale.
+    /// </summary>
+    private static float StrokeScale(SvgShape shape, Matrix toPage, bool pageSpace)
+        => shape.NonScalingStroke && !pageSpace && toPage.ScaleFactor > 1e-6f ? 1 / toPage.ScaleFactor : 1;
+
+    private static bool IsIdentity(Matrix m) => m.A == 1 && m.B == 0 && m.C == 0 && m.D == 1 && m.E == 0 && m.F == 0;
 
     /// <summary>Sets the fill of an SVG shape: a colour, or a shading or tiling pattern.</summary>
     private void WriteSvgFill(ByteBuffer b, SvgShape shape, Matrix toPage)
@@ -583,19 +630,20 @@ internal sealed partial class PdfDocumentWriter
     }
 
     /// <summary>Sets the width, caps, joins, miter limit and dash pattern of an SVG shape's stroke.</summary>
-    private void WriteSvgLineStyle(ByteBuffer b, SvgShape shape)
+    private void WriteSvgLineStyle(ByteBuffer b, SvgShape shape, float scale = 1)
     {
         _lineWidth = -1;
-        b.Num(shape.StrokeWidth).Ascii(" w ").Int((int)shape.LineCap).Ascii(" J ").Int((int)shape.LineJoin).Ascii(" j ")
+        if (shape.NonScalingStroke) scale *= _nonScalingLength;
+        b.Num(shape.StrokeWidth * scale).Ascii(" w ").Int((int)shape.LineCap).Ascii(" J ").Int((int)shape.LineJoin).Ascii(" j ")
             .Num(shape.MiterLimit).Ascii(" M\n");
         if (shape.Dash is not { } dash) return;
         b.Ascii("[");
         for (int i = 0; i < dash.Length; i++)
         {
             if (i > 0) b.Sp();
-            b.Num(dash[i]);
+            b.Num(dash[i] * scale);
         }
-        b.Ascii("] ").Num(shape.DashPhase).Ascii(" d\n");
+        b.Ascii("] ").Num(shape.DashPhase * scale).Ascii(" d\n");
     }
 
     /// <summary>

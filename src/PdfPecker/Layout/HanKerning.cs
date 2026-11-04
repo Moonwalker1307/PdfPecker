@@ -41,7 +41,12 @@ internal static class HanKerning
     /// How much the font's halt feature takes off a character's advance, in thousandths of an em: the blank half of a
     /// fullwidth bracket or dot. 0 when the font has no such adjustment for it.
     /// </summary>
-    public static float TrimUnits(TextFont font, int cp) => DataFor(font, cp)?.Trim(cp) ?? 0;
+    public static float TrimUnits(TextFont font, int cp)
+    {
+        if (font is FontChain chain) font = chain.Pick(cp);
+        // A face's size-adjust scales the trim with the glyph, from the program's em to the font size.
+        return DataFor(font, cp)?.Trim(cp) * (font is EmbeddedFont { SizeAdjust: not 1 } adjusted ? adjusted.SizeAdjust : 1) ?? 0;
+    }
 
     /// <summary>The data of the font that draws a character, or null when that font cannot trim punctuation.</summary>
     private static FontData? DataFor(TextFont font, int cp)

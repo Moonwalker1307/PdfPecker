@@ -69,7 +69,7 @@ internal sealed partial class InlineLayout
             int to = end + 1 < n ? starts[end + 1] : items.Count;
             var breaks = ChooseBreaks(items, pos, starts[0], to, count, block, availW, indent.First, indent.Wrapped, balanced: true);
             if (breaks != null) plan = Plan(plan, items.Count, starts[0], to, breaks);
-            else if (count == n && !HasForcedBreak(items)) return BalanceByWidth(items, lines, availW, indent);
+            else if (count == n && !HasForcedBreak(items)) return BalanceByWidth(items, lines, availW, indent, block.HyphenateLimitLines);
         }
         else
         {
@@ -89,10 +89,31 @@ internal sealed partial class InlineLayout
             }
         }
         if (plan == null) return lines;
-        var breaker = new LineBreaker(this, items, availW, indent, null, null, plan);
+        var breaker = new LineBreaker(this, items, availW, indent, null, null, plan, block.HyphenateLimitLines);
         breaker.Run();
+        // The scores know nothing of hyphenate-limit-lines, so new breaks that hyphenate too many lines in a row are
+        // dropped and the greedy lines, which keep the limit, stay.
+        if (block.HyphenateLimitLines >= 0 && ExceedsHyphenLimit(breaker.Lines, block.HyphenateLimitLines))
+        {
+            ReturnLines(breaker.Lines);
+            return lines;
+        }
         ReturnLines(lines);
         return breaker.Lines;
+    }
+
+    /// <summary>Whether more than <paramref name="limit"/> lines in a row end at a hyphenation break.</summary>
+    private static bool ExceedsHyphenLimit(List<Line> lines, int limit)
+    {
+        int run = 0;
+        foreach (var line in lines)
+        {
+            // A broken line's last item is the clone that shows the hyphen, which keeps the break it was made at.
+            bool hyphenated = !line.Forced && line.Items.Count > 0 && line.Items[^1] is { Kind: ItemKind.Text, BreakAfter: BreakAfter.SoftHyphen };
+            run = hyphenated ? run + 1 : 0;
+            if (run > limit) return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -316,7 +337,7 @@ internal sealed partial class InlineLayout
     /// Chrome's other way to balance: the lines broken greedily at the narrowest width, to a CSS pixel, that still
     /// makes as many lines; they are aligned in the full width.
     /// </summary>
-    private List<Line> BalanceByWidth(List<Item> items, List<Line> lines, float availW, LineIndent indent)
+    private List<Line> BalanceByWidth(List<Item> items, List<Line> lines, float availW, LineIndent indent, int hyphenLimit)
     {
         int n = lines.Count;
         float sum = 0;
@@ -325,7 +346,7 @@ internal sealed partial class InlineLayout
         while (lower + CssPixel < upper)
         {
             float mid = (lower + upper) / 2;
-            var trial = BreakLines(items, mid, indent);
+            var trial = BreakLines(items, mid, indent, hyphenLimit: hyphenLimit);
             bool fits = trial.Count <= n;
             for (int li = 0; li < trial.Count && fits; li++)
                 if (trial[li].Width > mid - indent.Of(trial, li) + Eps) fits = false;
@@ -335,6 +356,6 @@ internal sealed partial class InlineLayout
         }
         if (upper >= availW) return lines;
         ReturnLines(lines);
-        return BreakLines(items, upper, indent);
+        return BreakLines(items, upper, indent, hyphenLimit: hyphenLimit);
     }
 }

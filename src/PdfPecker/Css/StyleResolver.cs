@@ -477,12 +477,12 @@ internal sealed partial class StyleResolver
         return false;
     }
 
-    /// <summary>Keeps the values of the counters target-counter() asks for at an element with an id.</summary>
+    /// <summary>Keeps the values of the counters target-counter() and target-counters() ask for at an element with an id.</summary>
     private void SnapshotCounters(string id)
     {
-        var values = new Dictionary<string, int>(StringComparer.Ordinal);
+        var values = new Dictionary<string, int[]>(StringComparer.Ordinal);
         foreach (var name in Paged.WantedCounters)
-            if (_counters.TryGetValue(name, out var stack) && stack.Count > 0) values[name] = stack[^1];
+            if (_counters.TryGetValue(name, out var stack) && stack.Count > 0) values[name] = stack.ToArray();
         Paged.CounterSnapshots[id] = values;
     }
 

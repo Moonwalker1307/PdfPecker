@@ -24,7 +24,8 @@ internal sealed class SvgShape
     public bool EvenOdd;                          // fill-rule, or clip-rule for a clip
     public uint? Stroke;
     public Gradient? StrokeGradient;
-    public float StrokeWidth;
+    public float StrokeWidth;                     // user units; points of the page for a non-scaling stroke
+    public bool NonScalingStroke;                 // vector-effect: StrokeWidth and Dash are page lengths, set after the user space is scaled
     public SvgLineCap LineCap;
     public SvgLineJoin LineJoin;
     public float MiterLimit = 4;
@@ -153,6 +154,11 @@ internal sealed partial class SvgImage
     private Func<string, object?>? _load; // the PdfImage or SvgImage at an image element's href, or null
     private Dictionary<Element, (SvgPathMeasure?, float)>? _textPaths; // the paths text is laid along, measured
     private ContextPaint? _contextFill, _contextStroke; // what context-fill and context-stroke paint with, or null for none
+    // A user unit of the outermost viewport is a CSS pixel, which is 0.75 points: the length a non-scaling stroke keeps
+    // however the user space is scaled (see SvgShape.NonScalingStroke).
+    private const float NonScalingScale = 0.75f;
+    private Element? _root; // the svg element being built, whose viewport ViewportWidth and ViewportHeight are
+    private Dictionary<Element, (float MinX, float MinY, float MaxX, float MaxY)>? _localBounds; // bounds in each element's own space, for transform-box
     private (float Width, float Height)? _useSize; // the width and height of a use element drawing a nested svg
     private ComputedStyle? _useParent; // inside what a use element draws: the style the next element inherits from
     private int _wrapDepth; // groups, clips, masks and filters around the element being drawn
@@ -208,6 +214,7 @@ internal sealed partial class SvgImage
             if (parts.Length > 0) img.Align = parts[0];
             if (parts.Length > 1) img.Slice = parts[1] == "slice";
         }
+        img._root = svg;
         img.CollectIds(svg);
         var top = svg;
         while (top.Parent is { } parent) top = parent;
@@ -375,7 +382,7 @@ internal sealed partial class SvgImage
         if (s == null || s.Display == Display.None) return;
         var useParent = _useParent;
         if (useParent != null) s = InUse(s, useParent);
-        if (e.GetAttribute("transform") is { } tf) ctm = ParseTransform(tf).Then(ctm);
+        if (OwnTransform(e, s, depth) is { } own) ctm = own.Then(ctm);
         // A translucent container is composited as one group, so its children do not show through each other.
         bool group = s.Opacity < 1 && e.Name is "g" or "a" or "switch" or "use" or "svg";
         float op = group ? opacity : opacity * s.Opacity;
@@ -604,10 +611,11 @@ internal sealed partial class SvgImage
     /// Adds the bounds of what an element draws, its geometry without strokes, in the space <paramref name="m"/> maps
     /// it to. Text adds nothing.
     /// </summary>
-    private void ContentBounds(Element e, Matrix m, ref float minX, ref float minY, ref float maxX, ref float maxY, int depth, Element? use = null)
+    private void ContentBounds(Element e, Matrix m, ref float minX, ref float minY, ref float maxX, ref float maxY, int depth, Element? use = null, bool local = false)
     {
         if (--_budget.Remaining < 0 || depth > 32 || e.Style is not { } s || s.Display == Display.None) return;
-        if (e.GetAttribute("transform") is { } tf) m = ParseTransform(tf).Then(m);
+        // The element's own transform is left out when its bounds are wanted in its own user space, as a transform-box does.
+        if (!local && OwnTransform(e, s, depth) is { } own) m = own.Then(m);
         switch (e.Name)
         {
             case "g":
@@ -625,7 +633,7 @@ internal sealed partial class SvgImage
             case "use":
             {
                 if (Reference(e.GetAttribute("href") ?? e.GetAttribute("xlink:href")) is not { } target) return;
-                var place = Matrix.Translate(Num(e, "x"), Num(e, "y")).Then(m);
+                var place = Matrix.Translate(Len(e, "x", Axis.X), Len(e, "y", Axis.Y)).Then(m);
                 if (target.Name == "symbol")
                 {
                     var fitted = SymbolTransform(target, e).Then(place);
@@ -651,13 +659,89 @@ internal sealed partial class SvgImage
         }
     }
 
+    /// <summary>
+    /// The transform an element applies to its user space: the CSS transform property, which wins over the transform
+    /// attribute, about the transform origin of its transform-box. An SVG element turns about the origin of the
+    /// viewport (0 0) unless transform-origin is declared, and for fill-box and stroke-box that origin is the corner of
+    /// the element's bounds. The transform attribute takes the origin too, as in browsers. Null when there is none.
+    /// </summary>
+    private Matrix? OwnTransform(Element e, ComputedStyle s, int depth)
+    {
+        var fns = s.Transform;
+        var attribute = e.GetAttribute("transform");
+        if (fns == null && attribute == null) return null;
+        if (fns == null && !s.TransformOriginSet && s.TransformBox == TransformBox.ViewBox) return ParseTransform(attribute!);
+        var (bw, bh) = ViewportOf(e);
+        float bx = 0, by = 0;
+        if (s.TransformBox is not TransformBox.ViewBox)
+        {
+            // The bounds of an element are worked out once: a descendant with a transform-box asks for its own, so
+            // without the cache every level of nesting would repeat the work of the levels below it.
+            _localBounds ??= new Dictionary<Element, (float, float, float, float)>();
+            if (!_localBounds.TryGetValue(e, out var bounds))
+            {
+                float lx = float.MaxValue, ly = float.MaxValue, hx = float.MinValue, hy = float.MinValue;
+                ContentBounds(e, Matrix.Identity, ref lx, ref ly, ref hx, ref hy, depth, null, local: true);
+                _localBounds[e] = bounds = (lx, ly, hx, hy);
+            }
+            var (minX, minY, maxX, maxY) = bounds;
+            bx = by = bw = bh = 0;
+            if (maxX >= minX && maxY >= minY)
+            {
+                // content-box is the fill box and border-box the stroke box of an element without a CSS layout box.
+                float grow = s.TransformBox is TransformBox.StrokeBox or TransformBox.BorderBox && (s.SvgStroke != null || s.SvgStrokeUrl != null) ? s.SvgStrokeWidth / 2 : 0;
+                (bx, by, bw, bh) = (minX - grow, minY - grow, maxX - minX + 2 * grow, maxY - minY + 2 * grow);
+            }
+        }
+        float ox = 0, oy = 0;
+        if (s.TransformOriginSet)
+        {
+            ox = OriginOffset(s.TransformOriginX, bw);
+            oy = OriginOffset(s.TransformOriginY, bh);
+        }
+        // CSS lengths are in points and user units in CSS pixels: the functions are computed in points and the
+        // translation brought back.
+        Matrix m;
+        if (fns != null)
+        {
+            var points = CssTransform.ToMatrix(fns, bw * 0.75f, bh * 0.75f, ox * 0.75f, oy * 0.75f, null) ?? Matrix.Scale(0, 0);
+            m = new Matrix(points.A, points.B, points.C, points.D, points.E / 0.75f, points.F / 0.75f);
+        }
+        else m = ParseTransform(attribute!);
+        ox += bx;
+        oy += by;
+        return ox == 0 && oy == 0 ? m : Matrix.Translate(-ox, -oy).Then(m).Then(Matrix.Translate(ox, oy));
+    }
+
+    /// <summary>The size of the viewport an element is in, in its user units: the nearest svg element's viewBox or size.</summary>
+    private (float Width, float Height) ViewportOf(Element e)
+    {
+        for (var parent = e.Parent; parent != null && !ReferenceEquals(parent, _root); parent = parent.Parent)
+        {
+            if (parent.Name != "svg") continue;
+            var vb = ParseNumbers(parent.GetAttribute("viewbox"));
+            if (vb.Count == 4 && vb[2] > 0 && vb[3] > 0) return (vb[2], vb[3]);
+            float w = Num(parent, "width", float.NaN), h = Num(parent, "height", float.NaN);
+            if (!float.IsNaN(w) && !float.IsNaN(h)) return (w, h);
+            break;
+        }
+        return (ViewportWidth, ViewportHeight);
+    }
+
+    /// <summary>A transform-origin coordinate in user units: a percentage of the reference box size, or a length.</summary>
+    private static float OriginOffset(Length origin, float size)
+    {
+        float length = origin.Resolve(0);
+        return length / 0.75f + (origin.Resolve(size) - length);
+    }
+
     /// <summary>The outline of a basic shape or path element, in its own user space; null for anything else.</summary>
     private PathBuilder? ShapePath(Element e)
     {
         switch (e.Name)
         {
             case "path":
-                return PathParser.Parse(e.GetAttribute("d"));
+                return PathParser.Parse(e.Style?.SvgGeometry is { HasPath: true } declared ? declared.PathData : e.GetAttribute("d"));
             case "rect":
                 return RectPath(e);
             case "circle":
@@ -720,7 +804,8 @@ internal sealed partial class SvgImage
             Verbs = path.Verbs.ToArray(),
             Points = pts,
             EvenOdd = s.SvgEvenOdd,
-            StrokeWidth = s.SvgStrokeWidth * ctm.ScaleFactor,
+            StrokeWidth = s.SvgNonScalingStroke ? s.SvgStrokeWidth * NonScalingScale : s.SvgStrokeWidth * ctm.ScaleFactor,
+            NonScalingStroke = s.SvgNonScalingStroke,
             LineCap = s.SvgLineCap,
             LineJoin = s.SvgLineJoin,
             MiterLimit = s.SvgMiterLimit,
@@ -729,7 +814,7 @@ internal sealed partial class SvgImage
         {
             // pathLength rescales distances along the path: dash lengths are given in its units, not user units.
             float along = pathLength > 0 && float.IsFinite(pathLength) ? SvgPathMeasure.LengthOf(path) / pathLength : 1;
-            shape.Dash = Dashes(s, ctm.ScaleFactor * along, out shape.DashPhase);
+            shape.Dash = Dashes(s, (s.SvgNonScalingStroke ? NonScalingScale : ctm.ScaleFactor) * along, out shape.DashPhase);
         }
         if (fillable) shape.Fill = Paint(s.SvgFill, s.SvgFillUrl, s.SvgFillOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.FillGradient, out shape.FillPattern);
         if (s.SvgStrokeWidth > 0)
@@ -854,6 +939,12 @@ internal sealed partial class SvgImage
                         if (name == "stop-color") color = decl.Substring(colon + 1).Trim();
                         else if (name == "stop-opacity") alphaText = decl.Substring(colon + 1).Trim();
                     }
+                }
+                // Rules (and the style attribute, which is one) win over what the attributes say.
+                if (stop.Style?.SvgGeometry is { } declared)
+                {
+                    color = declared.StopColor ?? color;
+                    if (declared.StopOpacity is float declaredOpacity) alphaText = declaredOpacity.ToString(CultureInfo.InvariantCulture);
                 }
                 uint current = stop.Style?.Color ?? CssColor.Black;
                 if (!CssColor.TryParse(color ?? "black", current, out uint col)) col = CssColor.Black;
@@ -1321,12 +1412,13 @@ internal sealed partial class SvgImage
             TextPath = run.Path,
             PathStart = x,
             PathShift = y,
-            StrokeWidth = s.SvgStrokeWidth * ctm.ScaleFactor,
+            StrokeWidth = s.SvgNonScalingStroke ? s.SvgStrokeWidth * NonScalingScale : s.SvgStrokeWidth * ctm.ScaleFactor,
+            NonScalingStroke = s.SvgNonScalingStroke,
             LineJoin = s.SvgLineJoin,
             LineCap = s.SvgLineCap,
             MiterLimit = s.SvgMiterLimit,
         };
-        if (s.SvgDashArray != null && s.SvgStrokeWidth > 0) shape.Dash = Dashes(s, ctm.ScaleFactor, out shape.DashPhase);
+        if (s.SvgDashArray != null && s.SvgStrokeWidth > 0) shape.Dash = Dashes(s, s.SvgNonScalingStroke ? NonScalingScale : ctm.ScaleFactor, out shape.DashPhase);
         shape.Fill = Paint(s.SvgFill, s.SvgFillUrl, s.SvgFillOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.FillGradient, out shape.FillPattern);
         if (s.SvgStrokeWidth > 0)
             shape.Stroke = Paint(s.SvgStroke, s.SvgStrokeUrl, s.SvgStrokeOpacity * opacity, minX, minY, maxX, maxY, ctm, out shape.StrokeGradient, out shape.StrokePattern);
@@ -1428,8 +1520,42 @@ internal sealed partial class SvgImage
     /// <summary>A coordinate or size attribute in user units, where a percentage refers to the viewport.</summary>
     private float Len(Element e, string name, Axis axis, float fallback = 0)
     {
+        if (DeclaredLength(e, name) is { } declared)
+        {
+            // auto (rx and ry) leaves the radius to the other one, as a missing attribute does.
+            if (declared.IsAuto) return fallback;
+            if (declared.IsPercent) UsesPercentages = true;
+            float basis = axis switch { Axis.X => ViewportWidth, Axis.Y => ViewportHeight, _ => _diagonal };
+            float value = declared.Resolve(basis * 0.75f) / 0.75f;
+            // A calc() that comes out negative is a radius of zero.
+            return name is "r" or "rx" or "ry" ? Math.Max(0, value) : value;
+        }
         var v = e.GetAttribute(name);
         return v != null && Percentage(v.AsSpan().Trim(), axis) is float f ? f : Num(e, name, fallback);
+    }
+
+    /// <summary>
+    /// The length a style sheet gives the geometry property <paramref name="name"/> of an element, which wins over the
+    /// attribute; null when none does, or when the property does not apply to that kind of element.
+    /// </summary>
+    private static Length? DeclaredLength(Element e, string name)
+    {
+        if (e.Style is not { } style) return null;
+        // width and height are ordinary CSS properties, which Chrome applies to these elements instead of the attributes.
+        if (name is "width" or "height" && e.Name is "rect" or "image" or "foreignobject")
+            return (name == "width" ? style.Width : style.Height) is { IsAuto: false } size ? size : null;
+        if (style.SvgGeometry is not { } g) return null;
+        return name switch
+        {
+            "cx" when e.Name is "circle" or "ellipse" => g.Cx,
+            "cy" when e.Name is "circle" or "ellipse" => g.Cy,
+            "r" when e.Name == "circle" => g.R,
+            "rx" when e.Name is "rect" or "ellipse" => g.Rx,
+            "ry" when e.Name is "rect" or "ellipse" => g.Ry,
+            "x" when e.Name is "rect" or "image" or "foreignobject" or "use" => g.X,
+            "y" when e.Name is "rect" or "image" or "foreignobject" or "use" => g.Y,
+            _ => null,
+        };
     }
 
     /// <summary>A list of coordinates (the x and y of text), each a number or a percentage of the viewport.</summary>

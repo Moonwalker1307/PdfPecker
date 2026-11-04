@@ -296,6 +296,105 @@ public class HyphenationTests
         Assert.False(CssSupports.Evaluate("(hyphenate-limit-chars: 1 2 3 4)"));
     }
 
+    // The longest run of lines that end in a hyphen.
+    private static int LongestHyphenRun(List<string> lines)
+    {
+        int run = 0, best = 0;
+        foreach (var l in lines)
+            best = Math.Max(best, run = l.EndsWith('-') ? run + 1 : 0);
+        return best;
+    }
+
+    private const string LongWords = "internationalization characteristically unquestionably misrepresentation internationalization characteristically unquestionably misrepresentation internationalization characteristically unquestionably misrepresentation";
+
+    private static List<string> LimitedLines(string style, string content = LongWords) =>
+        Lines(Layout($"<div lang='en' style='width: 150px; hyphens: auto; font-size: 16px; {style}'>{content}</div>"));
+
+    [Fact]
+    public void Hyphenate_limit_lines_caps_the_run_of_hyphenated_lines()
+    {
+        int unlimited = LongestHyphenRun(LimitedLines("hyphenate-limit-lines: no-limit"));
+        Assert.True(unlimited >= 3, $"the text must hyphenate several lines in a row, got {unlimited}");
+        for (int n = 0; n <= 2; n++)
+        {
+            var lines = LimitedLines($"hyphenate-limit-lines: {n}");
+            Assert.True(LongestHyphenRun(lines) <= n, $"limit {n}: " + string.Join(" | ", lines));
+            // Nothing is lost: the words are all still there.
+            Assert.Equal(LongWords.Replace(" ", ""), string.Concat(lines.Select(l => l.EndsWith('-') ? l[..^1] : l)).Replace(" ", ""));
+        }
+        Assert.True(LongestHyphenRun(LimitedLines("-webkit-hyphenate-limit-lines: 1")) <= 1);
+    }
+
+    [Fact]
+    public void Hyphenate_limit_lines_counts_soft_hyphens_and_resets_after_a_forced_break()
+    {
+        const string soft = "inter&shy;na&shy;tion&shy;al&shy;iza&shy;tion char&shy;ac&shy;ter&shy;is&shy;tic&shy;al&shy;ly inter&shy;na&shy;tion&shy;al&shy;iza&shy;tion char&shy;ac&shy;ter&shy;is&shy;tic&shy;al&shy;ly";
+        Assert.True(LongestHyphenRun(LimitedLines("width: 90px", soft)) >= 2, string.Join(" | ", LimitedLines("width: 90px", soft)));
+        Assert.True(LongestHyphenRun(LimitedLines("width: 90px; hyphenate-limit-lines: 1", soft)) <= 1);
+        // Each paragraph has its own count: two paragraphs may both end a line in a hyphen.
+        var two = LimitedLines("hyphenate-limit-lines: 1", LongWords + "<br>" + LongWords);
+        Assert.True(LongestHyphenRun(two) <= 1);
+        Assert.True(two.Count(l => l.EndsWith('-')) > 2);
+    }
+
+    [Fact]
+    public void Hyphenate_limit_lines_is_inherited_and_overridden_per_element()
+    {
+        Assert.True(LongestHyphenRun(Lines(Layout($"<div lang='en' style='width: 150px; hyphens: auto; hyphenate-limit-lines: 1'><p style='margin: 0'>{LongWords}</p></div>"))) <= 1);
+        Assert.True(LongestHyphenRun(Lines(Layout($"<div lang='en' style='width: 150px; hyphens: auto; hyphenate-limit-lines: 1'><p style='margin: 0; hyphenate-limit-lines: no-limit'>{LongWords}</p></div>"))) >= 3);
+        // An invalid value is ignored.
+        Assert.True(LongestHyphenRun(LimitedLines("hyphenate-limit-lines: 1; hyphenate-limit-lines: -1")) <= 1);
+        Assert.True(LongestHyphenRun(LimitedLines("hyphenate-limit-lines: 1; hyphenate-limit-lines: 1.5")) <= 1);
+    }
+
+    [Fact]
+    public void Hyphenate_limit_lines_holds_with_text_wrap_balance_and_pretty()
+    {
+        foreach (var wrap in new[] { "balance", "pretty" })
+        {
+            var lines = LimitedLines($"hyphenate-limit-lines: 1; text-wrap: {wrap}", "internationalization characteristically unquestionably misrepresentation");
+            Assert.True(LongestHyphenRun(lines) <= 1, wrap + ": " + string.Join(" | ", lines));
+        }
+    }
+
+    [Fact]
+    public void Hyphenate_limit_lines_of_the_block_wins_over_an_inline_box()
+    {
+        // The property applies to block containers: a span's own value does not lift the block's limit.
+        var lines = Lines(Layout($"<div lang='en' style='width: 150px; hyphens: auto; font-size: 16px; hyphenate-limit-lines: 0'><span style='hyphenate-limit-lines: no-limit'>{LongWords}</span></div>"));
+        Assert.Equal(0, LongestHyphenRun(lines));
+        lines = Lines(Layout($"<div lang='en' style='width: 150px; hyphens: auto; font-size: 16px; hyphenate-limit-lines: 0; text-wrap: balance'><span style='hyphenate-limit-lines: no-limit'>internationalization characteristically unquestionably misrepresentation</span></div>"));
+        Assert.Equal(0, LongestHyphenRun(lines));
+    }
+
+    [Fact]
+    public void Hyphenate_limit_lines_holds_after_a_first_line_style_and_with_cloned_box_edges()
+    {
+        var first = Lines(Layout($"<style>p::first-line {{ font-weight: bold }}</style><p lang='en' style='margin: 0; width: 150px; hyphens: auto; font-size: 16px; hyphenate-limit-lines: 0'>{LongWords}</p>"));
+        Assert.Equal(0, LongestHyphenRun(first));
+        string cloned = $"<span style='box-decoration-break: clone; padding: 0 2px; border: 1px solid'>{LongWords}</span>";
+        var lines = LimitedLines("hyphenate-limit-lines: 1", cloned);
+        Assert.True(LongestHyphenRun(lines) <= 1, string.Join(" | ", lines));
+    }
+
+    [Fact]
+    public void Hyphenate_limit_lines_leaves_visible_text_on_a_pre_wrap_line()
+    {
+        var lines = LimitedLines("white-space: pre-wrap; hyphenate-limit-lines: 0", "      " + LongWords);
+        Assert.Equal(0, LongestHyphenRun(lines));
+        Assert.All(lines, l => Assert.False(string.IsNullOrWhiteSpace(l), string.Join(" | ", lines)));
+    }
+
+    [Fact]
+    public void Hyphenate_limit_lines_shows_in_supports()
+    {
+        Assert.True(CssSupports.Evaluate("(hyphenate-limit-lines: 2)"));
+        Assert.True(CssSupports.Evaluate("(hyphenate-limit-lines: no-limit)"));
+        Assert.True(CssSupports.Evaluate("(-webkit-hyphenate-limit-lines: 0)"));
+        Assert.False(CssSupports.Evaluate("(hyphenate-limit-lines: -1)"));
+        Assert.False(CssSupports.Evaluate("(hyphenate-limit-lines: auto)"));
+    }
+
     [Fact]
     public void A_hyphenated_document_converts_to_a_valid_pdf()
     {
