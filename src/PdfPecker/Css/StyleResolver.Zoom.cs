@@ -22,7 +22,7 @@ internal sealed partial class StyleResolver
         for (int i = _count - 1; i >= 0; i--)
         {
             if (_decls[i].Property != "zoom") continue;
-            if (Substituted(_decls[i].Value, s) is { } value && ParseZoom(value.Trim().ToLowerInvariant()) is { } z) own = z;
+            if (Substituted(_decls[i], s) is { } value && ParseZoom(value.Trim().ToLowerInvariant()) is { } z) own = z;
             break;
         }
         // Zooms multiply, but stay within bounds, so lengths stay finite however deeply zoomed boxes nest.

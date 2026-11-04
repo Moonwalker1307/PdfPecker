@@ -18,8 +18,17 @@ internal static class CssPropertySyntax
     {
         if (syntax == "*") return true;
         var value = initial?.Trim() ?? "";
-        if (value.Length == 0) return false;
-        bool valid = false;
+        return value.Length > 0 && IsValid(syntax, allowUrl: true) && Matches(syntax, value, relativeLengths: false);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="syntax"/> is a valid syntax string: "*", or components separated by "|", each a known
+    /// type or a keyword, with an optional "+" or "#". The type() of an attr() takes no &lt;url&gt;, as in Chrome, so
+    /// that an attribute can never name a resource.
+    /// </summary>
+    public static bool IsValid(string syntax, bool allowUrl)
+    {
+        if (syntax == "*") return true;
         foreach (var raw in syntax.Split('|'))
         {
             var part = raw.Trim();
@@ -28,42 +37,60 @@ internal static class CssPropertySyntax
             if (multiplier != '\0') part = part.Substring(0, part.Length - 1);
             if (part.StartsWith('<'))
             {
-                if (!part.EndsWith('>') || !IsKnownType(part[1..^1])) return false;
+                if (!part.EndsWith('>') || !IsKnownType(part[1..^1]) || !allowUrl && part == "<url>") return false;
             }
             else if (multiplier != '\0' || !IsIdent(part) || CssParser.IsCssWideKeyword(part)) return false;
-            if (!valid) valid = Matches(part, multiplier, value);
         }
-        return valid;
+        return true;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="value"/> matches a component of the valid <paramref name="syntax"/>. Font-relative and
+    /// container lengths count only with <paramref name="relativeLengths"/>: an initial value must be computationally
+    /// independent, while an attribute's value is computed on its own element.
+    /// </summary>
+    public static bool Matches(string syntax, string value, bool relativeLengths)
+    {
+        if (syntax == "*") return true;
+        foreach (var raw in syntax.Split('|'))
+        {
+            var part = raw.Trim();
+            char multiplier = part[^1] is '+' or '#' ? part[^1] : '\0';
+            if (multiplier != '\0') part = part.Substring(0, part.Length - 1);
+            if (Matches(part, multiplier, value, relativeLengths)) return true;
+        }
+        return false;
     }
 
     private static bool IsKnownType(string name) => name is "length" or "number" or "percentage" or "length-percentage" or "color"
         or "image" or "url" or "integer" or "angle" or "time" or "resolution" or "transform-function" or "transform-list"
         or "custom-ident" or "string";
 
-    private static bool Matches(string component, char multiplier, string value)
+    private static bool Matches(string component, char multiplier, string value, bool relative)
     {
-        if (multiplier == '\0') return MatchesOne(component, value);
+        if (multiplier == '\0') return MatchesOne(component, value, relative);
         var items = multiplier == '#' ? CssParser.SplitTopLevel(value, ',') : SplitSpaces(value);
         if (items.Count == 0) return false;
         foreach (var item in items)
-            if (!MatchesOne(component, item.Trim())) return false;
+            if (!MatchesOne(component, item.Trim(), relative)) return false;
         return true;
     }
 
-    private static bool MatchesOne(string component, string value)
+    private static bool MatchesOne(string component, string value, bool relative)
     {
         if (value.Length == 0) return false;
         if (!component.StartsWith('<')) return string.Equals(component, value, StringComparison.Ordinal);
         string type = component[1..^1];
         // Maths functions are checked by the property that uses the value, not here.
         bool math = IsMathFunction(value);
+        Func<string, bool> length = relative ? IsLength : IsAbsoluteLength;
         switch (type)
         {
-            case "length": return math || IsZero(value) || IsDimension(value, IsAbsoluteLength);
+            case "length": return math || IsZero(value) || IsDimension(value, length);
             case "number": return math || IsNumber(value, out _);
             case "integer": return math || IsNumber(value, out var n) && n == Math.Floor(n);
             case "percentage": return math || IsPercentage(value);
-            case "length-percentage": return math || IsZero(value) || IsPercentage(value) || IsDimension(value, IsAbsoluteLength);
+            case "length-percentage": return math || IsZero(value) || IsPercentage(value) || IsDimension(value, length);
             case "angle": return math || IsDimension(value, static u => u is "deg" or "rad" or "grad" or "turn");
             case "time": return math || IsDimension(value, static u => u is "s" or "ms");
             case "resolution": return math || IsDimension(value, static u => u is "dpi" or "dpcm" or "dppx" or "x");
@@ -97,6 +124,10 @@ internal static class CssPropertySyntax
     // Font-relative lengths depend on the element, so they are not computationally independent and may not be initial values.
     private static bool IsAbsoluteLength(string unit) => unit is "px" or "cm" or "mm" or "q" or "in" or "pt" or "pc"
         or "vw" or "vh" or "vmin" or "vmax" or "svw" or "svh" or "lvw" or "lvh" or "dvw" or "dvh" or "vi" or "vb";
+
+    private static bool IsLength(string unit) => IsAbsoluteLength(unit) || unit is "em" or "rem" or "ex" or "rex" or "ch" or "rch"
+        or "cap" or "rcap" or "ic" or "ric" or "lh" or "rlh" or "cqw" or "cqh" or "cqi" or "cqb" or "cqmin" or "cqmax"
+        or "svi" or "svb" or "lvi" or "lvb" or "dvi" or "dvb" or "svmin" or "svmax" or "lvmin" or "lvmax" or "dvmin" or "dvmax";
 
     private static bool IsDimension(string value, Func<string, bool> unit)
     {

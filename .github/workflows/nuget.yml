@@ -98,14 +98,15 @@ jobs:
       - run: dotnet build -c Release -p:Version=${{ steps.version.outputs.version }}
       - run: dotnet test -c Release --no-build
 
-      # PdfPecker.Fluent and PdfPecker.Testing are released with every PdfPecker release, with the same version, and
-      # depend on that version.
+      # PdfPecker.Fluent, PdfPecker.Testing and PdfPecker.Razor are released with every PdfPecker release, with the same
+      # version, and depend on that version.
       - run: dotnet pack src/PdfPecker -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
       - run: dotnet pack src/PdfPecker.Fluent -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
       - run: dotnet pack src/PdfPecker.Testing -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
+      - run: dotnet pack src/PdfPecker.Razor -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
 
       # PdfPecker.Cli is the `pdfpecker` dotnet tool. It carries PdfPecker's assembly inside the package, so it has no
-      # dependencies, and it gets the same version as the other two.
+      # dependencies, and it gets the same version as the other packages.
       - run: dotnet pack src/PdfPecker.Cli -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
 
       # The packed tool must install and run, which a successful pack does not show: install it from the artifacts
@@ -196,8 +197,10 @@ jobs:
       # Snapshot paths, file names and the files a failure writes depend on the file system.
       - run: dotnet build -c Release -f net10.0 tests/PdfPecker.Testing.Tests
       - run: dotnet test -c Release -f net10.0 --no-build tests/PdfPecker.Testing.Tests
+      - run: dotnet build -c Release -f net10.0 tests/PdfPecker.Razor.Tests
+      - run: dotnet test -c Release -f net10.0 --no-build tests/PdfPecker.Razor.Tests
 
-  # IsAotCompatible only turns on the analyzers; publishing and running the samples as native executables proves both
+  # IsAotCompatible only turns on the analyzers; publishing and running the samples as native executables proves the
   # packages really work trimmed and ahead-of-time compiled.
   native-aot:
     runs-on: ubuntu-latest
@@ -239,6 +242,16 @@ jobs:
           ./aot-cli/PdfPecker.Cli convert aot-cli/check.md aot-cli/check.pdf
           ./aot-cli/PdfPecker.Cli text aot-cli/check.pdf | grep -q 'Works without a runtime'
 
+      # Warnings stay errors here; the sample's project file lets through only Microsoft.AspNetCore.Components' own.
+      - name: Publish the Razor sample with native AOT
+        run: dotnet publish samples/PdfPecker.Razor.Sample -c Release -p:PublishAot=true -p:TreatWarningsAsErrors=true -o aot-razor
+
+      - name: Convert the Razor invoice
+        run: |
+          ./aot-razor/PdfPecker.Razor.Sample aot-razor-output
+          test "$(head -c 5 aot-razor-output/invoice.pdf)" = "%PDF-"
+          grep -q "Template design &lt;draft &amp; final&gt;" aot-razor-output/invoice.html
+
   release:
     if: github.event_name == 'release'
     needs: build
@@ -258,7 +271,7 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
         run: gh release upload "$TAG" artifacts/*.nupkg --clobber
 
-  # Pushes the release packages, PdfPecker, PdfPecker.Fluent, PdfPecker.Testing and PdfPecker.Cli, to nuget.org with Trusted Publishing: NuGet/login swaps a GitHub OIDC token
+  # Pushes the release packages, PdfPecker, PdfPecker.Fluent, PdfPecker.Testing, PdfPecker.Cli and PdfPecker.Razor, to nuget.org with Trusted Publishing: NuGet/login swaps a GitHub OIDC token
   # for a short-lived API key, so no long-lived key is stored in the repository. Runs only for published releases.
   publish:
     if: github.event_name == 'release'

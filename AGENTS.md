@@ -22,6 +22,10 @@ library's public API (convert, watch, merge, split, sign, ...) with wkhtmltopdf-
 package, released with every PdfPecker release under the same version; it carries the PdfPecker assembly inside it and
 has no dependencies of its own.
 
+PdfPecker.Razor (`src/PdfPecker.Razor`) is the fifth package, released the same way. It renders Razor components to
+HTML with Microsoft's `HtmlRenderer` and converts the HTML with PdfPecker. It is the only project that may depend on a
+package at run time, and only on Microsoft's `Microsoft.AspNetCore.Components.Web`, which holds that renderer.
+
 ## Read first
 
 Before non-trivial work, read:
@@ -33,8 +37,8 @@ Before non-trivial work, read:
 - `RELEASING.md` – versioning, the API baseline and how a release reaches nuget.org.
 
 `CONTRIBUTING.md` is the short version for outside contributors, `fuzz/README.md` covers both fuzzers, and
-`src/PdfPecker.Fluent/README.md` and `src/PdfPecker.Testing/README.md` are the other packages' READMEs and nuget.org
-pages.
+`src/PdfPecker.Fluent/README.md`, `src/PdfPecker.Testing/README.md` and `src/PdfPecker.Razor/README.md` are the other
+packages' READMEs and nuget.org pages.
 
 ## Core rules
 
@@ -42,7 +46,10 @@ pages.
   on top of the base class library. No project in this repository uses a third-party package at run time: the
   comparisons with other converters and with QuestPDF live in
   [PdfPecker.Benchmarks](https://github.com/Moonwalker1307/PdfPecker.Benchmarks). `src/PdfPecker.Fluent` and
-  `src/PdfPecker.Testing` reference `src/PdfPecker` as a project and nothing else.
+  `src/PdfPecker.Testing` reference `src/PdfPecker` as a project and nothing else. The one exception is
+  `src/PdfPecker.Razor`, which may reference `Microsoft.AspNetCore.Components.Web` (the release of each target
+  framework's .NET version) and nothing else besides `src/PdfPecker`; Razor rendering is Microsoft's code and cannot
+  be written on the base class library. No other project takes that package or any other.
 - **No JavaScript and no network.** PdfPecker is for HTML templates the caller controls. It runs no scripts, and
   conversion never fetches anything itself: remote resources load only through a `ResourceResolver` the caller
   supplies. Only signing goes online, and only when the caller asks for it.
@@ -65,8 +72,8 @@ pages.
 - **Malformed input fails only with documented exceptions**, within bounded time and memory.
 - **Every library PR checks `README.md`** (features, limitations, examples, benchmark table) and updates it in the same
   PR when the change is visible to users; a fluent package change checks `src/PdfPecker.Fluent/README.md` (features,
-  the QuestPDF porting notes, the benchmark table) the same way, and a testing package change checks
-  `src/PdfPecker.Testing/README.md`.
+  the QuestPDF porting notes, the benchmark table) the same way, and a testing or Razor package change checks
+  `src/PdfPecker.Testing/README.md` or `src/PdfPecker.Razor/README.md`.
 - **Never name a user's private application or employer** in code, tests, commits, the README or PR descriptions. Use
   neutral names such as "MyApp" or "a production app".
 
@@ -103,6 +110,9 @@ pages.
 - `src/PdfPecker.Testing/` – the snapshot testing package: `PdfAssert`, `PdfSnapshotOptions` and `PdfAssertException`
   are public; `PdfNormalizer` reads a PDF into normalised objects and `PixelDiff` compares rendered pages and writes the
   diff PNGs. `tests/PdfPecker.Testing.Tests/` holds its tests.
+- `src/PdfPecker.Razor/` – the Razor package: `RazorToPdf` renders a component with `HtmlRenderer`, in a renderer of
+  its own per call, and hands the HTML to `HtmlToPdf`. `tests/PdfPecker.Razor.Tests/` holds its xUnit tests and test
+  components, and `samples/PdfPecker.Razor.Sample` an invoice template that CI also publishes with Native AOT.
 - `samples/PdfPecker.Sample` – converts the sample documents; CI also publishes it with Native AOT.
 - `samples/PdfPecker.Fluent.Sample` – writes the fluent examples as PDF and HTML; CI also publishes it with Native AOT.
   Its `Examples.cs` and `assets/` (invoice, report, catalogue, layout and text examples) are shared with the fluent
@@ -129,8 +139,9 @@ dotnet test -f net10.0 --filter "FullyQualifiedName~MarkdownTests"   # one class
 Before pushing, the build must be warning-free (warnings are errors), the tests must pass, and the golden baselines
 must be unchanged unless the output change is intended. If only one runtime is installed, pass `-f net10.0`; CI runs
 `net8.0`, `net9.0` and `net10.0` on Linux and `net10.0` on Windows. A change to the public API also needs
-`dotnet pack src/PdfPecker -c Release -o ./nupkg` (or `src/PdfPecker.Fluent`, `src/PdfPecker.Testing`), which runs package validation. The
-tool has no assembly API to validate; pack it with `src/PdfPecker.Cli` when its csproj changes. Details
+`dotnet pack src/PdfPecker -c Release -o ./nupkg` (or `src/PdfPecker.Fluent`, `src/PdfPecker.Testing`,
+`src/PdfPecker.Razor`), which runs package validation. The tool has no assembly API to validate; pack it with
+`src/PdfPecker.Cli` when its csproj changes. Details
 are in `BUILD.md` and `TESTING.md`.
 
 ## Change-specific guidance
@@ -167,11 +178,13 @@ are in `BUILD.md` and `TESTING.md`.
   `tools/ConformanceSamples/known-failures.txt` fails CI.
 - **Performance-sensitive code**: compare with `bench/compare-versions.sh <base-ref>` on one machine, not with the
   README table.
-- **Releases**: follow `RELEASING.md`; only the repository owner publishes a release, and it publishes all four packages.
+- **Releases**: follow `RELEASING.md`; only the repository owner publishes a release, and it publishes all five
+  packages.
 
 ## Avoid
 
-- Adding a package, a native binary, a browser or a JavaScript engine.
+- Adding a package, a native binary, a browser or a JavaScript engine (PdfPecker.Razor's Microsoft package is the only
+  exception).
 - Regenerating goldens or the CommonMark pass list just to make a failing test pass.
 - Skipping, disabling or loosening a test, a time bound or a known-failures list to get CI green.
 - Reflection, `dynamic`, runtime code generation, or anything else that breaks trimming or Native AOT.
@@ -235,3 +248,6 @@ are in `BUILD.md` and `TESTING.md`.
 - The QR and Code 128 encoders dominate the fluent layer's own time in documents that have barcodes.
 - Fluent `Unconstrained` is a box of no size rather than `position: absolute`, because a positioned box paints over
   the in-flow content after it, and QuestPDF draws that content on top.
+- `Microsoft.AspNetCore.Components` reports trim warnings from its own code (it reads component members through
+  `GetType()`), so the Razor sample folds only that assembly's warnings into one ignored `IL2104` for the AOT publish;
+  `@layout` and `LayoutView` warn in the caller's project, so the sample's layout is a component with `ChildContent`.

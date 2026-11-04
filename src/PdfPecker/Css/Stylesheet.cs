@@ -28,13 +28,16 @@ internal sealed class Declaration
     // Whether the value has var() and a viewport-height unit: 0 until checked, then 1 for no and 2 for yes. The style
     // resolver asks for every element a declaration applies to, and the answer is kept here so that each declaration of
     // a style sheet is searched once. Conversions running in parallel may both search, and store the same answer.
-    private byte _var, _viewportHeight, _unitless;
+    private byte _var, _attr, _viewportHeight, _unitless;
 
     /// <summary>Whether the value uses var().</summary>
     public bool HasVar => _var != 0 ? _var == 2 : Remember(ref _var, CssParser.HasVar(Value));
 
-    /// <summary>Whether the value may depend on the viewport's height: vh, vb, vmin, vmax, or var().</summary>
-    public bool HasViewportHeightUnit => _viewportHeight != 0 ? _viewportHeight == 2 : Remember(ref _viewportHeight, ViewportHeightUnit(Value));
+    /// <summary>Whether the style resolver substitutes an attr() in the value, which makes the style depend on the element's attributes.</summary>
+    public bool UsesAttr => _attr != 0 ? _attr == 2 : Remember(ref _attr, CssAttr.Used(Property, Value));
+
+    /// <summary>Whether the value may depend on the viewport's height: vh, vb, vmin, vmax, var() or attr().</summary>
+    public bool HasViewportHeightUnit => _viewportHeight != 0 ? _viewportHeight == 2 : Remember(ref _viewportHeight, ViewportHeightUnit(Value) || UsesAttr);
 
     /// <summary>Whether the value gives a length property a number without a unit, which only quirks mode accepts.</summary>
     public bool HasUnitlessLength => _unitless != 0 ? _unitless == 2 : Remember(ref _unitless, CssUnits.HasUnitlessLength(Property, Value));
@@ -158,6 +161,23 @@ internal sealed class Stylesheet
 
     private int _unitsCheckedAt = -1;
     private bool _containerUnits;
+
+    private int _attrCheckedAt = -1;
+    private bool _attr;
+
+    /// <summary>Some declaration substitutes attr() (checked again only when rules were added since).</summary>
+    public bool HasAttrSubstitution
+    {
+        get
+        {
+            if (_attrCheckedAt != Rules.Count)
+            {
+                _attr = Rules.Exists(r => Array.Exists(r.Declarations, d => d.UsesAttr));
+                _attrCheckedAt = Rules.Count;
+            }
+            return _attr;
+        }
+    }
 
     /// <summary>Some declaration uses cq units (checked again only when rules were added since).</summary>
     public bool HasContainerUnits

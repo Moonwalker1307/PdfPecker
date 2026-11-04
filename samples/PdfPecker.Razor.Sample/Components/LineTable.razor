@@ -1,0 +1,24 @@
+<table>
+    <thead>
+        <tr><th>Description</th><th class="number">Quantity</th><th class="number">Unit price</th><th class="number">Amount</th></tr>
+    </thead>
+    <tbody>
+        @foreach (var line in Lines)
+        {
+            <tr>
+                <td>@line.Description</td>
+                <td class="number">@line.Quantity.ToString("0.##", CultureInfo.InvariantCulture)</td>
+                <td class="number">@Format(line.UnitPrice)</td>
+                <td class="number">@Format(line.Amount)</td>
+            </tr>
+        }
+        <tr class="total"><td colspan="3">Total</td><td class="number">@Format(Total)</td></tr>
+    </tbody>
+</table>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<LineItem> Lines { get; set; } = [];
+    [Parameter] public decimal Total { get; set; }
+
+    private static string Format(decimal value) => value.ToString("#,##0.00", CultureInfo.InvariantCulture);
+}

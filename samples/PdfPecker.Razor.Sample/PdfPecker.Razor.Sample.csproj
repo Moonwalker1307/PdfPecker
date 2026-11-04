@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <!-- CI publishes the sample with Native AOT to prove the package works trimmed and compiled ahead of time. -->
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <!-- Microsoft.AspNetCore.Components has trim warnings in its own code: it reads a component's members through
+       GetType(), which the trimmer cannot follow, although every component type reaches it through an annotated
+       parameter that keeps those members. Blazor WebAssembly turns trim warnings off for that reason. Here only that
+       assembly's warnings are folded into the one IL2104 that is ignored, so a warning from any other assembly,
+       PdfPecker.Razor's included, still breaks the AOT publish in CI. -->
+  <PropertyGroup>
+    <TrimmerSingleWarn>false</TrimmerSingleWarn>
+    <NoWarn>$(NoWarn);IL2104</NoWarn>
+  </PropertyGroup>
+
+  <Target Name="FoldComponentsTrimWarnings" BeforeTargets="PrepareForILLink;WriteIlcRspFileForCompilation">
+    <ItemGroup>
+      <ManagedAssemblyToLink Condition="'%(Filename)' == 'Microsoft.AspNetCore.Components'">
+        <TrimmerSingleWarn>true</TrimmerSingleWarn>
+      </ManagedAssemblyToLink>
+    </ItemGroup>
+  </Target>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/PdfPecker.Razor/PdfPecker.Razor.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -17,7 +17,7 @@ internal sealed partial class StyleResolver
 
     /// <summary>
     /// Applies the font properties before the rest, in their own order: a length in ex or ch measures the font the element
-    /// ends up with, whichever order the declarations are written in. Only the declarations without var() are moved.
+    /// ends up with, whichever order the declarations are written in. Only the declarations without var() or attr() are moved.
     /// </summary>
     private void ApplyFontPropertiesFirst(ComputedStyle s, ComputedStyle parent, (int Index, AllKeyword Keyword) all)
     {
@@ -29,7 +29,7 @@ internal sealed partial class StyleResolver
             {
                 var d = _decls[i];
                 bool lineHeight = d.Property == "line-height";
-                if (lineHeight != (pass == 1) || !IsFontProperty(d.Property) || d.HasVar || ResetByAll(i, all)) continue;
+                if (lineHeight != (pass == 1) || !IsFontProperty(d.Property) || d.HasVar || _attrUsed && d.UsesAttr || ResetByAll(i, all)) continue;
                 _applied[i] = true;
                 var value = s.Zoom != 1 || _rootZoom != 1 ? Zoomed(d.Property, d.Value, s, parent) : d.Value;
                 Apply(s, parent, d.Property, d.MetricUnits ? RewriteMetricUnits(value, s, lineHeight ? parent : s) : value);

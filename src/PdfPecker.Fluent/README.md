@@ -83,6 +83,22 @@ Document.Create(container =>
 - **Merging**: `Document.Merge(invoice1, invoice2, ...)` generates several documents as one PDF or HTML document, such
   as a batch of invoices. Each keeps its own page numbers, totals and section names, or `UseContinuousPageNumbers()`
   numbers the pages through all of them.
+- **Working on existing PDFs**: `DocumentOperation`, with QuestPDF's names, works on any PDF, also ones PdfPecker did
+  not write. `LoadFile` (or `Load` from bytes), then `TakePages` and `MergeFile` choose, reorder and append pages in
+  qpdf's page syntax (`"1-3,z"`, `"r3-r1"`, `"1-10,x4"`, `"1-z:even"`), `OverlayFile` and `UnderlayFile` draw the
+  pages of another PDF over or under chosen pages (a "COPY" stamp, letterhead with a different first page),
+  `AddAttachment` attaches files, and `Encrypt`, `Decrypt` and `Linearize` protect the result or prepare it for Fast
+  Web View, also both at once. `Save` writes a file or stream, and `GeneratePdf` returns the bytes:
+
+  ```csharp
+  DocumentOperation.LoadFile("invoice.pdf")
+      .MergeFile("terms.pdf")
+      .UnderlayFile(new DocumentOperation.LayerConfiguration { FilePath = "letterhead.pdf", SourcePages = "1", RepeatSourcePages = "2" })
+      .AddAttachment(new DocumentOperation.DocumentAttachment { FilePath = "invoice.xml", Relationship = DocumentOperation.DocumentAttachmentRelationship.Alternative })
+      .Encrypt(new DocumentOperation.Encryption256Bit { UserPassword = "secret", AllowModification = false })
+      .Linearize()
+      .Save("invoice-final.pdf");
+  ```
 - **Form fields and footnotes**, which QuestPDF does not have: `TextField` (one line, multiline or password),
   `CheckBox`, `RadioButton`, `ComboBox` and `ListBox` become fillable PDF fields, and `text.Footnote("...")` numbers a
   note and sets it at the bottom of its page. Browsers show footnotes in the text, where `GenerateHtml` puts them.
@@ -91,10 +107,12 @@ Document.Create(container =>
   the surrounding font, size and colour, styles headings, code, quotes and tables as on GitHub, and is safe for text
   from users: HTML in it stays text and only web, mail and in-document links keep their target.
 - **Images and graphics**: PNG, JPEG, WebP, BMP, TIFF and GIF images, SVG, solid, dashed and dotted lines, and QR,
-  EPC payment QR, Code 128 and EAN-13 barcodes. `Image.FromFile` and `SvgImage.FromText` load an image once for every
+  EPC payment QR, Swiss QR-bill, Data Matrix, GS1 Data Matrix, Code 128 and EAN-13 barcodes. `Image.FromFile` and `SvgImage.FromText` load an image once for every
   page and document that draws it, and `WithCompressionQuality`, `WithRasterDpi` and `UseOriginalImage`, or
   `ImageCompressionQuality` and `ImageRasterDpi` in `DocumentSettings`, write photos as JPEGs and downsample them to
   the size they are drawn at.
+- **Swiss QR-bill**: `SwissQrBill(bill, language)` lays out the 210 x 105 mm payment part with its receipt as the
+  QR-bill style guide sets it, in English, German, French or Italian, with blank fields for a missing amount or payer.
 - **Charts**: `Chart` draws column, bar, line and pie charts from your series as vector SVG, with a legend, data
   labels, your own colours and a .NET number format for the values; MigraDoc users will find the usual report charts here.
 - **Accessibility**: `SemanticSection`, `SemanticArticle`, `SemanticHeader1` to `6` (and `SemanticHeading1` to `6`),
@@ -166,6 +184,13 @@ Most QuestPDF code ports by changing the `using` lines: `Document.Create`, `Page
   smaller, and transparency stays lossless. `Image.Size` is not available.
 - A page number in `Background` or `Foreground` shows the number of the page set's first page on every page; put
   page numbers in the header or footer.
+- `DocumentOperation` encrypts with AES-256 for every `Encrypt` call, also `Encryption40Bit` and `Encryption128Bit`,
+  keeping their permissions, and always encrypts the metadata. An encrypted PDF whose pages change or that is
+  linearized needs `Decrypt()` or an `Encrypt` call, where QuestPDF keeps the old encryption; adding attachments keeps
+  it. An attachment is named by its `AttachmentName` (by default the file name), not by `Key`, and one the loaded PDF
+  already has cannot be replaced. Overlays, underlays, encryption and linearization refuse digitally signed PDFs, whose
+  signatures they would break; attachments keep the signatures valid.
+  `ExtendMetadata` and `RemoveRestrictions` are not available.
 - Not available: `Dynamic`, `Canvas`, the Companion previewer and the `MultiColumn` `Spacer`.
 
 ## Performance

@@ -66,7 +66,9 @@ internal static partial class CssParser
             char c = s[i];
             if (quote != '\0')
             {
+                // A backslash escapes the next character, so "a\" b" is one string, as SplitTopLevel reads it.
                 if (c == quote) quote = '\0';
+                else if (c == '\\') i++;
                 continue;
             }
             if (IsTokenSpace(c) && depth == 0)

@@ -56,7 +56,7 @@ for (int n = only ?? 0; only == null ? watch.Elapsed.TotalSeconds < seconds : n 
         document = new Random(caseSeed + 1).Next(2) == 0 ? merged.UseContinuousPageNumbers() : merged;
     }
     bool pdf = only != null || n % pdfEvery == 0;
-    string? failure = Fuzz.Check(document, pdf, ref rejected);
+    string? failure = Fuzz.Check(document, pdf, ref rejected, unchecked(caseSeed * 17 + 3));
     if (pdf) pdfs++;
     if (failure != null && only != null)
         File.WriteAllText("fuzz-case.html", string.Join("\n<!-- next page set -->\n", DocumentGenerator.Html(document, false, out _)));
@@ -90,7 +90,7 @@ internal static class Fuzz
 
     private static readonly string[] BadColors = ["red", "", "#", "#ggg", "#1234567", "rgb(1,2,3)", "#fff;x"];
 
-    public static string? Check(IDocument document, bool pdf, ref int rejected)
+    public static string? Check(IDocument document, bool pdf, ref int rejected, int operationSeed)
     {
         try
         {
@@ -112,7 +112,13 @@ internal static class Fuzz
                 }
                 // Like the library fuzzer's html target, a page limit keeps a document of huge margins or padding, which
                 // can run to tens of thousands of pages at the default limit, from spending the time bound on pages.
-                if (pdf) document.GeneratePdf(new PdfOptions { MaxPages = 100 });
+                if (pdf)
+                {
+                    byte[] result = document.GeneratePdf(new PdfOptions { MaxPages = 100 });
+                    // Some cases go on to work on the PDF with DocumentOperation, with random page selections.
+                    var r = new Random(operationSeed);
+                    if (r.Next(4) == 0) Operation(result, r).GeneratePdf();
+                }
                 return null;
             });
             if (!task.Wait(Bound)) return $"took longer than {Bound.TotalSeconds} s";
@@ -128,6 +134,54 @@ internal static class Fuzz
         {
             return e.InnerException!.GetType().Name + ": " + e.InnerException.Message + "\n" + e.InnerException.StackTrace;
         }
+    }
+
+    private static readonly string[] Selectors =
+    [
+        "1", "z", "1-z", "z-1", "r1", "r2-r1", "1-z:odd", "1-z:even", "1,1,1", "1-z,x1", "2-3", "1-2,x2-1", "r3",
+        "1-z,1-z,1-z", "", " ", "0", "x1", "1-", "-1", "1:odd:even", "99999", "r99999", "1-999999999", "1,,", "zz",
+    ];
+
+    private static string Selector(Random r) => r.Next(10) == 0 ? Text(r) : Selectors[r.Next(Selectors.Length)];
+
+    /// <summary>A random chain of DocumentOperation calls on <paramref name="pdf"/>, which also serves as merged file and layer.</summary>
+    private static DocumentOperation Operation(byte[] pdf, Random r)
+    {
+        var operation = DocumentOperation.Load(pdf);
+        for (int i = r.Next(1, 6); i > 0; i--)
+        {
+            switch (r.Next(9))
+            {
+                case 0: operation.TakePages(Selector(r)); break;
+                case 1: operation.Merge(pdf, r.Next(3) == 0 ? null : Selector(r)); break;
+                case 2:
+                case 3:
+                    var layer = new DocumentOperation.LayerConfiguration
+                    {
+                        Pdf = pdf,
+                        TargetPages = r.Next(2) == 0 ? null : Selector(r),
+                        SourcePages = r.Next(2) == 0 ? null : Selector(r),
+                        RepeatSourcePages = r.Next(2) == 0 ? null : Selector(r),
+                    };
+                    if (r.Next(2) == 0) operation.OverlayFile(layer);
+                    else operation.UnderlayFile(layer);
+                    break;
+                case 4:
+                    operation.AddAttachment(new DocumentOperation.DocumentAttachment
+                    {
+                        Data = new byte[r.Next(0, 100)],
+                        AttachmentName = r.Next(4) == 0 ? Text(r) : "a" + r.Next(3) + ".txt",
+                        Replace = r.Next(4) != 0,
+                        MimeType = r.Next(4) == 0 ? Text(r) : null,
+                        Description = r.Next(4) == 0 ? Text(r) : null,
+                    });
+                    break;
+                case 5: operation.Encrypt(new DocumentOperation.Encryption256Bit { UserPassword = Text(r), OwnerPassword = Text(r), AllowPrinting = r.Next(2) == 0 }); break;
+                case 6: operation.Decrypt(); break;
+                default: operation.Linearize(); break;
+            }
+        }
+        return operation;
     }
 
     // The exceptions the package documents: invalid arguments, invalid structure, and PdfPecker's own limits.
@@ -406,7 +460,19 @@ internal static class Fuzz
                 else c.Svg(svg.EndsWith(".svg", StringComparison.OrdinalIgnoreCase) ? svg + " " : svg);
                 break;
             case 5:
-                if (r.Next(2) == 0) c.QrCode(Text(r));
+                var barcode = r.Next(5);
+                if (barcode == 0) c.QrCode(Text(r));
+                else if (barcode == 1) c.DataMatrix(Text(r));
+                else if (barcode == 2) c.Gs1DataMatrix(r.Next(2) == 0 ? "(01)09506000134352(10)" + Text(r) : Text(r));
+                else if (barcode == 3) c.SwissQrBill(new SwissQrBill
+                {
+                    Account = "CH44 3199 9123 0008 8901 2",
+                    Creditor = new SwissQrAddress { Name = Text(r), PostalCode = "2501", Town = Text(r) },
+                    Amount = r.Next(2) == 0 ? null : r.Next(1, 100_000),
+                    Debtor = r.Next(2) == 0 ? null : new SwissQrAddress { Name = Text(r), Street = Text(r), PostalCode = Text(r), Town = Text(r), Country = "DE" },
+                    Reference = r.Next(4) == 0 ? Text(r) : "210000000003139471430009017",
+                    Message = r.Next(2) == 0 ? null : Text(r),
+                }, (SwissQrBillLanguage)r.Next(4));
                 else c.Ean13(r.Next(10) == 0 ? Text(r) : r.NextInt64(100_000_000_000, 999_999_999_999).ToString(CultureInfo.InvariantCulture));
                 break;
             case 6:

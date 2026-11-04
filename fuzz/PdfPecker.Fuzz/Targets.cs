@@ -90,7 +90,7 @@ internal static class Targets
         "var(--a)", "calc(", "min(", "max(", "clamp(", "!important", "@media print {", "@media (min-width: 1px) {", "@supports (display:grid) {", "@page {", "@font-face {", "@keyframes a {",
         "@import url(x);", "@container (min-width:1px) {", "@counter-style a {", ":is(", ":not(", ":where(", ":has(", ":nth-child(2n+1 of p)", "::before", "::after", "::marker",
         "*", ">", "~", "+", "|", "[a=b i]", "url(data:,)", "linear-gradient(", "radial-gradient(", "conic-gradient(", "repeating-linear-gradient(", "-webkit-gradient(", "-webkit-", "rotate(", "matrix(",
-        "attr(a)", "counter(a)", "counters(a, \".\")", "content:", "display:grid", "grid-template-columns: repeat(999999, 1fr)", "grid-column: 1 / span 99999", "flex: 1e9",
+        "attr(a)", "attr(data-x type(*), ", "attr(data-x px, ", "attr(class type(<length>+))", "attr(id raw-string)", "attr(title number)", "type(<color>)", "width:attr(data-x %)", "counter(a)", "counters(a, \".\")", "content:", "display:grid", "grid-template-columns: repeat(999999, 1fr)", "grid-column: 1 / span 99999", "flex: 1e9",
         "1e9px", "-1e9px", "100000%", "calc(1/0)", "calc(0/0)", "inherit", "initial", "unset", "revert", "all:unset", "--a:", "var(--a, var(--b, var(--a)))",
         "mask-image:", "-webkit-mask:", "mask-composite: exclude", "mask-mode: luminance", "mask-size: 1e9px", "url(#m)", "backdrop-filter: blur(1e9px)", "-webkit-backdrop-filter:",
         "shape-outside:", "inset(", "ellipse(", "polygon(", "path(", "margin-box", "content-box", "shape-margin: 1e9px", "shape-image-threshold: 1e9",

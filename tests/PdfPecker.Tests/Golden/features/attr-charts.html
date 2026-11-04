@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en"><head><title>Typed attr()</title>
+<style>
+@page { size: 148mm 105mm; margin: 10mm }
+body { font: 9pt/1.3 sans-serif; margin: 0; color: #222 }
+h1 { font-size: 13pt; margin: 0 0 5pt; border-bottom: 1pt solid #2980b9 }
+.row { display: flex; align-items: center; gap: 4pt; margin: 2pt 0 }
+.row::before { content: attr(data-label); width: 22mm; text-align: right }
+.bar { height: 9pt; width: attr(data-pct %, 2%); background: attr(data-color type(<color>), #95a5a6) }
+.bar::after { content: attr(data-pct) "%"; display: block; margin-left: calc(100% + 3pt); font-size: 7pt; line-height: 9pt }
+.cols { display: flex; align-items: flex-end; gap: 3pt; height: 26mm; border-bottom: 0.5pt solid #999; margin-top: 6pt }
+.cols > div { width: 8mm; height: calc(attr(data-v number, 0) * 1mm); background: hsl(calc(attr(data-v number) * 9) 60% 50%);
+  border-radius: attr(data-r px, 0) attr(data-r px, 0) 0 0 }
+.tag { display: inline-block; padding: 1pt 4pt; margin: 6pt 2pt 0 0; border: attr(data-w type(<length>), 1pt) solid currentcolor;
+  color: attr(data-c type(<color>)); --label: attr(data-c) }
+.tag::after { content: " " var(--label) }
+</style></head><body>
+<h1>Charts from data attributes</h1>
+<div class="row" data-label="North"><div class="bar" data-pct="72" data-color="#2980b9"></div></div>
+<div class="row" data-label="South"><div class="bar" data-pct="45" data-color="rgb(39 174 96)"></div></div>
+<div class="row" data-label="East"><div class="bar" data-pct="88" data-color="not a colour"></div></div>
+<div class="row" data-label="West"><div class="bar" data-pct="12px" data-color="#c0392b"></div></div>
+<div class="cols"><div data-v="8"></div><div data-v="14" data-r="4"></div><div data-v="23"></div><div data-v="17" data-r="2"></div><div data-v="5"></div><div data-v="x"></div><div data-v="20"></div></div>
+<span class="tag" data-c="crimson">tag</span><span class="tag" data-c="teal" data-w="2pt">tag</span><span class="tag" data-c="url(x.png)">tag</span>
+</body></html>
