@@ -241,10 +241,78 @@ public class BarcodeTests
     }
 
     [Fact]
+    public void Data_matrix_matches_the_worked_example_of_the_standard()
+    {
+        // "123456" is the encoding example of ISO/IEC 16022: three digit-pair codewords and five error correction
+        // codewords in a 10 x 10 symbol. The grid was read back by the libdmtx decoder.
+        var (codewords, size, _) = DataMatrixEncoder.Codewords("123456", gs1: false);
+        Assert.Equal(new byte[] { 142, 164, 186, 114, 25, 5, 88, 102 }, codewords);
+        Assert.Equal(10, size);
+        string[] expected =
+        {
+            "#.#.#.#.#.", "##..#.##.#", "##.....#..", "##...###.#", "##....#...", "#.....####", "###.##....",
+            "####.##..#", "#..###.#..", "##########",
+        };
+        Assert.Equal(string.Join('\n', expected) + "\n", Grid(DataMatrixEncoder.Encode("123456")));
+    }
+
+    [Theory]
+    [InlineData(3, 10)]
+    [InlineData(44, 26)]
+    [InlineData(62, 32)]
+    [InlineData(204, 52)]
+    [InlineData(280, 64)]
+    [InlineData(1304, 132)]
+    [InlineData(1558, 144)]
+    public void Data_matrix_size_follows_the_standard_table(int codewords, int size)
+    {
+        // A lower-case letter is one codeword. The most a size holds fits it; one more needs the next size.
+        var text = new string('a', codewords);
+        Assert.Equal(size, DataMatrixEncoder.Encode(text).GetLength(0));
+        if (size < 144)
+            Assert.True(DataMatrixEncoder.Encode(text + "a").GetLength(0) > size);
+        else
+            Assert.Throws<ArgumentException>(() => Barcode.DataMatrix(text + "a"));
+        Assert.Throws<ArgumentException>(() => Barcode.DataMatrix(""));
+        Assert.Throws<ArgumentException>(() => Barcode.DataMatrix(new string('1', 3117)));
+    }
+
+    [Fact]
+    public void Data_matrix_pads_and_stores_text_outside_ascii()
+    {
+        // The first pad codeword is 129 and the second is scrambled by its position: 129 + (149 * 3 mod 253) + 1 - 254.
+        Assert.Equal(new byte[] { 66, 129, 70 }, DataMatrixEncoder.Codewords("A", gs1: false).Codewords[..3]);
+        // Latin-1 letters use the upper shift; other text is UTF-8 behind ECI 26.
+        Assert.Equal(new byte[] { 235, 71 }, DataMatrixEncoder.Codewords("\u00C6", gs1: false).Codewords[..2]);
+        Assert.Equal(new byte[] { 241, 27, 235, 103, 235, 24, 235, 38 }, DataMatrixEncoder.Codewords("\u65E5", gs1: false).Codewords[..8]);
+    }
+
+    [Fact]
+    public void Gs1_data_matrix_starts_with_fnc1_and_separates_variable_fields()
+    {
+        // (01) and (17) have a fixed length, so only the variable (10) is followed by FNC1 (232) before (21).
+        var codewords = DataMatrixEncoder.Codewords("(01)09506000134352(17)270131(10)AB-123(21)X", gs1: true).Codewords;
+        byte[] expected =
+        {
+            232, 131, 139, 180, 190, 130, 143, 173, 182, 147, 157, 131, 161, 140, 66, 67, 46, 142, 52, 232, 151, 89,
+        };
+        Assert.Equal(expected, codewords[..expected.Length]);
+
+        Assert.Throws<ArgumentException>(() => Barcode.Gs1DataMatrix(""));
+        Assert.Throws<ArgumentException>(() => Barcode.Gs1DataMatrix("0109506000134352"));
+        Assert.Throws<ArgumentException>(() => Barcode.Gs1DataMatrix("(01)0950600013435"));
+        Assert.Throws<ArgumentException>(() => Barcode.Gs1DataMatrix("(1)AB"));
+        Assert.Throws<ArgumentException>(() => Barcode.Gs1DataMatrix("(10)A B"));
+        Assert.Throws<ArgumentException>(() => Barcode.Gs1DataMatrix("(10)"));
+        Assert.Throws<ArgumentException>(() => Barcode.Gs1DataMatrix("(10"));
+        Assert.Throws<ArgumentException>(() => Barcode.Gs1DataMatrix("(10)" + new string('A', 91)));
+    }
+
+    [Fact]
     public void Barcodes_convert_inline_and_as_images()
     {
         var html = "<html><body>" + Barcode.QrCode("https://pdfpecker.net/") + Barcode.Ean13("590123412345")
-            + "<img src=\"" + Barcode.ToDataUri(Barcode.Code128("PdfPecker")) + "\"></body></html>";
+            + Barcode.DataMatrix("PdfPecker") + "<img src=\"" + Barcode.ToDataUri(Barcode.Code128("PdfPecker")) + "\"></body></html>";
         var pdf = HtmlToPdf.Convert(html);
         var png = PdfToImage.ConvertPage(pdf, 0, new ImageOptions { Dpi = 72 });
         Assert.True(png.Length > 1000);

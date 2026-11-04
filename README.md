@@ -225,8 +225,9 @@ How snapshots are created and accepted, and the appearance comparison for PDFs f
 - **E-invoices and attachments**: Factur-X, ZUGFeRD, XRechnung and Peppol BIS 3.0 XML built from invoice data and
   checked against EN 16931, a ready-made invoice layout, and embedded files.
   [More](https://pdfpecker.net/docs/e-invoices/)
-- **Barcodes**: QR codes, EPC payment QR codes, Code 128 and EAN-13 as vector SVG, e.g.
-  `Barcode.QrCode("https://example.com")`. [More](https://pdfpecker.net/docs/barcodes/)
+- **Barcodes**: QR codes, EPC payment QR codes, Data Matrix and GS1 Data Matrix, Code 128 and EAN-13 as vector SVG,
+  e.g. `Barcode.QrCode("https://example.com")` or `Barcode.Gs1DataMatrix("(01)09506000134352(10)AB-123")`.
+  [More](https://pdfpecker.net/docs/barcodes/)
 - **Existing PDFs**: merge (also streamed), split, reorder, rotate, stamp, extract text with positions, extract images
   and read document properties. [More](https://pdfpecker.net/docs/merging/)
 - **Compacting and Fast Web View**: `PdfCompactor` makes any PDF smaller without changing how it looks, and

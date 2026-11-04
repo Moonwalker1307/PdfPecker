@@ -316,7 +316,7 @@ internal static class Targets
             {
                 // Barcode text often comes from data the caller does not control, such as an invoice reference.
                 Name = "barcode", Extension = ".txt", Text = true, MaxSize = 8 * 1024,
-                Seeds = _ => new[] { "HELLO WORLD", "https://pdfpecker.net/", "0123456789012", "Blåbær 🙂\t\u0000" }
+                Seeds = _ => new[] { "HELLO WORLD", "https://pdfpecker.net/", "0123456789012", "Blåbær 🙂\t\u0000", "(01)09506000134352(17)270131(10)AB-123" }
                     .Select((s, i) => ($"seed{i}", Encoding.UTF8.GetBytes(s))),
                 Run = (d, ct) =>
                 {
@@ -325,6 +325,8 @@ internal static class Targets
                         RunExpectingArgument(() => Barcode.QrCode(text, new BarcodeOptions { ErrorCorrection = level }));
                     RunExpectingArgument(() => Barcode.Code128(text));
                     RunExpectingArgument(() => Barcode.Ean13(text));
+                    RunExpectingArgument(() => Barcode.DataMatrix(text));
+                    RunExpectingArgument(() => Barcode.Gs1DataMatrix(text));
                     RunExpectingArgument(() => Barcode.EpcQrCode(new EpcPayment { Name = text, Iban = "DE89370400440532013000", Text = text }));
                 },
             },
