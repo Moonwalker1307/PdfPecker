@@ -128,13 +128,39 @@ It writes compact HTML and CSS and renders it with PdfPecker, so every `PdfOptio
 signatures, e-invoices) works with it. What it covers and how it differs from QuestPDF is in its
 [README](https://github.com/Moonwalker1307/PdfPecker/blob/main/src/PdfPecker.Fluent/README.md).
 
+## Testing PDFs
+
+[PdfPecker.Testing](https://www.nuget.org/packages/PdfPecker.Testing) adds snapshot tests for the PDFs your code makes.
+`PdfAssert.MatchesSnapshot` compares a PDF with a stored one, leaving out dates, file IDs and stream compression, and
+when they differ it writes the new PDF and page images with the changed pixels marked. It works with any test
+framework, because a failed check throws. It is released with every PdfPecker release under the same version, and its
+only dependency is PdfPecker.
+
+```
+dotnet add package PdfPecker.Testing
+```
+
+```csharp
+using PdfPecker.Testing;
+
+byte[] pdf = HtmlToPdf.Convert(invoiceHtml);
+PdfAssert.MatchesSnapshot(pdf, "invoice");   // Snapshots/invoice.pdf next to the test file
+PdfAssert.ContainsText(pdf, "Total due: 1,500.00");
+PdfAssert.HasPageCount(pdf, 1);
+```
+
+How snapshots are created and accepted, and the appearance comparison for PDFs from other producers, are in its
+[README](https://github.com/Moonwalker1307/PdfPecker/blob/main/src/PdfPecker.Testing/README.md).
+
 ## Features
 
 - **HTML and CSS**: flexbox, grid and subgrid, CSS tables, floats with `shape-outside`, `clip-path` shapes (also
   `rect()` and `xywh()`), sizes that fill the containing block (`width: stretch` and `-webkit-fill-available`, also for
   heights and their limits), `corner-shape` (squircle, bevel, scoop, notch and `superellipse()` corners on borders,
   backgrounds, shadows, outlines and clips), `overflow: clip` with `overflow-clip-margin`, `zoom` (as Chrome
-  computes it, for templates that shrink a page to fit), multi-column layout,
+  computes it, for templates that shrink a page to fit), multi-column layout, gap decorations (`column-rule` and
+  `row-rule` in grid and flex containers too, with lists and `repeat()`, `rule-break`, `rule-inset`,
+  `rule-visibility-items` and `rule-overlap`, cut where a grid or flex container breaks across pages),
   positioning (also the legacy `clip: rect()`, and absolute boxes inside a positioned inline element, such as
   tooltips and badges), transforms, gradients (also `in oklch` and other colour spaces, and as
   list markers), fixed background images (placed on each page's paper, as Chrome prints them), filters, masks,
@@ -180,7 +206,8 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
 - **Fonts**: TrueType, OpenType, WOFF and WOFF2, subset and embedded, with kerning, ligatures, variable fonts and
   OpenType features, and bundled fallback fonts for letters and symbols a document's fonts lack. COLR colour fonts,
   versions 0 and 1 (such as Noto Color Emoji), print in colour as Chrome prints them, with the default palette.
-  [More](https://pdfpecker.net/docs/fonts/)
+  `@font-face` takes `size-adjust`, `ascent-override`, `descent-override` and `line-gap-override`, so a fallback face
+  can be sized to match a web font. [More](https://pdfpecker.net/docs/fonts/)
 - **Languages**: Arabic and Hebrew with bidi and shaping, Indic scripts, Thai and Lao, CJK line breaking and
   justification, and hyphenation in eleven languages (with `hyphenate-limit-lines`). [More](https://pdfpecker.net/docs/languages/)
 - **PDF/A, passwords and watermarks**: PDF/A-2, 3 and 4, AES-256 encryption, and text, image and SVG watermarks.
@@ -277,6 +304,7 @@ dotnet run --project bench/PdfPecker.Benchmarks -c Release -- --requirements    
 bench/compare-versions.sh v1.22.0                              # this checkout against a release, in turns on this machine
 dotnet pack src/PdfPecker -c Release -o ./nupkg                # also checks the public API against the last release
 dotnet pack src/PdfPecker.Fluent -c Release -o ./nupkg         # the fluent package, with the same version
+dotnet pack src/PdfPecker.Testing -c Release -o ./nupkg        # the snapshot testing package, with the same version
 ```
 
 Requirements and details are in [BUILD.md](https://github.com/Moonwalker1307/PdfPecker/blob/main/BUILD.md) and

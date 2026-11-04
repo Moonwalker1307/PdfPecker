@@ -35,6 +35,14 @@ internal static class CssSupports
         "grid-template-areas", "grid-auto-columns", "grid-auto-rows", "grid-auto-flow", "grid-area", "grid-row",
         "grid-column", "grid-column-start", "grid-column-end", "grid-row-start", "grid-row-end", "columns", "column-count",
         "column-width", "column-rule", "column-rule-width", "column-rule-style", "column-rule-color", "column-span", "column-fill",
+        "row-rule", "row-rule-width", "row-rule-style", "row-rule-color", "rule", "rule-width", "rule-style", "rule-color",
+        "column-rule-break", "row-rule-break", "rule-break", "column-rule-visibility-items", "row-rule-visibility-items",
+        "rule-visibility-items", "rule-overlap", "rule-inset", "rule-inset-cap", "rule-inset-junction", "rule-inset-start",
+        "rule-inset-end", "column-rule-inset", "column-rule-inset-cap", "column-rule-inset-junction", "column-rule-inset-start",
+        "column-rule-inset-end", "column-rule-inset-cap-start", "column-rule-inset-cap-end", "column-rule-inset-junction-start",
+        "column-rule-inset-junction-end", "row-rule-inset", "row-rule-inset-cap", "row-rule-inset-junction", "row-rule-inset-start",
+        "row-rule-inset-end", "row-rule-inset-cap-start", "row-rule-inset-cap-end", "row-rule-inset-junction-start",
+        "row-rule-inset-junction-end",
         "fill", "stroke", "stroke-width", "fill-opacity", "stroke-opacity", "fill-rule", "stroke-linecap", "stroke-linejoin",
         "stroke-miterlimit", "clip-path", "clip", "clip-rule", "mask", "mask-type", "filter", "marker", "marker-start", "marker-mid",
         "marker-end", "flood-color", "flood-opacity", "lighting-color", "color-interpolation-filters", "text-anchor", "dominant-baseline",
@@ -156,7 +164,6 @@ internal static class CssSupports
             case "border-color":
             case "outline-color":
             case "text-decoration-color":
-            case "column-rule-color":
             case "flood-color":
             case "lighting-color":
                 return CssColor.TryParse(value, CssColor.Black, out _);
@@ -206,6 +213,24 @@ internal static class CssSupports
             case "hyphenate-limit-lines":
             case "-webkit-hyphenate-limit-lines":
                 return StyleResolver.ParseHyphenateLimitLines(lower) != null;
+            case "column-rule-color":
+            case "row-rule-color":
+            case "rule-color":
+                return GapRules.ParseList(value, static (string text, out uint color) => CssColor.TryParse(text, CssColor.Black, out color)) != null;
+            case "column-rule-style":
+            case "row-rule-style":
+            case "rule-style":
+                return GapRules.ParseList(lower, static (string text, out bool ok) => ok = CssParser.IsBorderStyle(text)) != null;
+            case "column-rule-break":
+            case "row-rule-break":
+            case "rule-break":
+                return GapRules.ParseBreak(lower) != null;
+            case "column-rule-visibility-items":
+            case "row-rule-visibility-items":
+            case "rule-visibility-items":
+                return GapRules.ParseVisibility(lower) != null;
+            case "rule-overlap":
+                return lower is "row-over-column" or "column-over-row";
         }
         // Other values: functions this library does not know make the value unsupported.
         // In content, attr() and the paged-media functions (target-counter(), target-counters(), target-text(), leader())

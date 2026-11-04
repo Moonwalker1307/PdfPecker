@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Font face metric overrides</title>
+<style>
+  @font-face { font-family: Work; src: url('../../Fixtures/fonts/WorkSans-Regular.ttf'); }
+  @font-face { font-family: WorkBig; src: url('../../Fixtures/fonts/WorkSans-Regular.ttf'); size-adjust: 130%; }
+  @font-face { font-family: WorkTight; src: url('../../Fixtures/fonts/WorkSans-Regular.ttf'); ascent-override: 80%; descent-override: 20%; line-gap-override: 0%; }
+  @font-face { font-family: WorkBoth; src: url('../../Fixtures/fonts/WorkSans-Regular.ttf'); size-adjust: 75%; ascent-override: 110%; descent-override: 40%; line-gap-override: 10%; }
+  @font-face { font-family: Split; src: url('../../Fixtures/fonts/WorkSans-Regular.ttf'); unicode-range: U+0041-005A; size-adjust: 150%; }
+  @font-face { font-family: Split; src: url('../../Fixtures/fonts/WorkSans-Regular.ttf'); unicode-range: U+0020, U+0061-007A; }
+  @page { size: 420px 330px; margin: 0; }
+  body { margin: 0; font-size: 16px; }
+  p { margin: 0 0 8px; padding: 0 8px; background: #eef; line-height: normal; width: 380px; }
+  span.ex { display: inline-block; width: 4ex; height: 4px; background: #c33; }
+  span.em { display: inline-block; width: 1em; height: 4px; background: #3a3; }
+</style>
+</head>
+<body>
+<p style="font-family: Work">Work Sans as it is: the quick brown fox <span class="ex"></span><span class="em"></span></p>
+<p style="font-family: WorkBig">size-adjust 130%: the quick brown fox <span class="ex"></span><span class="em"></span></p>
+<p style="font-family: WorkTight">ascent 80%, descent 20%, gap 0: the quick brown fox jumps over the lazy dog twice</p>
+<p style="font-family: WorkBoth">size-adjust 75% with overrides: the quick brown fox jumps over the lazy dog and keeps running</p>
+<p style="font-family: Split">Unicode Range Split: Capitals Are Larger Than Lowercase</p>
+<p style="font-family: WorkBig; font-size-adjust: 0.5">font-size-adjust after size-adjust: xxxx</p>
+<p style="font-family: Work; font-size-adjust: 0.5">font-size-adjust without it: xxxx</p>
+<p style="font-family: WorkBig; text-decoration: underline; text-decoration-skip-ink: auto">Underlined, skipping ink: gyp jqy</p>
+</body>
+</html>

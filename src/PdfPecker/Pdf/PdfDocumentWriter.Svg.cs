@@ -119,13 +119,15 @@ internal sealed partial class PdfDocumentWriter
         }
         var m = shape.TextMatrix;
         var svgFont = Leaf(shape.Font!);
+        // A face's size-adjust draws its glyphs at a font size of their own.
+        float size = svgFont is EmbeddedFont { SizeAdjust: not 1 } adjusted ? shape.FontSize * adjusted.SizeAdjust : shape.FontSize;
         if (svgFont is EmbeddedFont svgEmbedded) WriteFontName(b.Ascii("BT "), Subset(svgEmbedded.Program, SvgTextColor(shape)), 0);
         else b.Ascii("BT /F").Int(((StandardFont)shape.Font!).Index + 1);
-        b.Sp().Num(shape.FontSize).Ascii(" Tf ").Int(mode).Ascii(" Tr 0 Tw ")
+        b.Sp().Num(size).Ascii(" Tf ").Int(mode).Ascii(" Tr 0 Tw ")
             .Num(shape.CharSpacing).Ascii(" Tc ").Num6(m.A).Sp().Num6(m.B).Sp().Num6(m.C).Sp().Num6(m.D).Sp().Num(m.E).Sp().Num(m.F)
             .Ascii(" Tm ");
         if (svgFont is EmbeddedFont svgFontEmbedded)
-            WriteGlyphHex(b, svgFontEmbedded, Subset(svgFontEmbedded.Program, SvgTextColor(shape)), shape.Text!, shape.FontSize, shape.Rtl, shape.CharSpacing);
+            WriteGlyphHex(b, svgFontEmbedded, Subset(svgFontEmbedded.Program, SvgTextColor(shape)), shape.Text!, size, shape.Rtl, shape.CharSpacing);
         else WriteStandardText(b, shape.Font!, shape.Rtl ? Text.Bidi.VisualText(shape.Text!) : shape.Text!);
         b.Ascii(" ET\n");
     }
@@ -140,7 +142,7 @@ internal sealed partial class PdfDocumentWriter
     {
         var path = shape.TextPath!;
         var font = Leaf(shape.Font!);
-        float size = shape.FontSize, pen = shape.PathStart;
+        float size = font is EmbeddedFont { SizeAdjust: not 1 } adjusted ? shape.FontSize * adjusted.SizeAdjust : shape.FontSize, pen = shape.PathStart;
         if (font is EmbeddedFont embedded) WriteFontName(b.Ascii("BT "), Subset(embedded.Program, SvgTextColor(shape)), 0);
         else b.Ascii("BT /F").Int(((StandardFont)font).Index + 1);
         b.Sp().Num(size).Ascii(" Tf ").Int(mode).Ascii(" Tr 0 Tw 0 Tc\n");

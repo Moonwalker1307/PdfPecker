@@ -351,6 +351,21 @@ public static class TextSpanExtensions
     /// <summary>Struck through, or not with <c>false</c>.</summary>
     public static T Strikethrough<T>(this T descriptor, bool value = true) where T : TextSpanDescriptor => Apply(descriptor, s => s.Strikethrough(value));
 
+    /// <summary>A line above the text, or none with <c>false</c>.</summary>
+    public static T Overline<T>(this T descriptor, bool value = true) where T : TextSpanDescriptor => Apply(descriptor, s => s.Overline(value));
+
+    /// <summary>Lets a line break between any two characters, not only between words, or not with <c>false</c>.</summary>
+    public static T BreakAnywhere<T>(this T descriptor, bool value = true) where T : TextSpanDescriptor => Apply(descriptor, s => s.BreakAnywhere(value));
+
+    /// <summary>Takes the text's direction from its first letter that has one (the default).</summary>
+    public static T DirectionAuto<T>(this T descriptor) where T : TextSpanDescriptor => Apply(descriptor, s => s.DirectionAuto());
+
+    /// <summary>Lays the text out left to right.</summary>
+    public static T DirectionFromLeftToRight<T>(this T descriptor) where T : TextSpanDescriptor => Apply(descriptor, s => s.DirectionFromLeftToRight());
+
+    /// <summary>Lays the text out right to left.</summary>
+    public static T DirectionFromRightToLeft<T>(this T descriptor) where T : TextSpanDescriptor => Apply(descriptor, s => s.DirectionFromRightToLeft());
+
     /// <summary>The line height as a multiple of the font size.</summary>
     public static T LineHeight<T>(this T descriptor, float? factor) where T : TextSpanDescriptor => Apply(descriptor, s => s.LineHeight(factor));
 

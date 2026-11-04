@@ -13,6 +13,10 @@ under the same version, and its only dependency is the PdfPecker package of that
 its own: anything about how a page looks is PdfPecker's job, and the fluent package's job is to write the smallest
 HTML that says what the caller built.
 
+PdfPecker.Testing (`src/PdfPecker.Testing`) is the third package, released the same way: snapshot tests for PDFs
+(`PdfAssert`), with a normalised comparison of the files' objects, pixel diffs of the rendered pages, and text and
+page count checks. It depends on no test framework: a failed check throws `PdfAssertException`.
+
 ## Read first
 
 Before non-trivial work, read:
@@ -24,19 +28,20 @@ Before non-trivial work, read:
 - `RELEASING.md` – versioning, the API baseline and how a release reaches nuget.org.
 
 `CONTRIBUTING.md` is the short version for outside contributors, `fuzz/README.md` covers both fuzzers, and
-`src/PdfPecker.Fluent/README.md` is the fluent package's README and nuget.org page.
+`src/PdfPecker.Fluent/README.md` and `src/PdfPecker.Testing/README.md` are the other packages' READMEs and nuget.org
+pages.
 
 ## Core rules
 
 - **No dependencies.** Never add a `PackageReference` to `src/PdfPecker`. Everything the library does is its own code
   on top of the base class library. No project in this repository uses a third-party package at run time: the
   comparisons with other converters and with QuestPDF live in
-  [PdfPecker.Benchmarks](https://github.com/Moonwalker1307/PdfPecker.Benchmarks). `src/PdfPecker.Fluent` references
-  `src/PdfPecker` as a project and nothing else.
+  [PdfPecker.Benchmarks](https://github.com/Moonwalker1307/PdfPecker.Benchmarks). `src/PdfPecker.Fluent` and
+  `src/PdfPecker.Testing` reference `src/PdfPecker` as a project and nothing else.
 - **No JavaScript and no network.** PdfPecker is for HTML templates the caller controls. It runs no scripts, and
   conversion never fetches anything itself: remote resources load only through a `ResourceResolver` the caller
   supplies. Only signing goes online, and only when the caller asks for it.
-- **No breaking API changes before 2.0**, in either package. `dotnet pack` checks the public API against the last
+- **No breaking API changes before 2.0**, in any of the packages. `dotnet pack` checks the public API against the last
   release; a change it rejects needs a new overload or type instead, not a suppression. The fluent package keeps
   QuestPDF's names and signatures where they fit, so QuestPDF code ports by changing `using` lines.
 - **Caller data never becomes markup in the fluent package.** Text, links, colours, names and image data are encoded
@@ -52,7 +57,8 @@ Before non-trivial work, read:
 - **Malformed input fails only with documented exceptions**, within bounded time and memory.
 - **Every library PR checks `README.md`** (features, limitations, examples, benchmark table) and updates it in the same
   PR when the change is visible to users; a fluent package change checks `src/PdfPecker.Fluent/README.md` (features,
-  the QuestPDF porting notes, the benchmark table) the same way.
+  the QuestPDF porting notes, the benchmark table) the same way, and a testing package change checks
+  `src/PdfPecker.Testing/README.md`.
 - **Never name a user's private application or employer** in code, tests, commits, the README or PR descriptions. Use
   neutral names such as "MyApp" or "a production app".
 
@@ -81,6 +87,9 @@ Before non-trivial work, read:
 - `tests/PdfPecker.Tests/` – xUnit. `Fixtures/` holds inputs, `Golden/` the baseline PDFs.
 - `tests/PdfPecker.Fluent.Tests/` – xUnit for the fluent package. `Golden/` holds the baseline HTML and PDFs of the
   examples.
+- `src/PdfPecker.Testing/` – the snapshot testing package: `PdfAssert`, `PdfSnapshotOptions` and `PdfAssertException`
+  are public; `PdfNormalizer` reads a PDF into normalised objects and `PixelDiff` compares rendered pages and writes the
+  diff PNGs. `tests/PdfPecker.Testing.Tests/` holds its tests.
 - `samples/PdfPecker.Sample` – converts the sample documents; CI also publishes it with Native AOT.
 - `samples/PdfPecker.Fluent.Sample` – writes the fluent examples as PDF and HTML; CI also publishes it with Native AOT.
   Its `Examples.cs` and `assets/` (invoice, report, catalogue, layout and text examples) are shared with the fluent
@@ -107,7 +116,7 @@ dotnet test -f net10.0 --filter "FullyQualifiedName~MarkdownTests"   # one class
 Before pushing, the build must be warning-free (warnings are errors), the tests must pass, and the golden baselines
 must be unchanged unless the output change is intended. If only one runtime is installed, pass `-f net10.0`; CI runs
 `net8.0`, `net9.0` and `net10.0` on Linux and `net10.0` on Windows. A change to the public API also needs
-`dotnet pack src/PdfPecker -c Release -o ./nupkg` (or `src/PdfPecker.Fluent`), which runs package validation. Details
+`dotnet pack src/PdfPecker -c Release -o ./nupkg` (or `src/PdfPecker.Fluent`, `src/PdfPecker.Testing`), which runs package validation. Details
 are in `BUILD.md` and `TESTING.md`.
 
 ## Change-specific guidance

@@ -90,7 +90,10 @@ internal static class DocumentGenerator
         var container = new DocumentContainer();
         document.Compose(container);
         if (container.Pages.Count == 0) container.Pages.Add(new PageSet());
-        return new Composed(container, document.GetMetadata() ?? DocumentMetadata.Default, document.GetSettings() ?? DocumentSettings.Default);
+        var settings = document.GetSettings() ?? DocumentSettings.Default;
+        if (settings.ContentDirection == ContentDirection.RightToLeft)
+            foreach (var page in container.Pages) page.RightToLeft ??= true;
+        return new Composed(container, document.GetMetadata() ?? DocumentMetadata.Default, settings);
     }
 
     /// <summary>The HTML document of all page sets.</summary>
