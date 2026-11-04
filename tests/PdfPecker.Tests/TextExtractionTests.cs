@@ -254,6 +254,75 @@ public class TextExtractionTests
         Assert.Equal(new[] { "\u03b1\u03b2\u03b3\u03b4\u03c0 \u2211\u221e", "\u2713\u2714\u2715\u2716 \u261b", "\u03a9" }, lines);
     }
 
+    private const string Column1 = "The first column starts the story and runs on for a few lines of text before it ends here.";
+    private const string Column2 = "The second column carries the story on to the end with more words than one line can hold.";
+
+    [Fact]
+    public void Side_by_side_columns_are_read_one_after_the_other()
+    {
+        var pdf = HtmlToPdf.Convert(
+            "<h1>Two columns</h1><div style='column-count:2;column-gap:40px;width:360px;text-align:left'>" +
+            "<p style='margin:0'>" + Column1 + "</p><p style='margin:0;break-before:column'>" + Column2 + "</p></div>" +
+            "<p>A last paragraph under both columns.</p>");
+        var page = PdfText.ExtractPage(pdf, 1);
+        var text = page.Text.Replace('\n', ' ').Replace("  ", " ");
+        Assert.Contains(Column1, text);
+        Assert.Contains(Column2, text);
+        Assert.True(text.IndexOf(Column1, StringComparison.Ordinal) < text.IndexOf(Column2, StringComparison.Ordinal));
+        Assert.StartsWith("Two columns\n\n", page.Text);
+        Assert.EndsWith("\n\nA last paragraph under both columns.", page.Text);
+        // A new column starts a paragraph, and each line holds the words of one column only.
+        Assert.Contains("ends here.\n\nThe second", page.Text);
+        Assert.Equal(page.Text.Replace("\n\n", "\n"), string.Join("\n", page.Lines.Select(l => l.Text)));
+        foreach (var line in page.Lines.Skip(1).SkipLast(1)) Assert.True(line.Width < 180, line.Text);
+        Assert.Equal(page.Text, PdfText.Extract(pdf));
+
+        // Read from the top down, the lines run across both columns, and every word is there either way.
+        var across = PdfText.ExtractPage(pdf, 1, new PdfTextOptions { Order = PdfTextOrder.TopToBottom });
+        Assert.StartsWith("The first column", across.Lines[1].Text);
+        Assert.Contains("The second column", across.Lines[1].Text);
+        Assert.Equal(across.Lines.SelectMany(l => l.Words).Select(w => w.Text).Order(StringComparer.Ordinal),
+            page.Lines.SelectMany(l => l.Words).Select(w => w.Text).Order(StringComparer.Ordinal));
+        var split = page.Lines.First(l => l.Text.StartsWith("The second column", StringComparison.Ordinal));
+        var whole = across.Lines[1];
+        Assert.Equal(whole.Y, split.Y, 1);
+        Assert.Equal(whole.Words.First(w => w.Text == "second").X, split.Words[1].X, 3);
+        Assert.Equal(split.Words[^1].X + split.Words[^1].Width, split.X + split.Width, 3);
+    }
+
+    [Fact]
+    public void Text_in_one_column_reads_as_from_the_top_down()
+    {
+        const string html = "<h1>Invoice</h1><p>Billed to Example Trading Ltd, 1 Harbour Street.</p>" +
+            "<table style='border-collapse:collapse'><tr><th style='border:1px solid'>Item</th><th style='border:1px solid'>Amount</th></tr>" +
+            "<tr><td style='border:1px solid'>Consulting</td><td style='border:1px solid'>1,200.00</td></tr></table>" +
+            "<ul><li>Payment within thirty days.</li><li>Late payment adds interest.</li></ul><p>Thank you.</p>" +
+            "<p style='font-size:30px'>Large text</p><p>Small text close under it, then more.</p>";
+        foreach (var accessibility in new[] { PdfAccessibility.None, PdfAccessibility.Tagged })
+        {
+            var pdf = HtmlToPdf.Convert(html, new PdfOptions { Accessibility = accessibility });
+            var reading = PdfText.ExtractPage(pdf, 1);
+            var down = PdfText.ExtractPage(pdf, 1, new PdfTextOptions { Order = PdfTextOrder.TopToBottom });
+            Assert.Equal(down.Text, reading.Text);
+            Assert.Equal(down.Lines.Select(l => (l.Text, l.X, l.Y, l.Width, l.Height)), reading.Lines.Select(l => (l.Text, l.X, l.Y, l.Width, l.Height)));
+        }
+    }
+
+    [Fact]
+    public void Tagged_pdfs_are_read_in_the_order_of_their_tags()
+    {
+        // The second paragraph of the HTML is placed above the first, so its tag comes second but its text is higher.
+        const string html = "<div style='position:relative;height:200px'>" +
+            "<p style='position:absolute;top:120px;margin:0'>First in the document, lower on the page.</p>" +
+            "<p style='position:absolute;top:20px;margin:0'>Second in the document, higher on the page.</p></div>";
+        var tagged = HtmlToPdf.Convert(html, new PdfOptions { Accessibility = PdfAccessibility.Tagged });
+        Assert.Equal("First in the document, lower on the page.\n\nSecond in the document, higher on the page.", PdfText.ExtractPage(tagged, 1).Text);
+        Assert.Equal("Second in the document, higher on the page.\n\nFirst in the document, lower on the page.",
+            PdfText.ExtractPage(tagged, 1, new PdfTextOptions { Order = PdfTextOrder.TopToBottom }).Text);
+        // Without tags, the page is read from the top down.
+        Assert.Equal("Second in the document, higher on the page.\n\nFirst in the document, lower on the page.", PdfText.ExtractPage(HtmlToPdf.Convert(html), 1).Text);
+    }
+
     [Fact]
     public void Pages_overloads_and_limits()
     {

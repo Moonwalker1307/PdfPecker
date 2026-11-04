@@ -231,4 +231,34 @@ public class StructuredHtmlHostileInputTests
         sb.Append("ET\n");
         Assert.Contains("<section", Convert(Page(sb.ToString())));
     }
+
+    [Fact]
+    public void Text_beside_a_letter_stretched_far_past_the_page_comes_out_in_time()
+    {
+        // Two columns of running text, which text extraction reads one after the other, and a letter stretched so far
+        // that its middle is past where a square of the lookup grid can be counted in an int: looking up its place
+        // once ran through every integer.
+        var sb = new StringBuilder();
+        for (int i = 0; i < 8; i++)
+        {
+            sb.Append(Text(50, 700 - i * 14, 10, "The left column runs on with words " + i));
+            sb.Append(Text(330, 700 - i * 14, 10, "The right column has its own words " + i));
+        }
+        sb.Append("BT /F1 10 Tf 10000000000000 Tz 100 400 Td (W) Tj ET\n");
+        var pdf = Page(sb.ToString());
+        var text = Extract(pdf);
+        Assert.True(text.IndexOf("words 7", StringComparison.Ordinal) < text.IndexOf("The right column", StringComparison.Ordinal));
+        Convert(pdf);
+    }
+
+    private static string Extract(byte[] pdf)
+    {
+        var task = Task.Run(() =>
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            return PdfText.Extract(pdf, null, cts.Token);
+        });
+        Assert.True(task.Wait(TimeSpan.FromSeconds(20)), "Text extraction did not finish in time");
+        return task.Result;
+    }
 }

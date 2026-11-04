@@ -1,4 +1,5 @@
 using PdfPecker.Rendering;
+using PdfPecker.Rendering.Html;
 using PdfPecker.Rendering.Parsing;
 
 namespace PdfPecker;
@@ -23,11 +24,35 @@ public sealed class PdfTextOptions
     /// <summary>Whether the Latin ligature characters U+FB00 to U+FB06 come out as their letters, such as "fi". Default: true.</summary>
     public bool ExpandLigatures { get; set; } = true;
 
+    /// <summary>
+    /// The order the lines of a page are read in. Default: <see cref="PdfTextOrder.Reading"/>, which follows a tagged
+    /// PDF's structure and reads columns side by side one after the other.
+    /// </summary>
+    public PdfTextOrder Order { get; set; } = PdfTextOrder.Reading;
+
     /// <summary>The most pages read; more throws <see cref="PdfLimitException"/>. Default: 100,000.</summary>
     public int MaxPages { get; set; } = 100_000;
 
     /// <summary>The most pages read at the same time. Default: the processor count.</summary>
     public int MaxDegreeOfParallelism { get; set; } = Environment.ProcessorCount;
+}
+
+/// <summary>The order <see cref="PdfText"/> reads the lines of a page in.</summary>
+public enum PdfTextOrder
+{
+    /// <summary>
+    /// The order a reader takes: a tagged PDF (PDF/UA, or any PDF with a structure tree) in the order of its tags, and
+    /// other pages from their layout, with columns, boxes and tables set side by side each read whole before the next,
+    /// as <see cref="PdfToMarkdown"/> reads them. A line that runs across two such parts becomes a line in each. Text
+    /// in one column comes out as in <see cref="TopToBottom"/>.
+    /// </summary>
+    Reading,
+
+    /// <summary>
+    /// The lines from the top of the page to the bottom, each as wide as the text on its baseline, so columns side by
+    /// side are read across, line by line. Earlier versions read every page this way.
+    /// </summary>
+    TopToBottom,
 }
 
 /// <summary>The text of one page, with its lines and words and where they are.</summary>
@@ -59,7 +84,10 @@ public sealed class PdfTextPage
     /// <summary>The page's text: lines separated by a line feed, and paragraphs by an empty line.</summary>
     public string Text { get; }
 
-    /// <summary>The lines from top to bottom; text in other directions follows the page's upright text.</summary>
+    /// <summary>
+    /// The lines in the order of <see cref="PdfTextOptions.Order"/>: by default in reading order, else from top to
+    /// bottom. Text in other directions follows the page's upright text.
+    /// </summary>
     public IReadOnlyList<PdfTextLine> Lines { get; }
 
     /// <summary>The page's text.</summary>
@@ -101,6 +129,15 @@ public sealed class PdfTextLine
 
     /// <summary>The direction of the baseline in degrees counterclockwise: 0 for upright text, 90 for text running up the page.</summary>
     public double Angle { get; }
+
+    /// <summary>Where the baseline is across the line, in points along the page's text direction; down the page for upright text.</summary>
+    internal double Baseline { get; init; }
+
+    /// <summary>The largest font size on the line, which the space to the next line is measured in.</summary>
+    internal double Size { get; init; }
+
+    /// <summary>Whether the page's text has an empty line before this one, as it starts a paragraph.</summary>
+    internal bool ParagraphBefore { get; set; }
 
     /// <summary>Whether most of the line's letters are right-to-left (such as Arabic or Hebrew).</summary>
     public bool RightToLeft { get; }
@@ -176,8 +213,12 @@ public sealed class PdfTextWord
 /// (the recognised text layer of a scanned page) is included. Text hidden by optional content that is off is not.
 /// </para>
 /// <para>
-/// Columns side by side are read across, line by line, not one column after the other. Text a PDF draws only as
-/// outlines or images has no characters to extract, nor has a font that gives no way to its characters.
+/// Lines come in reading order: a tagged PDF's in the order of its structure tree, and on other pages each column, box
+/// or table set beside another is read whole before the next, as <see cref="PdfToMarkdown"/> reads them, unless
+/// <see cref="PdfTextOptions.Order"/> asks for <see cref="PdfTextOrder.TopToBottom"/>. Columns are found from the space
+/// that runs down between them, so a layout without one, or a page past the bounds of that search, is read from the top
+/// down. Text a PDF draws only as outlines or images has no characters to extract, nor has a font that gives no way to
+/// its characters.
 /// </para>
 /// </remarks>
 public static class PdfText
@@ -221,6 +262,7 @@ public static class PdfText
             : Enumerable.Range(0, Math.Min(doc.Pages.Count, max + 1)).ToList();
         if (indices.Count > max)
             throw new PdfLimitException($"The text of more than {max:N0} pages would be read (PdfTextOptions.MaxPages).");
+        var tree = options.Order == PdfTextOrder.Reading ? PdfToHtml.Tree(doc) : null;
         var result = new PdfTextPage[indices.Count];
         try
         {
@@ -228,7 +270,7 @@ public static class PdfText
             {
                 MaxDegreeOfParallelism = Math.Max(1, options.MaxDegreeOfParallelism),
                 CancellationToken = cancellationToken,
-            }, i => result[i] = Page(doc, indices[i], options, cancellationToken));
+            }, i => result[i] = Page(doc, tree, indices[i], options, cancellationToken));
         }
         catch (AggregateException ex) when (ex.InnerExceptions.Count > 0)
         {
@@ -264,7 +306,7 @@ public static class PdfText
         var doc = Open(pdf, options.Password);
         if (pageNumber < 1 || pageNumber > doc.Pages.Count)
             throw new ArgumentOutOfRangeException(nameof(pageNumber), pageNumber, $"The PDF has {doc.Pages.Count} page(s); page numbers start at 1.");
-        return Page(doc, pageNumber - 1, options, cancellationToken);
+        return Page(doc, options.Order == PdfTextOrder.Reading ? PdfToHtml.Tree(doc) : null, pageNumber - 1, options, cancellationToken);
     }
 
     /// <summary>Reads a PDF from <paramref name="pdf"/> (from its current position to the end) and returns the text of one page. The stream is not disposed.</summary>
@@ -295,13 +337,18 @@ public static class PdfText
         }
     }
 
-    private static PdfTextPage Page(RenderDocument doc, int index, PdfTextOptions options, CancellationToken cancellationToken)
+    private static PdfTextPage Page(RenderDocument doc, StructureTree? tree, int index, PdfTextOptions options, CancellationToken cancellationToken)
     {
         try
         {
-            var glyphs = doc.CollectText(index, options.IncludeAnnotations, cancellationToken);
             var (w, h) = doc.PageSize(index);
-            return TextLayout.Build(glyphs, index + 1, w, h, options.ExpandLigatures, cancellationToken);
+            if (options.Order == PdfTextOrder.TopToBottom)
+                return TextLayout.Build(doc.CollectText(index, options.IncludeAnnotations, cancellationToken), index + 1, w, h, options.ExpandLigatures, cancellationToken);
+            // The reading order is the order of the blocks the structured HTML and Markdown are written from.
+            var collected = doc.CollectText(index, options.IncludeAnnotations, rules: true, cancellationToken);
+            var text = TextLayout.Build(collected.Glyphs, index + 1, w, h, options.ExpandLigatures, cancellationToken);
+            var blocks = PdfToHtml.StructuredBlocks(tree, index, collected, text, new List<PageLink>(), out bool tagged, cancellationToken);
+            return TextReadingOrder.Arrange(text, blocks, tagged, cancellationToken);
         }
         catch (PdfFormatException ex)
         {

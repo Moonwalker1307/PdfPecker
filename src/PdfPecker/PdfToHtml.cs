@@ -398,13 +398,8 @@ public static class PdfToHtml
         {
             collected = doc.CollectText(index, renderAnnotations, rules: true, cancellationToken);
             var pageLinks = links?.Read(index) ?? new List<PageLink>();
-            // A tagged page says what its text is, but writers tag some tables, such as a grid of labels and values, as
-            // paragraphs; tables its layout shows where the tags have only paragraphs replace those paragraphs.
-            var tagged = tree != null && tree.Root.OnPage(index)
-                ? PageStructure.BuildTagged(tree, index, collected.Glyphs, w, h, pageLinks, cancellationToken) : null;
             var text = TextLayout.Build(collected.Glyphs, index + 1, w, h, true, cancellationToken);
-            var blocks = PageStructure.Build(text, collected.Rules, collected.Bullets, pageLinks, cancellationToken);
-            if (tagged != null) blocks = PageStructure.AddLayoutTables(tagged, blocks);
+            var blocks = StructuredBlocks(tree, index, collected, text, pageLinks, out _, cancellationToken);
             if (includeImages) AddImages(doc, index, w, h, renderAnnotations, blocks, cancellationToken);
             return blocks;
         }
@@ -412,6 +407,22 @@ public static class PdfToHtml
         {
             throw new InvalidDataException(ex.Message, ex);
         }
+    }
+
+    /// <summary>
+    /// The blocks of a page whose text and lines are already collected; <see cref="PdfText"/> reads its reading order
+    /// from these. <paramref name="tagged"/> says whether they come from the page's tags.
+    /// </summary>
+    internal static List<FlowBlock> StructuredBlocks(StructureTree? tree, int index, TextCollector collected, PdfTextPage text,
+        List<PageLink> pageLinks, out bool tagged, CancellationToken cancellationToken)
+    {
+        // A tagged page says what its text is, but writers tag some tables, such as a grid of labels and values, as
+        // paragraphs; tables its layout shows where the tags have only paragraphs replace those paragraphs.
+        var fromTags = tree != null && tree.Root.OnPage(index)
+            ? PageStructure.BuildTagged(tree, index, collected.Glyphs, text.Width, text.Height, pageLinks, cancellationToken) : null;
+        var blocks = PageStructure.Build(text, collected.Rules, collected.Bullets, pageLinks, cancellationToken);
+        tagged = fromTags != null;
+        return fromTags != null ? PageStructure.AddLayoutTables(fromTags, blocks) : blocks;
     }
 
     /// <summary>The most pictures of one page put in structured HTML.</summary>

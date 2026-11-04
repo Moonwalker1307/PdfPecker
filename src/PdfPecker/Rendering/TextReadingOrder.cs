@@ -1,0 +1,352 @@
+using System.Text;
+using PdfPecker.Rendering.Html;
+
+namespace PdfPecker.Rendering;
+
+/// <summary>
+/// Puts the lines of a page in reading order: the order of the blocks the structured HTML and Markdown are written
+/// from, which follow a tagged PDF's structure tree and read text columns and boxes side by side one after the other.
+/// Each word goes to the part of the page whose block covers it, a line that runs across parts is split, and the lines
+/// of a part keep their order on the page, so a table's rows stay lines as they are.
+/// </summary>
+internal static class TextReadingOrder
+{
+    /// <summary>The side of the squares, in points, that the blocks' words are filed under to find the one a word is in.</summary>
+    private const double Cell = 12;
+
+    /// <summary>
+    /// The fewest lines each part of a layout's side-by-side group must hold to be read on its own. A single line beside
+    /// other text, such as a figure at the end of a row of labels, is more often the end of that row than a column.
+    /// </summary>
+    private const int MinPartLines = 2;
+
+    /// <summary>How much of the shorter of two side-by-side parts must sit beside the other for them to be read apart.</summary>
+    private const double MinOverlap = 0.5;
+
+    /// <summary>
+    /// The characters, spaces included, each part's lines must hold on average for side-by-side parts that split lines
+    /// to be read apart: a narrow column of running text has some twenty or more, a label or a figure a dozen or fewer.
+    /// </summary>
+    private const int RunningText = 16;
+
+    /// <summary>A word covering more squares than this is checked against every word on the page instead.</summary>
+    private const int MaxCells = 64;
+
+    /// <summary>The most words of a page covering more than <see cref="MaxCells"/> squares.</summary>
+    private const int MaxLarge = 256;
+
+    public static PdfTextPage Arrange(PdfTextPage page, List<FlowBlock> blocks, bool tagged, CancellationToken cancellationToken)
+    {
+        var parts = new List<List<FlowWord>>();
+        var untagged = new List<bool>();
+        if (tagged) foreach (var block in blocks) Tagged(block, block.Untagged, parts, untagged);
+        else Layout(blocks, parts);
+        if (parts.Count < 2) return page;
+
+        var grid = new Dictionary<(int, int), List<(FlowWord Word, int Part)>>();
+        var large = new List<(FlowWord Word, int Part)>();
+        for (int p = 0; p < parts.Count; p++)
+        {
+            foreach (var w in parts[p])
+            {
+                var (c0, r0, c1, r1) = Cells(w.X0, w.Top, w.X1, w.Bottom);
+                if ((long)(c1 - c0 + 1) * (r1 - r0 + 1) > MaxCells)
+                {
+                    // Every word is checked against each large word, so a page of many, as hostile input can make,
+                    // keeps its lines as they are rather than take time that grows with their square.
+                    if (large.Count >= MaxLarge) return page;
+                    large.Add((w, p));
+                    continue;
+                }
+                for (int r = r0; r <= r1; r++)
+                    for (int c = c0; c <= c1; c++)
+                    {
+                        if (!grid.TryGetValue((c, r), out var list)) grid[(c, r)] = list = new List<(FlowWord, int)>();
+                        list.Add((w, p));
+                    }
+            }
+        }
+
+        // The part each word of the page's upright lines is in; text in other directions stays after it, as it was.
+        var lines = page.Lines;
+        var wordParts = new int[lines.Count][];
+        int lastPart = -1;
+        for (int l = 0; l < lines.Count; l++)
+        {
+            if ((l & 0xFF) == 0) cancellationToken.ThrowIfCancellationRequested();
+            var words = lines[l].Words;
+            var found = wordParts[l] = new int[words.Count];
+            if (lines[l].Angle != 0)
+            {
+                Array.Fill(found, int.MaxValue);
+                continue;
+            }
+            for (int i = 0; i < words.Count; i++) found[i] = PartOf(words[i]);
+            // On a tagged page, text the tags leave out that shares a line with tagged text, such as a list item's
+            // number, goes with that text.
+            if (untagged.Count > 0 && Array.Exists(found, p => p >= 0 && !untagged[p]))
+                for (int i = 0; i < found.Length; i++) if (found[i] >= 0 && untagged[found[i]]) found[i] = -1;
+            // Words no block holds, such as the dots of a leader or a copy of text drawn as its shadow, go with the
+            // words beside them on their line, or with the line before.
+            int known = Array.FindIndex(found, p => p >= 0);
+            if (known < 0) Array.Fill(found, Math.Max(lastPart, 0));
+            else
+            {
+                for (int i = 0; i < known; i++) found[i] = found[known];
+                for (int i = known + 1; i < found.Length; i++) if (found[i] < 0) found[i] = found[i - 1];
+            }
+            lastPart = found[^1];
+        }
+
+        // On a tagged page, a line of text the tags leave out, such as a running header or the value shown in a form
+        // field, is placed by its height on the page: before the first tagged part below it.
+        double[]? place = null;
+        if (untagged.Contains(true))
+        {
+            var tops = parts.Select(p => p.Min(w => w.Top)).ToArray();
+            place = new double[lines.Count];
+            for (int l = 0; l < lines.Count; l++)
+            {
+                place[l] = double.NaN;
+                if (lines[l].Angle != 0 || !Array.TrueForAll(wordParts[l], p => untagged[p])) continue;
+                int below = Enumerable.Range(0, parts.Count).FirstOrDefault(p => !untagged[p] && tops[p] > lines[l].Y, parts.Count);
+                place[l] = below - 0.5;
+            }
+        }
+
+        // The pieces of each line in each part, ordered by part and then as the lines are on the page.
+        var pieces = new List<(double Part, int Line, List<PdfTextWord>? Words)>(lines.Count);
+        for (int l = 0; l < lines.Count; l++)
+        {
+            var found = wordParts[l];
+            bool whole = Array.TrueForAll(found, p => p == found[0]);
+            if (whole || place != null && !double.IsNaN(place[l]))
+            {
+                pieces.Add((place != null && !double.IsNaN(place[l]) ? place[l] : found[0], l, null));
+                continue;
+            }
+            var byPart = new Dictionary<int, List<PdfTextWord>>();
+            var order = new List<int>();
+            for (int i = 0; i < found.Length; i++)
+            {
+                if (!byPart.TryGetValue(found[i], out var list)) { byPart[found[i]] = list = new List<PdfTextWord>(); order.Add(found[i]); }
+                list.Add(lines[l].Words[i]);
+            }
+            foreach (int p in order) pieces.Add((p, l, byPart[p]));
+        }
+        var sorted = pieces.Select((piece, i) => (piece, i)).OrderBy(e => e.piece.Part).ThenBy(e => e.i).Select(e => e.piece).ToList();
+        bool unchanged = true;
+        for (int k = 0; k < sorted.Count && unchanged; k++) unchanged = sorted[k].Words == null && sorted[k].Line == k;
+        if (unchanged) return page;
+
+        var result = new List<PdfTextLine>(sorted.Count);
+        var sb = new StringBuilder();
+        for (int k = 0; k < sorted.Count; k++)
+        {
+            var (_, l, words) = sorted[k];
+            var line = words == null ? lines[l] : Piece(lines[l], words);
+            if (k > 0)
+            {
+                var (_, previousLine, previousWords) = sorted[k - 1];
+                var previous = result[^1];
+                // Lines that follow each other on the page as they did keep the break between them. Elsewhere the space
+                // between the lines tells, as it does on the page, and going back up to the next column or box starts
+                // a paragraph.
+                bool paragraph = words == null && previousWords == null && previousLine == l - 1 ? line.ParagraphBefore
+                    : line.Angle != previous.Angle || line.Baseline <= previous.Baseline
+                        || TextLayout.ParagraphBreak(previous.Baseline, previous.Size, line.Baseline, line.Size);
+                sb.Append(paragraph ? "\n\n" : "\n");
+            }
+            sb.Append(line.Text);
+            result.Add(line);
+        }
+        return new PdfTextPage(page.PageNumber, page.Width, page.Height, sb.ToString(), result);
+
+        int PartOf(PdfTextWord word)
+        {
+            double x0 = word.X, y0 = word.Y, x1 = word.X + word.Width, y1 = word.Y + word.Height;
+            int best = -1;
+            double most = 0;
+            var (c0, r0, c1, r1) = Cells(x0, y0, x1, y1);
+            if ((long)(c1 - c0 + 1) * (r1 - r0 + 1) > MaxCells)
+            {
+                // A huge word is looked up by its centre alone.
+                c0 = c1 = At((x0 + x1) / 2);
+                r0 = r1 = At((y0 + y1) / 2);
+            }
+            for (int r = r0; r <= r1; r++)
+                for (int c = c0; c <= c1; c++)
+                    if (grid.TryGetValue((c, r), out var list))
+                        foreach (var (w, p) in list) Consider(w, p);
+            foreach (var (w, p) in large) Consider(w, p);
+            return best;
+
+            void Consider(FlowWord w, int p)
+            {
+                double overlap = Math.Max(0, Math.Min(x1, w.X1) - Math.Max(x0, w.X0)) * Math.Max(0, Math.Min(y1, w.Bottom) - Math.Max(y0, w.Top));
+                if (overlap > most || (overlap == most && overlap > 0 && p < best)) { most = overlap; best = p; }
+            }
+        }
+    }
+
+    /// <summary>The square a position is in; a position that is not a number, as a damaged PDF can give, counts as 0.</summary>
+    private static int At(double v) => double.IsNaN(v) ? 0 : (int)Math.Clamp(Math.Floor(v / Cell), -1_000_000, 1_000_000);
+
+    private static (int C0, int R0, int C1, int R1) Cells(double x0, double y0, double x1, double y1)
+    {
+        int c0 = At(x0), r0 = At(y0);
+        return (c0, r0, Math.Max(c0, At(x1)), Math.Max(r0, At(y1)));
+    }
+
+    /// <summary>
+    /// The words of a tagged page's blocks, a part per block in the order of the tags: the tags say where each
+    /// paragraph, list item and table is, so their order is the reading order.
+    /// </summary>
+    private static void Tagged(FlowBlock block, bool outside, List<List<FlowWord>> parts, List<bool> untagged)
+    {
+        if (block is GroupBlock g)
+        {
+            foreach (var part in Parts(g))
+                foreach (var b in part) Tagged(b, outside, parts, untagged);
+        }
+        else if (Words(block) is { Count: > 0 } words)
+        {
+            parts.Add(words);
+            untagged.Add(outside);
+        }
+    }
+
+    /// <summary>
+    /// The words of a page read from its layout: the blocks between two sets of side-by-side parts are one part, whose
+    /// lines keep their order on the page, as the paragraphs and tables found there say nothing a line does not
+    /// already; each side-by-side part is read whole before the next.
+    /// </summary>
+    private static void Layout(List<FlowBlock> blocks, List<List<FlowWord>> parts)
+    {
+        List<FlowWord>? current = null;
+        foreach (var block in blocks)
+        {
+            if (block is GroupBlock g && SideBySide(g))
+            {
+                current = null;
+                foreach (var part in Parts(g)) Layout(part, parts);
+                continue;
+            }
+            var words = Words(block);
+            if (words.Count == 0) continue;
+            if (current == null) parts.Add(current = new List<FlowWord>());
+            current.AddRange(words);
+        }
+    }
+
+    private static List<FlowWord> Words(FlowBlock block) => block switch
+    {
+        TextBlock t => t.Lines.SelectMany(l => l.Words).ToList(),
+        TableBlock t => t.Cells.SelectMany(c => c.Lines).SelectMany(l => l.Words).ToList(),
+        GroupBlock g => g.Parts.SelectMany(p => p).SelectMany(Words).ToList(),
+        _ => new List<FlowWord>(),
+    };
+
+    /// <summary>
+    /// Whether a group the layout sets side by side is read one part after the other. Every part needs a few lines of
+    /// its own and must sit beside the next part over most of its height, as columns do, rather than above or below
+    /// it with only a gap at one side in common. Where reading the parts apart splits lines, every part must also hold
+    /// running text, a good many letters to the line: short entries beside other text, as a grid or labels beside their
+    /// values, are more often a table that has no rules to show it, and read across.
+    /// </summary>
+    private static bool SideBySide(GroupBlock group)
+    {
+        var owner = new Dictionary<int, int>(); // the part each of the page's lines is in, or -1 for several
+        bool running = true;
+        List<(double Top, double Bottom)>? previous = null;
+        for (int p = 0; p < group.Parts.Count; p++)
+        {
+            var lines = new Dictionary<int, (double Top, double Bottom, double Size)>();
+            int letters = 0;
+            foreach (var block in group.Parts[p])
+                foreach (var w in Words(block))
+                {
+                    letters += w.Text.Length + 1;
+                    lines[w.Line] = lines.TryGetValue(w.Line, out var l)
+                        ? (Math.Min(l.Top, w.Top), Math.Max(l.Bottom, w.Bottom), Math.Max(l.Size, w.Size))
+                        : (w.Top, w.Bottom, w.Size);
+                }
+            if (lines.Count < MinPartLines) return false;
+            running &= letters >= RunningText * lines.Count;
+            foreach (int line in lines.Keys) owner[line] = owner.TryGetValue(line, out int other) && other != p ? -1 : p;
+            var spans = Spans(lines.Values);
+            if (previous != null && Overlap(previous, spans) < MinOverlap * Math.Min(Length(previous), Length(spans))) return false;
+            previous = spans;
+        }
+        return running || !owner.ContainsValue(-1);
+
+        // The stretches down the page a part's lines cover, with the space between the lines of a paragraph filled in.
+        static List<(double Top, double Bottom)> Spans(IEnumerable<(double Top, double Bottom, double Size)> lines)
+        {
+            var spans = new List<(double Top, double Bottom)>();
+            foreach (var (top, bottom, size) in lines.OrderBy(l => l.Top))
+            {
+                if (spans.Count > 0 && top - spans[^1].Bottom <= size) spans[^1] = (spans[^1].Top, Math.Max(spans[^1].Bottom, bottom));
+                else spans.Add((top, bottom));
+            }
+            return spans;
+        }
+
+        static double Length(List<(double Top, double Bottom)> spans) => spans.Sum(s => s.Bottom - s.Top);
+
+        static double Overlap(List<(double Top, double Bottom)> a, List<(double Top, double Bottom)> b)
+        {
+            double overlap = 0;
+            foreach (var x in a)
+                foreach (var y in b)
+                    overlap += Math.Max(0, Math.Min(x.Bottom, y.Bottom) - Math.Max(x.Top, y.Top));
+            return overlap;
+        }
+    }
+
+    /// <summary>A group's parts in reading order: from the left, or from the right where most of their text is right to left.</summary>
+    private static IEnumerable<List<FlowBlock>> Parts(GroupBlock group)
+    {
+        int rtl = 0, ltr = 0;
+        foreach (var part in group.Parts)
+            foreach (var block in part) Count(block, ref rtl, ref ltr);
+        return rtl > ltr ? Enumerable.Reverse(group.Parts) : group.Parts;
+
+        static void Count(FlowBlock block, ref int rtl, ref int ltr)
+        {
+            switch (block)
+            {
+                case TextBlock t:
+                    foreach (var line in t.Lines)
+                        if (line.RightToLeft) rtl += line.Words.Count; else ltr += line.Words.Count;
+                    break;
+                case TableBlock t:
+                    int words = t.Cells.Sum(c => c.Lines.Sum(l => l.Words.Count));
+                    if (t.RightToLeft) rtl += words; else ltr += words;
+                    break;
+                case GroupBlock g:
+                    foreach (var part in g.Parts)
+                        foreach (var b in part) Count(b, ref rtl, ref ltr);
+                    break;
+            }
+        }
+    }
+
+    /// <summary>The words of a line that are in one part, as a line of their own on the same baseline.</summary>
+    private static PdfTextLine Piece(PdfTextLine line, List<PdfTextWord> words)
+    {
+        double x0 = double.MaxValue, x1 = double.MinValue, size = 0;
+        foreach (var w in words)
+        {
+            x0 = Math.Min(x0, w.X);
+            x1 = Math.Max(x1, w.X + w.Width);
+            size = Math.Max(size, w.FontSize);
+        }
+        var (x, y, width, height) = TextLayout.Box(x0, x1, line.Baseline, size, 1, 0);
+        return new PdfTextLine(string.Join(' ', words.Select(w => w.Text)), words, x, y, width, height, line.Angle, line.RightToLeft)
+        {
+            Baseline = line.Baseline,
+            Size = size,
+        };
+    }
+}

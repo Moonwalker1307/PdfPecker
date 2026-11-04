@@ -52,8 +52,8 @@ internal static class TextLayout
                 if (sb.Length > 0)
                 {
                     sb.Append('\n');
-                    // Single-spaced text has lines 1.1 to 1.5 font sizes apart, so a wider gap is taken as a paragraph break.
-                    if (previous == null || line.V - previous.V > 1.75 * Math.Min(line.Size, previous.Size)) sb.Append('\n');
+                    textLine.ParagraphBefore = previous == null || ParagraphBreak(previous.V, previous.Size, line.V, line.Size);
+                    if (textLine.ParagraphBefore) sb.Append('\n');
                 }
                 sb.Append(textLine.Text);
                 lines.Add(textLine);
@@ -62,6 +62,14 @@ internal static class TextLayout
         }
         return new PdfTextPage(pageNumber, width, height, sb.ToString(), lines);
     }
+
+    /// <summary>
+    /// Whether a line whose baseline is at <paramref name="v"/> starts a paragraph after the line at
+    /// <paramref name="previousV"/>: single-spaced text has lines 1.1 to 1.5 font sizes apart, so a wider gap is taken
+    /// as a paragraph break.
+    /// </summary>
+    internal static bool ParagraphBreak(double previousV, double previousSize, double v, double size)
+        => v - previousV > 1.75 * Math.Min(size, previousSize);
 
     /// <summary>Clusters glyphs into lines by baseline, top to bottom, each sorted along the baseline.</summary>
     private static List<Line> BuildLines(List<TextGlyph> glyphs, List<int> indices, double cx, double cy, MarkTargets attached,
@@ -452,11 +460,11 @@ internal static class TextLayout
         Flush();
         if (words.Count == 0) return null;
         var (lx, ly, lw, lh) = Box(lu0, lu1, line.V, lsize, cx, cy);
-        return new PdfTextLine(lineText.ToString(), words, lx, ly, lw, lh, angle == 0 ? 0 : 360 - angle, rtl);
+        return new PdfTextLine(lineText.ToString(), words, lx, ly, lw, lh, angle == 0 ? 0 : 360 - angle, rtl) { Baseline = line.V, Size = line.Size };
     }
 
     /// <summary>The page box, in points from the top left, of a run from u0 to u1 on the baseline v of the line frame.</summary>
-    private static (double X, double Y, double W, double H) Box(double u0, double u1, double v, double size, double cx, double cy)
+    internal static (double X, double Y, double W, double H) Box(double u0, double u1, double v, double size, double cx, double cy)
     {
         // Ascent and descent are taken as the usual 0.8 and 0.2 of the font size, as the fonts' own metrics often lie.
         double v0 = v - 0.8 * size, v1 = v + 0.2 * size;
