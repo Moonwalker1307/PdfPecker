@@ -91,8 +91,29 @@ internal sealed partial class InlineLayout
         if (plan == null) return lines;
         var breaker = new LineBreaker(this, items, availW, indent, null, null, plan);
         breaker.Run();
+        // The scores know nothing of hyphenate-limit-lines, so new breaks that hyphenate too many lines in a row are
+        // dropped and the greedy lines, which keep the limit, stay.
+        if (block.HyphenateLimitLines >= 0 && ExceedsHyphenLimit(breaker.Lines, block.HyphenateLimitLines))
+        {
+            ReturnLines(breaker.Lines);
+            return lines;
+        }
         ReturnLines(lines);
         return breaker.Lines;
+    }
+
+    /// <summary>Whether more than <paramref name="limit"/> lines in a row end at a hyphenation break.</summary>
+    private static bool ExceedsHyphenLimit(List<Line> lines, int limit)
+    {
+        int run = 0;
+        foreach (var line in lines)
+        {
+            // A broken line's last item is the clone that shows the hyphen, which keeps the break it was made at.
+            bool hyphenated = !line.Forced && line.Items.Count > 0 && line.Items[^1] is { Kind: ItemKind.Text, BreakAfter: BreakAfter.SoftHyphen };
+            run = hyphenated ? run + 1 : 0;
+            if (run > limit) return true;
+        }
+        return false;
     }
 
     /// <summary>

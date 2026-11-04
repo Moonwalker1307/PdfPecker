@@ -207,6 +207,10 @@ internal sealed partial class StyleResolver
                 break;
             case "quotes": ApplyQuotes(s, parent, in d); break;
             case "hyphenate-limit-chars": ApplyHyphenateLimitChars(s, parent, in d); break;
+            case "hyphenate-limit-lines":
+            case "-webkit-hyphenate-limit-lines":
+                ApplyHyphenateLimitLines(s, parent, in d);
+                break;
             case "-webkit-line-clamp": ApplyLineClamp(s, in d); break;
             case "line-clamp": ApplyLineClampShorthand(s, parent, in d); break;
             case "block-ellipsis": ApplyBlockEllipsis(s, parent, d.Value, d.Lower, d.Inherit); break;
