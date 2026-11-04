@@ -47,6 +47,7 @@ internal sealed class FlowLine
 internal abstract class FlowBlock
 {
     public double Top, Left;
+    public bool Untagged; // on a tagged page, text the tags do not hold, such as a running header, read from its layout
 }
 
 internal enum TextKind { Paragraph, Heading, Bullet, Numbered }

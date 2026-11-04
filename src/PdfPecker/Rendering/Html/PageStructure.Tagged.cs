@@ -66,6 +66,7 @@ internal static partial class PageStructure
         foreach (var block in Build(TextLayout.Build(rest, page + 1, width, height, true, cancellationToken), null, null, links, cancellationToken))
         {
             int at = blocks.FindIndex(b => b.Top > block.Top);
+            block.Untagged = true;
             blocks.Insert(at < 0 ? blocks.Count : at, block);
         }
         return blocks;
