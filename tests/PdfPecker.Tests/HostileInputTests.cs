@@ -2129,6 +2129,28 @@ public class HostileInputTests
         static string Stream(string data, string entries = "") => $"<< {entries} /Length {data.Length} >>\nstream\n{data}\nendstream";
     }
 
+    [Fact]
+    public void Removing_many_active_annotations_stays_linear()
+    {
+        // A million annotations alternating between a media annotation, which is removed, and a link, which stays.
+        var annots = new StringBuilder("[");
+        for (int i = 0; i < 1_000_000; i++) annots.Append(i % 2 == 0 ? "5 0 R " : "6 0 R ");
+        var pdf = SimplePdf(new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Annots 4 0 R >>",
+            annots.Append(']').ToString(),
+            "<< /Type /Annot /Subtype /Screen /Rect [0 0 1 1] >>",
+            "<< /Type /Annot /Subtype /Link /Rect [0 0 1 1] >>",
+        });
+        var clean = Bounded(() => PdfSanitizer.RemoveActiveContent(pdf));
+        var file = PdfFile.Open(clean, null);
+        var page = (PdfDict)file.Resolve(file.GetArray(file.GetDict(file.Catalog, "Pages"), "Kids")![0])!;
+        Assert.Equal(500_000, file.GetArray(page, "Annots")!.Count);
+        Assert.False(PdfSanitizer.HasActiveContent(clean));
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private static byte[] SimplePdf(List<string> objects)
