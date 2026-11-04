@@ -76,14 +76,12 @@ public sealed class QuestPdfCallsTests
     [Theory]
     [InlineData("section")]
     [InlineData("article")]
-    [InlineData("nav")]
     public void Semantic_calls_write_the_matching_element(string tag)
     {
         Action<IContainer> content = tag switch
         {
             "section" => c => c.SemanticSection().Text("s"),
-            "article" => c => c.SemanticArticle().Text("s"),
-            _ => c => c.SemanticTableOfContents().Text("s"),
+            _ => c => c.SemanticArticle().Text("s"),
         };
         Assert.Equal($"<{tag}><p>s</p></{tag}>", Html.Item(content));
     }
@@ -397,6 +395,45 @@ public sealed class QuestPdfCallsTests
         Assert.Contains("/S /Quote", text, StringComparison.Ordinal);
         Assert.Contains("/S /TH", text, StringComparison.Ordinal);
         Assert.Contains("/Scope /Row", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Semantic_table_of_contents_formula_index_and_labels_write_what_pdf_ua_tags()
+    {
+        Assert.Equal("<nav class=\"c0\" role=\"doc-toc\"><li class=\"c1\"><p>e</p></li></nav>",
+            Html.Item(c => c.SemanticTableOfContents().Column(k => k.Item().SemanticTableOfContentsItem().Text("e"))));
+        Assert.Equal("<p role=\"math\" aria-label=\"a &lt;b&gt;\">x</p>", Html.Item(c => c.SemanticFormula("a <b>").Text("x")));
+        Assert.Equal("<p role=\"doc-index\">i</p>", Html.Item(c => c.SemanticIndex().Text("i")));
+        Assert.Equal("<p data-pdf-list-label=\"\">1.</p>", Html.Item(c => c.SemanticListLabel().Text("1.")));
+        Assert.Equal(Html.Item(c => c.Text("b")), Html.Item(c => c.SemanticListItemBody().Text("b")));
+        // Two tags on one slot need two elements.
+        Assert.Equal("<div role=\"doc-index\"><p role=\"math\" aria-label=\"f\">x</p></div>",
+            Html.Item(c => c.SemanticIndex().SemanticFormula("f").Text("x")));
+        Assert.Throws<ArgumentException>(() => Html.Item(c => c.SemanticFormula(" ").Text("x")));
+    }
+
+    [Fact]
+    public void Semantic_table_of_contents_formula_index_and_labels_are_tagged_in_pdf_ua()
+    {
+        byte[] pdf = Html.Page(c => c.Column(k =>
+        {
+            k.Item().SemanticTableOfContents().Column(toc =>
+            {
+                toc.Item().SemanticTableOfContentsItem().Text("Areas");
+                toc.Item().SemanticTableOfContentsItem().Text("Index");
+            });
+            k.Item().SemanticFormula("pi r squared").Text("πr²");
+            k.Item().SemanticList().Column(list => list.Item().SemanticListItem().Row(row =>
+            {
+                row.ConstantItem(20).SemanticListLabel().Text("1.");
+                row.RelativeItem().SemanticListItemBody().Text("Measure the radius.");
+            }));
+            k.Item().SemanticIndex().Text("Area, 1");
+        })).GeneratePdf(new PdfOptions { Title = "Tags", Language = "en", Accessibility = PdfAccessibility.PdfUA1, Compress = false });
+        var types = System.Text.RegularExpressions.Regex.Matches(System.Text.Encoding.Latin1.GetString(pdf), @"/Type /StructElem /S /(\w+)")
+            .Select(m => m.Groups[1].Value);
+        Assert.Equal("Document Sect TOC TOCI P TOCI P Formula L LI Lbl LBody P Index P", string.Join(" ", types));
+        Assert.Contains("/Alt (pi r squared)", System.Text.Encoding.Latin1.GetString(pdf), StringComparison.Ordinal);
     }
 
     private static int Count(string text, string part)

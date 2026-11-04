@@ -1266,6 +1266,18 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void A_band_full_of_opening_braces_is_read_in_linear_time()
+    {
+        // Placeholders such as {page:upper-roman} are read from an opening brace to the closing one. Reading from every
+        // opening brace would be quadratic, 20 billion character reads on every page for 200,000 braces, so only the
+        // last one before a closing brace is read.
+        var html = "<div data-sticky-pdf-footer>{page} " + new string('{', 200_000) + "}</div><p style='height:3000pt'>x</p>";
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        AssertStructurallyValid(Bounded(html));
+        Assert.InRange(watch.Elapsed.TotalSeconds, 0, 20);
+    }
+
+    [Fact]
     public void A_footer_with_braces_that_are_not_page_numbers_is_laid_out_once()
     {
         // The fluent package writes a caller's brace as "{<span></span>" so that its text stays as written. Any brace

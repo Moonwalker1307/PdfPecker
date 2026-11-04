@@ -116,9 +116,11 @@ Document.Create(container =>
 - **Charts**: `Chart` draws column, bar, line and pie charts from your series as vector SVG, with a legend, data
   labels, your own colours and a .NET number format for the values; MigraDoc users will find the usual report charts here.
 - **Accessibility**: `SemanticSection`, `SemanticArticle`, `SemanticHeader1` to `6` (and `SemanticHeading1` to `6`),
-  `SemanticList`, `SemanticBlockQuotation`, `SemanticQuote`, `SemanticCode`, `SemanticCaption`, `SemanticImage`,
-  `SemanticLanguage`, `SemanticIgnore`, `SemanticHorizontalHeader` on a table cell (a row's header) and the rest of
-  QuestPDF's semantic calls write the HTML elements PdfPecker tags a PDF/UA document from.
+  `SemanticList` with `SemanticListLabel` and `SemanticListItemBody`, `SemanticTableOfContents` with its
+  `SemanticTableOfContentsItem` entries, `SemanticFormula`, `SemanticIndex`, `SemanticBlockQuotation`, `SemanticQuote`,
+  `SemanticCode`, `SemanticCaption`, `SemanticImage`, `SemanticLanguage`, `SemanticIgnore`, `SemanticHorizontalHeader`
+  on a table cell (a row's header) and the rest of QuestPDF's semantic calls write the HTML elements and ARIA roles
+  PdfPecker tags a PDF/UA document from.
 - **Everything else in PdfPecker** through the normal `PdfOptions`: PDF/A, PDF/UA, signatures, encryption,
   watermarks, e-invoices (ZUGFeRD, Factur-X, XRechnung), attachments, fonts, viewer settings and page labels (which
   number the pages across every `Page` call) and linearized output for Fast Web View, also for documents with several
@@ -176,9 +178,8 @@ Most QuestPDF code ports by changing the `using` lines: `Document.Create`, `Page
   `BeginPageNumberOfSection` and `EndPageNumberOfSection` still give pages of the whole PDF.
 - `SemanticDivision`, `SemanticSpan` and `SemanticTable` write nothing: PdfPecker tags content by what it is, a
   `Table` is tagged as a table already, and plain groups stay out of the tag tree. `SemanticCode` and `SemanticQuote`
-  keep the surrounding font and add no quotation marks. `SemanticFormula`, `SemanticIndex`,
-  `SemanticTableOfContentsItem`, `SemanticListLabel` and `SemanticListItemBody` are not there yet; `List` tags its
-  labels and bodies itself.
+  keep the surrounding font and add no quotation marks. In a `SemanticListItem`, everything but the
+  `SemanticListLabel` is the item's body, so `SemanticListItemBody` writes nothing; `List` tags its labels itself.
 - Images keep their data unless `ImageCompressionQuality` or `ImageRasterDpi` is set, where QuestPDF compresses at
   `High` and 288 dpi by default; set those to match it. A compressed image replaces the original only when it is
   smaller, and transparency stays lossless. `Image.Size` is not available.

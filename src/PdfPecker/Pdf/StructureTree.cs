@@ -13,7 +13,7 @@ internal sealed class StructElem
     public readonly StructElem? Parent;
     public readonly List<object> Kids = new(2); // StructElem, ContentSlot or AnnotRef
     public string? Alt, Lang, Scope;
-    public string? ListNumbering; // an L element's numbering, once its items have Lbl elements
+    public string? ListNumbering; // an L element's numbering (PDF 2.0 names), once its items have Lbl elements
     public string? Text;       // a link's text, the description of its annotation
     public string? ElementId;  // the element identifier (/ID) a Note needs
     public int RowSpan = 1, ColSpan = 1;
@@ -113,52 +113,54 @@ internal sealed class StructureTree
 
     /// <summary>Structure types that can hold text directly; text in any other gets an anonymous paragraph.</summary>
     private static bool HoldsText(string type) => type is "P" or "H1" or "H2" or "H3" or "H4" or "H5" or "H6" or "Lbl" or "LBody"
-        or "TD" or "TH" or "Caption" or "Link" or "Code" or "Quote" or "Span" or "Note";
+        or "TD" or "TH" or "Caption" or "Link" or "Code" or "Quote" or "Span" or "Note" or "Formula";
 
     private static bool IsInline(ComputedStyle s)
         => !s.Floated && !s.OutOfFlow && (s.Display == Display.Inline || s.IsAtomicInline);
 
     private void VisitChildren(Element e, StructElem container)
     {
-        bool holdsText = HoldsText(container.Type);
         StructElem? anonymous = null; // the paragraph of the current run of inline content
-        foreach (var child in e.Children)
+        foreach (var child in e.Children) VisitChild(child, container, ref anonymous);
+    }
+
+    private void VisitChild(Node child, StructElem container, ref StructElem? anonymous)
+    {
+        bool holdsText = HoldsText(container.Type);
+        if (child is TextNode t)
         {
-            if (child is TextNode t)
+            bool blank = string.IsNullOrWhiteSpace(t.Text);
+            StructElem? target = holdsText ? container : anonymous;
+            if (target == null && !blank) target = anonymous = new StructElem("P", container);
+            // Whitespace between blocks stays an artifact; inside a paragraph it belongs to the text.
+            if (target != null) _content[t] = SlotIn(target);
+            return;
+        }
+        if (child is Element { FootnoteIndex: >= 0 } footnote && footnote.Style is { Display: not Display.None })
+        {
+            // A footnote is out of the flow but read where its call is: a Note in the text, which the call links to.
+            var holder = holdsText ? container : anonymous ??= new StructElem("P", container);
+            var note = new StructElem("Note", holder)
             {
-                bool blank = string.IsNullOrWhiteSpace(t.Text);
-                StructElem? target = holdsText ? container : anonymous;
-                if (target == null && !blank) target = anonymous = new StructElem("P", container);
-                // Whitespace between blocks stays an artifact; inside a paragraph it belongs to the text.
-                if (target != null) _content[t] = SlotIn(target);
-                continue;
-            }
-            if (child is Element { FootnoteIndex: >= 0 } footnote && footnote.Style is { Display: not Display.None })
-            {
-                // A footnote is out of the flow but read where its call is: a Note in the text, which the call links to.
-                var holder = holdsText ? container : anonymous ??= new StructElem("P", container);
-                var note = new StructElem("Note", holder)
-                {
-                    Lang = LangOf(footnote),
-                    ElementId = "fn" + (footnote.FootnoteIndex + 1).ToString(System.Globalization.CultureInfo.InvariantCulture),
-                };
-                _elements[footnote] = note;
-                _targets[Layout.FootnoteSetup.BodyKey(footnote.FootnoteIndex)] = note;
-                if (footnote.Id != null) _targets[footnote.Id] = note;
-                VisitChildren(footnote, note);
-                continue;
-            }
-            if (child is not Element c || Skipped(c)) continue;
-            if (IsInline(c.Style))
-            {
-                var target = holdsText ? container : anonymous ??= new StructElem("P", container);
-                VisitElement(c, target);
-            }
-            else
-            {
-                anonymous = null;
-                VisitElement(c, container);
-            }
+                Lang = LangOf(footnote),
+                ElementId = "fn" + (footnote.FootnoteIndex + 1).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            };
+            _elements[footnote] = note;
+            _targets[Layout.FootnoteSetup.BodyKey(footnote.FootnoteIndex)] = note;
+            if (footnote.Id != null) _targets[footnote.Id] = note;
+            VisitChildren(footnote, note);
+            return;
+        }
+        if (child is not Element c || Skipped(c)) return;
+        if (IsInline(c.Style))
+        {
+            var target = holdsText ? container : anonymous ??= new StructElem("P", container);
+            VisitElement(c, target);
+        }
+        else
+        {
+            anonymous = null;
+            VisitElement(c, container);
         }
     }
 
@@ -214,7 +216,7 @@ internal sealed class StructureTree
                 break;
         }
 
-        var type = TypeOf(e);
+        var type = TypeOf(e, parent);
         var lang = LangOf(e);
         if (type == null && lang != null) type = IsInline(e.Style) ? "Span" : "Div"; // to carry the language
         if (type == null)
@@ -223,6 +225,8 @@ internal sealed class StructureTree
             return;
         }
         var se = new StructElem(type, parent) { Lang = lang };
+        // A formula is read out by its text alternative, as a figure is.
+        if (type == "Formula" && AltText(e) is { } formulaAlt && !string.IsNullOrWhiteSpace(formulaAlt)) se.Alt = formulaAlt.Trim();
         _elements[e] = se;
         if (e.Id != null) _targets[e.Id] = se;
         if (e.Name == "a" && e.GetAttribute("name") is { Length: > 0 } anchorName) _targets[anchorName] = se;
@@ -235,6 +239,11 @@ internal sealed class StructureTree
         }
         switch (type)
         {
+            case "LI" when LabelPaths(e) is { } paths:
+                // A list item laid out by hand, with a label of its own beside the body, such as a row: the label is the
+                // item's Lbl and the rest its LBody.
+                VisitLabelledItem(e, se, paths);
+                return;
             case "LI":
                 if (e.Style.Display == Display.ListItem && (e.Style.ListStyleType != ListStyleType.None || e.Style.ListStyleImage != null || e.Style.ListStyleGradient != null))
                 {
@@ -254,6 +263,71 @@ internal sealed class StructureTree
         VisitChildren(e, se);
     }
 
+    /// <summary>The attribute that marks an element inside a list item as the item's label (Lbl).</summary>
+    internal const string ListLabelAttribute = "data-pdf-list-label";
+
+    /// <summary>
+    /// The elements of a list item that are marked as its label, and the boxes that hold them, or null when it has none.
+    /// Nested lists are left to their own items.
+    /// </summary>
+    private static HashSet<Element>? LabelPaths(Element li)
+    {
+        HashSet<Element>? paths = null;
+        var stack = new Stack<Element>();
+        stack.Push(li);
+        while (stack.Count > 0)
+        {
+            var e = stack.Pop();
+            foreach (var child in e.Children)
+            {
+                if (child is not Element c || c.Name is "ul" or "ol" or "li") continue;
+                if (c.HasAttribute(ListLabelAttribute))
+                {
+                    paths ??= new HashSet<Element>(ReferenceEqualityComparer.Instance);
+                    for (var a = c; a != li && a != null && paths.Add(a); a = a.Parent) { }
+                }
+                else stack.Push(c);
+            }
+        }
+        return paths;
+    }
+
+    /// <summary>
+    /// The parts of a list item with a marked label: each label, wherever it sits in the item's boxes, becomes a Lbl
+    /// and everything else the LBody, in reading order. Boxes that only hold the parts, such as a row, add no element.
+    /// </summary>
+    private void VisitLabelledItem(Element li, StructElem item, HashSet<Element> paths)
+    {
+        // Labels written by hand say nothing of how they count, so the list says only whether it is ordered.
+        if (item.Parent is { Type: "L" } list) list.ListNumbering ??= li.Parent?.Name == "ol" ? "Ordered" : "Unordered";
+        StructElem? body = null, anonymous = null;
+        var pending = new Stack<IEnumerator<Node>>();
+        pending.Push(li.Children.GetEnumerator());
+        while (pending.Count > 0)
+        {
+            var children = pending.Peek();
+            if (!children.MoveNext())
+            {
+                pending.Pop();
+                continue;
+            }
+            var child = children.Current;
+            if (child is Element c && paths.Contains(c) && !Skipped(c))
+            {
+                if (c.HasAttribute(ListLabelAttribute))
+                {
+                    body = anonymous = null;
+                    var label = new StructElem("Lbl", item) { Lang = LangOf(c) };
+                    _elements[c] = label;
+                    if (c.Id != null) _targets[c.Id] = label;
+                    VisitChildren(c, label);
+                }
+                else pending.Push(c.Children.GetEnumerator());
+            }
+            else VisitChild(child, body ??= new StructElem("LBody", item), ref anonymous);
+        }
+    }
+
     /// <summary>The ListNumbering attribute value for a list marker style.</summary>
     private static string Numbering(ListStyleType type) => type switch
     {
@@ -269,8 +343,22 @@ internal sealed class StructureTree
         _ => "Disc",
     };
 
-    private string? TypeOf(Element e)
+    private string? TypeOf(Element e, StructElem parent)
     {
+        // ARIA roles name what HTML has no element for: formulas, indexes and tables of contents, whose items are the
+        // items of the lists inside them.
+        switch (e.GetAttribute("role")?.Trim().ToLowerInvariant())
+        {
+            case "math": return "Formula";
+            case "doc-index": return "Index";
+            case "doc-toc": return "TOC";
+        }
+        if (parent.Type is "TOC" or "TOCI")
+        {
+            // A list in a table of contents is its entries: a nested list is a table of contents of its own.
+            if (e.Name is "ul" or "ol") return parent.Type == "TOCI" ? "TOC" : null;
+            if (e.Name == "li") return "TOCI";
+        }
         switch (e.Name)
         {
             case "p": return "P";

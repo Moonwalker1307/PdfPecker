@@ -33,8 +33,46 @@ public static partial class ContainerExtensions
     /// <summary>Tags the content as an article (Art) in PDF/UA.</summary>
     public static IContainer SemanticArticle(this IContainer container) => Semantic(container, "article");
 
-    /// <summary>Tags the content as a table of contents; PdfPecker tags it as a section (Sect).</summary>
-    public static IContainer SemanticTableOfContents(this IContainer container) => Semantic(container, "nav");
+    /// <summary>
+    /// Tags the content as a table of contents (TOC) in PDF/UA, whose entries are <see cref="SemanticTableOfContentsItem"/>
+    /// slots; a table of contents inside an entry nests.
+    /// </summary>
+    public static IContainer SemanticTableOfContents(this IContainer container)
+        => Tagging(Semantic(container, "nav"), ("role", "doc-toc"));
+
+    /// <summary>Tags the content as an entry (TOCI) of a <see cref="SemanticTableOfContents"/> in PDF/UA.</summary>
+    public static IContainer SemanticTableOfContentsItem(this IContainer container) => Semantic(container, "li");
+
+    /// <summary>
+    /// Tags the content as a formula (Formula) in PDF/UA, which screen readers read out by its text alternative, as
+    /// they do a figure.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="alternativeText"/> is empty.</exception>
+    public static IContainer SemanticFormula(this IContainer container, string alternativeText)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(alternativeText);
+        return Tagging(container, ("role", "math"), ("aria-label", alternativeText));
+    }
+
+    /// <summary>Tags the content as an index (Index) in PDF/UA, such as the list of terms at the back of a book.</summary>
+    public static IContainer SemanticIndex(this IContainer container) => Tagging(container, ("role", "doc-index"));
+
+    /// <summary>
+    /// Tags the content as the label (Lbl) of the <see cref="SemanticListItem"/> it is in, such as the number in a row
+    /// beside the item's text. The rest of the item is its body. <c>List</c> tags its markers this way itself.
+    /// </summary>
+    public static IContainer SemanticListLabel(this IContainer container) => Tagging(container, (HtmlWriter.ListLabelAttribute, ""));
+
+    /// <summary>
+    /// Tags the content as the body (LBody) of the <see cref="SemanticListItem"/> it is in. Everything in an item but
+    /// its <see cref="SemanticListLabel"/> is the body already, so this changes nothing; it is here so QuestPDF code
+    /// ports unchanged.
+    /// </summary>
+    public static IContainer SemanticListItemBody(this IContainer container)
+    {
+        Container.Of(container);
+        return container;
+    }
 
     /// <summary>Tags the content as a block quotation (BlockQuote) in PDF/UA.</summary>
     public static IContainer SemanticBlockQuotation(this IContainer container) => Semantic(container, "blockquote");
@@ -167,6 +205,9 @@ public static partial class ContainerExtensions
 
     /// <summary>Leaves the content out of the tagged structure, as decoration (an artifact) that screen readers skip.</summary>
     public static IContainer SemanticIgnore(this IContainer container) => Decorate(container, new Decorator(DecoratorKind.Artifact));
+
+    private static Container Tagging(IContainer container, params (string Name, string Value)[] attributes)
+        => Decorate(container, new Decorator(DecoratorKind.Tagging) { Declarations = attributes });
 
     private static Container Semantic(IContainer container, string tag)
         => Decorate(container, new Decorator(DecoratorKind.Semantic) { Text = tag });

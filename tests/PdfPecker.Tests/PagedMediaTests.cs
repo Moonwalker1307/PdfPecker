@@ -408,6 +408,41 @@ public class PagedMediaTests
     // ---- first-page header and footer ----
 
     /// <summary>The text of each page, with the page breaks of a long document of numbered paragraphs.</summary>
+    [Fact]
+    public void Band_page_numbers_take_a_counter_style()
+    {
+        var pages = TextOfPages("<style>@counter-style pad3 { system: extends decimal; pad: 3 \"0\" }</style>"
+            + "<div data-sticky-pdf-header>Page {page:upper-roman} of {total-pages:lower-roman} ({pages:upper-alpha})</div>"
+            + "<div data-sticky-pdf-footer>No. {page:pad3} {page:no-such-style} {page:symbols(cyclic '*')} {page:}</div>");
+        Assert.True(pages.Length >= 2);
+        string last = ToRoman(pages.Length);
+        Assert.Contains($"Page I of {last.ToLowerInvariant()} ({(char)('A' + pages.Length - 1)})", pages[0]);
+        Assert.Contains($"Page II of {last.ToLowerInvariant()}", pages[1]);
+        // An unknown style is decimal, as in CSS; what is not a style's name stays as it is.
+        Assert.Contains("No. 002 2 {page:symbols(cyclic '*')} {page:}", pages[1]);
+    }
+
+    [Fact]
+    public void Section_page_numbers_in_a_band_take_a_counter_style()
+    {
+        var html = @"<style>section { break-before: page }</style>
+          <div data-sticky-pdf-header>Section page {section-page:b%20x:lower-roman}</div>
+          <section id='a'><h2>A</h2></section>
+          <section id='b x'><h2>B</h2><p style='height: 1200px'>tall</p><p>end</p></section>";
+        var pages = PdfText.ExtractPages(HtmlToPdf.Convert(html)).Select(p => p.Text).ToArray();
+        Assert.Contains("Section page i", pages[1]);
+        Assert.DoesNotContain("Section page ii", pages[1]);
+        Assert.Contains("Section page ii", pages[2]);
+    }
+
+    private static string ToRoman(int n)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var (value, numeral) in new[] { (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I") })
+            while (n >= value) { sb.Append(numeral); n -= value; }
+        return sb.ToString();
+    }
+
     private static string[] TextOfPages(string bands, PdfOptions? options = null)
     {
         var body = string.Concat(Enumerable.Range(1, 80).Select(i => $"<p>Line {i}</p>"));

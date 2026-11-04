@@ -107,7 +107,12 @@ internal sealed partial class PdfDocumentWriter
                 if (e.ColSpan > 1) _out.Ascii(" /ColSpan ").Int(e.ColSpan);
                 _out.Ascii(" >>");
             }
-            if (e.ListNumbering != null) _out.Ascii(" /A << /O /List /ListNumbering /").Ascii(e.ListNumbering).Ascii(" >>");
+            if (e.ListNumbering != null)
+            {
+                // PDF 1.7 has no Ordered and Unordered numbering, so its nearest values stand in for them.
+                string numbering = Pdf20 ? e.ListNumbering : e.ListNumbering switch { "Ordered" => "Decimal", "Unordered" => "Disc", var n => n };
+                _out.Ascii(" /A << /O /List /ListNumbering /").Ascii(numbering).Ascii(" >>");
+            }
             _out.Ascii(" /K [");
             foreach (var k in e.Kids)
             {
@@ -160,6 +165,8 @@ internal sealed partial class PdfDocumentWriter
         "Quote" or "Code" => "Span",
         "Art" => "Sect",
         "Note" => "FENote",
+        "TOC" or "TOCI" => "Div",
+        "Index" => "Sect",
         _ => null,
     };
 }

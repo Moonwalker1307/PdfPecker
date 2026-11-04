@@ -84,6 +84,26 @@ var SigningCertificate = new Lazy<X509Certificate2>(() =>
     return X509CertificateLoader.LoadPkcs12(cert.Export(X509ContentType.Pfx, "pw"), "pw");
 });
 
+// Structure types that HTML has no element for, from ARIA roles and the list label attribute: a formula with its text
+// alternative, a table of contents with nested entries, an index and a list laid out by hand with marked labels.
+const string Roles = """
+    <html lang="en"><head><title>Structure roles</title></head><body>
+    <nav role="doc-toc"><ol style="list-style:none">
+      <li><a href="#a">Areas</a><ol style="list-style:none"><li><a href="#b">Circles</a></li></ol></li>
+      <li><a href="#c">Index</a></li>
+    </ol></nav>
+    <h1 id="a">Areas</h1>
+    <h2 id="b">Circles</h2>
+    <p>A circle's area is <span role="math" aria-label="pi times r squared">πr²</span>.</p>
+    <ul style="list-style:none;padding:0">
+      <li><div style="display:flex;gap:6pt"><div data-pdf-list-label>1.</div><div>Measure the radius.</div></div></li>
+      <li><div style="display:flex;gap:6pt"><div data-pdf-list-label>2.</div><div>Square it and multiply by pi.</div></div></li>
+    </ul>
+    <h1 id="c">Index</h1>
+    <div role="doc-index"><p>Area, 1</p><p>Circle, 1</p></div>
+    </body></html>
+    """;
+
 var profiles = new (string Name, PdfConformance Conformance, PdfAccessibility Accessibility, string[] Flavours, bool Linearize)[]
 {
     ("pdfa-2b", PdfConformance.PdfA2b, PdfAccessibility.None, ["2b"], false),
@@ -139,6 +159,7 @@ foreach (var profile in profiles)
     if (!profile.Linearize)
         File.WriteAllBytes(Path.Combine(dir, "signature-fields-signed.pdf"),
             PdfSigner.Sign(signatureFields, new PdfSignatureOptions(SigningCertificate.Value) { FieldName = "Seller" }));
+    File.WriteAllBytes(Path.Combine(dir, "structure-roles.pdf"), HtmlToPdf.Convert(Roles, Options(fixtures)));
 
     // Every viewer setting and page labels with a prefix, on the report sample, which has several pages and bookmarks.
     var report = Path.Combine(samples, "report.html");

@@ -301,8 +301,8 @@ public static partial class HtmlToPdf
             var (header, footer) = BandsOf(pageName, documentFirst, runFirst, even);
             if (header == null && footer == null) return;
             bool truncate = _options.TruncateBandsToWholePoints;
-            if (header != null) setup.BandTop = Math.Max(DeclaredHeight(header, setup, truncate), BandHeight(header, setup, _images, _context));
-            if (footer != null) setup.BandBottom = Math.Max(DeclaredHeight(footer, setup, truncate), BandHeight(footer, setup, _images, _context));
+            if (header != null) setup.BandTop = Math.Max(DeclaredHeight(header, setup, truncate), BandHeight(header, setup, _images, _context, _styles.CounterStyles));
+            if (footer != null) setup.BandBottom = Math.Max(DeclaredHeight(footer, setup, truncate), BandHeight(footer, setup, _images, _context, _styles.CounterStyles));
             float limit = setup.ContentHeight * 0.6f;
             float bands = setup.BandTop + setup.BandBottom;
             if (bands > limit)
