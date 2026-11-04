@@ -232,7 +232,7 @@ internal sealed partial class InlineLayout
         /// <summary>Breaks the paragraph into lines, from the ::first-line items when there are any, and flushes the floats.</summary>
         public List<Line> Break(FloatLines? fl)
         {
-            var broken = First != null ? _inline.BreakLines(First.Items, _w, _indent, fl, after: _items) : _inline.BreakLines(_items, _w, _indent, fl, block: _block);
+            var broken = First != null ? _inline.BreakLines(First.Items, _w, _indent, fl, after: _items, hyphenLimit: _block.HyphenateLimitLines) : _inline.BreakLines(_items, _w, _indent, fl, block: _block, hyphenLimit: _block.HyphenateLimitLines);
             fl?.Flush(broken);
             return broken;
         }
