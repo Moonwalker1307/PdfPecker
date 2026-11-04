@@ -14,9 +14,9 @@ internal sealed partial class InlineLayout
     /// Breaks items into lines. With <paramref name="after"/>, a list matching <paramref name="items"/> item for item,
     /// the lines after the first are made from that list instead (::first-line).
     /// </summary>
-    private List<Line> BreakLines(List<Item> items, float availW, LineIndent indent, FloatLines? fl = null, List<Item>? after = null, ComputedStyle? block = null)
+    private List<Line> BreakLines(List<Item> items, float availW, LineIndent indent, FloatLines? fl = null, List<Item>? after = null, ComputedStyle? block = null, int hyphenLimit = -1)
     {
-        var breaker = new LineBreaker(this, items, availW, indent, fl, after);
+        var breaker = new LineBreaker(this, items, availW, indent, fl, after, hyphenLimit: hyphenLimit);
         breaker.Run();
         if (breaker.ClonesEdges) AddCloneEdges(breaker.Lines);
         // text-wrap: balance and pretty choose the breaks again once the greedy ones are known; beside floats, on pages
@@ -146,10 +146,15 @@ internal sealed partial class InlineLayout
         // left edges it gives this line are counted.
         public readonly bool ClonesEdges;
         private Item? _edgeAfter;
+        // hyphenate-limit-lines: how many lines in a row, directly before the current one, ended at a hyphenation break.
+        private int _hyphenatedRun;
+        // hyphenate-limit-lines of the block container, which applies to the whole paragraph whatever the inline styles say; -1 = no limit.
+        private readonly int _hyphenLimit;
 
-        public LineBreaker(InlineLayout inline, List<Item> items, float availW, LineIndent indent, FloatLines? fl, List<Item>? after, byte[]? plan = null)
+        public LineBreaker(InlineLayout inline, List<Item> items, float availW, LineIndent indent, FloatLines? fl, List<Item>? after, byte[]? plan = null, int hyphenLimit = -1)
         {
             _inline = inline;
+            _hyphenLimit = hyphenLimit;
             _plan = plan;
             _items = items;
             _availW = availW;
@@ -196,7 +201,11 @@ internal sealed partial class InlineLayout
                 li.RemoveAt(li.Count - 1);
             // A line broken at a soft hyphen shows a hyphen.
             if (!forced && li.Count > 0 && li[^1] is { Kind: ItemKind.Text, BreakAfter: BreakAfter.SoftHyphen } shy)
+            {
                 li[^1] = shy.CloneWithText(shy.Text + HyphenText(shy.Style), shy.Width + shy.TrimEnd + HyphenWidth(shy.Style));
+                _hyphenatedRun++;
+            }
+            else _hyphenatedRun = 0;
             float width = 0;
             foreach (var it in li) width += it.Width;
             _cur.Width = width;
@@ -354,6 +363,14 @@ internal sealed partial class InlineLayout
             }
             if (_hasContent && full)
             {
+                // hyphenate-limit-lines: a line that would be the one hyphenated line too many ends earlier instead.
+                if (_plan == null && HyphenLimitReached() && MoveHyphenatedTail(i) is var moved and >= 0)
+                {
+                    bool firstLine = _after != null;
+                    Finish(forced: false);
+                    // After a ::first-line, the moved words are found again in the usual items.
+                    return firstLine ? Resume(moved) : moved;
+                }
                 bool switching = _after != null;
                 Finish(forced: false);
                 if (switching)
@@ -388,6 +405,44 @@ internal sealed partial class InlineLayout
                 for (int k = i; k < j; k++) Add(_items[k]);
             }
             return j;
+        }
+
+        /// <summary>Whether the current line, if it ended here, would be hyphenated beyond hyphenate-limit-lines.</summary>
+        private readonly bool HyphenLimitReached()
+        {
+            var li = _cur.Items;
+            if (li.Count == 0 || li[^1] is not { Kind: ItemKind.Text, BreakAfter: BreakAfter.SoftHyphen }) return false;
+            return _hyphenLimit >= 0 && _hyphenatedRun >= _hyphenLimit;
+        }
+
+        /// <summary>
+        /// Takes the words after the current line's last space (or other plain break opportunity) off the line, so that
+        /// it ends there without a hyphen, and returns the index in the items the next line starts with, where those
+        /// words are placed again. Something visible must stay on the line, not only spaces that pre-wrap keeps. Returns
+        /// -1 and leaves the line as it is when it has no earlier break opportunity (a line of one hyphenated word still
+        /// breaks at its hyphen), or when its items cannot be matched with the paragraph's, as after a float or
+        /// text-spacing-trim changed them: those lines may keep a hyphenated end beyond the limit.
+        /// </summary>
+        private int MoveHyphenatedTail(int chunkStart)
+        {
+            var li = _cur.Items;
+            int cut = -1;
+            for (int k = li.Count - 2; k >= 0 && cut < 0; k--)
+            {
+                if (li[k] is not ({ Kind: ItemKind.Space, Breakable: true } or { BreakAfter: BreakAfter.Break })) continue;
+                for (int v = k; v >= 0 && cut < 0; v--)
+                    if (li[v].Kind != ItemKind.Space && !li[v].IsMarker) cut = k + 1;
+            }
+            if (cut <= 0 || cut >= li.Count) return -1;
+            int moved = li.Count - cut;
+            if (chunkStart < moved) return -1;
+            for (int t = 1; t <= moved; t++)
+                if (!ReferenceEquals(_items[chunkStart - t], li[li.Count - t])) return -1;
+            // The line's width loses the moved items and the kerning in front of each, as the chunks were measured. What
+            // else it holds, such as the left edges box-decoration-break: clone gives its first item, stays.
+            for (int k = cut; k < li.Count; k++) _curW -= li[k].Width + PairKern(li[k - 1], li[k]);
+            li.RemoveRange(cut, moved);
+            return chunkStart - moved;
         }
 
         /// <summary>

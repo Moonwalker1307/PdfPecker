@@ -192,6 +192,7 @@ internal sealed partial class StyleResolver
             case "white-space": ApplyWhiteSpace(s, parent, in d); break;
             case "text-wrap": ApplyTextWrap(s, parent, in d); break;
             case "text-wrap-mode": ApplyTextWrapMode(s, parent, in d); break;
+            case "white-space-collapse": ApplyWhiteSpaceCollapse(s, parent, in d); break;
             case "text-wrap-style": ApplyTextWrapStyle(s, parent, in d); break;
             case "overflow-wrap": ApplyOverflowWrap(s, parent, in d); break;
             case "word-break": ApplyWordBreak(s, parent, in d); break;
@@ -206,6 +207,10 @@ internal sealed partial class StyleResolver
                 break;
             case "quotes": ApplyQuotes(s, parent, in d); break;
             case "hyphenate-limit-chars": ApplyHyphenateLimitChars(s, parent, in d); break;
+            case "hyphenate-limit-lines":
+            case "-webkit-hyphenate-limit-lines":
+                ApplyHyphenateLimitLines(s, parent, in d);
+                break;
             case "-webkit-line-clamp": ApplyLineClamp(s, in d); break;
             case "line-clamp": ApplyLineClampShorthand(s, parent, in d); break;
             case "block-ellipsis": ApplyBlockEllipsis(s, parent, d.Value, d.Lower, d.Inherit); break;
@@ -377,6 +382,7 @@ internal sealed partial class StyleResolver
             case "stroke-miterlimit": ApplyStrokeMiterLimit(s, in d); break;
             case "stroke-dasharray": ApplyStrokeDashArray(s, parent, in d); break;
             case "stroke-dashoffset": ApplyStrokeDashOffset(s, parent, in d); break;
+            case "cx" or "cy" or "r" or "rx" or "ry" or "x" or "y" or "d" or "stop-color" or "stop-opacity": ApplySvgGeometry(s, parent, prop, in d); break;
             case "mask": s.SvgMask = SvgUrl(d.Value, d.Lower); break;
             case "mask-type": s.SvgMaskAlpha = d.Lower == "alpha"; break;
             case "marker": s.SvgMarkerStart = s.SvgMarkerMid = s.SvgMarkerEnd = d.Inherit ? parent.SvgMarkerStart : SvgUrl(d.Value, d.Lower); break;

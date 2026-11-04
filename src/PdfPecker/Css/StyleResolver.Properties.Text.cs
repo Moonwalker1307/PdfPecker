@@ -435,6 +435,24 @@ internal sealed partial class StyleResolver
         else if (WrapMode(d.Lower) is { } wrap) s.WhiteSpace = WithWrapMode(s.WhiteSpace, wrap);
     }
 
+    /// <summary>
+    /// white-space-collapse, the other longhand of white-space: how spaces and newlines collapse, keeping whether lines
+    /// wrap. break-spaces is taken as preserve, as white-space: break-spaces is taken as pre-wrap.
+    /// </summary>
+    private static void ApplyWhiteSpaceCollapse(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        bool wrap = Wraps(s.WhiteSpace);
+        // The property is inherited, so unset inherits too.
+        if (d.Inherit || d.Lower == "unset") s.WhiteSpace = WithWrapMode(parent.WhiteSpace, wrap);
+        else s.WhiteSpace = d.Lower switch
+        {
+            "collapse" or "initial" => wrap ? WhiteSpace.Normal : WhiteSpace.NoWrap,
+            "preserve" or "break-spaces" => wrap ? WhiteSpace.PreWrap : WhiteSpace.Pre,
+            "preserve-breaks" => wrap ? WhiteSpace.PreLine : WhiteSpace.PreLineNoWrap,
+            _ => s.WhiteSpace,
+        };
+    }
+
     private static void ApplyTextWrapStyle(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
         if (d.Inherit) s.TextWrap = parent.TextWrap;
@@ -564,6 +582,30 @@ internal sealed partial class StyleResolver
         if (count == 1) values[1] = 0;
         if (count < 3) values[2] = values[1];
         return new HyphenateLimits(values[0], values[1], values[2]);
+    }
+
+    private static void ApplyHyphenateLimitLines(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit || d.Lower == "unset") s.HyphenateLimitLines = parent.HyphenateLimitLines;
+        else if (d.Lower == "initial") s.HyphenateLimitLines = -1;
+        else if (ParseHyphenateLimitLines(d.Lower) is { } lines) s.HyphenateLimitLines = lines;
+    }
+
+    /// <summary>
+    /// Parses hyphenate-limit-lines: no-limit (-1), or a non-negative integer, the most consecutive lines that may end
+    /// in a hyphen. CSS Text 4 allows any integer; a negative one is invalid here, as no number of lines is below zero.
+    /// Anything else is an invalid declaration (null).
+    /// </summary>
+    internal static int? ParseHyphenateLimitLines(string lower)
+    {
+        var v = lower.AsSpan().Trim();
+        if (v.SequenceEqual("no-limit")) return -1;
+        if (v.Length > 0 && v[0] == '+') v = v[1..];
+        if (v.IsEmpty) return null;
+        foreach (char c in v)
+            if (c is < '0' or > '9') return null;
+        // Huge values are clamped: no paragraph has that many lines.
+        return Invariant.TryParseInt(v, out int n) ? Math.Min(n, HyphenateLimits.Max) : HyphenateLimits.Max;
     }
 
     // A positive CSS integer. Huge values are clamped rather than rejected, as Chrome does; no word is that long anyway.

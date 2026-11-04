@@ -137,6 +137,23 @@ public class TextWrapTests
     }
 
     [Fact]
+    public void White_space_collapse_sets_how_spaces_collapse_and_keeps_wrapping()
+    {
+        var preserve = Paragraph("width: 200px; font-size: 14px; white-space-collapse: preserve", "keeps    its spaces but wraps the long line as before");
+        Assert.True(preserve.Length > 1);
+        Assert.Contains("keeps    its", preserve[0], StringComparison.Ordinal);
+        var nowrap = Paragraph("width: 200px; font-size: 14px; text-wrap-mode: nowrap; white-space-collapse: preserve", "keeps    its spaces and stays on one long line");
+        Assert.Contains("keeps    its", Assert.Single(nowrap), StringComparison.Ordinal);
+        var breaks = Paragraph("width: 400px; font-size: 14px; white-space-collapse: preserve-breaks", "spaces   collapse\nnewlines stay");
+        Assert.Equal(new[] { "spaces collapse", "newlines stay" }, breaks);
+        var collapse = Paragraph("width: 400px; font-size: 14px; white-space: pre; white-space-collapse: collapse", "spaces   collapse\nand newlines too");
+        Assert.Equal(new[] { "spaces collapse and newlines too" }, collapse);
+        var unknown = Paragraph("width: 400px; font-size: 14px; white-space: pre; white-space-collapse: squash", "unknown   values are ignored");
+        Assert.Contains("unknown   values", Assert.Single(unknown), StringComparison.Ordinal);
+        Assert.True(CssSupports.Evaluate("(white-space-collapse: preserve)"));
+    }
+
+    [Fact]
     public void Invalid_text_wrap_values_are_ignored()
     {
         Assert.Single(Paragraph("width: 200px; font-size: 14px; text-wrap: nowrap; text-wrap: balance pretty", "an invalid value keeps the text on one long line"));

@@ -136,13 +136,13 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   tooltips and badges), transforms, gradients (also `in oklch` and other colour spaces, and as
   list markers), fixed background images (placed on each page's paper, as Chrome prints them), filters, masks,
   media and container queries, `@scope` (scope roots, limits and proximity, as in Chrome), logical properties, `writing-mode` (with floats, sized boxes and vertical-lr line
-  order), `text-wrap`, hanging indents (`text-indent` with `hanging` and `each-line`), emphasis
+  order), `text-wrap` and `white-space-collapse`, hanging indents (`text-indent` with `hanging` and `each-line`), emphasis
   marks (`text-emphasis`), trimming lines to the cap height and baseline (`text-box`, for optically centred
   buttons and badges), `line-clamp` with your own `block-ellipsis`, underlines from the font or below the descenders
   (`text-underline-position`), drop caps, `::first-line` styles with a background, `::marker` styles (a larger marker font or a tall marker image makes its
   line taller, `content: none` hides the marker, `counter(list-item)` numbers it and its own `direction` orders its
   text, as in Chrome), images and gradients in `::before` and `::after` content, inline SVG (with
-  percentage coordinates and sizes, as in Bootstrap's placeholder images, HTML in `<foreignObject>`, and icons drawn
+  percentage coordinates and sizes, as in Bootstrap's placeholder images, `cx`, `cy`, `r`, `rx`, `ry`, `x`, `y`, `width`, `height`, `d: path()` and `stop-color` set from style sheets, HTML in `<foreignObject>`, and icons drawn
   with `<use>` from a sprite of symbols that is itself hidden, as in Bootstrap's icon sprites) and PNG, JPEG, GIF, WebP, BMP and TIFF images (also chosen by `srcset`, `<picture>` and
   `image-set()`,
   shown by `<embed>` and `<object>`, photos turned upright by their EXIF orientation, and `image-rendering: pixelated`
@@ -177,7 +177,7 @@ signatures, e-invoices) works with it. What it covers and how it differs from Qu
   versions 0 and 1 (such as Noto Color Emoji), print in colour as Chrome prints them, with the default palette.
   [More](https://pdfpecker.net/docs/fonts/)
 - **Languages**: Arabic and Hebrew with bidi and shaping, Indic scripts, Thai and Lao, CJK line breaking and
-  justification, and hyphenation in eleven languages. [More](https://pdfpecker.net/docs/languages/)
+  justification, and hyphenation in eleven languages (with `hyphenate-limit-lines`). [More](https://pdfpecker.net/docs/languages/)
 - **PDF/A, passwords and watermarks**: PDF/A-2, 3 and 4, AES-256 encryption, and text, image and SVG watermarks.
   [More](https://pdfpecker.net/docs/pdfa-and-passwords/)
 - **Accessibility**: tagged PDF, PDF/UA-1 and PDF/UA-2 built from your HTML.
