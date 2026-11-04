@@ -208,8 +208,10 @@ internal static class CssSupports
                 return StyleResolver.ParseHyphenateLimitLines(lower) != null;
         }
         // Other values: functions this library does not know make the value unsupported.
+        // In content, attr() and the paged-media functions (target-counter(), target-counters(), target-text(), leader())
+        // are generated content this library writes.
         foreach (var fn in new[] { "attr(", "anchor(", "env(", "element(", "paint(", "cross-fade(" })
-            if (lower.Contains(fn, StringComparison.Ordinal)) return false;
+            if (lower.Contains(fn, StringComparison.Ordinal) && !(name == "content" && fn == "attr(")) return false;
         return true;
     }
 }
