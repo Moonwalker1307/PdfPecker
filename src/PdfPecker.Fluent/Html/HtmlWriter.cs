@@ -567,6 +567,16 @@ internal sealed class HtmlWriter
                 declarations.Add(("height", "auto"));
                 break;
         }
+        if (image.UseOriginal)
+        {
+            declarations.Add(("-pdfpecker-image-quality", "none"));
+            declarations.Add(("-pdfpecker-image-max-resolution", "none"));
+        }
+        else
+        {
+            if (image.Quality is { } quality) declarations.Add(("-pdfpecker-image-quality", CssValue.Number(quality)));
+            if (image.RasterDpi is { } dpi) declarations.Add(("-pdfpecker-image-max-resolution", CssValue.Number(dpi) + "dpi"));
+        }
         _html.Append("<img");
         WriteAttribute("class", Class(declarations));
         WriteAttribute("src", _images.Source(image.Data));

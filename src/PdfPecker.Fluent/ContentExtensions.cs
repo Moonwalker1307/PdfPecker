@@ -134,13 +134,35 @@ public static partial class ContentExtensions
     }
 
     /// <summary>
+    /// An image loaded once with <see cref="Fluent.Image.FromFile"/>, <see cref="Fluent.Image.FromBinaryData"/> or
+    /// <see cref="Fluent.Image.FromStream"/>, such as a logo drawn on every page. The PDF holds it once.
+    /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="image"/> is null.</exception>
+    public static ImageDescriptor Image(this IContainer container, Image image)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        return Image(container, image.Data);
+    }
+
+    /// <summary>
     /// An SVG drawing, given as markup. It is drawn as an image, so it cannot change the document around it, and it
-    /// loads nothing from outside except data URIs.
+    /// loads nothing from outside except data URIs. As in QuestPDF, a text that ends in <c>.svg</c> and holds no markup is
+    /// taken as the path of a file, which is read now, by your code.
     /// </summary>
     public static ImageDescriptor Svg(this IContainer container, string svg)
     {
         ArgumentNullException.ThrowIfNull(svg);
+        if (svg.EndsWith(".svg", StringComparison.OrdinalIgnoreCase) && !svg.Contains('<', StringComparison.Ordinal))
+            return Image(container, File.ReadAllBytes(svg));
         return Image(container, System.Text.Encoding.UTF8.GetBytes(svg));
+    }
+
+    /// <summary>An SVG drawing loaded once with <see cref="SvgImage.FromText"/> or <see cref="SvgImage.FromFile"/>. The PDF holds it once.</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="image"/> is null.</exception>
+    public static ImageDescriptor Svg(this IContainer container, SvgImage image)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        return Image(container, image.Data);
     }
 
     /// <summary>A QR code for the text, as a vector drawing scaled to fit the slot (<c>FitArea</c>).</summary>
