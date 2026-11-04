@@ -207,6 +207,7 @@ internal sealed partial class StyleResolver
         _initialStyle = null;
         Strings.Clear();
         _scopeRoots.Clear();
+        _scopeLimitBudget = MaxScopeLimitMatches;
         Footnotes.Clear();
         _footnoteDepth = 0;
         _footnotePage = null;

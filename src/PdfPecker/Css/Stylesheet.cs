@@ -85,6 +85,7 @@ internal sealed class ScopeRule
 {
     public Selector[]? Start;
     public Selector[]? End;
+    public bool EndNamesScope; // whether the end names :scope, so that which elements it matches depends on the root
     public Element? ImplicitRoot;
     public ScopeRule? Parent; // an @scope block this one is nested in: its roots must be in that block's scope
 }

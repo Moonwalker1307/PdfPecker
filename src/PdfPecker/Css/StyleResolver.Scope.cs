@@ -21,6 +21,11 @@ internal sealed partial class StyleResolver
     // Whether an element is a root of a scope, remembered for one style pass: every rule of a block asks the same.
     private readonly Dictionary<(ScopeRule, Element), bool> _scopeRoots = new();
 
+    /// <summary>Matches of an end that names :scope one style pass may make before those rules no longer apply.</summary>
+    private const int MaxScopeLimitMatches = 20_000_000;
+
+    private int _scopeLimitBudget = MaxScopeLimitMatches;
+
     /// <summary>How close a scope root of <paramref name="hops"/> generations up ranks: 1 to 15, more for closer.</summary>
     private static int ScopeCloseness(int hops) => MaxScopeCloseness - Math.Min(hops, MaxScopeCloseness - 1);
 
@@ -33,10 +38,11 @@ internal sealed partial class StyleResolver
         var saved = Compound._scopeRoot;
         try
         {
+            int limit = LimitHops(scope, e);
             int hops = 0;
             for (var root = e; root != null && hops < MaxScopeWalk; root = ParentElement(root), hops++)
             {
-                if (!IsScopeRoot(scope, root) || Limited(scope, e, root)) continue;
+                if (!IsScopeRoot(scope, root) || Limited(scope, e, root, hops, limit)) continue;
                 Compound._scopeRoot = root;
                 if (selector.Matches(e)) return hops;
             }
@@ -61,27 +67,56 @@ internal sealed partial class StyleResolver
     private bool StartMatches(ScopeRule scope, Element root)
     {
         if (scope.Parent == null) return AnyMatches(scope.Start!, root, null);
+        int limit = LimitHops(scope.Parent, root);
         int hops = 0;
         for (var outer = root; outer != null && hops < MaxScopeWalk; outer = ParentElement(outer), hops++)
-            if (IsScopeRoot(scope.Parent, outer) && !Limited(scope.Parent, root, outer) && AnyMatches(scope.Start!, root, outer)) return true;
+            if (IsScopeRoot(scope.Parent, outer) && !Limited(scope.Parent, root, outer, hops, limit) && AnyMatches(scope.Start!, root, outer)) return true;
         return false;
     }
 
     /// <summary>Whether an element is in the scope of a block: at or below a root, and not at or below a limit under it.</summary>
     private bool InScope(ScopeRule scope, Element e)
     {
+        int limit = LimitHops(scope, e);
         int hops = 0;
         for (var root = e; root != null && hops < MaxScopeWalk; root = ParentElement(root), hops++)
-            if (IsScopeRoot(scope, root) && !Limited(scope, e, root)) return true;
+            if (IsScopeRoot(scope, root) && !Limited(scope, e, root, hops, limit)) return true;
         return false;
     }
 
-    /// <summary>Whether an element at or below <paramref name="e"/> up to (not including) the root matches the scope's end.</summary>
-    private static bool Limited(ScopeRule scope, Element e, Element root)
+    /// <summary>
+    /// For an end that does not name :scope, the generations from <paramref name="e"/> up to the closest element that
+    /// matches it, or <see cref="int.MaxValue"/> when none does within the walk: such an end matches the same elements
+    /// whatever the root, so one walk answers <see cref="Limited"/> for every root above. -1 for an end that names
+    /// :scope, which has to be matched again for each root.
+    /// </summary>
+    private static int LimitHops(ScopeRule? scope, Element e)
     {
-        if (scope.End == null) return false;
+        if (scope?.End is not { } end) return int.MaxValue;
+        if (scope.EndNamesScope) return -1;
+        int hops = 0;
+        for (var x = e; x != null && hops < MaxScopeWalk; x = ParentElement(x), hops++)
+            if (AnyMatches(end, x, null)) return hops;
+        return int.MaxValue;
+    }
+
+    /// <summary>
+    /// Whether an element at or below <paramref name="e"/> up to (not including) the root, <paramref name="rootHops"/>
+    /// generations up, matches the scope's end; <paramref name="limitHops"/> is what <see cref="LimitHops"/> gave.
+    /// </summary>
+    /// <remarks>
+    /// Walking from the element to each root in turn was quadratic in the walk: 300 blocks with an end over 10,000
+    /// nested elements took minutes. An end that names :scope still walks for each root, against a budget of matches
+    /// per style pass; past it, such rules no longer apply.
+    /// </remarks>
+    private bool Limited(ScopeRule scope, Element e, Element root, int rootHops, int limitHops)
+    {
+        if (limitHops >= 0) return limitHops < rootHops;
         for (var x = e; x != null && !ReferenceEquals(x, root); x = ParentElement(x))
-            if (AnyMatches(scope.End, x, root)) return true;
+        {
+            if (--_scopeLimitBudget < 0) return true;
+            if (AnyMatches(scope.End!, x, root)) return true;
+        }
         return false;
     }
 
