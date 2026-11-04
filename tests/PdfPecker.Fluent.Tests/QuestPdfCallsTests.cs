@@ -274,4 +274,135 @@ public sealed class QuestPdfCallsTests
         var after = fitted.Lines.Single(l => l.Text == "AFTER");
         Assert.True(bottom <= after.Y + 0.5, $"text ends at {bottom}, the next item starts at {after.Y}");
     }
+
+    [Fact]
+    public void Overline_joins_the_other_text_decoration_lines()
+    {
+        string css = Html.Css(Html.Page(c => c.Text(t =>
+        {
+            t.Span("a").Overline();
+            t.Span("b").Underline().Overline().Strikethrough();
+            t.Span("c").Overline(false);
+        })));
+        Assert.Contains("text-decoration-line:overline}", css);
+        Assert.Contains("text-decoration-line:underline overline line-through}", css);
+        Assert.Contains("text-decoration-line:none}", css);
+        Assert.Contains("text-decoration-line:overline}", Html.Css(Html.Page(c => c.DefaultTextStyle(s => s.Overline()).Text("x"))));
+    }
+
+    [Fact]
+    public void Break_anywhere_breaks_between_any_two_letters()
+    {
+        Assert.Contains("word-break:break-all", Html.Css(Html.Page(c => c.Text("x").BreakAnywhere())));
+        Assert.Contains("word-break:normal", Html.Css(Html.Page(c => c.Text("x").BreakAnywhere(false))));
+
+        // Without it the long word moves to a line of its own; with it, the word starts on the first line.
+        string Render(bool anywhere) => Html.Text(Document.Create(d => d.Page(p =>
+        {
+            p.Size(PageSizes.A6);
+            p.Content().Width(80).Text("ab 0123456789012345678901234567890123456789").BreakAnywhere(anywhere);
+        })).GeneratePdf());
+        Assert.StartsWith("ab\n", Render(anywhere: false).ReplaceLineEndings("\n"), StringComparison.Ordinal);
+        Assert.StartsWith("ab 0", Render(anywhere: true), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Text_direction_calls_isolate_the_text_in_its_direction()
+    {
+        string css = Html.Css(Html.Page(c => c.Text(t =>
+        {
+            t.Span("a").DirectionFromRightToLeft();
+            t.Span("b").DirectionFromLeftToRight();
+            t.Span("c").DirectionFromRightToLeft().DirectionAuto();
+        })));
+        Assert.Contains("{direction:rtl;unicode-bidi:isolate}", css);
+        Assert.Contains("{direction:ltr;unicode-bidi:isolate}", css);
+        Assert.Contains("{unicode-bidi:plaintext}", css);
+    }
+
+    [Fact]
+    public void Document_content_direction_applies_to_pages_without_their_own()
+    {
+        var settings = new DocumentSettings { ContentDirection = ContentDirection.RightToLeft };
+        string one = DocumentGenerator.Html(Html.Page(c => c.Text("x")).WithSettings(settings), false, out _);
+        Assert.Contains("<body dir=\"rtl\">", one, StringComparison.Ordinal);
+
+        string two = DocumentGenerator.Html(Document.Create(d =>
+        {
+            d.Page(p => p.Content().Text("a"));
+            d.Page(p => { p.ContentFromLeftToRight(); p.Content().Text("b"); });
+        }).WithSettings(settings), false, out _);
+        Assert.Equal(1, Count(two, " dir=\"rtl\""));
+        Assert.DoesNotContain(" dir=", DocumentGenerator.Html(Html.Page(c => c.Text("x")), false, out _), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Semantic_code_and_quotes_keep_the_font_and_add_no_marks()
+    {
+        Assert.Equal("<code class=\"c1\"><p>x</p></code>", Html.Item(c => c.SemanticCode().Text("x")));
+        Assert.Contains(".c1{display:block;font-family:inherit}", Css(c => c.SemanticCode().Text("x")));
+        Assert.Equal("<q class=\"c1\"><p>x</p></q>", Html.Item(c => c.SemanticQuote().Text("x")));
+        Assert.Contains(".c1{display:block;quotes:none}", Css(c => c.SemanticQuote().Text("x")));
+        Assert.Equal("x", Html.Text(Html.Page(c => c.SemanticQuote().Text("x")).GeneratePdf()).Trim());
+    }
+
+    [Fact]
+    public void Semantic_headings_and_language_are_the_heading_and_language_calls()
+    {
+        Assert.Equal(Html.Item(c => c.Heading(2).Text("h")), Html.Item(c => c.SemanticHeading2().Text("h")));
+        Assert.Equal(Html.Item(c => c.Heading(6).Text("h")), Html.Item(c => c.SemanticHeading6().Text("h")));
+        Assert.Equal(Html.Item(c => c.Language("de").Text("h")), Html.Item(c => c.SemanticLanguage("de").Text("h")));
+    }
+
+    [Fact]
+    public void Semantic_division_span_and_table_write_nothing_of_their_own()
+    {
+        string plain = Html.Item(c => c.Text("x"));
+        Assert.Equal(plain, Html.Item(c => c.SemanticDivision().Text("x")));
+        Assert.Equal(plain, Html.Item(c => c.SemanticSpan("expansion").Text("x")));
+        Assert.Equal(plain, Html.Item(c => c.SemanticSpan().Text("x")));
+        Assert.Equal(plain, Html.Item(c => c.SemanticTable().Text("x")));
+    }
+
+    [Fact]
+    public void A_horizontal_header_cell_is_the_header_of_its_row()
+    {
+        string html = Html.Of(c => c.Table(t =>
+        {
+            t.ColumnsDefinition(d => { d.RelativeColumn(); d.RelativeColumn(); });
+            t.Header(h => { h.Cell().Text("h"); h.Cell().SemanticHorizontalHeader().Text("h2"); });
+            t.Cell().SemanticHorizontalHeader().Text("r");
+            t.Cell().Text("v");
+        }));
+        Assert.Contains("<th scope=\"col\"><p>h2</p></th>", html);
+        Assert.Contains("<tr><th scope=\"row\"><p>r</p></th><td><p>v</p></td></tr>", html);
+    }
+
+    [Fact]
+    public void Semantic_code_quote_and_row_headers_are_tagged_in_pdf_ua()
+    {
+        byte[] pdf = Html.Page(c => c.Column(k =>
+        {
+            k.Item().SemanticCode().Text("code");
+            k.Item().SemanticQuote().Text("quote");
+            k.Item().Table(t =>
+            {
+                t.ColumnsDefinition(d => { d.RelativeColumn(); d.RelativeColumn(); });
+                t.Cell().SemanticHorizontalHeader().Text("r");
+                t.Cell().Text("v");
+            });
+        })).GeneratePdf(new PdfOptions { Title = "Tags", Language = "en", Accessibility = PdfAccessibility.PdfUA1, Compress = false });
+        string text = System.Text.Encoding.Latin1.GetString(pdf);
+        Assert.Contains("/S /Code", text, StringComparison.Ordinal);
+        Assert.Contains("/S /Quote", text, StringComparison.Ordinal);
+        Assert.Contains("/S /TH", text, StringComparison.Ordinal);
+        Assert.Contains("/Scope /Row", text, StringComparison.Ordinal);
+    }
+
+    private static int Count(string text, string part)
+    {
+        int count = 0;
+        for (int i = text.IndexOf(part, StringComparison.Ordinal); i >= 0; i = text.IndexOf(part, i + 1, StringComparison.Ordinal)) count++;
+        return count;
+    }
 }

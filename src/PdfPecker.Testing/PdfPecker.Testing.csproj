@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>PdfPecker.Testing</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+
+    <PackageId>PdfPecker.Testing</PackageId>
+    <!-- The package always has PdfPecker's version: it takes the library's local version from Directory.Build.props,
+         and CI passes the same -p:Version to every pack. -->
+    <Authors>Moonwalker1307</Authors>
+    <Description>Snapshot tests for PDFs with PdfPecker: compare a generated PDF with a stored one after leaving out dates, file IDs and compression, and get page images with the changed pixels marked when they differ. Also checks for text and page counts. Works with xUnit, NUnit, MSTest or any other test framework, because a failed check throws.</Description>
+    <PackageTags>pdf;testing;snapshot-testing;approval-testing;visual-regression;pixel-diff;golden-files;xunit;nunit;mstest;pdfpecker</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>logo.png</PackageIcon>
+    <PackageProjectUrl>https://pdfpecker.net/</PackageProjectUrl>
+    <PackageReleaseNotes>What changed in each release: https://pdfpecker.net/docs/changelog/</PackageReleaseNotes>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <Copyright>Copyright (c) 2026 Moonwalker1307</Copyright>
+    <RepositoryUrl>https://github.com/Moonwalker1307/PdfPecker</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+    <!-- Package validation checks the package's own consistency now. The package has no release to compare its public API
+         with yet; after its first release, PackageValidationBaselineVersion joins the other two packages', as
+         RELEASING.md describes. -->
+    <EnablePackageValidation>true</EnablePackageValidation>
+  </PropertyGroup>
+
+  <!-- CI builds use repository-relative source paths in the PDB, so builds are reproducible from the same commit. -->
+  <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The one dependency, packed as a PdfPecker dependency of this package's version as a minimum. No test framework:
+         a failed check throws PdfAssertException, which every framework reports as a failure. -->
+    <ProjectReference Include="../PdfPecker/PdfPecker.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="/" />
+    <None Include="../../LICENSE" Pack="true" PackagePath="/" />
+    <None Include="../../assets/logo.png" Pack="true" PackagePath="/" />
+    <InternalsVisibleTo Include="PdfPecker.Testing.Tests" />
+    <InternalsVisibleTo Include="PdfPecker.Fuzz" />
+  </ItemGroup>
+
+</Project>

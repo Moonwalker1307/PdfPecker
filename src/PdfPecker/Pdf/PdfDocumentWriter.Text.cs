@@ -306,14 +306,17 @@ internal sealed partial class PdfDocumentWriter
     {
         var subset = Subset(font.Program, t.Color);
         bool color = subset.Color != null;
-        if (color) SetColorFont(b, font, subset, _textSubset == subset && ReferenceEquals(_textFont, font) ? _textPage : 0, t.Size);
-        else SetFont(b, font, "/E", _subsetList.IndexOf(subset) + 1, t.Size);
+        // A face's size-adjust draws its glyphs at a font size of their own, so the text stays text and its widths in
+        // the font dictionary stay the program's.
+        float size = font.SizeAdjust == 1 ? t.Size : t.Size * font.SizeAdjust;
+        if (color) SetColorFont(b, font, subset, _textSubset == subset && ReferenceEquals(_textFont, font) ? _textPage : 0, size);
+        else SetFont(b, font, "/E", _subsetList.IndexOf(subset) + 1, size);
         float boldWidth = 0;
         if (font.SyntheticBold)
         {
             // Stroke the outlines in the fill colour, as browsers widen glyphs for a missing bold face.
-            float k = Math.Clamp((t.Size - 9f) / 27f, 0f, 1f);
-            boldWidth = t.Size * (1f / 24f + (1f / 32f - 1f / 24f) * k);
+            float k = Math.Clamp((size - 9f) / 27f, 0f, 1f);
+            boldWidth = size * (1f / 24f + (1f / 32f - 1f / 24f) * k);
         }
         SetTextPaint(b, t, pass, boldWidth);
         b.Ascii(font.SyntheticItalic ? t.UpsideDown ? "1 0 0.2 -1 " : "1 0 0.2 1 " : t.UpsideDown ? "1 0 0 -1 " : "1 0 0 1 ").Num(x).Sp().Num(y).Ascii(" Tm ");
@@ -321,17 +324,17 @@ internal sealed partial class PdfDocumentWriter
         // Word spacing (Tw) only applies to the single-byte code 32, so justified text moves spaces explicitly.
         // PDF/A forbids showing .notdef: characters no font has become blank space of the same width.
         string text = t.Text;
-        bool skipNotdef = NoNotdef && t.Size > 0;
+        bool skipNotdef = NoNotdef && size > 0;
         // Kerning moves the glyph after a kerned pair, as the layout measured it.
-        bool kern = font.HasKerning && t.Size > 0;
-        bool adjust = (t.WordSpacing != 0 || skipNotdef || kern) && t.Size > 0 || color;
-        float spaceAdjust = adjust && t.Size > 0 ? -t.WordSpacing * 1000f / t.Size : 0;
-        float notdefAdjust = skipNotdef ? -(font.Program.Advance1000(0) + t.CharSpacing * 1000f / t.Size) : 0;
+        bool kern = font.HasKerning && size > 0;
+        bool adjust = (t.WordSpacing != 0 || skipNotdef || kern) && size > 0 || color;
+        float spaceAdjust = adjust && size > 0 ? -t.WordSpacing * 1000f / size : 0;
+        float notdefAdjust = skipNotdef ? -(font.Program.Advance1000(0) + t.CharSpacing * 1000f / size) : 0;
         bool positioned = font.Shape(text, start, length, _glyphs, t.Rtl);
         if (t.Rtl) _glyphs.Reverse();
-        if (positioned && t.Size > 0)
+        if (positioned && size > 0)
         {
-            WritePositionedGlyphs(b, font, subset, t.Text, t.Size, t.WordSpacing, skipNotdef, notdefAdjust, spaceAdjust);
+            WritePositionedGlyphs(b, font, subset, t.Text, size, t.WordSpacing, skipNotdef, notdefAdjust, spaceAdjust);
             return;
         }
         b.Ascii(adjust ? "[<" : "<");
@@ -345,7 +348,7 @@ internal sealed partial class PdfDocumentWriter
             prev = g.Gid;
             int cid = subset.Cid(_glyphs, k, text);
             if (cid == 0 && skipNotdef) b.Ascii(">").Num(notdefAdjust).Ascii("<");
-            else WriteCode(b, font, subset, cid, t.Size);
+            else WriteCode(b, font, subset, cid, size);
             if (adjust && text[g.Start] == ' ' && t.WordSpacing != 0 && k + 1 < _glyphs.Count) b.Ascii(">").Num(spaceAdjust).Ascii("<");
         }
         b.Ascii(adjust ? ">] TJ\n" : "> Tj\n");

@@ -1,0 +1,24 @@
+<html><head><style>
+@page { size: 540px 470px; margin: 0 }
+body { margin: 10px; font-family: Helvetica; width: 520px }
+.needle { transform-box: fill-box; transform-origin: center; transform: rotate(60deg) }
+.hair { vector-effect: non-scaling-stroke }
+.box { position: relative; display: inline-block; width: 100px; height: 50px; padding: 20px 10px 0 30px; border: 6px solid #999; background: #eee;
+  transform-box: content-box; transform-origin: 0 0; transform: rotate(8deg) }
+</style></head><body>
+<svg width="240" height="130" viewBox="0 0 120 65" style="border: 1px solid #ccc">
+  <path d="M10 55A40 40 0 0 1 110 55" fill="none" stroke="#999" stroke-width="4"/>
+  <rect class="needle" x="58" y="18" width="4" height="37" fill="#c00" opacity=".25"/>
+  <rect class="needle" x="58" y="18" width="4" height="37" fill="#c00"/>
+</svg>
+<svg width="240" height="130" viewBox="0 0 24 13" preserveAspectRatio="none" style="border: 1px solid #ccc">
+  <path d="M2 2H22M2 6.5H22M2 11H22M6 1V12M12 1V12M18 1V12" stroke="#36c" stroke-width="1" class="hair" fill="none"/>
+  <path d="M2 10L8 5L14 8L22 2" stroke="#d33" stroke-width="2" stroke-dasharray="3 1" class="hair" fill="none"/>
+  <path d="M2 12H22" stroke="#000" stroke-width="1" fill="none"/>
+</svg>
+<svg width="240" height="130" viewBox="0 0 24 13" style="border: 1px solid #ccc">
+  <g transform="translate(12 6.5) scale(2)"><rect x="-4" y="-2" width="8" height="4" fill="none" stroke="#080" stroke-width="3" class="hair"/>
+  <rect x="-4" y="-2" width="8" height="4" fill="none" stroke="#080" stroke-width="3" opacity=".3" transform="scale(1.3)" style="vector-effect: none"/></g>
+</svg>
+<div style="height: 110px"><div class="box"><div style="height: 100%; background: #fc0"></div></div></div>
+</body></html>

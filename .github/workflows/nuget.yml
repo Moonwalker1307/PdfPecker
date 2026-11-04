@@ -98,9 +98,11 @@ jobs:
       - run: dotnet build -c Release -p:Version=${{ steps.version.outputs.version }}
       - run: dotnet test -c Release --no-build
 
-      # PdfPecker.Fluent is released with every PdfPecker release, with the same version, and depends on that version.
+      # PdfPecker.Fluent and PdfPecker.Testing are released with every PdfPecker release, with the same version, and
+      # depend on that version.
       - run: dotnet pack src/PdfPecker -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
       - run: dotnet pack src/PdfPecker.Fluent -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
+      - run: dotnet pack src/PdfPecker.Testing -c Release --no-build -p:Version=${{ steps.version.outputs.version }} -o artifacts
 
       # PdfPecker.Cli is the `pdfpecker` dotnet tool. It carries PdfPecker's assembly inside the package, so it has no
       # dependencies, and it gets the same version as the other two.
@@ -191,6 +193,9 @@ jobs:
       - run: dotnet test -c Release -f net10.0 --no-build tests/PdfPecker.Fluent.Tests
       - run: dotnet build -c Release -f net10.0 tests/PdfPecker.Cli.Tests
       - run: dotnet test -c Release -f net10.0 --no-build tests/PdfPecker.Cli.Tests
+      # Snapshot paths, file names and the files a failure writes depend on the file system.
+      - run: dotnet build -c Release -f net10.0 tests/PdfPecker.Testing.Tests
+      - run: dotnet test -c Release -f net10.0 --no-build tests/PdfPecker.Testing.Tests
 
   # IsAotCompatible only turns on the analyzers; publishing and running the samples as native executables proves both
   # packages really work trimmed and ahead-of-time compiled.
@@ -253,7 +258,7 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
         run: gh release upload "$TAG" artifacts/*.nupkg --clobber
 
-  # Pushes the release packages, PdfPecker, PdfPecker.Fluent and PdfPecker.Cli, to nuget.org with Trusted Publishing: NuGet/login swaps a GitHub OIDC token
+  # Pushes the release packages, PdfPecker, PdfPecker.Fluent, PdfPecker.Testing and PdfPecker.Cli, to nuget.org with Trusted Publishing: NuGet/login swaps a GitHub OIDC token
   # for a short-lived API key, so no long-lived key is stored in the repository. Runs only for published releases.
   publish:
     if: github.event_name == 'release'

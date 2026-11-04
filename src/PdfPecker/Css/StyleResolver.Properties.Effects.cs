@@ -61,8 +61,38 @@ internal sealed partial class StyleResolver
 
     private void ApplyTransformOrigin(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
-        if (d.Inherit) { s.TransformOriginX = parent.TransformOriginX; s.TransformOriginY = parent.TransformOriginY; }
-        else if (CssTransform.TryParseOrigin(d.Lower, d.Em, _rootFontSize, _vw, _vh, out var ox, out var oy)) { s.TransformOriginX = ox; s.TransformOriginY = oy; }
+        if (d.Inherit) { s.TransformOriginX = parent.TransformOriginX; s.TransformOriginY = parent.TransformOriginY; s.TransformOriginSet = parent.TransformOriginSet; }
+        else if (CssTransform.TryParseOrigin(d.Lower, d.Em, _rootFontSize, _vw, _vh, out var ox, out var oy)) { s.TransformOriginX = ox; s.TransformOriginY = oy; s.TransformOriginSet = true; }
+    }
+
+    /// <summary>transform-box: the keywords as they are; the initial value is view-box.</summary>
+    private static void ApplyTransformBox(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit) { s.TransformBox = parent.TransformBox; return; }
+        s.TransformBox = d.Lower switch
+        {
+            "view-box" or "initial" or "unset" => TransformBox.ViewBox,
+            "content-box" => TransformBox.ContentBox,
+            "border-box" => TransformBox.BorderBox,
+            "fill-box" => TransformBox.FillBox,
+            "stroke-box" => TransformBox.StrokeBox,
+            _ => s.TransformBox,
+        };
+    }
+
+    /// <summary>
+    /// vector-effect: only non-scaling-stroke has an effect in a print. It is not inherited, and the other effects
+    /// (non-scaling-size, non-rotation, fixed-position) are not supported by browsers either, so a list without
+    /// non-scaling-stroke turns the effect off.
+    /// </summary>
+    private static void ApplyVectorEffect(ComputedStyle s, in DeclaredValue d)
+    {
+        foreach (var token in CssParser.Tokens(d.Lower))
+        {
+            if (token == "non-scaling-stroke") { s.SvgNonScalingStroke = true; return; }
+            if (token is not ("none" or "non-scaling-size" or "non-rotation" or "fixed-position" or "initial" or "unset" or "inherit")) return;
+        }
+        s.SvgNonScalingStroke = false;
     }
 
     /// <summary>perspective: none or a distance; the children's 3D transforms are drawn as seen from that far away.</summary>

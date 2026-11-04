@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<title>Block boxes cloned across pages</title>
+<style>
+  @page { size: 148mm 105mm; margin: 10mm; }
+  body { margin: 0; font-family: sans-serif; font-size: 12px; line-height: 18px; }
+  h1 { font-size: 15px; margin: 0 0 8px; }
+  .clone { box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+  .box { border: 3px solid #36c; border-radius: 10px; padding: 8px 12px; background: linear-gradient(#eef4ff, #cddcfa);
+         box-shadow: 3px 3px 0 #9ab; margin-right: 3px; }
+  .note { border: 2px solid #c63; border-radius: 6px; padding: 4px 8px; background: #fff3e8; margin: 6px 0; }
+  p { margin: 0 0 6px; }
+  .note p { margin: 0; }
+</style>
+</head>
+<body>
+<h1>box-decoration-break: clone on a box split across two pages</h1>
+<div class="box clone">
+  <p>Each page gets the whole box: its border, padding, rounded corners, shadow and background. The padding and border
+    take room on both pages, so the text stops above the bottom edge and starts again below the top edge.</p>
+  <p>Line one of the text that runs on to the next page.</p>
+  <p>Line two of the text that runs on to the next page.</p>
+  <p>Line three of the text that runs on to the next page.</p>
+  <p>Line four of the text that runs on to the next page.</p>
+  <p>Line five of the text that runs on to the next page.</p>
+  <p>Line six of the text that runs on to the next page.</p>
+  <div class="note clone">
+    <p>A cloned note inside the box, which the page break splits too.</p>
+    <p>Its second line.</p>
+    <p>Its third line.</p>
+    <p>Its fourth line, on the next page below the edges of both boxes.</p>
+  </div>
+  <p>The end of the box.</p>
+</div>
+<p style="margin-top: 8px">After the box.</p>
+</body>
+</html>

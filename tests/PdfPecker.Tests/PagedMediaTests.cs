@@ -279,6 +279,61 @@ public class PagedMediaTests
     }
 
     [Fact]
+    public void Target_counters_write_every_nested_value_of_the_counter_at_the_target()
+    {
+        // The expected text is what WeasyPrint writes for this page; Chrome has no target-counters().
+        var html = @"<style>
+            .c { counter-reset: section } .s { counter-increment: section }
+            a::after { content: ' (' target-counters(attr(href url), section, '.') ')' }
+            a.r::after { content: ' (' target-counters(attr(href url), section, '/', upper-roman) ')' }
+            a.o::after { content: ' (' target-counter(attr(href url), section) ')' }
+            a.p::after { content: ' (' target-counters(attr(href url), section, '.', lower-alpha) ')' }
+            a.m::after { content: ' (' target-counters(attr(href url), nosuch, '.') ')' }
+            a.g::after { content: ' (' target-counters(attr(href url), section, '.', nosuchstyle) ')' }
+          </style>
+          <p><a href='#a'>A</a>|<a href='#b'>B</a>|<a href='#c'>C</a>|<a class='r' href='#c'>R</a>|<a class='o' href='#c'>O</a>|<a class='p' href='#d'>P</a>|<a class='m' href='#c'>M</a>|<a class='g' href='#c'>G</a>|<a href='#gone'>X</a></p>
+          <div class='c'><div class='s'><h2 id='a'>1</h2></div>
+            <div class='s'><h2>2</h2><div class='c'><div class='s'><h2 id='b'>2.1</h2></div>
+              <div class='s'><h2>2.2</h2><div class='c'><div class='s'><h2>2.2.1</h2></div><div class='s'><h2 id='c'>2.2.2</h2></div><div class='s'><h2 id='d'>2.2.3</h2></div></div></div>
+            </div></div></div>";
+        var text = PdfText.ExtractPages(HtmlToPdf.Convert(html)).Single().Text;
+        Assert.Contains("A (1)", text);
+        Assert.Contains("B (2.1)", text);
+        Assert.Contains("C (2.2.2)", text);
+        Assert.Contains("R (II/II/II)", text);
+        Assert.Contains("O (2)", text);
+        Assert.Contains("P (b.b.c)", text);
+        Assert.Contains("M (0)", text);
+        Assert.Contains("X (0)", text); // a link to no element
+        Assert.Contains("G (2.2.2)", text); // an unknown counter style drops the declaration, so the plain rule applies
+    }
+
+    [Fact]
+    public void Target_counters_with_a_page_counter_and_a_bad_separator()
+    {
+        var text = PdfText.ExtractPages(HtmlToPdf.Convert(@"<style>
+            a::after { content: ' (' target-counters(attr(href url), page, '-') ')' }
+            a.b::after { content: ' [' target-counters(attr(href url), page, -) ']' }
+            h2 { break-before: page }
+          </style><a href='#x'>A</a> <a class='b' href='#x'>B</a><h2 id='x'>x</h2>")).First().Text;
+        Assert.Contains("A (2)", text);
+        Assert.DoesNotContain("B [", text); // the separator must be a string
+    }
+
+    [Fact]
+    public void Supports_knows_target_counters()
+    {
+        Assert.True(CssSupports.Evaluate("(content: target-counters(attr(href url), section, '.'))"));
+        Assert.True(CssSupports.Evaluate("(content: ' p. ' target-counter(attr(href), page))"));
+        Assert.True(CssSupports.Evaluate("(content: target-text(attr(href)) leader(dotted))"));
+        Assert.True(CssSupports.Evaluate("(content: var(--x))"));
+        Assert.True(CssSupports.Evaluate("(content: conic-gradient(red, blue))"));
+        Assert.True(CssSupports.Evaluate("(content: repeating-linear-gradient(red, blue 10px))"));
+        Assert.False(CssSupports.Evaluate("(content: env(safe-area-inset-top))"));
+        Assert.False(CssSupports.Evaluate("(content: element(x))"));
+    }
+
+    [Fact]
     public void Leaders_fill_the_line_up_to_the_page_number()
     {
         var pdf = ConvertUncompressed(@"<style>
@@ -588,5 +643,33 @@ public class PagedMediaTests
                    + $"<h1>Title</h1><div style='break-inside: avoid'>{lines}</div>";
         var pages = PdfText.ExtractPages(HtmlToPdf.Convert(html)).Select(p => p.Lines.Select(l => l.Text).ToArray()).ToArray();
         Assert.Equal(new[] { "Title", "Line 1" }, pages[1][..2]);
+    }
+
+    // ---- fixed boxes and running bands ----
+
+    [Theory]
+    [InlineData("auto", 255, 0, 0)]
+    [InlineData("1", 255, 0, 0)]
+    [InlineData("-1", 0, 0, 255)]
+    public void A_fixed_box_paints_over_the_running_bands_unless_its_z_index_is_negative(string zIndex, int r, int g, int b)
+    {
+        // The bands are the root's in-flow content, so a fixed box paints over them as over a header that Chrome prints
+        // once in the flow, on every page, and in the page margins too; with a negative z-index it stays under them.
+        var html = "<style>@page { size: 200pt 200pt; margin: 20pt } body { margin: 0; font: 10pt/14pt sans-serif }</style>"
+                   + "<header data-sticky-pdf-header style='height: 40pt; background: rgb(0, 0, 255)'></header>"
+                   + string.Concat(Enumerable.Range(1, 20).Select(i => $"<p>Line {i}</p>"))
+                   + $"<div style='position: fixed; top: -20pt; left: -20pt; width: 200pt; height: 200pt; z-index: {zIndex}'>"
+                   + "<div style='width: 100pt; height: 100pt; background: rgb(255, 0, 0)'></div></div>";
+        var pdf = HtmlToPdf.Convert(html);
+        var renderer = PdfRenderer.Open(pdf);
+        Assert.True(renderer.PageCount > 1);
+        for (int page = 0; page < renderer.PageCount; page++)
+        {
+            var img = renderer.RenderPage(page, new ImageOptions { Dpi = 72 });
+            int i = (40 * img.Width + 40) * 4; // inside the header band
+            Assert.Equal((r, g, b), (img.Rgba[i], img.Rgba[i + 1], img.Rgba[i + 2]));
+            i = (5 * img.Width + 5) * 4; // in the top margin
+            Assert.Equal((255, 0, 0), (img.Rgba[i], img.Rgba[i + 1], img.Rgba[i + 2]));
+        }
     }
 }

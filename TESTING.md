@@ -143,6 +143,21 @@ The benchmarks:
 dotnet run --project bench/PdfPecker.Fluent.Benchmarks -c Release                 # the fluent layer's own cost
 ```
 
+## PdfPecker.Testing
+
+The snapshot testing package's tests are in `tests/PdfPecker.Testing.Tests` and run with the rest. They make small
+PDFs with `HtmlToPdf` and keep their snapshots in a temporary folder of their own, so they have no checked-in
+baselines and a library output change doesn't change them.
+
+- `SnapshotTests` – missing, matching and changed snapshots, the files a failure writes and a pass deletes, the
+  content and appearance comparisons, tolerances, extra pages, damaged snapshots, file names and the
+  `PDFPECKER_UPDATE_SNAPSHOTS` variable (in a collection that doesn't run in parallel, because the variable is
+  process-wide).
+- `TextAndPageTests` – `ContainsText`, `DoesNotContainText` and `HasPageCount`, and unreadable input.
+
+The `pdf-snapshot` fuzz target runs the snapshot normaliser on damaged PDFs, because it reads snapshot files without
+the library's parser.
+
 It times composing and writing HTML, `GeneratePdf`, and `HtmlToPdf` on the same HTML, after a 12-second warm-up. The
 comparison with QuestPDF, the same invoice built with both, is in the
 [PdfPecker.Benchmarks](https://github.com/Moonwalker1307/PdfPecker.Benchmarks) repository.

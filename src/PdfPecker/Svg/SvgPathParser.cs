@@ -18,6 +18,12 @@ internal static class PathParser
         return path.Verbs.Count == 0 ? null : path;
     }
 
+    /// <summary>
+    /// Whether <paramref name="d"/> is path data without any error. The attribute keeps the commands before an error,
+    /// but a style sheet's <c>d: path()</c> with an error is an invalid declaration, as in browsers.
+    /// </summary>
+    public static bool IsValid(string d) => new PathDataParser(d, new PathBuilder()).ParseCommands();
+
     /// <summary>Reads the commands one after another, keeping the current point and the last control point.</summary>
     private ref struct PathDataParser
     {
@@ -42,11 +48,14 @@ internal static class PathParser
             _previous = NoCommand;
         }
 
-        public void ParseCommands()
+        /// <summary>Runs the commands; false when an error ended the data before its end.</summary>
+        public bool ParseCommands()
         {
             char command = NoCommand;
-            while (TryNextCommand(ref command) && Execute(command))
+            while (true)
             {
+                if (!TryNextCommand(ref command)) return !_lexer.TryPeek(out _);
+                if (!Execute(command)) return false;
                 // S and T look at the command as written, so a moveto's extra pairs count as the lineto they are.
                 _previous = command;
                 _path.EndCommand();
