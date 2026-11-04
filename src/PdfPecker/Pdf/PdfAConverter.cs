@@ -52,7 +52,8 @@ internal sealed partial class PdfAConverter
     public void Run()
     {
         if (_fix) Preload();
-        var catalog = _file.Catalog!;
+        // Reading every object can make a damaged file rebuild its cross-reference table, which can lose the catalog.
+        if (_file.Catalog is not { } catalog) throw new InvalidDataException("The PDF is not readable: it has no catalog.");
         CatalogEntries(catalog);
         Actions();
         // The output intent decides which device colours need a profile, which the walks below record.

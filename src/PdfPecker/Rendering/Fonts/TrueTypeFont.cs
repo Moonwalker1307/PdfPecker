@@ -236,9 +236,15 @@ internal sealed partial class TrueTypeFont : IGlyphSource
     /// <summary>The tags of the font's tables.</summary>
     internal IEnumerable<string> TableTags => _tables.Keys;
 
-    /// <summary>A table's bytes, or null when the font has no such table.</summary>
+    /// <summary>
+    /// A table's bytes, or empty when the font has no such table; a damaged directory that places a table past the end of
+    /// the data gives only the part that is there.
+    /// </summary>
     internal ReadOnlySpan<byte> TableBytes(string tag)
-        => Table(tag) is { } t ? Data.AsSpan(t.Offset, t.Length) : ReadOnlySpan<byte>.Empty;
+    {
+        if (Table(tag) is not { } t || t.Offset < 0 || t.Offset >= Data.Length || t.Length <= 0) return ReadOnlySpan<byte>.Empty;
+        return Data.AsSpan(t.Offset, Math.Min(t.Length, Data.Length - t.Offset));
+    }
 
     /// <summary>A glyph's bytes in the glyf table: empty for a glyph without an outline, or one the table does not hold.</summary>
     internal ReadOnlySpan<byte> GlyphBytes(int gid)

@@ -132,10 +132,59 @@ public class PdfToPdfAHostileInputTests
     [Fact]
     public void An_information_entry_with_an_empty_name_is_kept_out_of_the_xmp()
     {
-        // Found by the pdf-pdfa fuzz target: a custom property named by the empty name "/" made the XMP writer read the
-        // first character of an empty string.
-        var result = Bounded(Encoding.Latin1.GetBytes("13 0 obj<<14 0 obj<<//Atrailer<</Info 14 0 R/Root 13 0 R"));
+        // Found by the pdf-pdfa fuzz target (exception-aee97909): a custom property named by the empty name "/" made the
+        // XMP writer read the first character of an empty string.
+        var result = Bounded(Encoding.Latin1.GetBytes("\n1 0 obj<<4 0 obj<<//trailer<</Root 1 0 R/Info 4 0 R"));
         Assert.NotEmpty(result.Pdf);
+    }
+
+    [Fact]
+    public void A_font_table_placed_past_the_end_of_the_program_is_cut_off()
+    {
+        // Found by the pdf-pdfa fuzz target (exception-46bbf5a8): rewriting an embedded TrueType font copies its other
+        // tables, and one whose directory gives it a length of almost 4 GB, negative as a 32-bit integer, was sliced
+        // out of range.
+        var font = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "Fixtures", "fonts", "Inter-Features.ttf"));
+        int tables = font[4] << 8 | font[5];
+        for (int i = 0; i < tables; i++)
+        {
+            int record = 12 + 16 * i;
+            if (Encoding.ASCII.GetString(font, record, 4) is not ("name" or "post")) continue;
+            font[record + 12] = 0xF0;
+        }
+        var pdf = BuildPdf(
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            Page("<< /Font << /F 4 0 R >> >>", 7),
+            // Widths that disagree with the program, so the conversion rewrites it.
+            "<< /Type /Font /Subtype /TrueType /BaseFont /Inter /FirstChar 65 /LastChar 67 /Widths [100 100 100] /FontDescriptor 5 0 R >>",
+            "<< /Type /FontDescriptor /FontName /Inter /Flags 32 /FontBBox [0 -200 1000 900] /ItalicAngle 0 /Ascent 900 /Descent -200 /CapHeight 700 /StemV 80 /FontFile2 6 0 R >>",
+            $"<< /Length {font.Length} >>\nstream\n{Encoding.Latin1.GetString(font)}\nendstream",
+            Stream("BT /F 12 Tf 10 10 Td (ABC) Tj ET"));
+        Assert.NotEmpty(Bounded(pdf).Pdf);
+    }
+
+    [Fact]
+    public void A_catalog_lost_when_the_cross_reference_table_is_rebuilt_is_invalid_data()
+    {
+        // Found by the pdf-pdfa fuzz target (exception-8c168e97), as it found it: the cross-reference table is damaged,
+        // so reading every object rebuilds it, and the rebuilt table has no catalog where the first one had one.
+        const string pdf = "JVBERi0xLjcaMSAwIG9iago8PGAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9L"
+            + "aWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVsdCAyIDAgUiAvTWVkaWFCb3ggWzAgMCAx"
+            + "MDAAMTAwXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCAvWE9iamVjdCA8PCAvSWwgNSAwIFIgPj4gPj4gPj4KZW5kb2JqCjQgMCBvQmoK"
+            + "PDwgL0xlbmd0aCAyOSA+PgpzdHJlYW0KcSAxMDAgMCAwIDEwMCAwIDAgY20gL0ltIERvIFEKZW5kc3RyZWFtCmVuZG9iago1IDAgb2JqCjw8IC9U"
+            + "eXBlIC9YT2JqZWN0IC9TdWJ0eXBlIC9JbWFnZSAvV2lkdGggMTYwIC9IZWlnaHQgMTAwIC9Db2xvclNwYWNlIC9EZXZpY2VHcmF5IC9CaXRzUGVy"
+            + "Q29tcG9uZW50IDEgL0ZpbHRlciAvSkJJRzJEZWNvZGUgIC9MZW5ndGggMTE2ID4+CnN0cmVhbQoAAAACMAABAAAAEwAAAKAAAABkAAAAAAAAAAAA"
+            + "AAAAAEADBiABAQAAAD8AAACgAAAAZAAAAAAAAAAAAAAS/////wAAgAmeWTf6gK5a7NilJkNoFKPWPG3GyWWRzG8iCA21GASm0qMf/6wAAAAEMQAB"
+            + "AAAAAAplbmRzdHJlYW0KZW5kb2JqCnhyZWYKMCA2CjAwMDAgMzUgZiAKOSAwMCBuIAowIDAwIG4hCjAwMTUgMDAgbiAKNCAwNCBuIAowIDAwCnRy"
+            + "YWlsZXIKPDwgNiAvUm9vdCAxIDAgUiA+PgpzdGFydHhyZWYKNjEw";
+        try
+        {
+            Assert.NotEmpty(Bounded(Convert.FromBase64String(pdf)).Pdf);
+        }
+        catch (AggregateException ex) when (ex.InnerException is InvalidDataException)
+        {
+        }
     }
 
     [Fact]
