@@ -126,10 +126,7 @@ internal static class FlowHtmlWriter
         };
         // Lines that end at one edge but start at different places, or share a centre, are set right-aligned or centred
         // one by one, as an address block in a corner is; each is a line of its own.
-        bool right = block.Lines.Count >= 2 && block.Lines.Max(l => l.X0) - block.Lines.Min(l => l.X0) > 4
-            && block.Lines.Max(l => l.X1) - block.Lines.Min(l => l.X1) <= 2;
-        bool centred = block.Lines.Count >= 2 && block.Lines.Max(l => l.X0) - block.Lines.Min(l => l.X0) > 4
-            && block.Lines.Max(l => l.X0 + l.X1) - block.Lines.Min(l => l.X0 + l.X1) <= 4;
+        var (right, centred) = Alignment(block.Lines);
         TextStyle? around = null;
         sb.Append('<').Append(tag);
         if (styles != null)
@@ -187,6 +184,17 @@ internal static class FlowHtmlWriter
             styles, around);
         sb.Append("</").Append(tag).Append(">\n");
     }
+
+    /// <summary>Whether lines end at one edge but start at different places, or share a centre.</summary>
+    internal static (bool Right, bool Centred) Alignment(List<FlowLine> lines)
+    {
+        bool ragged = lines.Count >= 2 && lines.Max(l => l.X0) - lines.Min(l => l.X0) > 4;
+        return (ragged && lines.Max(l => l.X1) - lines.Min(l => l.X1) <= 2, ragged && lines.Max(l => l.X0 + l.X1) - lines.Min(l => l.X0 + l.X1) <= 4);
+    }
+
+    /// <summary>Where the lines of a table cell could reach on the right: as far from its right side as its text starts from the left.</summary>
+    internal static double CellReach(TableCell cell)
+        => Math.Max(cell.X1 - Math.Max(0, cell.Lines.Min(l => l.X0) - cell.X0), cell.Lines.Max(l => l.X1));
 
     private static void WriteTable(StringBuilder sb, TableBlock table, Func<int, int> pageIds, FlowStyles? styles)
     {
@@ -250,9 +258,7 @@ internal static class FlowHtmlWriter
                         foreach (var image in cell.Images) WriteImages(sb, [image], styles, inCell: true);
                     if (cell.Lines.Count > 0)
                     {
-                        // Text can reach as far from the right side of a cell as it starts from the left.
-                        double padding = Math.Max(0, cell.Lines.Min(l => l.X0) - cell.X0);
-                        WriteLines(sb, cell.Lines, Math.Max(cell.X1 - padding, cell.Lines.Max(l => l.X1)), 0, !header, true, pageIds, styles, inCell);
+                        WriteLines(sb, cell.Lines, CellReach(cell), 0, !header, true, pageIds, styles, inCell);
                     }
                     sb.Append("</").Append(cellTag).Append('>');
                 }
@@ -385,8 +391,14 @@ internal static class FlowHtmlWriter
     /// <param name="around">How the text of the element the lines are in looks, with styles.</param>
     private static void WriteLines(StringBuilder sb, List<FlowLine> lines, double right, int skip, bool bold, bool cell, Func<int, int> pageIds,
         FlowStyles? styles = null, TextStyle? around = null)
+        => WriteWords(sb, Words(lines, right, skip, cell), bold, pageIds, styles, around);
+
+    /// <summary>
+    /// Each word of some lines with what goes before it: nothing, a space or a line break (<c>&lt;br&gt;</c>), as
+    /// <see cref="WriteLines"/> joins them.
+    /// </summary>
+    internal static List<(FlowWord Word, string Before)> Words(List<FlowLine> lines, double right, int skip, bool cell)
     {
-        // Each word with what goes before it: nothing, a space or a line break.
         var words = new List<(FlowWord Word, string Before)>();
         FlowLine? previous = null;
         foreach (var line in lines)
@@ -409,7 +421,7 @@ internal static class FlowHtmlWriter
             }
             previous = line;
         }
-        WriteWords(sb, words, bold, pageIds, styles, around);
+        return words;
     }
 
     private static bool Hyphenated(string end, string next)

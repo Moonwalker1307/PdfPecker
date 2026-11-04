@@ -20,6 +20,8 @@ dotnet pack src/PdfPecker.Testing -c Release -o ./nupkg         # PdfPecker.Test
 dotnet run --project samples/PdfPecker.Sample -c Release        # converts the sample HTML and Markdown into ./output
 dotnet publish samples/PdfPecker.Sample -c Release -p:PublishAot=true -o aot   # Native AOT, as CI checks it
 dotnet run --project samples/PdfPecker.Fluent.Sample -c Release -- output   # writes the fluent examples as PDF and HTML
+dotnet run --project src/PdfPecker.Cli -c Release -- convert in.html out.pdf   # the pdfpecker command-line tool
+dotnet pack src/PdfPecker.Cli -c Release -o ./nupkg                 # the dotnet tool package, same version as the others
 ```
 
 ## What breaks the build

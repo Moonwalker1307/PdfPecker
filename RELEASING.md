@@ -3,9 +3,10 @@
 Only the repository owner publishes a release. Agents and contributors prepare the pull requests around it, but never
 create tags or GitHub releases.
 
-A release publishes three packages from this repository, PdfPecker, PdfPecker.Fluent and PdfPecker.Testing, always
-with the same version. PdfPecker.Fluent and PdfPecker.Testing depend on the PdfPecker package of their own version, as a
-minimum.
+A release publishes four packages from this repository, PdfPecker, PdfPecker.Fluent, PdfPecker.Testing and PdfPecker.Cli,
+always with the same version. PdfPecker.Fluent and PdfPecker.Testing depend on the PdfPecker package of their own version,
+as a minimum. PdfPecker.Cli is the `pdfpecker` dotnet tool: it carries the PdfPecker assembly of its own version inside
+the package, so it has no dependencies.
 
 ## Versions
 
@@ -14,9 +15,13 @@ minimum.
 - Package validation enforces this: `dotnet pack` compares the public API with `PackageValidationBaselineVersion` in
   each package's project file and fails on a break. A deliberate break, in a major version only, needs a
   `CompatibilitySuppressions.xml` entry.
+- PdfPecker.Cli has no public assembly API to validate: its contract is the command line. Before 2.0 a command or option
+  is not removed or renamed and the exit codes (0 success, 1 the work failed, 2 a wrong command line) do not change; add a
+  new option instead. The `PdfPecker.Cli.Tests` run the commands and the `nuget.yml` build installs the packed tool and
+  runs it, so a package that does not work fails the build.
 - PdfPecker.Testing has no baseline until its first release: its package validation checks only the package's own
   consistency, and the pull request after that release adds its `PackageValidationBaselineVersion` (see below).
-- Local builds pack as `<next patch>-dev` (the `Version` in `Directory.Build.props`, which all three packages share). CI builds of main and pull requests
+- Local builds pack as `<next patch>-dev` (the `Version` in `Directory.Build.props`, which all four packages share). CI builds of main and pull requests
   are `<next patch>-preview.<run number>`, computed from the latest `v*` tag, so they sort between two releases.
 
 ## Before a release
@@ -28,11 +33,11 @@ minimum.
 ## Publishing
 
 1. The owner creates a GitHub release with a tag `vX.Y.Z` (or `vX.Y.Z-suffix` for a pre-release) and the notes.
-2. `nuget.yml` builds and tests with that version, attaches the three `.nupkg` files to the release, and pushes them to
+2. `nuget.yml` builds and tests with that version, attaches the four `.nupkg` files to the release, and pushes them to
    nuget.org with Trusted Publishing: `NuGet/login` swaps the workflow's OIDC token for a short-lived key, in the
    `nuget` environment with the `NUGET_USER` repository variable. There is no stored API key. The Trusted Publishing
-   policy covers every package its owner owns, so PdfPecker.Fluent and PdfPecker.Testing need no policy of their own;
-   a package's first push creates it on nuget.org under that account.
+   policy covers every package its owner owns, so PdfPecker.Fluent, PdfPecker.Testing and PdfPecker.Cli need no policy of
+   their own; a package's first push creates it on nuget.org under that account.
 
 ## After a release
 
@@ -42,7 +47,7 @@ Open one pull request on the library that:
   `src/PdfPecker.Fluent/PdfPecker.Fluent.csproj` and `src/PdfPecker.Testing/PdfPecker.Testing.csproj` (after the first
   release that includes PdfPecker.Testing, this adds the property there, next to `EnablePackageValidation`), and
   `Version` in `Directory.Build.props` to the next patch's `-dev` (CI warns while the library's baseline lags behind
-  the latest tag);
+  the latest tag). PdfPecker.Cli has no baseline to raise;
 - updates the version placeholder in `.github/ISSUE_TEMPLATE/bug_report.yml`;
 - updates `README.md`: the DLL size in the comparison table and the release in the `bench/compare-versions.sh`
   example.

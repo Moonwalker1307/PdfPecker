@@ -44,10 +44,19 @@ public class StructuredHtmlHostileInputTests
 
     private static string Text(double x, double y, double size, string text) => $"BT /F1 {N(size)} Tf {N(x)} {N(y)} Td ({text}) Tj ET\n";
 
-    /// <summary>The page in plain structured HTML, after checking that the output with styles and images is bounded too.</summary>
+    /// <summary>
+    /// The page in plain structured HTML, after checking that the output with styles and images, and the Markdown, are
+    /// bounded too.
+    /// </summary>
     private static string Convert(byte[] pdf)
     {
         Convert(pdf, Styled);
+        var task = Task.Run(() =>
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            return PdfToMarkdown.Convert(pdf, new PdfMarkdownOptions { IncludeImages = true }, cts.Token);
+        });
+        Assert.True(task.Wait(TimeSpan.FromSeconds(20)), "Markdown did not finish in time");
         return Convert(pdf, Structured);
     }
 

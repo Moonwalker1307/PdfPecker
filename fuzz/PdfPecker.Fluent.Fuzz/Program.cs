@@ -212,6 +212,8 @@ internal static class Fuzz
                 if (r.Next(2) == 0) Content(page.Footer(), r, 2);
                 if (r.Next(6) == 0) Content(page.EvenPageHeader(), r, 2);
                 if (r.Next(6) == 0) Content(page.EvenPageFooter(), r, 2);
+                if (r.Next(6) == 0) Content(page.Background(), r, 2);
+                if (r.Next(6) == 0) Content(page.Foreground(), r, 2);
             });
         }
     }

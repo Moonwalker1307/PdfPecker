@@ -195,6 +195,20 @@ internal static class Targets
             },
             new()
             {
+                Name = "pdf-markdown", Extension = ".pdf", Seeds = pdfSeeds, MaxSize = 1 << 20,
+                Run = (d, ct) =>
+                {
+                    int pages = Math.Min(PdfToImage.GetPageCount(d), 3);
+                    if (pages == 0) return;
+                    PdfToMarkdown.Convert(d, new PdfMarkdownOptions
+                    {
+                        Pages = PdfPageRange.Parse("1-" + pages.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                        IncludeImages = true, MaxDegreeOfParallelism = 1,
+                    }, ct);
+                },
+            },
+            new()
+            {
                 Name = "pdf-merge", Extension = ".pdf", Seeds = pdfSeeds, MaxSize = 1 << 20,
                 Run = (d, ct) => PdfMerger.Merge(new[] { d, SeedContext.Small.Value }, new PdfMergeOptions { MaxPages = 500 }, ct),
             },
@@ -316,7 +330,7 @@ internal static class Targets
             {
                 // Barcode text often comes from data the caller does not control, such as an invoice reference.
                 Name = "barcode", Extension = ".txt", Text = true, MaxSize = 8 * 1024,
-                Seeds = _ => new[] { "HELLO WORLD", "https://pdfpecker.net/", "0123456789012", "Blåbær 🙂\t\u0000" }
+                Seeds = _ => new[] { "HELLO WORLD", "https://pdfpecker.net/", "0123456789012", "Blåbær 🙂\t\u0000", "(01)09506000134352(17)270131(10)AB-123" }
                     .Select((s, i) => ($"seed{i}", Encoding.UTF8.GetBytes(s))),
                 Run = (d, ct) =>
                 {
@@ -325,6 +339,15 @@ internal static class Targets
                         RunExpectingArgument(() => Barcode.QrCode(text, new BarcodeOptions { ErrorCorrection = level }));
                     RunExpectingArgument(() => Barcode.Code128(text));
                     RunExpectingArgument(() => Barcode.Ean13(text));
+                    RunExpectingArgument(() => Barcode.DataMatrix(text));
+                    RunExpectingArgument(() => Barcode.Gs1DataMatrix(text));
+                    RunExpectingArgument(() => Barcode.SwissQrCode(new SwissQrBill
+                    {
+                        Account = "CH5800791123000889012",
+                        Creditor = new SwissQrAddress { Name = text, PostalCode = "2501", Town = text },
+                        Reference = text,
+                        Message = text,
+                    }));
                     RunExpectingArgument(() => Barcode.EpcQrCode(new EpcPayment { Name = text, Iban = "DE89370400440532013000", Text = text }));
                 },
             },

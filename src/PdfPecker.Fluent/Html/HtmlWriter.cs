@@ -188,12 +188,32 @@ internal sealed class HtmlWriter
     /// <summary>The header, content and footer of a page set; its bands name its page when there are several.</summary>
     private void RenderPageSet(PageSet page, string? name)
     {
+        if (page.BackgroundLayer.Child != null) RenderContainer(page.BackgroundLayer, PageLayer(page, "-1"));
         if (page.Header.Child != null) RenderBand(page.Header, "header", name);
         if (page.EvenHeader.Child != null) RenderEvenBand(page.EvenHeader, "header", name);
         // The footer comes after the content, so a browser that does not repeat it (Chrome) still shows it last.
         RenderContainer(page.Content, Box.Slot("main"));
         if (page.Footer.Child != null) RenderBand(page.Footer, "footer", name);
         if (page.EvenFooter.Child != null) RenderEvenBand(page.EvenFooter, "footer", name);
+        if (page.ForegroundLayer.Child != null) RenderContainer(page.ForegroundLayer, PageLayer(page, null));
+    }
+
+    /// <summary>
+    /// The box of a page set's background or foreground: a fixed box, which PdfPecker draws on every page of the set,
+    /// pulled out over the margins to cover the whole page. A negative z-index puts the background under the bands and
+    /// the content; the foreground comes last in the tree and paints over them.
+    /// </summary>
+    private static Box PageLayer(PageSet page, string? zIndex)
+    {
+        var box = Box.Slot("div");
+        box.FillsPage = true;
+        box.Declarations.Add(("position", "fixed"));
+        box.Declarations.Add(("top", CssValue.Pt(-page.MarginTop)));
+        box.Declarations.Add(("right", CssValue.Pt(-page.MarginRight)));
+        box.Declarations.Add(("bottom", CssValue.Pt(-page.MarginBottom)));
+        box.Declarations.Add(("left", CssValue.Pt(-page.MarginLeft)));
+        if (zIndex != null) box.Declarations.Add(("z-index", zIndex));
+        return box;
     }
 
     /// <summary>
@@ -267,7 +287,7 @@ internal sealed class HtmlWriter
                 bool fill = box.FillsWith(decorator);
                 // A percentage height resolves against a table cell only when the cell has a height of its own, as in
                 // Chrome, so the cell gets one too small to matter and grows with its row.
-                if (fill) box.Declarations.Add(("height", "1px"));
+                if (fill && box.InGrid) box.Declarations.Add(("height", "1px"));
                 Open(box);
                 box = box.Child();
                 if (fill) box.Declarations.Add(("height", "100%"));
@@ -1291,6 +1311,9 @@ internal sealed class HtmlWriter
         /// <summary>A cell of a fluent Table, whose content fills the row's height as in QuestPDF.</summary>
         public bool InGrid { get; set; }
 
+        /// <summary>A page's background or foreground, whose content fills the page as in QuestPDF.</summary>
+        public bool FillsPage { get; set; }
+
         /// <summary>A cell's horizontal alignment, which its non-text content gets from a flex wrapper inside it.</summary>
         private HorizontalAlignment? _cellAlignment;
         public List<(string Property, string Value)> Declarations { get; } = [];
@@ -1417,11 +1440,12 @@ internal sealed class HtmlWriter
         }
 
         /// <summary>
-        /// Whether the box inside this table cell must fill it: it paints a background, border or shadow, which QuestPDF
-        /// draws over the whole height of the row, or fades what may paint one. Aligned content keeps its own size.
+        /// Whether the box inside this table cell or page layer must fill it: it paints a background, border or shadow,
+        /// which QuestPDF draws over the whole height of the row or page, or fades what may paint one. Aligned content
+        /// keeps its own size.
         /// </summary>
         public bool FillsWith(Decorator decorator)
-            => InGrid && _cellAlignment == null && !Has("vertical-align")
+            => (InGrid || FillsPage) && _cellAlignment == null && !Has("vertical-align") && !(FillsPage && _aligned)
                && (decorator.Kind == DecoratorKind.Border || decorator.Kind == DecoratorKind.Style && decorator.Rank is Rank.Paint or Rank.Opacity);
 
         /// <summary>The box inside this one: plain, or aligned when this is a cell with a horizontal alignment.</summary>

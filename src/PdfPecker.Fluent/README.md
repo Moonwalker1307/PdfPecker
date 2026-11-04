@@ -78,7 +78,7 @@ Document.Create(container =>
 - **Pages**: size, margins, page colour, direction (per page, or for the whole document with
   `DocumentSettings.ContentDirection`), `ContinuousSize` (a page as tall as its content, for receipts on a roll), a header and footer on every page, and `CurrentPageNumber` / `TotalPages`
   in them or anywhere in the content. `ShowOnce` and `SkipOnce` in the header or footer give the first page a band of its own, such as a
-  letterhead followed by a slim header. `EvenPageHeader` and `EvenPageFooter` give the even pages bands of their own, for printing on both sides. Several `Page` calls give page sets with their own size, margins, header and
+  letterhead followed by a slim header. `EvenPageHeader` and `EvenPageFooter` give the even pages bands of their own, for printing on both sides. `Background` and `Foreground` cover the whole page, margins included, under or over the header, content and footer, for letterheads, frames and watermarks. Several `Page` calls give page sets with their own size, margins, header and
   footer in one document, and the page numbers run on through all of them.
 - **Merging**: `Document.Merge(invoice1, invoice2, ...)` generates several documents as one PDF or HTML document, such
   as a batch of invoices. Each keeps its own page numbers, totals and section names, or `UseContinuousPageNumbers()`
@@ -164,6 +164,8 @@ Most QuestPDF code ports by changing the `using` lines: `Document.Create`, `Page
 - Images keep their data unless `ImageCompressionQuality` or `ImageRasterDpi` is set, where QuestPDF compresses at
   `High` and 288 dpi by default; set those to match it. A compressed image replaces the original only when it is
   smaller, and transparency stays lossless. `Image.Size` is not available.
+- A page number in `Background` or `Foreground` shows the number of the page set's first page on every page; put
+  page numbers in the header or footer.
 - Not available: `Dynamic`, `Canvas`, the Companion previewer and the `MultiColumn` `Spacer`.
 
 ## Performance
