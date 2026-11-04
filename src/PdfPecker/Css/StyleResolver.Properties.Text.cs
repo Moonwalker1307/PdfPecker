@@ -435,6 +435,24 @@ internal sealed partial class StyleResolver
         else if (WrapMode(d.Lower) is { } wrap) s.WhiteSpace = WithWrapMode(s.WhiteSpace, wrap);
     }
 
+    /// <summary>
+    /// white-space-collapse, the other longhand of white-space: how spaces and newlines collapse, keeping whether lines
+    /// wrap. break-spaces is taken as preserve, as white-space: break-spaces is taken as pre-wrap.
+    /// </summary>
+    private static void ApplyWhiteSpaceCollapse(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        bool wrap = Wraps(s.WhiteSpace);
+        // The property is inherited, so unset inherits too.
+        if (d.Inherit || d.Lower == "unset") s.WhiteSpace = WithWrapMode(parent.WhiteSpace, wrap);
+        else s.WhiteSpace = d.Lower switch
+        {
+            "collapse" or "initial" => wrap ? WhiteSpace.Normal : WhiteSpace.NoWrap,
+            "preserve" or "break-spaces" => wrap ? WhiteSpace.PreWrap : WhiteSpace.Pre,
+            "preserve-breaks" => wrap ? WhiteSpace.PreLine : WhiteSpace.PreLineNoWrap,
+            _ => s.WhiteSpace,
+        };
+    }
+
     private static void ApplyTextWrapStyle(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
         if (d.Inherit) s.TextWrap = parent.TextWrap;
