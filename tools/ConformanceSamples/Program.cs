@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using PdfPecker;
 
 // Generates <output dir>/<profile>/<sample>.pdf for every profile and sample, plus profiles.tsv, which tells check.py
@@ -59,6 +61,28 @@ const string ColorFonts = """
     <p style="font-family: Grid; color: #c00; opacity: 0.6">&#x1F1E9;&#x1F1F0; &#x1F3F4;&#xE0067;&#xE0062;&#xE007F; &#x1F3FD; A</p>
     </body></html>
     """;
+
+// Empty signature fields over styled boxes, one with a "Sign here" line inside it. The same document is also signed into
+// one of its fields, as PdfSigner fills a template's field.
+const string SignatureFields = """
+    <html lang="en"><head><title>Signature fields</title><style>
+    .sign { display: inline-block; width: 200pt; height: 50pt; margin-right: 20pt; border-bottom: 1px solid #666 }
+    </style></head><body>
+    <h1>Agreement</h1>
+    <p>Signed by both sides.</p>
+    <div class="sign" data-pdf-signature="Seller" title="Seller's signature">Sign here</div>
+    <div class="sign" data-pdf-signature="Buyer" title="Buyer's signature"></div>
+    </body></html>
+    """;
+
+// A throwaway self-signed certificate: veraPDF checks the signature's form, not whom it trusts.
+var SigningCertificate = new Lazy<X509Certificate2>(() =>
+{
+    using var key = RSA.Create(2048);
+    var request = new CertificateRequest("CN=Conformance sample", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+    using var cert = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
+    return X509CertificateLoader.LoadPkcs12(cert.Export(X509ContentType.Pfx, "pw"), "pw");
+});
 
 // Structure types that HTML has no element for, from ARIA roles and the list label attribute: a formula with its text
 // alternative, a table of contents with nested entries, an index and a list laid out by hand with marked labels.
@@ -130,6 +154,11 @@ foreach (var profile in profiles)
 
     File.WriteAllBytes(Path.Combine(dir, "rtl-scripts.pdf"), HtmlToPdf.Convert(Rtl, Options(fixtures)));
     File.WriteAllBytes(Path.Combine(dir, "colour-fonts.pdf"), HtmlToPdf.Convert(ColorFonts, Options(fixtures)));
+    var signatureFields = HtmlToPdf.Convert(SignatureFields, Options(fixtures));
+    File.WriteAllBytes(Path.Combine(dir, "signature-fields.pdf"), signatureFields);
+    if (!profile.Linearize)
+        File.WriteAllBytes(Path.Combine(dir, "signature-fields-signed.pdf"),
+            PdfSigner.Sign(signatureFields, new PdfSignatureOptions(SigningCertificate.Value) { FieldName = "Seller" }));
     File.WriteAllBytes(Path.Combine(dir, "structure-roles.pdf"), HtmlToPdf.Convert(Roles, Options(fixtures)));
 
     // Every viewer setting and page labels with a prefix, on the report sample, which has several pages and bookmarks.

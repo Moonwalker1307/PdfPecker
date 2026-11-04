@@ -19,6 +19,7 @@ internal sealed partial class PdfDocumentWriter
     private readonly Dictionary<RadioGroup, (int Id, List<int> Kids)> _radioGroups = new();
     private readonly List<int> _topFields = new();
     private readonly int[] _daFontIds = new int[DaFonts.Length];
+    private bool _hasSignatureField;
 
     /// <summary>Finds the fields of each page and numbers their objects: a widget each, and a parent for each radio group.</summary>
     private List<FieldBlock>[] AllocateFields(List<List<Placed>> pages, int pageCount, ref int next)
@@ -42,7 +43,8 @@ internal sealed partial class PdfDocumentWriter
                     g.Kids.Add(id);
                 }
                 else _topFields.Add(id);
-                if (fb.Field.Kind is not (ControlKind.CheckBox or ControlKind.Radio))
+                if (fb.Field.Kind == ControlKind.Signature) _hasSignatureField = true;
+                if (fb.Field.Kind is not (ControlKind.CheckBox or ControlKind.Radio or ControlKind.Signature))
                 {
                     int font = DaFont(fb.Field.Font);
                     if (_daFontIds[font] == 0) _daFontIds[font] = next++;
@@ -69,7 +71,10 @@ internal sealed partial class PdfDocumentWriter
         if (_topFields.Count == 0) return;
         _out.Ascii(" /AcroForm << /Fields [");
         foreach (int id in _topFields) _out.Int(id).Ascii(" 0 R ");
-        _out.Ascii("] /DR << /Font <<");
+        _out.Ascii("]");
+        // SignaturesExist: the document has a signature field, signed or not (ISO 32000-1, table 219).
+        if (_hasSignatureField) _out.Ascii(" /SigFlags 1");
+        _out.Ascii(" /DR << /Font <<");
         for (int i = 0; i < DaFonts.Length; i++)
             if (_daFontIds[i] != 0) _out.Ascii(" /").Ascii(DaFonts[i]).Sp().Int(_daFontIds[i]).Ascii(" 0 R");
         _out.Ascii(" >> >> /DA ");
@@ -97,19 +102,12 @@ internal sealed partial class PdfDocumentWriter
                 float yTop = (_page.Height - origin - (f.Y - pageTop)) * k + _paperDy, yBottom = yTop - f.H * k;
                 float w = x2 - x1, h = yTop - yBottom;
                 bool button = f.Kind is ControlKind.CheckBox or ControlKind.Radio;
+                bool signature = f.Kind == ControlKind.Signature;
 
-                // The appearance: the field's laid-out content, moved from the page to the widget's own space.
+                // The appearance: the field's laid-out content, moved from the page to the widget's own space. An empty
+                // signature field has none: the page shows the box, and the signature brings its own appearance.
                 var ap = new ByteBuffer(512);
-                ResetState();
-                _yOrigin = origin;
-                if (!button) ap.Ascii("/Tx BMC\n");
-                ap.Ascii("q ").Ascii(k.ToString("0.######", CultureInfo.InvariantCulture)).Ascii(" 0 0 ")
-                    .Ascii(k.ToString("0.######", CultureInfo.InvariantCulture)).Sp().Num(-x1).Sp().Num(_paperDy - yBottom).Ascii(" cm\n");
-                foreach (var item in fb.Items)
-                    if (item.Op is not LinkOp) WriteOp(ap, item, pageTop, imageIds);
-                EndText(ap);
-                ap.Ascii("Q\n");
-                if (!button) ap.Ascii("EMC\n");
+                if (!signature) WriteFieldAppearance(ap, fb, x1, yBottom, k, origin, pageTop, button, imageIds);
                 string bbox = "/Type /XObject /Subtype /Form /BBox [0 0 " + N(w) + " " + N(h) + "]";
                 int onId = next++;
                 WriteStream(onId, ap.Span, _compress, bbox + " /Resources " + _resourcesId.ToString(CultureInfo.InvariantCulture) + " 0 R");
@@ -146,6 +144,10 @@ internal sealed partial class PdfDocumentWriter
                             if (flags != 0) _out.Ascii(" /Ff ").Int(flags);
                             _out.Ascii(" /V ");
                             WriteName(_out, f.Checked ? field.OnState : "Off");
+                            break;
+                        case ControlKind.Signature:
+                            _out.Ascii(" /FT /Sig");
+                            if (flags != 0) _out.Ascii(" /Ff ").Int(flags);
                             break;
                         case ControlKind.Text:
                             flags |= (field.Multiline ? FfMultiline : 0) | (field.Password ? FfPassword | FfDoNotSpellCheck : 0);
@@ -200,6 +202,7 @@ internal sealed partial class PdfDocumentWriter
                     WriteName(_out, field.OnState);
                     _out.Sp().Int(onId).Ascii(" 0 R /Off ").Int(offId).Ascii(" 0 R >> >>");
                 }
+                else if (signature) _out.Ascii(" /AP << /N ").Int(onId).Ascii(" 0 R >>");
                 else
                 {
                     // How a viewer draws the text while it is edited: the closest standard font, the field's size and colour.
@@ -236,6 +239,22 @@ internal sealed partial class PdfDocumentWriter
             Begin(_daFontIds[i]).Ascii("<< /Type /Font /Subtype /Type1 /BaseFont /").Ascii(DaBaseFonts[i]).Ascii(" /Encoding /WinAnsiEncoding >>");
             End();
         }
+    }
+
+    /// <summary>A field's laid-out content, moved from the page to the widget's own space, as its appearance.</summary>
+    private void WriteFieldAppearance(ByteBuffer ap, FieldBlock fb, float x1, float yBottom, float k, float origin, float pageTop,
+        bool button, Dictionary<PdfImage, int> imageIds)
+    {
+        ResetState();
+        _yOrigin = origin;
+        if (!button) ap.Ascii("/Tx BMC\n");
+        ap.Ascii("q ").Ascii(k.ToString("0.######", CultureInfo.InvariantCulture)).Ascii(" 0 0 ")
+            .Ascii(k.ToString("0.######", CultureInfo.InvariantCulture)).Sp().Num(-x1).Sp().Num(_paperDy - yBottom).Ascii(" cm\n");
+        foreach (var item in fb.Items)
+            if (item.Op is not LinkOp) WriteOp(ap, item, pageTop, imageIds);
+        EndText(ap);
+        ap.Ascii("Q\n");
+        if (!button) ap.Ascii("EMC\n");
     }
 
     private static string N(float v) => v.ToString("0.###", CultureInfo.InvariantCulture);
