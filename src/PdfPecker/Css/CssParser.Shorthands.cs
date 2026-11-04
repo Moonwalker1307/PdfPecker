@@ -43,7 +43,7 @@ internal static partial class CssParser
     }
 
     /// <summary>
-    /// The width, style and colour of a border-like shorthand (border, border-top, outline, column-rule): the parts in
+    /// The width, style and colour of a border-like shorthand (border, border-top, outline, column-rule, row-rule): the parts in
     /// any order, each with its initial value when left out. An outline also takes the style auto, and its width
     /// cannot be a math function.
     /// </summary>
@@ -189,9 +189,10 @@ internal static partial class CssParser
                 ExpandPlace(name, value, longhands);
                 break;
             case "font-variant": ExpandFontVariant(value, longhands); break;
-            case "column-rule": ExpandColumnRule(value, longhands); break;
             case "columns": ExpandColumns(value, longhands); break;
-            default: longhands.Add(CssMask.Unprefixed(name) ?? name, value); break;
+            default:
+                if (!ExpandGapRuleShorthand(name, value, longhands)) longhands.Add(CssMask.Unprefixed(name) ?? name, value);
+                break;
         }
 
         if (wide)
@@ -332,15 +333,6 @@ internal static partial class CssParser
         longhands.Add("outline-width", parts.Width);
         longhands.Add("outline-style", parts.Style);
         longhands.Add("outline-color", parts.Color);
-    }
-
-    /// <summary>Width, style and colour in any order, like a border side.</summary>
-    private static void ExpandColumnRule(string value, LonghandWriter longhands)
-    {
-        var parts = LineParts.Parse(value, outline: false);
-        longhands.Add("column-rule-width", parts.Width);
-        longhands.Add("column-rule-style", parts.Style);
-        longhands.Add("column-rule-color", parts.Color);
     }
 
     /// <summary>The shorthand sets all three longhands; "none" is the type or the image, whichever is not given.</summary>

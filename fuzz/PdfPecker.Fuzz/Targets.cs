@@ -95,6 +95,8 @@ internal static class Targets
         "mask-image:", "-webkit-mask:", "mask-composite: exclude", "mask-mode: luminance", "mask-size: 1e9px", "url(#m)", "backdrop-filter: blur(1e9px)", "-webkit-backdrop-filter:",
         "shape-outside:", "inset(", "ellipse(", "polygon(", "path(", "margin-box", "content-box", "shape-margin: 1e9px", "shape-image-threshold: 1e9",
         "::first-letter", "initial-letter: 3", "initial-letter: 1e9 999999", "initial-letter: 2 raise",
+        "rule: 1px solid red", "column-rule-color: red, repeat(auto, blue, green)", "row-rule-width: repeat(999999999, 1px)",
+        "rule-inset: -1e9px / overlap-join", "column-rule-inset-cap-end: -1e9px", "row-rule-inset: 0 -1e30px", "rule-break: intersection", "rule-visibility-items: between", "rule-overlap: column-over-row",
     };
 
     private static readonly (string, string)[] CssNesters =
