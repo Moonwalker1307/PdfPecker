@@ -195,6 +195,37 @@ internal sealed partial class PdfFile
         return o is PdfRef ? null : o;
     }
 
+    /// <summary>
+    /// Adds an object that the file did not have, under a number above every number the file uses, and returns a reference
+    /// to it, so that a writer that copies the file (<see cref="Pdf.PdfRewriter"/>) writes it like the others. The
+    /// object lives only in this parse of the file. Load the objects the result needs before adding any: rebuilding a
+    /// damaged cross-reference table forgets the objects parsed so far, the added ones with them.
+    /// </summary>
+    public PdfRef AddObject(PdfObject o)
+    {
+        lock (_lock)
+        {
+            if (_nextAdded == 0) _nextAdded = Math.Max(MaxObjectNumber, _cache.Count == 0 ? 0 : _cache.Keys.Max()) + 1;
+            int num = _nextAdded++;
+            _cache[num] = o;
+            if (o is PdfStream s) s.ObjectNumber = num;
+            return new PdfRef(num, 0);
+        }
+    }
+
+    private int _nextAdded;
+
+    /// <summary>The number of every object parsed or added so far, by the object, for finding how to refer to one.</summary>
+    internal Dictionary<PdfObject, int> ObjectNumbers()
+    {
+        lock (_lock)
+        {
+            var numbers = new Dictionary<PdfObject, int>(_cache.Count, ReferenceEqualityComparer.Instance);
+            foreach (var (num, o) in _cache) numbers.TryAdd(o, num);
+            return numbers;
+        }
+    }
+
     public PdfObject? GetObject(int num)
     {
         lock (_lock)

@@ -21,12 +21,14 @@ internal sealed class PdfRewriter : PdfObjectWriter
     private int _rootNum = -1;
 
     private readonly bool _reproducible;
+    private readonly (int Major, int Minor)? _version;
 
-    private PdfRewriter(PdfFile file, PdfEncryptor? crypt, bool reproducible) : base(PdfObjectSyntax.Rewrite)
+    private PdfRewriter(PdfFile file, PdfEncryptor? crypt, bool reproducible, (int Major, int Minor)? version) : base(PdfObjectSyntax.Rewrite)
     {
         _file = file;
         _crypt = crypt;
         _reproducible = reproducible;
+        _version = version;
         Encryption = crypt;
         _out = new ByteBuffer(Math.Max(4096, file.Data.Length + file.Data.Length / 8));
     }
@@ -40,9 +42,15 @@ internal sealed class PdfRewriter : PdfObjectWriter
         => Write(file, crypt, crypt == null && ReproducibleDate.Resolve(creationDate) != null);
 
     /// <summary>Rewrites <paramref name="file"/>; with <paramref name="reproducible"/>, the identifier is a hash of the result.</summary>
-    public static ByteBuffer Write(PdfFile file, PdfEncryptor? crypt, bool reproducible)
+    public static ByteBuffer Write(PdfFile file, PdfEncryptor? crypt, bool reproducible) => Write(file, crypt, reproducible, null);
+
+    /// <summary>
+    /// Rewrites <paramref name="file"/> like <see cref="Write(PdfFile, PdfEncryptor?, bool)"/>, with
+    /// <paramref name="version"/> in the header instead of the input's own version when it is set.
+    /// </summary>
+    public static ByteBuffer Write(PdfFile file, PdfEncryptor? crypt, bool reproducible, (int Major, int Minor)? version)
     {
-        var w = new PdfRewriter(file, crypt, reproducible);
+        var w = new PdfRewriter(file, crypt, reproducible, version);
         w.Run();
         return w._out;
     }
@@ -54,7 +62,7 @@ internal sealed class PdfRewriter : PdfObjectWriter
         if (trailer["Root"] is PdfRef root) _rootNum = root.Num;
 
         // AES-256 belongs to PDF 2.0, or to PDF 1.7 with Adobe extension level 8 (which the catalog then declares).
-        var (major, minor) = HeaderVersion(_file.Data);
+        var (major, minor) = _version ?? HeaderVersion(_file.Data);
         if (_crypt != null && (major, minor).CompareTo((1, 7)) < 0) (major, minor) = (1, 7);
         _out.Ascii("%PDF-").Int(major).Byte((byte)'.').Int(minor).Ascii("\n%").Bytes(new byte[] { 0xE2, 0xE3, 0xCF, 0xD3 }).Nl();
 

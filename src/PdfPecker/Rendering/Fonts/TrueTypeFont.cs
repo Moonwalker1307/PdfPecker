@@ -231,6 +231,43 @@ internal sealed partial class TrueTypeFont : IGlyphSource
         return strings;
     }
 
+    // ------------------------------------------------------------------ raw tables, for rewriting the program
+
+    /// <summary>The tags of the font's tables.</summary>
+    internal IEnumerable<string> TableTags => _tables.Keys;
+
+    /// <summary>
+    /// A table's bytes, or empty when the font has no such table; a damaged directory that places a table past the end of
+    /// the data gives only the part that is there.
+    /// </summary>
+    internal ReadOnlySpan<byte> TableBytes(string tag)
+    {
+        if (Table(tag) is not { } t || t.Offset < 0 || t.Offset >= Data.Length || t.Length <= 0) return ReadOnlySpan<byte>.Empty;
+        return Data.AsSpan(t.Offset, Math.Min(t.Length, Data.Length - t.Offset));
+    }
+
+    /// <summary>A glyph's bytes in the glyf table: empty for a glyph without an outline, or one the table does not hold.</summary>
+    internal ReadOnlySpan<byte> GlyphBytes(int gid)
+    {
+        if (!HasGlyf || gid < 0 || gid + 1 >= _loca.Length) return ReadOnlySpan<byte>.Empty;
+        int start = _loca[gid], end = _loca[gid + 1];
+        if (start < 0 || end <= start || end > _glyfLength) return ReadOnlySpan<byte>.Empty;
+        return Data.AsSpan(_glyf + start, end - start);
+    }
+
+    /// <summary>A glyph's left side bearing from hmtx, or 0 when the table does not give one.</summary>
+    internal int LeftSideBearing(int gid)
+    {
+        if (_hmtx < 0 || _numberOfHMetrics <= 0 || gid < 0) return 0;
+        int record = gid < _numberOfHMetrics
+            ? _hmtx + gid * HmtxRecordSize + 2
+            : _hmtx + _numberOfHMetrics * HmtxRecordSize + (gid - _numberOfHMetrics) * 2;
+        return record + 2 <= Data.Length ? _font.S16(record) : 0;
+    }
+
+    /// <summary>The (platform, encoding) of each cmap subtable, in the font's order.</summary>
+    internal IEnumerable<(int Platform, int Encoding)> CmapEncodings => _cmaps.Select(c => (c.Platform, c.Encoding));
+
     // ------------------------------------------------------------------ metrics
 
     public double Advance(int gid)

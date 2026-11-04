@@ -181,6 +181,52 @@ foreach (var (name, conformance, accessibility, flavours, linearize) in new (str
     File.WriteAllBytes(Path.Combine(dir, "einvoice.pdf"), pdf);
 }
 
+// Existing PDFs converted with PdfToPdfA: the third-party fixtures (the encrypted ones decrypted first, as the
+// conversion asks), the library's own plain output with forms, transparency, colour fonts and an attachment, and two
+// other fixtures. The generator stops when the conversion itself reports a problem, so the samples stay ones the
+// conversion claims to fix and veraPDF then checks that claim.
+var plainInputs = new List<(string Name, byte[] Pdf)>();
+foreach (var path in Directory.GetFiles(Path.Combine(fixtures, "third-party"), "*.pdf").Order(StringComparer.Ordinal))
+{
+    var pdf = File.ReadAllBytes(path);
+    var name = Path.GetFileNameWithoutExtension(path);
+    plainInputs.Add(("third-party-" + name, name.Contains("aes", StringComparison.Ordinal) || name.Contains("rc4", StringComparison.Ordinal)
+        ? PdfProtector.Decrypt(pdf, "user")
+        : pdf));
+}
+plainInputs.Add(("features", File.ReadAllBytes(Path.Combine(fixtures, "features.pdf"))));
+plainInputs.Add(("objstm-cairo", File.ReadAllBytes(Path.Combine(fixtures, "objstm-cairo.pdf"))));
+foreach (var input in inputs.Where(i => i.Name is "golden-forms" or "golden-transparency" or "sample-invoice" or "sample-markdown"))
+{
+    var options = new PdfOptions { AllowFileAccess = true, BaseDirectory = Path.GetDirectoryName(input.Path)! };
+    var text = File.ReadAllText(input.Path);
+    plainInputs.Add(("plain-" + input.Name, input.Markdown ? MarkdownToPdf.Convert(text, options) : HtmlToPdf.Convert(text, options)));
+}
+plainInputs.Add(("plain-colour-fonts", HtmlToPdf.Convert(ColorFonts, new PdfOptions { AllowFileAccess = true, BaseDirectory = fixtures })));
+var withXml = new PdfOptions();
+withXml.Attachments.Add(new PdfAttachment("invoice.xml", invoiceXml));
+plainInputs.Add(("plain-attachment", HtmlToPdf.Convert(File.ReadAllText(Path.Combine(golden, "einvoice", "demo.html")), withXml)));
+
+foreach (var (name, conformance, flavour) in new[]
+{
+    ("pdfa-2b-converted", PdfConformance.PdfA2b, "2b"),
+    ("pdfa-2u-converted", PdfConformance.PdfA2u, "2u"),
+    ("pdfa-3b-converted", PdfConformance.PdfA3b, "3b"),
+    ("pdfa-3u-converted", PdfConformance.PdfA3u, "3u"),
+})
+{
+    var dir = Path.Combine(outDir, name);
+    Directory.CreateDirectory(dir);
+    manifest.Add(name + "\t" + flavour);
+    foreach (var (sample, pdf) in plainInputs)
+    {
+        var result = PdfToPdfA.Convert(pdf, new PdfAConversionOptions { Conformance = conformance });
+        if (!result.IsConformant)
+            throw new InvalidOperationException($"{name}/{sample}: the conversion reports problems:\n  " + string.Join("\n  ", result.Problems));
+        File.WriteAllBytes(Path.Combine(dir, sample + ".pdf"), result.Pdf);
+    }
+}
+
 File.WriteAllLines(Path.Combine(outDir, "profiles.tsv"), manifest);
 Console.WriteLine($"Wrote {manifest.Count} profile folders to {outDir}");
 
