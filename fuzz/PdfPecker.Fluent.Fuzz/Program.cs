@@ -414,17 +414,17 @@ internal static class Fuzz
                                 1 => t.Leader((LeaderStyle)r.Next(0, r.Next(20) == 0 ? 6 : 3)),
                                 _ => t.Leader(Text(r)),
                             },
-                            0 => t.CurrentPageNumber(),
-                            1 => t.TotalPages(),
+                            0 => r.Next(3) == 0 ? t.CurrentPageNumber().Format(NumberFormat(r)) : t.CurrentPageNumber(),
+                            1 => r.Next(3) == 0 ? t.TotalPages().Format(NumberFormat(r)) : t.TotalPages(),
                             2 => t.Hyperlink(Text(r), r.Next(10) != 0 ? "https://example.com/" + Uri.EscapeDataString(Text(r)) : Text(r)),
                             3 => t.SectionLink(Text(r), Name(r)),
-                            4 => t.Line(Text(r)),
+                            4 => r.Next(20) == 0 ? t.Line(Text(r)).Format(NumberFormat(r)) : t.Line(Text(r)),
                             5 => r.Next(4) switch
                             {
                                 0 => t.BeginPageNumberOfSection(Name(r)),
                                 1 => t.EndPageNumberOfSection(Name(r)),
                                 2 => t.TotalPagesWithinSection(Name(r)),
-                                _ => t.PageNumberWithinSection(Name(r)),
+                                _ => t.PageNumberWithinSection(Name(r)).Format(NumberFormat(r)),
                             },
                             _ => t.Span(Text(r)).Style(Style(TextStyle.Default, r)),
                         };
@@ -553,6 +553,17 @@ internal static class Fuzz
                 break;
         }
     }
+
+    /// <summary>A page number format; sometimes a span that is no page number gets one, which Format must refuse.</summary>
+    private static PageNumberFormat NumberFormat(Random r) => r.Next(6) switch
+    {
+        0 => PageNumberFormat.LowerRoman,
+        1 => PageNumberFormat.UpperRoman,
+        2 => PageNumberFormat.LowerLetters,
+        3 => PageNumberFormat.UpperLetters,
+        4 => PageNumberFormat.ZeroPadded(r.Next(20) == 0 ? r.Next(-2, 14) : r.Next(1, 11)),
+        _ => PageNumberFormat.Decimal,
+    };
 
     private static void Cell(ITableCellContainer cell, Random r, int depth)
     {

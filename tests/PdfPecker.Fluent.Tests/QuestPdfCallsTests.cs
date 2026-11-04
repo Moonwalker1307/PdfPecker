@@ -436,6 +436,68 @@ public sealed class QuestPdfCallsTests
         Assert.Contains("/Alt (pi r squared)", System.Text.Encoding.Latin1.GetString(pdf), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Page_number_formats_write_counter_styles_in_bands_and_content()
+    {
+        var document = Document.Create(d => d.Page(p =>
+        {
+            p.Header().Text(t =>
+            {
+                t.CurrentPageNumber().Format(PageNumberFormat.UpperRoman);
+                t.Span(" / ");
+                t.TotalPages().Format(PageNumberFormat.ZeroPadded(3));
+            });
+            p.Content().Text(t =>
+            {
+                t.CurrentPageNumber().Format(PageNumberFormat.LowerLetters);
+                t.TotalPages().Format(PageNumberFormat.Decimal);
+            });
+        }));
+        string html = DocumentGenerator.Html(document, false, out _);
+        Assert.Contains("{page:upper-roman}", html, StringComparison.Ordinal);
+        Assert.Contains("{total-pages:pdfpecker-pad3}", html, StringComparison.Ordinal);
+        Assert.Contains("@counter-style pdfpecker-pad3{system:extends decimal;pad:3 \"0\"}", html, StringComparison.Ordinal);
+        Assert.Contains("data-number-style=\"lower-alpha\"", html, StringComparison.Ordinal);
+        Assert.Contains("[data-section-page][data-number-style=\"lower-alpha\"]::after{content:target-counter(attr(data-section-page),page,lower-alpha)}", html, StringComparison.Ordinal);
+        // Decimal is the default and writes nothing of its own.
+        Assert.Contains("<span data-total-pages></span>", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Page_number_formats_show_in_the_pdf()
+    {
+        string[] pages = PdfText.ExtractPages(Document.Create(d => d.Page(p =>
+        {
+            p.Size(PageSizes.A6);
+            p.Header().Text(t =>
+            {
+                t.Span("Page ");
+                t.CurrentPageNumber().Format(PageNumberFormat.UpperRoman);
+                t.Span(" of ");
+                t.TotalPages().Format(PageNumberFormat.ZeroPadded(3));
+            });
+            p.Content().Column(c =>
+            {
+                c.Item().Section("s").Text(t => { t.Span("Within "); t.PageNumberWithinSection("s").Format(PageNumberFormat.LowerRoman); });
+                c.Item().PageBreak();
+                c.Item().Text(t => { t.Span("Here "); t.CurrentPageNumber().Format(PageNumberFormat.UpperLetters); });
+            });
+        })).GeneratePdf()).Select(p => p.Text).ToArray();
+        Assert.Equal(2, pages.Length);
+        Assert.Contains("Page I of 002", pages[0], StringComparison.Ordinal);
+        Assert.Contains("Page II of 002", pages[1], StringComparison.Ordinal);
+        Assert.Contains("Within i", pages[0], StringComparison.Ordinal);
+        Assert.Contains("Here B", pages[1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Format_applies_to_page_numbers_only()
+    {
+        Assert.Throws<InvalidOperationException>(() => Html.Of(c => c.Text(t => t.Span("x").Format(PageNumberFormat.UpperRoman))));
+        Assert.Throws<ArgumentOutOfRangeException>(() => PageNumberFormat.ZeroPadded(0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => PageNumberFormat.ZeroPadded(11));
+    }
+
     private static int Count(string text, string part)
     {
         int count = 0;

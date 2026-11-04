@@ -184,6 +184,9 @@ internal sealed class TextRun
     public string? Target { get; init; }
     public TextStyle Style { get; set; } = TextStyle.Default;
 
+    /// <summary>How a page number run writes its number; null for decimal.</summary>
+    public PageNumberFormat? NumberFormat { get; set; }
+
     /// <summary>The content of an <see cref="RunKind.Element"/> run, and its CSS vertical-align.</summary>
     public Container? Slot { get; init; }
     public string VerticalAlign { get; init; } = "baseline";
