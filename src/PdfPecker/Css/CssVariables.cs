@@ -45,7 +45,8 @@ internal static class CssVariables
         if (i < 0) return value;
         var sb = new StringBuilder(value.Length + 16);
         var resources = new CssAttr.ResourceScan();
-        int last = 0;
+        int last = 0, ownResources = 0;
+        bool anyTaint = false;
         while (i >= 0)
         {
             int close;
@@ -58,6 +59,8 @@ internal static class CssVariables
                 if (!CssAttr.TryParseHead(value, i + 5, out var call)) return null;
                 if (call.IsGeneratedText && attrs!.KeepUntyped)
                 {
+                    // No attribute names a resource, not even through generated content: content: url(attr(x)) is invalid.
+                    if (resources.Inside(value, i)) return null;
                     // An untyped attr() of generated text stays for GeneratedContent; a var() in its fallback is still replaced.
                     i = Next(value, call.End, true, out isAttr);
                     continue;
@@ -107,15 +110,24 @@ internal static class CssVariables
             if (fromAttribute)
             {
                 if (own == null && (resources.Inside(value, i) || CssAttr.ContainsResource(replacement))) return null;
-                tainted = true;
+                tainted = anyTaint = true;
             }
+            else ownResources += CssAttr.CountResources(replacement, 0, replacement.Length);
+            ownResources += CssAttr.CountResources(value, last, i);
             sb.Append(value, last, i - last);
             sb.Append(replacement);
             last = Math.Min(close + 1, value.Length);
             i = Next(value, last, attrs != null, out isAttr);
         }
         sb.Append(value, last, value.Length - last);
-        return sb.Length > MaxLength ? null : sb.ToString();
+        if (sb.Length > MaxLength) return null;
+        var result = sb.ToString();
+        // Pieces checked one by one can still join into a resource function (attr() giving "url" next to one giving
+        // "(x.png)"), which Chrome never sees because it keeps token boundaries. So once text from an attribute is in the
+        // value, it may hold no more resource functions than the pieces that did not come from attributes brought.
+        if (anyTaint && own == null
+            && CssAttr.CountResources(result, 0, result.Length) > ownResources + CssAttr.CountResources(value, last, value.Length)) return null;
+        return result;
     }
 
     /// <summary>

@@ -40,9 +40,10 @@ public class CssAttrTests
     }
 
     /// <summary>The style of a div with data-v set to <paramref name="attr"/> (left out when null) under the rule.</summary>
-    private static ComputedStyle Probe(string declaration, string? attr)
+    private static ComputedStyle Probe(string declaration, string? attr, string? b = null)
     {
         var a = attr == null ? "" : $" data-v=\"{System.Net.WebUtility.HtmlEncode(attr)}\"";
+        if (b != null) a += $" data-a=\"{System.Net.WebUtility.HtmlEncode(attr)}\" data-b=\"{System.Net.WebUtility.HtmlEncode(b)}\"";
         var doc = Styled($"<style>#outer{{width:300px;color:black}} #h{{width:7px;font-size:10px}} #h{{{declaration}}}</style>"
                          + $"<div id=outer><div id=h data-w=8{a}></div></div>");
         return ById(doc, "h").Style;
@@ -296,11 +297,45 @@ public class CssAttrTests
     [InlineData("list-style-image: attr(data-v type(*))", "url(a.png)", false)]
     [InlineData("background-image: attr(data-v type(<image>))", "linear-gradient(red, blue)", true)]
     [InlineData("background-image: url(a.png), linear-gradient(attr(data-v type(<color>)), blue)", "red", true)]
-    public void Attribute_values_never_reach_a_url(string declaration, string attr, bool image)
+    // Pieces that are harmless one by one but join into a resource function, which Chrome's token boundaries prevent.
+    [InlineData("background-image: attr(data-a type(*))attr(data-b type(*))", "url", false, "(G1.png)")]
+    [InlineData("background-image: attr(data-a type(<custom-ident>))(G2.png)", "url", false, "x")]
+    [InlineData("--p: attr(data-a type(*)); --q: attr(data-b type(*)); background-image: var(--p)var(--q)", "url", false, "(G3.png)")]
+    [InlineData("background-image: attr(data-a type(*))attr(data-b type(*))", "image-set", false, "(\"G5.png\" 1x)")]
+    [InlineData("background-image: url(a.png), attr(data-a type(*))", "linear-gradient(red, blue)", true, "x")]
+    public void Attribute_values_never_reach_a_url(string declaration, string attr, bool image, string? b = null)
     {
-        var s = Probe(declaration, attr);
+        var s = Probe(declaration, attr, b);
         if (declaration.StartsWith("list-style-image", StringComparison.Ordinal)) Assert.Null(s.ListStyleImage);
         else Assert.Equal(image, s.BackgroundImages is { } layers && Array.Exists(layers, l => l != null));
+    }
+
+    // The same through a whole conversion: the resource resolver is asked only for the file the style sheet names.
+    [Theory]
+    [InlineData("div{background-image: attr(data-a type(*))attr(data-b type(*))}", "url", "(G1.png)")]
+    [InlineData("div{background-image: attr(data-a type(<custom-ident>))(G2.png)}", "url", "x")]
+    [InlineData("div{--p: attr(data-a type(*)); --q: attr(data-b type(*)); background-image: var(--p)var(--q)}", "url", "(G3.png)")]
+    [InlineData("div{background-image: attr(data-a type(*))attr(data-b type(*))}", "image-set", "(\"G5.png\" 1x)")]
+    [InlineData("div::before{content: attr(data-a type(*))attr(data-b type(*))}", "url", "(G6.png)")]
+    [InlineData("div::before{content: url(attr(data-a))}", "G7.png", "x")]
+    [InlineData("div::before{content: image-set(attr(data-a))}", "G8.png", "x")]
+    public void Joined_attribute_pieces_load_nothing(string css, string a, string b)
+    {
+        var fetched = new List<string>();
+        var html = $"<!doctype html><style>div{{width:50px;height:50px}} p{{background-image:url(CTRL.png)}} {css}</style>"
+                   + $"<div data-a=\"{System.Net.WebUtility.HtmlEncode(a)}\" data-b=\"{System.Net.WebUtility.HtmlEncode(b)}\">x</div><p>p</p>";
+        var options = new PdfOptions { ResourceResolver = u => { lock (fetched) fetched.Add(u); return null; } };
+        HtmlToPdf.Convert(html, options);
+        Assert.Contains(fetched, u => u.Contains("CTRL.png", StringComparison.Ordinal));
+        Assert.DoesNotContain(fetched, u => u.Contains("G", StringComparison.Ordinal) && !u.Contains("CTRL", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void An_untyped_attr_in_url_makes_no_box()
+    {
+        var doc = Styled("<style>p::before{content: url(attr(data-x))} i::before{content: \"a\" attr(data-x)}</style><p id=p data-x=a.png>p</p><i id=i data-x=b>i</i>");
+        Assert.DoesNotContain(ById(doc, "p").Children, c => c is Element { Name: "::before" });
+        Assert.Contains(ById(doc, "i").Children, c => c is Element { Name: "::before" });
     }
 
     [Fact]

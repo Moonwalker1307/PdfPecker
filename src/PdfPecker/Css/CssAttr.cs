@@ -132,6 +132,7 @@ internal static class CssAttr
     {
         valid = true;
         typed = false;
+        var resources = new ResourceScan();
         int i = 0;
         while ((i = Next(value, i)) >= 0)
         {
@@ -140,7 +141,8 @@ internal static class CssAttr
                 valid = false;
                 return;
             }
-            if (!call.IsGeneratedText) typed = true;
+            // An untyped attr() in a resource function is substituted too, so that the cascade can refuse it.
+            if (!call.IsGeneratedText || resources.Inside(value, i)) typed = true;
             i = call.End;
         }
     }
@@ -387,14 +389,40 @@ internal static class CssAttr
         }
     }
 
-    private static bool IsResourceFunction(string value, int paren)
+    private static bool IsResourceFunction(string value, int paren, int from = 0)
     {
+        // The longest name is -webkit-cross-fade; a longer run of name characters is some other function.
         int start = paren;
-        while (start > 0 && IsNameChar(value[start - 1])) start--;
+        while (start > from && IsNameChar(value[start - 1]) && paren - start <= 18) start--;
+        if (start > from && IsNameChar(value[start - 1])) return false;
         var name = value.AsSpan(start, paren - start);
         foreach (var f in ResourceFunctions)
             if (name.Equals(f, StringComparison.OrdinalIgnoreCase)) return true;
         return false;
+    }
+
+    /// <summary>
+    /// How many resource functions (url() and the others above) the text from <paramref name="start"/> to
+    /// <paramref name="end"/> calls outside strings, reading it as text on its own.
+    /// </summary>
+    public static int CountResources(string value, int start, int end)
+    {
+        if (value.IndexOf('(', start, end - start) < 0) return 0;
+        int count = 0;
+        char quote = '\0';
+        for (int i = start; i < end; i++)
+        {
+            char c = value[i];
+            if (c == '\\') { i++; continue; }
+            if (quote != '\0')
+            {
+                if (c == quote) quote = '\0';
+                continue;
+            }
+            if (c is '"' or '\'') quote = c;
+            else if (c == '(' && IsResourceFunction(value, i, start)) count++;
+        }
+        return count;
     }
 
     /// <summary>The value as a CSS string, with quotes, backslashes and control characters escaped.</summary>
