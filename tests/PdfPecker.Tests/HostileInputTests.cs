@@ -876,6 +876,18 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Svg_foreign_objects_drawn_again_by_use_elements_count_against_the_drawing_budget()
+    {
+        // Found by the fuzzer (target svg, memory-b7e7c7f7): a group that uses itself twice doubles its foreignObject at
+        // every level, and each copy was laid out as HTML on its own, until the heap had grown by 1.5 GB.
+        var html = "<svg width='120' height='50'><g id='s'><use href='#s' x='5'/><use href='#s' x='35'/><foreignObject x='62' width='56' height='46'>"
+            + "<div style='font:7pt sans-serif;height:40px'>" + Repeat("HTML", 1200) + "</div></foreignObject></g></svg>";
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.True(allocated < 1_000_000_000, $"{allocated:N0} bytes allocated");
+    }
+
+    [Fact]
     public void Svg_markers_that_use_other_markers_stay_within_the_drawing_budget()
     {
         // Thirty markers, each drawing the next one at both ends of its path, double at every level. Every copy counts
