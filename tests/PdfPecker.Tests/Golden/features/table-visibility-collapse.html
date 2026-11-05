@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"><head><title>Collapsed table rows and columns</title>
+<style>
+@page { size: A5; margin: 15mm } body { font: 12px sans-serif }
+table { margin-bottom: 14px; width: 100% } td { border: 1px solid #555; padding: 3px }
+.c { border-collapse: collapse }
+.x { visibility: collapse }
+.bg { background: #fed }
+</style></head><body>
+<p>1. collapsed row, collapsed borders</p>
+<table class="c"><tr><td>a1</td><td>b1</td><td>c1</td></tr><tr class="x"><td>a2</td><td>b2</td><td>c2</td></tr><tr><td>a3</td><td>b3</td><td>c3</td></tr></table>
+<p>2. collapsed row, separate borders</p>
+<table><tr><td>a1</td><td>b1</td><td>c1</td></tr><tr class="x"><td>a2</td><td>b2</td><td>c2</td></tr><tr><td>a3</td><td>b3</td><td>c3</td></tr></table>
+<p>3. collapsed tbody</p>
+<table class="c"><tbody><tr><td>a1</td><td>b1</td></tr></tbody><tbody class="x"><tr><td>hidden</td><td>hidden</td></tr><tr><td>hidden</td><td>hidden</td></tr></tbody><tbody><tr><td>a4</td><td>b4</td></tr></tbody></table>
+<p>4. rowspan across a collapsed row</p>
+<table class="c"><tr><td rowspan="3" class="bg">span<br>two<br>three<br>four</td><td>b1</td></tr><tr class="x"><td>b2</td></tr><tr><td>b3</td></tr></table>
+<p>5. collapsed column</p>
+<table class="c"><col><col class="x"><col><tr><td>a1</td><td>b1</td><td>c1</td></tr><tr><td colspan="2" class="bg">ab2 spans</td><td>c2</td></tr></table>
+<p>6. collapsed column, fixed widths</p>
+<table class="c" style="width:auto"><col style="width:80px"><col class="x" style="width:80px"><col style="width:80px"><tr><td>a1</td><td>b1</td><td>c1</td></tr></table>
+<p>7. collapse on a div acts as hidden</p>
+<div class="x" style="height:20px;background:red">x</div><div>after</div>
+</body></html>

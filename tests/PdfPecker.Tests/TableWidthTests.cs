@@ -140,4 +140,40 @@ public class TableWidthTests
         Assert.Equal(table.X + table.W, b.X + b.W, 1);
         Assert.True(b.X > 250 * 0.75f, $"second cell at {b.X}pt");
     }
+
+    private static bool HasText(List<DrawOp> ops, string word) => Flatten(ops).OfType<TextOp>().Any(t => t.Text.Contains(word, StringComparison.Ordinal));
+
+    [Fact]
+    public void ACollapsedRowTakesNoRoom()
+    {
+        // As Chrome lays the table out on screen: the row below moves up into the collapsed row's place.
+        var plain = Layout("<style>body{margin:0} td{padding:0}</style><table style='border-spacing:0'>" +
+                           "<tr><td>one</td></tr><tr><td>three</td></tr></table>");
+        var ops = Layout("<style>body{margin:0} td{padding:0}</style><table style='border-spacing:0'>" +
+                         "<tr><td>one</td></tr><tr style='visibility:collapse'><td>two</td></tr><tr><td>three</td></tr></table>");
+        Assert.False(HasText(ops, "two"));
+        Assert.Equal(Text(plain, "three").Baseline, Text(ops, "three").Baseline, 2);
+    }
+
+    [Fact]
+    public void ACollapsedRowGroupTakesItsRowsAway()
+    {
+        var ops = Layout("<style>body{margin:0} td{padding:0}</style><table style='border-spacing:0'><tbody><tr><td>one</td></tr></tbody>" +
+                         "<tbody style='visibility:collapse'><tr><td>two</td></tr><tr><td>three</td></tr></tbody><tbody><tr><td>four</td></tr></tbody></table>");
+        Assert.False(HasText(ops, "two") || HasText(ops, "three"));
+        float line = Text(ops, "four").Baseline - Text(ops, "one").Baseline;
+        Assert.InRange(line, 5, 20);
+    }
+
+    [Fact]
+    public void ACollapsedColumnLeavesWithItsShareOfTheWidth()
+    {
+        // Chrome shares the table's width out with the collapsed column too, and the table is narrower by its share.
+        var ops = Layout("<style>body{margin:0} td{padding:0}</style><table style='width:300px;border-spacing:0'>" +
+                         "<col style='width:100px'><col style='width:100px;visibility:collapse'><col style='width:100px'>" +
+                         "<tr><td>a</td><td>b</td><td>c</td></tr><tr><td colspan='2'>ab</td><td>cc</td></tr></table>");
+        Assert.DoesNotContain(Flatten(ops).OfType<TextOp>(), t => t.Text.Trim() == "b");
+        Assert.Equal(75, Text(ops, "c").X - Text(ops, "a").X, 1);
+        Assert.Equal(Text(ops, "c").X, Text(ops, "cc").X, 2);
+    }
 }

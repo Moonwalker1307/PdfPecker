@@ -332,6 +332,7 @@ internal sealed partial class ComputedStyle
     public bool NoKerning;               // font-kerning: none, or font-feature-settings: "kern" 0
     public float WordSpacing;
     public bool Visible = true;
+    public bool Collapsed; // visibility: collapse, which removes table rows and columns (Visible is false too)
     public bool CanvasBackground; // the background is painted on every page's canvas instead of on this box (html/body propagation)
     public bool BorderCollapse;
     public float BorderSpacingH, BorderSpacingV; // initially 0; the user agent style gives <table> 2px
