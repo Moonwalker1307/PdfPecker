@@ -110,7 +110,10 @@ internal sealed record SvgForeignObject(Element Element, Matrix ToRoot, float X,
 internal sealed class SvgBudget
 {
     /// <summary>Elements visited plus path points emitted, shared by every SVG of a document.</summary>
-    public long Remaining = 4_000_000;
+    public long Remaining = Initial;
+
+    /// <summary>The budget of a document.</summary>
+    public const long Initial = 4_000_000;
 }
 
 /// <summary>
@@ -531,6 +534,9 @@ internal sealed partial class SvgImage
                 // Inside a pattern tile, a mask or a filter image the content would have to be drawn into that list, and
                 // the shape index it was given pointed into that list rather than the drawing's own shapes.
                 if (!(w > 0 && h > 0) || _captureDepth > 0) return;
+                // Every recorded element is laid out as HTML on its own, so a use element that draws a group holding
+                // a foreignObject twice per level would lay out the same content exponentially often.
+                if ((_budget.Remaining -= ForeignObjectCost(e)) < 0) return;
                 ForeignObjects ??= new List<SvgForeignObject>();
                 ForeignObjects.Add(new SvgForeignObject(e, ctm, Len(e, "x", Axis.X), Len(e, "y", Axis.Y), w, h, op * _wrapOpacity,
                     _wrapDepth == 0 ? Shapes.Count : -1));
@@ -553,6 +559,35 @@ internal sealed partial class SvgImage
                 return;
         }
     }
+
+    /// <summary>
+    /// What laying out a foreignObject's content takes from the drawing budget: its nodes plus its characters, at least
+    /// <see cref="MinForeignObjectCost"/>, counted once per element and cached because use elements draw it again.
+    /// </summary>
+    private long ForeignObjectCost(Element e)
+    {
+        _foreignObjectCosts ??= new Dictionary<Element, long>(ReferenceEqualityComparer.Instance);
+        if (_foreignObjectCosts.TryGetValue(e, out long cost)) return cost;
+        cost = 0;
+        var stack = new Stack<Node>();
+        stack.Push(e);
+        // The walk stops once the cost is more than the whole budget, so a huge subtree is not walked to its end.
+        while (stack.Count > 0 && cost <= SvgBudget.Initial)
+        {
+            var node = stack.Pop();
+            cost++;
+            if (node is TextNode t) cost += t.Text.Length;
+            else if (node is Element child)
+                foreach (var c in child.Children) stack.Push(c);
+        }
+        cost = Math.Max(cost, MinForeignObjectCost);
+        _foreignObjectCosts[e] = cost;
+        return cost;
+    }
+
+    private const long MinForeignObjectCost = 256;
+
+    private Dictionary<Element, long>? _foreignObjectCosts;
 
     /// <summary>
     /// The transform that fits a symbol's viewBox into the width and height of the use element drawing it (100% of the
