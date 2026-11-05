@@ -1132,7 +1132,8 @@ internal sealed partial class LayoutEngine
             bool move = forced || allowMove && attempt == 0 && MayLayOutAgain && !AtPageTop(rowTop)
                         && (CrossesPage(rowTop, rowBottom + reserve) && rowBottom - rowTop <= _grid.Height(PageOf(rowTop) + 1)
                             && !(mayBreakInside && BreaksInside(m, r, rowTop, reserve, collapse))
-                            || keepWith > 0 && CrossesPage(rowTop, keptBottom + reserve));
+                            || keepWith > 0 && CrossesPage(rowTop, keptBottom + reserve)
+                            || SpanContentCrossesPage(m, r, rowTop, reserve));
             if (move && !CrossesPage(rowTop, rowBottom + reserve)) rowBottom = keptBottom;
             // A row that starts a page or column because the row before it ended right at the break gets the header too.
             bool atBreak = !move && allowMove && attempt == 0 && r > m.HeadCount && m.HeadCount > 0
@@ -1225,6 +1226,25 @@ internal sealed partial class LayoutEngine
                 PaintRowBackground(m, rs.BackgroundColor, rowGroup, rowTop, rowBottom, colX, widths, hs, under);
         }
         return rowBottom;
+    }
+
+    /// <summary>
+    /// Whether a cell spanning rows down from row <paramref name="r"/> has content that goes on past the end of the page
+    /// the row starts on, while the cell would fit on the next page. Its rows are laid out one at a time, so the row it
+    /// starts in may fit and stay while its content runs on past the break, where the cell's background and borders and
+    /// the repeated header do not make room for it. As when a row's own cell does not fit, the row moves to the next
+    /// page, and the rows the cell spans follow it; a spanning cell whose content fits before the break, such as a group
+    /// label, still lets its rows break between them as in Chrome.
+    /// </summary>
+    private bool SpanContentCrossesPage(TableModel m, int r, float rowTop, float reserve)
+    {
+        foreach (var cell in m.Rows[r].Cells)
+        {
+            if (cell.RowSpan == 1) continue;
+            float bottom = cell.Top + cell.ContentH;
+            if (CrossesPage(rowTop, bottom + reserve) && bottom - rowTop <= _grid.Height(PageOf(rowTop) + 1)) return true;
+        }
+        return false;
     }
 
     /// <summary>
