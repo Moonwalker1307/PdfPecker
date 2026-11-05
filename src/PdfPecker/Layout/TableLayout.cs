@@ -84,6 +84,9 @@ internal sealed partial class LayoutEngine
         public float[] ColFixed = Array.Empty<float>(), ColPct = Array.Empty<float>();
         public float[] ColSpecFixed = Array.Empty<float>(), ColSpecPct = Array.Empty<float>(); // from <col> only
         public uint[]? ColBackground, ColGroupBackground; // the background colours of <col> and <colgroup>, else null
+        // With collapsed borders, the <col> and the <colgroup> of each column, whose borders join in; null without any.
+        public ComputedStyle?[]? ColStyle;
+        public Element?[]? ColGroup;
         public float[]? RowExtra; // per layout pass: height each row gets on top of its content, to fill the table's height
         public bool DefiniteHeight; // per layout pass: the table's height is a length or a percentage that resolves
         public CellGrid Grid = new(0, 0); // the cell covering each row and column
@@ -244,6 +247,7 @@ internal sealed partial class LayoutEngine
         m.Rtl = table.Style.Rtl;
         if (table.Style.BorderCollapse)
         {
+            CollectColumnStyles(m, cols);
             ResolveCollapsedBorders(m);
             m.WholeTableSides = TableSides(m);
         }

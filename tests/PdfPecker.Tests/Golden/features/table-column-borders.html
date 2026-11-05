@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en"><head><title>Table column borders</title>
+<style>
+@page { size: A5; margin: 15mm }
+body { font: 12px sans-serif }
+table { border-collapse: collapse; margin-bottom: 14px; width: 100% }
+td, th { padding: 4px 6px }
+.t1 col.sep { border-right: 2px solid #c00 }
+.t1 { border: 1px solid #333 }
+.t2 colgroup { border: 3px solid #06c }
+.t2 col { border-left: 1px dotted #999 }
+.t3 col:nth-child(2) { border: 4px double green }
+.t3 td { border: 1px solid #aaa }
+.t4 col { border-left: 6px solid orange } .t4 td { border: 1px solid #333 }
+.t5 { direction: rtl } .t5 col.sep { border-right: 3px solid purple } .t5 td { border-bottom: 1px solid #ccc }
+.t6 col.h { border: hidden } .t6 td { border: 2px solid #333 }
+</style></head><body>
+<p>1. col border-right, table border</p>
+<table class="t1"><col class="sep"><col class="sep"><col>
+<tr><th>Item</th><th>Qty</th><th>Price</th></tr><tr><td>Apples</td><td>3</td><td>4.50</td></tr><tr><td>Pears</td><td>12</td><td>9.00</td></tr></table>
+<p>2. colgroup border, dotted col left</p>
+<table class="t2"><colgroup><col><col></colgroup><colgroup><col><col></colgroup>
+<tr><td>a</td><td>b</td><td>c</td><td>d</td></tr><tr><td colspan="2">ab</td><td>c</td><td>d</td></tr></table>
+<p>3. double col border beats cell borders</p>
+<table class="t3"><col><col><col><tr><td>a</td><td>b</td><td>c</td></tr><tr><td>a</td><td>b</td><td>c</td></tr></table>
+<p>4. thick col left vs thin cells</p>
+<table class="t4"><col span="3"><tr><td>a</td><td>b</td><td>c</td></tr><tr><td>a</td><td>b</td><td>c</td></tr></table>
+<p>5. rtl</p>
+<table class="t5"><col class="sep"><col><col><tr><td>א</td><td>ב</td><td>ג</td></tr><tr><td>א</td><td>ב</td><td>ג</td></tr></table>
+<p>6. hidden col border</p>
+<table class="t6"><col><col class="h"><col><tr><td>a</td><td>b</td><td>c</td></tr><tr><td>a</td><td>b</td><td>c</td></tr></table>
+</body></html>

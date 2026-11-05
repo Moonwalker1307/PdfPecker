@@ -1,4 +1,5 @@
 using PdfPecker.Css;
+using PdfPecker.Html;
 
 namespace PdfPecker.Layout;
 
@@ -9,12 +10,13 @@ namespace PdfPecker.Layout;
 internal sealed partial class LayoutEngine
 {
     // Where a contending border comes from; on a tie of width and style the higher origin wins (CSS 2.1 §17.6.2.1).
-    private const int TableOrigin = 0, GroupOrigin = 1, RowOrigin = 2, CellOrigin = 3;
+    private const int TableOrigin = 0, ColGroupOrigin = 1, ColOrigin = 2, GroupOrigin = 3, RowOrigin = 4, CellOrigin = 5;
 
     /// <summary>
     /// The border that wins one edge of a cell, built up by offering each border that meets there. A hidden border hides
     /// the edge; otherwise the wider border wins, then the style first in double, solid, dashed, dotted, ridge, outset,
-    /// groove, inset, then the origin (cell, row, row group, table); a full tie goes to the border offered first.
+    /// groove, inset, then the origin (cell, row, row group, column, column group, table); a full tie goes to the border
+    /// offered first.
     /// </summary>
     private struct EdgeWinner
     {
@@ -87,8 +89,9 @@ internal sealed partial class LayoutEngine
     /// <summary>
     /// The border that wins side <paramref name="side"/> of a cell, at column <paramref name="k"/> of its span for the
     /// top and bottom or row <paramref name="k"/> for the left and right: the cell's own border, the facing border of the
-    /// cell next to it, the borders of the rows and row groups that meet there and, at the table's edge, the table's.
-    /// Rows and row groups have left and right borders only along the table's edge.
+    /// cell next to it, the borders of the rows, row groups, columns and column groups that meet there and, at the table's
+    /// edge, the table's. Rows and row groups have left and right borders only along the table's edge, and columns and
+    /// column groups top and bottom borders only along it.
     /// </summary>
     private static EdgeWinner ResolveEdge(TableModel m, CellModel cell, int side, int k)
     {
@@ -105,28 +108,42 @@ internal sealed partial class LayoutEngine
                 if (r0 > 0) edge.Offer(m.Grid[r0 - 1, k]?.Td.Style, BoxPainter.Bottom, CellOrigin);
                 edge.Offer(s, BoxPainter.Top, CellOrigin, self: true);
                 OfferRows(m, ref edge, r0 - 1, r0);
-                if (r0 == 0) edge.Offer(t, BoxPainter.Top, TableOrigin);
+                if (r0 == 0)
+                {
+                    OfferColumn(m, ref edge, k, BoxPainter.Top, groupEdge: true);
+                    edge.Offer(t, BoxPainter.Top, TableOrigin);
+                }
                 break;
             case BoxPainter.Bottom:
                 edge.Offer(s, BoxPainter.Bottom, CellOrigin, self: true);
                 if (r1 < rows - 1) edge.Offer(m.Grid[r1 + 1, k]?.Td.Style, BoxPainter.Top, CellOrigin);
                 OfferRows(m, ref edge, r1, r1 + 1);
-                if (r1 >= rows - 1) edge.Offer(t, BoxPainter.Bottom, TableOrigin);
+                if (r1 >= rows - 1)
+                {
+                    OfferColumn(m, ref edge, k, BoxPainter.Bottom, groupEdge: true);
+                    edge.Offer(t, BoxPainter.Bottom, TableOrigin);
+                }
                 break;
             case BoxPainter.Left:
             {
                 // Left and right are the physical sides: right to left, the first column is on the right.
-                int next = m.Rtl ? c1 + 1 : c0 - 1;
-                if (next >= 0 && next < cols) edge.Offer(m.Grid[k, next]?.Td.Style, BoxPainter.Right, CellOrigin);
+                int own = m.Rtl ? c1 : c0, next = m.Rtl ? c1 + 1 : c0 - 1;
+                bool inside = next >= 0 && next < cols;
+                if (inside) edge.Offer(m.Grid[k, next]?.Td.Style, BoxPainter.Right, CellOrigin);
                 edge.Offer(s, BoxPainter.Left, CellOrigin, self: true);
-                if (next < 0 || next >= cols) OfferOuter(m, ref edge, k, BoxPainter.Left);
+                if (inside) OfferColumn(m, ref edge, next, BoxPainter.Right, NewColumnGroup(m, next, own));
+                OfferColumn(m, ref edge, own, BoxPainter.Left, !inside || NewColumnGroup(m, next, own));
+                if (!inside) OfferOuter(m, ref edge, k, BoxPainter.Left);
                 break;
             }
             default:
             {
-                int next = m.Rtl ? c0 - 1 : c1 + 1;
+                int own = m.Rtl ? c0 : c1, next = m.Rtl ? c0 - 1 : c1 + 1;
+                bool inside = next >= 0 && next < cols;
                 edge.Offer(s, BoxPainter.Right, CellOrigin, self: true);
-                if (next >= 0 && next < cols) edge.Offer(m.Grid[k, next]?.Td.Style, BoxPainter.Left, CellOrigin);
+                if (inside) edge.Offer(m.Grid[k, next]?.Td.Style, BoxPainter.Left, CellOrigin);
+                OfferColumn(m, ref edge, own, BoxPainter.Right, !inside || NewColumnGroup(m, own, next));
+                if (inside) OfferColumn(m, ref edge, next, BoxPainter.Left, NewColumnGroup(m, own, next));
                 else OfferOuter(m, ref edge, k, BoxPainter.Right);
                 break;
             }
@@ -146,6 +163,39 @@ internal sealed partial class LayoutEngine
         {
             edge.Offer(up?.Group?.Style, BoxPainter.Bottom, GroupOrigin);
             edge.Offer(down?.Group?.Style, BoxPainter.Top, GroupOrigin);
+        }
+    }
+
+    /// <summary>
+    /// Offers side <paramref name="side"/> of column <paramref name="c"/>'s <c>col</c> and, where
+    /// <paramref name="groupEdge"/> says the column group starts or ends there, of its <c>colgroup</c>.
+    /// </summary>
+    private static void OfferColumn(TableModel m, ref EdgeWinner edge, int c, int side, bool groupEdge)
+    {
+        edge.Offer(m.ColStyle?[c], side, ColOrigin);
+        if (groupEdge) edge.Offer(m.ColGroup?[c]?.Style, side, ColGroupOrigin);
+    }
+
+    /// <summary>Whether columns <paramref name="a"/> and <paramref name="b"/>, side by side, are in different column groups.</summary>
+    private static bool NewColumnGroup(TableModel m, int a, int b) => m.ColGroup is { } groups && groups[a] != groups[b];
+
+    /// <summary>
+    /// Notes the <c>col</c> and <c>colgroup</c> of each column, for the collapsed borders. A <c>colgroup</c> without
+    /// <c>col</c> children stands for its columns itself, as their group.
+    /// </summary>
+    private static void CollectColumnStyles(TableModel m, List<Element> cols)
+    {
+        int n = m.ColCount, c = 0;
+        foreach (var col in cols)
+        {
+            bool group = col.Style.Display == Display.TableColumnGroup;
+            var parent = group ? col : col.Parent is { Style.Display: Display.TableColumnGroup } cg ? cg : null;
+            int span = Math.Max(1, ParseInt(col.GetAttribute("span"), 1));
+            for (int k = 0; k < span && c < n; k++, c++)
+            {
+                if (!group) (m.ColStyle ??= new ComputedStyle?[n])[c] = col.Style;
+                if (parent != null) (m.ColGroup ??= new Element?[n])[c] = parent;
+            }
         }
     }
 
@@ -330,7 +380,10 @@ internal sealed partial class LayoutEngine
         foreach (int side in (ReadOnlySpan<int>)[BoxPainter.Top, BoxPainter.Bottom, BoxPainter.Left, BoxPainter.Right])
         {
             bool edgeOfTable = side switch { BoxPainter.Top => first, BoxPainter.Bottom => last, BoxPainter.Left => leftEdge, _ => rightEdge };
-            if (side != BoxPainter.Top && !edgeOfTable) continue;
+            // Inside the table, a column's border between two cells is drawn by the cell on its left, and by the cell
+            // on its right only where no cell is on the left.
+            if (side == BoxPainter.Bottom && !edgeOfTable) continue;
+            if (side == BoxPainter.Left && !edgeOfTable && m.Grid[cell.Row, m.Rtl ? cell.Col + cell.ColSpan : cell.Col - 1] != null) continue;
             if (edgeOfTable && (m.WholeTableSides & side) != 0) continue;
             if ((cell.ForeignSides & side) == 0) continue;
             var edge = ResolveEdge(m, cell, side, side is BoxPainter.Top or BoxPainter.Bottom ? cell.Col : cell.Row);
