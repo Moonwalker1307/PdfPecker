@@ -187,4 +187,35 @@ public class TablePaginationTests
         var head = pages[1].Lines.Single(l => l.Text == "Head");
         Assert.InRange(after.Y - head.Y, 145, 155);
     }
+
+    [Fact]
+    public void A_row_whose_spanning_cell_would_run_past_the_page_end_moves_to_the_next_page()
+    {
+        // The first row of the span fits, but the spanning cell's ten lines do not: before, the row stayed and the cell's
+        // text ran on past the page end, under the repeated header. Now the row moves and the span stays together.
+        var html = "<table style='border-spacing: 0'><thead><tr><th>Head</th></tr></thead><tbody>"
+                   + string.Concat(Enumerable.Range(1, 8).Select(i => $"<tr><td style='height: 30pt'>Row {i}</td><td></td></tr>"))
+                   + "<tr><td rowspan='2'>" + string.Join("<br>", Enumerable.Range(1, 10).Select(i => "Span " + i)) + "</td><td>First</td></tr>"
+                   + "<tr><td>Second</td></tr></tbody></table>";
+        var pages = Pages(html);
+        Assert.Equal(2, pages.Count);
+        var second = pages[1].Lines.Select(l => l.Text).ToList();
+        Assert.Equal("Head", second[0]);
+        Assert.StartsWith("Span 1", second[1], StringComparison.Ordinal);
+        Assert.Contains(second, l => l.Contains("Span 10", StringComparison.Ordinal));
+        Assert.DoesNotContain(pages[0].Lines, l => l.Text.Contains("Span", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void A_spanning_cell_whose_content_fits_still_lets_its_rows_break_between_them()
+    {
+        // As in Chrome, a short group label spanning many rows does not keep them all together.
+        var html = "<table style='border-spacing: 0'><tbody>"
+                   + string.Concat(Enumerable.Range(1, 8).Select(i => $"<tr><td style='height: 30pt'>Row {i}</td><td></td></tr>"))
+                   + "<tr><td rowspan='4'>Group</td><td style='height: 30pt'>Item 1</td></tr>"
+                   + string.Concat(Enumerable.Range(2, 3).Select(i => $"<tr><td style='height: 30pt'>Item {i}</td></tr>")) + "</tbody></table>";
+        var pages = Pages(html);
+        Assert.Contains(pages[0].Lines, l => l.Text.Contains("Group", StringComparison.Ordinal));
+        Assert.Contains(pages[1].Lines, l => l.Text.Contains("Item 4", StringComparison.Ordinal));
+    }
 }
