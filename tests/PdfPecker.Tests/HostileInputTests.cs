@@ -1021,6 +1021,20 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Filters_over_many_inset_shadows_count_the_rings_they_fill()
+    {
+        // Found by the fuzzer: target css, timeout-78eeadf2 (daily run 93). Every blurred inset shadow is a few rings as
+        // large as the box, which the renderer fills one after the other inside the box's clip, and the work budget did
+        // not count those fills, so these twenty boxes of 700 shadows each took 30 s.
+        var shadows = string.Join(",", Enumerable.Repeat("inset 2px 3px 4px #0003", 700));
+        var html = Repeat($"<div style='height:40px;border-radius:10px;box-shadow:{shadows};filter:blur(2px)'></div>", 20);
+        var pdf = Bounded(() => Bounded(html, new PdfOptions { Compress = false }));
+        AssertStructurallyValid(pdf);
+        // Each box is beyond the document's budget on its own, so all of them are drawn without the filter.
+        Assert.Equal(0, CountOf(Latin1(pdf), "/Subtype /Image"));
+    }
+
+    [Fact]
     public void Mask_layers_are_capped()
     {
         // Each mask layer nests a soft mask in the one below it, so the declaration is dropped beyond sixteen layers.

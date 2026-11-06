@@ -195,7 +195,7 @@ internal sealed partial class PdfDocumentWriter
         var (w, h) = FilterPixels(pw, ph);
         // The backdrops filtered already that are behind this one are decoded and drawn again in its rendering, so boxes
         // stacked on each other cost the square of their number.
-        if (!WithinRenderBudget(f, behind, w, h, BackdropImagePixels(behind) * ImageWorkPerPixel)) return default;
+        if (!WithinRenderBudget(f, behind, w, h, w * (double)h / (rw * rh), BackdropImagePixels(behind) * ImageWorkPerPixel)) return default;
         var pdf = RenderFlow(behind, rx, ry, rw, rh);
         if (pdf == null) return default;
         var source = RenderPremultiplied(pdf, w, h);
