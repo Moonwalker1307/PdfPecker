@@ -290,6 +290,126 @@ public class TextExtractionTests
         Assert.Equal(split.Words[^1].X + split.Words[^1].Width, split.X + split.Width, 3);
     }
 
+    private static readonly string[] Story =
+    [
+        "The first trams will run in the spring of 2029, if the contractors keep to the schedule that was agreed last month. The route follows the old railway embankment for most of its length, which keeps the cost of buying land low and avoids the narrow streets of the old town.",
+        "Residents along the embankment have asked for noise barriers and for the trees that line the path to be kept. The planning office says that most of the trees can stay, because the tracks need less room than the railway did, and that new trees will be planted where old ones must go.",
+        "Who pays for it",
+        "The national government pays forty percent of the construction cost under its programme for public transport in medium sized towns. The rest comes from the municipality and the regional health authority, which wants a faster connection for patients and staff.",
+        "Ticket prices will match the bus fares, and a single ticket will be valid on both for ninety minutes. Season passes bought before the opening keep their price for the first year.",
+        "What happens next",
+        "Archaeologists will survey the eastern section during the summer, where a medieval road is thought to cross the embankment. Construction of the depot starts in the autumn, and the first rails are laid the following year.",
+        "The council will hold three public meetings before the detailed plans are approved. The first is at the library on the second of March, and the plans can be read online and at the town hall until then.",
+        "A smaller second line to the harbour is being studied as well, but no money has been set aside for it yet. Its fate depends on how many passengers the first line carries in its first two years.",
+    ];
+
+    private static void AssertStoryInOrder(string text)
+    {
+        text = text.Replace('\n', ' ').Replace("  ", " ");
+        int at = -1;
+        foreach (var paragraph in Story)
+        {
+            int next = text.IndexOf(paragraph, StringComparison.Ordinal);
+            Assert.True(next > at, $"Out of order or missing: {paragraph[..Math.Min(30, paragraph.Length)]}\n{text}");
+            at = next;
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Columns_whose_paragraphs_do_not_line_up_are_read_one_after_the_other(bool tagged)
+    {
+        // The columns flow freely, so paragraphs run on from one column to the next and the two columns start their
+        // paragraphs at different heights, which ends the layout's group of side-by-side lines part of the way down.
+        var pdf = HtmlToPdf.Convert(
+            "<style>@page{size:A4;margin:18mm 16mm} body{margin:0;font:10.5pt/1.4 serif} h2{font:bold 12.5pt/1.25 sans-serif;margin:10pt 0 4pt}" +
+            " p{margin:0 0 6pt}</style><h1>Harbour town plans a new tram line</h1><div style='columns:2;column-gap:9mm;text-align:justify'>" +
+            string.Concat(Story.Select(p => p.Length < 20 ? "<h2>" + p + "</h2>" : "<p>" + p + "</p>")) + "</div>",
+            new PdfOptions { Accessibility = tagged ? PdfAccessibility.Tagged : PdfAccessibility.None });
+        var text = PdfText.ExtractPage(pdf, 1).Text;
+        Assert.StartsWith("Harbour town plans a new tram line\n\n", text);
+        AssertStoryInOrder(text);
+    }
+
+    [Fact]
+    public void The_lines_of_the_longer_column_stay_in_that_column()
+    {
+        // Two columns of lines placed one by one, drawn across the page, where the left column has two lines more
+        // than the right: those two lines have nothing beside them and end the left column, not the page.
+        var left = new[]
+        {
+            "The first trams will run in the spring of", "2029, if the contractors keep to the", "schedule that was agreed last month. The",
+            "route follows the old railway embankment for", "most of its length, which keeps the cost of", "buying land low and avoids the narrow",
+            "streets of the old town. Residents along the", "embankment have asked for noise barriers and", "for the trees that line the path to be kept.",
+            "The planning office says that most of the", "trees can stay.",
+        };
+        var right = new[]
+        {
+            "The national government pays forty percent", "of the construction cost under its programme", "for public transport in medium sized towns.",
+            "The rest comes from the municipality and the", "regional health authority, which wants a", "faster connection for patients and staff.",
+            "Ticket prices will match the bus fares, and", "a single ticket will be valid on both for", "ninety minutes.",
+        };
+        var html = new StringBuilder("<div style='position:relative;height:200mm;font:10.5pt serif'>");
+        for (int i = 0; i < left.Length; i++)
+        {
+            string top = (i * 5.2).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            html.Append($"<div style='position:absolute;white-space:nowrap;left:0;top:{top}mm'>{left[i]}</div>");
+            if (i < right.Length) html.Append($"<div style='position:absolute;white-space:nowrap;left:92mm;top:{top}mm'>{right[i]}</div>");
+        }
+        html.Append("</div>");
+        var page = PdfText.ExtractPage(HtmlToPdf.Convert(html.ToString()), 1);
+        Assert.Equal(left.Concat(right), page.Lines.Select(l => l.Text));
+    }
+
+    [Fact]
+    public void A_tagged_paragraph_that_runs_on_into_the_next_column_is_read_in_column_order()
+    {
+        // As word processors write two columns: the second paragraph starts at the foot of the left column and ends at
+        // the top of the right one, as one tagged paragraph whose text is drawn in that order.
+        var content = new StringBuilder();
+        string Line(double x, double y, string text) => $"BT /F1 10 Tf {x.ToString(System.Globalization.CultureInfo.InvariantCulture)} {y.ToString(System.Globalization.CultureInfo.InvariantCulture)} Td ({text}) Tj ET\n";
+        var first = new[] { "First paragraph line one", "First paragraph line two", "First paragraph line three" };
+        var secondLeft = new[] { "Second paragraph begins here", "and goes on down the column" };
+        var secondRight = new[] { "and ends at the top of the", "right column after the turn." };
+        var third = new[] { "Third paragraph line one", "Third paragraph line two" };
+        content.Append("/P <</MCID 0>> BDC\n");
+        for (int i = 0; i < first.Length; i++) content.Append(Line(72, 700 - 14 * i, first[i]));
+        content.Append("EMC\n/P <</MCID 1>> BDC\n");
+        for (int i = 0; i < secondLeft.Length; i++) content.Append(Line(72, 700 - 14 * (first.Length + 1 + i), secondLeft[i]));
+        for (int i = 0; i < secondRight.Length; i++) content.Append(Line(320, 700 - 14 * i, secondRight[i]));
+        content.Append("EMC\n/P <</MCID 2>> BDC\n");
+        for (int i = 0; i < third.Length; i++) content.Append(Line(320, 700 - 14 * (secondRight.Length + 1 + i), third[i]));
+        content.Append("EMC");
+        var objects = new List<string>
+        {
+            "<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 6 0 R /MarkInfo << /Marked true >> >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R /StructParents 0 >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+            $"<< /Length {content.Length} >>\nstream\n{content}\nendstream",
+            "<< /Type /StructTreeRoot /K 7 0 R >>",
+            "<< /Type /StructElem /S /Document /P 6 0 R /K [8 0 R 9 0 R 10 0 R] >>",
+            "<< /Type /StructElem /S /P /P 7 0 R /Pg 3 0 R /K 0 >>",
+            "<< /Type /StructElem /S /P /P 7 0 R /Pg 3 0 R /K 1 >>",
+            "<< /Type /StructElem /S /P /P 7 0 R /Pg 3 0 R /K 2 >>",
+        };
+        var pdf = new StringBuilder("%PDF-1.7\n");
+        var offsets = new List<int>();
+        for (int i = 0; i < objects.Count; i++)
+        {
+            offsets.Add(pdf.Length);
+            pdf.Append(i + 1).Append(" 0 obj\n").Append(objects[i]).Append("\nendobj\n");
+        }
+        int xref = pdf.Length;
+        pdf.Append("xref\n0 ").Append(objects.Count + 1).Append("\n0000000000 65535 f \n");
+        foreach (var o in offsets) pdf.Append(o.ToString("D10", System.Globalization.CultureInfo.InvariantCulture)).Append(" 00000 n \n");
+        pdf.Append("trailer\n<< /Size ").Append(objects.Count + 1).Append(" /Root 1 0 R >>\nstartxref\n").Append(xref).Append("\n%%EOF\n");
+
+        var page = PdfText.ExtractPage(Encoding.Latin1.GetBytes(pdf.ToString()), 1);
+        Assert.Equal(first.Concat(secondLeft).Concat(secondRight).Concat(third), page.Lines.Select(l => l.Text));
+    }
+
     [Fact]
     public void Text_in_one_column_reads_as_from_the_top_down()
     {
