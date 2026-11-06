@@ -20,7 +20,7 @@ public class ComputedStyleInheritanceTests
         "FontSizeAbsolute", "LineHeightKind", "LineHeightValue", "TextAlign", "Rtl", "WritingMode", "NoHyphens",
         "HyphensAuto", "Lang", "Quirks", "Hyphenation", "SmallCaps", "WhiteSpace", "TextWrap", "OverflowWrap", "WordBreak",
         "ListStyleType", "ListStylePositionInside", "TextTransform", "TextDecoration", "TextIndent", "LetterSpacing",
-        "NoLigatures", "NoContextual", "CaltSetting", "NoKerning", "WordSpacing", "Visible", "BorderCollapse",
+        "NoLigatures", "NoContextual", "CaltSetting", "NoKerning", "WordSpacing", "Visible", "Collapsed", "BorderCollapse",
         "BorderSpacingH", "BorderSpacingV",
         "FontFamilyName", "Fonts", "MissingFonts", "CustomProperties", "PageName", "BoxReverse",
         "_typography", "_decoration", "_svgPaint",

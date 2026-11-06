@@ -90,6 +90,9 @@ internal sealed partial class LayoutEngine
         public float[]? RowExtra; // per layout pass: height each row gets on top of its content, to fill the table's height
         public bool DefiniteHeight; // per layout pass: the table's height is a length or a percentage that resolves
         public CellGrid Grid = new(0, 0); // the cell covering each row and column
+        // With collapsed columns, the table as it is with them, which shares out the widths, and the columns that stay.
+        public TableModel? Uncollapsed;
+        public int[]? KeptColumns;
         public ComputedStyle TableStyle = null!;
         public int WholeTableSides; // with collapsed borders, the sides of its own border the table draws whole
         public readonly List<TableBreak> Breaks = new(); // per layout pass, with collapsed borders: where rows moved to the next page
@@ -104,6 +107,7 @@ internal sealed partial class LayoutEngine
     private readonly record struct TableBreak(float BodyEnd, float End, float EdgeHalf, bool Footer, float PageTop, float Resume);
 
     private readonly Dictionary<Element, TableModel> _tables = new();
+    private readonly Dictionary<Element, TableModel> _uncollapsedTables = new(); // see TableModel.Uncollapsed
 
     /// <summary>
     /// How many layouts of table rows are in progress whose drawing is thrown away and only their heights are used:
@@ -168,6 +172,66 @@ internal sealed partial class LayoutEngine
     private float SplitRowFoot(int page) => _splitRow is { } r && page >= r.FirstPage ? r.Foot : 0;
 
     /// <summary>
+    /// Takes the rows and columns with <c>visibility: collapse</c> out of the table, as Chrome lays a table out on screen
+    /// and as CSS 2.1 §17.5.5 says: they take no room, and a cell spanning them loses their share. A cell that lies only in
+    /// removed rows or columns goes with them. (Chrome's print layout keeps collapsed rows; it removes columns.) With
+    /// <paramref name="columns"/> false only the rows go. Returns the columns that stay when some columns went, else null.
+    /// </summary>
+    private static int[]? RemoveCollapsed(TableModel m, List<Element> cols, bool columns)
+    {
+        int n = m.ColCount, rows = m.Rows.Count;
+        bool[]? colGone = null;
+        int c = 0;
+        foreach (var col in cols)
+        {
+            int span = Math.Max(1, ParseInt(col.GetAttribute("span"), 1));
+            for (int k = 0; k < span && c < n; k++, c++)
+                if (columns && col.Style.Collapsed) (colGone ??= new bool[n])[c] = true;
+        }
+        bool rowGone = false;
+        foreach (var row in m.Rows) rowGone |= row.Tr.Style.Collapsed;
+        if (colGone == null && !rowGone) return null;
+
+        // Where each row and column, and the end of the table, lands once the collapsed ones are gone.
+        var colAt = new int[n + 1];
+        for (int i = 0; i < n; i++) colAt[i + 1] = colAt[i] + (colGone != null && colGone[i] ? 0 : 1);
+        var rowAt = new int[rows + 1];
+        for (int r = 0; r < rows; r++) rowAt[r + 1] = rowAt[r] + (m.Rows[r].Tr.Style.Collapsed ? 0 : 1);
+
+        var old = m.Rows.ToArray();
+        m.Rows.Clear();
+        foreach (var row in old)
+            if (!row.Tr.Style.Collapsed) m.Rows.Add(new RowModel { Tr = row.Tr, Group = row.Group });
+        foreach (var row in old)
+            foreach (var cell in row.Cells)
+            {
+                int r0 = rowAt[cell.Row], r1 = rowAt[Math.Min(rows, cell.Row + cell.RowSpan)];
+                int c0 = colAt[Math.Min(n, cell.Col)], c1 = colAt[Math.Min(n, cell.Col + cell.ColSpan)];
+                if (r1 == r0 || c1 == c0) continue;
+                cell.Row = r0;
+                cell.RowSpan = r1 - r0;
+                cell.Col = c0;
+                cell.ColSpan = c1 - c0;
+                m.Rows[r0].Cells.Add(cell);
+                m.Rows[r1 - 1].Ending.Add(cell);
+            }
+        // A cell that started in a removed row now starts in the next row, among cells further left.
+        foreach (var row in m.Rows)
+        {
+            row.Cells.Sort(static (a, b) => a.Col.CompareTo(b.Col));
+            row.Ending.Sort(static (a, b) => a.Col.CompareTo(b.Col));
+        }
+        m.HeadCount = rowAt[m.HeadCount];
+        m.FootCount = rowAt[rows] - rowAt[rows - m.FootCount];
+        m.ColCount = colAt[n];
+        if (colGone == null) return null;
+        var kept = new int[m.ColCount];
+        for (int i = 0; i < n; i++)
+            if (!colGone[i]) kept[colAt[i]] = i;
+        return kept;
+    }
+
+    /// <summary>
     /// The bottom of a box from <paramref name="top"/> to <paramref name="bottom"/> once the room for a split row's
     /// repeated footer and header at each page break it crosses is added, as its size goes on below the header.
     /// </summary>
@@ -181,9 +245,10 @@ internal sealed partial class LayoutEngine
     }
     private int _rowAboveFoot; // the body row above the footer repeated on this page
 
-    private TableModel GetTableModel(Element table)
+    private TableModel GetTableModel(Element table, bool keepColumns = false)
     {
-        if (_tables.TryGetValue(table, out var m)) return m;
+        var cache = keepColumns ? _uncollapsedTables : _tables;
+        if (cache.TryGetValue(table, out var m)) return m;
         m = new TableModel();
         var head = new List<Element>();
         var body = new List<Element>();
@@ -238,6 +303,11 @@ internal sealed partial class LayoutEngine
             }
         }
 
+        if (RemoveCollapsed(m, cols, columns: !keepColumns) is { } kept)
+        {
+            m.KeptColumns = kept;
+            m.Uncollapsed = GetTableModel(table, keepColumns: true);
+        }
         m.TableStyle = table.Style;
         m.Grid = new CellGrid(m.Rows.Count, m.ColCount);
         foreach (var row in m.Rows)
@@ -247,7 +317,7 @@ internal sealed partial class LayoutEngine
         m.Rtl = table.Style.Rtl;
         if (table.Style.BorderCollapse)
         {
-            CollectColumnStyles(m, cols);
+            CollectColumnStyles(m, cols, keepColumns);
             ResolveCollapsedBorders(m);
             m.WholeTableSides = TableSides(m);
         }
@@ -263,6 +333,8 @@ internal sealed partial class LayoutEngine
         int colIndex = 0;
         foreach (var col in cols)
         {
+            // A collapsed column was taken out of the table (see RemoveCollapsed).
+            if (col.Style.Collapsed && !keepColumns) continue;
             int span = Math.Max(1, ParseInt(col.GetAttribute("span"), 1));
             var cs = col.Style;
             uint groupBg = col.Parent is { Style.Display: Display.TableColumnGroup } cg && cg != col ? cg.Style.BackgroundColor : 0;
@@ -335,7 +407,7 @@ internal sealed partial class LayoutEngine
             pctLeft -= m.ColPct[c];
         }
 
-        _tables[table] = m;
+        cache[table] = m;
         return m;
     }
 
@@ -845,6 +917,9 @@ internal sealed partial class LayoutEngine
         }
         int n = m.ColCount;
         float gridSpace = n > 0 ? (n + 1) * hs : 0; // an empty table has no border spacing, as in Chrome
+        // As in Chrome, collapsed columns share the width out with the others and then leave, taking their share.
+        var wm = m.Uncollapsed ?? m;
+        float allocSpace = wm.ColCount > 0 ? (wm.ColCount + 1) * hs : 0;
         bool specified = !s.Width.IsAuto;
         float frameH = frameL + frameR, frameV = frameT + frameB;
         // aspect-ratio and an auto width: a fixed height (or a min-height wider than the content) sets the width as a
@@ -871,21 +946,21 @@ internal sealed partial class LayoutEngine
                 tw = s.Width.Resolve(availW);
                 if (!s.BorderBox) tw += frameH;
             }
-            avail = tw - frameH - gridSpace;
+            avail = tw - frameH - allocSpace;
             specified = true;
         }
-        else avail = Math.Min(availW - ml - mr, ratioMax) - frameH - gridSpace;
-        if (!s.MaxWidth.IsAuto) avail = Math.Min(avail, s.MaxWidth.Resolve(availW) - frameL - frameR - gridSpace);
+        else avail = Math.Min(availW - ml - mr, ratioMax) - frameH - allocSpace;
+        if (!s.MaxWidth.IsAuto) avail = Math.Min(avail, s.MaxWidth.Resolve(availW) - frameL - frameR - allocSpace);
         // As in Chrome, a table of auto width with percentage columns is as wide as their percentages need (when there
         // is room), and its columns then share that width as they would a specified one.
         bool fill = specified;
-        if (!specified && HasPercentColumn(m))
+        if (!specified && HasPercentColumn(wm))
         {
-            avail = Math.Min(avail, ColumnsMaxWidth(m));
+            avail = Math.Min(avail, ColumnsMaxWidth(wm));
             fill = true;
         }
 
-        var widths = specified && s.TableLayoutFixed ? FixedColumns(m, avail) : AllocateColumns(m, avail, fill);
+        var widths = KeptColumns(m, specified && s.TableLayoutFixed ? FixedColumns(wm, avail) : AllocateColumns(wm, avail, fill));
         float contentW = gridSpace;
         foreach (var cw in widths) contentW += cw;
         // As in Chrome, a table is at least as wide as its captions' min-content widths: the columns share the rest.
@@ -915,6 +990,15 @@ internal sealed partial class LayoutEngine
         for (int c = 0; c < n; c++) { colX[c] = cxp; cxp += widths[c] + hs; }
         colX[n] = cxp;
         return (bx, boxW, frameT, frameB, frameH, colX, widths);
+    }
+
+    /// <summary>The widths of the columns that stay, out of those <see cref="TableModel.Uncollapsed"/> was given.</summary>
+    private static float[] KeptColumns(TableModel m, float[] widths)
+    {
+        if (m.KeptColumns is not { } kept) return widths;
+        var w = new float[kept.Length];
+        for (int i = 0; i < kept.Length; i++) w[i] = widths[kept[i]];
+        return w;
     }
 
     /// <summary>

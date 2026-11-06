@@ -132,7 +132,7 @@ internal sealed partial class StyleResolver
             case "bottom": s.Bottom = from.Bottom; break;
             case "left": s.Left = from.Left; break;
             case "box-sizing": s.BorderBox = from.BorderBox; break;
-            case "visibility": s.Visible = from.Visible; break;
+            case "visibility": s.Visible = from.Visible; s.Collapsed = from.Collapsed; break;
             case "image-orientation": s.ImageOrientationNone = from.ImageOrientationNone; break;
             case "image-rendering": s.ImagePixelated = from.ImagePixelated; break;
             case "-pdfpecker-image-quality": s.ImageQuality = from.ImageQuality; break;

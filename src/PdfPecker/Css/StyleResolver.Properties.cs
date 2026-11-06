@@ -65,7 +65,10 @@ internal sealed partial class StyleResolver
             case "overflow-y":
                 ApplyOverflow(s, parent, prop, in d);
                 break;
-            case "visibility": s.Visible = d.Lower is not ("hidden" or "collapse"); break;
+            case "visibility":
+                s.Visible = d.Lower is not ("hidden" or "collapse");
+                s.Collapsed = d.Lower == "collapse";
+                break;
             case "box-sizing": s.BorderBox = d.Lower == "border-box"; break;
             case "margin-top": SetLength(ref s.MarginTop, d.Lower, d.Em, d.Inherit ? parent.MarginTop : null); break;
             case "margin-right": SetLength(ref s.MarginRight, d.Lower, d.Em, d.Inherit ? parent.MarginRight : null); break;

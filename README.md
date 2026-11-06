@@ -207,10 +207,11 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
 
 ## Features
 
-- **HTML and CSS**: flexbox, grid and subgrid, CSS tables (collapsed borders also from `col` and `colgroup`), floats
-  with `shape-outside`, `clip-path` shapes (also `rect()` and `xywh()`), sizes that fill the containing block (`width:
-  stretch` and `-webkit-fill-available`, also for heights and their limits), `corner-shape` (squircle, bevel, scoop,
-  notch and `superellipse()` corners on borders, backgrounds, shadows, outlines and clips), `overflow: clip` with `overflow-clip-margin`, `zoom` (as Chrome
+- **HTML and CSS**: flexbox, grid and subgrid, CSS tables (collapsed borders also from `col` and `colgroup`; rows and
+  columns with `visibility: collapse` leave), floats with `shape-outside`, `clip-path` shapes (also `rect()` and
+  `xywh()`), sizes that fill the containing block (`width: stretch` and `-webkit-fill-available`, also for heights and
+  their limits), `corner-shape` (squircle, bevel, scoop, notch and `superellipse()` corners on borders, backgrounds,
+  shadows, outlines and clips), `overflow: clip` with `overflow-clip-margin`, `zoom` (as Chrome
   computes it, for templates that shrink a page to fit), multi-column layout, gap decorations (`column-rule` and
   `row-rule` in grid and flex containers too, with lists and `repeat()`, `rule-break`, `rule-inset`,
   `rule-visibility-items` and `rule-overlap`, cut where a grid or flex container breaks across pages),

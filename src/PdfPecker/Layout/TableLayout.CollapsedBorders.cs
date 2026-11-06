@@ -181,13 +181,16 @@ internal sealed partial class LayoutEngine
 
     /// <summary>
     /// Notes the <c>col</c> and <c>colgroup</c> of each column, for the collapsed borders. A <c>colgroup</c> without
-    /// <c>col</c> children stands for its columns itself, as their group.
+    /// <c>col</c> children stands for its columns itself, as their group. Collapsed columns count only when
+    /// <paramref name="keepCollapsed"/> says the table still has them.
     /// </summary>
-    private static void CollectColumnStyles(TableModel m, List<Element> cols)
+    private static void CollectColumnStyles(TableModel m, List<Element> cols, bool keepCollapsed)
     {
         int n = m.ColCount, c = 0;
         foreach (var col in cols)
         {
+            // A collapsed column was taken out of the table (see RemoveCollapsed).
+            if (col.Style.Collapsed && !keepCollapsed) continue;
             bool group = col.Style.Display == Display.TableColumnGroup;
             var parent = group ? col : col.Parent is { Style.Display: Display.TableColumnGroup } cg ? cg : null;
             int span = Math.Max(1, ParseInt(col.GetAttribute("span"), 1));
