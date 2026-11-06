@@ -61,7 +61,7 @@ internal sealed partial class PdfDocumentWriter
         float density = layer.RasterDensity > 0 ? layer.RasterDensity : FilterPixelsPerPoint;
         double pw = Math.Ceiling(rw * density), ph = Math.Ceiling(rh * density);
         var (w, h) = FilterPixels(pw, ph);
-        if (!WithinRenderBudget(f, layer.Ops, w, h)) return (-1, 0, 0, 0, 0, 0, 0); // drawn without the filter
+        if (!WithinRenderBudget(f, layer.Ops, w, h, w * (double)h / (rw * rh))) return (-1, 0, 0, 0, 0, 0, 0); // drawn without the filter
         // A page of w × h points shows the flow rectangle (rx, ry, rw, rh) scaled to fill it, one point per pixel: the
         // margins move the flow's origin off the page (and keep all of it on the first page), and a layer scales it.
         var page = new PageSetup { Width = w, Height = h, MarginLeft = -rx, MarginTop = -ry, MarginBottom = -1e6f };
@@ -104,6 +104,10 @@ internal sealed partial class PdfDocumentWriter
     // pixel of a filter primitive.
     private const long CanvasWorkPerPixel = 2;
 
+    // A shape is rasterized and composited over every pixel of its bounds, and a clip is made into a mask over every
+    // pixel of its rectangle: measured at about twice the work of a pixel of a filter primitive.
+    private const long FillWorkPerPixel = 2;
+
     // A gradient is evaluated again at every pixel it paints: measured at about four times the work of a pixel of a
     // filter primitive.
     private const long GradientWorkPerPixel = 4;
@@ -112,13 +116,14 @@ internal sealed partial class PdfDocumentWriter
     /// Whether a filter may run on w × h pixels of ops rendered through a page of their own, counting its work against the
     /// document's budget when it may. Besides the filter's own work, the renderer paints every transparency group and
     /// soft mask in the ops on a canvas of its own the size of the whole image, so hundreds of masked boxes nested in
-    /// each other cost hundreds of full images, and every background gradient may cover the whole image too;
-    /// <paramref name="imageWork"/> is the work of the images drawn in the ops. A filter whose canvases, gradients and
-    /// images alone are beyond the document's budget never runs.
+    /// each other cost hundreds of full images, and every background gradient may cover the whole image too. Every shape
+    /// and clip is filled over its own area, at <paramref name="pixelsPerArea"/> pixels per square point;
+    /// <paramref name="imageWork"/> is the work of the images drawn in the ops. A filter whose canvases, gradients,
+    /// fills and images alone are beyond the document's budget never runs.
     /// </summary>
-    private bool WithinRenderBudget(SvgFilter f, List<DrawOp> ops, int w, int h, long imageWork = 0)
+    private bool WithinRenderBudget(SvgFilter f, List<DrawOp> ops, int w, int h, double pixelsPerArea, long imageWork = 0)
     {
-        long canvasWork = RenderWorkPerPixel(ops) * w * h + imageWork;
+        long canvasWork = RenderWorkPerPixel(ops) * w * h + FillPixels(ops, pixelsPerArea, (long)w * h) * FillWorkPerPixel + imageWork;
         return canvasWork <= SvgFilter.MaxDocumentWork && f.WithinBudget(w, h) && FilterBudget.TrySpend(f.DocumentWork(w, h) + canvasWork);
     }
 
@@ -136,6 +141,36 @@ internal sealed partial class PdfDocumentWriter
             if (op is LayerOp l) n += ((l.NeedsGroup ? 1 : 0) + (l.Mask?.Length ?? 0) + (l.MaskFill != null ? 1 : 0)) * CanvasWorkPerPixel;
             if (op is BackgroundOp { Gradient: { } g }) n += g.Alphas != null ? CanvasWorkPerPixel + 2 * GradientWorkPerPixel : GradientWorkPerPixel;
             if (op is GroupOp group) n += RenderWorkPerPixel(group.Ops);
+        }
+        return n;
+    }
+
+    /// <summary>
+    /// The pixels the renderer fills for the ops, each shape over its bounds and each clip over its rectangle, at most the
+    /// whole image (<paramref name="imagePixels"/>) each. Hundreds of inset box shadows in one blurred box are thousands of
+    /// rings, each as large as the box, which took seconds while the budget counted only the image once.
+    /// </summary>
+    private static long FillPixels(List<DrawOp> ops, double pixelsPerArea, long imagePixels)
+    {
+        long n = 0;
+        foreach (var op in ops)
+        {
+            double area;
+            if (op is GroupOp group)
+            {
+                n += FillPixels(group.Ops, pixelsPerArea, imagePixels);
+                if (op is not ClipOp clip) continue;
+                area = (double)Math.Max(0, clip.W) * Math.Max(0, clip.H);
+            }
+            else if (op is BackgroundOp { Gradient: not null }) continue; // counted over the whole image already
+            else
+            {
+                float x0 = float.MaxValue, y0 = float.MaxValue, x1 = float.MinValue, y1 = float.MinValue;
+                Bounds(op, ref x0, ref y0, ref x1, ref y1);
+                if (!(x1 > x0 && y1 > y0)) continue;
+                area = (double)(x1 - x0) * (y1 - y0);
+            }
+            n += (long)Math.Min(area * pixelsPerArea, imagePixels);
         }
         return n;
     }
