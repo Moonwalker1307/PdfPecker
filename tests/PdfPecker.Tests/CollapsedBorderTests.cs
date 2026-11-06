@@ -202,5 +202,52 @@ public class CollapsedBorderTests
         Assert.True(clip.Y + clip.H < footer.Baseline - 10);
         Assert.True(clip.Y + clip.H > footer.Baseline - 25);
     }
-}
 
+    [Fact]
+    public void ColumnBordersAreDrawnBetweenCells()
+    {
+        // As in Chrome, a col's right border is drawn between its column and the next one, from the top of the table to
+        // the bottom, where the cells have no border of their own.
+        var ops = Layout("<style>body{margin:0} td{padding:0}</style><table style='border-collapse:collapse'>" +
+                         "<col style='border-right:2px solid #f00'><col><tr><td>one</td><td>two</td></tr><tr><td>three</td><td>four</td></tr></table>");
+        var red = Rects(ops, 0xFFFF0000).Where(r => r.H > r.W).ToList();
+        Assert.NotEmpty(red);
+        float x = Text(ops, "two").X;
+        Assert.All(red, r => Assert.InRange(r.X + r.W, x - 3, x + 0.01));
+        Assert.True(red.Max(r => r.Y + r.H) - red.Min(r => r.Y) > Text(ops, "four").Baseline - Text(ops, "one").Baseline);
+    }
+
+    [Fact]
+    public void AColumnBorderTakesRoomInItsCells()
+    {
+        // A thick col border widens the cell beside it as a cell's own border would: at the table's edge the content
+        // starts inside the whole 10px border, as with the table's own border.
+        var plain = Layout("<style>body{margin:0} td{padding:0}</style><table style='border-collapse:collapse'>" +
+                           "<col><col><tr><td>a</td><td>b</td></tr></table>");
+        var thick = Layout("<style>body{margin:0} td{padding:0}</style><table style='border-collapse:collapse'>" +
+                           "<col style='border-left:10px solid #000'><col><tr><td>a</td><td>b</td></tr></table>");
+        Assert.Equal(Text(plain, "a").X + 7.5, Text(thick, "a").X, 2);
+    }
+
+    [Fact]
+    public void AColumnGroupBorderGoesRoundTheGroupOnly()
+    {
+        // The colgroup's left and right borders are drawn where the group starts and ends, not between its own columns.
+        var ops = Layout("<style>body{margin:0} td{padding:0}</style><table style='border-collapse:collapse'>" +
+                         "<colgroup style='border:3px solid #00f'><col><col></colgroup><col>" +
+                         "<tr><td>one</td><td>two</td><td>three</td></tr></table>");
+        var blue = Rects(ops, 0xFF0000FF).Where(r => r.H > r.W).ToList();
+        Assert.Equal(2, blue.Count);
+        Assert.True(blue.Min(r => r.X) < Text(ops, "one").X);
+        Assert.InRange(blue.Max(r => r.X), Text(ops, "two").X, Text(ops, "three").X);
+    }
+
+    [Fact]
+    public void ACellBorderBeatsAColumnBorderOfTheSameWidth()
+    {
+        var ops = Layout("<style>body{margin:0} td{padding:0}</style><table style='border-collapse:collapse'>" +
+                         "<col style='border-right:2px solid #00f'><col><tr><td style='border-right:2px solid #f00'>one</td><td>two</td></tr></table>");
+        Assert.DoesNotContain(Rects(ops, 0xFF0000FF), r => r.H > r.W);
+        Assert.Contains(Rects(ops, 0xFFFF0000), r => r.H > r.W);
+    }
+}
