@@ -70,6 +70,13 @@ internal static class TextReadingOrder
         // The part each word of the page's upright lines is in; text in other directions stays after it, as it was.
         var lines = page.Lines;
         var wordParts = new int[lines.Count][];
+        // On a tagged page, where in its part each line's first word is, so the lines of an element that runs on from
+        // one column to the next, which the tags hold in their order, keep that order rather than the page's.
+        var wordRanks = tagged ? new int[lines.Count][] : null;
+        var ranks = tagged ? new Dictionary<FlowWord, int>(ReferenceEqualityComparer.Instance) : null;
+        if (ranks != null)
+            foreach (var part in parts)
+                for (int i = 0; i < part.Count; i++) ranks.TryAdd(part[i], i);
         int lastPart = -1;
         for (int l = 0; l < lines.Count; l++)
         {
@@ -81,7 +88,12 @@ internal static class TextReadingOrder
                 Array.Fill(found, int.MaxValue);
                 continue;
             }
-            for (int i = 0; i < words.Count; i++) found[i] = PartOf(words[i]);
+            var rank = wordRanks != null ? wordRanks[l] = new int[words.Count] : null;
+            for (int i = 0; i < words.Count; i++)
+            {
+                found[i] = PartOf(words[i], out var match);
+                if (rank != null) rank[i] = match != null && ranks!.TryGetValue(match, out int r) ? r : int.MaxValue;
+            }
             // On a tagged page, text the tags leave out that shares a line with tagged text, such as a list item's
             // number, goes with that text.
             if (untagged.Count > 0 && Array.Exists(found, p => p >= 0 && !untagged[p]))
@@ -116,6 +128,7 @@ internal static class TextReadingOrder
 
         // The pieces of each line in each part, ordered by part and then as the lines are on the page.
         var pieces = new List<(double Part, int Line, List<PdfTextWord>? Words)>(lines.Count);
+        var pieceRanks = new List<int>(lines.Count);
         for (int l = 0; l < lines.Count; l++)
         {
             var found = wordParts[l];
@@ -123,6 +136,7 @@ internal static class TextReadingOrder
             if (whole || place != null && !double.IsNaN(place[l]))
             {
                 pieces.Add((place != null && !double.IsNaN(place[l]) ? place[l] : found[0], l, null));
+                pieceRanks.Add(wordRanks == null || wordRanks[l] == null ? 0 : wordRanks[l].Min());
                 continue;
             }
             var byPart = new Dictionary<int, List<PdfTextWord>>();
@@ -132,9 +146,18 @@ internal static class TextReadingOrder
                 if (!byPart.TryGetValue(found[i], out var list)) { byPart[found[i]] = list = new List<PdfTextWord>(); order.Add(found[i]); }
                 list.Add(lines[l].Words[i]);
             }
-            foreach (int p in order) pieces.Add((p, l, byPart[p]));
+            foreach (int p in order)
+            {
+                pieces.Add((p, l, byPart[p]));
+                int least = int.MaxValue;
+                if (wordRanks != null && wordRanks[l] != null)
+                    for (int i = 0; i < found.Length; i++) if (found[i] == p) least = Math.Min(least, wordRanks[l][i]);
+                pieceRanks.Add(wordRanks == null ? 0 : least);
+            }
         }
-        var sorted = pieces.Select((piece, i) => (piece, i)).OrderBy(e => e.piece.Part).ThenBy(e => e.i).Select(e => e.piece).ToList();
+        var sorted = pieces.Select((piece, i) => (piece, i)).OrderBy(e => e.piece.Part)
+            .ThenBy(e => pieceRanks[e.i])
+            .ThenBy(e => e.i).Select(e => e.piece).ToList();
         bool unchanged = true;
         for (int k = 0; k < sorted.Count && unchanged; k++) unchanged = sorted[k].Words == null && sorted[k].Line == k;
         if (unchanged) return page;
@@ -162,10 +185,11 @@ internal static class TextReadingOrder
         }
         return new PdfTextPage(page.PageNumber, page.Width, page.Height, sb.ToString(), result);
 
-        int PartOf(PdfTextWord word)
+        int PartOf(PdfTextWord word, out FlowWord? match)
         {
             double x0 = word.X, y0 = word.Y, x1 = word.X + word.Width, y1 = word.Y + word.Height;
             int best = -1;
+            FlowWord? bestWord = null;
             double most = 0;
             var (c0, r0, c1, r1) = Cells(x0, y0, x1, y1);
             if ((long)(c1 - c0 + 1) * (r1 - r0 + 1) > MaxCells)
@@ -179,12 +203,13 @@ internal static class TextReadingOrder
                     if (grid.TryGetValue((c, r), out var list))
                         foreach (var (w, p) in list) Consider(w, p);
             foreach (var (w, p) in large) Consider(w, p);
+            match = bestWord;
             return best;
 
             void Consider(FlowWord w, int p)
             {
                 double overlap = Math.Max(0, Math.Min(x1, w.X1) - Math.Max(x0, w.X0)) * Math.Max(0, Math.Min(y1, w.Bottom) - Math.Max(y0, w.Top));
-                if (overlap > most || (overlap == most && overlap > 0 && p < best)) { most = overlap; best = p; }
+                if (overlap > most || (overlap == most && overlap > 0 && p < best)) { most = overlap; best = p; bestWord = w; }
             }
         }
     }
@@ -224,7 +249,7 @@ internal static class TextReadingOrder
     private static void Layout(List<FlowBlock> blocks, List<List<FlowWord>> parts)
     {
         List<FlowWord>? current = null;
-        foreach (var block in blocks)
+        foreach (var block in Columns(blocks))
         {
             if (block is GroupBlock g && SideBySide(g))
             {
@@ -236,6 +261,117 @@ internal static class TextReadingOrder
             if (words.Count == 0) continue;
             if (current == null) parts.Add(current = new List<FlowWord>());
             current.AddRange(words);
+        }
+    }
+
+    /// <summary>
+    /// The blocks with each run of text columns as one group. The layout ends a group of side-by-side parts where the
+    /// columns' lines stop lining up, as where one column starts a paragraph and the other does not, so one run of
+    /// columns can come as two groups, one after the other, and the lines of the longer column, where the other has
+    /// ended or not yet begun, as a block of their own above or below the group. Reading those apart would read the
+    /// top of every column before the rest of the first.
+    /// </summary>
+    private static List<FlowBlock> Columns(List<FlowBlock> blocks)
+    {
+        var result = new List<FlowBlock>(blocks.Count);
+        foreach (var block in blocks)
+        {
+            if (block is GroupBlock g && SideBySide(g) && result.Count > 0)
+            {
+                // A second group under the first, its parts under the first's parts.
+                if (result[^1] is GroupBlock previous && SideBySide(previous) && Continues(previous, g))
+                {
+                    var joined = Join(previous, g);
+                    if (SideBySide(joined))
+                    {
+                        result[^1] = joined;
+                        continue;
+                    }
+                }
+                // Lines just above the group that sit in one of its columns are that column's start.
+                if (result[^1] is not GroupBlock && ColumnOf(g, result[^1], above: true) is int top)
+                {
+                    var joined = Join(g, null);
+                    joined.Parts[top].Insert(0, result[^1]);
+                    joined.Top = Math.Min(g.Top, result[^1].Top);
+                    result[^1] = joined;
+                    continue;
+                }
+            }
+            // Lines just below a group that sit in one of its columns are that column's end.
+            if (block is not GroupBlock && result.Count > 0 && result[^1] is GroupBlock group && SideBySide(group)
+                && ColumnOf(group, block, above: false) is int bottom)
+            {
+                var joined = Join(group, null);
+                joined.Parts[bottom].Add(block);
+                result[^1] = joined;
+                continue;
+            }
+            result.Add(block);
+        }
+        return result;
+
+        // Whether the second group's parts are the first's columns going on: as many, each under the one before it,
+        // overlapping it across and no further below it than the space between two paragraphs. Boxes set side by side
+        // in rows, as a grid of cards, have more space between the rows than their text has between its lines.
+        static bool Continues(GroupBlock first, GroupBlock second)
+        {
+            if (first.Parts.Count != second.Parts.Count) return false;
+            var a = first.Parts.Select(Extent).ToList();
+            var b = second.Parts.Select(Extent).ToList();
+            for (int i = 0; i < a.Count; i++)
+            {
+                double gap = b[i].Top - a[i].Bottom;
+                if (gap < -Math.Max(a[i].Size, b[i].Size) / 2 || gap > 1.5 * Math.Max(a[i].Size, b[i].Size)) return false;
+                if (Math.Min(a[i].X1, b[i].X1) - Math.Max(a[i].X0, b[i].X0) <= 0) return false;
+                for (int j = 0; j < b.Count; j++)
+                    if (j != i && Math.Min(a[i].X1, b[j].X1) - Math.Max(a[i].X0, b[j].X0) > 0) return false;
+            }
+            return true;
+        }
+
+        static GroupBlock Join(GroupBlock first, GroupBlock? second)
+        {
+            var joined = new GroupBlock { Top = first.Top, Left = first.Left };
+            for (int i = 0; i < first.Parts.Count; i++)
+            {
+                var part = new List<FlowBlock>(first.Parts[i]);
+                if (second != null) part.AddRange(second.Parts[i]);
+                joined.Parts.Add(part);
+            }
+            return joined;
+        }
+
+        // The column a block above or below the group belongs to: the one part it lies across, as wide as that part's
+        // lines, as running text that goes on from the column is, and no further from the part's first or last line
+        // than the space between two paragraphs. A heading or a label over one column is shorter and is left where it
+        // is. Lines above the group can only start the part that is read first.
+        static int? ColumnOf(GroupBlock group, FlowBlock block, bool above)
+        {
+            var words = Words(block);
+            if (words.Count == 0) return null;
+            double x0 = words.Min(w => w.X0), x1 = words.Max(w => w.X1), top = words.Min(w => w.Top), bottom = words.Max(w => w.Bottom);
+            double size = words.Max(w => w.Size);
+            int first = group.Parts.IndexOf(Parts(group).First());
+            int? found = null;
+            for (int i = 0; i < group.Parts.Count; i++)
+            {
+                var e = Extent(group.Parts[i]);
+                if (Math.Min(x1, e.X1) - Math.Max(x0, e.X0) <= 0) continue;
+                if (found != null || x0 < e.X0 - size || x1 > e.X1 + size || x1 - x0 < 0.8 * (e.X1 - e.X0)) return null;
+                if (above && i != first) return null;
+                double gap = above ? e.Top - bottom : top - e.Bottom;
+                if (gap < -size / 2 || gap > 1.5 * Math.Max(size, e.Size)) return null;
+                found = i;
+            }
+            return found;
+        }
+
+        static (double X0, double X1, double Top, double Bottom, double Size) Extent(List<FlowBlock> part)
+        {
+            var words = part.SelectMany(Words).ToList();
+            if (words.Count == 0) return (0, 0, 0, 0, 0);
+            return (words.Min(w => w.X0), words.Max(w => w.X1), words.Min(w => w.Top), words.Max(w => w.Bottom), words.Max(w => w.Size));
         }
     }
 

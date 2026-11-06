@@ -525,7 +525,30 @@ internal static partial class PageStructure
             int previous = -1;
             foreach (int i in glyphs)
                 if (i != previous) subset.Add(_glyphs[previous = i]);
-            return PageStructure.Lines(TextLayout.Build(subset, _page + 1, _width, _height, true, _cancel), _links);
+            // An element that runs from the foot of one text column on to the top of the next, as a paragraph does,
+            // is drawn in that order; its lines are read column by column rather than across the page.
+            var lines = new List<FlowLine>();
+            int start = 0;
+            double right = double.MinValue;
+            for (int k = 0; k < subset.Count; k++)
+            {
+                var g = subset[k];
+                if (k > start && ColumnStart(subset[k - 1], g, right))
+                {
+                    lines.AddRange(PageStructure.Lines(TextLayout.Build(subset.GetRange(start, k - start), _page + 1, _width, _height, true, _cancel), _links));
+                    start = k;
+                    right = double.MinValue;
+                }
+                right = Math.Max(right, Math.Max(g.X, g.EndX));
+            }
+            if (start == 0) return PageStructure.Lines(TextLayout.Build(subset, _page + 1, _width, _height, true, _cancel), _links);
+            lines.AddRange(PageStructure.Lines(TextLayout.Build(subset.GetRange(start, subset.Count - start), _page + 1, _width, _height, true, _cancel), _links));
+            return lines;
+
+            // Upright text that goes back up the page by more than a couple of lines, to the right of everything drawn
+            // since the last column started.
+            static bool ColumnStart(TextGlyph before, TextGlyph g, double right) =>
+                g.DirX > 0.99 && before.DirX > 0.99 && before.Y - g.Y > 2 * Math.Max(g.Size, before.Size) && g.X >= right;
         }
 
         private List<int> Gather(StructureTree.Node node)
