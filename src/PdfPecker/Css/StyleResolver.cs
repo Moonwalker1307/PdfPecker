@@ -134,6 +134,8 @@ internal sealed partial class StyleResolver
     private bool _containerUnits; // a declaration uses cq units, so styles that use them cannot be shared
     private bool _attrUsed; // a declaration substitutes attr(), so styles that do cannot be shared: they depend on attributes
     private CssAttr.Context? _attrs;
+    /// <summary>The printed page that media() in if() asks about: the author sheet's.</summary>
+    private readonly MediaContext _media;
     private Element? _attrHost; // the element whose attributes attr() reads in the style being computed
 
     /// <summary>
@@ -187,6 +189,7 @@ internal sealed partial class StyleResolver
         _containerRules = authorSheet.HasContainerRules;
         _containerUnits = authorSheet.HasContainerUnits;
         _attrUsed = authorSheet.HasAttrSubstitution;
+        _media = authorSheet.Media;
         CounterStyles = CounterStyles.From(authorSheet.CounterStyles);
         if (authorSheet.RegisteredProperties.Count > 0)
         {
