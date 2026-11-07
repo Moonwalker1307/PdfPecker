@@ -40,9 +40,7 @@ internal sealed partial class PdfImage
                 continue;
             }
             output[at - 1] = PngFilters.Paeth;
-            for (int i = 0; i < colors; i++) output[at + i] = (byte)(pixels[line + i] - pixels[prev + i]);
-            for (int i = colors; i < stride; i++)
-                output[at + i] = (byte)(pixels[line + i] - PngFilters.PaethPredictor(pixels[line + i - colors], pixels[prev + i], pixels[prev + i - colors]));
+            PngFilters.ApplyPaeth(pixels.AsSpan(line, stride), pixels.AsSpan(prev, stride), colors, output.AsSpan(at, stride));
         }
         decodeParms = "<< /Predictor 15 /Colors " + colors.ToString(CultureInfo.InvariantCulture) + " /BitsPerComponent 8 /Columns "
             + width.ToString(CultureInfo.InvariantCulture) + " >>";

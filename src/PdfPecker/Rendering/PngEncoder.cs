@@ -35,6 +35,7 @@ internal static class PngEncoder
     private const uint OpaqueAlpha = 0xFF000000;
     private const int ChunkLengthSize = 4;
     private const int ChunkTypeSize = 4;
+    private const int ChunkCrcSize = 4;
     private const uint CrcPolynomial = 0xEDB88320; // the reflected CRC-32 polynomial of ISO 3309
     private static readonly uint[] CrcTable = CreateCrcTable();
 
@@ -74,27 +75,32 @@ internal static class PngEncoder
     public static byte[] Encode(uint[] pixels, int width, int height, CompressionLevel level = CompressionLevel.Fastest)
     {
         bool opaque = pixels.AsSpan().IndexOfAnyExceptInRange(OpaqueAlpha, uint.MaxValue) < 0;
-        var output = new MemoryStream(width * height / 2 + 1024);
-        output.Write(Signature);
-        WriteHeader(output, width, height, opaque ? ColorType.Rgb : ColorType.Rgba);
-
         var imageData = new MemoryStream(width * height / 2 + 1024);
         using (var zlib = new ZLibStream(imageData, level, leaveOpen: true))
             WriteRows(zlib, pixels, width, height, opaque);
-        WriteChunk(output, "IDAT"u8, imageData.GetBuffer().AsSpan(0, (int)imageData.Length));
-        WriteChunk(output, "IEND"u8, ReadOnlySpan<byte>.Empty);
-        return output.ToArray();
+        var data = imageData.GetBuffer().AsSpan(0, (int)imageData.Length);
+
+        // The file is assembled once at its final size rather than through another growing stream.
+        var file = new byte[Signature.Length + ChunkSize(HeaderLength) + ChunkSize(data.Length) + ChunkSize(0)];
+        Signature.CopyTo(file);
+        int at = Signature.Length;
+        Span<byte> header = stackalloc byte[HeaderLength];
+        WriteHeader(header, width, height, opaque ? ColorType.Rgb : ColorType.Rgba);
+        at += WriteChunk(file.AsSpan(at), "IHDR"u8, header);
+        at += WriteChunk(file.AsSpan(at), "IDAT"u8, data);
+        WriteChunk(file.AsSpan(at), "IEND"u8, ReadOnlySpan<byte>.Empty);
+        return file;
     }
 
-    private static void WriteHeader(Stream output, int width, int height, ColorType colorType)
+    private static int ChunkSize(int dataLength) => ChunkLengthSize + ChunkTypeSize + dataLength + ChunkCrcSize;
+
+    private static void WriteHeader(Span<byte> header, int width, int height, ColorType colorType)
     {
-        Span<byte> header = stackalloc byte[HeaderLength];
         header.Clear();
         BinaryPrimitives.WriteInt32BigEndian(header, width);
         BinaryPrimitives.WriteInt32BigEndian(header[4..], height);
         header[BitDepthOffset] = BitDepth;
         header[ColorTypeOffset] = (byte)colorType;
-        WriteChunk(output, "IHDR"u8, header);
     }
 
     /// <summary>Converts each row to RGB or straight RGBA bytes, filters it and compresses it.</summary>
@@ -114,13 +120,16 @@ internal static class PngEncoder
 
     private static void ToRgb(ReadOnlySpan<uint> row, Span<byte> rgb)
     {
-        for (int x = 0, d = 0; x < row.Length; x++, d += 3)
-        {
-            uint p = row[x];
-            rgb[d] = (byte)p;
-            rgb[d + 1] = (byte)(p >> 8);
-            rgb[d + 2] = (byte)(p >> 16);
-        }
+        // Each pixel is stored whole, R, G, B and A, and the next pixel overwrites the A: one store per pixel instead of
+        // three. The last pixel is stored byte by byte so that nothing is written past the row.
+        int last = row.Length - 1;
+        for (int x = 0, d = 0; x < last; x++, d += 3) BinaryPrimitives.WriteUInt32LittleEndian(rgb.Slice(d), row[x]);
+        if (last < 0) return;
+        uint p = row[last];
+        int end = last * 3;
+        rgb[end] = (byte)p;
+        rgb[end + 1] = (byte)(p >> 8);
+        rgb[end + 2] = (byte)(p >> 16);
     }
 
     private static void ToStraightRgba(ReadOnlySpan<uint> row, Span<byte> rgba)
@@ -199,22 +208,8 @@ internal static class PngEncoder
         private long ApplyPaeth()
         {
             paeth[0] = (byte)FilterType.Paeth;
-            var output = paeth.AsSpan(1);
-            long sum = 0;
-            // The first pixel has no left or above-left neighbour, so its prediction is the byte above.
-            for (int i = 0; i < bytesPerPixel; i++)
-            {
-                byte v = (byte)(current[i] - previous[i]);
-                output[i] = v;
-                sum += Abs(v);
-            }
-            for (int i = bytesPerPixel; i < current.Length; i++)
-            {
-                byte v = (byte)(current[i] - PngFilters.PaethPredictor(current[i - bytesPerPixel], previous[i], previous[i - bytesPerPixel]));
-                output[i] = v;
-                sum += Abs(v);
-            }
-            return sum;
+            PngFilters.ApplyPaeth(current, previous, bytesPerPixel, paeth.AsSpan(1));
+            return SumAbs(paeth.AsSpan(1));
         }
     }
 
@@ -268,36 +263,46 @@ internal static class PngEncoder
     /// <summary>The magnitude of a filtered byte read as a signed value.</summary>
     private static int Abs(byte v) => v < 128 ? v : 256 - v;
 
-    /// <summary>Writes a chunk: big-endian length, type, data and the CRC of type and data.</summary>
-    private static void WriteChunk(Stream output, ReadOnlySpan<byte> type, ReadOnlySpan<byte> data)
+    /// <summary>Writes a chunk: big-endian length, type, data and the CRC of type and data. Returns its size.</summary>
+    private static int WriteChunk(Span<byte> output, ReadOnlySpan<byte> type, ReadOnlySpan<byte> data)
     {
-        Span<byte> header = stackalloc byte[ChunkLengthSize + ChunkTypeSize];
-        BinaryPrimitives.WriteInt32BigEndian(header, data.Length);
-        type.CopyTo(header[ChunkLengthSize..]);
-        output.Write(header);
-        output.Write(data);
+        BinaryPrimitives.WriteInt32BigEndian(output, data.Length);
+        type.CopyTo(output[ChunkLengthSize..]);
+        data.CopyTo(output[(ChunkLengthSize + ChunkTypeSize)..]);
         uint crc = UpdateCrc(UpdateCrc(0xFFFFFFFF, type), data) ^ 0xFFFFFFFF;
-        Span<byte> trailer = stackalloc byte[4];
-        BinaryPrimitives.WriteUInt32BigEndian(trailer, crc);
-        output.Write(trailer);
+        BinaryPrimitives.WriteUInt32BigEndian(output[(ChunkLengthSize + ChunkTypeSize + data.Length)..], crc);
+        return ChunkSize(data.Length);
     }
 
     private static uint UpdateCrc(uint crc, ReadOnlySpan<byte> data)
     {
+        // Slicing by eight: table k holds the CRC of a byte followed by k zero bytes, so eight bytes take one round of
+        // eight independent lookups instead of eight dependent ones.
         var table = CrcTable;
+        while (data.Length >= 8)
+        {
+            uint low = BinaryPrimitives.ReadUInt32LittleEndian(data) ^ crc;
+            uint high = BinaryPrimitives.ReadUInt32LittleEndian(data[4..]);
+            crc = table[7 * 256 + (low & 0xFF)] ^ table[6 * 256 + ((low >> 8) & 0xFF)]
+                ^ table[5 * 256 + ((low >> 16) & 0xFF)] ^ table[4 * 256 + (low >> 24)]
+                ^ table[3 * 256 + (high & 0xFF)] ^ table[2 * 256 + ((high >> 8) & 0xFF)]
+                ^ table[256 + ((high >> 16) & 0xFF)] ^ table[high >> 24];
+            data = data[8..];
+        }
         foreach (byte b in data) crc = table[(crc ^ b) & 0xFF] ^ (crc >> 8);
         return crc;
     }
 
     private static uint[] CreateCrcTable()
     {
-        var table = new uint[256];
+        var table = new uint[8 * 256];
         for (uint n = 0; n < 256; n++)
         {
             uint c = n;
             for (int k = 0; k < 8; k++) c = (c & 1) != 0 ? CrcPolynomial ^ (c >> 1) : c >> 1;
             table[n] = c;
         }
+        for (int n = 256; n < table.Length; n++) table[n] = table[table[n - 256] & 0xFF] ^ (table[n - 256] >> 8);
         return table;
     }
 }
