@@ -37,6 +37,17 @@ internal sealed class PageSetup
     /// the most PDF readers accept, and then made as tall as the content of a run that fits on one page.
     /// </summary>
     public bool AutoHeight;
+    /// <summary>
+    /// The @page bleed in paper points, or NaN for <c>auto</c>. The page's media box reaches this far past the paper on
+    /// every side, so that a background or picture printed to the edge survives the cut; the paper is the trim box.
+    /// </summary>
+    public float Bleed = float.NaN;
+    /// <summary>The @page marks: crop marks at the corners and registration crosses at the middle of each side.</summary>
+    public bool CropMarks, CrossMarks;
+    /// <summary>
+    /// The bleed in paper points: <c>auto</c> is 6pt when the page has crop marks and none otherwise (CSS Paged Media 3).
+    /// </summary>
+    public float BleedWidth => float.IsNaN(Bleed) ? (CropMarks ? 6 : 0) : Bleed;
     public float ContentWidth => Width - MarginLeft - MarginRight;
     public float ContentHeight => Height - MarginTop - MarginBottom;
     /// <summary>Height available to the flowing content on each page.</summary>
@@ -715,6 +726,7 @@ internal sealed partial class PdfDocumentWriter
         paperH = _page.Height * _page.Scale;
         if (_page.ChromePaper) { paperW = PaperSize(paperW); paperH = PaperSize(paperH); }
         _paperDy = paperH - _page.Height * _page.Scale;
+        _paper = (paperW, paperH);
         return paperW;
     }
 
@@ -738,6 +750,7 @@ internal sealed partial class PdfDocumentWriter
         return System.Text.Encoding.ASCII.GetString(b.Span);
     }
 
+    private (float W, float H) _paper; // the current page's paper size, which is its trim box when it has a bleed
     private float _paperDy; // how far a scaled page's content moves up to stay at the top of the paper
 
     /// <summary>

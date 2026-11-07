@@ -215,6 +215,9 @@ public static partial class HtmlToPdf
                 // Pages of other widths lay their content out at their own width: the widest of them is the room.
                 float width = Math.Max(run.Width, Math.Max(run.Grid.SetupOf(1).ContentWidth, run.Grid.SetupOf(2).ContentWidth));
                 float room = MathF.Ceiling(width / PointsPerPixel - 0.001f) * PointsPerPixel;
+                // On a page with a bleed, content that runs past the trim on purpose may reach the edge of the bleed.
+                var first = run.Grid.SetupOf(0);
+                if (first.BleedWidth > 0) room += first.MarginRight + first.BleedWidth / first.Scale;
                 float reach = ContentReach.Of(run.Engine.Ops);
                 if (reach > room + 0.01f) shrink = Math.Min(shrink, room / Math.Min(reach, room * MaxShrink));
             }
@@ -328,8 +331,13 @@ public static partial class HtmlToPdf
                 float bx = -setup.BoxLeft, by = -setup.BoxTop;
                 float bw = setup.ContentWidth + setup.BoxLeft + setup.BoxRight, bh = setup.ContentHeight + setup.BoxTop + setup.BoxBottom;
                 if (box != null)
-                    BoxPainter.PaintPageBackground(group, box, bx, by, bw, bh, (-setup.MarginLeft, -setup.MarginTop, setup.Width, setup.Height),
+                {
+                    // The sheet the page background covers reaches into the bleed, given in paper points.
+                    float bleed = setup.BleedWidth / setup.Scale;
+                    BoxPainter.PaintPageBackground(group, box, bx, by, bw, bh,
+                        (-setup.MarginLeft - bleed, -setup.MarginTop - bleed, setup.Width + 2 * bleed, setup.Height + 2 * bleed),
                         images, setup.ContentWidth);
+                }
                 if (painted != null)
                 {
                     // html { height: 100% } refers to the page area.
