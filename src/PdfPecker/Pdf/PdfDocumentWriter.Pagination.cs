@@ -82,6 +82,9 @@ internal sealed partial class PdfDocumentWriter
         private PageGrid _grid = null!;  // the pages of the section being distributed
         private int _pageOffset;         // pages of the sections before the one being distributed
         private Func<int, float>? _footnoteCut; // the space footnote areas take at the bottom of the pages being distributed
+        private float _topReach;         // how far above the section's first page its ops may reach: into the bleed
+        private float _bottomReach;      // how far below the section's last page its ops may reach
+        private int _lastPage;           // the last page the section's content needs
         private int _backdrops;          // boxes with a backdrop-filter given a part on every page they reach
         private int _clipFirst, _clipLast = int.MaxValue; // the pages the clips being distributed show
         // The root's clip of the viewport's overflow being distributed, whose parts so far are added to the pages
@@ -107,6 +110,13 @@ internal sealed partial class PdfDocumentWriter
             _grid = section.Grid;
             _pageOffset = firstPage;
             _footnoteCut = section.FootnoteReserve;
+            // A page with a bleed keeps what reaches past the top of the section's first page, or past the bottom of its
+            // last, through the margin into the bleed, instead of cutting it off or starting a page for it.
+            var first = _grid.SetupOf(0);
+            _topReach = first.BleedWidth > 0 ? first.MarginTop + first.BandTop + first.BleedWidth / first.Scale : 0;
+            _lastPage = PageOf(Math.Max(0, section.ContentHeight - 0.5f));
+            var last = _grid.SetupOf(_lastPage);
+            _bottomReach = last.BleedWidth > 0 ? last.MarginBottom + last.BandBottom + last.BleedWidth / last.Scale : 0;
             _slots = null;
             foreach (var op in section.Ops) Distribute(op, null);
             _footnoteCut = null;
@@ -200,11 +210,15 @@ internal sealed partial class PdfDocumentWriter
         {
             if (bottom < top) (top, bottom) = (bottom, top);
             int p0 = PageOf(top), p1 = Math.Max(p0, PageOf(bottom - 0.5f));
+            float lastEnd = _grid.Start(_lastPage + 1);
+            if (_bottomReach > 0 && p1 > _lastPage && p0 <= _lastPage && bottom <= lastEnd + _bottomReach) p1 = _lastPage;
             // Parts on pages a clip hides are left out: a column's part of a box as tall as many pages is drawn
             // whole in that column, clipped to it, and would otherwise be split over every page the box reaches.
             for (int p = Math.Max(p0, _clipFirst), last = Math.Min(p1, _clipLast); p <= last; p++)
             {
-                float y0 = Math.Max(top, _grid.Start(p)), y1 = Math.Min(bottom, _grid.Start(p + 1) - (_footnoteCut?.Invoke(p) ?? 0));
+                float y0 = Math.Max(top, _grid.Start(p) - (p == 0 ? _topReach : 0));
+                float y1 = p == _lastPage && _bottomReach > 0 && bottom <= lastEnd + _bottomReach ? bottom
+                    : Math.Min(bottom, _grid.Start(p + 1) - (_footnoteCut?.Invoke(p) ?? 0));
                 if (y1 > y0 || top == bottom) Target(into, p).Add(new Placed(op, y0, y1));
             }
         }

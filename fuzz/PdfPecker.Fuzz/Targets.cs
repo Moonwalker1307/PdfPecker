@@ -83,6 +83,7 @@ internal static class Targets
         "content:target-counters(attr(href url),a,'.',lower-greek)", "white-space-collapse:break-spaces", "white-space-collapse:preserve-breaks",
         "box-decoration-break:clone", "hyphens:auto;hyphenate-limit-lines:1", "hyphenate-limit-lines:2147483647", "vector-effect:non-scaling-stroke",
         "<input type=number min=5 max=1 value=3>", ":in-range", ":out-of-range", "gap:1e9px;row-rule:1px solid;column-rule:1e9px dotted",
+        "<style>@page{bleed:1e9px;marks:crop cross}</style>", "<style>@page{size:1px 1px;bleed:auto;marks:crop}</style>",
     };
 
     private static readonly (string, string)[] HtmlNesters =
@@ -109,6 +110,7 @@ internal static class Targets
         "zoom:", "zoom: 1e9", "zoom: 0.0001", "zoom: 1e9%", "@scope (", ") to (", ":scope", "@scope {", "position: running(a)", "content: element(a)",
         "element(a, first-except)", "@top-center {", "@bottom-right-corner {", "@page :first {", "target-counters(attr(id url), a, \".\")",
         "counter(page, lower-roman)", "white-space-collapse:", "box-decoration-break: clone", "hyphenate-limit-lines: 1",
+        "bleed: 3mm", "bleed: -1e30px", "marks: crop cross", "marks: cross",
     };
 
     private static readonly (string, string)[] CssNesters =

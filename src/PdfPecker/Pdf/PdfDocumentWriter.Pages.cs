@@ -54,7 +54,15 @@ internal sealed partial class PdfDocumentWriter
         {
             Mark(content, null);
             SetFill(content, background);
-            content.Ascii("0 0 ").Num(_page.Width).Sp().Num(_page.Height).Ascii(" re f\n");
+            float bleed = _page.BleedWidth;
+            if (bleed > 0)
+            {
+                // The page background reaches to the edge of the bleed, in the scaled content's own units.
+                float k = _page.Scale;
+                content.Num(-bleed / k).Sp().Num((-bleed - paperDy) / k).Sp().Num((_paper.W + 2 * bleed) / k).Sp()
+                    .Num((_paper.H + 2 * bleed) / k).Ascii(" re f\n");
+            }
+            else content.Ascii("0 0 ").Num(_page.Width).Sp().Num(_page.Height).Ascii(" re f\n");
         }
         _yOrigin = _page.MarginTop;
         _forceArtifact = true;
@@ -104,6 +112,7 @@ internal sealed partial class PdfDocumentWriter
         EndMarked(content);
         if (_page.Scale != 1) content.Ascii("Q\n");
         _streamSpace = null;
+        if (_page.CropMarks || _page.CrossMarks) WritePrinterMarks(content);
         return pageLinks;
     }
 
@@ -160,11 +169,82 @@ internal sealed partial class PdfDocumentWriter
         return annotIds;
     }
 
+    /// <summary>
+    /// Draws the @page marks in the outer half of the bleed, over everything else, as WeasyPrint draws them: crop marks
+    /// that continue the trim lines at each corner, and a registration cross in a circle at the middle of each side.
+    /// They are artifacts in a tagged file.
+    /// </summary>
+    private void WritePrinterMarks(ByteBuffer content)
+    {
+        float b = _page.BleedWidth;
+        if (b <= 0) return;
+        _forceArtifact = true;
+        Mark(content, null);
+        _forceArtifact = false;
+        var state = SaveState();
+        // A hairline-thin mark is lost in print; 0.75pt is the CSS pixel WeasyPrint strokes them with.
+        content.Ascii("q 0.75 w [] 0 d 0 J\n");
+        SetStroke(content, 0xFF000000);
+        float w = _paper.W, h = _paper.H, half = b / 2;
+        if (_page.CropMarks)
+        {
+            foreach (float x in new[] { 0f, w })
+            {
+                // Vertical marks above and below the page, on the left and right trim lines.
+                Line(content, x, h + half, x, h + b);
+                Line(content, x, -b, x, -half);
+            }
+            foreach (float y in new[] { 0f, h })
+            {
+                Line(content, -b, y, -half, y);
+                Line(content, w + half, y, w + b, y);
+            }
+        }
+        if (_page.CrossMarks)
+        {
+            // Each cross fills the outer half of the bleed, with half the line width of the crop marks.
+            content.Ascii("0.375 w\n");
+            float at = b * 0.75f, arm = b / 4, r = b / 8;
+            Cross(content, w / 2, h + at, r, arm);
+            Cross(content, w / 2, -at, r, arm);
+            Cross(content, -at, h / 2, r, arm);
+            Cross(content, w + at, h / 2, r, arm);
+        }
+        content.Ascii("Q\n");
+        RestoreState(state);
+
+        static void Line(ByteBuffer c, float x1, float y1, float x2, float y2)
+            => c.Num(x1).Sp().Num(y1).Ascii(" m ").Num(x2).Sp().Num(y2).Ascii(" l S\n");
+
+        static void Cross(ByteBuffer c, float x, float y, float r, float arm)
+        {
+            // A circle of four Bézier quarters, and the two strokes of the cross through it.
+            const float K = 0.5523f;
+            float d = r * K;
+            c.Num(x + r).Sp().Num(y).Ascii(" m ")
+                .Num(x + r).Sp().Num(y + d).Sp().Num(x + d).Sp().Num(y + r).Sp().Num(x).Sp().Num(y + r).Ascii(" c ")
+                .Num(x - d).Sp().Num(y + r).Sp().Num(x - r).Sp().Num(y + d).Sp().Num(x - r).Sp().Num(y).Ascii(" c ")
+                .Num(x - r).Sp().Num(y - d).Sp().Num(x - d).Sp().Num(y - r).Sp().Num(x).Sp().Num(y - r).Ascii(" c ")
+                .Num(x + d).Sp().Num(y - r).Sp().Num(x + r).Sp().Num(y - d).Sp().Num(x + r).Sp().Num(y).Ascii(" c S\n");
+            Line(c, x - arm, y, x + arm, y);
+            Line(c, x, y - arm, x, y + arm);
+        }
+    }
+
     private void WritePageObject(WriteState doc, int p, float paperW, float paperH, List<int> annotIds)
     {
-        Begin(doc.PageIds[p]).Ascii("<< /Type /Page /Parent ").Int(doc.PagesId).Ascii(" 0 R /MediaBox [0 0 ")
-            .Num(paperW).Sp().Num(paperH).Ascii("] /Resources ").Int(doc.ResourcesId).Ascii(" 0 R /Contents ")
-            .Int(doc.ContentIds[p]).Ascii(" 0 R");
+        Begin(doc.PageIds[p]).Ascii("<< /Type /Page /Parent ").Int(doc.PagesId).Ascii(" 0 R /MediaBox [");
+        float bleed = _page.BleedWidth;
+        if (bleed > 0)
+        {
+            // The paper is the trim box; the media box and bleed box reach past it by the bleed, so the page's own
+            // coordinates, and with them every link and field, stay as they are.
+            _out.Num(-bleed).Sp().Num(-bleed).Sp().Num(paperW + bleed).Sp().Num(paperH + bleed).Ascii("] /BleedBox [")
+                .Num(-bleed).Sp().Num(-bleed).Sp().Num(paperW + bleed).Sp().Num(paperH + bleed).Ascii("] /TrimBox [0 0 ")
+                .Num(paperW).Sp().Num(paperH);
+        }
+        else _out.Ascii("0 0 ").Num(paperW).Sp().Num(paperH);
+        _out.Ascii("] /Resources ").Int(doc.ResourcesId).Ascii(" 0 R /Contents ").Int(doc.ContentIds[p]).Ascii(" 0 R");
         if (annotIds.Count > 0)
         {
             _out.Ascii(" /Annots [");

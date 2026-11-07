@@ -139,6 +139,15 @@ public static partial class HtmlToPdf
                 case "margin-right": SetMargin(v, ref page.MarginRight, page.Width); break;
                 case "margin-bottom": SetMargin(v, ref page.MarginBottom, page.Height); break;
                 case "margin-left": SetMargin(v, ref page.MarginLeft, page.Width); break;
+                case "bleed":
+                    // A bleed wider than an inch is no printer's; the cap keeps the media box sane for untrusted CSS.
+                    if (v == "auto") page.Bleed = float.NaN;
+                    else if (StyleResolver.TryParseLength(v, 12, 12, out var bleed) && !bleed.IsAuto && !bleed.IsPercent && float.IsFinite(bleed.Value))
+                        page.Bleed = Math.Clamp(bleed.Value, 0, MaxBleed);
+                    break;
+                case "marks":
+                    if (ParseMarks(v) is var (crop, cross)) { page.CropMarks = crop; page.CrossMarks = cross; }
+                    break;
                 case "background-color":
                 case "background":
                     // The page box's own background covers the whole sheet, margins included.
@@ -146,6 +155,25 @@ public static partial class HtmlToPdf
                     break;
             }
         }
+    }
+
+    /// <summary>The widest bleed an @page rule may ask for: one inch.</summary>
+    private const float MaxBleed = 72;
+
+    /// <summary>The value of the marks property, <c>none | [ crop || cross ]</c>, or null when it is not valid.</summary>
+    private static (bool Crop, bool Cross)? ParseMarks(string v)
+    {
+        var tokens = CssParser.Tokens(v);
+        if (tokens.Count == 1 && tokens[0] == "none") return (false, false);
+        if (tokens.Count is < 1 or > 2) return null;
+        bool crop = false, cross = false;
+        foreach (var t in tokens)
+        {
+            if (t == "crop" && !crop) crop = true;
+            else if (t == "cross" && !cross) cross = true;
+            else return null;
+        }
+        return (crop, cross);
     }
 
     /// <summary>Sets a page margin from a length; percentages refer to the page's width or height, as <paramref name="basis"/> gives.</summary>
