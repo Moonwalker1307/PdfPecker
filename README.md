@@ -235,7 +235,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   Charts.css (column, bar, area, line and pie charts), laid out as Chrome lays them out. Typed `attr()` works in any
   property, as in Chrome: `width: attr(data-pct %)`, `color: attr(data-color type(<color>), gray)` or
   `calc(attr(data-v number) * 1mm)` draw bar charts and badges from data attributes, with fallbacks, `::before` reading
-  its element's attributes, and no attribute value ever reaching a `url()`. Older CSS works too: the
+  its element's attributes, and no attribute value ever reaching a `url()`. `sibling-index()` and `sibling-count()`
+  work as in Chrome too, for staggered widths, colours that step through a list and tabs that share a row evenly. Older CSS works too: the
   `-webkit-` property names Chrome still takes (`-webkit-transform`, `-webkit-flex`, ...), the legacy
   `display: -webkit-box` and its `-webkit-box-` properties, and the `-webkit-gradient()` and prefixed gradient
   syntaxes. As in browsers, a length without a unit (`width: 200`) counts as pixels only in a page without a doctype;
