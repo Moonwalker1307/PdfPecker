@@ -231,7 +231,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   for hairlines in a scaled chart, though markers still scale) and PNG, JPEG, GIF, WebP, BMP and TIFF images (also chosen by `srcset`, `<picture>` and
   `image-set()`,
   shown by `<embed>` and `<object>`, photos turned upright by their EXIF orientation, and `image-rendering: pixelated`
-  or `crisp-edges` writing enlarged images, such as QR codes and pixel art, with hard pixel edges in every PDF viewer), and CSS-only charts such as
+  or `crisp-edges` writing enlarged images, such as QR codes and pixel art, with hard pixel edges in every PDF viewer,
+  and `object-view-box` cropping a raster image in CSS, as Chrome does), and CSS-only charts such as
   Charts.css (column, bar, area, line and pie charts), laid out as Chrome lays them out. Typed `attr()` works in any
   property, as in Chrome: `width: attr(data-pct %)`, `color: attr(data-color type(<color>), gray)` or
   `calc(attr(data-v number) * 1mm)` draw bar charts and badges from data attributes, with fallbacks, `::before` reading

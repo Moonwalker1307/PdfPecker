@@ -2025,6 +2025,8 @@ internal sealed partial class LayoutEngine
         // A srcset candidate for 2x shows its pixels at half size.
         float density = _images.DensityOf(e);
         float iw = img != null ? img.Width * 0.75f / density : 0, ih = img != null ? img.Height * 0.75f / density : 0;
+        // object-view-box makes the part of the image it names the image's natural size.
+        if (img != null && ViewBox(e.Style, iw, ih) is var (_, _, vw, vh)) (iw, ih) = (vw, vh);
         if (svg != null)
         {
             (iw, ih) = SvgNaturalSize(svg, availW); // as for an inline svg element, as in Chrome
@@ -2143,6 +2145,12 @@ internal sealed partial class LayoutEngine
     /// </summary>
     private void AddImage(ComputedStyle s, PdfImage image, float density, float x, float y, float w, float h, CornerRadii? radii, ContentSlot? tag)
     {
+        if (s.ObjectViewBox != null && image.Width > 0 && image.Height > 0 && w > 0 && h > 0
+            && ViewBox(s, image.Width * 0.75f / density, image.Height * 0.75f / density) is { } view)
+        {
+            AddViewBoxImage(s, image, density, view, x, y, w, h, radii, tag);
+            return;
+        }
         if (s.ObjectFit == ObjectFit.Fill || image.Width <= 0 || image.Height <= 0 || w <= 0 || h <= 0)
         {
             image = DrawnImages.For(s, image, w, h);
@@ -2166,6 +2174,46 @@ internal sealed partial class LayoutEngine
             _ops.Add(op);
             return;
         }
+        var clip = new ClipOp(x, y, w, h, radii);
+        clip.Ops.Add(op);
+        _ops.Add(clip);
+    }
+
+    /// <summary>
+    /// The rectangle object-view-box picks out of an image of natural size nw × nh, in points from its top-left corner,
+    /// or null when the style has none or it leaves nothing to show.
+    /// </summary>
+    private static (float X, float Y, float W, float H)? ViewBox(ComputedStyle s, float nw, float nh)
+    {
+        if (s.ObjectViewBox is not { } box || nw <= 0 || nh <= 0) return null;
+        var (vx, vy, vw, vh, _) = box.ResolveInset(nw, nh);
+        return vw > Eps && vh > Eps && float.IsFinite(vw) && float.IsFinite(vh) ? (vx, vy, vw, vh) : null;
+    }
+
+    /// <summary>
+    /// Draws an image whose object-view-box shows the part <paramref name="view"/> of it (CSS Images 5): that part is
+    /// sized and placed by object-fit and object-position as a whole image would be. As in Chrome, the rest of the image
+    /// shows where it falls inside the content box, which is all that clips it.
+    /// </summary>
+    private void AddViewBoxImage(ComputedStyle s, PdfImage image, float density, (float X, float Y, float W, float H) view,
+        float x, float y, float w, float h, CornerRadii? radii, ContentSlot? tag)
+    {
+        float nw = image.Width * 0.75f / density, nh = image.Height * 0.75f / density;
+        float contain = Math.Min(w / view.W, h / view.H);
+        float kx, ky;
+        switch (s.ObjectFit)
+        {
+            case ObjectFit.Fill: kx = w / view.W; ky = h / view.H; break;
+            case ObjectFit.Contain: kx = ky = contain; break;
+            case ObjectFit.Cover: kx = ky = Math.Max(w / view.W, h / view.H); break;
+            case ObjectFit.ScaleDown: kx = ky = Math.Min(1, contain); break;
+            default: kx = ky = 1; break;
+        }
+        // Where the view box lands in the content box, and the whole image around it.
+        float vw = view.W * kx, vh = view.H * ky;
+        float vx = x + s.ObjectPositionX.Resolve(w - vw), vy = y + s.ObjectPositionY.Resolve(h - vh);
+        float dw = nw * kx, dh = nh * ky;
+        var op = new ImageOp(vx - view.X * kx, vy - view.Y * ky, dw, dh, DrawnImages.For(s, image, dw, dh)) { Tag = tag };
         var clip = new ClipOp(x, y, w, h, radii);
         clip.Ops.Add(op);
         _ops.Add(clip);

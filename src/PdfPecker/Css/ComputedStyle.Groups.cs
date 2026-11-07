@@ -315,6 +315,8 @@ internal sealed partial class ComputedStyle
     public ObjectFit ObjectFit { get => _visual.ObjectFit; set => Visual.ObjectFit = value; }
     public BackgroundOffset ObjectPositionX { get => _visual.ObjectPositionX; set => Visual.ObjectPositionX = value; }
     public BackgroundOffset ObjectPositionY { get => _visual.ObjectPositionY; set => Visual.ObjectPositionY = value; }
+    /// <summary>object-view-box: the part of an image (an inset(), rect() or xywh() of its natural size) shown as the whole of it, or null.</summary>
+    public ClipShape? ObjectViewBox { get => _visual.ObjectViewBox; set => Visual.ObjectViewBox = value; }
 
     // The group to change a value in, copied first when other styles share it.
     private VisualFields Visual => _visual.Shared ? _visual = _visual.Copy() : _visual;
@@ -372,6 +374,7 @@ internal sealed partial class ComputedStyle
         public uint? OutlineColor; // null = currentColor
         public ObjectFit ObjectFit;
         public BackgroundOffset ObjectPositionX = BackgroundOffset.Center, ObjectPositionY = BackgroundOffset.Center;
+        public ClipShape? ObjectViewBox;
 
         public VisualFields Copy()
         {

@@ -361,6 +361,21 @@ internal sealed partial class StyleResolver
             _ => s.ObjectFit,
         };
 
+    /// <summary>
+    /// object-view-box (CSS Images 5): none, or an inset(), rect() or xywh() without rounded corners, whose percentages
+    /// refer to the image's natural size.
+    /// </summary>
+    private void ApplyObjectViewBox(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
+    {
+        if (d.Inherit) { s.ObjectViewBox = parent.ObjectViewBox; return; }
+        if (d.Lower is "none" or "initial" or "unset") { s.ObjectViewBox = null; return; }
+        var tokens = CssParser.Tokens(d.Value.Trim());
+        if (tokens.Count != 1 || d.Lower.Contains("round", StringComparison.Ordinal)) return;
+        if (!(d.Lower.StartsWith("inset(", StringComparison.Ordinal) || d.Lower.StartsWith("rect(", StringComparison.Ordinal)
+              || d.Lower.StartsWith("xywh(", StringComparison.Ordinal))) return;
+        if (ClipShape.Parse(d.Value, d.Em, _rootFontSize, _vw, _vh) is { Kind: ClipShape.ShapeKind.Inset } shape) s.ObjectViewBox = shape;
+    }
+
     private void ApplyObjectPosition(ComputedStyle s, ComputedStyle parent, in DeclaredValue d)
     {
         if (d.Inherit) { s.ObjectPositionX = parent.ObjectPositionX; s.ObjectPositionY = parent.ObjectPositionY; }

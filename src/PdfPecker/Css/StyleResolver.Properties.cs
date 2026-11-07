@@ -127,6 +127,7 @@ internal sealed partial class StyleResolver
             case "aspect-ratio": ApplyAspectRatio(s, parent, in d); break;
             case "object-fit": ApplyObjectFit(s, parent, in d); break;
             case "object-position": ApplyObjectPosition(s, parent, in d); break;
+            case "object-view-box": ApplyObjectViewBox(s, parent, in d); break;
             case "container-type": ApplyContainerType(s, parent, in d); break;
             case "container-name": ApplyContainerName(s, parent, in d); break;
             case "table-layout": s.TableLayoutFixed = d.Lower == "fixed"; break;
