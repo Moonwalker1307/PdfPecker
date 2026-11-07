@@ -1,3 +1,4 @@
+using PdfPecker.Rendering;
 using System.Text;
 
 namespace PdfPecker.Tests;
@@ -417,6 +418,32 @@ public class TextExtractionTests
             Assert.True(next > at, $"Out of order or missing: {paragraph[..20]}\n{text}");
             at = next;
         }
+    }
+
+    [Fact]
+    public void Arabic_letters_joined_by_cursive_attachment_stay_one_word()
+    {
+        // Glyphs as Chrome places Noto Naskh Arabic at 13 pt, each on its own and in visual order: cursive attachment
+        // puts the final noon of "عن" half a size under the line and leaves gaps of a third of the size before the
+        // wide dad of "محاضرة" and "ومعرضاً", while the spaces between the words are drawn.
+        (string Text, double X, double End, double Y)[] drawn =
+        {
+            ("ي", 55.50, 61.74, 89.55), ("ذ", 63.73, 67.90, 90.01), ("ل", 67.90, 70.65, 86.25), ("ا", 70.65, 73.75, 86.25),
+            (" ", 73.75, 76.62, 86.25), ("م", 76.62, 82.97, 86.25), ("ا", 82.97, 86.26, 86.25), ("ع", 86.26, 91.64, 86.25),
+            ("ل", 91.64, 94.40, 86.25), ("ا", 94.40, 97.49, 86.25), (" ", 97.49, 100.36, 86.25), ("ن", 103.01, 107.97, 92.94),
+            ("ع", 107.97, 114.53, 86.25),
+            ("اً", 382.92, 386.22, 196.35), ("ض", 390.40, 396.44, 199.65), ("ر", 396.44, 401.69, 195.75), ("ع", 401.69, 407.07, 195.75),
+            ("م", 407.07, 413.00, 195.75), ("و", 412.99, 419.08, 195.75), (" ", 419.08, 421.95, 195.75), ("ة", 422.55, 427.25, 199.57),
+            ("ر", 427.25, 432.50, 195.75), ("ض", 436.67, 442.72, 199.65), ("ا", 442.72, 446.01, 195.75), ("ح", 446.00, 454.66, 195.75),
+            ("م", 454.66, 460.59, 195.75), (" ", 460.59, 463.46, 195.75), ("1", 463.46, 470.73, 195.75), ("4", 470.73, 478.00, 195.75),
+            ("0", 478.00, 485.27, 195.75),
+        };
+        var glyphs = drawn.Select(g => new TextGlyph
+        {
+            Text = g.Text, X = g.X, Y = g.Y, EndX = g.End, EndY = g.Y, DirX = 1, Size = 13, Font = "NotoNaskhArabic-Regular", Moved = true, Mcid = -1,
+        }).ToList();
+        var page = TextLayout.Build(glyphs, 1, 595, 842, expandLigatures: false);
+        Assert.Equal(new[] { "عن العام الذي", "140 محاضرة ومعرضاً" }, page.Lines.Select(l => l.Text));
     }
 
     [Fact]
