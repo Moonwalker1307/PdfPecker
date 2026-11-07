@@ -439,8 +439,9 @@ internal static partial class PageStructure
         {
             var list = g.OrderBy(w => w.Order).ToList();
             // Words of one text line that a cell boundary does not split but that lie far apart, as when two columns
-            // share a baseline, stay in one line; the line keeps their reading order.
-            lines.Add(new FlowLine(list, g.Key, false));
+            // share a baseline, stay in one line; the line keeps their reading order. A line cut from a wider one is
+            // right to left when most of its own words are, as a column of Hebrew beside another is.
+            lines.Add(new FlowLine(list, g.Key, list.Count(w => IsRightToLeft(w.Text)) * 2 > list.Count));
         }
         lines.Sort((a, b) => a.Top != b.Top ? a.Top.CompareTo(b.Top) : a.X0.CompareTo(b.X0));
         return lines;

@@ -333,6 +333,32 @@ public class TextExtractionTests
     }
 
     [Fact]
+    public void Right_to_left_columns_are_read_from_the_right()
+    {
+        // Hebrew in two columns: their lines share baselines, so each column's lines are cut from lines across the
+        // page, and the cut lines must stay right to left for the right column to be read first.
+        string[] paragraphs =
+        {
+            "מועצת העיר החליטה ביום שלישי לבנות קו רכבת קלה באורך אחד עשר קילומטרים בין התחנה המרכזית לבית החולים החדש. הרכבות הראשונות ייצאו לדרך באביב 2029.",
+            "הקו יעבור לאורך סוללת הרכבת הישנה, וכך תישאר עלות רכישת הקרקע נמוכה. התושבים ביקשו קירות נגד רעש ושמירה על העצים.",
+            "הממשלה תממן ארבעים אחוז מעלות הבנייה, והשאר יגיע מהעירייה ומרשות הבריאות האזורית. מחיר הכרטיס יהיה זהה למחיר באוטובוס.",
+            "הפגישה הציבורית הראשונה תתקיים בספרייה ב־2 במרץ, והתוכניות זמינות לעיון באתר העירייה עד אז.",
+        };
+        var pdf = HtmlToPdf.Convert("<html dir='rtl'><style>@page{size:A4;margin:18mm 16mm} body{margin:0;font:12pt/1.4 sans-serif}" +
+            " p{margin:0 0 8pt}</style><h1>עיר הנמל בונה קו רכבת קלה</h1><div style='columns:2;column-gap:8mm'>" +
+            string.Concat(paragraphs.Select(p => "<p>" + p + "</p>")) + "</div></html>");
+        var text = PdfText.ExtractPage(pdf, 1).Text.Replace('\n', ' ').Replace("  ", " ");
+        Assert.StartsWith("עיר הנמל בונה קו רכבת קלה ", text);
+        int at = -1;
+        foreach (var paragraph in paragraphs)
+        {
+            int next = text.IndexOf(paragraph, StringComparison.Ordinal);
+            Assert.True(next > at, $"Out of order or missing: {paragraph[..20]}\n{text}");
+            at = next;
+        }
+    }
+
+    [Fact]
     public void The_lines_of_the_longer_column_stay_in_that_column()
     {
         // Two columns of lines placed one by one, drawn across the page, where the left column has two lines more
