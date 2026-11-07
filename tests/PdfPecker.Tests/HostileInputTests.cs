@@ -735,6 +735,19 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Columns_inside_columns_split_a_clipped_shape_only_where_the_clip_shows_it()
+    {
+        // Found by the fuzzer: target html, timeout-d0d017cf (local round after daily run 94). The inner columns draw
+        // each tall card's border whole and clipped in every column it reaches, and the outer columns split each of
+        // those copies again over all of theirs, where the clip hid it: a thousand nested cards took 30 s and 3.9 GB.
+        var card = "<div style='border:1px solid;border-radius:3px;break-inside:avoid'>Lorem ipsum dolor sit amet ";
+        var html = "<style>@page { size: A5; margin: 12mm }</style><div style='columns:2'><div style='columns:3'>" + Repeat(card, 1000);
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.True(allocated < 1_200_000_000, $"{allocated:N0} bytes allocated");
+    }
+
+    [Fact]
     public void Broken_words_keep_every_character()
     {
         var pdf = ConvertUncompressed("<p style='width:40pt;font-family:Courier;font-size:10pt;overflow-wrap:break-word'>ABCDEFGHIJKLMNOPQRSTUVWXYZ</p>");
