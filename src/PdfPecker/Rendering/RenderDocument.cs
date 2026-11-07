@@ -19,6 +19,10 @@ internal sealed class RenderDocument
     public readonly List<PageInfo> Pages = new();
     private readonly RenderCache _cache = new();
 
+    // The glyphs the page read last showed. Pages of a document tend to hold as much text as each other, so the next
+    // page's list starts a little larger than that instead of growing from empty through copies of a large struct.
+    private int _glyphsPerPage;
+
     public RenderDocument(byte[] data, string? password)
     {
         File = PdfFile.Open(data, password);
@@ -98,9 +102,11 @@ internal sealed class RenderDocument
     public TextCollector CollectText(int index, bool annotations, bool rules, CancellationToken cancel)
     {
         var p = Pages[index];
-        var collector = new TextCollector(rules);
+        int expected = Volatile.Read(ref _glyphsPerPage);
+        var collector = new TextCollector(rules, expected + expected / 8);
         var r = new PageRenderer(File, _cache, collector, cancel);
         using (PdfFile.BeginRender(cancel)) r.RenderPage(p.Dict, p.Resources, PageMatrix(p, p.UserUnit, p.UserUnit), annotations);
+        Volatile.Write(ref _glyphsPerPage, collector.Glyphs.Count);
         VerticalText.Apply(collector.Glyphs);
         return collector;
     }

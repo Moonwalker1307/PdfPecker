@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+
 namespace PdfPecker.Rendering.Parsing;
 
 /// <summary>
@@ -62,6 +64,9 @@ internal sealed partial class PdfFile
     private readonly int _headerOffset;
     private Dictionary<int, XrefEntry> _xref = new();
     private readonly Dictionary<int, PdfObject> _cache = new();
+    // The objects GetObject has loaded, read without the lock: pages are read in parallel, and nearly every lookup
+    // finds an object loaded before. _cache stays the table the writers number objects from, in the order they were read.
+    private readonly ConcurrentDictionary<int, PdfObject> _loaded = new();
     private readonly Dictionary<int, ObjectStream> _objStreams = new();
     private readonly HashSet<int> _loading = new();
     private readonly object _lock = new();
@@ -172,6 +177,7 @@ internal sealed partial class PdfFile
             // Objects parsed so far (the trailer chain, the encryption dictionary) stay as read; drop the rest.
             var keep = _encryptObjNum >= 0 && _cache.TryGetValue(_encryptObjNum, out var encryptObject) ? encryptObject : null;
             _cache.Clear();
+            _loaded.Clear();
             _objStreams.Clear();
             if (keep != null) _cache[_encryptObjNum] = keep;
             _decryptor = decryptor;
@@ -228,6 +234,7 @@ internal sealed partial class PdfFile
 
     public PdfObject? GetObject(int num)
     {
+        if (_loaded.TryGetValue(num, out var loaded)) return loaded;
         lock (_lock)
         {
             if (_cache.TryGetValue(num, out var cached)) return cached;
@@ -248,6 +255,7 @@ internal sealed partial class PdfFile
                 }
                 o ??= PdfNull.Instance;
                 _cache[num] = o;
+                _loaded[num] = o;
                 return o;
             }
             finally

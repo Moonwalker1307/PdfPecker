@@ -420,13 +420,20 @@ internal static partial class PageStructure
     {
         var gaps = new List<(double, double)>();
         double at = minX;
-        foreach (var w in line.Words.OrderBy(w => w.X0))
+        // A line's words are nearly always in order from the left already, and this runs for every line many times.
+        var words = line.Words;
+        bool sorted = true;
+        for (int i = 1; i < words.Count && sorted; i++) sorted = words[i - 1].X0 <= words[i].X0;
+        if (sorted) foreach (var w in words) Word(w);
+        else foreach (var w in words.OrderBy(w => w.X0)) Word(w);
+        if (maxX - at >= width) gaps.Add((at, maxX));
+        return gaps;
+
+        void Word(FlowWord w)
         {
             if (w.X0 - at >= width) gaps.Add((at, w.X0));
             at = Math.Max(at, w.X1);
         }
-        if (maxX - at >= width) gaps.Add((at, maxX));
-        return gaps;
     }
 
     private static List<(double X0, double X1)> Intersect(List<(double X0, double X1)> a, List<(double X0, double X1)> b, double width)
