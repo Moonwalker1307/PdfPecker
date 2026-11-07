@@ -271,7 +271,7 @@ internal static class TextReadingOrder
     /// ended or not yet begun, as a block of their own above or below the group. Reading those apart would read the
     /// top of every column before the rest of the first.
     /// </summary>
-    private static List<FlowBlock> Columns(List<FlowBlock> blocks)
+    internal static List<FlowBlock> Columns(List<FlowBlock> blocks)
     {
         var result = new List<FlowBlock>(blocks.Count);
         foreach (var block in blocks)
@@ -345,9 +345,11 @@ internal static class TextReadingOrder
         // The column a block above or below the group belongs to: the one part it lies across, as wide as that part's
         // lines, as running text that goes on from the column is, and no further from the part's first or last line
         // than the space between two paragraphs. A heading or a label over one column is shorter and is left where it
-        // is. Lines above the group can only start the part that is read first.
+        // is. Lines above the group can only start the part that is read first, and a heading above it heads the group,
+        // as a section's title over a grid of cards does, rather than its first column.
         static int? ColumnOf(GroupBlock group, FlowBlock block, bool above)
         {
+            if (above && block is TextBlock { Kind: TextKind.Heading }) return null;
             var words = Words(block);
             if (words.Count == 0) return null;
             double x0 = words.Min(w => w.X0), x1 = words.Max(w => w.X1), top = words.Min(w => w.Top), bottom = words.Max(w => w.Bottom);
@@ -390,7 +392,7 @@ internal static class TextReadingOrder
     /// running text, a good many letters to the line: short entries beside other text, as a grid or labels beside their
     /// values, are more often a table that has no rules to show it, and read across.
     /// </summary>
-    private static bool SideBySide(GroupBlock group)
+    internal static bool SideBySide(GroupBlock group)
     {
         var owner = new Dictionary<int, int>(); // the part each of the page's lines is in, or -1 for several
         bool running = true;
@@ -441,7 +443,7 @@ internal static class TextReadingOrder
     }
 
     /// <summary>A group's parts in reading order: from the left, or from the right where most of their text is right to left.</summary>
-    private static IEnumerable<List<FlowBlock>> Parts(GroupBlock group)
+    internal static IEnumerable<List<FlowBlock>> Parts(GroupBlock group)
     {
         int rtl = 0, ltr = 0;
         foreach (var part in group.Parts)

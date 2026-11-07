@@ -404,7 +404,9 @@ public static class PdfToHtml
                 for (int i = 0; i < pageLinks.Count; i++) pageLinks[i] = turn.Turn(pageLinks[i]);
             }
             var text = TextLayout.Build(collected.Glyphs, index + 1, turn.Width, turn.Height, true, cancellationToken);
-            var blocks = StructuredBlocks(tree, index, collected, text, pageLinks, out _, cancellationToken);
+            var blocks = StructuredBlocks(tree, index, collected, text, pageLinks, out bool tagged, cancellationToken);
+            // Columns the layout found in pieces are read as PdfText reads them; a tagged page's order is its tags'.
+            if (!tagged) blocks = TextReadingOrder.Columns(blocks);
             if (includeImages) AddImages(doc, index, turn, renderAnnotations, blocks, cancellationToken);
             return blocks;
         }
