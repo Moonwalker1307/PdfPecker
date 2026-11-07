@@ -45,8 +45,8 @@ internal readonly struct TextTurn
     public double Height => Degrees % 180 == 0 ? _height : _width;
 
     /// <summary>
-    /// The turn that makes most of a page's letters upright, on a page with /Rotate (<paramref name="rotate"/>) or one
-    /// without upright text. Text in other directions on a mostly upright page, such as a turned table header or a label
+    /// The turn that makes more than half of a page's letters upright, on a page with /Rotate (<paramref name="rotate"/>)
+    /// or one without upright text. Text in other directions on a mostly upright page, such as a turned table header or a label
     /// up the margin, leaves the page as it is. So does an upright heading over vertical writing, as in Chinese or
     /// Japanese, which is read before the writing below it only while the page is upright.
     /// </summary>
@@ -62,10 +62,15 @@ internal readonly struct TextTurn
             if (Math.Abs(angle - quarter * 90) > 5) continue;
             counts[(quarter % 4 + 4) % 4]++;
         }
-        int most = 0;
+        int most = 0, all = counts[0];
         for (int q = 1; q < 4; q++)
+        {
+            all += counts[q];
             if (counts[q] > counts[most]) most = q;
-        return new TextTurn(rotate != 0 || counts[0] == 0 ? most * 90 : 0, width, height);
+        }
+        // A page of text boxes turned every way, as a poster or a test page can be, has no way up to read it in.
+        bool clear = counts[most] * 2 > all;
+        return new TextTurn(clear && (rotate != 0 || counts[0] == 0) ? most * 90 : 0, width, height);
     }
 
     /// <summary>Turns the glyphs, lines, bullets and fills the page drew.</summary>
