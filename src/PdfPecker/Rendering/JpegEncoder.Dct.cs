@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 
 namespace PdfPecker.Rendering;
@@ -46,23 +47,22 @@ internal static partial class JpegEncoder
         return divisors;
     }
 
-    /// <summary>Copies a block of samples centred on zero; returns false when all 64 samples are equal.</summary>
+    /// <summary>Copies a block of samples centred on zero; returns false, copying nothing, when all 64 samples are equal.</summary>
     private static bool LoadBlock(byte[] plane, int origin, int width, Span<float> block)
     {
-        byte first = plane[origin];
+        // Most blocks of a rendered page are flat, so each row of eight samples is first compared as one word.
+        ulong flat = plane[origin] * 0x0101010101010101UL;
         bool varies = false;
+        for (int row = 0; row < BlockSize && !varies; row++)
+            varies = BinaryPrimitives.ReadUInt64LittleEndian(plane.AsSpan(origin + row * width, BlockSize)) != flat;
+        if (!varies) return false;
         for (int row = 0; row < BlockSize; row++)
         {
             var samples = plane.AsSpan(origin + row * width, BlockSize);
             var destination = block.Slice(row * BlockSize, BlockSize);
-            for (int column = 0; column < BlockSize; column++)
-            {
-                byte v = samples[column];
-                if (v != first) varies = true;
-                destination[column] = v - LevelShift;
-            }
+            for (int column = 0; column < BlockSize; column++) destination[column] = samples[column] - LevelShift;
         }
-        return varies;
+        return true;
     }
 
     private static void TransformBlock(Span<float> block, float[] divisors, Span<short> output)

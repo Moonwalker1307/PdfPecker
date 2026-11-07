@@ -84,8 +84,11 @@ internal static partial class JpegEncoder
             int difference = coefficients[0] - prediction;
             prediction = coefficients[0];
             sink.Dc(luma, BitLength(difference), difference);
+            // Coefficients after the last nonzero one are all covered by the end-of-block code; in the flat blocks that
+            // most rendered pages are made of, that is all 63 of them.
+            int last = coefficients[1..].LastIndexOfAnyExcept((short)0) + 1;
             int run = 0;
-            for (int k = 1; k < BlockLength; k++)
+            for (int k = 1; k <= last; k++)
             {
                 int value = coefficients[k];
                 if (value == 0)
@@ -98,7 +101,7 @@ internal static partial class JpegEncoder
                 sink.Ac(luma, run << 4 | size, size, value);
                 run = 0;
             }
-            if (run > 0) sink.Ac(luma, EndOfBlock, 0, 0);
+            if (last < BlockLength - 1) sink.Ac(luma, EndOfBlock, 0, 0);
         }
 
         /// <summary>The number of bits of a value's magnitude, which is its size category.</summary>
