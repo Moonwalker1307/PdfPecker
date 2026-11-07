@@ -62,7 +62,13 @@ internal sealed class PageMarginBoxes
     public List<DrawOp> Layout(int pageIndex, int pageCount) => Layout(pageIndex, pageCount, _page, null);
 
     /// <summary>The margin boxes of a page with its own setup: a named page's (<paramref name="pageName"/>).</summary>
-    public List<DrawOp> Layout(int pageIndex, int pageCount, PageSetup page, string? pageName)
+    public List<DrawOp> Layout(int pageIndex, int pageCount, PageSetup page, string? pageName) => Layout(pageIndex, pageCount, page, pageName, pageIndex);
+
+    /// <summary>
+    /// The margin boxes of a page with its own setup, which is page <paramref name="groupPage"/> (from 0) of the run of
+    /// pages named <paramref name="pageName"/> it belongs to, for :nth(An+B of name).
+    /// </summary>
+    public List<DrawOp> Layout(int pageIndex, int pageCount, PageSetup page, string? pageName, int groupPage)
     {
         _page = page;
         if (_paged != null) _paged.CurrentPage = pageIndex;
@@ -72,7 +78,7 @@ internal sealed class PageMarginBoxes
         var boxes = new Dictionary<string, List<Declaration>>(StringComparer.Ordinal);
         foreach (var rule in _rules)
         {
-            if (!Applies(rule, pageIndex, pageName, FirstPageLeft)) continue;
+            if (!Applies(rule, pageIndex, groupPage, pageName, FirstPageLeft)) continue;
             context.AddRange(rule.Declarations);
             foreach (var (name, decls) in rule.MarginBoxes)
             {
@@ -152,17 +158,18 @@ internal sealed class PageMarginBoxes
 
     /// <summary>
     /// Whether an @page rule's selector matches the page: its page name, if any, and :first (the document's first
-    /// page, as in Chrome), :left or :right (the first page is a right page, or a left page in a right-to-left document).
+    /// page, as in Chrome), :left or :right (the first page is a right page, or a left page in a right-to-left document),
+    /// or :nth(An+B), which counts the document's pages or, with "of name", the pages of the named page's run.
     /// </summary>
-    private static bool Applies(PageRule rule, int pageIndex, string? pageName, bool firstPageLeft)
-        => (rule.Name.Length == 0 || rule.Name == pageName) && rule.Selector switch
+    private static bool Applies(PageRule rule, int pageIndex, int groupPage, string? pageName, bool firstPageLeft)
+        => (rule.Name.Length == 0 || rule.Name == pageName) && (rule.Nth != null ? rule.NthMatches(pageIndex, groupPage, pageName) : rule.Selector switch
     {
         "" => true,
         ":first" => pageIndex == 0,
         ":right" => pageIndex % 2 == (firstPageLeft ? 1 : 0),
         ":left" => pageIndex % 2 == (firstPageLeft ? 0 : 1),
         _ => false, // :blank: pages are never left blank by forced breaks here
-    };
+    });
 
     /// <summary>
     /// The used sizes of the three boxes along an edge (CSS Paged Media 3, 6.3.2), from their max-content sizes: the

@@ -16,7 +16,11 @@ internal class PageGrid
     public readonly bool Uniform;
 
     /// <summary>Some pages have another setup than the first, even with the same flow height.</summary>
-    public readonly bool Varies;
+    public bool Varies { get; private set; }
+
+    // Setups of single pages that differ from their kind's only in what does not move content, such as the
+    // background of @page :nth() rules; null for a page that keeps its kind's.
+    private Func<int, PageSetup?>? _pageOverride;
 
     public PageGrid(PageSetup page) : this(page, page, page) { }
 
@@ -38,7 +42,17 @@ internal class PageGrid
         Uniform = uniform;
     }
 
-    public PageSetup SetupOf(int page) => page <= 0 ? _first : (page & 1) == 1 ? _odd : _even;
+    public PageSetup SetupOf(int page) => _pageOverride?.Invoke(page) ?? (page <= 0 ? _first : (page & 1) == 1 ? _odd : _even);
+
+    /// <summary>
+    /// Gives single pages setups of their own that keep their kind's geometry (size, margins and bands), so that the
+    /// flow is laid out as before: only what is drawn around it changes.
+    /// </summary>
+    public void OverridePages(Func<int, PageSetup?> setupOf)
+    {
+        _pageOverride = setupOf;
+        Varies = true;
+    }
 
     public virtual float Height(int page) => page <= 0 ? _h0 : (page & 1) == 1 ? _h1 : _h2;
 
