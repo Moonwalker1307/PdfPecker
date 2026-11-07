@@ -85,9 +85,25 @@ public class Css3Tests
     [InlineData("color-mix(in srgb, red 30%, blue 30%)", 0x99800080)]
     [InlineData("color-mix(in oklab, white, black)", 0xFF636363)]
     [InlineData("light-dark(red, blue)", 0xFFFF0000)]
+    [InlineData("contrast-color(#1e3a8a)", 0xFFFFFFFF)]
+    [InlineData("contrast-color(#fde047)", 0xFF000000)]
+    [InlineData("contrast-color(#777777)", 0xFF000000)] // 4.69 with black against 4.48 with white
+    [InlineData("contrast-color(#707070)", 0xFFFFFFFF)] // 4.95 with white against 4.24 with black
+    [InlineData("contrast-color(rgb(0 0 0 / 0))", 0xFFFFFFFF)] // alpha is ignored
+    [InlineData("contrast-color(color-mix(in srgb, white, black))", 0xFF000000)]
+    [InlineData("contrast-color(oklch(45% 0.2 25))", 0xFFFFFFFF)]
+    [InlineData("rgb(from contrast-color(navy) r g b / 0.5)", 0x80FFFFFF)]
     [InlineData("Canvas", 0xFFFFFFFF)]
     [InlineData("rgb(calc(255 / 2) 0 0)", 0xFF800000)]
     public void Modern_colour_syntax_parses(string css, uint expected) => Near(expected, Parse(css));
+
+    [Theory]
+    [InlineData("contrast-color()")]
+    [InlineData("contrast-color(nonsense)")]
+    [InlineData("contrast-color(red, blue)")]
+    [InlineData("contrast-color(from red r g b)")]
+    public void Malformed_contrast_color_does_not_parse(string css)
+        => Assert.False(CssColor.TryParse(css, CssColor.Black, out _));
 
     [Fact]
     public void Colour_mix_in_oklch_takes_the_shorter_hue_arc()
