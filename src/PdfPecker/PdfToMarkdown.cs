@@ -155,7 +155,7 @@ public static class PdfToMarkdown
         PdfToHtml.WritePages(indices.Count, options.MaxDegreeOfParallelism, cancellationToken, i =>
         {
             int index = indices[i];
-            var blocks = PdfToHtml.StructuredBlocks(doc, tree, links, index, options.RenderAnnotations, options.IncludeImages, out _, cancellationToken);
+            var blocks = PdfToHtml.StructuredBlocks(doc, tree, links, index, options.RenderAnnotations, options.IncludeImages, out _, out _, cancellationToken);
             var sb = new StringBuilder(4096);
             if (options.IncludePageComments) sb.Append("<!-- page ").Append((index + 1).ToString(CultureInfo.InvariantCulture)).Append(" -->\n\n");
             MarkdownPageWriter.WritePage(sb, blocks);

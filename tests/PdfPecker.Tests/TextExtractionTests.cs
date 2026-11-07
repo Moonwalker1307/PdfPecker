@@ -332,6 +332,67 @@ public class TextExtractionTests
         AssertStoryInOrder(text);
     }
 
+    [Theory]
+    [InlineData(90, false)]
+    [InlineData(90, true)]
+    [InlineData(180, false)]
+    [InlineData(270, false)]
+    public void A_page_turned_with_Rotate_is_read_as_its_text_runs(int degrees, bool tagged)
+    {
+        // A page with /Rotate shows its text running down, up or upside down; read as displayed, the lines of its two
+        // columns lie side by side across the reading direction and were joined into one.
+        var upright = HtmlToPdf.Convert(
+            "<style>@page{size:A4;margin:18mm 16mm} body{margin:0;font:10.5pt/1.4 serif} h2{font:bold 12.5pt/1.25 sans-serif;margin:10pt 0 4pt}" +
+            " p{margin:0 0 6pt}</style><h1>Harbour town plans a new tram line</h1><div style='columns:2;column-gap:9mm;text-align:justify'>" +
+            string.Concat(Story.Select(p => p.Length < 20 ? "<h2>" + p + "</h2>" : "<p>" + p + "</p>")) + "</div>",
+            new PdfOptions { Accessibility = tagged ? PdfAccessibility.Tagged : PdfAccessibility.None });
+        var pdf = PdfPages.Rotate(upright, degrees);
+        var (page, uprightPage) = (PdfText.ExtractPage(pdf, 1), PdfText.ExtractPage(upright, 1));
+        Assert.Equal(uprightPage.Text, page.Text);
+        Assert.StartsWith("Harbour town plans a new tram line\n\n", page.Text);
+        AssertStoryInOrder(page.Text);
+        Assert.Equal(PdfToMarkdown.Convert(upright), PdfToMarkdown.Convert(pdf));
+
+        // The lines and words are where the page shows them, in the direction their text runs: the title is as far
+        // from the edge the top of the page has turned to, and from the one its left edge has, as on the upright page.
+        var (title, uprightTitle) = (page.Lines[0], uprightPage.Lines[0]);
+        var (top, left) = degrees switch
+        {
+            90 => (page.Width - (title.X + title.Width), title.Y),
+            180 => (page.Height - (title.Y + title.Height), page.Width - (title.X + title.Width)),
+            _ => (title.X, page.Height - (title.Y + title.Height)),
+        };
+        Assert.Equal((360 - degrees) % 360, title.Angle);
+        Assert.Equal(degrees == 180 ? 595.3 : 841.9, page.Width, 0.1);
+        Assert.Equal(degrees == 180 ? uprightTitle.Width : uprightTitle.Height, title.Width, 0.01);
+        Assert.Equal(uprightTitle.Y, top, 0.01);
+        Assert.Equal(uprightTitle.X, left, 0.01);
+        var words = page.Lines.SelectMany(l => l.Words).ToList();
+        var uprightWords = uprightPage.Lines.SelectMany(l => l.Words).ToList();
+        Assert.Equal(uprightWords.Count, words.Count);
+        for (int i = 0; i < words.Count; i++)
+        {
+            var (w, u) = (words[i], uprightWords[i]);
+            var (x, y) = degrees switch
+            {
+                90 => (uprightPage.Height - (u.Y + u.Height), u.X),
+                180 => (uprightPage.Width - (u.X + u.Width), uprightPage.Height - (u.Y + u.Height)),
+                _ => (u.Y, uprightPage.Width - (u.X + u.Width)),
+            };
+            Assert.True(Math.Abs(w.X - x) < 0.01 && Math.Abs(w.Y - y) < 0.01, $"{w.Text} at {w.X}, {w.Y} instead of {x}, {y}");
+        }
+    }
+
+    [Fact]
+    public void An_upright_heading_over_vertical_writing_stays_first()
+    {
+        // Most of the page's letters run down the page, but the page is upright and so is the heading at its top.
+        var pdf = HtmlToPdf.Convert(
+            "<style>@page{size:A5;margin:15mm} body{margin:0;font:11pt/1.5 serif}</style><h1>Vertical writing</h1>" +
+            "<div style='writing-mode:vertical-rl;height:120mm'>" + string.Concat(Story.Take(4).Select(p => "<p>" + p + "</p>")) + "</div>");
+        Assert.StartsWith("Vertical writing\n", PdfText.ExtractPage(pdf, 1).Text);
+    }
+
     [Fact]
     public void The_lines_of_the_longer_column_stay_in_that_column()
     {
