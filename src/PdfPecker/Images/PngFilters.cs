@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace PdfPecker.Images;
 
 /// <summary>
@@ -38,6 +40,48 @@ internal static class PngFilters
                     row[i] += (byte)PaethPredictor(row[i - bytesPerPixel], above[i], above[i - bytesPerPixel]);
                 break;
         }
+    }
+
+    /// <summary>
+    /// Applies the Paeth filter to one row: each byte of <paramref name="row"/> minus the Paeth predictor of its left,
+    /// upper and upper-left bytes, into <paramref name="filtered"/>. <paramref name="above"/> is the unfiltered row
+    /// before it. Unlike undoing the filter, applying it reads only unfiltered bytes, so it runs a vector at a time.
+    /// </summary>
+    public static void ApplyPaeth(ReadOnlySpan<byte> row, ReadOnlySpan<byte> above, int bytesPerPixel, Span<byte> filtered)
+    {
+        int n = row.Length, first = Math.Min(bytesPerPixel, n);
+        // Before the first pixel there is no byte to the left or upper left, so the predictor is the byte above.
+        for (int i = 0; i < first; i++) filtered[i] = (byte)(row[i] - above[i]);
+        int at = first;
+        if (Vector.IsHardwareAccelerated)
+        {
+            for (; at + Vector<byte>.Count <= n; at += Vector<byte>.Count)
+            {
+                var left = new Vector<byte>(row.Slice(at - bytesPerPixel));
+                var up = new Vector<byte>(above.Slice(at));
+                var upLeft = new Vector<byte>(above.Slice(at - bytesPerPixel));
+                Vector.Widen(left, out var leftLow, out var leftHigh);
+                Vector.Widen(up, out var upLow, out var upHigh);
+                Vector.Widen(upLeft, out var upLeftLow, out var upLeftHigh);
+                var predicted = Vector.Narrow(
+                    PaethPredictor(Vector.AsVectorInt16(leftLow), Vector.AsVectorInt16(upLow), Vector.AsVectorInt16(upLeftLow)),
+                    PaethPredictor(Vector.AsVectorInt16(leftHigh), Vector.AsVectorInt16(upHigh), Vector.AsVectorInt16(upLeftHigh)));
+                (new Vector<byte>(row.Slice(at)) - predicted).CopyTo(filtered.Slice(at));
+            }
+        }
+        for (; at < n; at++) filtered[at] = (byte)(row[at] - PaethPredictor(row[at - bytesPerPixel], above[at], above[at - bytesPerPixel]));
+    }
+
+    /// <summary><see cref="PaethPredictor(int, int, int)"/> for each lane of bytes widened to 16 bits.</summary>
+    private static Vector<ushort> PaethPredictor(Vector<short> left, Vector<short> above, Vector<short> aboveLeft)
+    {
+        // The distances of the estimate left + above - aboveLeft from left, above and aboveLeft.
+        var toLeft = Vector.Abs(above - aboveLeft);
+        var toAbove = Vector.Abs(left - aboveLeft);
+        var toAboveLeft = Vector.Abs(left + above - aboveLeft - aboveLeft);
+        var useLeft = Vector.LessThanOrEqual(toLeft, toAbove) & Vector.LessThanOrEqual(toLeft, toAboveLeft);
+        var aboveOrAboveLeft = Vector.ConditionalSelect(Vector.LessThanOrEqual(toAbove, toAboveLeft), above, aboveLeft);
+        return Vector.AsVectorUInt16(Vector.ConditionalSelect(useLeft, left, aboveOrAboveLeft));
     }
 
     /// <summary>Picks whichever of the left, upper and upper-left bytes is closest to left + upper - upper-left.</summary>
