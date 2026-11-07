@@ -13,6 +13,7 @@ internal static class TextLayout
     {
         public int Glyph; // index into the page's glyphs, or -1 for a space this layout inserts
         public double U0, U1, V, Size;
+        public bool Cursive; // an Arabic letter, which cursive attachment can lift or lower off its line's baseline
     }
 
     private sealed class Line
@@ -39,6 +40,7 @@ internal static class TextLayout
         var lines = new List<PdfTextLine>();
         var sb = new StringBuilder();
         var attached = new MarkTargets(glyphs);
+        bool drawsSpaces = glyphs.Exists(g => g.Text.Length > 0 && IsSpace(g.Text));
         foreach (var angle in groups.Keys.OrderBy(a => a))
         {
             double rad = angle * Math.PI / 180, cx = Math.Cos(rad), cy = Math.Sin(rad);
@@ -47,7 +49,7 @@ internal static class TextLayout
             foreach (var line in groupLines)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var textLine = MakeLine(glyphs, line, cx, cy, angle, expandLigatures);
+                var textLine = MakeLine(glyphs, line, cx, cy, angle, expandLigatures, drawsSpaces);
                 if (textLine == null) continue;
                 if (sb.Length > 0)
                 {
@@ -82,7 +84,7 @@ internal static class TextLayout
             // Line space: u along the baseline, v across it, growing down the page for unrotated text.
             double u0 = g.X * cx + g.Y * cy, u1 = g.EndX * cx + g.EndY * cy, v = -g.X * cy + g.Y * cx;
             if (u1 < u0) (u0, u1) = (u1, u0);
-            items.Add(new Item { Glyph = i, U0 = u0, U1 = u1, V = v, Size = Math.Max(g.Size, 1e-3) });
+            items.Add(new Item { Glyph = i, U0 = u0, U1 = u1, V = v, Size = Math.Max(g.Size, 1e-3), Cursive = ClassOf(g.Text) == BidiClass.AL });
         }
         // Combining marks (Arabic vowel signs, Hebrew points, accents drawn on their own) are often placed above or
         // below their letter, off its baseline; they are joined to the letter they sit on after the lines are built.
@@ -95,8 +97,10 @@ internal static class TextLayout
         Line? current = null;
         foreach (var it in items)
         {
-            // Superscripts and subscripts sit within about half a font size of their line's baseline.
-            if (current != null && it.V - current.V <= 0.5 * (current.Size + it.Size) / 2)
+            // Superscripts and subscripts sit within about half a font size of their line's baseline. Naskh and other
+            // Arabic styles join letters by cursive attachment, which can put a letter, such as a final noon after a
+            // mim, more than half a size below the letter it joins.
+            if (current != null && it.V - current.V <= (it.Cursive ? 0.75 : 0.5) * (current.Size + it.Size) / 2)
             {
                 current.Items.Add(it);
                 if (it.Size > current.Size) { current.Size = it.Size; current.V = it.V; }
@@ -133,8 +137,10 @@ internal static class TextLayout
             var line = lines[l];
             // The line's baselines: runs of glyphs, sorted across the line, less than a fifth of the smaller size apart.
             List<List<Item>>? groups = null;
+            // Arabic letters off the baseline by cursive attachment are not a baseline of their own.
             double minV = double.MaxValue, maxV = double.MinValue;
-            foreach (var it in line.Items) { minV = Math.Min(minV, it.V); maxV = Math.Max(maxV, it.V); }
+            foreach (var it in line.Items)
+                if (!it.Cursive) { minV = Math.Min(minV, it.V); maxV = Math.Max(maxV, it.V); }
             if (maxV - minV > 0.1 * line.Size)
             {
                 var sorted = line.Items.OrderBy(it => it.V).ToList();
@@ -388,7 +394,7 @@ internal static class TextLayout
         return true;
     }
 
-    private static PdfTextLine? MakeLine(List<TextGlyph> glyphs, Line line, double cx, double cy, int angle, bool expandLigatures)
+    private static PdfTextLine? MakeLine(List<TextGlyph> glyphs, Line line, double cx, double cy, int angle, bool expandLigatures, bool drawsSpaces)
     {
         // Visual order with spaces: a glyph drawn twice in the same place (fake bold) counts once, and a gap wider than
         // a fraction of the font's space becomes a space when the PDF does not draw one.
@@ -407,6 +413,10 @@ internal static class TextLayout
                 double threshold = space < double.MaxValue ? Math.Clamp(0.5 * space, 0.08 * size, 0.2 * size) : 0.15 * size;
                 // Text placed on its own, such as the next table cell, needs only a small gap to be a separate word.
                 if (g.Moved) threshold = Math.Min(threshold, 0.1 * size);
+                // Joined Arabic letters are placed by cursive attachment, so the advance of one need not reach the next:
+                // in Naskh the gap before a wide letter such as dad is a third of the size. Where the page draws its
+                // spaces, only a gap wider than a space between two of them is a word it leaves out, such as a cell.
+                if (drawsSpaces && it.Cursive && p.Cursive) threshold = Math.Max(threshold, 0.5 * size);
                 if (!spaceDrawn && it.U0 - p.U1 > threshold)
                     visual.Add(new Item { Glyph = -1, U0 = p.U1, U1 = it.U0, V = it.V, Size = size });
             }
