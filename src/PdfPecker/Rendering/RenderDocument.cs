@@ -101,6 +101,7 @@ internal sealed class RenderDocument
         var collector = new TextCollector(rules);
         var r = new PageRenderer(File, _cache, collector, cancel);
         using (PdfFile.BeginRender(cancel)) r.RenderPage(p.Dict, p.Resources, PageMatrix(p, p.UserUnit, p.UserUnit), annotations);
+        VerticalText.Apply(collector.Glyphs);
         return collector;
     }
 

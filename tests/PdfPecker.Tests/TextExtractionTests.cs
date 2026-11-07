@@ -384,6 +384,22 @@ public class TextExtractionTests
     }
 
     [Fact]
+    public void Vertical_writing_drawn_letter_by_letter_is_read_down_its_columns()
+    {
+        // Chrome prints writing-mode: vertical-rl with a horizontal font, every letter upright and placed on its own
+        // under the one before; placing each letter here does the same. The right column is read first.
+        string[] columns = { "中文的字测试。", "这是第句。" };
+        var html = new StringBuilder("<style>" + Face("N", "NotoSansSC-Subset.woff2") + " div{position:absolute;font:12pt/1 N}</style>");
+        for (int c = 0; c < columns.Length; c++)
+            for (int i = 0; i < columns[c].Length; i++)
+                html.Append($"<div style='left:{120 - 20 * c}pt;top:{40 + 12 * i}pt'>{columns[c][i]}</div>");
+        var page = PdfText.ExtractPage(HtmlToPdf.Convert(html.ToString()), 1);
+        Assert.Equal(columns, page.Lines.Select(l => l.Text));
+        Assert.All(page.Lines, l => Assert.Equal(270, l.Angle));
+        Assert.True(page.Lines[0].X > page.Lines[1].X && page.Lines[0].Height > page.Lines[0].Width);
+    }
+
+    [Fact]
     public void An_upright_heading_over_vertical_writing_stays_first()
     {
         // Most of the page's letters run down the page, but the page is upright and so is the heading at its top.
