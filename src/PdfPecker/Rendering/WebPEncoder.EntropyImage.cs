@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Numerics;
 
 namespace PdfPecker.Rendering;
@@ -16,9 +17,9 @@ internal static partial class WebPEncoder
     /// Writes one entropy-coded image: colour cache size, (for the main image) no meta prefix codes, five prefix codes
     /// and the coded pixels.
     /// </summary>
-    private static void EncodeImage(BitWriter writer, uint[] pixels, int width, bool isMainImage, Settings settings)
+    private static void EncodeImage(BitWriter writer, ReadOnlySpan<uint> pixels, int width, bool isMainImage, Settings settings)
     {
-        var references = BackwardReferences(pixels, width, settings);
+        using var references = BackwardReferences(pixels, width, settings);
         var histograms = new Histograms();
         var cache = new ColorCache();
         int cacheBits = ChooseCacheBits(pixels, references, settings, histograms, cache);
@@ -31,8 +32,21 @@ internal static partial class WebPEncoder
         if (isMainImage) writer.Write(0, 1); // a single group of prefix codes
 
         // The cache key of each literal that is found in the colour cache, else -1.
-        var cacheHits = new int[references.Count];
-        histograms.Count(pixels, references, cacheBits, cache, cacheHits);
+        var cacheHits = ArrayPool<int>.Shared.Rent(references.Count);
+        try
+        {
+            histograms.Count(pixels, references, cacheBits, cache, cacheHits);
+            WriteCodedPixels(writer, pixels, references, histograms, cacheHits);
+        }
+        finally
+        {
+            ArrayPool<int>.Shared.Return(cacheHits);
+        }
+    }
+
+    /// <summary>Writes the five prefix codes and then the pixels with them.</summary>
+    private static void WriteCodedPixels(BitWriter writer, ReadOnlySpan<uint> pixels, References references, Histograms histograms, int[] cacheHits)
+    {
         var green = WriteCode(writer, histograms.Green.AsSpan(0, histograms.GreenAlphabet));
         var red = WriteCode(writer, histograms.Red);
         var blue = WriteCode(writer, histograms.Blue);
@@ -127,7 +141,7 @@ internal static partial class WebPEncoder
         /// Counts the symbols the references code with a cache of 2^<paramref name="cacheBits"/> entries (none for 0),
         /// recording which literals hit the cache when <paramref name="cacheHits"/> is given.
         /// </summary>
-        public void Count(uint[] pixels, References references, int cacheBits, ColorCache cache, int[]? cacheHits = null)
+        public void Count(ReadOnlySpan<uint> pixels, References references, int cacheBits, ColorCache cache, int[]? cacheHits = null)
         {
             Array.Clear(Green);
             Array.Clear(Red);
@@ -169,7 +183,7 @@ internal static partial class WebPEncoder
                     // there, which skips most of a run.
                     if (useCache)
                     {
-                        var copied = pixels.AsSpan(position, reference.Length);
+                        var copied = pixels.Slice(position, reference.Length);
                         uint last = copied[0];
                         cache.Insert(cache.Key(last), last);
                         foreach (uint c in copied)
@@ -207,7 +221,7 @@ internal static partial class WebPEncoder
     }
 
     /// <summary>Picks the colour cache size with the smallest estimated literal cost.</summary>
-    private static int ChooseCacheBits(uint[] pixels, References references, Settings settings, Histograms histograms, ColorCache cache)
+    private static int ChooseCacheBits(ReadOnlySpan<uint> pixels, References references, Settings settings, Histograms histograms, ColorCache cache)
     {
         int best = 0;
         double bestCost = double.MaxValue;

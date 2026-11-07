@@ -254,5 +254,22 @@ public class ImageOutputFormatTests
         var webp = PdfPecker.Rendering.WebPEncoder.Encode(flat, size, size, 85);
         PdfPecker.Rendering.WebPEncoder.Encode(noisy, size, size, 85);
         Assert.Equal(webp, PdfPecker.Rendering.WebPEncoder.Encode(flat, size, size, 85));
+
+        // The WebP encoder rents its pixel copies too: fully transparent pixels must come out as zeros, and palette
+        // indexes must not pick up bits of an earlier image, whatever the buffers held before.
+        var holes = (uint[])noisy.Clone();
+        for (int i = 0; i < holes.Length; i += 3) holes[i] = (uint)random.Next(0x1000000); // alpha 0, with colour bits
+        var fewColours = new uint[size * size];
+        for (int i = 0; i < fewColours.Length; i++) fewColours[i] = (i / 7 % 3) switch { 0 => 0xFF000000u, 1 => 0xFFFFFFFFu, _ => 0x80402010u };
+        foreach (var image in new[] { holes, fewColours })
+        {
+            var expected = PdfPecker.Rendering.WebPEncoder.Encode(image, size, size, 85);
+            var decoded = WebPDecoder.Decode(expected, 1L << 32)!.Value;
+            for (int i = 0; i < image.Length; i++)
+                if (image[i] >> 24 == 0)
+                    Assert.True(decoded.Alpha![i] == 0 && decoded.Rgb[i * 3] == 0 && decoded.Rgb[i * 3 + 1] == 0 && decoded.Rgb[i * 3 + 2] == 0);
+            PdfPecker.Rendering.WebPEncoder.Encode(noisy, size, size, 95);
+            Assert.Equal(expected, PdfPecker.Rendering.WebPEncoder.Encode(image, size, size, 85));
+        }
     }
 }
