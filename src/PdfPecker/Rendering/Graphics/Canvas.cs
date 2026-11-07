@@ -16,11 +16,31 @@ internal sealed class Canvas
     private const uint RoundingBias = 0x00800080;
 
     public Canvas(int width, int height, uint background)
+        : this(width, height, background, null)
+    {
+    }
+
+    /// <summary>
+    /// A canvas on <paramref name="reuse"/> when it has exactly the canvas's pixel count, which is then overwritten
+    /// with <paramref name="background"/>; otherwise on a new array.
+    /// </summary>
+    public Canvas(int width, int height, uint background, uint[]? reuse)
     {
         Width = width;
         Height = height;
-        Pixels = new uint[checked(width * height)];
-        if (background != 0) Array.Fill(Pixels, background);
+        int count = checked(width * height);
+        if (reuse != null && reuse.Length == count)
+        {
+            Pixels = reuse;
+            Array.Fill(Pixels, background);
+        }
+        else if (background == 0) Pixels = new uint[count];
+        else
+        {
+            // Every pixel is set to the background, so the runtime need not clear the array first.
+            Pixels = GC.AllocateUninitializedArray<uint>(count);
+            Array.Fill(Pixels, background);
+        }
     }
 
     public int Width { get; }
