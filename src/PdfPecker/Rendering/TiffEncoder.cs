@@ -1,5 +1,7 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.IO.Compression;
+using System.Numerics;
 using System.Text;
 
 namespace PdfPecker.Rendering;
@@ -75,9 +77,14 @@ internal static class TiffEncoder
             if (opaque)
             {
                 samples = new byte[width * height * 3];
-                for (int i = 0, o = 0; i < premultiplied.Length; i++, o += 3)
+                // Each pixel is stored whole, R, G, B and A, and the next pixel overwrites the A: one store per pixel
+                // instead of three. The last pixel is stored byte by byte so that nothing is written past the samples.
+                int last = premultiplied.Length - 1;
+                for (int i = 0, o = 0; i < last; i++, o += 3) BinaryPrimitives.WriteUInt32LittleEndian(samples.AsSpan(o), premultiplied[i]);
+                if (last >= 0)
                 {
-                    uint p = premultiplied[i];
+                    uint p = premultiplied[last];
+                    int o = last * 3;
                     samples[o] = (byte)p; samples[o + 1] = (byte)(p >> 8); samples[o + 2] = (byte)(p >> 16);
                 }
             }
@@ -86,14 +93,30 @@ internal static class TiffEncoder
         int stride = width * page.SamplesPerPixel;
         if (page.Predictor)
         {
-            // Horizontal differencing, right to left so each sample is taken from its still unchanged left neighbour.
             int spp = page.SamplesPerPixel;
-            for (int y = 0; y < height; y++)
-                for (int i = y * stride + stride - 1, start = y * stride + spp; i >= start; i--)
-                    samples[i] -= samples[i - spp];
+            for (int y = 0; y < height; y++) DifferenceRow(samples.AsSpan(y * stride, stride), spp);
         }
         Split(page, samples, stride, compression);
         return page;
+    }
+
+    /// <summary>
+    /// Horizontal differencing in place: each sample minus the same sample of the pixel to its left. It runs right to
+    /// left, a vector at a time, so each sample is taken from its still unchanged left neighbour.
+    /// </summary>
+    private static void DifferenceRow(Span<byte> row, int samplesPerPixel)
+    {
+        int end = row.Length;
+        if (Vector.IsHardwareAccelerated)
+        {
+            // Both vectors are read before the difference is stored, and everything left of the store is unchanged.
+            for (; end - Vector<byte>.Count >= samplesPerPixel; end -= Vector<byte>.Count)
+            {
+                int at = end - Vector<byte>.Count;
+                (new Vector<byte>(row.Slice(at)) - new Vector<byte>(row.Slice(at - samplesPerPixel))).CopyTo(row.Slice(at));
+            }
+        }
+        for (int i = end - 1; i >= samplesPerPixel; i--) row[i] -= row[i - samplesPerPixel];
     }
 
     private static int CompressionTag(TiffCompression c) => c switch
@@ -269,58 +292,86 @@ internal static class TiffEncoder
     internal static byte[] Lzw(ReadOnlySpan<byte> data)
     {
         const int Clear = 256, End = 257, First = 258, MaxCode = 4094;
-        var output = new List<byte>(data.Length / 2 + 16);
+        // A code is at most 12 bits for each input byte it stands for, plus the clear codes and the end code.
+        var output = ArrayPool<byte>.Shared.Rent(data.Length * 3 / 2 + 64);
+        int length = 0;
         ulong bits = 0;
         int count = 0, width = 9;
-        void Put(int code)
-        {
-            bits = bits << width | (uint)code;
-            count += width;
-            while (count >= 8) { count -= 8; output.Add((byte)(bits >> count)); }
-        }
 
-        // The table maps (prefix code, next byte) to a code, with open addressing in a power-of-two hash table.
+        // The table maps (prefix code, next byte) to a code, with open addressing in a power-of-two hash table. Each
+        // entry holds the 20-bit key above the 12-bit code; no entry can be all ones, which marks a free slot.
         const int HashSize = 1 << 13;
-        var keys = new int[HashSize];
-        var codes = new short[HashSize];
-        void Reset() => Array.Fill(keys, -1);
-        Reset();
-        int next = First;
-        Put(Clear);
-        if (data.IsEmpty) { Put(End); return Flush(); }
-        int prefix = data[0];
-        for (int i = 1; i < data.Length; i++)
+        const uint Free = uint.MaxValue;
+        var table = ArrayPool<uint>.Shared.Rent(HashSize);
+        try
         {
-            byte c = data[i];
-            int key = prefix << 8 | c;
-            int h = (int)((uint)key * 0x9E3779B1u >> 19);
-            while (keys[h] != -1 && keys[h] != key) h = (h + 1) & (HashSize - 1);
-            if (keys[h] == key) { prefix = codes[h]; continue; }
-            Put(prefix);
-            keys[h] = key;
-            codes[h] = (short)next++;
+            var entries = table.AsSpan(0, HashSize);
+            entries.Fill(Free);
+            int next = First;
+            Put(Clear, 9);
+            if (data.IsEmpty)
+            {
+                Put(End, 9);
+                return Flush();
+            }
+            int prefix = data[0];
+            for (int i = 1; i < data.Length; i++)
+            {
+                byte c = data[i];
+                uint key = (uint)(prefix << 8 | c);
+                int h = (int)(key * 0x9E3779B1u >> 19);
+                uint entry;
+                while ((entry = entries[h]) != Free && entry >> 12 != key) h = (h + 1) & (HashSize - 1);
+                if (entry != Free)
+                {
+                    prefix = (int)(entry & 0xFFF);
+                    continue;
+                }
+                Put(prefix, width);
+                entries[h] = key << 12 | (uint)next++;
+                if (next == MaxCode)
+                {
+                    Put(Clear, width);
+                    entries.Fill(Free);
+                    next = First;
+                    width = 9;
+                }
+                else if (next > (1 << width) - 1) width++;
+                prefix = c;
+            }
+            Put(prefix, width);
+            // The decoder adds an entry for this last code too, so the end code may already need the wider width.
+            next++;
             if (next == MaxCode)
             {
-                Put(Clear);
-                Reset();
-                next = First;
+                Put(Clear, width);
                 width = 9;
             }
             else if (next > (1 << width) - 1) width++;
-            prefix = c;
+            Put(End, width);
+            return Flush();
         }
-        Put(prefix);
-        // The decoder adds an entry for this last code too, so the end code may already need the wider width.
-        next++;
-        if (next == MaxCode) { Put(Clear); width = 9; }
-        else if (next > (1 << width) - 1) width++;
-        Put(End);
-        return Flush();
+        finally
+        {
+            ArrayPool<uint>.Shared.Return(table);
+            ArrayPool<byte>.Shared.Return(output);
+        }
+
+        void Put(int code, int codeWidth)
+        {
+            bits = bits << codeWidth | (uint)code;
+            count += codeWidth;
+            while (count >= 8)
+            {
+                count -= 8;
+                output[length++] = (byte)(bits >> count);
+            }
+        }
 
         byte[] Flush()
         {
-            if (count > 0) output.Add((byte)(bits << (8 - count)));
-            return output.ToArray();
+            if (count > 0) output[length++] = (byte)(bits << (8 - count));
+            return output.AsSpan(0, length).ToArray();
         }
     }
 
