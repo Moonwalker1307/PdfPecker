@@ -374,13 +374,10 @@ public static class PdfToHtml
     private static string StructuredPage(RenderDocument doc, StructureTree? tree, PageLinks? links, int index, int id, PdfHtmlOptions options,
         Func<int, int> pageIds, CancellationToken cancellationToken)
     {
-        var blocks = StructuredBlocks(doc, tree, links, index, options.RenderAnnotations, options.IncludeImages, out var collected, cancellationToken);
+        var blocks = StructuredBlocks(doc, tree, links, index, options.RenderAnnotations, options.IncludeImages, out var collected, out var turn,
+            cancellationToken);
         FlowStyles? styles = null;
-        if (options.IncludeStyles)
-        {
-            var (w, h) = doc.PageSize(index);
-            styles = new FlowStyles(index + 1, w, h, collected.Fills, collected.Rules, blocks);
-        }
+        if (options.IncludeStyles) styles = new FlowStyles(index + 1, turn.Width, turn.Height, collected.Fills, collected.Rules, blocks);
         var sb = new StringBuilder(4096);
         FlowHtmlWriter.WritePage(sb, id, blocks, pageIds, styles);
         return sb.ToString();
@@ -388,19 +385,27 @@ public static class PdfToHtml
 
     /// <summary>
     /// A page's headings, paragraphs, lists and tables in reading order, read from its tags where the PDF is tagged and
-    /// otherwise from its layout; the structured HTML and Markdown are both written from these.
+    /// otherwise from its layout; the structured HTML and Markdown are both written from these. A page whose text runs
+    /// down or up is read turned so that its text is upright, and <paramref name="turn"/> says how, as the blocks and
+    /// <paramref name="collected"/> are then on the turned page.
     /// </summary>
     internal static List<FlowBlock> StructuredBlocks(RenderDocument doc, StructureTree? tree, PageLinks? links, int index, bool renderAnnotations,
-        bool includeImages, out TextCollector collected, CancellationToken cancellationToken)
+        bool includeImages, out TextCollector collected, out TextTurn turn, CancellationToken cancellationToken)
     {
         var (w, h) = doc.PageSize(index);
         try
         {
             collected = doc.CollectText(index, renderAnnotations, rules: true, cancellationToken);
+            turn = TextTurn.Of(collected.Glyphs, w, h, doc.Pages[index].Rotate);
             var pageLinks = links?.Read(index) ?? new List<PageLink>();
-            var text = TextLayout.Build(collected.Glyphs, index + 1, w, h, true, cancellationToken);
+            if (turn.Turned)
+            {
+                turn.Apply(collected);
+                for (int i = 0; i < pageLinks.Count; i++) pageLinks[i] = turn.Turn(pageLinks[i]);
+            }
+            var text = TextLayout.Build(collected.Glyphs, index + 1, turn.Width, turn.Height, true, cancellationToken);
             var blocks = StructuredBlocks(tree, index, collected, text, pageLinks, out _, cancellationToken);
-            if (includeImages) AddImages(doc, index, w, h, renderAnnotations, blocks, cancellationToken);
+            if (includeImages) AddImages(doc, index, turn, renderAnnotations, blocks, cancellationToken);
             return blocks;
         }
         catch (PdfFormatException ex)
@@ -433,9 +438,10 @@ public static class PdfToHtml
     /// them: pictures that fill most of the page, image masks, pictures too small to see and pictures drawn turned are
     /// left out.
     /// </summary>
-    private static void AddImages(RenderDocument doc, int index, double width, double height, bool renderAnnotations, List<FlowBlock> blocks,
+    private static void AddImages(RenderDocument doc, int index, TextTurn turn, bool renderAnnotations, List<FlowBlock> blocks,
         CancellationToken cancellationToken)
     {
+        double width = turn.Width, height = turn.Height;
         int placed = 0;
         foreach (var image in PdfImages.PageImages(doc, index, renderAnnotations, MaxPageImages, cancellationToken))
         {
@@ -446,19 +452,26 @@ public static class PdfToHtml
                 if (at.Width < 8 || at.Height < 8 || at.Width * at.Height > 0.5 * width * height) continue;
                 // A picture whose box on the page is far out of its own shape is drawn turned or skewed, as a corner
                 // ribbon is, and would show upright and out of place in the flow.
-                double shape = at.Width / at.Height * image.Height / Math.Max(1, image.Width);
+                // On a page read turned, a picture drawn the way its text runs is upright.
+                double shape = (turn.Degrees % 180 != 0 ? at.Height / at.Width : at.Width / at.Height) * image.Height / Math.Max(1, image.Width);
                 if (shape is > 1.5 or < 1 / 1.5) continue;
                 // The part a clip leaves, as of a photo cropped to its card.
                 double x0 = at.X, y0 = at.Y, x1 = at.X + at.Width, y1 = at.Y + at.Height;
                 if (at.Clip is var (cx0, cy0, cx1, cy1))
                     (x0, y0, x1, y1) = (Math.Max(x0, cx0), Math.Max(y0, cy0), Math.Min(x1, cx1), Math.Min(y1, cy1));
                 if (x1 - x0 < 8 || y1 - y0 < 8) continue;
+                var drawn = (at.X, at.Y, at.X + at.Width, at.Y + at.Height);
+                if (turn.Turned)
+                {
+                    (x0, y0, x1, y1) = turn.Turn((x0, y0, x1, y1));
+                    drawn = turn.Turn(drawn);
+                }
                 // A picture drawn over and over, as a pattern tile can be, is in the file once per place it is drawn.
                 if (++placed > MaxPageImages) return;
                 var block = new ImageBlock
                 {
                     Top = y0, Left = x0, X0 = x0, X1 = x1, Y0 = y0, Y1 = y1, MediaType = mediaType, Data = image.Data,
-                    Drawn = (at.X, at.Y, at.X + at.Width, at.Y + at.Height),
+                    Drawn = drawn,
                 };
                 FlowStyles.Place(blocks, block);
             }

@@ -346,9 +346,12 @@ public static class PdfText
                 return TextLayout.Build(doc.CollectText(index, options.IncludeAnnotations, cancellationToken), index + 1, w, h, options.ExpandLigatures, cancellationToken);
             // The reading order is the order of the blocks the structured HTML and Markdown are written from.
             var collected = doc.CollectText(index, options.IncludeAnnotations, rules: true, cancellationToken);
-            var text = TextLayout.Build(collected.Glyphs, index + 1, w, h, options.ExpandLigatures, cancellationToken);
+            var turn = TextTurn.Of(collected.Glyphs, w, h, doc.Pages[index].Rotate);
+            if (turn.Turned) turn.Apply(collected);
+            var text = TextLayout.Build(collected.Glyphs, index + 1, turn.Width, turn.Height, options.ExpandLigatures, cancellationToken);
             var blocks = PdfToHtml.StructuredBlocks(tree, index, collected, text, new List<PageLink>(), out bool tagged, cancellationToken);
-            return TextReadingOrder.Arrange(text, blocks, tagged, cancellationToken);
+            var arranged = TextReadingOrder.Arrange(text, blocks, tagged, cancellationToken);
+            return turn.Turned ? turn.Back(arranged) : arranged;
         }
         catch (PdfFormatException ex)
         {
