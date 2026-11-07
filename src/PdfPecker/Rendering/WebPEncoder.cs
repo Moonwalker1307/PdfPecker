@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Numerics;
 
@@ -44,19 +45,29 @@ internal static partial class WebPEncoder
         if (effort is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(effort), "Quality must be between 1 and 100.");
         if (width > MaxDimension || height > MaxDimension)
             throw new NotSupportedException($"WebP images are limited to {MaxDimension} pixels in each dimension; lower the Dpi or MaxDimension.");
-        var argb = ToStraightArgb(pixels, out bool hasAlpha);
-        var settings = Settings.For(effort);
-
-        var palette = FindPalette(argb);
-        byte[] best = palette != null
-            ? EncodeWithPalette(argb, width, height, hasAlpha, palette, settings)
-            : EncodeWithPredictor(argb, width, height, hasAlpha, settings);
-        if (palette != null && settings.TryBoth)
+        // The straight-alpha copy is as large as the page and lives only for this call, so it is rented.
+        int n = pixels.Length;
+        var argb = ArrayPool<uint>.Shared.Rent(n);
+        try
         {
-            var other = EncodeWithPredictor(argb, width, height, hasAlpha, settings);
-            if (other.Length < best.Length) best = other;
+            bool hasAlpha = ToStraightArgb(pixels, argb.AsSpan(0, n));
+            var settings = Settings.For(effort);
+
+            var palette = FindPalette(argb.AsSpan(0, n));
+            byte[] best = palette != null
+                ? EncodeWithPalette(argb.AsSpan(0, n), width, height, hasAlpha, palette, settings)
+                : EncodeWithPredictor(argb, n, width, height, hasAlpha, settings);
+            if (palette != null && settings.TryBoth)
+            {
+                var other = EncodeWithPredictor(argb, n, width, height, hasAlpha, settings);
+                if (other.Length < best.Length) best = other;
+            }
+            return WrapInContainer(best);
         }
-        return WrapInContainer(best);
+        finally
+        {
+            ArrayPool<uint>.Shared.Return(argb);
+        }
     }
 
     private static byte[] WrapInContainer(byte[] bitstream)
@@ -71,11 +82,13 @@ internal static partial class WebPEncoder
         return file;
     }
 
-    /// <summary>Straight-alpha 0xAARRGGBB, rounding like the PNG encoder so both formats carry the same pixels.</summary>
-    private static uint[] ToStraightArgb(uint[] pixels, out bool hasAlpha)
+    /// <summary>
+    /// Straight-alpha 0xAARRGGBB into <paramref name="argb"/>, rounding like the PNG encoder so both formats carry the
+    /// same pixels. Returns whether any pixel is not opaque.
+    /// </summary>
+    private static bool ToStraightArgb(uint[] pixels, Span<uint> argb)
     {
-        var argb = new uint[pixels.Length];
-        hasAlpha = false;
+        bool hasAlpha = false;
         int i = 0;
         // Rendered pages are mostly opaque, where only red and blue swap places; that runs a vector at a time.
         if (Vector.IsHardwareAccelerated)
@@ -88,7 +101,7 @@ internal static partial class WebPEncoder
                 var c = new Vector<uint>(pixels, i);
                 if (!Vector.EqualsAll(c & opaque, opaque)) break;
                 var swapped = (c & greenAlpha) | Vector.ShiftLeft(c & low, 16) | (Vector.ShiftRightLogical(c, 16) & low);
-                swapped.CopyTo(argb, i);
+                swapped.CopyTo(argb.Slice(i));
             }
         }
         for (; i < pixels.Length; i++)
@@ -98,14 +111,18 @@ internal static partial class WebPEncoder
             if (a != 255)
             {
                 hasAlpha = true;
-                if (a == 0) continue; // fully transparent pixels are all zero, whatever their colour
+                if (a == 0)
+                {
+                    argb[i] = 0; // fully transparent pixels are all zero, whatever their colour
+                    continue;
+                }
                 r = Unpremultiply(r, a);
                 g = Unpremultiply(g, a);
                 b = Unpremultiply(b, a);
             }
             argb[i] = a << 24 | r << 16 | g << 8 | b;
         }
-        return argb;
+        return hasAlpha;
     }
 
     // A channel above its alpha is not valid premultiplied colour; it is clamped rather than wrapped.

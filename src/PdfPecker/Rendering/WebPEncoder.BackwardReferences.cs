@@ -41,12 +41,14 @@ internal static partial class WebPEncoder
         public bool IsLiteral => DistanceCode == 0;
     }
 
-    /// <summary>The LZ77 parse of an image, in a buffer that doubles when full.</summary>
-    private sealed class References
+    /// <summary>
+    /// The LZ77 parse of an image, in a rented buffer that doubles when full. <see cref="Dispose"/> returns the buffer.
+    /// </summary>
+    private sealed class References : IDisposable
     {
         private BackwardReference[] items;
 
-        public References(int capacity) => items = new BackwardReference[Math.Max(capacity, 16)];
+        public References(int capacity) => items = ArrayPool<BackwardReference>.Shared.Rent(Math.Max(capacity, 16));
 
         public int Count { get; private set; }
 
@@ -58,8 +60,23 @@ internal static partial class WebPEncoder
 
         private void Add(BackwardReference reference)
         {
-            if (Count == items.Length) Array.Resize(ref items, Count * 2);
+            if (Count == items.Length) Grow();
             items[Count++] = reference;
+        }
+
+        private void Grow()
+        {
+            var larger = ArrayPool<BackwardReference>.Shared.Rent(items.Length * 2);
+            items.AsSpan(0, Count).CopyTo(larger);
+            ArrayPool<BackwardReference>.Shared.Return(items);
+            items = larger;
+        }
+
+        public void Dispose()
+        {
+            ArrayPool<BackwardReference>.Shared.Return(items);
+            items = Array.Empty<BackwardReference>();
+            Count = 0;
         }
     }
 
@@ -67,7 +84,7 @@ internal static partial class WebPEncoder
     /// A greedy LZ77 parse: at each pixel the longest match among the pixel to the left, the one above and the
     /// positions found through the hash chain, or a literal when none is at least three pixels long.
     /// </summary>
-    private static References BackwardReferences(uint[] pixels, int width, Settings settings)
+    private static References BackwardReferences(ReadOnlySpan<uint> pixels, int width, Settings settings)
     {
         int n = pixels.Length;
         var references = new References(n < 4096 ? n : n / 4);
@@ -76,23 +93,25 @@ internal static partial class WebPEncoder
             for (int i = 0; i < n; i++) references.AddLiteral();
             return references;
         }
-        var head = new int[1 << HashBits]; // the latest position of each hash, or -1
-        Array.Fill(head, -1);
-        // The position before each one with the same hash. As large as the page, so it is rented; only entries already
-        // written are read, as a chain only links positions already passed.
+        // The latest position of each hash, or -1, and the position before each one with the same hash. Both are
+        // rented: the heads are all set first, and only chain entries already written are read, as a chain only links
+        // positions already passed.
+        var head = ArrayPool<int>.Shared.Rent(1 << HashBits);
         var chain = ArrayPool<int>.Shared.Rent(n);
         try
         {
+            head.AsSpan(0, 1 << HashBits).Fill(-1);
             Parse(pixels, width, settings, head, chain, references);
         }
         finally
         {
             ArrayPool<int>.Shared.Return(chain);
+            ArrayPool<int>.Shared.Return(head);
         }
         return references;
     }
 
-    private static void Parse(uint[] pixels, int width, Settings settings, int[] head, int[] chain, References references)
+    private static void Parse(ReadOnlySpan<uint> pixels, int width, Settings settings, int[] head, int[] chain, References references)
     {
         int n = pixels.Length;
         int position = 0;
@@ -121,7 +140,7 @@ internal static partial class WebPEncoder
     }
 
     /// <summary>The longest match for the pixels at <paramref name="position"/> and its distance, or a length of 0.</summary>
-    private static (int Length, int Distance) LongestMatch(uint[] pixels, int position, int width, Settings settings, int[] head, int[] chain)
+    private static (int Length, int Distance) LongestMatch(ReadOnlySpan<uint> pixels, int position, int width, Settings settings, int[] head, int[] chain)
     {
         int n = pixels.Length;
         int bestLength = 0, bestDistance = 0;
@@ -162,8 +181,8 @@ internal static partial class WebPEncoder
 
     private static int Hash(uint a, uint b) => (int)(((a * ColorHashMultiplier) ^ (b * SecondPixelHashMultiplier)) >> (32 - HashBits));
 
-    private static int MatchLength(uint[] pixels, int from, int to, int max)
-        => pixels.AsSpan(from, max).CommonPrefixLength(pixels.AsSpan(to, max));
+    private static int MatchLength(ReadOnlySpan<uint> pixels, int from, int to, int max)
+        => pixels.Slice(from, max).CommonPrefixLength(pixels.Slice(to, max));
 
     /// <summary>The distance code for a copy: one of the 120 short codes for nearby pixels, else distance + 120.</summary>
     private static int PlaneCode(int width, int distance)
