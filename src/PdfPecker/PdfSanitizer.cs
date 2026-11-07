@@ -18,14 +18,16 @@ public sealed class PdfSanitizeOptions
 /// Removes active content from PDFs that come from others, so that passing them on, merging them or showing them is
 /// safe: JavaScript (document, page, field and link scripts), actions that launch programs, open other files, submit or
 /// import form data or play media, additional actions that run when a page or field is opened or changed, XFA forms,
-/// media and 3D annotations, and links with <c>javascript:</c>, <c>vbscript:</c>, <c>data:</c> or <c>file:</c>
-/// addresses. Pages, text, images, bookmarks and links within the document, web and e-mail links, form fields and their
-/// values stay.
+/// media and 3D annotations, and links to anything but absolute web, e-mail and phone addresses (<c>http:</c>,
+/// <c>https:</c>, <c>mailto:</c>, <c>tel:</c>), such as <c>javascript:</c>, <c>file:</c>, <c>smb:</c>, network paths,
+/// protocol handlers and relative addresses. Pages, text, images, bookmarks and links within the document, web, e-mail
+/// and phone links, form fields and their values stay.
 /// </summary>
 /// <remarks>
 /// PdfPecker itself never runs any of this; it matters for whoever opens the PDF in a viewer. The document is written out
 /// again with only what its catalog still uses, so earlier revisions and unused objects go too, and the same input always
-/// gives the same bytes. Digital signatures no
+/// gives the same bytes. A PDF without active content comes back unchanged, unless it is damaged so that its
+/// cross-reference table had to be rebuilt: then it is written out again too, as a viewer may repair it differently. Digital signatures no
 /// longer verify after sanitizing, as the signed bytes change. Encrypted PDFs are refused: decrypt with
 /// <see cref="PdfProtector.Decrypt(byte[], string?)"/>, sanitize, and encrypt the result again.
 /// </remarks>
@@ -34,7 +36,7 @@ public static class PdfSanitizer
     /// <summary>Removes the active content of <paramref name="pdf"/>.</summary>
     /// <param name="pdf">The PDF; it is treated as untrusted input.</param>
     /// <param name="options">What to remove besides scripts and actions; null for the defaults.</param>
-    /// <returns>The PDF without active content, or a copy of <paramref name="pdf"/> when it has none.</returns>
+    /// <returns>The PDF without active content, or a copy of <paramref name="pdf"/> when it has none and is intact.</returns>
     /// <exception cref="ArgumentException"><paramref name="pdf"/> is encrypted.</exception>
     /// <exception cref="InvalidDataException"><paramref name="pdf"/> is not a readable PDF.</exception>
     public static byte[] RemoveActiveContent(byte[] pdf, PdfSanitizeOptions? options = null)
@@ -48,7 +50,7 @@ public static class PdfSanitizer
     /// <param name="pdf">The PDF; it is treated as untrusted input.</param>
     /// <param name="options">What to remove besides scripts and actions; null for the defaults.</param>
     /// <param name="cancellationToken">Stops the work between objects.</param>
-    /// <returns>The PDF without active content, or a copy of <paramref name="pdf"/> when it has none.</returns>
+    /// <returns>The PDF without active content, or a copy of <paramref name="pdf"/> when it has none and is intact.</returns>
     public static byte[] RemoveActiveContent(byte[] pdf, PdfSanitizeOptions? options, CancellationToken cancellationToken)
     {
         if (pdf == null) throw new ArgumentNullException(nameof(pdf));
@@ -61,7 +63,7 @@ public static class PdfSanitizer
     /// result to <paramref name="output"/>. The streams are not closed.
     /// </summary>
     /// <param name="input">The PDF; it is treated as untrusted input.</param>
-    /// <param name="output">Where the sanitized PDF is written: the input unchanged when it has no active content.</param>
+    /// <param name="output">Where the sanitized PDF is written: the input unchanged when it has no active content and is intact.</param>
     /// <param name="options">What to remove besides scripts and actions; null for the defaults.</param>
     /// <param name="cancellationToken">Stops the work between objects; nothing is written then.</param>
     /// <exception cref="ArgumentException"><paramref name="input"/> is encrypted, or <paramref name="output"/> is not writable.</exception>
@@ -90,7 +92,7 @@ public static class PdfSanitizer
         using (PdfFile.BeginRender(CancellationToken.None))
         {
             var file = Open(pdf, password);
-            return ActiveContent.Process(file, remove: false, (options ?? new PdfSanitizeOptions()).RemoveAttachments, CancellationToken.None) > 0;
+            return ActiveContent.Process(file, remove: false, (options ?? new PdfSanitizeOptions()).RemoveAttachments, CancellationToken.None, webLinksOnly: true) > 0;
         }
     }
 
@@ -110,16 +112,19 @@ public static class PdfSanitizer
                 throw Encrypted(pdf, ex);
             }
             if (file.Decryptor != null) throw Encrypted(pdf, null);
-            if (ActiveContent.Process(file, remove: true, options.RemoveAttachments, cancellationToken) == 0) return null;
+            // A file whose cross-reference table had to be rebuilt may read differently in a viewer, which repairs it its
+            // own way and can find script that PdfPecker did not see. Such a file is written out again even with nothing
+            // to remove, so that only what PdfPecker checked reaches the viewer; an intact one comes back unchanged.
+            if (ActiveContent.Process(file, remove: true, options.RemoveAttachments, cancellationToken, webLinksOnly: true) == 0 && !file.Reconstructed) return null;
             var result = PdfRewriter.Write(file, null, reproducible: true).Span.ToArray();
 
             // A damaged file may have had its cross-reference table rebuilt while it was written, which parses objects
             // again from the file, unchanged. The result is a clean file, so one more pass over it settles that.
             var check = PdfFile.Open(result, null);
-            if (ActiveContent.Process(check, remove: true, options.RemoveAttachments, cancellationToken) > 0)
+            if (ActiveContent.Process(check, remove: true, options.RemoveAttachments, cancellationToken, webLinksOnly: true) > 0)
             {
                 result = PdfRewriter.Write(check, null, reproducible: true).Span.ToArray();
-                if (ActiveContent.Process(PdfFile.Open(result, null), remove: false, options.RemoveAttachments, cancellationToken) > 0)
+                if (ActiveContent.Process(PdfFile.Open(result, null), remove: false, options.RemoveAttachments, cancellationToken, webLinksOnly: true) > 0)
                     throw new InvalidDataException("The PDF is too damaged to remove its active content reliably.");
             }
             return result;

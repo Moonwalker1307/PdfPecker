@@ -311,8 +311,9 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   also encrypted: `PdfLinearizer` opens a protected PDF with its password and encrypts the result in the same pass.
   [More](https://pdfpecker.net/docs/compacting/)
 - **Removing active content**: `PdfSanitizer` takes JavaScript, actions that launch programs, open other files or
-  submit form data, XFA and media annotations out of PDFs from others, and `HasActiveContent` tells whether a PDF has
-  any. Pages, text, links and form fields stay.
+  submit form data, XFA and media annotations out of PDFs from others, together with links to anything but web, e-mail
+  and phone addresses (network paths, `smb:` and other protocol handlers), and `HasActiveContent` tells whether a PDF
+  has any. Pages, text, web links and form fields stay.
 - **Images to PDF**: `ImageToPdf` puts scans and photos on pages of their own size or fitted to a page size, with
   photos turned upright by their EXIF orientation.
   [More](https://pdfpecker.net/docs/images-to-pdf/)
