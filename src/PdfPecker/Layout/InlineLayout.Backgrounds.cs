@@ -246,7 +246,25 @@ internal sealed partial class InlineLayout
         if (s.BoxShadows != null) BoxPainter.PaintShadows(group, s, f.X, f.Y, f.W, f.H, radii);
         BoxPainter.PaintFragment(group, s, boxX, f.Y, boxW, f.H, (f.X, f.Y, f.W, f.H), radii, _engine._images, s.InlineFade);
         if (clipsToText) LayoutEngine.ClipBackgroundToText(group, f.Ops, f.TextFrom, f.TextTo, f.X, f.X + f.W);
+        if (s.BoxShadows != null) PaintInsetShadows(group, s, f, boxX, boxW);
         if (s.HasBorder) BoxPainter.PaintFragmentBorders(group, s, boxX, f.Y, boxW, f.H, (f.X, f.Y, f.W, f.H), !(left && right), s.InlineFade);
         if (s.OutlineStyle != BorderStyle.None && !MergesOutline(s, p)) BoxPainter.PaintOutline(group, s, f.X, f.Y, f.W, f.H, radii);
+    }
+
+    /// <summary>
+    /// Paints a fragment's inset shadows over its background and under its borders. A sliced box casts them as one box
+    /// as wide as all its fragments, (boxX, boxW), each fragment showing its own part, so the shadow along the left and
+    /// right edges appears only where the box starts and ends, as in Chrome.
+    /// </summary>
+    private static void PaintInsetShadows(GroupOp group, ComputedStyle s, in InlineFragment f, float boxX, float boxW)
+    {
+        if (boxX == f.X && boxW == f.W)
+        {
+            BoxPainter.PaintInsetShadows(group, s, f.X, f.Y, f.W, f.H, BoxPainter.Radii(s, f.W, f.H));
+            return;
+        }
+        var clip = new ClipOp(f.X, f.Y, f.W, f.H, null);
+        BoxPainter.PaintInsetShadows(clip, s, boxX, f.Y, boxW, f.H, BoxPainter.Radii(s, boxW, f.H));
+        if (clip.Ops.Count > 0) group.Ops.Add(clip);
     }
 }

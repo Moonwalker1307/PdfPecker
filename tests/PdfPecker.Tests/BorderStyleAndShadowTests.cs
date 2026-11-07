@@ -586,4 +586,29 @@ public class BorderStyleAndShadowTests
         static string Letters(string s) => string.Concat(s.ToUpperInvariant().Where(c => !char.IsWhiteSpace(c) && c != '-').Order());
         Assert.Equal(Letters(System.Text.RegularExpressions.Regex.Replace(html, "<[^>]*>", "")), Letters(string.Concat(texts.Select(t => t.Text))));
     }
+
+    // Wide spaces give the span a box with no glyphs in it to get in the way of the pixels.
+    private const string Spaces = "&nbsp;&nbsp;&nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp;";
+
+    [Fact]
+    public void An_inline_span_draws_its_inset_shadow_inside_its_box()
+    {
+        string html = Body + "<span style='font:40px/1 sans-serif;box-shadow:inset 0 0 0 4px red'>" + Spaces + "</span>";
+        Near(0xFF, 0, 0, Pixel(html, 1, 20));
+        Near(0xFF, 0, 0, Pixel(html, 20, 1));
+        Near(0xFF, 0xFF, 0xFF, Pixel(html, 20, 20));
+    }
+
+    [Theory]
+    [InlineData("slice", false)]
+    [InlineData("clone", true)]
+    public void A_wrapped_spans_inset_shadow_follows_box_decoration_break(string decorationBreak, bool secondLineEdge)
+    {
+        string html = Body + "<div style='width:60px;font:40px/1 sans-serif'><span style='box-shadow:inset 4px 0 0 red;"
+            + "box-decoration-break:" + decorationBreak + "'>" + Spaces + "</span></div>";
+        Near(0xFF, 0, 0, Pixel(html, 1, 20));
+        var second = Pixel(html, 1, 60);
+        if (secondLineEdge) Near(0xFF, 0, 0, second);
+        else Near(0xFF, 0xFF, 0xFF, second);
+    }
 }
