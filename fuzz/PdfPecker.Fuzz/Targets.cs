@@ -85,6 +85,12 @@ internal static class Targets
         "<input type=number min=5 max=1 value=3>", ":in-range", ":out-of-range", "gap:1e9px;row-rule:1px solid;column-rule:1e9px dotted",
         "<style>@page{bleed:1e9px;marks:crop cross}</style>", "<style>@page{size:1px 1px;bleed:auto;marks:crop}</style>",
         "<style>@page :nth(-2147483648n+2147483647){background:red;@top-center{content:'x'}}</style>", "<style>@page :nth(2 of a){margin:0}</style>",
+        "<style>li{width:calc(sibling-index() * 1e9px);z-index:sibling-count()}</style>", "<style>*{margin-left:calc(sibling-index() * 1em)}</style>",
+        "width:if(media(print): 1e9px; supports(display:grid): 1px; else: 2px)", "color:if(style(--a: 1): red; else: if(style(--b): blue))",
+        "color:contrast-color(var(--bg))", "background:contrast-color(contrast-color(red))", "color:contrast-color(transparent)",
+        "<img src=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'/>\" style=\"object-view-box:inset(-1e9% 100% 1e9px 0)\">",
+        "object-view-box:xywh(0 0 1e-9px 1e-9px)", "object-view-box:rect(1e9px auto 0 auto)",
+        "<span style=\"box-shadow:inset 0 0 1e9px 1e9px red,inset 1px 1px blue;border-radius:50%\">x<br>y</span>",
     };
 
     private static readonly (string, string)[] HtmlNesters =
@@ -113,6 +119,9 @@ internal static class Targets
         "counter(page, lower-roman)", "white-space-collapse:", "box-decoration-break: clone", "hyphenate-limit-lines: 1",
         "bleed: 3mm", "bleed: -1e30px", "marks: crop cross", "marks: cross",
         "@page :nth(2n+1) {", "@page :nth(1 of chapter) {", ":nth(-n+3)",
+        "sibling-index()", "sibling-count()", "calc(sibling-index() * 1e9px)", "if(", "media(print): ", "supports(display: grid): ", "style(--a: 1): ",
+        "; else: ", "contrast-color(", "contrast-color(currentcolor)", "object-view-box: ", "inset(10% 1e9px)", "xywh(0 0 100% 100%)",
+        "box-shadow: inset 0 0 9px red",
     };
 
     private static readonly (string, string)[] CssNesters =
