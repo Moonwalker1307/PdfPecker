@@ -723,6 +723,18 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Nested_stretched_flex_items_with_percentage_heights_inside_stay_within_the_relayout_budget()
+    {
+        // Found by the fuzzer: target html, timeout-d2edd0b0 (local round after daily run 94). An item stretched by a
+        // flex row of 30% is laid out again at the stretched height, because the next row's 30% now resolves, and each
+        // level does that for every level inside it: 21 unclosed cards took 5 s, and 22 levels here allocate 2 GB.
+        var html = "<style>html, body { height: 100%; margin: 0 }</style>" + Repeat("<div style='display:flex;height:30%'>x<div>", 22);
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.True(allocated < 800_000_000, $"{allocated:N0} bytes allocated");
+    }
+
+    [Fact]
     public void Broken_words_keep_every_character()
     {
         var pdf = ConvertUncompressed("<p style='width:40pt;font-family:Courier;font-size:10pt;overflow-wrap:break-word'>ABCDEFGHIJKLMNOPQRSTUVWXYZ</p>");

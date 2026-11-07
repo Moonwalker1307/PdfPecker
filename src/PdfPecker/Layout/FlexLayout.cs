@@ -402,8 +402,11 @@ internal sealed partial class LayoutEngine
                         // The line's cross size, also when the content is taller: a single line of a container with a
                         // definite height is that height, and the content overflows the stretched item (as in Chrome).
                         want = Math.Max(cross - it.Mt - it.Mb, VerticalFrame(st, w));
+                    // Each level of flex rows nested in stretched items lays out the levels inside it once to measure
+                    // them and once more at the stretched height, which doubles the work per level; past the relayout
+                    // budget an item keeps the height it was measured at.
                     if (want is { } h && Math.Abs(h - current) > Eps && (regrown || NeedsRelayoutWhenStretched(it) || st.Height.IsPercent)
-                        && !ForcedHeightKeepsLayout(it, h))
+                        && !ForcedHeightKeepsLayout(it, h) && MayLayOutAgain)
                         it.Box = CaptureBox(it.El, it.OuterMain, shrinkToFit: false, borderW: it.Main, borderH: h, reuse: true, inner: it.Box.Known);
                 }
 
