@@ -8,7 +8,10 @@ internal sealed partial class LayoutEngine
 {
     /// <summary>
     /// How deep foreignObject content is laid out inside other foreignObject content. A use element can draw an
-    /// ancestor svg again, so without a limit an SVG inside its own foreignObject would be laid out forever.
+    /// ancestor svg again, so without a limit an SVG inside its own foreignObject would be laid out forever. Below the
+    /// first level the content is also laid out only while the relayout budget lasts (see <see cref="MayLayOutAgain"/>):
+    /// an SVG whose use elements draw its foreignObject 16 times, inside its own foreignObject, laid out the content
+    /// 16 to the power of this depth times, 65,536 layouts of 4,000 characters each.
     /// </summary>
     private const int MaxForeignObjectDepth = 4;
 
@@ -20,7 +23,8 @@ internal sealed partial class LayoutEngine
     /// </summary>
     internal void AddSvgDrawing(List<DrawOp> ops, SvgImage svg, float x, float y, float w, float h, ContentSlot? tag)
     {
-        if (svg.ForeignObjects is not { } objects || _foreignObjectDepth >= MaxForeignObjectDepth || !(w > 0 && h > 0))
+        if (svg.ForeignObjects is not { } objects || _foreignObjectDepth >= MaxForeignObjectDepth || _foreignObjectDepth > 0 && !MayLayOutAgain
+            || !(w > 0 && h > 0))
         {
             ops.Add(new SvgOp(x, y, w, h, svg) { Tag = tag });
             return;

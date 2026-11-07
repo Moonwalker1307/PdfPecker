@@ -888,6 +888,20 @@ public class HostileInputTests
     }
 
     [Fact]
+    public void Svg_inside_its_own_foreign_object_lays_it_out_within_the_relayout_budget()
+    {
+        // Found by the fuzzer: target svg, memory-b7e7c7f7 again (daily run 94). The group and foreignObject are outside
+        // any svg, so the svg after them is inside the foreignObject, and its use element draws the group that holds
+        // it: the drawing has 16 copies of the foreignObject, each of which lays out the svg again, four levels deep,
+        // 65,536 layouts of 4,000 characters and 2.5 GB.
+        var html = "<g id='shape'><use href='#shape' x='5' y='5'/><foreignObject x='62' y='2' width='56' height='46'>" + Repeat("HTML", 983)
+            + "<svg width='120' height='50' viewBox='0 0 120 50'><use href='#shape' x='35' y='5'/>";
+        var (pdf, allocated) = Allocating(() => Bounded(html));
+        AssertStructurallyValid(pdf);
+        Assert.True(allocated < 300_000_000, $"{allocated:N0} bytes allocated");
+    }
+
+    [Fact]
     public void Svg_markers_that_use_other_markers_stay_within_the_drawing_budget()
     {
         // Thirty markers, each drawing the next one at both ends of its path, double at every level. Every copy counts
