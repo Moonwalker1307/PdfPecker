@@ -41,6 +41,7 @@ internal static class CssVariables
     private static string? Run(string value, CssVarScope? vars, OwnValues? own, CssAttr.Context? attrs, int depth, ref bool tainted)
     {
         if (depth > MaxDepth || value.Length > MaxLength) return null;
+        if (attrs?.Host != null) value = CssAttr.ReplaceTreeCounting(value, attrs.Host);
         int i = Next(value, 0, attrs != null, out bool isAttr);
         if (i < 0) return value;
         var sb = new StringBuilder(value.Length + 16);

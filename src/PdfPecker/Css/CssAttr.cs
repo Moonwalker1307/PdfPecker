@@ -89,8 +89,14 @@ internal static class CssAttr
         }
     }
 
-    /// <summary>A cheap test for an attr( that starts a token, made before any other work on a value.</summary>
-    public static bool Has(string value)
+    /// <summary>
+    /// A cheap test for an attr( that starts a token, or for sibling-index() or sibling-count(), made before any other
+    /// work on a value. The tree-counting functions depend on the element just as attr() does, so they take the same
+    /// path: substituted per element, and the style is not shared with other elements.
+    /// </summary>
+    public static bool Has(string value) => HasAttr(value) || HasTreeCounting(value);
+
+    private static bool HasAttr(string value)
     {
         int i = value.IndexOf("attr(", StringComparison.OrdinalIgnoreCase);
         while (i >= 0)
@@ -99,6 +105,67 @@ internal static class CssAttr
             i = value.IndexOf("attr(", i + 5, StringComparison.OrdinalIgnoreCase);
         }
         return false;
+    }
+
+    /// <summary>Whether the value calls sibling-index() or sibling-count() (CSS Values 5, 9).</summary>
+    internal static bool HasTreeCounting(string value)
+    {
+        int i = value.IndexOf("sibling-", StringComparison.OrdinalIgnoreCase);
+        while (i >= 0)
+        {
+            if ((i == 0 || !IsNameChar(value[i - 1])) && TreeCountingName(value, i) > 0) return true;
+            i = value.IndexOf("sibling-", i + 8, StringComparison.OrdinalIgnoreCase);
+        }
+        return false;
+    }
+
+    /// <summary>The length of "sibling-index(" or "sibling-count(" at <paramref name="i"/>, or 0.</summary>
+    private static int TreeCountingName(string value, int i)
+    {
+        const int Length = 14; // "sibling-index(".Length
+        if (i + Length > value.Length || value[i + Length - 1] != '(') return 0;
+        var word = value.AsSpan(i + 8, 5);
+        return word.Equals("index", StringComparison.OrdinalIgnoreCase) || word.Equals("count", StringComparison.OrdinalIgnoreCase) ? Length : 0;
+    }
+
+    /// <summary>
+    /// Replaces sibling-index() and sibling-count() outside strings with the element's position among its parent's
+    /// element children, from 1, and their number (the root element is the first of one). A call with arguments is left
+    /// as it is, which makes the declaration invalid.
+    /// </summary>
+    internal static string ReplaceTreeCounting(string value, Element host)
+    {
+        if (!HasTreeCounting(value)) return value;
+        var sb = new StringBuilder(value.Length);
+        char quote = '\0';
+        for (int i = 0; i < value.Length; i++)
+        {
+            char c = value[i];
+            if (quote != '\0')
+            {
+                sb.Append(c);
+                if (c == '\\' && i + 1 < value.Length) sb.Append(value[++i]);
+                else if (c == quote) quote = '\0';
+                continue;
+            }
+            if (c is '"' or '\'') { quote = c; sb.Append(c); continue; }
+            int name = c is 's' or 'S' && (i == 0 || !IsNameChar(value[i - 1])) ? TreeCountingName(value, i) : 0;
+            if (name > 0)
+            {
+                int j = i + name;
+                while (j < value.Length && char.IsWhiteSpace(value[j])) j++;
+                if (j < value.Length && value[j] == ')')
+                {
+                    bool index = char.ToLowerInvariant(value[i + 8]) == 'i';
+                    int n = Math.Max(1, index ? host.ElementIndex : host.ElementSiblingCount);
+                    sb.Append(n.ToString(CultureInfo.InvariantCulture));
+                    i = j;
+                    continue;
+                }
+            }
+            sb.Append(c);
+        }
+        return sb.ToString();
     }
 
     /// <summary>The properties whose generated text reads attr() itself (see <see cref="GeneratedContent"/>).</summary>
