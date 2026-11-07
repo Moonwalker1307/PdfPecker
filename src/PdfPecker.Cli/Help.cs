@@ -51,8 +51,10 @@ internal static class Help
                          --header-font-size, --footer-font-size, --header-font-name, --footer-font-name
             Document:    --title --author --subject --keywords --lang --creation-date   --no-outline
             Styling:     --user-style-sheet FILE (--css)   --font FILE   --font-dir DIR   --system-fonts   --base-dir DIR
-            Files:       --enable-local-file-access (--allow-file-access) lets the document read files outside its folder
+            Files:       --enable-local-file-access (--allow-file-access) lets the document read files outside its folder;
+                         a document from standard input reads local files only from --base-dir
             Output:      --pdfa 2b|2u|3b|3u|4|4f   --accessibility tagged|ua1|ua2   --user-password, --owner-password
+                         (--user-password-env, --owner-password-env read them from an environment variable)
                          --linearize   --no-pdf-compression   -o, --output FILE   -q, --quiet   --markdown / --html
 
             wkhtmltopdf options that need a browser engine, scripts or the network (--javascript-delay, --cookie,
@@ -64,12 +66,12 @@ internal static class Help
         "extract" => "pdfpecker extract <input.pdf> <output.pdf> --pages 1-3,5 [--password PW]\n",
         "remove" => "pdfpecker remove <input.pdf> <output.pdf> --pages 2,4 [--password PW]\n",
         "rotate" => "pdfpecker rotate <input.pdf> <output.pdf> --degrees 90 [--pages 1-3] [--password PW]\n",
-        "stamp" => "pdfpecker stamp <input.pdf> <stamp.pdf|stamp.html> <output.pdf> [--underlay] [--opacity 0.5] [--scale 1] [--position center|top-left|...] [--offset-x N] [--offset-y N] [--pages 1,3] [--stamp-page N]\n",
+        "stamp" => "pdfpecker stamp <input.pdf> <stamp.pdf|stamp.html> <output.pdf> [--underlay] [--opacity 0.5] [--scale 1] [--position center|top-left|...] [--offset-x N] [--offset-y N] [--pages 1,3] [--stamp-page N] [--stamp-password PW | --stamp-password-env VAR]\n",
         "compact" => "pdfpecker compact <input.pdf> <output.pdf> [--image-quality 1-100] [--max-dpi N] [--remove-metadata]\n",
         "linearize" => "pdfpecker linearize <input.pdf> <output.pdf>\n",
         "sanitize" => "pdfpecker sanitize <input.pdf> <output.pdf>\npdfpecker sanitize <input.pdf> --check      (exit code 1 when the PDF has active content)\n",
         "sign" => "pdfpecker sign <input.pdf> <output.pdf> --cert <certificate.pfx> [--cert-password PW | --cert-password-env VAR]\n  [--reason T] [--location T] [--contact T] [--name T] [--field NAME] [--page N --rect x,y,width,height] [--text T]\n  [--certify none|no-changes|forms|annotations] [--format pades|pkcs7] [--hash sha256|sha384|sha512] [--timestamp-url URL]\n  Without --cert-password the PDFPECKER_CERT_PASSWORD environment variable is used.\n",
-        "verify" => "pdfpecker verify <input.pdf> [--trusted-root ca.cer]... [--allow-sha1] [--check-revocation] [--password PW]\n  Exit code 0 when every signature is valid, 1 otherwise (also when there are none).\n",
+        "verify" => "pdfpecker verify <input.pdf> [--trusted-root ca.cer]... [--allow-sha1] [--check-revocation] [--password PW]\n  Exit code 0 when every signature is valid, 1 otherwise (also when there are none).\n  --check-revocation fetches the CRL, OCSP and certificate addresses named in the PDF's certificates, which anyone\n  can write; use it only where the machine cannot reach internal services.\n",
         "encrypt" => "pdfpecker encrypt <input.pdf> <output.pdf> --user-password PW [--owner-password PW] [--allow print,copy,modify,annotate,forms,accessibility,assemble|all]\n  --user-password-env and --owner-password-env read the password from an environment variable.\n",
         "decrypt" => "pdfpecker decrypt <input.pdf> <output.pdf> --password PW\n",
         "to-image" => "pdfpecker to-image <input.pdf> [output-directory] [--format png|jpeg|webp|tiff] [--dpi 150] [--quality 1-100] [--width PX] [--height PX] [--pages 1-3] [--transparent] [--prefix NAME]\n  Writes NAME-001.png ... (one TIFF file for tiff).\n",

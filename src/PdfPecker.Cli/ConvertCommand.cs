@@ -110,7 +110,7 @@ internal static class ConvertCommand
         io.WriteOutput(job.Output, pdf);
         if (job.Output != "-")
         {
-            int pages = PdfPages.Count(pdf, job.Args.Get("user-password"));
+            int pages = PdfPages.Count(pdf, Common.Password(job.Args, "user-password", "user-password-env"));
             io.Info($"Wrote {job.Output} ({pages.ToString(CultureInfo.InvariantCulture)} {(pages == 1 ? "page" : "pages")}, {FormatSize(pdf.Length)}) in {watch.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture)} ms");
         }
     }
@@ -120,11 +120,13 @@ internal static class ConvertCommand
         var a = job.Args;
         string path = StripFileUrl(raw);
         string text;
-        string baseDir;
+        string? baseDir;
         if (raw == "-")
         {
+            // Text piped in has no folder of its own. The current folder is wherever the tool runs, often a server's
+            // working directory, so a document from standard input reads local files only from a --base-dir it is given.
             text = io.ReadAllInputText();
-            baseDir = Directory.GetCurrentDirectory();
+            baseDir = null;
         }
         else
         {

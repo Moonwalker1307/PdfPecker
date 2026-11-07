@@ -277,9 +277,12 @@ internal sealed class RevocationFetcher : IDisposable
     // Redirects are followed here rather than by the handler, so each hop is checked like any other URL. The default
     // client connects only to public addresses, checked when it connects, so a host name that resolves to an internal
     // address is refused too; a caller's filter that names its own internal servers gets a client without that check.
+    // It never uses a proxy: through one, the connect callback would see the proxy's address instead of the server's,
+    // so the check would refuse every request behind an internal proxy and check nothing behind a public one.
     private static readonly Lazy<HttpClient> PublicOnly = new(() => new HttpClient(new SocketsHttpHandler
     {
         AllowAutoRedirect = false,
+        UseProxy = false,
         ConnectCallback = ConnectPublicAsync,
     }) { Timeout = PerRequest });
 

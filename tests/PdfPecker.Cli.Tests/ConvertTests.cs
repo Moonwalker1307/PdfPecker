@@ -38,6 +38,49 @@ public sealed class ConvertTests : IDisposable
     }
 
     [Fact]
+    public void StandardInputReadsLocalFilesOnlyFromTheBaseDirectory()
+    {
+        // The current folder is wherever the tool runs, so piped HTML may not read a file there; --base-dir lets it.
+        var name = "stdin-" + Guid.NewGuid().ToString("N") + ".css";
+        var here = Path.Combine(Directory.GetCurrentDirectory(), name);
+        File.WriteAllText(here, "p::after { content: 'from the current folder' }");
+        _cli.Write(name, "p::after { content: 'from the base folder' }");
+        try
+        {
+            var html = Encoding.UTF8.GetBytes($"<link rel=\"stylesheet\" href=\"{name}\"><p>Piped</p>");
+            var plain = _cli.RunWithInput(html, CancellationToken.None, "convert", "-", "-");
+            Assert.Equal(0, plain.Exit);
+            Assert.DoesNotContain("folder", PdfText.Extract(plain.Out));
+
+            var based = _cli.RunWithInput(html, CancellationToken.None, "convert", "-", "-", "--base-dir", _cli.Dir);
+            Assert.Contains("from the base folder", PdfText.Extract(based.Out));
+        }
+        finally
+        {
+            File.Delete(here);
+        }
+    }
+
+    [Fact]
+    public void PasswordsCanComeFromTheEnvironment()
+    {
+        var html = _cli.Html("in.html", "<p>secret page</p>");
+        Environment.SetEnvironmentVariable("PDFPECKER_TEST_CONVERT_PW", "pw");
+        try
+        {
+            _cli.Ok("convert", html, _cli.Path_("e.pdf"), "--user-password-env", "PDFPECKER_TEST_CONVERT_PW");
+            var pdf = File.ReadAllBytes(_cli.Path_("e.pdf"));
+            Assert.True(PdfProtector.IsEncrypted(pdf));
+            Assert.Contains("secret page", PdfText.Extract(PdfProtector.Decrypt(pdf, "pw")));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PDFPECKER_TEST_CONVERT_PW", null);
+        }
+        Assert.Equal(2, _cli.Run("convert", html, _cli.Path_("f.pdf"), "--owner-password-env", "PDFPECKER_TEST_UNSET_VARIABLE").Exit);
+    }
+
+    [Fact]
     public void ReadingStandardInputNeedsAnOutput()
     {
         var r = _cli.Run("convert", "-");
