@@ -158,12 +158,12 @@ internal sealed partial class InlineLayout
     }
 
     /// <summary>
-    /// Whether an image or inline SVG needs a box of its own: a layer or a vertical margin, or for an image a radius, object-fit, outline, or
+    /// Whether an image or inline SVG needs a box of its own: a layer or a vertical margin, or for an image a radius, object-fit, object-view-box, outline, or
     /// a box it paints or pads (borders, padding, a background or shadows), which a plain image item has no room for.
     /// </summary>
     private static bool IsImageLaidOutAsBox(Element e, ComputedStyle s) =>
         e.IsReplaced
-        && (s.Layered || HasVerticalMargin(s) || e.IsPicture && (s.BorderRadii != null || s.ObjectFit != ObjectFit.Fill || s.OutlineStyle != BorderStyle.None
+        && (s.Layered || HasVerticalMargin(s) || e.IsPicture && (s.BorderRadii != null || s.ObjectFit != ObjectFit.Fill || s.ObjectViewBox != null || s.OutlineStyle != BorderStyle.None
             || PaintsInlineBox(s) || HasPadding(s.PaddingTop) || HasPadding(s.PaddingRight) || HasPadding(s.PaddingBottom)
             || HasPadding(s.PaddingLeft)));
 
