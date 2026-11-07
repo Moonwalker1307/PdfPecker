@@ -61,8 +61,11 @@ internal sealed class TextCollector
     /// <summary>The areas the page fills with a plain colour, collected with the rules, in painting order.</summary>
     public readonly List<PageFill>? Fills;
 
-    public TextCollector(bool rules = false)
+    /// <param name="rules">Whether to collect the straight lines, bullets and fills the page draws.</param>
+    /// <param name="capacity">The glyphs the page is expected to show, so the list is not grown glyph by glyph.</param>
+    public TextCollector(bool rules = false, int capacity = 0)
     {
+        Glyphs = new List<TextGlyph>(Math.Clamp(capacity, 0, MaxGlyphs));
         if (rules)
         {
             Rules = new List<PageRule>();
@@ -87,7 +90,7 @@ internal sealed class TextCollector
     /// </summary>
     public const int MaxGlyphs = 2_000_000;
 
-    public readonly List<TextGlyph> Glyphs = new();
+    public readonly List<TextGlyph> Glyphs;
 
     public void Add(in TextGlyph glyph)
     {

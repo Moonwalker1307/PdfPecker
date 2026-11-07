@@ -78,6 +78,7 @@ internal sealed partial class PdfFile
             var previous = _xref;
             _xref = ScanObjectHeaders();
             _cache.Clear();
+            _loaded.Clear();
             _objStreams.Clear();
             var trailer = ScanTrailers();
 
@@ -105,6 +106,7 @@ internal sealed partial class PdfFile
             {
                 _xref = previous;
                 _cache.Clear();
+                _loaded.Clear();
                 _objStreams.Clear();
                 return;
             }

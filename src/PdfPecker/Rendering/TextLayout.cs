@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text;
 using PdfPecker.Text;
 
@@ -18,8 +19,12 @@ internal static class TextLayout
 
     private sealed class Line
     {
-        public readonly List<Item> Items = new();
+        public readonly List<Item> Items;
         public double V, Size;
+
+        public Line() => Items = new List<Item>();
+
+        public Line(List<Item> items) => Items = items;
     }
 
     public static PdfTextPage Build(List<TextGlyph> glyphs, int pageNumber, double width, double height, bool expandLigatures,
@@ -41,6 +46,7 @@ internal static class TextLayout
         var sb = new StringBuilder();
         var attached = new MarkTargets(glyphs);
         bool drawsSpaces = glyphs.Exists(g => g.Text.Length > 0 && IsSpace(g.Text));
+        var scratch = new Scratch();
         foreach (var angle in groups.Keys.OrderBy(a => a))
         {
             double rad = angle * Math.PI / 180, cx = Math.Cos(rad), cy = Math.Sin(rad);
@@ -49,7 +55,7 @@ internal static class TextLayout
             foreach (var line in groupLines)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var textLine = MakeLine(glyphs, line, cx, cy, angle, expandLigatures, drawsSpaces);
+                var textLine = MakeLine(glyphs, line, cx, cy, angle, expandLigatures, drawsSpaces, scratch);
                 if (textLine == null) continue;
                 if (sb.Length > 0)
                 {
@@ -94,22 +100,26 @@ internal static class TextLayout
         items.Sort((a, b) => a.V != b.V ? a.V.CompareTo(b.V) : a.U0.CompareTo(b.U0));
 
         var lines = new List<Line>();
-        Line? current = null;
-        foreach (var it in items)
+        // A line's items are taken once the line is complete, so that its list is allocated at its size, not grown.
+        int first = 0;
+        double lineV = 0, lineSize = 0;
+        for (int k = 0; k < items.Count; k++)
         {
+            var it = items[k];
             // Superscripts and subscripts sit within about half a font size of their line's baseline. Naskh and other
             // Arabic styles join letters by cursive attachment, which can put a letter, such as a final noon after a
             // mim, more than half a size below the letter it joins.
-            if (current != null && it.V - current.V <= (it.Cursive ? 0.75 : 0.5) * (current.Size + it.Size) / 2)
+            if (k > 0 && it.V - lineV <= (it.Cursive ? 0.75 : 0.5) * (lineSize + it.Size) / 2)
             {
-                current.Items.Add(it);
-                if (it.Size > current.Size) { current.Size = it.Size; current.V = it.V; }
+                if (it.Size > lineSize) { lineSize = it.Size; lineV = it.V; }
                 continue;
             }
-            current = new Line { V = it.V, Size = it.Size };
-            current.Items.Add(it);
-            lines.Add(current);
+            if (k > 0) lines.Add(new Line(Range(items, first, k)) { V = lineV, Size = lineSize });
+            first = k;
+            lineV = it.V;
+            lineSize = it.Size;
         }
+        if (items.Count > 0) lines.Add(new Line(Range(items, first, items.Count)) { V = lineV, Size = lineSize });
         lines = SeparateBaselines(lines);
         foreach (var line in lines) line.Items.Sort((a, b) => a.U0 != b.U0 ? a.U0.CompareTo(b.U0) : a.Glyph.CompareTo(b.Glyph));
         marks.Sort((a, b) => a.Glyph.CompareTo(b.Glyph));
@@ -121,6 +131,14 @@ internal static class TextLayout
         // The lines of this group are written out next, so they must see the marks joined to their letters.
         attached.Flush();
         return lines;
+    }
+
+    /// <summary>The items from <paramref name="start"/> up to <paramref name="end"/>, in a list of their size.</summary>
+    private static List<Item> Range(List<Item> items, int start, int end)
+    {
+        var range = new List<Item>(end - start);
+        range.AddRange(CollectionsMarshal.AsSpan(items)[start..end]);
+        return range;
     }
 
     /// <summary>
@@ -170,7 +188,7 @@ internal static class TextLayout
                     kept.AddRange(groups[g]);
                     kept.Sort((a, b) => a.U0.CompareTo(b.U0));
                 }
-                var split = new Line();
+                var split = new Line(new List<Item>(kept.Count));
                 double size = 0;
                 foreach (var it in kept)
                 {
@@ -394,11 +412,20 @@ internal static class TextLayout
         return true;
     }
 
-    private static PdfTextLine? MakeLine(List<TextGlyph> glyphs, Line line, double cx, double cy, int angle, bool expandLigatures, bool drawsSpaces)
+    /// <summary>The lists and text a line is made with, kept from one line to the next so they are allocated once per page.</summary>
+    private sealed class Scratch
+    {
+        public readonly List<Item> Visual = new();
+        public readonly StringBuilder Line = new(), Word = new();
+    }
+
+    private static PdfTextLine? MakeLine(List<TextGlyph> glyphs, Line line, double cx, double cy, int angle, bool expandLigatures, bool drawsSpaces,
+        Scratch scratch)
     {
         // Visual order with spaces: a glyph drawn twice in the same place (fake bold) counts once, and a gap wider than
         // a fraction of the font's space becomes a space when the PDF does not draw one.
-        var visual = new List<Item>(line.Items.Count + 8);
+        var visual = scratch.Visual;
+        visual.Clear();
         Item? prev = null;
         foreach (var it in line.Items)
         {
@@ -427,8 +454,8 @@ internal static class TextLayout
         var order = LogicalOrder(glyphs, visual, out bool rtl);
 
         var words = new List<PdfTextWord>();
-        var lineText = new StringBuilder();
-        var word = new StringBuilder();
+        var lineText = scratch.Line.Clear();
+        var word = scratch.Word.Clear();
         double wu0 = double.MaxValue, wu1 = double.MinValue, wv = 0, wsize = 0;
         string font = "";
         uint color = 0;
@@ -454,9 +481,9 @@ internal static class TextLayout
             wu0 = double.MaxValue; wu1 = double.MinValue; wsize = 0;
         }
 
-        foreach (int k in order)
+        for (int i = 0; i < visual.Count; i++)
         {
-            var it = visual[k];
+            var it = visual[order == null ? i : order[i]];
             if (it.Glyph < 0 || IsSpace(glyphs[it.Glyph].Text)) { Flush(); continue; }
             var g = glyphs[it.Glyph];
             if (word.Length == 0) { font = g.Font; color = g.Color; wv = it.V; }
@@ -479,12 +506,14 @@ internal static class TextLayout
         // Ascent and descent are taken as the usual 0.8 and 0.2 of the font size, as the fonts' own metrics often lie.
         double v0 = v - 0.8 * size, v1 = v + 0.2 * size;
         double x0 = double.MaxValue, y0 = double.MaxValue, x1 = double.MinValue, y1 = double.MinValue;
-        foreach (var (u, vv) in new[] { (u0, v0), (u1, v0), (u0, v1), (u1, v1) })
+        Corner(u0, v0); Corner(u1, v0); Corner(u0, v1); Corner(u1, v1);
+        return (x0, y0, x1 - x0, y1 - y0);
+
+        void Corner(double u, double vv)
         {
             double x = u * cx - vv * cy, y = u * cy + vv * cx;
             x0 = Math.Min(x0, x); y0 = Math.Min(y0, y); x1 = Math.Max(x1, x); y1 = Math.Max(y1, y);
         }
-        return (x0, y0, x1 - x0, y1 - y0);
     }
 
     private static void AppendText(StringBuilder sb, string text, bool expandLigatures)
@@ -505,24 +534,23 @@ internal static class TextLayout
     /// <summary>
     /// The order to read a line's items in. The items are in visual order, left to right; a line with right-to-left
     /// letters is given bidi levels from its strong characters, and reordering by those levels (rule L2, which undoes
-    /// itself) turns visual order back into logical order.
+    /// itself) turns visual order back into logical order. Null when that is the visual order.
     /// </summary>
-    private static int[] LogicalOrder(List<TextGlyph> glyphs, List<Item> visual, out bool rtl)
+    private static int[]? LogicalOrder(List<TextGlyph> glyphs, List<Item> visual, out bool rtl)
     {
         int n = visual.Count;
-        var cls = new BidiClass[n];
         int rCount = 0, lCount = 0;
         for (int i = 0; i < n; i++)
         {
             var c = visual[i].Glyph < 0 ? BidiClass.WS : ClassOf(glyphs[visual[i].Glyph].Text);
-            cls[i] = c;
             if (c is BidiClass.R or BidiClass.AL) rCount++;
             else if (c == BidiClass.L) lCount++;
         }
         rtl = rCount > lCount;
-        var order = new int[n];
-        for (int i = 0; i < n; i++) order[i] = i;
-        if (rCount == 0) return order;
+        // Most lines have no right-to-left letters and are read as they are drawn.
+        if (rCount == 0) return null;
+        var cls = new BidiClass[n];
+        for (int i = 0; i < n; i++) cls[i] = visual[i].Glyph < 0 ? BidiClass.WS : ClassOf(glyphs[visual[i].Glyph].Text);
 
         var levels = new byte[n];
         // Strong and number levels first: right-to-left letters at 1, left-to-right letters at the next even level, and

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 
 namespace PdfPecker.Rendering.Parsing;
@@ -68,7 +69,9 @@ internal sealed class PdfString : PdfObject
 
 internal sealed class PdfName : PdfObject
 {
-    private static readonly Dictionary<string, PdfName> Interned = new(StringComparer.Ordinal);
+    // Read without a lock, as every name a page's content uses is looked up here and pages are read in parallel.
+    private static readonly ConcurrentDictionary<string, PdfName> Interned = new(StringComparer.Ordinal);
+    private static int _internedCount;
     public readonly string Value;
     private PdfName(string v) => Value = v;
 
@@ -79,15 +82,16 @@ internal sealed class PdfName : PdfObject
     public static PdfName Get(string v)
     {
         if (v.Length > MaxInternedLength) return new PdfName(v);
-        lock (Interned)
+        if (Interned.TryGetValue(v, out var n)) return n;
+        n = new PdfName(v);
+        if (Volatile.Read(ref _internedCount) >= 100_000) return n;
+        if (Interned.TryAdd(v, n))
         {
-            if (!Interned.TryGetValue(v, out var n))
-            {
-                n = new PdfName(v);
-                if (Interned.Count < 100_000) Interned[v] = n;
-            }
+            Interlocked.Increment(ref _internedCount);
             return n;
         }
+        // Another thread interned the name first.
+        return Interned.TryGetValue(v, out var first) ? first : n;
     }
 
     public override string ToString() => "/" + Value;
