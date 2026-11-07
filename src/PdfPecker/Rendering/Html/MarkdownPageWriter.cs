@@ -60,7 +60,8 @@ internal static class MarkdownPageWriter
                     break;
                 }
                 case GroupBlock group:
-                    foreach (var part in group.Parts) WriteBlocks(sb, part, ref list);
+                    // Columns are read in the order PdfText reads them, from the right for right-to-left text.
+                    foreach (var part in TextReadingOrder.SideBySide(group) ? TextReadingOrder.Parts(group) : group.Parts) WriteBlocks(sb, part, ref list);
                     break;
             }
         }

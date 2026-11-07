@@ -330,6 +330,12 @@ public class TextExtractionTests
         var text = PdfText.ExtractPage(pdf, 1).Text;
         Assert.StartsWith("Harbour town plans a new tram line\n\n", text);
         AssertStoryInOrder(text);
+        // Markdown and structured HTML are written from the same columns.
+        var markdown = PdfToMarkdown.Convert(pdf);
+        Assert.StartsWith("# Harbour town plans a new tram line\n\n", markdown);
+        AssertStoryInOrder(markdown);
+        var html = PdfToHtml.Convert(pdf, new PdfHtmlOptions { Mode = PdfHtmlMode.Structured });
+        AssertStoryInOrder(System.Text.RegularExpressions.Regex.Replace(System.Text.RegularExpressions.Regex.Replace(html, "<[^>]+>", " "), @"\s+", " "));
     }
 
     [Theory]
