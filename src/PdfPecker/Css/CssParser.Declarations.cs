@@ -57,8 +57,11 @@ internal static partial class CssParser
         return false;
     }
 
-    /// <summary>True when the value references a custom property and can only be expanded once the element's variables are known.</summary>
-    public static bool HasVar(string value) => value.IndexOf("var(", StringComparison.OrdinalIgnoreCase) >= 0;
+    /// <summary>
+    /// Whether the value needs substituting per element: var(), or if(), which the style resolver substitutes the same
+    /// way, so that a shorthand with either is expanded once its value is known.
+    /// </summary>
+    public static bool HasVar(string value) => value.IndexOf("var(", StringComparison.OrdinalIgnoreCase) >= 0 || CssIf.Has(value);
 
     /// <summary>A container-name value: none, or one or more container names.</summary>
     internal static bool ContainerNamesValid(string names)

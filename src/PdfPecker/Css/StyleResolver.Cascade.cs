@@ -316,9 +316,13 @@ internal sealed partial class StyleResolver
         => d.HasVar || _attrUsed && d.UsesAttr ? Substitute(d, s) : d.Value;
 
     private string? Substitute(Declaration d, ComputedStyle s)
-        => _attrUsed && d.UsesAttr
+    {
+        var value = _attrUsed && d.UsesAttr
             ? CssVariables.Substitute(d.Value, s.CustomProperties, AttrContext(CssAttr.IsGeneratedTextProperty(d.Property)))
             : CssVariables.Substitute(d.Value, s.CustomProperties);
+        // if() goes last, so that its conditions and branches see the values var() and attr() put in.
+        return value == null ? null : CssIf.Resolve(value, s.CustomProperties, _media);
+    }
 
     private CssAttr.Context AttrContext(bool keepUntyped)
     {
