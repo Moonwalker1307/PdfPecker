@@ -801,7 +801,7 @@ internal sealed class Selector
         return new Selector(parts);
     }
 
-    private static bool TryParseNth(string arg, out int a, out int b)
+    internal static bool TryParseNth(string arg, out int a, out int b)
     {
         a = 0; b = 0;
         var s = arg.Replace(" ", "").ToLowerInvariant();

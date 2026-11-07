@@ -26,6 +26,8 @@ public static partial class HtmlToPdf
         private bool _pageVariants;
         /// <summary>Whether the root element is right to left, which makes the first page a left page.</summary>
         private bool _rtlPages;
+        /// <summary>Whether @page :nth() rules give some pages a background of their own.</summary>
+        private bool _nthBackgrounds;
         private readonly Dictionary<string, PageSetup> _namedSetups = new(StringComparer.Ordinal);
         private readonly Dictionary<(string?, bool, bool, bool), PageSetup> _variants = new();
         private readonly Dictionary<string, ComputedStyle> _footnoteAreas = new(StringComparer.Ordinal);
@@ -47,6 +49,8 @@ public static partial class HtmlToPdf
             _pageVariants = !_options.IgnoreCssPageRules
                             && _sheet.PageRules.Any(r => r.Selector is ":first" or ":left" or ":right" && r.Declarations.Count > 0);
             _rtlPages = _htmlElement?.Style is { Rtl: true };
+            _nthBackgrounds = !_options.IgnoreCssPageRules
+                              && _sheet.PageRules.Any(r => r.Nth != null && r.Declarations.Any(d => d.Property is "background" or "background-color"));
         }
 
         /// <summary>
@@ -101,6 +105,44 @@ public static partial class HtmlToPdf
             ScaleAndFit(setup, _scale, _options.Scale != 1, InitialStyle(_options.Language));
             ReserveBands(setup, name, first, runFirst, even);
             return _variants[(name, first, right, ownBands)] = setup;
+        }
+
+        /// <summary>
+        /// Gives the pages of a run that @page :nth() rules give a background of their own a setup with it. Such a rule
+        /// does not change a page's size or margins: the flow is laid out on the grid's three kinds of page, the first,
+        /// odd and even ones. The background is the cascade of every matching rule's, by specificity and source order.
+        /// </summary>
+        private void OverrideNthBackgrounds(PageRun run, int documentPage)
+        {
+            var grid = run.Grid;
+            var kinds = new[] { grid.SetupOf(0), grid.SetupOf(1), grid.SetupOf(2) };
+            var rules = _sheet.PageRules.Where(r => (r.Name.Length == 0 || r.Name == run.Name) && r.Selector != ":blank"
+                                                    && r.Declarations.Any(d => d.Property is "background" or "background-color"))
+                .OrderBy(r => r.Specificity).ToArray();
+            var cache = new Dictionary<(int, uint), PageSetup>();
+            string? name = run.Name;
+            bool rtl = _rtlPages;
+            grid.OverridePages(p =>
+            {
+                if (!rules.Any(r => r.Nth != null && r.NthMatches(documentPage + p, p, name))) return null;
+                int page = documentPage + p, kind = p <= 0 ? 0 : (p & 1) == 1 ? 1 : 2;
+                bool right = page % 2 == (rtl ? 1 : 0);
+                uint background = 0;
+                foreach (var rule in rules)
+                {
+                    bool matches = rule.Nth != null ? rule.NthMatches(page, p, name)
+                        : rule.Selector switch { "" => true, ":first" => page == 0, ":right" => right, ":left" => !right, _ => false };
+                    if (!matches) continue;
+                    foreach (var d in rule.Declarations)
+                        if (d.Property is "background" or "background-color" && CssColor.TryParse(d.Value.Trim().ToLowerInvariant(), CssColor.Black, out uint c))
+                            background = c;
+                }
+                if (background == kinds[kind].Background) return null;
+                if (cache.TryGetValue((kind, background), out var cached)) return cached;
+                var setup = kinds[kind].Copy();
+                setup.Background = background;
+                return cache[(kind, background)] = setup;
+            });
         }
 
         private static bool SameDeclarations(List<Declaration>? a, List<Declaration>? b)
@@ -180,6 +222,7 @@ public static partial class HtmlToPdf
                 run.Grid = new PageGrid(page, run.Grid.SetupOf(1), run.Grid.SetupOf(2));
                 run.Page = page;
             }
+            if (_nthBackgrounds) OverrideNthBackgrounds(run, documentPage);
             // The layout starts at the first page's width; on pages of other widths the content takes their width.
             run.Width = run.Grid.SetupOf(0).ContentWidth;
             var restore = run.Keep is { } keep ? KeepOnly(keep) : null;

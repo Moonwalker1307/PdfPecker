@@ -125,7 +125,7 @@ public static partial class HtmlToPdf
                     // Running strings (string-set) for string() are known once the writer has placed the pages.
                     if (_paged.Running == null && strings.Count > 0) _paged.Running = PlaceRunningStrings(writer, strings);
                     if (_paged.RunningElements == null && _styles.Runnings.Count > 0) _paged.RunningElements = PlaceRunningElements(writer, _styles.Runnings);
-                    ops.AddRange(marginBoxes.Layout(p, count, setup, run.Name));
+                    ops.AddRange(marginBoxes.Layout(p, count, setup, run.Name, local));
                 }
                 var (header, footer) = BandsOf(run.Name, p == 0, local == 0, p % 2 == 1);
                 if (header != null) ops.AddRange(LayoutBandForPage(header, setup, _images, p, count, alignBottom: false, unnumbered, FirstPageOf, _context, _styles.CounterStyles));

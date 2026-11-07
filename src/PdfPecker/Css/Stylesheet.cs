@@ -126,12 +126,57 @@ internal sealed class CascadeLayer
 internal sealed class PageRule
 {
     public string Name = "";     // the page name of a named page rule (@page wide), or ""
-    public string Selector = ""; // "", ":first", ":left", ":right" or ":blank"
+    private string _selector = "";
+    private (int A, int B, string? Of)? _nth;
+    /// <summary>"", ":first", ":left", ":right", ":blank" or ":nth(An+B)" (also "of" a page name), in canonical form.</summary>
+    public string Selector
+    {
+        get => _selector;
+        set { _selector = value; _nth = value.StartsWith(":nth(", StringComparison.Ordinal) ? ParseNth(value) : null; }
+    }
+    /// <summary>The <c>:nth(An+B of name)</c> of the selector (CSS GCPM 3, 4.1), or null for another selector.</summary>
+    public (int A, int B, string? Of)? Nth => _nth;
     public readonly List<Declaration> Declarations = new();
     public readonly Dictionary<string, List<Declaration>> MarginBoxes = new(StringComparer.Ordinal);
     /// <summary>The declarations of the rule's <c>@footnote</c> area, or null when it has none.</summary>
     public List<Declaration>? Footnote;
-    public int Specificity => (Name.Length > 0 ? 4 : 0) + Selector switch { ":first" or ":blank" => 2, ":left" or ":right" => 1, _ => 0 };
+    // :nth(An+B of name) matches only pages of that name, so it counts as naming the page, as in WeasyPrint.
+    public int Specificity => (Name.Length > 0 || _nth?.Of != null ? 4 : 0) + (_nth != null ? 2 : Selector switch { ":first" or ":blank" => 2, ":left" or ":right" => 1, _ => 0 });
+
+    /// <summary>
+    /// Whether an :nth() selector matches a page: the page's number in the document counts from 1, or with "of name",
+    /// its number in the run of pages of that name it belongs to (a page group), and pages of other names never match.
+    /// </summary>
+    public bool NthMatches(int documentPage, int groupPage, string? groupName)
+    {
+        if (_nth is not var (a, b, of)) return false;
+        long index;
+        if (of == null) index = documentPage + 1L;
+        else if (string.Equals(of, groupName, StringComparison.Ordinal)) index = groupPage + 1L;
+        else return false;
+        // index = a·n + b for some n >= 0.
+        long d = index - b;
+        if (a == 0) return d == 0;
+        return d % a == 0 && d / a >= 0;
+    }
+
+    /// <summary>Parses <c>:nth(An+B)</c> or <c>:nth(An+B of name)</c>, or returns null when it is not valid.</summary>
+    internal static (int A, int B, string? Of)? ParseNth(string pseudo)
+    {
+        if (!pseudo.StartsWith(":nth(", StringComparison.OrdinalIgnoreCase) || !pseudo.EndsWith(')')) return null;
+        var arg = pseudo.Substring(5, pseudo.Length - 6).Trim();
+        string? of = null;
+        var tokens = arg.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        int ofAt = Array.FindIndex(tokens, t => t.Equals("of", StringComparison.OrdinalIgnoreCase));
+        if (ofAt >= 0)
+        {
+            if (ofAt == 0 || ofAt != tokens.Length - 2 || !CssParser.IsPageName(tokens[^1])) return null;
+            of = tokens[^1];
+            arg = string.Join(' ', tokens, 0, ofAt);
+        }
+        if (arg.Length == 0 || !Css.Selector.TryParseNth(arg, out int a, out int b)) return null;
+        return (a, b, of);
+    }
 }
 
 /// <summary>A custom property registered with <c>@property</c>.</summary>

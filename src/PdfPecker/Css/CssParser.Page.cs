@@ -20,7 +20,7 @@ internal static partial class CssParser
     }
 
     /// <summary>
-    /// The page selectors: an optional page name (named pages) and an optional :first, :left, :right or :blank,
+    /// The page selectors: an optional page name (named pages) and an optional :first, :left, :right, :blank or :nth(),
     /// several separated by commas. A selector the parser does not know makes the whole rule invalid.
     /// </summary>
     private static bool TryParsePageSelectors(string prelude, out List<(string Name, string Pseudo)> selectors)
@@ -32,7 +32,13 @@ internal static partial class CssParser
             int colon = selector.IndexOf(':');
             var name = colon < 0 ? selector : selector.Substring(0, colon).TrimEnd();
             var pseudo = colon < 0 ? "" : selector.Substring(colon).ToLowerInvariant();
-            if (pseudo.Length > 0 && pseudo is not (":first" or ":left" or ":right" or ":blank")) return false;
+            if (pseudo.StartsWith(":nth(", StringComparison.Ordinal))
+            {
+                // :nth(An+B) or :nth(An+B of name), kept in one canonical spelling; the page name keeps its case.
+                if (PageRule.ParseNth(selector.Substring(colon)) is not { } nth) return false;
+                pseudo = nth.Of == null ? $":nth({Num(nth.A)}n+{Num(nth.B)})" : $":nth({Num(nth.A)}n+{Num(nth.B)} of {nth.Of})";
+            }
+            else if (pseudo.Length > 0 && pseudo is not (":first" or ":left" or ":right" or ":blank")) return false;
             if (name.Length > 0 && !IsPageName(name)) return false;
             selectors.Add((name, pseudo));
         }
@@ -85,6 +91,8 @@ internal static partial class CssParser
         copy.Footnote = rule.Footnote;
         return copy;
     }
+
+    private static string Num(int n) => n.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>A page name: a CSS identifier, not "auto".</summary>
     internal static bool IsPageName(string name)
