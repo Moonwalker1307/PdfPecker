@@ -681,7 +681,14 @@ internal sealed partial class LayoutEngine
     /// Puts an op laid out in the grid into the fragments it falls in: content goes to the column of its top, and a box
     /// split by a column break is drawn in each column it reaches, cut at the break as a page break cuts it.
     /// </summary>
-    private static void Distribute(DrawOp op, ColumnGrid g, Func<int, List<DrawOp>> into, ref int lastK)
+    /// <remarks>
+    /// Inside a clip only the part of a split shape the clip shows (<paramref name="shownTop"/> to
+    /// <paramref name="shownBottom"/>) is put in the fragments. Columns inside columns draw each tall shape whole and
+    /// clipped in every inner column, and the outer columns split each of those copies again over all of theirs, where
+    /// the clip hid it: 3,000 nested cards in columns inside columns made 2.2 million copies.
+    /// </remarks>
+    private static void Distribute(DrawOp op, ColumnGrid g, Func<int, List<DrawOp>> into, ref int lastK,
+        float shownTop = float.NegativeInfinity, float shownBottom = float.PositiveInfinity)
     {
         switch (op)
         {
@@ -713,7 +720,9 @@ internal sealed partial class LayoutEngine
                     return copy.Ops;
                 }
                 int inner = lastK;
-                foreach (var kid in kids) Distribute(kid, g, Part, ref inner);
+                if (group is ClipOp { H: < ClipOp.Far } clip)
+                    (shownTop, shownBottom) = (Math.Max(shownTop, clip.Y), Math.Min(shownBottom, clip.Y + clip.H));
+                foreach (var kid in kids) Distribute(kid, g, Part, ref inner, shownTop, shownBottom);
                 if (firstK == int.MinValue) into(lastK).Add(group); // an empty slot stays with the content before it
                 else lastK = inner;
                 break;
@@ -731,7 +740,7 @@ internal sealed partial class LayoutEngine
                 into(lastK = Frag(g, c.Cy - c.R)).Add(c);
                 break;
             case LineOp l when l.X1 == l.X2:
-                Split(l, Math.Min(l.Y1, l.Y2), Math.Max(l.Y1, l.Y2), g, into, ref lastK, static (o, y0, y1) =>
+                Split(l, Math.Min(l.Y1, l.Y2), Math.Max(l.Y1, l.Y2), g, into, ref lastK, shownTop, shownBottom, static (o, y0, y1) =>
                 {
                     var line = (LineOp)o;
                     line.Y1 = y0;
@@ -742,7 +751,7 @@ internal sealed partial class LayoutEngine
                 into(lastK = Frag(g, l.Y1)).Add(l);
                 break;
             case RectOp r:
-                Split(r, r.Y, r.Y + r.H, g, into, ref lastK, static (o, y0, y1) =>
+                Split(r, r.Y, r.Y + r.H, g, into, ref lastK, shownTop, shownBottom, static (o, y0, y1) =>
                 {
                     var rect = (RectOp)o;
                     rect.Y = y0;
@@ -750,7 +759,8 @@ internal sealed partial class LayoutEngine
                 });
                 break;
             case LinkOp lk:
-                Split(lk, lk.Y, lk.Y + lk.H, g, into, ref lastK, static (o, y0, y1) =>
+                // A clip does not clip a link's area on the page, so the link is split wherever it reaches.
+                Split(lk, lk.Y, lk.Y + lk.H, g, into, ref lastK, float.NegativeInfinity, float.PositiveInfinity, static (o, y0, y1) =>
                 {
                     var link = (LinkOp)o;
                     link.Y = y0;
@@ -759,18 +769,18 @@ internal sealed partial class LayoutEngine
                 break;
             case BorderRectOp br:
                 if (Frag(g, br.Y) == Frag(g, br.Y + br.H - 0.5f)) into(lastK = Frag(g, br.Y)).Add(br);
-                else foreach (var side in br.Sides()) Distribute(side, g, into, ref lastK); // open at the break
+                else foreach (var side in br.Sides()) Distribute(side, g, into, ref lastK, shownTop, shownBottom); // open at the break
                 break;
             case RoundRectOp rr:
-                ClipToFragments(rr, rr.Y, rr.Y + rr.H, g, into, ref lastK);
+                ClipToFragments(rr, rr.Y, rr.Y + rr.H, g, into, ref lastK, shownTop, shownBottom);
                 break;
             case PathOp path:
-                ClipToFragments(path, path.Y0, path.Y1, g, into, ref lastK);
+                ClipToFragments(path, path.Y0, path.Y1, g, into, ref lastK, shownTop, shownBottom);
                 break;
             case BackgroundOp bg:
             {
                 var (_, y0, _, y1) = bg.Painted();
-                ClipToFragments(bg, y0, y1, g, into, ref lastK);
+                ClipToFragments(bg, y0, y1, g, into, ref lastK, shownTop, shownBottom);
                 break;
             }
             default:
@@ -782,17 +792,23 @@ internal sealed partial class LayoutEngine
     /// <summary>The fragment a y is in, as the layout decides it; all of the hidden ones count as the first of them.</summary>
     private static int Frag(ColumnGrid g, float y) => Math.Min(g.PageOf(y + Eps), g.Hidden);
 
-    /// <summary>The fragments [top, bottom) falls in, at most <see cref="MaxSplitFragments"/>.</summary>
-    private static (int First, int Last) FragRange(ColumnGrid g, float top, float bottom)
+    /// <summary>
+    /// The fragments [top, bottom) falls in, at most <see cref="MaxSplitFragments"/>, of those where a clip shows
+    /// [shownTop, shownBottom); the fragment of the top when the clip shows none of it.
+    /// </summary>
+    private static (int First, int Last) FragRange(ColumnGrid g, float top, float bottom, float shownTop, float shownBottom)
     {
-        int k0 = Frag(g, top), k1 = Math.Max(k0, Frag(g, bottom - 0.5f));
+        float from = Math.Max(top, shownTop), to = Math.Min(bottom, shownBottom);
+        if (!(to > from)) (from, to) = (top, top);
+        int k0 = Frag(g, from), k1 = Math.Max(k0, Frag(g, to - 0.5f));
         return (k0, (int)Math.Min(k1, (long)k0 + MaxSplitFragments - 1));
     }
 
     /// <summary>Splits a rectangle-like op at the column breaks into copies, each set to its part by <paramref name="cut"/>.</summary>
-    private static void Split(DrawOp op, float top, float bottom, ColumnGrid g, Func<int, List<DrawOp>> into, ref int lastK, Action<DrawOp, float, float> cut)
+    private static void Split(DrawOp op, float top, float bottom, ColumnGrid g, Func<int, List<DrawOp>> into, ref int lastK,
+        float shownTop, float shownBottom, Action<DrawOp, float, float> cut)
     {
-        var (k0, k1) = FragRange(g, top, bottom);
+        var (k0, k1) = FragRange(g, top, bottom, shownTop, shownBottom);
         if (k0 == k1 || bottom <= top)
         {
             into(lastK = k0).Add(op);
@@ -809,9 +825,10 @@ internal sealed partial class LayoutEngine
     }
 
     /// <summary>Draws a shape split by column breaks whole in each column it reaches, clipped to that column's part.</summary>
-    private static void ClipToFragments(DrawOp op, float top, float bottom, ColumnGrid g, Func<int, List<DrawOp>> into, ref int lastK)
+    private static void ClipToFragments(DrawOp op, float top, float bottom, ColumnGrid g, Func<int, List<DrawOp>> into, ref int lastK,
+        float shownTop, float shownBottom)
     {
-        var (k0, k1) = FragRange(g, top, bottom);
+        var (k0, k1) = FragRange(g, top, bottom, shownTop, shownBottom);
         if (k0 == k1 || bottom <= top)
         {
             into(lastK = k0).Add(op);
