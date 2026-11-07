@@ -4,8 +4,8 @@ namespace PdfPecker.Css;
 
 /// <summary>
 /// The colour functions of CSS Color 4 and 5: <c>rgb()</c> and <c>hsl()</c> in both syntaxes, <c>hwb()</c>, <c>lab()</c>,
-/// <c>lch()</c>, <c>oklab()</c>, <c>oklch()</c>, <c>color()</c> with the predefined colour spaces, <c>color-mix()</c> and
-/// <c>light-dark()</c>, and the relative colour syntax of CSS Color 5 (<c>rgb(from &lt;color&gt; r g b / alpha)</c> and the
+/// <c>lch()</c>, <c>oklab()</c>, <c>oklch()</c>, <c>color()</c> with the predefined colour spaces, <c>color-mix()</c>,
+/// <c>light-dark()</c> and <c>contrast-color()</c>, and the relative colour syntax of CSS Color 5 (<c>rgb(from &lt;color&gt; r g b / alpha)</c> and the
 /// same for every function but <c>color-mix()</c>), whose channel keywords can be used in math functions. Colours are worked on as unclamped sRGB (so wide-gamut colours survive a mix) and clipped to
 /// sRGB at the end, as Chrome does when it prints.
 /// </summary>
@@ -52,7 +52,7 @@ internal static class ColorFunctions
     {
         color = default;
         if (depth > MaxDepth) return false;
-        if (fn is not ("color-mix" or "light-dark") && StartsWithWord(args, "from")) return Relative(fn, args, current, depth, out color);
+        if (fn is not ("color-mix" or "light-dark" or "contrast-color") && StartsWithWord(args, "from")) return Relative(fn, args, current, depth, out color);
         switch (fn)
         {
             case "rgb":
@@ -78,8 +78,30 @@ internal static class ColorFunctions
                 var parts = CssParser.SplitTopLevel(args, ',');
                 return parts.Count == 2 && TryParseAny(parts[0], current, depth + 1, out color);
             }
+            case "contrast-color":
+                return Contrast(args, current, depth, out color);
             default:
                 return false;
+        }
+    }
+
+    /// <summary>
+    /// contrast-color() of CSS Color 5: white or black, whichever contrasts more with the colour by the WCAG 2.1
+    /// contrast ratio, and white when they tie. The colour's alpha is ignored, as in Safari and Firefox.
+    /// </summary>
+    private static bool Contrast(string args, uint current, int depth, out Rgba color)
+    {
+        color = default;
+        if (!TryParseAny(args, current, depth + 1, out var c)) return false;
+        double l = 0.2126 * Linear(c.R) + 0.7152 * Linear(c.G) + 0.0722 * Linear(c.B);
+        double withWhite = 1.05 / (l + 0.05), withBlack = (l + 0.05) / 0.05;
+        color = withWhite >= withBlack ? new Rgba(1, 1, 1, 1) : new Rgba(0, 0, 0, 1);
+        return true;
+
+        static double Linear(double v)
+        {
+            v = Math.Clamp(double.IsNaN(v) ? 0 : v, 0, 1);
+            return v <= 0.04045 ? v / 12.92 : Math.Pow((v + 0.055) / 1.055, 2.4);
         }
     }
 
