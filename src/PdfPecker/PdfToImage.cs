@@ -333,6 +333,13 @@ public sealed class PdfRenderer
     /// <exception cref="InvalidDataException">The page cannot be rendered, for example because it is too complex.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
     public RenderedImage RenderPage(int pageIndex, ImageOptions? options = null, CancellationToken cancellationToken = default)
+        => RenderPage(pageIndex, options, cancellationToken, null);
+
+    /// <summary>
+    /// <see cref="RenderPage(int, ImageOptions?, CancellationToken)"/>, drawing on a pixel array from
+    /// <paramref name="buffers"/> when one of the page's size is free there.
+    /// </summary>
+    internal RenderedImage RenderPage(int pageIndex, ImageOptions? options, CancellationToken cancellationToken, PixelBuffers? buffers)
     {
         CheckIndex(pageIndex);
         options ??= new ImageOptions();
@@ -358,21 +365,21 @@ public sealed class PdfRenderer
         if (limit < 1) { sx *= limit; sy *= limit; }
         w = Math.Max(1, (int)Math.Round(pw * sx));
         h = Math.Max(1, (int)Math.Round(ph * sy));
-        return RenderSized(pageIndex, w, h, options, dpi, cancellationToken);
+        return RenderSized(pageIndex, w, h, options, dpi, cancellationToken, buffers?.Take(checked(w * h)));
     }
 
     /// <summary>
     /// Renders one page onto exactly <paramref name="width"/> × <paramref name="height"/> pixels, stretching it a little
-    /// where its shape differs from them. <see cref="RenderPage"/> keeps the page's shape, so a size it was given can come
+    /// where its shape differs from them. <see cref="RenderPage(int, ImageOptions?, CancellationToken)"/> keeps the page's shape, so a size it was given can come
     /// out a pixel short on one side; rasters that are drawn over a known rectangle need the size they asked for.
     /// </summary>
     internal RenderedImage RenderPageExact(int pageIndex, int width, int height, ImageOptions options, CancellationToken cancellationToken = default)
     {
         CheckIndex(pageIndex);
-        return RenderSized(pageIndex, width, height, options, null, cancellationToken);
+        return RenderSized(pageIndex, width, height, options, null, cancellationToken, null);
     }
 
-    private RenderedImage RenderSized(int pageIndex, int w, int h, ImageOptions options, double? dpi, CancellationToken cancellationToken)
+    private RenderedImage RenderSized(int pageIndex, int w, int h, ImageOptions options, double? dpi, CancellationToken cancellationToken, uint[]? reuse)
     {
         var (pw, ph) = _doc.PageSize(pageIndex);
         // Stretch slightly so the page fills the rounded pixel size exactly.
@@ -385,7 +392,7 @@ public sealed class PdfRenderer
         Canvas canvas;
         try
         {
-            canvas = _doc.Render(pageIndex, sx, sy, w, h, premul, options.RenderAnnotations, cancellationToken);
+            canvas = _doc.Render(pageIndex, sx, sy, w, h, premul, options.RenderAnnotations, cancellationToken, reuse);
         }
         catch (PdfFormatException ex)
         {
@@ -453,13 +460,20 @@ public sealed class PdfRenderer
     {
         options ??= new ImageOptions();
         var result = new T[PageCount];
+        // Each page's pixels are only needed until the page is encoded, so a later page of the same size draws on them.
+        var buffers = new PixelBuffers();
         try
         {
             Parallel.For(0, PageCount, new ParallelOptions
             {
                 MaxDegreeOfParallelism = Math.Max(1, options.MaxDegreeOfParallelism),
                 CancellationToken = cancellationToken,
-            }, i => result[i] = encode(RenderPage(i, options, cancellationToken)));
+            }, i =>
+            {
+                var image = RenderPage(i, options, cancellationToken, buffers);
+                result[i] = encode(image);
+                buffers.Return(image.Premultiplied);
+            });
         }
         catch (AggregateException ex) when (ex.InnerExceptions.Count > 0)
         {

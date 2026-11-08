@@ -293,6 +293,8 @@ public static class PdfToHtml
             _ => "image/webp",
         };
 
+        // A page's pixels are only needed until its image is encoded, so a later page of the same size draws on them.
+        var buffers = new PixelBuffers();
         WritePages(indices.Count, options.MaxDegreeOfParallelism, cancellationToken, i =>
         {
             int index = indices[i];
@@ -300,7 +302,7 @@ public static class PdfToHtml
             int id = firstCopy[i] ? index + 1 : 0;
             return structured
                 ? StructuredPage(doc, tree, links, index, id, options, PageId, cancellationToken)
-                : Page(renderer, links, index, id, pageNames[i], imageOptions, mediaType, options, PageId, cancellationToken);
+                : Page(renderer, links, index, id, pageNames[i], imageOptions, mediaType, options, PageId, buffers, cancellationToken);
         }, write);
         write("</body>\n</html>\n");
     }
@@ -335,11 +337,12 @@ public static class PdfToHtml
     }
 
     private static string Page(PdfRenderer renderer, PageLinks? links, int index, int id, string pageName, ImageOptions imageOptions,
-        string mediaType, PdfHtmlOptions options, Func<int, int> pageIds, CancellationToken cancellationToken)
+        string mediaType, PdfHtmlOptions options, Func<int, int> pageIds, PixelBuffers buffers, CancellationToken cancellationToken)
     {
         var doc = renderer.Document;
-        var image = renderer.RenderPage(index, imageOptions, cancellationToken);
+        var image = renderer.RenderPage(index, imageOptions, cancellationToken, buffers);
         var encoded = image.Encode();
+        buffers.Return(image.Premultiplied);
         var (w, h) = doc.PageSize(index);
         PdfTextPage? text = null;
         List<PageLink> pageLinks;

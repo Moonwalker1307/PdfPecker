@@ -272,4 +272,27 @@ public class ImageOutputFormatTests
             Assert.Equal(expected, PdfPecker.Rendering.WebPEncoder.Encode(image, size, size, 85));
         }
     }
+
+    [Fact]
+    public void Pages_rendered_together_match_pages_rendered_alone()
+    {
+        // A whole-document render hands each page's pixel array to the next page of the same size; pages of other
+        // sizes, transparent pages and pages drawn on a used array must all come out as when rendered on their own.
+        var small = HtmlToPdf.Convert("<p style='color:#c00'>One</p><p>Two</p>", new PdfOptions { PageSize = PageSize.FromMillimeters(105, 148) });
+        var large = HtmlToPdf.Convert("<div style='background:#036;height:60pt'></div>", new PdfOptions { PageSize = PageSize.FromMillimeters(148, 210) });
+        var pdf = PdfMerger.Merge(small, large, small, small, large);
+        var renderer = PdfRenderer.Open(pdf);
+        foreach (var options in new[]
+        {
+            new ImageOptions { Dpi = 40, MaxDegreeOfParallelism = 1 },
+            new ImageOptions { Dpi = 40, MaxDegreeOfParallelism = 1, Transparent = true },
+            new ImageOptions { Dpi = 40, MaxDegreeOfParallelism = 1, BackgroundColor = 0xFFFFEE00, Format = PdfImageFormat.WebP },
+        })
+        {
+            var together = renderer.RenderAllEncoded(options);
+            for (int i = 0; i < renderer.PageCount; i++) Assert.Equal(renderer.RenderPageEncoded(i, options), together[i]);
+        }
+        var html = PdfToHtml.Convert(pdf, new PdfHtmlOptions { Dpi = 40, MaxDegreeOfParallelism = 1 });
+        for (int i = 0; i < 3; i++) Assert.Equal(html, PdfToHtml.Convert(pdf, new PdfHtmlOptions { Dpi = 40, MaxDegreeOfParallelism = 4 }));
+    }
 }
