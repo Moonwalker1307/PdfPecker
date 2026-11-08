@@ -281,9 +281,12 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   (as Chrome applies them, such as Fira Code's ligatures), variable fonts and OpenType features, and bundled fallback fonts for letters and symbols a document's fonts lack. COLR colour fonts,
   versions 0 and 1 (such as Noto Color Emoji), print in colour as Chrome prints them, with the default palette.
   `@font-face` takes `size-adjust`, `ascent-override`, `descent-override` and `line-gap-override`, so a fallback face
-  can be sized to match a web font. [More](https://pdfpecker.net/docs/fonts/)
+  can be sized to match a web font. `FontCollection.AddDeferred` registers a font that is read only when a document
+  uses it, with a `unicode-range` so that fallback skips it for other characters, which suits large CJK fonts.
+  [More](https://pdfpecker.net/docs/fonts/)
 - **Languages**: Arabic and Hebrew with bidi and shaping, Indic scripts, Thai and Lao, CJK line breaking and
-  justification, and hyphenation in eleven languages (with `hyphenate-limit-lines`). [More](https://pdfpecker.net/docs/languages/)
+  justification, and hyphenation in eleven languages (with `hyphenate-limit-lines`), plus TeX patterns of your own,
+  which `HyphenationPatterns.Deferred` reads only when a document uses their language. [More](https://pdfpecker.net/docs/languages/)
 - **PDF/A, passwords and watermarks**: PDF/A-2, 3 and 4, AES-256 encryption, and text, image and SVG watermarks.
   [More](https://pdfpecker.net/docs/pdfa-and-passwords/)
 - **Existing PDFs to PDF/A**: `PdfToPdfA` converts PDFs from any tool to PDF/A-2b, 2u, 3b or 3u without rasterizing
@@ -311,6 +314,11 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
 - **Barcodes**: QR codes, EPC payment QR codes, Swiss QR-bill codes (with the Swiss cross and a checked payload), Data
   Matrix and GS1 Data Matrix, Code 128 and EAN-13 as vector SVG, e.g. `Barcode.QrCode("https://example.com")` or
   `Barcode.Gs1DataMatrix("(01)09506000134352(10)AB-123")`. [More](https://pdfpecker.net/docs/barcodes/)
+- **Reading barcodes**: `Barcode.Read(image)` reads the QR, Data Matrix (including the rectangular DMRE sizes), Code
+  128 and EAN-13 codes in a PNG, JPEG, GIF, WebP, BMP or TIFF image, and `PdfBarcodes.Find(pdf)` those on PDF pages,
+  whether drawn as vectors, embedded as images or scanned. Codes may be turned, tilted, mirrored or light on dark;
+  each result has its text and bytes, its corners in pixels or page points, a GS1 flag, and the payment parsed from an
+  EPC or Swiss QR-bill code. On the zxing-cpp test images it reads about 85 % of what zxing-cpp reads, with no wrong reads.
 - **Existing PDFs**: merge (also streamed), split, reorder, rotate, stamp, extract text with positions, extract images
   and read document properties. Text comes out in reading order: a tagged PDF's in the order of its tags, and columns
   side by side one after the other, also on pages turned sideways or upside down. [More](https://pdfpecker.net/docs/merging/)
@@ -326,7 +334,8 @@ Razor project, inject services and stream to an ASP.NET Core response is in its
   matches, from the file itself: the glyphs leave the content streams (so text extraction and copying no longer find
   them, while the text around them keeps its place), image pixels under an area are overwritten, and shapes, links and
   form fields in an area go, before a black box (or none) is drawn over it. Forms shared with other pages are redacted
-  in copies, replacement texts that would still name what was there are removed, and earlier revisions do not survive.
+  in copies, the originals of redacted images and forms leave the file unless a page still shows them elsewhere,
+  replacement texts that would still name what was there are removed, and earlier revisions do not survive.
 - **Images to PDF**: `ImageToPdf` puts scans and photos on pages of their own size or fitted to a page size, with
   photos turned upright by their EXIF orientation.
   [More](https://pdfpecker.net/docs/images-to-pdf/)

@@ -611,6 +611,75 @@ public class RendererImageTests
         AssertAt(img, 10, 10, 255, 255, 255); // inside the fill but outside the mask
     }
 
+    [Fact]
+    public void Soft_mask_transfer_function_applies_outside_the_group_box()
+    {
+        // The group covers the left half; outside its box the mask is the transfer function of the backdrop's alpha 0.
+        var pdf = new FixturePdf();
+        int tr = pdf.Add("<< /FunctionType 2 /Domain [0 1] /C0 [1] /C1 [0] /N 1 >>");
+        int form = pdf.AddStream("/Type /XObject /Subtype /Form /BBox [0 0 20 40] /Group << /S /Transparency >>", "0 g 0 0 40 40 re f");
+        int gs = pdf.Add($"<< /Type /ExtGState /SMask << /Type /Mask /S /Alpha /G {form} 0 R /TR {tr} 0 R >> >>");
+        var img = Render(pdf.Build(40, 40, "/GS gs 1 0 0 rg 0 0 40 40 re f", $"/ExtGState << /GS {gs} 0 R >>"));
+        AssertAt(img, 10, 20, 255, 255, 255); // alpha 1 inverted to 0
+        AssertAt(img, 30, 20, 255, 0, 0); // alpha 0 inverted to 1
+    }
+
+    [Theory]
+    [InlineData("0 g 50 50 10 10 re f")] // outside the page
+    [InlineData("")] // nothing at all
+    public void Soft_mask_whose_group_draws_nothing_hides_what_it_masks(string groupContent)
+    {
+        // An alpha mask whose group paints no pixel is 0 everywhere, so nothing under it shows.
+        var pdf = new FixturePdf();
+        int form = pdf.AddStream("/Type /XObject /Subtype /Form /BBox [0 0 100 100] /Group << /S /Transparency >>", groupContent);
+        int gs = pdf.Add($"<< /Type /ExtGState /SMask << /Type /Mask /S /Alpha /G {form} 0 R >> >>");
+        var img = Render(pdf.Build(40, 40, "/GS gs 1 0 0 rg 0 0 40 40 re f", $"/ExtGState << /GS {gs} 0 R >>"));
+        AssertAt(img, 10, 20, 255, 255, 255);
+        AssertAt(img, 30, 20, 255, 255, 255);
+    }
+
+    [Fact]
+    public void Soft_mask_set_inside_a_clip_ends_with_it()
+    {
+        var pdf = new FixturePdf();
+        int form = pdf.AddStream("/Type /XObject /Subtype /Form /BBox [0 0 40 40] /Group << /S /Transparency /CS /DeviceGray >>", "0.5 g 0 0 40 40 re f");
+        int gs = pdf.Add($"<< /Type /ExtGState /SMask << /Type /Mask /S /Luminosity /G {form} 0 R >> >>");
+        var img = Render(pdf.Build(40, 40, "q 0 0 20 40 re W n /GS gs 1 0 0 rg 0 0 40 40 re f Q 0 0 1 rg 20 0 20 40 re f",
+            $"/ExtGState << /GS {gs} 0 R >>"));
+        AssertAt(img, 10, 20, 255, 128, 128);
+        AssertAt(img, 30, 20, 0, 0, 255);
+    }
+
+    [Fact]
+    public void Many_small_transparency_groups_render_at_print_resolution()
+    {
+        // Every group had a layer the size of the page, so 200 groups of 10 points allocated 1.7 GB at 150 dpi and were
+        // too complex to render at 300 dpi. A layer now costs the area its group draws in.
+        var pdf = new FixturePdf();
+        int ga = pdf.Add("<< /ca 0.5 >>");
+        int form = pdf.AddStream("/Type /XObject /Subtype /Form /BBox [0 0 10 10] /Group << /S /Transparency >>", "1 0 0 rg 0 0 10 10 re f 0 0 1 rg 2 2 6 6 re f");
+        var content = new StringBuilder("/A gs ");
+        for (int i = 0; i < 200; i++) content.Append($"q 1 0 0 1 {20 + i % 40 * 13} {20 + i / 40 * 13} cm /X Do Q ");
+        var page = PdfRenderer.Open(pdf.Build(595, 842, content.ToString(), $"/XObject << /X {form} 0 R >> /ExtGState << /A {ga} 0 R >>"))
+            .RenderPage(0, new ImageOptions { Dpi = 300 });
+        // The first group's red edge and blue centre at half opacity over white, 300 / 72 pixels per point.
+        AssertColor(Px(page, (int)(21 * 300 / 72.0), page.Height - (int)(21 * 300 / 72.0)), 255, 128, 128);
+        AssertColor(Px(page, (int)(25 * 300 / 72.0), page.Height - (int)(25 * 300 / 72.0)), 128, 128, 255);
+    }
+
+    [Fact]
+    public void Many_translucent_gradients_and_nested_opacity_from_html_render_at_print_resolution()
+    {
+        // Each gradient with translucent stops is drawn through a soft mask, and each opacity is a transparency group:
+        // a full-page canvas for each made such pages fail at 300 dpi, and the opacities already at 150 dpi.
+        var gradients = HtmlToPdf.Convert("<body style='margin:0'>" + string.Concat(Enumerable.Repeat(
+            "<div style='display:inline-block;width:20px;height:10px;margin:1px;background:linear-gradient(rgba(255,0,0,0.3),rgba(0,0,255,0.9))'></div>", 200)));
+        Assert.True(PdfRenderer.Open(gradients).RenderPage(0, new ImageOptions { Dpi = 300 }).Width > 0);
+        var opacities = HtmlToPdf.Convert("<body style='margin:0'>" + string.Concat(Enumerable.Range(0, 1500).Select(i =>
+            $"<div style='display:inline-block;opacity:0.5;width:20px;height:10px;margin:1px'><span style='opacity:0.7;background:#c00'>{i % 10}</span></div>")));
+        Assert.True(PdfRenderer.Open(opacities).RenderPage(0, new ImageOptions { Dpi = 150 }).Width > 0);
+    }
+
     // ---------------------------------------------------------------- blend modes
 
     private static readonly double[] Backdrop = { 0.8, 0.4, 0.2 }, Source = { 0.3, 0.6, 0.9 };

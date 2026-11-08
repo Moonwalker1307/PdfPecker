@@ -49,6 +49,43 @@ internal sealed class Canvas
 
     public uint[] Pixels { get; }
 
+    // The rectangle painting has touched since the canvas was made or cleaned, empty while X1 <= X0: a transparency
+    // layer is composited and cleared only there, since the rest of it is still transparent.
+    public int DirtyX0 { get; private set; } = int.MaxValue;
+
+    public int DirtyY0 { get; private set; } = int.MaxValue;
+
+    public int DirtyX1 { get; private set; } = int.MinValue;
+
+    public int DirtyY1 { get; private set; } = int.MinValue;
+
+    /// <summary>The pixels of the dirty rectangle.</summary>
+    public long DirtyArea => DirtyX1 > DirtyX0 && DirtyY1 > DirtyY0 ? (long)(DirtyX1 - DirtyX0) * (DirtyY1 - DirtyY0) : 0;
+
+    /// <summary>Adds the pixels from <paramref name="x0"/> to <paramref name="x1"/> of row <paramref name="y"/> to the dirty rectangle.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void MarkDirty(int y, int x0, int x1)
+    {
+        if (x0 < DirtyX0) DirtyX0 = x0;
+        if (x1 > DirtyX1) DirtyX1 = x1;
+        if (y < DirtyY0) DirtyY0 = y;
+        if (y >= DirtyY1) DirtyY1 = y + 1;
+    }
+
+    /// <summary>Sets a rectangle of pixels to <paramref name="color"/> without marking it dirty.</summary>
+    public void FillRect(int x0, int y0, int x1, int y1, uint color)
+    {
+        for (int y = y0; y < y1; y++) Pixels.AsSpan(y * Width + x0, x1 - x0).Fill(color);
+    }
+
+    /// <summary>Makes the dirty rectangle transparent again and forgets it, so the canvas can be used as a new layer.</summary>
+    public void Clean()
+    {
+        if (DirtyArea > 0) FillRect(DirtyX0, DirtyY0, DirtyX1, DirtyY1, 0);
+        DirtyX0 = DirtyY0 = int.MaxValue;
+        DirtyX1 = DirtyY1 = int.MinValue;
+    }
+
     /// <summary>Packs a straight (non-premultiplied) color into a premultiplied pixel.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static uint Pack(int r, int g, int b, int a = Opaque)

@@ -28,7 +28,7 @@ internal sealed class GraphicsState
 
     public float FillAlpha = 1, StrokeAlpha = 1;
     public BlendMode Blend;
-    public byte[]? SoftMask;
+    public SoftMask? SoftMask;
 
     public PdfFont? Font;
     public double FontSize = 1, CharSpacing, WordSpacing, HScale = 1, Leading, Rise;

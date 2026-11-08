@@ -7,9 +7,10 @@ namespace PdfPecker;
 /// <summary>
 /// Draws QR codes, Swiss QR-bill codes, Data Matrix codes and Code 128 and EAN-13 barcodes as SVG markup, to put in an
 /// HTML template as an inline <c>&lt;svg&gt;</c> or, through <see cref="ToDataUri"/>, as an <c>&lt;img&gt;</c>. The
-/// SVG stays vector graphics in the PDF, so it scans at any print size. All methods are static and thread-safe.
+/// SVG stays vector graphics in the PDF, so it scans at any print size. <c>Read</c> reads the same symbologies back from
+/// images, and <see cref="PdfBarcodes"/> from PDF pages. All methods are static and thread-safe.
 /// </summary>
-public static class Barcode
+public static partial class Barcode
 {
     /// <summary>
     /// A QR code holding <paramref name="text"/>, in the smallest version (size) that fits at the chosen

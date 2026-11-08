@@ -73,6 +73,19 @@ public class RedactionTests
         return sb.ToString();
     }
 
+    /// <summary>How many streams of the given /Subtype the file holds, drawn or not.</summary>
+    private static int Streams(byte[] pdf, string subtype)
+    {
+        var file = PdfFile.Open(pdf, null);
+        int count = 0;
+        for (int i = 1; i <= file.MaxObjectNumber; i++)
+            if (file.GetObject(i) is PdfStream s && file.GetName(s, "Subtype") == subtype) count++;
+        return count;
+    }
+
+    /// <summary>A 4 by 1 RGB image whose samples spell SECRETPIXELS, so that the original's data can be looked for.</summary>
+    private const string SecretImage = "<< /Type /XObject /Subtype /Image /Width 4 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceRGB /Length 12 >>\nstream\nSECRETPIXELS\nendstream";
+
     private static PdfTextWord Word(byte[] pdf, string text)
         => PdfText.ExtractPages(pdf).SelectMany(p => p.Lines).SelectMany(l => l.Words).First(w => w.Text == text);
 
@@ -123,6 +136,8 @@ public class RedactionTests
         Assert.Equal(0xFF0000u, Pixel(image, 250, 150));
         // The image the page draws now is a new one; the original, with its red pixels in the area, is not in the file.
         Assert.Single(PdfImages.Extract(redacted));
+        // Only the copy and the soft mask that makes its area transparent are left.
+        Assert.Equal(2, Streams(redacted, "Image"));
     }
 
     [Fact]
@@ -134,6 +149,122 @@ public class RedactionTests
         var redacted = PdfRedactor.Redact(pdf, new[] { new PdfRedactionArea(1, 90, 90, 80, 80) });
 
         Assert.Empty(PdfImages.Extract(redacted));
+        Assert.Equal(0, Streams(redacted, "Image"));
+    }
+
+    [Fact]
+    public void The_original_of_a_redacted_scan_is_not_left_in_the_file()
+    {
+        // A scanned page: the image fills it, and an invisible text layer over its second pixel says what is there.
+        var pdf = Build(
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Count 1 /Kids [3 0 R] >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 300] /Resources << /Font << /F1 4 0 R >> /XObject << /Scan 6 0 R >> >> /Contents 5 0 R >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+            Stream("q 400 0 0 300 0 0 cm /Scan Do Q BT 3 Tr /F1 12 Tf 110 150 Td (123-45-6789) Tj ET"),
+            SecretImage);
+
+        var redacted = PdfRedactor.RedactText(pdf, "123-45-6789");
+
+        Assert.DoesNotContain("123-45-6789", PdfText.Extract(redacted));
+        Assert.Equal(1, Streams(redacted, "Image"));
+        Assert.DoesNotContain("SECRETPIXELS", AllBytes(redacted));
+        Assert.Equal(0x000000u, Pixel(Render(redacted), 150, 145));
+        PdfTestHelpers.AssertStructurallyValid(redacted);
+    }
+
+    [Fact]
+    public void Originals_named_in_shared_and_inherited_resources_go_and_what_other_pages_draw_stays()
+    {
+        // Both pages inherit one resource dictionary from the page tree. Page 1 draws /A inside the area and /B twice,
+        // once in it and once outside; page 2 draws /C. /A goes from the file; /B, still shown on page 1, and /C stay.
+        var other = SecretImage.Replace("SECRETPIXELS", "OTHERPIXELS!", StringComparison.Ordinal);
+        var third = SecretImage.Replace("SECRETPIXELS", "THIRDPIXELS!", StringComparison.Ordinal);
+        var pdf = Build(
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Count 2 /Kids [3 0 R 5 0 R] /Resources << /XObject << /A 7 0 R /B 8 0 R /C 9 0 R >> >> /MediaBox [0 0 400 300] >>",
+            "<< /Type /Page /Parent 2 0 R /Contents 4 0 R >>",
+            Stream("q 40 0 0 40 20 220 cm /A Do Q q 40 0 0 40 100 220 cm /B Do Q q 40 0 0 40 300 20 cm /B Do Q"),
+            "<< /Type /Page /Parent 2 0 R /Contents 6 0 R >>",
+            Stream("q 40 0 0 40 20 20 cm /C Do Q"),
+            SecretImage,
+            other,
+            third);
+
+        var redacted = PdfRedactor.Redact(pdf, new[] { new PdfRedactionArea(1, 0, 0, 200, 100) });
+
+        var all = AllBytes(redacted);
+        Assert.DoesNotContain("SECRETPIXELS", all);
+        Assert.Contains("OTHERPIXELS!", all);
+        Assert.Contains("THIRDPIXELS!", all);
+        Assert.NotEqual(0xFFFFFFu, Pixel(Render(redacted), 320, 260));
+        Assert.NotEqual(0xFFFFFFu, Pixel(Render(redacted, 1), 40, 260));
+        PdfTestHelpers.AssertStructurallyValid(redacted);
+    }
+
+    [Fact]
+    public void The_original_of_a_redacted_form_is_not_left_in_the_file_even_when_the_structure_tree_refers_to_it()
+    {
+        var form = "<< /Type /XObject /Subtype /Form /BBox [0 0 300 50] /Resources << /Font << /F1 6 0 R >> >> /Length 38 >>\nstream\nBT /F1 12 Tf 0 10 Td (FormSecret) Tj ET\nendstream";
+        var pdf = Build(
+            "<< /Type /Catalog /Pages 2 0 R /StructTreeRoot 7 0 R >>",
+            "<< /Type /Pages /Count 1 /Kids [3 0 R] >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 300] /Resources << /XObject << /X1 5 0 R >> >> /Contents 4 0 R >>",
+            Stream("q 1 0 0 1 20 200 cm /X1 Do Q"),
+            form,
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+            "<< /Type /StructTreeRoot /K << /S /P /P 7 0 R /Pg 3 0 R /K << /Type /MCR /Stm 5 0 R /MCID 0 >> >> >>");
+
+        var redacted = PdfRedactor.RedactText(pdf, "FormSecret");
+
+        Assert.DoesNotContain("FormSecret", PdfText.Extract(redacted));
+        Assert.DoesNotContain("FormSecret", AllBytes(redacted));
+        PdfTestHelpers.AssertStructurallyValid(redacted);
+    }
+
+    [Fact]
+    public void Text_a_form_draws_outside_its_box_is_removed()
+    {
+        // Clipped away by the form's box, but still found by text extraction.
+        var pdf = Build(
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Count 1 /Kids [3 0 R] >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 300] /Resources << /XObject << /X1 5 0 R >> >> /Contents 4 0 R >>",
+            Stream("/X1 Do"),
+            "<< /Type /XObject /Subtype /Form /BBox [0 0 10 10] /Resources << /Font << /F1 6 0 R >> >> /Length 44 >>\nstream\nBT /F1 12 Tf 100 200 Td (ClippedSecret) Tj ET\nendstream",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+        Assert.Contains("ClippedSecret", PdfText.Extract(pdf));
+
+        var redacted = PdfRedactor.RedactText(pdf, "ClippedSecret");
+
+        Assert.DoesNotContain("ClippedSecret", PdfText.Extract(redacted));
+        Assert.DoesNotContain("ClippedSecret", AllBytes(redacted));
+    }
+
+    [Fact]
+    public void Text_whose_font_is_missing_is_removed_when_it_could_reach_an_area()
+    {
+        // /F9 is not in the resources: viewers draw the text with a substitute font, so it must go all the same.
+        var pdf = OnePage("BT /F9 12 Tf 100 160 Td (MissingFontSecret) Tj ET BT /F9 12 Tf 100 40 Td (FarAway) Tj ET BT /F1 12 Tf 20 100 Td (Kept) Tj ET");
+
+        var redacted = PdfRedactor.Redact(pdf, new[] { new PdfRedactionArea(1, 150, 128, 20, 12) });
+
+        var all = AllBytes(redacted);
+        Assert.DoesNotContain("MissingFontSecret", all);
+        Assert.Contains("FarAway", all);
+        Assert.Contains("Kept", PdfText.Extract(redacted));
+    }
+
+    [Fact]
+    public void The_box_is_drawn_in_page_space_when_the_content_leaves_a_changed_transform_saved()
+    {
+        var pdf = OnePage("1 0 0 1 0 -100 cm q BT /F1 12 Tf 20 200 Td (Shifted SECRET) Tj ET");
+        var word = Word(pdf, "SECRET");
+
+        var redacted = PdfRedactor.Redact(pdf, new[] { PdfRedactionArea.Of(1, word) });
+
+        Assert.DoesNotContain("SECRET", PdfText.Extract(redacted));
+        Assert.Equal(0x000000u, Pixel(Render(redacted), (int)(word.X + word.Width / 2), (int)(word.Y + word.Height / 2)));
     }
 
     [Fact]
@@ -181,6 +312,28 @@ public class RedactionTests
 
         Assert.DoesNotContain("secret", PdfText.Extract(redacted));
         Assert.DoesNotContain("secret", AllBytes(redacted));
+    }
+
+    [Fact]
+    public void Replacement_text_in_named_marked_content_properties_goes_too()
+    {
+        // The properties are named in the page's resources rather than written in the content.
+        var pdf = Build(
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Count 1 /Kids [3 0 R] >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 300] /Resources << /Font << /F1 4 0 R >> /Properties << /P1 << /ActualText (Name: John 555-12-3456) >> >> >> /Contents 5 0 R >>",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+            Stream("BT /F1 12 Tf 20 200 Td /Span /P1 BDC (Name: John XXXXXXXXXX) Tj EMC ET"));
+        Assert.Contains("555-12-3456", PdfText.Extract(pdf));
+
+        var redacted = PdfRedactor.Redact(pdf, new[] { new PdfRedactionArea(1, 86, 85, 214, 25) });
+
+        var text = PdfText.Extract(redacted);
+        Assert.DoesNotContain("555", text);
+        Assert.Contains("John", text);
+        var file = PdfFile.Open(redacted, null);
+        for (int i = 1; i <= file.MaxObjectNumber; i++)
+            Assert.DoesNotContain("ActualText", file.GetObject(i)?.ToString() ?? "", StringComparison.Ordinal);
     }
 
     [Fact]

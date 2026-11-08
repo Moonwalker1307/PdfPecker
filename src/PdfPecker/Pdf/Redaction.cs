@@ -39,11 +39,13 @@ internal sealed partial class Redaction
     private readonly uint? _fill;
     private readonly Dictionary<PdfDict, PdfFont?> _fonts = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<(int StructParents, int Mcid)> _structHits = new();
+    private readonly HashSet<PdfDict> _replaced = new(ReferenceEqualityComparer.Instance);
     private SortedDictionary<int, PdfObject>? _parentTree;
     private List<Area> _areas = new();
     private Matrix _display;
     private int _names;
     private int _formWalks;
+    private int _hiddenWalks;
 
     public Redaction(PdfFile file, uint? fill)
     {
@@ -61,14 +63,21 @@ internal sealed partial class Redaction
         _display = doc.DisplayMatrix(index);
         _structHits.Clear();
         _formWalks = 0;
+        _hiddenWalks = 0;
 
         var context = new Context(PdfDict.CopyOf(info.Resources), _file.GetInt(page, "StructParents", -1));
         var data = PageContent(page);
         var body = data != null ? Walk(data, context, Matrix.Identity, 0) : null;
         if (body != null || _fill != null)
         {
-            var content = new ByteBuffer((body ?? data)?.Length + 256 ?? 256);
-            content.Ascii("q\n").Bytes(body ?? data ?? Array.Empty<byte>()).Ascii("\nQ\n");
+            var drawn = body ?? data ?? Array.Empty<byte>();
+            var content = new ByteBuffer(drawn.Length + 256);
+            // The boxes are drawn in the page's own space: content that restores more states than it saves, or leaves
+            // some saved with a changed transform, gets the q and Q it lacks.
+            var (under, open) = PdfStampWriter.SaveDepth(drawn);
+            for (int i = 0; i <= under; i++) content.Ascii("q\n");
+            content.Bytes(drawn).Ascii("\n");
+            for (int i = 0; i <= open; i++) content.Ascii("Q\n");
             if (_fill is uint fill && _display.TryInvert(out var toUser))
             {
                 content.Ascii("q ").Ascii(F(((fill >> 16) & 255) / 255.0)).Sp().Ascii(F(((fill >> 8) & 255) / 255.0)).Sp()
@@ -339,17 +348,23 @@ internal sealed partial class Redaction
         public bool Changed;
         private PdfDict? _xObjects;
 
-        public string AddXObject(Redaction owner, PdfRef xObject)
+        private PdfDict? _properties;
+
+        public string AddXObject(Redaction owner, PdfRef xObject) => Add(owner, "XObject", ref _xObjects, xObject);
+
+        public string AddProperties(Redaction owner, PdfDict properties) => Add(owner, "Properties", ref _properties, properties);
+
+        private string Add(Redaction owner, string category, ref PdfDict? names, PdfObject value)
         {
-            if (_xObjects == null)
+            if (names == null)
             {
-                _xObjects = PdfDict.CopyOf(owner._file.GetDict(Resources, "XObject"));
-                Resources.Entries["XObject"] = _xObjects;
+                names = PdfDict.CopyOf(owner._file.GetDict(Resources, category));
+                Resources.Entries[category] = names;
             }
             string name;
             do name = "Rd" + (++owner._names).ToString(CultureInfo.InvariantCulture);
-            while (_xObjects.ContainsKey(name));
-            _xObjects.Entries[name] = xObject;
+            while (names.ContainsKey(name));
+            names.Entries[name] = value;
             Changed = true;
             return name;
         }

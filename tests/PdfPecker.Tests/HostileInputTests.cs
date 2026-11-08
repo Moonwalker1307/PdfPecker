@@ -281,6 +281,23 @@ public class HostileInputTests
         Assert.Equal(0xFF00FF00u, ById(doc, "n").Style.Color);
     }
 
+    // revert-layer in every one of many layers rolls back through all of them to the first. A revert that meets another
+    // goes on from there instead of recursing, so the cost is one look back per element and the stack stays flat.
+    [Fact]
+    public void Revert_layer_in_many_layers_stays_linear()
+    {
+        var sb = new StringBuilder("<style>@layer base { p { margin-top: 3px; color: red } }");
+        for (int i = 0; i < 400; i++) sb.Append($"@layer l{i} {{ p {{ margin-top: revert-layer; color: revert-layer; font-size: revert-layer }} }}");
+        sb.Append("p { margin-top: revert-layer; color: revert-layer; font-size: revert-layer }</style>");
+        for (int i = 0; i < 2000; i++) sb.Append($"<p style='--i:{i}'>x</p>");
+        var html = sb.ToString();
+        var doc = Bounded(() => Styled(html));
+        var p = doc.FindFirst("p")!.Style;
+        Assert.Equal(2.25f, p.MarginTop.Resolve(0));
+        Assert.Equal(0xFFFF0000u, p.Color);
+        AssertStructurallyValid(Bounded(html));
+    }
+
     // Fuzz finding (css, timeout-d0d017cf): a variable that names itself in its reference and again in each nested
     // fallback was resolved twice per level down to the depth limit, about 2^32 substitutions.
     [Fact]

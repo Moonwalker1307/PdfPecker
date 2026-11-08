@@ -1,8 +1,9 @@
 namespace PdfPecker.Css;
 
 /// <summary>
-/// The CSS-wide keywords: inherit, initial and unset on single properties, and the all shorthand, which applies one of
-/// them (or revert) to every property but direction, unicode-bidi and custom properties.
+/// The CSS-wide keywords: inherit, initial and unset on single properties, revert and revert-layer, which roll the
+/// cascade back, and the all shorthand, which applies one of them to every property but direction, unicode-bidi and
+/// custom properties.
 /// </summary>
 internal sealed partial class StyleResolver
 {
@@ -15,7 +16,7 @@ internal sealed partial class StyleResolver
     private ComputedStyle InitialStyle => _initialStyle ??= (_rootStyle ?? new ComputedStyle()).CreateChild();
 
     /// <summary>What the all shorthand does to the declarations that come before it in the cascade.</summary>
-    private enum AllKeyword : byte { None, Unset, Initial, Inherit, Revert }
+    private enum AllKeyword : byte { None, Unset, Initial, Inherit, Revert, RevertLayer }
 
     /// <summary>
     /// The last all declaration in the working buffer and its keyword. Declarations sorted before it lose, except
@@ -31,8 +32,8 @@ internal sealed partial class StyleResolver
                 "unset" => AllKeyword.Unset,
                 "initial" => AllKeyword.Initial,
                 "inherit" => AllKeyword.Inherit,
-                // revert-layer is taken as revert: layered author rules are rare where all is used.
-                "revert" or "revert-layer" => AllKeyword.Revert,
+                "revert" => AllKeyword.Revert,
+                "revert-layer" => AllKeyword.RevertLayer,
                 _ => AllKeyword.None,
             };
             if (keyword != AllKeyword.None) return (i, keyword);
@@ -45,10 +46,203 @@ internal sealed partial class StyleResolver
     {
         if (i >= all.Index) return false;
         var prop = _decls[i].Property;
-        if (prop is "direction" or "unicode-bidi" or LangProperty or ControlWidthProperty || prop.StartsWith("--", StringComparison.Ordinal)) return false;
-        if (all.Keyword != AllKeyword.Revert) return true;
+        if (!ReachedByAll(prop)) return false;
+        return all.Keyword switch
+        {
+            AllKeyword.Revert => !RevertKeeps(i, all.Index, layer: false),
+            AllKeyword.RevertLayer => !RevertKeeps(i, all.Index, layer: true),
+            _ => true,
+        };
+    }
+
+    private static bool ReachedByAll(string prop)
+        => prop is not ("direction" or "unicode-bidi" or LangProperty or ControlWidthProperty) && !prop.StartsWith("--", StringComparison.Ordinal);
+
+    /// <summary>
+    /// The index in the working buffer of the declaration being applied, which revert and revert-layer roll back from;
+    /// -1 outside the cascade.
+    /// </summary>
+    private int _applyIndex = -1;
+
+    /// <summary>
+    /// While a property is rolled back, the only property <see cref="Apply"/> sets; the declarations applied again for it
+    /// leave every other property alone.
+    /// </summary>
+    private string? _revertFilter;
+
+    /// <summary>Set when a declaration applied again for <see cref="_revertFilter"/> set that property.</summary>
+    private bool _revertHit;
+
+    /// <summary>
+    /// Set when a declaration applied again for <see cref="_revertFilter"/> reverts the property itself: 1 for revert, 2
+    /// for revert-layer. The rollback then goes on from that declaration rather than recursing.
+    /// </summary>
+    private byte _pendingRevert;
+
+    private bool[] _overridden = new bool[64];
+    private readonly HashSet<string> _laterProperties = new(StringComparer.Ordinal);
+    private bool _overriddenKnown;
+
+    /// <summary>
+    /// Whether the declaration at <paramref name="i"/> reverts its property while a later declaration of the same
+    /// property follows, which sets it anyway. The cascade skips such a revert: rolling back once for every one of many
+    /// layers that revert a property would cost the square of the declarations.
+    /// </summary>
+    private bool RevertOverridden(int i)
+    {
+        var d = _decls[i];
+        if (d.HasVar || _attrUsed && d.UsesAttr || !IsRevert(d.Value, out _)) return false;
+        if (!_overriddenKnown)
+        {
+            _overriddenKnown = true;
+            if (_overridden.Length < _count) _overridden = new bool[Math.Max(_count, _overridden.Length * 2)];
+            _laterProperties.Clear();
+            for (int j = _count - 1; j >= 0; j--) _overridden[j] = !_laterProperties.Add(_decls[j].Property);
+        }
+        return _overridden[i];
+    }
+
+    /// <summary>Whether a value is revert or revert-layer, and which.</summary>
+    private static bool IsRevert(string value, out bool layer)
+    {
+        var v = value.AsSpan().Trim();
+        layer = v.Equals("revert-layer", StringComparison.OrdinalIgnoreCase);
+        return layer || v.Equals("revert", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Whether the declaration at <paramref name="j"/> still counts after the one at <paramref name="at"/> reverts the
+    /// property. revert rolls back to the user agent's declarations, as if the page had none for the property (the dir
+    /// attribute counts as the user agent's, as in HTML's style sheet; other presentational attributes are the page's).
+    /// revert-layer rolls back to the declarations of other origins and other cascade layers; a style attribute is a
+    /// layer of its own above the page's style sheets.
+    /// </summary>
+    private bool RevertKeeps(int j, int at, bool layer)
+    {
+        long tierJ = _keys[j] >> 60, tierAt = _keys[at] >> 60;
+        if (!layer)
+        {
+            if (tierAt is TierUa or TierUaImportant) return false;
+            return tierJ is TierUa or TierUaImportant || tierJ == TierHint && _decls[j].Property is "direction" or "unicode-bidi";
+        }
+        return Origin(tierJ) != Origin(tierAt) || LayerRank(j) != LayerRank(at);
+
+        static int Origin(long tier) => tier switch
+        {
+            TierUa or TierUaImportant => 0,
+            TierHint => 1,
+            TierAuthor or TierAuthorImportant => 2,
+            _ => 3,
+        };
+    }
+
+    /// <summary>The cascade layer of a declaration in the working buffer; important declarations store it reversed.</summary>
+    private int LayerRank(int i)
+    {
+        int bits = (int)((_keys[i] >> 52) & 0xFF);
         long tier = _keys[i] >> 60;
-        return tier is not (TierUa or TierUaImportant);
+        return tier is TierAuthorImportant or TierInlineImportant or TierUaImportant ? UnlayeredRank - bits : bits;
+    }
+
+    /// <summary>
+    /// revert and revert-layer on one property (a longhand, after logical properties are mapped): the property starts
+    /// unset, and the last declaration before the reverting one that still counts sets it again. Declarations are
+    /// looked at from the reverting one backwards, and the first that sets the property is the one that wins. One that
+    /// reverts the property again moves the starting point back to itself, so a chain of reverts costs one pass.
+    /// </summary>
+    private void Revert(ComputedStyle s, ComputedStyle parent, string prop, bool layer)
+    {
+        int at = _applyIndex, origin = at;
+        Apply(s, parent, prop, "unset");
+        if (at <= 0) return;
+        _revertFilter = prop;
+        try
+        {
+            for (int j = at - 1; j >= 0; j--)
+            {
+                if (!RevertKeeps(j, at, layer)) continue;
+                var d = _decls[j];
+                if (d.Property == "font-size" || d.Property.StartsWith("--", StringComparison.Ordinal)) continue;
+                _revertHit = false;
+                _pendingRevert = 0;
+                _applyIndex = j;
+                if (d.Property != "all") ApplyDeclaration(s, parent, d);
+                else if (ReachedByAll(prop) && AllValue(d.Value) is { } keyword) Apply(s, parent, prop, keyword);
+                if (_pendingRevert != 0)
+                {
+                    layer = _pendingRevert == 2;
+                    at = j;
+                    _pendingRevert = 0;
+                    Apply(s, parent, prop, "unset");
+                }
+                else if (_revertHit) break;
+            }
+        }
+        finally
+        {
+            _revertFilter = null;
+            _pendingRevert = 0;
+            _applyIndex = origin;
+        }
+    }
+
+    /// <summary>The CSS-wide keyword of an all declaration, or null for a value all does not take.</summary>
+    private static string? AllValue(string value)
+    {
+        var v = value.Trim().ToLowerInvariant();
+        return v is "unset" or "initial" or "inherit" or "revert" or "revert-layer" ? v : null;
+    }
+
+    /// <summary>
+    /// The value of a property whose winning declaration is at <paramref name="i"/>, for the properties the cascade
+    /// computes before the others (direction, writing-mode, font-size and font-family): revert and revert-layer are
+    /// followed back to the declaration they roll back to, and "unset" stands for none. Null when var() or if() fails,
+    /// which makes the property unset too.
+    /// </summary>
+    private string? WinningValue(int i, ComputedStyle s)
+    {
+        string prop = _decls[i].Property;
+        while (true)
+        {
+            var value = Substituted(_decls[i], s);
+            if (value == null || !IsRevert(value, out bool layer)) return value;
+            int j = i - 1;
+            for (; j >= 0; j--)
+            {
+                if (!RevertKeeps(j, i, layer)) continue;
+                var p = _decls[j].Property;
+                if (p == prop || (p is "writing-mode" or "-webkit-writing-mode" && prop is "writing-mode" or "-webkit-writing-mode")
+                    || (p == "all" && ReachedByAll(prop) && AllValue(_decls[j].Value) != null)) break;
+            }
+            if (j < 0) return "unset";
+            i = j;
+        }
+    }
+
+    /// <summary>
+    /// The value of the custom property declared at <paramref name="i"/>: revert and revert-layer are followed back, and
+    /// unset is inherit, as custom properties inherit, unless the property is registered as not inherited, when it is
+    /// the registered initial value.
+    /// </summary>
+    private string CustomValue(int i)
+    {
+        string prop = _decls[i].Property;
+        while (true)
+        {
+            var value = _decls[i].Value;
+            if (!IsRevert(value, out bool layer))
+            {
+                if (!value.AsSpan().Trim().Equals("unset", StringComparison.OrdinalIgnoreCase)) return value;
+                break;
+            }
+            int j = i - 1;
+            while (j >= 0 && (_decls[j].Property != prop || !RevertKeeps(j, i, layer))) j--;
+            if (j < 0) break;
+            i = j;
+        }
+        foreach (var registered in _registeredEach)
+            if (registered.Property == prop) return registered.Value;
+        return "inherit";
     }
 
     /// <summary>The style an element starts from before its declarations, after an all declaration.</summary>

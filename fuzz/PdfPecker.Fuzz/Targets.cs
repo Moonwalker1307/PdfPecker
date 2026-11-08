@@ -409,6 +409,37 @@ internal static class Targets
                     RunExpectingArgument(() => Barcode.EpcQrCode(new EpcPayment { Name = text, Iban = "DE89370400440532013000", Text = text }));
                 },
             },
+            new()
+            {
+                // Scans and photos are untrusted. The input is a grey image: its width as a little-endian 16-bit number,
+                // then one byte per pixel, row by row; mutations make module patterns that no encoder would write.
+                Name = "barcode-read", Extension = ".gray", MaxSize = 256 * 1024, MinTimeout = TimeSpan.FromSeconds(10),
+                Seeds = _ => BarcodeImageSeeds(),
+                Run = (d, ct) =>
+                {
+                    if (d.Length < 3) return;
+                    int width = Math.Clamp((int)BitConverter.ToUInt16(d, 0), 1, 1024), height = (d.Length - 2) / width;
+                    if (height == 0) return;
+                    var gray = new PdfPecker.Barcodes.Reading.GrayImage(width, height, d.AsSpan(2, width * height).ToArray());
+                    Barcode.Read(gray, new BarcodeReaderOptions(), 0, 1, 1, ct);
+                },
+            },
+            new()
+            {
+                // The decoded data of a code: the first byte picks a QR code version (1 to 40) or Data Matrix (0), and the
+                // rest are the data codewords after error correction, whose segments the parsers read.
+                Name = "barcode-codewords", Extension = ".cw", MaxSize = 4 * 1024,
+                Seeds = _ => BarcodeCodewordSeeds(),
+                Run = (d, ct) =>
+                {
+                    if (d.Length < 1) return;
+                    var data = d.AsSpan(1).ToArray();
+                    if (d[0] % 41 == 0) PdfPecker.Barcodes.Reading.DataMatrixDecoder.Parse(data);
+                    else PdfPecker.Barcodes.Reading.QrDecoder.ParseSegments(data, d[0] % 41);
+                    _ = PdfPecker.Barcodes.Reading.PaymentPayloads.Epc(Encoding.UTF8.GetString(data));
+                    _ = PdfPecker.Barcodes.Reading.PaymentPayloads.Swiss(Encoding.UTF8.GetString(data));
+                },
+            },
             Image("png", ".png", c => c.ImageFiles(".png").Concat(c.RenderedImages().Where(i => i.Ext == ".png").Select(i => (i.Name, i.Data))), d => PdfImage.FromBytes(d)),
             Image("jpeg", ".jpg", c => c.ImageFiles(".jpg", ".jpeg").Concat(c.RenderedImages().Where(i => i.Ext == ".jpg").Select(i => (i.Name, i.Data))), d =>
             {
@@ -454,6 +485,103 @@ internal static class Targets
             Font("font-color", ".ttf", c => c.FontFiles(".ttf").Where(f => IsColorFont(f.Name)), ColorFontPage),
         };
         return list;
+    }
+
+    /// <summary>Codes from the library's own encoders drawn as grey images, three pixels to a module, some turned or inverted.</summary>
+    private static IEnumerable<(string Name, byte[] Data)> BarcodeImageSeeds()
+    {
+        var bill = new SwissQrBill
+        {
+            Account = "CH4431999123000889012",
+            Creditor = new SwissQrAddress { Name = "Example AG", PostalCode = "8001", Town = "Zurich" },
+            Amount = 12.5m,
+            Reference = "210000000003139471430009017",
+        };
+        var grids = new (string Name, bool[,] Modules)[]
+        {
+            ("qr", PdfPecker.Barcodes.QrEncoder.Encode("https://pdfpecker.net/", QrErrorCorrection.Medium)),
+            ("qr-high", PdfPecker.Barcodes.QrEncoder.Encode("HELLO WORLD 0123456789", QrErrorCorrection.High)),
+            ("qr-v7", PdfPecker.Barcodes.QrEncoder.Encode(new string('x', 130), QrErrorCorrection.Low)),
+            ("swiss", PdfPecker.Barcodes.QrEncoder.Encode(bill.ToPayload(), QrErrorCorrection.Medium)),
+            ("dm", PdfPecker.Barcodes.DataMatrixEncoder.Encode("Data Matrix 12345")),
+            ("dm-gs1", PdfPecker.Barcodes.DataMatrixEncoder.EncodeGs1("(01)09506000134352(17)270131(10)AB-123")),
+            ("code128", Row(PdfPecker.Barcodes.LinearEncoder.Code128("PdfPecker-128"))),
+            ("ean13", Row(PdfPecker.Barcodes.LinearEncoder.Ean13("5901234123457"))),
+        };
+        foreach (var (name, modules) in grids)
+        {
+            yield return (name, Draw(modules, turned: false, inverted: false));
+            yield return (name + "-turned", Draw(modules, turned: true, inverted: false));
+        }
+        yield return ("qr-inverted", Draw(grids[0].Modules, turned: false, inverted: true));
+
+        static bool[,] Row(bool[] bars)
+        {
+            var grid = new bool[12, bars.Length];
+            for (int y = 0; y < 12; y++)
+                for (int x = 0; x < bars.Length; x++) grid[y, x] = bars[x];
+            return grid;
+        }
+
+        static byte[] Draw(bool[,] modules, bool turned, bool inverted)
+        {
+            const int Scale = 3, Quiet = 4;
+            int rows = modules.GetLength(0), cols = modules.GetLength(1);
+            int w = (cols + 2 * Quiet) * Scale, h = (rows + 2 * Quiet) * Scale;
+            int outW = turned ? h : w, outH = turned ? w : h;
+            var data = new byte[2 + outW * outH];
+            BitConverter.GetBytes((ushort)outW).CopyTo(data, 0);
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    int mx = x / Scale - Quiet, my = y / Scale - Quiet;
+                    bool dark = mx >= 0 && my >= 0 && mx < cols && my < rows && modules[my, mx];
+                    int ox = turned ? h - 1 - y : x, oy = turned ? x : y;
+                    data[2 + oy * outW + ox] = (byte)(dark != inverted ? 20 : 235);
+                }
+            }
+            return data;
+        }
+    }
+
+    /// <summary>Hand-built data codewords for the segment parsers: each QR mode and Data Matrix encodation.</summary>
+    private static IEnumerable<(string Name, byte[] Data)> BarcodeCodewordSeeds()
+    {
+        // QR: numeric "01234567", alphanumeric "AC-42", bytes "hi", ECI 26 with UTF-8 bytes, kanji, FNC1 and terminator.
+        yield return ("qr-mixed", Qr(1, (4, 1), (10, 8), (10, 12), (7, 345), (4, 2), (9, 5), (11, 461), (11, 1232), (6, 36), (4, 4), (8, 2),
+            (8, 'h'), (8, 'i'), (4, 7), (8, 26), (4, 4), (8, 2), (8, 0xC3), (8, 0xA6), (4, 8), (8, 1), (13, 0x0D9F), (4, 5), (4, 0)));
+        yield return ("qr-structured-append", Qr(10, (4, 3), (16, 0x1234), (4, 4), (16, 3), (8, 'a'), (8, 'b'), (8, 'c'), (4, 0)));
+        // Data Matrix: ASCII, digit pairs, upper shift, C40, Text, X12, EDIFACT and Base 256, then padding.
+        yield return ("dm-ascii", new byte[] { 0, (byte)('A' + 1), 130 + 42, 235, 66, 129, 175 });
+        yield return ("dm-c40", new byte[] { 0, 230, 91, 11, 91, 11, 254, 66 });
+        yield return ("dm-text", new byte[] { 0, 239, 91, 11, 254, 66 });
+        yield return ("dm-x12", new byte[] { 0, 238, 89, 191, 254, 66 });
+        yield return ("dm-edifact", new byte[] { 0, 240, 16, 21, 1, 124, 0, 0 });
+        yield return ("dm-base256", new byte[] { 0, 231, 44, 108, 59, 226, 126, 1, 104 });
+        yield return ("dm-gs1-eci", new byte[] { 0, 232, 241, 27, 66, 232, 67 });
+        yield return ("dm-macro", new byte[] { 0, 236, 66, 67 });
+        yield return ("epc", Encoding.UTF8.GetBytes("\0BCD\n002\n1\nSCT\n\nExample Ltd.\nDE89370400440532013000\nEUR12.30"));
+
+        static byte[] Qr(int version, params (int Bits, int Value)[] fields)
+        {
+            var bytes = new List<byte> { (byte)version };
+            int acc = 0, n = 0;
+            foreach (var (bits, value) in fields)
+            {
+                for (int i = bits - 1; i >= 0; i--)
+                {
+                    acc = (acc << 1) | ((value >> i) & 1);
+                    if (++n == 8)
+                    {
+                        bytes.Add((byte)acc);
+                        acc = n = 0;
+                    }
+                }
+            }
+            if (n > 0) bytes.Add((byte)(acc << (8 - n)));
+            return bytes.ToArray();
+        }
     }
 
     private static Target Image(string name, string ext, Func<SeedContext, IEnumerable<(string, byte[])>> seeds, Action<byte[]> decode)

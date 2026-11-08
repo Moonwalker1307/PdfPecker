@@ -335,7 +335,7 @@ internal sealed class FontResolver
             if (!candidates.Contains(standard) && Covers(standard, cp) && (accept == null || accept(standard))) return standard;
             foreach (var family in AllFamilies())
             {
-                if (listed.Contains(family)) continue;
+                if (listed.Contains(family) || !MayCover(family, cp)) continue;
                 foreach (var f in MatchFamily(family, weight, italic, variation))
                     if (f.Covers(cp) && (accept == null || accept(f))) return f;
             }
@@ -364,6 +364,18 @@ internal sealed class FontResolver
 
     private static bool Covers(TextFont f, int cp)
         => f is EmbeddedFont e ? e.Covers(cp) : cp < 0x10000 && StandardFont.CanEncode((char)cp);
+
+    /// <summary>
+    /// False when every face of a family has a unicode-range without the character, so that looking for a font that
+    /// has it does not read the family's fonts. Such faces could not draw it anyway.
+    /// </summary>
+    private bool MayCover(string family, int cp)
+    {
+        if (!_docFamilies.TryGetValue(family, out var faces) && (_collection == null || !_collection.ByFamily.TryGetValue(family, out faces))) return true;
+        foreach (var face in faces)
+            if (face.Range == null || face.Range.Contains(cp)) return true;
+        return false;
+    }
 
     private IEnumerable<string> AllFamilies()
     {

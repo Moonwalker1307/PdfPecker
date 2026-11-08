@@ -25,12 +25,16 @@ internal sealed partial class Redaction
         public State Clone() => (State)MemberwiseClone();
     }
 
-    /// <summary>Open marked content: its properties' place in the output when they carry texts to strip, and its MCID.</summary>
+    /// <summary>
+    /// Open marked content: its properties' place in the output when they carry texts to strip, with the name they have
+    /// in the resources when they are named there, and its MCID.
+    /// </summary>
     private sealed class Mark
     {
         public int Segment = -1;
         public string Tag = "";
         public PdfDict? Properties;
+        public string? Named;
         public int Mcid = -1;
         public bool Removed;
     }
@@ -303,9 +307,10 @@ internal sealed partial class Redaction
                     if (properties != null)
                     {
                         mark.Mcid = _file.GetInt(properties, "MCID", -1);
-                        if (o[1].Dict != null && (properties["ActualText"] != null || properties["Alt"] != null || properties["E"] != null))
+                        if (properties["ActualText"] != null || properties["Alt"] != null || properties["E"] != null)
                         {
                             mark.Properties = properties;
+                            mark.Named = o[1].Dict == null ? o[1].Name : null;
                             mark.Segment = output.Hold(data.AsSpan(p.Start, p.End - p.Start).ToArray());
                             if (marks.Count < 4096) marks.Add(mark);
                             break;
@@ -318,7 +323,7 @@ internal sealed partial class Redaction
                 case "EMC":
                     if (marks.Count > 0)
                     {
-                        CloseMark(marks[^1], output);
+                        CloseMark(marks[^1], output, context);
                         marks.RemoveAt(marks.Count - 1);
                     }
                     output.Copy(data, p.Start, p.End);
@@ -329,7 +334,7 @@ internal sealed partial class Redaction
             }
         }
         if (path.Pending) output.Copy(data, path.Start, path.End);
-        foreach (var m in marks) CloseMark(m, output);
+        foreach (var m in marks) CloseMark(m, output, context);
         return changed ? output.ToArray() : null;
     }
 
@@ -344,8 +349,12 @@ internal sealed partial class Redaction
         path.Point(dx, dy);
     }
 
-    /// <summary>Marked content that held removed text has its properties written again without their texts.</summary>
-    private static void CloseMark(Mark mark, Output output)
+    /// <summary>
+    /// Marked content that held removed text has its properties written again without their texts. Properties named in
+    /// the resources get a new name for the copy, so that marked content elsewhere that lost nothing keeps its own, and
+    /// the original goes from the file once nothing uses it.
+    /// </summary>
+    private void CloseMark(Mark mark, Output output, Context context)
     {
         if (!mark.Removed || mark.Segment < 0 || mark.Properties == null) return;
         var properties = PdfDict.CopyOf(mark.Properties);
@@ -356,7 +365,12 @@ internal sealed partial class Redaction
         b.Nl();
         WriteName(b, mark.Tag);
         b.Sp();
-        WriteValue(b, properties, 0);
+        if (mark.Named != null)
+        {
+            WriteName(b, context.AddProperties(this, properties));
+            _replaced.Add(mark.Properties);
+        }
+        else WriteValue(b, properties, 0);
         b.Ascii(" BDC\n");
         output.Replace(mark.Segment, b.Span.ToArray());
     }
@@ -387,7 +401,7 @@ internal sealed partial class Redaction
     private bool ShowText(List<PdfObject> items, State gs, ref Matrix tm, Output output, string prefix)
     {
         var font = gs.Font;
-        if (font == null) return false;
+        if (font == null) return ShowUnmeasured(items, gs, tm, output, prefix);
         double fs = gs.FontSize, th = gs.HScale;
         bool vertical = font.Vertical;
         double top = 0.9 * font.TextSizeScale, bottom = -0.25 * font.TextSizeScale;
@@ -477,6 +491,33 @@ internal sealed partial class Redaction
         return true;
     }
 
+    /// <summary>
+    /// Shows text whose font cannot be read. Nothing here knows where its glyphs are, but viewers draw it with a
+    /// substitute font and tools extract it, so each code is taken to be a full em wide, which few substitute glyphs
+    /// exceed, and the whole operator goes when that reach touches an area, as which of its glyphs lie there cannot be
+    /// told. It is not replaced by a move, as the renderer and text extraction do not move for it either.
+    /// </summary>
+    private bool ShowUnmeasured(List<PdfObject> items, State gs, Matrix tm, Output output, string prefix)
+    {
+        double fs = gs.FontSize, x = 0, x0 = double.PositiveInfinity, x1 = double.NegativeInfinity;
+        foreach (var item in items)
+        {
+            if (item is PdfNumber num) x -= num.Value / 1000 * fs;
+            else if (item is PdfString s)
+                foreach (byte c in s.Bytes)
+                {
+                    x0 = Math.Min(x0, Math.Min(x, x + fs));
+                    x1 = Math.Max(x1, Math.Max(x, x + fs));
+                    x += fs + gs.CharSpacing + (c == (byte)' ' ? gs.WordSpacing : 0);
+                }
+        }
+        if (x0 > x1) return false;
+        var trm = new Matrix(gs.HScale, 0, 0, 1, 0, gs.Rise).Multiply(tm).Multiply(gs.Ctm);
+        if (!Overlaps(BoxOf(x0, Math.Min(fs, -0.3 * fs), x1, Math.Max(fs, -0.3 * fs), trm))) return false;
+        output.Text.Nl().Ascii(prefix);
+        return true;
+    }
+
     // ------------------------------------------------------------------ paths
 
     /// <summary>
@@ -515,23 +556,39 @@ internal sealed partial class Redaction
                 var box = BoxOf(0, 0, 1, 1, ctm);
                 if (!Overlaps(box)) return false;
                 if (!Inside(box) && RedactImage(xObject, null, context.Resources, ctm) is { } copy) WriteDo(output, context.AddXObject(this, copy));
+                _replaced.Add(xObject);
                 return true;
             }
             case "Form":
             {
                 var m = Matrix.FromArray(_file.GetNumbers(xObject, "Matrix")).Multiply(ctm);
-                if (_file.GetNumbers(xObject, "BBox") is { Length: >= 4 } bbox && !Overlaps(BoxOf(bbox[0], bbox[1], bbox[2], bbox[3], m))) return false;
-                if (depth >= MaxDepth || ++_formWalks > MaxFormWalks || Decode(xObject) is not { } content) return true;
+                byte[]? content;
+                if (_file.GetNumbers(xObject, "BBox") is { Length: >= 4 } bbox && !Overlaps(BoxOf(bbox[0], bbox[1], bbox[2], bbox[3], m)))
+                {
+                    // What the form draws outside its box is clipped away, but text there still extracts, so the form is
+                    // walked too, on a budget of its own; past that it is kept, as nothing of it shows in an area.
+                    if (depth >= MaxDepth || ++_hiddenWalks > MaxFormWalks || Decode(xObject) is not { } hidden) return false;
+                    content = hidden;
+                }
+                else if (depth >= MaxDepth || ++_formWalks > MaxFormWalks || Decode(xObject) is not { } shown)
+                {
+                    _replaced.Add(xObject);
+                    return true;
+                }
+                else content = shown;
                 var own = _file.GetDict(xObject, "Resources");
                 var inner = new Context(PdfDict.CopyOf(own ?? context.Resources), _file.GetInt(xObject, "StructParents", -1));
                 if (Walk(content, inner, m, depth + 1) is not { } redacted) return false;
                 var entries = new Dictionary<string, PdfObject>(xObject.Entries, StringComparer.Ordinal);
                 entries.Remove("Length");
                 entries.Remove("DecodeParms");
+                // The producing application's private data can hold its own copy of what the form draws.
+                entries.Remove("PieceInfo");
                 entries["Filter"] = PdfName.Get("FlateDecode");
                 entries["Resources"] = inner.Resources;
                 var form = new PdfStream(entries, PdfImage.Deflate(redacted, System.IO.Compression.CompressionLevel.Optimal));
                 WriteDo(output, context.AddXObject(this, _file.AddObject(form)));
+                _replaced.Add(xObject);
                 return true;
             }
             default:

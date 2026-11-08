@@ -425,12 +425,7 @@ internal sealed class PdfStampWriter : PdfObjectWriter
             foreach (var c in contents)
             {
                 if (file.Resolve(c) is not PdfStream s) continue;
-                var parser = new ContentParser(file.DecodeStream(s));
-                while (parser.Next())
-                {
-                    if (parser.Op == "q") depth++;
-                    else if (parser.Op == "Q" && --depth < low) low = depth;
-                }
+                CountSaves(file.DecodeStream(s), ref depth, ref low);
             }
         }
         catch (Exception ex) when (ex is PdfFormatException or InvalidDataException or NotSupportedException or IndexOutOfRangeException or ArgumentException or OverflowException)
@@ -438,8 +433,25 @@ internal sealed class PdfStampWriter : PdfObjectWriter
             SwallowedErrors.Record(ex);
             return (0, 0);
         }
-        int under = Math.Min(-low, 10_000);
-        return (under, Math.Min(depth - low, 10_000));
+        return (Math.Min(-low, 10_000), Math.Min(depth - low, 10_000));
+    }
+
+    /// <summary>The same as <see cref="SaveDepth(PdfFile, List{PdfObject})"/> for decoded content, which redaction also wraps.</summary>
+    internal static (int Under, int Open) SaveDepth(byte[] content)
+    {
+        int depth = 0, low = 0;
+        CountSaves(content, ref depth, ref low);
+        return (Math.Min(-low, 10_000), Math.Min(depth - low, 10_000));
+    }
+
+    private static void CountSaves(byte[] content, ref int depth, ref int low)
+    {
+        var parser = new ContentParser(content);
+        while (parser.Next())
+        {
+            if (parser.Op == "q") depth++;
+            else if (parser.Op == "Q" && --depth < low) low = depth;
+        }
     }
 
     /// <summary>Maps the stamp's display space (see <see cref="WriteForm"/>) onto the page's user space.</summary>

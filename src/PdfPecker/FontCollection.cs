@@ -17,6 +17,10 @@ public sealed class FontCollection
     private readonly object _lock = new();
     private readonly List<FontFace> _faces = new();
     private volatile Snapshot? _snapshot;
+    // The fonts parsed from each array a deferred face's loader returned, so that faces sharing a file share its fonts.
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<byte[], List<FontProgram>> _deferredFiles = new();
+    // Parsed unicode-ranges by their text: a font package gives dozens of faces the same range of thousands of parts.
+    private readonly Dictionary<string, UnicodeRange> _ranges = new(StringComparer.Ordinal);
 
     /// <summary>Number of font faces registered.</summary>
     public int Count
@@ -94,6 +98,80 @@ public sealed class FontCollection
             }
         }
         return added;
+    }
+
+    /// <summary>
+    /// Registers a font face whose file is read only when a document needs it: when CSS asks for its family, or when
+    /// text has a character that the fonts before it lack and that <paramref name="unicodeRange"/> includes. Font
+    /// packages use it to offer large fonts, such as CJK ones, that cost no time or memory until a document uses them.
+    /// </summary>
+    /// <param name="familyName">The family name that CSS <c>font-family</c> refers to.</param>
+    /// <param name="fontData">
+    /// Returns the font file (.ttf, .otf, .ttc, WOFF or WOFF2). It is called at most once for the face, by the first
+    /// conversion that needs it. Faces whose loaders return the same array share the fonts parsed from it, so a
+    /// collection file registered face by face, or a face registered under two names, is parsed and embedded once. When it throws
+    /// an <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/>, or returns data that is not a font,
+    /// the face is left out as if it had not been registered.
+    /// </param>
+    /// <param name="weight">The face's weight, from 1 to 1000, as CSS <c>font-weight</c> matches it.</param>
+    /// <param name="italic">Whether the face is italic.</param>
+    /// <param name="unicodeRange">
+    /// The characters the face has, in the syntax of the CSS <c>unicode-range</c> descriptor, such as
+    /// <c>"U+0000-00FF, U+4E00-9FFF"</c>. Text outside it is never drawn with the face, and the face is not read to find
+    /// a character outside it. Null means the font's own characters, which reads the font the first time the fonts
+    /// before it lack a character.
+    /// </param>
+    /// <param name="faceIndex">The face's index in a font collection (.ttc); 0 for a single font.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="familyName"/> or <paramref name="fontData"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="familyName"/> is empty, or <paramref name="unicodeRange"/> has no valid range.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="weight"/> or <paramref name="faceIndex"/> is out of range.</exception>
+    /// <example><code>options.Fonts.AddDeferred("Noto Sans CJK SC", () => File.ReadAllBytes("NotoSansCJK-Regular.ttc"), unicodeRange: "U+3000-9FFF", faceIndex: 2);</code></example>
+    public FontCollection AddDeferred(string familyName, Func<byte[]> fontData, int weight = 400, bool italic = false, string? unicodeRange = null, int faceIndex = 0)
+    {
+        ArgumentNullException.ThrowIfNull(familyName);
+        ArgumentNullException.ThrowIfNull(fontData);
+        string family = familyName.Trim();
+        if (family.Length == 0) throw new ArgumentException("The family name is empty.", nameof(familyName));
+        if (weight is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(weight), weight, "The weight must be from 1 to 1000.");
+        if (faceIndex < 0) throw new ArgumentOutOfRangeException(nameof(faceIndex), faceIndex, "The face index must not be negative.");
+        UnicodeRange? range = null;
+        if (unicodeRange != null)
+        {
+            lock (_lock) _ranges.TryGetValue(unicodeRange, out range);
+            if (range == null)
+            {
+                range = UnicodeRange.Parse(unicodeRange) ?? throw new ArgumentException("The unicode-range has no valid range.", nameof(unicodeRange));
+                lock (_lock) _ranges[unicodeRange] = range;
+            }
+        }
+        var program = new Lazy<FontProgram?>(() =>
+        {
+            try
+            {
+                var data = fontData() ?? throw new FormatException("The font data is null.");
+                List<FontProgram> programs;
+                lock (_deferredFiles)
+                {
+                    if (!_deferredFiles.TryGetValue(data, out programs!))
+                    {
+                        programs = FontProgram.Load(data);
+                        _deferredFiles.Add(data, programs);
+                    }
+                }
+                return faceIndex < programs.Count ? programs[faceIndex] : null;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException || FontProgram.IsFormatError(ex))
+            {
+                SwallowedErrors.Record(ex);
+                return null;
+            }
+        });
+        lock (_lock)
+        {
+            _faces.Add(new FontFace(family, weight, weight, italic, range, program));
+            _snapshot = null;
+        }
+        return this;
     }
 
     private static readonly Lazy<FontCollection> SystemFonts = new(LoadSystemFonts);
